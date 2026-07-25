@@ -4860,6 +4860,10 @@ export interface components {
             looseMatch: boolean;
             productCount: number;
             mailRuleCount: number;
+            /** @description Whether an enabled recipient rule allows dot aliases. */
+            supportsDotAlias: boolean;
+            /** @description Whether an enabled recipient rule allows plus aliases. */
+            supportsPlusAlias: boolean;
             /** @description Safe product price summaries for project square cards. Supplier prices, rules and weights are intentionally omitted. */
             products?: components["schemas"]["ProjectProductSummary"][];
             /** Format: date-time */

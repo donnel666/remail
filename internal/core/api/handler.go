@@ -1498,19 +1498,21 @@ func toAppProjectBulkSelection(req ProjectBulkSelectionRequest) coreapp.ProjectB
 func toProjectItemResponse(summary coreapp.ProjectSummary, includeInternal bool, viewerUserID uint, inventoryByProductID map[uint]allocapp.ProductInventoryTotal) ProjectItemResponse {
 	project := summary.Project
 	item := ProjectItemResponse{
-		ID:             project.ID,
-		Name:           project.Name,
-		TargetPlatform: project.TargetPlatform,
-		LogoURL:        project.LogoURL,
-		Description:    project.Description,
-		Status:         string(project.Status),
-		AccessType:     string(project.AccessType),
-		LooseMatch:     project.LooseMatch,
-		ProductCount:   summary.ProductCount,
-		MailRuleCount:  summary.MailRuleCount,
-		Products:       toProjectProductSummaryResponses(summary.Products, inventoryByProductID),
-		CreatedAt:      project.CreatedAt,
-		UpdatedAt:      project.UpdatedAt,
+		ID:                project.ID,
+		Name:              project.Name,
+		TargetPlatform:    project.TargetPlatform,
+		LogoURL:           project.LogoURL,
+		Description:       project.Description,
+		Status:            string(project.Status),
+		AccessType:        string(project.AccessType),
+		LooseMatch:        project.LooseMatch,
+		ProductCount:      summary.ProductCount,
+		MailRuleCount:     summary.MailRuleCount,
+		SupportsDotAlias:  summary.SupportsDotAlias,
+		SupportsPlusAlias: summary.SupportsPlusAlias,
+		Products:          toProjectProductSummaryResponses(summary.Products, inventoryByProductID),
+		CreatedAt:         project.CreatedAt,
+		UpdatedAt:         project.UpdatedAt,
 	}
 	if includeInternal || isOwnProjectApplication(project, viewerUserID) {
 		if summary.Owner != nil {
@@ -1598,10 +1600,20 @@ func toProjectDetailResponse(detail *coredomain.ProjectDetail, includeInternal b
 
 func toProjectDetailResponseWithInventory(detail *coredomain.ProjectDetail, includeInternal bool, viewerUserID uint, inventoryByProductID map[uint]allocapp.ProductInventoryTotal) ProjectDetailResponse {
 	exposeApplicationFields := includeInternal || isOwnProjectApplication(detail.Project, viewerUserID)
+	var supportsDotAlias, supportsPlusAlias bool
+	for _, rule := range detail.MailRules {
+		if !rule.Enabled || rule.RuleType != coredomain.MailRuleRecipient {
+			continue
+		}
+		supportsDotAlias = supportsDotAlias || rule.Pattern == "dot"
+		supportsPlusAlias = supportsPlusAlias || rule.Pattern == "plus"
+	}
 	item := toProjectItemResponse(coreapp.ProjectSummary{
-		Project:       detail.Project,
-		ProductCount:  len(detail.Products),
-		MailRuleCount: len(detail.MailRules),
+		Project:           detail.Project,
+		ProductCount:      len(detail.Products),
+		MailRuleCount:     len(detail.MailRules),
+		SupportsDotAlias:  supportsDotAlias,
+		SupportsPlusAlias: supportsPlusAlias,
 	}, includeInternal, viewerUserID, inventoryByProductID)
 	products := make([]ProjectProductResponse, len(detail.Products))
 	for i := range detail.Products {

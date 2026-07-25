@@ -14088,6 +14088,8 @@ components:
         - looseMatch
         - productCount
         - mailRuleCount
+        - supportsDotAlias
+        - supportsPlusAlias
         - createdAt
         - updatedAt
       properties:
@@ -14119,6 +14121,12 @@ components:
           type: integer
         mailRuleCount:
           type: integer
+        supportsDotAlias:
+          type: boolean
+          description: Whether an enabled recipient rule allows dot aliases.
+        supportsPlusAlias:
+          type: boolean
+          description: Whether an enabled recipient rule allows plus aliases.
         products:
           type: array
           description: Safe product price summaries for project square cards. Supplier prices, rules and weights are intentionally omitted.

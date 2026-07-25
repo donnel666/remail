@@ -484,6 +484,10 @@ func TestProjectRepoListsOnlyCurrentSaleableProductsMySQL(t *testing.T) {
 	).Error)
 
 	microsoft := validListedProjectDetail("Current Microsoft Product")
+	microsoft.MailRules = append(microsoft.MailRules,
+		domain.MailRule{RuleType: domain.MailRuleRecipient, Pattern: "dot", Enabled: true},
+		domain.MailRule{RuleType: domain.MailRuleRecipient, Pattern: "plus", Enabled: false},
+	)
 	require.NoError(t, repo.CreateWithLog(context.Background(), microsoft, projectTestLog("req-project-current-microsoft")))
 
 	withHistoricalMicrosoft := validListedProjectDetail("Domain With Historical Microsoft Product")
@@ -533,6 +537,8 @@ func TestProjectRepoListsOnlyCurrentSaleableProductsMySQL(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, microsoftItems, 1)
 	require.Equal(t, microsoft.Project.ID, microsoftItems[0].Project.ID)
+	require.True(t, microsoftItems[0].SupportsDotAlias)
+	require.False(t, microsoftItems[0].SupportsPlusAlias)
 	microsoftCount, err := repo.Count(context.Background(), microsoftFilter)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), microsoftCount)

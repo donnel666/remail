@@ -206,6 +206,13 @@ type ProjectSummaryModel struct {
 	MailRuleCount int `gorm:"column:mail_rule_count"`
 }
 
+type projectMailRuleSummary struct {
+	ProjectID         uint `gorm:"column:project_id"`
+	Count             int  `gorm:"column:count"`
+	SupportsDotAlias  int  `gorm:"column:supports_dot_alias"`
+	SupportsPlusAlias int  `gorm:"column:supports_plus_alias"`
+}
+
 type ProjectRepo struct {
 	db            *gorm.DB
 	operationLogs *governanceinfra.OperationLogRepo
@@ -586,7 +593,7 @@ func (r *ProjectRepo) List(ctx context.Context, filter coreapp.ProjectListFilter
 	if err != nil {
 		return nil, err
 	}
-	mailRuleCounts, err := r.countMailRulesByProjectIDs(ctx, projectIDs)
+	mailRuleSummaries, err := r.summarizeMailRulesByProjectIDs(ctx, projectIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -594,11 +601,14 @@ func (r *ProjectRepo) List(ctx context.Context, filter coreapp.ProjectListFilter
 	result := make([]coreapp.ProjectSummary, len(rows))
 	for i := range rows {
 		products := productsByProjectID[rows[i].ID]
+		mailRules := mailRuleSummaries[rows[i].ID]
 		result[i] = coreapp.ProjectSummary{
-			Project:       rows[i].toDomain(),
-			Products:      products,
-			ProductCount:  len(products),
-			MailRuleCount: mailRuleCounts[rows[i].ID],
+			Project:           rows[i].toDomain(),
+			Products:          products,
+			ProductCount:      len(products),
+			MailRuleCount:     mailRules.Count,
+			SupportsDotAlias:  mailRules.SupportsDotAlias > 0,
+			SupportsPlusAlias: mailRules.SupportsPlusAlias > 0,
 		}
 	}
 	return result, nil
@@ -1187,27 +1197,29 @@ func (r *ProjectRepo) listProductsByProjectIDs(ctx context.Context, projectIDs [
 	return result, nil
 }
 
-func (r *ProjectRepo) countMailRulesByProjectIDs(ctx context.Context, projectIDs []uint) (map[uint]int, error) {
-	result := make(map[uint]int, len(projectIDs))
+func (r *ProjectRepo) summarizeMailRulesByProjectIDs(ctx context.Context, projectIDs []uint) (map[uint]projectMailRuleSummary, error) {
+	result := make(map[uint]projectMailRuleSummary, len(projectIDs))
 	if len(projectIDs) == 0 {
 		return result, nil
 	}
 
-	type countRow struct {
-		ProjectID uint `gorm:"column:project_id"`
-		Count     int  `gorm:"column:count"`
-	}
-	rows := make([]countRow, 0)
+	rows := make([]projectMailRuleSummary, 0)
 	if err := r.db.WithContext(ctx).
 		Model(&ProjectMailRuleModel{}).
-		Select("project_id, COUNT(*) AS count").
+		Select(`project_id,
+			COUNT(*) AS count,
+			MAX(CASE WHEN rule_type = ? AND pattern = ? AND enabled = 1 THEN 1 ELSE 0 END) AS supports_dot_alias,
+			MAX(CASE WHEN rule_type = ? AND pattern = ? AND enabled = 1 THEN 1 ELSE 0 END) AS supports_plus_alias`,
+			string(domain.MailRuleRecipient), "dot",
+			string(domain.MailRuleRecipient), "plus",
+		).
 		Where("project_id IN ?", projectIDs).
 		Group("project_id").
 		Scan(&rows).Error; err != nil {
 		return nil, fmt.Errorf("count project summary mail rules: %w", err)
 	}
 	for _, row := range rows {
-		result[row.ProjectID] = row.Count
+		result[row.ProjectID] = row
 	}
 	return result, nil
 }

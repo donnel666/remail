@@ -315,22 +315,24 @@ type MailboxListResponse struct {
 
 // ProjectItemResponse is a project list item safe for user/admin consoles.
 type ProjectItemResponse struct {
-	ID              uint                            `json:"id"`
-	Name            string                          `json:"name"`
-	TargetPlatform  string                          `json:"targetPlatform"`
-	LogoURL         string                          `json:"logoUrl,omitempty"`
-	Description     string                          `json:"description,omitempty"`
-	Status          string                          `json:"status"`
-	AccessType      string                          `json:"accessType"`
-	Owner           *adminMicrosoftOwnerResponse    `json:"owner,omitempty"`
-	ApplicantUserID *uint                           `json:"applicantUserId,omitempty"`
-	ReviewReason    string                          `json:"reviewReason,omitempty"`
-	LooseMatch      bool                            `json:"looseMatch"`
-	ProductCount    int                             `json:"productCount"`
-	MailRuleCount   int                             `json:"mailRuleCount"`
-	Products        []ProjectProductSummaryResponse `json:"products,omitempty"`
-	CreatedAt       time.Time                       `json:"createdAt"`
-	UpdatedAt       time.Time                       `json:"updatedAt"`
+	ID                uint                            `json:"id"`
+	Name              string                          `json:"name"`
+	TargetPlatform    string                          `json:"targetPlatform"`
+	LogoURL           string                          `json:"logoUrl,omitempty"`
+	Description       string                          `json:"description,omitempty"`
+	Status            string                          `json:"status"`
+	AccessType        string                          `json:"accessType"`
+	Owner             *adminMicrosoftOwnerResponse    `json:"owner,omitempty"`
+	ApplicantUserID   *uint                           `json:"applicantUserId,omitempty"`
+	ReviewReason      string                          `json:"reviewReason,omitempty"`
+	LooseMatch        bool                            `json:"looseMatch"`
+	ProductCount      int                             `json:"productCount"`
+	MailRuleCount     int                             `json:"mailRuleCount"`
+	SupportsDotAlias  bool                            `json:"supportsDotAlias"`
+	SupportsPlusAlias bool                            `json:"supportsPlusAlias"`
+	Products          []ProjectProductSummaryResponse `json:"products,omitempty"`
+	CreatedAt         time.Time                       `json:"createdAt"`
+	UpdatedAt         time.Time                       `json:"updatedAt"`
 }
 
 // ProjectListResponse is the paginated project list response.

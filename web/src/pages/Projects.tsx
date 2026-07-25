@@ -107,6 +107,23 @@ function accessTag(accessType: string, t: (key: string) => string) {
   );
 }
 
+function aliasTags(project: ProjectItem, t: (key: string) => string) {
+  return (
+    <>
+      {project.supportsPlusAlias ? (
+        <Tag color="orange" shape="circle">
+          {t("Project plus alias")}
+        </Tag>
+      ) : null}
+      {project.supportsDotAlias ? (
+        <Tag color="blue" shape="circle">
+          {t("Dot alias")}
+        </Tag>
+      ) : null}
+    </>
+  );
+}
+
 function projectStatusTag(project: ProjectItem, t: (key: string) => string) {
   if (isRejectedApplication(project)) {
     return (
@@ -417,6 +434,7 @@ function ProjectCardItem({
                 <Tag color={project.looseMatch ? "amber" : "grey"} shape="circle">
                   {project.looseMatch ? t("Loose match") : t("Strict match")}
                 </Tag>
+                {aliasTags(project, t)}
               </div>
               <Text className="shrink-0" size="small" type="tertiary">
                 {formatTime(project.updatedAt)}
@@ -512,6 +530,18 @@ function ProjectTableView({
               {Boolean(value) ? t("Loose match") : t("Strict match")}
             </Tag>
           ),
+        },
+        {
+          dataIndex: "aliases",
+          key: "aliases",
+          title: t("Alias"),
+          width: 170,
+          render: (_: unknown, record: ProjectItem) =>
+            record.supportsPlusAlias || record.supportsDotAlias ? (
+              <div className="flex flex-wrap gap-1.5">{aliasTags(record, t)}</div>
+            ) : (
+              "-"
+            ),
         },
         {
           dataIndex: "updatedAt",

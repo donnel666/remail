@@ -126,11 +126,13 @@ type ProjectBulkResult struct {
 }
 
 type ProjectSummary struct {
-	Project       domain.Project
-	Owner         *AdminOwnerSummary
-	Products      []domain.Product
-	ProductCount  int
-	MailRuleCount int
+	Project           domain.Project
+	Owner             *AdminOwnerSummary
+	Products          []domain.Product
+	ProductCount      int
+	MailRuleCount     int
+	SupportsDotAlias  bool
+	SupportsPlusAlias bool
 }
 
 type ProjectListResult struct {

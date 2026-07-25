@@ -6333,11 +6333,17 @@ type ProjectItem struct {
 	ProductCount    int                         `json:"productCount"`
 
 	// Products Safe product price summaries for project square cards. Supplier prices, rules and weights are intentionally omitted.
-	Products       *[]ProjectProductSummary `json:"products,omitempty"`
-	ReviewReason   *string                  `json:"reviewReason,omitempty"`
-	Status         ProjectItemStatus        `json:"status"`
-	TargetPlatform string                   `json:"targetPlatform"`
-	UpdatedAt      time.Time                `json:"updatedAt"`
+	Products     *[]ProjectProductSummary `json:"products,omitempty"`
+	ReviewReason *string                  `json:"reviewReason,omitempty"`
+	Status       ProjectItemStatus        `json:"status"`
+
+	// SupportsDotAlias Whether an enabled recipient rule allows dot aliases.
+	SupportsDotAlias bool `json:"supportsDotAlias"`
+
+	// SupportsPlusAlias Whether an enabled recipient rule allows plus aliases.
+	SupportsPlusAlias bool      `json:"supportsPlusAlias"`
+	TargetPlatform    string    `json:"targetPlatform"`
+	UpdatedAt         time.Time `json:"updatedAt"`
 }
 
 // ProjectItemAccessType defines model for ProjectItem.AccessType.

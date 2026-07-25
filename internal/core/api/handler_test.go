@@ -3579,7 +3579,12 @@ func TestCoreHandler_GetProjectDetailHidesInternalProductFieldsForNormalUser(t *
 	gin.SetMode(gin.TestMode)
 
 	repo := newMockProjectRepo()
-	repo.details[1] = projectDetailForAPITest()
+	detail := projectDetailForAPITest()
+	detail.MailRules = append(detail.MailRules,
+		coredomain.MailRule{RuleType: coredomain.MailRuleRecipient, Pattern: "dot", Enabled: true},
+		coredomain.MailRule{RuleType: coredomain.MailRuleRecipient, Pattern: "plus", Enabled: false},
+	)
+	repo.details[1] = detail
 	mod := &CoreModule{
 		ProjectUseCase: coreapp.NewProjectUseCase(repo),
 		ProductInventory: projectInventoryProviderStub{totals: &allocapp.ProjectProductInventoryTotals{
@@ -3603,6 +3608,9 @@ func TestCoreHandler_GetProjectDetailHidesInternalProductFieldsForNormalUser(t *
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	project := body["project"].(map[string]any)
+	require.Equal(t, true, project["supportsDotAlias"])
+	require.Equal(t, false, project["supportsPlusAlias"])
 	products := body["products"].([]any)
 	product := products[0].(map[string]any)
 	require.Equal(t, float64(12), product["totalAvailable"])
@@ -3678,10 +3686,12 @@ func TestCoreHandler_GetProjectsIncludesProductSummaries(t *testing.T) {
 	detail := projectDetailForAPITest()
 	repo.summaries = []coreapp.ProjectSummary{
 		{
-			Project:       detail.Project,
-			Products:      detail.Products,
-			ProductCount:  len(detail.Products),
-			MailRuleCount: len(detail.MailRules),
+			Project:           detail.Project,
+			Products:          detail.Products,
+			ProductCount:      len(detail.Products),
+			MailRuleCount:     len(detail.MailRules),
+			SupportsDotAlias:  true,
+			SupportsPlusAlias: true,
 		},
 	}
 	mod := &CoreModule{
@@ -3709,6 +3719,8 @@ func TestCoreHandler_GetProjectsIncludesProductSummaries(t *testing.T) {
 	items := body["items"].([]any)
 	require.Len(t, items, 1)
 	item := items[0].(map[string]any)
+	require.Equal(t, true, item["supportsDotAlias"])
+	require.Equal(t, true, item["supportsPlusAlias"])
 	products := item["products"].([]any)
 	require.Len(t, products, 1)
 	product := products[0].(map[string]any)
