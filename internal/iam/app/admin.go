@@ -96,9 +96,7 @@ type CreateUserGroupRequest struct {
 	Name                string
 	Description         string
 	Enabled             bool
-	APIRPMLimit         int64
 	APIConcurrencyLimit int64
-	APIQuotaLimit       int64
 	PriceDiscountRatio  string
 	TopupThreshold      string
 	AutoUpgradeEnabled  bool
@@ -108,9 +106,7 @@ type UpdateUserGroupRequest struct {
 	Name                *string
 	Description         *string
 	Enabled             *bool
-	APIRPMLimit         *int64
 	APIConcurrencyLimit *int64
-	APIQuotaLimit       *int64
 	PriceDiscountRatio  *string
 	TopupThreshold      *string
 	AutoUpgradeEnabled  *bool
@@ -224,9 +220,7 @@ func (uc *AdminUseCase) CreateUserGroup(ctx context.Context, req CreateUserGroup
 		Name:                strings.TrimSpace(req.Name),
 		Description:         strings.TrimSpace(req.Description),
 		Enabled:             req.Enabled,
-		APIRPMLimit:         req.APIRPMLimit,
 		APIConcurrencyLimit: req.APIConcurrencyLimit,
-		APIQuotaLimit:       req.APIQuotaLimit,
 		PriceDiscountRatio:  req.PriceDiscountRatio,
 		TopupThreshold:      req.TopupThreshold,
 		AutoUpgradeEnabled:  req.AutoUpgradeEnabled,
@@ -261,14 +255,8 @@ func (uc *AdminUseCase) UpdateUserGroup(ctx context.Context, groupID uint, req U
 	if req.Enabled != nil {
 		group.Enabled = *req.Enabled
 	}
-	if req.APIRPMLimit != nil {
-		group.APIRPMLimit = *req.APIRPMLimit
-	}
 	if req.APIConcurrencyLimit != nil {
 		group.APIConcurrencyLimit = *req.APIConcurrencyLimit
-	}
-	if req.APIQuotaLimit != nil {
-		group.APIQuotaLimit = *req.APIQuotaLimit
 	}
 	if req.PriceDiscountRatio != nil {
 		group.PriceDiscountRatio = *req.PriceDiscountRatio
@@ -289,7 +277,7 @@ func (uc *AdminUseCase) UpdateUserGroup(ctx context.Context, groupID uint, req U
 }
 
 func normalizeUserGroupCapabilities(group *domain.UserGroup) error {
-	if group.APIRPMLimit < 0 || group.APIConcurrencyLimit < 0 || group.APIQuotaLimit < 0 {
+	if group.APIConcurrencyLimit < 0 {
 		return domain.ErrInvalidUserGroup
 	}
 

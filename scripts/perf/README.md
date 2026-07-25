@@ -70,4 +70,4 @@ k6 run -e MULTIPLIER=2 -e DURATION=5m \
 - SMTP 注入到 Pickup 可见 P95 ≤ 2 秒。
 - 连接池无持续等待，MySQL 无 lock wait timeout。
 
-每个压测 API Key 的并发上限需设为 100，并确保总 RPM 覆盖目标下单速率；业务型 `422/429` 已标记为预期响应，不计入非业务 5xx 失败率。
+每个压测 API Key 的并发上限需设为 100，并确保总调用额度覆盖压测请求量；业务型 `422/429` 已标记为预期响应，不计入非业务 5xx 失败率。

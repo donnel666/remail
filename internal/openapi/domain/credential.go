@@ -7,22 +7,21 @@ import (
 )
 
 type APIKey struct {
-	ID                 uint
-	UserID             uint
-	OwnerRole          string
-	Name               string
-	KeyPrefix          string
-	KeyPlain           string
-	Enabled            bool
-	RateLimitPerMinute *int
-	ConcurrencyLimit   *int
-	QuotaLimit         *int64
-	QuotaUsed          int64
-	ActiveRequests     int
-	ExpireAt           *time.Time
-	LastUsedAt         *time.Time
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	ID               uint
+	UserID           uint
+	OwnerRole        string
+	Name             string
+	KeyPrefix        string
+	KeyPlain         string
+	Enabled          bool
+	ConcurrencyLimit *int
+	QuotaLimit       *int64
+	QuotaUsed        int64
+	ActiveRequests   int
+	ExpireAt         *time.Time
+	LastUsedAt       *time.Time
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 type OrderToken struct {
@@ -44,7 +43,6 @@ var (
 	ErrAPIKeyDisabled          = errors.New("openapi: api key disabled")
 	ErrAPIKeyExpired           = errors.New("openapi: api key expired")
 	ErrAPIKeyForbidden         = errors.New("openapi: api key forbidden")
-	ErrAPIKeyRateLimited       = errors.New("openapi: api key rate limited")
 	ErrAPIKeyQuotaExceeded     = errors.New("openapi: api key quota exceeded")
 	ErrAPIKeyConcurrencyLimit  = errors.New("openapi: api key concurrency limit reached")
 	ErrInvalidOrderToken       = errors.New("openapi: invalid order token")

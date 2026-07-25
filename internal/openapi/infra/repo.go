@@ -18,21 +18,20 @@ import (
 )
 
 type APIKeyModel struct {
-	ID                 uint       `gorm:"primaryKey;autoIncrement"`
-	UserID             uint       `gorm:"not null;column:user_id"`
-	Name               string     `gorm:"type:varchar(120);not null;default:''"`
-	KeyPrefix          string     `gorm:"type:varchar(32);not null;column:key_prefix"`
-	KeyPlain           string     `gorm:"type:varchar(255);not null;column:key_plain"`
-	Enabled            bool       `gorm:"not null;default:true"`
-	DeletedAt          *time.Time `gorm:"column:deleted_at"`
-	RateLimitPerMinute *int       `gorm:"column:rate_limit_per_minute"`
-	ConcurrencyLimit   *int       `gorm:"column:concurrency_limit"`
-	QuotaLimit         *int64     `gorm:"column:quota_limit"`
-	QuotaUsed          int64      `gorm:"not null;column:quota_used"`
-	ExpireAt           *time.Time `gorm:"column:expire_at"`
-	LastUsedAt         *time.Time `gorm:"column:last_used_at"`
-	CreatedAt          time.Time  `gorm:"not null;autoCreateTime;column:created_at"`
-	UpdatedAt          time.Time  `gorm:"not null;autoUpdateTime;column:updated_at"`
+	ID               uint       `gorm:"primaryKey;autoIncrement"`
+	UserID           uint       `gorm:"not null;column:user_id"`
+	Name             string     `gorm:"type:varchar(120);not null;default:''"`
+	KeyPrefix        string     `gorm:"type:varchar(32);not null;column:key_prefix"`
+	KeyPlain         string     `gorm:"type:varchar(255);not null;column:key_plain"`
+	Enabled          bool       `gorm:"not null;default:true"`
+	DeletedAt        *time.Time `gorm:"column:deleted_at"`
+	ConcurrencyLimit *int       `gorm:"column:concurrency_limit"`
+	QuotaLimit       *int64     `gorm:"column:quota_limit"`
+	QuotaUsed        int64      `gorm:"not null;column:quota_used"`
+	ExpireAt         *time.Time `gorm:"column:expire_at"`
+	LastUsedAt       *time.Time `gorm:"column:last_used_at"`
+	CreatedAt        time.Time  `gorm:"not null;autoCreateTime;column:created_at"`
+	UpdatedAt        time.Time  `gorm:"not null;autoUpdateTime;column:updated_at"`
 }
 
 func (APIKeyModel) TableName() string { return "api_keys" }
@@ -96,15 +95,14 @@ func (r *Repo) CreateAPIKey(ctx context.Context, cmd openapiapp.CreateAPIKeyComm
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		response, wasReplayed, err := withIdempotencyInTx(ctx, tx, cmd.UserID, "apikey.create", cmd.IdempotencyKey, cmd.RequestFingerprint, func(writeTx *gorm.DB) ([]byte, error) {
 			model := APIKeyModel{
-				UserID:             cmd.UserID,
-				Name:               cmd.Name,
-				KeyPrefix:          cmd.KeyPrefix,
-				KeyPlain:           cmd.KeyPlain,
-				Enabled:            true,
-				RateLimitPerMinute: cmd.RateLimitPerMinute,
-				ConcurrencyLimit:   cmd.ConcurrencyLimit,
-				QuotaLimit:         cmd.QuotaLimit,
-				ExpireAt:           cmd.ExpireAt,
+				UserID:           cmd.UserID,
+				Name:             cmd.Name,
+				KeyPrefix:        cmd.KeyPrefix,
+				KeyPlain:         cmd.KeyPlain,
+				Enabled:          true,
+				ConcurrencyLimit: cmd.ConcurrencyLimit,
+				QuotaLimit:       cmd.QuotaLimit,
+				ExpireAt:         cmd.ExpireAt,
 			}
 			if err := writeTx.WithContext(ctx).Create(&model).Error; err != nil {
 				if isDuplicateKeyError(err) {
@@ -191,7 +189,7 @@ func (r *Repo) FindAPIKeyByPlain(ctx context.Context, plain string) (*domain.API
 		}
 		return nil, fmt.Errorf("find api key by plain: %w", err)
 	}
-	ownerRole, active, err := r.GetAPIKeyOwnerAccess(ctx, model.UserID)
+	ownerRole, active, _, err := r.GetAPIKeyOwnerAccess(ctx, model.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -203,22 +201,24 @@ func (r *Repo) FindAPIKeyByPlain(ctx context.Context, plain string) (*domain.API
 	return &item, nil
 }
 
-func (r *Repo) GetAPIKeyOwnerAccess(ctx context.Context, userID uint) (string, bool, error) {
+func (r *Repo) GetAPIKeyOwnerAccess(ctx context.Context, userID uint) (string, bool, int64, error) {
 	var owner struct {
-		Status string
-		Role   string
+		Status                string
+		Role                  string
+		GroupConcurrencyLimit int64
 	}
 	if err := r.dbFor(ctx).
-		Table("users").
-		Select("status, role").
-		Where("id = ?", userID).
+		Table("users AS u").
+		Select("u.status, u.role, COALESCE(g.api_concurrency_limit, 0) AS group_concurrency_limit").
+		Joins("LEFT JOIN user_groups AS g ON g.id = u.user_group_id").
+		Where("u.id = ?", userID).
 		Take(&owner).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return "", false, nil
+			return "", false, 0, nil
 		}
-		return "", false, fmt.Errorf("load api key owner access: %w", err)
+		return "", false, 0, fmt.Errorf("load api key owner access: %w", err)
 	}
-	return owner.Role, owner.Status == "active", nil
+	return owner.Role, owner.Status == "active", owner.GroupConcurrencyLimit, nil
 }
 
 func (r *Repo) UpdateAPIKey(ctx context.Context, cmd openapiapp.UpdateAPIKeyCommand) (*domain.APIKey, error) {
@@ -231,13 +231,6 @@ func (r *Repo) UpdateAPIKey(ctx context.Context, cmd openapiapp.UpdateAPIKeyComm
 	}
 	if cmd.ExpireSet {
 		updates["expire_at"] = cmd.ExpireAt
-	}
-	if cmd.RateLimitSet {
-		if cmd.RateLimitPerMinute == nil {
-			updates["rate_limit_per_minute"] = nil
-		} else {
-			updates["rate_limit_per_minute"] = *cmd.RateLimitPerMinute
-		}
 	}
 	if cmd.ConcurrencySet {
 		if cmd.ConcurrencyLimit == nil {
@@ -432,21 +425,20 @@ func withIdempotencyInTx(ctx context.Context, tx *gorm.DB, ownerUserID uint, ope
 
 func apiKeyModelToDomain(model APIKeyModel) domain.APIKey {
 	return domain.APIKey{
-		ID:                 model.ID,
-		UserID:             model.UserID,
-		Name:               model.Name,
-		KeyPrefix:          model.KeyPrefix,
-		KeyPlain:           model.KeyPlain,
-		Enabled:            model.Enabled,
-		RateLimitPerMinute: model.RateLimitPerMinute,
-		ConcurrencyLimit:   model.ConcurrencyLimit,
-		QuotaLimit:         model.QuotaLimit,
-		QuotaUsed:          model.QuotaUsed,
-		ActiveRequests:     0,
-		ExpireAt:           model.ExpireAt,
-		LastUsedAt:         model.LastUsedAt,
-		CreatedAt:          model.CreatedAt,
-		UpdatedAt:          model.UpdatedAt,
+		ID:               model.ID,
+		UserID:           model.UserID,
+		Name:             model.Name,
+		KeyPrefix:        model.KeyPrefix,
+		KeyPlain:         model.KeyPlain,
+		Enabled:          model.Enabled,
+		ConcurrencyLimit: model.ConcurrencyLimit,
+		QuotaLimit:       model.QuotaLimit,
+		QuotaUsed:        model.QuotaUsed,
+		ActiveRequests:   0,
+		ExpireAt:         model.ExpireAt,
+		LastUsedAt:       model.LastUsedAt,
+		CreatedAt:        model.CreatedAt,
+		UpdatedAt:        model.UpdatedAt,
 	}
 }
 

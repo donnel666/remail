@@ -167,9 +167,7 @@ type UserGroupResponse struct {
 	Name                string `json:"name"`
 	Description         string `json:"description"`
 	Enabled             bool   `json:"enabled"`
-	APIRPMLimit         int64  `json:"apiRpmLimit"`
 	APIConcurrencyLimit int64  `json:"apiConcurrencyLimit"`
-	APIQuotaLimit       int64  `json:"apiQuotaLimit"`
 	PriceDiscountRatio  string `json:"priceDiscountRatio"`
 	TopupThreshold      string `json:"topupThreshold"`
 	AutoUpgradeEnabled  bool   `json:"autoUpgradeEnabled"`
@@ -245,9 +243,7 @@ type AdminCreateUserGroupRequest struct {
 	Name                string  `json:"name" binding:"required,max=100"`
 	Description         string  `json:"description" binding:"omitempty,max=500"`
 	Enabled             *bool   `json:"enabled,omitempty"`
-	APIRPMLimit         *int64  `json:"apiRpmLimit,omitempty" binding:"omitempty,gte=0"`
 	APIConcurrencyLimit *int64  `json:"apiConcurrencyLimit,omitempty" binding:"omitempty,gte=0"`
-	APIQuotaLimit       *int64  `json:"apiQuotaLimit,omitempty" binding:"omitempty,gte=0"`
 	PriceDiscountRatio  *string `json:"priceDiscountRatio,omitempty"`
 	TopupThreshold      *string `json:"topupThreshold,omitempty"`
 	AutoUpgradeEnabled  *bool   `json:"autoUpgradeEnabled,omitempty"`
@@ -257,9 +253,7 @@ type AdminUpdateUserGroupRequest struct {
 	Name                *string `json:"name,omitempty" binding:"omitempty,max=100"`
 	Description         *string `json:"description,omitempty" binding:"omitempty,max=500"`
 	Enabled             *bool   `json:"enabled,omitempty"`
-	APIRPMLimit         *int64  `json:"apiRpmLimit,omitempty" binding:"omitempty,gte=0"`
 	APIConcurrencyLimit *int64  `json:"apiConcurrencyLimit,omitempty" binding:"omitempty,gte=0"`
-	APIQuotaLimit       *int64  `json:"apiQuotaLimit,omitempty" binding:"omitempty,gte=0"`
 	PriceDiscountRatio  *string `json:"priceDiscountRatio,omitempty"`
 	TopupThreshold      *string `json:"topupThreshold,omitempty"`
 	AutoUpgradeEnabled  *bool   `json:"autoUpgradeEnabled,omitempty"`
@@ -440,8 +434,8 @@ func toUserGroupResponse(group domain.UserGroup) UserGroupResponse {
 	if group.ID == 0 {
 		return UserGroupResponse{
 			ID: 1, Code: "normal", Name: "普通用户", Description: "默认权益分组", Enabled: true,
-			APIRPMLimit: 60, APIConcurrencyLimit: 3, APIQuotaLimit: 10000,
-			PriceDiscountRatio: "1.00", TopupThreshold: "0.00",
+			APIConcurrencyLimit: 3,
+			PriceDiscountRatio:  "1.00", TopupThreshold: "0.00",
 		}
 	}
 	return UserGroupResponse{
@@ -450,9 +444,7 @@ func toUserGroupResponse(group domain.UserGroup) UserGroupResponse {
 		Name:                group.Name,
 		Description:         group.Description,
 		Enabled:             group.Enabled,
-		APIRPMLimit:         group.APIRPMLimit,
 		APIConcurrencyLimit: group.APIConcurrencyLimit,
-		APIQuotaLimit:       group.APIQuotaLimit,
 		PriceDiscountRatio:  group.PriceDiscountRatio,
 		TopupThreshold:      group.TopupThreshold,
 		AutoUpgradeEnabled:  group.AutoUpgradeEnabled,

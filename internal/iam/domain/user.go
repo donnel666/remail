@@ -77,9 +77,7 @@ type UserGroup struct {
 	Name                string
 	Description         string
 	Enabled             bool
-	APIRPMLimit         int64
 	APIConcurrencyLimit int64
-	APIQuotaLimit       int64
 	PriceDiscountRatio  string
 	TopupThreshold      string
 	AutoUpgradeEnabled  bool

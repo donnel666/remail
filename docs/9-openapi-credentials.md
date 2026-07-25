@@ -6,12 +6,13 @@
 |------|------|--------|------|
 | 2026-06-29 | V1.0 | Codex | 形成 Go 版从 0 DDD 设计基线，作为一次 V1.0 变更。 |
 | 2026-07-08 | V1.1 | Codex | P1-I8 补充/修正：OrderToken 作为 pickup 服务凭证事实，不再作为通用 Bearer 鉴权主体。 |
-| 2026-07-08 | V1.2 | Codex | 按产品设计纠正 API Key 展示边界：当前用户凭证管理列表可返回明文；补充 API Key 额度、不限 RPM 和软删除语义。 |
+| 2026-07-08 | V1.2 | Codex | 按产品设计纠正 API Key 展示边界：当前用户凭证管理列表可返回明文；补充 API Key 额度、旧版每分钟请求上限和软删除语义。 |
 | 2026-07-09 | V1.3 | Codex | 补充公开 API 入口策略：API Key 调用统一收敛到 `/v1/open/**`，文档分组只作为展示标签，不绑定 URI。 |
 | 2026-07-09 | V1.4 | Codex | 按接口命名清洁度要求规范 OpenAPI URI：API Key 当前信息使用 `/v1/open/apikey/profile`，公开资源导入/检测使用 `/v1/open/resources/imports`、`/v1/open/resources/validations`；只调整 URI 命名，不改变 `/v1/open/**` 鉴权和展示分组策略。 |
 | 2026-07-17 | V1.5 | Codex | 补充管理员按用户管理 API Key 的后台接口：`GET/POST /v1/admin/users/{userId}/apikeys` 与 `PATCH/DELETE /v1/admin/users/{userId}/apikeys/{keyId}`，供用户管理页 API Key 页签使用，复用现有凭证用例并按 `iam:user/operate` 授权；不改变 `/v1/open/**` 鉴权与展示分组策略。 |
 | 2026-07-20 | V1.6 | Codex | 稳定 API 新增独立批量下单入口；原单笔下单契约不变，批量入口按索引返回独立订单的逐项结果。 |
 | 2026-07-20 | V1.7 | Codex | 公开取件 API 新增批量入口，一次读取 2 到 200 组 `email + token` 并按输入顺序返回逐项结果，同时增加客户端 IP 限流并保留逐 Token 限流。 |
+| 2026-07-25 | V1.8 | Codex | API Key 移除每分钟请求上限，统一保留实时并发请求数上限与总调用额度。 |
 
 > 通用域。BC-OPENAPI 负责 API Key、OrderToken、请求入口保护和日志，不拥有订单服务数据。
 
@@ -34,7 +35,7 @@
 
 | 实体 | 字段 |
 |------|------|
-| `ApiKey` | `keyId`、`keyPrefix`、`plain`、`userId`、`enabled`、`rateLimit`、`concurrency`、`quotaLimit/quotaUsed`、`expireAt`、`lastUsedAt` |
+| `ApiKey` | `keyId`、`keyPrefix`、`plain`、`userId`、`enabled`、`concurrency`、`quotaLimit/quotaUsed`、`expireAt`、`lastUsedAt` |
 | `OrderToken` | `tokenId`、`tokenPrefix`、`plain`、`orderNo`、`enabled`、`expireAt`、`disabledAt`、`disabledReason` |
 
 API Key 和 OrderToken 按原值保存；授权凭证管理接口可重复查看明文。普通日志、错误响应、导出文件禁敏；非凭证管理列表默认只显示前缀。
@@ -43,8 +44,7 @@ API Key 限制补充设计：
 
 | 字段 | 规则 |
 |------|------|
-| `rateLimit` | `null` 表示不限制 RPM；正整数表示每分钟请求上限。 |
-| `concurrency` | 正整数，省略时使用系统默认并发上限。 |
+| `concurrency` | 正整数；省略时继承用户分组并发上限，显式值仍受分组上限约束。分组上限为 `0` 时不额外限制，最终回退到系统默认 `500`。 |
 | `quotaLimit` | `null` 表示不限制总请求额度；正整数表示该 Key 可消费的总请求次数。 |
 | `quotaUsed` | 鉴权通过并进入业务入口前原子递增；不得超过 `quotaLimit`。 |
 
@@ -66,7 +66,7 @@ API Key 限制补充设计：
 按提交的完整 API Key 明文与数据库保存值做等值校验，rk- 只是生成前缀，不作为鉴权策略分支
 校验用户启用/凭证启用/过期
 校验该接口是否允许该 principalType
-限流和并发占用
+额度校验和并发占用
 注入 Principal 到上下文
 请求结束释放并发占用
 ```
@@ -86,7 +86,7 @@ API Key 限制补充设计：
 | INV-O5 | 服务结束时 Trade 必须同步禁用 OrderToken。 |
 | INV-O6 | 购买邮箱正常服务长期有效，Token 不因质保到期自动过期。 |
 | INV-O7 | API Key 和 Token 明文不得进入普通日志和错误响应。 |
-| INV-O8 | 限流或并发超限必须在进入业务域前拒绝。 |
+| INV-O8 | 额度耗尽或并发超限必须在进入业务域前拒绝。 |
 
 ---
 
@@ -110,7 +110,7 @@ API Key 限制补充设计：
 | `GET` | `/v1/apikeys` | 当前用户 API Key 列表，返回明文，用于个人设置页直接复制。 |
 | `GET` | `/v1/apikeys/usage` | 当前用户 API Key 使用聚合，只返回请求次数和 Key 数量，不返回明文。 |
 | `GET` | `/v1/apikeys/{keyId}` | 授权详情，返回明文。 |
-| `PATCH` | `/v1/apikeys/{keyId}` | 启停、限流、并发、额度、过期时间。 |
+| `PATCH` | `/v1/apikeys/{keyId}` | 启停、并发、额度、过期时间。 |
 | `DELETE` | `/v1/apikeys/{keyId}` | 软删除 API Key；列表/详情/鉴权不可再使用，历史订单事实保留外键引用。 |
 | `GET` | `/v1/orders/{orderNo}/token` | 查看订单服务凭证详情，授权时返回明文。 |
 | `POST` | `/v1/orders/{orderNo}/token/reset` | 重置服务凭证，必须幂等，返回新明文。 |
@@ -121,10 +121,10 @@ API Key 限制补充设计：
 |------|-----|------|
 | `GET` | `/v1/admin/apikeys` | 管理员查询 API Key。 |
 | `GET` | `/v1/admin/apikeys/{keyId}` | 授权详情，返回明文。 |
-| `PATCH` | `/v1/admin/apikeys/{keyId}` | 调整启停、限流、并发、过期时间。 |
+| `PATCH` | `/v1/admin/apikeys/{keyId}` | 调整启停、并发、过期时间。 |
 | `GET` | `/v1/admin/users/{userId}/apikeys` | 管理员查看指定用户的 API Key 列表（用户管理页 API Key 页签），权限 `iam:user/operate`。 |
 | `POST` | `/v1/admin/users/{userId}/apikeys` | 管理员为指定用户创建 API Key；缺省 `Idempotency-Key` 时服务端合成。 |
-| `PATCH` | `/v1/admin/users/{userId}/apikeys/{keyId}` | 管理员调整指定用户某 API Key 的启停、限流、并发、额度、过期时间。 |
+| `PATCH` | `/v1/admin/users/{userId}/apikeys/{keyId}` | 管理员调整指定用户某 API Key 的启停、并发、额度、过期时间。 |
 | `DELETE` | `/v1/admin/users/{userId}/apikeys/{keyId}` | 管理员软删除指定用户的 API Key。 |
 | `GET` | `/v1/admin/tokens` | 服务凭证查询。 |
 | `GET` | `/v1/admin/tokens/{tokenId}` | 授权详情，返回明文。 |
@@ -136,7 +136,7 @@ SDK 可调用接口示例：
 
 | 方法 | URI | 说明 |
 |------|-----|------|
-| `GET` | `/v1/open/apikey/profile` | 查询当前 API Key 的额度、RPM、过期时间和使用状态。 |
+| `GET` | `/v1/open/apikey/profile` | 查询当前 API Key 的额度、并发、过期时间和使用状态。 |
 | `GET` | `/v1/open/projects` | API Key 查询可见项目。 |
 | `GET` | `/v1/open/projects/{projectId}` | API Key 查询可见项目详情。 |
 | `POST` | `/v1/open/orders` | API Key 单笔下单。 |

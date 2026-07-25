@@ -10235,18 +10235,12 @@ components:
           type: string
           format: date-time
           nullable: true
-        rateLimitPerMinute:
-          type: integer
-          minimum: 1
-          maximum: 10000
-          nullable: true
-          description: Empty means unlimited requests per minute.
         concurrencyLimit:
           type: integer
           nullable: true
           minimum: 1
           maximum: 500
-          description: Empty uses the system default of 500 concurrent requests.
+          description: Empty inherits the user's group limit. Explicit values are still capped by the group limit; a group limit of 0 falls back to the system default of 500.
         quotaLimit:
           type: integer
           format: int64
@@ -10267,16 +10261,12 @@ components:
           type: string
           format: date-time
           nullable: true
-        rateLimitPerMinute:
-          type: integer
-          minimum: 1
-          maximum: 10000
-          nullable: true
         concurrencyLimit:
           type: integer
           nullable: true
           minimum: 1
           maximum: 500
+          description: Empty inherits the user's group limit. Explicit values are still capped by the group limit; a group limit of 0 falls back to the system default of 500.
         quotaLimit:
           type: integer
           format: int64
@@ -10291,7 +10281,6 @@ components:
         - name
         - keyPrefix
         - enabled
-        - rateLimitPerMinute
         - concurrencyLimit
         - quotaUsed
         - activeRequests
@@ -10309,9 +10298,6 @@ components:
           description: Plain API key returned to its owner on create, list, and detail views.
         enabled:
           type: boolean
-        rateLimitPerMinute:
-          type: integer
-          nullable: true
         concurrencyLimit:
           type: integer
           nullable: true
@@ -12256,9 +12242,7 @@ components:
         - name
         - description
         - enabled
-        - apiRpmLimit
         - apiConcurrencyLimit
-        - apiQuotaLimit
         - priceDiscountRatio
         - topupThreshold
         - autoUpgradeEnabled
@@ -12273,18 +12257,11 @@ components:
           type: string
         enabled:
           type: boolean
-        apiRpmLimit:
-          type: integer
-          format: int64
-          minimum: 0
         apiConcurrencyLimit:
           type: integer
           format: int64
           minimum: 0
-        apiQuotaLimit:
-          type: integer
-          format: int64
-          minimum: 0
+          description: Maximum concurrent requests for each API key in this group. Zero applies no group cap and uses the API key or system default limit.
         priceDiscountRatio:
           $ref: "#/components/schemas/UserGroupDiscountRatio"
         topupThreshold:
@@ -12316,21 +12293,12 @@ components:
         enabled:
           type: boolean
           default: true
-        apiRpmLimit:
-          type: integer
-          format: int64
-          minimum: 0
-          default: 60
         apiConcurrencyLimit:
           type: integer
           format: int64
           minimum: 0
           default: 3
-        apiQuotaLimit:
-          type: integer
-          format: int64
-          minimum: 0
-          default: 10000
+          description: Maximum concurrent requests for each API key in this group. Zero applies no group cap and uses the API key or system default limit.
         priceDiscountRatio:
           allOf:
             - $ref: "#/components/schemas/UserGroupDiscountRatio"
@@ -12355,18 +12323,11 @@ components:
           maxLength: 500
         enabled:
           type: boolean
-        apiRpmLimit:
-          type: integer
-          format: int64
-          minimum: 0
         apiConcurrencyLimit:
           type: integer
           format: int64
           minimum: 0
-        apiQuotaLimit:
-          type: integer
-          format: int64
-          minimum: 0
+          description: Maximum concurrent requests for each API key in this group. Zero applies no group cap and uses the API key or system default limit.
         priceDiscountRatio:
           $ref: "#/components/schemas/UserGroupDiscountRatio"
         topupThreshold:

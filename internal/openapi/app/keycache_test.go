@@ -11,14 +11,30 @@ import (
 )
 
 func TestAPIKeyDefaultConcurrency(t *testing.T) {
-	_, concurrency, err := normalizeAPIKeyLimits(nil, nil)
-	require.NoError(t, err)
-	require.Nil(t, concurrency)
-	require.Equal(t, 500, effectiveAPIKeyConcurrency(concurrency))
+	require.Equal(t, 500, effectiveAPIKeyConcurrency(nil, 0))
+	require.Equal(t, 3, effectiveAPIKeyConcurrency(nil, 3))
+
+	keyLimit := 10
+	require.Equal(t, 3, effectiveAPIKeyConcurrency(&keyLimit, 3))
+	require.Equal(t, 10, effectiveAPIKeyConcurrency(&keyLimit, 20))
 
 	zero := 0
-	_, _, err = normalizeAPIKeyLimits(nil, &zero)
-	require.ErrorIs(t, err, domain.ErrInvalidAPIKey)
+	require.False(t, validAPIKeyConcurrency(zero))
+}
+
+func TestAPIKeyRuntimeAppliesUserGroupConcurrency(t *testing.T) {
+	ctx := context.Background()
+	keyLimit := 5
+	repo := newAPIKeyRuntimeRepoStub(domain.APIKey{ID: 1, UserID: 2, KeyPlain: "rk-test", Enabled: true, ConcurrencyLimit: &keyLimit})
+	repo.groupConcurrencyLimit = 1
+	rt := newAPIKeyRuntime(repo, time.Now)
+	defer func() { require.NoError(t, rt.close(ctx)) }()
+
+	_, err := rt.begin(ctx, "rk-test")
+	require.NoError(t, err)
+	_, err = rt.begin(ctx, "rk-test")
+	require.ErrorIs(t, err, domain.ErrAPIKeyConcurrencyLimit)
+	rt.finish(1)
 }
 
 func TestAPIKeyRuntimeUsesDefaultConcurrency(t *testing.T) {
@@ -74,21 +90,38 @@ func TestAPIKeyRuntimeConcurrencyAndFlush(t *testing.T) {
 	require.EqualValues(t, 2, repo.key.QuotaUsed)
 }
 
-func TestAPIKeyRuntimeRateLimitAndQuota(t *testing.T) {
+func TestAPIKeyRuntimeUpdatePreservesActiveRequests(t *testing.T) {
+	ctx := context.Background()
+	concurrency := 1
+	repo := newAPIKeyRuntimeRepoStub(domain.APIKey{ID: 1, UserID: 2, KeyPlain: "rk-test", Enabled: true, ConcurrencyLimit: &concurrency})
+	uc := NewUseCase(repo)
+	defer func() { require.NoError(t, uc.Close(ctx)) }()
+
+	first, err := uc.BeginAPIKeyRequest(ctx, "rk-test")
+	require.NoError(t, err)
+	_, err = uc.UpdateAPIKey(ctx, UpdateAPIKeyRequest{UserID: 2, KeyID: 1, ConcurrencySet: true, ConcurrencyLimit: &concurrency})
+	require.NoError(t, err)
+	_, err = uc.BeginAPIKeyRequest(ctx, "rk-test")
+	require.ErrorIs(t, err, domain.ErrAPIKeyConcurrencyLimit)
+	require.NoError(t, uc.FinishAPIKeyRequest(ctx, first.APIKeyID, first.LeaseID))
+	second, err := uc.BeginAPIKeyRequest(ctx, "rk-test")
+	require.NoError(t, err)
+	require.NoError(t, uc.FinishAPIKeyRequest(ctx, second.APIKeyID, second.LeaseID))
+}
+
+func TestAPIKeyRuntimeQuota(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	rateLimit := 1
 	quotaLimit := int64(2)
 	concurrency := 5
 	repo := newAPIKeyRuntimeRepoStub(domain.APIKey{
-		ID:                 1,
-		UserID:             2,
-		OwnerRole:          "user",
-		KeyPlain:           "rk-test",
-		Enabled:            true,
-		ConcurrencyLimit:   &concurrency,
-		RateLimitPerMinute: &rateLimit,
-		QuotaLimit:         &quotaLimit,
+		ID:               1,
+		UserID:           2,
+		OwnerRole:        "user",
+		KeyPlain:         "rk-test",
+		Enabled:          true,
+		ConcurrencyLimit: &concurrency,
+		QuotaLimit:       &quotaLimit,
 	})
 	rt := newAPIKeyRuntime(repo, func() time.Time { return now })
 	defer func() {
@@ -100,14 +133,9 @@ func TestAPIKeyRuntimeRateLimitAndQuota(t *testing.T) {
 	rt.finish(1)
 
 	_, err = rt.begin(ctx, "rk-test")
-	require.ErrorIs(t, err, domain.ErrAPIKeyRateLimited)
-
-	now = now.Add(61 * time.Second)
-	_, err = rt.begin(ctx, "rk-test")
 	require.NoError(t, err)
 	rt.finish(1)
 
-	now = now.Add(61 * time.Second)
 	_, err = rt.begin(ctx, "rk-test")
 	require.ErrorIs(t, err, domain.ErrAPIKeyQuotaExceeded)
 }
@@ -161,10 +189,11 @@ func TestAPIKeyRuntimeUsesCurrentOwnerRoleForCachedKey(t *testing.T) {
 }
 
 type apiKeyRuntimeRepoStub struct {
-	key        domain.APIKey
-	quotaAdded int64
-	userActive bool
-	ownerRole  string
+	key                   domain.APIKey
+	quotaAdded            int64
+	userActive            bool
+	ownerRole             string
+	groupConcurrencyLimit int64
 }
 
 func newAPIKeyRuntimeRepoStub(key domain.APIKey) *apiKeyRuntimeRepoStub {
@@ -187,8 +216,15 @@ func (r *apiKeyRuntimeRepoStub) FindAPIKey(context.Context, uint, uint) (*domain
 	return nil, errors.New("not implemented")
 }
 
-func (r *apiKeyRuntimeRepoStub) UpdateAPIKey(context.Context, UpdateAPIKeyCommand) (*domain.APIKey, error) {
-	return nil, errors.New("not implemented")
+func (r *apiKeyRuntimeRepoStub) UpdateAPIKey(_ context.Context, cmd UpdateAPIKeyCommand) (*domain.APIKey, error) {
+	if cmd.KeyID != r.key.ID || cmd.UserID != r.key.UserID {
+		return nil, domain.ErrAPIKeyNotFound
+	}
+	if cmd.ConcurrencySet {
+		r.key.ConcurrencyLimit = cmd.ConcurrencyLimit
+	}
+	keyCopy := r.key
+	return &keyCopy, nil
 }
 
 func (r *apiKeyRuntimeRepoStub) DeleteAPIKey(context.Context, uint, uint, time.Time) error {
@@ -203,8 +239,8 @@ func (r *apiKeyRuntimeRepoStub) FindAPIKeyByPlain(_ context.Context, plain strin
 	return &keyCopy, nil
 }
 
-func (r *apiKeyRuntimeRepoStub) GetAPIKeyOwnerAccess(context.Context, uint) (string, bool, error) {
-	return r.ownerRole, r.userActive, nil
+func (r *apiKeyRuntimeRepoStub) GetAPIKeyOwnerAccess(context.Context, uint) (string, bool, int64, error) {
+	return r.ownerRole, r.userActive, r.groupConcurrencyLimit, nil
 }
 
 func (r *apiKeyRuntimeRepoStub) AddAPIKeyQuotaUsed(_ context.Context, keyID uint, delta int64, _ time.Time) error {

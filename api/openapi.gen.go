@@ -3753,16 +3753,13 @@ func (e GetWalletTransactionsParamsScope) Valid() bool {
 
 // APIKeyCreateRequest defines model for APIKeyCreateRequest.
 type APIKeyCreateRequest struct {
-	// ConcurrencyLimit Empty uses the system default of 500 concurrent requests.
+	// ConcurrencyLimit Empty inherits the user's group limit. Explicit values are still capped by the group limit; a group limit of 0 falls back to the system default of 500.
 	ConcurrencyLimit *int       `json:"concurrencyLimit,omitempty"`
 	ExpireAt         *time.Time `json:"expireAt,omitempty"`
 	Name             *string    `json:"name,omitempty"`
 
 	// QuotaLimit Empty means unlimited total requests.
 	QuotaLimit *int64 `json:"quotaLimit,omitempty"`
-
-	// RateLimitPerMinute Empty means unlimited requests per minute.
-	RateLimitPerMinute *int `json:"rateLimitPerMinute,omitempty"`
 }
 
 // APIKeyListResponse defines model for APIKeyListResponse.
@@ -3775,12 +3772,12 @@ type APIKeyListResponse struct {
 
 // APIKeyPatchRequest defines model for APIKeyPatchRequest.
 type APIKeyPatchRequest struct {
-	ConcurrencyLimit   *int       `json:"concurrencyLimit,omitempty"`
-	Enabled            *bool      `json:"enabled,omitempty"`
-	ExpireAt           *time.Time `json:"expireAt,omitempty"`
-	Name               *string    `json:"name,omitempty"`
-	QuotaLimit         *int64     `json:"quotaLimit,omitempty"`
-	RateLimitPerMinute *int       `json:"rateLimitPerMinute,omitempty"`
+	// ConcurrencyLimit Empty inherits the user's group limit. Explicit values are still capped by the group limit; a group limit of 0 falls back to the system default of 500.
+	ConcurrencyLimit *int       `json:"concurrencyLimit,omitempty"`
+	Enabled          *bool      `json:"enabled,omitempty"`
+	ExpireAt         *time.Time `json:"expireAt,omitempty"`
+	Name             *string    `json:"name,omitempty"`
+	QuotaLimit       *int64     `json:"quotaLimit,omitempty"`
 }
 
 // APIKeyResponse defines model for APIKeyResponse.
@@ -3793,15 +3790,14 @@ type APIKeyResponse struct {
 	Id               int        `json:"id"`
 
 	// KeyPlain Plain API key returned to its owner on create, list, and detail views.
-	KeyPlain           *string    `json:"keyPlain,omitempty"`
-	KeyPrefix          string     `json:"keyPrefix"`
-	LastUsedAt         *time.Time `json:"lastUsedAt,omitempty"`
-	Name               string     `json:"name"`
-	QuotaLimit         *int64     `json:"quotaLimit,omitempty"`
-	QuotaUsed          int64      `json:"quotaUsed"`
-	RateLimitPerMinute *int       `json:"rateLimitPerMinute"`
-	RemainingQuota     *int64     `json:"remainingQuota,omitempty"`
-	UpdatedAt          time.Time  `json:"updatedAt"`
+	KeyPlain       *string    `json:"keyPlain,omitempty"`
+	KeyPrefix      string     `json:"keyPrefix"`
+	LastUsedAt     *time.Time `json:"lastUsedAt,omitempty"`
+	Name           string     `json:"name"`
+	QuotaLimit     *int64     `json:"quotaLimit,omitempty"`
+	QuotaUsed      int64      `json:"quotaUsed"`
+	RemainingQuota *int64     `json:"remainingQuota,omitempty"`
+	UpdatedAt      time.Time  `json:"updatedAt"`
 }
 
 // APIKeyUsageResponse defines model for APIKeyUsageResponse.
@@ -4019,9 +4015,8 @@ type AdminCreateProjectRequestAccessType string
 
 // AdminCreateUserGroupRequest defines model for AdminCreateUserGroupRequest.
 type AdminCreateUserGroupRequest struct {
+	// ApiConcurrencyLimit Maximum concurrent requests for each API key in this group. Zero applies no group cap and uses the API key or system default limit.
 	ApiConcurrencyLimit *int64                   `json:"apiConcurrencyLimit,omitempty"`
-	ApiQuotaLimit       *int64                   `json:"apiQuotaLimit,omitempty"`
-	ApiRpmLimit         *int64                   `json:"apiRpmLimit,omitempty"`
 	AutoUpgradeEnabled  *bool                    `json:"autoUpgradeEnabled,omitempty"`
 	Code                string                   `json:"code"`
 	Description         *string                  `json:"description,omitempty"`
@@ -5012,9 +5007,8 @@ type AdminUpdateInviteRequest struct {
 
 // AdminUpdateUserGroupRequest defines model for AdminUpdateUserGroupRequest.
 type AdminUpdateUserGroupRequest struct {
+	// ApiConcurrencyLimit Maximum concurrent requests for each API key in this group. Zero applies no group cap and uses the API key or system default limit.
 	ApiConcurrencyLimit *int64  `json:"apiConcurrencyLimit,omitempty"`
-	ApiQuotaLimit       *int64  `json:"apiQuotaLimit,omitempty"`
-	ApiRpmLimit         *int64  `json:"apiRpmLimit,omitempty"`
 	AutoUpgradeEnabled  *bool   `json:"autoUpgradeEnabled,omitempty"`
 	Description         *string `json:"description,omitempty"`
 	Enabled             *bool   `json:"enabled,omitempty"`
@@ -7130,9 +7124,8 @@ type UserGroupDiscountRatio = string
 
 // UserGroupResponse defines model for UserGroupResponse.
 type UserGroupResponse struct {
+	// ApiConcurrencyLimit Maximum concurrent requests for each API key in this group. Zero applies no group cap and uses the API key or system default limit.
 	ApiConcurrencyLimit int64  `json:"apiConcurrencyLimit"`
-	ApiQuotaLimit       int64  `json:"apiQuotaLimit"`
-	ApiRpmLimit         int64  `json:"apiRpmLimit"`
 	AutoUpgradeEnabled  bool   `json:"autoUpgradeEnabled"`
 	Code                string `json:"code"`
 	Description         string `json:"description"`

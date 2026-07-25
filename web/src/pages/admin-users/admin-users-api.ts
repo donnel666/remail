@@ -116,7 +116,6 @@ export interface AdminApiKey {
   keyPrefix: string;
   keyPlain?: string;
   enabled: boolean;
-  rateLimitPerMinute: number | null;
   concurrencyLimit: number | null;
   quotaLimit?: number | null;
   quotaUsed: number;
@@ -193,7 +192,6 @@ export interface AdminApiKeyInput {
   name?: string;
   enabled?: boolean;
   expireAt?: string | null;
-  rateLimitPerMinute?: number | null;
   concurrencyLimit?: number | null;
   quotaLimit?: number | null;
 }
@@ -527,7 +525,6 @@ export async function createAdminUserApiKey(
       body: {
         name: input.name,
         expireAt: input.expireAt,
-        rateLimitPerMinute: input.rateLimitPerMinute,
         concurrencyLimit: input.concurrencyLimit,
         quotaLimit: input.quotaLimit,
       },
@@ -545,9 +542,6 @@ export async function updateAdminUserApiKey(
   if (input.name !== undefined) body.name = input.name;
   if (input.enabled !== undefined) body.enabled = input.enabled;
   if (input.expireAt !== undefined) body.expireAt = input.expireAt;
-  if (input.rateLimitPerMinute !== undefined) {
-    body.rateLimitPerMinute = input.rateLimitPerMinute;
-  }
   if (input.concurrencyLimit !== undefined) {
     body.concurrencyLimit = input.concurrencyLimit;
   }

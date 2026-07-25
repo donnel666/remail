@@ -28,3 +28,15 @@ func TestConcurrencyLimitNullability(t *testing.T) {
 	require.True(t, patch.ConcurrencySet)
 	require.Nil(t, patch.ConcurrencyLimit)
 }
+
+func TestAPIKeyRequestsRejectRemovedAndUnknownFields(t *testing.T) {
+	for _, body := range []string{
+		`{"rateLimitPerMinute":60}`,
+		`{"unknown":true}`,
+	} {
+		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+		ctx.Request = httptest.NewRequest(http.MethodPatch, "/", strings.NewReader(body))
+		_, ok := decodeKeyPatchRequest(ctx)
+		require.False(t, ok)
+	}
+}

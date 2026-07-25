@@ -652,17 +652,9 @@ func (h *IAMHandler) PostAdminUserGroup(c *gin.Context) {
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	}
-	apiRPMLimit := int64(60)
-	if req.APIRPMLimit != nil {
-		apiRPMLimit = *req.APIRPMLimit
-	}
 	apiConcurrencyLimit := int64(3)
 	if req.APIConcurrencyLimit != nil {
 		apiConcurrencyLimit = *req.APIConcurrencyLimit
-	}
-	apiQuotaLimit := int64(10000)
-	if req.APIQuotaLimit != nil {
-		apiQuotaLimit = *req.APIQuotaLimit
 	}
 	priceDiscountRatio := "1"
 	if req.PriceDiscountRatio != nil {
@@ -681,9 +673,7 @@ func (h *IAMHandler) PostAdminUserGroup(c *gin.Context) {
 		Name:                req.Name,
 		Description:         req.Description,
 		Enabled:             enabled,
-		APIRPMLimit:         apiRPMLimit,
 		APIConcurrencyLimit: apiConcurrencyLimit,
-		APIQuotaLimit:       apiQuotaLimit,
 		PriceDiscountRatio:  priceDiscountRatio,
 		TopupThreshold:      topupThreshold,
 		AutoUpgradeEnabled:  autoUpgradeEnabled,
@@ -718,9 +708,7 @@ func (h *IAMHandler) PatchAdminUserGroup(c *gin.Context) {
 		Name:                req.Name,
 		Description:         req.Description,
 		Enabled:             req.Enabled,
-		APIRPMLimit:         req.APIRPMLimit,
 		APIConcurrencyLimit: req.APIConcurrencyLimit,
-		APIQuotaLimit:       req.APIQuotaLimit,
 		PriceDiscountRatio:  req.PriceDiscountRatio,
 		TopupThreshold:      req.TopupThreshold,
 		AutoUpgradeEnabled:  req.AutoUpgradeEnabled,

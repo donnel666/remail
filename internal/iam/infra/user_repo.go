@@ -43,9 +43,7 @@ type UserGroupModel struct {
 	Name                string    `gorm:"type:varchar(100);not null"`
 	Description         string    `gorm:"type:varchar(500);not null;default:''"`
 	Enabled             bool      `gorm:"not null"`
-	APIRPMLimit         int64     `gorm:"not null;column:api_rpm_limit"`
 	APIConcurrencyLimit int64     `gorm:"not null;column:api_concurrency_limit"`
-	APIQuotaLimit       int64     `gorm:"not null;column:api_quota_limit"`
 	PriceDiscountRatio  string    `gorm:"type:decimal(7,6);not null;column:price_discount_ratio"`
 	TopupThreshold      string    `gorm:"type:decimal(18,6);not null;column:topup_threshold"`
 	AutoUpgradeEnabled  bool      `gorm:"not null;column:auto_upgrade_enabled"`
@@ -128,9 +126,7 @@ func (m *UserModel) toDomain() *domain.User {
 			Name:                m.UserGroup.Name,
 			Description:         m.UserGroup.Description,
 			Enabled:             m.UserGroup.Enabled,
-			APIRPMLimit:         m.UserGroup.APIRPMLimit,
 			APIConcurrencyLimit: m.UserGroup.APIConcurrencyLimit,
-			APIQuotaLimit:       m.UserGroup.APIQuotaLimit,
 			PriceDiscountRatio:  m.UserGroup.PriceDiscountRatio,
 			TopupThreshold:      m.UserGroup.TopupThreshold,
 			AutoUpgradeEnabled:  m.UserGroup.AutoUpgradeEnabled,
@@ -176,9 +172,7 @@ func userGroupToDomain(m UserGroupModel) domain.UserGroup {
 		Name:                m.Name,
 		Description:         m.Description,
 		Enabled:             m.Enabled,
-		APIRPMLimit:         m.APIRPMLimit,
 		APIConcurrencyLimit: m.APIConcurrencyLimit,
-		APIQuotaLimit:       m.APIQuotaLimit,
 		PriceDiscountRatio:  m.PriceDiscountRatio,
 		TopupThreshold:      m.TopupThreshold,
 		AutoUpgradeEnabled:  m.AutoUpgradeEnabled,
@@ -1008,9 +1002,7 @@ func (r *UserRepo) CreateUserGroup(ctx context.Context, group *domain.UserGroup)
 		Name:                strings.TrimSpace(group.Name),
 		Description:         strings.TrimSpace(group.Description),
 		Enabled:             group.Enabled,
-		APIRPMLimit:         group.APIRPMLimit,
 		APIConcurrencyLimit: group.APIConcurrencyLimit,
-		APIQuotaLimit:       group.APIQuotaLimit,
 		PriceDiscountRatio:  priceDiscountRatio,
 		TopupThreshold:      topupThreshold,
 		AutoUpgradeEnabled:  group.AutoUpgradeEnabled,
@@ -1032,9 +1024,7 @@ func (r *UserRepo) UpdateUserGroup(ctx context.Context, group *domain.UserGroup)
 		Name:                strings.TrimSpace(group.Name),
 		Description:         strings.TrimSpace(group.Description),
 		Enabled:             group.Enabled,
-		APIRPMLimit:         group.APIRPMLimit,
 		APIConcurrencyLimit: group.APIConcurrencyLimit,
-		APIQuotaLimit:       group.APIQuotaLimit,
 		PriceDiscountRatio:  group.PriceDiscountRatio,
 		TopupThreshold:      group.TopupThreshold,
 		AutoUpgradeEnabled:  group.AutoUpgradeEnabled,
@@ -1042,7 +1032,7 @@ func (r *UserRepo) UpdateUserGroup(ctx context.Context, group *domain.UserGroup)
 	if err := r.db.WithContext(ctx).
 		Model(&UserGroupModel{}).
 		Where("id = ?", group.ID).
-		Select("name", "description", "enabled", "api_rpm_limit", "api_concurrency_limit", "api_quota_limit", "price_discount_ratio", "topup_threshold", "auto_upgrade_enabled").
+		Select("name", "description", "enabled", "api_concurrency_limit", "price_discount_ratio", "topup_threshold", "auto_upgrade_enabled").
 		Updates(model).Error; err != nil {
 		return fmt.Errorf("update user group: %w", err)
 	}

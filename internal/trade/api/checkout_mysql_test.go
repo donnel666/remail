@@ -1313,14 +1313,12 @@ func TestOrderRouteConcurrentBatchesThrottleSameUserWithoutDeadlockMySQL(t *test
 	seedTradeMicrosoftResources(t, db, 1, 1000, 100, true)
 
 	openapiMod := openapiapi.NewModule(db)
-	rateLimit := 1000
 	key, err := openapiMod.UseCase.CreateAPIKey(context.Background(), openapiapp.CreateAPIKeyRequest{
-		UserID:             2,
-		Name:               "concurrent-batch-sdk",
-		RateLimitPerMinute: &rateLimit,
-		ConcurrencyLimit:   intPointer(10),
-		IdempotencyKey:     "apikey-idem-concurrent-batch",
-		RequestID:          "req-apikey-concurrent-batch",
+		UserID:           2,
+		Name:             "concurrent-batch-sdk",
+		ConcurrencyLimit: intPointer(10),
+		IdempotencyKey:   "apikey-idem-concurrent-batch",
+		RequestID:        "req-apikey-concurrent-batch",
 	})
 	require.NoError(t, err)
 
@@ -1515,21 +1513,19 @@ VALUES ('st_failed_tok', 'st_failed_token_plain', 'OR_FAILED_TOKEN', TRUE, ?, ?,
 	require.Empty(t, result.ServiceToken)
 }
 
-func TestAPIKeyRequestLimitsMySQL(t *testing.T) {
+func TestAPIKeyConcurrencyLimitMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	require.NoError(t, db.Exec(`
 INSERT INTO users(id, email, password_hash, nickname, status, role) VALUES
     (2, 'buyer@test.local', 'hash', 'buyer', 'active', 'user')`).Error)
 
 	openapiMod := openapiapi.NewModule(db)
-	rateLimit := 1
 	key, err := openapiMod.UseCase.CreateAPIKey(context.Background(), openapiapp.CreateAPIKeyRequest{
-		UserID:             2,
-		Name:               "limited",
-		RateLimitPerMinute: &rateLimit,
-		ConcurrencyLimit:   intPointer(1),
-		IdempotencyKey:     "apikey-idem-limited",
-		RequestID:          "req-apikey-limited",
+		UserID:           2,
+		Name:             "limited",
+		ConcurrencyLimit: intPointer(1),
+		IdempotencyKey:   "apikey-idem-limited",
+		RequestID:        "req-apikey-limited",
 	})
 	require.NoError(t, err)
 
@@ -1540,9 +1536,9 @@ INSERT INTO users(id, email, password_hash, nickname, status, role) VALUES
 	require.ErrorIs(t, err, openapidomain.ErrAPIKeyConcurrencyLimit)
 	require.NoError(t, openapiMod.UseCase.FinishAPIKeyRequest(context.Background(), first.APIKeyID))
 
-	_, err = openapiMod.UseCase.BeginAPIKeyRequest(context.Background(), key.KeyPlain)
-	require.ErrorIs(t, err, openapidomain.ErrAPIKeyRateLimited)
-
+	second, err := openapiMod.UseCase.BeginAPIKeyRequest(context.Background(), key.KeyPlain)
+	require.NoError(t, err)
+	require.NoError(t, openapiMod.UseCase.FinishAPIKeyRequest(context.Background(), second.APIKeyID))
 }
 
 func TestAPIKeyDefaultConcurrencyIsNullMySQL(t *testing.T) {
@@ -1578,16 +1574,14 @@ INSERT INTO users(id, email, password_hash, nickname, status, role) VALUES
     (2, 'quota-user@test.local', 'hash', 'quota-user', 'active', 'user')`).Error)
 
 	openapiMod := openapiapi.NewModule(db)
-	rateLimit := 10
 	quotaLimit := int64(2)
 	key, err := openapiMod.UseCase.CreateAPIKey(context.Background(), openapiapp.CreateAPIKeyRequest{
-		UserID:             2,
-		Name:               "quota-limited",
-		RateLimitPerMinute: &rateLimit,
-		ConcurrencyLimit:   intPointer(5),
-		QuotaLimit:         &quotaLimit,
-		IdempotencyKey:     "apikey-idem-quota-limited",
-		RequestID:          "req-apikey-quota-limited",
+		UserID:           2,
+		Name:             "quota-limited",
+		ConcurrencyLimit: intPointer(5),
+		QuotaLimit:       &quotaLimit,
+		IdempotencyKey:   "apikey-idem-quota-limited",
+		RequestID:        "req-apikey-quota-limited",
 	})
 	require.NoError(t, err)
 
@@ -1600,30 +1594,25 @@ INSERT INTO users(id, email, password_hash, nickname, status, role) VALUES
 	require.ErrorIs(t, err, openapidomain.ErrAPIKeyQuotaExceeded)
 
 	updated, err := openapiMod.UseCase.UpdateAPIKey(context.Background(), openapiapp.UpdateAPIKeyRequest{
-		UserID:             2,
-		KeyID:              key.ID,
-		RateLimitSet:       true,
-		RateLimitPerMinute: nil,
-		ConcurrencySet:     true,
-		ConcurrencyLimit:   nil,
-		QuotaSet:           true,
-		QuotaLimit:         nil,
+		UserID:           2,
+		KeyID:            key.ID,
+		ConcurrencySet:   true,
+		ConcurrencyLimit: nil,
+		QuotaSet:         true,
+		QuotaLimit:       nil,
 	})
 	require.NoError(t, err)
-	require.Nil(t, updated.RateLimitPerMinute)
 	require.Nil(t, updated.ConcurrencyLimit)
 	require.Nil(t, updated.QuotaLimit)
 
 	var nullable struct {
-		RateLimitPerMinute *int
-		ConcurrencyLimit   *int
-		QuotaLimit         *int64
+		ConcurrencyLimit *int
+		QuotaLimit       *int64
 	}
 	require.NoError(t, db.Table("api_keys").
-		Select("rate_limit_per_minute, concurrency_limit, quota_limit").
+		Select("concurrency_limit, quota_limit").
 		Where("id = ?", key.ID).
 		Take(&nullable).Error)
-	require.Nil(t, nullable.RateLimitPerMinute)
 	require.Nil(t, nullable.ConcurrencyLimit)
 	require.Nil(t, nullable.QuotaLimit)
 
@@ -1735,8 +1724,8 @@ func TestOrderAPIKeyOwnerConstraintMySQL(t *testing.T) {
 
 	var apiKeyID uint
 	require.NoError(t, db.Exec(`
-INSERT INTO api_keys(user_id, name, key_prefix, key_plain, rate_limit_per_minute, concurrency_limit)
-VALUES (3, 'other-owner', 'rk-other-owner', 'rk-other-owner-plain', 60, 5)`).Error)
+INSERT INTO api_keys(user_id, name, key_prefix, key_plain, concurrency_limit)
+VALUES (3, 'other-owner', 'rk-other-owner', 'rk-other-owner-plain', 5)`).Error)
 	require.NoError(t, db.Table("api_keys").Select("id").Where("key_plain = ?", "rk-other-owner-plain").Scan(&apiKeyID).Error)
 	require.NotZero(t, apiKeyID)
 
@@ -1764,14 +1753,12 @@ func TestConcurrentAPIKeyOrderReplayDoesNotDuplicateFactsMySQL(t *testing.T) {
 	creditBuyer(t, db, 2, "10.00")
 
 	openapiMod := openapiapi.NewModule(db)
-	rateLimit := 1000
 	key, err := openapiMod.UseCase.CreateAPIKey(context.Background(), openapiapp.CreateAPIKeyRequest{
-		UserID:             2,
-		Name:               "sdk-concurrent",
-		RateLimitPerMinute: &rateLimit,
-		ConcurrencyLimit:   intPointer(50),
-		IdempotencyKey:     "apikey-idem-concurrent",
-		RequestID:          "req-apikey-concurrent",
+		UserID:           2,
+		Name:             "sdk-concurrent",
+		ConcurrencyLimit: intPointer(50),
+		IdempotencyKey:   "apikey-idem-concurrent",
+		RequestID:        "req-apikey-concurrent",
 	})
 	require.NoError(t, err)
 

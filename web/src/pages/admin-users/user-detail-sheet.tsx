@@ -1012,7 +1012,7 @@ function ApiKeysTab({
   const [name, setName] = useState("");
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
   const [quota, setQuota] = useState<number | null>(null);
-  const [rpm, setRpm] = useState<number | null>(null);
+  const [concurrency, setConcurrency] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [operatingId, setOperatingId] = useState<number | null>(null);
 
@@ -1037,7 +1037,7 @@ function ApiKeysTab({
     setName("");
     setExpiresAt(null);
     setQuota(null);
-    setRpm(null);
+    setConcurrency(null);
     setModalOpen(true);
   };
 
@@ -1047,7 +1047,7 @@ function ApiKeysTab({
     setName(record.name);
     setExpiresAt(toDateInput(record.expireAt));
     setQuota(record.quotaLimit ?? null);
-    setRpm(record.rateLimitPerMinute ?? null);
+    setConcurrency(record.concurrencyLimit ?? null);
     setModalOpen(true);
   };
 
@@ -1064,7 +1064,7 @@ function ApiKeysTab({
           name: name.trim(),
           expireAt: toExpireAt(expiresAt),
           quotaLimit: quota,
-          rateLimitPerMinute: rpm,
+          concurrencyLimit: concurrency,
         });
         setApiKeys((items) =>
           items.map((item) => (item.id === editing.id ? updated : item))
@@ -1075,7 +1075,7 @@ function ApiKeysTab({
           name: name.trim(),
           expireAt: toExpireAt(expiresAt),
           quotaLimit: quota,
-          rateLimitPerMinute: rpm,
+          concurrencyLimit: concurrency,
         });
         setApiKeys((items) => [created, ...items]);
         Toast.success(t("API key created."));
@@ -1177,11 +1177,11 @@ function ApiKeysTab({
           ),
         },
         {
-          dataIndex: "rateLimitPerMinute",
-          title: t("RPM limit"),
+          dataIndex: "concurrencyLimit",
+          title: t("Concurrency limit"),
           width: 110,
           render: (value: number | null) =>
-            value == null ? t("Unlimited") : value.toLocaleString(),
+            value == null ? t("Group default") : value.toLocaleString(),
         },
         {
           dataIndex: "lastUsedAt",
@@ -1340,16 +1340,17 @@ function ApiKeysTab({
               />
             </label>
             <label className="block">
-              <span className="mb-1.5 block text-sm font-medium">{t("RPM limit")}</span>
+              <span className="mb-1.5 block text-sm font-medium">{t("Concurrency limit")}</span>
               <InputNumber
+                max={500}
                 min={1}
-                onChange={(value) => setRpm(normalizeOptionalPositiveInteger(value))}
-                placeholder={t("Unlimited")}
+                onChange={(value) => setConcurrency(normalizeOptionalPositiveInteger(value))}
+                placeholder={t("Group default")}
                 precision={0}
                 showClear
                 step={10}
                 style={{ width: "100%" }}
-                value={rpm ?? ""}
+                value={concurrency ?? ""}
               />
             </label>
           </div>

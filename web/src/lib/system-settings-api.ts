@@ -142,9 +142,7 @@ export interface UserGroupFormValues {
   name: string;
   description: string;
   enabled: boolean;
-  apiRpmLimit: number;
   apiConcurrencyLimit: number;
-  apiQuotaLimit: number;
   priceDiscountRatio: number;
   topupThreshold: number;
   autoUpgradeEnabled: boolean;
@@ -152,10 +150,10 @@ export interface UserGroupFormValues {
 
 type UserGroupResponse = Omit<
   UserGroupFormValues,
-  "apiRpmLimit" | "apiConcurrencyLimit" | "apiQuotaLimit" | "priceDiscountRatio" | "topupThreshold" | "autoUpgradeEnabled"
+  "apiConcurrencyLimit" | "priceDiscountRatio" | "topupThreshold" | "autoUpgradeEnabled"
 > & Partial<Pick<
   UserGroupFormValues,
-  "apiRpmLimit" | "apiConcurrencyLimit" | "apiQuotaLimit" | "autoUpgradeEnabled"
+  "apiConcurrencyLimit" | "autoUpgradeEnabled"
 >> & {
   priceDiscountRatio?: string;
   topupThreshold?: string;
@@ -164,9 +162,7 @@ type UserGroupResponse = Omit<
 function withGroupDefaults(group: UserGroupResponse): UserGroupFormValues {
   return {
     ...group,
-    apiRpmLimit: group.apiRpmLimit ?? 0,
     apiConcurrencyLimit: group.apiConcurrencyLimit ?? 0,
-    apiQuotaLimit: group.apiQuotaLimit ?? 0,
     priceDiscountRatio: Number(group.priceDiscountRatio ?? 1),
     topupThreshold: Number(group.topupThreshold ?? 0),
     autoUpgradeEnabled: group.autoUpgradeEnabled ?? false,
@@ -197,9 +193,7 @@ export async function updateUserGroup(groupId: number, data: Partial<UserGroupFo
       name: data.name,
       description: data.description,
       enabled: data.enabled,
-      apiRpmLimit: data.apiRpmLimit,
       apiConcurrencyLimit: data.apiConcurrencyLimit,
-      apiQuotaLimit: data.apiQuotaLimit,
       priceDiscountRatio: data.priceDiscountRatio === undefined ? undefined : String(data.priceDiscountRatio),
       topupThreshold: data.topupThreshold === undefined ? undefined : String(data.topupThreshold),
       autoUpgradeEnabled: data.autoUpgradeEnabled,

@@ -16,7 +16,6 @@ const (
 	apiKeyPrefix             = "rk-"
 	orderTokenPrefix         = "st_"
 	defaultAPIKeyConcurrency = 500
-	maxRateLimitPerMinute    = 10000
 	maxAPIKeyConcurrency     = 500
 )
 
@@ -28,7 +27,7 @@ type Repository interface {
 	UpdateAPIKey(ctx context.Context, cmd UpdateAPIKeyCommand) (*domain.APIKey, error)
 	DeleteAPIKey(ctx context.Context, userID uint, keyID uint, deletedAt time.Time) error
 	FindAPIKeyByPlain(ctx context.Context, plain string) (*domain.APIKey, error)
-	GetAPIKeyOwnerAccess(ctx context.Context, userID uint) (role string, active bool, err error)
+	GetAPIKeyOwnerAccess(ctx context.Context, userID uint) (role string, active bool, groupConcurrencyLimit int64, err error)
 	AddAPIKeyQuotaUsed(ctx context.Context, keyID uint, delta int64, lastUsedAt time.Time) error
 
 	IssueOrderToken(ctx context.Context, cmd IssueOrderTokenCommand) (*domain.OrderToken, error)
@@ -38,15 +37,19 @@ type Repository interface {
 	DisableOrderToken(ctx context.Context, orderNo string, reason string, disabledAt time.Time) error
 }
 
+type APIKeyConcurrencyGate interface {
+	Acquire(ctx context.Context, keyID uint, limit int, leaseID string) (active int, acquired bool, err error)
+	Release(ctx context.Context, keyID uint, leaseID string) error
+}
+
 type CreateAPIKeyRequest struct {
-	UserID             uint
-	Name               string
-	ExpireAt           *time.Time
-	RateLimitPerMinute *int
-	ConcurrencyLimit   *int
-	QuotaLimit         *int64
-	IdempotencyKey     string
-	RequestID          string
+	UserID           uint
+	Name             string
+	ExpireAt         *time.Time
+	ConcurrencyLimit *int
+	QuotaLimit       *int64
+	IdempotencyKey   string
+	RequestID        string
 }
 
 type CreateAPIKeyCommand struct {
@@ -55,7 +58,6 @@ type CreateAPIKeyCommand struct {
 	KeyPlain           string
 	KeyPrefix          string
 	ExpireAt           *time.Time
-	RateLimitPerMinute *int
 	ConcurrencyLimit   *int
 	QuotaLimit         *int64
 	IdempotencyKey     string
@@ -65,39 +67,36 @@ type CreateAPIKeyCommand struct {
 }
 
 type UpdateAPIKeyRequest struct {
-	UserID             uint
-	KeyID              uint
-	Name               *string
-	Enabled            *bool
-	ExpireAt           *time.Time
-	ExpireSet          bool
-	RateLimitPerMinute *int
-	RateLimitSet       bool
-	ConcurrencyLimit   *int
-	ConcurrencySet     bool
-	QuotaLimit         *int64
-	QuotaSet           bool
+	UserID           uint
+	KeyID            uint
+	Name             *string
+	Enabled          *bool
+	ExpireAt         *time.Time
+	ExpireSet        bool
+	ConcurrencyLimit *int
+	ConcurrencySet   bool
+	QuotaLimit       *int64
+	QuotaSet         bool
 }
 
 type UpdateAPIKeyCommand struct {
-	UserID             uint
-	KeyID              uint
-	Name               *string
-	Enabled            *bool
-	ExpireAt           *time.Time
-	ExpireSet          bool
-	RateLimitPerMinute *int
-	RateLimitSet       bool
-	ConcurrencyLimit   *int
-	ConcurrencySet     bool
-	QuotaLimit         *int64
-	QuotaSet           bool
+	UserID           uint
+	KeyID            uint
+	Name             *string
+	Enabled          *bool
+	ExpireAt         *time.Time
+	ExpireSet        bool
+	ConcurrencyLimit *int
+	ConcurrencySet   bool
+	QuotaLimit       *int64
+	QuotaSet         bool
 }
 
 type APIKeyAuthResult struct {
 	UserID   uint
 	APIKeyID uint
 	Role     string
+	LeaseID  string
 }
 
 type APIKeyUsage struct {
@@ -119,12 +118,12 @@ type UseCase struct {
 	now     func() time.Time
 }
 
-func NewUseCase(repo Repository) *UseCase {
+func NewUseCase(repo Repository, concurrencyGates ...APIKeyConcurrencyGate) *UseCase {
 	uc := &UseCase{
 		repo: repo,
 		now:  func() time.Time { return time.Now().UTC() },
 	}
-	uc.runtime = newAPIKeyRuntime(repo, uc.now)
+	uc.runtime = newAPIKeyRuntime(repo, uc.now, concurrencyGates...)
 	return uc
 }
 
@@ -136,9 +135,8 @@ func (uc *UseCase) CreateAPIKey(ctx context.Context, req CreateAPIKeyRequest) (*
 	if idempotencyKey == "" {
 		return nil, domain.ErrIdempotencyRequired
 	}
-	rateLimit, concurrency, err := normalizeAPIKeyLimits(req.RateLimitPerMinute, req.ConcurrencyLimit)
-	if err != nil {
-		return nil, err
+	if req.ConcurrencyLimit != nil && !validAPIKeyConcurrency(*req.ConcurrencyLimit) {
+		return nil, domain.ErrInvalidAPIKey
 	}
 	plain := nextCredential(apiKeyPrefix)
 	keyPrefix := credentialPrefix(plain)
@@ -146,15 +144,14 @@ func (uc *UseCase) CreateAPIKey(ctx context.Context, req CreateAPIKeyRequest) (*
 	if req.QuotaLimit != nil && *req.QuotaLimit <= 0 {
 		return nil, domain.ErrInvalidAPIKey
 	}
-	fingerprint := fingerprint("apikey.create", req.UserID, name, timeFingerprint(req.ExpireAt), intFingerprint(rateLimit), intFingerprint(concurrency), int64Fingerprint(req.QuotaLimit))
+	fingerprint := fingerprint("apikey.create", req.UserID, name, timeFingerprint(req.ExpireAt), "", intFingerprint(req.ConcurrencyLimit), int64Fingerprint(req.QuotaLimit))
 	key, _, err := uc.repo.CreateAPIKey(ctx, CreateAPIKeyCommand{
 		UserID:             req.UserID,
 		Name:               name,
 		KeyPlain:           plain,
 		KeyPrefix:          keyPrefix,
 		ExpireAt:           req.ExpireAt,
-		RateLimitPerMinute: rateLimit,
-		ConcurrencyLimit:   concurrency,
+		ConcurrencyLimit:   req.ConcurrencyLimit,
 		QuotaLimit:         req.QuotaLimit,
 		IdempotencyKey:     idempotencyKey,
 		RequestFingerprint: fingerprint,
@@ -209,9 +206,6 @@ func (uc *UseCase) UpdateAPIKey(ctx context.Context, req UpdateAPIKeyRequest) (*
 		normalized := domain.NormalizeAPIKeyName(*req.Name)
 		req.Name = &normalized
 	}
-	if req.RateLimitSet && req.RateLimitPerMinute != nil && !validRateLimitPerMinute(*req.RateLimitPerMinute) {
-		return nil, domain.ErrInvalidAPIKey
-	}
 	if req.ConcurrencyLimit != nil {
 		req.ConcurrencySet = true
 	}
@@ -226,7 +220,7 @@ func (uc *UseCase) UpdateAPIKey(ctx context.Context, req UpdateAPIKeyRequest) (*
 	}
 	key, err := uc.repo.UpdateAPIKey(ctx, UpdateAPIKeyCommand(req))
 	if err == nil {
-		uc.runtime.invalidateAll()
+		uc.runtime.updateKey(*key)
 	}
 	return key, err
 }
@@ -240,7 +234,7 @@ func (uc *UseCase) DeleteAPIKey(ctx context.Context, userID uint, keyID uint) er
 	}
 	err := uc.repo.DeleteAPIKey(ctx, userID, keyID, uc.now())
 	if err == nil {
-		uc.runtime.invalidateAll()
+		uc.runtime.invalidateKey(keyID)
 	}
 	return err
 }
@@ -258,19 +252,23 @@ func (uc *UseCase) BeginAPIKeyRequest(ctx context.Context, plain string) (*APIKe
 	if plain == "" {
 		return nil, domain.ErrInvalidAPIKey
 	}
-	key, err := uc.runtime.begin(ctx, plain)
+	leaseID := platform.NewUUIDV4String()
+	key, err := uc.runtime.begin(ctx, plain, leaseID)
 	if err != nil {
 		return nil, err
 	}
-	return &APIKeyAuthResult{UserID: key.UserID, APIKeyID: key.ID, Role: key.OwnerRole}, nil
+	return &APIKeyAuthResult{UserID: key.UserID, APIKeyID: key.ID, Role: key.OwnerRole, LeaseID: leaseID}, nil
 }
 
-func (uc *UseCase) FinishAPIKeyRequest(_ context.Context, keyID uint) error {
+func (uc *UseCase) FinishAPIKeyRequest(ctx context.Context, keyID uint, leaseIDs ...string) error {
 	if keyID == 0 {
 		return nil
 	}
-	uc.runtime.finish(keyID)
-	return nil
+	leaseID := ""
+	if len(leaseIDs) > 0 {
+		leaseID = leaseIDs[0]
+	}
+	return uc.runtime.finishRequest(ctx, keyID, leaseID)
 }
 
 func (uc *UseCase) IssueOrderToken(ctx context.Context, orderNo string, expireAt *time.Time) (*domain.OrderToken, error) {
@@ -375,28 +373,15 @@ func intFingerprint(value *int) string {
 	return fmt.Sprintf("%d", *value)
 }
 
-func normalizeAPIKeyLimits(rateLimitPerMinute *int, concurrencyLimit *int) (*int, *int, error) {
-	if rateLimitPerMinute != nil && !validRateLimitPerMinute(*rateLimitPerMinute) {
-		return nil, nil, domain.ErrInvalidAPIKey
+func effectiveAPIKeyConcurrency(value *int, groupLimit int64) int {
+	limit := defaultAPIKeyConcurrency
+	if value != nil {
+		limit = *value
 	}
-	if concurrencyLimit == nil {
-		return rateLimitPerMinute, nil, nil
+	if groupLimit > 0 && groupLimit < int64(limit) {
+		return int(groupLimit)
 	}
-	if !validAPIKeyConcurrency(*concurrencyLimit) {
-		return nil, nil, domain.ErrInvalidAPIKey
-	}
-	return rateLimitPerMinute, concurrencyLimit, nil
-}
-
-func effectiveAPIKeyConcurrency(value *int) int {
-	if value == nil {
-		return defaultAPIKeyConcurrency
-	}
-	return *value
-}
-
-func validRateLimitPerMinute(value int) bool {
-	return value > 0 && value <= maxRateLimitPerMinute
+	return limit
 }
 
 func validAPIKeyConcurrency(value int) bool {

@@ -38,6 +38,7 @@ const { Text } = Typography;
 
 interface ApiKeyRecord {
   createdAt: string;
+  concurrencyLimit: number | null;
   enabled: boolean;
   expiresAt: string | null;
   id: number;
@@ -45,7 +46,6 @@ interface ApiKeyRecord {
   name: string;
   quota: number | null;
   quotaUsed: number;
-  rpmLimit: number | null;
   token: string;
 }
 
@@ -74,6 +74,7 @@ function toExpireAt(value: string | null) {
 function toApiKeyRecord(item: APIKeyResponse): ApiKeyRecord {
   return {
     createdAt: formatDateTime(item.createdAt),
+    concurrencyLimit: item.concurrencyLimit ?? null,
     enabled: item.enabled,
     expiresAt: toDateInput(item.expireAt),
     id: item.id,
@@ -81,7 +82,6 @@ function toApiKeyRecord(item: APIKeyResponse): ApiKeyRecord {
     name: item.name || item.keyPrefix,
     quota: item.quotaLimit ?? null,
     quotaUsed: item.quotaUsed,
-    rpmLimit: item.rateLimitPerMinute ?? null,
     token: item.keyPlain || item.keyPrefix,
   };
 }
@@ -124,7 +124,7 @@ export function ApiKeyPanel() {
   const [apiKeyName, setApiKeyName] = useState("");
   const [apiKeyExpiresAt, setApiKeyExpiresAt] = useState<string | null>(null);
   const [apiKeyQuota, setApiKeyQuota] = useState<number | null>(null);
-  const [apiKeyRpmLimit, setApiKeyRpmLimit] = useState<number | null>(null);
+  const [apiKeyConcurrencyLimit, setApiKeyConcurrencyLimit] = useState<number | null>(null);
 
   const refreshAPIKeys = useCallback(async () => {
     setLoading(true);
@@ -147,7 +147,7 @@ export function ApiKeyPanel() {
     setApiKeyName("");
     setApiKeyExpiresAt(null);
     setApiKeyQuota(null);
-    setApiKeyRpmLimit(null);
+    setApiKeyConcurrencyLimit(null);
     setApiKeyModalOpen(true);
   };
 
@@ -156,7 +156,7 @@ export function ApiKeyPanel() {
     setApiKeyName(record.name);
     setApiKeyExpiresAt(record.expiresAt);
     setApiKeyQuota(record.quota);
-    setApiKeyRpmLimit(record.rpmLimit);
+    setApiKeyConcurrencyLimit(record.concurrencyLimit);
     setApiKeyModalOpen(true);
   };
 
@@ -166,7 +166,7 @@ export function ApiKeyPanel() {
     setApiKeyName("");
     setApiKeyExpiresAt(null);
     setApiKeyQuota(null);
-    setApiKeyRpmLimit(null);
+    setApiKeyConcurrencyLimit(null);
   };
 
   const saveApiKey = async () => {
@@ -183,7 +183,7 @@ export function ApiKeyPanel() {
           expireAt: toExpireAt(apiKeyExpiresAt),
           name: nextName,
           quotaLimit: apiKeyQuota,
-          rateLimitPerMinute: apiKeyRpmLimit,
+          concurrencyLimit: apiKeyConcurrencyLimit,
         });
         setApiKeys((items) =>
           items.map((item) =>
@@ -196,7 +196,7 @@ export function ApiKeyPanel() {
           expireAt: toExpireAt(apiKeyExpiresAt),
           name: nextName,
           quotaLimit: apiKeyQuota,
-          rateLimitPerMinute: apiKeyRpmLimit,
+          concurrencyLimit: apiKeyConcurrencyLimit,
         });
         setApiKeys((items) => [toApiKeyRecord(created), ...items]);
         Toast.success(t("API key created."));
@@ -381,12 +381,12 @@ export function ApiKeyPanel() {
                     </div>
                     <div className="account-api-key-limit">
                       <Text size="small" type="tertiary">
-                        {t("RPM limit")}
+                        {t("Concurrency limit")}
                       </Text>
                       <Text size="small" strong>
-                        {record.rpmLimit == null
-                          ? t("Unlimited")
-                          : record.rpmLimit.toLocaleString()}
+                        {record.concurrencyLimit == null
+                          ? t("Group default")
+                          : record.concurrencyLimit.toLocaleString()}
                       </Text>
                     </div>
                   </div>
@@ -454,20 +454,21 @@ export function ApiKeyPanel() {
               />
             </div>
             <div>
-              <Text strong>{t("RPM limit")}</Text>
+              <Text strong>{t("Concurrency limit")}</Text>
               <InputNumber
                 className="!rounded-lg mt-2"
+                max={500}
                 min={1}
                 onChange={(value) =>
-                  setApiKeyRpmLimit(normalizeOptionalPositiveInteger(value))
+                  setApiKeyConcurrencyLimit(normalizeOptionalPositiveInteger(value))
                 }
                 precision={0}
-                placeholder={t("Unlimited")}
+                placeholder={t("Group default")}
                 showClear
                 size="large"
                 step={10}
                 style={{ width: "100%" }}
-                value={apiKeyRpmLimit ?? ""}
+                value={apiKeyConcurrencyLimit ?? ""}
               />
             </div>
           </div>

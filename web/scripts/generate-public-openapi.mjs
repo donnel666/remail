@@ -105,7 +105,6 @@ const schemas = {
       name: { type: "string", example: "订单服务专用密钥" },
       keyPrefix: { type: "string", example: "rk-550e8400-e2" },
       enabled: { type: "boolean", example: true },
-      rateLimitPerMinute: nullable("integer"),
       concurrencyLimit: nullable("integer"),
       quotaLimit: nullable("integer"),
       quotaUsed: { type: "integer", example: 372 },
@@ -789,7 +788,7 @@ const spec = {
         tags: ["Core"],
         operationId: "getApiKeyProfile",
         summary: "查询当前 API Key",
-        description: "返回当前 API Key 的额度、RPM、并发、过期时间和使用状态。",
+        description: "返回当前 API Key 的额度、并发、过期时间和使用状态。",
         security: apiKeySecurity,
         responses: {
           "200": ok(ref("APIKeyProfileResponse")),

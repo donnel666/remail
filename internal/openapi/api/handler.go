@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -29,19 +30,17 @@ func (h *Handler) PostAPIKey(c *gin.Context) {
 		return
 	}
 	var req KeyCreateRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request body.", "requestId": middleware.GetRequestID(c)})
+	if _, ok := decodeKeyRequest(c, &req); !ok {
 		return
 	}
 	item, err := h.mod.UseCase.CreateAPIKey(c.Request.Context(), openapiapp.CreateAPIKeyRequest{
-		UserID:             userID,
-		Name:               req.Name,
-		ExpireAt:           req.ExpireAt,
-		RateLimitPerMinute: req.RateLimitPerMinute,
-		ConcurrencyLimit:   req.ConcurrencyLimit,
-		QuotaLimit:         req.QuotaLimit,
-		IdempotencyKey:     c.GetHeader("Idempotency-Key"),
-		RequestID:          middleware.GetRequestID(c),
+		UserID:           userID,
+		Name:             req.Name,
+		ExpireAt:         req.ExpireAt,
+		ConcurrencyLimit: req.ConcurrencyLimit,
+		QuotaLimit:       req.QuotaLimit,
+		IdempotencyKey:   c.GetHeader("Idempotency-Key"),
+		RequestID:        middleware.GetRequestID(c),
 	})
 	if err != nil {
 		writeOpenAPIError(c, err)
@@ -152,18 +151,16 @@ func (h *Handler) PatchAPIKey(c *gin.Context) {
 		return
 	}
 	item, err := h.mod.UseCase.UpdateAPIKey(c.Request.Context(), openapiapp.UpdateAPIKeyRequest{
-		UserID:             userID,
-		KeyID:              keyID,
-		Name:               req.Name,
-		Enabled:            req.Enabled,
-		ExpireAt:           req.ExpireAt,
-		ExpireSet:          req.ExpireSet || req.ExpireAt != nil,
-		RateLimitPerMinute: req.RateLimitPerMinute,
-		RateLimitSet:       req.RateLimitSet,
-		ConcurrencyLimit:   req.ConcurrencyLimit,
-		ConcurrencySet:     req.ConcurrencySet,
-		QuotaLimit:         req.QuotaLimit,
-		QuotaSet:           req.QuotaSet,
+		UserID:           userID,
+		KeyID:            keyID,
+		Name:             req.Name,
+		Enabled:          req.Enabled,
+		ExpireAt:         req.ExpireAt,
+		ExpireSet:        req.ExpireSet || req.ExpireAt != nil,
+		ConcurrencyLimit: req.ConcurrencyLimit,
+		ConcurrencySet:   req.ConcurrencySet,
+		QuotaLimit:       req.QuotaLimit,
+		QuotaSet:         req.QuotaSet,
 	})
 	if err != nil {
 		writeOpenAPIError(c, err)
@@ -176,13 +173,8 @@ func (h *Handler) PatchAPIKey(c *gin.Context) {
 // were present so callers can distinguish "clear" from "leave unchanged".
 func decodeKeyPatchRequest(c *gin.Context) (KeyPatchRequest, bool) {
 	var req KeyPatchRequest
-	body, err := io.ReadAll(c.Request.Body)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request body.", "requestId": middleware.GetRequestID(c)})
-		return req, false
-	}
-	if err := json.Unmarshal(body, &req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request body.", "requestId": middleware.GetRequestID(c)})
+	body, ok := decodeKeyRequest(c, &req)
+	if !ok {
 		return req, false
 	}
 	var raw map[string]json.RawMessage
@@ -193,9 +185,6 @@ func decodeKeyPatchRequest(c *gin.Context) (KeyPatchRequest, bool) {
 	if _, exists := raw["expireAt"]; exists {
 		req.ExpireSet = true
 	}
-	if _, exists := raw["rateLimitPerMinute"]; exists {
-		req.RateLimitSet = true
-	}
 	if _, exists := raw["concurrencyLimit"]; exists {
 		req.ConcurrencySet = true
 	}
@@ -203,6 +192,23 @@ func decodeKeyPatchRequest(c *gin.Context) (KeyPatchRequest, bool) {
 		req.QuotaSet = true
 	}
 	return req, true
+}
+
+func decodeKeyRequest(c *gin.Context, dst any) ([]byte, bool) {
+	body, err := io.ReadAll(c.Request.Body)
+	if err == nil {
+		decoder := json.NewDecoder(bytes.NewReader(body))
+		decoder.DisallowUnknownFields()
+		err = decoder.Decode(dst)
+		if err == nil {
+			err = decoder.Decode(&struct{}{})
+			if errors.Is(err, io.EOF) {
+				return body, true
+			}
+		}
+	}
+	c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request body.", "requestId": middleware.GetRequestID(c)})
+	return nil, false
 }
 
 // --- Admin per-user API keys (iam:user:operate) ---
@@ -236,8 +242,7 @@ func (h *Handler) PostAdminUserAPIKey(c *gin.Context) {
 		return
 	}
 	var req KeyCreateRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request body.", "requestId": middleware.GetRequestID(c)})
+	if _, ok := decodeKeyRequest(c, &req); !ok {
 		return
 	}
 	// Admin-initiated creation is not client-retried, so synthesize an
@@ -247,14 +252,13 @@ func (h *Handler) PostAdminUserAPIKey(c *gin.Context) {
 		idempotencyKey = platform.NewUUIDV4CompactUpper()
 	}
 	item, err := h.mod.UseCase.CreateAPIKey(c.Request.Context(), openapiapp.CreateAPIKeyRequest{
-		UserID:             userID,
-		Name:               req.Name,
-		ExpireAt:           req.ExpireAt,
-		RateLimitPerMinute: req.RateLimitPerMinute,
-		ConcurrencyLimit:   req.ConcurrencyLimit,
-		QuotaLimit:         req.QuotaLimit,
-		IdempotencyKey:     idempotencyKey,
-		RequestID:          middleware.GetRequestID(c),
+		UserID:           userID,
+		Name:             req.Name,
+		ExpireAt:         req.ExpireAt,
+		ConcurrencyLimit: req.ConcurrencyLimit,
+		QuotaLimit:       req.QuotaLimit,
+		IdempotencyKey:   idempotencyKey,
+		RequestID:        middleware.GetRequestID(c),
 	})
 	if err != nil {
 		writeOpenAPIError(c, err)
@@ -278,18 +282,16 @@ func (h *Handler) PatchAdminUserAPIKey(c *gin.Context) {
 		return
 	}
 	item, err := h.mod.UseCase.UpdateAPIKey(c.Request.Context(), openapiapp.UpdateAPIKeyRequest{
-		UserID:             userID,
-		KeyID:              keyID,
-		Name:               req.Name,
-		Enabled:            req.Enabled,
-		ExpireAt:           req.ExpireAt,
-		ExpireSet:          req.ExpireSet || req.ExpireAt != nil,
-		RateLimitPerMinute: req.RateLimitPerMinute,
-		RateLimitSet:       req.RateLimitSet,
-		ConcurrencyLimit:   req.ConcurrencyLimit,
-		ConcurrencySet:     req.ConcurrencySet,
-		QuotaLimit:         req.QuotaLimit,
-		QuotaSet:           req.QuotaSet,
+		UserID:           userID,
+		KeyID:            keyID,
+		Name:             req.Name,
+		Enabled:          req.Enabled,
+		ExpireAt:         req.ExpireAt,
+		ExpireSet:        req.ExpireSet || req.ExpireAt != nil,
+		ConcurrencyLimit: req.ConcurrencyLimit,
+		ConcurrencySet:   req.ConcurrencySet,
+		QuotaLimit:       req.QuotaLimit,
+		QuotaSet:         req.QuotaSet,
 	})
 	if err != nil {
 		writeOpenAPIError(c, err)
@@ -343,20 +345,19 @@ func parseUintParam(c *gin.Context, name string) (uint, bool) {
 
 func apiKeyResponse(item domain.APIKey, includePlain bool) KeyResponse {
 	resp := KeyResponse{
-		ID:                 item.ID,
-		Name:               item.Name,
-		KeyPrefix:          item.KeyPrefix,
-		Enabled:            item.Enabled,
-		RateLimitPerMinute: item.RateLimitPerMinute,
-		ConcurrencyLimit:   item.ConcurrencyLimit,
-		QuotaLimit:         item.QuotaLimit,
-		QuotaUsed:          item.QuotaUsed,
-		RemainingQuota:     remainingAPIKeyQuota(item),
-		ActiveRequests:     item.ActiveRequests,
-		ExpireAt:           item.ExpireAt,
-		LastUsedAt:         item.LastUsedAt,
-		CreatedAt:          item.CreatedAt,
-		UpdatedAt:          item.UpdatedAt,
+		ID:               item.ID,
+		Name:             item.Name,
+		KeyPrefix:        item.KeyPrefix,
+		Enabled:          item.Enabled,
+		ConcurrencyLimit: item.ConcurrencyLimit,
+		QuotaLimit:       item.QuotaLimit,
+		QuotaUsed:        item.QuotaUsed,
+		RemainingQuota:   remainingAPIKeyQuota(item),
+		ActiveRequests:   item.ActiveRequests,
+		ExpireAt:         item.ExpireAt,
+		LastUsedAt:       item.LastUsedAt,
+		CreatedAt:        item.CreatedAt,
+		UpdatedAt:        item.UpdatedAt,
 	}
 	if includePlain {
 		resp.KeyPlain = item.KeyPlain
@@ -375,8 +376,6 @@ func writeOpenAPIError(c *gin.Context, err error) {
 		c.JSON(http.StatusNotFound, gin.H{"message": "API key not found.", "requestId": requestID})
 	case errors.Is(err, domain.ErrInvalidAPIKey), errors.Is(err, domain.ErrInvalidCredentialFilter):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Invalid API key request.", "requestId": requestID})
-	case errors.Is(err, domain.ErrAPIKeyRateLimited):
-		c.JSON(http.StatusTooManyRequests, gin.H{"message": "Too many requests.", "requestId": requestID})
 	case errors.Is(err, domain.ErrAPIKeyQuotaExceeded):
 		c.JSON(http.StatusTooManyRequests, gin.H{"message": "API key quota exceeded.", "requestId": requestID})
 	case errors.Is(err, domain.ErrAPIKeyConcurrencyLimit):

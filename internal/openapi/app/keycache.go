@@ -15,8 +15,9 @@ const (
 )
 
 type apiKeyRuntime struct {
-	repo Repository
-	now  func() time.Time
+	repo            Repository
+	concurrencyGate APIKeyConcurrencyGate
+	now             func() time.Time
 
 	mu      sync.RWMutex
 	byPlain map[string]*apiKeyState
@@ -35,20 +36,12 @@ type apiKeyState struct {
 	loadedAt time.Time
 
 	active int
-	window apiKeySlidingWindow
 
 	quotaDelta int64
 	lastUsedAt time.Time
 }
 
-type apiKeySlidingWindow struct {
-	currentBucket int64
-	currentCount  int
-	prevBucket    int64
-	prevCount     int
-}
-
-func newAPIKeyRuntime(repo Repository, now func() time.Time) *apiKeyRuntime {
+func newAPIKeyRuntime(repo Repository, now func() time.Time, concurrencyGates ...APIKeyConcurrencyGate) *apiKeyRuntime {
 	rt := &apiKeyRuntime{
 		repo:    repo,
 		now:     now,
@@ -57,11 +50,14 @@ func newAPIKeyRuntime(repo Repository, now func() time.Time) *apiKeyRuntime {
 		stop:    make(chan struct{}),
 		done:    make(chan struct{}),
 	}
+	if len(concurrencyGates) > 0 {
+		rt.concurrencyGate = concurrencyGates[0]
+	}
 	go rt.flushLoop()
 	return rt
 }
 
-func (rt *apiKeyRuntime) begin(ctx context.Context, plain string) (*domain.APIKey, error) {
+func (rt *apiKeyRuntime) begin(ctx context.Context, plain string, leaseIDs ...string) (*domain.APIKey, error) {
 	state, err := rt.stateForPlain(ctx, plain)
 	if err != nil {
 		return nil, err
@@ -78,7 +74,7 @@ func (rt *apiKeyRuntime) begin(ctx context.Context, plain string) (*domain.APIKe
 	if !meta.Enabled {
 		return nil, domain.ErrAPIKeyDisabled
 	}
-	ownerRole, active, err := rt.repo.GetAPIKeyOwnerAccess(ctx, meta.UserID)
+	ownerRole, active, groupConcurrencyLimit, err := rt.repo.GetAPIKeyOwnerAccess(ctx, meta.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -90,37 +86,76 @@ func (rt *apiKeyRuntime) begin(ctx context.Context, plain string) (*domain.APIKe
 	if meta.ExpireAt != nil && !meta.ExpireAt.After(now) {
 		return nil, domain.ErrAPIKeyExpired
 	}
-	if state.active >= effectiveAPIKeyConcurrency(meta.ConcurrencyLimit) {
-		return nil, domain.ErrAPIKeyConcurrencyLimit
-	}
-	if meta.RateLimitPerMinute != nil && !state.window.allow(now, *meta.RateLimitPerMinute) {
-		return nil, domain.ErrAPIKeyRateLimited
-	}
 	if meta.QuotaLimit != nil && meta.QuotaUsed+state.quotaDelta >= *meta.QuotaLimit {
 		return nil, domain.ErrAPIKeyQuotaExceeded
+	}
+	limit := effectiveAPIKeyConcurrency(meta.ConcurrencyLimit, groupConcurrencyLimit)
+	globalActive := 0
+	if rt.concurrencyGate == nil {
+		if state.active >= limit {
+			return nil, domain.ErrAPIKeyConcurrencyLimit
+		}
+	} else {
+		leaseID := ""
+		if len(leaseIDs) > 0 {
+			leaseID = leaseIDs[0]
+		}
+		var acquired bool
+		globalActive, acquired, err = rt.concurrencyGate.Acquire(ctx, meta.ID, limit, leaseID)
+		if err != nil {
+			return nil, err
+		}
+		if !acquired {
+			return nil, domain.ErrAPIKeyConcurrencyLimit
+		}
 	}
 	state.active++
 	state.quotaDelta++
 	state.lastUsedAt = now
-	return cloneAPIKey(state.overlayLocked(now)), nil
+	result := state.overlayLocked(now)
+	if rt.concurrencyGate != nil {
+		result.ActiveRequests = globalActive
+	}
+	return cloneAPIKey(result), nil
 }
 
 func (rt *apiKeyRuntime) finish(keyID uint) {
+	_ = rt.finishRequest(context.Background(), keyID, "")
+}
+
+func (rt *apiKeyRuntime) finishRequest(ctx context.Context, keyID uint, leaseID string) error {
 	state := rt.stateForID(keyID)
+	if state != nil {
+		state.mu.Lock()
+		if state.active > 0 {
+			state.active--
+		}
+		state.mu.Unlock()
+	}
+	if rt.concurrencyGate != nil {
+		return rt.concurrencyGate.Release(ctx, keyID, leaseID)
+	}
+	return nil
+}
+
+func (rt *apiKeyRuntime) updateKey(key domain.APIKey) {
+	state := rt.stateForID(key.ID)
 	if state == nil {
 		return
 	}
 	state.mu.Lock()
-	if state.active > 0 {
-		state.active--
-	}
+	key.OwnerRole = state.meta.OwnerRole
+	state.meta = key
+	state.loadedAt = rt.now()
 	state.mu.Unlock()
 }
 
-func (rt *apiKeyRuntime) invalidateAll() {
+func (rt *apiKeyRuntime) invalidateKey(keyID uint) {
 	rt.mu.Lock()
-	rt.byPlain = make(map[string]*apiKeyState)
-	rt.byID = make(map[uint]*apiKeyState)
+	if state := rt.byID[keyID]; state != nil {
+		delete(rt.byPlain, state.plain)
+		delete(rt.byID, keyID)
+	}
 	rt.mu.Unlock()
 }
 
@@ -278,34 +313,6 @@ func (rt *apiKeyRuntime) flushQuota(ctx context.Context) error {
 		state.mu.Unlock()
 	}
 	return errors.Join(errs...)
-}
-
-func (w *apiKeySlidingWindow) allow(now time.Time, limit int) bool {
-	if limit <= 0 {
-		return true
-	}
-	bucket := now.Unix() / 60
-	if w.currentBucket != bucket {
-		if w.currentBucket == bucket-1 {
-			w.prevBucket = w.currentBucket
-			w.prevCount = w.currentCount
-		} else {
-			w.prevBucket = 0
-			w.prevCount = 0
-		}
-		w.currentBucket = bucket
-		w.currentCount = 0
-	}
-	elapsed := now.Unix() % 60
-	effective := float64(w.currentCount)
-	if w.prevBucket == bucket-1 {
-		effective += float64(w.prevCount) * float64(60-elapsed) / 60.0
-	}
-	if effective >= float64(limit) {
-		return false
-	}
-	w.currentCount++
-	return true
 }
 
 func cloneAPIKey(key domain.APIKey) *domain.APIKey {

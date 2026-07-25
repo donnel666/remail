@@ -3394,9 +3394,7 @@ export interface components {
             name?: string;
             /** Format: date-time */
             expireAt?: string | null;
-            /** @description Empty means unlimited requests per minute. */
-            rateLimitPerMinute?: number | null;
-            /** @description Empty uses the system default of 500 concurrent requests. */
+            /** @description Empty inherits the user's group limit. Explicit values are still capped by the group limit; a group limit of 0 falls back to the system default of 500. */
             concurrencyLimit?: number | null;
             /**
              * Format: int64
@@ -3409,7 +3407,7 @@ export interface components {
             enabled?: boolean;
             /** Format: date-time */
             expireAt?: string | null;
-            rateLimitPerMinute?: number | null;
+            /** @description Empty inherits the user's group limit. Explicit values are still capped by the group limit; a group limit of 0 falls back to the system default of 500. */
             concurrencyLimit?: number | null;
             /** Format: int64 */
             quotaLimit?: number | null;
@@ -3421,7 +3419,6 @@ export interface components {
             /** @description Plain API key returned to its owner on create, list, and detail views. */
             keyPlain?: string;
             enabled: boolean;
-            rateLimitPerMinute: number | null;
             concurrencyLimit: number | null;
             /** Format: int64 */
             quotaLimit?: number | null;
@@ -4134,12 +4131,11 @@ export interface components {
             name: string;
             description: string;
             enabled: boolean;
-            /** Format: int64 */
-            apiRpmLimit: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Maximum concurrent requests for each API key in this group. Zero applies no group cap and uses the API key or system default limit.
+             */
             apiConcurrencyLimit: number;
-            /** Format: int64 */
-            apiQuotaLimit: number;
             priceDiscountRatio: components["schemas"]["UserGroupDiscountRatio"];
             topupThreshold: components["schemas"]["NonNegativeLedgerAmount"];
             autoUpgradeEnabled: boolean;
@@ -4154,19 +4150,10 @@ export interface components {
             enabled: boolean;
             /**
              * Format: int64
-             * @default 60
-             */
-            apiRpmLimit: number;
-            /**
-             * Format: int64
+             * @description Maximum concurrent requests for each API key in this group. Zero applies no group cap and uses the API key or system default limit.
              * @default 3
              */
             apiConcurrencyLimit: number;
-            /**
-             * Format: int64
-             * @default 10000
-             */
-            apiQuotaLimit: number;
             /** @default 1.00 */
             priceDiscountRatio: components["schemas"]["UserGroupDiscountRatio"];
             /** @default 0.00 */
@@ -4178,12 +4165,11 @@ export interface components {
             name?: string;
             description?: string;
             enabled?: boolean;
-            /** Format: int64 */
-            apiRpmLimit?: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Maximum concurrent requests for each API key in this group. Zero applies no group cap and uses the API key or system default limit.
+             */
             apiConcurrencyLimit?: number;
-            /** Format: int64 */
-            apiQuotaLimit?: number;
             priceDiscountRatio?: components["schemas"]["UserGroupDiscountRatio"];
             topupThreshold?: components["schemas"]["NonNegativeLedgerAmount"];
             autoUpgradeEnabled?: boolean;

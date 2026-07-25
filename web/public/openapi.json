@@ -195,12 +195,6 @@
             "type": "boolean",
             "example": true
           },
-          "rateLimitPerMinute": {
-            "type": [
-              "integer",
-              "null"
-            ]
-          },
           "concurrencyLimit": {
             "type": [
               "integer",
@@ -1831,7 +1825,7 @@
         ],
         "operationId": "getApiKeyProfile",
         "summary": "查询当前 API Key",
-        "description": "返回当前 API Key 的额度、RPM、并发、过期时间和使用状态。",
+        "description": "返回当前 API Key 的额度、并发、过期时间和使用状态。",
         "security": [
           {
             "remailApiKey": []

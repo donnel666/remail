@@ -3047,7 +3047,7 @@ func TestAdminUserGroupCapabilitiesRoundTrip(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/admin/users/groups", strings.NewReader(`{
 		"code":"vip","name":"VIP","enabled":false,
-		"apiRpmLimit":600,"apiConcurrencyLimit":12,"apiQuotaLimit":500000,
+		"apiConcurrencyLimit":12,
 		"priceDiscountRatio":"0.9","topupThreshold":"100.50","autoUpgradeEnabled":true
 	}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -3058,7 +3058,7 @@ func TestAdminUserGroupCapabilitiesRoundTrip(t *testing.T) {
 		Group UserGroupResponse `json:"group"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &created))
-	require.Equal(t, int64(600), created.Group.APIRPMLimit)
+	require.Equal(t, int64(12), created.Group.APIConcurrencyLimit)
 	require.Equal(t, "0.90", created.Group.PriceDiscountRatio)
 	require.Equal(t, "100.50", created.Group.TopupThreshold)
 	require.True(t, created.Group.AutoUpgradeEnabled)
@@ -3066,7 +3066,7 @@ func TestAdminUserGroupCapabilitiesRoundTrip(t *testing.T) {
 
 	w = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPatch, fmt.Sprintf("/v1/admin/users/groups/%d", created.Group.ID), strings.NewReader(`{
-		"apiRpmLimit":0,"apiConcurrencyLimit":0,"apiQuotaLimit":0,
+		"apiConcurrencyLimit":0,
 		"priceDiscountRatio":"0.75","topupThreshold":"0","autoUpgradeEnabled":false
 	}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -3077,9 +3077,7 @@ func TestAdminUserGroupCapabilitiesRoundTrip(t *testing.T) {
 		Group UserGroupResponse `json:"group"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &updated))
-	require.Zero(t, updated.Group.APIRPMLimit)
 	require.Zero(t, updated.Group.APIConcurrencyLimit)
-	require.Zero(t, updated.Group.APIQuotaLimit)
 	require.Equal(t, "0.75", updated.Group.PriceDiscountRatio)
 	require.Equal(t, "0.00", updated.Group.TopupThreshold)
 	require.False(t, updated.Group.AutoUpgradeEnabled)
