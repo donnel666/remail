@@ -1085,6 +1085,7 @@ func TestBillingRepoRechargeCallbackAndSchedulingMySQL(t *testing.T) {
 	require.Zero(t, claimedModel.QueryAttempts)
 
 	require.NoError(t, repo.RecordRechargeQuery(ctx, "RC-CALLBACK-FIRST", generation, now))
+	claimedModel = RechargeModel{}
 	require.NoError(t, db.First(&claimedModel, "recharge_no = ?", "RC-CALLBACK-FIRST").Error)
 	require.Nil(t, claimedModel.QueryLeaseUntil)
 	require.Equal(t, 1, claimedModel.QueryAttempts)

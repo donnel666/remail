@@ -1749,6 +1749,7 @@ INSERT INTO orders(
 func TestConcurrentAPIKeyOrderReplayDoesNotDuplicateFactsMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	seedTradeBase(t, db, "microsoft")
+	require.NoError(t, db.Exec("UPDATE user_groups SET api_concurrency_limit = 50 WHERE id = 1").Error)
 	seedTradeMicrosoftResources(t, db, 1, 1000, 1, true)
 	creditBuyer(t, db, 2, "10.00")
 

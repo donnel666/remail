@@ -288,8 +288,8 @@ func (stub *rechargeRepoStub) CreateRecharge(context.Context, CreateRechargeComm
 }
 
 func (stub *rechargeRepoStub) GetRechargeByNo(context.Context, string) (*domain.Recharge, error) {
-	copy := stub.recharge
-	return &copy, nil
+	recharge := stub.recharge
+	return &recharge, nil
 }
 
 func (stub *rechargeRepoStub) MarkRechargeCallback(_ context.Context, rechargeNo string, callbackAt time.Time) (bool, error) {
@@ -316,8 +316,8 @@ func (stub *rechargeRepoStub) ClaimRechargeQuery(context.Context, string, time.T
 	if config.Version == "" {
 		config = validRechargeConfig()
 	}
-	copy := stub.recharge
-	return &copy, config, 1, true, nil
+	recharge := stub.recharge
+	return &recharge, config, 1, true, nil
 }
 
 func (stub *rechargeRepoStub) RecordRechargeQuery(context.Context, string, int, time.Time) error {
