@@ -62,10 +62,10 @@ func (m *MailTransportModule) SetBackgroundExecutionGate(gate BackgroundExecutio
 	}
 }
 
-// bindingDomainLister sources the auxiliary/recovery-mailbox domains
-// (domain_resources.purpose='binding') injected into msacl.
+// bindingDomainLister sources the auxiliary/recovery-mailbox domains and the
+// subset allowed to allocate new bindings.
 type bindingDomainLister interface {
-	ListBindingDomains(ctx context.Context) ([]string, error)
+	ListBindingDomains(ctx context.Context) ([]string, []string, error)
 }
 
 // microsoftAutoRefreshLister sources Microsoft resources whose refresh token is
@@ -106,13 +106,13 @@ func refreshAuxiliaryDomainsWithin(ctx context.Context, lister bindingDomainList
 		return
 	}
 	runDispatcherSeed(ctx, timeout, func(seedCtx context.Context) {
-		domains, err := lister.ListBindingDomains(seedCtx)
+		domains, allocationDomains, err := lister.ListBindingDomains(seedCtx)
 		if err != nil {
 			slog.Warn("load auxiliary binding domains failed", "error", err)
 			return
 		}
-		msacl.SetAuxiliaryDomains(domains)
-		slog.Info("auxiliary binding domains loaded", "count", len(domains))
+		msacl.SetAuxiliaryDomainPolicy(domains, allocationDomains)
+		slog.Info("auxiliary binding domains loaded", "count", len(domains), "allocation_count", len(allocationDomains))
 	})
 }
 

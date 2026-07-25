@@ -13659,6 +13659,7 @@ components:
         - domain
         - mailServerId
         - purpose
+        - allowNewBindings
         - status
         - createdAt
       properties:
@@ -13672,6 +13673,9 @@ components:
           type: string
           enum: [not_sale, sale, binding]
           description: Domain resource purpose. not_sale is user-side private/unavailable for sale; sale is public supply; binding is displayed as auxiliary mailbox in Chinese.
+        allowNewBindings:
+          type: boolean
+          description: For purpose=binding only. When true, the domain may generate addresses for unbound Microsoft accounts; false only matches inbound mail for existing bindings.
         status:
           type: string
           description: Domain resource status (pending/validating/normal/abnormal/disabled/deleted)
@@ -15229,6 +15233,9 @@ components:
           type: string
           enum: [not_sale, binding]
           description: Defaults to not_sale. Domain creation does not accept sale; suppliers publish private domains through the resource publish endpoint. binding is admin-only and displayed as auxiliary mailbox in Chinese.
+        allowNewBindings:
+          type: boolean
+          description: For purpose=binding only. Defaults to false; true enables new auxiliary-mailbox generation, while false keeps existing-binding mail matching only.
       additionalProperties: false
 
     AdminDomainDnsStatusRequest:
@@ -15255,6 +15262,9 @@ components:
         purpose:
           type: string
           enum: [not_sale, sale, binding]
+        allowNewBindings:
+          type: boolean
+          description: For purpose=binding only. Defaults to false; true enables new auxiliary-mailbox generation, while false keeps existing-binding mail matching only.
         mailServerId:
           type: integer
           minimum: 1
@@ -15270,6 +15280,9 @@ components:
         purpose:
           type: string
           enum: [not_sale, sale, binding]
+        allowNewBindings:
+          type: boolean
+          description: For purpose=binding only. Enables or disables new auxiliary-mailbox generation.
         mailServerId:
           type: integer
           minimum: 1
@@ -15453,6 +15466,7 @@ components:
         - domainTld
         - mailServerId
         - purpose
+        - allowNewBindings
         - status
         - mailboxCount
         - createdAt
@@ -15483,6 +15497,9 @@ components:
         purpose:
           type: string
           enum: [not_sale, sale, binding]
+        allowNewBindings:
+          type: boolean
+          description: For purpose=binding only. When false, the domain only receives mail for existing bindings.
         status:
           type: string
           enum: [pending, validating, normal, abnormal, disabled, deleted]

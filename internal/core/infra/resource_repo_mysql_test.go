@@ -127,6 +127,10 @@ func TestResourceSchemaConstraintsMySQL(t *testing.T) {
 		"sale",
 		"normal",
 	).Error)
+	var allowNewBindings bool
+	require.NoError(t, db.Raw("SELECT allow_new_bindings FROM domain_resources WHERE id = ?", 103).Scan(&allowNewBindings).Error)
+	require.False(t, allowNewBindings)
+	require.Error(t, db.Exec("UPDATE domain_resources SET allow_new_bindings = 1 WHERE id = ?", 103).Error)
 
 	require.NoError(t, db.Exec(
 		"INSERT INTO generated_mailboxes(resource_id, owner_user_id, email, status) VALUES (?, ?, ?, ?)",
@@ -1151,6 +1155,34 @@ func TestResourceRepoListExcludesBindingDomainsWhenRequestedMySQL(t *testing.T) 
 		Status:       domain.DomainStatusNormal,
 	}
 	require.NoError(t, repo.CreateDomain(context.Background(), bindingRoot, binding))
+	allocationRoot := &domain.EmailResource{Type: domain.ResourceTypeDomain, OwnerUserID: 1}
+	allocation := &domain.MailDomainResource{
+		Domain:       "allocation.example.kg",
+		MailServerID: 200,
+		Purpose:      domain.PurposeBinding,
+		Status:       domain.DomainStatusNormal,
+	}
+	require.NoError(t, repo.CreateDomain(context.Background(), allocationRoot, allocation))
+
+	adminRepo := NewAdminResourceRepo(db)
+	require.NoError(t, adminRepo.WithTx(context.Background(), func(ctx context.Context) error {
+		root, resource, err := adminRepo.LockAdminDomain(ctx, allocationRoot.ID)
+		if err != nil {
+			return err
+		}
+		if err := resource.SetAllowNewBindingsAdmin(true); err != nil {
+			return err
+		}
+		return adminRepo.SaveAdminDomain(ctx, root, resource, root.Version, root.OwnerUserID)
+	}))
+	storedAllocation, err := repo.FindDomainByID(context.Background(), allocationRoot.ID)
+	require.NoError(t, err)
+	require.NotNil(t, storedAllocation)
+	require.True(t, storedAllocation.AllowNewBindings)
+	matchingDomains, allocationDomains, err := repo.ListBindingDomains(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, []string{"binding.example.kg", "allocation.example.kg"}, matchingDomains)
+	require.Equal(t, []string{"allocation.example.kg"}, allocationDomains)
 
 	filter := coreapp.ResourceListFilter{
 		ResourceType:   domain.ResourceTypeDomain,

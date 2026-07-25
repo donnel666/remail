@@ -4677,6 +4677,8 @@ export interface components {
              * @enum {string}
              */
             purpose: "not_sale" | "sale" | "binding";
+            /** @description For purpose=binding only. When true, the domain may generate addresses for unbound Microsoft accounts; false only matches inbound mail for existing bindings. */
+            allowNewBindings: boolean;
             /** @description Domain resource status (pending/validating/normal/abnormal/disabled/deleted) */
             status: string;
             lastSafeError?: string;
@@ -5316,6 +5318,8 @@ export interface components {
              * @enum {string}
              */
             purpose?: "not_sale" | "binding";
+            /** @description For purpose=binding only. Defaults to false; true enables new auxiliary-mailbox generation, while false keeps existing-binding mail matching only. */
+            allowNewBindings?: boolean;
         };
         AdminDomainDnsStatusRequest: {
             /** @description true marks DNS normal; false marks DNS abnormal. */
@@ -5326,12 +5330,16 @@ export interface components {
             ownerId: number;
             /** @enum {string} */
             purpose: "not_sale" | "sale" | "binding";
+            /** @description For purpose=binding only. Defaults to false; true enables new auxiliary-mailbox generation, while false keeps existing-binding mail matching only. */
+            allowNewBindings?: boolean;
             mailServerId?: number;
         };
         PatchAdminDomainRequest: {
             ownerId?: number;
             /** @enum {string} */
             purpose?: "not_sale" | "sale" | "binding";
+            /** @description For purpose=binding only. Enables or disables new auxiliary-mailbox generation. */
+            allowNewBindings?: boolean;
             mailServerId?: number;
             /**
              * @description Explicit state-machine command; disabled resources can only use enable, never a DNS result command.
@@ -5419,6 +5427,8 @@ export interface components {
             mailServerId: number;
             /** @enum {string} */
             purpose: "not_sale" | "sale" | "binding";
+            /** @description For purpose=binding only. When false, the domain only receives mail for existing bindings. */
+            allowNewBindings: boolean;
             /** @enum {string} */
             status: "pending" | "validating" | "normal" | "abnormal" | "disabled" | "deleted";
             /** @description Generated-mailbox count for ordinary domains; active Microsoft auxiliary-binding count for purpose=binding domains. */

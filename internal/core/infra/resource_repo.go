@@ -155,6 +155,7 @@ type DomainResourceModel struct {
 	OwnerUserID          uint       `gorm:"not null;column:owner_user_id"`
 	MailServerID         uint       `gorm:"not null;column:mail_server_id"`
 	Purpose              string     `gorm:"type:varchar(32);not null;default:'not_sale'"`
+	AllowNewBindings     bool       `gorm:"not null;default:false;column:allow_new_bindings"`
 	Status               string     `gorm:"type:varchar(32);not null;default:'abnormal'"`
 	ValidationGeneration uint64     `gorm:"not null;default:1;column:validation_generation"`
 	ValidationFailures   int        `gorm:"not null;default:0;column:validation_failures"`
@@ -176,6 +177,7 @@ func (m *DomainResourceModel) toDomain() *domain.MailDomainResource {
 		Domain:               m.Domain,
 		MailServerID:         m.MailServerID,
 		Purpose:              domain.ResourcePurpose(m.Purpose),
+		AllowNewBindings:     m.AllowNewBindings,
 		Status:               domain.MailDomainStatus(m.Status),
 		ValidationGeneration: m.ValidationGeneration,
 		ValidationFailures:   m.ValidationFailures,
@@ -415,6 +417,7 @@ WHERE gm.resource_id = ? AND da.id IS NULL`, existing.ID).Error; err != nil {
 				"domain_tld":            domain.TLD(dr.Domain),
 				"mail_server_id":        dr.MailServerID,
 				"purpose":               string(dr.Purpose),
+				"allow_new_bindings":    dr.AllowNewBindings,
 				"status":                string(dr.Status),
 				"validation_generation": gorm.Expr("validation_generation + 1"),
 				"validation_failures":   0,
@@ -467,6 +470,7 @@ WHERE gm.resource_id = ? AND da.id IS NULL`, existing.ID).Error; err != nil {
 		DomainTLD:            domain.TLD(dr.Domain),
 		MailServerID:         dr.MailServerID,
 		Purpose:              string(dr.Purpose),
+		AllowNewBindings:     dr.AllowNewBindings,
 		Status:               string(dr.Status),
 		ValidationGeneration: validationGeneration,
 		ValidationFailures:   dr.ValidationFailures,
@@ -775,21 +779,30 @@ func (r *ResourceRepo) FindMicrosoftByID(ctx context.Context, resourceID uint) (
 	return model.toDomain(), nil
 }
 
-// ListBindingDomains returns the domain names configured as auxiliary/recovery
-// mailbox domains (domain_resources.purpose = 'binding') that have passed
-// validation (status = 'normal'). It sources the msacl auxiliary-mailbox domain
-// list (SetAuxiliaryDomains) instead of a hardcoded default.
-func (r *ResourceRepo) ListBindingDomains(ctx context.Context) ([]string, error) {
-	var domains []string
+// ListBindingDomains returns every normal auxiliary/recovery domain for
+// existing-address matching and the subset allowed to allocate new bindings.
+func (r *ResourceRepo) ListBindingDomains(ctx context.Context) ([]string, []string, error) {
+	var rows []struct {
+		Domain           string
+		AllowNewBindings bool
+	}
 	err := r.db.WithContext(ctx).
 		Model(&DomainResourceModel{}).
 		Where("purpose = ? AND status = ?", string(domain.PurposeBinding), string(domain.DomainStatusNormal)).
 		Order("id").
-		Pluck("domain", &domains).Error
+		Find(&rows).Error
 	if err != nil {
-		return nil, fmt.Errorf("list binding domains: %w", err)
+		return nil, nil, fmt.Errorf("list binding domains: %w", err)
 	}
-	return domains, nil
+	domains := make([]string, 0, len(rows))
+	allocationDomains := make([]string, 0, len(rows))
+	for _, row := range rows {
+		domains = append(domains, row.Domain)
+		if row.AllowNewBindings {
+			allocationDomains = append(allocationDomains, row.Domain)
+		}
+	}
+	return domains, allocationDomains, nil
 }
 
 // MicrosoftAutoRefreshCandidate identifies a Microsoft resource whose refresh

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Input, Modal, Select, Toast } from "@douyinfe/semi-ui";
+import { Checkbox, Input, Modal, Select, Toast } from "@douyinfe/semi-ui";
 import { useTranslation } from "react-i18next";
 
 import type {
@@ -16,6 +16,7 @@ export interface DomainDraft {
   domain: string;
   ownerId?: number;
   purpose: AdminDomainPurpose;
+  allowNewBindings: boolean;
   mailServerId?: number;
   status: Extract<AdminDomainStatus, "normal" | "abnormal" | "disabled">;
 }
@@ -56,6 +57,7 @@ export function DomainFormModal({
     domain: "",
     ownerId: undefined,
     purpose: "not_sale",
+    allowNewBindings: false,
     mailServerId: undefined,
     status: "abnormal",
   });
@@ -68,6 +70,7 @@ export function DomainFormModal({
         domain: target.domain,
         ownerId: target.ownerId,
         purpose: target.purpose,
+        allowNewBindings: target.allowNewBindings ?? false,
         mailServerId: target.mailServerId,
         status:
           target.status === "deleted"
@@ -80,6 +83,7 @@ export function DomainFormModal({
         domain: "",
         ownerId: owner?.id,
         purpose: "not_sale",
+        allowNewBindings: false,
         mailServerId: mailServers.find(
           (server) =>
             server.ownerId === owner?.id && server.status !== "disabled"
@@ -111,6 +115,10 @@ export function DomainFormModal({
       purpose: ownerAllowsPurpose(owner, previous.purpose)
         ? previous.purpose
         : "not_sale",
+      allowNewBindings:
+        ownerAllowsPurpose(owner, previous.purpose) &&
+        previous.purpose === "binding" &&
+        previous.allowNewBindings,
       mailServerId: mailServers.find(
         (server) =>
           server.ownerId === ownerId && server.status !== "disabled"
@@ -208,9 +216,15 @@ export function DomainFormModal({
             {t("Purpose")}
           </span>
           <Select
-            onChange={(value) =>
-              setField("purpose", String(value) as AdminDomainPurpose)
-            }
+            onChange={(value) => {
+              const purpose = String(value) as AdminDomainPurpose;
+              setDraft((previous) => ({
+                ...previous,
+                purpose,
+                allowNewBindings:
+                  purpose === "binding" && previous.allowNewBindings,
+              }));
+            }}
             style={{ width: "100%" }}
             value={draft.purpose}
           >
@@ -229,6 +243,23 @@ export function DomainFormModal({
             </Select.Option>
           </Select>
         </label>
+        {draft.purpose === "binding" ? (
+          <div className="rounded-lg bg-[var(--semi-color-fill-0)] px-3 py-2.5">
+            <Checkbox
+              checked={draft.allowNewBindings}
+              onChange={(event) =>
+                setField("allowNewBindings", Boolean(event.target.checked))
+              }
+            >
+              {t("Allow new auxiliary mailboxes")}
+            </Checkbox>
+            <div className="mt-1 text-xs text-[var(--semi-color-text-2)]">
+              {t(
+                "When disabled, this domain only receives mail for existing bindings."
+              )}
+            </div>
+          </div>
+        ) : null}
         <label className="block">
           <span className="mb-1 block text-xs font-medium text-[var(--semi-color-text-1)]">
             {t("Mail server")}

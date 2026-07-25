@@ -391,6 +391,7 @@ type MailDomainResource struct {
 	Domain               string
 	MailServerID         uint
 	Purpose              ResourcePurpose
+	AllowNewBindings     bool
 	Status               MailDomainStatus
 	ValidationGeneration uint64
 	ValidationFailures   int
@@ -520,6 +521,20 @@ func (r *MailDomainResource) SetPurposeAdmin(purpose ResourcePurpose) error {
 		return ErrInvalidPurpose
 	}
 	r.Purpose = purpose
+	if purpose != PurposeBinding {
+		r.AllowNewBindings = false
+	}
+	return nil
+}
+
+func (r *MailDomainResource) SetAllowNewBindingsAdmin(allow bool) error {
+	if r.Status == DomainStatusDeleted {
+		return ErrResourceNotFound
+	}
+	if allow && r.Purpose != PurposeBinding {
+		return ErrInvalidPurpose
+	}
+	r.AllowNewBindings = allow
 	return nil
 }
 
@@ -529,6 +544,7 @@ func (r *MailDomainResource) DeleteAdmin() error {
 	}
 	r.Status = DomainStatusDeleted
 	r.Purpose = PurposeNotSale
+	r.AllowNewBindings = false
 	r.LastSafeError = ""
 	r.LastAllocatedAt = nil
 	return nil
@@ -540,6 +556,7 @@ func (r *MailDomainResource) RecoverAdmin() error {
 	}
 	r.beginValidationGeneration()
 	r.Purpose = PurposeNotSale
+	r.AllowNewBindings = false
 	r.LastAllocatedAt = nil
 	return nil
 }
@@ -554,6 +571,7 @@ func (r *MailDomainResource) MarkDeleted() error {
 		return ErrResourceNotPrivate
 	}
 	r.Status = DomainStatusDeleted
+	r.AllowNewBindings = false
 	r.LastSafeError = ""
 	r.LastAllocatedAt = nil
 	return nil

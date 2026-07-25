@@ -16,19 +16,20 @@ import (
 )
 
 type adminDomainRow struct {
-	ID              uint
-	OwnerUserID     uint
-	Version         uint64
-	Domain          string
-	DomainTLD       string
-	MailServerID    uint
-	Purpose         string
-	Status          string
-	MailboxCount    int64
-	LastSafeError   string
-	LastAllocatedAt *time.Time
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ID               uint
+	OwnerUserID      uint
+	Version          uint64
+	Domain           string
+	DomainTLD        string
+	MailServerID     uint
+	Purpose          string
+	AllowNewBindings bool
+	Status           string
+	MailboxCount     int64
+	LastSafeError    string
+	LastAllocatedAt  *time.Time
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 const adminDomainListSelect = `
@@ -39,6 +40,7 @@ dr.domain AS domain,
 dr.domain_tld AS domain_tld,
 dr.mail_server_id AS mail_server_id,
 dr.purpose AS purpose,
+dr.allow_new_bindings AS allow_new_bindings,
 dr.status AS status,
 (SELECT COUNT(*) FROM generated_mailboxes gm WHERE gm.resource_id = er.id AND gm.owner_user_id = er.owner_user_id AND gm.status <> 'retired') AS mailbox_count,
 dr.last_safe_error AS last_safe_error,
@@ -317,6 +319,7 @@ func (r *AdminResourceRepo) SaveAdminDomain(ctx context.Context, root *domain.Em
 		Updates(map[string]any{
 			"owner_user_id": root.OwnerUserID, "domain": resource.Domain, "domain_tld": domain.TLD(resource.Domain),
 			"mail_server_id": resource.MailServerID, "purpose": string(resource.Purpose), "status": string(resource.Status),
+			"allow_new_bindings":    resource.AllowNewBindings,
 			"validation_generation": resource.ValidationGeneration, "validation_failures": resource.ValidationFailures,
 			"mailbox_daily_limit": normalizeDailyLimit(resource.MailboxDailyLimit, domain.DefaultMailboxDailyLimitValue()),
 			"last_safe_error":     resource.LastSafeError, "last_allocated_at": resource.LastAllocatedAt, "updated_at": now,
@@ -346,7 +349,7 @@ func (r *AdminResourceRepo) SaveAdminDomain(ctx context.Context, root *domain.Em
 func adminDomainRecord(row adminDomainRow) coreapp.AdminDomainRecord {
 	return coreapp.AdminDomainRecord{
 		ID: row.ID, OwnerUserID: row.OwnerUserID, Version: row.Version, Domain: row.Domain, DomainTLD: row.DomainTLD,
-		MailServerID: row.MailServerID, Purpose: domain.ResourcePurpose(row.Purpose), Status: domain.MailDomainStatus(row.Status),
+		MailServerID: row.MailServerID, Purpose: domain.ResourcePurpose(row.Purpose), AllowNewBindings: row.AllowNewBindings, Status: domain.MailDomainStatus(row.Status),
 		MailboxCount: row.MailboxCount, LastSafeError: row.LastSafeError, LastAllocatedAt: row.LastAllocatedAt,
 		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 	}

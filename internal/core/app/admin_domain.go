@@ -28,19 +28,20 @@ type AdminDomainListFilter struct {
 }
 
 type AdminDomainRecord struct {
-	ID              uint
-	OwnerUserID     uint
-	Version         uint64
-	Domain          string
-	DomainTLD       string
-	MailServerID    uint
-	Purpose         domain.ResourcePurpose
-	Status          domain.MailDomainStatus
-	MailboxCount    int64
-	LastSafeError   string
-	LastAllocatedAt *time.Time
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ID               uint
+	OwnerUserID      uint
+	Version          uint64
+	Domain           string
+	DomainTLD        string
+	MailServerID     uint
+	Purpose          domain.ResourcePurpose
+	AllowNewBindings bool
+	Status           domain.MailDomainStatus
+	MailboxCount     int64
+	LastSafeError    string
+	LastAllocatedAt  *time.Time
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 type AdminDomainStatusFacets struct {
@@ -67,19 +68,20 @@ type AdminDomainFacets struct {
 }
 
 type AdminDomainItem struct {
-	ID              uint
-	Version         uint64
-	Domain          string
-	DomainTLD       string
-	Owner           AdminOwnerSummary
-	Purpose         string
-	Status          string
-	MailServerID    uint
-	MailboxCount    int64
-	LastSafeError   *string
-	LastAllocatedAt *time.Time
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ID               uint
+	Version          uint64
+	Domain           string
+	DomainTLD        string
+	Owner            AdminOwnerSummary
+	Purpose          string
+	AllowNewBindings bool
+	Status           string
+	MailServerID     uint
+	MailboxCount     int64
+	LastSafeError    *string
+	LastAllocatedAt  *time.Time
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 type AdminDomainListResult struct {
@@ -246,7 +248,8 @@ func adminDomainItem(record AdminDomainRecord, owner AdminOwnerSummary) AdminDom
 	return AdminDomainItem{
 		ID: record.ID, Version: record.Version, Domain: record.Domain, DomainTLD: record.DomainTLD,
 		Owner: owner, Purpose: string(record.Purpose), Status: string(record.Status), MailServerID: record.MailServerID,
-		MailboxCount: record.MailboxCount, LastSafeError: safeError, LastAllocatedAt: record.LastAllocatedAt,
+		AllowNewBindings: record.AllowNewBindings,
+		MailboxCount:     record.MailboxCount, LastSafeError: safeError, LastAllocatedAt: record.LastAllocatedAt,
 		CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt,
 	}
 }
@@ -278,28 +281,30 @@ const (
 )
 
 type AdminDomainCreateCommand struct {
-	Domain         string
-	OwnerUserID    uint
-	Purpose        domain.ResourcePurpose
-	MailServerID   uint
-	OperatorUserID uint
-	IdempotencyKey string
-	RequestID      string
-	Path           string
+	Domain           string
+	OwnerUserID      uint
+	Purpose          domain.ResourcePurpose
+	AllowNewBindings bool
+	MailServerID     uint
+	OperatorUserID   uint
+	IdempotencyKey   string
+	RequestID        string
+	Path             string
 }
 
 type AdminDomainEditCommand struct {
-	ResourceID     uint
-	Version        uint64
-	OwnerUserID    *uint
-	Purpose        *domain.ResourcePurpose
-	MailServerID   *uint
-	StatusCommand  AdminDomainStatusCommand
-	Action         AdminDomainAction
-	OperatorUserID uint
-	IdempotencyKey string
-	RequestID      string
-	Path           string
+	ResourceID       uint
+	Version          uint64
+	OwnerUserID      *uint
+	Purpose          *domain.ResourcePurpose
+	AllowNewBindings *bool
+	MailServerID     *uint
+	StatusCommand    AdminDomainStatusCommand
+	Action           AdminDomainAction
+	OperatorUserID   uint
+	IdempotencyKey   string
+	RequestID        string
+	Path             string
 }
 
 type AdminDomainMutationResult struct {
@@ -393,6 +398,9 @@ func (s *AdminDomainCommandService) Create(ctx context.Context, command AdminDom
 	if purpose == "" {
 		purpose = domain.PurposeNotSale
 	}
+	if command.AllowNewBindings && purpose != domain.PurposeBinding {
+		return nil, domain.ErrInvalidPurpose
+	}
 	owner, err := s.validateOwner(ctx, command.OwnerUserID, purpose)
 	if err != nil {
 		return nil, err
@@ -406,11 +414,12 @@ func (s *AdminDomainCommandService) Create(ctx context.Context, command AdminDom
 		mailServerID = server.ID
 	}
 	fingerprint, err := adminResourceCommandFingerprint(struct {
-		Domain       string                 `json:"domain"`
-		OwnerUserID  uint                   `json:"ownerId"`
-		Purpose      domain.ResourcePurpose `json:"purpose"`
-		MailServerID uint                   `json:"mailServerId"`
-	}{domainName, owner.ID, purpose, mailServerID})
+		Domain           string                 `json:"domain"`
+		OwnerUserID      uint                   `json:"ownerId"`
+		Purpose          domain.ResourcePurpose `json:"purpose"`
+		AllowNewBindings bool                   `json:"allowNewBindings"`
+		MailServerID     uint                   `json:"mailServerId"`
+	}{domainName, owner.ID, purpose, command.AllowNewBindings, mailServerID})
 	if err != nil {
 		return nil, err
 	}
@@ -433,7 +442,11 @@ func (s *AdminDomainCommandService) Create(ctx context.Context, command AdminDom
 			return domain.ErrMailServerNotFound
 		}
 		root := &domain.EmailResource{Type: domain.ResourceTypeDomain, OwnerUserID: owner.ID}
-		resource := &domain.MailDomainResource{Domain: domainName, MailServerID: mailServerID, Purpose: purpose, Status: domain.DomainStatusAbnormal}
+		resource := &domain.MailDomainResource{
+			Domain: domainName, MailServerID: mailServerID, Purpose: purpose,
+			AllowNewBindings: purpose == domain.PurposeBinding && command.AllowNewBindings,
+			Status:           domain.DomainStatusAbnormal,
+		}
 		if err := s.repo.CreateAdminDomain(txCtx, root, resource); err != nil {
 			return err
 		}
@@ -467,13 +480,14 @@ func (s *AdminDomainCommandService) mutate(ctx context.Context, command AdminDom
 		return nil, err
 	}
 	fingerprint, err := adminResourceCommandFingerprint(struct {
-		Version       uint64                   `json:"version"`
-		OwnerUserID   *uint                    `json:"ownerId"`
-		Purpose       *domain.ResourcePurpose  `json:"purpose"`
-		MailServerID  *uint                    `json:"mailServerId"`
-		StatusCommand AdminDomainStatusCommand `json:"statusCommand"`
-		Action        AdminDomainAction        `json:"action"`
-	}{command.Version, command.OwnerUserID, command.Purpose, command.MailServerID, command.StatusCommand, command.Action})
+		Version          uint64                   `json:"version"`
+		OwnerUserID      *uint                    `json:"ownerId"`
+		Purpose          *domain.ResourcePurpose  `json:"purpose"`
+		AllowNewBindings *bool                    `json:"allowNewBindings"`
+		MailServerID     *uint                    `json:"mailServerId"`
+		StatusCommand    AdminDomainStatusCommand `json:"statusCommand"`
+		Action           AdminDomainAction        `json:"action"`
+	}{command.Version, command.OwnerUserID, command.Purpose, command.AllowNewBindings, command.MailServerID, command.StatusCommand, command.Action})
 	if err != nil {
 		return nil, err
 	}
@@ -561,11 +575,16 @@ func (s *AdminDomainCommandService) mutate(ctx context.Context, command AdminDom
 			}
 		}
 
-		beforeOwner, beforeServer, beforePurpose, beforeStatus := root.OwnerUserID, resource.MailServerID, resource.Purpose, resource.Status
+		beforeOwner, beforeServer, beforePurpose, beforeAllowNewBindings, beforeStatus := root.OwnerUserID, resource.MailServerID, resource.Purpose, resource.AllowNewBindings, resource.Status
 		root.OwnerUserID = owner.ID
 		resource.MailServerID = targetServerID
 		if command.Purpose != nil || command.Action == AdminDomainPublish || command.Action == AdminDomainUnpublish {
 			if err := resource.SetPurposeAdmin(targetPurpose); err != nil {
+				return err
+			}
+		}
+		if command.AllowNewBindings != nil {
+			if err := resource.SetAllowNewBindingsAdmin(*command.AllowNewBindings); err != nil {
 				return err
 			}
 		}
@@ -591,7 +610,7 @@ func (s *AdminDomainCommandService) mutate(ctx context.Context, command AdminDom
 		if err != nil {
 			return err
 		}
-		changed := beforeOwner != root.OwnerUserID || beforeServer != resource.MailServerID || beforePurpose != resource.Purpose || beforeStatus != resource.Status
+		changed := beforeOwner != root.OwnerUserID || beforeServer != resource.MailServerID || beforePurpose != resource.Purpose || beforeAllowNewBindings != resource.AllowNewBindings || beforeStatus != resource.Status
 		if changed {
 			if err := s.repo.SaveAdminDomain(txCtx, root, resource, command.Version, previousOwnerID); err != nil {
 				return err
@@ -952,7 +971,7 @@ func validAdminDomainMutation(command AdminDomainEditCommand) bool {
 			return false
 		}
 	}
-	return command.OwnerUserID != nil || command.Purpose != nil || command.MailServerID != nil || command.StatusCommand != "" || command.Action != ""
+	return command.OwnerUserID != nil || command.Purpose != nil || command.AllowNewBindings != nil || command.MailServerID != nil || command.StatusCommand != "" || command.Action != ""
 }
 
 func validAdminDomainBulkAction(action string) bool {

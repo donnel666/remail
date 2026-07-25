@@ -85,8 +85,10 @@ func (s *adminDomainOwnersStub) ValidateTargetOwner(_ context.Context, id uint) 
 }
 
 type adminDomainCommandRepoStub struct {
-	root     *domain.EmailResource
-	resource *domain.MailDomainResource
+	root                  *domain.EmailResource
+	resource              *domain.MailDomainResource
+	saveCalls             int
+	savedAllowNewBindings bool
 }
 
 func (s *adminDomainCommandRepoStub) WithTx(ctx context.Context, fn func(context.Context) error) error {
@@ -113,7 +115,9 @@ func (*adminDomainCommandRepoStub) CreateAdminDomain(context.Context, *domain.Em
 	return nil
 }
 
-func (*adminDomainCommandRepoStub) SaveAdminDomain(context.Context, *domain.EmailResource, *domain.MailDomainResource, uint64, uint) error {
+func (s *adminDomainCommandRepoStub) SaveAdminDomain(_ context.Context, _ *domain.EmailResource, resource *domain.MailDomainResource, _ uint64, _ uint) error {
+	s.saveCalls++
+	s.savedAllowNewBindings = resource.AllowNewBindings
 	return nil
 }
 
@@ -193,5 +197,30 @@ func TestAdminDomainBulkPublishPropagatesOwnerDependencyError(t *testing.T) {
 	}, 1, "domain-bulk-owner-dependency", "req-domain-bulk-owner-dependency", "/v1/admin/domains/bulk")
 	if !errors.Is(err, ownerDependencyErr) {
 		t.Fatalf("ApplyBulk() error = %v, want wrapped owner dependency error", err)
+	}
+}
+
+func TestAdminDomainEditUpdatesNewBindingPermission(t *testing.T) {
+	allow := true
+	repo := &adminDomainCommandRepoStub{
+		root: &domain.EmailResource{ID: 42, Type: domain.ResourceTypeDomain, OwnerUserID: 9, Version: 1},
+		resource: &domain.MailDomainResource{
+			ID: 42, Purpose: domain.PurposeBinding, Status: domain.DomainStatusNormal,
+		},
+	}
+	service := NewAdminDomainCommandService(repo, nil, nil, &adminDomainLogStub{})
+	service.SetPorts(&adminDomainOwnersStub{owners: map[uint]AdminOwnerSummary{
+		9: {ID: 9, Role: "admin", Enabled: true},
+	}}, nil)
+
+	_, err := service.Edit(context.Background(), AdminDomainEditCommand{
+		ResourceID: 42, Version: 1, AllowNewBindings: &allow,
+		OperatorUserID: 1, IdempotencyKey: "allow-new-bindings",
+	})
+	if err != nil {
+		t.Fatalf("Edit() unexpected error: %v", err)
+	}
+	if repo.saveCalls != 1 || !repo.savedAllowNewBindings {
+		t.Fatalf("SaveAdminDomain() calls = %d, saved permission = %t; want 1, true", repo.saveCalls, repo.savedAllowNewBindings)
 	}
 }

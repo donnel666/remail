@@ -4193,8 +4193,10 @@ type AdminDomainFacets struct {
 
 // AdminDomainItem defines model for AdminDomainItem.
 type AdminDomainItem struct {
-	CreatedAt time.Time `json:"createdAt"`
-	Domain    string    `json:"domain"`
+	// AllowNewBindings For purpose=binding only. When false, the domain only receives mail for existing bindings.
+	AllowNewBindings bool      `json:"allowNewBindings"`
+	CreatedAt        time.Time `json:"createdAt"`
+	Domain           string    `json:"domain"`
 
 	// DomainTld Backend-derived exact TLD filter value.
 	DomainTld       string     `json:"domainTld"`
@@ -5336,10 +5338,12 @@ type CheckProxiesResponse struct {
 
 // CreateAdminDomainRequest defines model for CreateAdminDomainRequest.
 type CreateAdminDomainRequest struct {
-	Domain       string                          `json:"domain"`
-	MailServerId *int                            `json:"mailServerId,omitempty"`
-	OwnerId      int                             `json:"ownerId"`
-	Purpose      CreateAdminDomainRequestPurpose `json:"purpose"`
+	// AllowNewBindings For purpose=binding only. Defaults to false; true enables new auxiliary-mailbox generation, while false keeps existing-binding mail matching only.
+	AllowNewBindings *bool                           `json:"allowNewBindings,omitempty"`
+	Domain           string                          `json:"domain"`
+	MailServerId     *int                            `json:"mailServerId,omitempty"`
+	OwnerId          int                             `json:"ownerId"`
+	Purpose          CreateAdminDomainRequestPurpose `json:"purpose"`
 }
 
 // CreateAdminDomainRequestPurpose defines model for CreateAdminDomainRequest.Purpose.
@@ -5363,7 +5367,9 @@ type CreateCardsResponse struct {
 
 // CreateDomainRequest defines model for CreateDomainRequest.
 type CreateDomainRequest struct {
-	Domain string `json:"domain"`
+	// AllowNewBindings For purpose=binding only. Defaults to false; true enables new auxiliary-mailbox generation, while false keeps existing-binding mail matching only.
+	AllowNewBindings *bool  `json:"allowNewBindings,omitempty"`
+	Domain           string `json:"domain"`
 
 	// MailServerId Optional extension hook; omitted domains use the built-in local inbound server mx.aishop6.com
 	MailServerId *int `json:"mailServerId,omitempty"`
@@ -5607,12 +5613,14 @@ type DomainInventory struct {
 
 // DomainResourceDetail defines model for DomainResourceDetail.
 type DomainResourceDetail struct {
-	CreatedAt       time.Time  `json:"createdAt"`
-	Domain          string     `json:"domain"`
-	Id              int        `json:"id"`
-	LastAllocatedAt *time.Time `json:"lastAllocatedAt,omitempty"`
-	LastSafeError   *string    `json:"lastSafeError,omitempty"`
-	MailServerId    int        `json:"mailServerId"`
+	// AllowNewBindings For purpose=binding only. When true, the domain may generate addresses for unbound Microsoft accounts; false only matches inbound mail for existing bindings.
+	AllowNewBindings bool       `json:"allowNewBindings"`
+	CreatedAt        time.Time  `json:"createdAt"`
+	Domain           string     `json:"domain"`
+	Id               int        `json:"id"`
+	LastAllocatedAt  *time.Time `json:"lastAllocatedAt,omitempty"`
+	LastSafeError    *string    `json:"lastSafeError,omitempty"`
+	MailServerId     int        `json:"mailServerId"`
 
 	// Purpose Domain resource purpose. not_sale is user-side private/unavailable for sale; sale is public supply; binding is displayed as auxiliary mailbox in Chinese.
 	Purpose DomainResourceDetailPurpose `json:"purpose"`
@@ -6121,9 +6129,11 @@ type PasswordResetRequest struct {
 
 // PatchAdminDomainRequest defines model for PatchAdminDomainRequest.
 type PatchAdminDomainRequest struct {
-	MailServerId *int                            `json:"mailServerId,omitempty"`
-	OwnerId      *int                            `json:"ownerId,omitempty"`
-	Purpose      *PatchAdminDomainRequestPurpose `json:"purpose,omitempty"`
+	// AllowNewBindings For purpose=binding only. Enables or disables new auxiliary-mailbox generation.
+	AllowNewBindings *bool                           `json:"allowNewBindings,omitempty"`
+	MailServerId     *int                            `json:"mailServerId,omitempty"`
+	OwnerId          *int                            `json:"ownerId,omitempty"`
+	Purpose          *PatchAdminDomainRequestPurpose `json:"purpose,omitempty"`
 
 	// StatusCommand Explicit state-machine command; disabled resources can only use enable, never a DNS result command.
 	StatusCommand *PatchAdminDomainRequestStatusCommand `json:"statusCommand,omitempty"`

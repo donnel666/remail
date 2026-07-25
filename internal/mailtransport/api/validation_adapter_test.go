@@ -397,6 +397,19 @@ func TestPrepareBindingAddressReplacesMaskedSnapshotWithDeterministicCandidate(t
 	require.NotContains(t, actual, "*")
 }
 
+func TestPrepareBindingAddressDefersGenerationWithoutAllocationPermission(t *testing.T) {
+	defer msacl.SetAuxiliaryDomains([]string{"recovery.test"})
+	msacl.SetAuxiliaryDomainPolicy([]string{"receive.test"}, nil)
+
+	actual, err := (&ResourceValidationAdapter{}).prepareBindingAddress(
+		coreapp.MicrosoftValidationRequest{EmailAddress: "owner@example.test"},
+		"",
+	)
+
+	require.NoError(t, err)
+	require.Empty(t, actual)
+}
+
 func TestShouldFallbackRefreshTokenOnlyForExplicitExpiredCategories(t *testing.T) {
 	for _, category := range []string{"oauth_invalid_grant", "refresh_token_expired", "oauth_refresh_token_expired"} {
 		require.True(t, shouldFallbackInvalidRefreshToken(mailinfra.MicrosoftOAuthResult{Category: category}), category)

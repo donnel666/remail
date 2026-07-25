@@ -1025,14 +1025,15 @@ type MicrosoftResourceDetail struct {
 
 // DomainResourceDetail is the API-safe view of a domain resource.
 type DomainResourceDetail struct {
-	ID              uint       `json:"id"`
-	Domain          string     `json:"domain"`
-	MailServerID    uint       `json:"mailServerId"`
-	Purpose         string     `json:"purpose"`
-	Status          string     `json:"status"`
-	LastSafeError   string     `json:"lastSafeError"`
-	LastAllocatedAt *time.Time `json:"lastAllocatedAt,omitempty"`
-	CreatedAt       time.Time  `json:"createdAt"`
+	ID               uint       `json:"id"`
+	Domain           string     `json:"domain"`
+	MailServerID     uint       `json:"mailServerId"`
+	Purpose          string     `json:"purpose"`
+	AllowNewBindings bool       `json:"allowNewBindings"`
+	Status           string     `json:"status"`
+	LastSafeError    string     `json:"lastSafeError"`
+	LastAllocatedAt  *time.Time `json:"lastAllocatedAt,omitempty"`
+	CreatedAt        time.Time  `json:"createdAt"`
 }
 
 // ResourceListResult holds paginated resource results.
@@ -1374,14 +1375,15 @@ func (uc *ResourceUseCase) GetDetail(ctx context.Context, resourceID, userID uin
 			return nil, domain.ErrForbiddenResource
 		}
 		return &DomainResourceDetail{
-			ID:              dr.ID,
-			Domain:          dr.Domain,
-			MailServerID:    dr.MailServerID,
-			Purpose:         string(dr.Purpose),
-			Status:          string(dr.Status),
-			LastSafeError:   dr.LastSafeError,
-			LastAllocatedAt: dr.LastAllocatedAt,
-			CreatedAt:       dr.CreatedAt,
+			ID:               dr.ID,
+			Domain:           dr.Domain,
+			MailServerID:     dr.MailServerID,
+			Purpose:          string(dr.Purpose),
+			AllowNewBindings: dr.AllowNewBindings,
+			Status:           string(dr.Status),
+			LastSafeError:    dr.LastSafeError,
+			LastAllocatedAt:  dr.LastAllocatedAt,
+			CreatedAt:        dr.CreatedAt,
 		}, nil
 	}
 
@@ -1518,14 +1520,15 @@ func (uc *ResourceUseCase) PublishDomainForSale(ctx context.Context, resourceID,
 	dr.Purpose = domain.PurposeSale
 
 	return &DomainResourceDetail{
-		ID:              dr.ID,
-		Domain:          dr.Domain,
-		MailServerID:    dr.MailServerID,
-		Purpose:         string(dr.Purpose),
-		Status:          string(dr.Status),
-		LastSafeError:   dr.LastSafeError,
-		LastAllocatedAt: dr.LastAllocatedAt,
-		CreatedAt:       dr.CreatedAt,
+		ID:               dr.ID,
+		Domain:           dr.Domain,
+		MailServerID:     dr.MailServerID,
+		Purpose:          string(dr.Purpose),
+		AllowNewBindings: dr.AllowNewBindings,
+		Status:           string(dr.Status),
+		LastSafeError:    dr.LastSafeError,
+		LastAllocatedAt:  dr.LastAllocatedAt,
+		CreatedAt:        dr.CreatedAt,
 	}, nil
 }
 
@@ -1860,10 +1863,11 @@ func NewDomainUseCase(resources EmailResourceRepository, servers MailServerRepos
 
 // CreateDomainRequest contains the fields for creating a domain resource.
 type CreateDomainRequest struct {
-	Domain       string
-	MailServerID uint
-	Purpose      string
-	AllowBinding bool
+	Domain           string
+	MailServerID     uint
+	Purpose          string
+	AllowBinding     bool
+	AllowNewBindings bool
 }
 
 // Create creates a self-hosted domain resource. P1 defaults to the local
@@ -1887,6 +1891,9 @@ func (uc *DomainUseCase) Create(ctx context.Context, ownerUserID uint, req *Crea
 	if purpose == domain.PurposeBinding && !req.AllowBinding {
 		return nil, domain.ErrForbiddenPurpose
 	}
+	if req.AllowNewBindings && purpose != domain.PurposeBinding {
+		return nil, domain.ErrInvalidPurpose
+	}
 
 	server, err := uc.resolveMailServer(ctx, ownerUserID, req.MailServerID)
 	if err != nil {
@@ -1905,10 +1912,11 @@ func (uc *DomainUseCase) Create(ctx context.Context, ownerUserID uint, req *Crea
 	}
 
 	dr := &domain.MailDomainResource{
-		Domain:       domainName,
-		MailServerID: req.MailServerID,
-		Purpose:      purpose,
-		Status:       domain.DomainStatusAbnormal,
+		Domain:           domainName,
+		MailServerID:     req.MailServerID,
+		Purpose:          purpose,
+		AllowNewBindings: purpose == domain.PurposeBinding && req.AllowNewBindings,
+		Status:           domain.DomainStatusAbnormal,
 	}
 	if server != nil {
 		dr.MailServerID = server.ID

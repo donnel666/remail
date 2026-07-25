@@ -53,6 +53,23 @@ func TestSetAuxiliaryDomainsNormalizes(t *testing.T) {
 	}
 }
 
+func TestAuxiliaryDomainPolicyKeepsExistingBindingsWithoutNewAllocation(t *testing.T) {
+	previousDomains := activeAuxiliaryDomains()
+	previousAllocationDomains := activeAuxiliaryAllocationDomains()
+	defer SetAuxiliaryDomainPolicy(previousDomains, previousAllocationDomains)
+
+	SetAuxiliaryDomainPolicy([]string{"receive.test"}, nil)
+	if !UsesActiveAuxiliaryDomain("bound@receive.test") {
+		t.Fatal("existing binding domain must remain eligible for matching")
+	}
+	if _, err := nextAuxiliaryDomain(); err == nil {
+		t.Fatal("domain without allocation permission must not generate a new binding")
+	}
+	if _, err := createTempMailbox(t.Context(), "owner@example.test", "chosen@receive.test"); err == nil {
+		t.Fatal("domain without allocation permission must not accept a preferred new binding")
+	}
+}
+
 func TestMapExplicitAliasErrorAlreadyBoundShowsMaskedAddress(t *testing.T) {
 	res := mapExplicitAliasError(&AuthError{Status: AuthStatusAlreadyBound, BoundMailbox: "a****b@qq.com"})
 	if res.Category != "already_bound" {

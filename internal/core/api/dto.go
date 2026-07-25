@@ -17,9 +17,10 @@ type CreateMailServerRequest struct {
 
 // CreateDomainRequest represents a domain resource creation request.
 type CreateDomainRequest struct {
-	Domain       string `json:"domain" binding:"required"`
-	MailServerID uint   `json:"mailServerId"`
-	Purpose      string `json:"purpose"`
+	Domain           string `json:"domain" binding:"required"`
+	MailServerID     uint   `json:"mailServerId"`
+	Purpose          string `json:"purpose"`
+	AllowNewBindings bool   `json:"allowNewBindings"`
 }
 
 // ResourceBulkFilterRequest describes the filter used by an "all matching" bulk command.
@@ -222,14 +223,15 @@ type MicrosoftResourceDetailResponse struct {
 
 // DomainResourceDetailResponse is the API-safe domain resource detail.
 type DomainResourceDetailResponse struct {
-	ID              uint       `json:"id"`
-	Domain          string     `json:"domain"`
-	MailServerID    uint       `json:"mailServerId"`
-	Purpose         string     `json:"purpose"`
-	Status          string     `json:"status"`
-	LastSafeError   string     `json:"lastSafeError,omitempty"`
-	LastAllocatedAt *time.Time `json:"lastAllocatedAt,omitempty"`
-	CreatedAt       time.Time  `json:"createdAt"`
+	ID               uint       `json:"id"`
+	Domain           string     `json:"domain"`
+	MailServerID     uint       `json:"mailServerId"`
+	Purpose          string     `json:"purpose"`
+	AllowNewBindings bool       `json:"allowNewBindings"`
+	Status           string     `json:"status"`
+	LastSafeError    string     `json:"lastSafeError,omitempty"`
+	LastAllocatedAt  *time.Time `json:"lastAllocatedAt,omitempty"`
+	CreatedAt        time.Time  `json:"createdAt"`
 }
 
 // ImportResponse returns the import result.

@@ -57,6 +57,25 @@ func TestDomainResource_IsAllocatable(t *testing.T) {
 	}
 }
 
+func TestDomainResource_NewBindingPermissionOnlyAppliesToBindingPurpose(t *testing.T) {
+	resource := &MailDomainResource{Purpose: PurposeBinding, Status: DomainStatusNormal}
+	if err := resource.SetAllowNewBindingsAdmin(true); err != nil {
+		t.Fatalf("enable new bindings: %v", err)
+	}
+	if !resource.AllowNewBindings {
+		t.Fatal("new bindings should be enabled")
+	}
+	if err := resource.SetPurposeAdmin(PurposeNotSale); err != nil {
+		t.Fatalf("change purpose: %v", err)
+	}
+	if resource.AllowNewBindings {
+		t.Fatal("leaving binding purpose must clear new-binding permission")
+	}
+	if err := resource.SetAllowNewBindingsAdmin(true); err != ErrInvalidPurpose {
+		t.Fatalf("enable on non-binding purpose error = %v, want %v", err, ErrInvalidPurpose)
+	}
+}
+
 func TestMicrosoftResource_TransitionStatus(t *testing.T) {
 	valid := []struct {
 		from MicrosoftResourceStatus

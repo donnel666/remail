@@ -139,12 +139,14 @@ export interface CreateAdminDomainRequest {
   domain: string;
   ownerId: number;
   purpose: AdminDomainPurpose;
+  allowNewBindings?: boolean;
   mailServerId?: number;
 }
 
 export interface UpdateAdminDomainRequest {
   ownerId?: number;
   purpose?: AdminDomainPurpose;
+  allowNewBindings?: boolean;
   status?: Extract<AdminDomainStatus, "normal" | "abnormal" | "disabled">;
   mailServerId?: number;
 }
@@ -333,6 +335,11 @@ export async function updateAdminDomain(
     purpose:
       patch.purpose !== undefined && patch.purpose !== current.purpose
         ? patch.purpose
+        : undefined,
+    allowNewBindings:
+      patch.allowNewBindings !== undefined &&
+      patch.allowNewBindings !== current.allowNewBindings
+        ? patch.allowNewBindings
         : undefined,
     mailServerId:
       patch.mailServerId !== undefined &&

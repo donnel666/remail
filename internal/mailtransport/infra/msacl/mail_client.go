@@ -55,14 +55,34 @@ func activeMailboxReader() MailboxReader {
 // instead of fabricating an address on a default domain.
 var auxiliaryDomainsState = struct {
 	sync.RWMutex
-	domains []string
+	domains           []string
+	allocationDomains []string
+	configured        bool
 }{}
 
 // auxiliaryDomainCursor drives round-robin selection for the GENERATE path.
 var auxiliaryDomainCursor atomic.Uint64
 
-// SetAuxiliaryDomains replaces the active binding-purpose domain list.
+// SetAuxiliaryDomains configures the same domains for matching and allocation.
+// Command-line tools and tests use this compatibility seam; production loads
+// the two permissions separately through SetAuxiliaryDomainPolicy.
 func SetAuxiliaryDomains(domains []string) {
+	SetAuxiliaryDomainPolicy(domains, domains)
+}
+
+// SetAuxiliaryDomainPolicy replaces the domains used to match existing
+// bindings and the subset allowed to generate new bindings.
+func SetAuxiliaryDomainPolicy(domains, allocationDomains []string) {
+	domains = normalizeAuxiliaryDomains(domains)
+	allocationDomains = normalizeAuxiliaryDomains(allocationDomains)
+	auxiliaryDomainsState.Lock()
+	auxiliaryDomainsState.domains = domains
+	auxiliaryDomainsState.allocationDomains = allocationDomains
+	auxiliaryDomainsState.configured = true
+	auxiliaryDomainsState.Unlock()
+}
+
+func normalizeAuxiliaryDomains(domains []string) []string {
 	normalized := make([]string, 0, len(domains))
 	seen := make(map[string]struct{}, len(domains))
 	for _, d := range domains {
@@ -76,31 +96,46 @@ func SetAuxiliaryDomains(domains []string) {
 		seen[d] = struct{}{}
 		normalized = append(normalized, d)
 	}
-	auxiliaryDomainsState.Lock()
-	auxiliaryDomainsState.domains = normalized
-	auxiliaryDomainsState.Unlock()
+	return normalized
 }
 
-// activeAuxiliaryDomains returns the injected binding domains, or the env
-// fallback (mailDomains) when none have been injected. Used by the MATCH path
-// (iterate all) and as the source for round-robin generation.
+// activeAuxiliaryDomains returns every injected binding domain for matching
+// existing addresses, or the test-harness env fallback before configuration.
 func activeAuxiliaryDomains() []string {
 	auxiliaryDomainsState.RLock()
 	domains := auxiliaryDomainsState.domains
+	configured := auxiliaryDomainsState.configured
 	auxiliaryDomainsState.RUnlock()
-	if len(domains) > 0 {
+	if configured {
 		return domains
 	}
 	return mailDomains
 }
 
+func activeAuxiliaryAllocationDomains() []string {
+	auxiliaryDomainsState.RLock()
+	domains := auxiliaryDomainsState.allocationDomains
+	configured := auxiliaryDomainsState.configured
+	auxiliaryDomainsState.RUnlock()
+	if configured {
+		return domains
+	}
+	return mailDomains
+}
+
+// CanAllocateAuxiliaryMailbox reports whether an unbound account may receive a
+// newly generated auxiliary address.
+func CanAllocateAuxiliaryMailbox() bool {
+	return len(activeAuxiliaryAllocationDomains()) > 0
+}
+
 // nextAuxiliaryDomain picks one binding domain by round-robin — the GENERATE
 // path (creating a new auxiliary mailbox for an unbound account). Errors when
-// no binding domain is configured (never fabricates a default).
+// no binding domain has explicit allocation permission.
 func nextAuxiliaryDomain() (string, error) {
-	domains := activeAuxiliaryDomains()
+	domains := activeAuxiliaryAllocationDomains()
 	if len(domains) == 0 {
-		return "", newAuthError("未配置辅助邮箱绑定域名 (domain_resources purpose=binding)", AuthStatusRequestError)
+		return "", newAuthError("未配置允许新分配的辅助邮箱域名", AuthStatusRequestError)
 	}
 	idx := int((auxiliaryDomainCursor.Add(1) - 1) % uint64(len(domains)))
 	return domains[idx], nil
@@ -199,6 +234,9 @@ func createTempMailbox(ctx context.Context, accountEmail string, preferredBindin
 		return "", wrapAuthError(fmt.Sprintf("生成辅助邮箱取消: %s", err), AuthStatusRequestError, err)
 	}
 	if preferred := normalizeRecoveryMailbox(preferredBindingAddress); preferred != "" {
+		if !usesAuxiliaryAllocationDomain(preferred) {
+			return "", newAuthError("辅助邮箱域名未开启新分配权限", AuthStatusRequestError)
+		}
 		logInfo("使用导入指定辅助邮箱")
 		logDebug("辅助邮箱地址: %s", preferred)
 		return preferred, nil

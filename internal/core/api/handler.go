@@ -174,14 +174,15 @@ func (h *CoreHandler) GetResourceDetail(c *gin.Context) {
 		})
 	case *coreapp.DomainResourceDetail:
 		c.JSON(http.StatusOK, DomainResourceDetailResponse{
-			ID:              d.ID,
-			Domain:          d.Domain,
-			MailServerID:    d.MailServerID,
-			Purpose:         d.Purpose,
-			Status:          d.Status,
-			LastSafeError:   d.LastSafeError,
-			LastAllocatedAt: d.LastAllocatedAt,
-			CreatedAt:       d.CreatedAt,
+			ID:               d.ID,
+			Domain:           d.Domain,
+			MailServerID:     d.MailServerID,
+			Purpose:          d.Purpose,
+			AllowNewBindings: d.AllowNewBindings,
+			Status:           d.Status,
+			LastSafeError:    d.LastSafeError,
+			LastAllocatedAt:  d.LastAllocatedAt,
+			CreatedAt:        d.CreatedAt,
 		})
 	default:
 		writeCoreError(c, coredomain.ErrInvalidResourceType)
@@ -390,13 +391,14 @@ func (h *CoreHandler) PostResourcePublish(c *gin.Context) {
 		})
 	case *coreapp.DomainResourceDetail:
 		c.JSON(http.StatusOK, DomainResourceDetailResponse{
-			ID:              d.ID,
-			Domain:          d.Domain,
-			MailServerID:    d.MailServerID,
-			Purpose:         d.Purpose,
-			Status:          d.Status,
-			LastAllocatedAt: d.LastAllocatedAt,
-			CreatedAt:       d.CreatedAt,
+			ID:               d.ID,
+			Domain:           d.Domain,
+			MailServerID:     d.MailServerID,
+			Purpose:          d.Purpose,
+			AllowNewBindings: d.AllowNewBindings,
+			Status:           d.Status,
+			LastAllocatedAt:  d.LastAllocatedAt,
+			CreatedAt:        d.CreatedAt,
 		})
 	default:
 		writeCoreError(c, coredomain.ErrInvalidResourceType)
@@ -1857,10 +1859,11 @@ func (h *CoreHandler) PostDomain(c *gin.Context) {
 	}
 
 	appReq := &coreapp.CreateDomainRequest{
-		Domain:       req.Domain,
-		MailServerID: req.MailServerID,
-		Purpose:      purpose,
-		AllowBinding: role.HasAdminAccess(),
+		Domain:           req.Domain,
+		MailServerID:     req.MailServerID,
+		Purpose:          purpose,
+		AllowBinding:     role.HasAdminAccess(),
+		AllowNewBindings: req.AllowNewBindings,
 	}
 
 	result, err := h.module.DomainUseCase.Create(c.Request.Context(), userID, appReq)
@@ -1870,12 +1873,13 @@ func (h *CoreHandler) PostDomain(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, DomainResourceDetailResponse{
-		ID:           result.ID,
-		Domain:       result.Domain,
-		MailServerID: result.MailServerID,
-		Purpose:      string(result.Purpose),
-		Status:       string(result.Status),
-		CreatedAt:    result.CreatedAt,
+		ID:               result.ID,
+		Domain:           result.Domain,
+		MailServerID:     result.MailServerID,
+		Purpose:          string(result.Purpose),
+		AllowNewBindings: result.AllowNewBindings,
+		Status:           string(result.Status),
+		CreatedAt:        result.CreatedAt,
 	})
 }
 

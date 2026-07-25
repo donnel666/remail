@@ -306,6 +306,8 @@
   "Purpose": "用途",
   "Sale": "出售",
   "Binding": "辅助",
+  "Allow new auxiliary mailboxes": "允许生成新辅助邮箱",
+  "When disabled, this domain only receives mail for existing bindings.": "默认关闭；关闭时仅匹配已绑定地址收件，不参与未绑定账号的新辅助邮箱分配。",
   "Mailboxes": "邮箱数",
   "No domain email resources yet": "暂无域名邮箱资源",
   "DNS Setup": "DNS 配置",

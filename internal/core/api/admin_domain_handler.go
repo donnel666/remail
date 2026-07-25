@@ -13,22 +13,23 @@ import (
 )
 
 type adminDomainItemResponse struct {
-	ID              uint       `json:"id"`
-	Version         uint64     `json:"version"`
-	OwnerID         uint       `json:"ownerId"`
-	OwnerEmail      string     `json:"ownerEmail"`
-	OwnerNickname   string     `json:"ownerNickname"`
-	OwnerRole       string     `json:"ownerRole"`
-	Domain          string     `json:"domain"`
-	DomainTLD       string     `json:"domainTld"`
-	MailServerID    uint       `json:"mailServerId"`
-	Purpose         string     `json:"purpose"`
-	Status          string     `json:"status"`
-	MailboxCount    int64      `json:"mailboxCount"`
-	LastSafeError   *string    `json:"lastSafeError,omitempty"`
-	LastAllocatedAt *time.Time `json:"lastAllocatedAt,omitempty"`
-	CreatedAt       time.Time  `json:"createdAt"`
-	UpdatedAt       time.Time  `json:"updatedAt"`
+	ID               uint       `json:"id"`
+	Version          uint64     `json:"version"`
+	OwnerID          uint       `json:"ownerId"`
+	OwnerEmail       string     `json:"ownerEmail"`
+	OwnerNickname    string     `json:"ownerNickname"`
+	OwnerRole        string     `json:"ownerRole"`
+	Domain           string     `json:"domain"`
+	DomainTLD        string     `json:"domainTld"`
+	MailServerID     uint       `json:"mailServerId"`
+	Purpose          string     `json:"purpose"`
+	AllowNewBindings bool       `json:"allowNewBindings"`
+	Status           string     `json:"status"`
+	MailboxCount     int64      `json:"mailboxCount"`
+	LastSafeError    *string    `json:"lastSafeError,omitempty"`
+	LastAllocatedAt  *time.Time `json:"lastAllocatedAt,omitempty"`
+	CreatedAt        time.Time  `json:"createdAt"`
+	UpdatedAt        time.Time  `json:"updatedAt"`
 }
 
 type adminDomainStatusFacetsResponse struct {
@@ -69,17 +70,19 @@ type adminDomainListResponse struct {
 }
 
 type createAdminDomainRequest struct {
-	Domain       string `json:"domain" binding:"required"`
-	OwnerID      uint   `json:"ownerId" binding:"required,gt=0"`
-	Purpose      string `json:"purpose"`
-	MailServerID uint   `json:"mailServerId"`
+	Domain           string `json:"domain" binding:"required"`
+	OwnerID          uint   `json:"ownerId" binding:"required,gt=0"`
+	Purpose          string `json:"purpose"`
+	AllowNewBindings bool   `json:"allowNewBindings"`
+	MailServerID     uint   `json:"mailServerId"`
 }
 
 type patchAdminDomainRequest struct {
-	OwnerID       *uint   `json:"ownerId"`
-	Purpose       *string `json:"purpose"`
-	MailServerID  *uint   `json:"mailServerId"`
-	StatusCommand string  `json:"statusCommand"`
+	OwnerID          *uint   `json:"ownerId"`
+	Purpose          *string `json:"purpose"`
+	AllowNewBindings *bool   `json:"allowNewBindings"`
+	MailServerID     *uint   `json:"mailServerId"`
+	StatusCommand    string  `json:"statusCommand"`
 }
 
 type adminDomainDNSStatusRequest struct {
@@ -202,7 +205,8 @@ func (h *CoreHandler) PostAdminDomain(c *gin.Context) {
 		return
 	}
 	result, err := h.module.AdminDomainCommands.Create(c.Request.Context(), coreapp.AdminDomainCreateCommand{
-		Domain: req.Domain, OwnerUserID: req.OwnerID, Purpose: domain.ResourcePurpose(strings.TrimSpace(req.Purpose)), MailServerID: req.MailServerID,
+		Domain: req.Domain, OwnerUserID: req.OwnerID, Purpose: domain.ResourcePurpose(strings.TrimSpace(req.Purpose)),
+		AllowNewBindings: req.AllowNewBindings, MailServerID: req.MailServerID,
 		OperatorUserID: mustCurrentAdminUserID(c), IdempotencyKey: c.GetHeader("Idempotency-Key"), RequestID: middleware.GetRequestID(c), Path: c.FullPath(),
 	})
 	if err != nil {
@@ -241,7 +245,7 @@ func (h *CoreHandler) PatchAdminDomain(c *gin.Context) {
 		purpose = &value
 	}
 	_, err := h.module.AdminDomainCommands.Edit(c.Request.Context(), coreapp.AdminDomainEditCommand{
-		ResourceID: domainID, Version: version, OwnerUserID: req.OwnerID, Purpose: purpose, MailServerID: req.MailServerID,
+		ResourceID: domainID, Version: version, OwnerUserID: req.OwnerID, Purpose: purpose, AllowNewBindings: req.AllowNewBindings, MailServerID: req.MailServerID,
 		StatusCommand: coreapp.AdminDomainStatusCommand(strings.TrimSpace(req.StatusCommand)), OperatorUserID: mustCurrentAdminUserID(c),
 		IdempotencyKey: c.GetHeader("Idempotency-Key"), RequestID: middleware.GetRequestID(c), Path: c.FullPath(),
 	})
@@ -637,7 +641,8 @@ func toAdminDomainListResponse(result *coreapp.AdminDomainListResult) adminDomai
 func adminDomainFromApp(item *coreapp.AdminDomainItem) adminDomainItemResponse {
 	return adminDomainItemResponse{
 		ID: item.ID, Version: item.Version, OwnerID: item.Owner.ID, OwnerEmail: item.Owner.Email, OwnerNickname: item.Owner.Nickname, OwnerRole: item.Owner.Role,
-		Domain: item.Domain, DomainTLD: item.DomainTLD, MailServerID: item.MailServerID, Purpose: item.Purpose, Status: item.Status,
+		Domain: item.Domain, DomainTLD: item.DomainTLD, MailServerID: item.MailServerID, Purpose: item.Purpose,
+		AllowNewBindings: item.AllowNewBindings, Status: item.Status,
 		MailboxCount: item.MailboxCount, LastSafeError: item.LastSafeError, LastAllocatedAt: item.LastAllocatedAt, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
 	}
 }

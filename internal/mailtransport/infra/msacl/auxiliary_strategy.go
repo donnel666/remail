@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -62,6 +63,11 @@ func InferBindingAddress(accountEmail, maskedProof string) string {
 func UsesActiveAuxiliaryDomain(address string) bool {
 	_, domain, ok := strings.Cut(strings.ToLower(strings.TrimSpace(address)), "@")
 	return ok && domainInProject(domain)
+}
+
+func usesAuxiliaryAllocationDomain(address string) bool {
+	_, domain, ok := strings.Cut(strings.ToLower(strings.TrimSpace(address)), "@")
+	return ok && slices.Contains(activeAuxiliaryAllocationDomains(), domain)
 }
 
 func deterministicAuxiliaryAddressForDomain(accountEmail, domainName string) (string, error) {

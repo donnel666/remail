@@ -41,6 +41,7 @@ const DOMAIN = {
   domainTld: "com",
   mailServerId: 3,
   purpose: "not_sale" as const,
+  allowNewBindings: false,
   status: "disabled" as const,
   mailboxCount: 1,
   lastAllocatedAt: null,
@@ -128,6 +129,7 @@ describe("admin domain API adapter", () => {
         body: {
           ownerId: 10,
           purpose: "sale",
+          allowNewBindings: undefined,
           mailServerId: 4,
           statusCommand: "enable",
         },
@@ -150,12 +152,47 @@ describe("admin domain API adapter", () => {
       updateAdminDomain(42, {
         ownerId: DOMAIN.ownerId,
         purpose: DOMAIN.purpose,
+        allowNewBindings: DOMAIN.allowNewBindings,
         mailServerId: DOMAIN.mailServerId,
         status: DOMAIN.status,
       })
     ).resolves.toMatchObject({ id: 42 });
 
     expect(apiMocks.PATCH).not.toHaveBeenCalled();
+  });
+
+  it("sends the new-binding permission independently", async () => {
+    const bindingDomain = {
+      ...DOMAIN,
+      purpose: "binding" as const,
+    };
+    apiMocks.GET.mockResolvedValueOnce({ data: bindingDomain });
+    apiMocks.PATCH.mockResolvedValueOnce({
+      data: { ...bindingDomain, version: 8, allowNewBindings: true },
+    });
+
+    await updateAdminDomain(42, { allowNewBindings: true });
+
+    expect(apiMocks.PATCH).toHaveBeenCalledWith(
+      "/v1/admin/domains/{domainId}",
+      {
+        body: {
+          ownerId: undefined,
+          purpose: undefined,
+          allowNewBindings: true,
+          mailServerId: undefined,
+          statusCommand: undefined,
+        },
+        params: {
+          header: {
+            "X-CSRF-Token": "domain-csrf",
+            "Idempotency-Key": "domain-command-1",
+          },
+          path: { domainId: 42 },
+          query: { version: 7 },
+        },
+      }
+    );
   });
 
   it("keeps owner availability for editor validation", async () => {

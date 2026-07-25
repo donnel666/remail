@@ -306,6 +306,8 @@
   "Purpose": "Purpose",
   "Sale": "Sale",
   "Binding": "Binding",
+  "Allow new auxiliary mailboxes": "Allow new auxiliary mailboxes",
+  "When disabled, this domain only receives mail for existing bindings.": "When disabled, this domain only receives mail for existing bindings.",
   "Mailboxes": "Mailboxes",
   "No domain email resources yet": "No domain email resources yet",
   "DNS Setup": "DNS Setup",

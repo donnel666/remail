@@ -477,6 +477,7 @@ export default function AdminDomainEmails() {
           domain: draft.domain,
           ownerId: draft.ownerId as number,
           purpose: draft.purpose,
+          allowNewBindings: draft.allowNewBindings,
           mailServerId: draft.mailServerId,
         };
         await createAdminDomain(payload);
@@ -486,6 +487,7 @@ export default function AdminDomainEmails() {
         await updateAdminDomain(editorTarget.id, {
           ownerId: draft.ownerId,
           purpose: draft.purpose,
+          allowNewBindings: draft.allowNewBindings,
           status: draft.status,
           mailServerId: draft.mailServerId,
         });

@@ -1112,7 +1112,7 @@ func (a *ResourceValidationAdapter) prepareBindingAddress(req coreapp.MicrosoftV
 		}
 		return "", nil
 	}
-	if bindingAddress == "" {
+	if bindingAddress == "" && msacl.CanAllocateAuxiliaryMailbox() {
 		generated, err := msacl.DeterministicAuxiliaryAddress(req.EmailAddress)
 		if err != nil {
 			return "", err

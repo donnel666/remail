@@ -5,27 +5,29 @@ import (
 	"testing"
 	"time"
 
+	"github.com/donnel666/remail/internal/mailtransport/infra/msacl"
 	"github.com/stretchr/testify/require"
 )
 
-type bindingDomainListerFunc func(context.Context) ([]string, error)
+type bindingDomainListerFunc func(context.Context) ([]string, []string, error)
 
-func (f bindingDomainListerFunc) ListBindingDomains(ctx context.Context) ([]string, error) {
+func (f bindingDomainListerFunc) ListBindingDomains(ctx context.Context) ([]string, []string, error) {
 	return f(ctx)
 }
 
 func TestAuxiliaryDomainSeedTimeoutAllowsNextRound(t *testing.T) {
+	t.Cleanup(func() { msacl.SetAuxiliaryDomains([]string{"recovery.test"}) })
 	const timeout = 20 * time.Millisecond
 	started := time.Now()
-	refreshAuxiliaryDomainsWithin(context.Background(), bindingDomainListerFunc(func(ctx context.Context) ([]string, error) {
+	refreshAuxiliaryDomainsWithin(context.Background(), bindingDomainListerFunc(func(ctx context.Context) ([]string, []string, error) {
 		<-ctx.Done()
-		return nil, ctx.Err()
+		return nil, nil, ctx.Err()
 	}), timeout)
 
 	nextRoundRan := false
-	refreshAuxiliaryDomainsWithin(context.Background(), bindingDomainListerFunc(func(context.Context) ([]string, error) {
+	refreshAuxiliaryDomainsWithin(context.Background(), bindingDomainListerFunc(func(context.Context) ([]string, []string, error) {
 		nextRoundRan = true
-		return nil, nil
+		return nil, nil, nil
 	}), timeout)
 
 	require.True(t, nextRoundRan)
@@ -38,10 +40,10 @@ func TestAuxiliaryDomainSeedStopsOnParentCancellation(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		refreshAuxiliaryDomainsWithin(ctx, bindingDomainListerFunc(func(callCtx context.Context) ([]string, error) {
+		refreshAuxiliaryDomainsWithin(ctx, bindingDomainListerFunc(func(callCtx context.Context) ([]string, []string, error) {
 			close(started)
 			<-callCtx.Done()
-			return nil, callCtx.Err()
+			return nil, nil, callCtx.Err()
 		}), time.Minute)
 	}()
 

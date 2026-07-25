@@ -376,7 +376,7 @@ func openRecoveryRuntime(ctx context.Context, historyWindow time.Duration) (*rec
 	msacl.SetMailboxReader(mailinfra.NewMSACLMailboxReaderWithContentWindow(db, files, historyWindow))
 
 	store := newRecoveryStore(db)
-	domains, err := store.resources.ListBindingDomains(ctx)
+	domains, allocationDomains, err := store.resources.ListBindingDomains(ctx)
 	if err != nil {
 		_ = sqlDB.Close()
 		return nil, err
@@ -385,7 +385,7 @@ func openRecoveryRuntime(ctx context.Context, historyWindow time.Duration) (*rec
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("no normal binding-purpose domains are configured")
 	}
-	msacl.SetAuxiliaryDomains(domains)
+	msacl.SetAuxiliaryDomainPolicy(domains, allocationDomains)
 	allowedDomains := make(map[string]struct{}, len(domains))
 	for _, domain := range domains {
 		if normalized := strings.Trim(strings.ToLower(strings.TrimSpace(domain)), "."); normalized != "" {
