@@ -60,9 +60,9 @@ export async function getTurnstileConfig() {
 }
 
 export async function sendEmailCode(payload: EmailCodeRequest) {
-  return unwrap<void>(
-    await client.POST("/v1/email/code", { body: payload })
-  );
+  const result = await client.POST("/v1/email/code", { body: payload });
+  await unwrap<void>(result);
+  return Number.parseInt(result.response.headers.get("Retry-After") ?? "", 10) || 0;
 }
 
 export async function login(payload: LoginRequest) {
@@ -122,9 +122,9 @@ export async function changePassword(payload: ChangePasswordRequest) {
 }
 
 export async function requestPasswordReset(payload: PasswordResetCodeRequest) {
-  return unwrap<void>(
-    await client.POST("/v1/password/reset/request", { body: payload })
-  );
+  const result = await client.POST("/v1/password/reset/request", { body: payload });
+  await unwrap<void>(result);
+  return Number.parseInt(result.response.headers.get("Retry-After") ?? "", 10) || 0;
 }
 
 export async function resetPassword(payload: PasswordResetRequest) {

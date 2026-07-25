@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/donnel666/remail/internal/iam/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 // LoginUseCase handles user authentication.
@@ -22,15 +23,16 @@ func NewLoginUseCase(repo UserRepository, hasher Hasher, sessions SessionStore) 
 
 // LoginResult contains the outcome of a successful login.
 type LoginResult struct {
-	Session *domain.Session
-	User    *domain.User
+	Session       *domain.Session
+	User          *domain.User
+	SessionMaxAge int
 }
 
 // Login authenticates a user by email and password after the API boundary has
 // validated the request's Turnstile token.
 // Disabled accounts return the same error to prevent account enumeration
 // (docs/8-iam.md:109 — only "Account or password is incorrect" is safe to expose).
-func (uc *LoginUseCase) Login(ctx context.Context, email, password string, sessionTTL int) (*LoginResult, error) {
+func (uc *LoginUseCase) Login(ctx context.Context, email, password string) (*LoginResult, error) {
 	user, err := uc.repo.FindByEmail(ctx, normalizeEmail(email))
 	if err != nil {
 		return nil, fmt.Errorf("login find user: %w", err)
@@ -75,12 +77,14 @@ func (uc *LoginUseCase) Login(ctx context.Context, email, password string, sessi
 		CreatedAt:    now,
 	}
 
-	if err := uc.sessions.Create(ctx, session, sessionTTL); err != nil {
+	sessionMaxAge := runtimeconfig.Int("session_max_age_seconds", 86400, 300)
+	if err := uc.sessions.Create(ctx, session, sessionMaxAge); err != nil {
 		return nil, fmt.Errorf("login create session: %w", err)
 	}
 
 	return &LoginResult{
-		Session: session,
-		User:    user,
+		Session:       session,
+		User:          user,
+		SessionMaxAge: sessionMaxAge,
 	}, nil
 }

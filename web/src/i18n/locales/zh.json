@@ -148,6 +148,7 @@
   "Request failed.": "请求失败。",
   "Login failed.": "登录失败。",
   "Registration failed.": "注册失败。",
+  "Registration is disabled.": "当前已关闭开放注册，请使用邀请链接。",
   "Activation failed.": "激活失败。",
   "Failed to load activation status.": "无法加载激活状态。",
   "Failed to send verification code.": "验证码发送失败。",

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -89,7 +90,7 @@ func NewAbuseLimiter(rdb redis.UniversalClient) *AbuseLimiter {
 
 // HitTurnstile limits outbound Siteverify calls by client IP.
 func (l *AbuseLimiter) HitTurnstile(ctx context.Context, ip string) (int, error) {
-	retry, err := abuseHitScript.Run(ctx, l.rdb, []string{abuseIPKey("turnstile", ip)}, turnstileLimit, turnstileWindow).Int()
+	retry, err := abuseHitScript.Run(ctx, l.rdb, []string{abuseIPKey("turnstile", ip)}, runtimeconfig.Int("captcha_rate_limit", turnstileLimit, 1), turnstileWindow).Int()
 	if err != nil {
 		return 0, fmt.Errorf("redis turnstile abuse limit: %w", err)
 	}
@@ -97,9 +98,14 @@ func (l *AbuseLimiter) HitTurnstile(ctx context.Context, ip string) (int, error)
 }
 
 func (l *AbuseLimiter) TakeLogin(ctx context.Context, email, ip string) (int, error) {
+	settings := runtimeconfig.Snapshot()
 	return l.take(ctx,
 		[]string{abuseEmailKey("login_email", email), abuseIPKey("login_ip", ip)},
-		[]any{loginEmailLimit, loginIPLimit, loginWindow},
+		[]any{
+			settings.Int("login_email_limit", loginEmailLimit, 1),
+			settings.Int("login_ip_limit", loginIPLimit, 1),
+			settings.Int("login_window_seconds", loginWindow, 1),
+		},
 		"login",
 	)
 }
@@ -113,17 +119,27 @@ func (l *AbuseLimiter) CompleteLogin(ctx context.Context, email, ip string) erro
 }
 
 func (l *AbuseLimiter) TakePasswordReset(ctx context.Context, email, ip string) (int, error) {
+	settings := runtimeconfig.Snapshot()
 	return l.take(ctx,
 		[]string{abuseEmailKey("email_code_email", email), abuseIPKey("email_code_ip", ip)},
-		[]any{emailCodeEmailLimit, emailCodeIPLimit, emailCodeWindow},
+		[]any{
+			settings.Int("email_code_email_limit", emailCodeEmailLimit, 1),
+			settings.Int("email_code_ip_limit", emailCodeIPLimit, 1),
+			settings.Int("email_code_window_seconds", emailCodeWindow, 1),
+		},
 		"password reset",
 	)
 }
 
 func (l *AbuseLimiter) TakeRegistration(ctx context.Context, email, ip string) (int, error) {
+	settings := runtimeconfig.Snapshot()
 	return l.take(ctx,
 		[]string{abuseEmailKey("email_code_email", email), abuseIPKey("email_code_ip", ip)},
-		[]any{emailCodeEmailLimit, emailCodeIPLimit, emailCodeWindow},
+		[]any{
+			settings.Int("email_code_email_limit", emailCodeEmailLimit, 1),
+			settings.Int("email_code_ip_limit", emailCodeIPLimit, 1),
+			settings.Int("email_code_window_seconds", emailCodeWindow, 1),
+		},
 		"registration",
 	)
 }

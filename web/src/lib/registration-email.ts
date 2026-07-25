@@ -1,14 +1,4 @@
-const ALLOWED_REGISTRATION_DOMAINS = new Set([
-  "qq.com",
-  "foxmail.com",
-  "gmail.com",
-  "proton.me",
-  "protonmail.com",
-  "pm.me",
-  "mail.com",
-]);
-
-/** Local part: letters/digits only. Domain must be on the supported free-mail list. */
+/** Local part is checked client-side; the runtime domain whitelist lives on the server. */
 export function validateRegistrationEmail(email: string): string | null {
   const normalized = email.trim().toLowerCase();
   const at = normalized.lastIndexOf("@");
@@ -22,9 +12,6 @@ export function validateRegistrationEmail(email: string): string | null {
   }
   if (!/^[a-z0-9]+$/i.test(local)) {
     return "Email local part must contain only letters and digits.";
-  }
-  if (!ALLOWED_REGISTRATION_DOMAINS.has(host)) {
-    return "Registration with this email domain is not allowed.";
   }
   return null;
 }

@@ -29,7 +29,7 @@ func (uc *PasswordResetUseCase) Request(ctx context.Context, email string) (bool
 	// Acquire the resend cooldown before the user lookup so a registered and an
 	// unknown email throttle identically and existence cannot be probed by
 	// comparing responses to a repeated request.
-	started, retryAfter, err := uc.codeStore.StartCooldown(ctx, emailCodeKey(normalized), emailCodeResendGap)
+	started, retryAfter, err := uc.codeStore.StartCooldown(ctx, emailCodeKey(normalized), EmailCodeResendGapSeconds())
 	if err != nil {
 		return false, fmt.Errorf("password reset cooldown: %w", err)
 	}

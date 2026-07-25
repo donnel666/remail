@@ -141,6 +141,7 @@ type AdjustConsumerBalanceRequest struct {
 	UserID          uint
 	Amount          string
 	Reason          string
+	BizType         string
 	TransactionType domain.TransactionType
 	IdempotencyKey  string
 	RequestID       string
@@ -151,6 +152,7 @@ type AdjustConsumerBalanceCommand struct {
 	UserID             uint
 	Amount             string
 	Reason             string
+	BizType            string
 	TransactionType    domain.TransactionType
 	Direction          domain.TransactionDirection
 	ClampToBalance     bool
@@ -303,6 +305,19 @@ func (uc *WalletUseCase) CreditConsumer(ctx context.Context, req AdjustConsumerB
 	return uc.adjustConsumer(ctx, req, domain.TransactionDirectionIn, false)
 }
 
+// GrantRegistrationReward idempotently credits a user's consumer wallet once.
+func (uc *WalletUseCase) GrantRegistrationReward(ctx context.Context, userID uint, amount string) error {
+	const bizType = "registration_reward"
+	_, err := uc.CreditConsumer(ctx, AdjustConsumerBalanceRequest{
+		UserID:         userID,
+		Amount:         amount,
+		Reason:         bizType,
+		BizType:        bizType,
+		IdempotencyKey: fmt.Sprintf("registration_reward:%d", userID),
+	})
+	return err
+}
+
 func (uc *WalletUseCase) DebitConsumer(ctx context.Context, req AdjustConsumerBalanceRequest) (*AdjustBalanceResult, error) {
 	req.TransactionType = domain.TransactionTypeDebit
 	return uc.adjustConsumer(ctx, req, domain.TransactionDirectionOut, false)
@@ -333,16 +348,21 @@ func (uc *WalletUseCase) adjustConsumer(ctx context.Context, req AdjustConsumerB
 	if idempotencyKey == "" {
 		return nil, domain.ErrIdempotencyRequired
 	}
-	fingerprint := fingerprint("wallet.adjust", req.UserID, string(req.TransactionType), string(direction), amount, reason)
+	requestFingerprint := fingerprint("wallet.adjust", req.UserID, string(req.TransactionType), string(direction), amount, reason)
+	bizType := strings.TrimSpace(req.BizType)
+	if bizType != "" {
+		requestFingerprint = fingerprint("wallet.adjust", req.UserID, string(req.TransactionType), string(direction), amount, reason, bizType)
+	}
 	return uc.repo.AdjustConsumerBalance(ctx, AdjustConsumerBalanceCommand{
 		UserID:             req.UserID,
 		Amount:             amount,
 		Reason:             reason,
+		BizType:            bizType,
 		TransactionType:    req.TransactionType,
 		Direction:          direction,
 		ClampToBalance:     clampToBalance,
 		IdempotencyKey:     idempotencyKey,
-		RequestFingerprint: fingerprint,
+		RequestFingerprint: requestFingerprint,
 		RequestID:          strings.TrimSpace(req.RequestID),
 		Now:                uc.now(),
 		OperationLog:       req.OperationLog,

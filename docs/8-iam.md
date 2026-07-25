@@ -134,7 +134,7 @@ eft = allow/deny
 | 当前用户 | `GET /v1/me`。 |
 | 改密码 | 成功后递增 `tokenVersion`，清理旧 Session。 |
 | 禁用用户 | 递增 `tokenVersion`，清理旧 Session 和 API Key 缓存。 |
-| 人机验证 | 登录、注册发码、找回密码发码提交 Cloudflare Turnstile token；服务端调用 Siteverify 并校验对应 `action`。 |
+| 人机验证 | 系统设置 `captcha_enabled=true` 时，登录、注册发码、找回密码发码提交 Cloudflare Turnstile token；服务端调用 Siteverify 并校验对应 `action`。 |
 | 邮箱验证码 | `POST /v1/email/code` 发送，发送幂等，验证码不进日志。 |
 
 认证错误：
@@ -189,7 +189,7 @@ eft = allow/deny
 | `POST` | `/v1/login` | 登录。 |
 | `DELETE` | `/v1/sessions/current` | 登出。 |
 | `GET` | `/v1/me` | 当前用户。 |
-| `GET` | `/v1/turnstile/config` | 返回公开的 Turnstile site key，不返回 secret key。 |
+| `GET` | `/v1/turnstile/config` | 返回运行时启用状态和公开的 Turnstile site key，不返回 secret key。 |
 | `POST` | `/v1/email/code` | 发送邮箱验证码。 |
 | `POST` | `/v1/users` | 注册用户。 |
 | `POST` | `/v1/password/reset/request` | 创建找回密码请求。 |
@@ -218,10 +218,10 @@ eft = allow/deny
 
 | 场景 | 规则 |
 |------|------|
-| 登录 | `POST /v1/login` 必须提交 `action=login` 的 Turnstile token。 |
-| 发送注册邮箱验证码 | `POST /v1/email/code` 必须提交 `action=register_email_code` 的 Turnstile token，Turnstile 只控制发邮件动作。 |
+| 登录 | `captcha_enabled=true` 时，`POST /v1/login` 必须提交 `action=login` 的 Turnstile token。 |
+| 发送注册邮箱验证码 | `captcha_enabled=true` 时，`POST /v1/email/code` 必须提交 `action=register_email_code` 的 Turnstile token，Turnstile 只控制发邮件动作。 |
 | 注册用户 | `POST /v1/users` 必须提交邮箱验证码，邮箱验证码控制最终注册动作。 |
-| 发送找回密码邮箱验证码 | `POST /v1/password/reset/request` 必须提交 `action=password_reset_code` 的 Turnstile token，Turnstile 只控制发邮件动作。 |
+| 发送找回密码邮箱验证码 | `captcha_enabled=true` 时，`POST /v1/password/reset/request` 必须提交 `action=password_reset_code` 的 Turnstile token，Turnstile 只控制发邮件动作。 |
 | 执行找回密码 | `POST /v1/password/reset` 必须提交邮箱验证码，邮箱验证码控制最终重置动作。 |
 | Token 规则 | token 只使用一次、最长有效 5 分钟；前端每次提交后重置组件，后端始终执行 Siteverify，不信任客户端结果。 |
 

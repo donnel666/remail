@@ -2,7 +2,7 @@ package runtimeconfig
 
 import "github.com/donnel666/remail/internal/systemsettings/domain"
 
-const DefaultSettingsCount = 128
+const DefaultSettingsCount = 144
 
 // DefaultSettings is the single source of initial values for runtime-managed
 // settings. Startup inserts only keys that are not in storage.
@@ -11,6 +11,23 @@ func DefaultSettings() []domain.Setting {
 }
 
 var defaultSettings = []domain.Setting{
+	{Key: "register_enabled", Value: "true"},
+	{Key: "registration_email_whitelist", Value: "qq.com,foxmail.com,gmail.com,proton.me,protonmail.com,pm.me,mail.com"},
+	{Key: "registration_reward_amount", Value: "0"},
+	{Key: "captcha_enabled", Value: "true"},
+	{Key: "login_email_limit", Value: "10"},
+	{Key: "login_ip_limit", Value: "60"},
+	{Key: "login_window_seconds", Value: "900"},
+	{Key: "email_code_email_limit", Value: "5"},
+	{Key: "email_code_ip_limit", Value: "30"},
+	{Key: "email_code_window_seconds", Value: "600"},
+	{Key: "captcha_rate_limit", Value: "30"},
+	{Key: "email_code_ttl_seconds", Value: "600"},
+	{Key: "email_code_resend_gap_seconds", Value: "60"},
+	{Key: "email_code_digit_len", Value: "6"},
+	{Key: "bcrypt_cost", Value: "12"},
+	{Key: "session_max_age_seconds", Value: "86400"},
+
 	{Key: "microsoft_domain_whitelist", Value: "outlook.com,hotmail.com,outlook.sa,outlook.com.ar,outlook.com.au,outlook.at,outlook.be,outlook.com.br,outlook.cl,outlook.cz,outlook.fr,outlook.de,outlook.com.gr,outlook.co.il,outlook.in,outlook.co.id,outlook.ie,outlook.it,outlook.hu,outlook.jp,outlook.kr,outlook.lv,outlook.my,outlook.co.nz,outlook.ph,outlook.pt,outlook.sg,outlook.sk,outlook.es,outlook.co.th,outlook.com.tr,outlook.com.vn"},
 	{Key: "default_plus_daily_limit", Value: "10000"},
 	{Key: "default_mailbox_daily_limit", Value: "10000"},

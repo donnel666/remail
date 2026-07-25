@@ -96,7 +96,6 @@ type MigrationsConfig struct {
 // SessionConfig holds session settings.
 type SessionConfig struct {
 	Secret string
-	MaxAge int
 	Secure bool
 }
 
@@ -164,7 +163,6 @@ func Load() (*Config, error) {
 		},
 		Session: SessionConfig{
 			Secret: getEnv("SESSION_SECRET", ""),
-			MaxAge: getInt("SESSION_MAX_AGE", 86400),
 			Secure: getBool("SESSION_SECURE", false),
 		},
 		Turnstile: TurnstileConfig{

@@ -28,6 +28,8 @@ func TestDefaultSettingsAreValidAndIndependent(t *testing.T) {
 		}
 	}
 	require.Equal(t, "32", keys["background_worker_increase_step"])
+	require.Equal(t, "0", keys["registration_reward_amount"])
+	require.Equal(t, "86400", keys["session_max_age_seconds"])
 	whitelistValue := ""
 	for _, setting := range defaults {
 		if setting.Key == "microsoft_domain_whitelist" {

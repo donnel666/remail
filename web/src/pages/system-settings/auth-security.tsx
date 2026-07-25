@@ -19,7 +19,7 @@ import {
 
 const D: Record<string, unknown> = {
   register_enabled: true,
-  registration_email_whitelist: "qq.com,gmail.com,...",
+  registration_email_whitelist: "qq.com,foxmail.com,gmail.com,proton.me,protonmail.com,pm.me,mail.com",
   registration_reward_amount: 0,
   password_login_enabled: true,
   captcha_enabled: true,
@@ -113,18 +113,18 @@ export default function AuthSecuritySection({ options, onBulkSave, canSensitive 
       description={t("配置登录防暴力破解、验证码防滥用、密码哈希和会话有效期")}
     />}>
       <SettingsFormGrid className="mt-4">
-        <SettingsNumberField label={t("单邮箱登录限制次数")} value={number(form.login_email_limit)} onChange={(value) => update("login_email_limit", value)} min={0} />
-        <SettingsNumberField label={t("单IP登录限制次数")} value={number(form.login_ip_limit)} onChange={(value) => update("login_ip_limit", value)} min={0} />
-        <SettingsNumberField label={t("登录频率统计窗口（秒）")} value={number(form.login_window_seconds)} onChange={(value) => update("login_window_seconds", value)} min={0} />
-        <SettingsNumberField label={t("单邮箱验证码发送限制")} value={number(form.email_code_email_limit)} onChange={(value) => update("email_code_email_limit", value)} min={0} />
-        <SettingsNumberField label={t("单IP验证码发送限制")} value={number(form.email_code_ip_limit)} onChange={(value) => update("email_code_ip_limit", value)} min={0} />
-        <SettingsNumberField label={t("验证码频率统计窗口（秒）")} value={number(form.email_code_window_seconds)} onChange={(value) => update("email_code_window_seconds", value)} min={0} />
-        <SettingsNumberField label={t("人机验证频率限制（次/60秒）")} value={number(form.captcha_rate_limit)} onChange={(value) => update("captcha_rate_limit", value)} min={0} />
-        <SettingsNumberField label={t("验证码有效期（秒）")} value={number(form.email_code_ttl_seconds)} onChange={(value) => update("email_code_ttl_seconds", value)} min={0} />
-        <SettingsNumberField label={t("验证码重发间隔（秒）")} value={number(form.email_code_resend_gap_seconds)} onChange={(value) => update("email_code_resend_gap_seconds", value)} min={0} />
-        <SettingsNumberField label={t("验证码位数")} value={number(form.email_code_digit_len)} onChange={(value) => update("email_code_digit_len", value)} min={0} />
-        <SettingsNumberField label={t("密码哈希成本（bcrypt cost）")} value={number(form.bcrypt_cost)} onChange={(value) => update("bcrypt_cost", value)} min={0} />
-        <SettingsNumberField label={t("会话有效期（秒）")} value={number(form.session_max_age_seconds)} onChange={(value) => update("session_max_age_seconds", value)} min={0} />
+        <SettingsNumberField label={t("单邮箱登录限制次数")} value={number(form.login_email_limit)} onChange={(value) => update("login_email_limit", value)} min={1} max={1000} />
+        <SettingsNumberField label={t("单IP登录限制次数")} value={number(form.login_ip_limit)} onChange={(value) => update("login_ip_limit", value)} min={1} max={10000} />
+        <SettingsNumberField label={t("登录频率统计窗口（秒）")} value={number(form.login_window_seconds)} onChange={(value) => update("login_window_seconds", value)} min={1} max={86400} />
+        <SettingsNumberField label={t("单邮箱验证码发送限制")} value={number(form.email_code_email_limit)} onChange={(value) => update("email_code_email_limit", value)} min={1} max={1000} />
+        <SettingsNumberField label={t("单IP验证码发送限制")} value={number(form.email_code_ip_limit)} onChange={(value) => update("email_code_ip_limit", value)} min={1} max={10000} />
+        <SettingsNumberField label={t("验证码频率统计窗口（秒）")} value={number(form.email_code_window_seconds)} onChange={(value) => update("email_code_window_seconds", value)} min={1} max={86400} />
+        <SettingsNumberField label={t("人机验证频率限制（次/60秒）")} value={number(form.captcha_rate_limit)} onChange={(value) => update("captcha_rate_limit", value)} min={1} max={10000} />
+        <SettingsNumberField label={t("验证码有效期（秒）")} value={number(form.email_code_ttl_seconds)} onChange={(value) => update("email_code_ttl_seconds", value)} min={1} max={86400} />
+        <SettingsNumberField label={t("验证码重发间隔（秒）")} value={number(form.email_code_resend_gap_seconds)} onChange={(value) => update("email_code_resend_gap_seconds", value)} min={1} max={3600} />
+        <SettingsNumberField label={t("验证码位数")} value={number(form.email_code_digit_len)} onChange={(value) => update("email_code_digit_len", value)} min={4} max={10} />
+        <SettingsNumberField label={t("密码哈希成本（bcrypt cost）")} value={number(form.bcrypt_cost)} onChange={(value) => update("bcrypt_cost", value)} min={4} max={16} />
+        <SettingsNumberField label={t("会话有效期（秒）")} value={number(form.session_max_age_seconds)} onChange={(value) => update("session_max_age_seconds", value)} min={300} max={31536000} />
       </SettingsFormGrid>
       <Button icon={<Save size={14} />} loading={savingCard === "security"} onClick={() => void saveCard("security", ["login_email_limit", "login_ip_limit", "login_window_seconds", "email_code_email_limit", "email_code_ip_limit", "email_code_window_seconds", "captcha_rate_limit", "email_code_ttl_seconds", "email_code_resend_gap_seconds", "email_code_digit_len", "bcrypt_cost", "session_max_age_seconds"]).catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
     </SettingsSection>

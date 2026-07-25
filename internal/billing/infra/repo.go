@@ -633,9 +633,12 @@ func (r *BillingRepo) redeemCardInTx(ctx context.Context, tx *gorm.DB, req billi
 }
 
 func (r *BillingRepo) adjustConsumerBalanceInTx(ctx context.Context, tx *gorm.DB, wallet *WalletModel, req billingapp.AdjustConsumerBalanceCommand) (*billingapp.AdjustBalanceResult, error) {
-	bizType := "admin_wallet_adjustment"
-	if req.TransactionType == domain.TransactionTypeRefund {
-		bizType = "wallet_refund"
+	bizType := strings.TrimSpace(req.BizType)
+	if bizType == "" {
+		bizType = "admin_wallet_adjustment"
+		if req.TransactionType == domain.TransactionTypeRefund {
+			bizType = "wallet_refund"
+		}
 	}
 	result, err := r.createConsumerTransaction(ctx, tx, wallet, consumerTransactionRequest{
 		UserID:          req.UserID,

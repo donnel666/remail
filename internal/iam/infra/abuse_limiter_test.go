@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )
@@ -61,6 +62,31 @@ func TestAbuseLimiterThresholdsAndClear(t *testing.T) {
 		require.False(t, strings.Contains(key, "test.com"), key)
 		require.False(t, strings.Contains(key, "203.0.113"), key)
 	}
+}
+
+func TestAbuseLimiterUsesRuntimeSettings(t *testing.T) {
+	runtimeconfig.Set("login_email_limit", "2")
+	runtimeconfig.Set("login_ip_limit", "3")
+	runtimeconfig.Set("login_window_seconds", "7")
+	t.Cleanup(func() {
+		runtimeconfig.Delete("login_email_limit")
+		runtimeconfig.Delete("login_ip_limit")
+		runtimeconfig.Delete("login_window_seconds")
+	})
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	limiter := NewAbuseLimiter(client)
+	ctx := context.Background()
+
+	for range 2 {
+		retry, err := limiter.TakeLogin(ctx, "runtime@test.com", "203.0.113.20")
+		require.NoError(t, err)
+		require.Zero(t, retry)
+	}
+	retry, err := limiter.TakeLogin(ctx, "runtime@test.com", "203.0.113.20")
+	require.NoError(t, err)
+	require.Equal(t, 7, retry)
 }
 
 func TestAbuseLimiterPasswordResetLimitIsAtomic(t *testing.T) {

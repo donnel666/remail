@@ -18,21 +18,20 @@ import (
 	"github.com/donnel666/remail/internal/iam/app"
 	"github.com/donnel666/remail/internal/iam/domain"
 	maildomain "github.com/donnel666/remail/internal/mailtransport/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/gin-gonic/gin"
 )
 
 // IAMHandler holds the IAM HTTP handlers.
 type IAMHandler struct {
 	module        *IAMModule
-	sessionMaxAge int
 	sessionSecure bool
 }
 
 // NewIAMHandler creates a new IAM handler.
-func NewIAMHandler(module *IAMModule, sessionMaxAge int, sessionSecure bool) *IAMHandler {
+func NewIAMHandler(module *IAMModule, sessionSecure bool) *IAMHandler {
 	return &IAMHandler{
 		module:        module,
-		sessionMaxAge: sessionMaxAge,
 		sessionSecure: sessionSecure,
 	}
 }
@@ -78,11 +77,12 @@ const (
 
 // GET /v1/turnstile/config
 func (h *IAMHandler) GetTurnstileConfig(c *gin.Context) {
-	if strings.TrimSpace(h.module.TurnstileSiteKey) == "" {
+	enabled := runtimeconfig.Bool("captcha_enabled", true)
+	if enabled && strings.TrimSpace(h.module.TurnstileSiteKey) == "" {
 		writeError(c, domain.ErrTurnstileUnavailable)
 		return
 	}
-	c.JSON(http.StatusOK, TurnstileConfigResponse{SiteKey: h.module.TurnstileSiteKey})
+	c.JSON(http.StatusOK, TurnstileConfigResponse{Enabled: enabled, SiteKey: h.module.TurnstileSiteKey})
 }
 
 // POST /v1/email/code
@@ -112,6 +112,7 @@ func (h *IAMHandler) PostEmailCode(c *gin.Context) {
 		}
 	}
 
+	c.Header("Retry-After", strconv.Itoa(app.EmailCodeResendGapSeconds()))
 	c.Status(http.StatusNoContent)
 }
 
@@ -189,6 +190,7 @@ func (h *IAMHandler) PostPasswordResetRequest(c *gin.Context) {
 			slog.Warn("clear password reset email abuse limit", "request_id", middleware.GetRequestID(c), "error", err.Error())
 		}
 	}
+	c.Header("Retry-After", strconv.Itoa(app.EmailCodeResendGapSeconds()))
 	c.Status(http.StatusNoContent)
 }
 
@@ -272,7 +274,7 @@ func (h *IAMHandler) PostLogin(c *gin.Context) {
 		}
 	}
 
-	result, err := h.module.LoginUseCase.Login(c.Request.Context(), req.Email, req.Password, h.sessionMaxAge)
+	result, err := h.module.LoginUseCase.Login(c.Request.Context(), req.Email, req.Password)
 	if err != nil {
 		if !errors.Is(err, domain.ErrAccountOrPasswordIncorrect) && h.module.AbuseLimiter != nil {
 			if limitErr := h.module.AbuseLimiter.CancelLogin(c.Request.Context(), req.Email, clientIP); limitErr != nil {
@@ -289,12 +291,19 @@ func (h *IAMHandler) PostLogin(c *gin.Context) {
 		}
 	}
 
-	setAuthCookies(c, result.Session.ID, csrfToken, h.sessionMaxAge, h.sessionSecure)
+	setAuthCookies(c, result.Session.ID, csrfToken, result.SessionMaxAge, h.sessionSecure)
 
 	c.JSON(http.StatusOK, LoginResponse{User: h.userResponseWithPermissions(c.Request.Context(), result.User)})
 }
 
 func (h *IAMHandler) verifyTurnstile(c *gin.Context, token, action string) bool {
+	if !runtimeconfig.Bool("captcha_enabled", true) {
+		return true
+	}
+	if strings.TrimSpace(token) == "" {
+		writeError(c, domain.ErrTurnstileInvalid)
+		return false
+	}
 	if h.module.AbuseLimiter != nil {
 		retryAfter, err := h.module.AbuseLimiter.HitTurnstile(c.Request.Context(), c.ClientIP())
 		if err != nil {
@@ -1505,6 +1514,11 @@ func writeError(c *gin.Context, err error) {
 			"message":   "Email already exists.",
 			"requestId": rid,
 		})
+	case errors.Is(err, domain.ErrRegistrationDisabled):
+		c.JSON(http.StatusForbidden, gin.H{
+			"message":   "Registration is disabled.",
+			"requestId": rid,
+		})
 	case errors.Is(err, domain.ErrRegistrationEmailLocalInvalid):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
 			"message":   "Email local part must contain only letters and digits.",
@@ -1532,7 +1546,7 @@ func writeError(c *gin.Context, err error) {
 			"requestId": rid,
 		})
 	case errors.Is(err, domain.ErrEmailCodeThrottled):
-		retryAfter := app.EmailCodeResendGapSeconds
+		retryAfter := app.EmailCodeResendGapSeconds()
 		var throttled *domain.EmailCodeThrottledError
 		if errors.As(err, &throttled) && throttled.RetryAfterSeconds > 0 {
 			retryAfter = throttled.RetryAfterSeconds

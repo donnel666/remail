@@ -8,6 +8,7 @@ import (
 
 	"github.com/donnel666/remail/internal/iam/domain"
 	maildomain "github.com/donnel666/remail/internal/mailtransport/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/stretchr/testify/require"
 )
 
@@ -16,6 +17,7 @@ type emailCodeStoreStub struct {
 	codes     map[string]string
 	claims    map[string]string
 	cooldowns map[string]bool
+	lastTTL   int
 }
 
 func newEmailCodeStoreStub() *emailCodeStoreStub {
@@ -39,9 +41,10 @@ func (s *emailCodeStoreStub) ClearCooldown(_ context.Context, key string) error 
 	return nil
 }
 
-func (s *emailCodeStoreStub) CreateIfAbsent(_ context.Context, key, code string, _ int) (string, bool, error) {
+func (s *emailCodeStoreStub) CreateIfAbsent(_ context.Context, key, code string, ttl int) (string, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.lastTTL = ttl
 	if existing, ok := s.codes[key]; ok {
 		return existing, true, nil
 	}
@@ -114,19 +117,31 @@ func (s *mailDeliveryStub) callCount() int {
 }
 
 func TestEmailCodeUseCaseSendThrottlesWithinCooldown(t *testing.T) {
+	runtimeconfig.Set("email_code_resend_gap_seconds", "17")
+	runtimeconfig.Set("email_code_digit_len", "8")
+	runtimeconfig.Set("email_code_ttl_seconds", "123")
+	t.Cleanup(func() {
+		runtimeconfig.Delete("email_code_resend_gap_seconds")
+		runtimeconfig.Delete("email_code_digit_len")
+		runtimeconfig.Delete("email_code_ttl_seconds")
+	})
 	store := newEmailCodeStoreStub()
 	sender := &mailDeliveryStub{}
 	uc := NewEmailCodeUseCase(store, sender)
 
 	require.NoError(t, uc.Send(context.Background(), "User@QQ.COM"))
+	code, err := store.Get(context.Background(), emailCodeKey("user@qq.com"))
+	require.NoError(t, err)
+	require.Len(t, code, 8)
+	require.Equal(t, 123, store.lastTTL)
 
 	// A second send during the cooldown is rejected, not silently dropped, and
 	// carries the remaining cooldown for the Retry-After header.
-	err := uc.Send(context.Background(), "user@qq.com")
+	err = uc.Send(context.Background(), "user@qq.com")
 	require.ErrorIs(t, err, domain.ErrEmailCodeThrottled)
 	var throttled *domain.EmailCodeThrottledError
 	require.True(t, errors.As(err, &throttled))
-	require.Equal(t, emailCodeResendGap, throttled.RetryAfterSeconds)
+	require.Equal(t, 17, throttled.RetryAfterSeconds)
 	require.Equal(t, 1, sender.callCount())
 }
 

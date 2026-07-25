@@ -9,7 +9,7 @@ vi.mock("react-i18next", () => ({
 }));
 
 vi.mock("@/lib/iam-api", () => ({
-  getTurnstileConfig: vi.fn().mockResolvedValue({ siteKey: "site-key" }),
+  getTurnstileConfig: vi.fn().mockResolvedValue({ enabled: true, siteKey: "site-key" }),
 }));
 
 afterEach(() => {

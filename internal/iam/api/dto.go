@@ -21,7 +21,7 @@ type ActivationRequest struct {
 type LoginRequest struct {
 	Email          string `json:"email" binding:"required,email"`
 	Password       string `json:"password" binding:"required"`
-	TurnstileToken string `json:"turnstileToken" binding:"required,max=2048"`
+	TurnstileToken string `json:"turnstileToken" binding:"max=2048"`
 }
 
 // RegisterRequest is the request body for POST /v1/users.
@@ -36,7 +36,7 @@ type RegisterRequest struct {
 // EmailCodeRequest is the request body for POST /v1/email/code.
 type EmailCodeRequest struct {
 	Email          string `json:"email" binding:"required,email"`
-	TurnstileToken string `json:"turnstileToken" binding:"required,max=2048"`
+	TurnstileToken string `json:"turnstileToken" binding:"max=2048"`
 }
 
 // ChangePasswordRequest is the request body for PATCH /v1/password.
@@ -47,7 +47,7 @@ type ChangePasswordRequest struct {
 
 type PasswordResetCodeRequest struct {
 	Email          string `json:"email" binding:"required,email"`
-	TurnstileToken string `json:"turnstileToken" binding:"required,max=2048"`
+	TurnstileToken string `json:"turnstileToken" binding:"max=2048"`
 }
 
 type PasswordResetRequest struct {
@@ -184,8 +184,9 @@ type LoginResponse struct {
 	User UserResponse `json:"user"`
 }
 
-// TurnstileConfigResponse exposes only the public widget site key.
+// TurnstileConfigResponse exposes the runtime switch and public widget site key.
 type TurnstileConfigResponse struct {
+	Enabled bool   `json:"enabled"`
 	SiteKey string `json:"siteKey"`
 }
 

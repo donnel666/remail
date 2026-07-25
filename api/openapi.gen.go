@@ -5592,8 +5592,10 @@ type DomainResourceDetailPurpose string
 
 // EmailCodeRequest defines model for EmailCodeRequest.
 type EmailCodeRequest struct {
-	Email          openapi_types.Email `json:"email"`
-	TurnstileToken string              `json:"turnstileToken"`
+	Email openapi_types.Email `json:"email"`
+
+	// TurnstileToken Required when runtime human verification is enabled
+	TurnstileToken *string `json:"turnstileToken,omitempty"`
 }
 
 // Error defines model for Error.
@@ -5814,9 +5816,11 @@ type LedgerAmount = string
 
 // LoginRequest defines model for LoginRequest.
 type LoginRequest struct {
-	Email          openapi_types.Email `json:"email"`
-	Password       string              `json:"password"`
-	TurnstileToken string              `json:"turnstileToken"`
+	Email    openapi_types.Email `json:"email"`
+	Password string              `json:"password"`
+
+	// TurnstileToken Required when runtime human verification is enabled
+	TurnstileToken *string `json:"turnstileToken,omitempty"`
 }
 
 // LoginResponse defines model for LoginResponse.
@@ -6068,8 +6072,10 @@ type OrderStatusFacets struct {
 
 // PasswordResetCodeRequest defines model for PasswordResetCodeRequest.
 type PasswordResetCodeRequest struct {
-	Email          openapi_types.Email `json:"email"`
-	TurnstileToken string              `json:"turnstileToken"`
+	Email openapi_types.Email `json:"email"`
+
+	// TurnstileToken Required when runtime human verification is enabled
+	TurnstileToken *string `json:"turnstileToken,omitempty"`
 }
 
 // PasswordResetRequest defines model for PasswordResetRequest.
@@ -7020,6 +7026,9 @@ type TransactionListResponse struct {
 
 // TurnstileConfigResponse defines model for TurnstileConfigResponse.
 type TurnstileConfigResponse struct {
+	// Enabled Whether runtime human verification is enabled
+	Enabled bool `json:"enabled"`
+
 	// SiteKey Public Cloudflare Turnstile widget site key
 	SiteKey string `json:"siteKey"`
 }
@@ -10363,7 +10372,7 @@ type ServerInterface interface {
 	// Mark the caller's ticket as read
 	// (POST /v1/tickets/{ticketNo}/read)
 	PostTicketRead(c *gin.Context, ticketNo TicketNoPath, params PostTicketReadParams)
-	// Get the public Cloudflare Turnstile site key
+	// Get runtime human-verification configuration
 	// (GET /v1/turnstile/config)
 	GetTurnstileConfig(c *gin.Context)
 	// Register a new user

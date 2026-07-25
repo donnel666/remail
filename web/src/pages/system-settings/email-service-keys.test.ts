@@ -3,6 +3,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
+import { AUTH_SECURITY_KEYS } from "./auth-security-keys";
+
 import {
   ALLOCATION_KEYS,
   EMAIL_RESOURCE_KEYS,
@@ -39,6 +41,7 @@ const emailServiceGroups = [
   MAIL_DELIVERY_KEYS,
 ];
 const frontendGroups = [
+  AUTH_SECURITY_KEYS,
   ...emailServiceGroups,
   BACKGROUND_JOB_KEYS,
   BATCH_OPERATION_KEYS,

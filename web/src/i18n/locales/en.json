@@ -148,6 +148,7 @@
   "Request failed.": "Request failed.",
   "Login failed.": "Login failed.",
   "Registration failed.": "Registration failed.",
+  "Registration is disabled.": "Registration is disabled. Use an invitation link.",
   "Activation failed.": "Activation failed.",
   "Failed to load activation status.": "Failed to load activation status.",
   "Failed to send verification code.": "Failed to send verification code.",

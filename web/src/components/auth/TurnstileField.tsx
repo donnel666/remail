@@ -29,7 +29,7 @@ declare global {
 }
 
 let scriptPromise: Promise<TurnstileAPI> | undefined;
-let siteKeyPromise: Promise<string> | undefined;
+const CAPTCHA_DISABLED_TOKEN = "captcha-disabled";
 
 function loadScript() {
   if (window.turnstile) return Promise.resolve(window.turnstile);
@@ -59,16 +59,6 @@ function loadScript() {
   return scriptPromise;
 }
 
-function loadSiteKey() {
-  siteKeyPromise ??= getTurnstileConfig()
-    .then(({ siteKey }) => siteKey)
-    .catch((error) => {
-      siteKeyPromise = undefined;
-      throw error;
-    });
-  return siteKeyPromise;
-}
-
 interface TurnstileFieldProps {
   action: string;
   resetKey: number;
@@ -85,6 +75,7 @@ export function TurnstileField({
   const [retryKey, setRetryKey] = useState(0);
   const [failed, setFailed] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [captchaDisabled, setCaptchaDisabled] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -92,38 +83,48 @@ export function TurnstileField({
     let widgetId: string | undefined;
     setFailed(false);
     setLoading(true);
+    setCaptchaDisabled(false);
     onTokenChange("");
 
-    void Promise.all([loadScript(), loadSiteKey()])
-      .then(([nextAPI, siteKey]) => {
-        if (!active || !containerRef.current) return;
-        api = nextAPI;
-        widgetId = api.render(containerRef.current, {
-          sitekey: siteKey,
-          action,
-          theme: "auto",
-          size: "flexible",
-          callback: (token) => active && onTokenChange(token),
-          "expired-callback": () => active && onTokenChange(""),
-          "error-callback": () => {
-            if (!active) return;
-            onTokenChange("");
-            setFailed(true);
-          },
-        });
+    void (async () => {
+      const { enabled, siteKey } = await getTurnstileConfig();
+      if (!active) return;
+      if (!enabled) {
+        onTokenChange(CAPTCHA_DISABLED_TOKEN);
+        setCaptchaDisabled(true);
         setLoading(false);
-      })
-      .catch(() => {
-        if (!active) return;
-        setLoading(false);
-        setFailed(true);
+        return;
+      }
+      const nextAPI = await loadScript();
+      if (!active || !containerRef.current) return;
+      api = nextAPI;
+      widgetId = api.render(containerRef.current, {
+        sitekey: siteKey,
+        action,
+        theme: "auto",
+        size: "flexible",
+        callback: (token) => active && onTokenChange(token),
+        "expired-callback": () => active && onTokenChange(""),
+        "error-callback": () => {
+          if (!active) return;
+          onTokenChange("");
+          setFailed(true);
+        },
       });
+      setLoading(false);
+    })().catch(() => {
+      if (!active) return;
+      setLoading(false);
+      setFailed(true);
+    });
 
     return () => {
       active = false;
       if (api && widgetId) api.remove(widgetId);
     };
   }, [action, onTokenChange, resetKey, retryKey]);
+
+  if (captchaDisabled) return null;
 
   return (
     <div className="relative flex min-h-16 w-full items-center justify-center overflow-hidden">

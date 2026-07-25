@@ -104,7 +104,7 @@ paths:
   /v1/turnstile/config:
     get:
       operationId: getTurnstileConfig
-      summary: Get the public Cloudflare Turnstile site key
+      summary: Get runtime human-verification configuration
       tags:
         - IAM
       responses:
@@ -136,6 +136,11 @@ paths:
       responses:
         "204":
           description: Verification code request accepted
+          headers:
+            Retry-After:
+              description: Configured resend cooldown in seconds
+              schema:
+                type: integer
         "400":
           description: Invalid request body
           content:
@@ -521,6 +526,11 @@ paths:
       responses:
         "204":
           description: Password reset request accepted
+          headers:
+            Retry-After:
+              description: Configured resend cooldown in seconds
+              schema:
+                type: integer
         "400":
           description: Invalid request body
           content:
@@ -12033,8 +12043,12 @@ components:
     TurnstileConfigResponse:
       type: object
       required:
+        - enabled
         - siteKey
       properties:
+        enabled:
+          type: boolean
+          description: Whether runtime human verification is enabled
         siteKey:
           type: string
           description: Public Cloudflare Turnstile widget site key
@@ -12067,7 +12081,6 @@ components:
       type: object
       required:
         - email
-        - turnstileToken
       properties:
         email:
           type: string
@@ -12075,6 +12088,7 @@ components:
         turnstileToken:
           type: string
           maxLength: 2048
+          description: Required when runtime human verification is enabled
       additionalProperties: false
 
     LoginRequest:
@@ -12082,7 +12096,6 @@ components:
       required:
         - email
         - password
-        - turnstileToken
       properties:
         email:
           type: string
@@ -12092,6 +12105,7 @@ components:
         turnstileToken:
           type: string
           maxLength: 2048
+          description: Required when runtime human verification is enabled
       additionalProperties: false
 
     LoginResponse:
@@ -12120,7 +12134,6 @@ components:
       type: object
       required:
         - email
-        - turnstileToken
       properties:
         email:
           type: string
@@ -12128,6 +12141,7 @@ components:
         turnstileToken:
           type: string
           maxLength: 2048
+          description: Required when runtime human verification is enabled
       additionalProperties: false
 
     PasswordResetRequest:

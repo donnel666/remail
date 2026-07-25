@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/donnel666/remail/internal/iam/domain"
+	"github.com/donnel666/remail/internal/money"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 // RegistrationUseCase handles user self-registration.
@@ -16,6 +18,7 @@ type RegistrationUseCase struct {
 	repo      UserRepository
 	hasher    Hasher
 	codeStore EmailCodeStore
+	wallet    RegistrationRewardWallet
 }
 
 // NewRegistrationUseCase creates a new RegistrationUseCase.
@@ -23,9 +26,17 @@ func NewRegistrationUseCase(repo UserRepository, hasher Hasher, codeStore EmailC
 	return &RegistrationUseCase{repo: repo, hasher: hasher, codeStore: codeStore}
 }
 
+// SetRegistrationRewardWallet injects Billing after both modules are constructed.
+func (uc *RegistrationUseCase) SetRegistrationRewardWallet(wallet RegistrationRewardWallet) {
+	uc.wallet = wallet
+}
+
 // Register creates a new user with the "user" RBAC role and default user group.
 // It requires a valid email verification code for the submitted email.
 func (uc *RegistrationUseCase) Register(ctx context.Context, email, password, nickname, code, inviteCode string) (*domain.User, error) {
+	if !runtimeconfig.Bool("register_enabled", true) && strings.TrimSpace(inviteCode) == "" {
+		return nil, domain.ErrRegistrationDisabled
+	}
 	normalizedEmail := normalizeEmail(email)
 	if err := validateRegistrationEmail(normalizedEmail); err != nil {
 		return nil, err
@@ -95,6 +106,32 @@ func (uc *RegistrationUseCase) Register(ctx context.Context, email, password, ni
 	if committed, commitErr := uc.codeStore.Commit(commitCtx, key, claimToken); commitErr != nil || !committed {
 		slog.Warn("commit registration code", "error", commitErr, "committed", committed)
 	}
+	uc.grantRegistrationReward(ctx, user.ID)
 
 	return user, nil
+}
+
+func (uc *RegistrationUseCase) grantRegistrationReward(ctx context.Context, userID uint) {
+	amount, err := money.Parse(runtimeconfig.String("registration_reward_amount", "0"))
+	if err != nil {
+		slog.Warn("parse registration reward amount", "error", err)
+		return
+	}
+	if !amount.IsPositive() {
+		return
+	}
+	if uc.wallet == nil {
+		slog.Warn("grant registration reward", "user_id", userID, "amount", money.Format(amount), "error", "wallet is not configured")
+		return
+	}
+	rewardCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	formattedAmount := money.Format(amount)
+	for attempt := 1; attempt <= 2; attempt++ {
+		if err := uc.wallet.GrantRegistrationReward(rewardCtx, userID, formattedAmount); err == nil {
+			return
+		} else if attempt == 2 {
+			slog.Warn("grant registration reward", "user_id", userID, "amount", formattedAmount, "error", err)
+		}
+	}
 }

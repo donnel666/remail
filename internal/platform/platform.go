@@ -79,7 +79,6 @@ type Platform struct {
 	BackgroundLoad        *BackgroundLoadController
 	SMTP                  SMTPConfig
 	TrustedProxies        []string
-	SessionMaxAge         int
 	SessionSecure         bool
 	// ponytail: reuse SESSION_SECRET with HMAC domain separation; add a dedicated
 	// stable ticket secret if reply links must survive session-secret rotation.
@@ -129,7 +128,6 @@ func New(ctx context.Context, cfg *Config) (*Platform, func(), error) {
 		p.Close()
 	}
 
-	p.SessionMaxAge = cfg.Session.MaxAge
 	p.SessionSecure = cfg.Session.Secure
 	p.TicketReplySecret = cfg.Session.Secret
 	p.Turnstile = cfg.Turnstile

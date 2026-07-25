@@ -60,3 +60,37 @@ func TestBulkAdjustConsumer(t *testing.T) {
 		t.Fatalf("zero amount should error")
 	}
 }
+
+func TestGrantRegistrationRewardBuildsIdempotentCredit(t *testing.T) {
+	var commands []AdjustConsumerBalanceCommand
+	repo := stubWalletRepo{adjust: func(req AdjustConsumerBalanceCommand) (*AdjustBalanceResult, error) {
+		commands = append(commands, req)
+		return &AdjustBalanceResult{}, nil
+	}}
+	uc := NewWalletUseCase(repo)
+
+	for i := 0; i < 2; i++ {
+		if err := uc.GrantRegistrationReward(context.Background(), 42, "12.340000"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+	if len(commands) != 2 {
+		t.Fatalf("want two commands, got %d", len(commands))
+	}
+	first, second := commands[0], commands[1]
+	if first.Amount != "12.34" || first.TransactionType != domain.TransactionTypeCredit || first.Direction != domain.TransactionDirectionIn {
+		t.Fatalf("unexpected registration reward command: %+v", first)
+	}
+	if first.BizType != "registration_reward" || first.IdempotencyKey != "registration_reward:42" {
+		t.Fatalf("unexpected registration reward identity: %+v", first)
+	}
+	if first.IdempotencyKey != second.IdempotencyKey || first.RequestFingerprint != second.RequestFingerprint {
+		t.Fatalf("registration reward retry must be stable: first=%+v second=%+v", first, second)
+	}
+	if err := uc.GrantRegistrationReward(context.Background(), 42, "0"); err == nil {
+		t.Fatal("zero registration reward should be rejected")
+	}
+	if len(commands) != 2 {
+		t.Fatal("invalid reward must not reach the wallet repository")
+	}
+}

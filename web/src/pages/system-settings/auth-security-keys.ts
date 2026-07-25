@@ -1,0 +1,18 @@
+export const AUTH_SECURITY_KEYS = [
+  "register_enabled",
+  "registration_email_whitelist",
+  "registration_reward_amount",
+  "captcha_enabled",
+  "login_email_limit",
+  "login_ip_limit",
+  "login_window_seconds",
+  "email_code_email_limit",
+  "email_code_ip_limit",
+  "email_code_window_seconds",
+  "captcha_rate_limit",
+  "email_code_ttl_seconds",
+  "email_code_resend_gap_seconds",
+  "email_code_digit_len",
+  "bcrypt_cost",
+  "session_max_age_seconds",
+] as const;

@@ -25,7 +25,7 @@ afterEach(() => cleanup());
 type Send = (payload: {
   email: string;
   turnstileToken: string;
-}) => Promise<unknown>;
+}) => Promise<number>;
 
 function renderField(send: Send) {
   const onNotice = vi.fn();
@@ -54,13 +54,13 @@ function countdown() {
 
 describe("SendCodeField", () => {
   it("starts a resend countdown after a successful send", async () => {
-    const send = vi.fn<Send>().mockResolvedValue(undefined);
+    const send = vi.fn<Send>().mockResolvedValue(60);
     const { onNotice } = renderField(send);
 
     fireEvent.click(screen.getByRole("button", { name: "Send code" }));
 
     await waitFor(() => expect(countdown()).not.toBeNull());
-    // Default 60s cooldown; tolerate one tick to avoid a timer race.
+    // Server returned 60s; tolerate one tick to avoid a timer race.
     expect(countdown()).toBeGreaterThanOrEqual(59);
     expect((screen.getByRole("button", { name: /\d+s/ }) as HTMLButtonElement).disabled).toBe(true);
     expect(onNotice).toHaveBeenCalledWith("Verification code sent.");
@@ -90,7 +90,7 @@ describe("SendCodeField", () => {
   it("restarts the countdown on a second successful send", async () => {
     vi.useFakeTimers();
     try {
-      const send = vi.fn<Send>().mockResolvedValue(undefined);
+      const send = vi.fn<Send>().mockResolvedValue(60);
       renderField(send);
 
       await act(async () => {

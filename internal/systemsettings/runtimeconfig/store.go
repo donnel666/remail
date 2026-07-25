@@ -66,6 +66,14 @@ func String(key, fallback string) string {
 	return value
 }
 
+func Bool(key string, fallback bool) bool {
+	value, err := strconv.ParseBool(strings.TrimSpace(String(key, "")))
+	if err != nil {
+		return fallback
+	}
+	return value
+}
+
 func Snapshot() Values {
 	return Values(clone())
 }

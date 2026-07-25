@@ -3,6 +3,7 @@ package infra
 import (
 	"fmt"
 
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -18,7 +19,7 @@ func NewHasher() *Hasher {
 
 // Hash returns a bcrypt hash of the password.
 func (h *Hasher) Hash(password string) (string, error) {
-	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
+	bytes, err := bcrypt.GenerateFromPassword([]byte(password), runtimeconfig.Int("bcrypt_cost", bcryptCost, bcrypt.MinCost))
 	if err != nil {
 		return "", fmt.Errorf("bcrypt hash: %w", err)
 	}

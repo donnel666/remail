@@ -2,20 +2,13 @@ package app
 
 import (
 	"strings"
+	"unicode"
 
 	"github.com/donnel666/remail/internal/iam/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
-// Domains allowed for self-registration (exact match on the host after @).
-var allowedRegistrationDomains = map[string]struct{}{
-	"qq.com":         {},
-	"foxmail.com":    {},
-	"gmail.com":      {},
-	"proton.me":      {},
-	"protonmail.com": {},
-	"pm.me":          {},
-	"mail.com":       {},
-}
+const defaultRegistrationEmailWhitelist = "qq.com,foxmail.com,gmail.com,proton.me,protonmail.com,pm.me,mail.com"
 
 func normalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
@@ -23,7 +16,7 @@ func normalizeEmail(email string) string {
 
 // validateRegistrationEmail enforces self-registration address rules:
 // local part must be ASCII letters/digits only (no punctuation), and the
-// domain must be on the supported free-mail list.
+// domain must be on the runtime registration whitelist.
 func validateRegistrationEmail(email string) error {
 	normalized := normalizeEmail(email)
 	at := strings.LastIndex(normalized, "@")
@@ -41,7 +34,17 @@ func validateRegistrationEmail(email string) error {
 			return domain.ErrRegistrationEmailLocalInvalid
 		}
 	}
-	if _, allowed := allowedRegistrationDomains[host]; !allowed {
+	allowed := false
+	for _, candidate := range strings.FieldsFunc(runtimeconfig.String("registration_email_whitelist", defaultRegistrationEmailWhitelist), func(r rune) bool {
+		return r == ',' || r == '，' || unicode.IsSpace(r)
+	}) {
+		candidate = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(candidate)), ".")
+		if candidate == host {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
 		return domain.ErrRegistrationEmailDomainBlocked
 	}
 	return nil

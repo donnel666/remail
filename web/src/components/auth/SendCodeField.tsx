@@ -6,8 +6,6 @@ import { IamApiError } from "@/lib/iam-api";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import { validateRegistrationEmail } from "@/lib/registration-email";
 
-const RESEND_COOLDOWN_SECONDS = 60;
-
 interface SendCodePayload {
   email: string;
   turnstileToken: string;
@@ -17,7 +15,7 @@ interface SendCodeFieldProps {
   email: string;
   code: string;
   onCodeChange: (value: string) => void;
-  send: (payload: SendCodePayload) => Promise<unknown>;
+  send: (payload: SendCodePayload) => Promise<number>;
   turnstileAction: string;
   disabled?: boolean;
   onNotice: (message: string) => void;
@@ -79,12 +77,12 @@ export function SendCodeField({
     setRequesting(true);
 
     try {
-      await send({
+      const retryAfter = await send({
         email: email.trim(),
         turnstileToken,
       });
       onNotice(t("Verification code sent."));
-      setCooldown(RESEND_COOLDOWN_SECONDS);
+      setCooldown(retryAfter);
     } catch (nextError) {
       onError(getIamErrorMessage(t, nextError, "Failed to send verification code."));
       if (nextError instanceof IamApiError && nextError.retryAfterSeconds) {

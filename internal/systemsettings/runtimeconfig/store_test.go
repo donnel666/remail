@@ -9,10 +9,11 @@ import (
 )
 
 func TestRuntimeSettingsUpdateImmediately(t *testing.T) {
-	Replace([]domain.Setting{{Key: "SMTP_OUTBOUND_PAYLOAD_TTL_MINUTES", Value: "7"}})
+	Replace([]domain.Setting{{Key: "SMTP_OUTBOUND_PAYLOAD_TTL_MINUTES", Value: "7"}, {Key: "CAPTCHA_ENABLED", Value: "false"}})
 	t.Cleanup(func() { Replace(nil) })
 
 	require.Equal(t, 7*time.Minute, Duration("smtp_outbound_payload_ttl_minutes", 5*time.Minute, time.Minute, 1))
+	require.False(t, Bool("captcha_enabled", true))
 	Set("SMTP_OUTBOUND_PAYLOAD_TTL_MINUTES", "9")
 	require.Equal(t, 9*time.Minute, Duration("smtp_outbound_payload_ttl_minutes", 5*time.Minute, time.Minute, 1))
 	Delete("SMTP_OUTBOUND_PAYLOAD_TTL_MINUTES")
@@ -45,6 +46,20 @@ func TestValidateEmailServiceSettings(t *testing.T) {
 	require.ErrorIs(t, Validate("microsoft_domain_whitelist", "a.-invalid.com"), domain.ErrInvalidValue)
 	require.ErrorIs(t, Validate("smtp_outbound_payload_ttl_minutes", "0"), domain.ErrInvalidValue)
 	require.NoError(t, Validate("smtp_task_retry_count", "0"))
+}
+
+func TestValidateAuthSecuritySettings(t *testing.T) {
+	require.NoError(t, Validate("register_enabled", "false"))
+	require.ErrorIs(t, Validate("captcha_enabled", "1"), domain.ErrInvalidValue)
+	require.NoError(t, Validate("registration_email_whitelist", "qq.com, gmail.com"))
+	require.ErrorIs(t, Validate("registration_email_whitelist", "https://qq.com"), domain.ErrInvalidValue)
+	require.NoError(t, Validate("registration_reward_amount", "12.345678"))
+	require.ErrorIs(t, Validate("registration_reward_amount", "-0.01"), domain.ErrInvalidValue)
+	require.ErrorIs(t, Validate("registration_reward_amount", "0.0000001"), domain.ErrInvalidValue)
+	require.ErrorIs(t, Validate("bcrypt_cost", "3"), domain.ErrInvalidValue)
+	require.ErrorIs(t, Validate("bcrypt_cost", "17"), domain.ErrInvalidValue)
+	require.ErrorIs(t, Validate("email_code_digit_len", "11"), domain.ErrInvalidValue)
+	require.ErrorIs(t, Validate("session_max_age_seconds", "299"), domain.ErrInvalidValue)
 }
 
 func TestValidateSystemOperationsSettings(t *testing.T) {

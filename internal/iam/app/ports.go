@@ -199,6 +199,11 @@ type Hasher interface {
 	Verify(password, hash string) bool
 }
 
+// RegistrationRewardWallet credits the one-time reward configured for a new user.
+type RegistrationRewardWallet interface {
+	GrantRegistrationReward(ctx context.Context, userID uint, amount string) error
+}
+
 // PermissionChecker checks fine-grained admin permissions.
 type PermissionChecker interface {
 	Check(ctx context.Context, userID uint, role domain.Role, resource, action string) (bool, error)

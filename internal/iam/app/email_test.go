@@ -4,12 +4,11 @@ import (
 	"testing"
 
 	"github.com/donnel666/remail/internal/iam/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/stretchr/testify/require"
 )
 
 func TestValidateRegistrationEmail(t *testing.T) {
-	t.Parallel()
-
 	require.NoError(t, validateRegistrationEmail("  1515445804@qq.com  "))
 	require.NoError(t, validateRegistrationEmail("user@foxmail.com"))
 	require.NoError(t, validateRegistrationEmail("user@gmail.com"))
@@ -31,4 +30,9 @@ func TestValidateRegistrationEmail(t *testing.T) {
 	require.ErrorIs(t, validateRegistrationEmail("user@outlook.com"), domain.ErrRegistrationEmailDomainBlocked)
 	require.ErrorIs(t, validateRegistrationEmail("user@sub.qq.com"), domain.ErrRegistrationEmailDomainBlocked)
 	require.ErrorIs(t, validateRegistrationEmail("user@qq.com."), domain.ErrRegistrationEmailDomainBlocked)
+
+	runtimeconfig.Set("registration_email_whitelist", "EXAMPLE.COM.")
+	t.Cleanup(func() { runtimeconfig.Delete("registration_email_whitelist") })
+	require.NoError(t, validateRegistrationEmail("user@example.com"))
+	require.ErrorIs(t, validateRegistrationEmail("user@qq.com"), domain.ErrRegistrationEmailDomainBlocked)
 }

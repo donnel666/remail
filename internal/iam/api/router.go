@@ -54,8 +54,8 @@ func (f *sessionFetcher) FetchSession(ctx context.Context, sessionID string) (ui
 }
 
 // RegisterIAMRoutes registers all IAM routes on the given router group.
-func RegisterIAMRoutes(rg *gin.RouterGroup, mod *IAMModule, sessionMaxAge int, sessionSecure bool) {
-	h := NewIAMHandler(mod, sessionMaxAge, sessionSecure)
+func RegisterIAMRoutes(rg *gin.RouterGroup, mod *IAMModule, sessionSecure bool) {
+	h := NewIAMHandler(mod, sessionSecure)
 	fetcher := NewSessionFetcher(mod.SessionStore, mod.UserRepo)
 
 	// Public routes (no authentication required)

@@ -8,6 +8,7 @@ import (
 
 	"github.com/donnel666/remail/internal/iam/domain"
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 const (
@@ -17,8 +18,10 @@ const (
 )
 
 // EmailCodeResendGapSeconds is the per-address resend cooldown, surfaced to
-// clients via the Retry-After header when a request is throttled.
-const EmailCodeResendGapSeconds = emailCodeResendGap
+// clients via the Retry-After header.
+func EmailCodeResendGapSeconds() int {
+	return runtimeconfig.Int("email_code_resend_gap_seconds", emailCodeResendGap, 1)
+}
 
 // EmailCodeUseCase handles email verification code creation and delivery.
 type EmailCodeUseCase struct {
@@ -48,7 +51,7 @@ func (uc *EmailCodeUseCase) Request(ctx context.Context, email string) (bool, er
 		return false, err
 	}
 
-	started, retryAfter, err := uc.store.StartCooldown(ctx, emailCodeKey(normalized), emailCodeResendGap)
+	started, retryAfter, err := uc.store.StartCooldown(ctx, emailCodeKey(normalized), EmailCodeResendGapSeconds())
 	if err != nil {
 		return false, fmt.Errorf("email code cooldown: %w", err)
 	}
@@ -63,14 +66,14 @@ func (uc *EmailCodeUseCase) Request(ctx context.Context, email string) (bool, er
 // that have already acquired the cooldown (e.g. password reset, which must
 // throttle registered and unknown emails identically) use this directly.
 func (uc *EmailCodeUseCase) deliver(ctx context.Context, normalizedEmail string) (bool, error) {
-	code, err := generateRandomDigits(emailCodeDigitLen)
+	code, err := generateRandomDigits(runtimeconfig.Int("email_code_digit_len", emailCodeDigitLen, 1))
 	if err != nil {
 		return false, fmt.Errorf("generate email code: %w", err)
 	}
 
 	key := emailCodeKey(normalizedEmail)
 	// Reuse a still-valid code so a resend re-delivers the same digits.
-	storedCode, reused, err := uc.store.CreateIfAbsent(ctx, key, code, emailCodeTTL)
+	storedCode, reused, err := uc.store.CreateIfAbsent(ctx, key, code, runtimeconfig.Int("email_code_ttl_seconds", emailCodeTTL, 1))
 	if err != nil {
 		return false, fmt.Errorf("store email code: %w", err)
 	}
@@ -92,11 +95,11 @@ func (uc *EmailCodeUseCase) deliver(ctx context.Context, normalizedEmail string)
 }
 
 func (uc *EmailCodeUseCase) createDummy(ctx context.Context, normalizedEmail string) (bool, error) {
-	code, err := generateRandomDigits(emailCodeDigitLen)
+	code, err := generateRandomDigits(runtimeconfig.Int("email_code_digit_len", emailCodeDigitLen, 1))
 	if err != nil {
 		return false, fmt.Errorf("generate email code: %w", err)
 	}
-	_, reused, err := uc.store.CreateIfAbsent(ctx, emailCodeKey(normalizedEmail), code, emailCodeTTL)
+	_, reused, err := uc.store.CreateIfAbsent(ctx, emailCodeKey(normalizedEmail), code, runtimeconfig.Int("email_code_ttl_seconds", emailCodeTTL, 1))
 	if err != nil {
 		return false, fmt.Errorf("store email code: %w", err)
 	}

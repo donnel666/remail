@@ -2,9 +2,14 @@ package infra
 
 import (
 	"testing"
+
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func TestHasher_HashAndVerify(t *testing.T) {
+	runtimeconfig.Set("bcrypt_cost", "4")
+	t.Cleanup(func() { runtimeconfig.Delete("bcrypt_cost") })
 	h := NewHasher()
 
 	password := "TestPassword123!"
@@ -14,6 +19,9 @@ func TestHasher_HashAndVerify(t *testing.T) {
 	}
 	if hash == "" {
 		t.Fatal("Hash() returned empty string")
+	}
+	if cost, err := bcrypt.Cost([]byte(hash)); err != nil || cost != 4 {
+		t.Fatalf("bcrypt cost = %d, %v; want 4", cost, err)
 	}
 
 	// Verify correct password

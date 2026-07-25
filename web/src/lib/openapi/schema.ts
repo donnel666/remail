@@ -63,7 +63,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get the public Cloudflare Turnstile site key */
+        /** Get runtime human-verification configuration */
         get: operations["getTurnstileConfig"];
         put?: never;
         post?: never;
@@ -4016,6 +4016,8 @@ export interface components {
             nickname?: string;
         };
         TurnstileConfigResponse: {
+            /** @description Whether runtime human verification is enabled */
+            enabled: boolean;
             /** @description Public Cloudflare Turnstile widget site key */
             siteKey: string;
         };
@@ -4030,13 +4032,15 @@ export interface components {
         EmailCodeRequest: {
             /** Format: email */
             email: string;
-            turnstileToken: string;
+            /** @description Required when runtime human verification is enabled */
+            turnstileToken?: string;
         };
         LoginRequest: {
             /** Format: email */
             email: string;
             password: string;
-            turnstileToken: string;
+            /** @description Required when runtime human verification is enabled */
+            turnstileToken?: string;
         };
         LoginResponse: {
             user: components["schemas"]["UserResponse"];
@@ -4048,7 +4052,8 @@ export interface components {
         PasswordResetCodeRequest: {
             /** Format: email */
             email: string;
-            turnstileToken: string;
+            /** @description Required when runtime human verification is enabled */
+            turnstileToken?: string;
         };
         PasswordResetRequest: {
             /** Format: email */
@@ -6250,6 +6255,8 @@ export interface operations {
             /** @description Verification code request accepted */
             204: {
                 headers: {
+                    /** @description Configured resend cooldown in seconds */
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content?: never;
@@ -6738,6 +6745,8 @@ export interface operations {
             /** @description Password reset request accepted */
             204: {
                 headers: {
+                    /** @description Configured resend cooldown in seconds */
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content?: never;

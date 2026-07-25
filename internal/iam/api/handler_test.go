@@ -18,6 +18,7 @@ import (
 	"github.com/donnel666/remail/internal/iam/domain"
 	"github.com/donnel666/remail/internal/iam/infra"
 	maildomain "github.com/donnel666/remail/internal/mailtransport/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1208,7 +1209,7 @@ func newTestHandler() *IAMHandler {
 		TurnstileSiteKey:           "test-site-key",
 	}
 
-	return NewIAMHandler(mod, 3600, false)
+	return NewIAMHandler(mod, false)
 }
 
 func setupTestRouterWithHandler(h *IAMHandler) *gin.Engine {
@@ -1216,7 +1217,7 @@ func setupTestRouterWithHandler(h *IAMHandler) *gin.Engine {
 	r := gin.New()
 	r.Use(middleware.RequestID())
 	v1 := r.Group("/v1")
-	RegisterIAMRoutes(v1, h.module, 3600, false)
+	RegisterIAMRoutes(v1, h.module, false)
 	return r
 }
 
@@ -1353,7 +1354,57 @@ func TestGetTurnstileConfig_ReturnsPublicSiteKey(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
-	assert.JSONEq(t, `{"siteKey":"test-site-key"}`, w.Body.String())
+	assert.JSONEq(t, `{"enabled":true,"siteKey":"test-site-key"}`, w.Body.String())
+}
+
+func TestAuthSecurityRuntimeSettings(t *testing.T) {
+	runtimeconfig.Set("captcha_enabled", "false")
+	runtimeconfig.Set("session_max_age_seconds", "900")
+	t.Cleanup(func() {
+		runtimeconfig.Delete("captcha_enabled")
+		runtimeconfig.Delete("session_max_age_seconds")
+		runtimeconfig.Delete("register_enabled")
+	})
+	h := newTestHandler()
+	r := setupTestRouterWithHandler(h)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/turnstile/config", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	require.JSONEq(t, `{"enabled":false,"siteKey":"test-site-key"}`, w.Body.String())
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/v1/activation", strings.NewReader(`{"email":"admin@test.com","password":"Admin123!"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code)
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/v1/login", strings.NewReader(`{"email":"admin@test.com","password":"Admin123!"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	for _, cookie := range w.Result().Cookies() {
+		if cookie.Name == middleware.SessionCookieName || cookie.Name == middleware.CSRFCookieName {
+			require.Equal(t, 900, cookie.MaxAge)
+		}
+	}
+
+	runtimeconfig.Set("register_enabled", "false")
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/v1/users", strings.NewReader(`{"email":"user@qq.com","password":"User123!","code":"123456"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.Contains(t, w.Body.String(), "Registration is disabled")
+
+	code := requestEmailCode(t, h, r, "invited@qq.com", "")
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/v1/users", strings.NewReader(fmt.Sprintf(`{"email":"invited@qq.com","password":"User123!","code":%q,"inviteCode":"INVITE"}`, code)))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code)
 }
 
 func TestTurnstileActionsAreBoundToProtectedEndpoints(t *testing.T) {
@@ -1413,7 +1464,7 @@ func TestPostEmailCode_ThrottlesResendWithRetryAfter(t *testing.T) {
 
 	second := send()
 	require.Equal(t, http.StatusTooManyRequests, second.Code)
-	require.Equal(t, fmt.Sprintf("%d", app.EmailCodeResendGapSeconds), second.Header().Get("Retry-After"))
+	require.Equal(t, fmt.Sprintf("%d", app.EmailCodeResendGapSeconds()), second.Header().Get("Retry-After"))
 }
 
 // A repeated password-reset request must throttle the same way for an unknown
@@ -1554,14 +1605,15 @@ func TestPostLogin_WithoutTurnstileToken(t *testing.T) {
 	h := newTestHandler()
 	r := setupTestRouterWithHandler(h)
 
-	// Login without a Turnstile token should fail binding validation (400).
+	// The token is conditionally required by the runtime captcha switch.
 	body := `{"email":"admin@test.com","password":"Admin123!"}`
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/v1/login", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, http.StatusUnprocessableEntity, w.Code)
+	assert.Contains(t, w.Body.String(), "Human verification failed")
 }
 
 func TestPostLogin_WrongPassword(t *testing.T) {

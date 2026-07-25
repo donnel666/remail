@@ -2,18 +2,7 @@ import { describe, expect, it } from "vitest";
 import { validateRegistrationEmail } from "./registration-email";
 
 describe("validateRegistrationEmail", () => {
-  it("allows only alphanumeric local parts on exact supported domains", () => {
-    for (const domain of [
-      "qq.com",
-      "foxmail.com",
-      "gmail.com",
-      "proton.me",
-      "protonmail.com",
-      "pm.me",
-      "mail.com",
-    ]) {
-      expect(validateRegistrationEmail(`user@${domain}`)).toBeNull();
-    }
+  it("leaves the runtime domain whitelist to the server", () => {
     expect(validateRegistrationEmail("1515445804@qq.com")).toBeNull();
     expect(validateRegistrationEmail("User@QQ.COM")).toBeNull();
     for (const email of [
@@ -25,17 +14,7 @@ describe("validateRegistrationEmail", () => {
         "Email local part must contain only letters and digits."
       );
     }
-    expect(validateRegistrationEmail("user@example.com")).toBe(
-      "Registration with this email domain is not allowed."
-    );
-    expect(validateRegistrationEmail("user@google.com")).toBe(
-      "Registration with this email domain is not allowed."
-    );
-    expect(validateRegistrationEmail("user@sub.qq.com")).toBe(
-      "Registration with this email domain is not allowed."
-    );
-    expect(validateRegistrationEmail("user@qq.com.")).toBe(
-      "Registration with this email domain is not allowed."
-    );
+    expect(validateRegistrationEmail("user@example.com")).toBeNull();
+    expect(validateRegistrationEmail("user@sub.qq.com")).toBeNull();
   });
 });

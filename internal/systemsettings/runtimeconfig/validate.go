@@ -6,6 +6,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/donnel666/remail/internal/money"
 	"github.com/donnel666/remail/internal/systemsettings/domain"
 )
 
@@ -17,6 +18,11 @@ type integerRange struct {
 func positive(maximum int64) integerRange { return integerRange{min: 1, max: maximum} }
 
 var integerRanges = map[string]integerRange{
+	"login_email_limit": positive(1000), "login_ip_limit": positive(10000), "login_window_seconds": positive(86400),
+	"email_code_email_limit": positive(1000), "email_code_ip_limit": positive(10000), "email_code_window_seconds": positive(86400), "captcha_rate_limit": positive(10000),
+	"email_code_ttl_seconds": positive(86400), "email_code_resend_gap_seconds": positive(3600), "email_code_digit_len": {min: 4, max: 10},
+	"bcrypt_cost": {min: 4, max: 16}, "session_max_age_seconds": {min: 300, max: 31_536_000},
+
 	"default_plus_daily_limit": positive(2_147_483_647), "default_mailbox_daily_limit": positive(2_147_483_647), "resource_validation_max_failures": positive(100),
 	"resource_import_max_bytes": positive(512 << 20), "max_project_logo_bytes": positive(20 << 20), "project_name_max": positive(120), "project_description_max": positive(1000), "project_target_platform_max": positive(120),
 	"candidate_window_size": positive(100), "global_candidate_window": positive(100), "bucket_probe_count": positive(64), "alias_generation_window": positive(1000),
@@ -65,12 +71,22 @@ var removedKeys = map[string]struct{}{
 	"bucket_count": {}, "msacl_content_search_window_minutes": {}, "outbound_mail_claim_timeout_minutes": {},
 }
 
+var booleanKeys = map[string]struct{}{
+	"register_enabled": {}, "captcha_enabled": {},
+}
+
 func Validate(key, value string) error {
 	key = canonicalKey(key)
 	rawValue := value
 	value = strings.TrimSpace(value)
 	if _, removed := removedKeys[key]; removed {
 		return domain.ErrInvalidKey
+	}
+	if _, ok := booleanKeys[key]; ok {
+		if value != "true" && value != "false" {
+			return domain.ErrInvalidValue
+		}
+		return nil
 	}
 	if limits, ok := integerRanges[key]; ok {
 		number, err := strconv.ParseInt(value, 10, 64)
@@ -80,6 +96,11 @@ func Validate(key, value string) error {
 		return nil
 	}
 	switch key {
+	case "registration_reward_amount":
+		amount, err := money.Parse(value)
+		if err != nil || amount.IsNegative() {
+			return domain.ErrInvalidValue
+		}
 	case "token_refresh_hour":
 		number, err := strconv.Atoi(value)
 		if err != nil || number < 0 || number > 23 {
@@ -92,7 +113,7 @@ func Validate(key, value string) error {
 		if _, err := regexp.Compile(value); err != nil {
 			return domain.ErrInvalidValue
 		}
-	case "microsoft_domain_whitelist":
+	case "microsoft_domain_whitelist", "registration_email_whitelist":
 		if value == "" {
 			return nil
 		}
