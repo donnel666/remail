@@ -51,6 +51,8 @@ func backgroundTaskHasRetryHeadroom(retried, maximum int) bool {
 const (
 	// QueueMailfetch is the dedicated realtime 接码 (verification-code) pickup queue.
 	QueueMailfetch = "mailfetch"
+	// QueuePaymentReconcile is the realtime active payment reconciliation queue.
+	QueuePaymentReconcile = "payment_reconcile"
 	// QueueMailtransport carries foreground outbound mail delivery.
 	QueueMailtransport = "mailtransport"
 	// QueueDefault carries assorted foreground work (imports, allocation, proxy checks).
@@ -73,6 +75,7 @@ const (
 // asserts each is served by exactly one worker tier.
 var AllQueueNames = []string{
 	QueueMailfetch,
+	QueuePaymentReconcile,
 	QueueMailtransport,
 	QueueDefault,
 	QueueBackgroundValidation,

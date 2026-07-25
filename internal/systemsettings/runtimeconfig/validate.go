@@ -1,6 +1,8 @@
 package runtimeconfig
 
 import (
+	"encoding/json"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -8,6 +10,7 @@ import (
 
 	"github.com/donnel666/remail/internal/money"
 	"github.com/donnel666/remail/internal/systemsettings/domain"
+	"github.com/shopspring/decimal"
 )
 
 const maxSystemNoticeBytes = 1 << 20
@@ -24,6 +27,7 @@ var integerRanges = map[string]integerRange{
 	"email_code_email_limit": positive(1000), "email_code_ip_limit": positive(10000), "email_code_window_seconds": positive(86400), "captcha_rate_limit": positive(10000),
 	"email_code_ttl_seconds": positive(86400), "email_code_resend_gap_seconds": positive(3600), "email_code_digit_len": {min: 4, max: 10},
 	"bcrypt_cost": {min: 4, max: 16}, "session_max_age_seconds": {min: 300, max: 31_536_000},
+	"async_check_request_timeout_seconds": {min: 1, max: 30},
 
 	"default_plus_daily_limit": positive(2_147_483_647), "default_mailbox_daily_limit": positive(2_147_483_647), "resource_validation_max_failures": positive(100),
 	"resource_import_max_bytes": positive(512 << 20), "max_project_logo_bytes": positive(20 << 20), "project_name_max": positive(120), "project_description_max": positive(1000), "project_target_platform_max": positive(120),
@@ -74,7 +78,7 @@ var removedKeys = map[string]struct{}{
 }
 
 var booleanKeys = map[string]struct{}{
-	"register_enabled": {}, "captcha_enabled": {}, "announcement_enabled": {}, "faq_enabled": {},
+	"register_enabled": {}, "captcha_enabled": {}, "announcement_enabled": {}, "faq_enabled": {}, "epay_enabled": {},
 }
 
 func Validate(key, value string) error {
@@ -106,9 +110,19 @@ func Validate(key, value string) error {
 		if len(rawValue) > maxSystemNoticeBytes {
 			return domain.ErrInvalidValue
 		}
-	case "registration_reward_amount":
+	case "registration_reward_amount", "topup_fee_cap":
 		amount, err := money.Parse(value)
 		if err != nil || amount.IsNegative() {
+			return domain.ErrInvalidValue
+		}
+	case "min_topup_amount":
+		amount, err := money.Parse(value)
+		if err != nil || !amount.IsPositive() {
+			return domain.ErrInvalidValue
+		}
+	case "topup_fee_rate":
+		rate, err := money.Parse(value)
+		if err != nil || rate.IsNegative() || rate.GreaterThan(decimal.NewFromInt(100)) {
 			return domain.ErrInvalidValue
 		}
 	case "token_refresh_hour":
@@ -137,6 +151,55 @@ func Validate(key, value string) error {
 		}
 		if count == 0 {
 			return domain.ErrInvalidValue
+		}
+	case "epay_version":
+		if value != "v1" && value != "v2" {
+			return domain.ErrInvalidValue
+		}
+	case "epay_gateway_url", "epay_notify_url", "epay_return_url":
+		if value == "" {
+			return nil
+		}
+		parsed, err := url.Parse(value)
+		if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
+			return domain.ErrInvalidValue
+		}
+	case "epay_merchant_id", "epay_merchant_key":
+		if len(value) > 256 || strings.ContainsAny(value, "\r\n\x00") {
+			return domain.ErrInvalidValue
+		}
+	case "epay_private_key", "epay_platform_public_key":
+		if len(rawValue) > 32<<10 || strings.ContainsRune(rawValue, '\x00') {
+			return domain.ErrInvalidValue
+		}
+	case "topup_amount_presets":
+		var values []json.Number
+		if err := json.Unmarshal([]byte(value), &values); err != nil || len(values) == 0 || len(values) > 100 {
+			return domain.ErrInvalidValue
+		}
+		seen := make(map[string]struct{}, len(values))
+		for _, raw := range values {
+			amount, err := money.Parse(string(raw))
+			if err != nil || !amount.IsPositive() || !amount.Equal(amount.Round(2)) {
+				return domain.ErrInvalidValue
+			}
+			normalized := amount.StringFixed(2)
+			if _, exists := seen[normalized]; exists {
+				return domain.ErrInvalidValue
+			}
+			seen[normalized] = struct{}{}
+		}
+	case "topup_amount_bonus":
+		var values map[string]json.Number
+		if err := json.Unmarshal([]byte(value), &values); err != nil || values == nil || len(values) > 100 {
+			return domain.ErrInvalidValue
+		}
+		for rawAmount, rawBonus := range values {
+			amount, amountErr := money.Parse(rawAmount)
+			bonus, bonusErr := money.Parse(string(rawBonus))
+			if amountErr != nil || !amount.IsPositive() || !amount.Equal(amount.Round(2)) || bonusErr != nil || bonus.IsNegative() || !bonus.Equal(bonus.Round(2)) {
+				return domain.ErrInvalidValue
+			}
 		}
 	}
 	return nil
@@ -241,6 +304,9 @@ func sanitizeRelationships(values map[string]string) {
 	if value("background_worker_minimum", 8) > value("background_worker_initial", 16) || value("background_worker_initial", 16) > value("asynq_background_worker_concurrency", 512) {
 		drop("background_worker_minimum", "background_worker_initial", "asynq_background_worker_concurrency")
 	}
+	if strings.TrimSpace(values["epay_enabled"]) == "true" && !validEPayConfig(values) {
+		values["epay_enabled"] = "false"
+	}
 	retries := value("smtp_task_retry_count", 3)
 	if value("smtp_outbound_payload_ttl_minutes", 5) < value("outbound_mail_timeout_minutes", 3) || value("outbound_mail_timeout_minutes", 3)*60 < smtpTaskBudgetSeconds(retries) {
 		drop("smtp_outbound_payload_ttl_minutes", "outbound_mail_timeout_minutes", "smtp_task_retry_count")
@@ -273,7 +339,28 @@ func validateRelationships(values map[string]string) error {
 	if value("outbound_mail_timeout_minutes", 3)*60 < smtpTaskBudgetSeconds(retries) {
 		return domain.ErrInvalidValue
 	}
+	if strings.TrimSpace(values["epay_enabled"]) == "true" && !validEPayConfig(values) {
+		return domain.ErrInvalidValue
+	}
 	return nil
+}
+
+func validEPayConfig(values map[string]string) bool {
+	for _, key := range []string{"epay_gateway_url", "epay_merchant_id", "epay_notify_url", "epay_return_url"} {
+		if strings.TrimSpace(values[key]) == "" || Validate(key, values[key]) != nil {
+			return false
+		}
+	}
+	version := strings.TrimSpace(values["epay_version"])
+	if version == "v2" {
+		for _, key := range []string{"epay_private_key", "epay_platform_public_key"} {
+			if strings.TrimSpace(values[key]) == "" || Validate(key, values[key]) != nil {
+				return false
+			}
+		}
+		return true
+	}
+	return version == "v1" && strings.TrimSpace(values["epay_merchant_key"]) != "" && Validate("epay_merchant_key", values["epay_merchant_key"]) == nil
 }
 
 func smtpTaskBudgetSeconds(retries int) int {

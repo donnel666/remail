@@ -6,21 +6,33 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/donnel666/remail/api/middleware"
 	billingapp "github.com/donnel666/remail/internal/billing/app"
 	"github.com/donnel666/remail/internal/billing/domain"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	"github.com/gin-gonic/gin"
+	"golang.org/x/time/rate"
 )
 
 type BillingHandler struct {
 	module  *BillingModule
 	checker middleware.PermissionChecker
+	webhook *rate.Limiter
 }
 
+const (
+	maxRechargeRequestBytes = 4 << 10
+	maxEPayWebhookBytes     = 8 << 10
+)
+
 func NewBillingHandler(module *BillingModule, checker middleware.PermissionChecker) *BillingHandler {
-	return &BillingHandler{module: module, checker: checker}
+	return &BillingHandler{
+		module: module, checker: checker,
+		// ponytail: bound webhook DB work per process; move this limit to the edge if replica count becomes large.
+		webhook: rate.NewLimiter(rate.Every(10*time.Millisecond), 200),
+	}
 }
 
 func (h *BillingHandler) GetWallet(c *gin.Context) {
@@ -169,6 +181,87 @@ func (h *BillingHandler) GetRecharges(c *gin.Context) {
 		Offset: result.Offset,
 		Limit:  result.Limit,
 	})
+}
+
+func (h *BillingHandler) GetRechargeConfig(c *gin.Context) {
+	result, err := h.module.RechargeUseCase.Config()
+	if err != nil {
+		writeBillingError(c, err)
+		return
+	}
+	tiers := make([]RechargeTierResponse, len(result.Tiers))
+	for i, tier := range result.Tiers {
+		tiers[i] = RechargeTierResponse{
+			Amount: tier.Amount, Bonus: tier.Bonus,
+			RechargeQuota: tier.RechargeQuota, PaymentAmount: tier.PaymentAmount,
+		}
+	}
+	c.JSON(http.StatusOK, RechargeConfigResponse{
+		Enabled: result.Enabled, MinAmount: result.MinAmount,
+		FeeRate: result.FeeRate, FeeCap: result.FeeCap, Tiers: tiers,
+	})
+}
+
+func (h *BillingHandler) PostRecharge(c *gin.Context) {
+	userID, ok := requireCurrentUserID(c)
+	if !ok {
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxRechargeRequestBytes)
+	var request CreateRechargeRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		writeInvalidBody(c, err)
+		return
+	}
+	result, err := h.module.RechargeUseCase.Create(c.Request.Context(), billingapp.CreateRechargeRequest{
+		UserID: userID, Amount: request.Amount, IdempotencyKey: c.GetHeader("Idempotency-Key"),
+	})
+	if err != nil {
+		writeBillingError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, CreateRechargeResponse{
+		Recharge: rechargeResponse(result.Recharge), PayURL: result.PayURL, ExpiresAt: result.ExpiresAt,
+	})
+}
+
+func (h *BillingHandler) GetRecharge(c *gin.Context) {
+	userID, ok := requireCurrentUserID(c)
+	if !ok {
+		return
+	}
+	recharge, err := h.module.RechargeUseCase.Get(c.Request.Context(), userID, c.Param("rechargeNo"))
+	if err != nil {
+		writeBillingError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, rechargeResponse(*recharge))
+}
+
+func (h *BillingHandler) EPayWebhook(c *gin.Context) {
+	rechargeNo := c.Query("out_trade_no")
+	if c.Request.Method == http.MethodPost {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxEPayWebhookBytes)
+		if err := c.Request.ParseForm(); err != nil {
+			c.String(http.StatusOK, "success")
+			return
+		}
+		rechargeNo = c.Request.Form.Get("out_trade_no")
+	}
+	rechargeNo = strings.TrimSpace(rechargeNo)
+	if !domain.IsValidRechargeNo(rechargeNo) || h.webhook == nil || !h.webhook.Allow() {
+		c.String(http.StatusOK, "success")
+		return
+	}
+	if h == nil || h.module == nil || h.module.RechargeUseCase == nil {
+		c.String(http.StatusInternalServerError, "fail")
+		return
+	}
+	if err := h.module.RechargeUseCase.NotifyCallback(c.Request.Context(), rechargeNo); err != nil {
+		c.String(http.StatusInternalServerError, "fail")
+		return
+	}
+	c.String(http.StatusOK, "success")
 }
 
 func (h *BillingHandler) PostCardRedeem(c *gin.Context) {
@@ -648,15 +741,13 @@ func transactionResponse(transaction domain.Transaction) TransactionItemResponse
 
 func rechargeResponse(recharge domain.Recharge) RechargeItemResponse {
 	return RechargeItemResponse{
-		ID:            recharge.ID,
-		RechargeNo:    recharge.RechargeNo,
-		UserID:        recharge.UserID,
-		PaymentMethod: recharge.PaymentMethod,
-		RechargeQuota: recharge.RechargeQuota,
-		PaymentAmount: recharge.PaymentAmount,
-		Status:        string(recharge.Status),
-		CreatedAt:     recharge.CreatedAt,
-		UpdatedAt:     recharge.UpdatedAt,
+		ID: recharge.ID, RechargeNo: recharge.RechargeNo, UserID: recharge.UserID,
+		PaymentMethod: recharge.PaymentMethod, RechargeQuota: recharge.RechargeQuota,
+		PaymentAmount: recharge.PaymentAmount, Status: string(recharge.Status),
+		GatewayTradeNo: recharge.GatewayTradeNo, FailureReason: recharge.FailureReason,
+		QueryAttempts: recharge.QueryAttempts, ExpiresAt: recharge.CreatedAt.Add(domain.RechargeReconciliationWindow),
+		PaidAt: recharge.PaidAt, ReconciledAt: recharge.ReconciledAt,
+		CreatedAt: recharge.CreatedAt, UpdatedAt: recharge.UpdatedAt,
 	}
 }
 
@@ -689,6 +780,14 @@ func writeBillingError(c *gin.Context, err error) {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Invalid amount.", "requestId": requestID})
 	case errors.Is(err, domain.ErrInvalidRecharge):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Invalid recharge request.", "requestId": requestID})
+	case errors.Is(err, domain.ErrRechargeNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"message": "Recharge not found.", "requestId": requestID})
+	case errors.Is(err, domain.ErrRechargeExpired):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Recharge order expired.", "requestId": requestID})
+	case errors.Is(err, domain.ErrRechargePending):
+		c.JSON(http.StatusConflict, gin.H{"message": "A recharge order is already pending.", "requestId": requestID})
+	case errors.Is(err, domain.ErrRechargeConfigUnavailable), errors.Is(err, domain.ErrRechargeQueueUnavailable):
+		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "Recharge service is temporarily unavailable.", "requestId": requestID})
 	case errors.Is(err, domain.ErrInvalidCardKey):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Invalid card key.", "requestId": requestID})
 	case errors.Is(err, domain.ErrInvalidCardStatus):
@@ -703,6 +802,8 @@ func writeBillingError(c *gin.Context, err error) {
 		c.JSON(http.StatusConflict, gin.H{"message": "Card key already exists.", "requestId": requestID})
 	case errors.Is(err, domain.ErrIdempotencyRequired):
 		c.JSON(http.StatusBadRequest, gin.H{"message": "Idempotency-Key is required.", "requestId": requestID})
+	case errors.Is(err, domain.ErrInvalidIdempotencyKey):
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid Idempotency-Key.", "requestId": requestID})
 	case errors.Is(err, domain.ErrIdempotencyConflict):
 		c.JSON(http.StatusConflict, gin.H{"message": "Idempotency-Key conflicts with a different request.", "requestId": requestID})
 	case errors.Is(err, domain.ErrInvalidFilter):

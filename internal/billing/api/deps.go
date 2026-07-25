@@ -5,22 +5,29 @@ import (
 	billinginfra "github.com/donnel666/remail/internal/billing/infra"
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
+	"github.com/hibiken/asynq"
 	"gorm.io/gorm"
 )
 
 type BillingModule struct {
 	WalletUseCase         *billingapp.WalletUseCase
+	RechargeUseCase       *billingapp.RechargeUseCase
 	OperationLogs         governanceapp.OperationLogPort
 	UserSelectionResolver billingapp.UserSelectionResolver
 	UserDirectory         billingapp.UserDirectory
 }
 
-func NewBillingModule(db *gorm.DB) *BillingModule {
+func NewBillingModule(db *gorm.DB, clients ...*asynq.Client) *BillingModule {
 	repo := billinginfra.NewBillingRepo(db)
 	operationLogs := governanceinfra.NewOperationLogRepo(db)
+	var client *asynq.Client
+	if len(clients) > 0 {
+		client = clients[0]
+	}
 	return &BillingModule{
-		WalletUseCase: billingapp.NewWalletUseCase(repo),
-		OperationLogs: operationLogs,
+		WalletUseCase:   billingapp.NewWalletUseCase(repo),
+		RechargeUseCase: billingapp.NewRechargeUseCase(repo, billinginfra.RechargeConfigProvider{}, billinginfra.NewEPay(), billinginfra.NewRechargeQueue(client)),
+		OperationLogs:   operationLogs,
 	}
 }
 

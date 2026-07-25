@@ -1307,6 +1307,7 @@ paths:
     get:
       operationId: getAdminSettings
       summary: List system settings (admin only)
+      description: Write-only payment credentials are never returned.
       tags:
         - Admin
       security:
@@ -1347,7 +1348,7 @@ paths:
               $ref: "#/components/schemas/AdminSystemSettingsBulkRequest"
       responses:
         "200":
-          description: Updated system settings
+          description: Updated system settings; write-only payment credentials are omitted
           content:
             application/json:
               schema:
@@ -1381,6 +1382,7 @@ paths:
     get:
       operationId: getAdminSetting
       summary: Get one system setting (admin only)
+      description: Write-only payment credentials always return 404.
       tags:
         - Admin
       security:
@@ -1432,6 +1434,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AdminSystemSettingResponse"
+        "204":
+          description: Write-only payment credential updated without returning its value
         "400":
           description: Invalid request
           content:
@@ -5869,6 +5873,179 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+
+    post:
+      operationId: postRecharge
+      summary: Create an Alipay recharge order
+      description: Credit is granted only after the server actively confirms the payment within five minutes.
+      tags:
+        - Billing
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRechargeRequest"
+      responses:
+        "201":
+          description: Recharge order created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateRechargeResponse"
+        "400":
+          description: Invalid request body or missing, empty, or oversized idempotency key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Idempotency key conflict or another recharge order is still pending
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid recharge amount
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: Recharge service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/recharges/config:
+    get:
+      operationId: getRechargeConfig
+      summary: Get public recharge configuration
+      tags:
+        - Billing
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Public recharge configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RechargeConfigResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: Recharge configuration unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/recharges/{rechargeNo}:
+    get:
+      operationId: getRecharge
+      summary: Get one recharge order
+      tags:
+        - Billing
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: rechargeNo
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Recharge order
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RechargeItem"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Recharge not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/payments/webhooks/epay/v1:
+    get:
+      operationId: getEPayWebhook
+      summary: Receive an untrusted EPay notification
+      description: Reads out_trade_no and triggers active reconciliation for an existing recharge. The notification itself is never used to credit funds.
+      tags:
+        - Billing
+      responses:
+        "200":
+          description: Notification acknowledged
+          content:
+            text/plain:
+              schema:
+                type: string
+    post:
+      operationId: postEPayWebhook
+      summary: Receive an untrusted EPay notification
+      description: Reads form field out_trade_no and triggers active reconciliation for an existing recharge. The notification itself is never used to credit funds.
+      tags:
+        - Billing
+      responses:
+        "200":
+          description: Notification acknowledged
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /v1/payments/webhooks/epay/v2:
+    get:
+      operationId: getEPayV2Webhook
+      summary: Receive an untrusted EPay V2 notification
+      description: Reads out_trade_no and triggers active reconciliation for an existing recharge. The notification itself is never used to credit funds.
+      tags:
+        - Billing
+      responses:
+        "200":
+          description: Notification acknowledged
+          content:
+            text/plain:
+              schema:
+                type: string
+    post:
+      operationId: postEPayV2Webhook
+      summary: Receive an untrusted EPay V2 notification
+      description: Reads form field out_trade_no and triggers active reconciliation for an existing recharge. The notification itself is never used to credit funds.
+      tags:
+        - Billing
+      responses:
+        "200":
+          description: Notification acknowledged
+          content:
+            text/plain:
+              schema:
+                type: string
 
   /v1/cards/redeem:
     post:
@@ -11097,6 +11274,8 @@ components:
         - rechargeQuota
         - paymentAmount
         - status
+        - queryAttempts
+        - expiresAt
         - createdAt
         - updatedAt
       properties:
@@ -11115,6 +11294,23 @@ components:
         status:
           type: string
           enum: [paying, callback, reconciled, credited, failed]
+        gatewayTradeNo:
+          type: string
+        failureReason:
+          type: string
+        queryAttempts:
+          type: integer
+        expiresAt:
+          type: string
+          format: date-time
+        paidAt:
+          type: string
+          format: date-time
+          nullable: true
+        reconciledAt:
+          type: string
+          format: date-time
+          nullable: true
         createdAt:
           type: string
           format: date-time
@@ -11141,6 +11337,73 @@ components:
           type: integer
         limit:
           type: integer
+      additionalProperties: false
+
+    RechargeTier:
+      type: object
+      required:
+        - amount
+        - bonus
+        - rechargeQuota
+        - paymentAmount
+      properties:
+        amount:
+          $ref: "#/components/schemas/PaymentAmount"
+        bonus:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        rechargeQuota:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        paymentAmount:
+          $ref: "#/components/schemas/PaymentAmount"
+      additionalProperties: false
+
+    RechargeConfigResponse:
+      type: object
+      required:
+        - enabled
+        - minAmount
+        - feeRate
+        - feeCap
+        - tiers
+      properties:
+        enabled:
+          type: boolean
+        minAmount:
+          $ref: "#/components/schemas/PaymentAmount"
+        feeRate:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        feeCap:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        tiers:
+          type: array
+          items:
+            $ref: "#/components/schemas/RechargeTier"
+      additionalProperties: false
+
+    CreateRechargeRequest:
+      type: object
+      required:
+        - amount
+      properties:
+        amount:
+          $ref: "#/components/schemas/PaymentAmount"
+      additionalProperties: false
+
+    CreateRechargeResponse:
+      type: object
+      required:
+        - recharge
+        - payUrl
+        - expiresAt
+      properties:
+        recharge:
+          $ref: "#/components/schemas/RechargeItem"
+        payUrl:
+          type: string
+          format: uri
+        expiresAt:
+          type: string
+          format: date-time
       additionalProperties: false
 
     RedeemCardRequest:

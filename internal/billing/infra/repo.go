@@ -75,15 +75,25 @@ func (IdempotencyKeyModel) TableName() string {
 }
 
 type RechargeModel struct {
-	ID            uint      `gorm:"primaryKey;autoIncrement"`
-	RechargeNo    string    `gorm:"type:varchar(64);not null;column:recharge_no"`
-	UserID        uint      `gorm:"not null;column:user_id"`
-	PaymentMethod string    `gorm:"type:varchar(32);not null;column:payment_method"`
-	RechargeQuota string    `gorm:"type:decimal(18,6);not null;column:recharge_quota"`
-	PaymentAmount string    `gorm:"type:decimal(18,2);not null;column:payment_amount"`
-	Status        string    `gorm:"type:varchar(32);not null;default:'paying'"`
-	CreatedAt     time.Time `gorm:"not null;autoCreateTime;column:created_at"`
-	UpdatedAt     time.Time `gorm:"not null;autoUpdateTime;column:updated_at"`
+	ID                uint       `gorm:"primaryKey;autoIncrement"`
+	RechargeNo        string     `gorm:"type:varchar(64);not null;column:recharge_no"`
+	UserID            uint       `gorm:"not null;column:user_id"`
+	PaymentMethod     string     `gorm:"type:varchar(32);not null;column:payment_method"`
+	RechargeQuota     string     `gorm:"type:decimal(18,6);not null;column:recharge_quota"`
+	PaymentAmount     string     `gorm:"type:decimal(18,2);not null;column:payment_amount"`
+	Status            string     `gorm:"type:varchar(32);not null;default:'paying'"`
+	GatewayTradeNo    *string    `gorm:"type:varchar(64);column:gateway_trade_no"`
+	GatewayConfigHash string     `gorm:"type:char(64);not null;default:'';column:gateway_config_hash"`
+	FailureReason     string     `gorm:"type:varchar(64);not null;default:'';column:failure_reason"`
+	QueryAttempts     int        `gorm:"not null;default:0;column:query_attempts"`
+	LastQueriedAt     *time.Time `gorm:"column:last_queried_at"`
+	QueryGeneration   int        `gorm:"not null;default:0;column:query_generation"`
+	QueryLeaseUntil   *time.Time `gorm:"column:query_lease_until"`
+	GatewayConfigJSON *string    `gorm:"type:longtext;column:gateway_config_snapshot"`
+	PaidAt            *time.Time `gorm:"column:paid_at"`
+	ReconciledAt      *time.Time `gorm:"column:reconciled_at"`
+	CreatedAt         time.Time  `gorm:"not null;autoCreateTime;column:created_at"`
+	UpdatedAt         time.Time  `gorm:"not null;autoUpdateTime;column:updated_at"`
 }
 
 func (RechargeModel) TableName() string {
@@ -280,6 +290,292 @@ func (r *BillingRepo) CountRecharges(ctx context.Context, filter billingapp.Rech
 		return 0, fmt.Errorf("count recharges: %w", err)
 	}
 	return total, nil
+}
+
+func (r *BillingRepo) CreateRecharge(ctx context.Context, command billingapp.CreateRechargeCommand) (*domain.Recharge, error) {
+	var result domain.Recharge
+	snapshot, err := json.Marshal(command.GatewayConfig)
+	if err != nil {
+		return nil, fmt.Errorf("encode recharge gateway config: %w", err)
+	}
+	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		response, replayed, err := r.withIdempotencyInTx(ctx, tx, command.Recharge.UserID, "recharges.create", command.IdempotencyKey, command.RequestFingerprint, func(writeTx *gorm.DB) ([]byte, error) {
+			model := rechargeModelFromDomain(command.Recharge)
+			encoded := string(snapshot)
+			model.GatewayConfigJSON = &encoded
+			if err := writeTx.WithContext(ctx).Create(&model).Error; err != nil {
+				return nil, fmt.Errorf("create recharge: %w", err)
+			}
+			result = rechargeModelToDomain(model)
+			return json.Marshal(result)
+		})
+		if err != nil {
+			return err
+		}
+		if replayed {
+			if err := json.Unmarshal(response, &result); err != nil {
+				return fmt.Errorf("decode idempotent recharge: %w", err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		if isDuplicateKeyError(err) {
+			var pending int64
+			queryErr := r.db.WithContext(ctx).Model(&RechargeModel{}).
+				Where("user_id = ? AND status IN ?", command.Recharge.UserID, pendingRechargeStatuses()).
+				Count(&pending).Error
+			if queryErr == nil && pending > 0 {
+				return nil, domain.ErrRechargePending
+			}
+		}
+		return nil, err
+	}
+	return r.GetRechargeByNo(ctx, result.RechargeNo)
+}
+
+func (r *BillingRepo) GetRechargeByNo(ctx context.Context, rechargeNo string) (*domain.Recharge, error) {
+	var model RechargeModel
+	if err := r.db.WithContext(ctx).First(&model, "recharge_no = ?", rechargeNo).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, domain.ErrRechargeNotFound
+		}
+		return nil, fmt.Errorf("find recharge: %w", err)
+	}
+	recharge := rechargeModelToDomain(model)
+	return &recharge, nil
+}
+
+func (r *BillingRepo) MarkRechargeCallback(ctx context.Context, rechargeNo string, callbackAt time.Time) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&RechargeModel{}).
+		Where("recharge_no = ? AND status = ? AND created_at > ?", rechargeNo, domain.RechargeStatusPaying, callbackAt.Add(-domain.RechargeReconciliationWindow)).
+		Updates(map[string]any{
+			"status":     string(domain.RechargeStatusCallback),
+			"updated_at": callbackAt,
+		})
+	if result.Error != nil {
+		return false, fmt.Errorf("mark recharge callback: %w", result.Error)
+	}
+	return result.RowsAffected > 0, nil
+}
+
+func (r *BillingRepo) ListDueRecharges(ctx context.Context, now time.Time, limit int) ([]domain.Recharge, error) {
+	var models []RechargeModel
+	if err := r.db.WithContext(ctx).
+		Where(
+			"created_at > ? AND (status IN ? OR (status = ? AND created_at <= ?)) AND (query_lease_until IS NULL OR query_lease_until <= ?) AND (last_queried_at IS NULL OR (query_attempts < ? AND last_queried_at <= ?) OR (query_attempts >= ? AND last_queried_at <= ?))",
+			now.Add(-domain.RechargeReconciliationWindow),
+			[]string{string(domain.RechargeStatusCallback), string(domain.RechargeStatusReconciled)},
+			domain.RechargeStatusPaying,
+			now.Add(-domain.RechargeCallbackFallbackDelay),
+			now,
+			domain.RechargeFastQueryLimit,
+			now.Add(-domain.RechargeFastQueryInterval),
+			domain.RechargeFastQueryLimit,
+			now.Add(-domain.RechargeSlowQueryInterval),
+		).
+		Order("COALESCE(last_queried_at, created_at) ASC, id ASC").
+		Limit(limit).
+		Find(&models).Error; err != nil {
+		return nil, fmt.Errorf("list due recharges: %w", err)
+	}
+	items := make([]domain.Recharge, len(models))
+	for i := range models {
+		items[i] = rechargeModelToDomain(models[i])
+	}
+	return items, nil
+}
+
+func (r *BillingRepo) ExpirePendingRecharges(ctx context.Context, createdBefore, now time.Time) (int64, error) {
+	result := r.db.WithContext(ctx).
+		Model(&RechargeModel{}).
+		Where("status IN ? AND created_at <= ?", pendingRechargeStatuses(), createdBefore).
+		Updates(map[string]any{
+			"status":         string(domain.RechargeStatusFailed),
+			"failure_reason": "query_timeout",
+			"reconciled_at":  &now,
+			"updated_at":     now,
+		})
+	if result.Error != nil {
+		return 0, fmt.Errorf("expire pending recharges: %w", result.Error)
+	}
+	return result.RowsAffected, nil
+}
+
+func (r *BillingRepo) ClaimRechargeQuery(ctx context.Context, rechargeNo string, claimedAt, leaseUntil time.Time) (*domain.Recharge, billingapp.RechargeConfig, int, bool, error) {
+	var model RechargeModel
+	claimed := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.WithContext(ctx).
+			Model(&RechargeModel{}).
+			Where(
+				"recharge_no = ? AND created_at > ? AND (status IN ? OR (status = ? AND created_at <= ?)) AND (query_lease_until IS NULL OR query_lease_until <= ?) AND (last_queried_at IS NULL OR (query_attempts < ? AND last_queried_at <= ?) OR (query_attempts >= ? AND last_queried_at <= ?))",
+				rechargeNo,
+				claimedAt.Add(-domain.RechargeReconciliationWindow),
+				[]string{string(domain.RechargeStatusCallback), string(domain.RechargeStatusReconciled)},
+				domain.RechargeStatusPaying,
+				claimedAt.Add(-domain.RechargeCallbackFallbackDelay),
+				claimedAt,
+				domain.RechargeFastQueryLimit,
+				claimedAt.Add(-domain.RechargeFastQueryInterval),
+				domain.RechargeFastQueryLimit,
+				claimedAt.Add(-domain.RechargeSlowQueryInterval),
+			).
+			Updates(map[string]any{
+				"query_generation":  gorm.Expr("query_generation + 1"),
+				"query_lease_until": &leaseUntil,
+			})
+		if result.Error != nil {
+			return fmt.Errorf("claim recharge query: %w", result.Error)
+		}
+		if result.RowsAffected == 0 {
+			return nil
+		}
+		claimed = true
+		return tx.WithContext(ctx).First(&model, "recharge_no = ?", rechargeNo).Error
+	})
+	if err != nil {
+		return nil, billingapp.RechargeConfig{}, 0, false, err
+	}
+	if !claimed {
+		return nil, billingapp.RechargeConfig{}, 0, false, nil
+	}
+	if model.GatewayConfigJSON == nil {
+		return nil, billingapp.RechargeConfig{}, 0, false, fmt.Errorf("recharge gateway config snapshot is missing")
+	}
+	var config billingapp.RechargeConfig
+	if err := json.Unmarshal([]byte(*model.GatewayConfigJSON), &config); err != nil {
+		return nil, billingapp.RechargeConfig{}, 0, false, fmt.Errorf("decode recharge gateway config: %w", err)
+	}
+	recharge := rechargeModelToDomain(model)
+	return &recharge, config, model.QueryGeneration, true, nil
+}
+
+func (r *BillingRepo) RecordRechargeQuery(ctx context.Context, rechargeNo string, generation int, queriedAt time.Time) error {
+	if err := r.db.WithContext(ctx).
+		Model(&RechargeModel{}).
+		Where("recharge_no = ? AND query_generation = ? AND status IN ?", rechargeNo, generation, pendingRechargeStatuses()).
+		Updates(map[string]any{
+			"query_attempts":    gorm.Expr("query_attempts + 1"),
+			"last_queried_at":   &queriedAt,
+			"query_lease_until": nil,
+			"updated_at":        queriedAt,
+		}).Error; err != nil {
+		return fmt.Errorf("record recharge query: %w", err)
+	}
+	return nil
+}
+
+func (r *BillingRepo) FailRecharge(ctx context.Context, rechargeNo string, generation int, reason string, failedAt time.Time) error {
+	if err := r.db.WithContext(ctx).
+		Model(&RechargeModel{}).
+		Where("recharge_no = ? AND query_generation = ? AND status IN ?", rechargeNo, generation, pendingRechargeStatuses()).
+		Updates(map[string]any{
+			"status":            string(domain.RechargeStatusFailed),
+			"failure_reason":    reason,
+			"query_attempts":    gorm.Expr("query_attempts + 1"),
+			"last_queried_at":   &failedAt,
+			"query_lease_until": nil,
+			"reconciled_at":     &failedAt,
+			"updated_at":        failedAt,
+		}).Error; err != nil {
+		return fmt.Errorf("fail recharge: %w", err)
+	}
+	return nil
+}
+
+func (r *BillingRepo) CreditRecharge(ctx context.Context, command billingapp.CreditRechargeCommand) (*domain.Recharge, error) {
+	var credited domain.Recharge
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var model RechargeModel
+		if err := tx.WithContext(ctx).
+			Clauses(clause.Locking{Strength: "UPDATE"}).
+			First(&model, "recharge_no = ?", command.RechargeNo).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrRechargeNotFound
+			}
+			return fmt.Errorf("lock recharge: %w", err)
+		}
+		if domain.RechargeStatus(model.Status) == domain.RechargeStatusCredited {
+			credited = rechargeModelToDomain(model)
+			return nil
+		}
+		queriedInTime := command.QueriedAt.Before(model.CreatedAt.Add(domain.RechargeReconciliationWindow))
+		verifiedFailureRace := domain.RechargeStatus(model.Status) == domain.RechargeStatusFailed && queriedInTime
+		if (!domain.IsPendingRechargeStatus(domain.RechargeStatus(model.Status)) && !verifiedFailureRace) ||
+			!queriedInTime || strings.TrimSpace(command.GatewayTradeNo) == "" {
+			return domain.ErrRechargeExpired
+		}
+
+		relation, err := r.findReferralRelationInTx(ctx, tx, model.UserID)
+		if err != nil {
+			return err
+		}
+		wallets, err := r.lockWalletsInTx(ctx, tx, model.UserID, relation.InviterUserID)
+		if err != nil {
+			return err
+		}
+		transaction, err := r.createConsumerTransaction(ctx, tx, wallets[model.UserID], consumerTransactionRequest{
+			UserID:          model.UserID,
+			Amount:          model.RechargeQuota,
+			Direction:       domain.TransactionDirectionIn,
+			TransactionType: domain.TransactionTypeRecharge,
+			BizType:         "recharge",
+			BizID:           model.RechargeNo,
+			IdempotencyKey:  "recharge:" + model.RechargeNo,
+		})
+		if err != nil {
+			return err
+		}
+		if err := r.settleReferralRewardInTx(ctx, tx, relation, transaction.Transaction); err != nil {
+			return err
+		}
+
+		tradeNo := strings.TrimSpace(command.GatewayTradeNo)
+		paidAt := command.PaidAt
+		if paidAt == nil {
+			paidAt = &command.QueriedAt
+		}
+		settledAt := command.QueriedAt
+		if model.UpdatedAt.After(settledAt) {
+			settledAt = model.UpdatedAt
+		}
+		updates := map[string]any{
+			"status":            string(domain.RechargeStatusCredited),
+			"gateway_trade_no":  tradeNo,
+			"failure_reason":    "",
+			"query_attempts":    gorm.Expr("query_attempts + 1"),
+			"last_queried_at":   &settledAt,
+			"query_lease_until": nil,
+			"paid_at":           paidAt,
+			"reconciled_at":     &settledAt,
+			"updated_at":        settledAt,
+		}
+		if err := tx.WithContext(ctx).Model(&RechargeModel{}).Where("id = ?", model.ID).Updates(updates).Error; err != nil {
+			if isDuplicateKeyError(err) {
+				return domain.ErrRechargeQueryMismatch
+			}
+			return fmt.Errorf("credit recharge: %w", err)
+		}
+		if err := tx.WithContext(ctx).First(&model, model.ID).Error; err != nil {
+			return fmt.Errorf("reload credited recharge: %w", err)
+		}
+		credited = rechargeModelToDomain(model)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &credited, nil
+}
+
+func pendingRechargeStatuses() []string {
+	return []string{
+		string(domain.RechargeStatusPaying),
+		string(domain.RechargeStatusCallback),
+		string(domain.RechargeStatusReconciled),
+	}
 }
 
 func (r *BillingRepo) RedeemCard(ctx context.Context, req billingapp.RedeemCardCommand) (*billingapp.RedeemCardResult, error) {
@@ -1058,16 +1354,53 @@ func transactionModelToDomain(model WalletTransactionModel) domain.Transaction {
 }
 
 func rechargeModelToDomain(model RechargeModel) domain.Recharge {
+	gatewayTradeNo := ""
+	if model.GatewayTradeNo != nil {
+		gatewayTradeNo = *model.GatewayTradeNo
+	}
 	return domain.Recharge{
-		ID:            model.ID,
-		RechargeNo:    model.RechargeNo,
-		UserID:        model.UserID,
-		PaymentMethod: model.PaymentMethod,
-		RechargeQuota: normalizeMoneyString(model.RechargeQuota),
-		PaymentAmount: normalizeMoneyString(model.PaymentAmount),
-		Status:        domain.RechargeStatus(model.Status),
-		CreatedAt:     model.CreatedAt,
-		UpdatedAt:     model.UpdatedAt,
+		ID:                model.ID,
+		RechargeNo:        model.RechargeNo,
+		UserID:            model.UserID,
+		PaymentMethod:     model.PaymentMethod,
+		RechargeQuota:     normalizeMoneyString(model.RechargeQuota),
+		PaymentAmount:     normalizeMoneyString(model.PaymentAmount),
+		Status:            domain.RechargeStatus(model.Status),
+		GatewayTradeNo:    gatewayTradeNo,
+		GatewayConfigHash: model.GatewayConfigHash,
+		FailureReason:     model.FailureReason,
+		QueryAttempts:     model.QueryAttempts,
+		LastQueriedAt:     model.LastQueriedAt,
+		PaidAt:            model.PaidAt,
+		ReconciledAt:      model.ReconciledAt,
+		CreatedAt:         model.CreatedAt,
+		UpdatedAt:         model.UpdatedAt,
+	}
+}
+
+func rechargeModelFromDomain(recharge domain.Recharge) RechargeModel {
+	var gatewayTradeNo *string
+	if strings.TrimSpace(recharge.GatewayTradeNo) != "" {
+		value := strings.TrimSpace(recharge.GatewayTradeNo)
+		gatewayTradeNo = &value
+	}
+	return RechargeModel{
+		ID:                recharge.ID,
+		RechargeNo:        recharge.RechargeNo,
+		UserID:            recharge.UserID,
+		PaymentMethod:     recharge.PaymentMethod,
+		RechargeQuota:     recharge.RechargeQuota,
+		PaymentAmount:     recharge.PaymentAmount,
+		Status:            string(recharge.Status),
+		GatewayTradeNo:    gatewayTradeNo,
+		GatewayConfigHash: recharge.GatewayConfigHash,
+		FailureReason:     recharge.FailureReason,
+		QueryAttempts:     recharge.QueryAttempts,
+		LastQueriedAt:     recharge.LastQueriedAt,
+		PaidAt:            recharge.PaidAt,
+		ReconciledAt:      recharge.ReconciledAt,
+		CreatedAt:         recharge.CreatedAt,
+		UpdatedAt:         recharge.UpdatedAt,
 	}
 }
 

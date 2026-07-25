@@ -52,15 +52,21 @@ type TransactionListResponse struct {
 }
 
 type RechargeItemResponse struct {
-	ID            uint      `json:"id"`
-	RechargeNo    string    `json:"rechargeNo"`
-	UserID        uint      `json:"userId"`
-	PaymentMethod string    `json:"paymentMethod"`
-	RechargeQuota string    `json:"rechargeQuota"`
-	PaymentAmount string    `json:"paymentAmount"`
-	Status        string    `json:"status"`
-	CreatedAt     time.Time `json:"createdAt"`
-	UpdatedAt     time.Time `json:"updatedAt"`
+	ID             uint       `json:"id"`
+	RechargeNo     string     `json:"rechargeNo"`
+	UserID         uint       `json:"userId"`
+	PaymentMethod  string     `json:"paymentMethod"`
+	RechargeQuota  string     `json:"rechargeQuota"`
+	PaymentAmount  string     `json:"paymentAmount"`
+	Status         string     `json:"status"`
+	GatewayTradeNo string     `json:"gatewayTradeNo,omitempty"`
+	FailureReason  string     `json:"failureReason,omitempty"`
+	QueryAttempts  int        `json:"queryAttempts"`
+	ExpiresAt      time.Time  `json:"expiresAt"`
+	PaidAt         *time.Time `json:"paidAt,omitempty"`
+	ReconciledAt   *time.Time `json:"reconciledAt,omitempty"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	UpdatedAt      time.Time  `json:"updatedAt"`
 }
 
 type RechargeListResponse struct {
@@ -68,6 +74,31 @@ type RechargeListResponse struct {
 	Total  int64                  `json:"total"`
 	Offset int                    `json:"offset"`
 	Limit  int                    `json:"limit"`
+}
+
+type RechargeTierResponse struct {
+	Amount        string `json:"amount"`
+	Bonus         string `json:"bonus"`
+	RechargeQuota string `json:"rechargeQuota"`
+	PaymentAmount string `json:"paymentAmount"`
+}
+
+type RechargeConfigResponse struct {
+	Enabled   bool                   `json:"enabled"`
+	MinAmount string                 `json:"minAmount"`
+	FeeRate   string                 `json:"feeRate"`
+	FeeCap    string                 `json:"feeCap"`
+	Tiers     []RechargeTierResponse `json:"tiers"`
+}
+
+type CreateRechargeRequest struct {
+	Amount string `json:"amount" binding:"required"`
+}
+
+type CreateRechargeResponse struct {
+	Recharge  RechargeItemResponse `json:"recharge"`
+	PayURL    string               `json:"payUrl"`
+	ExpiresAt time.Time            `json:"expiresAt"`
 }
 
 type RedeemCardRequest struct {

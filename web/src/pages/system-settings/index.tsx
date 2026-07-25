@@ -98,13 +98,11 @@ export default function SystemSettingsPage() {
   const handleBulkSave = useCallback(async (updates: { key: string; value: string }[]) => {
     setSaving(true);
     try {
-      await updateSystemOptionsBulk(updates);
+      const result = await updateSystemOptionsBulk(updates);
       setOptions((prev) => {
-        const nx = [...prev];
-        for (const up of updates) {
-          const idx = nx.findIndex((o) => o.key === up.key);
-          if (idx >= 0) nx[idx] = up; else nx.push(up);
-        }
+        const updatedKeys = new Set(updates.map(({ key }) => key));
+        const nx = prev.filter(({ key }) => !updatedKeys.has(key));
+        nx.push(...result.options);
         return nx;
       });
       Toast.success(t("Settings saved."));

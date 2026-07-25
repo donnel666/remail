@@ -6,13 +6,12 @@ import { useTranslation } from "react-i18next";
 import { parseOption } from "@/lib/system-settings-api";
 
 import type { SectionProps } from "./index";
-import { SettingsCardHeader, SettingsFormGrid, SettingsNumberField, SettingsSection, SettingsSelectField, SettingsTextField } from "./settings-layout";
+import { EPAY_GATEWAY_KEYS, EPAY_WRITE_ONLY_KEYS, RECHARGE_CHECK_KEYS, TOPUP_KEYS } from "./payment-billing-keys";
+import { SettingsAccessBoundary, SettingsCardHeader, SettingsFormGrid, SettingsNumberField, SettingsSection, SettingsSelectField, SettingsTextField, SettingsTextareaField } from "./settings-layout";
 import { parseTopupTiers, serializeTopupTiers, type TopupTier } from "./topup-tiers";
 
-const D: Record<string, unknown> = { epay_version: "v1", epay_gateway_url: "", epay_merchant_id: "", epay_merchant_key: "", epay_notify_url: "", epay_return_url: "", epay_custom_callback_domain: "", min_topup_amount: 10, topup_fee_rate: 0, topup_fee_cap: 0, topup_amount_presets: "[10, 20, 50, 100, 200, 500]", topup_amount_bonus: "{}", async_check_enabled: true, async_check_poll_interval_seconds: 30, async_check_max_retries: 10, async_check_timeout_minutes: 30, async_check_request_timeout_seconds: 5 };
-const GATEWAY_KEYS = ["epay_version", "epay_gateway_url", "epay_merchant_id", "epay_merchant_key", "epay_notify_url", "epay_return_url", "epay_custom_callback_domain"];
-const TOPUP_KEYS = ["min_topup_amount", "topup_fee_rate", "topup_fee_cap", "topup_amount_presets", "topup_amount_bonus"];
-const CHECK_KEYS = ["async_check_enabled", "async_check_poll_interval_seconds", "async_check_max_retries", "async_check_timeout_minutes", "async_check_request_timeout_seconds"];
+const D: Record<string, unknown> = { epay_enabled: false, epay_version: "v1", epay_gateway_url: "", epay_merchant_id: "", epay_merchant_key: "", epay_private_key: "", epay_platform_public_key: "", epay_notify_url: "", epay_return_url: "", min_topup_amount: 10, topup_fee_rate: 0, topup_fee_cap: 0, topup_amount_presets: "[10, 20, 50, 100, 200, 500]", topup_amount_bonus: "{}", async_check_request_timeout_seconds: 5 };
+const EPAY_WRITE_ONLY = new Set<string>(EPAY_WRITE_ONLY_KEYS);
 
 export default function PaymentSection({ options, onBulkSave, canSensitive }: SectionProps) {
   const { t } = useTranslation();
@@ -24,7 +23,15 @@ export default function PaymentSection({ options, onBulkSave, canSensitive }: Se
   const field = (label: string, key: string) => <SettingsNumberField label={t(label)} value={number(form[key])} onChange={(value) => update(key, value)} min={0} />;
   const save = async (card: string, keys: string[]) => {
     setSavingCard(card);
-    try { await onBulkSave(keys.map((key) => ({ key, value: String(form[key] ?? "") }))); }
+    try {
+      await onBulkSave(keys.flatMap((key) => {
+        const value = String(form[key] ?? "");
+        return EPAY_WRITE_ONLY.has(key) && !value.trim() ? [] : [{ key, value }];
+      }));
+      if (card === "gateway") {
+        setForm((current) => ({ ...current, epay_merchant_key: "", epay_private_key: "" }));
+      }
+    }
     finally { setSavingCard(null); }
   };
   const saveTopup = async () => {
@@ -48,18 +55,22 @@ export default function PaymentSection({ options, onBulkSave, canSensitive }: Se
   const addTier = () => setTopupTiers((current) => [...current, { amount: current.length ? Math.max(...current.map(({ amount }) => amount)) + 10 : 10, bonus: 0 }]);
 
   return <div className="space-y-6">
-    <SettingsSection title={<SettingsCardHeader icon={<CreditCard size={16} />} title={t("支付网关")} description={t("配置易支付 V1 / V2 协议、商户凭据和回调地址")} />}>
-      <SettingsFormGrid className="mt-4">
-        <SettingsSelectField label={t("易支付版本")} value={String(form.epay_version)} onChange={(value) => update("epay_version", value)} options={[{ label: "V1", value: "v1" }, { label: "V2", value: "v2" }]} />
-        <SettingsTextField label={t("支付网关地址")} value={String(form.epay_gateway_url)} onChange={(value) => update("epay_gateway_url", value)} placeholder="https://pay.example.com/" />
-        <SettingsTextField label={t("商户 ID")} value={String(form.epay_merchant_id)} onChange={(value) => update("epay_merchant_id", value)} />
-        <SettingsTextField label={t("商户密钥")} value={String(form.epay_merchant_key)} onChange={(value) => update("epay_merchant_key", value)} type="password" disabled={!canSensitive} placeholder={!canSensitive ? t("需要敏感设置权限") : undefined} />
-        <SettingsTextField label={t("支付回调地址")} value={String(form.epay_notify_url)} onChange={(value) => update("epay_notify_url", value)} placeholder="https://example.com/api/callback" />
-        <SettingsTextField label={t("支付同步跳转地址")} value={String(form.epay_return_url)} onChange={(value) => update("epay_return_url", value)} />
-        <SettingsTextField label={t("自定义回调域名")} value={String(form.epay_custom_callback_domain)} onChange={(value) => update("epay_custom_callback_domain", value)} />
-      </SettingsFormGrid>
-      <Button icon={<Save size={14} />} loading={savingCard === "gateway"} onClick={() => void save("gateway", GATEWAY_KEYS.filter((key) => canSensitive || key !== "epay_merchant_key")).catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
-    </SettingsSection>
+    <SettingsAccessBoundary canWrite={canSensitive}>
+      <SettingsSection title={<SettingsCardHeader icon={<CreditCard size={16} />} title={t("支付网关")} description={t("易支付 V1 / V2；回调只确认收到，不参与入账")} enabled={!!form.epay_enabled} onToggle={(value) => update("epay_enabled", value)} statusText={form.epay_enabled ? t("已启用") : t("已禁用")} />}>
+        <SettingsFormGrid className="mt-4">
+          <SettingsSelectField label={t("易支付版本")} value={String(form.epay_version)} onChange={(value) => update("epay_version", value)} options={[{ label: "V1", value: "v1" }, { label: "V2", value: "v2" }]} />
+          <SettingsTextField label={t("支付网关地址")} value={String(form.epay_gateway_url)} onChange={(value) => update("epay_gateway_url", value)} placeholder="https://pay.example.com/" />
+          <SettingsTextField label={t("商户 ID")} value={String(form.epay_merchant_id)} onChange={(value) => update("epay_merchant_id", value)} />
+          {form.epay_version === "v2" ? <>
+            <SettingsTextField label={t("商户私钥（V2）")} value={String(form.epay_private_key)} onChange={(value) => update("epay_private_key", value)} type="password" placeholder={t("已保存私钥不会回显；留空保持不变")} />
+            <SettingsTextareaField label={t("平台公钥（V2）")} value={String(form.epay_platform_public_key)} onChange={(value) => update("epay_platform_public_key", value)} rows={4} placeholder={t("平台提供的 RSA 公钥")} />
+          </> : <SettingsTextField label={t("商户 MD5 密钥（V1）")} value={String(form.epay_merchant_key)} onChange={(value) => update("epay_merchant_key", value)} type="password" placeholder={t("已保存密钥不会回显；留空保持不变")} />}
+          <SettingsTextField label={t("支付回调地址")} value={String(form.epay_notify_url)} onChange={(value) => update("epay_notify_url", value)} placeholder="https://example.com/api/callback" />
+          <SettingsTextField label={t("支付同步跳转地址")} value={String(form.epay_return_url)} onChange={(value) => update("epay_return_url", value)} />
+        </SettingsFormGrid>
+        <Button icon={<Save size={14} />} loading={savingCard === "gateway"} onClick={() => void save("gateway", [...EPAY_GATEWAY_KEYS]).catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
+      </SettingsSection>
+    </SettingsAccessBoundary>
 
     <SettingsSection title={<SettingsCardHeader icon={<WalletCards size={16} />} title={t("充值配置")} description={t("配置最低充值额度、手续费和前端充值档位")} />}>
       <SettingsFormGrid className="mt-4">
@@ -97,14 +108,11 @@ export default function PaymentSection({ options, onBulkSave, canSensitive }: Se
       <Button icon={<Save size={14} />} loading={savingCard === "topup"} onClick={() => void saveTopup().catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
     </SettingsSection>
 
-    <SettingsSection title={<SettingsCardHeader icon={<RefreshCw size={16} />} title={t("异步查账")} description={t("后台主动轮询支付网关，处理 pending 状态充值单")} enabled={!!form.async_check_enabled} onToggle={(value) => update("async_check_enabled", value)} statusText={form.async_check_enabled ? t("已启用") : t("已禁用")} />}>
+    <SettingsSection title={<SettingsCardHeader icon={<RefreshCw size={16} />} title={t("异步查账")} description={t("回调后前 10 次每 5 秒查账，随后每 30 秒；无回调时 60 秒启动，5 分钟截止")} />}>
       <SettingsFormGrid className="mt-4">
-        {field("查账轮询间隔（秒）", "async_check_poll_interval_seconds")}
-        {field("查账最大重试次数", "async_check_max_retries")}
-        {field("查账超时时间（分钟）", "async_check_timeout_minutes")}
         {field("单次查账请求超时（秒）", "async_check_request_timeout_seconds")}
       </SettingsFormGrid>
-      <Button icon={<Save size={14} />} loading={savingCard === "check"} onClick={() => void save("check", CHECK_KEYS).catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
+      <Button icon={<Save size={14} />} loading={savingCard === "check"} onClick={() => void save("check", [...RECHARGE_CHECK_KEYS]).catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
     </SettingsSection>
   </div>;
 }

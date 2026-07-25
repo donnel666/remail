@@ -40,12 +40,15 @@ import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { generateIdempotencyKey } from "@/lib/idempotency";
 import {
+  createRecharge,
+  getRechargeConfig,
   getWallet,
   getWalletReferrals,
-  listWalletTransactions,
+  listRecharges,
   redeemCard,
   transferReferralRewards,
-  type TransactionItem,
+  type RechargeConfigResponse,
+  type RechargeItem,
   type WalletReferralResponse,
   type WalletResponse,
 } from "@/lib/wallet-api";
@@ -59,29 +62,6 @@ interface BannerStat {
   label: string;
   value: string;
 }
-
-interface PresetAmount {
-  amount: string;
-  badge?: string;
-  pay: string;
-  value: number;
-}
-
-interface PaymentMethod {
-  name: string;
-  type: "alipay";
-}
-
-const presetAmounts: PresetAmount[] = [
-  { amount: "100 ￥", pay: "￥13.70", value: 100 },
-  { amount: "200 ￥", pay: "￥27.40", value: 200 },
-  { amount: "300 ￥", pay: "￥41.10", value: 300 },
-  { amount: "500 ￥", pay: "￥68.49", value: 500 },
-];
-
-const paymentMethods: PaymentMethod[] = [
-  { name: "Alipay", type: "alipay" },
-];
 
 function formatCurrency(value: string | number | undefined) {
   const numeric = Number(value ?? 0);
@@ -182,25 +162,29 @@ function StatBanner({
 export default function Wallet() {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
-  const [selectedAmount, setSelectedAmount] = useState(100);
-  const [customAmount, setCustomAmount] = useState("100");
+  const [selectedAmount, setSelectedAmount] = useState(0);
+  const [customAmount, setCustomAmount] = useState("");
   const [redemptionCode, setRedemptionCode] = useState("");
   const [billingOpen, setBillingOpen] = useState(false);
   const [billingKeyword, setBillingKeyword] = useState("");
   const [debouncedBillingKeyword] = useDebouncedValue(billingKeyword);
   const [wallet, setWallet] = useState<WalletResponse | null>(null);
   const [referrals, setReferrals] = useState<WalletReferralResponse | null>(null);
+  const [rechargeConfig, setRechargeConfig] =
+    useState<RechargeConfigResponse | null>(null);
   const [referralLink, setReferralLink] = useState("");
-  const [transactions, setTransactions] = useState<TransactionItem[]>([]);
-  const [billingNextAfterId, setBillingNextAfterId] = useState<number>();
+  const [recharges, setRecharges] = useState<RechargeItem[]>([]);
   const [billingHasMore, setBillingHasMore] = useState(false);
   const [walletLoading, setWalletLoading] = useState(false);
   const [referralLoading, setReferralLoading] = useState(false);
   const [transferringRewards, setTransferringRewards] = useState(false);
   const [billingLoading, setBillingLoading] = useState(false);
+  const [recharging, setRecharging] = useState(false);
   const [redeeming, setRedeeming] = useState(false);
   const redeemAttemptRef = useRef<{ code: string; key: string } | null>(null);
   const transferAttemptRef = useRef<string | null>(null);
+  const rechargeAttemptRef = useRef<{ amount: string; key: string } | null>(null);
+  const pendingRechargeNosRef = useRef(new Set<string>());
   const billingRequestSeqRef = useRef(0);
   const amountFormApiRef = useRef<{
     setValue?: (field: "topUpCount", value: unknown) => void;
@@ -236,48 +220,72 @@ export default function Wallet() {
     }
   }, [t]);
 
+  const refreshRechargeConfig = useCallback(async () => {
+    try {
+      const config = await getRechargeConfig();
+      setRechargeConfig(config);
+      const first = config.tiers[0];
+      if (first) {
+        const value = Number(first.amount);
+        setSelectedAmount(value);
+        setCustomAmount(first.amount);
+        amountFormApiRef.current?.setValue?.("topUpCount", value);
+      }
+    } catch (error) {
+      Toast.error(error instanceof Error ? error.message : t("Request failed."));
+    }
+  }, [t]);
+
   const refreshRecharges = useCallback(async () => {
     const seq = billingRequestSeqRef.current + 1;
     billingRequestSeqRef.current = seq;
     setBillingLoading(true);
     try {
-      const response = await listWalletTransactions(
+      const response = await listRecharges(
         { search: debouncedBillingKeyword.trim() || undefined },
-        undefined,
+        0,
         100
       );
       if (billingRequestSeqRef.current !== seq) return;
-      setTransactions(response.items);
-      setBillingNextAfterId(response.nextAfterId);
-      setBillingHasMore(response.hasNext);
+      const nextPending = new Set(
+        response.items
+          .filter((item) => ["paying", "callback", "reconciled"].includes(item.status))
+          .map((item) => item.rechargeNo)
+      );
+      const settled = [...pendingRechargeNosRef.current].some(
+        (rechargeNo) => !nextPending.has(rechargeNo)
+      );
+      pendingRechargeNosRef.current = nextPending;
+      setRecharges(response.items);
+      setBillingHasMore(response.items.length < response.total);
+      if (settled) void refreshWallet();
     } catch (error) {
       if (billingRequestSeqRef.current !== seq) return;
       Toast.error(error instanceof Error ? error.message : t("Request failed."));
     } finally {
       if (billingRequestSeqRef.current === seq) setBillingLoading(false);
     }
-  }, [debouncedBillingKeyword, t]);
+  }, [debouncedBillingKeyword, refreshWallet, t]);
 
   const loadMoreTransactions = useCallback(async () => {
-    if (billingLoading || !billingHasMore || !billingNextAfterId) return;
+    if (billingLoading || !billingHasMore) return;
     setBillingLoading(true);
     const seq = billingRequestSeqRef.current;
     try {
-      const response = await listWalletTransactions(
+      const response = await listRecharges(
         { search: debouncedBillingKeyword.trim() || undefined },
-        billingNextAfterId,
+        recharges.length,
         100
       );
       if (billingRequestSeqRef.current !== seq) return;
-      setTransactions((current) => {
+      setRecharges((current) => {
         const existing = new Set(current.map((item) => item.id));
         return [
           ...current,
           ...response.items.filter((item) => !existing.has(item.id)),
         ];
       });
-      setBillingNextAfterId(response.nextAfterId);
-      setBillingHasMore(response.hasNext);
+      setBillingHasMore(recharges.length + response.items.length < response.total);
     } catch (error) {
       if (billingRequestSeqRef.current !== seq) return;
       Toast.error(error instanceof Error ? error.message : t("Request failed."));
@@ -287,8 +295,8 @@ export default function Wallet() {
   }, [
     billingHasMore,
     billingLoading,
-    billingNextAfterId,
     debouncedBillingKeyword,
+    recharges.length,
     t,
   ]);
 
@@ -301,18 +309,78 @@ export default function Wallet() {
   }, [refreshReferrals]);
 
   useEffect(() => {
+    void refreshRechargeConfig();
+  }, [refreshRechargeConfig]);
+
+  useEffect(() => {
     if (!billingOpen) return;
     void refreshRecharges();
   }, [billingOpen, refreshRecharges]);
 
-  const handlePresetSelect = (preset: PresetAmount) => {
-    setSelectedAmount(preset.value);
-    setCustomAmount(String(preset.value));
-    amountFormApiRef.current?.setValue?.("topUpCount", preset.value);
+  useEffect(() => {
+    if (!billingOpen || !recharges.some((item) => ["paying", "callback", "reconciled"].includes(item.status))) return;
+    const timer = window.setInterval(() => void refreshRecharges(), 2500);
+    return () => window.clearInterval(timer);
+  }, [billingOpen, recharges, refreshRecharges]);
+
+  const handlePresetSelect = (amount: string) => {
+    const value = Number(amount);
+    setSelectedAmount(value);
+    setCustomAmount(amount);
+    amountFormApiRef.current?.setValue?.("topUpCount", value);
   };
 
-  const handleMockOnly = (messageKey = "This feature is not connected yet.") => {
-    Toast.info(t(messageKey));
+  const selectedTier = rechargeConfig?.tiers.find(
+    (tier) => Number(tier.amount) === selectedAmount
+  );
+  const payableAmount = useMemo(() => {
+    if (selectedTier) return selectedTier.paymentAmount;
+    const amount = Number(customAmount);
+    const rate = Number(rechargeConfig?.feeRate ?? 0);
+    const cap = Number(rechargeConfig?.feeCap ?? 0);
+    if (!Number.isFinite(amount) || amount <= 0) return "0.00";
+    const fee = Math.min(amount * rate / 100, cap > 0 ? cap : Number.POSITIVE_INFINITY);
+    return (amount + fee).toFixed(2);
+  }, [customAmount, rechargeConfig?.feeCap, rechargeConfig?.feeRate, selectedTier]);
+
+  const handleRecharge = async () => {
+    if (recharging) return;
+    if (!rechargeConfig?.enabled) {
+      Toast.warning(t("Online recharge is unavailable."));
+      return;
+    }
+    const amount = Number(customAmount);
+    if (!Number.isFinite(amount) || amount < Number(rechargeConfig.minAmount)) {
+      Toast.warning(t("Recharge amount is below the minimum."));
+      return;
+    }
+    const normalizedAmount = amount.toFixed(2);
+    if (!rechargeAttemptRef.current || rechargeAttemptRef.current.amount !== normalizedAmount) {
+      rechargeAttemptRef.current = { amount: normalizedAmount, key: generateIdempotencyKey() };
+    }
+    const popup = window.open("", "_blank");
+    if (popup) {
+      popup.opener = null;
+      popup.document.title = t("Opening Alipay");
+      popup.document.body.textContent = t("Creating recharge order...");
+    }
+    setRecharging(true);
+    try {
+      const result = await createRecharge(normalizedAmount, rechargeAttemptRef.current.key);
+      rechargeAttemptRef.current = null;
+      if (popup) popup.location.href = result.payUrl;
+      else window.location.assign(result.payUrl);
+      setBillingOpen(true);
+      void refreshRecharges();
+    } catch (error) {
+      popup?.close();
+      if (error instanceof IamApiError && error.status >= 400 && error.status < 500) {
+        rechargeAttemptRef.current = null;
+      }
+      Toast.error(error instanceof Error ? error.message : t("Request failed."));
+    } finally {
+      setRecharging(false);
+    }
   };
 
   const handleCopyReferral = async () => {
@@ -432,16 +500,14 @@ export default function Wallet() {
 
   const billingData = useMemo(
     () =>
-      transactions.map((item) => ({
+      recharges.map((item) => ({
         ...item,
-        orderNo: item.transactionNo,
-        paymentMethod: item.transactionType === "card_redeem" ? "Redemption Code" : item.bizType,
-        rechargeQuotaText: formatCurrency(item.amount),
-        paymentAmountText: formatCurrency(item.amount),
-        status: item.direction === "in" ? "credited" : item.transactionType,
+        orderNo: item.rechargeNo,
+        rechargeQuotaText: formatCurrency(item.rechargeQuota),
+        paymentAmountText: formatCurrency(item.paymentAmount),
         createdAtText: formatDateTime(item.createdAt),
       })),
-    [transactions]
+    [recharges]
   );
 
   const billingColumns = useMemo(
@@ -469,7 +535,11 @@ export default function Wallet() {
       {
         dataIndex: "status",
         key: "status",
-        render: (status: string) => <Tag>{t(status)}</Tag>,
+        render: (status: string) => (
+          <Tag color={status === "credited" ? "green" : status === "failed" ? "red" : "orange"}>
+            {status === "failed" ? t("充值异常") : t(status)}
+          </Tag>
+        ),
         title: t("Status"),
       },
       {
@@ -541,54 +611,57 @@ export default function Wallet() {
                         <Text type="secondary">
                           {t("Payable")}:{" "}
                           <span style={{ color: "red" }}>
-                            {Number(selectedAmount || 0).toFixed(2)}
+                            {payableAmount}
                           </span>
                         </Text>
                       }
                       field="topUpCount"
                       label={t("Recharge Amount")}
                       max={999999999}
-                      min={1}
+                      min={Number(rechargeConfig?.minAmount ?? 0.01)}
                       onChange={(value) => {
                         const parsed = Number(value);
                         setCustomAmount(Number.isFinite(parsed) ? String(parsed) : "");
-                        if (Number.isFinite(parsed) && parsed > 0) {
-                          setSelectedAmount(parsed);
-                        }
+                        setSelectedAmount(Number.isFinite(parsed) ? parsed : 0);
                       }}
-                      precision={0}
-                      step={1}
+                      precision={2}
+                      step={0.01}
                       style={{ width: "100%" }}
                     />
                     <Form.Slot label={t("Payment Method")}>
-                      <Space wrap>
-                        {paymentMethods.map((method) => (
-                          <Button
-                            icon={<SiAlipay color="#1677FF" size={18} />}
-                            key={method.type}
-                            onClick={() => handleMockOnly()}
-                            theme="outline"
-                            type="tertiary"
-                          >
-                            {t(method.name)}
-                          </Button>
-                        ))}
+                      <Space vertical align="start">
+                        <Button
+                          disabled={!rechargeConfig?.enabled}
+                          icon={<SiAlipay color="#1677FF" size={18} />}
+                          loading={recharging}
+                          onClick={() => void handleRecharge()}
+                          theme="solid"
+                          type="primary"
+                        >
+                          {t("Alipay")}
+                        </Button>
+                        <Text type="secondary">
+                          {rechargeConfig?.enabled
+                            ? t("Credit is granted only after active verification within five minutes.")
+                            : t("Online recharge is unavailable.")}
+                        </Text>
                       </Space>
                     </Form.Slot>
                   </div>
 
                   <Form.Slot label={t("Select recharge amount")}>
                     <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-                      {presetAmounts.map((preset) => {
-                        const selected = preset.value === selectedAmount;
+                      {(rechargeConfig?.tiers ?? []).map((tier) => {
+                        const selected = Number(tier.amount) === selectedAmount;
                         return (
                           <div
-                            key={preset.value}
-                            onClick={() => handlePresetSelect(preset)}
+                            className="rounded-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--semi-color-primary)]"
+                            key={tier.amount}
+                            onClick={() => handlePresetSelect(tier.amount)}
                             onKeyDown={(event) => {
                               if (event.key === "Enter" || event.key === " ") {
                                 event.preventDefault();
-                                handlePresetSelect(preset);
+                                handlePresetSelect(tier.amount);
                               }
                             }}
                             role="button"
@@ -613,15 +686,15 @@ export default function Wallet() {
                               <div className="text-center">
                                 <div className="mb-2 flex items-center justify-center gap-1 text-base font-semibold">
                                   <Coins size={18} />
-                                  {preset.amount}
-                                  {preset.badge ? (
+                                  {formatCurrency(tier.amount)}
+                                  {Number(tier.bonus) > 0 ? (
                                     <Tag color="orange" size="small">
-                                      {t(preset.badge)}
+                                      +{formatCurrency(tier.bonus)}
                                     </Tag>
                                   ) : null}
                                 </div>
                                 <div className="text-xs text-muted-foreground">
-                                  {t("Pay")} {preset.pay}
+                                  {t("Pay")} {formatCurrency(tier.paymentAmount)}
                                   {t("Pay saving suffix")}
                                 </div>
                               </div>

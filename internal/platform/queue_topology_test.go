@@ -7,6 +7,9 @@ func TestForegroundExcludesDedicatedCodePickupQueue(t *testing.T) {
 	if _, ok := fg[QueueMailfetch]; ok {
 		t.Fatal("foreground config must not duplicate the dedicated 接码 queue")
 	}
+	if _, ok := fg[QueuePaymentReconcile]; ok {
+		t.Fatal("foreground config must not duplicate the dedicated payment reconciliation queue")
+	}
 	for name, weight := range fg {
 		if weight <= 0 {
 			t.Fatalf("foreground queue %s must have positive weight", name)
@@ -19,6 +22,9 @@ func TestRealtimeTierReservesDedicatedCapacityForCodePickup(t *testing.T) {
 	if _, ok := rt[QueueMailfetch]; !ok {
 		t.Fatal("realtime config must reserve capacity for the 接码 mailfetch queue")
 	}
+	if _, ok := rt[QueuePaymentReconcile]; !ok {
+		t.Fatal("realtime config must reserve capacity for payment reconciliation")
+	}
 	for name := range rt {
 		if name == QueueBackgroundValidation || name == QueueBackgroundAlias || name == QueueBackgroundTokenRefresh || name == QueueBackgroundProjectHistory || name == QueueBackgroundInventory || name == QueueResource {
 			t.Fatalf("realtime tier must not serve background queue %s", name)
@@ -29,7 +35,7 @@ func TestRealtimeTierReservesDedicatedCapacityForCodePickup(t *testing.T) {
 func TestBackgroundTierOnlyServesBackgroundQueues(t *testing.T) {
 	bg := backgroundQueueConfig()
 	// The background tier must never serve the realtime/foreground queues.
-	for _, foreground := range []string{QueueMailfetch, QueueMailtransport, QueueDefault} {
+	for _, foreground := range []string{QueueMailfetch, QueuePaymentReconcile, QueueMailtransport, QueueDefault} {
 		if _, ok := bg[foreground]; ok {
 			t.Fatalf("background tier must not serve realtime/foreground queue %s", foreground)
 		}

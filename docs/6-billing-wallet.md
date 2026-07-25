@@ -74,15 +74,14 @@
 ```mermaid
 stateDiagram-v2
     [*] --> paying
-    paying --> callback: 回调验签
-    paying --> reconciled: 查账确认
-    callback --> reconciled: 查账确认
-    reconciled --> credited: 入账
+    paying --> callback: 收到不可信回调，仅触发查账
+    paying --> credited: 60 秒兜底查账确认并事务入账
+    callback --> credited: 主动查账确认并事务入账
     paying --> failed
-    reconciled --> failed
+    callback --> failed
 ```
 
-回调不等于入账，必须查账确认后入 `consumer`。
+回调不等于入账，只把仍在 5 分钟窗口内的 `paying` 充值单原子标记为 `callback`，并立即投递 realtime 高优先级主动查账。首次查询立即执行，前 10 次查询之间间隔 5 秒，第 10 次后间隔 30 秒；即使回调丢失，充值单创建满 60 秒也会启动同一查账流程。只有主动查询在 5 分钟内核对商户、订单号、金额和支付类型均一致才入 `consumer`，超时统一标记为充值异常。每次查询先在 MySQL 原子领取带代次的租约，陈旧任务不能提交普通完成或失败；可信支付成功可以覆盖并发产生的失败终态，但仍受订单金额校验和网关流水唯一约束。充值单保存创建时的只读网关配置快照，密钥不通过 API 返回，后续配置轮换不会影响在途订单。V1 使用 MD5 与扩展后的 `POST /api.php` 订单查询，避免商户密钥进入 URL；易支付侧仍保留原有 GET 兼容。V2 使用 RSA-SHA256 与 `POST /api/pay/query`，并在判断支付成功前使用平台公钥验证查单响应签名。
 
 ### 3.2 供应商结算
 
@@ -127,6 +126,7 @@ stateDiagram-v2
 | INV-B10 | 卡密和 API Key 这类需重复展示凭据按原值保存，普通日志禁敏。 |
 | INV-B11 | 邀请返佣只在被邀请人首次充值成功时结算一次，奖励金额为本次充值金额的 80%，必须同事务写返佣事实；划转到消费余额时再同事务锁钱包、写流水、更新奖励状态。 |
 | INV-B12 | 内部账本金额统一使用六位小数精度；领域/API 字符串至少保留两位、至多六位，展示层不得反向决定账本舍入精度。充值额度和卡密面额属于站内额度并使用六位小数，只有支付渠道实际收款金额可限制为两位小数。 |
+| INV-B13 | 每个用户最多存在一笔待处理在线充值；易支付商户密钥和商户私钥明文持久化但属于只写设置，任何读取或写入响应均不得返回原值。 |
 
 邀请返佣补充设计：
 
@@ -165,6 +165,8 @@ stateDiagram-v2
 | `GET` | `/v1/wallet/transactions` | 钱包流水；支持 `scope=mine/all`。 |
 | `POST` | `/v1/recharges` | 创建充值单。 |
 | `GET` | `/v1/recharges` | 充值单列表；支持 `scope=mine/all`。 |
+| `GET` | `/v1/recharges/config` | 当前用户可见的充值档位、赠送和手续费配置。 |
+| `GET` | `/v1/recharges/{rechargeNo}` | 查询本人的充值单及主动查账状态。 |
 | `POST` | `/v1/cards/redeem` | 兑换卡密。 |
 | `POST` | `/v1/withdrawals` | 申请提现。 |
 | `GET` | `/v1/withdrawals` | 提现列表；支持 `scope=mine/all`。 |
@@ -198,8 +200,8 @@ stateDiagram-v2
 
 | 方法 | URI | 说明 |
 |------|-----|------|
-| `POST` | `/v1/payments/webhooks/epay/v1` | 易支付 V1 回调，只记录不入账。 |
-| `POST` | `/v1/payments/webhooks/epay/v2` | 易支付 V2 回调，只记录不入账。 |
+| `GET/POST` | `/v1/payments/webhooks/epay/v1` | 易支付 V1 回调读取 `out_trade_no`，只标记收到通知并触发主动查账；回调本身永不入账。 |
+| `GET/POST` | `/v1/payments/webhooks/epay/v2` | 易支付 V2 回调读取 `out_trade_no`，只标记收到通知并触发主动查账；回调本身永不入账。 |
 
 ---
 

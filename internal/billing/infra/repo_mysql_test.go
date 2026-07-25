@@ -3,7 +3,9 @@ package infra
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -838,6 +840,9 @@ func TestBillingRepoIndexesAndExplainMySQL(t *testing.T) {
 		{"idempotency_keys", "idx_idempotency_owner_key_operation"},
 		{"recharges", "idx_recharges_user_created"},
 		{"recharges", "idx_recharges_status_created"},
+		{"recharges", "idx_recharges_gateway_trade_no"},
+		{"recharges", "idx_recharges_one_pending_per_user"},
+		{"recharges", "idx_recharges_reconcile_due"},
 		{"card_keys", "idx_card_keys_status_expire"},
 		{"card_key_redemptions", "idx_card_redemptions_card_user"},
 		{"invites", "idx_invites_code_referral_owner"},
@@ -912,6 +917,164 @@ func TestBillingRepoTransactionRollbackMySQL(t *testing.T) {
 	var idempotencyCount int64
 	require.NoError(t, db.Model(&IdempotencyKeyModel{}).Where("owner_user_id = ? AND idempotency_key = ?", userID, "idem-rollback-001").Count(&idempotencyCount).Error)
 	require.EqualValues(t, 0, idempotencyCount)
+}
+
+func TestBillingRepoCreditRechargeExactlyOnceMySQL(t *testing.T) {
+	db := newBillingMySQLTestDB(t)
+	ctx := context.Background()
+	userID := createBillingTestUser(t, db, "recharge-buyer@example.com")
+	repo := NewBillingRepo(db)
+	now := time.Now().UTC()
+	created, err := repo.CreateRecharge(ctx, billingapp.CreateRechargeCommand{
+		Recharge: domain.Recharge{
+			RechargeNo: "RC-EXACTLY-ONCE", UserID: userID, PaymentMethod: "alipay",
+			RechargeQuota: "75.00", PaymentAmount: "75.00", Status: domain.RechargeStatusPaying,
+			GatewayConfigHash: "hash", CreatedAt: now, UpdatedAt: now,
+		},
+		IdempotencyKey: "recharge-create-1", RequestFingerprint: "recharge-fingerprint-1",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "RC-EXACTLY-ONCE", created.RechargeNo)
+
+	start := make(chan struct{})
+	errorsFound := make(chan error, 2)
+	for range 2 {
+		go func() {
+			<-start
+			_, creditErr := repo.CreditRecharge(ctx, billingapp.CreditRechargeCommand{
+				RechargeNo: created.RechargeNo, GatewayTradeNo: "GW-EXACTLY-ONCE", QueriedAt: now.Add(time.Minute),
+			})
+			errorsFound <- creditErr
+		}()
+	}
+	close(start)
+	require.NoError(t, <-errorsFound)
+	require.NoError(t, <-errorsFound)
+
+	summary, err := repo.GetOrCreateWalletSummary(ctx, userID)
+	require.NoError(t, err)
+	require.Equal(t, "75.00", summary.Wallet.ConsumerBalance)
+	var transactionCount int64
+	require.NoError(t, db.Model(&WalletTransactionModel{}).
+		Where("user_id = ? AND transaction_type = ? AND biz_id = ?", userID, domain.TransactionTypeRecharge, created.RechargeNo).
+		Count(&transactionCount).Error)
+	require.EqualValues(t, 1, transactionCount)
+
+	second, err := repo.CreateRecharge(ctx, billingapp.CreateRechargeCommand{
+		Recharge: domain.Recharge{
+			RechargeNo: "RC-DUPLICATE-GATEWAY", UserID: userID, PaymentMethod: "alipay",
+			RechargeQuota: "20.00", PaymentAmount: "20.00", Status: domain.RechargeStatusPaying,
+			GatewayConfigHash: "hash", CreatedAt: now, UpdatedAt: now,
+		},
+		IdempotencyKey: "recharge-create-2", RequestFingerprint: "recharge-fingerprint-2",
+	})
+	require.NoError(t, err)
+	_, err = repo.CreditRecharge(ctx, billingapp.CreditRechargeCommand{
+		RechargeNo: second.RechargeNo, GatewayTradeNo: "GW-EXACTLY-ONCE", QueriedAt: now.Add(2 * time.Minute),
+	})
+	require.ErrorIs(t, err, domain.ErrRechargeQueryMismatch)
+	_, err = repo.CreateRecharge(ctx, billingapp.CreateRechargeCommand{
+		Recharge: domain.Recharge{
+			RechargeNo: "RC-SECOND-PENDING", UserID: userID, PaymentMethod: "alipay",
+			RechargeQuota: "30.00", PaymentAmount: "30.00", Status: domain.RechargeStatusPaying,
+			GatewayConfigHash: "hash", CreatedAt: now, UpdatedAt: now,
+		},
+		IdempotencyKey: "recharge-create-3", RequestFingerprint: "recharge-fingerprint-3",
+	})
+	require.ErrorIs(t, err, domain.ErrRechargePending)
+	summary, err = repo.GetOrCreateWalletSummary(ctx, userID)
+	require.NoError(t, err)
+	require.Equal(t, "75.00", summary.Wallet.ConsumerBalance)
+	require.NoError(t, repo.FailRecharge(ctx, second.RechargeNo, 0, "query_mismatch", now.Add(2*time.Minute)))
+	_, err = repo.CreditRecharge(ctx, billingapp.CreditRechargeCommand{
+		RechargeNo: second.RechargeNo, GatewayTradeNo: "GW-RECOVERED", QueriedAt: now.Add(2*time.Minute + 30*time.Second),
+	})
+	require.NoError(t, err)
+	summary, err = repo.GetOrCreateWalletSummary(ctx, userID)
+	require.NoError(t, err)
+	require.Equal(t, "95.00", summary.Wallet.ConsumerBalance)
+}
+
+func TestBillingRepoRechargeCallbackAndSchedulingMySQL(t *testing.T) {
+	db := newBillingMySQLTestDB(t)
+	repo := NewBillingRepo(db)
+	ctx := context.Background()
+	now := time.Date(2026, 7, 25, 10, 0, 0, 0, time.UTC)
+	snapshotConfig := billingapp.RechargeConfig{
+		Enabled: true, Version: "v1", GatewayURL: "https://pay.example.com", MerchantID: "1000", MerchantKey: "snapshot-secret",
+		NotifyURL: "https://app.example.com/v1/payments/webhooks/epay/v1", ReturnURL: "https://app.example.com/wallet", RequestTimeout: 5 * time.Second,
+	}
+	snapshotBytes, err := json.Marshal(snapshotConfig)
+	require.NoError(t, err)
+	snapshot := string(snapshotBytes)
+	lastFastWait := now.Add(-4 * time.Second)
+	lastFastDue := now.Add(-domain.RechargeFastQueryInterval)
+	lastSlowWait := now.Add(-29 * time.Second)
+	lastSlowDue := now.Add(-domain.RechargeSlowQueryInterval)
+	models := []RechargeModel{
+		{RechargeNo: "RC-PAYING-WAIT", Status: string(domain.RechargeStatusPaying), CreatedAt: now.Add(-59 * time.Second)},
+		{RechargeNo: "RC-PAYING-DUE", Status: string(domain.RechargeStatusPaying), CreatedAt: now.Add(-domain.RechargeCallbackFallbackDelay)},
+		{RechargeNo: "RC-CALLBACK-FIRST", Status: string(domain.RechargeStatusCallback), CreatedAt: now.Add(-20 * time.Second)},
+		{RechargeNo: "RC-FAST-WAIT", Status: string(domain.RechargeStatusCallback), QueryAttempts: 9, LastQueriedAt: &lastFastWait, CreatedAt: now.Add(-30 * time.Second)},
+		{RechargeNo: "RC-FAST-DUE", Status: string(domain.RechargeStatusCallback), QueryAttempts: 9, LastQueriedAt: &lastFastDue, CreatedAt: now.Add(-31 * time.Second)},
+		{RechargeNo: "RC-SLOW-WAIT", Status: string(domain.RechargeStatusCallback), QueryAttempts: 10, LastQueriedAt: &lastSlowWait, CreatedAt: now.Add(-90 * time.Second)},
+		{RechargeNo: "RC-SLOW-DUE", Status: string(domain.RechargeStatusCallback), QueryAttempts: 10, LastQueriedAt: &lastSlowDue, CreatedAt: now.Add(-91 * time.Second)},
+		{RechargeNo: "RC-EXPIRED", Status: string(domain.RechargeStatusPaying), CreatedAt: now.Add(-domain.RechargeReconciliationWindow)},
+	}
+	for index := range models {
+		models[index].UserID = createBillingTestUser(t, db, fmt.Sprintf("recharge-schedule-%d@example.com", index))
+		models[index].PaymentMethod = "alipay"
+		models[index].RechargeQuota = "10.00"
+		models[index].PaymentAmount = "10.00"
+		models[index].GatewayConfigJSON = &snapshot
+		models[index].UpdatedAt = models[index].CreatedAt
+		require.NoError(t, db.Create(&models[index]).Error)
+	}
+
+	due, err := repo.ListDueRecharges(ctx, now, 20)
+	require.NoError(t, err)
+	dueNos := make([]string, len(due))
+	for index := range due {
+		dueNos[index] = due[index].RechargeNo
+	}
+	require.ElementsMatch(t, []string{"RC-PAYING-DUE", "RC-CALLBACK-FIRST", "RC-FAST-DUE", "RC-SLOW-DUE"}, dueNos)
+
+	marked, err := repo.MarkRechargeCallback(ctx, "RC-PAYING-WAIT", now)
+	require.NoError(t, err)
+	require.True(t, marked)
+	marked, err = repo.MarkRechargeCallback(ctx, "RC-PAYING-WAIT", now)
+	require.NoError(t, err)
+	require.False(t, marked)
+	marked, err = repo.MarkRechargeCallback(ctx, "RC-EXPIRED", now)
+	require.NoError(t, err)
+	require.False(t, marked)
+	marked, err = repo.MarkRechargeCallback(ctx, "RC-UNKNOWN", now)
+	require.NoError(t, err)
+	require.False(t, marked)
+
+	claimedRecharge, claimedConfig, generation, claimed, err := repo.ClaimRechargeQuery(
+		ctx, "RC-CALLBACK-FIRST", now, now.Add(domain.RechargeQueryLease),
+	)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	require.Equal(t, "RC-CALLBACK-FIRST", claimedRecharge.RechargeNo)
+	require.Equal(t, "snapshot-secret", claimedConfig.MerchantKey)
+	require.Equal(t, 1, generation)
+
+	_, _, _, claimed, err = repo.ClaimRechargeQuery(ctx, "RC-CALLBACK-FIRST", now, now.Add(domain.RechargeQueryLease))
+	require.NoError(t, err)
+	require.False(t, claimed)
+	require.NoError(t, repo.FailRecharge(ctx, "RC-CALLBACK-FIRST", generation+1, "query_mismatch", now))
+	var claimedModel RechargeModel
+	require.NoError(t, db.First(&claimedModel, "recharge_no = ?", "RC-CALLBACK-FIRST").Error)
+	require.Equal(t, string(domain.RechargeStatusCallback), claimedModel.Status)
+	require.NotNil(t, claimedModel.QueryLeaseUntil)
+	require.Zero(t, claimedModel.QueryAttempts)
+
+	require.NoError(t, repo.RecordRechargeQuery(ctx, "RC-CALLBACK-FIRST", generation, now))
+	require.NoError(t, db.First(&claimedModel, "recharge_no = ?", "RC-CALLBACK-FIRST").Error)
+	require.Nil(t, claimedModel.QueryLeaseUntil)
+	require.Equal(t, 1, claimedModel.QueryAttempts)
 }
 
 type failingOperationLogWriter struct{}

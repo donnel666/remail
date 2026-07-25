@@ -94,16 +94,32 @@ type Transaction struct {
 }
 
 type Recharge struct {
-	ID            uint
-	RechargeNo    string
-	UserID        uint
-	PaymentMethod string
-	RechargeQuota string
-	PaymentAmount string
-	Status        RechargeStatus
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID                uint
+	RechargeNo        string
+	UserID            uint
+	PaymentMethod     string
+	RechargeQuota     string
+	PaymentAmount     string
+	Status            RechargeStatus
+	GatewayTradeNo    string
+	GatewayConfigHash string
+	FailureReason     string
+	QueryAttempts     int
+	LastQueriedAt     *time.Time
+	PaidAt            *time.Time
+	ReconciledAt      *time.Time
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
+
+const (
+	RechargeReconciliationWindow  = 5 * time.Minute
+	RechargeCallbackFallbackDelay = time.Minute
+	RechargeFastQueryInterval     = 5 * time.Second
+	RechargeSlowQueryInterval     = 30 * time.Second
+	RechargeFastQueryLimit        = 10
+	RechargeQueryLease            = 40 * time.Second
+)
 
 type CardKey struct {
 	Key             string
@@ -151,6 +167,27 @@ func IsValidRechargeStatus(status RechargeStatus) bool {
 	default:
 		return false
 	}
+}
+
+func IsPendingRechargeStatus(status RechargeStatus) bool {
+	switch status {
+	case RechargeStatusPaying, RechargeStatusCallback, RechargeStatusReconciled:
+		return true
+	default:
+		return false
+	}
+}
+
+func IsValidRechargeNo(value string) bool {
+	if len(value) != 34 || !strings.HasPrefix(value, "RC") {
+		return false
+	}
+	for _, character := range value[2:] {
+		if (character < '0' || character > '9') && (character < 'A' || character > 'F') {
+			return false
+		}
+	}
+	return true
 }
 
 func NormalizeRechargeStatus(status string) (RechargeStatus, bool) {

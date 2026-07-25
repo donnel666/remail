@@ -1,0 +1,89 @@
+package infra
+
+import (
+	"encoding/json"
+	"fmt"
+	"strconv"
+	"strings"
+	"time"
+
+	billingapp "github.com/donnel666/remail/internal/billing/app"
+	"github.com/donnel666/remail/internal/billing/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
+)
+
+type RechargeConfigProvider struct{}
+
+func (RechargeConfigProvider) Current() (billingapp.RechargeConfig, error) {
+	settings := runtimeconfig.Snapshot()
+	tiers, err := rechargeTiers(
+		settings.String("topup_amount_presets", "[10,20,50,100,200,500]"),
+		settings.String("topup_amount_bonus", "{}"),
+	)
+	if err != nil {
+		return billingapp.RechargeConfig{}, domain.ErrRechargeConfigUnavailable
+	}
+	enabled, _ := strconv.ParseBool(strings.TrimSpace(settings.String("epay_enabled", "false")))
+	config := billingapp.RechargeConfig{
+		Enabled:           enabled,
+		Version:           strings.TrimSpace(settings.String("epay_version", "v1")),
+		GatewayURL:        strings.TrimSpace(settings.String("epay_gateway_url", "")),
+		MerchantID:        strings.TrimSpace(settings.String("epay_merchant_id", "")),
+		MerchantKey:       settings.String("epay_merchant_key", ""),
+		PrivateKey:        settings.String("epay_private_key", ""),
+		PlatformPublicKey: settings.String("epay_platform_public_key", ""),
+		NotifyURL:         strings.TrimSpace(settings.String("epay_notify_url", "")),
+		ReturnURL:         strings.TrimSpace(settings.String("epay_return_url", "")),
+		MinAmount:         strings.TrimSpace(settings.String("min_topup_amount", "10")),
+		FeeRate:           strings.TrimSpace(settings.String("topup_fee_rate", "0")),
+		FeeCap:            strings.TrimSpace(settings.String("topup_fee_cap", "0")),
+		Tiers:             tiers,
+		RequestTimeout:    settings.Duration("async_check_request_timeout_seconds", 5*time.Second, time.Second, 1),
+	}
+	if config.Enabled && strings.EqualFold(config.Version, "v2") {
+		if _, err := parseEPayPrivateKey(config.PrivateKey); err != nil {
+			return billingapp.RechargeConfig{}, domain.ErrRechargeConfigUnavailable
+		}
+		if _, err := parseEPayPublicKey(config.PlatformPublicKey); err != nil {
+			return billingapp.RechargeConfig{}, domain.ErrRechargeConfigUnavailable
+		}
+	}
+	return config, nil
+}
+
+func rechargeTiers(rawPresets, rawBonuses string) ([]billingapp.RechargeTier, error) {
+	var presets []any
+	if err := json.Unmarshal([]byte(rawPresets), &presets); err != nil {
+		return nil, err
+	}
+	var bonuses map[string]any
+	if err := json.Unmarshal([]byte(rawBonuses), &bonuses); err != nil {
+		return nil, err
+	}
+	tiers := make([]billingapp.RechargeTier, 0, len(presets))
+	seen := make(map[string]struct{}, len(presets))
+	for _, value := range presets {
+		amount, err := domain.NormalizePositiveMoney(fmt.Sprint(value))
+		if err != nil {
+			return nil, err
+		}
+		if _, ok := seen[amount]; ok {
+			return nil, domain.ErrRechargeConfigUnavailable
+		}
+		seen[amount] = struct{}{}
+		bonus := "0.00"
+		for key, value := range bonuses {
+			normalizedKey, err := domain.NormalizePositiveMoney(key)
+			if err != nil || normalizedKey != amount {
+				continue
+			}
+			bonus, err = domain.NormalizeNonNegativeMoney(fmt.Sprint(value))
+			if err != nil {
+				return nil, err
+			}
+			break
+		}
+		tiers = append(tiers, billingapp.RechargeTier{Amount: amount, Bonus: bonus})
+	}
+	return tiers, nil
+}

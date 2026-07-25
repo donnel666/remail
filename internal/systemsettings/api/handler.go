@@ -76,7 +76,7 @@ func (h *Handler) Get(c *gin.Context) {
 	}
 	options := make([]settingDTO, 0, len(settings))
 	for i := range settings {
-		if isSensitiveKey(settings[i].Key) && !canReadSensitive {
+		if isWriteOnlyKey(settings[i].Key) || isSensitiveKey(settings[i].Key) && !canReadSensitive {
 			continue
 		}
 		options = append(options, toDTO(settings[i]))
@@ -90,6 +90,10 @@ func (h *Handler) GetOne(c *gin.Context) {
 		return
 	}
 	key := c.Param("key")
+	if isWriteOnlyKey(key) {
+		writeError(c, domain.ErrSettingNotFound)
+		return
+	}
 	if !h.requireSensitive(c, key) {
 		return
 	}
@@ -118,6 +122,10 @@ func (h *Handler) Put(c *gin.Context) {
 	setting, err := h.module.Settings.Upsert(c.Request.Context(), key, *req.Value, mutationMeta(c))
 	if err != nil {
 		writeError(c, err)
+		return
+	}
+	if isWriteOnlyKey(key) {
+		c.Status(http.StatusNoContent)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"option": toDTO(*setting)})
@@ -153,9 +161,11 @@ func (h *Handler) PutBulk(c *gin.Context) {
 		writeError(c, err)
 		return
 	}
-	options := make([]settingDTO, len(settings))
+	options := make([]settingDTO, 0, len(settings))
 	for i := range settings {
-		options[i] = toDTO(settings[i])
+		if !isWriteOnlyKey(settings[i].Key) {
+			options = append(options, toDTO(settings[i]))
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{"options": options})
 }
@@ -178,7 +188,17 @@ func (h *Handler) Delete(c *gin.Context) {
 
 func isSensitiveKey(key string) bool {
 	switch strings.ToLower(strings.TrimSpace(key)) {
-	case "github_client_secret", "epay_merchant_key":
+	case "github_client_secret",
+		"epay_enabled", "epay_version", "epay_gateway_url", "epay_merchant_id", "epay_merchant_key", "epay_private_key", "epay_platform_public_key", "epay_notify_url", "epay_return_url":
+		return true
+	default:
+		return false
+	}
+}
+
+func isWriteOnlyKey(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "epay_merchant_key", "epay_private_key":
 		return true
 	default:
 		return false

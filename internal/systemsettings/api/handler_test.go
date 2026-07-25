@@ -250,6 +250,52 @@ func TestSensitiveSettingsRequireSensitivePermission(t *testing.T) {
 	require.Equal(t, "merchant-secret", repo.items["epay_merchant_key"].Value)
 }
 
+func TestEPayGatewaySettingsRequireSensitivePermission(t *testing.T) {
+	for _, key := range []string{
+		"epay_enabled", "epay_version", "epay_gateway_url", "epay_merchant_id",
+		"epay_merchant_key", "epay_private_key", "epay_platform_public_key", "epay_notify_url", "epay_return_url",
+	} {
+		require.True(t, isSensitiveKey(key), key)
+	}
+	require.False(t, isSensitiveKey("topup_fee_rate"))
+}
+
+func TestEPayCredentialsAreWriteOnlyForPrivilegedAdmins(t *testing.T) {
+	repo := &fakeRepository{items: map[string]settingsdomain.Setting{
+		"epay_merchant_key":        {Key: "epay_merchant_key", Value: "merchant-secret"},
+		"epay_private_key":         {Key: "epay_private_key", Value: "private-secret"},
+		"epay_platform_public_key": {Key: "epay_platform_public_key", Value: "public-key"},
+	}}
+	r := testRouter(repo)
+
+	list := httptest.NewRecorder()
+	r.ServeHTTP(list, requestWithSession(http.MethodGet, "/v1/admin/settings", ""))
+	require.Equal(t, http.StatusOK, list.Code)
+	require.NotContains(t, list.Body.String(), "merchant-secret")
+	require.NotContains(t, list.Body.String(), "private-secret")
+	require.Contains(t, list.Body.String(), "public-key")
+
+	for _, key := range []string{"epay_merchant_key", "epay_private_key"} {
+		response := httptest.NewRecorder()
+		r.ServeHTTP(response, requestWithSession(http.MethodGet, "/v1/admin/settings/"+key, ""))
+		require.Equal(t, http.StatusNotFound, response.Code)
+		require.NotContains(t, response.Body.String(), "secret")
+	}
+
+	put := httptest.NewRecorder()
+	r.ServeHTTP(put, requestWithSession(http.MethodPut, "/v1/admin/settings/epay_merchant_key", `{"value":"replacement-secret"}`))
+	require.Equal(t, http.StatusNoContent, put.Code)
+	require.Empty(t, put.Body.String())
+	require.Equal(t, "replacement-secret", repo.items["epay_merchant_key"].Value)
+
+	bulk := httptest.NewRecorder()
+	r.ServeHTTP(bulk, requestWithSession(http.MethodPut, "/v1/admin/settings", `{"settings":[{"key":"epay_private_key","value":"replacement-private"},{"key":"epay_platform_public_key","value":"replacement-public"}]}`))
+	require.Equal(t, http.StatusOK, bulk.Code)
+	require.NotContains(t, bulk.Body.String(), "replacement-private")
+	require.Contains(t, bulk.Body.String(), "replacement-public")
+	require.Equal(t, "replacement-private", repo.items["epay_private_key"].Value)
+}
+
 func TestBulkSettingsPermissionAndBlankSecretSafety(t *testing.T) {
 	repo := &fakeRepository{items: map[string]settingsdomain.Setting{
 		"site_title":           {Key: "site_title", Value: "old"},

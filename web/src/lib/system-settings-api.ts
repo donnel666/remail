@@ -129,8 +129,8 @@ export async function updateSystemOption(key: string, value: string): Promise<vo
 
 export async function updateSystemOptionsBulk(
   updates: SystemOption[],
-): Promise<void> {
-  await unwrap<components["schemas"]["AdminSystemSettingsResponse"]>(await apiClient.PUT("/v1/admin/settings", {
+): Promise<{ options: SystemOption[] }> {
+  return unwrap<components["schemas"]["AdminSystemSettingsResponse"]>(await apiClient.PUT("/v1/admin/settings", {
     params: { header: csrfHeader() },
     body: { settings: updates },
   }));

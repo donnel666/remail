@@ -10,6 +10,10 @@ export type WalletReferralTransferResponse =
   components["schemas"]["WalletReferralTransferResponse"];
 export type RechargeItem = components["schemas"]["RechargeItem"];
 export type RechargeListResponse = components["schemas"]["RechargeListResponse"];
+export type RechargeConfigResponse =
+  components["schemas"]["RechargeConfigResponse"];
+export type CreateRechargeResponse =
+  components["schemas"]["CreateRechargeResponse"];
 export type RedeemCardResponse = components["schemas"]["RedeemCardResponse"];
 export type TransactionItem = components["schemas"]["TransactionItem"];
 export type TransactionListResponse =
@@ -62,6 +66,37 @@ export async function listRecharges(
           limit,
         },
       },
+    })
+  );
+}
+
+export async function getRechargeConfig() {
+  return unwrap<RechargeConfigResponse>(
+    await client.GET("/v1/recharges/config")
+  );
+}
+
+export async function createRecharge(
+  amount: string,
+  key = generateIdempotencyKey()
+) {
+  return unwrap<CreateRechargeResponse>(
+    await client.POST("/v1/recharges", {
+      body: { amount },
+      params: {
+        header: {
+          ...csrfHeader(),
+          "Idempotency-Key": key,
+        },
+      },
+    })
+  );
+}
+
+export async function getRecharge(rechargeNo: string) {
+  return unwrap<RechargeItem>(
+    await client.GET("/v1/recharges/{rechargeNo}", {
+      params: { path: { rechargeNo } },
     })
   );
 }

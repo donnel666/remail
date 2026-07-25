@@ -63,6 +63,37 @@ func TestValidateAuthSecuritySettings(t *testing.T) {
 	require.ErrorIs(t, Validate("session_max_age_seconds", "299"), domain.ErrInvalidValue)
 }
 
+func TestValidateRechargePaymentSettings(t *testing.T) {
+	require.NoError(t, Validate("epay_version", "v1"))
+	require.NoError(t, Validate("epay_version", "v2"))
+	require.ErrorIs(t, Validate("epay_version", "v3"), domain.ErrInvalidValue)
+	require.NoError(t, Validate("epay_gateway_url", "https://pay.example.com/"))
+	require.ErrorIs(t, Validate("epay_gateway_url", "http://pay.example.com/"), domain.ErrInvalidValue)
+	require.NoError(t, Validate("topup_amount_presets", "[10,20.5]"))
+	require.ErrorIs(t, Validate("topup_amount_presets", "[10,10.00]"), domain.ErrInvalidValue)
+	require.NoError(t, Validate("topup_amount_bonus", `{"20.5":2}`))
+	require.ErrorIs(t, Validate("topup_amount_bonus", `{"20.5":-1}`), domain.ErrInvalidValue)
+	require.ErrorIs(t, ValidatePersistedUpdates(DefaultSettings(), []domain.Setting{{Key: "epay_enabled", Value: "true"}}), domain.ErrInvalidValue)
+	require.NoError(t, ValidatePersistedUpdates(DefaultSettings(), []domain.Setting{
+		{Key: "epay_enabled", Value: "true"},
+		{Key: "epay_gateway_url", Value: "https://pay.example.com/"},
+		{Key: "epay_merchant_id", Value: "1000"},
+		{Key: "epay_merchant_key", Value: "secret"},
+		{Key: "epay_notify_url", Value: "https://app.example.com/v1/payments/webhooks/epay/v1"},
+		{Key: "epay_return_url", Value: "https://app.example.com/wallet"},
+	}))
+	require.NoError(t, ValidatePersistedUpdates(DefaultSettings(), []domain.Setting{
+		{Key: "epay_enabled", Value: "true"},
+		{Key: "epay_version", Value: "v2"},
+		{Key: "epay_gateway_url", Value: "https://pay.example.com/"},
+		{Key: "epay_merchant_id", Value: "1000"},
+		{Key: "epay_private_key", Value: "merchant-private-key"},
+		{Key: "epay_platform_public_key", Value: "platform-public-key"},
+		{Key: "epay_notify_url", Value: "https://app.example.com/v1/payments/webhooks/epay/v2"},
+		{Key: "epay_return_url", Value: "https://app.example.com/wallet"},
+	}))
+}
+
 func TestValidateGlobalNoticeSize(t *testing.T) {
 	require.NoError(t, Validate("global_notice", strings.Repeat("界", maxSystemNoticeBytes/3)+"x"))
 	require.ErrorIs(t, Validate("global_notice", strings.Repeat("界", maxSystemNoticeBytes/3)+"xx"), domain.ErrInvalidValue)

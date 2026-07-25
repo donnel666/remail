@@ -98,7 +98,7 @@ describe("SystemSettingsPage", () => {
   it("shows success and failure feedback for settings saves", async () => {
     mocks.getSystemOptions.mockResolvedValue({ options: [] });
     mocks.updateSystemOptionsBulk
-      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce({ options: [{ key: "candidate_window_size", value: "4" }] })
       .mockRejectedValueOnce(new Error("save failed"));
 
     render(<SystemSettingsPage />);

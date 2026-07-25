@@ -504,7 +504,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List system settings (admin only) */
+        /**
+         * List system settings (admin only)
+         * @description Write-only payment credentials are never returned.
+         */
         get: operations["getAdminSettings"];
         /** Replace system settings in bulk (admin only) */
         put: operations["putAdminSettings"];
@@ -524,7 +527,10 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** Get one system setting (admin only) */
+        /**
+         * Get one system setting (admin only)
+         * @description Write-only payment credentials always return 404.
+         */
         get: operations["getAdminSetting"];
         /** Upsert one system setting (admin only) */
         put: operations["putAdminSetting"];
@@ -1785,7 +1791,93 @@ export interface paths {
         /** List recharge orders */
         get: operations["getRecharges"];
         put?: never;
+        /**
+         * Create an Alipay recharge order
+         * @description Credit is granted only after the server actively confirms the payment within five minutes.
+         */
+        post: operations["postRecharge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/recharges/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get public recharge configuration */
+        get: operations["getRechargeConfig"];
+        put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/recharges/{rechargeNo}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get one recharge order */
+        get: operations["getRecharge"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/payments/webhooks/epay/v1": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Receive an untrusted EPay notification
+         * @description Reads out_trade_no and triggers active reconciliation for an existing recharge. The notification itself is never used to credit funds.
+         */
+        get: operations["getEPayWebhook"];
+        put?: never;
+        /**
+         * Receive an untrusted EPay notification
+         * @description Reads form field out_trade_no and triggers active reconciliation for an existing recharge. The notification itself is never used to credit funds.
+         */
+        post: operations["postEPayWebhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/payments/webhooks/epay/v2": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Receive an untrusted EPay V2 notification
+         * @description Reads out_trade_no and triggers active reconciliation for an existing recharge. The notification itself is never used to credit funds.
+         */
+        get: operations["getEPayV2Webhook"];
+        put?: never;
+        /**
+         * Receive an untrusted EPay V2 notification
+         * @description Reads form field out_trade_no and triggers active reconciliation for an existing recharge. The notification itself is never used to credit funds.
+         */
+        post: operations["postEPayV2Webhook"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3741,6 +3833,15 @@ export interface components {
             paymentAmount: components["schemas"]["PaymentAmount"];
             /** @enum {string} */
             status: "paying" | "callback" | "reconciled" | "credited" | "failed";
+            gatewayTradeNo?: string;
+            failureReason?: string;
+            queryAttempts: number;
+            /** Format: date-time */
+            expiresAt: string;
+            /** Format: date-time */
+            paidAt?: string | null;
+            /** Format: date-time */
+            reconciledAt?: string | null;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -3751,6 +3852,29 @@ export interface components {
             total: number;
             offset: number;
             limit: number;
+        };
+        RechargeTier: {
+            amount: components["schemas"]["PaymentAmount"];
+            bonus: components["schemas"]["NonNegativeLedgerAmount"];
+            rechargeQuota: components["schemas"]["NonNegativeLedgerAmount"];
+            paymentAmount: components["schemas"]["PaymentAmount"];
+        };
+        RechargeConfigResponse: {
+            enabled: boolean;
+            minAmount: components["schemas"]["PaymentAmount"];
+            feeRate: components["schemas"]["NonNegativeLedgerAmount"];
+            feeCap: components["schemas"]["NonNegativeLedgerAmount"];
+            tiers: components["schemas"]["RechargeTier"][];
+        };
+        CreateRechargeRequest: {
+            amount: components["schemas"]["PaymentAmount"];
+        };
+        CreateRechargeResponse: {
+            recharge: components["schemas"]["RechargeItem"];
+            /** Format: uri */
+            payUrl: string;
+            /** Format: date-time */
+            expiresAt: string;
         };
         RedeemCardRequest: {
             cardKey: string;
@@ -7818,7 +7942,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Updated system settings */
+            /** @description Updated system settings; write-only payment credentials are omitted */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -7931,6 +8055,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["AdminSystemSettingResponse"];
                 };
+            };
+            /** @description Write-only payment credential updated without returning its value */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Invalid request */
             400: {
@@ -13129,6 +13260,238 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    postRecharge: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateRechargeRequest"];
+            };
+        };
+        responses: {
+            /** @description Recharge order created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateRechargeResponse"];
+                };
+            };
+            /** @description Invalid request body or missing, empty, or oversized idempotency key */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Idempotency key conflict or another recharge order is still pending */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid recharge amount */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Recharge service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getRechargeConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Public recharge configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RechargeConfigResponse"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Recharge configuration unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getRecharge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rechargeNo: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Recharge order */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RechargeItem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Recharge not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getEPayWebhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Notification acknowledged */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+        };
+    };
+    postEPayWebhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Notification acknowledged */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+        };
+    };
+    getEPayV2Webhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Notification acknowledged */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+        };
+    };
+    postEPayV2Webhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Notification acknowledged */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
                 };
             };
         };

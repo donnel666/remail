@@ -36,7 +36,8 @@ const (
 // long-running lower-priority tasks in the shared pool can never starve them.
 func realtimeQueueConfig() map[string]int {
 	return map[string]int{
-		QueueMailfetch: 1,
+		QueueMailfetch:        4,
+		QueuePaymentReconcile: 2,
 	}
 }
 

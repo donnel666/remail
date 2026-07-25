@@ -20,6 +20,7 @@ import {
   BATCH_OPERATION_KEYS,
   RETENTION_KEYS,
 } from "./system-operations-keys";
+import { PAYMENT_BILLING_KEYS } from "./payment-billing-keys";
 
 const defaultsSource = readFileSync(
   new URL("../../../../internal/systemsettings/runtimeconfig/defaults.go", import.meta.url),
@@ -43,6 +44,7 @@ const emailServiceGroups = [
 const frontendGroups = [
   ["announcement_enabled", "announcements", "global_notice", "faq_enabled", "faq_list"],
   AUTH_SECURITY_KEYS,
+  PAYMENT_BILLING_KEYS,
   ...emailServiceGroups,
   BACKGROUND_JOB_KEYS,
   BATCH_OPERATION_KEYS,

@@ -7,6 +7,10 @@ import (
 
 func RegisterBillingRoutes(rg *gin.RouterGroup, mod *BillingModule, fetcher middleware.SessionFetcher, checker middleware.PermissionChecker) {
 	h := NewBillingHandler(mod, checker)
+	rg.GET("/payments/webhooks/epay/v1", h.EPayWebhook)
+	rg.POST("/payments/webhooks/epay/v1", h.EPayWebhook)
+	rg.GET("/payments/webhooks/epay/v2", h.EPayWebhook)
+	rg.POST("/payments/webhooks/epay/v2", h.EPayWebhook)
 
 	auth := rg.Group("")
 	auth.Use(middleware.LoadSession(fetcher))
@@ -18,6 +22,9 @@ func RegisterBillingRoutes(rg *gin.RouterGroup, mod *BillingModule, fetcher midd
 		auth.POST("/wallet/referrals/transfer", h.PostWalletReferralTransfer)
 		auth.GET("/wallet/transactions", h.GetWalletTransactions)
 		auth.GET("/recharges", h.GetRecharges)
+		auth.GET("/recharges/config", h.GetRechargeConfig)
+		auth.POST("/recharges", h.PostRecharge)
+		auth.GET("/recharges/:rechargeNo", h.GetRecharge)
 		auth.POST("/cards/redeem", h.PostCardRedeem)
 	}
 

@@ -5444,6 +5444,19 @@ type CreateProxyRequest struct {
 	Url string `json:"url"`
 }
 
+// CreateRechargeRequest defines model for CreateRechargeRequest.
+type CreateRechargeRequest struct {
+	// Amount External payment-channel amount limited to 2 decimal places.
+	Amount PaymentAmount `json:"amount"`
+}
+
+// CreateRechargeResponse defines model for CreateRechargeResponse.
+type CreateRechargeResponse struct {
+	ExpiresAt time.Time    `json:"expiresAt"`
+	PayUrl    string       `json:"payUrl"`
+	Recharge  RechargeItem `json:"recharge"`
+}
+
 // CreateTicketRequest defines model for CreateTicketRequest.
 type CreateTicketRequest struct {
 	// Attachments Image attachments as base64 data URLs.
@@ -6623,18 +6636,39 @@ type ReadyzResponse struct {
 	Status       string            `json:"status"`
 }
 
+// RechargeConfigResponse defines model for RechargeConfigResponse.
+type RechargeConfigResponse struct {
+	Enabled bool `json:"enabled"`
+
+	// FeeCap Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	FeeCap NonNegativeLedgerAmount `json:"feeCap"`
+
+	// FeeRate Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	FeeRate NonNegativeLedgerAmount `json:"feeRate"`
+
+	// MinAmount External payment-channel amount limited to 2 decimal places.
+	MinAmount PaymentAmount  `json:"minAmount"`
+	Tiers     []RechargeTier `json:"tiers"`
+}
+
 // RechargeItem defines model for RechargeItem.
 type RechargeItem struct {
-	CreatedAt time.Time `json:"createdAt"`
-	Id        int       `json:"id"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	ExpiresAt      time.Time  `json:"expiresAt"`
+	FailureReason  *string    `json:"failureReason,omitempty"`
+	GatewayTradeNo *string    `json:"gatewayTradeNo,omitempty"`
+	Id             int        `json:"id"`
+	PaidAt         *time.Time `json:"paidAt,omitempty"`
 
 	// PaymentAmount External payment-channel amount limited to 2 decimal places.
 	PaymentAmount PaymentAmount `json:"paymentAmount"`
 	PaymentMethod string        `json:"paymentMethod"`
+	QueryAttempts int           `json:"queryAttempts"`
 	RechargeNo    string        `json:"rechargeNo"`
 
 	// RechargeQuota Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	RechargeQuota NonNegativeLedgerAmount `json:"rechargeQuota"`
+	ReconciledAt  *time.Time              `json:"reconciledAt,omitempty"`
 	Status        RechargeItemStatus      `json:"status"`
 	UpdatedAt     time.Time               `json:"updatedAt"`
 	UserId        int                     `json:"userId"`
@@ -6649,6 +6683,21 @@ type RechargeListResponse struct {
 	Limit  int            `json:"limit"`
 	Offset int            `json:"offset"`
 	Total  int            `json:"total"`
+}
+
+// RechargeTier defines model for RechargeTier.
+type RechargeTier struct {
+	// Amount External payment-channel amount limited to 2 decimal places.
+	Amount PaymentAmount `json:"amount"`
+
+	// Bonus Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	Bonus NonNegativeLedgerAmount `json:"bonus"`
+
+	// PaymentAmount External payment-channel amount limited to 2 decimal places.
+	PaymentAmount PaymentAmount `json:"paymentAmount"`
+
+	// RechargeQuota Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	RechargeQuota NonNegativeLedgerAmount `json:"rechargeQuota"`
 }
 
 // RedeemCardRequest defines model for RedeemCardRequest.
@@ -8711,6 +8760,15 @@ type GetRechargesParamsScope string
 // GetRechargesParamsStatus defines parameters for GetRecharges.
 type GetRechargesParamsStatus string
 
+// PostRechargeParams defines parameters for PostRecharge.
+type PostRechargeParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
 // GetResourcesParams defines parameters for GetResources.
 type GetResourcesParams struct {
 	Scope *string                 `form:"scope,omitempty" json:"scope,omitempty"`
@@ -9157,6 +9215,9 @@ type PostProjectJSONRequestBody = CreateProjectApplicationRequest
 
 // PostProjectResubmitJSONRequestBody defines body for PostProjectResubmit for application/json ContentType.
 type PostProjectResubmitJSONRequestBody = CreateProjectApplicationRequest
+
+// PostRechargeJSONRequestBody defines body for PostRecharge for application/json ContentType.
+type PostRechargeJSONRequestBody = CreateRechargeRequest
 
 // PostResourceDeleteBatchJSONRequestBody defines body for PostResourceDeleteBatch for application/json ContentType.
 type PostResourceDeleteBatchJSONRequestBody = DeleteResourcesRequest
@@ -10345,6 +10406,18 @@ type ServerInterface interface {
 	// Request a password reset verification code
 	// (POST /v1/password/reset/request)
 	PostPasswordResetRequest(c *gin.Context)
+	// Receive an untrusted EPay notification
+	// (GET /v1/payments/webhooks/epay/v1)
+	GetEPayWebhook(c *gin.Context)
+	// Receive an untrusted EPay notification
+	// (POST /v1/payments/webhooks/epay/v1)
+	PostEPayWebhook(c *gin.Context)
+	// Receive an untrusted EPay V2 notification
+	// (GET /v1/payments/webhooks/epay/v2)
+	GetEPayV2Webhook(c *gin.Context)
+	// Receive an untrusted EPay V2 notification
+	// (POST /v1/payments/webhooks/epay/v2)
+	PostEPayV2Webhook(c *gin.Context)
 	// Read mail messages with service email and token
 	// (GET /v1/pickup)
 	GetPickupMessages(c *gin.Context, params GetPickupMessagesParams)
@@ -10375,6 +10448,15 @@ type ServerInterface interface {
 	// List recharge orders
 	// (GET /v1/recharges)
 	GetRecharges(c *gin.Context, params GetRechargesParams)
+	// Create an Alipay recharge order
+	// (POST /v1/recharges)
+	PostRecharge(c *gin.Context, params PostRechargeParams)
+	// Get public recharge configuration
+	// (GET /v1/recharges/config)
+	GetRechargeConfig(c *gin.Context)
+	// Get one recharge order
+	// (GET /v1/recharges/{rechargeNo})
+	GetRecharge(c *gin.Context, rechargeNo string)
 	// List email resources
 	// (GET /v1/resources)
 	GetResources(c *gin.Context, params GetResourcesParams)
@@ -20224,6 +20306,58 @@ func (siw *ServerInterfaceWrapper) PostPasswordResetRequest(c *gin.Context) {
 	siw.Handler.PostPasswordResetRequest(c)
 }
 
+// GetEPayWebhook operation middleware
+func (siw *ServerInterfaceWrapper) GetEPayWebhook(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetEPayWebhook(c)
+}
+
+// PostEPayWebhook operation middleware
+func (siw *ServerInterfaceWrapper) PostEPayWebhook(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostEPayWebhook(c)
+}
+
+// GetEPayV2Webhook operation middleware
+func (siw *ServerInterfaceWrapper) GetEPayV2Webhook(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetEPayV2Webhook(c)
+}
+
+// PostEPayV2Webhook operation middleware
+func (siw *ServerInterfaceWrapper) PostEPayV2Webhook(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostEPayV2Webhook(c)
+}
+
 // GetPickupMessages operation middleware
 func (siw *ServerInterfaceWrapper) GetPickupMessages(c *gin.Context) {
 
@@ -20664,6 +20798,115 @@ func (siw *ServerInterfaceWrapper) GetRecharges(c *gin.Context) {
 	}
 
 	siw.Handler.GetRecharges(c, params)
+}
+
+// PostRecharge operation middleware
+func (siw *ServerInterfaceWrapper) PostRecharge(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostRechargeParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostRecharge(c, params)
+}
+
+// GetRechargeConfig operation middleware
+func (siw *ServerInterfaceWrapper) GetRechargeConfig(c *gin.Context) {
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetRechargeConfig(c)
+}
+
+// GetRecharge operation middleware
+func (siw *ServerInterfaceWrapper) GetRecharge(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "rechargeNo" -------------
+	var rechargeNo string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "rechargeNo", c.Param("rechargeNo"), &rechargeNo, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter rechargeNo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetRecharge(c, rechargeNo)
 }
 
 // GetResources operation middleware
@@ -22136,6 +22379,10 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.PATCH(options.BaseURL+"/v1/password", wrapper.PatchPassword)
 	router.POST(options.BaseURL+"/v1/password/reset", wrapper.PostPasswordReset)
 	router.POST(options.BaseURL+"/v1/password/reset/request", wrapper.PostPasswordResetRequest)
+	router.GET(options.BaseURL+"/v1/payments/webhooks/epay/v1", wrapper.GetEPayWebhook)
+	router.POST(options.BaseURL+"/v1/payments/webhooks/epay/v1", wrapper.PostEPayWebhook)
+	router.GET(options.BaseURL+"/v1/payments/webhooks/epay/v2", wrapper.GetEPayV2Webhook)
+	router.POST(options.BaseURL+"/v1/payments/webhooks/epay/v2", wrapper.PostEPayV2Webhook)
 	router.GET(options.BaseURL+"/v1/pickup", wrapper.GetPickupMessages)
 	router.POST(options.BaseURL+"/v1/pickup/batch", wrapper.PostPickupMessagesBatch)
 	router.GET(options.BaseURL+"/v1/pickup/messages/:messageId", wrapper.GetPickupMessage)
@@ -22146,6 +22393,9 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/projects/:projectId/inventory", wrapper.GetProjectInventory)
 	router.POST(options.BaseURL+"/v1/projects/:projectId/resubmit", wrapper.PostProjectResubmit)
 	router.GET(options.BaseURL+"/v1/recharges", wrapper.GetRecharges)
+	router.POST(options.BaseURL+"/v1/recharges", wrapper.PostRecharge)
+	router.GET(options.BaseURL+"/v1/recharges/config", wrapper.GetRechargeConfig)
+	router.GET(options.BaseURL+"/v1/recharges/:rechargeNo", wrapper.GetRecharge)
 	router.GET(options.BaseURL+"/v1/resources", wrapper.GetResources)
 	router.POST(options.BaseURL+"/v1/resources/delete", wrapper.PostResourceDeleteBatch)
 	router.POST(options.BaseURL+"/v1/resources/imports", wrapper.PostResourceImport)
