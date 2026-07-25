@@ -854,7 +854,6 @@ func TestBillingRepoIndexesAndExplainMySQL(t *testing.T) {
 		{"recharges", "idx_recharges_user_created"},
 		{"recharges", "idx_recharges_status_created"},
 		{"recharges", "idx_recharges_gateway_trade_no"},
-		{"recharges", "idx_recharges_one_pending_per_user"},
 		{"recharges", "idx_recharges_reconcile_due"},
 		{"card_keys", "idx_card_keys_status_expire"},
 		{"card_key_redemptions", "idx_card_redemptions_card_user"},
@@ -944,7 +943,8 @@ func TestBillingRepoCreditRechargeExactlyOnceMySQL(t *testing.T) {
 			RechargeQuota: "75.00", PaymentAmount: "75.00", Status: domain.RechargeStatusPaying,
 			GatewayConfigHash: "hash", CreatedAt: now, UpdatedAt: now,
 		},
-		IdempotencyKey: "recharge-create-1", RequestFingerprint: "recharge-fingerprint-1",
+		MaxPendingOrders: 2,
+		IdempotencyKey:   "recharge-create-1", RequestFingerprint: "recharge-fingerprint-1",
 	})
 	require.NoError(t, err)
 	require.Equal(t, "RC-EXACTLY-ONCE", created.RechargeNo)
@@ -979,20 +979,33 @@ func TestBillingRepoCreditRechargeExactlyOnceMySQL(t *testing.T) {
 			RechargeQuota: "20.00", PaymentAmount: "20.00", Status: domain.RechargeStatusPaying,
 			GatewayConfigHash: "hash", CreatedAt: now, UpdatedAt: now,
 		},
-		IdempotencyKey: "recharge-create-2", RequestFingerprint: "recharge-fingerprint-2",
+		MaxPendingOrders: 2,
+		IdempotencyKey:   "recharge-create-2", RequestFingerprint: "recharge-fingerprint-2",
 	})
 	require.NoError(t, err)
 	_, err = repo.CreditRecharge(ctx, billingapp.CreditRechargeCommand{
 		RechargeNo: second.RechargeNo, GatewayTradeNo: "GW-EXACTLY-ONCE", QueriedAt: now.Add(2 * time.Minute),
 	})
 	require.ErrorIs(t, err, domain.ErrRechargeQueryMismatch)
-	_, err = repo.CreateRecharge(ctx, billingapp.CreateRechargeCommand{
+	third, err := repo.CreateRecharge(ctx, billingapp.CreateRechargeCommand{
 		Recharge: domain.Recharge{
 			RechargeNo: "RC-SECOND-PENDING", UserID: userID, PaymentMethod: "alipay",
 			RechargeQuota: "30.00", PaymentAmount: "30.00", Status: domain.RechargeStatusPaying,
 			GatewayConfigHash: "hash", CreatedAt: now, UpdatedAt: now,
 		},
-		IdempotencyKey: "recharge-create-3", RequestFingerprint: "recharge-fingerprint-3",
+		MaxPendingOrders: 2,
+		IdempotencyKey:   "recharge-create-3", RequestFingerprint: "recharge-fingerprint-3",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "RC-SECOND-PENDING", third.RechargeNo)
+	_, err = repo.CreateRecharge(ctx, billingapp.CreateRechargeCommand{
+		Recharge: domain.Recharge{
+			RechargeNo: "RC-PENDING-LIMIT", UserID: userID, PaymentMethod: "alipay",
+			RechargeQuota: "40.00", PaymentAmount: "40.00", Status: domain.RechargeStatusPaying,
+			GatewayConfigHash: "hash", CreatedAt: now, UpdatedAt: now,
+		},
+		MaxPendingOrders: 2,
+		IdempotencyKey:   "recharge-create-4", RequestFingerprint: "recharge-fingerprint-4",
 	})
 	require.ErrorIs(t, err, domain.ErrRechargePending)
 	summary, err = repo.GetOrCreateWalletSummary(ctx, userID)
@@ -1006,6 +1019,54 @@ func TestBillingRepoCreditRechargeExactlyOnceMySQL(t *testing.T) {
 	summary, err = repo.GetOrCreateWalletSummary(ctx, userID)
 	require.NoError(t, err)
 	require.Equal(t, "95.00", summary.Wallet.ConsumerBalance)
+}
+
+func TestBillingRepoRechargePendingLimitIsSerializedMySQL(t *testing.T) {
+	db := newBillingMySQLTestDB(t)
+	ctx := context.Background()
+	userID := createBillingTestUser(t, db, "recharge-limit@example.com")
+	repo := NewBillingRepo(db)
+	_, err := repo.GetOrCreateWalletSummary(ctx, userID)
+	require.NoError(t, err)
+
+	now := time.Now().UTC()
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for index := range 2 {
+		go func() {
+			<-start
+			_, createErr := repo.CreateRecharge(ctx, billingapp.CreateRechargeCommand{
+				Recharge: domain.Recharge{
+					RechargeNo: fmt.Sprintf("RC-CONCURRENT-%d", index), UserID: userID, PaymentMethod: "alipay",
+					RechargeQuota: "10.00", PaymentAmount: "10.00", Status: domain.RechargeStatusPaying,
+					GatewayConfigHash: "hash", CreatedAt: now, UpdatedAt: now,
+				},
+				MaxPendingOrders:   1,
+				IdempotencyKey:     fmt.Sprintf("recharge-concurrent-%d", index),
+				RequestFingerprint: fmt.Sprintf("recharge-concurrent-fingerprint-%d", index),
+			})
+			results <- createErr
+		}()
+	}
+	close(start)
+
+	succeeded, limited := 0, 0
+	for range 2 {
+		switch createErr := <-results; {
+		case createErr == nil:
+			succeeded++
+		case errors.Is(createErr, domain.ErrRechargePending):
+			limited++
+		default:
+			require.NoError(t, createErr)
+		}
+	}
+	require.Equal(t, 1, succeeded)
+	require.Equal(t, 1, limited)
+
+	var pending int64
+	require.NoError(t, db.Model(&RechargeModel{}).Where("user_id = ? AND status IN ?", userID, pendingRechargeStatuses()).Count(&pending).Error)
+	require.EqualValues(t, 1, pending)
 }
 
 func TestBillingRepoRechargeCallbackAndSchedulingMySQL(t *testing.T) {

@@ -2,7 +2,7 @@ package runtimeconfig
 
 import "github.com/donnel666/remail/internal/systemsettings/domain"
 
-const DefaultSettingsCount = 168
+const DefaultSettingsCount = 169
 
 // DefaultSettings is the single source of initial values for runtime-managed
 // settings. Startup inserts only keys that are not in storage.
@@ -50,6 +50,7 @@ var defaultSettings = []domain.Setting{
 	{Key: "topup_fee_cap", Value: "0"},
 	{Key: "topup_amount_presets", Value: "[10,20,50,100,200,500]"},
 	{Key: "topup_amount_bonus", Value: "{}"},
+	{Key: "max_pending_recharge_orders", Value: "10"},
 	{Key: "async_check_request_timeout_seconds", Value: "5"},
 
 	{Key: "microsoft_domain_whitelist", Value: "outlook.com,hotmail.com,outlook.sa,outlook.com.ar,outlook.com.au,outlook.at,outlook.be,outlook.com.br,outlook.cl,outlook.cz,outlook.fr,outlook.de,outlook.com.gr,outlook.co.il,outlook.in,outlook.co.id,outlook.ie,outlook.it,outlook.hu,outlook.jp,outlook.kr,outlook.lv,outlook.my,outlook.co.nz,outlook.ph,outlook.pt,outlook.sg,outlook.sk,outlook.es,outlook.co.th,outlook.com.tr,outlook.com.vn"},

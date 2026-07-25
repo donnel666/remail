@@ -316,10 +316,21 @@ func epayRedirectURL(gatewayURL, payType, payInfo string) (string, error) {
 		return "", billingapp.ErrRechargeGatewayRejected
 	}
 	redirect = base.ResolveReference(redirect)
-	if !strings.EqualFold(redirect.Scheme, "https") || redirect.Host == "" || redirect.User != nil {
+	if !strings.EqualFold(redirect.Scheme, "https") || redirect.Host == "" || redirect.User != nil || !sameEPayOrigin(base, redirect) {
 		return "", billingapp.ErrRechargeGatewayRejected
 	}
 	return redirect.String(), nil
+}
+
+func sameEPayOrigin(left, right *url.URL) bool {
+	leftPort, rightPort := left.Port(), right.Port()
+	if leftPort == "" {
+		leftPort = "443"
+	}
+	if rightPort == "" {
+		rightPort = "443"
+	}
+	return strings.EqualFold(left.Hostname(), right.Hostname()) && leftPort == rightPort
 }
 
 func jsonScalar(raw json.RawMessage) string {

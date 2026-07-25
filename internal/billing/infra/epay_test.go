@@ -171,6 +171,15 @@ func TestEPayV2RejectsWeakRSAKeys(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrRechargeConfigUnavailable)
 }
 
+func TestEPayRedirectURLStaysOnGatewayOrigin(t *testing.T) {
+	redirect, err := epayRedirectURL("https://pay.example.com", "qrcode", "https://pay.example.com:443/pay/QR1")
+	require.NoError(t, err)
+	require.Equal(t, "https://pay.example.com:443/pay/QR1", redirect)
+
+	_, err = epayRedirectURL("https://pay.example.com", "qrcode", "https://evil.example.com/pay/QR1")
+	require.ErrorIs(t, err, billingapp.ErrRechargeGatewayRejected)
+}
+
 func epayRSAKeyPair(t *testing.T) (string, string) {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)

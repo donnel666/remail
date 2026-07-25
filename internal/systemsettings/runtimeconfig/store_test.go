@@ -83,6 +83,11 @@ func TestValidateRechargePaymentSettings(t *testing.T) {
 	require.ErrorIs(t, Validate("topup_amount_presets", "[10,10.00]"), domain.ErrInvalidValue)
 	require.NoError(t, Validate("topup_amount_bonus", `{"20.5":2}`))
 	require.ErrorIs(t, Validate("topup_amount_bonus", `{"20.5":-1}`), domain.ErrInvalidValue)
+	require.NoError(t, Validate("topup_fee_cap", "0.01"))
+	require.ErrorIs(t, Validate("topup_fee_cap", "0.009"), domain.ErrInvalidValue)
+	require.NoError(t, Validate("max_pending_recharge_orders", "10"))
+	require.ErrorIs(t, Validate("max_pending_recharge_orders", "0"), domain.ErrInvalidValue)
+	require.ErrorIs(t, Validate("max_pending_recharge_orders", "101"), domain.ErrInvalidValue)
 	err := ValidatePersistedUpdates(DefaultSettings(), []domain.Setting{{Key: "epay_enabled", Value: "true"}})
 	require.ErrorIs(t, err, domain.ErrInvalidValue)
 	var fieldError *domain.InvalidValueFieldsError

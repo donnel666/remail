@@ -173,7 +173,7 @@ func TestRechargeSecurityErrorsAreClientVisible(t *testing.T) {
 		status  int
 		message string
 	}{
-		{err: domain.ErrRechargePending, status: http.StatusConflict, message: "already pending"},
+		{err: domain.ErrRechargePending, status: http.StatusConflict, message: "Too many recharge orders"},
 		{err: domain.ErrInvalidIdempotencyKey, status: http.StatusBadRequest, message: "Invalid Idempotency-Key"},
 	} {
 		recorder := httptest.NewRecorder()

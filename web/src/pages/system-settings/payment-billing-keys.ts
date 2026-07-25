@@ -18,6 +18,7 @@ export const TOPUP_KEYS = [
   "topup_fee_cap",
   "topup_amount_presets",
   "topup_amount_bonus",
+  "max_pending_recharge_orders",
 ] as const;
 
 export const RECHARGE_CHECK_KEYS = [

@@ -13319,7 +13319,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Idempotency key conflict or another recharge order is still pending */
+            /** @description Idempotency key conflict or the configured pending recharge limit has been reached */
             409: {
                 headers: {
                     [name: string]: unknown;

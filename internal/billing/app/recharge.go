@@ -42,6 +42,7 @@ type RechargeConfig struct {
 	FeeRate           string
 	FeeCap            string
 	Tiers             []RechargeTier
+	MaxPendingOrders  int
 	RequestTimeout    time.Duration
 }
 
@@ -72,6 +73,7 @@ type RechargeQueue interface {
 type CreateRechargeCommand struct {
 	Recharge           domain.Recharge
 	GatewayConfig      RechargeConfig
+	MaxPendingOrders   int
 	IdempotencyKey     string
 	RequestFingerprint string
 }
@@ -180,7 +182,7 @@ func (uc *RechargeUseCase) Create(ctx context.Context, request CreateRechargeReq
 		return nil, domain.ErrRechargeQueueUnavailable
 	}
 	config, err := uc.currentConfig()
-	if err != nil || !config.Enabled || validateRechargeGatewayConfig(config) != nil {
+	if err != nil || !config.Enabled || config.MaxPendingOrders <= 0 || validateRechargeGatewayConfig(config) != nil {
 		return nil, domain.ErrRechargeConfigUnavailable
 	}
 	quota, payment, err := rechargeAmounts(config, request.Amount)
@@ -206,6 +208,7 @@ func (uc *RechargeUseCase) Create(ctx context.Context, request CreateRechargeReq
 	created, err := uc.repo.CreateRecharge(ctx, CreateRechargeCommand{
 		Recharge:           recharge,
 		GatewayConfig:      config,
+		MaxPendingOrders:   config.MaxPendingOrders,
 		IdempotencyKey:     strings.TrimSpace(request.IdempotencyKey),
 		RequestFingerprint: fingerprint("recharges.create", request.UserID, amount),
 	})
@@ -400,7 +403,7 @@ func rechargeAmounts(config RechargeConfig, rawAmount string) (string, string, e
 		return "", "", domain.ErrRechargeConfigUnavailable
 	}
 	capAmount, err := domain.ParseMoney(config.FeeCap)
-	if err != nil || capAmount.IsNegative() {
+	if err != nil || capAmount.IsNegative() || !capAmount.Equal(capAmount.Round(2)) {
 		return "", "", domain.ErrRechargeConfigUnavailable
 	}
 	bonus := decimal.Zero
@@ -414,7 +417,7 @@ func rechargeAmounts(config RechargeConfig, rawAmount string) (string, string, e
 			break
 		}
 	}
-	fee := amount.Mul(rate).Div(decimal.NewFromInt(100)).Round(2)
+	fee := amount.Mul(rate).Div(decimal.NewFromInt(100)).RoundCeil(2)
 	if capAmount.IsPositive() && fee.GreaterThan(capAmount) {
 		fee = capAmount
 	}

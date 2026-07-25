@@ -26,6 +26,17 @@ func TestRechargeAmountsAndActiveReconciliation(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "200.00", quota)
 	require.Equal(t, "203.00", payment)
+	config.FeeRate = "0.6"
+	config.FeeCap = "0"
+	config.MinAmount = "1"
+	quota, payment, err = rechargeAmounts(config, "1")
+	require.NoError(t, err)
+	require.Equal(t, "1.00", quota)
+	require.Equal(t, "1.01", payment)
+	config.FeeCap = "0.009"
+	_, _, err = rechargeAmounts(config, "1")
+	require.ErrorIs(t, err, domain.ErrRechargeConfigUnavailable)
+	config.FeeCap = "0"
 
 	createdAt := time.Date(2026, 7, 25, 10, 0, 0, 0, time.UTC)
 	for _, test := range []struct {
@@ -230,7 +241,8 @@ func validRechargeConfig() RechargeConfig {
 		NotifyURL: "https://app.example.com/v1/payments/webhooks/epay/v1",
 		ReturnURL: "https://app.example.com/wallet",
 		MinAmount: "10", FeeRate: "0", FeeCap: "0",
-		RequestTimeout: 5 * time.Second,
+		MaxPendingOrders: 10,
+		RequestTimeout:   5 * time.Second,
 	}
 }
 

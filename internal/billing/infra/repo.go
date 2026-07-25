@@ -296,13 +296,32 @@ func (r *BillingRepo) CountRecharges(ctx context.Context, filter billingapp.Rech
 }
 
 func (r *BillingRepo) CreateRecharge(ctx context.Context, command billingapp.CreateRechargeCommand) (*domain.Recharge, error) {
+	if command.MaxPendingOrders <= 0 {
+		return nil, domain.ErrRechargeConfigUnavailable
+	}
+	if _, err := r.getOrCreateWallet(ctx, r.db, command.Recharge.UserID); err != nil {
+		return nil, err
+	}
 	var result domain.Recharge
 	snapshot, err := json.Marshal(command.GatewayConfig)
 	if err != nil {
 		return nil, fmt.Errorf("encode recharge gateway config: %w", err)
 	}
 	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var wallet WalletModel
+		if err := tx.WithContext(ctx).Select("user_id").Clauses(clause.Locking{Strength: "UPDATE"}).First(&wallet, "user_id = ?", command.Recharge.UserID).Error; err != nil {
+			return fmt.Errorf("lock wallet for recharge: %w", err)
+		}
 		response, replayed, err := r.withIdempotencyInTx(ctx, tx, command.Recharge.UserID, "recharges.create", command.IdempotencyKey, command.RequestFingerprint, func(writeTx *gorm.DB) ([]byte, error) {
+			var pending int64
+			if err := writeTx.WithContext(ctx).Model(&RechargeModel{}).
+				Where("user_id = ? AND status IN ? AND created_at > ?", command.Recharge.UserID, pendingRechargeStatuses(), command.Recharge.CreatedAt.Add(-domain.RechargeReconciliationWindow)).
+				Count(&pending).Error; err != nil {
+				return nil, fmt.Errorf("count pending recharges: %w", err)
+			}
+			if pending >= int64(command.MaxPendingOrders) {
+				return nil, domain.ErrRechargePending
+			}
 			model := rechargeModelFromDomain(command.Recharge)
 			encoded := string(snapshot)
 			model.GatewayConfigJSON = &encoded
@@ -323,15 +342,6 @@ func (r *BillingRepo) CreateRecharge(ctx context.Context, command billingapp.Cre
 		return nil
 	})
 	if err != nil {
-		if isDuplicateKeyError(err) {
-			var pending int64
-			queryErr := r.db.WithContext(ctx).Model(&RechargeModel{}).
-				Where("user_id = ? AND status IN ?", command.Recharge.UserID, pendingRechargeStatuses()).
-				Count(&pending).Error
-			if queryErr == nil && pending > 0 {
-				return nil, domain.ErrRechargePending
-			}
-		}
 		return nil, err
 	}
 	return r.GetRechargeByNo(ctx, result.RechargeNo)

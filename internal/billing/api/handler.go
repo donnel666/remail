@@ -785,7 +785,7 @@ func writeBillingError(c *gin.Context, err error) {
 	case errors.Is(err, domain.ErrRechargeExpired):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Recharge order expired.", "requestId": requestID})
 	case errors.Is(err, domain.ErrRechargePending):
-		c.JSON(http.StatusConflict, gin.H{"message": "A recharge order is already pending.", "requestId": requestID})
+		c.JSON(http.StatusConflict, gin.H{"message": "Too many recharge orders are pending.", "requestId": requestID})
 	case errors.Is(err, domain.ErrRechargeConfigUnavailable), errors.Is(err, domain.ErrRechargeQueueUnavailable):
 		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "Recharge service is temporarily unavailable.", "requestId": requestID})
 	case errors.Is(err, domain.ErrInvalidCardKey):

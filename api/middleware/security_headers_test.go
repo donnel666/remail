@@ -5,11 +5,15 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	settingsdomain "github.com/donnel666/remail/internal/systemsettings/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
 func TestSecurityHeaders(t *testing.T) {
+	runtimeconfig.Replace([]settingsdomain.Setting{{Key: "epay_gateway_url", Value: "https://pay.example.com/base"}})
+	t.Cleanup(func() { runtimeconfig.Replace(nil) })
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.Use(SecurityHeaders())
@@ -18,7 +22,8 @@ func TestSecurityHeaders(t *testing.T) {
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
 
-	require.Equal(t, contentSecurityPolicy, response.Header().Get("Content-Security-Policy"))
+	require.Equal(t, contentSecurityPolicy(), response.Header().Get("Content-Security-Policy"))
+	require.Contains(t, response.Header().Get("Content-Security-Policy"), "frame-src https://challenges.cloudflare.com https://pay.example.com;")
 	require.Equal(t, "camera=(), geolocation=(), microphone=(), payment=(), usb=()", response.Header().Get("Permissions-Policy"))
 	require.Equal(t, "no-referrer", response.Header().Get("Referrer-Policy"))
 	require.Equal(t, "max-age=31536000", response.Header().Get("Strict-Transport-Security"))

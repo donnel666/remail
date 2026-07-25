@@ -10,7 +10,7 @@ import { applyEPayURLDefaults, changeEPayVersion, EPAY_GATEWAY_KEYS, EPAY_WRITE_
 import { SettingsAccessBoundary, SettingsCardHeader, SettingsFormGrid, SettingsNumberField, SettingsSection, SettingsSelectField, SettingsTextField, SettingsTextareaField } from "./settings-layout";
 import { parseTopupTiers, serializeTopupTiers, type TopupTier } from "./topup-tiers";
 
-const D: Record<string, unknown> = { epay_enabled: false, epay_version: "v1", epay_gateway_url: "", epay_merchant_id: "", epay_merchant_key: "", epay_private_key: "", epay_platform_public_key: "", epay_notify_url: "", epay_return_url: "", min_topup_amount: 10, topup_fee_rate: 0, topup_fee_cap: 0, topup_amount_presets: "[10, 20, 50, 100, 200, 500]", topup_amount_bonus: "{}", async_check_request_timeout_seconds: 5 };
+const D: Record<string, unknown> = { epay_enabled: false, epay_version: "v1", epay_gateway_url: "", epay_merchant_id: "", epay_merchant_key: "", epay_private_key: "", epay_platform_public_key: "", epay_notify_url: "", epay_return_url: "", min_topup_amount: 10, topup_fee_rate: 0, topup_fee_cap: 0, topup_amount_presets: "[10, 20, 50, 100, 200, 500]", topup_amount_bonus: "{}", max_pending_recharge_orders: 10, async_check_request_timeout_seconds: 5 };
 const EPAY_WRITE_ONLY = new Set<string>(EPAY_WRITE_ONLY_KEYS);
 
 export default function PaymentSection({ options, onBulkSave, canSensitive }: SectionProps) {
@@ -21,7 +21,6 @@ export default function PaymentSection({ options, onBulkSave, canSensitive }: Se
   const [savingCard, setSavingCard] = useState<string | null>(null);
   const update = (key: string, value: unknown) => setForm((current) => ({ ...current, [key]: value }));
   const number = (value: unknown) => Number(value) || 0;
-  const field = (label: string, key: string) => <SettingsNumberField label={t(label)} value={number(form[key])} onChange={(value) => update(key, value)} min={0} />;
   const save = async (card: string, keys: string[]) => {
     setSavingCard(card);
     try {
@@ -75,9 +74,10 @@ export default function PaymentSection({ options, onBulkSave, canSensitive }: Se
 
     <SettingsSection title={<SettingsCardHeader icon={<WalletCards size={16} />} title={t("充值配置")} description={t("配置最低充值额度、手续费和前端充值档位")} />}>
       <SettingsFormGrid className="mt-4">
-        {field("最低充值金额", "min_topup_amount")}
-        {field("充值手续费率", "topup_fee_rate")}
-        {field("手续费封顶金额", "topup_fee_cap")}
+        <SettingsNumberField label={t("最低充值金额")} value={number(form.min_topup_amount)} onChange={(value) => update("min_topup_amount", value)} min={0.01} precision={2} step={0.01} />
+        <SettingsNumberField label={t("充值手续费率（%）")} description={t("千分之六请输入 0.6")} value={number(form.topup_fee_rate)} onChange={(value) => update("topup_fee_rate", value)} min={0} max={100} precision={6} step={0.1} />
+        <SettingsNumberField label={t("手续费封顶金额")} description={t("0 表示不封顶")} value={number(form.topup_fee_cap)} onChange={(value) => update("topup_fee_cap", value)} min={0} precision={2} step={0.01} />
+        <SettingsNumberField label={t("单用户最大未支付充值订单数")} value={number(form.max_pending_recharge_orders)} onChange={(value) => update("max_pending_recharge_orders", value)} min={1} max={100} precision={0} />
       </SettingsFormGrid>
       <div className="mt-5 overflow-hidden rounded-lg border border-[var(--semi-color-border)]">
         <div className="flex items-center justify-between gap-4 bg-[var(--semi-color-fill-0)] px-4 py-3">
@@ -111,7 +111,7 @@ export default function PaymentSection({ options, onBulkSave, canSensitive }: Se
 
     <SettingsSection title={<SettingsCardHeader icon={<RefreshCw size={16} />} title={t("异步查账")} description={t("回调后前 10 次每 5 秒查账，随后每 30 秒；无回调时 60 秒启动，5 分钟截止")} />}>
       <SettingsFormGrid className="mt-4">
-        {field("单次查账请求超时（秒）", "async_check_request_timeout_seconds")}
+        <SettingsNumberField label={t("单次查账请求超时（秒）")} value={number(form.async_check_request_timeout_seconds)} onChange={(value) => update("async_check_request_timeout_seconds", value)} min={1} max={30} precision={0} />
       </SettingsFormGrid>
       <Button icon={<Save size={14} />} loading={savingCard === "check"} onClick={() => void save("check", [...RECHARGE_CHECK_KEYS]).catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
     </SettingsSection>

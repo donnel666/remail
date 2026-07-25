@@ -38,6 +38,7 @@ func (RechargeConfigProvider) Current() (billingapp.RechargeConfig, error) {
 		FeeRate:           strings.TrimSpace(settings.String("topup_fee_rate", "0")),
 		FeeCap:            strings.TrimSpace(settings.String("topup_fee_cap", "0")),
 		Tiers:             tiers,
+		MaxPendingOrders:  settings.Int("max_pending_recharge_orders", 10, 1),
 		RequestTimeout:    settings.Duration("async_check_request_timeout_seconds", 5*time.Second, time.Second, 1),
 	}
 	if config.Enabled && strings.EqualFold(config.Version, "v2") {

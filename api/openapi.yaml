@@ -5911,7 +5911,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "409":
-          description: Idempotency key conflict or another recharge order is still pending
+          description: Idempotency key conflict or the configured pending recharge limit has been reached
           content:
             application/json:
               schema:

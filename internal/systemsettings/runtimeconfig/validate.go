@@ -28,6 +28,7 @@ var integerRanges = map[string]integerRange{
 	"email_code_ttl_seconds": positive(86400), "email_code_resend_gap_seconds": positive(3600), "email_code_digit_len": {min: 4, max: 10},
 	"bcrypt_cost": {min: 4, max: 16}, "session_max_age_seconds": {min: 300, max: 31_536_000},
 	"rebate_expiry_days":                  {min: 0, max: 36500},
+	"max_pending_recharge_orders":         positive(100),
 	"async_check_request_timeout_seconds": {min: 1, max: 30},
 
 	"default_plus_daily_limit": positive(2_147_483_647), "default_mailbox_daily_limit": positive(2_147_483_647), "resource_validation_max_failures": positive(100),
@@ -113,7 +114,7 @@ func Validate(key, value string) error {
 		}
 	case "registration_reward_amount", "single_rebate_cap", "cumulative_rebate_cap", "topup_fee_cap":
 		amount, err := money.Parse(value)
-		if err != nil || amount.IsNegative() {
+		if err != nil || amount.IsNegative() || (key == "topup_fee_cap" && !amount.Equal(amount.Round(2))) {
 			return domain.ErrInvalidValue
 		}
 	case "min_topup_amount":

@@ -103,14 +103,15 @@ export function SettingsSwitchField({ checked, onChange, label, description, dis
 }
 
 // ---- SettingsNumberField — number input with label in 2-col grid ----
-export function SettingsNumberField({ label, value, onChange, min, max, precision, step }: {
-  label: string; value: number | undefined; onChange: (v: number) => void; min?: number; max?: number; precision?: number; step?: number;
+export function SettingsNumberField({ label, description, value, onChange, min, max, precision, step }: {
+  label: string; description?: string; value: number | undefined; onChange: (v: number) => void; min?: number; max?: number; precision?: number; step?: number;
 }) {
   const id = useId();
   return (
     <FormItem>
       <Label htmlFor={id}>{label}</Label>
       <InputNumber id={id} value={value} onNumberChange={onChange} min={min} max={max} precision={precision} step={step} style={{ width: "100%" }} />
+      {description ? <FormDescription>{description}</FormDescription> : null}
     </FormItem>
   );
 }

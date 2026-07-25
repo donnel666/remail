@@ -9,6 +9,7 @@ import {
   Input,
   Modal,
   Space,
+  Spin,
   Tag,
   Table,
   Toast,
@@ -41,6 +42,7 @@ import { useIsMobile } from "@/hooks/use-is-mobile";
 import { generateIdempotencyKey } from "@/lib/idempotency";
 import {
   createRecharge,
+  getRecharge,
   getRechargeConfig,
   getWallet,
   getWalletReferrals,
@@ -54,6 +56,8 @@ import {
 } from "@/lib/wallet-api";
 import { createMyInvite, getMyInvite } from "@/lib/iam-api";
 import { IamApiError } from "@/lib/api-client";
+
+import { calculateRechargePaymentAmount } from "./wallet-payment";
 
 const { Text } = Typography;
 
@@ -167,7 +171,7 @@ export default function Wallet() {
   const [redemptionCode, setRedemptionCode] = useState("");
   const [billingOpen, setBillingOpen] = useState(false);
   const [billingKeyword, setBillingKeyword] = useState("");
-  const [debouncedBillingKeyword] = useDebouncedValue(billingKeyword);
+  const [debouncedBillingKeyword, flushBillingKeyword] = useDebouncedValue(billingKeyword);
   const [wallet, setWallet] = useState<WalletResponse | null>(null);
   const [referrals, setReferrals] = useState<WalletReferralResponse | null>(null);
   const [rechargeConfig, setRechargeConfig] =
@@ -180,6 +184,9 @@ export default function Wallet() {
   const [transferringRewards, setTransferringRewards] = useState(false);
   const [billingLoading, setBillingLoading] = useState(false);
   const [recharging, setRecharging] = useState(false);
+  const [payment, setPayment] = useState<{ rechargeNo: string; url: string; expiresAt: string } | null>(null);
+  const [paymentFrameLoaded, setPaymentFrameLoaded] = useState(false);
+  const [paymentFrameSlow, setPaymentFrameSlow] = useState(false);
   const [redeeming, setRedeeming] = useState(false);
   const redeemAttemptRef = useRef<{ code: string; key: string } | null>(null);
   const transferAttemptRef = useRef<string | null>(null);
@@ -192,6 +199,12 @@ export default function Wallet() {
   const redeemFormApiRef = useRef<{
     setValue?: (field: "redemptionCode", value: unknown) => void;
   } | null>(null);
+
+  const openBilling = useCallback(() => {
+    setBillingKeyword("");
+    flushBillingKeyword("");
+    setBillingOpen(true);
+  }, [flushBillingKeyword]);
 
   const refreshWallet = useCallback(async () => {
     setWalletLoading(true);
@@ -323,6 +336,62 @@ export default function Wallet() {
     return () => window.clearInterval(timer);
   }, [billingOpen, recharges, refreshRecharges]);
 
+  useEffect(() => {
+    if (!payment || paymentFrameLoaded) return;
+    setPaymentFrameSlow(false);
+    const timer = window.setTimeout(() => setPaymentFrameSlow(true), 10_000);
+    return () => window.clearTimeout(timer);
+  }, [payment, paymentFrameLoaded]);
+
+  useEffect(() => {
+    if (!payment) return;
+    let cancelled = false;
+    let checking = false;
+    let consecutiveFailures = 0;
+    const refreshPayment = async () => {
+      if (cancelled || checking) return;
+      const expiresAt = new Date(payment.expiresAt).getTime();
+      if (Number.isFinite(expiresAt) && Date.now() >= expiresAt) {
+        setPayment(null);
+        setPaymentFrameLoaded(false);
+        setPaymentFrameSlow(false);
+        openBilling();
+        Toast.error(t("Recharge verification timed out. Please check the billing record."));
+        return;
+      }
+      checking = true;
+      try {
+        const recharge = await getRecharge(payment.rechargeNo);
+        consecutiveFailures = 0;
+        if (cancelled || ["paying", "callback", "reconciled"].includes(recharge.status)) return;
+        setPayment(null);
+        setPaymentFrameLoaded(false);
+        setPaymentFrameSlow(false);
+        openBilling();
+        if (recharge.status === "credited") {
+          Toast.success(t("Recharge successful. Balance has been credited."));
+          void refreshWallet();
+        } else {
+          Toast.error(t("Recharge is abnormal. Please check the billing record."));
+        }
+      } catch {
+        if (cancelled) return;
+        consecutiveFailures += 1;
+        if (consecutiveFailures === 3) {
+          Toast.warning(t("Unable to refresh recharge status. Verification is still running."));
+        }
+      } finally {
+        checking = false;
+      }
+    };
+    void refreshPayment();
+    const timer = window.setInterval(() => void refreshPayment(), 2500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [openBilling, payment, refreshWallet, t]);
+
   const handlePresetSelect = (amount: string) => {
     const value = Number(amount);
     setSelectedAmount(value);
@@ -335,12 +404,7 @@ export default function Wallet() {
   );
   const payableAmount = useMemo(() => {
     if (selectedTier) return selectedTier.paymentAmount;
-    const amount = Number(customAmount);
-    const rate = Number(rechargeConfig?.feeRate ?? 0);
-    const cap = Number(rechargeConfig?.feeCap ?? 0);
-    if (!Number.isFinite(amount) || amount <= 0) return "0.00";
-    const fee = Math.min(amount * rate / 100, cap > 0 ? cap : Number.POSITIVE_INFINITY);
-    return (amount + fee).toFixed(2);
+    return calculateRechargePaymentAmount(customAmount, rechargeConfig?.feeRate, rechargeConfig?.feeCap);
   }, [customAmount, rechargeConfig?.feeCap, rechargeConfig?.feeRate, selectedTier]);
 
   const handleRecharge = async () => {
@@ -358,26 +422,19 @@ export default function Wallet() {
     if (!rechargeAttemptRef.current || rechargeAttemptRef.current.amount !== normalizedAmount) {
       rechargeAttemptRef.current = { amount: normalizedAmount, key: generateIdempotencyKey() };
     }
-    const popup = window.open("", "_blank");
-    if (popup) {
-      popup.opener = null;
-      popup.document.title = t("Opening Alipay");
-      popup.document.body.textContent = t("Creating recharge order...");
-    }
     setRecharging(true);
     try {
       const result = await createRecharge(normalizedAmount, rechargeAttemptRef.current.key);
       rechargeAttemptRef.current = null;
-      if (popup) popup.location.href = result.payUrl;
-      else window.location.assign(result.payUrl);
-      setBillingOpen(true);
+      setPaymentFrameLoaded(false);
+      setPaymentFrameSlow(false);
+      setPayment({ rechargeNo: result.recharge.rechargeNo, url: result.payUrl, expiresAt: result.expiresAt });
       void refreshRecharges();
     } catch (error) {
-      popup?.close();
       if (error instanceof IamApiError && error.status >= 400 && error.status < 500) {
         rechargeAttemptRef.current = null;
       }
-      Toast.error(error instanceof Error ? error.message : t("Request failed."));
+      Toast.error(error instanceof Error ? t(error.message) : t("Request failed."));
     } finally {
       setRecharging(false);
     }
@@ -537,7 +594,7 @@ export default function Wallet() {
         key: "status",
         render: (status: string) => (
           <Tag color={status === "credited" ? "green" : status === "failed" ? "red" : "orange"}>
-            {status === "failed" ? t("充值异常") : t(status)}
+            {t(status)}
           </Tag>
         ),
         title: t("Status"),
@@ -839,6 +896,57 @@ export default function Wallet() {
           </Card>
         </div>
       </div>
+
+      <Modal
+        bodyStyle={{
+          height: isMobile ? "calc(100vh - 152px)" : "min(680px, calc(100vh - 220px))",
+          overflow: "hidden",
+          padding: 0,
+        }}
+        footer={
+          <Button
+            disabled={!payment}
+            onClick={() => payment && window.open(payment.url, "_blank", "noopener,noreferrer")}
+            theme="outline"
+          >
+            {t("Open in new window")}
+          </Button>
+        }
+        maskClosable={false}
+        onCancel={() => {
+          setPayment(null);
+          setPaymentFrameLoaded(false);
+          setPaymentFrameSlow(false);
+          openBilling();
+        }}
+        size={isMobile ? "full-width" : "large"}
+        title={t("Alipay Payment")}
+        visible={Boolean(payment)}
+      >
+        {payment ? (
+          <div className="relative h-full">
+            <iframe
+              className={`h-full w-full border-0 bg-white ${paymentFrameLoaded ? "visible" : "invisible"}`}
+              onLoad={() => {
+                setPaymentFrameLoaded(true);
+                setPaymentFrameSlow(false);
+              }}
+              referrerPolicy="no-referrer"
+              sandbox="allow-forms allow-same-origin allow-scripts"
+              src={payment.url}
+              title={t("Alipay Payment")}
+            />
+            {!paymentFrameLoaded ? (
+              <div aria-live="polite" className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-white px-6 text-center" role="status">
+                <Spin size="large" />
+                <Text type="secondary">
+                  {t(paymentFrameSlow ? "Payment page is taking longer than expected. Open it in a new window." : "Loading payment page...")}
+                </Text>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </Modal>
 
       <Modal
         footer={null}
