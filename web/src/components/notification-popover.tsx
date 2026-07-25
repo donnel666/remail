@@ -16,6 +16,8 @@ const TABS = [
   { key: "system", labelKey: "System announcements" },
 ] as const;
 
+const ANNOUNCEMENT_DISMISSED_DATE_KEY = "announcement-dismissed-date";
+
 const FOCUSABLE_SELECTOR = [
   "a[href]",
   "button:not([disabled])",
@@ -28,6 +30,22 @@ const FOCUSABLE_SELECTOR = [
 function getFocusableElements(container: HTMLElement) {
   return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
     .filter((element) => !element.hasAttribute("disabled") && element.offsetParent !== null);
+}
+
+function localDateKey(date = new Date()) {
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+function announcementsDismissedToday() {
+  try {
+    return window.localStorage.getItem(ANNOUNCEMENT_DISMISSED_DATE_KEY) === localDateKey();
+  } catch {
+    return false;
+  }
 }
 
 export function NotificationPopover() {
@@ -64,7 +82,7 @@ export function NotificationPopover() {
     }
   }, []);
 
-  const loadAnnouncements = useCallback(async () => {
+  const loadAnnouncements = useCallback(async (): Promise<SystemAnnouncement[] | null> => {
     announcementsRequestRef.current?.abort();
     const controller = new AbortController();
     announcementsRequestRef.current = controller;
@@ -72,9 +90,12 @@ export function NotificationPopover() {
     setAnnouncementsError(false);
     try {
       const next = await getSystemAnnouncements(controller.signal);
-      if (!controller.signal.aborted) setAnnouncements(next);
+      if (controller.signal.aborted) return null;
+      setAnnouncements(next);
+      return next;
     } catch {
       if (!controller.signal.aborted) setAnnouncementsError(true);
+      return null;
     } finally {
       if (announcementsRequestRef.current === controller) {
         announcementsRequestRef.current = null;
@@ -96,12 +117,29 @@ export function NotificationPopover() {
     setOpen(false);
   }, []);
 
-  useEffect(() => () => {
-    noticeRequestRef.current?.abort();
-    announcementsRequestRef.current?.abort();
-    noticeRequestRef.current = null;
-    announcementsRequestRef.current = null;
-  }, []);
+  const closeForToday = useCallback(() => {
+    try {
+      window.localStorage.setItem(ANNOUNCEMENT_DISMISSED_DATE_KEY, localDateKey());
+    } catch {}
+    closeDialog();
+  }, [closeDialog]);
+
+  useEffect(() => {
+    void loadAnnouncements().then((next) => {
+      if (!next?.length || announcementsDismissedToday()) return;
+      previousFocusRef.current = document.activeElement as HTMLElement | null;
+      setActiveTab("system");
+      setOpen(true);
+      void loadNotice();
+    });
+
+    return () => {
+      noticeRequestRef.current?.abort();
+      announcementsRequestRef.current?.abort();
+      noticeRequestRef.current = null;
+      announcementsRequestRef.current = null;
+    };
+  }, [loadAnnouncements, loadNotice]);
 
   useEffect(() => {
     if (!open) return;
@@ -253,7 +291,15 @@ export function NotificationPopover() {
               )}
             </div>
 
-            <footer className="flex items-center justify-end pb-6">
+            <footer className="flex items-center justify-end gap-3 pb-6">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 rounded-[10px] bg-surface-sunken px-3 text-brand hover:bg-brand-subtle hover:text-brand"
+                onClick={closeForToday}
+              >
+                {t("Close today")}
+              </Button>
               <Button
                 variant="ghost"
                 size="sm"
@@ -296,7 +342,7 @@ function LoadingState({ label }: { label: string }) {
   );
 }
 
-function LoadError({ message, onRetry }: { message: string; onRetry: () => Promise<void> }) {
+function LoadError({ message, onRetry }: { message: string; onRetry: () => Promise<unknown> }) {
   const { t } = useTranslation();
   return (
     <div className="flex min-h-[320px] flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border bg-background px-6 text-center">

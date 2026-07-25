@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -29,10 +29,11 @@ function deferred<T>() {
 describe("NotificationPopover", () => {
   afterEach(() => {
     cleanup();
+    window.localStorage.clear();
     vi.clearAllMocks();
   });
 
-  it("loads and renders active system announcements when opened", async () => {
+  it("opens active system announcements automatically on entry", async () => {
     mocks.getSystemNotice.mockResolvedValue("");
     mocks.getSystemAnnouncements.mockResolvedValue([{
       id: 1,
@@ -45,14 +46,50 @@ describe("NotificationPopover", () => {
     }]);
     render(<NotificationPopover />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Notifications" }));
-    fireEvent.click(await screen.findByRole("tab", { name: "System announcements" }));
-
     expect(await screen.findByText("Maintenance")).toBeVisible();
     expect(screen.getByText("Service will restart soon.")).toBeVisible();
     expect(screen.getByText("Effective immediately")).toBeVisible();
+    expect(screen.getByRole("tab", { name: "System announcements" })).toHaveAttribute("aria-selected", "true");
     expect(mocks.getSystemAnnouncements).toHaveBeenCalledOnce();
-    expect(screen.queryByText("Close today")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close today" })).toBeVisible();
+  });
+
+  it("opens again after a regular close and refresh", async () => {
+    mocks.getSystemNotice.mockResolvedValue("");
+    mocks.getSystemAnnouncements.mockResolvedValue([{
+      id: 1, title: "Maintenance", content: "Restart soon", type: "warning", startTime: "", endTime: "", enabled: true,
+    }]);
+    const firstView = render(<NotificationPopover />);
+
+    expect(await screen.findByText("Maintenance")).toBeVisible();
+    fireEvent.click(screen.getAllByRole("button", { name: "Close notifications" })[0]);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    firstView.unmount();
+    render(<NotificationPopover />);
+
+    expect(await screen.findByText("Maintenance")).toBeVisible();
+    expect(mocks.getSystemAnnouncements).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps today's automatic popup closed while allowing manual access", async () => {
+    mocks.getSystemNotice.mockResolvedValue("");
+    mocks.getSystemAnnouncements.mockResolvedValue([{
+      id: 1, title: "Maintenance", content: "Restart soon", type: "warning", startTime: "", endTime: "", enabled: true,
+    }]);
+    const firstView = render(<NotificationPopover />);
+
+    expect(await screen.findByText("Maintenance")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Close today" }));
+    firstView.unmount();
+    render(<NotificationPopover />);
+
+    await waitFor(() => expect(mocks.getSystemAnnouncements).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Notifications" }));
+    fireEvent.click(screen.getByRole("tab", { name: "System announcements" }));
+    expect(await screen.findByText("Maintenance")).toBeVisible();
   });
 
   it("does not let an aborted request overwrite a newer response", async () => {
@@ -62,12 +99,9 @@ describe("NotificationPopover", () => {
     mocks.getSystemAnnouncements.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
     render(<NotificationPopover />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Notifications" }));
     const firstSignal = mocks.getSystemAnnouncements.mock.calls[0][0] as AbortSignal;
-    fireEvent.click(screen.getAllByRole("button", { name: "Close notifications" })[0]);
-    expect(firstSignal.aborted).toBe(true);
-
     fireEvent.click(screen.getByRole("button", { name: "Notifications" }));
+    expect(firstSignal.aborted).toBe(true);
     fireEvent.click(await screen.findByRole("tab", { name: "System announcements" }));
     await act(async () => second.resolve([{
       id: 2, title: "Newest", content: "New", type: "success", startTime: "", endTime: "", enabled: true,
@@ -117,11 +151,9 @@ describe("NotificationPopover", () => {
     }]);
     render(<NotificationPopover />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Notifications" }));
-    expect(await screen.findByText("Failed to load notifications")).toBeVisible();
-    fireEvent.click(screen.getByRole("tab", { name: "System announcements" }));
     expect(await screen.findByText("Available announcement")).toBeVisible();
     fireEvent.click(screen.getByRole("tab", { name: "Notifications" }));
+    expect(await screen.findByText("Failed to load notifications")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
 
     expect(await screen.findByText("Recovered")).toBeVisible();
