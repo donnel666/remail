@@ -899,7 +899,7 @@ export default function Wallet() {
 
       <Modal
         bodyStyle={{
-          height: isMobile ? "calc(100vh - 152px)" : "min(680px, calc(100vh - 220px))",
+          height: isMobile ? "calc(100vh - 152px)" : "min(882px, calc(100vh - 160px))",
           overflow: "hidden",
           padding: 0,
         }}
@@ -922,6 +922,7 @@ export default function Wallet() {
         size={isMobile ? "full-width" : "large"}
         title={t("Alipay Payment")}
         visible={Boolean(payment)}
+        width={isMobile ? undefined : "min(960px, calc(100vw - 48px))"}
       >
         {payment ? (
           <div className="relative h-full">
