@@ -191,7 +191,7 @@ P1-I5 分配算法采用 Bucketed Locked LRU Allocation。目标是保持实现�
 
 | 规则 | 说明 |
 |------|------|
-| 分桶 | Microsoft 资源使用 2048 桶；域名资源根使用 512 桶，仅承担生成兜底；已生成域名邮箱按规范化邮箱地址的稳定 CRC32 哈希使用独立的 2048 桶。分配先从已生成邮箱桶中复用未占用邮箱，探测不到时再从符合后缀的域名资源生成新邮箱。每轮默认探测 4 个桶，指定后缀首桶为空时直接进入兜底。 |
+| 分桶 | Microsoft 资源使用 2048 桶；域名资源根使用 512 桶，仅承担生成兜底；已生成域名邮箱按规范化邮箱地址的稳定 CRC32 哈希使用独立的 2048 桶。分配先从已生成邮箱桶中复用未占用邮箱，探测不到时再从符合公共后缀的域名资源生成新邮箱。每轮默认探测 4 个桶，指定公共后缀时耗尽探测桶后再走该后缀的全局索引兜底。 |
 | 锁定 | 资源候选列表查询保持只读，避免 MySQL 范围锁放大；真正尝试某个候选前，再按资源主键 `FOR UPDATE SKIP LOCKED` 短锁并重新校验 Core 源表条件。复用显式别名、点别名、加号别名和自建生成邮箱时也使用 `FOR UPDATE SKIP LOCKED` 锁定被复用实体。不使用 Redis 锁兜底。 |
 | 排序 | 候选按 `lastAllocatedAt ASC, qualityScore DESC, id ASC` 排序，优先使用长期未分配、质量更好的资源；不得使用 `ORDER BY RAND()`。 |
 | 唯一约束 | 并发正确性最终由 `OrderGuard` 和 allocation active generated unique key 兜底；锁只用于减少复用实体冲突。 |
@@ -217,11 +217,11 @@ Domain 公开出售候选和自用私有候选也必须使用两条显式查询�
 
 P1-I5 分配直接使用 SourceCandidate 查询 Core 源表，并在同一短事务内 `FOR UPDATE SKIP LOCKED` 重校验资源状态、出售标记或用途、owner 启用状态和 owner 角色。早期按“项目 × 全资源”维护的 RoutingCandidate 镜像与刷新任务已删除，避免百万资源下的存储倍增和刷新写风暴；库存诊断使用项目级 Redis 读模型，用户只参与实时项目可见性校验，不参与库存 key 或聚合 SQL。所有用户共享同一项目快照，冷 miss 只为该项目标记一次活跃键并调度异步预热。后台任务每十分钟限量刷新近期活跃的项目库存；只有异步刷新会重置二十四小时 TTL，缓存读取不续期，短期刷新失败继续服务已有快照，TTL 到期后重新预热。
 
-项目级库存使用独立的 `alloc:inventory:v3:*` 数据、锁和 active ZSET，不读取 buyer 语义的 v2 payload。滚动发布期间不得删除旧 active ZSET；全部旧实例退出且最长十分钟旧刷新任务 drain 后，一次性执行 `UNLINK alloc:inventory:active`。旧 v2 payload 依靠二十四小时 TTL、旧 marker/lock 依靠十分钟 TTL 自然淘汰。
+项目级库存使用独立的 `alloc:inventory:v4:*` 数据、锁和 active ZSET，不读取 v3 的 Domain 具体域名库存语义。滚动发布期间不得删除旧 v3 active ZSET；全部旧实例退出且最长十分钟旧刷新任务 drain 后，可执行 `UNLINK alloc:inventory:v3:active`。旧 v3 payload 依靠二十四小时 TTL、旧 marker/lock 依靠十分钟 TTL 自然淘汰。
 
 Microsoft 候选查询和行锁重校验必须读取既有 `microsoft_allocations` 历史：同一具体 `main/explicitAliasId/dotAliasId/plusAliasId` 已经分配给目标项目时不得再次选择，但同一主资源下未用于该项目的其他别名仍可分配。验证后的历史扫描把识别结果交给 BC-TRADE；已有 Allocation 的具体关系直接复用且不创建假订单，只有缺失关系才通过 BC-ALLOC 既有 alias、order guard 和 allocation repository 创建超级管理员 0 元已过保订单对应的 `released` Allocation，BC-MAILMATCH 不直写本表。旧 `microsoft_resource_project_matches` 仅作为尚未重扫数据的保守兼容挡板，资源完成重扫后删除对应旧行。
 
-P1-I5 项目库存按项目商品启用的分配形态计算。管理员库存诊断可以看到来源明细；普通用户和下单页只看到项目商品库存、可选 Microsoft 后缀或 Domain 域名维度库存，不返回具体供应商、资源 ID、别名或生成邮箱等来源 breakdown。兼容字段 `totalAvailable` 与 `publicAvailable` 都表示同一份项目公共库存；买家自有资源不进入该读模型。库存分两类：
+P1-I5 项目库存按项目商品启用的分配形态计算。管理员库存诊断可以看到来源明细；普通用户和下单页只看到项目商品库存、可选 Microsoft 精确后缀或 Domain 公共后缀库存（如 `com`、`com.cn`、`co.uk`），不返回具体供应商、资源 ID、别名或生成邮箱等来源 breakdown。兼容字段 `totalAvailable` 与 `publicAvailable` 都表示同一份项目公共库存；买家自有资源不进入该读模型。库存分两类：
 
 | 类型 | 库存口径 |
 |------|----------|
@@ -271,7 +271,7 @@ MySQL 没有 partial unique index，P1-I5 使用 generated column 表达 active 
 |------|------|
 | 按订单查询 | 先查 `OrderGuard` 决定 Microsoft/Domain，再查对应 allocation 表。 |
 | 按收件人查询 | `email + status` 必须有索引，供 MailMatch 先按 recipient 定位 active 分配，禁止全项目扫描。主邮箱分配也必须冗余写入交付邮箱，提升匹配性能。 |
-| 用户商品库存 | `GET /v1/projects/{projectId}/inventory` 返回项目总库存、每个商品的 `totalAvailable/publicAvailable` 以及可选后缀或域名库存；不返回供应商、资源 ID、别名或生成邮箱等来源 breakdown。 |
+| 用户商品库存 | `GET /v1/projects/{projectId}/inventory` 返回项目总库存、每个商品的 `totalAvailable/publicAvailable` 以及可选 Microsoft 精确后缀或 Domain 公共后缀库存；不返回供应商、资源 ID、别名或生成邮箱等来源 breakdown。 |
 | 库存诊断 | `GET /v1/admin/projects/{projectId}/inventory` 返回项目商品、Microsoft 可分配统计、Domain 可分配统计和 active 分配统计。 |
 | 资源使用详情 | `AdminAllocationQueryPort` 按 `resourceId` 分页返回资源维度订单/分配读模型；通过批量 Port 丰富，不得为每条 allocation 单独查询订单、项目、买家或邮件。 |
 
@@ -332,7 +332,7 @@ MySQL 没有 partial unique index，P1-I5 使用 generated column 表达 active 
 | `GET` | `/v1/admin/allocations/{allocationId}` | 分配详情，必须带 `type` 查询参数防止猜表。 |
 | `GET` | `/v1/admin/orders/{orderNo}/allocations` | 按订单查看分配。 |
 | `GET` | `/v1/admin/allocations?type=microsoft&resourceId={resourceId}` | 复用 Alloc 管理列表提供资源维度订单 Tab；基础设施只对当前页 orderNo 做有界只读丰富，不新增重复 nested API。 |
-| `GET` | `/v1/projects/{projectId}/inventory` | 普通用户/下单页读取项目商品库存、可选后缀或域名库存；不返回来源 breakdown。 |
+| `GET` | `/v1/projects/{projectId}/inventory` | 普通用户/下单页读取项目商品库存、可选 Microsoft 精确后缀或 Domain 公共后缀库存；不返回来源 breakdown。 |
 | `GET` | `/v1/admin/projects/{projectId}/inventory` | 项目库存和可用性诊断。 |
 | `GET` | `/v1/admin/projects/{projectId}/candidates` | 路由候选读模型；支持 `type=microsoft/domain`，不传则返回两类候选。 |
 | `POST` | `/v1/admin/projects/{projectId}/candidates/refresh` | 创建候选读模型刷新任务，返回 `202`。 |

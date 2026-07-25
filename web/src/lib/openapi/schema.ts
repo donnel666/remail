@@ -3409,13 +3409,13 @@ export interface components {
         CreateOrderRequest: {
             projectId: number;
             productId: number;
-            /** @description Optional email domain suffix filter used by BC-ALLOC when selecting an allocation source. */
+            /** @description Optional allocation suffix. Microsoft products accept an exact email domain (for example outlook.com); Domain products accept only a public suffix (for example com, com.cn, or co.uk), which aggregates all concrete domains under that suffix. */
             emailSuffix?: string;
         };
         CreateOrderBatchRequest: {
             projectId: number;
             productId: number;
-            /** @description Optional email domain suffix filter used by BC-ALLOC when selecting an allocation source. */
+            /** @description Optional allocation suffix. Microsoft products accept an exact email domain (for example outlook.com); Domain products accept only a public suffix (for example com, com.cn, or co.uk), which aggregates all concrete domains under that suffix. */
             emailSuffix?: string;
             /** @description Number of independent orders to create. */
             quantity: number;
@@ -4694,7 +4694,7 @@ export interface components {
             suffixes?: components["schemas"]["ProductSuffixInventory"][];
         };
         ProductSuffixInventory: {
-            /** @description Email suffix without leading @. Empty is not used here; callers use the parent product row for random suffix. */
+            /** @description Suffix without leading @. Microsoft products expose exact email domains; Domain products expose only aggregated public suffixes such as com, com.cn, or co.uk. Empty is not used here; callers use the parent product row for a random suffix. */
             suffix: string;
             /** Format: int64 */
             totalAvailable: number;

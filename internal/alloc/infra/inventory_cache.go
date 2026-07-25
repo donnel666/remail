@@ -14,8 +14,8 @@ import (
 )
 
 const (
-	inventoryCacheKeyPrefix = "alloc:inventory:v3:"
-	inventoryCacheActiveKey = "alloc:inventory:v3:active"
+	inventoryCacheKeyPrefix = "alloc:inventory:v4:"
+	inventoryCacheActiveKey = "alloc:inventory:v4:active"
 )
 
 type InventoryCache struct {
@@ -213,7 +213,7 @@ func (c *InventoryCache) MarkProductUnavailable(ctx context.Context, req allocap
 }
 
 func productInventoryTargetExists(totals allocapp.ProjectProductInventoryTotals, req allocapp.ProductInventoryAvailabilityRequest) bool {
-	suffix := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(req.EmailSuffix), "@"))
+	suffix := normalizeCandidateSuffix(req.EmailSuffix)
 	for _, item := range totals.Items {
 		if item.ProductID != req.ProductID {
 			continue
@@ -222,7 +222,7 @@ func productInventoryTargetExists(totals allocapp.ProjectProductInventoryTotals,
 			return true
 		}
 		for _, entry := range item.Suffixes {
-			entrySuffix := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(entry.Suffix), "@"))
+			entrySuffix := normalizeCandidateSuffix(entry.Suffix)
 			if entrySuffix == suffix {
 				return true
 			}
@@ -255,7 +255,7 @@ func productUnavailableMarkerKey(req allocapp.ProductInventoryAvailabilityReques
 	if req.PublicOnly {
 		scope = "public"
 	}
-	suffix := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(req.EmailSuffix), "@"))
+	suffix := normalizeCandidateSuffix(req.EmailSuffix)
 	if suffix == "" {
 		suffix = "-"
 	}
@@ -268,7 +268,7 @@ func markProductUnavailable(totals *allocapp.ProjectProductInventoryTotals, req 
 	if totals == nil {
 		return false
 	}
-	suffix := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(req.EmailSuffix), "@"))
+	suffix := normalizeCandidateSuffix(req.EmailSuffix)
 	changed := false
 	for i := range totals.Items {
 		item := &totals.Items[i]
@@ -295,7 +295,7 @@ func markProductUnavailable(totals *allocapp.ProjectProductInventoryTotals, req 
 			found := false
 			for j := range item.Suffixes {
 				entry := &item.Suffixes[j]
-				entrySuffix := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(entry.Suffix), "@"))
+				entrySuffix := normalizeCandidateSuffix(entry.Suffix)
 				if entrySuffix != suffix {
 					continue
 				}

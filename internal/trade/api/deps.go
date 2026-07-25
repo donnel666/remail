@@ -383,7 +383,9 @@ func mapAllocationError(err error) error {
 	switch {
 	case errors.Is(err, allocdomain.ErrInsufficientInventory):
 		return domain.ErrInsufficientInventory
-	case errors.Is(err, allocdomain.ErrProjectNotAllocatable), errors.Is(err, allocdomain.ErrInvalidAllocationRequest):
+	case errors.Is(err, allocdomain.ErrInvalidAllocationRequest):
+		return domain.ErrInvalidOrderRequest
+	case errors.Is(err, allocdomain.ErrProjectNotAllocatable):
 		return domain.ErrProjectUnavailable
 	default:
 		return err

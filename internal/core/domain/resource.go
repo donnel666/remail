@@ -645,6 +645,16 @@ func NormalizeDomainSuffix(value string) (string, error) {
 	return "." + suffix, nil
 }
 
+// NormalizeDomainTLD canonicalizes a selectable public suffix without leading
+// punctuation and rejects concrete domains such as example.com.
+func NormalizeDomainTLD(value string) (string, error) {
+	normalized, err := NormalizeDomainSuffix(strings.TrimPrefix(strings.TrimSpace(value), "@"))
+	if err != nil || TLD("mailbox"+normalized) != normalized {
+		return "", ErrInvalidDomain
+	}
+	return strings.TrimPrefix(normalized, "."), nil
+}
+
 // TLD extracts the normalized suffix used by resource filters.
 func TLD(value string) string {
 	canonical, err := NormalizeDomainName(value)

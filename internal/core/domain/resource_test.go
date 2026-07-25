@@ -442,6 +442,25 @@ func TestTLD(t *testing.T) {
 	}
 }
 
+func TestNormalizeDomainTLD(t *testing.T) {
+	for input, want := range map[string]string{
+		"com":     "com",
+		".CN":     "cn",
+		"@co.uk":  "co.uk",
+		".com.cn": "com.cn",
+	} {
+		got, err := NormalizeDomainTLD(input)
+		if err != nil || got != want {
+			t.Fatalf("NormalizeDomainTLD(%q) = %q, %v; want %q, nil", input, got, err, want)
+		}
+	}
+	for _, input := range []string{"", "example.com", "mail.example.cn", "bad suffix"} {
+		if got, err := NormalizeDomainTLD(input); !errors.Is(err, ErrInvalidDomain) {
+			t.Fatalf("NormalizeDomainTLD(%q) = %q, %v; want ErrInvalidDomain", input, got, err)
+		}
+	}
+}
+
 func TestResourceType_ConstantValues(t *testing.T) {
 	if ResourceTypeMicrosoft != "microsoft" {
 		t.Errorf("ResourceTypeMicrosoft = %q, want 'microsoft'", ResourceTypeMicrosoft)

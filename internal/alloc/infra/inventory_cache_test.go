@@ -356,13 +356,13 @@ func TestClaimActiveInventoryLeavesEntriesTouchedAfterTaskCutoff(t *testing.T) {
 	require.NoError(t, client.ZScore(context.Background(), inventoryCacheActiveKey, inventoryCacheKey(freshEntry.Kind, freshEntry.ProjectID)).Err())
 }
 
-func TestInventoryCacheV3DoesNotServeV2InventorySemantics(t *testing.T) {
+func TestInventoryCacheV4DoesNotServeV3InventorySemantics(t *testing.T) {
 	server := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
 	t.Cleanup(func() { require.NoError(t, client.Close()) })
 	cache := NewInventoryCache(client)
-	oldKey := "alloc:inventory:v2:products:10:7"
-	oldActiveKey := "alloc:inventory:active"
+	oldKey := "alloc:inventory:v3:products:10"
+	oldActiveKey := "alloc:inventory:v3:active"
 	require.NoError(t, server.Set(oldKey, `{"ProjectID":10,"TotalAvailable":8678,"Items":[]}`))
 	require.NoError(t, client.ZAdd(context.Background(), oldActiveKey, redis.Z{
 		Score: float64(time.Now().UnixMilli()), Member: oldKey,
@@ -380,21 +380,21 @@ func TestInventoryCacheV3DoesNotServeV2InventorySemantics(t *testing.T) {
 	require.EqualValues(t, 1, client.ZCard(context.Background(), oldActiveKey).Val())
 }
 
-func TestInventoryCacheV3KeysAreProjectScoped(t *testing.T) {
+func TestInventoryCacheV4KeysAreProjectScoped(t *testing.T) {
 	entry := allocapp.InventoryCacheEntry{Kind: allocapp.InventoryCacheStats, ProjectID: 10}
-	require.Equal(t, "alloc:inventory:v3:stats:10", inventoryCacheKey(entry.Kind, entry.ProjectID))
-	require.Equal(t, "alloc:inventory:v3:lock:stats:10", inventoryCacheLockKey(entry))
-	require.Equal(t, "alloc:inventory:v3:active", inventoryCacheActiveKey)
-	require.Equal(t, "alloc:inventory:v3:unavailable:10:20:public:outlook.com", productUnavailableMarkerKey(
+	require.Equal(t, "alloc:inventory:v4:stats:10", inventoryCacheKey(entry.Kind, entry.ProjectID))
+	require.Equal(t, "alloc:inventory:v4:lock:stats:10", inventoryCacheLockKey(entry))
+	require.Equal(t, "alloc:inventory:v4:active", inventoryCacheActiveKey)
+	require.Equal(t, "alloc:inventory:v4:unavailable:10:20:public:outlook.com", productUnavailableMarkerKey(
 		allocapp.ProductInventoryAvailabilityRequest{
 			ProjectID: 10, ProductID: 20, EmailSuffix: "@OUTLOOK.COM", PublicOnly: true,
 		},
 	))
 
-	parsed, ok := parseInventoryCacheKey("alloc:inventory:v3:stats:10")
+	parsed, ok := parseInventoryCacheKey("alloc:inventory:v4:stats:10")
 	require.True(t, ok)
 	require.Equal(t, entry, parsed)
-	_, ok = parseInventoryCacheKey("alloc:inventory:v3:stats:10:7")
+	_, ok = parseInventoryCacheKey("alloc:inventory:v4:stats:10:7")
 	require.False(t, ok)
 }
 
@@ -440,8 +440,8 @@ func TestInventoryCacheSharesOneProjectSnapshotAcrossViewers(t *testing.T) {
 	require.Equal(t, 1, repo.productCalls, "the shared aggregate must run only once")
 	require.Equal(t, 2, repo.accessCalls, "each viewer must still be authorized")
 	require.True(t, server.Exists(inventoryCacheKey(allocapp.InventoryCacheProducts, 10)))
-	require.False(t, server.Exists("alloc:inventory:v3:products:10:7"))
-	require.False(t, server.Exists("alloc:inventory:v3:products:10:8"))
+	require.False(t, server.Exists("alloc:inventory:v4:products:10:7"))
+	require.False(t, server.Exists("alloc:inventory:v4:products:10:8"))
 }
 
 type blockingInventoryRepoStub struct {

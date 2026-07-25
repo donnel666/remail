@@ -464,7 +464,8 @@
         "properties": {
           "suffix": {
             "type": "string",
-            "example": "outlook.com"
+            "example": "com.cn",
+            "description": "Microsoft products expose exact email domains; Domain products expose aggregated public suffixes such as com, com.cn, or co.uk."
           },
           "totalAvailable": {
             "type": "integer",
@@ -582,7 +583,8 @@
           },
           "emailSuffix": {
             "type": "string",
-            "example": "outlook.com"
+            "example": "com.cn",
+            "description": "Microsoft products accept an exact email domain; Domain products accept only a public suffix such as com, com.cn, or co.uk."
           }
         },
         "required": [
@@ -603,7 +605,8 @@
           },
           "emailSuffix": {
             "type": "string",
-            "example": "outlook.com"
+            "example": "com.cn",
+            "description": "Microsoft products accept an exact email domain; Domain products accept only a public suffix such as com, com.cn, or co.uk."
           },
           "quantity": {
             "type": "integer",

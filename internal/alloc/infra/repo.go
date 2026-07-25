@@ -538,8 +538,8 @@ func (r *Repo) ListDomainSourceCandidates(ctx context.Context, buyerUserID uint,
 		where = append(where, "dr.purpose = 'sale'", "u.status = 'active'", "u.role IN ('supplier', 'admin', 'super_admin')")
 	}
 	if suffix := normalizeCandidateSuffix(emailSuffix); suffix != "" {
-		where = append(where, "dr.domain = ?")
-		args = append(args, suffix)
+		where = append(where, "dr.domain_tld = ?")
+		args = append(args, "."+suffix)
 	}
 	if bucket != nil {
 		where = append(where, "dr.alloc_bucket = ?")
@@ -583,8 +583,8 @@ func (r *Repo) ListGeneratedMailboxCandidates(ctx context.Context, projectID uin
 		where = append(where, "dr.purpose = 'sale'", "u.status = 'active'", "u.role IN ('supplier', 'admin', 'super_admin')")
 	}
 	if suffix := normalizeCandidateSuffix(emailSuffix); suffix != "" {
-		where = append(where, "dr.domain = ?")
-		args = append(args, suffix)
+		where = append(where, "dr.domain_tld = ?")
+		args = append(args, "."+suffix)
 	}
 	if bucket != nil {
 		where = append(where, "gm.alloc_bucket = ?")
@@ -748,8 +748,8 @@ func (r *Repo) LockDomainCandidate(ctx context.Context, resourceID uint, buyerUs
 		)
 	}
 	if suffix := normalizeCandidateSuffix(emailSuffix); suffix != "" {
-		where = append(where, "dr.domain = ?")
-		args = append(args, suffix)
+		where = append(where, "dr.domain_tld = ?")
+		args = append(args, "."+suffix)
 	}
 	var row allocapp.DomainCandidate
 	query := `
@@ -1862,7 +1862,7 @@ func (r *Repo) domainSuffixInventoryByScope(ctx context.Context) (map[string]int
 		MailboxDailyLimit int64
 	}
 	if err := r.dbFor(ctx).Raw(`
-SELECT dr.domain AS suffix, COALESCE(SUM(dr.mailbox_daily_limit), 0) AS mailbox_daily_limit
+SELECT dr.domain_tld AS suffix, COALESCE(SUM(dr.mailbox_daily_limit), 0) AS mailbox_daily_limit
 FROM domain_resources dr
 JOIN email_resources er ON er.id = dr.id AND er.type = 'domain'
 JOIN mail_servers ms ON ms.id = dr.mail_server_id
@@ -1870,12 +1870,12 @@ JOIN users u ON u.id = er.owner_user_id
 WHERE dr.status = 'normal'
   AND ms.status = 'online'
   AND `+scope+`
-GROUP BY dr.domain`, scopeArgs...).Scan(&capacities).Error; err != nil {
+GROUP BY dr.domain_tld`, scopeArgs...).Scan(&capacities).Error; err != nil {
 		return nil, fmt.Errorf("domain suffix capacity: %w", err)
 	}
 	today := time.Now().UTC().Format("2006-01-02")
 	used, err := r.domainSuffixCount(ctx, `
-SELECT dr.domain AS suffix, COALESCE(SUM(adu.used_count), 0) AS count
+SELECT dr.domain_tld AS suffix, COALESCE(SUM(adu.used_count), 0) AS count
 FROM allocation_daily_usages adu
 JOIN domain_resources dr ON dr.id = adu.resource_id
 JOIN email_resources er ON er.id = dr.id AND er.type = 'domain'
@@ -1887,7 +1887,7 @@ WHERE adu.usage_date = ?
   AND dr.status = 'normal'
   AND ms.status = 'online'
   AND `+scope+`
-GROUP BY dr.domain`, append([]any{today}, scopeArgs...)...)
+GROUP BY dr.domain_tld`, append([]any{today}, scopeArgs...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -2667,7 +2667,8 @@ func domainInventoryScopeSQL() (string, []any) {
 
 func normalizeCandidateSuffix(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
-	return strings.TrimPrefix(value, "@")
+	value = strings.TrimPrefix(value, "@")
+	return strings.TrimPrefix(value, ".")
 }
 
 func nonNegative(value int64) int64 {

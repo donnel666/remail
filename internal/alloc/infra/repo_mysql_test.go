@@ -904,6 +904,11 @@ func TestInventoryStatsAreScopedToProjectProductsMySQL(t *testing.T) {
 	require.Equal(t, int64(30000), stats.Domain.MailboxDailyLimit)
 	require.Equal(t, int64(30000), stats.Domain.TotalAvailable)
 	require.Equal(t, int64(30000), stats.TotalAvailable)
+	productStats, err := repo.GetProductInventoryTotals(context.Background(), 10)
+	require.NoError(t, err)
+	require.Equal(t, []allocapp.ProductInventorySuffixTotal{{
+		Suffix: "com", TotalAvailable: 30000, PublicAvailable: 30000,
+	}}, productStats.Items[0].Suffixes)
 
 	_, err = repo.GetInventoryStats(context.Background(), 999)
 	require.ErrorIs(t, err, domain.ErrProjectNotAllocatable)
@@ -1289,11 +1294,21 @@ func TestDomainDailyLimitConsumesPerResourceCounterMySQL(t *testing.T) {
 	require.NoError(t, db.Exec("UPDATE domain_resources SET mailbox_daily_limit = 1 WHERE id = 2000").Error)
 
 	uc := allocapp.NewUseCase(NewRepo(db))
+	_, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo:          "ord-domain-concrete-suffix",
+		BuyerUserID:      2,
+		ProjectProductID: 20,
+		SupplyScope:      domain.SupplyScopePublic,
+		EmailSuffix:      "d2000.example.com",
+	})
+	require.ErrorIs(t, err, domain.ErrInvalidAllocationRequest)
+
 	first, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
 		OrderNo:          "ord-domain-limit-1",
 		BuyerUserID:      2,
 		ProjectProductID: 20,
 		SupplyScope:      domain.SupplyScopePublic,
+		EmailSuffix:      "@com",
 	})
 	require.NoError(t, err)
 	require.Equal(t, domain.AllocationTypeDomain, first.Type)
@@ -1343,7 +1358,9 @@ VALUES (CURRENT_DATE(), 'microsoft', 1000, 'plus', 1)`).Error)
 		{"microsoft_resources", "idx_microsoft_inventory_public"},
 		{"domain_resources", "idx_domain_alloc_public"},
 		{"domain_resources", "idx_domain_alloc_owned"},
+		{"domain_resources", "idx_domain_alloc_tld_public"},
 		{"domain_resources", "idx_domain_inventory_public"},
+		{"domain_resources", "idx_domain_resources_owner_tld_private"},
 		{"project_products", "idx_project_products_id_project"},
 		{"explicit_aliases", "idx_explicit_aliases_id_resource"},
 		{"explicit_aliases", "idx_explicit_aliases_alloc_reuse"},
@@ -1388,6 +1405,21 @@ VALUES (CURRENT_DATE(), 'microsoft', 1000, 'plus', 1)`).Error)
 	requireExplainUsesIndex(t, db,
 		"idx_domain_alloc_public",
 		"EXPLAIN SELECT id FROM domain_resources WHERE alloc_bucket = MOD(2000, 512) AND purpose = 'sale' AND status = 'normal' ORDER BY last_allocated_at ASC, id ASC LIMIT 4",
+	)
+	requireExplainUsesIndex(t, db,
+		"idx_domain_alloc_tld_public",
+		"EXPLAIN SELECT id FROM domain_resources WHERE domain_tld = '.com' AND purpose = 'sale' AND status = 'normal' ORDER BY last_allocated_at ASC, id ASC LIMIT 8",
+		20,
+	)
+	requireExplainUsesIndex(t, db,
+		"idx_domain_resources_owner_tld_private",
+		"EXPLAIN SELECT id FROM domain_resources WHERE owner_user_id = 1 AND domain_tld = '.com' AND purpose = 'not_sale' AND status = 'normal' ORDER BY last_allocated_at ASC, id ASC LIMIT 8",
+		20,
+	)
+	requireExplainUsesIndex(t, db,
+		"idx_domain_inventory_public",
+		"EXPLAIN SELECT domain_tld, SUM(mailbox_daily_limit) FROM domain_resources WHERE purpose = 'sale' AND status = 'normal' GROUP BY domain_tld",
+		20,
 	)
 	requireExplainUsesIndex(t, db,
 		"idx_generated_mailboxes_bucket_reuse",
@@ -1522,8 +1554,12 @@ func requireIndexMissing(t *testing.T, db *gorm.DB, tableName string, indexName 
 	require.Zero(t, count, "unexpected index %s on %s", indexName, tableName)
 }
 
-func requireExplainUsesIndex(t *testing.T, db *gorm.DB, expectedKey string, query string) {
+func requireExplainUsesIndex(t *testing.T, db *gorm.DB, expectedKey string, query string, maxRows ...int64) {
 	t.Helper()
+	rowLimit := int64(10)
+	if len(maxRows) > 0 {
+		rowLimit = maxRows[0]
+	}
 
 	var rows []struct {
 		Key        sql.NullString `gorm:"column:key"`
@@ -1538,7 +1574,7 @@ func requireExplainUsesIndex(t *testing.T, db *gorm.DB, expectedKey string, quer
 		require.True(t, row.Key.Valid, "expected query to use an index: %s", query)
 		seenKeys = append(seenKeys, row.Key.String)
 		require.True(t, row.Rows.Valid, "expected query to expose row estimate: %s", query)
-		require.LessOrEqual(t, row.Rows.Int64, int64(10), "unexpected row estimate for %s using %s", query, row.Key.String)
+		require.LessOrEqual(t, row.Rows.Int64, rowLimit, "unexpected row estimate for %s using %s", query, row.Key.String)
 		require.NotEqual(t, "ALL", row.AccessType.String, "unexpected full table scan for %s", query)
 		if row.Key.String == expectedKey {
 			usedExpectedKey = true
@@ -1568,7 +1604,7 @@ ON DUPLICATE KEY UPDATE status = VALUES(status)`, mailServerID, ownerID).Error)
 		).Error)
 		require.NoError(t, db.Exec(`
 INSERT INTO domain_resources(id, resource_type, owner_user_id, domain, domain_tld, mail_server_id, purpose, status, alloc_bucket)
-VALUES (?, 'domain', ?, ?, 'example.com', ?, ?, 'normal', MOD(?, 512))`,
+VALUES (?, 'domain', ?, ?, '.com', ?, ?, 'normal', MOD(?, 512))`,
 			id,
 			ownerID,
 			domainName,

@@ -719,33 +719,33 @@ func TestDomainAllocationReusesBucketedGeneratedMailboxBeforeCreating(t *testing
 	}
 }
 
-func TestSpecifiedDomainReusesMailboxWithoutMailboxBucketProbe(t *testing.T) {
+func TestSpecifiedDomainTLDReusesMailboxThroughResourceBucket(t *testing.T) {
 	repo := &generatedMailboxRetryRepo{
 		candidate: DomainCandidate{ResourceID: 1, OwnerUserID: 2, Domain: "example.com", MailboxDailyLimit: 10},
 		reusable:  &GeneratedMailboxCandidate{ID: 7, ResourceID: 1, Email: "existing@example.com"},
 	}
 	result, err := NewUseCase(repo).allocateDomainOnce(
 		context.Background(),
-		AllocateCommand{OrderNo: "order-1", BuyerUserID: 3, SupplyScope: domain.SupplyScopeOwned, EmailSuffix: "example.com", ensureOrderGuard: func(context.Context, domain.AllocationType) error { return nil }},
+		AllocateCommand{OrderNo: "order-1", BuyerUserID: 3, SupplyScope: domain.SupplyScopeOwned, EmailSuffix: "com", ensureOrderGuard: func(context.Context, domain.AllocationType) error { return nil }},
 		ProductAllocationConfig{ProjectID: 4, ProductID: 5},
 	)
 	if err != nil || result == nil || result.Email != "existing@example.com" {
-		t.Fatalf("specified-domain reuse result = %#v, error = %v", result, err)
+		t.Fatalf("specified-TLD reuse result = %#v, error = %v", result, err)
 	}
-	if repo.generatedLists != 0 || len(repo.domainBuckets) != 1 || repo.domainBuckets[0] != -1 || repo.calls != 0 {
-		t.Fatalf("generated lists/domain buckets/generated calls = %d/%v/%d, want 0/[-1]/0", repo.generatedLists, repo.domainBuckets, repo.calls)
+	if repo.generatedLists != 0 || len(repo.domainBuckets) != 1 || repo.domainBuckets[0] < 0 || repo.calls != 0 {
+		t.Fatalf("generated lists/domain buckets/generated calls = %d/%v/%d, want 0/[bucket]/0", repo.generatedLists, repo.domainBuckets, repo.calls)
 	}
 }
 
-func TestDomainAllocationRejectsWrongDeliverySuffixBeforeUsage(t *testing.T) {
+func TestDomainAllocationRejectsWrongDeliveryTLDBeforeUsage(t *testing.T) {
 	repo := &generatedMailboxRetryRepo{}
 	result, err := NewUseCase(repo).createDomainAllocation(
 		context.Background(),
-		AllocateCommand{EmailSuffix: "example.com", ensureOrderGuard: func(context.Context, domain.AllocationType) error { return nil }},
+		AllocateCommand{EmailSuffix: "com", ensureOrderGuard: func(context.Context, domain.AllocationType) error { return nil }},
 		ProductAllocationConfig{ProjectID: 4, ProductID: 5},
 		1,
 		7,
-		"wrong@other.com",
+		"wrong@other.cn",
 		time.Now().UTC(),
 		&DailyUsageReservation{UsageDate: "2026-07-25", AllocationType: domain.AllocationTypeDomain, ResourceID: 1, Kind: domain.DailyUsageKindDomainMailbox, Limit: 10},
 	)
@@ -754,6 +754,18 @@ func TestDomainAllocationRejectsWrongDeliverySuffixBeforeUsage(t *testing.T) {
 	}
 	if repo.consumeCalls != 0 || repo.domainCreates != 0 {
 		t.Fatalf("usage/create calls = %d/%d, want 0/0", repo.consumeCalls, repo.domainCreates)
+	}
+}
+
+func TestDomainProductRejectsConcreteDomainSuffix(t *testing.T) {
+	repo := &allocationLockRepo{config: ProductAllocationConfig{
+		ProjectID: 4, ProductID: 5, ProductType: domain.AllocationTypeDomain,
+	}}
+	result, err := NewUseCase(repo).Allocate(context.Background(), AllocateCommand{
+		OrderNo: "order-1", BuyerUserID: 3, ProjectProductID: 5, EmailSuffix: "example.com",
+	})
+	if !errors.Is(err, domain.ErrInvalidAllocationRequest) || result != nil {
+		t.Fatalf("Allocate() result = %#v, error = %v; want invalid concrete domain suffix", result, err)
 	}
 }
 

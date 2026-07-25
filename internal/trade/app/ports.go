@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	coredomain "github.com/donnel666/remail/internal/core/domain"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	moneyfmt "github.com/donnel666/remail/internal/money"
 	"github.com/donnel666/remail/internal/platform"
@@ -698,6 +699,13 @@ func (uc *UseCase) prepareCheckoutQuote(ctx context.Context, prepared *checkoutP
 		if quotes != nil {
 			quotes[key] = quote
 		}
+	}
+	if quote.ProductType == domain.ProductTypeDomain && prepared.emailSuffix != "" {
+		normalized, err := coredomain.NormalizeDomainTLD(prepared.emailSuffix)
+		if err != nil {
+			return domain.ErrInvalidOrderRequest
+		}
+		prepared.emailSuffix = normalized
 	}
 	prepared.quote = quote
 	return nil
@@ -2124,7 +2132,8 @@ func apiKeyFingerprint(apiKeyID *uint) uint {
 
 func normalizeEmailSuffix(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
-	return strings.TrimPrefix(value, "@")
+	value = strings.TrimPrefix(value, "@")
+	return strings.TrimPrefix(value, ".")
 }
 
 func orderAllowsServiceToken(status domain.OrderStatus) bool {

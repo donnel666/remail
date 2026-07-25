@@ -160,9 +160,10 @@ func (batchTokenSpy) FindOrderTokenByOrder(_ context.Context, orderNo string) (*
 
 type batchOrderingSpy struct {
 	OrderingPort
-	mu        sync.Mutex
-	calls     int
-	callsInTx int
+	mu          sync.Mutex
+	calls       int
+	callsInTx   int
+	productType domain.ProductType
 }
 
 func (s *batchOrderingSpy) GetOrderingQuote(ctx context.Context, projectID uint, productID uint, _ uint, _ domain.ServiceMode) (*OrderingQuote, error) {
@@ -172,8 +173,12 @@ func (s *batchOrderingSpy) GetOrderingQuote(ctx context.Context, projectID uint,
 		s.callsInTx++
 	}
 	s.mu.Unlock()
+	productType := s.productType
+	if productType == "" {
+		productType = domain.ProductTypeMicrosoft
+	}
 	return &OrderingQuote{
-		ProjectID: projectID, ProductID: productID, ProductType: domain.ProductTypeMicrosoft,
+		ProjectID: projectID, ProductID: productID, ProductType: productType,
 		PayAmount: "1.00", ActivationWindowMinutes: 10, WarrantyMinutes: 10,
 	}, nil
 }
@@ -360,6 +365,25 @@ func TestCheckoutRejectsZeroInventoryBeforeOpeningTransaction(t *testing.T) {
 	require.Zero(t, inventory.allocationCalls)
 	require.Zero(t, repo.topTx)
 	require.Zero(t, wallet.locks)
+}
+
+func TestCheckoutRejectsConcreteDomainBeforeInventoryPrecheck(t *testing.T) {
+	repo := &batchRepoSpy{orders: map[string]domain.Order{}}
+	wallet := &batchWalletSpy{}
+	inventory := &checkoutInventorySpy{available: true}
+	ordering := &batchOrderingSpy{productType: domain.ProductTypeDomain}
+	uc := NewUseCase(repo, ordering, wallet, inventory, batchTokenSpy{})
+	request := batchRequest("concrete-domain", 1)
+	request.EmailSuffix = "example.com"
+
+	result, err := uc.Checkout(context.Background(), request)
+
+	require.Nil(t, result)
+	require.ErrorIs(t, err, domain.ErrInvalidOrderRequest)
+	require.Equal(t, 1, ordering.calls)
+	require.Zero(t, inventory.checks)
+	require.Zero(t, wallet.balanceChecks)
+	require.Zero(t, repo.topTx)
 }
 
 func TestCheckoutBatchRejectsPrivateBalanceBelowPriceBeforeOpeningTransactions(t *testing.T) {

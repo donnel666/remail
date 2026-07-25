@@ -5378,7 +5378,7 @@ type CreateOrderBatchItemResponseStatus string
 
 // CreateOrderBatchRequest defines model for CreateOrderBatchRequest.
 type CreateOrderBatchRequest struct {
-	// EmailSuffix Optional email domain suffix filter used by BC-ALLOC when selecting an allocation source.
+	// EmailSuffix Optional allocation suffix. Microsoft products accept an exact email domain (for example outlook.com); Domain products accept only a public suffix (for example com, com.cn, or co.uk), which aggregates all concrete domains under that suffix.
 	EmailSuffix *string `json:"emailSuffix,omitempty"`
 	ProductId   int     `json:"productId"`
 	ProjectId   int     `json:"projectId"`
@@ -5392,7 +5392,7 @@ type CreateOrderBatchResponse = []CreateOrderBatchItemResponse
 
 // CreateOrderRequest defines model for CreateOrderRequest.
 type CreateOrderRequest struct {
-	// EmailSuffix Optional email domain suffix filter used by BC-ALLOC when selecting an allocation source.
+	// EmailSuffix Optional allocation suffix. Microsoft products accept an exact email domain (for example outlook.com); Domain products accept only a public suffix (for example com, com.cn, or co.uk), which aggregates all concrete domains under that suffix.
 	EmailSuffix *string `json:"emailSuffix,omitempty"`
 	ProductId   int     `json:"productId"`
 	ProjectId   int     `json:"projectId"`
@@ -6167,7 +6167,7 @@ type PickupCredentialRequest struct {
 type ProductSuffixInventory struct {
 	PublicAvailable int64 `json:"publicAvailable"`
 
-	// Suffix Email suffix without leading @. Empty is not used here; callers use the parent product row for random suffix.
+	// Suffix Suffix without leading @. Microsoft products expose exact email domains; Domain products expose only aggregated public suffixes such as com, com.cn, or co.uk. Empty is not used here; callers use the parent product row for a random suffix.
 	Suffix         string `json:"suffix"`
 	TotalAvailable int64  `json:"totalAvailable"`
 }

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/donnel666/remail/internal/alloc/domain"
+	coredomain "github.com/donnel666/remail/internal/core/domain"
 	"github.com/donnel666/remail/internal/platform"
 )
 
@@ -153,6 +154,12 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *d
 				return domain.ErrProjectNotAllocatable
 			}
 			metricType = string(config.ProductType)
+			if config.ProductType == domain.AllocationTypeDomain && cmd.EmailSuffix != "" {
+				cmd.EmailSuffix, err = coredomain.NormalizeDomainTLD(cmd.EmailSuffix)
+				if err != nil {
+					return domain.ErrInvalidAllocationRequest
+				}
+			}
 			// Create the guard only after a candidate is locked. Rolling back an
 			// empty owned-scope guard retained the right-edge supremum lock in MySQL.
 			guardCreated := false
@@ -1385,16 +1392,6 @@ func (uc *UseCase) tryGeneratedMailboxCandidate(ctx context.Context, cmd Allocat
 
 func (uc *UseCase) generateDomainMailboxOnce(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig) (*domain.UnifiedAllocation, error) {
 	now := time.Now().UTC()
-	if cmd.EmailSuffix != "" {
-		result, busy, _, err := uc.tryDomainBucket(ctx, cmd, config, nil, now)
-		if err != nil || result != nil {
-			return result, err
-		}
-		if busy {
-			return nil, domain.ErrAllocationConflict
-		}
-		return nil, domain.ErrInsufficientInventory
-	}
 	resourceBusy := false
 	buckets := bucketProbeSequence(cmd.OrderNo, config.ProjectID, "domain", DomainBucketCount)
 	for _, bucket := range buckets {
@@ -1520,8 +1517,11 @@ func (uc *UseCase) createDomainAllocation(ctx context.Context, cmd AllocateComma
 	if cmd.ensureOrderGuard == nil {
 		return nil, domain.ErrAllocationTxRequired
 	}
-	if _, suffix, valid := splitEmail(email); cmd.EmailSuffix != "" && (!valid || suffix != cmd.EmailSuffix) {
-		return nil, errCandidateUnavailable
+	if cmd.EmailSuffix != "" {
+		_, suffix, valid := splitEmail(email)
+		if !valid || normalizeEmailSuffix(coredomain.TLD(suffix)) != normalizeEmailSuffix(cmd.EmailSuffix) {
+			return nil, errCandidateUnavailable
+		}
 	}
 	allocation := &domain.GeneratedMailboxAllocation{
 		OrderNo:     cmd.OrderNo,
@@ -1648,7 +1648,8 @@ func allocationUsageDate(value time.Time) string {
 
 func normalizeEmailSuffix(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
-	return strings.TrimPrefix(value, "@")
+	value = strings.TrimPrefix(value, "@")
+	return strings.TrimPrefix(value, ".")
 }
 
 func plusAliasVariants(email string, projectID uint, orderNo string) []string {

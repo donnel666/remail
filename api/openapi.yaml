@@ -10340,7 +10340,7 @@ components:
           type: integer
         emailSuffix:
           type: string
-          description: Optional email domain suffix filter used by BC-ALLOC when selecting an allocation source.
+          description: Optional allocation suffix. Microsoft products accept an exact email domain (for example outlook.com); Domain products accept only a public suffix (for example com, com.cn, or co.uk), which aggregates all concrete domains under that suffix.
       additionalProperties: false
 
     CreateOrderBatchRequest:
@@ -10356,7 +10356,7 @@ components:
           type: integer
         emailSuffix:
           type: string
-          description: Optional email domain suffix filter used by BC-ALLOC when selecting an allocation source.
+          description: Optional allocation suffix. Microsoft products accept an exact email domain (for example outlook.com); Domain products accept only a public suffix (for example com, com.cn, or co.uk), which aggregates all concrete domains under that suffix.
         quantity:
           type: integer
           minimum: 2
@@ -13804,7 +13804,7 @@ components:
       properties:
         suffix:
           type: string
-          description: Email suffix without leading @. Empty is not used here; callers use the parent product row for random suffix.
+          description: Suffix without leading @. Microsoft products expose exact email domains; Domain products expose only aggregated public suffixes such as com, com.cn, or co.uk. Empty is not used here; callers use the parent product row for a random suffix.
         totalAvailable:
           type: integer
           format: int64

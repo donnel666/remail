@@ -199,7 +199,11 @@ const schemas = {
   ProductSuffixInventory: {
     type: "object",
     properties: {
-      suffix: { type: "string", example: "outlook.com" },
+      suffix: {
+        type: "string",
+        example: "com.cn",
+        description: "Microsoft products expose exact email domains; Domain products expose aggregated public suffixes such as com, com.cn, or co.uk.",
+      },
       totalAvailable: { type: "integer", example: 120 },
       publicAvailable: { type: "integer", example: 80 },
     },
@@ -244,7 +248,11 @@ const schemas = {
     properties: {
       projectId: { type: "integer", example: 1001 },
       productId: { type: "integer", example: 2001 },
-      emailSuffix: { type: "string", example: "outlook.com" },
+      emailSuffix: {
+        type: "string",
+        example: "com.cn",
+        description: "Microsoft products accept an exact email domain; Domain products accept only a public suffix such as com, com.cn, or co.uk.",
+      },
     },
     required: ["projectId", "productId"],
   },
@@ -253,7 +261,11 @@ const schemas = {
     properties: {
       projectId: { type: "integer", example: 1001 },
       productId: { type: "integer", example: 2001 },
-      emailSuffix: { type: "string", example: "outlook.com" },
+      emailSuffix: {
+        type: "string",
+        example: "com.cn",
+        description: "Microsoft products accept an exact email domain; Domain products accept only a public suffix such as com, com.cn, or co.uk.",
+      },
       quantity: { type: "integer", minimum: 2, maximum: 100, example: 5 },
     },
     required: ["projectId", "productId", "quantity"],
