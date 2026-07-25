@@ -635,16 +635,11 @@ export default function Wallet() {
                           icon={<SiAlipay color="#1677FF" size={18} />}
                           loading={recharging}
                           onClick={() => void handleRecharge()}
-                          theme="solid"
-                          type="primary"
+                          theme="outline"
+                          type="tertiary"
                         >
                           {t("Alipay")}
                         </Button>
-                        <Text type="secondary">
-                          {rechargeConfig?.enabled
-                            ? t("Credit is granted only after active verification within five minutes.")
-                            : t("Online recharge is unavailable.")}
-                        </Text>
                       </Space>
                     </Form.Slot>
                   </div>

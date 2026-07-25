@@ -15,6 +15,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"sort"
@@ -28,7 +29,7 @@ import (
 
 const (
 	epayMaxResponseBytes = 1 << 20
-	epayV2SubmitPath     = "api/pay/submit"
+	epayV2CreatePath     = "api/pay/create"
 	epayV2QueryPath      = "api/pay/query"
 )
 
@@ -42,12 +43,12 @@ func NewEPay() *EPay {
 	}}}
 }
 
-func (gateway *EPay) PaymentURL(config billingapp.RechargeConfig, recharge domain.Recharge) (string, error) {
+func (gateway *EPay) PaymentURL(ctx context.Context, config billingapp.RechargeConfig, recharge domain.Recharge, clientIP string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(config.Version)) {
 	case "v1":
 		return gateway.paymentURLV1(config, recharge)
 	case "v2":
-		return gateway.paymentURLV2(config, recharge)
+		return gateway.paymentURLV2(ctx, config, recharge, clientIP)
 	default:
 		return "", domain.ErrRechargeConfigUnavailable
 	}
@@ -77,19 +78,21 @@ func (gateway *EPay) paymentURLV1(config billingapp.RechargeConfig, recharge dom
 	return endpoint.String(), nil
 }
 
-func (gateway *EPay) paymentURLV2(config billingapp.RechargeConfig, recharge domain.Recharge) (string, error) {
-	endpoint, err := epayEndpoint(config.GatewayURL, epayV2SubmitPath)
-	if err != nil {
+func (gateway *EPay) paymentURLV2(ctx context.Context, config billingapp.RechargeConfig, recharge domain.Recharge, clientIP string) (string, error) {
+	endpoint, err := epayEndpoint(config.GatewayURL, epayV2CreatePath)
+	if err != nil || net.ParseIP(strings.TrimSpace(clientIP)) == nil {
 		return "", domain.ErrRechargeConfigUnavailable
 	}
 	values := map[string]string{
 		"pid":          config.MerchantID,
+		"method":       "web",
 		"type":         "alipay",
 		"out_trade_no": recharge.RechargeNo,
 		"notify_url":   config.NotifyURL,
 		"return_url":   config.ReturnURL,
 		"name":         "Account recharge",
 		"money":        recharge.PaymentAmount,
+		"clientip":     strings.TrimSpace(clientIP),
 		"timestamp":    strconv.FormatInt(time.Now().Unix(), 10),
 	}
 	signature, err := epaySignRSA(values, config.PrivateKey)
@@ -99,14 +102,26 @@ func (gateway *EPay) paymentURLV2(config billingapp.RechargeConfig, recharge dom
 	if _, err := parseEPayPublicKey(config.PlatformPublicKey); err != nil {
 		return "", domain.ErrRechargeConfigUnavailable
 	}
-	query := url.Values{}
-	for key, value := range values {
-		query.Set(key, value)
+	values["sign"] = signature
+	values["sign_type"] = "RSA"
+	body, err := gateway.request(ctx, http.MethodPost, endpoint, values)
+	if err != nil {
+		return "", err
 	}
-	query.Set("sign", signature)
-	query.Set("sign_type", "RSA")
-	endpoint.RawQuery = query.Encode()
-	return endpoint.String(), nil
+	result, responseValues, err := decodeEPayResponse(body)
+	if err != nil {
+		return "", fmt.Errorf("decode epay response: %w", err)
+	}
+	if result.Code != "0" {
+		return "", billingapp.ErrRechargeGatewayRejected
+	}
+	if !strings.EqualFold(responseValues["sign_type"], "RSA") || epayVerifyRSA(responseValues, responseValues["sign"], config.PlatformPublicKey) != nil {
+		return "", domain.ErrRechargeQueryMismatch
+	}
+	if strings.TrimSpace(result.TradeNo) == "" {
+		return "", billingapp.ErrRechargeGatewayRejected
+	}
+	return epayRedirectURL(config.GatewayURL, result.PayType, result.PayInfo)
 }
 
 func (gateway *EPay) Query(ctx context.Context, config billingapp.RechargeConfig, recharge domain.Recharge) (billingapp.RechargeGatewayQuery, error) {
@@ -260,6 +275,8 @@ type epayResponse struct {
 	Type       string `json:"type"`
 	Money      string `json:"money"`
 	EndTime    string `json:"endtime"`
+	PayType    string `json:"pay_type"`
+	PayInfo    string `json:"pay_info"`
 }
 
 func decodeEPayResponse(body []byte) (epayResponse, map[string]string, error) {
@@ -282,7 +299,27 @@ func decodeEPayResponse(body []byte) (epayResponse, map[string]string, error) {
 	return epayResponse{
 		Code: values["code"], Status: values["status"], PID: values["pid"], TradeNo: values["trade_no"],
 		OutTradeNo: values["out_trade_no"], Type: values["type"], Money: values["money"], EndTime: values["endtime"],
+		PayType: values["pay_type"], PayInfo: values["pay_info"],
 	}, values, nil
+}
+
+func epayRedirectURL(gatewayURL, payType, payInfo string) (string, error) {
+	if (!strings.EqualFold(strings.TrimSpace(payType), "jump") && !strings.EqualFold(strings.TrimSpace(payType), "qrcode")) || strings.TrimSpace(payInfo) == "" {
+		return "", billingapp.ErrRechargeGatewayRejected
+	}
+	base, err := epayEndpoint(gatewayURL, "")
+	if err != nil {
+		return "", billingapp.ErrRechargeGatewayRejected
+	}
+	redirect, err := url.Parse(strings.TrimSpace(payInfo))
+	if err != nil {
+		return "", billingapp.ErrRechargeGatewayRejected
+	}
+	redirect = base.ResolveReference(redirect)
+	if !strings.EqualFold(redirect.Scheme, "https") || redirect.Host == "" || redirect.User != nil {
+		return "", billingapp.ErrRechargeGatewayRejected
+	}
+	return redirect.String(), nil
 }
 
 func jsonScalar(raw json.RawMessage) string {
@@ -298,7 +335,7 @@ func jsonScalar(raw json.RawMessage) string {
 
 func epayEndpoint(raw, file string) (*url.URL, error) {
 	endpoint, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || endpoint.Scheme != "https" || endpoint.Host == "" {
+	if err != nil || !strings.EqualFold(endpoint.Scheme, "https") || endpoint.Host == "" || endpoint.User != nil {
 		return nil, domain.ErrRechargeConfigUnavailable
 	}
 	endpoint.Path = strings.TrimRight(endpoint.Path, "/") + "/" + strings.TrimLeft(file, "/")

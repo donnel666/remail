@@ -83,7 +83,25 @@ func TestValidateRechargePaymentSettings(t *testing.T) {
 	require.ErrorIs(t, Validate("topup_amount_presets", "[10,10.00]"), domain.ErrInvalidValue)
 	require.NoError(t, Validate("topup_amount_bonus", `{"20.5":2}`))
 	require.ErrorIs(t, Validate("topup_amount_bonus", `{"20.5":-1}`), domain.ErrInvalidValue)
-	require.ErrorIs(t, ValidatePersistedUpdates(DefaultSettings(), []domain.Setting{{Key: "epay_enabled", Value: "true"}}), domain.ErrInvalidValue)
+	err := ValidatePersistedUpdates(DefaultSettings(), []domain.Setting{{Key: "epay_enabled", Value: "true"}})
+	require.ErrorIs(t, err, domain.ErrInvalidValue)
+	var fieldError *domain.InvalidValueFieldsError
+	require.ErrorAs(t, err, &fieldError)
+	require.Contains(t, fieldError.Fields, "epay_gateway_url")
+	require.Contains(t, fieldError.Fields, "epay_merchant_key")
+	err = ValidatePersistedUpdates(DefaultSettings(), []domain.Setting{
+		{Key: "epay_enabled", Value: "true"},
+		{Key: "epay_version", Value: "v2"},
+		{Key: "epay_gateway_url", Value: "https://pay.example.com/"},
+		{Key: "epay_merchant_id", Value: "1000"},
+		{Key: "epay_notify_url", Value: "https://app.example.com/v1/payments/webhooks/epay/v2"},
+		{Key: "epay_return_url", Value: "https://app.example.com/wallet"},
+	})
+	require.ErrorAs(t, err, &fieldError)
+	require.Equal(t, map[string]string{
+		"epay_private_key":         "Required when EPay is enabled.",
+		"epay_platform_public_key": "Required when EPay is enabled.",
+	}, fieldError.Fields)
 	require.NoError(t, ValidatePersistedUpdates(DefaultSettings(), []domain.Setting{
 		{Key: "epay_enabled", Value: "true"},
 		{Key: "epay_gateway_url", Value: "https://pay.example.com/"},

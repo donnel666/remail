@@ -16,6 +16,7 @@ import (
 
 const (
 	defaultRechargeDispatchLimit = 200
+	rechargePaymentCreateTimeout = 10 * time.Second
 	defaultRechargeQueryTimeout  = 5 * time.Second
 	maxRechargeQueryTimeout      = 30 * time.Second
 )
@@ -56,7 +57,7 @@ type RechargeGatewayQuery struct {
 }
 
 type RechargeGateway interface {
-	PaymentURL(config RechargeConfig, recharge domain.Recharge) (string, error)
+	PaymentURL(ctx context.Context, config RechargeConfig, recharge domain.Recharge, clientIP string) (string, error)
 	Query(ctx context.Context, config RechargeConfig, recharge domain.Recharge) (RechargeGatewayQuery, error)
 }
 
@@ -121,6 +122,7 @@ type CreateRechargeRequest struct {
 	UserID         uint
 	Amount         string
 	IdempotencyKey string
+	ClientIP       string
 }
 
 type CreateRechargeResult struct {
@@ -219,7 +221,9 @@ func (uc *RechargeUseCase) Create(ctx context.Context, request CreateRechargeReq
 	if created.GatewayConfigHash != rechargeGatewayConfigHash(config) {
 		return nil, domain.ErrRechargeExpired
 	}
-	payURL, err := uc.gateway.PaymentURL(config, *created)
+	paymentCtx, cancel := context.WithTimeout(ctx, rechargePaymentCreateTimeout)
+	defer cancel()
+	payURL, err := uc.gateway.PaymentURL(paymentCtx, config, *created, request.ClientIP)
 	if err != nil {
 		return nil, domain.ErrRechargeConfigUnavailable
 	}

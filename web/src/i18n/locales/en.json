@@ -1775,5 +1775,9 @@
   "Removed {{count}} {{type}} entries.": "Removed {{count}} {{type}} entries.",
   "Only {{type}} entries created before the cutoff will be permanently deleted.": "Only {{type}} entries created before the cutoff will be permanently deleted.",
   "Search module, event, object, summary or request ID": "Search module, event, object, summary or request ID",
-  "Search operator, operation, resource, summary or request ID": "Search operator, operation, resource, summary or request ID"
+  "Search operator, operation, resource, summary or request ID": "Search operator, operation, resource, summary or request ID",
+  "Online recharge is unavailable.": "Online recharge is unavailable.",
+  "Recharge amount is below the minimum.": "Recharge amount is below the minimum.",
+  "Opening Alipay": "Opening Alipay",
+  "Creating recharge order...": "Creating recharge order..."
 }

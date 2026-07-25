@@ -90,17 +90,20 @@ func TestRechargeCreateInputAndConfigReplaySafety(t *testing.T) {
 
 	t.Run("successful create waits for callback or fallback", func(t *testing.T) {
 		createdAt := time.Date(2026, 7, 25, 10, 0, 0, 0, time.UTC)
+		startedAt := time.Now()
 		repo := &rechargeRepoStub{recharge: domain.Recharge{
 			RechargeNo: "RC1", UserID: 1, PaymentAmount: "10.00", RechargeQuota: "10.00",
 			Status: domain.RechargeStatusPaying, GatewayConfigHash: rechargeGatewayConfigHash(config), CreatedAt: createdAt,
 		}}
 		queueCalls := 0
-		useCase := NewRechargeUseCase(repo, rechargeConfigStub{config}, &rechargeGatewayStub{}, &rechargeQueueStub{calls: &queueCalls})
+		gateway := &rechargeGatewayStub{}
+		useCase := NewRechargeUseCase(repo, rechargeConfigStub{config}, gateway, &rechargeQueueStub{calls: &queueCalls})
 		useCase.now = func() time.Time { return createdAt }
 
 		result, err := useCase.Create(context.Background(), CreateRechargeRequest{UserID: 1, Amount: "10", IdempotencyKey: "create"})
 		require.NoError(t, err)
 		require.Equal(t, "RC1", result.Recharge.RechargeNo)
+		require.WithinDuration(t, startedAt.Add(rechargePaymentCreateTimeout), gateway.paymentDeadline, time.Second)
 		require.Zero(t, queueCalls)
 	})
 
@@ -236,15 +239,17 @@ type rechargeConfigStub struct{ config RechargeConfig }
 func (stub rechargeConfigStub) Current() (RechargeConfig, error) { return stub.config, nil }
 
 type rechargeGatewayStub struct {
-	query        RechargeGatewayQuery
-	err          error
-	calls        int
-	paymentCalls int
-	queryConfig  RechargeConfig
+	query           RechargeGatewayQuery
+	err             error
+	calls           int
+	paymentCalls    int
+	paymentDeadline time.Time
+	queryConfig     RechargeConfig
 }
 
-func (stub *rechargeGatewayStub) PaymentURL(RechargeConfig, domain.Recharge) (string, error) {
+func (stub *rechargeGatewayStub) PaymentURL(ctx context.Context, _ RechargeConfig, _ domain.Recharge, _ string) (string, error) {
 	stub.paymentCalls++
+	stub.paymentDeadline, _ = ctx.Deadline()
 	return "https://pay.example.com/submit.php", nil
 }
 

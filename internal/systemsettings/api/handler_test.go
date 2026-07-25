@@ -211,6 +211,7 @@ func TestAdminSettingsRejectInvalidKnownValue(t *testing.T) {
 	r.ServeHTTP(response, requestWithSession(http.MethodPut, "/v1/admin/settings/smtp_outbound_payload_ttl_minutes", `{"value":"0"}`))
 
 	require.Equal(t, http.StatusBadRequest, response.Code)
+	require.JSONEq(t, `{"message":"Invalid system setting value: smtp_outbound_payload_ttl_minutes.","requestId":"","fields":{"smtp_outbound_payload_ttl_minutes":"Invalid value."}}`, response.Body.String())
 	require.NotContains(t, repo.items, "smtp_outbound_payload_ttl_minutes")
 }
 

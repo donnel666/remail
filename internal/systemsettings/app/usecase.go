@@ -64,7 +64,7 @@ func (uc *SystemSettingsUseCase) Upsert(ctx context.Context, key, value string, 
 	}
 	update := domain.Setting{Key: key, Value: value}
 	if err := runtimeconfig.Validate(key, value); err != nil {
-		return nil, err
+		return nil, invalidValueField(key, err)
 	}
 	var setting *domain.Setting
 	err = uc.mutate(ctx, &governancedomain.OperationLog{
@@ -113,7 +113,7 @@ func (uc *SystemSettingsUseCase) BulkUpsert(ctx context.Context, settings []doma
 			}
 			existing, getErr := uc.repo.Get(ctx, key)
 			if getErr != nil || existing == nil || existing.Value != setting.Value {
-				return nil, err
+				return nil, invalidValueField(key, err)
 			}
 			continue
 		}
@@ -222,4 +222,11 @@ func auditResourceID(key string) string {
 		return key[:100]
 	}
 	return key
+}
+
+func invalidValueField(key string, err error) error {
+	if errors.Is(err, domain.ErrInvalidValue) {
+		return &domain.InvalidValueFieldsError{Fields: map[string]string{key: "Invalid value."}}
+	}
+	return err
 }

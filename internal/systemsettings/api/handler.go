@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -287,5 +288,16 @@ func writeError(c *gin.Context, err error) {
 	case errors.Is(err, errUnavailable):
 		status, message = http.StatusServiceUnavailable, "System settings are unavailable."
 	}
-	c.JSON(status, gin.H{"message": message, "requestId": middleware.GetRequestID(c)})
+	body := gin.H{"message": message, "requestId": middleware.GetRequestID(c)}
+	var fieldError *domain.InvalidValueFieldsError
+	if errors.As(err, &fieldError) && len(fieldError.Fields) > 0 {
+		keys := make([]string, 0, len(fieldError.Fields))
+		for key := range fieldError.Fields {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		body["message"] = "Invalid system setting value: " + strings.Join(keys, ", ") + "."
+		body["fields"] = fieldError.Fields
+	}
+	c.JSON(status, body)
 }

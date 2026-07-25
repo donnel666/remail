@@ -214,7 +214,7 @@ func (h *BillingHandler) PostRecharge(c *gin.Context) {
 		return
 	}
 	result, err := h.module.RechargeUseCase.Create(c.Request.Context(), billingapp.CreateRechargeRequest{
-		UserID: userID, Amount: request.Amount, IdempotencyKey: c.GetHeader("Idempotency-Key"),
+		UserID: userID, Amount: request.Amount, IdempotencyKey: c.GetHeader("Idempotency-Key"), ClientIP: c.ClientIP(),
 	})
 	if err != nil {
 		writeBillingError(c, err)

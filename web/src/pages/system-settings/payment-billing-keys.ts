@@ -29,3 +29,21 @@ export const PAYMENT_BILLING_KEYS = [
   ...TOPUP_KEYS,
   ...RECHARGE_CHECK_KEYS,
 ] as const;
+
+export function applyEPayURLDefaults(form: Record<string, unknown>, origin: string): Record<string, unknown> {
+  const version = String(form.epay_version) === "v2" ? "v2" : "v1";
+  return {
+    ...form,
+    epay_notify_url: String(form.epay_notify_url ?? "").trim() || `${origin}/v1/payments/webhooks/epay/${version}`,
+    epay_return_url: String(form.epay_return_url ?? "").trim() || `${origin}/wallet`,
+  };
+}
+
+export function changeEPayVersion(form: Record<string, unknown>, version: string, origin: string): Record<string, unknown> {
+  const currentDefault = applyEPayURLDefaults({ epay_version: form.epay_version }, origin).epay_notify_url;
+  return applyEPayURLDefaults({
+    ...form,
+    epay_version: version,
+    epay_notify_url: form.epay_notify_url === currentDefault ? "" : form.epay_notify_url,
+  }, origin);
+}

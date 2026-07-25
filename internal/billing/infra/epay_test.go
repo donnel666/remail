@@ -26,7 +26,7 @@ func TestEPayV1PaymentURLAndActiveQuery(t *testing.T) {
 	}
 	recharge := domain.Recharge{RechargeNo: "RC1", PaymentAmount: "100.00"}
 	gateway := NewEPay()
-	paymentURL, err := gateway.PaymentURL(config, recharge)
+	paymentURL, err := gateway.PaymentURL(context.Background(), config, recharge, "")
 	require.NoError(t, err)
 	parsed, err := url.Parse(paymentURL)
 	require.NoError(t, err)
@@ -77,27 +77,37 @@ func TestEPayV2PaymentURLAndSignedActiveQuery(t *testing.T) {
 	merchantPrivate, merchantPublic := epayRSAKeyPair(t)
 	platformPrivate, platformPublic := epayRSAKeyPair(t)
 	config := billingapp.RechargeConfig{
-		Version: "v2", GatewayURL: "https://pay.example.com/base", MerchantID: "1000",
+		Version: "v2", MerchantID: "1000",
 		PrivateKey: merchantPrivate, PlatformPublicKey: platformPublic,
 		NotifyURL: "https://app.example.com/v1/payments/webhooks/epay/v2", ReturnURL: "https://app.example.com/wallet",
 	}
 	recharge := domain.Recharge{RechargeNo: "RC2", PaymentAmount: "100.00"}
 	gateway := NewEPay()
-	paymentURL, err := gateway.PaymentURL(config, recharge)
-	require.NoError(t, err)
-	parsed, err := url.Parse(paymentURL)
-	require.NoError(t, err)
-	require.Equal(t, "/base/api/pay/submit", parsed.Path)
-	require.Equal(t, "RSA", parsed.Query().Get("sign_type"))
-	require.NoError(t, epayVerifyRSA(queryValues(parsed.Query()), parsed.Query().Get("sign"), merchantPublic))
-
-	responseMode := "paid"
+	responseMode := "create"
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		require.Equal(t, http.MethodPost, request.Method)
-		require.Equal(t, "/api/pay/query", request.URL.Path)
 		require.NoError(t, request.ParseForm())
 		require.Equal(t, "RSA", request.PostForm.Get("sign_type"))
 		require.NoError(t, epayVerifyRSA(queryValues(request.PostForm), request.PostForm.Get("sign"), merchantPublic))
+		if request.URL.Path == "/api/pay/create" {
+			require.Equal(t, "web", request.PostForm.Get("method"))
+			require.Equal(t, "203.0.113.10", request.PostForm.Get("clientip"))
+			require.NotEmpty(t, request.PostForm.Get("timestamp"))
+			values := map[string]string{
+				"code": "0", "trade_no": "GW2", "pay_type": "qrcode",
+				"pay_info": "/pay/submit/GW2/", "timestamp": "1753437600",
+			}
+			signature, signErr := epaySignRSA(values, platformPrivate)
+			require.NoError(t, signErr)
+			values["sign_type"] = "RSA"
+			values["sign"] = signature
+			if responseMode == "create_tampered" {
+				values["pay_info"] = "https://evil.example.com/"
+			}
+			require.NoError(t, json.NewEncoder(w).Encode(values))
+			return
+		}
+		require.Equal(t, "/api/pay/query", request.URL.Path)
 		if responseMode == "missing" {
 			require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"code": -1, "msg": "order not found"}))
 			return
@@ -119,6 +129,15 @@ func TestEPayV2PaymentURLAndSignedActiveQuery(t *testing.T) {
 	config.GatewayURL = server.URL
 	gateway.client = server.Client()
 
+	paymentURL, err := gateway.PaymentURL(context.Background(), config, recharge, "203.0.113.10")
+	require.NoError(t, err)
+	require.Equal(t, server.URL+"/pay/submit/GW2/", paymentURL)
+
+	responseMode = "create_tampered"
+	_, err = gateway.PaymentURL(context.Background(), config, recharge, "203.0.113.10")
+	require.ErrorIs(t, err, domain.ErrRechargeQueryMismatch)
+
+	responseMode = "paid"
 	result, err := gateway.Query(context.Background(), config, recharge)
 	require.NoError(t, err)
 	require.True(t, result.Paid)
@@ -145,10 +164,10 @@ func TestEPayV2RejectsWeakRSAKeys(t *testing.T) {
 	_, err = epaySignRSA(map[string]string{"pid": "1000"}, weakPrivate)
 	require.Error(t, err)
 	strongPrivate, _ := epayRSAKeyPair(t)
-	_, err = NewEPay().PaymentURL(billingapp.RechargeConfig{
+	_, err = NewEPay().PaymentURL(context.Background(), billingapp.RechargeConfig{
 		Version: "v2", GatewayURL: "https://pay.example.com", MerchantID: "1000",
 		PrivateKey: strongPrivate, PlatformPublicKey: weakPublic,
-	}, domain.Recharge{RechargeNo: "RC-WEAK", PaymentAmount: "10.00"})
+	}, domain.Recharge{RechargeNo: "RC-WEAK", PaymentAmount: "10.00"}, "127.0.0.1")
 	require.ErrorIs(t, err, domain.ErrRechargeConfigUnavailable)
 }
 

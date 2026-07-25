@@ -1775,5 +1775,9 @@
   "Removed {{count}} {{type}} entries.": "已删除 {{count}} 条{{type}}。",
   "Only {{type}} entries created before the cutoff will be permanently deleted.": "仅永久删除截止时间之前的{{type}}，其他日志不受影响。",
   "Search module, event, object, summary or request ID": "搜索模块、事件、业务对象、摘要或请求 ID",
-  "Search operator, operation, resource, summary or request ID": "搜索操作人、操作、资源、摘要或请求 ID"
+  "Search operator, operation, resource, summary or request ID": "搜索操作人、操作、资源、摘要或请求 ID",
+  "Online recharge is unavailable.": "在线充值暂不可用。",
+  "Recharge amount is below the minimum.": "充值金额低于最低限额。",
+  "Opening Alipay": "正在打开支付宝",
+  "Creating recharge order...": "正在创建充值订单……"
 }

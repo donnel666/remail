@@ -310,7 +310,7 @@ func sanitizeRelationships(values map[string]string) {
 	if value("background_worker_minimum", 8) > value("background_worker_initial", 16) || value("background_worker_initial", 16) > value("asynq_background_worker_concurrency", 512) {
 		drop("background_worker_minimum", "background_worker_initial", "asynq_background_worker_concurrency")
 	}
-	if strings.TrimSpace(values["epay_enabled"]) == "true" && !validEPayConfig(values) {
+	if strings.TrimSpace(values["epay_enabled"]) == "true" && len(invalidEPayConfigFields(values)) > 0 {
 		values["epay_enabled"] = "false"
 	}
 	retries := value("smtp_task_retry_count", 3)
@@ -345,28 +345,38 @@ func validateRelationships(values map[string]string) error {
 	if value("outbound_mail_timeout_minutes", 3)*60 < smtpTaskBudgetSeconds(retries) {
 		return domain.ErrInvalidValue
 	}
-	if strings.TrimSpace(values["epay_enabled"]) == "true" && !validEPayConfig(values) {
-		return domain.ErrInvalidValue
+	if strings.TrimSpace(values["epay_enabled"]) == "true" {
+		if fields := invalidEPayConfigFields(values); len(fields) > 0 {
+			return &domain.InvalidValueFieldsError{Fields: fields}
+		}
 	}
 	return nil
 }
 
-func validEPayConfig(values map[string]string) bool {
-	for _, key := range []string{"epay_gateway_url", "epay_merchant_id", "epay_notify_url", "epay_return_url"} {
-		if strings.TrimSpace(values[key]) == "" || Validate(key, values[key]) != nil {
-			return false
+func invalidEPayConfigFields(values map[string]string) map[string]string {
+	fields := make(map[string]string)
+	require := func(key string) {
+		if strings.TrimSpace(values[key]) == "" {
+			fields[key] = "Required when EPay is enabled."
+		} else if Validate(key, values[key]) != nil {
+			fields[key] = "Invalid value."
 		}
+	}
+	for _, key := range []string{"epay_gateway_url", "epay_merchant_id", "epay_notify_url", "epay_return_url"} {
+		require(key)
 	}
 	version := strings.TrimSpace(values["epay_version"])
-	if version == "v2" {
+	switch version {
+	case "v2":
 		for _, key := range []string{"epay_private_key", "epay_platform_public_key"} {
-			if strings.TrimSpace(values[key]) == "" || Validate(key, values[key]) != nil {
-				return false
-			}
+			require(key)
 		}
-		return true
+	case "v1":
+		require("epay_merchant_key")
+	default:
+		fields["epay_version"] = "Invalid value."
 	}
-	return version == "v1" && strings.TrimSpace(values["epay_merchant_key"]) != "" && Validate("epay_merchant_key", values["epay_merchant_key"]) == nil
+	return fields
 }
 
 func smtpTaskBudgetSeconds(retries int) int {

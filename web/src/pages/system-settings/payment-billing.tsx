@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import { parseOption } from "@/lib/system-settings-api";
 
 import type { SectionProps } from "./index";
-import { EPAY_GATEWAY_KEYS, EPAY_WRITE_ONLY_KEYS, RECHARGE_CHECK_KEYS, TOPUP_KEYS } from "./payment-billing-keys";
+import { applyEPayURLDefaults, changeEPayVersion, EPAY_GATEWAY_KEYS, EPAY_WRITE_ONLY_KEYS, RECHARGE_CHECK_KEYS, TOPUP_KEYS } from "./payment-billing-keys";
 import { SettingsAccessBoundary, SettingsCardHeader, SettingsFormGrid, SettingsNumberField, SettingsSection, SettingsSelectField, SettingsTextField, SettingsTextareaField } from "./settings-layout";
 import { parseTopupTiers, serializeTopupTiers, type TopupTier } from "./topup-tiers";
 
@@ -15,7 +15,8 @@ const EPAY_WRITE_ONLY = new Set<string>(EPAY_WRITE_ONLY_KEYS);
 
 export default function PaymentSection({ options, onBulkSave, canSensitive }: SectionProps) {
   const { t } = useTranslation();
-  const [form, setForm] = useState(parseOption(options, D as any) as Record<string, unknown>);
+  const origin = typeof window === "undefined" ? "" : window.location.origin;
+  const [form, setForm] = useState(() => applyEPayURLDefaults(parseOption(options, D as any) as Record<string, unknown>, origin));
   const [topupTiers, setTopupTiers] = useState(() => parseTopupTiers(form.topup_amount_presets, form.topup_amount_bonus));
   const [savingCard, setSavingCard] = useState<string | null>(null);
   const update = (key: string, value: unknown) => setForm((current) => ({ ...current, [key]: value }));
@@ -58,14 +59,14 @@ export default function PaymentSection({ options, onBulkSave, canSensitive }: Se
     <SettingsAccessBoundary canWrite={canSensitive}>
       <SettingsSection title={<SettingsCardHeader icon={<CreditCard size={16} />} title={t("支付网关")} description={t("易支付 V1 / V2；回调只确认收到，不参与入账")} enabled={!!form.epay_enabled} onToggle={(value) => update("epay_enabled", value)} statusText={form.epay_enabled ? t("已启用") : t("已禁用")} />}>
         <SettingsFormGrid className="mt-4">
-          <SettingsSelectField label={t("易支付版本")} value={String(form.epay_version)} onChange={(value) => update("epay_version", value)} options={[{ label: "V1", value: "v1" }, { label: "V2", value: "v2" }]} />
+          <SettingsSelectField label={t("易支付版本")} value={String(form.epay_version)} onChange={(value) => setForm((current) => changeEPayVersion(current, value, origin))} options={[{ label: "V1", value: "v1" }, { label: "V2", value: "v2" }]} />
           <SettingsTextField label={t("支付网关地址")} value={String(form.epay_gateway_url)} onChange={(value) => update("epay_gateway_url", value)} placeholder="https://pay.example.com/" />
           <SettingsTextField label={t("商户 ID")} value={String(form.epay_merchant_id)} onChange={(value) => update("epay_merchant_id", value)} />
           {form.epay_version === "v2" ? <>
-            <SettingsTextField label={t("商户私钥（V2）")} value={String(form.epay_private_key)} onChange={(value) => update("epay_private_key", value)} type="password" placeholder={t("已保存私钥不会回显；留空保持不变")} />
-            <SettingsTextareaField label={t("平台公钥（V2）")} value={String(form.epay_platform_public_key)} onChange={(value) => update("epay_platform_public_key", value)} rows={4} placeholder={t("平台提供的 RSA 公钥")} />
+            <SettingsTextField label={t("商户私钥（V2）")} value={String(form.epay_private_key)} onChange={(value) => update("epay_private_key", value)} type="password" placeholder={t("粘贴易支付生成的商户私钥（Base64 或 PEM，保存后不回显）")} />
+            <SettingsTextareaField label={t("平台公钥（V2）")} value={String(form.epay_platform_public_key)} onChange={(value) => update("epay_platform_public_key", value)} rows={4} placeholder={t("粘贴易支付商户中心显示的平台公钥，不是商户公钥")} />
           </> : <SettingsTextField label={t("商户 MD5 密钥（V1）")} value={String(form.epay_merchant_key)} onChange={(value) => update("epay_merchant_key", value)} type="password" placeholder={t("已保存密钥不会回显；留空保持不变")} />}
-          <SettingsTextField label={t("支付回调地址")} value={String(form.epay_notify_url)} onChange={(value) => update("epay_notify_url", value)} placeholder="https://example.com/api/callback" />
+          <SettingsTextField label={t("支付回调地址")} value={String(form.epay_notify_url)} onChange={(value) => update("epay_notify_url", value)} />
           <SettingsTextField label={t("支付同步跳转地址")} value={String(form.epay_return_url)} onChange={(value) => update("epay_return_url", value)} />
         </SettingsFormGrid>
         <Button icon={<Save size={14} />} loading={savingCard === "gateway"} onClick={() => void save("gateway", [...EPAY_GATEWAY_KEYS]).catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
