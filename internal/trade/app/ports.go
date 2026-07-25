@@ -12,6 +12,7 @@ import (
 	"time"
 
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
+	moneyfmt "github.com/donnel666/remail/internal/money"
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/trade/domain"
 )
@@ -43,6 +44,7 @@ type WalletTransaction struct {
 }
 
 type WalletPort interface {
+	ConsumerBalance(ctx context.Context, userID uint) (string, error)
 	LockConsumer(ctx context.Context, userID uint) error
 	DebitConsumer(ctx context.Context, cmd WalletCommand) (*WalletTransaction, error)
 	RefundConsumer(ctx context.Context, cmd WalletCommand) (*WalletTransaction, error)
@@ -583,6 +585,7 @@ func (uc *UseCase) Checkout(ctx context.Context, req CheckoutRequest) (result *C
 		}
 	}
 	preparedItems := []checkoutPreparation{prepared}
+	uc.precheckCheckoutBalance(ctx, preparedItems)
 	uc.precheckCheckoutInventory(ctx, preparedItems)
 	result, runErr = uc.checkoutPrepared(ctx, preparedItems[0])
 	if errors.Is(runErr, domain.ErrInsufficientInventory) && result != nil && result.Created {
@@ -835,9 +838,50 @@ func (uc *UseCase) CheckoutBatch(ctx context.Context, requests []CheckoutRequest
 		items = checkoutBatchFailedItems(len(requests), prepareErr)
 		return items, nil
 	}
+	uc.precheckCheckoutBalance(ctx, prepared)
 	uc.precheckCheckoutInventory(ctx, prepared)
 	items, runErr = uc.checkoutBatch(ctx, prepared)
 	return items, runErr
+}
+
+func (uc *UseCase) precheckCheckoutBalance(ctx context.Context, prepared []checkoutPreparation) {
+	userID := uint(0)
+	for index := range prepared {
+		item := &prepared[index]
+		if item.prepareErr == nil && item.existing == nil && item.quote != nil {
+			userID = item.request.UserID
+			break
+		}
+	}
+	if userID == 0 {
+		return
+	}
+	balanceValue, err := uc.wallet.ConsumerBalance(ctx, userID)
+	if err != nil {
+		slog.Debug("checkout balance precheck skipped", "user_id", userID, "error", err)
+		return
+	}
+	balance, err := moneyfmt.Parse(balanceValue)
+	if err != nil {
+		slog.Debug("checkout balance precheck skipped", "user_id", userID, "error", err)
+		return
+	}
+	remaining := balance
+	for index := range prepared {
+		item := &prepared[index]
+		if item.prepareErr != nil || item.existing != nil || item.quote == nil {
+			continue
+		}
+		amount, amountErr := moneyfmt.Parse(item.quote.PayAmount)
+		if amountErr != nil {
+			continue
+		}
+		if remaining.LessThan(amount) {
+			item.prepareErr = domain.ErrInsufficientBalance
+			continue
+		}
+		remaining = remaining.Sub(amount)
+	}
 }
 
 func (uc *UseCase) precheckCheckoutInventory(ctx context.Context, prepared []checkoutPreparation) {

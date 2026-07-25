@@ -193,6 +193,18 @@ type billingWalletAdapter struct {
 	wallet *billingapp.WalletUseCase
 }
 
+func (a billingWalletAdapter) ConsumerBalance(ctx context.Context, userID uint) (string, error) {
+	balances, err := a.wallet.ListConsumerBalances(ctx, []uint{userID})
+	if err != nil {
+		return "", err
+	}
+	balance, exists := balances[userID]
+	if !exists {
+		return "0.00", nil
+	}
+	return balance, nil
+}
+
 func (a billingWalletAdapter) LockConsumer(ctx context.Context, userID uint) error {
 	return a.wallet.LockConsumer(ctx, userID)
 }

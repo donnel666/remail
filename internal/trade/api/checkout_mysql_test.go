@@ -453,6 +453,7 @@ func TestCheckoutOwnedMicrosoftStockCreatesZeroDebitMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	seedTradeBase(t, db, "microsoft")
 	seedTradeMicrosoftResources(t, db, 2, 1000, 1, false)
+	creditBuyer(t, db, 2, "2.00")
 
 	uc := newTradeUseCase(db)
 	result, err := uc.Checkout(context.Background(), tradeapp.CheckoutRequest{
@@ -482,8 +483,8 @@ func TestCheckoutOwnedMicrosoftStockCreatesZeroDebitMySQL(t *testing.T) {
 		Where("id = ?", *result.Order.DebitTxID).
 		Take(&tx).Error)
 	require.Equal(t, "0.000000", tx.Amount)
-	require.Equal(t, "0.000000", tx.BalanceBefore)
-	require.Equal(t, "0.000000", tx.BalanceAfter)
+	require.Equal(t, "2.000000", tx.BalanceBefore)
+	require.Equal(t, "2.000000", tx.BalanceAfter)
 	var supplyScope string
 	require.NoError(t, db.Table("microsoft_allocations").
 		Select("supply_scope").
@@ -496,6 +497,7 @@ func TestCheckoutOwnedDomainStockCreatesZeroDebitMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	seedTradeBase(t, db, "domain")
 	seedTradeDomainResources(t, db, 2, 2000, 1, "not_sale")
+	creditBuyer(t, db, 2, "2.00")
 
 	uc := newTradeUseCase(db)
 	result, err := uc.Checkout(context.Background(), tradeapp.CheckoutRequest{
@@ -525,8 +527,8 @@ func TestCheckoutOwnedDomainStockCreatesZeroDebitMySQL(t *testing.T) {
 		Where("id = ?", *result.Order.DebitTxID).
 		Take(&tx).Error)
 	require.Equal(t, "0.000000", tx.Amount)
-	require.Equal(t, "0.000000", tx.BalanceBefore)
-	require.Equal(t, "0.000000", tx.BalanceAfter)
+	require.Equal(t, "2.000000", tx.BalanceBefore)
+	require.Equal(t, "2.000000", tx.BalanceAfter)
 	var supplyScope string
 	require.NoError(t, db.Table("domain_allocations").
 		Select("supply_scope").
@@ -628,10 +630,13 @@ func (r *markFailedErrorRepo) MarkFailed(context.Context, tradeapp.MarkFailedCom
 	return nil, fmt.Errorf("forced mark failed error")
 }
 
-func TestCheckoutInsufficientBalanceReleasesAllocationMySQL(t *testing.T) {
+func TestCheckoutZeroBalancePrecheckCreatesNoFactsMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	seedTradeBase(t, db, "microsoft")
-	seedTradeMicrosoftResources(t, db, 1, 1000, 1, true)
+	seedTradeMicrosoftResources(t, db, 2, 1000, 1, false)
+	facts := tradeCheckoutFactCounts(t, db)
+	var wallets int64
+	require.NoError(t, db.Table("wallets").Count(&wallets).Error)
 
 	uc := newTradeUseCase(db)
 	_, err := uc.Checkout(context.Background(), tradeapp.CheckoutRequest{
@@ -639,7 +644,7 @@ func TestCheckoutInsufficientBalanceReleasesAllocationMySQL(t *testing.T) {
 		ProjectID:      10,
 		ProductID:      20,
 		ServiceMode:    "code",
-		SupplyPolicy:   "public_only",
+		SupplyPolicy:   "private_first",
 		ClientChannel:  tradedomain.ClientChannelConsole,
 		IdempotencyKey: "order-idem-insufficient-balance",
 		RequestID:      "req-insufficient-balance",
@@ -650,33 +655,16 @@ func TestCheckoutInsufficientBalanceReleasesAllocationMySQL(t *testing.T) {
 		ProjectID:      10,
 		ProductID:      20,
 		ServiceMode:    "code",
-		SupplyPolicy:   "public_only",
+		SupplyPolicy:   "private_first",
 		ClientChannel:  tradedomain.ClientChannelConsole,
 		IdempotencyKey: "order-idem-insufficient-balance",
 		RequestID:      "req-insufficient-balance-replay",
 	})
 	require.ErrorIs(t, replayErr, tradedomain.ErrInsufficientBalance)
-
-	var order struct {
-		OrderNo      string
-		Status       string
-		FailureCode  string
-		DebitTxID    *uint
-		RefundTxID   *uint
-		RefundAmount string
-	}
-	require.NoError(t, db.Table("orders").Where("idempotency_key = ?", "order-idem-insufficient-balance").Take(&order).Error)
-	require.Equal(t, string(tradedomain.OrderStatusFailed), order.Status)
-	require.Equal(t, string(tradedomain.OrderFailureInsufficientBalance), order.FailureCode)
-	require.Nil(t, order.DebitTxID)
-	require.Nil(t, order.RefundTxID)
-	require.Equal(t, "0.000000", order.RefundAmount)
-
-	var allocation struct {
-		Status string
-	}
-	require.NoError(t, db.Table("microsoft_allocations").Where("order_no = ?", order.OrderNo).Take(&allocation).Error)
-	require.Equal(t, "released", allocation.Status)
+	require.Equal(t, facts, tradeCheckoutFactCounts(t, db))
+	var walletsAfter int64
+	require.NoError(t, db.Table("wallets").Count(&walletsAfter).Error)
+	require.Equal(t, wallets, walletsAfter)
 }
 
 func TestExpireDueOrdersRefundsExpiredCodeAndCleansServiceMySQL(t *testing.T) {

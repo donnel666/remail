@@ -1008,9 +1008,17 @@ func (r *BillingRepo) ListConsumerBalances(ctx context.Context, userIDs []uint) 
 		Find(&models).Error; err != nil {
 		return nil, fmt.Errorf("list consumer balances: %w", err)
 	}
+	return mapConsumerBalances(models)
+}
+
+func mapConsumerBalances(models []WalletModel) (map[uint]string, error) {
 	balances := make(map[uint]string, len(models))
 	for _, m := range models {
-		balances[m.UserID] = normalizeMoneyString(m.ConsumerBalance)
+		balance, err := normalizeDBMoney(m.ConsumerBalance)
+		if err != nil {
+			return nil, fmt.Errorf("normalize consumer balance for user %d: %w", m.UserID, err)
+		}
+		balances[m.UserID] = balance
 	}
 	return balances, nil
 }

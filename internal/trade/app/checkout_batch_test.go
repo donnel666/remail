@@ -111,8 +111,22 @@ func (r *batchRepoSpy) MarkFailed(_ context.Context, cmd MarkFailedCommand) (*do
 
 type batchWalletSpy struct {
 	WalletPort
-	mu    sync.Mutex
-	locks int
+	mu            sync.Mutex
+	balance       string
+	balanceChecks int
+	locks         int
+	debits        int
+	debitErr      error
+}
+
+func (w *batchWalletSpy) ConsumerBalance(context.Context, uint) (string, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.balanceChecks++
+	if w.balance != "" {
+		return w.balance, nil
+	}
+	return "1000.00", nil
 }
 
 func (w *batchWalletSpy) LockConsumer(ctx context.Context, _ uint) error {
@@ -123,6 +137,19 @@ func (w *batchWalletSpy) LockConsumer(ctx context.Context, _ uint) error {
 	w.locks++
 	w.mu.Unlock()
 	return nil
+}
+
+func (w *batchWalletSpy) DebitConsumer(ctx context.Context, _ WalletCommand) (*WalletTransaction, error) {
+	if ctx.Value(batchTxContextKey{}) == nil {
+		return nil, errors.New("wallet debit outside item transaction")
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.debits++
+	if w.debitErr != nil {
+		return nil, w.debitErr
+	}
+	return &WalletTransaction{ID: 1}, nil
 }
 
 type batchTokenSpy struct{ OrderTokenPort }
@@ -252,8 +279,11 @@ type checkoutInventorySpy struct {
 	AllocationPort
 	available       bool
 	err             error
+	allocation      *AllocationResult
 	checks          int
 	allocationCalls int
+	releaseCalls    int
+	releasedOrderNo string
 	marks           int
 	marked          InventoryAvailabilityCommand
 }
@@ -271,7 +301,16 @@ func (s *checkoutInventorySpy) HasAvailableInventory(context.Context, InventoryA
 
 func (s *checkoutInventorySpy) Allocate(context.Context, AllocationCommand) (*AllocationResult, error) {
 	s.allocationCalls++
+	if s.allocation != nil {
+		return s.allocation, nil
+	}
 	return nil, domain.ErrInsufficientInventory
+}
+
+func (s *checkoutInventorySpy) ReleaseByOrder(_ context.Context, orderNo string) error {
+	s.releaseCalls++
+	s.releasedOrderNo = orderNo
+	return nil
 }
 
 func batchOrder(key string, status domain.OrderStatus, failure domain.OrderFailureCode) domain.Order {
@@ -321,6 +360,120 @@ func TestCheckoutRejectsZeroInventoryBeforeOpeningTransaction(t *testing.T) {
 	require.Zero(t, inventory.allocationCalls)
 	require.Zero(t, repo.topTx)
 	require.Zero(t, wallet.locks)
+}
+
+func TestCheckoutBatchRejectsPrivateBalanceBelowPriceBeforeOpeningTransactions(t *testing.T) {
+	repo := &batchRepoSpy{orders: map[string]domain.Order{}}
+	wallet := &batchWalletSpy{balance: "0.01"}
+	inventory := &checkoutInventorySpy{available: true}
+	uc := NewUseCase(repo, &batchOrderingSpy{}, wallet, inventory, batchTokenSpy{})
+	requests := []CheckoutRequest{batchRequest("low-balance-1", 2), batchRequest("low-balance-2", 2)}
+
+	items, err := uc.CheckoutBatch(context.Background(), requests)
+
+	require.NoError(t, err)
+	require.Len(t, items, len(requests))
+	for _, item := range items {
+		require.Nil(t, item.Result)
+		require.ErrorIs(t, item.Err, domain.ErrInsufficientBalance)
+	}
+	require.Equal(t, 1, wallet.balanceChecks)
+	require.Zero(t, inventory.checks)
+	require.Zero(t, repo.topTx)
+	require.Zero(t, wallet.locks)
+	require.Empty(t, repo.orders)
+}
+
+func TestCheckoutBatchBalancePrecheckReservesEarlierAmounts(t *testing.T) {
+	wallet := &batchWalletSpy{balance: "1.00"}
+	uc := &UseCase{wallet: wallet}
+	prepared := []checkoutPreparation{
+		{request: CheckoutRequest{UserID: 7}, quote: &OrderingQuote{PayAmount: "1.00"}},
+		{request: CheckoutRequest{UserID: 7}, quote: &OrderingQuote{PayAmount: "1.00"}},
+	}
+
+	uc.precheckCheckoutBalance(context.Background(), prepared)
+
+	require.NoError(t, prepared[0].prepareErr)
+	require.ErrorIs(t, prepared[1].prepareErr, domain.ErrInsufficientBalance)
+	require.Equal(t, 1, wallet.balanceChecks)
+}
+
+func TestCheckoutCommitsFailedOrderWhenBalanceDropsAfterPrecheck(t *testing.T) {
+	repo := &batchRepoSpy{orders: map[string]domain.Order{}}
+	wallet := &batchWalletSpy{balance: "1.00", debitErr: domain.ErrInsufficientBalance}
+	inventory := &checkoutInventorySpy{
+		available: true,
+		allocation: &AllocationResult{
+			Type: domain.AllocationTypeMicrosoft, ID: 1,
+			Email: "allocated@example.com", SupplyScope: SupplyScopePublic,
+		},
+	}
+	uc := NewUseCase(repo, &batchOrderingSpy{}, wallet, inventory, batchTokenSpy{})
+
+	result, err := uc.Checkout(context.Background(), batchRequest("stale-balance", 1))
+
+	require.ErrorIs(t, err, domain.ErrInsufficientBalance)
+	require.NotNil(t, result)
+	require.True(t, result.Created)
+	stored := repo.orders["stale-balance"]
+	require.Equal(t, domain.OrderStatusFailed, stored.Status)
+	require.Equal(t, domain.OrderFailureInsufficientBalance, stored.FailureCode)
+	require.Equal(t, 1, wallet.balanceChecks)
+	require.Equal(t, 1, wallet.locks)
+	require.Equal(t, 1, wallet.debits)
+	require.Equal(t, 1, inventory.checks)
+	require.Equal(t, 1, inventory.allocationCalls)
+	require.Equal(t, 1, inventory.releaseCalls)
+	require.Equal(t, stored.OrderNo, inventory.releasedOrderNo)
+	require.Equal(t, 1, repo.topTx)
+	require.Equal(t, 1, repo.committed)
+	require.Zero(t, repo.rolledBack)
+}
+
+func TestCheckoutIdempotentReplaySkipsZeroBalancePrecheck(t *testing.T) {
+	repo := &batchRepoSpy{orders: map[string]domain.Order{
+		"replay": batchOrder("replay", domain.OrderStatusActive, ""),
+	}}
+	wallet := &batchWalletSpy{balance: "0.00", debitErr: domain.ErrInsufficientBalance}
+	ordering := &batchOrderingSpy{}
+	inventory := &checkoutInventorySpy{}
+	uc := NewUseCase(repo, ordering, wallet, inventory, batchTokenSpy{})
+
+	result, err := uc.Checkout(context.Background(), batchRequest("replay", 1))
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.False(t, result.Created)
+	require.Equal(t, "order-replay", result.Order.OrderNo)
+	require.Equal(t, "token-order-replay", result.ServiceToken)
+	require.Zero(t, wallet.balanceChecks)
+	require.Zero(t, wallet.debits)
+	require.Zero(t, ordering.calls)
+	require.Zero(t, inventory.checks)
+	require.Equal(t, 1, wallet.locks)
+	require.Equal(t, 1, repo.topTx)
+	require.Equal(t, 1, repo.committed)
+	require.Zero(t, repo.rolledBack)
+}
+
+func TestCheckoutRejectsPublicPriceAboveBalanceBeforeOpeningTransaction(t *testing.T) {
+	repo := &batchRepoSpy{orders: map[string]domain.Order{}}
+	wallet := &batchWalletSpy{balance: "0.50"}
+	inventory := &checkoutInventorySpy{available: true}
+	uc := NewUseCase(repo, &batchOrderingSpy{}, wallet, inventory, batchTokenSpy{})
+	request := batchRequest("low-public-balance", 1)
+	request.SupplyPolicy = string(domain.SupplyPolicyPublicOnly)
+
+	result, err := uc.Checkout(context.Background(), request)
+
+	require.Nil(t, result)
+	require.ErrorIs(t, err, domain.ErrInsufficientBalance)
+	require.Equal(t, 1, wallet.balanceChecks)
+	require.Zero(t, inventory.checks)
+	require.Zero(t, repo.topTx)
+	require.Zero(t, wallet.locks)
+	require.Empty(t, repo.orders)
 }
 
 func TestCheckoutBatchChecksSharedZeroInventoryOnceAndReturnsEveryItem(t *testing.T) {
