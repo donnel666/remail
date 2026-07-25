@@ -24,9 +24,6 @@ type Config struct {
 	Turnstile   TurnstileConfig
 	Log         LogConfig
 	Diagnostics DiagnosticsConfig
-	// BackgroundLoadOverloadPercent is the CPU or memory level that halves the
-	// adaptive background worker window. Recovery stays ten points below it.
-	BackgroundLoadOverloadPercent float64
 }
 
 // ServerConfig holds HTTP server settings.
@@ -119,8 +116,6 @@ type LogConfig struct {
 // DiagnosticsConfig holds opt-in runtime diagnostics settings.
 type DiagnosticsConfig struct {
 	PprofAddr               string
-	SlowRequestThreshold    time.Duration
-	SlowSQLThreshold        time.Duration
 	PprofCPUThreshold       float64
 	PprofCPUProfileDir      string
 	PprofCPUProfileDuration time.Duration
@@ -182,14 +177,11 @@ func Load() (*Config, error) {
 		},
 		Diagnostics: DiagnosticsConfig{
 			PprofAddr:               getEnv("PPROF_ADDR", ""),
-			SlowRequestThreshold:    getDuration("SLOW_REQUEST_THRESHOLD", time.Second),
-			SlowSQLThreshold:        getDuration("SLOW_SQL_THRESHOLD", 200*time.Millisecond),
 			PprofCPUThreshold:       getFloat("PPROF_CPU_THRESHOLD", 80),
 			PprofCPUProfileDir:      getEnv("PPROF_CPU_PROFILE_DIR", "pprof"),
 			PprofCPUProfileDuration: getDuration("PPROF_CPU_PROFILE_DURATION", 10*time.Second),
 			PprofCPUCheckInterval:   getDuration("PPROF_CPU_CHECK_INTERVAL", 30*time.Second),
 		},
-		BackgroundLoadOverloadPercent: getFloat("BACKGROUND_LOAD_OVERLOAD_PERCENT", defaultBackgroundOverloadPercent),
 	}
 
 	if err := cfg.validate(); err != nil {
@@ -245,9 +237,6 @@ func (c *Config) validate() error {
 	}
 	if c.Redis.PoolSize <= 0 {
 		return fmt.Errorf("REDIS_POOL_SIZE must be positive")
-	}
-	if !validSystemPercent(c.BackgroundLoadOverloadPercent) || c.BackgroundLoadOverloadPercent <= backgroundLoadHysteresisPercent {
-		return fmt.Errorf("BACKGROUND_LOAD_OVERLOAD_PERCENT must be greater than %.0f and at most 100", backgroundLoadHysteresisPercent)
 	}
 	if c.MinIO.AccessKey == "" {
 		return fmt.Errorf("MINIO_ACCESS_KEY is required")

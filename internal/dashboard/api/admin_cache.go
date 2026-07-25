@@ -10,6 +10,7 @@ import (
 	"time"
 
 	dashboardapp "github.com/donnel666/remail/internal/dashboard/app"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -18,6 +19,10 @@ const (
 	adminDashboardActiveKey   = adminDashboardCachePrefix + "active"
 	adminDashboardCacheTTL    = 24 * time.Hour
 )
+
+func adminDashboardCacheTTLValue() time.Duration {
+	return runtimeconfig.Duration("dashboard_cache_ttl_hours", adminDashboardCacheTTL, time.Hour, 1)
+}
 
 type adminDashboardCache struct {
 	redis redis.UniversalClient
@@ -93,8 +98,9 @@ func (c *adminDashboardCache) set(ctx context.Context, from, to *time.Time, data
 		return fmt.Errorf("encode admin dashboard cache: %w", err)
 	}
 	key := adminDashboardCacheKey(from, to)
+	ttl := adminDashboardCacheTTLValue()
 	_, err = c.redis.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
-		pipe.Set(ctx, key, payload, adminDashboardCacheTTL)
+		pipe.Set(ctx, key, payload, ttl)
 		pipe.ZAdd(ctx, adminDashboardActiveKey, redis.Z{Score: float64(time.Now().UnixMilli()), Member: key})
 		return nil
 	})
@@ -105,7 +111,8 @@ func (c *adminDashboardCache) refresh(ctx context.Context, load adminDashboardLo
 	if c == nil || c.redis == nil || load == nil {
 		return nil
 	}
-	cutoff := fmt.Sprintf("%d", time.Now().Add(-adminDashboardCacheTTL).UnixMilli())
+	ttl := adminDashboardCacheTTLValue()
+	cutoff := fmt.Sprintf("%d", time.Now().Add(-ttl).UnixMilli())
 	if err := c.redis.ZRemRangeByScore(ctx, adminDashboardActiveKey, "-inf", "("+cutoff).Err(); err != nil {
 		return err
 	}
@@ -131,7 +138,7 @@ func (c *adminDashboardCache) refresh(ctx context.Context, load adminDashboardLo
 			payload, err = json.Marshal(entry)
 		}
 		if err == nil {
-			err = c.redis.Set(ctx, key, payload, adminDashboardCacheTTL).Err()
+			err = c.redis.Set(ctx, key, payload, ttl).Err()
 		}
 		if err != nil {
 			refreshErrors = append(refreshErrors, fmt.Errorf("%s: %w", key, err))

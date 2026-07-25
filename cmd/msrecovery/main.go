@@ -21,6 +21,8 @@ import (
 	mailinfra "github.com/donnel666/remail/internal/mailtransport/infra"
 	"github.com/donnel666/remail/internal/mailtransport/infra/msacl"
 	"github.com/donnel666/remail/internal/platform"
+	systemsettingsinfra "github.com/donnel666/remail/internal/systemsettings/infra"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"gorm.io/driver/mysql"
@@ -337,7 +339,7 @@ func openRecoveryRuntime(ctx context.Context, historyWindow time.Duration) (*rec
 	if dsn == "" {
 		return nil, fmt.Errorf("MYSQL_DSN is required")
 	}
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{Logger: platform.NewGormLogger(200 * time.Millisecond)})
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{Logger: platform.NewGormLogger()})
 	if err != nil {
 		return nil, fmt.Errorf("open recovery database: %w", err)
 	}
@@ -352,6 +354,7 @@ func openRecoveryRuntime(ctx context.Context, historyWindow time.Duration) (*rec
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("ping recovery database: %w", err)
 	}
+	loadRecoveryRuntimeSettings(ctx, db)
 
 	endpoint := strings.TrimSpace(os.Getenv("MINIO_ENDPOINT"))
 	accessKey := strings.TrimSpace(os.Getenv("MINIO_ACCESS_KEY"))
@@ -394,6 +397,17 @@ func openRecoveryRuntime(ctx context.Context, historyWindow time.Duration) (*rec
 		domains: allowedDomains,
 		close:   sqlDB.Close,
 	}, nil
+}
+
+func loadRecoveryRuntimeSettings(ctx context.Context, db *gorm.DB) {
+	if db == nil {
+		return
+	}
+	setting, err := systemsettingsinfra.NewRepository(db).Get(ctx, "slow_sql_threshold_ms")
+	if err != nil || runtimeconfig.Validate(setting.Key, setting.Value) != nil {
+		return
+	}
+	runtimeconfig.Set(setting.Key, setting.Value)
 }
 
 func newCommandResult(options commandOptions, snapshot recoverySnapshot) *commandResult {

@@ -3,6 +3,7 @@ package platform
 import (
 	"context"
 
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/hibiken/asynq"
 )
 
@@ -10,6 +11,10 @@ import (
 // release their generation back to the dispatcher; capacity deferrals are not
 // failures and therefore do not consume this budget.
 const BackgroundTaskMaxRetry = 5
+
+func BackgroundTaskMaxRetryValue() int {
+	return runtimeconfig.Int("background_task_max_retry", BackgroundTaskMaxRetry, 0)
+}
 
 // BackgroundTaskHasRetryHeadroom reports whether a handler error can still be
 // moved to Asynq's retry set. Messages queued by older releases used

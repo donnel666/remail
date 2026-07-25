@@ -7,12 +7,20 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/hibiken/asynq"
 	"github.com/stretchr/testify/require"
 )
 
 type dashboardBackgroundGateStub struct {
 	calls int
+}
+
+func TestRankingRefreshIntervalUsesRuntimeSetting(t *testing.T) {
+	runtimeconfig.Set("ranking_refresh_interval_minutes", "2")
+	t.Cleanup(func() { runtimeconfig.Delete("ranking_refresh_interval_minutes") })
+
+	require.Equal(t, 2*time.Minute, rankingRefreshIntervalValue())
 }
 
 func (s *dashboardBackgroundGateStub) TryAcquire() (func(), bool) {

@@ -23,7 +23,6 @@ const (
 	adminResourceBulkTaskTimeout    = 30 * time.Minute
 	adminResourceBulkLeaseDuration  = 24 * time.Hour
 	adminResourceBulkCleanupTimeout = 5 * time.Second
-	adminResourceBulkTaskMaxRetry   = platform.BackgroundTaskMaxRetry
 )
 
 type AdminResourceBulkQueue struct {
@@ -80,7 +79,7 @@ func (q *AdminResourceBulkQueue) EnqueueAdminResourceBulk(ctx context.Context, t
 		ctx,
 		asynq.NewTask(TypeAdminResourceBulk, payload),
 		asynq.Queue(AdminResourceBulkQueueName),
-		asynq.MaxRetry(adminResourceBulkTaskMaxRetry),
+		asynq.MaxRetry(platform.BackgroundTaskMaxRetryValue()),
 		asynq.Unique(adminResourceBulkTaskTimeout),
 		asynq.Timeout(adminResourceBulkTaskTimeout),
 		asynq.Retention(0),

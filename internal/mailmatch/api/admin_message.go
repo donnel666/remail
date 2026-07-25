@@ -62,7 +62,8 @@ func (h *Handler) GetAdminMessages(c *gin.Context) {
 		writeAdminMessageBadRequest(c)
 		return
 	}
-	limit, ok := nonNegativeIntQuery(c, "limit", 20)
+	defaultLimit, _, _ := mailmatchapp.AdminMessageLimits()
+	limit, ok := nonNegativeIntQuery(c, "limit", defaultLimit)
 	if !ok || limit == 0 {
 		writeAdminMessageBadRequest(c)
 		return

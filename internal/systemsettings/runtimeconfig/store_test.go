@@ -47,6 +47,24 @@ func TestValidateEmailServiceSettings(t *testing.T) {
 	require.NoError(t, Validate("smtp_task_retry_count", "0"))
 }
 
+func TestValidateSystemOperationsSettings(t *testing.T) {
+	require.NoError(t, Validate("background_load_overload_percent", "11"))
+	require.ErrorIs(t, Validate("background_load_overload_percent", "10"), domain.ErrInvalidValue)
+	require.NoError(t, Validate("retention_daily_run_hour", "23"))
+	require.ErrorIs(t, Validate("retention_daily_run_hour", "24"), domain.ErrInvalidValue)
+	require.NoError(t, Validate("slow_request_threshold_ms", "0"))
+	for _, key := range []string{
+		"admin_resource_list_max_limit", "admin_log_max_limit", "admin_task_max_limit", "admin_message_max_limit",
+		"api_key_meta_ttl_seconds", "api_key_cache_flush_interval_seconds",
+	} {
+		require.ErrorIs(t, Validate(key, "100"), domain.ErrInvalidKey)
+	}
+	require.ErrorIs(t, ValidatePersistedUpdates(DefaultSettings(), []domain.Setting{
+		{Key: "background_worker_minimum", Value: "32"},
+		{Key: "background_worker_initial", Value: "16"},
+	}), domain.ErrInvalidValue)
+}
+
 func TestRuntimeSettingsRejectUnsafeAndConflictingValues(t *testing.T) {
 	require.ErrorIs(t, Validate("alias_generation_window", "2147483647"), domain.ErrInvalidValue)
 	require.ErrorIs(t, Validate("project_name_max", "121"), domain.ErrInvalidValue)

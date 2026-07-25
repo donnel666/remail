@@ -1,0 +1,53 @@
+export const BACKGROUND_JOB_KEYS = [
+  "background_load_overload_percent",
+  "background_worker_minimum",
+  "background_worker_initial",
+  "background_worker_increase_step",
+  "background_recovery_samples",
+  "background_metric_failure_limit",
+  "background_task_max_retry",
+  "background_retry_delay_minimum_seconds",
+  "background_retry_delay_jitter_seconds",
+  "asynq_worker_concurrency",
+  "asynq_realtime_worker_concurrency",
+  "asynq_background_worker_concurrency",
+  "asynq_shutdown_timeout_seconds",
+  "validation_dispatch_maximum",
+  "default_inbound_smtp_max_connections",
+] as const;
+
+export const BATCH_OPERATION_KEYS = [
+  "admin_resource_bulk_max_ids",
+  "admin_domain_bulk_max_ids",
+  "admin_domain_bulk_max_filter",
+  "resource_validation_max_ids",
+  "validation_batch_page_size",
+  "validation_insert_chunk_size",
+  "bulk_user_chunk_size",
+  "card_bulk_chunk_size",
+  "retention_batch_size",
+  "retention_batch_sleep_ms",
+  "retention_daily_run_hour",
+] as const;
+
+export const RETENTION_KEYS = [
+  "idempotency_key_retain_days",
+  "mailmatch_ms_retain_days",
+  "mailmatch_domain_retain_days",
+  "daily_usage_retain_days",
+  "outbound_mail_retain_days",
+  "inbound_mail_retain_days",
+  "system_log_retain_days",
+] as const;
+
+export const ADMIN_MONITOR_KEYS = [
+  "admin_ranking_limit",
+  "admin_message_max_search",
+  "dashboard_cache_ttl_hours",
+  "leaderboard_cache_ttl_minutes",
+  "ranking_refresh_interval_minutes",
+  "resource_facets_cache_ttl_seconds",
+  "ttl_cache_max_entries",
+  "slow_request_threshold_ms",
+  "slow_sql_threshold_ms",
+] as const;

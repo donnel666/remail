@@ -5,15 +5,19 @@ import (
 	"time"
 
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/gin-gonic/gin"
 )
 
-func RequestLogger(slowThreshold time.Duration) gin.HandlerFunc {
+const defaultSlowRequestThreshold = time.Second
+
+func RequestLogger() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 		c.Next()
 
 		elapsed := time.Since(start)
+		slowThreshold := runtimeconfig.Duration("slow_request_threshold_ms", defaultSlowRequestThreshold, time.Millisecond, 0)
 		if shouldSkipRequestLog(c.Request.URL.Path, elapsed, slowThreshold) {
 			return
 		}

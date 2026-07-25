@@ -2,10 +2,10 @@ package runtimeconfig
 
 import "github.com/donnel666/remail/internal/systemsettings/domain"
 
-const DefaultSettingsCount = 82
+const DefaultSettingsCount = 128
 
 // DefaultSettings is the single source of initial values for runtime-managed
-// email-service settings. Startup inserts only keys that are not in storage.
+// settings. Startup inserts only keys that are not in storage.
 func DefaultSettings() []domain.Setting {
 	return append([]domain.Setting(nil), defaultSettings...)
 }
@@ -98,4 +98,53 @@ var defaultSettings = []domain.Setting{
 	{Key: "alias_dispatcher_interval_seconds", Value: "2"},
 	{Key: "token_refresh_dispatcher_interval_seconds", Value: "2"},
 	{Key: "legacy_alias_retry_delay_seconds", Value: "30"},
+
+	{Key: "background_load_overload_percent", Value: "50"},
+	{Key: "background_worker_minimum", Value: "8"},
+	{Key: "background_worker_initial", Value: "16"},
+	{Key: "background_worker_increase_step", Value: "32"},
+	{Key: "background_recovery_samples", Value: "2"},
+	{Key: "background_metric_failure_limit", Value: "3"},
+	{Key: "background_task_max_retry", Value: "5"},
+	{Key: "background_retry_delay_minimum_seconds", Value: "5"},
+	{Key: "background_retry_delay_jitter_seconds", Value: "5"},
+	{Key: "asynq_worker_concurrency", Value: "768"},
+	{Key: "asynq_realtime_worker_concurrency", Value: "256"},
+	{Key: "asynq_background_worker_concurrency", Value: "512"},
+	{Key: "asynq_shutdown_timeout_seconds", Value: "30"},
+	{Key: "validation_dispatch_maximum", Value: "128"},
+	{Key: "default_inbound_smtp_max_connections", Value: "200"},
+
+	{Key: "admin_resource_bulk_max_ids", Value: "1000"},
+	{Key: "admin_domain_bulk_max_ids", Value: "1000"},
+	{Key: "admin_domain_bulk_max_filter", Value: "10000"},
+	{Key: "resource_validation_max_ids", Value: "10000"},
+	{Key: "validation_batch_page_size", Value: "1000"},
+	{Key: "validation_insert_chunk_size", Value: "1000"},
+	{Key: "bulk_user_chunk_size", Value: "5000"},
+	{Key: "card_bulk_chunk_size", Value: "5000"},
+	{Key: "retention_batch_size", Value: "5000"},
+	{Key: "retention_batch_sleep_ms", Value: "200"},
+	{Key: "retention_daily_run_hour", Value: "4"},
+	{Key: "idempotency_key_retain_days", Value: "30"},
+	{Key: "mailmatch_ms_retain_days", Value: "3"},
+	{Key: "mailmatch_domain_retain_days", Value: "30"},
+	{Key: "daily_usage_retain_days", Value: "14"},
+	{Key: "outbound_mail_retain_days", Value: "30"},
+	{Key: "inbound_mail_retain_days", Value: "30"},
+	{Key: "system_log_retain_days", Value: "30"},
+
+	{Key: "admin_resource_list_default_limit", Value: "20"},
+	{Key: "admin_log_default_limit", Value: "20"},
+	{Key: "admin_task_default_limit", Value: "20"},
+	{Key: "admin_ranking_limit", Value: "10"},
+	{Key: "admin_message_default_limit", Value: "20"},
+	{Key: "admin_message_max_search", Value: "120"},
+	{Key: "dashboard_cache_ttl_hours", Value: "24"},
+	{Key: "leaderboard_cache_ttl_minutes", Value: "15"},
+	{Key: "ranking_refresh_interval_minutes", Value: "5"},
+	{Key: "resource_facets_cache_ttl_seconds", Value: "10"},
+	{Key: "ttl_cache_max_entries", Value: "4096"},
+	{Key: "slow_request_threshold_ms", Value: "1000"},
+	{Key: "slow_sql_threshold_ms", Value: "200"},
 }

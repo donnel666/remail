@@ -313,10 +313,11 @@ func (h *CoreHandler) GetAdminMicrosoftResources(c *gin.Context) {
 		writeAdminResourceError(c, domain.ErrInvalidResourceFilter)
 		return
 	}
-	if !validateAdminLimitQuery(c, coreapp.AdminResourceMaxLimit) {
+	defaultLimit, maxLimit := coreapp.AdminResourceListLimits()
+	if !validateAdminLimitQuery(c, maxLimit) {
 		return
 	}
-	offset, limit, ok := middleware.ParsePagination(c, middleware.PaginationOptions{DefaultLimit: coreapp.AdminResourceDefaultLimit, MaxLimit: coreapp.AdminResourceMaxLimit})
+	offset, limit, ok := middleware.ParsePagination(c, middleware.PaginationOptions{DefaultLimit: defaultLimit, MaxLimit: maxLimit})
 	if !ok {
 		return
 	}
@@ -432,10 +433,11 @@ func (h *CoreHandler) GetAdminMicrosoftResourceAliases(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !validateAdminLimitQuery(c, coreapp.AdminResourceMaxLimit) {
+	defaultLimit, maxLimit := coreapp.AdminResourceListLimits()
+	if !validateAdminLimitQuery(c, maxLimit) {
 		return
 	}
-	offset, limit, ok := middleware.ParsePagination(c, middleware.PaginationOptions{DefaultLimit: 20, MaxLimit: coreapp.AdminResourceMaxLimit})
+	offset, limit, ok := middleware.ParsePagination(c, middleware.PaginationOptions{DefaultLimit: defaultLimit, MaxLimit: maxLimit})
 	if !ok {
 		return
 	}

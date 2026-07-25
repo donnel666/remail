@@ -8,8 +8,17 @@ import (
 	"time"
 
 	"github.com/donnel666/remail/internal/governance/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/stretchr/testify/require"
 )
+
+func TestNextRetentionRunAtUsesRuntimeHour(t *testing.T) {
+	runtimeconfig.Set("retention_daily_run_hour", "18")
+	t.Cleanup(func() { runtimeconfig.Delete("retention_daily_run_hour") })
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+
+	require.Equal(t, time.Date(2026, 7, 10, 18, 0, 0, 0, time.UTC), nextRetentionRunAt(now, time.UTC))
+}
 
 func TestRetentionRunOnceDeletesInboundObjectsAndOrphans(t *testing.T) {
 	ctx := context.Background()

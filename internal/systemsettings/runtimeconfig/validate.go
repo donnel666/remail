@@ -38,9 +38,30 @@ var integerRanges = map[string]integerRange{
 	"max_inbound_body_runes": positive(1_000_000), "max_inbound_mime_depth": positive(50), "mail_dispatcher_interval_seconds": positive(3600), "alias_dispatcher_interval_seconds": positive(3600),
 	"token_refresh_dispatcher_interval_seconds": positive(3600), "legacy_alias_retry_delay_seconds": positive(3600),
 	"smtp_task_retry_count": {min: 0, max: 20},
+
+	"background_load_overload_percent": {min: 11, max: 100}, "background_worker_minimum": positive(4096), "background_worker_initial": positive(4096),
+	"background_worker_increase_step": positive(4096), "background_recovery_samples": positive(100), "background_metric_failure_limit": positive(100),
+	"background_task_max_retry": {min: 0, max: 20}, "background_retry_delay_minimum_seconds": positive(3600), "background_retry_delay_jitter_seconds": {min: 0, max: 3600},
+	"asynq_worker_concurrency": positive(4096), "asynq_realtime_worker_concurrency": positive(4096), "asynq_background_worker_concurrency": positive(4096),
+	"asynq_shutdown_timeout_seconds": positive(300), "validation_dispatch_maximum": positive(10000), "default_inbound_smtp_max_connections": positive(10000),
+
+	"admin_resource_bulk_max_ids": positive(1000), "admin_domain_bulk_max_ids": positive(1000), "admin_domain_bulk_max_filter": positive(10000),
+	"resource_validation_max_ids": positive(10000), "validation_batch_page_size": positive(10000), "validation_insert_chunk_size": positive(10000),
+	"bulk_user_chunk_size": positive(10000), "card_bulk_chunk_size": positive(10000), "retention_batch_size": positive(100000),
+	"retention_batch_sleep_ms": {min: 0, max: 60000}, "retention_daily_run_hour": {min: 0, max: 23},
+	"idempotency_key_retain_days": positive(3650), "mailmatch_ms_retain_days": positive(3650), "mailmatch_domain_retain_days": positive(3650),
+	"daily_usage_retain_days": positive(3650), "outbound_mail_retain_days": positive(3650), "inbound_mail_retain_days": positive(3650), "system_log_retain_days": positive(3650),
+
+	"admin_resource_list_default_limit": positive(100), "admin_log_default_limit": positive(100), "admin_task_default_limit": positive(100), "admin_ranking_limit": positive(100),
+	"admin_message_default_limit": positive(100), "admin_message_max_search": positive(120),
+	"dashboard_cache_ttl_hours": positive(8760), "leaderboard_cache_ttl_minutes": positive(1440), "ranking_refresh_interval_minutes": positive(1440),
+	"resource_facets_cache_ttl_seconds": positive(3600),
+	"ttl_cache_max_entries":             positive(1_000_000), "slow_request_threshold_ms": {min: 0, max: 600000}, "slow_sql_threshold_ms": {min: 0, max: 600000},
 }
 
 var removedKeys = map[string]struct{}{
+	"admin_log_max_limit": {}, "admin_message_max_limit": {}, "admin_resource_list_max_limit": {},
+	"admin_task_max_limit": {}, "api_key_cache_flush_interval_seconds": {}, "api_key_meta_ttl_seconds": {},
 	"bucket_count": {}, "msacl_content_search_window_minutes": {}, "outbound_mail_claim_timeout_minutes": {},
 }
 
@@ -186,6 +207,9 @@ func sanitizeRelationships(values map[string]string) {
 	if value("imap_full_history_timeout_minutes", 15) > value("project_history_timeout_minutes", 20) {
 		drop("imap_full_history_timeout_minutes", "project_history_timeout_minutes")
 	}
+	if value("background_worker_minimum", 8) > value("background_worker_initial", 16) || value("background_worker_initial", 16) > value("asynq_background_worker_concurrency", 512) {
+		drop("background_worker_minimum", "background_worker_initial", "asynq_background_worker_concurrency")
+	}
 	retries := value("smtp_task_retry_count", 3)
 	if value("smtp_outbound_payload_ttl_minutes", 5) < value("outbound_mail_timeout_minutes", 3) || value("outbound_mail_timeout_minutes", 3)*60 < smtpTaskBudgetSeconds(retries) {
 		drop("smtp_outbound_payload_ttl_minutes", "outbound_mail_timeout_minutes", "smtp_task_retry_count")
@@ -209,6 +233,8 @@ func validateRelationships(values map[string]string) error {
 		value("recovery_code_lease_minutes", 10)*60 < value("password_recovery_code_wait_seconds", 90)+30 ||
 		value("pickup_fetch_reserve_ttl_minutes", 2) > value("pickup_request_fetch_timeout_minutes", 2) ||
 		value("imap_full_history_timeout_minutes", 15) > value("project_history_timeout_minutes", 20) ||
+		value("background_worker_minimum", 8) > value("background_worker_initial", 16) ||
+		value("background_worker_initial", 16) > value("asynq_background_worker_concurrency", 512) ||
 		value("smtp_outbound_payload_ttl_minutes", 5) < value("outbound_mail_timeout_minutes", 3) {
 		return domain.ErrInvalidValue
 	}

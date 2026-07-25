@@ -14,6 +14,7 @@ import (
 
 	"github.com/donnel666/remail/internal/core/domain"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 type AdminResourceBulkAction string
@@ -146,6 +147,10 @@ const (
 	AdminResourceBulkMaxExplicitIDs = 1000
 	adminResourceBulkPageSize       = 100
 )
+
+func AdminResourceBulkMaxExplicitIDsValue() int {
+	return min(runtimeconfig.Int("admin_resource_bulk_max_ids", AdminResourceBulkMaxExplicitIDs, 1), AdminResourceBulkMaxExplicitIDs)
+}
 
 func NewAdminResourceBulkService(repo AdminResourceBulkRepository, queue AdminResourceBulkQueue, commands *AdminResourceCommandService) *AdminResourceBulkService {
 	return &AdminResourceBulkService{repo: repo, queue: queue, commands: commands, now: func() time.Time { return time.Now().UTC() }}
@@ -538,7 +543,7 @@ func normalizeAdminBulkSelection(selection AdminResourceBulkSelection) (AdminRes
 		if len(selection.ResourceIDs) == 0 {
 			return selection, domain.ErrResourceNotFound
 		}
-		if len(selection.ResourceIDs) > AdminResourceBulkMaxExplicitIDs {
+		if len(selection.ResourceIDs) > AdminResourceBulkMaxExplicitIDsValue() {
 			return selection, domain.ErrResourceSelectionTooLarge
 		}
 		selection.Filter = AdminResourceBulkFilterValue{}

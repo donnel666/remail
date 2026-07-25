@@ -51,7 +51,7 @@ minio                MinIO
 | Redis | `go-redis` | 会话、验证码、缓存、限流、Asynq。 |
 | 异步任务 | Asynq | Redis-backed 任务队列，支持后台 worker、重试、延迟和定时任务。 |
 | 对象存储 | `minio-go` | 私有上传、附件、导入文件、失败文件。 |
-| 配置 | 环境变量 + 本地 `.env` | 不引入配置中心。 |
+| 配置 | 环境变量 + 系统设置 | 连接凭据和启动基础设施使用环境变量；可运营参数由系统设置统一管理。 |
 | 日志 | 标准库 `slog` | JSON 结构化日志，带 requestId。 |
 | API 文档/生成 | OpenAPI + `oapi-codegen` + `openapi-typescript`/`openapi-fetch` | `oapi-codegen` 生成 Go 服务端类型；`openapi-typescript` 生成前端 schema，`openapi-fetch` 做薄封装；同一份 OpenAPI 仍是前端 client 和 SDK 契约源。 |
 | 参数校验 | Gin binding + validator | DTO 校验集中处理。 |
@@ -66,8 +66,8 @@ minio                MinIO
 | 能力 | 选型 | 规则 |
 |------|------|------|
 | 性能诊断 | 标准库 `net/http/pprof` | 通过独立本地诊断 HTTP server 暴露 `/debug/pprof/`；`PPROF_ADDR` 为空时关闭。裸进程建议绑定 `127.0.0.1:6060`，Docker 内建议绑定 `:6060` 并只映射到宿主机 `127.0.0.1`。该入口不进入 OpenAPI，不作为业务 API 契约。 |
-| 慢请求日志 | Gin middleware + `slog` | 参考 `new-api` 的运行日志可见性，所有非健康检查/静态资源请求输出 method/path/status/latency/requestId；超过 `SLOW_REQUEST_THRESHOLD` 输出 `slow http request` warning。日志不得写请求体、Cookie、密码、Token。 |
-| 慢 SQL 日志 | GORM logger + `slog` | 超过 `SLOW_SQL_THRESHOLD` 输出 `slow sql` warning，并携带 requestId、耗时、行数和参数化 SQL；SQL 日志必须开启参数过滤，避免把密码、Token、验证码等参数写入日志。 |
+| 慢请求日志 | Gin middleware + `slog` | 参考 `new-api` 的运行日志可见性，所有非健康检查/静态资源请求输出 method/path/status/latency/requestId；超过系统设置 `slow_request_threshold_ms` 输出 `slow http request` warning。日志不得写请求体、Cookie、密码、Token。 |
+| 慢 SQL 日志 | GORM logger + `slog` | 超过系统设置 `slow_sql_threshold_ms` 输出 `slow sql` warning，并携带 requestId、耗时、行数和参数化 SQL；SQL 日志必须开启参数过滤，避免把密码、Token、验证码等参数写入日志。 |
 | 自动 CPU profile | `runtime/pprof` + CPU monitor | `PPROF_ADDR` 开启时启动 CPU 使用率监视；超过 `PPROF_CPU_THRESHOLD` 自动采样 `PPROF_CPU_PROFILE_DURATION` 并写入 `PPROF_CPU_PROFILE_DIR`，触发和文件路径必须出现在 `docker logs`。 |
 
 ORM 使用规则：

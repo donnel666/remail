@@ -50,7 +50,7 @@ func (q *ProxyCheckQueue) EnqueueProxyCheck(ctx context.Context, task proxyapp.P
 		asynqTask,
 		asynq.Queue(proxyQueueName),
 		asynq.Unique(proxyCheckTaskUniqueTTL),
-		asynq.MaxRetry(platform.BackgroundTaskMaxRetry),
+		asynq.MaxRetry(platform.BackgroundTaskMaxRetryValue()),
 		asynq.Timeout(proxyCheckTaskTimeout),
 		asynq.Retention(0),
 	)

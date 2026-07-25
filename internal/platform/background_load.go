@@ -10,6 +10,8 @@ import (
 
 	"github.com/shirou/gopsutil/v4/cpu"
 	"github.com/shirou/gopsutil/v4/mem"
+
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 const (
@@ -168,6 +170,8 @@ type BackgroundLoadController struct {
 	sampleInterval     time.Duration
 	overloadPercent    float64
 	recoveryPercent    float64
+	recoverySamples    int
+	metricFailureLimit int
 
 	tuneMu            sync.Mutex
 	sampleMu          sync.RWMutex
@@ -183,20 +187,20 @@ type BackgroundLoadController struct {
 	done        chan struct{}
 }
 
-func NewBackgroundLoadController(maximum int, overloadPercent float64) *BackgroundLoadController {
-	return newBackgroundLoadController(gopsutilSystemLoadReader{}, maximum, overloadPercent)
+func NewBackgroundLoadController(maximum int) *BackgroundLoadController {
+	return newBackgroundLoadController(gopsutilSystemLoadReader{}, maximum)
 }
 
-func newBackgroundLoadController(load systemLoadReader, maximum int, overloadPercent float64) *BackgroundLoadController {
+func newBackgroundLoadController(load systemLoadReader, maximum int) *BackgroundLoadController {
 	if maximum <= 0 {
 		maximum = 1
 	}
-	if !validSystemPercent(overloadPercent) || overloadPercent <= backgroundLoadHysteresisPercent {
-		overloadPercent = defaultBackgroundOverloadPercent
-	}
-	minimum := min(backgroundWorkerMinimum, maximum)
-	initial := min(max(backgroundWorkerInitial, minimum), maximum)
-	increaseStep := min(max(backgroundWorkerMinimumIncreaseStep, maximum/16, 1), maximum)
+	settings := runtimeconfig.Snapshot()
+	overloadPercent := float64(settings.Int("background_load_overload_percent", int(defaultBackgroundOverloadPercent), int(backgroundLoadHysteresisPercent)+1))
+	minimum := min(settings.Int("background_worker_minimum", backgroundWorkerMinimum, 1), maximum)
+	initial := min(max(settings.Int("background_worker_initial", backgroundWorkerInitial, 1), minimum), maximum)
+	defaultIncreaseStep := min(max(backgroundWorkerMinimumIncreaseStep, maximum/16, 1), maximum)
+	increaseStep := min(settings.Int("background_worker_increase_step", defaultIncreaseStep, 1), maximum)
 	slowStartThreshold := min(maximum, max(initial, maximum/2))
 	return &BackgroundLoadController{
 		systemLoad:         load,
@@ -208,6 +212,8 @@ func newBackgroundLoadController(load systemLoadReader, maximum int, overloadPer
 		sampleInterval:     backgroundLoadSampleInterval,
 		overloadPercent:    overloadPercent,
 		recoveryPercent:    overloadPercent - backgroundLoadHysteresisPercent,
+		recoverySamples:    settings.Int("background_recovery_samples", backgroundRecoverySamples, 1),
+		metricFailureLimit: settings.Int("background_metric_failure_limit", backgroundMetricFailureLimit, 1),
 	}
 }
 
@@ -284,6 +290,7 @@ func (c *BackgroundLoadController) sampleAndTune(ctx context.Context) {
 	}
 	c.tuneMu.Lock()
 	defer c.tuneMu.Unlock()
+	c.refreshRuntimeConfiguration()
 
 	sample := systemLoadSample{sampledAt: time.Now()}
 	if c.systemLoad != nil {
@@ -309,7 +316,7 @@ func (c *BackgroundLoadController) sampleAndTune(ctx context.Context) {
 	if healthy {
 		c.metricFailures = 0
 	} else {
-		c.metricFailures = min(c.metricFailures+1, backgroundMetricFailureLimit)
+		c.metricFailures = min(c.metricFailures+1, c.metricFailureLimit)
 	}
 	switch {
 	case high:
@@ -322,9 +329,9 @@ func (c *BackgroundLoadController) sampleAndTune(ctx context.Context) {
 			c.headroomSamples = 0
 			reason = "underutilized"
 		} else {
-			c.headroomSamples = min(c.headroomSamples+1, backgroundRecoverySamples)
+			c.headroomSamples = min(c.headroomSamples+1, c.recoverySamples)
 		}
-		if active == current && c.headroomSamples >= backgroundRecoverySamples {
+		if active == current && c.headroomSamples >= c.recoverySamples {
 			if current < c.slowStartThreshold {
 				next = min(c.slowStartThreshold, current*2)
 				reason = "slow_start"
@@ -338,7 +345,7 @@ func (c *BackgroundLoadController) sampleAndTune(ctx context.Context) {
 		}
 	case !sample.cpuValid || !sample.memoryValid:
 		c.headroomSamples = 0
-		if c.metricFailures >= backgroundMetricFailureLimit {
+		if c.metricFailures >= c.metricFailureLimit {
 			next = max(c.minimum, (current+1)/2)
 			c.slowStartThreshold = next
 			reason = "metrics_stale"
@@ -382,6 +389,22 @@ func (c *BackgroundLoadController) sampleAndTune(ctx context.Context) {
 	c.sampleMu.Lock()
 	c.lastSample = sample
 	c.sampleMu.Unlock()
+}
+
+func (c *BackgroundLoadController) refreshRuntimeConfiguration() {
+	settings := runtimeconfig.Snapshot()
+	overload := float64(settings.Int("background_load_overload_percent", int(defaultBackgroundOverloadPercent), int(backgroundLoadHysteresisPercent)+1))
+	c.overloadPercent = overload
+	c.recoveryPercent = overload - backgroundLoadHysteresisPercent
+	c.minimum = min(settings.Int("background_worker_minimum", backgroundWorkerMinimum, 1), c.maximum)
+	defaultIncreaseStep := min(max(backgroundWorkerMinimumIncreaseStep, c.maximum/16, 1), c.maximum)
+	c.increaseStep = min(settings.Int("background_worker_increase_step", defaultIncreaseStep, 1), c.maximum)
+	c.recoverySamples = settings.Int("background_recovery_samples", backgroundRecoverySamples, 1)
+	c.metricFailureLimit = settings.Int("background_metric_failure_limit", backgroundMetricFailureLimit, 1)
+	limit, _, _ := c.gate.Stats()
+	if limit < c.minimum {
+		c.gate.Resize(c.minimum)
+	}
 }
 
 // TryAcquire attempts one permit without blocking. On denial, background

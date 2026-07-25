@@ -9,6 +9,7 @@ import (
 
 	dashboardapp "github.com/donnel666/remail/internal/dashboard/app"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/hibiken/asynq"
 )
 
@@ -17,11 +18,14 @@ const (
 	typeAdminDashboardRefresh        = "dashboard:admin_refresh"
 	rankingRefreshInterval           = 5 * time.Minute
 	adminDashboardRefreshInterval    = 10 * time.Minute
-	rankingRefreshUniqueTTL          = 3 * rankingRefreshInterval
 	adminDashboardRefreshUniqueTTL   = 3 * adminDashboardRefreshInterval
 	rankingRefreshTaskTimeout        = 4 * time.Minute
 	adminDashboardRefreshTaskTimeout = 9 * time.Minute
 )
+
+func rankingRefreshIntervalValue() time.Duration {
+	return runtimeconfig.Duration("ranking_refresh_interval_minutes", rankingRefreshInterval, time.Minute, 1)
+}
 
 func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) func(context.Context) {
 	mux.HandleFunc(typeRankingRefresh, func(ctx context.Context, _ *asynq.Task) error {
@@ -59,18 +63,23 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) func(context.Cont
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		rankingTicker := time.NewTicker(rankingRefreshInterval)
+		rankingTicker := time.NewTicker(time.Second)
 		adminTicker := time.NewTicker(adminDashboardRefreshInterval)
 		defer rankingTicker.Stop()
 		defer adminTicker.Stop()
 		enqueueRankingRefresh(ctx, module.asynq)
+		lastRankingRefresh := time.Now()
 		enqueueAdminDashboardRefresh(ctx, module.asynq)
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-rankingTicker.C:
+			case now := <-rankingTicker.C:
+				if now.Sub(lastRankingRefresh) < rankingRefreshIntervalValue() {
+					continue
+				}
 				enqueueRankingRefresh(ctx, module.asynq)
+				lastRankingRefresh = now
 			case <-adminTicker.C:
 				enqueueAdminDashboardRefresh(ctx, module.asynq)
 			}
@@ -102,7 +111,7 @@ func enqueueAdminDashboardRefresh(ctx context.Context, client *asynq.Client) {
 		asynq.NewTask(typeAdminDashboardRefresh, nil),
 		asynq.Queue(platform.QueueBackgroundInventory),
 		asynq.Unique(adminDashboardRefreshUniqueTTL),
-		asynq.MaxRetry(platform.BackgroundTaskMaxRetry),
+		asynq.MaxRetry(platform.BackgroundTaskMaxRetryValue()),
 		asynq.Timeout(adminDashboardRefreshTaskTimeout),
 		asynq.Retention(0),
 	)
@@ -116,8 +125,8 @@ func enqueueRankingRefresh(ctx context.Context, client *asynq.Client) {
 		ctx,
 		asynq.NewTask(typeRankingRefresh, nil),
 		asynq.Queue(platform.QueueBackgroundInventory),
-		asynq.Unique(rankingRefreshUniqueTTL),
-		asynq.MaxRetry(platform.BackgroundTaskMaxRetry),
+		asynq.Unique(max(3*rankingRefreshIntervalValue(), rankingRefreshTaskTimeout)),
+		asynq.MaxRetry(platform.BackgroundTaskMaxRetryValue()),
 		asynq.Timeout(rankingRefreshTaskTimeout),
 		asynq.Retention(0),
 	)

@@ -9,6 +9,7 @@ import (
 
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	"github.com/donnel666/remail/internal/mailmatch/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 const (
@@ -16,6 +17,12 @@ const (
 	maxAdminMessageLimit     = 100
 	maxAdminMessageSearch    = 120
 )
+
+func AdminMessageLimits() (int, int, int) {
+	settings := runtimeconfig.Snapshot()
+	return min(settings.Int("admin_message_default_limit", defaultAdminMessageLimit, 1), maxAdminMessageLimit), maxAdminMessageLimit,
+		min(settings.Int("admin_message_max_search", maxAdminMessageSearch, 1), maxAdminMessageSearch)
+}
 
 type AdminMessageSummary struct {
 	ID               uint
@@ -83,13 +90,14 @@ func (uc *AdminMessageUseCase) List(ctx context.Context, query AdminMessageListQ
 	if query.ResourceType != domain.ResourceTypeMicrosoft && query.ResourceType != domain.ResourceTypeDomain {
 		return nil, domain.ErrInvalidRequest
 	}
-	if utf8.RuneCountInString(query.Search) > maxAdminMessageSearch {
+	defaultLimit, maxLimit, maxSearch := AdminMessageLimits()
+	if utf8.RuneCountInString(query.Search) > maxSearch {
 		return nil, domain.ErrInvalidRequest
 	}
 	if query.Limit == 0 {
-		query.Limit = defaultAdminMessageLimit
+		query.Limit = defaultLimit
 	}
-	if query.Limit < 1 || query.Limit > maxAdminMessageLimit {
+	if query.Limit < 1 || query.Limit > maxLimit {
 		return nil, domain.ErrInvalidRequest
 	}
 	exists, err := uc.repo.AdminMessageResourceExists(ctx, query.ResourceID, query.ResourceType)

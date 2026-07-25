@@ -18,7 +18,6 @@ import (
 const (
 	TypeAdminDomainBulk = "core:admin_domain_bulk"
 
-	adminDomainBulkTaskMaxRetry   = platform.BackgroundTaskMaxRetry
 	adminDomainBulkTaskTimeout    = time.Minute
 	adminDomainBulkLeaseDuration  = 24 * time.Hour
 	adminDomainBulkCleanupTimeout = 5 * time.Second
@@ -82,7 +81,7 @@ func (q *AdminDomainBulkQueue) EnqueueAdminDomainBulk(ctx context.Context, task 
 		asynq.NewTask(TypeAdminDomainBulk, payload),
 		asynq.Queue(platform.QueueResource),
 		asynq.Unique(adminDomainBulkTaskTimeout),
-		asynq.MaxRetry(adminDomainBulkTaskMaxRetry),
+		asynq.MaxRetry(platform.BackgroundTaskMaxRetryValue()),
 		asynq.Timeout(adminDomainBulkTaskTimeout),
 		asynq.Retention(0),
 	)

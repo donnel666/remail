@@ -11,6 +11,7 @@ import (
 
 	billingapp "github.com/donnel666/remail/internal/billing/app"
 	"github.com/donnel666/remail/internal/billing/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -44,8 +45,9 @@ const cardBulkChunkSize = 5000
 // limit (mirrors IAM's bulk chunking).
 func (r *BillingRepo) SetCardsStatus(ctx context.Context, cardKeys []string, status domain.CardKeyStatus) (int, error) {
 	var affected int64
-	for start := 0; start < len(cardKeys); start += cardBulkChunkSize {
-		end := start + cardBulkChunkSize
+	chunkSize := min(runtimeconfig.Int("card_bulk_chunk_size", cardBulkChunkSize, 1), 10000)
+	for start := 0; start < len(cardKeys); start += chunkSize {
+		end := start + chunkSize
 		if end > len(cardKeys) {
 			end = len(cardKeys)
 		}

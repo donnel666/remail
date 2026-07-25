@@ -55,7 +55,7 @@ func (q *MicrosoftTokenRefreshQueue) EnqueueMicrosoftTokenRefresh(ctx context.Co
 		asynq.NewTask(TypeMicrosoftTokenRefresh, payload),
 		asynq.Queue(MicrosoftTokenRefreshQueueName),
 		asynq.Unique(taskTimeout),
-		asynq.MaxRetry(platform.BackgroundTaskMaxRetry),
+		asynq.MaxRetry(platform.BackgroundTaskMaxRetryValue()),
 		asynq.Timeout(taskTimeout),
 		asynq.Retention(0),
 	)

@@ -33,7 +33,8 @@ func (h *Handler) GetAdminTasks(c *gin.Context) {
 	if !ok {
 		return
 	}
-	limit, ok := parseAdminTaskInt(c, "limit", governanceapp.AdminTaskDefaultLimit, 1, governanceapp.AdminTaskMaxLimit)
+	defaultLimit, maxLimit := governanceapp.AdminTaskLimits()
+	limit, ok := parseAdminTaskInt(c, "limit", defaultLimit, 1, maxLimit)
 	if !ok {
 		return
 	}
@@ -139,7 +140,8 @@ func parseAdminLogFilter(c *gin.Context) (governanceapp.AdminLogListFilter, bool
 	if !ok {
 		return governanceapp.AdminLogListFilter{}, false
 	}
-	limit, ok := parseAdminLogInt(c, "limit", governanceapp.AdminLogDefaultLimit, 1, governanceapp.AdminLogMaxLimit)
+	defaultLimit, maxLimit := governanceapp.AdminLogLimits()
+	limit, ok := parseAdminLogInt(c, "limit", defaultLimit, 1, maxLimit)
 	if !ok {
 		return governanceapp.AdminLogListFilter{}, false
 	}

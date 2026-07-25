@@ -6,20 +6,19 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 )
 
 type GormLogger struct {
 	level         gormlogger.LogLevel
-	slowThreshold time.Duration
 	parameterized bool
 }
 
-func NewGormLogger(slowThreshold time.Duration) *GormLogger {
+func NewGormLogger() *GormLogger {
 	return &GormLogger{
 		level:         gormlogger.Warn,
-		slowThreshold: slowThreshold,
 		parameterized: true,
 	}
 }
@@ -54,6 +53,7 @@ func (l *GormLogger) Trace(ctx context.Context, begin time.Time, fc func() (stri
 	}
 
 	elapsed := time.Since(begin)
+	slowThreshold := runtimeconfig.Duration("slow_sql_threshold_ms", 200*time.Millisecond, time.Millisecond, 0)
 
 	switch {
 	case err != nil && l.level >= gormlogger.Error && !errors.Is(err, gorm.ErrRecordNotFound):
@@ -65,12 +65,12 @@ func (l *GormLogger) Trace(ctx context.Context, begin time.Time, fc func() (stri
 			"rows", rows,
 			"sql", sql,
 		)
-	case l.slowThreshold > 0 && elapsed > l.slowThreshold && l.level >= gormlogger.Warn:
+	case slowThreshold > 0 && elapsed > slowThreshold && l.level >= gormlogger.Warn:
 		sql, rows := fc()
 		Logger(ctx).Warn(
 			"slow sql",
 			"elapsed_ms", elapsed.Seconds()*1000,
-			"threshold_ms", l.slowThreshold.Seconds()*1000,
+			"threshold_ms", slowThreshold.Seconds()*1000,
 			"rows", rows,
 			"sql", sql,
 		)

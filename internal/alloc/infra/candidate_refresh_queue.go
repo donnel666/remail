@@ -36,7 +36,7 @@ func (q *CandidateRefreshQueue) EnqueueInventoryRefresh(ctx context.Context) err
 		asynq.NewTask(TypeInventoryRefresh, nil),
 		asynq.Queue(platform.QueueBackgroundInventory),
 		asynq.Unique(inventoryRefreshTaskTimeout),
-		asynq.MaxRetry(platform.BackgroundTaskMaxRetry),
+		asynq.MaxRetry(platform.BackgroundTaskMaxRetryValue()),
 		asynq.Timeout(inventoryRefreshTaskTimeout),
 		asynq.Retention(0),
 	)
@@ -70,7 +70,7 @@ func (q *CandidateRefreshQueue) EnqueueCandidateRefresh(ctx context.Context, tas
 		asynqTask,
 		asynq.Queue(allocationQueueName),
 		asynq.Unique(candidateRefreshTaskTimeout),
-		asynq.MaxRetry(platform.BackgroundTaskMaxRetry),
+		asynq.MaxRetry(platform.BackgroundTaskMaxRetryValue()),
 		asynq.Timeout(candidateRefreshTaskTimeout),
 		asynq.Retention(0),
 	)

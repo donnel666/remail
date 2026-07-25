@@ -21,8 +21,9 @@ func (a *CoreTaskQueryAdapter) GetRecentByResourceID(ctx context.Context, resour
 	if limit <= 0 {
 		limit = 5
 	}
-	if limit > governanceapp.AdminTaskMaxLimit {
-		limit = governanceapp.AdminTaskMaxLimit
+	_, maxLimit := governanceapp.AdminTaskLimits()
+	if limit > maxLimit {
+		limit = maxLimit
 	}
 	result, err := a.tasks.List(ctx, governanceapp.AdminTaskListFilter{
 		BizType: governanceapp.AdminTaskBizMicrosoftResource,

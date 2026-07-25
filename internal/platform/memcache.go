@@ -3,6 +3,8 @@ package platform
 import (
 	"sync"
 	"time"
+
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 const ttlCacheMaxEntries = 4096
@@ -54,13 +56,14 @@ func (c *TTLCache[K, V]) Set(key K, value V, ttl time.Duration) {
 	}
 	now := c.now()
 	c.mu.Lock()
-	if _, exists := c.items[key]; !exists && len(c.items) >= ttlCacheMaxEntries {
+	maximum := runtimeconfig.Int("ttl_cache_max_entries", ttlCacheMaxEntries, 1)
+	if _, exists := c.items[key]; !exists && len(c.items) >= maximum {
 		for currentKey, entry := range c.items {
 			if !entry.expireAt.After(now) {
 				delete(c.items, currentKey)
 			}
 		}
-		for len(c.items) >= ttlCacheMaxEntries {
+		for len(c.items) >= maximum {
 			for currentKey := range c.items {
 				delete(c.items, currentKey)
 				break

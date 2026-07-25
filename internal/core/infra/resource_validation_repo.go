@@ -14,6 +14,7 @@ import (
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"gorm.io/gorm"
 )
 
@@ -405,8 +406,9 @@ func markValidationCandidatesPendingTx(ctx context.Context, tx *gorm.DB, candida
 		}
 	}
 	now := time.Now().UTC()
-	for start := 0; start < len(microsoftIDs); start += resourceValidationInsertSize {
-		end := start + resourceValidationInsertSize
+	chunkSize := min(runtimeconfig.Int("validation_insert_chunk_size", resourceValidationInsertSize, 1), 10000)
+	for start := 0; start < len(microsoftIDs); start += chunkSize {
+		end := start + chunkSize
 		if end > len(microsoftIDs) {
 			end = len(microsoftIDs)
 		}
@@ -427,8 +429,8 @@ func markValidationCandidatesPendingTx(ctx context.Context, tx *gorm.DB, candida
 			return fmt.Errorf("mark microsoft resources pending for validation: %w", updated.Error)
 		}
 	}
-	for start := 0; start < len(domainIDs); start += resourceValidationInsertSize {
-		end := min(start+resourceValidationInsertSize, len(domainIDs))
+	for start := 0; start < len(domainIDs); start += chunkSize {
+		end := min(start+chunkSize, len(domainIDs))
 		updated := tx.WithContext(ctx).
 			Model(&DomainResourceModel{}).
 			Where("id IN ? AND status NOT IN ?", domainIDs[start:end], []string{

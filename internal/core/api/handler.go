@@ -503,7 +503,7 @@ func (h *CoreHandler) PostResourceValidations(c *gin.Context) {
 		})
 		return
 	}
-	if req.Selection.Mode == "ids" && len(req.Selection.ResourceIDs) > coreapp.ResourceValidationMaxExplicitIDs {
+	if req.Selection.Mode == "ids" && len(req.Selection.ResourceIDs) > coreapp.ResourceValidationMaxExplicitIDsValue() {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"message": "Invalid request body.",
 			"fields": map[string]string{

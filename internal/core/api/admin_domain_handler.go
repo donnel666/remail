@@ -145,10 +145,11 @@ func (h *CoreHandler) GetAdminDomains(c *gin.Context) {
 		writeAdminResourceError(c, domain.ErrResourceDependency)
 		return
 	}
-	if !validateAdminLimitQuery(c, coreapp.AdminResourceMaxLimit) {
+	defaultLimit, maxLimit := coreapp.AdminResourceListLimits()
+	if !validateAdminLimitQuery(c, maxLimit) {
 		return
 	}
-	offset, limit, ok := middleware.ParsePagination(c, middleware.PaginationOptions{DefaultLimit: coreapp.AdminResourceDefaultLimit, MaxLimit: coreapp.AdminResourceMaxLimit})
+	offset, limit, ok := middleware.ParsePagination(c, middleware.PaginationOptions{DefaultLimit: defaultLimit, MaxLimit: maxLimit})
 	if !ok {
 		return
 	}

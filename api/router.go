@@ -53,7 +53,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 	r.Use(middleware.RequestID())
 	r.Use(middleware.SecurityHeaders())
 	r.Use(platform.HTTPMetricsMiddleware())
-	r.Use(middleware.RequestLogger(p.Diagnostics.SlowRequestThreshold))
+	r.Use(middleware.RequestLogger())
 	r.Use(middleware.CORS("http://localhost:3000", "http://127.0.0.1:3000"))
 
 	// Health check endpoints (outside /v1)
@@ -76,6 +76,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 			return nil, cleanup, err
 		}
 		cleanupFuncs = append(cleanupFuncs, systemSettingsMod.Start(context.Background()))
+		p.InitWorkers()
 		// IAM module (activation, auth, users)
 		fileStore := governanceinfra.NewMinIOFileStore(p.MinIO, p.MinIOBucket)
 		retentionLocation, err := time.LoadLocation("Asia/Shanghai")

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	dashboardapp "github.com/donnel666/remail/internal/dashboard/app"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
@@ -348,7 +349,7 @@ func (r *ViewRepo) RefreshLeaderboardCache(ctx context.Context, todayStart time.
 	if err != nil {
 		return err
 	}
-	return r.redis.Set(ctx, leaderboardCacheKey, payload, leaderboardCacheTTL).Err()
+	return r.redis.Set(ctx, leaderboardCacheKey, payload, runtimeconfig.Duration("leaderboard_cache_ttl_minutes", leaderboardCacheTTL, time.Minute, 1)).Err()
 }
 
 func (r *ViewRepo) cachedLeaderboard(ctx context.Context, since *time.Time) ([]dashboardapp.LeaderRow, bool) {

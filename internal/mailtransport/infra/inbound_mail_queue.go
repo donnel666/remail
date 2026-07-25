@@ -17,8 +17,7 @@ const (
 	TypeInboundProcess  = "mailtransport:inbound_process"
 	TypeInboundDispatch = "mailtransport:inbound_dispatch"
 
-	inboundTaskMaxRetry = platform.BackgroundTaskMaxRetry
-	inboundTaskTimeout  = 2 * time.Minute
+	inboundTaskTimeout = 2 * time.Minute
 )
 
 type InboundMailQueue struct {
@@ -73,7 +72,7 @@ func (q *InboundMailQueue) EnqueueInboundProcess(ctx context.Context, task maila
 		asynqTask,
 		asynq.Queue(mailQueueName),
 		asynq.Unique(timeout),
-		asynq.MaxRetry(inboundTaskMaxRetry),
+		asynq.MaxRetry(platform.BackgroundTaskMaxRetryValue()),
 		asynq.Timeout(timeout),
 		asynq.Retention(0),
 	)

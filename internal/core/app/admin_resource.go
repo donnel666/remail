@@ -15,6 +15,7 @@ import (
 	"github.com/donnel666/remail/internal/core/domain"
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 const (
@@ -23,6 +24,11 @@ const (
 	adminTokenExpiringWindow  = 7 * 24 * time.Hour
 	adminIdempotencyKeyMaxLen = 128
 )
+
+func AdminResourceListLimits() (int, int) {
+	settings := runtimeconfig.Snapshot()
+	return min(settings.Int("admin_resource_list_default_limit", AdminResourceDefaultLimit, 1), AdminResourceMaxLimit), AdminResourceMaxLimit
+}
 
 var adminMicrosoftACLRequestedScopes = [...]string{
 	"https://graph.microsoft.com/Mail.Read",
@@ -343,10 +349,11 @@ func (q *AdminResourceQuery) List(ctx context.Context, filter AdminMicrosoftList
 	if err != nil {
 		return nil, err
 	}
+	defaultLimit, maxLimit := AdminResourceListLimits()
 	if limit <= 0 {
-		limit = AdminResourceDefaultLimit
+		limit = defaultLimit
 	}
-	if limit > AdminResourceMaxLimit {
+	if limit > maxLimit {
 		return nil, domain.ErrInvalidResourceFilter
 	}
 	if offset < 0 {
@@ -490,7 +497,8 @@ func (q *AdminResourceQuery) ListAliases(ctx context.Context, resourceID uint, k
 	if kind != "explicit" && kind != "other" {
 		return nil, domain.ErrInvalidResourceFilter
 	}
-	if offset < 0 || limit <= 0 || limit > AdminResourceMaxLimit {
+	_, maxLimit := AdminResourceListLimits()
+	if offset < 0 || limit <= 0 || limit > maxLimit {
 		return nil, domain.ErrInvalidResourceFilter
 	}
 	items, total, err := q.repo.ListAdminMicrosoftAliases(ctx, resourceID, kind, offset, limit)

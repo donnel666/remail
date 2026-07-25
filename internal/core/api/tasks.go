@@ -13,6 +13,7 @@ import (
 	coredomain "github.com/donnel666/remail/internal/core/domain"
 	coreinfra "github.com/donnel666/remail/internal/core/infra"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/hibiken/asynq"
 )
 
@@ -75,7 +76,7 @@ func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 		if module == nil || module.ValidationUseCase == nil {
 			return nil
 		}
-		limit := backgroundValidationWindowLimit(module.BackgroundExecution, resourceValidationDispatchMaximum)
+		limit := backgroundValidationWindowLimit(module.BackgroundExecution, min(runtimeconfig.Int("validation_dispatch_maximum", resourceValidationDispatchMaximum, 1), 10000))
 		if limit <= 0 {
 			return nil
 		}

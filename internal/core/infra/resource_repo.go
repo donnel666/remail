@@ -15,6 +15,7 @@ import (
 	coreapp "github.com/donnel666/remail/internal/core/app"
 	"github.com/donnel666/remail/internal/core/domain"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -1050,7 +1051,7 @@ func (r *ResourceRepo) Facets(ctx context.Context, ownerUserID uint, filter core
 		}
 	}
 
-	r.facetsCache.Set(cacheKey, *cloneResourceListFacets(facets), resourceFacetsCacheTTL)
+	r.facetsCache.Set(cacheKey, *cloneResourceListFacets(facets), runtimeconfig.Duration("resource_facets_cache_ttl_seconds", resourceFacetsCacheTTL, time.Second, 1))
 	return facets, nil
 }
 

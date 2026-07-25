@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/donnel666/remail/internal/governance/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 const (
@@ -24,6 +25,11 @@ const (
 	AdminOperationResultSuccess = "success"
 	AdminOperationResultFailure = "failure"
 )
+
+func AdminLogLimits() (int, int) {
+	settings := runtimeconfig.Snapshot()
+	return min(settings.Int("admin_log_default_limit", AdminLogDefaultLimit, 1), AdminLogMaxLimit), AdminLogMaxLimit
+}
 
 var (
 	ErrInvalidAdminLogQuery = errors.New("invalid administrator log query")
@@ -211,10 +217,11 @@ func normalizeAdminLogFilter(filter AdminLogListFilter, category string) (AdminL
 	if filter.Offset < 0 || len([]rune(filter.Search)) > 200 {
 		return AdminLogListFilter{}, ErrInvalidAdminLogQuery
 	}
+	defaultLimit, maxLimit := AdminLogLimits()
 	if filter.Limit == 0 {
-		filter.Limit = AdminLogDefaultLimit
+		filter.Limit = defaultLimit
 	}
-	if filter.Limit < 1 || filter.Limit > AdminLogMaxLimit {
+	if filter.Limit < 1 || filter.Limit > maxLimit {
 		return AdminLogListFilter{}, ErrInvalidAdminLogQuery
 	}
 	if filter.From != nil && filter.To != nil && filter.From.After(*filter.To) {

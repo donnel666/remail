@@ -21,8 +21,6 @@ const (
 	TypeResourceValidationDispatcher = "core:resource_validation_dispatcher"
 
 	ResourceValidationQueueName     = platform.QueueBackgroundValidation
-	validationTaskMaxRetry          = platform.BackgroundTaskMaxRetry
-	validationBatchTaskMaxRetry     = platform.BackgroundTaskMaxRetry
 	validationTaskTimeout           = 15 * time.Minute
 	validationTaskActivationDelay   = time.Second
 	validationBatchTaskTimeout      = time.Minute
@@ -57,7 +55,7 @@ func (q *ResourceValidationQueue) EnqueueResourceValidation(ctx context.Context,
 		asynqTask,
 		asynq.Queue(ResourceValidationQueueName),
 		asynq.Unique(validationTaskTimeout+validationTaskActivationDelay),
-		asynq.MaxRetry(validationTaskMaxRetry),
+		asynq.MaxRetry(platform.BackgroundTaskMaxRetryValue()),
 		asynq.Timeout(validationTaskTimeout),
 		asynq.ProcessIn(validationTaskActivationDelay),
 		asynq.Retention(0),
@@ -116,7 +114,7 @@ func (q *ResourceValidationQueue) EnqueueResourceValidationBatch(ctx context.Con
 		asynq.NewTask(TypeResourceValidationBatch, payload),
 		asynq.Queue(platform.QueueResource),
 		asynq.Unique(validationBatchTaskTimeout),
-		asynq.MaxRetry(validationBatchTaskMaxRetry),
+		asynq.MaxRetry(platform.BackgroundTaskMaxRetryValue()),
 		asynq.Timeout(validationBatchTaskTimeout),
 		asynq.Retention(0),
 	)

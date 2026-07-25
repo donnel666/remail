@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	mysqldriver "github.com/go-sql-driver/mysql"
 	"github.com/hibiken/asynq"
 	"github.com/minio/minio-go/v7"
@@ -85,6 +86,7 @@ type Platform struct {
 	TicketReplySecret string
 	Turnstile         TurnstileConfig
 	Diagnostics       DiagnosticsConfig
+	redisConfig       RedisConfig
 	workersReady      atomic.Bool
 	workerStop        sync.Once
 	clientClose       sync.Once
@@ -95,7 +97,7 @@ type Platform struct {
 func New(ctx context.Context, cfg *Config) (*Platform, func(), error) {
 	p := &Platform{}
 
-	db, sqlDB, err := initMySQL(ctx, cfg.MySQL, cfg.Diagnostics.SlowSQLThreshold)
+	db, sqlDB, err := initMySQL(ctx, cfg.MySQL)
 	if err != nil {
 		return nil, nil, fmt.Errorf("mysql init: %w", err)
 	}
@@ -119,11 +121,7 @@ func New(ctx context.Context, cfg *Config) (*Platform, func(), error) {
 	p.MinIOBucket = cfg.MinIO.Bucket
 
 	p.Asynq = initAsynq(cfg.Redis)
-	p.RealtimeAsynqServer = initRealtimeAsynqServer(cfg.Redis)
-	p.AsynqServer = initAsynqServer(cfg.Redis)
-	p.BackgroundAsynqServer = initBackgroundAsynqServer(cfg.Redis)
-	p.BackgroundLoad = NewBackgroundLoadController(asynqBackgroundWorkerConcurrency, cfg.BackgroundLoadOverloadPercent)
-	SetMetricsBackgroundLoad(p.BackgroundLoad)
+	p.redisConfig = cfg.Redis
 	p.SMTP = cfg.SMTP
 	p.TrustedProxies = append([]string(nil), cfg.Server.TrustedProxies...)
 
@@ -138,6 +136,20 @@ func New(ctx context.Context, cfg *Config) (*Platform, func(), error) {
 	p.Diagnostics = cfg.Diagnostics
 
 	return p, cleanup, nil
+}
+
+// InitWorkers builds task servers after system settings have been loaded from
+// the database. Worker pool sizes and shutdown timeout are restart-applied
+// settings because Asynq fixes them when a server is constructed.
+func (p *Platform) InitWorkers() {
+	if p == nil || p.RealtimeAsynqServer != nil || p.AsynqServer != nil || p.BackgroundAsynqServer != nil {
+		return
+	}
+	p.RealtimeAsynqServer = initRealtimeAsynqServer(p.redisConfig)
+	p.AsynqServer = initAsynqServer(p.redisConfig)
+	p.BackgroundAsynqServer = initBackgroundAsynqServer(p.redisConfig)
+	p.BackgroundLoad = NewBackgroundLoadController(asynqBackgroundWorkerConcurrencyValue())
+	SetMetricsBackgroundLoad(p.BackgroundLoad)
 }
 
 func (p *Platform) ShutdownWorkers() {
@@ -199,13 +211,13 @@ func (p *Platform) Close() {
 	})
 }
 
-func initMySQL(ctx context.Context, cfg MySQLConfig, slowSQLThreshold time.Duration) (*gorm.DB, *sql.DB, error) {
+func initMySQL(ctx context.Context, cfg MySQLConfig) (*gorm.DB, *sql.DB, error) {
 	formattedDSN, err := mysqlDSN(cfg.DSN)
 	if err != nil {
 		return nil, nil, err
 	}
 	gormCfg := &gorm.Config{
-		Logger:         NewGormLogger(slowSQLThreshold).LogMode(gormlogger.Warn),
+		Logger:         NewGormLogger().LogMode(gormlogger.Warn),
 		TranslateError: true, // Map MySQL errors (e.g. 1062 duplicate) to gorm sentinels
 	}
 
@@ -277,10 +289,10 @@ func initAsynq(cfg RedisConfig) *asynq.Client {
 
 func initAsynqServer(cfg RedisConfig) *asynq.Server {
 	return asynq.NewServer(asynqRedisOptions(cfg), asynq.Config{
-		Concurrency:     asynqWorkerConcurrency,
+		Concurrency:     runtimeconfig.Int("asynq_worker_concurrency", asynqWorkerConcurrency, 1),
 		Queues:          foregroundQueueConfig(),
 		StrictPriority:  false, // weighted polling prevents a large queue from starving another queue
-		ShutdownTimeout: asynqShutdownTimeout,
+		ShutdownTimeout: runtimeconfig.Duration("asynq_shutdown_timeout_seconds", asynqShutdownTimeout, time.Second, 1),
 	})
 }
 
@@ -290,21 +302,21 @@ func initAsynqServer(cfg RedisConfig) *asynq.Server {
 // saturated by long-running bulk tasks.
 func initRealtimeAsynqServer(cfg RedisConfig) *asynq.Server {
 	return asynq.NewServer(asynqRedisOptions(cfg), asynq.Config{
-		Concurrency:     asynqRealtimeWorkerConcurrency,
+		Concurrency:     runtimeconfig.Int("asynq_realtime_worker_concurrency", asynqRealtimeWorkerConcurrency, 1),
 		Queues:          realtimeQueueConfig(),
 		StrictPriority:  false,
-		ShutdownTimeout: asynqShutdownTimeout,
+		ShutdownTimeout: runtimeconfig.Duration("asynq_shutdown_timeout_seconds", asynqShutdownTimeout, time.Second, 1),
 	})
 }
 
 func initBackgroundAsynqServer(cfg RedisConfig) *asynq.Server {
 	return asynq.NewServer(asynqRedisOptions(cfg), asynq.Config{
-		Concurrency:     asynqBackgroundWorkerConcurrency,
+		Concurrency:     asynqBackgroundWorkerConcurrencyValue(),
 		Queues:          backgroundQueueConfig(),
 		StrictPriority:  false, // every non-empty background queue keeps a weighted share
 		RetryDelayFunc:  backgroundRetryDelay,
 		IsFailure:       backgroundIsFailure,
-		ShutdownTimeout: asynqShutdownTimeout,
+		ShutdownTimeout: runtimeconfig.Duration("asynq_shutdown_timeout_seconds", asynqShutdownTimeout, time.Second, 1),
 	})
 }
 
@@ -324,10 +336,16 @@ func backgroundRetryDelay(retried int, err error, task *asynq.Task) time.Duratio
 			_, _ = hash.Write([]byte(task.Type()))
 			_, _ = hash.Write(task.Payload())
 		}
-		jitterSteps := uint32(backgroundRetryDelayJitter/time.Second) + 1
-		return backgroundRetryDelayMinimum + time.Duration(hash.Sum32()%jitterSteps)*time.Second
+		minimum := runtimeconfig.Duration("background_retry_delay_minimum_seconds", backgroundRetryDelayMinimum, time.Second, 1)
+		jitter := runtimeconfig.Duration("background_retry_delay_jitter_seconds", backgroundRetryDelayJitter, time.Second, 0)
+		jitterSteps := uint32(jitter/time.Second) + 1
+		return minimum + time.Duration(hash.Sum32()%jitterSteps)*time.Second
 	}
 	return asynq.DefaultRetryDelayFunc(retried, err, task)
+}
+
+func asynqBackgroundWorkerConcurrencyValue() int {
+	return runtimeconfig.Int("asynq_background_worker_concurrency", asynqBackgroundWorkerConcurrency, 1)
 }
 
 func backgroundIsFailure(err error) bool {

@@ -12,6 +12,7 @@ import (
 
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	"github.com/donnel666/remail/internal/mailtransport/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	smtpserver "github.com/emersion/go-smtp"
 )
 
@@ -44,7 +45,6 @@ func NewInboundSMTPServer(cfg InboundSMTPConfig, accepter InboundAccepter) *Inbo
 	backend := &inboundSMTPBackend{
 		accepter:        accepter,
 		maxMessageBytes: maxMessageBytes,
-		connSlots:       make(chan struct{}, defaultInboundSMTPMaxConnections),
 	}
 	server := smtpserver.NewServer(backend)
 	server.Addr = firstNonEmpty(cfg.Addr, ":2525")
@@ -83,17 +83,18 @@ func (s *InboundSMTPServer) Shutdown(ctx context.Context) error {
 type inboundSMTPBackend struct {
 	accepter        InboundAccepter
 	maxMessageBytes int64
-	connSlots       chan struct{}
+	connMu          sync.Mutex
+	activeConns     int
 }
 
 func (b *inboundSMTPBackend) NewSession(conn *smtpserver.Conn) (smtpserver.Session, error) {
-	if b.connSlots != nil {
-		select {
-		case b.connSlots <- struct{}{}:
-		default:
-			return nil, smtpTemporary("too many connections")
-		}
+	b.connMu.Lock()
+	if b.activeConns >= runtimeconfig.Int("default_inbound_smtp_max_connections", defaultInboundSMTPMaxConnections, 1) {
+		b.connMu.Unlock()
+		return nil, smtpTemporary("too many connections")
 	}
+	b.activeConns++
+	b.connMu.Unlock()
 	remoteAddr := ""
 	if conn != nil && conn.Conn() != nil {
 		remoteAddr = conn.Conn().RemoteAddr().String()
@@ -103,13 +104,11 @@ func (b *inboundSMTPBackend) NewSession(conn *smtpserver.Conn) (smtpserver.Sessi
 		remoteAddr:      remoteAddr,
 		maxMessageBytes: b.maxMessageBytes,
 		releaseConn: func() {
-			if b.connSlots == nil {
-				return
+			b.connMu.Lock()
+			if b.activeConns > 0 {
+				b.activeConns--
 			}
-			select {
-			case <-b.connSlots:
-			default:
-			}
+			b.connMu.Unlock()
 		},
 	}, nil
 }

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/hibiken/asynq"
 	"github.com/stretchr/testify/require"
 )
@@ -58,7 +59,7 @@ func (s *systemLoadReaderStub) callCount() int {
 
 func newBackgroundLoadControllerTestHarness(cpuPercent, memoryPercent float64) (*BackgroundLoadController, *systemLoadReaderStub) {
 	load := &systemLoadReaderStub{cpu: cpuPercent, memory: memoryPercent}
-	return newBackgroundLoadController(load, 128, defaultBackgroundOverloadPercent), load
+	return newBackgroundLoadController(load, 128), load
 }
 
 func saturateBackgroundWindow(t *testing.T, controller *BackgroundLoadController) []func() {
@@ -110,7 +111,7 @@ func TestBackgroundLoadControllerSlowStartsThenAdditivelyRampsToMaximum(t *testi
 
 func TestBackgroundLoadControllerScalesRecoveryStepForFiveHundredTwelveCeiling(t *testing.T) {
 	load := &systemLoadReaderStub{cpu: 20, memory: 20}
-	controller := newBackgroundLoadController(load, 512, defaultBackgroundOverloadPercent)
+	controller := newBackgroundLoadController(load, 512)
 	require.Equal(t, 32, controller.increaseStep)
 	require.Equal(t, 256, controller.slowStartThreshold)
 	var releases []func()
@@ -132,7 +133,7 @@ func TestBackgroundLoadControllerScalesRecoveryStepForFiveHundredTwelveCeiling(t
 
 func TestBackgroundLoadControllerDoesNotRampWhileIdle(t *testing.T) {
 	load := &systemLoadReaderStub{cpu: 10, memory: 10}
-	controller := newBackgroundLoadController(load, 512, defaultBackgroundOverloadPercent)
+	controller := newBackgroundLoadController(load, 512)
 
 	for range 32 {
 		controller.sampleAndTune(context.Background())
@@ -143,7 +144,7 @@ func TestBackgroundLoadControllerDoesNotRampWhileIdle(t *testing.T) {
 
 func TestBackgroundLoadControllerCapsAdditiveRecoveryAtLowWindow(t *testing.T) {
 	load := &systemLoadReaderStub{cpu: 20, memory: 20}
-	controller := newBackgroundLoadController(load, 512, defaultBackgroundOverloadPercent)
+	controller := newBackgroundLoadController(load, 512)
 	controller.gate.Resize(backgroundWorkerMinimum)
 	controller.slowStartThreshold = backgroundWorkerMinimum
 	releases := saturateBackgroundWindow(t, controller)
@@ -215,8 +216,10 @@ func TestBackgroundLoadControllerUsesFortyToFiftyPercentHysteresisBand(t *testin
 }
 
 func TestBackgroundLoadControllerUsesConfiguredOverloadPercent(t *testing.T) {
+	runtimeconfig.Set("background_load_overload_percent", "70")
+	t.Cleanup(func() { runtimeconfig.Delete("background_load_overload_percent") })
 	load := &systemLoadReaderStub{cpu: 50, memory: 20}
-	controller := newBackgroundLoadController(load, 128, 70)
+	controller := newBackgroundLoadController(load, 128)
 	controller.gate.Resize(128)
 
 	controller.sampleAndTune(context.Background())

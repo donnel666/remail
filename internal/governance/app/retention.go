@@ -8,6 +8,7 @@ import (
 
 	"github.com/donnel666/remail/internal/governance/domain"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 const (
@@ -31,6 +32,33 @@ type RetentionRepository interface {
 type RetentionInboundMailObject struct {
 	ID        uint64
 	ObjectKey string
+}
+
+type retentionSettings struct {
+	batchSize           int
+	batchSleep          time.Duration
+	idempotencyDays     int
+	mailmatchMSDays     int
+	mailmatchDomainDays int
+	dailyUsageDays      int
+	outboundMailDays    int
+	inboundMailDays     int
+	systemLogDays       int
+}
+
+func currentRetentionSettings() retentionSettings {
+	settings := runtimeconfig.Snapshot()
+	return retentionSettings{
+		batchSize:           min(settings.Int("retention_batch_size", retentionBatchSize, 1), 100000),
+		batchSleep:          settings.Duration("retention_batch_sleep_ms", retentionBatchSleep, time.Millisecond, 0),
+		idempotencyDays:     settings.Int("idempotency_key_retain_days", 30, 1),
+		mailmatchMSDays:     settings.Int("mailmatch_ms_retain_days", 3, 1),
+		mailmatchDomainDays: settings.Int("mailmatch_domain_retain_days", 30, 1),
+		dailyUsageDays:      settings.Int("daily_usage_retain_days", 14, 1),
+		outboundMailDays:    settings.Int("outbound_mail_retain_days", 30, 1),
+		inboundMailDays:     settings.Int("inbound_mail_retain_days", 30, 1),
+		systemLogDays:       settings.Int("system_log_retain_days", 30, 1),
+	}
 }
 
 type RetentionService struct {
@@ -62,10 +90,16 @@ func (s *RetentionService) StartDaily(ctx context.Context, loc *time.Location) f
 		defer close(done)
 		for {
 			next := nextRetentionRunAt(s.now(), loc)
-			timer := time.NewTimer(time.Until(next))
+			wait := time.Until(next)
+			if wait > time.Minute {
+				wait = time.Minute
+			}
+			timer := time.NewTimer(wait)
 			select {
 			case <-timer.C:
-				s.RunOnce(runCtx)
+				if !s.now().Before(next) {
+					s.RunOnce(runCtx)
+				}
 			case <-runCtx.Done():
 				timer.Stop()
 				return
@@ -83,7 +117,8 @@ func (s *RetentionService) StartDaily(ctx context.Context, loc *time.Location) f
 
 func nextRetentionRunAt(now time.Time, loc *time.Location) time.Time {
 	localNow := now.In(loc)
-	next := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), retentionDailyRunHour, 0, 0, 0, loc)
+	hour := runtimeconfig.Int("retention_daily_run_hour", retentionDailyRunHour, 0)
+	next := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), hour, 0, 0, 0, loc)
 	if !next.After(localNow) {
 		next = next.Add(24 * time.Hour)
 	}
@@ -95,33 +130,34 @@ func (s *RetentionService) RunOnce(ctx context.Context) {
 		return
 	}
 	now := s.now()
+	settings := currentRetentionSettings()
 	summary := make([]string, 0, 12)
-	summary = append(summary, s.deleteLoop(ctx, "idempotency_keys", now.AddDate(0, 0, -30), func(ctx context.Context, before time.Time) (int64, error) {
-		return s.repo.DeleteIdempotencyKeysBefore(ctx, before, retentionBatchSize)
+	summary = append(summary, s.deleteLoop(ctx, "idempotency_keys", now.AddDate(0, 0, -settings.idempotencyDays), settings, func(ctx context.Context, before time.Time) (int64, error) {
+		return s.repo.DeleteIdempotencyKeysBefore(ctx, before, settings.batchSize)
 	}))
-	summary = append(summary, s.deleteLoop(ctx, "mailmatch_messages_microsoft", now.AddDate(0, 0, -3), func(ctx context.Context, before time.Time) (int64, error) {
-		return s.repo.DeleteMailmatchMessagesBefore(ctx, before, "microsoft", retentionBatchSize)
+	summary = append(summary, s.deleteLoop(ctx, "mailmatch_messages_microsoft", now.AddDate(0, 0, -settings.mailmatchMSDays), settings, func(ctx context.Context, before time.Time) (int64, error) {
+		return s.repo.DeleteMailmatchMessagesBefore(ctx, before, "microsoft", settings.batchSize)
 	}))
-	summary = append(summary, s.deleteLoop(ctx, "mailmatch_messages_domain", now.AddDate(0, 0, -30), func(ctx context.Context, before time.Time) (int64, error) {
-		return s.repo.DeleteMailmatchMessagesBefore(ctx, before, "domain", retentionBatchSize)
+	summary = append(summary, s.deleteLoop(ctx, "mailmatch_messages_domain", now.AddDate(0, 0, -settings.mailmatchDomainDays), settings, func(ctx context.Context, before time.Time) (int64, error) {
+		return s.repo.DeleteMailmatchMessagesBefore(ctx, before, "domain", settings.batchSize)
 	}))
-	summary = append(summary, s.deleteLoop(ctx, "allocation_daily_usages", now.AddDate(0, 0, -14), func(ctx context.Context, before time.Time) (int64, error) {
-		return s.repo.DeleteAllocationDailyUsagesBefore(ctx, before, retentionBatchSize)
+	summary = append(summary, s.deleteLoop(ctx, "allocation_daily_usages", now.AddDate(0, 0, -settings.dailyUsageDays), settings, func(ctx context.Context, before time.Time) (int64, error) {
+		return s.repo.DeleteAllocationDailyUsagesBefore(ctx, before, settings.batchSize)
 	}))
-	summary = append(summary, s.deleteLoop(ctx, "outbound_mails", now.AddDate(0, 0, -30), func(ctx context.Context, before time.Time) (int64, error) {
-		return s.repo.DeleteOutboundMailsTerminalBefore(ctx, before, retentionBatchSize)
+	summary = append(summary, s.deleteLoop(ctx, "outbound_mails", now.AddDate(0, 0, -settings.outboundMailDays), settings, func(ctx context.Context, before time.Time) (int64, error) {
+		return s.repo.DeleteOutboundMailsTerminalBefore(ctx, before, settings.batchSize)
 	}))
-	summary = append(summary, s.deleteLoop(ctx, "system_logs", now.AddDate(0, 0, -30), func(ctx context.Context, before time.Time) (int64, error) {
-		return s.repo.DeleteSystemLogsBefore(ctx, before, retentionBatchSize)
+	summary = append(summary, s.deleteLoop(ctx, "system_logs", now.AddDate(0, 0, -settings.systemLogDays), settings, func(ctx context.Context, before time.Time) (int64, error) {
+		return s.repo.DeleteSystemLogsBefore(ctx, before, settings.batchSize)
 	}))
-	inboundBefore := now.AddDate(0, 0, -30)
-	summary = append(summary, s.deleteInboundMails(ctx, inboundBefore))
-	summary = append(summary, s.deleteOrphanInboundObjects(ctx, inboundBefore))
+	inboundBefore := now.AddDate(0, 0, -settings.inboundMailDays)
+	summary = append(summary, s.deleteInboundMails(ctx, inboundBefore, settings))
+	summary = append(summary, s.deleteOrphanInboundObjects(ctx, inboundBefore, settings))
 	s.writeSummary(ctx, strings.Join(summary, "; "))
 	platform.RecordBusinessEvent("retention", "completed")
 }
 
-func (s *RetentionService) deleteLoop(ctx context.Context, name string, before time.Time, deleteBatch func(context.Context, time.Time) (int64, error)) string {
+func (s *RetentionService) deleteLoop(ctx context.Context, name string, before time.Time, settings retentionSettings, deleteBatch func(context.Context, time.Time) (int64, error)) string {
 	var total int64
 	for {
 		if ctx.Err() != nil {
@@ -132,20 +168,20 @@ func (s *RetentionService) deleteLoop(ctx context.Context, name string, before t
 			return fmt.Sprintf("%s=%d error=%s", name, total, safeRetentionDetail(err))
 		}
 		total += deleted
-		if deleted == 0 || deleted < retentionBatchSize {
+		if deleted == 0 || deleted < int64(settings.batchSize) {
 			return fmt.Sprintf("%s=%d", name, total)
 		}
-		sleepOrDone(ctx, retentionBatchSleep)
+		sleepOrDone(ctx, settings.batchSleep)
 	}
 }
 
-func (s *RetentionService) deleteInboundMails(ctx context.Context, before time.Time) string {
+func (s *RetentionService) deleteInboundMails(ctx context.Context, before time.Time, settings retentionSettings) string {
 	var total int64
 	for {
 		if ctx.Err() != nil {
 			return fmt.Sprintf("inbound_mails=%d canceled", total)
 		}
-		objects, err := s.repo.ListInboundMailObjectsBefore(ctx, before, retentionBatchSize)
+		objects, err := s.repo.ListInboundMailObjectsBefore(ctx, before, settings.batchSize)
 		if err != nil {
 			return fmt.Sprintf("inbound_mails=%d error=%s", total, safeRetentionDetail(err))
 		}
@@ -168,14 +204,14 @@ func (s *RetentionService) deleteInboundMails(ctx context.Context, before time.T
 				}
 			}
 		}
-		if len(objects) < retentionBatchSize {
+		if len(objects) < settings.batchSize {
 			return fmt.Sprintf("inbound_mails=%d", total)
 		}
-		sleepOrDone(ctx, retentionBatchSleep)
+		sleepOrDone(ctx, settings.batchSleep)
 	}
 }
 
-func (s *RetentionService) deleteOrphanInboundObjects(ctx context.Context, before time.Time) string {
+func (s *RetentionService) deleteOrphanInboundObjects(ctx context.Context, before time.Time, settings retentionSettings) string {
 	if s.files == nil {
 		return "inbound_orphans=0 no_file_store"
 	}
@@ -185,7 +221,7 @@ func (s *RetentionService) deleteOrphanInboundObjects(ctx context.Context, befor
 		if ctx.Err() != nil {
 			return fmt.Sprintf("inbound_orphans=%d canceled", total)
 		}
-		objects, err := s.files.ListPrivate(ctx, inboundObjectPrefix, startAfter, retentionBatchSize)
+		objects, err := s.files.ListPrivate(ctx, inboundObjectPrefix, startAfter, settings.batchSize)
 		if err != nil {
 			return fmt.Sprintf("inbound_orphans=%d error=%s", total, safeRetentionDetail(err))
 		}
@@ -216,11 +252,11 @@ func (s *RetentionService) deleteOrphanInboundObjects(ctx context.Context, befor
 				total++
 			}
 		}
-		if len(objects) < retentionBatchSize {
+		if len(objects) < settings.batchSize {
 			return fmt.Sprintf("inbound_orphans=%d", total)
 		}
 		startAfter = objects[len(objects)-1].ObjectKey
-		sleepOrDone(ctx, retentionBatchSleep)
+		sleepOrDone(ctx, settings.batchSleep)
 	}
 }
 

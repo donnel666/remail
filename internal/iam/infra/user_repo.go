@@ -14,6 +14,7 @@ import (
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	"github.com/donnel666/remail/internal/iam/domain"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -582,8 +583,9 @@ const bulkUserChunkSize = 5000
 // batchInChunks runs fn over ids in bounded chunks and sums the rows affected.
 func batchInChunks(ids []uint, fn func(chunk []uint) (int64, error)) (int64, error) {
 	var total int64
-	for start := 0; start < len(ids); start += bulkUserChunkSize {
-		end := start + bulkUserChunkSize
+	chunkSize := min(runtimeconfig.Int("bulk_user_chunk_size", bulkUserChunkSize, 1), 10000)
+	for start := 0; start < len(ids); start += chunkSize {
+		end := start + chunkSize
 		if end > len(ids) {
 			end = len(ids)
 		}

@@ -54,7 +54,7 @@ func (q *MicrosoftAliasQueue) EnqueueMicrosoftAlias(ctx context.Context, task ma
 		asynqTask,
 		asynq.Queue(MicrosoftAliasQueueName),
 		asynq.Unique(taskTimeout),
-		asynq.MaxRetry(platform.BackgroundTaskMaxRetry),
+		asynq.MaxRetry(platform.BackgroundTaskMaxRetryValue()),
 		asynq.Timeout(taskTimeout),
 		asynq.Retention(0),
 	)

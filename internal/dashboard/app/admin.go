@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"time"
+
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 // Admin platform dashboard. Reuses the bucketing/label helpers in service.go.
@@ -161,6 +163,10 @@ func NewAdminQueryService(view AdminView, finance AdminFinancePort, inventory Ad
 
 const adminRankingLimit = 10
 
+func adminRankingLimitValue() int {
+	return min(runtimeconfig.Int("admin_ranking_limit", adminRankingLimit, 1), 100)
+}
+
 func (s *AdminQueryService) AdminDashboard(ctx context.Context, from, to *time.Time) (*AdminDashboard, error) {
 	now := s.now()
 	fromT, toT := resolveRange(from, to, now)
@@ -201,11 +207,12 @@ func (s *AdminQueryService) AdminDashboard(ctx context.Context, from, to *time.T
 	if err != nil {
 		return nil, err
 	}
-	codeRanking, err := s.view.ProjectCodeRanking(ctx, fromT, toT, adminRankingLimit)
+	rankingLimit := adminRankingLimitValue()
+	codeRanking, err := s.view.ProjectCodeRanking(ctx, fromT, toT, rankingLimit)
 	if err != nil {
 		return nil, err
 	}
-	inventoryRanking, err := s.inventory.ProjectInventoryRanking(ctx, adminRankingLimit)
+	inventoryRanking, err := s.inventory.ProjectInventoryRanking(ctx, rankingLimit)
 	if err != nil {
 		return nil, err
 	}

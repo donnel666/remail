@@ -226,6 +226,14 @@ func ResourceValidationMaxFailuresValue() int {
 	return min(runtimeconfig.Int("resource_validation_max_failures", ResourceValidationMaxFailures, 1), resourceValidationFailuresLimit)
 }
 
+func ResourceValidationMaxExplicitIDsValue() int {
+	return min(runtimeconfig.Int("resource_validation_max_ids", ResourceValidationMaxExplicitIDs, 1), ResourceValidationMaxExplicitIDs)
+}
+
+func resourceValidationBatchPageSizeValue() int {
+	return min(runtimeconfig.Int("validation_batch_page_size", resourceValidationBatchPageSize, 1), ResourceValidationMaxExplicitIDs)
+}
+
 var ErrValidationTemporaryUnavailable = errors.New("resource validation temporary unavailable")
 
 // ErrValidationResultStale means a Redis task was fenced off because the
@@ -319,7 +327,7 @@ func (uc *ResourceValidationUseCase) CreateBatch(ctx context.Context, selection 
 	}
 	switch selection.Mode {
 	case ResourceBulkSelectionIDs:
-		if len(selection.ResourceIDs) > ResourceValidationMaxExplicitIDs {
+		if len(selection.ResourceIDs) > ResourceValidationMaxExplicitIDsValue() {
 			return nil, domain.ErrResourceSelectionTooLarge
 		}
 		ids := uniqueResourceIDs(selection.ResourceIDs)
@@ -369,7 +377,7 @@ func (uc *ResourceValidationUseCase) ProcessBatch(ctx context.Context, task Reso
 			return nil
 		}
 	}
-	page, err := uc.validations.MarkValidationBatchPending(ctx, task, resourceValidationBatchPageSize)
+	page, err := uc.validations.MarkValidationBatchPending(ctx, task, resourceValidationBatchPageSizeValue())
 	if err != nil {
 		return err
 	}

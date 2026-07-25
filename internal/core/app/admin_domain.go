@@ -12,6 +12,7 @@ import (
 	"github.com/donnel666/remail/internal/core/domain"
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 type AdminDomainListFilter struct {
@@ -121,10 +122,11 @@ func (q *AdminDomainQuery) List(ctx context.Context, filter AdminDomainListFilte
 	if err != nil {
 		return nil, err
 	}
+	defaultLimit, maxLimit := AdminResourceListLimits()
 	if limit <= 0 {
-		limit = AdminResourceDefaultLimit
+		limit = defaultLimit
 	}
-	if limit > AdminResourceMaxLimit || offset < 0 {
+	if limit > maxLimit || offset < 0 {
 		return nil, domain.ErrInvalidResourceFilter
 	}
 	records, total, err := q.repo.ListAdminDomains(ctx, filter, offset, limit, afterID)
@@ -313,6 +315,14 @@ const (
 	// ponytail: domain batches stay synchronous up to this bounded dashboard ceiling; move filter batches to the existing durable worker pattern if measured volume exceeds it.
 	AdminDomainBulkMaxFilter = 10_000
 )
+
+func adminDomainBulkMaxExplicitIDsValue() int {
+	return min(runtimeconfig.Int("admin_domain_bulk_max_ids", AdminDomainBulkMaxExplicitIDs, 1), AdminDomainBulkMaxExplicitIDs)
+}
+
+func adminDomainBulkMaxFilterValue() int {
+	return min(runtimeconfig.Int("admin_domain_bulk_max_filter", AdminDomainBulkMaxFilter, 1), AdminDomainBulkMaxFilter)
+}
 
 type AdminDomainBulkSelection struct {
 	Mode        AdminDomainBulkSelectionMode `json:"mode"`
@@ -723,11 +733,12 @@ func (s *AdminDomainCommandService) ApplyBulk(ctx context.Context, action string
 		}
 		ids := selection.ResourceIDs
 		if selection.Mode == AdminDomainBulkFilter {
-			ids, err = s.repo.ListAdminDomainIDs(txCtx, selection.Filter, AdminDomainBulkMaxFilter+1)
+			maximum := adminDomainBulkMaxFilterValue()
+			ids, err = s.repo.ListAdminDomainIDs(txCtx, selection.Filter, maximum+1)
 			if err != nil {
 				return err
 			}
-			if len(ids) > AdminDomainBulkMaxFilter {
+			if len(ids) > maximum {
 				return domain.ErrResourceSelectionTooLarge
 			}
 		}
@@ -854,7 +865,7 @@ func (s *AdminDomainCommandService) normalizeBulkSelection(ctx context.Context, 
 		if len(selection.ResourceIDs) == 0 {
 			return AdminDomainBulkSelection{}, nil, domain.ErrResourceNotFound
 		}
-		if len(selection.ResourceIDs) > AdminDomainBulkMaxExplicitIDs {
+		if len(selection.ResourceIDs) > adminDomainBulkMaxExplicitIDsValue() {
 			return AdminDomainBulkSelection{}, nil, domain.ErrResourceSelectionTooLarge
 		}
 		return selection, struct {

@@ -16,7 +16,6 @@ const (
 	TypeMicrosoftImport = "core:microsoft_import"
 
 	importQueueName       = platform.QueueDefault
-	importTaskMaxRetry    = platform.BackgroundTaskMaxRetry
 	importTaskTimeout     = 30 * time.Minute
 	importActivationDelay = time.Second
 )
@@ -46,7 +45,7 @@ func (q *ResourceImportQueue) EnqueueMicrosoftImport(ctx context.Context, task c
 		asynqTask,
 		asynq.Queue(importQueueName),
 		asynq.Unique(importTaskTimeout+importActivationDelay),
-		asynq.MaxRetry(importTaskMaxRetry),
+		asynq.MaxRetry(platform.BackgroundTaskMaxRetryValue()),
 		asynq.Timeout(importTaskTimeout),
 		asynq.ProcessIn(importActivationDelay),
 		asynq.Retention(0),

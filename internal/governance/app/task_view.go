@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 const (
@@ -44,6 +46,11 @@ const (
 	AdminTaskSourceToken         = "token"
 	AdminTaskSourceFetch         = "fetch"
 )
+
+func AdminTaskLimits() (int, int) {
+	settings := runtimeconfig.Snapshot()
+	return min(settings.Int("admin_task_default_limit", AdminTaskDefaultLimit, 1), AdminTaskMaxLimit), AdminTaskMaxLimit
+}
 
 var (
 	ErrInvalidAdminTaskQuery = errors.New("invalid administrator task query")
@@ -238,10 +245,11 @@ func normalizeAdminTaskListFilter(filter AdminTaskListFilter) (AdminTaskListFilt
 	if (filter.BizType != AdminTaskBizMicrosoftResource && filter.BizType != AdminTaskBizDomainResource) || filter.BizID == 0 || filter.Offset < 0 {
 		return AdminTaskListFilter{}, ErrInvalidAdminTaskQuery
 	}
+	defaultLimit, maxLimit := AdminTaskLimits()
 	if filter.Limit == 0 {
-		filter.Limit = AdminTaskDefaultLimit
+		filter.Limit = defaultLimit
 	}
-	if filter.Limit < 1 || filter.Limit > AdminTaskMaxLimit {
+	if filter.Limit < 1 || filter.Limit > maxLimit {
 		return AdminTaskListFilter{}, ErrInvalidAdminTaskQuery
 	}
 	if filter.Kind != "" && !isAdminTaskKind(filter.Kind) {

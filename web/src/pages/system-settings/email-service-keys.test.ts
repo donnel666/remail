@@ -12,13 +12,25 @@ import {
   MICROSOFT_OPS_KEYS,
   PROXY_NETWORK_KEYS,
 } from "./email-service-keys";
+import {
+  ADMIN_MONITOR_KEYS,
+  BACKGROUND_JOB_KEYS,
+  BATCH_OPERATION_KEYS,
+  RETENTION_KEYS,
+} from "./system-operations-keys";
 
 const defaultsSource = readFileSync(
   new URL("../../../../internal/systemsettings/runtimeconfig/defaults.go", import.meta.url),
   "utf8",
 );
 const backendKeys = [...defaultsSource.matchAll(/\{Key: "([^\"]+)"/g)].map((match) => match[1]);
-const frontendGroups = [
+const nonUIRuntimeKeys = new Set([
+  "admin_resource_list_default_limit",
+  "admin_log_default_limit",
+  "admin_task_default_limit",
+  "admin_message_default_limit",
+]);
+const emailServiceGroups = [
   EMAIL_RESOURCE_KEYS,
   ALLOCATION_KEYS,
   MAILMATCH_KEYS,
@@ -26,12 +38,21 @@ const frontendGroups = [
   PROXY_NETWORK_KEYS,
   MAIL_DELIVERY_KEYS,
 ];
+const frontendGroups = [
+  ...emailServiceGroups,
+  BACKGROUND_JOB_KEYS,
+  BATCH_OPERATION_KEYS,
+  RETENTION_KEYS,
+  ADMIN_MONITOR_KEYS,
+];
 
-describe("email service setting keys", () => {
+describe("system setting keys", () => {
   it("keeps frontend groups unique and aligned with backend defaults", () => {
+    const emailServiceKeys = emailServiceGroups.flat();
     const frontendKeys = frontendGroups.flat();
+    const visibleBackendKeys = backendKeys.filter((key) => !nonUIRuntimeKeys.has(key));
     expect(new Set(frontendKeys).size).toBe(frontendKeys.length);
-    expect(new Set(frontendKeys)).toEqual(new Set(backendKeys));
-    expect(EMAIL_SERVICE_KEYS).toEqual(frontendKeys);
+    expect(new Set(frontendKeys)).toEqual(new Set(visibleBackendKeys));
+    expect(EMAIL_SERVICE_KEYS).toEqual(emailServiceKeys);
   });
 });

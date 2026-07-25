@@ -8,12 +8,30 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	coredomain "github.com/donnel666/remail/internal/core/domain"
 	maildomain "github.com/donnel666/remail/internal/mailtransport/domain"
 	"github.com/donnel666/remail/internal/mailtransport/infra/msacl"
+	systemsettingsinfra "github.com/donnel666/remail/internal/systemsettings/infra"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
+
+func TestLoadRecoveryRuntimeSettings(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&systemsettingsinfra.SettingModel{}))
+	_, err = systemsettingsinfra.NewRepository(db).Upsert(context.Background(), "slow_sql_threshold_ms", "321")
+	require.NoError(t, err)
+	t.Cleanup(func() { runtimeconfig.Delete("slow_sql_threshold_ms") })
+
+	loadRecoveryRuntimeSettings(context.Background(), db)
+
+	require.Equal(t, 321*time.Millisecond, runtimeconfig.Duration("slow_sql_threshold_ms", 200*time.Millisecond, time.Millisecond, 0))
+}
 
 func TestParseCommandOptionsDefaultsToSafeBindingDryRun(t *testing.T) {
 	options, err := parseCommandOptions([]string{"-resource-id", "2"}, new(bytes.Buffer))
