@@ -2,7 +2,7 @@ package runtimeconfig
 
 import "github.com/donnel666/remail/internal/systemsettings/domain"
 
-const DefaultSettingsCount = 164
+const DefaultSettingsCount = 168
 
 // DefaultSettings is the single source of initial values for runtime-managed
 // settings. Startup inserts only keys that are not in storage.
@@ -32,6 +32,10 @@ var defaultSettings = []domain.Setting{
 	{Key: "global_notice", Value: ""},
 	{Key: "faq_enabled", Value: "true"},
 	{Key: "faq_list", Value: "[]"},
+	{Key: "first_order_rebate_ratio", Value: "0.8"},
+	{Key: "single_rebate_cap", Value: "0"},
+	{Key: "cumulative_rebate_cap", Value: "0"},
+	{Key: "rebate_expiry_days", Value: "90"},
 	{Key: "epay_enabled", Value: "false"},
 	{Key: "epay_version", Value: "v1"},
 	{Key: "epay_gateway_url", Value: ""},

@@ -27,6 +27,7 @@ var integerRanges = map[string]integerRange{
 	"email_code_email_limit": positive(1000), "email_code_ip_limit": positive(10000), "email_code_window_seconds": positive(86400), "captcha_rate_limit": positive(10000),
 	"email_code_ttl_seconds": positive(86400), "email_code_resend_gap_seconds": positive(3600), "email_code_digit_len": {min: 4, max: 10},
 	"bcrypt_cost": {min: 4, max: 16}, "session_max_age_seconds": {min: 300, max: 31_536_000},
+	"rebate_expiry_days":                  {min: 0, max: 36500},
 	"async_check_request_timeout_seconds": {min: 1, max: 30},
 
 	"default_plus_daily_limit": positive(2_147_483_647), "default_mailbox_daily_limit": positive(2_147_483_647), "resource_validation_max_failures": positive(100),
@@ -110,7 +111,7 @@ func Validate(key, value string) error {
 		if len(rawValue) > maxSystemNoticeBytes {
 			return domain.ErrInvalidValue
 		}
-	case "registration_reward_amount", "topup_fee_cap":
+	case "registration_reward_amount", "single_rebate_cap", "cumulative_rebate_cap", "topup_fee_cap":
 		amount, err := money.Parse(value)
 		if err != nil || amount.IsNegative() {
 			return domain.ErrInvalidValue
@@ -123,6 +124,11 @@ func Validate(key, value string) error {
 	case "topup_fee_rate":
 		rate, err := money.Parse(value)
 		if err != nil || rate.IsNegative() || rate.GreaterThan(decimal.NewFromInt(100)) {
+			return domain.ErrInvalidValue
+		}
+	case "first_order_rebate_ratio":
+		ratio, err := money.Parse(value)
+		if err != nil || ratio.IsNegative() || ratio.GreaterThan(decimal.NewFromInt(1)) {
 			return domain.ErrInvalidValue
 		}
 	case "token_refresh_hour":

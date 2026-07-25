@@ -14,7 +14,9 @@ import (
 	"github.com/donnel666/remail/internal/billing/domain"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
+	"github.com/donnel666/remail/internal/money"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/go-sql-driver/mysql"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
@@ -140,6 +142,7 @@ type ReferralRewardModel struct {
 	RewardAmount          string     `gorm:"type:decimal(18,6);not null;column:reward_amount"`
 	Status                string     `gorm:"type:varchar(32);not null;default:'available'"`
 	TransferredAt         *time.Time `gorm:"column:transferred_at"`
+	ExpiresAt             *time.Time `gorm:"column:expires_at"`
 	CreatedAt             time.Time  `gorm:"not null;autoCreateTime;column:created_at"`
 }
 
@@ -229,7 +232,7 @@ func (r *BillingRepo) GetReferralSummary(ctx context.Context, userID uint) (*dom
 	if err := r.db.WithContext(ctx).
 		Model(&ReferralRewardModel{}).
 		Select("COALESCE(SUM(reward_amount), 0)").
-		Where("inviter_user_id = ? AND status = ?", userID, "available").
+		Where("inviter_user_id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)", userID, "available", time.Now().UTC()).
 		Scan(&pendingRewards).Error; err != nil {
 		return nil, fmt.Errorf("sum pending referral rewards: %w", err)
 	}
@@ -881,7 +884,7 @@ func (r *BillingRepo) redeemCardInTx(ctx context.Context, tx *gorm.DB, req billi
 	if err != nil {
 		return nil, err
 	}
-	wallets, err := r.lockWalletsInTx(ctx, tx, req.UserID)
+	wallets, err := r.lockWalletsInTx(ctx, tx, req.UserID, referral.InviterUserID)
 	if err != nil {
 		return nil, err
 	}
@@ -962,7 +965,7 @@ func (r *BillingRepo) transferReferralRewardsInTx(ctx context.Context, tx *gorm.
 	var rewards []ReferralRewardModel
 	if err := tx.WithContext(ctx).
 		Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("inviter_user_id = ? AND status = ?", req.UserID, "available").
+		Where("inviter_user_id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)", req.UserID, "available", req.Now).
 		Order("id ASC").
 		Find(&rewards).Error; err != nil {
 		return nil, fmt.Errorf("lock referral rewards: %w", err)
@@ -1061,10 +1064,35 @@ func (r *BillingRepo) settleReferralRewardInTx(
 	if err != nil || !sourceAmount.IsPositive() {
 		return domain.ErrInvalidAmount
 	}
-	rewardAmount := sourceAmount.Mul(decimal.NewFromInt(80)).Div(decimal.NewFromInt(100))
+	settings := runtimeconfig.Snapshot()
+	ratio := decimalSetting(settings.String("first_order_rebate_ratio", "0.8"), decimal.RequireFromString("0.8"), decimal.Zero, decimal.NewFromInt(1))
+	singleCap := decimalSetting(settings.String("single_rebate_cap", "0"), decimal.Zero, decimal.Zero, decimal.Zero)
+	cumulativeCap := decimalSetting(settings.String("cumulative_rebate_cap", "0"), decimal.Zero, decimal.Zero, decimal.Zero)
+	totalEarned := decimal.Zero
+	if cumulativeCap.IsPositive() {
+		var rawTotal string
+		if err := tx.WithContext(ctx).
+			Model(&ReferralRewardModel{}).
+			Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("COALESCE(SUM(reward_amount), 0)").
+			Where("inviter_user_id = ?", relation.InviterUserID).
+			Scan(&rawTotal).Error; err != nil {
+			return fmt.Errorf("sum cumulative referral rewards: %w", err)
+		}
+		totalEarned, err = domain.ParseMoney(rawTotal)
+		if err != nil {
+			return err
+		}
+	}
+	rewardAmount := calculateReferralReward(sourceAmount, totalEarned, ratio, singleCap, cumulativeCap)
 	rewardAmountString := domain.MoneyString(rewardAmount)
 	if rewardAmountString == "0.00" {
 		return nil
+	}
+	var expiresAt *time.Time
+	if expiryDays := settings.Int("rebate_expiry_days", 90, 0); expiryDays > 0 {
+		expiry := source.CreatedAt.AddDate(0, 0, expiryDays)
+		expiresAt = &expiry
 	}
 
 	reward := ReferralRewardModel{
@@ -1075,6 +1103,7 @@ func (r *BillingRepo) settleReferralRewardInTx(
 		SourceAmount:        source.Amount,
 		RewardAmount:        rewardAmountString,
 		Status:              "available",
+		ExpiresAt:           expiresAt,
 	}
 	if err := tx.WithContext(ctx).Create(&reward).Error; err != nil {
 		if isDuplicateKeyError(err) {
@@ -1083,6 +1112,31 @@ func (r *BillingRepo) settleReferralRewardInTx(
 		return fmt.Errorf("create referral reward: %w", err)
 	}
 	return nil
+}
+
+func decimalSetting(value string, fallback, minimum, maximum decimal.Decimal) decimal.Decimal {
+	parsed, err := money.Parse(value)
+	if err != nil || parsed.LessThan(minimum) || maximum.IsPositive() && parsed.GreaterThan(maximum) {
+		return fallback
+	}
+	return parsed
+}
+
+func calculateReferralReward(source, totalEarned, ratio, singleCap, cumulativeCap decimal.Decimal) decimal.Decimal {
+	reward := source.Mul(ratio)
+	if singleCap.IsPositive() && reward.GreaterThan(singleCap) {
+		reward = singleCap
+	}
+	if cumulativeCap.IsPositive() {
+		remaining := cumulativeCap.Sub(totalEarned)
+		if !remaining.IsPositive() {
+			return decimal.Zero
+		}
+		if reward.GreaterThan(remaining) {
+			reward = remaining
+		}
+	}
+	return reward
 }
 
 func (r *BillingRepo) getOrCreateWallet(ctx context.Context, tx *gorm.DB, userID uint) (WalletModel, error) {

@@ -20,6 +20,7 @@ import {
   BATCH_OPERATION_KEYS,
   RETENTION_KEYS,
 } from "./system-operations-keys";
+import { RECHARGE_REBATE_KEYS } from "./users-rebates-keys";
 import { PAYMENT_BILLING_KEYS } from "./payment-billing-keys";
 
 const defaultsSource = readFileSync(
@@ -45,6 +46,7 @@ const frontendGroups = [
   ["announcement_enabled", "announcements", "global_notice", "faq_enabled", "faq_list"],
   AUTH_SECURITY_KEYS,
   PAYMENT_BILLING_KEYS,
+  RECHARGE_REBATE_KEYS,
   ...emailServiceGroups,
   BACKGROUND_JOB_KEYS,
   BATCH_OPERATION_KEYS,

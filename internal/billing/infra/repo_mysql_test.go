@@ -19,6 +19,8 @@ import (
 	"github.com/donnel666/remail/internal/billing/domain"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	"github.com/donnel666/remail/internal/platform/testmysql"
+	settingsdomain "github.com/donnel666/remail/internal/systemsettings/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
@@ -126,6 +128,13 @@ func TestBillingRepoRedeemCardMySQL(t *testing.T) {
 }
 
 func TestBillingRepoReferralRewardOnFirstCardRedemptionMySQL(t *testing.T) {
+	runtimeconfig.Replace([]settingsdomain.Setting{
+		{Key: "first_order_rebate_ratio", Value: "0.8"},
+		{Key: "single_rebate_cap", Value: "60"},
+		{Key: "cumulative_rebate_cap", Value: "70"},
+		{Key: "rebate_expiry_days", Value: "30"},
+	})
+	t.Cleanup(func() { runtimeconfig.Replace(nil) })
 	db := newBillingMySQLTestDB(t)
 	ctx := context.Background()
 	inviterID := createBillingTestUser(t, db, "inviter@example.com")
@@ -176,8 +185,12 @@ func TestBillingRepoReferralRewardOnFirstCardRedemptionMySQL(t *testing.T) {
 	referrals, err := repo.GetReferralSummary(ctx, inviterID)
 	require.NoError(t, err)
 	require.EqualValues(t, 2, referrals.InviteCount)
-	require.Equal(t, "80.00", referrals.TotalEarned)
-	require.Equal(t, "80.00", referrals.PendingRewards)
+	require.Equal(t, "60.00", referrals.TotalEarned)
+	require.Equal(t, "60.00", referrals.PendingRewards)
+	var firstReward ReferralRewardModel
+	require.NoError(t, db.Where("invitee_user_id = ?", inviteeID).First(&firstReward).Error)
+	require.NotNil(t, firstReward.ExpiresAt)
+	require.WithinDuration(t, first.Transaction.CreatedAt.AddDate(0, 0, 30), *firstReward.ExpiresAt, time.Second)
 
 	second, err := repo.RedeemCard(ctx, billingapp.RedeemCardCommand{
 		UserID:             inviteeID,
@@ -217,13 +230,13 @@ func TestBillingRepoReferralRewardOnFirstCardRedemptionMySQL(t *testing.T) {
 		Now:                time.Now().UTC(),
 	})
 	require.NoError(t, err)
-	require.Equal(t, "100.00", transfer.TransferredAmount)
+	require.Equal(t, "70.00", transfer.TransferredAmount)
 	require.Equal(t, 2, transfer.TransferredCount)
-	require.Equal(t, "100.00", transfer.Wallet.ConsumerBalance)
+	require.Equal(t, "70.00", transfer.Wallet.ConsumerBalance)
 
 	referrals, err = repo.GetReferralSummary(ctx, inviterID)
 	require.NoError(t, err)
-	require.Equal(t, "100.00", referrals.TotalEarned)
+	require.Equal(t, "70.00", referrals.TotalEarned)
 	require.Equal(t, "0.00", referrals.PendingRewards)
 
 	var transferredRewards []ReferralRewardModel

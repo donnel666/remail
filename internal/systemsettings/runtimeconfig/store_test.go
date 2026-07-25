@@ -63,6 +63,16 @@ func TestValidateAuthSecuritySettings(t *testing.T) {
 	require.ErrorIs(t, Validate("session_max_age_seconds", "299"), domain.ErrInvalidValue)
 }
 
+func TestValidateRechargeRebateSettings(t *testing.T) {
+	require.NoError(t, Validate("first_order_rebate_ratio", "0.8"))
+	require.NoError(t, Validate("single_rebate_cap", "100.50"))
+	require.NoError(t, Validate("cumulative_rebate_cap", "0"))
+	require.NoError(t, Validate("rebate_expiry_days", "0"))
+	require.ErrorIs(t, Validate("first_order_rebate_ratio", "1.000001"), domain.ErrInvalidValue)
+	require.ErrorIs(t, Validate("single_rebate_cap", "-0.01"), domain.ErrInvalidValue)
+	require.ErrorIs(t, Validate("rebate_expiry_days", "36501"), domain.ErrInvalidValue)
+}
+
 func TestValidateRechargePaymentSettings(t *testing.T) {
 	require.NoError(t, Validate("epay_version", "v1"))
 	require.NoError(t, Validate("epay_version", "v2"))
