@@ -15,6 +15,7 @@ import (
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	openapiapp "github.com/donnel666/remail/internal/openapi/app"
+	"github.com/donnel666/remail/internal/platform"
 	tradeapp "github.com/donnel666/remail/internal/trade/app"
 	"github.com/donnel666/remail/internal/trade/domain"
 	"github.com/donnel666/remail/internal/trade/infra"
@@ -104,7 +105,11 @@ func (a orderDeliveryAdapter) ListOrderDeliveries(ctx context.Context, orderIDs 
 		VerificationCode string    `gorm:"column:verification_code"`
 		ReceivedAt       time.Time `gorm:"column:received_at"`
 	}
-	if err := a.db.WithContext(ctx).
+	db := a.db
+	if tx, ok := platform.GormTxFromContext(ctx); ok {
+		db = tx
+	}
+	if err := db.WithContext(ctx).
 		Table("mailmatch_order_delivery_heads AS h").
 		Select(`h.order_id,
 COALESCE(CASE WHEN mp.message_id IS NULL THEN m.verification_code ELSE mp.verification_code END, '') AS verification_code,

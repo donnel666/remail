@@ -203,6 +203,7 @@ type Repository interface {
 	ListExpiredCodeOrderNos(ctx context.Context, now time.Time, limit int) ([]string, error)
 	ListExpiredPurchaseActivationOrderNos(ctx context.Context, now time.Time, limit int) ([]string, error)
 	ListExpiredPurchaseWarrantyOrderNos(ctx context.Context, now time.Time, limit int) ([]string, error)
+	ListUnavailableMicrosoftOrderNos(ctx context.Context, resourceID uint, limit int) ([]string, error)
 	ListCodeOrderNosReadyForCleanup(ctx context.Context, now time.Time, limit int) ([]string, error)
 	ListPartialCleanupOrderNos(ctx context.Context, limit int) ([]string, error)
 }
@@ -392,6 +393,7 @@ type AdminOrderCommandRequest struct {
 
 type ExpireOrdersResult struct {
 	CodeTimedOut                int
+	ResourceUnavailableRefunded int
 	PurchaseActivationCompleted int
 	PurchaseWarrantyCompleted   int
 	CodeCleaned                 int
@@ -1546,6 +1548,20 @@ func (uc *UseCase) ExpireDueOrders(ctx context.Context, limit int) (*ExpireOrder
 			result.DeliveryReconciled++
 		}
 	}
+	unavailable, err := uc.repo.ListUnavailableMicrosoftOrderNos(ctx, 0, limit)
+	if err != nil {
+		return nil, err
+	}
+	for _, orderNo := range unavailable {
+		refunded, err := uc.refundUnavailableMicrosoftOrder(ctx, orderNo, "")
+		if err != nil {
+			result.Failed++
+			continue
+		}
+		if refunded {
+			result.ResourceUnavailableRefunded++
+		}
+	}
 	codeExpired, err := uc.repo.ListExpiredCodeOrderNos(ctx, now, limit)
 	if err != nil {
 		return nil, err
@@ -1609,6 +1625,26 @@ func (uc *UseCase) ExpireDueOrders(ctx context.Context, limit int) (*ExpireOrder
 	return result, nil
 }
 
+func (uc *UseCase) RefundUnavailableMicrosoftOrders(ctx context.Context, resourceID uint, requestID string) (int, error) {
+	if uc == nil || uc.repo == nil || uc.wallet == nil || resourceID == 0 {
+		return 0, domain.ErrInvalidOrderRequest
+	}
+	orderNos, err := uc.repo.ListUnavailableMicrosoftOrderNos(ctx, resourceID, 200)
+	if err != nil {
+		return 0, err
+	}
+	refunded := 0
+	var resultErr error
+	for _, orderNo := range orderNos {
+		changed, err := uc.refundUnavailableMicrosoftOrder(ctx, orderNo, requestID)
+		if changed {
+			refunded++
+		}
+		resultErr = errors.Join(resultErr, err)
+	}
+	return refunded, resultErr
+}
+
 func (uc *UseCase) NotifyMatchedCode(ctx context.Context, req MatchCodeResultRequest) error {
 	orderNo := strings.TrimSpace(req.OrderNo)
 	if orderNo == "" {
@@ -1653,32 +1689,35 @@ func (uc *UseCase) NotifyMatchedCode(ctx context.Context, req MatchCodeResultReq
 }
 
 type refundOrderRequest struct {
-	OrderNo         string
-	Reason          string
-	IdempotencyKey  string
-	RequestID       string
-	Operator        domain.OperatorType
-	AllowedStatuses []domain.OrderStatus
+	OrderNo           string
+	Reason            string
+	IdempotencyKey    string
+	RequestID         string
+	Operator          domain.OperatorType
+	AllowedStatuses   []domain.OrderStatus
+	ReconcileDelivery bool
 }
 
-func (uc *UseCase) expireCodeOrder(ctx context.Context, orderNo string, now time.Time) error {
-	if uc.deliveries != nil {
-		order, err := uc.repo.FindOrder(ctx, orderNo)
-		if err != nil {
-			return err
-		}
-		delivery, err := uc.deliveries.FindOrderDelivery(ctx, order.ID)
-		if err != nil {
-			return err
-		}
-		if delivery != nil {
-			matchedAt := delivery.ReceivedAt
-			if matchedAt.IsZero() {
-				matchedAt = now
-			}
-			return uc.NotifyMatchedCode(ctx, MatchCodeResultRequest{OrderNo: orderNo, MatchedAt: matchedAt})
-		}
+func (uc *UseCase) refundUnavailableMicrosoftOrder(ctx context.Context, orderNo string, requestID string) (bool, error) {
+	order, changed, err := uc.refundOrder(ctx, refundOrderRequest{
+		OrderNo:           orderNo,
+		Reason:            "Microsoft resource is permanently unavailable.",
+		IdempotencyKey:    "order:" + strings.TrimSpace(orderNo) + ":refund",
+		RequestID:         strings.TrimSpace(requestID),
+		Operator:          domain.OperatorTypeSystem,
+		AllowedStatuses:   []domain.OrderStatus{domain.OrderStatusActive},
+		ReconcileDelivery: true,
+	})
+	if errors.Is(err, domain.ErrOrderStateConflict) {
+		return false, nil
 	}
+	if err != nil || order == nil || !changed {
+		return false, err
+	}
+	return true, uc.cleanupOrderService(ctx, *order, true, "Order refunded because its Microsoft resource is permanently unavailable.", requestID)
+}
+
+func (uc *UseCase) expireCodeOrder(ctx context.Context, orderNo string, _ time.Time) error {
 	order, changed, err := uc.refundOrder(ctx, refundOrderRequest{
 		OrderNo:        orderNo,
 		Reason:         "Code receive window expired.",
@@ -1687,6 +1726,7 @@ func (uc *UseCase) expireCodeOrder(ctx context.Context, orderNo string, now time
 		AllowedStatuses: []domain.OrderStatus{
 			domain.OrderStatusActive,
 		},
+		ReconcileDelivery: true,
 	})
 	if err != nil || order == nil || !changed {
 		return err
@@ -1740,6 +1780,19 @@ func (uc *UseCase) refundOrder(ctx context.Context, req refundOrderRequest) (*do
 		}
 		if !statusAllowed(locked.Status, req.AllowedStatuses) {
 			return domain.ErrOrderStateConflict
+		}
+		if req.ReconcileDelivery && locked.ServiceMode == domain.ServiceModeCode && uc.deliveries != nil {
+			delivery, err := uc.deliveries.FindOrderDelivery(txCtx, locked.ID)
+			if err != nil {
+				return err
+			}
+			if delivery != nil {
+				matchedAt := delivery.ReceivedAt
+				if matchedAt.IsZero() {
+					matchedAt = uc.now()
+				}
+				return uc.NotifyMatchedCode(txCtx, MatchCodeResultRequest{OrderNo: locked.OrderNo, MatchedAt: matchedAt})
+			}
 		}
 		refund, err := uc.wallet.RefundConsumer(txCtx, WalletCommand{
 			UserID:         locked.UserID,

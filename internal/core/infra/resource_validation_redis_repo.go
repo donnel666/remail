@@ -82,6 +82,67 @@ func (r *ResourceValidationRepo) MarkResourcePendingWithLog(
 	})
 }
 
+func (r *ResourceValidationRepo) RecordMicrosoftFetchFailure(
+	ctx context.Context,
+	resourceID uint,
+	expectedCredentialRevision uint64,
+	refreshToken string,
+	safeError string,
+	requestID string,
+	systemLog *governancedomain.SystemLog,
+) (abnormal bool, err error) {
+	if r == nil || r.db == nil || resourceID == 0 || expectedCredentialRevision == 0 {
+		return false, domain.ErrInvalidResourceCommand
+	}
+	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var resource MicrosoftResourceModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&resource, resourceID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrResourceNotFound
+			}
+			return fmt.Errorf("lock microsoft resource after fetch failure: %w", err)
+		}
+		status := domain.MicrosoftResourceStatus(resource.Status)
+		if status == domain.MicrosoftStatusAbnormal {
+			abnormal = true
+			return nil
+		}
+		if (status != domain.MicrosoftStatusNormal && status != domain.MicrosoftStatusIdentifying) || resource.CredentialRevision != expectedCredentialRevision {
+			return nil
+		}
+		now := time.Now().UTC()
+		updates := map[string]any{
+			"status":              string(domain.MicrosoftStatusAbnormal),
+			"graph_available":     false,
+			"quality_score":       0,
+			"validation_failures": coreapp.ResourceValidationMaxFailuresValue(),
+			"last_safe_error":     safeValidationMessage(safeError),
+			"updated_at":          now,
+		}
+		if refreshToken = strings.TrimSpace(refreshToken); refreshToken != "" && refreshToken != strings.TrimSpace(resource.RefreshToken) {
+			updates["refresh_token"] = refreshToken
+			updates["credential_revision"] = resource.CredentialRevision + 1
+			updates["credential_updated_at"] = now
+			updates["token_last_refreshed_at"] = now
+			updates["token_last_request_id"] = strings.TrimSpace(requestID)
+		}
+		result := tx.Model(&MicrosoftResourceModel{}).
+			Where("id = ? AND status IN ? AND credential_revision = ?", resourceID, []string{
+				string(domain.MicrosoftStatusNormal), string(domain.MicrosoftStatusIdentifying),
+			}, expectedCredentialRevision).
+			Updates(updates)
+		if result.Error != nil {
+			return fmt.Errorf("mark microsoft resource abnormal after fetch failure: %w", result.Error)
+		}
+		if result.RowsAffected != 1 {
+			return nil
+		}
+		abnormal = true
+		return createSystemLogInTx(ctx, tx, systemLog)
+	})
+	return abnormal, err
+}
+
 func (r *ResourceValidationRepo) MarkValidationBatchPending(ctx context.Context, task coreapp.ResourceValidationBatchTask, limit int) (*coreapp.ResourceValidationBatchPageResult, error) {
 	if r == nil || r.db == nil || task.OwnerUserID == 0 || limit <= 0 {
 		return nil, domain.ErrInvalidResourceCommand

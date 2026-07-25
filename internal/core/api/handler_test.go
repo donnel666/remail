@@ -1600,6 +1600,10 @@ func (r *mockValidationRepo) ApplyMicrosoftResult(_ context.Context, task coreap
 	return nil
 }
 
+func (*mockValidationRepo) RecordMicrosoftFetchFailure(context.Context, uint, uint64, string, string, string, *governancedomain.SystemLog) (bool, error) {
+	return true, nil
+}
+
 func (r *mockValidationRepo) ApplyDomainResult(_ context.Context, task coreapp.ResourceValidationTask, result coreapp.DomainValidationResult, _ *governancedomain.SystemLog) error {
 	resource := r.resources.domains[task.ResourceID]
 	if resource == nil || resource.Status != coredomain.DomainStatusValidating || resource.ValidationGeneration != task.ValidationGeneration {

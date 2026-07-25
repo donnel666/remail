@@ -869,6 +869,26 @@ func (r *Repo) ListExpiredPurchaseWarrantyOrderNos(ctx context.Context, now time
 	)
 }
 
+func (r *Repo) ListUnavailableMicrosoftOrderNos(ctx context.Context, resourceID uint, limit int) ([]string, error) {
+	var orderNos []string
+	query := r.dbFor(ctx).Table("orders AS o").
+		Select("o.order_no").
+		Joins("JOIN microsoft_allocations AS ma ON ma.id = o.microsoft_alloc_id AND ma.order_no = o.order_no AND ma.status = ?", "allocated").
+		Joins("JOIN microsoft_resources AS mr ON mr.id = ma.resource_id AND mr.status = ?", "abnormal").
+		Where("o.allocation_type = ? AND o.status = ? AND o.debit_tx_id IS NOT NULL AND o.refund_tx_id IS NULL", string(domain.AllocationTypeMicrosoft), string(domain.OrderStatusActive)).
+		Order("o.id ASC")
+	if resourceID > 0 {
+		query = query.Where("ma.resource_id = ?", resourceID)
+	}
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	if err := query.Scan(&orderNos).Error; err != nil {
+		return nil, fmt.Errorf("list orders on unavailable microsoft resources: %w", err)
+	}
+	return orderNos, nil
+}
+
 func (r *Repo) ListCodeOrderNosReadyForCleanup(ctx context.Context, now time.Time, limit int) ([]string, error) {
 	return r.listOrderNos(ctx, limit, "status IN ? AND service_mode = ? AND service_cleanup_status = ? AND after_sale_until IS NOT NULL AND after_sale_until < ?",
 		[]string{string(domain.OrderStatusCompleted), string(domain.OrderStatusRefunded)},
@@ -884,8 +904,8 @@ func (r *Repo) ListPartialCleanupOrderNos(ctx context.Context, limit int) ([]str
 	}
 	var orderNos []string
 	if err := r.dbFor(ctx).Model(&OrderModel{}).
-		Where("service_cleanup_status = ? AND (status IN ? OR (status = ? AND refund_tx_id IS NOT NULL))",
-			"partial_failure",
+		Where("service_cleanup_status IN ? AND (status IN ? OR (status = ? AND refund_tx_id IS NOT NULL))",
+			[]string{"none", "partial_failure"},
 			[]string{string(domain.OrderStatusRefunded), string(domain.OrderStatusClosed)},
 			string(domain.OrderStatusFailed),
 		).

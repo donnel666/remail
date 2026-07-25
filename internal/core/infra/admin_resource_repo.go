@@ -111,7 +111,7 @@ func (r *AdminResourceRepo) CompleteAdminCommand(ctx context.Context, operatorUs
 	}
 	result := r.dbFor(ctx).Model(&AdminResourceCommandReceiptModel{}).
 		Where("operator_user_id = ? AND idempotency_key = ? AND status = ?", operatorUserID, idempotencyKey, "processing").
-		Updates(map[string]any{"status": "succeeded", "result_json": resultJSON})
+		Updates(map[string]any{"status": "succeeded", "result_json": string(resultJSON)})
 	if result.Error != nil {
 		return fmt.Errorf("complete administrator resource command receipt: %w", result.Error)
 	}

@@ -55,6 +55,7 @@ func runOrderLifecycleScan(ctx context.Context, module *Module) {
 		platform.RecordBusinessEvent("order_lifecycle", "succeeded")
 	}
 	if result.CodeTimedOut == 0 &&
+		result.ResourceUnavailableRefunded == 0 &&
 		result.PurchaseActivationCompleted == 0 &&
 		result.PurchaseWarrantyCompleted == 0 &&
 		result.CodeCleaned == 0 &&
@@ -66,6 +67,7 @@ func runOrderLifecycleScan(ctx context.Context, module *Module) {
 	slog.Info(
 		"trade lifecycle scanner finished",
 		"code_timed_out", result.CodeTimedOut,
+		"resource_unavailable_refunded", result.ResourceUnavailableRefunded,
 		"purchase_activation_completed", result.PurchaseActivationCompleted,
 		"purchase_warranty_completed", result.PurchaseWarrantyCompleted,
 		"code_cleaned", result.CodeCleaned,

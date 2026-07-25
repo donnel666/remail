@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	"github.com/stretchr/testify/require"
 )
 
@@ -12,11 +13,29 @@ type validationBatchRepoStub struct {
 	ResourceValidationRepository
 	page   ResourceValidationBatchPageResult
 	called bool
+	fetch  struct {
+		resourceID   uint
+		revision     uint64
+		refreshToken string
+		safeError    string
+		requestID    string
+		log          *governancedomain.SystemLog
+	}
 }
 
 func (s *validationBatchRepoStub) MarkValidationBatchPending(context.Context, ResourceValidationBatchTask, int) (*ResourceValidationBatchPageResult, error) {
 	s.called = true
 	return &s.page, nil
+}
+
+func (s *validationBatchRepoStub) RecordMicrosoftFetchFailure(_ context.Context, resourceID uint, revision uint64, refreshToken string, safeError string, requestID string, log *governancedomain.SystemLog) (bool, error) {
+	s.fetch.resourceID = resourceID
+	s.fetch.revision = revision
+	s.fetch.refreshToken = refreshToken
+	s.fetch.safeError = safeError
+	s.fetch.requestID = requestID
+	s.fetch.log = log
+	return true, nil
 }
 
 type validationBatchQueueStub struct {
@@ -90,4 +109,22 @@ func TestValidationCategoryRequiresExplicitTerminalEvidence(t *testing.T) {
 	for _, category := range []string{"oauth_invalid_grant", "password", "locked", "unknown_mailbox", "dns"} {
 		require.False(t, isRetryableValidationCategory(category), category)
 	}
+}
+
+func TestPermanentMicrosoftFetchFailureMarksResourceAbnormal(t *testing.T) {
+	repo := &validationBatchRepoStub{}
+	uc := NewResourceValidationUseCase(nil, repo, nil, nil)
+
+	abnormal, err := uc.MarkMicrosoftAbnormalAfterFetchFailure(
+		context.Background(), 95, 7, "rotated-refresh-token", "oauth_invalid_grant", "Microsoft refresh token is invalid or expired.", "ORDER-PERMANENT",
+	)
+
+	require.NoError(t, err)
+	require.True(t, abnormal)
+	require.Equal(t, uint(95), repo.fetch.resourceID)
+	require.Equal(t, uint64(7), repo.fetch.revision)
+	require.Equal(t, "rotated-refresh-token", repo.fetch.refreshToken)
+	require.Equal(t, "Microsoft refresh token is invalid or expired.", repo.fetch.safeError)
+	require.Equal(t, "ORDER-PERMANENT", repo.fetch.requestID)
+	require.Equal(t, "oauth_invalid_grant: Microsoft refresh token is invalid or expired.", repo.fetch.log.Detail)
 }

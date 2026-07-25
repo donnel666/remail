@@ -2,10 +2,12 @@ package api
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	stdmail "net/mail"
 	"regexp"
 	"strings"
+	"time"
 
 	mailmatchapp "github.com/donnel666/remail/internal/mailmatch/app"
 	"github.com/donnel666/remail/internal/mailmatch/domain"
@@ -19,6 +21,7 @@ const (
 	fetchProxyAttempts              = 2
 	maxFetchProxyAttempts           = 20
 	realtimeMicrosoftMessageMaximum = 30
+	permanentFetchFailureTimeout    = 30 * time.Second
 )
 
 type microsoftMessageFetchClient interface {
@@ -26,14 +29,21 @@ type microsoftMessageFetchClient interface {
 }
 
 type MicrosoftFetchAdapter struct {
-	client  microsoftMessageFetchClient
-	proxies *proxyapp.ProxyUseCase
+	client        microsoftMessageFetchClient
+	proxies       *proxyapp.ProxyUseCase
+	fetchFailures mailmatchapp.PermanentMicrosoftFetchFailurePort
 }
 
 func NewMicrosoftFetchAdapter(proxies *proxyapp.ProxyUseCase) *MicrosoftFetchAdapter {
 	return &MicrosoftFetchAdapter{
 		client:  mailinfra.NewMicrosoftMailFetchClient(),
 		proxies: proxies,
+	}
+}
+
+func (a *MicrosoftFetchAdapter) SetPermanentMicrosoftFetchFailurePort(port mailmatchapp.PermanentMicrosoftFetchFailurePort) {
+	if a != nil {
+		a.fetchFailures = port
 	}
 }
 
@@ -46,7 +56,7 @@ func (a *MicrosoftFetchAdapter) FetchMicrosoftMessages(ctx context.Context, req 
 			Cause:       domain.ErrMailServiceUnavailable,
 		}
 	}
-	var lastFailure error
+	var lastFailure *mailmatchapp.MailFetchFailure
 	maxMessages := 30
 	sinceAt := req.SinceAt
 	untilAt := req.UntilAt
@@ -163,10 +173,10 @@ func (a *MicrosoftFetchAdapter) FetchMicrosoftMessages(ctx context.Context, req 
 		if proxyID != 0 {
 			_ = a.reportProxySuccess(ctx, proxyID)
 		}
-		return nil, lastFailure
+		return a.finishFailure(ctx, req, lastFailure)
 	}
 	if lastFailure != nil {
-		return nil, lastFailure
+		return a.finishFailure(ctx, req, lastFailure)
 	}
 	return nil, &mailmatchapp.MailFetchFailure{
 		Category:    "request",
@@ -174,6 +184,27 @@ func (a *MicrosoftFetchAdapter) FetchMicrosoftMessages(ctx context.Context, req 
 		Retryable:   true,
 		Cause:       domain.ErrMailServiceUnavailable,
 	}
+}
+
+func (a *MicrosoftFetchAdapter) finishFailure(ctx context.Context, req mailmatchapp.FetchMessagesRequest, failure *mailmatchapp.MailFetchFailure) (*mailmatchapp.FetchMessagesResult, error) {
+	if failure == nil || failure.Retryable || a == nil || a.fetchFailures == nil || req.Scope.EmailResourceID == 0 || req.Scope.CredentialRevision == 0 {
+		return nil, failure
+	}
+	handleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), permanentFetchFailureTimeout)
+	defer cancel()
+	handleErr := a.fetchFailures.HandlePermanentMicrosoftFetchFailure(handleCtx, mailmatchapp.PermanentMicrosoftFetchFailure{
+		ResourceID:         req.Scope.EmailResourceID,
+		CredentialRevision: req.Scope.CredentialRevision,
+		RefreshToken:       failure.RefreshToken,
+		OrderNo:            req.Scope.OrderNo,
+		RequestID:          firstNonEmpty(req.RequestID, req.Scope.OrderNo),
+		Category:           failure.Category,
+		SafeMessage:        failure.SafeMessage,
+	})
+	if handleErr != nil {
+		return nil, errors.Join(mailmatchapp.ErrPermanentMicrosoftFetchFailureHandling, handleErr)
+	}
+	return nil, failure
 }
 
 func (a *MicrosoftFetchAdapter) acquireProxy(ctx context.Context, scope mailmatchapp.OrderScope, requestID string, attempt int) (*proxyapp.ProxyConfig, error) {
@@ -192,10 +223,8 @@ func (a *MicrosoftFetchAdapter) acquireProxy(ctx context.Context, scope mailmatc
 
 func microsoftFetchFailure(category string, safeMessage string, proxyFailure bool) *mailmatchapp.MailFetchFailure {
 	category = strings.ToLower(strings.TrimSpace(category))
-	retryable := proxyFailure || category == "request" || category == "auth_timeout"
 	if category == "" {
 		category = "request"
-		retryable = true
 	}
 	safeMessage = strings.TrimSpace(safeMessage)
 	if safeMessage == "" {
@@ -204,8 +233,23 @@ func microsoftFetchFailure(category string, safeMessage string, proxyFailure boo
 	return &mailmatchapp.MailFetchFailure{
 		Category:    category,
 		SafeMessage: safeMessage,
-		Retryable:   retryable,
+		Retryable:   retryableMicrosoftFetchCategory(category, proxyFailure),
 		Cause:       domain.ErrMailServiceUnavailable,
+	}
+}
+
+func retryableMicrosoftFetchCategory(category string, proxyFailure bool) bool {
+	if proxyFailure {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(category)) {
+	case "missing_token", "oauth_invalid_grant", "refresh_token_expired", "oauth_refresh_token_expired",
+		"oauth_client", "oauth_permission", "mfa", "passkey", "phone", "password",
+		"unknown_mailbox", "locked", "account_abnormal", "graph_unauthorized", "graph_forbidden",
+		"imap_auth_failed", "identity_mismatch":
+		return false
+	default:
+		return true
 	}
 }
 

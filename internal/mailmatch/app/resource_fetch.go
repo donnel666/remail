@@ -31,9 +31,14 @@ type MailFetchFailure struct {
 	Cause        error
 }
 
+var ErrPermanentMicrosoftFetchFailureHandling = errors.New("permanent microsoft fetch failure handling failed")
+
 func (e *MailFetchFailure) Error() string {
 	if e == nil {
 		return "mail fetch failed"
+	}
+	if safeMessage := strings.TrimSpace(e.SafeMessage); safeMessage != "" {
+		return safeMessage
 	}
 	if e.Cause != nil {
 		return e.Cause.Error()
@@ -209,13 +214,14 @@ func (uc *ResourceFetchUseCase) Process(ctx context.Context, task ResourceFetchT
 	}
 	fetched, err := uc.transport.FetchMicrosoftMessages(ctx, FetchMessagesRequest{
 		Scope: OrderScope{
-			OrderNo:           firstNonBlank(job.RequestID, fmt.Sprintf("resource-fetch-%d", job.ID)),
-			AllocationType:    domain.ResourceTypeMicrosoft,
-			EmailResourceID:   scope.ResourceID,
-			Recipient:         scope.EmailAddress,
-			MicrosoftEmail:    scope.EmailAddress,
-			MicrosoftClientID: scope.ClientID,
-			MicrosoftRT:       scope.RefreshToken,
+			OrderNo:            firstNonBlank(job.RequestID, fmt.Sprintf("resource-fetch-%d", job.ID)),
+			AllocationType:     domain.ResourceTypeMicrosoft,
+			EmailResourceID:    scope.ResourceID,
+			Recipient:          scope.EmailAddress,
+			MicrosoftEmail:     scope.EmailAddress,
+			MicrosoftClientID:  scope.ClientID,
+			MicrosoftRT:        scope.RefreshToken,
+			CredentialRevision: job.ExpectedCredentialRevision,
 		},
 		SinceAt:   dereferenceTime(job.SinceAt, uc.now().Add(-boundedRuntimeDuration("fetch_lookback_window_days", resourceFetchLookbackWindow, 24*time.Hour, maxFetchLookbackWindow))),
 		UntilAt:   dereferenceTime(job.UntilAt, uc.now()),
@@ -483,10 +489,11 @@ func classifyResourceFetchFailure(err error) (safe string, category string, retr
 		if retryable {
 			return "Microsoft mail service is temporarily unavailable.", category, true
 		}
-		if category == "missing_token" {
-			return "Microsoft mail fetch credentials are incomplete.", category, false
+		safe = strings.TrimSpace(failure.SafeMessage)
+		if safe == "" {
+			safe = "Microsoft mail fetch failed."
 		}
-		return "Microsoft mail fetch failed.", category, false
+		return safe, category, false
 	}
 	return "Microsoft mail service is temporarily unavailable.", "request", true
 }
@@ -532,7 +539,10 @@ func resourceFetchOperationLabel(kind domain.ResourceFetchJobKind) string {
 func safeResourceFetchCategory(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	switch value {
-	case "request", "auth_timeout", "missing_token", "credential_changed", "resource_unavailable", "ingestion", "queue_unavailable":
+	case "request", "auth_timeout", "rate_limited", "missing_token", "credential_changed", "resource_unavailable", "ingestion", "queue_unavailable",
+		"oauth_invalid_grant", "refresh_token_expired", "oauth_refresh_token_expired", "oauth_client", "oauth_permission",
+		"mfa", "passkey", "phone", "password", "unknown_mailbox", "locked", "account_abnormal",
+		"graph_unauthorized", "graph_forbidden", "imap_auth_failed", "identity_mismatch":
 		return value
 	default:
 		return "unknown"

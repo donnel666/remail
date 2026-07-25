@@ -66,3 +66,22 @@ func TestResourceFetchInfrastructureReleaseDoesNotAlsoRetryAsynqTask(t *testing.
 
 	require.NoError(t, err)
 }
+
+func TestResourceFetchKeepsPermanentMicrosoftFailureCategory(t *testing.T) {
+	for _, category := range []string{
+		"oauth_invalid_grant", "oauth_client", "oauth_permission", "mfa", "passkey", "phone", "password",
+		"unknown_mailbox", "locked", "account_abnormal", "graph_unauthorized", "graph_forbidden", "imap_auth_failed", "identity_mismatch",
+	} {
+		require.Equal(t, category, safeResourceFetchCategory(category), category)
+	}
+}
+
+func TestResourceFetchKeepsPermanentMicrosoftFailureSafeMessage(t *testing.T) {
+	safe, category, retryable := classifyResourceFetchFailure(&MailFetchFailure{
+		Category: "oauth_invalid_grant", SafeMessage: "Microsoft refresh token is invalid or expired.",
+	})
+
+	require.Equal(t, "Microsoft refresh token is invalid or expired.", safe)
+	require.Equal(t, "oauth_invalid_grant", category)
+	require.False(t, retryable)
+}

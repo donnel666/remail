@@ -192,6 +192,10 @@ func (*adminHandlerValidationRepo) ReleaseValidation(context.Context, coreapp.Re
 func (*adminHandlerValidationRepo) ApplyMicrosoftResult(context.Context, coreapp.ResourceValidationTask, coreapp.MicrosoftValidationResult, *governancedomain.SystemLog) error {
 	return nil
 }
+
+func (*adminHandlerValidationRepo) RecordMicrosoftFetchFailure(context.Context, uint, uint64, string, string, string, *governancedomain.SystemLog) (bool, error) {
+	return true, nil
+}
 func (*adminHandlerValidationRepo) ApplyDomainResult(context.Context, coreapp.ResourceValidationTask, coreapp.DomainValidationResult, *governancedomain.SystemLog) error {
 	return nil
 }

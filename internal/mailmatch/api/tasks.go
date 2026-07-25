@@ -226,6 +226,9 @@ func processPickupRequestFetchTask(ctx context.Context, task *asynq.Task, module
 	platform.ObserveServiceEndToEnd("pickup_fetch", size, result, payload.RequestedAt)
 	if err != nil {
 		slog.Warn("pickup request fetch task completed with scope failures", "scopes", len(payload.Scopes), "error", err)
+		if errors.Is(err, mailmatchapp.ErrPermanentMicrosoftFetchFailureHandling) {
+			return err
+		}
 		return nil
 	}
 	return nil

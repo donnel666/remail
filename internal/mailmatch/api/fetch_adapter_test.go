@@ -17,6 +17,18 @@ type microsoftMessageFetchClientStub struct {
 	results  []mailinfra.MicrosoftMailFetchResult
 }
 
+type permanentFetchFailurePortStub struct {
+	failures    []mailmatchapp.PermanentMicrosoftFetchFailure
+	err         error
+	hasDeadline bool
+}
+
+func (s *permanentFetchFailurePortStub) HandlePermanentMicrosoftFetchFailure(ctx context.Context, failure mailmatchapp.PermanentMicrosoftFetchFailure) error {
+	s.failures = append(s.failures, failure)
+	_, s.hasDeadline = ctx.Deadline()
+	return s.err
+}
+
 func TestMicrosoftFetchAdapterRealtimeStopsAtThirtyWithinRequestedWindow(t *testing.T) {
 	client := &microsoftMessageFetchClientStub{results: []mailinfra.MicrosoftMailFetchResult{{Valid: true}}}
 	adapter := &MicrosoftFetchAdapter{client: client}
@@ -161,6 +173,70 @@ func TestMicrosoftFetchAdapterReturnsRotatedTokenOnFetchFailure(t *testing.T) {
 	var failure *mailmatchapp.MailFetchFailure
 	require.True(t, errors.As(err, &failure))
 	require.Equal(t, "rotated-refresh-token", failure.RefreshToken)
+}
+
+func TestMicrosoftFetchFailureKeepsTerminalClassification(t *testing.T) {
+	for _, category := range []string{
+		"oauth_invalid_grant", "oauth_client", "oauth_permission", "mfa", "passkey", "phone", "password",
+		"unknown_mailbox", "locked", "graph_unauthorized", "graph_forbidden", "imap_auth_failed", "identity_mismatch", "missing_token",
+	} {
+		failure := microsoftFetchFailure(category, "safe", false)
+		require.Equal(t, category, failure.Category)
+		require.False(t, failure.Retryable, category)
+	}
+	for _, category := range []string{"request", "auth_timeout", "rate_limited", "unknown", "protocol_changed"} {
+		require.True(t, microsoftFetchFailure(category, "safe", false).Retryable, category)
+	}
+	require.True(t, microsoftFetchFailure("oauth_invalid_grant", "safe", true).Retryable)
+}
+
+func TestMicrosoftFetchAdapterHandlesPermanentFailureForEveryCaller(t *testing.T) {
+	client := &microsoftMessageFetchClientStub{results: []mailinfra.MicrosoftMailFetchResult{{
+		Category: "oauth_invalid_grant", SafeMessage: "Microsoft refresh token is invalid or expired.", RefreshToken: "rotated-refresh-token",
+	}}}
+	failures := &permanentFetchFailurePortStub{}
+	adapter := &MicrosoftFetchAdapter{client: client, fetchFailures: failures}
+
+	_, err := adapter.FetchMicrosoftMessages(context.Background(), mailmatchapp.FetchMessagesRequest{
+		Scope: mailmatchapp.OrderScope{
+			OrderNo: "OR019F97158E9A713AA3A82FEB49DE0486", EmailResourceID: 30043, CredentialRevision: 7,
+			MicrosoftEmail: "owner@example.test", MicrosoftClientID: "client-id", MicrosoftRT: "refresh-token",
+		},
+		RequestID: "019f972e-26d0-76c4-8d55-942e685db7d7",
+	})
+
+	require.Error(t, err)
+	require.Equal(t, "Microsoft refresh token is invalid or expired.", err.Error())
+	var fetchFailure *mailmatchapp.MailFetchFailure
+	require.True(t, errors.As(err, &fetchFailure))
+	require.Equal(t, "oauth_invalid_grant", fetchFailure.Category)
+	require.False(t, fetchFailure.Retryable)
+	require.Equal(t, []mailmatchapp.PermanentMicrosoftFetchFailure{{
+		ResourceID: 30043, CredentialRevision: 7,
+		RefreshToken: "rotated-refresh-token",
+		OrderNo:      "OR019F97158E9A713AA3A82FEB49DE0486", RequestID: "019f972e-26d0-76c4-8d55-942e685db7d7",
+		Category: "oauth_invalid_grant", SafeMessage: "Microsoft refresh token is invalid or expired.",
+	}}, failures.failures)
+	require.True(t, failures.hasDeadline)
+}
+
+func TestMicrosoftFetchAdapterRetriesWhenPermanentFailureHandlingFails(t *testing.T) {
+	client := &microsoftMessageFetchClientStub{results: []mailinfra.MicrosoftMailFetchResult{{Category: "oauth_invalid_grant"}}}
+	adapter := &MicrosoftFetchAdapter{
+		client: client,
+		fetchFailures: &permanentFetchFailurePortStub{
+			err: errors.New("database unavailable"),
+		},
+	}
+
+	_, err := adapter.FetchMicrosoftMessages(context.Background(), mailmatchapp.FetchMessagesRequest{Scope: mailmatchapp.OrderScope{
+		EmailResourceID: 30043, CredentialRevision: 7,
+		MicrosoftEmail: "owner@example.test", MicrosoftClientID: "client-id", MicrosoftRT: "refresh-token",
+	}})
+
+	require.ErrorIs(t, err, mailmatchapp.ErrPermanentMicrosoftFetchFailureHandling)
+	var fetchFailure *mailmatchapp.MailFetchFailure
+	require.False(t, errors.As(err, &fetchFailure))
 }
 
 func TestMicrosoftMessagesToMailmatchPreservesCompleteProviderContent(t *testing.T) {

@@ -49,13 +49,16 @@ func (m *Module) SetMicrosoftCredentialPort(credentials coreapp.MicrosoftCredent
 	}
 }
 
-func NewModule(db *gorm.DB, files governanceapp.FilePort, redisClient redis.UniversalClient, asynqClient *asynq.Client, proxies *proxyapp.ProxyUseCase, trade *tradeapp.UseCase) *Module {
+func NewModule(db *gorm.DB, files governanceapp.FilePort, redisClient redis.UniversalClient, asynqClient *asynq.Client, proxies *proxyapp.ProxyUseCase, trade *tradeapp.UseCase, validation *coreapp.ResourceValidationUseCase) *Module {
 	repo := mailmatchinfra.NewRepo(db, files)
 	resourceFetchRepo := mailmatchinfra.NewResourceFetchRepo(db)
 	projectHistoryRepo := mailmatchinfra.NewProjectHistoryScanRepo(db)
 	adminMessageRepo := mailmatchinfra.NewAdminMessageRepo(db)
 	queue := mailmatchinfra.NewFetchQueue(asynqClient)
 	transport := NewMicrosoftFetchAdapter(proxies)
+	if validation != nil && trade != nil {
+		transport.SetPermanentMicrosoftFetchFailurePort(permanentMicrosoftFetchFailureAdapter{validation: validation, trade: trade})
+	}
 	useCase := mailmatchapp.NewUseCase(repo, queue, transport, matchResultAdapter{trade: trade})
 	useCase.SetPickupFetchStatePort(mailmatchinfra.NewPickupFetchState(redisClient))
 	useCase.SetPickupMessageCachePort(mailmatchinfra.NewPickupMessageCache(redisClient))
@@ -78,6 +81,28 @@ func NewModule(db *gorm.DB, files governanceapp.FilePort, redisClient redis.Univ
 		AdminMessages:     mailmatchapp.NewAdminMessageUseCase(adminMessageRepo),
 		resourceFetchRepo: resourceFetchRepo,
 	}
+}
+
+type permanentMicrosoftFetchFailureAdapter struct {
+	validation *coreapp.ResourceValidationUseCase
+	trade      *tradeapp.UseCase
+}
+
+func (a permanentMicrosoftFetchFailureAdapter) HandlePermanentMicrosoftFetchFailure(ctx context.Context, failure mailmatchapp.PermanentMicrosoftFetchFailure) error {
+	abnormal, err := a.validation.MarkMicrosoftAbnormalAfterFetchFailure(
+		ctx,
+		failure.ResourceID,
+		failure.CredentialRevision,
+		failure.RefreshToken,
+		failure.Category,
+		failure.SafeMessage,
+		failure.RequestID,
+	)
+	if err != nil || !abnormal {
+		return err
+	}
+	_, err = a.trade.RefundUnavailableMicrosoftOrders(ctx, failure.ResourceID, failure.RequestID)
+	return err
 }
 
 type historicalMicrosoftUsageAdapter struct {

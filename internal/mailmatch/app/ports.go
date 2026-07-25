@@ -204,6 +204,20 @@ type MatchResult struct {
 	MatchedAt        time.Time
 }
 
+type PermanentMicrosoftFetchFailure struct {
+	ResourceID         uint
+	CredentialRevision uint64
+	RefreshToken       string
+	OrderNo            string
+	RequestID          string
+	Category           string
+	SafeMessage        string
+}
+
+type PermanentMicrosoftFetchFailurePort interface {
+	HandlePermanentMicrosoftFetchFailure(ctx context.Context, failure PermanentMicrosoftFetchFailure) error
+}
+
 type FetchTask struct {
 	OrderNo         string    `json:"orderNo"`
 	EmailResourceID uint      `json:"emailResourceId"`

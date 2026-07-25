@@ -18,6 +18,7 @@ import (
 // applies results from temporary Redis tasks.
 type ResourceValidationRepository interface {
 	MarkResourcePendingWithLog(ctx context.Context, resourceID uint, resourceType domain.ResourceType, ownerUserID uint, log *governancedomain.OperationLog) error
+	RecordMicrosoftFetchFailure(ctx context.Context, resourceID uint, expectedCredentialRevision uint64, refreshToken string, safeError string, requestID string, systemLog *governancedomain.SystemLog) (abnormal bool, err error)
 	MarkValidationBatchPending(ctx context.Context, task ResourceValidationBatchTask, limit int) (*ResourceValidationBatchPageResult, error)
 	CountAssignedValidations(ctx context.Context) (int, error)
 	ClaimPendingValidations(ctx context.Context, limit int) ([]ResourceValidationTask, error)
@@ -254,6 +255,35 @@ func NewResourceValidationUseCase(resources EmailResourceRepository, validations
 		queue:       queue,
 		validator:   validator,
 	}
+}
+
+func (uc *ResourceValidationUseCase) MarkMicrosoftAbnormalAfterFetchFailure(
+	ctx context.Context,
+	resourceID uint,
+	expectedCredentialRevision uint64,
+	refreshToken string,
+	category string,
+	safeMessage string,
+	requestID string,
+) (bool, error) {
+	if uc == nil || uc.validations == nil || resourceID == 0 || expectedCredentialRevision == 0 {
+		return false, domain.ErrInvalidResourceCommand
+	}
+	category = strings.ToLower(strings.TrimSpace(category))
+	safeMessage = strings.TrimSpace(safeMessage)
+	if safeMessage == "" {
+		safeMessage = "Microsoft mail fetch permanently failed."
+	}
+	return uc.validations.RecordMicrosoftFetchFailure(ctx, resourceID, expectedCredentialRevision, refreshToken, safeMessage, requestID, &governancedomain.SystemLog{
+		Level:     "warning",
+		Module:    "core",
+		EventType: "resource.microsoft_fetch_permanent_failure",
+		RequestID: strings.TrimSpace(requestID),
+		BizType:   "resource",
+		BizID:     fmt.Sprintf("%d", resourceID),
+		Message:   "Microsoft resource marked abnormal after a permanent mail fetch failure.",
+		Detail:    safeValidationDetail(category, safeMessage),
+	})
 }
 
 func (uc *ResourceValidationUseCase) Create(ctx context.Context, resourceID uint, userID uint, isAdmin bool, requestID, path string) (*ResourceBatchValidationResult, error) {

@@ -264,6 +264,7 @@ func (uc *ProjectHistoryScanUseCase) scanValidatedMicrosoftHistory(ctx context.C
 			OrderNo: "validated-microsoft-history", AllocationType: domain.ResourceTypeMicrosoft,
 			EmailResourceID: resource.ResourceID, Recipient: resource.EmailAddress,
 			MicrosoftEmail: resource.EmailAddress, MicrosoftClientID: resource.ClientID, MicrosoftRT: resource.RefreshToken,
+			CredentialRevision: resource.CredentialRevision,
 		},
 		RequestID: strings.TrimSpace(task.RequestID), FullHistory: true,
 		OnMessages: accumulator.add, OnReset: accumulator.reset,
@@ -384,6 +385,7 @@ func (uc *ProjectHistoryScanUseCase) scanProjectHistoryResource(
 			OrderNo: "project-history", AllocationType: domain.ResourceTypeMicrosoft,
 			EmailResourceID: resource.ResourceID, Recipient: resource.EmailAddress,
 			MicrosoftEmail: resource.EmailAddress, MicrosoftClientID: resource.ClientID, MicrosoftRT: resource.RefreshToken,
+			CredentialRevision: resource.CredentialRevision,
 		},
 		RequestID: task.RequestID, FullHistory: true, OnMessages: accumulator.add, OnReset: accumulator.reset,
 	})

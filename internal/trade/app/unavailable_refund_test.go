@@ -1,0 +1,218 @@
+package app
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/donnel666/remail/internal/trade/domain"
+	"github.com/stretchr/testify/require"
+)
+
+type unavailableRefundRepoStub struct {
+	Repository
+	resourceID       uint
+	order            domain.Order
+	refundCalls      int
+	cleanupStatus    string
+	unavailableLimit int
+}
+
+func (s *unavailableRefundRepoStub) WithTx(ctx context.Context, fn func(context.Context) error) error {
+	return fn(ctx)
+}
+
+func (s *unavailableRefundRepoStub) FindOrder(context.Context, string) (*domain.Order, error) {
+	order := s.order
+	return &order, nil
+}
+
+func (s *unavailableRefundRepoStub) LockOrderForUpdate(context.Context, string) (*domain.Order, error) {
+	order := s.order
+	return &order, nil
+}
+
+func (s *unavailableRefundRepoStub) RefundOrder(_ context.Context, cmd RefundOrderCommand) (*domain.Order, bool, error) {
+	if s.order.Status == domain.OrderStatusRefunded {
+		order := s.order
+		return &order, false, nil
+	}
+	s.refundCalls++
+	s.order.Status = domain.OrderStatusRefunded
+	s.order.RefundTxID = &cmd.RefundTxID
+	s.order.RefundAmount = cmd.RefundAmount
+	order := s.order
+	return &order, true, nil
+}
+
+func (s *unavailableRefundRepoStub) CompleteCodeOrder(_ context.Context, _ string, _ time.Time, _ time.Time) (*domain.Order, bool, error) {
+	if s.order.ServiceMode != domain.ServiceModeCode || s.order.Status != domain.OrderStatusActive {
+		order := s.order
+		return &order, false, nil
+	}
+	s.order.Status = domain.OrderStatusCompleted
+	order := s.order
+	return &order, true, nil
+}
+
+func (s *unavailableRefundRepoStub) MarkServiceCleanup(_ context.Context, _ string, status string) error {
+	s.cleanupStatus = status
+	return nil
+}
+
+func (s *unavailableRefundRepoStub) ListUnavailableMicrosoftOrderNos(_ context.Context, resourceID uint, limit int) ([]string, error) {
+	s.unavailableLimit = limit
+	if s.order.Status != domain.OrderStatusActive || s.order.RefundTxID != nil || (resourceID != 0 && resourceID != s.resourceID) {
+		return nil, nil
+	}
+	return []string{s.order.OrderNo}, nil
+}
+
+func (*unavailableRefundRepoStub) ListExpiredCodeOrderNos(context.Context, time.Time, int) ([]string, error) {
+	return nil, nil
+}
+
+func (*unavailableRefundRepoStub) ListExpiredPurchaseActivationOrderNos(context.Context, time.Time, int) ([]string, error) {
+	return nil, nil
+}
+
+func (*unavailableRefundRepoStub) ListExpiredPurchaseWarrantyOrderNos(context.Context, time.Time, int) ([]string, error) {
+	return nil, nil
+}
+
+func (*unavailableRefundRepoStub) ListCodeOrderNosReadyForCleanup(context.Context, time.Time, int) ([]string, error) {
+	return nil, nil
+}
+
+func (s *unavailableRefundRepoStub) ListPartialCleanupOrderNos(context.Context, int) ([]string, error) {
+	if s.order.Status == domain.OrderStatusRefunded && s.cleanupStatus != "succeeded" {
+		return []string{s.order.OrderNo}, nil
+	}
+	return nil, nil
+}
+
+type unavailableRefundWalletStub struct {
+	WalletPort
+	commands []WalletCommand
+}
+
+func (*unavailableRefundWalletStub) LockConsumer(context.Context, uint) error { return nil }
+
+func (s *unavailableRefundWalletStub) RefundConsumer(_ context.Context, cmd WalletCommand) (*WalletTransaction, error) {
+	s.commands = append(s.commands, cmd)
+	return &WalletTransaction{ID: 9001}, nil
+}
+
+type unavailableRefundAllocationStub struct {
+	AllocationPort
+	released []string
+}
+
+func (s *unavailableRefundAllocationStub) ReleaseByOrder(_ context.Context, orderNo string) error {
+	s.released = append(s.released, orderNo)
+	return nil
+}
+
+type unavailableRefundTokenStub struct {
+	OrderTokenPort
+	disabled []string
+	extended []string
+}
+
+func (s *unavailableRefundTokenStub) DisableOrderToken(_ context.Context, orderNo string, _ string) error {
+	s.disabled = append(s.disabled, orderNo)
+	return nil
+}
+
+func (s *unavailableRefundTokenStub) ExtendOrderToken(_ context.Context, orderNo string, _ time.Time) error {
+	s.extended = append(s.extended, orderNo)
+	return nil
+}
+
+type unavailableRefundDeliveryStub struct {
+	OrderDeliveryPort
+	delivery *OrderDeliverySummary
+}
+
+func (s unavailableRefundDeliveryStub) FindOrderDelivery(context.Context, uint) (*OrderDeliverySummary, error) {
+	return s.delivery, nil
+}
+
+func TestUnavailableMicrosoftResourceRefundIsImmediateAndIdempotent(t *testing.T) {
+	debitTxID := uint(8001)
+	repo := &unavailableRefundRepoStub{resourceID: 30043, order: domain.Order{
+		OrderNo: "OR019F97158E9A713AA3A82FEB49DE0486", UserID: 42,
+		Status: domain.OrderStatusActive, ServiceMode: domain.ServiceModePurchase,
+		PayAmount: "0.010000", DebitTxID: &debitTxID,
+	}}
+	wallet := &unavailableRefundWalletStub{}
+	allocation := &unavailableRefundAllocationStub{}
+	tokens := &unavailableRefundTokenStub{}
+	uc := NewUseCase(repo, nil, wallet, allocation, tokens)
+
+	refunded, err := uc.RefundUnavailableMicrosoftOrders(context.Background(), 30043, repo.order.OrderNo)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, refunded)
+	require.Equal(t, 200, repo.unavailableLimit)
+	require.Equal(t, domain.OrderStatusRefunded, repo.order.Status)
+	require.Equal(t, "0.010000", repo.order.RefundAmount)
+	require.NotNil(t, repo.order.RefundTxID)
+	require.Equal(t, uint(9001), *repo.order.RefundTxID)
+	require.Equal(t, "order:"+repo.order.OrderNo+":refund", wallet.commands[0].IdempotencyKey)
+	require.Equal(t, []string{repo.order.OrderNo}, allocation.released)
+	require.Equal(t, []string{repo.order.OrderNo}, tokens.disabled)
+	require.Equal(t, "succeeded", repo.cleanupStatus)
+
+	result, err := uc.ExpireDueOrders(context.Background(), 200)
+	require.NoError(t, err)
+	require.Zero(t, result.ResourceUnavailableRefunded)
+	require.Equal(t, 1, repo.refundCalls)
+	require.Len(t, wallet.commands, 1)
+}
+
+func TestUnavailableMicrosoftResourceCompletesDeliveredCodeOrderInsteadOfRefunding(t *testing.T) {
+	debitTxID := uint(8002)
+	repo := &unavailableRefundRepoStub{resourceID: 30044, order: domain.Order{
+		ID: 77, OrderNo: "ORDER-DELIVERED-CODE", UserID: 42,
+		Status: domain.OrderStatusActive, ServiceMode: domain.ServiceModeCode,
+		PayAmount: "0.010000", DebitTxID: &debitTxID,
+	}}
+	wallet := &unavailableRefundWalletStub{}
+	allocation := &unavailableRefundAllocationStub{}
+	tokens := &unavailableRefundTokenStub{}
+	uc := NewUseCase(repo, nil, wallet, allocation, tokens)
+	uc.SetOrderDeliveryPort(unavailableRefundDeliveryStub{delivery: &OrderDeliverySummary{ReceivedAt: time.Now().UTC()}})
+
+	refunded, err := uc.RefundUnavailableMicrosoftOrders(context.Background(), repo.resourceID, "request-delivered")
+
+	require.NoError(t, err)
+	require.Zero(t, refunded)
+	require.Equal(t, domain.OrderStatusCompleted, repo.order.Status)
+	require.Zero(t, repo.refundCalls)
+	require.Empty(t, wallet.commands)
+	require.Empty(t, allocation.released)
+	require.Equal(t, []string{repo.order.OrderNo}, tokens.extended)
+	require.Empty(t, tokens.disabled)
+}
+
+func TestRefundedOrderWithMissingCleanupIsRecovered(t *testing.T) {
+	debitTxID := uint(8003)
+	refundTxID := uint(9003)
+	repo := &unavailableRefundRepoStub{resourceID: 30045, cleanupStatus: "none", order: domain.Order{
+		OrderNo: "ORDER-CLEANUP-RECOVERY", UserID: 42,
+		Status: domain.OrderStatusRefunded, ServiceMode: domain.ServiceModePurchase,
+		PayAmount: "0.010000", DebitTxID: &debitTxID, RefundTxID: &refundTxID,
+	}}
+	allocation := &unavailableRefundAllocationStub{}
+	tokens := &unavailableRefundTokenStub{}
+	uc := NewUseCase(repo, nil, nil, allocation, tokens)
+
+	result, err := uc.ExpireDueOrders(context.Background(), 200)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, result.CleanupRetried)
+	require.Equal(t, []string{repo.order.OrderNo}, allocation.released)
+	require.Equal(t, []string{repo.order.OrderNo}, tokens.disabled)
+	require.Equal(t, "succeeded", repo.cleanupStatus)
+}
