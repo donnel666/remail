@@ -1334,6 +1334,8 @@ func TestAllocationMigrationIndexesAndExplainMySQL(t *testing.T) {
 	seedAllocBase(t, db, "domain", 0, 0, 0)
 	seedMicrosoftResources(t, db, 1, 1000, 16, true, "normal")
 	seedDomainResources(t, db, 1, 2000, 16)
+	seedDomainResourcesWithPurpose(t, db, 1, 3000, 16, "not_sale")
+	seedDomainResourcesWithPurpose(t, db, 2, 4000, 64, "not_sale")
 	require.NoError(t, db.Exec(`
 INSERT INTO generated_mailboxes(resource_id, owner_user_id, email, status, last_allocated_at)
 VALUES
@@ -1348,6 +1350,7 @@ VALUES ('ord-explain-domain-active', 10, 20, 2000, 'public', ?, 'a@d2000.example
 	require.NoError(t, db.Exec(`
 INSERT INTO allocation_daily_usages(usage_date, resource_type, resource_id, usage_kind, used_count)
 VALUES (CURRENT_DATE(), 'microsoft', 1000, 'plus', 1)`).Error)
+	require.NoError(t, db.Exec("ANALYZE TABLE domain_resources").Error)
 
 	for _, item := range []struct {
 		table string
