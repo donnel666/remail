@@ -2467,6 +2467,33 @@ func (e SupplierApplicationResponseStatus) Valid() bool {
 	}
 }
 
+// Defines values for SystemAnnouncementType.
+const (
+	SystemAnnouncementTypeDefault SystemAnnouncementType = "default"
+	SystemAnnouncementTypeError   SystemAnnouncementType = "error"
+	SystemAnnouncementTypeOngoing SystemAnnouncementType = "ongoing"
+	SystemAnnouncementTypeSuccess SystemAnnouncementType = "success"
+	SystemAnnouncementTypeWarning SystemAnnouncementType = "warning"
+)
+
+// Valid indicates whether the value is a known member of the SystemAnnouncementType enum.
+func (e SystemAnnouncementType) Valid() bool {
+	switch e {
+	case SystemAnnouncementTypeDefault:
+		return true
+	case SystemAnnouncementTypeError:
+		return true
+	case SystemAnnouncementTypeOngoing:
+		return true
+	case SystemAnnouncementTypeSuccess:
+		return true
+	case SystemAnnouncementTypeWarning:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TicketMessageResponseSenderType.
 const (
 	TicketMessageResponseSenderTypePlatform TicketMessageResponseSenderType = "platform"
@@ -6888,6 +6915,26 @@ type SupplierApplicationResponse struct {
 // SupplierApplicationResponseStatus defines model for SupplierApplicationResponse.Status.
 type SupplierApplicationResponseStatus string
 
+// SystemAnnouncement defines model for SystemAnnouncement.
+type SystemAnnouncement struct {
+	// Content Maximum 1 MiB when UTF-8 encoded.
+	Content   string                 `json:"content"`
+	Enabled   bool                   `json:"enabled"`
+	EndTime   string                 `json:"endTime"`
+	Id        int64                  `json:"id"`
+	StartTime string                 `json:"startTime"`
+	Title     string                 `json:"title"`
+	Type      SystemAnnouncementType `json:"type"`
+}
+
+// SystemAnnouncementType defines model for SystemAnnouncement.Type.
+type SystemAnnouncementType string
+
+// SystemAnnouncementsResponse defines model for SystemAnnouncementsResponse.
+type SystemAnnouncementsResponse struct {
+	Announcements []SystemAnnouncement `json:"announcements"`
+}
+
 // TicketFacets defines model for TicketFacets.
 type TicketFacets struct {
 	Status     TicketStatusFacets `json:"status"`
@@ -10204,6 +10251,9 @@ type ServerInterface interface {
 	// Withdraw from supplier wallet
 	// (POST /v1/admin/wallets/{userId}/withdraw)
 	PostAdminWalletWithdraw(c *gin.Context, userId int, params PostAdminWalletWithdrawParams)
+	// List active system announcements
+	// (GET /v1/announcements)
+	GetSystemAnnouncements(c *gin.Context)
 	// List API keys for the current user
 	// (GET /v1/apikeys)
 	GetApiKeys(c *gin.Context, params GetApiKeysParams)
@@ -19102,6 +19152,19 @@ func (siw *ServerInterfaceWrapper) PostAdminWalletWithdraw(c *gin.Context) {
 	siw.Handler.PostAdminWalletWithdraw(c, userId, params)
 }
 
+// GetSystemAnnouncements operation middleware
+func (siw *ServerInterfaceWrapper) GetSystemAnnouncements(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetSystemAnnouncements(c)
+}
+
 // GetApiKeys operation middleware
 func (siw *ServerInterfaceWrapper) GetApiKeys(c *gin.Context) {
 
@@ -22001,6 +22064,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/wallets/:userId/debit", wrapper.PostAdminWalletDebit)
 	router.GET(options.BaseURL+"/v1/admin/wallets/:userId/transactions", wrapper.GetAdminWalletTransactions)
 	router.POST(options.BaseURL+"/v1/admin/wallets/:userId/withdraw", wrapper.PostAdminWalletWithdraw)
+	router.GET(options.BaseURL+"/v1/announcements", wrapper.GetSystemAnnouncements)
 	router.GET(options.BaseURL+"/v1/apikeys", wrapper.GetApiKeys)
 	router.POST(options.BaseURL+"/v1/apikeys", wrapper.PostApiKey)
 	router.GET(options.BaseURL+"/v1/apikeys/usage", wrapper.GetApiKeyUsage)

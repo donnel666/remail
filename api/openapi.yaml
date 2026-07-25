@@ -48,6 +48,20 @@ paths:
               schema:
                 $ref: "#/components/schemas/ReadyzResponse"
 
+  /v1/announcements:
+    get:
+      operationId: getSystemAnnouncements
+      summary: List active system announcements
+      tags:
+        - System
+      responses:
+        "200":
+          description: Active system announcements, most recently started first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemAnnouncementsResponse"
+
   # --- Activation ---
   /v1/activation:
     get:
@@ -12369,6 +12383,58 @@ components:
         updatedAt:
           type: string
           format: date-time
+      additionalProperties: false
+
+    SystemAnnouncement:
+      type: object
+      required:
+        - id
+        - title
+        - content
+        - type
+        - startTime
+        - endTime
+        - enabled
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        content:
+          type: string
+          minLength: 1
+          description: Maximum 1 MiB when UTF-8 encoded.
+        type:
+          type: string
+          enum:
+            - default
+            - ongoing
+            - success
+            - warning
+            - error
+        startTime:
+          type: string
+        endTime:
+          type: string
+        enabled:
+          type: boolean
+      additionalProperties: false
+
+    SystemAnnouncementsResponse:
+      type: object
+      required:
+        - announcements
+      properties:
+        announcements:
+          type: array
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/SystemAnnouncement"
       additionalProperties: false
 
     AdminSystemSettingsResponse:

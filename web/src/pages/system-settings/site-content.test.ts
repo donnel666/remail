@@ -1,12 +1,27 @@
 import { describe, expect, it } from "vitest";
 
-import { invalidNumericKeys, parseSettingsList, selectOptions, serializeOptions } from "@/lib/system-settings-api";
+import {
+  invalidNumericKeys,
+  MAX_ANNOUNCEMENT_CONTENT_BYTES,
+  parseSettingsList,
+  selectOptions,
+  serializeOptions,
+  utf8ByteLength,
+} from "@/lib/system-settings-api";
 
 describe("parseSettingsList", () => {
   it("accepts arrays and safely ignores invalid setting values", () => {
     expect(parseSettingsList<{ id: number }>('[{"id":1}]')).toEqual([{ id: 1 }]);
     expect(parseSettingsList("{}")).toEqual([]);
     expect(parseSettingsList("broken")).toEqual([]);
+  });
+});
+
+describe("announcement content size", () => {
+  it("counts UTF-8 bytes at the 1 MiB boundary", () => {
+    const content = "界".repeat(Math.floor(MAX_ANNOUNCEMENT_CONTENT_BYTES / 3)) + "x";
+    expect(utf8ByteLength(content)).toBe(MAX_ANNOUNCEMENT_CONTENT_BYTES);
+    expect(utf8ByteLength(content + "x")).toBe(MAX_ANNOUNCEMENT_CONTENT_BYTES + 1);
   });
 });
 

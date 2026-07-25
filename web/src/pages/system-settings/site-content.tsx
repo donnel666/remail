@@ -21,7 +21,6 @@ import {
   Bell,
   Edit,
   HelpCircle,
-  Maximize2,
   Plus,
   Save,
   Trash2,
@@ -32,7 +31,13 @@ import {
 } from "@douyinfe/semi-illustrations";
 import { useTranslation } from "react-i18next";
 
-import { parseOption, parseSettingsList } from "@/lib/system-settings-api";
+import {
+  MAX_ANNOUNCEMENT_CONTENT_BYTES,
+  parseOption,
+  parseSettingsList,
+  type SystemAnnouncement,
+  utf8ByteLength,
+} from "@/lib/system-settings-api";
 
 import type { SectionProps } from "./index";
 import {
@@ -44,15 +49,7 @@ import {
 
 type AnnouncementType = "default" | "ongoing" | "success" | "warning" | "error";
 
-interface Announcement {
-  id: number;
-  title: string;
-  content: string;
-  type: AnnouncementType;
-  startTime: string;
-  endTime: string;
-  enabled: boolean;
-}
+type Announcement = SystemAnnouncement;
 
 interface FAQItem {
   id: number;
@@ -72,15 +69,9 @@ const D = {
   faq_list: "[]",
 };
 
-const EMPTY_ANNOUNCEMENT: Announcement = {
-  id: 0,
-  title: "",
-  content: "",
-  type: "default",
-  startTime: "",
-  endTime: "",
-  enabled: true,
-};
+function emptyAnnouncement(): Announcement {
+  return { id: 0, title: "", content: "", type: "default", startTime: new Date().toISOString(), endTime: "", enabled: true };
+}
 
 const EMPTY_FAQ: FAQItem = { id: 0, question: "", answer: "", weight: 0 };
 const { Text } = Typography;
@@ -107,9 +98,8 @@ export default function SiteContentSection({ options, loading, onBulkSave }: Sec
   const [announcements, setAnnouncements] = useState(() => parseSettingsList<Announcement>(parsed.announcements));
   const [faqList, setFaqList] = useState(() => parseSettingsList<FAQItem>(parsed.faq_list));
   const [announcementModalOpen, setAnnouncementModalOpen] = useState(false);
-  const [contentModalOpen, setContentModalOpen] = useState(false);
   const [faqModalOpen, setFaqModalOpen] = useState(false);
-  const [announcementDraft, setAnnouncementDraft] = useState<Announcement>(EMPTY_ANNOUNCEMENT);
+  const [announcementDraft, setAnnouncementDraft] = useState<Announcement>(() => emptyAnnouncement());
   const [faqDraft, setFaqDraft] = useState<FAQItem>(EMPTY_FAQ);
   const [announcementPanelEnabled, setAnnouncementPanelEnabled] = useState(parsed.announcement_enabled);
   const [announcementDirty, setAnnouncementDirty] = useState(false);
@@ -142,13 +132,23 @@ export default function SiteContentSection({ options, loading, onBulkSave }: Sec
       Toast.warning(t("请填写公告标题和内容"));
       return;
     }
+    if (utf8ByteLength(draft.content) > MAX_ANNOUNCEMENT_CONTENT_BYTES) {
+      Toast.warning(t("公告内容不能超过 1 MiB"));
+      return;
+    }
+    const start = toDate(draft.startTime);
+    const end = toDate(draft.endTime);
+    if (start && end && end < start) {
+      Toast.warning(t("结束时间不能早于开始时间"));
+      return;
+    }
     if (!draft.id && announcements.length >= 100) {
       Toast.warning(t("系统公告最多添加 100 条"));
       return;
     }
     setAnnouncements((current) => draft.id
       ? current.map((item) => item.id === draft.id ? draft : item)
-      : [...current, { ...draft, id: nextId(current) }]);
+      : [{ ...draft, id: nextId(current) }, ...current]);
     markAnnouncementChanged();
     setAnnouncementModalOpen(false);
   };
@@ -275,7 +275,7 @@ export default function SiteContentSection({ options, loading, onBulkSave }: Sec
     <Divider margin="12px" />
     <div className="flex w-full flex-col items-center justify-between gap-4 md:flex-row">
       <div className="order-2 flex w-full gap-2 md:order-1 md:w-auto">
-        <Button icon={<Plus size={14} />} theme="light" type="primary" className="w-full md:w-auto" onClick={() => { setAnnouncementDraft({ ...EMPTY_ANNOUNCEMENT }); setAnnouncementModalOpen(true); }}>{t("添加公告")}</Button>
+        <Button icon={<Plus size={14} />} theme="light" type="primary" className="w-full md:w-auto" onClick={() => { setAnnouncementDraft(emptyAnnouncement()); setAnnouncementModalOpen(true); }}>{t("添加公告")}</Button>
         <Button icon={<Trash2 size={14} />} theme="light" type="danger" className="w-full md:w-auto" disabled={selectedAnnouncementIds.length === 0} onClick={deleteSelectedAnnouncements}>{t("批量删除")} {selectedAnnouncementIds.length > 0 ? `(${selectedAnnouncementIds.length})` : ""}</Button>
         <Button icon={<Save size={14} />} type="secondary" className="w-full md:w-auto" loading={loading} disabled={!announcementDirty} onClick={() => void saveAnnouncements().catch(() => undefined)}>{t("保存设置")}</Button>
       </div>
@@ -384,11 +384,11 @@ export default function SiteContentSection({ options, loading, onBulkSave }: Sec
 
     <Modal title={announcementDraft.id ? t("编辑公告") : t("添加公告")} visible={announcementModalOpen} onCancel={() => setAnnouncementModalOpen(false)} onOk={saveAnnouncement} okText={t("保存")} cancelText={t("取消")} width={600}>
       <div className="space-y-4">
-        <label className="block" htmlFor="announcement-title"><span className="mb-1.5 block text-sm font-medium">{t("公告标题")}</span><Input autoFocus id="announcement-title" name="announcement-title" value={announcementDraft.title} onChange={(value) => setAnnouncementDraft((current) => ({ ...current, title: value }))} /></label>
+        <label className="block" htmlFor="announcement-title"><span className="mb-1.5 block text-sm font-medium">{t("公告标题")}</span><Input autoFocus id="announcement-title" name="announcement-title" maxLength={200} value={announcementDraft.title} onChange={(value) => setAnnouncementDraft((current) => ({ ...current, title: value }))} /></label>
         <div>
           <label className="mb-1.5 block text-sm font-medium" htmlFor="announcement-content">{t("公告内容")}</label>
-          <TextArea id="announcement-content" name="announcement-content" rows={4} maxCount={500} value={announcementDraft.content} placeholder={t("请输入公告内容（支持 Markdown/HTML）")} onChange={(value) => setAnnouncementDraft((current) => ({ ...current, content: value }))} />
-          <Button icon={<Maximize2 size={14} />} size="small" theme="light" type="tertiary" className="mt-2" onClick={() => setContentModalOpen(true)}>{t("放大编辑")}</Button>
+          <TextArea id="announcement-content" name="announcement-content" rows={6} value={announcementDraft.content} placeholder={t("请输入公告内容")} onChange={(value) => setAnnouncementDraft((current) => ({ ...current, content: value }))} />
+          <Text type="secondary" size="small">{t("公告内容最大 1 MiB（按 UTF-8 字节计算）")}</Text>
         </div>
         <div>
           <span className="mb-1.5 block text-sm font-medium">{t("开始时间")}</span>
@@ -407,10 +407,6 @@ export default function SiteContentSection({ options, loading, onBulkSave }: Sec
           <Switch aria-label={t("是否启用")} checked={announcementDraft.enabled} onChange={(value) => setAnnouncementDraft((current) => ({ ...current, enabled: value }))} />
         </div>
       </div>
-    </Modal>
-
-    <Modal title={t("编辑公告内容")} visible={contentModalOpen} onCancel={() => setContentModalOpen(false)} onOk={() => setContentModalOpen(false)} okText={t("确定")} cancelText={t("取消")} width={800}>
-      <TextArea autoFocus rows={14} maxCount={500} value={announcementDraft.content} placeholder={t("请输入公告内容（支持 Markdown/HTML）")} onChange={(value) => setAnnouncementDraft((current) => ({ ...current, content: value }))} />
     </Modal>
 
     <Modal title={faqDraft.id ? t("编辑问答") : t("添加问答")} visible={faqModalOpen} onCancel={() => setFaqModalOpen(false)} onOk={saveFaq} width={800}>

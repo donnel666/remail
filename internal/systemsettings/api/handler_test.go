@@ -13,6 +13,7 @@ import (
 	iamdomain "github.com/donnel666/remail/internal/iam/domain"
 	settingsapp "github.com/donnel666/remail/internal/systemsettings/app"
 	settingsdomain "github.com/donnel666/remail/internal/systemsettings/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -150,6 +151,22 @@ func TestAdminSettingsCRUD(t *testing.T) {
 	missing := httptest.NewRecorder()
 	r.ServeHTTP(missing, requestWithSession(http.MethodGet, "/v1/admin/settings/site.title", ""))
 	require.Equal(t, http.StatusNotFound, missing.Code)
+}
+
+func TestSystemAnnouncementsArePublic(t *testing.T) {
+	runtimeconfig.Replace([]settingsdomain.Setting{
+		{Key: "announcement_enabled", Value: "true"},
+		{Key: "announcements", Value: `[{"id":1,"title":"Notice","content":"Hello","type":"default","startTime":"","endTime":"","enabled":true}]`},
+	})
+	t.Cleanup(func() { runtimeconfig.Replace(nil) })
+	r := testRouter(&fakeRepository{items: map[string]settingsdomain.Setting{}})
+
+	response := httptest.NewRecorder()
+	r.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/announcements", nil))
+
+	require.Equal(t, http.StatusOK, response.Code)
+	require.Equal(t, "no-store", response.Header().Get("Cache-Control"))
+	require.JSONEq(t, `{"announcements":[{"id":1,"title":"Notice","content":"Hello","type":"default","startTime":"","endTime":"","enabled":true}]}`, response.Body.String())
 }
 
 func TestSettingDTOCanonicalizesLegacyKeyCase(t *testing.T) {

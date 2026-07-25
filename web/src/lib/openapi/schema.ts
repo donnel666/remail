@@ -38,6 +38,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/announcements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List active system announcements */
+        get: operations["getSystemAnnouncements"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/activation": {
         parameters: {
             query?: never;
@@ -4151,6 +4168,21 @@ export interface components {
             /** Format: date-time */
             updatedAt?: string;
         };
+        SystemAnnouncement: {
+            /** Format: int64 */
+            id: number;
+            title: string;
+            /** @description Maximum 1 MiB when UTF-8 encoded. */
+            content: string;
+            /** @enum {string} */
+            type: "default" | "ongoing" | "success" | "warning" | "error";
+            startTime: string;
+            endTime: string;
+            enabled: boolean;
+        };
+        SystemAnnouncementsResponse: {
+            announcements: components["schemas"]["SystemAnnouncement"][];
+        };
         AdminSystemSettingsResponse: {
             options: components["schemas"]["AdminSystemSetting"][];
         };
@@ -6142,6 +6174,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReadyzResponse"];
+                };
+            };
+        };
+    };
+    getSystemAnnouncements: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Active system announcements, most recently started first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemAnnouncementsResponse"];
                 };
             };
         };

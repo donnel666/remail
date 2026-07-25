@@ -4,10 +4,12 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/donnel666/remail/api/middleware"
 	"github.com/donnel666/remail/internal/systemsettings/app"
 	"github.com/donnel666/remail/internal/systemsettings/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/gin-gonic/gin"
 )
 
@@ -20,6 +22,11 @@ var errUnavailable = errors.New("system settings unavailable")
 
 func NewHandler(module *Module, checker middleware.PermissionChecker) *Handler {
 	return &Handler{module: module, checker: checker}
+}
+
+func (h *Handler) GetAnnouncements(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, gin.H{"announcements": runtimeconfig.ActiveAnnouncements(time.Now(), 20)})
 }
 
 type settingDTO struct {

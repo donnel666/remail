@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Bell, X } from "lucide-react";
+import { Bell, LoaderCircle, RefreshCw, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
+import {
+  getSystemAnnouncements,
+  type SystemAnnouncement,
+} from "@/lib/system-settings-api";
 import { Button } from "@/components/ui/button";
 import { HeaderActionButton } from "@/components/header-action-button";
 
@@ -27,18 +31,48 @@ function getFocusableElements(container: HTMLElement) {
 
 export function NotificationPopover() {
   const { t } = useTranslation();
-  const [activeTab, setActiveTab] = useState<(typeof TABS)[number]["key"]>("notifications");
+  const [activeTab, setActiveTab] = useState<(typeof TABS)[number]["key"]>("system");
   const [open, setOpen] = useState(false);
+  const [announcements, setAnnouncements] = useState<SystemAnnouncement[]>([]);
+  const [announcementsLoading, setAnnouncementsLoading] = useState(false);
+  const [announcementsError, setAnnouncementsError] = useState(false);
   const dialogRef = useRef<HTMLElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const requestRef = useRef<AbortController | null>(null);
+
+  const loadAnnouncements = useCallback(async () => {
+    requestRef.current?.abort();
+    const controller = new AbortController();
+    requestRef.current = controller;
+    setAnnouncementsLoading(true);
+    setAnnouncementsError(false);
+    try {
+      const next = await getSystemAnnouncements(controller.signal);
+      if (!controller.signal.aborted) setAnnouncements(next);
+    } catch {
+      if (!controller.signal.aborted) setAnnouncementsError(true);
+    } finally {
+      if (requestRef.current === controller) {
+        requestRef.current = null;
+        setAnnouncementsLoading(false);
+      }
+    }
+  }, []);
 
   const openDialog = useCallback(() => {
     previousFocusRef.current = document.activeElement as HTMLElement | null;
     setOpen(true);
-  }, []);
+    void loadAnnouncements();
+  }, [loadAnnouncements]);
 
   const closeDialog = useCallback(() => {
+    requestRef.current?.abort();
     setOpen(false);
+  }, []);
+
+  useEffect(() => () => {
+    requestRef.current?.abort();
+    requestRef.current = null;
   }, []);
 
   useEffect(() => {
@@ -156,12 +190,27 @@ export function NotificationPopover() {
               </Button>
             </header>
 
-            <div className="min-h-0 flex-1 overflow-auto pb-6">
+            <div aria-live="polite" className="min-h-0 flex-1 overflow-auto pb-6">
               {activeTab === "notifications" ? (
                 <EmptyAnnouncement
                   title={t("No notifications")}
                   description={t("New messages will appear here")}
                 />
+              ) : announcementsLoading ? (
+                <div className="flex min-h-[320px] items-center justify-center gap-2 text-sm text-muted-foreground" role="status">
+                  <LoaderCircle className="size-4 animate-spin motion-reduce:animate-none" />
+                  {t("Loading announcements")}
+                </div>
+              ) : announcementsError ? (
+                <div className="flex min-h-[320px] flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border bg-background px-6 text-center">
+                  <p className="text-sm text-muted-foreground">{t("Failed to load announcements")}</p>
+                  <Button variant="outline" size="sm" onClick={() => void loadAnnouncements()}>
+                    <RefreshCw className="size-4" />
+                    {t("Try again")}
+                  </Button>
+                </div>
+              ) : announcements.length > 0 ? (
+                <AnnouncementList announcements={announcements} />
               ) : (
                 <EmptyAnnouncement
                   title={t("No system announcements")}
@@ -170,15 +219,7 @@ export function NotificationPopover() {
               )}
             </div>
 
-            <footer className="flex items-center justify-end gap-3 pb-6">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 rounded-[10px] bg-surface-sunken px-3 text-brand hover:bg-brand-subtle hover:text-brand"
-                onClick={closeDialog}
-              >
-                {t("Close today")}
-              </Button>
+            <footer className="flex items-center justify-end pb-6">
               <Button
                 variant="ghost"
                 size="sm"
@@ -201,6 +242,47 @@ export function NotificationPopover() {
       </HeaderActionButton>
       {dialog}
     </>
+  );
+}
+
+const ANNOUNCEMENT_TYPES: Record<SystemAnnouncement["type"], { label: string; dot: string }> = {
+  default: { label: "General", dot: "bg-zinc-500" },
+  ongoing: { label: "In progress", dot: "bg-blue-500" },
+  success: { label: "Success", dot: "bg-emerald-500" },
+  warning: { label: "Warning", dot: "bg-amber-500" },
+  error: { label: "Error", dot: "bg-red-500" },
+};
+
+function AnnouncementList({ announcements }: { announcements: SystemAnnouncement[] }) {
+  const { t } = useTranslation();
+
+  return (
+    <div className="space-y-3">
+      {announcements.map((announcement) => {
+        const type = ANNOUNCEMENT_TYPES[announcement.type];
+        return (
+          <article key={announcement.id} className="rounded-xl border border-border bg-background p-4 transition-colors hover:bg-surface-sunken/60">
+            <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
+              <span className={cn("mt-1.5 size-2.5 shrink-0 rounded-full", type.dot)} aria-hidden="true" />
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="break-words text-sm font-semibold text-foreground">{announcement.title}</h3>
+                  <span className="rounded-full bg-surface-sunken px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                    {t(type.label)}
+                  </span>
+                </div>
+                <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-foreground/80">{announcement.content}</p>
+              </div>
+              <time className="shrink-0 text-xs text-muted-foreground" dateTime={announcement.startTime || undefined}>
+                {announcement.startTime
+                  ? new Date(announcement.startTime).toLocaleString(undefined, { hour12: false })
+                  : t("Effective immediately")}
+              </time>
+            </div>
+          </article>
+        );
+      })}
+    </div>
   );
 }
 

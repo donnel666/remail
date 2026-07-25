@@ -72,7 +72,7 @@ var removedKeys = map[string]struct{}{
 }
 
 var booleanKeys = map[string]struct{}{
-	"register_enabled": {}, "captcha_enabled": {},
+	"register_enabled": {}, "captcha_enabled": {}, "announcement_enabled": {},
 }
 
 func Validate(key, value string) error {
@@ -96,6 +96,8 @@ func Validate(key, value string) error {
 		return nil
 	}
 	switch key {
+	case "announcements":
+		return validateAnnouncements(rawValue)
 	case "registration_reward_amount":
 		amount, err := money.Parse(value)
 		if err != nil || amount.IsNegative() {

@@ -6,6 +6,17 @@ export interface SystemOption {
   value: string;
 }
 
+export type SystemAnnouncement = components["schemas"]["SystemAnnouncement"];
+export const MAX_ANNOUNCEMENT_CONTENT_BYTES = 1 << 20;
+export const utf8ByteLength = (value: string) => new TextEncoder().encode(value).byteLength;
+
+export async function getSystemAnnouncements(signal?: AbortSignal): Promise<SystemAnnouncement[]> {
+  const response = await unwrap<components["schemas"]["SystemAnnouncementsResponse"]>(
+    await apiClient.GET("/v1/announcements", { signal }),
+  );
+  return response.announcements;
+}
+
 export function parseSettingsList<T>(raw: unknown): T[] {
   if (typeof raw !== "string" || !raw) return [];
   try {
