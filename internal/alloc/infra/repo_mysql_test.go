@@ -54,7 +54,7 @@ func allocMigrationsDir(t *testing.T) string {
 func TestMicrosoftMainAllocationConcurrentMySQL(t *testing.T) {
 	db := newAllocMySQLTestDB(t)
 	seedAllocBase(t, db, "microsoft", 1, 0, 0)
-	seedMicrosoftResources(t, db, 1, 1000, 150, true, "normal")
+	seedMicrosoftResources(t, db, 1, 1000, 10_000, true, "normal")
 	deadlocksBefore := innodbMetricCount(t, db, "lock_deadlocks")
 	timeoutsBefore := innodbMetricCount(t, db, "lock_timeouts")
 
@@ -1458,29 +1458,44 @@ INSERT INTO project_mail_rules(project_id, rule_type, pattern, enabled) VALUES
 
 func seedMicrosoftResources(t *testing.T, db *gorm.DB, ownerID, startID, count int, forSale bool, status string) {
 	t.Helper()
+	type emailResourceSeed struct {
+		ID          int
+		Type        string
+		OwnerUserID int `gorm:"column:owner_user_id"`
+	}
+	type microsoftResourceSeed struct {
+		ID           int
+		EmailAddress string `gorm:"column:email_address"`
+		EmailDomain  string `gorm:"column:email_domain"`
+		Password     string
+		ForSale      bool `gorm:"column:for_sale"`
+		Status       string
+		QualityScore int    `gorm:"column:quality_score"`
+		AllocBucket  uint16 `gorm:"column:alloc_bucket"`
+	}
+
+	roots := make([]emailResourceSeed, count)
+	resources := make([]microsoftResourceSeed, count)
 	for i := 0; i < count; i++ {
 		id := startID + i
-		email := fmt.Sprintf("ms%d@example.com", id)
 		qualityScore := 100 - i
 		if qualityScore < 0 {
 			qualityScore = 0
 		}
-		require.NoError(t, db.Exec(
-			"INSERT INTO email_resources(id, type, owner_user_id) VALUES (?, 'microsoft', ?)",
-			id,
-			ownerID,
-		).Error)
-		require.NoError(t, db.Exec(`
-INSERT INTO microsoft_resources(id, email_address, email_domain, password, for_sale, status, quality_score, alloc_bucket)
-VALUES (?, ?, 'example.com', 'secret', ?, ?, ?, MOD(?, 2048))`,
-			id,
-			email,
-			forSale,
-			status,
-			qualityScore,
-			id,
-		).Error)
+		roots[i] = emailResourceSeed{ID: id, Type: "microsoft", OwnerUserID: ownerID}
+		resources[i] = microsoftResourceSeed{
+			ID:           id,
+			EmailAddress: fmt.Sprintf("ms%d@example.com", id),
+			EmailDomain:  "example.com",
+			Password:     "secret",
+			ForSale:      forSale,
+			Status:       status,
+			QualityScore: qualityScore,
+			AllocBucket:  coredomain.MicrosoftAllocationBucket(uint(id)),
+		}
 	}
+	require.NoError(t, db.Table("email_resources").CreateInBatches(roots, 1000).Error)
+	require.NoError(t, db.Table("microsoft_resources").CreateInBatches(resources, 1000).Error)
 }
 
 func requireIndexExists(t *testing.T, db *gorm.DB, tableName string, indexName string) {
