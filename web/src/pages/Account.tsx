@@ -20,6 +20,7 @@ import { useNavigate } from "@tanstack/react-router";
 import {
   BarChart2,
   Coins,
+  Crown,
   ShieldCheck,
   UserPlus,
   Users,
@@ -28,6 +29,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import coverImage from "@/assets/cover-4.webp";
+import { MembershipBenefits } from "@/components/membership";
 import { OverflowTooltip } from "@/components/semi/overflow-tooltip";
 import { useAuth, type CurrentUser } from "@/context/auth-provider";
 import { LOGIN_NOTICE_KEY, clearLoginReturnTo } from "@/lib/auth-flow";
@@ -77,7 +79,7 @@ function formatInteger(value: number | null) {
 export default function Account() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { currentUser, logout } = useAuth();
+  const { currentUser, logout, refreshCurrentUser } = useAuth();
   const [wallet, setWallet] = useState<WalletResponse | null>(null);
   const [requestCount, setRequestCount] = useState<number | null>(null);
   const [overviewLoading, setOverviewLoading] = useState(false);
@@ -103,6 +105,7 @@ export default function Account() {
       const [walletResponse, nextRequestCount] = await Promise.all([
         getWallet(),
         getAPIKeyUsage().then((usage) => usage.requestCount),
+        refreshCurrentUser(),
       ]);
       setWallet(walletResponse);
       setRequestCount(nextRequestCount);
@@ -111,7 +114,7 @@ export default function Account() {
     } finally {
       setOverviewLoading(false);
     }
-  }, [t]);
+  }, [refreshCurrentUser, t]);
 
   useEffect(() => {
     void refreshAccountOverview();
@@ -252,6 +255,28 @@ export default function Account() {
               ))}
             </div>
           </Card>
+        </div>
+      </Card>
+
+      <Card className="!rounded-2xl mt-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex min-w-0 items-start gap-3">
+            <Avatar className="shadow-md" color="orange" size="small">
+              <Crown size={16} />
+            </Avatar>
+            <div className="min-w-0">
+              <Text className="text-lg font-medium">{t("Current benefits")}</Text>
+              <div className="mt-1 text-sm text-[var(--semi-color-text-2)]">
+                {currentUser?.userGroup.description || t("Benefits currently active for this account")}
+              </div>
+            </div>
+          </div>
+          <Tag color="orange" size="large">
+            {userGroupLabel}
+          </Tag>
+        </div>
+        <div className="mt-5 border-t border-[var(--semi-color-border)] pt-4">
+          <MembershipBenefits group={currentUser?.userGroup} />
         </div>
       </Card>
 

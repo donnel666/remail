@@ -3082,3 +3082,22 @@ func TestAdminUserGroupCapabilitiesRoundTrip(t *testing.T) {
 	require.Equal(t, "0.00", updated.Group.TopupThreshold)
 	require.False(t, updated.Group.AutoUpgradeEnabled)
 }
+
+func TestUserGroupsListsEnabledMembershipGroups(t *testing.T) {
+	h := newTestHandler()
+	r := setupTestRouterWithHandler(h)
+	seedAdminSession(t, h, "membership-session")
+	testRepo(h).userGroups[2] = &domain.UserGroup{ID: 2, Code: "vip1", Name: "VIP 1", Enabled: true, TopupThreshold: "100.00", AutoUpgradeEnabled: true}
+	testRepo(h).userGroups[3] = &domain.UserGroup{ID: 3, Code: "hidden", Name: "Hidden", Enabled: false}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/user-groups", nil)
+	addAuthenticatedRequest(req, "membership-session")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var response UserGroupListResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	require.Len(t, response.Groups, 2)
+	require.NotContains(t, w.Body.String(), `"hidden"`)
+}

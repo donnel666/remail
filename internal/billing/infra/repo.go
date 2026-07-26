@@ -28,6 +28,7 @@ type WalletModel struct {
 	ConsumerBalance     string    `gorm:"type:decimal(18,6);not null;default:0;column:consumer_balance"`
 	SupplierAvailable   string    `gorm:"type:decimal(18,6);not null;default:0;column:supplier_available"`
 	SupplierFrozen      string    `gorm:"type:decimal(18,6);not null;default:0;column:supplier_frozen"`
+	TotalRecharged      string    `gorm:"type:decimal(18,6);not null;default:0;column:total_recharged"`
 	TotalSpend          string    `gorm:"type:decimal(18,6);not null;default:0;column:total_spend"`
 	SpendCount          int64     `gorm:"not null;default:0;column:spend_count"`
 	BalanceWarningLevel int       `gorm:"not null;default:4;column:balance_warning_level"`
@@ -183,12 +184,17 @@ func (r *BillingRepo) GetOrCreateWalletSummary(ctx context.Context, userID uint)
 		return nil, err
 	}
 
+	totalRecharged, err := normalizeDBMoney(wallet.TotalRecharged)
+	if err != nil {
+		return nil, err
+	}
 	normalizedSpend, err := normalizeDBMoney(wallet.TotalSpend)
 	if err != nil {
 		return nil, err
 	}
 	return &domain.WalletSummary{
 		Wallet:          walletModelToDomain(wallet),
+		TotalRecharged:  totalRecharged,
 		HistoricalSpend: normalizedSpend,
 		OrderCount:      wallet.SpendCount,
 	}, nil
@@ -1196,6 +1202,7 @@ func defaultWalletModel(userID uint) WalletModel {
 		ConsumerBalance:     "0.00",
 		SupplierAvailable:   "0.00",
 		SupplierFrozen:      "0.00",
+		TotalRecharged:      "0.00",
 		TotalSpend:          "0.00",
 		SpendCount:          0,
 		BalanceWarningLevel: 4,
@@ -1310,6 +1317,9 @@ func (r *BillingRepo) createConsumerTransaction(ctx context.Context, tx *gorm.DB
 		updates["total_spend"] = gorm.Expr("total_spend + ?", domain.MoneyString(amount))
 		updates["spend_count"] = gorm.Expr("spend_count + 1")
 	}
+	if isCumulativeRechargeType(req.TransactionType) {
+		updates["total_recharged"] = gorm.Expr("total_recharged + ?", domain.MoneyString(amount))
+	}
 	if err := tx.WithContext(ctx).
 		Model(&WalletModel{}).
 		Where("user_id = ?", wallet.UserID).
@@ -1325,11 +1335,77 @@ func (r *BillingRepo) createConsumerTransaction(ctx context.Context, tx *gorm.DB
 		wallet.TotalSpend = domain.MoneyString(totalSpend.Add(amount))
 		wallet.SpendCount++
 	}
+	if isCumulativeRechargeType(req.TransactionType) {
+		totalRecharged, err := domain.ParseMoney(wallet.TotalRecharged)
+		if err != nil {
+			return nil, err
+		}
+		wallet.TotalRecharged = domain.MoneyString(totalRecharged.Add(amount))
+		if err := r.autoUpgradeUserGroupInTx(ctx, tx, req.UserID, wallet.TotalRecharged); err != nil {
+			return nil, err
+		}
+	}
 	wallet.UpdatedAt = time.Now().UTC()
 	return &billingapp.AdjustBalanceResult{
 		Wallet:      walletModelToDomain(*wallet),
 		Transaction: transactionModelToDomain(transaction),
 	}, nil
+}
+
+func isCumulativeRechargeType(transactionType domain.TransactionType) bool {
+	return transactionType == domain.TransactionTypeRecharge || transactionType == domain.TransactionTypeCardRedeem
+}
+
+func (r *BillingRepo) autoUpgradeUserGroupInTx(ctx context.Context, tx *gorm.DB, userID uint, totalRecharged string) error {
+	var current struct {
+		UserGroupID uint `gorm:"column:user_group_id"`
+	}
+	if err := tx.WithContext(ctx).
+		Table("users").
+		Select("user_group_id").
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ?", userID).
+		Take(&current).Error; err != nil {
+		return fmt.Errorf("load membership for upgrade: %w", err)
+	}
+	var currentGroup struct {
+		TopupThreshold string `gorm:"column:topup_threshold"`
+	}
+	if err := tx.WithContext(ctx).
+		Table("user_groups").
+		Select("topup_threshold").
+		Where("id = ?", current.UserGroupID).
+		Take(&currentGroup).Error; err != nil {
+		return fmt.Errorf("load membership threshold: %w", err)
+	}
+
+	var target struct {
+		ID uint `gorm:"column:id"`
+	}
+	if err := tx.WithContext(ctx).
+		Table("user_groups").
+		Select("id").
+		Where("enabled = ? AND auto_upgrade_enabled = ?", true, true).
+		Where("topup_threshold > ? AND topup_threshold <= ?", currentGroup.TopupThreshold, totalRecharged).
+		Order("topup_threshold DESC, id DESC").
+		Take(&target).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return fmt.Errorf("find membership upgrade: %w", err)
+	}
+
+	result := tx.WithContext(ctx).
+		Table("users").
+		Where("id = ? AND user_group_id = ?", userID, current.UserGroupID).
+		Updates(map[string]any{"user_group_id": target.ID, "updated_at": time.Now().UTC()})
+	if result.Error != nil {
+		return fmt.Errorf("apply membership upgrade: %w", result.Error)
+	}
+	if result.RowsAffected != 1 {
+		return fmt.Errorf("apply membership upgrade: user group changed concurrently")
+	}
+	return nil
 }
 
 func validConsumerTransactionAmount(amount decimal.Decimal, transactionType domain.TransactionType) bool {

@@ -383,6 +383,22 @@ func (h *IAMHandler) GetMe(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"user": h.userResponseWithPermissions(c.Request.Context(), user)})
 }
 
+// GET /v1/user-groups
+func (h *IAMHandler) GetUserGroups(c *gin.Context) {
+	groups, err := h.module.AdminUseCase.ListUserGroups(c.Request.Context())
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	resp := make([]UserGroupResponse, 0, len(groups))
+	for _, group := range groups {
+		if group.Enabled {
+			resp = append(resp, toUserGroupResponse(group))
+		}
+	}
+	c.JSON(http.StatusOK, UserGroupListResponse{Groups: resp})
+}
+
 // GET /v1/me/invite
 func (h *IAMHandler) GetMeInvite(c *gin.Context) {
 	userID, ok := middleware.GetCurrentUserID(c)

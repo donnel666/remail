@@ -65,6 +65,7 @@ type Wallet struct {
 
 type WalletSummary struct {
 	Wallet          Wallet
+	TotalRecharged  string
 	HistoricalSpend string
 	OrderCount      int64
 }

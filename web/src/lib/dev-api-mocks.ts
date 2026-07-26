@@ -28,9 +28,9 @@ export const DEV_ME = {
     nickname: "Admin",
     role: "super_admin",
     userGroup: {
-      id: 1, code: "super_admin", name: "超级管理员", description: "", enabled: true,
-      apiConcurrencyLimit: 3,
-      priceDiscountRatio: "1.00", topupThreshold: "0.00", autoUpgradeEnabled: false,
+      id: 2, code: "vip1", name: "VIP 1", description: "稳定使用平台服务的进阶会员", enabled: true,
+      apiConcurrencyLimit: 10,
+      priceDiscountRatio: "0.90", topupThreshold: "100.00", autoUpgradeEnabled: true,
       createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
     },
     permissions,
@@ -45,6 +45,7 @@ export const DEV_WALLET = {
   consumerBalance: "9999.00",
   supplierAvailable: "286.50",
   supplierFrozen: "42.00",
+  totalRecharged: "268.00",
   historicalSpend: "128.50",
   orderCount: 12,
   updatedAt: "2024-01-01T00:00:00Z",
@@ -97,4 +98,20 @@ export const DEV_WALLET_TRANSACTIONS = {
   ],
   hasNext: false,
   limit: 100,
+};
+
+export const DEV_USER_GROUPS = {
+  groups: [
+    {
+      id: 1, code: "normal", name: "普通用户", description: "默认会员等级", enabled: true,
+      apiConcurrencyLimit: 3,
+      priceDiscountRatio: "1.00", topupThreshold: "0.00", autoUpgradeEnabled: false,
+    },
+    DEV_ME.user.userGroup,
+    {
+      id: 3, code: "vip2", name: "VIP 2", description: "面向高频业务的高级会员", enabled: true,
+      apiConcurrencyLimit: 20,
+      priceDiscountRatio: "0.80", topupThreshold: "500.00", autoUpgradeEnabled: true,
+    },
+  ],
 };

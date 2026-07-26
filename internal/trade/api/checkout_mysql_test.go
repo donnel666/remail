@@ -81,6 +81,7 @@ func tradeMigrationsDir(t *testing.T) string {
 func TestCheckoutSuccessAndIdempotentReplayMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	seedTradeBase(t, db, "microsoft")
+	require.NoError(t, db.Table("user_groups").Where("id = ?", 1).Update("price_discount_ratio", "0.900000").Error)
 	seedTradeMicrosoftResources(t, db, 1, 1000, 2, true)
 	creditBuyer(t, db, 2, "10.00")
 
@@ -98,6 +99,7 @@ func TestCheckoutSuccessAndIdempotentReplayMySQL(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, first.Created)
 	require.Equal(t, tradedomain.OrderStatusActive, first.Order.Status)
+	require.Equal(t, "1.80", first.Order.PayAmount)
 	require.NotEmpty(t, first.Order.DeliveryEmail)
 	require.NotEmpty(t, first.ServiceToken)
 	require.NotNil(t, first.Order.DebitTxID)
@@ -133,7 +135,7 @@ func TestCheckoutSuccessAndIdempotentReplayMySQL(t *testing.T) {
 		Select("amount").
 		Where("id = ?", *first.Order.DebitTxID).
 		Scan(&debitAmount).Error)
-	require.Equal(t, "-2.000000", debitAmount)
+	require.Equal(t, "-1.800000", debitAmount)
 	var allocationCount int64
 	require.NoError(t, db.Table("microsoft_allocations").Where("order_no = ?", first.Order.OrderNo).Count(&allocationCount).Error)
 	require.EqualValues(t, 1, allocationCount)
@@ -589,7 +591,7 @@ func TestCheckoutMarkFailedErrorRollsBackPendingOrderMySQL(t *testing.T) {
 	tokens := openapiapp.NewUseCase(openapiinfra.NewRepo(db))
 	uc := tradeapp.NewUseCase(
 		&markFailedErrorRepo{Repository: baseRepo},
-		coreOrderingAdapter{projects: projects},
+		coreOrderingAdapter{projects: projects, db: db},
 		billingWalletAdapter{wallet: wallet},
 		forcedAvailableAllocationAdapter{allocationAdapter{alloc: alloc}},
 		orderTokenAdapter{tokens: tokens},

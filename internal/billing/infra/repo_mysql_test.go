@@ -56,6 +56,11 @@ func TestBillingRepoRedeemCardMySQL(t *testing.T) {
 	db := newBillingMySQLTestDB(t)
 	ctx := context.Background()
 	userID := createBillingTestUser(t, db, "buyer@example.com")
+	require.NoError(t, db.Exec(`
+INSERT INTO user_groups(code, name, description, enabled, api_concurrency_limit, price_discount_ratio, topup_threshold, auto_upgrade_enabled)
+VALUES ('vip-card', 'VIP Card', '', 1, 10, 0.900000, 20.000000, 1)`).Error)
+	var vipGroupID uint
+	require.NoError(t, db.Table("user_groups").Select("id").Where("code = ?", "vip-card").Scan(&vipGroupID).Error)
 	repo := NewBillingRepo(db)
 	_, err := repo.GetOrCreateWalletSummary(ctx, userID)
 	require.NoError(t, err)
@@ -93,6 +98,10 @@ func TestBillingRepoRedeemCardMySQL(t *testing.T) {
 	summary, err := repo.GetOrCreateWalletSummary(ctx, userID)
 	require.NoError(t, err)
 	require.Equal(t, "25.50", summary.Wallet.ConsumerBalance)
+	require.Equal(t, "25.50", summary.TotalRecharged)
+	var userGroupID uint
+	require.NoError(t, db.Table("users").Select("user_group_id").Where("id = ?", userID).Scan(&userGroupID).Error)
+	require.Equal(t, vipGroupID, userGroupID)
 
 	replay, err := repo.RedeemCard(ctx, billingapp.RedeemCardCommand{
 		UserID:             userID,
@@ -137,6 +146,19 @@ func TestBillingRepoRedeemCardMySQL(t *testing.T) {
 		Now:                time.Now().UTC(),
 	})
 	require.ErrorIs(t, err, domain.ErrCardExhausted)
+
+	_, err = repo.ReverseTransaction(ctx, billingapp.ReverseTransactionCommand{
+		Original:           result.Transaction,
+		IdempotencyKey:     "reverse-card-001",
+		RequestFingerprint: "reverse-card-001-fingerprint",
+		RequestID:          "req-reverse-card-001",
+		Now:                time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	summary, err = repo.GetOrCreateWalletSummary(ctx, userID)
+	require.NoError(t, err)
+	require.Equal(t, "0.00", summary.Wallet.ConsumerBalance)
+	require.Equal(t, "0.00", summary.TotalRecharged)
 }
 
 func TestBillingRepoReferralRewardOnFirstCardRedemptionMySQL(t *testing.T) {
@@ -983,6 +1005,7 @@ func TestBillingRepoCreditRechargeExactlyOnceMySQL(t *testing.T) {
 	summary, err := repo.GetOrCreateWalletSummary(ctx, userID)
 	require.NoError(t, err)
 	require.Equal(t, "75.00", summary.Wallet.ConsumerBalance)
+	require.Equal(t, "75.00", summary.TotalRecharged)
 	var transactionCount int64
 	require.NoError(t, db.Model(&WalletTransactionModel{}).
 		Where("user_id = ? AND transaction_type = ? AND biz_id = ?", userID, domain.TransactionTypeRecharge, created.RechargeNo).
@@ -1039,6 +1062,7 @@ func TestBillingRepoCreditRechargeExactlyOnceMySQL(t *testing.T) {
 	summary, err = repo.GetOrCreateWalletSummary(ctx, userID)
 	require.NoError(t, err)
 	require.Equal(t, "95.00", summary.Wallet.ConsumerBalance)
+	require.Equal(t, "95.00", summary.TotalRecharged)
 }
 
 func TestBillingRepoRechargePendingLimitIsSerializedMySQL(t *testing.T) {

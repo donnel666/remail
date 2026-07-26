@@ -7284,6 +7284,9 @@ type WalletResponse struct {
 
 	// SupplierFrozen Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	SupplierFrozen NonNegativeLedgerAmount `json:"supplierFrozen"`
+
+	// TotalRecharged Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	TotalRecharged NonNegativeLedgerAmount `json:"totalRecharged"`
 	UpdatedAt      time.Time               `json:"updatedAt"`
 	UserId         int                     `json:"userId"`
 }
@@ -10568,6 +10571,9 @@ type ServerInterface interface {
 	// Get runtime human-verification configuration
 	// (GET /v1/turnstile/config)
 	GetTurnstileConfig(c *gin.Context)
+	// List enabled membership groups
+	// (GET /v1/user-groups)
+	GetUserGroups(c *gin.Context)
 	// Register a new user
 	// (POST /v1/users)
 	PostRegister(c *gin.Context)
@@ -22111,6 +22117,21 @@ func (siw *ServerInterfaceWrapper) GetTurnstileConfig(c *gin.Context) {
 	siw.Handler.GetTurnstileConfig(c)
 }
 
+// GetUserGroups operation middleware
+func (siw *ServerInterfaceWrapper) GetUserGroups(c *gin.Context) {
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetUserGroups(c)
+}
+
 // PostRegister operation middleware
 func (siw *ServerInterfaceWrapper) PostRegister(c *gin.Context) {
 
@@ -22523,6 +22544,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/tickets/:ticketNo/messages", wrapper.PostTicketMessage)
 	router.POST(options.BaseURL+"/v1/tickets/:ticketNo/read", wrapper.PostTicketRead)
 	router.GET(options.BaseURL+"/v1/turnstile/config", wrapper.GetTurnstileConfig)
+	router.GET(options.BaseURL+"/v1/user-groups", wrapper.GetUserGroups)
 	router.POST(options.BaseURL+"/v1/users", wrapper.PostRegister)
 	router.GET(options.BaseURL+"/v1/wallet", wrapper.GetWallet)
 	router.GET(options.BaseURL+"/v1/wallet/referrals", wrapper.GetWalletReferrals)

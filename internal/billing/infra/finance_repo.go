@@ -280,6 +280,23 @@ func (r *BillingRepo) reverseTransactionInTx(ctx context.Context, tx *gorm.DB, c
 	if err != nil {
 		return nil, err
 	}
+	if isCumulativeRechargeType(domain.TransactionType(original.TransactionType)) {
+		amount, err := domain.ParseMoney(original.Amount)
+		if err != nil {
+			return nil, err
+		}
+		total, err := domain.ParseMoney(wallet.TotalRecharged)
+		if err != nil || total.LessThan(amount) {
+			return nil, fmt.Errorf("reverse cumulative recharge: invalid wallet total")
+		}
+		wallet.TotalRecharged = domain.MoneyString(total.Sub(amount))
+		if err := tx.WithContext(ctx).
+			Model(&WalletModel{}).
+			Where("user_id = ?", original.UserID).
+			Update("total_recharged", wallet.TotalRecharged).Error; err != nil {
+			return nil, fmt.Errorf("reverse cumulative recharge: %w", err)
+		}
+	}
 	reversedByNo := created.Transaction.TransactionNo
 	return &billingapp.ReverseTransactionResult{
 		Original: billingapp.AdminTransaction{

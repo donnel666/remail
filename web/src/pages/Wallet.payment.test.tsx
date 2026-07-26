@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   getWallet: vi.fn(),
   getWalletReferrals: vi.fn(),
   listRecharges: vi.fn(),
+  refreshCurrentUser: vi.fn(),
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
   toastWarning: vi.fn(),
@@ -37,6 +38,26 @@ vi.mock("@/lib/wallet-api", () => ({
 vi.mock("@/lib/iam-api", () => ({
   createMyInvite: vi.fn(),
   getMyInvite: vi.fn(async () => ({ inviteCode: "INVITE" })),
+  getUserGroups: vi.fn(async () => ({ groups: [] })),
+}));
+
+vi.mock("@/context/auth-provider", () => ({
+  useAuth: () => ({
+    currentUser: {
+      userGroup: {
+        id: 1,
+        code: "normal",
+        name: "Normal",
+        description: "",
+        enabled: true,
+        apiConcurrencyLimit: 3,
+        priceDiscountRatio: "1.00",
+        topupThreshold: "0.00",
+        autoUpgradeEnabled: false,
+      },
+    },
+    refreshCurrentUser: mocks.refreshCurrentUser,
+  }),
 }));
 
 vi.mock("@douyinfe/semi-icons", () => ({ IconSearch: () => null }));
@@ -102,11 +123,12 @@ describe("wallet payment modal", () => {
       return 1;
     });
     vi.spyOn(window, "clearInterval").mockImplementation(() => undefined);
-    mocks.getWallet.mockResolvedValue({ consumerBalance: "0.00", supplierAvailable: "0.00", supplierFrozen: "0.00", historicalSpend: "0.00", orderCount: 0 });
+    mocks.getWallet.mockResolvedValue({ consumerBalance: "0.00", supplierAvailable: "0.00", supplierFrozen: "0.00", totalRecharged: "0.00", historicalSpend: "0.00", orderCount: 0 });
     mocks.getWalletReferrals.mockResolvedValue({ inviteCount: 0, pendingRewards: "0.00", totalEarned: "0.00" });
     mocks.getRechargeConfig.mockResolvedValue({ enabled: true, minAmount: "1.00", feeRate: "0.6", feeCap: "0", tiers: [{ amount: "1.00", bonus: "0.00", rechargeQuota: "1.00", paymentAmount: "1.01" }] });
     mocks.listRecharges.mockResolvedValue({ items: [], total: 0, offset: 0, limit: 100 });
     mocks.getRecharge.mockResolvedValue(payingRecharge);
+    mocks.refreshCurrentUser.mockResolvedValue(null);
   });
 
   afterEach(() => {
@@ -140,6 +162,7 @@ describe("wallet payment modal", () => {
     expect(screen.queryByTitle("Alipay Payment")).not.toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "Recharge Billing" })).toBeVisible();
     expect(screen.getByLabelText("Order No.")).toHaveValue("");
+    expect(mocks.refreshCurrentUser).toHaveBeenCalledTimes(2);
   });
 
   it("closes the payment page at the five-minute verification deadline", async () => {

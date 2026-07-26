@@ -37,6 +37,8 @@ import { SiAlipay } from "react-icons/si";
 import { useTranslation } from "react-i18next";
 
 import sampleProjectCover from "@/assets/cover-4.webp";
+import { MembershipOverview } from "@/components/membership";
+import { useAuth } from "@/context/auth-provider";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { generateIdempotencyKey } from "@/lib/idempotency";
@@ -165,6 +167,7 @@ function StatBanner({
 
 export default function Wallet() {
   const { t } = useTranslation();
+  const { currentUser, refreshCurrentUser } = useAuth();
   const isMobile = useIsMobile();
   const [selectedAmount, setSelectedAmount] = useState(0);
   const [customAmount, setCustomAmount] = useState("");
@@ -179,7 +182,7 @@ export default function Wallet() {
   const [referralLink, setReferralLink] = useState("");
   const [recharges, setRecharges] = useState<RechargeItem[]>([]);
   const [billingHasMore, setBillingHasMore] = useState(false);
-  const [walletLoading, setWalletLoading] = useState(false);
+  const [walletLoading, setWalletLoading] = useState(true);
   const [referralLoading, setReferralLoading] = useState(false);
   const [transferringRewards, setTransferringRewards] = useState(false);
   const [billingLoading, setBillingLoading] = useState(false);
@@ -216,6 +219,10 @@ export default function Wallet() {
       setWalletLoading(false);
     }
   }, [t]);
+
+  const refreshMembership = useCallback(async () => {
+    await Promise.all([refreshWallet(), refreshCurrentUser()]);
+  }, [refreshCurrentUser, refreshWallet]);
 
   const refreshReferrals = useCallback(async () => {
     setReferralLoading(true);
@@ -271,14 +278,14 @@ export default function Wallet() {
       pendingRechargeNosRef.current = nextPending;
       setRecharges(response.items);
       setBillingHasMore(response.items.length < response.total);
-      if (settled) void refreshWallet();
+      if (settled) void refreshMembership();
     } catch (error) {
       if (billingRequestSeqRef.current !== seq) return;
       Toast.error(error instanceof Error ? error.message : t("Request failed."));
     } finally {
       if (billingRequestSeqRef.current === seq) setBillingLoading(false);
     }
-  }, [debouncedBillingKeyword, refreshWallet, t]);
+  }, [debouncedBillingKeyword, refreshMembership, t]);
 
   const loadMoreTransactions = useCallback(async () => {
     if (billingLoading || !billingHasMore) return;
@@ -314,8 +321,8 @@ export default function Wallet() {
   ]);
 
   useEffect(() => {
-    void refreshWallet();
-  }, [refreshWallet]);
+    void refreshMembership();
+  }, [refreshMembership]);
 
   useEffect(() => {
     void refreshReferrals();
@@ -370,7 +377,7 @@ export default function Wallet() {
         openBilling();
         if (recharge.status === "credited") {
           Toast.success(t("Recharge successful. Balance has been credited."));
-          void refreshWallet();
+          void refreshMembership();
         } else {
           Toast.error(t("Recharge is abnormal. Please check the billing record."));
         }
@@ -390,7 +397,7 @@ export default function Wallet() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [openBilling, payment, refreshWallet, t]);
+  }, [openBilling, payment, refreshMembership, t]);
 
   const handlePresetSelect = (amount: string) => {
     const value = Number(amount);
@@ -498,7 +505,7 @@ export default function Wallet() {
       redeemAttemptRef.current = null;
       setRedemptionCode("");
       redeemFormApiRef.current?.setValue?.("redemptionCode", "");
-      await refreshWallet();
+      await refreshMembership();
       await refreshReferrals();
       if (billingOpen) {
         await refreshRecharges();
@@ -611,7 +618,14 @@ export default function Wallet() {
   return (
     <>
       <div className="console-content-width py-5">
-        <div className="grid gap-5 xl:grid-cols-2">
+        <MembershipOverview
+          currentGroup={currentUser?.userGroup}
+          loading={walletLoading}
+          onRetry={refreshMembership}
+          totalRecharged={wallet?.totalRecharged}
+        />
+
+        <div className="mt-5 grid gap-5 xl:grid-cols-2">
           <div className="space-y-2">
             <Card
               bodyStyle={{ padding: 12 }}

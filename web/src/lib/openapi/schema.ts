@@ -209,6 +209,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/user-groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List enabled membership groups */
+        get: operations["getUserGroups"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/me/invite": {
         parameters: {
             query?: never;
@@ -3812,6 +3829,7 @@ export interface components {
             consumerBalance: components["schemas"]["NonNegativeLedgerAmount"];
             supplierAvailable: components["schemas"]["NonNegativeLedgerAmount"];
             supplierFrozen: components["schemas"]["NonNegativeLedgerAmount"];
+            totalRecharged: components["schemas"]["NonNegativeLedgerAmount"];
             historicalSpend: components["schemas"]["NonNegativeLedgerAmount"];
             orderCount: number;
             /** Format: date-time */
@@ -6782,6 +6800,35 @@ export interface operations {
                     "application/json": {
                         user: components["schemas"]["UserResponse"];
                     };
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getUserGroups: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Enabled membership group list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminUserGroupListResponse"];
                 };
             };
             /** @description Authentication required */

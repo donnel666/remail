@@ -238,6 +238,8 @@ type AdminUserGroupListResponse struct {
 	Groups []UserGroupResponse `json:"groups"`
 }
 
+type UserGroupListResponse = AdminUserGroupListResponse
+
 type AdminCreateUserGroupRequest struct {
 	Code                string  `json:"code" binding:"required,max=64"`
 	Name                string  `json:"name" binding:"required,max=100"`

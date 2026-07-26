@@ -369,6 +369,28 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/user-groups:
+    get:
+      operationId: getUserGroups
+      summary: List enabled membership groups
+      tags:
+        - IAM
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Enabled membership group list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserGroupListResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /v1/me/invite:
     get:
       operationId: getMeInvite
@@ -11201,6 +11223,7 @@ components:
         - consumerBalance
         - supplierAvailable
         - supplierFrozen
+        - totalRecharged
         - historicalSpend
         - orderCount
         - updatedAt
@@ -11212,6 +11235,8 @@ components:
         supplierAvailable:
           $ref: "#/components/schemas/NonNegativeLedgerAmount"
         supplierFrozen:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        totalRecharged:
           $ref: "#/components/schemas/NonNegativeLedgerAmount"
         historicalSpend:
           $ref: "#/components/schemas/NonNegativeLedgerAmount"

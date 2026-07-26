@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -14,11 +15,13 @@ import (
 	coredomain "github.com/donnel666/remail/internal/core/domain"
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
+	moneyfmt "github.com/donnel666/remail/internal/money"
 	openapiapp "github.com/donnel666/remail/internal/openapi/app"
 	"github.com/donnel666/remail/internal/platform"
 	tradeapp "github.com/donnel666/remail/internal/trade/app"
 	"github.com/donnel666/remail/internal/trade/domain"
 	"github.com/donnel666/remail/internal/trade/infra"
+	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
 
@@ -33,7 +36,7 @@ func NewModule(db *gorm.DB, coreProjects *coreapp.ProjectUseCase, billingWallet 
 	operationLogs := governanceinfra.NewOperationLogRepo(db)
 	uc := tradeapp.NewUseCase(
 		repo,
-		coreOrderingAdapter{projects: coreProjects},
+		coreOrderingAdapter{projects: coreProjects, db: db},
 		billingWalletAdapter{wallet: billingWallet},
 		allocationAdapter{alloc: alloc},
 		orderTokenAdapter{tokens: tokens},
@@ -176,6 +179,7 @@ func (a orderDeliveryAdapter) ListPendingNotifications(ctx context.Context, afte
 
 type coreOrderingAdapter struct {
 	projects *coreapp.ProjectUseCase
+	db       *gorm.DB
 }
 
 func (a coreOrderingAdapter) GetOrderingQuote(ctx context.Context, projectID uint, productID uint, buyerUserID uint, serviceMode domain.ServiceMode) (*tradeapp.OrderingQuote, error) {
@@ -183,7 +187,7 @@ func (a coreOrderingAdapter) GetOrderingQuote(ctx context.Context, projectID uin
 	if err != nil {
 		return nil, mapCoreError(err)
 	}
-	return &tradeapp.OrderingQuote{
+	result := &tradeapp.OrderingQuote{
 		ProjectID:               quote.ProjectID,
 		ProductID:               quote.ProductID,
 		ProductType:             domain.ProductType(quote.ProductType),
@@ -191,7 +195,47 @@ func (a coreOrderingAdapter) GetOrderingQuote(ctx context.Context, projectID uin
 		CodeWindowMinutes:       quote.CodeWindowMinutes,
 		ActivationWindowMinutes: quote.ActivationWindowMinutes,
 		WarrantyMinutes:         quote.WarrantyMinutes,
-	}, nil
+	}
+	ratio, err := a.userPriceDiscountRatio(ctx, buyerUserID)
+	if err != nil {
+		return nil, err
+	}
+	if err := applyOrderingDiscount(result, ratio); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (a coreOrderingAdapter) userPriceDiscountRatio(ctx context.Context, userID uint) (string, error) {
+	db := a.db
+	if tx, ok := platform.GormTxFromContext(ctx); ok {
+		db = tx
+	}
+	var row struct {
+		PriceDiscountRatio string `gorm:"column:price_discount_ratio"`
+	}
+	if err := db.WithContext(ctx).
+		Table("users AS u").
+		Select("COALESCE(user_group.price_discount_ratio, 1.000000) AS price_discount_ratio").
+		Joins("LEFT JOIN user_groups AS user_group ON user_group.id = u.user_group_id").
+		Where("u.id = ?", userID).
+		Take(&row).Error; err != nil {
+		return "", fmt.Errorf("load user price discount: %w", err)
+	}
+	return row.PriceDiscountRatio, nil
+}
+
+func applyOrderingDiscount(quote *tradeapp.OrderingQuote, ratioValue string) error {
+	ratio, err := moneyfmt.Parse(ratioValue)
+	if err != nil || ratio.IsNegative() || ratio.GreaterThan(decimal.NewFromInt(1)) {
+		return fmt.Errorf("invalid user price discount ratio")
+	}
+	value, err := moneyfmt.Parse(quote.PayAmount)
+	if err != nil {
+		return fmt.Errorf("discount order amount: %w", err)
+	}
+	quote.PayAmount = moneyfmt.Format(value.Mul(ratio))
+	return nil
 }
 
 type billingWalletAdapter struct {

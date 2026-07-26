@@ -60,6 +60,7 @@ describe("admin-finance-api response mappers", () => {
       consumerBalance: "50.00",
       supplierAvailable: "10.00",
       supplierFrozen: "1.00",
+      totalRecharged: "0.00",
       historicalSpend: "0.00",
       orderCount: 0,
       updatedAt: "2026-01-04T00:00:00Z",

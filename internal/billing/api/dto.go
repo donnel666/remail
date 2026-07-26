@@ -11,6 +11,7 @@ type WalletResponse struct {
 	ConsumerBalance   string    `json:"consumerBalance"`
 	SupplierAvailable string    `json:"supplierAvailable"`
 	SupplierFrozen    string    `json:"supplierFrozen"`
+	TotalRecharged    string    `json:"totalRecharged"`
 	HistoricalSpend   string    `json:"historicalSpend"`
 	OrderCount        int64     `json:"orderCount"`
 	UpdatedAt         time.Time `json:"updatedAt"`

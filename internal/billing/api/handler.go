@@ -707,7 +707,9 @@ func parsePagination(c *gin.Context) (int, int, bool) {
 }
 
 func walletResponse(summary domain.WalletSummary) WalletResponse {
-	return walletOnlyResponse(summary.Wallet, summary.HistoricalSpend, summary.OrderCount)
+	response := walletOnlyResponse(summary.Wallet, summary.HistoricalSpend, summary.OrderCount)
+	response.TotalRecharged = summary.TotalRecharged
+	return response
 }
 
 func walletOnlyResponse(wallet domain.Wallet, historicalSpend string, orderCount int64) WalletResponse {

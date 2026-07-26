@@ -30,6 +30,8 @@ export type AdminUserListResponse =
   components["schemas"]["AdminUserListResponse"];
 export type CurrentInviteResponse =
   components["schemas"]["CurrentInviteResponse"];
+export type UserGroupListResponse =
+  components["schemas"]["AdminUserGroupListResponse"];
 export type RegisterResponse = JsonResponse<operations["postRegister"], 201>;
 export type MeResponse = JsonResponse<operations["getMe"], 200>;
 
@@ -84,6 +86,14 @@ export async function getMe() {
     return (await import("./dev-api-mocks")).DEV_ME as MeResponse;
   }
   return unwrap<MeResponse>(await client.GET("/v1/me"));
+}
+
+export async function getUserGroups() {
+  if (import.meta.env.DEV) {
+    return (await import("./dev-api-mocks"))
+      .DEV_USER_GROUPS as UserGroupListResponse;
+  }
+  return unwrap<UserGroupListResponse>(await client.GET("/v1/user-groups"));
 }
 
 export async function getMyInvite() {
