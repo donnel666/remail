@@ -12,6 +12,10 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
 import { createCopyableConfig } from "@/components/semi/copyable-config";
+import {
+  CopyableEllipsisText,
+  mailExtractionLabelKey,
+} from "@/components/semi/copyable-ellipsis-text";
 import { OverflowTooltip } from "@/components/semi/overflow-tooltip";
 import { cn } from "@/lib/utils";
 
@@ -157,22 +161,38 @@ function OrderAccordionItem({
         >
           {t("Open mailbox")}
         </Button>
-        <button
+        <div
           className="workbench-order-summary-state"
           onClick={onToggle}
-          type="button"
         >
           <span className="workbench-order-summary-side">
-            <strong>
-              {order.verificationCode ??
-                (order.serviceMode === "purchase"
+            {order.verificationCode ? (
+              <CopyableEllipsisText
+                className="workbench-order-summary-code"
+                text={order.verificationCode}
+              />
+            ) : (
+              <strong>
+                {order.serviceMode === "purchase"
                   ? formatMoney(order.payAmount)
-                  : t("Waiting"))}
-            </strong>
+                  : t("Waiting")}
+              </strong>
+            )}
             <small>{formatRemainingDuration(order.afterSaleUntil)}</small>
           </span>
-          {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-        </button>
+          <button
+            aria-expanded={expanded}
+            aria-label={t("Details")}
+            className="workbench-order-summary-toggle"
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggle();
+            }}
+            type="button"
+          >
+            {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </button>
+        </div>
       </div>
 
       {expanded ? (
@@ -200,27 +220,30 @@ function OrderAccordionItem({
             <div className="workbench-code-line">
               <div className="workbench-code-content">
                 <div className="workbench-mini-label">
-                  {order.serviceMode === "code"
-                    ? t("Verification code")
-                    : t("Quick verification code")}
+                  {order.verificationCode
+                    ? t(
+                        mailExtractionLabelKey(
+                          order.verificationCode,
+                          order.serviceMode === "code"
+                            ? "Verification code"
+                            : "Quick verification code"
+                        )
+                      )
+                    : order.serviceMode === "code"
+                      ? t("Verification code")
+                      : t("Quick verification code")}
                 </div>
                 <div className="workbench-code-value-row">
-                  <Text
-                    className={cn(
-                      "workbench-inline-code",
-                      !order.verificationCode && "is-empty",
-                    )}
-                    copyable={
-                      order.verificationCode
-                        ? createCopyableConfig(
-                            order.verificationCode,
-                            t("Copied"),
-                          )
-                        : false
-                    }
-                  >
-                    {order.verificationCode ?? t("Waiting")}
-                  </Text>
+                  {order.verificationCode ? (
+                    <CopyableEllipsisText
+                      className="workbench-inline-code"
+                      text={order.verificationCode}
+                    />
+                  ) : (
+                    <Text className="workbench-inline-code is-empty">
+                      {t("Waiting")}
+                    </Text>
+                  )}
                 </div>
                 {shouldShowQuickFetchControl(order) ? (
                   <FetchControl

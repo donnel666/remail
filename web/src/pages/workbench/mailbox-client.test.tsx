@@ -17,7 +17,9 @@ vi.mock("@douyinfe/semi-ui", () => ({
   Modal: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
   Tag: ({ children }: { children?: ReactNode }) => <span>{children}</span>,
   Typography: {
-    Text: ({ children }: { children?: ReactNode }) => <span>{children}</span>,
+    Text: ({ children, copyable: _copyable, ellipsis: _ellipsis, type: _type, ...props }: any) => (
+      <span {...props}>{children}</span>
+    ),
   },
 }));
 
@@ -59,6 +61,23 @@ function deferred<T>() {
 }
 
 describe("MailboxClient message body loading", () => {
+  it("labels HTTP extraction values as URLs without nesting copy controls", () => {
+    const url = "https://example.com/verify/a-very-long-token";
+    render(
+      <MailboxClient
+        email="first@example.com"
+        fetchKey="first"
+        messages={[{ ...message("first@example.com"), verificationCode: url }]}
+        onFetch={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("Email URL")).toBeVisible();
+    const copyControls = screen.getAllByRole("button", { name: `Copy: ${url}` });
+    expect(copyControls).toHaveLength(2);
+    copyControls.forEach((control) => expect(control.closest("button")).toBeNull());
+  });
+
   it("retries a failed load and keeps unsafe HTML as text", async () => {
     const unsafeBody = `<script>alert(1)</script><img src=x onerror=alert(2)><a href="https://example.com">Verify</a>`;
     const loader = vi.fn()

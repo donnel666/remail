@@ -25,7 +25,9 @@ vi.mock("@douyinfe/semi-ui", async () => {
   );
   const Spin = () => <div>loading</div>;
   const Tag = ({ children }: any) => <span>{children}</span>;
-  const Text = ({ children }: any) => <span>{children}</span>;
+  const Text = ({ children, copyable: _copyable, ellipsis: _ellipsis, type: _type, ...props }: any) => (
+    <span {...props}>{children}</span>
+  );
   return {
     Button: ({ children, onClick }: any) => <button onClick={onClick}>{children}</button>,
     Empty,
@@ -271,5 +273,25 @@ describe("admin domain mailbox infinite list", () => {
     expect(view.container.querySelector("script")).toBeNull();
     expect(view.container.querySelector("img")).toBeNull();
     expect(view.container.querySelector("a")).toBeNull();
+  });
+
+  it("labels HTTP extraction values as URLs without nesting copy controls", async () => {
+    const url = "https://example.com/verify/a-very-long-token";
+    const mail = { ...message(1), verificationCode: url };
+    apiMocks.listMessages.mockResolvedValueOnce({
+      items: [mail],
+      limit: 20,
+      offset: 0,
+      total: 1,
+      hasMore: false,
+    });
+    apiMocks.getMessage.mockResolvedValueOnce(mail);
+
+    render(<DomainMailsPanel resourceId={42} t={t} />);
+
+    expect(await screen.findByText("Email URL")).toBeVisible();
+    const copyControls = screen.getAllByRole("button", { name: `Copy: ${url}` });
+    expect(copyControls).toHaveLength(2);
+    copyControls.forEach((control) => expect(control.closest("button")).toBeNull());
   });
 });

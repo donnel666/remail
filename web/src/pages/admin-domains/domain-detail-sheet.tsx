@@ -17,6 +17,10 @@ import { useTranslation } from "react-i18next";
 
 import { createCardProPagination } from "@/components/semi/card-pro-pagination";
 import { createCopyableConfig } from "@/components/semi/copyable-config";
+import {
+  CopyableEllipsisText,
+  mailExtractionLabelKey,
+} from "@/components/semi/copyable-ellipsis-text";
 import { CopyableTableText } from "@/components/semi/copyable-table-text";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useIsMobile } from "@/hooks/use-is-mobile";
@@ -564,7 +568,7 @@ export function DomainMailsPanel({
             />
           ) : (
             messages.map((message) => (
-              <button
+              <div
                 className={`block w-full border-b border-[var(--semi-color-border)] px-3 py-2.5 text-left transition-colors ${
                   selected?.id === message.id
                     ? "bg-[var(--semi-color-primary-light-default)]"
@@ -572,15 +576,25 @@ export function DomainMailsPanel({
                 }`}
                 key={message.id}
                 onClick={() => setSelectedId(message.id)}
-                type="button"
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--semi-color-text-0)]">
+                  <button
+                    aria-pressed={selected?.id === message.id}
+                    className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-sm font-medium text-[var(--semi-color-text-0)]"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setSelectedId(message.id);
+                    }}
+                    type="button"
+                  >
                     {message.subject}
-                  </span>
+                  </button>
                   {message.verificationCode ? (
-                    <span className="shrink-0 font-mono text-xs font-semibold text-[var(--semi-color-success)]">
-                      {message.verificationCode}
+                    <span className="inline-flex min-w-0 max-w-[45%] shrink-0">
+                      <CopyableEllipsisText
+                        className="font-mono text-xs font-semibold text-[var(--semi-color-success)]"
+                        text={message.verificationCode}
+                      />
                     </span>
                   ) : (
                     <span className="shrink-0">
@@ -599,7 +613,7 @@ export function DomainMailsPanel({
                     {formatDomainTime(message.receivedAt)}
                   </span>
                 </div>
-              </button>
+              </div>
             ))
           )}
           {listError && messages.length > 0 ? (
@@ -641,13 +655,14 @@ export function DomainMailsPanel({
                 }
               />
               <DomainInfoItem
-                label={t("Verification code")}
+                label={t(
+                  selected.verificationCode
+                    ? mailExtractionLabelKey(selected.verificationCode)
+                    : "Verification code"
+                )}
                 value={
                   selected.verificationCode ? (
-                    <CopyableTableText
-                      copiedText={t("Copied")}
-                      text={selected.verificationCode}
-                    />
+                    <CopyableEllipsisText text={selected.verificationCode} />
                   ) : (
                     "-"
                   )
@@ -809,17 +824,14 @@ function DomainOrdersPanel({
         },
         {
           dataIndex: "verificationCode",
-          title: t("Verification code"),
+          title: t("Code / URL"),
           width: 130,
           render: (value: unknown, record: AdminDomainOrder) =>
             value ? (
-              <Text
-                className="font-mono-data"
-                copyable={createCopyableConfig(String(value), t("Copied"))}
-                style={{ color: "var(--semi-color-success)" }}
-              >
-                {String(value)}
-              </Text>
+              <CopyableEllipsisText
+                className="font-mono-data text-[var(--semi-color-success)]"
+                text={String(value)}
+              />
             ) : record.orderStatus === "active" ? (
               <Tag color="grey" shape="circle" size="small">
                 {t("Waiting")}

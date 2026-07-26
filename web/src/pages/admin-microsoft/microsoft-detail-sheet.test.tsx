@@ -87,7 +87,9 @@ vi.mock("@douyinfe/semi-ui", async () => {
   );
   (Tabs as any).TabPane = TabPane;
   const Tag = ({ children }: any) => <span>{children}</span>;
-  const Text = ({ children }: any) => <span>{children}</span>;
+  const Text = ({ children, copyable: _copyable, ellipsis: _ellipsis, type: _type, ...props }: any) => (
+    <span {...props}>{children}</span>
+  );
   return {
     Button,
     Empty,
@@ -431,6 +433,34 @@ describe("admin Microsoft detail sheet runtime", () => {
       )
     );
     expect(await screen.findByText("Message 21")).toBeInTheDocument();
+  });
+
+  it("labels HTTP extraction values as URLs without nesting copy controls", async () => {
+    const url = "https://example.com/verify/a-very-long-token";
+    mocks.messages.mockResolvedValueOnce({
+      ...EMPTY_PAGE,
+      items: [{
+        id: 1,
+        mailbox: "main",
+        orderNo: null,
+        preview: "Preview",
+        receivedAt: "2026-07-12T00:00:01Z",
+        recipient: "user@outlook.com",
+        sender: "sender@example.net",
+        status: "matched",
+        subject: "Verification",
+        verificationCode: url,
+      }],
+      total: 1,
+    });
+
+    renderSheet(detail(41));
+    fireEvent.click(screen.getByRole("tab", { name: "Mailbox" }));
+
+    expect(await screen.findByText("Email URL")).toBeVisible();
+    const copyControls = screen.getAllByRole("button", { name: `Copy: ${url}` });
+    expect(copyControls).toHaveLength(2);
+    copyControls.forEach((control) => expect(control.closest("button")).toBeNull());
   });
 
   it("retries a failed continuation with the same cursor", async () => {

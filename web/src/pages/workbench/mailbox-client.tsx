@@ -1,10 +1,13 @@
 import { Button, Empty, Input, Modal, Tag, Typography } from "@douyinfe/semi-ui";
 import { IconSearch } from "@douyinfe/semi-icons";
 import { Mail } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { createCopyableConfig } from "@/components/semi/copyable-config";
+import {
+  CopyableEllipsisText,
+  mailExtractionLabelKey,
+} from "@/components/semi/copyable-ellipsis-text";
 import { OverflowTooltip } from "@/components/semi/overflow-tooltip";
 import { cn } from "@/lib/utils";
 
@@ -160,15 +163,6 @@ export function MailboxClient({
     });
   }
 
-  function handleMessageKeyDown(
-    event: KeyboardEvent<HTMLDivElement>,
-    messageId: string
-  ) {
-    if (event.key !== "Enter" && event.key !== " ") return;
-    event.preventDefault();
-    setSelectedMessageId(messageId);
-  }
-
   return (
     <div className="mailbox-client">
       <aside className="mailbox-client-sidebar">
@@ -207,32 +201,30 @@ export function MailboxClient({
                 )}
                 key={message.id}
                 onClick={() => setSelectedMessageId(message.id)}
-                onKeyDown={(event) => handleMessageKeyDown(event, message.id)}
-                role="button"
-                aria-selected={selectedMessage?.id === message.id}
-                tabIndex={0}
               >
                 <span className="mailbox-client-item-head">
-                  <OverflowTooltip
-                    className="mailbox-client-item-subject"
-                    content={message.subject}
+                  <button
+                    aria-pressed={selectedMessage?.id === message.id}
+                    className="mailbox-client-item-select"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setSelectedMessageId(message.id);
+                    }}
+                    type="button"
                   >
-                    {message.subject}
-                  </OverflowTooltip>
-                  {message.verificationCode ? (
-                    <span
-                      className="mailbox-code-copy-wrap"
-                      onClick={(event) => event.stopPropagation()}
+                    <OverflowTooltip
+                      className="mailbox-client-item-subject"
+                      content={message.subject}
                     >
-                      <Text
+                      {message.subject}
+                    </OverflowTooltip>
+                  </button>
+                  {message.verificationCode ? (
+                    <span className="mailbox-code-copy-wrap">
+                      <CopyableEllipsisText
                         className="mailbox-code-copy"
-                        copyable={createCopyableConfig(
-                          message.verificationCode,
-                          t("Copied")
-                        )}
-                      >
-                        {message.verificationCode}
-                      </Text>
+                        text={message.verificationCode}
+                      />
                     </span>
                   ) : (
                     <Tag
@@ -296,16 +288,13 @@ export function MailboxClient({
               </div>
               {selectedMessage.verificationCode ? (
                 <div className="mailbox-detail-code">
-                  <span>{t("Verification code")}</span>
-                  <Text
-                    className="font-mono-data"
-                    copyable={createCopyableConfig(
-                      selectedMessage.verificationCode,
-                      t("Copied")
-                    )}
-                  >
-                    {selectedMessage.verificationCode}
-                  </Text>
+                  <span className="mailbox-detail-code-label">
+                    {t(mailExtractionLabelKey(selectedMessage.verificationCode))}
+                  </span>
+                  <CopyableEllipsisText
+                    className="mailbox-detail-code-value font-mono-data"
+                    text={selectedMessage.verificationCode}
+                  />
                 </div>
               ) : null}
             </div>

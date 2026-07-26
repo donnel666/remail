@@ -27,6 +27,7 @@ import {
   DESKTOP_TABLE_SCROLL_Y,
 } from "@/components/semi/card-table";
 import { CompactModeToggle } from "@/components/semi/compact-mode-toggle";
+import { CopyableEllipsisText } from "@/components/semi/copyable-ellipsis-text";
 import { CopyableTableText } from "@/components/semi/copyable-table-text";
 import { OverflowTooltip } from "@/components/semi/overflow-tooltip";
 import { StatisticFilterOption } from "@/components/semi/statistic-filter-option";
@@ -582,12 +583,12 @@ export default function Orders() {
         },
         {
           key: "code",
-          title: t("Code"),
+          title: t("Code / URL"),
           dataIndex: "verificationCode",
           width: 130,
           render: (code: string | undefined, record: OrderResponse) => {
             if (code) {
-              return <CopyableTableText copiedText={t("Copied")} text={code} />;
+              return <CopyableEllipsisText className="font-mono-data" text={code} />;
             }
             if (record.status === "active") {
               return (

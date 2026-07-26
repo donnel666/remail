@@ -3,6 +3,10 @@ import { Button, Modal, Tag, Toast, Typography } from "@douyinfe/semi-ui";
 import { useTranslation } from "react-i18next";
 
 import { createCopyableConfig } from "@/components/semi/copyable-config";
+import {
+  CopyableEllipsisText,
+  mailExtractionLabelKey,
+} from "@/components/semi/copyable-ellipsis-text";
 import { OverflowTooltip } from "@/components/semi/overflow-tooltip";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { copyText } from "@/lib/clipboard";
@@ -169,11 +173,15 @@ export function OrderDetailModal({
             />
           ) : null}
           <DetailRow
-            label={t("Code")}
+            label={t(
+              order.verificationCode
+                ? mailExtractionLabelKey(order.verificationCode, "Code")
+                : "Code"
+            )}
             value={
               order.verificationCode ? (
-                <CopyableValue
-                  copiedText={t("Copied")}
+                <CopyableEllipsisText
+                  className="font-mono-data"
                   text={order.verificationCode}
                 />
               ) : order.status === "active" ? (
