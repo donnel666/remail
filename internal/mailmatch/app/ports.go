@@ -2002,11 +2002,6 @@ func regexMatch(pattern string, value string) bool {
 	return re.MatchString(value)
 }
 
-func extractByBodyRules(body string, patterns []string) string {
-	value, _ := extractByBodyRulesWithIndex(body, patterns)
-	return value
-}
-
 func extractByBodyRulesWithIndex(body string, patterns []string) (string, int) {
 	if body == "" || len(patterns) == 0 {
 		return "", -1

@@ -84,8 +84,8 @@ func (m announcementMailer) processAnnouncementBroadcast(ctx context.Context, ta
 	var current *runtimeconfig.Announcement
 	for _, announcement := range runtimeconfig.ActiveAnnouncements(now, 100) {
 		if announcement.ID == task.ID && strings.TrimSpace(announcement.StartTime) == strings.TrimSpace(task.StartTime) {
-			copy := announcement
-			current = &copy
+			matched := announcement
+			current = &matched
 			break
 		}
 	}

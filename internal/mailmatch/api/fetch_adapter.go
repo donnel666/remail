@@ -59,10 +59,7 @@ func (a *MicrosoftFetchAdapter) FetchMicrosoftMessages(ctx context.Context, req 
 	maxMessages := runtimeconfig.Int("purchase_read_limit", 30, 1)
 	sinceAt := req.SinceAt
 	untilAt := req.UntilAt
-	stopAfterLimit := false
-	if req.Realtime {
-		stopAfterLimit = true
-	}
+	stopAfterLimit := req.Realtime
 	if req.FullHistory {
 		maxMessages = 0
 		sinceAt = req.SinceAt
