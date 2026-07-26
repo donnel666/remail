@@ -217,7 +217,7 @@ Domain 公开出售候选和自用私有候选也必须使用两条显式查询�
 
 P1-I5 分配直接使用 SourceCandidate 查询 Core 源表，并在同一短事务内 `FOR UPDATE SKIP LOCKED` 重校验资源状态、出售标记或用途、owner 启用状态和 owner 角色。早期按“项目 × 全资源”维护的 RoutingCandidate 镜像与刷新任务已删除，避免百万资源下的存储倍增和刷新写风暴；库存诊断使用项目级 Redis 读模型，用户只参与实时项目可见性校验，不参与库存 key 或聚合 SQL。所有用户共享同一项目快照，冷 miss 只为该项目标记一次活跃键并调度异步预热。后台任务每十分钟限量刷新近期活跃的项目库存；只有异步刷新会重置二十四小时 TTL，缓存读取不续期，短期刷新失败继续服务已有快照，TTL 到期后重新预热。
 
-项目级库存使用独立的 `alloc:inventory:v4:*` 数据、锁和 active ZSET，不读取 v3 的 Domain 具体域名库存语义。滚动发布期间不得删除旧 v3 active ZSET；全部旧实例退出且最长十分钟旧刷新任务 drain 后，可执行 `UNLINK alloc:inventory:v3:active`。旧 v3 payload 依靠二十四小时 TTL、旧 marker/lock 依靠十分钟 TTL 自然淘汰。
+项目级库存使用独立的 `alloc:inventory:v5:*` 数据、锁和 active ZSET，不读取 v4 的 Random 后缀子库存语义。滚动发布期间不得删除旧 v4 active ZSET；全部旧实例退出且最长十分钟旧刷新任务 drain 后，可执行 `UNLINK alloc:inventory:v4:active`。旧 v4 payload 依靠二十四小时 TTL、旧 marker/lock 依靠十分钟 TTL 自然淘汰。
 
 Microsoft 候选查询和行锁重校验必须读取既有 `microsoft_allocations` 历史：同一具体 `main/explicitAliasId/dotAliasId/plusAliasId` 已经分配给目标项目时不得再次选择，但同一主资源下未用于该项目的其他别名仍可分配。验证后的历史扫描把识别结果交给 BC-TRADE；已有 Allocation 的具体关系直接复用且不创建假订单，只有缺失关系才通过 BC-ALLOC 既有 alias、order guard 和 allocation repository 创建超级管理员 0 元已过保订单对应的 `released` Allocation，BC-MAILMATCH 不直写本表。旧 `microsoft_resource_project_matches` 仅作为尚未重扫数据的保守兼容挡板，资源完成重扫后删除对应旧行。
 

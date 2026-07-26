@@ -399,7 +399,8 @@
             "type": "string",
             "enum": [
               "microsoft",
-              "domain"
+              "domain",
+              "random"
             ]
           },
           "status": {
@@ -727,7 +728,8 @@
             "type": "string",
             "enum": [
               "microsoft",
-              "domain"
+              "domain",
+              "random"
             ]
           },
           "serviceMode": {
@@ -1940,7 +1942,8 @@
               "type": "string",
               "enum": [
                 "microsoft",
-                "domain"
+                "domain",
+                "random"
               ]
             }
           },

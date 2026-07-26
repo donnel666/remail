@@ -47,7 +47,7 @@ func (r *batchRepoSpy) WithTx(ctx context.Context, fn func(context.Context) erro
 	return err
 }
 
-func (r *batchRepoSpy) FindOrderByIdempotency(ctx context.Context, _ domain.ClientChannel, _ uint, _ *uint, idempotencyKey, _ string) (*domain.Order, error) {
+func (r *batchRepoSpy) FindOrderByIdempotency(ctx context.Context, _ domain.ClientChannel, _ uint, _ *uint, idempotencyKey, _, _ string) (*domain.Order, error) {
 	r.mu.Lock()
 	r.finds++
 	if ctx.Value(batchTxContextKey{}) != nil {
@@ -86,9 +86,11 @@ func (r *batchRepoSpy) LoadOrCreatePendingOrder(_ context.Context, cmd CreatePen
 		ProjectID: cmd.ProjectID, ProjectProductID: cmd.ProjectProductID,
 		ProductType: cmd.ProductType, ServiceMode: cmd.ServiceMode, SupplyPolicy: cmd.SupplyPolicy,
 		Status: domain.OrderStatusPendingPayment, PayAmount: cmd.PayAmount,
+		RandomMicrosoftPayAmount: cmd.RandomMicrosoftPayAmount, RandomDomainPayAmount: cmd.RandomDomainPayAmount,
 		CodeWindowMinutes: cmd.CodeWindowMinutes, ActivationWindowMinutes: cmd.ActivationWindowMinutes,
 		WarrantyMinutes: cmd.WarrantyMinutes, ClientChannel: cmd.ClientChannel,
 		APIKeyID: cmd.APIKeyID, IdempotencyKey: cmd.IdempotencyKey,
+		RequestFingerprint: cmd.RequestFingerprint,
 	}
 	r.orders[cmd.IdempotencyKey] = order
 	return &order, true, nil
@@ -177,10 +179,16 @@ func (s *batchOrderingSpy) GetOrderingQuote(ctx context.Context, projectID uint,
 	if productType == "" {
 		productType = domain.ProductTypeMicrosoft
 	}
-	return &OrderingQuote{
+	quote := &OrderingQuote{
 		ProjectID: projectID, ProductID: productID, ProductType: productType,
 		PayAmount: "1.00", ActivationWindowMinutes: 10, WarrantyMinutes: 10,
-	}, nil
+	}
+	if productType == domain.ProductTypeRandom {
+		quote.PayAmount = "0.80"
+		quote.MicrosoftPayAmount = "1.20"
+		quote.DomainPayAmount = "0.80"
+	}
+	return quote, nil
 }
 
 type batchPreloadRepoSpy struct {
@@ -336,6 +344,71 @@ func batchRequest(key string, quantity int) CheckoutRequest {
 	}
 }
 
+func TestRandomCheckoutAmountUsesAllocatedProductPrice(t *testing.T) {
+	order := domain.Order{
+		ProjectID: 8, ProjectProductID: 9, ProductType: domain.ProductTypeRandom,
+		ServiceMode: domain.ServiceModePurchase, PayAmount: "0.08",
+		RandomMicrosoftPayAmount: "0.12", RandomDomainPayAmount: "0.08",
+		ActivationWindowMinutes: 10, WarrantyMinutes: 10,
+	}
+	quote, err := orderingQuoteFromOrder(order)
+	require.NoError(t, err)
+
+	microsoftAmount, err := allocatedCheckoutPayAmount(order, *quote, AllocationResult{
+		Type: domain.AllocationTypeMicrosoft, SupplyScope: SupplyScopePublic,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "0.12", microsoftAmount)
+
+	domainAmount, err := allocatedCheckoutPayAmount(order, *quote, AllocationResult{
+		Type: domain.AllocationTypeDomain, SupplyScope: SupplyScopePublic,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "0.08", domainAmount)
+
+	ownedAmount, err := allocatedCheckoutPayAmount(order, *quote, AllocationResult{
+		Type: domain.AllocationTypeMicrosoft, SupplyScope: SupplyScopeOwned,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "0.00", ownedAmount)
+
+	order.RandomMicrosoftPayAmount = ""
+	_, err = orderingQuoteFromOrder(order)
+	require.ErrorIs(t, err, domain.ErrInvalidOrderRequest)
+}
+
+func TestCheckoutFingerprintIgnoresSuffixOnlyForRandom(t *testing.T) {
+	withSuffixRequest := batchRequest("same-key", 1)
+	withSuffixRequest.EmailSuffix = "example.com"
+	withSuffix, err := prepareCheckoutRequest(withSuffixRequest)
+	require.NoError(t, err)
+	withoutSuffix, err := prepareCheckoutRequest(batchRequest("same-key", 1))
+	require.NoError(t, err)
+
+	require.NoError(t, finalizeCheckoutProduct(&withSuffix, domain.ProductTypeRandom))
+	require.NoError(t, finalizeCheckoutProduct(&withoutSuffix, domain.ProductTypeRandom))
+	require.Empty(t, withSuffix.emailSuffix)
+	require.Equal(t, withoutSuffix.fingerprint, withSuffix.fingerprint)
+
+	for _, test := range []struct {
+		productType domain.ProductType
+		suffix      string
+	}{
+		{productType: domain.ProductTypeMicrosoft, suffix: "outlook.com"},
+		{productType: domain.ProductTypeDomain, suffix: "com"},
+	} {
+		request := batchRequest("same-key", 1)
+		request.EmailSuffix = test.suffix
+		withSuffix, err := prepareCheckoutRequest(request)
+		require.NoError(t, err)
+		withoutSuffix, err := prepareCheckoutRequest(batchRequest("same-key", 1))
+		require.NoError(t, err)
+		require.NoError(t, finalizeCheckoutProduct(&withSuffix, test.productType))
+		require.NoError(t, finalizeCheckoutProduct(&withoutSuffix, test.productType))
+		require.NotEqual(t, withoutSuffix.fingerprint, withSuffix.fingerprint)
+	}
+}
+
 func TestPaidCheckoutStopsImmediatelyOnAllocationWriteError(t *testing.T) {
 	wantErr := errors.New("allocation write conflict")
 	uc := &UseCase{allocation: checkoutAllocationErrorSpy{err: wantErr}}
@@ -384,6 +457,21 @@ func TestCheckoutRejectsConcreteDomainBeforeInventoryPrecheck(t *testing.T) {
 	require.Zero(t, inventory.checks)
 	require.Zero(t, wallet.balanceChecks)
 	require.Zero(t, repo.topTx)
+}
+
+func TestCheckoutIgnoresRandomEmailSuffixBeforeInventoryPrecheck(t *testing.T) {
+	ordering := &batchOrderingSpy{productType: domain.ProductTypeRandom}
+	uc := NewUseCase(&batchRepoSpy{}, ordering, &batchWalletSpy{}, &checkoutInventorySpy{}, batchTokenSpy{})
+	prepared := checkoutPreparation{
+		request:     CheckoutRequest{UserID: 7, ProjectID: 8, ProductID: 9},
+		mode:        domain.ServiceModePurchase,
+		emailSuffix: "outlook.com",
+	}
+
+	err := uc.prepareCheckoutQuote(context.Background(), &prepared, nil)
+
+	require.NoError(t, err)
+	require.Empty(t, prepared.emailSuffix)
 }
 
 func TestCheckoutBatchRejectsPrivateBalanceBelowPriceBeforeOpeningTransactions(t *testing.T) {

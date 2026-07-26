@@ -117,7 +117,7 @@ type ProjectBulkCommandRequest struct {
 // ProjectBulkUpdateProductsRequest replaces complete product configurations for selected projects.
 type ProjectBulkUpdateProductsRequest struct {
 	ProjectIDs []uint                  `json:"projectIds" binding:"required,min=1,max=1000,dive,gt=0"`
-	Products   []ProjectProductRequest `json:"products" binding:"required,min=1,max=2"`
+	Products   []ProjectProductRequest `json:"products" binding:"required,min=1,max=3"`
 }
 
 // ProjectPriceDefaultsResponse returns the non-sensitive project price defaults.
@@ -385,6 +385,7 @@ type ProjectProductTypeFacetsResponse struct {
 	All       int64 `json:"all"`
 	Microsoft int64 `json:"microsoft"`
 	Domain    int64 `json:"domain"`
+	Random    int64 `json:"random"`
 }
 
 // ProjectProductResponse is a product view under a project.

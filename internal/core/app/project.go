@@ -123,6 +123,7 @@ type ProjectProductTypeFacets struct {
 	All       int64
 	Microsoft int64
 	Domain    int64
+	Random    int64
 }
 
 type ProjectListFacets struct {
@@ -201,6 +202,8 @@ type OrderingQuote struct {
 	ProductID               uint
 	ProductType             domain.ProductType
 	PayAmount               string
+	MicrosoftPayAmount      string
+	DomainPayAmount         string
 	SupplierAmount          string
 	CodeWindowMinutes       int
 	ActivationWindowMinutes int
@@ -252,6 +255,9 @@ func (uc *ProjectUseCase) List(ctx context.Context, filter ProjectListFilter, of
 	if err != nil {
 		return nil, err
 	}
+	for i := range items {
+		domain.ApplyRandomProductPrices(items[i].Products)
+	}
 	if normalized.IsAdmin && uc.owners != nil {
 		ownerIDs := make([]uint, 0, len(items))
 		for i := range items {
@@ -291,6 +297,7 @@ func (uc *ProjectUseCase) Get(ctx context.Context, projectID uint, userID uint, 
 	if detail == nil {
 		return nil, domain.ErrProjectNotFound
 	}
+	domain.ApplyRandomProductPrices(detail.Products)
 	return detail, nil
 }
 
@@ -361,6 +368,15 @@ func (uc *ProjectUseCase) GetOrderingQuote(ctx context.Context, projectID uint, 
 		}
 		quote.PayAmount = payAmount
 		quote.SupplierAmount = supplierAmount
+	}
+	if product.Type == domain.ProductTypeRandom {
+		microsoftAmount, domainAmount, err := randomOrderingAmounts(detail.Products, mode)
+		if err != nil {
+			return nil, err
+		}
+		quote.MicrosoftPayAmount = microsoftAmount
+		quote.DomainPayAmount = domainAmount
+		quote.PayAmount = minimumOrderingAmount(microsoftAmount, domainAmount)
 	}
 	return quote, nil
 }
@@ -537,7 +553,7 @@ func (uc *ProjectUseCase) scheduleHistoryScan(ctx context.Context, detail *domai
 
 func projectHasMicrosoftProduct(products []domain.Product) bool {
 	for _, product := range products {
-		if product.Type == domain.ProductTypeMicrosoft {
+		if product.Type == domain.ProductTypeMicrosoft || product.Type == domain.ProductTypeRandom {
 			return true
 		}
 	}
@@ -865,6 +881,11 @@ func normalizeProductRequests(requests []ProjectProductRequest, requireEnabled, 
 			DotWeight:               req.DotWeight,
 			PlusWeight:              req.PlusWeight,
 		}
+		if product.Type == domain.ProductTypeRandom {
+			product.MainWeight = 1
+			product.DotWeight = 1
+			product.PlusWeight = 1
+		}
 		if product.CodeEnabled && product.CodeWindowMinutes <= 0 {
 			return nil, domain.ErrInvalidProduct
 		}
@@ -885,7 +906,52 @@ func normalizeProductRequests(requests []ProjectProductRequest, requireEnabled, 
 	if requireEnabled && !hasEnabled {
 		return nil, domain.ErrInvalidProduct
 	}
+	if !domain.ApplyRandomProductPrices(products) && requireEnabled {
+		return nil, domain.ErrInvalidProduct
+	}
 	return products, nil
+}
+
+func randomOrderingAmounts(products []domain.Product, mode string) (string, string, error) {
+	var microsoftAmount, domainAmount string
+	for i := range products {
+		product := products[i]
+		switch product.Type {
+		case domain.ProductTypeMicrosoft:
+			if mode == "code" {
+				microsoftAmount = product.CodePrice
+			} else {
+				microsoftAmount = product.PurchasePrice
+			}
+		case domain.ProductTypeDomain:
+			if mode == "code" {
+				domainAmount = product.CodePrice
+			} else {
+				domainAmount = product.PurchasePrice
+			}
+		}
+	}
+	if microsoftAmount == "" || domainAmount == "" {
+		return "", "", domain.ErrInvalidProduct
+	}
+	microsoftAmount, err := normalizeOrderingAmount(microsoftAmount)
+	if err != nil {
+		return "", "", err
+	}
+	domainAmount, err = normalizeOrderingAmount(domainAmount)
+	if err != nil {
+		return "", "", err
+	}
+	return microsoftAmount, domainAmount, nil
+}
+
+func minimumOrderingAmount(first, second string) string {
+	firstAmount, _ := moneyfmt.Parse(first)
+	secondAmount, _ := moneyfmt.Parse(second)
+	if firstAmount.LessThanOrEqual(secondAmount) {
+		return first
+	}
+	return second
 }
 
 func projectPriceOrDefault(value string, productType domain.ProductType, field string, applyDefault bool) string {

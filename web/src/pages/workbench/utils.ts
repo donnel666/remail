@@ -85,7 +85,9 @@ export function inventoryScopeLabel(
 }
 
 export function productTypeLabel(type: ProductType, t: (key: string) => string) {
-  return type === "microsoft" ? t("Microsoft email") : t("Domain email");
+  if (type === "microsoft") return t("Microsoft email");
+  if (type === "domain") return t("Domain email");
+  return t("Random email");
 }
 
 export function serviceStateMeta(

@@ -70,7 +70,7 @@ func inventoryCacheHardTTLValue() time.Duration {
 type ProductAllocationConfig struct {
 	ProjectID   uint
 	ProductID   uint
-	ProductType domain.AllocationType
+	ProductType coredomain.ProductType
 	MainWeight  int
 	DotWeight   int
 	PlusWeight  int

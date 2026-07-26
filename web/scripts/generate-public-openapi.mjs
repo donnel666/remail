@@ -181,7 +181,7 @@ const schemas = {
     type: "object",
     properties: {
       id: { type: "integer", example: 2001 },
-      type: stringEnum(["microsoft", "domain"]),
+      type: stringEnum(["microsoft", "domain", "random"]),
       status: stringEnum(["enabled", "disabled"]),
       codeEnabled: { type: "boolean", example: true },
       purchaseEnabled: { type: "boolean", example: true },
@@ -314,7 +314,7 @@ const schemas = {
       userId: { type: "integer", example: 1 },
       projectId: { type: "integer", example: 1001 },
       projectProductId: { type: "integer", example: 2001 },
-      productType: stringEnum(["microsoft", "domain"]),
+      productType: stringEnum(["microsoft", "domain", "random"]),
       serviceMode: stringEnum(["code", "purchase"]),
       supplyPolicy: stringEnum(["private_first", "public_only"]),
       status: stringEnum(["pending_payment", "paid", "active", "completed", "refunded", "failed", "closed"]),
@@ -808,7 +808,7 @@ const spec = {
           { name: "scope", in: "query", schema: stringEnum(["visible", "mine"]) },
           { name: "status", in: "query", schema: { type: "string" } },
           { name: "accessType", in: "query", schema: stringEnum(["public", "private"]) },
-          { name: "productType", in: "query", schema: stringEnum(["microsoft", "domain"]) },
+          { name: "productType", in: "query", schema: stringEnum(["microsoft", "domain", "random"]) },
           { name: "search", in: "query", schema: { type: "string" } },
         ],
         responses: {

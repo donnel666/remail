@@ -474,14 +474,14 @@ LIMIT 1`, productID, fulfillExistingOrder, buyerUserID).Scan(&item).Error
 	if item.ProductID == 0 {
 		return nil, nil
 	}
-	allocationType := domain.AllocationType(item.Type)
-	if !domain.IsValidAllocationType(allocationType) {
+	productType := coredomain.ProductType(item.Type)
+	if !coredomain.IsValidProductType(productType) {
 		return nil, domain.ErrProjectNotAllocatable
 	}
 	return &allocapp.ProductAllocationConfig{
 		ProjectID:   item.ProjectID,
 		ProductID:   item.ProductID,
-		ProductType: allocationType,
+		ProductType: productType,
 		MainWeight:  item.MainWeight,
 		DotWeight:   item.DotWeight,
 		PlusWeight:  item.PlusWeight,
@@ -1381,13 +1381,19 @@ JOIN project_products pp ON pp.project_id = p.id
 	}
 	today := time.Now().UTC().Format("2006-01-02")
 	for _, row := range productRows {
-		switch domain.AllocationType(row.Type) {
-		case domain.AllocationTypeMicrosoft:
+		switch coredomain.ProductType(row.Type) {
+		case coredomain.ProductTypeMicrosoft:
 			stats.Microsoft.Enabled = true
-			stats.Microsoft.MainEnabled = row.MainWeight > 0
-			stats.Microsoft.DotEnabled = row.DotWeight > 0
-			stats.Microsoft.PlusEnabled = row.PlusWeight > 0
-		case domain.AllocationTypeDomain:
+			stats.Microsoft.MainEnabled = stats.Microsoft.MainEnabled || row.MainWeight > 0
+			stats.Microsoft.DotEnabled = stats.Microsoft.DotEnabled || row.DotWeight > 0
+			stats.Microsoft.PlusEnabled = stats.Microsoft.PlusEnabled || row.PlusWeight > 0
+		case coredomain.ProductTypeDomain:
+			stats.Domain.Enabled = true
+		case coredomain.ProductTypeRandom:
+			stats.Microsoft.Enabled = true
+			stats.Microsoft.MainEnabled = true
+			stats.Microsoft.DotEnabled = true
+			stats.Microsoft.PlusEnabled = true
 			stats.Domain.Enabled = true
 		}
 	}
@@ -1647,8 +1653,9 @@ JOIN project_products pp ON pp.project_id = p.id
 		return nil, err
 	}
 	result := &allocapp.ProjectProductInventoryTotals{
-		ProjectID: projectID,
-		Items:     make([]allocapp.ProductInventoryTotal, 0, len(productRows)),
+		ProjectID:      projectID,
+		TotalAvailable: stats.TotalAvailable,
+		Items:          make([]allocapp.ProductInventoryTotal, 0, len(productRows)),
 	}
 	for _, row := range productRows {
 		item := allocapp.ProductInventoryTotal{
@@ -1656,18 +1663,18 @@ JOIN project_products pp ON pp.project_id = p.id
 			TotalAvailable:  productInventoryTotalFromStats(row, stats),
 			PublicAvailable: productInventoryTotalFromStats(row, stats),
 		}
-		switch domain.AllocationType(row.Type) {
-		case domain.AllocationTypeMicrosoft:
+		switch coredomain.ProductType(row.Type) {
+		case coredomain.ProductTypeMicrosoft:
 			item.Suffixes, err = r.microsoftProductInventorySuffixTotals(ctx, projectID, row)
-		case domain.AllocationTypeDomain:
+		case coredomain.ProductTypeDomain:
 			item.Suffixes, err = r.domainProductInventorySuffixTotals(ctx)
+		case coredomain.ProductTypeRandom:
 		default:
 			return nil, domain.ErrProjectNotAllocatable
 		}
 		if err != nil {
 			return nil, err
 		}
-		result.TotalAvailable += item.TotalAvailable
 		result.Items = append(result.Items, item)
 	}
 	return result, nil
@@ -1677,8 +1684,8 @@ func productInventoryTotalFromStats(row productInventoryRow, stats *allocapp.Inv
 	if stats == nil {
 		return 0
 	}
-	switch domain.AllocationType(row.Type) {
-	case domain.AllocationTypeMicrosoft:
+	switch coredomain.ProductType(row.Type) {
+	case coredomain.ProductTypeMicrosoft:
 		total := int64(0)
 		if row.MainWeight > 0 {
 			total += stats.Microsoft.MainAvailable + stats.Microsoft.ExplicitAliasAvailable
@@ -1690,8 +1697,10 @@ func productInventoryTotalFromStats(row productInventoryRow, stats *allocapp.Inv
 			total += stats.Microsoft.PlusDailyAvailable
 		}
 		return total
-	case domain.AllocationTypeDomain:
+	case coredomain.ProductTypeDomain:
 		return stats.Domain.TotalAvailable
+	case coredomain.ProductTypeRandom:
+		return stats.Microsoft.TotalAvailable + stats.Domain.TotalAvailable
 	default:
 		return 0
 	}
@@ -2016,7 +2025,7 @@ func (r *Repo) refreshMicrosoftCandidatesInTx(ctx context.Context, projectID uin
 	if err := db.Raw(`
 SELECT COUNT(*)
 FROM projects p
-JOIN project_products pp ON pp.project_id = p.id AND pp.type = 'microsoft' AND pp.status = 'enabled'
+JOIN project_products pp ON pp.project_id = p.id AND pp.type IN ('microsoft', 'random') AND pp.status = 'enabled'
 WHERE p.id = ? AND p.status = 'listed'`, projectID).Scan(&projectCount).Error; err != nil {
 		return 0, fmt.Errorf("check microsoft candidate project: %w", err)
 	}
@@ -2088,7 +2097,7 @@ func (r *Repo) refreshDomainCandidatesInTx(ctx context.Context, projectID uint) 
 	if err := db.Raw(`
 SELECT COUNT(*)
 FROM projects p
-JOIN project_products pp ON pp.project_id = p.id AND pp.type = 'domain' AND pp.status = 'enabled'
+JOIN project_products pp ON pp.project_id = p.id AND pp.type IN ('domain', 'random') AND pp.status = 'enabled'
 WHERE p.id = ? AND p.status = 'listed'`, projectID).Scan(&projectCount).Error; err != nil {
 		return 0, fmt.Errorf("check domain candidate project: %w", err)
 	}

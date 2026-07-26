@@ -23,6 +23,8 @@ type OrderingQuote struct {
 	ProductID               uint
 	ProductType             domain.ProductType
 	PayAmount               string
+	MicrosoftPayAmount      string
+	DomainPayAmount         string
 	CodeWindowMinutes       int
 	ActivationWindowMinutes int
 	WarrantyMinutes         int
@@ -183,7 +185,7 @@ type Repository interface {
 	WithTx(ctx context.Context, fn func(context.Context) error) error
 	LockOrderForUpdate(ctx context.Context, orderNo string) (*domain.Order, error)
 	LoadOrCreatePendingOrder(ctx context.Context, cmd CreatePendingOrderCommand) (*domain.Order, bool, error)
-	FindOrderByIdempotency(ctx context.Context, channel domain.ClientChannel, userID uint, apiKeyID *uint, idempotencyKey, requestFingerprint string) (*domain.Order, error)
+	FindOrderByIdempotency(ctx context.Context, channel domain.ClientChannel, userID uint, apiKeyID *uint, idempotencyKey, requestFingerprint, randomRequestFingerprint string) (*domain.Order, error)
 	FindOrder(ctx context.Context, orderNo string) (*domain.Order, error)
 	MarkPaid(ctx context.Context, cmd MarkPaidCommand) (*domain.Order, error)
 	MarkActive(ctx context.Context, cmd MarkActiveCommand) (*domain.Order, error)
@@ -214,22 +216,24 @@ type HistoricalOrderRepository interface {
 }
 
 type CreatePendingOrderCommand struct {
-	OrderNo                 string
-	UserID                  uint
-	ProjectID               uint
-	ProjectProductID        uint
-	ProductType             domain.ProductType
-	ServiceMode             domain.ServiceMode
-	SupplyPolicy            domain.SupplyPolicy
-	PayAmount               string
-	CodeWindowMinutes       int
-	ActivationWindowMinutes int
-	WarrantyMinutes         int
-	ClientChannel           domain.ClientChannel
-	APIKeyID                *uint
-	IdempotencyKey          string
-	RequestFingerprint      string
-	Now                     time.Time
+	OrderNo                  string
+	UserID                   uint
+	ProjectID                uint
+	ProjectProductID         uint
+	ProductType              domain.ProductType
+	ServiceMode              domain.ServiceMode
+	SupplyPolicy             domain.SupplyPolicy
+	PayAmount                string
+	RandomMicrosoftPayAmount string
+	RandomDomainPayAmount    string
+	CodeWindowMinutes        int
+	ActivationWindowMinutes  int
+	WarrantyMinutes          int
+	ClientChannel            domain.ClientChannel
+	APIKeyID                 *uint
+	IdempotencyKey           string
+	RequestFingerprint       string
+	Now                      time.Time
 }
 
 type MarkActiveCommand struct {
@@ -578,11 +582,16 @@ func (uc *UseCase) Checkout(ctx context.Context, req CheckoutRequest) (result *C
 		prepared.request.APIKeyID,
 		prepared.idempotencyKey,
 		prepared.fingerprint,
+		checkoutPreparationFingerprint(prepared, ""),
 	)
 	if err != nil {
 		return nil, err
 	}
-	if prepared.existing == nil {
+	if prepared.existing != nil {
+		if err := finalizeCheckoutProduct(&prepared, prepared.existing.ProductType); err != nil {
+			return nil, err
+		}
+	} else {
 		if err := uc.prepareCheckoutQuote(ctx, &prepared, nil); err != nil {
 			return nil, err
 		}
@@ -660,20 +669,53 @@ func prepareCheckoutRequest(req CheckoutRequest) (checkoutPreparation, error) {
 		req.APIKeyID = nil
 	}
 
-	emailSuffix := normalizeEmailSuffix(req.EmailSuffix)
-	fingerprintParts := []any{req.UserID, req.ProjectID, req.ProductID, mode, policy, emailSuffix, req.ClientChannel, apiKeyFingerprint(req.APIKeyID)}
-	if req.BatchQuantity > 1 {
-		fingerprintParts = append(fingerprintParts, req.BatchQuantity)
-	}
-	return checkoutPreparation{
+	prepared := checkoutPreparation{
 		request:        req,
 		mode:           mode,
 		policy:         policy,
 		idempotencyKey: idempotencyKey,
-		fingerprint:    checkoutFingerprint(fingerprintParts...),
-		emailSuffix:    emailSuffix,
+		emailSuffix:    normalizeEmailSuffix(req.EmailSuffix),
 		requestID:      strings.TrimSpace(req.RequestID),
-	}, nil
+	}
+	prepared.fingerprint = checkoutPreparationFingerprint(prepared, prepared.emailSuffix)
+	return prepared, nil
+}
+
+func finalizeCheckoutProduct(prepared *checkoutPreparation, productType domain.ProductType) error {
+	switch productType {
+	case domain.ProductTypeMicrosoft:
+	case domain.ProductTypeDomain:
+		if prepared.emailSuffix != "" {
+			normalized, err := coredomain.NormalizeDomainTLD(prepared.emailSuffix)
+			if err != nil {
+				return domain.ErrInvalidOrderRequest
+			}
+			prepared.emailSuffix = normalized
+		}
+	case domain.ProductTypeRandom:
+		prepared.emailSuffix = ""
+	default:
+		return domain.ErrInvalidOrderRequest
+	}
+	prepared.fingerprint = checkoutPreparationFingerprint(*prepared, prepared.emailSuffix)
+	return nil
+}
+
+func checkoutPreparationFingerprint(prepared checkoutPreparation, emailSuffix string) string {
+	parts := []any{
+		prepared.request.UserID,
+		prepared.request.ProjectID,
+		prepared.request.ProductID,
+		prepared.mode,
+		prepared.policy,
+		emailSuffix,
+		prepared.request.ClientChannel,
+		apiKeyFingerprint(prepared.request.APIKeyID),
+	}
+	if prepared.request.BatchQuantity > 1 {
+		parts = append(parts, prepared.request.BatchQuantity)
+	}
+	return checkoutFingerprint(parts...)
 }
 
 func (uc *UseCase) prepareCheckoutQuote(ctx context.Context, prepared *checkoutPreparation, quotes map[checkoutQuoteKey]*OrderingQuote) error {
@@ -702,12 +744,11 @@ func (uc *UseCase) prepareCheckoutQuote(ctx context.Context, prepared *checkoutP
 			quotes[key] = quote
 		}
 	}
-	if quote.ProductType == domain.ProductTypeDomain && prepared.emailSuffix != "" {
-		normalized, err := coredomain.NormalizeDomainTLD(prepared.emailSuffix)
-		if err != nil {
-			return domain.ErrInvalidOrderRequest
-		}
-		prepared.emailSuffix = normalized
+	if err := finalizeCheckoutProduct(prepared, quote.ProductType); err != nil {
+		return err
+	}
+	if quote.ProductType == domain.ProductTypeRandom && (quote.MicrosoftPayAmount == "" || quote.DomainPayAmount == "") {
+		return domain.ErrInvalidOrderRequest
 	}
 	prepared.quote = quote
 	return nil
@@ -736,22 +777,24 @@ func (uc *UseCase) checkoutPrepared(ctx context.Context, prepared checkoutPrepar
 			return err
 		}
 		order, created, err := uc.repo.LoadOrCreatePendingOrder(txCtx, CreatePendingOrderCommand{
-			OrderNo:                 nextOrderNo(),
-			UserID:                  prepared.request.UserID,
-			ProjectID:               prepared.quote.ProjectID,
-			ProjectProductID:        prepared.quote.ProductID,
-			ProductType:             prepared.quote.ProductType,
-			ServiceMode:             prepared.mode,
-			SupplyPolicy:            prepared.policy,
-			PayAmount:               prepared.quote.PayAmount,
-			CodeWindowMinutes:       prepared.quote.CodeWindowMinutes,
-			ActivationWindowMinutes: prepared.quote.ActivationWindowMinutes,
-			WarrantyMinutes:         prepared.quote.WarrantyMinutes,
-			ClientChannel:           prepared.request.ClientChannel,
-			APIKeyID:                prepared.request.APIKeyID,
-			IdempotencyKey:          prepared.idempotencyKey,
-			RequestFingerprint:      prepared.fingerprint,
-			Now:                     uc.now(),
+			OrderNo:                  nextOrderNo(),
+			UserID:                   prepared.request.UserID,
+			ProjectID:                prepared.quote.ProjectID,
+			ProjectProductID:         prepared.quote.ProductID,
+			ProductType:              prepared.quote.ProductType,
+			ServiceMode:              prepared.mode,
+			SupplyPolicy:             prepared.policy,
+			PayAmount:                prepared.quote.PayAmount,
+			RandomMicrosoftPayAmount: prepared.quote.MicrosoftPayAmount,
+			RandomDomainPayAmount:    prepared.quote.DomainPayAmount,
+			CodeWindowMinutes:        prepared.quote.CodeWindowMinutes,
+			ActivationWindowMinutes:  prepared.quote.ActivationWindowMinutes,
+			WarrantyMinutes:          prepared.quote.WarrantyMinutes,
+			ClientChannel:            prepared.request.ClientChannel,
+			APIKeyID:                 prepared.request.APIKeyID,
+			IdempotencyKey:           prepared.idempotencyKey,
+			RequestFingerprint:       prepared.fingerprint,
+			Now:                      uc.now(),
 		})
 		if err != nil {
 			return err
@@ -1121,6 +1164,10 @@ func (uc *UseCase) preloadCheckoutBatch(ctx context.Context, prepared []checkout
 			if !exists {
 				continue
 			}
+			if err := finalizeCheckoutProduct(&prepared[i], order.ProductType); err != nil {
+				prepared[i].prepareErr = err
+				continue
+			}
 			if order.RequestFingerprint != prepared[i].fingerprint {
 				prepared[i].prepareErr = domain.ErrIdempotencyConflict
 				continue
@@ -1139,6 +1186,7 @@ func (uc *UseCase) preloadCheckoutBatch(ctx context.Context, prepared []checkout
 			prepared[i].request.APIKeyID,
 			prepared[i].idempotencyKey,
 			prepared[i].fingerprint,
+			checkoutPreparationFingerprint(prepared[i], ""),
 		)
 		if errors.Is(err, domain.ErrIdempotencyConflict) {
 			prepared[i].prepareErr = err
@@ -1146,6 +1194,12 @@ func (uc *UseCase) preloadCheckoutBatch(ctx context.Context, prepared []checkout
 		}
 		if err != nil {
 			return err
+		}
+		if existing != nil {
+			if err := finalizeCheckoutProduct(&prepared[i], existing.ProductType); err != nil {
+				prepared[i].prepareErr = err
+				continue
+			}
 		}
 		prepared[i].existing = existing
 	}
@@ -1905,7 +1959,10 @@ func (uc *UseCase) resumeCheckout(ctx context.Context, order domain.Order, quote
 				return nil, err
 			}
 			currentAllocation = allocation
-			payAmount := checkoutPayAmount(order.PayAmount, allocation.SupplyScope)
+			payAmount, err := allocatedCheckoutPayAmount(order, quote, *allocation)
+			if err != nil {
+				return nil, err
+			}
 			debit, err := uc.wallet.DebitConsumer(ctx, WalletCommand{
 				UserID:         order.UserID,
 				Amount:         payAmount,
@@ -2059,6 +2116,24 @@ func checkoutPayAmount(listedAmount string, scope SupplyScope) string {
 	return listedAmount
 }
 
+func allocatedCheckoutPayAmount(order domain.Order, quote OrderingQuote, allocation AllocationResult) (string, error) {
+	listedAmount := order.PayAmount
+	if order.ProductType == domain.ProductTypeRandom {
+		switch allocation.Type {
+		case domain.AllocationTypeMicrosoft:
+			listedAmount = quote.MicrosoftPayAmount
+		case domain.AllocationTypeDomain:
+			listedAmount = quote.DomainPayAmount
+		default:
+			return "", domain.ErrInvalidOrderRequest
+		}
+		if listedAmount == "" {
+			return "", domain.ErrInvalidOrderRequest
+		}
+	}
+	return checkoutPayAmount(listedAmount, allocation.SupplyScope), nil
+}
+
 func (uc *UseCase) refundPaidOrder(ctx context.Context, order domain.Order, failureCode domain.OrderFailureCode, reason string) (*domain.Order, error) {
 	refund, err := uc.wallet.RefundConsumer(ctx, WalletCommand{
 		UserID:         order.UserID,
@@ -2116,6 +2191,13 @@ func orderingQuoteFromOrder(order domain.Order) (*OrderingQuote, error) {
 		CodeWindowMinutes:       order.CodeWindowMinutes,
 		ActivationWindowMinutes: order.ActivationWindowMinutes,
 		WarrantyMinutes:         order.WarrantyMinutes,
+	}
+	if order.ProductType == domain.ProductTypeRandom {
+		if order.RandomMicrosoftPayAmount == "" || order.RandomDomainPayAmount == "" {
+			return nil, domain.ErrInvalidOrderRequest
+		}
+		quote.MicrosoftPayAmount = order.RandomMicrosoftPayAmount
+		quote.DomainPayAmount = order.RandomDomainPayAmount
 	}
 	if quote.ProjectID == 0 || quote.ProductID == 0 || quote.ProductType == "" {
 		return nil, domain.ErrInvalidOrderRequest

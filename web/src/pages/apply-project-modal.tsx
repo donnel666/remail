@@ -43,6 +43,7 @@ export const initialApplyForm: ApplyFormState = {
 export function productTypeLabel(type: string, t: (key: string) => string) {
   if (type === "microsoft") return t("Microsoft email");
   if (type === "domain") return t("Domain email");
+  if (type === "random") return t("Random email");
   return type;
 }
 

@@ -2409,7 +2409,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [microsoft, domain]
+            enum: [microsoft, domain, random]
         - name: search
           in: query
           schema:
@@ -10829,7 +10829,7 @@ components:
           type: integer
         productType:
           type: string
-          enum: [microsoft, domain]
+          enum: [microsoft, domain, random]
         serviceMode:
           type: string
           enum: [code, purchase]
@@ -13943,7 +13943,7 @@ components:
           type: boolean
         productType:
           type: string
-          enum: [microsoft, domain]
+          enum: [microsoft, domain, random]
         search:
           type: string
         targetPlatform:
@@ -14035,7 +14035,7 @@ components:
         products:
           type: array
           minItems: 1
-          maxItems: 2
+          maxItems: 3
           items:
             $ref: "#/components/schemas/ProjectProductRequest"
       additionalProperties: false
@@ -14069,7 +14069,7 @@ components:
       properties:
         type:
           type: string
-          enum: [microsoft, domain]
+          enum: [microsoft, domain, random]
         status:
           type: string
           enum: [enabled, disabled]
@@ -14204,13 +14204,15 @@ components:
 
     ProjectProductTypeFacets:
       type: object
-      required: [all, microsoft, domain]
+      required: [all, microsoft, domain, random]
       properties:
         all:
           type: integer
         microsoft:
           type: integer
         domain:
+          type: integer
+        random:
           type: integer
       additionalProperties: false
 
@@ -14297,7 +14299,7 @@ components:
           type: integer
         type:
           type: string
-          enum: [microsoft, domain]
+          enum: [microsoft, domain, random]
         status:
           type: string
           enum: [enabled, disabled]
@@ -14338,7 +14340,7 @@ components:
       properties:
         suffix:
           type: string
-          description: Suffix without leading @. Microsoft products expose exact email domains; Domain products expose only aggregated public suffixes such as com, com.cn, or co.uk. Empty is not used here; callers use the parent product row for a random suffix.
+          description: Suffix without leading @. Microsoft products expose exact email domains; Domain products expose aggregated public suffixes such as com, com.cn, or co.uk; Random products do not expose suffix entries.
         totalAvailable:
           type: integer
           format: int64
@@ -14370,7 +14372,7 @@ components:
           type: integer
         type:
           type: string
-          enum: [microsoft, domain]
+          enum: [microsoft, domain, random]
         status:
           type: string
           enum: [enabled, disabled]

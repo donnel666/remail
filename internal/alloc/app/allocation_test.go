@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/donnel666/remail/internal/alloc/domain"
+	coredomain "github.com/donnel666/remail/internal/core/domain"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
@@ -220,6 +221,83 @@ type allocationLockRepo struct {
 	createdMailbox       domain.MicrosoftMailbox
 }
 
+type randomAllocationRepo struct {
+	*allocationLockRepo
+	txAttempts             int
+	microsoftCalls         int
+	microsoftCandidates    []MicrosoftCandidate
+	microsoftRootBusy      bool
+	microsoftWriteConflict bool
+	microsoftCreates       int
+	domainCreates          int
+	domainCreateTxAttempts []int
+}
+
+func (r *randomAllocationRepo) ListMicrosoftSourceCandidates(context.Context, uint, uint, domain.SupplyScope, domain.MicrosoftMailbox, *uint16, int, string) ([]MicrosoftCandidate, error) {
+	r.microsoftCalls++
+	return r.microsoftCandidates, nil
+}
+
+func (r *randomAllocationRepo) WithTx(ctx context.Context, fn func(context.Context) error) error {
+	r.txAttempts++
+	return fn(ctx)
+}
+
+func (*randomAllocationRepo) HasParentTx(context.Context) bool { return false }
+
+func (r *randomAllocationRepo) LockResourceRoot(ctx context.Context, resourceID uint, allocationType domain.AllocationType) (bool, error) {
+	if r.microsoftRootBusy && allocationType == domain.AllocationTypeMicrosoft {
+		return false, nil
+	}
+	return r.allocationLockRepo.LockResourceRoot(ctx, resourceID, allocationType)
+}
+
+func (r *randomAllocationRepo) CreateMicrosoftAllocation(_ context.Context, allocation *domain.MicrosoftAllocation) error {
+	r.microsoftCreates++
+	if r.microsoftWriteConflict && r.microsoftCreates == 1 {
+		return domain.ErrAllocationConflict
+	}
+	allocation.ID = uint(r.microsoftCreates)
+	allocation.CreatedAt = time.Now().UTC()
+	return nil
+}
+
+func (*randomAllocationRepo) ListDomainSourceCandidates(context.Context, uint, domain.SupplyScope, *uint16, int, string) ([]DomainCandidate, error) {
+	return []DomainCandidate{{ResourceID: 2, OwnerUserID: 3, Domain: "example.com", MailboxDailyLimit: 1}}, nil
+}
+
+func (*randomAllocationRepo) ListGeneratedMailboxCandidates(context.Context, uint, uint, domain.SupplyScope, *uint16, int, string) ([]GeneratedMailboxCandidate, error) {
+	return nil, nil
+}
+
+func (*randomAllocationRepo) LockDomainCandidate(context.Context, uint, uint, domain.SupplyScope, string) (*DomainCandidate, error) {
+	return &DomainCandidate{ResourceID: 2, OwnerUserID: 3, Domain: "example.com", MailboxDailyLimit: 1}, nil
+}
+
+func (*randomAllocationRepo) FindReusableGeneratedMailbox(context.Context, uint, uint) (*GeneratedMailboxCandidate, error) {
+	return nil, nil
+}
+
+func (*randomAllocationRepo) FindOrCreateGeneratedMailbox(context.Context, uint, uint, string) (*GeneratedMailboxCandidate, error) {
+	return &GeneratedMailboxCandidate{ID: 9, ResourceID: 2, Email: "random@example.com"}, nil
+}
+
+func (*randomAllocationRepo) IsDomainMailboxAllocated(context.Context, uint, uint) (bool, error) {
+	return false, nil
+}
+
+func (r *randomAllocationRepo) CreateDomainAllocation(_ context.Context, allocation *domain.GeneratedMailboxAllocation) error {
+	r.domainCreates++
+	r.domainCreateTxAttempts = append(r.domainCreateTxAttempts, r.txAttempts)
+	allocation.ID = 10
+	allocation.CreatedAt = time.Now().UTC()
+	return nil
+}
+
+func (*randomAllocationRepo) TouchDomainAllocated(context.Context, uint, uint, time.Time) error {
+	return nil
+}
+
 func (*allocationLockRepo) WithTx(ctx context.Context, fn func(context.Context) error) error {
 	return fn(ctx)
 }
@@ -233,7 +311,7 @@ func (r *allocationLockRepo) FindExistingAllocation(context.Context, string) (*d
 
 func (r *allocationLockRepo) LoadProductConfig(context.Context, uint, uint, bool) (*ProductAllocationConfig, error) {
 	if r.config.ProductID == 0 {
-		r.config = ProductAllocationConfig{ProjectID: 4, ProductID: 5, ProductType: domain.AllocationTypeMicrosoft, PlusWeight: 1}
+		r.config = ProductAllocationConfig{ProjectID: 4, ProductID: 5, ProductType: coredomain.ProductTypeMicrosoft, PlusWeight: 1}
 	}
 	return &r.config, nil
 }
@@ -278,6 +356,112 @@ func TestSpecifiedSuffixFallsBackAfterFirstEmptyBucket(t *testing.T) {
 				t.Fatalf("listed buckets = %v, want second query global = %v", repo.listedBuckets, tt.wantGlobal)
 			}
 		})
+	}
+}
+
+func TestRandomProductIgnoresEmailSuffixWhenFallingBackToDomain(t *testing.T) {
+	orderNo := ""
+	for i := 0; ; i++ {
+		orderNo = fmt.Sprintf("random-%d", i)
+		if randomProductTypes(orderNo, 5)[0] == coredomain.ProductTypeMicrosoft {
+			break
+		}
+	}
+	repo := &randomAllocationRepo{allocationLockRepo: &allocationLockRepo{config: ProductAllocationConfig{
+		ProjectID: 4, ProductID: 5, ProductType: coredomain.ProductTypeRandom, MainWeight: 1,
+	}}}
+	result, err := NewUseCase(repo).Allocate(context.Background(), AllocateCommand{
+		OrderNo: orderNo, BuyerUserID: 3, ProjectProductID: 5, EmailSuffix: "outlook.com",
+	})
+
+	if err != nil || result == nil || result.Type != domain.AllocationTypeDomain {
+		t.Fatalf("Allocate() result = %#v, error = %v; want domain fallback", result, err)
+	}
+	if repo.microsoftCalls == 0 || repo.domainCreates != 1 {
+		t.Fatalf("microsoft/domain calls = %d/%d, want attempted/1", repo.microsoftCalls, repo.domainCreates)
+	}
+}
+
+func TestRandomProductIgnoresMicrosoftEmailSuffixWhenDomainIsFirst(t *testing.T) {
+	orderNo := ""
+	for i := 0; ; i++ {
+		orderNo = fmt.Sprintf("random-microsoft-suffix-%d", i)
+		if randomProductTypes(orderNo, 5)[0] == coredomain.ProductTypeDomain {
+			break
+		}
+	}
+	repo := &randomAllocationRepo{
+		allocationLockRepo: &allocationLockRepo{config: ProductAllocationConfig{
+			ProjectID: 4, ProductID: 5, ProductType: coredomain.ProductTypeRandom, MainWeight: 1,
+		}},
+		microsoftCandidates: []MicrosoftCandidate{{ResourceID: 2, EmailAddress: "ms@example.com"}},
+	}
+
+	result, err := NewUseCase(repo).Allocate(context.Background(), AllocateCommand{
+		OrderNo: orderNo, BuyerUserID: 3, ProjectProductID: 5, EmailSuffix: "example.com",
+	})
+
+	if err != nil || result == nil || result.Type != domain.AllocationTypeDomain {
+		t.Fatalf("Allocate() result = %#v, error = %v; want random domain allocation", result, err)
+	}
+	if repo.domainCreates != 1 || repo.microsoftCreates != 0 {
+		t.Fatalf("domain/microsoft creates = %d/%d, want 1/0", repo.domainCreates, repo.microsoftCreates)
+	}
+}
+
+func TestRandomProductFallsBackAfterAllocationConflict(t *testing.T) {
+	orderNo := ""
+	for i := 0; ; i++ {
+		orderNo = fmt.Sprintf("random-conflict-%d", i)
+		if randomProductTypes(orderNo, 5)[0] == coredomain.ProductTypeMicrosoft {
+			break
+		}
+	}
+	repo := &randomAllocationRepo{
+		allocationLockRepo: &allocationLockRepo{config: ProductAllocationConfig{
+			ProjectID: 4, ProductID: 5, ProductType: coredomain.ProductTypeRandom, MainWeight: 1,
+		}},
+		microsoftCandidates:    []MicrosoftCandidate{{ResourceID: 2, EmailAddress: "ms@example.com"}},
+		microsoftWriteConflict: true,
+	}
+
+	result, err := NewUseCase(repo).Allocate(context.Background(), AllocateCommand{
+		OrderNo: orderNo, BuyerUserID: 3, ProjectProductID: 5,
+	})
+
+	if err != nil || result == nil || result.Type != domain.AllocationTypeDomain {
+		t.Fatalf("Allocate() result = %#v, error = %v; want domain fallback", result, err)
+	}
+	if repo.txAttempts != 2 || repo.microsoftCreates != 1 || !slices.Equal(repo.domainCreateTxAttempts, []int{2}) {
+		t.Fatalf("tx/microsoft/domain attempts = %d/%d/%v, want 2/1/[2]", repo.txAttempts, repo.microsoftCreates, repo.domainCreateTxAttempts)
+	}
+}
+
+func TestRandomProductFallsBackFromBusyResourceTypeInSameTransaction(t *testing.T) {
+	orderNo := ""
+	for i := 0; ; i++ {
+		orderNo = fmt.Sprintf("random-busy-%d", i)
+		if randomProductTypes(orderNo, 5)[0] == coredomain.ProductTypeMicrosoft {
+			break
+		}
+	}
+	repo := &randomAllocationRepo{
+		allocationLockRepo: &allocationLockRepo{config: ProductAllocationConfig{
+			ProjectID: 4, ProductID: 5, ProductType: coredomain.ProductTypeRandom, MainWeight: 1,
+		}},
+		microsoftCandidates: []MicrosoftCandidate{{ResourceID: 2, EmailAddress: "ms@example.com"}},
+		microsoftRootBusy:   true,
+	}
+
+	result, err := NewUseCase(repo).Allocate(context.Background(), AllocateCommand{
+		OrderNo: orderNo, BuyerUserID: 3, ProjectProductID: 5, EmailSuffix: "com",
+	})
+
+	if err != nil || result == nil || result.Type != domain.AllocationTypeDomain {
+		t.Fatalf("Allocate() result = %#v, error = %v; want domain fallback", result, err)
+	}
+	if repo.txAttempts != 1 || !slices.Equal(repo.domainCreateTxAttempts, []int{1}) {
+		t.Fatalf("tx/domain attempts = %d/%v, want 1/[1]", repo.txAttempts, repo.domainCreateTxAttempts)
 	}
 }
 
@@ -438,7 +622,7 @@ func TestAllocationReusesHeldRootAcrossBucketProbes(t *testing.T) {
 func TestMicrosoftMainUsesAliasWhenMainIsAlreadyAllocated(t *testing.T) {
 	repo := &allocationLockRepo{
 		config: ProductAllocationConfig{
-			ProjectID: 4, ProductID: 5, ProductType: domain.AllocationTypeMicrosoft, MainWeight: 1,
+			ProjectID: 4, ProductID: 5, ProductType: coredomain.ProductTypeMicrosoft, MainWeight: 1,
 		},
 		candidates:    []MicrosoftCandidate{{ResourceID: 1, EmailAddress: "main@example.com", MainAllocated: true}},
 		explicitAlias: &AliasCandidate{ID: 9, Email: "alias@example.com"},
@@ -458,7 +642,7 @@ func TestMicrosoftMainUsesAliasWhenMainIsAlreadyAllocated(t *testing.T) {
 func TestMicrosoftAllocationRejectsWrongDeliverySuffix(t *testing.T) {
 	repo := &allocationLockRepo{
 		config: ProductAllocationConfig{
-			ProjectID: 4, ProductID: 5, ProductType: domain.AllocationTypeMicrosoft, MainWeight: 1,
+			ProjectID: 4, ProductID: 5, ProductType: coredomain.ProductTypeMicrosoft, MainWeight: 1,
 		},
 		candidates:    []MicrosoftCandidate{{ResourceID: 1, EmailAddress: "main@hotmail.com", MainAllocated: true}},
 		explicitAlias: &AliasCandidate{ID: 9, Email: "alias@outlook.com"},
@@ -759,7 +943,7 @@ func TestDomainAllocationRejectsWrongDeliveryTLDBeforeUsage(t *testing.T) {
 
 func TestDomainProductRejectsConcreteDomainSuffix(t *testing.T) {
 	repo := &allocationLockRepo{config: ProductAllocationConfig{
-		ProjectID: 4, ProductID: 5, ProductType: domain.AllocationTypeDomain,
+		ProjectID: 4, ProductID: 5, ProductType: coredomain.ProductTypeDomain,
 	}}
 	result, err := NewUseCase(repo).Allocate(context.Background(), AllocateCommand{
 		OrderNo: "order-1", BuyerUserID: 3, ProjectProductID: 5, EmailSuffix: "example.com",

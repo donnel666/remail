@@ -1598,6 +1598,7 @@ func toProjectListFacetsResponse(facets *coreapp.ProjectListFacets) *ProjectList
 			All:       facets.ProductType.All,
 			Microsoft: facets.ProductType.Microsoft,
 			Domain:    facets.ProductType.Domain,
+			Random:    facets.ProductType.Random,
 		},
 	}
 }

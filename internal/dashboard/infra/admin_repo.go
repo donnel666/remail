@@ -39,13 +39,13 @@ func (r *AdminViewRepo) OrderTrend(ctx context.Context, sqlFormat string, from, 
 }
 
 func (r *AdminViewRepo) CodeOrderTrend(ctx context.Context, sqlFormat string, from, to time.Time) ([]dashboardapp.TypeCountBucket, error) {
-	sel := fmt.Sprintf("DATE_FORMAT(created_at, '%s') AS bucket, product_type, COUNT(*) AS count", sqlFormat)
+	sel := fmt.Sprintf("DATE_FORMAT(created_at, '%s') AS bucket, COALESCE(allocation_type, product_type) AS product_type, COUNT(*) AS count", sqlFormat)
 	var rows []dashboardapp.TypeCountBucket
 	if err := r.db.WithContext(ctx).
 		Table("orders").
 		Select(sel).
 		Where("service_mode = 'code' AND debit_tx_id IS NOT NULL AND created_at >= ? AND created_at <= ?", from.UTC(), to.UTC()).
-		Group("bucket, product_type").
+		Group("bucket, COALESCE(allocation_type, product_type)").
 		Scan(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -54,9 +54,9 @@ func (r *AdminViewRepo) CodeOrderTrend(ctx context.Context, sqlFormat string, fr
 
 func (r *AdminViewRepo) CodeReceiptTrend(ctx context.Context, sqlFormat string, from, to time.Time) ([]dashboardapp.TypeReceiptBucket, error) {
 	// Anchored to the order's created_at (like the console) so receipts stay a
-	// subset of code orders in the same bucket; split by the order's product_type.
+	// subset of code orders in the same bucket; split by the delivered resource type.
 	sel := fmt.Sprintf(
-		"DATE_FORMAT(o.created_at, '%s') AS bucket, o.product_type, COUNT(*) AS received, COALESCE(GREATEST(ROUND(AVG(TIMESTAMPDIFF(SECOND, o.receive_started_at, h.message_received_at))),0),0) AS avg_seconds",
+		"DATE_FORMAT(o.created_at, '%s') AS bucket, COALESCE(o.allocation_type, o.product_type) AS product_type, COUNT(*) AS received, COALESCE(GREATEST(ROUND(AVG(TIMESTAMPDIFF(SECOND, o.receive_started_at, h.message_received_at))),0),0) AS avg_seconds",
 		sqlFormat,
 	)
 	var rows []dashboardapp.TypeReceiptBucket
@@ -65,7 +65,7 @@ func (r *AdminViewRepo) CodeReceiptTrend(ctx context.Context, sqlFormat string, 
 		Joins("JOIN orders AS o ON o.id = h.order_id").
 		Select(sel).
 		Where("o.service_mode = 'code' AND o.created_at >= ? AND o.created_at <= ?", from.UTC(), to.UTC()).
-		Group("bucket, o.product_type").
+		Group("bucket, COALESCE(o.allocation_type, o.product_type)").
 		Scan(&rows).Error; err != nil {
 		return nil, err
 	}

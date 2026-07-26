@@ -38,6 +38,7 @@ type ProductType string
 const (
 	ProductTypeMicrosoft ProductType = "microsoft"
 	ProductTypeDomain    ProductType = "domain"
+	ProductTypeRandom    ProductType = "random"
 )
 
 // MailRuleType identifies which part of a message a rule matches.
@@ -145,7 +146,7 @@ func IsValidProductStatus(status ProductStatus) bool {
 
 func IsValidProductType(productType ProductType) bool {
 	switch productType {
-	case ProductTypeMicrosoft, ProductTypeDomain:
+	case ProductTypeMicrosoft, ProductTypeDomain, ProductTypeRandom:
 		return true
 	default:
 		return false
@@ -202,6 +203,8 @@ func NormalizeProductType(productType string) (ProductType, bool) {
 		return ProductTypeMicrosoft, true
 	case ProductTypeDomain:
 		return ProductTypeDomain, true
+	case ProductTypeRandom:
+		return ProductTypeRandom, true
 	default:
 		return "", false
 	}
@@ -232,4 +235,43 @@ func NormalizeMoney(value string) (string, bool) {
 		return "", false
 	}
 	return amount.StringFixedBank(moneyfmt.Scale), true
+}
+
+// ApplyRandomProductPrices derives Random display prices from its two allocation sources.
+func ApplyRandomProductPrices(products []Product) bool {
+	var microsoftProduct, domainProduct *Product
+	hasRandom := false
+	for i := range products {
+		switch products[i].Type {
+		case ProductTypeMicrosoft:
+			microsoftProduct = &products[i]
+		case ProductTypeDomain:
+			domainProduct = &products[i]
+		case ProductTypeRandom:
+			hasRandom = true
+		}
+	}
+	if !hasRandom {
+		return true
+	}
+	if microsoftProduct == nil || domainProduct == nil {
+		return false
+	}
+	for i := range products {
+		if products[i].Type != ProductTypeRandom {
+			continue
+		}
+		products[i].CodePrice = lowerProductAmount(microsoftProduct.CodePrice, domainProduct.CodePrice)
+		products[i].PurchasePrice = lowerProductAmount(microsoftProduct.PurchasePrice, domainProduct.PurchasePrice)
+	}
+	return true
+}
+
+func lowerProductAmount(first, second string) string {
+	firstAmount, firstErr := moneyfmt.Parse(first)
+	secondAmount, secondErr := moneyfmt.Parse(second)
+	if firstErr != nil || secondErr != nil || firstAmount.LessThanOrEqual(secondAmount) {
+		return first
+	}
+	return second
 }

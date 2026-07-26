@@ -135,7 +135,12 @@ function toWorkbenchProducts(
   product: ProjectProductSummary,
   inventory?: ProductInventoryTotal,
 ): WorkbenchProduct[] {
-  const label = product.type === "microsoft" ? "Microsoft" : "Domain";
+  const label =
+    product.type === "microsoft"
+      ? "Microsoft"
+      : product.type === "domain"
+        ? "Domain"
+        : "Random";
   const totalAvailable =
     inventory?.totalAvailable ?? product.totalAvailable ?? 0;
   const publicAvailable =
@@ -159,21 +164,24 @@ function toWorkbenchProducts(
     suffix: label,
     warrantyHours: Math.max(1, Math.ceil(product.warrantyMinutes / 60)),
   };
-  const suffixProducts = (inventory?.suffixes ?? product.suffixes ?? [])
-    .map((suffix) => ({
-      ...suffix,
-      suffix: String(suffix.suffix ?? "").replace(/^@/, ""),
-    }))
-    .filter((suffix) => suffix.suffix)
-    .map((suffix) => ({
-      ...baseProduct,
-      codeInventory: suffix.totalAvailable ?? 0,
-      emailSuffix: suffix.suffix,
-      id: `${product.id}:${suffix.suffix}`,
-      publicInventory: suffix.publicAvailable ?? 0,
-      purchaseInventory: suffix.totalAvailable ?? 0,
-      suffix: `@${suffix.suffix}`,
-    }));
+  const suffixProducts =
+    product.type === "random"
+      ? []
+      : (inventory?.suffixes ?? product.suffixes ?? [])
+          .map((suffix) => ({
+            ...suffix,
+            suffix: String(suffix.suffix ?? "").replace(/^@/, ""),
+          }))
+          .filter((suffix) => suffix.suffix)
+          .map((suffix) => ({
+            ...baseProduct,
+            codeInventory: suffix.totalAvailable ?? 0,
+            emailSuffix: suffix.suffix,
+            id: `${product.id}:${suffix.suffix}`,
+            publicInventory: suffix.publicAvailable ?? 0,
+            purchaseInventory: suffix.totalAvailable ?? 0,
+            suffix: `@${suffix.suffix}`,
+          }));
   return [baseProduct, ...suffixProducts];
 }
 
@@ -204,21 +212,24 @@ function mergeProjectInventory(
         purchaseInventory: totalAvailable,
         suffix: product.label,
       };
-      const suffixProducts = (inventoryItem.suffixes ?? [])
-        .map((suffix) => ({
-          ...suffix,
-          suffix: String(suffix.suffix ?? "").replace(/^@/, ""),
-        }))
-        .filter((suffix) => suffix.suffix)
-        .map((suffix) => ({
-          ...baseProduct,
-          codeInventory: suffix.totalAvailable ?? 0,
-          emailSuffix: suffix.suffix,
-          id: `${product.productId}:${suffix.suffix}`,
-          publicInventory: suffix.publicAvailable ?? 0,
-          purchaseInventory: suffix.totalAvailable ?? 0,
-          suffix: `@${suffix.suffix}`,
-        }));
+      const suffixProducts =
+        product.productType === "random"
+          ? []
+          : (inventoryItem.suffixes ?? [])
+              .map((suffix) => ({
+                ...suffix,
+                suffix: String(suffix.suffix ?? "").replace(/^@/, ""),
+              }))
+              .filter((suffix) => suffix.suffix)
+              .map((suffix) => ({
+                ...baseProduct,
+                codeInventory: suffix.totalAvailable ?? 0,
+                emailSuffix: suffix.suffix,
+                id: `${product.productId}:${suffix.suffix}`,
+                publicInventory: suffix.publicAvailable ?? 0,
+                purchaseInventory: suffix.totalAvailable ?? 0,
+                suffix: `@${suffix.suffix}`,
+              }));
       return [baseProduct, ...suffixProducts];
     }),
   };

@@ -30,6 +30,7 @@ const (
 var (
 	errCandidateUnavailable = errors.New("allocation candidate unavailable")
 	errResourceRootBusy     = errors.New("allocation resource root busy")
+	errResourceTypeBusy     = errors.New("allocation resource type busy")
 )
 
 var pinyinMailboxNameParts = [...]string{
@@ -126,6 +127,7 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *d
 	}
 
 	var err error
+	preferredRandomProductType := coredomain.ProductType("")
 	attempts := candidateRetryCountValue()
 	if uc.repo.HasParentTx(ctx) {
 		// A nested retry would keep the parent wallet/resource locks and sleep in
@@ -135,6 +137,7 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *d
 	for attempt := 0; attempt < attempts; attempt++ {
 		result = nil
 		existingHit = false
+		conflictedRandomProductType := coredomain.ProductType("")
 		err = uc.repo.WithTx(ctx, func(txCtx context.Context) error {
 			existing, err := uc.repo.FindExistingAllocation(txCtx, cmd.OrderNo)
 			if err != nil {
@@ -154,7 +157,9 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *d
 				return domain.ErrProjectNotAllocatable
 			}
 			metricType = string(config.ProductType)
-			if config.ProductType == domain.AllocationTypeDomain && cmd.EmailSuffix != "" {
+			if config.ProductType == coredomain.ProductTypeRandom {
+				cmd.EmailSuffix = ""
+			} else if config.ProductType == coredomain.ProductTypeDomain && cmd.EmailSuffix != "" {
 				cmd.EmailSuffix, err = coredomain.NormalizeDomainTLD(cmd.EmailSuffix)
 				if err != nil {
 					return domain.ErrInvalidAllocationRequest
@@ -201,32 +206,66 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *d
 				}
 				return locked, err
 			}
+			productTypes := []coredomain.ProductType{config.ProductType}
+			if config.ProductType == coredomain.ProductTypeRandom {
+				productTypes = randomProductTypes(cmd.OrderNo, config.ProductID)
+				if preferredRandomProductType != "" && productTypes[0] != preferredRandomProductType {
+					productTypes[0], productTypes[1] = productTypes[1], productTypes[0]
+				}
+			}
+			sawResourceTypeBusy := false
 			for _, scope := range scopes {
 				attemptCmd := cmd
 				attemptCmd.SupplyScope = scope
-				switch config.ProductType {
-				case domain.AllocationTypeMicrosoft:
-					result, err = uc.allocateMicrosoft(txCtx, attemptCmd, *config)
-				case domain.AllocationTypeDomain:
-					result, err = uc.allocateDomain(txCtx, attemptCmd, *config)
-				default:
-					return domain.ErrProjectNotAllocatable
+				for _, productType := range productTypes {
+					switch productType {
+					case coredomain.ProductTypeMicrosoft:
+						result, err = uc.allocateMicrosoft(txCtx, attemptCmd, *config)
+					case coredomain.ProductTypeDomain:
+						result, err = uc.allocateDomain(txCtx, attemptCmd, *config)
+					default:
+						return domain.ErrProjectNotAllocatable
+					}
+					if err == nil {
+						return nil
+					}
+					if errors.Is(err, errResourceTypeBusy) {
+						if config.ProductType == coredomain.ProductTypeRandom {
+							sawResourceTypeBusy = true
+							continue
+						}
+						return domain.ErrAllocationConflict
+					}
+					if config.ProductType == coredomain.ProductTypeRandom && errors.Is(err, domain.ErrAllocationConflict) {
+						conflictedRandomProductType = productType
+					}
+					if !errors.Is(err, domain.ErrInsufficientInventory) {
+						return err
+					}
 				}
-				if err == nil {
-					return nil
-				}
-				if !errors.Is(err, domain.ErrInsufficientInventory) {
-					return err
-				}
+			}
+			if sawResourceTypeBusy {
+				return errResourceTypeBusy
 			}
 			return domain.ErrInsufficientInventory
 		})
-		if err == nil || (!errors.Is(err, domain.ErrInsufficientInventory) && !errors.Is(err, domain.ErrAllocationConflict)) {
+		if errors.Is(err, domain.ErrAllocationConflict) {
+			switch conflictedRandomProductType {
+			case coredomain.ProductTypeMicrosoft:
+				preferredRandomProductType = coredomain.ProductTypeDomain
+			case coredomain.ProductTypeDomain:
+				preferredRandomProductType = coredomain.ProductTypeMicrosoft
+			}
+		}
+		if err == nil || (!errors.Is(err, domain.ErrInsufficientInventory) && !errors.Is(err, domain.ErrAllocationConflict) && !errors.Is(err, errResourceTypeBusy)) {
 			break
 		}
 		if attempt < attempts-1 {
 			time.Sleep(candidateRetryDelay)
 		}
+	}
+	if errors.Is(err, errResourceTypeBusy) {
+		err = domain.ErrAllocationConflict
 	}
 	if err != nil {
 		return nil, err
@@ -1085,7 +1124,7 @@ func (uc *UseCase) allocateMicrosoftOnce(ctx context.Context, cmd AllocateComman
 		}
 	}
 	if resourceBusy {
-		return nil, domain.ErrAllocationConflict
+		return nil, errResourceTypeBusy
 	}
 	return nil, domain.ErrInsufficientInventory
 }
@@ -1298,7 +1337,7 @@ func (uc *UseCase) allocateDomainOnce(ctx context.Context, cmd AllocateCommand, 
 	}
 	result, err := uc.generateDomainMailboxOnce(ctx, cmd, config)
 	if errors.Is(err, domain.ErrInsufficientInventory) && resourceBusy {
-		return nil, domain.ErrAllocationConflict
+		return nil, errResourceTypeBusy
 	}
 	return result, err
 }
@@ -1414,7 +1453,7 @@ func (uc *UseCase) generateDomainMailboxOnce(ctx context.Context, cmd AllocateCo
 		return result, nil
 	}
 	if resourceBusy {
-		return nil, domain.ErrAllocationConflict
+		return nil, errResourceTypeBusy
 	}
 	return nil, domain.ErrInsufficientInventory
 }
@@ -1605,6 +1644,13 @@ func microsoftMailboxPreferences(orderNo string, config ProductAllocationConfig)
 		result = append(result, item.mailbox)
 	}
 	return result
+}
+
+func randomProductTypes(orderNo string, productID uint) []coredomain.ProductType {
+	if hash64(orderNo+"|"+strconv.Itoa(int(productID))+"|type")%2 == 0 {
+		return []coredomain.ProductType{coredomain.ProductTypeMicrosoft, coredomain.ProductTypeDomain}
+	}
+	return []coredomain.ProductType{coredomain.ProductTypeDomain, coredomain.ProductTypeMicrosoft}
 }
 
 func bucketProbeSequence(orderNo string, projectID uint, kind string, bucketCount uint16) []uint16 {

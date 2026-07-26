@@ -909,7 +909,9 @@ export default function AdminOrders() {
           mailboxOrder?.status === "active" && !mailboxOrder.verificationCode
         }
         email={mailboxOrder?.deliveryEmail}
-        fetchEnabled={mailboxOrder?.productType !== "domain"}
+        fetchEnabled={
+          (mailboxOrder?.allocationType ?? mailboxOrder?.productType) !== "domain"
+        }
         fetchKey={mailboxOrder?.orderNo}
         messages={mailboxMessages}
         onClose={closeOrderMailbox}

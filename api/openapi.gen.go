@@ -1691,6 +1691,7 @@ func (e OrderResponseFailureCode) Valid() bool {
 const (
 	OrderResponseProductTypeDomain    OrderResponseProductType = "domain"
 	OrderResponseProductTypeMicrosoft OrderResponseProductType = "microsoft"
+	OrderResponseProductTypeRandom    OrderResponseProductType = "random"
 )
 
 // Valid indicates whether the value is a known member of the OrderResponseProductType enum.
@@ -1699,6 +1700,8 @@ func (e OrderResponseProductType) Valid() bool {
 	case OrderResponseProductTypeDomain:
 		return true
 	case OrderResponseProductTypeMicrosoft:
+		return true
+	case OrderResponseProductTypeRandom:
 		return true
 	default:
 		return false
@@ -1925,6 +1928,7 @@ func (e ProjectBulkFilterAccessType) Valid() bool {
 const (
 	ProjectBulkFilterProductTypeDomain    ProjectBulkFilterProductType = "domain"
 	ProjectBulkFilterProductTypeMicrosoft ProjectBulkFilterProductType = "microsoft"
+	ProjectBulkFilterProductTypeRandom    ProjectBulkFilterProductType = "random"
 )
 
 // Valid indicates whether the value is a known member of the ProjectBulkFilterProductType enum.
@@ -1933,6 +1937,8 @@ func (e ProjectBulkFilterProductType) Valid() bool {
 	case ProjectBulkFilterProductTypeDomain:
 		return true
 	case ProjectBulkFilterProductTypeMicrosoft:
+		return true
+	case ProjectBulkFilterProductTypeRandom:
 		return true
 	default:
 		return false
@@ -2087,6 +2093,7 @@ func (e ProjectProductStatus) Valid() bool {
 const (
 	ProjectProductTypeDomain    ProjectProductType = "domain"
 	ProjectProductTypeMicrosoft ProjectProductType = "microsoft"
+	ProjectProductTypeRandom    ProjectProductType = "random"
 )
 
 // Valid indicates whether the value is a known member of the ProjectProductType enum.
@@ -2095,6 +2102,8 @@ func (e ProjectProductType) Valid() bool {
 	case ProjectProductTypeDomain:
 		return true
 	case ProjectProductTypeMicrosoft:
+		return true
+	case ProjectProductTypeRandom:
 		return true
 	default:
 		return false
@@ -2123,6 +2132,7 @@ func (e ProjectProductRequestStatus) Valid() bool {
 const (
 	ProjectProductRequestTypeDomain    ProjectProductRequestType = "domain"
 	ProjectProductRequestTypeMicrosoft ProjectProductRequestType = "microsoft"
+	ProjectProductRequestTypeRandom    ProjectProductRequestType = "random"
 )
 
 // Valid indicates whether the value is a known member of the ProjectProductRequestType enum.
@@ -2131,6 +2141,8 @@ func (e ProjectProductRequestType) Valid() bool {
 	case ProjectProductRequestTypeDomain:
 		return true
 	case ProjectProductRequestTypeMicrosoft:
+		return true
+	case ProjectProductRequestTypeRandom:
 		return true
 	default:
 		return false
@@ -2159,6 +2171,7 @@ func (e ProjectProductSummaryStatus) Valid() bool {
 const (
 	ProjectProductSummaryTypeDomain    ProjectProductSummaryType = "domain"
 	ProjectProductSummaryTypeMicrosoft ProjectProductSummaryType = "microsoft"
+	ProjectProductSummaryTypeRandom    ProjectProductSummaryType = "random"
 )
 
 // Valid indicates whether the value is a known member of the ProjectProductSummaryType enum.
@@ -2167,6 +2180,8 @@ func (e ProjectProductSummaryType) Valid() bool {
 	case ProjectProductSummaryTypeDomain:
 		return true
 	case ProjectProductSummaryTypeMicrosoft:
+		return true
+	case ProjectProductSummaryTypeRandom:
 		return true
 	default:
 		return false
@@ -3575,6 +3590,7 @@ func (e GetProjectsParamsAccessType) Valid() bool {
 const (
 	GetProjectsParamsProductTypeDomain    GetProjectsParamsProductType = "domain"
 	GetProjectsParamsProductTypeMicrosoft GetProjectsParamsProductType = "microsoft"
+	GetProjectsParamsProductTypeRandom    GetProjectsParamsProductType = "random"
 )
 
 // Valid indicates whether the value is a known member of the GetProjectsParamsProductType enum.
@@ -3583,6 +3599,8 @@ func (e GetProjectsParamsProductType) Valid() bool {
 	case GetProjectsParamsProductTypeDomain:
 		return true
 	case GetProjectsParamsProductTypeMicrosoft:
+		return true
+	case GetProjectsParamsProductTypeRandom:
 		return true
 	default:
 		return false
@@ -6217,7 +6235,7 @@ type PickupCredentialRequest struct {
 type ProductSuffixInventory struct {
 	PublicAvailable int64 `json:"publicAvailable"`
 
-	// Suffix Suffix without leading @. Microsoft products expose exact email domains; Domain products expose only aggregated public suffixes such as com, com.cn, or co.uk. Empty is not used here; callers use the parent product row for a random suffix.
+	// Suffix Suffix without leading @. Microsoft products expose exact email domains; Domain products expose aggregated public suffixes such as com, com.cn, or co.uk; Random products do not expose suffix entries.
 	Suffix         string `json:"suffix"`
 	TotalAvailable int64  `json:"totalAvailable"`
 }
@@ -6534,6 +6552,7 @@ type ProjectProductTypeFacets struct {
 	All       int `json:"all"`
 	Domain    int `json:"domain"`
 	Microsoft int `json:"microsoft"`
+	Random    int `json:"random"`
 }
 
 // ProjectStatusFacets defines model for ProjectStatusFacets.

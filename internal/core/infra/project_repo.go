@@ -579,7 +579,7 @@ func (r *ProjectRepo) BulkUpsertProductsWithLog(ctx context.Context, filter core
 	var affected int
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var projectIDs []uint
-		if err := r.projectListQueryWithDB(ctx, tx, filter).Pluck("projects.id", &projectIDs).Error; err != nil {
+		if err := r.projectListQueryWithDB(ctx, tx, filter).Clauses(clause.Locking{Strength: "UPDATE"}).Pluck("projects.id", &projectIDs).Error; err != nil {
 			return fmt.Errorf("list projects for bulk product update: %w", err)
 		}
 		models := make([]ProjectProductModel, 0, len(projectIDs)*len(products))
@@ -600,6 +600,33 @@ func (r *ProjectRepo) BulkUpsertProductsWithLog(ctx context.Context, filter core
 				}),
 			}).Create(&models).Error; err != nil {
 				return fmt.Errorf("bulk upsert project products: %w", err)
+			}
+			var finalModels []ProjectProductModel
+			if err := tx.WithContext(ctx).Where("project_id IN ?", projectIDs).Order("project_id ASC, id ASC").Find(&finalModels).Error; err != nil {
+				return fmt.Errorf("list bulk updated project products: %w", err)
+			}
+			finalProductsByProject := make(map[uint][]domain.Product, len(projectIDs))
+			for i := range finalModels {
+				product := finalModels[i].toDomain()
+				finalProductsByProject[product.ProjectID] = append(finalProductsByProject[product.ProjectID], product)
+			}
+			for _, projectID := range projectIDs {
+				finalProducts := finalProductsByProject[projectID]
+				if !domain.ApplyRandomProductPrices(finalProducts) {
+					return domain.ErrInvalidProduct
+				}
+				for i := range finalProducts {
+					if finalProducts[i].Type != domain.ProductTypeRandom {
+						continue
+					}
+					if err := tx.WithContext(ctx).Model(&ProjectProductModel{}).Where("id = ?", finalProducts[i].ID).Updates(map[string]any{
+						"code_price":     finalProducts[i].CodePrice,
+						"purchase_price": finalProducts[i].PurchasePrice,
+						"updated_at":     time.Now(),
+					}).Error; err != nil {
+						return fmt.Errorf("sync random product prices: %w", err)
+					}
+				}
 			}
 			if err := tx.WithContext(ctx).Model(&ProjectModel{}).Where("id IN ?", projectIDs).Update("updated_at", time.Now()).Error; err != nil {
 				return fmt.Errorf("touch bulk updated projects: %w", err)
@@ -725,6 +752,8 @@ func (r *ProjectRepo) Facets(ctx context.Context, filter coreapp.ProjectListFilt
 			facets.ProductType.Microsoft = row.Count
 		case domain.ProductTypeDomain:
 			facets.ProductType.Domain = row.Count
+		case domain.ProductTypeRandom:
+			facets.ProductType.Random = row.Count
 		}
 	}
 	return facets, nil

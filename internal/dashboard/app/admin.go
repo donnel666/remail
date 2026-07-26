@@ -341,10 +341,11 @@ func typeCountByBucket(rows []TypeCountBucket) (microsoft, domain map[string]int
 	microsoft = map[string]int{}
 	domain = map[string]int{}
 	for _, r := range rows {
-		if r.ProductType == "domain" {
-			domain[r.Bucket] = r.Count
-		} else {
+		switch r.ProductType {
+		case "microsoft":
 			microsoft[r.Bucket] = r.Count
+		case "domain":
+			domain[r.Bucket] = r.Count
 		}
 	}
 	return microsoft, domain
@@ -354,10 +355,11 @@ func typeReceiptByBucket(rows []TypeReceiptBucket) (microsoft, domain map[string
 	microsoft = map[string]TypeReceiptBucket{}
 	domain = map[string]TypeReceiptBucket{}
 	for _, r := range rows {
-		if r.ProductType == "domain" {
-			domain[r.Bucket] = r
-		} else {
+		switch r.ProductType {
+		case "microsoft":
 			microsoft[r.Bucket] = r
+		case "domain":
+			domain[r.Bucket] = r
 		}
 	}
 	return microsoft, domain

@@ -60,6 +60,10 @@ func TestNormalizeAllocationResultPreservesExistingHit(t *testing.T) {
 	require.Equal(t, "system_failed", normalizeAllocationResult("unexpected"))
 }
 
+func TestNormalizeAllocationTypeKeepsRandomFailuresVisible(t *testing.T) {
+	require.Equal(t, "random", normalizeAllocationType("random"))
+}
+
 func TestHTTPMetricsMiddlewareRecordsStatusClassAndLongDurationBuckets(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()

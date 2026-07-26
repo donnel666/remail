@@ -14,8 +14,8 @@ import (
 )
 
 const (
-	inventoryCacheKeyPrefix = "alloc:inventory:v4:"
-	inventoryCacheActiveKey = "alloc:inventory:v4:active"
+	inventoryCacheKeyPrefix = "alloc:inventory:v5:"
+	inventoryCacheActiveKey = "alloc:inventory:v5:active"
 )
 
 type InventoryCache struct {
@@ -270,6 +270,7 @@ func markProductUnavailable(totals *allocapp.ProjectProductInventoryTotals, req 
 	}
 	suffix := normalizeCandidateSuffix(req.EmailSuffix)
 	changed := false
+	removedTotal := int64(0)
 	for i := range totals.Items {
 		item := &totals.Items[i]
 		if item.ProductID != req.ProductID {
@@ -284,6 +285,7 @@ func markProductUnavailable(totals *allocapp.ProjectProductInventoryTotals, req 
 				}
 			} else {
 				changed = item.TotalAvailable != 0 || item.PublicAvailable != 0
+				removedTotal = item.TotalAvailable
 				item.TotalAvailable = 0
 				item.PublicAvailable = 0
 				for j := range item.Suffixes {
@@ -305,6 +307,7 @@ func markProductUnavailable(totals *allocapp.ProjectProductInventoryTotals, req 
 					entry.PublicAvailable = 0
 				} else {
 					changed = changed || entry.TotalAvailable != 0 || entry.PublicAvailable != 0
+					removedTotal += entry.TotalAvailable
 					entry.TotalAvailable = 0
 					entry.PublicAvailable = 0
 				}
@@ -324,9 +327,8 @@ func markProductUnavailable(totals *allocapp.ProjectProductInventoryTotals, req 
 	if !changed {
 		return false
 	}
-	totals.TotalAvailable = 0
-	for _, item := range totals.Items {
-		totals.TotalAvailable += item.TotalAvailable
+	if !req.PublicOnly {
+		totals.TotalAvailable = max(0, totals.TotalAvailable-removedTotal)
 	}
 	return true
 }

@@ -3663,7 +3663,7 @@ export interface components {
             projectLogoUrl?: string;
             projectProductId: number;
             /** @enum {string} */
-            productType: "microsoft" | "domain";
+            productType: "microsoft" | "domain" | "random";
             /** @enum {string} */
             serviceMode: "code" | "purchase";
             /** @enum {string} */
@@ -4804,7 +4804,7 @@ export interface components {
             accessType?: "public" | "private";
             looseMatch?: boolean;
             /** @enum {string} */
-            productType?: "microsoft" | "domain";
+            productType?: "microsoft" | "domain" | "random";
             search?: string;
             targetPlatform?: string;
             /** Format: date-time */
@@ -4845,7 +4845,7 @@ export interface components {
         };
         ProjectProductRequest: {
             /** @enum {string} */
-            type: "microsoft" | "domain";
+            type: "microsoft" | "domain" | "random";
             /**
              * @default enabled
              * @enum {string}
@@ -4904,6 +4904,7 @@ export interface components {
             all: number;
             microsoft: number;
             domain: number;
+            random: number;
         };
         ProjectItem: {
             id: number;
@@ -4935,7 +4936,7 @@ export interface components {
         ProjectProductSummary: {
             id: number;
             /** @enum {string} */
-            type: "microsoft" | "domain";
+            type: "microsoft" | "domain" | "random";
             /** @enum {string} */
             status: "enabled" | "disabled";
             codeEnabled: boolean;
@@ -4958,7 +4959,7 @@ export interface components {
             suffixes?: components["schemas"]["ProductSuffixInventory"][];
         };
         ProductSuffixInventory: {
-            /** @description Suffix without leading @. Microsoft products expose exact email domains; Domain products expose only aggregated public suffixes such as com, com.cn, or co.uk. Empty is not used here; callers use the parent product row for a random suffix. */
+            /** @description Suffix without leading @. Microsoft products expose exact email domains; Domain products expose aggregated public suffixes such as com, com.cn, or co.uk; Random products do not expose suffix entries. */
             suffix: string;
             /** Format: int64 */
             totalAvailable: number;
@@ -4969,7 +4970,7 @@ export interface components {
             id: number;
             projectId: number;
             /** @enum {string} */
-            type: "microsoft" | "domain";
+            type: "microsoft" | "domain" | "random";
             /** @enum {string} */
             status: "enabled" | "disabled";
             codeEnabled: boolean;
@@ -9288,7 +9289,7 @@ export interface operations {
                 status?: "reviewing" | "listed" | "delisted";
                 accessType?: "public" | "private";
                 looseMatch?: boolean;
-                productType?: "microsoft" | "domain";
+                productType?: "microsoft" | "domain" | "random";
                 search?: string;
                 targetPlatform?: string;
                 createdFrom?: string;

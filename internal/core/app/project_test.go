@@ -284,6 +284,81 @@ func TestProjectUseCaseSkipsHistoryScanWithoutMicrosoftProduct(t *testing.T) {
 	require.False(t, scanned)
 }
 
+func TestProjectUseCaseRandomProductSchedulesMicrosoftHistoryScan(t *testing.T) {
+	repo := &fakeProjectRepo{}
+	uc := NewProjectUseCase(repo)
+	scanned := false
+	uc.SetHistoryScan(func(context.Context, uint, string) error {
+		scanned = true
+		return nil
+	})
+	req := validProjectCreateRequest()
+	microsoftProduct := req.Products[0]
+	domainProduct := microsoftProduct
+	domainProduct.Type = "domain"
+	randomProduct := microsoftProduct
+	randomProduct.Type = "random"
+	req.Products = []ProjectProductRequest{microsoftProduct, domainProduct, randomProduct}
+
+	detail, err := uc.AdminCreateListed(context.Background(), 9, req, "req-random", "/v1/admin/projects")
+
+	require.NoError(t, err)
+	require.True(t, scanned)
+	require.Equal(t, 1, detail.Products[2].MainWeight)
+	require.Equal(t, 1, detail.Products[2].DotWeight)
+	require.Equal(t, 1, detail.Products[2].PlusWeight)
+}
+
+func TestProjectUseCaseRejectsRandomProductWithoutBothPriceSources(t *testing.T) {
+	uc := NewProjectUseCase(&fakeProjectRepo{})
+	req := validProjectCreateRequest()
+	req.Products[0].Type = "random"
+
+	_, err := uc.AdminCreateListed(context.Background(), 9, req, "req-random", "/v1/admin/projects")
+
+	require.ErrorIs(t, err, domain.ErrInvalidProduct)
+}
+
+func TestRandomProductUsesLowestDisplayPriceAndKeepsAllocationPrices(t *testing.T) {
+	repo := &fakeProjectRepo{detail: &domain.ProjectDetail{
+		Project: domain.Project{ID: 1, Status: domain.ProjectStatusListed},
+		Products: []domain.Product{
+			{ID: 1, ProjectID: 1, Type: domain.ProductTypeMicrosoft, Status: domain.ProductStatusEnabled, CodePrice: "0.12", PurchasePrice: "0.20"},
+			{ID: 2, ProjectID: 1, Type: domain.ProductTypeDomain, Status: domain.ProductStatusEnabled, CodePrice: "0.08", PurchasePrice: "0.30"},
+			{
+				ID: 3, ProjectID: 1, Type: domain.ProductTypeRandom, Status: domain.ProductStatusEnabled,
+				CodeEnabled: true, PurchaseEnabled: true, CodePrice: "0.99", PurchasePrice: "0.99",
+				CodeSupplierPrice: "0", PurchaseSupplierPrice: "0", CodeWindowMinutes: 10,
+				ActivationWindowMinutes: 60, WarrantyMinutes: 60,
+			},
+		},
+	}}
+	uc := NewProjectUseCase(repo)
+
+	detail, err := uc.Get(context.Background(), 1, 7, false)
+	require.NoError(t, err)
+	require.Equal(t, "0.08", detail.Products[2].CodePrice)
+	require.Equal(t, "0.20", detail.Products[2].PurchasePrice)
+
+	for _, test := range []struct {
+		mode                string
+		wantPay             string
+		wantMicrosoftAmount string
+		wantDomainAmount    string
+	}{
+		{mode: "code", wantPay: "0.08", wantMicrosoftAmount: "0.12", wantDomainAmount: "0.08"},
+		{mode: "purchase", wantPay: "0.20", wantMicrosoftAmount: "0.20", wantDomainAmount: "0.30"},
+	} {
+		t.Run(test.mode, func(t *testing.T) {
+			quote, err := uc.GetOrderingQuote(context.Background(), 1, 3, 7, test.mode)
+			require.NoError(t, err)
+			require.Equal(t, test.wantPay, quote.PayAmount)
+			require.Equal(t, test.wantMicrosoftAmount, quote.MicrosoftPayAmount)
+			require.Equal(t, test.wantDomainAmount, quote.DomainPayAmount)
+		})
+	}
+}
+
 func TestProjectUseCaseAdminUpdatePreservesDisabledHistoricalProduct(t *testing.T) {
 	repo := &fakeProjectRepo{}
 	uc := NewProjectUseCase(repo)

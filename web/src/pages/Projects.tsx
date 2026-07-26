@@ -274,7 +274,7 @@ function ProjectAvatar({
 function minProductPrice(products: ProjectProductSummary[], field: "codePrice" | "purchasePrice") {
   const prices = products
     .map((product) => Number(product[field]))
-    .filter((value) => Number.isFinite(value) && value > 0);
+    .filter((value) => Number.isFinite(value) && value >= 0);
   if (prices.length === 0) return "";
   return money(String(Math.min(...prices)));
 }
@@ -785,6 +785,7 @@ function ProjectSquareSidebar({
             value: "microsoft",
           },
           { count: productTypeCounts.domain, label: t("Domain email"), value: "domain" },
+          { count: productTypeCounts.random, label: t("Random email"), value: "random" },
         ]}
         onChange={onProductTypeChange}
         title={t("Product type")}
@@ -1125,6 +1126,7 @@ export default function Projects() {
     all: 0,
     domain: 0,
     microsoft: 0,
+    random: 0,
   });
   const [statusCounts, setStatusCounts] = useState<Record<StatusFilter, number>>({
     all: 0,
@@ -1173,6 +1175,7 @@ export default function Projects() {
         all: facets?.productType.all ?? listResponse.total,
         domain: facets?.productType.domain ?? 0,
         microsoft: facets?.productType.microsoft ?? 0,
+        random: facets?.productType.random ?? 0,
       });
       return { items: listResponse.items, total: listResponse.total };
     },

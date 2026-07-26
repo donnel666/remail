@@ -10,7 +10,7 @@ export type OrderStatus =
   | "refunded"
   | "failed"
   | "closed";
-export type ProductType = "microsoft" | "domain";
+export type ProductType = "microsoft" | "domain" | "random";
 export type ServiceMode = "purchase" | "code";
 export type ServiceState =
   | "waiting_mail"

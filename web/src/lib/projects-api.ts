@@ -40,7 +40,7 @@ export interface ProjectListFilter {
   createdFrom?: string;
   createdTo?: string;
   looseMatch?: boolean;
-  productType?: "microsoft" | "domain";
+  productType?: "microsoft" | "domain" | "random";
   scope?: "visible" | "mine" | "all";
   search?: string;
   status?: "reviewing" | "listed" | "delisted";

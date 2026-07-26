@@ -74,10 +74,12 @@ func TestAdminDashboardAssembly(t *testing.T) {
 		codeOrder: []TypeCountBucket{
 			{Bucket: keys[0], ProductType: "microsoft", Count: 6},
 			{Bucket: keys[0], ProductType: "domain", Count: 2},
+			{Bucket: keys[0], ProductType: "random", Count: 99},
 		},
 		receipts: []TypeReceiptBucket{
 			{Bucket: keys[0], ProductType: "microsoft", Received: 5, AvgSeconds: 20},
 			{Bucket: keys[0], ProductType: "domain", Received: 2, AvgSeconds: 40},
+			{Bucket: keys[0], ProductType: "random", Received: 99, AvgSeconds: 1},
 		},
 		newUsers:   []CountBucket{{Bucket: keys[0], Count: 3}, {Bucket: keys[1], Count: 2}},
 		active:     []CountBucket{{Bucket: keys[0], Count: 7}, {Bucket: keys[2], Count: 5}},
