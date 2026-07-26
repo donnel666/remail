@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/donnel666/remail/internal/systemsettings/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 // Repository persists generic system settings.
@@ -20,4 +21,8 @@ type Repository interface {
 // persisted runtime settings snapshot from the database.
 type RuntimeSettingsPublisher interface {
 	Publish(ctx context.Context) error
+}
+
+type AnnouncementPublisher interface {
+	PublishAnnouncements(ctx context.Context, announcements []runtimeconfig.Announcement) error
 }

@@ -5,6 +5,7 @@ import (
 	billinginfra "github.com/donnel666/remail/internal/billing/infra"
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
+	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	"github.com/hibiken/asynq"
 	"gorm.io/gorm"
 )
@@ -44,4 +45,9 @@ func (m *BillingModule) SetUserSelectionResolver(r billingapp.UserSelectionResol
 func (m *BillingModule) SetUserDirectory(d billingapp.UserDirectory) {
 	m.UserDirectory = d
 	m.WalletUseCase.SetUserDirectory(d)
+}
+
+func (m *BillingModule) SetMailDelivery(delivery mailapp.DeliveryPort) {
+	m.WalletUseCase.SetMailDelivery(delivery)
+	m.RechargeUseCase.SetNotifications(delivery, m.UserDirectory, m.WalletUseCase)
 }

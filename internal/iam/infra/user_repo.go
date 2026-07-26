@@ -857,6 +857,7 @@ type userSummaryRow struct {
 	ID        uint
 	Email     string
 	Nickname  string
+	Status    string
 	Role      string
 	GroupID   uint
 	GroupName string
@@ -867,13 +868,14 @@ func (row userSummaryRow) toDomain() domain.UserSummary {
 		ID:        row.ID,
 		Email:     row.Email,
 		Nickname:  row.Nickname,
+		Status:    domain.UserStatus(row.Status),
 		Role:      row.Role,
 		GroupID:   row.GroupID,
 		GroupName: row.GroupName,
 	}
 }
 
-const userSummarySelect = "u.id AS id, u.email AS email, u.nickname AS nickname, u.role AS role, u.user_group_id AS group_id, g.name AS group_name"
+const userSummarySelect = "u.id AS id, u.email AS email, u.nickname AS nickname, u.status AS status, u.role AS role, u.user_group_id AS group_id, g.name AS group_name"
 
 // LookupUserSummaries batch-loads compact user summaries keyed by id in a single
 // join query. Missing ids are simply absent from the map.

@@ -8,6 +8,7 @@ import (
 	"html"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/donnel666/remail/internal/mailtransport/domain"
 )
@@ -31,19 +32,123 @@ func VerificationCodeMessage(recipient, code string) domain.OutboundMessage {
 	}
 }
 
+func BalanceWarningMessage(recipient, balance, threshold string, cycle uint64) domain.OutboundMessage {
+	recipient = strings.TrimSpace(recipient)
+	body := fmt.Sprintf("当前余额：￥%s\n预警档位：≤￥%s\n请及时充值，以免影响服务使用。", balance, threshold)
+	return notificationMessage(
+		domain.PurposeSystemNotice,
+		messageDigest("balance_warning", recipient, cycle, threshold),
+		recipient,
+		"ReMail 余额不足预警",
+		"余额不足预警",
+		"您的账户余额已到达预警档位。",
+		body,
+		"充值到账后，各档位的预警次数将自动重置。",
+	)
+}
+
+func RechargeCreditedMessage(recipient, rechargeNo, amount, balance string) domain.OutboundMessage {
+	recipient = strings.TrimSpace(recipient)
+	body := fmt.Sprintf("充值金额：￥%s\n到账后余额：￥%s\n充值单号：%s", amount, balance, rechargeNo)
+	return notificationMessage(
+		domain.PurposeSystemNotice,
+		messageDigest("recharge_credited", recipient, rechargeNo),
+		recipient,
+		"ReMail 充值到账通知",
+		"充值到账",
+		"您的充值已成功到账。",
+		body,
+		"如对本次充值有疑问，请联系平台管理员。",
+	)
+}
+
+func LoginNotificationMessage(recipient, sessionID, clientIP, userAgent string, at time.Time) domain.OutboundMessage {
+	recipient = strings.TrimSpace(recipient)
+	clientIP = oneLine(clientIP, 64)
+	userAgent = oneLine(userAgent, 240)
+	if clientIP == "" {
+		clientIP = "未知"
+	}
+	if userAgent == "" {
+		userAgent = "未知设备"
+	}
+	location := time.FixedZone("Asia/Shanghai", 8*60*60)
+	body := fmt.Sprintf("登录时间：%s\n登录 IP：%s\n设备：%s", at.In(location).Format("2006-01-02 15:04:05 MST"), clientIP, userAgent)
+	return notificationMessage(
+		domain.PurposeSecurityNotice,
+		messageDigest("login", recipient, sessionID),
+		recipient,
+		"ReMail 登录通知",
+		"账户登录通知",
+		"您的 ReMail 账户刚刚完成登录。",
+		body,
+		"若非本人操作，请立即修改密码并联系平台管理员。",
+	)
+}
+
+func AnnouncementMessage(recipient string, announcementID int64, title, content string) domain.OutboundMessage {
+	recipient = strings.TrimSpace(recipient)
+	title = bodyValue(title)
+	return notificationMessage(
+		domain.PurposeSystemNotice,
+		messageDigest("announcement", announcementID, recipient),
+		recipient,
+		"ReMail 系统公告："+title,
+		title,
+		"平台发布了新的系统公告。",
+		strings.TrimSpace(content),
+		"此邮件由系统自动发送，请勿直接回复。",
+	)
+}
+
 func verificationCodePlainText(code string) string {
 	return fmt.Sprintf("您的 ReMail 邮箱验证码是：%s\r\n验证码 10 分钟内有效。若非本人操作，请忽略本邮件。\r\n\r\nRemail，轻松收码\r\n让闲置邮箱，重新热起来\r\n", code)
 }
 
 func verificationCodeHTML(code string) string {
 	code = html.EscapeString(code)
+	return brandedHTML(
+		"ReMail 邮箱验证码",
+		"邮箱验证码",
+		"请输入下方验证码完成本次操作。",
+		fmt.Sprintf(`<div style="font-size:32px;line-height:40px;font-weight:700;color:#111827;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:18px 20px;text-align:center;margin:0 0 20px;">%s</div>`, code),
+		"验证码 10 分钟内有效。若非本人操作，请忽略本邮件。",
+	)
+}
+
+func notificationMessage(purpose domain.OutboundPurpose, idempotencyKey, recipient, subject, heading, intro, content, note string) domain.OutboundMessage {
+	return domain.OutboundMessage{
+		IdempotencyKey: idempotencyKey,
+		Purpose:        purpose,
+		To:             recipient,
+		Subject:        bodyValue(subject),
+		TextBody:       notificationPlainText(heading, intro, content, note),
+		HTMLBody:       brandedHTML(subject, heading, intro, notificationPanelHTML(content), note),
+	}
+}
+
+func notificationPlainText(heading, intro, content, note string) string {
+	return fmt.Sprintf("%s\r\n\r\n%s\r\n\r\n%s\r\n\r\n%s\r\n\r\nRemail，轻松收码\r\n让闲置邮箱，重新热起来\r\n", heading, intro, content, note)
+}
+
+func notificationPanelHTML(content string) string {
+	content = html.EscapeString(strings.TrimSpace(content))
+	content = strings.ReplaceAll(content, "\n", "<br>")
+	return `<div style="font-size:15px;line-height:24px;color:#374151;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:18px 20px;margin:0 0 20px;">` + content + `</div>`
+}
+
+func brandedHTML(documentTitle, heading, intro, contentHTML, note string) string {
+	documentTitle = html.EscapeString(documentTitle)
+	heading = html.EscapeString(heading)
+	intro = html.EscapeString(intro)
+	note = html.EscapeString(note)
 	logo := html.EscapeString(logoDataURI())
 	return fmt.Sprintf(`<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ReMail 邮箱验证码</title>
+  <title>%s</title>
   <style>
     @keyframes sweep-shine {
       0%% { background-position: 200%% 0; }
@@ -104,10 +209,10 @@ func verificationCodeHTML(code string) string {
           <tr>
             <td style="padding:32px 32px 28px;">
               <img src="%s" alt="Remail" width="48" height="50" style="display:block;width:48px;height:50px;border:0;margin:0 0 18px;">
-              <h1 style="font-size:22px;line-height:30px;font-weight:700;color:#111827;margin:0 0 10px;">邮箱验证码</h1>
-              <p style="font-size:15px;line-height:24px;color:#4b5563;margin:0 0 24px;">请输入下方验证码完成本次操作。</p>
-              <div style="font-size:32px;line-height:40px;font-weight:700;color:#111827;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:18px 20px;text-align:center;margin:0 0 20px;">%s</div>
-              <p style="font-size:14px;line-height:22px;color:#6b7280;margin:0;">验证码 10 分钟内有效。若非本人操作，请忽略本邮件。</p>
+              <h1 style="font-size:22px;line-height:30px;font-weight:700;color:#111827;margin:0 0 10px;">%s</h1>
+              <p style="font-size:15px;line-height:24px;color:#4b5563;margin:0 0 24px;">%s</p>
+              %s
+              <p style="font-size:14px;line-height:22px;color:#6b7280;margin:0;">%s</p>
             </td>
           </tr>
           <tr>
@@ -128,7 +233,16 @@ func verificationCodeHTML(code string) string {
     </tr>
   </table>
 </body>
-</html>`, logo, code)
+</html>`, documentTitle, logo, heading, intro, contentHTML, note)
+}
+
+func oneLine(value string, maxLen int) string {
+	value = strings.Join(strings.Fields(value), " ")
+	runes := []rune(value)
+	if len(runes) > maxLen {
+		return string(runes[:maxLen])
+	}
+	return value
 }
 
 func bodyValue(value string) string {

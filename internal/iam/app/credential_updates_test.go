@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/donnel666/remail/internal/iam/domain"
+	maildomain "github.com/donnel666/remail/internal/mailtransport/domain"
 	"github.com/stretchr/testify/require"
 )
 
@@ -17,6 +18,13 @@ type credentialRepoStub struct {
 	updateOK     bool
 	expectedHash string
 	newHash      string
+}
+
+type loginDeliveryStub struct{ messages []maildomain.OutboundMessage }
+
+func (s *loginDeliveryStub) Send(_ context.Context, message maildomain.OutboundMessage) error {
+	s.messages = append(s.messages, message)
+	return nil
 }
 
 func (r *credentialRepoStub) FindByEmail(context.Context, string) (*domain.User, error) {
@@ -75,6 +83,21 @@ func TestLoginUsesCurrentAuthorizationStateAfterCredentialCheck(t *testing.T) {
 	require.Equal(t, domain.RoleSupplier, result.User.Role)
 	require.Equal(t, domain.RoleSupplier, sessions.created.Role)
 	require.Equal(t, 4, sessions.created.TokenVersion)
+}
+
+func TestLoginSendsSecurityNotification(t *testing.T) {
+	repo := &credentialRepoStub{
+		byEmail:  &domain.User{ID: 7, Email: "user@test.com", PasswordHash: "old-hash", Status: domain.UserStatusActive},
+		recorded: &domain.User{ID: 7, Email: "user@test.com", PasswordHash: "old-hash", Status: domain.UserStatusActive},
+	}
+	delivery := &loginDeliveryStub{}
+	_, err := NewLoginUseCase(repo, credentialHasherStub{}, &credentialSessionStoreStub{}, delivery).
+		Login(context.Background(), "user@test.com", "correct", LoginMeta{ClientIP: "203.0.113.8", UserAgent: "Test Browser"})
+
+	require.NoError(t, err)
+	require.Len(t, delivery.messages, 1)
+	require.Equal(t, maildomain.PurposeSecurityNotice, delivery.messages[0].Purpose)
+	require.Contains(t, delivery.messages[0].TextBody, "203.0.113.8")
 }
 
 func TestLoginDoesNotCreateSessionWhenCredentialSnapshotBecameStale(t *testing.T) {

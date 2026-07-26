@@ -57,6 +57,12 @@ func TestBillingRepoRedeemCardMySQL(t *testing.T) {
 	ctx := context.Background()
 	userID := createBillingTestUser(t, db, "buyer@example.com")
 	repo := NewBillingRepo(db)
+	_, err := repo.GetOrCreateWalletSummary(ctx, userID)
+	require.NoError(t, err)
+	require.NoError(t, db.Model(&WalletModel{}).Where("user_id = ?", userID).Updates(map[string]any{
+		"balance_warning_level": 3,
+		"balance_warning_cycle": 8,
+	}).Error)
 
 	require.NoError(t, db.Create(&CardKeyModel{
 		Key:            "CARD-001",
@@ -78,6 +84,11 @@ func TestBillingRepoRedeemCardMySQL(t *testing.T) {
 	require.Equal(t, "25.50", result.Transaction.Amount)
 	require.Equal(t, domain.TransactionTypeCardRedeem, result.Transaction.TransactionType)
 	require.Equal(t, 1, result.Card.RedeemedCount)
+	require.False(t, result.Replayed)
+	var warningState WalletModel
+	require.NoError(t, db.Select("balance_warning_level", "balance_warning_cycle").First(&warningState, "user_id = ?", userID).Error)
+	require.Equal(t, 0, warningState.BalanceWarningLevel)
+	require.Equal(t, uint64(9), warningState.BalanceWarningCycle)
 
 	summary, err := repo.GetOrCreateWalletSummary(ctx, userID)
 	require.NoError(t, err)
@@ -94,6 +105,7 @@ func TestBillingRepoRedeemCardMySQL(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, result.Transaction.TransactionNo, replay.Transaction.TransactionNo)
 	require.Equal(t, "25.50", replay.Wallet.ConsumerBalance)
+	require.True(t, replay.Replayed)
 
 	_, err = repo.RedeemCard(ctx, billingapp.RedeemCardCommand{
 		UserID:             userID,
@@ -948,6 +960,10 @@ func TestBillingRepoCreditRechargeExactlyOnceMySQL(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, "RC-EXACTLY-ONCE", created.RechargeNo)
+	require.NoError(t, db.Model(&WalletModel{}).Where("user_id = ?", userID).Updates(map[string]any{
+		"balance_warning_level": 3,
+		"balance_warning_cycle": 8,
+	}).Error)
 
 	start := make(chan struct{})
 	errorsFound := make(chan error, 2)
@@ -972,6 +988,10 @@ func TestBillingRepoCreditRechargeExactlyOnceMySQL(t *testing.T) {
 		Where("user_id = ? AND transaction_type = ? AND biz_id = ?", userID, domain.TransactionTypeRecharge, created.RechargeNo).
 		Count(&transactionCount).Error)
 	require.EqualValues(t, 1, transactionCount)
+	var warningState WalletModel
+	require.NoError(t, db.Select("balance_warning_level", "balance_warning_cycle").First(&warningState, "user_id = ?", userID).Error)
+	require.Equal(t, 0, warningState.BalanceWarningLevel)
+	require.Equal(t, uint64(9), warningState.BalanceWarningCycle)
 
 	second, err := repo.CreateRecharge(ctx, billingapp.CreateRechargeCommand{
 		Recharge: domain.Recharge{

@@ -12,7 +12,10 @@ import (
 	"github.com/hibiken/asynq"
 )
 
-const rechargeDispatcherInterval = time.Second
+const (
+	rechargeDispatcherInterval       = time.Second
+	balanceWarningDispatcherInterval = 5 * time.Second
+)
 
 func RegisterBillingTaskHandlers(mux *asynq.ServeMux, module *BillingModule) func(context.Context) {
 	mux.HandleFunc(billinginfra.TypeRechargeReconcile, func(ctx context.Context, task *asynq.Task) error {
@@ -34,6 +37,7 @@ func RegisterBillingTaskHandlers(mux *asynq.ServeMux, module *BillingModule) fun
 		defer close(done)
 		ticker := time.NewTicker(rechargeDispatcherInterval)
 		defer ticker.Stop()
+		balanceLast := time.Now()
 		dispatch := func() {
 			if err := module.RechargeUseCase.Dispatch(ctx); err != nil && ctx.Err() == nil {
 				slog.Warn("recharge dispatcher failed", "error", err)
@@ -46,6 +50,12 @@ func RegisterBillingTaskHandlers(mux *asynq.ServeMux, module *BillingModule) fun
 				return
 			case <-ticker.C:
 				dispatch()
+				if module.WalletUseCase != nil && time.Since(balanceLast) >= balanceWarningDispatcherInterval {
+					if err := module.WalletUseCase.DispatchBalanceWarnings(ctx, 100); err != nil && ctx.Err() == nil {
+						slog.Warn("balance warning dispatcher failed", "error", err)
+					}
+					balanceLast = time.Now()
+				}
 			}
 		}
 	}()

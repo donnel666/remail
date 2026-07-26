@@ -5,11 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"log/slog"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/donnel666/remail/internal/billing/domain"
+	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/shopspring/decimal"
 )
@@ -98,11 +100,14 @@ type RechargeRepository interface {
 }
 
 type RechargeUseCase struct {
-	repo    RechargeRepository
-	config  RechargeConfigProvider
-	gateway RechargeGateway
-	queue   RechargeQueue
-	now     func() time.Time
+	repo     RechargeRepository
+	config   RechargeConfigProvider
+	gateway  RechargeGateway
+	queue    RechargeQueue
+	delivery mailapp.DeliveryPort
+	users    UserDirectory
+	wallets  *WalletUseCase
+	now      func() time.Time
 }
 
 type RechargeConfigResult struct {
@@ -111,6 +116,10 @@ type RechargeConfigResult struct {
 	FeeRate   string
 	FeeCap    string
 	Tiers     []RechargeTierResult
+}
+
+func (uc *RechargeUseCase) SetNotifications(delivery mailapp.DeliveryPort, users UserDirectory, wallets *WalletUseCase) {
+	uc.delivery, uc.users, uc.wallets = delivery, users, wallets
 }
 
 type RechargeTierResult struct {
@@ -340,7 +349,7 @@ func (uc *RechargeUseCase) Reconcile(ctx context.Context, task RechargeTask) err
 		return uc.repo.FailRecharge(ctx, recharge.RechargeNo, generation, "query_timeout", queriedAt)
 	}
 	if query.Paid {
-		_, err := uc.repo.CreditRecharge(ctx, CreditRechargeCommand{
+		credited, err := uc.repo.CreditRecharge(ctx, CreditRechargeCommand{
 			RechargeNo: recharge.RechargeNo, GatewayTradeNo: query.GatewayTrade,
 			PaidAt: query.PaidAt, QueriedAt: queriedAt,
 		})
@@ -350,12 +359,31 @@ func (uc *RechargeUseCase) Reconcile(ctx context.Context, task RechargeTask) err
 		if errors.Is(err, domain.ErrRechargeExpired) {
 			return nil
 		}
+		if err == nil {
+			uc.notifyRechargeCredited(ctx, credited)
+		}
 		return err
 	}
 	if query.Terminal {
 		return uc.repo.FailRecharge(ctx, recharge.RechargeNo, generation, "gateway_status", queriedAt)
 	}
 	return uc.repo.RecordRechargeQuery(ctx, recharge.RechargeNo, generation, queriedAt)
+}
+
+func (uc *RechargeUseCase) notifyRechargeCredited(ctx context.Context, recharge *domain.Recharge) {
+	if uc == nil || uc.delivery == nil || uc.users == nil || uc.wallets == nil || recharge == nil {
+		return
+	}
+	wallet, err := uc.wallets.GetWallet(ctx, recharge.UserID)
+	if err == nil {
+		err = sendRechargeCreditedNotification(
+			ctx, uc.delivery, uc.users, recharge.UserID,
+			recharge.RechargeNo, recharge.RechargeQuota, wallet.Wallet.ConsumerBalance,
+		)
+	}
+	if err != nil {
+		slog.Warn("send recharge notification failed", "user_id", recharge.UserID, "recharge_no", recharge.RechargeNo, "error", err)
+	}
 }
 
 func (uc *RechargeUseCase) currentConfig() (RechargeConfig, error) {

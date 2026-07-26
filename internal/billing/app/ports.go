@@ -6,11 +6,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/donnel666/remail/internal/billing/domain"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
+	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	"github.com/donnel666/remail/internal/platform"
 )
 
@@ -25,6 +27,8 @@ type WalletRepository interface {
 	CountRecharges(ctx context.Context, filter RechargeListFilter) (int64, error)
 	RedeemCard(ctx context.Context, req RedeemCardCommand) (*RedeemCardResult, error)
 	AdjustConsumerBalance(ctx context.Context, req AdjustConsumerBalanceCommand) (*AdjustBalanceResult, error)
+	ClaimBalanceWarnings(ctx context.Context, limit int) ([]BalanceWarningClaim, error)
+	ReleaseBalanceWarning(ctx context.Context, claim BalanceWarningClaim) error
 	ListCards(ctx context.Context, filter CardListFilter, offset, limit int) ([]domain.CardKey, error)
 	CountCards(ctx context.Context, filter CardListFilter) (int64, error)
 	CreateCards(ctx context.Context, req CreateCardsCommand) ([]domain.CardKey, error)
@@ -52,6 +56,7 @@ type UserDirectoryEntry struct {
 	UserID    uint
 	Email     string
 	Nickname  string
+	Status    string
 	Role      string
 	GroupName string
 	GroupID   uint
@@ -135,6 +140,7 @@ type RedeemCardResult struct {
 	Wallet      domain.Wallet
 	Transaction domain.Transaction
 	Card        domain.CardKey
+	Replayed    bool `json:"-"`
 }
 
 type AdjustConsumerBalanceRequest struct {
@@ -199,9 +205,10 @@ type UpdateCardRequest struct {
 type UpdateCardCommand = UpdateCardRequest
 
 type WalletUseCase struct {
-	repo  WalletRepository
-	users UserDirectory
-	now   func() time.Time
+	repo     WalletRepository
+	users    UserDirectory
+	delivery mailapp.DeliveryPort
+	now      func() time.Time
 }
 
 const (
@@ -290,7 +297,7 @@ func (uc *WalletUseCase) RedeemCard(ctx context.Context, req RedeemCardRequest) 
 		return nil, domain.ErrIdempotencyRequired
 	}
 	fingerprint := fingerprint("cards.redeem", req.UserID, cardKey)
-	return uc.repo.RedeemCard(ctx, RedeemCardCommand{
+	result, err := uc.repo.RedeemCard(ctx, RedeemCardCommand{
 		UserID:             req.UserID,
 		CardKey:            cardKey,
 		IdempotencyKey:     idempotencyKey,
@@ -298,6 +305,15 @@ func (uc *WalletUseCase) RedeemCard(ctx context.Context, req RedeemCardRequest) 
 		RequestID:          strings.TrimSpace(req.RequestID),
 		Now:                uc.now(),
 	})
+	if err == nil && result != nil && !result.Replayed {
+		if notifyErr := sendRechargeCreditedNotification(
+			ctx, uc.delivery, uc.users, req.UserID,
+			result.Transaction.TransactionNo, result.Transaction.Amount, result.Wallet.ConsumerBalance,
+		); notifyErr != nil {
+			slog.Warn("send card redemption notification failed", "user_id", req.UserID, "error", notifyErr)
+		}
+	}
+	return result, err
 }
 
 func (uc *WalletUseCase) CreditConsumer(ctx context.Context, req AdjustConsumerBalanceRequest) (*AdjustBalanceResult, error) {

@@ -135,6 +135,9 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		if err != nil {
 			return nil, cleanup, err
 		}
+		announcementMail := announcementMailer{users: iamMod.Users, delivery: mailMod.DeliveryUseCase, client: p.Asynq}
+		systemSettingsMod.Settings.SetAnnouncementPublisher(announcementMail)
+		registerSystemEmailTaskHandlers(taskMux, announcementMail)
 		iamapi.RegisterIAMRoutes(v1, iamMod, p.SessionSecure)
 
 		// Generic administrator-managed system settings.
@@ -177,6 +180,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		billingMod := billingapi.NewBillingModule(p.DB, p.Asynq)
 		billingMod.SetUserSelectionResolver(iamMod.AdminUserSelectionResolver)
 		billingMod.SetUserDirectory(financeUserDirectory{users: iamMod.Users})
+		billingMod.SetMailDelivery(mailMod.DeliveryUseCase)
 		iamMod.RegistrationUseCase.SetRegistrationRewardWallet(billingMod.WalletUseCase)
 		billingapi.RegisterBillingRoutes(v1, billingMod, iamSessionFetcher, iamMod.PermissionChecker)
 		cleanupFuncs = append(cleanupFuncs, billingapi.RegisterBillingTaskHandlers(taskMux, billingMod))

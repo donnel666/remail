@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -21,10 +22,11 @@ var settingKeyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,190}$`
 // SystemSettingsUseCase handles the small amount of normalization required at
 // the administrator API boundary before delegating persistence to the repo.
 type SystemSettingsUseCase struct {
-	repo      Repository
-	logs      governanceapp.OperationLogPort
-	publisher RuntimeSettingsPublisher
-	mu        sync.Mutex
+	repo          Repository
+	logs          governanceapp.OperationLogPort
+	publisher     RuntimeSettingsPublisher
+	announcements AnnouncementPublisher
+	mu            sync.Mutex
 }
 
 type MutationMeta struct {
@@ -43,6 +45,12 @@ func (uc *SystemSettingsUseCase) SetRuntimeSettingsPublisher(publisher RuntimeSe
 	}
 }
 
+func (uc *SystemSettingsUseCase) SetAnnouncementPublisher(publisher AnnouncementPublisher) {
+	if uc != nil {
+		uc.announcements = publisher
+	}
+}
+
 func (uc *SystemSettingsUseCase) List(ctx context.Context) ([]domain.Setting, error) {
 	return uc.repo.List(ctx)
 }
@@ -57,6 +65,13 @@ func (uc *SystemSettingsUseCase) Get(ctx context.Context, key string) (*domain.S
 
 func (uc *SystemSettingsUseCase) Upsert(ctx context.Context, key, value string, meta MutationMeta) (*domain.Setting, error) {
 	uc.mu.Lock()
+	var published []runtimeconfig.Announcement
+	committed := false
+	defer func() {
+		if committed {
+			uc.publishAnnouncements(ctx, published)
+		}
+	}()
 	defer uc.mu.Unlock()
 	key, err := normalizeKey(key)
 	if err != nil {
@@ -84,6 +99,7 @@ func (uc *SystemSettingsUseCase) Upsert(ctx context.Context, key, value string, 
 		if err := runtimeconfig.ValidatePersistedUpdates(persisted, []domain.Setting{update}); err != nil {
 			return err
 		}
+		published = newlyPublishedAnnouncements(persisted, []domain.Setting{update}, time.Now())
 		setting, err = uc.repo.Upsert(txCtx, key, value)
 		return err
 	})
@@ -92,11 +108,19 @@ func (uc *SystemSettingsUseCase) Upsert(ctx context.Context, key, value string, 
 	}
 	runtimeconfig.Set(setting.Key, setting.Value)
 	uc.publishRuntimeSettings(ctx)
+	committed = true
 	return setting, nil
 }
 
 func (uc *SystemSettingsUseCase) BulkUpsert(ctx context.Context, settings []domain.Setting, meta MutationMeta) ([]domain.Setting, error) {
 	uc.mu.Lock()
+	var published []runtimeconfig.Announcement
+	committed := false
+	defer func() {
+		if committed {
+			uc.publishAnnouncements(ctx, published)
+		}
+	}()
 	defer uc.mu.Unlock()
 	normalized := make([]domain.Setting, 0, len(settings))
 	for _, setting := range settings {
@@ -140,6 +164,7 @@ func (uc *SystemSettingsUseCase) BulkUpsert(ctx context.Context, settings []doma
 		if err := runtimeconfig.ValidatePersistedUpdates(persisted, normalized); err != nil {
 			return err
 		}
+		published = newlyPublishedAnnouncements(persisted, normalized, time.Now())
 		saved, err = uc.repo.BulkUpsert(txCtx, normalized)
 		return err
 	})
@@ -148,6 +173,7 @@ func (uc *SystemSettingsUseCase) BulkUpsert(ctx context.Context, settings []doma
 	}
 	runtimeconfig.SetMany(saved)
 	uc.publishRuntimeSettings(ctx)
+	committed = true
 	return saved, nil
 }
 
@@ -192,6 +218,56 @@ func (uc *SystemSettingsUseCase) publishRuntimeSettings(ctx context.Context) {
 		// another replica if Redis is temporarily unavailable.
 		slog.Warn("publish system settings runtime update failed", "error", err)
 	}
+}
+
+func (uc *SystemSettingsUseCase) publishAnnouncements(ctx context.Context, announcements []runtimeconfig.Announcement) {
+	if uc == nil || uc.announcements == nil || len(announcements) == 0 {
+		return
+	}
+	// Scheduling is best effort; notification loss must not roll back settings.
+	publishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	if err := uc.announcements.PublishAnnouncements(publishCtx, announcements); err != nil {
+		slog.Warn("publish announcement emails failed", "error", err)
+	}
+}
+
+func newlyPublishedAnnouncements(persisted, updates []domain.Setting, now time.Time) []runtimeconfig.Announcement {
+	oldValue, newValue := "[]", ""
+	for _, setting := range persisted {
+		if strings.EqualFold(strings.TrimSpace(setting.Key), "announcements") {
+			oldValue = setting.Value
+		}
+	}
+	for _, setting := range updates {
+		if strings.EqualFold(strings.TrimSpace(setting.Key), "announcements") {
+			newValue = setting.Value
+		}
+	}
+	if newValue == "" {
+		return nil
+	}
+	var before, after []runtimeconfig.Announcement
+	if json.Unmarshal([]byte(oldValue), &before) != nil || json.Unmarshal([]byte(newValue), &after) != nil {
+		return nil
+	}
+	previous := make(map[int64]runtimeconfig.Announcement, len(before))
+	for _, announcement := range before {
+		previous[announcement.ID] = announcement
+	}
+	published := make([]runtimeconfig.Announcement, 0, len(after))
+	for _, announcement := range after {
+		old, exists := previous[announcement.ID]
+		if announcement.Enabled && (!exists || !old.Enabled) {
+			published = append(published, announcement)
+			continue
+		}
+		oldStart, err := time.Parse(time.RFC3339, old.StartTime)
+		if announcement.Enabled && old.Enabled && old.StartTime != announcement.StartTime && err == nil && oldStart.After(now) {
+			published = append(published, announcement)
+		}
+	}
+	return published
 }
 
 func (uc *SystemSettingsUseCase) mutate(ctx context.Context, log *governancedomain.OperationLog, fn func(context.Context) error) error {

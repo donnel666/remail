@@ -24,14 +24,16 @@ import (
 )
 
 type WalletModel struct {
-	UserID            uint      `gorm:"primaryKey;column:user_id"`
-	ConsumerBalance   string    `gorm:"type:decimal(18,6);not null;default:0;column:consumer_balance"`
-	SupplierAvailable string    `gorm:"type:decimal(18,6);not null;default:0;column:supplier_available"`
-	SupplierFrozen    string    `gorm:"type:decimal(18,6);not null;default:0;column:supplier_frozen"`
-	TotalSpend        string    `gorm:"type:decimal(18,6);not null;default:0;column:total_spend"`
-	SpendCount        int64     `gorm:"not null;default:0;column:spend_count"`
-	CreatedAt         time.Time `gorm:"not null;autoCreateTime;column:created_at"`
-	UpdatedAt         time.Time `gorm:"not null;autoUpdateTime;column:updated_at"`
+	UserID              uint      `gorm:"primaryKey;column:user_id"`
+	ConsumerBalance     string    `gorm:"type:decimal(18,6);not null;default:0;column:consumer_balance"`
+	SupplierAvailable   string    `gorm:"type:decimal(18,6);not null;default:0;column:supplier_available"`
+	SupplierFrozen      string    `gorm:"type:decimal(18,6);not null;default:0;column:supplier_frozen"`
+	TotalSpend          string    `gorm:"type:decimal(18,6);not null;default:0;column:total_spend"`
+	SpendCount          int64     `gorm:"not null;default:0;column:spend_count"`
+	BalanceWarningLevel int       `gorm:"not null;default:4;column:balance_warning_level"`
+	BalanceWarningCycle uint64    `gorm:"not null;default:0;column:balance_warning_cycle"`
+	CreatedAt           time.Time `gorm:"not null;autoCreateTime;column:created_at"`
+	UpdatedAt           time.Time `gorm:"not null;autoUpdateTime;column:updated_at"`
 }
 
 func (WalletModel) TableName() string {
@@ -544,6 +546,9 @@ func (r *BillingRepo) CreditRecharge(ctx context.Context, command billingapp.Cre
 		if err := r.settleReferralRewardInTx(ctx, tx, relation, transaction.Transaction); err != nil {
 			return err
 		}
+		if err := resetBalanceWarningsInTx(ctx, tx, model.UserID); err != nil {
+			return err
+		}
 
 		tradeNo := strings.TrimSpace(command.GatewayTradeNo)
 		paidAt := command.PaidAt
@@ -609,6 +614,7 @@ func (r *BillingRepo) RedeemCard(ctx context.Context, req billingapp.RedeemCardC
 			if err := json.Unmarshal(response, &result); err != nil {
 				return fmt.Errorf("decode idempotent card redemption: %w", err)
 			}
+			result.Replayed = true
 		}
 		return nil
 	})
@@ -912,6 +918,9 @@ func (r *BillingRepo) redeemCardInTx(ctx context.Context, tx *gorm.DB, req billi
 	if err != nil {
 		return nil, err
 	}
+	if err := resetBalanceWarningsInTx(ctx, tx, req.UserID); err != nil {
+		return nil, err
+	}
 	if err := tx.WithContext(ctx).
 		Model(&CardKeyModel{}).
 		Where("card_key = ?", req.CardKey).
@@ -939,6 +948,16 @@ func (r *BillingRepo) redeemCardInTx(ctx context.Context, tx *gorm.DB, req billi
 		Transaction: result.Transaction,
 		Card:        cardModelToDomain(card),
 	}, nil
+}
+
+func resetBalanceWarningsInTx(ctx context.Context, tx *gorm.DB, userID uint) error {
+	if err := tx.WithContext(ctx).Model(&WalletModel{}).Where("user_id = ?", userID).Updates(map[string]any{
+		"balance_warning_level": 0,
+		"balance_warning_cycle": gorm.Expr("balance_warning_cycle + 1"),
+	}).Error; err != nil {
+		return fmt.Errorf("reset balance warnings after credit: %w", err)
+	}
+	return nil
 }
 
 func (r *BillingRepo) adjustConsumerBalanceInTx(ctx context.Context, tx *gorm.DB, wallet *WalletModel, req billingapp.AdjustConsumerBalanceCommand) (*billingapp.AdjustBalanceResult, error) {
@@ -1173,12 +1192,13 @@ func (r *BillingRepo) getOrCreateWallet(ctx context.Context, tx *gorm.DB, userID
 
 func defaultWalletModel(userID uint) WalletModel {
 	return WalletModel{
-		UserID:            userID,
-		ConsumerBalance:   "0.00",
-		SupplierAvailable: "0.00",
-		SupplierFrozen:    "0.00",
-		TotalSpend:        "0.00",
-		SpendCount:        0,
+		UserID:              userID,
+		ConsumerBalance:     "0.00",
+		SupplierAvailable:   "0.00",
+		SupplierFrozen:      "0.00",
+		TotalSpend:          "0.00",
+		SpendCount:          0,
+		BalanceWarningLevel: 4,
 	}
 }
 
@@ -1372,6 +1392,85 @@ func (r *BillingRepo) ListConsumerBalances(ctx context.Context, userIDs []uint) 
 		return nil, fmt.Errorf("list consumer balances: %w", err)
 	}
 	return mapConsumerBalances(models)
+}
+
+func (r *BillingRepo) ClaimBalanceWarnings(ctx context.Context, limit int) ([]billingapp.BalanceWarningClaim, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	const targetLevel = `CASE
+		WHEN consumer_balance <= 0.5 THEN 4
+		WHEN consumer_balance <= 1 THEN 3
+		WHEN consumer_balance <= 2 THEN 2
+		WHEN consumer_balance <= 3 THEN 1
+		ELSE 0 END`
+	claims := make([]billingapp.BalanceWarningClaim, 0, limit)
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var wallets []WalletModel
+		if err := tx.WithContext(ctx).
+			Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+			Where("consumer_balance <= 3 AND balance_warning_level < " + targetLevel).
+			Order("updated_at ASC, user_id ASC").
+			Limit(limit).
+			Find(&wallets).Error; err != nil {
+			return fmt.Errorf("claim balance warnings: %w", err)
+		}
+		for i := range wallets {
+			target, err := balanceWarningLevel(wallets[i].ConsumerBalance)
+			if err != nil {
+				return err
+			}
+			previous := wallets[i].BalanceWarningLevel
+			if target <= previous {
+				continue
+			}
+			level := previous + 1
+			if err := tx.WithContext(ctx).Model(&WalletModel{}).
+				Where("user_id = ?", wallets[i].UserID).
+				Update("balance_warning_level", level).Error; err != nil {
+				return fmt.Errorf("advance balance warning: %w", err)
+			}
+			balance, err := normalizeDBMoney(wallets[i].ConsumerBalance)
+			if err != nil {
+				return err
+			}
+			claims = append(claims, billingapp.BalanceWarningClaim{
+				UserID: wallets[i].UserID, Balance: balance, Cycle: wallets[i].BalanceWarningCycle,
+				PreviousLevel: previous, Level: level,
+			})
+		}
+		return nil
+	})
+	return claims, err
+}
+
+func (r *BillingRepo) ReleaseBalanceWarning(ctx context.Context, claim billingapp.BalanceWarningClaim) error {
+	result := r.db.WithContext(ctx).Model(&WalletModel{}).
+		Where("user_id = ? AND balance_warning_cycle = ? AND balance_warning_level = ?", claim.UserID, claim.Cycle, claim.Level).
+		Update("balance_warning_level", claim.PreviousLevel)
+	if result.Error != nil {
+		return fmt.Errorf("release balance warning: %w", result.Error)
+	}
+	return nil
+}
+
+func balanceWarningLevel(value string) (int, error) {
+	balance, err := domain.ParseMoney(value)
+	if err != nil {
+		return 0, err
+	}
+	switch {
+	case balance.LessThanOrEqual(decimal.RequireFromString("0.5")):
+		return 4, nil
+	case balance.LessThanOrEqual(decimal.NewFromInt(1)):
+		return 3, nil
+	case balance.LessThanOrEqual(decimal.NewFromInt(2)):
+		return 2, nil
+	case balance.LessThanOrEqual(decimal.NewFromInt(3)):
+		return 1, nil
+	default:
+		return 0, nil
+	}
 }
 
 func mapConsumerBalances(models []WalletModel) (map[uint]string, error) {

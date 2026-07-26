@@ -274,7 +274,10 @@ func (h *IAMHandler) PostLogin(c *gin.Context) {
 		}
 	}
 
-	result, err := h.module.LoginUseCase.Login(c.Request.Context(), req.Email, req.Password)
+	result, err := h.module.LoginUseCase.Login(c.Request.Context(), req.Email, req.Password, app.LoginMeta{
+		ClientIP:  clientIP,
+		UserAgent: c.Request.UserAgent(),
+	})
 	if err != nil {
 		if !errors.Is(err, domain.ErrAccountOrPasswordIncorrect) && h.module.AbuseLimiter != nil {
 			if limitErr := h.module.AbuseLimiter.CancelLogin(c.Request.Context(), req.Email, clientIP); limitErr != nil {

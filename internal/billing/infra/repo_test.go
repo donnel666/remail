@@ -8,6 +8,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestBalanceWarningLevel(t *testing.T) {
+	for _, test := range []struct {
+		balance string
+		level   int
+	}{
+		{"3.01", 0}, {"3.00", 1}, {"2.00", 2}, {"1.00", 3}, {"0.50", 4},
+	} {
+		level, err := balanceWarningLevel(test.balance)
+		require.NoError(t, err)
+		require.Equal(t, test.level, level, test.balance)
+	}
+}
+
 func TestMapConsumerBalancesReturnsInvalidBalanceError(t *testing.T) {
 	balances, err := mapConsumerBalances([]WalletModel{{UserID: 7, ConsumerBalance: "invalid"}})
 

@@ -79,6 +79,37 @@ func TestSystemSettingMutationsAreSerializedWithRuntimePublish(t *testing.T) {
 	require.Equal(t, "second", runtimeconfig.String("concurrent_test_key", ""))
 }
 
+func TestNewlyPublishedAnnouncementsOnlyReturnsNewlyEnabledItems(t *testing.T) {
+	before := []domain.Setting{{Key: "announcements", Value: `[
+		{"id":1,"title":"old","content":"old","type":"default","startTime":"","endTime":"","enabled":true},
+		{"id":2,"title":"draft","content":"draft","type":"default","startTime":"","endTime":"","enabled":false}
+	]`}}
+	after := []domain.Setting{{Key: "announcements", Value: `[
+		{"id":1,"title":"edited","content":"edited","type":"default","startTime":"","endTime":"","enabled":true},
+		{"id":2,"title":"published","content":"published","type":"default","startTime":"","endTime":"","enabled":true},
+		{"id":3,"title":"new","content":"new","type":"default","startTime":"","endTime":"","enabled":true}
+	]`}}
+
+	published := newlyPublishedAnnouncements(before, after, time.Now())
+	require.Equal(t, []int64{2, 3}, []int64{published[0].ID, published[1].ID})
+}
+
+func TestNewlyPublishedAnnouncementsReschedulesUnpublishedFutureItem(t *testing.T) {
+	now := time.Date(2026, time.July, 26, 12, 0, 0, 0, time.UTC)
+	before := []domain.Setting{{Key: "announcements", Value: `[
+		{"id":1,"title":"future","content":"old","type":"default","startTime":"2026-07-26T13:00:00Z","endTime":"","enabled":true},
+		{"id":2,"title":"active","content":"old","type":"default","startTime":"2026-07-26T11:00:00Z","endTime":"","enabled":true}
+	]`}}
+	after := []domain.Setting{{Key: "announcements", Value: `[
+		{"id":1,"title":"future","content":"new","type":"default","startTime":"2026-07-26T14:00:00Z","endTime":"","enabled":true},
+		{"id":2,"title":"active","content":"new","type":"default","startTime":"2026-07-26T14:00:00Z","endTime":"","enabled":true}
+	]`}}
+
+	published := newlyPublishedAnnouncements(before, after, now)
+	require.Len(t, published, 1)
+	require.Equal(t, int64(1), published[0].ID)
+}
+
 func (f *fakeRepository) WithTx(ctx context.Context, fn func(context.Context) error) error {
 	var snapshot *domain.Setting
 	if f.setting != nil {

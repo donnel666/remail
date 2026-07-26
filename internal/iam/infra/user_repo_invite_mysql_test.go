@@ -158,6 +158,7 @@ func TestUserRepoInviteBrowseAndEnrichmentMySQL(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, sums, 2)
 	require.Equal(t, "admin@test.local", sums[admin.ID].Email)
+	require.Equal(t, domain.UserStatusActive, sums[admin.ID].Status)
 	require.Equal(t, "admin", sums[admin.ID].Role)
 	require.Equal(t, staff.ID, sums[admin.ID].GroupID)
 	require.Equal(t, "Staff", sums[admin.ID].GroupName)

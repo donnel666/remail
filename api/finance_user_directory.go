@@ -59,6 +59,7 @@ func financeDirectoryEntry(summary iamdomain.UserSummary) billingapp.UserDirecto
 		UserID:    summary.ID,
 		Email:     summary.Email,
 		Nickname:  summary.Nickname,
+		Status:    string(summary.Status),
 		Role:      summary.Role,
 		GroupName: summary.GroupName,
 		GroupID:   summary.GroupID,

@@ -34,7 +34,7 @@ func (f *fakeUserSummarySource) ListUserSummaries(_ context.Context, search stri
 
 func TestFinanceUserDirectoryLookupMapsFields(t *testing.T) {
 	src := &fakeUserSummarySource{lookup: map[uint]iamdomain.UserSummary{
-		7: {ID: 7, Email: "a@b.com", Nickname: "Nick", Role: "supplier", GroupID: 3, GroupName: "VIP"},
+		7: {ID: 7, Email: "a@b.com", Nickname: "Nick", Status: iamdomain.UserStatusActive, Role: "supplier", GroupID: 3, GroupName: "VIP"},
 	}}
 	d := financeUserDirectory{users: src}
 
@@ -47,7 +47,7 @@ func TestFinanceUserDirectoryLookupMapsFields(t *testing.T) {
 		t.Fatalf("user 7 missing from result")
 	}
 	if e.UserID != 7 || e.Email != "a@b.com" || e.Nickname != "Nick" ||
-		e.Role != "supplier" || e.GroupID != 3 || e.GroupName != "VIP" {
+		e.Status != "active" || e.Role != "supplier" || e.GroupID != 3 || e.GroupName != "VIP" {
 		t.Fatalf("field mapping wrong: %+v", e)
 	}
 }

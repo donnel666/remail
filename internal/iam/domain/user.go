@@ -149,6 +149,7 @@ type UserSummary struct {
 	ID        uint
 	Email     string
 	Nickname  string
+	Status    UserStatus
 	Role      string
 	GroupID   uint
 	GroupName string
