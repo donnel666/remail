@@ -887,6 +887,40 @@ func (uc *UseCase) RefreshInventoryCache(ctx context.Context) (*InventoryRefresh
 	return uc.RefreshInventoryCacheBefore(ctx, time.Now())
 }
 
+func (uc *UseCase) RefreshProductInventoryCaches(ctx context.Context) error {
+	if uc == nil || uc.inventoryCache == nil {
+		return nil
+	}
+	// ponytail: TLD changes are rare, so synchronously refresh only existing
+	// product snapshots; use cache generations if this scan becomes measurable.
+	entries, err := uc.inventoryCache.ListProductInventoryEntries(ctx)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		token, acquired, err := uc.inventoryCache.AcquireInventoryRefresh(ctx, entry, inventoryRefreshLockTTL)
+		if err != nil {
+			return err
+		}
+		if !acquired {
+			return fmt.Errorf("refresh product inventory cache for project %d: cache refresh already running", entry.ProjectID)
+		}
+		totals, refreshErr := uc.repo.GetProductInventoryTotals(ctx, entry.ProjectID)
+		if errors.Is(refreshErr, domain.ErrProjectNotAllocatable) || (refreshErr == nil && totals == nil) {
+			refreshErr = uc.inventoryCache.DeleteInventory(ctx, entry)
+		} else if refreshErr == nil {
+			refreshErr = uc.inventoryCache.RefreshProductInventoryTotals(ctx, entry.ProjectID, totals, inventoryCacheHardTTLValue())
+		}
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		releaseErr := uc.inventoryCache.ReleaseInventoryRefresh(cleanupCtx, entry, token)
+		cancel()
+		if refreshErr != nil || releaseErr != nil {
+			return errors.Join(refreshErr, releaseErr)
+		}
+	}
+	return nil
+}
+
 // RefreshInventoryCacheBefore refreshes only entries active before one task's
 // cutoff, so reads during aggregation are left for the next task.
 func (uc *UseCase) RefreshInventoryCacheBefore(ctx context.Context, before time.Time) (*InventoryRefreshResult, error) {

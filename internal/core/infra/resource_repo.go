@@ -345,9 +345,60 @@ func (r *ResourceRepo) CreateDomain(ctx context.Context, resource *domain.EmailR
 	})
 }
 
+const (
+	domainCustomTLDSettingKey     = "domain_custom_tlds"
+	domainMaxSubdomainsSettingKey = "domain_max_subdomains_per_registrable_domain"
+)
+
+type domainCreationPolicy struct {
+	customTLDs    string
+	maxSubdomains int
+}
+
+func lockDomainCreationPolicy(tx *gorm.DB) (domainCreationPolicy, error) {
+	policy := domainCreationPolicy{maxSubdomains: domain.DefaultMaxSubdomainsPerRegistrableDomain}
+	var guard struct{ ID int }
+	if err := tx.Raw("SELECT id FROM system_guard WHERE id = 1 FOR UPDATE").Scan(&guard).Error; err != nil {
+		return policy, fmt.Errorf("acquire domain creation guard: %w", err)
+	}
+	if guard.ID != 1 {
+		return policy, fmt.Errorf("domain creation guard row missing")
+	}
+
+	var settings []struct {
+		Key   string
+		Value string
+	}
+	if err := tx.Raw(
+		"SELECT `key`, `value` FROM system_settings WHERE `key` IN (?, ?) FOR UPDATE",
+		domainCustomTLDSettingKey,
+		domainMaxSubdomainsSettingKey,
+	).Scan(&settings).Error; err != nil {
+		return policy, fmt.Errorf("lock domain creation settings: %w", err)
+	}
+	for _, setting := range settings {
+		switch strings.ToLower(strings.TrimSpace(setting.Key)) {
+		case domainCustomTLDSettingKey:
+			policy.customTLDs = setting.Value
+		case domainMaxSubdomainsSettingKey:
+			policy.maxSubdomains = domain.MaxSubdomainsPerRegistrableDomain(setting.Value)
+		}
+	}
+	return policy, nil
+}
+
 func createDomainTx(tx *gorm.DB, resource *domain.EmailResource, dr *domain.MailDomainResource) error {
+	// ponytail: domain creation is low-volume, so one singleton lock plus a suffix
+	// scan is cheapest; persist registrable_domain with per-root guards if measured
+	// create throughput ever makes either visible.
+	policy, err := lockDomainCreationPolicy(tx)
+	if err != nil {
+		return err
+	}
+	domainTLD := domain.TLDWithCustom(dr.Domain, policy.customTLDs)
+
 	var candidate DomainResourceModel
-	err := tx.Select("id").
+	err = tx.Select("id").
 		Where("domain = ?", dr.Domain).
 		First(&candidate).Error
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -369,6 +420,9 @@ func createDomainTx(tx *gorm.DB, resource *domain.EmailResource, dr *domain.Mail
 		}
 		if domain.MailDomainStatus(existing.Status) != domain.DomainStatusDeleted {
 			return domain.ErrDuplicateDomain
+		}
+		if err := enforceDomainSubdomainLimit(tx, dr.Domain, policy); err != nil {
+			return err
 		}
 
 		now := time.Now().UTC()
@@ -414,7 +468,7 @@ WHERE gm.resource_id = ? AND da.id IS NULL`, existing.ID).Error; err != nil {
 			Updates(map[string]any{
 				"owner_user_id":         resource.OwnerUserID,
 				"domain":                dr.Domain,
-				"domain_tld":            domain.TLD(dr.Domain),
+				"domain_tld":            domainTLD,
 				"mail_server_id":        dr.MailServerID,
 				"purpose":               string(dr.Purpose),
 				"allow_new_bindings":    dr.AllowNewBindings,
@@ -450,6 +504,9 @@ WHERE gm.resource_id = ? AND da.id IS NULL`, existing.ID).Error; err != nil {
 		dr.UpdatedAt = now
 		return nil
 	}
+	if err := enforceDomainSubdomainLimit(tx, dr.Domain, policy); err != nil {
+		return err
+	}
 
 	root := &EmailResourceModel{
 		Type:        string(resource.Type),
@@ -467,7 +524,7 @@ WHERE gm.resource_id = ? AND da.id IS NULL`, existing.ID).Error; err != nil {
 		ID:                   root.ID,
 		OwnerUserID:          root.OwnerUserID,
 		Domain:               dr.Domain,
-		DomainTLD:            domain.TLD(dr.Domain),
+		DomainTLD:            domainTLD,
 		MailServerID:         dr.MailServerID,
 		Purpose:              string(dr.Purpose),
 		AllowNewBindings:     dr.AllowNewBindings,
@@ -494,6 +551,79 @@ WHERE gm.resource_id = ? AND da.id IS NULL`, existing.ID).Error; err != nil {
 	dr.CreatedAt = domainModel.CreatedAt
 	dr.UpdatedAt = domainModel.UpdatedAt
 	return nil
+}
+
+func enforceDomainSubdomainLimit(tx *gorm.DB, domainName string, policy domainCreationPolicy) error {
+	registrable := domain.RegistrableDomainWithCustom(domainName, policy.customTLDs)
+	if registrable == "" || registrable == domainName {
+		return nil
+	}
+	var rows []struct{ ID uint }
+	if err := tx.Model(&DomainResourceModel{}).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Select("id").
+		Where("status <> ? AND domain LIKE ?", string(domain.DomainStatusDeleted), "%."+registrable).
+		Limit(policy.maxSubdomains).
+		Find(&rows).Error; err != nil {
+		return fmt.Errorf("count domain subdomains: %w", err)
+	}
+	if len(rows) >= policy.maxSubdomains {
+		return domain.ErrDomainSubdomainLimit
+	}
+	return nil
+}
+
+// ReindexDomainTLDs repairs persisted filter/allocation suffixes after the PSL
+// baseline or administrator-supplied additions change.
+func (r *ResourceRepo) ReindexDomainTLDs(ctx context.Context) error {
+	// ponytail: one transaction keeps the derived index atomic and blocks the
+	// low-volume domain write path; add versioned online reindexing only if the
+	// inventory becomes large enough for this to show up in measurements.
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		policy, err := lockDomainCreationPolicy(tx)
+		if err != nil {
+			return err
+		}
+		const batchSize = 1000
+		var afterID uint
+		for {
+			var rows []struct {
+				ID        uint
+				Domain    string
+				DomainTLD string `gorm:"column:domain_tld"`
+			}
+			if err := tx.Model(&DomainResourceModel{}).
+				Select("id, domain, domain_tld").
+				Where("id > ?", afterID).
+				Order("id ASC").
+				Limit(batchSize).
+				Find(&rows).Error; err != nil {
+				return fmt.Errorf("list domain TLD reindex batch: %w", err)
+			}
+			if len(rows) == 0 {
+				return nil
+			}
+			updates := make(map[string][]uint)
+			for _, row := range rows {
+				tld := domain.TLDWithCustom(row.Domain, policy.customTLDs)
+				if tld != "" && tld != row.DomainTLD {
+					updates[tld] = append(updates[tld], row.ID)
+				}
+			}
+			for tld, ids := range updates {
+				if err := tx.Model(&DomainResourceModel{}).Where("id IN ?", ids).UpdateColumn("domain_tld", tld).Error; err != nil {
+					return fmt.Errorf("update domain TLD index: %w", err)
+				}
+				if err := tx.Table("domain_routing_candidates").Where("resource_id IN ?", ids).Update("domain_tld", tld).Error; err != nil {
+					return fmt.Errorf("update domain routing TLD index: %w", err)
+				}
+			}
+			afterID = rows[len(rows)-1].ID
+			if len(rows) < batchSize {
+				return nil
+			}
+		}
+	})
 }
 
 func createMicrosoftBatchTx(tx *gorm.DB, resources []domain.EmailResource, ms []domain.MicrosoftResource) (map[string]struct{}, error) {

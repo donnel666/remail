@@ -29,6 +29,7 @@ import (
 	"github.com/donnel666/remail/internal/platform"
 	proxyapi "github.com/donnel666/remail/internal/proxy/api"
 	systemsettingsapi "github.com/donnel666/remail/internal/systemsettings/api"
+	settingsdomain "github.com/donnel666/remail/internal/systemsettings/domain"
 	tradeapi "github.com/donnel666/remail/internal/trade/api"
 	"github.com/gin-gonic/gin"
 	"github.com/hibiken/asynq"
@@ -75,7 +76,6 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		if err != nil {
 			return nil, cleanup, err
 		}
-		cleanupFuncs = append(cleanupFuncs, systemSettingsMod.Start(context.Background()))
 		p.InitWorkers()
 		// IAM module (activation, auth, users)
 		fileStore := governanceinfra.NewMinIOFileStore(p.MinIO, p.MinIOBucket)
@@ -169,6 +169,21 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 
 		// Allocation module (admin diagnostics and Trade-facing application port)
 		allocMod := allocapi.NewModule(p.DB, p.Redis, p.Asynq)
+		systemSettingsMod.SetRuntimeUpdateHook(func(ctx context.Context, settings []settingsdomain.Setting) error {
+			for _, setting := range settings {
+				if strings.EqualFold(strings.TrimSpace(setting.Key), "domain_custom_tlds") {
+					if err := coreMod.ReindexDomainTLDs(ctx); err != nil {
+						return err
+					}
+					return allocMod.UseCase.RefreshProductInventoryCaches(ctx)
+				}
+			}
+			return nil
+		})
+		if err := allocMod.UseCase.RefreshProductInventoryCaches(context.Background()); err != nil {
+			return nil, cleanup, err
+		}
+		cleanupFuncs = append(cleanupFuncs, systemSettingsMod.Start(context.Background()))
 		allocMod.UseCase.SetHistoricalMicrosoftAliasPort(mailMod.MicrosoftAliases)
 		allocMod.SetBackgroundExecutionGate(p.BackgroundLoad)
 		cleanupFuncs = append(cleanupFuncs, allocapi.RegisterAllocationTaskHandlers(taskMux, allocMod))

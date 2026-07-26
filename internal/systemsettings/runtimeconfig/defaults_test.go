@@ -32,6 +32,8 @@ func TestDefaultSettingsAreValidAndIndependent(t *testing.T) {
 	require.Equal(t, "86400", keys["session_max_age_seconds"])
 	require.Equal(t, "0.8", keys["first_order_rebate_ratio"])
 	require.Equal(t, "90", keys["rebate_expiry_days"])
+	require.Equal(t, "", keys["domain_custom_tlds"])
+	require.Equal(t, "3", keys["domain_max_subdomains_per_registrable_domain"])
 	whitelistValue := ""
 	for _, setting := range defaults {
 		if setting.Key == "microsoft_domain_whitelist" {

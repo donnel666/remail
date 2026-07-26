@@ -45,6 +45,10 @@ func TestValidateEmailServiceSettings(t *testing.T) {
 	require.NoError(t, Validate("microsoft_domain_whitelist", "outlook.com,hotmail.com"))
 	require.ErrorIs(t, Validate("microsoft_domain_whitelist", "https://outlook.com"), domain.ErrInvalidValue)
 	require.ErrorIs(t, Validate("microsoft_domain_whitelist", "a.-invalid.com"), domain.ErrInvalidValue)
+	require.NoError(t, Validate("domain_custom_tlds", "edu.kg,edu.invalid"))
+	require.ErrorIs(t, Validate("domain_custom_tlds", "kg"), domain.ErrInvalidValue)
+	require.NoError(t, Validate("domain_max_subdomains_per_registrable_domain", "3"))
+	require.ErrorIs(t, Validate("domain_max_subdomains_per_registrable_domain", "0"), domain.ErrInvalidValue)
 	require.ErrorIs(t, Validate("smtp_outbound_payload_ttl_minutes", "0"), domain.ErrInvalidValue)
 	require.NoError(t, Validate("smtp_task_retry_count", "0"))
 }

@@ -356,7 +356,7 @@ purpose=not_sale -> purpose=sale
 
 Domain 资源列表、数量统计、验证任务、公开出售发布和分配候选都必须排除 `status=deleted`。后续再次创建同一个已删除域名时，服务端复用原有 `EmailResource.id` 和 `DomainResource.id`，把 `EmailResource.ownerUserId`、`DomainResource.ownerUserId`、`mailServerId/purpose/status/lastAllocatedAt/domainTld` 等字段覆盖为本次创建数据，并按创建请求恢复用途；普通用户创建默认恢复为 `purpose=not_sale/status=abnormal`，`sale` 仍不得通过创建接口写入。如果同域名资源存在且状态不是 `deleted`，继续按重复域名冲突处理。
 
-Domain 创建接口只接受 canonical ASCII 域名：服务端必须统一 lower-case、去掉尾部根点，并拒绝 URL scheme、路径、端口、通配符、空 label、非法字符、过长 label 和非域名格式。批量发布/删除的 `selection.mode=filter.tld` 必须使用 `domainTld` 等值匹配；`domainTld` 由服务端按内置常见二级 TLD 规则派生，避免精确 TLD 筛选退化为 `LIKE '%.tld'` 扫描。前端筛选 tab 必须使用资源列表返回的 `domainTld`，不得维护另一份 TLD 派生表。
+Domain 创建接口只接受 canonical ASCII 域名：服务端必须统一 lower-case、去掉尾部根点，并拒绝 URL scheme、路径、端口、通配符、空 label、非法字符、过长 label 和非域名格式。批量发布/删除的 `selection.mode=filter.tld` 必须使用 `domainTld` 等值匹配；`domainTld` 由服务端按 Mozilla Public Suffix List 及系统设置中的自定义 TLD 补充项派生，避免精确 TLD 筛选退化为 `LIKE '%.tld'` 扫描。前端筛选 tab 必须使用资源列表返回的 `domainTld`，不得维护另一份 TLD 派生表。同一可注册域名下的非删除子域名资源数不得超过 `domain_max_subdomains_per_registrable_domain`（默认 3），可注册域名本身不计入限额。
 
 ### 2.6 `GeneratedMailbox`
 

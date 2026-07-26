@@ -3,10 +3,13 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/donnel666/remail/internal/systemsettings/domain"
 	"github.com/donnel666/remail/internal/systemsettings/infra"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/redis/go-redis/v9"
@@ -38,10 +41,22 @@ type runtimeSettingsSync struct {
 	mu     sync.Mutex
 	cancel context.CancelFunc
 	done   chan struct{}
+
+	hookMu      sync.RWMutex
+	runtimeHook func(context.Context, []domain.Setting) error
 }
 
 func newRuntimeSettingsSync(client redis.UniversalClient, repo *infra.Repository) *runtimeSettingsSync {
 	return &runtimeSettingsSync{redis: client, repo: repo, reconcileInterval: runtimeSettingsReconcileInterval}
+}
+
+func (s *runtimeSettingsSync) SetRuntimeUpdateHook(hook func(context.Context, []domain.Setting) error) {
+	if s == nil {
+		return
+	}
+	s.hookMu.Lock()
+	s.runtimeHook = hook
+	s.hookMu.Unlock()
 }
 
 func (s *runtimeSettingsSync) Start(ctx context.Context) {
@@ -111,8 +126,33 @@ func (s *runtimeSettingsSync) reload(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	changed := changedRuntimeSettings(settings)
+	s.hookMu.RLock()
+	hook := s.runtimeHook
+	s.hookMu.RUnlock()
+	if hook != nil && len(changed) > 0 {
+		if err := hook(ctx, changed); err != nil {
+			return fmt.Errorf("apply reloaded runtime settings: %w", err)
+		}
+	}
 	runtimeconfig.Replace(settings)
 	return nil
+}
+
+func changedRuntimeSettings(settings []domain.Setting) []domain.Setting {
+	current := runtimeconfig.Snapshot()
+	changed := make([]domain.Setting, 0, len(settings))
+	for _, setting := range settings {
+		if runtimeconfig.Validate(setting.Key, setting.Value) != nil {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(setting.Key))
+		value, exists := current[key]
+		if !exists || value != setting.Value {
+			changed = append(changed, setting)
+		}
+	}
+	return changed
 }
 
 func (s *runtimeSettingsSync) Close(ctx context.Context) {

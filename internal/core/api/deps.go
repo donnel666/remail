@@ -40,6 +40,14 @@ type CoreModule struct {
 	MicrosoftCredentials coreapp.MicrosoftCredentialPort
 	BackgroundExecution  BackgroundExecutionGate
 	validationRepo       *coreinfra.ResourceValidationRepo
+	resourceRepo         *coreinfra.ResourceRepo
+}
+
+func (m *CoreModule) ReindexDomainTLDs(ctx context.Context) error {
+	if m == nil || m.resourceRepo == nil {
+		return nil
+	}
+	return m.resourceRepo.ReindexDomainTLDs(ctx)
 }
 
 func (m *CoreModule) SetBackgroundExecutionGate(gate BackgroundExecutionGate) {
@@ -110,6 +118,9 @@ func (m *CoreModule) SetMicrosoftValidationBindingCommitPort(port coreapp.Micros
 func NewCoreModule(db *gorm.DB, redisClient redis.UniversalClient, files governanceapp.FilePort, asynqClient *asynq.Client, validator coreapp.ResourceValidationPort, bindingRecorder coreapp.MicrosoftBindingInputRecorder) (*CoreModule, error) {
 	txtParser := coreinfra.NewTXTParser()
 	resourceRepo := coreinfra.NewResourceRepo(db)
+	if err := resourceRepo.ReindexDomainTLDs(context.Background()); err != nil {
+		return nil, err
+	}
 	importRepo := coreinfra.NewResourceImportRepo(db)
 	importQueue := coreinfra.NewResourceImportQueue(asynqClient)
 	validationRepo := coreinfra.NewResourceValidationRepo(db)
@@ -156,5 +167,6 @@ func NewCoreModule(db *gorm.DB, redisClient redis.UniversalClient, files governa
 		AdminDomainCommands:  adminDomainCommands,
 		MicrosoftCredentials: coreapp.NewMicrosoftCredentialService(adminRepo),
 		validationRepo:       validationRepo,
+		resourceRepo:         resourceRepo,
 	}, nil
 }

@@ -159,6 +159,44 @@ func TestProductInventorySnapshotsQueueEveryColdProjectBeforeReturning(t *testin
 	require.Equal(t, 2, repo.productCalls)
 }
 
+func TestDomainTLDChangeRefreshesProductCachesAndCanRetryBusyLocks(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	cache := NewInventoryCache(client)
+	repo := &inventoryCacheRepoStub{totals: allocapp.ProjectProductInventoryTotals{
+		ProjectID: 10, TotalAvailable: 5,
+		Items: []allocapp.ProductInventoryTotal{{
+			ProductID: 20, TotalAvailable: 5, PublicAvailable: 5,
+			Suffixes: []allocapp.ProductInventorySuffixTotal{{Suffix: ".edu.invalid", TotalAvailable: 5, PublicAvailable: 5}},
+		}},
+	}}
+	useCase := allocapp.NewUseCase(repo)
+	useCase.SetInventoryCache(cache)
+	require.NoError(t, cache.SetProductInventoryTotals(context.Background(), 10, &allocapp.ProjectProductInventoryTotals{
+		ProjectID: 10, TotalAvailable: 4,
+		Items: []allocapp.ProductInventoryTotal{{
+			ProductID: 20, TotalAvailable: 4, PublicAvailable: 4,
+			Suffixes: []allocapp.ProductInventorySuffixTotal{{Suffix: ".invalid", TotalAvailable: 4, PublicAvailable: 4}},
+		}},
+	}, time.Hour))
+	oldMarker := productUnavailableMarkerKey(allocapp.ProductInventoryAvailabilityRequest{ProjectID: 10, ProductID: 20, EmailSuffix: ".invalid"})
+	require.NoError(t, client.Set(context.Background(), oldMarker, "1", time.Hour).Err())
+	entry := allocapp.InventoryCacheEntry{Kind: allocapp.InventoryCacheProducts, ProjectID: 10}
+	require.NoError(t, client.Set(context.Background(), inventoryCacheLockKey(entry), "busy", time.Hour).Err())
+
+	require.ErrorContains(t, useCase.RefreshProductInventoryCaches(context.Background()), "already running")
+	require.Zero(t, repo.productCalls)
+	require.NoError(t, client.Del(context.Background(), inventoryCacheLockKey(entry)).Err())
+	require.NoError(t, useCase.RefreshProductInventoryCaches(context.Background()))
+
+	updated, err := cache.GetProductInventoryTotals(context.Background(), 10)
+	require.NoError(t, err)
+	require.Equal(t, ".edu.invalid", updated.Items[0].Suffixes[0].Suffix)
+	require.EqualValues(t, 5, updated.Items[0].Suffixes[0].TotalAvailable)
+	require.True(t, server.Exists(oldMarker), "suffix-scoped corrections expire naturally and cannot affect the new suffix")
+}
+
 func TestInitializeInventoryDoesNotOverwriteWarmSnapshots(t *testing.T) {
 	server := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})

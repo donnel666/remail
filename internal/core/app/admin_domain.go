@@ -345,7 +345,9 @@ type AdminDomainCommandRepository interface {
 	WithTx(ctx context.Context, fn func(context.Context) error) error
 	ReserveAdminCommand(ctx context.Context, receipt AdminResourceCommandReceipt) ([]byte, bool, error)
 	CompleteAdminCommand(ctx context.Context, operatorUserID uint, idempotencyKey string, resultJSON []byte) error
+	LockAdminDomainCreation(ctx context.Context) error
 	LockAdminDomain(ctx context.Context, resourceID uint) (*domain.EmailResource, *domain.MailDomainResource, error)
+	LockAdminDomainForRecovery(ctx context.Context, resourceID uint) (*domain.EmailResource, *domain.MailDomainResource, error)
 	LockAdminDomainMailServer(ctx context.Context, mailServerID uint) (*domain.MailServer, error)
 	CreateAdminDomain(ctx context.Context, root *domain.EmailResource, resource *domain.MailDomainResource) error
 	SaveAdminDomain(ctx context.Context, root *domain.EmailResource, resource *domain.MailDomainResource, expectedVersion uint64, previousOwnerID uint) error
@@ -430,6 +432,9 @@ func (s *AdminDomainCommandService) Create(ctx context.Context, command AdminDom
 		if err != nil || replayed {
 			return err
 		}
+		if err := s.repo.LockAdminDomainCreation(txCtx); err != nil {
+			return err
+		}
 		owner, err = s.validateOwner(txCtx, command.OwnerUserID, purpose)
 		if err != nil {
 			return err
@@ -499,7 +504,13 @@ func (s *AdminDomainCommandService) mutate(ctx context.Context, command AdminDom
 		if err != nil || replayed {
 			return err
 		}
-		root, resource, err := s.repo.LockAdminDomain(txCtx, command.ResourceID)
+		var root *domain.EmailResource
+		var resource *domain.MailDomainResource
+		if command.Action == AdminDomainRecover {
+			root, resource, err = s.repo.LockAdminDomainForRecovery(txCtx, command.ResourceID)
+		} else {
+			root, resource, err = s.repo.LockAdminDomain(txCtx, command.ResourceID)
+		}
 		if err != nil {
 			return err
 		}

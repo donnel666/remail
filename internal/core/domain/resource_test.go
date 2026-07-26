@@ -453,11 +453,24 @@ func TestTLD(t *testing.T) {
 		{"sub.example.co.uk", ".co.uk"},
 		{"example.com.cn", ".com.cn"},
 		{"example.net.ar", ".net.ar"},
+		{"school.edu.kg", ".edu.kg"},
 	}
 	for _, tt := range tests {
 		if got := TLD(tt.domain); got != tt.want {
 			t.Fatalf("TLD(%q) = %q, want %q", tt.domain, got, tt.want)
 		}
+	}
+}
+
+func TestTLDWithCustomAddition(t *testing.T) {
+	if got := TLDWithCustom("mail.school.edu.invalid", "edu.invalid"); got != ".edu.invalid" {
+		t.Fatalf("TLDWithCustom() = %q, want .edu.invalid", got)
+	}
+}
+
+func TestRegistrableDomainWithCustomAddition(t *testing.T) {
+	if got := RegistrableDomainWithCustom("mail.school.edu.invalid", "edu.invalid"); got != "school.edu.invalid" {
+		t.Fatalf("RegistrableDomainWithCustom() = %q, want school.edu.invalid", got)
 	}
 }
 
@@ -467,6 +480,7 @@ func TestNormalizeDomainTLD(t *testing.T) {
 		".CN":     "cn",
 		"@co.uk":  "co.uk",
 		".com.cn": "com.cn",
+		"edu.kg":  "edu.kg",
 	} {
 		got, err := NormalizeDomainTLD(input)
 		if err != nil || got != want {

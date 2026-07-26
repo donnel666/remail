@@ -2143,6 +2143,11 @@ func writeCoreError(c *gin.Context, err error) {
 			"message":   "Domain already exists.",
 			"requestId": rid,
 		})
+	case errors.Is(err, coredomain.ErrDomainSubdomainLimit):
+		c.JSON(http.StatusConflict, gin.H{
+			"message":   "Domain subdomain limit reached.",
+			"requestId": rid,
+		})
 	case errors.Is(err, coredomain.ErrResourceHasAllocation):
 		c.JSON(http.StatusConflict, gin.H{
 			"message":   "Resource has an active allocation.",

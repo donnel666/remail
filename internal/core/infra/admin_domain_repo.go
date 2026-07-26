@@ -276,6 +276,28 @@ func (r *AdminResourceRepo) LockAdminDomain(ctx context.Context, resourceID uint
 	return root.toDomain(), resource.toDomain(), nil
 }
 
+func (r *AdminResourceRepo) LockAdminDomainCreation(ctx context.Context) error {
+	_, err := lockDomainCreationPolicy(r.dbFor(ctx))
+	return err
+}
+
+func (r *AdminResourceRepo) LockAdminDomainForRecovery(ctx context.Context, resourceID uint) (*domain.EmailResource, *domain.MailDomainResource, error) {
+	policy, err := lockDomainCreationPolicy(r.dbFor(ctx))
+	if err != nil {
+		return nil, nil, err
+	}
+	root, resource, err := r.LockAdminDomain(ctx, resourceID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if resource.Status == domain.DomainStatusDeleted {
+		if err := enforceDomainSubdomainLimit(r.dbFor(ctx), resource.Domain, policy); err != nil {
+			return nil, nil, err
+		}
+	}
+	return root, resource, nil
+}
+
 func (r *AdminResourceRepo) LockAdminDomainMailServer(ctx context.Context, mailServerID uint) (*domain.MailServer, error) {
 	if mailServerID == 0 {
 		return nil, domain.ErrMailServerNotFound
@@ -317,7 +339,7 @@ func (r *AdminResourceRepo) SaveAdminDomain(ctx context.Context, root *domain.Em
 	resourceUpdate := db.Model(&DomainResourceModel{}).
 		Where("id = ?", resource.ID).
 		Updates(map[string]any{
-			"owner_user_id": root.OwnerUserID, "domain": resource.Domain, "domain_tld": domain.TLD(resource.Domain),
+			"owner_user_id":  root.OwnerUserID,
 			"mail_server_id": resource.MailServerID, "purpose": string(resource.Purpose), "status": string(resource.Status),
 			"allow_new_bindings":    resource.AllowNewBindings,
 			"validation_generation": resource.ValidationGeneration, "validation_failures": resource.ValidationFailures,

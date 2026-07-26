@@ -2,10 +2,13 @@ package api
 
 import (
 	"context"
+	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	settingsdomain "github.com/donnel666/remail/internal/systemsettings/domain"
 	"github.com/donnel666/remail/internal/systemsettings/infra"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/glebarez/sqlite"
@@ -57,5 +60,34 @@ func TestRuntimeSettingsSyncPeriodicallyReconcilesMissedPublish(t *testing.T) {
 
 	require.Eventually(t, func() bool {
 		return runtimeconfig.Int("smtp_task_retry_count", 3, 0) == 4
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestRuntimeSettingsSyncRetriesHookBeforeReplacingLocalSnapshot(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:system-settings-runtime-hook-retry?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&infra.SettingModel{}))
+
+	module, err := NewModule(db, nil)
+	require.NoError(t, err)
+	module.runtimeSync.reconcileInterval = 10 * time.Millisecond
+	var attempts atomic.Int32
+	hookErr := errors.New("temporary hook failure")
+	module.SetRuntimeUpdateHook(func(_ context.Context, _ []settingsdomain.Setting) error {
+		if attempts.Add(1) == 1 {
+			return hookErr
+		}
+		return nil
+	})
+	stop := module.Start(context.Background())
+	t.Cleanup(func() { stop(context.Background()) })
+	t.Cleanup(func() { runtimeconfig.Replace(nil) })
+
+	repo := infra.NewRepository(db)
+	_, err = repo.Upsert(context.Background(), "smtp_task_retry_count", "4")
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		return attempts.Load() >= 2 && runtimeconfig.Int("smtp_task_retry_count", 3, 0) == 4
 	}, time.Second, 10*time.Millisecond)
 }

@@ -6,6 +6,7 @@ import (
 
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	"github.com/donnel666/remail/internal/systemsettings/app"
+	settingsdomain "github.com/donnel666/remail/internal/systemsettings/domain"
 	"github.com/donnel666/remail/internal/systemsettings/infra"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/redis/go-redis/v9"
@@ -66,5 +67,17 @@ func (m *Module) Start(ctx context.Context) func(context.Context) {
 func (m *Module) Close(ctx context.Context) {
 	if m != nil && m.runtimeSync != nil {
 		m.runtimeSync.Close(ctx)
+	}
+}
+
+func (m *Module) SetRuntimeUpdateHook(hook func(context.Context, []settingsdomain.Setting) error) {
+	if m == nil {
+		return
+	}
+	if m.Settings != nil {
+		m.Settings.SetRuntimeUpdateHook(hook)
+	}
+	if m.runtimeSync != nil {
+		m.runtimeSync.SetRuntimeUpdateHook(hook)
 	}
 }

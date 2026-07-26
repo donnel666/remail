@@ -3,6 +3,7 @@ package infra
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"github.com/donnel666/remail/internal/core/domain"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	"github.com/donnel666/remail/internal/platform/testmysql"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
@@ -226,6 +228,127 @@ func TestResourceSchemaConstraintsMySQL(t *testing.T) {
 		"bind@example.com",
 		"pending",
 	).Error)
+}
+
+func TestDomainTLDReindexAndSubdomainLimitMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	repo := NewResourceRepo(db)
+	runtimeconfig.Delete("domain_custom_tlds")
+	t.Cleanup(func() {
+		runtimeconfig.Delete("domain_custom_tlds")
+	})
+	require.NoError(t, db.Exec("INSERT INTO system_settings (`key`, value) VALUES "+
+		"('domain_custom_tlds', ''), "+
+		"('domain_max_subdomains_per_registrable_domain', '3') "+
+		"ON DUPLICATE KEY UPDATE value = VALUES(value)").Error)
+
+	require.NoError(t, db.Exec(
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?)",
+		1, "domain-limit@test.local", "hash", "supplier",
+	).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO mail_servers(id, owner_user_id, server_address, mx_record, status) VALUES (?, ?, ?, ?, ?)",
+		200, 1, "mx.domain-limit.test", "mx.domain-limit.test", "online",
+	).Error)
+
+	create := func(name string) error {
+		return repo.CreateDomain(context.Background(),
+			&domain.EmailResource{Type: domain.ResourceTypeDomain, OwnerUserID: 1},
+			&domain.MailDomainResource{Domain: name, MailServerID: 200, Purpose: domain.PurposeNotSale, Status: domain.DomainStatusAbnormal},
+		)
+	}
+	require.NoError(t, create("one.school.edu.invalid"))
+
+	var storedTLD string
+	require.NoError(t, db.Raw("SELECT domain_tld FROM domain_resources WHERE domain = ?", "one.school.edu.invalid").Scan(&storedTLD).Error)
+	require.Equal(t, ".invalid", storedTLD)
+	require.NoError(t, db.Exec("UPDATE system_settings SET value = ? WHERE `key` = ?", "edu.invalid", "domain_custom_tlds").Error)
+	require.NoError(t, repo.ReindexDomainTLDs(context.Background()))
+	require.NoError(t, db.Raw("SELECT domain_tld FROM domain_resources WHERE domain = ?", "one.school.edu.invalid").Scan(&storedTLD).Error)
+	require.Equal(t, ".edu.invalid", storedTLD)
+
+	require.NoError(t, create("two.school.edu.invalid"))
+	require.NoError(t, create("three.school.edu.invalid"))
+	require.ErrorIs(t, create("four.school.edu.invalid"), domain.ErrDomainSubdomainLimit)
+	require.NoError(t, create("school.edu.invalid"), "the registrable domain itself must not consume a subdomain slot")
+
+	require.NoError(t, db.Exec("UPDATE system_settings SET value = '4' WHERE `key` = ?", domainMaxSubdomainsSettingKey).Error)
+	require.NoError(t, create("four.school.edu.invalid"))
+	require.NoError(t, db.Exec("UPDATE domain_resources SET status = ? WHERE domain = ?", string(domain.DomainStatusDeleted), "four.school.edu.invalid").Error)
+	require.NoError(t, db.Exec("UPDATE system_settings SET value = '3' WHERE `key` = ?", domainMaxSubdomainsSettingKey).Error)
+	adminRepo := NewAdminResourceRepo(db)
+	var resourceID uint
+	require.NoError(t, db.Raw("SELECT id FROM domain_resources WHERE domain = ?", "four.school.edu.invalid").Scan(&resourceID).Error)
+	err := adminRepo.WithTx(context.Background(), func(txCtx context.Context) error {
+		_, _, err := adminRepo.LockAdminDomainForRecovery(txCtx, resourceID)
+		return err
+	})
+	require.ErrorIs(t, err, domain.ErrDomainSubdomainLimit)
+}
+
+func TestDomainSubdomainLimitUsesCurrentReadAfterRepeatableReadSnapshotMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	require.NoError(t, db.Exec("INSERT INTO system_settings (`key`, value) VALUES "+
+		"('domain_custom_tlds', 'edu.invalid'), "+
+		"('domain_max_subdomains_per_registrable_domain', '1') "+
+		"ON DUPLICATE KEY UPDATE value = VALUES(value)").Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?)",
+		1, "domain-limit-current-read@test.local", "hash", "supplier",
+	).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO mail_servers(id, owner_user_id, server_address, mx_record, status) VALUES (?, ?, ?, ?, ?)",
+		200, 1, "mx.domain-limit-current-read.test", "mx.domain-limit-current-read.test", "online",
+	).Error)
+
+	txs := []*gorm.DB{
+		db.Begin(&sql.TxOptions{Isolation: sql.LevelRepeatableRead}),
+		db.Begin(&sql.TxOptions{Isolation: sql.LevelRepeatableRead}),
+	}
+	for _, tx := range txs {
+		require.NoError(t, tx.Error)
+		var count int64
+		require.NoError(t, tx.Model(&DomainResourceModel{}).Count(&count).Error)
+		require.Zero(t, count)
+	}
+	t.Cleanup(func() {
+		for _, tx := range txs {
+			_ = tx.Rollback().Error
+		}
+	})
+
+	results := make(chan error, len(txs))
+	for i, tx := range txs {
+		go func(index int, tx *gorm.DB) {
+			root := &domain.EmailResource{Type: domain.ResourceTypeDomain, OwnerUserID: 1}
+			resource := &domain.MailDomainResource{
+				Domain: fmt.Sprintf("sub-%d.school.edu.invalid", index+1), MailServerID: 200,
+				Purpose: domain.PurposeNotSale, Status: domain.DomainStatusAbnormal,
+			}
+			err := createDomainTx(tx, root, resource)
+			if err == nil {
+				err = tx.Commit().Error
+			} else {
+				_ = tx.Rollback().Error
+			}
+			results <- err
+		}(i, tx)
+	}
+
+	succeeded, limited := 0, 0
+	for range txs {
+		err := <-results
+		switch {
+		case err == nil:
+			succeeded++
+		case errors.Is(err, domain.ErrDomainSubdomainLimit):
+			limited++
+		default:
+			require.NoError(t, err)
+		}
+	}
+	require.Equal(t, 1, succeeded)
+	require.Equal(t, 1, limited)
 }
 
 func TestResourceListIndexesMySQL(t *testing.T) {
@@ -1615,6 +1738,7 @@ func TestResourceRepoDeleteResourcesBatchWithLogDeletesMixedPrivateAndSkipsPubli
 func TestResourceRepoBulkFilterMutationsMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 	repo := NewResourceRepo(db)
+	require.NoError(t, db.Exec("INSERT INTO system_settings (`key`, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)", domainMaxSubdomainsSettingKey, "10").Error)
 
 	require.NoError(t, db.Exec(
 		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?)",

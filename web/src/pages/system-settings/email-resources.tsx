@@ -9,7 +9,7 @@ import type { SectionProps } from "./index";
 import { FormItem, FormLabel, SettingsCardHeader, SettingsFormGrid, SettingsInvalidValuesNotice, SettingsNumberField, SettingsSection } from "./settings-layout";
 import { EMAIL_RESOURCE_KEYS } from "./email-service-keys";
 const BYTES_PER_MB = 1024 * 1024;
-const NUMERIC_KEYS = EMAIL_RESOURCE_KEYS.filter((key) => key !== "microsoft_domain_whitelist");
+const NUMERIC_KEYS = EMAIL_RESOURCE_KEYS.filter((key) => key !== "microsoft_domain_whitelist" && key !== "domain_custom_tlds");
 
 export default function EmailResourceSection({ options, onBulkSave }: SectionProps) {
   const { t } = useTranslation();
@@ -21,9 +21,11 @@ export default function EmailResourceSection({ options, onBulkSave }: SectionPro
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : undefined;
   };
-  const domains = typeof form.microsoft_domain_whitelist === "string"
-    ? form.microsoft_domain_whitelist.split(/[\s,，]+/).map((domain) => domain.trim()).filter(Boolean)
+  const tags = (key: string) => typeof form[key] === "string"
+    ? String(form[key]).split(/[\s,，]+/).map((value) => value.trim()).filter(Boolean)
     : [];
+  const domains = tags("microsoft_domain_whitelist");
+  const customTLDs = tags("domain_custom_tlds");
   const invalidKeys = invalidNumericKeys(form, NUMERIC_KEYS);
   const save = async () => {
     setSaving(true);
@@ -40,6 +42,12 @@ export default function EmailResourceSection({ options, onBulkSave }: SectionPro
         <TagInput aria-label={t("微软邮箱域名白名单")} value={domains} separator={[",", "，", " ", "\n"]} allowDuplicates={false} addOnBlur showClear placeholder={t("输入邮箱域名后回车")} onChange={(values) => update("microsoft_domain_whitelist", values.map((value) => value.trim()).filter(Boolean).join(","))} style={{ width: "100%" }} />
         <p className="text-xs text-[var(--semi-color-text-2)]">{t("每个允许导入的微软邮箱域名单独显示；留空使用系统内置白名单")}</p>
       </FormItem>
+      <FormItem spanFull>
+        <FormLabel>{t("自定义 TLD")}</FormLabel>
+        <TagInput aria-label={t("自定义 TLD")} value={customTLDs} separator={[",", "，", " ", "\n"]} allowDuplicates={false} addOnBlur showClear placeholder={t("输入 TLD 后回车")} onChange={(values) => update("domain_custom_tlds", values.map((value) => value.trim()).filter(Boolean).join(","))} style={{ width: "100%" }} />
+        <p className="text-xs text-[var(--semi-color-text-2)]">{t("系统默认使用 Public Suffix List；这里仅填写需要人工补充的公共后缀，例如 edu.kg")}</p>
+      </FormItem>
+      <SettingsNumberField label={t("每个可注册域名最多子域名数")} description={t("根域名本身不计入限额")} value={number(form.domain_max_subdomains_per_registrable_domain)} onChange={(value) => update("domain_max_subdomains_per_registrable_domain", value)} min={1} max={1000} />
       <SettingsNumberField label={t("子地址默认日配额")} value={number(form.default_plus_daily_limit)} onChange={(value) => update("default_plus_daily_limit", value)} min={1} />
       <SettingsNumberField label={t("邮箱默认日配额")} value={number(form.default_mailbox_daily_limit)} onChange={(value) => update("default_mailbox_daily_limit", value)} min={1} />
       <SettingsNumberField label={t("验证最大连续失败次数")} value={number(form.resource_validation_max_failures)} onChange={(value) => update("resource_validation_max_failures", value)} min={1} />

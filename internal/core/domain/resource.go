@@ -2,11 +2,13 @@ package domain
 
 import (
 	"hash/crc32"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
 
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
+	"golang.org/x/net/publicsuffix"
 )
 
 // ResourceType represents the type of email resource.
@@ -39,9 +41,11 @@ func GeneratedMailboxBucket(email string) uint16 {
 }
 
 const (
-	DefaultPlusDailyLimit    = 10000
-	DefaultMailboxDailyLimit = 10000
-	maxConfiguredDailyLimit  = 2_147_483_647
+	DefaultPlusDailyLimit                    = 10000
+	DefaultMailboxDailyLimit                 = 10000
+	DefaultMaxSubdomainsPerRegistrableDomain = 3
+	maxConfiguredDailyLimit                  = 2_147_483_647
+	maxSubdomainsPerRegistrableDomain        = 1000
 )
 
 // MicrosoftResourceStatus represents the status of a Microsoft resource.
@@ -583,62 +587,6 @@ func (r *MailDomainResource) IsAllocatable() bool {
 		r.Status == DomainStatusNormal
 }
 
-var knownTwoPartTLDs = map[string]struct{}{
-	"ac.jp":  {},
-	"ac.th":  {},
-	"ac.uk":  {},
-	"co.in":  {},
-	"co.jp":  {},
-	"co.kr":  {},
-	"co.nz":  {},
-	"co.th":  {},
-	"co.uk":  {},
-	"co.za":  {},
-	"com.ar": {},
-	"com.au": {},
-	"com.br": {},
-	"com.cn": {},
-	"com.hk": {},
-	"com.mx": {},
-	"com.sg": {},
-	"com.tw": {},
-	"edu.cn": {},
-	"edu.hk": {},
-	"gen.in": {},
-	"go.jp":  {},
-	"go.th":  {},
-	"gov.cn": {},
-	"gov.uk": {},
-	"ne.jp":  {},
-	"ne.kr":  {},
-	"net.au": {},
-	"net.ar": {},
-	"net.br": {},
-	"net.cn": {},
-	"net.hk": {},
-	"net.in": {},
-	"net.nz": {},
-	"net.sg": {},
-	"net.th": {},
-	"net.tw": {},
-	"net.za": {},
-	"or.jp":  {},
-	"or.kr":  {},
-	"or.th":  {},
-	"org.ar": {},
-	"org.au": {},
-	"org.br": {},
-	"org.cn": {},
-	"org.hk": {},
-	"org.in": {},
-	"org.mx": {},
-	"org.nz": {},
-	"org.sg": {},
-	"org.tw": {},
-	"org.uk": {},
-	"org.za": {},
-}
-
 // NormalizeDomainName returns the canonical ASCII domain form accepted by Core.
 func NormalizeDomainName(value string) (string, error) {
 	canonical := normalizeDomainInput(value)
@@ -673,24 +621,50 @@ func NormalizeDomainTLD(value string) (string, error) {
 	return strings.TrimPrefix(normalized, "."), nil
 }
 
-// TLD extracts the normalized suffix used by resource filters.
+// TLD extracts the normalized suffix used by resource filters. The baseline is
+// Mozilla's Public Suffix List embedded by x/net; administrators may add newer
+// or private suffixes through domain_custom_tlds.
 func TLD(value string) string {
+	return TLDWithCustom(value, runtimeconfig.String("domain_custom_tlds", ""))
+}
+
+func TLDWithCustom(value, customTLDs string) string {
 	canonical, err := NormalizeDomainName(value)
 	if err != nil {
 		return ""
 	}
 
-	parts := strings.Split(canonical, ".")
-	if len(parts) < 2 {
+	suffix, _ := publicsuffix.PublicSuffix(canonical)
+	for _, candidate := range strings.FieldsFunc(customTLDs, func(r rune) bool { return r == ',' || r == '，' || unicode.IsSpace(r) }) {
+		candidate = normalizeDomainInput(candidate)
+		if len(candidate) > 63 || validateDomainLabels(candidate) != nil {
+			continue
+		}
+		if len(candidate) > len(suffix) && (canonical == candidate || strings.HasSuffix(canonical, "."+candidate)) {
+			suffix = candidate
+		}
+	}
+	if suffix == "" {
 		return ""
 	}
+	return "." + suffix
+}
 
-	lastTwo := strings.Join(parts[len(parts)-2:], ".")
-	if _, ok := knownTwoPartTLDs[lastTwo]; ok {
-		return "." + lastTwo
+// RegistrableDomainWithCustom returns the eTLD+1 used to group subdomain resources.
+func RegistrableDomainWithCustom(value, customTLDs string) string {
+	canonical, err := NormalizeDomainName(value)
+	if err != nil {
+		return ""
 	}
-
-	return "." + parts[len(parts)-1]
+	suffix := strings.TrimPrefix(TLDWithCustom(canonical, customTLDs), ".")
+	if suffix == "" || canonical == suffix {
+		return canonical
+	}
+	prefix := strings.TrimSuffix(canonical, "."+suffix)
+	if dot := strings.LastIndexByte(prefix, '.'); dot >= 0 {
+		prefix = prefix[dot+1:]
+	}
+	return prefix + "." + suffix
 }
 
 // microsoftEmailWhitelist is the closed set of Microsoft consumer mailbox domains
@@ -761,6 +735,14 @@ func DefaultPlusDailyLimitValue() int {
 
 func DefaultMailboxDailyLimitValue() int {
 	return min(runtimeconfig.Int("default_mailbox_daily_limit", DefaultMailboxDailyLimit, 1), maxConfiguredDailyLimit)
+}
+
+func MaxSubdomainsPerRegistrableDomain(value string) int {
+	parsed, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || parsed < 1 {
+		return DefaultMaxSubdomainsPerRegistrableDomain
+	}
+	return min(parsed, maxSubdomainsPerRegistrableDomain)
 }
 
 func normalizeDomainInput(value string) string {

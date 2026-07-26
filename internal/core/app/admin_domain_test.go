@@ -87,6 +87,9 @@ func (s *adminDomainOwnersStub) ValidateTargetOwner(_ context.Context, id uint) 
 type adminDomainCommandRepoStub struct {
 	root                  *domain.EmailResource
 	resource              *domain.MailDomainResource
+	creationLocks         int
+	domainLocks           int
+	recoveryLocks         int
 	saveCalls             int
 	savedAllowNewBindings bool
 }
@@ -103,7 +106,18 @@ func (*adminDomainCommandRepoStub) CompleteAdminCommand(context.Context, uint, s
 	return nil
 }
 
+func (s *adminDomainCommandRepoStub) LockAdminDomainCreation(context.Context) error {
+	s.creationLocks++
+	return nil
+}
+
 func (s *adminDomainCommandRepoStub) LockAdminDomain(context.Context, uint) (*domain.EmailResource, *domain.MailDomainResource, error) {
+	s.domainLocks++
+	return s.root, s.resource, nil
+}
+
+func (s *adminDomainCommandRepoStub) LockAdminDomainForRecovery(context.Context, uint) (*domain.EmailResource, *domain.MailDomainResource, error) {
+	s.recoveryLocks++
 	return s.root, s.resource, nil
 }
 
@@ -222,5 +236,27 @@ func TestAdminDomainEditUpdatesNewBindingPermission(t *testing.T) {
 	}
 	if repo.saveCalls != 1 || !repo.savedAllowNewBindings {
 		t.Fatalf("SaveAdminDomain() calls = %d, saved permission = %t; want 1, true", repo.saveCalls, repo.savedAllowNewBindings)
+	}
+}
+
+func TestAdminDomainRecoverUsesRecoveryLimitLock(t *testing.T) {
+	repo := &adminDomainCommandRepoStub{
+		root:     &domain.EmailResource{ID: 42, Type: domain.ResourceTypeDomain, OwnerUserID: 9, Version: 1},
+		resource: &domain.MailDomainResource{ID: 42, Domain: "one.example.com", Purpose: domain.PurposeNotSale, Status: domain.DomainStatusDeleted},
+	}
+	service := NewAdminDomainCommandService(repo, nil, NewResourceValidationUseCase(nil, nil, nil, nil), &adminDomainLogStub{})
+	service.SetPorts(&adminDomainOwnersStub{owners: map[uint]AdminOwnerSummary{
+		9: {ID: 9, Role: "supplier", Enabled: true},
+	}}, nil)
+
+	_, err := service.ApplyAction(context.Background(), AdminDomainEditCommand{
+		ResourceID: 42, Version: 1, Action: AdminDomainRecover,
+		OperatorUserID: 1, IdempotencyKey: "recover-with-limit-lock",
+	})
+	if err != nil {
+		t.Fatalf("ApplyAction() unexpected error: %v", err)
+	}
+	if repo.recoveryLocks != 1 || repo.domainLocks != 0 {
+		t.Fatalf("recovery locks = %d, ordinary locks = %d; want 1, 0", repo.recoveryLocks, repo.domainLocks)
 	}
 }

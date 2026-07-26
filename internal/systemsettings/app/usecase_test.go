@@ -79,6 +79,42 @@ func TestSystemSettingMutationsAreSerializedWithRuntimePublish(t *testing.T) {
 	require.Equal(t, "second", runtimeconfig.String("concurrent_test_key", ""))
 }
 
+func TestRuntimeUpdateHookRunsForSameValueSoFailedSideEffectsCanRetry(t *testing.T) {
+	repo := &fakeRepository{setting: &domain.Setting{Key: "domain_custom_tlds", Value: "edu.kg"}}
+	uc := NewSystemSettingsUseCase(repo, &fakeOperationLogs{})
+	var received []domain.Setting
+	uc.SetRuntimeUpdateHook(func(_ context.Context, settings []domain.Setting) error {
+		received = append(received, settings...)
+		return nil
+	})
+	t.Cleanup(func() { runtimeconfig.Delete("domain_custom_tlds") })
+
+	_, err := uc.BulkUpsert(context.Background(), []domain.Setting{{Key: "domain_custom_tlds", Value: "edu.kg"}}, MutationMeta{})
+	require.NoError(t, err)
+	require.Equal(t, []domain.Setting{{Key: "domain_custom_tlds", Value: "edu.kg"}}, received)
+	_, err = uc.Upsert(context.Background(), "domain_custom_tlds", "edu.kg,edu.invalid", MutationMeta{})
+	require.NoError(t, err)
+	require.Equal(t, []domain.Setting{
+		{Key: "domain_custom_tlds", Value: "edu.kg"},
+		{Key: "domain_custom_tlds", Value: "edu.kg,edu.invalid"},
+	}, received)
+}
+
+func TestRuntimeUpdateHookFailureIsReturnedBeforeLocalRuntimeChanges(t *testing.T) {
+	repo := &fakeRepository{setting: &domain.Setting{Key: "domain_custom_tlds", Value: "edu.kg"}}
+	uc := NewSystemSettingsUseCase(repo, &fakeOperationLogs{})
+	hookErr := errors.New("reindex failed")
+	uc.SetRuntimeUpdateHook(func(context.Context, []domain.Setting) error { return hookErr })
+	runtimeconfig.Set("domain_custom_tlds", "edu.kg")
+	t.Cleanup(func() { runtimeconfig.Delete("domain_custom_tlds") })
+
+	saved, err := uc.Upsert(context.Background(), "domain_custom_tlds", "edu.invalid", MutationMeta{})
+	require.ErrorIs(t, err, hookErr)
+	require.Equal(t, "edu.invalid", saved.Value)
+	require.Equal(t, "edu.invalid", repo.setting.Value)
+	require.Equal(t, "edu.kg", runtimeconfig.String("domain_custom_tlds", ""))
+}
+
 func TestNewlyPublishedAnnouncementsOnlyReturnsNewlyEnabledItems(t *testing.T) {
 	before := []domain.Setting{{Key: "announcements", Value: `[
 		{"id":1,"title":"old","content":"old","type":"default","startTime":"","endTime":"","enabled":true},

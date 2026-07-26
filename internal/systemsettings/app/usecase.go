@@ -26,6 +26,7 @@ type SystemSettingsUseCase struct {
 	logs          governanceapp.OperationLogPort
 	publisher     RuntimeSettingsPublisher
 	announcements AnnouncementPublisher
+	runtimeHook   func(context.Context, []domain.Setting) error
 	mu            sync.Mutex
 }
 
@@ -48,6 +49,12 @@ func (uc *SystemSettingsUseCase) SetRuntimeSettingsPublisher(publisher RuntimeSe
 func (uc *SystemSettingsUseCase) SetAnnouncementPublisher(publisher AnnouncementPublisher) {
 	if uc != nil {
 		uc.announcements = publisher
+	}
+}
+
+func (uc *SystemSettingsUseCase) SetRuntimeUpdateHook(hook func(context.Context, []domain.Setting) error) {
+	if uc != nil {
+		uc.runtimeHook = hook
 	}
 }
 
@@ -106,9 +113,12 @@ func (uc *SystemSettingsUseCase) Upsert(ctx context.Context, key, value string, 
 	if err != nil {
 		return nil, err
 	}
+	committed = true
+	if err := uc.runRuntimeUpdateHook(ctx, []domain.Setting{*setting}); err != nil {
+		return setting, err
+	}
 	runtimeconfig.Set(setting.Key, setting.Value)
 	uc.publishRuntimeSettings(ctx)
-	committed = true
 	return setting, nil
 }
 
@@ -171,9 +181,12 @@ func (uc *SystemSettingsUseCase) BulkUpsert(ctx context.Context, settings []doma
 	if err != nil {
 		return nil, err
 	}
+	committed = true
+	if err := uc.runRuntimeUpdateHook(ctx, saved); err != nil {
+		return saved, err
+	}
 	runtimeconfig.SetMany(saved)
 	uc.publishRuntimeSettings(ctx)
-	committed = true
 	return saved, nil
 }
 
@@ -218,6 +231,16 @@ func (uc *SystemSettingsUseCase) publishRuntimeSettings(ctx context.Context) {
 		// another replica if Redis is temporarily unavailable.
 		slog.Warn("publish system settings runtime update failed", "error", err)
 	}
+}
+
+func (uc *SystemSettingsUseCase) runRuntimeUpdateHook(ctx context.Context, settings []domain.Setting) error {
+	if uc == nil || uc.runtimeHook == nil || len(settings) == 0 {
+		return nil
+	}
+	if err := uc.runtimeHook(ctx, settings); err != nil {
+		return fmt.Errorf("apply runtime setting side effect: %w", err)
+	}
+	return nil
 }
 
 func (uc *SystemSettingsUseCase) publishAnnouncements(ctx context.Context, announcements []runtimeconfig.Announcement) {

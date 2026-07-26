@@ -1,5 +1,7 @@
 export const EMAIL_RESOURCE_KEYS = [
   "microsoft_domain_whitelist",
+  "domain_custom_tlds",
+  "domain_max_subdomains_per_registrable_domain",
   "default_plus_daily_limit",
   "default_mailbox_daily_limit",
   "resource_validation_max_failures",
