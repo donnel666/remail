@@ -39,7 +39,6 @@ import {
   deleteMicrosoftResource,
   deleteMicrosoftResourcesByFilter,
   deleteMicrosoftResourcesBatch,
-  getCurrentSupplierApplication,
   listOwnedMicrosoftResources,
   publishMicrosoftResource,
   publishMicrosoftResourcesByFilter,
@@ -70,7 +69,10 @@ import {
   toEmailResource,
 } from "./resources/model";
 import { renderStatusTag } from "./resources/resource-status-tag";
-import { SupplierApplicationModal } from "./resources/supplier-application-modal";
+import {
+  ensureSupplierRole,
+  SupplierApplicationModal,
+} from "./resources/supplier-application-modal";
 import { useSelectionNotification } from "./resources/use-selection-notification";
 
 type StatusFilter =
@@ -82,10 +84,6 @@ type StatusFilter =
   | "abnormal"
   | "disabled";
 type BooleanFilter = "all" | "yes" | "no";
-
-function hasSupplierRole(role?: string | null) {
-  return role === "supplier" || role === "admin" || role === "super_admin";
-}
 
 function isEmailResource(item: EmailResource | null): item is EmailResource {
   return item !== null;
@@ -131,7 +129,6 @@ export default function MicrosoftEmails() {
   const [publishingBatch, setPublishingBatch] = useState(false);
   const [deletingBatch, setDeletingBatch] = useState(false);
   const dateRangePresets = useMemo(() => createDateRangePresets(t), [t]);
-  const canPublishForSale = hasSupplierRole(currentUser?.role);
   const [debouncedSearchKeyword, flushSearchKeyword] =
     useDebouncedValue(searchKeyword);
 
@@ -388,28 +385,13 @@ export default function MicrosoftEmails() {
     }
   }, [microsoftBulkFilter, t, total]);
 
-  const promptSupplierApplication = useCallback(async () => {
-    try {
-      const response = await getCurrentSupplierApplication();
-      if (response.application?.status === "reviewing") {
-        Toast.info(t("Supplier application is already under review."));
-        return;
-      }
-      setSupplierApplicationOpen(true);
-    } catch (error) {
-      Toast.error(getIamErrorMessage(t, error, "Supplier application failed."));
-    }
-  }, [t]);
-
-  const ensureCanPublishForSale = useCallback(async () => {
-    if (canPublishForSale) return true;
-
-    const latestUser = await refreshCurrentUser();
-    if (hasSupplierRole(latestUser?.role)) return true;
-
-    await promptSupplierApplication();
-    return false;
-  }, [canPublishForSale, promptSupplierApplication, refreshCurrentUser]);
+  const ensureCanPublishForSale = useCallback(
+    () =>
+      ensureSupplierRole(currentUser?.role, refreshCurrentUser, () => {
+        setSupplierApplicationOpen(true);
+      }),
+    [currentUser?.role, refreshCurrentUser]
+  );
 
   const handleSellResource = useCallback(async (record: EmailResource) => {
     if (record.forSale) return;

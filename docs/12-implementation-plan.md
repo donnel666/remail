@@ -18,6 +18,7 @@
 | 2026-07-12 | V1.11 | Codex | 完成自动化代码交付收口：Core credential Port 消除 Token/Fetch 跨域直写，Alias expedite 收敛为唯一受审计入口，再删除五个无读取用例索引；async accepted/import queue 禁敏补齐。功能/事务/migration、前端 9/56、生成、vet/lint 和零 mock/直连扫描通过，不再把压测作为本次门禁。 |
 | 2026-07-12 | V1.12 | Codex | 按简单稳定优先收敛管理员 Microsoft：删除专项大规模性能 harness 和应用内 Redis 管理限流，保留分页上限、查询次数和普通 EXPLAIN smoke；MySQL 冲突重试收敛为 3 次；验收聚焦功能、事务、迁移、禁敏和 UI 契约。 |
 | 2026-07-12 | V1.13 | Codex | 将管理员 Microsoft 按冷接口实施：列表/详情/Tab 直接有界读取源表，不建缓存或投影表；移除 dead TaskView 批量查询、重复列表索引和固定高并发测试，最多按 10 个管理员同时提交验证事务、幂等和 single-flight。 |
+| 2026-07-26 | V1.14 | Codex | 普通用户供应商权限申请改为非订单工单，管理员看到工单后在用户管理中人工授予 supplier 角色，不建设独立审批流程。 |
 
 > 本文用于把 DDD 设计落到可执行节奏。
 >
@@ -118,7 +119,7 @@ flowchart LR
 |------|------|
 | super_admin/admin | 激活、登录、项目商品、资源诊断、代理池、订单列表、任务/SystemLog 简表。 |
 | supplier | 上传资源、选择 Microsoft 资源长短效、单个或批量发布自有 Microsoft 资源出售、查看自己的资源状态。 |
-| user | 项目列表、下单、订单详情、服务结果、API Key 管理、上传自用 Microsoft 私有资源并提交供应商申请。 |
+| user | 项目列表、下单、订单详情、服务结果、API Key 管理、上传自用 Microsoft 私有资源并通过非订单工单提交供应商权限申请。 |
 
 一期最少 API：
 

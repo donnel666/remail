@@ -15,6 +15,7 @@
 | 2026-07-17 | V1.8 | Codex | 补充管理员用户管理落地：`GET /v1/admin/users` 增加 `role/enabled/userGroupId/created*` 过滤与 `facets`；新增管理员建号 `POST /v1/admin/users`、资料/邮箱/密码编辑扩展 `PATCH`、单条 `DELETE`、`selection`(ids/filter) 批量启停/删除/强退，以及 `GET .../{userId}/invitations` 邀请关系总览。批量恒排除 `super_admin`、`filter` 模式必须携带 `filter` 对象、无条数上限（大量匹配由服务端分块执行）；沿用既有 `iam:user` read/write/operate 权限，不新增权限或改变 RBAC/Casbin 语义。 |
 | 2026-07-19 | V1.9 | Codex | 用户生命周期统一为 `active/disabled/deleted`，`status` 是唯一状态源；管理员删除改为逻辑删除并保留订单、钱包、资源和供应商申请等跨 BC 历史。现有 API `enabled` 字段和筛选保持兼容，由 `status=active` 派生。 |
 | 2026-07-20 | V1.10 | Codex | 新增 `governance:log(read/operate)` 权限目录与角色基线；admin/super_admin 可读，operate 仅默认授予 super_admin，日志清理仍额外校验 super_admin 角色。 |
+| 2026-07-26 | V1.11 | Codex | 供应商权限申请改为 BC-AFTERSALE 非订单工单：标题固定为“供应商申请”，正文为用户填写内容；管理员看到工单后通过用户管理人工将角色改为 supplier，不再进入独立审批状态机。旧 SupplierApplication 数据和接口仅保留存量兼容。 |
 
 > 通用域。BC-IAM 回答“你是谁、你能做什么”。管理员、供应商、普通用户共用一张用户表。
 
@@ -41,7 +42,7 @@
 | `ThirdPartyIdentity` | 第三方账号绑定 |
 | `UserLoginDevice` | 设备指纹和最近登录 |
 | `CasbinRule` | Casbin policy 存储 |
-| `SupplierApplication` | 普通用户申请 supplier 权限的审核记录 |
+| `SupplierApplication` | 历史供应商申请审核记录；新申请不再写入。 |
 
 RBAC 角色：
 
@@ -163,7 +164,7 @@ eft = allow/deny
 | INV-I7 | 权限变更必须写 OperationLog，并刷新 Casbin enforcer/cache。 |
 | INV-I8 | 首次激活只允许发生一次。 |
 | INV-I9 | 已有 `super_admin` 不能被管理员用户命令修改或强制退出；提升新 `super_admin` 和增删 `sensitive` policy 必须具备 `iam:permission/sensitive`。 |
-| INV-I10 | 同一用户同时只能有一个 `reviewing` 供应商申请。审批通过只提升角色，不自动发布任何资源。 |
+| INV-I10 | 普通 `user` 不能发布公开供给；供应商申请工单不自动改角色或发布资源，管理员必须人工将用户角色改为 `supplier`。 |
 
 ---
 
@@ -225,23 +226,13 @@ eft = allow/deny
 | 执行找回密码 | `POST /v1/password/reset` 必须提交邮箱验证码，邮箱验证码控制最终重置动作。 |
 | Token 规则 | token 只使用一次、最长有效 5 分钟；前端每次提交后重置组件，后端始终执行 Siteverify，不信任客户端结果。 |
 
-供应商申请补充设计：
+供应商权限申请补充设计：
 
-| 方法 | URI | 说明 |
-|------|-----|------|
-| `POST` | `/v1/suppliers/applications` | 当前普通用户提交供应商申请，只提交申请理由。 |
-| `GET` | `/v1/suppliers/applications/current` | 查询当前用户最新供应商申请，用于“出售”按钮分流。 |
+普通用户点击资源“出售”时，前端直接打开供应商申请弹窗。提交后调用 BC-AFTERSALE `POST /v1/tickets` 创建 `ticketType=general` 的非订单工单，标题固定为“供应商申请”，首条消息只使用用户填写的申请内容，不创建独立供应商申请记录或审核状态。
 
-`SupplierApplication` 状态：
+管理员在工单列表看到申请后，通过 `PATCH /v1/admin/users/{userId}` 人工将申请人的 RBAC `role` 改为 `supplier`，再按实际处理结果回复或关闭工单。角色变更不自动发布任何 Microsoft/Domain 资源；用户成为 `supplier` 后仍需在资源页主动执行出售。
 
-```text
-reviewing
-approved
-rejected
-canceled
-```
-
-普通用户点击资源“出售”时，如果没有 `reviewing` 申请，则提交申请理由；如果已有 `reviewing` 申请，则前端提示“供应商申请正在审核中”。管理员审批通过后将申请人 RBAC `role` 设置为 `supplier`。审批通过不改变任何 Microsoft 资源的 `forSale`，用户仍需在资源页主动发布出售。
+旧 `/v1/suppliers/applications`、`/v1/suppliers/applications/current` 及后台审批接口和 `SupplierApplication` 数据仅用于兼容存量记录，不参与新的出售入口和供应商权限申请流程。
 
 后台：
 
@@ -266,9 +257,6 @@ canceled
 | `GET` | `/v1/admin/invites` | 邀请码查询。 |
 | `POST` | `/v1/admin/invites` | 创建邀请码。 |
 | `PATCH` | `/v1/admin/invites/{code}` | 启停/调整邀请码。 |
-| `GET` | `/v1/admin/suppliers/applications` | 供应商申请列表。 |
-| `POST` | `/v1/admin/suppliers/applications/{applicationId}/approve` | 审批通过供应商申请，将申请人提升为 supplier。 |
-| `POST` | `/v1/admin/suppliers/applications/{applicationId}/reject` | 驳回供应商申请，必须记录安全审核原因。 |
 
 管理员 Microsoft 资源 owner 组合规则：
 

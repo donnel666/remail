@@ -39,7 +39,6 @@ import {
   deleteDomainResource,
   deleteDomainResourcesByFilter,
   deleteDomainResourcesBatch,
-  getCurrentSupplierApplication,
   listOwnedDomainResources,
   publishDomainResource,
   publishDomainResourcesByFilter,
@@ -61,7 +60,10 @@ import {
   normalizeDateRangeValue,
   type DateRangeValue,
 } from "./resources/date-range-filter";
-import { SupplierApplicationModal } from "./resources/supplier-application-modal";
+import {
+  ensureSupplierRole,
+  SupplierApplicationModal,
+} from "./resources/supplier-application-modal";
 import {
   isDomainAvailable,
   toDomainResource,
@@ -79,10 +81,6 @@ type StatusFilter =
   | "abnormal"
   | "disabled";
 type BooleanFilter = "all" | "yes" | "no";
-
-function hasSupplierRole(role?: string | null) {
-  return role === "supplier" || role === "admin" || role === "super_admin";
-}
 
 function renderDomainStatusTag(
   status: DomainStatus,
@@ -168,7 +166,6 @@ export default function DomainEmails() {
   const [resourceFacets, setResourceFacets] =
     useState<ResourceListResponse["facets"] | null>(null);
   const dateRangePresets = useMemo(() => createDateRangePresets(t), [t]);
-  const canPublishForSale = hasSupplierRole(currentUser?.role);
   const [debouncedSearchKeyword, flushSearchKeyword] =
     useDebouncedValue(searchKeyword);
 
@@ -389,28 +386,13 @@ export default function DomainEmails() {
     }
   }, [domainBulkFilter, t, total]);
 
-  const promptSupplierApplication = useCallback(async () => {
-    try {
-      const response = await getCurrentSupplierApplication();
-      if (response.application?.status === "reviewing") {
-        Toast.info(t("Supplier application is already under review."));
-        return;
-      }
-      setSupplierApplicationOpen(true);
-    } catch (error) {
-      Toast.error(getIamErrorMessage(t, error, "Supplier application failed."));
-    }
-  }, [t]);
-
-  const ensureCanPublishForSale = useCallback(async () => {
-    if (canPublishForSale) return true;
-
-    const latestUser = await refreshCurrentUser();
-    if (hasSupplierRole(latestUser?.role)) return true;
-
-    await promptSupplierApplication();
-    return false;
-  }, [canPublishForSale, promptSupplierApplication, refreshCurrentUser]);
+  const ensureCanPublishForSale = useCallback(
+    () =>
+      ensureSupplierRole(currentUser?.role, refreshCurrentUser, () => {
+        setSupplierApplicationOpen(true);
+      }),
+    [currentUser?.role, refreshCurrentUser]
+  );
 
   const markResourcesPublishedForSale = useCallback((resourceIds: number[]) => {
     const published = new Set(resourceIds);

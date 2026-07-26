@@ -3,12 +3,28 @@ import { Button, Modal, Space, TextArea, Toast } from "@douyinfe/semi-ui";
 import { useTranslation } from "react-i18next";
 
 import { getIamErrorMessage } from "@/lib/iam-errors";
-import { submitSupplierApplication } from "@/lib/resources-api";
+
+import { createTicket } from "../tickets/tickets-api";
 
 interface SupplierApplicationModalProps {
   open: boolean;
   onOpenChange: (value: boolean) => void;
   onSuccess: () => void;
+}
+
+function hasSupplierRole(role?: string | null) {
+  return role === "supplier" || role === "admin" || role === "super_admin";
+}
+
+export async function ensureSupplierRole(
+  currentRole: string | null | undefined,
+  refreshCurrentUser: () => Promise<{ role?: string | null } | null>,
+  openApplication: () => void
+) {
+  if (hasSupplierRole(currentRole)) return true;
+  if (hasSupplierRole((await refreshCurrentUser())?.role)) return true;
+  openApplication();
+  return false;
 }
 
 export function SupplierApplicationModal({
@@ -35,7 +51,11 @@ export function SupplierApplicationModal({
 
     setBusy(true);
     try {
-      await submitSupplierApplication({ reason: trimmedReason });
+      await createTicket({
+        ticketType: "general",
+        title: "供应商申请",
+        firstMessage: trimmedReason,
+      });
       Toast.success(t("Supplier application submitted."));
       close();
       onSuccess();

@@ -3,7 +3,6 @@ import {
   apiClient as client,
   csrfHeader,
   unwrap,
-  type JsonResponse,
 } from "./api-client";
 
 export type ResourceItem = components["schemas"]["ResourceItem"];
@@ -33,18 +32,8 @@ export type ResourcePublishDetail =
   | MicrosoftResourceDetail
   | DomainResourceDetail;
 export type CreateDomainRequest = components["schemas"]["CreateDomainRequest"];
-export type SupplierApplicationResponse =
-  components["schemas"]["SupplierApplicationResponse"];
-export type SupplierApplicationCurrentResponse =
-  components["schemas"]["SupplierApplicationCurrentResponse"];
-export type SupplierApplicationRequest =
-  components["schemas"]["SupplierApplicationRequest"];
 export type ResourceListResponse =
   components["schemas"]["ResourceListResponse"];
-export type SupplierApplicationSubmitResponse = JsonResponse<
-  operations["postSupplierApplication"],
-  201
->;
 
 export interface ResourceListFilter {
   createdFrom?: string;
@@ -377,21 +366,4 @@ export async function deleteMicrosoftResourcesByFilter(filter: ResourceBulkFilte
 
 export async function deleteDomainResourcesByFilter(filter: ResourceBulkFilter) {
   return deleteResourcesViaFilterEndpoint(filter);
-}
-
-export async function getCurrentSupplierApplication() {
-  return unwrap<SupplierApplicationCurrentResponse>(
-    await client.GET("/v1/suppliers/applications/current")
-  );
-}
-
-export async function submitSupplierApplication(
-  payload: SupplierApplicationRequest
-) {
-  return unwrap<SupplierApplicationSubmitResponse>(
-    await client.POST("/v1/suppliers/applications", {
-      body: payload,
-      params: { header: csrfHeader() },
-    })
-  );
 }

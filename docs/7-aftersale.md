@@ -5,6 +5,7 @@
 | 日期 | 版本 | 修订人 | 说明 |
 |------|------|--------|------|
 | 2026-06-29 | V1.0 | Codex | 形成 Go 版从 0 DDD 设计基线，作为一次 V1.0 变更。 |
+| 2026-07-26 | V1.1 | Codex | 普通用户的供应商权限申请复用 general 工单；AFTERSALE 只记录申请会话，管理员人工修改 IAM 角色，不新增供应商审批状态机。 |
 
 > 支撑域。售后只拥有工单状态机，不拥有订单和退款执行。
 
@@ -100,6 +101,8 @@ stateDiagram-v2
 | `POST` | `/v1/tickets/{ticketNo}/reopen` | 用户重开。 |
 | `POST` | `/v1/tickets/{ticketNo}/escalate` | 用户或供应商升级平台。 |
 | `POST` | `/v1/tickets/{ticketNo}/resolve` | 供应商解决已指派工单。 |
+
+供应商权限申请复用 `POST /v1/tickets`：`ticketType=general`、标题固定为“供应商申请”、首条消息为用户填写内容。AFTERSALE 不修改用户角色；管理员看到工单后通过 IAM 用户管理人工将申请人角色改为 `supplier`。
 
 后台/供应商特权动作：
 
