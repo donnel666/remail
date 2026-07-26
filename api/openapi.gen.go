@@ -1579,6 +1579,51 @@ func (e InviteResponseKind) Valid() bool {
 	}
 }
 
+// Defines values for MonitoringMetricSeriesType.
+const (
+	Counter   MonitoringMetricSeriesType = "counter"
+	Gauge     MonitoringMetricSeriesType = "gauge"
+	Histogram MonitoringMetricSeriesType = "histogram"
+	Untyped   MonitoringMetricSeriesType = "untyped"
+)
+
+// Valid indicates whether the value is a known member of the MonitoringMetricSeriesType enum.
+func (e MonitoringMetricSeriesType) Valid() bool {
+	switch e {
+	case Counter:
+		return true
+	case Gauge:
+		return true
+	case Histogram:
+		return true
+	case Untyped:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MonitoringStatus.
+const (
+	Degraded    MonitoringStatus = "degraded"
+	Healthy     MonitoringStatus = "healthy"
+	Unavailable MonitoringStatus = "unavailable"
+)
+
+// Valid indicates whether the value is a known member of the MonitoringStatus enum.
+func (e MonitoringStatus) Valid() bool {
+	switch e {
+	case Degraded:
+		return true
+	case Healthy:
+		return true
+	case Unavailable:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for OrderBatchItemErrorResponseCode.
 const (
 	OrderBatchItemErrorResponseCodeInsufficientBalance   OrderBatchItemErrorResponseCode = "insufficient_balance"
@@ -4773,6 +4818,17 @@ type AdminMicrosoftUpdateRequest struct {
 	Version int `json:"version"`
 }
 
+// AdminMonitoringSnapshot defines model for AdminMonitoringSnapshot.
+type AdminMonitoringSnapshot struct {
+	Application MonitoringApplicationStats `json:"application"`
+	Go          MonitoringGoStats          `json:"go"`
+	Mysql       MonitoringMySQLStats       `json:"mysql"`
+	Redis       MonitoringRedisStats       `json:"redis"`
+	SampledAt   time.Time                  `json:"sampledAt"`
+	System      MonitoringSystemStats      `json:"system"`
+	Tasks       MonitoringTaskStats        `json:"tasks"`
+}
+
 // AdminOperationLogItem defines model for AdminOperationLogItem.
 type AdminOperationLogItem struct {
 	Category       AdminOperationLogItemCategory `json:"category"`
@@ -5958,6 +6014,136 @@ type MicrosoftResourceDetail struct {
 	LongLived       bool       `json:"longLived"`
 	QualityScore    int        `json:"qualityScore"`
 	Status          string     `json:"status"`
+}
+
+// MonitoringApplicationStats defines model for MonitoringApplicationStats.
+type MonitoringApplicationStats struct {
+	Series []MonitoringMetricSeries `json:"series"`
+	Status MonitoringStatus         `json:"status"`
+}
+
+// MonitoringBackgroundWorkerStats defines model for MonitoringBackgroundWorkerStats.
+type MonitoringBackgroundWorkerStats struct {
+	Active         int     `json:"active"`
+	CpuPercent     float64 `json:"cpuPercent"`
+	Limit          int     `json:"limit"`
+	Maximum        int     `json:"maximum"`
+	MemoryPercent  float64 `json:"memoryPercent"`
+	MetricsHealthy bool    `json:"metricsHealthy"`
+}
+
+// MonitoringGoStats defines model for MonitoringGoStats.
+type MonitoringGoStats struct {
+	CgoCalls             int64   `json:"cgoCalls"`
+	GcCpuFraction        float64 `json:"gcCpuFraction"`
+	GcCycles             int64   `json:"gcCycles"`
+	Gomaxprocs           int     `json:"gomaxprocs"`
+	Goroutines           int     `json:"goroutines"`
+	HeapAllocBytes       int64   `json:"heapAllocBytes"`
+	HeapInUseBytes       int64   `json:"heapInUseBytes"`
+	HeapObjects          int64   `json:"heapObjects"`
+	LastGcPauseSeconds   float64 `json:"lastGcPauseSeconds"`
+	NextGcBytes          int64   `json:"nextGcBytes"`
+	NumCpu               int     `json:"numCpu"`
+	ProcessUptimeSeconds int64   `json:"processUptimeSeconds"`
+	StackInUseBytes      int64   `json:"stackInUseBytes"`
+	SysBytes             int64   `json:"sysBytes"`
+	Version              string  `json:"version"`
+}
+
+// MonitoringMetricSeries defines model for MonitoringMetricSeries.
+type MonitoringMetricSeries struct {
+	Average float64                    `json:"average"`
+	Count   int64                      `json:"count"`
+	Help    string                     `json:"help"`
+	Labels  map[string]string          `json:"labels"`
+	Name    string                     `json:"name"`
+	P50     float64                    `json:"p50"`
+	P95     float64                    `json:"p95"`
+	Sum     float64                    `json:"sum"`
+	Type    MonitoringMetricSeriesType `json:"type"`
+	Value   float64                    `json:"value"`
+}
+
+// MonitoringMetricSeriesType defines model for MonitoringMetricSeries.Type.
+type MonitoringMetricSeriesType string
+
+// MonitoringMySQLStats defines model for MonitoringMySQLStats.
+type MonitoringMySQLStats struct {
+	IdleConnections          int              `json:"idleConnections"`
+	InUseConnections         int              `json:"inUseConnections"`
+	MaxIdleClosed            int64            `json:"maxIdleClosed"`
+	MaxIdleTimeClosed        int64            `json:"maxIdleTimeClosed"`
+	MaxLifetimeClosed        int64            `json:"maxLifetimeClosed"`
+	MaxOpenConnections       int              `json:"maxOpenConnections"`
+	OpenConnections          int              `json:"openConnections"`
+	PingMilliseconds         float64          `json:"pingMilliseconds"`
+	Status                   MonitoringStatus `json:"status"`
+	WaitCount                int64            `json:"waitCount"`
+	WaitDurationMilliseconds float64          `json:"waitDurationMilliseconds"`
+}
+
+// MonitoringQueueStats defines model for MonitoringQueueStats.
+type MonitoringQueueStats struct {
+	Active           int              `json:"active"`
+	Archived         int              `json:"archived"`
+	FailedToday      int              `json:"failedToday"`
+	FailedTotal      int              `json:"failedTotal"`
+	LatencySeconds   float64          `json:"latencySeconds"`
+	MemoryUsageBytes int64            `json:"memoryUsageBytes"`
+	Name             string           `json:"name"`
+	Paused           bool             `json:"paused"`
+	Pending          int              `json:"pending"`
+	ProcessedToday   int              `json:"processedToday"`
+	ProcessedTotal   int              `json:"processedTotal"`
+	Retry            int              `json:"retry"`
+	Scheduled        int              `json:"scheduled"`
+	Status           MonitoringStatus `json:"status"`
+}
+
+// MonitoringRedisStats defines model for MonitoringRedisStats.
+type MonitoringRedisStats struct {
+	ConnectedClients     int64            `json:"connectedClients"`
+	EvictedKeys          int64            `json:"evictedKeys"`
+	FragmentationRatio   float64          `json:"fragmentationRatio"`
+	HitRatePercent       float64          `json:"hitRatePercent"`
+	KeyspaceHits         int64            `json:"keyspaceHits"`
+	KeyspaceMisses       int64            `json:"keyspaceMisses"`
+	MaxMemoryBytes       int64            `json:"maxMemoryBytes"`
+	OperationsPerSecond  int64            `json:"operationsPerSecond"`
+	PingMilliseconds     float64          `json:"pingMilliseconds"`
+	PoolHits             int64            `json:"poolHits"`
+	PoolIdleConnections  int64            `json:"poolIdleConnections"`
+	PoolMisses           int64            `json:"poolMisses"`
+	PoolStaleConnections int64            `json:"poolStaleConnections"`
+	PoolTimeouts         int64            `json:"poolTimeouts"`
+	PoolTotalConnections int64            `json:"poolTotalConnections"`
+	Status               MonitoringStatus `json:"status"`
+	UsedMemoryBytes      int64            `json:"usedMemoryBytes"`
+}
+
+// MonitoringStatus defines model for MonitoringStatus.
+type MonitoringStatus string
+
+// MonitoringSystemStats defines model for MonitoringSystemStats.
+type MonitoringSystemStats struct {
+	CpuPercent       float64          `json:"cpuPercent"`
+	Load1            float64          `json:"load1"`
+	Load15           float64          `json:"load15"`
+	Load5            float64          `json:"load5"`
+	MemoryPercent    float64          `json:"memoryPercent"`
+	MemoryTotalBytes int64            `json:"memoryTotalBytes"`
+	MemoryUsedBytes  int64            `json:"memoryUsedBytes"`
+	Status           MonitoringStatus `json:"status"`
+	UptimeSeconds    int64            `json:"uptimeSeconds"`
+}
+
+// MonitoringTaskStats defines model for MonitoringTaskStats.
+type MonitoringTaskStats struct {
+	BackgroundWorkers MonitoringBackgroundWorkerStats `json:"backgroundWorkers"`
+	Queues            []MonitoringQueueStats          `json:"queues"`
+	Status            MonitoringStatus                `json:"status"`
+	WorkersReady      bool                            `json:"workersReady"`
 }
 
 // NonNegativeLedgerAmount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
@@ -10068,6 +10254,9 @@ type ServerInterface interface {
 	// Get one primary-mailbox message body and diagnostic
 	// (GET /v1/admin/messages/{messageId})
 	GetAdminMessage(c *gin.Context, messageId int, params GetAdminMessageParams)
+	// Read the current system monitoring snapshot
+	// (GET /v1/admin/monitoring)
+	GetAdminSystemMonitoring(c *gin.Context)
 	// Run order timeout scan
 	// (POST /v1/admin/orders/timeouts/scan)
 	PostAdminOrderTimeoutScan(c *gin.Context, params PostAdminOrderTimeoutScanParams)
@@ -13409,6 +13598,21 @@ func (siw *ServerInterfaceWrapper) GetAdminMessage(c *gin.Context) {
 	}
 
 	siw.Handler.GetAdminMessage(c, messageId, params)
+}
+
+// GetAdminSystemMonitoring operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminSystemMonitoring(c *gin.Context) {
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminSystemMonitoring(c)
 }
 
 // PostAdminOrderTimeoutScan operation middleware
@@ -22389,6 +22593,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/admin/logs/system", wrapper.GetAdminSystemLogs)
 	router.GET(options.BaseURL+"/v1/admin/messages", wrapper.GetAdminMessages)
 	router.GET(options.BaseURL+"/v1/admin/messages/:messageId", wrapper.GetAdminMessage)
+	router.GET(options.BaseURL+"/v1/admin/monitoring", wrapper.GetAdminSystemMonitoring)
 	router.POST(options.BaseURL+"/v1/admin/orders/timeouts/scan", wrapper.PostAdminOrderTimeoutScan)
 	router.GET(options.BaseURL+"/v1/admin/orders/:orderNo/allocations", wrapper.GetAdminOrderAllocation)
 	router.POST(options.BaseURL+"/v1/admin/orders/:orderNo/cleanup/retry", wrapper.PostAdminOrderCleanupRetry)

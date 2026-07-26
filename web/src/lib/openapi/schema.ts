@@ -1737,6 +1737,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/monitoring": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the current system monitoring snapshot
+         * @description Requires `governance:log/read`. Returns host, Go runtime, MySQL pool, Redis, Asynq queue, and bounded application metric data without credentials or configuration secrets.
+         */
+        get: operations["getAdminSystemMonitoring"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/dashboard": {
         parameters: {
             query?: never;
@@ -4130,6 +4150,178 @@ export interface components {
             name: string;
             available: number;
             rank: number;
+        };
+        /** @enum {string} */
+        MonitoringStatus: "healthy" | "degraded" | "unavailable";
+        AdminMonitoringSnapshot: {
+            /** Format: date-time */
+            sampledAt: string;
+            system: components["schemas"]["MonitoringSystemStats"];
+            go: components["schemas"]["MonitoringGoStats"];
+            mysql: components["schemas"]["MonitoringMySQLStats"];
+            redis: components["schemas"]["MonitoringRedisStats"];
+            tasks: components["schemas"]["MonitoringTaskStats"];
+            application: components["schemas"]["MonitoringApplicationStats"];
+        };
+        MonitoringSystemStats: {
+            status: components["schemas"]["MonitoringStatus"];
+            /** Format: double */
+            cpuPercent: number;
+            /** Format: double */
+            memoryPercent: number;
+            /** Format: int64 */
+            memoryUsedBytes: number;
+            /** Format: int64 */
+            memoryTotalBytes: number;
+            /** Format: double */
+            load1: number;
+            /** Format: double */
+            load5: number;
+            /** Format: double */
+            load15: number;
+            /** Format: int64 */
+            uptimeSeconds: number;
+        };
+        MonitoringGoStats: {
+            version: string;
+            numCpu: number;
+            gomaxprocs: number;
+            goroutines: number;
+            /** Format: int64 */
+            cgoCalls: number;
+            /** Format: int64 */
+            processUptimeSeconds: number;
+            /** Format: int64 */
+            heapAllocBytes: number;
+            /** Format: int64 */
+            heapInUseBytes: number;
+            /** Format: int64 */
+            heapObjects: number;
+            /** Format: int64 */
+            stackInUseBytes: number;
+            /** Format: int64 */
+            sysBytes: number;
+            /** Format: int64 */
+            nextGcBytes: number;
+            /** Format: int64 */
+            gcCycles: number;
+            /** Format: double */
+            lastGcPauseSeconds: number;
+            /** Format: double */
+            gcCpuFraction: number;
+        };
+        MonitoringMySQLStats: {
+            status: components["schemas"]["MonitoringStatus"];
+            /** Format: double */
+            pingMilliseconds: number;
+            openConnections: number;
+            inUseConnections: number;
+            idleConnections: number;
+            maxOpenConnections: number;
+            /** Format: int64 */
+            waitCount: number;
+            /** Format: double */
+            waitDurationMilliseconds: number;
+            /** Format: int64 */
+            maxIdleClosed: number;
+            /** Format: int64 */
+            maxIdleTimeClosed: number;
+            /** Format: int64 */
+            maxLifetimeClosed: number;
+        };
+        MonitoringRedisStats: {
+            status: components["schemas"]["MonitoringStatus"];
+            /** Format: double */
+            pingMilliseconds: number;
+            /** Format: int64 */
+            usedMemoryBytes: number;
+            /** Format: int64 */
+            maxMemoryBytes: number;
+            /** Format: int64 */
+            connectedClients: number;
+            /** Format: int64 */
+            operationsPerSecond: number;
+            /** Format: int64 */
+            keyspaceHits: number;
+            /** Format: int64 */
+            keyspaceMisses: number;
+            /** Format: double */
+            hitRatePercent: number;
+            /** Format: int64 */
+            evictedKeys: number;
+            /** Format: double */
+            fragmentationRatio: number;
+            /** Format: int64 */
+            poolHits: number;
+            /** Format: int64 */
+            poolMisses: number;
+            /** Format: int64 */
+            poolTimeouts: number;
+            /** Format: int64 */
+            poolTotalConnections: number;
+            /** Format: int64 */
+            poolIdleConnections: number;
+            /** Format: int64 */
+            poolStaleConnections: number;
+        };
+        MonitoringTaskStats: {
+            status: components["schemas"]["MonitoringStatus"];
+            workersReady: boolean;
+            backgroundWorkers: components["schemas"]["MonitoringBackgroundWorkerStats"];
+            queues: components["schemas"]["MonitoringQueueStats"][];
+        };
+        MonitoringBackgroundWorkerStats: {
+            limit: number;
+            active: number;
+            maximum: number;
+            /** Format: double */
+            cpuPercent: number;
+            /** Format: double */
+            memoryPercent: number;
+            metricsHealthy: boolean;
+        };
+        MonitoringQueueStats: {
+            name: string;
+            status: components["schemas"]["MonitoringStatus"];
+            paused: boolean;
+            pending: number;
+            active: number;
+            scheduled: number;
+            retry: number;
+            archived: number;
+            processedToday: number;
+            failedToday: number;
+            processedTotal: number;
+            failedTotal: number;
+            /** Format: double */
+            latencySeconds: number;
+            /** Format: int64 */
+            memoryUsageBytes: number;
+        };
+        MonitoringApplicationStats: {
+            status: components["schemas"]["MonitoringStatus"];
+            series: components["schemas"]["MonitoringMetricSeries"][];
+        };
+        MonitoringMetricSeries: {
+            name: string;
+            help: string;
+            /** @enum {string} */
+            type: "counter" | "gauge" | "histogram" | "untyped";
+            labels: {
+                [key: string]: string;
+            };
+            /** Format: double */
+            value: number;
+            /** Format: int64 */
+            count: number;
+            /** Format: double */
+            sum: number;
+            /** Format: double */
+            average: number;
+            /** Format: double */
+            p50: number;
+            /** Format: double */
+            p95: number;
         };
         CardKey: {
             cardKey: string;
@@ -13205,6 +13397,44 @@ export interface operations {
             };
             /** @description Authentication required */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getAdminSystemMonitoring: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current monitoring snapshot */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminMonitoringSnapshot"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

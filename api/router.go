@@ -143,6 +143,14 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		// Generic administrator-managed system settings.
 		iamSessionFetcher := iamapi.NewSessionFetcher(iamMod.SessionStore, iamMod.UserRepo)
 		systemsettingsapi.RegisterRoutes(v1, systemSettingsMod, iamSessionFetcher, iamMod.PermissionChecker)
+		v1.GET(
+			"/admin/monitoring",
+			middleware.LoadSession(iamSessionFetcher),
+			middleware.AuthRequired(),
+			middleware.CSRFRequired(),
+			middleware.PermissionRequired(iamMod.PermissionChecker, "governance:log", "read"),
+			systemMonitoringHandler(p),
+		)
 
 		// Core module (resources, mail servers, domains)
 		coreMod, err = coreapi.NewCoreModule(p.DB, p.Redis, fileStore, p.Asynq, mailMod.ValidationUseCase, mailMod.BindingRecorder)

@@ -1,4 +1,5 @@
 import {
+  Activity,
   BarChart3,
   CircleDollarSign,
   ClipboardList,
@@ -55,6 +56,12 @@ export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
           permissionKey("core:resource", "read"),
           permissionKey("billing:wallet", "read"),
         ],
+      },
+      {
+        path: "/admin/monitoring",
+        labelKey: "System Monitoring",
+        icon: Activity,
+        requiredPermission: permissionKey("governance:log", "read"),
       },
       {
         path: "/admin/microsoft",

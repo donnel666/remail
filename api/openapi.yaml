@@ -5727,6 +5727,35 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/admin/monitoring:
+    get:
+      operationId: getAdminSystemMonitoring
+      summary: Read the current system monitoring snapshot
+      description: Requires `governance:log/read`. Returns host, Go runtime, MySQL pool, Redis, Asynq queue, and bounded application metric data without credentials or configuration secrets.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Current monitoring snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMonitoringSnapshot"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /v1/admin/dashboard:
     get:
       operationId: getAdminDashboard
@@ -12126,6 +12155,374 @@ components:
           type: integer
         rank:
           type: integer
+      additionalProperties: false
+
+    MonitoringStatus:
+      type: string
+      enum: [healthy, degraded, unavailable]
+
+    AdminMonitoringSnapshot:
+      type: object
+      required: [sampledAt, system, go, mysql, redis, tasks, application]
+      properties:
+        sampledAt:
+          type: string
+          format: date-time
+        system:
+          $ref: "#/components/schemas/MonitoringSystemStats"
+        go:
+          $ref: "#/components/schemas/MonitoringGoStats"
+        mysql:
+          $ref: "#/components/schemas/MonitoringMySQLStats"
+        redis:
+          $ref: "#/components/schemas/MonitoringRedisStats"
+        tasks:
+          $ref: "#/components/schemas/MonitoringTaskStats"
+        application:
+          $ref: "#/components/schemas/MonitoringApplicationStats"
+      additionalProperties: false
+
+    MonitoringSystemStats:
+      type: object
+      required: [status, cpuPercent, memoryPercent, memoryUsedBytes, memoryTotalBytes, load1, load5, load15, uptimeSeconds]
+      properties:
+        status:
+          $ref: "#/components/schemas/MonitoringStatus"
+        cpuPercent:
+          type: number
+          format: double
+        memoryPercent:
+          type: number
+          format: double
+        memoryUsedBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        memoryTotalBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        load1:
+          type: number
+          format: double
+        load5:
+          type: number
+          format: double
+        load15:
+          type: number
+          format: double
+        uptimeSeconds:
+          type: integer
+          format: int64
+          minimum: 0
+      additionalProperties: false
+
+    MonitoringGoStats:
+      type: object
+      required: [version, numCpu, gomaxprocs, goroutines, cgoCalls, processUptimeSeconds, heapAllocBytes, heapInUseBytes, heapObjects, stackInUseBytes, sysBytes, nextGcBytes, gcCycles, lastGcPauseSeconds, gcCpuFraction]
+      properties:
+        version:
+          type: string
+        numCpu:
+          type: integer
+        gomaxprocs:
+          type: integer
+        goroutines:
+          type: integer
+        cgoCalls:
+          type: integer
+          format: int64
+          minimum: 0
+        processUptimeSeconds:
+          type: integer
+          format: int64
+          minimum: 0
+        heapAllocBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        heapInUseBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        heapObjects:
+          type: integer
+          format: int64
+          minimum: 0
+        stackInUseBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        sysBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        nextGcBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        gcCycles:
+          type: integer
+          format: int64
+          minimum: 0
+        lastGcPauseSeconds:
+          type: number
+          format: double
+          minimum: 0
+        gcCpuFraction:
+          type: number
+          format: double
+          minimum: 0
+      additionalProperties: false
+
+    MonitoringMySQLStats:
+      type: object
+      required: [status, pingMilliseconds, openConnections, inUseConnections, idleConnections, maxOpenConnections, waitCount, waitDurationMilliseconds, maxIdleClosed, maxIdleTimeClosed, maxLifetimeClosed]
+      properties:
+        status:
+          $ref: "#/components/schemas/MonitoringStatus"
+        pingMilliseconds:
+          type: number
+          format: double
+          minimum: 0
+        openConnections:
+          type: integer
+          minimum: 0
+        inUseConnections:
+          type: integer
+          minimum: 0
+        idleConnections:
+          type: integer
+          minimum: 0
+        maxOpenConnections:
+          type: integer
+          minimum: 0
+        waitCount:
+          type: integer
+          format: int64
+          minimum: 0
+        waitDurationMilliseconds:
+          type: number
+          format: double
+          minimum: 0
+        maxIdleClosed:
+          type: integer
+          format: int64
+          minimum: 0
+        maxIdleTimeClosed:
+          type: integer
+          format: int64
+          minimum: 0
+        maxLifetimeClosed:
+          type: integer
+          format: int64
+          minimum: 0
+      additionalProperties: false
+
+    MonitoringRedisStats:
+      type: object
+      required: [status, pingMilliseconds, usedMemoryBytes, maxMemoryBytes, connectedClients, operationsPerSecond, keyspaceHits, keyspaceMisses, hitRatePercent, evictedKeys, fragmentationRatio, poolHits, poolMisses, poolTimeouts, poolTotalConnections, poolIdleConnections, poolStaleConnections]
+      properties:
+        status:
+          $ref: "#/components/schemas/MonitoringStatus"
+        pingMilliseconds:
+          type: number
+          format: double
+          minimum: 0
+        usedMemoryBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        maxMemoryBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        connectedClients:
+          type: integer
+          format: int64
+          minimum: 0
+        operationsPerSecond:
+          type: integer
+          format: int64
+          minimum: 0
+        keyspaceHits:
+          type: integer
+          format: int64
+          minimum: 0
+        keyspaceMisses:
+          type: integer
+          format: int64
+          minimum: 0
+        hitRatePercent:
+          type: number
+          format: double
+          minimum: 0
+        evictedKeys:
+          type: integer
+          format: int64
+          minimum: 0
+        fragmentationRatio:
+          type: number
+          format: double
+          minimum: 0
+        poolHits:
+          type: integer
+          format: int64
+          minimum: 0
+        poolMisses:
+          type: integer
+          format: int64
+          minimum: 0
+        poolTimeouts:
+          type: integer
+          format: int64
+          minimum: 0
+        poolTotalConnections:
+          type: integer
+          format: int64
+          minimum: 0
+        poolIdleConnections:
+          type: integer
+          format: int64
+          minimum: 0
+        poolStaleConnections:
+          type: integer
+          format: int64
+          minimum: 0
+      additionalProperties: false
+
+    MonitoringTaskStats:
+      type: object
+      required: [status, workersReady, backgroundWorkers, queues]
+      properties:
+        status:
+          $ref: "#/components/schemas/MonitoringStatus"
+        workersReady:
+          type: boolean
+        backgroundWorkers:
+          $ref: "#/components/schemas/MonitoringBackgroundWorkerStats"
+        queues:
+          type: array
+          items:
+            $ref: "#/components/schemas/MonitoringQueueStats"
+      additionalProperties: false
+
+    MonitoringBackgroundWorkerStats:
+      type: object
+      required: [limit, active, maximum, cpuPercent, memoryPercent, metricsHealthy]
+      properties:
+        limit:
+          type: integer
+          minimum: 0
+        active:
+          type: integer
+          minimum: 0
+        maximum:
+          type: integer
+          minimum: 0
+        cpuPercent:
+          type: number
+          format: double
+        memoryPercent:
+          type: number
+          format: double
+        metricsHealthy:
+          type: boolean
+      additionalProperties: false
+
+    MonitoringQueueStats:
+      type: object
+      required: [name, status, paused, pending, active, scheduled, retry, archived, processedToday, failedToday, processedTotal, failedTotal, latencySeconds, memoryUsageBytes]
+      properties:
+        name:
+          type: string
+        status:
+          $ref: "#/components/schemas/MonitoringStatus"
+        paused:
+          type: boolean
+        pending:
+          type: integer
+          minimum: 0
+        active:
+          type: integer
+          minimum: 0
+        scheduled:
+          type: integer
+          minimum: 0
+        retry:
+          type: integer
+          minimum: 0
+        archived:
+          type: integer
+          minimum: 0
+        processedToday:
+          type: integer
+          minimum: 0
+        failedToday:
+          type: integer
+          minimum: 0
+        processedTotal:
+          type: integer
+          minimum: 0
+        failedTotal:
+          type: integer
+          minimum: 0
+        latencySeconds:
+          type: number
+          format: double
+          minimum: 0
+        memoryUsageBytes:
+          type: integer
+          format: int64
+          minimum: 0
+      additionalProperties: false
+
+    MonitoringApplicationStats:
+      type: object
+      required: [status, series]
+      properties:
+        status:
+          $ref: "#/components/schemas/MonitoringStatus"
+        series:
+          type: array
+          items:
+            $ref: "#/components/schemas/MonitoringMetricSeries"
+      additionalProperties: false
+
+    MonitoringMetricSeries:
+      type: object
+      required: [name, help, type, labels, value, count, sum, average, p50, p95]
+      properties:
+        name:
+          type: string
+        help:
+          type: string
+        type:
+          type: string
+          enum: [counter, gauge, histogram, untyped]
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+        value:
+          type: number
+          format: double
+        count:
+          type: integer
+          format: int64
+          minimum: 0
+        sum:
+          type: number
+          format: double
+        average:
+          type: number
+          format: double
+        p50:
+          type: number
+          format: double
+        p95:
+          type: number
+          format: double
       additionalProperties: false
 
     CardKey:
