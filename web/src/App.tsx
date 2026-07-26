@@ -59,6 +59,7 @@ const pageLoaders = {
   consoleOverview: () => import("./pages/ConsoleOverview"),
   finance: () => import("./pages/FinanceCenter"),
   wallet: () => import("./pages/Wallet"),
+  paymentReturn: () => import("./pages/PaymentReturn"),
   orders: () => import("./pages/Orders"),
   tickets: () => import("./pages/Tickets"),
   microsoftEmails: () => import("./pages/MicrosoftEmails"),
@@ -92,6 +93,7 @@ const Account = lazy(pageLoaders.account);
 const ConsoleOverview = lazy(pageLoaders.consoleOverview);
 const FinanceCenter = lazy(pageLoaders.finance);
 const Wallet = lazy(pageLoaders.wallet);
+const PaymentReturn = lazy(pageLoaders.paymentReturn);
 const Orders = lazy(pageLoaders.orders);
 const Tickets = lazy(pageLoaders.tickets);
 const MicrosoftEmails = lazy(pageLoaders.microsoftEmails);
@@ -454,16 +456,24 @@ function RouteGate({ children }: { children: ReactNode }) {
   );
 }
 
-const rootRoute = createRootRoute({
-  component: () => (
+function RootRouteLayout() {
+  const content = (
+    <Suspense fallback={<Loading />}>
+      <Outlet />
+    </Suspense>
+  );
+
+  if (useLocation().pathname === "/payment/return") return content;
+
+  return (
     <RouteGate>
-      <AppShell>
-        <Suspense fallback={<Loading />}>
-          <Outlet />
-        </Suspense>
-      </AppShell>
+      <AppShell>{content}</AppShell>
     </RouteGate>
-  ),
+  );
+}
+
+const rootRoute = createRootRoute({
+  component: RootRouteLayout,
   notFoundComponent: NotFoundPage,
   errorComponent: ({ reset }) => <ServerErrorPage onRetry={reset} />,
 });
@@ -504,6 +514,7 @@ const routeTree = rootRoute.addChildren([
   createRoute({ getParentRoute: () => rootRoute, path: "/projects", component: Projects }),
   createRoute({ getParentRoute: () => rootRoute, path: "/finance", component: FinanceCenter }),
   createRoute({ getParentRoute: () => rootRoute, path: "/wallet", component: Wallet }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/payment/return", component: PaymentReturn }),
   createRoute({ getParentRoute: () => rootRoute, path: "/orders", component: Orders }),
   createRoute({ getParentRoute: () => rootRoute, path: "/tickets", component: Tickets }),
   createRoute({ getParentRoute: () => rootRoute, path: "/microsoft", component: MicrosoftEmails }),

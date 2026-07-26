@@ -9,10 +9,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const contentSecurityPolicyTemplate = "default-src 'self'; base-uri 'self'; connect-src 'self' https://challenges.cloudflare.com; font-src 'self' data:; form-action 'self'; frame-ancestors 'none'; frame-src %s; img-src 'self' data: blob: https:; media-src 'self' data: blob:; object-src 'none'; script-src 'self' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:"
+const contentSecurityPolicyTemplate = "default-src 'self'; base-uri 'self'; connect-src 'self' https://challenges.cloudflare.com; font-src 'self' data:; form-action 'self'; frame-ancestors 'self'; frame-src %s; img-src 'self' data: blob: https:; media-src 'self' data: blob:; object-src 'none'; script-src 'self' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:"
 
 func contentSecurityPolicy() string {
-	frameSources := "https://challenges.cloudflare.com"
+	frameSources := "'self' https://challenges.cloudflare.com"
 	gateway, err := url.Parse(strings.TrimSpace(runtimeconfig.String("epay_gateway_url", "")))
 	if err == nil && gateway.Scheme == "https" && gateway.Host != "" && gateway.User == nil {
 		frameSources += " https://" + gateway.Host
@@ -28,7 +28,7 @@ func SecurityHeaders() gin.HandlerFunc {
 		c.Header("Referrer-Policy", "no-referrer")
 		c.Header("Strict-Transport-Security", "max-age=31536000")
 		c.Header("X-Content-Type-Options", "nosniff")
-		c.Header("X-Frame-Options", "DENY")
+		c.Header("X-Frame-Options", "SAMEORIGIN")
 		c.Next()
 	}
 }

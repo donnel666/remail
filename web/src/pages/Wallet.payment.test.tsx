@@ -137,7 +137,7 @@ describe("wallet payment modal", () => {
     vi.clearAllMocks();
   });
 
-  it("shows the final iframe and reports a credited terminal state", async () => {
+  it("lets the return page check while open, then confirms after it closes", async () => {
     mocks.createRecharge.mockResolvedValue({ recharge: payingRecharge, payUrl: "https://pay.example.com/qr", expiresAt: "2026-07-26T00:05:00Z" });
     render(<Wallet />);
 
@@ -154,11 +154,22 @@ describe("wallet payment modal", () => {
     fireEvent.load(frame);
     expect(screen.queryByText("Loading payment page...")).not.toBeInTheDocument();
 
-    await waitFor(() => expect(mocks.getRecharge).toHaveBeenCalledOnce());
+    expect(mocks.getRecharge).not.toHaveBeenCalled();
     mocks.getRecharge.mockResolvedValue({ ...payingRecharge, status: "credited" });
-    await act(async () => paymentPoll?.());
 
-    expect(mocks.toastSuccess).toHaveBeenCalledWith("Recharge successful. Balance has been credited.");
+    fireEvent(
+      window,
+      new MessageEvent("message", {
+        data: "remail:epay-return",
+        origin: window.location.origin,
+        source: frame.contentWindow,
+      })
+    );
+    expect(document.querySelector("iframe")).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Recharge Billing" })).toBeVisible();
+
+    await waitFor(() => expect(mocks.getRecharge).toHaveBeenCalledOnce());
+    await waitFor(() => expect(mocks.toastSuccess).toHaveBeenCalledWith("Recharge successful. Balance has been credited."));
     expect(screen.queryByTitle("Alipay Payment")).not.toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "Recharge Billing" })).toBeVisible();
     expect(screen.getByLabelText("Order No.")).toHaveValue("");
@@ -179,5 +190,23 @@ describe("wallet payment modal", () => {
     expect(mocks.toastError).toHaveBeenCalledWith("Recharge verification timed out. Please check the billing record.");
     expect(document.querySelector("iframe")).toBeNull();
     expect(screen.getByRole("dialog", { name: "Recharge Billing" })).toBeVisible();
+  });
+
+  it("checks a credited result before applying the verification deadline", async () => {
+    mocks.createRecharge.mockResolvedValue({ recharge: payingRecharge, payUrl: "https://pay.example.com/qr", expiresAt: "2026-07-26T00:00:01Z" });
+    mocks.getRecharge.mockResolvedValue({ ...payingRecharge, status: "credited" });
+    render(<Wallet />);
+
+    const payButton = await screen.findByRole("button", { name: "Alipay" });
+    await waitFor(() => expect(payButton).toBeEnabled());
+    fireEvent.click(payButton);
+    await waitFor(() => expect(document.querySelector("iframe")).not.toBeNull());
+
+    now += 2_500;
+    await act(async () => paymentPoll?.());
+
+    expect(mocks.getRecharge).toHaveBeenCalled();
+    expect(mocks.toastError).not.toHaveBeenCalled();
+    expect(document.querySelector("iframe")).not.toBeNull();
   });
 });

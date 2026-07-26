@@ -18,7 +18,7 @@ describe("EPay callback settings", () => {
   it("fills the current origin and follows the selected protocol version", () => {
     const initial = applyEPayURLDefaults({ epay_version: "v1", epay_notify_url: "", epay_return_url: "" }, "https://app.example.com");
     expect(initial.epay_notify_url).toBe("https://app.example.com/v1/payments/webhooks/epay/v1");
-    expect(initial.epay_return_url).toBe("https://app.example.com/wallet");
+    expect(initial.epay_return_url).toBe("https://app.example.com/payment/return");
     expect(changeEPayVersion(initial, "v2", "https://app.example.com").epay_notify_url).toBe("https://app.example.com/v1/payments/webhooks/epay/v2");
   });
 

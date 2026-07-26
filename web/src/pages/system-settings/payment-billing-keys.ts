@@ -48,7 +48,7 @@ export function applyEPayURLDefaults(form: Record<string, unknown>, origin: stri
   return {
     ...form,
     epay_notify_url: String(form.epay_notify_url ?? "").trim() || `${origin}/v1/payments/webhooks/epay/${version}`,
-    epay_return_url: String(form.epay_return_url ?? "").trim() || `${origin}/wallet`,
+    epay_return_url: String(form.epay_return_url ?? "").trim() || `${origin}/payment/return`,
   };
 }
 

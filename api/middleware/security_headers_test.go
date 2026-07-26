@@ -23,10 +23,11 @@ func TestSecurityHeaders(t *testing.T) {
 	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
 
 	require.Equal(t, contentSecurityPolicy(), response.Header().Get("Content-Security-Policy"))
-	require.Contains(t, response.Header().Get("Content-Security-Policy"), "frame-src https://challenges.cloudflare.com https://pay.example.com;")
+	require.Contains(t, response.Header().Get("Content-Security-Policy"), "frame-ancestors 'self';")
+	require.Contains(t, response.Header().Get("Content-Security-Policy"), "frame-src 'self' https://challenges.cloudflare.com https://pay.example.com;")
 	require.Equal(t, "camera=(), geolocation=(), microphone=(), payment=(), usb=()", response.Header().Get("Permissions-Policy"))
 	require.Equal(t, "no-referrer", response.Header().Get("Referrer-Policy"))
 	require.Equal(t, "max-age=31536000", response.Header().Get("Strict-Transport-Security"))
 	require.Equal(t, "nosniff", response.Header().Get("X-Content-Type-Options"))
-	require.Equal(t, "DENY", response.Header().Get("X-Frame-Options"))
+	require.Equal(t, "SAMEORIGIN", response.Header().Get("X-Frame-Options"))
 }

@@ -62,6 +62,7 @@ import { IamApiError } from "@/lib/api-client";
 import { calculateRechargePaymentAmount } from "./wallet-payment";
 
 const { Text } = Typography;
+const EPAY_RETURN_MESSAGE = "remail:epay-return";
 
 interface BannerStat {
   icon: ReactNode;
@@ -188,12 +189,14 @@ export default function Wallet() {
   const [billingLoading, setBillingLoading] = useState(false);
   const [recharging, setRecharging] = useState(false);
   const [payment, setPayment] = useState<{ rechargeNo: string; url: string; expiresAt: string } | null>(null);
+  const [paymentOpen, setPaymentOpen] = useState(false);
   const [paymentFrameLoaded, setPaymentFrameLoaded] = useState(false);
   const [paymentFrameSlow, setPaymentFrameSlow] = useState(false);
   const [redeeming, setRedeeming] = useState(false);
   const redeemAttemptRef = useRef<{ code: string; key: string } | null>(null);
   const transferAttemptRef = useRef<string | null>(null);
   const rechargeAttemptRef = useRef<{ amount: string; key: string } | null>(null);
+  const paymentFrameRef = useRef<HTMLIFrameElement | null>(null);
   const pendingRechargeNosRef = useRef(new Set<string>());
   const billingRequestSeqRef = useRef(0);
   const amountFormApiRef = useRef<{
@@ -344,11 +347,28 @@ export default function Wallet() {
   }, [billingOpen, recharges, refreshRecharges]);
 
   useEffect(() => {
-    if (!payment || paymentFrameLoaded) return;
+    if (!payment || !paymentOpen || paymentFrameLoaded) return;
     setPaymentFrameSlow(false);
     const timer = window.setTimeout(() => setPaymentFrameSlow(true), 10_000);
     return () => window.clearTimeout(timer);
-  }, [payment, paymentFrameLoaded]);
+  }, [payment, paymentFrameLoaded, paymentOpen]);
+
+  useEffect(() => {
+    if (!payment || !paymentOpen) return;
+    const handlePaymentReturn = (event: MessageEvent) => {
+      if (
+        event.data !== EPAY_RETURN_MESSAGE ||
+        event.origin !== window.location.origin ||
+        event.source !== paymentFrameRef.current?.contentWindow
+      ) return;
+      setPaymentOpen(false);
+      setPaymentFrameLoaded(false);
+      setPaymentFrameSlow(false);
+      openBilling();
+    };
+    window.addEventListener("message", handlePaymentReturn);
+    return () => window.removeEventListener("message", handlePaymentReturn);
+  }, [openBilling, payment, paymentOpen]);
 
   useEffect(() => {
     if (!payment) return;
@@ -358,20 +378,26 @@ export default function Wallet() {
     const refreshPayment = async () => {
       if (cancelled || checking) return;
       const expiresAt = new Date(payment.expiresAt).getTime();
-      if (Number.isFinite(expiresAt) && Date.now() >= expiresAt) {
-        setPayment(null);
-        setPaymentFrameLoaded(false);
-        setPaymentFrameSlow(false);
-        openBilling();
-        Toast.error(t("Recharge verification timed out. Please check the billing record."));
-        return;
-      }
+      const expired = Number.isFinite(expiresAt) && Date.now() >= expiresAt;
+      if (paymentOpen && !expired) return;
       checking = true;
       try {
         const recharge = await getRecharge(payment.rechargeNo);
         consecutiveFailures = 0;
-        if (cancelled || ["paying", "callback", "reconciled"].includes(recharge.status)) return;
+        if (cancelled) return;
+        if (["paying", "callback", "reconciled"].includes(recharge.status)) {
+          if (!expired) return;
+          setPayment(null);
+          setPaymentOpen(false);
+          setPaymentFrameLoaded(false);
+          setPaymentFrameSlow(false);
+          openBilling();
+          Toast.error(t("Recharge verification timed out. Please check the billing record."));
+          return;
+        }
+        if (paymentOpen && recharge.status === "credited") return;
         setPayment(null);
+        setPaymentOpen(false);
         setPaymentFrameLoaded(false);
         setPaymentFrameSlow(false);
         openBilling();
@@ -397,7 +423,7 @@ export default function Wallet() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [openBilling, payment, refreshMembership, t]);
+  }, [openBilling, payment, paymentOpen, refreshMembership, t]);
 
   const handlePresetSelect = (amount: string) => {
     const value = Number(amount);
@@ -433,6 +459,7 @@ export default function Wallet() {
     try {
       const result = await createRecharge(normalizedAmount, rechargeAttemptRef.current.key);
       rechargeAttemptRef.current = null;
+      setPaymentOpen(true);
       setPaymentFrameLoaded(false);
       setPaymentFrameSlow(false);
       setPayment({ rechargeNo: result.recharge.rechargeNo, url: result.payUrl, expiresAt: result.expiresAt });
@@ -928,14 +955,14 @@ export default function Wallet() {
         }
         maskClosable={false}
         onCancel={() => {
-          setPayment(null);
+          setPaymentOpen(false);
           setPaymentFrameLoaded(false);
           setPaymentFrameSlow(false);
           openBilling();
         }}
         size={isMobile ? "full-width" : "large"}
         title={t("Alipay Payment")}
-        visible={Boolean(payment)}
+        visible={Boolean(payment) && paymentOpen}
         width={isMobile ? undefined : "min(960px, calc(100vw - 48px))"}
       >
         {payment ? (
@@ -947,6 +974,7 @@ export default function Wallet() {
                 setPaymentFrameSlow(false);
               }}
               referrerPolicy="no-referrer"
+              ref={paymentFrameRef}
               sandbox="allow-forms allow-same-origin allow-scripts"
               src={payment.url}
               title={t("Alipay Payment")}
