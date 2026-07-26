@@ -1311,6 +1311,7 @@ func TestOrderRouteBatchPartialFailureConvergesOnRetryMySQL(t *testing.T) {
 func TestOrderRouteConcurrentBatchesThrottleSameUserWithoutDeadlockMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	seedTradeBase(t, db, "microsoft")
+	require.NoError(t, db.Exec("UPDATE user_groups SET api_concurrency_limit = 10 WHERE id = 1").Error)
 	require.NoError(t, db.Table("project_products").Where("id = ?", 20).Update("code_price", "0.000000").Error)
 	seedTradeMicrosoftResources(t, db, 1, 1000, 100, true)
 

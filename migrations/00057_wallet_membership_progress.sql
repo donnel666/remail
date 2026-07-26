@@ -35,7 +35,7 @@ FROM (
         ROW_NUMBER() OVER (
             PARTITION BY u.id
             ORDER BY candidate.topup_threshold DESC, candidate.id DESC
-        ) AS row_number
+        ) AS row_rank
     FROM users u
     JOIN wallets w ON w.user_id = u.id
     JOIN user_groups current_group ON current_group.id = u.user_group_id
@@ -45,7 +45,7 @@ FROM (
      AND candidate.topup_threshold > current_group.topup_threshold
      AND candidate.topup_threshold <= w.total_recharged
 ) ranked
-WHERE row_number = 1;
+WHERE row_rank = 1;
 
 UPDATE users u
 JOIN membership_upgrade_targets_00057 target ON target.user_id = u.id
