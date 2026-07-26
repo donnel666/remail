@@ -80,9 +80,8 @@ type SMTPConfig struct {
 	InboundMaxRecipients   int
 	InboundReadTimeout     time.Duration
 	InboundWriteTimeout    time.Duration
-	// After-sales ticket email (opt-in). Ticket activity is emailed to the
-	// requester and active super-admins with authenticated Reply-To addresses.
-	TicketMailEnabled    bool
+	// After-sales ticket activity is emailed to the requester and active
+	// super-admins with authenticated Reply-To addresses.
 	TicketMailFrom       string
 	TicketReplyLocalPart string
 	TicketReplyDomain    string
@@ -328,7 +327,6 @@ func loadSMTPConfig() SMTPConfig {
 		InboundMaxRecipients:   getInt("SMTP_INBOUND_MAX_RECIPIENTS", 20),
 		InboundReadTimeout:     getDuration("SMTP_INBOUND_READ_TIMEOUT", 30*time.Second),
 		InboundWriteTimeout:    getDuration("SMTP_INBOUND_WRITE_TIMEOUT", 30*time.Second),
-		TicketMailEnabled:      getBool("SMTP_TICKET_MAIL_ENABLED", false),
 		TicketMailFrom:         getEnv("SMTP_TICKET_MAIL_FROM", getEnv("SMTP_FROM", "no-reply@aishop6.com")),
 		TicketReplyLocalPart:   getEnv("SMTP_TICKET_REPLY_LOCAL", "support"),
 		TicketReplyDomain:      getEnv("SMTP_TICKET_REPLY_DOMAIN", getEnv("SMTP_INBOUND_DOMAIN", heloDomain)),

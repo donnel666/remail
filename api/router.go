@@ -201,18 +201,21 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		cleanupFuncs = append(cleanupFuncs, tradeapi.StartLifecycleScanner(tradeMod))
 
 		// Aftersale module (support tickets over orders/general, refunds via Trade).
-		aftersaleMod := aftersaleapi.NewModule(p.DB, tradeMod.UseCase, fileStore)
-		aftersaleMod.UseCase.SetOwnerLookupPort(ticketParticipantDirectory{owners: iamMod.AdminResourceOwners, users: iamMod.Users})
-		if p.SMTP.TicketMailEnabled {
-			aftersaleMod.UseCase.SetMailer(
-				aftersaleMailAdapter{delivery: mailMod.DeliveryUseCase, from: p.SMTP.TicketMailFrom},
-				aftersaleapp.TicketMailConfig{
-					ReplyLocalPart: p.SMTP.TicketReplyLocalPart,
-					ReplyDomain:    p.SMTP.TicketReplyDomain,
-					ReplySecret:    p.TicketReplySecret,
-				},
-			)
+		aftersaleMod, err := aftersaleapi.NewModule(
+			p.DB,
+			tradeMod.UseCase,
+			fileStore,
+			aftersaleMailAdapter{delivery: mailMod.DeliveryUseCase, from: p.SMTP.TicketMailFrom},
+			aftersaleapp.TicketMailConfig{
+				ReplyLocalPart: p.SMTP.TicketReplyLocalPart,
+				ReplyDomain:    p.SMTP.TicketReplyDomain,
+				ReplySecret:    p.TicketReplySecret,
+			},
+		)
+		if err != nil {
+			return nil, cleanup, err
 		}
+		aftersaleMod.UseCase.SetOwnerLookupPort(ticketParticipantDirectory{owners: iamMod.AdminResourceOwners, users: iamMod.Users})
 		aftersaleapi.RegisterRoutes(v1, aftersaleMod, iamSessionFetcher, iamMod.PermissionChecker)
 
 		// MailMatch module (order-scoped message cache, async fetch and matching).
@@ -229,14 +232,10 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		// Inbound mail: ticket reply plus-addresses go to aftersale, everything
 		// else keeps flowing to mailmatch's resource inbound consumer.
 		mailmatchInbound := mailmatchapi.NewInboundConsumerAdapter(mailmatchMod.UseCase)
-		if p.SMTP.TicketMailEnabled {
-			mailMod.SetInboundConsumer(ticketInboundRouter{
-				ticket:   aftersaleapi.NewInboundConsumer(aftersaleMod.UseCase, p.SMTP.TicketReplyLocalPart),
-				fallback: mailmatchInbound,
-			})
-		} else {
-			mailMod.SetInboundConsumer(mailmatchInbound)
-		}
+		mailMod.SetInboundConsumer(ticketInboundRouter{
+			ticket:   aftersaleapi.NewInboundConsumer(aftersaleMod.UseCase, p.SMTP.TicketReplyLocalPart),
+			fallback: mailmatchInbound,
+		})
 		mailmatchapi.RegisterTaskHandlers(taskMux, mailmatchMod)
 		mailmatchapi.RegisterRoutes(v1, mailmatchMod)
 		mailmatchapi.RegisterAdminRoutes(v1, mailmatchMod, iamSessionFetcher, iamMod.PermissionChecker)

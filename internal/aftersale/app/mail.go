@@ -3,11 +3,11 @@ package app
 import (
 	"context"
 	"fmt"
-	"html"
 	"log/slog"
 	"strings"
 
 	"github.com/donnel666/remail/internal/aftersale/domain"
+	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	"github.com/donnel666/remail/internal/platform"
 )
 
@@ -29,7 +29,7 @@ func newReplyToken() string {
 
 // notifyRequester emails the ticket requester about the latest platform activity.
 func (uc *UseCase) notifyRequester(ctx context.Context, view *TicketView, kind ticketMailKind) {
-	if uc.mail == nil || !uc.mailConfig.enabled() || view == nil || view.Ticket == nil {
+	if view == nil || view.Ticket == nil {
 		return
 	}
 	ticket := view.Ticket
@@ -46,7 +46,7 @@ func (uc *UseCase) notifyRequester(ctx context.Context, view *TicketView, kind t
 // notifySuperAdmins emails every active super-admin about requester activity.
 // Recipient lookup and delivery are best-effort (INV-AS7).
 func (uc *UseCase) notifySuperAdmins(ctx context.Context, view *TicketView, kind ticketMailKind) {
-	if uc.mail == nil || !uc.mailConfig.enabled() || uc.owners == nil || view == nil || view.Ticket == nil {
+	if uc.owners == nil || view == nil || view.Ticket == nil {
 		return
 	}
 	ticket := view.Ticket
@@ -78,7 +78,7 @@ func (uc *UseCase) sendTicketMail(ctx context.Context, ticket *domain.Ticket, to
 		ReplyTo:        uc.mailConfig.replyAddress(ticket.TicketNo, replyToken),
 		Subject:        subject,
 		TextBody:       ticketMailText(ticket, intro, last.Content),
-		HTMLBody:       ticketMailHTML(ticket, intro, last.Content),
+		HTMLBody:       ticketMailHTML(ticket, subject, intro, last.Content),
 	}
 	if err := uc.mail.SendTicketMail(ctx, command); err != nil {
 		slog.Warn("aftersale ticket email failed", "ticketNo", ticket.TicketNo, "error", err)
@@ -121,16 +121,12 @@ func ticketMailText(ticket *domain.Ticket, intro, content string) string {
 	return b.String()
 }
 
-func ticketMailHTML(ticket *domain.Ticket, intro, content string) string {
-	safeContent := strings.ReplaceAll(html.EscapeString(strings.TrimSpace(content)), "\n", "<br>")
-	return fmt.Sprintf(
-		`<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1f2329;line-height:1.6">`+
-			`<p>您好，</p>`+
-			`<p>%s</p>`+
-			`<blockquote style="margin:12px 0;padding:8px 12px;border-left:3px solid #d0d3d6;color:#41464b">%s</blockquote>`+
-			`<hr style="border:none;border-top:1px dashed #d0d3d6;margin:20px 0">`+
-			`<p style="color:#8a9099;font-size:12px">%s<br>工单号：%s<br>直接回复本邮件即可继续沟通，请勿修改邮件主题。</p>`+
-			`</div>`,
-		html.EscapeString(intro), safeContent, html.EscapeString(replyDelimiter), html.EscapeString(ticket.TicketNo),
+func ticketMailHTML(ticket *domain.Ticket, subject, intro, content string) string {
+	return mailapp.BrandedNotificationHTML(
+		subject,
+		"工单通知",
+		intro,
+		content,
+		fmt.Sprintf("%s 工单号：%s。直接回复本邮件即可继续沟通，请勿修改邮件主题。", replyDelimiter, ticket.TicketNo),
 	)
 }

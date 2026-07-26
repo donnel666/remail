@@ -18,15 +18,20 @@ type Module struct {
 	UseCase *aftersaleapp.UseCase
 }
 
-func NewModule(db *gorm.DB, trade *tradeapp.UseCase, fileStore governanceapp.FilePort) *Module {
+func NewModule(db *gorm.DB, trade *tradeapp.UseCase, fileStore governanceapp.FilePort, mail aftersaleapp.MailPort, mailConfig aftersaleapp.TicketMailConfig) (*Module, error) {
 	repo := infra.NewRepo(db)
-	uc := aftersaleapp.NewUseCase(
+	uc, err := aftersaleapp.NewUseCase(
 		repo,
 		tradeOrderAdapter{trade: trade},
 		tradeRefundAdapter{trade: trade},
 		fileStoreAdapter{store: fileStore},
+		mail,
+		mailConfig,
 	)
-	return &Module{UseCase: uc}
+	if err != nil {
+		return nil, err
+	}
+	return &Module{UseCase: uc}, nil
 }
 
 // tradeOrderAdapter resolves an order from BC-TRADE for ticket creation. Passing

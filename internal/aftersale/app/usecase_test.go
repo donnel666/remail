@@ -170,7 +170,14 @@ func newTestUseCase() (*UseCase, *fakeRepo, *fakeRefundPort, *fakeFileStore) {
 	repo := &fakeRepo{}
 	refund := &fakeRefundPort{result: &RefundResult{RefundAmount: "6.8"}}
 	files := &fakeFileStore{}
-	uc := NewUseCase(repo, fakeOrderPort{}, refund, files)
+	uc, err := NewUseCase(repo, fakeOrderPort{}, refund, files, &fakeMail{}, TicketMailConfig{
+		ReplyLocalPart: "support",
+		ReplyDomain:    "tickets.example.com",
+		ReplySecret:    "secret",
+	})
+	if err != nil {
+		panic(err)
+	}
 	uc.SetOwnerLookupPort(fakeOwners{})
 	uc.now = func() time.Time { return time.Date(2026, 7, 17, 0, 0, 0, 0, time.UTC) }
 	return uc, repo, refund, files
@@ -198,6 +205,17 @@ func TestDecodeImageDataURL(t *testing.T) {
 		if _, _, err := decodeImageDataURL(raw); err == nil {
 			t.Errorf("%s: expected error, got nil", name)
 		}
+	}
+}
+
+func TestNewUseCaseRequiresTicketMailer(t *testing.T) {
+	repo, refund, files := &fakeRepo{}, &fakeRefundPort{}, &fakeFileStore{}
+	config := TicketMailConfig{ReplyLocalPart: "support", ReplyDomain: "tickets.example.com", ReplySecret: "secret"}
+	if _, err := NewUseCase(repo, fakeOrderPort{}, refund, files, nil, config); err == nil {
+		t.Fatal("nil mailer should fail")
+	}
+	if _, err := NewUseCase(repo, fakeOrderPort{}, refund, files, &fakeMail{}, TicketMailConfig{}); err == nil {
+		t.Fatal("empty mail config should fail")
 	}
 }
 
@@ -276,14 +294,14 @@ func TestCreateTicketNotifiesRequesterAndSuperAdmin(t *testing.T) {
 	}})
 	mailer := &fakeMail{}
 	config := TicketMailConfig{ReplyLocalPart: "support", ReplyDomain: "tickets.example.com", ReplySecret: "secret"}
-	uc.SetMailer(mailer, config)
+	uc.mail, uc.mailConfig = mailer, config
 
 	view, err := uc.CreateTicket(context.Background(), CreateTicketRequest{
 		RequesterUserID: 7,
 		RequesterEmail:  "u@example.com",
 		TicketType:      domain.TicketTypeGeneral,
 		Title:           "help",
-		FirstMessage:    "hi",
+		FirstMessage:    "hi\n<script>alert(1)</script>",
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -312,6 +330,19 @@ func TestCreateTicketNotifiesRequesterAndSuperAdmin(t *testing.T) {
 	if requesterMail.ReplyTo != config.replyAddress(view.Ticket.TicketNo, view.Ticket.ReplyToken) {
 		t.Fatalf("requester Reply-To = %q", requesterMail.ReplyTo)
 	}
+	if !strings.Contains(requesterMail.HTMLBody, `class="remail-shine-bar"`) ||
+		!strings.Contains(requesterMail.HTMLBody, "Remail，轻松收码") ||
+		strings.Contains(requesterMail.HTMLBody, "<script>") ||
+		!strings.Contains(requesterMail.HTMLBody, "&lt;script&gt;") {
+		t.Fatalf("ticket mail does not use the escaped branded frame: %s", requesterMail.HTMLBody)
+	}
+	for _, body := range []string{requesterMail.TextBody, requesterMail.HTMLBody} {
+		for _, expected := range []string{replyDelimiter, view.Ticket.TicketNo, "直接回复本邮件即可继续沟通"} {
+			if !strings.Contains(body, expected) {
+				t.Fatalf("ticket mail missing %q: %s", expected, body)
+			}
+		}
+	}
 	expectedAdminReplyTo := config.replyAddress(view.Ticket.TicketNo, config.platformReplyToken(view.Ticket.TicketNo, view.Ticket.ReplyToken, 42))
 	expectedAdmin2ReplyTo := config.replyAddress(view.Ticket.TicketNo, config.platformReplyToken(view.Ticket.TicketNo, view.Ticket.ReplyToken, 43))
 	if adminMail.ReplyTo != expectedAdminReplyTo || admin2Mail.ReplyTo != expectedAdmin2ReplyTo ||
@@ -326,7 +357,7 @@ func TestUserCloseNotifiesSuperAdmin(t *testing.T) {
 		ID: 42, Email: "admin@example.com", Role: "super_admin", Enabled: true,
 	}}})
 	mailer := &fakeMail{}
-	uc.SetMailer(mailer, TicketMailConfig{ReplyLocalPart: "support", ReplyDomain: "tickets.example.com", ReplySecret: "secret"})
+	uc.mail = mailer
 	repo.ticket = &domain.Ticket{
 		TicketNo: "AS1", Title: "help", ReplyToken: "tok", RequesterUserID: 7, Status: domain.TicketStatusOpen,
 		Messages: []domain.TicketMessage{{ID: 1, SenderType: domain.SenderTypeUser, Content: "hi"}},

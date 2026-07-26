@@ -123,8 +123,13 @@ func notificationMessage(purpose domain.OutboundPurpose, idempotencyKey, recipie
 		To:             recipient,
 		Subject:        bodyValue(subject),
 		TextBody:       notificationPlainText(heading, intro, content, note),
-		HTMLBody:       brandedHTML(subject, heading, intro, notificationPanelHTML(content), note),
+		HTMLBody:       BrandedNotificationHTML(subject, heading, intro, content, note),
 	}
+}
+
+// BrandedNotificationHTML renders plain notification content in the shared email frame.
+func BrandedNotificationHTML(documentTitle, heading, intro, content, note string) string {
+	return brandedHTML(documentTitle, heading, intro, notificationPanelHTML(content), note)
 }
 
 func notificationPlainText(heading, intro, content, note string) string {

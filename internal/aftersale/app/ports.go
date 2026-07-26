@@ -100,15 +100,14 @@ type TicketMailCommand struct {
 	HTMLBody       string
 }
 
-// TicketMailConfig holds the addressing used to build ticket emails. When the
-// reply domain is unset the mailer is treated as disabled.
+// TicketMailConfig holds the addressing used to build ticket emails.
 type TicketMailConfig struct {
 	ReplyLocalPart string
 	ReplyDomain    string
 	ReplySecret    string
 }
 
-func (c TicketMailConfig) enabled() bool {
+func (c TicketMailConfig) valid() bool {
 	return strings.TrimSpace(c.ReplyDomain) != "" && strings.TrimSpace(c.ReplyLocalPart) != "" && strings.TrimSpace(c.ReplySecret) != ""
 }
 

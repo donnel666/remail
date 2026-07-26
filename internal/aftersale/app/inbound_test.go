@@ -153,15 +153,15 @@ func TestReplyAddressAndToken(t *testing.T) {
 	if got := config.replyAddress("AS1B2C3", "tok123"); got != "support+AS1B2C3-tok123@tickets.example.com" {
 		t.Fatalf("replyAddress = %q", got)
 	}
-	if !config.enabled() {
-		t.Fatal("config should be enabled")
+	if !config.valid() {
+		t.Fatal("config should be valid")
 	}
 	adminToken := config.platformReplyToken("AS1B2C3", "tok123", 42)
 	if len(adminToken) != 16 || adminToken == "tok123" || adminToken != config.platformReplyToken("AS1B2C3", "tok123", 42) {
 		t.Fatalf("unexpected platform token %q", adminToken)
 	}
-	if (TicketMailConfig{}).enabled() {
-		t.Fatal("empty config should be disabled")
+	if (TicketMailConfig{}).valid() {
+		t.Fatal("empty config should be invalid")
 	}
 	if token := newReplyToken(); len(token) != 16 {
 		t.Fatalf("token length = %d (%q)", len(token), token)

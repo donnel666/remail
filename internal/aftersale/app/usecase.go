@@ -31,26 +31,27 @@ type UseCase struct {
 	now        func() time.Time
 }
 
-func NewUseCase(repo Repository, orders OrderPort, refunds RefundPort, files FileStorePort) *UseCase {
-	return &UseCase{
-		repo:    repo,
-		orders:  orders,
-		refunds: refunds,
-		files:   files,
-		now:     func() time.Time { return time.Now().UTC() },
+func NewUseCase(repo Repository, orders OrderPort, refunds RefundPort, files FileStorePort, mail MailPort, mailConfig TicketMailConfig) (*UseCase, error) {
+	if mail == nil {
+		return nil, fmt.Errorf("aftersale mailer is required")
 	}
+	if !mailConfig.valid() {
+		return nil, fmt.Errorf("aftersale ticket mail config is required")
+	}
+	return &UseCase{
+		repo:       repo,
+		orders:     orders,
+		refunds:    refunds,
+		files:      files,
+		mail:       mail,
+		mailConfig: mailConfig,
+		now:        func() time.Time { return time.Now().UTC() },
+	}, nil
 }
 
 // SetOwnerLookupPort attaches the IAM-backed participant directory. Wired in the
 // composition root to avoid a cross-context import cycle.
 func (uc *UseCase) SetOwnerLookupPort(owners OwnerLookupPort) { uc.owners = owners }
-
-// SetMailer attaches the outbound mail port and its addressing config. When
-// unset, ticket emails are silently skipped.
-func (uc *UseCase) SetMailer(mail MailPort, config TicketMailConfig) {
-	uc.mail = mail
-	uc.mailConfig = config
-}
 
 func (uc *UseCase) ListTickets(ctx context.Context, filter ListFilter, offset int, afterID uint, limit int) (*TicketListResult, error) {
 	if limit <= 0 || limit > 1000 {
