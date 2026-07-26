@@ -106,6 +106,10 @@ export async function listWalletTransactions(
   afterId?: number,
   limit = 20
 ) {
+  if (import.meta.env.DEV) {
+    return (await import("./dev-api-mocks"))
+      .DEV_WALLET_TRANSACTIONS as TransactionListResponse;
+  }
   return unwrap<TransactionListResponse>(
     await client.GET("/v1/wallet/transactions", {
       params: {

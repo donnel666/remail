@@ -12,8 +12,16 @@ interface SupplierApplicationModalProps {
   onSuccess: () => void;
 }
 
-function hasSupplierRole(role?: string | null) {
+export function hasSupplierRole(role?: string | null) {
   return role === "supplier" || role === "admin" || role === "super_admin";
+}
+
+export function createSupplierApplicationTicket(reason: string) {
+  return createTicket({
+    ticketType: "general",
+    title: "供应商申请",
+    firstMessage: reason,
+  });
 }
 
 export async function ensureSupplierRole(
@@ -51,11 +59,7 @@ export function SupplierApplicationModal({
 
     setBusy(true);
     try {
-      await createTicket({
-        ticketType: "general",
-        title: "供应商申请",
-        firstMessage: trimmedReason,
-      });
+      await createSupplierApplicationTicket(trimmedReason);
       Toast.success(t("Supplier application submitted."));
       close();
       onSuccess();

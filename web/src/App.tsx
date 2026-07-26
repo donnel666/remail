@@ -57,6 +57,7 @@ const pageLoaders = {
   passwordReset: () => import("./pages/PasswordReset"),
   account: () => import("./pages/Account"),
   consoleOverview: () => import("./pages/ConsoleOverview"),
+  finance: () => import("./pages/FinanceCenter"),
   wallet: () => import("./pages/Wallet"),
   orders: () => import("./pages/Orders"),
   tickets: () => import("./pages/Tickets"),
@@ -88,6 +89,7 @@ const Register = lazy(pageLoaders.register);
 const PasswordReset = lazy(pageLoaders.passwordReset);
 const Account = lazy(pageLoaders.account);
 const ConsoleOverview = lazy(pageLoaders.consoleOverview);
+const FinanceCenter = lazy(pageLoaders.finance);
 const Wallet = lazy(pageLoaders.wallet);
 const Orders = lazy(pageLoaders.orders);
 const Tickets = lazy(pageLoaders.tickets);
@@ -117,6 +119,7 @@ const routePreloadPriority = [
   "projects",
   "apiDocs",
   "pickup",
+  "finance",
   "wallet",
   "microsoftEmails",
   "domainEmails",
@@ -162,6 +165,7 @@ const preloadRouteByLoader: Partial<Record<PageLoaderKey, string>> = {
   consoleOverview: "/console",
   dashboard: "/dashboard",
   domainEmails: "/domains",
+  finance: "/finance",
   invite: "/invite",
   microsoftEmails: "/microsoft",
   orders: "/orders",
@@ -494,6 +498,7 @@ const routeTree = rootRoute.addChildren([
   createRoute({ getParentRoute: () => rootRoute, path: "/dashboard", component: Dashboard }),
   createRoute({ getParentRoute: () => rootRoute, path: "/pickup", component: Pickup }),
   createRoute({ getParentRoute: () => rootRoute, path: "/projects", component: Projects }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/finance", component: FinanceCenter }),
   createRoute({ getParentRoute: () => rootRoute, path: "/wallet", component: Wallet }),
   createRoute({ getParentRoute: () => rootRoute, path: "/orders", component: Orders }),
   createRoute({ getParentRoute: () => rootRoute, path: "/tickets", component: Tickets }),

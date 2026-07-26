@@ -11,6 +11,7 @@
 | 2026-07-17 | V1.4 | Codex | 补充管理员用户管理所需后台钱包接口：`GET /v1/admin/wallets/balances` 批量余额、`GET /v1/admin/wallets/{userId}` 与 `/transactions` 只读，以及 `POST /v1/admin/wallets/adjust` 按 `selection`(ids/filter) 批量调账；批量调账经 IAM `UserSelectionResolver` 跨 BC 解析用户、恒排除 `super_admin`、要求 `Idempotency-Key`，复用既有 signed-delta 与六位小数账本，不改变钱包额度桶策略。 |
 | 2026-07-25 | V1.5 | Codex | 邀请返佣改由系统设置控制首次充值比例、单笔/累计上限和有效期。 |
 | 2026-07-25 | V1.6 | Codex | 在线充值支持易支付 V1 MD5 与 V2 RSA；回调只触发主动查账，前 10 次每 5 秒、随后每 30 秒，无回调时 60 秒兜底启动，且只允许 5 分钟内查账确认后入账。 |
+| 2026-07-26 | V1.7 | Codex | 当前供应商提现与转入用户钱包统一改走 AFTERSALE general 工单，由管理员人工核对并操作钱包；不提供用户侧提现/划转写接口，不新增提现审批状态机。 |
 
 > 支撑域。BC-BILLING 只保证资金事实正确，不理解订单为什么扣款、退款或结算。
 
@@ -63,7 +64,7 @@
 | `CardKeyRedemption` | 卡密兑换事实 |
 | `ReferralReward` | 被邀请人首次充值触发的一次性返佣事实 |
 | `Settlement` | `frozen/credited/cancelled` |
-| `Withdrawal` | `reviewing/approved/transferred/rejected/cancelled/failed` |
+| `Withdrawal` | 当前版本不建立独立聚合；申请由 AFTERSALE general 工单承载。 |
 | `PaymentChannel` | 支付渠道配置 |
 | `IdempotencyKey` | 资金操作幂等事实 |
 
@@ -96,19 +97,9 @@ stateDiagram-v2
 
 ### 3.3 提现
 
-```mermaid
-stateDiagram-v2
-    [*] --> reviewing: 用户申请
-    reviewing --> approved
-    reviewing --> rejected
-    reviewing --> cancelled
-    approved --> transferred
-    approved --> failed
-    failed --> approved
-    failed --> rejected
-```
+当前版本不建立提现聚合或独立审批状态机。供应商在个人财务中心选择“支付宝”或“用户钱包”后，前端调用 AFTERSALE `POST /v1/tickets` 创建 `ticketType=general` 的非订单工单，标题固定为“供应商提现申请”，首条消息记录金额、去向和用户备注；支付宝提现必须附收款码图片。
 
-提现申请时从供应商可用转冻结；拒绝/取消退回；确认转账扣减冻结。
+工单提交本身不修改或预冻结任何余额。管理员处理时必须重新核对申请人的 `supplierAvailable`，再通过后台钱包操作人工完成供应商余额扣减、支付宝转账或消费余额加款，并在工单中留痕后关闭。重复工单和处理期间发生的余额变化均以管理员实际操作时的账本余额为准。
 
 ---
 
@@ -171,11 +162,9 @@ stateDiagram-v2
 | `GET` | `/v1/recharges/config` | 当前用户可见的充值档位、赠送和手续费配置。 |
 | `GET` | `/v1/recharges/{rechargeNo}` | 查询本人的充值单及主动查账状态。 |
 | `POST` | `/v1/cards/redeem` | 兑换卡密。 |
-| `POST` | `/v1/withdrawals` | 申请提现。 |
-| `GET` | `/v1/withdrawals` | 提现列表；支持 `scope=mine/all`。 |
-| `POST` | `/v1/withdrawals/{withdrawalNo}/cancel` | 用户取消待审核提现。 |
-| `POST` | `/v1/wallet/transfers` | 供应商可用额度转消费。 |
 | `GET` | `/v1/settlements` | 供应商结算列表；支持 `scope=mine/all`。 |
+
+当前无用户侧提现或供应商余额划转写接口；这两类申请统一使用 BC-AFTERSALE general 工单。
 
 后台 API：
 
@@ -186,11 +175,8 @@ stateDiagram-v2
 | `GET` | `/v1/admin/wallets/{userId}/transactions` | 读取指定用户流水（游标分页）。 |
 | `POST` | `/v1/admin/wallets/{userId}/credit` | 人工加款，必须有业务原因。 |
 | `POST` | `/v1/admin/wallets/{userId}/debit` | 人工扣款，必须有业务原因。 |
+| `POST` | `/v1/admin/wallets/{userId}/withdraw` | 从指定用户供应商可用余额人工扣减，必须有业务原因。 |
 | `POST` | `/v1/admin/wallets/adjust` | 按 `selection`(ids/filter) 批量调账（签名金额，正加负扣）；跨 BC 经 IAM 解析可调整用户（恒排除 `super_admin`），必须携带 `Idempotency-Key`，返回 `{requested,affected,skipped}`。 |
-| `POST` | `/v1/admin/withdrawals/{withdrawalNo}/approve` | 审核通过。 |
-| `POST` | `/v1/admin/withdrawals/{withdrawalNo}/reject` | 审核拒绝，必须有业务原因。 |
-| `POST` | `/v1/admin/withdrawals/{withdrawalNo}/transfer/confirm` | 确认已转账。 |
-| `POST` | `/v1/admin/withdrawals/{withdrawalNo}/transfer/fail` | 标记转账失败。 |
 | `POST` | `/v1/admin/recharges/{rechargeNo}/reconcile` | 查账入账。 |
 | `POST` | `/v1/admin/recharges/{rechargeNo}/fail` | 标记失败。 |
 | `GET` | `/v1/admin/cards` | 卡密查询。 |
@@ -213,6 +199,7 @@ stateDiagram-v2
 | ADR | 决策 | 理由 |
 |-----|------|------|
 | ADR-BILL-1 | 多额度桶 + 单一台账 | 防充值套利提现，同时保持流水统一。 |
-| ADR-BILL-2 | 不建通用冻结表 | 冻结原因由结算单和提现单表达。 |
+| ADR-BILL-2 | 不建通用冻结表 | 冻结原因由结算单表达。 |
 | ADR-BILL-3 | 回调不入账 | 必须查账确认金额后入账。 |
 | ADR-BILL-4 | Billing 不提供任意改结算状态 | 结算业务条件由 Trade 判断。 |
+| ADR-BILL-5 | 不建用户提现状态机 | 当前申请量由 general 工单和人工钱包操作即可覆盖；需要自动冻结、并发占款或支付通道时再引入提现聚合。 |

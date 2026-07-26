@@ -12,6 +12,11 @@ function visiblePaths(permissions: string[]) {
 }
 
 describe("admin navigation permissions", () => {
+  it("shows the personal finance center without admin permissions", () => {
+    expect(visiblePaths([])).toContain("/finance");
+    expect(getSidebarRouteRequiredPermissions("/finance")).toEqual([]);
+  });
+
   it("requires every platform-dashboard permission", () => {
     expect(
       visiblePaths([

@@ -1,5 +1,6 @@
 import {
   BarChart3,
+  CircleDollarSign,
   ClipboardList,
   Database,
   Globe,
@@ -36,6 +37,7 @@ export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
     id: "personal-center",
     labelKey: "Personal Center",
     items: [
+      { path: "/finance", labelKey: "Finance Center", icon: CircleDollarSign },
       { path: "/wallet", labelKey: "Wallet Management", icon: Wallet },
       { path: "/account", labelKey: "Personal Settings", icon: Settings },
     ],
