@@ -965,6 +965,8 @@ func TestAdminMicrosoftCoreRouteSecurityMatrix(t *testing.T) {
 		{name: "domain mailbox disable", method: http.MethodPost, path: "/v1/admin/domain-mailboxes/42/disable", resource: "core:resource", action: "operate", csrfNeeded: true},
 		{name: "server list", method: http.MethodGet, path: "/v1/admin/servers", resource: "core:resource", action: "read"},
 		{name: "server create", method: http.MethodPost, path: "/v1/admin/servers", resource: "core:resource", action: "write", csrfNeeded: true},
+		{name: "project price defaults", method: http.MethodGet, path: "/v1/admin/projects/product-defaults", resource: "core:project", action: "read"},
+		{name: "project products batch", method: http.MethodPost, path: "/v1/admin/projects/products", resource: "core:project", action: "write", csrfNeeded: true},
 	}
 
 	newRouter := func(checker *adminHandlerPermissionChecker) *gin.Engine {

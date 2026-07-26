@@ -2925,6 +2925,82 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/admin/projects/product-defaults:
+    get:
+      operationId: getAdminProjectPriceDefaults
+      summary: Get non-sensitive default project product prices
+      tags:
+        - Projects
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Current project product price defaults
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectPriceDefaultsResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/projects/products:
+    post:
+      operationId: postAdminProjectsProducts
+      summary: Create or replace product configurations for selected projects
+      tags:
+        - Projects
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectBulkUpdateProductsRequest"
+      responses:
+        "200":
+          description: Bulk project product update result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectBulkCommandResponse"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid project product configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /v1/admin/projects/logos:
     post:
       operationId: postAdminProjectLogo
@@ -13865,8 +13941,11 @@ components:
           enum: [ids, filter]
         projectIds:
           type: array
+          maxItems: 1000
+          uniqueItems: true
           items:
             type: integer
+            minimum: 1
         filter:
           $ref: "#/components/schemas/ProjectBulkFilter"
       additionalProperties: false
@@ -13901,6 +13980,39 @@ components:
       properties:
         affected:
           type: integer
+      additionalProperties: false
+
+    ProjectPriceDefaultsResponse:
+      type: object
+      required:
+        - defaults
+      properties:
+        defaults:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/NonNegativeLedgerAmount"
+      additionalProperties: false
+
+    ProjectBulkUpdateProductsRequest:
+      type: object
+      required:
+        - projectIds
+        - products
+      properties:
+        projectIds:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          uniqueItems: true
+          items:
+            type: integer
+            minimum: 1
+        products:
+          type: array
+          minItems: 1
+          maxItems: 2
+          items:
+            $ref: "#/components/schemas/ProjectProductRequest"
       additionalProperties: false
 
     GrantProjectAccessRequest:

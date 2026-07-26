@@ -44,6 +44,7 @@ import {
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import {
   approveAdminProject,
+  bulkUpdateAdminProjectProductsByIds,
   createAdminProject,
   deleteAdminProject,
   deleteAdminProjectsByFilter,
@@ -51,6 +52,7 @@ import {
   delistAdminProject,
   delistAdminProjectsByFilter,
   delistAdminProjectsByIds,
+  getAdminProjectPriceDefaults,
   getProject,
   listProjects,
   rejectAdminProject,
@@ -121,6 +123,49 @@ interface ProductDraft {
   warrantyMinutes: string;
 }
 
+type ProjectPriceDefaults = Record<
+  ProjectProductType,
+  Pick<ProductDraft, "codePrice" | "codeSupplierPrice" | "purchasePrice" | "purchaseSupplierPrice">
+>;
+
+const fallbackProjectPriceDefaults: ProjectPriceDefaults = {
+  microsoft: {
+    codePrice: "0.008",
+    codeSupplierPrice: "0.005",
+    purchasePrice: "0.01",
+    purchaseSupplierPrice: "0.007",
+  },
+  domain: {
+    codePrice: "0.08",
+    codeSupplierPrice: "0.04",
+    purchasePrice: "0",
+    purchaseSupplierPrice: "0",
+  },
+};
+
+function projectPriceDefaultsFromValues(values: Record<string, string>): ProjectPriceDefaults {
+  const read = (key: string, fallback: string) => {
+    const value = values[key];
+    return value !== undefined && Number.isFinite(Number(value)) && Number(value) >= 0
+      ? value
+      : fallback;
+  };
+  return {
+    microsoft: {
+      codePrice: read("default_project_microsoft_code_price", fallbackProjectPriceDefaults.microsoft.codePrice),
+      codeSupplierPrice: read("default_project_microsoft_code_supplier_price", fallbackProjectPriceDefaults.microsoft.codeSupplierPrice),
+      purchasePrice: read("default_project_microsoft_purchase_price", fallbackProjectPriceDefaults.microsoft.purchasePrice),
+      purchaseSupplierPrice: read("default_project_microsoft_purchase_supplier_price", fallbackProjectPriceDefaults.microsoft.purchaseSupplierPrice),
+    },
+    domain: {
+      codePrice: read("default_project_domain_code_price", fallbackProjectPriceDefaults.domain.codePrice),
+      codeSupplierPrice: read("default_project_domain_code_supplier_price", fallbackProjectPriceDefaults.domain.codeSupplierPrice),
+      purchasePrice: read("default_project_domain_purchase_price", fallbackProjectPriceDefaults.domain.purchasePrice),
+      purchaseSupplierPrice: read("default_project_domain_purchase_supplier_price", fallbackProjectPriceDefaults.domain.purchaseSupplierPrice),
+    },
+  };
+}
+
 interface ProjectDraft {
   accessType: "public" | "private";
   description: string;
@@ -152,27 +197,30 @@ function createDefaultMailRules(): MailRuleDraft[] {
   ];
 }
 
-function createDefaultProduct(type: ProjectProductType): ProductDraft {
+function createDefaultProduct(
+  type: ProjectProductType,
+  priceDefaults: ProjectPriceDefaults = fallbackProjectPriceDefaults
+): ProductDraft {
   const isMicrosoft = type === "microsoft";
   return {
     activationWindowMinutes: "60",
     codeEnabled: true,
-    codePrice: isMicrosoft ? "0.008" : "0.08",
-    codeSupplierPrice: isMicrosoft ? "0.005" : "0.04",
+    codePrice: priceDefaults[type].codePrice,
+    codeSupplierPrice: priceDefaults[type].codeSupplierPrice,
     codeWindowMinutes: "10",
     dotWeight: "0",
     mainWeight: isMicrosoft ? "1" : "0",
     plusWeight: "0",
     purchaseEnabled: isMicrosoft,
-    purchasePrice: isMicrosoft ? "0.01" : "0",
-    purchaseSupplierPrice: isMicrosoft ? "0.007" : "0",
+    purchasePrice: priceDefaults[type].purchasePrice,
+    purchaseSupplierPrice: priceDefaults[type].purchaseSupplierPrice,
     status: "enabled",
     type,
     warrantyMinutes: isMicrosoft ? "1440" : "60",
   };
 }
 
-function initialDraft(): ProjectDraft {
+function initialDraft(priceDefaults: ProjectPriceDefaults = fallbackProjectPriceDefaults): ProjectDraft {
   return {
     accessType: "public",
     description: "",
@@ -180,7 +228,7 @@ function initialDraft(): ProjectDraft {
     looseMatch: true,
     mailRules: createDefaultMailRules(),
     name: "",
-    products: [createDefaultProduct("microsoft")],
+    products: [createDefaultProduct("microsoft", priceDefaults)],
     targetPlatform: "",
   };
 }
@@ -272,8 +320,11 @@ function updateProduct(
   );
 }
 
-function detailToDraft(detail: ProjectDetailResponse | null): ProjectDraft {
-  if (!detail) return initialDraft();
+function detailToDraft(
+  detail: ProjectDetailResponse | null,
+  priceDefaults: ProjectPriceDefaults = fallbackProjectPriceDefaults
+): ProjectDraft {
+  if (!detail) return initialDraft(priceDefaults);
   const products =
     detail.products.length > 0
       ? detail.products.map((product): ProductDraft => ({
@@ -292,7 +343,7 @@ function detailToDraft(detail: ProjectDetailResponse | null): ProjectDraft {
           type: product.type as ProjectProductType,
           warrantyMinutes: String(product.warrantyMinutes ?? 0),
         }))
-      : [createDefaultProduct("microsoft")];
+      : [createDefaultProduct("microsoft", priceDefaults)];
 
   return {
     accessType: detail.project.accessType === "private" ? "private" : "public",
@@ -357,6 +408,65 @@ function withProjectAccessUserIDs(
   };
 }
 
+function productDraftToRequest(
+  product: ProductDraft,
+  t: (key: string) => string
+): ProjectProductRequest | null {
+  if (!product.codeEnabled && !product.purchaseEnabled) {
+    Toast.error(t("Each product must enable at least one service."));
+    return null;
+  }
+  if (product.codeEnabled && toNonNegativeInt(product.codeWindowMinutes) <= 0) {
+    Toast.error(t("Code window must be positive."));
+    return null;
+  }
+  if (
+    product.purchaseEnabled &&
+    (toNonNegativeInt(product.activationWindowMinutes) <= 0 ||
+      toNonNegativeInt(product.warrantyMinutes) <= 0)
+  ) {
+    Toast.error(t("Purchase windows must be positive."));
+    return null;
+  }
+  if (
+    product.type === "microsoft" &&
+    toNonNegativeInt(product.mainWeight) +
+      toNonNegativeInt(product.dotWeight) +
+      toNonNegativeInt(product.plusWeight) <=
+      0
+  ) {
+    Toast.error(t("Microsoft weights must be positive."));
+    return null;
+  }
+
+  const request: ProjectProductRequest = {
+    activationWindowMinutes: toNonNegativeInt(product.activationWindowMinutes),
+    codeEnabled: product.codeEnabled,
+    codePrice: normalizedMoney(product.codePrice),
+    codeSupplierPrice: normalizedMoney(product.codeSupplierPrice),
+    codeWindowMinutes: toNonNegativeInt(product.codeWindowMinutes),
+    dotWeight: product.type === "microsoft" ? toNonNegativeInt(product.dotWeight) : 0,
+    mainWeight: product.type === "microsoft" ? toNonNegativeInt(product.mainWeight) : 0,
+    plusWeight: product.type === "microsoft" ? toNonNegativeInt(product.plusWeight) : 0,
+    purchaseEnabled: product.purchaseEnabled,
+    purchasePrice: normalizedMoney(product.purchasePrice),
+    purchaseSupplierPrice: normalizedMoney(product.purchaseSupplierPrice),
+    status: product.status,
+    type: product.type,
+    warrantyMinutes: toNonNegativeInt(product.warrantyMinutes),
+  };
+  if (
+    !request.codePrice ||
+    !request.purchasePrice ||
+    !request.codeSupplierPrice ||
+    !request.purchaseSupplierPrice
+  ) {
+    Toast.error(t("Price fields must be non-negative numbers."));
+    return null;
+  }
+  return request;
+}
+
 function buildProjectPayload(
   draft: ProjectDraft,
   t: (key: string) => string
@@ -407,58 +517,8 @@ function buildProjectPayload(
 
   const products: ProjectProductRequest[] = [];
   for (const product of draft.products) {
-    if (!product.codeEnabled && !product.purchaseEnabled) {
-      Toast.error(t("Each product must enable at least one service."));
-      return null;
-    }
-    if (product.codeEnabled && toNonNegativeInt(product.codeWindowMinutes) <= 0) {
-      Toast.error(t("Code window must be positive."));
-      return null;
-    }
-    if (
-      product.purchaseEnabled &&
-      (toNonNegativeInt(product.activationWindowMinutes) <= 0 ||
-        toNonNegativeInt(product.warrantyMinutes) <= 0)
-    ) {
-      Toast.error(t("Purchase windows must be positive."));
-      return null;
-    }
-    if (
-      product.type === "microsoft" &&
-      toNonNegativeInt(product.mainWeight) +
-        toNonNegativeInt(product.dotWeight) +
-        toNonNegativeInt(product.plusWeight) <=
-        0
-    ) {
-      Toast.error(t("Microsoft weights must be positive."));
-      return null;
-    }
-
-    const productRequest = {
-      activationWindowMinutes: toNonNegativeInt(product.activationWindowMinutes),
-      codeEnabled: product.codeEnabled,
-      codePrice: normalizedMoney(product.codePrice),
-      codeSupplierPrice: normalizedMoney(product.codeSupplierPrice),
-      codeWindowMinutes: toNonNegativeInt(product.codeWindowMinutes),
-      dotWeight: product.type === "microsoft" ? toNonNegativeInt(product.dotWeight) : 0,
-      mainWeight: product.type === "microsoft" ? toNonNegativeInt(product.mainWeight) : 0,
-      plusWeight: product.type === "microsoft" ? toNonNegativeInt(product.plusWeight) : 0,
-      purchaseEnabled: product.purchaseEnabled,
-      purchasePrice: normalizedMoney(product.purchasePrice),
-      purchaseSupplierPrice: normalizedMoney(product.purchaseSupplierPrice),
-      status: product.status,
-      type: product.type,
-      warrantyMinutes: toNonNegativeInt(product.warrantyMinutes),
-    };
-    if (
-      !productRequest.codePrice ||
-      !productRequest.purchasePrice ||
-      !productRequest.codeSupplierPrice ||
-      !productRequest.purchaseSupplierPrice
-    ) {
-      Toast.error(t("Price fields must be non-negative numbers."));
-      return null;
-    }
+    const productRequest = productDraftToRequest(product, t);
+    if (!productRequest) return null;
     products.push(productRequest);
   }
 
@@ -486,9 +546,11 @@ function InfoItem({ label, value }: { label: string; value: ReactNode }) {
 function ProductDraftCard({
   draft,
   onChange,
+  statusEditable = false,
 }: {
   draft: ProductDraft;
   onChange: (patch: Partial<ProductDraft>) => void;
+  statusEditable?: boolean;
 }) {
   const { t } = useTranslation();
   const isMicrosoft = draft.type === "microsoft";
@@ -509,9 +571,18 @@ function ProductDraftCard({
           <Tag color={isMicrosoft ? "blue" : "green"} shape="circle">
             {productTypeLabel(draft.type, t)}
           </Tag>
-          <Tag color={draft.status === "enabled" ? "green" : "grey"} shape="circle">
-            {draft.status === "enabled" ? t("Enabled") : t("Disabled")}
-          </Tag>
+          {statusEditable ? (
+            <Checkbox
+              checked={draft.status === "enabled"}
+              onChange={(event) => onChange({ status: event.target.checked ? "enabled" : "disabled" })}
+            >
+              {t("Product enabled")}
+            </Checkbox>
+          ) : (
+            <Tag color={draft.status === "enabled" ? "green" : "grey"} shape="circle">
+              {draft.status === "enabled" ? t("Enabled") : t("Disabled")}
+            </Tag>
+          )}
         </Space>
         <Space wrap>
           <Checkbox
@@ -878,6 +949,7 @@ function ProjectEditorSheet({
   mode,
   onCancel,
   onSubmit,
+  priceDefaults,
   visible,
 }: {
   detail: ProjectDetailResponse | null;
@@ -887,6 +959,7 @@ function ProjectEditorSheet({
     payload: AdminCreateProjectRequest | AdminUpdateProjectRequest,
     accessUserIDs: number[]
   ) => Promise<void>;
+  priceDefaults: ProjectPriceDefaults;
   visible: boolean;
 }) {
   const { t } = useTranslation();
@@ -937,7 +1010,7 @@ function ProjectEditorSheet({
   useEffect(() => {
     accessHydrateSeqRef.current += 1;
     if (!visible) return;
-    const nextDraft = mode === "create" ? initialDraft() : detailToDraft(detail);
+    const nextDraft = mode === "create" ? initialDraft(priceDefaults) : detailToDraft(detail, priceDefaults);
     const accessUserIDs = mode === "create" ? [] : projectAccessUserIDs(detail);
     setDraft(nextDraft);
     setAccessUsers(mode === "create" ? [] : projectAccessUsers(detail));
@@ -953,7 +1026,7 @@ function ProjectEditorSheet({
     if (accessUserIDs.length > 0) {
       void hydrateAccessUsers(accessUserIDs);
     }
-  }, [detail, hydrateAccessUsers, mode, visible]);
+  }, [detail, hydrateAccessUsers, mode, priceDefaults, visible]);
 
   useEffect(() => {
     return () => {
@@ -976,7 +1049,7 @@ function ProjectEditorSheet({
         ...previous,
         products:
           !existing
-            ? [...previous.products, createDefaultProduct(type)]
+            ? [...previous.products, createDefaultProduct(type, priceDefaults)]
             : existing.status === "disabled"
               ? updateProduct(previous.products, type, { status: "enabled" })
               : previous.products.filter((product) => product.type !== type),
@@ -1299,6 +1372,109 @@ function ProjectEditorSheet({
   );
 }
 
+function BulkProductModal({
+  onCancel,
+  onSubmit,
+  priceDefaults,
+  projectCount,
+  visible,
+}: {
+  onCancel: () => void;
+  onSubmit: (products: ProjectProductRequest[]) => Promise<void>;
+  priceDefaults: ProjectPriceDefaults;
+  projectCount: number;
+  visible: boolean;
+}) {
+  const { t } = useTranslation();
+  const isMobile = useIsMobile();
+  const [products, setProducts] = useState<ProductDraft[]>([]);
+  const [selectedTypes, setSelectedTypes] = useState<ProjectProductType[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!visible) return;
+    setProducts([
+      createDefaultProduct("microsoft", priceDefaults),
+      createDefaultProduct("domain", priceDefaults),
+    ]);
+    setSelectedTypes([]);
+  }, [priceDefaults, visible]);
+
+  const submit = async () => {
+    const selected = products.filter((product) => selectedTypes.includes(product.type));
+    if (selected.length === 0) {
+      Toast.error(t("Select at least one product type."));
+      return;
+    }
+    const requests: ProjectProductRequest[] = [];
+    for (const product of selected) {
+      const request = productDraftToRequest(product, t);
+      if (!request) return;
+      requests.push(request);
+    }
+    setSubmitting(true);
+    try {
+      await onSubmit(requests);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal
+      bodyStyle={{
+        maxHeight: isMobile ? "calc(100vh - 152px)" : "min(720px, calc(100vh - 180px))",
+        overflowY: "auto",
+      }}
+      cancelText={t("Cancel")}
+      confirmLoading={submitting}
+      keepDOM={false}
+      okText={t("Apply to selected projects")}
+      onCancel={onCancel}
+      onOk={() => void submit().catch(() => undefined)}
+      size={isMobile ? "full-width" : "large"}
+      title={t("Batch edit products")}
+      visible={visible}
+      width={isMobile ? undefined : "min(960px, calc(100vw - 48px))"}
+    >
+      <div className="mb-4 text-sm text-[var(--semi-color-text-2)]">
+        {t("Batch product update description", { count: projectCount })}
+      </div>
+      <div className="space-y-4">
+        {products.map((product) => {
+          const selected = selectedTypes.includes(product.type);
+          return (
+            <section key={product.type}>
+              <Checkbox
+                checked={selected}
+                className="mb-2"
+                onChange={(event) =>
+                  setSelectedTypes((current) =>
+                    event.target.checked
+                      ? Array.from(new Set([...current, product.type]))
+                      : current.filter((type) => type !== product.type)
+                  )
+                }
+              >
+                {t("Apply product type", { type: productTypeLabel(product.type, t) })}
+              </Checkbox>
+              <fieldset disabled={!selected} className={!selected ? "opacity-50" : undefined}>
+                <ProductDraftCard
+                  draft={product}
+                  onChange={(patch) =>
+                    setProducts((current) => updateProduct(current, product.type, patch))
+                  }
+                  statusEditable
+                />
+              </fieldset>
+            </section>
+          );
+        })}
+      </div>
+    </Modal>
+  );
+}
+
 function ProjectDetailSheet({
   detail,
   onCancel,
@@ -1419,12 +1595,32 @@ export default function AdminProjects() {
   const [editorMode, setEditorMode] = useState<ProjectEditorMode>("create");
   const [editorDetail, setEditorDetail] = useState<ProjectDetailResponse | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
+  const [bulkProductsOpen, setBulkProductsOpen] = useState(false);
+  const [priceDefaults, setPriceDefaults] = useState<ProjectPriceDefaults | null>(null);
   const [operatingProjectID, setOperatingProjectID] = useState<number | null>(null);
   const [bulkOperating, setBulkOperating] = useState<
-    "relist" | "delist" | "reject" | "delete" | null
+    "relist" | "delist" | "reject" | "delete" | "products" | null
   >(null);
   const [debouncedSearchKeyword, flushSearchKeyword] =
     useDebouncedValue(searchKeyword);
+
+  useEffect(() => {
+    let active = true;
+    void getAdminProjectPriceDefaults()
+      .then(({ defaults }) => {
+        if (active) setPriceDefaults(projectPriceDefaultsFromValues(defaults));
+      })
+      .catch((error) => {
+        if (!active) return;
+        Toast.error(getIamErrorMessage(t, error, "Project price defaults load failed."));
+        setPriceDefaults(fallbackProjectPriceDefaults);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const resolvedPriceDefaults = priceDefaults ?? fallbackProjectPriceDefaults;
 
   const listFilter = useMemo<ProjectListFilter>(() => {
     const filter: ProjectListFilter = { scope: "all" };
@@ -1934,9 +2130,37 @@ export default function AdminProjects() {
     );
   }, [confirmBulkReject, selectedReviewingProjectIDs, t]);
 
+  const openBulkProducts = useCallback(() => {
+    if (selectedKeys.length === 0) return;
+    setBulkProductsOpen(true);
+  }, [selectedKeys.length]);
+
+  const updateSelectedProducts = useCallback(async (products: ProjectProductRequest[]) => {
+    setBulkOperating("products");
+    try {
+      const response = await bulkUpdateAdminProjectProductsByIds(selectedKeys, products);
+      Toast.success(t("Projects bulk operation completed.", { count: response.affected }));
+      setBulkProductsOpen(false);
+      setSelectedKeys([]);
+      await refresh();
+    } catch (error) {
+      Toast.error(getIamErrorMessage(t, error, "Project operation failed."));
+      throw error;
+    } finally {
+      setBulkOperating(null);
+    }
+  }, [refresh, selectedKeys, t]);
+
   const selectionExtraActions = useMemo(
-    () =>
-      selectedReviewingProjectIDs.length > 0
+    () => [
+      {
+        key: "products",
+        labelKey: "Batch edit products",
+        loading: bulkOperating === "products",
+        onClick: openBulkProducts,
+        type: "tertiary" as const,
+      },
+      ...(selectedReviewingProjectIDs.length > 0
         ? [
             {
               key: "reject",
@@ -1946,8 +2170,9 @@ export default function AdminProjects() {
               type: "danger" as const,
             },
           ]
-        : [],
-    [bulkOperating, confirmRejectSelected, selectedReviewingProjectIDs.length]
+        : []),
+    ],
+    [bulkOperating, confirmRejectSelected, openBulkProducts, selectedReviewingProjectIDs.length]
   );
 
   useSelectionNotification({
@@ -2554,7 +2779,15 @@ export default function AdminProjects() {
           setEditorDetail(null);
         }}
         onSubmit={handleEditorSubmit}
-        visible={editorOpen}
+        priceDefaults={resolvedPriceDefaults}
+        visible={editorOpen && priceDefaults !== null}
+      />
+      <BulkProductModal
+        onCancel={() => setBulkProductsOpen(false)}
+        onSubmit={updateSelectedProducts}
+        priceDefaults={resolvedPriceDefaults}
+        projectCount={selectedKeys.length}
+        visible={bulkProductsOpen && priceDefaults !== null}
       />
       <ProjectDetailSheet detail={detail} onCancel={() => setDetail(null)} />
     </div>

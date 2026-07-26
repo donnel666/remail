@@ -104,7 +104,7 @@ type ProjectBulkFilterRequest struct {
 // ProjectBulkSelectionRequest selects projects by IDs or by a filter.
 type ProjectBulkSelectionRequest struct {
 	Mode       string                   `json:"mode" binding:"required,oneof=ids filter"`
-	ProjectIDs []uint                   `json:"projectIds,omitempty"`
+	ProjectIDs []uint                   `json:"projectIds,omitempty" binding:"omitempty,max=1000,dive,gt=0"`
 	Filter     ProjectBulkFilterRequest `json:"filter,omitempty"`
 }
 
@@ -112,6 +112,17 @@ type ProjectBulkSelectionRequest struct {
 type ProjectBulkCommandRequest struct {
 	Selection    ProjectBulkSelectionRequest `json:"selection" binding:"required"`
 	ReviewReason string                      `json:"reviewReason,omitempty"`
+}
+
+// ProjectBulkUpdateProductsRequest replaces complete product configurations for selected projects.
+type ProjectBulkUpdateProductsRequest struct {
+	ProjectIDs []uint                  `json:"projectIds" binding:"required,min=1,max=1000,dive,gt=0"`
+	Products   []ProjectProductRequest `json:"products" binding:"required,min=1,max=2"`
+}
+
+// ProjectPriceDefaultsResponse returns the non-sensitive project price defaults.
+type ProjectPriceDefaultsResponse struct {
+	Defaults map[string]string `json:"defaults"`
 }
 
 // GrantProjectAccessRequest grants a user access to a private project.

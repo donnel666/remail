@@ -25,10 +25,22 @@ export const RECHARGE_CHECK_KEYS = [
   "async_check_request_timeout_seconds",
 ] as const;
 
+export const PROJECT_PRICE_KEYS = [
+  "default_project_microsoft_code_price",
+  "default_project_microsoft_code_supplier_price",
+  "default_project_microsoft_purchase_price",
+  "default_project_microsoft_purchase_supplier_price",
+  "default_project_domain_code_price",
+  "default_project_domain_code_supplier_price",
+  "default_project_domain_purchase_price",
+  "default_project_domain_purchase_supplier_price",
+] as const;
+
 export const PAYMENT_BILLING_KEYS = [
   ...EPAY_GATEWAY_KEYS,
   ...TOPUP_KEYS,
   ...RECHARGE_CHECK_KEYS,
+  ...PROJECT_PRICE_KEYS,
 ] as const;
 
 export function applyEPayURLDefaults(form: Record<string, unknown>, origin: string): Record<string, unknown> {

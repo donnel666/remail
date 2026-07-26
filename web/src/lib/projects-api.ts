@@ -12,6 +12,10 @@ export type CreateProjectApplicationRequest =
   components["schemas"]["CreateProjectApplicationRequest"];
 export type ProjectBulkCommandResponse =
   components["schemas"]["ProjectBulkCommandResponse"];
+export type ProjectBulkUpdateProductsRequest =
+  components["schemas"]["ProjectBulkUpdateProductsRequest"];
+export type ProjectPriceDefaultsResponse =
+  components["schemas"]["ProjectPriceDefaultsResponse"];
 export type ProjectBulkFilter = components["schemas"]["ProjectBulkFilter"];
 export type ProjectAccess = components["schemas"]["ProjectAccess"];
 export type ProjectAccessListResponse =
@@ -138,6 +142,12 @@ export async function createAdminProject(payload: AdminCreateProjectRequest) {
       body: payload,
       params: { header: csrfHeader() },
     })
+  );
+}
+
+export async function getAdminProjectPriceDefaults() {
+  return unwrap<ProjectPriceDefaultsResponse>(
+    await client.GET("/v1/admin/projects/product-defaults")
   );
 }
 
@@ -277,6 +287,18 @@ export async function deleteAdminProjectsByFilter(filter: ProjectListFilter) {
   return unwrap<ProjectBulkCommandResponse>(
     await client.POST("/v1/admin/projects/delete", {
       body: { selection: filterSelection(filter) },
+      params: { header: csrfHeader() },
+    })
+  );
+}
+
+export async function bulkUpdateAdminProjectProductsByIds(
+  projectIds: number[],
+  products: ProjectProductRequest[]
+) {
+  return unwrap<ProjectBulkCommandResponse>(
+    await client.POST("/v1/admin/projects/products", {
+      body: { projectIds: projectIdSelection(projectIds).projectIds, products },
       params: { header: csrfHeader() },
     })
   );

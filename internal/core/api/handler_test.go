@@ -21,6 +21,7 @@ import (
 	coredomain "github.com/donnel666/remail/internal/core/domain"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	iamdomain "github.com/donnel666/remail/internal/iam/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -271,6 +272,37 @@ func (r *mockProjectRepo) BulkDeleteWithLog(_ context.Context, filter coreapp.Pr
 			}
 		}
 		r.summaries = next
+	}
+	if log != nil {
+		r.logs = append(r.logs, log)
+	}
+	return affected, nil
+}
+
+func (r *mockProjectRepo) BulkUpsertProductsWithLog(_ context.Context, filter coreapp.ProjectListFilter, products []coredomain.Product, log *governancedomain.OperationLog) (int, error) {
+	affected := 0
+	for _, detail := range r.details {
+		if !mockProjectMatchesFilter(detail.Project, filter) {
+			continue
+		}
+		for _, product := range products {
+			product.ProjectID = detail.Project.ID
+			replaced := false
+			for i := range detail.Products {
+				if detail.Products[i].Type == product.Type {
+					product.ID = detail.Products[i].ID
+					detail.Products[i] = product
+					replaced = true
+					break
+				}
+			}
+			if !replaced {
+				product.ID = uint(len(detail.Products) + 1)
+				detail.Products = append(detail.Products, product)
+			}
+		}
+		r.upsertSummary(detail)
+		affected++
 	}
 	if log != nil {
 		r.logs = append(r.logs, log)
@@ -4132,6 +4164,80 @@ func TestCoreHandler_AdminProjectBulkSelectionShapeValidation(t *testing.T) {
 	setAuthContext(c, 1, iamdomain.RoleAdmin)
 
 	h.PostAdminProjectsDelete(c)
+
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+}
+
+func TestCoreHandler_AdminProjectsProductsCreatesMissingProduct(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := newMockProjectRepo()
+	detail := projectDetailForAPITest()
+	detail.Project.ID = 10
+	repo.details[10] = detail
+	repo.upsertSummary(detail)
+	h := NewCoreHandler(&CoreModule{ProjectUseCase: coreapp.NewProjectUseCase(repo)})
+	body := `{
+		"projectIds":[10],
+		"products":[{
+			"type":"domain","status":"enabled","codeEnabled":true,"purchaseEnabled":true,
+			"codePrice":"0.01","codeSupplierPrice":"0.005","purchasePrice":"0.02","purchaseSupplierPrice":"0.01",
+			"codeWindowMinutes":10,"activationWindowMinutes":60,"warrantyMinutes":60,
+			"mainWeight":0,"dotWeight":0,"plusWeight":0
+		}]
+	}`
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/v1/admin/projects/products", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	setAuthContext(c, 1, iamdomain.RoleAdmin)
+
+	h.PostAdminProjectsProducts(c)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Len(t, repo.details[10].Products, 2)
+	product := repo.details[10].Products[1]
+	require.Equal(t, coredomain.ProductTypeDomain, product.Type)
+	require.True(t, product.PurchaseEnabled)
+	require.Equal(t, "0.020000", product.PurchasePrice)
+}
+
+func TestCoreHandler_AdminProjectPriceDefaults(t *testing.T) {
+	key := "default_project_microsoft_code_price"
+	previous := runtimeconfig.String(key, "")
+	runtimeconfig.Set(key, "0.123456")
+	t.Cleanup(func() {
+		if previous == "" {
+			runtimeconfig.Delete(key)
+		} else {
+			runtimeconfig.Set(key, previous)
+		}
+	})
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/admin/projects/product-defaults", nil)
+	setAuthContext(c, 1, iamdomain.RoleAdmin)
+
+	NewCoreHandler(&CoreModule{}).GetAdminProjectPriceDefaults(c)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var response ProjectPriceDefaultsResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	require.Equal(t, "0.123456", response.Defaults[key])
+	require.Len(t, response.Defaults, 8)
+}
+
+func TestCoreHandler_AdminProjectsProductsLimitsRequestBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	body := `{"projectIds":[10],"products":[{"type":"domain","status":"enabled","codeEnabled":true,"purchaseEnabled":false,"codePrice":"0.01","codeSupplierPrice":"0.005","purchasePrice":"0","purchaseSupplierPrice":"0","codeWindowMinutes":10,"activationWindowMinutes":60,"warrantyMinutes":60,"mainWeight":0,"dotWeight":0,"plusWeight":0}],"padding":"` + strings.Repeat("x", MaxProjectBulkRequestBytes) + `"}`
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/admin/projects/products", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	setAuthContext(c, 1, iamdomain.RoleAdmin)
+
+	NewCoreHandler(&CoreModule{ProjectUseCase: coreapp.NewProjectUseCase(newMockProjectRepo())}).PostAdminProjectsProducts(c)
 
 	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
 }

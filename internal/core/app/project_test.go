@@ -15,6 +15,8 @@ import (
 type fakeProjectRepo struct {
 	detail           *domain.ProjectDetail
 	bulkReviewReason string
+	bulkFilter       ProjectListFilter
+	bulkProducts     []domain.Product
 	items            []ProjectSummary
 	log              *governancedomain.OperationLog
 }
@@ -114,6 +116,13 @@ func (r *fakeProjectRepo) BulkTransitionWithLog(_ context.Context, _ ProjectList
 func (r *fakeProjectRepo) BulkDeleteWithLog(_ context.Context, _ ProjectListFilter, log *governancedomain.OperationLog) (int, error) {
 	r.log = log
 	return 2, nil
+}
+
+func (r *fakeProjectRepo) BulkUpsertProductsWithLog(_ context.Context, filter ProjectListFilter, products []domain.Product, log *governancedomain.OperationLog) (int, error) {
+	r.bulkFilter = filter
+	r.bulkProducts = products
+	r.log = log
+	return len(filter.IDs), nil
 }
 
 func (r *fakeProjectRepo) ListAccesses(_ context.Context, _ uint) ([]domain.ProjectAccess, error) {
@@ -309,6 +318,28 @@ func TestProjectUseCaseAdminUpdatePreservesDisabledHistoricalProduct(t *testing.
 	require.Equal(t, domain.ProductStatusEnabled, detail.Products[1].Status)
 }
 
+func TestProjectUseCaseAdminUpdateDoesNotApplyCreatePriceDefaults(t *testing.T) {
+	repo := &fakeProjectRepo{}
+	uc := NewProjectUseCase(repo)
+	key := "default_project_microsoft_code_price"
+	previous := runtimeconfig.String(key, "")
+	runtimeconfig.Set(key, "9.99")
+	t.Cleanup(func() {
+		if previous == "" {
+			runtimeconfig.Delete(key)
+		} else {
+			runtimeconfig.Set(key, previous)
+		}
+	})
+
+	req := validProjectCreateRequest()
+	req.Products[0].CodePrice = ""
+	detail, err := uc.AdminUpdate(context.Background(), 9, 55, req, "req-update-empty-price", "/v1/admin/projects/:projectId")
+
+	require.NoError(t, err)
+	require.Equal(t, "0.000000", detail.Products[0].CodePrice)
+}
+
 func TestProjectUseCaseAdminCreateListedNormalizesPrivateAccesses(t *testing.T) {
 	repo := &fakeProjectRepo{}
 	uc := NewProjectUseCase(repo)
@@ -396,6 +427,49 @@ func TestProjectUseCaseAdminBulkReject(t *testing.T) {
 	require.Equal(t, 2, result.Affected)
 	require.Equal(t, "资料不完整", repo.bulkReviewReason)
 	require.Equal(t, "core.project.bulk_reject", repo.log.OperationType)
+}
+
+func TestProjectUseCaseAdminBulkUpdateProducts(t *testing.T) {
+	repo := &fakeProjectRepo{}
+	uc := NewProjectUseCase(repo)
+	key := "default_project_domain_code_price"
+	previous := runtimeconfig.String(key, "")
+	runtimeconfig.Set(key, "0.123456")
+	t.Cleanup(func() {
+		if previous == "" {
+			runtimeconfig.Delete(key)
+		} else {
+			runtimeconfig.Set(key, previous)
+		}
+	})
+
+	result, err := uc.AdminBulkUpdateProducts(context.Background(), 9, []uint{5, 6, 5}, []ProjectProductRequest{{
+		Type: "domain", Status: "enabled", CodeEnabled: true, PurchaseEnabled: true,
+		PurchasePrice: "0.2", CodeSupplierPrice: "0.03", PurchaseSupplierPrice: "0.04",
+		CodeWindowMinutes: 10, ActivationWindowMinutes: 60, WarrantyMinutes: 60,
+	}}, "req-bulk-products", "/v1/admin/projects/products")
+
+	require.NoError(t, err)
+	require.Equal(t, 2, result.Affected)
+	require.Equal(t, []uint{5, 6}, repo.bulkFilter.IDs)
+	require.Len(t, repo.bulkProducts, 1)
+	require.Equal(t, "0.123456", repo.bulkProducts[0].CodePrice)
+	require.Equal(t, "0.200000", repo.bulkProducts[0].PurchasePrice)
+	require.Equal(t, domain.ProductStatusEnabled, repo.bulkProducts[0].Status)
+	require.Equal(t, "core.project.bulk_update_products", repo.log.OperationType)
+}
+
+func TestProjectUseCaseAdminBulkUpdateProductsRejectsTooManyIDs(t *testing.T) {
+	ids := make([]uint, ProjectBulkMaxExplicitIDs+1)
+	for i := range ids {
+		ids[i] = uint(i + 1)
+	}
+
+	_, err := NewProjectUseCase(&fakeProjectRepo{}).AdminBulkUpdateProducts(
+		context.Background(), 9, ids, nil, "req-bulk-products-limit", "/v1/admin/projects/products",
+	)
+
+	require.ErrorIs(t, err, domain.ErrInvalidProject)
 }
 
 func TestProjectUseCaseAdminApproveWithConfig(t *testing.T) {

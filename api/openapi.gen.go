@@ -6291,6 +6291,12 @@ type ProjectBulkSelection struct {
 // ProjectBulkSelectionMode defines model for ProjectBulkSelection.Mode.
 type ProjectBulkSelectionMode string
 
+// ProjectBulkUpdateProductsRequest defines model for ProjectBulkUpdateProductsRequest.
+type ProjectBulkUpdateProductsRequest struct {
+	Products   []ProjectProductRequest `json:"products"`
+	ProjectIds []int                   `json:"projectIds"`
+}
+
 // ProjectDetailResponse defines model for ProjectDetailResponse.
 type ProjectDetailResponse struct {
 	Accesses *[]ProjectAccess `json:"accesses,omitempty"`
@@ -6403,6 +6409,11 @@ type ProjectMatchFacets struct {
 	All    int `json:"all"`
 	Loose  int `json:"loose"`
 	Strict int `json:"strict"`
+}
+
+// ProjectPriceDefaultsResponse defines model for ProjectPriceDefaultsResponse.
+type ProjectPriceDefaultsResponse struct {
+	Defaults map[string]NonNegativeLedgerAmount `json:"defaults"`
 }
 
 // ProjectProduct defines model for ProjectProduct.
@@ -7841,6 +7852,12 @@ type PostAdminProjectLogoParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// PostAdminProjectsProductsParams defines parameters for PostAdminProjectsProducts.
+type PostAdminProjectsProductsParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // PostAdminProjectsRejectParams defines parameters for PostAdminProjectsReject.
 type PostAdminProjectsRejectParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
@@ -9061,6 +9078,9 @@ type PostAdminProjectsDelistJSONRequestBody = ProjectBulkCommandRequest
 // PostAdminProjectLogoMultipartRequestBody defines body for PostAdminProjectLogo for multipart/form-data ContentType.
 type PostAdminProjectLogoMultipartRequestBody PostAdminProjectLogoMultipartBody
 
+// PostAdminProjectsProductsJSONRequestBody defines body for PostAdminProjectsProducts for application/json ContentType.
+type PostAdminProjectsProductsJSONRequestBody = ProjectBulkUpdateProductsRequest
+
 // PostAdminProjectsRejectJSONRequestBody defines body for PostAdminProjectsReject for application/json ContentType.
 type PostAdminProjectsRejectJSONRequestBody = ProjectBulkRejectRequest
 
@@ -10059,6 +10079,12 @@ type ServerInterface interface {
 	// Upload a project logo
 	// (POST /v1/admin/projects/logos)
 	PostAdminProjectLogo(c *gin.Context, params PostAdminProjectLogoParams)
+	// Get non-sensitive default project product prices
+	// (GET /v1/admin/projects/product-defaults)
+	GetAdminProjectPriceDefaults(c *gin.Context)
+	// Create or replace product configurations for selected projects
+	// (POST /v1/admin/projects/products)
+	PostAdminProjectsProducts(c *gin.Context, params PostAdminProjectsProductsParams)
 	// Reject reviewing projects in bulk
 	// (POST /v1/admin/projects/reject)
 	PostAdminProjectsReject(c *gin.Context, params PostAdminProjectsRejectParams)
@@ -13907,6 +13933,66 @@ func (siw *ServerInterfaceWrapper) PostAdminProjectLogo(c *gin.Context) {
 	}
 
 	siw.Handler.PostAdminProjectLogo(c, params)
+}
+
+// GetAdminProjectPriceDefaults operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminProjectPriceDefaults(c *gin.Context) {
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminProjectPriceDefaults(c)
+}
+
+// PostAdminProjectsProducts operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminProjectsProducts(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminProjectsProductsParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminProjectsProducts(c, params)
 }
 
 // PostAdminProjectsReject operation middleware
@@ -22274,6 +22360,8 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/projects/delete", wrapper.PostAdminProjectsDelete)
 	router.POST(options.BaseURL+"/v1/admin/projects/delist", wrapper.PostAdminProjectsDelist)
 	router.POST(options.BaseURL+"/v1/admin/projects/logos", wrapper.PostAdminProjectLogo)
+	router.GET(options.BaseURL+"/v1/admin/projects/product-defaults", wrapper.GetAdminProjectPriceDefaults)
+	router.POST(options.BaseURL+"/v1/admin/projects/products", wrapper.PostAdminProjectsProducts)
 	router.POST(options.BaseURL+"/v1/admin/projects/reject", wrapper.PostAdminProjectsReject)
 	router.POST(options.BaseURL+"/v1/admin/projects/relist", wrapper.PostAdminProjectsRelist)
 	router.DELETE(options.BaseURL+"/v1/admin/projects/:projectId", wrapper.DeleteAdminProject)

@@ -35,6 +35,9 @@ const (
 // JSON decoding. Ten thousand numeric IDs fit comfortably within this limit.
 const MaxResourceValidationRequestBytes = 1024 * 1024 // 1 MB
 
+// MaxProjectBulkRequestBytes bounds project bulk JSON before decoding.
+const MaxProjectBulkRequestBytes = 64 * 1024
+
 func maxImportBytesValue() int64 {
 	return int64(min(runtimeconfig.Int("resource_import_max_bytes", MaxImportBytes, 1), maxConfiguredImportBytes))
 }
@@ -537,6 +540,14 @@ func (h *CoreHandler) PostResourceValidations(c *gin.Context) {
 }
 
 // --- Projects ---
+
+// GET /v1/admin/projects/product-defaults
+func (h *CoreHandler) GetAdminProjectPriceDefaults(c *gin.Context) {
+	if _, ok := requireCurrentUserID(c); !ok {
+		return
+	}
+	c.JSON(http.StatusOK, ProjectPriceDefaultsResponse{Defaults: coreapp.ProjectPriceDefaults()})
+}
 
 // GET /v1/projects
 func (h *CoreHandler) GetProjects(c *gin.Context) {
@@ -1128,6 +1139,32 @@ func (h *CoreHandler) PostAdminProjectsDelete(c *gin.Context) {
 	})
 }
 
+// POST /v1/admin/projects/products
+func (h *CoreHandler) PostAdminProjectsProducts(c *gin.Context) {
+	userID, ok := requireCurrentUserID(c)
+	if !ok {
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, MaxProjectBulkRequestBytes)
+	var req ProjectBulkUpdateProductsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid request body.",
+			"fields":    validationErrors(err),
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+	result, err := h.module.ProjectUseCase.AdminBulkUpdateProducts(
+		c.Request.Context(), userID, req.ProjectIDs, toAppProjectProducts(req.Products), middleware.GetRequestID(c), c.FullPath(),
+	)
+	if err != nil {
+		writeCoreError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, ProjectBulkCommandResponse{Affected: result.Affected})
+}
+
 func (h *CoreHandler) adminProjectBulkCommand(
 	c *gin.Context,
 	action func(userID uint, selection coreapp.ProjectBulkSelection, reviewReason string) (*coreapp.ProjectBulkResult, error),
@@ -1136,6 +1173,7 @@ func (h *CoreHandler) adminProjectBulkCommand(
 	if !ok {
 		return
 	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, MaxProjectBulkRequestBytes)
 	var req ProjectBulkCommandRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -1434,26 +1472,7 @@ func toAppProjectRequest(req projectRequestFields) coreapp.CreateProjectRequest 
 	if req.projectLooseMatch() != nil {
 		looseMatch = *req.projectLooseMatch()
 	}
-	requestProducts := req.projectProducts()
-	products := make([]coreapp.ProjectProductRequest, len(requestProducts))
-	for i := range requestProducts {
-		products[i] = coreapp.ProjectProductRequest{
-			Type:                    requestProducts[i].Type,
-			Status:                  requestProducts[i].Status,
-			CodeEnabled:             requestProducts[i].CodeEnabled,
-			PurchaseEnabled:         requestProducts[i].PurchaseEnabled,
-			CodePrice:               requestProducts[i].CodePrice,
-			PurchasePrice:           requestProducts[i].PurchasePrice,
-			CodeSupplierPrice:       requestProducts[i].CodeSupplierPrice,
-			PurchaseSupplierPrice:   requestProducts[i].PurchaseSupplierPrice,
-			CodeWindowMinutes:       requestProducts[i].CodeWindowMinutes,
-			ActivationWindowMinutes: requestProducts[i].ActivationWindowMinutes,
-			WarrantyMinutes:         requestProducts[i].WarrantyMinutes,
-			MainWeight:              requestProducts[i].MainWeight,
-			DotWeight:               requestProducts[i].DotWeight,
-			PlusWeight:              requestProducts[i].PlusWeight,
-		}
-	}
+	products := toAppProjectProducts(req.projectProducts())
 	requestRules := req.projectMailRules()
 	rules := make([]coreapp.ProjectMailRuleRequest, len(requestRules))
 	for i := range requestRules {
@@ -1493,6 +1512,22 @@ func toAppProjectBulkSelection(req ProjectBulkSelectionRequest) coreapp.ProjectB
 			CreatedTo:      req.Filter.CreatedTo,
 		},
 	}
+}
+
+func toAppProjectProducts(requestProducts []ProjectProductRequest) []coreapp.ProjectProductRequest {
+	products := make([]coreapp.ProjectProductRequest, len(requestProducts))
+	for i := range requestProducts {
+		products[i] = coreapp.ProjectProductRequest{
+			Type: requestProducts[i].Type, Status: requestProducts[i].Status,
+			CodeEnabled: requestProducts[i].CodeEnabled, PurchaseEnabled: requestProducts[i].PurchaseEnabled,
+			CodePrice: requestProducts[i].CodePrice, PurchasePrice: requestProducts[i].PurchasePrice,
+			CodeSupplierPrice: requestProducts[i].CodeSupplierPrice, PurchaseSupplierPrice: requestProducts[i].PurchaseSupplierPrice,
+			CodeWindowMinutes: requestProducts[i].CodeWindowMinutes, ActivationWindowMinutes: requestProducts[i].ActivationWindowMinutes,
+			WarrantyMinutes: requestProducts[i].WarrantyMinutes, MainWeight: requestProducts[i].MainWeight,
+			DotWeight: requestProducts[i].DotWeight, PlusWeight: requestProducts[i].PlusWeight,
+		}
+	}
+	return products
 }
 
 func toProjectItemResponse(summary coreapp.ProjectSummary, includeInternal bool, viewerUserID uint, inventoryByProductID map[uint]allocapp.ProductInventoryTotal) ProjectItemResponse {
@@ -1996,6 +2031,8 @@ func validateProjectBulkSelectionRequest(selection ProjectBulkSelectionRequest) 
 	case "ids":
 		if len(selection.ProjectIDs) == 0 {
 			fields["selection.projectIds"] = "At least one project ID is required."
+		} else if len(selection.ProjectIDs) > coreapp.ProjectBulkMaxExplicitIDs {
+			fields["selection.projectIds"] = "Too many project IDs."
 		} else {
 			for _, projectID := range selection.ProjectIDs {
 				if projectID == 0 {

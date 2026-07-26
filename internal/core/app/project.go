@@ -22,6 +22,20 @@ const (
 	projectRulePatternMax    = 500
 )
 
+// ProjectBulkMaxExplicitIDs bounds project bulk commands selected by ID.
+const ProjectBulkMaxExplicitIDs = 1000
+
+var projectPriceFallbacks = map[string]string{
+	"default_project_microsoft_code_price":              "0.008",
+	"default_project_microsoft_code_supplier_price":     "0.005",
+	"default_project_microsoft_purchase_price":          "0.01",
+	"default_project_microsoft_purchase_supplier_price": "0.007",
+	"default_project_domain_code_price":                 "0.08",
+	"default_project_domain_code_supplier_price":        "0.04",
+	"default_project_domain_purchase_price":             "0",
+	"default_project_domain_purchase_supplier_price":    "0",
+}
+
 func projectNameMaxValue() int {
 	return min(runtimeconfig.Int("project_name_max", projectNameMax, 1), projectNameMax)
 }
@@ -34,6 +48,15 @@ func projectDescriptionMaxValue() int {
 	return min(runtimeconfig.Int("project_description_max", projectDescriptionMax, 0), projectDescriptionMax)
 }
 
+// ProjectPriceDefaults returns the current non-sensitive project price defaults.
+func ProjectPriceDefaults() map[string]string {
+	defaults := make(map[string]string, len(projectPriceFallbacks))
+	for key, fallback := range projectPriceFallbacks {
+		defaults[key] = runtimeconfig.String(key, fallback)
+	}
+	return defaults
+}
+
 // ProjectRepository persists Project aggregates.
 type ProjectRepository interface {
 	CreateWithLog(ctx context.Context, detail *domain.ProjectDetail, log *governancedomain.OperationLog) error
@@ -44,6 +67,7 @@ type ProjectRepository interface {
 	DeleteWithLog(ctx context.Context, projectID uint, log *governancedomain.OperationLog) error
 	BulkTransitionWithLog(ctx context.Context, filter ProjectListFilter, from domain.ProjectStatus, to domain.ProjectStatus, reviewReason string, log *governancedomain.OperationLog) (int, error)
 	BulkDeleteWithLog(ctx context.Context, filter ProjectListFilter, log *governancedomain.OperationLog) (int, error)
+	BulkUpsertProductsWithLog(ctx context.Context, filter ProjectListFilter, products []domain.Product, log *governancedomain.OperationLog) (int, error)
 	ListAccesses(ctx context.Context, projectID uint) ([]domain.ProjectAccess, error)
 	GrantAccessWithLog(ctx context.Context, projectID, userID, grantedBy uint, log *governancedomain.OperationLog) (*domain.ProjectAccess, error)
 	RevokeAccessWithLog(ctx context.Context, projectID, userID uint, log *governancedomain.OperationLog) error
@@ -395,7 +419,7 @@ func (uc *ProjectUseCase) AdminCreateListed(ctx context.Context, operatorUserID 
 	if err != nil {
 		return nil, err
 	}
-	products, err := normalizeProductRequests(req.Products, true)
+	products, err := normalizeProductRequests(req.Products, true, true)
 	if err != nil {
 		return nil, err
 	}
@@ -431,7 +455,7 @@ func (uc *ProjectUseCase) AdminUpdate(ctx context.Context, operatorUserID, proje
 		return nil, err
 	}
 	project.ID = projectID
-	products, err := normalizeProductRequests(req.Products, true)
+	products, err := normalizeProductRequests(req.Products, true, false)
 	if err != nil {
 		return nil, err
 	}
@@ -476,7 +500,7 @@ func (uc *ProjectUseCase) AdminApproveWithConfig(ctx context.Context, operatorUs
 		return nil, err
 	}
 	project.ID = projectID
-	products, err := normalizeProductRequests(req.Products, true)
+	products, err := normalizeProductRequests(req.Products, true, true)
 	if err != nil {
 		return nil, err
 	}
@@ -612,6 +636,23 @@ func (uc *ProjectUseCase) AdminBulkDelete(ctx context.Context, operatorUserID ui
 	return &ProjectBulkResult{Affected: affected}, nil
 }
 
+func (uc *ProjectUseCase) AdminBulkUpdateProducts(ctx context.Context, operatorUserID uint, projectIDs []uint, requests []ProjectProductRequest, requestID, path string) (*ProjectBulkResult, error) {
+	filter, err := uc.normalizeBulkSelection(ProjectBulkSelection{Mode: ProjectSelectionModeIDs, ProjectIDs: projectIDs})
+	if err != nil {
+		return nil, err
+	}
+	products, err := normalizeProductRequests(requests, false, true)
+	if err != nil {
+		return nil, err
+	}
+	log := projectOperationLog(operatorUserID, requestID, path, "core.project.bulk_update_products", "project", "bulk", "success", "Project products updated.")
+	affected, err := uc.projects.BulkUpsertProductsWithLog(ctx, filter, products, log)
+	if err != nil {
+		return nil, err
+	}
+	return &ProjectBulkResult{Affected: affected}, nil
+}
+
 func (uc *ProjectUseCase) AdminListAccesses(ctx context.Context, projectID uint) ([]domain.ProjectAccess, error) {
 	if projectID == 0 {
 		return nil, domain.ErrProjectNotFound
@@ -665,7 +706,7 @@ func (uc *ProjectUseCase) normalizeBulkSelection(selection ProjectBulkSelection)
 	filter.IsAdmin = true
 	switch selection.Mode {
 	case ProjectSelectionModeIDs:
-		if len(selection.ProjectIDs) == 0 {
+		if len(selection.ProjectIDs) == 0 || len(selection.ProjectIDs) > ProjectBulkMaxExplicitIDs {
 			return ProjectListFilter{}, domain.ErrInvalidProject
 		}
 		filter.IDs = uniqueProjectIDs(selection.ProjectIDs)
@@ -748,7 +789,7 @@ func normalizeProject(req CreateProjectRequest, status domain.ProjectStatus) (do
 	}, nil
 }
 
-func normalizeProductRequests(requests []ProjectProductRequest, requireEnabled bool) ([]domain.Product, error) {
+func normalizeProductRequests(requests []ProjectProductRequest, requireEnabled, applyPriceDefaults bool) ([]domain.Product, error) {
 	if len(requests) == 0 {
 		return nil, domain.ErrInvalidProduct
 	}
@@ -791,19 +832,19 @@ func normalizeProductRequests(requests []ProjectProductRequest, requireEnabled b
 			return nil, domain.ErrInvalidProduct
 		}
 
-		codePrice, ok := domain.NormalizeMoney(req.CodePrice)
+		codePrice, ok := domain.NormalizeMoney(projectPriceOrDefault(req.CodePrice, productType, "code_price", applyPriceDefaults))
 		if !ok {
 			return nil, domain.ErrInvalidProduct
 		}
-		purchasePrice, ok := domain.NormalizeMoney(req.PurchasePrice)
+		purchasePrice, ok := domain.NormalizeMoney(projectPriceOrDefault(req.PurchasePrice, productType, "purchase_price", applyPriceDefaults))
 		if !ok {
 			return nil, domain.ErrInvalidProduct
 		}
-		codeSupplierPrice, ok := domain.NormalizeMoney(req.CodeSupplierPrice)
+		codeSupplierPrice, ok := domain.NormalizeMoney(projectPriceOrDefault(req.CodeSupplierPrice, productType, "code_supplier_price", applyPriceDefaults))
 		if !ok {
 			return nil, domain.ErrInvalidProduct
 		}
-		purchaseSupplierPrice, ok := domain.NormalizeMoney(req.PurchaseSupplierPrice)
+		purchaseSupplierPrice, ok := domain.NormalizeMoney(projectPriceOrDefault(req.PurchaseSupplierPrice, productType, "purchase_supplier_price", applyPriceDefaults))
 		if !ok {
 			return nil, domain.ErrInvalidProduct
 		}
@@ -845,6 +886,14 @@ func normalizeProductRequests(requests []ProjectProductRequest, requireEnabled b
 		return nil, domain.ErrInvalidProduct
 	}
 	return products, nil
+}
+
+func projectPriceOrDefault(value string, productType domain.ProductType, field string, applyDefault bool) string {
+	if !applyDefault || strings.TrimSpace(value) != "" {
+		return value
+	}
+	key := "default_project_" + string(productType) + "_" + field
+	return runtimeconfig.String(key, projectPriceFallbacks[key])
 }
 
 func normalizeProjectAccessRequests(accessType domain.ProjectAccessType, userIDs []uint, grantedBy uint) ([]domain.ProjectAccess, error) {

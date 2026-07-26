@@ -575,6 +575,48 @@ func (r *ProjectRepo) BulkDeleteWithLog(ctx context.Context, filter coreapp.Proj
 	return int(affected), nil
 }
 
+func (r *ProjectRepo) BulkUpsertProductsWithLog(ctx context.Context, filter coreapp.ProjectListFilter, products []domain.Product, log *governancedomain.OperationLog) (int, error) {
+	var affected int
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var projectIDs []uint
+		if err := r.projectListQueryWithDB(ctx, tx, filter).Pluck("projects.id", &projectIDs).Error; err != nil {
+			return fmt.Errorf("list projects for bulk product update: %w", err)
+		}
+		models := make([]ProjectProductModel, 0, len(projectIDs)*len(products))
+		for _, projectID := range projectIDs {
+			for _, product := range products {
+				product.ProjectID = projectID
+				models = append(models, productModelFromDomain(product))
+			}
+		}
+		if len(models) > 0 {
+			if err := tx.WithContext(ctx).Clauses(clause.OnConflict{
+				Columns: []clause.Column{{Name: "project_id"}, {Name: "type"}},
+				DoUpdates: clause.AssignmentColumns([]string{
+					"status", "code_enabled", "purchase_enabled", "code_price", "purchase_price",
+					"code_supplier_price", "purchase_supplier_price", "code_window_minutes",
+					"activation_window_minutes", "warranty_minutes", "main_weight", "dot_weight",
+					"plus_weight", "updated_at",
+				}),
+			}).Create(&models).Error; err != nil {
+				return fmt.Errorf("bulk upsert project products: %w", err)
+			}
+			if err := tx.WithContext(ctx).Model(&ProjectModel{}).Where("id IN ?", projectIDs).Update("updated_at", time.Now()).Error; err != nil {
+				return fmt.Errorf("touch bulk updated projects: %w", err)
+			}
+		}
+		affected = len(projectIDs)
+		if log != nil {
+			log.SafeSummary = projectBulkSummary(log.SafeSummary, int64(affected))
+			if err := r.operationLogs.CreateInTx(ctx, tx, log); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return affected, err
+}
+
 func (r *ProjectRepo) List(ctx context.Context, filter coreapp.ProjectListFilter, offset, limit int) ([]coreapp.ProjectSummary, error) {
 	var rows []ProjectSummaryModel
 	q := r.projectListQuery(ctx, filter).Select("projects.*")
