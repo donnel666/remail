@@ -7,8 +7,10 @@ import (
 	"net"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/donnel666/remail/internal/mailtransport/infra/msacl"
 	"github.com/emersion/go-imap/v2"
@@ -567,6 +569,70 @@ func TestMicrosoftHistoryNormalizationOmitsUnusedRawPayloads(t *testing.T) {
 	applyIMAPBody(&imapMessage, []byte("Subject: Test\r\n\r\nbody"), false)
 	require.Equal(t, "body", imapMessage.Body)
 	require.Empty(t, imapMessage.RawSource)
+}
+
+func TestMicrosoftFetchedBodiesPreserveHTMLExactly(t *testing.T) {
+	graphBody := " \r\n<a href=\"https://example.com/verify?token=graph\">Verify &amp; continue</a>\r\n"
+	normalized := normalizeGraphFetchedMessage(graphMessage{
+		ID:          "message",
+		BodyPreview: "preview must not replace body",
+		Body:        graphMessageBody{ContentType: "html", Content: graphBody},
+	}, defaultMicrosoftMailFolders[0], false)
+	require.Equal(t, graphBody, normalized.Body)
+
+	htmlBody := " \r\n<a href=\"https://example.com/verify?token=imap\">Verify &amp; continue</a>"
+	raw := strings.Join([]string{
+		"Subject: Test",
+		"Content-Type: multipart/alternative; boundary=mail-boundary",
+		"",
+		"--mail-boundary",
+		"Content-Type: text/plain; charset=utf-8",
+		"",
+		"plain fallback",
+		"--mail-boundary",
+		"Content-Type: text/html; charset=utf-8",
+		"",
+		htmlBody,
+		"--mail-boundary--",
+		"",
+	}, "\r\n")
+	var imapMessage MicrosoftFetchedMessage
+	applyIMAPBody(&imapMessage, []byte(raw), false)
+	require.Equal(t, htmlBody, imapMessage.Body)
+}
+
+func TestMicrosoftIMAPBodyPrefersNestedHTMLAndDecodesCharset(t *testing.T) {
+	htmlBody := `<p>café <a href="https://example.com/verify?token=imap">Verify</a></p>`
+	raw := strings.Join([]string{
+		"Subject: Test",
+		"Content-Type: multipart/mixed; boundary=outer",
+		"",
+		"--outer",
+		"Content-Type: multipart/alternative; boundary=plain-nested",
+		"",
+		"--plain-nested",
+		"Content-Type: text/plain; charset=utf-8",
+		"",
+		"first nested plain",
+		"--plain-nested--",
+		"--outer",
+		"Content-Type: multipart/alternative; boundary=html-nested",
+		"",
+		"--html-nested",
+		"Content-Type: text/html; charset=iso-8859-1",
+		"Content-Transfer-Encoding: quoted-printable",
+		"",
+		`<p>caf=E9 <a href=3D"https://example.com/verify?token=3Dimap">Verify</a></p>`,
+		"--html-nested--",
+		"--outer--",
+		"",
+	}, "\r\n")
+
+	var message MicrosoftFetchedMessage
+	applyIMAPBody(&message, []byte(raw), false)
+
+	require.Equal(t, htmlBody, message.Body)
+	require.True(t, utf8.ValidString(message.Body))
 }
 
 func TestMicrosoftMailFetchClientGraphSessionFailureKeepsRefreshToken(t *testing.T) {

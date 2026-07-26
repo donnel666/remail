@@ -3,16 +3,23 @@ import { Button } from "@douyinfe/semi-ui";
 import { MailSearch, Save } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { invalidNumericKeys, selectOptions, serializeOptions } from "@/lib/system-settings-api";
+import { invalidNumericKeys, parseSettingsList, selectOptions, serializeOptions } from "@/lib/system-settings-api";
 
 import type { SectionProps } from "./index";
-import { SettingsCardHeader, SettingsFormGrid, SettingsInvalidValuesNotice, SettingsNumberField, SettingsSection, SettingsTextField } from "./settings-layout";
+import { SettingsCardHeader, SettingsFormGrid, SettingsInvalidValuesNotice, SettingsNumberField, SettingsSection, SettingsTextareaField } from "./settings-layout";
 import { MAILMATCH_KEYS } from "./email-service-keys";
 const NUMERIC_KEYS = MAILMATCH_KEYS.filter((key) => key !== "verification_code_pattern");
 
 export default function MailmatchSection({ options, onBulkSave }: SectionProps) {
   const { t } = useTranslation();
-  const [form, setForm] = useState<Record<string, unknown>>(() => selectOptions(options, MAILMATCH_KEYS));
+  const [form, setForm] = useState<Record<string, unknown>>(() => {
+    const selected = selectOptions(options, MAILMATCH_KEYS);
+    const patterns = parseSettingsList<unknown>(selected.verification_code_pattern);
+    if (patterns.length > 0 && patterns.every((pattern) => typeof pattern === "string")) {
+      selected.verification_code_pattern = patterns.join("\n");
+    }
+    return selected;
+  });
   const [saving, setSaving] = useState(false);
   const update = (key: string, value: unknown) => setForm((current) => ({ ...current, [key]: value }));
   const number = (value: unknown): number | undefined => {
@@ -21,11 +28,15 @@ export default function MailmatchSection({ options, onBulkSave }: SectionProps) 
     return Number.isFinite(parsed) ? parsed : undefined;
   };
   const invalidKeys = invalidNumericKeys(form, NUMERIC_KEYS);
+  const verificationPatterns = String(form.verification_code_pattern ?? "").split(/\r?\n/).map((pattern) => pattern.trim()).filter(Boolean);
   const field = (label: string, key: string) => <SettingsNumberField label={t(label)} value={number(form[key])} onChange={(value) => update(key, value)} min={1} />;
   const save = async () => {
     setSaving(true);
     try {
-      await onBulkSave(serializeOptions(MAILMATCH_KEYS, form, NUMERIC_KEYS));
+      await onBulkSave(serializeOptions(MAILMATCH_KEYS, {
+        ...form,
+        verification_code_pattern: JSON.stringify(verificationPatterns),
+      }, NUMERIC_KEYS));
     }
     finally { setSaving(false); }
   };
@@ -49,9 +60,15 @@ export default function MailmatchSection({ options, onBulkSave }: SectionProps) 
       {field("拉取调度间隔（秒）", "fetch_dispatcher_interval_seconds")}
       {field("项目历史并发数", "project_history_concurrency")}
       {field("项目历史每轮上限", "project_history_dispatch_limit")}
-      <SettingsTextField label={t("验证码识别正则")} value={typeof form.verification_code_pattern === "string" ? form.verification_code_pattern : undefined} onChange={(value) => update("verification_code_pattern", value)} />
+      <SettingsTextareaField
+        label={t("系统兜底提取规则（从上到下优先）")}
+        onChange={(value) => update("verification_code_pattern", value)}
+        placeholder={'href=["\'](https?://[^"\']+)["\']\n(?:验证码|code)[^\\d]*(\\d{6})\n(\\d{6,8})'}
+        rows={5}
+        value={String(form.verification_code_pattern ?? "")}
+      />
     </SettingsFormGrid>
     <SettingsInvalidValuesNotice keys={invalidKeys} message={t("检测到无效数字配置，请修正后再保存")} />
-    <Button icon={<Save size={14} />} disabled={invalidKeys.length > 0} loading={saving} onClick={() => void save().catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
+    <Button icon={<Save size={14} />} disabled={invalidKeys.length > 0 || verificationPatterns.length === 0} loading={saving} onClick={() => void save().catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
   </SettingsSection>;
 }

@@ -18,7 +18,7 @@ import {
   Typography,
 } from "@douyinfe/semi-ui";
 import { IconSearch } from "@douyinfe/semi-icons";
-import { SlidersHorizontal } from "lucide-react";
+import { ChevronDown, ChevronUp, SlidersHorizontal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import sampleProjectCover from "@/assets/cover-4.webp";
@@ -672,11 +672,19 @@ function MailRuleDraftList({
     onChange(value.filter((rule) => rule.key !== key));
   };
 
+  const moveRule = (index: number, offset: -1 | 1) => {
+    const target = index + offset;
+    if (target < 0 || target >= value.length) return;
+    const next = [...value];
+    [next[index], next[target]] = [next[target], next[index]];
+    onChange(next);
+  };
+
   return (
     <div className="space-y-2">
-      {value.map((rule) => (
+      {value.map((rule, index) => (
         <div
-          className="grid gap-2 rounded-lg border border-[var(--semi-color-border)] bg-[var(--semi-color-bg-0)] p-3 sm:grid-cols-[132px_1fr_86px_64px]"
+          className="grid gap-2 rounded-lg border border-[var(--semi-color-border)] bg-[var(--semi-color-bg-0)] p-3 sm:grid-cols-[132px_1fr_86px_72px_64px]"
           key={rule.key}
         >
           <label className="block">
@@ -742,6 +750,27 @@ function MailRuleDraftList({
               {t("Enabled")}
             </Checkbox>
           </label>
+
+          <div className="flex items-end gap-1">
+            <Button
+              aria-label={`${t("Priority")} ↑`}
+              disabled={index === 0}
+              icon={<ChevronUp size={14} />}
+              onClick={() => moveRule(index, -1)}
+              size="small"
+              title={`${t("Priority")} ↑`}
+              type="tertiary"
+            />
+            <Button
+              aria-label={`${t("Priority")} ↓`}
+              disabled={index === value.length - 1}
+              icon={<ChevronDown size={14} />}
+              onClick={() => moveRule(index, 1)}
+              size="small"
+              title={`${t("Priority")} ↓`}
+              type="tertiary"
+            />
+          </div>
 
           <div className="flex items-end">
             <Button

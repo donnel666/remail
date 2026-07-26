@@ -1166,13 +1166,6 @@ func normalizeMailFetchRequest(req MicrosoftMailFetchRequest) MicrosoftMailFetch
 
 func normalizeGraphFetchedMessage(message graphMessage, folder MicrosoftMailFolder, includeProviderPayload bool) MicrosoftFetchedMessage {
 	receivedAt, _ := time.Parse(time.RFC3339Nano, strings.TrimSpace(message.ReceivedDateTime))
-	body := strings.TrimSpace(message.Body.Content)
-	if strings.EqualFold(message.Body.ContentType, "html") {
-		body = stripHTMLForMSACL(body)
-	}
-	if body == "" {
-		body = strings.TrimSpace(message.BodyPreview)
-	}
 	providerPayload := ""
 	if includeProviderPayload {
 		encoded, _ := json.Marshal(message)
@@ -1190,7 +1183,7 @@ func normalizeGraphFetchedMessage(message graphMessage, folder MicrosoftMailFold
 		Bcc:               formatGraphRecipientList(message.BccRecipients),
 		ReceivedAt:        receivedAt,
 		Preview:           strings.TrimSpace(message.BodyPreview),
-		Body:              body,
+		Body:              message.Body.Content,
 		ProviderPayload:   providerPayload,
 		Protocol:          "graph",
 		HasAttachments:    message.HasAttachments,
@@ -1241,7 +1234,7 @@ func applyIMAPBody(message *MicrosoftFetchedMessage, raw []byte, includeRawSourc
 		if includeRawSource {
 			message.RawSource = string(raw)
 		}
-		message.Body = strings.TrimSpace(string(raw))
+		message.Body = string(raw)
 		message.Preview = bodyPreview(message.Body)
 		return
 	}
@@ -1268,7 +1261,7 @@ func applyIMAPBody(message *MicrosoftFetchedMessage, raw []byte, includeRawSourc
 		message.InternetMessageID = messageID
 	}
 	body, _ := readMIMEBody(msg.Header.Get("Content-Type"), msg.Header.Get("Content-Transfer-Encoding"), msg.Body)
-	message.Body = strings.TrimSpace(body)
+	message.Body = body
 	message.Preview = bodyPreview(message.Body)
 }
 

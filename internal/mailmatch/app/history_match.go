@@ -140,7 +140,7 @@ func historicalRecipientMatchesProject(message HistoricalProjectMessage, mainEma
 		Recipients:        []string{recipient},
 		Sender:            strings.TrimSpace(message.Sender),
 		Subject:           strings.TrimSpace(message.Subject),
-		Body:              strings.TrimSpace(message.Body),
+		Body:              message.Body,
 		BodyPreview:       strings.TrimSpace(message.BodyPreview),
 		MessageIDHeader:   strings.TrimSpace(message.MessageIDHeader),
 		ProviderMessageID: strings.TrimSpace(message.ProviderMessageID),

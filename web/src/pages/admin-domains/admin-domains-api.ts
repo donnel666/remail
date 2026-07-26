@@ -651,7 +651,7 @@ export async function listAdminDomainMessages(
   );
   return {
     ...page,
-    items: page.items.map((item) => adminDomainMessage(item, item.preview)),
+    items: page.items.map((item) => adminDomainMessage(item, "")),
   };
 }
 

@@ -18,10 +18,9 @@ import (
 )
 
 const (
-	fetchProxyAttempts              = 2
-	maxFetchProxyAttempts           = 20
-	realtimeMicrosoftMessageMaximum = 30
-	permanentFetchFailureTimeout    = 30 * time.Second
+	fetchProxyAttempts           = 2
+	maxFetchProxyAttempts        = 20
+	permanentFetchFailureTimeout = 30 * time.Second
 )
 
 type microsoftMessageFetchClient interface {
@@ -57,12 +56,11 @@ func (a *MicrosoftFetchAdapter) FetchMicrosoftMessages(ctx context.Context, req 
 		}
 	}
 	var lastFailure *mailmatchapp.MailFetchFailure
-	maxMessages := 30
+	maxMessages := runtimeconfig.Int("purchase_read_limit", 30, 1)
 	sinceAt := req.SinceAt
 	untilAt := req.UntilAt
 	stopAfterLimit := false
 	if req.Realtime {
-		maxMessages = realtimeMicrosoftMessageMaximum
 		stopAfterLimit = true
 	}
 	if req.FullHistory {
@@ -270,10 +268,6 @@ func (a *MicrosoftFetchAdapter) reportProxyFailure(ctx context.Context, proxyID 
 func microsoftMessagesToMailmatch(scope mailmatchapp.OrderScope, messages []mailinfra.MicrosoftFetchedMessage) []mailmatchapp.FetchedMessage {
 	items := make([]mailmatchapp.FetchedMessage, 0, len(messages))
 	for _, message := range messages {
-		body := strings.TrimSpace(message.Body)
-		if body == "" {
-			body = strings.TrimSpace(message.Preview)
-		}
 		recipients := recipientCandidates(strings.Join([]string{message.To, message.Cc, message.Bcc}, ","))
 		primaryRecipient := firstNonEmpty(recipients...)
 		items = append(items, mailmatchapp.FetchedMessage{
@@ -283,7 +277,7 @@ func microsoftMessagesToMailmatch(scope mailmatchapp.OrderScope, messages []mail
 			Recipients:        recipients,
 			Sender:            strings.TrimSpace(message.From),
 			Subject:           strings.TrimSpace(message.Subject),
-			Body:              body,
+			Body:              message.Body,
 			RawSource:         message.RawSource,
 			ProviderPayload:   message.ProviderPayload,
 			BodyPreview:       strings.TrimSpace(message.Preview),

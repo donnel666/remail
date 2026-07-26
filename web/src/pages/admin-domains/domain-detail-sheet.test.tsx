@@ -252,4 +252,24 @@ describe("admin domain mailbox infinite list", () => {
     expect(await screen.findByText("Subject 1")).toBeInTheDocument();
     expect(apiMocks.listMessages).toHaveBeenCalledTimes(2);
   });
+
+  it("renders stored HTML as inert text", async () => {
+    const body = `<script>window.hacked=true</script><img src=x onerror=alert(1)><a href="https://example.com">Verify</a>`;
+    apiMocks.listMessages.mockResolvedValueOnce({
+      items: [message(1)],
+      limit: 20,
+      offset: 0,
+      total: 1,
+      hasMore: false,
+    });
+    apiMocks.getMessage.mockResolvedValueOnce({ ...message(1), body });
+
+    const view = render(<DomainMailsPanel resourceId={42} t={t} />);
+
+    const renderedBody = await screen.findByText(body);
+    expect(renderedBody).toBeInTheDocument();
+    expect(view.container.querySelector("script")).toBeNull();
+    expect(view.container.querySelector("img")).toBeNull();
+    expect(view.container.querySelector("a")).toBeNull();
+  });
 });

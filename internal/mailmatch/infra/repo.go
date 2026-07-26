@@ -20,6 +20,8 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+const verificationCodeMaxBytes = 4096
+
 type MessageModel struct {
 	ID                uint           `gorm:"primaryKey;autoIncrement"`
 	EmailResourceID   uint           `gorm:"not null;column:email_resource_id"`
@@ -31,7 +33,7 @@ type MessageModel struct {
 	Subject           string         `gorm:"type:varchar(500);not null;default:''"`
 	RawBody           sql.NullString `gorm:"type:mediumtext;column:raw_body"`
 	BodyPreview       string         `gorm:"type:varchar(1000);not null;default:'';column:body_preview"`
-	VerificationCode  string         `gorm:"type:varchar(64);not null;default:'';column:verification_code"`
+	VerificationCode  string         `gorm:"type:varchar(4096);not null;default:'';column:verification_code"`
 	MessageIDHeader   string         `gorm:"type:varchar(500);not null;default:'';column:message_id_header"`
 	ProviderMessageID string         `gorm:"type:varchar(500);not null;default:'';column:provider_message_id"`
 	DedupeKey         string         `gorm:"type:char(64);not null;column:dedupe_key"`
@@ -1272,7 +1274,7 @@ func (r *Repo) UpsertMessages(ctx context.Context, messages []domain.Message) ([
 			"sender":              gorm.Expr("VALUES(sender)"),
 			"subject":             gorm.Expr("VALUES(subject)"),
 			"matched_order_id":    gorm.Expr("COALESCE(matched_order_id, VALUES(matched_order_id))"),
-			"raw_body":            gorm.Expr("IF(NULLIF(TRIM(VALUES(raw_body)), '') IS NULL, raw_body, VALUES(raw_body))"),
+			"raw_body":            gorm.Expr("IF(VALUES(raw_body) IS NULL, raw_body, VALUES(raw_body))"),
 			"body_preview":        gorm.Expr("IF(NULLIF(TRIM(VALUES(body_preview)), '') IS NULL, body_preview, VALUES(body_preview))"),
 			"verification_code":   gorm.Expr("IF(verification_code <> '', verification_code, VALUES(verification_code))"),
 			"message_id_header":   gorm.Expr("VALUES(message_id_header)"),
@@ -1348,7 +1350,7 @@ func messageModelToDomain(model MessageModel) domain.Message {
 }
 
 func messageModelFromDomain(item domain.Message) MessageModel {
-	rawBodyValue := truncateUTF8Bytes(strings.TrimSpace(item.RawBody), 64*1024)
+	rawBodyValue := item.RawBody
 	rawBody := sql.NullString{String: rawBodyValue, Valid: rawBodyValue != ""}
 	recipientsJSON := encodeRecipients(item.Recipients, item.Recipient)
 	return MessageModel{
@@ -1361,7 +1363,7 @@ func messageModelFromDomain(item domain.Message) MessageModel {
 		Subject:           truncate(item.Subject, 500),
 		RawBody:           rawBody,
 		BodyPreview:       truncate(item.BodyPreview, 1000),
-		VerificationCode:  truncate(item.VerificationCode, 64),
+		VerificationCode:  truncate(item.VerificationCode, verificationCodeMaxBytes),
 		MessageIDHeader:   truncate(item.MessageIDHeader, 500),
 		ProviderMessageID: truncate(item.ProviderMessageID, 500),
 		DedupeKey:         item.DedupeKey,

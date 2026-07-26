@@ -3,6 +3,7 @@ package infra
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -53,6 +54,25 @@ func TestMSACLMailboxReaderPreservesRowIdentityWhenObjectIsUnreadable(t *testing
 	require.EqualValues(t, 42, emails[0].ID)
 	require.Equal(t, "proof@example.com", emails[0].To)
 	require.Empty(t, emails[0].Preview)
+}
+
+func TestParseMSACLInboundEmailRemovesHTMLMetadataFromPreview(t *testing.T) {
+	raw := strings.Join([]string{
+		"From: account-security-noreply@accountprotection.microsoft.com",
+		"To: proof@example.com",
+		"Subject: Microsoft security code",
+		"Content-Type: text/html; charset=utf-8",
+		"",
+		`<a href="https://tracker.example?id=123456">tracking</a>`,
+		`<script>999999</script><span>Your security code is:</span>`,
+		`<div class="long-formatting-wrapper"><b>654505</b></div>`,
+	}, "\r\n")
+
+	email := parseMSACLInboundEmail(InboundMailModel{Recipient: "proof@example.com"}, []byte(raw))
+
+	require.Equal(t, "tracking Your security code is: 654505", email.Preview)
+	require.NotContains(t, email.Preview, "123456")
+	require.NotContains(t, email.Preview, "999999")
 }
 
 func TestNewMSACLMailboxReaderWithContentWindow(t *testing.T) {

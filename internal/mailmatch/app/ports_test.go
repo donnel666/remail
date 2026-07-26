@@ -357,10 +357,32 @@ func TestVerificationCodePatternUpdatesAndFallsBackWhenInvalid(t *testing.T) {
 	runtimeconfig.Set("verification_code_pattern", `(\d{4})`)
 	require.Equal(t, "1234", extractVerificationCode("code: 1234"))
 	runtimeconfig.Set("verification_code_pattern", `code[:：]\s*\d{6}`)
-	require.Equal(t, "654321", extractVerificationCode("code: 654321"))
+	require.Equal(t, "code: 654321", extractVerificationCode("code: 654321"))
+	runtimeconfig.Set("verification_code_pattern", `href=["'](https?://[^"']+)["']`)
+	require.Equal(t, "https://example.com/verify?token=legacy", extractVerificationCode(`<a href="https://example.com/verify?token=legacy">Verify</a>`))
+	runtimeconfig.Set("verification_code_pattern", `["never-match","href=[\"'](https?://[^\"']+)[\"']"]`)
+	require.Equal(t, "https://example.com/verify?token=abc", extractVerificationCode(`<a href="https://example.com/verify?token=abc">Verify</a>`))
+	runtimeconfig.Set("verification_code_pattern", `[123]`)
+	require.Equal(t, "2", extractVerificationCode("value 2"))
 
 	runtimeconfig.Set("verification_code_pattern", `(`)
 	require.Equal(t, "654321", extractVerificationCode("code: 654321"))
+}
+
+func TestBodyRuleOnlyFallsBackToFullMatchWithoutCaptureGroups(t *testing.T) {
+	require.Equal(t, "token: ABC123", extractByBodyRule("token: ABC123", `token: [A-Z0-9]+`))
+	require.Empty(t, extractByBodyRule("prefix", `prefix(optional)?`))
+}
+
+func TestBodyRuleSkipsExtractionLargerThanStorageLimit(t *testing.T) {
+	value, index := extractByBodyRulesWithIndex(
+		strings.Repeat("a", maxExtractedValueSize+1)+" ok",
+		[]string{`(a+)`, `(ok)`},
+	)
+
+	require.Equal(t, "ok", value)
+	require.Equal(t, 1, index)
+	require.Equal(t, strings.Repeat("a", maxExtractedValueSize), extractByBodyRule(strings.Repeat("a", maxExtractedValueSize), `(a+)`))
 }
 
 func TestPickupFetchTimingKeepsHeartbeatInsideLease(t *testing.T) {
@@ -1194,6 +1216,115 @@ func TestBodyPreviewDoesNotSplitUTF8(t *testing.T) {
 	require.LessOrEqual(t, len(preview), 1000)
 }
 
+func TestInboundFetchedMessagePreservesPreferredHTMLPart(t *testing.T) {
+	htmlBody := `<a href="https://example.com/verify?token=smtp">Verify &amp; continue</a>`
+	raw := strings.Join([]string{
+		"From: Sender <sender@example.net>",
+		"To: user@example.com",
+		"Subject: Verification",
+		"Content-Type: multipart/alternative; boundary=mail-boundary",
+		"",
+		"--mail-boundary",
+		"Content-Type: text/plain; charset=utf-8",
+		"",
+		"plain fallback",
+		"--mail-boundary",
+		"Content-Type: text/html; charset=utf-8",
+		"Content-Disposition: attachment; filename=ignored.html",
+		"",
+		"<a href=\"https://example.com/attachment\">attachment</a>",
+		"--mail-boundary",
+		"Content-Type: text/html; charset=utf-8",
+		"Content-Transfer-Encoding: quoted-printable",
+		"",
+		strings.ReplaceAll(htmlBody, "=", "=3D"),
+		"--mail-boundary--",
+		"",
+	}, "\r\n")
+
+	message := inboundFetchedMessage(InboundMailRequest{
+		EmailResourceID: 1,
+		ResourceType:    domain.ResourceTypeDomain,
+		Recipient:       "user@example.com",
+		Raw:             []byte(raw),
+	})
+
+	require.Equal(t, htmlBody, message.Body)
+}
+
+func TestInboundFetchedMessagePrefersHTMLAcrossNestedMultiparts(t *testing.T) {
+	htmlBody := `<a href="https://example.com/verify?token=nested">Nested HTML</a>`
+	raw := strings.Join([]string{
+		"From: sender@example.net",
+		"To: user@example.com",
+		"Content-Type: multipart/mixed; boundary=outer",
+		"",
+		"--outer",
+		"Content-Type: multipart/alternative; boundary=plain-nested",
+		"",
+		"--plain-nested",
+		"Content-Type: text/plain; charset=utf-8",
+		"",
+		"first nested plain",
+		"--plain-nested--",
+		"--outer",
+		"Content-Type: multipart/alternative; boundary=html-nested",
+		"",
+		"--html-nested",
+		"Content-Type: text/plain; charset=utf-8",
+		"",
+		"later plain",
+		"--html-nested",
+		"Content-Type: text/html; charset=utf-8",
+		"",
+		htmlBody,
+		"--html-nested--",
+		"--outer--",
+		"",
+	}, "\r\n")
+
+	message := inboundFetchedMessage(InboundMailRequest{Recipient: "user@example.com", Raw: []byte(raw)})
+
+	require.Equal(t, htmlBody, message.Body)
+}
+
+func TestInboundFetchedMessageIgnoresEmptyNestedMultipart(t *testing.T) {
+	raw := strings.Join([]string{
+		"To: user@example.com",
+		"Content-Type: multipart/mixed; boundary=outer",
+		"",
+		"--outer",
+		"Content-Type: multipart/alternative; boundary=empty",
+		"",
+		"--empty--",
+		"--outer",
+		"Content-Type: text/plain; charset=utf-8",
+		"",
+		"outer plain body",
+		"--outer--",
+		"",
+	}, "\r\n")
+
+	message := inboundFetchedMessage(InboundMailRequest{Recipient: "user@example.com", Raw: []byte(raw)})
+
+	require.Equal(t, "outer plain body", message.Body)
+}
+
+func TestInboundFetchedMessageDecodesMIMECharsetWithoutChangingHTML(t *testing.T) {
+	raw := strings.Join([]string{
+		"To: user@example.com",
+		"Content-Type: text/html; charset=iso-8859-1",
+		"Content-Transfer-Encoding: quoted-printable",
+		"",
+		`<p>caf=E9 <a href=3D"https://example.com/verify?token=3Dabc">Verify</a></p>`,
+	}, "\r\n")
+
+	message := inboundFetchedMessage(InboundMailRequest{Recipient: "user@example.com", Raw: []byte(raw)})
+
+	require.Equal(t, `<p>café <a href="https://example.com/verify?token=abc">Verify</a></p>`, message.Body)
+	require.True(t, utf8.ValidString(message.Body))
+}
+
 func TestScopeReadableKeepsPurchaseServiceAfterWarranty(t *testing.T) {
 	now := time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC)
 	receiveUntil := now.Add(time.Hour)
@@ -1247,6 +1378,9 @@ func TestMessageDedupeKeyMatchesAcrossProvidersWithoutMessageID(t *testing.T) {
 	imap.Protocol = "imap"
 
 	require.Equal(t, messageDedupeKey(graph), messageDedupeKey(imap))
+	differentLink := graph
+	differentLink.Body = `<p>Your code is <a href="https://example.com/other">123456</a></p>`
+	require.NotEqual(t, messageDedupeKey(graph), messageDedupeKey(differentLink))
 }
 
 func TestHistoricalMessageMatchesProjectWithoutVerificationCode(t *testing.T) {
@@ -1293,6 +1427,79 @@ func TestEarliestOrderDeliveriesKeepsOldestMessagePerOrder(t *testing.T) {
 	}
 	require.Equal(t, "older", byOrder[1].message.DedupeKey)
 	require.Equal(t, "other", byOrder[2].message.DedupeKey)
+}
+
+func TestDeliverySelectionUsesRulePriorityBeforeMessageTime(t *testing.T) {
+	defer runtimeconfig.Delete("verification_code_pattern")
+	base := time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name          string
+		bodyRules     []string
+		systemRules   string
+		messages      []FetchedMessage
+		wantExtracted string
+	}{
+		{
+			name:        "project rule A beats earlier project rule B",
+			bodyRules:   []string{`href="([^"]+)"`, `code:\s*(\d{6})`},
+			systemRules: `["never-system"]`,
+			messages: []FetchedMessage{
+				{Body: "code: 111111", ReceivedAt: base},
+				{Body: `<a href="https://example.com/project-a">Verify</a>`, ReceivedAt: base.Add(time.Minute)},
+			},
+			wantExtracted: "https://example.com/project-a",
+		},
+		{
+			name:        "project rule beats earlier system rule",
+			bodyRules:   []string{`project:\s*([A-Z]+)`},
+			systemRules: `["system:\\s*([A-Z]+)"]`,
+			messages: []FetchedMessage{
+				{Body: "system: EARLY", ReceivedAt: base},
+				{Body: "project: LATE", ReceivedAt: base.Add(time.Minute)},
+			},
+			wantExtracted: "LATE",
+		},
+		{
+			name:        "system rule one beats earlier system rule two",
+			bodyRules:   []string{`never-project`},
+			systemRules: `["primary:\\s*([A-Z]+)","secondary:\\s*([A-Z]+)"]`,
+			messages: []FetchedMessage{
+				{Body: "secondary: EARLY", ReceivedAt: base},
+				{Body: "primary: LATE", ReceivedAt: base.Add(time.Minute)},
+			},
+			wantExtracted: "LATE",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			runtimeconfig.Set("verification_code_pattern", test.systemRules)
+			rules := []MailRule{
+				{Type: MailRuleRecipient, Pattern: "exact", Enabled: true},
+				{Type: MailRuleSender, Pattern: `sender@example\.net`, Enabled: true},
+			}
+			for _, pattern := range test.bodyRules {
+				rules = append(rules, MailRule{Type: MailRuleBody, Pattern: pattern, Enabled: true})
+			}
+			scope := OrderScope{
+				OrderID: 1, OrderNo: "OR_PRIORITY", Recipient: "user@example.com", RecipientKind: "exact",
+				ServiceMode: "code", LooseMatch: true, Rules: rules,
+			}
+			repo := &matchingRepoStub{scopes: []OrderScope{scope}}
+			messages := append([]FetchedMessage(nil), test.messages...)
+			for index := range messages {
+				messages[index].EmailResourceID = 1
+				messages[index].ResourceType = domain.ResourceTypeMicrosoft
+				messages[index].Recipient = "user@example.com"
+				messages[index].Sender = "sender@example.net"
+			}
+
+			_, _, _, err := NewUseCase(repo, nil, nil, &matchResultStub{}).ingestFetchedMessages(context.Background(), messages)
+
+			require.NoError(t, err)
+			require.NotNil(t, repo.purchaseDelivery)
+			require.Equal(t, test.wantExtracted, repo.purchaseDelivery.VerificationCode)
+		})
+	}
 }
 
 func TestLaterPullNotifiesWithImmutableDeliveryHead(t *testing.T) {

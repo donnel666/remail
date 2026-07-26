@@ -14,7 +14,8 @@ import (
 
 type legacyFetchRepoStub struct {
 	Repository
-	scope OrderScope
+	scope    OrderScope
+	upserted []domain.Message
 }
 
 func (s *legacyFetchRepoStub) LoadOrderScopeForServiceToken(context.Context, string) (*OrderScope, error) {
@@ -26,7 +27,8 @@ func (*legacyFetchRepoStub) WithTx(ctx context.Context, fn func(context.Context)
 	return fn(ctx)
 }
 
-func (*legacyFetchRepoStub) UpsertMessages(_ context.Context, messages []domain.Message) ([]domain.Message, error) {
+func (s *legacyFetchRepoStub) UpsertMessages(_ context.Context, messages []domain.Message) ([]domain.Message, error) {
+	s.upserted = append([]domain.Message(nil), messages...)
 	return messages, nil
 }
 
@@ -203,6 +205,7 @@ func TestPickupFetchMergesOnlyNewMessagesAndPreservesCompleteContent(t *testing.
 
 	require.NoError(t, uc.ProcessFetch(context.Background(), pickupFetchTask(91, "ORDER-NEW", now)))
 	require.Equal(t, []FetchedMessage{newMessage, oldMessage}, cache.storeMessages)
+	require.Len(t, repo.upserted, 2, "matching must use the merged cache snapshot")
 }
 
 func TestPickupFetchDoesNotOverwriteNewerCredential(t *testing.T) {

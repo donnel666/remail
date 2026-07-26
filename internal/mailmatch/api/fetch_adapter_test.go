@@ -29,7 +29,9 @@ func (s *permanentFetchFailurePortStub) HandlePermanentMicrosoftFetchFailure(ctx
 	return s.err
 }
 
-func TestMicrosoftFetchAdapterRealtimeStopsAtThirtyWithinRequestedWindow(t *testing.T) {
+func TestMicrosoftFetchAdapterRealtimeUsesPurchaseReadLimitWithinRequestedWindow(t *testing.T) {
+	defer runtimeconfig.Delete("purchase_read_limit")
+	runtimeconfig.Set("purchase_read_limit", "47")
 	client := &microsoftMessageFetchClientStub{results: []mailinfra.MicrosoftMailFetchResult{{Valid: true}}}
 	adapter := &MicrosoftFetchAdapter{client: client}
 	sinceAt := time.Now().Add(-time.Hour)
@@ -45,7 +47,7 @@ func TestMicrosoftFetchAdapterRealtimeStopsAtThirtyWithinRequestedWindow(t *test
 
 	require.NoError(t, err)
 	require.Len(t, client.requests, 1)
-	require.Equal(t, realtimeMicrosoftMessageMaximum, client.requests[0].MaxMessages)
+	require.Equal(t, 47, client.requests[0].MaxMessages)
 	require.True(t, client.requests[0].StopAfterLimit)
 	require.Equal(t, sinceAt, client.requests[0].SinceAt)
 	require.Equal(t, untilAt, client.requests[0].UntilAt)
@@ -242,14 +244,19 @@ func TestMicrosoftFetchAdapterRetriesWhenPermanentFailureHandlingFails(t *testin
 func TestMicrosoftMessagesToMailmatchPreservesCompleteProviderContent(t *testing.T) {
 	rawSource := "  MIME-Version: 1.0\r\n\r\nbody\r\n"
 	providerPayload := "\n{\"id\":\"message-id\",\"body\":\"full\"}\n"
+	body := " \n<a href=\"https://example.com/verify?token=abc\">Verify</a>\n"
 
 	messages := microsoftMessagesToMailmatch(mailmatchapp.OrderScope{EmailResourceID: 42}, []mailinfra.MicrosoftFetchedMessage{{
-		ID: "message-id", To: "user@example.com", RawSource: rawSource, ProviderPayload: providerPayload,
+		ID: "message-id", To: "user@example.com", Body: body, Preview: "preview must stay separate", RawSource: rawSource, ProviderPayload: providerPayload,
+	}, {
+		ID: "empty-body", To: "user@example.com", Preview: "preview must not become body",
 	}})
 
-	require.Len(t, messages, 1)
+	require.Len(t, messages, 2)
+	require.Equal(t, body, messages[0].Body)
 	require.Equal(t, rawSource, messages[0].RawSource)
 	require.Equal(t, providerPayload, messages[0].ProviderPayload)
+	require.Empty(t, messages[1].Body)
 }
 
 func TestMicrosoftMessagesToMailmatchUsesCcAndKeepsUnaddressedIdentity(t *testing.T) {

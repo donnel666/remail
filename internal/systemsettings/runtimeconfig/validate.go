@@ -13,7 +13,11 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-const maxSystemNoticeBytes = 1 << 20
+const (
+	maxSystemNoticeBytes        = 1 << 20
+	maxVerificationPatternBytes = 4096
+	maxVerificationPatternCount = 64
+)
 
 type integerRange struct {
 	min int64
@@ -142,12 +146,7 @@ func Validate(key, value string) error {
 			return domain.ErrInvalidValue
 		}
 	case "verification_code_pattern":
-		if value == "" || len(rawValue) > 4096 {
-			return domain.ErrInvalidValue
-		}
-		if _, err := regexp.Compile(value); err != nil {
-			return domain.ErrInvalidValue
-		}
+		return validateVerificationPatterns(rawValue)
 	case "microsoft_domain_whitelist", "registration_email_whitelist", "domain_custom_tlds":
 		if value == "" {
 			return nil
@@ -212,6 +211,33 @@ func Validate(key, value string) error {
 				return domain.ErrInvalidValue
 			}
 		}
+	}
+	return nil
+}
+
+func validateVerificationPatterns(raw string) error {
+	value := strings.TrimSpace(raw)
+	if value == "" || len(raw) > maxVerificationPatternBytes {
+		return domain.ErrInvalidValue
+	}
+	var patterns []string
+	if json.Unmarshal([]byte(value), &patterns) == nil {
+		if len(patterns) == 0 || len(patterns) > maxVerificationPatternCount {
+			return domain.ErrInvalidValue
+		}
+		for _, pattern := range patterns {
+			pattern = strings.TrimSpace(pattern)
+			if pattern == "" {
+				return domain.ErrInvalidValue
+			}
+			if _, err := regexp.Compile(pattern); err != nil {
+				return domain.ErrInvalidValue
+			}
+		}
+		return nil
+	}
+	if _, err := regexp.Compile(value); err != nil {
+		return domain.ErrInvalidValue
 	}
 	return nil
 }

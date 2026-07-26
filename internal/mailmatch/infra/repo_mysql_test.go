@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -132,14 +133,15 @@ func TestUpsertMessagesPreservesMatchedCodeMySQL(t *testing.T) {
 	repo := NewRepo(db, nil)
 	ctx := context.Background()
 	now := time.Now().UTC()
+	extracted := "https://example.com/verify?token=" + strings.Repeat("x", 256)
 	message := domain.Message{
 		EmailResourceID:  100,
 		ResourceType:     domain.ResourceTypeMicrosoft,
 		MatchedOrderID:   &orderID,
 		Recipient:        "user@example.com",
-		RawBody:          "Your code is 123456",
-		BodyPreview:      "Your code is 123456",
-		VerificationCode: "123456",
+		RawBody:          `<a href="` + extracted + `">Verify</a>`,
+		BodyPreview:      "Verify",
+		VerificationCode: extracted,
 		DedupeKey:        "1111111111111111111111111111111111111111111111111111111111111111",
 		Status:           domain.MessageStatusMatched,
 		ReceivedAt:       now,
@@ -166,9 +168,9 @@ func TestUpsertMessagesPreservesMatchedCodeMySQL(t *testing.T) {
 		Take(&stored).Error)
 	require.Equal(t, "matched", stored.Status)
 	require.Equal(t, orderID, *stored.MatchedOrderID)
-	require.Equal(t, "Your code is 123456", stored.RawBody)
-	require.Equal(t, "Your code is 123456", stored.BodyPreview)
-	require.Equal(t, "123456", stored.VerificationCode)
+	require.Equal(t, `<a href="`+extracted+`">Verify</a>`, stored.RawBody)
+	require.Equal(t, "Verify", stored.BodyPreview)
+	require.Equal(t, extracted, stored.VerificationCode)
 }
 
 func TestAppendMessagesKeepFactsImmutableAndMatchedOwnershipTerminalMySQL(t *testing.T) {
@@ -354,12 +356,13 @@ func TestProjectionAndDeliveryCommitAfterSecondFenceMySQL(t *testing.T) {
 	repo := NewRepo(db, nil)
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
+	extracted := "https://example.com/verify?token=" + strings.Repeat("y", 256)
 	decision := domain.Message{
 		EmailResourceID: 100, ResourceType: domain.ResourceTypeMicrosoft,
 		MatchedOrderID: &orderID, Recipient: "main@example.com",
 		Sender: "sender@example.net", Subject: "Fence code",
-		RawBody: "Your code is 123456", BodyPreview: "Your code is 123456",
-		VerificationCode: "123456", DedupeKey: fmt.Sprintf("%064x", 7001),
+		RawBody: `<a href="` + extracted + `">Verify</a>`, BodyPreview: "Verify",
+		VerificationCode: extracted, DedupeKey: fmt.Sprintf("%064x", 7001),
 		Status: domain.MessageStatusMatched, ReceivedAt: now,
 	}
 	facts, inserted, err := repo.AppendMessages(ctx, []domain.Message{decision})
@@ -420,14 +423,14 @@ func TestProjectionAndDeliveryCommitAfterSecondFenceMySQL(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, delivery)
 	require.NotNil(t, delivery.Message)
-	require.Equal(t, "123456", delivery.Message.VerificationCode)
+	require.Equal(t, extracted, delivery.Message.VerificationCode)
 	items, err = repo.ListOrderMessages(ctx, app.OrderScope{
 		OrderID: orderID, ServiceMode: "purchase",
 		AllocationType: domain.ResourceTypeMicrosoft, ReceiveStartedAt: &startedAt,
 	}, 30)
 	require.NoError(t, err)
 	require.Len(t, items, 1)
-	require.Equal(t, "123456", items[0].VerificationCode)
+	require.Equal(t, extracted, items[0].VerificationCode)
 	pending, err = repo.ListUnprojectedMessages(ctx, domain.ResourceTypeMicrosoft, []uint{100}, 100)
 	require.NoError(t, err)
 	require.Empty(t, pending)

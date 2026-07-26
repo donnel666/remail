@@ -1,4 +1,4 @@
-import { Empty, Input, Modal, Tag, Typography } from "@douyinfe/semi-ui";
+import { Button, Empty, Input, Modal, Tag, Typography } from "@douyinfe/semi-ui";
 import { IconSearch } from "@douyinfe/semi-icons";
 import { Mail } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
@@ -66,14 +66,26 @@ export function MailboxClient({
   );
   const [selectedMessageId, setSelectedMessageId] = useState("");
   const [loadedBodies, setLoadedBodies] = useState<Record<string, string>>({});
-  const loadingBodyIdsRef = useRef(new Set<string>());
+  const [bodyErrors, setBodyErrors] = useState<Record<string, boolean>>({});
+  const [loadingBodyIds, setLoadingBodyIds] = useState<Record<string, boolean>>({});
+  const loadingBodyIdsRef = useRef(new Map<string, number>());
+  const bodyGenerationRef = useRef(0);
+  const onLoadMessageRef = useRef(onLoadMessage);
   const previousEmailRef = useRef(email);
+
+  useEffect(() => {
+    onLoadMessageRef.current = onLoadMessage;
+  }, [onLoadMessage]);
 
   useEffect(() => {
     const emailChanged = previousEmailRef.current !== email;
     previousEmailRef.current = email;
     if (emailChanged) {
+      bodyGenerationRef.current += 1;
+      loadingBodyIdsRef.current.clear();
       setLoadedBodies({});
+      setBodyErrors({});
+      setLoadingBodyIds({});
       setSelectedMessageId(filteredMessages[0]?.id ?? "");
       return;
     }
@@ -89,36 +101,64 @@ export function MailboxClient({
   const selectedMessage =
     filteredMessages.find((message) => message.id === selectedMessageId) ??
     filteredMessages[0];
+  const selectedMessageKey = selectedMessage ? `${email}\0${selectedMessage.id}` : "";
+  const hasLoadedBody = selectedMessage
+    ? Object.prototype.hasOwnProperty.call(loadedBodies, selectedMessageKey)
+    : false;
+  const selectedBodyError = selectedMessage
+    ? Boolean(bodyErrors[selectedMessageKey])
+    : false;
+  const selectedBodyLoading = selectedMessage
+    ? Boolean(loadingBodyIds[selectedMessageKey])
+    : false;
   const selectedBody = selectedMessage
-    ? (loadedBodies[selectedMessage.id] ?? selectedMessage.body)
+    ? (loadedBodies[selectedMessageKey] ?? selectedMessage.body)
     : "";
+  const loadableMessageId = selectedMessage?.id ?? "";
+  const loadableMessageBody = selectedMessage?.body ?? "";
+  const canLoadMessage = Boolean(onLoadMessage);
 
   useEffect(() => {
     if (
-      !selectedMessage ||
-      selectedBody ||
-      !onLoadMessage ||
-      loadingBodyIdsRef.current.has(selectedMessage.id)
+      !loadableMessageId ||
+      hasLoadedBody ||
+      selectedBodyError ||
+      loadableMessageBody !== "" ||
+      !canLoadMessage ||
+      loadingBodyIdsRef.current.has(selectedMessageKey)
     ) {
       return;
     }
-    let active = true;
-    loadingBodyIdsRef.current.add(selectedMessage.id);
-    void onLoadMessage(selectedMessage.id)
+    const generation = bodyGenerationRef.current;
+    const loader = onLoadMessageRef.current;
+    if (!loader) return;
+    loadingBodyIdsRef.current.set(selectedMessageKey, generation);
+    setLoadingBodyIds((current) => ({ ...current, [selectedMessageKey]: true }));
+    void Promise.resolve()
+      .then(() => loader(loadableMessageId))
       .then((body) => {
-        if (!active) return;
-        setLoadedBodies((current) => ({ ...current, [selectedMessage.id]: body }));
+        if (bodyGenerationRef.current !== generation) return;
+        setLoadedBodies((current) => ({ ...current, [selectedMessageKey]: body }));
       })
       .catch(() => {
-        if (active) setLoadedBodies((current) => ({ ...current, [selectedMessage.id]: selectedMessage.preview }));
+        if (bodyGenerationRef.current !== generation) return;
+        setBodyErrors((current) => ({ ...current, [selectedMessageKey]: true }));
       })
       .finally(() => {
-        loadingBodyIdsRef.current.delete(selectedMessage.id);
+        if (loadingBodyIdsRef.current.get(selectedMessageKey) !== generation) return;
+        loadingBodyIdsRef.current.delete(selectedMessageKey);
+        setLoadingBodyIds((current) => ({ ...current, [selectedMessageKey]: false }));
       });
-    return () => {
-      active = false;
-    };
-  }, [onLoadMessage, selectedBody, selectedMessage]);
+  }, [canLoadMessage, email, hasLoadedBody, loadableMessageBody, loadableMessageId, selectedBodyError, selectedMessageKey]);
+
+  function retrySelectedBody() {
+    if (!selectedMessageKey) return;
+    setBodyErrors((current) => {
+      const next = { ...current };
+      delete next[selectedMessageKey];
+      return next;
+    });
+  }
 
   function handleMessageKeyDown(
     event: KeyboardEvent<HTMLDivElement>,
@@ -269,9 +309,20 @@ export function MailboxClient({
                 </div>
               ) : null}
             </div>
-            <pre className="mailbox-client-body">
-              {selectedBody || selectedMessage.preview}
-            </pre>
+            {selectedBodyError ? (
+              <div className="flex flex-1 items-center justify-center gap-3">
+                <Text type="danger">{t("Mail load failed.")}</Text>
+                <Button onClick={retrySelectedBody} size="small">
+                  {t("Retry")}
+                </Button>
+              </div>
+            ) : selectedBodyLoading ? (
+              <div className="flex flex-1 items-center justify-center">
+                <Text type="tertiary">{t("Loading...")}</Text>
+              </div>
+            ) : (
+              <pre className="mailbox-client-body">{selectedBody}</pre>
+            )}
           </>
         ) : (
           <div className="mailbox-client-empty">

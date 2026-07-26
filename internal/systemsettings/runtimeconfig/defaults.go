@@ -100,7 +100,7 @@ var defaultSettings = []domain.Setting{
 	{Key: "fetch_dispatcher_interval_seconds", Value: "15"},
 	{Key: "project_history_concurrency", Value: "4"},
 	{Key: "project_history_dispatch_limit", Value: "4"},
-	{Key: "verification_code_pattern", Value: `(^|[^\d])(\d{6,8})([^\d]|$)`},
+	{Key: "verification_code_pattern", Value: `["(?:^|[^\\d])(\\d{6,8})(?:[^\\d]|$)"]`},
 
 	{Key: "microsoft_alias_weekly_limit", Value: "2"},
 	{Key: "microsoft_alias_yearly_limit", Value: "10"},

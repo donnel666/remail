@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -25,6 +26,7 @@ import (
 	"github.com/donnel666/remail/internal/mailmatch/domain"
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
+	htmlcharset "golang.org/x/net/html/charset"
 )
 
 const (
@@ -54,6 +56,8 @@ const (
 	maxPickupMessageCacheLimit = 100
 	maxPickupFetchHeartbeat    = 5 * time.Minute
 	maxVerificationPatternSize = 4096
+	maxVerificationRuleCount   = 64
+	maxExtractedValueSize      = 4096
 )
 
 func boundedRuntimeInt(key string, fallback, maximum int) int {
@@ -569,9 +573,12 @@ func cachedMessagesMatchingScopes(messages []FetchedMessage, emailResourceID uin
 			if scope.EmailResourceID != emailResourceID || scope.AllocationType != domain.ResourceTypeMicrosoft {
 				continue
 			}
-			if ok, _, _ := matchAndExtractAnyRecipient(message, scope); ok {
+			if !matchesScopeFiltersAnyRecipient(message, scope) {
+				continue
+			}
+			messageMatched = true
+			if ok, value, _, _ := matchAndExtractAnyRecipientWithPriority(message, scope); ok && (value != "" || scope.ServiceMode == "purchase") {
 				matchedScopes[index] = true
-				messageMatched = true
 			}
 		}
 		if messageMatched {
@@ -1013,9 +1020,21 @@ func (uc *UseCase) processFetch(ctx context.Context, task FetchTask, timing pick
 			return err
 		}
 	}
+	messagesToIngest := fetched.Messages
+	if uc.pickupMessages != nil {
+		messagesToIngest = mergePickupMessages(fetched.Messages, cachedMessages)
+		cacheCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), pickupMessageCacheIO)
+		err := uc.pickupMessages.Store(cacheCtx, task.EmailResourceID, messagesToIngest, boundedRuntimeDuration("pickup_message_cache_ttl_seconds", pickupMessageCacheTTL, time.Second, maxPickupMessageCacheTTL))
+		cancel()
+		if err != nil {
+			slog.Warn("pickup message cache write failed", "resource_id", task.EmailResourceID, "error", err)
+		} else {
+			platform.AddWorkUnits("mailmatch_fetch", "all", "cache_refresh", 1)
+		}
+	}
 	stored := 0
 	matched := 0
-	if len(fetched.Messages) == 0 {
+	if len(messagesToIngest) == 0 {
 		current, err := uc.pickupFetch.Owns(ctx, task.EmailResourceID, task.LeaseToken)
 		if err != nil {
 			return err
@@ -1025,7 +1044,7 @@ func (uc *UseCase) processFetch(ctx context.Context, task FetchTask, timing pick
 		}
 	} else {
 		var lastReceivedAt *time.Time
-		stored, matched, lastReceivedAt, err = uc.ingestFetchedMessagesForResourcesWithFence(ctx, fetched.Messages, domain.ResourceTypeMicrosoft, []uint{task.EmailResourceID}, func(txCtx context.Context) error {
+		stored, matched, lastReceivedAt, err = uc.ingestFetchedMessagesForResourcesWithFence(ctx, messagesToIngest, domain.ResourceTypeMicrosoft, []uint{task.EmailResourceID}, func(txCtx context.Context) error {
 			current, err := uc.pickupFetch.Owns(txCtx, task.EmailResourceID, task.LeaseToken)
 			if err != nil {
 				return err
@@ -1043,17 +1062,6 @@ func (uc *UseCase) processFetch(ctx context.Context, task FetchTask, timing pick
 	platform.AddWorkUnits("mailmatch_fetch", "all", "fetched", len(fetched.Messages))
 	platform.AddWorkUnits("mailmatch_fetch", "all", "stored", stored)
 	platform.AddWorkUnits("mailmatch_fetch", "all", "matched", matched)
-	if uc.pickupMessages != nil {
-		mergedMessages := mergePickupMessages(fetched.Messages, cachedMessages)
-		cacheCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), pickupMessageCacheIO)
-		err := uc.pickupMessages.Store(cacheCtx, task.EmailResourceID, mergedMessages, boundedRuntimeDuration("pickup_message_cache_ttl_seconds", pickupMessageCacheTTL, time.Second, maxPickupMessageCacheTTL))
-		cancel()
-		if err != nil {
-			slog.Warn("pickup message cache write failed", "resource_id", task.EmailResourceID, "error", err)
-		} else {
-			platform.AddWorkUnits("mailmatch_fetch", "all", "cache_refresh", 1)
-		}
-	}
 	return nil
 }
 
@@ -1213,8 +1221,9 @@ type mailIngestError struct {
 }
 
 type matchedDelivery struct {
-	scope   OrderScope
-	message domain.Message
+	scope    OrderScope
+	message  domain.Message
+	priority extractionPriority
 }
 
 func (e *mailIngestError) Error() string { return e.err.Error() }
@@ -1242,13 +1251,13 @@ func (uc *UseCase) ingestFetchedMessagesForResourcesWithFence(
 	messages := make([]domain.Message, 0, len(fetched))
 	matchDeliveries := make([]matchedDelivery, 0)
 	for _, item := range fetched {
-		message, matchedScope, err := uc.fetchedMessageToDomain(ctx, item)
+		message, matchedScope, priority, err := uc.fetchedMessageToDomain(ctx, item)
 		if err != nil {
 			return 0, 0, latestReceivedAt(messages), &mailIngestError{safe: "Mail message matching failed.", err: err}
 		}
 		messages = append(messages, message)
 		if matchedScope != nil && (strings.TrimSpace(message.VerificationCode) != "" || matchedScope.ServiceMode == "purchase") {
-			matchDeliveries = append(matchDeliveries, matchedDelivery{scope: *matchedScope, message: message})
+			matchDeliveries = append(matchDeliveries, matchedDelivery{scope: *matchedScope, message: message, priority: priority})
 		}
 	}
 	lastReceivedAt := latestReceivedAt(messages)
@@ -1284,14 +1293,14 @@ func (uc *UseCase) ingestFetchedMessagesForResourcesWithFence(
 			if _, exists := knownDecisions[mailMessageIdentity(fact)]; exists {
 				continue
 			}
-			decision, matchedScope, matchErr := uc.fetchedMessageToDomain(ctx, fetchedMessageFromDomain(fact))
+			decision, matchedScope, priority, matchErr := uc.fetchedMessageToDomain(ctx, fetchedMessageFromDomain(fact))
 			if matchErr != nil {
 				return 0, 0, lastReceivedAt, &mailIngestError{safe: "Mail message recovery failed.", err: matchErr}
 			}
 			decisions = append(decisions, decision)
 			knownDecisions[mailMessageIdentity(decision)] = struct{}{}
 			if matchedScope != nil && (strings.TrimSpace(decision.VerificationCode) != "" || matchedScope.ServiceMode == "purchase") {
-				matchDeliveries = append(matchDeliveries, matchedDelivery{scope: *matchedScope, message: decision})
+				matchDeliveries = append(matchDeliveries, matchedDelivery{scope: *matchedScope, message: decision, priority: priority})
 			}
 		}
 		for _, fact := range storedMessages {
@@ -1507,8 +1516,7 @@ func earliestOrderDeliveries(deliveries []matchedDelivery) []matchedDelivery {
 	earliestByOrder := make(map[uint]matchedDelivery, len(deliveries))
 	for _, delivery := range deliveries {
 		current, exists := earliestByOrder[delivery.scope.OrderID]
-		if !exists || delivery.message.ReceivedAt.Before(current.message.ReceivedAt) ||
-			(delivery.message.ReceivedAt.Equal(current.message.ReceivedAt) && delivery.message.DedupeKey < current.message.DedupeKey) {
+		if !exists || deliveryPrecedes(delivery, current) {
 			earliestByOrder[delivery.scope.OrderID] = delivery
 		}
 	}
@@ -1520,6 +1528,19 @@ func earliestOrderDeliveries(deliveries []matchedDelivery) []matchedDelivery {
 		return result[i].scope.OrderID < result[j].scope.OrderID
 	})
 	return result
+}
+
+func deliveryPrecedes(candidate, current matchedDelivery) bool {
+	if candidate.priority.tier != current.priority.tier {
+		return candidate.priority.tier < current.priority.tier
+	}
+	if candidate.priority.index != current.priority.index {
+		return candidate.priority.index < current.priority.index
+	}
+	if !candidate.message.ReceivedAt.Equal(current.message.ReceivedAt) {
+		return candidate.message.ReceivedAt.Before(current.message.ReceivedAt)
+	}
+	return candidate.message.DedupeKey < current.message.DedupeKey
 }
 
 func (uc *UseCase) fetchMessages(ctx context.Context, scope OrderScope, job domain.FetchJob, knownMessageIDs []string) (*FetchMessagesResult, error) {
@@ -1573,18 +1594,19 @@ func scopeFetchable(scope OrderScope, now func() time.Time) bool {
 	return scope.AllocationID > 0 && scope.EmailResourceID > 0
 }
 
-func (uc *UseCase) fetchedMessageToDomain(ctx context.Context, item FetchedMessage) (domain.Message, *OrderScope, error) {
+func (uc *UseCase) fetchedMessageToDomain(ctx context.Context, item FetchedMessage) (domain.Message, *OrderScope, extractionPriority, error) {
 	message := baseMessageFromFetched(item)
 	matches := make([]struct {
 		scope     OrderScope
 		code      string
 		recipient string
+		priority  extractionPriority
 	}, 0)
 	seenOrders := make(map[string]struct{})
 	for _, recipient := range fetchedRecipientCandidates(item) {
 		scopes, err := uc.repo.ListMatchingScopesByRecipient(ctx, message.ResourceType, message.EmailResourceID, recipient, message.ReceivedAt)
 		if err != nil {
-			return message, nil, err
+			return message, nil, extractionPriority{tier: extractionTierNone}, err
 		}
 		for _, scope := range scopes {
 			if _, ok := seenOrders[scope.OrderNo]; ok {
@@ -1592,14 +1614,15 @@ func (uc *UseCase) fetchedMessageToDomain(ctx context.Context, item FetchedMessa
 			}
 			candidateMessage := message
 			candidateMessage.Recipient = recipient
-			matched, code, _ := matchAndExtract(fetchedMessageFromDomain(candidateMessage), scope)
+			matched, code, _, priority := matchAndExtractWithPriority(fetchedMessageFromDomain(candidateMessage), scope)
 			if matched {
 				seenOrders[scope.OrderNo] = struct{}{}
 				matches = append(matches, struct {
 					scope     OrderScope
 					code      string
 					recipient string
-				}{scope: scope, code: code, recipient: recipient})
+					priority  extractionPriority
+				}{scope: scope, code: code, recipient: recipient, priority: priority})
 			}
 		}
 	}
@@ -1614,17 +1637,17 @@ func (uc *UseCase) fetchedMessageToDomain(ctx context.Context, item FetchedMessa
 		matchedOrderID := matches[0].scope.OrderID
 		message.MatchedOrderID = &matchedOrderID
 		platform.RecordBusinessEvent("mail_match", "matched")
-		return message, &matches[0].scope, nil
+		return message, &matches[0].scope, matches[0].priority, nil
 	default:
 		message.Status = domain.MessageStatusReceived
 		message.MatchDiagnostic = "Message matched multiple active order services."
 		platform.RecordBusinessEvent("mail_match", "ambiguous")
 	}
-	return message, nil, nil
+	return message, nil, extractionPriority{tier: extractionTierNone}, nil
 }
 
 func baseMessageFromFetched(item FetchedMessage) domain.Message {
-	body := strings.TrimSpace(item.Body)
+	body := item.Body
 	recipient := ""
 	candidates := fetchedRecipientCandidates(item)
 	if len(candidates) > 0 {
@@ -1675,15 +1698,31 @@ func fetchedMessageFromDomain(message domain.Message) FetchedMessage {
 	}
 }
 
+const (
+	extractionTierProject = iota
+	extractionTierSystem
+	extractionTierNone
+)
+
+type extractionPriority struct {
+	tier  int
+	index int
+}
+
 func matchAndExtractAnyRecipient(message FetchedMessage, scope OrderScope) (bool, string, string) {
+	matched, value, diagnostic, _ := matchAndExtractAnyRecipientWithPriority(message, scope)
+	return matched, value, diagnostic
+}
+
+func matchAndExtractAnyRecipientWithPriority(message FetchedMessage, scope OrderScope) (bool, string, string, extractionPriority) {
 	for _, recipient := range fetchedRecipientCandidates(message) {
 		candidate := message
 		candidate.Recipient = recipient
-		if matched, code, diagnostic := matchAndExtract(candidate, scope); matched {
-			return true, code, diagnostic
+		if matched, value, diagnostic, priority := matchAndExtractWithPriority(candidate, scope); matched {
+			return true, value, diagnostic, priority
 		}
 	}
-	return false, "", "Message did not match recipient project mail rules."
+	return false, "", "Message did not match recipient project mail rules.", extractionPriority{tier: extractionTierNone}
 }
 
 func fetchedRecipientCandidates(item FetchedMessage) []string {
@@ -1712,7 +1751,7 @@ func inboundFetchedMessage(req InboundMailRequest) FetchedMessage {
 	if receivedAt.IsZero() {
 		receivedAt = time.Now().UTC()
 	}
-	body := strings.TrimSpace(string(req.Raw))
+	body := string(req.Raw)
 	item := FetchedMessage{
 		EmailResourceID: req.EmailResourceID,
 		ResourceType:    req.ResourceType,
@@ -1745,8 +1784,8 @@ func inboundFetchedMessage(req InboundMailRequest) FetchedMessage {
 	if date, err := stdmail.ParseDate(msg.Header.Get("Date")); err == nil {
 		item.ReceivedAt = date.UTC()
 	}
-	if parsedBody, _ := readMIMEBody(msg.Header.Get("Content-Type"), msg.Header.Get("Content-Transfer-Encoding"), msg.Body); strings.TrimSpace(parsedBody) != "" {
-		item.Body = strings.TrimSpace(parsedBody)
+	if parsedBody, bodyErr := readMIMEBody(msg.Header.Get("Content-Type"), msg.Header.Get("Content-Transfer-Encoding"), msg.Body); bodyErr == nil {
+		item.Body = parsedBody
 		item.BodyPreview = bodyPreview(parsedBody)
 	}
 	return item
@@ -1788,29 +1827,56 @@ func mailAddressCandidates(raw string) []string {
 }
 
 func matchAndExtract(message FetchedMessage, scope OrderScope) (bool, string, string) {
+	matched, value, diagnostic, _ := matchAndExtractWithPriority(message, scope)
+	return matched, value, diagnostic
+}
+
+func matchAndExtractWithPriority(message FetchedMessage, scope OrderScope) (bool, string, string, extractionPriority) {
 	enabled := enabledRules(scope.Rules)
+	if matched, diagnostic := matchScopeFilters(message, scope, enabled); !matched {
+		return false, "", diagnostic, extractionPriority{tier: extractionTierNone}
+	}
+	if value, index := extractByBodyRulesWithIndex(message.Body, enabled[MailRuleBody]); value != "" {
+		return true, value, "", extractionPriority{tier: extractionTierProject, index: index}
+	}
+	if value, index := extractBySystemRules(message.Body); value != "" {
+		return true, value, "", extractionPriority{tier: extractionTierSystem, index: index}
+	}
+	priority := extractionPriority{tier: extractionTierNone}
+	if scope.LooseMatch {
+		return true, "", "", priority
+	}
+	return false, "", "No project or system body rule extracted a value.", priority
+}
+
+func matchScopeFilters(message FetchedMessage, scope OrderScope, enabled map[MailRuleType][]string) (bool, string) {
 	if !matchRequiredRule(MailRuleRecipient, enabled, message, scope) {
-		return false, "", "Message did not match recipient project mail rules."
+		return false, "Message did not match recipient project mail rules."
 	}
 	if scope.LooseMatch {
 		if !matchRequiredRule(MailRuleSender, enabled, message, scope) {
-			return false, "", "Message did not match sender project mail rules."
+			return false, "Message did not match sender project mail rules."
 		}
-		if code := extractByBodyRules(message.Body, enabled[MailRuleBody]); code != "" {
-			return true, code, ""
-		}
-		return true, extractVerificationCode(message.Body), ""
+		return true, ""
 	}
 	for _, ruleType := range []MailRuleType{MailRuleSender, MailRuleSubject} {
 		if !matchRequiredRule(ruleType, enabled, message, scope) {
-			return false, "", "Message did not match strict project mail rules."
+			return false, "Message did not match strict project mail rules."
 		}
 	}
-	code := extractByBodyRules(message.Body, enabled[MailRuleBody])
-	if code == "" {
-		return false, "", "Strict body rule did not extract a verification code."
+	return true, ""
+}
+
+func matchesScopeFiltersAnyRecipient(message FetchedMessage, scope OrderScope) bool {
+	enabled := enabledRules(scope.Rules)
+	for _, recipient := range fetchedRecipientCandidates(message) {
+		candidate := message
+		candidate.Recipient = recipient
+		if matched, _ := matchScopeFilters(candidate, scope, enabled); matched {
+			return true
+		}
 	}
-	return true, code, ""
+	return false
 }
 
 func enabledRules(rules []MailRule) map[MailRuleType][]string {
@@ -1937,87 +2003,93 @@ func regexMatch(pattern string, value string) bool {
 }
 
 func extractByBodyRules(body string, patterns []string) string {
-	body = strings.TrimSpace(body)
+	value, _ := extractByBodyRulesWithIndex(body, patterns)
+	return value
+}
+
+func extractByBodyRulesWithIndex(body string, patterns []string) (string, int) {
 	if body == "" || len(patterns) == 0 {
+		return "", -1
+	}
+	for index, pattern := range patterns {
+		if value := extractByBodyRule(body, pattern); value != "" {
+			return value, index
+		}
+	}
+	return "", -1
+}
+
+func extractByBodyRule(body string, pattern string) string {
+	if body == "" {
 		return ""
 	}
-	for _, pattern := range patterns {
-		re := compileCachedRegex(pattern)
-		if re == nil {
-			continue
-		}
-		matches := re.FindStringSubmatch(body)
-		if len(matches) == 0 {
-			continue
-		}
-		for _, value := range matches[1:] {
-			value = strings.TrimSpace(value)
-			if value != "" {
-				return value
-			}
-		}
-		if value := strings.TrimSpace(matches[0]); value != "" {
+	re := compileCachedRegex(pattern)
+	if re == nil {
+		return ""
+	}
+	matches := re.FindStringSubmatch(body)
+	if len(matches) == 0 {
+		return ""
+	}
+	if len(matches) == 1 {
+		return validExtractedValue(matches[0])
+	}
+	for _, value := range matches[1:] {
+		value = validExtractedValue(value)
+		if value != "" {
 			return value
 		}
 	}
 	return ""
 }
 
-const verificationCodePattern = `(^|[^\d])(\d{6,8})([^\d]|$)`
+func validExtractedValue(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) > maxExtractedValueSize {
+		return ""
+	}
+	return value
+}
 
-var verificationCodeRe = regexp.MustCompile(verificationCodePattern)
+const verificationCodePattern = `(?:^|[^\d])(\d{6,8})(?:[^\d]|$)`
 
 func extractVerificationCode(body string) string {
-	pattern := runtimeconfig.String("verification_code_pattern", verificationCodePattern)
-	if len(pattern) > maxVerificationPatternSize {
-		pattern = verificationCodePattern
-	}
-	re := compileCachedRegex(pattern)
-	if re == nil {
-		re = verificationCodeRe
-	}
-	matches := re.FindStringSubmatch(body)
-	if len(matches) == 0 {
-		return ""
-	}
-	for _, match := range matches[1:] {
-		if isDigits(match) {
-			return match
-		}
-	}
-	if isDigits(matches[0]) {
-		return matches[0]
-	}
-	return longestDigitRun(matches[0])
+	value, _ := extractBySystemRules(body)
+	return value
 }
 
-func longestDigitRun(value string) string {
-	start, bestStart, bestLength := -1, 0, 0
-	for i := 0; i <= len(value); i++ {
-		if i < len(value) && value[i] >= '0' && value[i] <= '9' {
-			if start < 0 {
-				start = i
+func extractBySystemRules(body string) (string, int) {
+	for index, pattern := range systemExtractionRules() {
+		if value := extractByBodyRule(body, pattern); value != "" {
+			return value, index
+		}
+	}
+	return "", -1
+}
+
+func systemExtractionRules() []string {
+	raw := runtimeconfig.String("verification_code_pattern", verificationCodePattern)
+	if len(raw) <= maxVerificationPatternSize {
+		var rules []string
+		if json.Unmarshal([]byte(strings.TrimSpace(raw)), &rules) == nil {
+			if len(rules) == 0 || len(rules) > maxVerificationRuleCount {
+				return []string{verificationCodePattern}
 			}
-			continue
+			for index, pattern := range rules {
+				pattern = strings.TrimSpace(pattern)
+				if pattern == "" || compileCachedRegex(pattern) == nil {
+					return []string{verificationCodePattern}
+				}
+				rules[index] = pattern
+			}
+			return rules
 		}
-		if start >= 0 && i-start > bestLength {
-			bestStart, bestLength = start, i-start
-		}
-		start = -1
-	}
-	if bestLength == 0 {
-		return ""
-	}
-	return value[bestStart : bestStart+bestLength]
-}
-
-func isDigits(value string) bool {
-	for _, r := range value {
-		if r < '0' || r > '9' {
-			return false
+		pattern := strings.TrimSpace(raw)
+		if compileCachedRegex(pattern) != nil {
+			return []string{pattern}
 		}
 	}
-	return value != ""
+	return []string{verificationCodePattern}
 }
 
 func bodyPreview(value string) string {
@@ -2041,50 +2113,73 @@ func decodeMIMEHeader(decoder *mime.WordDecoder, value string) string {
 }
 
 func readMIMEBody(contentType string, transferEncoding string, body io.Reader) (string, error) {
+	value, _, _, err := readMIMEBodyPart(contentType, transferEncoding, body)
+	return value, err
+}
+
+func readMIMEBodyPart(contentType string, transferEncoding string, body io.Reader) (string, bool, bool, error) {
 	mediaType, params, err := mime.ParseMediaType(contentType)
 	if err != nil {
 		mediaType = "text/plain"
 	}
-	if strings.HasPrefix(strings.ToLower(mediaType), "multipart/") {
+	mediaType = strings.ToLower(mediaType)
+	if strings.HasPrefix(mediaType, "multipart/") {
 		mr := multipart.NewReader(body, params["boundary"])
-		var htmlFallback string
+		var htmlBody, plainBody string
+		var hasHTML, hasPlain bool
 		for {
 			part, err := mr.NextPart()
 			if err == io.EOF {
 				break
 			}
 			if err != nil {
-				return "", err
+				return "", false, false, err
 			}
-			partBody, err := readMIMEBody(part.Header.Get("Content-Type"), part.Header.Get("Content-Transfer-Encoding"), part)
-			if err != nil {
+			if disposition, _, dispositionErr := mime.ParseMediaType(part.Header.Get("Content-Disposition")); dispositionErr == nil && strings.EqualFold(disposition, "attachment") {
 				continue
 			}
-			partType, _, _ := mime.ParseMediaType(part.Header.Get("Content-Type"))
-			switch strings.ToLower(partType) {
-			case "text/plain":
-				if strings.TrimSpace(partBody) != "" {
-					return partBody, nil
+			partBody, partIsHTML, found, err := readMIMEBodyPart(part.Header.Get("Content-Type"), part.Header.Get("Content-Transfer-Encoding"), part)
+			if err != nil || !found {
+				continue
+			}
+			if partIsHTML {
+				if !hasHTML {
+					htmlBody, hasHTML = partBody, true
 				}
-			case "text/html":
-				if htmlFallback == "" {
-					htmlFallback = stripHTML(partBody)
-				}
+			} else if !hasPlain {
+				plainBody, hasPlain = partBody, true
 			}
 		}
-		return htmlFallback, nil
+		if hasHTML {
+			return htmlBody, true, true, nil
+		}
+		if hasPlain {
+			return plainBody, false, true, nil
+		}
+		return "", false, false, nil
+	}
+	if !strings.EqualFold(mediaType, "text/plain") && !strings.EqualFold(mediaType, "text/html") {
+		return "", false, false, nil
 	}
 
 	reader := decodeTransferReader(body, transferEncoding)
 	data, err := io.ReadAll(reader)
 	if err != nil {
-		return "", err
+		return "", false, false, err
 	}
-	text := string(data)
-	if strings.EqualFold(mediaType, "text/html") {
-		text = stripHTML(text)
+	value := decodeMIMEText(data, params["charset"])
+	return value, mediaType == "text/html", value != "", nil
+}
+
+func decodeMIMEText(data []byte, label string) string {
+	if label = strings.TrimSpace(label); label != "" {
+		if reader, err := htmlcharset.NewReaderLabel(label, bytes.NewReader(data)); err == nil {
+			if decoded, err := io.ReadAll(reader); err == nil {
+				data = decoded
+			}
+		}
 	}
-	return text, nil
+	return strings.ToValidUTF8(string(data), "\uFFFD")
 }
 
 func decodeTransferReader(body io.Reader, transferEncoding string) io.Reader {
@@ -2098,19 +2193,6 @@ func decodeTransferReader(body io.Reader, transferEncoding string) io.Reader {
 	}
 }
 
-var (
-	htmlScriptRe = regexp.MustCompile(`(?is)<script\b.*?</script>`)
-	htmlStyleRe  = regexp.MustCompile(`(?is)<style\b.*?</style>`)
-	htmlTagRe    = regexp.MustCompile(`(?s)<[^>]+>`)
-)
-
-func stripHTML(value string) string {
-	value = htmlScriptRe.ReplaceAllString(value, " ")
-	value = htmlStyleRe.ReplaceAllString(value, " ")
-	value = htmlTagRe.ReplaceAllString(value, " ")
-	return strings.Join(strings.Fields(value), " ")
-}
-
 func messageDedupeKey(item FetchedMessage) string {
 	if messageID := strings.ToLower(strings.Trim(strings.TrimSpace(item.MessageIDHeader), "<>")); messageID != "" {
 		return hashParts("message-id", messageID)
@@ -2118,8 +2200,7 @@ func messageDedupeKey(item FetchedMessage) string {
 	recipients := strings.Join(fetchedRecipientCandidates(item), ",")
 	sender := strings.ToLower(strings.TrimSpace(item.Sender))
 	subject := strings.TrimSpace(item.Subject)
-	normalizedBody := stripHTML(item.Body)
-	if strings.TrimSpace(recipients+sender+subject+normalizedBody) == "" {
+	if recipients+sender+subject+item.Body == "" {
 		if providerMessageID := strings.ToLower(strings.TrimSpace(item.ProviderMessageID)); providerMessageID != "" {
 			return hashParts(
 				"provider",
@@ -2135,7 +2216,7 @@ func messageDedupeKey(item FetchedMessage) string {
 		sender,
 		subject,
 		item.ReceivedAt.UTC().Truncate(time.Second).Format(time.RFC3339),
-		bodyHash(normalizedBody),
+		bodyHash(item.Body),
 	}
 	return hashParts(parts...)
 }

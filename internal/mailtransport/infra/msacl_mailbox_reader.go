@@ -17,6 +17,7 @@ import (
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
 	"github.com/donnel666/remail/internal/mailtransport/domain"
 	"github.com/donnel666/remail/internal/mailtransport/infra/msacl"
+	htmlcharset "golang.org/x/net/html/charset"
 	"gorm.io/gorm"
 )
 
@@ -220,7 +221,10 @@ func parseMSACLInboundEmail(row InboundMailModel, raw []byte) msacl.EmailObj {
 	if to := decodeMIMEHeader(decoder, msg.Header.Get("To")); to != "" {
 		email.To = to
 	}
-	body, _ := readMIMEBody(msg.Header.Get("Content-Type"), msg.Header.Get("Content-Transfer-Encoding"), msg.Body)
+	body, isHTML, _, _ := readMIMEBodyPart(msg.Header.Get("Content-Type"), msg.Header.Get("Content-Transfer-Encoding"), msg.Body)
+	if isHTML {
+		body = stripHTMLForMSACL(body)
+	}
 	email.Preview = strings.TrimSpace(body)
 	return email
 }
@@ -238,50 +242,73 @@ func decodeMIMEHeader(decoder *mime.WordDecoder, value string) string {
 }
 
 func readMIMEBody(contentType string, transferEncoding string, body io.Reader) (string, error) {
+	value, _, _, err := readMIMEBodyPart(contentType, transferEncoding, body)
+	return value, err
+}
+
+func readMIMEBodyPart(contentType string, transferEncoding string, body io.Reader) (string, bool, bool, error) {
 	mediaType, params, err := mime.ParseMediaType(contentType)
 	if err != nil {
 		mediaType = "text/plain"
 	}
-	if strings.HasPrefix(strings.ToLower(mediaType), "multipart/") {
+	mediaType = strings.ToLower(mediaType)
+	if strings.HasPrefix(mediaType, "multipart/") {
 		mr := multipart.NewReader(body, params["boundary"])
-		var htmlFallback string
+		var htmlBody, plainBody string
+		var hasHTML, hasPlain bool
 		for {
 			part, err := mr.NextPart()
 			if err == io.EOF {
 				break
 			}
 			if err != nil {
-				return "", err
+				return "", false, false, err
 			}
-			partBody, err := readMIMEBody(part.Header.Get("Content-Type"), part.Header.Get("Content-Transfer-Encoding"), part)
-			if err != nil {
+			if disposition, _, dispositionErr := mime.ParseMediaType(part.Header.Get("Content-Disposition")); dispositionErr == nil && strings.EqualFold(disposition, "attachment") {
 				continue
 			}
-			partType, _, _ := mime.ParseMediaType(part.Header.Get("Content-Type"))
-			switch strings.ToLower(partType) {
-			case "text/plain":
-				if strings.TrimSpace(partBody) != "" {
-					return partBody, nil
+			partBody, partIsHTML, found, err := readMIMEBodyPart(part.Header.Get("Content-Type"), part.Header.Get("Content-Transfer-Encoding"), part)
+			if err != nil || !found {
+				continue
+			}
+			if partIsHTML {
+				if !hasHTML {
+					htmlBody, hasHTML = partBody, true
 				}
-			case "text/html":
-				if htmlFallback == "" {
-					htmlFallback = stripHTMLForMSACL(partBody)
-				}
+			} else if !hasPlain {
+				plainBody, hasPlain = partBody, true
 			}
 		}
-		return htmlFallback, nil
+		if hasHTML {
+			return htmlBody, true, true, nil
+		}
+		if hasPlain {
+			return plainBody, false, true, nil
+		}
+		return "", false, false, nil
+	}
+	if !strings.EqualFold(mediaType, "text/plain") && !strings.EqualFold(mediaType, "text/html") {
+		return "", false, false, nil
 	}
 
 	reader := decodeTransferReader(body, transferEncoding)
 	data, err := io.ReadAll(reader)
 	if err != nil {
-		return "", err
+		return "", false, false, err
 	}
-	text := string(data)
-	if strings.EqualFold(mediaType, "text/html") {
-		text = stripHTMLForMSACL(text)
+	value := decodeMIMEText(data, params["charset"])
+	return value, mediaType == "text/html", value != "", nil
+}
+
+func decodeMIMEText(data []byte, label string) string {
+	if label = strings.TrimSpace(label); label != "" {
+		if reader, err := htmlcharset.NewReaderLabel(label, bytes.NewReader(data)); err == nil {
+			if decoded, err := io.ReadAll(reader); err == nil {
+				data = decoded
+			}
+		}
 	}
-	return text, nil
+	return strings.ToValidUTF8(string(data), "\uFFFD")
 }
 
 func decodeTransferReader(body io.Reader, transferEncoding string) io.Reader {
@@ -295,9 +322,15 @@ func decodeTransferReader(body io.Reader, transferEncoding string) io.Reader {
 	}
 }
 
+var (
+	msaclHTMLScriptRe = regexp.MustCompile(`(?is)<script\b.*?</script>`)
+	msaclHTMLStyleRe  = regexp.MustCompile(`(?is)<style\b.*?</style>`)
+	msaclHTMLTagRe    = regexp.MustCompile(`(?s)<[^>]+>`)
+)
+
 func stripHTMLForMSACL(value string) string {
-	value = regexp.MustCompile(`(?is)<script\b.*?</script>`).ReplaceAllString(value, " ")
-	value = regexp.MustCompile(`(?is)<style\b.*?</style>`).ReplaceAllString(value, " ")
-	value = regexp.MustCompile(`(?s)<[^>]+>`).ReplaceAllString(value, " ")
+	value = msaclHTMLScriptRe.ReplaceAllString(value, " ")
+	value = msaclHTMLStyleRe.ReplaceAllString(value, " ")
+	value = msaclHTMLTagRe.ReplaceAllString(value, " ")
 	return strings.Join(strings.Fields(value), " ")
 }

@@ -18,7 +18,7 @@ type MessageProjectionModel struct {
 	MessageID         uint      `gorm:"primaryKey;autoIncrement:false;column:message_id"`
 	MatchedOrderID    *uint     `gorm:"column:matched_order_id"`
 	Status            string    `gorm:"type:varchar(32);not null"`
-	VerificationCode  string    `gorm:"type:varchar(64);not null;default:'';column:verification_code"`
+	VerificationCode  string    `gorm:"type:varchar(4096);not null;default:'';column:verification_code"`
 	MatchDiagnostic   string    `gorm:"type:varchar(500);not null;default:'';column:match_diagnostic"`
 	MessageReceivedAt time.Time `gorm:"not null;column:message_received_at"`
 	DecidedAt         time.Time `gorm:"not null;autoCreateTime:milli;column:decided_at"`
@@ -163,7 +163,7 @@ func (r *Repo) InsertMessageProjections(ctx context.Context, messages []domain.M
 			MessageID:         messages[i].ID,
 			MatchedOrderID:    messages[i].MatchedOrderID,
 			Status:            string(messages[i].Status),
-			VerificationCode:  truncate(messages[i].VerificationCode, 64),
+			VerificationCode:  truncate(messages[i].VerificationCode, verificationCodeMaxBytes),
 			MatchDiagnostic:   truncate(messages[i].MatchDiagnostic, 500),
 			MessageReceivedAt: messages[i].ReceivedAt.UTC(),
 		}

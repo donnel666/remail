@@ -1362,7 +1362,7 @@ function ResourceMailsPanel({
               </div>
             ) : null}
             <div className="whitespace-pre-wrap break-words rounded-lg bg-[var(--semi-color-fill-0)] p-3 text-sm text-[var(--semi-color-text-0)]">
-              {detailLoading ? <Spin /> : selectedDetail?.body ?? selected.preview}
+              {detailLoading ? <Spin /> : selectedDetail?.body ?? ""}
             </div>
           </div>
         ) : (
