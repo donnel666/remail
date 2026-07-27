@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -33,9 +34,9 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func newBillingMySQLTestDB(t *testing.T) *gorm.DB {
+func newBillingMySQLTestDB(t *testing.T, dsnOptions ...string) *gorm.DB {
 	t.Helper()
-	return billingMySQLTestServer.Database(t, billingMigrationsDir(t))
+	return billingMySQLTestServer.Database(t, billingMigrationsDir(t), dsnOptions...)
 }
 
 func billingInnoDBMetricCount(t *testing.T, db *gorm.DB, name string) uint64 {
@@ -1194,6 +1195,172 @@ func TestBillingRepoRechargeCallbackAndSchedulingMySQL(t *testing.T) {
 	require.NoError(t, db.First(&claimedModel, "recharge_no = ?", "RC-CALLBACK-FIRST").Error)
 	require.Nil(t, claimedModel.QueryLeaseUntil)
 	require.Equal(t, 1, claimedModel.QueryAttempts)
+}
+
+func TestBillingRepoDailyCheckinIsConcurrentAndNoWinCannotRerollMySQL(t *testing.T) {
+	db := newBillingMySQLTestDB(t, "clientFoundRows=true")
+	repo := NewBillingRepo(db)
+	ctx := context.Background()
+	userID := createBillingTestUser(t, db, "daily-checkin@example.com")
+	command := billingapp.DailyCheckinCommand{
+		UserID: userID, BusinessDate: "2026-07-27", RewardAmount: "5.00",
+		CheckedInAt: time.Date(2026, 7, 26, 16, 0, 0, 0, time.UTC), IdempotencyKey: "daily_checkin:test",
+	}
+
+	const callers = 8
+	start := make(chan struct{})
+	results := make(chan *billingapp.DailyCheckinResult, callers)
+	errs := make(chan error, callers)
+	for range callers {
+		go func() {
+			<-start
+			result, err := repo.ClaimDailyCheckin(ctx, command)
+			results <- result
+			errs <- err
+		}()
+	}
+	close(start)
+	firstClaims := 0
+	for range callers {
+		require.NoError(t, <-errs)
+		result := <-results
+		if result.FirstClaim {
+			firstClaims++
+		}
+		require.Equal(t, "5.00", result.RewardAmount)
+	}
+	require.Equal(t, 1, firstClaims)
+	var facts, transactions int64
+	require.NoError(t, db.Model(&DailyCheckinModel{}).Count(&facts).Error)
+	require.NoError(t, db.Model(&WalletTransactionModel{}).Where("biz_type = ?", "daily_checkin").Count(&transactions).Error)
+	require.EqualValues(t, 1, facts)
+	require.EqualValues(t, 1, transactions)
+	wallet, err := repo.GetOrCreateWalletSummary(ctx, userID)
+	require.NoError(t, err)
+	require.Equal(t, "5.00", wallet.Wallet.ConsumerBalance)
+
+	noWinUserID := createBillingTestUser(t, db, "daily-checkin-no-win@example.com")
+	command.UserID, command.BusinessDate, command.RewardAmount = noWinUserID, "2026-07-28", "0.00"
+	first, err := repo.ClaimDailyCheckin(ctx, command)
+	require.NoError(t, err)
+	require.True(t, first.FirstClaim)
+	command.RewardAmount = "100.00"
+	replay, err := repo.ClaimDailyCheckin(ctx, command)
+	require.NoError(t, err)
+	require.False(t, replay.FirstClaim)
+	require.Equal(t, "0.00", replay.RewardAmount)
+}
+
+func TestBillingRepoLeaderboardSettlementCreditsOnceFromSuccessWindowMySQL(t *testing.T) {
+	db := newBillingMySQLTestDB(t, "clientFoundRows=true")
+	repo := NewBillingRepo(db)
+	ctx := context.Background()
+	latest, found, err := repo.LatestLeaderboardSettlementDate(ctx)
+	require.NoError(t, err)
+	require.False(t, found)
+	require.Empty(t, latest)
+	firstUser := createBillingTestUser(t, db, "leader-one@example.com")
+	secondUser := createBillingTestUser(t, db, "leader-two@example.com")
+	require.NoError(t, db.Exec(`
+INSERT INTO projects(id, name, target_platform, logo_url, status, access_type, loose_match)
+VALUES (9001, 'Rewards', 'trade', '', 'listed', 'public', TRUE)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO project_products(
+    id, project_id, type, status, code_enabled, purchase_enabled,
+    code_price, purchase_price, code_supplier_price, purchase_supplier_price,
+    code_window_minutes, activation_window_minutes, warranty_minutes,
+    main_weight, dot_weight, plus_weight)
+VALUES (9001, 9001, 'microsoft', 'enabled', TRUE, TRUE, 1, 1, 1, 1, 10, 60, 1440, 1, 0, 0)`).Error)
+	start := time.Date(2026, 7, 26, 16, 0, 0, 0, time.UTC)
+	end := start.Add(24 * time.Hour)
+	seedRewardPurchaseOrder(t, db, 9101, firstUser, start.Add(30*time.Minute)) // created before start, succeeds inside
+	seedRewardPurchaseOrder(t, db, 9102, firstUser, start.Add(2*time.Hour))
+	seedRewardPurchaseOrder(t, db, 9103, secondUser, start.Add(3*time.Hour))
+	seedRewardPurchaseOrder(t, db, 9104, secondUser, end) // half-open upper bound
+	seedRewardCodeOrderDeliveredLate(t, db, 9105, 9201, firstUser, end.Add(-time.Minute), end.Add(time.Minute))
+	requireExplainUsesIndex(t, db, "idx_mailmatch_delivery_heads_received", `
+EXPLAIN SELECT o.user_id, h.message_received_at
+FROM mailmatch_order_delivery_heads AS h FORCE INDEX (idx_mailmatch_delivery_heads_received)
+JOIN orders AS o ON o.id = h.order_id
+WHERE h.message_received_at >= ? AND h.message_received_at < ?`, start, end)
+	requireExplainUsesIndex(t, db, "idx_orders_activated", `
+EXPLAIN SELECT o.user_id, o.activated_at
+FROM orders AS o FORCE INDEX (idx_orders_activated)
+WHERE o.activated_at >= ? AND o.activated_at < ?`, start, end)
+
+	rules := []runtimeconfig.LeaderboardRewardRule{{RankFrom: 1, RankTo: 1, Amount: "10.00"}, {RankFrom: 2, RankTo: 2, Amount: "5.00"}}
+	command := billingapp.LeaderboardSettlementCommand{
+		BusinessDate: "2026-07-27", PeriodStart: start, PeriodEnd: end, Rules: rules,
+		RulesJSON: `[{"rankFrom":1,"rankTo":1,"amount":10},{"rankFrom":2,"rankTo":2,"amount":5}]`, SettledAt: end,
+	}
+	result, err := repo.SettleLeaderboard(ctx, command)
+	require.NoError(t, err)
+	require.True(t, result.Created)
+	require.Equal(t, []billingapp.LeaderboardWinner{
+		{UserID: firstUser, Rank: 1, Score: 3, Amount: "10.00"},
+		{UserID: secondUser, Rank: 2, Score: 1, Amount: "5.00"},
+	}, result.Winners)
+	latest, found, err = repo.LatestLeaderboardSettlementDate(ctx)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, "2026-07-27", latest)
+
+	replay, err := repo.SettleLeaderboard(ctx, command)
+	require.NoError(t, err)
+	require.False(t, replay.Created)
+	firstWallet, err := repo.GetOrCreateWalletSummary(ctx, firstUser)
+	require.NoError(t, err)
+	secondWallet, err := repo.GetOrCreateWalletSummary(ctx, secondUser)
+	require.NoError(t, err)
+	require.Equal(t, "10.00", firstWallet.Wallet.ConsumerBalance)
+	require.Equal(t, "5.00", secondWallet.Wallet.ConsumerBalance)
+
+	command.BusinessDate = "2026-07-29"
+	command.PeriodStart, command.PeriodEnd = end.Add(24*time.Hour), end.Add(48*time.Hour)
+	empty, err := repo.SettleLeaderboard(ctx, command)
+	require.NoError(t, err)
+	require.True(t, empty.Created)
+	require.Empty(t, empty.Winners)
+	var settlementCount, rewardCount, transactionCount int64
+	require.NoError(t, db.Model(&LeaderboardSettlementModel{}).Count(&settlementCount).Error)
+	require.NoError(t, db.Model(&LeaderboardRewardModel{}).Count(&rewardCount).Error)
+	require.NoError(t, db.Model(&WalletTransactionModel{}).Where("biz_type = ?", "leaderboard_reward").Count(&transactionCount).Error)
+	require.EqualValues(t, 2, settlementCount)
+	require.EqualValues(t, 2, rewardCount)
+	require.EqualValues(t, 2, transactionCount)
+}
+
+func seedRewardPurchaseOrder(t *testing.T, db *gorm.DB, id, userID uint, activatedAt time.Time) {
+	t.Helper()
+	require.NoError(t, db.Exec(`
+INSERT INTO orders(id, order_no, user_id, project_id, project_product_id, product_type, service_mode,
+    pay_amount, client_channel, idempotency_key, request_fingerprint, activated_at, created_at, updated_at)
+VALUES (?, ?, ?, 9001, 9001, 'microsoft', 'purchase', 0, 'console', ?, ?, ?, ?, ?)`,
+		id, fmt.Sprintf("REWARD-%d", id), userID, fmt.Sprintf("reward-%d", id), strings.Repeat("f", 64),
+		activatedAt.UTC(), activatedAt.Add(-time.Hour).UTC(), activatedAt.UTC(),
+	).Error)
+}
+
+func seedRewardCodeOrderDeliveredLate(t *testing.T, db *gorm.DB, orderID, messageID, userID uint, receivedAt, insertedAt time.Time) {
+	t.Helper()
+	require.NoError(t, db.Exec(`
+INSERT INTO email_resources(id, type, owner_user_id) VALUES (9001, 'microsoft', ?)`, userID).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO orders(id, order_no, user_id, project_id, project_product_id, product_type, service_mode,
+    pay_amount, client_channel, idempotency_key, request_fingerprint, created_at, updated_at)
+VALUES (?, ?, ?, 9001, 9001, 'microsoft', 'code', 0, 'console', ?, ?, ?, ?)`,
+		orderID, fmt.Sprintf("REWARD-%d", orderID), userID, fmt.Sprintf("reward-%d", orderID), strings.Repeat("e", 64),
+		receivedAt.Add(-time.Hour).UTC(), receivedAt.Add(-time.Hour).UTC(),
+	).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO mailmatch_messages(id, email_resource_id, resource_type, recipient, dedupe_key, received_at, created_at, updated_at)
+VALUES (?, 9001, 'microsoft', 'late@example.com', ?, ?, ?, ?)`,
+		messageID, strings.Repeat("d", 64), receivedAt.UTC(), insertedAt.UTC(), insertedAt.UTC(),
+	).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO mailmatch_order_delivery_heads(order_id, message_id, message_received_at) VALUES (?, ?, ?)`,
+		orderID, messageID, receivedAt.UTC(),
+	).Error)
 }
 
 type failingOperationLogWriter struct{}

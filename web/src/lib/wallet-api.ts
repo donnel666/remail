@@ -4,6 +4,7 @@ import { generateIdempotencyKey } from "./idempotency";
 import { notifyWalletUpdated } from "./wallet-events";
 
 export type WalletResponse = components["schemas"]["WalletResponse"];
+export type DailyCheckinResponse = components["schemas"]["DailyCheckinResponse"];
 export type WalletReferralResponse =
   components["schemas"]["WalletReferralResponse"];
 export type WalletReferralTransferResponse =
@@ -29,6 +30,18 @@ export async function getWallet() {
     return (await import("./dev-api-mocks")).DEV_WALLET as WalletResponse;
   }
   return unwrap<WalletResponse>(await client.GET("/v1/wallet"));
+}
+
+export async function claimDailyCheckin() {
+  const response = await unwrap<DailyCheckinResponse>(
+    await client.POST("/v1/wallet/check-ins", {
+      params: { header: csrfHeader() },
+    })
+  );
+  if (response.firstClaim && Number(response.rewardAmount) > 0) {
+    notifyWalletUpdated();
+  }
+  return response;
 }
 
 export async function getWalletReferrals() {

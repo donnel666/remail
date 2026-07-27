@@ -13,6 +13,7 @@ import (
 
 	dashboardapp "github.com/donnel666/remail/internal/dashboard/app"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
+	"github.com/donnel666/remail/internal/trade/successranking"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
@@ -23,11 +24,9 @@ type ViewRepo struct {
 }
 
 const (
-	leaderboardCacheKey       = "dashboard:leaderboards:v3"
-	leaderboardCacheTTL       = 15 * time.Minute
-	successfulOrderPredicate  = "((o.service_mode = 'code' AND h.order_id IS NOT NULL) OR (o.service_mode = 'purchase' AND o.activated_at IS NOT NULL))"
-	historyOrderExclude       = "order_no NOT LIKE 'HIST-%'"
-	leaderboardHistoryExclude = "o." + historyOrderExclude
+	leaderboardCacheKey = "dashboard:leaderboards:v4"
+	leaderboardCacheTTL = 15 * time.Minute
+	historyOrderExclude = "order_no NOT LIKE 'HIST-%'"
 )
 
 // ponytail: one JSON value keeps the two rankings atomic; use ZSETs only if the
@@ -238,42 +237,26 @@ func (r *ViewRepo) Leaderboard(ctx context.Context, since *time.Time, limit int)
 }
 
 func (r *ViewRepo) queryLeaderboard(ctx context.Context, since *time.Time, limit int) ([]dashboardapp.LeaderRow, error) {
-	query := r.db.WithContext(ctx).
-		Table("orders AS o").
-		Joins("LEFT JOIN mailmatch_order_delivery_heads AS h ON h.order_id = o.id").
-		Joins("JOIN users AS u ON u.id = o.user_id").
-		Select("o.user_id AS user_id, COALESCE(u.nickname, '') AS nickname, COALESCE(u.email, '') AS email, COUNT(*) AS count").
-		Where(successfulOrderPredicate).
-		Where(leaderboardHistoryExclude).
-		Group("o.user_id, u.nickname, u.email").
-		Order("count DESC, o.user_id ASC")
-	if limit > 0 {
-		query = query.Limit(limit)
-	}
+	var until *time.Time
 	if since != nil {
-		query = query.Where("o.created_at >= ?", since.UTC())
+		end := since.AddDate(0, 0, 1)
+		until = &end
 	}
-	var rows []struct {
-		UserID   uint   `gorm:"column:user_id"`
-		Nickname string `gorm:"column:nickname"`
-		Email    string `gorm:"column:email"`
-		Count    int    `gorm:"column:count"`
-	}
-	if err := query.Scan(&rows).Error; err != nil {
+	rows, err := successranking.Query(ctx, r.db, since, until, limit)
+	if err != nil {
 		return nil, err
 	}
 	out := make([]dashboardapp.LeaderRow, len(rows))
 	for i := range rows {
-		out[i] = dashboardapp.LeaderRow(rows[i])
+		out[i] = dashboardapp.LeaderRow{UserID: rows[i].UserID, Nickname: rows[i].Nickname, Email: rows[i].Email, Count: rows[i].Score}
 	}
 	return out, nil
 }
 
 // UserStanding returns the caller's own successful-order count and their ordinal
-// position on the same leaderboard the panel renders (ordered by count DESC,
-// then user_id ASC), so the "me" row shown when the caller is outside the top
-// ranks agrees with the visible list on ties. It also carries the caller's
-// identity for that row. since=nil is all-time.
+// position on the same leaderboard the panel renders (score DESC, earlier
+// final success, then user_id ASC), so the "me" row agrees with visible ties.
+// It also carries the caller's identity. since=nil is all-time.
 func (r *ViewRepo) UserStanding(ctx context.Context, userID uint, since *time.Time) (dashboardapp.Standing, error) {
 	if rows, ok := r.cachedLeaderboard(ctx, since); ok {
 		for i, row := range rows {
@@ -288,16 +271,13 @@ func (r *ViewRepo) UserStanding(ctx context.Context, userID uint, since *time.Ti
 		return dashboardapp.Standing{Rank: len(rows) + 1, Nickname: identity.Nickname, Email: identity.Email}, nil
 	}
 
-	countQuery := r.db.WithContext(ctx).
-		Table("orders AS o").
-		Joins("LEFT JOIN mailmatch_order_delivery_heads AS h ON h.order_id = o.id").
-		Where("o.user_id = ? AND "+successfulOrderPredicate, userID).
-		Where(leaderboardHistoryExclude)
+	var until *time.Time
 	if since != nil {
-		countQuery = countQuery.Where("o.created_at >= ?", since.UTC())
+		end := since.AddDate(0, 0, 1)
+		until = &end
 	}
-	var count int64
-	if err := countQuery.Count(&count).Error; err != nil {
+	rows, err := successranking.Query(ctx, r.db, since, until, 0)
+	if err != nil {
 		return dashboardapp.Standing{}, err
 	}
 
@@ -306,28 +286,14 @@ func (r *ViewRepo) UserStanding(ctx context.Context, userID uint, since *time.Ti
 		return dashboardapp.Standing{}, err
 	}
 
-	// Users that sort strictly before the caller on the leaderboard order
-	// (count DESC, user_id ASC): higher count, or equal count and a smaller id.
-	// The caller's own row is excluded (user_id < userID is strict).
-	ahead := r.db.WithContext(ctx).
-		Table("orders AS o").
-		Joins("LEFT JOIN mailmatch_order_delivery_heads AS h ON h.order_id = o.id").
-		Select("o.user_id").
-		Where(successfulOrderPredicate).
-		Where(leaderboardHistoryExclude).
-		Group("o.user_id").
-		Having("COUNT(*) > ? OR (COUNT(*) = ? AND o.user_id < ?)", count, count, userID)
-	if since != nil {
-		ahead = ahead.Where("o.created_at >= ?", since.UTC())
-	}
-	var aheadCount int64
-	if err := r.db.WithContext(ctx).Table("(?) AS ranked", ahead).Count(&aheadCount).Error; err != nil {
-		return dashboardapp.Standing{}, err
+	for i, row := range rows {
+		if row.UserID == userID {
+			return dashboardapp.Standing{Count: row.Score, Rank: i + 1, Nickname: identity.Nickname, Email: identity.Email}, nil
+		}
 	}
 
 	return dashboardapp.Standing{
-		Count:    int(count),
-		Rank:     int(aheadCount) + 1,
+		Rank:     len(rows) + 1,
 		Nickname: identity.Nickname,
 		Email:    identity.Email,
 	}, nil

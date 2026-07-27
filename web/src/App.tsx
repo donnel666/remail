@@ -35,6 +35,7 @@ import {
 } from "./lib/auth-flow";
 import { resolveRouteAuthorizationRedirect } from "./lib/route-gate";
 import AppShell from "./components/layout/AppShell";
+import DailyCheckin from "./components/daily-checkin";
 import {
   ROUTES_WITH_SIDEBAR,
   getSidebarRouteRequiredPermissions,
@@ -463,12 +464,15 @@ function RootRouteLayout() {
     </Suspense>
   );
 
-  if (useLocation().pathname === "/payment/return") return content;
+  if (useLocation().pathname === "/payment/return") return <><DailyCheckin />{content}</>;
 
   return (
-    <RouteGate>
-      <AppShell>{content}</AppShell>
-    </RouteGate>
+    <>
+      <DailyCheckin />
+      <RouteGate>
+        <AppShell>{content}</AppShell>
+      </RouteGate>
+    </>
   );
 }
 

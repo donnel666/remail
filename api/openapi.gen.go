@@ -5555,6 +5555,23 @@ type CurrentInviteResponse struct {
 	InviteCode string `json:"inviteCode"`
 }
 
+// DailyCheckinResponse defines model for DailyCheckinResponse.
+type DailyCheckinResponse struct {
+	// BusinessDate Server-calculated Asia/Shanghai business date.
+	BusinessDate openapi_types.Date `json:"businessDate"`
+	CheckedInAt  *time.Time         `json:"checkedInAt,omitempty"`
+
+	// ConsumerBalance Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	ConsumerBalance *NonNegativeLedgerAmount `json:"consumerBalance,omitempty"`
+	Enabled         bool                     `json:"enabled"`
+
+	// FirstClaim True only when this request created today's check-in fact.
+	FirstClaim bool `json:"firstClaim"`
+
+	// RewardAmount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	RewardAmount NonNegativeLedgerAmount `json:"rewardAmount"`
+}
+
 // DashboardProjectSeries defines model for DashboardProjectSeries.
 type DashboardProjectSeries struct {
 	Name  string    `json:"name"`
@@ -9191,6 +9208,12 @@ type PostTicketReadParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// PostWalletCheckinParams defines parameters for PostWalletCheckin.
+type PostWalletCheckinParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // PostWalletReferralTransferParams defines parameters for PostWalletReferralTransfer.
 type PostWalletReferralTransferParams struct {
 	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
@@ -10788,6 +10811,9 @@ type ServerInterface interface {
 	// Get current wallet
 	// (GET /v1/wallet)
 	GetWallet(c *gin.Context)
+	// Claim today's automatic check-in reward
+	// (POST /v1/wallet/check-ins)
+	PostWalletCheckin(c *gin.Context, params PostWalletCheckinParams)
 	// Get current wallet referral reward statistics
 	// (GET /v1/wallet/referrals)
 	GetWalletReferrals(c *gin.Context)
@@ -22383,6 +22409,51 @@ func (siw *ServerInterfaceWrapper) GetWallet(c *gin.Context) {
 	siw.Handler.GetWallet(c)
 }
 
+// PostWalletCheckin operation middleware
+func (siw *ServerInterfaceWrapper) PostWalletCheckin(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostWalletCheckinParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostWalletCheckin(c, params)
+}
+
 // GetWalletReferrals operation middleware
 func (siw *ServerInterfaceWrapper) GetWalletReferrals(c *gin.Context) {
 
@@ -22771,6 +22842,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/user-groups", wrapper.GetUserGroups)
 	router.POST(options.BaseURL+"/v1/users", wrapper.PostRegister)
 	router.GET(options.BaseURL+"/v1/wallet", wrapper.GetWallet)
+	router.POST(options.BaseURL+"/v1/wallet/check-ins", wrapper.PostWalletCheckin)
 	router.GET(options.BaseURL+"/v1/wallet/referrals", wrapper.GetWalletReferrals)
 	router.POST(options.BaseURL+"/v1/wallet/referrals/transfer", wrapper.PostWalletReferralTransfer)
 	router.GET(options.BaseURL+"/v1/wallet/transactions", wrapper.GetWalletTransactions)

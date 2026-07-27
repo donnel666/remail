@@ -1801,6 +1801,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/wallet/check-ins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Claim today's automatic check-in reward
+         * @description Uses the server-calculated Asia/Shanghai business date. Repeated or concurrent calls return the same daily result and never reroll the reward.
+         */
+        post: operations["postWalletCheckin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/wallet/referrals": {
         parameters: {
             query?: never;
@@ -3854,6 +3874,20 @@ export interface components {
             orderCount: number;
             /** Format: date-time */
             updatedAt: string;
+        };
+        DailyCheckinResponse: {
+            enabled: boolean;
+            /**
+             * Format: date
+             * @description Server-calculated Asia/Shanghai business date.
+             */
+            businessDate: string;
+            /** @description True only when this request created today's check-in fact. */
+            firstClaim: boolean;
+            rewardAmount: components["schemas"]["NonNegativeLedgerAmount"];
+            /** Format: date-time */
+            checkedInAt?: string;
+            consumerBalance?: components["schemas"]["NonNegativeLedgerAmount"];
         };
         AdminWalletBalanceList: {
             balances: {
@@ -13510,6 +13544,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WalletResponse"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    postWalletCheckin: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Today's check-in state; firstClaim is true only for the request that created it. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DailyCheckinResponse"];
                 };
             };
             /** @description Authentication required */

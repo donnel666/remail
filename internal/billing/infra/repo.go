@@ -17,6 +17,7 @@ import (
 	"github.com/donnel666/remail/internal/money"
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
+	"github.com/donnel666/remail/internal/trade/successranking"
 	"github.com/go-sql-driver/mysql"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
@@ -129,6 +130,44 @@ type CardKeyRedemptionModel struct {
 	RequestID     string    `gorm:"type:varchar(64);not null;default:'';column:request_id"`
 	RedeemedAt    time.Time `gorm:"not null;autoCreateTime;column:redeemed_at"`
 }
+
+type DailyCheckinModel struct {
+	ID                  uint      `gorm:"primaryKey;autoIncrement"`
+	UserID              uint      `gorm:"not null;column:user_id"`
+	BusinessDate        string    `gorm:"type:date;not null;column:business_date"`
+	RewardAmount        string    `gorm:"type:decimal(18,6);not null;column:reward_amount"`
+	WalletTransactionID *uint     `gorm:"column:wallet_transaction_id"`
+	CheckedInAt         time.Time `gorm:"not null;column:checked_in_at"`
+	CreatedAt           time.Time `gorm:"not null;autoCreateTime;column:created_at"`
+}
+
+func (DailyCheckinModel) TableName() string { return "daily_checkins" }
+
+type LeaderboardSettlementModel struct {
+	ID            uint      `gorm:"primaryKey;autoIncrement"`
+	BusinessDate  string    `gorm:"type:date;not null;column:business_date"`
+	PeriodStart   time.Time `gorm:"not null;column:period_start"`
+	PeriodEnd     time.Time `gorm:"not null;column:period_end"`
+	RulesSnapshot string    `gorm:"type:json;not null;column:rules_snapshot"`
+	Status        string    `gorm:"type:varchar(32);not null"`
+	SettledAt     time.Time `gorm:"not null;column:settled_at"`
+	CreatedAt     time.Time `gorm:"not null;autoCreateTime;column:created_at"`
+}
+
+func (LeaderboardSettlementModel) TableName() string { return "leaderboard_settlements" }
+
+type LeaderboardRewardModel struct {
+	ID                  uint      `gorm:"primaryKey;autoIncrement"`
+	SettlementID        uint      `gorm:"not null;column:settlement_id"`
+	UserID              uint      `gorm:"not null;column:user_id"`
+	Rank                int       `gorm:"not null;column:rank_no"`
+	Score               int       `gorm:"not null;column:score"`
+	RewardAmount        string    `gorm:"type:decimal(18,6);not null;column:reward_amount"`
+	WalletTransactionID uint      `gorm:"not null;column:wallet_transaction_id"`
+	CreatedAt           time.Time `gorm:"not null;autoCreateTime;column:created_at"`
+}
+
+func (LeaderboardRewardModel) TableName() string { return "leaderboard_rewards" }
 
 func (CardKeyRedemptionModel) TableName() string {
 	return "card_key_redemptions"
@@ -689,6 +728,143 @@ func (r *BillingRepo) AdjustConsumerBalance(ctx context.Context, req billingapp.
 		return nil, err
 	}
 	return &result, nil
+}
+
+func (r *BillingRepo) ClaimDailyCheckin(ctx context.Context, command billingapp.DailyCheckinCommand) (*billingapp.DailyCheckinResult, error) {
+	var result billingapp.DailyCheckinResult
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		checkin := DailyCheckinModel{UserID: command.UserID, BusinessDate: command.BusinessDate, RewardAmount: command.RewardAmount, CheckedInAt: command.CheckedInAt}
+		created := tx.WithContext(ctx).Create(&checkin)
+		if errors.Is(created.Error, gorm.ErrDuplicatedKey) {
+			if err := tx.WithContext(ctx).Where("user_id = ? AND business_date = ?", command.UserID, command.BusinessDate).First(&checkin).Error; err != nil {
+				return fmt.Errorf("load daily check-in: %w", err)
+			}
+			wallet, err := r.lockWalletInTx(ctx, tx, command.UserID)
+			if err != nil {
+				return err
+			}
+			result = checkinResult(checkin, wallet.ConsumerBalance, false)
+			return nil
+		}
+		if created.Error != nil {
+			return fmt.Errorf("create daily check-in: %w", created.Error)
+		}
+
+		wallet, err := r.lockWalletInTx(ctx, tx, command.UserID)
+		if err != nil {
+			return err
+		}
+		if command.RewardAmount != "0.00" {
+			credited, err := r.createConsumerTransaction(ctx, tx, wallet, consumerTransactionRequest{
+				UserID: command.UserID, Amount: command.RewardAmount, Direction: domain.TransactionDirectionIn,
+				TransactionType: domain.TransactionTypeCredit, BizType: "daily_checkin", BizID: command.BusinessDate,
+				IdempotencyKey: command.IdempotencyKey, RequestID: command.RequestID,
+			})
+			if err != nil {
+				return err
+			}
+			checkin.WalletTransactionID = &credited.Transaction.ID
+			if err := tx.WithContext(ctx).Model(&DailyCheckinModel{}).Where("id = ?", checkin.ID).Update("wallet_transaction_id", credited.Transaction.ID).Error; err != nil {
+				return fmt.Errorf("link daily check-in transaction: %w", err)
+			}
+		}
+		result = checkinResult(checkin, wallet.ConsumerBalance, true)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func checkinResult(model DailyCheckinModel, balance string, first bool) billingapp.DailyCheckinResult {
+	return billingapp.DailyCheckinResult{
+		BusinessDate: model.BusinessDate, FirstClaim: first, RewardAmount: normalizeMoneyString(model.RewardAmount),
+		CheckedInAt: model.CheckedInAt, ConsumerBalance: normalizeMoneyString(balance),
+	}
+}
+
+func (r *BillingRepo) SettleLeaderboard(ctx context.Context, command billingapp.LeaderboardSettlementCommand) (*billingapp.LeaderboardSettlementResult, error) {
+	result := billingapp.LeaderboardSettlementResult{BusinessDate: command.BusinessDate}
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		settlement := LeaderboardSettlementModel{
+			BusinessDate: command.BusinessDate, PeriodStart: command.PeriodStart, PeriodEnd: command.PeriodEnd,
+			RulesSnapshot: command.RulesJSON, Status: "completed", SettledAt: command.SettledAt,
+		}
+		created := tx.WithContext(ctx).Create(&settlement)
+		if errors.Is(created.Error, gorm.ErrDuplicatedKey) {
+			return nil
+		}
+		if created.Error != nil {
+			return fmt.Errorf("create leaderboard settlement: %w", created.Error)
+		}
+		result.Created = true
+
+		maxRank := 0
+		for _, rule := range command.Rules {
+			maxRank = max(maxRank, rule.RankTo)
+		}
+		rows, err := successranking.Query(ctx, tx, &command.PeriodStart, &command.PeriodEnd, maxRank)
+		if err != nil {
+			return fmt.Errorf("rank successful orders: %w", err)
+		}
+		for i, row := range rows {
+			if amount := leaderboardRewardForRank(command.Rules, i+1); amount != "" {
+				result.Winners = append(result.Winners, billingapp.LeaderboardWinner{UserID: row.UserID, Rank: i + 1, Score: row.Score, Amount: amount})
+			}
+		}
+		ids := make([]uint, len(result.Winners))
+		for i, winner := range result.Winners {
+			ids[i] = winner.UserID
+		}
+		wallets, err := r.lockWalletsInTx(ctx, tx, ids...)
+		if err != nil {
+			return err
+		}
+		for _, winner := range result.Winners {
+			credited, err := r.createConsumerTransaction(ctx, tx, wallets[winner.UserID], consumerTransactionRequest{
+				UserID: winner.UserID, Amount: winner.Amount, Direction: domain.TransactionDirectionIn,
+				TransactionType: domain.TransactionTypeCredit, BizType: "leaderboard_reward",
+				BizID:          fmt.Sprintf("%s:rank:%d", command.BusinessDate, winner.Rank),
+				IdempotencyKey: fmt.Sprintf("leaderboard_reward:%s:%d", command.BusinessDate, winner.UserID),
+			})
+			if err != nil {
+				return err
+			}
+			reward := LeaderboardRewardModel{
+				SettlementID: settlement.ID, UserID: winner.UserID, Rank: winner.Rank, Score: winner.Score,
+				RewardAmount: winner.Amount, WalletTransactionID: credited.Transaction.ID,
+			}
+			if err := tx.WithContext(ctx).Create(&reward).Error; err != nil {
+				return fmt.Errorf("create leaderboard reward: %w", err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (r *BillingRepo) LatestLeaderboardSettlementDate(ctx context.Context) (string, bool, error) {
+	var latest sql.NullTime
+	if err := r.db.WithContext(ctx).Model(&LeaderboardSettlementModel{}).Select("MAX(business_date)").Scan(&latest).Error; err != nil {
+		return "", false, fmt.Errorf("load latest leaderboard settlement: %w", err)
+	}
+	if !latest.Valid {
+		return "", false, nil
+	}
+	return latest.Time.Format(time.DateOnly), true, nil
+}
+
+func leaderboardRewardForRank(rules []runtimeconfig.LeaderboardRewardRule, rank int) string {
+	for _, rule := range rules {
+		if rank >= rule.RankFrom && rank <= rule.RankTo {
+			return rule.Amount
+		}
+	}
+	return ""
 }
 
 func (r *BillingRepo) ListCards(ctx context.Context, filter billingapp.CardListFilter, offset, limit int) ([]domain.CardKey, error) {

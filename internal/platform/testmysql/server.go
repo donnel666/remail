@@ -35,7 +35,7 @@ func New(prefix string) *Server {
 	return &Server{prefix: prefix}
 }
 
-func (s *Server) Database(t *testing.T, migrationsDir string) *gorm.DB {
+func (s *Server) Database(t *testing.T, migrationsDir string, dsnOptions ...string) *gorm.DB {
 	t.Helper()
 
 	s.once.Do(func() {
@@ -56,6 +56,9 @@ func (s *Server) Database(t *testing.T, migrationsDir string) *gorm.DB {
 	require.NoError(t, cloneDatabase(adminDB, s.templateName, dbName))
 
 	dsn := testDSN(s.host, s.port, dbName)
+	if len(dsnOptions) > 0 {
+		dsn += "&" + strings.Join(dsnOptions, "&")
+	}
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{TranslateError: true})
 	require.NoError(t, err)
 	sqlDB, err := db.DB()

@@ -1,5 +1,6 @@
 import type { SectionProps } from "./index";
 import RechargeRebateSection from "./invite-rebate";
+import RewardSettings from "./reward-settings";
 import UserGroupSection from "./user-groups";
 import { SettingsAccessBoundary } from "./settings-layout";
 import { useTranslation } from "react-i18next";
@@ -9,6 +10,9 @@ export default function UsersRebatesSection(props: SectionProps) {
   return <div className="space-y-6">
     <SettingsAccessBoundary canWrite={props.canWrite}>
       <RechargeRebateSection {...props} />
+    </SettingsAccessBoundary>
+    <SettingsAccessBoundary canWrite={props.canWrite}>
+      <RewardSettings {...props} />
     </SettingsAccessBoundary>
     {props.canReadUserGroups ? (
       <SettingsAccessBoundary canWrite={props.canWriteUserGroups}>

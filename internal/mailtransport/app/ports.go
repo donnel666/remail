@@ -62,6 +62,21 @@ func RechargeCreditedMessage(recipient, rechargeNo, amount, balance string) doma
 	)
 }
 
+func LeaderboardRewardMessage(recipient, businessDate string, rank, score int, amount string) domain.OutboundMessage {
+	recipient = strings.TrimSpace(recipient)
+	body := fmt.Sprintf("结算日期：%s\n排行榜名次：第 %d 名\n成功订单数：%d\n奖励金额：￥%s", businessDate, rank, score, amount)
+	return notificationMessage(
+		domain.PurposeSystemNotice,
+		messageDigest("leaderboard_reward", businessDate, rank, recipient),
+		recipient,
+		"ReMail 排行榜奖励到账通知",
+		"排行榜奖励到账",
+		"恭喜您获得今日成功订单排行榜奖励。",
+		body,
+		"奖励已发放至您的消费钱包，此邮件由系统自动发送。",
+	)
+}
+
 func LoginNotificationMessage(recipient, sessionID, clientIP, userAgent string, at time.Time) domain.OutboundMessage {
 	recipient = strings.TrimSpace(recipient)
 	clientIP = oneLine(clientIP, 64)

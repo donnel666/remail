@@ -15,6 +15,7 @@ import (
 const (
 	rechargeDispatcherInterval       = time.Second
 	balanceWarningDispatcherInterval = 5 * time.Second
+	leaderboardSettlementInterval    = time.Minute
 )
 
 func RegisterBillingTaskHandlers(mux *asynq.ServeMux, module *BillingModule) func(context.Context) {
@@ -38,6 +39,7 @@ func RegisterBillingTaskHandlers(mux *asynq.ServeMux, module *BillingModule) fun
 		ticker := time.NewTicker(rechargeDispatcherInterval)
 		defer ticker.Stop()
 		balanceLast := time.Now()
+		leaderboardLast := time.Time{}
 		dispatch := func() {
 			if err := module.RechargeUseCase.Dispatch(ctx); err != nil && ctx.Err() == nil {
 				slog.Warn("recharge dispatcher failed", "error", err)
@@ -50,6 +52,12 @@ func RegisterBillingTaskHandlers(mux *asynq.ServeMux, module *BillingModule) fun
 				return
 			case <-ticker.C:
 				dispatch()
+				if module.WalletUseCase != nil && time.Since(leaderboardLast) >= leaderboardSettlementInterval {
+					if err := module.WalletUseCase.SettleDueLeaderboard(ctx); err != nil && ctx.Err() == nil {
+						slog.Warn("leaderboard settlement failed", "error", err)
+					}
+					leaderboardLast = time.Now()
+				}
 				if module.WalletUseCase != nil && time.Since(balanceLast) >= balanceWarningDispatcherInterval {
 					if err := module.WalletUseCase.DispatchBalanceWarnings(ctx, 100); err != nil && ctx.Err() == nil {
 						slog.Warn("balance warning dispatcher failed", "error", err)

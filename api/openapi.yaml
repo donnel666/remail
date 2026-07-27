@@ -5833,6 +5833,31 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/wallet/check-ins:
+    post:
+      operationId: postWalletCheckin
+      summary: Claim today's automatic check-in reward
+      description: Uses the server-calculated Asia/Shanghai business date. Repeated or concurrent calls return the same daily result and never reroll the reward.
+      tags:
+        - Billing
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "200":
+          description: Today's check-in state; firstClaim is true only for the request that created it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DailyCheckinResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /v1/wallet/referrals:
     get:
       operationId: getWalletReferrals
@@ -11274,6 +11299,32 @@ components:
         updatedAt:
           type: string
           format: date-time
+      additionalProperties: false
+
+    DailyCheckinResponse:
+      type: object
+      required:
+        - enabled
+        - businessDate
+        - firstClaim
+        - rewardAmount
+      properties:
+        enabled:
+          type: boolean
+        businessDate:
+          type: string
+          format: date
+          description: Server-calculated Asia/Shanghai business date.
+        firstClaim:
+          type: boolean
+          description: True only when this request created today's check-in fact.
+        rewardAmount:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        checkedInAt:
+          type: string
+          format: date-time
+        consumerBalance:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
       additionalProperties: false
 
     AdminWalletBalanceList:

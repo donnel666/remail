@@ -85,6 +85,17 @@ func TestValidateRechargeRebateSettings(t *testing.T) {
 	require.ErrorIs(t, Validate("rebate_expiry_days", "36501"), domain.ErrInvalidValue)
 }
 
+func TestValidateDailyRewardSettings(t *testing.T) {
+	require.NoError(t, Validate("daily_checkin_reward_rules", `[{"amount":100,"probability":0.005},{"amount":50,"probability":0.1}]`))
+	require.ErrorIs(t, Validate("daily_checkin_reward_rules", `[{"amount":100,"probability":0.8},{"amount":50,"probability":0.3}]`), domain.ErrInvalidValue)
+	require.ErrorIs(t, Validate("daily_checkin_reward_rules", `[{"amount":100,"probability":0.0000001}]`), domain.ErrInvalidValue)
+	require.NoError(t, Validate("leaderboard_reward_rules", `[{"rankFrom":1,"rankTo":1,"amount":100},{"rankFrom":2,"rankTo":6,"amount":20}]`))
+	require.ErrorIs(t, Validate("leaderboard_reward_rules", `[{"rankFrom":1,"rankTo":3,"amount":100},{"rankFrom":3,"rankTo":6,"amount":20}]`), domain.ErrInvalidValue)
+	require.NoError(t, Validate("leaderboard_settlement_time", "00:00"))
+	require.ErrorIs(t, Validate("leaderboard_settlement_time", "24:00"), domain.ErrInvalidValue)
+	require.ErrorIs(t, ValidatePersistedUpdates(DefaultSettings(), []domain.Setting{{Key: "daily_checkin_enabled", Value: "true"}}), domain.ErrInvalidValue)
+}
+
 func TestValidateRechargePaymentSettings(t *testing.T) {
 	require.NoError(t, Validate("epay_version", "v1"))
 	require.NoError(t, Validate("epay_version", "v2"))

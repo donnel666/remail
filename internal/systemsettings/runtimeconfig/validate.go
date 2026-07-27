@@ -85,6 +85,7 @@ var removedKeys = map[string]struct{}{
 
 var booleanKeys = map[string]struct{}{
 	"register_enabled": {}, "captcha_enabled": {}, "announcement_enabled": {}, "faq_enabled": {}, "epay_enabled": {},
+	"daily_checkin_enabled": {}, "leaderboard_reward_enabled": {},
 }
 
 func Validate(key, value string) error {
@@ -210,6 +211,18 @@ func Validate(key, value string) error {
 			if amountErr != nil || !amount.IsPositive() || !amount.Equal(amount.Round(2)) || bonusErr != nil || bonus.IsNegative() || !bonus.Equal(bonus.Round(2)) {
 				return domain.ErrInvalidValue
 			}
+		}
+	case "daily_checkin_reward_rules":
+		if _, err := ParseCheckinRewardRules(value); err != nil {
+			return domain.ErrInvalidValue
+		}
+	case "leaderboard_reward_rules":
+		if _, err := ParseLeaderboardRewardRules(value); err != nil {
+			return domain.ErrInvalidValue
+		}
+	case "leaderboard_settlement_time":
+		if _, _, err := ParseSettlementClock(value); err != nil {
+			return domain.ErrInvalidValue
 		}
 	}
 	return nil
@@ -344,6 +357,16 @@ func sanitizeRelationships(values map[string]string) {
 	if strings.TrimSpace(values["epay_enabled"]) == "true" && len(invalidEPayConfigFields(values)) > 0 {
 		values["epay_enabled"] = "false"
 	}
+	if strings.TrimSpace(values["daily_checkin_enabled"]) == "true" {
+		if rules, err := ParseCheckinRewardRules(values["daily_checkin_reward_rules"]); err != nil || len(rules) == 0 {
+			values["daily_checkin_enabled"] = "false"
+		}
+	}
+	if strings.TrimSpace(values["leaderboard_reward_enabled"]) == "true" {
+		if rules, err := ParseLeaderboardRewardRules(values["leaderboard_reward_rules"]); err != nil || len(rules) == 0 {
+			values["leaderboard_reward_enabled"] = "false"
+		}
+	}
 	retries := value("smtp_task_retry_count", 3)
 	if value("smtp_outbound_payload_ttl_minutes", 5) < value("outbound_mail_timeout_minutes", 3) || value("outbound_mail_timeout_minutes", 3)*60 < smtpTaskBudgetSeconds(retries) {
 		drop("smtp_outbound_payload_ttl_minutes", "outbound_mail_timeout_minutes", "smtp_task_retry_count")
@@ -379,6 +402,16 @@ func validateRelationships(values map[string]string) error {
 	if strings.TrimSpace(values["epay_enabled"]) == "true" {
 		if fields := invalidEPayConfigFields(values); len(fields) > 0 {
 			return &domain.InvalidValueFieldsError{Fields: fields}
+		}
+	}
+	if strings.TrimSpace(values["daily_checkin_enabled"]) == "true" {
+		if rules, err := ParseCheckinRewardRules(values["daily_checkin_reward_rules"]); err != nil || len(rules) == 0 {
+			return domain.ErrInvalidValue
+		}
+	}
+	if strings.TrimSpace(values["leaderboard_reward_enabled"]) == "true" {
+		if rules, err := ParseLeaderboardRewardRules(values["leaderboard_reward_rules"]); err != nil || len(rules) == 0 {
+			return domain.ErrInvalidValue
 		}
 	}
 	return nil

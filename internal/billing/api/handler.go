@@ -48,6 +48,26 @@ func (h *BillingHandler) GetWallet(c *gin.Context) {
 	c.JSON(http.StatusOK, walletResponse(*summary))
 }
 
+func (h *BillingHandler) PostWalletCheckin(c *gin.Context) {
+	userID, ok := requireCurrentUserID(c)
+	if !ok {
+		return
+	}
+	result, err := h.module.WalletUseCase.ClaimDailyCheckin(c.Request.Context(), userID, middleware.GetRequestID(c))
+	if err != nil {
+		writeBillingError(c, err)
+		return
+	}
+	var checkedInAt *time.Time
+	if !result.CheckedInAt.IsZero() {
+		checkedInAt = &result.CheckedInAt
+	}
+	c.JSON(http.StatusOK, DailyCheckinResponse{
+		Enabled: result.Enabled, BusinessDate: result.BusinessDate, FirstClaim: result.FirstClaim,
+		RewardAmount: result.RewardAmount, CheckedInAt: checkedInAt, ConsumerBalance: result.ConsumerBalance,
+	})
+}
+
 func (h *BillingHandler) GetWalletReferrals(c *gin.Context) {
 	userID, ok := requireCurrentUserID(c)
 	if !ok {

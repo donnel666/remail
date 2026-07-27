@@ -6,6 +6,15 @@ import (
 	"time"
 )
 
+type DailyCheckinResponse struct {
+	Enabled         bool       `json:"enabled"`
+	BusinessDate    string     `json:"businessDate"`
+	FirstClaim      bool       `json:"firstClaim"`
+	RewardAmount    string     `json:"rewardAmount"`
+	CheckedInAt     *time.Time `json:"checkedInAt,omitempty"`
+	ConsumerBalance string     `json:"consumerBalance,omitempty"`
+}
+
 type WalletResponse struct {
 	UserID            uint      `json:"userId"`
 	ConsumerBalance   string    `json:"consumerBalance"`
