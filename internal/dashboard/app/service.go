@@ -2,7 +2,7 @@
 // aggregate rows produced by the infra ViewRepo. All business logic that the
 // mock previously did on the client (time bucketing, zero-fill, labels,
 // ratios, rank assignment and leaderboard name resolution) lives here so the
-// frontend presentation stays untouched.
+// frontend remains a thin presentation layer.
 package app
 
 import (
@@ -11,6 +11,8 @@ import (
 	"math"
 	"strings"
 	"time"
+
+	"github.com/donnel666/remail/internal/businessday"
 )
 
 // bucketing constants mirror internal/billing/app/finance.go so the dashboard
@@ -26,21 +28,30 @@ const (
 	leaderboardLimit = 10
 )
 
-var dashboardLocation = time.FixedZone("Asia/Shanghai", 8*60*60)
+var dashboardLocation = businessday.Shanghai
 
 // ---- raw aggregate rows returned by the ViewRepo -------------------------
 
 type OrderBucketRow struct {
-	Bucket     string
-	Orders     int
-	CodeOrders int
-	Spend      float64
+	Bucket         string
+	Orders         int
+	CodeOrders     int
+	PurchaseOrders int
+	Spend          float64
 }
 
 type ReceiptBucketRow struct {
 	Bucket     string
 	Received   int
 	AvgSeconds int
+}
+
+type PurchaseActivationBucketRow struct {
+	Bucket       string
+	Activated    int
+	AvgSeconds   int
+	TotalSeconds int64
+	Timed        int
 }
 
 type ProjectCountRow struct {
@@ -76,9 +87,9 @@ type ConsoleView interface {
 	WalletSummary(ctx context.Context, userID uint) (balance, totalSpend float64, err error)
 	OrderBuckets(ctx context.Context, userID uint, sqlFormat string, from, to time.Time) ([]OrderBucketRow, error)
 	ReceiptBuckets(ctx context.Context, userID uint, sqlFormat string, from, to time.Time) ([]ReceiptBucketRow, error)
+	PurchaseActivationBuckets(ctx context.Context, userID uint, sqlFormat string, from, to time.Time) ([]PurchaseActivationBucketRow, error)
 	ProjectCodeRanking(ctx context.Context, userID uint, from, to time.Time) ([]ProjectCountRow, error)
 	ProjectSpendBuckets(ctx context.Context, userID uint, projectIDs []uint, sqlFormat string, from, to time.Time) ([]ProjectSpendRow, error)
-	TodayCounts(ctx context.Context, userID uint, since time.Time) (orders, receipts int, err error)
 	RangeAvgReceiptSeconds(ctx context.Context, userID uint, from, to time.Time) (int, error)
 	Leaderboard(ctx context.Context, since *time.Time, limit int) ([]LeaderRow, error)
 	UserStanding(ctx context.Context, userID uint, since *time.Time) (Standing, error)
@@ -87,23 +98,24 @@ type ConsoleView interface {
 // ---- assembled read model (mapped to the API DTO 1:1) --------------------
 
 type Stats struct {
-	WalletBalance             float64
-	HistoricalSpend           float64
-	TodayOrders               int
-	TotalOrders               int
-	TodayCodeReceipts         int
-	TotalCodeReceipts         int
-	CodeSuccessRate           float64
-	AverageCodeReceiptSeconds int
+	WalletBalance                    float64
+	HistoricalSpend                  float64
+	CodeSuccessRate                  float64
+	AverageCodeReceiptSeconds        int
+	PurchaseActivationSuccessRate    float64
+	AveragePurchaseActivationSeconds int
 }
 
 type TrendPoint struct {
-	Label                     string
-	Orders                    int
-	CodeOrders                int
-	ReceivedCodes             int
-	AverageCodeReceiptSeconds int
-	Spend                     float64
+	Label                            string
+	Orders                           int
+	CodeOrders                       int
+	PurchaseOrders                   int
+	ReceivedCodes                    int
+	ActivatedPurchases               int
+	AverageCodeReceiptSeconds        int
+	AveragePurchaseActivationSeconds int
+	Spend                            float64
 }
 
 type ProjectSeries struct {
@@ -142,8 +154,8 @@ func NewQueryService(view ConsoleView) *QueryService {
 }
 
 // ConsoleDashboard aggregates the signed-in user's overview over [from, to].
-// "today" metrics and the today leaderboard are always relative to the real
-// current day, independent of the selected range, matching the mock.
+// The today leaderboard is always relative to the real current day,
+// independent of the selected range.
 func (s *QueryService) ConsoleDashboard(ctx context.Context, userID uint, from, to *time.Time) (*ConsoleDashboard, error) {
 	now := s.now()
 	fromT, toT := resolveRange(from, to, now)
@@ -161,6 +173,10 @@ func (s *QueryService) ConsoleDashboard(ctx context.Context, userID uint, from, 
 	if err != nil {
 		return nil, err
 	}
+	activationRows, err := s.view.PurchaseActivationBuckets(ctx, userID, sqlFmt, fromT, toT)
+	if err != nil {
+		return nil, err
+	}
 	ranking, err := s.view.ProjectCodeRanking(ctx, userID, fromT, toT)
 	if err != nil {
 		return nil, err
@@ -174,10 +190,6 @@ func (s *QueryService) ConsoleDashboard(ctx context.Context, userID uint, from, 
 		featuredIDs[i] = p.ProjectID
 	}
 	spendRows, err := s.view.ProjectSpendBuckets(ctx, userID, featuredIDs, sqlFmt, fromT, toT)
-	if err != nil {
-		return nil, err
-	}
-	todayOrders, todayReceipts, err := s.view.TodayCounts(ctx, userID, today)
 	if err != nil {
 		return nil, err
 	}
@@ -214,6 +226,10 @@ func (s *QueryService) ConsoleDashboard(ctx context.Context, userID uint, from, 
 	for _, r := range receiptRows {
 		receiptByKey[r.Bucket] = r
 	}
+	activationByKey := make(map[string]PurchaseActivationBucketRow, len(activationRows))
+	for _, r := range activationRows {
+		activationByKey[r.Bucket] = r
+	}
 	spendByProject := make(map[uint]map[string]float64, len(featuredIDs))
 	for _, r := range spendRows {
 		if spendByProject[r.ProjectID] == nil {
@@ -224,22 +240,32 @@ func (s *QueryService) ConsoleDashboard(ctx context.Context, userID uint, from, 
 
 	trend := make([]TrendPoint, 0, len(orderRows)+len(receiptRows))
 	seriesSpend := make(map[uint][]float64, len(featuredIDs))
-	var totalOrders, totalCodeOrders, totalReceipts int
+	var totalOrders, totalCodeOrders, totalPurchaseOrders, totalReceipts, totalActivations int
+	var totalActivationSeconds int64
+	var totalTimedActivations int
 	for t := bucketStart(fromT, gran); !t.After(bucketStart(toT, gran)) && len(trend) < maxTrendBuckets; t = nextBucket(t, gran) {
 		key := t.Format(layout)
 		o := orderByKey[key]
 		r := receiptByKey[key]
+		a := activationByKey[key]
 		trend = append(trend, TrendPoint{
-			Label:                     trendLabel(t, gran, sameYear),
-			Orders:                    o.Orders,
-			CodeOrders:                o.CodeOrders,
-			ReceivedCodes:             r.Received,
-			AverageCodeReceiptSeconds: r.AvgSeconds,
-			Spend:                     roundMoney(o.Spend),
+			Label:                            trendLabel(t, gran, sameYear),
+			Orders:                           o.Orders,
+			CodeOrders:                       o.CodeOrders,
+			PurchaseOrders:                   o.PurchaseOrders,
+			ReceivedCodes:                    r.Received,
+			ActivatedPurchases:               a.Activated,
+			AverageCodeReceiptSeconds:        r.AvgSeconds,
+			AveragePurchaseActivationSeconds: a.AvgSeconds,
+			Spend:                            roundMoney(o.Spend),
 		})
 		totalOrders += o.Orders
 		totalCodeOrders += o.CodeOrders
+		totalPurchaseOrders += o.PurchaseOrders
 		totalReceipts += r.Received
+		totalActivations += a.Activated
+		totalActivationSeconds += a.TotalSeconds
+		totalTimedActivations += a.Timed
 		for _, id := range featuredIDs {
 			seriesSpend[id] = append(seriesSpend[id], roundMoney(spendByProject[id][key]))
 		}
@@ -266,17 +292,12 @@ func (s *QueryService) ConsoleDashboard(ctx context.Context, userID uint, from, 
 
 	return &ConsoleDashboard{
 		Stats: Stats{
-			WalletBalance:     roundMoney(balance),
-			HistoricalSpend:   roundMoney(historicalSpend),
-			TodayOrders:       todayOrders,
-			TotalOrders:       totalOrders,
-			TodayCodeReceipts: todayReceipts,
-			TotalCodeReceipts: totalReceipts,
-			// Receipts are keyed by receipt time and code orders by creation time,
-			// so a code received in-range for an order created just before it can
-			// nudge the ratio slightly over 100; cap for a sane percentage.
-			CodeSuccessRate:           round1(math.Min(100, pct(totalReceipts, totalCodeOrders))),
-			AverageCodeReceiptSeconds: avgSeconds,
+			WalletBalance:                    roundMoney(balance),
+			HistoricalSpend:                  roundMoney(historicalSpend),
+			CodeSuccessRate:                  round1(math.Min(100, pct(totalReceipts, totalCodeOrders))),
+			AverageCodeReceiptSeconds:        avgSeconds,
+			PurchaseActivationSuccessRate:    round1(math.Min(100, pct(totalActivations, totalPurchaseOrders))),
+			AveragePurchaseActivationSeconds: averageSeconds(totalActivationSeconds, totalTimedActivations),
 		},
 		Trend:                     trend,
 		ProjectSeries:             projectSeries,
@@ -408,8 +429,8 @@ func trendLabel(t time.Time, gran string, sameYear bool) string {
 
 // TodayStart returns midnight in the dashboard's business timezone.
 func TodayStart(now time.Time) time.Time {
-	l := now.In(dashboardLocation)
-	return time.Date(l.Year(), l.Month(), l.Day(), 0, 0, 0, 0, dashboardLocation)
+	_, start, _ := businessday.Bounds(now)
+	return start
 }
 
 // ---- numeric helpers -----------------------------------------------------
@@ -426,6 +447,13 @@ func roundMoney(v float64) float64 {
 		v = 0
 	}
 	return math.Round(v*100) / 100
+}
+
+func averageSeconds(total int64, count int) int {
+	if count <= 0 {
+		return 0
+	}
+	return max(0, int(math.Round(float64(total)/float64(count))))
 }
 
 func roundInt(v float64) float64 { return math.Round(v) }

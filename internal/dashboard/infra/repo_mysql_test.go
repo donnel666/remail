@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/donnel666/remail/internal/businessday"
 	"github.com/donnel666/remail/internal/platform/testmysql"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
@@ -22,6 +23,9 @@ import (
 var dashboardMySQLTestServer = testmysql.New("remail_dashboard_test")
 
 func TestMain(m *testing.M) {
+	// Production runs with TZ=Asia/Shanghai and the MySQL DSN uses loc=Local.
+	// Keep DATETIME encoding and SQL buckets deterministic on UTC CI hosts too.
+	time.Local = businessday.Shanghai
 	code := m.Run()
 	_ = dashboardMySQLTestServer.Close(context.Background())
 	os.Exit(code)
@@ -114,12 +118,12 @@ VALUES (1, 'TX-1', 2, 'debit', 'consumer', 'out', -1.00, 100.00, 99.00, 'order',
 	seedDashboardOrder(t, db, 3, 2, 11, 21, "code", "5.00", receiveStart, ref)
 	// user 3: one code order with a receipt.
 	seedDashboardOrder(t, db, 4, 3, 10, 20, "code", "3.00", receiveStart, ref)
-	// user 4: one code order with a receipt — tied with user 3 (both 1) to exercise
-	// the leaderboard's ordinal tie-break (user 3 ranks ahead of user 4 by id).
+	// user 4: one code order with a receipt — tied with user 3 (both 1 and the
+	// same final success time) to exercise the user-id tie-break.
 	seedDashboardOrder(t, db, 6, 4, 10, 20, "code", "3.00", receiveStart, ref)
 	// A successfully activated purchase order also counts in the user leaderboard,
 	// but stays excluded from code-receipt metrics.
-	seedDashboardOrder(t, db, 5, 2, 10, 20, "purchase", "10.00", ref, ref)
+	seedDashboardOrder(t, db, 5, 2, 10, 20, "purchase", "10.00", ref.Add(-45*time.Second), ref)
 	require.NoError(t, db.Table("orders").Where("id = ?", 5).Update("activated_at", ref).Error)
 	// A normal project 1 order still counts; leaderboard exclusion is based on
 	// the HIST- order prefix, not a project ID.
@@ -151,15 +155,17 @@ VALUES (1, 'TX-1', 2, 'debit', 'consumer', 'out', -1.00, 100.00, 99.00, 'order',
 
 	orderRows, err := repo.OrderBuckets(ctx, 2, dayFmt, from, to)
 	require.NoError(t, err)
-	var orders, codeOrders int
+	var orders, codeOrders, purchaseOrders int
 	var spend float64
 	for _, r := range orderRows {
 		orders += r.Orders
 		codeOrders += r.CodeOrders
+		purchaseOrders += r.PurchaseOrders
 		spend += r.Spend
 	}
 	require.Equal(t, 5, orders)     // includes one project 1 (Test) code order
 	require.Equal(t, 3, codeOrders) // personal metrics still count that project
+	require.Equal(t, 2, purchaseOrders)
 	require.InDelta(t, 36.00, spend, 0.001)
 
 	receiptRows, err := repo.ReceiptBuckets(ctx, 2, dayFmt, from, to)
@@ -170,6 +176,14 @@ VALUES (1, 'TX-1', 2, 'debit', 'consumer', 'out', -1.00, 100.00, 99.00, 'order',
 		require.Equal(t, 30, r.AvgSeconds)
 	}
 	require.Equal(t, 3, received) // order 5 purchase excluded; order 7 project 1 included
+
+	activationRows, err := repo.PurchaseActivationBuckets(ctx, 2, dayFmt, from, to)
+	require.NoError(t, err)
+	require.Len(t, activationRows, 1)
+	require.Equal(t, 1, activationRows[0].Activated)
+	require.Equal(t, 45, activationRows[0].AvgSeconds)
+	require.EqualValues(t, 45, activationRows[0].TotalSeconds)
+	require.Equal(t, 1, activationRows[0].Timed)
 
 	ranking, err := repo.ProjectCodeRanking(ctx, 2, from, to)
 	require.NoError(t, err)
@@ -188,11 +202,6 @@ VALUES (1, 'TX-1', 2, 'debit', 'consumer', 'out', -1.00, 100.00, 99.00, 'order',
 	}
 	require.InDelta(t, 30.00, byProject[10], 0.001)
 	require.InDelta(t, 5.00, byProject[11], 0.001)
-
-	todayOrders, todayReceipts, err := repo.TodayCounts(ctx, 2, since)
-	require.NoError(t, err)
-	require.Equal(t, 5, todayOrders)
-	require.Equal(t, 3, todayReceipts)
 
 	avg, err := repo.RangeAvgReceiptSeconds(ctx, 2, from, to)
 	require.NoError(t, err)
@@ -290,17 +299,26 @@ INSERT INTO wallet_transactions(id, transaction_no, user_id, transaction_type, b
     amount, balance_before, balance_after, biz_type, biz_id)
 VALUES (1, 'TX-1', 2, 'debit', 'consumer', 'out', -1.00, 100.00, 99.00, 'order', 'ORD')`).Error)
 
-	// orders: 1 microsoft code, 2 domain code, 1 microsoft purchase (all charged).
+	// Valid range cohort: 1 microsoft code, 2 domain code and 2 microsoft
+	// purchases (one activated), all charged.
 	seedTypedOrder(t, db, 1, 2, 10, 20, "microsoft", "code", "12.00", receiveStart, ref)
 	seedTypedOrder(t, db, 2, 2, 10, 20, "domain", "code", "5.00", receiveStart, ref)
 	seedTypedOrder(t, db, 3, 2, 10, 20, "microsoft", "purchase", "8.00", ref, ref)
 	seedTypedOrder(t, db, 4, 2, 10, 20, "domain", "code", "5.00", receiveStart, ref)
+	seedTypedOrder(t, db, 9, 2, 10, 20, "microsoft", "purchase", "8.00", ref.Add(-45*time.Second), ref)
+	require.NoError(t, db.Table("orders").Where("id = ?", 9).Update("activated_at", ref).Error)
 	// Historical purchases are charged records but not platform orders.
 	seedTypedOrder(t, db, 6, 2, 10, 20, "microsoft", "purchase", "0.00", ref, ref)
 	require.NoError(t, db.Table("orders").Where("id = ?", 6).Update("order_no", "HIST-ADMIN-COUNT-TEST").Error)
+	seedTypedOrder(t, db, 7, 2, 10, 20, "microsoft", "code", "0.00", receiveStart, ref)
+	require.NoError(t, db.Table("orders").Where("id = ?", 7).Update("order_no", "HIST-ADMIN-CODE-TEST").Error)
+	seedTypedOrder(t, db, 8, 2, 10, 20, "microsoft", "code", "0.00", receiveStart, ref)
+	require.NoError(t, db.Table("orders").Where("id = ?", 8).Update("debit_tx_id", nil).Error)
 	seedDashboardReceipt(t, db, 1, 101, ref)
 	seedDashboardReceipt(t, db, 2, 102, ref)
 	seedDashboardReceipt(t, db, 4, 103, ref)
+	seedDashboardReceipt(t, db, 7, 105, ref)
+	seedDashboardReceipt(t, db, 8, 106, ref)
 	// A valid paid/code fact outside the selected range must not affect any
 	// range-scoped order, receipt or ranking metric.
 	seedTypedOrder(t, db, 5, 2, 10, 20, "microsoft", "code", "9.00", beforeRange, beforeRange)
@@ -323,7 +341,7 @@ INSERT INTO microsoft_resources(id, email_address, password, status, for_sale, g
 
 	orderRows, err := repo.OrderTrend(ctx, dayFmt, from, to)
 	require.NoError(t, err)
-	require.Equal(t, 4, sumCountBuckets(orderRows))
+	require.Equal(t, 5, sumCountBuckets(orderRows))
 
 	codeOrders, err := repo.CodeOrderTrend(ctx, dayFmt, from, to)
 	require.NoError(t, err)
@@ -343,6 +361,8 @@ INSERT INTO microsoft_resources(id, email_address, password, status, for_sale, g
 	msR, domainR := 0, 0
 	for _, r := range receipts {
 		require.Equal(t, 30, r.AvgSeconds)
+		require.EqualValues(t, 30*r.Received, r.TotalSeconds)
+		require.Equal(t, r.Received, r.Timed)
 		if r.ProductType == "domain" {
 			domainR += r.Received
 		} else {
@@ -351,6 +371,13 @@ INSERT INTO microsoft_resources(id, email_address, password, status, for_sale, g
 	}
 	require.Equal(t, 1, msR)
 	require.Equal(t, 2, domainR)
+
+	purchases, err := repo.MicrosoftPurchaseSummary(ctx, from, to)
+	require.NoError(t, err)
+	require.Equal(t, 2, purchases.Orders)
+	require.Equal(t, 1, purchases.Activated)
+	require.EqualValues(t, 45, purchases.TotalSeconds)
+	require.Equal(t, 1, purchases.Timed)
 
 	newUsers, err := repo.NewUserTrend(ctx, dayFmt, from, to)
 	require.NoError(t, err)
@@ -378,6 +405,69 @@ INSERT INTO microsoft_resources(id, email_address, password, status, for_sale, g
 	require.Len(t, ranking, 1)
 	require.Equal(t, "Microsoft", ranking[0].Name)
 	require.Equal(t, 3, ranking[0].Count) // 3 code receipts across the project
+
+	// 2025-12-31 16:30 UTC is 2026-01-01 00:30 in Shanghai. This covers the
+	// UTC/Shanghai day and year boundary without applying a second +08:00 shift
+	// to DATETIME values already encoded through loc=Local.
+	boundary := time.Date(2025, 12, 31, 16, 30, 0, 0, time.UTC)
+	require.NoError(t, db.Exec(`
+INSERT INTO users(id, email, password_hash, nickname, status, role, created_at, last_login_at)
+VALUES (10, 'boundary@test.local', 'h', 'Boundary', 'active', 'user', ?, ?)`, boundary, boundary).Error)
+	seedTypedOrder(t, db, 10, 10, 10, 20, "microsoft", "code", "1.00", boundary.Add(-30*time.Second), boundary)
+	seedDashboardReceipt(t, db, 10, 110, boundary)
+	seedTypedOrder(t, db, 11, 10, 10, 20, "microsoft", "purchase", "2.00", boundary.Add(-45*time.Second), boundary)
+	require.NoError(t, db.Table("orders").Where("id = ?", 11).Update("activated_at", boundary).Error)
+	boundaryFrom, boundaryTo := boundary.Add(-30*time.Minute), boundary.Add(30*time.Minute)
+
+	boundaryOrders, err := repo.OrderTrend(ctx, dayFmt, boundaryFrom, boundaryTo)
+	require.NoError(t, err)
+	require.Equal(t, []dashboardapp.CountBucket{{Bucket: "2026-01-01", Count: 2}}, boundaryOrders)
+
+	const hourFmt = "%Y-%m-%d %H:00:00"
+	boundaryCodeOrders, err := repo.CodeOrderTrend(ctx, hourFmt, boundaryFrom, boundaryTo)
+	require.NoError(t, err)
+	require.Len(t, boundaryCodeOrders, 1)
+	require.Equal(t, "2026-01-01 00:00:00", boundaryCodeOrders[0].Bucket)
+
+	boundaryReceipts, err := repo.CodeReceiptTrend(ctx, dayFmt, boundaryFrom, boundaryTo)
+	require.NoError(t, err)
+	require.Len(t, boundaryReceipts, 1)
+	require.Equal(t, "2026-01-01", boundaryReceipts[0].Bucket)
+
+	boundaryUsers, err := repo.NewUserTrend(ctx, dayFmt, boundaryFrom, boundaryTo)
+	require.NoError(t, err)
+	require.Equal(t, []dashboardapp.CountBucket{{Bucket: "2026-01-01", Count: 1}}, boundaryUsers)
+
+	boundaryActiveUsers, err := repo.ActiveUserTrend(ctx, hourFmt, boundaryFrom, boundaryTo)
+	require.NoError(t, err)
+	require.Equal(t, []dashboardapp.CountBucket{{Bucket: "2026-01-01 00:00:00", Count: 1}}, boundaryActiveUsers)
+
+	boundaryPurchases, err := repo.MicrosoftPurchaseSummary(ctx, boundaryFrom, boundaryTo)
+	require.NoError(t, err)
+	require.Equal(t, dashboardapp.PurchaseSummary{Orders: 1, Activated: 1, TotalSeconds: 45, Timed: 1}, boundaryPurchases)
+
+	consoleRepo := NewViewRepo(db, nil)
+	consoleOrders, err := consoleRepo.OrderBuckets(ctx, 10, hourFmt, boundaryFrom, boundaryTo)
+	require.NoError(t, err)
+	require.Len(t, consoleOrders, 1)
+	require.Equal(t, "2026-01-01 00:00:00", consoleOrders[0].Bucket)
+	require.Equal(t, 1, consoleOrders[0].CodeOrders)
+	require.Equal(t, 1, consoleOrders[0].PurchaseOrders)
+
+	consoleReceipts, err := consoleRepo.ReceiptBuckets(ctx, 10, dayFmt, boundaryFrom, boundaryTo)
+	require.NoError(t, err)
+	require.Len(t, consoleReceipts, 1)
+	require.Equal(t, "2026-01-01", consoleReceipts[0].Bucket)
+
+	consoleActivations, err := consoleRepo.PurchaseActivationBuckets(ctx, 10, hourFmt, boundaryFrom, boundaryTo)
+	require.NoError(t, err)
+	require.Len(t, consoleActivations, 1)
+	require.Equal(t, "2026-01-01 00:00:00", consoleActivations[0].Bucket)
+
+	consoleSpend, err := consoleRepo.ProjectSpendBuckets(ctx, 10, []uint{10}, dayFmt, boundaryFrom, boundaryTo)
+	require.NoError(t, err)
+	require.Len(t, consoleSpend, 1)
+	require.Equal(t, "2026-01-01", consoleSpend[0].Bucket)
 }
 
 func sumCountBuckets(rows []dashboardapp.CountBucket) int {

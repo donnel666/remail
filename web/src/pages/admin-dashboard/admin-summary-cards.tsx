@@ -32,7 +32,7 @@ interface MetricItem {
   icon: ReactNode;
   title: string;
   trendColor: string;
-  trendData: number[];
+  trendData?: number[];
   value: string;
 }
 
@@ -227,26 +227,23 @@ export function AdminDashboardSummaryCards({
         {
           avatarColor: "orange",
           icon: <IconTextStroked />,
-          title: t("Microsoft code receipts"),
+          title: t("Code-purchase count"),
           trendColor: "#f59e0b",
-          trendData: trend.map((point) => point.microsoftReceivedCodes),
-          value: formatCount(stats?.microsoftCodeReceipts),
+          value: `${formatCount(stats?.microsoftCodeReceipts)} - ${formatCount(stats?.microsoftPurchaseActivations)}`,
         },
         {
           avatarColor: "green",
           icon: <IconPulse />,
-          title: t("Microsoft code success rate"),
+          title: t("Code-purchase success rate"),
           trendColor: "#22a06b",
-          trendData: trend.map((point) => point.microsoftCodeSuccessRate),
-          value: formatRate(stats?.microsoftCodeSuccessRate),
+          value: `${formatRate(stats?.microsoftCodeSuccessRate)} - ${formatRate(stats?.microsoftPurchaseActivationSuccessRate)}`,
         },
         {
           avatarColor: "purple",
           icon: <IconStopwatchStroked />,
-          title: t("Average code receipt time"),
+          title: t("Code-purchase average time"),
           trendColor: "#8b5cf6",
-          trendData: trend.map((point) => point.microsoftAverageCodeReceiptSeconds),
-          value: `${stats?.microsoftAverageCodeReceiptSeconds ?? 0}s`,
+          value: `${stats?.microsoftAverageCodeReceiptSeconds ?? 0}s - ${stats?.microsoftAveragePurchaseActivationSeconds ?? 0}s`,
         },
       ],
     },
@@ -341,7 +338,7 @@ export function AdminDashboardSummaryCards({
                       </div>
                     </div>
                   </div>
-                  {item.trendData.length ? (
+                  {item.trendData?.length ? (
                     <div className="h-10 w-24 shrink-0">
                       <Sparkline color={item.trendColor} values={item.trendData} />
                     </div>

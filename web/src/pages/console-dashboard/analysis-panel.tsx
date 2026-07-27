@@ -9,8 +9,7 @@ import { useTranslation } from "react-i18next";
 import type { DashboardData } from "@/lib/dashboard-api";
 
 export type AnalysisView =
-  | "codes"
-  | "orders"
+  | "fulfillmentTime"
   | "projects"
   | "serviceModes"
   | "spend"
@@ -18,9 +17,8 @@ export type AnalysisView =
 
 const ANALYSIS_TABS: Array<{ key: AnalysisView; labelKey: string }> = [
   { key: "spend", labelKey: "Spend distribution" },
-  { key: "orders", labelKey: "Order trend" },
-  { key: "codes", labelKey: "Code receipt trend" },
-  { key: "successRate", labelKey: "Code success rate" },
+  { key: "successRate", labelKey: "Fulfillment success rate" },
+  { key: "fulfillmentTime", labelKey: "Fulfillment time" },
   { key: "projects", labelKey: "Project code ranking" },
   { key: "serviceModes", labelKey: "Service mode distribution" },
 ];
@@ -103,58 +101,9 @@ function useAnalysisSpec(data: DashboardData | null, view: AnalysisView) {
       });
     }
 
-    if (view === "orders") {
-      return asChartSpec({
-        color: { specified: { [t("Total orders")]: "#06b6d4" } },
-        data: [
-          {
-            id: "orderTrendData",
-            values: (data?.trend ?? []).map((point) => ({
-              Count: point.orders,
-              Metric: t("Total orders"),
-              Time: point.label,
-            })),
-          },
-        ],
-        legends: { selectMode: "single", visible: true },
-        seriesField: "Metric",
-        title: chartTitle(
-          t("Order trend"),
-          `${t("Total orders")}：${(data?.stats.totalOrders ?? 0).toLocaleString("zh-CN")}`,
-        ),
-        type: "line",
-        xField: "Time",
-        yField: "Count",
-      });
-    }
-
-    if (view === "codes") {
-      return asChartSpec({
-        color: { specified: { [t("Code receipts")]: "#f59e0b" } },
-        data: [
-          {
-            id: "codeTrendData",
-            values: (data?.trend ?? []).map((point) => ({
-              Count: point.receivedCodes,
-              Metric: t("Code receipts"),
-              Time: point.label,
-            })),
-          },
-        ],
-        legends: { selectMode: "single", visible: true },
-        seriesField: "Metric",
-        title: chartTitle(
-          t("Code receipt trend"),
-          `${t("Total code receipts")}：${(data?.stats.totalCodeReceipts ?? 0).toLocaleString("zh-CN")}`,
-        ),
-        type: "line",
-        xField: "Time",
-        yField: "Count",
-      });
-    }
-
     if (view === "successRate") {
-      const successLabel = t("Code success rate");
+      const codeSuccessLabel = t("Code success rate");
+      const purchaseSuccessLabel = t("Purchase activation success rate");
 
       return asChartSpec({
         axes: [
@@ -165,28 +114,87 @@ function useAnalysisSpec(data: DashboardData | null, view: AnalysisView) {
             orient: "left",
           },
         ],
-        color: { specified: { [successLabel]: "#22a06b" } },
+        color: {
+          specified: {
+            [codeSuccessLabel]: "#f59e0b",
+            [purchaseSuccessLabel]: "#22a06b",
+          },
+        },
         data: [
           {
-            id: "codeSuccessRateData",
-            values: (data?.trend ?? []).map((point) => ({
-              Metric: successLabel,
-              Rate: point.codeOrders
-                ? Number(((point.receivedCodes / point.codeOrders) * 100).toFixed(1))
-                : 0,
-              Time: point.label,
-            })),
+            id: "fulfillmentSuccessRateData",
+            values: (data?.trend ?? []).flatMap((point) => [
+              {
+                Metric: codeSuccessLabel,
+                Rate: point.codeOrders
+                  ? Number(((point.receivedCodes / point.codeOrders) * 100).toFixed(1))
+                  : 0,
+                Time: point.label,
+              },
+              {
+                Metric: purchaseSuccessLabel,
+                Rate: point.purchaseOrders
+                  ? Number(
+                      (
+                        (point.activatedPurchases / point.purchaseOrders) *
+                        100
+                      ).toFixed(1),
+                    )
+                  : 0,
+                Time: point.label,
+              },
+            ]),
           },
         ],
         legends: { selectMode: "single", visible: true },
         seriesField: "Metric",
         title: chartTitle(
-          successLabel,
-          `${successLabel}：${data?.stats.codeSuccessRate ?? 0}%`,
+          t("Fulfillment success rate"),
+          `${codeSuccessLabel}：${data?.stats.codeSuccessRate ?? 0}% / ${purchaseSuccessLabel}：${data?.stats.purchaseActivationSuccessRate ?? 0}%`,
         ),
         type: "line",
         xField: "Time",
         yField: "Rate",
+      });
+    }
+
+    if (view === "fulfillmentTime") {
+      const codeTimeLabel = t("Average code receipt time");
+      const purchaseTimeLabel = t("Average purchase activation time");
+
+      return asChartSpec({
+        color: {
+          specified: {
+            [codeTimeLabel]: "#8b5cf6",
+            [purchaseTimeLabel]: "#06b6d4",
+          },
+        },
+        data: [
+          {
+            id: "fulfillmentTimeData",
+            values: (data?.trend ?? []).flatMap((point) => [
+              {
+                Metric: codeTimeLabel,
+                Seconds: point.averageCodeReceiptSeconds,
+                Time: point.label,
+              },
+              {
+                Metric: purchaseTimeLabel,
+                Seconds: point.averagePurchaseActivationSeconds,
+                Time: point.label,
+              },
+            ]),
+          },
+        ],
+        legends: { selectMode: "single", visible: true },
+        seriesField: "Metric",
+        title: chartTitle(
+          t("Fulfillment time"),
+          `${codeTimeLabel}：${data?.stats.averageCodeReceiptSeconds ?? 0}s / ${purchaseTimeLabel}：${data?.stats.averagePurchaseActivationSeconds ?? 0}s`,
+        ),
+        type: "line",
+        xField: "Time",
+        yField: "Seconds",
       });
     }
 
@@ -205,10 +213,7 @@ function useAnalysisSpec(data: DashboardData | null, view: AnalysisView) {
         data: [{ id: "projectRankData", values }],
         legends: { selectMode: "single", visible: true },
         seriesField: "Project",
-        title: chartTitle(
-          t("Project code ranking"),
-          `${t("Total code receipts")}：${(data?.stats.totalCodeReceipts ?? 0).toLocaleString("zh-CN")}`,
-        ),
+        title: chartTitle(t("Project code ranking"), ""),
         type: "bar",
         xField: "Project",
         yField: "Count",

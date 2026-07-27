@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,4 +37,24 @@ func TestAdminDashboardCacheRefreshesActiveRangeFor24Hours(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, 2, got.Stats.TotalUsers)
+}
+
+func TestAdminDashboardCacheIgnoresPreviousSchemaVersion(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	cache := newAdminDashboardCache(client)
+	ctx := context.Background()
+
+	payload, err := json.Marshal(adminDashboardCacheEntry{
+		Data: &dashboardapp.AdminDashboard{Stats: dashboardapp.AdminStats{TotalUsers: 99}},
+	})
+	require.NoError(t, err)
+	oldKey := strings.Replace(adminDashboardCacheKey(nil, nil), adminDashboardCachePrefix, "dashboard:admin:v1:", 1)
+	require.NoError(t, client.Set(ctx, oldKey, payload, adminDashboardCacheTTL).Err())
+
+	got, ok, err := cache.get(ctx, nil, nil)
+	require.NoError(t, err)
+	require.False(t, ok)
+	require.Nil(t, got)
 }

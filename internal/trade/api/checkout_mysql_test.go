@@ -1537,11 +1537,11 @@ INSERT INTO users(id, email, password_hash, nickname, status, role) VALUES
 	require.Equal(t, key.ID, first.APIKeyID)
 	_, err = openapiMod.UseCase.BeginAPIKeyRequest(context.Background(), key.KeyPlain)
 	require.ErrorIs(t, err, openapidomain.ErrAPIKeyConcurrencyLimit)
-	require.NoError(t, openapiMod.UseCase.FinishAPIKeyRequest(context.Background(), first.APIKeyID))
+	require.NoError(t, openapiMod.UseCase.FinishAPIKeyRequest(context.Background(), first.UserID, first.APIKeyID, first.LeaseID))
 
 	second, err := openapiMod.UseCase.BeginAPIKeyRequest(context.Background(), key.KeyPlain)
 	require.NoError(t, err)
-	require.NoError(t, openapiMod.UseCase.FinishAPIKeyRequest(context.Background(), second.APIKeyID))
+	require.NoError(t, openapiMod.UseCase.FinishAPIKeyRequest(context.Background(), second.UserID, second.APIKeyID, second.LeaseID))
 }
 
 func TestAPIKeyDefaultConcurrencyIsNullMySQL(t *testing.T) {
@@ -1591,7 +1591,7 @@ INSERT INTO users(id, email, password_hash, nickname, status, role) VALUES
 	for i := 0; i < 2; i++ {
 		acquired, err := openapiMod.UseCase.BeginAPIKeyRequest(context.Background(), key.KeyPlain)
 		require.NoError(t, err)
-		require.NoError(t, openapiMod.UseCase.FinishAPIKeyRequest(context.Background(), acquired.APIKeyID))
+		require.NoError(t, openapiMod.UseCase.FinishAPIKeyRequest(context.Background(), acquired.UserID, acquired.APIKeyID, acquired.LeaseID))
 	}
 	_, err = openapiMod.UseCase.BeginAPIKeyRequest(context.Background(), key.KeyPlain)
 	require.ErrorIs(t, err, openapidomain.ErrAPIKeyQuotaExceeded)
@@ -1621,7 +1621,7 @@ INSERT INTO users(id, email, password_hash, nickname, status, role) VALUES
 
 	acquired, err := openapiMod.UseCase.BeginAPIKeyRequest(context.Background(), key.KeyPlain)
 	require.NoError(t, err)
-	require.NoError(t, openapiMod.UseCase.FinishAPIKeyRequest(context.Background(), acquired.APIKeyID))
+	require.NoError(t, openapiMod.UseCase.FinishAPIKeyRequest(context.Background(), acquired.UserID, acquired.APIKeyID, acquired.LeaseID))
 
 	oneShotQuota := int64(1)
 	concurrentKey, err := openapiMod.UseCase.CreateAPIKey(context.Background(), openapiapp.CreateAPIKeyRequest{
@@ -1643,7 +1643,7 @@ INSERT INTO users(id, email, password_hash, nickname, status, role) VALUES
 			defer wg.Done()
 			acquired, err := openapiMod.UseCase.BeginAPIKeyRequest(context.Background(), concurrentKey.KeyPlain)
 			if err == nil {
-				_ = openapiMod.UseCase.FinishAPIKeyRequest(context.Background(), acquired.APIKeyID)
+				_ = openapiMod.UseCase.FinishAPIKeyRequest(context.Background(), acquired.UserID, acquired.APIKeyID, acquired.LeaseID)
 			}
 			errs <- err
 		}()

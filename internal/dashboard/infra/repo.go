@@ -62,14 +62,15 @@ func (r *ViewRepo) WalletSummary(ctx context.Context, userID uint) (balance, tot
 func (r *ViewRepo) OrderBuckets(ctx context.Context, userID uint, sqlFormat string, from, to time.Time) ([]dashboardapp.OrderBucketRow, error) {
 	// sqlFormat is a fixed internal constant (see app.sqlFormat), never user input.
 	sel := fmt.Sprintf(
-		"DATE_FORMAT(CONVERT_TZ(created_at, '+00:00', '+08:00'), '%s') AS bucket, COUNT(*) AS orders, COALESCE(SUM(service_mode = 'code'),0) AS code_orders, COALESCE(SUM(pay_amount - refund_amount),0) AS spend",
+		"DATE_FORMAT(created_at, '%s') AS bucket, COUNT(*) AS orders, COALESCE(SUM(service_mode = 'code'),0) AS code_orders, COALESCE(SUM(service_mode = 'purchase'),0) AS purchase_orders, COALESCE(SUM(pay_amount - refund_amount),0) AS spend",
 		sqlFormat,
 	)
 	var rows []struct {
-		Bucket     string `gorm:"column:bucket"`
-		Orders     int    `gorm:"column:orders"`
-		CodeOrders int    `gorm:"column:code_orders"`
-		Spend      string `gorm:"column:spend"`
+		Bucket         string `gorm:"column:bucket"`
+		Orders         int    `gorm:"column:orders"`
+		CodeOrders     int    `gorm:"column:code_orders"`
+		PurchaseOrders int    `gorm:"column:purchase_orders"`
+		Spend          string `gorm:"column:spend"`
 	}
 	if err := r.db.WithContext(ctx).
 		Table("orders").
@@ -87,10 +88,11 @@ func (r *ViewRepo) OrderBuckets(ctx context.Context, userID uint, sqlFormat stri
 	out := make([]dashboardapp.OrderBucketRow, len(rows))
 	for i := range rows {
 		out[i] = dashboardapp.OrderBucketRow{
-			Bucket:     rows[i].Bucket,
-			Orders:     rows[i].Orders,
-			CodeOrders: rows[i].CodeOrders,
-			Spend:      parseMoney(rows[i].Spend),
+			Bucket:         rows[i].Bucket,
+			Orders:         rows[i].Orders,
+			CodeOrders:     rows[i].CodeOrders,
+			PurchaseOrders: rows[i].PurchaseOrders,
+			Spend:          parseMoney(rows[i].Spend),
 		}
 	}
 	return out, nil
@@ -102,7 +104,7 @@ func (r *ViewRepo) ReceiptBuckets(ctx context.Context, userID uint, sqlFormat st
 	// success rate the panels compute (receivedCodes/codeOrders) is then always
 	// well-defined and <= 100%. Latency still uses the receipt timestamp.
 	sel := fmt.Sprintf(
-		"DATE_FORMAT(CONVERT_TZ(o.created_at, '+00:00', '+08:00'), '%s') AS bucket, COUNT(*) AS received, COALESCE(GREATEST(ROUND(AVG(TIMESTAMPDIFF(SECOND, o.receive_started_at, h.message_received_at))),0),0) AS avg_seconds",
+		"DATE_FORMAT(o.created_at, '%s') AS bucket, COUNT(*) AS received, COALESCE(GREATEST(ROUND(AVG(TIMESTAMPDIFF(SECOND, o.receive_started_at, h.message_received_at))),0),0) AS avg_seconds",
 		sqlFormat,
 	)
 	var rows []struct {
@@ -114,7 +116,8 @@ func (r *ViewRepo) ReceiptBuckets(ctx context.Context, userID uint, sqlFormat st
 		Table("mailmatch_order_delivery_heads AS h").
 		Joins("JOIN orders AS o ON o.id = h.order_id").
 		Select(sel).
-		Where("o.user_id = ? AND o.service_mode = 'code' AND o.created_at >= ? AND o.created_at <= ?", userID, from.UTC(), to.UTC()).
+		Where("o.user_id = ? AND o.debit_tx_id IS NOT NULL AND o.service_mode = 'code' AND o.created_at >= ? AND o.created_at <= ?", userID, from.UTC(), to.UTC()).
+		Where("o." + historyOrderExclude).
 		Group("bucket").
 		Order("bucket ASC").
 		Scan(&rows).Error; err != nil {
@@ -123,6 +126,37 @@ func (r *ViewRepo) ReceiptBuckets(ctx context.Context, userID uint, sqlFormat st
 	out := make([]dashboardapp.ReceiptBucketRow, len(rows))
 	for i := range rows {
 		out[i] = dashboardapp.ReceiptBucketRow(rows[i])
+	}
+	return out, nil
+}
+
+func (r *ViewRepo) PurchaseActivationBuckets(ctx context.Context, userID uint, sqlFormat string, from, to time.Time) ([]dashboardapp.PurchaseActivationBucketRow, error) {
+	// Purchase activation is the first matched mail recorded by Trade in
+	// activated_at. Buckets use order creation time to match the denominator.
+	sel := fmt.Sprintf(
+		"DATE_FORMAT(o.created_at, '%s') AS bucket, COUNT(*) AS activated, COALESCE(GREATEST(ROUND(AVG(TIMESTAMPDIFF(SECOND, o.receive_started_at, o.activated_at))),0),0) AS avg_seconds, COALESCE(SUM(TIMESTAMPDIFF(SECOND, o.receive_started_at, o.activated_at)),0) AS total_seconds, COUNT(o.receive_started_at) AS timed",
+		sqlFormat,
+	)
+	var rows []struct {
+		Bucket       string `gorm:"column:bucket"`
+		Activated    int    `gorm:"column:activated"`
+		AvgSeconds   int    `gorm:"column:avg_seconds"`
+		TotalSeconds int64  `gorm:"column:total_seconds"`
+		Timed        int    `gorm:"column:timed"`
+	}
+	if err := r.db.WithContext(ctx).
+		Table("orders AS o").
+		Select(sel).
+		Where("o.user_id = ? AND o.debit_tx_id IS NOT NULL AND o.service_mode = 'purchase' AND o.activated_at IS NOT NULL AND o.created_at >= ? AND o.created_at <= ?", userID, from.UTC(), to.UTC()).
+		Where("o." + historyOrderExclude).
+		Group("bucket").
+		Order("bucket ASC").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]dashboardapp.PurchaseActivationBucketRow, len(rows))
+	for i := range rows {
+		out[i] = dashboardapp.PurchaseActivationBucketRow(rows[i])
 	}
 	return out, nil
 }
@@ -156,7 +190,7 @@ func (r *ViewRepo) ProjectSpendBuckets(ctx context.Context, userID uint, project
 		return nil, nil
 	}
 	sel := fmt.Sprintf(
-		"o.project_id AS project_id, DATE_FORMAT(CONVERT_TZ(o.created_at, '+00:00', '+08:00'), '%s') AS bucket, COALESCE(SUM(o.pay_amount - o.refund_amount),0) AS spend",
+		"o.project_id AS project_id, DATE_FORMAT(o.created_at, '%s') AS bucket, COALESCE(SUM(o.pay_amount - o.refund_amount),0) AS spend",
 		sqlFormat,
 	)
 	var rows []struct {
@@ -183,33 +217,14 @@ func (r *ViewRepo) ProjectSpendBuckets(ctx context.Context, userID uint, project
 	return out, nil
 }
 
-func (r *ViewRepo) TodayCounts(ctx context.Context, userID uint, since time.Time) (orders, receipts int, err error) {
-	var orderCount int64
-	if err := r.db.WithContext(ctx).
-		Table("orders").
-		Where("user_id = ? AND debit_tx_id IS NOT NULL AND created_at >= ?", userID, since.UTC()).
-		Where(historyOrderExclude).
-		Count(&orderCount).Error; err != nil {
-		return 0, 0, err
-	}
-	var receiptCount int64
-	if err := r.db.WithContext(ctx).
-		Table("mailmatch_order_delivery_heads AS h").
-		Joins("JOIN orders AS o ON o.id = h.order_id").
-		Where("o.user_id = ? AND o.service_mode = 'code' AND o.created_at >= ?", userID, since.UTC()).
-		Count(&receiptCount).Error; err != nil {
-		return 0, 0, err
-	}
-	return int(orderCount), int(receiptCount), nil
-}
-
 func (r *ViewRepo) RangeAvgReceiptSeconds(ctx context.Context, userID uint, from, to time.Time) (int, error) {
 	var avg *float64
 	if err := r.db.WithContext(ctx).
 		Table("mailmatch_order_delivery_heads AS h").
 		Joins("JOIN orders AS o ON o.id = h.order_id").
 		Select("GREATEST(ROUND(AVG(TIMESTAMPDIFF(SECOND, o.receive_started_at, h.message_received_at))),0)").
-		Where("o.user_id = ? AND o.service_mode = 'code' AND o.created_at >= ? AND o.created_at <= ?", userID, from.UTC(), to.UTC()).
+		Where("o.user_id = ? AND o.debit_tx_id IS NOT NULL AND o.service_mode = 'code' AND o.created_at >= ? AND o.created_at <= ?", userID, from.UTC(), to.UTC()).
+		Where("o." + historyOrderExclude).
 		Scan(&avg).Error; err != nil {
 		return 0, err
 	}

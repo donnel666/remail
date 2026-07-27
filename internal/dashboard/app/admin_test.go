@@ -10,6 +10,7 @@ type fakeAdminView struct {
 	orders     []CountBucket
 	codeOrder  []TypeCountBucket
 	receipts   []TypeReceiptBucket
+	purchase   PurchaseSummary
 	newUsers   []CountBucket
 	active     []CountBucket
 	totalUsers int
@@ -25,6 +26,9 @@ func (f *fakeAdminView) CodeOrderTrend(context.Context, string, time.Time, time.
 }
 func (f *fakeAdminView) CodeReceiptTrend(context.Context, string, time.Time, time.Time) ([]TypeReceiptBucket, error) {
 	return f.receipts, nil
+}
+func (f *fakeAdminView) MicrosoftPurchaseSummary(context.Context, time.Time, time.Time) (PurchaseSummary, error) {
+	return f.purchase, nil
 }
 func (f *fakeAdminView) NewUserTrend(context.Context, string, time.Time, time.Time) ([]CountBucket, error) {
 	return f.newUsers, nil
@@ -55,8 +59,13 @@ func (f fakeInventory) ProjectInventoryRanking(context.Context, int) ([]AdminInv
 }
 
 func TestAdminDashboardAssembly(t *testing.T) {
-	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	to := time.Date(2026, 1, 3, 0, 0, 0, 0, time.UTC)
+	oldLocal := time.Local
+	time.Local = time.UTC
+	defer func() { time.Local = oldLocal }()
+
+	// Both endpoints are in 2026 in Shanghai, despite crossing the UTC year.
+	from := time.Date(2025, 12, 31, 16, 0, 0, 0, time.UTC)
+	to := time.Date(2026, 1, 2, 16, 0, 0, 0, time.UTC)
 	gran := granularity(from, to)
 	layout := bucketLayout(gran)
 	sameYear := true
@@ -77,10 +86,11 @@ func TestAdminDashboardAssembly(t *testing.T) {
 			{Bucket: keys[0], ProductType: "random", Count: 99},
 		},
 		receipts: []TypeReceiptBucket{
-			{Bucket: keys[0], ProductType: "microsoft", Received: 5, AvgSeconds: 20},
-			{Bucket: keys[0], ProductType: "domain", Received: 2, AvgSeconds: 40},
-			{Bucket: keys[0], ProductType: "random", Received: 99, AvgSeconds: 1},
+			{Bucket: keys[0], ProductType: "microsoft", Received: 5, AvgSeconds: 20, TotalSeconds: 100, Timed: 5},
+			{Bucket: keys[0], ProductType: "domain", Received: 2, AvgSeconds: 40, TotalSeconds: 80, Timed: 2},
+			{Bucket: keys[0], ProductType: "random", Received: 99, AvgSeconds: 1, TotalSeconds: 99, Timed: 99},
 		},
+		purchase:   PurchaseSummary{Orders: 4, Activated: 3, TotalSeconds: 95, Timed: 3},
 		newUsers:   []CountBucket{{Bucket: keys[0], Count: 3}, {Bucket: keys[1], Count: 2}},
 		active:     []CountBucket{{Bucket: keys[0], Count: 7}, {Bucket: keys[2], Count: 5}},
 		totalUsers: 105,
@@ -145,6 +155,9 @@ func TestAdminDashboardAssembly(t *testing.T) {
 	}
 	if s.MicrosoftAverageCodeReceiptSeconds != 20 || s.DomainAverageCodeReceiptSeconds != 40 {
 		t.Errorf("avg seconds: ms %d domain %d", s.MicrosoftAverageCodeReceiptSeconds, s.DomainAverageCodeReceiptSeconds)
+	}
+	if s.MicrosoftPurchaseActivations != 3 || s.MicrosoftPurchaseActivationSuccessRate != 75 || s.MicrosoftAveragePurchaseActivationSeconds != 32 {
+		t.Errorf("microsoft purchase fulfillment: %d / %v%% / %ds", s.MicrosoftPurchaseActivations, s.MicrosoftPurchaseActivationSuccessRate, s.MicrosoftAveragePurchaseActivationSeconds)
 	}
 	if s.MicrosoftTotalEmails != 500 || s.DomainAvailableMailboxes != 120 {
 		t.Errorf("inventory stats wrong: %+v", s)

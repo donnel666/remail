@@ -1,18 +1,16 @@
 import type { ReactNode } from "react";
 
 import {
-  IconCoinMoneyStroked,
   IconHistogram,
   IconMoneyExchangeStroked,
   IconPulse,
-  IconSend,
   IconStopwatchStroked,
-  IconTextStroked,
 } from "@douyinfe/semi-icons";
 import { Avatar, Card, Skeleton, Tag } from "@douyinfe/semi-ui";
 import { useNavigate } from "@tanstack/react-router";
 import {
   Activity,
+  BadgeCheck,
   Gauge,
   Wallet,
   Zap,
@@ -20,6 +18,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import type { DashboardData } from "@/lib/dashboard-api";
+import type { APIKeyRealtimeUsageResponse } from "@/lib/openapi-credentials-api";
 
 type MetricTone = "blue" | "cyan" | "green" | "orange" | "pink" | "purple";
 
@@ -35,6 +34,8 @@ interface MetricItem {
 interface MetricGroup {
   color: string;
   items: MetricItem[];
+  loading?: boolean;
+  status?: string;
   title: ReactNode;
 }
 
@@ -79,10 +80,6 @@ function groupTitle(icon: ReactNode, text: string) {
   );
 }
 
-function formatCount(value: number | undefined) {
-  return (value ?? 0).toLocaleString("zh-CN");
-}
-
 function formatMoney(value: string | number | null | undefined) {
   const parsed = Number(value ?? 0);
   if (!Number.isFinite(parsed)) return "0.00";
@@ -92,23 +89,37 @@ function formatMoney(value: string | number | null | undefined) {
   });
 }
 
+function percent(part: number, whole: number) {
+  return whole ? (part / whole) * 100 : 0;
+}
+
 export function DashboardSummaryCards({
   data,
   loading,
+  realtimeLoading,
+  realtimeUnavailable,
+  usage,
 }: {
   data: DashboardData | null;
   loading: boolean;
+  realtimeLoading: boolean;
+  realtimeUnavailable: boolean;
+  usage: APIKeyRealtimeUsageResponse | null;
 }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const stats = data?.stats;
   const trend = data?.trend ?? [];
-  const orderTrend = trend.map((point) => point.orders);
-  const codeTrend = trend.map((point) => point.receivedCodes);
   const codeSuccessTrend = trend.map((point) =>
-    point.codeOrders ? (point.receivedCodes / point.codeOrders) * 100 : 0,
+    percent(point.receivedCodes, point.codeOrders),
+  );
+  const purchaseSuccessTrend = trend.map((point) =>
+    percent(point.activatedPurchases, point.purchaseOrders),
   );
   const receiptTimeTrend = trend.map((point) => point.averageCodeReceiptSeconds);
+  const activationTimeTrend = trend.map(
+    (point) => point.averagePurchaseActivationSeconds,
+  );
 
   const groupedStatsData: MetricGroup[] = [
     {
@@ -132,55 +143,8 @@ export function DashboardSummaryCards({
       ],
     },
     {
-      color: "bg-[color-mix(in_oklch,#22a06b_12%,var(--semi-color-bg-0))]",
-      title: groupTitle(<Activity size={16} />, t("Order activity")),
-      items: [
-        {
-          avatarColor: "green",
-          icon: <IconSend />,
-          title: t("Today orders"),
-          trendColor: "#10b981",
-          value: formatCount(stats?.todayOrders),
-        },
-        {
-          avatarColor: "cyan",
-          icon: <IconPulse />,
-          title: t("Total orders"),
-          trendColor: "#06b6d4",
-          trendData: orderTrend.map((_, index) =>
-            orderTrend.slice(0, index + 1).reduce((sum, value) => sum + value, 0),
-          ),
-          value: formatCount(stats?.totalOrders),
-        },
-      ],
-    },
-    {
       color: "bg-[color-mix(in_oklch,#f59e0b_12%,var(--semi-color-bg-0))]",
-      title: groupTitle(<Zap size={16} />, t("Code receipt activity")),
-      items: [
-        {
-          avatarColor: "orange",
-          icon: <IconCoinMoneyStroked />,
-          title: t("Today code receipts"),
-          trendColor: "#f59e0b",
-          trendData: codeTrend,
-          value: formatCount(stats?.todayCodeReceipts),
-        },
-        {
-          avatarColor: "pink",
-          icon: <IconTextStroked />,
-          title: t("Total code receipts"),
-          trendColor: "#ec4899",
-          trendData: codeTrend.map((_, index) =>
-            codeTrend.slice(0, index + 1).reduce((sum, value) => sum + value, 0),
-          ),
-          value: formatCount(stats?.totalCodeReceipts),
-        },
-      ],
-    },
-    {
-      color: "bg-[color-mix(in_oklch,#8b5cf6_12%,var(--semi-color-bg-0))]",
-      title: groupTitle(<Gauge size={16} />, t("Service quality")),
+      title: groupTitle(<Zap size={16} />, t("Code order fulfillment")),
       items: [
         {
           avatarColor: "green",
@@ -197,6 +161,55 @@ export function DashboardSummaryCards({
           trendColor: "#8b5cf6",
           trendData: receiptTimeTrend,
           value: `${stats?.averageCodeReceiptSeconds ?? 0}s`,
+        },
+      ],
+    },
+    {
+      color: "bg-[color-mix(in_oklch,#22a06b_12%,var(--semi-color-bg-0))]",
+      title: groupTitle(
+        <BadgeCheck size={16} />,
+        t("Purchase order fulfillment"),
+      ),
+      items: [
+        {
+          avatarColor: "green",
+          icon: <IconPulse />,
+          title: t("Purchase activation success rate"),
+          trendColor: "#22a06b",
+          trendData: purchaseSuccessTrend,
+          value: `${stats?.purchaseActivationSuccessRate ?? 0}%`,
+        },
+        {
+          avatarColor: "cyan",
+          icon: <IconStopwatchStroked />,
+          title: t("Average purchase activation time"),
+          trendColor: "#06b6d4",
+          trendData: activationTimeTrend,
+          value: `${stats?.averagePurchaseActivationSeconds ?? 0}s`,
+        },
+      ],
+    },
+    {
+      color: "bg-[color-mix(in_oklch,#8b5cf6_12%,var(--semi-color-bg-0))]",
+      loading: realtimeLoading,
+      status: realtimeUnavailable
+        ? t("Real-time data is temporarily unavailable")
+        : undefined,
+      title: groupTitle(<Gauge size={16} />, t("Real-time load")),
+      items: [
+        {
+          avatarColor: "pink",
+          icon: <Activity size={16} />,
+          title: t("Active API requests"),
+          trendColor: "#ec4899",
+          value: usage ? usage.activeRequests.toLocaleString() : "—",
+        },
+        {
+          avatarColor: "purple",
+          icon: <IconPulse />,
+          title: t("Requests per minute (RPM)"),
+          trendColor: "#8b5cf6",
+          value: usage ? usage.requestsPerMinute.toLocaleString() : "—",
         },
       ],
     },
@@ -232,7 +245,7 @@ export function DashboardSummaryCards({
                       <div className="text-lg font-semibold text-[var(--semi-color-text-0)]">
                         <Skeleton
                           active
-                          loading={loading}
+                          loading={group.loading ?? loading}
                           placeholder={
                             <Skeleton.Paragraph
                               rows={1}
@@ -262,6 +275,15 @@ export function DashboardSummaryCards({
                   ) : null}
                 </div>
               ))}
+              {group.status ? (
+                <div
+                  aria-live="polite"
+                  className="text-xs text-[var(--semi-color-danger)]"
+                  role="status"
+                >
+                  {group.status}
+                </div>
+              ) : null}
             </div>
           </Card>
         ))}

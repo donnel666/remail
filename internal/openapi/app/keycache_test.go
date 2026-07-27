@@ -75,6 +75,10 @@ func TestAPIKeyRuntimeConcurrencyAndFlush(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 1, first.ActiveRequests)
 	require.EqualValues(t, 1, first.QuotaUsed)
+	active, rpm, err := rt.realtimeUsage(ctx, 2)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, active)
+	require.EqualValues(t, 1, rpm)
 
 	_, err = rt.begin(ctx, "rk-test")
 	require.ErrorIs(t, err, domain.ErrAPIKeyConcurrencyLimit)
@@ -84,10 +88,18 @@ func TestAPIKeyRuntimeConcurrencyAndFlush(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 1, second.ActiveRequests)
 	rt.finish(1)
+	active, rpm, err = rt.realtimeUsage(ctx, 2)
+	require.NoError(t, err)
+	require.Zero(t, active)
+	require.EqualValues(t, 2, rpm)
 
 	require.NoError(t, rt.flush(ctx))
 	require.EqualValues(t, 2, repo.quotaAdded)
 	require.EqualValues(t, 2, repo.key.QuotaUsed)
+	now = now.Add(apiKeyRPMWindow + time.Second)
+	_, rpm, err = rt.realtimeUsage(ctx, 2)
+	require.NoError(t, err)
+	require.Zero(t, rpm)
 }
 
 func TestAPIKeyRuntimeUpdatePreservesActiveRequests(t *testing.T) {
@@ -103,10 +115,45 @@ func TestAPIKeyRuntimeUpdatePreservesActiveRequests(t *testing.T) {
 	require.NoError(t, err)
 	_, err = uc.BeginAPIKeyRequest(ctx, "rk-test")
 	require.ErrorIs(t, err, domain.ErrAPIKeyConcurrencyLimit)
-	require.NoError(t, uc.FinishAPIKeyRequest(ctx, first.APIKeyID, first.LeaseID))
+	require.NoError(t, uc.FinishAPIKeyRequest(ctx, first.UserID, first.APIKeyID, first.LeaseID))
 	second, err := uc.BeginAPIKeyRequest(ctx, "rk-test")
 	require.NoError(t, err)
-	require.NoError(t, uc.FinishAPIKeyRequest(ctx, second.APIKeyID, second.LeaseID))
+	require.NoError(t, uc.FinishAPIKeyRequest(ctx, second.UserID, second.APIKeyID, second.LeaseID))
+}
+
+func TestAPIKeyRuntimeReleasesUserLeaseAfterKeyDeletion(t *testing.T) {
+	ctx := context.Background()
+	repo := newAPIKeyRuntimeRepoStub(domain.APIKey{ID: 1, UserID: 2, KeyPlain: "rk-test", Enabled: true})
+	gate := &apiKeyConcurrencyGateStub{leases: map[string]uint{}}
+	uc := NewUseCase(repo, gate)
+	defer func() { require.NoError(t, uc.Close(ctx)) }()
+
+	request, err := uc.BeginAPIKeyRequest(ctx, "rk-test")
+	require.NoError(t, err)
+	usage, err := uc.GetAPIKeyRealtimeUsage(ctx, request.UserID)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, usage.ActiveRequests)
+
+	require.NoError(t, uc.DeleteAPIKey(ctx, request.UserID, request.APIKeyID))
+	require.NoError(t, uc.FinishAPIKeyRequest(ctx, request.UserID, request.APIKeyID, request.LeaseID))
+	usage, err = uc.GetAPIKeyRealtimeUsage(ctx, request.UserID)
+	require.NoError(t, err)
+	require.Zero(t, usage.ActiveRequests)
+}
+
+func TestGetAPIKeyUsageDoesNotDependOnRealtimeStore(t *testing.T) {
+	ctx := context.Background()
+	repo := newAPIKeyRuntimeRepoStub(domain.APIKey{})
+	repo.usage = &APIKeyUsage{RequestCount: 7, KeyCount: 2}
+	gate := &apiKeyConcurrencyGateStub{realtimeErr: errors.New("redis unavailable")}
+	uc := NewUseCase(repo, gate)
+	defer func() { require.NoError(t, uc.Close(ctx)) }()
+
+	usage, err := uc.GetAPIKeyUsage(ctx, 2)
+	require.NoError(t, err)
+	require.EqualValues(t, 7, usage.RequestCount)
+	require.EqualValues(t, 2, usage.KeyCount)
+	require.Zero(t, gate.realtimeCalls)
 }
 
 func TestAPIKeyRuntimeQuota(t *testing.T) {
@@ -190,10 +237,39 @@ func TestAPIKeyRuntimeUsesCurrentOwnerRoleForCachedKey(t *testing.T) {
 
 type apiKeyRuntimeRepoStub struct {
 	key                   domain.APIKey
+	usage                 *APIKeyUsage
 	quotaAdded            int64
 	userActive            bool
 	ownerRole             string
 	groupConcurrencyLimit int64
+}
+
+type apiKeyConcurrencyGateStub struct {
+	active        int64
+	rpm           int64
+	leases        map[string]uint
+	realtimeCalls int
+	realtimeErr   error
+}
+
+func (g *apiKeyConcurrencyGateStub) Acquire(_ context.Context, userID, _ uint, _ int, leaseID string) (int, bool, error) {
+	g.active++
+	g.rpm++
+	g.leases[leaseID] = userID
+	return int(g.active), true, nil
+}
+
+func (g *apiKeyConcurrencyGateStub) Release(_ context.Context, userID, _ uint, leaseID string) error {
+	if g.leases[leaseID] == userID {
+		delete(g.leases, leaseID)
+		g.active--
+	}
+	return nil
+}
+
+func (g *apiKeyConcurrencyGateStub) RealtimeUsage(context.Context, uint) (int64, int64, error) {
+	g.realtimeCalls++
+	return g.active, g.rpm, g.realtimeErr
 }
 
 func newAPIKeyRuntimeRepoStub(key domain.APIKey) *apiKeyRuntimeRepoStub {
@@ -209,7 +285,11 @@ func (r *apiKeyRuntimeRepoStub) ListAPIKeys(context.Context, uint, int, int) ([]
 }
 
 func (r *apiKeyRuntimeRepoStub) GetAPIKeyUsage(context.Context, uint) (*APIKeyUsage, error) {
-	return nil, errors.New("not implemented")
+	if r.usage == nil {
+		return nil, errors.New("not implemented")
+	}
+	usage := *r.usage
+	return &usage, nil
 }
 
 func (r *apiKeyRuntimeRepoStub) FindAPIKey(context.Context, uint, uint) (*domain.APIKey, error) {
@@ -228,7 +308,7 @@ func (r *apiKeyRuntimeRepoStub) UpdateAPIKey(_ context.Context, cmd UpdateAPIKey
 }
 
 func (r *apiKeyRuntimeRepoStub) DeleteAPIKey(context.Context, uint, uint, time.Time) error {
-	return errors.New("not implemented")
+	return nil
 }
 
 func (r *apiKeyRuntimeRepoStub) FindAPIKeyByPlain(_ context.Context, plain string) (*domain.APIKey, error) {

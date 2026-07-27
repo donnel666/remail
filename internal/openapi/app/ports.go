@@ -38,8 +38,9 @@ type Repository interface {
 }
 
 type APIKeyConcurrencyGate interface {
-	Acquire(ctx context.Context, keyID uint, limit int, leaseID string) (active int, acquired bool, err error)
-	Release(ctx context.Context, keyID uint, leaseID string) error
+	Acquire(ctx context.Context, userID, keyID uint, limit int, leaseID string) (active int, acquired bool, err error)
+	Release(ctx context.Context, userID, keyID uint, leaseID string) error
+	RealtimeUsage(ctx context.Context, userID uint) (activeRequests, requestsPerMinute int64, err error)
 }
 
 type CreateAPIKeyRequest struct {
@@ -102,6 +103,11 @@ type APIKeyAuthResult struct {
 type APIKeyUsage struct {
 	RequestCount int64
 	KeyCount     int64
+}
+
+type APIKeyRealtimeUsage struct {
+	ActiveRequests    int64
+	RequestsPerMinute int64
 }
 
 type IssueOrderTokenCommand struct {
@@ -191,6 +197,17 @@ func (uc *UseCase) GetAPIKeyUsage(ctx context.Context, userID uint) (*APIKeyUsag
 	return usage, nil
 }
 
+func (uc *UseCase) GetAPIKeyRealtimeUsage(ctx context.Context, userID uint) (*APIKeyRealtimeUsage, error) {
+	if userID == 0 {
+		return nil, domain.ErrInvalidCredentialFilter
+	}
+	active, rpm, err := uc.runtime.realtimeUsage(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return &APIKeyRealtimeUsage{ActiveRequests: active, RequestsPerMinute: rpm}, nil
+}
+
 func (uc *UseCase) GetAPIKey(ctx context.Context, userID uint, keyID uint) (*domain.APIKey, error) {
 	if userID == 0 || keyID == 0 {
 		return nil, domain.ErrInvalidAPIKey
@@ -260,15 +277,11 @@ func (uc *UseCase) BeginAPIKeyRequest(ctx context.Context, plain string) (*APIKe
 	return &APIKeyAuthResult{UserID: key.UserID, APIKeyID: key.ID, Role: key.OwnerRole, LeaseID: leaseID}, nil
 }
 
-func (uc *UseCase) FinishAPIKeyRequest(ctx context.Context, keyID uint, leaseIDs ...string) error {
+func (uc *UseCase) FinishAPIKeyRequest(ctx context.Context, userID, keyID uint, leaseID string) error {
 	if keyID == 0 {
 		return nil
 	}
-	leaseID := ""
-	if len(leaseIDs) > 0 {
-		leaseID = leaseIDs[0]
-	}
-	return uc.runtime.finishRequest(ctx, keyID, leaseID)
+	return uc.runtime.finishRequest(ctx, userID, keyID, leaseID)
 }
 
 func (uc *UseCase) IssueOrderToken(ctx context.Context, orderNo string, expireAt *time.Time) (*domain.OrderToken, error) {

@@ -55,6 +55,7 @@ type AdminView interface {
 	OrderTrend(ctx context.Context, sqlFormat string, from, to time.Time) ([]CountBucket, error)
 	CodeOrderTrend(ctx context.Context, sqlFormat string, from, to time.Time) ([]TypeCountBucket, error)
 	CodeReceiptTrend(ctx context.Context, sqlFormat string, from, to time.Time) ([]TypeReceiptBucket, error)
+	MicrosoftPurchaseSummary(ctx context.Context, from, to time.Time) (PurchaseSummary, error)
 	NewUserTrend(ctx context.Context, sqlFormat string, from, to time.Time) ([]CountBucket, error)
 	ActiveUserTrend(ctx context.Context, sqlFormat string, from, to time.Time) ([]CountBucket, error)
 	TotalUsers(ctx context.Context) (int, error)
@@ -74,10 +75,19 @@ type TypeCountBucket struct {
 }
 
 type TypeReceiptBucket struct {
-	Bucket      string
-	ProductType string
-	Received    int
-	AvgSeconds  int
+	Bucket       string
+	ProductType  string
+	Received     int
+	AvgSeconds   int
+	TotalSeconds int64
+	Timed        int
+}
+
+type PurchaseSummary struct {
+	Orders       int
+	Activated    int
+	TotalSeconds int64
+	Timed        int
 }
 
 type InventorySnapshot struct {
@@ -90,26 +100,29 @@ type InventorySnapshot struct {
 // ---- assembled read model ------------------------------------------------
 
 type AdminStats struct {
-	RechargeAmount                     float64
-	SpendAmount                        float64
-	RefundAmount                       float64
-	WithdrawAmount                     float64
-	PlatformRevenue                    float64
-	TotalOrders                        int
-	SuccessfulCodeReceipts             int
-	TotalUsers                         int
-	ActiveUsers                        int
-	NewUsers                           int
-	MicrosoftTotalEmails               int
-	MicrosoftAvailableEmails           int
-	MicrosoftCodeReceipts              int
-	MicrosoftCodeSuccessRate           float64
-	MicrosoftAverageCodeReceiptSeconds int
-	DomainTotalMailboxes               int
-	DomainAvailableMailboxes           int
-	DomainCodeReceipts                 int
-	DomainCodeSuccessRate              float64
-	DomainAverageCodeReceiptSeconds    int
+	RechargeAmount                            float64
+	SpendAmount                               float64
+	RefundAmount                              float64
+	WithdrawAmount                            float64
+	PlatformRevenue                           float64
+	TotalOrders                               int
+	SuccessfulCodeReceipts                    int
+	TotalUsers                                int
+	ActiveUsers                               int
+	NewUsers                                  int
+	MicrosoftTotalEmails                      int
+	MicrosoftAvailableEmails                  int
+	MicrosoftCodeReceipts                     int
+	MicrosoftCodeSuccessRate                  float64
+	MicrosoftAverageCodeReceiptSeconds        int
+	MicrosoftPurchaseActivations              int
+	MicrosoftPurchaseActivationSuccessRate    float64
+	MicrosoftAveragePurchaseActivationSeconds int
+	DomainTotalMailboxes                      int
+	DomainAvailableMailboxes                  int
+	DomainCodeReceipts                        int
+	DomainCodeSuccessRate                     float64
+	DomainAverageCodeReceiptSeconds           int
 }
 
 type AdminTrendPoint struct {
@@ -173,7 +186,7 @@ func (s *AdminQueryService) AdminDashboard(ctx context.Context, from, to *time.T
 	gran := granularity(fromT, toT)
 	sqlFmt := sqlFormat(gran)
 	layout := bucketLayout(gran)
-	sameYear := fromT.In(time.Local).Year() == toT.In(time.Local).Year()
+	sameYear := fromT.In(dashboardLocation).Year() == toT.In(dashboardLocation).Year()
 
 	finance, err := s.finance.FinanceSummary(ctx, &fromT, &toT)
 	if err != nil {
@@ -188,6 +201,10 @@ func (s *AdminQueryService) AdminDashboard(ctx context.Context, from, to *time.T
 		return nil, err
 	}
 	receiptRows, err := s.view.CodeReceiptTrend(ctx, sqlFmt, fromT, toT)
+	if err != nil {
+		return nil, err
+	}
+	purchaseSummary, err := s.view.MicrosoftPurchaseSummary(ctx, fromT, toT)
 	if err != nil {
 		return nil, err
 	}
@@ -230,7 +247,8 @@ func (s *AdminQueryService) AdminDashboard(ctx context.Context, from, to *time.T
 	trend := make([]AdminTrendPoint, 0, len(orderRows)+len(receiptRows))
 	var totalOrders, totalReceipts int
 	var msRecvTotal, msOrdersTotal, domainRecvTotal, domainOrdersTotal int
-	var msSecondsWeighted, domainSecondsWeighted int
+	var msSecondsTotal, domainSecondsTotal int64
+	var msTimedTotal, domainTimedTotal int
 	var newUsersTotal, activeUsersTotal int
 	for t := bucketStart(fromT, gran); !t.After(bucketStart(toT, gran)) && len(trend) < maxTrendBuckets; t = nextBucket(t, gran) {
 		key := t.Format(layout)
@@ -272,8 +290,10 @@ func (s *AdminQueryService) AdminDashboard(ctx context.Context, from, to *time.T
 		domainRecvTotal += dR.Received
 		msOrdersTotal += msCO
 		domainOrdersTotal += dCO
-		msSecondsWeighted += msR.AvgSeconds * msR.Received
-		domainSecondsWeighted += dR.AvgSeconds * dR.Received
+		msSecondsTotal += msR.TotalSeconds
+		domainSecondsTotal += dR.TotalSeconds
+		msTimedTotal += msR.Timed
+		domainTimedTotal += dR.Timed
 		// Accumulated in the loop (not sumCounts over all rows) so every header
 		// stat reflects the same visited buckets and stays internally consistent
 		// even if the trend loop ever caps.
@@ -286,26 +306,29 @@ func (s *AdminQueryService) AdminDashboard(ctx context.Context, from, to *time.T
 
 	return &AdminDashboard{
 		Stats: AdminStats{
-			RechargeAmount:                     finance.RechargeAmount,
-			SpendAmount:                        finance.SpendAmount,
-			RefundAmount:                       finance.RefundAmount,
-			WithdrawAmount:                     finance.WithdrawAmount,
-			PlatformRevenue:                    finance.PlatformRevenue,
-			TotalOrders:                        totalOrders,
-			SuccessfulCodeReceipts:             totalReceipts,
-			TotalUsers:                         totalUsers,
-			ActiveUsers:                        activeUsersTotal,
-			NewUsers:                           newUsersTotal,
-			MicrosoftTotalEmails:               snapshot.MicrosoftTotal,
-			MicrosoftAvailableEmails:           snapshot.MicrosoftAvailable,
-			MicrosoftCodeReceipts:              msRecvTotal,
-			MicrosoftCodeSuccessRate:           round1(minFloat(100, pct(msRecvTotal, msOrdersTotal))),
-			MicrosoftAverageCodeReceiptSeconds: weightedAvg(msSecondsWeighted, msRecvTotal),
-			DomainTotalMailboxes:               snapshot.DomainTotal,
-			DomainAvailableMailboxes:           snapshot.DomainAvailable,
-			DomainCodeReceipts:                 domainRecvTotal,
-			DomainCodeSuccessRate:              round1(minFloat(100, pct(domainRecvTotal, domainOrdersTotal))),
-			DomainAverageCodeReceiptSeconds:    weightedAvg(domainSecondsWeighted, domainRecvTotal),
+			RechargeAmount:                            finance.RechargeAmount,
+			SpendAmount:                               finance.SpendAmount,
+			RefundAmount:                              finance.RefundAmount,
+			WithdrawAmount:                            finance.WithdrawAmount,
+			PlatformRevenue:                           finance.PlatformRevenue,
+			TotalOrders:                               totalOrders,
+			SuccessfulCodeReceipts:                    totalReceipts,
+			TotalUsers:                                totalUsers,
+			ActiveUsers:                               activeUsersTotal,
+			NewUsers:                                  newUsersTotal,
+			MicrosoftTotalEmails:                      snapshot.MicrosoftTotal,
+			MicrosoftAvailableEmails:                  snapshot.MicrosoftAvailable,
+			MicrosoftCodeReceipts:                     msRecvTotal,
+			MicrosoftCodeSuccessRate:                  round1(minFloat(100, pct(msRecvTotal, msOrdersTotal))),
+			MicrosoftAverageCodeReceiptSeconds:        averageSeconds(msSecondsTotal, msTimedTotal),
+			MicrosoftPurchaseActivations:              purchaseSummary.Activated,
+			MicrosoftPurchaseActivationSuccessRate:    round1(minFloat(100, pct(purchaseSummary.Activated, purchaseSummary.Orders))),
+			MicrosoftAveragePurchaseActivationSeconds: averageSeconds(purchaseSummary.TotalSeconds, purchaseSummary.Timed),
+			DomainTotalMailboxes:                      snapshot.DomainTotal,
+			DomainAvailableMailboxes:                  snapshot.DomainAvailable,
+			DomainCodeReceipts:                        domainRecvTotal,
+			DomainCodeSuccessRate:                     round1(minFloat(100, pct(domainRecvTotal, domainOrdersTotal))),
+			DomainAverageCodeReceiptSeconds:           averageSeconds(domainSecondsTotal, domainTimedTotal),
 		},
 		Trend:                   trend,
 		ProjectCodeRanking:      adminRankItems(codeRanking),
@@ -363,13 +386,6 @@ func typeReceiptByBucket(rows []TypeReceiptBucket) (microsoft, domain map[string
 		}
 	}
 	return microsoft, domain
-}
-
-func weightedAvg(weightedSum, weight int) int {
-	if weight <= 0 {
-		return 0
-	}
-	return weightedSum / weight
 }
 
 func minFloat(a, b float64) float64 {

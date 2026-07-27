@@ -86,6 +86,22 @@ func (h *Handler) GetAPIKeyUsage(c *gin.Context) {
 	})
 }
 
+func (h *Handler) GetAPIKeyRealtimeUsage(c *gin.Context) {
+	userID, ok := currentUserID(c)
+	if !ok {
+		return
+	}
+	usage, err := h.mod.UseCase.GetAPIKeyRealtimeUsage(c.Request.Context(), userID)
+	if err != nil {
+		writeOpenAPIError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, KeyRealtimeUsageResponse{
+		ActiveRequests:    usage.ActiveRequests,
+		RequestsPerMinute: usage.RequestsPerMinute,
+	})
+}
+
 func (h *Handler) GetAPIKeyProfile(c *gin.Context) {
 	userID, ok := currentUserID(c)
 	if !ok {

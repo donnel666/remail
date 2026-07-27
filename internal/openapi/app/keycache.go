@@ -12,6 +12,7 @@ import (
 const (
 	apiKeyRuntimeMetaTTL       = 30 * time.Second
 	apiKeyRuntimeFlushInterval = 5 * time.Second
+	apiKeyRPMWindow            = time.Minute
 )
 
 type apiKeyRuntime struct {
@@ -39,6 +40,7 @@ type apiKeyState struct {
 
 	quotaDelta int64
 	lastUsedAt time.Time
+	recent     []time.Time
 }
 
 func newAPIKeyRuntime(repo Repository, now func() time.Time, concurrencyGates ...APIKeyConcurrencyGate) *apiKeyRuntime {
@@ -101,7 +103,7 @@ func (rt *apiKeyRuntime) begin(ctx context.Context, plain string, leaseIDs ...st
 			leaseID = leaseIDs[0]
 		}
 		var acquired bool
-		globalActive, acquired, err = rt.concurrencyGate.Acquire(ctx, meta.ID, limit, leaseID)
+		globalActive, acquired, err = rt.concurrencyGate.Acquire(ctx, meta.UserID, meta.ID, limit, leaseID)
 		if err != nil {
 			return nil, err
 		}
@@ -112,6 +114,10 @@ func (rt *apiKeyRuntime) begin(ctx context.Context, plain string, leaseIDs ...st
 	state.active++
 	state.quotaDelta++
 	state.lastUsedAt = now
+	if rt.concurrencyGate == nil {
+		state.trimRecentLocked(now.Add(-apiKeyRPMWindow))
+		state.recent = append(state.recent, now)
+	}
 	result := state.overlayLocked(now)
 	if rt.concurrencyGate != nil {
 		result.ActiveRequests = globalActive
@@ -120,22 +126,58 @@ func (rt *apiKeyRuntime) begin(ctx context.Context, plain string, leaseIDs ...st
 }
 
 func (rt *apiKeyRuntime) finish(keyID uint) {
-	_ = rt.finishRequest(context.Background(), keyID, "")
+	_ = rt.finishRequest(context.Background(), 0, keyID, "")
 }
 
-func (rt *apiKeyRuntime) finishRequest(ctx context.Context, keyID uint, leaseID string) error {
+func (rt *apiKeyRuntime) finishRequest(ctx context.Context, userID, keyID uint, leaseID string) error {
 	state := rt.stateForID(keyID)
 	if state != nil {
 		state.mu.Lock()
+		if userID == 0 {
+			userID = state.meta.UserID
+		}
 		if state.active > 0 {
 			state.active--
 		}
 		state.mu.Unlock()
 	}
 	if rt.concurrencyGate != nil {
-		return rt.concurrencyGate.Release(ctx, keyID, leaseID)
+		return rt.concurrencyGate.Release(ctx, userID, keyID, leaseID)
 	}
 	return nil
+}
+
+func (rt *apiKeyRuntime) realtimeUsage(ctx context.Context, userID uint) (int64, int64, error) {
+	if rt.concurrencyGate != nil {
+		return rt.concurrencyGate.RealtimeUsage(ctx, userID)
+	}
+	now := rt.now()
+	cutoff := now.Add(-apiKeyRPMWindow)
+	var active, rpm int64
+	rt.mu.RLock()
+	states := make([]*apiKeyState, 0, len(rt.byID))
+	for _, state := range rt.byID {
+		states = append(states, state)
+	}
+	rt.mu.RUnlock()
+	for _, state := range states {
+		state.mu.Lock()
+		if state.meta.UserID == userID {
+			state.trimRecentLocked(cutoff)
+			active += int64(state.active)
+			rpm += int64(len(state.recent))
+		}
+		state.mu.Unlock()
+	}
+	return active, rpm, nil
+}
+
+func (state *apiKeyState) trimRecentLocked(cutoff time.Time) {
+	first := 0
+	for first < len(state.recent) && !state.recent[first].After(cutoff) {
+		first++
+	}
+	state.recent = state.recent[first:]
 }
 
 func (rt *apiKeyRuntime) updateKey(key domain.APIKey) {

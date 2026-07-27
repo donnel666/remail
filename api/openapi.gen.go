@@ -3843,6 +3843,15 @@ type APIKeyPatchRequest struct {
 	QuotaLimit       *int64     `json:"quotaLimit,omitempty"`
 }
 
+// APIKeyRealtimeUsageResponse defines model for APIKeyRealtimeUsageResponse.
+type APIKeyRealtimeUsageResponse struct {
+	// ActiveRequests API key requests currently executing for this user across all application instances.
+	ActiveRequests int64 `json:"activeRequests"`
+
+	// RequestsPerMinute Accepted API key requests started during the current and previous 59 one-second buckets; this is observed traffic, not a rate limit.
+	RequestsPerMinute int64 `json:"requestsPerMinute"`
+}
+
 // APIKeyResponse defines model for APIKeyResponse.
 type APIKeyResponse struct {
 	ActiveRequests   int        `json:"activeRequests"`
@@ -4125,26 +4134,41 @@ type AdminDashboardResponse struct {
 
 // AdminDashboardStats defines model for AdminDashboardStats.
 type AdminDashboardStats struct {
-	ActiveUsers                        int     `json:"activeUsers"`
-	DomainAvailableMailboxes           int     `json:"domainAvailableMailboxes"`
-	DomainAverageCodeReceiptSeconds    int     `json:"domainAverageCodeReceiptSeconds"`
-	DomainCodeReceipts                 int     `json:"domainCodeReceipts"`
-	DomainCodeSuccessRate              float32 `json:"domainCodeSuccessRate"`
-	DomainTotalMailboxes               int     `json:"domainTotalMailboxes"`
-	MicrosoftAvailableEmails           int     `json:"microsoftAvailableEmails"`
-	MicrosoftAverageCodeReceiptSeconds int     `json:"microsoftAverageCodeReceiptSeconds"`
-	MicrosoftCodeReceipts              int     `json:"microsoftCodeReceipts"`
-	MicrosoftCodeSuccessRate           float32 `json:"microsoftCodeSuccessRate"`
-	MicrosoftTotalEmails               int     `json:"microsoftTotalEmails"`
-	NewUsers                           int     `json:"newUsers"`
-	PlatformRevenue                    float32 `json:"platformRevenue"`
-	RechargeAmount                     float32 `json:"rechargeAmount"`
-	RefundAmount                       float32 `json:"refundAmount"`
-	SpendAmount                        float32 `json:"spendAmount"`
-	SuccessfulCodeReceipts             int     `json:"successfulCodeReceipts"`
-	TotalOrders                        int     `json:"totalOrders"`
-	TotalUsers                         int     `json:"totalUsers"`
-	WithdrawAmount                     float32 `json:"withdrawAmount"`
+	ActiveUsers                     int     `json:"activeUsers"`
+	DomainAvailableMailboxes        int     `json:"domainAvailableMailboxes"`
+	DomainAverageCodeReceiptSeconds int     `json:"domainAverageCodeReceiptSeconds"`
+	DomainCodeReceipts              int     `json:"domainCodeReceipts"`
+	DomainCodeSuccessRate           float32 `json:"domainCodeSuccessRate"`
+	DomainTotalMailboxes            int     `json:"domainTotalMailboxes"`
+	MicrosoftAvailableEmails        int     `json:"microsoftAvailableEmails"`
+
+	// MicrosoftAverageCodeReceiptSeconds Global average seconds from receiveStartedAt to the first matched code message for successful Microsoft code orders created in the selected range.
+	MicrosoftAverageCodeReceiptSeconds int `json:"microsoftAverageCodeReceiptSeconds"`
+
+	// MicrosoftAveragePurchaseActivationSeconds Global average seconds from receiveStartedAt to activatedAt for activated Microsoft purchase orders created in the selected range.
+	MicrosoftAveragePurchaseActivationSeconds int `json:"microsoftAveragePurchaseActivationSeconds"`
+
+	// MicrosoftCodeReceipts Successful deliveries for charged, non-history Microsoft code orders created in the selected range across all users.
+	MicrosoftCodeReceipts int `json:"microsoftCodeReceipts"`
+
+	// MicrosoftCodeSuccessRate Successful Microsoft code deliveries divided by charged, non-history Microsoft code orders created in the selected range across all users.
+	MicrosoftCodeSuccessRate float32 `json:"microsoftCodeSuccessRate"`
+
+	// MicrosoftPurchaseActivationSuccessRate Activated Microsoft purchases divided by charged Microsoft purchase orders created in the selected range across all users.
+	MicrosoftPurchaseActivationSuccessRate float32 `json:"microsoftPurchaseActivationSuccessRate"`
+
+	// MicrosoftPurchaseActivations Successfully activated charged Microsoft purchase orders created in the selected range across all users.
+	MicrosoftPurchaseActivations int     `json:"microsoftPurchaseActivations"`
+	MicrosoftTotalEmails         int     `json:"microsoftTotalEmails"`
+	NewUsers                     int     `json:"newUsers"`
+	PlatformRevenue              float32 `json:"platformRevenue"`
+	RechargeAmount               float32 `json:"rechargeAmount"`
+	RefundAmount                 float32 `json:"refundAmount"`
+	SpendAmount                  float32 `json:"spendAmount"`
+	SuccessfulCodeReceipts       int     `json:"successfulCodeReceipts"`
+	TotalOrders                  int     `json:"totalOrders"`
+	TotalUsers                   int     `json:"totalUsers"`
+	WithdrawAmount               float32 `json:"withdrawAmount"`
 }
 
 // AdminDashboardTrendPoint defines model for AdminDashboardTrendPoint.
@@ -5606,24 +5630,32 @@ type DashboardResponse struct {
 
 // DashboardStats defines model for DashboardStats.
 type DashboardStats struct {
-	AverageCodeReceiptSeconds int     `json:"averageCodeReceiptSeconds"`
-	CodeSuccessRate           float32 `json:"codeSuccessRate"`
-	HistoricalSpend           float32 `json:"historicalSpend"`
-	TodayCodeReceipts         int     `json:"todayCodeReceipts"`
-	TodayOrders               int     `json:"todayOrders"`
-	TotalCodeReceipts         int     `json:"totalCodeReceipts"`
-	TotalOrders               int     `json:"totalOrders"`
-	WalletBalance             float32 `json:"walletBalance"`
+	// AverageCodeReceiptSeconds Average seconds from receiveStartedAt to the first matched verification-code mail for successful code orders in the selected range.
+	AverageCodeReceiptSeconds int `json:"averageCodeReceiptSeconds"`
+
+	// AveragePurchaseActivationSeconds Average seconds from receiveStartedAt to activatedAt for activated purchase orders in the selected range.
+	AveragePurchaseActivationSeconds int `json:"averagePurchaseActivationSeconds"`
+
+	// CodeSuccessRate Successful code deliveries divided by charged code orders created in the selected range.
+	CodeSuccessRate float32 `json:"codeSuccessRate"`
+	HistoricalSpend float32 `json:"historicalSpend"`
+
+	// PurchaseActivationSuccessRate Activated purchase orders divided by charged purchase orders created in the selected range.
+	PurchaseActivationSuccessRate float32 `json:"purchaseActivationSuccessRate"`
+	WalletBalance                 float32 `json:"walletBalance"`
 }
 
 // DashboardTrendPoint defines model for DashboardTrendPoint.
 type DashboardTrendPoint struct {
-	AverageCodeReceiptSeconds int     `json:"averageCodeReceiptSeconds"`
-	CodeOrders                int     `json:"codeOrders"`
-	Label                     string  `json:"label"`
-	Orders                    int     `json:"orders"`
-	ReceivedCodes             int     `json:"receivedCodes"`
-	Spend                     float32 `json:"spend"`
+	ActivatedPurchases               int     `json:"activatedPurchases"`
+	AverageCodeReceiptSeconds        int     `json:"averageCodeReceiptSeconds"`
+	AveragePurchaseActivationSeconds int     `json:"averagePurchaseActivationSeconds"`
+	CodeOrders                       int     `json:"codeOrders"`
+	Label                            string  `json:"label"`
+	Orders                           int     `json:"orders"`
+	PurchaseOrders                   int     `json:"purchaseOrders"`
+	ReceivedCodes                    int     `json:"receivedCodes"`
+	Spend                            float32 `json:"spend"`
 }
 
 // DeleteProxiesRequest defines model for DeleteProxiesRequest.
@@ -10628,6 +10660,9 @@ type ServerInterface interface {
 	// Create an API key for the current user
 	// (POST /v1/apikeys)
 	PostApiKey(c *gin.Context, params PostApiKeyParams)
+	// Get current user's real-time API key usage
+	// (GET /v1/apikeys/realtime-usage)
+	GetApiKeyRealtimeUsage(c *gin.Context)
 	// Get current user's API key usage summary
 	// (GET /v1/apikeys/usage)
 	GetApiKeyUsage(c *gin.Context)
@@ -19748,6 +19783,21 @@ func (siw *ServerInterfaceWrapper) PostApiKey(c *gin.Context) {
 	siw.Handler.PostApiKey(c, params)
 }
 
+// GetApiKeyRealtimeUsage operation middleware
+func (siw *ServerInterfaceWrapper) GetApiKeyRealtimeUsage(c *gin.Context) {
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetApiKeyRealtimeUsage(c)
+}
+
 // GetApiKeyUsage operation middleware
 func (siw *ServerInterfaceWrapper) GetApiKeyUsage(c *gin.Context) {
 
@@ -22863,6 +22913,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/announcements", wrapper.GetSystemAnnouncements)
 	router.GET(options.BaseURL+"/v1/apikeys", wrapper.GetApiKeys)
 	router.POST(options.BaseURL+"/v1/apikeys", wrapper.PostApiKey)
+	router.GET(options.BaseURL+"/v1/apikeys/realtime-usage", wrapper.GetApiKeyRealtimeUsage)
 	router.GET(options.BaseURL+"/v1/apikeys/usage", wrapper.GetApiKeyUsage)
 	router.DELETE(options.BaseURL+"/v1/apikeys/:keyId", wrapper.DeleteApiKey)
 	router.GET(options.BaseURL+"/v1/apikeys/:keyId", wrapper.GetApiKey)

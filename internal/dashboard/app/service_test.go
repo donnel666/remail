@@ -10,17 +10,16 @@ import (
 // ratios, rank assignment, leaderboard name resolution) can be tested without a
 // database.
 type fakeView struct {
-	orders   []OrderBucketRow
-	receipts []ReceiptBucketRow
-	ranking  []ProjectCountRow
-	spend    []ProjectSpendRow
-	balance  float64
-	spent    float64
-	todayO   int
-	todayR   int
-	avgSecs  int
-	leaders  []LeaderRow
-	standing Standing
+	orders      []OrderBucketRow
+	receipts    []ReceiptBucketRow
+	activations []PurchaseActivationBucketRow
+	ranking     []ProjectCountRow
+	spend       []ProjectSpendRow
+	balance     float64
+	spent       float64
+	avgSecs     int
+	leaders     []LeaderRow
+	standing    Standing
 }
 
 func (f *fakeView) WalletSummary(context.Context, uint) (float64, float64, error) {
@@ -32,14 +31,14 @@ func (f *fakeView) OrderBuckets(context.Context, uint, string, time.Time, time.T
 func (f *fakeView) ReceiptBuckets(context.Context, uint, string, time.Time, time.Time) ([]ReceiptBucketRow, error) {
 	return f.receipts, nil
 }
+func (f *fakeView) PurchaseActivationBuckets(context.Context, uint, string, time.Time, time.Time) ([]PurchaseActivationBucketRow, error) {
+	return f.activations, nil
+}
 func (f *fakeView) ProjectCodeRanking(context.Context, uint, time.Time, time.Time) ([]ProjectCountRow, error) {
 	return f.ranking, nil
 }
 func (f *fakeView) ProjectSpendBuckets(context.Context, uint, []uint, string, time.Time, time.Time) ([]ProjectSpendRow, error) {
 	return f.spend, nil
-}
-func (f *fakeView) TodayCounts(context.Context, uint, time.Time) (int, int, error) {
-	return f.todayO, f.todayR, nil
 }
 func (f *fakeView) RangeAvgReceiptSeconds(context.Context, uint, time.Time, time.Time) (int, error) {
 	return f.avgSecs, nil
@@ -75,11 +74,16 @@ func TestConsoleDashboardAssembly(t *testing.T) {
 	view := &fakeView{
 		// orders in bucket 0 and 2, none in bucket 1 (must zero-fill).
 		orders: []OrderBucketRow{
-			{Bucket: keys[0], Orders: 10, CodeOrders: 6, Spend: 12.005},
-			{Bucket: keys[2], Orders: 4, CodeOrders: 3, Spend: 5.5},
+			{Bucket: keys[0], Orders: 10, CodeOrders: 6, PurchaseOrders: 4, Spend: 12.005},
+			{Bucket: keys[2], Orders: 4, CodeOrders: 3, PurchaseOrders: 1, Spend: 5.5},
 		},
 		receipts: []ReceiptBucketRow{
-			{Bucket: keys[1], Received: 5, AvgSeconds: 30},
+			{Bucket: keys[0], Received: 4, AvgSeconds: 30},
+			{Bucket: keys[2], Received: 1, AvgSeconds: 50},
+		},
+		activations: []PurchaseActivationBucketRow{
+			{Bucket: keys[0], Activated: 2, AvgSeconds: 20, TotalSeconds: 40, Timed: 2},
+			{Bucket: keys[2], Activated: 1, AvgSeconds: 40, TotalSeconds: 40, Timed: 1},
 		},
 		ranking: ranking,
 		spend: []ProjectSpendRow{
@@ -87,8 +91,6 @@ func TestConsoleDashboardAssembly(t *testing.T) {
 		},
 		balance: 640.123,
 		spent:   1200.5,
-		todayO:  3,
-		todayR:  2,
 		avgSecs: 42,
 		leaders: []LeaderRow{
 			{UserID: 7, Nickname: "", Email: "alice@example.com", Count: 20},
@@ -106,18 +108,18 @@ func TestConsoleDashboardAssembly(t *testing.T) {
 	if len(got.Trend) != 3 {
 		t.Fatalf("trend length = %d, want 3", len(got.Trend))
 	}
-	if got.Trend[1].Orders != 0 || got.Trend[1].ReceivedCodes != 5 {
-		t.Errorf("bucket 1 = %+v, want zero orders and 5 receipts", got.Trend[1])
+	if got.Trend[1].Orders != 0 || got.Trend[1].ReceivedCodes != 0 || got.Trend[1].ActivatedPurchases != 0 {
+		t.Errorf("bucket 1 = %+v, want zero-filled fulfillment metrics", got.Trend[1])
 	}
 	if got.Trend[0].Spend != 12.01 { // 12.005 rounds to 12.01
 		t.Errorf("bucket 0 spend = %v, want 12.01", got.Trend[0].Spend)
 	}
-	if got.Stats.TotalOrders != 14 || got.Stats.TotalCodeReceipts != 5 {
-		t.Errorf("stats totals = orders %d, receipts %d", got.Stats.TotalOrders, got.Stats.TotalCodeReceipts)
-	}
 	// codeSuccessRate = receipts(5) / codeOrders(9) * 100 = 55.6 (1dp).
 	if got.Stats.CodeSuccessRate != 55.6 {
 		t.Errorf("codeSuccessRate = %v, want 55.6", got.Stats.CodeSuccessRate)
+	}
+	if got.Stats.PurchaseActivationSuccessRate != 60 || got.Stats.AveragePurchaseActivationSeconds != 27 {
+		t.Errorf("purchase fulfillment = %v%% / %ds, want 60%% / 27s", got.Stats.PurchaseActivationSuccessRate, got.Stats.AveragePurchaseActivationSeconds)
 	}
 	// codeRatio = codeOrders(9) / orders(14) * 100 = round(64.28) = 64.
 	if got.CodeRatio != 64 || got.PurchaseRatio != 36 {

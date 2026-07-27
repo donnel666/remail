@@ -4672,6 +4672,29 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/apikeys/realtime-usage:
+    get:
+      operationId: getApiKeyRealtimeUsage
+      summary: Get current user's real-time API key usage
+      description: Returns only the Redis-backed live load metrics used by the console dashboard polling path.
+      tags:
+        - OpenAPI
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Current API key request concurrency and rolling 60-second request count.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIKeyRealtimeUsageResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /v1/apikeys:
     post:
       operationId: postApiKey
@@ -5686,12 +5709,12 @@ paths:
       operationId: getDashboard
       summary: Current user's console data dashboard
       description: |
-        Aggregated analytics for the signed-in user's console overview — orders,
-        code receipts, spend, project spend series, project code-receipt ranking,
-        and today/all-time cross-user successful-order leaderboards (delivered
-        code orders plus activated purchase orders) — over the selected date
-        range. Available to any authenticated user; scoped to the caller. Buckets
-        are hourly when the range is a single day, else daily.
+        Aggregated analytics for the signed-in user's console overview — code
+        receipt and purchase-activation quality, spend, project series and rankings,
+        and today/all-time cross-user successful-order
+        leaderboards (delivered code orders plus activated purchase orders) — over
+        the selected date range. Available to any authenticated user; scoped to
+        the caller. Buckets are hourly when the range is a single day, else daily.
       tags:
         - Dashboard
       security:
@@ -10751,6 +10774,22 @@ components:
           description: Current non-deleted API key count.
       additionalProperties: false
 
+    APIKeyRealtimeUsageResponse:
+      type: object
+      required:
+        - activeRequests
+        - requestsPerMinute
+      properties:
+        activeRequests:
+          type: integer
+          format: int64
+          description: API key requests currently executing for this user across all application instances.
+        requestsPerMinute:
+          type: integer
+          format: int64
+          description: Accepted API key requests started during the current and previous 59 one-second buckets; this is observed traffic, not a rate limit.
+      additionalProperties: false
+
     CreateOrderRequest:
       type: object
       required:
@@ -12005,29 +12044,27 @@ components:
       required:
         - walletBalance
         - historicalSpend
-        - todayOrders
-        - totalOrders
-        - todayCodeReceipts
-        - totalCodeReceipts
         - codeSuccessRate
         - averageCodeReceiptSeconds
+        - purchaseActivationSuccessRate
+        - averagePurchaseActivationSeconds
       properties:
         walletBalance:
           type: number
         historicalSpend:
           type: number
-        todayOrders:
-          type: integer
-        totalOrders:
-          type: integer
-        todayCodeReceipts:
-          type: integer
-        totalCodeReceipts:
-          type: integer
         codeSuccessRate:
           type: number
+          description: Successful code deliveries divided by charged code orders created in the selected range.
         averageCodeReceiptSeconds:
           type: integer
+          description: Average seconds from receiveStartedAt to the first matched verification-code mail for successful code orders in the selected range.
+        purchaseActivationSuccessRate:
+          type: number
+          description: Activated purchase orders divided by charged purchase orders created in the selected range.
+        averagePurchaseActivationSeconds:
+          type: integer
+          description: Average seconds from receiveStartedAt to activatedAt for activated purchase orders in the selected range.
       additionalProperties: false
 
     DashboardTrendPoint:
@@ -12036,8 +12073,11 @@ components:
         - label
         - orders
         - codeOrders
+        - purchaseOrders
         - receivedCodes
+        - activatedPurchases
         - averageCodeReceiptSeconds
+        - averagePurchaseActivationSeconds
         - spend
       properties:
         label:
@@ -12046,9 +12086,15 @@ components:
           type: integer
         codeOrders:
           type: integer
+        purchaseOrders:
+          type: integer
         receivedCodes:
           type: integer
+        activatedPurchases:
+          type: integer
         averageCodeReceiptSeconds:
+          type: integer
+        averagePurchaseActivationSeconds:
           type: integer
         spend:
           type: number
@@ -12128,6 +12174,9 @@ components:
         - microsoftCodeReceipts
         - microsoftCodeSuccessRate
         - microsoftAverageCodeReceiptSeconds
+        - microsoftPurchaseActivations
+        - microsoftPurchaseActivationSuccessRate
+        - microsoftAveragePurchaseActivationSeconds
         - domainTotalMailboxes
         - domainAvailableMailboxes
         - domainCodeReceipts
@@ -12160,10 +12209,22 @@ components:
           type: integer
         microsoftCodeReceipts:
           type: integer
+          description: Successful deliveries for charged, non-history Microsoft code orders created in the selected range across all users.
         microsoftCodeSuccessRate:
           type: number
+          description: Successful Microsoft code deliveries divided by charged, non-history Microsoft code orders created in the selected range across all users.
         microsoftAverageCodeReceiptSeconds:
           type: integer
+          description: Global average seconds from receiveStartedAt to the first matched code message for successful Microsoft code orders created in the selected range.
+        microsoftPurchaseActivations:
+          type: integer
+          description: Successfully activated charged Microsoft purchase orders created in the selected range across all users.
+        microsoftPurchaseActivationSuccessRate:
+          type: number
+          description: Activated Microsoft purchases divided by charged Microsoft purchase orders created in the selected range across all users.
+        microsoftAveragePurchaseActivationSeconds:
+          type: integer
+          description: Global average seconds from receiveStartedAt to activatedAt for activated Microsoft purchase orders created in the selected range.
         domainTotalMailboxes:
           type: integer
         domainAvailableMailboxes:

@@ -1447,6 +1447,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/apikeys/realtime-usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get current user's real-time API key usage
+         * @description Returns only the Redis-backed live load metrics used by the console dashboard polling path.
+         */
+        get: operations["getApiKeyRealtimeUsage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/apikeys": {
         parameters: {
             query?: never;
@@ -1721,12 +1741,12 @@ export interface paths {
         };
         /**
          * Current user's console data dashboard
-         * @description Aggregated analytics for the signed-in user's console overview — orders,
-         *     code receipts, spend, project spend series, project code-receipt ranking,
-         *     and today/all-time cross-user successful-order leaderboards (delivered
-         *     code orders plus activated purchase orders) — over the selected date
-         *     range. Available to any authenticated user; scoped to the caller. Buckets
-         *     are hourly when the range is a single day, else daily.
+         * @description Aggregated analytics for the signed-in user's console overview — code
+         *     receipt and purchase-activation quality, spend, project series and rankings,
+         *     and today/all-time cross-user successful-order
+         *     leaderboards (delivered code orders plus activated purchase orders) — over
+         *     the selected date range. Available to any authenticated user; scoped to
+         *     the caller. Buckets are hourly when the range is a single day, else daily.
          */
         get: operations["getDashboard"];
         put?: never;
@@ -3657,6 +3677,18 @@ export interface components {
              */
             keyCount: number;
         };
+        APIKeyRealtimeUsageResponse: {
+            /**
+             * Format: int64
+             * @description API key requests currently executing for this user across all application instances.
+             */
+            activeRequests: number;
+            /**
+             * Format: int64
+             * @description Accepted API key requests started during the current and previous 59 one-second buckets; this is observed traffic, not a rate limit.
+             */
+            requestsPerMinute: number;
+        };
         CreateOrderRequest: {
             projectId: number;
             productId: number;
@@ -4122,19 +4154,24 @@ export interface components {
         DashboardStats: {
             walletBalance: number;
             historicalSpend: number;
-            todayOrders: number;
-            totalOrders: number;
-            todayCodeReceipts: number;
-            totalCodeReceipts: number;
+            /** @description Successful code deliveries divided by charged code orders created in the selected range. */
             codeSuccessRate: number;
+            /** @description Average seconds from receiveStartedAt to the first matched verification-code mail for successful code orders in the selected range. */
             averageCodeReceiptSeconds: number;
+            /** @description Activated purchase orders divided by charged purchase orders created in the selected range. */
+            purchaseActivationSuccessRate: number;
+            /** @description Average seconds from receiveStartedAt to activatedAt for activated purchase orders in the selected range. */
+            averagePurchaseActivationSeconds: number;
         };
         DashboardTrendPoint: {
             label: string;
             orders: number;
             codeOrders: number;
+            purchaseOrders: number;
             receivedCodes: number;
+            activatedPurchases: number;
             averageCodeReceiptSeconds: number;
+            averagePurchaseActivationSeconds: number;
             spend: number;
         };
         DashboardProjectSeries: {
@@ -4167,9 +4204,18 @@ export interface components {
             newUsers: number;
             microsoftTotalEmails: number;
             microsoftAvailableEmails: number;
+            /** @description Successful deliveries for charged, non-history Microsoft code orders created in the selected range across all users. */
             microsoftCodeReceipts: number;
+            /** @description Successful Microsoft code deliveries divided by charged, non-history Microsoft code orders created in the selected range across all users. */
             microsoftCodeSuccessRate: number;
+            /** @description Global average seconds from receiveStartedAt to the first matched code message for successful Microsoft code orders created in the selected range. */
             microsoftAverageCodeReceiptSeconds: number;
+            /** @description Successfully activated charged Microsoft purchase orders created in the selected range across all users. */
+            microsoftPurchaseActivations: number;
+            /** @description Activated Microsoft purchases divided by charged Microsoft purchase orders created in the selected range across all users. */
+            microsoftPurchaseActivationSuccessRate: number;
+            /** @description Global average seconds from receiveStartedAt to activatedAt for activated Microsoft purchase orders created in the selected range. */
+            microsoftAveragePurchaseActivationSeconds: number;
             domainTotalMailboxes: number;
             domainAvailableMailboxes: number;
             domainCodeReceipts: number;
@@ -12223,6 +12269,35 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["APIKeyUsageResponse"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getApiKeyRealtimeUsage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current API key request concurrency and rolling 60-second request count. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIKeyRealtimeUsageResponse"];
                 };
             };
             /** @description Authentication required */

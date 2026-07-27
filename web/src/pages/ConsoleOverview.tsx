@@ -17,6 +17,10 @@ import {
   getDashboardData,
   type DashboardData,
 } from "@/lib/dashboard-api";
+import {
+  getAPIKeyRealtimeUsage,
+  type APIKeyRealtimeUsageResponse,
+} from "@/lib/openapi-credentials-api";
 
 import {
   DashboardAnalysisPanel,
@@ -39,9 +43,14 @@ export default function ConsoleOverview() {
   const dateRangePresets = useMemo(() => createDateRangePresets(t), [t]);
   const [createdAtRange, setCreatedAtRange] = useSharedDashboardDateRange();
   const [data, setData] = useState<DashboardData | null>(null);
+  const [usage, setUsage] = useState<APIKeyRealtimeUsageResponse | null>(null);
+  const [realtimeLoading, setRealtimeLoading] = useState(true);
+  const [realtimeUnavailable, setRealtimeUnavailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [analysisView, setAnalysisView] = useState<AnalysisView>("spend");
   const requestSequence = useRef(0);
+  const realtimeGeneration = useRef(0);
+  const realtimeInFlight = useRef<Promise<void> | null>(null);
   const displayName = currentUser?.nickname || currentUser?.name || t("User");
 
   const load = useCallback(async () => {
@@ -70,6 +79,67 @@ export default function ConsoleOverview() {
     };
   }, [load]);
 
+  const refreshRealtimeUsage = useCallback(async () => {
+    if (realtimeInFlight.current) {
+      await realtimeInFlight.current;
+      return;
+    }
+    const generation = realtimeGeneration.current;
+    const request = (async () => {
+      try {
+        const result = await getAPIKeyRealtimeUsage();
+        if (generation !== realtimeGeneration.current) return;
+        setUsage(result);
+        setRealtimeUnavailable(false);
+      } catch {
+        if (generation !== realtimeGeneration.current) return;
+        setUsage(null);
+        setRealtimeUnavailable(true);
+      } finally {
+        if (generation === realtimeGeneration.current) setRealtimeLoading(false);
+      }
+    })();
+    realtimeInFlight.current = request;
+    try {
+      await request;
+    } finally {
+      if (realtimeInFlight.current === request) realtimeInFlight.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    let stopped = false;
+    let polling = false;
+    let timer: number | undefined;
+    const schedule = () => {
+      if (!stopped && !document.hidden) {
+        timer = window.setTimeout(() => void poll(), 10_000);
+      }
+    };
+    const poll = async () => {
+      if (stopped || polling || document.hidden) return;
+      polling = true;
+      await refreshRealtimeUsage();
+      polling = false;
+      schedule();
+    };
+    const handleVisibilityChange = () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+      timer = undefined;
+      if (!document.hidden) void poll();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    void poll();
+    return () => {
+      stopped = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      realtimeGeneration.current += 1;
+      realtimeInFlight.current = null;
+    };
+  }, [refreshRealtimeUsage]);
+
   const greeting = t(greetingKey(new Date().getHours()));
 
   return (
@@ -83,12 +153,21 @@ export default function ConsoleOverview() {
           const next = normalizeDateRangeValue(value);
           if (next.length === 2) setCreatedAtRange(next);
         }}
-        onRefresh={() => void load()}
+        onRefresh={() => {
+          void load();
+          void refreshRealtimeUsage();
+        }}
         range={createdAtRange}
         t={t}
       />
 
-      <DashboardSummaryCards data={data} loading={loading} />
+      <DashboardSummaryCards
+        data={data}
+        loading={loading}
+        realtimeLoading={realtimeLoading}
+        realtimeUnavailable={realtimeUnavailable}
+        usage={usage}
+      />
 
       <section className="mb-4 flex flex-col gap-6">
         <RankingPanel

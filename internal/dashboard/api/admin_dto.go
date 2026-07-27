@@ -14,26 +14,29 @@ type AdminDashboardResponse struct {
 }
 
 type AdminDashboardStats struct {
-	RechargeAmount                     float64 `json:"rechargeAmount"`
-	SpendAmount                        float64 `json:"spendAmount"`
-	RefundAmount                       float64 `json:"refundAmount"`
-	WithdrawAmount                     float64 `json:"withdrawAmount"`
-	PlatformRevenue                    float64 `json:"platformRevenue"`
-	TotalOrders                        int     `json:"totalOrders"`
-	SuccessfulCodeReceipts             int     `json:"successfulCodeReceipts"`
-	TotalUsers                         int     `json:"totalUsers"`
-	ActiveUsers                        int     `json:"activeUsers"`
-	NewUsers                           int     `json:"newUsers"`
-	MicrosoftTotalEmails               int     `json:"microsoftTotalEmails"`
-	MicrosoftAvailableEmails           int     `json:"microsoftAvailableEmails"`
-	MicrosoftCodeReceipts              int     `json:"microsoftCodeReceipts"`
-	MicrosoftCodeSuccessRate           float64 `json:"microsoftCodeSuccessRate"`
-	MicrosoftAverageCodeReceiptSeconds int     `json:"microsoftAverageCodeReceiptSeconds"`
-	DomainTotalMailboxes               int     `json:"domainTotalMailboxes"`
-	DomainAvailableMailboxes           int     `json:"domainAvailableMailboxes"`
-	DomainCodeReceipts                 int     `json:"domainCodeReceipts"`
-	DomainCodeSuccessRate              float64 `json:"domainCodeSuccessRate"`
-	DomainAverageCodeReceiptSeconds    int     `json:"domainAverageCodeReceiptSeconds"`
+	RechargeAmount                            float64 `json:"rechargeAmount"`
+	SpendAmount                               float64 `json:"spendAmount"`
+	RefundAmount                              float64 `json:"refundAmount"`
+	WithdrawAmount                            float64 `json:"withdrawAmount"`
+	PlatformRevenue                           float64 `json:"platformRevenue"`
+	TotalOrders                               int     `json:"totalOrders"`
+	SuccessfulCodeReceipts                    int     `json:"successfulCodeReceipts"`
+	TotalUsers                                int     `json:"totalUsers"`
+	ActiveUsers                               int     `json:"activeUsers"`
+	NewUsers                                  int     `json:"newUsers"`
+	MicrosoftTotalEmails                      int     `json:"microsoftTotalEmails"`
+	MicrosoftAvailableEmails                  int     `json:"microsoftAvailableEmails"`
+	MicrosoftCodeReceipts                     int     `json:"microsoftCodeReceipts"`
+	MicrosoftCodeSuccessRate                  float64 `json:"microsoftCodeSuccessRate"`
+	MicrosoftAverageCodeReceiptSeconds        int     `json:"microsoftAverageCodeReceiptSeconds"`
+	MicrosoftPurchaseActivations              int     `json:"microsoftPurchaseActivations"`
+	MicrosoftPurchaseActivationSuccessRate    float64 `json:"microsoftPurchaseActivationSuccessRate"`
+	MicrosoftAveragePurchaseActivationSeconds int     `json:"microsoftAveragePurchaseActivationSeconds"`
+	DomainTotalMailboxes                      int     `json:"domainTotalMailboxes"`
+	DomainAvailableMailboxes                  int     `json:"domainAvailableMailboxes"`
+	DomainCodeReceipts                        int     `json:"domainCodeReceipts"`
+	DomainCodeSuccessRate                     float64 `json:"domainCodeSuccessRate"`
+	DomainAverageCodeReceiptSeconds           int     `json:"domainAverageCodeReceiptSeconds"`
 }
 
 type AdminDashboardTrendPoint struct {

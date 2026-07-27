@@ -45,6 +45,7 @@ func (r *AdminViewRepo) CodeOrderTrend(ctx context.Context, sqlFormat string, fr
 		Table("orders").
 		Select(sel).
 		Where("service_mode = 'code' AND debit_tx_id IS NOT NULL AND created_at >= ? AND created_at <= ?", from.UTC(), to.UTC()).
+		Where(historyOrderExclude).
 		Group("bucket, COALESCE(allocation_type, product_type)").
 		Scan(&rows).Error; err != nil {
 		return nil, err
@@ -56,7 +57,7 @@ func (r *AdminViewRepo) CodeReceiptTrend(ctx context.Context, sqlFormat string, 
 	// Anchored to the order's created_at (like the console) so receipts stay a
 	// subset of code orders in the same bucket; split by the delivered resource type.
 	sel := fmt.Sprintf(
-		"DATE_FORMAT(o.created_at, '%s') AS bucket, COALESCE(o.allocation_type, o.product_type) AS product_type, COUNT(*) AS received, COALESCE(GREATEST(ROUND(AVG(TIMESTAMPDIFF(SECOND, o.receive_started_at, h.message_received_at))),0),0) AS avg_seconds",
+		"DATE_FORMAT(o.created_at, '%s') AS bucket, COALESCE(o.allocation_type, o.product_type) AS product_type, COUNT(*) AS received, COALESCE(ROUND(AVG(GREATEST(TIMESTAMPDIFF(SECOND, o.receive_started_at, h.message_received_at),0))),0) AS avg_seconds, COALESCE(SUM(CASE WHEN o.receive_started_at IS NOT NULL THEN GREATEST(TIMESTAMPDIFF(SECOND, o.receive_started_at, h.message_received_at),0) ELSE 0 END),0) AS total_seconds, COUNT(o.receive_started_at) AS timed",
 		sqlFormat,
 	)
 	var rows []dashboardapp.TypeReceiptBucket
@@ -64,12 +65,24 @@ func (r *AdminViewRepo) CodeReceiptTrend(ctx context.Context, sqlFormat string, 
 		Table("mailmatch_order_delivery_heads AS h").
 		Joins("JOIN orders AS o ON o.id = h.order_id").
 		Select(sel).
-		Where("o.service_mode = 'code' AND o.created_at >= ? AND o.created_at <= ?", from.UTC(), to.UTC()).
+		Where("o.service_mode = 'code' AND o.debit_tx_id IS NOT NULL AND o.created_at >= ? AND o.created_at <= ?", from.UTC(), to.UTC()).
+		Where("o." + historyOrderExclude).
 		Group("bucket, COALESCE(o.allocation_type, o.product_type)").
 		Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 	return rows, nil
+}
+
+func (r *AdminViewRepo) MicrosoftPurchaseSummary(ctx context.Context, from, to time.Time) (dashboardapp.PurchaseSummary, error) {
+	var summary dashboardapp.PurchaseSummary
+	err := r.db.WithContext(ctx).
+		Table("orders").
+		Select("COUNT(*) AS orders, COUNT(activated_at) AS activated, COALESCE(SUM(CASE WHEN activated_at IS NOT NULL AND receive_started_at IS NOT NULL THEN GREATEST(TIMESTAMPDIFF(SECOND, receive_started_at, activated_at),0) ELSE 0 END),0) AS total_seconds, COUNT(CASE WHEN activated_at IS NOT NULL AND receive_started_at IS NOT NULL THEN 1 END) AS timed").
+		Where("service_mode = 'purchase' AND debit_tx_id IS NOT NULL AND COALESCE(allocation_type, product_type) = 'microsoft' AND created_at >= ? AND created_at <= ?", from.UTC(), to.UTC()).
+		Where(historyOrderExclude).
+		Scan(&summary).Error
+	return summary, err
 }
 
 func (r *AdminViewRepo) NewUserTrend(ctx context.Context, sqlFormat string, from, to time.Time) ([]dashboardapp.CountBucket, error) {
@@ -165,7 +178,8 @@ func (r *AdminViewRepo) ProjectCodeRanking(ctx context.Context, from, to time.Ti
 		Joins("JOIN orders AS o ON o.id = h.order_id").
 		Joins("LEFT JOIN projects AS p ON p.id = o.project_id").
 		Select("o.project_id AS project_id, COALESCE(p.name, '') AS name, COUNT(*) AS count").
-		Where("o.service_mode = 'code' AND o.created_at >= ? AND o.created_at <= ?", from.UTC(), to.UTC()).
+		Where("o.service_mode = 'code' AND o.debit_tx_id IS NOT NULL AND o.created_at >= ? AND o.created_at <= ?", from.UTC(), to.UTC()).
+		Where("o." + historyOrderExclude).
 		Group("o.project_id, name").
 		Order("count DESC, o.project_id ASC").
 		Limit(limit).

@@ -45,7 +45,7 @@ func LoadAPIKey(useCase *openapiapp.UseCase) gin.HandlerFunc {
 		defer func() {
 			finishCtx, finishCancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer finishCancel()
-			_ = useCase.FinishAPIKeyRequest(finishCtx, result.APIKeyID, result.LeaseID)
+			_ = useCase.FinishAPIKeyRequest(finishCtx, result.UserID, result.APIKeyID, result.LeaseID)
 		}()
 		c.Next()
 	}

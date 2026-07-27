@@ -3,8 +3,7 @@ package api
 import dashboardapp "github.com/donnel666/remail/internal/dashboard/app"
 
 // The DTOs mirror the api/openapi.yaml Dashboard* schemas 1:1 (only the fields
-// the console panels consume). Field names match the frontend interfaces so the
-// presentation stays untouched.
+// the console panels consume). Field names match the frontend interfaces.
 
 type DashboardResponse struct {
 	Stats                     DashboardStats           `json:"stats"`
@@ -20,23 +19,24 @@ type DashboardResponse struct {
 }
 
 type DashboardStats struct {
-	WalletBalance             float64 `json:"walletBalance"`
-	HistoricalSpend           float64 `json:"historicalSpend"`
-	TodayOrders               int     `json:"todayOrders"`
-	TotalOrders               int     `json:"totalOrders"`
-	TodayCodeReceipts         int     `json:"todayCodeReceipts"`
-	TotalCodeReceipts         int     `json:"totalCodeReceipts"`
-	CodeSuccessRate           float64 `json:"codeSuccessRate"`
-	AverageCodeReceiptSeconds int     `json:"averageCodeReceiptSeconds"`
+	WalletBalance                    float64 `json:"walletBalance"`
+	HistoricalSpend                  float64 `json:"historicalSpend"`
+	CodeSuccessRate                  float64 `json:"codeSuccessRate"`
+	AverageCodeReceiptSeconds        int     `json:"averageCodeReceiptSeconds"`
+	PurchaseActivationSuccessRate    float64 `json:"purchaseActivationSuccessRate"`
+	AveragePurchaseActivationSeconds int     `json:"averagePurchaseActivationSeconds"`
 }
 
 type DashboardTrendPoint struct {
-	Label                     string  `json:"label"`
-	Orders                    int     `json:"orders"`
-	CodeOrders                int     `json:"codeOrders"`
-	ReceivedCodes             int     `json:"receivedCodes"`
-	AverageCodeReceiptSeconds int     `json:"averageCodeReceiptSeconds"`
-	Spend                     float64 `json:"spend"`
+	Label                            string  `json:"label"`
+	Orders                           int     `json:"orders"`
+	CodeOrders                       int     `json:"codeOrders"`
+	PurchaseOrders                   int     `json:"purchaseOrders"`
+	ReceivedCodes                    int     `json:"receivedCodes"`
+	ActivatedPurchases               int     `json:"activatedPurchases"`
+	AverageCodeReceiptSeconds        int     `json:"averageCodeReceiptSeconds"`
+	AveragePurchaseActivationSeconds int     `json:"averagePurchaseActivationSeconds"`
+	Spend                            float64 `json:"spend"`
 }
 
 type DashboardProjectSeries struct {
