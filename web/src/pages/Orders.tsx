@@ -17,7 +17,7 @@ import {
   IllustrationNoResultDark,
 } from "@douyinfe/semi-illustrations";
 import { useNavigate } from "@tanstack/react-router";
-import { Layers, SlidersHorizontal } from "lucide-react";
+import { SlidersHorizontal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { CardPro } from "@/components/semi/card-pro";
@@ -146,7 +146,7 @@ export default function Orders() {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
 
-  const [activeDomain, setActiveDomain] = useState("all");
+  const [activeProjectId, setActiveProjectId] = useState("all");
   const [searchKeyword, setSearchKeyword] = useState("");
   const [createdAtRange, setCreatedAtRange] = useState<DateRangeValue>([]);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -196,9 +196,9 @@ export default function Orders() {
   }, [createdAtRange, debouncedSearchKeyword, serviceModeFilter, statusFilter]);
 
   const orderListFilter = useMemo<OrderListFilter>(() => {
-    if (activeDomain === "all") return orderStatsFilter;
-    return { ...orderStatsFilter, domain: activeDomain };
-  }, [activeDomain, orderStatsFilter]);
+    if (activeProjectId === "all") return orderStatsFilter;
+    return { ...orderStatsFilter, projectId: Number(activeProjectId) };
+  }, [activeProjectId, orderStatsFilter]);
 
   const loadOrderBlock = useCallback(
     async (offset: number, limit: number, cursor?: { afterId?: number }) => {
@@ -250,16 +250,13 @@ export default function Orders() {
     await Promise.all([refreshStats(), refreshList()]);
   }, [refreshList, refreshStats]);
 
-  const domainCounts = useMemo(
-    () =>
-      orderFacets?.domains?.map(
-        (item) => [item.key, item.count] as [string, number]
-      ) ?? [],
+  const projectFacets = useMemo(
+    () => orderFacets?.projects ?? [],
     [orderFacets]
   );
-  const domainSet = useMemo(
-    () => new Set(domainCounts.map(([domain]) => domain)),
-    [domainCounts]
+  const projectIdSet = useMemo(
+    () => new Set(projectFacets.map((project) => String(project.projectId))),
+    [projectFacets]
   );
 
   const orderStats = useMemo(() => {
@@ -285,10 +282,14 @@ export default function Orders() {
     Number(statusFilter !== "all") + Number(serviceModeFilter !== "all");
 
   useEffect(() => {
-    if (orderFacets && activeDomain !== "all" && !domainSet.has(activeDomain)) {
-      setActiveDomain("all");
+    if (
+      orderFacets &&
+      activeProjectId !== "all" &&
+      !projectIdSet.has(activeProjectId)
+    ) {
+      setActiveProjectId("all");
     }
-  }, [activeDomain, domainSet, orderFacets]);
+  }, [activeProjectId, orderFacets, projectIdSet]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const safePage = Math.min(activePage, totalPages);
@@ -297,8 +298,8 @@ export default function Orders() {
     if (safePage !== activePage) setActivePage(safePage);
   }, [activePage, safePage]);
 
-  const selectDomain = (domain: string) => {
-    setActiveDomain(domain);
+  const selectProject = (projectId: string) => {
+    setActiveProjectId(projectId);
     setActivePage(1);
     setSelectedKeys([]);
   };
@@ -309,7 +310,7 @@ export default function Orders() {
     setCreatedAtRange([]);
     setStatusFilter("all");
     setServiceModeFilter("all");
-    setActiveDomain("all");
+    setActiveProjectId("all");
     setActivePage(1);
     setSelectedKeys([]);
   };
@@ -717,10 +718,10 @@ export default function Orders() {
 
   const tabsArea = (
     <Tabs
-      activeKey={activeDomain}
+      activeKey={activeProjectId}
       type="card"
       collapsible
-      onChange={(key) => selectDomain(String(key))}
+      onChange={(key) => selectProject(String(key))}
       className="mb-2"
     >
       <Tabs.TabPane
@@ -728,25 +729,31 @@ export default function Orders() {
         tab={
           <span className="flex items-center gap-2">
             {t("All")}
-            <Tag color={activeDomain === "all" ? "red" : "grey"} shape="circle">
+            <Tag color={activeProjectId === "all" ? "red" : "grey"} shape="circle">
               {orderStats.status.all}
             </Tag>
           </span>
         }
       />
-      {domainCounts.map(([domain, count]) => (
+      {projectFacets.map((project) => (
         <Tabs.TabPane
-          key={domain}
-          itemKey={domain}
+          key={project.projectId}
+          itemKey={String(project.projectId)}
           tab={
             <span className="flex items-center gap-2">
-              <Layers size={14} />
-              {domain}
+              <ProjectIcon
+                logoUrl={project.logoUrl}
+                name={project.name}
+                size={16}
+              />
+              {project.name}
               <Tag
-                color={activeDomain === domain ? "red" : "grey"}
+                color={
+                  activeProjectId === String(project.projectId) ? "red" : "grey"
+                }
                 shape="circle"
               >
-                {count}
+                {project.count}
               </Tag>
             </span>
           }

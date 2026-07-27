@@ -5005,6 +5005,11 @@ paths:
           schema:
             type: string
           description: Prefix search by order number or delivery email; token-prefix search by user email/nickname or project name/platform; exact user/project ID search.
+        - name: projectId
+          in: query
+          description: Exact project filter used by the order project tabs.
+          schema:
+            type: integer
         - name: domain
           in: query
           description: Delivery email domain filter; the "@" prefix is optional.
@@ -11142,6 +11147,24 @@ components:
           format: int64
       additionalProperties: false
 
+    OrderProjectFacet:
+      type: object
+      required:
+        - projectId
+        - name
+        - count
+      properties:
+        projectId:
+          type: integer
+        name:
+          type: string
+        logoUrl:
+          type: string
+        count:
+          type: integer
+          format: int64
+      additionalProperties: false
+
     OrderKeyFacet:
       type: object
       required:
@@ -11161,12 +11184,17 @@ components:
       required:
         - status
         - serviceMode
+        - projects
         - domains
       properties:
         status:
           $ref: "#/components/schemas/OrderStatusFacets"
         serviceMode:
           $ref: "#/components/schemas/OrderServiceModeFacets"
+        projects:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderProjectFacet"
         domains:
           type: array
           items:

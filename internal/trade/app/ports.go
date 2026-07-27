@@ -306,6 +306,7 @@ type OrderListFilter struct {
 	Status      domain.OrderStatus
 	ServiceMode domain.ServiceMode
 	Search      string
+	ProjectID   uint
 	// Domain filters by the delivery email domain without the "@" prefix.
 	Domain      string
 	CreatedFrom *time.Time
@@ -329,6 +330,13 @@ type OrderServiceModeFacets struct {
 	Purchase int64
 }
 
+type OrderProjectFacet struct {
+	ProjectID uint
+	Name      string
+	LogoURL   string
+	Count     int64
+}
+
 type OrderKeyFacet struct {
 	Key   string
 	Count int64
@@ -339,6 +347,7 @@ type OrderKeyFacet struct {
 type OrderListFacets struct {
 	Status      OrderStatusFacets
 	ServiceMode OrderServiceModeFacets
+	Projects    []OrderProjectFacet
 	Domains     []OrderKeyFacet
 }
 
@@ -1282,7 +1291,7 @@ func (uc *UseCase) GetOrder(ctx context.Context, orderNo string, userID uint, is
 		return nil, err
 	}
 	displayed := []CheckoutResult{*result}
-	if err := uc.attachProjectDisplays(ctx, displayed); err != nil {
+	if err := uc.attachProjectDisplays(ctx, displayed, nil); err != nil {
 		return nil, err
 	}
 	result.ProjectName = displayed[0].ProjectName
@@ -1321,10 +1330,7 @@ func (uc *UseCase) ListOrders(ctx context.Context, filter OrderListFilter, offse
 		NextAfterID: nextAfterID,
 		Facets:      facets,
 	}
-	if len(orderIDs) == 0 {
-		return list, nil
-	}
-	if uc.deliveries != nil {
+	if uc.deliveries != nil && len(orderIDs) > 0 {
 		deliveries, err := uc.deliveries.ListOrderDeliveries(ctx, orderIDs)
 		if err != nil {
 			return nil, err
@@ -1333,7 +1339,7 @@ func (uc *UseCase) ListOrders(ctx context.Context, filter OrderListFilter, offse
 			attachOrderDeliverySummary(&results[i], deliveries[results[i].Order.ID])
 		}
 	}
-	if err := uc.attachProjectDisplays(ctx, results); err != nil {
+	if err := uc.attachProjectDisplays(ctx, results, facets.Projects); err != nil {
 		return nil, err
 	}
 	if err := uc.attachOwners(ctx, filter, results); err != nil {
@@ -1377,22 +1383,27 @@ func (uc *UseCase) attachOwners(ctx context.Context, filter OrderListFilter, res
 	return nil
 }
 
-func (uc *UseCase) attachProjectDisplays(ctx context.Context, results []CheckoutResult) error {
-	if uc.projectDisplays == nil || len(results) == 0 {
+func (uc *UseCase) attachProjectDisplays(ctx context.Context, results []CheckoutResult, facets []OrderProjectFacet) error {
+	if uc.projectDisplays == nil || len(results)+len(facets) == 0 {
 		return nil
 	}
-	idSet := make(map[uint]struct{}, len(results))
-	ids := make([]uint, 0, len(results))
-	for i := range results {
-		id := results[i].Order.ProjectID
+	idSet := make(map[uint]struct{}, len(results)+len(facets))
+	ids := make([]uint, 0, len(results)+len(facets))
+	addID := func(id uint) {
 		if id == 0 {
-			continue
+			return
 		}
 		if _, ok := idSet[id]; ok {
-			continue
+			return
 		}
 		idSet[id] = struct{}{}
 		ids = append(ids, id)
+	}
+	for i := range results {
+		addID(results[i].Order.ProjectID)
+	}
+	for i := range facets {
+		addID(facets[i].ProjectID)
 	}
 	if len(ids) == 0 {
 		return nil
@@ -1405,6 +1416,11 @@ func (uc *UseCase) attachProjectDisplays(ctx context.Context, results []Checkout
 		display := displays[results[i].Order.ProjectID]
 		results[i].ProjectName = display.Name
 		results[i].ProjectLogoURL = display.LogoURL
+	}
+	for i := range facets {
+		display := displays[facets[i].ProjectID]
+		facets[i].Name = display.Name
+		facets[i].LogoURL = display.LogoURL
 	}
 	return nil
 }

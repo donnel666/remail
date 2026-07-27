@@ -3836,6 +3836,13 @@ export interface components {
             /** Format: int64 */
             purchase: number;
         };
+        OrderProjectFacet: {
+            projectId: number;
+            name: string;
+            logoUrl?: string;
+            /** Format: int64 */
+            count: number;
+        };
         OrderKeyFacet: {
             key: string;
             /** Format: int64 */
@@ -3845,6 +3852,7 @@ export interface components {
         OrderListFacets: {
             status: components["schemas"]["OrderStatusFacets"];
             serviceMode: components["schemas"]["OrderServiceModeFacets"];
+            projects: components["schemas"]["OrderProjectFacet"][];
             domains: components["schemas"]["OrderKeyFacet"][];
         };
         OrderEventResponse: {
@@ -12580,6 +12588,8 @@ export interface operations {
                 serviceMode?: "purchase" | "code";
                 /** @description Prefix search by order number or delivery email; token-prefix search by user email/nickname or project name/platform; exact user/project ID search. */
                 search?: string;
+                /** @description Exact project filter used by the order project tabs. */
+                projectId?: number;
                 /** @description Delivery email domain filter; the "@" prefix is optional. */
                 domain?: string;
                 createdFrom?: string;

@@ -24,8 +24,9 @@ func (s *projectDisplayPortSpy) ProjectDisplays(_ context.Context, projectIDs []
 
 func TestAttachProjectDisplaysUsesOneDeduplicatedBatchAndFallsBackToEmpty(t *testing.T) {
 	port := &projectDisplayPortSpy{displays: map[uint]ProjectDisplay{
-		7: {Name: "Project Seven", LogoURL: "/v1/projects/logos/seven"},
-		8: {Name: "Project Eight"},
+		7:  {Name: "Project Seven", LogoURL: "/v1/projects/logos/seven"},
+		8:  {Name: "Project Eight"},
+		10: {Name: "Project Ten", LogoURL: "/v1/projects/logos/ten"},
 	}}
 	uc := &UseCase{projectDisplays: port}
 	results := []CheckoutResult{
@@ -35,10 +36,11 @@ func TestAttachProjectDisplaysUsesOneDeduplicatedBatchAndFallsBackToEmpty(t *tes
 		{Order: domain.Order{ProjectID: 9}}, // Missing/deleted project.
 		{Order: domain.Order{}},
 	}
+	facets := []OrderProjectFacet{{ProjectID: 8}, {ProjectID: 10}}
 
-	require.NoError(t, uc.attachProjectDisplays(context.Background(), results))
+	require.NoError(t, uc.attachProjectDisplays(context.Background(), results, facets))
 	require.Equal(t, 1, port.calls)
-	require.Equal(t, []uint{7, 8, 9}, port.ids)
+	require.Equal(t, []uint{7, 8, 9, 10}, port.ids)
 	require.Equal(t, "Project Seven", results[0].ProjectName)
 	require.Equal(t, "/v1/projects/logos/seven", results[0].ProjectLogoURL)
 	require.Equal(t, "Project Seven", results[1].ProjectName)
@@ -49,6 +51,10 @@ func TestAttachProjectDisplaysUsesOneDeduplicatedBatchAndFallsBackToEmpty(t *tes
 	require.Empty(t, results[3].ProjectLogoURL)
 	require.Empty(t, results[4].ProjectName)
 	require.Empty(t, results[4].ProjectLogoURL)
+	require.Equal(t, "Project Eight", facets[0].Name)
+	require.Empty(t, facets[0].LogoURL)
+	require.Equal(t, "Project Ten", facets[1].Name)
+	require.Equal(t, "/v1/projects/logos/ten", facets[1].LogoURL)
 }
 
 func TestAttachProjectDisplaysPropagatesBatchLookupError(t *testing.T) {
@@ -58,7 +64,7 @@ func TestAttachProjectDisplaysPropagatesBatchLookupError(t *testing.T) {
 
 	err := uc.attachProjectDisplays(context.Background(), []CheckoutResult{{
 		Order: domain.Order{ProjectID: 7},
-	}})
+	}}, nil)
 
 	require.ErrorIs(t, err, wantErr)
 	require.Equal(t, 1, port.calls)

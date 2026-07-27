@@ -6239,6 +6239,7 @@ type OrderKeyFacet struct {
 // OrderListFacets List aggregates; each dimension is computed with the current filter minus that dimension itself.
 type OrderListFacets struct {
 	Domains     []OrderKeyFacet        `json:"domains"`
+	Projects    []OrderProjectFacet    `json:"projects"`
 	ServiceMode OrderServiceModeFacets `json:"serviceMode"`
 	Status      OrderStatusFacets      `json:"status"`
 }
@@ -6269,6 +6270,14 @@ type OrderOwnerSummary struct {
 	Nickname  *string `json:"nickname,omitempty"`
 	Role      *string `json:"role,omitempty"`
 	UserId    int     `json:"userId"`
+}
+
+// OrderProjectFacet defines model for OrderProjectFacet.
+type OrderProjectFacet struct {
+	Count     int64   `json:"count"`
+	LogoUrl   *string `json:"logoUrl,omitempty"`
+	Name      string  `json:"name"`
+	ProjectId int     `json:"projectId"`
 }
 
 // OrderResponse defines model for OrderResponse.
@@ -8915,6 +8924,9 @@ type GetOrdersParams struct {
 
 	// Search Prefix search by order number or delivery email; token-prefix search by user email/nickname or project name/platform; exact user/project ID search.
 	Search *string `form:"search,omitempty" json:"search,omitempty"`
+
+	// ProjectId Exact project filter used by the order project tabs.
+	ProjectId *int `form:"projectId,omitempty" json:"projectId,omitempty"`
 
 	// Domain Delivery email domain filter; the "@" prefix is optional.
 	Domain      *string    `form:"domain,omitempty" json:"domain,omitempty"`
@@ -20312,6 +20324,14 @@ func (siw *ServerInterfaceWrapper) GetOrders(c *gin.Context) {
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", c.Request.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
 	if err != nil {
 		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter search: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "projectId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "projectId", c.Request.URL.Query(), &params.ProjectId, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectId: %w", err), http.StatusBadRequest)
 		return
 	}
 

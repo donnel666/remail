@@ -236,6 +236,15 @@ func (h *Handler) GetOrders(c *gin.Context) {
 		}
 		afterID = uint(parsed)
 	}
+	var projectID uint
+	if raw := strings.TrimSpace(c.Query("projectId")); raw != "" {
+		parsed, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil || parsed == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request parameters.", "requestId": middleware.GetRequestID(c)})
+			return
+		}
+		projectID = uint(parsed)
+	}
 	status, ok := parseOrderStatus(c.Query("status"))
 	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request parameters.", "requestId": middleware.GetRequestID(c)})
@@ -270,6 +279,7 @@ func (h *Handler) GetOrders(c *gin.Context) {
 		Status:      status,
 		ServiceMode: serviceMode,
 		Search:      strings.TrimSpace(c.Query("search")),
+		ProjectID:   projectID,
 		Domain:      domainFilter,
 		CreatedFrom: createdFrom,
 		CreatedTo:   createdTo,
@@ -577,6 +587,15 @@ func toOrderListFacetsResponse(facets *tradeapp.OrderListFacets) *OrderListFacet
 	if facets == nil {
 		return nil
 	}
+	projects := make([]OrderProjectFacetResponse, len(facets.Projects))
+	for i := range facets.Projects {
+		projects[i] = OrderProjectFacetResponse{
+			ProjectID: facets.Projects[i].ProjectID,
+			Name:      facets.Projects[i].Name,
+			LogoURL:   facets.Projects[i].LogoURL,
+			Count:     facets.Projects[i].Count,
+		}
+	}
 	domains := make([]OrderKeyFacetResponse, len(facets.Domains))
 	for i := range facets.Domains {
 		domains[i] = OrderKeyFacetResponse{
@@ -600,7 +619,8 @@ func toOrderListFacetsResponse(facets *tradeapp.OrderListFacets) *OrderListFacet
 			Code:     facets.ServiceMode.Code,
 			Purchase: facets.ServiceMode.Purchase,
 		},
-		Domains: domains,
+		Projects: projects,
+		Domains:  domains,
 	}
 }
 

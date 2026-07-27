@@ -76,6 +76,7 @@ export interface OrderListFilter {
   domain?: string;
   limit?: number;
   offset?: number;
+  projectId?: number;
   scope?: "mine" | "all";
   search?: string;
   serviceMode?: OrderServiceMode;
@@ -94,6 +95,7 @@ export async function listOrders(filter: OrderListFilter) {
           search: filter.search,
           serviceMode: filter.serviceMode,
           status: filter.status,
+          projectId: filter.projectId,
           domain: filter.domain,
           createdFrom: filter.createdFrom,
           createdTo: filter.createdTo,

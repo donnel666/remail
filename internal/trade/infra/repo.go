@@ -799,25 +799,46 @@ func (r *Repo) OrderFacets(ctx context.Context, filter tradeapp.OrderListFilter)
 		Purchase: modeRow.Purchase,
 	}
 
+	projectBase := filter
+	projectBase.ProjectID = 0
+	type projectRow struct {
+		ProjectID uint  `gorm:"column:project_id"`
+		Count     int64 `gorm:"column:count"`
+	}
+	rows := make([]projectRow, 0)
+	// ponytail: 100 tabs is the UI ceiling; use a searchable project selector if this is exceeded.
+	if err := applyOrderFilter(r.dbFor(ctx).Model(&OrderModel{}), projectBase).
+		Select("project_id, COUNT(*) AS count").
+		Group("project_id").
+		Order("count DESC, project_id ASC").
+		Limit(100).
+		Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("order project facets: %w", err)
+	}
+	facets.Projects = make([]tradeapp.OrderProjectFacet, len(rows))
+	for i := range rows {
+		facets.Projects[i] = tradeapp.OrderProjectFacet{ProjectID: rows[i].ProjectID, Count: rows[i].Count}
+	}
+
 	domainBase := filter
 	domainBase.Domain = ""
 	type keyRow struct {
 		Key   string `gorm:"column:facet_key"`
 		Count int64  `gorm:"column:count"`
 	}
-	rows := make([]keyRow, 0)
+	domainRows := make([]keyRow, 0)
 	if err := applyOrderFilter(r.dbFor(ctx).Model(&OrderModel{}), domainBase).
 		Select("SUBSTRING_INDEX(delivery_email, '@', -1) AS facet_key, COUNT(*) AS count").
 		Where("delivery_email LIKE ?", "%@%").
 		Group("facet_key").
 		Order("count DESC, facet_key ASC").
 		Limit(100).
-		Scan(&rows).Error; err != nil {
+		Scan(&domainRows).Error; err != nil {
 		return nil, fmt.Errorf("order domain facets: %w", err)
 	}
-	facets.Domains = make([]tradeapp.OrderKeyFacet, len(rows))
-	for i := range rows {
-		facets.Domains[i] = tradeapp.OrderKeyFacet{Key: rows[i].Key, Count: rows[i].Count}
+	facets.Domains = make([]tradeapp.OrderKeyFacet, len(domainRows))
+	for i := range domainRows {
+		facets.Domains[i] = tradeapp.OrderKeyFacet{Key: domainRows[i].Key, Count: domainRows[i].Count}
 	}
 	return facets, nil
 }
@@ -1100,6 +1121,9 @@ func applyOrderFilter(query *gorm.DB, filter tradeapp.OrderListFilter) *gorm.DB 
 	}
 	if filter.ServiceMode != "" {
 		query = query.Where("service_mode = ?", string(filter.ServiceMode))
+	}
+	if filter.ProjectID > 0 {
+		query = query.Where("project_id = ?", filter.ProjectID)
 	}
 	if domainFilter := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(filter.Domain)), "@"); domainFilter != "" {
 		query = query.Where("delivery_email LIKE ?", "%@"+escapeLikePattern(domainFilter))

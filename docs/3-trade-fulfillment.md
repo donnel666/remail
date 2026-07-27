@@ -12,6 +12,7 @@
 | 2026-07-12 | V1.5 | Codex | 补充管理员 Microsoft 订单 Tab 的批量 `OrderSummaryQueryPort`；只发布 Trade 自有订单事实，不让 Alloc/Core 直接读订单表或复制订单状态。 |
 | 2026-07-12 | V1.6 | Codex | 将管理员订单 Tab 收敛为共享数据库内直接源表的单页有界只读查询组合；Trade 继续拥有订单事实，查询只返回安全展示字段且不形成写入口或投影表。 |
 | 2026-07-20 | V1.7 | Codex | 新增独立批量下单接口，创建 2 到 100 个互相独立的订单并按输入索引返回逐项结果；原单笔接口契约不变。 |
+| 2026-07-27 | V1.8 | Codex | 订单记录和订单管理的列表 Tab 从交付邮箱后缀改为项目并展示项目 Logo；列表新增精确 `projectId` 筛选，项目 facets 返回 ID、当前名称、Logo 和计数，原域名 facets 暂保留兼容。 |
 
 > 支撑域。BC-TRADE 负责一次“钱 -> 单个邮箱使用权 + 服务凭证”的履约编排。
 
@@ -167,7 +168,7 @@ stateDiagram-v2
 |------|-----|------|
 | `POST` | `/v1/orders` | 创建单个订单，必须带 `Idempotency-Key`；成功返回单个订单对象。 |
 | `POST` | `/v1/orders/batch` | 创建 2 到 100 个独立订单，必须带 `Idempotency-Key`；按输入索引返回逐项成功/失败结果，存在失败项时返回 `207 Multi-Status`，同一幂等键重试会收敛到相同的完整结果。 |
-| `GET` | `/v1/orders` | 订单列表；支持 `scope=mine/all`（普通用户只能 `mine`）、`status/serviceMode/domain/createdFrom/createdTo/search` 筛选与 `offset/afterId` 分页，响应含 `total` 和自排除维度的 `facets`（状态/服务模式/交付域名）。 |
+| `GET` | `/v1/orders` | 订单列表；支持 `scope=mine/all`（普通用户只能 `mine`）、`status/serviceMode/projectId/domain/createdFrom/createdTo/search` 筛选与 `offset/afterId` 分页，响应含 `total` 和自排除维度的 `facets`（状态/服务模式/项目，域名 facets 暂保留兼容）。 |
 | `GET` | `/v1/orders/{orderNo}` | 订单详情。 |
 | `GET` | `/v1/orders/{orderNo}/events` | 订单事件。 |
 | `POST` | `/v1/orders/{orderNo}/archive` | 用户归档已完成/退款/失败订单。 |

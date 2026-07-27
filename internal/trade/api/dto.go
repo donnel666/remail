@@ -104,6 +104,13 @@ type OrderServiceModeFacetsResponse struct {
 	Purchase int64 `json:"purchase"`
 }
 
+type OrderProjectFacetResponse struct {
+	ProjectID uint   `json:"projectId"`
+	Name      string `json:"name"`
+	LogoURL   string `json:"logoUrl,omitempty"`
+	Count     int64  `json:"count"`
+}
+
 type OrderKeyFacetResponse struct {
 	Key   string `json:"key"`
 	Count int64  `json:"count"`
@@ -112,6 +119,7 @@ type OrderKeyFacetResponse struct {
 type OrderListFacetsResponse struct {
 	Status      OrderStatusFacetsResponse      `json:"status"`
 	ServiceMode OrderServiceModeFacetsResponse `json:"serviceMode"`
+	Projects    []OrderProjectFacetResponse    `json:"projects"`
 	Domains     []OrderKeyFacetResponse        `json:"domains"`
 }
 

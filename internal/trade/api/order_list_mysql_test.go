@@ -2,11 +2,17 @@ package api
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/donnel666/remail/api/middleware"
+	iamdomain "github.com/donnel666/remail/internal/iam/domain"
 	tradeapp "github.com/donnel666/remail/internal/trade/app"
 	tradedomain "github.com/donnel666/remail/internal/trade/domain"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
@@ -15,14 +21,16 @@ func checkoutListOrder(
 	t *testing.T,
 	uc *tradeapp.UseCase,
 	userID uint,
+	projectID uint,
+	productID uint,
 	serviceMode string,
 	idempotencyKey string,
 ) tradeapp.CheckoutResult {
 	t.Helper()
 	result, err := uc.Checkout(context.Background(), tradeapp.CheckoutRequest{
 		UserID:         userID,
-		ProjectID:      10,
-		ProductID:      20,
+		ProjectID:      projectID,
+		ProductID:      productID,
 		ServiceMode:    serviceMode,
 		SupplyPolicy:   "public_only",
 		ClientChannel:  tradedomain.ClientChannelConsole,
@@ -45,6 +53,25 @@ func setOrderCreatedAt(t *testing.T, db *gorm.DB, orderNo string, createdAt time
 func TestListOrdersFiltersFacetsAndPagingMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	seedTradeBase(t, db, "microsoft")
+	require.NoError(t, db.Exec(`
+INSERT INTO projects(id, name, target_platform, logo_url, status, access_type, loose_match)
+VALUES (11, 'Second Project', 'second', '/v1/projects/logos/second-project', 'listed', 'public', TRUE)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO project_products(
+    id, project_id, type, status, code_enabled, purchase_enabled,
+    code_price, purchase_price, code_supplier_price, purchase_supplier_price,
+    code_window_minutes, activation_window_minutes, warranty_minutes,
+    main_weight, dot_weight, plus_weight
+)
+SELECT 21, 11, type, status, code_enabled, purchase_enabled,
+    code_price, purchase_price, code_supplier_price, purchase_supplier_price,
+    code_window_minutes, activation_window_minutes, warranty_minutes,
+    main_weight, dot_weight, plus_weight
+FROM project_products WHERE id = 20`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO project_mail_rules(project_id, rule_type, pattern, enabled) VALUES
+    (11, 'sender', '.*', TRUE),
+    (11, 'recipient', 'exact', TRUE)`).Error)
 	require.NoError(t, db.Table("users").Where("id = ?", 3).Update("nickname", "Regular Customer").Error)
 	creditBuyer(t, db, 2, "50.00")
 	creditBuyer(t, db, 3, "50.00")
@@ -56,15 +83,15 @@ func TestListOrdersFiltersFacetsAndPagingMySQL(t *testing.T) {
 	// delivery email mapping stays deterministic regardless of the
 	// allocation picking strategy.
 	seedTradeMicrosoftResource(t, db, 1, 1001, "a1@outlook.test", "outlook.test", 100, true)
-	first := checkoutListOrder(t, uc, 2, "code", "order-list-1")
+	first := checkoutListOrder(t, uc, 2, 10, 20, "code", "order-list-1")
 	seedTradeMicrosoftResource(t, db, 1, 1002, "a2@outlook.test", "outlook.test", 99, true)
-	second := checkoutListOrder(t, uc, 2, "code", "order-list-2")
+	second := checkoutListOrder(t, uc, 2, 10, 20, "code", "order-list-2")
 	seedTradeMicrosoftResource(t, db, 1, 1003, "b1@hotmail.test", "hotmail.test", 98, true)
-	third := checkoutListOrder(t, uc, 2, "purchase", "order-list-3")
+	third := checkoutListOrder(t, uc, 2, 11, 21, "purchase", "order-list-3")
 	seedTradeMicrosoftResource(t, db, 1, 1004, "b2@hotmail.test", "hotmail.test", 97, true)
-	fourth := checkoutListOrder(t, uc, 2, "purchase", "order-list-4")
+	fourth := checkoutListOrder(t, uc, 2, 11, 21, "purchase", "order-list-4")
 	seedTradeMicrosoftResource(t, db, 1, 1005, "c1@outlook.test", "outlook.test", 96, true)
-	other := checkoutListOrder(t, uc, 3, "code", "order-list-other")
+	other := checkoutListOrder(t, uc, 3, 10, 20, "code", "order-list-other")
 	seedTradeMicrosoftResource(t, db, 1, 1006, "history@history.test", "history.test", 95, true)
 	matchedAt := time.Now().UTC().Add(-time.Hour)
 	require.NoError(t, uc.ImportHistoricalMicrosoftUsage(ctx, []tradeapp.HistoricalMicrosoftUsage{{
@@ -116,8 +143,14 @@ func TestListOrdersFiltersFacetsAndPagingMySQL(t *testing.T) {
 	)
 	require.Nil(t, all.NextAfterID)
 	for _, item := range all.Items {
-		require.Equal(t, "Trade Project", item.ProjectName)
-		require.Equal(t, "/v1/projects/logos/trade-project", item.ProjectLogoURL)
+		if item.Order.ProjectID == 10 {
+			require.Equal(t, "Trade Project", item.ProjectName)
+			require.Equal(t, "/v1/projects/logos/trade-project", item.ProjectLogoURL)
+		} else {
+			require.Equal(t, uint(11), item.Order.ProjectID)
+			require.Equal(t, "Second Project", item.ProjectName)
+			require.Equal(t, "/v1/projects/logos/second-project", item.ProjectLogoURL)
+		}
 	}
 	require.NotNil(t, all.Facets)
 	require.EqualValues(t, 4, all.Facets.Status.All)
@@ -127,11 +160,52 @@ func TestListOrdersFiltersFacetsAndPagingMySQL(t *testing.T) {
 	require.EqualValues(t, 4, all.Facets.ServiceMode.All)
 	require.EqualValues(t, 2, all.Facets.ServiceMode.Code)
 	require.EqualValues(t, 2, all.Facets.ServiceMode.Purchase)
-	require.Len(t, all.Facets.Domains, 2)
-	require.Equal(t, "hotmail.test", all.Facets.Domains[0].Key)
-	require.EqualValues(t, 2, all.Facets.Domains[0].Count)
-	require.Equal(t, "outlook.test", all.Facets.Domains[1].Key)
-	require.EqualValues(t, 2, all.Facets.Domains[1].Count)
+	require.Len(t, all.Facets.Projects, 2)
+	require.Equal(t, uint(10), all.Facets.Projects[0].ProjectID)
+	require.Equal(t, "Trade Project", all.Facets.Projects[0].Name)
+	require.Equal(t, "/v1/projects/logos/trade-project", all.Facets.Projects[0].LogoURL)
+	require.EqualValues(t, 2, all.Facets.Projects[0].Count)
+	require.Equal(t, uint(11), all.Facets.Projects[1].ProjectID)
+	require.Equal(t, "Second Project", all.Facets.Projects[1].Name)
+	require.Equal(t, "/v1/projects/logos/second-project", all.Facets.Projects[1].LogoURL)
+	require.EqualValues(t, 2, all.Facets.Projects[1].Count)
+	require.Equal(t, []tradeapp.OrderKeyFacet{
+		{Key: "hotmail.test", Count: 2},
+		{Key: "outlook.test", Count: 2},
+	}, all.Facets.Domains)
+
+	// Project filter keeps the full project tab set by excluding its own
+	// dimension from the project facets query.
+	secondProject, err := uc.ListOrders(ctx, tradeapp.OrderListFilter{UserID: 2, ProjectID: 11}, 0, 0, 20)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, secondProject.Total)
+	require.Equal(t,
+		[]string{fourth.Order.OrderNo, third.Order.OrderNo},
+		[]string{secondProject.Items[0].Order.OrderNo, secondProject.Items[1].Order.OrderNo},
+	)
+	require.Len(t, secondProject.Facets.Projects, 2)
+
+	// Exercise the HTTP query/JSON boundary used by both consoles.
+	handler := NewHandler(&Module{UseCase: uc})
+	router := gin.New()
+	router.GET("/v1/orders", func(c *gin.Context) {
+		middleware.SetCurrentUser(c, 2, iamdomain.RoleUser, "", "")
+		handler.GetOrders(c)
+	})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/orders?projectId=11", nil))
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	var httpList OrderListResponse
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &httpList))
+	require.EqualValues(t, 2, httpList.Total)
+	require.Len(t, httpList.Items, 2)
+	for _, item := range httpList.Items {
+		require.Equal(t, uint(11), item.ProjectID)
+	}
+	require.NotNil(t, httpList.Facets)
+	require.Len(t, httpList.Facets.Projects, 2)
+	require.Equal(t, "/v1/projects/logos/second-project", httpList.Facets.Projects[1].LogoURL)
+	require.Equal(t, []OrderKeyFacetResponse{{Key: "hotmail.test", Count: 2}}, httpList.Facets.Domains)
 
 	// Domain filter, with and without the "@" prefix.
 	outlook, err := uc.ListOrders(ctx, tradeapp.OrderListFilter{UserID: 2, Domain: "outlook.test"}, 0, 0, 20)
@@ -140,8 +214,7 @@ func TestListOrdersFiltersFacetsAndPagingMySQL(t *testing.T) {
 	require.Len(t, outlook.Items, 2)
 	require.EqualValues(t, 1, outlook.Facets.Status.Active)
 	require.EqualValues(t, 1, outlook.Facets.Status.Completed)
-	// The domain dimension excludes its own filter so tabs keep all keys.
-	require.Len(t, outlook.Facets.Domains, 2)
+	require.Len(t, outlook.Facets.Projects, 1)
 
 	prefixed, err := uc.ListOrders(ctx, tradeapp.OrderListFilter{UserID: 2, Domain: "@Outlook.TEST"}, 0, 0, 20)
 	require.NoError(t, err)
@@ -212,7 +285,7 @@ func TestListOrdersFiltersFacetsAndPagingMySQL(t *testing.T) {
 	require.EqualValues(t, 4, byProject.Total)
 	byProjectID, err := uc.ListOrders(ctx, tradeapp.OrderListFilter{UserID: 2, Search: "10"}, 0, 0, 20)
 	require.NoError(t, err)
-	require.EqualValues(t, 4, byProjectID.Total)
+	require.EqualValues(t, 2, byProjectID.Total)
 
 	// User isolation stays intact.
 	otherList, err := uc.ListOrders(ctx, tradeapp.OrderListFilter{UserID: 3}, 0, 0, 20)
@@ -229,6 +302,7 @@ func TestListOrdersFiltersFacetsAndPagingMySQL(t *testing.T) {
 	require.NotNil(t, adminMine.Facets)
 	require.Zero(t, adminMine.Facets.Status.All)
 	require.Zero(t, adminMine.Facets.ServiceMode.All)
+	require.Empty(t, adminMine.Facets.Projects)
 	require.Empty(t, adminMine.Facets.Domains)
 
 	// The site-wide admin list uses the same historical-order exclusion.
@@ -242,11 +316,13 @@ func TestListOrdersFiltersFacetsAndPagingMySQL(t *testing.T) {
 	require.NotNil(t, adminList.Facets)
 	require.EqualValues(t, 5, adminList.Facets.Status.All)
 	require.EqualValues(t, 5, adminList.Facets.ServiceMode.All)
-	require.Len(t, adminList.Facets.Domains, 2)
-	require.Equal(t, "outlook.test", adminList.Facets.Domains[0].Key)
-	require.EqualValues(t, 3, adminList.Facets.Domains[0].Count)
-	require.Equal(t, "hotmail.test", adminList.Facets.Domains[1].Key)
-	require.EqualValues(t, 2, adminList.Facets.Domains[1].Count)
+	require.Len(t, adminList.Facets.Projects, 2)
+	require.Equal(t, uint(10), adminList.Facets.Projects[0].ProjectID)
+	require.Equal(t, "Trade Project", adminList.Facets.Projects[0].Name)
+	require.EqualValues(t, 3, adminList.Facets.Projects[0].Count)
+	require.Equal(t, uint(11), adminList.Facets.Projects[1].ProjectID)
+	require.Equal(t, "Second Project", adminList.Facets.Projects[1].Name)
+	require.EqualValues(t, 2, adminList.Facets.Projects[1].Count)
 }
 
 func TestParseOrderDomainAndOptionalTime(t *testing.T) {
