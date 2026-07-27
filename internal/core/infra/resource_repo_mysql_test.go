@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -20,6 +22,7 @@ import (
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 var coreMySQLTestServer = testmysql.New("remail_core_test")
@@ -36,7 +39,7 @@ func newCoreMySQLTestDB(t *testing.T) *gorm.DB {
 	return coreMySQLTestServer.Database(t, coreMigrationsDir(t))
 }
 
-func TestResourceMicrosoftFacetsCoalesceToOneScanMySQL(t *testing.T) {
+func TestResourceMicrosoftFacetsCoalesceConcurrentMissesIntoTwoBoundedQueriesMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 	repo := NewResourceRepo(db)
 	ctx := context.Background()
@@ -117,7 +120,190 @@ VALUES
 		require.Equal(t, coreapp.ResourceBooleanFacets{All: 2, Yes: 1, No: 1}, got.facets.GraphAvailable)
 		require.Equal(t, []coreapp.ResourceKeyFacet{{Key: "hotmail.com", Count: 1}, {Key: "outlook.com", Count: 1}}, got.facets.Suffixes)
 	}
-	require.EqualValues(t, 1, queries.Load())
+	require.EqualValues(t, 2, queries.Load())
+}
+
+func TestResourceMicrosoftFacetsUseScalarCountsAndBoundedSuffixesMySQL(t *testing.T) {
+	var sqlLog strings.Builder
+	db := newCoreMySQLTestDB(t).Session(&gorm.Session{Logger: gormlogger.New(log.New(&sqlLog, "", 0), gormlogger.Config{LogLevel: gormlogger.Info})})
+	repo := NewResourceRepo(db)
+
+	_, err := repo.Facets(context.Background(), 9401, coreapp.ResourceListFilter{ResourceType: domain.ResourceTypeMicrosoft})
+	require.NoError(t, err)
+	sql := strings.ToLower(strings.ReplaceAll(sqlLog.String(), string(rune(96)), ""))
+	require.Contains(t, sql, "sum(case when")
+	require.NotContains(t, sql, "group by ms_filter.status")
+	require.Contains(t, sql, "group by ms_filter.email_domain")
+	require.Contains(t, sql, "limit 100")
+}
+
+func TestMicrosoftFacetCachesInvalidateAfterImportAndCreateMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	resources := NewResourceRepo(db)
+	imports := NewResourceImportRepo(db)
+	admin := NewAdminResourceRepo(db)
+	ctx := context.Background()
+	require.NoError(t, db.Exec(`
+INSERT INTO users(id, email, password_hash, role, status)
+VALUES (9451, 'facet-cache-owner@test.local', 'hash', 'supplier', 'active')`).Error)
+
+	userFilter := coreapp.ResourceListFilter{ResourceType: domain.ResourceTypeMicrosoft}
+	userFacets, err := resources.Facets(ctx, 9451, userFilter)
+	require.NoError(t, err)
+	require.Zero(t, userFacets.Matched)
+	adminFacets, err := admin.AdminMicrosoftFacets(ctx, coreapp.AdminMicrosoftListFilter{}, time.Now().UTC())
+	require.NoError(t, err)
+	require.Zero(t, adminFacets.Matched)
+
+	importRecord := &domain.ResourceImport{
+		OwnerUserID: 9451, ResourceType: domain.ResourceTypeMicrosoft,
+		SourceObjectKey: "imports/microsoft/facet-cache.txt", Status: domain.ResourceImportProcessing,
+	}
+	require.NoError(t, imports.Create(ctx, importRecord))
+	importResources := []domain.EmailResource{{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 9451}}
+	importMicrosoft := []domain.MicrosoftResource{{
+		EmailAddress: "facet-import@outlook.com", Password: "secret", Status: domain.MicrosoftStatusPending,
+	}}
+	importedIDs, err := imports.CreateMicrosoftResourcesAndMarkSucceeded(
+		ctx, importRecord.ID, "", microsoftImportLinesForRepoTest(importMicrosoft), importResources, importMicrosoft,
+		nil, "", "", nil,
+	)
+	require.NoError(t, err)
+	require.Len(t, importedIDs, 1)
+
+	userFacets, err = resources.Facets(ctx, 9451, userFilter)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, userFacets.Matched)
+	adminFacets, err = admin.AdminMicrosoftFacets(ctx, coreapp.AdminMicrosoftListFilter{}, time.Now().UTC())
+	require.NoError(t, err)
+	require.EqualValues(t, 1, adminFacets.Matched)
+
+	require.NoError(t, resources.CreateMicrosoft(ctx,
+		&domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 9451},
+		&domain.MicrosoftResource{EmailAddress: "facet-create@hotmail.com", Password: "secret", Status: domain.MicrosoftStatusNormal},
+	))
+	userFacets, err = resources.Facets(ctx, 9451, userFilter)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, userFacets.Matched)
+	adminFacets, err = admin.AdminMicrosoftFacets(ctx, coreapp.AdminMicrosoftListFilter{}, time.Now().UTC())
+	require.NoError(t, err)
+	require.EqualValues(t, 2, adminFacets.Matched)
+
+	generation := currentMicrosoftFacetsGeneration()
+	require.NoError(t, admin.WithTx(ctx, func(txCtx context.Context) error {
+		_, _, err := admin.LockAdminMicrosoft(txCtx, importedIDs[0])
+		return err
+	}))
+	require.Equal(t, generation, currentMicrosoftFacetsGeneration(), "read-only transactions must keep facet caches hot")
+
+	require.NoError(t, admin.WithTx(ctx, func(txCtx context.Context) error {
+		root, resource, err := admin.LockAdminMicrosoft(txCtx, importedIDs[0])
+		if err != nil {
+			return err
+		}
+		resource.ForSale = true
+		return admin.SaveAdminMicrosoft(txCtx, root, resource, root.Version)
+	}))
+	userFacets, err = resources.Facets(ctx, 9451, userFilter)
+	require.NoError(t, err)
+	require.Equal(t, coreapp.ResourceBooleanFacets{All: 2, Yes: 1, No: 1}, userFacets.Private)
+	adminFacets, err = admin.AdminMicrosoftFacets(ctx, coreapp.AdminMicrosoftListFilter{}, time.Now().UTC())
+	require.NoError(t, err)
+	require.Equal(t, coreapp.AdminBooleanFacets{All: 2, Yes: 1, No: 1}, adminFacets.ForSale)
+}
+
+type observedDoneContext struct {
+	context.Context
+	once     sync.Once
+	observed chan struct{}
+}
+
+func newObservedDoneContext(ctx context.Context) *observedDoneContext {
+	return &observedDoneContext{Context: ctx, observed: make(chan struct{})}
+}
+
+func (c *observedDoneContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.observed) })
+	return c.Context.Done()
+}
+
+func requireFacetWaitersCancelIndependently(t *testing.T, db *gorm.DB, callback string, call func(context.Context) error) {
+	t.Helper()
+	var queries atomic.Int32
+	var blockOnce sync.Once
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseQuery := func() { releaseOnce.Do(func() { close(release) }) }
+	require.NoError(t, db.Callback().Row().Before("gorm:row").Register(callback, func(*gorm.DB) {
+		queries.Add(1)
+		blockOnce.Do(func() {
+			close(entered)
+			<-release
+		})
+	}))
+	t.Cleanup(func() {
+		releaseQuery()
+		_ = db.Callback().Row().Remove(callback)
+	})
+
+	leaderBase, cancelLeader := context.WithCancel(context.Background())
+	leaderCtx := newObservedDoneContext(leaderBase)
+	leaderErr := make(chan error, 1)
+	go func() { leaderErr <- call(leaderCtx) }()
+	requireChannelClosed(t, leaderCtx.observed)
+	requireChannelClosed(t, entered)
+
+	canceledBase, cancelWaiter := context.WithCancel(context.Background())
+	canceledCtx := newObservedDoneContext(canceledBase)
+	canceledErr := make(chan error, 1)
+	go func() { canceledErr <- call(canceledCtx) }()
+	requireChannelClosed(t, canceledCtx.observed)
+
+	validCtx := newObservedDoneContext(context.Background())
+	validErr := make(chan error, 1)
+	go func() { validErr <- call(validCtx) }()
+	requireChannelClosed(t, validCtx.observed)
+
+	cancelWaiter()
+	require.ErrorIs(t, requireChannelValue(t, canceledErr), context.Canceled)
+	cancelLeader()
+	require.ErrorIs(t, requireChannelValue(t, leaderErr), context.Canceled)
+
+	releaseQuery()
+	require.NoError(t, requireChannelValue(t, validErr))
+	require.EqualValues(t, 2, queries.Load())
+}
+
+func requireChannelClosed(t *testing.T, ch <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for channel")
+	}
+}
+
+func requireChannelValue[T any](t *testing.T, ch <-chan T) T {
+	t.Helper()
+	select {
+	case value := <-ch:
+		return value
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for channel value")
+		var zero T
+		return zero
+	}
+}
+
+func TestResourceMicrosoftFacetWaitersCancelIndependentlyMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	repo := NewResourceRepo(db)
+	filter := coreapp.ResourceListFilter{ResourceType: domain.ResourceTypeMicrosoft}
+	requireFacetWaitersCancelIndependently(t, db, "test:resource-facets-context", func(ctx context.Context) error {
+		_, err := repo.Facets(ctx, 9461, filter)
+		return err
+	})
 }
 
 func coreMigrationsDir(t *testing.T) string {

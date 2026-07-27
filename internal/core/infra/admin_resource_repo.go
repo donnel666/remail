@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -64,9 +63,15 @@ func (r *AdminResourceRepo) WithTx(ctx context.Context, fn func(context.Context)
 	if tx, ok := platform.GormTxFromContext(ctx); ok {
 		return fn(platform.WithGormTx(ctx, tx.WithContext(ctx)))
 	}
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		return fn(platform.WithGormTx(ctx, tx))
+	invalidation := &microsoftFacetsInvalidationState{}
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		txCtx := context.WithValue(platform.WithGormTx(ctx, tx), microsoftFacetsInvalidationKey{}, invalidation)
+		return fn(txCtx)
 	})
+	if err == nil && invalidation.dirty {
+		invalidateMicrosoftFacets()
+	}
+	return err
 }
 
 func (r *AdminResourceRepo) ReserveAdminCommand(ctx context.Context, receipt coreapp.AdminResourceCommandReceipt) ([]byte, bool, error) {
@@ -249,6 +254,7 @@ func (r *AdminResourceRepo) SaveAdminMicrosoft(ctx context.Context, root *domain
 	root.Version = expectedVersion + 1
 	root.UpdatedAt = now
 	resource.UpdatedAt = now
+	markMicrosoftFacetsDirty(ctx)
 	return nil
 }
 
@@ -354,159 +360,177 @@ func (r *AdminResourceRepo) AdminMicrosoftFacets(ctx context.Context, filter cor
 		return cloneAdminMicrosoftFacets(&cached), nil
 	}
 
-	value, err, _ := r.facetsFlight.Do(cacheKey, func() (any, error) {
+	resultCh := r.facetsFlight.DoChan(cacheKey, func() (any, error) {
 		if cached, ok := r.facetsCache.Get(cacheKey); ok {
 			return cached, nil
 		}
-		var rows []adminMicrosoftFacetRow
-		if err := r.adminMicrosoftFacetQuery(ctx, filter, now).
-			Select(adminMicrosoftFacetSelect, now, now.Add(7*24*time.Hour)).
-			Group("mr.status, mr.for_sale, mr.long_lived, mr.graph_available, token_health, mr.email_domain").
-			Scan(&rows).Error; err != nil {
+		queryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), microsoftFacetsQueryTimeout)
+		defer cancel()
+
+		var selects facetAggregateSelect
+		add := func(alias string, ignore string, extra string, extraArgs ...any) {
+			predicate, args := adminMicrosoftFacetPredicate(filter, ignore, now)
+			if extra != "" {
+				predicate += " AND " + extra
+				args = append(args, extraArgs...)
+			}
+			selects.add(alias, predicate, args...)
+		}
+		add("matched_count", "", "")
+		add("status_pending_count", "status", "mr.status = ?", string(domain.MicrosoftStatusPending))
+		add("status_validating_count", "status", "mr.status = ?", string(domain.MicrosoftStatusValidating))
+		add("status_identifying_count", "status", "mr.status = ?", string(domain.MicrosoftStatusIdentifying))
+		add("status_normal_count", "status", "mr.status = ?", string(domain.MicrosoftStatusNormal))
+		add("status_abnormal_count", "status", "mr.status = ?", string(domain.MicrosoftStatusAbnormal))
+		add("status_disabled_count", "status", "mr.status = ?", string(domain.MicrosoftStatusDisabled))
+		add("status_deleted_count", "status", "mr.status = ?", string(domain.MicrosoftStatusDeleted))
+		add("for_sale_all_count", "for_sale", "")
+		add("for_sale_yes_count", "for_sale", "mr.for_sale = TRUE")
+		add("for_sale_no_count", "for_sale", "mr.for_sale = FALSE")
+		add("long_lived_all_count", "long_lived", "")
+		add("long_lived_yes_count", "long_lived", "mr.long_lived = TRUE")
+		add("long_lived_no_count", "long_lived", "mr.long_lived = FALSE")
+		add("graph_available_all_count", "graph_available", "")
+		add("graph_available_yes_count", "graph_available", "mr.graph_available = TRUE")
+		add("graph_available_no_count", "graph_available", "mr.graph_available = FALSE")
+		add("token_health_all_count", "token_health", "")
+		for _, health := range []string{"valid", "expiring", "expired", "missing"} {
+			predicate, args := adminTokenHealthPredicate(health, now)
+			add("token_health_"+health+"_count", "token_health", predicate, args...)
+		}
+		selectSQL, selectArgs := selects.query()
+
+		var counts adminMicrosoftFacetCountsRow
+		if err := r.adminMicrosoftFacetQuery(queryCtx, filter, now).
+			Select(selectSQL, selectArgs...).
+			Scan(&counts).Error; err != nil {
 			return nil, fmt.Errorf("admin microsoft facets: %w", err)
 		}
-		facets := adminMicrosoftFacetsFromRows(rows, filter)
+
+		suffixPredicate, suffixArgs := adminMicrosoftFacetPredicate(filter, "suffix", now)
+		var suffixRows []microsoftResourceSuffixFacetRow
+		if err := r.adminMicrosoftFacetQuery(queryCtx, filter, now).
+			Select("mr.email_domain AS facet_key, COUNT(*) AS count").
+			Where(suffixPredicate, suffixArgs...).
+			Where("mr.email_domain <> ''").
+			Group("mr.email_domain").
+			Order("count DESC, facet_key ASC").
+			Limit(microsoftFacetsSuffixLimit).
+			Scan(&suffixRows).Error; err != nil {
+			return nil, fmt.Errorf("admin microsoft suffix facets: %w", err)
+		}
+
+		facets := adminMicrosoftFacetsFromCounts(counts, suffixRows)
 		r.facetsCache.Set(cacheKey, *cloneAdminMicrosoftFacets(facets), runtimeconfig.Duration(
 			"admin_resource_facets_cache_ttl_seconds", adminMicrosoftFacetsCacheTTL, time.Second, 1,
 		))
 		return *facets, nil
 	})
-	if err != nil {
-		return nil, err
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case result := <-resultCh:
+		if result.Err != nil {
+			return nil, result.Err
+		}
+		facets, ok := result.Val.(coreapp.AdminMicrosoftFacets)
+		if !ok {
+			return nil, fmt.Errorf("admin microsoft facets: unexpected cache value")
+		}
+		return cloneAdminMicrosoftFacets(&facets), nil
 	}
-	facets, ok := value.(coreapp.AdminMicrosoftFacets)
-	if !ok {
-		return nil, fmt.Errorf("admin microsoft facets: unexpected cache value")
-	}
-	return cloneAdminMicrosoftFacets(&facets), nil
 }
 
-type adminMicrosoftFacetRow struct {
-	Status         string
-	ForSale        bool
-	LongLived      bool
-	GraphAvailable bool
-	TokenHealth    string
-	EmailDomain    string
-	Count          int64
+type adminMicrosoftFacetCountsRow struct {
+	Matched             int64 `gorm:"column:matched_count"`
+	StatusPending       int64 `gorm:"column:status_pending_count"`
+	StatusValidating    int64 `gorm:"column:status_validating_count"`
+	StatusIdentifying   int64 `gorm:"column:status_identifying_count"`
+	StatusNormal        int64 `gorm:"column:status_normal_count"`
+	StatusAbnormal      int64 `gorm:"column:status_abnormal_count"`
+	StatusDisabled      int64 `gorm:"column:status_disabled_count"`
+	StatusDeleted       int64 `gorm:"column:status_deleted_count"`
+	ForSaleAll          int64 `gorm:"column:for_sale_all_count"`
+	ForSaleYes          int64 `gorm:"column:for_sale_yes_count"`
+	ForSaleNo           int64 `gorm:"column:for_sale_no_count"`
+	LongLivedAll        int64 `gorm:"column:long_lived_all_count"`
+	LongLivedYes        int64 `gorm:"column:long_lived_yes_count"`
+	LongLivedNo         int64 `gorm:"column:long_lived_no_count"`
+	GraphAvailableAll   int64 `gorm:"column:graph_available_all_count"`
+	GraphAvailableYes   int64 `gorm:"column:graph_available_yes_count"`
+	GraphAvailableNo    int64 `gorm:"column:graph_available_no_count"`
+	TokenHealthAll      int64 `gorm:"column:token_health_all_count"`
+	TokenHealthValid    int64 `gorm:"column:token_health_valid_count"`
+	TokenHealthExpiring int64 `gorm:"column:token_health_expiring_count"`
+	TokenHealthExpired  int64 `gorm:"column:token_health_expired_count"`
+	TokenHealthMissing  int64 `gorm:"column:token_health_missing_count"`
 }
 
-const adminTokenHealthExpression = `CASE
-    WHEN mr.client_id = '' OR mr.refresh_token = '' THEN 'missing'
-    WHEN mr.rt_expire_at IS NOT NULL AND mr.rt_expire_at <= ? THEN 'expired'
-    WHEN mr.rt_expire_at IS NOT NULL AND mr.rt_expire_at <= ? THEN 'expiring'
-    ELSE 'valid'
-END`
-
-const adminMicrosoftFacetSelect = `
-mr.status AS status,
-mr.for_sale AS for_sale,
-mr.long_lived AS long_lived,
-mr.graph_available AS graph_available,
-` + adminTokenHealthExpression + ` AS token_health,
-mr.email_domain AS email_domain,
-COUNT(*) AS count`
-
-func adminMicrosoftFacetsFromRows(rows []adminMicrosoftFacetRow, filter coreapp.AdminMicrosoftListFilter) *coreapp.AdminMicrosoftFacets {
-	facets := &coreapp.AdminMicrosoftFacets{}
-	suffixes := make(map[string]int64)
-	for _, row := range rows {
-		if adminMicrosoftFacetRowMatches(row, filter, "") {
-			facets.Matched += row.Count
-		}
-		if adminMicrosoftFacetRowMatches(row, filter, "status") {
-			addAdminStatusFacet(&facets.Status, domain.MicrosoftResourceStatus(row.Status), row.Count)
-		}
-		if adminMicrosoftFacetRowMatches(row, filter, "for_sale") {
-			addAdminBooleanFacet(&facets.ForSale, row.ForSale, row.Count)
-		}
-		if adminMicrosoftFacetRowMatches(row, filter, "long_lived") {
-			addAdminBooleanFacet(&facets.LongLived, row.LongLived, row.Count)
-		}
-		if adminMicrosoftFacetRowMatches(row, filter, "graph_available") {
-			addAdminBooleanFacet(&facets.GraphAvailable, row.GraphAvailable, row.Count)
-		}
-		if adminMicrosoftFacetRowMatches(row, filter, "token_health") {
-			addAdminTokenFacet(&facets.TokenHealth, row.TokenHealth, row.Count)
-		}
-		if row.EmailDomain != "" && adminMicrosoftFacetRowMatches(row, filter, "suffix") {
-			key := "@" + strings.TrimPrefix(strings.ToLower(row.EmailDomain), "@")
-			suffixes[key] += row.Count
-		}
+func adminMicrosoftFacetsFromCounts(counts adminMicrosoftFacetCountsRow, suffixRows []microsoftResourceSuffixFacetRow) *coreapp.AdminMicrosoftFacets {
+	status := coreapp.AdminFacetCounts{
+		Pending: counts.StatusPending, Validating: counts.StatusValidating,
+		Identifying: counts.StatusIdentifying, Normal: counts.StatusNormal,
+		Abnormal: counts.StatusAbnormal, Disabled: counts.StatusDisabled, Deleted: counts.StatusDeleted,
 	}
-	facets.Status.All = facets.Status.Pending + facets.Status.Validating + facets.Status.Identifying + facets.Status.Normal + facets.Status.Abnormal + facets.Status.Disabled
-	facets.Suffixes = make([]coreapp.AdminKeyFacet, 0, len(suffixes))
-	for key, count := range suffixes {
-		facets.Suffixes = append(facets.Suffixes, coreapp.AdminKeyFacet{Key: key, Count: count})
+	status.All = status.Pending + status.Validating + status.Identifying + status.Normal + status.Abnormal + status.Disabled
+	facets := &coreapp.AdminMicrosoftFacets{
+		Matched: counts.Matched,
+		Status:  status,
+		ForSale: coreapp.AdminBooleanFacets{All: counts.ForSaleAll, Yes: counts.ForSaleYes, No: counts.ForSaleNo},
+		LongLived: coreapp.AdminBooleanFacets{
+			All: counts.LongLivedAll, Yes: counts.LongLivedYes, No: counts.LongLivedNo,
+		},
+		GraphAvailable: coreapp.AdminBooleanFacets{
+			All: counts.GraphAvailableAll, Yes: counts.GraphAvailableYes, No: counts.GraphAvailableNo,
+		},
+		TokenHealth: coreapp.AdminTokenHealthFacets{
+			All: counts.TokenHealthAll, Valid: counts.TokenHealthValid, Expiring: counts.TokenHealthExpiring,
+			Expired: counts.TokenHealthExpired, Missing: counts.TokenHealthMissing,
+		},
+		Suffixes: make([]coreapp.AdminKeyFacet, len(suffixRows)),
 	}
-	sort.Slice(facets.Suffixes, func(i, j int) bool {
-		if facets.Suffixes[i].Count == facets.Suffixes[j].Count {
-			return facets.Suffixes[i].Key < facets.Suffixes[j].Key
-		}
-		return facets.Suffixes[i].Count > facets.Suffixes[j].Count
-	})
+	for i, row := range suffixRows {
+		facets.Suffixes[i] = coreapp.AdminKeyFacet{Key: "@" + strings.TrimPrefix(strings.ToLower(row.Key), "@"), Count: row.Count}
+	}
 	return facets
 }
 
-func adminMicrosoftFacetRowMatches(row adminMicrosoftFacetRow, filter coreapp.AdminMicrosoftListFilter, ignore string) bool {
-	if ignore != "status" && ((filter.Status != "" && row.Status != string(filter.Status)) || (filter.Status == "" && row.Status == string(domain.MicrosoftStatusDeleted))) {
-		return false
+func adminMicrosoftFacetPredicate(filter coreapp.AdminMicrosoftListFilter, ignore string, now time.Time) (string, []any) {
+	conditions := make([]string, 0, 6)
+	args := make([]any, 0, 6)
+	if ignore != "status" {
+		if filter.Status != "" {
+			conditions = append(conditions, "mr.status = ?")
+			args = append(args, string(filter.Status))
+		} else {
+			conditions = append(conditions, "mr.status <> ?")
+			args = append(args, string(domain.MicrosoftStatusDeleted))
+		}
 	}
-	if ignore != "suffix" && filter.Suffix != "" && row.EmailDomain != strings.TrimPrefix(strings.ToLower(filter.Suffix), "@") {
-		return false
+	if ignore != "suffix" && filter.Suffix != "" {
+		conditions = append(conditions, "mr.email_domain = ?")
+		args = append(args, strings.TrimPrefix(strings.ToLower(filter.Suffix), "@"))
 	}
-	if ignore != "for_sale" && filter.ForSale != nil && row.ForSale != *filter.ForSale {
-		return false
+	if ignore != "for_sale" && filter.ForSale != nil {
+		conditions = append(conditions, "mr.for_sale = ?")
+		args = append(args, *filter.ForSale)
 	}
-	if ignore != "long_lived" && filter.LongLived != nil && row.LongLived != *filter.LongLived {
-		return false
+	if ignore != "long_lived" && filter.LongLived != nil {
+		conditions = append(conditions, "mr.long_lived = ?")
+		args = append(args, *filter.LongLived)
 	}
-	if ignore != "graph_available" && filter.GraphAvailable != nil && row.GraphAvailable != *filter.GraphAvailable {
-		return false
+	if ignore != "graph_available" && filter.GraphAvailable != nil {
+		conditions = append(conditions, "mr.graph_available = ?")
+		args = append(args, *filter.GraphAvailable)
 	}
-	return ignore == "token_health" || filter.TokenHealth == "" || row.TokenHealth == filter.TokenHealth
-}
-
-func addAdminStatusFacet(facets *coreapp.AdminFacetCounts, status domain.MicrosoftResourceStatus, count int64) {
-	switch status {
-	case domain.MicrosoftStatusPending:
-		facets.Pending += count
-	case domain.MicrosoftStatusValidating:
-		facets.Validating += count
-	case domain.MicrosoftStatusIdentifying:
-		facets.Identifying += count
-	case domain.MicrosoftStatusNormal:
-		facets.Normal += count
-	case domain.MicrosoftStatusAbnormal:
-		facets.Abnormal += count
-	case domain.MicrosoftStatusDisabled:
-		facets.Disabled += count
-	case domain.MicrosoftStatusDeleted:
-		facets.Deleted += count
+	if ignore != "token_health" && filter.TokenHealth != "" {
+		condition, conditionArgs := adminTokenHealthPredicate(filter.TokenHealth, now)
+		if condition != "" {
+			conditions = append(conditions, condition)
+			args = append(args, conditionArgs...)
+		}
 	}
-}
-
-func addAdminBooleanFacet(facets *coreapp.AdminBooleanFacets, value bool, count int64) {
-	facets.All += count
-	if value {
-		facets.Yes += count
-	} else {
-		facets.No += count
-	}
-}
-
-func addAdminTokenFacet(facets *coreapp.AdminTokenHealthFacets, health string, count int64) {
-	facets.All += count
-	switch health {
-	case "valid":
-		facets.Valid += count
-	case "expiring":
-		facets.Expiring += count
-	case "expired":
-		facets.Expired += count
-	case "missing":
-		facets.Missing += count
-	}
+	return facetPredicateSQL(conditions), args
 }
 
 func (r *AdminResourceRepo) adminMicrosoftFilterQuery(ctx context.Context, filter coreapp.AdminMicrosoftListFilter, now time.Time, ignore string) *gorm.DB {
@@ -591,17 +615,25 @@ func applyAdminMicrosoftFilters(query *gorm.DB, filter coreapp.AdminMicrosoftLis
 }
 
 func applyAdminTokenHealth(query *gorm.DB, health string, now time.Time) *gorm.DB {
+	predicate, args := adminTokenHealthPredicate(health, now)
+	if predicate == "" {
+		return query
+	}
+	return query.Where(predicate, args...)
+}
+
+func adminTokenHealthPredicate(health string, now time.Time) (string, []any) {
 	switch health {
 	case "missing":
-		return query.Where("mr.client_id = '' OR mr.refresh_token = ''")
+		return "(mr.client_id = '' OR mr.refresh_token = '')", nil
 	case "expired":
-		return query.Where("mr.client_id <> '' AND mr.refresh_token <> '' AND mr.rt_expire_at IS NOT NULL AND mr.rt_expire_at <= ?", now)
+		return "mr.client_id <> '' AND mr.refresh_token <> '' AND mr.rt_expire_at IS NOT NULL AND mr.rt_expire_at <= ?", []any{now}
 	case "expiring":
-		return query.Where("mr.client_id <> '' AND mr.refresh_token <> '' AND mr.rt_expire_at > ? AND mr.rt_expire_at <= ?", now, now.Add(7*24*time.Hour))
+		return "mr.client_id <> '' AND mr.refresh_token <> '' AND mr.rt_expire_at > ? AND mr.rt_expire_at <= ?", []any{now, now.Add(7 * 24 * time.Hour)}
 	case "valid":
-		return query.Where("mr.client_id <> '' AND mr.refresh_token <> '' AND (mr.rt_expire_at IS NULL OR mr.rt_expire_at > ?)", now.Add(7*24*time.Hour))
+		return "mr.client_id <> '' AND mr.refresh_token <> '' AND (mr.rt_expire_at IS NULL OR mr.rt_expire_at > ?)", []any{now.Add(7 * 24 * time.Hour)}
 	default:
-		return query
+		return "", nil
 	}
 }
 
@@ -610,7 +642,8 @@ func adminMicrosoftFacetsCacheKey(filter coreapp.AdminMicrosoftListFilter) strin
 	for i, ownerID := range filter.OwnerIDs {
 		ownerIDs[i] = strconv.FormatUint(uint64(ownerID), 10)
 	}
-	return fmt.Sprintf("search=%q|suffix=%q|status=%q|sale=%s|long=%s|graph=%s|token=%q|from=%s|to=%s|owners=%s",
+	return fmt.Sprintf("generation=%d|search=%q|suffix=%q|status=%q|sale=%s|long=%s|graph=%s|token=%q|from=%s|to=%s|owners=%s",
+		currentMicrosoftFacetsGeneration(),
 		strings.ToLower(strings.TrimSpace(filter.Search)), strings.ToLower(strings.TrimSpace(filter.Suffix)), filter.Status,
 		resourceBoolPtrKey(filter.ForSale), resourceBoolPtrKey(filter.LongLived), resourceBoolPtrKey(filter.GraphAvailable), filter.TokenHealth,
 		resourceTimePtrKey(filter.CreatedFrom), resourceTimePtrKey(filter.CreatedTo), strings.Join(ownerIDs, ","))

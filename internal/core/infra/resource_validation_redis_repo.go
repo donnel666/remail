@@ -26,7 +26,7 @@ func (r *ResourceValidationRepo) MarkResourcePendingWithLog(
 	if r == nil || r.db == nil || resourceID == 0 || ownerUserID == 0 || !domain.IsValidResourceType(resourceType) {
 		return domain.ErrInvalidResourceCommand
 	}
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var root EmailResourceModel
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("id = ? AND type = ? AND owner_user_id = ?", resourceID, string(resourceType), ownerUserID).
@@ -80,6 +80,10 @@ func (r *ResourceValidationRepo) MarkResourcePendingWithLog(
 		}
 		return nil
 	})
+	if err == nil && resourceType == domain.ResourceTypeMicrosoft {
+		invalidateMicrosoftFacets()
+	}
+	return err
 }
 
 func (r *ResourceValidationRepo) RecordMicrosoftFetchFailure(
@@ -140,6 +144,9 @@ func (r *ResourceValidationRepo) RecordMicrosoftFetchFailure(
 		abnormal = true
 		return createSystemLogInTx(ctx, tx, systemLog)
 	})
+	if err == nil && abnormal {
+		invalidateMicrosoftFacets()
+	}
 	return abnormal, err
 }
 
@@ -148,6 +155,7 @@ func (r *ResourceValidationRepo) MarkValidationBatchPending(ctx context.Context,
 		return nil, domain.ErrInvalidResourceCommand
 	}
 	result := &coreapp.ResourceValidationBatchPageResult{AfterID: task.AfterID, ThroughID: task.ThroughID}
+	microsoftChanged := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		selection := task.Selection
 		if !selection.AllowBinding {
@@ -202,10 +210,19 @@ func (r *ResourceValidationRepo) MarkValidationBatchPending(ctx context.Context,
 		if result.AfterID == task.AfterID {
 			return fmt.Errorf("resource validation Redis batch made no progress")
 		}
+		for _, candidate := range candidates {
+			if domain.ResourceType(candidate.ResourceType) == domain.ResourceTypeMicrosoft {
+				microsoftChanged = true
+				break
+			}
+		}
 		return markValidationCandidatesPendingTx(ctx, tx, candidates)
 	})
 	if err != nil {
 		return nil, err
+	}
+	if microsoftChanged {
+		invalidateMicrosoftFacets()
 	}
 	return result, nil
 }
@@ -297,7 +314,11 @@ func (r *ResourceValidationRepo) MarkValidationDispatched(ctx context.Context, t
 	if result.Error != nil {
 		return false, fmt.Errorf("activate Redis validation assignment: %w", result.Error)
 	}
-	return result.RowsAffected == 1, nil
+	changed := result.RowsAffected == 1
+	if changed && task.ResourceType == domain.ResourceTypeMicrosoft {
+		invalidateMicrosoftFacets()
+	}
+	return changed, nil
 }
 
 func (r *ResourceValidationRepo) ReleaseValidation(ctx context.Context, task coreapp.ResourceValidationTask) error {
@@ -320,6 +341,9 @@ func (r *ResourceValidationRepo) ReleaseValidation(ctx context.Context, task cor
 	}
 	if result.Error != nil {
 		return fmt.Errorf("release Redis validation assignment: %w", result.Error)
+	}
+	if result.RowsAffected == 1 && task.ResourceType == domain.ResourceTypeMicrosoft {
+		invalidateMicrosoftFacets()
 	}
 	return nil
 }
@@ -405,6 +429,7 @@ func (r *ResourceValidationRepo) ApplyMicrosoftResult(ctx context.Context, task 
 	if stale {
 		return coreapp.ErrValidationResultStale
 	}
+	invalidateMicrosoftFacets()
 	return nil
 }
 

@@ -503,6 +503,9 @@ func (r *ResourceImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(
 		if err != nil {
 			return nil, err
 		}
+		if len(chunkIDs) > 0 {
+			invalidateMicrosoftFacets()
+		}
 		importedResourceIDs = append(importedResourceIDs, chunkIDs...)
 	}
 

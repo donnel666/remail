@@ -243,34 +243,63 @@ VALUES (9101, 'identifying-owner@test.local', 'hash', 'Identifying Owner', 'supp
 	require.EqualValues(t, 1, facets.Status.Normal)
 }
 
-func TestAdminMicrosoftFacetsPreserveCrossFilterSemantics(t *testing.T) {
-	yes := true
-	rows := []adminMicrosoftFacetRow{
-		{Status: "normal", ForSale: true, LongLived: true, GraphAvailable: true, TokenHealth: "valid", EmailDomain: "outlook.com", Count: 4},
-		{Status: "abnormal", ForSale: true, LongLived: true, GraphAvailable: true, TokenHealth: "valid", EmailDomain: "outlook.com", Count: 3},
-		{Status: "deleted", ForSale: true, LongLived: true, GraphAvailable: true, TokenHealth: "valid", EmailDomain: "outlook.com", Count: 8},
-		{Status: "normal", ForSale: false, LongLived: true, GraphAvailable: true, TokenHealth: "valid", EmailDomain: "outlook.com", Count: 2},
-		{Status: "normal", ForSale: true, LongLived: false, GraphAvailable: true, TokenHealth: "valid", EmailDomain: "outlook.com", Count: 5},
-		{Status: "normal", ForSale: true, LongLived: true, GraphAvailable: false, TokenHealth: "valid", EmailDomain: "outlook.com", Count: 6},
-		{Status: "normal", ForSale: true, LongLived: true, GraphAvailable: true, TokenHealth: "missing", EmailDomain: "outlook.com", Count: 7},
-		{Status: "normal", ForSale: true, LongLived: true, GraphAvailable: true, TokenHealth: "valid", EmailDomain: "hotmail.com", Count: 9},
+func TestAdminMicrosoftFacetsPreserveCrossFilterSemanticsMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	resources := NewResourceRepo(db)
+	repo := NewAdminResourceRepo(db)
+	ctx := context.Background()
+	require.NoError(t, db.Exec(`
+INSERT INTO users(id, email, password_hash, nickname, role, status)
+VALUES (9201, 'facet-cross-owner@test.local', 'hash', 'Facet Owner', 'supplier', 'active')`).Error)
+
+	facts := []struct {
+		status         domain.MicrosoftResourceStatus
+		forSale        bool
+		longLived      bool
+		graphAvailable bool
+		oauth          bool
+		suffix         string
+	}{
+		{domain.MicrosoftStatusNormal, true, true, true, true, "outlook.com"},
+		{domain.MicrosoftStatusAbnormal, true, true, true, true, "outlook.com"},
+		{domain.MicrosoftStatusDeleted, true, true, true, true, "outlook.com"},
+		{domain.MicrosoftStatusNormal, false, true, true, true, "outlook.com"},
+		{domain.MicrosoftStatusNormal, true, false, true, true, "outlook.com"},
+		{domain.MicrosoftStatusNormal, true, true, false, true, "outlook.com"},
+		{domain.MicrosoftStatusNormal, true, true, true, false, "outlook.com"},
+		{domain.MicrosoftStatusNormal, true, true, true, true, "hotmail.com"},
 	}
+	for i, fact := range facts {
+		resource := &domain.MicrosoftResource{
+			EmailAddress: fmt.Sprintf("facet-cross-%d@%s", i, fact.suffix), Password: "secret",
+			Status: fact.status, ForSale: fact.forSale, LongLived: fact.longLived, GraphAvailable: fact.graphAvailable,
+		}
+		if fact.oauth {
+			resource.ClientID = "client"
+			resource.RefreshToken = "refresh"
+		}
+		require.NoError(t, resources.CreateMicrosoft(ctx,
+			&domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 9201}, resource))
+	}
+
+	yes := true
 	filter := coreapp.AdminMicrosoftListFilter{
 		Status: domain.MicrosoftStatusNormal, Suffix: "outlook.com", ForSale: &yes,
 		LongLived: &yes, GraphAvailable: &yes, TokenHealth: "valid",
 	}
 
-	facets := adminMicrosoftFacetsFromRows(rows, filter)
-	require.EqualValues(t, 4, facets.Matched)
-	require.Equal(t, coreapp.AdminFacetCounts{All: 7, Normal: 4, Abnormal: 3, Deleted: 8}, facets.Status)
-	require.Equal(t, coreapp.AdminBooleanFacets{All: 6, Yes: 4, No: 2}, facets.ForSale)
-	require.Equal(t, coreapp.AdminBooleanFacets{All: 9, Yes: 4, No: 5}, facets.LongLived)
-	require.Equal(t, coreapp.AdminBooleanFacets{All: 10, Yes: 4, No: 6}, facets.GraphAvailable)
-	require.Equal(t, coreapp.AdminTokenHealthFacets{All: 11, Valid: 4, Missing: 7}, facets.TokenHealth)
-	require.Equal(t, []coreapp.AdminKeyFacet{{Key: "@hotmail.com", Count: 9}, {Key: "@outlook.com", Count: 4}}, facets.Suffixes)
+	facets, err := repo.AdminMicrosoftFacets(ctx, filter, time.Now().UTC())
+	require.NoError(t, err)
+	require.EqualValues(t, 1, facets.Matched)
+	require.Equal(t, coreapp.AdminFacetCounts{All: 2, Normal: 1, Abnormal: 1, Deleted: 1}, facets.Status)
+	require.Equal(t, coreapp.AdminBooleanFacets{All: 2, Yes: 1, No: 1}, facets.ForSale)
+	require.Equal(t, coreapp.AdminBooleanFacets{All: 2, Yes: 1, No: 1}, facets.LongLived)
+	require.Equal(t, coreapp.AdminBooleanFacets{All: 2, Yes: 1, No: 1}, facets.GraphAvailable)
+	require.Equal(t, coreapp.AdminTokenHealthFacets{All: 2, Valid: 1, Missing: 1}, facets.TokenHealth)
+	require.Equal(t, []coreapp.AdminKeyFacet{{Key: "@hotmail.com", Count: 1}, {Key: "@outlook.com", Count: 1}}, facets.Suffixes)
 }
 
-func TestAdminMicrosoftFacetsCoalesceConcurrentCacheMissesMySQL(t *testing.T) {
+func TestAdminMicrosoftFacetsCoalesceConcurrentCacheMissesIntoTwoBoundedQueriesMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 	repo := NewAdminResourceRepo(db)
 	var queries atomic.Int32
@@ -297,7 +326,17 @@ func TestAdminMicrosoftFacetsCoalesceConcurrentCacheMissesMySQL(t *testing.T) {
 	for range callers {
 		require.NoError(t, <-errs)
 	}
-	require.EqualValues(t, 1, queries.Load())
+	require.EqualValues(t, 2, queries.Load())
+}
+
+func TestAdminMicrosoftFacetWaitersCancelIndependentlyMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	repo := NewAdminResourceRepo(db)
+	now := time.Now().UTC()
+	requireFacetWaitersCancelIndependently(t, db, "test:admin-facets-context", func(ctx context.Context) error {
+		_, err := repo.AdminMicrosoftFacets(ctx, coreapp.AdminMicrosoftListFilter{}, now)
+		return err
+	})
 }
 
 func TestAdminResourceQueryPlansKeepListBoundedAndUseResourceIndexesMySQL(t *testing.T) {
@@ -335,10 +374,11 @@ LIMIT 20`
 	requireAdminExplainTableUsesOneOf(t, db, listExplain, "er", 8, "PRIMARY")
 
 	facetExplain := `EXPLAIN SELECT mr.email_domain AS suffix, COUNT(*) AS count
-FROM microsoft_resources AS mr
-WHERE mr.status <> 'deleted'
-GROUP BY mr.email_domain
-ORDER BY count DESC, suffix ASC`
+	FROM microsoft_resources AS mr
+	WHERE mr.status <> 'deleted'
+	GROUP BY mr.email_domain
+	ORDER BY count DESC, suffix ASC
+	LIMIT 100`
 	requireAdminExplainTableUsesOneOf(t, db, facetExplain, "mr", 512,
 		"idx_microsoft_bulk_domain", "idx_microsoft_status")
 
@@ -398,38 +438,28 @@ func TestAdminMicrosoftFilterQueryUsesOneRootJoinShapeMySQL(t *testing.T) {
 	require.Contains(t, sql, "exists (select 1 from plus_aliases pa")
 	require.Contains(t, sql, "er.owner_user_id in (9901)")
 
-	var rows []adminMicrosoftFacetRow
 	now := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
-	facetResult := repo.adminMicrosoftFacetQuery(
-		context.Background(), coreapp.AdminMicrosoftListFilter{}, now,
-	).Select(adminMicrosoftFacetSelect, now, now.Add(7*24*time.Hour)).
-		Group("mr.status, mr.for_sale, mr.long_lived, mr.graph_available, token_health, mr.email_domain").
-		Scan(&rows)
-	require.NoError(t, facetResult.Error)
+	_, err := repo.AdminMicrosoftFacets(context.Background(), coreapp.AdminMicrosoftListFilter{}, now)
+	require.NoError(t, err)
 	facetSQL := strings.ToLower(strings.ReplaceAll(sqlLog.String(), string(rune(96)), ""))
 	sqlLog.Reset()
 	require.Contains(t, facetSQL, "from microsoft_resources as mr")
 	require.NotContains(t, facetSQL, "join email_resources")
-	require.Contains(t, facetSQL, "group by mr.status")
+	require.Contains(t, facetSQL, "sum(case when")
+	require.NotContains(t, facetSQL, "group by mr.status")
+	require.Contains(t, facetSQL, "group by mr.email_domain")
+	require.Contains(t, facetSQL, "limit 100")
 
-	ownerFacetResult := repo.adminMicrosoftFacetQuery(
-		context.Background(), coreapp.AdminMicrosoftListFilter{OwnerIDs: []uint{9901}}, now,
-	).Select(adminMicrosoftFacetSelect, now, now.Add(7*24*time.Hour)).
-		Group("mr.status, mr.for_sale, mr.long_lived, mr.graph_available, token_health, mr.email_domain").
-		Scan(&rows)
-	require.NoError(t, ownerFacetResult.Error)
+	_, err = repo.AdminMicrosoftFacets(context.Background(), coreapp.AdminMicrosoftListFilter{OwnerIDs: []uint{9901}}, now)
+	require.NoError(t, err)
 	ownerFacetSQL := strings.ToLower(strings.ReplaceAll(sqlLog.String(), string(rune(96)), ""))
 	sqlLog.Reset()
 	require.Contains(t, ownerFacetSQL, "join email_resources as er")
 	require.Contains(t, ownerFacetSQL, "er.owner_user_id in (9901)")
 
 	createdFrom := now.Add(-time.Hour)
-	createdFacetResult := repo.adminMicrosoftFacetQuery(
-		context.Background(), coreapp.AdminMicrosoftListFilter{CreatedFrom: &createdFrom}, now,
-	).Select(adminMicrosoftFacetSelect, now, now.Add(7*24*time.Hour)).
-		Group("mr.status, mr.for_sale, mr.long_lived, mr.graph_available, token_health, mr.email_domain").
-		Scan(&rows)
-	require.NoError(t, createdFacetResult.Error)
+	_, err = repo.AdminMicrosoftFacets(context.Background(), coreapp.AdminMicrosoftListFilter{CreatedFrom: &createdFrom}, now)
+	require.NoError(t, err)
 	createdFacetSQL := strings.ToLower(strings.ReplaceAll(sqlLog.String(), string(rune(96)), ""))
 	require.Contains(t, createdFacetSQL, "join email_resources as er")
 	require.Contains(t, createdFacetSQL, "er.created_at >=")
