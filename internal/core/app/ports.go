@@ -1068,6 +1068,7 @@ type ResourceKeyFacet struct {
 }
 
 type ResourceListFacets struct {
+	Matched        int64
 	Status         ResourceFacetCounts
 	Private        ResourceBooleanFacets
 	LongLived      ResourceBooleanFacets
@@ -1201,30 +1202,33 @@ func (uc *ResourceUseCase) List(ctx context.Context, ownerUserID uint, scope str
 	var resources []domain.EmailResource
 	var total int64
 	var facets *ResourceListFacets
+	facetOwnerUserID := ownerUserID
 
 	if scope == "all" {
 		resources, err = uc.resources.ListAll(ctx, filter, offset, limit, afterID)
 		if err != nil {
 			return nil, err
 		}
-		total, err = uc.resources.CountAll(ctx, filter)
-		if err != nil {
-			return nil, err
-		}
-		facets, err = uc.resources.Facets(ctx, 0, filter)
-		if err != nil {
-			return nil, err
-		}
+		facetOwnerUserID = 0
 	} else {
 		resources, err = uc.resources.List(ctx, ownerUserID, filter, offset, limit, afterID)
 		if err != nil {
 			return nil, err
 		}
-		total, err = uc.resources.Count(ctx, ownerUserID, filter)
+	}
+	facets, err = uc.resources.Facets(ctx, facetOwnerUserID, filter)
+	if err != nil {
+		return nil, err
+	}
+	if filter.ResourceType == domain.ResourceTypeMicrosoft {
+		total = reconcileCachedListTotal(facets.Matched, offset, limit, afterID, len(resources))
+	} else if scope == "all" {
+		total, err = uc.resources.CountAll(ctx, filter)
 		if err != nil {
 			return nil, err
 		}
-		facets, err = uc.resources.Facets(ctx, ownerUserID, filter)
+	} else {
+		total, err = uc.resources.Count(ctx, ownerUserID, filter)
 		if err != nil {
 			return nil, err
 		}

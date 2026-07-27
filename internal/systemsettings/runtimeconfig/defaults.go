@@ -2,7 +2,7 @@ package runtimeconfig
 
 import "github.com/donnel666/remail/internal/systemsettings/domain"
 
-const DefaultSettingsCount = 189
+const DefaultSettingsCount = 190
 
 // DefaultSettings is the single source of initial values for runtime-managed
 // settings. Startup inserts only keys that are not in storage.
@@ -206,6 +206,7 @@ var defaultSettings = []domain.Setting{
 	{Key: "leaderboard_cache_ttl_minutes", Value: "15"},
 	{Key: "ranking_refresh_interval_minutes", Value: "5"},
 	{Key: "resource_facets_cache_ttl_seconds", Value: "10"},
+	{Key: "admin_resource_facets_cache_ttl_seconds", Value: "300"},
 	{Key: "ttl_cache_max_entries", Value: "4096"},
 	{Key: "slow_request_threshold_ms", Value: "1000"},
 	{Key: "slow_sql_threshold_ms", Value: "200"},

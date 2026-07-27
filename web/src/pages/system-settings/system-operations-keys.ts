@@ -47,6 +47,7 @@ export const ADMIN_MONITOR_KEYS = [
   "leaderboard_cache_ttl_minutes",
   "ranking_refresh_interval_minutes",
   "resource_facets_cache_ttl_seconds",
+  "admin_resource_facets_cache_ttl_seconds",
   "ttl_cache_max_entries",
   "slow_request_threshold_ms",
   "slow_sql_threshold_ms",

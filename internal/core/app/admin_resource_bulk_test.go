@@ -106,3 +106,23 @@ func TestAdminResourceBulkUsesRedisCursorAndBusinessRows(t *testing.T) {
 	require.Equal(t, []uint{2, 3}, maintenance.ids)
 	require.True(t, queue.released)
 }
+
+func TestReconcileCachedListTotal(t *testing.T) {
+	for _, test := range []struct {
+		name                   string
+		cached                 int64
+		offset, limit, records int
+		afterID                uint
+		want                   int64
+	}{
+		{name: "short first page replaces stale high total", cached: 100, limit: 20, records: 3, want: 3},
+		{name: "short first page replaces stale low total", cached: 1, limit: 20, records: 3, want: 3},
+		{name: "full offset page raises stale low total", cached: 5, offset: 20, limit: 10, records: 10, want: 30},
+		{name: "empty out of range page preserves total", cached: 50, offset: 100, limit: 20, want: 50},
+		{name: "cursor page only provides a page-size lower bound", cached: 1, limit: 20, records: 20, afterID: 100, want: 20},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.want, reconcileCachedListTotal(test.cached, test.offset, test.limit, test.afterID, test.records))
+		})
+	}
+}

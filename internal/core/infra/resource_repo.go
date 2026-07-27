@@ -17,6 +17,7 @@ import (
 	"github.com/donnel666/remail/internal/core/domain"
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
+	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -197,6 +198,7 @@ type ResourceRepo struct {
 	db            *gorm.DB
 	operationLogs *governanceinfra.OperationLogRepo
 	facetsCache   *platform.TTLCache[string, coreapp.ResourceListFacets]
+	facetsFlight  singleflight.Group
 }
 
 const (
@@ -1154,6 +1156,9 @@ func (r *ResourceRepo) Facets(ctx context.Context, ownerUserID uint, filter core
 	if cached, ok := r.facetsCache.Get(cacheKey); ok {
 		return cloneResourceListFacets(&cached), nil
 	}
+	if filter.ResourceType == domain.ResourceTypeMicrosoft {
+		return r.microsoftResourceFacets(ctx, ownerUserID, filter, cacheKey)
+	}
 
 	facets := &coreapp.ResourceListFacets{}
 
@@ -1164,36 +1169,6 @@ func (r *ResourceRepo) Facets(ctx context.Context, ownerUserID uint, filter core
 		return nil, err
 	}
 	facets.Status = statusFacets
-
-	if filter.ResourceType == domain.ResourceTypeMicrosoft {
-		privateBase := filter
-		privateBase.ForSale = nil
-		facets.Private, err = r.resourceBooleanFacets(ctx, ownerUserID, privateBase, "ms_filter.for_sale", false)
-		if err != nil {
-			return nil, err
-		}
-
-		longLivedBase := filter
-		longLivedBase.LongLived = nil
-		facets.LongLived, err = r.resourceBooleanFacets(ctx, ownerUserID, longLivedBase, "ms_filter.long_lived", true)
-		if err != nil {
-			return nil, err
-		}
-
-		graphBase := filter
-		graphBase.GraphAvailable = nil
-		facets.GraphAvailable, err = r.resourceBooleanFacets(ctx, ownerUserID, graphBase, "ms_filter.graph_available", true)
-		if err != nil {
-			return nil, err
-		}
-
-		suffixBase := filter
-		suffixBase.Suffix = ""
-		facets.Suffixes, err = r.resourceFacetGroups(ctx, ownerUserID, suffixBase, "ms_filter.email_domain")
-		if err != nil {
-			return nil, err
-		}
-	}
 
 	if filter.ResourceType == domain.ResourceTypeDomain {
 		privateBase := filter
@@ -1213,6 +1188,136 @@ func (r *ResourceRepo) Facets(ctx context.Context, ownerUserID uint, filter core
 
 	r.facetsCache.Set(cacheKey, *cloneResourceListFacets(facets), runtimeconfig.Duration("resource_facets_cache_ttl_seconds", resourceFacetsCacheTTL, time.Second, 1))
 	return facets, nil
+}
+
+type microsoftResourceFacetRow struct {
+	Status         string
+	ForSale        bool
+	LongLived      bool
+	GraphAvailable bool
+	EmailDomain    string
+	Count          int64
+}
+
+func (r *ResourceRepo) microsoftResourceFacets(ctx context.Context, ownerUserID uint, filter coreapp.ResourceListFilter, cacheKey string) (*coreapp.ResourceListFacets, error) {
+	value, err, _ := r.facetsFlight.Do(cacheKey, func() (any, error) {
+		if cached, ok := r.facetsCache.Get(cacheKey); ok {
+			return cached, nil
+		}
+		base := filter
+		base.Status = ""
+		base.ForSale = nil
+		base.LongLived = nil
+		base.GraphAvailable = nil
+		base.Suffix = ""
+		var rows []microsoftResourceFacetRow
+		if err := r.listQuery(ctx, ownerUserID, base).
+			Select(`ms_filter.status AS status,
+				ms_filter.for_sale AS for_sale,
+				ms_filter.long_lived AS long_lived,
+				ms_filter.graph_available AS graph_available,
+				ms_filter.email_domain AS email_domain,
+				COUNT(*) AS count`).
+			Group("ms_filter.status, ms_filter.for_sale, ms_filter.long_lived, ms_filter.graph_available, ms_filter.email_domain").
+			Scan(&rows).Error; err != nil {
+			return nil, fmt.Errorf("microsoft resource facets: %w", err)
+		}
+		facets := microsoftResourceFacetsFromRows(rows, filter)
+		r.facetsCache.Set(cacheKey, *cloneResourceListFacets(facets), runtimeconfig.Duration("resource_facets_cache_ttl_seconds", resourceFacetsCacheTTL, time.Second, 1))
+		return *facets, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	facets, ok := value.(coreapp.ResourceListFacets)
+	if !ok {
+		return nil, fmt.Errorf("microsoft resource facets: unexpected cache value")
+	}
+	return cloneResourceListFacets(&facets), nil
+}
+
+func microsoftResourceFacetsFromRows(rows []microsoftResourceFacetRow, filter coreapp.ResourceListFilter) *coreapp.ResourceListFacets {
+	facets := &coreapp.ResourceListFacets{}
+	suffixes := make(map[string]int64)
+	for _, row := range rows {
+		if microsoftResourceFacetRowMatches(row, filter, "") {
+			facets.Matched += row.Count
+		}
+		if microsoftResourceFacetRowMatches(row, filter, "status") {
+			facets.Status.All += row.Count
+			addResourceStatusFacet(&facets.Status, row.Status, row.Count)
+		}
+		if microsoftResourceFacetRowMatches(row, filter, "for_sale") {
+			addResourceBooleanFacet(&facets.Private, !row.ForSale, row.Count)
+		}
+		if microsoftResourceFacetRowMatches(row, filter, "long_lived") {
+			addResourceBooleanFacet(&facets.LongLived, row.LongLived, row.Count)
+		}
+		if microsoftResourceFacetRowMatches(row, filter, "graph_available") {
+			addResourceBooleanFacet(&facets.GraphAvailable, row.GraphAvailable, row.Count)
+		}
+		if row.EmailDomain != "" && microsoftResourceFacetRowMatches(row, filter, "suffix") {
+			suffixes[row.EmailDomain] += row.Count
+		}
+	}
+	for key, count := range suffixes {
+		facets.Suffixes = append(facets.Suffixes, coreapp.ResourceKeyFacet{Key: key, Count: count})
+	}
+	sort.Slice(facets.Suffixes, func(i, j int) bool {
+		if facets.Suffixes[i].Count == facets.Suffixes[j].Count {
+			return facets.Suffixes[i].Key < facets.Suffixes[j].Key
+		}
+		return facets.Suffixes[i].Count > facets.Suffixes[j].Count
+	})
+	if len(facets.Suffixes) > 100 {
+		facets.Suffixes = facets.Suffixes[:100]
+	}
+	return facets
+}
+
+func microsoftResourceFacetRowMatches(row microsoftResourceFacetRow, filter coreapp.ResourceListFilter, ignore string) bool {
+	if row.Status == string(domain.MicrosoftStatusDeleted) {
+		return false
+	}
+	if ignore != "status" && filter.Status != "" && row.Status != filter.Status {
+		return false
+	}
+	if ignore != "suffix" && filter.Suffix != "" && row.EmailDomain != filter.Suffix {
+		return false
+	}
+	if ignore != "for_sale" && filter.ForSale != nil && row.ForSale != *filter.ForSale {
+		return false
+	}
+	if ignore != "long_lived" && filter.LongLived != nil && row.LongLived != *filter.LongLived {
+		return false
+	}
+	return ignore == "graph_available" || filter.GraphAvailable == nil || row.GraphAvailable == *filter.GraphAvailable
+}
+
+func addResourceStatusFacet(facets *coreapp.ResourceFacetCounts, status string, count int64) {
+	switch domain.MicrosoftResourceStatus(status) {
+	case domain.MicrosoftStatusNormal:
+		facets.Normal += count
+	case domain.MicrosoftStatusPending:
+		facets.Pending += count
+	case domain.MicrosoftStatusValidating:
+		facets.Validating += count
+	case domain.MicrosoftStatusIdentifying:
+		facets.Identifying += count
+	case domain.MicrosoftStatusAbnormal:
+		facets.Abnormal += count
+	case domain.MicrosoftStatusDisabled:
+		facets.Disabled += count
+	}
+}
+
+func addResourceBooleanFacet(facets *coreapp.ResourceBooleanFacets, yes bool, count int64) {
+	facets.All += count
+	if yes {
+		facets.Yes += count
+	} else {
+		facets.No += count
+	}
 }
 
 type resourceStatusFacetRow struct {

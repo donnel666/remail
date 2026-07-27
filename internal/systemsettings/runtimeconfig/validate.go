@@ -75,8 +75,9 @@ var integerRanges = map[string]integerRange{
 	"admin_resource_list_default_limit": positive(100), "admin_log_default_limit": positive(100), "admin_task_default_limit": positive(100), "admin_ranking_limit": positive(100),
 	"admin_message_default_limit": positive(100), "admin_message_max_search": positive(120),
 	"dashboard_cache_ttl_hours": positive(8760), "leaderboard_cache_ttl_minutes": positive(1440), "ranking_refresh_interval_minutes": positive(1440),
-	"resource_facets_cache_ttl_seconds": positive(3600),
-	"ttl_cache_max_entries":             positive(1_000_000), "slow_request_threshold_ms": {min: 0, max: 600000}, "slow_sql_threshold_ms": {min: 0, max: 600000},
+	"resource_facets_cache_ttl_seconds":       positive(3600),
+	"admin_resource_facets_cache_ttl_seconds": positive(3600),
+	"ttl_cache_max_entries":                   positive(1_000_000), "slow_request_threshold_ms": {min: 0, max: 600000}, "slow_sql_threshold_ms": {min: 0, max: 600000},
 }
 
 var removedKeys = map[string]struct{}{

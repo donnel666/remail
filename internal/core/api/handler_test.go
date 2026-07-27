@@ -605,7 +605,7 @@ func (r *mockResourceRepo) CountAll(_ context.Context, filter coreapp.ResourceLi
 }
 
 func (r *mockResourceRepo) Facets(_ context.Context, ownerUserID uint, filter coreapp.ResourceListFilter) (*coreapp.ResourceListFacets, error) {
-	facets := &coreapp.ResourceListFacets{}
+	facets := &coreapp.ResourceListFacets{Matched: int64(len(r.listResources(ownerUserID, filter, 0, 0)))}
 	statusBase := filter
 	statusBase.Status = ""
 	facets.Status.All = int64(len(r.listResources(ownerUserID, statusBase, 0, 0)))

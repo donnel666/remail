@@ -25,12 +25,13 @@ type adminHandlerReadRepo struct {
 	record coreapp.AdminMicrosoftRecord
 }
 
-func (r adminHandlerReadRepo) ListAdminMicrosoft(context.Context, coreapp.AdminMicrosoftListFilter, int, int, uint, time.Time) ([]coreapp.AdminMicrosoftRecord, int64, error) {
-	return []coreapp.AdminMicrosoftRecord{r.record}, 1, nil
+func (r adminHandlerReadRepo) ListAdminMicrosoft(context.Context, coreapp.AdminMicrosoftListFilter, int, int, uint, time.Time) ([]coreapp.AdminMicrosoftRecord, error) {
+	return []coreapp.AdminMicrosoftRecord{r.record}, nil
 }
 
 func (r adminHandlerReadRepo) AdminMicrosoftFacets(context.Context, coreapp.AdminMicrosoftListFilter, time.Time) (*coreapp.AdminMicrosoftFacets, error) {
 	return &coreapp.AdminMicrosoftFacets{
+		Matched:        1,
 		Status:         coreapp.AdminFacetCounts{All: 1, Normal: 1},
 		ForSale:        coreapp.AdminBooleanFacets{All: 1, Yes: 1},
 		LongLived:      coreapp.AdminBooleanFacets{All: 1, Yes: 1},

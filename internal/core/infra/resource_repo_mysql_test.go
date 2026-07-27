@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -33,6 +34,90 @@ func newCoreMySQLTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
 	return coreMySQLTestServer.Database(t, coreMigrationsDir(t))
+}
+
+func TestResourceMicrosoftFacetsCoalesceToOneScanMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	repo := NewResourceRepo(db)
+	ctx := context.Background()
+	require.NoError(t, db.Exec(`
+INSERT INTO users(id, email, password_hash, role, status)
+VALUES
+	(9401, 'facet-owner@test.local', 'hash', 'supplier', 'active'),
+	(9402, 'facet-other@test.local', 'hash', 'supplier', 'active')`).Error)
+
+	facts := []struct {
+		owner          uint
+		status         domain.MicrosoftResourceStatus
+		domain         string
+		forSale        bool
+		longLived      bool
+		graphAvailable bool
+	}{
+		{9401, domain.MicrosoftStatusNormal, "outlook.com", false, true, true},
+		{9401, domain.MicrosoftStatusAbnormal, "outlook.com", false, true, true},
+		{9401, domain.MicrosoftStatusNormal, "outlook.com", true, true, true},
+		{9401, domain.MicrosoftStatusNormal, "outlook.com", false, false, true},
+		{9401, domain.MicrosoftStatusNormal, "outlook.com", false, true, false},
+		{9401, domain.MicrosoftStatusNormal, "hotmail.com", false, true, true},
+		{9401, domain.MicrosoftStatusDeleted, "outlook.com", false, true, true},
+		{9402, domain.MicrosoftStatusNormal, "outlook.com", false, true, true},
+	}
+	for i, fact := range facts {
+		root := &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: fact.owner}
+		resource := &domain.MicrosoftResource{
+			EmailAddress: fmt.Sprintf("facet-%d@%s", i, fact.domain), Password: "secret", Status: fact.status,
+			ForSale: fact.forSale, LongLived: fact.longLived, GraphAvailable: fact.graphAvailable,
+		}
+		require.NoError(t, repo.CreateMicrosoft(ctx, root, resource))
+	}
+
+	var queries atomic.Int32
+	var enteredOnce sync.Once
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	const callback = "test:resource-microsoft-facets-singleflight"
+	require.NoError(t, db.Callback().Row().Before("gorm:row").Register(callback, func(*gorm.DB) {
+		queries.Add(1)
+		enteredOnce.Do(func() { close(entered) })
+		<-release
+	}))
+	t.Cleanup(func() { _ = db.Callback().Row().Remove(callback) })
+
+	private, yes := false, true
+	filter := coreapp.ResourceListFilter{
+		ResourceType:   domain.ResourceTypeMicrosoft,
+		Status:         string(domain.MicrosoftStatusNormal),
+		Suffix:         "outlook.com",
+		ForSale:        &private,
+		LongLived:      &yes,
+		GraphAvailable: &yes,
+	}
+	type result struct {
+		facets *coreapp.ResourceListFacets
+		err    error
+	}
+	const callers = 8
+	results := make(chan result, callers)
+	for range callers {
+		go func() {
+			facets, err := repo.Facets(ctx, 9401, filter)
+			results <- result{facets: facets, err: err}
+		}()
+	}
+	<-entered
+	close(release)
+	for range callers {
+		got := <-results
+		require.NoError(t, got.err)
+		require.EqualValues(t, 1, got.facets.Matched)
+		require.Equal(t, coreapp.ResourceFacetCounts{All: 2, Normal: 1, Abnormal: 1}, got.facets.Status)
+		require.Equal(t, coreapp.ResourceBooleanFacets{All: 2, Yes: 1, No: 1}, got.facets.Private)
+		require.Equal(t, coreapp.ResourceBooleanFacets{All: 2, Yes: 1, No: 1}, got.facets.LongLived)
+		require.Equal(t, coreapp.ResourceBooleanFacets{All: 2, Yes: 1, No: 1}, got.facets.GraphAvailable)
+		require.Equal(t, []coreapp.ResourceKeyFacet{{Key: "hotmail.com", Count: 1}, {Key: "outlook.com", Count: 1}}, got.facets.Suffixes)
+	}
+	require.EqualValues(t, 1, queries.Load())
 }
 
 func coreMigrationsDir(t *testing.T) string {

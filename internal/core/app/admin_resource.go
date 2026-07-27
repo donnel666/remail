@@ -215,6 +215,7 @@ type AdminKeyFacet struct {
 }
 
 type AdminMicrosoftFacets struct {
+	Matched        int64
 	Status         AdminFacetCounts
 	ForSale        AdminBooleanFacets
 	LongLived      AdminBooleanFacets
@@ -224,7 +225,7 @@ type AdminMicrosoftFacets struct {
 }
 
 type AdminMicrosoftReadRepository interface {
-	ListAdminMicrosoft(ctx context.Context, filter AdminMicrosoftListFilter, offset, limit int, afterID uint, now time.Time) ([]AdminMicrosoftRecord, int64, error)
+	ListAdminMicrosoft(ctx context.Context, filter AdminMicrosoftListFilter, offset, limit int, afterID uint, now time.Time) ([]AdminMicrosoftRecord, error)
 	AdminMicrosoftFacets(ctx context.Context, filter AdminMicrosoftListFilter, now time.Time) (*AdminMicrosoftFacets, error)
 	FindAdminMicrosoft(ctx context.Context, resourceID uint) (*AdminMicrosoftRecord, error)
 	ListAdminMicrosoftAliases(ctx context.Context, resourceID uint, kind string, offset, limit int) ([]AdminMicrosoftAliasItem, int64, error)
@@ -373,7 +374,7 @@ func (q *AdminResourceQuery) List(ctx context.Context, filter AdminMicrosoftList
 		filter.OwnerIDs = uniqueAdminResourceIDs(filter.OwnerIDs)
 	}
 	now := q.now()
-	records, total, err := q.repo.ListAdminMicrosoft(ctx, filter, offset, limit, afterID, now)
+	records, err := q.repo.ListAdminMicrosoft(ctx, filter, offset, limit, afterID, now)
 	if err != nil {
 		return nil, err
 	}
@@ -400,12 +401,26 @@ func (q *AdminResourceQuery) List(ctx context.Context, filter AdminMicrosoftList
 	}
 	return &AdminMicrosoftListResult{
 		Items:       items,
-		Total:       total,
+		Total:       reconcileCachedListTotal(facets.Matched, offset, limit, afterID, len(records)),
 		Offset:      offset,
 		Limit:       limit,
 		NextAfterID: adminNextAfterID(records, limit),
 		Facets:      *facets,
 	}, nil
+}
+
+func reconcileCachedListTotal(cached int64, offset, limit int, afterID uint, records int) int64 {
+	if afterID > 0 {
+		return max(cached, int64(records))
+	}
+	if offset > 0 && records == 0 {
+		return cached
+	}
+	observed := int64(offset + records)
+	if records < limit && (offset == 0 || records > 0) {
+		return observed
+	}
+	return max(cached, observed)
 }
 
 func (q *AdminResourceQuery) Get(ctx context.Context, resourceID uint) (*AdminMicrosoftResourceDetail, error) {

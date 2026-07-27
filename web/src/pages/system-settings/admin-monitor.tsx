@@ -35,6 +35,7 @@ export default function AdminMonitorSection({ options, onBulkSave }: SectionProp
       {field("排行榜缓存有效期（分钟）", "leaderboard_cache_ttl_minutes", 1, 1440)}
       {field("排行榜刷新间隔（分钟）", "ranking_refresh_interval_minutes", 1, 1440)}
       {field("资源筛选缓存有效期（秒）", "resource_facets_cache_ttl_seconds", 1, 3600)}
+      {field("管理端资源统计缓存有效期（秒）", "admin_resource_facets_cache_ttl_seconds", 1, 3600)}
       {field("进程内缓存最大条目", "ttl_cache_max_entries", 1, 1000000)}
       {field("慢请求告警阈值（毫秒）", "slow_request_threshold_ms", 0, 600000)}
       {field("慢 SQL 告警阈值（毫秒）", "slow_sql_threshold_ms", 0, 600000)}
