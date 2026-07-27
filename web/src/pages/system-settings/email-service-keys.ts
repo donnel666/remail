@@ -81,6 +81,11 @@ export const PROXY_NETWORK_KEYS = [
   "pending_proxy_check_limit",
   "proxy_idle_conn_timeout_seconds",
   "proxy_tls_handshake_timeout_seconds",
+  "proxy_server_health_timeout_seconds",
+  "proxy_server_health_interval_seconds",
+  "proxy_server_health_dispatch_lease_seconds",
+  "proxy_server_failure_threshold",
+  "proxy_server_inventory_threshold_percent",
 ] as const;
 
 export const MAIL_DELIVERY_KEYS = [

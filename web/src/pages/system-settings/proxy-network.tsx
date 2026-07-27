@@ -39,6 +39,11 @@ export default function ProxySection({ options, onBulkSave }: SectionProps) {
       {field("待检测代理查询上限", "pending_proxy_check_limit")}
       {field("代理空闲连接超时（秒）", "proxy_idle_conn_timeout_seconds")}
       {field("代理 TLS 握手超时（秒）", "proxy_tls_handshake_timeout_seconds")}
+      {field("代理服务器健康探测总超时（秒）", "proxy_server_health_timeout_seconds")}
+      {field("代理服务器健康探测间隔（秒）", "proxy_server_health_interval_seconds")}
+      {field("代理服务器健康调度租约（秒）", "proxy_server_health_dispatch_lease_seconds")}
+      {field("代理服务器连续失败阈值", "proxy_server_failure_threshold")}
+      {field("代理服务器不可用库存阈值（%）", "proxy_server_inventory_threshold_percent")}
     </SettingsFormGrid>
     <SettingsInvalidValuesNotice keys={invalidKeys} message={t("检测到无效数字配置，请修正后再保存")} />
     <Button icon={<Save size={14} />} disabled={invalidKeys.length > 0} loading={saving} onClick={() => void save().catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>

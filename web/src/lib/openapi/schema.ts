@@ -5598,6 +5598,8 @@ export interface components {
         };
         ProxyItem: {
             id: number;
+            /** @description Shared proxy-server identity derived only from the canonical entry IP or legacy host. */
+            proxyServerId: number;
             /** @enum {string} */
             pool: "resource" | "system";
             /** @description Complete proxy URL for authorized admin endpoints. Logs, errors and diagnostics remain redacted. */
@@ -5620,6 +5622,11 @@ export interface components {
             lastCheckedAt?: string | null;
             /** Format: date-time */
             lastUsedAt?: string | null;
+            /**
+             * Format: date-time
+             * @description Durable Resource allocation fairness timestamp; updated in the binding transaction.
+             */
+            lastAssignedAt?: string | null;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
