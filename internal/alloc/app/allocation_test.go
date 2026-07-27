@@ -123,6 +123,11 @@ func (q *candidateRefreshQueueStub) EnqueueInventoryRefresh(context.Context) err
 	return nil
 }
 
+func (q *candidateRefreshQueueStub) EnqueueInventoryRefreshContinuation(context.Context) error {
+	q.inventoryCalls++
+	return nil
+}
+
 func TestCandidateRefreshMarksProcessingOnlyAfterAcceptedEnqueue(t *testing.T) {
 	tests := []struct {
 		name             string

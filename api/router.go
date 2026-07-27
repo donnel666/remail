@@ -175,14 +175,13 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 					if err := coreMod.ReindexDomainTLDs(ctx); err != nil {
 						return err
 					}
-					return allocMod.UseCase.RefreshProductInventoryCaches(ctx)
+					// ponytail: inactive persisted snapshots refresh after their next
+					// read; add cache generations only if TLD changes need instant purge.
+					return allocMod.UseCase.ScheduleInventoryRefresh(ctx)
 				}
 			}
 			return nil
 		})
-		if err := allocMod.UseCase.RefreshProductInventoryCaches(context.Background()); err != nil {
-			return nil, cleanup, err
-		}
 		cleanupFuncs = append(cleanupFuncs, systemSettingsMod.Start(context.Background()))
 		allocMod.UseCase.SetHistoricalMicrosoftAliasPort(mailMod.MicrosoftAliases)
 		allocMod.SetBackgroundExecutionGate(p.BackgroundLoad)

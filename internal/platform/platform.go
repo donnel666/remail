@@ -26,7 +26,7 @@ const (
 	asynqWorkerConcurrency           = 768
 	asynqRealtimeWorkerConcurrency   = 256
 	asynqBackgroundWorkerConcurrency = 512
-	asynqShutdownTimeout             = 30 * time.Second
+	asynqShutdownTimeout             = 5 * time.Second
 	backgroundRetryDelayMinimum      = 5 * time.Second
 	backgroundRetryDelayJitter       = 5 * time.Second
 )

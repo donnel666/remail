@@ -106,7 +106,11 @@ func main() {
 		slog.Error("server error", "error", err)
 	}
 
-	// Give outstanding requests up to 30 seconds to complete
+	// Drain durable task workers while the old HTTP listener is still serving.
+	// Asynq requeues anything that exceeds its short shutdown timeout.
+	p.ShutdownWorkers()
+
+	// Give outstanding HTTP requests up to 30 seconds to complete.
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -114,7 +118,6 @@ func main() {
 		slog.Error("server forced to shutdown", "error", err)
 	}
 	routerCleanup(shutdownCtx)
-	p.ShutdownWorkers()
 	stopRuntimeDiagnostics()
 	shutdownPprofServer(shutdownCtx, pprofSrv)
 

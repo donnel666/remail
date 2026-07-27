@@ -163,7 +163,7 @@ var defaultSettings = []domain.Setting{
 	{Key: "asynq_worker_concurrency", Value: "768"},
 	{Key: "asynq_realtime_worker_concurrency", Value: "256"},
 	{Key: "asynq_background_worker_concurrency", Value: "512"},
-	{Key: "asynq_shutdown_timeout_seconds", Value: "30"},
+	{Key: "asynq_shutdown_timeout_seconds", Value: "5"},
 	{Key: "validation_dispatch_maximum", Value: "128"},
 	{Key: "default_inbound_smtp_max_connections", Value: "200"},
 

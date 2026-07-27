@@ -2,6 +2,7 @@ package infra
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"sort"
@@ -348,22 +349,29 @@ func (r *ResourceRepo) CreateDomain(ctx context.Context, resource *domain.EmailR
 const (
 	domainCustomTLDSettingKey     = "domain_custom_tlds"
 	domainMaxSubdomainsSettingKey = "domain_max_subdomains_per_registrable_domain"
+	// Bump when TLDWithCustom semantics or the embedded public suffix list changes.
+	domainTLDIndexVersion = "1"
 )
 
 type domainCreationPolicy struct {
-	customTLDs    string
-	maxSubdomains int
+	customTLDs       string
+	maxSubdomains    int
+	indexFingerprint string
 }
 
 func lockDomainCreationPolicy(tx *gorm.DB) (domainCreationPolicy, error) {
 	policy := domainCreationPolicy{maxSubdomains: domain.DefaultMaxSubdomainsPerRegistrableDomain}
-	var guard struct{ ID int }
-	if err := tx.Raw("SELECT id FROM system_guard WHERE id = 1 FOR UPDATE").Scan(&guard).Error; err != nil {
+	var guard struct {
+		ID                   int
+		DomainTLDFingerprint string `gorm:"column:domain_tld_index_fingerprint"`
+	}
+	if err := tx.Raw("SELECT id, domain_tld_index_fingerprint FROM system_guard WHERE id = 1 FOR UPDATE").Scan(&guard).Error; err != nil {
 		return policy, fmt.Errorf("acquire domain creation guard: %w", err)
 	}
 	if guard.ID != 1 {
 		return policy, fmt.Errorf("domain creation guard row missing")
 	}
+	policy.indexFingerprint = guard.DomainTLDFingerprint
 
 	var settings []struct {
 		Key   string
@@ -385,6 +393,10 @@ func lockDomainCreationPolicy(tx *gorm.DB) (domainCreationPolicy, error) {
 		}
 	}
 	return policy, nil
+}
+
+func domainTLDIndexFingerprint(customTLDs string) string {
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(domainTLDIndexVersion+"\n"+strings.TrimSpace(customTLDs))))
 }
 
 func createDomainTx(tx *gorm.DB, resource *domain.EmailResource, dr *domain.MailDomainResource) error {
@@ -576,13 +588,14 @@ func enforceDomainSubdomainLimit(tx *gorm.DB, domainName string, policy domainCr
 // ReindexDomainTLDs repairs persisted filter/allocation suffixes after the PSL
 // baseline or administrator-supplied additions change.
 func (r *ResourceRepo) ReindexDomainTLDs(ctx context.Context) error {
-	// ponytail: one transaction keeps the derived index atomic and blocks the
-	// low-volume domain write path; add versioned online reindexing only if the
-	// inventory becomes large enough for this to show up in measurements.
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		policy, err := lockDomainCreationPolicy(tx)
 		if err != nil {
 			return err
+		}
+		fingerprint := domainTLDIndexFingerprint(policy.customTLDs)
+		if policy.indexFingerprint == fingerprint {
+			return nil
 		}
 		const batchSize = 1000
 		var afterID uint
@@ -601,7 +614,7 @@ func (r *ResourceRepo) ReindexDomainTLDs(ctx context.Context) error {
 				return fmt.Errorf("list domain TLD reindex batch: %w", err)
 			}
 			if len(rows) == 0 {
-				return nil
+				break
 			}
 			updates := make(map[string][]uint)
 			for _, row := range rows {
@@ -620,9 +633,13 @@ func (r *ResourceRepo) ReindexDomainTLDs(ctx context.Context) error {
 			}
 			afterID = rows[len(rows)-1].ID
 			if len(rows) < batchSize {
-				return nil
+				break
 			}
 		}
+		if err := tx.Table("system_guard").Where("id = 1").UpdateColumn("domain_tld_index_fingerprint", fingerprint).Error; err != nil {
+			return fmt.Errorf("record domain TLD index fingerprint: %w", err)
+		}
+		return nil
 	})
 }
 

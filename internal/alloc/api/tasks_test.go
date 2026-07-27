@@ -15,8 +15,9 @@ import (
 )
 
 type allocationTaskQueueStub struct {
-	candidateCalls atomic.Int32
-	inventoryCalls atomic.Int32
+	candidateCalls    atomic.Int32
+	inventoryCalls    atomic.Int32
+	continuationCalls atomic.Int32
 }
 
 func (*allocationTaskQueueStub) EnqueueCandidateRefresh(context.Context, allocapp.CandidateRefreshTask) (bool, error) {
@@ -30,6 +31,11 @@ func (q *allocationTaskQueueStub) EnqueueCandidateRefreshDispatcher(context.Cont
 
 func (q *allocationTaskQueueStub) EnqueueInventoryRefresh(context.Context) error {
 	q.inventoryCalls.Add(1)
+	return nil
+}
+
+func (q *allocationTaskQueueStub) EnqueueInventoryRefreshContinuation(context.Context) error {
+	q.continuationCalls.Add(1)
 	return nil
 }
 
@@ -158,6 +164,29 @@ func TestInventoryRefreshTaskStopsNormallyAtItsWorkLimit(t *testing.T) {
 	require.Equal(t, inventoryRefreshMaxEntriesPerTask, result.Updated)
 	require.EqualValues(t, inventoryRefreshMaxEntriesPerTask, repo.calls.Load())
 	require.Equal(t, inventoryRefreshMaxEntriesPerTask/5, cache.claims)
+}
+
+func TestInventoryRefreshTaskQueuesContinuationAtItsWorkLimit(t *testing.T) {
+	queue := &allocationTaskQueueStub{}
+	useCase := allocapp.NewUseCase(&boundedInventoryTaskRepo{}, queue)
+	useCase.SetInventoryCache(&boundedInventoryTaskCache{})
+	mux := asynq.NewServeMux()
+	cleanup := RegisterAllocationTaskHandlers(mux, &Module{UseCase: useCase})
+	t.Cleanup(func() { cleanup(context.Background()) })
+
+	require.NoError(t, mux.ProcessTask(context.Background(), asynq.NewTask(allocinfra.TypeInventoryRefresh, nil)))
+	require.EqualValues(t, 1, queue.continuationCalls.Load())
+}
+
+func TestAllocationTaskSeedersQueueInventoryRefreshImmediately(t *testing.T) {
+	queue := &allocationTaskQueueStub{}
+	module := &Module{UseCase: allocapp.NewUseCase(nil, queue)}
+	cleanup := startAllocationTaskSeeders(module, time.Hour, time.Hour)
+	t.Cleanup(func() { cleanup(context.Background()) })
+
+	require.Eventually(t, func() bool {
+		return queue.inventoryCalls.Load() == 1
+	}, 100*time.Millisecond, time.Millisecond)
 }
 
 func TestAllocationTaskSeedersStopOnCleanup(t *testing.T) {

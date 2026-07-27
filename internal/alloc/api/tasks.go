@@ -90,6 +90,11 @@ func RegisterAllocationTaskHandlers(mux *asynq.ServeMux, module *Module) func(co
 		if deferred {
 			return platform.ErrBackgroundExecutionDeferred
 		}
+		if result != nil && result.Attempted >= inventoryRefreshMaxEntriesPerTask {
+			if err := module.UseCase.ScheduleInventoryRefreshContinuation(ctx); err != nil {
+				return fmt.Errorf("enqueue inventory cache refresh continuation: %w", err)
+			}
+		}
 		return nil
 	})
 	if module == nil || module.UseCase == nil {
@@ -145,6 +150,9 @@ func startAllocationTaskSeedersWithInventoryInterval(module *Module, candidateIn
 		defer close(done)
 		candidateTicker := time.NewTicker(candidateInterval)
 		lastInventory := time.Now()
+		if err := module.UseCase.ScheduleInventoryRefresh(ctx); err != nil {
+			slog.Warn("enqueue initial inventory cache refresh failed", "error", err)
+		}
 		nextInventoryDelay := func() time.Duration {
 			delay := time.Until(lastInventory.Add(inventoryInterval()))
 			if delay <= 0 {

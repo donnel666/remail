@@ -182,7 +182,6 @@ type InventoryCache interface {
 	RefreshInventoryStats(ctx context.Context, projectID uint, stats *InventoryStats, ttl time.Duration) error
 	GetProductInventoryTotals(ctx context.Context, projectID uint) (*ProjectProductInventoryTotals, error)
 	GetProductInventorySnapshots(ctx context.Context, projectIDs []uint) (map[uint]*ProjectProductInventoryTotals, error)
-	ListProductInventoryEntries(ctx context.Context) ([]InventoryCacheEntry, error)
 	InitializeInventory(ctx context.Context, entries []InventoryCacheEntry, ttl time.Duration) error
 	SetProductInventoryTotals(ctx context.Context, projectID uint, totals *ProjectProductInventoryTotals, ttl time.Duration) error
 	RefreshProductInventoryTotals(ctx context.Context, projectID uint, totals *ProjectProductInventoryTotals, ttl time.Duration) error
@@ -353,6 +352,7 @@ type CandidateRefreshQueue interface {
 	EnqueueCandidateRefresh(ctx context.Context, task CandidateRefreshTask) (bool, error)
 	EnqueueCandidateRefreshDispatcher(ctx context.Context, delay time.Duration) error
 	EnqueueInventoryRefresh(ctx context.Context) error
+	EnqueueInventoryRefreshContinuation(ctx context.Context) error
 }
 
 type Repository interface {

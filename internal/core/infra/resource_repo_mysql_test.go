@@ -266,6 +266,9 @@ func TestDomainTLDReindexAndSubdomainLimitMySQL(t *testing.T) {
 	require.NoError(t, repo.ReindexDomainTLDs(context.Background()))
 	require.NoError(t, db.Raw("SELECT domain_tld FROM domain_resources WHERE domain = ?", "one.school.edu.invalid").Scan(&storedTLD).Error)
 	require.Equal(t, ".edu.invalid", storedTLD)
+	var fingerprint string
+	require.NoError(t, db.Raw("SELECT domain_tld_index_fingerprint FROM system_guard WHERE id = 1").Scan(&fingerprint).Error)
+	require.Equal(t, domainTLDIndexFingerprint("edu.invalid"), fingerprint)
 
 	require.NoError(t, create("two.school.edu.invalid"))
 	require.NoError(t, create("three.school.edu.invalid"))

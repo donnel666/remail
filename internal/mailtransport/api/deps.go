@@ -85,6 +85,7 @@ const (
 	// binding domain becomes usable within one interval).
 	auxiliaryDomainRefreshInterval = 60 * time.Second
 	dispatcherSeedTimeout          = 5 * time.Second
+	inboundSMTPShutdownTimeout     = 5 * time.Second
 
 	// Proactive refresh-token expiry scan: once a day at ~dawn, enqueue a
 	// refresh for every account whose refresh token expires within the lookahead
@@ -292,7 +293,14 @@ func (m *MailTransportModule) StartInboundSMTP() func(context.Context) {
 	var once sync.Once
 	return func(ctx context.Context) {
 		once.Do(func() {
-			_ = m.InboundSMTP.Shutdown(ctx)
+			shutdownCtx, cancel := context.WithTimeout(ctx, inboundSMTPShutdownTimeout)
+			defer cancel()
+			if err := m.InboundSMTP.Shutdown(shutdownCtx); err != nil &&
+				!errors.Is(err, context.Canceled) &&
+				!errors.Is(err, context.DeadlineExceeded) &&
+				!errors.Is(err, smtpserver.ErrServerClosed) {
+				slog.Warn("inbound smtp shutdown failed", "error", err)
+			}
 		})
 	}
 }

@@ -100,35 +100,6 @@ func (c *InventoryCache) GetProductInventorySnapshots(ctx context.Context, proje
 	return result, nil
 }
 
-func (c *InventoryCache) ListProductInventoryEntries(ctx context.Context) ([]allocapp.InventoryCacheEntry, error) {
-	if c == nil || c.redis == nil {
-		return nil, nil
-	}
-	entries := make(map[uint]allocapp.InventoryCacheEntry)
-	var cursor uint64
-	for {
-		keys, next, err := c.redis.Scan(ctx, cursor, inventoryCacheKeyPrefix+string(allocapp.InventoryCacheProducts)+":*", 100).Result()
-		if err != nil {
-			return nil, fmt.Errorf("list product inventory cache keys: %w", err)
-		}
-		for _, key := range keys {
-			entry, ok := parseInventoryCacheKey(key)
-			if ok && entry.Kind == allocapp.InventoryCacheProducts {
-				entries[entry.ProjectID] = entry
-			}
-		}
-		cursor = next
-		if cursor == 0 {
-			break
-		}
-	}
-	result := make([]allocapp.InventoryCacheEntry, 0, len(entries))
-	for _, entry := range entries {
-		result = append(result, entry)
-	}
-	return result, nil
-}
-
 // InitializeInventory seeds cold keys with known-zero snapshots without
 // overwriting a concurrent background refresh.
 func (c *InventoryCache) InitializeInventory(ctx context.Context, entries []allocapp.InventoryCacheEntry, ttl time.Duration) error {

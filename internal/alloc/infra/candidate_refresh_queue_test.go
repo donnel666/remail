@@ -56,12 +56,13 @@ func TestInventoryRefreshQueueUsesBackgroundWorker(t *testing.T) {
 
 	require.NoError(t, queue.EnqueueInventoryRefresh(context.Background()))
 	require.NoError(t, queue.EnqueueInventoryRefresh(context.Background()))
+	require.NoError(t, queue.EnqueueInventoryRefreshContinuation(context.Background()))
 
 	inspector := asynq.NewInspector(redisOptions)
 	t.Cleanup(func() { require.NoError(t, inspector.Close()) })
 	pending, err := inspector.ListPendingTasks(platform.QueueBackgroundInventory)
 	require.NoError(t, err)
-	require.Len(t, pending, 1)
+	require.Len(t, pending, 2)
 	require.Equal(t, TypeInventoryRefresh, pending[0].Type)
 	require.Equal(t, platform.BackgroundTaskMaxRetry, pending[0].MaxRetry)
 	require.Equal(t, inventoryRefreshTaskTimeout, pending[0].Timeout)
