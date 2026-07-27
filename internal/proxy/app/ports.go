@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/proxy/domain"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
@@ -35,7 +37,7 @@ type ProxyRepository interface {
 	ReleaseProxyCheckInfrastructureFailure(ctx context.Context, id uint, generation uint64, safeError string) (bool, error)
 	UpdateCheckResultForGenerationWithLog(ctx context.Context, id uint, generation uint64, result domain.CheckResult, success bool, log *governancedomain.OperationLog) (*domain.Proxy, error)
 	AcquireResourceProxy(ctx context.Context, key string, ipVersion domain.ProxyIPVersion, now time.Time, bindingTTL time.Duration) (*domain.Proxy, error)
-	AcquireSystemProxy(ctx context.Context, ipVersion domain.ProxyIPVersion, now time.Time) (*domain.Proxy, error)
+	AcquireSystemProxy(ctx context.Context, ipVersion domain.ProxyIPVersion, now time.Time, selection ProxyServerSelection) (*domain.Proxy, error)
 	ReportSuccess(ctx context.Context, proxyID uint, usedAt time.Time) error
 	ReportFailure(ctx context.Context, proxyID uint, safeError string, retryable bool) (*domain.Proxy, error)
 }
@@ -49,9 +51,51 @@ type ProxyCheckQueue interface {
 	EnqueueProxyCheckDispatcher(ctx context.Context, delay time.Duration) error
 }
 
+type ProxyServerHealthRepository interface {
+	ListDueProxyServerChecks(ctx context.Context, now time.Time, limit int) ([]ProxyServerCheckTask, error)
+	MarkProxyServerCheckScheduled(ctx context.Context, task ProxyServerCheckTask, nextCheckAt time.Time) (bool, error)
+	FindProxyServerCheckTarget(ctx context.Context, task ProxyServerCheckTask, now time.Time) (*ProxyServerCheckTarget, error)
+	CompleteProxyServerCheck(ctx context.Context, task ProxyServerCheckTask, reachable bool, safeError string, now, nextCheckAt time.Time, failureThreshold, inventoryThresholdPercent int) (*ProxyServerCheckUpdate, error)
+}
+
+type ProxyServerHealthChecker interface {
+	Check(ctx context.Context, proxyURLs []string) error
+}
+
+type ProxyServerCheckQueue interface {
+	EnqueueProxyServerCheck(ctx context.Context, task ProxyServerCheckTask) (bool, error)
+}
+
 type ProxyCheckTask struct {
 	ProxyID         uint   `json:"proxyId"`
 	CheckGeneration uint64 `json:"checkGeneration"`
+}
+
+type ProxyServerCheckTask struct {
+	ProxyServerID    uint   `json:"proxyServerId"`
+	HealthGeneration uint64 `json:"healthGeneration"`
+}
+
+type ProxyServerCheckTarget struct {
+	Server    domain.ProxyServer
+	ProxyURLs []string
+}
+
+type ProxyServerCheckUpdate struct {
+	ProxyServerID           uint
+	PreviousHealthStatus    domain.ProxyServerHealthStatus
+	HealthStatus            domain.ProxyServerHealthStatus
+	PreviousInventoryStatus domain.ProxyServerInventoryStatus
+	InventoryStatus         domain.ProxyServerInventoryStatus
+	HealthFailures          uint
+	ActiveProxies           int64
+	UnavailableProxies      int64
+}
+
+type ProxyServerCheckDispatchResult struct {
+	Attempted int
+	Queued    int
+	Failed    int
 }
 
 type ProxyListFilter struct {
@@ -158,34 +202,61 @@ type AcquireProxyRequest struct {
 	AllowSystemFallback bool
 	Attempt             int
 	RequestID           string
+	AvoidProxyServerIDs []uint
 }
 
 type ProxyConfig struct {
-	ID        uint
-	Pool      domain.ProxyPool
-	URL       string
-	IPVersion domain.ProxyIPVersion
-	Country   string
-	LatencyMs int
-	Direct    bool
+	ID            uint
+	ProxyServerID uint
+	Pool          domain.ProxyPool
+	URL           string
+	IPVersion     domain.ProxyIPVersion
+	Country       string
+	LatencyMs     int
+	Direct        bool
+}
+
+type ProxyServerSelection struct {
+	Seed                string
+	AvoidProxyServerIDs []uint
+}
+
+func AppendAvoidProxyServerID(ids []uint, config *ProxyConfig) []uint {
+	if config == nil || config.Direct || config.ProxyServerID == 0 {
+		return ids
+	}
+	for _, id := range ids {
+		if id == config.ProxyServerID {
+			return ids
+		}
+	}
+	return append(ids, config.ProxyServerID)
 }
 
 type ProxyUseCase struct {
-	proxies ProxyRepository
-	checker ProxyChecker
-	queue   ProxyCheckQueue
-	ops     governanceapp.OperationLogPort
-	systems governanceapp.SystemLogPort
-	now     func() time.Time
+	proxies       ProxyRepository
+	checker       ProxyChecker
+	queue         ProxyCheckQueue
+	serverHealth  ProxyServerHealthRepository
+	serverChecker ProxyServerHealthChecker
+	serverQueue   ProxyServerCheckQueue
+	ops           governanceapp.OperationLogPort
+	systems       governanceapp.SystemLogPort
+	now           func() time.Time
 }
 
 const (
-	defaultProxyListLimit  = 20
-	maxProxyListLimit      = 10000
-	resourceBindingTTL     = 7 * 24 * time.Hour
-	maxProxyAttempts       = 3
-	pendingProxyCheckLimit = 100
-	proxyCheckAttempts     = 3
+	defaultProxyListLimit                = 20
+	maxProxyListLimit                    = 10000
+	resourceBindingTTL                   = 7 * 24 * time.Hour
+	maxProxyAttempts                     = 3
+	pendingProxyCheckLimit               = 100
+	proxyCheckAttempts                   = 3
+	proxyServerCheckLimit                = 100
+	proxyServerCheckInterval             = time.Minute
+	proxyServerCheckLease                = 2 * time.Minute
+	proxyServerFailureThreshold          = 3
+	proxyServerInventoryThresholdPercent = 80
 )
 
 func NewProxyUseCase(
@@ -195,13 +266,22 @@ func NewProxyUseCase(
 	ops governanceapp.OperationLogPort,
 	systems governanceapp.SystemLogPort,
 ) *ProxyUseCase {
-	return &ProxyUseCase{
+	uc := &ProxyUseCase{
 		proxies: proxies,
 		checker: checker,
 		queue:   queue,
 		ops:     ops,
 		systems: systems,
 		now:     func() time.Time { return time.Now().UTC() },
+	}
+	uc.serverHealth, _ = proxies.(ProxyServerHealthRepository)
+	uc.serverQueue, _ = queue.(ProxyServerCheckQueue)
+	return uc
+}
+
+func (uc *ProxyUseCase) SetProxyServerHealthChecker(checker ProxyServerHealthChecker) {
+	if uc != nil {
+		uc.serverChecker = checker
 	}
 }
 
@@ -760,6 +840,72 @@ func (uc *ProxyUseCase) DispatchPendingProxyChecks(ctx context.Context, limit in
 	return result, nil
 }
 
+func (uc *ProxyUseCase) DispatchDueProxyServerChecks(ctx context.Context, limit int) (*ProxyServerCheckDispatchResult, error) {
+	if uc == nil || uc.serverHealth == nil || uc.serverQueue == nil {
+		return &ProxyServerCheckDispatchResult{}, nil
+	}
+	if limit <= 0 || limit > proxyServerCheckLimit {
+		limit = proxyServerCheckLimit
+	}
+	now := uc.now()
+	tasks, err := uc.serverHealth.ListDueProxyServerChecks(ctx, now, limit)
+	if err != nil {
+		return nil, err
+	}
+	result := &ProxyServerCheckDispatchResult{Attempted: len(tasks)}
+	lease := runtimeconfig.Duration("proxy_server_health_dispatch_lease_seconds", proxyServerCheckLease, time.Second, 1)
+	for _, task := range tasks {
+		accepted, err := uc.serverQueue.EnqueueProxyServerCheck(ctx, task)
+		if err != nil {
+			result.Failed++
+			continue
+		}
+		scheduled, err := uc.serverHealth.MarkProxyServerCheckScheduled(ctx, task, now.Add(lease))
+		if err != nil {
+			result.Failed++
+			continue
+		}
+		if accepted && scheduled {
+			result.Queued++
+		}
+	}
+	return result, nil
+}
+
+func (uc *ProxyUseCase) RunProxyServerCheck(ctx context.Context, task ProxyServerCheckTask) error {
+	if task.ProxyServerID == 0 || task.HealthGeneration == 0 {
+		return fmt.Errorf("proxy server check task identity is required")
+	}
+	if uc == nil || uc.serverHealth == nil || uc.serverChecker == nil {
+		return fmt.Errorf("proxy server checker is unavailable")
+	}
+	now := uc.now()
+	target, err := uc.serverHealth.FindProxyServerCheckTarget(ctx, task, now)
+	if err != nil || target == nil {
+		return err
+	}
+	checkErr := uc.serverChecker.Check(ctx, target.ProxyURLs)
+	if checkErr != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	safeError := ""
+	if checkErr != nil {
+		safeError = "Proxy server transport probe failed."
+	}
+	interval := runtimeconfig.Duration("proxy_server_health_interval_seconds", proxyServerCheckInterval, time.Second, 1)
+	_, err = uc.serverHealth.CompleteProxyServerCheck(
+		ctx,
+		task,
+		checkErr == nil,
+		safeError,
+		now,
+		now.Add(interval),
+		runtimeconfig.Int("proxy_server_failure_threshold", proxyServerFailureThreshold, 1),
+		runtimeconfig.Int("proxy_server_inventory_threshold_percent", proxyServerInventoryThresholdPercent, 1),
+	)
+	return err
+}
+
 func (uc *ProxyUseCase) ScheduleProxyCheckDispatcher(ctx context.Context, delay time.Duration) {
 	if uc.queue == nil {
 		return
@@ -779,6 +925,11 @@ func (uc *ProxyUseCase) markProxyCheckQueueFailure(ctx context.Context, id uint,
 }
 
 func (uc *ProxyUseCase) Acquire(ctx context.Context, req AcquireProxyRequest) (*ProxyConfig, error) {
+	req.RequestID = strings.TrimSpace(req.RequestID)
+	if req.RequestID == "" {
+		// Internal callers still receive an independent, evenly distributed seed.
+		req.RequestID = platform.NewUUIDV7String()
+	}
 	ipVersion := normalizeAcquireIP(req.IPVersion, req.Purpose)
 	now := uc.now()
 	if req.Attempt < 0 {
@@ -808,7 +959,10 @@ func (uc *ProxyUseCase) Acquire(ctx context.Context, req AcquireProxyRequest) (*
 		}
 		_ = uc.writeSystemLog(ctx, "warning", "proxy.system_fallback", req.RequestID, "proxy_binding", req.Key, "Resource proxy unavailable, falling back to system proxy.", "Proxy unavailable.")
 	}
-	proxy, err = uc.proxies.AcquireSystemProxy(ctx, ipVersion, now)
+	proxy, err = uc.proxies.AcquireSystemProxy(ctx, ipVersion, now, ProxyServerSelection{
+		Seed:                req.RequestID,
+		AvoidProxyServerIDs: req.AvoidProxyServerIDs,
+	})
 	if err != nil {
 		if errors.Is(err, domain.ErrProxyUnavailable) {
 			_ = uc.writeSystemLog(ctx, "warning", "proxy.direct_fallback", req.RequestID, "proxy_binding", req.Key, "System proxy unavailable, falling back to direct connection.", err.Error())
@@ -980,12 +1134,13 @@ func proxyConfig(proxy *domain.Proxy) *ProxyConfig {
 		return nil
 	}
 	return &ProxyConfig{
-		ID:        proxy.ID,
-		Pool:      proxy.Pool,
-		URL:       proxy.URL,
-		IPVersion: proxy.IPVersion,
-		Country:   proxy.Country,
-		LatencyMs: proxy.LatencyMs,
+		ID:            proxy.ID,
+		ProxyServerID: proxy.ProxyServerID,
+		Pool:          proxy.Pool,
+		URL:           proxy.URL,
+		IPVersion:     proxy.IPVersion,
+		Country:       proxy.Country,
+		LatencyMs:     proxy.LatencyMs,
 	}
 }
 

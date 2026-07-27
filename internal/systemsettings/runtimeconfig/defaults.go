@@ -2,7 +2,7 @@ package runtimeconfig
 
 import "github.com/donnel666/remail/internal/systemsettings/domain"
 
-const DefaultSettingsCount = 184
+const DefaultSettingsCount = 189
 
 // DefaultSettings is the single source of initial values for runtime-managed
 // settings. Startup inserts only keys that are not in storage.
@@ -140,6 +140,11 @@ var defaultSettings = []domain.Setting{
 	{Key: "pending_proxy_check_limit", Value: "100"},
 	{Key: "proxy_idle_conn_timeout_seconds", Value: "15"},
 	{Key: "proxy_tls_handshake_timeout_seconds", Value: "5"},
+	{Key: "proxy_server_health_timeout_seconds", Value: "3"},
+	{Key: "proxy_server_health_interval_seconds", Value: "60"},
+	{Key: "proxy_server_health_dispatch_lease_seconds", Value: "120"},
+	{Key: "proxy_server_failure_threshold", Value: "3"},
+	{Key: "proxy_server_inventory_threshold_percent", Value: "80"},
 
 	{Key: "smtp_outbound_payload_ttl_minutes", Value: "5"},
 	{Key: "smtp_task_retry_count", Value: "3"},

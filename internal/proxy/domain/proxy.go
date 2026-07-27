@@ -44,8 +44,49 @@ const (
 	ProxyPurposeBinding ProxyPurpose = "binding"
 )
 
+type ProxyServerAdminStatus string
+
+const (
+	ProxyServerAdminOnline   ProxyServerAdminStatus = "online"
+	ProxyServerAdminDraining ProxyServerAdminStatus = "draining"
+	ProxyServerAdminOffline  ProxyServerAdminStatus = "offline"
+)
+
+type ProxyServerHealthStatus string
+
+const (
+	ProxyServerHealthy   ProxyServerHealthStatus = "healthy"
+	ProxyServerUnhealthy ProxyServerHealthStatus = "unhealthy"
+)
+
+type ProxyServerInventoryStatus string
+
+const (
+	ProxyServerInventoryHealthy  ProxyServerInventoryStatus = "healthy"
+	ProxyServerInventoryDegraded ProxyServerInventoryStatus = "degraded"
+)
+
+type ProxyServer struct {
+	ID                  uint
+	ServerIP            string
+	Name                string
+	SourceType          string
+	CapacityWeight      uint
+	AdminStatus         ProxyServerAdminStatus
+	HealthStatus        ProxyServerHealthStatus
+	HealthFailures      uint
+	HealthGeneration    uint64
+	LastHealthError     string
+	LastHealthCheckedAt *time.Time
+	NextHealthCheckAt   time.Time
+	InventoryStatus     ProxyServerInventoryStatus
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+}
+
 type Proxy struct {
 	ID                  uint
+	ProxyServerID       uint
 	Pool                ProxyPool
 	URL                 string
 	ExpireAt            time.Time
@@ -62,6 +103,7 @@ type Proxy struct {
 	CheckGeneration     uint64
 	LastCheckedAt       *time.Time
 	LastUsedAt          *time.Time
+	LastAssignedAt      *time.Time
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
 }
@@ -303,6 +345,16 @@ func NormalizeCountry(value string) string {
 		return normalized[:32]
 	}
 	return normalized
+}
+
+// NormalizeProxyServerIP is the machine identity used by scheduling. Ports,
+// credentials, and observed outbound addresses deliberately do not participate.
+func NormalizeProxyServerIP(value string) string {
+	value = strings.TrimSpace(value)
+	if ip := net.ParseIP(value); ip != nil {
+		return strings.ToLower(ip.String())
+	}
+	return strings.ToLower(value)
 }
 
 func NormalizeProxyURL(value string) (string, error) {

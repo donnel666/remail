@@ -33,6 +33,19 @@ func RegisterProxyTaskHandlers(mux *asynq.ServeMux, module *ProxyModule) {
 				"failed", result.Failed,
 			)
 		}
+		serverResult, err := module.ProxyUseCase.DispatchDueProxyServerChecks(ctx, 0)
+		if err != nil {
+			module.ProxyUseCase.LogTaskFailure(ctx, "proxy.server_check_dispatcher_failed", "", "proxy_server", "dispatcher", "Proxy server check dispatcher failed.", err)
+			return err
+		}
+		if serverResult != nil && serverResult.Attempted > 0 {
+			slog.Info(
+				"proxy server check dispatcher finished",
+				"attempted", serverResult.Attempted,
+				"queued", serverResult.Queued,
+				"failed", serverResult.Failed,
+			)
+		}
 		return nil
 	})
 	module.ProxyUseCase.ScheduleProxyCheckDispatcher(context.Background(), 0)
@@ -73,6 +86,18 @@ func RegisterProxyTaskHandlers(mux *asynq.ServeMux, module *ProxyModule) {
 			"check_generation", payload.CheckGeneration,
 			"status", status,
 		)
+		return nil
+	})
+
+	mux.HandleFunc(proxyinfra.TypeProxyServerCheck, func(ctx context.Context, task *asynq.Task) error {
+		var payload proxyapp.ProxyServerCheckTask
+		if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+			return fmt.Errorf("decode proxy server check task: %w: %w", err, asynq.SkipRetry)
+		}
+		if err := module.ProxyUseCase.RunProxyServerCheck(ctx, payload); err != nil {
+			module.ProxyUseCase.LogTaskFailure(ctx, "proxy.server_check_task_failed", "", "proxy_server", fmt.Sprintf("%d", payload.ProxyServerID), "Proxy server check task failed.", err)
+			return err
+		}
 		return nil
 	})
 }

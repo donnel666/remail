@@ -25,6 +25,7 @@
 | 2026-07-03 | V1.18 | Codex | 补充检测 job claim 策略：dispatcher 必须用数据库行锁和状态条件原子 claim，worker 只能从 `queued` 进入 `running`，终态不得被回退。 |
 | 2026-07-15 | V1.19 | Codex | 运行期连续第 3 次可重试错误仅触发异步检测：代理进入 `checking` 并原子创建单检测 job；只有检测失败才写入 `abnormal`。 |
 | 2026-07-18 | V1.20 | Codex | 移除代理检测 job/item 表；代理业务状态和 `check_generation` 成为唯一事实源，Asynq 仅承担有限期执行与去重。 |
+| 2026-07-27 | V1.21 | Codex | 引入按入口 IP 归并的 `ProxyServer`、Resource/System 两层调度、失败服务器排除、事务内 `last_assigned_at` 和独立 TCP 服务器健康探测。 |
 
 > 支撑域。BC-PROXY 负责 Microsoft 通讯用代理的录入、检测、选择、绑定、轮转和禁用，不拥有 Microsoft 页面流、资源状态或订单状态。
 
@@ -36,7 +37,7 @@
 
 | 拥有 | 不拥有 |
 |------|--------|
-| 代理 URL、到期时间、IP 版本、国家、延时、状态、连续可重试错误次数、资源代理绑定、系统池兜底轮转 | Microsoft 登录页面、资源验证状态、邮件匹配、订单服务窗口 |
+| 代理 URL、入口服务器身份/容量/健康、到期时间、IP 版本、国家、延时、状态、连续可重试错误次数、资源代理绑定、系统池兜底轮转 | Microsoft 登录页面、资源验证状态、邮件匹配、订单服务窗口 |
 
 两级代理池：
 
@@ -56,6 +57,7 @@
 | 字段 | 含义 |
 |------|------|
 | `id` | 代理 ID |
+| `proxyServerId` | 所属物理/供应商入口服务器 ID |
 | `pool` | `resource/system` |
 | `url` | 代理 URL，原值保存 |
 | `expireAt` | 代理到期时间，可为空；为空表示长期有效 |
@@ -64,7 +66,8 @@
 | `latencyMs` | 延时，系统检测补全 |
 | `status` | `checking/normal/abnormal/disabled/expired` |
 | `errors` | 连续可重试错误次数，不可重试错误不计入该计数 |
-| `lastCheckedAt/lastUsedAt` | 最近检测/使用时间 |
+| `lastCheckedAt/lastUsedAt` | 最近检测/实际使用时间；`lastUsedAt` 是提交后的 best-effort 遥测 |
+| `lastAssignedAt` | 新建或覆盖绑定时在绑定事务内更新的公平调度事实 |
 | `createdAt/updatedAt` | 时间 |
 
 管理员新增代理时只输入：
@@ -120,7 +123,23 @@ stateDiagram-v2
     expired --> disabled: 管理员禁用
 ```
 
-### 2.2 `Binding`
+### 2.2 `ProxyServer`
+
+`ProxyServer` 表示共同承载一批账号路由的入口服务器。身份只取代理 URL 的规范化 host/IP：端口、用户名、密码和检测到的出口 IP 都不参与归并。IPv4/IPv6 字面量会规范化；历史 DNS host 为兼容现有数据仍可保留。
+
+| 字段 | 含义 |
+|------|------|
+| `serverIp` | 唯一入口 IP/兼容 host；同 IP 不同端口和凭据属于同一服务器 |
+| `sourceType` | `self_hosted/vendor`，不参与调度身份 |
+| `capacityWeight` | 手工配置的并发/带宽权重，默认 1；不得按账号路由数量自动推导 |
+| `adminStatus` | `online/draining/offline`；自动健康任务不得覆盖 |
+| `healthStatus` | `healthy/unhealthy`；只由入口物理服务探测更新 |
+| `healthFailures/healthGeneration` | 连续物理探测失败数及异步任务 fencing generation |
+| `inventoryStatus` | `healthy/degraded`；非过期、非禁用路由中非 `normal` 比例达到阈值时降级告警 |
+
+新分配和 System 轮转只允许 `adminStatus=online && healthStatus=healthy`。已有 Resource 绑定允许 `online/draining`，但仍要求服务器健康；因此 draining 能停止新流量而不中断既有粘性绑定。offline 禁止新旧流量。服务器健康检查最多探测三个代表端口；SOCKS URL 必须完成无凭据 SOCKS5 greeting，HTTP URL 只验证 TCP，不访问公网目标。单次任务共享总探测 deadline，避免串行端口超出 worker timeout。健康/库存状态变化与 SystemLog 同事务提交；服务器切流另写数据库限频的 `proxy.server_failover`，日志失败不会消耗限频事实。`expired` 路由不计入服务器库存异常比例，没有非禁用端点的服务器不再调度健康任务。
+
+### 2.3 `Binding`
 
 资源代理当前绑定事实。`Binding` 不是历史流水；过期或失效后可以覆盖同一 `key + ip` 记录，历史排障靠 SystemLog。失效包含绑定自身过期、绑定代理已过期、绑定代理被禁用、绑定代理不再属于 `resource` 池或代理行已不存在。
 
@@ -152,6 +171,8 @@ stateDiagram-v2
 | `ip` | `auto/ipv4/ipv6`。 |
 | `purpose` | `auth/fetch/binding` 等内部用途，用于日志和默认 IP 策略。 |
 | `attempt` | 当前业务链路内的代理尝试序号，从 0 开始；达到 3 后 BC-PROXY 返回直连配置。 |
+| `requestId` | System Rendezvous 种子；内部任务必须在顶层执行时生成一次并贯穿全部重试。 |
+| `avoidProxyServerIds` | 当前业务生命周期内已经明确失败的入口服务器集合。 |
 
 默认 IP 策略：
 
@@ -163,23 +184,20 @@ stateDiagram-v2
 资源池选择流程：
 
 ```text
-1. 若 key 存在未过期绑定，且代理 normal、未过期、IP 满足要求，返回绑定代理。
-2. 否则从 resource 池选择 normal、未过期、IP 满足要求的代理。
-3. `abnormal/disabled/expired/checking` 不进入可分配候选；即使状态为 `normal`，`expireAt` 已到期也不能进入候选。
-4. 对历史数据或并发兜底，仍优先选择 `errors` 更低的 normal 代理。
-5. 错误数相同，选择 active binding 最少的代理。
-6. 绑定数相同，选择 latencyMs 更低的代理。
-7. 再相同，选择最久未使用的代理。
-8. 创建 7 天绑定，返回代理。
+1. 若 key 存在未过期绑定，代理和服务器均可用且 IP 满足要求，返回绑定代理；draining 服务器上的旧绑定仍可用。
+2. 否则加载仍有有效 Resource 库存的 online/healthy 服务器，以规范化 key 做加权 Rendezvous Hash，得到稳定的服务器回退顺序；pending/checking/abnormal 库存仍保留服务器排序位置，便于检测并记录真实切流。
+3. 按顺序逐台复核服务器状态，并从该服务器内选择 normal、未过期、IP 满足要求的代理；当前服务器因并发锁或库存耗尽选不到时，在同一事务继续下一台。
+4. 服务器内按 `errors ASC -> lastAssignedAt ASC -> latencyMs ASC -> id ASC` 选择，并使用 `FOR UPDATE SKIP LOCKED`。
+5. 创建/覆盖 7 天绑定并在同一事务更新所选代理的 `lastAssignedAt`；提交后再 best-effort 更新 `lastUsedAt`。
 ```
 
 系统池兜底流程：
 
 ```text
-1. 每次外部请求失败后，调用方必须上报本次代理成功/失败，再按 attempt + 1 重新获取路线。
+1. 每次明确的代理失败后，调用方必须上报代理，并把本次 `proxyServerId` 加入当前业务生命周期的排除集合，再按 attempt + 1 重新获取路线；上报落库失败也不能丢失本地排除事实。
 2. attempt=0 且 key 存在时，优先 resource 池；resource 不可用时切到 system 池。
 3. attempt=1/2 只从 system 池选择 normal、未过期、IP 满足要求的代理，不创建 Binding。
-4. system 池只选择 normal 代理，并按 `errors` 更低、最久未使用优先轮转，延时仅作为并列排序。
+4. System 先按非空 `requestId` 做加权 Rendezvous 服务器排序，再在服务器内按 `errors ASC -> lastUsedAt ASC -> latencyMs ASC -> id ASC` 选择；服务器内使用 `FOR UPDATE SKIP LOCKED`，选不到就在同一事务尝试下一台。
 5. attempt >= 3，或 resource/system 池均不可用时，返回 `direct=true` 的系统直连配置。
 6. 直连配置没有 proxyId、URL 和代理状态，调用方不得把直连失败上报为代理失败。
 ```
@@ -188,8 +206,8 @@ stateDiagram-v2
 
 | 场景 | 处理 |
 |------|------|
-| 单次可重试代理错误 | `errors + 1`，写安全诊断，状态置 `abnormal`。 |
-| 可重试错误连续出现 | 继续累计 `errors`，状态保持 `abnormal`，不得自动禁用。 |
+| 单次可重试代理错误 | `errors + 1` 并写安全诊断；未达到阈值时保留 `normal`。 |
+| 可重试错误连续达到阈值 | 代理进入 `pending`、提升 `checkGeneration`，交给异步检测确认，不得自动禁用。 |
 | 不可重试代理错误 | 状态置 `abnormal`，不递增 `errors`，写安全诊断，仍不得自动禁用。 |
 | 成功使用或检测成功 | `errors=0`，更新 `lastUsedAt/lastCheckedAt`。 |
 | 资源代理异常 | 本次业务允许降级时，重新获取 `system` 池代理。 |
@@ -209,9 +227,11 @@ stateDiagram-v2
 | INV-P5 | 检测中的可重试错误在任务内部最多尝试 3 次；仍失败必须置 `abnormal`。系统检测和运行期错误都不得自动禁用代理，`disabled` 只能由管理员显式操作产生。 |
 | INV-P6 | 设置了 `expireAt` 的代理过期后不可再被选择，过期扫描只允许把 `normal/abnormal` 置为 `expired`，不得覆盖 `checking/disabled`；未设置有效期的代理不参与过期扫描。`expired` 不阻塞检测、编辑、删除和禁用。 |
 | INV-P7 | 选择代理必须支持 `auto/ipv4/ipv6`；Microsoft 资源验证链路必须强制请求 IPv4。 |
-| INV-P8 | 同等健康度下资源池选择优先绑定数最少，避免少数代理被过度绑定。 |
+| INV-P8 | Resource/System 都必须先选服务器再选路由；相同容量权重的两台服务器按大量独立 key/requestId 近似 50/50。 |
 | INV-P9 | 同一业务链路最多尝试 3 次代理路线，之后必须切换系统直连；直连失败不计入代理错误。 |
 | INV-P10 | 只有 `normal` 代理可被选择；历史 normal 数据如存在 `errors > 0`，仍必须优先选择 `errors` 更低的代理。 |
+| INV-P11 | `ProxyServer` 身份只由规范化入口 IP/host 决定；端口、认证和出口 IP 不参与同一性判断。 |
+| INV-P12 | 自动探测只修改 `healthStatus`，绝不能覆盖 `adminStatus`；过期凭据不计入服务器物理故障。 |
 
 ---
 
@@ -253,10 +273,12 @@ BC-MAILTRANSPORT 只拿到本次可用代理配置，不直接查询或修改代
 | 场景 | 要求 |
 |------|------|
 | 代理 URL | 同一 pool 下 URL 唯一；实现上保存 URL 原文，并用 `url_hash=sha256(url)` 建 `pool + url_hash` 唯一索引，避免把最长 1024 字符敏感 URL 直接放进唯一索引。 |
+| 服务器归并 | 新增/导入/修改 URL 时在同一事务按规范化 `url_host` upsert `proxy_servers`；历史迁移用 `INET6_ATON/INET6_NTOA` 规范化 IPv4/IPv6 并回填非空外键。 |
 | 代理搜索 | 保存 `url_host` 派生字段并建索引；完整 URL 精确搜索走 `url_hash`，普通搜索走 `url_host/outboundIp/country` 前缀匹配。 |
 | 绑定唯一性 | `key + ip` 同一时间只能有一个有效绑定。 |
-| 最少绑定优先 | 选择代理和创建绑定必须在事务内完成，避免并发都选中同一代理。 |
-| 健康优先 | 只选择 `normal` 代理；查询仍按 `errors ASC` 排序作为历史数据和并发兜底。DDL 必须保留 `pool/status/ip/errors/expireAt` 方向索引支撑选择查询，其中 `expireAt IS NULL` 表示长期有效。 |
+| 两层并发选择 | 候选服务器普通读取并在 Go 内做加权 Rendezvous 排序；逐台短 `FOR SHARE` 复核后，子代理用 `FOR UPDATE SKIP LOCKED`。服务器内无行时必须在同一事务回退下一台。 |
+| Resource 公平性 | 新绑定按 `errors/last_assigned_at/latency/id` 排序；绑定写与 `last_assigned_at` 必须同事务提交，迁移从历史 Binding 回填该字段但不主动打破 7 天粘性。`last_used_at` 仅作提交后 best-effort 遥测。 |
+| 健康优先 | 新路线只选择 online/healthy 服务器上的 `normal` 代理；旧绑定额外允许 draining。DDL 必须保留以 `proxy_server_id` 开头的 Resource/System 选择索引，其中 `expireAt IS NULL` 表示长期有效。 |
 | 错误计数 | 可重试错误上报递增 `errors` 并置 `abnormal`；不可重试错误不递增 `errors` 但同样置 `abnormal`。任何错误上报都不得自动写 `disabled`。 |
 | 过期扫描与选择 | `expireAt` 有索引；扫描只允许把 `normal/abnormal` 批量置 `expired`，不得覆盖 `checking/disabled`。资源池和系统池选择 SQL 必须用 `(expireAt IS NULL OR expireAt > now)` 排除已到期代理。 |
 | 统计查询 | 管理页统计只允许 `COUNT/GROUP BY`，不得返回完整代理行给前端再本地统计。 |
@@ -265,14 +287,15 @@ BC-MAILTRANSPORT 只拿到本次可用代理配置，不直接查询或修改代
 | 检测任务事实 | `proxies.status` 与 `check_generation` 是唯一事实源。提交检测必须原子写 `pending`、提升 generation 并写 OperationLog；dispatcher 只按索引扫描 `pending`。只有 Asynq 明确接受任务后，才允许按相同 generation CAS 为 `checking`；重复任务、Redis 错误或入队错误都保持 `pending`。任务 payload 只含代理 ID 与 generation，旧 generation 的 worker 和结果必须无害退出。Asynq 使用随机 ID、有限 `Unique`、`Timeout` 和 `Retention(0)`，不得承担业务事实持久化。 |
 | 批量检测 | 固定 ID 或筛选批量检测只批量写代理自身的 `pending` 与新 generation，不创建批量任务或明细表，也不把全部 ID 放进 Asynq payload。dispatcher 按稳定顺序分页扫描 `pending` 并逐个入队；单代理 worker 内部最多 3 次真实探测，第三次失败写 `abnormal`，基础设施失败不得计入业务失败次数。 |
 | 批量禁用 | 按筛选条件批量禁用必须由后端单次批量更新完成，并和 OperationLog 在同一事务内提交；前端不得逐条 PATCH。批量启用只能复用批量检测入口，不得直接把状态写成 `normal`。 |
-| EXPLAIN 证据 | 验收测试必须 EXPLAIN 生产选择 SQL 本身：resource 选择查询命中 `idx_proxies_select_health`，active binding 子查询命中 `idx_proxy_bindings_expire_proxy`；system 选择查询命中 `idx_proxies_select_health`。 |
+| EXPLAIN 证据 | 验收测试必须 EXPLAIN 生产选择 SQL 本身：Resource 命中 `idx_proxies_resource_server_select`，System 命中 `idx_proxies_system_server_select`，且热点排序不得出现 `Using filesort`。NULL 时间使用 MySQL 原生 ASC NULL-first，未知延迟通过持久化 `latency_sort_ms` 排到最后。 |
 
 补充说明：`system_logs` 表归属 BC-GOVERNANCE。当前 migration 在代理池阶段引入该基础表，是因为代理检测/兜底诊断是第一个消费者；表所有权、字段语义和写入策略仍按 Governance 文档执行，BC-PROXY 只通过 LogPort 写入。
 
 并发测试必须覆盖：
 
 - 同一 key 100 并发获取，只创建一个有效绑定。
-- 不同 key 并发获取，优先落到绑定数最少的代理。
+- 大量不同 key/requestId 在两台同权重服务器上近似 50/50，指定权重时按比例分布。
+- 首选服务器无可锁/可用路由时，同一事务回退下一台；失败服务器排除后不得再次选到同一 server ID。
 - 检测任务内部 3 次探测失败后变为 abnormal，连续错误只累计 errors，不会自动 disabled。
 - resource 代理失败后能获取 system 代理，且不创建 Binding。
 - 代理尝试达到 3 次或代理池不可用时返回 direct 路线，直连不上报代理错误计数。

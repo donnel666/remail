@@ -197,7 +197,7 @@ func (r *fakeProxyRepo) AcquireResourceProxy(_ context.Context, _ string, _ doma
 	return nil, nil
 }
 
-func (r *fakeProxyRepo) AcquireSystemProxy(_ context.Context, _ domain.ProxyIPVersion, _ time.Time) (*domain.Proxy, error) {
+func (r *fakeProxyRepo) AcquireSystemProxy(_ context.Context, _ domain.ProxyIPVersion, _ time.Time, _ proxyapp.ProxyServerSelection) (*domain.Proxy, error) {
 	return nil, nil
 }
 

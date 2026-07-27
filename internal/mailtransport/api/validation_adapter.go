@@ -102,8 +102,9 @@ func (a *ResourceValidationAdapter) RefreshMicrosoftToken(
 
 	var last mailapp.MicrosoftTokenRefreshProtocolResult
 	maxProxyAttempts := microsoftProxyAttemptLimit()
+	var avoidServerIDs []uint
 	for attempt := 0; attempt <= maxProxyAttempts; attempt++ {
-		proxyConfig, err := a.acquireMicrosoftTokenProxy(ctx, request, attempt)
+		proxyConfig, err := a.acquireMicrosoftTokenProxy(ctx, request, attempt, avoidServerIDs)
 		if err != nil {
 			return unavailableMicrosoftTokenRefreshResult(), nil
 		}
@@ -133,6 +134,7 @@ func (a *ResourceValidationAdapter) RefreshMicrosoftToken(
 			return last, nil
 		}
 		if raw.ProxyFailure && proxyID != 0 {
+			avoidServerIDs = proxyapp.AppendAvoidProxyServerID(avoidServerIDs, proxyConfig)
 			_ = a.reportProxyFailure(ctx, proxyID, last.SafeMessage)
 			continue
 		}
@@ -154,6 +156,7 @@ func (a *ResourceValidationAdapter) acquireMicrosoftTokenProxy(
 	ctx context.Context,
 	request mailapp.MicrosoftTokenRefreshProtocolRequest,
 	attempt int,
+	avoidServerIDs []uint,
 ) (*proxyapp.ProxyConfig, error) {
 	if a == nil || a.proxies == nil {
 		return &proxyapp.ProxyConfig{Direct: true}, nil
@@ -165,6 +168,7 @@ func (a *ResourceValidationAdapter) acquireMicrosoftTokenProxy(
 		AllowSystemFallback: true,
 		Attempt:             attempt,
 		RequestID:           strings.TrimSpace(request.RequestID),
+		AvoidProxyServerIDs: avoidServerIDs,
 	})
 }
 
@@ -219,8 +223,7 @@ func unavailableMicrosoftTokenRefreshResult() mailapp.MicrosoftTokenRefreshProto
 }
 
 func NewResourceValidationAdapter(proxies *proxyapp.ProxyUseCase, bindings *mailinfra.MicrosoftBindingRepo) *ResourceValidationAdapter {
-	return &ResourceValidationAdapter{
-		proxies:                    proxies,
+	adapter := &ResourceValidationAdapter{
 		microsoft:                  mailinfra.NewMicrosoftOAuthClient(),
 		fetcher:                    mailinfra.NewMicrosoftMailFetchClient(),
 		dns:                        mailinfra.NewDomainDNSValidator(),
@@ -228,6 +231,10 @@ func NewResourceValidationAdapter(proxies *proxyapp.ProxyUseCase, bindings *mail
 		probePasswordRecovery:      msacl.ProbePasswordRecovery,
 		evaluateBindingEligibility: msacl.EvaluateActiveBindingRecoveryEligibility,
 	}
+	if proxies != nil {
+		adapter.proxies = proxies
+	}
+	return adapter
 }
 
 func (a *ResourceValidationAdapter) ValidateMicrosoft(ctx context.Context, req coreapp.MicrosoftValidationRequest) (coreapp.MicrosoftValidationResult, error) {
@@ -266,8 +273,9 @@ func (a *ResourceValidationAdapter) ValidateMicrosoft(ctx context.Context, req c
 	credentialsKnownAuthoritative := false
 	recoveryAttempted := false
 	maxProxyAttempts := microsoftProxyAttemptLimit()
+	var avoidServerIDs []uint
 	for attempt := 0; attempt <= maxProxyAttempts; attempt++ {
-		proxyConfig, err := a.acquireProxy(ctx, req, attempt)
+		proxyConfig, err := a.acquireProxy(ctx, req, attempt, avoidServerIDs)
 		if err != nil {
 			return coreapp.MicrosoftValidationResult{}, err
 		}
@@ -398,6 +406,7 @@ func (a *ResourceValidationAdapter) ValidateMicrosoft(ctx context.Context, req c
 			return last, nil
 		}
 		if rawResult.ProxyFailure && proxyID != 0 {
+			avoidServerIDs = proxyapp.AppendAvoidProxyServerID(avoidServerIDs, proxyConfig)
 			_ = a.reportProxyFailure(ctx, proxyID, rawResult.SafeMessage)
 			continue
 		}
@@ -440,7 +449,7 @@ func (a *ResourceValidationAdapter) ValidateDomain(ctx context.Context, req core
 	}, err
 }
 
-func (a *ResourceValidationAdapter) acquireProxy(ctx context.Context, req coreapp.MicrosoftValidationRequest, attempt int) (*proxyapp.ProxyConfig, error) {
+func (a *ResourceValidationAdapter) acquireProxy(ctx context.Context, req coreapp.MicrosoftValidationRequest, attempt int, avoidServerIDs []uint) (*proxyapp.ProxyConfig, error) {
 	if a == nil || a.proxies == nil {
 		return &proxyapp.ProxyConfig{Direct: true}, nil
 	}
@@ -458,6 +467,7 @@ func (a *ResourceValidationAdapter) acquireProxy(ctx context.Context, req coreap
 		AllowSystemFallback: true,
 		Attempt:             attempt,
 		RequestID:           req.RequestID,
+		AvoidProxyServerIDs: avoidServerIDs,
 	})
 }
 
@@ -468,6 +478,7 @@ func (a *ResourceValidationAdapter) acquireBindingRecoveryProxy(
 	ctx context.Context,
 	req coreapp.MicrosoftValidationRequest,
 	attempt int,
+	avoidServerIDs []uint,
 ) (*proxyapp.ProxyConfig, error) {
 	if a == nil || a.proxies == nil {
 		return &proxyapp.ProxyConfig{Direct: true}, nil
@@ -479,6 +490,7 @@ func (a *ResourceValidationAdapter) acquireBindingRecoveryProxy(
 		AllowSystemFallback: true,
 		Attempt:             attempt,
 		RequestID:           req.RequestID,
+		AvoidProxyServerIDs: avoidServerIDs,
 	})
 }
 
@@ -598,11 +610,12 @@ func (a *ResourceValidationAdapter) acquireTokenWithBindingProxy(
 ) (mailinfra.MicrosoftOAuthResult, error) {
 	last := unavailableMicrosoftBindingResult()
 	maxProxyAttempts := microsoftProxyAttemptLimit()
+	var avoidServerIDs []uint
 	for attempt := 0; attempt <= maxProxyAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return mailinfra.MicrosoftOAuthResult{}, err
 		}
-		proxyConfig, err := a.acquireBindingRecoveryProxy(ctx, req, attempt)
+		proxyConfig, err := a.acquireBindingRecoveryProxy(ctx, req, attempt, avoidServerIDs)
 		if err != nil {
 			if cancelErr := microsoftRecoveryContextError(ctx, err); cancelErr != nil {
 				return mailinfra.MicrosoftOAuthResult{}, cancelErr
@@ -629,6 +642,7 @@ func (a *ResourceValidationAdapter) acquireTokenWithBindingProxy(
 			result.ProxyFailure = proxyID != 0
 		}
 		if result.ProxyFailure {
+			avoidServerIDs = proxyapp.AppendAvoidProxyServerID(avoidServerIDs, proxyConfig)
 			_ = a.reportProxyFailure(ctx, proxyID, result.SafeMessage)
 			result.ProxyFailure = false
 			last = result
@@ -994,11 +1008,12 @@ func (a *ResourceValidationAdapter) recoverBindingForValidation(
 	}
 
 	maxProxyAttempts := microsoftProxyAttemptLimit()
+	var avoidServerIDs []uint
 	for attempt := 0; attempt <= maxProxyAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return nil, false, err
 		}
-		proxyConfig, err := a.acquireBindingRecoveryProxy(ctx, req, attempt)
+		proxyConfig, err := a.acquireBindingRecoveryProxy(ctx, req, attempt, avoidServerIDs)
 		if err != nil {
 			if cancelErr := microsoftRecoveryContextError(ctx, err); cancelErr != nil {
 				return nil, false, cancelErr
@@ -1029,6 +1044,7 @@ func (a *ResourceValidationAdapter) recoverBindingForValidation(
 				logMicrosoftBindingRecoverySkip(req, "probe_rejected")
 				return nil, false, nil
 			}
+			avoidServerIDs = proxyapp.AppendAvoidProxyServerID(avoidServerIDs, proxyConfig)
 			if attempt < maxProxyAttempts {
 				continue
 			}

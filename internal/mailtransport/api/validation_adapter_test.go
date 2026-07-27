@@ -230,6 +230,32 @@ func TestMicrosoftTokenRefreshACLUsesRuntimeProxyAttemptLimit(t *testing.T) {
 	require.Equal(t, 2, oauth.calls)
 }
 
+func TestMicrosoftTokenRefreshAvoidsFailedProxyServerOnRetry(t *testing.T) {
+	proxies := &microsoftProxyProviderStub{acquireFn: func(request proxyapp.AcquireProxyRequest) (*proxyapp.ProxyConfig, error) {
+		serverID := uint(len(request.AvoidProxyServerIDs) + 1)
+		return &proxyapp.ProxyConfig{
+			ID: serverID * 10, ProxyServerID: serverID, URL: fmt.Sprintf("socks5://server-%d.invalid:1080", serverID),
+		}, nil
+	}}
+	oauth := &microsoftOAuthProtocolStub{refreshFn: func(mailinfra.MicrosoftOAuthRequest) (mailinfra.MicrosoftOAuthResult, error) {
+		if len(proxies.requests) == 1 {
+			return mailinfra.MicrosoftOAuthResult{Category: "request", ProxyFailure: true}, nil
+		}
+		return mailinfra.MicrosoftOAuthResult{Valid: true, ClientID: "client", RefreshToken: "refresh"}, nil
+	}}
+	adapter := &ResourceValidationAdapter{proxies: proxies, microsoft: oauth}
+
+	result, err := adapter.RefreshMicrosoftToken(context.Background(), mailapp.MicrosoftTokenRefreshProtocolRequest{
+		EmailAddress: "owner@example.test", RequestID: "refresh-request",
+	})
+
+	require.NoError(t, err)
+	require.True(t, result.Valid)
+	require.Len(t, proxies.requests, 2)
+	require.Empty(t, proxies.requests[0].AvoidProxyServerIDs)
+	require.Equal(t, []uint{1}, proxies.requests[1].AvoidProxyServerIDs)
+}
+
 func TestRecoverBindingForValidationReturnsCandidateWithFenceOnlyWhenEligible(t *testing.T) {
 	updatedAt := time.Date(2026, time.July, 14, 12, 0, 0, 0, time.UTC)
 	var preferred string
@@ -1612,8 +1638,9 @@ func TestValidateMicrosoftRecoveryProbeRotatesBindingProxyWithoutCondemningIt(t 
 	proxies := &microsoftProxyProviderStub{acquireFn: func(request proxyapp.AcquireProxyRequest) (*proxyapp.ProxyConfig, error) {
 		proxyCall++
 		return &proxyapp.ProxyConfig{
-			ID:  uint(300 + proxyCall),
-			URL: fmt.Sprintf("socks5://%s-%d.invalid:1080", request.Purpose, request.Attempt),
+			ID:            uint(300 + proxyCall),
+			ProxyServerID: uint(300 + proxyCall),
+			URL:           fmt.Sprintf("socks5://%s-%d.invalid:1080", request.Purpose, request.Attempt),
 		}, nil
 	}}
 	acquireCall := 0
@@ -1663,6 +1690,14 @@ func TestValidateMicrosoftRecoveryProbeRotatesBindingProxyWithoutCondemningIt(t 
 	require.Equal(t, 2, probeCalls)
 	require.Empty(t, proxies.failures, "ordinary proof-page failures must not mark a shared proxy abnormal")
 	require.Equal(t, 2, oauth.acquireCalls)
+	foundAvoidedRecoveryRetry := false
+	for _, request := range proxies.requests {
+		if request.Purpose == proxydomain.ProxyPurposeBinding && request.Attempt == 1 {
+			require.Equal(t, []uint{302}, request.AvoidProxyServerIDs)
+			foundAvoidedRecoveryRetry = true
+		}
+	}
+	require.True(t, foundAvoidedRecoveryRetry)
 }
 
 func TestValidateMicrosoftExhaustedTemporaryRecoveryProbeReturnsRetryablePendingObservation(t *testing.T) {

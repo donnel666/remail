@@ -161,6 +161,10 @@ func TestValidateSystemOperationsSettings(t *testing.T) {
 	require.NoError(t, Validate("retention_daily_run_hour", "23"))
 	require.ErrorIs(t, Validate("retention_daily_run_hour", "24"), domain.ErrInvalidValue)
 	require.NoError(t, Validate("slow_request_threshold_ms", "0"))
+	require.NoError(t, Validate("proxy_server_health_timeout_seconds", "10"))
+	require.ErrorIs(t, Validate("proxy_server_health_timeout_seconds", "11"), domain.ErrInvalidValue)
+	require.NoError(t, Validate("proxy_server_inventory_threshold_percent", "100"))
+	require.ErrorIs(t, Validate("proxy_server_inventory_threshold_percent", "101"), domain.ErrInvalidValue)
 	for _, key := range []string{
 		"admin_resource_list_max_limit", "admin_log_max_limit", "admin_task_max_limit", "admin_message_max_limit",
 		"api_key_meta_ttl_seconds", "api_key_cache_flush_interval_seconds",

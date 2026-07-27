@@ -6,21 +6,23 @@ import (
 )
 
 type ProxyItemResponse struct {
-	ID            uint       `json:"id"`
-	Pool          string     `json:"pool"`
-	URL           string     `json:"url"`
-	ExpireAt      *time.Time `json:"expireAt"`
-	IPVersion     string     `json:"ipVersion"`
-	OutboundIP    string     `json:"outboundIp"`
-	Country       string     `json:"country"`
-	LatencyMs     int        `json:"latencyMs"`
-	Status        string     `json:"status"`
-	Errors        int        `json:"errors"`
-	LastSafeError string     `json:"lastSafeError,omitempty"`
-	LastCheckedAt *time.Time `json:"lastCheckedAt,omitempty"`
-	LastUsedAt    *time.Time `json:"lastUsedAt,omitempty"`
-	CreatedAt     time.Time  `json:"createdAt"`
-	UpdatedAt     time.Time  `json:"updatedAt"`
+	ID             uint       `json:"id"`
+	ProxyServerID  uint       `json:"proxyServerId"`
+	Pool           string     `json:"pool"`
+	URL            string     `json:"url"`
+	ExpireAt       *time.Time `json:"expireAt"`
+	IPVersion      string     `json:"ipVersion"`
+	OutboundIP     string     `json:"outboundIp"`
+	Country        string     `json:"country"`
+	LatencyMs      int        `json:"latencyMs"`
+	Status         string     `json:"status"`
+	Errors         int        `json:"errors"`
+	LastSafeError  string     `json:"lastSafeError,omitempty"`
+	LastCheckedAt  *time.Time `json:"lastCheckedAt,omitempty"`
+	LastUsedAt     *time.Time `json:"lastUsedAt,omitempty"`
+	LastAssignedAt *time.Time `json:"lastAssignedAt,omitempty"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	UpdatedAt      time.Time  `json:"updatedAt"`
 }
 
 type ProxyListResponse struct {

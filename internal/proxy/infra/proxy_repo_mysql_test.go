@@ -4,9 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -48,6 +50,9 @@ func TestProxySchemaConstraintsMySQL(t *testing.T) {
 	requireIndexExists(t, db, "proxies", "idx_proxies_select_health")
 	requireIndexExists(t, db, "proxies", "idx_proxies_created")
 	requireIndexExists(t, db, "proxies", "idx_proxies_check_dispatch")
+	requireIndexExists(t, db, "proxies", "idx_proxies_resource_server_select")
+	requireIndexExists(t, db, "proxies", "idx_proxies_system_server_select")
+	requireIndexExists(t, db, "proxy_servers", "idx_proxy_servers_ip")
 	requireIndexExists(t, db, "proxy_bindings", "idx_proxy_bindings_key_ip")
 	requireIndexExists(t, db, "proxy_bindings", "idx_proxy_bindings_proxy_expire")
 	requireIndexExists(t, db, "proxy_bindings", "idx_proxy_bindings_expire_proxy")
@@ -55,39 +60,45 @@ func TestProxySchemaConstraintsMySQL(t *testing.T) {
 	require.False(t, db.Migrator().HasTable("proxy_check_job_items"))
 
 	expireAt := time.Now().UTC().Add(time.Hour)
+	serverID := createProxyServerFixture(t, db, "127.0.0.1")
 	require.NoError(t, db.Create(&ProxyModel{
-		Pool:     "resource",
-		URL:      "socks5://user:pass@127.0.0.1:1080",
-		URLHash:  proxyURLHash("socks5://user:pass@127.0.0.1:1080"),
-		ExpireAt: ptrTime(expireAt),
-		Country:  "UNKNOWN",
-		Status:   "checking",
+		ProxyServerID: serverID,
+		Pool:          "resource",
+		URL:           "socks5://user:pass@127.0.0.1:1080",
+		URLHash:       proxyURLHash("socks5://user:pass@127.0.0.1:1080"),
+		ExpireAt:      ptrTime(expireAt),
+		Country:       "UNKNOWN",
+		Status:        "checking",
 	}).Error)
 	require.Error(t, db.Create(&ProxyModel{
-		Pool:     "resource",
-		URL:      "socks5://user:pass@127.0.0.1:1080",
-		URLHash:  proxyURLHash("socks5://user:pass@127.0.0.1:1080"),
-		ExpireAt: ptrTime(expireAt),
-		Country:  "UNKNOWN",
-		Status:   "checking",
+		ProxyServerID: serverID,
+		Pool:          "resource",
+		URL:           "socks5://user:pass@127.0.0.1:1080",
+		URLHash:       proxyURLHash("socks5://user:pass@127.0.0.1:1080"),
+		ExpireAt:      ptrTime(expireAt),
+		Country:       "UNKNOWN",
+		Status:        "checking",
 	}).Error)
 	require.NoError(t, db.Create(&ProxyModel{
-		Pool:     "system",
-		URL:      "socks5://user:pass@127.0.0.1:1080",
-		URLHash:  proxyURLHash("socks5://user:pass@127.0.0.1:1080"),
-		ExpireAt: ptrTime(expireAt),
-		Country:  "UNKNOWN",
-		Status:   "checking",
+		ProxyServerID: serverID,
+		Pool:          "system",
+		URL:           "socks5://user:pass@127.0.0.1:1080",
+		URLHash:       proxyURLHash("socks5://user:pass@127.0.0.1:1080"),
+		ExpireAt:      ptrTime(expireAt),
+		Country:       "UNKNOWN",
+		Status:        "checking",
 	}).Error)
 	require.Error(t, db.Create(&ProxyModel{
-		Pool:     "resource",
-		URL:      "http://127.0.0.1:18080",
-		URLHash:  proxyURLHash("http://127.0.0.1:18080"),
-		ExpireAt: ptrTime(expireAt),
-		Country:  "UNKNOWN",
-		Status:   "invalid",
+		ProxyServerID: serverID,
+		Pool:          "resource",
+		URL:           "http://127.0.0.1:18080",
+		URLHash:       proxyURLHash("http://127.0.0.1:18080"),
+		ExpireAt:      ptrTime(expireAt),
+		Country:       "UNKNOWN",
+		Status:        "invalid",
 	}).Error)
 	require.NoError(t, db.Create(&ProxyModel{
+		ProxyServerID:   serverID,
 		Pool:            "resource",
 		URL:             "http://127.0.0.1:18081",
 		URLHash:         proxyURLHash("http://127.0.0.1:18081"),
@@ -607,13 +618,238 @@ func TestProxyRepoAcquireSystemDoesNotBindMySQL(t *testing.T) {
 	}
 	require.NoError(t, repo.Create(ctx, system))
 
-	selected, err := repo.AcquireSystemProxy(ctx, domain.ProxyIPAuto, now)
+	selected, err := repo.AcquireSystemProxy(ctx, domain.ProxyIPAuto, now, proxyapp.ProxyServerSelection{Seed: "system-test"})
 	require.NoError(t, err)
 	require.Equal(t, system.ID, selected.ID)
 
 	var bindingCount int64
 	require.NoError(t, db.Model(&ProxyBindingModel{}).Count(&bindingCount).Error)
 	require.Equal(t, int64(0), bindingCount)
+}
+
+func TestProxyRepoBalancesBothPoolsByServerAndFallsBackMySQL(t *testing.T) {
+	db := newProxyMySQLTestDB(t)
+	repo := NewProxyRepo(db)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	for serverIndex, host := range []string{"192.0.2.10", "192.0.2.20"} {
+		for route := 0; route < 2; route++ {
+			for _, pool := range []domain.ProxyPool{domain.ProxyPoolResource, domain.ProxyPoolSystem} {
+				proxy := &domain.Proxy{
+					Pool: pool, URL: fmt.Sprintf("socks5://user-%d:secret@%s:%d", route, host, 1080+serverIndex*10+route),
+					ExpireAt: now.Add(24 * time.Hour), IPVersion: domain.ProxyIPv4, Country: "US", Status: domain.ProxyStatusNormal,
+				}
+				require.NoError(t, repo.Create(ctx, proxy))
+			}
+		}
+	}
+
+	resourceCounts := make(map[uint]int)
+	for i := 0; i < 200; i++ {
+		selected, err := repo.AcquireResourceProxy(ctx, fmt.Sprintf("balance-%d@example.test", i), domain.ProxyIPv4, now, time.Hour)
+		require.NoError(t, err)
+		resourceCounts[selected.ProxyServerID]++
+	}
+	require.Len(t, resourceCounts, 2)
+	for _, count := range resourceCounts {
+		require.InDelta(t, 100, count, 25)
+	}
+
+	systemCounts := make(map[uint]int)
+	for i := 0; i < 200; i++ {
+		selected, err := repo.AcquireSystemProxy(ctx, domain.ProxyIPv4, now, proxyapp.ProxyServerSelection{Seed: fmt.Sprintf("request-%d", i)})
+		require.NoError(t, err)
+		systemCounts[selected.ProxyServerID]++
+	}
+	require.Len(t, systemCounts, 2)
+	for _, count := range systemCounts {
+		require.InDelta(t, 100, count, 25)
+	}
+
+	first, err := repo.AcquireSystemProxy(ctx, domain.ProxyIPv4, now, proxyapp.ProxyServerSelection{Seed: "stable-failover"})
+	require.NoError(t, err)
+	second, err := repo.AcquireSystemProxy(ctx, domain.ProxyIPv4, now, proxyapp.ProxyServerSelection{
+		Seed: "stable-failover", AvoidProxyServerIDs: []uint{first.ProxyServerID},
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, first.ProxyServerID, second.ProxyServerID)
+
+	locked := db.Begin()
+	require.NoError(t, locked.Error)
+	defer func() { _ = locked.Rollback().Error }()
+	var lockedRoutes []ProxyModel
+	require.NoError(t, locked.Raw(
+		"SELECT * FROM proxies WHERE proxy_server_id = ? AND pool = ? FOR UPDATE",
+		first.ProxyServerID,
+		string(domain.ProxyPoolSystem),
+	).Scan(&lockedRoutes).Error)
+	require.NotEmpty(t, lockedRoutes)
+	lockedFallback, err := repo.AcquireSystemProxy(ctx, domain.ProxyIPv4, now, proxyapp.ProxyServerSelection{Seed: "stable-failover"})
+	require.NoError(t, err)
+	require.NotEqual(t, first.ProxyServerID, lockedFallback.ProxyServerID)
+	var failoverLogs int64
+	require.NoError(t, db.Table("system_logs").
+		Where("event_type = ? AND biz_type = ? AND biz_id = ?", "proxy.server_failover", "proxy_server", fmt.Sprintf("%d", first.ProxyServerID)).
+		Count(&failoverLogs).Error)
+	require.Equal(t, int64(1), failoverLogs, "repeated failover is rate limited per preferred server")
+	var failedOverServer ProxyServerModel
+	require.NoError(t, db.First(&failedOverServer, first.ProxyServerID).Error)
+	require.NotNil(t, failedOverServer.LastFailoverLoggedAt)
+	require.NoError(t, locked.Rollback().Error)
+	require.NoError(t, db.Model(&ProxyModel{}).
+		Where("proxy_server_id = ? AND pool = ?", first.ProxyServerID, string(domain.ProxyPoolSystem)).
+		Update("status", string(domain.ProxyStatusPending)).Error)
+	pendingFallback, err := repo.AcquireSystemProxy(ctx, domain.ProxyIPv4, now.Add(10*time.Minute), proxyapp.ProxyServerSelection{Seed: "stable-failover"})
+	require.NoError(t, err)
+	require.NotEqual(t, first.ProxyServerID, pendingFallback.ProxyServerID)
+	require.NoError(t, db.Table("system_logs").
+		Where("event_type = ? AND biz_type = ? AND biz_id = ?", "proxy.server_failover", "proxy_server", fmt.Sprintf("%d", first.ProxyServerID)).
+		Count(&failoverLogs).Error)
+	require.Equal(t, int64(2), failoverLogs, "a server with only pending routes remains visible to failover detection")
+}
+
+func TestProxyRepoDrainingKeepsExistingBindingButRejectsNewAllocationMySQL(t *testing.T) {
+	db := newProxyMySQLTestDB(t)
+	repo := NewProxyRepo(db)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	for _, host := range []string{"198.51.100.10", "198.51.100.20"} {
+		require.NoError(t, repo.Create(ctx, &domain.Proxy{
+			Pool: domain.ProxyPoolResource, URL: "socks5://user:secret@" + host + ":1080",
+			ExpireAt: now.Add(time.Hour), IPVersion: domain.ProxyIPv4, Country: "US", Status: domain.ProxyStatusNormal,
+		}))
+	}
+
+	bound, err := repo.AcquireResourceProxy(ctx, "sticky@example.test", domain.ProxyIPv4, now, time.Hour)
+	require.NoError(t, err)
+	require.NoError(t, db.Model(&ProxyServerModel{}).Where("id = ?", bound.ProxyServerID).Update("admin_status", string(domain.ProxyServerAdminDraining)).Error)
+
+	sticky, err := repo.AcquireResourceProxy(ctx, "sticky@example.test", domain.ProxyIPv4, now.Add(time.Minute), time.Hour)
+	require.NoError(t, err)
+	require.Equal(t, bound.ID, sticky.ID)
+	newBinding, err := repo.AcquireResourceProxy(ctx, "new@example.test", domain.ProxyIPv4, now.Add(time.Minute), time.Hour)
+	require.NoError(t, err)
+	require.NotEqual(t, bound.ProxyServerID, newBinding.ProxyServerID)
+}
+
+func TestProxyRepoServerHealthSeparatesTransportInventoryAndAdminStateMySQL(t *testing.T) {
+	db := newProxyMySQLTestDB(t)
+	repo := NewProxyRepo(db)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	for i := 0; i < 5; i++ {
+		status := domain.ProxyStatusPending
+		if i == 0 {
+			status = domain.ProxyStatusNormal
+		} else if i%2 == 0 {
+			status = domain.ProxyStatusChecking
+		}
+		require.NoError(t, repo.Create(ctx, &domain.Proxy{
+			Pool: domain.ProxyPoolSystem, URL: fmt.Sprintf("socks5://user-%d:secret@203.0.113.10:%d", i, 1080+i),
+			ExpireAt: now.Add(time.Hour), IPVersion: domain.ProxyIPv4, Country: "US", Status: status,
+		}))
+	}
+	require.NoError(t, repo.Create(ctx, &domain.Proxy{
+		Pool: domain.ProxyPoolSystem, URL: "socks5://expired:secret@203.0.113.10:2080",
+		ExpireAt: now.Add(-time.Hour), IPVersion: domain.ProxyIPv4, Country: "US", Status: domain.ProxyStatusExpired,
+	}))
+	var server ProxyServerModel
+	require.NoError(t, db.First(&server, "server_ip = ?", "203.0.113.10").Error)
+	require.NoError(t, db.Model(&ProxyServerModel{}).Where("id = ?", server.ID).Update("admin_status", string(domain.ProxyServerAdminDraining)).Error)
+
+	var update *proxyapp.ProxyServerCheckUpdate
+	for generation := uint64(1); generation <= 3; generation++ {
+		var err error
+		update, err = repo.CompleteProxyServerCheck(ctx, proxyapp.ProxyServerCheckTask{
+			ProxyServerID: server.ID, HealthGeneration: generation,
+		}, false, "transport failed", now, now.Add(time.Minute), 3, 80)
+		require.NoError(t, err)
+	}
+	require.Equal(t, domain.ProxyServerUnhealthy, update.HealthStatus)
+	require.Equal(t, domain.ProxyServerInventoryDegraded, update.InventoryStatus)
+	require.Equal(t, int64(5), update.ActiveProxies, "expired credentials are not physical-health inventory")
+	require.Equal(t, int64(4), update.UnavailableProxies)
+	require.NoError(t, db.First(&server, server.ID).Error)
+	require.Equal(t, string(domain.ProxyServerAdminDraining), server.AdminStatus, "automatic health must not overwrite admin intent")
+
+	update, err := repo.CompleteProxyServerCheck(ctx, proxyapp.ProxyServerCheckTask{
+		ProxyServerID: server.ID, HealthGeneration: 4,
+	}, true, "", now.Add(time.Minute), now.Add(2*time.Minute), 3, 80)
+	require.NoError(t, err)
+	require.Equal(t, domain.ProxyServerHealthy, update.HealthStatus)
+	require.Equal(t, uint(0), update.HealthFailures)
+	var eventTypes []string
+	require.NoError(t, db.Table("system_logs").
+		Where("biz_type = ? AND biz_id = ?", "proxy_server", fmt.Sprintf("%d", server.ID)).
+		Order("id ASC").
+		Pluck("event_type", &eventTypes).Error)
+	require.Equal(t, []string{
+		"proxy.server_inventory_degraded",
+		"proxy.server_unhealthy",
+		"proxy.server_recovered",
+	}, eventTypes)
+}
+
+func TestProxyRepoServerHealthStateAndLogAreAtomicMySQL(t *testing.T) {
+	db := newProxyMySQLTestDB(t)
+	repo := NewProxyRepo(db)
+	now := time.Now().UTC()
+	require.NoError(t, repo.Create(context.Background(), &domain.Proxy{
+		Pool: domain.ProxyPoolSystem, URL: "socks5://user:secret@203.0.113.30:1080",
+		ExpireAt: now.Add(time.Hour), IPVersion: domain.ProxyIPv4, Country: "US", Status: domain.ProxyStatusNormal,
+	}))
+	var server ProxyServerModel
+	require.NoError(t, db.First(&server, "server_ip = ?", "203.0.113.30").Error)
+	require.NoError(t, db.Migrator().DropTable("system_logs"))
+
+	_, err := repo.CompleteProxyServerCheck(context.Background(), proxyapp.ProxyServerCheckTask{
+		ProxyServerID: server.ID, HealthGeneration: server.HealthGeneration,
+	}, false, "transport failed", now, now.Add(time.Minute), 1, 80)
+	require.Error(t, err)
+	require.NoError(t, db.First(&server, server.ID).Error)
+	require.Equal(t, string(domain.ProxyServerHealthy), server.HealthStatus)
+	require.Zero(t, server.HealthFailures)
+	require.Equal(t, uint64(1), server.HealthGeneration)
+}
+
+func TestProxyRepoServerChecksSkipServersWithoutProbeEndpointsMySQL(t *testing.T) {
+	db := newProxyMySQLTestDB(t)
+	repo := NewProxyRepo(db)
+	now := time.Now().UTC()
+	orphanID := createProxyServerFixture(t, db, "203.0.113.40")
+	disabledID := createProxyServerFixture(t, db, "203.0.113.41")
+	activeID := createProxyServerFixture(t, db, "203.0.113.42")
+	for _, fixture := range []struct {
+		serverID uint
+		host     string
+		status   domain.ProxyStatus
+	}{
+		{serverID: disabledID, host: "203.0.113.41", status: domain.ProxyStatusDisabled},
+		{serverID: activeID, host: "203.0.113.42", status: domain.ProxyStatusPending},
+	} {
+		require.NoError(t, db.Create(&ProxyModel{
+			ProxyServerID: fixture.serverID,
+			Pool:          string(domain.ProxyPoolSystem),
+			URL:           "socks5://user:secret@" + fixture.host + ":1080",
+			URLHash:       proxyURLHash("socks5://user:secret@" + fixture.host + ":1080"),
+			URLHost:       fixture.host,
+			ExpireAt:      ptrTime(now.Add(time.Hour)),
+			IPVersion:     string(domain.ProxyIPv4),
+			Country:       "US",
+			Status:        string(fixture.status),
+		}).Error)
+	}
+
+	tasks, err := repo.ListDueProxyServerChecks(context.Background(), now.Add(time.Second), 100)
+	require.NoError(t, err)
+	require.Equal(t, []proxyapp.ProxyServerCheckTask{{ProxyServerID: activeID, HealthGeneration: 1}}, tasks)
+	target, err := repo.FindProxyServerCheckTarget(context.Background(), proxyapp.ProxyServerCheckTask{
+		ProxyServerID: disabledID, HealthGeneration: 1,
+	}, now)
+	require.NoError(t, err)
+	require.Nil(t, target)
+	require.NotZero(t, orphanID)
 }
 
 func TestProxyRepoAcquireTouchesProxyAfterSelectionTransactionMySQL(t *testing.T) {
@@ -652,7 +888,7 @@ WHERE trx_mysql_thread_id = CONNECTION_ID()`).Scan(&inTransaction); err != nil {
 	selected, err := repo.AcquireResourceProxy(context.Background(), "post-commit@example.com", domain.ProxyIPv4, now, time.Hour)
 	require.NoError(t, err)
 	require.Equal(t, resource.ID, selected.ID)
-	selected, err = repo.AcquireSystemProxy(context.Background(), domain.ProxyIPv4, now)
+	selected, err = repo.AcquireSystemProxy(context.Background(), domain.ProxyIPv4, now, proxyapp.ProxyServerSelection{Seed: "post-commit"})
 	require.NoError(t, err)
 	require.Equal(t, system.ID, selected.ID)
 
@@ -698,7 +934,7 @@ func TestProxyRepoAcquireCommitsBindingWhenFairnessTouchFailsMySQL(t *testing.T)
 	selected, err := repo.AcquireResourceProxy(context.Background(), "durable-binding@example.com", domain.ProxyIPv4, now, time.Hour)
 	require.NoError(t, err)
 	require.Equal(t, resource.ID, selected.ID)
-	selected, err = repo.AcquireSystemProxy(context.Background(), domain.ProxyIPv4, now)
+	selected, err = repo.AcquireSystemProxy(context.Background(), domain.ProxyIPv4, now, proxyapp.ProxyServerSelection{Seed: "durable"})
 	require.NoError(t, err)
 	require.Equal(t, system.ID, selected.ID)
 
@@ -710,6 +946,45 @@ func TestProxyRepoAcquireCommitsBindingWhenFairnessTouchFailsMySQL(t *testing.T)
 		Where("id IN ? AND last_used_at IS NOT NULL", []uint{resource.ID, system.ID}).
 		Count(&touched).Error)
 	require.Zero(t, touched)
+}
+
+func TestProxyRepoLastAssignedRollsBackWithBindingMySQL(t *testing.T) {
+	db := newProxyMySQLTestDB(t)
+	repo := NewProxyRepo(db)
+	now := time.Now().UTC().Truncate(time.Second)
+	oldProxy := &domain.Proxy{
+		Pool: domain.ProxyPoolResource, URL: "http://127.0.0.1:19291", ExpireAt: now.Add(time.Hour), LatencyMs: 200,
+		IPVersion: domain.ProxyIPv4, OutboundIP: "198.51.100.39", Country: "US", Status: domain.ProxyStatusNormal,
+	}
+	replacement := &domain.Proxy{
+		Pool: domain.ProxyPoolResource, URL: "http://127.0.0.1:19292", ExpireAt: now.Add(time.Hour), LatencyMs: 10,
+		IPVersion: domain.ProxyIPv4, OutboundIP: "198.51.100.40", Country: "US", Status: domain.ProxyStatusNormal,
+	}
+	require.NoError(t, repo.Create(context.Background(), oldProxy))
+	require.NoError(t, repo.Create(context.Background(), replacement))
+	originalExpiry := now.Add(-time.Minute)
+	require.NoError(t, db.Create(&ProxyBindingModel{
+		BindKey: "rollback@example.com", ProxyID: oldProxy.ID, IPVersion: string(domain.ProxyIPv4), ExpireAt: originalExpiry,
+	}).Error)
+
+	forcedAssignmentFailure := errors.New("forced assignment failure")
+	const callback = "test:fail_proxy_assignment_touch"
+	require.NoError(t, db.Callback().Update().Before("gorm:update").Register(callback, func(tx *gorm.DB) {
+		if isProxyLastAssignedTouch(tx) {
+			_ = tx.AddError(forcedAssignmentFailure)
+		}
+	}))
+	t.Cleanup(func() { require.NoError(t, db.Callback().Update().Remove(callback)) })
+
+	_, err := repo.AcquireResourceProxy(context.Background(), "rollback@example.com", domain.ProxyIPv4, now, time.Hour)
+	require.ErrorIs(t, err, forcedAssignmentFailure)
+	var binding ProxyBindingModel
+	require.NoError(t, db.First(&binding, "bind_key = ?", "rollback@example.com").Error)
+	require.Equal(t, oldProxy.ID, binding.ProxyID)
+	require.True(t, originalExpiry.Equal(binding.ExpireAt))
+	var assigned int64
+	require.NoError(t, db.Model(&ProxyModel{}).Where("id IN ? AND last_assigned_at IS NOT NULL", []uint{oldProxy.ID, replacement.ID}).Count(&assigned).Error)
+	require.Zero(t, assigned)
 }
 
 func TestProxyRepoConcurrentResourceSelectionAndPostCommitTouchDoNotDeadlockMySQL(t *testing.T) {
@@ -854,7 +1129,7 @@ func TestProxyRepoAcquirePrefersLowerErrorCountMySQL(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, resourceHealthy.ID, selected.ID)
 
-	selected, err = repo.AcquireSystemProxy(ctx, domain.ProxyIPv4, now)
+	selected, err = repo.AcquireSystemProxy(ctx, domain.ProxyIPv4, now, proxyapp.ProxyServerSelection{Seed: "healthy"})
 	require.NoError(t, err)
 	require.Equal(t, systemHealthy.ID, selected.ID)
 }
@@ -971,32 +1246,35 @@ func TestProxyRepoExplainEvidenceMySQL(t *testing.T) {
 	requireIndexExists(t, db, "proxy_bindings", "idx_proxy_bindings_expire_proxy")
 
 	now := time.Now().UTC()
+	serverID := createProxyServerFixture(t, db, "127.0.0.1")
 	require.NoError(t, db.Create(&ProxyModel{
-		Pool:       "resource",
-		URL:        "http://127.0.0.1:22081",
-		URLHash:    proxyURLHash("http://127.0.0.1:22081"),
-		ExpireAt:   ptrTime(now.Add(time.Hour)),
-		IPVersion:  "ipv4",
-		OutboundIP: "198.51.100.50",
-		Country:    "US",
-		Status:     "normal",
+		ProxyServerID: serverID,
+		Pool:          "resource",
+		URL:           "http://127.0.0.1:22081",
+		URLHash:       proxyURLHash("http://127.0.0.1:22081"),
+		ExpireAt:      ptrTime(now.Add(time.Hour)),
+		IPVersion:     "ipv4",
+		OutboundIP:    "198.51.100.50",
+		Country:       "US",
+		Status:        "normal",
 	}).Error)
 	require.NoError(t, db.Create(&ProxyModel{
-		Pool:       "system",
-		URL:        "http://127.0.0.1:22082",
-		URLHash:    proxyURLHash("http://127.0.0.1:22082"),
-		ExpireAt:   ptrTime(now.Add(time.Hour)),
-		IPVersion:  "ipv6",
-		OutboundIP: "2001:db8::50",
-		Country:    "JP",
-		Status:     "normal",
+		ProxyServerID: serverID,
+		Pool:          "system",
+		URL:           "http://127.0.0.1:22082",
+		URLHash:       proxyURLHash("http://127.0.0.1:22082"),
+		ExpireAt:      ptrTime(now.Add(time.Hour)),
+		IPVersion:     "ipv6",
+		OutboundIP:    "2001:db8::50",
+		Country:       "JP",
+		Status:        "normal",
 	}).Error)
 
-	resourceSQL, resourceArgs := buildSelectResourceProxySQL(domain.ProxyIPv4, now)
-	requireExplainUsesIndex(t, db, "idx_proxies_select_health", "EXPLAIN "+resourceSQL, resourceArgs...)
+	resourceSQL, resourceArgs := buildSelectResourceProxySQL(1, domain.ProxyIPv4, now)
+	requireExplainUsesIndex(t, db, "idx_proxies_resource_server_select", "EXPLAIN "+resourceSQL, resourceArgs...)
 
-	systemSQL, systemArgs := buildSelectSystemProxySQL(domain.ProxyIPv6, now)
-	requireExplainUsesIndex(t, db, "idx_proxies_select_health", "EXPLAIN "+systemSQL, systemArgs...)
+	systemSQL, systemArgs := buildSelectSystemProxySQL(1, domain.ProxyIPv6, now)
+	requireExplainUsesIndex(t, db, "idx_proxies_system_server_select", "EXPLAIN "+systemSQL, systemArgs...)
 
 	requireExplainUsesIndexedAccess(t, db,
 		"EXPLAIN SELECT id FROM proxies WHERE pool = 'system' AND status = 'normal' AND ip_version = 'ipv6' ORDER BY created_at DESC, id DESC LIMIT 100",
@@ -1071,7 +1349,32 @@ func ptrTime(value time.Time) *time.Time {
 	return &value
 }
 
+func createProxyServerFixture(t *testing.T, db *gorm.DB, serverIP string) uint {
+	t.Helper()
+	server := ProxyServerModel{
+		ServerIP:          serverIP,
+		Name:              serverIP,
+		SourceType:        "vendor",
+		CapacityWeight:    1,
+		AdminStatus:       string(domain.ProxyServerAdminOnline),
+		HealthStatus:      string(domain.ProxyServerHealthy),
+		HealthGeneration:  1,
+		InventoryStatus:   string(domain.ProxyServerInventoryHealthy),
+		NextHealthCheckAt: time.Now().UTC(),
+	}
+	require.NoError(t, db.Create(&server).Error)
+	return server.ID
+}
+
 func isProxyLastUsedTouch(tx *gorm.DB) bool {
+	return isProxyColumnTouch(tx, "last_used_at")
+}
+
+func isProxyLastAssignedTouch(tx *gorm.DB) bool {
+	return isProxyColumnTouch(tx, "last_assigned_at")
+}
+
+func isProxyColumnTouch(tx *gorm.DB, column string) bool {
 	if tx == nil || tx.Statement == nil {
 		return false
 	}
@@ -1086,7 +1389,7 @@ func isProxyLastUsedTouch(tx *gorm.DB) bool {
 	if !ok {
 		return false
 	}
-	_, ok = updates["last_used_at"]
+	_, ok = updates[column]
 	return ok
 }
 
@@ -1120,6 +1423,7 @@ func requireExplainUsesIndex(t *testing.T, db *gorm.DB, expectedKey string, quer
 	seenKeys := make([]string, 0, len(rows))
 	for _, row := range rows {
 		assertExplainIndexedRow(t, row, query)
+		require.NotContains(t, strings.ToLower(row.Extra.String), "filesort", "hot proxy selection must use index order: %s", query)
 		seenKeys = append(seenKeys, row.Key.String)
 		if row.Key.String == expectedKey {
 			usedExpectedKey = true
@@ -1141,6 +1445,7 @@ type explainRow struct {
 	Key        sql.NullString `gorm:"column:key"`
 	Rows       sql.NullInt64  `gorm:"column:rows"`
 	AccessType sql.NullString `gorm:"column:type"`
+	Extra      sql.NullString `gorm:"column:Extra"`
 }
 
 func explainRows(t *testing.T, db *gorm.DB, query string, args ...any) []explainRow {
@@ -1150,6 +1455,7 @@ func explainRows(t *testing.T, db *gorm.DB, query string, args ...any) []explain
 		Key        sql.NullString `gorm:"column:key"`
 		Rows       sql.NullInt64  `gorm:"column:rows"`
 		AccessType sql.NullString `gorm:"column:type"`
+		Extra      sql.NullString `gorm:"column:Extra"`
 	}
 	require.NoError(t, db.Raw(query, args...).Scan(&rows).Error)
 	require.NotEmpty(t, rows, "expected EXPLAIN rows for %s", query)

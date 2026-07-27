@@ -9,14 +9,15 @@ import (
 
 func TestProxyPendingDispatchMigrationRoundTripRehydratesLegacyJobsMySQL(t *testing.T) {
 	db := newProxyMySQLTestDB(t)
+	serverID := createProxyServerFixture(t, db, "127.0.0.1")
 	require.NoError(t, db.Exec(`
 INSERT INTO proxies(
-    id, pool, url, url_hash, url_host, status,
+    id, proxy_server_id, pool, url, url_hash, url_host, status,
     check_operator_user_id, check_request_id, check_path
 )
 VALUES
-    (990271, 'resource', 'http://127.0.0.1:9001', REPEAT('a', 64), '127.0.0.1', 'pending', 71, 'request-pending', '/pending'),
-    (990272, 'resource', 'http://127.0.0.1:9002', REPEAT('b', 64), '127.0.0.1', 'checking', 72, 'request-checking', '/checking')`).Error)
+    (990271, ?, 'resource', 'http://127.0.0.1:9001', REPEAT('a', 64), '127.0.0.1', 'pending', 71, 'request-pending', '/pending'),
+    (990272, ?, 'resource', 'http://127.0.0.1:9002', REPEAT('b', 64), '127.0.0.1', 'checking', 72, 'request-checking', '/checking')`, serverID, serverID).Error)
 
 	sqlDB, err := db.DB()
 	require.NoError(t, err)

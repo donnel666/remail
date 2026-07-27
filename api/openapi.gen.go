@@ -6869,13 +6869,19 @@ type ProxyItem struct {
 	Id       int        `json:"id"`
 
 	// IpVersion Detected proxy outbound IP version. Empty before the first successful check.
-	IpVersion     string          `json:"ipVersion"`
-	LastCheckedAt *time.Time      `json:"lastCheckedAt,omitempty"`
-	LastSafeError *string         `json:"lastSafeError,omitempty"`
-	LastUsedAt    *time.Time      `json:"lastUsedAt,omitempty"`
-	LatencyMs     int             `json:"latencyMs"`
-	OutboundIp    string          `json:"outboundIp"`
-	Pool          ProxyItemPool   `json:"pool"`
+	IpVersion string `json:"ipVersion"`
+
+	// LastAssignedAt Durable Resource allocation fairness timestamp; updated in the binding transaction.
+	LastAssignedAt *time.Time    `json:"lastAssignedAt,omitempty"`
+	LastCheckedAt  *time.Time    `json:"lastCheckedAt,omitempty"`
+	LastSafeError  *string       `json:"lastSafeError,omitempty"`
+	LastUsedAt     *time.Time    `json:"lastUsedAt,omitempty"`
+	LatencyMs      int           `json:"latencyMs"`
+	OutboundIp     string        `json:"outboundIp"`
+	Pool           ProxyItemPool `json:"pool"`
+
+	// ProxyServerId Shared proxy-server identity derived only from the canonical entry IP or legacy host.
+	ProxyServerId int             `json:"proxyServerId"`
 	Status        ProxyItemStatus `json:"status"`
 	UpdatedAt     time.Time       `json:"updatedAt"`
 

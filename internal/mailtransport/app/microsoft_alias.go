@@ -9,6 +9,7 @@ import (
 	"time"
 
 	coredomain "github.com/donnel666/remail/internal/core/domain"
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
@@ -85,6 +86,7 @@ type MicrosoftAliasAttemptOutcome struct {
 
 type MicrosoftAliasCreationRequest struct {
 	ResourceID     uint
+	RequestID      string
 	EmailAddress   string
 	Password       string
 	BindingAddress string
@@ -291,6 +293,7 @@ func (s *MicrosoftAliasService) Process(ctx context.Context, task MicrosoftAlias
 	}
 
 	now := s.now().UTC()
+	requestID := platform.NewUUIDV7String()
 	if _, err := s.store.MarkQueued(ctx, task, now); err != nil {
 		return fmt.Errorf("activate microsoft alias schedule: %w", err)
 	}
@@ -311,6 +314,7 @@ func (s *MicrosoftAliasService) Process(ctx context.Context, task MicrosoftAlias
 	}
 	prepared, prepareErr := s.creator.PrepareMicrosoftAliasBinding(ctx, MicrosoftAliasCreationRequest{
 		ResourceID:     account.ResourceID,
+		RequestID:      requestID,
 		EmailAddress:   account.EmailAddress,
 		Password:       account.Password,
 		BindingAddress: account.BindingAddress,
@@ -446,6 +450,7 @@ func (s *MicrosoftAliasService) Process(ctx context.Context, task MicrosoftAlias
 	}
 	result, createErr := s.creator.CreateMicrosoftAliases(ctx, MicrosoftAliasCreationRequest{
 		ResourceID:     account.ResourceID,
+		RequestID:      requestID,
 		EmailAddress:   account.EmailAddress,
 		Password:       account.Password,
 		BindingAddress: account.BindingAddress,

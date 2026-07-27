@@ -527,21 +527,23 @@ func toProxyItemResponse(proxy domain.Proxy) ProxyItemResponse {
 		expireAt = &value
 	}
 	return ProxyItemResponse{
-		ID:            proxy.ID,
-		Pool:          string(proxy.Pool),
-		URL:           proxy.URL,
-		ExpireAt:      expireAt,
-		IPVersion:     string(proxy.IPVersion),
-		OutboundIP:    proxy.OutboundIP,
-		Country:       proxy.Country,
-		LatencyMs:     proxy.LatencyMs,
-		Status:        string(proxy.Status),
-		Errors:        proxy.Errors,
-		LastSafeError: proxy.LastSafeError,
-		LastCheckedAt: proxy.LastCheckedAt,
-		LastUsedAt:    proxy.LastUsedAt,
-		CreatedAt:     proxy.CreatedAt,
-		UpdatedAt:     proxy.UpdatedAt,
+		ID:             proxy.ID,
+		ProxyServerID:  proxy.ProxyServerID,
+		Pool:           string(proxy.Pool),
+		URL:            proxy.URL,
+		ExpireAt:       expireAt,
+		IPVersion:      string(proxy.IPVersion),
+		OutboundIP:     proxy.OutboundIP,
+		Country:        proxy.Country,
+		LatencyMs:      proxy.LatencyMs,
+		Status:         string(proxy.Status),
+		Errors:         proxy.Errors,
+		LastSafeError:  proxy.LastSafeError,
+		LastCheckedAt:  proxy.LastCheckedAt,
+		LastUsedAt:     proxy.LastUsedAt,
+		LastAssignedAt: proxy.LastAssignedAt,
+		CreatedAt:      proxy.CreatedAt,
+		UpdatedAt:      proxy.UpdatedAt,
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 
 	mailmatchapp "github.com/donnel666/remail/internal/mailmatch/app"
 	mailinfra "github.com/donnel666/remail/internal/mailtransport/infra"
+	proxyapp "github.com/donnel666/remail/internal/proxy/app"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/stretchr/testify/require"
 )
@@ -15,6 +16,21 @@ import (
 type microsoftMessageFetchClientStub struct {
 	requests []mailinfra.MicrosoftMailFetchRequest
 	results  []mailinfra.MicrosoftMailFetchResult
+}
+
+type microsoftFetchProxyProviderStub struct {
+	requests []proxyapp.AcquireProxyRequest
+}
+
+func (s *microsoftFetchProxyProviderStub) Acquire(_ context.Context, req proxyapp.AcquireProxyRequest) (*proxyapp.ProxyConfig, error) {
+	s.requests = append(s.requests, req)
+	serverID := uint(len(s.requests) * 10)
+	return &proxyapp.ProxyConfig{ID: serverID + 1, ProxyServerID: serverID, URL: "socks5://proxy.invalid:1080"}, nil
+}
+
+func (*microsoftFetchProxyProviderStub) ReportSuccess(context.Context, uint) error { return nil }
+func (*microsoftFetchProxyProviderStub) ReportFailure(context.Context, uint, string) error {
+	return nil
 }
 
 type permanentFetchFailurePortStub struct {
@@ -93,6 +109,27 @@ func TestMicrosoftFetchAdapterRetriesWithLatestRotatedRefreshToken(t *testing.T)
 	require.Len(t, client.requests, 2)
 	require.Equal(t, "original-refresh-token", client.requests[0].RefreshToken)
 	require.Equal(t, "rotated-after-first-attempt", client.requests[1].RefreshToken)
+}
+
+func TestMicrosoftFetchAdapterAvoidsFailedProxyServerOnRetry(t *testing.T) {
+	client := &microsoftMessageFetchClientStub{results: []mailinfra.MicrosoftMailFetchResult{
+		{Category: "request", ProxyFailure: true},
+		{Valid: true},
+	}}
+	proxies := &microsoftFetchProxyProviderStub{}
+	adapter := &MicrosoftFetchAdapter{client: client, proxies: proxies}
+
+	_, err := adapter.FetchMicrosoftMessages(context.Background(), mailmatchapp.FetchMessagesRequest{
+		RequestID: "fetch-request",
+		Scope: mailmatchapp.OrderScope{
+			MicrosoftEmail: "owner@example.test", MicrosoftClientID: "client-id", MicrosoftRT: "refresh-token",
+		},
+	})
+
+	require.NoError(t, err)
+	require.Len(t, proxies.requests, 2)
+	require.Empty(t, proxies.requests[0].AvoidProxyServerIDs)
+	require.Equal(t, []uint{10}, proxies.requests[1].AvoidProxyServerIDs)
 }
 
 func TestMicrosoftFetchAdapterStopsAfterTwoInternalAttempts(t *testing.T) {

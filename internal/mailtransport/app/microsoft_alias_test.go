@@ -230,11 +230,13 @@ type fakeMicrosoftAliasCreator struct {
 	candidates            []string
 	result                MicrosoftAliasCreationResult
 	request               MicrosoftAliasCreationRequest
+	prepareRequest        MicrosoftAliasCreationRequest
 	prepareResult         *MicrosoftAliasBindingPreparationResult
 	prepareErr            error
 }
 
 func (f *fakeMicrosoftAliasCreator) PrepareMicrosoftAliasBinding(_ context.Context, req MicrosoftAliasCreationRequest) (MicrosoftAliasBindingPreparationResult, error) {
+	f.prepareRequest = req
 	if f.prepareResult != nil {
 		return *f.prepareResult, f.prepareErr
 	}
@@ -498,6 +500,8 @@ func TestMicrosoftAliasProcessCreatesTwoAndWaitsForNextCalendarWeek(t *testing.T
 	assert.Equal(t, 2, creator.count)
 	assert.False(t, creator.reconcileOnly)
 	assert.True(t, creator.request.BindingMissing)
+	require.NotEmpty(t, creator.request.RequestID)
+	require.Equal(t, creator.prepareRequest.RequestID, creator.request.RequestID)
 	require.Len(t, store.outcomes, 2)
 	assert.Equal(t, MicrosoftAliasAttemptSucceeded, store.outcomes[0].Status)
 	assert.Equal(t, MicrosoftAliasAttemptSucceeded, store.outcomes[1].Status)

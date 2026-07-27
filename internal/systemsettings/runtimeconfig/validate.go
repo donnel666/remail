@@ -51,6 +51,8 @@ var integerRanges = map[string]integerRange{
 	"mail_stream_batch_size": positive(1000), "mail_fetch_client_timeout_seconds": positive(300), "imap_dial_timeout_seconds": positive(120), "imap_keepalive_seconds": positive(600), "oauth_validation_timeout_seconds": positive(300),
 	"proxy_check_interval_seconds": positive(86400), "proxy_failure_threshold": positive(100), "proxy_check_timeout_seconds": positive(120), "resource_binding_ttl_days": positive(365), "max_proxy_attempts": positive(20),
 	"pending_proxy_check_limit": positive(10000), "proxy_idle_conn_timeout_seconds": positive(600), "proxy_tls_handshake_timeout_seconds": positive(120),
+	"proxy_server_health_timeout_seconds": {min: 1, max: 10}, "proxy_server_health_interval_seconds": positive(86400), "proxy_server_health_dispatch_lease_seconds": {min: 15, max: 3600},
+	"proxy_server_failure_threshold": positive(100), "proxy_server_inventory_threshold_percent": {min: 1, max: 100},
 	"smtp_outbound_payload_ttl_minutes": positive(1440), "outbound_mail_timeout_minutes": positive(120), "inbound_mail_timeout_minutes": positive(120),
 	"auxiliary_domain_refresh_interval_seconds": positive(86400), "max_inbound_header_runes": positive(10000), "max_inbound_preview_runes": positive(10000), "max_inbound_body_bytes": positive(100 << 20),
 	"max_inbound_body_runes": positive(1_000_000), "max_inbound_mime_depth": positive(50), "mail_dispatcher_interval_seconds": positive(3600), "alias_dispatcher_interval_seconds": positive(3600),

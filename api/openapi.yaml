@@ -15796,6 +15796,7 @@ components:
       type: object
       required:
         - id
+        - proxyServerId
         - pool
         - url
         - expireAt
@@ -15810,6 +15811,9 @@ components:
       properties:
         id:
           type: integer
+        proxyServerId:
+          type: integer
+          description: Shared proxy-server identity derived only from the canonical entry IP or legacy host.
         pool:
           type: string
           enum: [resource, system]
@@ -15845,6 +15849,11 @@ components:
           type: string
           format: date-time
           nullable: true
+        lastAssignedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Durable Resource allocation fairness timestamp; updated in the binding transaction.
         createdAt:
           type: string
           format: date-time

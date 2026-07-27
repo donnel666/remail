@@ -11,12 +11,44 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	"github.com/donnel666/remail/internal/mailtransport/infra/msacl"
+	proxyapp "github.com/donnel666/remail/internal/proxy/app"
 	"github.com/stretchr/testify/require"
 )
+
+func TestAuthorizeAliasBindingAvoidsFailedProxyServerOnRetry(t *testing.T) {
+	proxies := &microsoftProxyProviderStub{acquireFn: func(request proxyapp.AcquireProxyRequest) (*proxyapp.ProxyConfig, error) {
+		serverID := uint(len(request.AvoidProxyServerIDs) + 1)
+		return &proxyapp.ProxyConfig{
+			ID: serverID * 10, ProxyServerID: serverID, URL: fmt.Sprintf("socks5://server-%d.invalid:1080", serverID),
+		}, nil
+	}}
+	calls := 0
+	adapter := &MicrosoftAliasCreationAdapter{
+		proxies: proxies,
+		authorize: func(context.Context, string, string, string, string) (msacl.Result, error) {
+			calls++
+			if calls == 1 {
+				return msacl.Result{ProxyFailure: true, SafeMessage: "Proxy failed."}, nil
+			}
+			return msacl.Result{Valid: true, BindingAddress: "binding@recovery.test"}, nil
+		},
+	}
+
+	result, err := adapter.PrepareMicrosoftAliasBinding(context.Background(), mailapp.MicrosoftAliasCreationRequest{
+		ResourceID: 7, RequestID: "alias-request", EmailAddress: "owner@example.test", Password: "secret",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "binding@recovery.test", result.BindingAddress)
+	require.Len(t, proxies.requests, 2)
+	require.Empty(t, proxies.requests[0].AvoidProxyServerIDs)
+	require.Equal(t, []uint{1}, proxies.requests[1].AvoidProxyServerIDs)
+}
 
 func TestConfirmedAddedAliasesRejectsFailedAndRateLimitedResults(t *testing.T) {
 	confirmed := confirmedAddedAliases([]msacl.ExplicitAliasResult{

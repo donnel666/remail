@@ -20,6 +20,11 @@ func TestNormalizeAndRedactProxyURL(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidProxyURL)
 }
 
+func TestNormalizeProxyServerIPCanonicalizesIPv6(t *testing.T) {
+	require.Equal(t, "2001:db8::1", NormalizeProxyServerIP("2001:0DB8:0:0:0:0:0:1"))
+	require.Equal(t, "proxy.example.com", NormalizeProxyServerIP(" Proxy.Example.COM "))
+}
+
 func TestSafeProxyErrorRedactsSecrets(t *testing.T) {
 	safe := SafeProxyError("dial socks5://user:pass@127.0.0.1:1080 failed password=secret refreshToken=rt")
 

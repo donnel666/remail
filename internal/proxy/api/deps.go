@@ -16,12 +16,15 @@ type ProxyModule struct {
 func NewProxyModule(db *gorm.DB, asynqClient *asynq.Client) (*ProxyModule, error) {
 	repo := proxyinfra.NewProxyRepo(db)
 	checker := proxyinfra.NewProxyChecker()
+	serverChecker := proxyinfra.NewProxyServerChecker()
 	checkQueue := proxyinfra.NewProxyCheckQueue(asynqClient)
 	operationLogs := governanceinfra.NewOperationLogRepo(db)
 	systemLogs := governanceinfra.NewSystemLogRepo(db)
 
+	useCase := proxyapp.NewProxyUseCase(repo, checker, checkQueue, operationLogs, systemLogs)
+	useCase.SetProxyServerHealthChecker(serverChecker)
 	return &ProxyModule{
-		ProxyUseCase:          proxyapp.NewProxyUseCase(repo, checker, checkQueue, operationLogs, systemLogs),
+		ProxyUseCase:          useCase,
 		AdminResourceBindings: proxyapp.NewAdminResourceProxyBindingQuery(repo),
 	}, nil
 }

@@ -27,17 +27,26 @@ type microsoftMessageFetchClient interface {
 	FetchAll(context.Context, mailinfra.MicrosoftMailFetchRequest) (mailinfra.MicrosoftMailFetchResult, error)
 }
 
+type microsoftFetchProxyProvider interface {
+	Acquire(context.Context, proxyapp.AcquireProxyRequest) (*proxyapp.ProxyConfig, error)
+	ReportSuccess(context.Context, uint) error
+	ReportFailure(context.Context, uint, string) error
+}
+
 type MicrosoftFetchAdapter struct {
 	client        microsoftMessageFetchClient
-	proxies       *proxyapp.ProxyUseCase
+	proxies       microsoftFetchProxyProvider
 	fetchFailures mailmatchapp.PermanentMicrosoftFetchFailurePort
 }
 
 func NewMicrosoftFetchAdapter(proxies *proxyapp.ProxyUseCase) *MicrosoftFetchAdapter {
-	return &MicrosoftFetchAdapter{
-		client:  mailinfra.NewMicrosoftMailFetchClient(),
-		proxies: proxies,
+	adapter := &MicrosoftFetchAdapter{
+		client: mailinfra.NewMicrosoftMailFetchClient(),
 	}
+	if proxies != nil {
+		adapter.proxies = proxies
+	}
+	return adapter
 }
 
 func (a *MicrosoftFetchAdapter) SetPermanentMicrosoftFetchFailurePort(port mailmatchapp.PermanentMicrosoftFetchFailurePort) {
@@ -67,6 +76,7 @@ func (a *MicrosoftFetchAdapter) FetchMicrosoftMessages(ctx context.Context, req 
 		stopAfterLimit = false
 	}
 	proxyAttempts := min(runtimeconfig.Int("max_proxy_attempts", fetchProxyAttempts, 1), maxFetchProxyAttempts)
+	var avoidServerIDs []uint
 	for attempt := 0; attempt < proxyAttempts; attempt++ {
 		streamed := false
 		var onMessages func([]mailinfra.MicrosoftFetchedMessage)
@@ -76,7 +86,7 @@ func (a *MicrosoftFetchAdapter) FetchMicrosoftMessages(ctx context.Context, req 
 				req.OnMessages(microsoftMessagesToMailmatch(req.Scope, messages))
 			}
 		}
-		proxyConfig, err := a.acquireProxy(ctx, req.Scope, req.RequestID, attempt)
+		proxyConfig, err := a.acquireProxy(ctx, req.Scope, req.RequestID, attempt, avoidServerIDs)
 		if err != nil {
 			return nil, &mailmatchapp.MailFetchFailure{
 				Category:     "request",
@@ -127,6 +137,7 @@ func (a *MicrosoftFetchAdapter) FetchMicrosoftMessages(ctx context.Context, req 
 				"category", "request",
 				"safe_message", "Microsoft mail service is temporarily unavailable.",
 			)
+			avoidServerIDs = proxyapp.AppendAvoidProxyServerID(avoidServerIDs, proxyConfig)
 			_ = a.reportProxyFailure(ctx, proxyID, "Microsoft mail fetch failed.")
 			if streamed {
 				if req.OnReset == nil {
@@ -156,6 +167,7 @@ func (a *MicrosoftFetchAdapter) FetchMicrosoftMessages(ctx context.Context, req 
 			"safe_message", failure.SafeMessage,
 		)
 		if result.ProxyFailure {
+			avoidServerIDs = proxyapp.AppendAvoidProxyServerID(avoidServerIDs, proxyConfig)
 			_ = a.reportProxyFailure(ctx, proxyID, result.SafeMessage)
 			if streamed {
 				if req.OnReset == nil {
@@ -202,7 +214,7 @@ func (a *MicrosoftFetchAdapter) finishFailure(ctx context.Context, req mailmatch
 	return nil, failure
 }
 
-func (a *MicrosoftFetchAdapter) acquireProxy(ctx context.Context, scope mailmatchapp.OrderScope, requestID string, attempt int) (*proxyapp.ProxyConfig, error) {
+func (a *MicrosoftFetchAdapter) acquireProxy(ctx context.Context, scope mailmatchapp.OrderScope, requestID string, attempt int, avoidServerIDs []uint) (*proxyapp.ProxyConfig, error) {
 	if a == nil || a.proxies == nil {
 		return &proxyapp.ProxyConfig{Direct: true}, nil
 	}
@@ -213,6 +225,7 @@ func (a *MicrosoftFetchAdapter) acquireProxy(ctx context.Context, scope mailmatc
 		AllowSystemFallback: true,
 		Attempt:             attempt,
 		RequestID:           firstNonEmpty(requestID, scope.OrderNo),
+		AvoidProxyServerIDs: avoidServerIDs,
 	})
 }
 

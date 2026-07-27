@@ -15,19 +15,22 @@ import (
 const maxAliasProxyAttempts = 1
 
 type MicrosoftAliasCreationAdapter struct {
-	proxies                 *proxyapp.ProxyUseCase
+	proxies                 microsoftProxyProvider
 	authorize               func(context.Context, string, string, string, string) (msacl.Result, error)
 	probePasswordRecovery   func(context.Context, string, string, string) (msacl.PasswordRecoveryProbeResult, error)
 	confirmPasswordRecovery func(context.Context, string, string, msacl.PasswordRecoveryConfirmationOptions) (msacl.PasswordRecoveryConfirmationResult, error)
 }
 
 func NewMicrosoftAliasCreationAdapter(proxies *proxyapp.ProxyUseCase) *MicrosoftAliasCreationAdapter {
-	return &MicrosoftAliasCreationAdapter{
-		proxies:                 proxies,
+	adapter := &MicrosoftAliasCreationAdapter{
 		authorize:               msacl.Authorize,
 		probePasswordRecovery:   msacl.ProbePasswordRecovery,
 		confirmPasswordRecovery: msacl.ConfirmPasswordRecoveryBinding,
 	}
+	if proxies != nil {
+		adapter.proxies = proxies
+	}
+	return adapter
 }
 
 func (a *MicrosoftAliasCreationAdapter) GenerateMicrosoftAliasCandidates(count int, accountEmail string) ([]string, error) {
@@ -67,8 +70,9 @@ func (a *MicrosoftAliasCreationAdapter) PrepareMicrosoftAliasBinding(ctx context
 
 func (a *MicrosoftAliasCreationAdapter) authorizeAliasBinding(ctx context.Context, req mailapp.MicrosoftAliasCreationRequest, preferredAddress, recoveryMask string) (mailapp.MicrosoftAliasBindingPreparationResult, error) {
 	ctx = msacl.WithRecoveryLeaseScope(ctx, req.ResourceID, recoveryMask)
+	var avoidServerIDs []uint
 	for attempt := 0; attempt <= maxAliasProxyAttempts; attempt++ {
-		proxyConfig, err := a.acquireAliasProxy(ctx, req, attempt)
+		proxyConfig, err := a.acquireAliasProxy(ctx, req, attempt, avoidServerIDs)
 		if err != nil {
 			continue
 		}
@@ -84,6 +88,7 @@ func (a *MicrosoftAliasCreationAdapter) authorizeAliasBinding(ctx context.Contex
 		}
 		result, err := authorize(ctx, req.EmailAddress, req.Password, proxyURL, preferredAddress)
 		if err != nil || result.ProxyFailure {
+			avoidServerIDs = proxyapp.AppendAvoidProxyServerID(avoidServerIDs, proxyConfig)
 			a.reportAliasProxyFailure(ctx, proxyID, result.SafeMessage)
 			continue
 		}
@@ -109,7 +114,7 @@ func (a *MicrosoftAliasCreationAdapter) authorizeAliasBinding(ctx context.Contex
 func (a *MicrosoftAliasCreationAdapter) recoverAliasBindingViaPasswordRecovery(ctx context.Context, req mailapp.MicrosoftAliasCreationRequest, maskedAddress string) (mailapp.MicrosoftAliasBindingPreparationResult, error) {
 	ctx = msacl.WithRecoveryLeaseScope(ctx, req.ResourceID, maskedAddress)
 	for attempt := 0; attempt <= maxAliasProxyAttempts; attempt++ {
-		proxyConfig, err := a.acquireAliasProxy(ctx, req, attempt)
+		proxyConfig, err := a.acquireAliasProxy(ctx, req, attempt, nil)
 		if err != nil {
 			continue
 		}
@@ -150,8 +155,9 @@ func (a *MicrosoftAliasCreationAdapter) confirmCurrentAliasBinding(ctx context.C
 	if probe == nil {
 		probe = msacl.ProbePasswordRecovery
 	}
+	var avoidServerIDs []uint
 	for attempt := 0; attempt <= maxAliasProxyAttempts; attempt++ {
-		proxyConfig, err := a.acquireAliasProxy(ctx, req, attempt)
+		proxyConfig, err := a.acquireAliasProxy(ctx, req, attempt, avoidServerIDs)
 		if err != nil {
 			continue
 		}
@@ -167,6 +173,7 @@ func (a *MicrosoftAliasCreationAdapter) confirmCurrentAliasBinding(ctx context.C
 				a.reportAliasProxySuccess(ctx, proxyID)
 				return failure, nil
 			}
+			avoidServerIDs = proxyapp.AppendAvoidProxyServerID(avoidServerIDs, proxyConfig)
 			a.reportAliasProxyFailure(ctx, proxyID, "Microsoft recovery mailbox lookup failed.")
 			continue
 		}
@@ -245,8 +252,9 @@ func aliasBindingProbeFailure(err error) (mailapp.MicrosoftAliasBindingPreparati
 // candidates, or performs a read-only check for previously uncertain candidates.
 func (a *MicrosoftAliasCreationAdapter) CreateMicrosoftAliases(ctx context.Context, req mailapp.MicrosoftAliasCreationRequest) (mailapp.MicrosoftAliasCreationResult, error) {
 	ctx = msacl.WithRecoveryLeaseScope(ctx, req.ResourceID, req.RecoveryMask)
+	var avoidServerIDs []uint
 	for attempt := 0; attempt <= maxAliasProxyAttempts; attempt++ {
-		proxyConfig, err := a.acquireAliasProxy(ctx, req, attempt)
+		proxyConfig, err := a.acquireAliasProxy(ctx, req, attempt, avoidServerIDs)
 		if err != nil {
 			return mailapp.MicrosoftAliasCreationResult{
 				Category:    "request",
@@ -278,6 +286,7 @@ func (a *MicrosoftAliasCreationAdapter) CreateMicrosoftAliases(ctx context.Conte
 				}, nil
 			}
 			if raw.ProxyFailure {
+				avoidServerIDs = proxyapp.AppendAvoidProxyServerID(avoidServerIDs, proxyConfig)
 				if proxyID != 0 {
 					a.reportAliasProxyFailure(ctx, proxyID, raw.SafeMessage)
 				}
@@ -322,6 +331,7 @@ func (a *MicrosoftAliasCreationAdapter) CreateMicrosoftAliases(ctx context.Conte
 				)
 			}
 			if raw.ProxyFailure && proxyID != 0 {
+				avoidServerIDs = proxyapp.AppendAvoidProxyServerID(avoidServerIDs, proxyConfig)
 				a.reportAliasProxyFailure(ctx, proxyID, raw.SafeMessage)
 				if attempt < maxAliasProxyAttempts {
 					continue
@@ -339,6 +349,7 @@ func (a *MicrosoftAliasCreationAdapter) CreateMicrosoftAliases(ctx context.Conte
 		summary, proxyFailure := summarizeMicrosoftAliasAddResults(result.AddResults)
 		summary.ExistingAliases = normalizeMicrosoftAliases(result.ExistingAliases)
 		if proxyFailure {
+			avoidServerIDs = proxyapp.AppendAvoidProxyServerID(avoidServerIDs, proxyConfig)
 			if proxyID != 0 {
 				a.reportAliasProxyFailure(ctx, proxyID, summary.SafeMessage)
 			}
@@ -427,7 +438,7 @@ func normalizeMicrosoftAliases(values []string) []string {
 	return aliases
 }
 
-func (a *MicrosoftAliasCreationAdapter) acquireAliasProxy(ctx context.Context, req mailapp.MicrosoftAliasCreationRequest, attempt int) (*proxyapp.ProxyConfig, error) {
+func (a *MicrosoftAliasCreationAdapter) acquireAliasProxy(ctx context.Context, req mailapp.MicrosoftAliasCreationRequest, attempt int, avoidServerIDs []uint) (*proxyapp.ProxyConfig, error) {
 	if a == nil || a.proxies == nil {
 		return &proxyapp.ProxyConfig{Direct: true}, nil
 	}
@@ -440,6 +451,8 @@ func (a *MicrosoftAliasCreationAdapter) acquireAliasProxy(ctx context.Context, r
 		Purpose:             proxydomain.ProxyPurposeBinding,
 		AllowSystemFallback: true,
 		Attempt:             attempt,
+		RequestID:           req.RequestID,
+		AvoidProxyServerIDs: avoidServerIDs,
 	})
 }
 

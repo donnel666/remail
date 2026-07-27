@@ -26,6 +26,7 @@ type fakeProxyRepository struct {
 
 	resourceAcquireCount    int
 	systemAcquireCount      int
+	systemSelection         ProxyServerSelection
 	reportSuccessCount      int
 	reportFailureCount      int
 	checkResultUpdates      int
@@ -224,8 +225,9 @@ func (r *fakeProxyRepository) AcquireResourceProxy(context.Context, string, doma
 	r.resourceAcquireCount++
 	return r.resourceProxy, r.resourceErr
 }
-func (r *fakeProxyRepository) AcquireSystemProxy(context.Context, domain.ProxyIPVersion, time.Time) (*domain.Proxy, error) {
+func (r *fakeProxyRepository) AcquireSystemProxy(_ context.Context, _ domain.ProxyIPVersion, _ time.Time, selection ProxyServerSelection) (*domain.Proxy, error) {
 	r.systemAcquireCount++
+	r.systemSelection = selection
 	return r.systemProxy, r.systemErr
 }
 func (r *fakeProxyRepository) ReportSuccess(context.Context, uint, time.Time) error {
@@ -834,6 +836,23 @@ func TestProxyAcquireRetriesSystemBeforeDirect(t *testing.T) {
 	require.Equal(t, uint(2), config.ID)
 	require.Equal(t, 0, repo.resourceAcquireCount)
 	require.Equal(t, 1, repo.systemAcquireCount)
+}
+
+func TestProxyAcquirePassesRequestSeedAndAvoidedServers(t *testing.T) {
+	repo := &fakeProxyRepository{systemProxy: &domain.Proxy{
+		ID: 2, ProxyServerID: 22, Pool: domain.ProxyPoolSystem, URL: "http://system.example:8080",
+	}}
+	uc := NewProxyUseCase(repo, nil, nil, nil, nil)
+
+	config, err := uc.Acquire(context.Background(), AcquireProxyRequest{
+		Attempt: 1, RequestID: "request-seed", AvoidProxyServerIDs: []uint{11, 11, 0},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, uint(22), config.ProxyServerID)
+	require.Equal(t, "request-seed", repo.systemSelection.Seed)
+	require.Equal(t, []uint{11, 11, 0}, repo.systemSelection.AvoidProxyServerIDs)
+	require.Equal(t, []uint{11}, AppendAvoidProxyServerID([]uint{11}, &ProxyConfig{ProxyServerID: 11}))
 }
 
 func TestProxyAcquireFallsBackToDirectWhenPoolsUnavailable(t *testing.T) {

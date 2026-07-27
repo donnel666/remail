@@ -34,6 +34,11 @@ func TestDefaultSettingsAreValidAndIndependent(t *testing.T) {
 	require.Equal(t, "90", keys["rebate_expiry_days"])
 	require.Equal(t, "", keys["domain_custom_tlds"])
 	require.Equal(t, "3", keys["domain_max_subdomains_per_registrable_domain"])
+	require.Equal(t, "3", keys["proxy_server_health_timeout_seconds"])
+	require.Equal(t, "60", keys["proxy_server_health_interval_seconds"])
+	require.Equal(t, "120", keys["proxy_server_health_dispatch_lease_seconds"])
+	require.Equal(t, "3", keys["proxy_server_failure_threshold"])
+	require.Equal(t, "80", keys["proxy_server_inventory_threshold_percent"])
 	require.Equal(t, `["(?:^|[^\\d])(\\d{6,8})(?:[^\\d]|$)"]`, keys["verification_code_pattern"])
 	whitelistValue := ""
 	for _, setting := range defaults {

@@ -15,15 +15,48 @@ import (
 const (
 	TypeProxyCheck           = "proxy:check"
 	TypeProxyCheckDispatcher = "proxy:check_dispatcher"
+	TypeProxyServerCheck     = "proxy:server_check"
 
 	proxyQueueName                  = platform.QueueDefault
 	proxyCheckTaskTimeout           = 90 * time.Second
 	proxyCheckTaskUniqueTTL         = 15 * time.Minute
 	proxyCheckDispatcherTaskTimeout = 30 * time.Second
+	// The runtime probe timeout is capped at 10 seconds and shared by all targets.
+	proxyServerCheckTaskTimeout   = 15 * time.Second
+	proxyServerCheckTaskUniqueTTL = 2 * time.Minute
 )
 
 type ProxyCheckQueue struct {
 	client *asynq.Client
+}
+
+func (q *ProxyCheckQueue) EnqueueProxyServerCheck(ctx context.Context, task proxyapp.ProxyServerCheckTask) (bool, error) {
+	if q == nil || q.client == nil {
+		return false, fmt.Errorf("proxy server check queue is unavailable")
+	}
+	if task.ProxyServerID == 0 || task.HealthGeneration == 0 {
+		return false, fmt.Errorf("proxy server check task identity is required")
+	}
+	payload, err := json.Marshal(task)
+	if err != nil {
+		return false, fmt.Errorf("marshal proxy server check task: %w", err)
+	}
+	_, err = q.client.EnqueueContext(
+		ctx,
+		asynq.NewTask(TypeProxyServerCheck, payload),
+		asynq.Queue(proxyQueueName),
+		asynq.Unique(proxyServerCheckTaskUniqueTTL),
+		asynq.MaxRetry(platform.BackgroundTaskMaxRetryValue()),
+		asynq.Timeout(proxyServerCheckTaskTimeout),
+		asynq.Retention(0),
+	)
+	if err != nil {
+		if errors.Is(err, asynq.ErrDuplicateTask) {
+			return false, nil
+		}
+		return false, fmt.Errorf("enqueue proxy server check task: %w", err)
+	}
+	return true, nil
 }
 
 func NewProxyCheckQueue(client *asynq.Client) *ProxyCheckQueue {
