@@ -7513,6 +7513,12 @@ type WalletResponse struct {
 	UserId         int                     `json:"userId"`
 }
 
+// WalletSupplierTransferRequest defines model for WalletSupplierTransferRequest.
+type WalletSupplierTransferRequest struct {
+	// Amount Positive amount to move from supplierAvailable to consumer balance.
+	Amount NonNegativeLedgerAmount `json:"amount"`
+}
+
 // AdminCommandIdempotencyKey defines model for AdminCommandIdempotencyKey.
 type AdminCommandIdempotencyKey = string
 
@@ -9223,6 +9229,15 @@ type PostWalletReferralTransferParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// PostWalletSupplierTransferParams defines parameters for PostWalletSupplierTransfer.
+type PostWalletSupplierTransferParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // GetWalletTransactionsParams defines parameters for GetWalletTransactions.
 type GetWalletTransactionsParams struct {
 	Scope   *GetWalletTransactionsParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
@@ -9512,6 +9527,9 @@ type PostTicketMessageJSONRequestBody = ReplyTicketRequest
 
 // PostRegisterJSONRequestBody defines body for PostRegister for application/json ContentType.
 type PostRegisterJSONRequestBody = RegisterRequest
+
+// PostWalletSupplierTransferJSONRequestBody defines body for PostWalletSupplierTransfer for application/json ContentType.
+type PostWalletSupplierTransferJSONRequestBody = WalletSupplierTransferRequest
 
 // AsAdminDomainBulkSelection0 returns the union data inside the AdminDomainBulkSelection as a AdminDomainBulkSelection0
 func (t AdminDomainBulkSelection) AsAdminDomainBulkSelection0() (AdminDomainBulkSelection0, error) {
@@ -10820,6 +10838,9 @@ type ServerInterface interface {
 	// Transfer available referral rewards to consumer balance
 	// (POST /v1/wallet/referrals/transfer)
 	PostWalletReferralTransfer(c *gin.Context, params PostWalletReferralTransferParams)
+	// Transfer supplier available balance to the current user's consumer wallet
+	// (POST /v1/wallet/supplier-transfers)
+	PostWalletSupplierTransfer(c *gin.Context, params PostWalletSupplierTransferParams)
 	// List wallet transactions
 	// (GET /v1/wallet/transactions)
 	GetWalletTransactions(c *gin.Context, params GetWalletTransactionsParams)
@@ -22536,6 +22557,73 @@ func (siw *ServerInterfaceWrapper) PostWalletReferralTransfer(c *gin.Context) {
 	siw.Handler.PostWalletReferralTransfer(c, params)
 }
 
+// PostWalletSupplierTransfer operation middleware
+func (siw *ServerInterfaceWrapper) PostWalletSupplierTransfer(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostWalletSupplierTransferParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostWalletSupplierTransfer(c, params)
+}
+
 // GetWalletTransactions operation middleware
 func (siw *ServerInterfaceWrapper) GetWalletTransactions(c *gin.Context) {
 
@@ -22845,5 +22933,6 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/wallet/check-ins", wrapper.PostWalletCheckin)
 	router.GET(options.BaseURL+"/v1/wallet/referrals", wrapper.GetWalletReferrals)
 	router.POST(options.BaseURL+"/v1/wallet/referrals/transfer", wrapper.PostWalletReferralTransfer)
+	router.POST(options.BaseURL+"/v1/wallet/supplier-transfers", wrapper.PostWalletSupplierTransfer)
 	router.GET(options.BaseURL+"/v1/wallet/transactions", wrapper.GetWalletTransactions)
 }

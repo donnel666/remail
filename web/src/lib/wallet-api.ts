@@ -65,6 +65,25 @@ export async function transferReferralRewards(key = generateIdempotencyKey()) {
   return response;
 }
 
+export async function transferSupplierBalance(
+  amount: string,
+  key: string
+) {
+  const response = await unwrap<WalletResponse>(
+    await client.POST("/v1/wallet/supplier-transfers", {
+      body: { amount },
+      params: {
+        header: {
+          ...csrfHeader(),
+          "Idempotency-Key": key,
+        },
+      },
+    })
+  );
+  notifyWalletUpdated();
+  return response;
+}
+
 export async function listRecharges(
   filter: RechargeListFilter = {},
   offset = 0,

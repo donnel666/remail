@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  buildWithdrawalTicketInput,
+  buildAlipayWithdrawalTicketInput,
   isPositiveLedgerAmount,
   sumLedgerAmounts,
   validateWithdrawal,
@@ -76,9 +76,8 @@ describe("supplier withdrawal tickets", () => {
 
   it("builds a general ticket and attaches the Alipay QR code", () => {
     expect(
-      buildWithdrawalTicketInput({
+      buildAlipayWithdrawalTicketInput({
         amount: " 12.50 ",
-        destination: "alipay",
         note: " 请处理 ",
         paymentQrCode: "data:image/png;base64,qr",
       }),

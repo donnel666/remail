@@ -45,21 +45,19 @@ export function validateWithdrawal(input: {
   return null;
 }
 
-export function buildWithdrawalTicketInput(input: {
+export function buildAlipayWithdrawalTicketInput(input: {
   amount: string;
-  destination: WithdrawalDestination;
   note: string;
   paymentQrCode: string;
 }): CreateTicketInput {
-  const destination = input.destination === "alipay" ? "支付宝" : "用户钱包";
   return {
     ticketType: "general",
     title: "供应商提现申请",
     firstMessage: [
       `提现金额：￥${input.amount.trim()}`,
-      `提现方式：${destination}`,
+      "提现方式：支付宝",
       `备注：${input.note.trim() || "无"}`,
     ].join("\n"),
-    attachments: input.destination === "alipay" ? [input.paymentQrCode] : undefined,
+    attachments: [input.paymentQrCode],
   };
 }

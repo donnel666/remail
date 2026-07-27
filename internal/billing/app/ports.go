@@ -22,6 +22,7 @@ type WalletRepository interface {
 	ListConsumerBalances(ctx context.Context, userIDs []uint) (map[uint]string, error)
 	GetReferralSummary(ctx context.Context, userID uint) (*domain.ReferralSummary, error)
 	TransferReferralRewards(ctx context.Context, req TransferReferralRewardsCommand) (*TransferReferralRewardsResult, error)
+	TransferSupplierBalance(ctx context.Context, req TransferSupplierBalanceCommand) (*domain.WalletSummary, error)
 	ListTransactions(ctx context.Context, filter TransactionListFilter, afterID uint, limit int) ([]domain.Transaction, *uint, error)
 	ListRecharges(ctx context.Context, filter RechargeListFilter, offset, limit int) ([]domain.Recharge, error)
 	CountRecharges(ctx context.Context, filter RechargeListFilter) (int64, error)
@@ -125,6 +126,21 @@ type TransferReferralRewardsResult struct {
 	Transaction       domain.Transaction
 	TransferredAmount string
 	TransferredCount  int
+}
+
+type TransferSupplierBalanceRequest struct {
+	UserID         uint
+	Amount         string
+	IdempotencyKey string
+	RequestID      string
+}
+
+type TransferSupplierBalanceCommand struct {
+	UserID             uint
+	Amount             string
+	IdempotencyKey     string
+	RequestFingerprint string
+	RequestID          string
 }
 
 type RedeemCardCommand struct {
@@ -262,6 +278,30 @@ func (uc *WalletUseCase) TransferReferralRewards(ctx context.Context, req Transf
 		RequestFingerprint: fingerprint,
 		RequestID:          strings.TrimSpace(req.RequestID),
 		Now:                uc.now(),
+	})
+}
+
+func (uc *WalletUseCase) TransferSupplierBalance(ctx context.Context, req TransferSupplierBalanceRequest) (*domain.WalletSummary, error) {
+	amount, err := domain.NormalizePositiveMoney(req.Amount)
+	if err != nil {
+		return nil, err
+	}
+	idempotencyKey := strings.TrimSpace(req.IdempotencyKey)
+	if req.UserID == 0 {
+		return nil, domain.ErrInvalidFilter
+	}
+	if idempotencyKey == "" {
+		return nil, domain.ErrIdempotencyRequired
+	}
+	if len(idempotencyKey) > 128 {
+		return nil, domain.ErrInvalidIdempotencyKey
+	}
+	return uc.repo.TransferSupplierBalance(ctx, TransferSupplierBalanceCommand{
+		UserID:             req.UserID,
+		Amount:             amount,
+		IdempotencyKey:     idempotencyKey,
+		RequestFingerprint: fingerprint("wallet.supplier-transfer", req.UserID, amount),
+		RequestID:          strings.TrimSpace(req.RequestID),
 	})
 }
 

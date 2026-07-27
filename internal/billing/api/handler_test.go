@@ -3,12 +3,14 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/donnel666/remail/api/middleware"
@@ -17,6 +19,7 @@ import (
 	iamdomain "github.com/donnel666/remail/internal/iam/domain"
 	"github.com/donnel666/remail/internal/platform/testmysql"
 	"github.com/gin-gonic/gin"
+	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
@@ -122,6 +125,107 @@ func TestBillingWalletReferralsRoute(t *testing.T) {
 	router.ServeHTTP(w, req)
 	require.Equal(t, http.StatusUnprocessableEntity, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), "No referral rewards available.")
+}
+
+func TestBillingSupplierTransferIsAuthorizedAtomicAndIdempotent(t *testing.T) {
+	db := newBillingAPITestDB(t)
+	supplierID := createBillingAPIUser(t, db, "supplier-transfer@example.com", iamdomain.RoleSupplier)
+	userID := createBillingAPIUser(t, db, "user-transfer@example.com", iamdomain.RoleUser)
+	adminID := createBillingAPIUser(t, db, "admin-transfer@example.com", iamdomain.RoleAdmin)
+	repo := billinginfra.NewBillingRepo(db)
+	_, err := repo.GetOrCreateWalletSummary(context.Background(), supplierID)
+	require.NoError(t, err)
+	require.NoError(t, db.Model(&billinginfra.WalletModel{}).Where("user_id = ?", supplierID).Updates(map[string]any{
+		"consumer_balance":   "3.000000",
+		"supplier_available": "12.000000",
+	}).Error)
+	router := newBillingAPIRouter(db, map[string]sessionFixture{
+		"supplier-session": {userID: supplierID, role: iamdomain.RoleSupplier, email: "supplier-transfer@example.com"},
+		"user-session":     {userID: userID, role: iamdomain.RoleUser, email: "user-transfer@example.com"},
+		"admin-session":    {userID: adminID, role: iamdomain.RoleAdmin, email: "admin-transfer@example.com"},
+	}, true)
+
+	w := httptest.NewRecorder()
+	req := authenticatedJSONRequest(http.MethodPost, "/v1/wallet/supplier-transfers", "user-session", `{"amount":"1.00"}`)
+	req.Header.Set("Idempotency-Key", "user-cannot-transfer")
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+
+	transfer := func(amount, key string) *httptest.ResponseRecorder {
+		response := httptest.NewRecorder()
+		request := authenticatedJSONRequest(http.MethodPost, "/v1/wallet/supplier-transfers", "supplier-session", `{"amount":"`+amount+`"}`)
+		request.Header.Set("Idempotency-Key", key)
+		router.ServeHTTP(response, request)
+		return response
+	}
+
+	w = transfer("1.00", strings.Repeat("x", 129))
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "Invalid Idempotency-Key.")
+
+	w = transfer("4.25", "supplier-transfer-1")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	firstResponse := w.Body.String()
+	var wallet WalletResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &wallet))
+	require.Equal(t, "7.25", wallet.ConsumerBalance)
+	require.Equal(t, "7.75", wallet.SupplierAvailable)
+
+	var transactions []billinginfra.WalletTransactionModel
+	require.NoError(t, db.Where("user_id = ? AND biz_type = ?", supplierID, "supplier_transfer").Order("id").Find(&transactions).Error)
+	require.Len(t, transactions, 2)
+	require.Equal(t, "supplier_available", transactions[0].BalanceBucket)
+	require.Equal(t, "out", transactions[0].Direction)
+	require.Equal(t, "-4.250000", transactions[0].Amount)
+	require.Equal(t, "consumer", transactions[1].BalanceBucket)
+	require.Equal(t, "in", transactions[1].Direction)
+	require.Equal(t, "4.250000", transactions[1].Amount)
+
+	for _, transaction := range transactions {
+		reverse := httptest.NewRecorder()
+		request := authenticatedJSONRequest(http.MethodPost, "/v1/admin/transactions/"+strconv.FormatUint(uint64(transaction.ID), 10)+"/reverse", "admin-session", ``)
+		request.Header.Set("Idempotency-Key", "reverse-transfer-"+strconv.FormatUint(uint64(transaction.ID), 10))
+		router.ServeHTTP(reverse, request)
+		require.Equal(t, http.StatusUnprocessableEntity, reverse.Code, reverse.Body.String())
+		require.Contains(t, reverse.Body.String(), "Transaction cannot be reversed.")
+	}
+
+	w = transfer("1.00", "supplier-transfer-2")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	w = transfer("4.25", "supplier-transfer-1")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.JSONEq(t, firstResponse, w.Body.String(), "an idempotent replay must return the original response")
+	transactions = nil
+	require.NoError(t, db.Where("user_id = ? AND biz_type = ?", supplierID, "supplier_transfer").Find(&transactions).Error)
+	require.Len(t, transactions, 4, "an idempotent replay must not write another ledger pair")
+
+	w = transfer("7.00", "supplier-transfer-insufficient")
+	require.Equal(t, http.StatusUnprocessableEntity, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "Insufficient balance.")
+	var stored billinginfra.WalletModel
+	require.NoError(t, db.First(&stored, "user_id = ?", supplierID).Error)
+	require.Equal(t, "8.250000", stored.ConsumerBalance)
+	require.Equal(t, "6.750000", stored.SupplierAvailable)
+	require.Zero(t, stored.BalanceWarningLevel)
+	require.Equal(t, uint64(2), stored.BalanceWarningCycle)
+
+	require.NoError(t, db.Model(&billinginfra.WalletModel{}).Where("user_id = ?", supplierID).
+		Update("consumer_balance", "999999999999.999999").Error)
+	w = transfer("0.000001", "supplier-transfer-overflow")
+	require.Equal(t, http.StatusUnprocessableEntity, w.Code, w.Body.String())
+	require.NoError(t, db.First(&stored, "user_id = ?", supplierID).Error)
+	require.Equal(t, "999999999999.999999", stored.ConsumerBalance)
+	require.Equal(t, "6.750000", stored.SupplierAvailable, "the supplier debit must roll back if the consumer credit fails")
+	var transactionCount int64
+	require.NoError(t, db.Model(&billinginfra.WalletTransactionModel{}).
+		Where("user_id = ? AND biz_type = ?", supplierID, "supplier_transfer").Count(&transactionCount).Error)
+	require.EqualValues(t, 4, transactionCount)
+
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, goose.DownTo(sqlDB, billingAPIMigrationsDir(t), 62), "immutable outbound transfer rows must not block rollback")
+	require.NoError(t, goose.UpTo(sqlDB, billingAPIMigrationsDir(t), 63))
 }
 
 func TestBillingAdminWalletCreditWritesOperationLog(t *testing.T) {

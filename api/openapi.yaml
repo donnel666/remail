@@ -5923,6 +5923,62 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/wallet/supplier-transfers:
+    post:
+      operationId: postWalletSupplierTransfer
+      summary: Transfer supplier available balance to the current user's consumer wallet
+      description: Atomically debits supplierAvailable and credits consumer balance. Available only to supplier, admin, and super-admin roles.
+      tags:
+        - Billing
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WalletSupplierTransferRequest"
+      responses:
+        "200":
+          description: Supplier balance transferred to the consumer wallet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WalletResponse"
+        "400":
+          description: Invalid body or missing idempotency key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Supplier access required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Idempotency key conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid amount or insufficient supplier balance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /v1/wallet/transactions:
     get:
       operationId: getWalletTransactions
@@ -11378,6 +11434,17 @@ components:
           $ref: "#/components/schemas/NonNegativeLedgerAmount"
         transferredCount:
           type: integer
+      additionalProperties: false
+
+    WalletSupplierTransferRequest:
+      type: object
+      required:
+        - amount
+      properties:
+        amount:
+          allOf:
+            - $ref: "#/components/schemas/NonNegativeLedgerAmount"
+          description: Positive amount to move from supplierAvailable to consumer balance.
       additionalProperties: false
 
     TransactionItem:

@@ -7,7 +7,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getWallet: vi.fn(),
   listWalletTransactions: vi.fn(),
+  transferSupplierBalance: vi.fn(),
+  createTicket: vi.fn(),
   toastError: vi.fn(),
+  toastSuccess: vi.fn(),
   translate: (key: string) => key,
 }));
 
@@ -28,6 +31,7 @@ vi.mock("@/lib/iam-errors", () => ({
 vi.mock("@/lib/wallet-api", () => ({
   getWallet: mocks.getWallet,
   listWalletTransactions: mocks.listWalletTransactions,
+  transferSupplierBalance: mocks.transferSupplierBalance,
 }));
 
 vi.mock("@/components/semi/card-table", () => ({
@@ -44,7 +48,7 @@ vi.mock("./resources/supplier-application-modal", () => ({
     role === "supplier" || role === "admin" || role === "super_admin",
 }));
 
-vi.mock("./tickets/tickets-api", () => ({ createTicket: vi.fn() }));
+vi.mock("./tickets/tickets-api", () => ({ createTicket: mocks.createTicket }));
 
 vi.mock("@douyinfe/semi-ui", async () => {
   const React = await import("react");
@@ -96,7 +100,7 @@ vi.mock("@douyinfe/semi-ui", async () => {
     Space: Box,
     Tag: Box,
     TextArea,
-    Toast: { error: mocks.toastError, success: vi.fn(), warning: vi.fn() },
+    Toast: { error: mocks.toastError, success: mocks.toastSuccess, warning: vi.fn() },
   };
 });
 
@@ -117,6 +121,11 @@ describe("FinanceCenter", () => {
     vi.clearAllMocks();
     mocks.getWallet.mockResolvedValue(wallet);
     mocks.listWalletTransactions.mockRejectedValue(new Error("transactions unavailable"));
+    mocks.transferSupplierBalance.mockResolvedValue({
+      ...wallet,
+      consumerBalance: "15.25",
+      supplierAvailable: "999999999994.749999",
+    });
   });
 
   afterEach(() => cleanup());
@@ -126,14 +135,55 @@ describe("FinanceCenter", () => {
 
     expect(await screen.findByText("¥999,999,999,999.999999")).toBeVisible();
     expect(screen.getByText("¥1,000,000,000,000.00")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Withdraw" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Withdraw to Alipay" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Transfer to user wallet" })).toBeEnabled();
     expect(mocks.toastError).toHaveBeenCalledWith("Supplier transactions load failed.");
 
     mocks.getWallet.mockRejectedValueOnce(new Error("wallet unavailable"));
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
 
     await waitFor(() => expect(mocks.getWallet).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Withdraw" })).toBeEnabled());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Withdraw to Alipay" })).toBeEnabled(),
+    );
     expect(screen.getByText("¥999,999,999,999.999999")).toBeVisible();
+  });
+
+  it("transfers supplier balance directly instead of creating a ticket", async () => {
+    render(<FinanceCenter />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Transfer to user wallet" }));
+    expect(screen.getByRole("dialog", { name: "Transfer supplier balance" })).toBeVisible();
+    expect(screen.queryByText("Alipay payment QR code")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "5.25" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm transfer" }));
+
+    await waitFor(() =>
+      expect(mocks.transferSupplierBalance).toHaveBeenCalledWith("5.25", expect.any(String)),
+    );
+    expect(mocks.createTicket).not.toHaveBeenCalled();
+    expect(mocks.toastSuccess).toHaveBeenCalledWith("Wallet transfer completed.");
+  });
+
+  it("reuses the transfer idempotency key after an ambiguous failure", async () => {
+    mocks.transferSupplierBalance.mockRejectedValueOnce(new Error("response lost"));
+    render(<FinanceCenter />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Transfer to user wallet" }));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "5.25" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm transfer" }));
+
+    await waitFor(() => expect(mocks.transferSupplierBalance).toHaveBeenCalledTimes(1));
+    const firstKey = mocks.transferSupplierBalance.mock.calls[0][1];
+    expect(firstKey).toEqual(expect.any(String));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Confirm transfer" })).toBeEnabled(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Confirm transfer" }));
+
+    await waitFor(() => expect(mocks.transferSupplierBalance).toHaveBeenCalledTimes(2));
+    expect(mocks.transferSupplierBalance.mock.calls[1]).toEqual(["5.25", firstKey]);
   });
 });

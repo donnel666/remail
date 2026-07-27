@@ -1855,6 +1855,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/wallet/supplier-transfers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Transfer supplier available balance to the current user's consumer wallet
+         * @description Atomically debits supplierAvailable and credits consumer balance. Available only to supplier, admin, and super-admin roles.
+         */
+        post: operations["postWalletSupplierTransfer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/wallet/transactions": {
         parameters: {
             query?: never;
@@ -3905,6 +3925,10 @@ export interface components {
             transaction: components["schemas"]["TransactionItem"];
             transferredAmount: components["schemas"]["NonNegativeLedgerAmount"];
             transferredCount: number;
+        };
+        WalletSupplierTransferRequest: {
+            /** @description Positive amount to move from supplierAvailable to consumer balance. */
+            amount: components["schemas"]["NonNegativeLedgerAmount"];
         };
         TransactionItem: {
             id: number;
@@ -13669,6 +13693,80 @@ export interface operations {
                 };
             };
             /** @description No referral rewards available */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    postWalletSupplierTransfer: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WalletSupplierTransferRequest"];
+            };
+        };
+        responses: {
+            /** @description Supplier balance transferred to the consumer wallet */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WalletResponse"];
+                };
+            };
+            /** @description Invalid body or missing idempotency key */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Supplier access required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Idempotency key conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid amount or insufficient supplier balance */
             422: {
                 headers: {
                     [name: string]: unknown;

@@ -51,7 +51,10 @@ export function TransactionDetailSheet({
   const isMobile = useIsMobile();
 
   const canReverse = Boolean(
-    transaction && !transaction.reversed && !transaction.reversalOfNo
+    transaction &&
+      transaction.transactionType !== "transfer" &&
+      !transaction.reversed &&
+      !transaction.reversalOfNo
   );
 
   return (

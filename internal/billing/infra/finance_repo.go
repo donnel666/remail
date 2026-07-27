@@ -250,6 +250,9 @@ func (r *BillingRepo) reverseTransactionInTx(ctx context.Context, tx *gorm.DB, c
 	if original.ReversalOfNo != nil {
 		return nil, domain.ErrTransactionNotReversible
 	}
+	if domain.TransactionType(original.TransactionType) == domain.TransactionTypeTransfer {
+		return nil, domain.ErrTransactionNotReversible
+	}
 	var existing int64
 	if err := tx.WithContext(ctx).Model(&WalletTransactionModel{}).
 		Where("reversal_of_no = ?", original.TransactionNo).
@@ -309,6 +312,67 @@ func (r *BillingRepo) reverseTransactionInTx(ctx context.Context, tx *gorm.DB, c
 }
 
 // ---- Wallets ------------------------------------------------------------
+
+func (r *BillingRepo) TransferSupplierBalance(ctx context.Context, cmd billingapp.TransferSupplierBalanceCommand) (*domain.WalletSummary, error) {
+	var result domain.WalletSummary
+	err := r.withTx(ctx, func(txCtx context.Context, tx *gorm.DB) error {
+		response, replayed, err := r.withIdempotencyInTx(txCtx, tx, cmd.UserID, "wallet.supplier-transfer", cmd.IdempotencyKey, cmd.RequestFingerprint, func(writeTx *gorm.DB) ([]byte, error) {
+			wallet, err := r.lockWalletInTx(txCtx, writeTx, cmd.UserID)
+			if err != nil {
+				return nil, err
+			}
+			_, err = r.createLedgerEntryInTx(txCtx, writeTx, wallet, ledgerEntryRequest{
+				UserID:          cmd.UserID,
+				Bucket:          domain.BalanceBucketSupplierAvailable,
+				Direction:       domain.TransactionDirectionOut,
+				TransactionType: domain.TransactionTypeTransfer,
+				BizType:         "supplier_transfer",
+				BizID:           cmd.IdempotencyKey,
+				Amount:          cmd.Amount,
+				IdempotencyKey:  cmd.IdempotencyKey,
+				RequestID:       cmd.RequestID,
+			})
+			if err != nil {
+				return nil, err
+			}
+			_, err = r.createConsumerTransaction(txCtx, writeTx, wallet, consumerTransactionRequest{
+				UserID:          cmd.UserID,
+				Direction:       domain.TransactionDirectionIn,
+				TransactionType: domain.TransactionTypeTransfer,
+				BizType:         "supplier_transfer",
+				BizID:           cmd.IdempotencyKey,
+				Amount:          cmd.Amount,
+				IdempotencyKey:  cmd.IdempotencyKey,
+				RequestID:       cmd.RequestID,
+			})
+			if err != nil {
+				return nil, err
+			}
+			if err := resetBalanceWarningsInTx(txCtx, writeTx, cmd.UserID); err != nil {
+				return nil, err
+			}
+			summary, err := walletSummaryFromModel(*wallet)
+			if err != nil {
+				return nil, err
+			}
+			result = *summary
+			return json.Marshal(result)
+		})
+		if err != nil {
+			return err
+		}
+		if replayed {
+			if err := json.Unmarshal(response, &result); err != nil {
+				return fmt.Errorf("decode idempotent supplier transfer: %w", err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
 
 func (r *BillingRepo) WithdrawSupplier(ctx context.Context, cmd billingapp.WithdrawSupplierCommand) (*billingapp.AdjustBalanceResult, error) {
 	var result billingapp.AdjustBalanceResult
@@ -387,7 +451,7 @@ type ledgerEntryRequest struct {
 // createLedgerEntryInTx appends one ledger row against any wallet bucket and
 // moves that bucket balance (lock held by caller). Rejects an outbound entry
 // that would drive the bucket negative (INV-B1). Consumer credit/debit keep
-// their own path; this serves withdrawal and reversal.
+// their own path; this serves supplier transfers, withdrawals and reversals.
 func (r *BillingRepo) createLedgerEntryInTx(ctx context.Context, tx *gorm.DB, wallet *WalletModel, req ledgerEntryRequest) (*billingapp.AdjustBalanceResult, error) {
 	amount, err := domain.ParseMoney(req.Amount)
 	if err != nil || !amount.IsPositive() {

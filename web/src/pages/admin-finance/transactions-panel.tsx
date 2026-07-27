@@ -258,7 +258,10 @@ export function TransactionsPanel({ tabsArea }: { tabsArea: ReactNode }) {
         width: 160,
         render: (_: unknown, record: FinanceTransaction) => {
           const canReverse =
-            canOperate && !record.reversed && !record.reversalOfNo;
+            canOperate &&
+            record.transactionType !== "transfer" &&
+            !record.reversed &&
+            !record.reversalOfNo;
           return (
             <Space spacing={4} wrap={false}>
               <Button

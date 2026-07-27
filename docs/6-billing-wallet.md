@@ -12,6 +12,7 @@
 | 2026-07-25 | V1.5 | Codex | 邀请返佣改由系统设置控制首次充值比例、单笔/累计上限和有效期。 |
 | 2026-07-25 | V1.6 | Codex | 在线充值支持易支付 V1 MD5 与 V2 RSA；回调只触发主动查账，前 10 次每 5 秒、随后每 30 秒，无回调时 60 秒兜底启动，且只允许 5 分钟内查账确认后入账。 |
 | 2026-07-26 | V1.7 | Codex | 当前供应商提现与转入用户钱包统一改走 AFTERSALE general 工单，由管理员人工核对并操作钱包；不提供用户侧提现/划转写接口，不新增提现审批状态机。 |
+| 2026-07-27 | V1.8 | Codex | 支付宝提现继续由固定格式 general 工单人工处理并强制附收款码；供应商可用余额转消费余额改为用户侧幂等接口，在同一钱包事务内完成双桶划转与双流水。 |
 
 > 支撑域。BC-BILLING 只保证资金事实正确，不理解订单为什么扣款、退款或结算。
 
@@ -64,7 +65,7 @@
 | `CardKeyRedemption` | 卡密兑换事实 |
 | `ReferralReward` | 被邀请人首次充值触发的一次性返佣事实 |
 | `Settlement` | `frozen/credited/cancelled` |
-| `Withdrawal` | 当前版本不建立独立聚合；申请由 AFTERSALE general 工单承载。 |
+| `Withdrawal` | 当前版本不建立独立聚合；支付宝提现申请由 AFTERSALE general 工单承载。 |
 | `PaymentChannel` | 支付渠道配置 |
 | `IdempotencyKey` | 资金操作幂等事实 |
 
@@ -97,9 +98,11 @@ stateDiagram-v2
 
 ### 3.3 提现
 
-当前版本不建立提现聚合或独立审批状态机。供应商在个人财务中心选择“支付宝”或“用户钱包”后，前端调用 AFTERSALE `POST /v1/tickets` 创建 `ticketType=general` 的非订单工单，标题固定为“供应商提现申请”，首条消息记录金额、去向和用户备注；支付宝提现必须附收款码图片。
+当前版本不建立提现聚合或独立审批状态机。供应商在个人财务中心点击“提现到支付宝”后，前端调用 AFTERSALE `POST /v1/tickets` 创建 `ticketType=general` 的非订单工单，标题固定为“供应商提现申请”，首条消息按固定格式记录金额、支付宝去向和用户备注，并必须附收款码图片。
 
-工单提交本身不修改或预冻结任何余额。管理员处理时必须重新核对申请人的 `supplierAvailable`，再通过后台钱包操作人工完成供应商余额扣减、支付宝转账或消费余额加款，并在工单中留痕后关闭。重复工单和处理期间发生的余额变化均以管理员实际操作时的账本余额为准。
+支付宝工单提交本身不修改或预冻结任何余额。管理员处理时必须重新核对申请人的 `supplierAvailable`，再通过后台钱包操作人工完成供应商余额扣减与支付宝转账，并在工单中留痕后关闭。重复工单和处理期间发生的余额变化均以管理员实际操作时的账本余额为准。
+
+“转入用户钱包”不创建工单。前端调用 `POST /v1/wallet/supplier-transfers`，后端在同一事务内锁定当前钱包，从 `supplierAvailable` 扣减指定正数金额并向 `consumer` 加入等额金额，各写一条 `transfer` 流水；余额不足时整体失败且不写流水。接口只对 supplier/admin/super-admin 开放并要求 `Idempotency-Key`，同键重试返回原结果。两条 `transfer` 流水禁止通过后台单笔冲正。
 
 ---
 
@@ -156,6 +159,7 @@ stateDiagram-v2
 | `GET` | `/v1/wallet` | 当前主体钱包。 |
 | `GET` | `/v1/wallet/referrals` | 当前主体邀请返佣统计。 |
 | `POST` | `/v1/wallet/referrals/transfer` | 将当前主体可划转返佣批量划转到消费余额，必须带幂等键。 |
+| `POST` | `/v1/wallet/supplier-transfers` | 将当前主体指定金额的供应商可用余额原子转入消费余额，仅 supplier/admin/super-admin 角色可用且必须带幂等键。 |
 | `GET` | `/v1/wallet/transactions` | 钱包流水；支持 `scope=mine/all`。 |
 | `POST` | `/v1/recharges` | 创建充值单。 |
 | `GET` | `/v1/recharges` | 充值单列表；支持 `scope=mine/all`。 |
@@ -164,7 +168,7 @@ stateDiagram-v2
 | `POST` | `/v1/cards/redeem` | 兑换卡密。 |
 | `GET` | `/v1/settlements` | 供应商结算列表；支持 `scope=mine/all`。 |
 
-当前无用户侧提现或供应商余额划转写接口；这两类申请统一使用 BC-AFTERSALE general 工单。
+当前无用户侧支付宝提现写接口；支付宝申请使用 BC-AFTERSALE general 工单。供应商余额转消费余额使用上述 Billing 写接口直接完成。
 
 后台 API：
 
@@ -202,4 +206,4 @@ stateDiagram-v2
 | ADR-BILL-2 | 不建通用冻结表 | 冻结原因由结算单表达。 |
 | ADR-BILL-3 | 回调不入账 | 必须查账确认金额后入账。 |
 | ADR-BILL-4 | Billing 不提供任意改结算状态 | 结算业务条件由 Trade 判断。 |
-| ADR-BILL-5 | 不建用户提现状态机 | 当前申请量由 general 工单和人工钱包操作即可覆盖；需要自动冻结、并发占款或支付通道时再引入提现聚合。 |
+| ADR-BILL-5 | 不建用户提现状态机 | 支付宝提现由 general 工单和人工钱包操作覆盖；站内双桶划转直接复用钱包行锁、台账与幂等能力。需要自动冻结、并发占款或支付通道时再引入提现聚合。 |

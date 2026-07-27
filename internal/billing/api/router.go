@@ -21,6 +21,7 @@ func RegisterBillingRoutes(rg *gin.RouterGroup, mod *BillingModule, fetcher midd
 		auth.POST("/wallet/check-ins", h.PostWalletCheckin)
 		auth.GET("/wallet/referrals", h.GetWalletReferrals)
 		auth.POST("/wallet/referrals/transfer", h.PostWalletReferralTransfer)
+		auth.POST("/wallet/supplier-transfers", h.PostWalletSupplierTransfer)
 		auth.GET("/wallet/transactions", h.GetWalletTransactions)
 		auth.GET("/recharges", h.GetRecharges)
 		auth.GET("/recharges/config", h.GetRechargeConfig)

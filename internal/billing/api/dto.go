@@ -39,6 +39,10 @@ type WalletReferralTransferResponse struct {
 	TransferredCount  int                     `json:"transferredCount"`
 }
 
+type WalletSupplierTransferRequest struct {
+	Amount string `json:"amount" binding:"required"`
+}
+
 type TransactionItemResponse struct {
 	ID              uint      `json:"id"`
 	TransactionNo   string    `json:"transactionNo"`

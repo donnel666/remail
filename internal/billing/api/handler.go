@@ -23,8 +23,9 @@ type BillingHandler struct {
 }
 
 const (
-	maxRechargeRequestBytes = 4 << 10
-	maxEPayWebhookBytes     = 8 << 10
+	maxRechargeRequestBytes       = 4 << 10
+	maxWalletTransferRequestBytes = 4 << 10
+	maxEPayWebhookBytes           = 8 << 10
 )
 
 func NewBillingHandler(module *BillingModule, checker middleware.PermissionChecker) *BillingHandler {
@@ -110,6 +111,35 @@ func (h *BillingHandler) PostWalletReferralTransfer(c *gin.Context) {
 		TransferredAmount: result.TransferredAmount,
 		TransferredCount:  result.TransferredCount,
 	})
+}
+
+func (h *BillingHandler) PostWalletSupplierTransfer(c *gin.Context) {
+	userID, ok := requireCurrentUserID(c)
+	if !ok {
+		return
+	}
+	role, _ := middleware.GetCurrentRole(c)
+	if !role.HasSupplierAccess() {
+		c.JSON(http.StatusForbidden, gin.H{"message": "Permission denied.", "requestId": middleware.GetRequestID(c)})
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxWalletTransferRequestBytes)
+	var request WalletSupplierTransferRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		writeInvalidBody(c, err)
+		return
+	}
+	summary, err := h.module.WalletUseCase.TransferSupplierBalance(c.Request.Context(), billingapp.TransferSupplierBalanceRequest{
+		UserID:         userID,
+		Amount:         request.Amount,
+		IdempotencyKey: c.GetHeader("Idempotency-Key"),
+		RequestID:      middleware.GetRequestID(c),
+	})
+	if err != nil {
+		writeBillingError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, walletResponse(*summary))
 }
 
 func (h *BillingHandler) GetWalletTransactions(c *gin.Context) {

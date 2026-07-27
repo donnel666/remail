@@ -7,8 +7,6 @@ import {
   Empty,
   Input,
   Modal,
-  Radio,
-  RadioGroup,
   Skeleton,
   Space,
   Tag,
@@ -30,9 +28,11 @@ import { CardTable } from "@/components/semi/card-table";
 import { useAuth } from "@/context/auth-provider";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { getIamErrorMessage } from "@/lib/iam-errors";
+import { generateIdempotencyKey } from "@/lib/idempotency";
 import {
   getWallet,
   listWalletTransactions,
+  transferSupplierBalance,
   type TransactionItem,
   type WalletResponse,
 } from "@/lib/wallet-api";
@@ -43,7 +43,7 @@ import {
   hasSupplierRole,
 } from "./resources/supplier-application-modal";
 import {
-  buildWithdrawalTicketInput,
+  buildAlipayWithdrawalTicketInput,
   isPositiveLedgerAmount,
   sumLedgerAmounts,
   validateWithdrawal,
@@ -194,6 +194,7 @@ export default function FinanceCenter() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const requestSequence = useRef(0);
   const fileReadSequence = useRef(0);
+  const transferAttemptRef = useRef<{ amount: string; key: string } | null>(null);
   const [wallet, setWallet] = useState<WalletResponse | null>(null);
   const [transactions, setTransactions] = useState<TransactionItem[]>([]);
   const [walletLoading, setWalletLoading] = useState(supplier);
@@ -268,6 +269,7 @@ export default function FinanceCenter() {
     setPaymentQrCode("");
     setPaymentQrCodeName("");
     setWithdrawing(false);
+    transferAttemptRef.current = null;
   };
 
   const pickQrCode = async (file?: File) => {
@@ -296,6 +298,7 @@ export default function FinanceCenter() {
   };
 
   const submitWithdrawal = async () => {
+    if (withdrawing) return;
     const validationError = validateWithdrawal({
       amount: withdrawAmount,
       available: wallet?.supplierAvailable ?? "0",
@@ -308,10 +311,23 @@ export default function FinanceCenter() {
     }
     setWithdrawing(true);
     try {
+      if (destination === "wallet") {
+        const amount = withdrawAmount.trim();
+        let attempt = transferAttemptRef.current;
+        if (!attempt || attempt.amount !== amount) {
+          attempt = { amount, key: generateIdempotencyKey() };
+          transferAttemptRef.current = attempt;
+        }
+        const updatedWallet = await transferSupplierBalance(amount, attempt.key);
+        setWallet(updatedWallet);
+        Toast.success(t("Wallet transfer completed."));
+        closeWithdrawal();
+        void load();
+        return;
+      }
       await createTicket(
-        buildWithdrawalTicketInput({
+        buildAlipayWithdrawalTicketInput({
           amount: withdrawAmount,
-          destination,
           note,
           paymentQrCode,
         }),
@@ -319,7 +335,13 @@ export default function FinanceCenter() {
       Toast.success(t("Withdrawal submitted."));
       closeWithdrawal();
     } catch (error) {
-      Toast.error(getIamErrorMessage(t, error, "Withdrawal submission failed."));
+      Toast.error(
+        getIamErrorMessage(
+          t,
+          error,
+          destination === "wallet" ? "Wallet transfer failed." : "Withdrawal submission failed.",
+        ),
+      );
     } finally {
       setWithdrawing(false);
     }
@@ -401,7 +423,7 @@ export default function FinanceCenter() {
             {t("Manage supplier income, withdrawals and transfers.")}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button
             aria-label={t("Refresh")}
             icon={<RefreshCw size={16} />}
@@ -414,11 +436,25 @@ export default function FinanceCenter() {
           </Button>
           <Button
             disabled={!canWithdraw || walletLoading}
-            icon={<ArrowRightLeft size={16} />}
-            onClick={() => setWithdrawOpen(true)}
+            icon={<CircleDollarSign size={16} />}
+            onClick={() => {
+              setDestination("alipay");
+              setWithdrawOpen(true);
+            }}
             type="primary"
           >
-            {t("Withdraw")}
+            {t("Withdraw to Alipay")}
+          </Button>
+          <Button
+            disabled={!canWithdraw || walletLoading}
+            icon={<ArrowRightLeft size={16} />}
+            onClick={() => {
+              setDestination("wallet");
+              setWithdrawOpen(true);
+            }}
+            theme="outline"
+          >
+            {t("Transfer to user wallet")}
           </Button>
         </div>
       </div>
@@ -473,18 +509,13 @@ export default function FinanceCenter() {
             </div>
           }
         >
-          <div className="space-y-4">
-            <MetricRow
-              color="blue"
-              icon={<Wallet size={16} />}
-              label={t("User wallet")}
-              loading={walletLoading}
-              value={moneyText(wallet?.consumerBalance)}
-            />
-            <div className="rounded-xl border border-[var(--semi-color-border)] bg-[var(--semi-color-bg-0)] p-3 text-sm text-[var(--semi-color-text-2)]">
-              {t("Withdrawals are submitted as tickets and processed manually.")}
-            </div>
-          </div>
+          <MetricRow
+            color="blue"
+            icon={<Wallet size={16} />}
+            label={t("User wallet")}
+            loading={walletLoading}
+            value={moneyText(wallet?.consumerBalance)}
+          />
         </Card>
       </div>
 
@@ -514,7 +545,9 @@ export default function FinanceCenter() {
               {t("Cancel")}
             </Button>
             <Button loading={withdrawing} onClick={() => void submitWithdrawal()} type="primary">
-              {withdrawing ? t("Submitting") : t("Submit")}
+              {withdrawing
+                ? t(destination === "wallet" ? "Transferring" : "Submitting")
+                : t(destination === "wallet" ? "Confirm transfer" : "Submit")}
             </Button>
           </Space>
         }
@@ -522,14 +555,14 @@ export default function FinanceCenter() {
         onCancel={() => {
           if (!withdrawing) closeWithdrawal();
         }}
-        title={t("Supplier withdrawal application")}
+        title={t(destination === "wallet" ? "Transfer supplier balance" : "Supplier withdrawal application")}
         visible={withdrawOpen}
         width={isMobile ? "94%" : 560}
       >
         <div className="space-y-4">
           <label className="block" htmlFor="withdraw-amount">
             <span className="mb-2 block text-sm font-medium text-[var(--semi-color-text-0)]">
-              {t("Withdraw amount")}
+              {t(destination === "wallet" ? "Transfer amount" : "Withdraw amount")}
             </span>
             <Input
               id="withdraw-amount"
@@ -543,19 +576,6 @@ export default function FinanceCenter() {
               {t("Withdrawable balance")}: {moneyText(supplierAvailable)}
             </span>
           </label>
-
-          <fieldset className="m-0 border-0 p-0">
-            <legend className="mb-2 text-sm font-medium text-[var(--semi-color-text-0)]">
-              {t("Withdrawal destination")}
-            </legend>
-            <RadioGroup
-              onChange={(event) => setDestination(event.target.value as WithdrawalDestination)}
-              value={destination}
-            >
-              <Radio value="alipay">{t("Withdraw to Alipay")}</Radio>
-              <Radio value="wallet">{t("Transfer to user wallet")}</Radio>
-            </RadioGroup>
-          </fieldset>
 
           {destination === "alipay" ? (
             <div>
@@ -603,20 +623,22 @@ export default function FinanceCenter() {
             </div>
           ) : null}
 
-          <label className="block" htmlFor="withdraw-note">
-            <span className="mb-2 block text-sm font-medium text-[var(--semi-color-text-0)]">
-              {t("Note")}
-            </span>
-            <TextArea
-              autosize={{ minRows: 3, maxRows: 6 }}
-              id="withdraw-note"
-              maxCount={500}
-              onChange={(value) => setNote(String(value))}
-              placeholder={t("Withdrawal request note placeholder")}
-              showClear
-              value={note}
-            />
-          </label>
+          {destination === "alipay" ? (
+            <label className="block" htmlFor="withdraw-note">
+              <span className="mb-2 block text-sm font-medium text-[var(--semi-color-text-0)]">
+                {t("Note")}
+              </span>
+              <TextArea
+                autosize={{ minRows: 3, maxRows: 6 }}
+                id="withdraw-note"
+                maxCount={500}
+                onChange={(value) => setNote(String(value))}
+                placeholder={t("Withdrawal request note placeholder")}
+                showClear
+                value={note}
+              />
+            </label>
+          ) : null}
         </div>
       </Modal>
     </div>

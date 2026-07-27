@@ -222,7 +222,10 @@ func (r *BillingRepo) GetOrCreateWalletSummary(ctx context.Context, userID uint)
 	if err != nil {
 		return nil, err
 	}
+	return walletSummaryFromModel(wallet)
+}
 
+func walletSummaryFromModel(wallet WalletModel) (*domain.WalletSummary, error) {
 	totalRecharged, err := normalizeDBMoney(wallet.TotalRecharged)
 	if err != nil {
 		return nil, err
@@ -1468,6 +1471,9 @@ func (r *BillingRepo) createConsumerTransaction(ctx context.Context, tx *gorm.DB
 		signedAmount = amount.Neg()
 	default:
 		return nil, domain.ErrInvalidTransactionType
+	}
+	if _, err := domain.ParseMoney(afterString); err != nil {
+		return nil, err
 	}
 	amountString := domain.MoneyString(signedAmount)
 	beforeString := domain.MoneyString(before)
