@@ -4,6 +4,10 @@ import { useTranslation } from "react-i18next";
 
 import { IamApiError } from "@/lib/api-client";
 import {
+  getApiErrorBodyMessage,
+  getIamErrorMessage,
+} from "@/lib/iam-errors";
+import {
   createOrder,
   createOrderBatch,
   getOrder,
@@ -351,12 +355,6 @@ function checkoutBatchSignature(input: {
   ].join("|");
 }
 
-function apiErrorMessage(err: unknown, fallback: string) {
-  if (err instanceof IamApiError && err.message) return err.message;
-  if (err instanceof Error && err.message) return err.message;
-  return fallback;
-}
-
 export default function Dashboard() {
   const { t } = useTranslation();
   const [applyOpen, setApplyOpen] = useState(false);
@@ -520,7 +518,7 @@ export default function Dashboard() {
       );
       setProjects(listed.map((project) => toWorkbenchProject(project)));
     } catch (err) {
-      Toast.error(apiErrorMessage(err, t("An unexpected error occurred.")));
+      Toast.error(getIamErrorMessage(t, err, "An unexpected error occurred."));
     }
   }
 
@@ -541,7 +539,7 @@ export default function Dashboard() {
       );
     } catch (err) {
       if (!silent) {
-        Toast.error(apiErrorMessage(err, t("An unexpected error occurred.")));
+        Toast.error(getIamErrorMessage(t, err, "An unexpected error occurred."));
       }
     }
   }
@@ -571,7 +569,7 @@ export default function Dashboard() {
         ];
       });
     } catch (err) {
-      Toast.error(apiErrorMessage(err, t("An unexpected error occurred.")));
+      Toast.error(getIamErrorMessage(t, err, "An unexpected error occurred."));
     }
   }
 
@@ -604,7 +602,7 @@ export default function Dashboard() {
         return [...prev, ...additions];
       });
     } catch (err) {
-      Toast.error(apiErrorMessage(err, t("An unexpected error occurred.")));
+      Toast.error(getIamErrorMessage(t, err, "An unexpected error occurred."));
     } finally {
       loadingMoreOrdersRef.current = false;
       setLoadingMoreOrders(false);
@@ -701,7 +699,11 @@ export default function Dashboard() {
         Toast.success(t("Order created."));
       } else {
         Toast.error(
-          `${failedItems[0]?.error?.message ?? t("An unexpected error occurred.")} (${createdOrders.length}/${requestedQuantity})`,
+          `${getApiErrorBodyMessage(
+            t,
+            failedItems[0]?.error,
+            "Order creation failed.",
+          )} (${createdOrders.length}/${requestedQuantity})`,
         );
       }
       if (requestedQuantity > 1 && nextOrders.length > 0) {
@@ -712,7 +714,7 @@ export default function Dashboard() {
     } catch (err) {
       void refreshOrders();
       void loadProjectInventory(selectedProject.id);
-      Toast.error(apiErrorMessage(err, t("An unexpected error occurred.")));
+      Toast.error(getIamErrorMessage(t, err, "Order creation failed."));
     } finally {
       setCreating(false);
     }
@@ -790,7 +792,7 @@ export default function Dashboard() {
           return err.retryAfterSeconds;
         }
         if (source === "manual") {
-          Toast.error(apiErrorMessage(err, t("An unexpected error occurred.")));
+          Toast.error(getIamErrorMessage(t, err, "An unexpected error occurred."));
         }
       } finally {
         fetchInFlightRef.current.delete(order.orderNo);
@@ -891,7 +893,7 @@ export default function Dashboard() {
           })
           .catch((err) =>
             Toast.error(
-              apiErrorMessage(err, t("An unexpected error occurred.")),
+              getIamErrorMessage(t, err, "An unexpected error occurred."),
             ),
           );
       } else if (
@@ -930,7 +932,7 @@ export default function Dashboard() {
         }
       })
       .catch((err) =>
-        Toast.error(apiErrorMessage(err, t("An unexpected error occurred."))),
+        Toast.error(getIamErrorMessage(t, err, "An unexpected error occurred.")),
       );
   }
 

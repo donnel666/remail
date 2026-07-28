@@ -384,12 +384,13 @@ function ImportProxyModal({
       const sourceText = mode === "paste" ? text : (await file?.text()) ?? "";
       const prepared = parseProxyImportContent(sourceText);
       if (prepared.invalidLines.length > 0) {
-        throw new Error(
+        Toast.error(
           t("Proxy import invalid line", { line: prepared.invalidLines[0] })
         );
+        return;
       }
       if (prepared.entries.length === 0) {
-        throw new Error(t("No valid proxy entries."));
+        throw new Error("No valid proxy entries.");
       }
       await onSubmit({
         expireAt: expireAt?.toISOString() ?? null,

@@ -1,16 +1,55 @@
 import type { TFunction } from "i18next";
 import { IamApiError } from "./iam-api";
 
+interface ApiErrorMessageBody {
+  message?: string | null;
+}
+
+function translateErrorMessage(
+  t: TFunction,
+  message: string | null | undefined,
+  fallback: string,
+) {
+  return message ? t(message, { defaultValue: fallback }) : fallback;
+}
+
+function fallbackMessage(
+  t: TFunction,
+  error: unknown,
+  fallbackKey: string,
+) {
+  if (error instanceof IamApiError) {
+    if (error.status === 401) return t("Authentication is required.");
+    if (error.status === 403) return t("Permission denied.");
+    if (error.status === 429) {
+      return error.retryAfterSeconds
+        ? t("Please retry in {{seconds}} seconds.", {
+            seconds: error.retryAfterSeconds,
+          })
+        : t("Too many requests.");
+    }
+    if (error.status >= 500) return t("Service is temporarily unavailable.");
+  }
+  return t(fallbackKey);
+}
+
+export function getApiErrorBodyMessage(
+  t: TFunction,
+  error: ApiErrorMessageBody | null | undefined,
+  fallbackKey = "Request failed.",
+) {
+  return translateErrorMessage(t, error?.message, t(fallbackKey));
+}
+
 export function getIamErrorMessage(
   t: TFunction,
   error: unknown,
-  fallbackKey = "Request failed."
+  fallbackKey = "Request failed.",
 ) {
-  if (error instanceof IamApiError && error.message) {
-    return t(error.message);
+  const fallback = fallbackMessage(t, error, fallbackKey);
+  let message = error instanceof Error ? error.message : undefined;
+  if (error instanceof IamApiError && message === "Request failed.") {
+    message = undefined;
   }
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
-  return t(fallbackKey);
+  return translateErrorMessage(t, message, fallback);
 }

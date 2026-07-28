@@ -58,6 +58,7 @@ import {
 } from "@/lib/wallet-api";
 import { createMyInvite, getMyInvite } from "@/lib/iam-api";
 import { IamApiError } from "@/lib/api-client";
+import { getIamErrorMessage } from "@/lib/iam-errors";
 
 import { calculateRechargePaymentAmount } from "./wallet-payment";
 
@@ -217,7 +218,7 @@ export default function Wallet() {
     try {
       setWallet(await getWallet());
     } catch (error) {
-      Toast.error(error instanceof Error ? error.message : t("Request failed."));
+      Toast.error(getIamErrorMessage(t, error, "Wallet load failed."));
     } finally {
       setWalletLoading(false);
     }
@@ -237,7 +238,7 @@ export default function Wallet() {
       setReferrals(stats);
       setReferralLink(buildReferralLink(invite.inviteCode));
     } catch (error) {
-      Toast.error(error instanceof Error ? error.message : t("Request failed."));
+      Toast.error(getIamErrorMessage(t, error));
     } finally {
       setReferralLoading(false);
     }
@@ -255,7 +256,7 @@ export default function Wallet() {
         amountFormApiRef.current?.setValue?.("topUpCount", value);
       }
     } catch (error) {
-      Toast.error(error instanceof Error ? error.message : t("Request failed."));
+      Toast.error(getIamErrorMessage(t, error));
     }
   }, [t]);
 
@@ -284,7 +285,7 @@ export default function Wallet() {
       if (settled) void refreshMembership();
     } catch (error) {
       if (billingRequestSeqRef.current !== seq) return;
-      Toast.error(error instanceof Error ? error.message : t("Request failed."));
+      Toast.error(getIamErrorMessage(t, error));
     } finally {
       if (billingRequestSeqRef.current === seq) setBillingLoading(false);
     }
@@ -311,7 +312,7 @@ export default function Wallet() {
       setBillingHasMore(recharges.length + response.items.length < response.total);
     } catch (error) {
       if (billingRequestSeqRef.current !== seq) return;
-      Toast.error(error instanceof Error ? error.message : t("Request failed."));
+      Toast.error(getIamErrorMessage(t, error));
     } finally {
       if (billingRequestSeqRef.current === seq) setBillingLoading(false);
     }
@@ -468,7 +469,7 @@ export default function Wallet() {
       if (error instanceof IamApiError && error.status >= 400 && error.status < 500) {
         rechargeAttemptRef.current = null;
       }
-      Toast.error(error instanceof Error ? t(error.message) : t("Request failed."));
+      Toast.error(getIamErrorMessage(t, error));
     } finally {
       setRecharging(false);
     }
@@ -506,7 +507,7 @@ export default function Wallet() {
       if (error instanceof IamApiError && error.status >= 400 && error.status < 500) {
         transferAttemptRef.current = null;
       }
-      Toast.error(error instanceof Error ? error.message : t("Request failed."));
+      Toast.error(getIamErrorMessage(t, error));
     } finally {
       setTransferringRewards(false);
     }
@@ -541,7 +542,7 @@ export default function Wallet() {
       if (error instanceof IamApiError && error.status >= 400 && error.status < 500) {
         redeemAttemptRef.current = null;
       }
-      Toast.error(error instanceof Error ? error.message : t("Request failed."));
+      Toast.error(getIamErrorMessage(t, error));
     } finally {
       setRedeeming(false);
     }

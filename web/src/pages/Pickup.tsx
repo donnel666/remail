@@ -5,6 +5,7 @@ import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { IamApiError } from "@/lib/api-client";
+import { getIamErrorMessage } from "@/lib/iam-errors";
 import {
   readPickupMail,
   readPickupMessage,
@@ -74,9 +75,7 @@ export default function Pickup() {
         return err.retryAfterSeconds;
       }
       if (source === "manual") {
-        Toast.error(
-          err instanceof Error ? err.message : t("An unexpected error occurred.")
-        );
+        Toast.error(getIamErrorMessage(t, err, "An unexpected error occurred."));
       }
       return 30;
     }

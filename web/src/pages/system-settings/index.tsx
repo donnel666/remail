@@ -6,6 +6,7 @@ import {
   type SystemOption,
 } from "@/lib/system-settings-api";
 import { useAuth, hasPermissionKey } from "@/context/auth-provider";
+import { getIamErrorMessage } from "@/lib/iam-errors";
 import {
   Shield, Mail, Cpu, ShoppingCart, Cog, Users,
 } from "lucide-react";
@@ -69,7 +70,7 @@ export default function SystemSettingsPage() {
       const result = await getSystemOptions();
       setOptions(result.options ?? []);
     } catch (error) {
-      const message = error instanceof Error ? error.message : t("加载系统设置失败");
+      const message = getIamErrorMessage(t, error, "Settings load failed.");
       setLoadError(message);
       Toast.error(message);
     } finally {
@@ -88,7 +89,7 @@ export default function SystemSettingsPage() {
       setOptions((prev) => { const nx = prev.filter((o) => o.key !== key); nx.push({ key, value }); return nx; });
       Toast.success(t("Settings saved."));
     } catch (error) {
-      Toast.error(error instanceof Error ? error.message : t("Settings save failed."));
+      Toast.error(getIamErrorMessage(t, error, "Settings save failed."));
       throw error;
     } finally {
       setSaving(false);
@@ -107,7 +108,7 @@ export default function SystemSettingsPage() {
       });
       Toast.success(t("Settings saved."));
     } catch (error) {
-      Toast.error(error instanceof Error ? error.message : t("Settings save failed."));
+      Toast.error(getIamErrorMessage(t, error, "Settings save failed."));
       throw error;
     } finally {
       setSaving(false);
@@ -121,8 +122,8 @@ export default function SystemSettingsPage() {
   if (loadError) {
     return (
       <div className="console-content-width flex min-h-64 flex-col items-center justify-center gap-3 pt-3">
-        <p className="text-sm text-[var(--semi-color-text-2)]">{t("系统设置加载失败")}：{loadError}</p>
-        <Button onClick={() => void load()} theme="light" type="primary">{t("重试")}</Button>
+        <p className="text-sm text-[var(--semi-color-text-2)]">{loadError}</p>
+        <Button onClick={() => void load()} theme="light" type="primary">{t("Retry")}</Button>
       </div>
     );
   }

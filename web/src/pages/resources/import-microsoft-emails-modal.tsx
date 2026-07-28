@@ -4,7 +4,7 @@ import type { TFunction } from "i18next";
 import { FileText, Upload } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { getIamErrorMessage } from "@/lib/iam-errors";
+import { getApiErrorBodyMessage, getIamErrorMessage } from "@/lib/iam-errors";
 import {
   importMicrosoftResources,
   type ImportErrorStrategy,
@@ -19,7 +19,7 @@ import {
 
 const { Text } = Typography;
 const ENTRY_AREA_HEIGHT = 208;
-const SKIPPED_IMPORT_ENTRIES_PATTERN = /^Skipped (\d+) import entries?\.$/;
+const SKIPPED_IMPORT_ENTRIES_PATTERN = /^Skipped (\d+) import entr(?:y|ies)\.$/;
 
 interface ImportMicrosoftEmailsModalProps {
   open: boolean;
@@ -106,12 +106,13 @@ export function ImportMicrosoftEmailsModal({
         errorStrategy
       );
       if (prepared.firstFailure) {
-        throw new Error(
+        Toast.error(
           getImportPreprocessFailureMessage(t, prepared.firstFailure)
         );
+        return;
       }
       if (prepared.validCount === 0) {
-        throw new Error(t("No valid import entries."));
+        throw new Error("No valid import entries.");
       }
       if (prepared.skippedCount > 0) {
         Toast.warning(
@@ -136,7 +137,7 @@ export function ImportMicrosoftEmailsModal({
         signal: controller.signal,
       });
       if (status.status === "failed") {
-        throw new Error(t(status.lastSafeError || "Resource import failed."));
+        throw new Error(status.lastSafeError || "Resource import failed.");
       }
       if (status.lastSafeError) {
         Toast.warning(getImportWarningMessage(t, status.lastSafeError));
@@ -292,12 +293,16 @@ export function ImportMicrosoftEmailsModal({
   );
 }
 
-function getImportWarningMessage(t: TFunction, safeMessage: string) {
+export function getImportWarningMessage(t: TFunction, safeMessage: string) {
   const match = SKIPPED_IMPORT_ENTRIES_PATTERN.exec(safeMessage);
   if (match) {
     return t("Import skipped errors", { count: Number(match[1]) });
   }
-  return t(safeMessage);
+  return getApiErrorBodyMessage(
+    t,
+    { message: safeMessage },
+    "Resource import completed with warnings."
+  );
 }
 
 function isAbortError(error: unknown) {

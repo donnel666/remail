@@ -3,6 +3,7 @@ import { Button, Modal, Toast } from "@douyinfe/semi-ui";
 import { Edit, Plus, Users } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { getIamErrorMessage } from "@/lib/iam-errors";
 import { createUserGroup, getUserGroups, updateUserGroup, type UserGroupFormValues } from "@/lib/system-settings-api";
 
 import type { SectionProps } from "./index";
@@ -24,7 +25,7 @@ export default function UserGroupSection(_props: SectionProps) {
       const result = await getUserGroups();
       setGroups(result.groups);
     } catch (error) {
-      Toast.error(error instanceof Error ? error.message : t("加载用户分组失败"));
+      Toast.error(getIamErrorMessage(t, error, "User groups load failed."));
     } finally {
       setLoading(false);
     }
@@ -50,7 +51,7 @@ export default function UserGroupSection(_props: SectionProps) {
       setShowForm(false);
       await load();
     } catch (error) {
-      Toast.error(error instanceof Error ? error.message : t("保存用户分组失败"));
+      Toast.error(getIamErrorMessage(t, error, "User group save failed."));
     } finally { setSaving(false); }
   };
 

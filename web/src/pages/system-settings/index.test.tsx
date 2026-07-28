@@ -9,7 +9,8 @@ const mocks = vi.hoisted(() => ({
   updateSystemOptionsBulk: vi.fn(),
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
-  t: (key: string) => key,
+  t: (key: string, options?: { defaultValue?: string }) =>
+    options?.defaultValue ?? key,
 }));
 
 vi.mock("react-i18next", () => ({
@@ -84,10 +85,10 @@ describe("SystemSettingsPage", () => {
 
     render(<SystemSettingsPage />);
 
-    expect(await screen.findByText("系统设置加载失败：network unavailable")).toBeInTheDocument();
+    expect(await screen.findByText("Settings load failed.")).toBeInTheDocument();
     expect(screen.queryByTestId("settings-section")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
 
     await waitFor(() => {
       expect(screen.getAllByTestId("settings-section").length).toBeGreaterThan(0);
@@ -109,7 +110,7 @@ describe("SystemSettingsPage", () => {
     expect(mocks.toastError).not.toHaveBeenCalled();
 
     fireEvent.click(save);
-    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith("save failed"));
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith("Settings save failed."));
     expect(mocks.toastSuccess).toHaveBeenCalledTimes(1);
   });
 });
