@@ -20,33 +20,46 @@ type fakeView struct {
 	avgSecs     int
 	leaders     []LeaderRow
 	standing    Standing
+	userID      uint
+	from        time.Time
+	to          time.Time
+	fullReads   int
 }
 
-func (f *fakeView) WalletSummary(context.Context, uint) (float64, float64, error) {
+func (f *fakeView) WalletSummary(_ context.Context, userID uint) (float64, float64, error) {
+	f.userID = userID
 	return f.balance, f.spent, nil
 }
-func (f *fakeView) OrderBuckets(context.Context, uint, string, time.Time, time.Time) ([]OrderBucketRow, error) {
+func (f *fakeView) OrderBuckets(_ context.Context, userID uint, _ string, from, to time.Time) ([]OrderBucketRow, error) {
+	f.userID, f.from, f.to = userID, from, to
 	return f.orders, nil
 }
-func (f *fakeView) ReceiptBuckets(context.Context, uint, string, time.Time, time.Time) ([]ReceiptBucketRow, error) {
+func (f *fakeView) ReceiptBuckets(_ context.Context, userID uint, _ string, _, _ time.Time) ([]ReceiptBucketRow, error) {
+	f.userID = userID
 	return f.receipts, nil
 }
-func (f *fakeView) PurchaseActivationBuckets(context.Context, uint, string, time.Time, time.Time) ([]PurchaseActivationBucketRow, error) {
+func (f *fakeView) PurchaseActivationBuckets(_ context.Context, userID uint, _ string, _, _ time.Time) ([]PurchaseActivationBucketRow, error) {
+	f.userID = userID
 	return f.activations, nil
 }
 func (f *fakeView) ProjectCodeRanking(context.Context, uint, time.Time, time.Time) ([]ProjectCountRow, error) {
+	f.fullReads++
 	return f.ranking, nil
 }
 func (f *fakeView) ProjectSpendBuckets(context.Context, uint, []uint, string, time.Time, time.Time) ([]ProjectSpendRow, error) {
+	f.fullReads++
 	return f.spend, nil
 }
-func (f *fakeView) RangeAvgReceiptSeconds(context.Context, uint, time.Time, time.Time) (int, error) {
+func (f *fakeView) RangeAvgReceiptSeconds(_ context.Context, userID uint, _, _ time.Time) (int, error) {
+	f.userID = userID
 	return f.avgSecs, nil
 }
 func (f *fakeView) Leaderboard(context.Context, *time.Time, int) ([]LeaderRow, error) {
+	f.fullReads++
 	return f.leaders, nil
 }
 func (f *fakeView) UserStanding(context.Context, uint, *time.Time) (Standing, error) {
+	f.fullReads++
 	return f.standing, nil
 }
 
@@ -151,6 +164,33 @@ func TestConsoleDashboardAssembly(t *testing.T) {
 	}
 	if got.TodayCurrentUserRank.Rank != 2 || !got.TodayCurrentUserRank.IsCurrentUser || got.TodayCurrentUserRank.Name != "Me" {
 		t.Errorf("current user rank = %+v, want rank 2 Me", got.TodayCurrentUserRank)
+	}
+}
+
+func TestConsoleStatsUsesSelectedUserAndSkipsFullDashboardReads(t *testing.T) {
+	from := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2026, 7, 2, 0, 0, 0, 0, time.UTC)
+	view := &fakeView{
+		orders:      []OrderBucketRow{{Orders: 5, CodeOrders: 3, PurchaseOrders: 2}},
+		receipts:    []ReceiptBucketRow{{Received: 2}},
+		activations: []PurchaseActivationBucketRow{{Activated: 1, TotalSeconds: 27, Timed: 1}},
+		balance:     2.48,
+		spent:       0.02,
+		avgSecs:     9,
+	}
+
+	stats, err := NewQueryService(view).ConsoleStats(context.Background(), 42, &from, &to)
+	if err != nil {
+		t.Fatalf("ConsoleStats: %v", err)
+	}
+	if view.userID != 42 || !view.from.Equal(from) || !view.to.Equal(to) {
+		t.Fatalf("query scope = user %d [%s,%s], want user 42 [%s,%s]", view.userID, view.from, view.to, from, to)
+	}
+	if view.fullReads != 0 {
+		t.Fatalf("full dashboard reads = %d, want 0", view.fullReads)
+	}
+	if stats.WalletBalance != 2.48 || stats.HistoricalSpend != 0.02 || stats.CodeSuccessRate != 66.7 || stats.AverageCodeReceiptSeconds != 9 || stats.PurchaseActivationSuccessRate != 50 || stats.AveragePurchaseActivationSeconds != 27 {
+		t.Fatalf("unexpected stats: %+v", stats)
 	}
 }
 

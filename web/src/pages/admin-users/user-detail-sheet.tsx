@@ -35,8 +35,16 @@ import { createCopyableConfig } from "@/components/semi/copyable-config";
 import { CopyableTableText } from "@/components/semi/copyable-table-text";
 import { OverflowTooltip } from "@/components/semi/overflow-tooltip";
 import { useIsMobile } from "@/hooks/use-is-mobile";
+import { useSharedDashboardDateRange } from "@/hooks/use-shared-dashboard-date-range";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import { getIamErrorMessage } from "@/lib/iam-errors";
+import {
+  DATE_RANGE_DROPDOWN_CLASS,
+  createDateRangePresets,
+  createdFromISOString,
+  createdToISOString,
+  normalizeDateRangeValue,
+} from "@/pages/resources/date-range-filter";
 
 import {
   canMutateAdminUser,
@@ -50,8 +58,10 @@ import {
   debitAdminUserWallet,
   deleteAdminUser,
   deleteAdminUserApiKey,
+  getAdminUserDashboardStats,
   getAdminUserInvitations,
   getAdminUserPermissions,
+  getAdminUserRealtimeUsage,
   getAdminUserWallet,
   getPermissionCatalog,
   listAdminUserApiKeys,
@@ -64,9 +74,11 @@ import {
   type AdminApiKey,
   type AdminTransaction,
   type AdminUser,
+  type AdminUserDashboardStats,
   type AdminUserInvitationMember,
   type AdminUserInvitationOverview,
   type AdminUserListFilter,
+  type AdminUserRealtimeUsage,
   type AdminUserRole,
   type AdminWallet,
   type PermissionCatalogItem,
@@ -110,6 +122,14 @@ function InfoItem({ label, value }: { label: string; value: ReactNode }) {
         {value}
       </div>
     </div>
+  );
+}
+
+function metricValue(loading: boolean, value: ReactNode) {
+  return loading ? (
+    <Spin size="small" />
+  ) : (
+    <span className="font-mono-data font-semibold">{value}</span>
   );
 }
 
@@ -222,20 +242,34 @@ function ProfileTab({
   user,
   canAssignSuperAdmin,
   canEdit,
+  canReadMetrics,
   onSaved,
 }: {
   user: AdminUser;
   canAssignSuperAdmin: boolean;
   canEdit: boolean;
+  canReadMetrics: boolean;
   onSaved: (user: AdminUser) => void | Promise<void>;
 }) {
   const { t } = useTranslation();
   const { groups } = useUserGroups();
+  const isMobile = useIsMobile();
+  const dateRangePresets = useMemo(() => createDateRangePresets(t), [t]);
+  const [createdAtRange, setCreatedAtRange] = useSharedDashboardDateRange();
+  const createdFrom = createdFromISOString(createdAtRange);
+  const createdTo = createdToISOString(createdAtRange);
   const [nickname, setNickname] = useState(user.nickname);
   const [role, setRole] = useState<AdminUserRole>(user.role);
   const [userGroupId, setUserGroupId] = useState<number>(user.userGroup.id);
   const [enabled, setEnabled] = useState(user.enabled);
   const [saving, setSaving] = useState(false);
+  const [dashboardStats, setDashboardStats] =
+    useState<AdminUserDashboardStats | null>(null);
+  const [dashboardLoading, setDashboardLoading] = useState(canReadMetrics);
+  const [realtimeUsage, setRealtimeUsage] =
+    useState<AdminUserRealtimeUsage | null>(null);
+  const [realtimeLoading, setRealtimeLoading] = useState(canReadMetrics);
+  const [realtimeUnavailable, setRealtimeUnavailable] = useState(false);
   const [walletSummary, setWalletSummary] = useState<AdminWallet | null>(null);
   const [walletLoading, setWalletLoading] = useState(true);
   const isSuperAdmin = user.role === "super_admin";
@@ -248,6 +282,86 @@ function ProfileTab({
     setUserGroupId(user.userGroup.id);
     setEnabled(user.enabled);
   }, [user]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setDashboardStats(null);
+    if (!canReadMetrics) {
+      setDashboardLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+    setDashboardLoading(true);
+    void getAdminUserDashboardStats(user.id, { createdFrom, createdTo })
+      .then((result) => {
+        if (!cancelled) setDashboardStats(result);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          Toast.error(getIamErrorMessage(t, error, "Operation failed."));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setDashboardLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canReadMetrics, createdFrom, createdTo, t, user.id]);
+
+  useEffect(() => {
+    setRealtimeUsage(null);
+    setRealtimeUnavailable(false);
+    if (!canReadMetrics) {
+      setRealtimeLoading(false);
+      return;
+    }
+
+    let stopped = false;
+    let polling = false;
+    let timer: number | undefined;
+    setRealtimeLoading(true);
+
+    const schedule = () => {
+      if (!stopped && !document.hidden) {
+        timer = window.setTimeout(() => void poll(), 10_000);
+      }
+    };
+    const poll = async () => {
+      if (stopped || polling || document.hidden) return;
+      polling = true;
+      try {
+        const result = await getAdminUserRealtimeUsage(user.id);
+        if (!stopped) {
+          setRealtimeUsage(result);
+          setRealtimeUnavailable(false);
+        }
+      } catch {
+        if (!stopped) {
+          setRealtimeUsage(null);
+          setRealtimeUnavailable(true);
+        }
+      } finally {
+        polling = false;
+        if (!stopped) setRealtimeLoading(false);
+        schedule();
+      }
+    };
+    const handleVisibilityChange = () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+      timer = undefined;
+      if (!document.hidden) void poll();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    void poll();
+    return () => {
+      stopped = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [canReadMetrics, user.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -282,6 +396,92 @@ function ProfileTab({
     role !== user.role ||
     userGroupId !== user.userGroup.id ||
     enabled !== user.enabled;
+  const stats = dashboardStats;
+  const metricGroups = [
+    {
+      color: "bg-[color-mix(in_oklch,#3b82f6_12%,var(--semi-color-bg-0))]",
+      title: t("Account overview"),
+      items: [
+        {
+          label: t("Wallet balance"),
+          value: metricValue(
+            dashboardLoading,
+            stats ? `¥${formatMoney(stats.walletBalance)}` : "—"
+          ),
+        },
+        {
+          label: t("Historical spend"),
+          value: metricValue(
+            dashboardLoading,
+            stats ? `¥${formatMoney(stats.historicalSpend)}` : "—"
+          ),
+        },
+      ],
+    },
+    {
+      color: "bg-[color-mix(in_oklch,#f59e0b_12%,var(--semi-color-bg-0))]",
+      title: t("Code order fulfillment"),
+      items: [
+        {
+          label: t("Code success rate"),
+          value: metricValue(
+            dashboardLoading,
+            stats ? `${stats.codeSuccessRate}%` : "—"
+          ),
+        },
+        {
+          label: t("Average code receipt time"),
+          value: metricValue(
+            dashboardLoading,
+            stats ? `${stats.averageCodeReceiptSeconds}s` : "—"
+          ),
+        },
+      ],
+    },
+    {
+      color: "bg-[color-mix(in_oklch,#22a06b_12%,var(--semi-color-bg-0))]",
+      title: t("Purchase order fulfillment"),
+      items: [
+        {
+          label: t("Purchase activation success rate"),
+          value: metricValue(
+            dashboardLoading,
+            stats ? `${stats.purchaseActivationSuccessRate}%` : "—"
+          ),
+        },
+        {
+          label: t("Average purchase activation time"),
+          value: metricValue(
+            dashboardLoading,
+            stats ? `${stats.averagePurchaseActivationSeconds}s` : "—"
+          ),
+        },
+      ],
+    },
+    {
+      color: "bg-[color-mix(in_oklch,#8b5cf6_12%,var(--semi-color-bg-0))]",
+      status: realtimeUnavailable
+        ? t("Real-time data is temporarily unavailable")
+        : undefined,
+      title: t("Real-time load"),
+      items: [
+        {
+          label: t("Active API requests"),
+          value: metricValue(
+            realtimeLoading,
+            realtimeUsage?.activeRequests.toLocaleString() ?? "—"
+          ),
+        },
+        {
+          label: t("Requests per minute (RPM)"),
+          value: metricValue(
+            realtimeLoading,
+            realtimeUsage?.requestsPerMinute.toLocaleString() ?? "—"
+          ),
+        },
+      ],
+    },
+  ];
 
   const save = async () => {
     if (!editable) return;
@@ -328,6 +528,55 @@ function ProfileTab({
           <InfoItem label={t("Updated at")} value={formatDateTime(user.updatedAt)} />
         </div>
       </section>
+
+      {canReadMetrics ? (
+        <section>
+          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-sm font-semibold text-[var(--semi-color-text-0)]">
+              {t("Usage metrics")}
+            </div>
+            <DatePicker
+              dropdownClassName={DATE_RANGE_DROPDOWN_CLASS}
+              format="yyyy-MM-dd HH:mm"
+              onChange={(value) => {
+                const next = normalizeDateRangeValue(value);
+                if (next.length === 2) setCreatedAtRange(next);
+              }}
+              placeholder={[t("Start time"), t("End time")]}
+              presetPosition="bottom"
+              presets={dateRangePresets}
+              showClear={false}
+              size="small"
+              style={{ maxWidth: "100%", width: isMobile ? "100%" : 360 }}
+              type="dateTimeRange"
+              value={createdAtRange}
+            />
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {metricGroups.map((group) => (
+              <div className={`${group.color} rounded-xl p-3`} key={group.title}>
+                <div className="text-sm font-semibold text-[var(--semi-color-text-0)]">
+                  {group.title}
+                </div>
+                {group.status ? (
+                  <div className="mt-1 text-xs text-[var(--semi-color-danger)]">
+                    {group.status}
+                  </div>
+                ) : null}
+                <div className="mt-3 space-y-2">
+                  {group.items.map((item) => (
+                    <InfoItem
+                      key={item.label}
+                      label={item.label}
+                      value={item.value}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <section>
         <div className="mb-3 text-sm font-semibold text-[var(--semi-color-text-0)]">
@@ -1757,6 +2006,7 @@ export function UserDetailSheet({
               <ProfileTab
                 canAssignSuperAdmin={capabilities.canAssignSuperAdmin}
                 canEdit={canEditCurrent}
+                canReadMetrics={capabilities.canReadMetrics}
                 onSaved={handleSaved}
                 user={current}
               />

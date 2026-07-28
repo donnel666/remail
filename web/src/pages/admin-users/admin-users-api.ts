@@ -81,6 +81,10 @@ export interface AdminWallet {
   updatedAt: string;
 }
 
+export type AdminUserDashboardStats = components["schemas"]["DashboardStats"];
+export type AdminUserRealtimeUsage =
+  components["schemas"]["APIKeyRealtimeUsageResponse"];
+
 export interface AdminUserInvitationMember {
   id: number;
   email: string;
@@ -404,6 +408,28 @@ export async function getAdminUserInvitations(
     inviter: response.inviter ? toInvitationMember(response.inviter) : null,
     invitees: response.invitees.map(toInvitationMember),
   };
+}
+
+export async function getAdminUserDashboardStats(
+  userId: number,
+  range: { createdFrom?: string; createdTo?: string }
+): Promise<AdminUserDashboardStats> {
+  return unwrap<AdminUserDashboardStats>(
+    await apiClient.GET("/v1/admin/users/{userId}/dashboard", {
+      params: { path: { userId }, query: range },
+    })
+  );
+}
+
+export async function getAdminUserRealtimeUsage(
+  userId: number
+): Promise<AdminUserRealtimeUsage> {
+  return unwrap<AdminUserRealtimeUsage>(
+    await apiClient.GET(
+      "/v1/admin/users/{userId}/apikeys/realtime-usage",
+      { params: { path: { userId } } }
+    )
+  );
 }
 
 export async function listUserGroups(): Promise<AdminUserGroup[]> {

@@ -32,5 +32,11 @@ func RegisterAdminRoutes(rg *gin.RouterGroup, mod *Module, fetcher middleware.Se
 	admin.Use(middleware.CSRFRequired())
 	{
 		admin.GET("/dashboard", middleware.PermissionRequired(checker, "billing:wallet", "read"), h.GetAdminDashboard)
+		admin.GET(
+			"/users/:userId/dashboard",
+			middleware.PermissionRequired(checker, "iam:user", "read"),
+			middleware.PermissionRequired(checker, "billing:wallet", "read"),
+			h.GetAdminUserDashboard,
+		)
 	}
 }

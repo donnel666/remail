@@ -13,6 +13,7 @@ describe("admin user operation access", () => {
       canEditPermissions: false,
       canManageApiKeys: false,
       canOperateUsers: false,
+      canReadMetrics: false,
       canWriteUsers: false,
     });
 
@@ -22,6 +23,7 @@ describe("admin user operation access", () => {
         "iam:user:operate",
         "iam:permission:write",
         "iam:permission:sensitive",
+        "billing:wallet:read",
         "billing:wallet:operate",
       ])
     ).toEqual({
@@ -30,6 +32,7 @@ describe("admin user operation access", () => {
       canEditPermissions: true,
       canManageApiKeys: true,
       canOperateUsers: true,
+      canReadMetrics: true,
       canWriteUsers: true,
     });
   });

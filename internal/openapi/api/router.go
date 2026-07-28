@@ -22,12 +22,13 @@ func RegisterRoutes(rg *gin.RouterGroup, mod *Module, fetcher middleware.Session
 		auth.DELETE("/apikeys/:keyId", h.DeleteAPIKey)
 	}
 
-	// Admin per-user API key management, authorized by iam:user:operate.
+	// Realtime usage requires iam:user:read; API key management requires operate.
 	admin := rg.Group("/admin")
 	admin.Use(middleware.LoadSession(fetcher))
 	admin.Use(middleware.AuthRequired())
 	admin.Use(middleware.CSRFRequired())
 	{
+		admin.GET("/users/:userId/apikeys/realtime-usage", middleware.PermissionRequired(checker, "iam:user", "read"), h.GetAdminUserAPIKeyRealtimeUsage)
 		admin.GET("/users/:userId/apikeys", middleware.PermissionRequired(checker, "iam:user", "operate"), h.GetAdminUserAPIKeys)
 		admin.POST("/users/:userId/apikeys", middleware.PermissionRequired(checker, "iam:user", "operate"), h.PostAdminUserAPIKey)
 		admin.PATCH("/users/:userId/apikeys/:keyId", middleware.PermissionRequired(checker, "iam:user", "operate"), h.PatchAdminUserAPIKey)

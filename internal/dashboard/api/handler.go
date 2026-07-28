@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,12 +24,31 @@ func (h *Handler) GetDashboard(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"message": "Authentication is required.", "requestId": middleware.GetRequestID(c)})
 		return
 	}
-	from, ok := parseOptionalTime(c.Query("createdFrom"))
+	h.getDashboard(c, userID)
+}
+
+// GetAdminUserDashboard returns the selected user's compact dashboard stats.
+func (h *Handler) GetAdminUserDashboard(c *gin.Context) {
+	parsed, err := strconv.ParseUint(c.Param("userId"), 10, 64)
+	if err != nil || parsed == 0 {
+		badRequest(c)
+		return
+	}
+	from, to, ok := dashboardRange(c)
 	if !ok {
 		badRequest(c)
 		return
 	}
-	to, ok := parseOptionalTime(c.Query("createdTo"))
+	result, err := h.mod.Query.ConsoleStats(c.Request.Context(), uint(parsed), from, to)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "Failed to load dashboard.", "requestId": middleware.GetRequestID(c)})
+		return
+	}
+	c.JSON(http.StatusOK, DashboardStats(*result))
+}
+
+func (h *Handler) getDashboard(c *gin.Context, userID uint) {
+	from, to, ok := dashboardRange(c)
 	if !ok {
 		badRequest(c)
 		return
@@ -39,6 +59,15 @@ func (h *Handler) GetDashboard(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, dashboardResponse(result))
+}
+
+func dashboardRange(c *gin.Context) (*time.Time, *time.Time, bool) {
+	from, ok := parseOptionalTime(c.Query("createdFrom"))
+	if !ok {
+		return nil, nil, false
+	}
+	to, ok := parseOptionalTime(c.Query("createdTo"))
+	return from, to, ok
 }
 
 func badRequest(c *gin.Context) {

@@ -22,6 +22,8 @@ vi.mock("@/lib/idempotency", () => ({
 
 import {
   adjustAdminUsersWalletByIds,
+  getAdminUserDashboardStats,
+  getAdminUserRealtimeUsage,
   setAdminUsersEnabledByFilter,
   setAdminUsersEnabledByIds,
 } from "./admin-users-api";
@@ -99,5 +101,38 @@ describe("admin user bulk API adapter", () => {
       },
       params: COMMAND_HEADER,
     });
+  });
+
+  it("loads dashboard and real-time usage for the selected user", async () => {
+    apiMocks.GET
+      .mockResolvedValueOnce({ data: { walletBalance: 2.48 } })
+      .mockResolvedValueOnce({
+        data: { activeRequests: 3, requestsPerMinute: 12 },
+      });
+
+    await getAdminUserDashboardStats(42, {
+      createdFrom: "2026-07-01T00:00:00.000Z",
+      createdTo: "2026-07-02T00:00:00.000Z",
+    });
+    await getAdminUserRealtimeUsage(42);
+
+    expect(apiMocks.GET).toHaveBeenNthCalledWith(
+      1,
+      "/v1/admin/users/{userId}/dashboard",
+      {
+        params: {
+          path: { userId: 42 },
+          query: {
+            createdFrom: "2026-07-01T00:00:00.000Z",
+            createdTo: "2026-07-02T00:00:00.000Z",
+          },
+        },
+      }
+    );
+    expect(apiMocks.GET).toHaveBeenNthCalledWith(
+      2,
+      "/v1/admin/users/{userId}/apikeys/realtime-usage",
+      { params: { path: { userId: 42 } } }
+    );
   });
 });

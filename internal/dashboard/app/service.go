@@ -106,6 +106,42 @@ type Stats struct {
 	AveragePurchaseActivationSeconds int
 }
 
+type fulfillmentTotals struct {
+	orders, codeOrders, purchaseOrders int
+	receipts, activations              int
+	activationSeconds                  int64
+	timedActivations                   int
+}
+
+func totalsFromRows(orderRows []OrderBucketRow, receiptRows []ReceiptBucketRow, activationRows []PurchaseActivationBucketRow) fulfillmentTotals {
+	var totals fulfillmentTotals
+	for _, row := range orderRows {
+		totals.orders += row.Orders
+		totals.codeOrders += row.CodeOrders
+		totals.purchaseOrders += row.PurchaseOrders
+	}
+	for _, row := range receiptRows {
+		totals.receipts += row.Received
+	}
+	for _, row := range activationRows {
+		totals.activations += row.Activated
+		totals.activationSeconds += row.TotalSeconds
+		totals.timedActivations += row.Timed
+	}
+	return totals
+}
+
+func (totals fulfillmentTotals) stats(balance, historicalSpend float64, averageCodeReceiptSeconds int) Stats {
+	return Stats{
+		WalletBalance:                    roundMoney(balance),
+		HistoricalSpend:                  roundMoney(historicalSpend),
+		CodeSuccessRate:                  round1(math.Min(100, pct(totals.receipts, totals.codeOrders))),
+		AverageCodeReceiptSeconds:        averageCodeReceiptSeconds,
+		PurchaseActivationSuccessRate:    round1(math.Min(100, pct(totals.activations, totals.purchaseOrders))),
+		AveragePurchaseActivationSeconds: averageSeconds(totals.activationSeconds, totals.timedActivations),
+	}
+}
+
 type TrendPoint struct {
 	Label                            string
 	Orders                           int
@@ -153,6 +189,35 @@ func NewQueryService(view ConsoleView) *QueryService {
 	return &QueryService{view: view, now: time.Now}
 }
 
+// ConsoleStats returns only the six account and fulfillment values used by
+// compact user summaries, avoiding project and leaderboard work.
+func (s *QueryService) ConsoleStats(ctx context.Context, userID uint, from, to *time.Time) (*Stats, error) {
+	fromT, toT := resolveRange(from, to, s.now())
+	sqlFmt := sqlFormat(granularity(fromT, toT))
+	orderRows, err := s.view.OrderBuckets(ctx, userID, sqlFmt, fromT, toT)
+	if err != nil {
+		return nil, err
+	}
+	receiptRows, err := s.view.ReceiptBuckets(ctx, userID, sqlFmt, fromT, toT)
+	if err != nil {
+		return nil, err
+	}
+	activationRows, err := s.view.PurchaseActivationBuckets(ctx, userID, sqlFmt, fromT, toT)
+	if err != nil {
+		return nil, err
+	}
+	averageCodeReceiptSeconds, err := s.view.RangeAvgReceiptSeconds(ctx, userID, fromT, toT)
+	if err != nil {
+		return nil, err
+	}
+	balance, historicalSpend, err := s.view.WalletSummary(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	stats := totalsFromRows(orderRows, receiptRows, activationRows).stats(balance, historicalSpend, averageCodeReceiptSeconds)
+	return &stats, nil
+}
+
 // ConsoleDashboard aggregates the signed-in user's overview over [from, to].
 // The today leaderboard is always relative to the real current day,
 // independent of the selected range.
@@ -177,6 +242,7 @@ func (s *QueryService) ConsoleDashboard(ctx context.Context, userID uint, from, 
 	if err != nil {
 		return nil, err
 	}
+	totals := totalsFromRows(orderRows, receiptRows, activationRows)
 	ranking, err := s.view.ProjectCodeRanking(ctx, userID, fromT, toT)
 	if err != nil {
 		return nil, err
@@ -240,9 +306,6 @@ func (s *QueryService) ConsoleDashboard(ctx context.Context, userID uint, from, 
 
 	trend := make([]TrendPoint, 0, len(orderRows)+len(receiptRows))
 	seriesSpend := make(map[uint][]float64, len(featuredIDs))
-	var totalOrders, totalCodeOrders, totalPurchaseOrders, totalReceipts, totalActivations int
-	var totalActivationSeconds int64
-	var totalTimedActivations int
 	for t := bucketStart(fromT, gran); !t.After(bucketStart(toT, gran)) && len(trend) < maxTrendBuckets; t = nextBucket(t, gran) {
 		key := t.Format(layout)
 		o := orderByKey[key]
@@ -259,13 +322,6 @@ func (s *QueryService) ConsoleDashboard(ctx context.Context, userID uint, from, 
 			AveragePurchaseActivationSeconds: a.AvgSeconds,
 			Spend:                            roundMoney(o.Spend),
 		})
-		totalOrders += o.Orders
-		totalCodeOrders += o.CodeOrders
-		totalPurchaseOrders += o.PurchaseOrders
-		totalReceipts += r.Received
-		totalActivations += a.Activated
-		totalActivationSeconds += a.TotalSeconds
-		totalTimedActivations += a.Timed
 		for _, id := range featuredIDs {
 			seriesSpend[id] = append(seriesSpend[id], roundMoney(spendByProject[id][key]))
 		}
@@ -284,21 +340,14 @@ func (s *QueryService) ConsoleDashboard(ctx context.Context, userID uint, from, 
 		projectCodeRanking[i] = RankItem{Name: projectLabel(p), Count: p.Count, Rank: i + 1}
 	}
 
-	codeRatio := roundInt(pct(totalCodeOrders, totalOrders))
+	codeRatio := roundInt(pct(totals.codeOrders, totals.orders))
 	purchaseRatio := 0.0
-	if totalOrders > 0 {
+	if totals.orders > 0 {
 		purchaseRatio = 100 - codeRatio
 	}
 
 	return &ConsoleDashboard{
-		Stats: Stats{
-			WalletBalance:                    roundMoney(balance),
-			HistoricalSpend:                  roundMoney(historicalSpend),
-			CodeSuccessRate:                  round1(math.Min(100, pct(totalReceipts, totalCodeOrders))),
-			AverageCodeReceiptSeconds:        avgSeconds,
-			PurchaseActivationSuccessRate:    round1(math.Min(100, pct(totalActivations, totalPurchaseOrders))),
-			AveragePurchaseActivationSeconds: averageSeconds(totalActivationSeconds, totalTimedActivations),
-		},
+		Stats:                     totals.stats(balance, historicalSpend, avgSeconds),
 		Trend:                     trend,
 		ProjectSeries:             projectSeries,
 		ProjectCodeRanking:        projectCodeRanking,

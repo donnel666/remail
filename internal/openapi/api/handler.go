@@ -91,6 +91,18 @@ func (h *Handler) GetAPIKeyRealtimeUsage(c *gin.Context) {
 	if !ok {
 		return
 	}
+	h.getAPIKeyRealtimeUsage(c, userID)
+}
+
+func (h *Handler) GetAdminUserAPIKeyRealtimeUsage(c *gin.Context) {
+	userID, ok := parseUintParam(c, "userId")
+	if !ok {
+		return
+	}
+	h.getAPIKeyRealtimeUsage(c, userID)
+}
+
+func (h *Handler) getAPIKeyRealtimeUsage(c *gin.Context, userID uint) {
 	usage, err := h.mod.UseCase.GetAPIKeyRealtimeUsage(c.Request.Context(), userID)
 	if err != nil {
 		writeOpenAPIError(c, err)

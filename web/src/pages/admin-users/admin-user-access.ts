@@ -6,6 +6,7 @@ export interface AdminUserCapabilities {
   canEditPermissions: boolean;
   canManageApiKeys: boolean;
   canOperateUsers: boolean;
+  canReadMetrics: boolean;
   canWriteUsers: boolean;
 }
 
@@ -19,6 +20,7 @@ export function getAdminUserCapabilities(
     canEditPermissions: permissionSet.has("iam:permission:write"),
     canManageApiKeys: permissionSet.has("iam:user:operate"),
     canOperateUsers: permissionSet.has("iam:user:operate"),
+    canReadMetrics: permissionSet.has("billing:wallet:read"),
     canWriteUsers: permissionSet.has("iam:user:write"),
   };
 }

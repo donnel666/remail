@@ -1507,6 +1507,57 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/admin/users/{userId}/dashboard:
+    get:
+      operationId: getAdminUserDashboard
+      summary: Read a user's account and fulfillment metrics (admin only)
+      description: Requires both `iam:user/read` and `billing:wallet/read`. Returns the six non-real-time metrics using the same calculations and default date range as the user's console dashboard.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: createdFrom
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: createdTo
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Selected user's account and fulfillment aggregates
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardStats"
+        "400":
+          description: Invalid path or query parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /v1/admin/users/{userId}/apikeys:
     get:
       operationId: getAdminUserApiKeys
@@ -1609,6 +1660,47 @@ paths:
                 $ref: "#/components/schemas/Error"
         "404":
           description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/users/{userId}/apikeys/realtime-usage:
+    get:
+      operationId: getAdminUserApiKeyRealtimeUsage
+      summary: Read a user's current API request load (admin only)
+      description: Requires `iam:user/read` and returns the selected user's active API requests and observed RPM.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Selected user's current API request load
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIKeyRealtimeUsageResponse"
+        "400":
+          description: Invalid user ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
           content:
             application/json:
               schema:

@@ -8797,6 +8797,12 @@ type PatchAdminUserApiKeyParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// GetAdminUserDashboardParams defines parameters for GetAdminUserDashboard.
+type GetAdminUserDashboardParams struct {
+	CreatedFrom *time.Time `form:"createdFrom,omitempty" json:"createdFrom,omitempty"`
+	CreatedTo   *time.Time `form:"createdTo,omitempty" json:"createdTo,omitempty"`
+}
+
 // PutAdminUserPermissionsParams defines parameters for PutAdminUserPermissions.
 type PutAdminUserPermissionsParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
@@ -10627,12 +10633,18 @@ type ServerInterface interface {
 	// Create an API key for a user (admin only)
 	// (POST /v1/admin/users/{userId}/apikeys)
 	PostAdminUserApiKey(c *gin.Context, userId int, params PostAdminUserApiKeyParams)
+	// Read a user's current API request load (admin only)
+	// (GET /v1/admin/users/{userId}/apikeys/realtime-usage)
+	GetAdminUserApiKeyRealtimeUsage(c *gin.Context, userId int)
 	// Delete a user's API key (admin only)
 	// (DELETE /v1/admin/users/{userId}/apikeys/{keyId})
 	DeleteAdminUserApiKey(c *gin.Context, userId int, keyId int, params DeleteAdminUserApiKeyParams)
 	// Update a user's API key (admin only)
 	// (PATCH /v1/admin/users/{userId}/apikeys/{keyId})
 	PatchAdminUserApiKey(c *gin.Context, userId int, keyId int, params PatchAdminUserApiKeyParams)
+	// Read a user's account and fulfillment metrics (admin only)
+	// (GET /v1/admin/users/{userId}/dashboard)
+	GetAdminUserDashboard(c *gin.Context, userId int, params GetAdminUserDashboardParams)
 	// Get a user's inviter and invitees (admin only)
 	// (GET /v1/admin/users/{userId}/invitations)
 	GetAdminUserInvitations(c *gin.Context, userId int)
@@ -18968,6 +18980,33 @@ func (siw *ServerInterfaceWrapper) PostAdminUserApiKey(c *gin.Context) {
 	siw.Handler.PostAdminUserApiKey(c, userId, params)
 }
 
+// GetAdminUserApiKeyRealtimeUsage operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminUserApiKeyRealtimeUsage(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "userId" -------------
+	var userId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "userId", c.Param("userId"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter userId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminUserApiKeyRealtimeUsage(c, userId)
+}
+
 // DeleteAdminUserApiKey operation middleware
 func (siw *ServerInterfaceWrapper) DeleteAdminUserApiKey(c *gin.Context) {
 
@@ -19092,6 +19131,52 @@ func (siw *ServerInterfaceWrapper) PatchAdminUserApiKey(c *gin.Context) {
 	}
 
 	siw.Handler.PatchAdminUserApiKey(c, userId, keyId, params)
+}
+
+// GetAdminUserDashboard operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminUserDashboard(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "userId" -------------
+	var userId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "userId", c.Param("userId"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter userId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminUserDashboardParams
+
+	// ------------- Optional query parameter "createdFrom" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdFrom", c.Request.URL.Query(), &params.CreatedFrom, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdFrom: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdTo" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdTo", c.Request.URL.Query(), &params.CreatedTo, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdTo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminUserDashboard(c, userId, params)
 }
 
 // GetAdminUserInvitations operation middleware
@@ -22922,8 +23007,10 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.PATCH(options.BaseURL+"/v1/admin/users/:userId", wrapper.PatchAdminUser)
 	router.GET(options.BaseURL+"/v1/admin/users/:userId/apikeys", wrapper.GetAdminUserApiKeys)
 	router.POST(options.BaseURL+"/v1/admin/users/:userId/apikeys", wrapper.PostAdminUserApiKey)
+	router.GET(options.BaseURL+"/v1/admin/users/:userId/apikeys/realtime-usage", wrapper.GetAdminUserApiKeyRealtimeUsage)
 	router.DELETE(options.BaseURL+"/v1/admin/users/:userId/apikeys/:keyId", wrapper.DeleteAdminUserApiKey)
 	router.PATCH(options.BaseURL+"/v1/admin/users/:userId/apikeys/:keyId", wrapper.PatchAdminUserApiKey)
+	router.GET(options.BaseURL+"/v1/admin/users/:userId/dashboard", wrapper.GetAdminUserDashboard)
 	router.GET(options.BaseURL+"/v1/admin/users/:userId/invitations", wrapper.GetAdminUserInvitations)
 	router.GET(options.BaseURL+"/v1/admin/users/:userId/permissions", wrapper.GetAdminUserPermissions)
 	router.PUT(options.BaseURL+"/v1/admin/users/:userId/permissions", wrapper.PutAdminUserPermissions)
