@@ -879,7 +879,7 @@ export default function AdminSystemMonitoring() {
                   dataSource={snapshot.tasks.queues}
                   pagination={false}
                   rowKey="name"
-                  scroll={{ x: 1050 }}
+                  scroll={{ x: "max(100%, 1050px)" }}
                   size="small"
                 />
               </div>
