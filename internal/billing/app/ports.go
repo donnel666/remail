@@ -85,8 +85,9 @@ type UserSelectionResolver interface {
 }
 
 type TransactionListFilter struct {
-	UserID uint
-	Search string
+	UserID          uint
+	Search          string
+	TransactionType domain.TransactionType
 }
 
 type RechargeListFilter struct {

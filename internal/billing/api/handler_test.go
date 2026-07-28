@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/donnel666/remail/api/middleware"
+	billingdomain "github.com/donnel666/remail/internal/billing/domain"
 	billinginfra "github.com/donnel666/remail/internal/billing/infra"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	iamdomain "github.com/donnel666/remail/internal/iam/domain"
@@ -61,6 +62,61 @@ func TestBillingRoutesAuthAndScope(t *testing.T) {
 	router.ServeHTTP(w, req)
 	require.Equal(t, http.StatusForbidden, w.Code)
 	require.Contains(t, w.Body.String(), "Permission denied.")
+}
+
+func TestBillingWalletTransactionsFilterTypeBeforePagination(t *testing.T) {
+	db := newBillingAPITestDB(t)
+	userID := createBillingAPIUser(t, db, "wallet-transactions@example.com", iamdomain.RoleUser)
+	records := []billinginfra.WalletTransactionModel{
+		{
+			TransactionNo: "TX-REDEEM-OLD", UserID: userID,
+			TransactionType: string(billingdomain.TransactionTypeCardRedeem), BalanceBucket: "consumer", Direction: "in",
+			Amount: "10.000000", BalanceBefore: "0.000000", BalanceAfter: "10.000000", BizType: "card_key", BizID: "CARD-OLD",
+		},
+		{
+			TransactionNo: "TX-DEBIT", UserID: userID,
+			TransactionType: string(billingdomain.TransactionTypeDebit), BalanceBucket: "consumer", Direction: "out",
+			Amount: "-2.000000", BalanceBefore: "10.000000", BalanceAfter: "8.000000", BizType: "order", BizID: "ORDER-1",
+		},
+		{
+			TransactionNo: "TX-REDEEM-NEW", UserID: userID,
+			TransactionType: string(billingdomain.TransactionTypeCardRedeem), BalanceBucket: "consumer", Direction: "in",
+			Amount: "25.000000", BalanceBefore: "8.000000", BalanceAfter: "33.000000", BizType: "card_key", BizID: "CARD-NEW",
+		},
+	}
+	require.NoError(t, db.Create(&records).Error)
+	router := newBillingAPIRouter(db, map[string]sessionFixture{
+		"user-session": {userID: userID, role: iamdomain.RoleUser, email: "wallet-transactions@example.com"},
+	}, false)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/wallet/transactions?type=card_redeem&limit=1", nil)
+	req.AddCookie(&http.Cookie{Name: middleware.SessionCookieName, Value: "user-session"})
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var firstPage TransactionListResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &firstPage))
+	require.Len(t, firstPage.Items, 1)
+	require.Equal(t, "TX-REDEEM-NEW", firstPage.Items[0].TransactionNo)
+	require.True(t, firstPage.HasNext)
+	require.NotNil(t, firstPage.NextAfterID)
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/v1/wallet/transactions?type=card_redeem&limit=1&afterId="+strconv.FormatUint(uint64(*firstPage.NextAfterID), 10), nil)
+	req.AddCookie(&http.Cookie{Name: middleware.SessionCookieName, Value: "user-session"})
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var secondPage TransactionListResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &secondPage))
+	require.Len(t, secondPage.Items, 1)
+	require.Equal(t, "TX-REDEEM-OLD", secondPage.Items[0].TransactionNo)
+	require.False(t, secondPage.HasNext)
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/v1/wallet/transactions?type=unknown", nil)
+	req.AddCookie(&http.Cookie{Name: middleware.SessionCookieName, Value: "user-session"})
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusUnprocessableEntity, w.Code, w.Body.String())
 }
 
 func TestBillingAdminMutationPermissionsMatchFrontendContract(t *testing.T) {

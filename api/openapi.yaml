@@ -6118,6 +6118,11 @@ paths:
           in: query
           schema:
             type: string
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [recharge, debit, refund, freeze, credit, withdrawal, manual_adjustment, card_redeem, transfer]
         - name: afterId
           in: query
           schema:
@@ -6143,6 +6148,12 @@ paths:
                 $ref: "#/components/schemas/Error"
         "403":
           description: Permission denied for scope=all
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid transaction type
           content:
             application/json:
               schema:

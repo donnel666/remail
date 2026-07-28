@@ -164,6 +164,14 @@ func (h *BillingHandler) GetWalletTransactions(c *gin.Context) {
 		UserID: userID,
 		Search: c.Query("search"),
 	}
+	if rawType := strings.TrimSpace(c.Query("type")); rawType != "" {
+		transactionType, valid := domain.NormalizeTransactionType(rawType)
+		if !valid {
+			writeBillingError(c, domain.ErrInvalidFilter)
+			return
+		}
+		filter.TransactionType = transactionType
+	}
 	if strings.EqualFold(strings.TrimSpace(c.Query("scope")), "all") {
 		if !h.canReadAll(c, "billing:wallet") {
 			return

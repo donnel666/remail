@@ -134,13 +134,24 @@ export async function getRecharge(rechargeNo: string) {
 }
 
 export async function listWalletTransactions(
-  filter: { search?: string } = {},
+  filter: {
+    search?: string;
+    type?: TransactionItem["transactionType"];
+  } = {},
   afterId?: number,
   limit = 20
 ) {
   if (import.meta.env.DEV) {
-    return (await import("./dev-api-mocks"))
+    const response = (await import("./dev-api-mocks"))
       .DEV_WALLET_TRANSACTIONS as TransactionListResponse;
+    return filter.type
+      ? {
+          ...response,
+          items: response.items.filter(
+            (item) => item.transactionType === filter.type
+          ),
+        }
+      : response;
   }
   return unwrap<TransactionListResponse>(
     await client.GET("/v1/wallet/transactions", {

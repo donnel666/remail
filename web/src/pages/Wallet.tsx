@@ -49,10 +49,12 @@ import {
   getWallet,
   getWalletReferrals,
   listRecharges,
+  listWalletTransactions,
   redeemCard,
   transferReferralRewards,
   type RechargeConfigResponse,
   type RechargeItem,
+  type TransactionItem,
   type WalletReferralResponse,
   type WalletResponse,
 } from "@/lib/wallet-api";
@@ -183,11 +185,15 @@ export default function Wallet() {
     useState<RechargeConfigResponse | null>(null);
   const [referralLink, setReferralLink] = useState("");
   const [recharges, setRecharges] = useState<RechargeItem[]>([]);
-  const [billingHasMore, setBillingHasMore] = useState(false);
+  const [redemptions, setRedemptions] = useState<TransactionItem[]>([]);
+  const [rechargeHasMore, setRechargeHasMore] = useState(false);
+  const [redemptionNextAfterId, setRedemptionNextAfterId] = useState<number>();
+  const [redemptionHasMore, setRedemptionHasMore] = useState(false);
   const [walletLoading, setWalletLoading] = useState(true);
   const [referralLoading, setReferralLoading] = useState(false);
   const [transferringRewards, setTransferringRewards] = useState(false);
-  const [billingLoading, setBillingLoading] = useState(false);
+  const [rechargesLoading, setRechargesLoading] = useState(false);
+  const [redemptionsLoading, setRedemptionsLoading] = useState(false);
   const [recharging, setRecharging] = useState(false);
   const [payment, setPayment] = useState<{ rechargeNo: string; url: string; expiresAt: string } | null>(null);
   const [paymentOpen, setPaymentOpen] = useState(false);
@@ -199,13 +205,16 @@ export default function Wallet() {
   const rechargeAttemptRef = useRef<{ amount: string; key: string } | null>(null);
   const paymentFrameRef = useRef<HTMLIFrameElement | null>(null);
   const pendingRechargeNosRef = useRef(new Set<string>());
-  const billingRequestSeqRef = useRef(0);
+  const rechargeRequestSeqRef = useRef(0);
+  const redemptionRequestSeqRef = useRef(0);
   const amountFormApiRef = useRef<{
     setValue?: (field: "topUpCount", value: unknown) => void;
   } | null>(null);
   const redeemFormApiRef = useRef<{
     setValue?: (field: "redemptionCode", value: unknown) => void;
   } | null>(null);
+  const billingHasMore = rechargeHasMore || redemptionHasMore;
+  const billingLoading = rechargesLoading || redemptionsLoading;
 
   const openBilling = useCallback(() => {
     setBillingKeyword("");
@@ -261,16 +270,13 @@ export default function Wallet() {
   }, [t]);
 
   const refreshRecharges = useCallback(async () => {
-    const seq = billingRequestSeqRef.current + 1;
-    billingRequestSeqRef.current = seq;
-    setBillingLoading(true);
+    const seq = rechargeRequestSeqRef.current + 1;
+    rechargeRequestSeqRef.current = seq;
+    setRechargesLoading(true);
     try {
-      const response = await listRecharges(
-        { search: debouncedBillingKeyword.trim() || undefined },
-        0,
-        100
-      );
-      if (billingRequestSeqRef.current !== seq) return;
+      const filter = { search: debouncedBillingKeyword.trim() || undefined };
+      const response = await listRecharges(filter, 0, 100);
+      if (rechargeRequestSeqRef.current !== seq) return;
       const nextPending = new Set(
         response.items
           .filter((item) => ["paying", "callback", "reconciled"].includes(item.status))
@@ -281,27 +287,52 @@ export default function Wallet() {
       );
       pendingRechargeNosRef.current = nextPending;
       setRecharges(response.items);
-      setBillingHasMore(response.items.length < response.total);
+      setRechargeHasMore(response.items.length < response.total);
       if (settled) void refreshMembership();
     } catch (error) {
-      if (billingRequestSeqRef.current !== seq) return;
+      if (rechargeRequestSeqRef.current !== seq) return;
       Toast.error(getIamErrorMessage(t, error));
     } finally {
-      if (billingRequestSeqRef.current === seq) setBillingLoading(false);
+      if (rechargeRequestSeqRef.current === seq) setRechargesLoading(false);
     }
   }, [debouncedBillingKeyword, refreshMembership, t]);
 
-  const loadMoreTransactions = useCallback(async () => {
-    if (billingLoading || !billingHasMore) return;
-    setBillingLoading(true);
-    const seq = billingRequestSeqRef.current;
+  const refreshRedemptions = useCallback(async () => {
+    const seq = redemptionRequestSeqRef.current + 1;
+    redemptionRequestSeqRef.current = seq;
+    setRedemptionsLoading(true);
+    try {
+      const response = await listWalletTransactions(
+        {
+          search: debouncedBillingKeyword.trim() || undefined,
+          type: "card_redeem",
+        },
+        undefined,
+        100
+      );
+      if (redemptionRequestSeqRef.current !== seq) return;
+      setRedemptions(response.items);
+      setRedemptionNextAfterId(response.nextAfterId);
+      setRedemptionHasMore(response.hasNext && Boolean(response.nextAfterId));
+    } catch (error) {
+      if (redemptionRequestSeqRef.current !== seq) return;
+      Toast.error(getIamErrorMessage(t, error));
+    } finally {
+      if (redemptionRequestSeqRef.current === seq) setRedemptionsLoading(false);
+    }
+  }, [debouncedBillingKeyword, t]);
+
+  const loadMoreRecharges = useCallback(async () => {
+    if (rechargesLoading || !rechargeHasMore) return;
+    setRechargesLoading(true);
+    const seq = rechargeRequestSeqRef.current;
     try {
       const response = await listRecharges(
         { search: debouncedBillingKeyword.trim() || undefined },
         recharges.length,
         100
       );
-      if (billingRequestSeqRef.current !== seq) return;
+      if (rechargeRequestSeqRef.current !== seq) return;
       setRecharges((current) => {
         const existing = new Set(current.map((item) => item.id));
         return [
@@ -309,18 +340,59 @@ export default function Wallet() {
           ...response.items.filter((item) => !existing.has(item.id)),
         ];
       });
-      setBillingHasMore(recharges.length + response.items.length < response.total);
+      setRechargeHasMore(recharges.length + response.items.length < response.total);
     } catch (error) {
-      if (billingRequestSeqRef.current !== seq) return;
+      if (rechargeRequestSeqRef.current !== seq) return;
       Toast.error(getIamErrorMessage(t, error));
     } finally {
-      if (billingRequestSeqRef.current === seq) setBillingLoading(false);
+      if (rechargeRequestSeqRef.current === seq) setRechargesLoading(false);
     }
   }, [
-    billingHasMore,
-    billingLoading,
     debouncedBillingKeyword,
+    rechargeHasMore,
     recharges.length,
+    rechargesLoading,
+    t,
+  ]);
+
+  const loadMoreRedemptions = useCallback(async () => {
+    if (
+      redemptionsLoading ||
+      !redemptionHasMore ||
+      !redemptionNextAfterId
+    ) return;
+    setRedemptionsLoading(true);
+    const seq = redemptionRequestSeqRef.current;
+    try {
+      const response = await listWalletTransactions(
+        {
+          search: debouncedBillingKeyword.trim() || undefined,
+          type: "card_redeem",
+        },
+        redemptionNextAfterId,
+        100
+      );
+      if (redemptionRequestSeqRef.current !== seq) return;
+      setRedemptions((current) => {
+        const existing = new Set(current.map((item) => item.id));
+        return [
+          ...current,
+          ...response.items.filter((item) => !existing.has(item.id)),
+        ];
+      });
+      setRedemptionNextAfterId(response.nextAfterId);
+      setRedemptionHasMore(response.hasNext && Boolean(response.nextAfterId));
+    } catch (error) {
+      if (redemptionRequestSeqRef.current !== seq) return;
+      Toast.error(getIamErrorMessage(t, error));
+    } finally {
+      if (redemptionRequestSeqRef.current === seq) setRedemptionsLoading(false);
+    }
+  }, [
+    debouncedBillingKeyword,
+    redemptionHasMore,
+    redemptionNextAfterId,
+    redemptionsLoading,
     t,
   ]);
 
@@ -339,7 +411,8 @@ export default function Wallet() {
   useEffect(() => {
     if (!billingOpen) return;
     void refreshRecharges();
-  }, [billingOpen, refreshRecharges]);
+    void refreshRedemptions();
+  }, [billingOpen, refreshRecharges, refreshRedemptions]);
 
   useEffect(() => {
     if (!billingOpen || !recharges.some((item) => ["paying", "callback", "reconciled"].includes(item.status))) return;
@@ -536,7 +609,7 @@ export default function Wallet() {
       await refreshMembership();
       await refreshReferrals();
       if (billingOpen) {
-        await refreshRecharges();
+        await refreshRedemptions();
       }
     } catch (error) {
       if (error instanceof IamApiError && error.status >= 400 && error.status < 500) {
@@ -591,15 +664,25 @@ export default function Wallet() {
   );
 
   const billingData = useMemo(
-    () =>
-      recharges.map((item) => ({
+    () => [
+      ...recharges.map((item) => ({
         ...item,
         orderNo: item.rechargeNo,
         rechargeQuotaText: formatCurrency(item.rechargeQuota),
         paymentAmountText: formatCurrency(item.paymentAmount),
         createdAtText: formatDateTime(item.createdAt),
       })),
-    [recharges]
+      ...redemptions.map((item) => ({
+        ...item,
+        orderNo: item.transactionNo,
+        paymentMethod: "Redemption Code",
+        rechargeQuotaText: formatCurrency(item.amount),
+        paymentAmountText: formatCurrency(item.amount),
+        status: "credited",
+        createdAtText: formatDateTime(item.createdAt),
+      })),
+    ].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)),
+    [recharges, redemptions]
   );
 
   const billingColumns = useMemo(
@@ -612,6 +695,8 @@ export default function Wallet() {
       {
         dataIndex: "paymentMethod",
         key: "paymentMethod",
+        render: (paymentMethod: string) =>
+          paymentMethod === "Redemption Code" ? t(paymentMethod) : paymentMethod,
         title: t("Payment method"),
       },
       {
@@ -823,10 +908,9 @@ export default function Wallet() {
                       onChange={(value) => setRedemptionCode(String(value))}
                       placeholder={t("Enter redemption code")}
                       prefix={
-                        <Gift
-                          className="text-muted-foreground"
-                          size={15}
-                        />
+                        <span className="flex w-6 shrink-0 justify-start text-muted-foreground">
+                          <Gift aria-hidden size={15} />
+                        </span>
                       }
                       showClear
                       style={{ width: "100%" }}
@@ -1035,7 +1119,10 @@ export default function Wallet() {
             <div className="mt-3 flex justify-center">
               <Button
                 loading={billingLoading}
-                onClick={() => void loadMoreTransactions()}
+                onClick={() => {
+                  void loadMoreRecharges();
+                  void loadMoreRedemptions();
+                }}
                 theme="outline"
               >
                 {t("Load more")}

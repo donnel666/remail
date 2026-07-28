@@ -1604,6 +1604,9 @@ func applyTransactionFilter(query *gorm.DB, filter billingapp.TransactionListFil
 	if filter.UserID != 0 {
 		query = query.Where("user_id = ?", filter.UserID)
 	}
+	if filter.TransactionType != "" {
+		query = query.Where("transaction_type = ?", filter.TransactionType)
+	}
 	if search := strings.TrimSpace(filter.Search); search != "" {
 		like := search + "%"
 		query = query.Where("transaction_no LIKE ? OR biz_id LIKE ?", like, like)

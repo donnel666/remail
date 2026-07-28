@@ -14015,6 +14015,7 @@ export interface operations {
             query?: {
                 scope?: "mine" | "all";
                 search?: string;
+                type?: "recharge" | "debit" | "refund" | "freeze" | "credit" | "withdrawal" | "manual_adjustment" | "card_redeem" | "transfer";
                 afterId?: number;
                 limit?: number;
             };
@@ -14044,6 +14045,15 @@ export interface operations {
             };
             /** @description Permission denied for scope=all */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid transaction type */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

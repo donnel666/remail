@@ -3351,37 +3351,37 @@ func (e GetAdminTicketsParamsStatus) Valid() bool {
 
 // Defines values for GetAdminTransactionsParamsType.
 const (
-	CardRedeem       GetAdminTransactionsParamsType = "card_redeem"
-	Credit           GetAdminTransactionsParamsType = "credit"
-	Debit            GetAdminTransactionsParamsType = "debit"
-	Freeze           GetAdminTransactionsParamsType = "freeze"
-	ManualAdjustment GetAdminTransactionsParamsType = "manual_adjustment"
-	Recharge         GetAdminTransactionsParamsType = "recharge"
-	Refund           GetAdminTransactionsParamsType = "refund"
-	Transfer         GetAdminTransactionsParamsType = "transfer"
-	Withdrawal       GetAdminTransactionsParamsType = "withdrawal"
+	GetAdminTransactionsParamsTypeCardRedeem       GetAdminTransactionsParamsType = "card_redeem"
+	GetAdminTransactionsParamsTypeCredit           GetAdminTransactionsParamsType = "credit"
+	GetAdminTransactionsParamsTypeDebit            GetAdminTransactionsParamsType = "debit"
+	GetAdminTransactionsParamsTypeFreeze           GetAdminTransactionsParamsType = "freeze"
+	GetAdminTransactionsParamsTypeManualAdjustment GetAdminTransactionsParamsType = "manual_adjustment"
+	GetAdminTransactionsParamsTypeRecharge         GetAdminTransactionsParamsType = "recharge"
+	GetAdminTransactionsParamsTypeRefund           GetAdminTransactionsParamsType = "refund"
+	GetAdminTransactionsParamsTypeTransfer         GetAdminTransactionsParamsType = "transfer"
+	GetAdminTransactionsParamsTypeWithdrawal       GetAdminTransactionsParamsType = "withdrawal"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminTransactionsParamsType enum.
 func (e GetAdminTransactionsParamsType) Valid() bool {
 	switch e {
-	case CardRedeem:
+	case GetAdminTransactionsParamsTypeCardRedeem:
 		return true
-	case Credit:
+	case GetAdminTransactionsParamsTypeCredit:
 		return true
-	case Debit:
+	case GetAdminTransactionsParamsTypeDebit:
 		return true
-	case Freeze:
+	case GetAdminTransactionsParamsTypeFreeze:
 		return true
-	case ManualAdjustment:
+	case GetAdminTransactionsParamsTypeManualAdjustment:
 		return true
-	case Recharge:
+	case GetAdminTransactionsParamsTypeRecharge:
 		return true
-	case Refund:
+	case GetAdminTransactionsParamsTypeRefund:
 		return true
-	case Transfer:
+	case GetAdminTransactionsParamsTypeTransfer:
 		return true
-	case Withdrawal:
+	case GetAdminTransactionsParamsTypeWithdrawal:
 		return true
 	default:
 		return false
@@ -3808,6 +3808,45 @@ func (e GetWalletTransactionsParamsScope) Valid() bool {
 	case All:
 		return true
 	case Mine:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetWalletTransactionsParamsType.
+const (
+	GetWalletTransactionsParamsTypeCardRedeem       GetWalletTransactionsParamsType = "card_redeem"
+	GetWalletTransactionsParamsTypeCredit           GetWalletTransactionsParamsType = "credit"
+	GetWalletTransactionsParamsTypeDebit            GetWalletTransactionsParamsType = "debit"
+	GetWalletTransactionsParamsTypeFreeze           GetWalletTransactionsParamsType = "freeze"
+	GetWalletTransactionsParamsTypeManualAdjustment GetWalletTransactionsParamsType = "manual_adjustment"
+	GetWalletTransactionsParamsTypeRecharge         GetWalletTransactionsParamsType = "recharge"
+	GetWalletTransactionsParamsTypeRefund           GetWalletTransactionsParamsType = "refund"
+	GetWalletTransactionsParamsTypeTransfer         GetWalletTransactionsParamsType = "transfer"
+	GetWalletTransactionsParamsTypeWithdrawal       GetWalletTransactionsParamsType = "withdrawal"
+)
+
+// Valid indicates whether the value is a known member of the GetWalletTransactionsParamsType enum.
+func (e GetWalletTransactionsParamsType) Valid() bool {
+	switch e {
+	case GetWalletTransactionsParamsTypeCardRedeem:
+		return true
+	case GetWalletTransactionsParamsTypeCredit:
+		return true
+	case GetWalletTransactionsParamsTypeDebit:
+		return true
+	case GetWalletTransactionsParamsTypeFreeze:
+		return true
+	case GetWalletTransactionsParamsTypeManualAdjustment:
+		return true
+	case GetWalletTransactionsParamsTypeRecharge:
+		return true
+	case GetWalletTransactionsParamsTypeRefund:
+		return true
+	case GetWalletTransactionsParamsTypeTransfer:
+		return true
+	case GetWalletTransactionsParamsTypeWithdrawal:
 		return true
 	default:
 		return false
@@ -9298,12 +9337,16 @@ type PostWalletSupplierTransferParams struct {
 type GetWalletTransactionsParams struct {
 	Scope   *GetWalletTransactionsParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
 	Search  *string                           `form:"search,omitempty" json:"search,omitempty"`
+	Type    *GetWalletTransactionsParamsType  `form:"type,omitempty" json:"type,omitempty"`
 	AfterId *int                              `form:"afterId,omitempty" json:"afterId,omitempty"`
 	Limit   *int                              `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // GetWalletTransactionsParamsScope defines parameters for GetWalletTransactions.
 type GetWalletTransactionsParamsScope string
+
+// GetWalletTransactionsParamsType defines parameters for GetWalletTransactions.
+type GetWalletTransactionsParamsType string
 
 // PostActivationJSONRequestBody defines body for PostActivation for application/json ContentType.
 type PostActivationJSONRequestBody = ActivationRequest
@@ -22809,6 +22852,14 @@ func (siw *ServerInterfaceWrapper) GetWalletTransactions(c *gin.Context) {
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", c.Request.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
 	if err != nil {
 		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter search: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "type" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "type", c.Request.URL.Query(), &params.Type, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter type: %w", err), http.StatusBadRequest)
 		return
 	}
 

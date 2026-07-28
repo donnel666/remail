@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   getWallet: vi.fn(),
   getWalletReferrals: vi.fn(),
   listRecharges: vi.fn(),
+  listWalletTransactions: vi.fn(),
   refreshCurrentUser: vi.fn(),
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
@@ -31,11 +32,13 @@ vi.mock("@/lib/wallet-api", () => ({
   getWallet: mocks.getWallet,
   getWalletReferrals: mocks.getWalletReferrals,
   listRecharges: mocks.listRecharges,
+  listWalletTransactions: mocks.listWalletTransactions,
   redeemCard: vi.fn(),
   transferReferralRewards: vi.fn(),
 }));
 
 vi.mock("@/lib/iam-api", () => ({
+  IamApiError: class IamApiError extends Error {},
   createMyInvite: vi.fn(),
   getMyInvite: vi.fn(async () => ({ inviteCode: "INVITE" })),
   getUserGroups: vi.fn(async () => ({ groups: [] })),
@@ -73,10 +76,11 @@ vi.mock("@douyinfe/semi-ui", async () => {
     return <div>{children}</div>;
   };
   Form.InputNumber = ({ label, onChange }: any) => <input aria-label={label} onChange={(event) => onChange?.(event.target.value)} />;
-  Form.Input = ({ onChange, placeholder }: any) => <input aria-label={placeholder} onChange={(event) => onChange?.(event.target.value)} />;
+  Form.Input = ({ onChange, placeholder, prefix, suffix }: any) => <div>{prefix}<input aria-label={placeholder} onChange={(event) => onChange?.(event.target.value)} />{suffix}</div>;
   Form.Slot = Box;
   const Input = ({ onChange, placeholder, value }: any) => <input aria-label={placeholder} onChange={(event) => onChange?.(event.target.value)} value={value} />;
   const Modal = ({ children, footer, onCancel, title, visible }: any) => visible ? <div aria-label={title} role="dialog"><button aria-label={`close-${title}`} onClick={onCancel}>close</button>{children}{footer}</div> : null;
+  const Table = ({ columns = [], dataSource = [] }: any) => <div>{dataSource.map((item: any) => <div data-testid={`row-${item.orderNo}`} key={item.orderNo}>{columns.map((column: any) => <span key={column.key}>{column.render ? column.render(item[column.dataIndex], item) : item[column.dataIndex]}</span>)}</div>)}</div>;
   return {
     Avatar: Box,
     Button,
@@ -87,7 +91,7 @@ vi.mock("@douyinfe/semi-ui", async () => {
     Modal,
     Space: Box,
     Spin: () => <span>spinner</span>,
-    Table: Box,
+    Table,
     Tag: Box,
     Toast: { error: mocks.toastError, success: mocks.toastSuccess, warning: mocks.toastWarning, info: vi.fn() },
     Typography: { Text: Box },
@@ -113,6 +117,23 @@ const payingRecharge = {
   updatedAt: "2026-07-26T00:00:00Z",
 };
 
+function redemptionTransaction(id: number, transactionNo: string) {
+  return {
+    id,
+    transactionNo,
+    userId: 1,
+    transactionType: "card_redeem",
+    balanceBucket: "consumer",
+    direction: "in",
+    amount: "25.00",
+    balanceBefore: "0.00",
+    balanceAfter: "25.00",
+    bizType: "card_key",
+    bizId: `GIFT-CODE-${id}`,
+    createdAt: `2026-07-26T00:0${id}:00Z`,
+  };
+}
+
 describe("wallet payment modal", () => {
   beforeEach(() => {
     now = Date.parse("2026-07-26T00:00:00Z");
@@ -127,6 +148,7 @@ describe("wallet payment modal", () => {
     mocks.getWalletReferrals.mockResolvedValue({ inviteCount: 0, pendingRewards: "0.00", totalEarned: "0.00" });
     mocks.getRechargeConfig.mockResolvedValue({ enabled: true, minAmount: "1.00", feeRate: "0.6", feeCap: "0", tiers: [{ amount: "1.00", bonus: "0.00", rechargeQuota: "1.00", paymentAmount: "1.01" }] });
     mocks.listRecharges.mockResolvedValue({ items: [], total: 0, offset: 0, limit: 100 });
+    mocks.listWalletTransactions.mockResolvedValue({ items: [], hasNext: false, limit: 100 });
     mocks.getRecharge.mockResolvedValue(payingRecharge);
     mocks.refreshCurrentUser.mockResolvedValue(null);
   });
@@ -208,5 +230,104 @@ describe("wallet payment modal", () => {
     expect(mocks.getRecharge).toHaveBeenCalled();
     expect(mocks.toastError).not.toHaveBeenCalled();
     expect(document.querySelector("iframe")).not.toBeNull();
+  });
+
+  it("shows redemption code transactions in billing", async () => {
+    mocks.listWalletTransactions.mockResolvedValue({
+      items: [redemptionTransaction(2, "TX0002")],
+      hasNext: false,
+      limit: 100,
+    });
+    const { container } = render(<Wallet />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Billing" }));
+
+    const row = await screen.findByTestId("row-TX0002");
+    expect(row).toHaveTextContent("Redemption Code");
+    expect(row.textContent?.match(/￥25\.00/g)).toHaveLength(2);
+    expect(container.querySelector(".lucide-gift")?.parentElement).toHaveClass(
+      "w-6",
+      "justify-start",
+    );
+  });
+
+  it("keeps recharge records when redemption history fails", async () => {
+    mocks.listRecharges.mockResolvedValue({
+      items: [{ ...payingRecharge, status: "credited" }],
+      total: 1,
+      offset: 0,
+      limit: 100,
+    });
+    mocks.listWalletTransactions.mockRejectedValue(new Error("transactions unavailable"));
+    render(<Wallet />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Billing" }));
+
+    expect(await screen.findByTestId(`row-${payingRecharge.rechargeNo}`)).toBeVisible();
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith("transactions unavailable"));
+  });
+
+  it("loads older redemption transactions with the wallet cursor", async () => {
+    mocks.listWalletTransactions
+      .mockResolvedValueOnce({
+        items: [redemptionTransaction(2, "TX0002")],
+        nextAfterId: 2,
+        hasNext: true,
+        limit: 100,
+      })
+      .mockResolvedValueOnce({
+        items: [redemptionTransaction(1, "TX0001")],
+        hasNext: false,
+        limit: 100,
+      });
+    render(<Wallet />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Billing" }));
+    await screen.findByTestId("row-TX0002");
+    fireEvent.click(await screen.findByRole("button", { name: "Load more" }));
+
+    expect(await screen.findByTestId("row-TX0001")).toBeVisible();
+    expect(mocks.listWalletTransactions).toHaveBeenNthCalledWith(
+      2,
+      { search: undefined, type: "card_redeem" },
+      2,
+      100,
+    );
+  });
+
+  it("does not let a recharge refresh cancel redemption history", async () => {
+    let resolveTransactions!: (value: {
+      items: ReturnType<typeof redemptionTransaction>[];
+      hasNext: boolean;
+      limit: number;
+    }) => void;
+    const transactions = new Promise<{
+      items: ReturnType<typeof redemptionTransaction>[];
+      hasNext: boolean;
+      limit: number;
+    }>((resolve) => {
+      resolveTransactions = resolve;
+    });
+    mocks.createRecharge.mockResolvedValue({
+      recharge: payingRecharge,
+      payUrl: "https://pay.example.com/qr",
+      expiresAt: "2026-07-26T00:05:00Z",
+    });
+    mocks.listWalletTransactions.mockReturnValueOnce(transactions);
+    render(<Wallet />);
+
+    const payButton = await screen.findByRole("button", { name: "Alipay" });
+    await waitFor(() => expect(payButton).toBeEnabled());
+    fireEvent.click(await screen.findByRole("button", { name: "Billing" }));
+    await waitFor(() => expect(mocks.listWalletTransactions).toHaveBeenCalledOnce());
+    fireEvent.click(payButton);
+    await waitFor(() => expect(mocks.listRecharges).toHaveBeenCalledTimes(2));
+    resolveTransactions({
+      items: [redemptionTransaction(2, "TX0002")],
+      hasNext: false,
+      limit: 100,
+    });
+
+    expect(await screen.findByTestId("row-TX0002")).toBeVisible();
   });
 });
