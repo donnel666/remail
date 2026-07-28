@@ -148,7 +148,7 @@ type fakeOwners struct {
 func (fakeOwners) GetByIDs(_ context.Context, ids []uint) (map[uint]RequesterSummary, error) {
 	out := make(map[uint]RequesterSummary, len(ids))
 	for _, id := range ids {
-		out[id] = RequesterSummary{ID: id, Nickname: "nick", Email: "u@example.com", Enabled: true}
+		out[id] = RequesterSummary{ID: id, Nickname: "nick", Email: "u@example.com", GroupName: "VIP", Role: "user", Enabled: true}
 	}
 	return out, nil
 }
@@ -225,6 +225,12 @@ func TestFormatMoney(t *testing.T) {
 		if got := formatMoney(in); got != want {
 			t.Errorf("formatMoney(%q)=%q want %q", in, got, want)
 		}
+	}
+}
+
+func TestTicketMailFieldIsSingleLine(t *testing.T) {
+	if got := ticketMailField(" 张三\r\n分组：超级管理员\t"); got != "张三 分组：超级管理员" {
+		t.Fatalf("ticketMailField() = %q", got)
 	}
 }
 
@@ -348,6 +354,16 @@ func TestCreateTicketNotifiesRequesterAndSuperAdmin(t *testing.T) {
 	if adminMail.ReplyTo != expectedAdminReplyTo || admin2Mail.ReplyTo != expectedAdmin2ReplyTo ||
 		adminMail.ReplyTo == admin2Mail.ReplyTo || adminMail.ReplyTo == requesterMail.ReplyTo {
 		t.Fatalf("Reply-To addresses must be recipient-specific: %+v", byRecipient)
+	}
+	for _, body := range []string{adminMail.TextBody, adminMail.HTMLBody} {
+		for _, expected := range []string{"提交用户信息", "用户 ID：7", "昵称：nick", "邮箱：u@example.com", "分组：VIP", "角色：user"} {
+			if !strings.Contains(body, expected) {
+				t.Fatalf("admin ticket mail missing requester detail %q: %s", expected, body)
+			}
+		}
+	}
+	if strings.Contains(requesterMail.TextBody, "提交用户信息") || strings.Contains(requesterMail.HTMLBody, "提交用户信息") {
+		t.Fatalf("requester mail must not expose the admin-only detail block: %+v", requesterMail)
 	}
 }
 

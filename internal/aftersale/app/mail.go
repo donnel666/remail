@@ -40,7 +40,7 @@ func (uc *UseCase) notifyRequester(ctx context.Context, view *TicketView, kind t
 	if to == "" || len(ticket.Messages) == 0 || strings.TrimSpace(ticket.ReplyToken) == "" {
 		return
 	}
-	uc.sendTicketMail(ctx, ticket, to, ticket.ReplyToken, 0, kind, false)
+	uc.sendTicketMail(ctx, view, to, ticket.ReplyToken, 0, kind, false)
 }
 
 // notifySuperAdmins emails every active super-admin about requester activity.
@@ -64,12 +64,25 @@ func (uc *UseCase) notifySuperAdmins(ctx context.Context, view *TicketView, kind
 			continue
 		}
 		token := uc.mailConfig.platformReplyToken(ticket.TicketNo, ticket.ReplyToken, admin.ID)
-		uc.sendTicketMail(ctx, ticket, to, token, admin.ID, kind, true)
+		uc.sendTicketMail(ctx, view, to, token, admin.ID, kind, true)
 	}
 }
 
-func (uc *UseCase) sendTicketMail(ctx context.Context, ticket *domain.Ticket, to, replyToken string, adminID uint, kind ticketMailKind, platformRecipient bool) {
+func ticketMailField(value string) string { return strings.Join(strings.Fields(value), " ") }
+
+func (uc *UseCase) sendTicketMail(ctx context.Context, view *TicketView, to, replyToken string, adminID uint, kind ticketMailKind, platformRecipient bool) {
+	ticket := view.Ticket
 	last := ticket.Messages[len(ticket.Messages)-1]
+	content := last.Content
+	if platformRecipient {
+		requester := RequesterSummary{ID: ticket.RequesterUserID}
+		if view.Requester != nil {
+			requester = *view.Requester
+		}
+		content = fmt.Sprintf("提交用户信息\n用户 ID：%d\n昵称：%s\n邮箱：%s\n分组：%s\n角色：%s\n\n工单内容\n%s",
+			ticket.RequesterUserID, ticketMailField(requester.Nickname), ticketMailField(requester.Email),
+			ticketMailField(requester.GroupName), ticketMailField(requester.Role), content)
+	}
 
 	subject, intro := ticketMailSubjectIntro(kind, ticket, platformRecipient)
 	command := TicketMailCommand{
@@ -77,8 +90,8 @@ func (uc *UseCase) sendTicketMail(ctx context.Context, ticket *domain.Ticket, to
 		To:             to,
 		ReplyTo:        uc.mailConfig.replyAddress(ticket.TicketNo, replyToken),
 		Subject:        subject,
-		TextBody:       ticketMailText(ticket, intro, last.Content),
-		HTMLBody:       ticketMailHTML(ticket, subject, intro, last.Content),
+		TextBody:       ticketMailText(ticket, intro, content),
+		HTMLBody:       ticketMailHTML(ticket, subject, intro, content),
 	}
 	if err := uc.mail.SendTicketMail(ctx, command); err != nil {
 		slog.Warn("aftersale ticket email failed", "ticketNo", ticket.TicketNo, "error", err)
