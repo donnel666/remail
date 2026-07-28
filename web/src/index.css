@@ -359,6 +359,29 @@ body[theme-mode="dark"] .semi-always-light,
   overflow: hidden;
 }
 
+.table-scroll-card .semi-card-body > .semi-table-wrapper,
+.table-scroll-card .semi-table-wrapper > .semi-spin,
+.table-scroll-card .semi-table-wrapper > .semi-spin > .semi-spin-children,
+.table-scroll-card .semi-table-fixed-header {
+  height: 100%;
+}
+
+.table-scroll-card .semi-table-fixed-header,
+.table-scroll-card .semi-table-container {
+  display: flex;
+  flex-direction: column;
+}
+
+.table-scroll-card .semi-table-container,
+.table-scroll-card .semi-table-body {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.table-scroll-card .semi-table-header {
+  flex: 0 0 auto;
+}
+
 .remail-stable-table .semi-table {
   table-layout: fixed;
 }
@@ -476,7 +499,7 @@ body[theme-mode="dark"] .semi-always-light,
 .table-scroll-card .semi-card-body::-webkit-scrollbar,
 .semi-table-body::-webkit-scrollbar {
   width: 6px;
-  height: 6px;
+  height: 8px;
 }
 
 .table-scroll-card .semi-card-body::-webkit-scrollbar-thumb,

@@ -61,7 +61,6 @@ import {
 } from "./admin-users/user-detail-sheet";
 import {
   deleteAdminUser,
-  deleteAdminUsersByFilter,
   deleteAdminUsersByIds,
   listAdminUsers,
   revokeAdminUserSessions,
@@ -490,26 +489,19 @@ export default function AdminUsers() {
   }, [capabilities.canAdjustBalance, listFilter, t, total]);
 
   const confirmBulkActionAll = useCallback(
-    (action: "disable" | "logout" | "delete") => {
+    (action: "disable" | "logout") => {
       if (!capabilities.canOperateUsers) return;
       if (total === 0) {
         Toast.warning(t("No users match the current filters."));
         return;
       }
-      const label =
-        action === "disable"
-          ? t("Disable")
-          : action === "logout"
-            ? t("Exit")
-            : t("Delete");
+      const label = action === "disable" ? t("Disable") : t("Exit");
       Modal.confirm({
         cancelText: t("Cancel"),
         content: t(
           action === "disable"
             ? "Confirm disable all matching users content"
-            : action === "logout"
-              ? "Confirm force logout all matching users content"
-              : "Confirm delete all matching users content",
+            : "Confirm force logout all matching users content",
           { count: total }
         ),
         okButtonProps: { type: "danger" },
@@ -520,9 +512,7 @@ export default function AdminUsers() {
             const result =
               action === "disable"
                 ? await setAdminUsersEnabledByFilter(listFilter, false)
-                : action === "logout"
-                  ? await revokeAdminUsersSessionsByFilter(listFilter)
-                  : await deleteAdminUsersByFilter(listFilter);
+                : await revokeAdminUsersSessionsByFilter(listFilter);
 
             setSelectedRowKeys([]);
             await refresh();
@@ -906,15 +896,6 @@ export default function AdminUsers() {
               type="tertiary"
             >
               {t("Exit")}
-            </Button>
-            <Button
-              className="flex-1 md:flex-none"
-              loading={bulkAction === "delete"}
-              onClick={() => confirmBulkActionAll("delete")}
-              size="small"
-              type="danger"
-            >
-              {t("Delete")}
             </Button>
           </>
         ) : null}
