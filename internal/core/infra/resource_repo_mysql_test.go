@@ -272,7 +272,9 @@ func requireFacetWaitersCancelIndependently(t *testing.T, db *gorm.DB, callback 
 
 	releaseQuery()
 	require.NoError(t, requireChannelValue(t, validErr))
-	require.EqualValues(t, 2, queries.Load())
+	// The canceled leader stops its aggregate query; the surviving waiter retries
+	// and completes the aggregate plus suffix queries under its own context.
+	require.EqualValues(t, 3, queries.Load())
 }
 
 func requireChannelClosed(t *testing.T, ch <-chan struct{}) {

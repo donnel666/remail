@@ -4801,12 +4801,15 @@ type AdminMicrosoftResourceItemType string
 
 // AdminMicrosoftResourceListResponse defines model for AdminMicrosoftResourceListResponse.
 type AdminMicrosoftResourceListResponse struct {
-	Facets      AdminMicrosoftFacets         `json:"facets"`
+	// Facets Omitted when `includeFacets=false`.
+	Facets      *AdminMicrosoftFacets        `json:"facets,omitempty"`
 	Items       []AdminMicrosoftResourceItem `json:"items"`
 	Limit       int                          `json:"limit"`
 	NextAfterId *int                         `json:"nextAfterId"`
 	Offset      int                          `json:"offset"`
-	Total       int64                        `json:"total"`
+
+	// Total Omitted when `includeTotal=false`.
+	Total *int64 `json:"total,omitempty"`
 }
 
 // AdminMicrosoftResourceStatus defines model for AdminMicrosoftResourceStatus.
@@ -7221,7 +7224,9 @@ type ResourceListResponse struct {
 	Limit       int                 `json:"limit"`
 	NextAfterId *int                `json:"nextAfterId,omitempty"`
 	Offset      int                 `json:"offset"`
-	Total       int                 `json:"total"`
+
+	// Total Omitted when `includeTotal=false`.
+	Total *int `json:"total,omitempty"`
 }
 
 // ResourceValidationsResponse defines model for ResourceValidationsResponse.
@@ -8350,7 +8355,7 @@ type GetAdminMicrosoftResourcesParams struct {
 	// Type This administrator query is limited to Microsoft resources.
 	Type GetAdminMicrosoftResourcesParamsType `form:"type" json:"type"`
 
-	// Search Case-insensitive search across resource ID, mailbox address, and owner display identity.
+	// Search Case-insensitive prefix search across mailbox addresses and owner display identity; an all-digit value matches resource or owner ID exactly.
 	Search *string `form:"search,omitempty" json:"search,omitempty"`
 
 	// Suffix Exact normalized mailbox domain. Values with or without a leading `@` are accepted.
@@ -8358,10 +8363,16 @@ type GetAdminMicrosoftResourcesParams struct {
 	Status *AdminMicrosoftResourceStatus `form:"status,omitempty" json:"status,omitempty"`
 
 	// ForSale Public-supply flag. The UI's private=true filter maps to forSale=false.
-	ForSale        *bool                      `form:"forSale,omitempty" json:"forSale,omitempty"`
-	LongLived      *bool                      `form:"longLived,omitempty" json:"longLived,omitempty"`
-	GraphAvailable *bool                      `form:"graphAvailable,omitempty" json:"graphAvailable,omitempty"`
-	TokenHealth    *AdminMicrosoftTokenHealth `form:"tokenHealth,omitempty" json:"tokenHealth,omitempty"`
+	ForSale        *bool `form:"forSale,omitempty" json:"forSale,omitempty"`
+	LongLived      *bool `form:"longLived,omitempty" json:"longLived,omitempty"`
+	GraphAvailable *bool `form:"graphAvailable,omitempty" json:"graphAvailable,omitempty"`
+
+	// IncludeFacets Set false for list-only requests to skip complete-set facet aggregation.
+	IncludeFacets *bool `form:"includeFacets,omitempty" json:"includeFacets,omitempty"`
+
+	// IncludeTotal Set false for cursor-list requests to skip the complete-set count.
+	IncludeTotal *bool                      `form:"includeTotal,omitempty" json:"includeTotal,omitempty"`
+	TokenHealth  *AdminMicrosoftTokenHealth `form:"tokenHealth,omitempty" json:"tokenHealth,omitempty"`
 
 	// CreatedFrom Inclusive ISO 8601 creation-time lower bound.
 	CreatedFrom *time.Time `form:"createdFrom,omitempty" json:"createdFrom,omitempty"`
@@ -9154,6 +9165,12 @@ type GetResourcesParams struct {
 
 	// GraphAvailable Microsoft Graph availability filter.
 	GraphAvailable *bool `form:"graphAvailable,omitempty" json:"graphAvailable,omitempty"`
+
+	// IncludeFacets Set false for list-only requests to skip complete-set facet aggregation.
+	IncludeFacets *bool `form:"includeFacets,omitempty" json:"includeFacets,omitempty"`
+
+	// IncludeTotal Set false for cursor-list requests to skip the complete-set count.
+	IncludeTotal *bool `form:"includeTotal,omitempty" json:"includeTotal,omitempty"`
 
 	// CreatedFrom Inclusive resource creation lower bound.
 	CreatedFrom *time.Time `form:"createdFrom,omitempty" json:"createdFrom,omitempty"`
@@ -15710,6 +15727,22 @@ func (siw *ServerInterfaceWrapper) GetAdminMicrosoftResources(c *gin.Context) {
 		return
 	}
 
+	// ------------- Optional query parameter "includeFacets" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "includeFacets", c.Request.URL.Query(), &params.IncludeFacets, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter includeFacets: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "includeTotal" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "includeTotal", c.Request.URL.Query(), &params.IncludeTotal, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter includeTotal: %w", err), http.StatusBadRequest)
+		return
+	}
+
 	// ------------- Optional query parameter "tokenHealth" -------------
 
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "tokenHealth", c.Request.URL.Query(), &params.TokenHealth, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
@@ -21579,6 +21612,22 @@ func (siw *ServerInterfaceWrapper) GetResources(c *gin.Context) {
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "graphAvailable", c.Request.URL.Query(), &params.GraphAvailable, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
 	if err != nil {
 		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter graphAvailable: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "includeFacets" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "includeFacets", c.Request.URL.Query(), &params.IncludeFacets, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter includeFacets: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "includeTotal" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "includeTotal", c.Request.URL.Query(), &params.IncludeTotal, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter includeTotal: %w", err), http.StatusBadRequest)
 		return
 	}
 

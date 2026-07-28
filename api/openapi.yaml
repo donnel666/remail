@@ -3794,6 +3794,18 @@ paths:
           schema:
             type: boolean
           description: Microsoft Graph availability filter.
+        - name: includeFacets
+          in: query
+          schema:
+            type: boolean
+            default: true
+          description: Set false for list-only requests to skip complete-set facet aggregation.
+        - name: includeTotal
+          in: query
+          schema:
+            type: boolean
+            default: true
+          description: Set false for cursor-list requests to skip the complete-set count.
         - name: createdFrom
           in: query
           schema:
@@ -8648,7 +8660,7 @@ paths:
       operationId: getAdminMicrosoftResources
       summary: List Microsoft resources for the administrator console
       description: |
-        Requires `core:resource/read`. Directly queries the resource facts and returns administrator-safe Microsoft resource fields plus cross-filter facets. The default query excludes logically deleted resources; `status=deleted` selects deleted resources explicitly. Facets are calculated from the complete matched set and each facet ignores only its own filter. Credential values, tokens, object keys, task leases, and upstream payloads are never returned.
+        Requires `core:resource/read`. Directly queries the resource facts and returns administrator-safe Microsoft resource fields plus optional cross-filter facets. The default query excludes logically deleted resources; `status=deleted` selects deleted resources explicitly. Unless `includeFacets=false`, facets are calculated from the complete matched set and each facet ignores only its own filter. Credential values, tokens, object keys, task leases, and upstream payloads are never returned.
       tags:
         - Admin
       security:
@@ -8663,7 +8675,7 @@ paths:
             enum: [microsoft]
         - name: search
           in: query
-          description: Case-insensitive search across resource ID, mailbox address, and owner display identity.
+          description: Case-insensitive prefix search across mailbox addresses and owner display identity; an all-digit value matches resource or owner ID exactly.
           schema:
             type: string
             maxLength: 120
@@ -8690,6 +8702,18 @@ paths:
           in: query
           schema:
             type: boolean
+        - name: includeFacets
+          in: query
+          schema:
+            type: boolean
+            default: true
+          description: Set false for list-only requests to skip complete-set facet aggregation.
+        - name: includeTotal
+          in: query
+          schema:
+            type: boolean
+            default: true
+          description: Set false for cursor-list requests to skip the complete-set count.
         - name: tokenHealth
           in: query
           schema:
@@ -8727,7 +8751,7 @@ paths:
             default: 20
       responses:
         "200":
-          description: Paginated Microsoft resource list and server-side facets
+          description: Paginated Microsoft resource list with optional server-side facets
           content:
             application/json:
               schema:
@@ -14259,7 +14283,6 @@ components:
       type: object
       required:
         - items
-        - total
         - offset
         - limit
       properties:
@@ -14269,6 +14292,7 @@ components:
             $ref: "#/components/schemas/ResourceItem"
         total:
           type: integer
+          description: Omitted when `includeTotal=false`.
         offset:
           type: integer
         limit:
@@ -16798,11 +16822,9 @@ components:
       type: object
       required:
         - items
-        - total
         - offset
         - limit
         - nextAfterId
-        - facets
       properties:
         items:
           type: array
@@ -16812,6 +16834,7 @@ components:
           type: integer
           format: int64
           minimum: 0
+          description: Omitted when `includeTotal=false`.
         offset:
           type: integer
           minimum: 0
@@ -16824,7 +16847,9 @@ components:
           minimum: 1
           nullable: true
         facets:
-          $ref: "#/components/schemas/AdminMicrosoftFacets"
+          description: Omitted when `includeFacets=false`.
+          allOf:
+            - $ref: "#/components/schemas/AdminMicrosoftFacets"
       additionalProperties: false
     AdminMicrosoftAliasCounts:
       type: object

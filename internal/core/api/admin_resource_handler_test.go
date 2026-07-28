@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -22,14 +23,29 @@ import (
 )
 
 type adminHandlerReadRepo struct {
-	record coreapp.AdminMicrosoftRecord
+	record    coreapp.AdminMicrosoftRecord
+	countErr  error
+	facetsErr error
 }
 
 func (r adminHandlerReadRepo) ListAdminMicrosoft(context.Context, coreapp.AdminMicrosoftListFilter, int, int, uint, time.Time) ([]coreapp.AdminMicrosoftRecord, error) {
 	return []coreapp.AdminMicrosoftRecord{r.record}, nil
 }
 
+func (r adminHandlerReadRepo) CountAdminMicrosoft(context.Context, coreapp.AdminMicrosoftListFilter, time.Time) (int64, error) {
+	if r.countErr != nil {
+		return 0, r.countErr
+	}
+	if r.record.ID == 0 {
+		return 0, nil
+	}
+	return 1, nil
+}
+
 func (r adminHandlerReadRepo) AdminMicrosoftFacets(context.Context, coreapp.AdminMicrosoftListFilter, time.Time) (*coreapp.AdminMicrosoftFacets, error) {
+	if r.facetsErr != nil {
+		return nil, r.facetsErr
+	}
 	return &coreapp.AdminMicrosoftFacets{
 		Matched:        1,
 		Status:         coreapp.AdminFacetCounts{All: 1, Normal: 1},
@@ -334,12 +350,73 @@ func TestAdminMicrosoftListRejectsWrongTypeAndOversizedLimit(t *testing.T) {
 	for _, path := range []string{
 		"/v1/admin/resources?type=domain",
 		"/v1/admin/resources?type=microsoft&limit=101",
+		"/v1/admin/resources?type=microsoft&includeFacets=invalid",
+		"/v1/admin/resources?type=microsoft&includeTotal=invalid",
 	} {
 		response := httptest.NewRecorder()
 		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, strings.NewReader("")))
 		require.Contains(t, []int{http.StatusBadRequest, http.StatusUnprocessableEntity}, response.Code)
 		require.Contains(t, response.Body.String(), "requestId")
 	}
+}
+
+func TestAdminMicrosoftListCanSkipFacets(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	now := time.Now().UTC()
+	repo := adminHandlerReadRepo{
+		record: coreapp.AdminMicrosoftRecord{
+			ID: 42, OwnerUserID: 7, EmailAddress: "safe-mailbox@outlook.com", EmailDomain: "outlook.com",
+			Status: domain.MicrosoftStatusNormal, CreatedAt: now, UpdatedAt: now,
+		},
+		facetsErr: errors.New("facets must not run"),
+	}
+	query := coreapp.NewAdminResourceQuery(repo)
+	query.SetPorts(
+		adminHandlerOwnerPort{owner: coreapp.AdminOwnerSummary{ID: 7, Email: "owner@example.com"}},
+		adminHandlerBindingPort{}, nil, nil,
+	)
+	router := gin.New()
+	router.Use(middleware.RequestID())
+	router.GET("/v1/admin/resources", NewCoreHandler(&CoreModule{AdminResourceQuery: query}).GetAdminMicrosoftResources)
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/admin/resources?type=microsoft&includeFacets=false", nil))
+
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var payload adminMicrosoftListResponse
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &payload))
+	require.NotNil(t, payload.Total)
+	require.EqualValues(t, 1, *payload.Total)
+	require.Nil(t, payload.Facets)
+	require.NotContains(t, response.Body.String(), "\"facets\"")
+}
+
+func TestAdminMicrosoftListCanSkipFacetsAndTotal(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	now := time.Now().UTC()
+	repo := adminHandlerReadRepo{
+		record: coreapp.AdminMicrosoftRecord{
+			ID: 42, OwnerUserID: 7, EmailAddress: "safe-mailbox@outlook.com", EmailDomain: "outlook.com",
+			Status: domain.MicrosoftStatusNormal, CreatedAt: now, UpdatedAt: now,
+		},
+		countErr: errors.New("count must not run"), facetsErr: errors.New("facets must not run"),
+	}
+	query := coreapp.NewAdminResourceQuery(repo)
+	query.SetPorts(
+		adminHandlerOwnerPort{owner: coreapp.AdminOwnerSummary{ID: 7, Email: "owner@example.com"}},
+		adminHandlerBindingPort{}, nil, nil,
+	)
+	router := gin.New()
+	router.Use(middleware.RequestID())
+	router.GET("/v1/admin/resources", NewCoreHandler(&CoreModule{AdminResourceQuery: query}).GetAdminMicrosoftResources)
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet,
+		"/v1/admin/resources?type=microsoft&includeFacets=false&includeTotal=false", nil))
+
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.NotContains(t, response.Body.String(), "\"total\"")
+	require.NotContains(t, response.Body.String(), "\"facets\"")
 }
 
 func TestAdminMicrosoftWriteHandlersRequireIdempotencyKey(t *testing.T) {

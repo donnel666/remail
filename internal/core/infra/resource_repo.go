@@ -1220,84 +1220,92 @@ type microsoftResourceSuffixFacetRow struct {
 }
 
 func (r *ResourceRepo) microsoftResourceFacets(ctx context.Context, ownerUserID uint, filter coreapp.ResourceListFilter, cacheKey string) (*coreapp.ResourceListFacets, error) {
-	resultCh := r.facetsFlight.DoChan(cacheKey, func() (any, error) {
+	for attempt := 0; ; attempt++ {
 		if cached, ok := r.facetsCache.Get(cacheKey); ok {
-			return cached, nil
+			return cloneResourceListFacets(&cached), nil
 		}
-		queryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), microsoftFacetsQueryTimeout)
-		defer cancel()
-
-		base := filter
-		base.Status = ""
-		base.ForSale = nil
-		base.LongLived = nil
-		base.GraphAvailable = nil
-		base.Suffix = ""
-
-		var selects facetAggregateSelect
-		add := func(alias string, ignore string, extra string, extraArgs ...any) {
-			predicate, args := microsoftResourceFacetPredicate(filter, ignore)
-			if extra != "" {
-				predicate += " AND " + extra
-				args = append(args, extraArgs...)
+		resultCh := r.facetsFlight.DoChan(cacheKey, func() (any, error) {
+			if cached, ok := r.facetsCache.Get(cacheKey); ok {
+				return cached, nil
 			}
-			selects.add(alias, predicate, args...)
-		}
-		add("matched_count", "", "")
-		add("status_all_count", "status", "")
-		add("status_normal_count", "status", "ms_filter.status = ?", string(domain.MicrosoftStatusNormal))
-		add("status_pending_count", "status", "ms_filter.status = ?", string(domain.MicrosoftStatusPending))
-		add("status_validating_count", "status", "ms_filter.status = ?", string(domain.MicrosoftStatusValidating))
-		add("status_identifying_count", "status", "ms_filter.status = ?", string(domain.MicrosoftStatusIdentifying))
-		add("status_abnormal_count", "status", "ms_filter.status = ?", string(domain.MicrosoftStatusAbnormal))
-		add("status_disabled_count", "status", "ms_filter.status = ?", string(domain.MicrosoftStatusDisabled))
-		add("private_all_count", "for_sale", "")
-		add("private_yes_count", "for_sale", "ms_filter.for_sale = FALSE")
-		add("private_no_count", "for_sale", "ms_filter.for_sale = TRUE")
-		add("long_lived_all_count", "long_lived", "")
-		add("long_lived_yes_count", "long_lived", "ms_filter.long_lived = TRUE")
-		add("long_lived_no_count", "long_lived", "ms_filter.long_lived = FALSE")
-		add("graph_available_all_count", "graph_available", "")
-		add("graph_available_yes_count", "graph_available", "ms_filter.graph_available = TRUE")
-		add("graph_available_no_count", "graph_available", "ms_filter.graph_available = FALSE")
-		selectSQL, selectArgs := selects.query()
+			queryCtx, cancel := context.WithTimeout(ctx, microsoftFacetsQueryTimeout)
+			defer cancel()
 
-		var counts microsoftResourceFacetCountsRow
-		if err := r.listQuery(queryCtx, ownerUserID, base).
-			Select(selectSQL, selectArgs...).
-			Scan(&counts).Error; err != nil {
-			return nil, fmt.Errorf("microsoft resource facets: %w", err)
-		}
+			base := filter
+			base.Status = ""
+			base.ForSale = nil
+			base.LongLived = nil
+			base.GraphAvailable = nil
+			base.Suffix = ""
 
-		suffixBase := filter
-		suffixBase.Suffix = ""
-		var suffixRows []microsoftResourceSuffixFacetRow
-		if err := r.listQuery(queryCtx, ownerUserID, suffixBase).
-			Select("ms_filter.email_domain AS facet_key, COUNT(*) AS count").
-			Where("ms_filter.email_domain <> ''").
-			Group("ms_filter.email_domain").
-			Order("count DESC, facet_key ASC").
-			Limit(microsoftFacetsSuffixLimit).
-			Scan(&suffixRows).Error; err != nil {
-			return nil, fmt.Errorf("microsoft resource suffix facets: %w", err)
-		}
+			var selects facetAggregateSelect
+			add := func(alias string, ignore string, extra string, extraArgs ...any) {
+				predicate, args := microsoftResourceFacetPredicate(filter, ignore)
+				if extra != "" {
+					predicate += " AND " + extra
+					args = append(args, extraArgs...)
+				}
+				selects.add(alias, predicate, args...)
+			}
+			add("matched_count", "", "")
+			add("status_all_count", "status", "")
+			add("status_normal_count", "status", "ms_filter.status = ?", string(domain.MicrosoftStatusNormal))
+			add("status_pending_count", "status", "ms_filter.status = ?", string(domain.MicrosoftStatusPending))
+			add("status_validating_count", "status", "ms_filter.status = ?", string(domain.MicrosoftStatusValidating))
+			add("status_identifying_count", "status", "ms_filter.status = ?", string(domain.MicrosoftStatusIdentifying))
+			add("status_abnormal_count", "status", "ms_filter.status = ?", string(domain.MicrosoftStatusAbnormal))
+			add("status_disabled_count", "status", "ms_filter.status = ?", string(domain.MicrosoftStatusDisabled))
+			add("private_all_count", "for_sale", "")
+			add("private_yes_count", "for_sale", "ms_filter.for_sale = FALSE")
+			add("private_no_count", "for_sale", "ms_filter.for_sale = TRUE")
+			add("long_lived_all_count", "long_lived", "")
+			add("long_lived_yes_count", "long_lived", "ms_filter.long_lived = TRUE")
+			add("long_lived_no_count", "long_lived", "ms_filter.long_lived = FALSE")
+			add("graph_available_all_count", "graph_available", "")
+			add("graph_available_yes_count", "graph_available", "ms_filter.graph_available = TRUE")
+			add("graph_available_no_count", "graph_available", "ms_filter.graph_available = FALSE")
+			selectSQL, selectArgs := selects.query()
 
-		facets := microsoftResourceFacetsFromCounts(counts, suffixRows)
-		r.facetsCache.Set(cacheKey, *cloneResourceListFacets(facets), runtimeconfig.Duration("resource_facets_cache_ttl_seconds", resourceFacetsCacheTTL, time.Second, 1))
-		return *facets, nil
-	})
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case result := <-resultCh:
-		if result.Err != nil {
-			return nil, result.Err
+			var counts microsoftResourceFacetCountsRow
+			if err := r.listQuery(queryCtx, ownerUserID, base).
+				Select(selectSQL, selectArgs...).
+				Scan(&counts).Error; err != nil {
+				return nil, fmt.Errorf("microsoft resource facets: %w", err)
+			}
+
+			suffixBase := filter
+			suffixBase.Suffix = ""
+			var suffixRows []microsoftResourceSuffixFacetRow
+			if err := r.listQuery(queryCtx, ownerUserID, suffixBase).
+				Select("ms_filter.email_domain AS facet_key, COUNT(*) AS count").
+				Where("ms_filter.email_domain <> ''").
+				Group("ms_filter.email_domain").
+				Order("count DESC, facet_key ASC").
+				Limit(microsoftFacetsSuffixLimit).
+				Scan(&suffixRows).Error; err != nil {
+				return nil, fmt.Errorf("microsoft resource suffix facets: %w", err)
+			}
+
+			facets := microsoftResourceFacetsFromCounts(counts, suffixRows)
+			r.facetsCache.Set(cacheKey, *cloneResourceListFacets(facets), runtimeconfig.Duration("resource_facets_cache_ttl_seconds", resourceFacetsCacheTTL, time.Second, 1))
+			return *facets, nil
+		})
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case result := <-resultCh:
+			if result.Err != nil {
+				if attempt == 0 && ctx.Err() == nil && errors.Is(result.Err, context.Canceled) {
+					continue
+				}
+				return nil, result.Err
+			}
+			facets, ok := result.Val.(coreapp.ResourceListFacets)
+			if !ok {
+				return nil, fmt.Errorf("microsoft resource facets: unexpected cache value")
+			}
+			return cloneResourceListFacets(&facets), nil
 		}
-		facets, ok := result.Val.(coreapp.ResourceListFacets)
-		if !ok {
-			return nil, fmt.Errorf("microsoft resource facets: unexpected cache value")
-		}
-		return cloneResourceListFacets(&facets), nil
 	}
 }
 

@@ -177,6 +177,7 @@ describe("admin Microsoft API adapter", () => {
 
   it("serializes only the formal list filters and caps blocks at 100", async () => {
     apiMocks.GET.mockResolvedValueOnce({ data: EMPTY_LIST });
+    const controller = new AbortController();
 
     await listAdminMicrosoftResources(
       {
@@ -192,7 +193,8 @@ describe("admin Microsoft API adapter", () => {
       },
       1_000,
       1_000,
-      7_000
+      7_000,
+      { includeFacets: false, includeTotal: false, signal: controller.signal }
     );
 
     expect(apiMocks.GET).toHaveBeenCalledWith("/v1/admin/resources", {
@@ -211,9 +213,11 @@ describe("admin Microsoft API adapter", () => {
           offset: 1_000,
           limit: 100,
           afterId: 7_000,
+          includeFacets: false,
+          includeTotal: false,
         },
       },
-      signal: undefined,
+      signal: controller.signal,
     });
   });
 

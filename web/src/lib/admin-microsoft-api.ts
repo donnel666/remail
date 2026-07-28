@@ -88,7 +88,11 @@ export async function listAdminMicrosoftResources(
   offset = 0,
   limit = 20,
   afterId?: number,
-  signal?: AbortSignal
+  options: {
+    includeFacets?: boolean;
+    includeTotal?: boolean;
+    signal?: AbortSignal;
+  } = {}
 ): Promise<AdminMicrosoftListResponse> {
   return unwrap(
     await client.GET("/v1/admin/resources", {
@@ -99,9 +103,11 @@ export async function listAdminMicrosoftResources(
           offset: Math.max(0, Math.trunc(offset)),
           limit: pageLimit(limit),
           afterId,
+          includeFacets: options.includeFacets,
+          includeTotal: options.includeTotal,
         },
       },
-      signal,
+      signal: options.signal,
     })
   );
 }

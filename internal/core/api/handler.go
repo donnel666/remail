@@ -132,9 +132,13 @@ func (h *CoreHandler) GetResources(c *gin.Context) {
 		}
 	}
 
+	var total *int64
+	if !filter.SkipTotal {
+		total = &result.Total
+	}
 	c.JSON(http.StatusOK, ResourceListResponse{
 		Items:       items,
-		Total:       result.Total,
+		Total:       total,
 		Offset:      result.Offset,
 		Limit:       result.Limit,
 		NextAfterID: result.NextAfterID,
@@ -1315,6 +1319,16 @@ func resourceListFilterFromQuery(c *gin.Context) (coreapp.ResourceListFilter, bo
 	if !ok {
 		return filter, false
 	}
+	includeFacets, ok := parseOptionalBoolQuery(c, "includeFacets")
+	if !ok {
+		return filter, false
+	}
+	filter.SkipFacets = includeFacets != nil && !*includeFacets
+	includeTotal, ok := parseOptionalBoolQuery(c, "includeTotal")
+	if !ok {
+		return filter, false
+	}
+	filter.SkipTotal = includeTotal != nil && !*includeTotal
 	filter.CreatedFrom, ok = parseOptionalCoreTimeQuery(c, "createdFrom")
 	if !ok {
 		return filter, false

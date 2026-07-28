@@ -132,11 +132,11 @@ type adminMicrosoftFacetsResponse struct {
 
 type adminMicrosoftListResponse struct {
 	Items       []adminMicrosoftResourceItemResponse `json:"items"`
-	Total       int64                                `json:"total"`
+	Total       *int64                               `json:"total,omitempty"`
 	Offset      int                                  `json:"offset"`
 	Limit       int                                  `json:"limit"`
 	NextAfterID *uint                                `json:"nextAfterId"`
-	Facets      adminMicrosoftFacetsResponse         `json:"facets"`
+	Facets      *adminMicrosoftFacetsResponse        `json:"facets,omitempty"`
 }
 
 type adminMicrosoftAliasCountsResponse struct {
@@ -334,7 +334,7 @@ func (h *CoreHandler) GetAdminMicrosoftResources(c *gin.Context) {
 		writeAdminResourceError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, toAdminMicrosoftListResponse(result))
+	c.JSON(http.StatusOK, toAdminMicrosoftListResponse(result, !filter.SkipTotal))
 }
 
 func (h *CoreHandler) PostAdminMicrosoftResourceImport(c *gin.Context) {
@@ -788,6 +788,16 @@ func adminMicrosoftFilterFromQuery(c *gin.Context) (coreapp.AdminMicrosoftListFi
 	if !ok {
 		return filter, false
 	}
+	includeFacets, ok := parseOptionalBoolQuery(c, "includeFacets")
+	if !ok {
+		return filter, false
+	}
+	filter.SkipFacets = includeFacets != nil && !*includeFacets
+	includeTotal, ok := parseOptionalBoolQuery(c, "includeTotal")
+	if !ok {
+		return filter, false
+	}
+	filter.SkipTotal = includeTotal != nil && !*includeTotal
 	filter.CreatedFrom, ok = parseOptionalCoreTimeQuery(c, "createdFrom")
 	if !ok {
 		return filter, false
@@ -796,24 +806,32 @@ func adminMicrosoftFilterFromQuery(c *gin.Context) (coreapp.AdminMicrosoftListFi
 	return filter, ok
 }
 
-func toAdminMicrosoftListResponse(result *coreapp.AdminMicrosoftListResult) adminMicrosoftListResponse {
+func toAdminMicrosoftListResponse(result *coreapp.AdminMicrosoftListResult, includeTotal bool) adminMicrosoftListResponse {
 	items := make([]adminMicrosoftResourceItemResponse, len(result.Items))
 	for i := range result.Items {
 		items[i] = toAdminMicrosoftItemResponse(result.Items[i])
 	}
-	suffixes := make([]adminMicrosoftSuffixFacetResponse, len(result.Facets.Suffixes))
-	for i := range result.Facets.Suffixes {
-		suffixes[i] = adminMicrosoftSuffixFacetResponse{Key: result.Facets.Suffixes[i].Key, Count: result.Facets.Suffixes[i].Count}
-	}
-	return adminMicrosoftListResponse{
-		Items: items, Total: result.Total, Offset: result.Offset, Limit: result.Limit, NextAfterID: result.NextAfterID,
-		Facets: adminMicrosoftFacetsResponse{
+	var facets *adminMicrosoftFacetsResponse
+	if result.HasFacets {
+		suffixes := make([]adminMicrosoftSuffixFacetResponse, len(result.Facets.Suffixes))
+		for i := range result.Facets.Suffixes {
+			suffixes[i] = adminMicrosoftSuffixFacetResponse{Key: result.Facets.Suffixes[i].Key, Count: result.Facets.Suffixes[i].Count}
+		}
+		facets = &adminMicrosoftFacetsResponse{
 			Status:         adminMicrosoftStatusFacetResponse(result.Facets.Status),
 			ForSale:        adminMicrosoftBooleanFacetResponse(result.Facets.ForSale),
 			LongLived:      adminMicrosoftBooleanFacetResponse(result.Facets.LongLived),
 			GraphAvailable: adminMicrosoftBooleanFacetResponse(result.Facets.GraphAvailable),
 			TokenHealth:    adminMicrosoftTokenFacetResponse(result.Facets.TokenHealth), Suffixes: suffixes,
-		},
+		}
+	}
+	var total *int64
+	if includeTotal {
+		total = &result.Total
+	}
+	return adminMicrosoftListResponse{
+		Items: items, Total: total, Offset: result.Offset, Limit: result.Limit, NextAfterID: result.NextAfterID,
+		Facets: facets,
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -161,6 +162,11 @@ VALUES
 	require.EqualValues(t, 1, ownerSearch.Total)
 	require.Equal(t, r2Root.ID, ownerSearch.Items[0].ID)
 
+	ownerEmailSearch, err := query.List(ctx, coreapp.AdminMicrosoftListFilter{Search: "beta-owner@test.local"}, 0, 20, 0)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, ownerEmailSearch.Total)
+	require.Equal(t, r2Root.ID, ownerEmailSearch.Items[0].ID)
+
 	for _, search := range []string{"explicit-two@outlook.com", "a.l.p.h.a@outlook.com", "alpha+one@outlook.com"} {
 		aliasSearch, err := query.List(ctx, coreapp.AdminMicrosoftListFilter{Search: search}, 0, 20, 0)
 		require.NoError(t, err)
@@ -168,6 +174,16 @@ VALUES
 		require.Equal(t, r1Root.ID, aliasSearch.Items[0].ID, search)
 		require.Equal(t, "alpha@outlook.com", aliasSearch.Items[0].EmailAddress, search)
 	}
+
+	domainSearch, err := query.List(ctx, coreapp.AdminMicrosoftListFilter{Search: "outlook.com"}, 0, 20, 0)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, domainSearch.Total)
+	require.Equal(t, r1Root.ID, domainSearch.Items[0].ID)
+
+	idSearch, err := query.List(ctx, coreapp.AdminMicrosoftListFilter{Search: strconv.FormatUint(uint64(r2Root.ID), 10)}, 0, 20, 0)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, idSearch.Total)
+	require.Equal(t, r2Root.ID, idSearch.Items[0].ID)
 
 	suffixList, err := query.List(ctx, coreapp.AdminMicrosoftListFilter{Suffix: "@outlook.com"}, 0, 20, 0)
 	require.NoError(t, err)
@@ -350,8 +366,11 @@ func TestAdminResourceQueryPlansKeepListBoundedAndUseResourceIndexesMySQL(t *tes
 		{"microsoft_resources", "idx_microsoft_bulk_domain"},
 		{"microsoft_resources", "idx_microsoft_status"},
 		{"explicit_aliases", "idx_explicit_aliases_resource_created_id"},
+		{"explicit_aliases", "idx_explicit_aliases_email_resource"},
 		{"dot_aliases", "idx_dot_aliases_resource_created_id"},
+		{"dot_aliases", "idx_dot_aliases_email_resource"},
 		{"plus_aliases", "idx_plus_aliases_resource_created_id"},
+		{"plus_aliases", "idx_plus_aliases_email_resource"},
 	} {
 		requireIndexExists(t, db, item.table, item.index)
 	}
@@ -424,7 +443,7 @@ func TestAdminMicrosoftFilterQueryUsesOneRootJoinShapeMySQL(t *testing.T) {
 	var total int64
 	result := repo.adminMicrosoftFilterQuery(
 		context.Background(),
-		coreapp.AdminMicrosoftListFilter{Search: "owner", OwnerIDs: []uint{9901}},
+		coreapp.AdminMicrosoftListFilter{Search: "owner@example.com", OwnerIDs: []uint{9901}},
 		time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC),
 		"",
 	).Count(&total)
@@ -433,10 +452,61 @@ func TestAdminMicrosoftFilterQueryUsesOneRootJoinShapeMySQL(t *testing.T) {
 	sqlLog.Reset()
 	require.Contains(t, sql, "from email_resources as er")
 	require.Contains(t, sql, "join microsoft_resources as mr")
-	require.Contains(t, sql, "exists (select 1 from explicit_aliases ea")
-	require.Contains(t, sql, "exists (select 1 from dot_aliases da")
-	require.Contains(t, sql, "exists (select 1 from plus_aliases pa")
-	require.Contains(t, sql, "er.owner_user_id in (9901)")
+	require.Contains(t, sql, "left join (select id as resource_id from microsoft_resources where email_address = 'owner@example.com'")
+	require.Contains(t, sql, "select resource_id from explicit_aliases where email = 'owner@example.com'")
+	require.Contains(t, sql, "select resource_id from dot_aliases where email = 'owner@example.com'")
+	require.Contains(t, sql, "select resource_id from plus_aliases where email = 'owner@example.com'")
+	require.Contains(t, sql, "admin_resource_search.resource_id is not null or er.owner_user_id in (9901)")
+	require.NotContains(t, sql, "select id as resource_id from email_resources where owner_user_id")
+	require.NotContains(t, sql, "lower(")
+	require.NotContains(t, sql, "exists (select")
+	require.NotContains(t, sql, "like '%owner@example.com%'")
+
+	result = repo.adminMicrosoftFilterQuery(
+		context.Background(),
+		coreapp.AdminMicrosoftListFilter{Search: "a", OwnerIDs: []uint{9901}},
+		time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC),
+		"",
+	).Count(&total)
+	require.NoError(t, result.Error)
+	shortSQL := strings.ToLower(strings.ReplaceAll(sqlLog.String(), string(rune(96)), ""))
+	sqlLog.Reset()
+	require.Contains(t, shortSQL, "mr.email_address like 'a%'")
+	require.Contains(t, shortSQL, "exists (select 1 from explicit_aliases ea")
+	require.Contains(t, shortSQL, "exists (select 1 from dot_aliases da")
+	require.Contains(t, shortSQL, "exists (select 1 from plus_aliases pa")
+	require.Contains(t, shortSQL, "er.owner_user_id in (9901)")
+	require.NotContains(t, shortSQL, "join (select id as resource_id")
+	require.NotContains(t, shortSQL, "lower(")
+	require.NotContains(t, shortSQL, "like '%a%'")
+
+	result = repo.adminMicrosoftFilterQuery(
+		context.Background(),
+		coreapp.AdminMicrosoftListFilter{Search: "@outlook.com"},
+		time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC),
+		"",
+	).Count(&total)
+	require.NoError(t, result.Error)
+	domainSQL := strings.ToLower(strings.ReplaceAll(sqlLog.String(), string(rune(96)), ""))
+	sqlLog.Reset()
+	require.Contains(t, domainSQL, "mr.email_domain like 'outlook.com%'")
+	require.Contains(t, domainSQL, "exists (select 1 from explicit_aliases ea")
+	require.NotContains(t, domainSQL, "join (select id as resource_id")
+
+	result = repo.adminMicrosoftFilterQuery(
+		context.Background(),
+		coreapp.AdminMicrosoftListFilter{Search: "991128", OwnerIDs: []uint{9901}},
+		time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC),
+		"",
+	).Count(&total)
+	require.NoError(t, result.Error)
+	idSQL := strings.ToLower(strings.ReplaceAll(sqlLog.String(), string(rune(96)), ""))
+	sqlLog.Reset()
+	require.Contains(t, idSQL, "er.id = 991128")
+	require.Contains(t, idSQL, "er.owner_user_id in (9901)")
+	require.NotContains(t, idSQL, "email_address like")
+	require.NotContains(t, idSQL, "exists (select")
+	require.NotContains(t, idSQL, "join (select id as resource_id")
 
 	now := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
 	_, err := repo.AdminMicrosoftFacets(context.Background(), coreapp.AdminMicrosoftListFilter{}, now)

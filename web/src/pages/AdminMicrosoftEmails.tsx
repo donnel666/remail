@@ -143,6 +143,7 @@ export default function AdminMicrosoftEmails() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailBusy, setDetailBusy] = useState(false);
   const detailRequestRef = useRef<AbortController | null>(null);
+  const statsRequestRef = useRef<AbortController | null>(null);
   const [rowBusy, setRowBusy] = useState<{
     action: "check" | "delete" | "publish" | "recover" | "toggle";
     id: number;
@@ -205,16 +206,21 @@ export default function AdminMicrosoftEmails() {
   const listFilterKey = JSON.stringify(listFilter);
 
   const loadMicrosoftBlock = useCallback(
-    async (offset: number, limit: number, cursor?: { afterId?: number }) => {
+    async (
+      offset: number,
+      limit: number,
+      cursor: { afterId?: number } | undefined,
+      signal: AbortSignal
+    ) => {
       const response = await listAdminMicrosoftResources(
         listFilter,
         offset,
         limit,
-        cursor?.afterId
+        cursor?.afterId,
+        { includeFacets: false, includeTotal: false, signal }
       );
       return {
         items: response.items,
-        meta: response.facets,
         nextAfterId: response.nextAfterId,
         total: response.total,
       };
@@ -222,19 +228,13 @@ export default function AdminMicrosoftEmails() {
     [listFilter]
   );
 
-  const acceptMicrosoftBlock = useCallback(
-    (response: { meta?: AdminMicrosoftFacets }) => {
-      if (response.meta) setFacets(response.meta);
-    },
-    []
-  );
-
   const {
     loading,
     pagedItems,
     refresh: refreshList,
+    setTotal: setListTotal,
     total,
-  } = useBlockPagedList<AdminMicrosoftResourceItem, AdminMicrosoftFacets>({
+  } = useBlockPagedList<AdminMicrosoftResourceItem>({
     activePage,
     blockSize: 100,
     filterKey: listFilterKey,
@@ -242,9 +242,43 @@ export default function AdminMicrosoftEmails() {
     onError: (error) => {
       Toast.error(getIamErrorMessage(t, error, "Admin Microsoft resources load failed."));
     },
-    onLoaded: acceptMicrosoftBlock,
     pageSize,
   });
+
+  const refreshStats = useCallback(async () => {
+    statsRequestRef.current?.abort();
+    const controller = new AbortController();
+    statsRequestRef.current = controller;
+    try {
+      const response = await listAdminMicrosoftResources(
+        listFilter,
+        0,
+        1,
+        undefined,
+        { includeFacets: true, signal: controller.signal }
+      );
+      if (controller.signal.aborted) return;
+      setFacets(response.facets ?? null);
+      if (response.total !== undefined) setListTotal(response.total);
+    } catch {
+      // The next refresh retries stats; aborted and failed requests never replace current data.
+    } finally {
+      if (statsRequestRef.current === controller) statsRequestRef.current = null;
+    }
+  }, [listFilter, setListTotal]);
+
+  useEffect(() => {
+    setFacets(null);
+    void refreshStats();
+    return () => {
+      statsRequestRef.current?.abort();
+      statsRequestRef.current = null;
+    };
+  }, [refreshStats]);
+
+  const refresh = useCallback(async () => {
+    await Promise.all([refreshStats(), refreshList()]);
+  }, [refreshList, refreshStats]);
 
   const refreshOpenDetail = useCallback(async (resourceId?: number) => {
     const id = resourceId ?? detail?.id;
@@ -263,7 +297,7 @@ export default function AdminMicrosoftEmails() {
   const refreshAfterMutation = useCallback(
     async (resourceId?: number) => {
       try {
-        await refreshList();
+        await refresh();
         if (resourceId) await refreshOpenDetail(resourceId);
       } catch (error) {
         Toast.error(
@@ -271,7 +305,7 @@ export default function AdminMicrosoftEmails() {
         );
       }
     },
-    [refreshList, refreshOpenDetail, t]
+    [refresh, refreshOpenDetail, t]
   );
 
   const showBulkOutcome = useCallback(
@@ -980,7 +1014,7 @@ export default function AdminMicrosoftEmails() {
         <Button
           className="remail-toolbar-fixed-button flex-1 md:flex-none"
           loading={loading}
-          onClick={() => void refreshList()}
+          onClick={() => void refresh()}
           size="small"
           type="tertiary"
         >

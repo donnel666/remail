@@ -48,22 +48,30 @@ export interface ResourceListFilter {
   tld?: string;
 }
 
+interface ResourceListOptions {
+  includeFacets?: boolean;
+  includeTotal?: boolean;
+  signal?: AbortSignal;
+}
+
 export async function listOwnedMicrosoftResources(
   filter: ResourceListFilter = {},
   offset = 0,
   limit = 20,
-  afterId?: number
+  afterId?: number,
+  options: ResourceListOptions = {}
 ) {
-  return listOwnedResources("microsoft", filter, offset, limit, afterId);
+  return listOwnedResources("microsoft", filter, offset, limit, afterId, options);
 }
 
 export async function listOwnedDomainResources(
   filter: ResourceListFilter = {},
   offset = 0,
   limit = 20,
-  afterId?: number
+  afterId?: number,
+  options: ResourceListOptions = {}
 ) {
-  return listOwnedResources("domain", filter, offset, limit, afterId);
+  return listOwnedResources("domain", filter, offset, limit, afterId, options);
 }
 
 async function listOwnedResources(
@@ -71,7 +79,8 @@ async function listOwnedResources(
   filter: ResourceListFilter,
   offset: number,
   limit: number,
-  afterId?: number
+  afterId: number | undefined,
+  options: ResourceListOptions
 ) {
   return unwrap<ResourceListResponse>(
     await client.GET("/v1/resources", {
@@ -83,8 +92,11 @@ async function listOwnedResources(
           offset,
           afterId,
           limit,
+          includeFacets: options.includeFacets,
+          includeTotal: options.includeTotal,
         },
       },
+      signal: options.signal,
     })
   );
 }

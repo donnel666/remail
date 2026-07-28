@@ -7,7 +7,7 @@ export interface BlockPageResult<T, M = undefined> {
   items: T[];
   meta?: M;
   nextAfterId?: number | null;
-  total: number;
+  total?: number;
 }
 
 export interface BlockLoadCursor {
@@ -21,7 +21,8 @@ interface UseBlockPagedListOptions<T, M = undefined> {
   loadBlock: (
     offset: number,
     limit: number,
-    cursor?: BlockLoadCursor
+    cursor: BlockLoadCursor | undefined,
+    signal: AbortSignal
   ) => Promise<BlockPageResult<T, M>>;
   onError?: (error: unknown) => void;
   onLoaded?: (response: BlockPageResult<T, M>) => void;
@@ -31,7 +32,6 @@ interface UseBlockPagedListOptions<T, M = undefined> {
 interface CachedBlock<T> {
   items: T[];
   nextAfterId?: number | null;
-  total: number;
 }
 
 function blockOffsetForIndex(index: number, blockSize: number) {
@@ -49,9 +49,10 @@ export function useBlockPagedList<T, M = undefined>({
 }: UseBlockPagedListOptions<T, M>) {
   const cacheRef = useRef(new Map<number, CachedBlock<T>>());
   const pendingRef = useRef(new Map<number, Promise<void>>());
+  const controllersRef = useRef(new Map<number, AbortController>());
   const loadSeqRef = useRef(0);
   const [loading, setLoading] = useState(true);
-  const [total, setTotal] = useState(0);
+  const [total, setTotalState] = useState(0);
   const [version, setVersion] = useState(0);
 
   const pageStart = Math.max(activePage - 1, 0) * pageSize;
@@ -78,16 +79,21 @@ export function useBlockPagedList<T, M = undefined>({
         offset > 0 && previousBlock?.nextAfterId
           ? { afterId: previousBlock.nextAfterId }
           : undefined;
+      const controller = new AbortController();
+      controllersRef.current.set(offset, controller);
 
-      const request = loadBlock(offset, blockSize, cursor)
+      const request = loadBlock(offset, blockSize, cursor, controller.signal)
         .then((response) => {
           if (loadSeqRef.current !== seq) return;
           cacheRef.current.set(offset, {
             items: response.items,
             nextAfterId: response.nextAfterId ?? null,
-            total: response.total,
           });
-          setTotal(response.total);
+          const observedTotal =
+            offset + response.items.length + (response.nextAfterId ? 1 : 0);
+          setTotalState((current) =>
+            response.total ?? Math.max(current, observedTotal)
+          );
           onLoaded?.(response);
           bumpVersion();
         })
@@ -98,6 +104,9 @@ export function useBlockPagedList<T, M = undefined>({
           if (pendingRef.current.get(offset) === request) {
             pendingRef.current.delete(offset);
           }
+          if (controllersRef.current.get(offset) === controller) {
+            controllersRef.current.delete(offset);
+          }
           if (foreground && loadSeqRef.current === seq) setLoading(false);
         });
 
@@ -107,14 +116,20 @@ export function useBlockPagedList<T, M = undefined>({
     [blockSize, bumpVersion, loadBlock, onError, onLoaded]
   );
 
-  const clear = useCallback(() => {
+  const cancelPending = useCallback(() => {
     loadSeqRef.current += 1;
-    cacheRef.current.clear();
+    controllersRef.current.forEach((controller) => controller.abort());
+    controllersRef.current.clear();
     pendingRef.current.clear();
-    setTotal(0);
+  }, []);
+
+  const clear = useCallback(() => {
+    cancelPending();
+    cacheRef.current.clear();
+    setTotalState(0);
     setLoading(true);
     bumpVersion();
-  }, [bumpVersion]);
+  }, [bumpVersion, cancelPending]);
 
   const refresh = useCallback(async () => {
     clear();
@@ -124,6 +139,8 @@ export function useBlockPagedList<T, M = undefined>({
   useEffect(() => {
     clear();
   }, [clear, filterKey]);
+
+  useEffect(() => cancelPending, [cancelPending]);
 
   useEffect(() => {
     void loadBlockAt(currentBlockOffset, true);
@@ -136,7 +153,7 @@ export function useBlockPagedList<T, M = undefined>({
     const pageEnd = pageStart + pageSize;
     const prefetchAt = currentBlockOffset + blockSize * PREFETCH_THRESHOLD;
     const nextBlockOffset = currentBlockOffset + blockSize;
-    if (pageEnd >= prefetchAt && nextBlockOffset < block.total) {
+    if (pageEnd >= prefetchAt && block.nextAfterId) {
       void loadBlockAt(nextBlockOffset, false);
     }
   }, [blockSize, currentBlockOffset, loadBlockAt, pageSize, pageStart, version]);
@@ -168,17 +185,12 @@ export function useBlockPagedList<T, M = undefined>({
   );
 
   const adjustTotal = useCallback((delta: number) => {
-    const nextTotalByOffset = new Map<number, CachedBlock<T>>();
-    for (const [offset, block] of cacheRef.current.entries()) {
-      nextTotalByOffset.set(offset, {
-        ...block,
-        total: Math.max(block.total + delta, 0),
-      });
-    }
-    cacheRef.current = nextTotalByOffset;
-    setTotal((value) => Math.max(value + delta, 0));
-    bumpVersion();
-  }, [bumpVersion]);
+    setTotalState((value) => Math.max(value + delta, 0));
+  }, []);
+
+  const setTotal = useCallback((value: number) => {
+    setTotalState(Math.max(value, 0));
+  }, []);
 
   return {
     adjustTotal,
@@ -186,6 +198,7 @@ export function useBlockPagedList<T, M = undefined>({
     loading: loading && !currentBlock,
     pagedItems,
     refresh,
+    setTotal,
     total,
     updateLoadedItems,
   };

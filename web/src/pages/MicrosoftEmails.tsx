@@ -94,6 +94,7 @@ export default function MicrosoftEmails() {
   const { currentUser, refreshCurrentUser } = useAuth();
   const isMobile = useIsMobile();
   const validationControllersRef = useRef(new Set<AbortController>());
+  const statsRequestRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const controllers = validationControllersRef.current;
@@ -164,12 +165,18 @@ export default function MicrosoftEmails() {
   }, [activeSuffix, microsoftStatsFilter]);
 
   const loadMicrosoftBlock = useCallback(
-    async (offset: number, limit: number, cursor?: { afterId?: number }) => {
+    async (
+      offset: number,
+      limit: number,
+      cursor: { afterId?: number } | undefined,
+      signal: AbortSignal
+    ) => {
       const response = await listOwnedMicrosoftResources(
         microsoftListFilter,
         offset,
         limit,
-        cursor?.afterId
+        cursor?.afterId,
+        { includeFacets: false, includeTotal: false, signal }
       );
       return {
         items: response.items.map(toEmailResource).filter(isEmailResource),
@@ -185,10 +192,12 @@ export default function MicrosoftEmails() {
     loading,
     pagedItems,
     refresh: refreshList,
+    setTotal: setListTotal,
     total,
     updateLoadedItems,
   } = useBlockPagedList<EmailResource>({
     activePage,
+    blockSize: 100,
     filterKey: JSON.stringify(microsoftListFilter),
     loadBlock: loadMicrosoftBlock,
     onError: (error) => {
@@ -198,20 +207,34 @@ export default function MicrosoftEmails() {
   });
 
   const refreshStats = useCallback(async () => {
+    statsRequestRef.current?.abort();
+    const controller = new AbortController();
+    statsRequestRef.current = controller;
     try {
       const response = await listOwnedMicrosoftResources(
-        microsoftStatsFilter,
+        microsoftListFilter,
         0,
-        1
+        1,
+        undefined,
+        { includeFacets: true, signal: controller.signal }
       );
+      if (controller.signal.aborted) return;
       setResourceFacets(response.facets ?? null);
+      if (response.total !== undefined) setListTotal(response.total);
     } catch {
-      // Keep the previous tabs stable; the next refresh will retry stats.
+      // The next refresh retries stats; aborted and failed requests never replace current data.
+    } finally {
+      if (statsRequestRef.current === controller) statsRequestRef.current = null;
     }
-  }, [microsoftStatsFilter]);
+  }, [microsoftListFilter, setListTotal]);
 
   useEffect(() => {
+    setResourceFacets(null);
     void refreshStats();
+    return () => {
+      statsRequestRef.current?.abort();
+      statsRequestRef.current = null;
+    };
   }, [refreshStats]);
 
   const refresh = useCallback(async () => {

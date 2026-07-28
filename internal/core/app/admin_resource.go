@@ -152,6 +152,8 @@ type AdminMicrosoftListFilter struct {
 	CreatedFrom    *time.Time
 	CreatedTo      *time.Time
 	OwnerIDs       []uint
+	SkipFacets     bool `json:"-"`
+	SkipTotal      bool `json:"-"`
 }
 
 type AdminMicrosoftRecord struct {
@@ -226,6 +228,7 @@ type AdminMicrosoftFacets struct {
 
 type AdminMicrosoftReadRepository interface {
 	ListAdminMicrosoft(ctx context.Context, filter AdminMicrosoftListFilter, offset, limit int, afterID uint, now time.Time) ([]AdminMicrosoftRecord, error)
+	CountAdminMicrosoft(ctx context.Context, filter AdminMicrosoftListFilter, now time.Time) (int64, error)
 	AdminMicrosoftFacets(ctx context.Context, filter AdminMicrosoftListFilter, now time.Time) (*AdminMicrosoftFacets, error)
 	FindAdminMicrosoft(ctx context.Context, resourceID uint) (*AdminMicrosoftRecord, error)
 	ListAdminMicrosoftAliases(ctx context.Context, resourceID uint, kind string, offset, limit int) ([]AdminMicrosoftAliasItem, int64, error)
@@ -295,6 +298,7 @@ type AdminMicrosoftListResult struct {
 	Limit       int
 	NextAfterID *uint
 	Facets      AdminMicrosoftFacets
+	HasFacets   bool
 }
 
 type AdminMicrosoftAliasItem struct {
@@ -378,7 +382,18 @@ func (q *AdminResourceQuery) List(ctx context.Context, filter AdminMicrosoftList
 	if err != nil {
 		return nil, err
 	}
-	facets, err := q.repo.AdminMicrosoftFacets(ctx, filter, now)
+	var total int64
+	var facets AdminMicrosoftFacets
+	if filter.SkipFacets && !filter.SkipTotal {
+		total, err = q.repo.CountAdminMicrosoft(ctx, filter, now)
+	} else if !filter.SkipFacets {
+		loadedFacets, facetsErr := q.repo.AdminMicrosoftFacets(ctx, filter, now)
+		if facetsErr != nil {
+			return nil, facetsErr
+		}
+		facets = *loadedFacets
+		total = reconcileCachedListTotal(facets.Matched, offset, limit, afterID, len(records))
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -401,11 +416,12 @@ func (q *AdminResourceQuery) List(ctx context.Context, filter AdminMicrosoftList
 	}
 	return &AdminMicrosoftListResult{
 		Items:       items,
-		Total:       reconcileCachedListTotal(facets.Matched, offset, limit, afterID, len(records)),
+		Total:       total,
 		Offset:      offset,
 		Limit:       limit,
 		NextAfterID: adminNextAfterID(records, limit),
-		Facets:      *facets,
+		Facets:      facets,
+		HasFacets:   !filter.SkipFacets,
 	}, nil
 }
 

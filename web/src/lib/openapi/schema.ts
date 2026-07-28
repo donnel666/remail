@@ -2843,7 +2843,7 @@ export interface paths {
         };
         /**
          * List Microsoft resources for the administrator console
-         * @description Requires `core:resource/read`. Directly queries the resource facts and returns administrator-safe Microsoft resource fields plus cross-filter facets. The default query excludes logically deleted resources; `status=deleted` selects deleted resources explicitly. Facets are calculated from the complete matched set and each facet ignores only its own filter. Credential values, tokens, object keys, task leases, and upstream payloads are never returned.
+         * @description Requires `core:resource/read`. Directly queries the resource facts and returns administrator-safe Microsoft resource fields plus optional cross-filter facets. The default query excludes logically deleted resources; `status=deleted` selects deleted resources explicitly. Unless `includeFacets=false`, facets are calculated from the complete matched set and each facet ignores only its own filter. Credential values, tokens, object keys, task leases, and upstream payloads are never returned.
          */
         get: operations["getAdminMicrosoftResources"];
         put?: never;
@@ -4982,7 +4982,8 @@ export interface components {
         };
         ResourceListResponse: {
             items: components["schemas"]["ResourceItem"][];
-            total: number;
+            /** @description Omitted when `includeTotal=false`. */
+            total?: number;
             offset: number;
             limit: number;
             nextAfterId?: number | null;
@@ -6042,12 +6043,16 @@ export interface components {
         };
         AdminMicrosoftResourceListResponse: {
             items: components["schemas"]["AdminMicrosoftResourceItem"][];
-            /** Format: int64 */
-            total: number;
+            /**
+             * Format: int64
+             * @description Omitted when `includeTotal=false`.
+             */
+            total?: number;
             offset: number;
             limit: number;
             nextAfterId: number | null;
-            facets: components["schemas"]["AdminMicrosoftFacets"];
+            /** @description Omitted when `includeFacets=false`. */
+            facets?: components["schemas"]["AdminMicrosoftFacets"];
         };
         AdminMicrosoftAliasCounts: {
             /** Format: int64 */
@@ -11315,6 +11320,10 @@ export interface operations {
                 longLived?: boolean;
                 /** @description Microsoft Graph availability filter. */
                 graphAvailable?: boolean;
+                /** @description Set false for list-only requests to skip complete-set facet aggregation. */
+                includeFacets?: boolean;
+                /** @description Set false for cursor-list requests to skip the complete-set count. */
+                includeTotal?: boolean;
                 /** @description Inclusive resource creation lower bound. */
                 createdFrom?: string;
                 /** @description Inclusive resource creation upper bound. */
@@ -16838,7 +16847,7 @@ export interface operations {
             query: {
                 /** @description This administrator query is limited to Microsoft resources. */
                 type: "microsoft";
-                /** @description Case-insensitive search across resource ID, mailbox address, and owner display identity. */
+                /** @description Case-insensitive prefix search across mailbox addresses and owner display identity; an all-digit value matches resource or owner ID exactly. */
                 search?: string;
                 /** @description Exact normalized mailbox domain. Values with or without a leading `@` are accepted. */
                 suffix?: string;
@@ -16847,6 +16856,10 @@ export interface operations {
                 forSale?: boolean;
                 longLived?: boolean;
                 graphAvailable?: boolean;
+                /** @description Set false for list-only requests to skip complete-set facet aggregation. */
+                includeFacets?: boolean;
+                /** @description Set false for cursor-list requests to skip the complete-set count. */
+                includeTotal?: boolean;
                 tokenHealth?: components["schemas"]["AdminMicrosoftTokenHealth"];
                 /** @description Inclusive ISO 8601 creation-time lower bound. */
                 createdFrom?: string;
@@ -16863,7 +16876,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Paginated Microsoft resource list and server-side facets */
+            /** @description Paginated Microsoft resource list with optional server-side facets */
             200: {
                 headers: {
                     [name: string]: unknown;

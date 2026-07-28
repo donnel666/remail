@@ -1139,6 +1139,8 @@ type ResourceListFilter struct {
 	GraphAvailable *bool      `json:"graphAvailable,omitempty"`
 	CreatedFrom    *time.Time `json:"createdFrom,omitempty"`
 	CreatedTo      *time.Time `json:"createdTo,omitempty"`
+	SkipFacets     bool       `json:"-"`
+	SkipTotal      bool       `json:"-"`
 }
 
 // ResourceBulkFilter keeps bulk command APIs on the same filter semantics as
@@ -1216,18 +1218,20 @@ func (uc *ResourceUseCase) List(ctx context.Context, ownerUserID uint, scope str
 			return nil, err
 		}
 	}
-	facets, err = uc.resources.Facets(ctx, facetOwnerUserID, filter)
-	if err != nil {
-		return nil, err
+	if !filter.SkipFacets {
+		facets, err = uc.resources.Facets(ctx, facetOwnerUserID, filter)
+		if err != nil {
+			return nil, err
+		}
 	}
-	if filter.ResourceType == domain.ResourceTypeMicrosoft {
+	if facets != nil && filter.ResourceType == domain.ResourceTypeMicrosoft && !filter.SkipTotal {
 		total = reconcileCachedListTotal(facets.Matched, offset, limit, afterID, len(resources))
-	} else if scope == "all" {
+	} else if !filter.SkipTotal && scope == "all" {
 		total, err = uc.resources.CountAll(ctx, filter)
 		if err != nil {
 			return nil, err
 		}
-	} else {
+	} else if !filter.SkipTotal {
 		total, err = uc.resources.Count(ctx, ownerUserID, filter)
 		if err != nil {
 			return nil, err

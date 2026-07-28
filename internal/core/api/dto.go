@@ -181,7 +181,7 @@ type ResourceItemResponse struct {
 // ResourceListResponse is the paginated resource list response.
 type ResourceListResponse struct {
 	Items       []ResourceItemResponse      `json:"items"`
-	Total       int64                       `json:"total"`
+	Total       *int64                      `json:"total,omitempty"`
 	Offset      int                         `json:"offset"`
 	Limit       int                         `json:"limit"`
 	NextAfterID *uint                       `json:"nextAfterId,omitempty"`

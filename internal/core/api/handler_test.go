@@ -29,10 +29,12 @@ import (
 // --- In-memory mock repositories for testing ---
 
 type mockResourceRepo struct {
-	resources map[uint]*coredomain.EmailResource
-	microsoft map[uint]*coredomain.MicrosoftResource
-	domains   map[uint]*coredomain.MailDomainResource
-	seq       uint
+	resources   map[uint]*coredomain.EmailResource
+	microsoft   map[uint]*coredomain.MicrosoftResource
+	domains     map[uint]*coredomain.MailDomainResource
+	seq         uint
+	facetsCalls int
+	countCalls  int
 }
 
 func newMockResourceRepo() *mockResourceRepo {
@@ -597,14 +599,17 @@ func (r *mockResourceRepo) ListAll(_ context.Context, filter coreapp.ResourceLis
 }
 
 func (r *mockResourceRepo) Count(_ context.Context, ownerUserID uint, filter coreapp.ResourceListFilter) (int64, error) {
+	r.countCalls++
 	return int64(len(r.listResources(ownerUserID, filter, 0, 0))), nil
 }
 
 func (r *mockResourceRepo) CountAll(_ context.Context, filter coreapp.ResourceListFilter) (int64, error) {
+	r.countCalls++
 	return int64(len(r.listResources(0, filter, 0, 0))), nil
 }
 
 func (r *mockResourceRepo) Facets(_ context.Context, ownerUserID uint, filter coreapp.ResourceListFilter) (*coreapp.ResourceListFacets, error) {
+	r.facetsCalls++
 	facets := &coreapp.ResourceListFacets{Matched: int64(len(r.listResources(ownerUserID, filter, 0, 0)))}
 	statusBase := filter
 	statusBase.Status = ""
@@ -2714,8 +2719,8 @@ func TestCoreHandler_ResourceListIncludesStatusFields(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}
-	if resp.Total != 2 || len(resp.Items) != 2 {
-		t.Fatalf("expected 2 resources, got total=%d len=%d", resp.Total, len(resp.Items))
+	if resp.Total == nil || *resp.Total != 2 || len(resp.Items) != 2 {
+		t.Fatalf("expected 2 resources, got total=%v len=%d", resp.Total, len(resp.Items))
 	}
 
 	var sawMicrosoft, sawDomain bool
@@ -2799,8 +2804,60 @@ func TestCoreHandler_ResourceListScopeAllFallsBackToOwnedForNonAdmin(t *testing.
 	var resp ResourceListResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	require.Equal(t, 1, len(resp.Items))
-	require.Equal(t, int64(1), resp.Total)
+	require.NotNil(t, resp.Total)
+	require.Equal(t, int64(1), *resp.Total)
 	require.Equal(t, "owner@example.com", resp.Items[0].Email)
+}
+
+func TestCoreHandler_ResourceListCanSkipFacets(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	mod, resourceRepo, _, _ := setupCoreTestModule()
+	h := NewCoreHandler(mod)
+	root := &coredomain.EmailResource{Type: coredomain.ResourceTypeMicrosoft, OwnerUserID: 1}
+	resource := &coredomain.MicrosoftResource{
+		EmailAddress: "owner@example.com", Password: "secret", Status: coredomain.MicrosoftStatusNormal,
+	}
+	require.NoError(t, resourceRepo.CreateMicrosoft(context.Background(), root, resource))
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/v1/resources?type=microsoft&includeFacets=false", nil)
+	setAuthContext(c, 1, iamdomain.RoleUser)
+
+	h.GetResources(c)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var response ResourceListResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	require.NotNil(t, response.Total)
+	require.EqualValues(t, 1, *response.Total)
+	require.Nil(t, response.Facets)
+	require.Zero(t, resourceRepo.facetsCalls)
+}
+
+func TestCoreHandler_ResourceListCanSkipFacetsAndTotal(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	mod, resourceRepo, _, _ := setupCoreTestModule()
+	h := NewCoreHandler(mod)
+	require.NoError(t, resourceRepo.CreateMicrosoft(context.Background(),
+		&coredomain.EmailResource{Type: coredomain.ResourceTypeMicrosoft, OwnerUserID: 1},
+		&coredomain.MicrosoftResource{EmailAddress: "owner@example.com", Password: "secret", Status: coredomain.MicrosoftStatusNormal},
+	))
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/v1/resources?type=microsoft&includeFacets=false&includeTotal=false", nil)
+	setAuthContext(c, 1, iamdomain.RoleUser)
+
+	h.GetResources(c)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.NotContains(t, w.Body.String(), "\"total\"")
+	require.NotContains(t, w.Body.String(), "\"facets\"")
+	require.Zero(t, resourceRepo.countCalls)
+	require.Zero(t, resourceRepo.facetsCalls)
 }
 
 func TestCoreHandler_SelfServiceDomainResourcesHideBindingDomainsAndFacets(t *testing.T) {
@@ -2837,7 +2894,8 @@ func TestCoreHandler_SelfServiceDomainResourcesHideBindingDomainsAndFacets(t *te
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	var response ResourceListResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
-	require.EqualValues(t, 1, response.Total)
+	require.NotNil(t, response.Total)
+	require.EqualValues(t, 1, *response.Total)
 	require.Len(t, response.Items, 1)
 	require.Equal(t, visibleDomain.Domain, response.Items[0].Domain)
 	require.NotContains(t, w.Body.String(), bindingDomain.Domain)
