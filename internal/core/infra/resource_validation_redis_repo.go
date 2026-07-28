@@ -10,11 +10,16 @@ import (
 	coreapp "github.com/donnel666/remail/internal/core/app"
 	"github.com/donnel666/remail/internal/core/domain"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
+	"github.com/donnel666/remail/internal/platform"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
-const validationAssignmentSettleAfter = time.Second
+const (
+	validationAssignmentSettleAfter = time.Second
+	validationDispatchCursorKey     = "core:resource_validation:dispatch_cursor"
+	validationDispatchCycle         = platform.BackgroundMicrosoftValidationWeight + platform.BackgroundDomainValidationWeight
+)
 
 func (r *ResourceValidationRepo) MarkResourcePendingWithLog(
 	ctx context.Context,
@@ -244,53 +249,187 @@ func captureValidationBatchThroughID(ctx context.Context, tx *gorm.DB, ownerUser
 }
 
 func (r *ResourceValidationRepo) CountAssignedValidations(ctx context.Context) (int, error) {
+	assigned, err := r.countAssignedValidations(ctx)
+	return assigned.total(), err
+}
+
+type validationAssignmentCounts struct {
+	Microsoft int `gorm:"column:microsoft_assigned"`
+	Domain    int `gorm:"column:domain_assigned"`
+}
+
+func (c validationAssignmentCounts) total() int {
+	return c.Microsoft + c.Domain
+}
+
+func (r *ResourceValidationRepo) countAssignedValidations(ctx context.Context) (validationAssignmentCounts, error) {
 	if r == nil || r.db == nil {
-		return 0, coreapp.ErrValidationTemporaryUnavailable
+		return validationAssignmentCounts{}, coreapp.ErrValidationTemporaryUnavailable
 	}
-	var assigned int
+	var assigned validationAssignmentCounts
 	if err := r.db.WithContext(ctx).Raw(`
 SELECT
-    (SELECT COUNT(*) FROM microsoft_resources WHERE status = ?) +
-    (SELECT COUNT(*) FROM domain_resources WHERE status = ?) AS assigned`,
+	    (SELECT COUNT(*) FROM microsoft_resources WHERE status = ?) AS microsoft_assigned,
+	    (SELECT COUNT(*) FROM domain_resources WHERE status = ?) AS domain_assigned`,
 		string(domain.MicrosoftStatusValidating),
 		string(domain.DomainStatusValidating),
 	).Scan(&assigned).Error; err != nil {
-		return 0, fmt.Errorf("count assigned resource validations: %w", err)
+		return validationAssignmentCounts{}, fmt.Errorf("count assigned resource validations: %w", err)
 	}
 	return assigned, nil
 }
 
-func (r *ResourceValidationRepo) ClaimPendingValidations(ctx context.Context, limit int) ([]coreapp.ResourceValidationTask, error) {
-	if r == nil || r.db == nil || limit <= 0 {
+func (r *ResourceValidationRepo) ClaimPendingValidations(ctx context.Context, windowLimit int) ([]coreapp.ResourceValidationTask, error) {
+	if r == nil || r.db == nil || windowLimit <= 0 {
 		return nil, nil
 	}
-	var candidates []validationCandidateRow
-	now := time.Now().UTC()
-	err := r.db.WithContext(ctx).
-		Table("email_resources AS er").
-		Select("er.id, er.type AS resource_type, er.owner_user_id, COALESCE(ms.credential_revision, 0) AS credential_revision, COALESCE(ms.validation_generation, dr.validation_generation, 0) AS validation_generation, COALESCE(ms.status, '') AS microsoft_status, COALESCE(dr.status, '') AS domain_status").
-		Joins("LEFT JOIN microsoft_resources AS ms ON ms.id = er.id AND er.type = ?", string(domain.ResourceTypeMicrosoft)).
-		Joins("LEFT JOIN domain_resources AS dr ON dr.id = er.id AND er.type = ?", string(domain.ResourceTypeDomain)).
-		Where("(er.type = ? AND ms.status = ?) OR (er.type = ? AND dr.status = ?)",
-			string(domain.ResourceTypeMicrosoft), string(domain.MicrosoftStatusPending),
-			string(domain.ResourceTypeDomain), string(domain.DomainStatusPending)).
-		Where("(er.type = ? AND ms.updated_at <= ?) OR (er.type = ? AND dr.updated_at <= ?)",
-			string(domain.ResourceTypeMicrosoft), now.Add(-validationAssignmentSettleAfter),
-			string(domain.ResourceTypeDomain), now.Add(-validationAssignmentSettleAfter)).
-		Order("er.id ASC").Limit(limit).
-		Find(&candidates).Error
+	assigned, err := r.countAssignedValidations(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("list pending resource validations: %w", err)
+		return nil, err
 	}
-	tasks := make([]coreapp.ResourceValidationTask, len(candidates))
-	for i := range candidates {
+	available := max(0, windowLimit-assigned.total())
+	if available == 0 && assigned.Microsoft > 0 && assigned.Domain > 0 {
+		return nil, nil
+	}
+	scanLimit := max(available, 1)
+	now := time.Now().UTC()
+	readyBefore := now.Add(-validationAssignmentSettleAfter)
+	microsoftTasks, err := r.listPendingMicrosoftValidations(ctx, scanLimit, readyBefore)
+	if err != nil {
+		return nil, err
+	}
+	domainTasks, err := r.listPendingDomainValidations(ctx, scanLimit, readyBefore)
+	if err != nil {
+		return nil, err
+	}
+	needMicrosoft := assigned.Microsoft == 0 && len(microsoftTasks) > 0
+	needDomain := assigned.Domain == 0 && len(domainTasks) > 0
+	reservations := 0
+	if needMicrosoft {
+		reservations++
+	}
+	if needDomain {
+		reservations++
+	}
+	slots := min(max(available, reservations), len(microsoftTasks)+len(domainTasks))
+	if slots == 0 {
+		return nil, nil
+	}
+	start, err := r.advanceValidationDispatchCursor(ctx, slots)
+	if err != nil {
+		return nil, err
+	}
+	tasks := interleaveValidationTasks(microsoftTasks, domainTasks, slots, start)
+	return ensureValidationTypesPresent(tasks, microsoftTasks, domainTasks, needMicrosoft, needDomain), nil
+}
+
+func (r *ResourceValidationRepo) advanceValidationDispatchCursor(ctx context.Context, slots int) (int, error) {
+	if slots <= 0 {
+		return 0, nil
+	}
+	if r.redis != nil {
+		end, err := r.redis.IncrBy(ctx, validationDispatchCursorKey, int64(slots)).Result()
+		if err != nil {
+			return 0, fmt.Errorf("advance resource validation dispatch cursor: %w", err)
+		}
+		start := (end - int64(slots)) % int64(validationDispatchCycle)
+		if start < 0 {
+			start += int64(validationDispatchCycle)
+		}
+		return int(start), nil
+	}
+	start := r.validationDispatchCursor.Add(uint32(slots)) - uint32(slots)
+	return int(start % uint32(validationDispatchCycle)), nil
+}
+
+func ensureValidationTypesPresent(tasks, microsoftTasks, domainTasks []coreapp.ResourceValidationTask, needMicrosoft, needDomain bool) []coreapp.ResourceValidationTask {
+	ensure := func(resourceType domain.ResourceType, candidates []coreapp.ResourceValidationTask, required bool) {
+		if !required || len(candidates) == 0 {
+			return
+		}
+		for _, task := range tasks {
+			if task.ResourceType == resourceType {
+				return
+			}
+		}
+		for index := len(tasks) - 1; index >= 0; index-- {
+			if tasks[index].ResourceType != resourceType {
+				tasks[index] = candidates[0]
+				return
+			}
+		}
+	}
+	ensure(domain.ResourceTypeMicrosoft, microsoftTasks, needMicrosoft)
+	ensure(domain.ResourceTypeDomain, domainTasks, needDomain)
+	return tasks
+}
+
+type pendingValidationRow struct {
+	ID                   uint
+	OwnerUserID          uint   `gorm:"column:owner_user_id"`
+	CredentialRevision   uint64 `gorm:"column:credential_revision"`
+	ValidationGeneration uint64 `gorm:"column:validation_generation"`
+}
+
+func (r *ResourceValidationRepo) listPendingMicrosoftValidations(ctx context.Context, limit int, readyBefore time.Time) ([]coreapp.ResourceValidationTask, error) {
+	var rows []pendingValidationRow
+	if err := r.db.WithContext(ctx).
+		Table("microsoft_resources AS ms").
+		Select("ms.id, er.owner_user_id, ms.credential_revision, ms.validation_generation").
+		Joins("JOIN email_resources AS er ON er.id = ms.id AND er.type = ?", string(domain.ResourceTypeMicrosoft)).
+		Where("ms.status = ? AND ms.updated_at <= ?", string(domain.MicrosoftStatusPending), readyBefore).
+		Order("ms.id ASC").Limit(limit).
+		Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list pending Microsoft validations: %w", err)
+	}
+	tasks := make([]coreapp.ResourceValidationTask, len(rows))
+	for i := range rows {
 		tasks[i] = coreapp.ResourceValidationTask{
-			ResourceID: candidates[i].ID, ResourceType: domain.ResourceType(candidates[i].ResourceType),
-			OwnerUserID: candidates[i].OwnerUserID, ValidationGeneration: candidates[i].ValidationGeneration,
-			ExpectedCredentialRevision: candidates[i].CredentialRevision,
+			ResourceID: rows[i].ID, ResourceType: domain.ResourceTypeMicrosoft,
+			OwnerUserID: rows[i].OwnerUserID, ValidationGeneration: rows[i].ValidationGeneration,
+			ExpectedCredentialRevision: rows[i].CredentialRevision,
 		}
 	}
 	return tasks, nil
+}
+
+func (r *ResourceValidationRepo) listPendingDomainValidations(ctx context.Context, limit int, readyBefore time.Time) ([]coreapp.ResourceValidationTask, error) {
+	var rows []pendingValidationRow
+	if err := r.db.WithContext(ctx).
+		Table("domain_resources AS dr").
+		Select("dr.id, er.owner_user_id, dr.validation_generation").
+		Joins("JOIN email_resources AS er ON er.id = dr.id AND er.type = ?", string(domain.ResourceTypeDomain)).
+		Where("dr.status = ? AND dr.updated_at <= ?", string(domain.DomainStatusPending), readyBefore).
+		Order("dr.id ASC").Limit(limit).
+		Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list pending domain validations: %w", err)
+	}
+	tasks := make([]coreapp.ResourceValidationTask, len(rows))
+	for i := range rows {
+		tasks[i] = coreapp.ResourceValidationTask{
+			ResourceID: rows[i].ID, ResourceType: domain.ResourceTypeDomain,
+			OwnerUserID: rows[i].OwnerUserID, ValidationGeneration: rows[i].ValidationGeneration,
+		}
+	}
+	return tasks, nil
+}
+
+// interleaveValidationTasks is a work-conserving weighted round robin.
+// Either type borrows the whole batch when it is the only non-empty backlog.
+func interleaveValidationTasks(microsoftTasks, domainTasks []coreapp.ResourceValidationTask, limit, start int) []coreapp.ResourceValidationTask {
+	result := make([]coreapp.ResourceValidationTask, 0, min(limit, len(microsoftTasks)+len(domainTasks)))
+	microsoftIndex, domainIndex := 0, 0
+	for slot := 0; len(result) < limit && (microsoftIndex < len(microsoftTasks) || domainIndex < len(domainTasks)); slot++ {
+		wantDomain := (start+slot)%validationDispatchCycle >= platform.BackgroundMicrosoftValidationWeight
+		if (wantDomain && domainIndex < len(domainTasks)) || microsoftIndex >= len(microsoftTasks) {
+			result = append(result, domainTasks[domainIndex])
+			domainIndex++
+			continue
+		}
+		result = append(result, microsoftTasks[microsoftIndex])
+		microsoftIndex++
+	}
+	return result
 }
 
 func (r *ResourceValidationRepo) MarkValidationDispatched(ctx context.Context, task coreapp.ResourceValidationTask) (bool, error) {

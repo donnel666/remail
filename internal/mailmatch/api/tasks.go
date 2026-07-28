@@ -91,7 +91,7 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) {
 		if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 			return fmt.Errorf("decode mailmatch resource fetch task: %w: %w", err, asynq.SkipRetry)
 		}
-		release, admitted := acquireBackgroundExecution(module)
+		release, admitted := acquireBackgroundExecution(ctx, module)
 		if !admitted {
 			if !platform.BackgroundTaskHasRetryHeadroom(ctx) {
 				recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), backgroundReleaseTimeout)
@@ -128,7 +128,7 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) {
 		if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 			return fmt.Errorf("decode project history scan task: %w: %w", err, asynq.SkipRetry)
 		}
-		release, admitted := acquireProjectHistoryCapacity(module)
+		release, admitted := acquireProjectHistoryCapacity(ctx, module)
 		if !admitted {
 			if !platform.BackgroundTaskHasRetryHeadroom(ctx) {
 				recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), backgroundReleaseTimeout)
@@ -164,7 +164,7 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) {
 		if payload.ResourceID == 0 {
 			return fmt.Errorf("decode validated microsoft history scan task: resource identity is missing: %w", asynq.SkipRetry)
 		}
-		release, admitted := acquireProjectHistoryCapacity(module)
+		release, admitted := acquireProjectHistoryCapacity(ctx, module)
 		if !admitted {
 			if !platform.BackgroundTaskHasRetryHeadroom(ctx) {
 				return nil
@@ -288,8 +288,8 @@ func startFetchDispatcherSeeder(module *Module) {
 	}()
 }
 
-func acquireProjectHistoryCapacity(module *Module) (func(), bool) {
-	backgroundRelease, admitted := acquireBackgroundExecution(module)
+func acquireProjectHistoryCapacity(ctx context.Context, module *Module) (func(), bool) {
+	backgroundRelease, admitted := acquireBackgroundExecution(ctx, module)
 	if !admitted {
 		return func() {}, false
 	}
@@ -309,15 +309,11 @@ func acquireProjectHistoryCapacity(module *Module) (func(), bool) {
 	}
 }
 
-func acquireBackgroundExecution(module *Module) (func(), bool) {
+func acquireBackgroundExecution(ctx context.Context, module *Module) (func(), bool) {
 	if module == nil || module.BackgroundExecution == nil {
 		return func() {}, true
 	}
-	release, admitted := module.BackgroundExecution.TryAcquire()
-	if release == nil {
-		release = func() {}
-	}
-	return release, admitted
+	return platform.AcquireBackgroundExecution(ctx, module.BackgroundExecution)
 }
 
 func scheduleMailmatchFetchDispatcher(ctx context.Context, module *Module, delay time.Duration) {

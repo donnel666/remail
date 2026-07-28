@@ -1522,6 +1522,11 @@ func (r *mockValidationRepo) ClaimPendingValidations(_ context.Context, limit in
 	if r.resources == nil {
 		return result, nil
 	}
+	assigned, _ := r.CountAssignedValidations(context.Background())
+	limit = max(0, limit-assigned)
+	if limit == 0 {
+		return result, nil
+	}
 	for id, resource := range r.resources.microsoft {
 		if resource.Status != coredomain.MicrosoftStatusPending {
 			continue

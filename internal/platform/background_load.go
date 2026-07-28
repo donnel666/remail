@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hibiken/asynq"
 	"github.com/shirou/gopsutil/v4/cpu"
 	"github.com/shirou/gopsutil/v4/mem"
 
@@ -77,10 +78,11 @@ type systemLoadSample struct {
 // bounded work and remain outside this window so they cannot block its progress.
 // A denied worker is deferred by Asynq instead of waiting in the handler.
 type adaptiveConcurrencyGate struct {
-	mu      sync.Mutex
-	maximum int
-	limit   int
-	active  int
+	mu            sync.Mutex
+	maximum       int
+	limit         int
+	active        int
+	activeByQueue map[string]int
 }
 
 func newAdaptiveConcurrencyGate(initial, maximum int) *adaptiveConcurrencyGate {
@@ -89,30 +91,58 @@ func newAdaptiveConcurrencyGate(initial, maximum int) *adaptiveConcurrencyGate {
 	}
 	initial = clamp(initial, 1, maximum)
 	return &adaptiveConcurrencyGate{
-		maximum: maximum,
-		limit:   initial,
+		maximum:       maximum,
+		limit:         initial,
+		activeByQueue: make(map[string]int),
 	}
 }
 
 func (g *adaptiveConcurrencyGate) TryAcquire() (func(), bool) {
+	return g.tryAcquire("")
+}
+
+func (g *adaptiveConcurrencyGate) TryAcquireQueue(queue string) (func(), bool) {
+	return g.tryAcquire(queue)
+}
+
+// ponytail: fairness may exceed the adaptive limit by one active task per
+// configured queue; replace this with preemptive queue quotas only if that
+// bounded burst is measurably too expensive.
+func (g *adaptiveConcurrencyGate) tryAcquire(queue string) (func(), bool) {
 	g.mu.Lock()
-	if g.active >= g.limit {
+	if g.active >= g.limit && (queue == "" || g.activeByQueue[queue] > 0) {
 		g.mu.Unlock()
 		return func() {}, false
 	}
 	g.active++
+	if queue != "" {
+		g.activeByQueue[queue]++
+	}
 	g.mu.Unlock()
 	var once sync.Once
-	return func() { once.Do(g.Release) }, true
+	return func() { once.Do(func() { g.release(queue) }) }, true
 }
 
 func (g *adaptiveConcurrencyGate) Release() {
+	g.release("")
+}
+
+func (g *adaptiveConcurrencyGate) release(queue string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.active <= 0 {
 		panic("platform: background concurrency permit released without acquire")
 	}
 	g.active--
+	if queue != "" {
+		if g.activeByQueue[queue] <= 0 {
+			panic("platform: background queue permit released without acquire")
+		}
+		g.activeByQueue[queue]--
+		if g.activeByQueue[queue] == 0 {
+			delete(g.activeByQueue, queue)
+		}
+	}
 }
 
 func (g *adaptiveConcurrencyGate) Resize(limit int) {
@@ -157,9 +187,8 @@ type BackgroundLoadSnapshot struct {
 // half of the hard ceiling; after the first overload, that measured safe point
 // replaces the startup threshold and recovery becomes additive. Requiring real
 // saturation prevents an idle process from silently ramping to the 512 hard
-// ceiling before its first burst. The window never makes queue-specific
-// decisions; Asynq's non-strict weighted polling and durable dispatchers
-// preserve progress across background task types.
+// ceiling before its first burst. Asynq chooses work by queue weight; once a
+// queue is selected, the gate lets its first task break a saturated monopoly.
 type BackgroundLoadController struct {
 	systemLoad         systemLoadReader
 	gate               *adaptiveConcurrencyGate
@@ -416,6 +445,45 @@ func (c *BackgroundLoadController) TryAcquire() (func(), bool) {
 		return func() {}, true
 	}
 	return c.gate.TryAcquire()
+}
+
+func (c *BackgroundLoadController) TryAcquireQueue(queue string) (func(), bool) {
+	if c == nil || c.gate == nil {
+		return func() {}, true
+	}
+	return c.gate.TryAcquireQueue(queue)
+}
+
+// AcquireBackgroundExecution lets a queue that has no running task enter a
+// saturated window once. The small bounded overbooking breaks monopolies while
+// preserving full borrowing when only one queue has work.
+func AcquireBackgroundExecution(ctx context.Context, gate interface {
+	TryAcquire() (release func(), admitted bool)
+}) (func(), bool) {
+	if gate == nil {
+		return func() {}, true
+	}
+	var release func()
+	var admitted bool
+	queue, hasQueue := "", false
+	if ctx != nil {
+		queue, hasQueue = asynq.GetQueueName(ctx)
+	}
+	if hasQueue {
+		if queueGate, ok := gate.(interface {
+			TryAcquireQueue(string) (func(), bool)
+		}); ok {
+			release, admitted = queueGate.TryAcquireQueue(queue)
+		} else {
+			release, admitted = gate.TryAcquire()
+		}
+	} else {
+		release, admitted = gate.TryAcquire()
+	}
+	if release == nil {
+		release = func() {}
+	}
+	return release, admitted
 }
 
 // Available returns the currently unused portion of the adaptive execution

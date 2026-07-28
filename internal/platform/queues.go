@@ -12,6 +12,11 @@ import (
 // failures and therefore do not consume this budget.
 const BackgroundTaskMaxRetry = 5
 
+const (
+	BackgroundMicrosoftValidationWeight = 3
+	BackgroundDomainValidationWeight    = 1
+)
+
 func BackgroundTaskMaxRetryValue() int {
 	return runtimeconfig.Int("background_task_max_retry", BackgroundTaskMaxRetry, 0)
 }
@@ -57,8 +62,12 @@ const (
 	QueueMailtransport = "mailtransport"
 	// QueueDefault carries assorted foreground work (imports, allocation, proxy checks).
 	QueueDefault = "default"
-	// QueueBackgroundValidation carries temporary resource validation tasks.
+	// QueueBackgroundValidation carries temporary Microsoft validation tasks.
+	// Existing deployments use it for Microsoft validation, so the name remains
+	// stable while domain validation gets its own queue below.
 	QueueBackgroundValidation = "background_validation"
+	// QueueBackgroundDomainValidation carries temporary domain DNS validation tasks.
+	QueueBackgroundDomainValidation = "background_domain_validation"
 	// QueueBackgroundAlias carries Microsoft explicit-alias creation.
 	QueueBackgroundAlias = "background_alias"
 	// QueueBackgroundTokenRefresh carries Microsoft refresh-token maintenance.
@@ -79,6 +88,7 @@ var AllQueueNames = []string{
 	QueueMailtransport,
 	QueueDefault,
 	QueueBackgroundValidation,
+	QueueBackgroundDomainValidation,
 	QueueBackgroundAlias,
 	QueueBackgroundTokenRefresh,
 	QueueResource,

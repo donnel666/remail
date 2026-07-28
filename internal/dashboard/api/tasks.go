@@ -32,7 +32,7 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) func(context.Cont
 		if module == nil || module.view == nil {
 			return nil
 		}
-		release, admitted := acquireDashboardBackground(module)
+		release, admitted := acquireDashboardBackground(ctx, module)
 		if !admitted {
 			return platform.ErrBackgroundExecutionDeferred
 		}
@@ -46,7 +46,7 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) func(context.Cont
 		if module == nil || module.adminCache == nil || module.AdminQuery == nil {
 			return nil
 		}
-		release, admitted := acquireDashboardBackground(module)
+		release, admitted := acquireDashboardBackground(ctx, module)
 		if !admitted {
 			return platform.ErrBackgroundExecutionDeferred
 		}
@@ -94,15 +94,11 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) func(context.Cont
 	}
 }
 
-func acquireDashboardBackground(module *Module) (func(), bool) {
+func acquireDashboardBackground(ctx context.Context, module *Module) (func(), bool) {
 	if module == nil || module.background == nil {
 		return func() {}, true
 	}
-	release, admitted := module.background.TryAcquire()
-	if release == nil {
-		release = func() {}
-	}
-	return release, admitted
+	return platform.AcquireBackgroundExecution(ctx, module.background)
 }
 
 func enqueueAdminDashboardRefresh(ctx context.Context, client *asynq.Client) {

@@ -97,7 +97,7 @@ func TestResourceValidationRepoLimitsPendingScanMySQL(t *testing.T) {
 
 	tasks, err := validations.ClaimPendingValidations(context.Background(), 2)
 	require.NoError(t, err)
-	require.Len(t, tasks, 2)
+	require.Len(t, tasks, 1)
 	for _, task := range tasks {
 		activated, activateErr := validations.MarkValidationDispatched(context.Background(), task)
 		require.NoError(t, activateErr)
@@ -106,6 +106,57 @@ func TestResourceValidationRepoLimitsPendingScanMySQL(t *testing.T) {
 	tasks, err = validations.ClaimPendingValidations(context.Background(), 2)
 	require.NoError(t, err)
 	require.Empty(t, tasks)
+}
+
+func TestResourceValidationRepoDoesNotStarveDomainBehindMicrosoftBacklogMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	repo := NewResourceRepo(db)
+	validations := NewResourceValidationRepo(db)
+	insertAdminValidationOwner(t, db)
+
+	for i := range 4 {
+		root := &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1}
+		require.NoError(t, repo.CreateMicrosoft(context.Background(), root, &domain.MicrosoftResource{
+			EmailAddress: fmt.Sprintf("fair-validation-%d@outlook.com", i), Password: "secret", Status: domain.MicrosoftStatusPending,
+		}))
+	}
+	domainRoot := &domain.EmailResource{Type: domain.ResourceTypeDomain, OwnerUserID: 1}
+	require.NoError(t, repo.CreateDomain(context.Background(), domainRoot, &domain.MailDomainResource{
+		Domain: "fair-validation.example.com", MailServerID: 1, Purpose: domain.PurposeNotSale, Status: domain.DomainStatusPending,
+	}))
+	makeValidationAssignmentsReady(t, db)
+
+	tasks, err := validations.ClaimPendingValidations(context.Background(), 4)
+	require.NoError(t, err)
+	require.Len(t, tasks, 4)
+	require.Contains(t, []uint{tasks[0].ResourceID, tasks[1].ResourceID, tasks[2].ResourceID, tasks[3].ResourceID}, domainRoot.ID)
+}
+
+func TestResourceValidationRepoAdmitsDomainWhenMicrosoftOwnsFullWindowMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	repo := NewResourceRepo(db)
+	validations := NewResourceValidationRepo(db)
+	insertAdminValidationOwner(t, db)
+
+	for i := range 4 {
+		root := &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1}
+		require.NoError(t, repo.CreateMicrosoft(context.Background(), root, &domain.MicrosoftResource{
+			EmailAddress: fmt.Sprintf("full-window-%d@outlook.com", i), Password: "secret", Status: domain.MicrosoftStatusPending,
+		}))
+		require.NoError(t, db.Model(&MicrosoftResourceModel{}).Where("id = ?", root.ID).
+			Update("status", string(domain.MicrosoftStatusValidating)).Error)
+	}
+	domainRoot := &domain.EmailResource{Type: domain.ResourceTypeDomain, OwnerUserID: 1}
+	require.NoError(t, repo.CreateDomain(context.Background(), domainRoot, &domain.MailDomainResource{
+		Domain: "full-window.example.com", MailServerID: 1, Purpose: domain.PurposeNotSale, Status: domain.DomainStatusPending,
+	}))
+	makeValidationAssignmentsReady(t, db)
+
+	tasks, err := validations.ClaimPendingValidations(context.Background(), 4)
+	require.NoError(t, err)
+	require.Equal(t, []coreapp.ResourceValidationTask{{
+		ResourceID: domainRoot.ID, ResourceType: domain.ResourceTypeDomain, OwnerUserID: 1, ValidationGeneration: 1,
+	}}, tasks)
 }
 
 func TestResourceValidationRepoPagesRedisBatchAndFreezesHighWaterMySQL(t *testing.T) {

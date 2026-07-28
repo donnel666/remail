@@ -350,6 +350,30 @@ func TestAdaptiveConcurrencyGateResizeUpMakesCapacityImmediatelyAvailable(t *tes
 	releaseSecond()
 }
 
+func TestAdaptiveConcurrencyGateLetsMissingQueueBreakMonopoly(t *testing.T) {
+	gate := newAdaptiveConcurrencyGate(2, 8)
+	releaseFirst, admitted := gate.TryAcquireQueue(QueueBackgroundValidation)
+	require.True(t, admitted)
+	releaseSecond, admitted := gate.TryAcquireQueue(QueueBackgroundValidation)
+	require.True(t, admitted, "one queue may borrow the whole idle window")
+
+	releaseDomain, admitted := gate.TryAcquireQueue(QueueBackgroundDomainValidation)
+	require.True(t, admitted, "a missing queue gets one bounded anti-starvation slot")
+	_, admitted = gate.TryAcquireQueue(QueueBackgroundDomainValidation)
+	require.False(t, admitted, "the anti-starvation slot is one per saturated queue")
+	_, admitted = gate.TryAcquireQueue(QueueBackgroundValidation)
+	require.False(t, admitted)
+
+	limit, active, _ := gate.Stats()
+	require.Equal(t, 2, limit)
+	require.Equal(t, 3, active)
+	releaseFirst()
+	releaseSecond()
+	releaseDomain()
+	_, active, _ = gate.Stats()
+	require.Zero(t, active)
+}
+
 func TestNilBackgroundLoadControllerAdmitsWithoutLimiting(t *testing.T) {
 	var controller *BackgroundLoadController
 	release, admitted := controller.TryAcquire()

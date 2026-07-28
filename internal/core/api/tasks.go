@@ -348,10 +348,7 @@ func tryAcquireBackgroundExecution(ctx context.Context, gate BackgroundExecution
 	if gate == nil {
 		return func() {}, true, nil
 	}
-	release, admitted := gate.TryAcquire()
-	if release == nil {
-		release = func() {}
-	}
+	release, admitted := platform.AcquireBackgroundExecution(ctx, gate)
 	return release, admitted, nil
 }
 

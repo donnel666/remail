@@ -64,7 +64,7 @@ func RegisterAllocationTaskHandlers(mux *asynq.ServeMux, module *Module) func(co
 		if module == nil || module.UseCase == nil {
 			return nil
 		}
-		release, admitted := acquireInventoryRefreshCapacity(module)
+		release, admitted := acquireInventoryRefreshCapacity(ctx, module)
 		if !admitted {
 			return platform.ErrBackgroundExecutionDeferred
 		}
@@ -189,13 +189,9 @@ func startAllocationTaskSeedersWithInventoryInterval(module *Module, candidateIn
 	}
 }
 
-func acquireInventoryRefreshCapacity(module *Module) (func(), bool) {
+func acquireInventoryRefreshCapacity(ctx context.Context, module *Module) (func(), bool) {
 	if module == nil || module.BackgroundExecution == nil {
 		return func() {}, true
 	}
-	release, admitted := module.BackgroundExecution.TryAcquire()
-	if release == nil {
-		release = func() {}
-	}
-	return release, admitted
+	return platform.AcquireBackgroundExecution(ctx, module.BackgroundExecution)
 }

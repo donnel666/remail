@@ -77,11 +77,11 @@ func (s *pickupFallbackTaskState) Release(context.Context, uint, string) error {
 func TestProjectHistoryCapacityIsLimitedToFourWorkers(t *testing.T) {
 	releases := make([]func(), 0, projectHistoryConcurrency)
 	for range projectHistoryConcurrency {
-		release, admitted := acquireProjectHistoryCapacity(nil)
+		release, admitted := acquireProjectHistoryCapacity(context.Background(), nil)
 		require.True(t, admitted)
 		releases = append(releases, release)
 	}
-	_, admitted := acquireProjectHistoryCapacity(nil)
+	_, admitted := acquireProjectHistoryCapacity(context.Background(), nil)
 	require.False(t, admitted)
 	for _, release := range releases {
 		release()
@@ -92,11 +92,11 @@ func TestProjectHistoryCapacityUpdatesAtRuntime(t *testing.T) {
 	defer runtimeconfig.Delete("project_history_concurrency")
 	runtimeconfig.Set("project_history_concurrency", "2")
 
-	first, admitted := acquireProjectHistoryCapacity(nil)
+	first, admitted := acquireProjectHistoryCapacity(context.Background(), nil)
 	require.True(t, admitted)
-	second, admitted := acquireProjectHistoryCapacity(nil)
+	second, admitted := acquireProjectHistoryCapacity(context.Background(), nil)
 	require.True(t, admitted)
-	_, admitted = acquireProjectHistoryCapacity(nil)
+	_, admitted = acquireProjectHistoryCapacity(context.Background(), nil)
 	require.False(t, admitted)
 	first()
 	second()

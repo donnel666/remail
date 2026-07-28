@@ -54,11 +54,12 @@ func foregroundQueueConfig() map[string]int {
 // realtime and foreground tiers.
 func backgroundQueueConfig() map[string]int {
 	return map[string]int{
-		QueueBackgroundValidation:     3,
-		QueueBackgroundAlias:          1,
-		QueueBackgroundTokenRefresh:   1,
-		QueueBackgroundProjectHistory: 1,
-		QueueBackgroundInventory:      1,
+		QueueBackgroundValidation:       BackgroundMicrosoftValidationWeight,
+		QueueBackgroundDomainValidation: BackgroundDomainValidationWeight,
+		QueueBackgroundAlias:            1,
+		QueueBackgroundTokenRefresh:     1,
+		QueueBackgroundProjectHistory:   1,
+		QueueBackgroundInventory:        1,
 		// Admin resource bulk operations (validate/publish/unpublish/delete) are
 		// enqueued to the resource queue; without it here no server consumes them
 		// and every bulk command sits queued forever.

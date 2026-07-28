@@ -123,7 +123,7 @@ func NewCoreModule(db *gorm.DB, redisClient redis.UniversalClient, files governa
 	}
 	importRepo := coreinfra.NewResourceImportRepo(db)
 	importQueue := coreinfra.NewResourceImportQueue(asynqClient)
-	validationRepo := coreinfra.NewResourceValidationRepo(db)
+	validationRepo := coreinfra.NewResourceValidationRepo(db, redisClient)
 	validationQueue := coreinfra.NewResourceValidationQueue(asynqClient, redisClient)
 	mailServerRepo := coreinfra.NewMailServerRepo(db)
 	mailboxRepo := coreinfra.NewGeneratedMailboxRepo(db)

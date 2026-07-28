@@ -20,13 +20,14 @@ const (
 	TypeResourceValidationBatch      = "core:resource_validation_batch"
 	TypeResourceValidationDispatcher = "core:resource_validation_dispatcher"
 
-	ResourceValidationQueueName     = platform.QueueBackgroundValidation
-	validationTaskTimeout           = 15 * time.Minute
-	validationTaskActivationDelay   = time.Second
-	validationBatchTaskTimeout      = time.Minute
-	validationDispatcherTaskTimeout = 30 * time.Second
-	validationBatchLeaseDuration    = 24 * time.Hour
-	validationBatchCleanupTimeout   = 5 * time.Second
+	MicrosoftResourceValidationQueueName = platform.QueueBackgroundValidation
+	DomainResourceValidationQueueName    = platform.QueueBackgroundDomainValidation
+	validationTaskTimeout                = 15 * time.Minute
+	validationTaskActivationDelay        = time.Second
+	validationBatchTaskTimeout           = time.Minute
+	validationDispatcherTaskTimeout      = 30 * time.Second
+	validationBatchLeaseDuration         = 24 * time.Hour
+	validationBatchCleanupTimeout        = 5 * time.Second
 )
 
 type ResourceValidationQueue struct {
@@ -49,11 +50,15 @@ func (q *ResourceValidationQueue) EnqueueResourceValidation(ctx context.Context,
 	if err != nil {
 		return false, fmt.Errorf("marshal resource validation task: %w", err)
 	}
+	queueName := MicrosoftResourceValidationQueueName
+	if task.ResourceType == "domain" {
+		queueName = DomainResourceValidationQueueName
+	}
 	asynqTask := asynq.NewTask(TypeResourceValidation, payload)
 	_, err = q.client.EnqueueContext(
 		ctx,
 		asynqTask,
-		asynq.Queue(ResourceValidationQueueName),
+		asynq.Queue(queueName),
 		asynq.Unique(validationTaskTimeout+validationTaskActivationDelay),
 		asynq.MaxRetry(platform.BackgroundTaskMaxRetryValue()),
 		asynq.Timeout(validationTaskTimeout),

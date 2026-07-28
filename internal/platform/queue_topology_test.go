@@ -26,7 +26,7 @@ func TestRealtimeTierReservesDedicatedCapacityForCodePickup(t *testing.T) {
 		t.Fatal("realtime config must reserve capacity for payment reconciliation")
 	}
 	for name := range rt {
-		if name == QueueBackgroundValidation || name == QueueBackgroundAlias || name == QueueBackgroundTokenRefresh || name == QueueBackgroundProjectHistory || name == QueueBackgroundInventory || name == QueueResource {
+		if name == QueueBackgroundValidation || name == QueueBackgroundDomainValidation || name == QueueBackgroundAlias || name == QueueBackgroundTokenRefresh || name == QueueBackgroundProjectHistory || name == QueueBackgroundInventory || name == QueueResource {
 			t.Fatalf("realtime tier must not serve background queue %s", name)
 		}
 	}
@@ -40,7 +40,7 @@ func TestBackgroundTierOnlyServesBackgroundQueues(t *testing.T) {
 			t.Fatalf("background tier must not serve realtime/foreground queue %s", foreground)
 		}
 	}
-	if bg[QueueBackgroundValidation] != 3 || bg[QueueBackgroundAlias] != 1 || bg[QueueBackgroundTokenRefresh] != 1 || bg[QueueBackgroundProjectHistory] != 1 || bg[QueueBackgroundInventory] != 1 || bg[QueueResource] != 2 {
+	if bg[QueueBackgroundValidation] != 3 || bg[QueueBackgroundDomainValidation] != 1 || bg[QueueBackgroundAlias] != 1 || bg[QueueBackgroundTokenRefresh] != 1 || bg[QueueBackgroundProjectHistory] != 1 || bg[QueueBackgroundInventory] != 1 || bg[QueueResource] != 2 {
 		t.Fatalf("background queues must retain non-zero weighted fairness, got %#v", bg)
 	}
 }

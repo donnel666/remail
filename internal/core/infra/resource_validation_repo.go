@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	coreapp "github.com/donnel666/remail/internal/core/app"
@@ -15,22 +16,29 @@ import (
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
 type ResourceValidationRepo struct {
-	db                     *gorm.DB
-	operationLogs          *governanceinfra.OperationLogRepo
-	microsoftBindingCommit coreapp.MicrosoftValidationBindingCommitPort
+	db                       *gorm.DB
+	redis                    redis.UniversalClient
+	operationLogs            *governanceinfra.OperationLogRepo
+	microsoftBindingCommit   coreapp.MicrosoftValidationBindingCommitPort
+	validationDispatchCursor atomic.Uint32 // isolated-test fallback when Redis is omitted
 }
 
 const resourceValidationInsertSize = 1000
 
-func NewResourceValidationRepo(db *gorm.DB) *ResourceValidationRepo {
-	return &ResourceValidationRepo{
+func NewResourceValidationRepo(db *gorm.DB, redisClients ...redis.UniversalClient) *ResourceValidationRepo {
+	repo := &ResourceValidationRepo{
 		db:            db,
 		operationLogs: governanceinfra.NewOperationLogRepo(db),
 	}
+	if len(redisClients) > 0 {
+		repo.redis = redisClients[0]
+	}
+	return repo
 }
 
 // SetMicrosoftValidationBindingCommitPort installs the MailTransport-owned

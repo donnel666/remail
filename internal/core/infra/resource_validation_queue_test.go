@@ -37,12 +37,21 @@ func TestResourceValidationQueueReportsOnlyNewEnqueueAsAccepted(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, accepted, "a new validation generation must not be deduplicated behind the old task")
 
-	scheduled, err := inspector.ListScheduledTasks(ResourceValidationQueueName)
+	scheduled, err := inspector.ListScheduledTasks(DomainResourceValidationQueueName)
 	require.NoError(t, err)
 	require.Len(t, scheduled, 2)
 	for _, taskInfo := range scheduled {
 		require.Equal(t, platform.BackgroundTaskMaxRetry, taskInfo.MaxRetry)
 	}
+	microsoftTask := task
+	microsoftTask.ResourceID++
+	microsoftTask.ResourceType = "microsoft"
+	accepted, err = queue.EnqueueResourceValidation(context.Background(), microsoftTask)
+	require.NoError(t, err)
+	require.True(t, accepted)
+	microsoftScheduled, err := inspector.ListScheduledTasks(MicrosoftResourceValidationQueueName)
+	require.NoError(t, err)
+	require.Len(t, microsoftScheduled, 1)
 	uniqueKeys := 0
 	for _, key := range server.Keys() {
 		if strings.Contains(key, ":unique:") {
@@ -50,7 +59,61 @@ func TestResourceValidationQueueReportsOnlyNewEnqueueAsAccepted(t *testing.T) {
 			require.Positive(t, server.TTL(key))
 		}
 	}
-	require.Equal(t, 2, uniqueKeys)
+	require.Equal(t, 3, uniqueKeys)
+}
+
+func TestInterleaveValidationTasksBoundsDomainWaitAndBorrowsIdleShare(t *testing.T) {
+	microsoftTasks := []coreapp.ResourceValidationTask{
+		{ResourceID: 1, ResourceType: "microsoft"},
+		{ResourceID: 2, ResourceType: "microsoft"},
+		{ResourceID: 3, ResourceType: "microsoft"},
+		{ResourceID: 4, ResourceType: "microsoft"},
+	}
+	domainTasks := []coreapp.ResourceValidationTask{
+		{ResourceID: 5, ResourceType: "domain"},
+		{ResourceID: 6, ResourceType: "domain"},
+	}
+
+	got := interleaveValidationTasks(microsoftTasks, domainTasks, 4, 0)
+	require.Equal(t, []string{"microsoft", "microsoft", "microsoft", "domain"}, []string{
+		string(got[0].ResourceType), string(got[1].ResourceType), string(got[2].ResourceType), string(got[3].ResourceType),
+	})
+	var singleSlotCycle []string
+	for start := range 4 {
+		single := interleaveValidationTasks(microsoftTasks, domainTasks, 1, start)
+		singleSlotCycle = append(singleSlotCycle, string(single[0].ResourceType))
+	}
+	require.Equal(t, []string{"microsoft", "microsoft", "microsoft", "domain"}, singleSlotCycle)
+	require.Len(t, interleaveValidationTasks(nil, domainTasks, 2, 0), 2)
+	require.Len(t, interleaveValidationTasks(microsoftTasks, nil, 4, 0), 4)
+	reserved := ensureValidationTypesPresent(
+		interleaveValidationTasks(microsoftTasks, domainTasks, 2, 0),
+		microsoftTasks,
+		domainTasks,
+		true,
+		true,
+	)
+	require.Equal(t, []string{"microsoft", "domain"}, []string{
+		string(reserved[0].ResourceType), string(reserved[1].ResourceType),
+	})
+}
+
+func TestValidationDispatchCursorIsSharedAcrossRepoInstances(t *testing.T) {
+	server := miniredis.RunT(t)
+	redisClient := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { require.NoError(t, redisClient.Close()) })
+	repos := []*ResourceValidationRepo{
+		NewResourceValidationRepo(nil, redisClient),
+		NewResourceValidationRepo(nil, redisClient),
+	}
+
+	starts := make([]int, 0, validationDispatchCycle)
+	for index := range validationDispatchCycle {
+		start, err := repos[index%len(repos)].advanceValidationDispatchCursor(context.Background(), 1)
+		require.NoError(t, err)
+		starts = append(starts, start)
+	}
+	require.Equal(t, []int{0, 1, 2, 3}, starts)
 }
 
 func TestResourceValidationBatchQueueUsesFencedLiveLease(t *testing.T) {
