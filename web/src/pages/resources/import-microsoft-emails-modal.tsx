@@ -173,6 +173,7 @@ export function ImportMicrosoftEmailsModal({
       onCancel={close}
       title={t("Import Microsoft Emails")}
       visible={open}
+      width="min(666px, calc(100vw - 32px))"
     >
       <div className="space-y-4">
         <div className="grid grid-cols-2 gap-2">

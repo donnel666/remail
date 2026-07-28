@@ -178,7 +178,7 @@ export function ApplyProjectModal({
       onOk={() => void submit()}
       title={mode === "resubmit" ? t("Resubmit project application") : t("Apply project")}
       visible={visible}
-      width={640}
+      width="min(666px, calc(100vw - 32px))"
     >
       <div className="grid gap-4">
         <label className="block">

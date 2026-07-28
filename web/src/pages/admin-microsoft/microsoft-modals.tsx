@@ -214,7 +214,7 @@ export function ImportMicrosoftModal({
       okText={t("Import")}
       title={t("Import Microsoft Emails")}
       visible={visible}
-      width={640}
+      width="min(666px, calc(100vw - 32px))"
     >
       <div className="space-y-4 py-1">
         <label className="block">

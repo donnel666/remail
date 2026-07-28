@@ -156,7 +156,9 @@ export function DomainFormModal({
           : t("Import Domain Email")
       }
       visible={visible}
-      width={520}
+      width={
+        mode === "import" ? "min(666px, calc(100vw - 32px))" : 520
+      }
     >
       <div className="space-y-3">
         {mode === "import" ? (

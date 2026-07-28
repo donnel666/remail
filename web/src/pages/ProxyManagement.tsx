@@ -409,6 +409,7 @@ function ImportProxyModal({
       title={t("Import proxies")}
       visible={open}
       onCancel={close}
+      width="min(666px, calc(100vw - 32px))"
       footer={
         <Space>
           <Button disabled={busy} onClick={close} theme="outline">

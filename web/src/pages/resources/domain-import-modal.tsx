@@ -78,7 +78,7 @@ export function ImportDomainModal({
       onCancel={close}
       title={t("Import Domain Email")}
       visible={open}
-      width={520}
+      width="min(666px, calc(100vw - 32px))"
     >
       <div className="space-y-4">
         <div className="rounded-xl border border-[var(--semi-color-border)] bg-[var(--semi-color-fill-0)] p-4">

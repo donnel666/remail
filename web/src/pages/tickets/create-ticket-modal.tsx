@@ -16,7 +16,6 @@ import { useTranslation } from "react-i18next";
 
 import { OverflowTooltip } from "@/components/semi/overflow-tooltip";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
-import { useIsMobile } from "@/hooks/use-is-mobile";
 import { listOrders, type OrderResponse } from "@/lib/orders-api";
 import { formatLedgerAmount } from "@/pages/orders/order-meta";
 import { ProjectIcon } from "@/pages/workbench/project-icon";
@@ -66,7 +65,6 @@ export function CreateTicketModal({
   onViewTicket: (ticket: Ticket) => void;
 }) {
   const { t } = useTranslation();
-  const isMobile = useIsMobile();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const attachmentReadIdRef = useRef(0);
 
@@ -325,7 +323,7 @@ export function CreateTicketModal({
       onCancel={() => onOpenChange(false)}
       title={t("Create ticket")}
       visible={open}
-      width={isMobile ? "94%" : 560}
+      width="min(666px, calc(100vw - 32px))"
     >
       <div className="flex flex-col gap-4 pb-1">
         <div>
