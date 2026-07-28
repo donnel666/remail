@@ -46,7 +46,7 @@ func (f *fakeView) ProjectCodeRanking(context.Context, uint, time.Time, time.Tim
 	f.fullReads++
 	return f.ranking, nil
 }
-func (f *fakeView) ProjectSpendBuckets(context.Context, uint, []uint, string, time.Time, time.Time) ([]ProjectSpendRow, error) {
+func (f *fakeView) ProjectSpendBuckets(context.Context, uint, string, time.Time, time.Time) ([]ProjectSpendRow, error) {
 	f.fullReads++
 	return f.spend, nil
 }
@@ -83,6 +83,15 @@ func TestConsoleDashboardAssembly(t *testing.T) {
 	for i := range ranking {
 		ranking[i] = ProjectCountRow{ProjectID: uint(i + 1), Name: "P" + string(rune('A'+i)), Count: 20 - i}
 	}
+	spend := make([]ProjectSpendRow, 8)
+	for i := range spend {
+		spend[i] = ProjectSpendRow{
+			ProjectID: uint(100 + i),
+			Name:      "Spend " + string(rune('A'+i)),
+			Bucket:    keys[0],
+			Spend:     float64(10 - i),
+		}
+	}
 
 	view := &fakeView{
 		// orders in bucket 0 and 2, none in bucket 1 (must zero-fill).
@@ -99,9 +108,7 @@ func TestConsoleDashboardAssembly(t *testing.T) {
 			{Bucket: keys[2], Activated: 1, AvgSeconds: 40, TotalSeconds: 40, Timed: 1},
 		},
 		ranking: ranking,
-		spend: []ProjectSpendRow{
-			{ProjectID: 1, Bucket: keys[0], Spend: 9.99},
-		},
+		spend:   spend,
 		balance: 640.123,
 		spent:   1200.5,
 		avgSecs: 42,
@@ -152,8 +159,8 @@ func TestConsoleDashboardAssembly(t *testing.T) {
 			t.Errorf("series %q spend length = %d, want 3", s.Name, len(s.Spend))
 		}
 	}
-	if got.ProjectSeries[0].Spend[0] != 9.99 {
-		t.Errorf("series[0] bucket 0 spend = %v, want 9.99", got.ProjectSeries[0].Spend[0])
+	if got.ProjectSeries[0].Name != "Spend A" || got.ProjectSeries[0].Spend[0] != 10 {
+		t.Errorf("series[0] = %+v, want independent top-spend project", got.ProjectSeries[0])
 	}
 	// leaderboard: alice has no nickname -> email local part; row 2 is me.
 	if got.TodayCodeRanking[0].Name != "alice" || got.TodayCodeRanking[0].IsCurrentUser {

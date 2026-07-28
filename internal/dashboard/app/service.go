@@ -6,9 +6,11 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"time"
 
@@ -20,8 +22,7 @@ import (
 const (
 	maxTrendBuckets    = 2000
 	defaultSummaryDays = 1
-	// projectSeriesLimit caps how many top projects get a spend series, matching
-	// the mock's featured = ranks.slice(0, 6).
+	// projectSeriesLimit caps how many top net-spend projects get a series.
 	projectSeriesLimit = 6
 	// leaderboardLimit is the number of ranked users the panel renders (two
 	// columns of five).
@@ -62,6 +63,7 @@ type ProjectCountRow struct {
 
 type ProjectSpendRow struct {
 	ProjectID uint
+	Name      string
 	Bucket    string
 	Spend     float64
 }
@@ -89,7 +91,7 @@ type ConsoleView interface {
 	ReceiptBuckets(ctx context.Context, userID uint, sqlFormat string, from, to time.Time) ([]ReceiptBucketRow, error)
 	PurchaseActivationBuckets(ctx context.Context, userID uint, sqlFormat string, from, to time.Time) ([]PurchaseActivationBucketRow, error)
 	ProjectCodeRanking(ctx context.Context, userID uint, from, to time.Time) ([]ProjectCountRow, error)
-	ProjectSpendBuckets(ctx context.Context, userID uint, projectIDs []uint, sqlFormat string, from, to time.Time) ([]ProjectSpendRow, error)
+	ProjectSpendBuckets(ctx context.Context, userID uint, sqlFormat string, from, to time.Time) ([]ProjectSpendRow, error)
 	RangeAvgReceiptSeconds(ctx context.Context, userID uint, from, to time.Time) (int, error)
 	Leaderboard(ctx context.Context, since *time.Time, limit int) ([]LeaderRow, error)
 	UserStanding(ctx context.Context, userID uint, since *time.Time) (Standing, error)
@@ -247,15 +249,7 @@ func (s *QueryService) ConsoleDashboard(ctx context.Context, userID uint, from, 
 	if err != nil {
 		return nil, err
 	}
-	featured := ranking
-	if len(featured) > projectSeriesLimit {
-		featured = featured[:projectSeriesLimit]
-	}
-	featuredIDs := make([]uint, len(featured))
-	for i, p := range featured {
-		featuredIDs[i] = p.ProjectID
-	}
-	spendRows, err := s.view.ProjectSpendBuckets(ctx, userID, featuredIDs, sqlFmt, fromT, toT)
+	spendRows, err := s.view.ProjectSpendBuckets(ctx, userID, sqlFmt, fromT, toT)
 	if err != nil {
 		return nil, err
 	}
@@ -296,12 +290,38 @@ func (s *QueryService) ConsoleDashboard(ctx context.Context, userID uint, from, 
 	for _, r := range activationRows {
 		activationByKey[r.Bucket] = r
 	}
-	spendByProject := make(map[uint]map[string]float64, len(featuredIDs))
+	spendByProject := make(map[uint]map[string]float64)
+	spendTotals := make(map[uint]float64)
+	spendNames := make(map[uint]string)
 	for _, r := range spendRows {
 		if spendByProject[r.ProjectID] == nil {
 			spendByProject[r.ProjectID] = make(map[string]float64)
 		}
 		spendByProject[r.ProjectID][r.Bucket] = r.Spend
+		spendTotals[r.ProjectID] += r.Spend
+		spendNames[r.ProjectID] = r.Name
+	}
+
+	// ponytail: sort the current user's grouped project rows in memory; move the
+	// top-N ranking into SQL only if per-user project counts become materially large.
+	featured := make([]ProjectSpendRow, 0, len(spendTotals))
+	for projectID, total := range spendTotals {
+		if total > 0 {
+			featured = append(featured, ProjectSpendRow{ProjectID: projectID, Name: spendNames[projectID], Spend: total})
+		}
+	}
+	slices.SortFunc(featured, func(left, right ProjectSpendRow) int {
+		if order := cmp.Compare(right.Spend, left.Spend); order != 0 {
+			return order
+		}
+		return cmp.Compare(left.ProjectID, right.ProjectID)
+	})
+	if len(featured) > projectSeriesLimit {
+		featured = featured[:projectSeriesLimit]
+	}
+	featuredIDs := make([]uint, len(featured))
+	for i, project := range featured {
+		featuredIDs[i] = project.ProjectID
 	}
 
 	trend := make([]TrendPoint, 0, len(orderRows)+len(receiptRows))
@@ -332,12 +352,12 @@ func (s *QueryService) ConsoleDashboard(ctx context.Context, userID uint, from, 
 
 	projectSeries := make([]ProjectSeries, len(featured))
 	for i, p := range featured {
-		projectSeries[i] = ProjectSeries{Name: projectLabel(p), Spend: seriesSpend[p.ProjectID]}
+		projectSeries[i] = ProjectSeries{Name: projectLabel(p.ProjectID, p.Name), Spend: seriesSpend[p.ProjectID]}
 	}
 
 	projectCodeRanking := make([]RankItem, len(ranking))
 	for i, p := range ranking {
-		projectCodeRanking[i] = RankItem{Name: projectLabel(p), Count: p.Count, Rank: i + 1}
+		projectCodeRanking[i] = RankItem{Name: projectLabel(p.ProjectID, p.Name), Count: p.Count, Rank: i + 1}
 	}
 
 	codeRatio := roundInt(pct(totals.codeOrders, totals.orders))
@@ -382,11 +402,11 @@ func standingItem(s Standing, currentUserID uint) RankItem {
 	}
 }
 
-func projectLabel(p ProjectCountRow) string {
-	if name := strings.TrimSpace(p.Name); name != "" {
+func projectLabel(projectID uint, projectName string) string {
+	if name := strings.TrimSpace(projectName); name != "" {
 		return name
 	}
-	return fmt.Sprintf("#%d", p.ProjectID)
+	return fmt.Sprintf("#%d", projectID)
 }
 
 // displayName resolves the leaderboard label: the trimmed nickname when set,

@@ -172,7 +172,8 @@ func (r *ViewRepo) ProjectCodeRanking(ctx context.Context, userID uint, from, to
 		Joins("JOIN orders AS o ON o.id = h.order_id").
 		Joins("LEFT JOIN projects AS p ON p.id = o.project_id").
 		Select("o.project_id AS project_id, COALESCE(p.name, '') AS name, COUNT(*) AS count").
-		Where("o.user_id = ? AND o.service_mode = 'code' AND o.created_at >= ? AND o.created_at <= ?", userID, from.UTC(), to.UTC()).
+		Where("o.user_id = ? AND o.debit_tx_id IS NOT NULL AND o.service_mode = 'code' AND o.created_at >= ? AND o.created_at <= ?", userID, from.UTC(), to.UTC()).
+		Where("o." + historyOrderExclude).
 		Group("o.project_id, name").
 		Order("count DESC, o.project_id ASC").
 		Scan(&rows).Error; err != nil {
@@ -185,23 +186,23 @@ func (r *ViewRepo) ProjectCodeRanking(ctx context.Context, userID uint, from, to
 	return out, nil
 }
 
-func (r *ViewRepo) ProjectSpendBuckets(ctx context.Context, userID uint, projectIDs []uint, sqlFormat string, from, to time.Time) ([]dashboardapp.ProjectSpendRow, error) {
-	if len(projectIDs) == 0 {
-		return nil, nil
-	}
+func (r *ViewRepo) ProjectSpendBuckets(ctx context.Context, userID uint, sqlFormat string, from, to time.Time) ([]dashboardapp.ProjectSpendRow, error) {
 	sel := fmt.Sprintf(
-		"o.project_id AS project_id, DATE_FORMAT(o.created_at, '%s') AS bucket, COALESCE(SUM(o.pay_amount - o.refund_amount),0) AS spend",
+		"o.project_id AS project_id, COALESCE(MAX(p.name), '') AS name, DATE_FORMAT(o.created_at, '%s') AS bucket, COALESCE(SUM(o.pay_amount - o.refund_amount),0) AS spend",
 		sqlFormat,
 	)
 	var rows []struct {
 		ProjectID uint   `gorm:"column:project_id"`
+		Name      string `gorm:"column:name"`
 		Bucket    string `gorm:"column:bucket"`
 		Spend     string `gorm:"column:spend"`
 	}
 	if err := r.db.WithContext(ctx).
 		Table("orders AS o").
+		Joins("LEFT JOIN projects AS p ON p.id = o.project_id").
 		Select(sel).
-		Where("o.user_id = ? AND o.debit_tx_id IS NOT NULL AND o.project_id IN ? AND o.created_at >= ? AND o.created_at <= ?", userID, projectIDs, from.UTC(), to.UTC()).
+		Where("o.user_id = ? AND o.debit_tx_id IS NOT NULL AND o.created_at >= ? AND o.created_at <= ?", userID, from.UTC(), to.UTC()).
+		Where("o." + historyOrderExclude).
 		Group("o.project_id, bucket").
 		Scan(&rows).Error; err != nil {
 		return nil, err
@@ -210,6 +211,7 @@ func (r *ViewRepo) ProjectSpendBuckets(ctx context.Context, userID uint, project
 	for i := range rows {
 		out[i] = dashboardapp.ProjectSpendRow{
 			ProjectID: rows[i].ProjectID,
+			Name:      rows[i].Name,
 			Bucket:    rows[i].Bucket,
 			Spend:     parseMoney(rows[i].Spend),
 		}

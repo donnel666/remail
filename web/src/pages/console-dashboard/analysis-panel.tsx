@@ -88,14 +88,12 @@ function useAnalysisSpec(data: DashboardData | null, view: AnalysisView) {
       );
 
       return asChartSpec({
-        bar: { state: { hover: { lineWidth: 1, stroke: "#000" } } },
         color: { specified: projectColors },
         data: [{ id: "spendData", values }],
         legends: { selectMode: "single", visible: true },
         seriesField: "Project",
-        stack: true,
         title: chartTitle(t("Spend distribution"), `${t("Total spend")}：¥${formatMoney(totalSpend)}`),
-        type: "bar",
+        type: "line",
         xField: "Time",
         yField: "Usage",
       });
@@ -203,18 +201,13 @@ function useAnalysisSpec(data: DashboardData | null, view: AnalysisView) {
         Count: item.count,
         Project: item.name,
       })) ?? [];
-      const rankColors = Object.fromEntries(
-        values.map((item, index) => [item.Project, CHART_COLORS[index % CHART_COLORS.length]]),
-      );
 
       return asChartSpec({
-        bar: { state: { hover: { lineWidth: 1, stroke: "#000" } } },
-        color: { specified: rankColors },
         data: [{ id: "projectRankData", values }],
-        legends: { selectMode: "single", visible: true },
-        seriesField: "Project",
+        legends: { visible: false },
+        point: { visible: true },
         title: chartTitle(t("Project code ranking"), ""),
-        type: "bar",
+        type: "line",
         xField: "Project",
         yField: "Count",
       });
@@ -275,7 +268,11 @@ export function DashboardAnalysisPanel({
 }) {
   const { t } = useTranslation();
   const spec = useAnalysisSpec(data, view);
-  const hasData = Boolean(data?.trend.length);
+  const hasData = view === "spend"
+    ? Boolean(data?.projectSeries.length)
+    : view === "projects"
+      ? Boolean(data?.projectCodeRanking.length)
+      : Boolean(data?.trend.length);
 
   useEffect(() => {
     applyVChartSemiTheme();

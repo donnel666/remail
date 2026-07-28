@@ -236,19 +236,28 @@ func (r *ProxyRepo) Stats(ctx context.Context, filter proxyapp.ProxyListFilter) 
 	if err := base.Session(&gorm.Session{}).Count(&total).Error; err != nil {
 		return nil, fmt.Errorf("count proxy stats: %w", err)
 	}
-	countries, err := r.groupProxyCounts(ctx, filter, "country")
+	facetFilter := filter
+	facetFilter.Country = ""
+	countries, err := r.groupProxyCounts(ctx, facetFilter, "country")
 	if err != nil {
 		return nil, err
 	}
-	statuses, err := r.groupProxyCounts(ctx, filter, "status")
+	facetFilter = filter
+	facetFilter.Status = ""
+	statuses, err := r.groupProxyCounts(ctx, facetFilter, "status")
 	if err != nil {
 		return nil, err
 	}
-	pools, err := r.groupProxyCounts(ctx, filter, "pool")
+	facetFilter = filter
+	facetFilter.Pool = ""
+	pools, err := r.groupProxyCounts(ctx, facetFilter, "pool")
 	if err != nil {
 		return nil, err
 	}
-	ipVersions, err := r.groupProxyCounts(ctx, filter, "ip_version")
+	facetFilter = filter
+	facetFilter.IPVersion = ""
+	facetFilter.IPv6 = nil
+	ipVersions, err := r.groupProxyCounts(ctx, facetFilter, "ip_version")
 	if err != nil {
 		return nil, err
 	}

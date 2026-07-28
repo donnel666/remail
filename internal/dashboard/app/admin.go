@@ -339,7 +339,7 @@ func (s *AdminQueryService) AdminDashboard(ctx context.Context, from, to *time.T
 func adminRankItems(rows []ProjectCountRow) []RankItem {
 	out := make([]RankItem, len(rows))
 	for i, p := range rows {
-		out[i] = RankItem{Name: projectLabel(p), Count: p.Count, Rank: i + 1}
+		out[i] = RankItem{Name: projectLabel(p.ProjectID, p.Name), Count: p.Count, Rank: i + 1}
 	}
 	return out
 }

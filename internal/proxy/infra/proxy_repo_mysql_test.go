@@ -1214,7 +1214,7 @@ func TestProxyRepoStatsAndSearchMySQL(t *testing.T) {
 		IPVersion:  domain.ProxyIPv6,
 		OutboundIP: "2001:db8::40",
 		Country:    "JP",
-		Status:     domain.ProxyStatusChecking,
+		Status:     domain.ProxyStatusAbnormal,
 	}
 	require.NoError(t, repo.Create(ctx, first))
 	require.NoError(t, repo.Create(ctx, second))
@@ -1224,6 +1224,13 @@ func TestProxyRepoStatsAndSearchMySQL(t *testing.T) {
 	require.Equal(t, int64(2), stats.Total)
 	require.Contains(t, stats.Countries, proxyapp.ProxyCount{Key: "US", Count: 1})
 	require.Contains(t, stats.Countries, proxyapp.ProxyCount{Key: "JP", Count: 1})
+
+	abnormalStats, err := repo.Stats(ctx, proxyapp.ProxyListFilter{Status: domain.ProxyStatusAbnormal})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), abnormalStats.Total)
+	require.Contains(t, abnormalStats.Statuses, proxyapp.ProxyCount{Key: "normal", Count: 1})
+	require.Contains(t, abnormalStats.Statuses, proxyapp.ProxyCount{Key: "abnormal", Count: 1})
+	require.Equal(t, []proxyapp.ProxyCount{{Key: "JP", Count: 1}}, abnormalStats.Countries)
 
 	searched, err := repo.List(ctx, proxyapp.ProxyListFilter{
 		Search: "127.0.0",

@@ -42,7 +42,7 @@ func (*adminUserDashboardViewStub) ProjectCodeRanking(context.Context, uint, tim
 	return nil, nil
 }
 
-func (*adminUserDashboardViewStub) ProjectSpendBuckets(context.Context, uint, []uint, string, time.Time, time.Time) ([]dashboardapp.ProjectSpendRow, error) {
+func (*adminUserDashboardViewStub) ProjectSpendBuckets(context.Context, uint, string, time.Time, time.Time) ([]dashboardapp.ProjectSpendRow, error) {
 	return nil, nil
 }
 

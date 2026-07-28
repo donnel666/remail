@@ -194,14 +194,19 @@ VALUES (1, 'TX-1', 2, 'debit', 'consumer', 'out', -1.00, 100.00, 99.00, 'order',
 	require.Equal(t, "Microsoft", ranking[1].Name)
 	require.Equal(t, "Telegram", ranking[2].Name)
 
-	spendRows, err := repo.ProjectSpendBuckets(ctx, 2, []uint{10, 11}, dayFmt, from, to)
+	spendRows, err := repo.ProjectSpendBuckets(ctx, 2, dayFmt, from, to)
 	require.NoError(t, err)
 	byProject := map[uint]float64{}
+	projectNames := map[uint]string{}
 	for _, r := range spendRows {
 		byProject[r.ProjectID] += r.Spend
+		projectNames[r.ProjectID] = r.Name
 	}
 	require.InDelta(t, 30.00, byProject[10], 0.001)
 	require.InDelta(t, 5.00, byProject[11], 0.001)
+	require.InDelta(t, 1.00, byProject[1], 0.001)
+	require.Equal(t, "Microsoft", projectNames[10])
+	require.Equal(t, "Telegram", projectNames[11])
 
 	avg, err := repo.RangeAvgReceiptSeconds(ctx, 2, from, to)
 	require.NoError(t, err)
@@ -464,7 +469,7 @@ VALUES (10, 'boundary@test.local', 'h', 'Boundary', 'active', 'user', ?, ?)`, bo
 	require.Len(t, consoleActivations, 1)
 	require.Equal(t, "2026-01-01 00:00:00", consoleActivations[0].Bucket)
 
-	consoleSpend, err := consoleRepo.ProjectSpendBuckets(ctx, 10, []uint{10}, dayFmt, boundaryFrom, boundaryTo)
+	consoleSpend, err := consoleRepo.ProjectSpendBuckets(ctx, 10, dayFmt, boundaryFrom, boundaryTo)
 	require.NoError(t, err)
 	require.Len(t, consoleSpend, 1)
 	require.Equal(t, "2026-01-01", consoleSpend[0].Bucket)

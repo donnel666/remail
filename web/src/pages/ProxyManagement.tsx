@@ -63,12 +63,16 @@ import {
   type DateRangeValue,
 } from "./resources/date-range-filter";
 import { useSelectionNotification } from "./resources/use-selection-notification";
+import {
+  proxyStatsFromResponse,
+  proxyToggleCandidateCounts,
+  type StatusFilter,
+} from "./proxy-management-counts";
 
 const { Text } = Typography;
 
 type SystemProxyFilter = "all" | "yes" | "no";
 type IPv6Filter = "all" | "yes" | "no";
-type StatusFilter = "all" | "pending" | "checking" | "normal" | "abnormal" | "disabled" | "expired";
 type ProxyPool = "resource" | "system";
 type ProxyImportMode = "paste" | "file";
 
@@ -180,47 +184,6 @@ function proxyMatchesListFilter(proxy: ProxyItem, filter: ProxyListFilter) {
     if (Number.isNaN(createdAt) || createdAt > createdTo) return false;
   }
   return true;
-}
-
-const emptyStats = {
-  ipv6: { all: 0, no: 0, yes: 0 },
-  systemProxy: { all: 0, no: 0, yes: 0 },
-  status: { all: 0, abnormal: 0, pending: 0, checking: 0, disabled: 0, expired: 0, normal: 0 },
-};
-
-function countOf(
-  items: ProxyStatsResponse["statuses"],
-  key: string
-) {
-  return items.find((item) => item.key === key)?.count ?? 0;
-}
-
-function proxyStatsFromResponse(stats?: ProxyStatsResponse | null) {
-  if (!stats) return emptyStats;
-  const total = stats.total;
-  const systemCount = countOf(stats.pools, "system");
-  const ipv6Count = countOf(stats.ipVersions, "ipv6");
-  return {
-    ipv6: {
-      all: total,
-      no: Math.max(total - ipv6Count, 0),
-      yes: ipv6Count,
-    },
-    systemProxy: {
-      all: total,
-      no: Math.max(total - systemCount, 0),
-      yes: systemCount,
-    },
-    status: {
-      all: total,
-      abnormal: countOf(stats.statuses, "abnormal"),
-      pending: countOf(stats.statuses, "pending"),
-      checking: countOf(stats.statuses, "checking"),
-      disabled: countOf(stats.statuses, "disabled"),
-      expired: countOf(stats.statuses, "expired"),
-      normal: countOf(stats.statuses, "normal"),
-    },
-  };
 }
 
 function getCountryCounts(stats?: ProxyStatsResponse | null) {
@@ -691,6 +654,10 @@ export default function ProxyManagement() {
     () => getCountryCounts(proxyStats),
     [proxyStats]
   );
+  const countryTotal = useMemo(
+    () => countryCounts.reduce((total, [, count]) => total + count, 0),
+    [countryCounts]
+  );
   const countrySet = useMemo(
     () => new Set(countryCounts.map(([country]) => country)),
     [countryCounts]
@@ -703,17 +670,8 @@ export default function ProxyManagement() {
   }, [activeCountry, countrySet]);
 
   const stats = useMemo(() => proxyStatsFromResponse(proxyStats), [proxyStats]);
-  const currentStats = useMemo(
-    () => proxyStatsFromResponse(currentProxyStats),
-    [currentProxyStats]
-  );
-  const disableCandidateCount =
-    currentStats.status.pending +
-    currentStats.status.checking +
-    currentStats.status.normal +
-    currentStats.status.abnormal +
-    currentStats.status.expired;
-  const enableCandidateCount = currentStats.status.disabled;
+  const { disable: disableCandidateCount, enable: enableCandidateCount } =
+    proxyToggleCandidateCounts(currentProxyStats, statusFilter);
   const hasToggleCandidates = disableCandidateCount > 0 || enableCandidateCount > 0;
   const allFilteredDisabled = disableCandidateCount === 0 && enableCandidateCount > 0;
 
@@ -1312,7 +1270,7 @@ export default function ProxyManagement() {
           <span className="flex items-center gap-2">
             {t("All")}
             <Tag color={activeCountry === "all" ? "red" : "grey"} shape="circle">
-              {stats.status.all}
+              {countryTotal}
             </Tag>
           </span>
         }
