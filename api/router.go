@@ -39,6 +39,7 @@ import (
 // feFS is the embedded frontend dist filesystem (nil in development mode).
 func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Context), error) {
 	r := gin.New()
+	r.RemoteIPHeaders = []string{gin.PlatformCloudflare, "X-Forwarded-For", "X-Real-IP"}
 	if err := r.SetTrustedProxies(p.TrustedProxies); err != nil {
 		return nil, func(context.Context) {}, err
 	}

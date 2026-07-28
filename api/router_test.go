@@ -96,28 +96,33 @@ func TestServeEmbeddedFrontendDoesNotFallbackForAPIRoutes(t *testing.T) {
 	}
 }
 
-func TestTrustedProxyAcceptsForwardedIPOnlyFromLoopback(t *testing.T) {
+func TestTrustedProxyClientIPHeaders(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
+	r.RemoteIPHeaders = []string{gin.PlatformCloudflare, "X-Forwarded-For", "X-Real-IP"}
 	if err := r.SetTrustedProxies([]string{"127.0.0.1", "::1"}); err != nil {
 		t.Fatalf("configure trusted proxy: %v", err)
 	}
 	r.GET("/ip", func(c *gin.Context) { c.String(http.StatusOK, c.ClientIP()) })
 
 	tests := []struct {
-		name       string
-		remoteAddr string
-		want       string
+		name           string
+		remoteAddr     string
+		cfConnectingIP string
+		xForwardedFor  string
+		want           string
 	}{
-		{name: "loopback proxy", remoteAddr: "127.0.0.1:1234", want: "203.0.113.9"},
-		{name: "untrusted client cannot forge xff", remoteAddr: "198.51.100.8:1234", want: "198.51.100.8"},
+		{name: "cloudflare header wins from trusted proxy", remoteAddr: "127.0.0.1:1234", cfConnectingIP: "203.0.113.9", xForwardedFor: "192.0.2.10", want: "203.0.113.9"},
+		{name: "xff remains a fallback", remoteAddr: "127.0.0.1:1234", xForwardedFor: "203.0.113.9", want: "203.0.113.9"},
+		{name: "untrusted client cannot forge proxy headers", remoteAddr: "198.51.100.8:1234", cfConnectingIP: "203.0.113.9", xForwardedFor: "203.0.113.9", want: "198.51.100.8"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodGet, "/ip", nil)
 			req.RemoteAddr = tt.remoteAddr
-			req.Header.Set("X-Forwarded-For", "203.0.113.9")
+			req.Header.Set(gin.PlatformCloudflare, tt.cfConnectingIP)
+			req.Header.Set("X-Forwarded-For", tt.xForwardedFor)
 			r.ServeHTTP(w, req)
 			if got := w.Body.String(); got != tt.want {
 				t.Fatalf("expected client IP %q, got %q", tt.want, got)
