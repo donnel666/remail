@@ -1,9 +1,10 @@
-import type { Key, ReactNode } from "react";
+import type { ComponentProps, Key, ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Button,
   Card,
+  Checkbox,
   Collapsible,
   Empty,
   Pagination,
@@ -23,6 +24,22 @@ type TableColumn<T extends RowData> = {
   [key: string]: unknown;
 };
 
+type CardTableRowSelection<T extends RowData> = {
+  disabled?: boolean;
+  getCheckboxProps?: (
+    record: T
+  ) => Omit<
+    ComponentProps<typeof Checkbox>,
+    "checked" | "defaultChecked" | "indeterminate" | "onChange"
+  >;
+  hidden?: boolean;
+  onChange?: (
+    selectedRowKeys: Array<string | number>,
+    selectedRows?: T[]
+  ) => void;
+  selectedRowKeys?: Array<string | number>;
+};
+
 export const DESKTOP_TABLE_SCROLL_Y = "100%";
 
 interface CardTableProps<T extends RowData> {
@@ -33,6 +50,7 @@ interface CardTableProps<T extends RowData> {
   hidePagination?: boolean;
   empty?: ReactNode;
   pagination?: Record<string, unknown> | false;
+  rowSelection?: CardTableRowSelection<T> | boolean;
   expandedRowRender?: (record: T, index: number) => ReactNode;
   rowExpandable?: (record: T) => boolean;
   visibleColumns?: Record<string, boolean>;
@@ -66,6 +84,10 @@ export function CardTable<T extends RowData>({
   const isMobile = useIsMobile();
   const { t } = useTranslation();
   const showSkeleton = useMinimumLoadingTime(loading);
+  const mobileRowSelection =
+    typeof tableProps.rowSelection === "object"
+      ? tableProps.rowSelection
+      : undefined;
 
   const getRowKey = (record: T, index: number): Key => {
     if (typeof rowKey === "function") return rowKey(record, index);
@@ -73,6 +95,13 @@ export function CardTable<T extends RowData>({
     return typeof value === "string" || typeof value === "number"
       ? value
       : index;
+  };
+
+  const getSelectionKey = (record: T, index: number): string | number => {
+    const key = getRowKey(record, index);
+    return typeof key === "string" || typeof key === "number"
+      ? key
+      : String(key);
   };
 
   if (!isMobile) {
@@ -175,9 +204,50 @@ export function CardTable<T extends RowData>({
     const hasDetails =
       tableProps.expandedRowRender &&
       (!tableProps.rowExpandable || tableProps.rowExpandable(record));
+    const selectionKey = getSelectionKey(record, index);
+    const selectedRowKeys = mobileRowSelection?.selectedRowKeys ?? [];
+    const checkboxProps =
+      mobileRowSelection?.getCheckboxProps?.(record) ?? {};
+    const selected = selectedRowKeys.includes(selectionKey);
+
+    const changeSelection = (checked: boolean) => {
+      if (!mobileRowSelection?.onChange) return;
+      const nextKeys = checked
+        ? selected
+          ? selectedRowKeys
+          : [...selectedRowKeys, selectionKey]
+        : selectedRowKeys.filter((key) => key !== selectionKey);
+      const nextKeySet = new Set(nextKeys);
+      mobileRowSelection.onChange(
+        nextKeys,
+        dataSource.filter((item, itemIndex) =>
+          nextKeySet.has(getSelectionKey(item, itemIndex))
+        )
+      );
+    };
 
     return (
       <Card className="!rounded-2xl shadow-sm">
+        {mobileRowSelection && !mobileRowSelection.hidden ? (
+          <div className="flex justify-end">
+            <Checkbox
+              {...checkboxProps}
+              aria-label={
+                checkboxProps["aria-label"] ??
+                `${t("Select row")}: ${String(selectionKey)}`
+              }
+              checked={selected}
+              className={[
+                "inline-flex min-h-11 min-w-11 items-center justify-center",
+                checkboxProps.className,
+              ]
+                .filter(Boolean)
+                .join(" ")}
+              disabled={mobileRowSelection.disabled || checkboxProps.disabled}
+              onChange={(event) => changeSelection(Boolean(event.target.checked))}
+            />
+          </div>
+        ) : null}
         {visibleColumns.map((column, columnIndex) => {
           const value =
             typeof column.dataIndex === "string"

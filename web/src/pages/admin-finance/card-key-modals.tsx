@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  Button,
   DatePicker,
   InputNumber,
   Modal,
@@ -15,11 +16,12 @@ import {
   type FinanceCardKey,
 } from "./admin-finance-api";
 import { formatMoney } from "./finance-meta";
+import { copyText } from "./finance-shared";
 
 interface CreateCardKeyModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onCreated: (count: number, keys: string[]) => void;
+  onCreated: () => void;
 }
 
 export function CreateCardKeyModal({
@@ -33,6 +35,7 @@ export function CreateCardKeyModal({
   const [maxRedemptions, setMaxRedemptions] = useState<number | string>(1);
   const [expireAt, setExpireAt] = useState<Date | null>(null);
   const [customKeys, setCustomKeys] = useState("");
+  const [createdKeys, setCreatedKeys] = useState<string[] | null>(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -42,6 +45,7 @@ export function CreateCardKeyModal({
     setMaxRedemptions(1);
     setExpireAt(null);
     setCustomKeys("");
+    setCreatedKeys(null);
   }, [open]);
 
   const submit = async () => {
@@ -76,11 +80,8 @@ export function CreateCardKeyModal({
         cardKeys: cardKeys.length ? cardKeys : undefined,
       });
       Toast.success(t("Card keys created.", { count: result.created }));
-      onCreated(
-        result.created,
-        result.items.map((item) => item.key)
-      );
-      onOpenChange(false);
+      setCreatedKeys(result.items.map((item) => item.key));
+      onCreated();
     } catch (error) {
       Toast.error(getIamErrorMessage(t, error, "Operation failed."));
     } finally {
@@ -88,19 +89,54 @@ export function CreateCardKeyModal({
     }
   };
 
+  const copyCreatedKeys = async () => {
+    if (!createdKeys) return;
+    try {
+      await copyText(createdKeys.join("\n"));
+      Toast.success(
+        t("Card keys created and copied.", { count: createdKeys.length })
+      );
+    } catch {
+      Toast.error(t("Copy failed."));
+    }
+  };
+
   return (
     <Modal
+      cancelButtonProps={
+        createdKeys ? { style: { display: "none" } } : undefined
+      }
       centered
       confirmLoading={saving}
       onCancel={() => onOpenChange(false)}
-      onOk={() => void submit()}
-      okText={t("Create")}
+      onOk={createdKeys ? () => onOpenChange(false) : () => void submit()}
+      okText={createdKeys ? t("Close") : t("Create")}
       cancelText={t("Cancel")}
       style={{ width: 620 }}
       title={t("Create card keys")}
       visible={open}
     >
-      <div className="space-y-4 py-1">
+      {createdKeys ? (
+        <div className="space-y-3 py-1">
+          <div className="rounded-lg bg-[var(--semi-color-success-light-default)] px-3 py-2 text-sm text-[var(--semi-color-success)]">
+            {t("Card keys created.", { count: createdKeys.length })}
+          </div>
+          <TextArea
+            aria-label={t("Card keys")}
+            autosize={{ minRows: 3, maxRows: 12 }}
+            readonly
+            value={createdKeys.join("\n")}
+          />
+          <Button
+            className="w-full"
+            onClick={() => void copyCreatedKeys()}
+            type="primary"
+          >
+            {t("Copy all")}
+          </Button>
+        </div>
+      ) : null}
+      <div className={createdKeys ? "hidden" : "space-y-4 py-1"}>
         <div className="rounded-lg bg-[var(--semi-color-fill-0)] px-3 py-2 text-xs text-[var(--semi-color-text-2)]">
           {t("Create card keys hint")}
         </div>

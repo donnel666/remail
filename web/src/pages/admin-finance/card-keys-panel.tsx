@@ -47,12 +47,13 @@ import {
   CreateCardKeyModal,
   EditCardKeyModal,
 } from "./card-key-modals";
+import { exportCardKeys } from "./card-key-export";
 import {
   formatDateTime,
   formatMoney,
   renderCardKeyStatusTag,
 } from "./finance-meta";
-import { copyText, emptyNode } from "./finance-shared";
+import { emptyNode } from "./finance-shared";
 
 // Same role labels admin-microsoft uses in its owner cell.
 const CARD_KEY_ROLE_LABELS: Record<FinanceUserRole, string> = {
@@ -226,6 +227,13 @@ export function CardKeysPanel({ tabsArea }: { tabsArea: ReactNode }) {
   };
 
   useSelectionNotification({
+    extraActions: [
+      {
+        key: "export",
+        labelKey: "Export selected card keys",
+        onClick: () => exportCardKeys(selectedRowKeys),
+      },
+    ],
     selectedCount: selectedRowKeys.length,
     onClear: () => setSelectedRowKeys([]),
     onCheck: canWrite ? () => void runStatusSelected("enabled") : undefined,
@@ -569,34 +577,20 @@ export function CardKeysPanel({ tabsArea }: { tabsArea: ReactNode }) {
           loading={loading}
           pagination={false}
           rowKey="key"
-          rowSelection={
-            canWrite
-              ? {
-                  selectedRowKeys,
-                  onChange: (keys?: Array<string | number>) =>
-                    setSelectedRowKeys(keys ?? []),
-                }
-              : undefined
-          }
+          rowSelection={{
+            selectedRowKeys,
+            onChange: (keys?: Array<string | number>) =>
+              setSelectedRowKeys(keys ?? []),
+          }}
           scroll={{ x: "max(100%, 1400px)", y: DESKTOP_TABLE_SCROLL_Y }}
           size="middle"
         />
       </CardPro>
 
       <CreateCardKeyModal
-        onCreated={async (count, keys) => {
+        onCreated={() => {
           setActivePage(1);
           void refresh();
-          if (keys.length) {
-            try {
-              await copyText(keys.join("\n"));
-              Toast.success(
-                t("Card keys created and copied.", { count })
-              );
-            } catch {
-              // copy is best-effort
-            }
-          }
         }}
         onOpenChange={setCreateOpen}
         open={createOpen}
