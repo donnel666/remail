@@ -56,6 +56,7 @@ export function useBlockPagedList<T, M = undefined>({
   onErrorRef.current = onError;
   onLoadedRef.current = onLoaded;
   const [loading, setLoading] = useState(true);
+  const [loadedFilterKey, setLoadedFilterKey] = useState<string | null>(null);
   const [total, setTotalState] = useState(0);
   const [version, setVersion] = useState(0);
 
@@ -98,6 +99,7 @@ export function useBlockPagedList<T, M = undefined>({
           setTotalState((current) =>
             response.total ?? Math.max(current, observedTotal)
           );
+          if (foreground) setLoadedFilterKey(filterKey);
           onLoadedRef.current?.(response);
           bumpVersion();
         })
@@ -117,7 +119,7 @@ export function useBlockPagedList<T, M = undefined>({
       pendingRef.current.set(offset, request);
       await request;
     },
-    [blockSize, bumpVersion, loadBlock]
+    [blockSize, bumpVersion, filterKey, loadBlock]
   );
 
   const cancelPending = useCallback(() => {
@@ -130,6 +132,7 @@ export function useBlockPagedList<T, M = undefined>({
   const clear = useCallback(() => {
     cancelPending();
     cacheRef.current.clear();
+    setLoadedFilterKey(null);
     setTotalState(0);
     setLoading(true);
     bumpVersion();
@@ -199,6 +202,7 @@ export function useBlockPagedList<T, M = undefined>({
   return {
     adjustTotal,
     loadedItems,
+    loaded: loadedFilterKey === filterKey,
     loading: loading && !currentBlock,
     pagedItems,
     refresh,

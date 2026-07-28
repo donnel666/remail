@@ -2843,7 +2843,7 @@ export interface paths {
         };
         /**
          * List Microsoft resources for the administrator console
-         * @description Requires `core:resource/read`. Directly queries the resource facts and returns administrator-safe Microsoft resource fields plus optional cross-filter facets. The default query excludes logically deleted resources; `status=deleted` selects deleted resources explicitly. Unless `includeFacets=false`, facets are calculated from the complete matched set and each facet ignores only its own filter. Credential values, tokens, object keys, task leases, and upstream payloads are never returned.
+         * @description Requires `core:resource/read`. Directly queries the resource facts and returns administrator-safe Microsoft resource fields plus optional cross-filter facets. The default query excludes logically deleted resources; `status=deleted` selects deleted resources explicitly. Unless `includeFacets=false`, facets are calculated from the complete matched set, each facet ignores only its own filter, and the result is served as an eventually consistent snapshot using the configured cache TTL. An expired snapshot may be returned once while it refreshes in the background. Credential values, tokens, object keys, task leases, and upstream payloads are never returned.
          */
         get: operations["getAdminMicrosoftResources"];
         put?: never;
@@ -16847,7 +16847,7 @@ export interface operations {
             query: {
                 /** @description This administrator query is limited to Microsoft resources. */
                 type: "microsoft";
-                /** @description Case-insensitive prefix search across mailbox addresses and owner display identity; an all-digit value matches resource or owner ID exactly. */
+                /** @description Exact case-insensitive mailbox lookup across primary and alias inventories. A value without `@` is treated as a complete local-part across domains; a leading `@` matches the primary mailbox domain exactly. Owner display identity remains prefix-searchable, and an all-digit value matches resource or owner ID exactly. */
                 search?: string;
                 /** @description Exact normalized mailbox domain. Values with or without a leading `@` are accepted. */
                 suffix?: string;

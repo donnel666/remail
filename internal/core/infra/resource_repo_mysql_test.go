@@ -137,7 +137,7 @@ func TestResourceMicrosoftFacetsUseScalarCountsAndBoundedSuffixesMySQL(t *testin
 	require.Contains(t, sql, "limit 100")
 }
 
-func TestMicrosoftFacetCachesInvalidateAfterImportAndCreateMySQL(t *testing.T) {
+func TestMicrosoftUserFacetCachesInvalidateAfterImportAndCreateMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 	resources := NewResourceRepo(db)
 	imports := NewResourceImportRepo(db)
@@ -151,9 +151,6 @@ VALUES (9451, 'facet-cache-owner@test.local', 'hash', 'supplier', 'active')`).Er
 	userFacets, err := resources.Facets(ctx, 9451, userFilter)
 	require.NoError(t, err)
 	require.Zero(t, userFacets.Matched)
-	adminFacets, err := admin.AdminMicrosoftFacets(ctx, coreapp.AdminMicrosoftListFilter{}, time.Now().UTC())
-	require.NoError(t, err)
-	require.Zero(t, adminFacets.Matched)
 
 	importRecord := &domain.ResourceImport{
 		OwnerUserID: 9451, ResourceType: domain.ResourceTypeMicrosoft,
@@ -174,9 +171,6 @@ VALUES (9451, 'facet-cache-owner@test.local', 'hash', 'supplier', 'active')`).Er
 	userFacets, err = resources.Facets(ctx, 9451, userFilter)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, userFacets.Matched)
-	adminFacets, err = admin.AdminMicrosoftFacets(ctx, coreapp.AdminMicrosoftListFilter{}, time.Now().UTC())
-	require.NoError(t, err)
-	require.EqualValues(t, 1, adminFacets.Matched)
 
 	require.NoError(t, resources.CreateMicrosoft(ctx,
 		&domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 9451},
@@ -185,9 +179,6 @@ VALUES (9451, 'facet-cache-owner@test.local', 'hash', 'supplier', 'active')`).Er
 	userFacets, err = resources.Facets(ctx, 9451, userFilter)
 	require.NoError(t, err)
 	require.EqualValues(t, 2, userFacets.Matched)
-	adminFacets, err = admin.AdminMicrosoftFacets(ctx, coreapp.AdminMicrosoftListFilter{}, time.Now().UTC())
-	require.NoError(t, err)
-	require.EqualValues(t, 2, adminFacets.Matched)
 
 	generation := currentMicrosoftFacetsGeneration()
 	require.NoError(t, admin.WithTx(ctx, func(txCtx context.Context) error {
@@ -207,9 +198,6 @@ VALUES (9451, 'facet-cache-owner@test.local', 'hash', 'supplier', 'active')`).Er
 	userFacets, err = resources.Facets(ctx, 9451, userFilter)
 	require.NoError(t, err)
 	require.Equal(t, coreapp.ResourceBooleanFacets{All: 2, Yes: 1, No: 1}, userFacets.Private)
-	adminFacets, err = admin.AdminMicrosoftFacets(ctx, coreapp.AdminMicrosoftListFilter{}, time.Now().UTC())
-	require.NoError(t, err)
-	require.Equal(t, coreapp.AdminBooleanFacets{All: 2, Yes: 1, No: 1}, adminFacets.ForSale)
 }
 
 type observedDoneContext struct {

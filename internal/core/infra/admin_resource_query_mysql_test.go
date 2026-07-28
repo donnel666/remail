@@ -351,6 +351,26 @@ func TestAdminMicrosoftFacetsCoalesceConcurrentCacheMissesIntoTwoBoundedQueriesM
 	require.EqualValues(t, 2, queries.Load())
 }
 
+func TestAdminMicrosoftFacetsKeepFreshSnapshotAcrossGenerationChangesMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	repo := NewAdminResourceRepo(db)
+	now := time.Now().UTC()
+	first, err := repo.AdminMicrosoftFacets(context.Background(), coreapp.AdminMicrosoftListFilter{}, now)
+	require.NoError(t, err)
+
+	var queries atomic.Int32
+	const callback = "test:admin-facets-generation"
+	require.NoError(t, db.Callback().Row().Before("gorm:row").Register(callback, func(*gorm.DB) {
+		queries.Add(1)
+	}))
+	invalidateMicrosoftFacets()
+
+	second, err := repo.AdminMicrosoftFacets(context.Background(), coreapp.AdminMicrosoftListFilter{}, now)
+	require.NoError(t, err)
+	require.Equal(t, first, second)
+	require.Zero(t, queries.Load(), "high-frequency validation changes must not bypass the configured facet TTL")
+}
+
 func TestAdminMicrosoftFacetsReuseRedisSnapshotAcrossRepoInstancesMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 	redisServer := miniredis.RunT(t)

@@ -99,7 +99,7 @@ describe("useBlockPagedList", () => {
       )
       .mockResolvedValueOnce({ items: [2], total: 1 });
 
-    const { rerender } = renderHook(
+    const { result, rerender } = renderHook(
       ({ filterKey }) =>
         useBlockPagedList<number>({
           activePage: 1,
@@ -112,9 +112,11 @@ describe("useBlockPagedList", () => {
     );
 
     await waitFor(() => expect(loadBlock).toHaveBeenCalledTimes(1));
+    expect(result.current.loaded).toBe(false);
     rerender({ filterKey: "new" });
 
     await waitFor(() => expect(loadBlock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(result.current.loaded).toBe(true));
     expect(staleSignal.aborted).toBe(true);
   });
 
@@ -133,7 +135,8 @@ describe("useBlockPagedList", () => {
       })
     );
 
-    await waitFor(() => expect(result.current.total).toBe(4));
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    expect(result.current.total).toBe(4);
     act(() => result.current.setTotal(5_000_000));
     expect(result.current.total).toBe(5_000_000);
   });
@@ -155,6 +158,7 @@ describe("useBlockPagedList", () => {
 
     await waitFor(() => expect(onError).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.loaded).toBe(false);
     rerender({ revision: 2 });
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));

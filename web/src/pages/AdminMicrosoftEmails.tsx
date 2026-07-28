@@ -229,6 +229,7 @@ export default function AdminMicrosoftEmails() {
   );
 
   const {
+    loaded,
     loading,
     pagedItems,
     refresh: refreshList,
@@ -269,13 +270,13 @@ export default function AdminMicrosoftEmails() {
 
   useEffect(() => {
     setFacets(null);
-    if (loading) return;
+    if (!loaded) return;
     void refreshStats();
     return () => {
       statsRequestRef.current?.abort();
       statsRequestRef.current = null;
     };
-  }, [loading, refreshStats]);
+  }, [loaded, refreshStats]);
 
   const refresh = useCallback(async () => {
     await refreshList();

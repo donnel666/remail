@@ -380,15 +380,16 @@ func (r *AdminResourceRepo) FindAdminMicrosoft(ctx context.Context, resourceID u
 }
 
 func (r *AdminResourceRepo) AdminMicrosoftFacets(ctx context.Context, filter coreapp.AdminMicrosoftListFilter, now time.Time) (*coreapp.AdminMicrosoftFacets, error) {
-	stableKey := adminMicrosoftFacetsCacheKey(filter)
-	cacheKey := fmt.Sprintf("generation=%d|%s", currentMicrosoftFacetsGeneration(), stableKey)
+	// ponytail: administrator facets are TTL-consistent; use incremental
+	// counters if sub-TTL freshness ever becomes mandatory at this scale.
+	cacheKey := adminMicrosoftFacetsCacheKey(filter)
 	freshTTL := runtimeconfig.Duration(
 		"admin_resource_facets_cache_ttl_seconds", adminMicrosoftFacetsCacheTTL, time.Second, 1,
 	)
 	if cached, ok := r.facetsCache.Get(cacheKey); ok {
 		return cloneAdminMicrosoftFacets(&cached), nil
 	}
-	if snapshot, ok := r.loadAdminMicrosoftFacetsSnapshot(ctx, stableKey); ok {
+	if snapshot, ok := r.loadAdminMicrosoftFacetsSnapshot(ctx, cacheKey); ok {
 		age := time.Since(snapshot.ComputedAt)
 		if age < 0 {
 			age = 0
@@ -398,17 +399,16 @@ func (r *AdminResourceRepo) AdminMicrosoftFacets(ctx context.Context, filter cor
 		} else {
 			retryTTL := min(adminMicrosoftFacetsStaleRetryTTL, freshTTL)
 			r.facetsCache.Set(cacheKey, *cloneAdminMicrosoftFacets(&snapshot.Facets), retryTTL)
-			r.refreshAdminMicrosoftFacets(cacheKey, stableKey, filter, now, freshTTL)
+			r.refreshAdminMicrosoftFacets(cacheKey, filter, now, freshTTL)
 		}
 		return cloneAdminMicrosoftFacets(&snapshot.Facets), nil
 	}
-	return r.loadAdminMicrosoftFacets(ctx, cacheKey, stableKey, filter, now, freshTTL)
+	return r.loadAdminMicrosoftFacets(ctx, cacheKey, filter, now, freshTTL)
 }
 
 func (r *AdminResourceRepo) loadAdminMicrosoftFacets(
 	ctx context.Context,
 	cacheKey string,
-	stableKey string,
 	filter coreapp.AdminMicrosoftListFilter,
 	now time.Time,
 	freshTTL time.Duration,
@@ -418,7 +418,7 @@ func (r *AdminResourceRepo) loadAdminMicrosoftFacets(
 			return cloneAdminMicrosoftFacets(&cached), nil
 		}
 
-		resultCh := r.facetsFlight.DoChan(stableKey, func() (any, error) {
+		resultCh := r.facetsFlight.DoChan(cacheKey, func() (any, error) {
 			if cached, ok := r.facetsCache.Get(cacheKey); ok {
 				return cached, nil
 			}
@@ -428,7 +428,7 @@ func (r *AdminResourceRepo) loadAdminMicrosoftFacets(
 			if err != nil {
 				return nil, err
 			}
-			r.storeAdminMicrosoftFacets(queryCtx, cacheKey, stableKey, facets, freshTTL)
+			r.storeAdminMicrosoftFacets(queryCtx, cacheKey, facets, freshTTL)
 			return *facets, nil
 		})
 		select {
@@ -452,7 +452,6 @@ func (r *AdminResourceRepo) loadAdminMicrosoftFacets(
 
 func (r *AdminResourceRepo) refreshAdminMicrosoftFacets(
 	cacheKey string,
-	stableKey string,
 	filter coreapp.AdminMicrosoftListFilter,
 	now time.Time,
 	freshTTL time.Duration,
@@ -460,12 +459,12 @@ func (r *AdminResourceRepo) refreshAdminMicrosoftFacets(
 	go func() {
 		refreshCtx, cancel := context.WithTimeout(context.Background(), microsoftFacetsQueryTimeout)
 		defer cancel()
-		_, _, _ = r.facetsFlight.Do(stableKey, func() (any, error) {
+		_, _, _ = r.facetsFlight.Do(cacheKey, func() (any, error) {
 			facets, err := r.queryAdminMicrosoftFacets(refreshCtx, filter, now)
 			if err != nil {
 				return nil, err
 			}
-			r.storeAdminMicrosoftFacets(refreshCtx, cacheKey, stableKey, facets, freshTTL)
+			r.storeAdminMicrosoftFacets(refreshCtx, cacheKey, facets, freshTTL)
 			return *facets, nil
 		})
 	}()
@@ -550,7 +549,6 @@ func (r *AdminResourceRepo) loadAdminMicrosoftFacetsSnapshot(ctx context.Context
 func (r *AdminResourceRepo) storeAdminMicrosoftFacets(
 	ctx context.Context,
 	cacheKey string,
-	stableKey string,
 	facets *coreapp.AdminMicrosoftFacets,
 	freshTTL time.Duration,
 ) {
@@ -568,7 +566,7 @@ func (r *AdminResourceRepo) storeAdminMicrosoftFacets(
 	}
 	cacheCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 	defer cancel()
-	_ = r.facetsRedis.Set(cacheCtx, adminMicrosoftFacetsRedisKey(stableKey), payload, adminMicrosoftFacetsSnapshotTTL).Err()
+	_ = r.facetsRedis.Set(cacheCtx, adminMicrosoftFacetsRedisKey(cacheKey), payload, adminMicrosoftFacetsSnapshotTTL).Err()
 }
 
 func adminMicrosoftFacetsRedisKey(cacheKey string) string {
