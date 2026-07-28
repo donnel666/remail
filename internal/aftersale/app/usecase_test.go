@@ -306,7 +306,7 @@ func TestCreateTicketNotifiesRequesterAndSuperAdmin(t *testing.T) {
 		RequesterUserID: 7,
 		RequesterEmail:  "u@example.com",
 		TicketType:      domain.TicketTypeGeneral,
-		Title:           "help",
+		Title:           `help <img src=x onerror=alert(1)>`,
 		FirstMessage:    "hi\n<script>alert(1)</script>",
 	})
 	if err != nil {
@@ -338,8 +338,13 @@ func TestCreateTicketNotifiesRequesterAndSuperAdmin(t *testing.T) {
 	}
 	if !strings.Contains(requesterMail.HTMLBody, `class="remail-shine-bar"`) ||
 		!strings.Contains(requesterMail.HTMLBody, "Remail，轻松收码") ||
+		!strings.Contains(requesterMail.HTMLBody, `<table aria-label="通知详情"`) ||
+		!strings.Contains(requesterMail.HTMLBody, "white-space:pre-wrap") ||
+		!strings.Contains(requesterMail.HTMLBody, "mso-spacerun:yes") ||
 		strings.Contains(requesterMail.HTMLBody, "<script>") ||
-		!strings.Contains(requesterMail.HTMLBody, "&lt;script&gt;") {
+		strings.Contains(requesterMail.HTMLBody, "<img src=x") ||
+		!strings.Contains(requesterMail.HTMLBody, "help &lt;img src=x onerror=alert(1)&gt;") ||
+		!strings.Contains(requesterMail.HTMLBody, "hi<br>&lt;script&gt;alert(1)&lt;/script&gt;") {
 		t.Fatalf("ticket mail does not use the escaped branded frame: %s", requesterMail.HTMLBody)
 	}
 	for _, body := range []string{requesterMail.TextBody, requesterMail.HTMLBody} {
@@ -355,15 +360,45 @@ func TestCreateTicketNotifiesRequesterAndSuperAdmin(t *testing.T) {
 		adminMail.ReplyTo == admin2Mail.ReplyTo || adminMail.ReplyTo == requesterMail.ReplyTo {
 		t.Fatalf("Reply-To addresses must be recipient-specific: %+v", byRecipient)
 	}
-	for _, body := range []string{adminMail.TextBody, adminMail.HTMLBody} {
-		for _, expected := range []string{"提交用户信息", "用户 ID：7", "昵称：nick", "邮箱：u@example.com", "分组：VIP", "角色：user"} {
-			if !strings.Contains(body, expected) {
-				t.Fatalf("admin ticket mail missing requester detail %q: %s", expected, body)
-			}
+	for _, expected := range []string{"提交用户信息", "用户 ID：7", "昵称：nick", "邮箱：u@example.com", "分组：VIP", "角色：user"} {
+		if !strings.Contains(adminMail.TextBody, expected) {
+			t.Fatalf("admin ticket text mail missing requester detail %q: %s", expected, adminMail.TextBody)
+		}
+	}
+	for _, expected := range []string{"工单号", "工单标题", "用户 ID", "昵称", "邮箱", "分组", "角色", "nick", "u@example.com", "VIP", "user"} {
+		if !strings.Contains(adminMail.HTMLBody, expected) {
+			t.Fatalf("admin ticket HTML mail missing requester detail %q: %s", expected, adminMail.HTMLBody)
 		}
 	}
 	if strings.Contains(requesterMail.TextBody, "提交用户信息") || strings.Contains(requesterMail.HTMLBody, "提交用户信息") {
 		t.Fatalf("requester mail must not expose the admin-only detail block: %+v", requesterMail)
+	}
+}
+
+func TestTicketHTMLRenderFailureStillSendsPlainText(t *testing.T) {
+	original := ticketMailContentTemplate
+	ticketMailContentTemplate = nil
+	t.Cleanup(func() { ticketMailContentTemplate = original })
+
+	uc, _, _, _ := newTestUseCase()
+	mailer := &fakeMail{}
+	uc.mail = mailer
+
+	_, err := uc.CreateTicket(context.Background(), CreateTicketRequest{
+		RequesterUserID: 7,
+		RequesterEmail:  "u@example.com",
+		TicketType:      domain.TicketTypeGeneral,
+		Title:           "help",
+		FirstMessage:    "plain-text fallback",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if len(mailer.sent) != 1 {
+		t.Fatalf("sent %d mails, want 1", len(mailer.sent))
+	}
+	if mailer.sent[0].HTMLBody != "" || !strings.Contains(mailer.sent[0].TextBody, "plain-text fallback") {
+		t.Fatalf("ticket mail did not fall back to plain text: %+v", mailer.sent[0])
 	}
 }
 

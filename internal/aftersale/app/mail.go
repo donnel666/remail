@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"html/template"
 	"log/slog"
 	"strings"
 
@@ -14,6 +15,18 @@ import (
 // replyDelimiter is inserted into every outbound ticket email. Inbound replies
 // are stripped at this marker so only the customer's new text is ingested.
 const replyDelimiter = "##- 请在此行以上回复 / Reply above this line -##"
+
+var ticketMailContentTemplate = template.Must(template.New("ticket-mail-content").Funcs(template.FuncMap{"lines": ticketMailTextLines}).Parse(`<table aria-label="通知详情" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:separate;border-spacing:0;border:1px solid #e5e7eb;border-bottom:0;border-radius:8px;overflow:hidden;margin:0 0 20px;">{{range .Details}}<tr><th scope="row" align="left" valign="top" width="34%" style="border-bottom:1px solid #e5e7eb;background:#f9fafb;color:#4b5563;font-size:14px;line-height:22px;font-weight:600;padding:13px 16px;word-break:break-word;">{{.Label}}</th><td align="left" valign="top" style="border-bottom:1px solid #e5e7eb;color:#111827;font-size:15px;line-height:22px;padding:13px 16px;white-space:pre-wrap;mso-spacerun:yes;word-break:break-word;">{{range $index, $line := lines .Value}}{{if $index}}<br>{{end}}{{$line}}{{end}}</td></tr>{{end}}</table><div style="font-size:15px;line-height:24px;color:#374151;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:18px 20px;margin:0 0 20px;white-space:pre-wrap;mso-spacerun:yes;word-break:break-word;">{{range $index, $line := lines .Content}}{{if $index}}<br>{{end}}{{$line}}{{end}}</div>`))
+
+type ticketMailDetail struct {
+	Label string
+	Value string
+}
+
+type ticketMailHTMLData struct {
+	Details []ticketMailDetail
+	Content string
+}
 
 type ticketMailKind int
 
@@ -70,28 +83,43 @@ func (uc *UseCase) notifySuperAdmins(ctx context.Context, view *TicketView, kind
 
 func ticketMailField(value string) string { return strings.Join(strings.Fields(value), " ") }
 
+func ticketMailTextLines(value string) []string {
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	return strings.Split(strings.ReplaceAll(value, "\r", "\n"), "\n")
+}
+
 func (uc *UseCase) sendTicketMail(ctx context.Context, view *TicketView, to, replyToken string, adminID uint, kind ticketMailKind, platformRecipient bool) {
 	ticket := view.Ticket
 	last := ticket.Messages[len(ticket.Messages)-1]
 	content := last.Content
+	details := []ticketMailDetail{{Label: "工单号", Value: ticket.TicketNo}, {Label: "工单标题", Value: ticket.Title}}
 	if platformRecipient {
-		requester := RequesterSummary{ID: ticket.RequesterUserID}
+		summary := RequesterSummary{ID: ticket.RequesterUserID}
 		if view.Requester != nil {
-			requester = *view.Requester
+			summary = *view.Requester
 		}
-		content = fmt.Sprintf("提交用户信息\n用户 ID：%d\n昵称：%s\n邮箱：%s\n分组：%s\n角色：%s\n\n工单内容\n%s",
-			ticket.RequesterUserID, ticketMailField(requester.Nickname), ticketMailField(requester.Email),
-			ticketMailField(requester.GroupName), ticketMailField(requester.Role), content)
+		requesterDetails := []ticketMailDetail{
+			{Label: "用户 ID", Value: fmt.Sprint(ticket.RequesterUserID)},
+			{Label: "昵称", Value: ticketMailField(summary.Nickname)},
+			{Label: "邮箱", Value: ticketMailField(summary.Email)},
+			{Label: "分组", Value: ticketMailField(summary.GroupName)},
+			{Label: "角色", Value: ticketMailField(summary.Role)},
+		}
+		details = append(details, requesterDetails...)
+		content = "提交用户信息\n" + ticketMailDetailsText(requesterDetails) + "\n\n工单内容\n" + content
 	}
-
 	subject, intro := ticketMailSubjectIntro(kind, ticket, platformRecipient)
+	htmlBody, err := ticketMailHTML(ticket, subject, intro, last.Content, details)
+	if err != nil {
+		slog.Warn("aftersale ticket email HTML render failed", "ticketNo", ticket.TicketNo, "error", err)
+	}
 	command := TicketMailCommand{
 		IdempotencyKey: ticketMailIdempotencyKey(ticket.TicketNo, last.ID, adminID),
 		To:             to,
 		ReplyTo:        uc.mailConfig.replyAddress(ticket.TicketNo, replyToken),
 		Subject:        subject,
 		TextBody:       ticketMailText(ticket, intro, content),
-		HTMLBody:       ticketMailHTML(ticket, subject, intro, content),
+		HTMLBody:       htmlBody,
 	}
 	if err := uc.mail.SendTicketMail(ctx, command); err != nil {
 		slog.Warn("aftersale ticket email failed", "ticketNo", ticket.TicketNo, "error", err)
@@ -134,12 +162,21 @@ func ticketMailText(ticket *domain.Ticket, intro, content string) string {
 	return b.String()
 }
 
-func ticketMailHTML(ticket *domain.Ticket, subject, intro, content string) string {
-	return mailapp.BrandedNotificationHTML(
+func ticketMailDetailsText(details []ticketMailDetail) string {
+	lines := make([]string, len(details))
+	for i, detail := range details {
+		lines[i] = detail.Label + "：" + detail.Value
+	}
+	return strings.Join(lines, "\n")
+}
+
+func ticketMailHTML(ticket *domain.Ticket, subject, intro, content string, details []ticketMailDetail) (string, error) {
+	return mailapp.BrandedHTML(
 		subject,
 		"工单通知",
 		intro,
-		content,
+		ticketMailContentTemplate,
+		ticketMailHTMLData{Details: details, Content: content},
 		fmt.Sprintf("%s 工单号：%s。直接回复本邮件即可继续沟通，请勿修改邮件主题。", replyDelimiter, ticket.TicketNo),
 	)
 }

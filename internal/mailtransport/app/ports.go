@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"html"
+	"html/template"
+	"log/slog"
 	"regexp"
 	"strings"
 	"time"
@@ -18,6 +20,17 @@ var diagnosticEmailPattern = regexp.MustCompile(`(?i)\b([a-z0-9._%+\-])[a-z0-9._
 type DeliveryPort interface {
 	Send(ctx context.Context, message domain.OutboundMessage) error
 }
+
+type notificationDetail struct {
+	Label string
+	Value string
+}
+
+var (
+	verificationCodeContentTemplate  = template.Must(template.New("verification-code").Parse(`<div style="font-size:32px;line-height:40px;font-weight:700;color:#111827;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:18px 20px;text-align:center;margin:0 0 20px;">{{.}}</div>`))
+	notificationPanelContentTemplate = template.Must(template.New("notification-panel").Funcs(template.FuncMap{"lines": mailTextLines}).Parse(`<div style="font-size:15px;line-height:24px;color:#374151;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:18px 20px;margin:0 0 20px;white-space:pre-wrap;mso-spacerun:yes;word-break:break-word;">{{range $index, $line := lines .}}{{if $index}}<br>{{end}}{{$line}}{{end}}</div>`))
+	notificationTableContentTemplate = template.Must(template.New("notification-table").Funcs(template.FuncMap{"lines": mailTextLines}).Parse(`<table aria-label="通知详情" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:separate;border-spacing:0;border:1px solid #e5e7eb;border-bottom:0;border-radius:8px;overflow:hidden;margin:0 0 20px;">{{range .}}<tr><th scope="row" align="left" valign="top" width="34%" style="border-bottom:1px solid #e5e7eb;background:#f9fafb;color:#4b5563;font-size:14px;line-height:22px;font-weight:600;padding:13px 16px;word-break:break-word;">{{.Label}}</th><td align="left" valign="top" style="border-bottom:1px solid #e5e7eb;color:#111827;font-size:15px;line-height:22px;padding:13px 16px;white-space:pre-wrap;mso-spacerun:yes;word-break:break-word;">{{range $index, $line := lines .Value}}{{if $index}}<br>{{end}}{{$line}}{{end}}</td></tr>{{end}}</table>`))
+)
 
 func VerificationCodeMessage(recipient, code string) domain.OutboundMessage {
 	code = bodyValue(code)
@@ -34,7 +47,11 @@ func VerificationCodeMessage(recipient, code string) domain.OutboundMessage {
 
 func BalanceWarningMessage(recipient, balance, threshold string, cycle uint64) domain.OutboundMessage {
 	recipient = strings.TrimSpace(recipient)
-	body := fmt.Sprintf("当前余额：￥%s\n预警档位：≤￥%s\n请及时充值，以免影响服务使用。", balance, threshold)
+	details := []notificationDetail{
+		{Label: "当前余额", Value: "￥" + balance},
+		{Label: "预警档位", Value: "≤￥" + threshold},
+		{Label: "建议操作", Value: "请及时充值，以免影响服务使用。"},
+	}
 	return notificationMessage(
 		domain.PurposeSystemNotice,
 		messageDigest("balance_warning", recipient, cycle, threshold),
@@ -42,14 +59,20 @@ func BalanceWarningMessage(recipient, balance, threshold string, cycle uint64) d
 		"ReMail 余额不足预警",
 		"余额不足预警",
 		"您的账户余额已到达预警档位。",
-		body,
+		notificationDetailsText(details),
+		notificationTableContentTemplate,
+		details,
 		"充值到账后，各档位的预警次数将自动重置。",
 	)
 }
 
 func RechargeCreditedMessage(recipient, rechargeNo, amount, balance string) domain.OutboundMessage {
 	recipient = strings.TrimSpace(recipient)
-	body := fmt.Sprintf("充值金额：￥%s\n到账后余额：￥%s\n充值单号：%s", amount, balance, rechargeNo)
+	details := []notificationDetail{
+		{Label: "充值金额", Value: "￥" + amount},
+		{Label: "到账后余额", Value: "￥" + balance},
+		{Label: "充值单号", Value: rechargeNo},
+	}
 	return notificationMessage(
 		domain.PurposeSystemNotice,
 		messageDigest("recharge_credited", recipient, rechargeNo),
@@ -57,14 +80,21 @@ func RechargeCreditedMessage(recipient, rechargeNo, amount, balance string) doma
 		"ReMail 充值到账通知",
 		"充值到账",
 		"您的充值已成功到账。",
-		body,
+		notificationDetailsText(details),
+		notificationTableContentTemplate,
+		details,
 		"如对本次充值有疑问，请联系平台管理员。",
 	)
 }
 
 func LeaderboardRewardMessage(recipient, businessDate string, rank, score int, amount string) domain.OutboundMessage {
 	recipient = strings.TrimSpace(recipient)
-	body := fmt.Sprintf("结算日期：%s\n排行榜名次：第 %d 名\n成功订单数：%d\n奖励金额：￥%s", businessDate, rank, score, amount)
+	details := []notificationDetail{
+		{Label: "结算日期", Value: businessDate},
+		{Label: "排行榜名次", Value: fmt.Sprintf("第 %d 名", rank)},
+		{Label: "成功订单数", Value: fmt.Sprint(score)},
+		{Label: "奖励金额", Value: "￥" + amount},
+	}
 	return notificationMessage(
 		domain.PurposeSystemNotice,
 		messageDigest("leaderboard_reward", businessDate, rank, recipient),
@@ -72,7 +102,9 @@ func LeaderboardRewardMessage(recipient, businessDate string, rank, score int, a
 		"ReMail 排行榜奖励到账通知",
 		"排行榜奖励到账",
 		"恭喜您获得今日成功订单排行榜奖励。",
-		body,
+		notificationDetailsText(details),
+		notificationTableContentTemplate,
+		details,
 		"奖励已发放至您的消费钱包，此邮件由系统自动发送。",
 	)
 }
@@ -88,7 +120,12 @@ func LoginNotificationMessage(recipient, sessionID, clientIP, userAgent string, 
 		userAgent = "未知设备"
 	}
 	location := time.FixedZone("Asia/Shanghai", 8*60*60)
-	body := fmt.Sprintf("登录时间：%s\n登录 IP：%s\n设备：%s", at.In(location).Format("2006-01-02 15:04:05 MST"), clientIP, userAgent)
+	loginTime := at.In(location).Format("2006-01-02 15:04:05 MST")
+	details := []notificationDetail{
+		{Label: "登录时间", Value: loginTime},
+		{Label: "登录 IP", Value: clientIP},
+		{Label: "设备", Value: userAgent},
+	}
 	return notificationMessage(
 		domain.PurposeSecurityNotice,
 		messageDigest("login", recipient, sessionID),
@@ -96,7 +133,9 @@ func LoginNotificationMessage(recipient, sessionID, clientIP, userAgent string, 
 		"ReMail 登录通知",
 		"账户登录通知",
 		"您的 ReMail 账户刚刚完成登录。",
-		body,
+		notificationDetailsText(details),
+		notificationTableContentTemplate,
+		details,
 		"若非本人操作，请立即修改密码并联系平台管理员。",
 	)
 }
@@ -111,7 +150,9 @@ func AnnouncementMessage(recipient string, announcementID int64, title, content 
 		"ReMail 系统公告："+title,
 		title,
 		"平台发布了新的系统公告。",
-		strings.TrimSpace(content),
+		content,
+		notificationPanelContentTemplate,
+		content,
 		"此邮件由系统自动发送，请勿直接回复。",
 	)
 }
@@ -121,40 +162,62 @@ func verificationCodePlainText(code string) string {
 }
 
 func verificationCodeHTML(code string) string {
-	code = html.EscapeString(code)
-	return brandedHTML(
+	htmlBody, err := BrandedHTML(
 		"ReMail 邮箱验证码",
 		"邮箱验证码",
 		"请输入下方验证码完成本次操作。",
-		fmt.Sprintf(`<div style="font-size:32px;line-height:40px;font-weight:700;color:#111827;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:18px 20px;text-align:center;margin:0 0 20px;">%s</div>`, code),
+		verificationCodeContentTemplate,
+		code,
 		"验证码 10 分钟内有效。若非本人操作，请忽略本邮件。",
 	)
+	if err != nil {
+		slog.Error("render verification code email HTML failed", "error", err)
+	}
+	return htmlBody
 }
 
-func notificationMessage(purpose domain.OutboundPurpose, idempotencyKey, recipient, subject, heading, intro, content, note string) domain.OutboundMessage {
+func notificationMessage(purpose domain.OutboundPurpose, idempotencyKey, recipient, subject, heading, intro, textContent string, contentTemplate *template.Template, contentData any, note string) domain.OutboundMessage {
+	htmlBody, err := BrandedHTML(subject, heading, intro, contentTemplate, contentData, note)
+	if err != nil {
+		slog.Error("render notification email HTML failed", "purpose", purpose, "error", err)
+	}
 	return domain.OutboundMessage{
 		IdempotencyKey: idempotencyKey,
 		Purpose:        purpose,
 		To:             recipient,
 		Subject:        bodyValue(subject),
-		TextBody:       notificationPlainText(heading, intro, content, note),
-		HTMLBody:       BrandedNotificationHTML(subject, heading, intro, content, note),
+		TextBody:       notificationPlainText(heading, intro, textContent, note),
+		HTMLBody:       htmlBody,
 	}
-}
-
-// BrandedNotificationHTML renders plain notification content in the shared email frame.
-func BrandedNotificationHTML(documentTitle, heading, intro, content, note string) string {
-	return brandedHTML(documentTitle, heading, intro, notificationPanelHTML(content), note)
 }
 
 func notificationPlainText(heading, intro, content, note string) string {
 	return fmt.Sprintf("%s\r\n\r\n%s\r\n\r\n%s\r\n\r\n%s\r\n\r\nRemail，轻松收码\r\n让闲置邮箱，重新热起来\r\n", heading, intro, content, note)
 }
 
-func notificationPanelHTML(content string) string {
-	content = html.EscapeString(strings.TrimSpace(content))
-	content = strings.ReplaceAll(content, "\n", "<br>")
-	return `<div style="font-size:15px;line-height:24px;color:#374151;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:18px 20px;margin:0 0 20px;">` + content + `</div>`
+func notificationDetailsText(details []notificationDetail) string {
+	lines := make([]string, len(details))
+	for i, detail := range details {
+		lines[i] = detail.Label + "：" + detail.Value
+	}
+	return strings.Join(lines, "\n")
+}
+
+func mailTextLines(value string) []string {
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	return strings.Split(strings.ReplaceAll(value, "\r", "\n"), "\n")
+}
+
+// BrandedHTML renders ordinary caller data through its content template, then adds the shared email frame.
+func BrandedHTML(documentTitle, heading, intro string, contentTemplate *template.Template, contentData any, note string) (string, error) {
+	if contentTemplate == nil {
+		return "", fmt.Errorf("render branded email content: template is nil")
+	}
+	var contentHTML strings.Builder
+	if err := contentTemplate.Execute(&contentHTML, contentData); err != nil {
+		return "", fmt.Errorf("render branded email content: %w", err)
+	}
+	return brandedHTML(documentTitle, heading, intro, contentHTML.String(), note), nil
 }
 
 func brandedHTML(documentTitle, heading, intro, contentHTML, note string) string {

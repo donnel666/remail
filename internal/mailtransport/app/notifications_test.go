@@ -1,6 +1,7 @@
 package app
 
 import (
+	"html/template"
 	"strings"
 	"testing"
 	"time"
@@ -10,20 +11,73 @@ import (
 )
 
 func TestSystemMessagesReuseVerificationFrameAndEscapeContent(t *testing.T) {
-	messages := []domain.OutboundMessage{
-		BalanceWarningMessage("user@example.com", "0.40", "0.50", 2),
-		RechargeCreditedMessage("user@example.com", "RC1", "10.00", "10.40"),
-		LoginNotificationMessage("user@example.com", "session-1", "203.0.113.8", "Browser", time.Unix(0, 0)),
-		AnnouncementMessage("user@example.com", 7, "公告", "安全内容\n<script>alert(1)</script>"),
+	structured := []struct {
+		message domain.OutboundMessage
+		labels  []string
+	}{
+		{BalanceWarningMessage("user@example.com", "0.40", "0.50", 2), []string{"当前余额", "预警档位", "建议操作"}},
+		{RechargeCreditedMessage("user@example.com", "<img src=x onerror=alert(1)>\r\nRC2", "10.00", "10.40"), []string{"充值金额", "到账后余额", "充值单号"}},
+		{LeaderboardRewardMessage("user@example.com", "2026-07-28", 1, 12, "8.00"), []string{"结算日期", "排行榜名次", "成功订单数", "奖励金额"}},
+		{LoginNotificationMessage("user@example.com", "session-1", "203.0.113.8", "Browser", time.Unix(0, 0)), []string{"登录时间", "登录 IP", "设备"}},
 	}
-	for _, message := range messages {
+	for _, item := range structured {
+		message := item.message
 		require.Contains(t, message.HTMLBody, `class="remail-shine-bar"`)
 		require.Contains(t, message.HTMLBody, "Remail，轻松收码")
+		require.Contains(t, message.HTMLBody, `<table aria-label="通知详情"`)
 		require.NotEmpty(t, message.TextBody)
 		require.Len(t, message.IdempotencyKey, 64)
+		for _, label := range item.labels {
+			require.Contains(t, message.HTMLBody, ">"+label+"</th>")
+			require.Contains(t, message.TextBody, label+"：")
+		}
 	}
-	require.Equal(t, domain.PurposeSecurityNotice, messages[2].Purpose)
-	require.NotContains(t, messages[3].HTMLBody, "<script>")
-	require.Contains(t, messages[3].HTMLBody, "&lt;script&gt;")
-	require.True(t, strings.HasPrefix(messages[3].Subject, "ReMail 系统公告："))
+	require.Equal(t, domain.PurposeSecurityNotice, structured[3].message.Purpose)
+	require.NotContains(t, structured[1].message.HTMLBody, "<img src=x")
+	require.Contains(t, structured[1].message.HTMLBody, "&lt;img src=x onerror=alert(1)&gt;<br>RC2")
+	require.Contains(t, structured[1].message.TextBody, `<img src=x onerror=alert(1)>`)
+
+	announcement := AnnouncementMessage("user@example.com", 7, `公告 <img src=x onerror=alert(1)>`, "  安全内容\r\n<script>alert(1)</script>\n")
+	require.NotContains(t, announcement.HTMLBody, `<table aria-label="通知详情"`)
+	require.NotContains(t, announcement.HTMLBody, "<script>")
+	require.NotContains(t, announcement.HTMLBody, "<img src=x")
+	require.Contains(t, announcement.HTMLBody, "公告 &lt;img src=x onerror=alert(1)&gt;")
+	require.Contains(t, announcement.HTMLBody, ">  安全内容<br>&lt;script&gt;alert(1)&lt;/script&gt;<br></div>")
+	require.Contains(t, announcement.HTMLBody, "white-space:pre-wrap")
+	require.Contains(t, announcement.HTMLBody, "mso-spacerun:yes")
+	require.True(t, strings.HasPrefix(announcement.Subject, "ReMail 系统公告："))
+
+	verification := VerificationCodeMessage("user@example.com", "123456")
+	require.NotContains(t, verification.HTMLBody, `<table aria-label="通知详情"`)
+	require.Contains(t, verification.HTMLBody, "123456")
+}
+
+func TestBrandedHTMLReturnsRenderErrors(t *testing.T) {
+	badTemplate := template.Must(template.New("bad").Parse(`{{.Missing}}`))
+
+	htmlBody, err := BrandedHTML("title", "heading", "intro", badTemplate, struct{}{}, "note")
+	require.Empty(t, htmlBody)
+	require.ErrorContains(t, err, "render branded email content")
+
+	htmlBody, err = BrandedHTML("title", "heading", "intro", nil, nil, "note")
+	require.Empty(t, htmlBody)
+	require.ErrorContains(t, err, "template is nil")
+}
+
+func TestNotificationRenderFailureFallsBackToPlainText(t *testing.T) {
+	originalPanel := notificationPanelContentTemplate
+	notificationPanelContentTemplate = nil
+	t.Cleanup(func() { notificationPanelContentTemplate = originalPanel })
+
+	message := AnnouncementMessage("user@example.com", 7, "公告", "仍然可以读取的正文")
+	require.Empty(t, message.HTMLBody)
+	require.Contains(t, message.TextBody, "仍然可以读取的正文")
+
+	originalVerification := verificationCodeContentTemplate
+	verificationCodeContentTemplate = nil
+	t.Cleanup(func() { verificationCodeContentTemplate = originalVerification })
+
+	verification := VerificationCodeMessage("user@example.com", "123456")
+	require.Empty(t, verification.HTMLBody)
+	require.Contains(t, verification.TextBody, "123456")
 }
