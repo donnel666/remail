@@ -22,27 +22,31 @@ describe("dashboard date range", () => {
     vi.useRealTimers();
   });
 
-  it("uses the same 24-hour default for every dashboard", () => {
+  it("uses the full current day for every dashboard", () => {
     const [from, to] = createDefaultDashboardDateRange(now);
-    const expectedFrom = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const expectedFrom = new Date(now);
+    expectedFrom.setHours(0, 0, 0, 0);
+    const expectedTo = new Date(now);
+    expectedTo.setHours(23, 59, 59, 999);
 
     expect(from).toEqual(expectedFrom);
-    expect(to).toEqual(now);
+    expect(to).toEqual(expectedTo);
   });
 
-  it("orders dates and excludes future time", () => {
+  it("keeps today live and excludes later days", () => {
+    const from = new Date(now);
+    from.setHours(0, 0, 0, 0);
+    const later = new Date(now);
+    later.setDate(later.getDate() + 1);
+    later.setHours(23, 59, 59, 999);
+    const endOfToday = new Date(now);
+    endOfToday.setHours(23, 59, 59, 999);
     const range = normalizeDashboardDateRange(
-      [
-        new Date("2026-07-16T00:00:00+08:00"),
-        new Date("2026-07-15T10:00:00+08:00"),
-      ],
+      [from, later],
       now,
     );
 
-    expect(range).toEqual([
-      new Date("2026-07-15T10:00:00+08:00"),
-      now,
-    ]);
+    expect(range).toEqual([from, endOfToday]);
   });
 
   it("bounds very long custom ranges without changing their end", () => {
@@ -104,11 +108,11 @@ describe("dashboard date range", () => {
     const dashboard = renderHook(() => useSharedDashboardDateRange());
     dashboard.unmount();
 
-    window.localStorage.setItem("dashboard-date-range", serialized);
+    window.localStorage.setItem("dashboard-date-range-v2", serialized);
     act(() => {
       window.dispatchEvent(
         new StorageEvent("storage", {
-          key: "dashboard-date-range",
+          key: "dashboard-date-range-v2",
           newValue: serialized,
         }),
       );

@@ -4,6 +4,7 @@ services:
     command:
       - --max-connections=550
     environment:
+      TZ: Asia/Shanghai
       MYSQL_ROOT_PASSWORD: root
       MYSQL_DATABASE: remail
       MYSQL_USER: remail
@@ -56,8 +57,9 @@ services:
       - "127.0.0.1:8080:8080"
       - "127.0.0.1:6060:6060"
     environment:
+      TZ: Asia/Shanghai
       SERVER_ADDR: ":8080"
-      MYSQL_DSN: "remail:remail@tcp(mysql:3306)/remail?charset=utf8mb4&parseTime=True&loc=Local"
+      MYSQL_DSN: "remail:remail@tcp(mysql:3306)/remail?charset=utf8mb4&parseTime=True&loc=Asia%2FShanghai"
       MYSQL_MAX_OPEN_CONNS: "500"
       MYSQL_MAX_IDLE_CONNS: "500"
       REDIS_ADDR: "redis:6379"

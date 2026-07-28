@@ -12,8 +12,9 @@ import (
 )
 
 // TestFinanceSummaryBucketsMatchDBTimezoneMySQL guards the SQL↔Go bucketing
-// seam. The ledger SQL groups by DATE_FORMAT(created_at) in the DB session zone
-// (loc=Local) while buildFinanceSummary keys its buckets in time.Local. If those
+// seam. The ledger SQL groups by DATE_FORMAT(created_at) in Asia/Shanghai while
+// buildFinanceSummary keys its buckets in time.Local, which CI pins to Shanghai.
+// If those
 // desync (e.g. Go keying in UTC under a non-UTC deployment) every bucket lookup
 // misses and the whole trend + totals silently zero out. Seeds real rows across
 // two hours and asserts they land in the right buckets, with a compensating

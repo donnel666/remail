@@ -23,7 +23,7 @@ import (
 var dashboardMySQLTestServer = testmysql.New("remail_dashboard_test")
 
 func TestMain(m *testing.M) {
-	// Production runs with TZ=Asia/Shanghai and the MySQL DSN uses loc=Local.
+	// Production runs with TZ=Asia/Shanghai and the MySQL DSN uses Asia/Shanghai.
 	// Keep DATETIME encoding and SQL buckets deterministic on UTC CI hosts too.
 	time.Local = businessday.Shanghai
 	code := m.Run()
@@ -413,7 +413,7 @@ INSERT INTO microsoft_resources(id, email_address, password, status, for_sale, g
 
 	// 2025-12-31 16:30 UTC is 2026-01-01 00:30 in Shanghai. This covers the
 	// UTC/Shanghai day and year boundary without applying a second +08:00 shift
-	// to DATETIME values already encoded through loc=Local.
+	// to DATETIME values already encoded in Asia/Shanghai.
 	boundary := time.Date(2025, 12, 31, 16, 30, 0, 0, time.UTC)
 	require.NoError(t, db.Exec(`
 INSERT INTO users(id, email, password_hash, nickname, status, role, created_at, last_login_at)

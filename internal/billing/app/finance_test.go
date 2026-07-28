@@ -65,7 +65,7 @@ func ptrUint(v uint) *uint { return &v }
 
 func TestBuildFinanceSummaryHourly(t *testing.T) {
 	// Times are constructed in time.Local because the summary buckets in the
-	// DB session zone (loc=Local); using time.Local keeps this test correct
+	// DB session's Asia/Shanghai zone; using time.Local keeps this test correct
 	// under any TZ (the wall-clock hours are what the labels reflect).
 	from := time.Date(2026, 3, 15, 9, 30, 0, 0, time.Local)
 	to := time.Date(2026, 3, 15, 11, 15, 0, 0, time.Local)
@@ -128,6 +128,17 @@ func TestBuildFinanceSummaryCrossYearLabels(t *testing.T) {
 	result := buildFinanceSummary(from, to, financeGranularity(from, to), nil, nil, nil)
 	if len(result.Trend) != 2 || result.Trend[0].Label != "2025/12/31" || result.Trend[1].Label != "2026/1/1" {
 		t.Fatalf("cross-year labels wrong: %+v", result.Trend)
+	}
+}
+
+func TestResolveFinanceRangeCapsFutureEndAtServerNow(t *testing.T) {
+	now := time.Date(2026, 7, 21, 8, 42, 0, 0, time.UTC)
+	from := now.Add(-8 * time.Hour)
+	to := now.Add(8 * time.Hour)
+
+	gotFrom, gotTo := resolveFinanceRange(&from, &to, now)
+	if !gotFrom.Equal(from) || !gotTo.Equal(now) {
+		t.Fatalf("resolveFinanceRange = [%s,%s], want [%s,%s]", gotFrom, gotTo, from, now)
 	}
 }
 

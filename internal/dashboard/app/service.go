@@ -428,9 +428,12 @@ func displayName(nickname, email string, userID uint) string {
 // ---- bucketing helpers (mirrors internal/billing/app/finance.go) ---------
 
 func resolveRange(from, to *time.Time, now time.Time) (time.Time, time.Time) {
-	toT := now.In(dashboardLocation)
+	toT := now.UTC()
 	if to != nil {
 		toT = to.UTC()
+		if toT.After(now) {
+			toT = now.UTC()
+		}
 	}
 	fromT := toT.AddDate(0, 0, -defaultSummaryDays)
 	if from != nil {

@@ -238,3 +238,14 @@ func TestDashboardBucketsUseShanghaiDay(t *testing.T) {
 		t.Fatalf("granularity(%s,%s) = %q, want hour", now, now, got)
 	}
 }
+
+func TestResolveRangeCapsFutureEndAtServerNow(t *testing.T) {
+	now := time.Date(2026, 7, 21, 8, 42, 0, 0, time.UTC)
+	from := now.Add(-8 * time.Hour)
+	to := now.Add(8 * time.Hour)
+
+	gotFrom, gotTo := resolveRange(&from, &to, now)
+	if !gotFrom.Equal(from) || !gotTo.Equal(now) {
+		t.Fatalf("resolveRange = [%s,%s], want [%s,%s]", gotFrom, gotTo, from, now)
+	}
+}

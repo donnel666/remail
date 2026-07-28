@@ -651,6 +651,9 @@ func resolveFinanceRange(from, to *time.Time, now time.Time) (time.Time, time.Ti
 	toT := now.UTC()
 	if to != nil {
 		toT = to.UTC()
+		if toT.After(now) {
+			toT = now.UTC()
+		}
 	}
 	var fromT time.Time
 	if from != nil {
@@ -671,9 +674,8 @@ func resolveFinanceRange(from, to *time.Time, now time.Time) (time.Time, time.Ti
 }
 
 // financeGranularity buckets by hour for a single calendar day, else by day.
-// The calendar day is evaluated in time.Local because the ledger SQL groups by
-// DATE_FORMAT(created_at) in the DB session's zone, which the DSN pins to Local
-// (loc=Local); bucketing here in any other zone would desync the keys.
+// The calendar day is evaluated in time.Local, which the process and MySQL DSN
+// both pin to Asia/Shanghai so these keys match the SQL DATE_FORMAT buckets.
 func financeGranularity(from, to time.Time) string {
 	fl, tl := from.In(time.Local), to.In(time.Local)
 	if fl.Year() == tl.Year() && fl.YearDay() == tl.YearDay() {

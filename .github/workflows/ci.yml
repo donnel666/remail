@@ -22,6 +22,7 @@ env:
   GO_VERSION: "1.25"
   NODE_VERSION: "22"
   IMAGE_NAME: ghcr.io/${{ github.repository }}
+  TZ: Asia/Shanghai
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -168,6 +169,7 @@ jobs:
       mysql:
         image: mysql:8.0
         env:
+          TZ: Asia/Shanghai
           MYSQL_ROOT_PASSWORD: root
           MYSQL_DATABASE: remail
           MYSQL_USER: remail
@@ -243,7 +245,7 @@ jobs:
           done
           exit 1
         env:
-          MYSQL_DSN: "remail:remail@tcp(127.0.0.1:3306)/remail?charset=utf8mb4&parseTime=True&loc=Local"
+          MYSQL_DSN: "remail:remail@tcp(127.0.0.1:3306)/remail?charset=utf8mb4&parseTime=True&loc=Asia%2FShanghai"
           REDIS_ADDR: "127.0.0.1:6379"
           MINIO_ENDPOINT: "127.0.0.1:9000"
           MINIO_ACCESS_KEY: "remail"
@@ -458,7 +460,7 @@ jobs:
           MYSQL_DATABASE=remail
           MYSQL_USER=remail
           MYSQL_PASSWORD=${MYSQL_PASSWORD}
-          MYSQL_DSN=remail:${MYSQL_PASSWORD}@tcp(mysql:3306)/remail?charset=utf8mb4&parseTime=True&loc=Local
+          MYSQL_DSN=remail:${MYSQL_PASSWORD}@tcp(mysql:3306)/remail?charset=utf8mb4&parseTime=True&loc=Asia%2FShanghai
           REDIS_PASSWORD=${REDIS_PASSWORD}
           MINIO_ROOT_USER=${MINIO_ROOT_USER}
           MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}

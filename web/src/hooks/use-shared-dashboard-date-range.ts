@@ -5,7 +5,7 @@ import {
   type DateRangeValue,
 } from "@/pages/resources/date-range-filter";
 
-const DASHBOARD_DATE_RANGE_STORAGE_KEY = "dashboard-date-range";
+const DASHBOARD_DATE_RANGE_STORAGE_KEY = "dashboard-date-range-v2";
 
 // Keep custom ranges bounded so every dashboard can render them without
 // producing an unbounded number of chart points. The selected range remains
@@ -26,8 +26,10 @@ function cloneRange(range: DateRangeValue): DateRangeValue {
 export function createDefaultDashboardDateRange(
   now = new Date(),
 ): DateRangeValue {
+  const start = new Date(now.getTime());
+  start.setHours(0, 0, 0, 0);
   const end = new Date(now.getTime());
-  const start = new Date(end.getTime() - 24 * 60 * 60 * 1000);
+  end.setHours(23, 59, 59, 999);
   return [start, end];
 }
 
@@ -39,7 +41,9 @@ export function normalizeDashboardDateRange(
   if (normalized.length !== 2) return createDefaultDashboardDateRange(now);
 
   let [from, to] = cloneRange(normalized);
-  if (to.getTime() > now.getTime()) to = new Date(now.getTime());
+  const latestAllowed = new Date(now.getTime());
+  latestAllowed.setHours(23, 59, 59, 999);
+  if (to.getTime() > latestAllowed.getTime()) to = latestAllowed;
   if (from.getTime() > to.getTime()) from = new Date(to.getTime());
 
   const earliestAllowed = new Date(to.getTime());

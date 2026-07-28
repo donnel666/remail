@@ -10,6 +10,7 @@ services:
       - --innodb-buffer-pool-size=4G
       - --innodb-lock-wait-timeout=3
     environment:
+      TZ: Asia/Shanghai
       MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD}"
       MYSQL_DATABASE: "${MYSQL_DATABASE}"
       MYSQL_USER: "${MYSQL_USER}"
@@ -50,6 +51,7 @@ services:
   server:
     image: ${APP_IMAGE}
     environment:
+      TZ: Asia/Shanghai
       APP_ENV: "production"
       SERVER_ADDR: ":8080"
       TRUSTED_PROXIES: "${TRUSTED_PROXIES}"

@@ -129,6 +129,7 @@ func (s *Server) start() {
 		Image:        "mysql:8.0",
 		ExposedPorts: []string{"3306/tcp"},
 		Env: map[string]string{
+			"TZ":                  "Asia/Shanghai",
 			"MYSQL_ROOT_PASSWORD": "root",
 			"MYSQL_DATABASE":      "remail_test",
 			"MYSQL_USER":          "remail",
