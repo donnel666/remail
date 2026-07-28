@@ -269,16 +269,17 @@ export default function AdminMicrosoftEmails() {
 
   useEffect(() => {
     setFacets(null);
+    if (loading) return;
     void refreshStats();
     return () => {
       statsRequestRef.current?.abort();
       statsRequestRef.current = null;
     };
-  }, [refreshStats]);
+  }, [loading, refreshStats]);
 
   const refresh = useCallback(async () => {
-    await Promise.all([refreshStats(), refreshList()]);
-  }, [refreshList, refreshStats]);
+    await refreshList();
+  }, [refreshList]);
 
   const refreshOpenDetail = useCallback(async (resourceId?: number) => {
     const id = resourceId ?? detail?.id;

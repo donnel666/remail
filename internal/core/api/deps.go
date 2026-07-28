@@ -130,7 +130,7 @@ func NewCoreModule(db *gorm.DB, redisClient redis.UniversalClient, files governa
 	projectRepo := coreinfra.NewProjectRepo(db)
 	importUseCase := coreapp.NewImportUseCase(resourceRepo, importRepo, txtParser, files, importQueue, bindingRecorder)
 	validationUseCase := coreapp.NewResourceValidationUseCase(resourceRepo, validationRepo, validationQueue, validator)
-	adminRepo := coreinfra.NewAdminResourceRepo(db)
+	adminRepo := coreinfra.NewAdminResourceRepo(db, redisClient)
 	adminQuery := coreapp.NewAdminResourceQuery(adminRepo)
 	adminDomainQuery := coreapp.NewAdminDomainQuery(adminRepo)
 	adminCommands := coreapp.NewAdminResourceCommandService(

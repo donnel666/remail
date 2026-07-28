@@ -138,6 +138,32 @@ describe("useBlockPagedList", () => {
     expect(result.current.total).toBe(5_000_000);
   });
 
+  it("does not retry a failed block when callback identities change", async () => {
+    const loadBlock = vi.fn().mockRejectedValue(new Error("database timeout"));
+    const onError = vi.fn();
+    const { result, rerender } = renderHook(
+      ({ revision }) =>
+        useBlockPagedList<number>({
+          activePage: 1,
+          filterKey: "failed-filter",
+          loadBlock,
+          onError: (error) => onError(revision, error),
+          pageSize: 5,
+        }),
+      { initialProps: { revision: 1 } }
+    );
+
+    await waitFor(() => expect(onError).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    rerender({ revision: 2 });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(loadBlock).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledTimes(1);
+  });
+
   it("aborts pending requests when unmounted", async () => {
     let signal!: AbortSignal;
     const loadBlock = vi.fn(

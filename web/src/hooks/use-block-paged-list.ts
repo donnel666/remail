@@ -51,6 +51,10 @@ export function useBlockPagedList<T, M = undefined>({
   const pendingRef = useRef(new Map<number, Promise<void>>());
   const controllersRef = useRef(new Map<number, AbortController>());
   const loadSeqRef = useRef(0);
+  const onErrorRef = useRef(onError);
+  const onLoadedRef = useRef(onLoaded);
+  onErrorRef.current = onError;
+  onLoadedRef.current = onLoaded;
   const [loading, setLoading] = useState(true);
   const [total, setTotalState] = useState(0);
   const [version, setVersion] = useState(0);
@@ -94,11 +98,11 @@ export function useBlockPagedList<T, M = undefined>({
           setTotalState((current) =>
             response.total ?? Math.max(current, observedTotal)
           );
-          onLoaded?.(response);
+          onLoadedRef.current?.(response);
           bumpVersion();
         })
         .catch((error) => {
-          if (loadSeqRef.current === seq) onError?.(error);
+          if (loadSeqRef.current === seq) onErrorRef.current?.(error);
         })
         .finally(() => {
           if (pendingRef.current.get(offset) === request) {
@@ -113,7 +117,7 @@ export function useBlockPagedList<T, M = undefined>({
       pendingRef.current.set(offset, request);
       await request;
     },
-    [blockSize, bumpVersion, loadBlock, onError, onLoaded]
+    [blockSize, bumpVersion, loadBlock]
   );
 
   const cancelPending = useCallback(() => {

@@ -3,6 +3,7 @@ package infra
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strconv"
@@ -12,8 +13,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	coreapp "github.com/donnel666/remail/internal/core/app"
 	"github.com/donnel666/remail/internal/core/domain"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
@@ -167,7 +170,10 @@ VALUES
 	require.EqualValues(t, 1, ownerEmailSearch.Total)
 	require.Equal(t, r2Root.ID, ownerEmailSearch.Items[0].ID)
 
-	for _, search := range []string{"explicit-two@outlook.com", "a.l.p.h.a@outlook.com", "alpha+one@outlook.com"} {
+	for _, search := range []string{
+		"alpha@outlook.com", "explicit-two@outlook.com", "a.l.p.h.a@outlook.com", "alpha+one@outlook.com",
+		"alpha", "explicit-two", "a.l.p.h.a", "alpha+one",
+	} {
 		aliasSearch, err := query.List(ctx, coreapp.AdminMicrosoftListFilter{Search: search}, 0, 20, 0)
 		require.NoError(t, err)
 		require.EqualValues(t, 1, aliasSearch.Total, search)
@@ -175,7 +181,7 @@ VALUES
 		require.Equal(t, "alpha@outlook.com", aliasSearch.Items[0].EmailAddress, search)
 	}
 
-	domainSearch, err := query.List(ctx, coreapp.AdminMicrosoftListFilter{Search: "outlook.com"}, 0, 20, 0)
+	domainSearch, err := query.List(ctx, coreapp.AdminMicrosoftListFilter{Search: "@outlook.com"}, 0, 20, 0)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, domainSearch.Total)
 	require.Equal(t, r1Root.ID, domainSearch.Items[0].ID)
@@ -345,6 +351,94 @@ func TestAdminMicrosoftFacetsCoalesceConcurrentCacheMissesIntoTwoBoundedQueriesM
 	require.EqualValues(t, 2, queries.Load())
 }
 
+func TestAdminMicrosoftFacetsReuseRedisSnapshotAcrossRepoInstancesMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	redisServer := miniredis.RunT(t)
+	redisClient := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
+	t.Cleanup(func() { require.NoError(t, redisClient.Close()) })
+
+	now := time.Now().UTC()
+	firstRepo := NewAdminResourceRepo(db, redisClient)
+	first, err := firstRepo.AdminMicrosoftFacets(context.Background(), coreapp.AdminMicrosoftListFilter{}, now)
+	require.NoError(t, err)
+
+	var queries atomic.Int32
+	const callback = "test:admin-facets-redis-snapshot"
+	require.NoError(t, db.Callback().Row().Before("gorm:row").Register(callback, func(*gorm.DB) {
+		queries.Add(1)
+	}))
+	invalidateMicrosoftFacets()
+
+	secondRepo := NewAdminResourceRepo(db, redisClient)
+	second, err := secondRepo.AdminMicrosoftFacets(context.Background(), coreapp.AdminMicrosoftListFilter{}, now)
+	require.NoError(t, err)
+	require.Equal(t, first, second)
+	require.Zero(t, queries.Load(), "a fresh Redis snapshot must survive process-local cache loss and facet generation changes")
+}
+
+func TestAdminMicrosoftFacetsReturnStaleRedisSnapshotWhileRefreshingMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	redisServer := miniredis.RunT(t)
+	redisClient := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
+	t.Cleanup(func() { require.NoError(t, redisClient.Close()) })
+
+	filter := coreapp.AdminMicrosoftListFilter{}
+	stableKey := adminMicrosoftFacetsCacheKey(filter)
+	staleComputedAt := time.Now().UTC().Add(-time.Hour)
+	payload, err := json.Marshal(adminMicrosoftFacetsSnapshot{
+		Facets:     coreapp.AdminMicrosoftFacets{Matched: 123},
+		ComputedAt: staleComputedAt,
+	})
+	require.NoError(t, err)
+	require.NoError(t, redisClient.Set(context.Background(), adminMicrosoftFacetsRedisKey(stableKey), payload, time.Hour).Err())
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var enteredOnce sync.Once
+	var releaseOnce sync.Once
+	releaseQueries := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(releaseQueries)
+	const callback = "test:admin-facets-stale-refresh"
+	require.NoError(t, db.Callback().Row().Before("gorm:row").Register(callback, func(*gorm.DB) {
+		enteredOnce.Do(func() { close(entered) })
+		<-release
+	}))
+
+	repo := NewAdminResourceRepo(db, redisClient)
+	type facetResult struct {
+		facets *coreapp.AdminMicrosoftFacets
+		err    error
+	}
+	resultCh := make(chan facetResult, 1)
+	go func() {
+		facets, callErr := repo.AdminMicrosoftFacets(context.Background(), filter, time.Now().UTC())
+		resultCh <- facetResult{facets: facets, err: callErr}
+	}()
+
+	select {
+	case result := <-resultCh:
+		require.NoError(t, result.err)
+		require.EqualValues(t, 123, result.facets.Matched)
+	case <-time.After(time.Second):
+		releaseQueries()
+		t.Fatal("a stale Redis snapshot must return without waiting for the MySQL refresh")
+	}
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("a stale Redis snapshot must trigger a background refresh")
+	}
+	releaseQueries()
+	require.Eventually(t, func() bool {
+		nextPayload, getErr := redisClient.Get(context.Background(), adminMicrosoftFacetsRedisKey(stableKey)).Bytes()
+		if getErr != nil {
+			return false
+		}
+		var snapshot adminMicrosoftFacetsSnapshot
+		return json.Unmarshal(nextPayload, &snapshot) == nil && snapshot.ComputedAt.After(staleComputedAt)
+	}, 3*time.Second, 20*time.Millisecond)
+}
+
 func TestAdminMicrosoftFacetWaitersCancelIndependentlyMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 	repo := NewAdminResourceRepo(db)
@@ -391,6 +485,30 @@ LIMIT 20`
 	requireAdminExplainTableUsesOneOf(t, db, listExplain, "mr", 8,
 		"idx_microsoft_bulk_domain")
 	requireAdminExplainTableUsesOneOf(t, db, listExplain, "er", 8, "PRIMARY")
+
+	localPartExplain := `EXPLAIN SELECT er.id
+FROM email_resources AS er
+JOIN microsoft_resources AS mr ON mr.id = er.id AND er.type = 'microsoft'
+JOIN (
+    SELECT id AS resource_id FROM microsoft_resources WHERE email_address LIKE 'explicit-00@%'
+    UNION
+    SELECT resource_id FROM explicit_aliases WHERE email LIKE 'explicit-00@%'
+    UNION
+    SELECT resource_id FROM dot_aliases WHERE email LIKE 'explicit-00@%'
+    UNION
+    SELECT resource_id FROM plus_aliases WHERE email LIKE 'explicit-00@%'
+) AS admin_resource_search ON admin_resource_search.resource_id = er.id
+WHERE mr.status <> 'deleted'
+ORDER BY er.id DESC
+LIMIT 20`
+	requireAdminExplainTableUsesOneOf(t, db, localPartExplain, "microsoft_resources", 8,
+		"idx_microsoft_email")
+	requireAdminExplainTableUsesOneOf(t, db, localPartExplain, "explicit_aliases", 8,
+		"idx_explicit_aliases_email_resource")
+	requireAdminExplainTableUsesOneOf(t, db, localPartExplain, "dot_aliases", 8,
+		"idx_dot_aliases_email_resource")
+	requireAdminExplainTableUsesOneOf(t, db, localPartExplain, "plus_aliases", 8,
+		"idx_plus_aliases_email_resource")
 
 	facetExplain := `EXPLAIN SELECT mr.email_domain AS suffix, COUNT(*) AS count
 	FROM microsoft_resources AS mr
@@ -471,14 +589,14 @@ func TestAdminMicrosoftFilterQueryUsesOneRootJoinShapeMySQL(t *testing.T) {
 	require.NoError(t, result.Error)
 	shortSQL := strings.ToLower(strings.ReplaceAll(sqlLog.String(), string(rune(96)), ""))
 	sqlLog.Reset()
-	require.Contains(t, shortSQL, "mr.email_address like 'a%'")
-	require.Contains(t, shortSQL, "exists (select 1 from explicit_aliases ea")
-	require.Contains(t, shortSQL, "exists (select 1 from dot_aliases da")
-	require.Contains(t, shortSQL, "exists (select 1 from plus_aliases pa")
-	require.Contains(t, shortSQL, "er.owner_user_id in (9901)")
-	require.NotContains(t, shortSQL, "join (select id as resource_id")
+	require.Contains(t, shortSQL, "left join (select id as resource_id from microsoft_resources where email_address like 'a@%'")
+	require.Contains(t, shortSQL, "select resource_id from explicit_aliases where email like 'a@%'")
+	require.Contains(t, shortSQL, "select resource_id from dot_aliases where email like 'a@%'")
+	require.Contains(t, shortSQL, "select resource_id from plus_aliases where email like 'a@%'")
+	require.Contains(t, shortSQL, "admin_resource_search.resource_id is not null or er.owner_user_id in (9901)")
 	require.NotContains(t, shortSQL, "lower(")
-	require.NotContains(t, shortSQL, "like '%a%'")
+	require.NotContains(t, shortSQL, "exists (select")
+	require.NotContains(t, shortSQL, "like 'a%'")
 
 	result = repo.adminMicrosoftFilterQuery(
 		context.Background(),
@@ -489,8 +607,8 @@ func TestAdminMicrosoftFilterQueryUsesOneRootJoinShapeMySQL(t *testing.T) {
 	require.NoError(t, result.Error)
 	domainSQL := strings.ToLower(strings.ReplaceAll(sqlLog.String(), string(rune(96)), ""))
 	sqlLog.Reset()
-	require.Contains(t, domainSQL, "mr.email_domain like 'outlook.com%'")
-	require.Contains(t, domainSQL, "exists (select 1 from explicit_aliases ea")
+	require.Contains(t, domainSQL, "mr.email_domain = 'outlook.com'")
+	require.NotContains(t, domainSQL, "exists (select")
 	require.NotContains(t, domainSQL, "join (select id as resource_id")
 
 	result = repo.adminMicrosoftFilterQuery(

@@ -2,9 +2,10 @@ package infra
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"net/mail"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/donnel666/remail/internal/core/domain"
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
+	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -22,9 +24,19 @@ type AdminResourceRepo struct {
 	db           *gorm.DB
 	facetsCache  *platform.TTLCache[string, coreapp.AdminMicrosoftFacets]
 	facetsFlight singleflight.Group
+	facetsRedis  redis.UniversalClient
 }
 
-const adminMicrosoftFacetsCacheTTL = 5 * time.Minute
+const (
+	adminMicrosoftFacetsCacheTTL      = 5 * time.Minute
+	adminMicrosoftFacetsSnapshotTTL   = 24 * time.Hour
+	adminMicrosoftFacetsStaleRetryTTL = 15 * time.Second
+)
+
+type adminMicrosoftFacetsSnapshot struct {
+	Facets     coreapp.AdminMicrosoftFacets `json:"facets"`
+	ComputedAt time.Time                    `json:"computedAt"`
+}
 
 type AdminResourceCommandReceiptModel struct {
 	OperatorUserID     uint      `gorm:"primaryKey;column:operator_user_id"`
@@ -43,11 +55,15 @@ func (AdminResourceCommandReceiptModel) TableName() string {
 	return "admin_resource_command_receipts"
 }
 
-func NewAdminResourceRepo(db *gorm.DB) *AdminResourceRepo {
-	return &AdminResourceRepo{
+func NewAdminResourceRepo(db *gorm.DB, redisClients ...redis.UniversalClient) *AdminResourceRepo {
+	repo := &AdminResourceRepo{
 		db:          db,
 		facetsCache: platform.NewTTLCache[string, coreapp.AdminMicrosoftFacets](),
 	}
+	if len(redisClients) > 0 {
+		repo.facetsRedis = redisClients[0]
+	}
+	return repo
 }
 
 func (r *AdminResourceRepo) dbFor(ctx context.Context) *gorm.DB {
@@ -364,76 +380,55 @@ func (r *AdminResourceRepo) FindAdminMicrosoft(ctx context.Context, resourceID u
 }
 
 func (r *AdminResourceRepo) AdminMicrosoftFacets(ctx context.Context, filter coreapp.AdminMicrosoftListFilter, now time.Time) (*coreapp.AdminMicrosoftFacets, error) {
-	cacheKey := adminMicrosoftFacetsCacheKey(filter)
+	stableKey := adminMicrosoftFacetsCacheKey(filter)
+	cacheKey := fmt.Sprintf("generation=%d|%s", currentMicrosoftFacetsGeneration(), stableKey)
+	freshTTL := runtimeconfig.Duration(
+		"admin_resource_facets_cache_ttl_seconds", adminMicrosoftFacetsCacheTTL, time.Second, 1,
+	)
+	if cached, ok := r.facetsCache.Get(cacheKey); ok {
+		return cloneAdminMicrosoftFacets(&cached), nil
+	}
+	if snapshot, ok := r.loadAdminMicrosoftFacetsSnapshot(ctx, stableKey); ok {
+		age := time.Since(snapshot.ComputedAt)
+		if age < 0 {
+			age = 0
+		}
+		if age < freshTTL {
+			r.facetsCache.Set(cacheKey, *cloneAdminMicrosoftFacets(&snapshot.Facets), freshTTL-age)
+		} else {
+			retryTTL := min(adminMicrosoftFacetsStaleRetryTTL, freshTTL)
+			r.facetsCache.Set(cacheKey, *cloneAdminMicrosoftFacets(&snapshot.Facets), retryTTL)
+			r.refreshAdminMicrosoftFacets(cacheKey, stableKey, filter, now, freshTTL)
+		}
+		return cloneAdminMicrosoftFacets(&snapshot.Facets), nil
+	}
+	return r.loadAdminMicrosoftFacets(ctx, cacheKey, stableKey, filter, now, freshTTL)
+}
+
+func (r *AdminResourceRepo) loadAdminMicrosoftFacets(
+	ctx context.Context,
+	cacheKey string,
+	stableKey string,
+	filter coreapp.AdminMicrosoftListFilter,
+	now time.Time,
+	freshTTL time.Duration,
+) (*coreapp.AdminMicrosoftFacets, error) {
 	for attempt := 0; ; attempt++ {
 		if cached, ok := r.facetsCache.Get(cacheKey); ok {
 			return cloneAdminMicrosoftFacets(&cached), nil
 		}
 
-		resultCh := r.facetsFlight.DoChan(cacheKey, func() (any, error) {
+		resultCh := r.facetsFlight.DoChan(stableKey, func() (any, error) {
 			if cached, ok := r.facetsCache.Get(cacheKey); ok {
 				return cached, nil
 			}
 			queryCtx, cancel := context.WithTimeout(ctx, microsoftFacetsQueryTimeout)
 			defer cancel()
-
-			var selects facetAggregateSelect
-			add := func(alias string, ignore string, extra string, extraArgs ...any) {
-				predicate, args := adminMicrosoftFacetPredicate(filter, ignore, now)
-				if extra != "" {
-					predicate += " AND " + extra
-					args = append(args, extraArgs...)
-				}
-				selects.add(alias, predicate, args...)
+			facets, err := r.queryAdminMicrosoftFacets(queryCtx, filter, now)
+			if err != nil {
+				return nil, err
 			}
-			add("matched_count", "", "")
-			add("status_pending_count", "status", "mr.status = ?", string(domain.MicrosoftStatusPending))
-			add("status_validating_count", "status", "mr.status = ?", string(domain.MicrosoftStatusValidating))
-			add("status_identifying_count", "status", "mr.status = ?", string(domain.MicrosoftStatusIdentifying))
-			add("status_normal_count", "status", "mr.status = ?", string(domain.MicrosoftStatusNormal))
-			add("status_abnormal_count", "status", "mr.status = ?", string(domain.MicrosoftStatusAbnormal))
-			add("status_disabled_count", "status", "mr.status = ?", string(domain.MicrosoftStatusDisabled))
-			add("status_deleted_count", "status", "mr.status = ?", string(domain.MicrosoftStatusDeleted))
-			add("for_sale_all_count", "for_sale", "")
-			add("for_sale_yes_count", "for_sale", "mr.for_sale = TRUE")
-			add("for_sale_no_count", "for_sale", "mr.for_sale = FALSE")
-			add("long_lived_all_count", "long_lived", "")
-			add("long_lived_yes_count", "long_lived", "mr.long_lived = TRUE")
-			add("long_lived_no_count", "long_lived", "mr.long_lived = FALSE")
-			add("graph_available_all_count", "graph_available", "")
-			add("graph_available_yes_count", "graph_available", "mr.graph_available = TRUE")
-			add("graph_available_no_count", "graph_available", "mr.graph_available = FALSE")
-			add("token_health_all_count", "token_health", "")
-			for _, health := range []string{"valid", "expiring", "expired", "missing"} {
-				predicate, args := adminTokenHealthPredicate(health, now)
-				add("token_health_"+health+"_count", "token_health", predicate, args...)
-			}
-			selectSQL, selectArgs := selects.query()
-
-			var counts adminMicrosoftFacetCountsRow
-			if err := r.adminMicrosoftFacetQuery(queryCtx, filter, now).
-				Select(selectSQL, selectArgs...).
-				Scan(&counts).Error; err != nil {
-				return nil, fmt.Errorf("admin microsoft facets: %w", err)
-			}
-
-			suffixPredicate, suffixArgs := adminMicrosoftFacetPredicate(filter, "suffix", now)
-			var suffixRows []microsoftResourceSuffixFacetRow
-			if err := r.adminMicrosoftFacetQuery(queryCtx, filter, now).
-				Select("mr.email_domain AS facet_key, COUNT(*) AS count").
-				Where(suffixPredicate, suffixArgs...).
-				Where("mr.email_domain <> ''").
-				Group("mr.email_domain").
-				Order("count DESC, facet_key ASC").
-				Limit(microsoftFacetsSuffixLimit).
-				Scan(&suffixRows).Error; err != nil {
-				return nil, fmt.Errorf("admin microsoft suffix facets: %w", err)
-			}
-
-			facets := adminMicrosoftFacetsFromCounts(counts, suffixRows)
-			r.facetsCache.Set(cacheKey, *cloneAdminMicrosoftFacets(facets), runtimeconfig.Duration(
-				"admin_resource_facets_cache_ttl_seconds", adminMicrosoftFacetsCacheTTL, time.Second, 1,
-			))
+			r.storeAdminMicrosoftFacets(queryCtx, cacheKey, stableKey, facets, freshTTL)
 			return *facets, nil
 		})
 		select {
@@ -453,6 +448,131 @@ func (r *AdminResourceRepo) AdminMicrosoftFacets(ctx context.Context, filter cor
 			return cloneAdminMicrosoftFacets(&facets), nil
 		}
 	}
+}
+
+func (r *AdminResourceRepo) refreshAdminMicrosoftFacets(
+	cacheKey string,
+	stableKey string,
+	filter coreapp.AdminMicrosoftListFilter,
+	now time.Time,
+	freshTTL time.Duration,
+) {
+	go func() {
+		refreshCtx, cancel := context.WithTimeout(context.Background(), microsoftFacetsQueryTimeout)
+		defer cancel()
+		_, _, _ = r.facetsFlight.Do(stableKey, func() (any, error) {
+			facets, err := r.queryAdminMicrosoftFacets(refreshCtx, filter, now)
+			if err != nil {
+				return nil, err
+			}
+			r.storeAdminMicrosoftFacets(refreshCtx, cacheKey, stableKey, facets, freshTTL)
+			return *facets, nil
+		})
+	}()
+}
+
+func (r *AdminResourceRepo) queryAdminMicrosoftFacets(
+	ctx context.Context,
+	filter coreapp.AdminMicrosoftListFilter,
+	now time.Time,
+) (*coreapp.AdminMicrosoftFacets, error) {
+	var selects facetAggregateSelect
+	add := func(alias string, ignore string, extra string, extraArgs ...any) {
+		predicate, args := adminMicrosoftFacetPredicate(filter, ignore, now)
+		if extra != "" {
+			predicate += " AND " + extra
+			args = append(args, extraArgs...)
+		}
+		selects.add(alias, predicate, args...)
+	}
+	add("matched_count", "", "")
+	add("status_pending_count", "status", "mr.status = ?", string(domain.MicrosoftStatusPending))
+	add("status_validating_count", "status", "mr.status = ?", string(domain.MicrosoftStatusValidating))
+	add("status_identifying_count", "status", "mr.status = ?", string(domain.MicrosoftStatusIdentifying))
+	add("status_normal_count", "status", "mr.status = ?", string(domain.MicrosoftStatusNormal))
+	add("status_abnormal_count", "status", "mr.status = ?", string(domain.MicrosoftStatusAbnormal))
+	add("status_disabled_count", "status", "mr.status = ?", string(domain.MicrosoftStatusDisabled))
+	add("status_deleted_count", "status", "mr.status = ?", string(domain.MicrosoftStatusDeleted))
+	add("for_sale_all_count", "for_sale", "")
+	add("for_sale_yes_count", "for_sale", "mr.for_sale = TRUE")
+	add("for_sale_no_count", "for_sale", "mr.for_sale = FALSE")
+	add("long_lived_all_count", "long_lived", "")
+	add("long_lived_yes_count", "long_lived", "mr.long_lived = TRUE")
+	add("long_lived_no_count", "long_lived", "mr.long_lived = FALSE")
+	add("graph_available_all_count", "graph_available", "")
+	add("graph_available_yes_count", "graph_available", "mr.graph_available = TRUE")
+	add("graph_available_no_count", "graph_available", "mr.graph_available = FALSE")
+	add("token_health_all_count", "token_health", "")
+	for _, health := range []string{"valid", "expiring", "expired", "missing"} {
+		predicate, args := adminTokenHealthPredicate(health, now)
+		add("token_health_"+health+"_count", "token_health", predicate, args...)
+	}
+	selectSQL, selectArgs := selects.query()
+
+	var counts adminMicrosoftFacetCountsRow
+	if err := r.adminMicrosoftFacetQuery(ctx, filter, now).
+		Select(selectSQL, selectArgs...).
+		Scan(&counts).Error; err != nil {
+		return nil, fmt.Errorf("admin microsoft facets: %w", err)
+	}
+
+	suffixPredicate, suffixArgs := adminMicrosoftFacetPredicate(filter, "suffix", now)
+	var suffixRows []microsoftResourceSuffixFacetRow
+	if err := r.adminMicrosoftFacetQuery(ctx, filter, now).
+		Select("mr.email_domain AS facet_key, COUNT(*) AS count").
+		Where(suffixPredicate, suffixArgs...).
+		Where("mr.email_domain <> ''").
+		Group("mr.email_domain").
+		Order("count DESC, facet_key ASC").
+		Limit(microsoftFacetsSuffixLimit).
+		Scan(&suffixRows).Error; err != nil {
+		return nil, fmt.Errorf("admin microsoft suffix facets: %w", err)
+	}
+
+	return adminMicrosoftFacetsFromCounts(counts, suffixRows), nil
+}
+
+func (r *AdminResourceRepo) loadAdminMicrosoftFacetsSnapshot(ctx context.Context, cacheKey string) (adminMicrosoftFacetsSnapshot, bool) {
+	if r == nil || r.facetsRedis == nil {
+		return adminMicrosoftFacetsSnapshot{}, false
+	}
+	payload, err := r.facetsRedis.Get(ctx, adminMicrosoftFacetsRedisKey(cacheKey)).Bytes()
+	if err != nil {
+		return adminMicrosoftFacetsSnapshot{}, false
+	}
+	var snapshot adminMicrosoftFacetsSnapshot
+	if json.Unmarshal(payload, &snapshot) != nil || snapshot.ComputedAt.IsZero() {
+		return adminMicrosoftFacetsSnapshot{}, false
+	}
+	return snapshot, true
+}
+
+func (r *AdminResourceRepo) storeAdminMicrosoftFacets(
+	ctx context.Context,
+	cacheKey string,
+	stableKey string,
+	facets *coreapp.AdminMicrosoftFacets,
+	freshTTL time.Duration,
+) {
+	if facets == nil {
+		return
+	}
+	cloned := cloneAdminMicrosoftFacets(facets)
+	r.facetsCache.Set(cacheKey, *cloned, freshTTL)
+	if r.facetsRedis == nil {
+		return
+	}
+	payload, err := json.Marshal(adminMicrosoftFacetsSnapshot{Facets: *cloned, ComputedAt: time.Now().UTC()})
+	if err != nil {
+		return
+	}
+	cacheCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	_ = r.facetsRedis.Set(cacheCtx, adminMicrosoftFacetsRedisKey(stableKey), payload, adminMicrosoftFacetsSnapshotTTL).Err()
+}
+
+func adminMicrosoftFacetsRedisKey(cacheKey string) string {
+	return fmt.Sprintf("admin:microsoft:facets:v1:%x", sha256.Sum256([]byte(cacheKey)))
 }
 
 type adminMicrosoftFacetCountsRow struct {
@@ -622,44 +742,46 @@ func applyAdminMicrosoftSearch(query *gorm.DB, filter coreapp.AdminMicrosoftList
 		}
 		return query.Where("("+strings.Join(conditions, " OR ")+")", args...)
 	}
-	if adminMicrosoftSearchUsesCandidates(search) {
-		parts := []string{
-			"SELECT id AS resource_id FROM microsoft_resources WHERE email_address = ?",
-			"SELECT resource_id FROM explicit_aliases WHERE email = ?",
-			"SELECT resource_id FROM dot_aliases WHERE email = ?",
-			"SELECT resource_id FROM plus_aliases WHERE email = ?",
+	if strings.HasPrefix(search, "@") {
+		domain := strings.TrimSpace(strings.TrimPrefix(search, "@"))
+		conditions := make([]string, 0, 2)
+		args := make([]any, 0, 2)
+		if domain != "" {
+			conditions = append(conditions, "mr.email_domain = ?")
+			args = append(args, domain)
 		}
-		args := []any{search, search, search, search}
 		if len(filter.OwnerIDs) > 0 {
-			return query.
-				Joins("LEFT JOIN ("+strings.Join(parts, " UNION ")+") AS admin_resource_search ON admin_resource_search.resource_id = "+idColumn, args...).
-				Where("(admin_resource_search.resource_id IS NOT NULL OR "+ownerColumn+" IN ?)", filter.OwnerIDs)
+			conditions = append(conditions, ownerColumn+" IN ?")
+			args = append(args, filter.OwnerIDs)
 		}
-		return query.Joins("JOIN ("+strings.Join(parts, " UNION ")+") AS admin_resource_search ON admin_resource_search.resource_id = "+idColumn, args...)
+		if len(conditions) == 0 {
+			return query.Where("FALSE")
+		}
+		return query.Where("("+strings.Join(conditions, " OR ")+")", args...)
 	}
 
-	pattern := escapeAdminLike(search) + "%"
-	domainPattern := escapeAdminLike(strings.TrimPrefix(search, "@")) + "%"
-	conditions := []string{
-		"mr.email_address LIKE ? ESCAPE '\\\\'",
-		"mr.email_domain LIKE ? ESCAPE '\\\\'",
-		"EXISTS (SELECT 1 FROM explicit_aliases ea WHERE ea.resource_id = " + idColumn + " AND ea.email LIKE ? ESCAPE '\\\\')",
-		"EXISTS (SELECT 1 FROM dot_aliases da WHERE da.resource_id = " + idColumn + " AND da.email LIKE ? ESCAPE '\\\\')",
-		"EXISTS (SELECT 1 FROM plus_aliases pa WHERE pa.resource_id = " + idColumn + " AND pa.email LIKE ? ESCAPE '\\\\')",
+	comparison := " = ?"
+	value := search
+	if !strings.Contains(search, "@") {
+		// An address without its domain is an exact local-part lookup, not an
+		// arbitrary prefix. Appending '@' keeps every branch on its email-first
+		// index without turning short input into a large UNION result.
+		comparison = " LIKE ? ESCAPE '\\\\'"
+		value = escapeAdminLike(search) + "@%"
 	}
-	args := []any{pattern, domainPattern, pattern, pattern, pattern}
+	parts := []string{
+		"SELECT id AS resource_id FROM microsoft_resources WHERE email_address" + comparison,
+		"SELECT resource_id FROM explicit_aliases WHERE email" + comparison,
+		"SELECT resource_id FROM dot_aliases WHERE email" + comparison,
+		"SELECT resource_id FROM plus_aliases WHERE email" + comparison,
+	}
+	args := []any{value, value, value, value}
 	if len(filter.OwnerIDs) > 0 {
-		conditions = append(conditions, ownerColumn+" IN ?")
-		args = append(args, filter.OwnerIDs)
+		return query.
+			Joins("LEFT JOIN ("+strings.Join(parts, " UNION ")+") AS admin_resource_search ON admin_resource_search.resource_id = "+idColumn, args...).
+			Where("(admin_resource_search.resource_id IS NOT NULL OR "+ownerColumn+" IN ?)", filter.OwnerIDs)
 	}
-	// ponytail: indexed prefixes are the compatibility ceiling; add a search index if arbitrary substrings become mandatory.
-	return query.Where("("+strings.Join(conditions, " OR ")+")", args...)
-}
-
-func adminMicrosoftSearchUsesCandidates(search string) bool {
-	search = strings.TrimSpace(search)
-	address, err := mail.ParseAddress(search)
-	return err == nil && strings.EqualFold(address.Address, search)
+	return query.Joins("JOIN ("+strings.Join(parts, " UNION ")+") AS admin_resource_search ON admin_resource_search.resource_id = "+idColumn, args...)
 }
 
 func applyAdminTokenHealth(query *gorm.DB, health string, now time.Time) *gorm.DB {
@@ -690,8 +812,7 @@ func adminMicrosoftFacetsCacheKey(filter coreapp.AdminMicrosoftListFilter) strin
 	for i, ownerID := range filter.OwnerIDs {
 		ownerIDs[i] = strconv.FormatUint(uint64(ownerID), 10)
 	}
-	return fmt.Sprintf("generation=%d|search=%q|suffix=%q|status=%q|sale=%s|long=%s|graph=%s|token=%q|from=%s|to=%s|owners=%s",
-		currentMicrosoftFacetsGeneration(),
+	return fmt.Sprintf("search=%q|suffix=%q|status=%q|sale=%s|long=%s|graph=%s|token=%q|from=%s|to=%s|owners=%s",
 		strings.ToLower(strings.TrimSpace(filter.Search)), strings.ToLower(strings.TrimSpace(filter.Suffix)), filter.Status,
 		resourceBoolPtrKey(filter.ForSale), resourceBoolPtrKey(filter.LongLived), resourceBoolPtrKey(filter.GraphAvailable), filter.TokenHealth,
 		resourceTimePtrKey(filter.CreatedFrom), resourceTimePtrKey(filter.CreatedTo), strings.Join(ownerIDs, ","))
