@@ -730,7 +730,7 @@ export default function Wallet() {
 
   return (
     <>
-      <div className="console-content-width py-5">
+      <div className="console-content-width flex flex-col py-5">
         <MembershipOverview
           currentGroup={currentUser?.userGroup}
           loading={walletLoading}

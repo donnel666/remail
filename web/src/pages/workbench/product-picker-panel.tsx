@@ -15,6 +15,7 @@ import type {
 import {
   formatCompactNumber,
   formatMoney,
+  formatMoneyExact,
   productTypeLabel,
 } from "./utils";
 
@@ -43,6 +44,7 @@ export function ProductPickerPanel({
   onProductSearchChange,
   onSelectProduct,
   onServiceModeChange,
+  priceMultiplier,
   productSearch,
   products,
   selectedProductId,
@@ -54,6 +56,7 @@ export function ProductPickerPanel({
   onProductSearchChange: (value: string) => void;
   onSelectProduct: (productId: string) => void;
   onServiceModeChange: (value: ServiceMode) => void;
+  priceMultiplier: number;
   productSearch: string;
   products: WorkbenchProduct[];
   selectedProductId: string;
@@ -122,6 +125,12 @@ export function ProductPickerPanel({
           products.map((product) => {
             const selected = selectedProductId === product.id;
             const inventory = getScopedInventory(product, serviceMode, inventoryScope);
+            const originalPrice = getPrice(product, serviceMode);
+            const discountedPrice = originalPrice * priceMultiplier;
+            const hasDiscount = discountedPrice < originalPrice;
+            const priceLabel = hasDiscount
+              ? `${t("Original price")} ${formatMoneyExact(originalPrice)}, ${t("Discounted price")} ${formatMoneyExact(discountedPrice)}`
+              : formatMoneyExact(originalPrice);
             return (
               <button
                 className={cn(
@@ -150,8 +159,18 @@ export function ProductPickerPanel({
                   </OverflowTooltip>
                 </span>
                 <span className="workbench-product-side">
-                  <span className="workbench-product-price">
-                    {formatMoney(getPrice(product, serviceMode))}
+                  <span
+                    aria-label={priceLabel}
+                    className="workbench-product-prices"
+                  >
+                    {hasDiscount ? (
+                      <span className="workbench-original-price">
+                        {formatMoney(originalPrice)}
+                      </span>
+                    ) : null}
+                    <span className="workbench-product-price">
+                      {formatMoney(discountedPrice)}
+                    </span>
                   </span>
                   <span className="workbench-product-stock">
                     {t("Stock")} {formatCompactNumber(inventory)}

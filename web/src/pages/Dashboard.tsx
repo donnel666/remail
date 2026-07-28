@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Toast } from "@douyinfe/semi-ui";
 import { useTranslation } from "react-i18next";
 
+import { useAuth } from "@/context/auth-provider";
 import { IamApiError } from "@/lib/api-client";
 import {
   getApiErrorBodyMessage,
@@ -14,6 +15,7 @@ import {
   listOrders,
   type OrderResponse,
 } from "@/lib/orders-api";
+import { priceMultiplier as membershipPriceMultiplier } from "@/lib/membership";
 import {
   readPickupMail,
   readPickupMailBatch,
@@ -357,6 +359,10 @@ function checkoutBatchSignature(input: {
 
 export default function Dashboard() {
   const { t } = useTranslation();
+  const { currentUser } = useAuth();
+  const displayPriceMultiplier = membershipPriceMultiplier(
+    currentUser?.userGroup?.priceDiscountRatio,
+  );
   const [applyOpen, setApplyOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [inventoryScope, setInventoryScope] =
@@ -958,6 +964,7 @@ export default function Dashboard() {
             onServiceModeChange={(mode) => {
               setServiceMode(mode);
             }}
+            priceMultiplier={displayPriceMultiplier}
             productSearch={productSearch}
             products={filteredProducts}
             selectedProductId={selectedProductId}
@@ -981,6 +988,7 @@ export default function Dashboard() {
             onSelectOrder={handleSelectOrder}
             orderSearch={orderSearch}
             orders={visibleOrders}
+            priceMultiplier={displayPriceMultiplier}
             productsById={productsById}
             projectsById={projectsById}
             quantity={quantity}

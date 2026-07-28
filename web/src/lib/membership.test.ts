@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { calculateMembershipProgress, type MembershipGroup } from "./membership";
+import {
+  calculateMembershipProgress,
+  formatPriceMultiplier,
+  normalizePriceMultiplier,
+  priceMultiplier,
+  type MembershipGroup,
+} from "./membership";
 
 const group = (
   id: number,
@@ -16,6 +22,23 @@ const group = (
   priceDiscountRatio: "0.90",
   topupThreshold: threshold,
   autoUpgradeEnabled,
+});
+
+describe("membership price multiplier", () => {
+  it("normalizes and formats valid ratios", () => {
+    expect(normalizePriceMultiplier("0.900000")).toBe("0.900000");
+    expect(priceMultiplier("0.900000")).toBe(0.9);
+    expect(formatPriceMultiplier("0.900000")).toBe("0.9×");
+    expect(formatPriceMultiplier("0")).toBe("0×");
+  });
+
+  it.each([undefined, "", "-0.1", "1.000001", "nope"])(
+    "falls back to standard pricing for %s",
+    (value) => {
+      expect(normalizePriceMultiplier(value)).toBe("1");
+      expect(formatPriceMultiplier(value)).toBe("1×");
+    },
+  );
 });
 
 describe("membership progress", () => {

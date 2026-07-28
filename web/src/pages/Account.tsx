@@ -20,7 +20,6 @@ import { useNavigate } from "@tanstack/react-router";
 import {
   BarChart2,
   Coins,
-  Crown,
   ShieldCheck,
   UserPlus,
   Users,
@@ -29,12 +28,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import coverImage from "@/assets/cover-4.webp";
-import { MembershipBenefits } from "@/components/membership";
 import { OverflowTooltip } from "@/components/semi/overflow-tooltip";
 import { useAuth, type CurrentUser } from "@/context/auth-provider";
 import { LOGIN_NOTICE_KEY, clearLoginReturnTo } from "@/lib/auth-flow";
 import { changePassword } from "@/lib/iam-api";
 import { getIamErrorMessage } from "@/lib/iam-errors";
+import { formatPriceMultiplier } from "@/lib/membership";
 import { getAPIKeyUsage } from "@/lib/openapi-credentials-api";
 import { getWallet, type WalletResponse } from "@/lib/wallet-api";
 
@@ -98,6 +97,18 @@ export default function Account() {
     if (group.code === "normal") return t("Normal User Group");
     return group.name || group.code || "-";
   }, [currentUser?.userGroup, t]);
+  const userGroupSummary = useMemo(() => {
+    const group = currentUser?.userGroup;
+    if (!group) return "-";
+    const concurrency = group.apiConcurrencyLimit > 0
+      ? group.apiConcurrencyLimit.toLocaleString()
+      : t("Uses API key or system limit");
+    return [
+      userGroupLabel,
+      `${t("Multiplier")} ${formatPriceMultiplier(group.priceDiscountRatio)}`,
+      `${t("Maximum concurrency")} ${concurrency}`,
+    ].join(" · ");
+  }, [currentUser?.userGroup, t, userGroupLabel]);
 
   const refreshAccountOverview = useCallback(async () => {
     setOverviewLoading(true);
@@ -135,10 +146,10 @@ export default function Account() {
       {
         icon: <Users size={16} />,
         label: "User Group",
-        value: userGroupLabel,
+        value: userGroupSummary,
       },
     ],
-    [overviewLoading, requestCount, userGroupLabel, wallet?.historicalSpend]
+    [overviewLoading, requestCount, userGroupSummary, wallet?.historicalSpend]
   );
 
   const resetPasswordForm = () => {
@@ -255,28 +266,6 @@ export default function Account() {
               ))}
             </div>
           </Card>
-        </div>
-      </Card>
-
-      <Card className="!rounded-2xl mt-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="flex min-w-0 items-start gap-3">
-            <Avatar className="shadow-md" color="orange" size="small">
-              <Crown size={16} />
-            </Avatar>
-            <div className="min-w-0">
-              <Text className="text-lg font-medium">{t("Current benefits")}</Text>
-              <div className="mt-1 text-sm text-[var(--semi-color-text-2)]">
-                {currentUser?.userGroup.description || t("Benefits currently active for this account")}
-              </div>
-            </div>
-          </div>
-          <Tag color="orange" size="large">
-            {userGroupLabel}
-          </Tag>
-        </div>
-        <div className="mt-5 border-t border-[var(--semi-color-border)] pt-4">
-          <MembershipBenefits group={currentUser?.userGroup} />
         </div>
       </Card>
 

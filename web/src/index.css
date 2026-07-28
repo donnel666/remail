@@ -2132,6 +2132,25 @@ body[theme-mode="dark"] .semi-always-light,
   font-weight: 800;
 }
 
+.workbench-product-prices {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.workbench-original-price {
+  flex: 0 0 auto;
+  color: var(--semi-color-text-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-decoration-color: var(--semi-color-danger);
+  text-decoration-line: line-through;
+  text-decoration-thickness: 2px;
+}
+
 .workbench-product-stock {
   color: var(--semi-color-text-2);
   font-size: 11px;
@@ -2191,7 +2210,7 @@ body[theme-mode="dark"] .semi-always-light,
     minmax(68px, 0.7fr)
     minmax(76px, 0.85fr)
     minmax(44px, 0.5fr)
-    minmax(72px, 0.65fr)
+    minmax(104px, 0.85fr)
     84px
     minmax(108px, 0.9fr);
   gap: 8px;
@@ -2251,7 +2270,17 @@ body[theme-mode="dark"] .semi-always-light,
 }
 
 .workbench-quick-price .remail-overflow-tooltip-target {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 6px;
   text-align: center;
+}
+
+.workbench-discounted-price {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .workbench-quantity-input {

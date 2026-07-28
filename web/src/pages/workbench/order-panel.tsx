@@ -312,6 +312,7 @@ export function OrderPanel({
   onSelectOrder,
   orders,
   orderSearch,
+  priceMultiplier,
   productsById,
   projectsById,
   quantity,
@@ -342,6 +343,7 @@ export function OrderPanel({
   onSelectOrder: (orderNo: string) => void;
   orders: WorkbenchOrder[];
   orderSearch: string;
+  priceMultiplier: number;
   productsById: Map<string, WorkbenchProduct>;
   projectsById: Map<string, WorkbenchProject>;
   quantity: number;
@@ -356,12 +358,18 @@ export function OrderPanel({
     maxQuantity > 0
       ? Math.min(Math.max(1, quantity), maxQuantity)
       : 0;
-  const totalPrice = selectedProduct
+  const originalTotalPrice = selectedProduct
     ? getPrice(selectedProduct, serviceMode, safeQuantity)
     : 0;
+  const totalPrice = originalTotalPrice * priceMultiplier;
+  const hasDiscount = totalPrice < originalTotalPrice;
+  const originalTotalPriceText = formatMoney(originalTotalPrice);
+  const originalTotalPriceExactText = formatMoneyExact(originalTotalPrice);
   const totalPriceText = formatMoney(totalPrice);
   const totalPriceExactText = formatMoneyExact(totalPrice);
-  const totalPriceIsCompact = totalPriceText !== totalPriceExactText;
+  const totalPriceIsCompact =
+    totalPriceText !== totalPriceExactText ||
+    originalTotalPriceText !== originalTotalPriceExactText;
   const inventory = selectedProductInventory;
   const stockText = `${t("Stock")} ${formatCompactNumber(inventory)}`;
   const createOrderLabel =
@@ -395,17 +403,32 @@ export function OrderPanel({
                 ? `${selectedProduct?.codeWindowMinutes ?? 0}m`
                 : `${selectedProduct?.warrantyHours ?? 0}h`}
             </span>
-            <strong
-              aria-label={totalPriceExactText}
+            <div
+              aria-label={
+                hasDiscount
+                  ? `${t("Original price")} ${originalTotalPriceExactText}, ${t("Discounted price")} ${totalPriceExactText}`
+                  : totalPriceExactText
+              }
               className="workbench-quick-price"
             >
               <OverflowTooltip
-                content={totalPriceExactText}
+                content={
+                  hasDiscount
+                    ? `${t("Original price")} ${originalTotalPriceExactText} → ${t("Discounted price")} ${totalPriceExactText}`
+                    : totalPriceExactText
+                }
                 force={totalPriceIsCompact}
               >
-                {totalPriceText}
+                {hasDiscount ? (
+                  <span className="workbench-original-price">
+                    {originalTotalPriceText}
+                  </span>
+                ) : null}
+                <span className="workbench-discounted-price">
+                  {totalPriceText}
+                </span>
               </OverflowTooltip>
-            </strong>
+            </div>
             <InputNumber
               aria-label={t("Quantity")}
               className="workbench-quantity-input"
