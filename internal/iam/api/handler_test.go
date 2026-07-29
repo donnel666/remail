@@ -1035,6 +1035,8 @@ type mockSessionStore struct {
 	sessions          map[string]*domain.Session
 	byUser            map[uint][]string
 	linuxDOFlows      map[string]app.LinuxDOFlow
+	getErr            error
+	deleteErr         error
 	deleteByUserIDErr error
 }
 
@@ -1058,6 +1060,9 @@ func (s *mockSessionStore) Create(_ context.Context, session *domain.Session, _ 
 func (s *mockSessionStore) Get(_ context.Context, sessionID string) (*domain.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
 	if sess, ok := s.sessions[sessionID]; ok {
 		cp := *sess
 		return &cp, nil
@@ -1068,6 +1073,9 @@ func (s *mockSessionStore) Get(_ context.Context, sessionID string) (*domain.Ses
 func (s *mockSessionStore) Delete(_ context.Context, sessionID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.deleteErr != nil {
+		return s.deleteErr
+	}
 	if sess, ok := s.sessions[sessionID]; ok {
 		delete(s.sessions, sessionID)
 		if sessions, ok := s.byUser[sess.UserID]; ok {
@@ -1840,6 +1848,86 @@ func TestGetMe_Unauthenticated(t *testing.T) {
 
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 	assert.Contains(t, w.Body.String(), "Authentication is required")
+}
+
+func TestGetMeSessionLookupFailurePreservesAuthCookies(t *testing.T) {
+	h := newTestHandler()
+	h.module.SessionStore.(*mockSessionStore).getErr = errors.New("redis unavailable canary")
+	r := setupTestRouterWithHandler(h)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	req.AddCookie(&http.Cookie{Name: middleware.SessionCookieName, Value: "valid-session"})
+	req.AddCookie(&http.Cookie{Name: middleware.CSRFCookieName, Value: "valid-csrf"})
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+	require.Contains(t, w.Body.String(), "Service is temporarily unavailable.")
+	require.NotContains(t, w.Body.String(), "redis unavailable canary")
+	for _, cookie := range w.Result().Cookies() {
+		require.NotEqual(t, middleware.SessionCookieName, cookie.Name)
+		require.NotEqual(t, middleware.CSRFCookieName, cookie.Name)
+	}
+}
+
+func TestDeleteSessionIsIdempotentWithoutCSRF(t *testing.T) {
+	h := newTestHandler()
+	r := setupTestRouterWithHandler(h)
+	seedUserSession(t, h, "user@test.com", "user-session")
+	seedUserSession(t, h, "legacy@test.com", "legacy-session")
+
+	for attempt := range 2 {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/v1/sessions/current", nil)
+		if attempt == 0 {
+			req.AddCookie(&http.Cookie{Name: middleware.SessionCookieName, Value: "user-session"})
+			req.AddCookie(&http.Cookie{Name: middleware.SessionCookieName, Value: "legacy-session"})
+		}
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusNoContent, w.Code)
+		requireAuthCookiesCleared(t, w.Result().Cookies())
+	}
+
+	for _, sessionID := range []string{"user-session", "legacy-session"} {
+		session, err := h.module.SessionStore.Get(context.Background(), sessionID)
+		require.NoError(t, err)
+		require.Nil(t, session)
+	}
+}
+
+func TestDeleteSessionFailureStillClearsAuthCookies(t *testing.T) {
+	h := newTestHandler()
+	seedUserSession(t, h, "user@test.com", "user-session")
+	h.module.SessionStore.(*mockSessionStore).deleteErr = errors.New("redis unavailable")
+	r := setupTestRouterWithHandler(h)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/v1/sessions/current", nil)
+	req.AddCookie(&http.Cookie{Name: middleware.SessionCookieName, Value: "user-session"})
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+	requireAuthCookiesCleared(t, w.Result().Cookies())
+}
+
+func requireAuthCookiesCleared(t *testing.T, cookies []*http.Cookie) {
+	t.Helper()
+
+	for _, name := range []string{middleware.SessionCookieName, middleware.CSRFCookieName} {
+		for _, path := range []string{"/", "/v1"} {
+			found := false
+			for _, cookie := range cookies {
+				if cookie.Name != name || cookie.Path != path {
+					continue
+				}
+				found = true
+				require.Empty(t, cookie.Value)
+				require.Negative(t, cookie.MaxAge)
+			}
+			require.True(t, found, "missing cleared cookie %s at path %s", name, path)
+		}
+	}
 }
 
 func TestGetMeIncludesAdminNavigationAndOperationPermissions(t *testing.T) {

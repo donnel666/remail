@@ -125,15 +125,15 @@ type fakeSessionFetcher struct {
 	role iamdomain.Role
 }
 
-func (f fakeSessionFetcher) FetchSession(context.Context, string) (uint, iamdomain.Role, string, bool) {
+func (f fakeSessionFetcher) FetchSession(context.Context, string) (uint, iamdomain.Role, string, bool, error) {
 	if !f.ok {
-		return 0, "", "", false
+		return 0, "", "", false, nil
 	}
 	role := f.role
 	if role == "" {
 		role = iamdomain.RoleAdmin
 	}
-	return 1, role, "admin@test.local", true
+	return 1, role, "admin@test.local", true, nil
 }
 
 type fakePermissionChecker struct {

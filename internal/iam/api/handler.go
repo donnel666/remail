@@ -339,18 +339,28 @@ func writeTooManyRequests(c *gin.Context, retryAfter int) {
 
 // DELETE /v1/sessions/current
 func (h *IAMHandler) DeleteSession(c *gin.Context) {
-	sid, ok := middleware.GetCurrentSessionID(c)
-	if !ok {
-		c.Status(http.StatusNoContent)
-		return
+	const maxSessionCookies = 2 // Current / plus legacy /v1; bounds work on this public endpoint.
+	seen := make(map[string]struct{})
+	var logoutErr error
+	for _, cookie := range c.Request.Cookies() {
+		if len(seen) == maxSessionCookies {
+			break
+		}
+		if cookie.Name != middleware.SessionCookieName || cookie.Value == "" {
+			continue
+		}
+		if _, ok := seen[cookie.Value]; ok {
+			continue
+		}
+		seen[cookie.Value] = struct{}{}
+		logoutErr = errors.Join(logoutErr, h.module.SessionUseCase.Logout(c.Request.Context(), cookie.Value))
 	}
-
-	if err := h.module.SessionUseCase.Logout(c.Request.Context(), sid); err != nil {
-		writeError(c, err)
-		return
-	}
-
 	clearAuthCookies(c, h.sessionSecure)
+	if logoutErr != nil {
+		writeError(c, logoutErr)
+		return
+	}
+
 	c.Status(http.StatusNoContent)
 }
 

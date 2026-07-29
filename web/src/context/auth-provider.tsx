@@ -8,6 +8,7 @@ import {
 } from "react";
 import {
   getMe,
+  IamApiError,
   login as loginRequest,
   logout as logoutRequest,
   type LoginRequest,
@@ -31,10 +32,12 @@ export interface CurrentUser {
 
 interface AuthProviderState {
   currentUser: CurrentUser | null;
+  authenticationError: boolean;
   loading: boolean;
   login: (payload: LoginRequest) => Promise<CurrentUser>;
   logout: () => Promise<void>;
   refreshCurrentUser: () => Promise<CurrentUser | null>;
+  retryCurrentUser: () => Promise<CurrentUser | null>;
 }
 
 const AuthContext = createContext<AuthProviderState | null>(null);
@@ -78,17 +81,23 @@ export function hasPermissionKey(
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const [authenticationError, setAuthenticationError] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const refreshCurrentUser = useCallback(async () => {
+    setAuthenticationError(false);
     try {
       const response = await getMe();
       const nextUser = toCurrentUser(response.user);
       setCurrentUser(nextUser);
       return nextUser;
-    } catch {
-      clearBrowserAuthState();
-      setCurrentUser(null);
+    } catch (error) {
+      if (error instanceof IamApiError && error.status === 401) {
+        clearBrowserAuthState();
+        setCurrentUser(null);
+      } else {
+        setAuthenticationError(true);
+      }
       return null;
     }
   }, []);
@@ -109,6 +118,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const handleAuthRequired = () => {
       clearBrowserAuthState({ notice: true });
       setCurrentUser(null);
+      setAuthenticationError(false);
     };
 
     window.addEventListener(AUTH_REQUIRED_EVENT, handleAuthRequired);
@@ -121,21 +131,53 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const response = await loginRequest(payload);
     const nextUser = toCurrentUser(response.user);
     setCurrentUser(nextUser);
+    setAuthenticationError(false);
     return nextUser;
   }, []);
+
+  const retryCurrentUser = useCallback(async () => {
+    setLoading(true);
+    try {
+      return await refreshCurrentUser();
+    } finally {
+      setLoading(false);
+    }
+  }, [refreshCurrentUser]);
 
   const logout = useCallback(async () => {
     try {
       await logoutRequest();
-    } finally {
+    } catch (error) {
+      if (!(error instanceof IamApiError) || error.status !== 500) throw error;
       clearBrowserAuthState();
       setCurrentUser(null);
+      setAuthenticationError(false);
+      throw error;
     }
+    clearBrowserAuthState();
+    setCurrentUser(null);
+    setAuthenticationError(false);
   }, []);
 
   const value = useMemo(
-    () => ({ currentUser, loading, login, logout, refreshCurrentUser }),
-    [currentUser, loading, login, logout, refreshCurrentUser]
+    () => ({
+      authenticationError,
+      currentUser,
+      loading,
+      login,
+      logout,
+      refreshCurrentUser,
+      retryCurrentUser,
+    }),
+    [
+      authenticationError,
+      currentUser,
+      loading,
+      login,
+      logout,
+      refreshCurrentUser,
+      retryCurrentUser,
+    ]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

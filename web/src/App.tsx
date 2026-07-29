@@ -327,10 +327,16 @@ function matchesRoute(pathname: string, route: string) {
 function RouteGate({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { currentUser, loading: authLoading } = useAuth();
+  const {
+    authenticationError,
+    currentUser,
+    loading: authLoading,
+    retryCurrentUser,
+  } = useAuth();
   const [activationNeeded, setActivationNeeded] = useState<boolean | null>(null);
 
   const pathname = location.pathname;
+  const authenticationUnavailable = authenticationError && !currentUser;
   const isProtectedRoute = useMemo(
     () => PROTECTED_ROUTES.some((route) => matchesRoute(pathname, route)),
     [pathname]
@@ -347,7 +353,7 @@ function RouteGate({ children }: { children: ReactNode }) {
     () =>
       resolveRouteAuthorizationRedirect({
         activationNeeded,
-        authLoading,
+        authLoading: authLoading || authenticationUnavailable,
         currentUser,
         isProtectedRoute,
         pathname,
@@ -356,6 +362,7 @@ function RouteGate({ children }: { children: ReactNode }) {
     [
       activationNeeded,
       authLoading,
+      authenticationUnavailable,
       currentUser,
       isProtectedRoute,
       pathname,
@@ -448,6 +455,8 @@ function RouteGate({ children }: { children: ReactNode }) {
     authorizationRedirect !== null
   ) {
     content = <Loading />;
+  } else if (authenticationUnavailable && isProtectedRoute) {
+    content = <ServerErrorPage onRetry={() => void retryCurrentUser()} />;
   }
 
   return (

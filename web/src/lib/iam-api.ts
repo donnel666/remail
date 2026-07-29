@@ -82,11 +82,7 @@ export const linuxDOLoginURL = "/v1/oauth/linuxdo";
 export const linuxDOBindURL = "/v1/oauth/linuxdo/bind";
 
 export async function logout() {
-  return unwrap<void>(
-    await client.DELETE("/v1/sessions/current", {
-      params: { header: csrfHeader() },
-    })
-  );
+  return unwrap<void>(await client.DELETE("/v1/sessions/current"));
 }
 
 export async function getMe() {

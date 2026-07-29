@@ -37,8 +37,8 @@ func (s *auxiliaryQueryHandlerStub) Get(_ context.Context, request mailapp.Auxil
 
 type auxiliarySessionFetcher struct{}
 
-func (auxiliarySessionFetcher) FetchSession(context.Context, string) (uint, iamdomain.Role, string, bool) {
-	return 7, iamdomain.RoleAdmin, "admin@example.com", true
+func (auxiliarySessionFetcher) FetchSession(context.Context, string) (uint, iamdomain.Role, string, bool, error) {
+	return 7, iamdomain.RoleAdmin, "admin@example.com", true, nil
 }
 
 type auxiliaryPermissionChecker struct {

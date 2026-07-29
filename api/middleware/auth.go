@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -20,16 +21,18 @@ const (
 // SessionFetcher looks up a session and returns authenticated user details.
 // Implementations should do a Redis lookup and return the session data.
 type SessionFetcher interface {
-	// FetchSession retrieves session data. Returns ok=false if invalid/expired.
-	FetchSession(ctx context.Context, sessionID string) (userID uint, role domain.Role, email string, ok bool)
+	// FetchSession retrieves session data. Returns ok=false only when the
+	// session is definitively invalid or expired; dependency failures return err.
+	FetchSession(ctx context.Context, sessionID string) (userID uint, role domain.Role, email string, ok bool, err error)
 }
 
 // SessionFetcherFunc is a function adapter for SessionFetcher.
 type SessionFetcherFunc func(ctx context.Context, sessionID string) (uint, domain.Role, string, bool)
 
 // FetchSession implements SessionFetcher.
-func (f SessionFetcherFunc) FetchSession(ctx context.Context, sessionID string) (uint, domain.Role, string, bool) {
-	return f(ctx, sessionID)
+func (f SessionFetcherFunc) FetchSession(ctx context.Context, sessionID string) (uint, domain.Role, string, bool, error) {
+	userID, role, email, ok := f(ctx, sessionID)
+	return userID, role, email, ok, nil
 }
 
 // PermissionChecker checks fine-grained permissions for authenticated users.
@@ -49,7 +52,15 @@ func LoadSession(fetcher SessionFetcher) gin.HandlerFunc {
 			return
 		}
 
-		userID, role, email, ok := fetcher.FetchSession(c.Request.Context(), sid)
+		userID, role, email, ok, fetchErr := fetcher.FetchSession(c.Request.Context(), sid)
+		if fetchErr != nil {
+			slog.Error("session lookup failed", "request_id", GetRequestID(c), "error", fetchErr)
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
+				"message":   "Service is temporarily unavailable.",
+				"requestId": GetRequestID(c),
+			})
+			return
+		}
 		if !ok {
 			clearRequestAuthCookies(c)
 			c.Next()
@@ -169,8 +180,10 @@ func permissionGuard(checker PermissionChecker, pairs [][2]string) gin.HandlerFu
 
 func ClearAuthCookies(c *gin.Context, secure bool) {
 	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(SessionCookieName, "", -1, "/", "", secure, true)
-	c.SetCookie(CSRFCookieName, "", -1, "/", "", secure, false)
+	for _, cookiePath := range []string{"/", "/v1"} {
+		c.SetCookie(SessionCookieName, "", -1, cookiePath, "", secure, true)
+		c.SetCookie(CSRFCookieName, "", -1, cookiePath, "", secure, false)
+	}
 }
 
 func clearRequestAuthCookies(c *gin.Context) {

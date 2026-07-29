@@ -9281,12 +9281,6 @@ type PostServerParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
-// DeleteSessionParams defines parameters for DeleteSession.
-type DeleteSessionParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
-	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
-}
-
 // PostSupplierApplicationParams defines parameters for PostSupplierApplication.
 type PostSupplierApplicationParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
@@ -10939,7 +10933,7 @@ type ServerInterface interface {
 	PostServer(c *gin.Context, params PostServerParams)
 	// Logout and delete current session
 	// (DELETE /v1/sessions/current)
-	DeleteSession(c *gin.Context, params DeleteSessionParams)
+	DeleteSession(c *gin.Context)
 	// Submit current user's supplier application
 	// (POST /v1/suppliers/applications)
 	PostSupplierApplication(c *gin.Context, params PostSupplierApplicationParams)
@@ -22277,38 +22271,6 @@ func (siw *ServerInterfaceWrapper) PostServer(c *gin.Context) {
 // DeleteSession operation middleware
 func (siw *ServerInterfaceWrapper) DeleteSession(c *gin.Context) {
 
-	var err error
-	_ = err
-
-	c.Set(string(CookieAuthScopes), []string{})
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params DeleteSessionParams
-
-	headers := c.Request.Header
-
-	// ------------- Required header parameter "X-CSRF-Token" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
-		var XCSRFToken CsrfToken
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
-			return
-		}
-
-		params.XCSRFToken = XCSRFToken
-
-	} else {
-		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
-		return
-	}
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
 		if c.IsAborted() {
@@ -22316,7 +22278,7 @@ func (siw *ServerInterfaceWrapper) DeleteSession(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.DeleteSession(c, params)
+	siw.Handler.DeleteSession(c)
 }
 
 // PostSupplierApplication operation middleware

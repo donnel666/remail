@@ -253,7 +253,10 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Logout and delete current session */
+        /**
+         * Logout and delete current session
+         * @description Idempotently deletes the session cookie value when present and always expires the browser authentication cookies. This recovery endpoint intentionally does not require CSRF because a missing CSRF cookie must not prevent logout.
+         */
         delete: operations["deleteSession"];
         options?: never;
         head?: never;
@@ -7272,33 +7275,21 @@ export interface operations {
     deleteSession: {
         parameters: {
             query?: never;
-            header: {
-                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
-                "X-CSRF-Token": components["parameters"]["CsrfToken"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Logged out successfully */
+            /** @description Logged out or already logged out */
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description Authentication required */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Permission denied */
-            403: {
+            /** @description Session cleanup failed */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

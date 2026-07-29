@@ -17,6 +17,14 @@ type middlewarePermissionCheckerStub struct {
 	err     error
 }
 
+type failingSessionFetcher struct {
+	err error
+}
+
+func (s failingSessionFetcher) FetchSession(context.Context, string) (uint, domain.Role, string, bool, error) {
+	return 0, "", "", false, s.err
+}
+
 func (s middlewarePermissionCheckerStub) Check(context.Context, uint, domain.Role, string, string) (bool, error) {
 	return s.allowed, s.err
 }
@@ -41,8 +49,36 @@ func TestAuthRequiredClearsInvalidSessionCookies(t *testing.T) {
 
 	require.Equal(t, http.StatusUnauthorized, response.Code)
 	cookies := response.Result().Cookies()
-	requireCookieCleared(t, cookies, SessionCookieName)
-	requireCookieCleared(t, cookies, CSRFCookieName)
+	for _, name := range []string{SessionCookieName, CSRFCookieName} {
+		requireCookieCleared(t, cookies, name, "/")
+		requireCookieCleared(t, cookies, name, "/v1")
+	}
+}
+
+func TestLoadSessionPreservesCookiesWhenSessionLookupFails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(RequestID())
+	router.Use(LoadSession(failingSessionFetcher{err: errors.New("redis unavailable canary")}))
+	router.Use(AuthRequired())
+	router.GET("/protected", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	request.AddCookie(&http.Cookie{Name: SessionCookieName, Value: "valid-session"})
+	request.AddCookie(&http.Cookie{Name: CSRFCookieName, Value: "valid-csrf"})
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusServiceUnavailable, response.Code)
+	require.Contains(t, response.Body.String(), "Service is temporarily unavailable.")
+	require.NotContains(t, response.Body.String(), "redis unavailable canary")
+	for _, cookie := range response.Result().Cookies() {
+		require.NotEqual(t, SessionCookieName, cookie.Name)
+		require.NotEqual(t, CSRFCookieName, cookie.Name)
+	}
 }
 
 func TestPermissionRequiredDoesNotExposeCheckerErrors(t *testing.T) {
@@ -74,15 +110,15 @@ func TestPermissionRequiredDoesNotExposeCheckerErrors(t *testing.T) {
 	require.NotContains(t, response.Body.String(), "password")
 }
 
-func requireCookieCleared(t *testing.T, cookies []*http.Cookie, name string) {
+func requireCookieCleared(t *testing.T, cookies []*http.Cookie, name, path string) {
 	t.Helper()
 
 	for _, cookie := range cookies {
-		if cookie.Name == name {
+		if cookie.Name == name && cookie.Path == path {
 			require.Empty(t, cookie.Value)
 			require.Negative(t, cookie.MaxAge)
 			return
 		}
 	}
-	require.Failf(t, "cookie was not cleared", "missing cookie %s", name)
+	require.Failf(t, "cookie was not cleared", "missing cookie %s at path %s", name, path)
 }

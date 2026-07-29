@@ -131,7 +131,7 @@ eft = allow/deny
 | 场景 | 规则 |
 |------|------|
 | 登录 | `POST /v1/login`，成功设置 HttpOnly Cookie，返回当前用户概要。 |
-| 登出 | `DELETE /v1/sessions/current`。 |
+| 登出 | `DELETE /v1/sessions/current`，幂等撤销请求携带的 Session，并始终过期 `/`、`/v1` 路径的认证 Cookie；即使 CSRF Cookie 已丢失或服务端撤销失败也必须完成浏览器清理。 |
 | 当前用户 | `GET /v1/me`。 |
 | 改密码 | 成功后递增 `tokenVersion`，清理旧 Session。 |
 | 禁用用户 | 递增 `tokenVersion`，清理旧 Session 和 API Key 缓存。 |
@@ -143,6 +143,7 @@ eft = allow/deny
 | 场景 | HTTP | message |
 |------|------|---------|
 | 未登录 | `401` | `Authentication is required.` |
+| Session 校验依赖不可用 | `503` | `Service is temporarily unavailable.`；不得清理认证 Cookie。 |
 | 账号或密码错误 | `422` | `Account or password is incorrect.` |
 | 人机验证失败 | `422` | `Human verification failed.` |
 | 人机验证服务不可用 | `503` | `Human verification is temporarily unavailable.` |

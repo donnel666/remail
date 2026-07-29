@@ -13,8 +13,8 @@ import (
 
 type noSessionFetcher struct{}
 
-func (noSessionFetcher) FetchSession(context.Context, string) (uint, iamdomain.Role, string, bool) {
-	return 0, "", "", false
+func (noSessionFetcher) FetchSession(context.Context, string) (uint, iamdomain.Role, string, bool, error) {
+	return 0, "", "", false, nil
 }
 
 type noPermissionChecker struct{}

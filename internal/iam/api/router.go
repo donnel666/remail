@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/donnel666/remail/api/middleware"
 	"github.com/donnel666/remail/internal/iam/domain"
@@ -33,10 +34,13 @@ func NewSessionFetcher(
 	return &sessionFetcher{sessionStore: store, userRepo: repo}
 }
 
-func (f *sessionFetcher) FetchSession(ctx context.Context, sessionID string) (uint, domain.Role, string, bool) {
+func (f *sessionFetcher) FetchSession(ctx context.Context, sessionID string) (uint, domain.Role, string, bool, error) {
 	sess, err := f.sessionStore.Get(ctx, sessionID)
-	if err != nil || sess == nil {
-		return 0, "", "", false
+	if err != nil {
+		return 0, "", "", false, fmt.Errorf("get session: %w", err)
+	}
+	if sess == nil {
+		return 0, "", "", false, nil
 	}
 
 	// Re-verify against the DB on every request:
@@ -45,12 +49,15 @@ func (f *sessionFetcher) FetchSession(ctx context.Context, sessionID string) (ui
 	// - Use the current role from DB, not the cached snapshot from Redis,
 	//   so role changes take effect immediately (docs/8-iam.md:123).
 	user, err := f.userRepo.FindByID(ctx, sess.UserID)
-	if err != nil || user == nil || !user.IsActive() || user.TokenVersion != sess.TokenVersion {
-		return 0, "", "", false
+	if err != nil {
+		return 0, "", "", false, fmt.Errorf("get session user: %w", err)
+	}
+	if user == nil || !user.IsActive() || user.TokenVersion != sess.TokenVersion {
+		return 0, "", "", false, nil
 	}
 
 	// Use current user data from DB, not the session snapshot
-	return sess.UserID, user.Role, user.Email, true
+	return sess.UserID, user.Role, user.Email, true, nil
 }
 
 // RegisterIAMRoutes registers all IAM routes on the given router group.
@@ -69,6 +76,7 @@ func RegisterIAMRoutes(rg *gin.RouterGroup, mod *IAMModule, sessionSecure bool) 
 	rg.POST("/email/code", h.PostEmailCode)
 	rg.POST("/users", h.PostRegister)
 	rg.POST("/login", h.PostLogin)
+	rg.DELETE("/sessions/current", h.DeleteSession)
 	rg.POST("/password/reset/request", h.PostPasswordResetRequest)
 	rg.POST("/password/reset", h.PostPasswordReset)
 
@@ -82,7 +90,6 @@ func RegisterIAMRoutes(rg *gin.RouterGroup, mod *IAMModule, sessionSecure bool) 
 		auth.GET("/user-groups", h.GetUserGroups)
 		auth.GET("/me/invite", h.GetMeInvite)
 		auth.POST("/me/invite", h.PostMeInvite)
-		auth.DELETE("/sessions/current", h.DeleteSession)
 		auth.PATCH("/password", h.PatchPassword)
 		auth.POST("/suppliers/applications", h.PostSupplierApplication)
 		auth.GET("/suppliers/applications/current", h.GetCurrentSupplierApplication)

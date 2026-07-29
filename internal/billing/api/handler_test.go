@@ -367,9 +367,9 @@ type fakeSessionFetcher struct {
 	sessions map[string]sessionFixture
 }
 
-func (f fakeSessionFetcher) FetchSession(_ context.Context, sessionID string) (uint, iamdomain.Role, string, bool) {
+func (f fakeSessionFetcher) FetchSession(_ context.Context, sessionID string) (uint, iamdomain.Role, string, bool, error) {
 	session, ok := f.sessions[sessionID]
-	return session.userID, session.role, session.email, ok
+	return session.userID, session.role, session.email, ok, nil
 }
 
 type fakePermissionChecker struct {

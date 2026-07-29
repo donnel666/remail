@@ -403,23 +403,15 @@ paths:
     delete:
       operationId: deleteSession
       summary: Logout and delete current session
+      description: Idempotently deletes the session cookie value when present and always expires the browser authentication cookies. This recovery endpoint intentionally does not require CSRF because a missing CSRF cookie must not prevent logout.
       tags:
         - IAM
-      security:
-        - cookieAuth: []
-      parameters:
-        - $ref: "#/components/parameters/CsrfToken"
+      security: []
       responses:
         "204":
-          description: Logged out successfully
-        "401":
-          description: Authentication required
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "403":
-          description: Permission denied
+          description: Logged out or already logged out
+        "500":
+          description: Session cleanup failed
           content:
             application/json:
               schema:

@@ -2000,8 +2000,8 @@ func registerOpenOrderRoute(router *gin.Engine, mod *Module, openapiMod *openapi
 
 type fixedTradeSessionFetcher struct{}
 
-func (fixedTradeSessionFetcher) FetchSession(context.Context, string) (uint, iamdomain.Role, string, bool) {
-	return 1, iamdomain.RoleAdmin, "admin@test.local", true
+func (fixedTradeSessionFetcher) FetchSession(context.Context, string) (uint, iamdomain.Role, string, bool, error) {
+	return 1, iamdomain.RoleAdmin, "admin@test.local", true, nil
 }
 
 type allowTradePermissionChecker struct{}

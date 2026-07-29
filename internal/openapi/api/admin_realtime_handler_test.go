@@ -14,8 +14,8 @@ import (
 
 type adminRealtimeSessionFetcher struct{}
 
-func (adminRealtimeSessionFetcher) FetchSession(_ context.Context, sessionID string) (uint, iamdomain.Role, string, bool) {
-	return 1, iamdomain.RoleAdmin, "admin@example.com", sessionID == "valid"
+func (adminRealtimeSessionFetcher) FetchSession(_ context.Context, sessionID string) (uint, iamdomain.Role, string, bool, error) {
+	return 1, iamdomain.RoleAdmin, "admin@example.com", sessionID == "valid", nil
 }
 
 type adminRealtimePermissionChecker map[string]bool

@@ -60,8 +60,8 @@ func (*adminUserDashboardViewStub) UserStanding(context.Context, uint, *time.Tim
 
 type adminUserDashboardSessionFetcher struct{}
 
-func (adminUserDashboardSessionFetcher) FetchSession(_ context.Context, sessionID string) (uint, iamdomain.Role, string, bool) {
-	return 1, iamdomain.RoleAdmin, "admin@example.com", sessionID == "valid"
+func (adminUserDashboardSessionFetcher) FetchSession(_ context.Context, sessionID string) (uint, iamdomain.Role, string, bool, error) {
+	return 1, iamdomain.RoleAdmin, "admin@example.com", sessionID == "valid", nil
 }
 
 type adminUserDashboardPermissionChecker map[string]bool
