@@ -113,13 +113,16 @@ export async function getOrder(orderNo: string) {
   );
 }
 
-export async function adminRefundOrder(orderNo: string, reason?: string) {
+export async function adminRefundOrder(
+  orderNo: string,
+  reason = "Admin console manual refund."
+) {
   // The refund credits the buyer's wallet, not the admin operator's, so this
   // deliberately does not emit notifyWalletUpdated (that refreshes the current
   // user's own balance).
   return unwrap<OrderResponse>(
     await client.POST("/v1/admin/orders/{orderNo}/refund", {
-      body: { reason: reason ?? "" },
+      body: { reason },
       params: {
         path: { orderNo },
         header: {

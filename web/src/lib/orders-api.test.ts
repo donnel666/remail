@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const apiMocks = vi.hoisted(() => ({ GET: vi.fn() }));
+const apiMocks = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn() }));
 
 vi.mock("@/lib/api-client", () => ({
   apiClient: apiMocks,
@@ -8,7 +8,7 @@ vi.mock("@/lib/api-client", () => ({
   unwrap: async (result: { data?: unknown }) => result.data,
 }));
 
-import { listOrders } from "./orders-api";
+import { adminRefundOrder, listOrders } from "./orders-api";
 
 describe("order API adapter", () => {
   beforeEach(() => {
@@ -37,5 +37,18 @@ describe("order API adapter", () => {
         },
       },
     });
+  });
+
+  it("supplies the required reason for an admin refund", async () => {
+    apiMocks.POST.mockResolvedValueOnce({ data: { orderNo: "OR1" } });
+
+    await adminRefundOrder("OR1");
+
+    expect(apiMocks.POST).toHaveBeenCalledWith(
+      "/v1/admin/orders/{orderNo}/refund",
+      expect.objectContaining({
+        body: { reason: "Admin console manual refund." },
+      })
+    );
   });
 });
