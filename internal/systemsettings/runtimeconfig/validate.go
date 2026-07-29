@@ -44,7 +44,7 @@ var integerRanges = map[string]integerRange{
 	"fetch_lookback_window_days": positive(3650), "read_window_skew_minutes": positive(1440), "code_read_limit": positive(100), "purchase_read_limit": positive(500), "message_scan_limit": positive(500),
 	"projection_replay_limit": positive(1000), "pickup_fetch_reserve_ttl_minutes": positive(30), "pickup_fetch_lease_ttl_minutes": positive(10), "pickup_message_cache_ttl_seconds": positive(300),
 	"pickup_message_cache_limit": positive(100), "pickup_fetch_heartbeat_seconds": positive(300), "mailmatch_fetch_timeout_minutes": positive(60), "pickup_request_fetch_timeout_minutes": positive(30),
-	"project_history_timeout_minutes": positive(120), "fetch_dispatcher_interval_seconds": positive(3600), "project_history_concurrency": positive(32), "project_history_dispatch_limit": positive(100),
+	"project_history_timeout_minutes": positive(120), "fetch_dispatcher_interval_seconds": positive(3600), "project_history_concurrency": positive(8096), "project_history_dispatch_limit": positive(100),
 	"microsoft_alias_weekly_limit": positive(1000), "microsoft_alias_yearly_limit": positive(10000), "microsoft_alias_ensure_interval_hours": positive(720), "microsoft_alias_reconciliation_grace_hours": positive(720),
 	"microsoft_alias_transient_backoff_base_minutes": positive(1440), "microsoft_alias_transient_backoff_max_hours": positive(720), "microsoft_alias_negative_confirm_required": positive(20),
 	"token_refresh_max_attempts": positive(20), "token_refresh_scan_limit": positive(10000), "token_refresh_lookahead_days": positive(365), "recovery_code_lease_minutes": positive(60),
@@ -61,10 +61,10 @@ var integerRanges = map[string]integerRange{
 	"token_refresh_dispatcher_interval_seconds": positive(3600), "legacy_alias_retry_delay_seconds": positive(3600),
 	"smtp_task_retry_count": {min: 0, max: 20},
 
-	"background_load_overload_percent": {min: 11, max: 100}, "background_worker_minimum": positive(4096), "background_worker_initial": positive(4096),
-	"background_worker_increase_step": positive(4096), "background_recovery_samples": positive(100), "background_metric_failure_limit": positive(100),
+	"background_load_overload_percent": {min: 11, max: 100}, "background_worker_minimum": positive(8096), "background_worker_initial": positive(8096),
+	"background_worker_increase_step": positive(8096), "background_recovery_samples": positive(100), "background_metric_failure_limit": positive(100),
 	"background_task_max_retry": {min: 0, max: 20}, "background_retry_delay_minimum_seconds": positive(3600), "background_retry_delay_jitter_seconds": {min: 0, max: 3600},
-	"asynq_worker_concurrency": positive(4096), "asynq_realtime_worker_concurrency": positive(4096), "asynq_background_worker_concurrency": positive(4096),
+	"asynq_worker_concurrency": positive(8096), "asynq_realtime_worker_concurrency": positive(8096), "asynq_background_worker_concurrency": positive(8096),
 	"asynq_shutdown_timeout_seconds": positive(300), "validation_dispatch_maximum": positive(10000), "default_inbound_smtp_max_connections": positive(10000),
 
 	"admin_resource_bulk_max_ids": positive(1000), "admin_domain_bulk_max_ids": positive(1000), "admin_domain_bulk_max_filter": positive(10000),

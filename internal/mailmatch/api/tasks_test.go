@@ -89,18 +89,23 @@ func TestProjectHistoryCapacityIsLimitedToFourWorkers(t *testing.T) {
 	}
 }
 
-func TestProjectHistoryCapacityUpdatesAtRuntime(t *testing.T) {
+func TestProjectHistoryCapacitySupportsConfiguredMaximum(t *testing.T) {
 	defer runtimeconfig.Delete("project_history_concurrency")
-	runtimeconfig.Set("project_history_concurrency", "2")
+	runtimeconfig.Set("project_history_concurrency", "8096")
 
-	first, admitted := acquireProjectHistoryCapacity(context.Background(), nil)
-	require.True(t, admitted)
-	second, admitted := acquireProjectHistoryCapacity(context.Background(), nil)
-	require.True(t, admitted)
-	_, admitted = acquireProjectHistoryCapacity(context.Background(), nil)
+	releases := make([]func(), 0, 8096)
+	t.Cleanup(func() {
+		for _, release := range releases {
+			release()
+		}
+	})
+	for range 8096 {
+		release, admitted := acquireProjectHistoryCapacity(context.Background(), nil)
+		require.True(t, admitted)
+		releases = append(releases, release)
+	}
+	_, admitted := acquireProjectHistoryCapacity(context.Background(), nil)
 	require.False(t, admitted)
-	first()
-	second()
 }
 
 func TestValidatedMicrosoftHistoryRetryCapAppliesToLegacyTasks(t *testing.T) {

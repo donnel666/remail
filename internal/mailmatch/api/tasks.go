@@ -22,7 +22,7 @@ const (
 	projectHistoryDispatchLimit    = 4
 	backgroundReleaseTimeout       = 5 * time.Second
 	maxFetchDispatcherInterval     = time.Hour
-	maxProjectHistoryConcurrency   = 32
+	maxProjectHistoryConcurrency   = 8096
 	maxProjectHistoryDispatchLimit = 100
 )
 

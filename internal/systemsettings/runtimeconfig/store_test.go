@@ -185,6 +185,15 @@ func TestValidateGlobalNoticeSize(t *testing.T) {
 func TestValidateSystemOperationsSettings(t *testing.T) {
 	require.NoError(t, Validate("background_load_overload_percent", "11"))
 	require.ErrorIs(t, Validate("background_load_overload_percent", "10"), domain.ErrInvalidValue)
+	require.NoError(t, Validate("project_history_concurrency", "8096"))
+	require.ErrorIs(t, Validate("project_history_concurrency", "8097"), domain.ErrInvalidValue)
+	for _, key := range []string{
+		"background_worker_minimum", "background_worker_initial", "background_worker_increase_step",
+		"asynq_worker_concurrency", "asynq_realtime_worker_concurrency", "asynq_background_worker_concurrency",
+	} {
+		require.NoError(t, Validate(key, "8096"))
+		require.ErrorIs(t, Validate(key, "8097"), domain.ErrInvalidValue)
+	}
 	require.NoError(t, Validate("retention_daily_run_hour", "23"))
 	require.ErrorIs(t, Validate("retention_daily_run_hour", "24"), domain.ErrInvalidValue)
 	require.NoError(t, Validate("slow_request_threshold_ms", "0"))

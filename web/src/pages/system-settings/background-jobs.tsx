@@ -20,7 +20,7 @@ export default function BackgroundJobSection({ options, onBulkSave }: SectionPro
     return Number.isFinite(parsed) ? parsed : undefined;
   };
   const invalidKeys = invalidNumericKeys(form, BACKGROUND_JOB_KEYS);
-  const field = (label: string, key: string, min = 1, max = 4096) => <SettingsNumberField label={t(label)} value={number(form[key])} onChange={(value) => update(key, value)} min={min} max={max} />;
+  const field = (label: string, key: string, min = 1, max = 8096) => <SettingsNumberField label={t(label)} value={number(form[key])} onChange={(value) => update(key, value)} min={min} max={max} />;
   const save = async () => {
     setSaving(true);
     try { await onBulkSave(serializeOptions(BACKGROUND_JOB_KEYS, form, BACKGROUND_JOB_KEYS)); }
