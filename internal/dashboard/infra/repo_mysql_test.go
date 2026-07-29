@@ -188,10 +188,10 @@ VALUES (1, 'TX-1', 2, 'debit', 'consumer', 'out', -1.00, 100.00, 99.00, 'order',
 	ranking, err := repo.ProjectCodeRanking(ctx, 2, from, to)
 	require.NoError(t, err)
 	require.Len(t, ranking, 3)
-	// All three tie at 1; order by project_id ASC.
-	require.Equal(t, "Test", ranking[0].Name)
-	require.Equal(t, 1, ranking[0].Count)
-	require.Equal(t, "Microsoft", ranking[1].Name)
+	require.Equal(t, "Microsoft", ranking[0].Name)
+	require.Equal(t, 2, ranking[0].Count) // one delivered code order plus one activated purchase
+	require.Equal(t, "Test", ranking[1].Name)
+	require.Equal(t, 1, ranking[1].Count)
 	require.Equal(t, "Telegram", ranking[2].Name)
 
 	spendRows, err := repo.ProjectSpendBuckets(ctx, 2, dayFmt, from, to)

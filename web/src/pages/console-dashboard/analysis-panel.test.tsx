@@ -152,6 +152,7 @@ describe("console dashboard analysis charts", () => {
         },
       ],
       point: { visible: true },
+      title: { text: "Project fulfillment ranking" },
       xField: "Project",
       yField: "Count",
     });

@@ -168,11 +168,11 @@ func (r *ViewRepo) ProjectCodeRanking(ctx context.Context, userID uint, from, to
 		Count     int    `gorm:"column:count"`
 	}
 	if err := r.db.WithContext(ctx).
-		Table("mailmatch_order_delivery_heads AS h").
-		Joins("JOIN orders AS o ON o.id = h.order_id").
+		Table("orders AS o").
+		Joins("LEFT JOIN mailmatch_order_delivery_heads AS h ON h.order_id = o.id").
 		Joins("LEFT JOIN projects AS p ON p.id = o.project_id").
 		Select("o.project_id AS project_id, COALESCE(p.name, '') AS name, COUNT(*) AS count").
-		Where("o.user_id = ? AND o.debit_tx_id IS NOT NULL AND o.service_mode = 'code' AND o.created_at >= ? AND o.created_at <= ?", userID, from.UTC(), to.UTC()).
+		Where("o.user_id = ? AND o.debit_tx_id IS NOT NULL AND ((o.service_mode = 'code' AND h.order_id IS NOT NULL) OR (o.service_mode = 'purchase' AND o.activated_at IS NOT NULL)) AND o.created_at >= ? AND o.created_at <= ?", userID, from.UTC(), to.UTC()).
 		Where("o." + historyOrderExclude).
 		Group("o.project_id, name").
 		Order("count DESC, o.project_id ASC").

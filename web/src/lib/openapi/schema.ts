@@ -4369,6 +4369,7 @@ export interface components {
             stats: components["schemas"]["DashboardStats"];
             trend: components["schemas"]["DashboardTrendPoint"][];
             projectSeries: components["schemas"]["DashboardProjectSeries"][];
+            /** @description Successful fulfillment ranking by project; includes delivered code orders and activated purchase orders. The field name is retained for compatibility. */
             projectCodeRanking: components["schemas"]["DashboardRankItem"][];
             codeRatio: number;
             purchaseRatio: number;

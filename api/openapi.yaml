@@ -12543,6 +12543,7 @@ components:
             $ref: "#/components/schemas/DashboardProjectSeries"
         projectCodeRanking:
           type: array
+          description: Successful fulfillment ranking by project; includes delivered code orders and activated purchase orders. The field name is retained for compatibility.
           items:
             $ref: "#/components/schemas/DashboardRankItem"
         codeRatio:

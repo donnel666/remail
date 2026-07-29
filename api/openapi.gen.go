@@ -5700,12 +5700,14 @@ type DashboardResponse struct {
 	CodeRatio float32 `json:"codeRatio"`
 
 	// HistoricalCodeRanking All-time successful-order ranking; includes delivered code orders and activated purchase orders.
-	HistoricalCodeRanking     []DashboardRankItem      `json:"historicalCodeRanking"`
-	HistoricalCurrentUserRank DashboardRankItem        `json:"historicalCurrentUserRank"`
-	ProjectCodeRanking        []DashboardRankItem      `json:"projectCodeRanking"`
-	ProjectSeries             []DashboardProjectSeries `json:"projectSeries"`
-	PurchaseRatio             float32                  `json:"purchaseRatio"`
-	Stats                     DashboardStats           `json:"stats"`
+	HistoricalCodeRanking     []DashboardRankItem `json:"historicalCodeRanking"`
+	HistoricalCurrentUserRank DashboardRankItem   `json:"historicalCurrentUserRank"`
+
+	// ProjectCodeRanking Successful fulfillment ranking by project; includes delivered code orders and activated purchase orders. The field name is retained for compatibility.
+	ProjectCodeRanking []DashboardRankItem      `json:"projectCodeRanking"`
+	ProjectSeries      []DashboardProjectSeries `json:"projectSeries"`
+	PurchaseRatio      float32                  `json:"purchaseRatio"`
+	Stats              DashboardStats           `json:"stats"`
 
 	// TodayCodeRanking Successful-order ranking for the current business day; includes delivered code orders and activated purchase orders.
 	TodayCodeRanking     []DashboardRankItem   `json:"todayCodeRanking"`

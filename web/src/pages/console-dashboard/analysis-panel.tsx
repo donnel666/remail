@@ -20,7 +20,7 @@ const ANALYSIS_TABS: Array<{ key: AnalysisView; labelKey: string }> = [
   { key: "spend", labelKey: "Spend distribution" },
   { key: "successRate", labelKey: "Fulfillment success rate" },
   { key: "fulfillmentTime", labelKey: "Fulfillment time" },
-  { key: "projects", labelKey: "Project code ranking" },
+  { key: "projects", labelKey: "Project fulfillment ranking" },
   { key: "serviceModes", labelKey: "Service mode distribution" },
 ];
 
@@ -198,7 +198,7 @@ function useAnalysisSpec(data: DashboardData | null, view: AnalysisView) {
         data: [{ id: "projectRankData", values }],
         legends: { visible: false },
         point: { visible: true },
-        title: chartTitle(t("Project code ranking"), ""),
+        title: chartTitle(t("Project fulfillment ranking"), ""),
         type: "line",
         xField: "Project",
         yField: "Count",
