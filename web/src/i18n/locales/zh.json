@@ -801,7 +801,7 @@
   "Next tier": "下一等级",
   "Membership upgrade progress": "会员升级进度",
   "Recharge {{amount}} more to reach {{tier}}": "再充值 {{amount}} 即可达到 {{tier}} 门槛",
-  "Recharge {{amount}} more to unlock {{tier}} benefits": "再充 {{amount}} 即可解锁 {{tier}} 权益",
+  "Recharge {{amount}} more to unlock {{tier}} benefits": "还差 {{amount}} 即可解锁 {{tier}} 权益",
   "The {{tier}} threshold has been reached": "已达到 {{tier}} 升级门槛",
   "You have reached the highest membership tier": "当前已是最高会员等级",
   "Higher membership tiers exist, but none are available for automatic upgrade": "存在更高分组，但暂无可自动升级的等级",
