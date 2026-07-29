@@ -182,6 +182,11 @@ type LoginResponse struct {
 	User UserResponse `json:"user"`
 }
 
+type LoginConfigResponse struct {
+	LinuxDOOAuthEnabled bool `json:"linuxdoOAuthEnabled"`
+	LinuxDOBound        bool `json:"linuxdoBound"`
+}
+
 // TurnstileConfigResponse exposes the runtime switch and public widget site key.
 type TurnstileConfigResponse struct {
 	Enabled bool   `json:"enabled"`

@@ -94,6 +94,91 @@ func TestUserRepoCreateFirstUserConcurrentMySQL(t *testing.T) {
 	require.Equal(t, int64(1), count)
 }
 
+func TestUserRepoLinuxDOIdentityMySQL(t *testing.T) {
+	db := newMySQLTestDB(t)
+	repo := NewUserRepo(db)
+	user := &domain.User{
+		Email:        "linuxdo-42@oauth.invalid",
+		PasswordHash: "hash",
+		Nickname:     "LinuxDo User",
+		Status:       domain.UserStatusActive,
+		Role:         domain.RoleUser,
+		UserGroupID:  1,
+	}
+
+	require.NoError(t, repo.CreateWithLinuxDOIdentity(context.Background(), user, "42"))
+	found, err := repo.FindByLinuxDOID(context.Background(), "42")
+	require.NoError(t, err)
+	require.NotNil(t, found)
+	require.Equal(t, user.ID, found.ID)
+
+	loggedIn, err := repo.RecordLinuxDOLogin(context.Background(), user.ID, "42")
+	require.NoError(t, err)
+	require.NotNil(t, loggedIn)
+	require.NotNil(t, loggedIn.LastLoginAt)
+
+	duplicate := &domain.User{Email: "another@oauth.invalid", PasswordHash: "hash", Status: domain.UserStatusActive, Role: domain.RoleUser, UserGroupID: 1}
+	require.ErrorIs(t, repo.CreateWithLinuxDOIdentity(context.Background(), duplicate, "42"), domain.ErrLinuxDOIdentityAlreadyBound)
+	var duplicateCount int64
+	require.NoError(t, db.Model(&UserModel{}).Where("email = ?", duplicate.Email).Count(&duplicateCount).Error)
+	require.Zero(t, duplicateCount)
+
+	local := &domain.User{Email: "local@test.local", PasswordHash: "hash", Status: domain.UserStatusActive, Role: domain.RoleUser, UserGroupID: 1}
+	require.NoError(t, repo.Create(context.Background(), local))
+	bound, err := repo.HasLinuxDOIdentity(context.Background(), local.ID)
+	require.NoError(t, err)
+	require.False(t, bound)
+	require.NoError(t, repo.BindLinuxDOIdentity(context.Background(), local.ID, "99"))
+	require.NoError(t, repo.BindLinuxDOIdentity(context.Background(), local.ID, "99"))
+	bound, err = repo.HasLinuxDOIdentity(context.Background(), local.ID)
+	require.NoError(t, err)
+	require.True(t, bound)
+	require.ErrorIs(t, repo.BindLinuxDOIdentity(context.Background(), local.ID, "100"), domain.ErrLinuxDOIdentityAlreadyBound)
+	require.ErrorIs(t, repo.BindLinuxDOIdentity(context.Background(), user.ID, "99"), domain.ErrLinuxDOIdentityAlreadyBound)
+}
+
+func TestUserRepoBindLinuxDOIdentityConcurrentMySQL(t *testing.T) {
+	db := newMySQLTestDB(t)
+	repo := NewUserRepo(db)
+	user := &domain.User{Email: "concurrent-bind@test.local", PasswordHash: "hash", Status: domain.UserStatusActive, Role: domain.RoleUser, UserGroupID: 1}
+	require.NoError(t, repo.Create(context.Background(), user))
+
+	const workers = 8
+	start := make(chan struct{})
+	errs := make(chan error, workers)
+	var wg sync.WaitGroup
+	for i := range workers {
+		wg.Add(1)
+		go func(linuxDOID string) {
+			defer wg.Done()
+			<-start
+			errs <- repo.BindLinuxDOIdentity(context.Background(), user.ID, linuxDOID)
+		}(fmt.Sprintf("%d", 200+i))
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+
+	successes := 0
+	conflicts := 0
+	for err := range errs {
+		switch {
+		case err == nil:
+			successes++
+		case errors.Is(err, domain.ErrLinuxDOIdentityAlreadyBound):
+			conflicts++
+		default:
+			t.Fatalf("unexpected bind error: %v", err)
+		}
+	}
+	require.Equal(t, 1, successes)
+	require.Equal(t, workers-1, conflicts)
+
+	var count int64
+	require.NoError(t, db.Model(&ThirdPartyIdentityModel{}).Where("user_id = ? AND provider = ?", user.ID, linuxDOIdentityProvider).Count(&count).Error)
+	require.Equal(t, int64(1), count)
+}
+
 func TestUserRepoRoleCheckMySQL(t *testing.T) {
 	db := newMySQLTestDB(t)
 

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"time"
 
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	"github.com/donnel666/remail/internal/iam/domain"
@@ -13,6 +14,10 @@ type UserRepository interface {
 	// Create persists a new user. Returns ErrEmailAlreadyExists on duplicate.
 	Create(ctx context.Context, user *domain.User) error
 
+	// CreateWithLinuxDOIdentity persists a new user and its external identity in
+	// one transaction. Identity conflicts return ErrLinuxDOIdentityAlreadyBound.
+	CreateWithLinuxDOIdentity(ctx context.Context, user *domain.User, linuxDOID string) error
+
 	// CreateWithInvite persists a new user and atomically consumes an invite.
 	CreateWithInvite(ctx context.Context, user *domain.User, inviteCode string) error
 
@@ -20,12 +25,22 @@ type UserRepository interface {
 	// timing behavior and deleted emails remain reserved.
 	FindByEmail(ctx context.Context, email string) (*domain.User, error)
 
+	// FindByLinuxDOID includes logically deleted users so an OAuth identity
+	// cannot be reused after its local account is deleted.
+	FindByLinuxDOID(ctx context.Context, linuxDOID string) (*domain.User, error)
+	BindLinuxDOIdentity(ctx context.Context, userID uint, linuxDOID string) error
+	HasLinuxDOIdentity(ctx context.Context, userID uint) (bool, error)
+
 	// FindByID looks up a non-deleted user by primary key.
 	FindByID(ctx context.Context, id uint) (*domain.User, error)
 
 	// RecordLogin updates only last_login_at when the verified credential
 	// snapshot is still current, then returns the latest user state.
 	RecordLogin(ctx context.Context, userID uint, expectedPasswordHash string) (*domain.User, error)
+
+	// RecordLinuxDOLogin updates last_login_at only while the account remains
+	// active and bound to the verified LinuxDo identity.
+	RecordLinuxDOLogin(ctx context.Context, userID uint, linuxDOID string) (*domain.User, error)
 
 	// UpdatePassword updates only password_hash and atomically bumps
 	// token_version when the account is active and the password snapshot
@@ -155,6 +170,19 @@ type SessionStore interface {
 
 	// DeleteByUserID removes all sessions for a given user.
 	DeleteByUserID(ctx context.Context, userID uint) error
+
+	// PutLinuxDOFlow stores one short-lived OAuth flow keyed by its state.
+	PutLinuxDOFlow(ctx context.Context, state string, flow LinuxDOFlow, ttl time.Duration) error
+
+	// ConsumeLinuxDOFlow atomically returns and deletes an OAuth flow.
+	ConsumeLinuxDOFlow(ctx context.Context, state string) (*LinuxDOFlow, error)
+}
+
+type LinuxDOFlow struct {
+	Intent       string
+	UserID       uint
+	SessionID    string
+	CodeVerifier string
 }
 
 // EmailCodeStore defines storage for email verification codes.

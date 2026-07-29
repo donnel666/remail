@@ -14,6 +14,8 @@ import (
 const (
 	turnstileLimit      = 30
 	turnstileWindow     = 60
+	linuxDOOAuthLimit   = 30
+	linuxDOOAuthWindow  = 60
 	loginEmailLimit     = 10
 	loginIPLimit        = 60
 	loginWindow         = 15 * 60
@@ -93,6 +95,15 @@ func (l *AbuseLimiter) HitTurnstile(ctx context.Context, ip string) (int, error)
 	retry, err := abuseHitScript.Run(ctx, l.rdb, []string{abuseIPKey("turnstile", ip)}, runtimeconfig.Int("captcha_rate_limit", turnstileLimit, 1), turnstileWindow).Int()
 	if err != nil {
 		return 0, fmt.Errorf("redis turnstile abuse limit: %w", err)
+	}
+	return retry, nil
+}
+
+// HitLinuxDOOAuth limits outbound Linux DO token exchanges by client IP.
+func (l *AbuseLimiter) HitLinuxDOOAuth(ctx context.Context, ip string) (int, error) {
+	retry, err := abuseHitScript.Run(ctx, l.rdb, []string{abuseIPKey("linuxdo_oauth", ip)}, linuxDOOAuthLimit, linuxDOOAuthWindow).Int()
+	if err != nil {
+		return 0, fmt.Errorf("redis linuxdo oauth abuse limit: %w", err)
 	}
 	return retry, nil
 }

@@ -261,11 +261,12 @@ func TestEPayGatewaySettingsRequireSensitivePermission(t *testing.T) {
 	require.False(t, isSensitiveKey("topup_fee_rate"))
 }
 
-func TestEPayCredentialsAreWriteOnlyForPrivilegedAdmins(t *testing.T) {
+func TestCredentialsAreWriteOnlyForPrivilegedAdmins(t *testing.T) {
 	repo := &fakeRepository{items: map[string]settingsdomain.Setting{
 		"epay_merchant_key":        {Key: "epay_merchant_key", Value: "merchant-secret"},
 		"epay_private_key":         {Key: "epay_private_key", Value: "private-secret"},
 		"epay_platform_public_key": {Key: "epay_platform_public_key", Value: "public-key"},
+		"linuxdo_client_secret":    {Key: "linuxdo_client_secret", Value: "linuxdo-secret"},
 	}}
 	r := testRouter(repo)
 
@@ -274,9 +275,10 @@ func TestEPayCredentialsAreWriteOnlyForPrivilegedAdmins(t *testing.T) {
 	require.Equal(t, http.StatusOK, list.Code)
 	require.NotContains(t, list.Body.String(), "merchant-secret")
 	require.NotContains(t, list.Body.String(), "private-secret")
+	require.NotContains(t, list.Body.String(), "linuxdo-secret")
 	require.Contains(t, list.Body.String(), "public-key")
 
-	for _, key := range []string{"epay_merchant_key", "epay_private_key"} {
+	for _, key := range []string{"epay_merchant_key", "epay_private_key", "linuxdo_client_secret"} {
 		response := httptest.NewRecorder()
 		r.ServeHTTP(response, requestWithSession(http.MethodGet, "/v1/admin/settings/"+key, ""))
 		require.Equal(t, http.StatusNotFound, response.Code)
@@ -325,4 +327,32 @@ func TestBulkSettingsPermissionAndBlankSecretSafety(t *testing.T) {
 	require.Equal(t, http.StatusOK, cleared.Code)
 	require.Equal(t, "new", repo.items["site_title"].Value)
 	require.Equal(t, "", repo.items["github_client_secret"].Value)
+}
+
+func TestLinuxDOOAuthAppSettingsRequireSensitivePermission(t *testing.T) {
+	callbackURL := "https://mail.example.com/v1/oauth/linuxdo/callback"
+	repo := &fakeRepository{items: map[string]settingsdomain.Setting{
+		"site_title":            {Key: "site_title", Value: "old"},
+		"linuxdo_client_id":     {Key: "linuxdo_client_id", Value: "original-client"},
+		"linuxdo_client_secret": {Key: "linuxdo_client_secret", Value: "original-secret"},
+		"linuxdo_callback_url":  {Key: "linuxdo_callback_url", Value: callbackURL},
+	}}
+	checker := permissionCheckerFunc(func(_ context.Context, _ uint, _ iamdomain.Role, _, action string) (bool, error) {
+		return action != "sensitive", nil
+	})
+	r := testRouter(repo, checker)
+
+	list := httptest.NewRecorder()
+	r.ServeHTTP(list, requestWithSession(http.MethodGet, "/v1/admin/settings", ""))
+	require.Equal(t, http.StatusOK, list.Code)
+	require.Contains(t, list.Body.String(), "original-client")
+	require.Contains(t, list.Body.String(), callbackURL)
+	require.NotContains(t, list.Body.String(), "original-secret")
+
+	denied := httptest.NewRecorder()
+	r.ServeHTTP(denied, requestWithSession(http.MethodPut, "/v1/admin/settings", `{"settings":[{"key":"site_title","value":"new"},{"key":" linuxdo_client_id ","value":"attacker-client"},{"key":"linuxdo_callback_url","value":"https://attacker.example/v1/oauth/linuxdo/callback"}]}`))
+	require.Equal(t, http.StatusForbidden, denied.Code)
+	require.Equal(t, "old", repo.items["site_title"].Value)
+	require.Equal(t, "original-client", repo.items["linuxdo_client_id"].Value)
+	require.Equal(t, callbackURL, repo.items["linuxdo_callback_url"].Value)
 }

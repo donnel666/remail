@@ -262,6 +262,90 @@ paths:
                 $ref: "#/components/schemas/Error"
 
   # --- Login / Sessions ---
+  /v1/login/config:
+    get:
+      operationId: getLoginConfig
+      summary: Get enabled login methods and current binding state
+      tags:
+        - IAM
+      responses:
+        "200":
+          description: Login method configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginConfigResponse"
+
+  /v1/oauth/linuxdo:
+    get:
+      operationId: getLinuxDOAuthorize
+      summary: Start Linux DO OAuth login
+      tags:
+        - IAM
+      responses:
+        "302":
+          description: Redirect to Linux DO authorization or back to login on configuration failure
+          headers:
+            Location:
+              schema:
+                type: string
+        "303":
+          description: Redirect back to login on configuration failure
+          headers:
+            Location:
+              schema:
+                type: string
+
+  /v1/oauth/linuxdo/bind:
+    get:
+      operationId: getLinuxDOBind
+      summary: Start Linux DO binding for the current user
+      tags:
+        - IAM
+      responses:
+        "302":
+          description: Redirect to Linux DO authorization
+          headers:
+            Location:
+              schema:
+                type: string
+        "303":
+          description: Redirect back to login or account when the session is unavailable, already bound, or configuration fails
+          headers:
+            Location:
+              schema:
+                type: string
+
+  /v1/oauth/linuxdo/callback:
+    get:
+      operationId: getLinuxDOCallback
+      summary: Complete Linux DO OAuth login or binding
+      tags:
+        - IAM
+      parameters:
+        - name: code
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: error
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "303":
+          description: Redirect to login or account with the OAuth result
+          headers:
+            Location:
+              schema:
+                type: string
+
   /v1/login:
     post:
       operationId: postLogin
@@ -13238,6 +13322,18 @@ components:
       properties:
         user:
           $ref: "#/components/schemas/UserResponse"
+      additionalProperties: false
+
+    LoginConfigResponse:
+      type: object
+      required:
+        - linuxdoOAuthEnabled
+        - linuxdoBound
+      properties:
+        linuxdoOAuthEnabled:
+          type: boolean
+        linuxdoBound:
+          type: boolean
       additionalProperties: false
 
     ChangePasswordRequest:

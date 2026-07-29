@@ -26,6 +26,7 @@ export type ActivationUserResponse = JsonResponse<
   201
 >;
 export type LoginResponse = components["schemas"]["LoginResponse"];
+export type LoginConfigResponse = components["schemas"]["LoginConfigResponse"];
 export type AdminUserListResponse =
   components["schemas"]["AdminUserListResponse"];
 export type CurrentInviteResponse =
@@ -72,6 +73,13 @@ export async function login(payload: LoginRequest) {
     await client.POST("/v1/login", { body: payload })
   );
 }
+
+export async function getLoginConfig() {
+  return unwrap<LoginConfigResponse>(await client.GET("/v1/login/config"));
+}
+
+export const linuxDOLoginURL = "/v1/oauth/linuxdo";
+export const linuxDOBindURL = "/v1/oauth/linuxdo/bind";
 
 export async function logout() {
   return unwrap<void>(

@@ -30,6 +30,7 @@ type mockUserRepo struct {
 	mu                   sync.Mutex
 	users                map[uint]*domain.User
 	byID                 map[string]uint
+	byLinuxDO            map[string]uint
 	invites              map[string]*domain.Invite
 	userGroups           map[uint]*domain.UserGroup
 	supplierApplications map[uint]*domain.SupplierApplication
@@ -43,9 +44,10 @@ type mockUserRepo struct {
 
 func newMockUserRepo() *mockUserRepo {
 	return &mockUserRepo{
-		users:   make(map[uint]*domain.User),
-		byID:    make(map[string]uint),
-		invites: make(map[string]*domain.Invite),
+		users:     make(map[uint]*domain.User),
+		byID:      make(map[string]uint),
+		byLinuxDO: make(map[string]uint),
+		invites:   make(map[string]*domain.Invite),
 		userGroups: map[uint]*domain.UserGroup{
 			1: {ID: 1, Code: "normal", Name: "普通用户", Description: "默认权益分组", Enabled: true},
 		},
@@ -216,6 +218,25 @@ func (p *mockOperationLogPort) Create(_ context.Context, log *governancedomain.O
 func (r *mockUserRepo) Create(_ context.Context, user *domain.User) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.createUserLocked(user)
+}
+
+func (r *mockUserRepo) CreateWithLinuxDOIdentity(_ context.Context, user *domain.User, linuxDOID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if existingID, ok := r.byLinuxDO[linuxDOID]; ok {
+		if _, exists := r.users[existingID]; exists {
+			return domain.ErrLinuxDOIdentityAlreadyBound
+		}
+	}
+	if err := r.createUserLocked(user); err != nil {
+		return err
+	}
+	r.byLinuxDO[linuxDOID] = user.ID
+	return nil
+}
+
+func (r *mockUserRepo) createUserLocked(user *domain.User) error {
 	if existingID, ok := r.byID[user.Email]; ok {
 		if _, exists := r.users[existingID]; exists {
 			return domain.ErrEmailAlreadyExists
@@ -247,6 +268,51 @@ func (r *mockUserRepo) FindByEmail(_ context.Context, email string) (*domain.Use
 	return nil, nil
 }
 
+func (r *mockUserRepo) FindByLinuxDOID(_ context.Context, linuxDOID string) (*domain.User, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if id, ok := r.byLinuxDO[linuxDOID]; ok {
+		if user, exists := r.users[id]; exists {
+			cp := *user
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *mockUserRepo) BindLinuxDOIdentity(_ context.Context, userID uint, linuxDOID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	user := r.users[userID]
+	if user == nil || !user.IsActive() {
+		return domain.ErrLinuxDOAccountUnavailable
+	}
+	if mappedID, ok := r.byLinuxDO[linuxDOID]; ok {
+		if mappedID == userID {
+			return nil
+		}
+		return domain.ErrLinuxDOIdentityAlreadyBound
+	}
+	for _, mappedID := range r.byLinuxDO {
+		if mappedID == userID {
+			return domain.ErrLinuxDOIdentityAlreadyBound
+		}
+	}
+	r.byLinuxDO[linuxDOID] = userID
+	return nil
+}
+
+func (r *mockUserRepo) HasLinuxDOIdentity(_ context.Context, userID uint) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, mappedID := range r.byLinuxDO {
+		if mappedID == userID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (r *mockUserRepo) FindByID(_ context.Context, id uint) (*domain.User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -272,6 +338,19 @@ func (r *mockUserRepo) RecordLogin(_ context.Context, userID uint, expectedPassw
 	defer r.mu.Unlock()
 	user := r.users[userID]
 	if user == nil || !user.IsActive() || user.PasswordHash != expectedPasswordHash {
+		return nil, nil
+	}
+	now := time.Now()
+	user.LastLoginAt = &now
+	cp := *user
+	return &cp, nil
+}
+
+func (r *mockUserRepo) RecordLinuxDOLogin(_ context.Context, userID uint, linuxDOID string) (*domain.User, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	user := r.users[userID]
+	if mappedID, ok := r.byLinuxDO[linuxDOID]; user == nil || !user.IsActive() || !ok || mappedID != userID {
 		return nil, nil
 	}
 	now := time.Now()
@@ -955,13 +1034,15 @@ type mockSessionStore struct {
 	mu                sync.Mutex
 	sessions          map[string]*domain.Session
 	byUser            map[uint][]string
+	linuxDOFlows      map[string]app.LinuxDOFlow
 	deleteByUserIDErr error
 }
 
 func newMockSessionStore() *mockSessionStore {
 	return &mockSessionStore{
-		sessions: make(map[string]*domain.Session),
-		byUser:   make(map[uint][]string),
+		sessions:     make(map[string]*domain.Session),
+		byUser:       make(map[uint][]string),
+		linuxDOFlows: make(map[string]app.LinuxDOFlow),
 	}
 }
 
@@ -1015,6 +1096,24 @@ func (s *mockSessionStore) DeleteByUserID(_ context.Context, userID uint) error 
 		delete(s.byUser, userID)
 	}
 	return nil
+}
+
+func (s *mockSessionStore) PutLinuxDOFlow(_ context.Context, state string, flow app.LinuxDOFlow, _ time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.linuxDOFlows[state] = flow
+	return nil
+}
+
+func (s *mockSessionStore) ConsumeLinuxDOFlow(_ context.Context, state string) (*app.LinuxDOFlow, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	flow, ok := s.linuxDOFlows[state]
+	if !ok {
+		return nil, nil
+	}
+	delete(s.linuxDOFlows, state)
+	return &flow, nil
 }
 
 type mockTurnstileVerifier struct {
@@ -1241,6 +1340,12 @@ func requestEmailCode(t *testing.T, h *IAMHandler, r *gin.Engine, email, turnsti
 
 func testRepo(h *IAMHandler) *mockUserRepo {
 	return h.module.UserRepo.(*mockUserRepo)
+}
+
+func (r *mockUserRepo) userCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.users)
 }
 
 func seedAdminSession(t *testing.T, h *IAMHandler, sessionID string) *domain.User {
@@ -2686,6 +2791,8 @@ func TestPostRegister_MalformedJSONDoesNotExposeParserError(t *testing.T) {
 
 type fakeAbuseLimiter struct {
 	turnstileRetry    int
+	linuxDORetry      int
+	linuxDOHits       int
 	loginRetry        int
 	resetRetry        int
 	loginTaken        int
@@ -2704,6 +2811,11 @@ type fakeAbuseLimiter struct {
 
 func (l *fakeAbuseLimiter) HitTurnstile(context.Context, string) (int, error) {
 	return l.turnstileRetry, nil
+}
+
+func (l *fakeAbuseLimiter) HitLinuxDOOAuth(context.Context, string) (int, error) {
+	l.linuxDOHits++
+	return l.linuxDORetry, nil
 }
 
 func (l *fakeAbuseLimiter) TakeLogin(context.Context, string, string) (int, error) {

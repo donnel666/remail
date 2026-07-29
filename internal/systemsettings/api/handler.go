@@ -117,7 +117,7 @@ func (h *Handler) Put(c *gin.Context) {
 		return
 	}
 	key := c.Param("key")
-	if !h.requireSensitive(c, key) {
+	if !h.requireSensitiveMutation(c, key) {
 		return
 	}
 	setting, err := h.module.Settings.Upsert(c.Request.Context(), key, *req.Value, mutationMeta(c))
@@ -149,12 +149,12 @@ func (h *Handler) PutBulk(c *gin.Context) {
 			badRequest(c)
 			return
 		}
-		if isSensitiveKey(item.Key) {
+		if isSensitiveMutationKey(item.Key) {
 			sensitiveKey = item.Key
 		}
 		updates = append(updates, domain.Setting{Key: item.Key, Value: *item.Value})
 	}
-	if sensitiveKey != "" && !h.requireSensitive(c, sensitiveKey) {
+	if sensitiveKey != "" && !h.requireSensitiveMutation(c, sensitiveKey) {
 		return
 	}
 	settings, err := h.module.Settings.BulkUpsert(c.Request.Context(), updates, mutationMeta(c))
@@ -177,7 +177,7 @@ func (h *Handler) Delete(c *gin.Context) {
 		return
 	}
 	key := c.Param("key")
-	if !h.requireSensitive(c, key) {
+	if !h.requireSensitiveMutation(c, key) {
 		return
 	}
 	if err := h.module.Settings.Delete(c.Request.Context(), key, mutationMeta(c)); err != nil {
@@ -190,6 +190,7 @@ func (h *Handler) Delete(c *gin.Context) {
 func isSensitiveKey(key string) bool {
 	switch strings.ToLower(strings.TrimSpace(key)) {
 	case "github_client_secret",
+		"linuxdo_client_secret",
 		"epay_enabled", "epay_version", "epay_gateway_url", "epay_merchant_id", "epay_merchant_key", "epay_private_key", "epay_platform_public_key", "epay_notify_url", "epay_return_url":
 		return true
 	default:
@@ -199,15 +200,32 @@ func isSensitiveKey(key string) bool {
 
 func isWriteOnlyKey(key string) bool {
 	switch strings.ToLower(strings.TrimSpace(key)) {
-	case "epay_merchant_key", "epay_private_key":
+	case "epay_merchant_key", "epay_private_key", "linuxdo_client_secret":
 		return true
 	default:
 		return false
 	}
 }
 
+func isSensitiveMutationKey(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "linuxdo_client_id", "linuxdo_callback_url":
+		return true
+	default:
+		return isSensitiveKey(key)
+	}
+}
+
 func (h *Handler) requireSensitive(c *gin.Context, key string) bool {
-	if !isSensitiveKey(key) {
+	return h.requireSensitiveWhen(c, isSensitiveKey(key))
+}
+
+func (h *Handler) requireSensitiveMutation(c *gin.Context, key string) bool {
+	return h.requireSensitiveWhen(c, isSensitiveMutationKey(key))
+}
+
+func (h *Handler) requireSensitiveWhen(c *gin.Context, required bool) bool {
+	if !required {
 		return true
 	}
 	allowed, ok := h.sensitiveAllowed(c)

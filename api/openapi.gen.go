@@ -6021,6 +6021,12 @@ type InviteUseResponse struct {
 // LedgerAmount Signed internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the absolute value must fit DECIMAL(18,6).
 type LedgerAmount = string
 
+// LoginConfigResponse defines model for LoginConfigResponse.
+type LoginConfigResponse struct {
+	LinuxdoBound        bool `json:"linuxdoBound"`
+	LinuxdoOAuthEnabled bool `json:"linuxdoOAuthEnabled"`
+}
+
 // LoginRequest defines model for LoginRequest.
 type LoginRequest struct {
 	Email    openapi_types.Email `json:"email"`
@@ -8355,7 +8361,7 @@ type GetAdminMicrosoftResourcesParams struct {
 	// Type This administrator query is limited to Microsoft resources.
 	Type GetAdminMicrosoftResourcesParamsType `form:"type" json:"type"`
 
-	// Search Case-insensitive prefix search across mailbox addresses and owner display identity; an all-digit value matches resource or owner ID exactly.
+	// Search Exact case-insensitive mailbox lookup across primary and alias inventories. A value without `@` is treated as a complete local-part across domains; a leading `@` matches the primary mailbox domain exactly. Owner display identity remains prefix-searchable, and an all-digit value matches resource or owner ID exactly.
 	Search *string `form:"search,omitempty" json:"search,omitempty"`
 
 	// Suffix Exact normalized mailbox domain. Values with or without a leading `@` are accepted.
@@ -8976,6 +8982,13 @@ type GetDomainMailboxesParams struct {
 type PostMeInviteParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// GetLinuxDOCallbackParams defines parameters for GetLinuxDOCallback.
+type GetLinuxDOCallbackParams struct {
+	Code  *string `form:"code,omitempty" json:"code,omitempty"`
+	State *string `form:"state,omitempty" json:"state,omitempty"`
+	Error *string `form:"error,omitempty" json:"error,omitempty"`
 }
 
 // GetOrdersParams defines parameters for GetOrders.
@@ -10786,6 +10799,9 @@ type ServerInterface interface {
 	// Login and create a session
 	// (POST /v1/login)
 	PostLogin(c *gin.Context)
+	// Get enabled login methods and current binding state
+	// (GET /v1/login/config)
+	GetLoginConfig(c *gin.Context)
 	// Get current authenticated user profile
 	// (GET /v1/me)
 	GetMe(c *gin.Context)
@@ -10798,6 +10814,15 @@ type ServerInterface interface {
 	// Read the current system notice
 	// (GET /v1/notice)
 	GetSystemNotice(c *gin.Context)
+	// Start Linux DO OAuth login
+	// (GET /v1/oauth/linuxdo)
+	GetLinuxDOAuthorize(c *gin.Context)
+	// Start Linux DO binding for the current user
+	// (GET /v1/oauth/linuxdo/bind)
+	GetLinuxDOBind(c *gin.Context)
+	// Complete Linux DO OAuth login or binding
+	// (GET /v1/oauth/linuxdo/callback)
+	GetLinuxDOCallback(c *gin.Context, params GetLinuxDOCallbackParams)
 	// List orders
 	// (GET /v1/orders)
 	GetOrders(c *gin.Context, params GetOrdersParams)
@@ -20361,6 +20386,19 @@ func (siw *ServerInterfaceWrapper) PostLogin(c *gin.Context) {
 	siw.Handler.PostLogin(c)
 }
 
+// GetLoginConfig operation middleware
+func (siw *ServerInterfaceWrapper) GetLoginConfig(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetLoginConfig(c)
+}
+
 // GetMe operation middleware
 func (siw *ServerInterfaceWrapper) GetMe(c *gin.Context) {
 
@@ -20447,6 +20485,75 @@ func (siw *ServerInterfaceWrapper) GetSystemNotice(c *gin.Context) {
 	}
 
 	siw.Handler.GetSystemNotice(c)
+}
+
+// GetLinuxDOAuthorize operation middleware
+func (siw *ServerInterfaceWrapper) GetLinuxDOAuthorize(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetLinuxDOAuthorize(c)
+}
+
+// GetLinuxDOBind operation middleware
+func (siw *ServerInterfaceWrapper) GetLinuxDOBind(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetLinuxDOBind(c)
+}
+
+// GetLinuxDOCallback operation middleware
+func (siw *ServerInterfaceWrapper) GetLinuxDOCallback(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetLinuxDOCallbackParams
+
+	// ------------- Optional query parameter "code" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "code", c.Request.URL.Query(), &params.Code, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter code: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "state" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "state", c.Request.URL.Query(), &params.State, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter state: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "error" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "error", c.Request.URL.Query(), &params.Error, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter error: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetLinuxDOCallback(c, params)
 }
 
 // GetOrders operation middleware
@@ -23138,10 +23245,14 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/email/code", wrapper.PostEmailCode)
 	router.GET(options.BaseURL+"/v1/faqs", wrapper.GetSystemFAQs)
 	router.POST(options.BaseURL+"/v1/login", wrapper.PostLogin)
+	router.GET(options.BaseURL+"/v1/login/config", wrapper.GetLoginConfig)
 	router.GET(options.BaseURL+"/v1/me", wrapper.GetMe)
 	router.GET(options.BaseURL+"/v1/me/invite", wrapper.GetMeInvite)
 	router.POST(options.BaseURL+"/v1/me/invite", wrapper.PostMeInvite)
 	router.GET(options.BaseURL+"/v1/notice", wrapper.GetSystemNotice)
+	router.GET(options.BaseURL+"/v1/oauth/linuxdo", wrapper.GetLinuxDOAuthorize)
+	router.GET(options.BaseURL+"/v1/oauth/linuxdo/bind", wrapper.GetLinuxDOBind)
+	router.GET(options.BaseURL+"/v1/oauth/linuxdo/callback", wrapper.GetLinuxDOCallback)
 	router.GET(options.BaseURL+"/v1/orders", wrapper.GetOrders)
 	router.POST(options.BaseURL+"/v1/orders", wrapper.PostOrder)
 	router.POST(options.BaseURL+"/v1/orders/batch", wrapper.PostOrderBatch)

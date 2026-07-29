@@ -15,4 +15,9 @@ export const AUTH_SECURITY_KEYS = [
   "email_code_digit_len",
   "bcrypt_cost",
   "session_max_age_seconds",
+  "linuxdo_oauth_enabled",
+  "linuxdo_client_id",
+  "linuxdo_client_secret",
+  "linuxdo_callback_url",
+  "linuxdo_minimum_trust_level",
 ] as const;

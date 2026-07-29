@@ -28,10 +28,15 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import coverImage from "@/assets/cover-4.webp";
+import { LinuxDoIcon } from "@/components/auth/LinuxDoIcon";
 import { OverflowTooltip } from "@/components/semi/overflow-tooltip";
 import { useAuth, type CurrentUser } from "@/context/auth-provider";
 import { LOGIN_NOTICE_KEY, clearLoginReturnTo } from "@/lib/auth-flow";
-import { changePassword } from "@/lib/iam-api";
+import {
+  changePassword,
+  getLoginConfig,
+  linuxDOBindURL,
+} from "@/lib/iam-api";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import { formatPriceMultiplier } from "@/lib/membership";
 import { getAPIKeyUsage } from "@/lib/openapi-credentials-api";
@@ -42,6 +47,24 @@ import { ChangePasswordDialog } from "./account/change-password-dialog";
 import { SettingItem } from "./account/setting-item";
 
 const { Text } = Typography;
+
+const oauthNoticeKeys: Record<string, string> = {
+  linuxdo_bound: "LinuxDO account bound successfully.",
+};
+
+const oauthErrorKeys: Record<string, string> = {
+  account: "LinuxDO account is unavailable.",
+  already_bound: "This LinuxDO account is already bound.",
+  cancelled: "LinuxDO authorization was cancelled.",
+  disabled: "LinuxDO login is unavailable.",
+  failed: "LinuxDO login failed.",
+  rate_limited: "Too many LinuxDO login attempts. Please try again later.",
+  session: "Your session expired. Please log in and try again.",
+  state: "LinuxDO login request expired. Please try again.",
+  trust_level: "Your LinuxDO trust level is too low.",
+};
+
+type LinuxDOConfigState = "loading" | "enabled" | "disabled" | "error";
 
 function getRoleLabel(role?: CurrentUser["role"]) {
   if (!role) return "Unknown";
@@ -82,6 +105,10 @@ export default function Account() {
   const [wallet, setWallet] = useState<WalletResponse | null>(null);
   const [requestCount, setRequestCount] = useState<number | null>(null);
   const [overviewLoading, setOverviewLoading] = useState(false);
+  const [linuxDOConfigState, setLinuxDOConfigState] = useState<LinuxDOConfigState>("loading");
+  const [linuxDOBound, setLinuxDOBound] = useState(false);
+  const [oauthNotice, setOAuthNotice] = useState("");
+  const [oauthError, setOAuthError] = useState("");
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
   const [oldPassword, setOldPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -90,6 +117,7 @@ export default function Account() {
   const [submitting, setSubmitting] = useState(false);
 
   const displayName = currentUser?.nickname || currentUser?.name || "-";
+  const hasLocalPassword = !currentUser?.email?.toLowerCase().endsWith("@oauth.invalid");
   const roleLabel = t(getRoleLabel(currentUser?.role));
   const userGroupLabel = useMemo(() => {
     const group = currentUser?.userGroup;
@@ -130,6 +158,35 @@ export default function Account() {
   useEffect(() => {
     void refreshAccountOverview();
   }, [refreshAccountOverview]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getLoginConfig()
+      .then((config) => {
+        if (cancelled) return;
+        setLinuxDOConfigState(config.linuxdoOAuthEnabled ? "enabled" : "disabled");
+        setLinuxDOBound(config.linuxdoBound);
+      })
+      .catch(() => {
+        if (!cancelled) setLinuxDOConfigState("error");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const notice = params.get("oauth_notice");
+    const errorCode = params.get("oauth_error");
+    if (notice && Object.prototype.hasOwnProperty.call(oauthNoticeKeys, notice)) setOAuthNotice(t(oauthNoticeKeys[notice]));
+    if (errorCode) setOAuthError(t(Object.prototype.hasOwnProperty.call(oauthErrorKeys, errorCode) ? oauthErrorKeys[errorCode] : "LinuxDO login failed."));
+    if (!notice && !errorCode) return;
+    params.delete("oauth_notice");
+    params.delete("oauth_error");
+    const search = params.toString();
+    window.history.replaceState({}, "", window.location.pathname + (search ? `?${search}` : "") + window.location.hash);
+  }, [t]);
 
   const profileStats = useMemo(
     () => [
@@ -203,6 +260,16 @@ export default function Account() {
 
   return (
     <div className="account-page console-content-width">
+      {oauthNotice ? (
+        <div className="mb-4 rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300" role="status">
+          {oauthNotice}
+        </div>
+      ) : null}
+      {oauthError ? (
+        <div className="mb-4 rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:text-red-300" role="alert">
+          {oauthError}
+        </div>
+      ) : null}
       <Card
         bodyStyle={{ padding: 12 }}
         className="account-hero-card !rounded-2xl overflow-hidden"
@@ -296,16 +363,6 @@ export default function Account() {
               <div className="account-tab-body">
                 <div className="account-binding-grid">
                   <SettingItem
-                    action={
-                      <Button
-                        onClick={handleMockOnly}
-                        size="small"
-                        theme="outline"
-                        type="primary"
-                      >
-                        {t("Change Binding")}
-                      </Button>
-                    }
                     description={
                       <OverflowTooltip content={currentUser?.email || "-"}>
                         {currentUser?.email || "-"}
@@ -314,6 +371,40 @@ export default function Account() {
                     icon={<IconMail />}
                     iconTone="orange"
                     title={t("Email")}
+                  />
+                  <SettingItem
+                    action={
+                      linuxDOConfigState === "loading" ? (
+                        <Button className="min-h-11" disabled loading size="small" theme="outline" type="tertiary">
+                          {t("Loading...")}
+                        </Button>
+                      ) : linuxDOConfigState === "error" ? (
+                        <Button className="min-h-11" disabled size="small" theme="outline" type="tertiary">
+                          {t("Unavailable")}
+                        </Button>
+                      ) : linuxDOConfigState === "enabled" && !linuxDOBound ? (
+                        <a
+                          className="inline-flex min-h-11 items-center justify-center rounded-lg border border-[var(--semi-color-primary)] px-4 text-sm font-medium text-[var(--semi-color-primary)] transition-colors hover:bg-[var(--semi-color-primary-light-default)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--semi-color-primary)] focus-visible:ring-offset-2"
+                          href={linuxDOBindURL}
+                        >
+                          {t("Bind")}
+                        </a>
+                      ) : (
+                        <Button className="min-h-11" disabled size="small" theme="outline" type="tertiary">
+                          {linuxDOBound ? t("Bound") : t("Not enabled")}
+                        </Button>
+                      )
+                    }
+                    description={
+                      linuxDOConfigState === "loading"
+                        ? t("Loading LinuxDO account status...")
+                        : linuxDOConfigState === "error"
+                          ? <span role="alert">{t("Could not load LinuxDO account status. Please try again later.")}</span>
+                          : linuxDOBound ? t("Bound to LinuxDO") : t("Unbound")
+                    }
+                    icon={<LinuxDoIcon className="size-5" />}
+                    iconTone="violet"
+                    title="LinuxDO"
                   />
                   <SettingItem
                     action={
@@ -342,16 +433,22 @@ export default function Account() {
                 <Space className="w-full" vertical>
                   <SettingItem
                     action={
-                      <Button
-                        icon={<IconLock />}
-                        onClick={() => setShowChangePasswordModal(true)}
-                        theme="solid"
-                        type="primary"
-                      >
-                        {t("Change password")}
-                      </Button>
+                      hasLocalPassword ? (
+                        <Button
+                          icon={<IconLock />}
+                          onClick={() => setShowChangePasswordModal(true)}
+                          theme="solid"
+                          type="primary"
+                        >
+                          {t("Change password")}
+                        </Button>
+                      ) : (
+                        <Button disabled icon={<IconLock />} theme="outline" type="tertiary">
+                          {t("Unavailable")}
+                        </Button>
+                      )
                     }
-                    description={t("Regularly changing your password improves account security.")}
+                    description={t(hasLocalPassword ? "Regularly changing your password improves account security." : "LinuxDO-only accounts do not use a local password.")}
                     icon={<IconLock />}
                     iconTone="orange"
                     title={t("Password Management")}

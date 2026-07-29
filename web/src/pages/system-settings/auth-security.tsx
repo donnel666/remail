@@ -1,8 +1,10 @@
 import { useState } from "react";
-import { Button, TagInput } from "@douyinfe/semi-ui";
-import { Github, Save, ShieldAlert, UserPlus } from "lucide-react";
+import { Button, TagInput, Toast } from "@douyinfe/semi-ui";
+import { Copy, ExternalLink, Github, Save, ShieldAlert, UserPlus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { LinuxDoIcon } from "@/components/auth/LinuxDoIcon";
+import { copyText } from "@/lib/clipboard";
 import { parseOption } from "@/lib/system-settings-api";
 
 import type { SectionProps } from "./index";
@@ -39,12 +41,22 @@ const D: Record<string, unknown> = {
   email_code_digit_len: 6,
   bcrypt_cost: 12,
   session_max_age_seconds: 86400,
+  linuxdo_oauth_enabled: false,
+  linuxdo_client_id: "",
+  linuxdo_client_secret: "",
+  linuxdo_callback_url: "",
+  linuxdo_minimum_trust_level: 0,
 };
 
 const TWO_COLUMN_GRID = "xl:grid-cols-2 xl:[&>[data-settings-form-span=full]]:col-span-2 xl:[&>[data-slot=form-item]:has(textarea)]:col-span-2";
 export default function AuthSecuritySection({ options, onBulkSave, canSensitive }: SectionProps) {
   const { t } = useTranslation();
-  const [form, setForm] = useState(parseOption(options, D as any) as Record<string, unknown>);
+  const callbackURL = typeof window === "undefined" ? "" : window.location.origin + "/v1/oauth/linuxdo/callback";
+  const [form, setForm] = useState(() => {
+    const values = { ...(parseOption(options, D as any) as Record<string, unknown>) };
+    if (!String(values.linuxdo_callback_url ?? "").trim()) values.linuxdo_callback_url = callbackURL;
+    return values;
+  });
   const [savingCard, setSavingCard] = useState<string | null>(null);
   const update = (key: string, value: unknown) => setForm((current) => ({ ...current, [key]: value }));
   const number = (value: unknown) => Number(value) || 0;
@@ -53,7 +65,13 @@ export default function AuthSecuritySection({ options, onBulkSave, canSensitive 
   const saveCard = async (card: string, keys: string[]) => {
     setSavingCard(card);
     try {
-      await onBulkSave(keys.map((key) => ({ key, value: String(form[key] ?? "") })));
+      await onBulkSave(keys.flatMap((key) => {
+        const value = String(form[key] ?? "");
+        return key === "linuxdo_client_secret" && !value.trim() ? [] : [{ key, value }];
+      }));
+      if (card === "linuxdo") {
+        setForm((current) => ({ ...current, linuxdo_client_secret: "" }));
+      }
     } finally {
       setSavingCard(null);
     }
@@ -87,6 +105,54 @@ export default function AuthSecuritySection({ options, onBulkSave, canSensitive 
         <SettingsNumberField label={t("新用户注册奖励金额")} value={number(form.registration_reward_amount)} onChange={(value) => update("registration_reward_amount", value)} min={0} />
       </SettingsFormGrid>
       <Button icon={<Save size={14} />} loading={savingCard === "register"} onClick={() => void saveCard("register", ["register_enabled", "password_login_enabled", "captcha_enabled", "registration_email_whitelist", "registration_reward_amount"]).catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
+    </SettingsSection>
+
+    <SettingsSection title={<SettingsCardHeader
+      icon={<LinuxDoIcon className="size-4" />}
+      title={t("LinuxDO third-party login")}
+      description={t("Configure LinuxDO Connect for user login and registration")}
+      enabled={!!form.linuxdo_oauth_enabled}
+      onToggle={(value) => update("linuxdo_oauth_enabled", value)}
+      statusText={form.linuxdo_oauth_enabled ? t("已启用") : t("已禁用")}
+    />}>
+      <SettingsFormGrid className={`${TWO_COLUMN_GRID} mt-4`}>
+        <div data-settings-form-span="full" className="rounded-lg border border-[var(--semi-color-border)] bg-[var(--semi-color-fill-0)] p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="text-sm font-medium text-[var(--semi-color-text-0)]">{t("Setup guide")}</p>
+              <p className="mt-1 text-xs leading-5 text-[var(--semi-color-text-2)]">{t("Set this callback URL in your LinuxDO Connect application before enabling login.")}</p>
+            </div>
+            <a
+              href="https://connect.linux.do/"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex min-h-11 shrink-0 cursor-pointer items-center gap-1 text-sm font-medium text-brand hover:text-brand-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-start)]"
+            >
+              {t("Manage your LinuxDO OAuth app")}
+              <ExternalLink size={14} aria-hidden="true" />
+            </a>
+          </div>
+          <div className="mt-3 flex min-w-0 flex-col gap-2 rounded-md bg-[var(--semi-color-bg-0)] p-3 sm:flex-row sm:items-center">
+            <span className="shrink-0 text-xs text-[var(--semi-color-text-2)]">{t("Authorization callback URL")}</span>
+            <code className="min-w-0 flex-1 break-all text-xs text-[var(--semi-color-text-0)]">{String(form.linuxdo_callback_url)}</code>
+            <Button
+              aria-label={t("Copy callback URL")}
+              icon={<Copy size={14} />}
+              onClick={() => void copyText(String(form.linuxdo_callback_url)).then(() => Toast.success(t("Copied"))).catch(() => Toast.error(t("Copy failed.")))}
+              theme="borderless"
+              type="tertiary"
+              className="min-h-11 min-w-11"
+            />
+          </div>
+        </div>
+        <SettingsTextField label="Client ID" value={String(form.linuxdo_client_id)} onChange={(value) => update("linuxdo_client_id", value)} disabled={!canSensitive} placeholder={canSensitive ? t("LinuxDO Client ID") : t("需要敏感设置权限")} />
+        <SettingsTextField label="Client Secret" value={String(form.linuxdo_client_secret)} onChange={(value) => update("linuxdo_client_secret", value)} type="password" disabled={!canSensitive} placeholder={canSensitive ? t("Saved secret is not shown; leave blank to keep it unchanged") : t("需要敏感设置权限")} />
+        <SettingsNumberField label={t("Minimum Trust Level")} description={t("Minimum LinuxDO trust level required (0-4)")} value={number(form.linuxdo_minimum_trust_level)} onChange={(value) => update("linuxdo_minimum_trust_level", value)} min={0} max={4} />
+        <div data-settings-form-span="full">
+          <SettingsTextField label={t("Authorization callback URL")} value={String(form.linuxdo_callback_url)} onChange={(value) => update("linuxdo_callback_url", value)} disabled={!canSensitive} placeholder={callbackURL} />
+        </div>
+      </SettingsFormGrid>
+      <Button icon={<Save size={14} />} loading={savingCard === "linuxdo"} onClick={() => void saveCard("linuxdo", ["linuxdo_oauth_enabled", ...(canSensitive ? ["linuxdo_client_id", "linuxdo_client_secret", "linuxdo_callback_url"] : []), "linuxdo_minimum_trust_level"]).catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
     </SettingsSection>
 
     <SettingsSection title={<SettingsCardHeader

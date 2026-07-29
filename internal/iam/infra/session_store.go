@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/donnel666/remail/internal/iam/app"
 	"github.com/donnel666/remail/internal/iam/domain"
 	"github.com/redis/go-redis/v9"
 )
@@ -13,7 +15,17 @@ import (
 const (
 	sessionKeyPrefix   = "session:"
 	userSessionsPrefix = "user_sessions:"
+	linuxDOFlowPrefix  = "linuxdo_oauth_flow:"
 )
+
+var consumeLinuxDOFlowScript = redis.NewScript(`
+local value = redis.call('GET', KEYS[1])
+if not value then
+  return nil
+end
+redis.call('DEL', KEYS[1])
+return value
+`)
 
 // SessionStore implements app.SessionStore using Redis.
 type SessionStore struct {
@@ -31,6 +43,10 @@ func sessionKey(id string) string {
 
 func userSessionsKey(userID uint) string {
 	return fmt.Sprintf("%s%d", userSessionsPrefix, userID)
+}
+
+func linuxDOFlowKey(state string) string {
+	return linuxDOFlowPrefix + state
 }
 
 // sessionData is the JSON structure stored in Redis.
@@ -123,4 +139,36 @@ func (s *SessionStore) DeleteByUserID(ctx context.Context, userID uint) error {
 	pipe.Del(ctx, userSessionsKey(userID))
 	_, err = pipe.Exec(ctx)
 	return err
+}
+
+func (s *SessionStore) PutLinuxDOFlow(ctx context.Context, state string, flow app.LinuxDOFlow, ttl time.Duration) error {
+	if strings.TrimSpace(state) == "" || ttl <= 0 {
+		return fmt.Errorf("invalid linuxdo oauth flow")
+	}
+	data, err := json.Marshal(flow)
+	if err != nil {
+		return fmt.Errorf("marshal linuxdo oauth flow: %w", err)
+	}
+	if err := s.rdb.Set(ctx, linuxDOFlowKey(state), data, ttl).Err(); err != nil {
+		return fmt.Errorf("redis linuxdo oauth flow put: %w", err)
+	}
+	return nil
+}
+
+func (s *SessionStore) ConsumeLinuxDOFlow(ctx context.Context, state string) (*app.LinuxDOFlow, error) {
+	if strings.TrimSpace(state) == "" {
+		return nil, nil
+	}
+	value, err := consumeLinuxDOFlowScript.Run(ctx, s.rdb, []string{linuxDOFlowKey(state)}).Text()
+	if err != nil {
+		if err == redis.Nil {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("redis linuxdo oauth flow consume: %w", err)
+	}
+	var flow app.LinuxDOFlow
+	if err := json.Unmarshal([]byte(value), &flow); err != nil {
+		return nil, fmt.Errorf("unmarshal linuxdo oauth flow: %w", err)
+	}
+	return &flow, nil
 }

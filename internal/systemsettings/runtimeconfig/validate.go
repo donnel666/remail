@@ -2,6 +2,7 @@ package runtimeconfig
 
 import (
 	"encoding/json"
+	"net"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -31,6 +32,7 @@ var integerRanges = map[string]integerRange{
 	"email_code_email_limit": positive(1000), "email_code_ip_limit": positive(10000), "email_code_window_seconds": positive(86400), "captcha_rate_limit": positive(10000),
 	"email_code_ttl_seconds": positive(86400), "email_code_resend_gap_seconds": positive(3600), "email_code_digit_len": {min: 4, max: 10},
 	"bcrypt_cost": {min: 4, max: 16}, "session_max_age_seconds": {min: 300, max: 31_536_000},
+	"linuxdo_minimum_trust_level":         {min: 0, max: 4},
 	"rebate_expiry_days":                  {min: 0, max: 36500},
 	"max_pending_recharge_orders":         positive(100),
 	"async_check_request_timeout_seconds": {min: 1, max: 30},
@@ -88,7 +90,7 @@ var removedKeys = map[string]struct{}{
 
 var booleanKeys = map[string]struct{}{
 	"register_enabled": {}, "captcha_enabled": {}, "announcement_enabled": {}, "faq_enabled": {}, "epay_enabled": {},
-	"daily_checkin_enabled": {}, "leaderboard_reward_enabled": {},
+	"daily_checkin_enabled": {}, "leaderboard_reward_enabled": {}, "linuxdo_oauth_enabled": {},
 }
 
 func Validate(key, value string) error {
@@ -176,6 +178,17 @@ func Validate(key, value string) error {
 		}
 		parsed, err := url.Parse(value)
 		if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
+			return domain.ErrInvalidValue
+		}
+	case "linuxdo_callback_url":
+		if value == "" {
+			return nil
+		}
+		if rawValue != value || !validLinuxDOCallbackURL(value) {
+			return domain.ErrInvalidValue
+		}
+	case "linuxdo_client_id", "linuxdo_client_secret":
+		if rawValue != value || len(value) > 512 || strings.ContainsAny(value, "\r\n\x00") {
 			return domain.ErrInvalidValue
 		}
 	case "epay_merchant_id", "epay_merchant_key":
@@ -360,6 +373,9 @@ func sanitizeRelationships(values map[string]string) {
 	if strings.TrimSpace(values["epay_enabled"]) == "true" && len(invalidEPayConfigFields(values)) > 0 {
 		values["epay_enabled"] = "false"
 	}
+	if strings.TrimSpace(values["linuxdo_oauth_enabled"]) == "true" && len(invalidLinuxDOConfigFields(values)) > 0 {
+		values["linuxdo_oauth_enabled"] = "false"
+	}
 	if strings.TrimSpace(values["daily_checkin_enabled"]) == "true" {
 		if rules, err := ParseCheckinRewardRules(values["daily_checkin_reward_rules"]); err != nil || len(rules) == 0 {
 			values["daily_checkin_enabled"] = "false"
@@ -407,6 +423,11 @@ func validateRelationships(values map[string]string) error {
 			return &domain.InvalidValueFieldsError{Fields: fields}
 		}
 	}
+	if strings.TrimSpace(values["linuxdo_oauth_enabled"]) == "true" {
+		if fields := invalidLinuxDOConfigFields(values); len(fields) > 0 {
+			return &domain.InvalidValueFieldsError{Fields: fields}
+		}
+	}
 	if strings.TrimSpace(values["daily_checkin_enabled"]) == "true" {
 		if rules, err := ParseCheckinRewardRules(values["daily_checkin_reward_rules"]); err != nil || len(rules) == 0 {
 			return domain.ErrInvalidValue
@@ -446,6 +467,18 @@ func invalidEPayConfigFields(values map[string]string) map[string]string {
 	return fields
 }
 
+func invalidLinuxDOConfigFields(values map[string]string) map[string]string {
+	fields := make(map[string]string)
+	for _, key := range []string{"linuxdo_client_id", "linuxdo_client_secret", "linuxdo_callback_url"} {
+		if strings.TrimSpace(values[key]) == "" {
+			fields[key] = "Required when LinuxDO OAuth is enabled."
+		} else if Validate(key, values[key]) != nil {
+			fields[key] = "Invalid value."
+		}
+	}
+	return fields
+}
+
 func smtpTaskBudgetSeconds(retries int) int {
 	return (retries+1)*30 + retries*(retries+1)/2
 }
@@ -465,4 +498,23 @@ func validDomain(value string) bool {
 		}
 	}
 	return true
+}
+
+func validLinuxDOCallbackURL(value string) bool {
+	parsed, err := url.Parse(value)
+	if len(value) > 2048 || err != nil || parsed.Hostname() == "" || parsed.User != nil || parsed.ForceQuery || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.RawPath != "" || parsed.Path != "/v1/oauth/linuxdo/callback" {
+		return false
+	}
+	if parsed.Scheme == "https" {
+		return true
+	}
+	if parsed.Scheme != "http" {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

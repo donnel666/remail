@@ -20,6 +20,8 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+const linuxDOIdentityProvider = "linuxdo"
+
 // UserModel is the GORM model for the users table.
 // This is the infra-layer representation, not exposed outside the package.
 type UserModel struct {
@@ -35,6 +37,14 @@ type UserModel struct {
 	LastLoginAt  *time.Time     `gorm:"column:last_login_at"`
 	CreatedAt    time.Time      `gorm:"not null;autoCreateTime"`
 	UpdatedAt    time.Time      `gorm:"not null;autoUpdateTime"`
+}
+
+type ThirdPartyIdentityModel struct {
+	ID             uint64    `gorm:"primaryKey;autoIncrement"`
+	UserID         uint      `gorm:"not null;column:user_id"`
+	Provider       string    `gorm:"type:varchar(50);not null"`
+	ProviderUserID string    `gorm:"type:varchar(255);not null;column:provider_user_id"`
+	CreatedAt      time.Time `gorm:"not null;autoCreateTime"`
 }
 
 type UserGroupModel struct {
@@ -97,6 +107,10 @@ func (CasbinRuleModel) TableName() string {
 // TableName overrides the default table name.
 func (UserModel) TableName() string {
 	return "users"
+}
+
+func (ThirdPartyIdentityModel) TableName() string {
+	return "third_party_identities"
 }
 
 func (UserGroupModel) TableName() string {
@@ -252,6 +266,44 @@ func (r *UserRepo) Create(ctx context.Context, user *domain.User) error {
 	return nil
 }
 
+func (r *UserRepo) CreateWithLinuxDOIdentity(ctx context.Context, user *domain.User, linuxDOID string) error {
+	linuxDOID = strings.TrimSpace(linuxDOID)
+	if linuxDOID == "" {
+		return domain.ErrLinuxDOAccountUnavailable
+	}
+	err := r.dbFor(ctx).Transaction(func(tx *gorm.DB) error {
+		model := fromDomain(user)
+		if err := tx.Create(model).Error; err != nil {
+			if errors.Is(err, gorm.ErrDuplicatedKey) {
+				return domain.ErrEmailAlreadyExists
+			}
+			return fmt.Errorf("create linuxdo user: %w", err)
+		}
+		identity := &ThirdPartyIdentityModel{
+			UserID:         model.ID,
+			Provider:       linuxDOIdentityProvider,
+			ProviderUserID: linuxDOID,
+		}
+		if err := tx.Create(identity).Error; err != nil {
+			if isIAMDuplicateKeyError(err) {
+				return domain.ErrLinuxDOIdentityAlreadyBound
+			}
+			return fmt.Errorf("create linuxdo identity: %w", err)
+		}
+		user.ID = model.ID
+		user.UserGroupID = model.UserGroupID
+		user.Status = domain.UserStatus(model.Status)
+		user.CreatedAt = model.CreatedAt
+		user.UpdatedAt = model.UpdatedAt
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	_ = r.loadUserGroup(ctx, user)
+	return nil
+}
+
 func (r *UserRepo) CreateWithInvite(ctx context.Context, user *domain.User, inviteCode string) error {
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var invite InviteModel
@@ -369,6 +421,93 @@ func (r *UserRepo) FindByEmail(ctx context.Context, email string) (*domain.User,
 	return model.toDomain(), nil
 }
 
+func (r *UserRepo) FindByLinuxDOID(ctx context.Context, linuxDOID string) (*domain.User, error) {
+	linuxDOID = strings.TrimSpace(linuxDOID)
+	if linuxDOID == "" {
+		return nil, nil
+	}
+	var model UserModel
+	err := r.dbFor(ctx).
+		Preload("UserGroup").
+		Joins("JOIN third_party_identities AS identity ON identity.user_id = users.id").
+		Where("identity.provider = ? AND identity.provider_user_id = ?", linuxDOIdentityProvider, linuxDOID).
+		First(&model).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("find user by linuxdo id: %w", err)
+	}
+	return model.toDomain(), nil
+}
+
+func (r *UserRepo) BindLinuxDOIdentity(ctx context.Context, userID uint, linuxDOID string) error {
+	linuxDOID = strings.TrimSpace(linuxDOID)
+	if userID == 0 || linuxDOID == "" {
+		return domain.ErrLinuxDOAccountUnavailable
+	}
+
+	return r.dbFor(ctx).Transaction(func(tx *gorm.DB) error {
+		var user UserModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id", "status").
+			First(&user, userID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrLinuxDOAccountUnavailable
+			}
+			return fmt.Errorf("bind linuxdo lock user: %w", err)
+		}
+		if user.Status != string(domain.UserStatusActive) {
+			return domain.ErrLinuxDOAccountUnavailable
+		}
+
+		var identity ThirdPartyIdentityModel
+		err := tx.Where("provider = ? AND provider_user_id = ?", linuxDOIdentityProvider, linuxDOID).First(&identity).Error
+		if err == nil {
+			if identity.UserID == userID {
+				return nil
+			}
+			return domain.ErrLinuxDOIdentityAlreadyBound
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("bind linuxdo find identity: %w", err)
+		}
+
+		err = tx.Where("user_id = ? AND provider = ?", userID, linuxDOIdentityProvider).First(&identity).Error
+		if err == nil {
+			return domain.ErrLinuxDOIdentityAlreadyBound
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("bind linuxdo find user identity: %w", err)
+		}
+
+		if err := tx.Create(&ThirdPartyIdentityModel{
+			UserID:         userID,
+			Provider:       linuxDOIdentityProvider,
+			ProviderUserID: linuxDOID,
+		}).Error; err != nil {
+			if isIAMDuplicateKeyError(err) {
+				return domain.ErrLinuxDOIdentityAlreadyBound
+			}
+			return fmt.Errorf("bind linuxdo create identity: %w", err)
+		}
+		return nil
+	})
+}
+
+func (r *UserRepo) HasLinuxDOIdentity(ctx context.Context, userID uint) (bool, error) {
+	if userID == 0 {
+		return false, nil
+	}
+	var count int64
+	if err := r.dbFor(ctx).Model(&ThirdPartyIdentityModel{}).
+		Where("user_id = ? AND provider = ?", userID, linuxDOIdentityProvider).
+		Count(&count).Error; err != nil {
+		return false, fmt.Errorf("has linuxdo identity: %w", err)
+	}
+	return count > 0, nil
+}
+
 func (r *UserRepo) FindByID(ctx context.Context, id uint) (*domain.User, error) {
 	var model UserModel
 	err := r.dbFor(ctx).Preload("UserGroup").Where("id = ? AND status <> ?", id, domain.UserStatusDeleted).First(&model).Error
@@ -382,10 +521,22 @@ func (r *UserRepo) FindByID(ctx context.Context, id uint) (*domain.User, error) 
 }
 
 func (r *UserRepo) RecordLogin(ctx context.Context, userID uint, expectedPasswordHash string) (*domain.User, error) {
+	return r.recordLogin(ctx, userID, "BINARY password_hash = ?", expectedPasswordHash)
+}
+
+func (r *UserRepo) RecordLinuxDOLogin(ctx context.Context, userID uint, linuxDOID string) (*domain.User, error) {
+	return r.recordLogin(ctx, userID, `EXISTS (
+		SELECT 1 FROM third_party_identities AS identity
+		WHERE identity.user_id = users.id AND identity.provider = ? AND identity.provider_user_id = ?
+	)`, linuxDOIdentityProvider, strings.TrimSpace(linuxDOID))
+}
+
+func (r *UserRepo) recordLogin(ctx context.Context, userID uint, condition string, values ...any) (*domain.User, error) {
 	var user *domain.User
 	err := r.dbFor(ctx).Transaction(func(tx *gorm.DB) error {
 		result := tx.Model(&UserModel{}).
-			Where("id = ? AND status = ? AND BINARY password_hash = ?", userID, domain.UserStatusActive, expectedPasswordHash).
+			Where("id = ? AND status = ?", userID, domain.UserStatusActive).
+			Where(condition, values...).
 			UpdateColumn("last_login_at", time.Now())
 		if result.Error != nil {
 			return fmt.Errorf("update last login: %w", result.Error)

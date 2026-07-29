@@ -2,8 +2,11 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/donnel666/remail/internal/iam/domain"
@@ -13,10 +16,11 @@ import (
 
 // LoginUseCase handles user authentication.
 type LoginUseCase struct {
-	repo     UserRepository
-	hasher   Hasher
-	sessions SessionStore
-	delivery mailapp.DeliveryPort
+	repo         UserRepository
+	hasher       Hasher
+	sessions     SessionStore
+	delivery     mailapp.DeliveryPort
+	rewardWallet RegistrationRewardWallet
 }
 
 // NewLoginUseCase creates a new LoginUseCase.
@@ -26,6 +30,11 @@ func NewLoginUseCase(repo UserRepository, hasher Hasher, sessions SessionStore, 
 		uc.delivery = delivery[0]
 	}
 	return uc
+}
+
+// SetRegistrationRewardWallet injects Billing after both modules are constructed.
+func (uc *LoginUseCase) SetRegistrationRewardWallet(wallet RegistrationRewardWallet) {
+	uc.rewardWallet = wallet
 }
 
 type LoginMeta struct {
@@ -38,6 +47,15 @@ type LoginResult struct {
 	Session       *domain.Session
 	User          *domain.User
 	SessionMaxAge int
+}
+
+type LinuxDOProfile struct {
+	ID         string
+	Username   string
+	Name       string
+	Active     bool
+	Silenced   bool
+	TrustLevel int
 }
 
 // Login authenticates a user by email and password after the API boundary has
@@ -74,7 +92,112 @@ func (uc *LoginUseCase) Login(ctx context.Context, email, password string, metad
 		return nil, domain.ErrAccountOrPasswordIncorrect
 	}
 
-	// Create session
+	return uc.finishLogin(ctx, user, true, metadata...)
+}
+
+func (uc *LoginUseCase) LoginLinuxDO(ctx context.Context, profile LinuxDOProfile, metadata ...LoginMeta) (*LoginResult, error) {
+	profile, err := normalizeLinuxDOProfile(profile)
+	if err != nil {
+		return nil, err
+	}
+
+	user, err := uc.repo.FindByLinuxDOID(ctx, profile.ID)
+	if err != nil {
+		return nil, fmt.Errorf("linuxdo login find user: %w", err)
+	}
+	if user == nil {
+		if !runtimeconfig.Bool("register_enabled", true) {
+			return nil, domain.ErrRegistrationDisabled
+		}
+		password, err := newCryptoID()
+		if err != nil {
+			return nil, fmt.Errorf("linuxdo login generate password: %w", err)
+		}
+		passwordHash, err := uc.hasher.Hash(password)
+		if err != nil {
+			return nil, fmt.Errorf("linuxdo login hash password: %w", err)
+		}
+		user = &domain.User{
+			Email:        fmt.Sprintf("linuxdo-%s@oauth.invalid", profile.ID),
+			PasswordHash: passwordHash,
+			Nickname:     linuxDONickname(profile),
+			Status:       domain.UserStatusActive,
+			Role:         domain.RoleUser,
+			UserGroupID:  1,
+		}
+		if err := uc.repo.CreateWithLinuxDOIdentity(ctx, user, profile.ID); err != nil {
+			if !errors.Is(err, domain.ErrLinuxDOIdentityAlreadyBound) && !errors.Is(err, domain.ErrEmailAlreadyExists) {
+				return nil, fmt.Errorf("linuxdo login create user: %w", err)
+			}
+			user, err = uc.repo.FindByLinuxDOID(ctx, profile.ID)
+			if err != nil {
+				return nil, fmt.Errorf("linuxdo login resolve concurrent user: %w", err)
+			}
+			if user == nil {
+				return nil, errors.New("linuxdo login concurrent user is missing")
+			}
+		} else {
+			grantRegistrationReward(ctx, uc.rewardWallet, user.ID)
+		}
+	}
+
+	user, err = uc.repo.RecordLinuxDOLogin(ctx, user.ID, profile.ID)
+	if err != nil {
+		return nil, fmt.Errorf("linuxdo login update last login: %w", err)
+	}
+	if user == nil {
+		return nil, domain.ErrLinuxDOAccountUnavailable
+	}
+	notify := !strings.HasSuffix(strings.ToLower(user.Email), "@oauth.invalid")
+	return uc.finishLogin(ctx, user, notify, metadata...)
+}
+
+func (uc *LoginUseCase) BindLinuxDO(ctx context.Context, userID uint, profile LinuxDOProfile) error {
+	profile, err := normalizeLinuxDOProfile(profile)
+	if err != nil {
+		return err
+	}
+	if err := uc.repo.BindLinuxDOIdentity(ctx, userID, profile.ID); err != nil {
+		return fmt.Errorf("bind linuxdo identity: %w", err)
+	}
+	return nil
+}
+
+func (uc *LoginUseCase) HasLinuxDOIdentity(ctx context.Context, userID uint) (bool, error) {
+	bound, err := uc.repo.HasLinuxDOIdentity(ctx, userID)
+	if err != nil {
+		return false, fmt.Errorf("has linuxdo identity: %w", err)
+	}
+	return bound, nil
+}
+
+func normalizeLinuxDOProfile(profile LinuxDOProfile) (LinuxDOProfile, error) {
+	profile.ID = strings.TrimSpace(profile.ID)
+	id, err := strconv.ParseUint(profile.ID, 10, 64)
+	if err != nil || id == 0 || strconv.FormatUint(id, 10) != profile.ID || !profile.Active || profile.Silenced {
+		return LinuxDOProfile{}, domain.ErrLinuxDOAccountUnavailable
+	}
+	if profile.TrustLevel < runtimeconfig.Int("linuxdo_minimum_trust_level", 0, 0) {
+		return LinuxDOProfile{}, domain.ErrLinuxDOTrustLevelTooLow
+	}
+	return profile, nil
+}
+
+func linuxDONickname(profile LinuxDOProfile) string {
+	nickname := strings.TrimSpace(profile.Name)
+	if nickname == "" {
+		nickname = strings.TrimSpace(profile.Username)
+	}
+	if nickname == "" {
+		nickname = "LinuxDO User"
+	}
+	if runes := []rune(nickname); len(runes) > 100 {
+		nickname = string(runes[:100])
+	}
+	return nickname
+}
+
+func (uc *LoginUseCase) finishLogin(ctx context.Context, user *domain.User, notify bool, metadata ...LoginMeta) (*LoginResult, error) {
 	now := time.Now()
 	sessionID, err := newCryptoID()
 	if err != nil {
@@ -93,7 +216,7 @@ func (uc *LoginUseCase) Login(ctx context.Context, email, password string, metad
 	if err := uc.sessions.Create(ctx, session, sessionMaxAge); err != nil {
 		return nil, fmt.Errorf("login create session: %w", err)
 	}
-	if uc.delivery != nil {
+	if notify && uc.delivery != nil {
 		meta := LoginMeta{}
 		if len(metadata) > 0 {
 			meta = metadata[0]

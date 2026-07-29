@@ -2,7 +2,7 @@ package runtimeconfig
 
 import "github.com/donnel666/remail/internal/systemsettings/domain"
 
-const DefaultSettingsCount = 190
+const DefaultSettingsCount = 195
 
 // DefaultSettings is the single source of initial values for runtime-managed
 // settings. Startup inserts only keys that are not in storage.
@@ -27,6 +27,11 @@ var defaultSettings = []domain.Setting{
 	{Key: "email_code_digit_len", Value: "6"},
 	{Key: "bcrypt_cost", Value: "12"},
 	{Key: "session_max_age_seconds", Value: "86400"},
+	{Key: "linuxdo_oauth_enabled", Value: "false"},
+	{Key: "linuxdo_client_id", Value: ""},
+	{Key: "linuxdo_client_secret", Value: ""},
+	{Key: "linuxdo_callback_url", Value: ""},
+	{Key: "linuxdo_minimum_trust_level", Value: "0"},
 	{Key: "announcement_enabled", Value: "true"},
 	{Key: "announcements", Value: "[]"},
 	{Key: "global_notice", Value: ""},

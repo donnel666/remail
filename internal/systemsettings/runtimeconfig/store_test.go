@@ -73,6 +73,28 @@ func TestValidateAuthSecuritySettings(t *testing.T) {
 	require.ErrorIs(t, Validate("bcrypt_cost", "17"), domain.ErrInvalidValue)
 	require.ErrorIs(t, Validate("email_code_digit_len", "11"), domain.ErrInvalidValue)
 	require.ErrorIs(t, Validate("session_max_age_seconds", "299"), domain.ErrInvalidValue)
+	require.NoError(t, Validate("linuxdo_minimum_trust_level", "4"))
+	require.ErrorIs(t, Validate("linuxdo_minimum_trust_level", "5"), domain.ErrInvalidValue)
+	require.NoError(t, Validate("linuxdo_callback_url", "https://mail.example.com/v1/oauth/linuxdo/callback"))
+	require.NoError(t, Validate("linuxdo_callback_url", "http://localhost:8080/v1/oauth/linuxdo/callback"))
+	require.ErrorIs(t, Validate("linuxdo_callback_url", "http://mail.example.com/v1/oauth/linuxdo/callback"), domain.ErrInvalidValue)
+	require.ErrorIs(t, Validate("linuxdo_callback_url", "https://mail.example.com/v1/oauth/linuxdo/callback?"), domain.ErrInvalidValue)
+	require.ErrorIs(t, Validate("linuxdo_callback_url", "https://mail.example.com/v1/oauth/linuxdo/callback?next=/"), domain.ErrInvalidValue)
+
+	missingSecret := ValidatePersistedUpdates(DefaultSettings(), []domain.Setting{
+		{Key: "linuxdo_oauth_enabled", Value: "true"},
+		{Key: "linuxdo_client_id", Value: "client-id"},
+		{Key: "linuxdo_callback_url", Value: "https://mail.example.com/v1/oauth/linuxdo/callback"},
+	})
+	var fields *domain.InvalidValueFieldsError
+	require.ErrorAs(t, missingSecret, &fields)
+	require.Contains(t, fields.Fields, "linuxdo_client_secret")
+	require.NoError(t, ValidatePersistedUpdates(DefaultSettings(), []domain.Setting{
+		{Key: "linuxdo_oauth_enabled", Value: "true"},
+		{Key: "linuxdo_client_id", Value: "client-id"},
+		{Key: "linuxdo_client_secret", Value: "client-secret"},
+		{Key: "linuxdo_callback_url", Value: "https://mail.example.com/v1/oauth/linuxdo/callback"},
+	}))
 }
 
 func TestValidateRechargeRebateSettings(t *testing.T) {

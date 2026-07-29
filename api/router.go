@@ -205,6 +205,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		billingMod.SetUserDirectory(financeUserDirectory{users: iamMod.Users})
 		billingMod.SetMailDelivery(mailMod.DeliveryUseCase)
 		iamMod.RegistrationUseCase.SetRegistrationRewardWallet(billingMod.WalletUseCase)
+		iamMod.LoginUseCase.SetRegistrationRewardWallet(billingMod.WalletUseCase)
 		billingapi.RegisterBillingRoutes(v1, billingMod, iamSessionFetcher, iamMod.PermissionChecker)
 		cleanupFuncs = append(cleanupFuncs, billingapi.RegisterBillingTaskHandlers(taskMux, billingMod))
 

@@ -106,12 +106,12 @@ func (uc *RegistrationUseCase) Register(ctx context.Context, email, password, ni
 	if committed, commitErr := uc.codeStore.Commit(commitCtx, key, claimToken); commitErr != nil || !committed {
 		slog.Warn("commit registration code", "error", commitErr, "committed", committed)
 	}
-	uc.grantRegistrationReward(ctx, user.ID)
+	grantRegistrationReward(ctx, uc.wallet, user.ID)
 
 	return user, nil
 }
 
-func (uc *RegistrationUseCase) grantRegistrationReward(ctx context.Context, userID uint) {
+func grantRegistrationReward(ctx context.Context, wallet RegistrationRewardWallet, userID uint) {
 	amount, err := money.Parse(runtimeconfig.String("registration_reward_amount", "0"))
 	if err != nil {
 		slog.Warn("parse registration reward amount", "error", err)
@@ -120,7 +120,7 @@ func (uc *RegistrationUseCase) grantRegistrationReward(ctx context.Context, user
 	if !amount.IsPositive() {
 		return
 	}
-	if uc.wallet == nil {
+	if wallet == nil {
 		slog.Warn("grant registration reward", "user_id", userID, "amount", money.Format(amount), "error", "wallet is not configured")
 		return
 	}
@@ -128,7 +128,7 @@ func (uc *RegistrationUseCase) grantRegistrationReward(ctx context.Context, user
 	defer cancel()
 	formattedAmount := money.Format(amount)
 	for attempt := 1; attempt <= 2; attempt++ {
-		if err := uc.wallet.GrantRegistrationReward(rewardCtx, userID, formattedAmount); err == nil {
+		if err := wallet.GrantRegistrationReward(rewardCtx, userID, formattedAmount); err == nil {
 			return
 		} else if attempt == 2 {
 			slog.Warn("grant registration reward", "user_id", userID, "amount", formattedAmount, "error", err)
