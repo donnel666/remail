@@ -240,6 +240,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 			return nil, cleanup, err
 		}
 		aftersaleMod.UseCase.SetOwnerLookupPort(ticketParticipantDirectory{owners: iamMod.AdminResourceOwners, users: iamMod.Users})
+		aftersaleMod.UseCase.SetSupplierWalletPort(supplierWithdrawalWalletAdapter{wallets: billingMod.WalletUseCase})
 		aftersaleapi.RegisterRoutes(v1, aftersaleMod, iamSessionFetcher, iamMod.PermissionChecker)
 
 		// MailMatch module (order-scoped message cache, async fetch and matching).

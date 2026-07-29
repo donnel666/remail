@@ -512,10 +512,12 @@ export default function Wallet() {
     const seq = rechargeQuoteSeqRef.current + 1;
     rechargeQuoteSeqRef.current = seq;
     const points = normalizePointValue(debouncedCustomPoints);
+    const pointAmount = Number(points);
     if (
       !rechargeConfig?.enabled ||
       !points ||
-      Number(points) < Number(rechargeConfig.minPoints)
+      points.includes(".") ||
+      pointAmount < Number(rechargeConfig.minPoints)
     ) {
       setRechargeQuote(null);
       return;
@@ -543,6 +545,10 @@ export default function Wallet() {
       return;
     }
     const points = normalizePointValue(customAmount);
+    if (points.includes(".")) {
+      Toast.warning(t("Amount must be an integer."));
+      return;
+    }
     if (
       !points ||
       Number(points) < Number(rechargeConfig.minPoints)
@@ -819,8 +825,8 @@ export default function Wallet() {
                       }
                       field="topUpCount"
                       label={t("Recharge points")}
-                      max={999999999999.999999}
-                      min={Number(rechargeConfig?.minPoints ?? 0.01)}
+                      max={999999999999}
+                      min={Math.max(1, Math.ceil(Number(rechargeConfig?.minPoints) || 1))}
                       onChange={(value) => {
                         const points = normalizePointValue(
                           typeof value === "string" || typeof value === "number"
@@ -832,8 +838,8 @@ export default function Wallet() {
                         setSelectedAmount(Number.isFinite(parsed) ? parsed : 0);
                         setRechargeQuote(null);
                       }}
-                      precision={6}
-                      step={0.01}
+                      precision={0}
+                      step={1}
                       style={{ width: "100%" }}
                     />
                     <Form.Slot label={t("Payment Method")}>

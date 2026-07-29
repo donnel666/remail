@@ -283,10 +283,11 @@ func (uc *WalletUseCase) TransferReferralRewards(ctx context.Context, req Transf
 }
 
 func (uc *WalletUseCase) TransferSupplierBalance(ctx context.Context, req TransferSupplierBalanceRequest) (*domain.WalletSummary, error) {
-	amount, err := domain.NormalizePositiveMoney(req.Amount)
-	if err != nil {
-		return nil, err
+	parsedAmount, err := domain.ParseMoney(req.Amount)
+	if err != nil || !parsedAmount.IsPositive() || !parsedAmount.Equal(parsedAmount.Truncate(0)) {
+		return nil, domain.ErrInvalidAmount
 	}
+	amount := domain.MoneyString(parsedAmount)
 	idempotencyKey := strings.TrimSpace(req.IdempotencyKey)
 	if req.UserID == 0 {
 		return nil, domain.ErrInvalidFilter

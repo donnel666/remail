@@ -24,6 +24,7 @@ func RegisterRoutes(rg *gin.RouterGroup, mod *Module, fetcher middleware.Session
 		auth.GET("/tickets/:ticketNo", h.GetTicket)
 		auth.GET("/tickets/:ticketNo/attachments/:attachmentNo", h.GetAttachment)
 		auth.POST("/tickets", h.PostTicket)
+		auth.POST("/wallet/supplier-withdrawals", h.PostSupplierWithdrawal)
 		auth.POST("/tickets/:ticketNo/messages", h.PostTicketMessage)
 		auth.POST("/tickets/:ticketNo/read", h.PostTicketRead)
 		auth.POST("/tickets/:ticketNo/close", h.PostTicketClose)

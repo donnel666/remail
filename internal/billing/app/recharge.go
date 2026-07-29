@@ -170,6 +170,13 @@ func (uc *RechargeUseCase) Config() (*RechargeConfigResult, error) {
 		Tiers:        make([]RechargeTierResult, 0, len(config.Tiers)),
 	}
 	for _, tier := range config.Tiers {
+		tierPoints, err := domain.ParseMoney(tier.Points)
+		if err != nil || !tierPoints.IsPositive() {
+			return nil, domain.ErrRechargeConfigUnavailable
+		}
+		if !tierPoints.Equal(tierPoints.Truncate(0)) {
+			continue
+		}
 		quote, _, err := rechargeAmounts(config, tier.Points)
 		if err != nil {
 			return nil, domain.ErrRechargeConfigUnavailable
@@ -432,7 +439,7 @@ func validateRechargeGatewayConfig(config RechargeConfig) error {
 
 func rechargeAmounts(config RechargeConfig, rawPoints string) (*RechargeQuoteResult, string, error) {
 	points, err := domain.ParseMoney(rawPoints)
-	if err != nil || !points.IsPositive() {
+	if err != nil || !points.IsPositive() || !points.Equal(points.Truncate(0)) {
 		return nil, "", domain.ErrInvalidAmount
 	}
 	minimum, err := domain.ParseMoney(config.MinPoints)

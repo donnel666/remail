@@ -1,13 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  buildAlipayWithdrawalTicketInput,
   isPositiveLedgerAmount,
   sumLedgerAmounts,
   validateWithdrawal,
 } from "./finance-withdrawal";
 
-describe("supplier withdrawal tickets", () => {
+describe("supplier withdrawals", () => {
   it("requires a payment QR code only for Alipay withdrawals", () => {
     expect(
       validateWithdrawal({
@@ -30,7 +29,7 @@ describe("supplier withdrawal tickets", () => {
   it("rejects amounts above the supplier balance", () => {
     expect(
       validateWithdrawal({
-        amount: "20.000001",
+        amount: "21",
         available: "20",
         destination: "wallet",
         paymentQrCode: "",
@@ -47,7 +46,7 @@ describe("supplier withdrawal tickets", () => {
     ).toBe("Withdrawal exceeds withdrawable balance.");
   });
 
-  it("keeps six-decimal point precision for Alipay and wallet withdrawals", () => {
+  it("rejects fractional points for Alipay and wallet withdrawals", () => {
     expect(
       validateWithdrawal({
         amount: "12.345678",
@@ -55,11 +54,19 @@ describe("supplier withdrawal tickets", () => {
         destination: "alipay",
         paymentQrCode: "data:image/png;base64,qr",
       }),
-    ).toBeNull();
+    ).toBe("Amount must be an integer.");
     expect(
       validateWithdrawal({
         amount: "12.345678",
         available: "20",
+        destination: "wallet",
+        paymentQrCode: "",
+      }),
+    ).toBe("Amount must be an integer.");
+    expect(
+      validateWithdrawal({
+        amount: "12.000000",
+        available: "20.500000",
         destination: "wallet",
         paymentQrCode: "",
       }),
@@ -72,20 +79,5 @@ describe("supplier withdrawal tickets", () => {
     );
     expect(isPositiveLedgerAmount("0.000001")).toBe(true);
     expect(isPositiveLedgerAmount("0.000000")).toBe(false);
-  });
-
-  it("builds a general ticket and attaches the Alipay QR code", () => {
-    expect(
-      buildAlipayWithdrawalTicketInput({
-        amount: " 12.50 ",
-        note: " 请处理 ",
-        paymentQrCode: "data:image/png;base64,qr",
-      }),
-    ).toEqual({
-      ticketType: "general",
-      title: "供应商提现申请",
-      firstMessage: "提现积分：12.50\n提现方式：支付宝\n备注：请处理",
-      attachments: ["data:image/png;base64,qr"],
-    });
   });
 });

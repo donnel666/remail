@@ -201,6 +201,18 @@ describe("wallet payment modal", () => {
     expect(mocks.refreshCurrentUser).toHaveBeenCalledTimes(2);
   });
 
+  it("rejects fractional recharge points before creating an order", async () => {
+    render(<Wallet />);
+
+    const payButton = await screen.findByRole("button", { name: "Alipay" });
+    await waitFor(() => expect(payButton).toBeEnabled());
+    fireEvent.change(screen.getByLabelText("Recharge points"), { target: { value: "1000.5" } });
+    fireEvent.click(payButton);
+
+    expect(mocks.createRecharge).not.toHaveBeenCalled();
+    expect(mocks.toastWarning).toHaveBeenCalledWith("Amount must be an integer.");
+  });
+
   it("closes the payment page at the five-minute verification deadline", async () => {
     mocks.createRecharge.mockResolvedValue({ recharge: payingRecharge, payUrl: "https://pay.example.com/qr", expiresAt: "2026-07-26T00:00:01Z" });
     render(<Wallet />);

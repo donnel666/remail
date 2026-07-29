@@ -2057,6 +2057,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/wallet/supplier-withdrawals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create an Alipay supplier withdrawal request
+         * @description Validates supplier access, a positive whole-number amount, current withdrawable balance, note, and payment QR code before creating a trusted system-authored ticket.
+         */
+        post: operations["postWalletSupplierWithdrawal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/wallet/transactions": {
         parameters: {
             query?: never;
@@ -3914,6 +3934,8 @@ export interface components {
         LedgerAmount: string;
         /** @description Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6). */
         NonNegativeLedgerAmount: string;
+        /** @description Positive whole-number point amount; a decimal representation is accepted only when its fractional part is zero, and the value must fit DECIMAL(18,6). */
+        PositiveIntegerPointAmount: string;
         /** @description Signed point amount with up to 6 decimal places. */
         LedgerAmountResponse: string;
         /** @description Non-negative point amount with up to 6 decimal places. */
@@ -4152,7 +4174,13 @@ export interface components {
         };
         WalletSupplierTransferRequest: {
             /** @description Positive amount to move from supplierAvailable to consumer balance. */
-            amount: components["schemas"]["NonNegativeLedgerAmount"];
+            amount: components["schemas"]["PositiveIntegerPointAmount"];
+        };
+        CreateSupplierWithdrawalRequest: {
+            amount: components["schemas"]["PositiveIntegerPointAmount"];
+            note?: string;
+            /** @description Alipay payment QR code as an image base64 data URL. */
+            paymentQrCode: string;
         };
         TransactionItem: {
             id: number;
@@ -4207,7 +4235,7 @@ export interface components {
             limit: number;
         };
         RechargeTier: {
-            points: components["schemas"]["NonNegativeLedgerAmount"];
+            points: components["schemas"]["PositiveIntegerPointAmount"];
             bonusPoints: components["schemas"]["NonNegativeLedgerAmount"];
             feePoints: components["schemas"]["NonNegativeLedgerAmount"];
             creditedPoints: components["schemas"]["NonNegativeLedgerAmount"];
@@ -4220,10 +4248,10 @@ export interface components {
             tiers: components["schemas"]["RechargeTier"][];
         };
         CreateRechargeRequest: {
-            points: components["schemas"]["NonNegativeLedgerAmount"];
+            points: components["schemas"]["PositiveIntegerPointAmount"];
         };
         RechargeQuoteRequest: {
-            points: components["schemas"]["NonNegativeLedgerAmount"];
+            points: components["schemas"]["PositiveIntegerPointAmount"];
         };
         RechargeQuoteResponse: {
             points: components["schemas"]["NonNegativeLedgerAmount"];
@@ -14495,6 +14523,54 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+        };
+    };
+    postWalletSupplierWithdrawal: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateSupplierWithdrawalRequest"];
+            };
+        };
+        responses: {
+            /** @description Supplier withdrawal ticket created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TicketResponse"];
+                };
+            };
+            /** @description Invalid or oversized request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Invalid amount, insufficient supplier balance, invalid note, or invalid payment QR code */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getWalletTransactions: {

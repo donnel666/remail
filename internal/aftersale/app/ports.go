@@ -31,6 +31,12 @@ type OrderPort interface {
 	GetOrderForTicket(ctx context.Context, orderNo string, requesterUserID uint) (*OrderInfo, error)
 }
 
+// SupplierWalletPort exposes only the supplier balance needed to validate a
+// withdrawal request without coupling aftersale to billing.
+type SupplierWalletPort interface {
+	SupplierAvailable(ctx context.Context, userID uint) (string, error)
+}
+
 // OrderInfo is the trade-owned view of an order needed to open a ticket.
 type OrderInfo struct {
 	OrderNo        string
@@ -246,6 +252,14 @@ type CreateTicketRequest struct {
 	OrderNo         string
 	Attachments     []string
 	RequestID       string
+}
+
+type CreateSupplierWithdrawalRequest struct {
+	RequesterUserID uint
+	SupplierAccess  bool
+	Amount          string
+	Note            string
+	PaymentQRCode   string
 }
 
 type ReplyTicketRequest struct {

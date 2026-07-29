@@ -5,7 +5,7 @@ import {
   Button,
   Card,
   Empty,
-  Input,
+  InputNumber,
   Modal,
   Skeleton,
   Space,
@@ -31,6 +31,7 @@ import { getIamErrorMessage } from "@/lib/iam-errors";
 import { generateIdempotencyKey } from "@/lib/idempotency";
 import { formatPoints, formatPointsValue } from "@/lib/points";
 import {
+  createSupplierWithdrawal,
   getWallet,
   listWalletTransactions,
   transferSupplierBalance,
@@ -43,13 +44,11 @@ import {
   hasSupplierRole,
 } from "./resources/supplier-application-modal";
 import {
-  buildAlipayWithdrawalTicketInput,
   isPositiveLedgerAmount,
   sumLedgerAmounts,
   validateWithdrawal,
   type WithdrawalDestination,
 } from "./finance-withdrawal";
-import { createTicket } from "./tickets/tickets-api";
 
 const MAX_QR_CODE_BYTES = 5 * 1024 * 1024;
 
@@ -321,13 +320,7 @@ export default function FinanceCenter() {
         void load();
         return;
       }
-      await createTicket(
-        buildAlipayWithdrawalTicketInput({
-          amount: withdrawAmount,
-          note,
-          paymentQrCode,
-        }),
-      );
+      await createSupplierWithdrawal(withdrawAmount.trim(), note.trim(), paymentQrCode);
       Toast.success(t("Withdrawal submitted."));
       closeWithdrawal();
     } catch (error) {
@@ -560,11 +553,14 @@ export default function FinanceCenter() {
             <span className="mb-2 block text-sm font-medium text-[var(--semi-color-text-0)]">
               {t(destination === "wallet" ? "Transfer points" : "Withdraw points")}
             </span>
-            <Input
+            <InputNumber
               id="withdraw-amount"
-              inputMode="decimal"
-              onChange={(value) => setWithdrawAmount(String(value))}
-              placeholder="0.01"
+              min={1}
+              onChange={(value) => setWithdrawAmount(String(value ?? ""))}
+              placeholder="1"
+              precision={0}
+              step={1}
+              style={{ width: "100%" }}
               value={withdrawAmount}
             />
             <span className="mt-1 block text-xs text-[var(--semi-color-text-2)]">

@@ -212,7 +212,7 @@ func Validate(key, value string) error {
 		seen := make(map[string]struct{}, len(values))
 		for _, raw := range values {
 			amount, err := money.Parse(string(raw))
-			if err != nil || !amount.IsPositive() {
+			if err != nil || !amount.IsPositive() || !amount.Equal(amount.Truncate(0)) {
 				return domain.ErrInvalidValue
 			}
 			normalized := money.Format(amount)
@@ -229,7 +229,7 @@ func Validate(key, value string) error {
 		for rawAmount, rawBonus := range values {
 			amount, amountErr := money.Parse(rawAmount)
 			bonus, bonusErr := money.Parse(string(rawBonus))
-			if amountErr != nil || !amount.IsPositive() || bonusErr != nil || bonus.IsNegative() {
+			if amountErr != nil || !amount.IsPositive() || !amount.Equal(amount.Truncate(0)) || bonusErr != nil || bonus.IsNegative() {
 				return domain.ErrInvalidValue
 			}
 		}

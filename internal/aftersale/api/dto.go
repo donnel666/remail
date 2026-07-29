@@ -15,6 +15,12 @@ type CreateTicketRequest struct {
 	Attachments  []string `json:"attachments,omitempty"`
 }
 
+type CreateSupplierWithdrawalRequest struct {
+	Amount        string `json:"amount"`
+	Note          string `json:"note,omitempty"`
+	PaymentQRCode string `json:"paymentQrCode"`
+}
+
 type ReplyTicketRequest struct {
 	Content     string   `json:"content"`
 	Attachments []string `json:"attachments,omitempty"`

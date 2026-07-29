@@ -5625,8 +5625,8 @@ type CreateProxyRequest struct {
 
 // CreateRechargeRequest defines model for CreateRechargeRequest.
 type CreateRechargeRequest struct {
-	// Points Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
-	Points NonNegativeLedgerAmount `json:"points"`
+	// Points Positive whole-number point amount; a decimal representation is accepted only when its fractional part is zero, and the value must fit DECIMAL(18,6).
+	Points PositiveIntegerPointAmount `json:"points"`
 }
 
 // CreateRechargeResponse defines model for CreateRechargeResponse.
@@ -5634,6 +5634,16 @@ type CreateRechargeResponse struct {
 	ExpiresAt time.Time    `json:"expiresAt"`
 	PayUrl    string       `json:"payUrl"`
 	Recharge  RechargeItem `json:"recharge"`
+}
+
+// CreateSupplierWithdrawalRequest defines model for CreateSupplierWithdrawalRequest.
+type CreateSupplierWithdrawalRequest struct {
+	// Amount Positive whole-number point amount; a decimal representation is accepted only when its fractional part is zero, and the value must fit DECIMAL(18,6).
+	Amount PositiveIntegerPointAmount `json:"amount"`
+	Note   *string                    `json:"note,omitempty"`
+
+	// PaymentQrCode Alipay payment QR code as an image base64 data URL.
+	PaymentQrCode string `json:"paymentQrCode"`
 }
 
 // CreateTicketRequest defines model for CreateTicketRequest.
@@ -6589,6 +6599,9 @@ type PickupCredentialRequest struct {
 	Token string              `json:"token"`
 }
 
+// PositiveIntegerPointAmount Positive whole-number point amount; a decimal representation is accepted only when its fractional part is zero, and the value must fit DECIMAL(18,6).
+type PositiveIntegerPointAmount = string
+
 // ProductSuffixInventory defines model for ProductSuffixInventory.
 type ProductSuffixInventory struct {
 	PublicAvailable int64 `json:"publicAvailable"`
@@ -7094,8 +7107,8 @@ type RechargeListResponse struct {
 
 // RechargeQuoteRequest defines model for RechargeQuoteRequest.
 type RechargeQuoteRequest struct {
-	// Points Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
-	Points NonNegativeLedgerAmount `json:"points"`
+	// Points Positive whole-number point amount; a decimal representation is accepted only when its fractional part is zero, and the value must fit DECIMAL(18,6).
+	Points PositiveIntegerPointAmount `json:"points"`
 }
 
 // RechargeQuoteResponse defines model for RechargeQuoteResponse.
@@ -7124,8 +7137,8 @@ type RechargeTier struct {
 	// FeePoints Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	FeePoints NonNegativeLedgerAmount `json:"feePoints"`
 
-	// Points Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
-	Points NonNegativeLedgerAmount `json:"points"`
+	// Points Positive whole-number point amount; a decimal representation is accepted only when its fractional part is zero, and the value must fit DECIMAL(18,6).
+	Points PositiveIntegerPointAmount `json:"points"`
 }
 
 // RedeemCardRequest defines model for RedeemCardRequest.
@@ -7710,7 +7723,7 @@ type WalletResponse struct {
 // WalletSupplierTransferRequest defines model for WalletSupplierTransferRequest.
 type WalletSupplierTransferRequest struct {
 	// Amount Positive amount to move from supplierAvailable to consumer balance.
-	Amount NonNegativeLedgerAmount `json:"amount"`
+	Amount PositiveIntegerPointAmount `json:"amount"`
 }
 
 // AdminCommandIdempotencyKey defines model for AdminCommandIdempotencyKey.
@@ -9460,6 +9473,12 @@ type PostWalletSupplierTransferParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// PostWalletSupplierWithdrawalParams defines parameters for PostWalletSupplierWithdrawal.
+type PostWalletSupplierWithdrawalParams struct {
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // GetWalletTransactionsParams defines parameters for GetWalletTransactions.
 type GetWalletTransactionsParams struct {
 	Scope   *GetWalletTransactionsParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
@@ -9765,6 +9784,9 @@ type PostRegisterJSONRequestBody = RegisterRequest
 
 // PostWalletSupplierTransferJSONRequestBody defines body for PostWalletSupplierTransfer for application/json ContentType.
 type PostWalletSupplierTransferJSONRequestBody = WalletSupplierTransferRequest
+
+// PostWalletSupplierWithdrawalJSONRequestBody defines body for PostWalletSupplierWithdrawal for application/json ContentType.
+type PostWalletSupplierWithdrawalJSONRequestBody = CreateSupplierWithdrawalRequest
 
 // AsAdminDomainBulkSelection0 returns the union data inside the AdminDomainBulkSelection as a AdminDomainBulkSelection0
 func (t AdminDomainBulkSelection) AsAdminDomainBulkSelection0() (AdminDomainBulkSelection0, error) {
@@ -11109,6 +11131,9 @@ type ServerInterface interface {
 	// Transfer supplier available balance to the current user's consumer wallet
 	// (POST /v1/wallet/supplier-transfers)
 	PostWalletSupplierTransfer(c *gin.Context, params PostWalletSupplierTransferParams)
+	// Create an Alipay supplier withdrawal request
+	// (POST /v1/wallet/supplier-withdrawals)
+	PostWalletSupplierWithdrawal(c *gin.Context, params PostWalletSupplierWithdrawalParams)
 	// List wallet transactions
 	// (GET /v1/wallet/transactions)
 	GetWalletTransactions(c *gin.Context, params GetWalletTransactionsParams)
@@ -23154,6 +23179,51 @@ func (siw *ServerInterfaceWrapper) PostWalletSupplierTransfer(c *gin.Context) {
 	siw.Handler.PostWalletSupplierTransfer(c, params)
 }
 
+// PostWalletSupplierWithdrawal operation middleware
+func (siw *ServerInterfaceWrapper) PostWalletSupplierWithdrawal(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostWalletSupplierWithdrawalParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostWalletSupplierWithdrawal(c, params)
+}
+
 // GetWalletTransactions operation middleware
 func (siw *ServerInterfaceWrapper) GetWalletTransactions(c *gin.Context) {
 
@@ -23483,5 +23553,6 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/wallet/referrals", wrapper.GetWalletReferrals)
 	router.POST(options.BaseURL+"/v1/wallet/referrals/transfer", wrapper.PostWalletReferralTransfer)
 	router.POST(options.BaseURL+"/v1/wallet/supplier-transfers", wrapper.PostWalletSupplierTransfer)
+	router.POST(options.BaseURL+"/v1/wallet/supplier-withdrawals", wrapper.PostWalletSupplierWithdrawal)
 	router.GET(options.BaseURL+"/v1/wallet/transactions", wrapper.GetWalletTransactions)
 }

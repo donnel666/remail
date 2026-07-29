@@ -229,23 +229,27 @@ func TestBillingSupplierTransferIsAuthorizedAtomicAndIdempotent(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), "Invalid Idempotency-Key.")
 
-	w = transfer("4.25", "supplier-transfer-1")
+	w = transfer("4.25", "supplier-transfer-fractional")
+	require.Equal(t, http.StatusUnprocessableEntity, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "Invalid amount.")
+
+	w = transfer("4", "supplier-transfer-1")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	firstResponse := w.Body.String()
 	var wallet WalletResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &wallet))
-	require.Equal(t, "7.25", wallet.ConsumerBalance)
-	require.Equal(t, "7.75", wallet.SupplierAvailable)
+	require.Equal(t, "7.00", wallet.ConsumerBalance)
+	require.Equal(t, "8.00", wallet.SupplierAvailable)
 
 	var transactions []billinginfra.WalletTransactionModel
 	require.NoError(t, db.Where("user_id = ? AND biz_type = ?", supplierID, "supplier_transfer").Order("id").Find(&transactions).Error)
 	require.Len(t, transactions, 2)
 	require.Equal(t, "supplier_available", transactions[0].BalanceBucket)
 	require.Equal(t, "out", transactions[0].Direction)
-	require.Equal(t, "-4.250000", transactions[0].Amount)
+	require.Equal(t, "-4.000000", transactions[0].Amount)
 	require.Equal(t, "consumer", transactions[1].BalanceBucket)
 	require.Equal(t, "in", transactions[1].Direction)
-	require.Equal(t, "4.250000", transactions[1].Amount)
+	require.Equal(t, "4.000000", transactions[1].Amount)
 
 	for _, transaction := range transactions {
 		reverse := httptest.NewRecorder()
@@ -259,30 +263,30 @@ func TestBillingSupplierTransferIsAuthorizedAtomicAndIdempotent(t *testing.T) {
 	w = transfer("1.00", "supplier-transfer-2")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
-	w = transfer("4.25", "supplier-transfer-1")
+	w = transfer("4", "supplier-transfer-1")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.JSONEq(t, firstResponse, w.Body.String(), "an idempotent replay must return the original response")
 	transactions = nil
 	require.NoError(t, db.Where("user_id = ? AND biz_type = ?", supplierID, "supplier_transfer").Find(&transactions).Error)
 	require.Len(t, transactions, 4, "an idempotent replay must not write another ledger pair")
 
-	w = transfer("7.00", "supplier-transfer-insufficient")
+	w = transfer("8.00", "supplier-transfer-insufficient")
 	require.Equal(t, http.StatusUnprocessableEntity, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), "Insufficient balance.")
 	var stored billinginfra.WalletModel
 	require.NoError(t, db.First(&stored, "user_id = ?", supplierID).Error)
-	require.Equal(t, "8.250000", stored.ConsumerBalance)
-	require.Equal(t, "6.750000", stored.SupplierAvailable)
+	require.Equal(t, "8.000000", stored.ConsumerBalance)
+	require.Equal(t, "7.000000", stored.SupplierAvailable)
 	require.Zero(t, stored.BalanceWarningLevel)
 	require.Equal(t, uint64(2), stored.BalanceWarningCycle)
 
 	require.NoError(t, db.Model(&billinginfra.WalletModel{}).Where("user_id = ?", supplierID).
 		Update("consumer_balance", "999999999999.999999").Error)
-	w = transfer("0.000001", "supplier-transfer-overflow")
+	w = transfer("1", "supplier-transfer-overflow")
 	require.Equal(t, http.StatusUnprocessableEntity, w.Code, w.Body.String())
 	require.NoError(t, db.First(&stored, "user_id = ?", supplierID).Error)
 	require.Equal(t, "999999999999.999999", stored.ConsumerBalance)
-	require.Equal(t, "6.750000", stored.SupplierAvailable, "the supplier debit must roll back if the consumer credit fails")
+	require.Equal(t, "7.000000", stored.SupplierAvailable, "the supplier debit must roll back if the consumer credit fails")
 	var transactionCount int64
 	require.NoError(t, db.Model(&billinginfra.WalletTransactionModel{}).
 		Where("user_id = ? AND biz_type = ?", supplierID, "supplier_transfer").Count(&transactionCount).Error)

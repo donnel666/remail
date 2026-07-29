@@ -6,29 +6,34 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/donnel666/remail/internal/aftersale/domain"
+	moneyfmt "github.com/donnel666/remail/internal/money"
 	"github.com/donnel666/remail/internal/platform"
 )
 
 const (
-	maxAttachments     = 6
-	maxAttachmentBytes = 5 << 20 // 5 MiB decoded, per image
-	platformFallback   = "平台客服"
+	maxAttachments                 = 6
+	maxAttachmentBytes             = 5 << 20 // 5 MiB decoded, per image
+	platformFallback               = "平台客服"
+	supplierWithdrawalTitle        = "供应商提现申请"
+	maxSupplierWithdrawalNoteRunes = 500
 )
 
 // UseCase orchestrates the aftersale ticket lifecycle. It owns authorization,
 // order validation, attachment storage and refund routing; state transitions
 // and unread math live in the repository so they stay atomic with the write.
 type UseCase struct {
-	repo       Repository
-	orders     OrderPort
-	refunds    RefundPort
-	files      FileStorePort
-	owners     OwnerLookupPort
-	mail       MailPort
-	mailConfig TicketMailConfig
-	now        func() time.Time
+	repo           Repository
+	orders         OrderPort
+	refunds        RefundPort
+	files          FileStorePort
+	owners         OwnerLookupPort
+	supplierWallet SupplierWalletPort
+	mail           MailPort
+	mailConfig     TicketMailConfig
+	now            func() time.Time
 }
 
 func NewUseCase(repo Repository, orders OrderPort, refunds RefundPort, files FileStorePort, mail MailPort, mailConfig TicketMailConfig) (*UseCase, error) {
@@ -52,6 +57,9 @@ func NewUseCase(repo Repository, orders OrderPort, refunds RefundPort, files Fil
 // SetOwnerLookupPort attaches the IAM-backed participant directory. Wired in the
 // composition root to avoid a cross-context import cycle.
 func (uc *UseCase) SetOwnerLookupPort(owners OwnerLookupPort) { uc.owners = owners }
+
+// SetSupplierWalletPort attaches billing's wallet query at the composition root.
+func (uc *UseCase) SetSupplierWalletPort(wallet SupplierWalletPort) { uc.supplierWallet = wallet }
 
 func (uc *UseCase) ListTickets(ctx context.Context, filter ListFilter, offset int, afterID uint, limit int) (*TicketListResult, error) {
 	if limit <= 0 || limit > 1000 {
@@ -102,6 +110,9 @@ func (uc *UseCase) CreateTicket(ctx context.Context, req CreateTicketRequest) (*
 	if req.TicketType != domain.TicketTypeOrder && req.TicketType != domain.TicketTypeGeneral {
 		return nil, domain.ErrInvalidTicketRequest
 	}
+	if title == supplierWithdrawalTitle {
+		return nil, domain.ErrInvalidTicketRequest
+	}
 
 	var snapshot *domain.OrderSnapshot
 	if req.TicketType == domain.TicketTypeOrder {
@@ -119,26 +130,72 @@ func (uc *UseCase) CreateTicket(ctx context.Context, req CreateTicketRequest) (*
 		snapshot = buildSnapshot(info)
 	}
 
-	ticketNo := nextTicketNo()
-	attachments, err := uc.decodeAndUpload(ctx, ticketNo, req.Attachments)
-	if err != nil {
-		return nil, err
-	}
-	created, err := uc.repo.Create(ctx, CreateTicketParams{
-		TicketNo:        ticketNo,
+	return uc.persistNewTicket(ctx, CreateTicketParams{
 		TicketType:      req.TicketType,
 		Title:           title,
 		RequesterUserID: req.RequesterUserID,
-		ReplyToken:      newReplyToken(),
 		Order:           snapshot,
 		FirstMessage: MessageInsert{
 			SenderType:   domain.SenderTypeUser,
 			SenderUserID: req.RequesterUserID,
 			SenderEmail:  req.RequesterEmail,
 			Content:      first,
-			Attachments:  attachments,
 		},
-	})
+	}, req.Attachments)
+}
+
+func (uc *UseCase) CreateSupplierWithdrawal(ctx context.Context, req CreateSupplierWithdrawalRequest) (*TicketView, error) {
+	if !req.SupplierAccess {
+		return nil, domain.ErrTicketForbidden
+	}
+	if req.RequesterUserID == 0 {
+		return nil, domain.ErrInvalidTicketRequest
+	}
+	amount, err := moneyfmt.Parse(req.Amount)
+	if err != nil || !amount.IsPositive() || !amount.Equal(amount.Truncate(0)) {
+		return nil, domain.ErrInvalidTicketRequest
+	}
+	note := strings.TrimSpace(req.Note)
+	if utf8.RuneCountInString(note) > maxSupplierWithdrawalNoteRunes || strings.TrimSpace(req.PaymentQRCode) == "" {
+		return nil, domain.ErrInvalidTicketRequest
+	}
+	if uc.supplierWallet == nil {
+		return nil, domain.ErrSupplierWalletUnavailable
+	}
+	rawAvailable, err := uc.supplierWallet.SupplierAvailable(ctx, req.RequesterUserID)
+	if err != nil {
+		return nil, domain.ErrSupplierWalletUnavailable
+	}
+	available, err := moneyfmt.Parse(rawAvailable)
+	if err != nil || available.IsNegative() {
+		return nil, domain.ErrSupplierWalletUnavailable
+	}
+	if amount.GreaterThan(available) {
+		return nil, domain.ErrInsufficientSupplierBalance
+	}
+	if note == "" {
+		note = "无"
+	}
+	return uc.persistNewTicket(ctx, CreateTicketParams{
+		TicketType:      domain.TicketTypeGeneral,
+		Title:           supplierWithdrawalTitle,
+		RequesterUserID: req.RequesterUserID,
+		FirstMessage: MessageInsert{
+			SenderType: domain.SenderTypeSystem,
+			Content:    fmt.Sprintf("提现积分：%s\n提现方式：支付宝\n备注：%s", amount.String(), note),
+		},
+	}, []string{strings.TrimSpace(req.PaymentQRCode)})
+}
+
+func (uc *UseCase) persistNewTicket(ctx context.Context, params CreateTicketParams, rawAttachments []string) (*TicketView, error) {
+	params.TicketNo = nextTicketNo()
+	params.ReplyToken = newReplyToken()
+	attachments, err := uc.decodeAndUpload(ctx, params.TicketNo, rawAttachments)
+	if err != nil {
+		return nil, err
+	}
+	params.FirstMessage.Attachments = attachments
+	created, err := uc.repo.Create(ctx, params)
 	if err != nil {
 		return nil, err
 	}

@@ -110,15 +110,17 @@ type TicketAttachment struct {
 }
 
 var (
-	ErrTicketNotFound       = errors.New("aftersale: ticket not found")
-	ErrTicketForbidden      = errors.New("aftersale: ticket forbidden")
-	ErrTicketClosed         = errors.New("aftersale: ticket already closed")
-	ErrTicketStateConflict  = errors.New("aftersale: ticket state conflict")
-	ErrInvalidTicketRequest = errors.New("aftersale: invalid ticket request")
-	ErrOrderNotEligible     = errors.New("aftersale: order not eligible for aftersale")
-	ErrAttachmentNotFound   = errors.New("aftersale: attachment not found")
-	ErrAttachmentInvalid    = errors.New("aftersale: invalid attachment")
-	ErrAttachmentTooLarge   = errors.New("aftersale: attachment too large")
+	ErrTicketNotFound              = errors.New("aftersale: ticket not found")
+	ErrTicketForbidden             = errors.New("aftersale: ticket forbidden")
+	ErrTicketClosed                = errors.New("aftersale: ticket already closed")
+	ErrTicketStateConflict         = errors.New("aftersale: ticket state conflict")
+	ErrInvalidTicketRequest        = errors.New("aftersale: invalid ticket request")
+	ErrOrderNotEligible            = errors.New("aftersale: order not eligible for aftersale")
+	ErrAttachmentNotFound          = errors.New("aftersale: attachment not found")
+	ErrAttachmentInvalid           = errors.New("aftersale: invalid attachment")
+	ErrAttachmentTooLarge          = errors.New("aftersale: attachment too large")
+	ErrInsufficientSupplierBalance = errors.New("aftersale: insufficient supplier balance")
+	ErrSupplierWalletUnavailable   = errors.New("aftersale: supplier wallet unavailable")
 )
 
 // NormalizeTicketType parses an untrusted type string.

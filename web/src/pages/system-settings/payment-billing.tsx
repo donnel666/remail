@@ -35,8 +35,8 @@ export default function PaymentSection({ options, onBulkSave, canSensitive }: Se
     finally { setSavingCard(null); }
   };
   const saveTopup = async () => {
-    if (topupTiers.some(({ amount, bonus }) => !Number.isFinite(amount) || amount <= 0 || !Number.isFinite(bonus) || bonus < 0)) {
-      Toast.warning(t("充值档位积分必须大于 0，赠送积分不能为负数"));
+    if (topupTiers.some(({ amount, bonus }) => !Number.isInteger(amount) || amount <= 0 || !Number.isFinite(bonus) || bonus < 0)) {
+      Toast.warning(t("充值档位积分必须为正整数，赠送积分不能为负数"));
       return;
     }
     const amounts = topupTiers.map(({ amount }) => amount.toFixed(6));
@@ -97,7 +97,7 @@ export default function PaymentSection({ options, onBulkSave, canSensitive }: Se
           <div key={index} className="grid gap-3 border-t border-[var(--semi-color-border)] px-4 py-3 sm:grid-cols-[1fr_1fr_32px] sm:items-center sm:gap-4">
             <label className="min-w-0">
               <span className="mb-1.5 block text-xs text-[var(--semi-color-text-2)] sm:hidden">{t("充值积分")}</span>
-              <InputNumber aria-label={t("充值积分")} min={0.000001} onNumberChange={(value) => updateTier(index, { amount: Number(value) || 0 })} precision={6} style={{ width: "100%" }} value={tier.amount || ""} />
+              <InputNumber aria-label={t("充值积分")} min={1} onNumberChange={(value) => updateTier(index, { amount: Number(value) || 0 })} precision={0} step={1} style={{ width: "100%" }} value={tier.amount || ""} />
             </label>
             <label className="min-w-0">
               <span className="mb-1.5 block text-xs text-[var(--semi-color-text-2)] sm:hidden">{t("赠送积分")}</span>

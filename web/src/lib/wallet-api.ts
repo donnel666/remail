@@ -21,6 +21,8 @@ export type RedeemCardResponse = components["schemas"]["RedeemCardResponse"];
 export type TransactionItem = components["schemas"]["TransactionItem"];
 export type TransactionListResponse =
   components["schemas"]["TransactionListResponse"];
+export type SupplierWithdrawalResponse =
+  components["schemas"]["TicketResponse"];
 
 export interface RechargeListFilter {
   search?: string;
@@ -84,6 +86,19 @@ export async function transferSupplierBalance(
   );
   notifyWalletUpdated();
   return response;
+}
+
+export async function createSupplierWithdrawal(
+  amount: string,
+  note: string,
+  paymentQrCode: string
+) {
+  return unwrap<SupplierWithdrawalResponse>(
+    await client.POST("/v1/wallet/supplier-withdrawals", {
+      body: { amount, note, paymentQrCode },
+      params: { header: csrfHeader() },
+    })
+  );
 }
 
 export async function listRecharges(

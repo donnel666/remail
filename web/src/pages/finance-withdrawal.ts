@@ -1,5 +1,3 @@
-import type { CreateTicketInput } from "./tickets/tickets-api";
-
 export type WithdrawalDestination = "alipay" | "wallet";
 
 const LEDGER_SCALE = 1_000_000n;
@@ -33,6 +31,9 @@ export function validateWithdrawal(input: {
   if (amountUnits === null || amountUnits <= 0n) {
     return "Amount must be positive.";
   }
+  if (amountUnits % LEDGER_SCALE !== 0n) {
+    return "Amount must be an integer.";
+  }
   if (amountUnits > (ledgerUnits(input.available) ?? 0n)) {
     return "Withdrawal exceeds withdrawable balance.";
   }
@@ -40,21 +41,4 @@ export function validateWithdrawal(input: {
     return "Payment QR code is required.";
   }
   return null;
-}
-
-export function buildAlipayWithdrawalTicketInput(input: {
-  amount: string;
-  note: string;
-  paymentQrCode: string;
-}): CreateTicketInput {
-  return {
-    ticketType: "general",
-    title: "供应商提现申请",
-    firstMessage: [
-      `提现积分：${input.amount.trim()}`,
-      "提现方式：支付宝",
-      `备注：${input.note.trim() || "无"}`,
-    ].join("\n"),
-    attachments: [input.paymentQrCode],
-  };
 }

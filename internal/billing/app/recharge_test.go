@@ -29,12 +29,14 @@ func TestRechargeAmountsAndActiveReconciliation(t *testing.T) {
 	config.FeeRate = "0.6"
 	config.FeeCapPoints = "0"
 	config.MinPoints = "0.01"
-	quote, payment, err = rechargeAmounts(config, "0.01")
+	_, _, err = rechargeAmounts(config, "0.01")
+	require.ErrorIs(t, err, domain.ErrInvalidAmount)
+	quote, payment, err = rechargeAmounts(config, "1.00")
 	require.NoError(t, err)
-	require.Equal(t, &RechargeQuoteResult{Points: "0.01", BonusPoints: "0.00", FeePoints: "0.00006", CreditedPoints: "0.01"}, quote)
+	require.Equal(t, &RechargeQuoteResult{Points: "1.00", BonusPoints: "0.00", FeePoints: "0.006", CreditedPoints: "1.00"}, quote)
 	require.Equal(t, "0.01", payment)
 	config.FeeCapPoints = "0.0000001"
-	_, _, err = rechargeAmounts(config, "0.01")
+	_, _, err = rechargeAmounts(config, "1")
 	require.ErrorIs(t, err, domain.ErrRechargeConfigUnavailable)
 	config.FeeCapPoints = "0"
 
@@ -94,6 +96,27 @@ func TestRechargeAmountsAndActiveReconciliation(t *testing.T) {
 		require.Equal(t, "query_timeout", repo.failReason)
 		require.Equal(t, 1, gateway.calls)
 	})
+}
+
+func TestRechargeConfigSkipsLegacyFractionalTiers(t *testing.T) {
+	config := validRechargeConfig()
+	config.Tiers = []RechargeTier{
+		{Points: "10", BonusPoints: "1"},
+		{Points: "20.5", BonusPoints: "2"},
+		{Points: "30", BonusPoints: "3"},
+	}
+	useCase := NewRechargeUseCase(nil, rechargeConfigStub{config}, nil, nil)
+
+	result, err := useCase.Config()
+	require.NoError(t, err)
+	require.Len(t, result.Tiers, 2)
+	require.Equal(t, "10.00", result.Tiers[0].Points)
+	require.Equal(t, "30.00", result.Tiers[1].Points)
+
+	quote, err := useCase.Quote("20")
+	require.NoError(t, err)
+	require.Equal(t, "20.00", quote.Points)
+	require.Equal(t, "0.00", quote.BonusPoints)
 }
 
 func TestRechargeCreateInputAndConfigReplaySafety(t *testing.T) {

@@ -116,6 +116,17 @@ func (f fakeOrderPort) GetOrderForTicket(context.Context, string, uint) (*OrderI
 	return f.info, f.err
 }
 
+type fakeSupplierWallet struct {
+	available string
+	err       error
+	calls     []uint
+}
+
+func (f *fakeSupplierWallet) SupplierAvailable(_ context.Context, userID uint) (string, error) {
+	f.calls = append(f.calls, userID)
+	return f.available, f.err
+}
+
 type fakeRefundPort struct {
 	called *RefundCommand
 	result *RefundResult
@@ -288,6 +299,100 @@ func TestCreateTicketGeneral(t *testing.T) {
 	}
 	if view.Requester == nil || view.Requester.Nickname != "nick" {
 		t.Fatalf("requester not enriched: %+v", view.Requester)
+	}
+}
+
+func TestCreateTicketRejectsReservedSupplierWithdrawalTitle(t *testing.T) {
+	uc, repo, _, _ := newTestUseCase()
+	_, err := uc.CreateTicket(context.Background(), CreateTicketRequest{
+		RequesterUserID: 7,
+		TicketType:      domain.TicketTypeGeneral,
+		Title:           supplierWithdrawalTitle,
+		FirstMessage:    "提现积分：12\n提现方式：支付宝",
+	})
+	if err != domain.ErrInvalidTicketRequest {
+		t.Fatalf("reserved title error = %v", err)
+	}
+	if len(repo.createCalls) != 0 {
+		t.Fatalf("created %d tickets, want 0", len(repo.createCalls))
+	}
+}
+
+func TestCreateSupplierWithdrawalValidatesAuthorizationAmountAndBalance(t *testing.T) {
+	uc, repo, _, _ := newTestUseCase()
+	wallet := &fakeSupplierWallet{available: "20.5"}
+	uc.SetSupplierWalletPort(wallet)
+	request := CreateSupplierWithdrawalRequest{
+		RequesterUserID: 7,
+		SupplierAccess:  true,
+		Amount:          "12",
+		PaymentQRCode:   pngDataURL("qr"),
+	}
+
+	request.SupplierAccess = false
+	if _, err := uc.CreateSupplierWithdrawal(context.Background(), request); err != domain.ErrTicketForbidden {
+		t.Fatalf("non-supplier error = %v", err)
+	}
+	request.SupplierAccess = true
+	request.Amount = "12.5"
+	if _, err := uc.CreateSupplierWithdrawal(context.Background(), request); err != domain.ErrInvalidTicketRequest {
+		t.Fatalf("fractional amount error = %v", err)
+	}
+	request.Amount = "12"
+	request.PaymentQRCode = ""
+	if _, err := uc.CreateSupplierWithdrawal(context.Background(), request); err != domain.ErrInvalidTicketRequest {
+		t.Fatalf("missing QR code error = %v", err)
+	}
+	request.PaymentQRCode = pngDataURL("qr")
+	request.Note = strings.Repeat("界", maxSupplierWithdrawalNoteRunes+1)
+	if _, err := uc.CreateSupplierWithdrawal(context.Background(), request); err != domain.ErrInvalidTicketRequest {
+		t.Fatalf("long note error = %v", err)
+	}
+	request.Note = ""
+	request.Amount = "21"
+	if _, err := uc.CreateSupplierWithdrawal(context.Background(), request); err != domain.ErrInsufficientSupplierBalance {
+		t.Fatalf("insufficient balance error = %v", err)
+	}
+	request.Amount = "12"
+	wallet.err = context.DeadlineExceeded
+	if _, err := uc.CreateSupplierWithdrawal(context.Background(), request); err != domain.ErrSupplierWalletUnavailable {
+		t.Fatalf("wallet error = %v", err)
+	}
+	if len(repo.createCalls) != 0 {
+		t.Fatalf("created %d tickets, want 0", len(repo.createCalls))
+	}
+}
+
+func TestCreateSupplierWithdrawalCreatesTrustedSystemTicket(t *testing.T) {
+	uc, repo, _, files := newTestUseCase()
+	wallet := &fakeSupplierWallet{available: "20.5"}
+	uc.SetSupplierWalletPort(wallet)
+
+	view, err := uc.CreateSupplierWithdrawal(context.Background(), CreateSupplierWithdrawalRequest{
+		RequesterUserID: 7,
+		SupplierAccess:  true,
+		Amount:          "12.00",
+		Note:            " 请处理 ",
+		PaymentQRCode:   pngDataURL("qr"),
+	})
+	if err != nil {
+		t.Fatalf("create withdrawal: %v", err)
+	}
+	if len(repo.createCalls) != 1 || len(files.saved) != 1 {
+		t.Fatalf("create calls=%d saved files=%d", len(repo.createCalls), len(files.saved))
+	}
+	created := repo.createCalls[0]
+	if created.Title != supplierWithdrawalTitle || created.TicketType != domain.TicketTypeGeneral {
+		t.Fatalf("unexpected ticket: %+v", created)
+	}
+	if created.FirstMessage.SenderType != domain.SenderTypeSystem || created.FirstMessage.SenderUserID != 0 {
+		t.Fatalf("untrusted first message: %+v", created.FirstMessage)
+	}
+	if created.FirstMessage.Content != "提现积分：12\n提现方式：支付宝\n备注：请处理" || len(created.FirstMessage.Attachments) != 1 {
+		t.Fatalf("unexpected first message: %+v", created.FirstMessage)
+	}
+	if len(wallet.calls) != 1 || wallet.calls[0] != 7 || view.Ticket.Messages[0].SenderType != domain.SenderTypeSystem {
+		t.Fatalf("wallet calls=%v message=%+v", wallet.calls, view.Ticket.Messages[0])
 	}
 }
 

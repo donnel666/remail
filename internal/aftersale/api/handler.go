@@ -17,6 +17,8 @@ type Handler struct {
 	mod *Module
 }
 
+const maxSupplierWithdrawalRequestBytes int64 = 8 << 20
+
 func NewHandler(mod *Module) *Handler {
 	return &Handler{mod: mod}
 }
@@ -157,6 +159,33 @@ func (h *Handler) PostTicket(c *gin.Context) {
 		writeAftersaleError(c, err)
 		return
 	}
+	c.JSON(http.StatusCreated, ticketDetailResponse(*view))
+}
+
+func (h *Handler) PostSupplierWithdrawal(c *gin.Context) {
+	userID, ok := currentUserID(c)
+	if !ok {
+		return
+	}
+	role, _ := middleware.GetCurrentRole(c)
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxSupplierWithdrawalRequestBytes)
+	var req CreateSupplierWithdrawalRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		badRequest(c)
+		return
+	}
+	view, err := h.mod.UseCase.CreateSupplierWithdrawal(c.Request.Context(), aftersaleapp.CreateSupplierWithdrawalRequest{
+		RequesterUserID: userID,
+		SupplierAccess:  role.HasSupplierAccess(),
+		Amount:          req.Amount,
+		Note:            req.Note,
+		PaymentQRCode:   req.PaymentQRCode,
+	})
+	if err != nil {
+		writeAftersaleError(c, err)
+		return
+	}
+	c.Header("Location", "/v1/tickets/"+view.Ticket.TicketNo)
 	c.JSON(http.StatusCreated, ticketDetailResponse(*view))
 }
 
@@ -334,6 +363,10 @@ func writeAftersaleError(c *gin.Context, err error) {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Order is not eligible for after-sale.", "requestId": requestID})
 	case errors.Is(err, domain.ErrAttachmentTooLarge):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Attachment is too large.", "requestId": requestID})
+	case errors.Is(err, domain.ErrInsufficientSupplierBalance):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Withdrawal exceeds withdrawable balance.", "requestId": requestID})
+	case errors.Is(err, domain.ErrSupplierWalletUnavailable):
+		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "Supplier wallet is unavailable.", "requestId": requestID})
 	case errors.Is(err, domain.ErrInvalidTicketRequest), errors.Is(err, domain.ErrAttachmentInvalid):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Invalid ticket request.", "requestId": requestID})
 	default:
