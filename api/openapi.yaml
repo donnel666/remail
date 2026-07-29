@@ -511,7 +511,7 @@ paths:
             Set-Cookie:
               schema:
                 type: string
-                description: sid HttpOnly cookie and csrf_token SameSite cookie
+                description: sid_points_v2 HttpOnly cookie and csrf_token_points_v2 SameSite cookie
           content:
             application/json:
               schema:
@@ -6530,6 +6530,55 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/recharges/quote:
+    post:
+      operationId: postRechargeQuote
+      summary: Quote a recharge entirely in points
+      description: Returns the point principal, bonus, fee, and credited total.
+      tags:
+        - Billing
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RechargeQuoteRequest"
+      responses:
+        "200":
+          description: Point quote
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RechargeQuoteResponse"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid point amount
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: Recharge configuration unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /v1/recharges/{rechargeNo}:
     get:
       operationId: getRecharge
@@ -10822,7 +10871,7 @@ components:
       required: true
       schema:
         type: string
-      description: CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+      description: CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 
     OptionalCsrfToken:
       name: X-CSRF-Token
@@ -10830,7 +10879,7 @@ components:
       required: false
       schema:
         type: string
-      description: CSRF token from the csrf_token SameSite cookie; required for Session state-changing requests and ignored for API Key requests.
+      description: CSRF token from the csrf_token_points_v2 SameSite cookie; required for Session state-changing requests and ignored for API Key requests.
 
     IdempotencyKey:
       name: Idempotency-Key
@@ -11259,18 +11308,23 @@ components:
 
     LedgerAmount:
       type: string
-      description: Signed internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the absolute value must fit DECIMAL(18,6).
+      description: Signed point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the absolute value must fit DECIMAL(18,6).
       pattern: '^-?[0-9]+(\.[0-9]{1,6})?$'
 
     NonNegativeLedgerAmount:
       type: string
-      description: Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+      description: Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
       pattern: '^[0-9]+(\.[0-9]{1,6})?$'
 
-    PaymentAmount:
+    LedgerAmountResponse:
       type: string
-      description: External payment-channel amount limited to 2 decimal places.
-      pattern: '^[0-9]+(\.[0-9]{1,2})?$'
+      description: Signed point amount with up to 6 decimal places.
+      pattern: '^-?[0-9]+(\.[0-9]{1,6})?$'
+
+    NonNegativeLedgerAmountResponse:
+      type: string
+      description: Non-negative point amount with up to 6 decimal places.
+      pattern: '^[0-9]+(\.[0-9]{1,6})?$'
 
     OrderOwnerSummary:
       type: object
@@ -11352,9 +11406,9 @@ components:
             - service_token_failed
             - activation_failed
         payAmount:
-          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
         refundAmount:
-          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
         allocationType:
           type: string
           enum: [microsoft, domain]
@@ -11895,11 +11949,11 @@ components:
           type: string
           enum: [in, out]
         amount:
-          $ref: "#/components/schemas/LedgerAmount"
+          $ref: "#/components/schemas/LedgerAmountResponse"
         balanceBefore:
-          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
         balanceAfter:
-          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
         bizType:
           type: string
         bizId:
@@ -11935,8 +11989,7 @@ components:
         - rechargeNo
         - userId
         - paymentMethod
-        - rechargeQuota
-        - paymentAmount
+        - creditedPoints
         - status
         - queryAttempts
         - expiresAt
@@ -11951,10 +12004,8 @@ components:
           type: integer
         paymentMethod:
           type: string
-        rechargeQuota:
+        creditedPoints:
           $ref: "#/components/schemas/NonNegativeLedgerAmount"
-        paymentAmount:
-          $ref: "#/components/schemas/PaymentAmount"
         status:
           type: string
           enum: [paying, callback, reconciled, credited, failed]
@@ -12006,37 +12057,37 @@ components:
     RechargeTier:
       type: object
       required:
-        - amount
-        - bonus
-        - rechargeQuota
-        - paymentAmount
+        - points
+        - bonusPoints
+        - feePoints
+        - creditedPoints
       properties:
-        amount:
-          $ref: "#/components/schemas/PaymentAmount"
-        bonus:
+        points:
           $ref: "#/components/schemas/NonNegativeLedgerAmount"
-        rechargeQuota:
+        bonusPoints:
           $ref: "#/components/schemas/NonNegativeLedgerAmount"
-        paymentAmount:
-          $ref: "#/components/schemas/PaymentAmount"
+        feePoints:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        creditedPoints:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
       additionalProperties: false
 
     RechargeConfigResponse:
       type: object
       required:
         - enabled
-        - minAmount
+        - minPoints
         - feeRate
-        - feeCap
+        - feeCapPoints
         - tiers
       properties:
         enabled:
           type: boolean
-        minAmount:
-          $ref: "#/components/schemas/PaymentAmount"
+        minPoints:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
         feeRate:
           $ref: "#/components/schemas/NonNegativeLedgerAmount"
-        feeCap:
+        feeCapPoints:
           $ref: "#/components/schemas/NonNegativeLedgerAmount"
         tiers:
           type: array
@@ -12047,10 +12098,37 @@ components:
     CreateRechargeRequest:
       type: object
       required:
-        - amount
+        - points
       properties:
-        amount:
-          $ref: "#/components/schemas/PaymentAmount"
+        points:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+      additionalProperties: false
+
+    RechargeQuoteRequest:
+      type: object
+      required:
+        - points
+      properties:
+        points:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+      additionalProperties: false
+
+    RechargeQuoteResponse:
+      type: object
+      required:
+        - points
+        - bonusPoints
+        - feePoints
+        - creditedPoints
+      properties:
+        points:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        bonusPoints:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        feePoints:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        creditedPoints:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
       additionalProperties: false
 
     CreateRechargeResponse:
@@ -12157,11 +12235,11 @@ components:
           type: string
           enum: [in, out]
         amount:
-          $ref: "#/components/schemas/LedgerAmount"
+          $ref: "#/components/schemas/LedgerAmountResponse"
         balanceBefore:
-          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
         balanceAfter:
-          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
         bizType:
           type: string
         bizId:
@@ -18326,7 +18404,7 @@ components:
           type: string
           enum: [allocated, released]
         payAmount:
-          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
         buyerEmail:
           type: string
           format: email
@@ -18421,7 +18499,7 @@ components:
         deliveryEmail:
           type: string
         payAmount:
-          type: string
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
         serviceMode:
           type: string
           enum: [code, purchase]
@@ -18441,7 +18519,7 @@ components:
           type: string
           enum: [refunded, closed]
         refundAmount:
-          type: string
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
       additionalProperties: false
 
     TicketMessageResponse:

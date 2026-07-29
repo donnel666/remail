@@ -8,7 +8,7 @@ import (
 )
 
 func TestProxyPendingDispatchMigrationRoundTripRehydratesLegacyJobsMySQL(t *testing.T) {
-	db := newProxyMySQLTestDB(t)
+	db, migrationsDir := newProxyLegacyMigrationTestDB(t)
 	serverID := createProxyServerFixture(t, db, "127.0.0.1")
 	require.NoError(t, db.Exec(`
 INSERT INTO proxies(
@@ -22,7 +22,7 @@ VALUES
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	require.NoError(t, goose.SetDialect("mysql"))
-	require.NoError(t, goose.DownTo(sqlDB, proxyMigrationsDir(t), 26))
+	require.NoError(t, goose.DownTo(sqlDB, migrationsDir, 26))
 
 	var statuses []string
 	require.NoError(t, db.Table("proxies").Where("id IN ?", []uint{990271, 990272}).Order("id").Pluck("status", &statuses).Error)
@@ -47,7 +47,7 @@ VALUES
 		{ProxyID: 990272, Status: "pending", Operator: 72, Request: "request-checking", Path: "/checking"},
 	}, jobs)
 
-	require.NoError(t, goose.UpTo(sqlDB, proxyMigrationsDir(t), 27))
+	require.NoError(t, goose.UpTo(sqlDB, migrationsDir, 27))
 	require.False(t, db.Migrator().HasTable("proxy_check_jobs"))
 	var rows []struct {
 		Status     string `gorm:"column:status"`

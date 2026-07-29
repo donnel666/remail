@@ -81,6 +81,22 @@ func TestLoadSessionPreservesCookiesWhenSessionLookupFails(t *testing.T) {
 	}
 }
 
+func TestCSRFRequiredRejectsLegacyCookieNamespace(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/protected", CSRFRequired(), func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	request := httptest.NewRequest(http.MethodPost, "/protected", nil)
+	request.AddCookie(&http.Cookie{Name: "csrf_token", Value: "legacy-csrf"})
+	request.Header.Set(CSRFHeaderName, "legacy-csrf")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusForbidden, response.Code)
+}
+
 func TestPermissionRequiredDoesNotExposeCheckerErrors(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()

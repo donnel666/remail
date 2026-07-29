@@ -37,7 +37,7 @@ export interface TicketMessage {
 export interface TicketResolution {
   kind: TicketResolutionKind;
   note?: string;
-  refundAmount?: number;
+  refundAmount?: string;
 }
 
 export interface Ticket {
@@ -85,13 +85,12 @@ export interface TicketListResponse {
 // ---------------------------------------------------------------------------
 
 function toOrderRef(order: TicketOrderDTO): TicketOrderRef {
-  const payAmount = Number(order.payAmount);
   return {
     orderNo: order.orderNo,
     projectName: order.projectName || "-",
     projectLogoUrl: order.projectLogoUrl || undefined,
     deliveryEmail: order.deliveryEmail,
-    payAmount: Number.isFinite(payAmount) ? payAmount : 0,
+    payAmount: order.payAmount,
     serviceMode: order.serviceMode,
     afterSaleUntil: order.afterSaleUntil || undefined,
     hasSupplier: order.hasSupplier ?? false,
@@ -127,10 +126,7 @@ function toTicket(dto: TicketResponse): Ticket {
     resolution: dto.resolution
       ? {
           kind: dto.resolution.kind,
-          refundAmount:
-            dto.resolution.refundAmount != null
-              ? Number(dto.resolution.refundAmount)
-              : undefined,
+          refundAmount: dto.resolution.refundAmount,
         }
       : undefined,
     requesterUnreadCount: dto.requesterUnreadCount,

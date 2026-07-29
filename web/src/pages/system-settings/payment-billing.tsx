@@ -10,7 +10,7 @@ import { applyEPayURLDefaults, changeEPayVersion, EPAY_GATEWAY_KEYS, EPAY_WRITE_
 import { SettingsAccessBoundary, SettingsCardHeader, SettingsFormGrid, SettingsNumberField, SettingsSection, SettingsSelectField, SettingsTextField, SettingsTextareaField } from "./settings-layout";
 import { parseTopupTiers, serializeTopupTiers, type TopupTier } from "./topup-tiers";
 
-const D: Record<string, unknown> = { epay_enabled: false, epay_version: "v1", epay_gateway_url: "", epay_merchant_id: "", epay_merchant_key: "", epay_private_key: "", epay_platform_public_key: "", epay_notify_url: "", epay_return_url: "", min_topup_amount: 10, topup_fee_rate: 0, topup_fee_cap: 0, topup_amount_presets: "[10, 20, 50, 100, 200, 500]", topup_amount_bonus: "{}", max_pending_recharge_orders: 10, async_check_request_timeout_seconds: 5 };
+const D: Record<string, unknown> = { epay_enabled: false, epay_version: "v1", epay_gateway_url: "", epay_merchant_id: "", epay_merchant_key: "", epay_private_key: "", epay_platform_public_key: "", epay_notify_url: "", epay_return_url: "", points_per_yuan: 1000, min_topup_amount: 10000, topup_fee_rate: 0, topup_fee_cap: 0, topup_amount_presets: "[10000, 20000, 50000, 100000, 200000, 500000]", topup_amount_bonus: "{}", max_pending_recharge_orders: 10, async_check_request_timeout_seconds: 5 };
 const EPAY_WRITE_ONLY = new Set<string>(EPAY_WRITE_ONLY_KEYS);
 
 export default function PaymentSection({ options, onBulkSave, canSensitive }: SectionProps) {
@@ -36,12 +36,12 @@ export default function PaymentSection({ options, onBulkSave, canSensitive }: Se
   };
   const saveTopup = async () => {
     if (topupTiers.some(({ amount, bonus }) => !Number.isFinite(amount) || amount <= 0 || !Number.isFinite(bonus) || bonus < 0)) {
-      Toast.warning(t("充值档位金额必须大于 0，赠送金额不能为负数"));
+      Toast.warning(t("充值档位积分必须大于 0，赠送积分不能为负数"));
       return;
     }
-    const amounts = topupTiers.map(({ amount }) => amount.toFixed(2));
+    const amounts = topupTiers.map(({ amount }) => amount.toFixed(6));
     if (new Set(amounts).size !== amounts.length) {
-      Toast.warning(t("充值档位金额不能重复"));
+      Toast.warning(t("充值档位积分不能重复"));
       return;
     }
     const serialized = serializeTopupTiers(topupTiers);
@@ -52,7 +52,7 @@ export default function PaymentSection({ options, onBulkSave, canSensitive }: Se
     } finally { setSavingCard(null); }
   };
   const updateTier = (index: number, values: Partial<TopupTier>) => setTopupTiers((current) => current.map((tier, tierIndex) => tierIndex === index ? { ...tier, ...values } : tier));
-  const addTier = () => setTopupTiers((current) => [...current, { amount: current.length ? Math.max(...current.map(({ amount }) => amount)) + 10 : 10, bonus: 0 }]);
+  const addTier = () => setTopupTiers((current) => [...current, { amount: current.length ? Math.max(...current.map(({ amount }) => amount)) + 10000 : 10000, bonus: 0 }]);
 
   return <div className="space-y-6">
     <SettingsAccessBoundary canWrite={canSensitive}>
@@ -72,35 +72,36 @@ export default function PaymentSection({ options, onBulkSave, canSensitive }: Se
       </SettingsSection>
     </SettingsAccessBoundary>
 
-    <SettingsSection title={<SettingsCardHeader icon={<WalletCards size={16} />} title={t("充值配置")} description={t("配置最低充值额度、手续费和前端充值档位")} />}>
+    <SettingsSection title={<SettingsCardHeader icon={<WalletCards size={16} />} title={t("充值配置")} description={t("配置支付宝积分汇率、最低充值积分、手续费和前端充值档位")} />}>
       <SettingsFormGrid className="mt-4">
-        <SettingsNumberField label={t("最低充值金额")} value={number(form.min_topup_amount)} onChange={(value) => update("min_topup_amount", value)} min={0.01} precision={2} step={0.01} />
+        <SettingsNumberField label={t("支付宝汇率（1 人民币等于多少积分）")} description={t("仅创建支付宝订单时用于把积分换算为人民币")} value={number(form.points_per_yuan)} onChange={(value) => update("points_per_yuan", value)} min={0.000001} precision={6} step={1} />
+        <SettingsNumberField label={t("最低充值积分")} value={number(form.min_topup_amount)} onChange={(value) => update("min_topup_amount", value)} min={0.000001} precision={6} step={0.01} />
         <SettingsNumberField label={t("充值手续费率（%）")} description={t("千分之六请输入 0.6")} value={number(form.topup_fee_rate)} onChange={(value) => update("topup_fee_rate", value)} min={0} max={100} precision={6} step={0.1} />
-        <SettingsNumberField label={t("手续费封顶金额")} description={t("0 表示不封顶")} value={number(form.topup_fee_cap)} onChange={(value) => update("topup_fee_cap", value)} min={0} precision={2} step={0.01} />
+        <SettingsNumberField label={t("手续费封顶积分")} description={t("0 表示不封顶")} value={number(form.topup_fee_cap)} onChange={(value) => update("topup_fee_cap", value)} min={0} precision={6} step={0.01} />
         <SettingsNumberField label={t("单用户最大未支付充值订单数")} value={number(form.max_pending_recharge_orders)} onChange={(value) => update("max_pending_recharge_orders", value)} min={1} max={100} precision={0} />
       </SettingsFormGrid>
       <div className="mt-5 overflow-hidden rounded-lg border border-[var(--semi-color-border)]">
         <div className="flex items-center justify-between gap-4 bg-[var(--semi-color-fill-0)] px-4 py-3">
           <div>
             <div className="text-sm font-medium text-[var(--semi-color-text-0)]">{t("充值档位")}</div>
-            <div className="mt-0.5 text-xs text-[var(--semi-color-text-2)]">{t("逐项设置前端面额和对应赠送金额，赠送为 0 表示不赠送")}</div>
+            <div className="mt-0.5 text-xs text-[var(--semi-color-text-2)]">{t("逐项设置前端积分和对应赠送积分，赠送为 0 表示不赠送")}</div>
           </div>
           <Button icon={<Plus size={14} />} onClick={addTier} size="small">{t("添加档位")}</Button>
         </div>
         <div className="hidden grid-cols-[1fr_1fr_32px] gap-4 border-t border-[var(--semi-color-border)] px-4 py-2 text-xs text-[var(--semi-color-text-2)] sm:grid">
-          <span>{t("充值金额")}</span>
-          <span>{t("赠送金额")}</span>
+          <span>{t("充值积分")}</span>
+          <span>{t("赠送积分")}</span>
           <span />
         </div>
         {topupTiers.length ? topupTiers.map((tier, index) => (
           <div key={index} className="grid gap-3 border-t border-[var(--semi-color-border)] px-4 py-3 sm:grid-cols-[1fr_1fr_32px] sm:items-center sm:gap-4">
             <label className="min-w-0">
-              <span className="mb-1.5 block text-xs text-[var(--semi-color-text-2)] sm:hidden">{t("充值金额")}</span>
-              <InputNumber aria-label={t("充值金额")} min={0.01} onNumberChange={(value) => updateTier(index, { amount: Number(value) || 0 })} precision={2} prefix="¥" style={{ width: "100%" }} value={tier.amount || ""} />
+              <span className="mb-1.5 block text-xs text-[var(--semi-color-text-2)] sm:hidden">{t("充值积分")}</span>
+              <InputNumber aria-label={t("充值积分")} min={0.000001} onNumberChange={(value) => updateTier(index, { amount: Number(value) || 0 })} precision={6} style={{ width: "100%" }} value={tier.amount || ""} />
             </label>
             <label className="min-w-0">
-              <span className="mb-1.5 block text-xs text-[var(--semi-color-text-2)] sm:hidden">{t("赠送金额")}</span>
-              <InputNumber aria-label={t("赠送金额")} min={0} onNumberChange={(value) => updateTier(index, { bonus: Number(value) || 0 })} precision={2} prefix="¥" style={{ width: "100%" }} value={tier.bonus} />
+              <span className="mb-1.5 block text-xs text-[var(--semi-color-text-2)] sm:hidden">{t("赠送积分")}</span>
+              <InputNumber aria-label={t("赠送积分")} min={0} onNumberChange={(value) => updateTier(index, { bonus: Number(value) || 0 })} precision={6} style={{ width: "100%" }} value={tier.bonus} />
             </label>
             <Button aria-label={t("删除档位")} icon={<Trash2 size={14} />} onClick={() => setTopupTiers((current) => current.filter((_, tierIndex) => tierIndex !== index))} size="small" theme="borderless" type="danger" />
           </div>

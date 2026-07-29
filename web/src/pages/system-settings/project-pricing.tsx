@@ -10,12 +10,12 @@ import { PROJECT_PRICE_KEYS } from "./payment-billing-keys";
 import { SettingsCardHeader, SettingsFormGrid, SettingsNumberField, SettingsSection } from "./settings-layout";
 
 const DEFAULTS = {
-  default_project_microsoft_code_price: 0.008,
-  default_project_microsoft_code_supplier_price: 0.005,
-  default_project_microsoft_purchase_price: 0.01,
-  default_project_microsoft_purchase_supplier_price: 0.007,
-  default_project_domain_code_price: 0.08,
-  default_project_domain_code_supplier_price: 0.04,
+  default_project_microsoft_code_price: 8,
+  default_project_microsoft_code_supplier_price: 5,
+  default_project_microsoft_purchase_price: 10,
+  default_project_microsoft_purchase_supplier_price: 7,
+  default_project_domain_code_price: 80,
+  default_project_domain_code_supplier_price: 40,
   default_project_domain_purchase_price: 0,
   default_project_domain_purchase_supplier_price: 0,
 };
@@ -26,7 +26,7 @@ export default function ProjectPricingSection({ options, onBulkSave }: SectionPr
   const [saving, setSaving] = useState(false);
   const update = (key: keyof typeof DEFAULTS, value: number) => setForm((current) => ({ ...current, [key]: value }));
   const field = (label: string, key: keyof typeof DEFAULTS) => (
-    <SettingsNumberField label={t(label)} min={0} onChange={(value) => update(key, value)} precision={6} step={0.000001} value={form[key]} />
+    <SettingsNumberField label={`${t(label)}（${t("Points")}）`} min={0} onChange={(value) => update(key, value)} precision={6} step={0.01} value={form[key]} />
   );
   const save = async () => {
     setSaving(true);

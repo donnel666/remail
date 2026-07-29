@@ -47,7 +47,7 @@ describe("supplier withdrawal tickets", () => {
     ).toBe("Withdrawal exceeds withdrawable balance.");
   });
 
-  it("limits Alipay withdrawals to cents while keeping wallet ledger precision", () => {
+  it("keeps six-decimal point precision for Alipay and wallet withdrawals", () => {
     expect(
       validateWithdrawal({
         amount: "12.345678",
@@ -55,7 +55,7 @@ describe("supplier withdrawal tickets", () => {
         destination: "alipay",
         paymentQrCode: "data:image/png;base64,qr",
       }),
-    ).toBe("Alipay withdrawal amount supports at most 2 decimal places.");
+    ).toBeNull();
     expect(
       validateWithdrawal({
         amount: "12.345678",
@@ -84,7 +84,7 @@ describe("supplier withdrawal tickets", () => {
     ).toEqual({
       ticketType: "general",
       title: "供应商提现申请",
-      firstMessage: "提现金额：￥12.50\n提现方式：支付宝\n备注：请处理",
+      firstMessage: "提现积分：12.50 积分\n提现方式：支付宝\n备注：请处理",
       attachments: ["data:image/png;base64,qr"],
     });
   });

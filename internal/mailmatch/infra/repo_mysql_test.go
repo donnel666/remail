@@ -19,17 +19,27 @@ import (
 	"gorm.io/gorm"
 )
 
-var mailmatchMySQLTestServer = testmysql.New("remail_mailmatch_repo_test")
+var (
+	mailmatchMySQLTestServer       = testmysql.New("remail_mailmatch_repo_test")
+	mailmatchLegacyMySQLTestServer = testmysql.New("remail_mailmatch_legacy_test")
+)
 
 func TestMain(m *testing.M) {
 	code := m.Run()
 	_ = mailmatchMySQLTestServer.Close(context.Background())
+	_ = mailmatchLegacyMySQLTestServer.Close(context.Background())
 	os.Exit(code)
 }
 
 func newMailmatchMySQLTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	return mailmatchMySQLTestServer.Database(t, mailmatchMigrationsDir(t))
+}
+
+func newMailmatchLegacyMigrationTestDB(t *testing.T) (*gorm.DB, string) {
+	t.Helper()
+	migrationsDir := testmysql.MigrationsThrough(t, mailmatchMigrationsDir(t), 65)
+	return mailmatchLegacyMySQLTestServer.Database(t, migrationsDir), migrationsDir
 }
 
 func mailmatchMigrationsDir(t *testing.T) string {
@@ -57,7 +67,7 @@ VALUES (?, 99999, ?)`, orderID, now).Error
 }
 
 func TestMessageProjectionMigrationDownRestoresLegacyDecisionMySQL(t *testing.T) {
-	db := newMailmatchMySQLTestDB(t)
+	db, migrationsDir := newMailmatchLegacyMigrationTestDB(t)
 	orderID := seedMailmatchOrder(t, db, "OR_PROJECTION_DOWN")
 	require.NoError(t, db.Exec(`
 INSERT INTO wallet_transactions(
@@ -83,7 +93,7 @@ WHERE id = ?`, orderID).Error)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	require.NoError(t, goose.SetDialect("mysql"))
-	require.NoError(t, goose.DownTo(sqlDB, mailmatchMigrationsDir(t), 39))
+	require.NoError(t, goose.DownTo(sqlDB, migrationsDir, 39))
 
 	var legacy MessageModel
 	require.NoError(t, db.First(&legacy, messageID).Error)

@@ -3968,7 +3968,7 @@ type ActivationResponse struct {
 
 // AdminAdjustWalletRequest defines model for AdminAdjustWalletRequest.
 type AdminAdjustWalletRequest struct {
-	// Amount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// Amount Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	Amount NonNegativeLedgerAmount `json:"amount"`
 	Reason string                  `json:"reason"`
 }
@@ -3985,18 +3985,18 @@ type AdminAllocationItem struct {
 	OrderNo     string                         `json:"orderNo"`
 	OrderStatus AdminAllocationItemOrderStatus `json:"orderStatus"`
 
-	// PayAmount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
-	PayAmount        NonNegativeLedgerAmount        `json:"payAmount"`
-	ProjectId        int                            `json:"projectId"`
-	ProjectLogoUrl   *string                        `json:"projectLogoUrl"`
-	ProjectName      string                         `json:"projectName"`
-	ReceiveUntil     *time.Time                     `json:"receiveUntil"`
-	ResourceId       int                            `json:"resourceId"`
-	ServiceMode      AdminAllocationItemServiceMode `json:"serviceMode"`
-	Status           AdminAllocationItemStatus      `json:"status"`
-	SupplyScope      AdminAllocationItemSupplyScope `json:"supplyScope"`
-	Type             AdminAllocationItemType        `json:"type"`
-	VerificationCode *string                        `json:"verificationCode"`
+	// PayAmount Non-negative point amount with up to 6 decimal places.
+	PayAmount        NonNegativeLedgerAmountResponse `json:"payAmount"`
+	ProjectId        int                             `json:"projectId"`
+	ProjectLogoUrl   *string                         `json:"projectLogoUrl"`
+	ProjectName      string                          `json:"projectName"`
+	ReceiveUntil     *time.Time                      `json:"receiveUntil"`
+	ResourceId       int                             `json:"resourceId"`
+	ServiceMode      AdminAllocationItemServiceMode  `json:"serviceMode"`
+	Status           AdminAllocationItemStatus       `json:"status"`
+	SupplyScope      AdminAllocationItemSupplyScope  `json:"supplyScope"`
+	Type             AdminAllocationItemType         `json:"type"`
+	VerificationCode *string                         `json:"verificationCode"`
 }
 
 // AdminAllocationItemMailbox defines model for AdminAllocationItem.Mailbox.
@@ -5128,14 +5128,14 @@ type AdminTaskView struct {
 
 // AdminTransactionItem defines model for AdminTransactionItem.
 type AdminTransactionItem struct {
-	// Amount Signed internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the absolute value must fit DECIMAL(18,6).
-	Amount LedgerAmount `json:"amount"`
+	// Amount Signed point amount with up to 6 decimal places.
+	Amount LedgerAmountResponse `json:"amount"`
 
-	// BalanceAfter Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
-	BalanceAfter NonNegativeLedgerAmount `json:"balanceAfter"`
+	// BalanceAfter Non-negative point amount with up to 6 decimal places.
+	BalanceAfter NonNegativeLedgerAmountResponse `json:"balanceAfter"`
 
-	// BalanceBefore Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
-	BalanceBefore   NonNegativeLedgerAmount             `json:"balanceBefore"`
+	// BalanceBefore Non-negative point amount with up to 6 decimal places.
+	BalanceBefore   NonNegativeLedgerAmountResponse     `json:"balanceBefore"`
 	BalanceBucket   AdminTransactionItemBalanceBucket   `json:"balanceBucket"`
 	BizId           string                              `json:"bizId"`
 	BizType         string                              `json:"bizType"`
@@ -5192,7 +5192,7 @@ type AdminUpdateUserGroupRequest struct {
 	// PriceDiscountRatio Exact decimal discount ratio from 0 through 1, with up to 6 decimal places.
 	PriceDiscountRatio *UserGroupDiscountRatio `json:"priceDiscountRatio,omitempty"`
 
-	// TopupThreshold Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// TopupThreshold Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	TopupThreshold *NonNegativeLedgerAmount `json:"topupThreshold,omitempty"`
 }
 
@@ -5310,13 +5310,13 @@ type AdminWalletBalanceList struct {
 
 // AdminWalletItem defines model for AdminWalletItem.
 type AdminWalletItem struct {
-	// ConsumerBalance Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// ConsumerBalance Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	ConsumerBalance NonNegativeLedgerAmount `json:"consumerBalance"`
 
-	// SupplierAvailable Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// SupplierAvailable Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	SupplierAvailable NonNegativeLedgerAmount `json:"supplierAvailable"`
 
-	// SupplierFrozen Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// SupplierFrozen Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	SupplierFrozen NonNegativeLedgerAmount `json:"supplierFrozen"`
 	UpdatedAt      *time.Time              `json:"updatedAt"`
 	UserEmail      string                  `json:"userEmail"`
@@ -5336,7 +5336,7 @@ type AdminWalletListResponse struct {
 
 // AdminWithdrawWalletRequest defines model for AdminWithdrawWalletRequest.
 type AdminWithdrawWalletRequest struct {
-	// Amount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// Amount Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	Amount NonNegativeLedgerAmount `json:"amount"`
 	Note   *string                 `json:"note,omitempty"`
 }
@@ -5395,7 +5395,7 @@ type CardBulkSelectionMode string
 
 // CardKey defines model for CardKey.
 type CardKey struct {
-	// Amount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// Amount Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	Amount          NonNegativeLedgerAmount `json:"amount"`
 	CardKey         string                  `json:"cardKey"`
 	CreatedAt       time.Time               `json:"createdAt"`
@@ -5448,7 +5448,7 @@ type CardKeyListResponse struct {
 
 // CardRedemptionResponse defines model for CardRedemptionResponse.
 type CardRedemptionResponse struct {
-	// Amount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// Amount Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	Amount        NonNegativeLedgerAmount `json:"amount"`
 	CardKey       string                  `json:"cardKey"`
 	Id            int                     `json:"id"`
@@ -5524,7 +5524,7 @@ type CreateAdminDomainRequestPurpose string
 
 // CreateCardsRequest defines model for CreateCardsRequest.
 type CreateCardsRequest struct {
-	// Amount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// Amount Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	Amount         NonNegativeLedgerAmount `json:"amount"`
 	CardKeys       *[]string               `json:"cardKeys,omitempty"`
 	Count          *int                    `json:"count,omitempty"`
@@ -5625,8 +5625,8 @@ type CreateProxyRequest struct {
 
 // CreateRechargeRequest defines model for CreateRechargeRequest.
 type CreateRechargeRequest struct {
-	// Amount External payment-channel amount limited to 2 decimal places.
-	Amount PaymentAmount `json:"amount"`
+	// Points Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	Points NonNegativeLedgerAmount `json:"points"`
 }
 
 // CreateRechargeResponse defines model for CreateRechargeResponse.
@@ -5660,14 +5660,14 @@ type DailyCheckinResponse struct {
 	BusinessDate openapi_types.Date `json:"businessDate"`
 	CheckedInAt  *time.Time         `json:"checkedInAt,omitempty"`
 
-	// ConsumerBalance Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// ConsumerBalance Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	ConsumerBalance *NonNegativeLedgerAmount `json:"consumerBalance,omitempty"`
 	Enabled         bool                     `json:"enabled"`
 
 	// FirstClaim True only when this request created today's check-in fact.
 	FirstClaim bool `json:"firstClaim"`
 
-	// RewardAmount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// RewardAmount Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	RewardAmount NonNegativeLedgerAmount `json:"rewardAmount"`
 }
 
@@ -5874,7 +5874,7 @@ type FetchStateResponse struct {
 
 // FinanceHotItem defines model for FinanceHotItem.
 type FinanceHotItem struct {
-	// Amount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// Amount Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	Amount NonNegativeLedgerAmount `json:"amount"`
 	Count  int                     `json:"count"`
 	Name   string                  `json:"name"`
@@ -5882,25 +5882,25 @@ type FinanceHotItem struct {
 
 // FinanceSummaryResponse defines model for FinanceSummaryResponse.
 type FinanceSummaryResponse struct {
-	// AccountRevenue Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// AccountRevenue Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	AccountRevenue NonNegativeLedgerAmount `json:"accountRevenue"`
 	HotProducts    []FinanceHotItem        `json:"hotProducts"`
 	HotProjects    []FinanceHotItem        `json:"hotProjects"`
 
-	// PlatformRevenue Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// PlatformRevenue Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	PlatformRevenue NonNegativeLedgerAmount `json:"platformRevenue"`
 
-	// RechargeAmount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// RechargeAmount Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	RechargeAmount NonNegativeLedgerAmount `json:"rechargeAmount"`
 
-	// RefundAmount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// RefundAmount Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	RefundAmount NonNegativeLedgerAmount `json:"refundAmount"`
 
-	// SpendAmount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// SpendAmount Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	SpendAmount NonNegativeLedgerAmount `json:"spendAmount"`
 	Trend       []FinanceTrendPoint     `json:"trend"`
 
-	// WithdrawAmount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// WithdrawAmount Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	WithdrawAmount NonNegativeLedgerAmount `json:"withdrawAmount"`
 }
 
@@ -6051,8 +6051,8 @@ type InviteUseResponse struct {
 	UserRole      string    `json:"userRole"`
 }
 
-// LedgerAmount Signed internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the absolute value must fit DECIMAL(18,6).
-type LedgerAmount = string
+// LedgerAmountResponse Signed point amount with up to 6 decimal places.
+type LedgerAmountResponse = string
 
 // LinuxDOAccountMode defines model for LinuxDOAccountMode.
 type LinuxDOAccountMode string
@@ -6309,8 +6309,11 @@ type MonitoringTaskStats struct {
 	WorkersReady      bool                            `json:"workersReady"`
 }
 
-// NonNegativeLedgerAmount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+// NonNegativeLedgerAmount Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 type NonNegativeLedgerAmount = string
+
+// NonNegativeLedgerAmountResponse Non-negative point amount with up to 6 decimal places.
+type NonNegativeLedgerAmountResponse = string
 
 // OrderBatchItemErrorResponse defines model for OrderBatchItemErrorResponse.
 type OrderBatchItemErrorResponse struct {
@@ -6418,10 +6421,10 @@ type OrderResponse struct {
 	// Owner Safe buyer summary attached to admin site-wide order rows; omitted on the buyer's own order list.
 	Owner *OrderOwnerSummary `json:"owner,omitempty"`
 
-	// PayAmount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
-	PayAmount   NonNegativeLedgerAmount  `json:"payAmount"`
-	ProductType OrderResponseProductType `json:"productType"`
-	ProjectId   int                      `json:"projectId"`
+	// PayAmount Non-negative point amount with up to 6 decimal places.
+	PayAmount   NonNegativeLedgerAmountResponse `json:"payAmount"`
+	ProductType OrderResponseProductType        `json:"productType"`
+	ProjectId   int                             `json:"projectId"`
 
 	// ProjectLogoUrl Current display logo URL of the ordered project; omitted when the project no longer exists or has no logo.
 	ProjectLogoUrl *string `json:"projectLogoUrl,omitempty"`
@@ -6432,10 +6435,10 @@ type OrderResponse struct {
 	ReceiveStartedAt *time.Time `json:"receiveStartedAt,omitempty"`
 	ReceiveUntil     *time.Time `json:"receiveUntil,omitempty"`
 
-	// RefundAmount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
-	RefundAmount         NonNegativeLedgerAmount  `json:"refundAmount"`
-	ServiceCleanupStatus string                   `json:"serviceCleanupStatus"`
-	ServiceMode          OrderResponseServiceMode `json:"serviceMode"`
+	// RefundAmount Non-negative point amount with up to 6 decimal places.
+	RefundAmount         NonNegativeLedgerAmountResponse `json:"refundAmount"`
+	ServiceCleanupStatus string                          `json:"serviceCleanupStatus"`
+	ServiceMode          OrderResponseServiceMode        `json:"serviceMode"`
 
 	// ServiceToken Service credential used by pickup URLs and later mail-result APIs.
 	ServiceToken *string                   `json:"serviceToken,omitempty"`
@@ -6520,9 +6523,6 @@ type PatchAdminDomainRequestPurpose string
 
 // PatchAdminDomainRequestStatusCommand Explicit state-machine command; disabled resources can only use enable, never a DNS result command.
 type PatchAdminDomainRequestStatusCommand string
-
-// PaymentAmount External payment-channel amount limited to 2 decimal places.
-type PaymentAmount = string
 
 // PermissionCatalogItemResponse defines model for PermissionCatalogItemResponse.
 type PermissionCatalogItemResponse struct {
@@ -6797,10 +6797,10 @@ type ProjectProduct struct {
 	ActivationWindowMinutes int  `json:"activationWindowMinutes"`
 	CodeEnabled             bool `json:"codeEnabled"`
 
-	// CodePrice Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// CodePrice Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	CodePrice NonNegativeLedgerAmount `json:"codePrice"`
 
-	// CodeSupplierPrice Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// CodeSupplierPrice Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	CodeSupplierPrice *NonNegativeLedgerAmount `json:"codeSupplierPrice,omitempty"`
 	CodeWindowMinutes int                      `json:"codeWindowMinutes"`
 	CreatedAt         time.Time                `json:"createdAt"`
@@ -6817,10 +6817,10 @@ type ProjectProduct struct {
 	ProjectId       int  `json:"projectId"`
 	PurchaseEnabled bool `json:"purchaseEnabled"`
 
-	// PurchasePrice Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// PurchasePrice Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	PurchasePrice NonNegativeLedgerAmount `json:"purchasePrice"`
 
-	// PurchaseSupplierPrice Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// PurchaseSupplierPrice Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	PurchaseSupplierPrice *NonNegativeLedgerAmount `json:"purchaseSupplierPrice,omitempty"`
 	Status                ProjectProductStatus     `json:"status"`
 	Type                  ProjectProductType       `json:"type"`
@@ -6847,10 +6847,10 @@ type ProjectProductRequest struct {
 	ActivationWindowMinutes *int `json:"activationWindowMinutes,omitempty"`
 	CodeEnabled             bool `json:"codeEnabled"`
 
-	// CodePrice Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// CodePrice Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	CodePrice *NonNegativeLedgerAmount `json:"codePrice,omitempty"`
 
-	// CodeSupplierPrice Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// CodeSupplierPrice Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	CodeSupplierPrice *NonNegativeLedgerAmount `json:"codeSupplierPrice,omitempty"`
 	CodeWindowMinutes *int                     `json:"codeWindowMinutes,omitempty"`
 	DotWeight         *int                     `json:"dotWeight,omitempty"`
@@ -6858,10 +6858,10 @@ type ProjectProductRequest struct {
 	PlusWeight        *int                     `json:"plusWeight,omitempty"`
 	PurchaseEnabled   bool                     `json:"purchaseEnabled"`
 
-	// PurchasePrice Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// PurchasePrice Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	PurchasePrice *NonNegativeLedgerAmount `json:"purchasePrice,omitempty"`
 
-	// PurchaseSupplierPrice Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// PurchaseSupplierPrice Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	PurchaseSupplierPrice *NonNegativeLedgerAmount     `json:"purchaseSupplierPrice,omitempty"`
 	Status                *ProjectProductRequestStatus `json:"status,omitempty"`
 	Type                  ProjectProductRequestType    `json:"type"`
@@ -6879,7 +6879,7 @@ type ProjectProductSummary struct {
 	ActivationWindowMinutes int  `json:"activationWindowMinutes"`
 	CodeEnabled             bool `json:"codeEnabled"`
 
-	// CodePrice Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// CodePrice Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	CodePrice         NonNegativeLedgerAmount `json:"codePrice"`
 	CodeWindowMinutes int                     `json:"codeWindowMinutes"`
 	Id                int                     `json:"id"`
@@ -6888,7 +6888,7 @@ type ProjectProductSummary struct {
 	PublicAvailable int64 `json:"publicAvailable"`
 	PurchaseEnabled bool  `json:"purchaseEnabled"`
 
-	// PurchasePrice Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// PurchasePrice Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	PurchasePrice NonNegativeLedgerAmount     `json:"purchasePrice"`
 	Status        ProjectProductSummaryStatus `json:"status"`
 	Suffixes      *[]ProductSuffixInventory   `json:"suffixes,omitempty"`
@@ -7050,38 +7050,35 @@ type ReadyzResponse struct {
 type RechargeConfigResponse struct {
 	Enabled bool `json:"enabled"`
 
-	// FeeCap Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
-	FeeCap NonNegativeLedgerAmount `json:"feeCap"`
+	// FeeCapPoints Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	FeeCapPoints NonNegativeLedgerAmount `json:"feeCapPoints"`
 
-	// FeeRate Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// FeeRate Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	FeeRate NonNegativeLedgerAmount `json:"feeRate"`
 
-	// MinAmount External payment-channel amount limited to 2 decimal places.
-	MinAmount PaymentAmount  `json:"minAmount"`
-	Tiers     []RechargeTier `json:"tiers"`
+	// MinPoints Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	MinPoints NonNegativeLedgerAmount `json:"minPoints"`
+	Tiers     []RechargeTier          `json:"tiers"`
 }
 
 // RechargeItem defines model for RechargeItem.
 type RechargeItem struct {
-	CreatedAt      time.Time  `json:"createdAt"`
-	ExpiresAt      time.Time  `json:"expiresAt"`
-	FailureReason  *string    `json:"failureReason,omitempty"`
-	GatewayTradeNo *string    `json:"gatewayTradeNo,omitempty"`
-	Id             int        `json:"id"`
-	PaidAt         *time.Time `json:"paidAt,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
 
-	// PaymentAmount External payment-channel amount limited to 2 decimal places.
-	PaymentAmount PaymentAmount `json:"paymentAmount"`
-	PaymentMethod string        `json:"paymentMethod"`
-	QueryAttempts int           `json:"queryAttempts"`
-	RechargeNo    string        `json:"rechargeNo"`
-
-	// RechargeQuota Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
-	RechargeQuota NonNegativeLedgerAmount `json:"rechargeQuota"`
-	ReconciledAt  *time.Time              `json:"reconciledAt,omitempty"`
-	Status        RechargeItemStatus      `json:"status"`
-	UpdatedAt     time.Time               `json:"updatedAt"`
-	UserId        int                     `json:"userId"`
+	// CreditedPoints Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	CreditedPoints NonNegativeLedgerAmount `json:"creditedPoints"`
+	ExpiresAt      time.Time               `json:"expiresAt"`
+	FailureReason  *string                 `json:"failureReason,omitempty"`
+	GatewayTradeNo *string                 `json:"gatewayTradeNo,omitempty"`
+	Id             int                     `json:"id"`
+	PaidAt         *time.Time              `json:"paidAt,omitempty"`
+	PaymentMethod  string                  `json:"paymentMethod"`
+	QueryAttempts  int                     `json:"queryAttempts"`
+	RechargeNo     string                  `json:"rechargeNo"`
+	ReconciledAt   *time.Time              `json:"reconciledAt,omitempty"`
+	Status         RechargeItemStatus      `json:"status"`
+	UpdatedAt      time.Time               `json:"updatedAt"`
+	UserId         int                     `json:"userId"`
 }
 
 // RechargeItemStatus defines model for RechargeItem.Status.
@@ -7095,19 +7092,40 @@ type RechargeListResponse struct {
 	Total  int            `json:"total"`
 }
 
+// RechargeQuoteRequest defines model for RechargeQuoteRequest.
+type RechargeQuoteRequest struct {
+	// Points Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	Points NonNegativeLedgerAmount `json:"points"`
+}
+
+// RechargeQuoteResponse defines model for RechargeQuoteResponse.
+type RechargeQuoteResponse struct {
+	// BonusPoints Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	BonusPoints NonNegativeLedgerAmount `json:"bonusPoints"`
+
+	// CreditedPoints Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	CreditedPoints NonNegativeLedgerAmount `json:"creditedPoints"`
+
+	// FeePoints Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	FeePoints NonNegativeLedgerAmount `json:"feePoints"`
+
+	// Points Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	Points NonNegativeLedgerAmount `json:"points"`
+}
+
 // RechargeTier defines model for RechargeTier.
 type RechargeTier struct {
-	// Amount External payment-channel amount limited to 2 decimal places.
-	Amount PaymentAmount `json:"amount"`
+	// BonusPoints Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	BonusPoints NonNegativeLedgerAmount `json:"bonusPoints"`
 
-	// Bonus Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
-	Bonus NonNegativeLedgerAmount `json:"bonus"`
+	// CreditedPoints Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	CreditedPoints NonNegativeLedgerAmount `json:"creditedPoints"`
 
-	// PaymentAmount External payment-channel amount limited to 2 decimal places.
-	PaymentAmount PaymentAmount `json:"paymentAmount"`
+	// FeePoints Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	FeePoints NonNegativeLedgerAmount `json:"feePoints"`
 
-	// RechargeQuota Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
-	RechargeQuota NonNegativeLedgerAmount `json:"rechargeQuota"`
+	// Points Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	Points NonNegativeLedgerAmount `json:"points"`
 }
 
 // RedeemCardRequest defines model for RedeemCardRequest.
@@ -7451,14 +7469,16 @@ type TicketMessageResponseSenderType string
 
 // TicketOrderResponse defines model for TicketOrderResponse.
 type TicketOrderResponse struct {
-	AfterSaleUntil *time.Time                     `json:"afterSaleUntil,omitempty"`
-	DeliveryEmail  string                         `json:"deliveryEmail"`
-	HasSupplier    bool                           `json:"hasSupplier"`
-	OrderNo        string                         `json:"orderNo"`
-	PayAmount      string                         `json:"payAmount"`
-	ProjectLogoUrl *string                        `json:"projectLogoUrl,omitempty"`
-	ProjectName    *string                        `json:"projectName,omitempty"`
-	ServiceMode    TicketOrderResponseServiceMode `json:"serviceMode"`
+	AfterSaleUntil *time.Time `json:"afterSaleUntil,omitempty"`
+	DeliveryEmail  string     `json:"deliveryEmail"`
+	HasSupplier    bool       `json:"hasSupplier"`
+	OrderNo        string     `json:"orderNo"`
+
+	// PayAmount Non-negative point amount with up to 6 decimal places.
+	PayAmount      NonNegativeLedgerAmountResponse `json:"payAmount"`
+	ProjectLogoUrl *string                         `json:"projectLogoUrl,omitempty"`
+	ProjectName    *string                         `json:"projectName,omitempty"`
+	ServiceMode    TicketOrderResponseServiceMode  `json:"serviceMode"`
 }
 
 // TicketOrderResponseServiceMode defines model for TicketOrderResponse.ServiceMode.
@@ -7466,8 +7486,10 @@ type TicketOrderResponseServiceMode string
 
 // TicketResolutionResponse defines model for TicketResolutionResponse.
 type TicketResolutionResponse struct {
-	Kind         TicketResolutionResponseKind `json:"kind"`
-	RefundAmount *string                      `json:"refundAmount,omitempty"`
+	Kind TicketResolutionResponseKind `json:"kind"`
+
+	// RefundAmount Non-negative point amount with up to 6 decimal places.
+	RefundAmount *NonNegativeLedgerAmountResponse `json:"refundAmount,omitempty"`
 }
 
 // TicketResolutionResponseKind defines model for TicketResolutionResponse.Kind.
@@ -7517,23 +7539,23 @@ type TicketTypeFacets struct {
 
 // TransactionItem defines model for TransactionItem.
 type TransactionItem struct {
-	// Amount Signed internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the absolute value must fit DECIMAL(18,6).
-	Amount LedgerAmount `json:"amount"`
+	// Amount Signed point amount with up to 6 decimal places.
+	Amount LedgerAmountResponse `json:"amount"`
 
-	// BalanceAfter Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
-	BalanceAfter NonNegativeLedgerAmount `json:"balanceAfter"`
+	// BalanceAfter Non-negative point amount with up to 6 decimal places.
+	BalanceAfter NonNegativeLedgerAmountResponse `json:"balanceAfter"`
 
-	// BalanceBefore Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
-	BalanceBefore   NonNegativeLedgerAmount        `json:"balanceBefore"`
-	BalanceBucket   TransactionItemBalanceBucket   `json:"balanceBucket"`
-	BizId           string                         `json:"bizId"`
-	BizType         string                         `json:"bizType"`
-	CreatedAt       time.Time                      `json:"createdAt"`
-	Direction       TransactionItemDirection       `json:"direction"`
-	Id              int                            `json:"id"`
-	TransactionNo   string                         `json:"transactionNo"`
-	TransactionType TransactionItemTransactionType `json:"transactionType"`
-	UserId          int                            `json:"userId"`
+	// BalanceBefore Non-negative point amount with up to 6 decimal places.
+	BalanceBefore   NonNegativeLedgerAmountResponse `json:"balanceBefore"`
+	BalanceBucket   TransactionItemBalanceBucket    `json:"balanceBucket"`
+	BizId           string                          `json:"bizId"`
+	BizType         string                          `json:"bizType"`
+	CreatedAt       time.Time                       `json:"createdAt"`
+	Direction       TransactionItemDirection        `json:"direction"`
+	Id              int                             `json:"id"`
+	TransactionNo   string                          `json:"transactionNo"`
+	TransactionType TransactionItemTransactionType  `json:"transactionType"`
+	UserId          int                             `json:"userId"`
 }
 
 // TransactionItemBalanceBucket defines model for TransactionItem.BalanceBucket.
@@ -7604,7 +7626,7 @@ type UserGroupResponse struct {
 	// PriceDiscountRatio Exact decimal discount ratio from 0 through 1, with up to 6 decimal places.
 	PriceDiscountRatio UserGroupDiscountRatio `json:"priceDiscountRatio"`
 
-	// TopupThreshold Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// TopupThreshold Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	TopupThreshold NonNegativeLedgerAmount `json:"topupThreshold"`
 }
 
@@ -7647,10 +7669,10 @@ type WalletAdjustmentResponse struct {
 type WalletReferralResponse struct {
 	InviteCount int `json:"inviteCount"`
 
-	// PendingRewards Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// PendingRewards Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	PendingRewards NonNegativeLedgerAmount `json:"pendingRewards"`
 
-	// TotalEarned Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// TotalEarned Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	TotalEarned NonNegativeLedgerAmount `json:"totalEarned"`
 }
 
@@ -7658,7 +7680,7 @@ type WalletReferralResponse struct {
 type WalletReferralTransferResponse struct {
 	Transaction TransactionItem `json:"transaction"`
 
-	// TransferredAmount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// TransferredAmount Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	TransferredAmount NonNegativeLedgerAmount `json:"transferredAmount"`
 	TransferredCount  int                     `json:"transferredCount"`
 	Wallet            WalletResponse          `json:"wallet"`
@@ -7666,20 +7688,20 @@ type WalletReferralTransferResponse struct {
 
 // WalletResponse defines model for WalletResponse.
 type WalletResponse struct {
-	// ConsumerBalance Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// ConsumerBalance Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	ConsumerBalance NonNegativeLedgerAmount `json:"consumerBalance"`
 
-	// HistoricalSpend Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// HistoricalSpend Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	HistoricalSpend NonNegativeLedgerAmount `json:"historicalSpend"`
 	OrderCount      int                     `json:"orderCount"`
 
-	// SupplierAvailable Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// SupplierAvailable Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	SupplierAvailable NonNegativeLedgerAmount `json:"supplierAvailable"`
 
-	// SupplierFrozen Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// SupplierFrozen Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	SupplierFrozen NonNegativeLedgerAmount `json:"supplierFrozen"`
 
-	// TotalRecharged Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	// TotalRecharged Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	TotalRecharged NonNegativeLedgerAmount `json:"totalRecharged"`
 	UpdatedAt      time.Time               `json:"updatedAt"`
 	UserId         int                     `json:"userId"`
@@ -7838,7 +7860,7 @@ type GetAdminCardsParamsOwnerRole string
 
 // PostAdminCardsParams defines parameters for PostAdminCards.
 type PostAdminCardsParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
@@ -7847,19 +7869,19 @@ type PostAdminCardsParams struct {
 
 // PostAdminCardsDisableParams defines parameters for PostAdminCardsDisable.
 type PostAdminCardsDisableParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminCardsEnableParams defines parameters for PostAdminCardsEnable.
 type PostAdminCardsEnableParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PatchAdminCardParams defines parameters for PatchAdminCard.
 type PatchAdminCardParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -7871,7 +7893,7 @@ type GetAdminDashboardParams struct {
 
 // PostAdminDomainMailboxDisableParams defines parameters for PostAdminDomainMailboxDisable.
 type PostAdminDomainMailboxDisableParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op.
@@ -7902,7 +7924,7 @@ type GetAdminDomainsParamsStatus string
 
 // PostAdminDomainParams defines parameters for PostAdminDomain.
 type PostAdminDomainParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -7911,7 +7933,7 @@ type PostAdminDomainParams struct {
 
 // PostAdminDomainsDeleteParams defines parameters for PostAdminDomainsDelete.
 type PostAdminDomainsDeleteParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -7920,7 +7942,7 @@ type PostAdminDomainsDeleteParams struct {
 
 // PostAdminDomainsDisableParams defines parameters for PostAdminDomainsDisable.
 type PostAdminDomainsDisableParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -7929,7 +7951,7 @@ type PostAdminDomainsDisableParams struct {
 
 // PostAdminDomainsPublishParams defines parameters for PostAdminDomainsPublish.
 type PostAdminDomainsPublishParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -7938,7 +7960,7 @@ type PostAdminDomainsPublishParams struct {
 
 // PostAdminDomainsUnpublishParams defines parameters for PostAdminDomainsUnpublish.
 type PostAdminDomainsUnpublishParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -7947,7 +7969,7 @@ type PostAdminDomainsUnpublishParams struct {
 
 // PostAdminDomainValidationsParams defines parameters for PostAdminDomainValidations.
 type PostAdminDomainValidationsParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -7959,7 +7981,7 @@ type DeleteAdminDomainParams struct {
 	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
 	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
 
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -7971,7 +7993,7 @@ type PatchAdminDomainParams struct {
 	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
 	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
 
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -7983,7 +8005,7 @@ type PostAdminDomainDisableParams struct {
 	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
 	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
 
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op.
@@ -7995,7 +8017,7 @@ type PostAdminDomainDnsStatusParams struct {
 	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
 	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
 
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op.
@@ -8007,7 +8029,7 @@ type PostAdminDomainEnableParams struct {
 	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
 	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
 
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8025,7 +8047,7 @@ type PostAdminDomainPublishParams struct {
 	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
 	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
 
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8037,7 +8059,7 @@ type PostAdminDomainRecoverParams struct {
 	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
 	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
 
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8049,7 +8071,7 @@ type PostAdminDomainUnpublishParams struct {
 	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
 	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
 
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8058,7 +8080,7 @@ type PostAdminDomainUnpublishParams struct {
 
 // PostAdminDomainValidateParams defines parameters for PostAdminDomainValidate.
 type PostAdminDomainValidateParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8090,31 +8112,31 @@ type GetAdminInvitesParamsOwnerRole string
 
 // PostAdminInviteParams defines parameters for PostAdminInvite.
 type PostAdminInviteParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminInvitesBatchParams defines parameters for PostAdminInvitesBatch.
 type PostAdminInvitesBatchParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminInvitesDisableParams defines parameters for PostAdminInvitesDisable.
 type PostAdminInvitesDisableParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminInvitesEnableParams defines parameters for PostAdminInvitesEnable.
 type PostAdminInvitesEnableParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PatchAdminInviteParams defines parameters for PatchAdminInvite.
 type PatchAdminInviteParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -8122,7 +8144,7 @@ type PatchAdminInviteParams struct {
 type DeleteAdminOperationLogsParams struct {
 	Before time.Time `form:"before" json:"before"`
 
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -8140,7 +8162,7 @@ type GetAdminOperationLogsParams struct {
 type DeleteAdminSystemLogsParams struct {
 	Before time.Time `form:"before" json:"before"`
 
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -8189,13 +8211,13 @@ type GetAdminMessageParamsType string
 
 // PostAdminOrderTimeoutScanParams defines parameters for PostAdminOrderTimeoutScan.
 type PostAdminOrderTimeoutScanParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminOrderCleanupRetryParams defines parameters for PostAdminOrderCleanupRetry.
 type PostAdminOrderCleanupRetryParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -8204,7 +8226,7 @@ type PostAdminOrderRefundParams struct {
 	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
 
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -8213,7 +8235,7 @@ type PostAdminOrderRefundRetryParams struct {
 	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
 
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -8222,25 +8244,25 @@ type PostAdminOrderTerminateParams struct {
 	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
 
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminProjectParams defines parameters for PostAdminProject.
 type PostAdminProjectParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminProjectsDeleteParams defines parameters for PostAdminProjectsDelete.
 type PostAdminProjectsDeleteParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminProjectsDelistParams defines parameters for PostAdminProjectsDelist.
 type PostAdminProjectsDelistParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -8251,79 +8273,79 @@ type PostAdminProjectLogoMultipartBody struct {
 
 // PostAdminProjectLogoParams defines parameters for PostAdminProjectLogo.
 type PostAdminProjectLogoParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminProjectsProductsParams defines parameters for PostAdminProjectsProducts.
 type PostAdminProjectsProductsParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminProjectsRejectParams defines parameters for PostAdminProjectsReject.
 type PostAdminProjectsRejectParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminProjectsRelistParams defines parameters for PostAdminProjectsRelist.
 type PostAdminProjectsRelistParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // DeleteAdminProjectParams defines parameters for DeleteAdminProject.
 type DeleteAdminProjectParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PutAdminProjectParams defines parameters for PutAdminProject.
 type PutAdminProjectParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminProjectAccessParams defines parameters for PostAdminProjectAccess.
 type PostAdminProjectAccessParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // DeleteAdminProjectAccessParams defines parameters for DeleteAdminProjectAccess.
 type DeleteAdminProjectAccessParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminProjectApproveParams defines parameters for PostAdminProjectApprove.
 type PostAdminProjectApproveParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminProjectDelistParams defines parameters for PostAdminProjectDelist.
 type PostAdminProjectDelistParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminProjectDuplicateParams defines parameters for PostAdminProjectDuplicate.
 type PostAdminProjectDuplicateParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminProjectRejectParams defines parameters for PostAdminProjectReject.
 type PostAdminProjectRejectParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminProjectRelistParams defines parameters for PostAdminProjectRelist.
 type PostAdminProjectRelistParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -8364,31 +8386,31 @@ type GetAdminProxyBindingsParamsIp string
 
 // PostAdminProxyCheckBatchParams defines parameters for PostAdminProxyCheckBatch.
 type PostAdminProxyCheckBatchParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminProxyDeleteBatchParams defines parameters for PostAdminProxyDeleteBatch.
 type PostAdminProxyDeleteBatchParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminProxyDisableBatchParams defines parameters for PostAdminProxyDisableBatch.
 type PostAdminProxyDisableBatchParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminProxyImportsParams defines parameters for PostAdminProxyImports.
 type PostAdminProxyImportsParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminResourceProxyParams defines parameters for PostAdminResourceProxy.
 type PostAdminResourceProxyParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -8415,19 +8437,19 @@ type GetAdminProxyStatsParamsStatus string
 
 // PostAdminSystemProxyParams defines parameters for PostAdminSystemProxy.
 type PostAdminSystemProxyParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PatchAdminProxyParams defines parameters for PatchAdminProxy.
 type PatchAdminProxyParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminProxyCheckParams defines parameters for PostAdminProxyCheck.
 type PostAdminProxyCheckParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -8472,7 +8494,7 @@ type GetAdminMicrosoftResourcesParamsType string
 
 // PostAdminMicrosoftResourcesDeleteParams defines parameters for PostAdminMicrosoftResourcesDelete.
 type PostAdminMicrosoftResourcesDeleteParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8481,7 +8503,7 @@ type PostAdminMicrosoftResourcesDeleteParams struct {
 
 // PostAdminMicrosoftResourcesDisableParams defines parameters for PostAdminMicrosoftResourcesDisable.
 type PostAdminMicrosoftResourcesDisableParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8500,7 +8522,7 @@ type PostAdminMicrosoftResourceImportMultipartBody struct {
 
 // PostAdminMicrosoftResourceImportParams defines parameters for PostAdminMicrosoftResourceImport.
 type PostAdminMicrosoftResourceImportParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8512,7 +8534,7 @@ type PostAdminMicrosoftResourceImportMultipartBodyErrorStrategy string
 
 // PostAdminMicrosoftResourcesMaintenanceParams defines parameters for PostAdminMicrosoftResourcesMaintenance.
 type PostAdminMicrosoftResourcesMaintenanceParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8521,7 +8543,7 @@ type PostAdminMicrosoftResourcesMaintenanceParams struct {
 
 // PostAdminMicrosoftResourcesPublishParams defines parameters for PostAdminMicrosoftResourcesPublish.
 type PostAdminMicrosoftResourcesPublishParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8530,7 +8552,7 @@ type PostAdminMicrosoftResourcesPublishParams struct {
 
 // PostAdminMicrosoftResourcesUnpublishParams defines parameters for PostAdminMicrosoftResourcesUnpublish.
 type PostAdminMicrosoftResourcesUnpublishParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8539,7 +8561,7 @@ type PostAdminMicrosoftResourcesUnpublishParams struct {
 
 // PostAdminMicrosoftResourceValidationsParams defines parameters for PostAdminMicrosoftResourceValidations.
 type PostAdminMicrosoftResourceValidationsParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8551,7 +8573,7 @@ type DeleteAdminMicrosoftResourceParams struct {
 	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
 	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
 
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8560,7 +8582,7 @@ type DeleteAdminMicrosoftResourceParams struct {
 
 // PatchAdminMicrosoftResourceParams defines parameters for PatchAdminMicrosoftResource.
 type PatchAdminMicrosoftResourceParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8579,7 +8601,7 @@ type GetAdminMicrosoftResourceAliasesParamsKind string
 
 // PostAdminMicrosoftResourceAliasParams defines parameters for PostAdminMicrosoftResourceAlias.
 type PostAdminMicrosoftResourceAliasParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8588,7 +8610,7 @@ type PostAdminMicrosoftResourceAliasParams struct {
 
 // PutAdminMicrosoftResourceCredentialsParams defines parameters for PutAdminMicrosoftResourceCredentials.
 type PutAdminMicrosoftResourceCredentialsParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8600,7 +8622,7 @@ type PostAdminMicrosoftResourceDisableParams struct {
 	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
 	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
 
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8612,7 +8634,7 @@ type PostAdminMicrosoftResourceEnableParams struct {
 	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
 	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
 
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8621,7 +8643,7 @@ type PostAdminMicrosoftResourceEnableParams struct {
 
 // PostAdminMicrosoftResourceMessagesFetchParams defines parameters for PostAdminMicrosoftResourceMessagesFetch.
 type PostAdminMicrosoftResourceMessagesFetchParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8630,7 +8652,7 @@ type PostAdminMicrosoftResourceMessagesFetchParams struct {
 
 // PostAdminMicrosoftResourceProjectScanParams defines parameters for PostAdminMicrosoftResourceProjectScan.
 type PostAdminMicrosoftResourceProjectScanParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8642,7 +8664,7 @@ type PostAdminMicrosoftResourcePublishParams struct {
 	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
 	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
 
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8654,7 +8676,7 @@ type PostAdminMicrosoftResourceRecoverParams struct {
 	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
 	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
 
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8663,7 +8685,7 @@ type PostAdminMicrosoftResourceRecoverParams struct {
 
 // PostAdminMicrosoftResourceTokenRefreshParams defines parameters for PostAdminMicrosoftResourceTokenRefresh.
 type PostAdminMicrosoftResourceTokenRefreshParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8675,7 +8697,7 @@ type PostAdminMicrosoftResourceUnpublishParams struct {
 	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
 	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
 
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8684,7 +8706,7 @@ type PostAdminMicrosoftResourceUnpublishParams struct {
 
 // PostAdminMicrosoftResourceValidateParams defines parameters for PostAdminMicrosoftResourceValidate.
 type PostAdminMicrosoftResourceValidateParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8699,25 +8721,25 @@ type GetAdminServersParams struct {
 
 // PostAdminServerParams defines parameters for PostAdminServer.
 type PostAdminServerParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PutAdminSettingsParams defines parameters for PutAdminSettings.
 type PutAdminSettingsParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // DeleteAdminSettingParams defines parameters for DeleteAdminSetting.
 type DeleteAdminSettingParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PutAdminSettingParams defines parameters for PutAdminSetting.
 type PutAdminSettingParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -8730,13 +8752,13 @@ type GetAdminSupplierApplicationsParams struct {
 
 // PostAdminSupplierApplicationApproveParams defines parameters for PostAdminSupplierApplicationApprove.
 type PostAdminSupplierApplicationApproveParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminSupplierApplicationRejectParams defines parameters for PostAdminSupplierApplicationReject.
 type PostAdminSupplierApplicationRejectParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -8779,19 +8801,19 @@ type GetAdminTicketsParamsStatus string
 
 // PostAdminTicketCloseParams defines parameters for PostAdminTicketClose.
 type PostAdminTicketCloseParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminTicketMessageParams defines parameters for PostAdminTicketMessage.
 type PostAdminTicketMessageParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminTicketReadParams defines parameters for PostAdminTicketRead.
 type PostAdminTicketReadParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -8800,7 +8822,7 @@ type PostAdminTicketRefundParams struct {
 	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
 
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -8823,7 +8845,7 @@ type GetAdminTransactionsParamsDirection string
 
 // PostAdminTransactionReverseParams defines parameters for PostAdminTransactionReverse.
 type PostAdminTransactionReverseParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8852,55 +8874,55 @@ type GetAdminUsersParamsRole string
 
 // PostAdminUserParams defines parameters for PostAdminUser.
 type PostAdminUserParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminUsersDeleteParams defines parameters for PostAdminUsersDelete.
 type PostAdminUsersDeleteParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminUsersDisableParams defines parameters for PostAdminUsersDisable.
 type PostAdminUsersDisableParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminUsersEnableParams defines parameters for PostAdminUsersEnable.
 type PostAdminUsersEnableParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminUserGroupParams defines parameters for PostAdminUserGroup.
 type PostAdminUserGroupParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PatchAdminUserGroupParams defines parameters for PatchAdminUserGroup.
 type PatchAdminUserGroupParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminUsersRevokeSessionsParams defines parameters for PostAdminUsersRevokeSessions.
 type PostAdminUsersRevokeSessionsParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // DeleteAdminUserParams defines parameters for DeleteAdminUser.
 type DeleteAdminUserParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PatchAdminUserParams defines parameters for PatchAdminUser.
 type PatchAdminUserParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -8912,19 +8934,19 @@ type GetAdminUserApiKeysParams struct {
 
 // PostAdminUserApiKeyParams defines parameters for PostAdminUserApiKey.
 type PostAdminUserApiKeyParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // DeleteAdminUserApiKeyParams defines parameters for DeleteAdminUserApiKey.
 type DeleteAdminUserApiKeyParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PatchAdminUserApiKeyParams defines parameters for PatchAdminUserApiKey.
 type PatchAdminUserApiKeyParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -8936,13 +8958,13 @@ type GetAdminUserDashboardParams struct {
 
 // PutAdminUserPermissionsParams defines parameters for PutAdminUserPermissions.
 type PutAdminUserPermissionsParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminRevokeSessionsParams defines parameters for PostAdminRevokeSessions.
 type PostAdminRevokeSessionsParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -8955,7 +8977,7 @@ type GetAdminWalletsParams struct {
 
 // PostAdminWalletBulkAdjustParams defines parameters for PostAdminWalletBulkAdjust.
 type PostAdminWalletBulkAdjustParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -8967,7 +8989,7 @@ type GetAdminWalletBalancesParams struct {
 
 // PostAdminWalletCreditParams defines parameters for PostAdminWalletCredit.
 type PostAdminWalletCreditParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
@@ -8976,7 +8998,7 @@ type PostAdminWalletCreditParams struct {
 
 // PostAdminWalletDebitParams defines parameters for PostAdminWalletDebit.
 type PostAdminWalletDebitParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
@@ -8992,7 +9014,7 @@ type GetAdminWalletTransactionsParams struct {
 
 // PostAdminWalletWithdrawParams defines parameters for PostAdminWalletWithdraw.
 type PostAdminWalletWithdrawParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -9010,25 +9032,25 @@ type PostApiKeyParams struct {
 	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
 
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // DeleteApiKeyParams defines parameters for DeleteApiKey.
 type DeleteApiKeyParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PatchApiKeyParams defines parameters for PatchApiKey.
 type PatchApiKeyParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostCardRedeemParams defines parameters for PostCardRedeem.
 type PostCardRedeemParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
@@ -9043,7 +9065,7 @@ type GetDashboardParams struct {
 
 // PostDomainParams defines parameters for PostDomain.
 type PostDomainParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -9055,7 +9077,7 @@ type GetDomainMailboxesParams struct {
 
 // PostMeInviteParams defines parameters for PostMeInvite.
 type PostMeInviteParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -9106,7 +9128,7 @@ type PostOrderParams struct {
 	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
 
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for Session state-changing requests and ignored for API Key requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for Session state-changing requests and ignored for API Key requests.
 	XCSRFToken *OptionalCsrfToken `json:"X-CSRF-Token,omitempty"`
 }
 
@@ -9124,7 +9146,7 @@ type PostOrderBatchParams struct {
 	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
 
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for Session state-changing requests and ignored for API Key requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for Session state-changing requests and ignored for API Key requests.
 	XCSRFToken *OptionalCsrfToken `json:"X-CSRF-Token,omitempty"`
 }
 
@@ -9136,7 +9158,7 @@ type PostOrderBatchParamsSupply string
 
 // PostOrderArchiveParams defines parameters for PostOrderArchive.
 type PostOrderArchiveParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for Session state-changing requests and ignored for API Key requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for Session state-changing requests and ignored for API Key requests.
 	XCSRFToken *OptionalCsrfToken `json:"X-CSRF-Token,omitempty"`
 }
 
@@ -9148,7 +9170,7 @@ type GetOrderEventsParams struct {
 
 // PatchPasswordParams defines parameters for PatchPassword.
 type PatchPasswordParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -9193,13 +9215,13 @@ type GetProjectsParamsProductType string
 
 // PostProjectParams defines parameters for PostProject.
 type PostProjectParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostProjectResubmitParams defines parameters for PostProjectResubmit.
 type PostProjectResubmitParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -9220,11 +9242,17 @@ type GetRechargesParamsStatus string
 
 // PostRechargeParams defines parameters for PostRecharge.
 type PostRechargeParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostRechargeQuoteParams defines parameters for PostRechargeQuote.
+type PostRechargeQuoteParams struct {
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // GetResourcesParams defines parameters for GetResources.
@@ -9280,7 +9308,7 @@ type GetResourcesParamsPurpose string
 
 // PostResourceDeleteBatchParams defines parameters for PostResourceDeleteBatch.
 type PostResourceDeleteBatchParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -9296,7 +9324,7 @@ type PostResourceImportMultipartBody struct {
 
 // PostResourceImportParams defines parameters for PostResourceImport.
 type PostResourceImportParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -9305,19 +9333,19 @@ type PostResourceImportMultipartBodyErrorStrategy string
 
 // PostResourcePublishBatchParams defines parameters for PostResourcePublishBatch.
 type PostResourcePublishBatchParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostResourceValidationsParams defines parameters for PostResourceValidations.
 type PostResourceValidationsParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // DeleteResourceParams defines parameters for DeleteResource.
 type DeleteResourceParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -9328,7 +9356,7 @@ type GetResourceDetail200JSONResponseBody struct {
 
 // PostResourcePublishParams defines parameters for PostResourcePublish.
 type PostResourcePublishParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -9339,7 +9367,7 @@ type PostResourcePublish200JSONResponseBody struct {
 
 // PostResourceValidateParams defines parameters for PostResourceValidate.
 type PostResourceValidateParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -9352,13 +9380,13 @@ type GetServersParams struct {
 
 // PostServerParams defines parameters for PostServer.
 type PostServerParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostSupplierApplicationParams defines parameters for PostSupplierApplication.
 type PostSupplierApplicationParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -9386,31 +9414,31 @@ type GetTicketsParamsStatus string
 
 // PostTicketParams defines parameters for PostTicket.
 type PostTicketParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostTicketCloseParams defines parameters for PostTicketClose.
 type PostTicketCloseParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostTicketMessageParams defines parameters for PostTicketMessage.
 type PostTicketMessageParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostTicketReadParams defines parameters for PostTicketRead.
 type PostTicketReadParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostWalletCheckinParams defines parameters for PostWalletCheckin.
 type PostWalletCheckinParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -9419,7 +9447,7 @@ type PostWalletReferralTransferParams struct {
 	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
 
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -9428,7 +9456,7 @@ type PostWalletSupplierTransferParams struct {
 	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
 
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -9704,6 +9732,9 @@ type PostProjectResubmitJSONRequestBody = CreateProjectApplicationRequest
 
 // PostRechargeJSONRequestBody defines body for PostRecharge for application/json ContentType.
 type PostRechargeJSONRequestBody = CreateRechargeRequest
+
+// PostRechargeQuoteJSONRequestBody defines body for PostRechargeQuote for application/json ContentType.
+type PostRechargeQuoteJSONRequestBody = RechargeQuoteRequest
 
 // PostResourceDeleteBatchJSONRequestBody defines body for PostResourceDeleteBatch for application/json ContentType.
 type PostResourceDeleteBatchJSONRequestBody = DeleteResourcesRequest
@@ -10982,6 +11013,9 @@ type ServerInterface interface {
 	// Get public recharge configuration
 	// (GET /v1/recharges/config)
 	GetRechargeConfig(c *gin.Context)
+	// Quote a recharge entirely in points
+	// (POST /v1/recharges/quote)
+	PostRechargeQuote(c *gin.Context, params PostRechargeQuoteParams)
 	// Get one recharge order
 	// (GET /v1/recharges/{rechargeNo})
 	GetRecharge(c *gin.Context, rechargeNo string)
@@ -21727,6 +21761,51 @@ func (siw *ServerInterfaceWrapper) GetRechargeConfig(c *gin.Context) {
 	siw.Handler.GetRechargeConfig(c)
 }
 
+// PostRechargeQuote operation middleware
+func (siw *ServerInterfaceWrapper) PostRechargeQuote(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostRechargeQuoteParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostRechargeQuote(c, params)
+}
+
 // GetRecharge operation middleware
 func (siw *ServerInterfaceWrapper) GetRecharge(c *gin.Context) {
 
@@ -23372,6 +23451,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/recharges", wrapper.GetRecharges)
 	router.POST(options.BaseURL+"/v1/recharges", wrapper.PostRecharge)
 	router.GET(options.BaseURL+"/v1/recharges/config", wrapper.GetRechargeConfig)
+	router.POST(options.BaseURL+"/v1/recharges/quote", wrapper.PostRechargeQuote)
 	router.GET(options.BaseURL+"/v1/recharges/:rechargeNo", wrapper.GetRecharge)
 	router.GET(options.BaseURL+"/v1/resources", wrapper.GetResources)
 	router.POST(options.BaseURL+"/v1/resources/delete", wrapper.PostResourceDeleteBatch)

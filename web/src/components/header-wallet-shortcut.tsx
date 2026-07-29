@@ -4,19 +4,10 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { CurrentUser } from "@/context/auth-provider";
+import { formatPoints } from "@/lib/points";
 import { cn } from "@/lib/utils";
 import { getWallet } from "@/lib/wallet-api";
 import { subscribeWalletUpdated } from "@/lib/wallet-events";
-
-function formatBalance(value: string | null) {
-  if (value == null) return "￥-";
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return "￥-";
-  return `￥${numeric.toLocaleString("zh-CN", {
-    maximumFractionDigits: 6,
-    minimumFractionDigits: 2,
-  })}`;
-}
 
 function formatUserGroup(
   group: CurrentUser["userGroup"] | null | undefined,
@@ -80,7 +71,7 @@ export function HeaderWalletShortcut({
         )}
       >
         <Wallet className="size-3.5 shrink-0 text-muted-foreground" />
-        <span className="tabular-nums">{loading ? "..." : formatBalance(balance)}</span>
+        <span className="tabular-nums">{loading ? "..." : formatPoints(balance, t("Points"))}</span>
       </Link>
       <Link
         to="/wallet"

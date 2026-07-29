@@ -13,6 +13,25 @@
 - 雷池对 `/pickup`、`/v1/pickup` 关闭或脱敏 query 日志，并禁用验证码、JS Challenge 等会改变 API 响应的挑战。
 - 雷池必须阻止公网访问 `/metrics`，上传限制不得低于 100 MB，并传递 `Host`、`X-Forwarded-For`、`X-Forwarded-Proto`。
 
+## 积分单位一次性切换（迁移 68）
+
+68 号迁移会把全部权威业务金额一次性乘以 1000，仅保留支付宝实际支付列 `recharges.payment_amount` 为人民币。该迁移不可逆，且排在当前发布包的普通迁移之后，必须按以下顺序发布：
+
+1. 维护窗口前，把最新生产备份恢复到隔离 MySQL，使用本次待发布镜像完整演练升级到 68；逐项核对第 6 步，任何异常都终止发布。
+2. 预演通过后进入维护窗口：停止所有旧 API、Asynq worker、scheduler、定时任务和导入，阻断后台及人工写库，等待在途事务结束；确认不存在仍可能按人民币写库的旧容器或进程，并冻结所有金额和奖励配置。积分版会忽略切换前尚未发送的旧版邮件载荷，避免迁移后继续发送人民币模板。
+3. 制作停写后的切换点全量备份；若采用已有全备加 binlog，则记录并验证可恢复的 GTID/位点。把这个精确切换点恢复到隔离 MySQL，再用待发布镜像完整执行并核对一次迁移 68。第二次演练未通过时不得在生产执行迁移。
+4. 精确切换点演练通过后，只启动一个带 `io.remail.points-unit=1` 标签的新版本容器。服务会在注册路由、启动 worker 和 scheduler 之前执行迁移；迁移失败时进程直接退出，不提供流量。
+5. 核对 `goose_db_version` 最新记录为已应用的 68 或更高版本，且以下查询都只返回一行预期值：
+
+   ```sql
+   SELECT version_id, is_applied FROM goose_db_version ORDER BY id DESC LIMIT 1;
+   SELECT `value` FROM system_settings WHERE `key` = 'points_unit_migration_v1'; -- completed
+   SELECT `value` FROM system_settings WHERE `key` = 'points_per_yuan';          -- 1000
+   ```
+
+6. 对照切换点备份逐表核对钱包、流水、项目价格、用户组门槛、卡密、返佣、充值积分、奖励、订单、售后金额及金额型配置：原记录数不变，每个权威金额都恰好乘以 1000；`recharges.payment_amount` 必须逐行不变。
+7. 核对完成后再恢复入口流量并解除配置冻结。迁移哨兵存在时，禁止回滚到没有 `io.remail.points-unit=1` 标签的旧镜像；自动部署已对此做失败关闭保护。
+
 ## Cloudflare Turnstile
 
 1. Cloudflare 控制台进入 **Turnstile**，创建 widget，hostname 只填写 `remail.aishop6.com`。

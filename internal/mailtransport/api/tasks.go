@@ -237,25 +237,27 @@ func processOutboundSendTask(ctx context.Context, task *asynq.Task, module *Mail
 		return nil
 	}
 	payload.ID = strings.TrimSpace(payload.ID)
-	if payload.ID != "" {
-		retryCount := payload.RetryCount
-		if module.OutboundQueue == nil {
-			slog.Warn("outbound mail task discarded", "reason", "payload store unavailable")
-			return nil
-		}
-		cleanupID = payload.ID
-		stored, found, loadErr := module.OutboundQueue.LoadOutboundSend(ctx, payload.ID)
-		if loadErr != nil {
-			slog.Warn("outbound mail task discarded", "reason", "payload read failed", "error", loadErr)
-			return nil
-		}
-		if !found {
-			slog.Warn("outbound mail task discarded", "reason", "payload expired")
-			return nil
-		}
-		stored.RetryCount = retryCount
-		payload = stored
+	if payload.ID == "" {
+		slog.Warn("outbound mail task discarded", "reason", "legacy inline payload")
+		return nil
 	}
+	retryCount := payload.RetryCount
+	if module.OutboundQueue == nil {
+		slog.Warn("outbound mail task discarded", "reason", "payload store unavailable")
+		return nil
+	}
+	cleanupID = payload.ID
+	stored, found, loadErr := module.OutboundQueue.LoadOutboundSend(ctx, payload.ID)
+	if loadErr != nil {
+		slog.Warn("outbound mail task discarded", "reason", "payload read failed", "error", loadErr)
+		return nil
+	}
+	if !found {
+		slog.Warn("outbound mail task discarded", "reason", "payload expired")
+		return nil
+	}
+	stored.RetryCount = retryCount
+	payload = stored
 	if err := module.OutboundSendUseCase.Process(ctx, payload); err != nil {
 		slog.Warn("outbound mail task failed", "purpose", payload.Message.Purpose, "error", err)
 		return nil

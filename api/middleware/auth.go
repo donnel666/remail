@@ -40,13 +40,13 @@ type PermissionChecker interface {
 	Check(ctx context.Context, userID uint, role domain.Role, resource, action string) (bool, error)
 }
 
-// LoadSession returns a middleware that reads the "sid" cookie and populates
+// LoadSession returns a middleware that reads the session cookie and populates
 // the gin context with authenticated user info. If the cookie is missing or
 // the session is invalid, the middleware simply continues without setting
 // auth context (protected routes will use AuthRequired to reject).
 func LoadSession(fetcher SessionFetcher) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		sid, err := c.Cookie("sid")
+		sid, err := c.Cookie(SessionCookieName)
 		if err != nil || sid == "" {
 			c.Next()
 			return

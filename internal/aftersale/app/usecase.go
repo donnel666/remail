@@ -277,7 +277,7 @@ func (uc *UseCase) RefundAndCloseTicket(ctx context.Context, req RefundTicketReq
 		TicketNo:      req.TicketNo,
 		By:            domain.SenderTypePlatform,
 		Resolution:    domain.Resolution{Kind: domain.ResolutionRefunded, RefundAmount: amount},
-		SystemMessage: fmt.Sprintf("平台已退款 %s 并关闭工单。", formatMoney(amount)),
+		SystemMessage: fmt.Sprintf("平台已退款 %s 并关闭工单。", formatPoints(amount)),
 	})
 	if err != nil {
 		return nil, err
@@ -482,12 +482,10 @@ func extForMime(mime string) string {
 	}
 }
 
-// formatMoney trims trailing decimal zeros and prefixes ¥, matching the
-// console's amount formatting.
-func formatMoney(amount string) string {
+func formatPoints(amount string) string {
 	value := strings.TrimSpace(amount)
 	if value == "" {
-		return "¥0"
+		return "0 积分"
 	}
 	if strings.Contains(value, ".") {
 		value = strings.TrimRight(value, "0")
@@ -496,7 +494,7 @@ func formatMoney(amount string) string {
 	if value == "" || value == "-" {
 		value = "0"
 	}
-	return "¥" + value
+	return value + " 积分"
 }
 
 func nextTicketNo() string     { return "AS" + platform.NewUUIDV7CompactUpper() }

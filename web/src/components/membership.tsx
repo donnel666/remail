@@ -9,7 +9,7 @@ import {
   formatPriceMultiplier,
   type MembershipGroup,
 } from "@/lib/membership";
-import { formatMoney } from "@/pages/admin-users/format-money";
+import { formatPoints } from "@/lib/points";
 
 export function MembershipOverview({
   currentGroup,
@@ -148,7 +148,7 @@ export function MembershipOverview({
                     : t(
                         "Recharge {{amount}} more to unlock {{tier}} benefits",
                         {
-                          amount: `￥${formatMoney(progress.remaining)}`,
+                          amount: formatPoints(progress.remaining, t("Points")),
                           tier:
                             progress.nextGroup.name || progress.nextGroup.code,
                         },

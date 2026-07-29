@@ -7,6 +7,7 @@ import { PieChart } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import type { DashboardData } from "@/lib/dashboard-api";
+import { formatPoints } from "@/lib/points";
 
 export type AnalysisView =
   | "fulfillmentTime"
@@ -25,15 +26,6 @@ const ANALYSIS_TABS: Array<{ key: AnalysisView; labelKey: string }> = [
 
 const CHART_CONFIG = { mode: "desktop-browser" as const };
 const CHART_COLORS = ["#3b82f6", "#8b5cf6", "#06b6d4", "#ec4899", "#f59e0b", "#22a06b"];
-
-function formatMoney(value: string | number | null | undefined) {
-  const parsed = Number(value ?? 0);
-  if (!Number.isFinite(parsed)) return "0.00";
-  return parsed.toLocaleString(undefined, {
-    maximumFractionDigits: 6,
-    minimumFractionDigits: 2,
-  });
-}
 
 function chartTitle(text: string, subtext: string) {
   return { subtext, text, visible: true };
@@ -92,7 +84,7 @@ function useAnalysisSpec(data: DashboardData | null, view: AnalysisView) {
         data: [{ id: "spendData", values }],
         legends: { selectMode: "single", visible: true },
         seriesField: "Project",
-        title: chartTitle(t("Spend distribution"), `${t("Total spend")}：¥${formatMoney(totalSpend)}`),
+        title: chartTitle(t("Spend distribution"), `${t("Total spend")}：${formatPoints(totalSpend, t("Points"))}`),
         type: "line",
         xField: "Time",
         yField: "Usage",

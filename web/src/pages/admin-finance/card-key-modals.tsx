@@ -30,7 +30,7 @@ export function CreateCardKeyModal({
   onCreated,
 }: CreateCardKeyModalProps) {
   const { t } = useTranslation();
-  const [amount, setAmount] = useState<number | string>(100);
+  const [amount, setAmount] = useState<number | string>(100000);
   const [count, setCount] = useState<number | string>(1);
   const [maxRedemptions, setMaxRedemptions] = useState<number | string>(1);
   const [expireAt, setExpireAt] = useState<Date | null>(null);
@@ -40,7 +40,7 @@ export function CreateCardKeyModal({
 
   useEffect(() => {
     if (!open) return;
-    setAmount(100);
+    setAmount(100000);
     setCount(1);
     setMaxRedemptions(1);
     setExpireAt(null);
@@ -143,13 +143,13 @@ export function CreateCardKeyModal({
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <label className="block">
             <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
-              {t("Amount")} *
+              {t("Points")} *
             </span>
             <InputNumber
-              min={0.01}
+              min={0.000001}
               onChange={setAmount}
               precision={6}
-              prefix="¥"
+              step={0.01}
               style={{ width: "100%" }}
               value={amount}
             />
@@ -273,8 +273,8 @@ export function EditCardKeyModal({
             <span className="ml-2 font-mono-data font-semibold">{card?.key}</span>
           </div>
           <div className="mt-1">
-            <span className="text-[var(--semi-color-text-2)]">{t("Amount")}</span>
-            <span className="ml-2 font-mono-data">¥{formatMoney(card?.amount)}</span>
+            <span className="text-[var(--semi-color-text-2)]">{t("Points")}</span>
+            <span className="ml-2 font-mono-data">{formatMoney(card?.amount)}</span>
           </div>
         </div>
         <label className="block">

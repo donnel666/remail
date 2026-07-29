@@ -48,10 +48,10 @@ func (s *balanceWarningDeliveryStub) Send(_ context.Context, message maildomain.
 
 func TestBalanceWarningDispatchSendsEveryNewTierOnce(t *testing.T) {
 	repo := &balanceWarningRepoStub{claims: []BalanceWarningClaim{
-		{UserID: 7, Balance: "0.40", Cycle: 3, PreviousLevel: 0, Level: 1},
-		{UserID: 7, Balance: "0.40", Cycle: 3, PreviousLevel: 1, Level: 2},
-		{UserID: 7, Balance: "0.40", Cycle: 3, PreviousLevel: 2, Level: 3},
-		{UserID: 7, Balance: "0.40", Cycle: 3, PreviousLevel: 3, Level: 4},
+		{UserID: 7, Balance: "400.00", Cycle: 3, PreviousLevel: 0, Level: 1},
+		{UserID: 7, Balance: "400.00", Cycle: 3, PreviousLevel: 1, Level: 2},
+		{UserID: 7, Balance: "400.00", Cycle: 3, PreviousLevel: 2, Level: 3},
+		{UserID: 7, Balance: "400.00", Cycle: 3, PreviousLevel: 3, Level: 4},
 	}}
 	delivery := &balanceWarningDeliveryStub{}
 	uc := NewWalletUseCase(repo)
@@ -62,8 +62,8 @@ func TestBalanceWarningDispatchSendsEveryNewTierOnce(t *testing.T) {
 		require.NoError(t, uc.DispatchBalanceWarnings(context.Background(), 100))
 	}
 	require.Len(t, delivery.messages, 4)
-	require.Contains(t, delivery.messages[0].TextBody, "≤￥3.00")
-	require.Contains(t, delivery.messages[3].TextBody, "≤￥0.50")
+	require.Contains(t, delivery.messages[0].TextBody, "≤3000.00 积分")
+	require.Contains(t, delivery.messages[3].TextBody, "≤500.00 积分")
 	require.Empty(t, repo.released)
 
 	require.NoError(t, uc.DispatchBalanceWarnings(context.Background(), 100))

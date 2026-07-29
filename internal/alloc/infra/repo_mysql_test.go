@@ -21,17 +21,27 @@ import (
 	"gorm.io/gorm"
 )
 
-var allocMySQLTestServer = testmysql.New("remail_alloc_test")
+var (
+	allocMySQLTestServer       = testmysql.New("remail_alloc_test")
+	allocLegacyMySQLTestServer = testmysql.New("remail_alloc_legacy_test")
+)
 
 func TestMain(m *testing.M) {
 	code := m.Run()
 	_ = allocMySQLTestServer.Close(context.Background())
+	_ = allocLegacyMySQLTestServer.Close(context.Background())
 	os.Exit(code)
 }
 
 func newAllocMySQLTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	return allocMySQLTestServer.Database(t, allocMigrationsDir(t))
+}
+
+func newAllocLegacyMigrationTestDB(t *testing.T) (*gorm.DB, string) {
+	t.Helper()
+	migrationsDir := testmysql.MigrationsThrough(t, allocMigrationsDir(t), 65)
+	return allocLegacyMySQLTestServer.Database(t, migrationsDir), migrationsDir
 }
 
 func innodbMetricCount(t *testing.T, db *gorm.DB, name string) uint64 {

@@ -102,7 +102,7 @@ export default function AuthSecuritySection({ options, onBulkSave, canSensitive 
           />
           <p className="text-xs text-[var(--semi-color-text-2)]">{t("每个域名单独显示；输入后按回车添加，点击标签上的关闭按钮删除")}</p>
         </FormItem>
-        <SettingsNumberField label={t("新用户注册奖励金额")} value={number(form.registration_reward_amount)} onChange={(value) => update("registration_reward_amount", value)} min={0} />
+        <SettingsNumberField label={t("新用户注册奖励积分")} value={number(form.registration_reward_amount)} onChange={(value) => update("registration_reward_amount", value)} min={0} precision={6} step={0.01} />
       </SettingsFormGrid>
       <Button icon={<Save size={14} />} loading={savingCard === "register"} onClick={() => void saveCard("register", ["register_enabled", "password_login_enabled", "captcha_enabled", "registration_email_whitelist", "registration_reward_amount"]).catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
     </SettingsSection>

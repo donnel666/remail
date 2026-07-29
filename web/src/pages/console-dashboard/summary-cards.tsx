@@ -18,6 +18,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import type { DashboardData } from "@/lib/dashboard-api";
+import { formatPoints } from "@/lib/points";
 import type { APIKeyRealtimeUsageResponse } from "@/lib/openapi-credentials-api";
 
 type MetricTone = "blue" | "cyan" | "green" | "orange" | "pink" | "purple";
@@ -80,15 +81,6 @@ function groupTitle(icon: ReactNode, text: string) {
   );
 }
 
-function formatMoney(value: string | number | null | undefined) {
-  const parsed = Number(value ?? 0);
-  if (!Number.isFinite(parsed)) return "0.00";
-  return parsed.toLocaleString(undefined, {
-    maximumFractionDigits: 6,
-    minimumFractionDigits: 2,
-  });
-}
-
 function percent(part: number, whole: number) {
   return whole ? (part / whole) * 100 : 0;
 }
@@ -131,14 +123,14 @@ export function DashboardSummaryCards({
           icon: <IconMoneyExchangeStroked />,
           title: t("Wallet balance"),
           trendColor: "#3b82f6",
-          value: `¥${formatMoney(stats?.walletBalance)}`,
+          value: formatPoints(stats?.walletBalance, t("Points")),
         },
         {
           avatarColor: "purple",
           icon: <IconHistogram />,
           title: t("Historical spend"),
           trendColor: "#8b5cf6",
-          value: `¥${formatMoney(stats?.historicalSpend)}`,
+          value: formatPoints(stats?.historicalSpend, t("Points")),
         },
       ],
     },

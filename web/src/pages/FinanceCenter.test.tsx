@@ -133,8 +133,8 @@ describe("FinanceCenter", () => {
   it("keeps exact wallet data usable when transactions or a refresh fail", async () => {
     render(<FinanceCenter />);
 
-    expect(await screen.findByText("¥999,999,999,999.999999")).toBeVisible();
-    expect(screen.getByText("¥1,000,000,000,000.00")).toBeVisible();
+    expect(await screen.findByText("999,999,999,999.999999 Points")).toBeVisible();
+    expect(screen.getByText("1,000,000,000,000 Points")).toBeVisible();
     expect(screen.getByRole("button", { name: "Withdraw to Alipay" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Transfer to user wallet" })).toBeEnabled();
     expect(mocks.toastError).toHaveBeenCalledWith("Supplier transactions load failed.");
@@ -146,7 +146,7 @@ describe("FinanceCenter", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Withdraw to Alipay" })).toBeEnabled(),
     );
-    expect(screen.getByText("¥999,999,999,999.999999")).toBeVisible();
+    expect(screen.getByText("999,999,999,999.999999 Points")).toBeVisible();
   });
 
   it("transfers supplier balance directly instead of creating a ticket", async () => {

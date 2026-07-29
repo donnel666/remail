@@ -31,6 +31,7 @@ var billingMySQLTestServer = testmysql.New("remail_billing_test")
 func TestMain(m *testing.M) {
 	code := m.Run()
 	_ = billingMySQLTestServer.Close(context.Background())
+	_ = pointsMigrationMySQLTestServer.Close(context.Background())
 	os.Exit(code)
 }
 

@@ -2,6 +2,8 @@ import { Tag } from "@douyinfe/semi-ui";
 import type { ReactNode } from "react";
 import type { TFunction } from "i18next";
 
+import { formatPointsValue } from "@/lib/points";
+
 import type {
   FinanceCardKeyStatus,
   FinanceTransactionDirection,
@@ -21,12 +23,7 @@ const TRANSACTION_TYPE_LABEL: Record<FinanceTransactionType, string> = {
 };
 
 export function formatMoney(value: string | number | null | undefined) {
-  const parsed = Number(value ?? 0);
-  if (!Number.isFinite(parsed)) return "0.00";
-  return parsed.toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 6,
-  });
+  return formatPointsValue(value);
 }
 
 export function formatDateTime(value?: string | null) {

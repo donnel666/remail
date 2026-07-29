@@ -29,6 +29,7 @@ import { useAuth } from "@/context/auth-provider";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import { generateIdempotencyKey } from "@/lib/idempotency";
+import { formatPoints } from "@/lib/points";
 import {
   getWallet,
   listWalletTransactions,
@@ -37,7 +38,6 @@ import {
   type WalletResponse,
 } from "@/lib/wallet-api";
 
-import { formatMoney } from "./admin-users/format-money";
 import {
   createSupplierApplicationTicket,
   hasSupplierRole,
@@ -52,10 +52,6 @@ import {
 import { createTicket } from "./tickets/tickets-api";
 
 const MAX_QR_CODE_BYTES = 5 * 1024 * 1024;
-
-function moneyText(value: string | null | undefined) {
-  return value == null ? "--" : `¥${formatMoney(value)}`;
-}
 
 function formatDateTime(value?: string | null) {
   if (!value) return "-";
@@ -367,7 +363,7 @@ export default function FinanceCenter() {
           t(value === "supplier_available" ? "Supplier available" : "Frozen amount"),
       },
       {
-        title: t("Amount"),
+        title: t("Points"),
         dataIndex: "amount",
         width: 115,
         render: (value: unknown, record: TransactionItem) => (
@@ -378,9 +374,9 @@ export default function FinanceCenter() {
                 : "text-[var(--semi-color-warning)]"
             }`}
           >
-            {`${record.direction === "in" ? "+" : "-"}¥${formatMoney(
-              String(value).replace(/^-/, ""),
-            )}`}
+            {String(value).trim()
+              ? `${record.direction === "in" ? "+" : "-"}${formatPoints(String(value).replace(/^-/, ""), t("Points"))}`
+              : "—"}
           </span>
         ),
       },
@@ -389,7 +385,7 @@ export default function FinanceCenter() {
         dataIndex: "balanceAfter",
         width: 135,
         render: (value: unknown) => (
-          <span className="font-mono-data">¥{formatMoney(String(value))}</span>
+          <span className="font-mono-data">{formatPoints(String(value), t("Points"))}</span>
         ),
       },
       {
@@ -478,21 +474,21 @@ export default function FinanceCenter() {
               icon={<CircleDollarSign size={16} />}
               label={t("Income amount")}
               loading={walletLoading}
-              value={moneyText(supplierIncome)}
+              value={formatPoints(supplierIncome, t("Points"))}
             />
             <MetricRow
               color="blue"
               icon={<ArrowRightLeft size={16} />}
               label={t("Withdrawable balance")}
               loading={walletLoading}
-              value={moneyText(supplierAvailable)}
+              value={formatPoints(supplierAvailable, t("Points"))}
             />
             <MetricRow
               color="purple"
               icon={<Snowflake size={16} />}
               label={t("Frozen amount")}
               loading={walletLoading}
-              value={moneyText(supplierFrozen)}
+              value={formatPoints(supplierFrozen, t("Points"))}
             />
           </div>
         </Card>
@@ -514,7 +510,7 @@ export default function FinanceCenter() {
             icon={<Wallet size={16} />}
             label={t("User wallet")}
             loading={walletLoading}
-            value={moneyText(wallet?.consumerBalance)}
+            value={formatPoints(wallet?.consumerBalance, t("Points"))}
           />
         </Card>
       </div>
@@ -562,18 +558,17 @@ export default function FinanceCenter() {
         <div className="space-y-4">
           <label className="block" htmlFor="withdraw-amount">
             <span className="mb-2 block text-sm font-medium text-[var(--semi-color-text-0)]">
-              {t(destination === "wallet" ? "Transfer amount" : "Withdraw amount")}
+              {t(destination === "wallet" ? "Transfer points" : "Withdraw points")}
             </span>
             <Input
               id="withdraw-amount"
               inputMode="decimal"
               onChange={(value) => setWithdrawAmount(String(value))}
-              placeholder="0.00"
-              prefix="¥"
+              placeholder="0.01"
               value={withdrawAmount}
             />
             <span className="mt-1 block text-xs text-[var(--semi-color-text-2)]">
-              {t("Withdrawable balance")}: {moneyText(supplierAvailable)}
+              {t("Withdrawable points")}: {formatPoints(supplierAvailable, t("Points"))}
             </span>
           </label>
 

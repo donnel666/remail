@@ -8,11 +8,11 @@ import (
 )
 
 func TestExplicitAliasFixedOwnerMigrationRepairsAndGuardsRowsMySQL(t *testing.T) {
-	db := newMailTransportMySQLTestDB(t)
+	db, migrationsDir := newMailTransportLegacyMigrationTestDB(t)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	require.NoError(t, goose.SetDialect("mysql"))
-	require.NoError(t, goose.DownTo(sqlDB, mailTransportMigrationsDir(t), 38))
+	require.NoError(t, goose.DownTo(sqlDB, migrationsDir, 38))
 
 	require.NoError(t, db.Exec(`
 INSERT INTO users(id, email, password_hash, role) VALUES
@@ -26,7 +26,7 @@ VALUES (2039, 'microsoft', 'fixed-owner@outlook.com', 'outlook.com', 'secret', T
 INSERT INTO explicit_aliases(resource_id, owner_user_id, email, status)
 VALUES (2039, 2, 'existing@outlook.com', 'normal')`).Error)
 
-	require.NoError(t, goose.UpTo(sqlDB, mailTransportMigrationsDir(t), 39))
+	require.NoError(t, goose.UpTo(sqlDB, migrationsDir, 39))
 
 	var ownerUserID uint
 	require.NoError(t, db.Table("explicit_aliases").Select("owner_user_id").
@@ -53,11 +53,11 @@ WHERE constraint_schema = DATABASE()
 }
 
 func TestExplicitAliasFixedOwnerMigrationRequiresUserOneSuperAdminMySQL(t *testing.T) {
-	db := newMailTransportMySQLTestDB(t)
+	db, migrationsDir := newMailTransportLegacyMigrationTestDB(t)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	require.NoError(t, goose.SetDialect("mysql"))
-	require.NoError(t, goose.DownTo(sqlDB, mailTransportMigrationsDir(t), 38))
+	require.NoError(t, goose.DownTo(sqlDB, migrationsDir, 38))
 
 	require.NoError(t, db.Exec(`
 INSERT INTO users(id, email, password_hash, role)
@@ -70,7 +70,7 @@ VALUES (2040, 'microsoft', 'legacy-owner@outlook.com', 'outlook.com', 'secret', 
 INSERT INTO explicit_aliases(resource_id, owner_user_id, email, status)
 VALUES (2040, 3, 'legacy@outlook.com', 'normal')`).Error)
 
-	err = goose.UpTo(sqlDB, mailTransportMigrationsDir(t), 39)
+	err = goose.UpTo(sqlDB, migrationsDir, 39)
 	require.ErrorContains(t, err, "migration 00039 requires users.id=1")
 
 	var ownerUserID uint

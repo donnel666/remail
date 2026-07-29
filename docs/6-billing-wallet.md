@@ -116,7 +116,7 @@ stateDiagram-v2
 | INV-B4 | 供应商收入在争议窗口内只能进冻结额度。 |
 | INV-B5 | 退款发生在结算入账前必须取消冻结结算。 |
 | INV-B6 | 流水不可修改、不可物理删除。 |
-| INV-B7 | 流水金额采用银行流水式 signed delta：`direction=in` 时 `amount >= 0`，`direction=out` 时 `amount <= 0`，`balanceAfter = balanceBefore + amount`；余额桶不得为负。0 元业务事实必须写流水，例如私有库存订单的 0 元消费和对应 0 元退款。 |
+| INV-B7 | 流水积分采用银行流水式 signed delta：`direction=in` 时 `amount >= 0`，`direction=out` 时 `amount <= 0`，`balanceAfter = balanceBefore + amount`；余额桶不得为负。0 积分业务事实必须写流水，例如私有库存订单的 0 积分消费和对应 0 积分退款。 |
 | INV-B8 | 状态更新必须带 expected status，冲突返回 `409 Conflict`。 |
 | INV-B9 | 资金写动作必须幂等，同幂等键不同指纹返回 `409 Conflict`。 |
 | INV-B10 | 卡密和 API Key 这类需重复展示凭据按原值保存，普通日志禁敏。 |
@@ -136,7 +136,7 @@ stateDiagram-v2
 | 有效期 | 新返佣按结算时的 `rebate_expiry_days` 固化 `expires_at`；`0` 表示永不过期，历史空值继续保持永不过期。 |
 | 前端统计 | `/v1/wallet/referrals` 返回邀请人数、待划转奖励和历史收益。 |
 
-调用边界补充：应用层的 `DebitConsumer(amount=10.00)` 表达“扣 10 元”，不要求调用方传负数；BC-BILLING 仓储写入流水时根据 `direction=out` 保存为 `amount=-10.00`。`RefundConsumer(amount=10.00)` 写入 `+10.00`。这样业务命令保持非负金额，数据库流水保持 signed delta 事实。
+调用边界补充：应用层的 `DebitConsumer(amount=10.00)` 表达“扣 10 积分”，不要求调用方传负数；BC-BILLING 仓储写入流水时根据 `direction=out` 保存为 `amount=-10.00`。`RefundConsumer(amount=10.00)` 写入 `+10.00`。这样业务命令保持非负积分，数据库流水保持 signed delta 事实。
 
 ---
 

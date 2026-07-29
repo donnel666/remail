@@ -8,11 +8,11 @@ import (
 )
 
 func TestProjectHistoryStateMigrationRoundTripRehydratesLegacyPlannerMySQL(t *testing.T) {
-	db := newMailmatchMySQLTestDB(t)
+	db, migrationsDir := newMailmatchLegacyMigrationTestDB(t)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	require.NoError(t, goose.SetDialect("mysql"))
-	require.NoError(t, goose.DownTo(sqlDB, mailmatchMigrationsDir(t), 32))
+	require.NoError(t, goose.DownTo(sqlDB, migrationsDir, 32))
 
 	require.NoError(t, db.Exec(`
 INSERT INTO projects(
@@ -25,7 +25,7 @@ INSERT INTO projects(
     (990323, 'history-normal', 'outlook', 'normal', 10, 0, 17, 9, 4, 'request-normal', CURRENT_TIMESTAMP(3)),
     (990324, 'history-abnormal', 'outlook', 'abnormal', 11, 3, 19, 10, 5, 'request-abnormal', CURRENT_TIMESTAMP(3))`).Error)
 
-	require.NoError(t, goose.DownTo(sqlDB, mailmatchMigrationsDir(t), 31))
+	require.NoError(t, goose.DownTo(sqlDB, migrationsDir, 31))
 	var planners []struct {
 		ProjectID    uint   `gorm:"column:project_id"`
 		Status       string `gorm:"column:status"`
@@ -45,7 +45,7 @@ INSERT INTO projects(
 		{ProjectID: 990322, Status: "queued", Attempts: 2, ScannedCount: 13, RequestID: "request-processing"},
 	}, planners)
 
-	require.NoError(t, goose.UpTo(sqlDB, mailmatchMigrationsDir(t), 32))
+	require.NoError(t, goose.UpTo(sqlDB, migrationsDir, 32))
 	var states []struct {
 		Status     string `gorm:"column:history_scan_status"`
 		Generation uint64 `gorm:"column:history_scan_generation"`
@@ -61,11 +61,11 @@ INSERT INTO projects(
 }
 
 func TestMailmatchFetchStateMigrationNormalizesLegacyCountsMySQL(t *testing.T) {
-	db := newMailmatchMySQLTestDB(t)
+	db, migrationsDir := newMailmatchLegacyMigrationTestDB(t)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	require.NoError(t, goose.SetDialect("mysql"))
-	require.NoError(t, goose.DownTo(sqlDB, mailmatchMigrationsDir(t), 32))
+	require.NoError(t, goose.DownTo(sqlDB, migrationsDir, 32))
 	seedMailmatchOrderLegacyEnabled(t, db, "OR_MIGRATION_COUNTS")
 
 	require.NoError(t, db.Exec(`
@@ -79,7 +79,7 @@ INSERT INTO mailmatch_fetch_jobs(
     1, 5, 7, 'request-counts'
 )`).Error)
 
-	require.NoError(t, goose.UpTo(sqlDB, mailmatchMigrationsDir(t), 33))
+	require.NoError(t, goose.UpTo(sqlDB, migrationsDir, 33))
 	var state struct {
 		Status       string `gorm:"column:status"`
 		Generation   uint64 `gorm:"column:generation"`
@@ -99,11 +99,11 @@ INSERT INTO mailmatch_fetch_jobs(
 }
 
 func TestMailmatchFetchStateMigrationPreservesAdminIdempotencyMySQL(t *testing.T) {
-	db := newMailmatchMySQLTestDB(t)
+	db, migrationsDir := newMailmatchLegacyMigrationTestDB(t)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	require.NoError(t, goose.SetDialect("mysql"))
-	require.NoError(t, goose.DownTo(sqlDB, mailmatchMigrationsDir(t), 32))
+	require.NoError(t, goose.DownTo(sqlDB, migrationsDir, 32))
 	seedMailmatchOrderLegacyEnabled(t, db, "OR_MIGRATION_IDEMPOTENCY")
 
 	require.NoError(t, db.Exec(`
@@ -122,7 +122,7 @@ SELECT 3, 'admin-idempotency', 100, id
 FROM mailmatch_resource_fetch_jobs
 WHERE resource_id = 100`).Error)
 
-	require.NoError(t, goose.UpTo(sqlDB, mailmatchMigrationsDir(t), 33))
+	require.NoError(t, goose.UpTo(sqlDB, migrationsDir, 33))
 	var state struct {
 		OperationKind  string `gorm:"column:operation_kind"`
 		IdempotencyKey string `gorm:"column:idempotency_key"`

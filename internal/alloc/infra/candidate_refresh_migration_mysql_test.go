@@ -8,11 +8,11 @@ import (
 )
 
 func TestCandidateRefreshStateMigrationRoundTripPreservesActiveWorkMySQL(t *testing.T) {
-	db := newAllocMySQLTestDB(t)
+	db, migrationsDir := newAllocLegacyMigrationTestDB(t)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	require.NoError(t, goose.SetDialect("mysql"))
-	require.NoError(t, goose.DownTo(sqlDB, allocMigrationsDir(t), 27))
+	require.NoError(t, goose.DownTo(sqlDB, migrationsDir, 27))
 
 	require.NoError(t, db.Exec(`
 INSERT INTO users(id, email, password_hash, role)
@@ -29,7 +29,7 @@ INSERT INTO allocation_candidate_refresh_jobs(
     'legacy retry', 'candidate-request', '/candidate'
 )`).Error)
 
-	require.NoError(t, goose.UpTo(sqlDB, allocMigrationsDir(t), 28))
+	require.NoError(t, goose.UpTo(sqlDB, migrationsDir, 28))
 	require.False(t, db.Migrator().HasTable("allocation_candidate_refresh_jobs"))
 	var state struct {
 		Status     string `gorm:"column:candidate_refresh_status"`
@@ -53,7 +53,7 @@ INSERT INTO allocation_candidate_refresh_jobs(
 		"candidate_refresh_generation": 7,
 		"candidate_refresh_failures":   2,
 	}).Error)
-	require.NoError(t, goose.DownTo(sqlDB, allocMigrationsDir(t), 27))
+	require.NoError(t, goose.DownTo(sqlDB, migrationsDir, 27))
 	var job struct {
 		Status      string `gorm:"column:status"`
 		Attempts    int    `gorm:"column:attempts"`

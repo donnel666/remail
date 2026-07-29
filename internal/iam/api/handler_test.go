@@ -2060,7 +2060,7 @@ func TestAdminUsers_InvalidQuery(t *testing.T) {
 		w := httptest.NewRecorder()
 		req, requestErr := http.NewRequest("GET", path, nil)
 		require.NoError(t, requestErr)
-		req.AddCookie(&http.Cookie{Name: "sid", Value: "admin-session"})
+		req.AddCookie(&http.Cookie{Name: middleware.SessionCookieName, Value: "admin-session"})
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusBadRequest, w.Code, path)

@@ -13,7 +13,7 @@ func TestBalanceWarningLevel(t *testing.T) {
 		balance string
 		level   int
 	}{
-		{"3.01", 0}, {"3.00", 1}, {"2.00", 2}, {"1.00", 3}, {"0.50", 4},
+		{"3000.01", 0}, {"3000.00", 1}, {"2000.00", 2}, {"1000.00", 3}, {"500.00", 4},
 	} {
 		level, err := balanceWarningLevel(test.balance)
 		require.NoError(t, err)

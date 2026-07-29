@@ -29,7 +29,7 @@ import { formatDateTime, formatMoney } from "./finance-meta";
 import { emptyNode } from "./finance-shared";
 import { BalanceAccountCell } from "./balance-meta";
 
-const QUICK_AMOUNTS = [10, 50, 100, -10, -50, -100];
+const QUICK_AMOUNTS = [10000, 50000, 100000, -10000, -50000, -100000];
 
 function FinanceAdjustModal({
   open,
@@ -130,18 +130,17 @@ function FinanceAdjustModal({
             {t("Current Balance")}
           </span>
           <span className="ml-2 font-mono-data font-semibold text-[var(--semi-color-text-0)]">
-            {balance === "-" ? "-" : `¥${formatMoney(balance)}`}
+            {balance === "-" ? "-" : `${formatMoney(balance)} ${t("Points")}`}
           </span>
         </div>
         <label className="block">
           <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
-            {t("Amount")} *
+            {t("Points")} *
           </span>
           <InputNumber
             onChange={setAmount}
             precision={6}
-            prefix="¥"
-            step={1}
+            step={0.01}
             style={{ width: "100%" }}
             value={amount}
           />
@@ -156,7 +155,7 @@ function FinanceAdjustModal({
                 size="small"
                 type="tertiary"
               >
-                {value > 0 ? "+" : "-"}¥{Math.abs(value)}
+                {value > 0 ? "+" : "-"}{Math.abs(value).toLocaleString()} {t("Points")}
               </Button>
             ))}
           </div>
@@ -244,28 +243,27 @@ function FinanceWithdrawModal({
       <div className="space-y-4 py-1">
         <div className="rounded-lg bg-[var(--semi-color-fill-0)] px-3 py-2 text-sm">
           <span className="text-[var(--semi-color-text-2)]">
-            {t("Withdrawable balance")}
+            {t("Withdrawable points")}
           </span>
           <span className="ml-2 font-mono-data font-semibold text-[var(--semi-color-text-0)]">
-            ¥{formatMoney(user?.supplierAvailable ?? "0")}
+            {formatMoney(user?.supplierAvailable ?? "0")} {t("Points")}
           </span>
         </div>
         <label className="block">
           <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
-            {t("Amount")} *
+            {t("Points")} *
           </span>
           <InputNumber
             max={available}
-            min={0.01}
+            min={0.000001}
             onChange={setAmount}
             precision={6}
-            prefix="¥"
-            step={1}
+            step={0.01}
             style={{ width: "100%" }}
             value={amount}
           />
           <div className="mt-2 flex flex-wrap gap-1.5">
-            {[50, 100, 500].map((value) => (
+            {[50000, 100000, 500000].map((value) => (
               <Button
                 disabled={value > available}
                 key={value}
@@ -273,7 +271,7 @@ function FinanceWithdrawModal({
                 size="small"
                 type="tertiary"
               >
-                ¥{value}
+                {value.toLocaleString()} {t("Points")}
               </Button>
             ))}
             <Button
@@ -390,7 +388,7 @@ export function BalancesPanel({ tabsArea }: { tabsArea: ReactNode }) {
         width: 150,
         render: (value: string) => (
           <span className="font-mono-data font-semibold">
-            ¥{formatMoney(value)}
+            {formatMoney(value)} {t("Points")}
           </span>
         ),
       },
@@ -399,7 +397,7 @@ export function BalancesPanel({ tabsArea }: { tabsArea: ReactNode }) {
         dataIndex: "supplierAvailable",
         width: 150,
         render: (value: string) => (
-          <span className="font-mono-data">¥{formatMoney(value)}</span>
+          <span className="font-mono-data">{formatMoney(value)} {t("Points")}</span>
         ),
       },
       {
@@ -407,7 +405,7 @@ export function BalancesPanel({ tabsArea }: { tabsArea: ReactNode }) {
         dataIndex: "supplierFrozen",
         width: 140,
         render: (value: string) => (
-          <span className="font-mono-data">¥{formatMoney(value)}</span>
+          <span className="font-mono-data">{formatMoney(value)} {t("Points")}</span>
         ),
       },
       {

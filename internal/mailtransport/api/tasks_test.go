@@ -50,7 +50,7 @@ func (s *failingOutboundSenderStub) Send(context.Context, maildomain.OutboundMes
 	return &mailapp.OutboundSendFailure{SafeMessage: "SMTP server rejected the message.", Cause: errors.New("smtp 550")}
 }
 
-func TestOutboundSMTPFailureCompletesWithoutAsynqRetry(t *testing.T) {
+func TestOutboundLegacyInlinePayloadIsDiscarded(t *testing.T) {
 	sender := &failingOutboundSenderStub{}
 	module := &MailTransportModule{OutboundSendUseCase: mailapp.NewOutboundSendUseCase(sender)}
 	mux := asynq.NewServeMux()
@@ -61,7 +61,7 @@ func TestOutboundSMTPFailureCompletesWithoutAsynqRetry(t *testing.T) {
 	err = mux.ProcessTask(context.Background(), asynq.NewTask(mailinfra.TypeOutboundSend, payload))
 
 	require.NoError(t, err)
-	require.Equal(t, 1, sender.calls)
+	require.Zero(t, sender.calls)
 }
 
 func TestOutboundSMTPFailureDeletesTemporaryRedisPayload(t *testing.T) {

@@ -223,18 +223,21 @@ export function TransactionsPanel({ tabsArea }: { tabsArea: ReactNode }) {
         title: t("Amount"),
         dataIndex: "amount",
         width: 120,
-        render: (value: string, record: FinanceTransaction) => (
-          <span className={moneyClassName(record.direction)}>
-            {record.direction === "in" ? "+" : "-"}¥{formatMoney(value)}
-          </span>
-        ),
+        render: (value: string, record: FinanceTransaction) => {
+          const formatted = formatMoney(String(value).replace(/^-/, ""));
+          return (
+            <span className={moneyClassName(record.direction)}>
+              {formatted === "—" ? formatted : `${record.direction === "in" ? "+" : "-"}${formatted} ${t("Points")}`}
+            </span>
+          );
+        },
       },
       {
         title: t("Balance after"),
         dataIndex: "balanceAfter",
         width: 130,
         render: (value: string) => (
-          <span className="font-mono-data">¥{formatMoney(value)}</span>
+          <span className="font-mono-data">{formatMoney(value)}{formatMoney(value) === "—" ? "" : ` ${t("Points")}`}</span>
         ),
       },
       {

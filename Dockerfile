@@ -20,6 +20,7 @@ RUN CGO_ENABLED=0 go build -o /msrecovery ./cmd/msrecovery
 
 # Stage 3: Runtime
 FROM alpine:3.21
+LABEL io.remail.points-unit="1"
 RUN apk add --no-cache ca-certificates tzdata
 ENV TZ=Asia/Shanghai
 COPY --from=backend /server /server

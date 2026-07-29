@@ -140,5 +140,5 @@ func outboundPayloadID(idempotencyKey string) string {
 }
 
 func outboundPayloadKey(id string) string {
-	return "remail:mailtransport:outbound:" + strings.TrimSpace(id)
+	return "remail:mailtransport:outbound:points-v2:" + strings.TrimSpace(id)
 }

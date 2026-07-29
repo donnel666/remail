@@ -25,17 +25,27 @@ import (
 	"gorm.io/gorm"
 )
 
-var billingAPIMySQLTestServer = testmysql.New("remail_billing_api_test")
+var (
+	billingAPIMySQLTestServer       = testmysql.New("remail_billing_api_test")
+	billingAPILegacyMySQLTestServer = testmysql.New("remail_billing_api_legacy_test")
+)
 
 func TestMain(m *testing.M) {
 	code := m.Run()
 	_ = billingAPIMySQLTestServer.Close(context.Background())
+	_ = billingAPILegacyMySQLTestServer.Close(context.Background())
 	os.Exit(code)
 }
 
 func newBillingAPITestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	return billingAPIMySQLTestServer.Database(t, billingAPIMigrationsDir(t))
+}
+
+func newBillingAPILegacyMigrationTestDB(t *testing.T) (*gorm.DB, string) {
+	t.Helper()
+	migrationsDir := testmysql.MigrationsThrough(t, billingAPIMigrationsDir(t), 65)
+	return billingAPILegacyMySQLTestServer.Database(t, migrationsDir), migrationsDir
 }
 
 func billingAPIMigrationsDir(t *testing.T) string {
@@ -184,7 +194,7 @@ func TestBillingWalletReferralsRoute(t *testing.T) {
 }
 
 func TestBillingSupplierTransferIsAuthorizedAtomicAndIdempotent(t *testing.T) {
-	db := newBillingAPITestDB(t)
+	db, migrationsDir := newBillingAPILegacyMigrationTestDB(t)
 	supplierID := createBillingAPIUser(t, db, "supplier-transfer@example.com", iamdomain.RoleSupplier)
 	userID := createBillingAPIUser(t, db, "user-transfer@example.com", iamdomain.RoleUser)
 	adminID := createBillingAPIUser(t, db, "admin-transfer@example.com", iamdomain.RoleAdmin)
@@ -280,8 +290,8 @@ func TestBillingSupplierTransferIsAuthorizedAtomicAndIdempotent(t *testing.T) {
 
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
-	require.NoError(t, goose.DownTo(sqlDB, billingAPIMigrationsDir(t), 62), "immutable outbound transfer rows must not block rollback")
-	require.NoError(t, goose.UpTo(sqlDB, billingAPIMigrationsDir(t), 63))
+	require.NoError(t, goose.DownTo(sqlDB, migrationsDir, 62), "immutable outbound transfer rows must not block rollback")
+	require.NoError(t, goose.UpTo(sqlDB, migrationsDir, 63))
 }
 
 func TestBillingAdminWalletCreditWritesOperationLog(t *testing.T) {

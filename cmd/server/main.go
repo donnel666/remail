@@ -60,6 +60,10 @@ func main() {
 		slog.Error("failed to run migrations", "error", err)
 		os.Exit(1)
 	}
+	if err := platform.VerifyPointsUnitMigration(p.SQLDB); err != nil {
+		slog.Error("points unit migration verification failed", "error", err)
+		os.Exit(1)
+	}
 	// Get embedded frontend filesystem (subdirectory)
 	var feFS fs.FS
 	if sub, err := fs.Sub(frontendFS, "webdist"); err == nil {

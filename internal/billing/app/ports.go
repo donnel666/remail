@@ -631,6 +631,8 @@ func generateCardKeys(count int) []string {
 
 func fingerprint(parts ...any) string {
 	hash := sha256.New()
+	_, _ = fmt.Fprint(hash, "points-v2")
+	_, _ = hash.Write([]byte{0})
 	for _, part := range parts {
 		_, _ = fmt.Fprint(hash, part)
 		_, _ = hash.Write([]byte{0})

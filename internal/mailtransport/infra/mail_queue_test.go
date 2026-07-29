@@ -91,6 +91,7 @@ func TestOutboundMailQueueStoresFiveMinutePayloadAndQueuesOnlyReference(t *testi
 	require.NotContains(t, string(pending[0].Payload), "123456")
 	require.NotEqual(t, TypeOutboundSend, pending[0].ID)
 	require.Zero(t, pending[0].MaxRetry)
+	require.Equal(t, "remail:mailtransport:outbound:points-v2:"+payload.ID, outboundPayloadKey(payload.ID))
 	require.Equal(t, outboundPayloadTTL, server.TTL(outboundPayloadKey(payload.ID)))
 	stored, found, err := queue.LoadOutboundSend(ctx, payload.ID)
 	require.NoError(t, err)

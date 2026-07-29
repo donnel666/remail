@@ -10,11 +10,11 @@ import (
 )
 
 func TestAllocationBucketCapacityMigrationRoundTripMySQL(t *testing.T) {
-	db := newAllocMySQLTestDB(t)
+	db, migrationsDir := newAllocLegacyMigrationTestDB(t)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	require.NoError(t, goose.SetDialect("mysql"))
-	require.NoError(t, goose.DownTo(sqlDB, allocMigrationsDir(t), 45))
+	require.NoError(t, goose.DownTo(sqlDB, migrationsDir, 45))
 
 	seedAllocBase(t, db, "microsoft", 1, 0, 0)
 	require.NoError(t, db.Exec(`
@@ -44,7 +44,7 @@ INSERT INTO domain_routing_candidates(
     id, project_id, resource_id, domain, domain_tld, purpose, status, alloc_bucket
 ) VALUES (990462, 10, 4095, 'd4095.example.com', 'example.com', 'sale', 'normal', MOD(4095, 64))`).Error)
 
-	require.NoError(t, goose.UpTo(sqlDB, allocMigrationsDir(t), 46))
+	require.NoError(t, goose.UpTo(sqlDB, migrationsDir, 46))
 	assertAllocationBuckets(t, db, 2047, 511)
 	requireIndexExists(t, db, "generated_mailboxes", "idx_generated_mailboxes_alloc_reuse")
 	requireIndexExists(t, db, "generated_mailboxes", "idx_generated_mailboxes_bucket_reuse")
@@ -53,7 +53,7 @@ INSERT INTO domain_routing_candidates(
 	require.NoError(t, db.Raw("SELECT alloc_bucket FROM generated_mailboxes WHERE id = 2047").Scan(&generatedBucket).Error)
 	require.Equal(t, coredomain.GeneratedMailboxBucket("existing@d4095.example.com"), generatedBucket)
 
-	require.NoError(t, goose.DownTo(sqlDB, allocMigrationsDir(t), 45))
+	require.NoError(t, goose.DownTo(sqlDB, migrationsDir, 45))
 	assertAllocationBuckets(t, db, 63, 63)
 	requireIndexExists(t, db, "generated_mailboxes", "idx_generated_mailboxes_alloc_reuse")
 	requireIndexMissing(t, db, "generated_mailboxes", "idx_generated_mailboxes_bucket_reuse")

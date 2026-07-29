@@ -126,7 +126,7 @@ export function CardKeyDetailSheet({
                   label={t("Amount")}
                   value={
                     <span className="font-mono-data">
-                      ¥{formatMoney(card.amount)}
+                      {formatMoney(card.amount)} {t("Points")}
                     </span>
                   }
                 />
@@ -216,7 +216,7 @@ export function CardKeyDetailSheet({
                           width: 140,
                           render: (value: string) => (
                             <span className="font-mono-data">
-                              ¥{formatMoney(value)}
+                              {formatMoney(value)} {t("Points")}
                             </span>
                           ),
                         },

@@ -130,14 +130,14 @@ type ProjectPriceDefaults = Record<
 
 const fallbackProjectPriceDefaults: ProjectPriceDefaults = {
   microsoft: {
-    codePrice: "0.008",
-    codeSupplierPrice: "0.005",
-    purchasePrice: "0.01",
-    purchaseSupplierPrice: "0.007",
+    codePrice: "8",
+    codeSupplierPrice: "5",
+    purchasePrice: "10",
+    purchaseSupplierPrice: "7",
   },
   domain: {
-    codePrice: "0.08",
-    codeSupplierPrice: "0.04",
+    codePrice: "80",
+    codeSupplierPrice: "40",
     purchasePrice: "0",
     purchaseSupplierPrice: "0",
   },
@@ -555,11 +555,11 @@ function ProductDraftCard({
   const { t } = useTranslation();
   const isMicrosoft = draft.type === "microsoft";
   const fields: Array<[keyof ProductDraft, string]> = [
-    ["codePrice", t("Code price")],
-    ["codeSupplierPrice", t("Code supplier price")],
+    ["codePrice", `${t("Code price")}（${t("Points")}）`],
+    ["codeSupplierPrice", `${t("Code supplier price")}（${t("Points")}）`],
     ["codeWindowMinutes", t("Code window minutes")],
-    ["purchasePrice", t("Purchase price")],
-    ["purchaseSupplierPrice", t("Purchase supplier price")],
+    ["purchasePrice", `${t("Purchase price")}（${t("Points")}）`],
+    ["purchaseSupplierPrice", `${t("Purchase supplier price")}（${t("Points")}）`],
     ["activationWindowMinutes", t("Activation window minutes")],
     ["warrantyMinutes", t("Warranty minutes label")],
   ];
@@ -1557,11 +1557,11 @@ function ProjectDetailSheet({
                   <div className="grid gap-2 text-sm sm:grid-cols-3">
                     <InfoItem
                       label={t("Code price")}
-                      value={product.codeEnabled ? moneyForDisplay(product.codePrice) : t("Disabled")}
+                      value={product.codeEnabled ? `${moneyForDisplay(product.codePrice)} ${t("Points")}` : t("Disabled")}
                     />
                     <InfoItem
                       label={t("Purchase price")}
-                      value={product.purchaseEnabled ? moneyForDisplay(product.purchasePrice) : t("Disabled")}
+                      value={product.purchaseEnabled ? `${moneyForDisplay(product.purchasePrice)} ${t("Points")}` : t("Disabled")}
                     />
                     <InfoItem
                       label={t("Service window")}

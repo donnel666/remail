@@ -33,9 +33,6 @@ export function validateWithdrawal(input: {
   if (amountUnits === null || amountUnits <= 0n) {
     return "Amount must be positive.";
   }
-  if (input.destination === "alipay" && !/^\d+(?:\.\d{1,2})?$/.test(amount)) {
-    return "Alipay withdrawal amount supports at most 2 decimal places.";
-  }
   if (amountUnits > (ledgerUnits(input.available) ?? 0n)) {
     return "Withdrawal exceeds withdrawable balance.";
   }
@@ -54,7 +51,7 @@ export function buildAlipayWithdrawalTicketInput(input: {
     ticketType: "general",
     title: "供应商提现申请",
     firstMessage: [
-      `提现金额：￥${input.amount.trim()}`,
+      `提现积分：${input.amount.trim()} 积分`,
       "提现方式：支付宝",
       `备注：${input.note.trim() || "无"}`,
     ].join("\n"),

@@ -9,7 +9,7 @@ import (
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 )
 
-var balanceWarningThresholds = [...]string{"3.00", "2.00", "1.00", "0.50"}
+var balanceWarningThresholds = [...]string{"3000.00", "2000.00", "1000.00", "500.00"}
 
 type BalanceWarningClaim struct {
 	UserID        uint

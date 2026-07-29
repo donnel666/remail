@@ -13,6 +13,7 @@ export const EPAY_GATEWAY_KEYS = [
 export const EPAY_WRITE_ONLY_KEYS = ["epay_merchant_key", "epay_private_key"] as const;
 
 export const TOPUP_KEYS = [
+  "points_per_yuan",
   "min_topup_amount",
   "topup_fee_rate",
   "topup_fee_cap",

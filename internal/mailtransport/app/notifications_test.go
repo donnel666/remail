@@ -15,9 +15,9 @@ func TestSystemMessagesReuseVerificationFrameAndEscapeContent(t *testing.T) {
 		message domain.OutboundMessage
 		labels  []string
 	}{
-		{BalanceWarningMessage("user@example.com", "0.40", "0.50", 2), []string{"当前余额", "预警档位", "建议操作"}},
-		{RechargeCreditedMessage("user@example.com", "<img src=x onerror=alert(1)>\r\nRC2", "10.00", "10.40"), []string{"充值金额", "到账后余额", "充值单号"}},
-		{LeaderboardRewardMessage("user@example.com", "2026-07-28", 1, 12, "8.00"), []string{"结算日期", "排行榜名次", "成功订单数", "奖励金额"}},
+		{BalanceWarningMessage("user@example.com", "400.00", "500.00", 2), []string{"当前积分", "预警档位", "建议操作"}},
+		{RechargeCreditedMessage("user@example.com", "<img src=x onerror=alert(1)>\r\nRC2", "10000.00", "10400.00"), []string{"充值积分", "到账后积分", "充值单号"}},
+		{LeaderboardRewardMessage("user@example.com", "2026-07-28", 1, 12, "8000.00"), []string{"结算日期", "排行榜名次", "成功订单数", "奖励积分"}},
 		{LoginNotificationMessage("user@example.com", "session-1", "203.0.113.8", "Browser", time.Unix(0, 0)), []string{"登录时间", "登录 IP", "设备"}},
 	}
 	for _, item := range structured {

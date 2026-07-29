@@ -10,11 +10,11 @@ import (
 )
 
 func TestMicrosoftMaintenanceMigrationRoundTripMySQL(t *testing.T) {
-	db := newMailTransportMySQLTestDB(t)
+	db, migrationsDir := newMailTransportLegacyMigrationTestDB(t)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	require.NoError(t, goose.SetDialect("mysql"))
-	require.NoError(t, goose.DownTo(sqlDB, mailTransportMigrationsDir(t), 29))
+	require.NoError(t, goose.DownTo(sqlDB, migrationsDir, 29))
 	require.True(t, db.Migrator().HasTable("microsoft_token_refresh_jobs"))
 	require.True(t, db.Migrator().HasTable("microsoft_token_refresh_requests"))
 	require.False(t, db.Migrator().HasColumn(&MicrosoftTokenRefreshStateModel{}, "token_refresh_generation"))
@@ -26,7 +26,7 @@ INSERT INTO microsoft_token_refresh_jobs(
     status, attempts, max_attempts, request_id, path
 ) VALUES (993001, 993001, 1, 'running', 2, 3, 'legacy-active', '/legacy')`).Error)
 
-	require.NoError(t, goose.UpTo(sqlDB, mailTransportMigrationsDir(t), 30))
+	require.NoError(t, goose.UpTo(sqlDB, migrationsDir, 30))
 	require.False(t, db.Migrator().HasTable("microsoft_token_refresh_jobs"))
 	require.False(t, db.Migrator().HasTable("microsoft_token_refresh_requests"))
 	require.True(t, db.Migrator().HasColumn(&MicrosoftTokenRefreshStateModel{}, "token_refresh_generation"))

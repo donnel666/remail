@@ -39,18 +39,28 @@ import (
 	"gorm.io/gorm"
 )
 
-var tradeAPIMySQLTestServer = testmysql.New("remail_trade_api_test")
+var (
+	tradeAPIMySQLTestServer       = testmysql.New("remail_trade_api_test")
+	tradeAPILegacyMySQLTestServer = testmysql.New("remail_trade_api_legacy_test")
+)
 
 func TestMain(m *testing.M) {
 	gin.SetMode(gin.TestMode)
 	code := m.Run()
 	_ = tradeAPIMySQLTestServer.Close(context.Background())
+	_ = tradeAPILegacyMySQLTestServer.Close(context.Background())
 	os.Exit(code)
 }
 
 func newTradeMySQLTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	return tradeAPIMySQLTestServer.Database(t, tradeMigrationsDir(t))
+}
+
+func newTradeLegacyMigrationTestDB(t *testing.T) (*gorm.DB, string) {
+	t.Helper()
+	migrationsDir := testmysql.MigrationsThrough(t, tradeMigrationsDir(t), 65)
+	return tradeAPILegacyMySQLTestServer.Database(t, migrationsDir), migrationsDir
 }
 
 func tradeInnoDBMetricCount(t *testing.T, db *gorm.DB, name string) uint64 {
@@ -404,11 +414,11 @@ func TestCheckoutPurchaseOrderContinuesAfterProductDelistedMySQL(t *testing.T) {
 }
 
 func TestOrderServiceSnapshotMigrationBackfillsDelistedProductMySQL(t *testing.T) {
-	db := newTradeMySQLTestDB(t)
+	db, migrationsDir := newTradeLegacyMigrationTestDB(t)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	require.NoError(t, goose.SetDialect("mysql"))
-	require.NoError(t, goose.DownTo(sqlDB, tradeMigrationsDir(t), 12))
+	require.NoError(t, goose.DownTo(sqlDB, migrationsDir, 12))
 
 	seedTradeBaseLegacyEnabled(t, db, "microsoft")
 	require.NoError(t, db.Exec(`
@@ -436,7 +446,7 @@ INSERT INTO orders(
 	).Error)
 	require.NoError(t, db.Table("project_products").Where("id = ?", 20).Update("status", "disabled").Error)
 
-	require.NoError(t, goose.UpTo(sqlDB, tradeMigrationsDir(t), 13))
+	require.NoError(t, goose.UpTo(sqlDB, migrationsDir, 13))
 	var snapshot struct {
 		CodeWindowMinutes       int
 		ActivationWindowMinutes int

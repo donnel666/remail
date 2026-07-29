@@ -20,7 +20,10 @@ import (
 	"gorm.io/gorm"
 )
 
-var iamMySQLTestServer = testmysql.New("remail_iam_test")
+var (
+	iamMySQLTestServer       = testmysql.New("remail_iam_test")
+	iamLegacyMySQLTestServer = testmysql.New("remail_iam_legacy_test")
+)
 
 type iamExplainRow struct {
 	Type sql.NullString `gorm:"column:type"`
@@ -30,6 +33,7 @@ type iamExplainRow struct {
 func TestMain(m *testing.M) {
 	code := m.Run()
 	_ = iamMySQLTestServer.Close(context.Background())
+	_ = iamLegacyMySQLTestServer.Close(context.Background())
 	os.Exit(code)
 }
 
@@ -37,6 +41,12 @@ func newMySQLTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
 	return iamMySQLTestServer.Database(t, migrationsDir(t))
+}
+
+func newIAMLegacyMigrationTestDB(t *testing.T) (*gorm.DB, string) {
+	t.Helper()
+	migrationsDir := testmysql.MigrationsThrough(t, migrationsDir(t), 65)
+	return iamLegacyMySQLTestServer.Database(t, migrationsDir), migrationsDir
 }
 
 func migrationsDir(t *testing.T) string {
@@ -209,17 +219,17 @@ func TestUserRepoRoleCheckMySQL(t *testing.T) {
 }
 
 func TestUserStatusMigrationMySQL(t *testing.T) {
-	db := newMySQLTestDB(t)
+	db, legacyMigrationsDir := newIAMLegacyMigrationTestDB(t)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	require.NoError(t, goose.SetDialect("mysql"))
-	require.NoError(t, goose.DownTo(sqlDB, migrationsDir(t), 34))
+	require.NoError(t, goose.DownTo(sqlDB, legacyMigrationsDir, 34))
 
 	require.NoError(t, db.Exec(`
 INSERT INTO users(id, email, password_hash, nickname, enabled, role) VALUES
     (990351, 'active-migration@test.local', 'hash', 'active', TRUE, 'user'),
     (990352, 'disabled-migration@test.local', 'hash', 'disabled', FALSE, 'user')`).Error)
-	require.NoError(t, goose.UpTo(sqlDB, migrationsDir(t), 35))
+	require.NoError(t, goose.UpTo(sqlDB, legacyMigrationsDir, 35))
 
 	var rows []struct {
 		ID     uint

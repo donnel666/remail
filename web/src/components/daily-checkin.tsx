@@ -4,6 +4,7 @@ import { useLocation } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 
 import { useAuth } from "@/context/auth-provider";
+import { formatPoints } from "@/lib/points";
 import { claimDailyCheckin, type DailyCheckinResponse } from "@/lib/wallet-api";
 
 export default function DailyCheckin() {
@@ -49,8 +50,8 @@ export default function DailyCheckin() {
   >
     <p className="py-2 text-base text-[var(--semi-color-text-0)]">
       {amount > 0
-        ? t("签到成功，获得奖励 ￥{{amount}}", { amount: result?.rewardAmount })
-        : t("签到成功，本次未获得现金奖励")}
+        ? t("签到成功，获得奖励 {{amount}}", { amount: formatPoints(result?.rewardAmount, t("Points")) })
+        : t("签到成功，本次未获得积分奖励")}
     </p>
   </Modal>;
 }

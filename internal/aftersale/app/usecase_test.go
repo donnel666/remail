@@ -219,11 +219,11 @@ func TestNewUseCaseRequiresTicketMailer(t *testing.T) {
 	}
 }
 
-func TestFormatMoney(t *testing.T) {
-	cases := map[string]string{"6.800000": "¥6.8", "0": "¥0", "": "¥0", "10.000000": "¥10", "1.500000": "¥1.5"}
+func TestFormatPoints(t *testing.T) {
+	cases := map[string]string{"6.800000": "6.8 积分", "0": "0 积分", "": "0 积分", "10.000000": "10 积分", "1.500000": "1.5 积分"}
 	for in, want := range cases {
-		if got := formatMoney(in); got != want {
-			t.Errorf("formatMoney(%q)=%q want %q", in, got, want)
+		if got := formatPoints(in); got != want {
+			t.Errorf("formatPoints(%q)=%q want %q", in, got, want)
 		}
 	}
 }

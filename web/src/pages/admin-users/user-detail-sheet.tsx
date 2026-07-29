@@ -407,14 +407,14 @@ function ProfileTab({
           label: t("Wallet balance"),
           value: metricValue(
             dashboardLoading,
-            stats ? `¥${formatMoney(stats.walletBalance)}` : "—"
+            stats ? `${formatMoney(stats.walletBalance)} ${t("Points")}` : "—"
           ),
         },
         {
           label: t("Historical spend"),
           value: metricValue(
             dashboardLoading,
-            stats ? `¥${formatMoney(stats.historicalSpend)}` : "—"
+            stats ? `${formatMoney(stats.historicalSpend)} ${t("Points")}` : "—"
           ),
         },
       ],
@@ -637,7 +637,7 @@ function ProfileTab({
           <InfoItem label={t("User Group")} value={user.userGroup.name} />
           <InfoItem
             label={t("Current Balance")}
-            value={<span className="font-mono-data">¥{formatMoney(user.consumerBalance)}</span>}
+            value={<span className="font-mono-data">{formatMoney(user.consumerBalance)} {t("Points")}</span>}
           />
           {canWithdraw ? (
             <InfoItem
@@ -647,7 +647,7 @@ function ProfileTab({
                   <Spin size="small" />
                 ) : (
                   <span className="font-mono-data font-semibold text-[var(--semi-color-primary)]">
-                    ¥{formatMoney(walletSummary?.supplierAvailable ?? "0")}
+                    {formatMoney(walletSummary?.supplierAvailable ?? "0")} {t("Points")}
                   </span>
                 )
               }
@@ -890,7 +890,7 @@ function InvitationsTab({ userId }: { userId: number }) {
 
 // ---------- Wallet tab ----------
 
-const QUICK_AMOUNTS = [10, 50, 100, -10, -50, -100];
+const QUICK_AMOUNTS = [10000, 50000, 100000, -10000, -50000, -100000];
 
 export function WalletAdjustModal({
   open,
@@ -988,18 +988,17 @@ export function WalletAdjustModal({
             {t("Current Balance")}
           </span>
           <span className="ml-2 font-mono-data font-semibold text-[var(--semi-color-text-0)]">
-            {balance === "-" ? "-" : `¥${formatMoney(balance)}`}
+            {balance === "-" ? "-" : `${formatMoney(balance)} ${t("Points")}`}
           </span>
         </div>
         <label className="block">
           <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
-            {t("Amount")} *
+            {t("Points")} *
           </span>
           <InputNumber
             onChange={setAmount}
             precision={6}
-            prefix="¥"
-            step={1}
+            step={0.01}
             style={{ width: "100%" }}
             value={amount}
           />
@@ -1014,7 +1013,7 @@ export function WalletAdjustModal({
                 size="small"
                 type="tertiary"
               >
-                {value > 0 ? "+" : "-"}¥{Math.abs(value)}
+                {value > 0 ? "+" : "-"}{Math.abs(value).toLocaleString()} {t("Points")}
               </Button>
             ))}
           </div>
@@ -1115,24 +1114,27 @@ function WalletTab({
           dataIndex: "amount",
           title: t("Amount"),
           width: 120,
-          render: (value: string, record: AdminTransaction) => (
-            <span
-              className={`font-mono-data font-semibold ${
-                record.direction === "in"
-                  ? "text-[var(--semi-color-success)]"
-                  : "text-[var(--semi-color-warning)]"
-              }`}
-            >
-              {record.direction === "in" ? "+" : "-"}¥{formatMoney(value)}
-            </span>
-          ),
+          render: (value: string, record: AdminTransaction) => {
+            const formatted = formatMoney(String(value).replace(/^-/, ""));
+            return (
+              <span
+                className={`font-mono-data font-semibold ${
+                  record.direction === "in"
+                    ? "text-[var(--semi-color-success)]"
+                    : "text-[var(--semi-color-warning)]"
+                }`}
+              >
+                {formatted === "—" ? "—" : `${record.direction === "in" ? "+" : "-"}${formatted} ${t("Points")}`}
+              </span>
+            );
+          },
         },
         {
           dataIndex: "balanceAfter",
           title: t("Balance after"),
           width: 130,
           render: (value: string) => (
-            <span className="font-mono-data">¥{formatMoney(value)}</span>
+            <span className="font-mono-data">{formatMoney(value)}{formatMoney(value) === "—" ? "" : ` ${t("Points")}`}</span>
           ),
         },
         {
@@ -1202,13 +1204,13 @@ function WalletTab({
             label={t("Current Balance")}
             value={
               <span className="font-mono-data font-semibold text-[var(--semi-color-primary)]">
-                ¥{formatMoney(wallet.consumerBalance)}
+                {formatMoney(wallet.consumerBalance)} {t("Points")}
               </span>
             }
           />
           <InfoItem
             label={t("Historical Spend")}
-            value={<span className="font-mono-data">¥{formatMoney(wallet.historicalSpend)}</span>}
+            value={<span className="font-mono-data">{formatMoney(wallet.historicalSpend)} {t("Points")}</span>}
           />
           <InfoItem
             label={t("Order Count")}
@@ -1218,11 +1220,11 @@ function WalletTab({
             <>
               <InfoItem
                 label={t("Supplier available")}
-                value={<span className="font-mono-data">¥{formatMoney(wallet.supplierAvailable)}</span>}
+                value={<span className="font-mono-data">{formatMoney(wallet.supplierAvailable)} {t("Points")}</span>}
               />
               <InfoItem
                 label={t("Supplier frozen")}
-                value={<span className="font-mono-data">¥{formatMoney(wallet.supplierFrozen)}</span>}
+                value={<span className="font-mono-data">{formatMoney(wallet.supplierFrozen)} {t("Points")}</span>}
               />
             </>
           ) : null}

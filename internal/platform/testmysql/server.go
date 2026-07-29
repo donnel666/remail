@@ -4,6 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -33,6 +36,27 @@ type Server struct {
 
 func New(prefix string) *Server {
 	return &Server{prefix: prefix}
+}
+
+func MigrationsThrough(t *testing.T, source string, maximum int) string {
+	t.Helper()
+	target := t.TempDir()
+	entries, err := os.ReadDir(source)
+	require.NoError(t, err)
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || filepath.Ext(name) != ".sql" || len(name) < 5 {
+			continue
+		}
+		version, err := strconv.Atoi(name[:5])
+		if err != nil || version > maximum {
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join(source, name))
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filepath.Join(target, name), content, 0o600))
+	}
+	return target
 }
 
 func (s *Server) Database(t *testing.T, migrationsDir string, dsnOptions ...string) *gorm.DB {

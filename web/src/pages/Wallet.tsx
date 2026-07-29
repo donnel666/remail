@@ -50,10 +50,12 @@ import {
   getWalletReferrals,
   listRecharges,
   listWalletTransactions,
+  quoteRecharge,
   redeemCard,
   transferReferralRewards,
   type RechargeConfigResponse,
   type RechargeItem,
+  type RechargeQuoteResponse,
   type TransactionItem,
   type WalletReferralResponse,
   type WalletResponse,
@@ -61,8 +63,7 @@ import {
 import { createMyInvite, getMyInvite } from "@/lib/iam-api";
 import { IamApiError } from "@/lib/api-client";
 import { getIamErrorMessage } from "@/lib/iam-errors";
-
-import { calculateRechargePaymentAmount } from "./wallet-payment";
+import { formatPoints, normalizePointValue } from "@/lib/points";
 
 const { Text } = Typography;
 const EPAY_RETURN_MESSAGE = "remail:epay-return";
@@ -71,15 +72,6 @@ interface BannerStat {
   icon: ReactNode;
   label: string;
   value: string;
-}
-
-function formatCurrency(value: string | number | undefined) {
-  const numeric = Number(value ?? 0);
-  const safeValue = Number.isFinite(numeric) ? numeric : 0;
-  return `￥${safeValue.toLocaleString("zh-CN", {
-    maximumFractionDigits: 6,
-    minimumFractionDigits: 2,
-  })}`;
 }
 
 function formatDateTime(value: string | undefined) {
@@ -179,10 +171,13 @@ export default function Wallet() {
   const [billingOpen, setBillingOpen] = useState(false);
   const [billingKeyword, setBillingKeyword] = useState("");
   const [debouncedBillingKeyword, flushBillingKeyword] = useDebouncedValue(billingKeyword);
+  const [debouncedCustomPoints, flushCustomPoints] = useDebouncedValue(customAmount, 250);
   const [wallet, setWallet] = useState<WalletResponse | null>(null);
   const [referrals, setReferrals] = useState<WalletReferralResponse | null>(null);
   const [rechargeConfig, setRechargeConfig] =
     useState<RechargeConfigResponse | null>(null);
+  const [rechargeQuote, setRechargeQuote] =
+    useState<RechargeQuoteResponse | null>(null);
   const [referralLink, setReferralLink] = useState("");
   const [recharges, setRecharges] = useState<RechargeItem[]>([]);
   const [redemptions, setRedemptions] = useState<TransactionItem[]>([]);
@@ -202,9 +197,10 @@ export default function Wallet() {
   const [redeeming, setRedeeming] = useState(false);
   const redeemAttemptRef = useRef<{ code: string; key: string } | null>(null);
   const transferAttemptRef = useRef<string | null>(null);
-  const rechargeAttemptRef = useRef<{ amount: string; key: string } | null>(null);
+  const rechargeAttemptRef = useRef<{ points: string; key: string } | null>(null);
   const paymentFrameRef = useRef<HTMLIFrameElement | null>(null);
   const pendingRechargeNosRef = useRef(new Set<string>());
+  const rechargeQuoteSeqRef = useRef(0);
   const rechargeRequestSeqRef = useRef(0);
   const redemptionRequestSeqRef = useRef(0);
   const amountFormApiRef = useRef<{
@@ -259,15 +255,17 @@ export default function Wallet() {
       setRechargeConfig(config);
       const first = config.tiers[0];
       if (first) {
-        const value = Number(first.amount);
+        const value = Number(first.points);
         setSelectedAmount(value);
-        setCustomAmount(first.amount);
+        setCustomAmount(first.points);
+        setRechargeQuote(first);
+        flushCustomPoints(first.points);
         amountFormApiRef.current?.setValue?.("topUpCount", value);
       }
     } catch (error) {
       Toast.error(getIamErrorMessage(t, error));
     }
-  }, [t]);
+  }, [flushCustomPoints, t]);
 
   const refreshRecharges = useCallback(async () => {
     const seq = rechargeRequestSeqRef.current + 1;
@@ -499,20 +497,44 @@ export default function Wallet() {
     };
   }, [openBilling, payment, paymentOpen, refreshMembership, t]);
 
-  const handlePresetSelect = (amount: string) => {
-    const value = Number(amount);
+  const handlePresetSelect = (points: string) => {
+    const value = Number(points);
     setSelectedAmount(value);
-    setCustomAmount(amount);
+    setCustomAmount(points);
+    flushCustomPoints(points);
+    setRechargeQuote(
+      rechargeConfig?.tiers.find((tier) => tier.points === points) ?? null
+    );
     amountFormApiRef.current?.setValue?.("topUpCount", value);
   };
 
-  const selectedTier = rechargeConfig?.tiers.find(
-    (tier) => Number(tier.amount) === selectedAmount
-  );
-  const payableAmount = useMemo(() => {
-    if (selectedTier) return selectedTier.paymentAmount;
-    return calculateRechargePaymentAmount(customAmount, rechargeConfig?.feeRate, rechargeConfig?.feeCap);
-  }, [customAmount, rechargeConfig?.feeCap, rechargeConfig?.feeRate, selectedTier]);
+  useEffect(() => {
+    const seq = rechargeQuoteSeqRef.current + 1;
+    rechargeQuoteSeqRef.current = seq;
+    const points = normalizePointValue(debouncedCustomPoints);
+    if (
+      !rechargeConfig?.enabled ||
+      !points ||
+      Number(points) < Number(rechargeConfig.minPoints)
+    ) {
+      setRechargeQuote(null);
+      return;
+    }
+    const tier = rechargeConfig.tiers.find(
+      (item) => normalizePointValue(item.points) === points
+    );
+    if (tier) {
+      setRechargeQuote(tier);
+      return;
+    }
+    void quoteRecharge(points)
+      .then((quote) => {
+        if (rechargeQuoteSeqRef.current === seq) setRechargeQuote(quote);
+      })
+      .catch(() => {
+        if (rechargeQuoteSeqRef.current === seq) setRechargeQuote(null);
+      });
+  }, [debouncedCustomPoints, rechargeConfig]);
 
   const handleRecharge = async () => {
     if (recharging) return;
@@ -520,18 +542,20 @@ export default function Wallet() {
       Toast.warning(t("Online recharge is unavailable."));
       return;
     }
-    const amount = Number(customAmount);
-    if (!Number.isFinite(amount) || amount < Number(rechargeConfig.minAmount)) {
+    const points = normalizePointValue(customAmount);
+    if (
+      !points ||
+      Number(points) < Number(rechargeConfig.minPoints)
+    ) {
       Toast.warning(t("Recharge amount is below the minimum."));
       return;
     }
-    const normalizedAmount = amount.toFixed(2);
-    if (!rechargeAttemptRef.current || rechargeAttemptRef.current.amount !== normalizedAmount) {
-      rechargeAttemptRef.current = { amount: normalizedAmount, key: generateIdempotencyKey() };
+    if (!rechargeAttemptRef.current || rechargeAttemptRef.current.points !== points) {
+      rechargeAttemptRef.current = { points, key: generateIdempotencyKey() };
     }
     setRecharging(true);
     try {
-      const result = await createRecharge(normalizedAmount, rechargeAttemptRef.current.key);
+      const result = await createRecharge(points, rechargeAttemptRef.current.key);
       rechargeAttemptRef.current = null;
       setPaymentOpen(true);
       setPaymentFrameLoaded(false);
@@ -626,12 +650,12 @@ export default function Wallet() {
       {
         icon: <WalletIcon size={14} />,
         label: "Current Balance",
-        value: walletLoading ? "..." : formatCurrency(wallet?.consumerBalance),
+        value: walletLoading ? "..." : formatPoints(wallet?.consumerBalance, t("Points")),
       },
       {
         icon: <TrendingUp size={14} />,
         label: "Historical Spend",
-        value: walletLoading ? "..." : formatCurrency(wallet?.historicalSpend),
+        value: walletLoading ? "..." : formatPoints(wallet?.historicalSpend, t("Points")),
       },
       {
         icon: <BarChart2 size={14} />,
@@ -639,7 +663,7 @@ export default function Wallet() {
         value: walletLoading ? "..." : String(wallet?.orderCount ?? 0),
       },
     ],
-    [wallet, walletLoading]
+    [t, wallet, walletLoading]
   );
 
   const referralStats = useMemo<BannerStat[]>(
@@ -647,12 +671,12 @@ export default function Wallet() {
       {
         icon: <TrendingUp size={14} />,
         label: "Pending Rewards",
-        value: referralLoading ? "..." : formatCurrency(referrals?.pendingRewards),
+        value: referralLoading ? "..." : formatPoints(referrals?.pendingRewards, t("Points")),
       },
       {
         icon: <BarChart2 size={14} />,
         label: "Total Earned",
-        value: referralLoading ? "..." : formatCurrency(referrals?.totalEarned),
+        value: referralLoading ? "..." : formatPoints(referrals?.totalEarned, t("Points")),
       },
       {
         icon: <Users size={14} />,
@@ -660,7 +684,7 @@ export default function Wallet() {
         value: referralLoading ? "..." : String(referrals?.inviteCount ?? 0),
       },
     ],
-    [referralLoading, referrals]
+    [referralLoading, referrals, t]
   );
 
   const billingData = useMemo(
@@ -668,21 +692,19 @@ export default function Wallet() {
       ...recharges.map((item) => ({
         ...item,
         orderNo: item.rechargeNo,
-        rechargeQuotaText: formatCurrency(item.rechargeQuota),
-        paymentAmountText: formatCurrency(item.paymentAmount),
+        creditedPointsText: formatPoints(item.creditedPoints, t("Points")),
         createdAtText: formatDateTime(item.createdAt),
       })),
       ...redemptions.map((item) => ({
         ...item,
         orderNo: item.transactionNo,
         paymentMethod: "Redemption Code",
-        rechargeQuotaText: formatCurrency(item.amount),
-        paymentAmountText: formatCurrency(item.amount),
+        creditedPointsText: formatPoints(item.amount, t("Points")),
         status: "credited",
         createdAtText: formatDateTime(item.createdAt),
       })),
     ].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)),
-    [recharges, redemptions]
+    [recharges, redemptions, t]
   );
 
   const billingColumns = useMemo(
@@ -700,14 +722,9 @@ export default function Wallet() {
         title: t("Payment method"),
       },
       {
-        dataIndex: "rechargeQuotaText",
-        key: "rechargeQuota",
-        title: t("Recharge quota"),
-      },
-      {
-        dataIndex: "paymentAmountText",
-        key: "paymentAmount",
-        title: t("Payment amount"),
+        dataIndex: "creditedPointsText",
+        key: "creditedPoints",
+        title: t("Credited points"),
       },
       {
         dataIndex: "status",
@@ -793,22 +810,31 @@ export default function Wallet() {
                     <Form.InputNumber
                       extraText={
                         <Text type="secondary">
-                          {t("Payable")}:{" "}
-                          <span style={{ color: "red" }}>
-                            {payableAmount}
-                          </span>
+                          {rechargeQuote ? (
+                            <>
+                              {t("Fee points")}: {formatPoints(rechargeQuote.feePoints, t("Points"))}
+                              {" · "}
+                              {t("Credited points")}: {formatPoints(rechargeQuote.creditedPoints, t("Points"))}
+                            </>
+                          ) : t("Enter recharge points for a quote")}
                         </Text>
                       }
                       field="topUpCount"
-                      label={t("Recharge Amount")}
-                      max={999999999}
-                      min={Number(rechargeConfig?.minAmount ?? 0.01)}
+                      label={t("Recharge points")}
+                      max={999999999999.999999}
+                      min={Number(rechargeConfig?.minPoints ?? 0.01)}
                       onChange={(value) => {
-                        const parsed = Number(value);
-                        setCustomAmount(Number.isFinite(parsed) ? String(parsed) : "");
+                        const points = normalizePointValue(
+                          typeof value === "string" || typeof value === "number"
+                            ? value
+                            : undefined
+                        );
+                        const parsed = Number(points);
+                        setCustomAmount(points);
                         setSelectedAmount(Number.isFinite(parsed) ? parsed : 0);
+                        setRechargeQuote(null);
                       }}
-                      precision={2}
+                      precision={6}
                       step={0.01}
                       style={{ width: "100%" }}
                     />
@@ -828,26 +854,26 @@ export default function Wallet() {
                     </Form.Slot>
                   </div>
 
-                  <Form.Slot label={t("Select recharge amount")}>
+                  <Form.Slot label={t("Select recharge points")}>
                     <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
                       {(rechargeConfig?.tiers ?? []).map((tier) => {
-                        const selected = Number(tier.amount) === selectedAmount;
+                        const selected = Number(tier.points) === selectedAmount;
                         return (
                           <div
                             className="rounded-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--semi-color-primary)]"
-                            key={tier.amount}
-                            onClick={() => handlePresetSelect(tier.amount)}
+                            key={tier.points}
+                            onClick={() => handlePresetSelect(tier.points)}
                             onKeyDown={(event) => {
                               if (event.key === "Enter" || event.key === " ") {
                                 event.preventDefault();
-                                handlePresetSelect(tier.amount);
+                                handlePresetSelect(tier.points);
                               }
                             }}
                             role="button"
                             tabIndex={0}
                             style={{
                               cursor: "pointer",
-                              height: 116,
+                              height: 132,
                               width: "100%",
                             }}
                           >
@@ -865,16 +891,18 @@ export default function Wallet() {
                               <div className="text-center">
                                 <div className="mb-2 flex items-center justify-center gap-1 text-base font-semibold">
                                   <Coins size={18} />
-                                  {formatCurrency(tier.amount)}
-                                  {Number(tier.bonus) > 0 ? (
+                                  {formatPoints(tier.points, t("Points"))}
+                                  {Number(tier.bonusPoints) > 0 ? (
                                     <Tag color="orange" size="small">
-                                      +{formatCurrency(tier.bonus)}
+                                      +{formatPoints(tier.bonusPoints, t("Points"))}
                                     </Tag>
                                   ) : null}
                                 </div>
                                 <div className="text-xs text-muted-foreground">
-                                  {t("Pay")} {formatCurrency(tier.paymentAmount)}
-                                  {t("Pay saving suffix")}
+                                  {t("Credited points")}: {formatPoints(tier.creditedPoints, t("Points"))}
+                                </div>
+                                <div className="mt-1 text-xs text-muted-foreground">
+                                  {t("Fee points")}: {formatPoints(tier.feePoints, t("Points"))}
                                 </div>
                               </div>
                             </Card>

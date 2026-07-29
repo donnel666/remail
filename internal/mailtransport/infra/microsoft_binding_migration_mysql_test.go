@@ -22,17 +22,17 @@ func TestMicrosoftBindingMaskMigrationsRejectDirtyLegacyDisplayMySQL(t *testing.
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			db := newMailTransportMySQLTestDB(t)
+			db, migrationsDir := newMailTransportLegacyMigrationTestDB(t)
 			sqlDB, err := db.DB()
 			require.NoError(t, err)
 			require.NoError(t, goose.SetDialect("mysql"))
-			require.NoError(t, goose.DownTo(sqlDB, mailTransportMigrationsDir(t), tt.from))
+			require.NoError(t, goose.DownTo(sqlDB, migrationsDir, tt.from))
 
 			insertLegacyBindingDisplay(t, db, tt.baseID+1, "original-one@recovery.test", "a***b@@recovery.test")
 			insertLegacyBindingDisplay(t, db, tt.baseID+2, "original-two@recovery.test", "Name <a***b@recovery.test>")
 			insertLegacyBindingDisplay(t, db, tt.baseID+3, "original-three@recovery.test", " A***B@Recovery.Test ")
 
-			require.NoError(t, goose.UpTo(sqlDB, mailTransportMigrationsDir(t), tt.to))
+			require.NoError(t, goose.UpTo(sqlDB, migrationsDir, tt.to))
 			require.Equal(t, "original-one@recovery.test", bindingAddressForMigrationTest(t, db, tt.baseID+1))
 			require.Equal(t, "original-two@recovery.test", bindingAddressForMigrationTest(t, db, tt.baseID+2))
 			require.Equal(t, "a***b@recovery.test", bindingAddressForMigrationTest(t, db, tt.baseID+3))
@@ -41,16 +41,16 @@ func TestMicrosoftBindingMaskMigrationsRejectDirtyLegacyDisplayMySQL(t *testing.
 }
 
 func TestMicrosoftBindingMaskMigrationRollbackPreservesLongDisplayMySQL(t *testing.T) {
-	db := newMailTransportMySQLTestDB(t)
+	db, migrationsDir := newMailTransportLegacyMigrationTestDB(t)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	require.NoError(t, goose.SetDialect("mysql"))
-	require.NoError(t, goose.DownTo(sqlDB, mailTransportMigrationsDir(t), 20))
+	require.NoError(t, goose.DownTo(sqlDB, migrationsDir, 20))
 
 	const resourceID = 9_922_001
 	longMask := strings.Repeat("a", 280) + "*@recovery.test"
 	insertLegacyBindingDisplay(t, db, resourceID, longMask, "")
-	require.NoError(t, goose.DownTo(sqlDB, mailTransportMigrationsDir(t), 19))
+	require.NoError(t, goose.DownTo(sqlDB, migrationsDir, 19))
 
 	var display string
 	require.NoError(t, db.Raw("SELECT bound_display FROM microsoft_binding_mailboxes WHERE resource_id = ?", resourceID).Scan(&display).Error)

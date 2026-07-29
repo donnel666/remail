@@ -21,17 +21,27 @@ import (
 	"gorm.io/gorm"
 )
 
-var mailTransportMySQLTestServer = testmysql.New("remail_mailtransport_test")
+var (
+	mailTransportMySQLTestServer       = testmysql.New("remail_mailtransport_test")
+	mailTransportLegacyMySQLTestServer = testmysql.New("remail_mailtransport_legacy_test")
+)
 
 func TestMain(m *testing.M) {
 	code := m.Run()
 	_ = mailTransportMySQLTestServer.Close(context.Background())
+	_ = mailTransportLegacyMySQLTestServer.Close(context.Background())
 	os.Exit(code)
 }
 
 func newMailTransportMySQLTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	return mailTransportMySQLTestServer.Database(t, mailTransportMigrationsDir(t))
+}
+
+func newMailTransportLegacyMigrationTestDB(t *testing.T) (*gorm.DB, string) {
+	t.Helper()
+	migrationsDir := testmysql.MigrationsThrough(t, mailTransportMigrationsDir(t), 65)
+	return mailTransportLegacyMySQLTestServer.Database(t, migrationsDir), migrationsDir
 }
 
 func mailTransportMigrationsDir(t *testing.T) string {

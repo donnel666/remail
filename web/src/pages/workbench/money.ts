@@ -11,11 +11,11 @@ export function formatCompactNumber(value: number) {
 }
 
 export function formatMoneyExact(value: number) {
-  if (!Number.isFinite(value)) return "￥0";
-  return "￥" + value.toFixed(6).replace(/\.?0+$/, "");
+  if (!Number.isFinite(value)) return "0 积分";
+  return `${value.toFixed(6).replace(/\.?0+$/, "")} 积分`;
 }
 
 export function formatMoney(value: number) {
   if (Math.abs(value) < 1000) return formatMoneyExact(value);
-  return "￥" + formatCompactNumber(value);
+  return `${formatCompactNumber(value)} 积分`;
 }

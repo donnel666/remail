@@ -24,6 +24,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import type { AdminDashboardData } from "@/lib/admin-dashboard-api";
+import { formatPoints } from "@/lib/points";
 
 type MetricTone = "blue" | "cyan" | "green" | "orange" | "pink" | "purple";
 
@@ -87,15 +88,6 @@ function formatCount(value: number | undefined) {
   return (value ?? 0).toLocaleString("zh-CN");
 }
 
-function formatMoney(value: string | number | null | undefined) {
-  const parsed = Number(value ?? 0);
-  if (!Number.isFinite(parsed)) return "0.00";
-  return parsed.toLocaleString(undefined, {
-    maximumFractionDigits: 6,
-    minimumFractionDigits: 2,
-  });
-}
-
 function formatRate(value: number | undefined) {
   return `${(value ?? 0).toFixed(1)}%`;
 }
@@ -122,7 +114,7 @@ export function AdminDashboardSummaryCards({
           title: t("Recharge amount"),
           trendColor: "#3b82f6",
           trendData: trend.map((point) => point.rechargeAmount),
-          value: `¥${formatMoney(stats?.rechargeAmount)}`,
+          value: formatPoints(stats?.rechargeAmount, t("Points")),
         },
         {
           avatarColor: "purple",
@@ -130,7 +122,7 @@ export function AdminDashboardSummaryCards({
           title: t("Spend amount"),
           trendColor: "#8b5cf6",
           trendData: trend.map((point) => point.spendAmount),
-          value: `¥${formatMoney(stats?.spendAmount)}`,
+          value: formatPoints(stats?.spendAmount, t("Points")),
         },
         {
           avatarColor: "green",
@@ -138,7 +130,7 @@ export function AdminDashboardSummaryCards({
           title: t("Platform revenue"),
           trendColor: "#22a06b",
           trendData: trend.map((point) => point.platformRevenue),
-          value: `¥${formatMoney(stats?.platformRevenue)}`,
+          value: formatPoints(stats?.platformRevenue, t("Points")),
         },
         {
           avatarColor: "orange",
@@ -146,7 +138,7 @@ export function AdminDashboardSummaryCards({
           title: t("Refund amount"),
           trendColor: "#f59e0b",
           trendData: trend.map((point) => point.refundAmount),
-          value: `¥${formatMoney(stats?.refundAmount)}`,
+          value: formatPoints(stats?.refundAmount, t("Points")),
         },
         {
           avatarColor: "cyan",
@@ -154,7 +146,7 @@ export function AdminDashboardSummaryCards({
           title: t("Withdraw amount"),
           trendColor: "#06b6d4",
           trendData: trend.map((point) => point.withdrawAmount),
-          value: `¥${formatMoney(stats?.withdrawAmount)}`,
+          value: formatPoints(stats?.withdrawAmount, t("Points")),
         },
       ],
     },

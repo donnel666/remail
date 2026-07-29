@@ -9,8 +9,8 @@ import (
 )
 
 func TestExplicitAliasOwnershipMigrationBackfillsOldestSuperAdminMySQL(t *testing.T) {
-	db := newMailTransportMySQLTestDB(t)
-	downgradeExplicitAliasOwnershipMigration(t, db)
+	db, migrationsDir := newMailTransportLegacyMigrationTestDB(t)
+	downgradeExplicitAliasOwnershipMigration(t, db, migrationsDir)
 
 	require.NoError(t, db.Exec(`
 INSERT INTO users(id, email, password_hash, role) VALUES
@@ -27,7 +27,7 @@ VALUES (2000, 'legacy-owner@outlook.com', 'outlook.com', 'secret', TRUE, 'normal
 INSERT INTO explicit_aliases(resource_id, email, status)
 VALUES (2000, 'legacy-explicit-alias@outlook.com', 'normal')`).Error)
 
-	upgradeExplicitAliasOwnershipMigration(t, db)
+	upgradeExplicitAliasOwnershipMigration(t, db, migrationsDir)
 
 	var ownerUserID uint
 	require.NoError(t, db.Raw(
@@ -41,8 +41,8 @@ VALUES (2000, 'missing-owner@outlook.com', 'normal')`).Error)
 }
 
 func TestExplicitAliasOwnershipMigrationRejectsLegacyAliasesWithoutSuperAdminMySQL(t *testing.T) {
-	db := newMailTransportMySQLTestDB(t)
-	downgradeExplicitAliasOwnershipMigration(t, db)
+	db, migrationsDir := newMailTransportLegacyMigrationTestDB(t)
+	downgradeExplicitAliasOwnershipMigration(t, db, migrationsDir)
 
 	require.NoError(t, db.Exec(
 		"INSERT INTO users(id, email, password_hash, role) VALUES (20, 'ownerless-supplier@test.local', 'hash', 'supplier')",
@@ -60,22 +60,22 @@ VALUES (2001, 'ownerless-explicit-alias@outlook.com', 'normal')`).Error)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	require.NoError(t, goose.SetDialect("mysql"))
-	err = goose.UpTo(sqlDB, mailTransportMigrationsDir(t), 8)
+	err = goose.UpTo(sqlDB, migrationsDir, 8)
 	require.Error(t, err)
 }
 
-func downgradeExplicitAliasOwnershipMigration(t *testing.T, db *gorm.DB) {
+func downgradeExplicitAliasOwnershipMigration(t *testing.T, db *gorm.DB, migrationsDir string) {
 	t.Helper()
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	require.NoError(t, goose.SetDialect("mysql"))
-	require.NoError(t, goose.DownTo(sqlDB, mailTransportMigrationsDir(t), 7))
+	require.NoError(t, goose.DownTo(sqlDB, migrationsDir, 7))
 }
 
-func upgradeExplicitAliasOwnershipMigration(t *testing.T, db *gorm.DB) {
+func upgradeExplicitAliasOwnershipMigration(t *testing.T, db *gorm.DB, migrationsDir string) {
 	t.Helper()
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	require.NoError(t, goose.SetDialect("mysql"))
-	require.NoError(t, goose.UpTo(sqlDB, mailTransportMigrationsDir(t), 8))
+	require.NoError(t, goose.UpTo(sqlDB, migrationsDir, 8))
 }

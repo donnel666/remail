@@ -13,7 +13,7 @@ export type JsonResponse<
 
 export type ApiErrorBody = Partial<components["schemas"]["Error"]>;
 
-const csrfCookieName = "csrf_token";
+const csrfCookieName = "csrf_token_points_v2";
 const csrfHeaderName = "X-CSRF-Token";
 export const apiRequestTimeoutMs = 60_000;
 const authRequiredIgnoredPaths = new Set([

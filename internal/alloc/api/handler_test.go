@@ -101,6 +101,7 @@ func TestAllocationAdminRoutesAuthAndContract(t *testing.T) {
 		require.Equal(t, "buyer-mailbox@example.com", item["deliveryEmail"])
 		require.Equal(t, "admin@test.local", item["buyerEmail"])
 		require.Equal(t, "654321", item["verificationCode"])
+		require.Equal(t, "12.340000", item["payAmount"])
 		require.NotContains(t, item, "productId")
 		require.NotContains(t, item, "email")
 		require.NotContains(t, item, "releasedAt")

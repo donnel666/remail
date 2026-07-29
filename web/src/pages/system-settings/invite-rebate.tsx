@@ -23,11 +23,11 @@ export default function RechargeRebateSection({ options, onBulkSave }: SectionPr
     finally { setSaving(false); }
   };
 
-  return <SettingsSection title={<SettingsCardHeader icon={<Tag size={16} />} title={t("充值返利")} description={t("配置被邀请用户首次充值后的返利比例、金额上限和有效期")} />}>
+  return <SettingsSection title={<SettingsCardHeader icon={<Tag size={16} />} title={t("充值返利")} description={t("配置被邀请用户首次充值后的返利比例、积分上限和有效期")} />}>
     <SettingsFormGrid className="mt-4">
       <SettingsNumberField label={t("首次充值返利比例（0.8 = 80%）")} value={number(form.first_order_rebate_ratio)} onChange={(value) => update("first_order_rebate_ratio", value)} min={0} max={1} precision={2} step={0.01} />
-      <SettingsNumberField label={t("单笔充值返利上限（0 = 不限制）")} value={number(form.single_rebate_cap)} onChange={(value) => update("single_rebate_cap", value)} min={0} precision={2} />
-      <SettingsNumberField label={t("累计充值返利上限（0 = 不限制）")} value={number(form.cumulative_rebate_cap)} onChange={(value) => update("cumulative_rebate_cap", value)} min={0} precision={2} />
+      <SettingsNumberField label={t("单笔充值返利积分上限（0 = 不限制）")} value={number(form.single_rebate_cap)} onChange={(value) => update("single_rebate_cap", value)} min={0} precision={6} step={0.01} />
+      <SettingsNumberField label={t("累计充值返利积分上限（0 = 不限制）")} value={number(form.cumulative_rebate_cap)} onChange={(value) => update("cumulative_rebate_cap", value)} min={0} precision={6} step={0.01} />
       <SettingsNumberField label={t("返利有效期（天，0 = 永不过期）")} value={number(form.rebate_expiry_days)} onChange={(value) => update("rebate_expiry_days", value)} min={0} max={36500} precision={0} />
     </SettingsFormGrid>
     <Button icon={<Save size={14} />} loading={saving} onClick={() => void save().catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>

@@ -654,7 +654,7 @@ export default function AdminUsers() {
           width: 115,
           render: (value: string) => (
             <span className="font-mono-data text-[var(--semi-color-text-0)]">
-              ¥{formatMoney(value)}
+              {formatMoney(value)} {t("Points")}
             </span>
           ),
         },

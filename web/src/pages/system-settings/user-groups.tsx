@@ -73,7 +73,7 @@ export default function UserGroupSection(_props: SectionProps) {
               {!group.enabled ? <span className="rounded bg-red-50 px-1.5 py-0.5 text-xs text-red-600">{t("已禁用")}</span> : null}
             </div>
             <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--semi-color-text-2)]">
-              <span>{t("并发")}: {group.apiConcurrencyLimit}</span><span>{t("折扣")}: {group.priceDiscountRatio}</span><span>{t("门槛")}: {group.topupThreshold}</span><span>{t("自动升级")}: {group.autoUpgradeEnabled ? t("是") : t("否")}</span>
+              <span>{t("并发")}: {group.apiConcurrencyLimit}</span><span>{t("折扣")}: {group.priceDiscountRatio}</span><span>{t("门槛")}: {group.topupThreshold} {t("Points")}</span><span>{t("自动升级")}: {group.autoUpgradeEnabled ? t("是") : t("否")}</span>
             </div>
           </div>
           <Button icon={<Edit size={14} />} theme="light" type="tertiary" onClick={() => { setEditing({ ...group }); setShowForm(true); }}>{t("编辑")}</Button>
@@ -102,7 +102,7 @@ export default function UserGroupSection(_props: SectionProps) {
         <SettingsTextField label={t("分组描述")} value={editing.description} onChange={(value) => update("description", value)} />
         <SettingsNumberField label={t("API 并发请求数上限")} value={number(editing.apiConcurrencyLimit)} onChange={(value) => update("apiConcurrencyLimit", value)} min={0} />
         <SettingsNumberField label={t("价格折扣率（0.9 = 九折）")} value={number(editing.priceDiscountRatio)} onChange={(value) => update("priceDiscountRatio", value)} min={0} max={1} precision={2} step={0.01} />
-        <SettingsNumberField label={t("充值升级门槛")} value={number(editing.topupThreshold)} onChange={(value) => update("topupThreshold", value)} min={0} />
+        <SettingsNumberField label={t("充值积分升级门槛")} value={number(editing.topupThreshold)} onChange={(value) => update("topupThreshold", value)} min={0} precision={6} step={0.01} />
         <SettingsSwitchField checked={editing.enabled} onChange={(value) => update("enabled", value)} label={t("启用分组")} />
         <SettingsSwitchField checked={editing.autoUpgradeEnabled} onChange={(value) => update("autoUpgradeEnabled", value)} label={t("允许自动升级")} description={t("达到充值门槛后自动升入此分组")} />
       </SettingsFormGrid>

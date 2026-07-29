@@ -111,7 +111,7 @@ describe("MembershipOverview", () => {
     render(<MembershipOverview currentGroup={current} totalRecharged={undefined} />);
 
     await screen.findByRole("table", { name: "Membership groups" });
-    expect(screen.queryByText("￥0.00")).not.toBeInTheDocument();
+    expect(screen.queryByText("0 Points")).not.toBeInTheDocument();
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Membership tier information is unavailable",

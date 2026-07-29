@@ -19,11 +19,11 @@ func TestCoreAsyncStateSchemaMySQL(t *testing.T) {
 }
 
 func TestCoreAsyncStateMigrationResumesAfterGenerationWasCommittedMySQL(t *testing.T) {
-	db := newCoreMySQLTestDB(t)
+	db, migrationsDir := newCoreLegacyMigrationTestDB(t)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	require.NoError(t, goose.SetDialect("mysql"))
-	require.NoError(t, goose.DownTo(sqlDB, coreMigrationsDir(t), 30))
+	require.NoError(t, goose.DownTo(sqlDB, migrationsDir, 30))
 
 	require.NoError(t, db.Exec(`
 INSERT INTO users(id, email, password_hash, enabled, role)
@@ -57,7 +57,7 @@ INSERT INTO resource_imports(
 ALTER TABLE resource_imports
 ADD COLUMN generation BIGINT UNSIGNED NOT NULL DEFAULT 1 AFTER max_attempts`).Error)
 
-	require.NoError(t, goose.UpTo(sqlDB, coreMigrationsDir(t), 31))
+	require.NoError(t, goose.UpTo(sqlDB, migrationsDir, 31))
 	var rows []struct {
 		SourceObjectKey string     `gorm:"column:source_object_key"`
 		DispatchStatus  string     `gorm:"column:dispatch_status"`
@@ -93,11 +93,11 @@ WHERE table_schema = DATABASE()
 }
 
 func TestResourceValidationGenerationMigrationTakesOverInflightAssignmentsMySQL(t *testing.T) {
-	db := newCoreMySQLTestDB(t)
+	db, migrationsDir := newCoreLegacyMigrationTestDB(t)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	require.NoError(t, goose.SetDialect("mysql"))
-	require.NoError(t, goose.DownTo(sqlDB, coreMigrationsDir(t), 33))
+	require.NoError(t, goose.DownTo(sqlDB, migrationsDir, 33))
 
 	require.NoError(t, db.Exec(`
 INSERT INTO users(id, email, password_hash, enabled, role)
@@ -115,7 +115,7 @@ VALUES (9803, 'microsoft', 'validation-migration@outlook.com', 'secret', 'valida
 INSERT INTO domain_resources(id, resource_type, owner_user_id, domain, mail_server_id, purpose, status)
 VALUES (9804, 'domain', 9801, 'validation-migration.example.com', 9802, 'not_sale', 'validating')`).Error)
 
-	require.NoError(t, goose.UpTo(sqlDB, coreMigrationsDir(t), 34))
+	require.NoError(t, goose.UpTo(sqlDB, migrationsDir, 34))
 	for _, table := range []string{"microsoft_resources", "domain_resources"} {
 		var status string
 		var generation uint64
@@ -129,11 +129,11 @@ VALUES (9804, 'domain', 9801, 'validation-migration.example.com', 9802, 'not_sal
 }
 
 func TestAdminMicrosoftMigrationBackfillsConcurrencyFactsMySQL(t *testing.T) {
-	db := newCoreMySQLTestDB(t)
+	db, migrationsDir := newCoreLegacyMigrationTestDB(t)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	require.NoError(t, goose.SetDialect("mysql"))
-	require.NoError(t, goose.DownTo(sqlDB, coreMigrationsDir(t), 8))
+	require.NoError(t, goose.DownTo(sqlDB, migrationsDir, 8))
 
 	legacyUpdatedAt := time.Date(2026, time.July, 1, 2, 3, 4, 0, time.UTC)
 	require.NoError(t, db.Exec(`
@@ -149,7 +149,7 @@ INSERT INTO microsoft_resources(
 ) VALUES (9201, 'microsoft', 'legacy@outlook.com', 'outlook.com', 'password',
           'client-id', 'refresh-token', 'normal', 80, ?, ?)`, legacyUpdatedAt, legacyUpdatedAt).Error)
 
-	require.NoError(t, goose.UpTo(sqlDB, coreMigrationsDir(t), 9))
+	require.NoError(t, goose.UpTo(sqlDB, migrationsDir, 9))
 
 	var rootVersion uint64
 	require.NoError(t, db.Raw("SELECT version FROM email_resources WHERE id = 9201").Scan(&rootVersion).Error)
@@ -166,7 +166,7 @@ WHERE id = 9201`).Row().Scan(&credentialRevision, &credentialUpdatedAt))
 }
 
 func TestAdminMicrosoftMigrationConstraintsAndOwnerHistoryMySQL(t *testing.T) {
-	db := newCoreMySQLTestDB(t)
+	db, migrationsDir := newCoreLegacyMigrationTestDB(t)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 
@@ -268,23 +268,23 @@ WHERE id = 9401`).Error)
 	// snapshots. Migration 00009 therefore keeps the historical owner on mail
 	// facts instead of attempting to rewrite it with the current resource owner.
 	require.NoError(t, goose.SetDialect("mysql"))
-	require.NoError(t, goose.DownTo(sqlDB, coreMigrationsDir(t), 8))
+	require.NoError(t, goose.DownTo(sqlDB, migrationsDir, 8))
 	require.NoError(t, db.Raw("SELECT owner_user_id FROM inbound_mails WHERE resource_id = 9401").Scan(&inboundOwner).Error)
 	require.Equal(t, uint(9301), inboundOwner)
 
 	// The relaxed rollback schema is also a supported source for a later
 	// forward deployment of the same migration.
-	require.NoError(t, goose.UpTo(sqlDB, coreMigrationsDir(t), 9))
+	require.NoError(t, goose.UpTo(sqlDB, migrationsDir, 9))
 }
 
 func TestAdminResourceCommandReceiptForwardMigrationAndConstraintsMySQL(t *testing.T) {
-	db := newCoreMySQLTestDB(t)
+	db, migrationsDir := newCoreLegacyMigrationTestDB(t)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	require.NoError(t, goose.SetDialect("mysql"))
-	require.NoError(t, goose.DownTo(sqlDB, coreMigrationsDir(t), 9))
+	require.NoError(t, goose.DownTo(sqlDB, migrationsDir, 9))
 	require.False(t, db.Migrator().HasTable(&AdminResourceCommandReceiptModel{}))
-	require.NoError(t, goose.UpTo(sqlDB, coreMigrationsDir(t), 10))
+	require.NoError(t, goose.UpTo(sqlDB, migrationsDir, 10))
 	require.True(t, db.Migrator().HasTable(&AdminResourceCommandReceiptModel{}))
 
 	require.NoError(t, db.Exec(`

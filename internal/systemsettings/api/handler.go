@@ -200,7 +200,7 @@ func isSensitiveKey(key string) bool {
 
 func isWriteOnlyKey(key string) bool {
 	switch strings.ToLower(strings.TrimSpace(key)) {
-	case "epay_merchant_key", "epay_private_key", "linuxdo_client_secret":
+	case "epay_merchant_key", "epay_private_key", "linuxdo_client_secret", "points_unit_migration_v1":
 		return true
 	default:
 		return false

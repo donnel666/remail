@@ -259,7 +259,7 @@ export function CardKeysPanel({ tabsArea }: { tabsArea: ReactNode }) {
         dataIndex: "amount",
         width: 120,
         render: (value: string) => (
-          <span className="font-mono-data">¥{formatMoney(value)}</span>
+          <span className="font-mono-data">{formatMoney(value)} {t("Points")}</span>
         ),
       },
       {

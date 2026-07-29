@@ -250,13 +250,31 @@ func (h *BillingHandler) GetRechargeConfig(c *gin.Context) {
 	tiers := make([]RechargeTierResponse, len(result.Tiers))
 	for i, tier := range result.Tiers {
 		tiers[i] = RechargeTierResponse{
-			Amount: tier.Amount, Bonus: tier.Bonus,
-			RechargeQuota: tier.RechargeQuota, PaymentAmount: tier.PaymentAmount,
+			Points: tier.Points, BonusPoints: tier.BonusPoints,
+			FeePoints: tier.FeePoints, CreditedPoints: tier.CreditedPoints,
 		}
 	}
 	c.JSON(http.StatusOK, RechargeConfigResponse{
-		Enabled: result.Enabled, MinAmount: result.MinAmount,
-		FeeRate: result.FeeRate, FeeCap: result.FeeCap, Tiers: tiers,
+		Enabled: result.Enabled, MinPoints: result.MinPoints,
+		FeeRate: result.FeeRate, FeeCapPoints: result.FeeCapPoints, Tiers: tiers,
+	})
+}
+
+func (h *BillingHandler) PostRechargeQuote(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxRechargeRequestBytes)
+	var request RechargeQuoteRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		writeInvalidBody(c, err)
+		return
+	}
+	result, err := h.module.RechargeUseCase.Quote(request.Points)
+	if err != nil {
+		writeBillingError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, RechargeQuoteResponse{
+		Points: result.Points, BonusPoints: result.BonusPoints,
+		FeePoints: result.FeePoints, CreditedPoints: result.CreditedPoints,
 	})
 }
 
@@ -272,7 +290,7 @@ func (h *BillingHandler) PostRecharge(c *gin.Context) {
 		return
 	}
 	result, err := h.module.RechargeUseCase.Create(c.Request.Context(), billingapp.CreateRechargeRequest{
-		UserID: userID, Amount: request.Amount, IdempotencyKey: c.GetHeader("Idempotency-Key"), ClientIP: c.ClientIP(),
+		UserID: userID, Points: request.Points, IdempotencyKey: c.GetHeader("Idempotency-Key"), ClientIP: c.ClientIP(),
 	})
 	if err != nil {
 		writeBillingError(c, err)
@@ -802,8 +820,8 @@ func transactionResponse(transaction domain.Transaction) TransactionItemResponse
 func rechargeResponse(recharge domain.Recharge) RechargeItemResponse {
 	return RechargeItemResponse{
 		ID: recharge.ID, RechargeNo: recharge.RechargeNo, UserID: recharge.UserID,
-		PaymentMethod: recharge.PaymentMethod, RechargeQuota: recharge.RechargeQuota,
-		PaymentAmount: recharge.PaymentAmount, Status: string(recharge.Status),
+		PaymentMethod: recharge.PaymentMethod, CreditedPoints: recharge.RechargeQuota,
+		Status:         string(recharge.Status),
 		GatewayTradeNo: recharge.GatewayTradeNo, FailureReason: recharge.FailureReason,
 		QueryAttempts: recharge.QueryAttempts, ExpiresAt: recharge.CreatedAt.Add(domain.RechargeReconciliationWindow),
 		PaidAt: recharge.PaidAt, ReconciledAt: recharge.ReconciledAt,

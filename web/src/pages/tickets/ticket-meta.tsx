@@ -5,6 +5,7 @@ import type {
   TicketStatus,
   TicketType,
 } from "./tickets-api";
+import { formatPoints, type PointValue } from "@/lib/points";
 
 type Translator = (key: string, options?: Record<string, unknown>) => string;
 
@@ -90,10 +91,8 @@ export function renderSenderTag(sender: TicketSender, t: Translator) {
   );
 }
 
-export function formatTicketAmount(value: number) {
-  if (!Number.isFinite(value)) return "￥0";
-  const text = value.toFixed(6).replace(/\.?0+$/, "");
-  return `￥${text || "0"}`;
+export function formatTicketAmount(value: PointValue, unit = "积分") {
+  return formatPoints(value, unit);
 }
 
 export function formatTicketDateTime(value?: string) {

@@ -128,8 +128,11 @@ func TestValidateRechargePaymentSettings(t *testing.T) {
 	require.ErrorIs(t, Validate("topup_amount_presets", "[10,10.00]"), domain.ErrInvalidValue)
 	require.NoError(t, Validate("topup_amount_bonus", `{"20.5":2}`))
 	require.ErrorIs(t, Validate("topup_amount_bonus", `{"20.5":-1}`), domain.ErrInvalidValue)
-	require.NoError(t, Validate("topup_fee_cap", "0.01"))
-	require.ErrorIs(t, Validate("topup_fee_cap", "0.009"), domain.ErrInvalidValue)
+	require.NoError(t, Validate("topup_fee_cap", "0.009"))
+	require.NoError(t, Validate("points_per_yuan", "1000"))
+	require.ErrorIs(t, Validate("points_per_yuan", "0"), domain.ErrInvalidValue)
+	require.NoError(t, Validate("points_unit_migration_v1", "completed"))
+	require.ErrorIs(t, Validate("points_unit_migration_v1", "pending"), domain.ErrInvalidValue)
 	require.NoError(t, Validate("max_pending_recharge_orders", "10"))
 	require.ErrorIs(t, Validate("max_pending_recharge_orders", "0"), domain.ErrInvalidValue)
 	require.ErrorIs(t, Validate("max_pending_recharge_orders", "101"), domain.ErrInvalidValue)
@@ -226,6 +229,7 @@ func TestRuntimeSettingsRejectUnsafeAndConflictingValues(t *testing.T) {
 
 func TestRuntimeDefaultSettingsCannotBeDeleted(t *testing.T) {
 	require.ErrorIs(t, ValidateDelete("SMTP_TASK_RETRY_COUNT"), domain.ErrInvalidValue)
+	require.ErrorIs(t, ValidateDelete("points_unit_migration_v1"), domain.ErrInvalidValue)
 	require.NoError(t, ValidateDelete("custom.setting"))
 }
 

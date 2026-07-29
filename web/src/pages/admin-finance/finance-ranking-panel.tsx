@@ -18,7 +18,8 @@ function RankMark({ rank }: { rank: number }) {
 }
 
 function RankingColumn({ items, offset }: { items: FinanceHotItem[]; offset: number }) {
-  return items.map((item, index) => {
+  const { t } = useTranslation();
+	return items.map((item, index) => {
     const rank = offset + index + 1;
 
     return (
@@ -31,7 +32,7 @@ function RankingColumn({ items, offset }: { items: FinanceHotItem[]; offset: num
         </div>
         <div className="truncate font-medium text-[var(--semi-color-text-1)]">{item.name}</div>
         <div className="whitespace-nowrap text-sm text-[var(--semi-color-text-2)]">
-          ¥{formatMoney(item.amount)}
+          {formatMoney(item.amount)} {t("Points")}
         </div>
         <div />
       </div>

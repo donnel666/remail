@@ -56,6 +56,7 @@ export function TransactionDetailSheet({
       !transaction.reversed &&
       !transaction.reversalOfNo
   );
+  const formattedAmount = formatMoney(String(transaction?.amount ?? "").replace(/^-/, ""));
 
   return (
     <SideSheet
@@ -96,8 +97,9 @@ export function TransactionDetailSheet({
                 label={t("Amount")}
                 value={
                   <span className={moneyClassName(transaction.direction)}>
-                    {transaction.direction === "in" ? "+" : "-"}¥
-                    {formatMoney(transaction.amount)}
+                    {formattedAmount === "—"
+                      ? "—"
+                      : `${transaction.direction === "in" ? "+" : "-"}${formattedAmount} ${t("Points")}`}
                   </span>
                 }
               />
@@ -105,7 +107,7 @@ export function TransactionDetailSheet({
                 label={t("Balance after")}
                 value={
                   <span className="font-mono-data">
-                    ¥{formatMoney(transaction.balanceAfter)}
+                    {formatMoney(transaction.balanceAfter)}{formatMoney(transaction.balanceAfter) === "—" ? "" : ` ${t("Points")}`}
                   </span>
                 }
               />
@@ -113,7 +115,7 @@ export function TransactionDetailSheet({
                 label={t("Balance before")}
                 value={
                   <span className="font-mono-data">
-                    ¥{formatMoney(transaction.balanceBefore)}
+                    {formatMoney(transaction.balanceBefore)}{formatMoney(transaction.balanceBefore) === "—" ? "" : ` ${t("Points")}`}
                   </span>
                 }
               />

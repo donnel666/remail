@@ -8,11 +8,11 @@ import (
 )
 
 func TestProxyServerMigrationBackfillsCanonicalMachineIdentityMySQL(t *testing.T) {
-	db := newProxyMySQLTestDB(t)
+	db, migrationsDir := newProxyLegacyMigrationTestDB(t)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	require.NoError(t, goose.SetDialect("mysql"))
-	require.NoError(t, goose.DownTo(sqlDB, proxyMigrationsDir(t), 63))
+	require.NoError(t, goose.DownTo(sqlDB, migrationsDir, 63))
 
 	require.NoError(t, db.Exec(`
 INSERT INTO proxies(id, pool, url, url_hash, url_host, status)
@@ -26,7 +26,7 @@ VALUES
 INSERT INTO proxy_bindings(bind_key, proxy_id, ip_version, expire_at, created_at, last_used_at)
 VALUES ('historical@example.test', 990645, 'ipv4', '2026-08-01 00:00:00', '2026-07-01 00:00:00', '2026-07-02 00:00:00')`).Error)
 
-	require.NoError(t, goose.UpTo(sqlDB, proxyMigrationsDir(t), 64))
+	require.NoError(t, goose.UpTo(sqlDB, migrationsDir, 64))
 	var rows []struct {
 		ID            uint   `gorm:"column:id"`
 		ProxyServerID uint   `gorm:"column:proxy_server_id"`

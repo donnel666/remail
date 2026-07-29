@@ -26,12 +26,12 @@ const (
 const ProjectBulkMaxExplicitIDs = 1000
 
 var projectPriceFallbacks = map[string]string{
-	"default_project_microsoft_code_price":              "0.008",
-	"default_project_microsoft_code_supplier_price":     "0.005",
-	"default_project_microsoft_purchase_price":          "0.01",
-	"default_project_microsoft_purchase_supplier_price": "0.007",
-	"default_project_domain_code_price":                 "0.08",
-	"default_project_domain_code_supplier_price":        "0.04",
+	"default_project_microsoft_code_price":              "8",
+	"default_project_microsoft_code_supplier_price":     "5",
+	"default_project_microsoft_purchase_price":          "10",
+	"default_project_microsoft_purchase_supplier_price": "7",
+	"default_project_domain_code_price":                 "80",
+	"default_project_domain_code_supplier_price":        "40",
 	"default_project_domain_purchase_price":             "0",
 	"default_project_domain_purchase_supplier_price":    "0",
 }

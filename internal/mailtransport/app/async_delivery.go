@@ -17,8 +17,8 @@ type OutboundMailQueue interface {
 	EnqueueOutboundSend(ctx context.Context, task OutboundSendTask) (bool, error)
 }
 
-// OutboundSendTask normally carries only ID. Message remains for draining
-// tasks created by the previous deployment.
+// OutboundSendTask carries an ID in Asynq and a Message only after the current
+// version loads that ID from its versioned Redis payload namespace.
 type OutboundSendTask struct {
 	ID         string                 `json:"id,omitempty"`
 	Message    domain.OutboundMessage `json:"message,omitempty"`

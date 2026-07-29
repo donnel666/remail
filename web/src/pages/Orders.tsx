@@ -607,7 +607,7 @@ export default function Orders() {
           dataIndex: "payAmount",
           width: 100,
           render: (amount: string) => (
-            <span className="font-mono-data">{formatLedgerAmount(amount)}</span>
+            <span className="font-mono-data">{formatLedgerAmount(amount, t("Points"))}</span>
           ),
         },
         {

@@ -33,6 +33,7 @@ const nonUIRuntimeKeys = new Set([
   "admin_log_default_limit",
   "admin_task_default_limit",
   "admin_message_default_limit",
+  "points_unit_migration_v1",
 ]);
 const emailServiceGroups = [
   EMAIL_RESOURCE_KEYS,

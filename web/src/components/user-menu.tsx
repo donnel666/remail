@@ -1,7 +1,9 @@
 import { Link } from "@tanstack/react-router";
+import { Toast } from "@douyinfe/semi-ui";
 import { ChevronDown, KeyRound, LogOut, UserRound, Wallet } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "@/context/auth-provider";
+import { getIamErrorMessage } from "@/lib/iam-errors";
 import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
@@ -18,6 +20,14 @@ function getInitial(name: string) {
 export function UserMenu() {
   const { t } = useTranslation();
   const { currentUser, logout } = useAuth();
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } catch (error) {
+      Toast.error(getIamErrorMessage(t, error));
+    }
+  };
 
   if (!currentUser) return null;
 
@@ -75,7 +85,7 @@ export function UserMenu() {
         </DropdownMenuItem>
         <DropdownMenuSeparator className="mx-0 bg-border" />
         <DropdownMenuItem
-          onClick={() => void logout()}
+          onClick={() => void handleLogout()}
           className="h-9 gap-2.5 rounded-none px-3 text-sm text-foreground hover:bg-surface-sunken"
         >
           <LogOut className="size-4 shrink-0 text-muted-foreground" />

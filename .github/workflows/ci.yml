@@ -534,13 +534,20 @@ jobs:
 
           CURRENT_IMAGE="$(awk -F= '$1 == "APP_IMAGE" {print $2}' .env)"
           PREVIOUS_IMAGE="$(docker compose --env-file .env -f compose.yml ps -q server | xargs -r docker inspect --format '{{.Config.Image}}' | head -n1 || true)"
+          PREVIOUS_POINTS_UNIT=""
+          if [ -n "$PREVIOUS_IMAGE" ]; then
+            PREVIOUS_POINTS_UNIT="$(docker image inspect --format '{{ index .Config.Labels "io.remail.points-unit" }}' "$PREVIOUS_IMAGE" 2>/dev/null || true)"
+          fi
           echo "Current target image: ${CURRENT_IMAGE}"
           echo "Previous server image: ${PREVIOUS_IMAGE:-none}"
 
           deploy_status=0
           docker compose --env-file .env -f compose.yml pull server || deploy_status=$?
           if [ "$deploy_status" -eq 0 ]; then
-            docker compose --env-file .env -f compose.yml up -d || deploy_status=$?
+            docker compose --env-file .env -f compose.yml stop server || deploy_status=$?
+          fi
+          if [ "$deploy_status" -eq 0 ]; then
+            docker compose --env-file .env -f compose.yml up -d --scale server=1 server || deploy_status=$?
           fi
 
           if [ "$deploy_status" -eq 0 ] && wait_for_health; then
@@ -552,13 +559,32 @@ jobs:
 
           echo "New deployment failed; collecting logs before rollback" >&2
           docker compose --env-file .env -f compose.yml logs --tail=200 server || true
+          # Wait until the new process is fully gone before reading the marker.
+          # Its migration is then either committed with the marker or rolled back.
+          docker compose --env-file .env -f compose.yml stop server || true
+          POINTS_MIGRATION_STATE=""
+          POINTS_MIGRATION_QUERY_OK=false
+          if raw_points_migration_state="$(
+            docker compose --env-file .env -f compose.yml exec -T mysql sh -c \
+              'mysql --batch --skip-column-names -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" -e "$1"' \
+              sh "SELECT value FROM system_settings WHERE \`key\` = 'points_unit_migration_v1' LIMIT 1;" \
+              2>/dev/null
+          )"; then
+            POINTS_MIGRATION_QUERY_OK=true
+            POINTS_MIGRATION_STATE="$(printf '%s' "$raw_points_migration_state" | tr -d '\r\n')"
+          fi
+          if [ -n "$PREVIOUS_IMAGE" ] && [ "$PREVIOUS_POINTS_UNIT" != "1" ] && \
+             { [ "$POINTS_MIGRATION_QUERY_OK" != "true" ] || [ -n "$POINTS_MIGRATION_STATE" ]; }; then
+            echo "Refusing rollback to a pre-points image after an irreversible migration (or when migration state cannot be verified)." >&2
+            PREVIOUS_IMAGE=""
+          fi
           if [ -n "$PREVIOUS_IMAGE" ] && [ "$PREVIOUS_IMAGE" != "$CURRENT_IMAGE" ]; then
             echo "Rolling back to previous image: $PREVIOUS_IMAGE" >&2
             set_app_image "$PREVIOUS_IMAGE"
             docker compose --env-file .env -f compose.yml pull server || \
               echo "Previous image is unavailable remotely; trying the local image cache" >&2
             rollback_status=0
-            docker compose --env-file .env -f compose.yml up -d || rollback_status=$?
+            docker compose --env-file .env -f compose.yml up -d --scale server=1 server || rollback_status=$?
             if [ "$rollback_status" -eq 0 ] && wait_for_health; then
               echo "Rollback completed; previous image is healthy" >&2
               docker compose --env-file .env -f compose.yml ps

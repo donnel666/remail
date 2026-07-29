@@ -17,7 +17,7 @@ type RechargeConfigProvider struct{}
 func (RechargeConfigProvider) Current() (billingapp.RechargeConfig, error) {
 	settings := runtimeconfig.Snapshot()
 	tiers, err := rechargeTiers(
-		settings.String("topup_amount_presets", "[10,20,50,100,200,500]"),
+		settings.String("topup_amount_presets", "[10000,20000,50000,100000,200000,500000]"),
 		settings.String("topup_amount_bonus", "{}"),
 	)
 	if err != nil {
@@ -34,9 +34,10 @@ func (RechargeConfigProvider) Current() (billingapp.RechargeConfig, error) {
 		PlatformPublicKey: settings.String("epay_platform_public_key", ""),
 		NotifyURL:         strings.TrimSpace(settings.String("epay_notify_url", "")),
 		ReturnURL:         strings.TrimSpace(settings.String("epay_return_url", "")),
-		MinAmount:         strings.TrimSpace(settings.String("min_topup_amount", "10")),
+		PointsPerYuan:     strings.TrimSpace(settings.String("points_per_yuan", "1000")),
+		MinPoints:         strings.TrimSpace(settings.String("min_topup_amount", "10000")),
 		FeeRate:           strings.TrimSpace(settings.String("topup_fee_rate", "0")),
-		FeeCap:            strings.TrimSpace(settings.String("topup_fee_cap", "0")),
+		FeeCapPoints:      strings.TrimSpace(settings.String("topup_fee_cap", "0")),
 		Tiers:             tiers,
 		MaxPendingOrders:  settings.Int("max_pending_recharge_orders", 10, 1),
 		RequestTimeout:    settings.Duration("async_check_request_timeout_seconds", 5*time.Second, time.Second, 1),
@@ -84,7 +85,7 @@ func rechargeTiers(rawPresets, rawBonuses string) ([]billingapp.RechargeTier, er
 			}
 			break
 		}
-		tiers = append(tiers, billingapp.RechargeTier{Amount: amount, Bonus: bonus})
+		tiers = append(tiers, billingapp.RechargeTier{Points: amount, BonusPoints: bonus})
 	}
 	return tiers, nil
 }

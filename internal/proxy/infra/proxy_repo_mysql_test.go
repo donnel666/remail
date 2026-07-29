@@ -21,11 +21,15 @@ import (
 	"gorm.io/gorm"
 )
 
-var proxyMySQLTestServer = testmysql.New("remail_proxy_test")
+var (
+	proxyMySQLTestServer       = testmysql.New("remail_proxy_test")
+	proxyLegacyMySQLTestServer = testmysql.New("remail_proxy_legacy_test")
+)
 
 func TestMain(m *testing.M) {
 	code := m.Run()
 	_ = proxyMySQLTestServer.Close(context.Background())
+	_ = proxyLegacyMySQLTestServer.Close(context.Background())
 	os.Exit(code)
 }
 
@@ -33,6 +37,12 @@ func newProxyMySQLTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
 	return proxyMySQLTestServer.Database(t, proxyMigrationsDir(t))
+}
+
+func newProxyLegacyMigrationTestDB(t *testing.T) (*gorm.DB, string) {
+	t.Helper()
+	migrationsDir := testmysql.MigrationsThrough(t, proxyMigrationsDir(t), 65)
+	return proxyLegacyMySQLTestServer.Database(t, migrationsDir), migrationsDir
 }
 
 func proxyMigrationsDir(t *testing.T) string {

@@ -1,6 +1,7 @@
 import { Tag } from "@douyinfe/semi-ui";
 
 import type { OrderServiceMode, OrderStatus } from "@/lib/orders-api";
+import { formatPoints } from "@/lib/points";
 
 type Translator = (key: string) => string;
 
@@ -57,14 +58,8 @@ export function getOrderDomain(email: string) {
   return index === -1 ? "" : email.slice(index).toLowerCase();
 }
 
-// Ledger amounts are 6-decimal strings; trim trailing zeros for display.
-export function formatLedgerAmount(value: string | number) {
-  const text = typeof value === "number" ? value.toFixed(6) : value.trim();
-  if (!/^-?\d+(\.\d+)?$/.test(text)) return "￥0";
-  const trimmed = text.includes(".")
-    ? text.replace(/0+$/, "").replace(/\.$/, "")
-    : text;
-  return `￥${trimmed || "0"}`;
+export function formatLedgerAmount(value: string | number, unit = "积分") {
+  return formatPoints(value, unit);
 }
 
 export function formatOrderDateTime(value?: string | null) {

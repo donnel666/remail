@@ -13,6 +13,8 @@ export type RechargeItem = components["schemas"]["RechargeItem"];
 export type RechargeListResponse = components["schemas"]["RechargeListResponse"];
 export type RechargeConfigResponse =
   components["schemas"]["RechargeConfigResponse"];
+export type RechargeQuoteResponse =
+  components["schemas"]["RechargeQuoteResponse"];
 export type CreateRechargeResponse =
   components["schemas"]["CreateRechargeResponse"];
 export type RedeemCardResponse = components["schemas"]["RedeemCardResponse"];
@@ -108,13 +110,22 @@ export async function getRechargeConfig() {
   );
 }
 
+export async function quoteRecharge(points: string) {
+  return unwrap<RechargeQuoteResponse>(
+    await client.POST("/v1/recharges/quote", {
+      body: { points },
+      params: { header: csrfHeader() },
+    })
+  );
+}
+
 export async function createRecharge(
-  amount: string,
+  points: string,
   key = generateIdempotencyKey()
 ) {
   return unwrap<CreateRechargeResponse>(
     await client.POST("/v1/recharges", {
-      body: { amount },
+      body: { points },
       params: {
         header: {
           ...csrfHeader(),

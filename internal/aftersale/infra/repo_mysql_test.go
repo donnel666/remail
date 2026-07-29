@@ -138,7 +138,7 @@ func TestRepoCloseMySQL(t *testing.T) {
 		TicketNo:      "AS4",
 		By:            domain.SenderTypePlatform,
 		Resolution:    domain.Resolution{Kind: domain.ResolutionRefunded, RefundAmount: "6.800000"},
-		SystemMessage: "平台已退款 ¥6.8 并关闭工单。",
+		SystemMessage: "平台已退款 6.8 积分并关闭工单。",
 	})
 	require.NoError(t, err)
 	require.Equal(t, domain.TicketStatusClosed, updated.Status)

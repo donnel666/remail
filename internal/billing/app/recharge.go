@@ -26,8 +26,8 @@ const (
 var ErrRechargeGatewayRejected = errors.New("billing: recharge gateway rejected query")
 
 type RechargeTier struct {
-	Amount string
-	Bonus  string
+	Points      string
+	BonusPoints string
 }
 
 type RechargeConfig struct {
@@ -40,9 +40,10 @@ type RechargeConfig struct {
 	PlatformPublicKey string
 	NotifyURL         string
 	ReturnURL         string
-	MinAmount         string
+	PointsPerYuan     string
+	MinPoints         string
 	FeeRate           string
-	FeeCap            string
+	FeeCapPoints      string
 	Tiers             []RechargeTier
 	MaxPendingOrders  int
 	RequestTimeout    time.Duration
@@ -111,11 +112,11 @@ type RechargeUseCase struct {
 }
 
 type RechargeConfigResult struct {
-	Enabled   bool
-	MinAmount string
-	FeeRate   string
-	FeeCap    string
-	Tiers     []RechargeTierResult
+	Enabled      bool
+	MinPoints    string
+	FeeRate      string
+	FeeCapPoints string
+	Tiers        []RechargeTierResult
 }
 
 func (uc *RechargeUseCase) SetNotifications(delivery mailapp.DeliveryPort, users UserDirectory, wallets *WalletUseCase) {
@@ -123,17 +124,24 @@ func (uc *RechargeUseCase) SetNotifications(delivery mailapp.DeliveryPort, users
 }
 
 type RechargeTierResult struct {
-	Amount        string
-	Bonus         string
-	RechargeQuota string
-	PaymentAmount string
+	Points         string
+	BonusPoints    string
+	FeePoints      string
+	CreditedPoints string
 }
 
 type CreateRechargeRequest struct {
 	UserID         uint
-	Amount         string
+	Points         string
 	IdempotencyKey string
 	ClientIP       string
+}
+
+type RechargeQuoteResult struct {
+	Points         string
+	BonusPoints    string
+	FeePoints      string
+	CreditedPoints string
 }
 
 type CreateRechargeResult struct {
@@ -155,23 +163,32 @@ func (uc *RechargeUseCase) Config() (*RechargeConfigResult, error) {
 		return nil, err
 	}
 	result := &RechargeConfigResult{
-		Enabled:   config.Enabled && validateRechargeGatewayConfig(config) == nil,
-		MinAmount: config.MinAmount,
-		FeeRate:   config.FeeRate,
-		FeeCap:    config.FeeCap,
-		Tiers:     make([]RechargeTierResult, 0, len(config.Tiers)),
+		Enabled:      config.Enabled && validateRechargeGatewayConfig(config) == nil,
+		MinPoints:    config.MinPoints,
+		FeeRate:      config.FeeRate,
+		FeeCapPoints: config.FeeCapPoints,
+		Tiers:        make([]RechargeTierResult, 0, len(config.Tiers)),
 	}
 	for _, tier := range config.Tiers {
-		quota, payment, err := rechargeAmounts(config, tier.Amount)
+		quote, _, err := rechargeAmounts(config, tier.Points)
 		if err != nil {
 			return nil, domain.ErrRechargeConfigUnavailable
 		}
 		result.Tiers = append(result.Tiers, RechargeTierResult{
-			Amount: tier.Amount, Bonus: tier.Bonus,
-			RechargeQuota: quota, PaymentAmount: payment,
+			Points: quote.Points, BonusPoints: quote.BonusPoints,
+			FeePoints: quote.FeePoints, CreditedPoints: quote.CreditedPoints,
 		})
 	}
 	return result, nil
+}
+
+func (uc *RechargeUseCase) Quote(rawPoints string) (*RechargeQuoteResult, error) {
+	config, err := uc.currentConfig()
+	if err != nil {
+		return nil, err
+	}
+	quote, _, err := rechargeAmounts(config, rawPoints)
+	return quote, err
 }
 
 func (uc *RechargeUseCase) Create(ctx context.Context, request CreateRechargeRequest) (*CreateRechargeResult, error) {
@@ -194,11 +211,7 @@ func (uc *RechargeUseCase) Create(ctx context.Context, request CreateRechargeReq
 	if err != nil || !config.Enabled || config.MaxPendingOrders <= 0 || validateRechargeGatewayConfig(config) != nil {
 		return nil, domain.ErrRechargeConfigUnavailable
 	}
-	quota, payment, err := rechargeAmounts(config, request.Amount)
-	if err != nil {
-		return nil, err
-	}
-	amount, err := domain.NormalizePositiveMoney(request.Amount)
+	quote, payment, err := rechargeAmounts(config, request.Points)
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +220,7 @@ func (uc *RechargeUseCase) Create(ctx context.Context, request CreateRechargeReq
 		RechargeNo:        "RC" + platform.NewUUIDV7CompactUpper(),
 		UserID:            request.UserID,
 		PaymentMethod:     "alipay",
-		RechargeQuota:     quota,
+		RechargeQuota:     quote.CreditedPoints,
 		PaymentAmount:     payment,
 		Status:            domain.RechargeStatusPaying,
 		GatewayConfigHash: rechargeGatewayConfigHash(config),
@@ -219,7 +232,7 @@ func (uc *RechargeUseCase) Create(ctx context.Context, request CreateRechargeReq
 		GatewayConfig:      config,
 		MaxPendingOrders:   config.MaxPendingOrders,
 		IdempotencyKey:     strings.TrimSpace(request.IdempotencyKey),
-		RequestFingerprint: fingerprint("recharges.create", request.UserID, amount),
+		RequestFingerprint: fingerprint("recharges.create", request.UserID, quote.Points),
 	})
 	if err != nil {
 		return nil, err
@@ -417,39 +430,56 @@ func validateRechargeGatewayConfig(config RechargeConfig) error {
 	return nil
 }
 
-func rechargeAmounts(config RechargeConfig, rawAmount string) (string, string, error) {
-	amount, err := domain.ParseMoney(rawAmount)
-	if err != nil || !amount.IsPositive() || !amount.Equal(amount.Round(2)) {
-		return "", "", domain.ErrInvalidAmount
+func rechargeAmounts(config RechargeConfig, rawPoints string) (*RechargeQuoteResult, string, error) {
+	points, err := domain.ParseMoney(rawPoints)
+	if err != nil || !points.IsPositive() {
+		return nil, "", domain.ErrInvalidAmount
 	}
-	minimum, err := domain.ParseMoney(config.MinAmount)
-	if err != nil || minimum.IsNegative() || amount.LessThan(minimum) {
-		return "", "", domain.ErrInvalidAmount
+	minimum, err := domain.ParseMoney(config.MinPoints)
+	if err != nil || minimum.IsNegative() || points.LessThan(minimum) {
+		return nil, "", domain.ErrInvalidAmount
 	}
 	rate, err := domain.ParseMoney(config.FeeRate)
 	if err != nil || rate.IsNegative() || rate.GreaterThan(decimal.NewFromInt(100)) {
-		return "", "", domain.ErrRechargeConfigUnavailable
+		return nil, "", domain.ErrRechargeConfigUnavailable
 	}
-	capAmount, err := domain.ParseMoney(config.FeeCap)
-	if err != nil || capAmount.IsNegative() || !capAmount.Equal(capAmount.Round(2)) {
-		return "", "", domain.ErrRechargeConfigUnavailable
+	capPoints, err := domain.ParseMoney(config.FeeCapPoints)
+	if err != nil || capPoints.IsNegative() {
+		return nil, "", domain.ErrRechargeConfigUnavailable
+	}
+	pointsPerYuan, err := domain.ParseMoney(config.PointsPerYuan)
+	if err != nil || !pointsPerYuan.IsPositive() {
+		return nil, "", domain.ErrRechargeConfigUnavailable
 	}
 	bonus := decimal.Zero
 	for _, tier := range config.Tiers {
-		tierAmount, amountErr := domain.ParseMoney(tier.Amount)
-		if amountErr == nil && amount.Equal(tierAmount) {
-			bonus, err = domain.ParseMoney(tier.Bonus)
+		tierPoints, pointsErr := domain.ParseMoney(tier.Points)
+		if pointsErr == nil && points.Equal(tierPoints) {
+			bonus, err = domain.ParseMoney(tier.BonusPoints)
 			if err != nil || bonus.IsNegative() {
-				return "", "", domain.ErrRechargeConfigUnavailable
+				return nil, "", domain.ErrRechargeConfigUnavailable
 			}
 			break
 		}
 	}
-	fee := amount.Mul(rate).Div(decimal.NewFromInt(100)).RoundCeil(2)
-	if capAmount.IsPositive() && fee.GreaterThan(capAmount) {
-		fee = capAmount
+	fee := points.Mul(rate).Div(decimal.NewFromInt(100)).RoundCeil(6)
+	if capPoints.IsPositive() && fee.GreaterThan(capPoints) {
+		fee = capPoints
 	}
-	return domain.MoneyString(amount.Add(bonus)), amount.Add(fee).StringFixed(2), nil
+	credited := points.Add(bonus)
+	payment := points.Add(fee).Div(pointsPerYuan).RoundCeil(2)
+	if payment.GreaterThan(decimal.RequireFromString("9999999999999999.99")) {
+		return nil, "", domain.ErrInvalidAmount
+	}
+	for _, value := range []decimal.Decimal{points, bonus, fee, credited} {
+		if _, err := domain.ParseMoney(domain.MoneyString(value)); err != nil {
+			return nil, "", domain.ErrInvalidAmount
+		}
+	}
+	return &RechargeQuoteResult{
+		Points: domain.MoneyString(points), BonusPoints: domain.MoneyString(bonus),
+		FeePoints: domain.MoneyString(fee), CreditedPoints: domain.MoneyString(credited),
+	}, payment.StringFixed(2), nil
 }
 
 func rechargeGatewayConfigHash(config RechargeConfig) string {

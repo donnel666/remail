@@ -1,4 +1,4 @@
-export const TICKET_CREATE_ORDER_STORAGE_KEY = "remail:ticket-create-order";
+export const TICKET_CREATE_ORDER_STORAGE_KEY = "remail:ticket-create-order:points-v2";
 
 export interface TicketOrderSource {
   orderNo: string;
@@ -17,7 +17,7 @@ export interface TicketOrderRef {
   projectName: string;
   projectLogoUrl?: string;
   deliveryEmail: string;
-  payAmount: number;
+  payAmount: string | number;
   serviceMode: "code" | "purchase";
   afterSaleUntil?: string;
   hasSupplier: boolean;
@@ -39,13 +39,12 @@ export function buildOrderRefFromOrder(order: TicketOrderSource): TicketOrderRef
     hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
   }
   const hasSupplier = order.supplyPolicy === "private_first" || hash % 5 < 2;
-  const payAmount = Number(order.payAmount);
   return {
     orderNo: order.orderNo,
     projectName: order.projectName || "-",
     projectLogoUrl: order.projectLogoUrl ?? undefined,
     deliveryEmail: order.deliveryEmail,
-    payAmount: Number.isFinite(payAmount) ? payAmount : 0,
+    payAmount: order.payAmount,
     serviceMode: order.serviceMode,
     afterSaleUntil: order.afterSaleUntil ?? order.receiveUntil ?? undefined,
     hasSupplier,

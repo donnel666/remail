@@ -1660,17 +1660,17 @@ func (r *BillingRepo) ClaimBalanceWarnings(ctx context.Context, limit int) ([]bi
 		limit = 100
 	}
 	const targetLevel = `CASE
-		WHEN consumer_balance <= 0.5 THEN 4
-		WHEN consumer_balance <= 1 THEN 3
-		WHEN consumer_balance <= 2 THEN 2
-		WHEN consumer_balance <= 3 THEN 1
+		WHEN consumer_balance <= 500 THEN 4
+		WHEN consumer_balance <= 1000 THEN 3
+		WHEN consumer_balance <= 2000 THEN 2
+		WHEN consumer_balance <= 3000 THEN 1
 		ELSE 0 END`
 	claims := make([]billingapp.BalanceWarningClaim, 0, limit)
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var wallets []WalletModel
 		if err := tx.WithContext(ctx).
 			Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
-			Where("consumer_balance <= 3 AND balance_warning_level < " + targetLevel).
+			Where("consumer_balance <= 3000 AND balance_warning_level < " + targetLevel).
 			Order("updated_at ASC, user_id ASC").
 			Limit(limit).
 			Find(&wallets).Error; err != nil {
@@ -1721,13 +1721,13 @@ func balanceWarningLevel(value string) (int, error) {
 		return 0, err
 	}
 	switch {
-	case balance.LessThanOrEqual(decimal.RequireFromString("0.5")):
+	case balance.LessThanOrEqual(decimal.NewFromInt(500)):
 		return 4, nil
-	case balance.LessThanOrEqual(decimal.NewFromInt(1)):
+	case balance.LessThanOrEqual(decimal.NewFromInt(1000)):
 		return 3, nil
-	case balance.LessThanOrEqual(decimal.NewFromInt(2)):
+	case balance.LessThanOrEqual(decimal.NewFromInt(2000)):
 		return 2, nil
-	case balance.LessThanOrEqual(decimal.NewFromInt(3)):
+	case balance.LessThanOrEqual(decimal.NewFromInt(3000)):
 		return 1, nil
 	default:
 		return 0, nil

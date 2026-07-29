@@ -40,6 +40,7 @@ import {
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import { formatPriceMultiplier } from "@/lib/membership";
 import { getAPIKeyUsage } from "@/lib/openapi-credentials-api";
+import { formatPoints } from "@/lib/points";
 import { getWallet, type WalletResponse } from "@/lib/wallet-api";
 
 import { ApiKeyPanel } from "./account/api-key-panel";
@@ -81,16 +82,6 @@ function getAvatarText(value?: string) {
   const normalized = value?.trim();
   if (!normalized) return "RM";
   return normalized.slice(0, 2).toUpperCase();
-}
-
-function formatCurrency(value: string | number | null | undefined) {
-  if (value == null) return "-";
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return "-";
-  return `￥${numeric.toLocaleString("zh-CN", {
-    maximumFractionDigits: 6,
-    minimumFractionDigits: 2,
-  })}`;
 }
 
 function formatInteger(value: number | null) {
@@ -193,7 +184,7 @@ export default function Account() {
       {
         icon: <Coins size={16} />,
         label: "Historical Spend",
-        value: overviewLoading ? "..." : formatCurrency(wallet?.historicalSpend),
+        value: overviewLoading ? "..." : formatPoints(wallet?.historicalSpend, t("Points")),
       },
       {
         icon: <BarChart2 size={16} />,
@@ -206,7 +197,7 @@ export default function Account() {
         value: userGroupSummary,
       },
     ],
-    [overviewLoading, requestCount, userGroupSummary, wallet?.historicalSpend]
+    [overviewLoading, requestCount, t, userGroupSummary, wallet?.historicalSpend]
   );
 
   const resetPasswordForm = () => {
@@ -308,7 +299,7 @@ export default function Account() {
         <div className="account-hero-body">
           <Badge count={t("Current Balance")} position="rightTop" type="danger">
             <div className="account-hero-balance">
-              {overviewLoading ? "..." : formatCurrency(wallet?.consumerBalance)}
+              {overviewLoading ? "..." : formatPoints(wallet?.consumerBalance, t("Points"))}
             </div>
           </Badge>
 

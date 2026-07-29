@@ -7,6 +7,7 @@ import { PieChart } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import type { AdminDashboardData } from "@/lib/admin-dashboard-api";
+import { formatPoints } from "@/lib/points";
 
 export type AdminAnalysisView =
   | "codes"
@@ -26,15 +27,6 @@ const ANALYSIS_TABS: Array<{ key: AdminAnalysisView; labelKey: string }> = [
 ];
 
 const CHART_CONFIG = { mode: "desktop-browser" as const };
-
-function formatMoney(value: string | number | null | undefined) {
-  const parsed = Number(value ?? 0);
-  if (!Number.isFinite(parsed)) return "0.00";
-  return parsed.toLocaleString(undefined, {
-    maximumFractionDigits: 6,
-    minimumFractionDigits: 2,
-  });
-}
 
 function chartTitle(text: string, subtext: string) {
   return { subtext, text, visible: true };
@@ -102,7 +94,7 @@ function useAnalysisSpec(data: AdminDashboardData | null, view: AdminAnalysisVie
         seriesField: "Metric",
         title: chartTitle(
           t("Finance trend"),
-          `${labels.recharge}：¥${formatMoney(data?.stats.rechargeAmount)} / ${labels.spend}：¥${formatMoney(data?.stats.spendAmount)}`,
+          `${labels.recharge}：${formatPoints(data?.stats.rechargeAmount, t("Points"))} / ${labels.spend}：${formatPoints(data?.stats.spendAmount, t("Points"))}`,
         ),
         type: "line",
         xField: "Time",

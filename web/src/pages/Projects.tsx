@@ -324,8 +324,7 @@ function ProductPricePreview({
             <div className="project-square-price-value">
               <span>{t("Code service")}</span>
               <strong>
-                {t("Yuan")}
-                {codePrice}
+                {codePrice} {t("Points")}
               </strong>
               {showFrom ? <em>{t("From price suffix")}</em> : null}
             </div>
@@ -334,8 +333,7 @@ function ProductPricePreview({
             <div className="project-square-price-value">
               <span>{t("Purchase service")}</span>
               <strong>
-                {t("Yuan")}
-                {purchasePrice}
+                {purchasePrice} {t("Points")}
               </strong>
               {showFrom ? <em>{t("From price suffix")}</em> : null}
             </div>
@@ -910,8 +908,8 @@ function ProductRows({ products }: { products: ProjectProduct[] }) {
               <div className="project-detail-service-card">
                 <div className="project-detail-service-label">{t("Code service")}</div>
                 <div className="project-detail-price">
-                  <span>{t("Yuan")}</span>
                   {money(product.codePrice)}
+                  <span>{t("Points")}</span>
                 </div>
                 <div className="project-detail-meta-row">
                   <span>{t("Code window minutes")}</span>
@@ -926,8 +924,8 @@ function ProductRows({ products }: { products: ProjectProduct[] }) {
               <div className="project-detail-service-card project-detail-service-card-strong">
                 <div className="project-detail-service-label">{t("Purchase service")}</div>
                 <div className="project-detail-price">
-                  <span>{t("Yuan")}</span>
                   {money(product.purchasePrice)}
+                  <span>{t("Points")}</span>
                 </div>
                 <div className="project-detail-meta-row">
                   <span>{t("Activation window minutes")}</span>

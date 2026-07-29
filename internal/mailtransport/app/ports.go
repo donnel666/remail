@@ -48,8 +48,8 @@ func VerificationCodeMessage(recipient, code string) domain.OutboundMessage {
 func BalanceWarningMessage(recipient, balance, threshold string, cycle uint64) domain.OutboundMessage {
 	recipient = strings.TrimSpace(recipient)
 	details := []notificationDetail{
-		{Label: "当前余额", Value: "￥" + balance},
-		{Label: "预警档位", Value: "≤￥" + threshold},
+		{Label: "当前积分", Value: balance + " 积分"},
+		{Label: "预警档位", Value: "≤" + threshold + " 积分"},
 		{Label: "建议操作", Value: "请及时充值，以免影响服务使用。"},
 	}
 	return notificationMessage(
@@ -69,8 +69,8 @@ func BalanceWarningMessage(recipient, balance, threshold string, cycle uint64) d
 func RechargeCreditedMessage(recipient, rechargeNo, amount, balance string) domain.OutboundMessage {
 	recipient = strings.TrimSpace(recipient)
 	details := []notificationDetail{
-		{Label: "充值金额", Value: "￥" + amount},
-		{Label: "到账后余额", Value: "￥" + balance},
+		{Label: "充值积分", Value: amount + " 积分"},
+		{Label: "到账后积分", Value: balance + " 积分"},
 		{Label: "充值单号", Value: rechargeNo},
 	}
 	return notificationMessage(
@@ -93,7 +93,7 @@ func LeaderboardRewardMessage(recipient, businessDate string, rank, score int, a
 		{Label: "结算日期", Value: businessDate},
 		{Label: "排行榜名次", Value: fmt.Sprintf("第 %d 名", rank)},
 		{Label: "成功订单数", Value: fmt.Sprint(score)},
-		{Label: "奖励金额", Value: "￥" + amount},
+		{Label: "奖励积分", Value: amount + " 积分"},
 	}
 	return notificationMessage(
 		domain.PurposeSystemNotice,

@@ -219,7 +219,7 @@ P1-I5 分配直接使用 SourceCandidate 查询 Core 源表，并在同一短事
 
 项目级库存使用独立的 `alloc:inventory:v5:*` 数据、锁和 active ZSET，不读取 v4 的 Random 后缀子库存语义。滚动发布期间不得删除旧 v4 active ZSET；全部旧实例退出且最长十分钟旧刷新任务 drain 后，可执行 `UNLINK alloc:inventory:v4:active`。旧 v4 payload 依靠二十四小时 TTL、旧 marker/lock 依靠十分钟 TTL 自然淘汰。
 
-Microsoft 候选查询和行锁重校验必须读取既有 `microsoft_allocations` 历史：同一具体 `main/explicitAliasId/dotAliasId/plusAliasId` 已经分配给目标项目时不得再次选择，但同一主资源下未用于该项目的其他别名仍可分配。验证后的历史扫描把识别结果交给 BC-TRADE；已有 Allocation 的具体关系直接复用且不创建假订单，只有缺失关系才通过 BC-ALLOC 既有 alias、order guard 和 allocation repository 创建超级管理员 0 元已过保订单对应的 `released` Allocation，BC-MAILMATCH 不直写本表。旧 `microsoft_resource_project_matches` 仅作为尚未重扫数据的保守兼容挡板，资源完成重扫后删除对应旧行。
+Microsoft 候选查询和行锁重校验必须读取既有 `microsoft_allocations` 历史：同一具体 `main/explicitAliasId/dotAliasId/plusAliasId` 已经分配给目标项目时不得再次选择，但同一主资源下未用于该项目的其他别名仍可分配。验证后的历史扫描把识别结果交给 BC-TRADE；已有 Allocation 的具体关系直接复用且不创建假订单，只有缺失关系才通过 BC-ALLOC 既有 alias、order guard 和 allocation repository 创建超级管理员 0 积分已过保订单对应的 `released` Allocation，BC-MAILMATCH 不直写本表。旧 `microsoft_resource_project_matches` 仅作为尚未重扫数据的保守兼容挡板，资源完成重扫后删除对应旧行。
 
 P1-I5 项目库存按项目商品启用的分配形态计算。管理员库存诊断可以看到来源明细；普通用户和下单页只看到项目商品库存、可选 Microsoft 精确后缀或 Domain 公共后缀库存（如 `com`、`com.cn`、`co.uk`），不返回具体供应商、资源 ID、别名或生成邮箱等来源 breakdown。兼容字段 `totalAvailable` 与 `publicAvailable` 都表示同一份项目公共库存；买家自有资源不进入该读模型。库存分两类：
 

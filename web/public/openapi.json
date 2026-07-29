@@ -1265,13 +1265,9 @@
             "type": "string",
             "example": "card"
           },
-          "rechargeQuota": {
+          "creditedPoints": {
             "type": "string",
-            "example": "100.00"
-          },
-          "paymentAmount": {
-            "type": "string",
-            "example": "100.00"
+            "example": "10000"
           },
           "status": {
             "type": "string",

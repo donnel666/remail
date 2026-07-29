@@ -128,12 +128,16 @@ func Validate(key, value string) error {
 		"default_project_domain_code_price", "default_project_domain_code_supplier_price",
 		"default_project_domain_purchase_price", "default_project_domain_purchase_supplier_price":
 		amount, err := money.Parse(value)
-		if err != nil || amount.IsNegative() || (key == "topup_fee_cap" && !amount.Equal(amount.Round(2))) {
+		if err != nil || amount.IsNegative() {
 			return domain.ErrInvalidValue
 		}
-	case "min_topup_amount":
+	case "min_topup_amount", "points_per_yuan":
 		amount, err := money.Parse(value)
 		if err != nil || !amount.IsPositive() {
+			return domain.ErrInvalidValue
+		}
+	case "points_unit_migration_v1":
+		if value != "completed" {
 			return domain.ErrInvalidValue
 		}
 	case "topup_fee_rate":
@@ -207,10 +211,10 @@ func Validate(key, value string) error {
 		seen := make(map[string]struct{}, len(values))
 		for _, raw := range values {
 			amount, err := money.Parse(string(raw))
-			if err != nil || !amount.IsPositive() || !amount.Equal(amount.Round(2)) {
+			if err != nil || !amount.IsPositive() {
 				return domain.ErrInvalidValue
 			}
-			normalized := amount.StringFixed(2)
+			normalized := money.Format(amount)
 			if _, exists := seen[normalized]; exists {
 				return domain.ErrInvalidValue
 			}
@@ -224,7 +228,7 @@ func Validate(key, value string) error {
 		for rawAmount, rawBonus := range values {
 			amount, amountErr := money.Parse(rawAmount)
 			bonus, bonusErr := money.Parse(string(rawBonus))
-			if amountErr != nil || !amount.IsPositive() || !amount.Equal(amount.Round(2)) || bonusErr != nil || bonus.IsNegative() || !bonus.Equal(bonus.Round(2)) {
+			if amountErr != nil || !amount.IsPositive() || bonusErr != nil || bonus.IsNegative() {
 				return domain.ErrInvalidValue
 			}
 		}
@@ -305,6 +309,9 @@ func validateUpdates(values map[string]string, settings []domain.Setting) error 
 
 func ValidateDelete(key string) error {
 	key = canonicalKey(key)
+	if key == "points_unit_migration_v1" {
+		return domain.ErrInvalidValue
+	}
 	for _, setting := range defaultSettings {
 		if setting.Key == key {
 			return domain.ErrInvalidValue

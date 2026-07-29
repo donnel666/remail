@@ -16,27 +16,27 @@ const validTestRechargeNo = "RC00000000000000000000000000000001"
 func TestRechargeAmountsAndActiveReconciliation(t *testing.T) {
 	config := validRechargeConfig()
 	config.FeeRate = "2.5"
-	config.FeeCap = "3"
-	config.Tiers = []RechargeTier{{Amount: "100", Bonus: "10"}}
-	quota, payment, err := rechargeAmounts(config, "100")
+	config.FeeCapPoints = "3"
+	config.Tiers = []RechargeTier{{Points: "100", BonusPoints: "10"}}
+	quote, payment, err := rechargeAmounts(config, "100")
 	require.NoError(t, err)
-	require.Equal(t, "110.00", quota)
-	require.Equal(t, "102.50", payment)
-	quota, payment, err = rechargeAmounts(config, "200")
+	require.Equal(t, &RechargeQuoteResult{Points: "100.00", BonusPoints: "10.00", FeePoints: "2.50", CreditedPoints: "110.00"}, quote)
+	require.Equal(t, "0.11", payment)
+	quote, payment, err = rechargeAmounts(config, "200")
 	require.NoError(t, err)
-	require.Equal(t, "200.00", quota)
-	require.Equal(t, "203.00", payment)
+	require.Equal(t, &RechargeQuoteResult{Points: "200.00", BonusPoints: "0.00", FeePoints: "3.00", CreditedPoints: "200.00"}, quote)
+	require.Equal(t, "0.21", payment)
 	config.FeeRate = "0.6"
-	config.FeeCap = "0"
-	config.MinAmount = "1"
-	quota, payment, err = rechargeAmounts(config, "1")
+	config.FeeCapPoints = "0"
+	config.MinPoints = "0.01"
+	quote, payment, err = rechargeAmounts(config, "0.01")
 	require.NoError(t, err)
-	require.Equal(t, "1.00", quota)
-	require.Equal(t, "1.01", payment)
-	config.FeeCap = "0.009"
-	_, _, err = rechargeAmounts(config, "1")
+	require.Equal(t, &RechargeQuoteResult{Points: "0.01", BonusPoints: "0.00", FeePoints: "0.00006", CreditedPoints: "0.01"}, quote)
+	require.Equal(t, "0.01", payment)
+	config.FeeCapPoints = "0.0000001"
+	_, _, err = rechargeAmounts(config, "0.01")
 	require.ErrorIs(t, err, domain.ErrRechargeConfigUnavailable)
-	config.FeeCap = "0"
+	config.FeeCapPoints = "0"
 
 	createdAt := time.Date(2026, 7, 25, 10, 0, 0, 0, time.UTC)
 	for _, test := range []struct {
@@ -111,7 +111,7 @@ func TestRechargeCreateInputAndConfigReplaySafety(t *testing.T) {
 		useCase := NewRechargeUseCase(repo, rechargeConfigStub{config}, gateway, &rechargeQueueStub{calls: &queueCalls})
 		useCase.now = func() time.Time { return createdAt }
 
-		result, err := useCase.Create(context.Background(), CreateRechargeRequest{UserID: 1, Amount: "10", IdempotencyKey: "create"})
+		result, err := useCase.Create(context.Background(), CreateRechargeRequest{UserID: 1, Points: "10", IdempotencyKey: "create"})
 		require.NoError(t, err)
 		require.Equal(t, "RC1", result.Recharge.RechargeNo)
 		require.WithinDuration(t, startedAt.Add(rechargePaymentCreateTimeout), gateway.paymentDeadline, time.Second)
@@ -120,7 +120,7 @@ func TestRechargeCreateInputAndConfigReplaySafety(t *testing.T) {
 
 	t.Run("rejects oversized idempotency key", func(t *testing.T) {
 		useCase := NewRechargeUseCase(&rechargeRepoStub{}, rechargeConfigStub{config}, &rechargeGatewayStub{}, &rechargeQueueStub{})
-		_, err := useCase.Create(context.Background(), CreateRechargeRequest{UserID: 1, Amount: "10", IdempotencyKey: strings.Repeat("a", 129)})
+		_, err := useCase.Create(context.Background(), CreateRechargeRequest{UserID: 1, Points: "10", IdempotencyKey: strings.Repeat("a", 129)})
 		require.ErrorIs(t, err, domain.ErrInvalidIdempotencyKey)
 	})
 
@@ -133,7 +133,7 @@ func TestRechargeCreateInputAndConfigReplaySafety(t *testing.T) {
 		queueCalls := 0
 		useCase := NewRechargeUseCase(repo, rechargeConfigStub{config}, gateway, &rechargeQueueStub{calls: &queueCalls})
 
-		_, err := useCase.Create(context.Background(), CreateRechargeRequest{UserID: 1, Amount: "10", IdempotencyKey: "replay"})
+		_, err := useCase.Create(context.Background(), CreateRechargeRequest{UserID: 1, Points: "10", IdempotencyKey: "replay"})
 		require.ErrorIs(t, err, domain.ErrRechargeExpired)
 		require.Zero(t, gateway.paymentCalls)
 		require.Zero(t, queueCalls)
@@ -149,7 +149,7 @@ func TestRechargeCreateInputAndConfigReplaySafety(t *testing.T) {
 		useCase := NewRechargeUseCase(repo, rechargeConfigStub{config}, gateway, &rechargeQueueStub{})
 		useCase.now = func() time.Time { return createdAt.Add(domain.RechargeReconciliationWindow) }
 
-		_, err := useCase.Create(context.Background(), CreateRechargeRequest{UserID: 1, Amount: "10", IdempotencyKey: "expired-replay"})
+		_, err := useCase.Create(context.Background(), CreateRechargeRequest{UserID: 1, Points: "10", IdempotencyKey: "expired-replay"})
 		require.ErrorIs(t, err, domain.ErrRechargeExpired)
 		require.Zero(t, gateway.paymentCalls)
 	})
@@ -238,9 +238,9 @@ func validRechargeConfig() RechargeConfig {
 	return RechargeConfig{
 		Enabled: true, Version: "v1", GatewayURL: "https://pay.example.com",
 		MerchantID: "1000", MerchantKey: "secret",
-		NotifyURL: "https://app.example.com/v1/payments/webhooks/epay/v1",
-		ReturnURL: "https://app.example.com/wallet",
-		MinAmount: "10", FeeRate: "0", FeeCap: "0",
+		NotifyURL:     "https://app.example.com/v1/payments/webhooks/epay/v1",
+		ReturnURL:     "https://app.example.com/wallet",
+		PointsPerYuan: "1000", MinPoints: "10", FeeRate: "0", FeeCapPoints: "0",
 		MaxPendingOrders: 10,
 		RequestTimeout:   5 * time.Second,
 	}

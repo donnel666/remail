@@ -25,11 +25,15 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 )
 
-var coreMySQLTestServer = testmysql.New("remail_core_test")
+var (
+	coreMySQLTestServer       = testmysql.New("remail_core_test")
+	coreLegacyMySQLTestServer = testmysql.New("remail_core_legacy_test")
+)
 
 func TestMain(m *testing.M) {
 	code := m.Run()
 	_ = coreMySQLTestServer.Close(context.Background())
+	_ = coreLegacyMySQLTestServer.Close(context.Background())
 	os.Exit(code)
 }
 
@@ -37,6 +41,12 @@ func newCoreMySQLTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
 	return coreMySQLTestServer.Database(t, coreMigrationsDir(t))
+}
+
+func newCoreLegacyMigrationTestDB(t *testing.T) (*gorm.DB, string) {
+	t.Helper()
+	migrationsDir := testmysql.MigrationsThrough(t, coreMigrationsDir(t), 65)
+	return coreLegacyMySQLTestServer.Database(t, migrationsDir), migrationsDir
 }
 
 func TestResourceMicrosoftFacetsCoalesceConcurrentMissesIntoTwoBoundedQueriesMySQL(t *testing.T) {
