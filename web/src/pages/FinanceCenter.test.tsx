@@ -133,11 +133,13 @@ describe("FinanceCenter", () => {
   it("keeps exact wallet data usable when transactions or a refresh fail", async () => {
     render(<FinanceCenter />);
 
-    expect(await screen.findByText("999,999,999,999.999999 Points")).toBeVisible();
-    expect(screen.getByText("1,000,000,000,000 Points")).toBeVisible();
+    expect((await screen.findAllByText("1T")).length).toBeGreaterThanOrEqual(2);
     expect(screen.getByRole("button", { name: "Withdraw to Alipay" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Transfer to user wallet" })).toBeEnabled();
     expect(mocks.toastError).toHaveBeenCalledWith("Supplier transactions load failed.");
+
+    fireEvent.click(screen.getByRole("button", { name: "Withdraw to Alipay" }));
+    expect(screen.getByText(/999,999,999,999\.999999/)).toBeVisible();
 
     mocks.getWallet.mockRejectedValueOnce(new Error("wallet unavailable"));
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
@@ -146,7 +148,8 @@ describe("FinanceCenter", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Withdraw to Alipay" })).toBeEnabled(),
     );
-    expect(screen.getByText("999,999,999,999.999999 Points")).toBeVisible();
+    expect(screen.getAllByText("1T").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText(/999,999,999,999\.999999/)).toBeVisible();
   });
 
   it("transfers supplier balance directly instead of creating a ticket", async () => {

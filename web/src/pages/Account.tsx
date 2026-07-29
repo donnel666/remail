@@ -184,7 +184,7 @@ export default function Account() {
       {
         icon: <Coins size={16} />,
         label: "Historical Spend",
-        value: overviewLoading ? "..." : formatPoints(wallet?.historicalSpend, t("Points")),
+        value: overviewLoading ? "..." : formatPoints(wallet?.historicalSpend),
       },
       {
         icon: <BarChart2 size={16} />,
@@ -299,7 +299,7 @@ export default function Account() {
         <div className="account-hero-body">
           <Badge count={t("Current Balance")} position="rightTop" type="danger">
             <div className="account-hero-balance">
-              {overviewLoading ? "..." : formatPoints(wallet?.consumerBalance, t("Points"))}
+              {overviewLoading ? "..." : formatPoints(wallet?.consumerBalance)}
             </div>
           </Badge>
 

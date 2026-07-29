@@ -203,7 +203,7 @@ export function CreateTicketModal({
                 : t("Purchase")}
             </Tag>
             <span className="font-mono-data text-xs text-[var(--semi-color-text-2)]">
-              {formatTicketAmount(selectedOrder.payAmount, t("Points"))}
+              {formatTicketAmount(selectedOrder.payAmount)}
             </span>
           </div>
           <OverflowTooltip
@@ -268,7 +268,7 @@ export function CreateTicketModal({
                         {order.projectName || "-"}
                       </span>
                       <span className="font-mono-data text-xs text-[var(--semi-color-text-2)]">
-                        {formatLedgerAmount(order.payAmount, t("Points"))}
+                        {formatLedgerAmount(order.payAmount)}
                       </span>
                     </div>
                     <OverflowTooltip

@@ -323,18 +323,14 @@ function ProductPricePreview({
           {codePrice ? (
             <div className="project-square-price-value">
               <span>{t("Code service")}</span>
-              <strong>
-                {codePrice} {t("Points")}
-              </strong>
+              <strong>{codePrice}</strong>
               {showFrom ? <em>{t("From price suffix")}</em> : null}
             </div>
           ) : null}
           {purchasePrice ? (
             <div className="project-square-price-value">
               <span>{t("Purchase service")}</span>
-              <strong>
-                {purchasePrice} {t("Points")}
-              </strong>
+              <strong>{purchasePrice}</strong>
               {showFrom ? <em>{t("From price suffix")}</em> : null}
             </div>
           ) : null}
@@ -907,10 +903,7 @@ function ProductRows({ products }: { products: ProjectProduct[] }) {
             {product.codeEnabled ? (
               <div className="project-detail-service-card">
                 <div className="project-detail-service-label">{t("Code service")}</div>
-                <div className="project-detail-price">
-                  {money(product.codePrice)}
-                  <span>{t("Points")}</span>
-                </div>
+                <div className="project-detail-price">{money(product.codePrice)}</div>
                 <div className="project-detail-meta-row">
                   <span>{t("Code window minutes")}</span>
                   <strong>
@@ -923,10 +916,7 @@ function ProductRows({ products }: { products: ProjectProduct[] }) {
             {product.purchaseEnabled ? (
               <div className="project-detail-service-card project-detail-service-card-strong">
                 <div className="project-detail-service-label">{t("Purchase service")}</div>
-                <div className="project-detail-price">
-                  {money(product.purchasePrice)}
-                  <span>{t("Points")}</span>
-                </div>
+                <div className="project-detail-price">{money(product.purchasePrice)}</div>
                 <div className="project-detail-meta-row">
                   <span>{t("Activation window minutes")}</span>
                   <strong>

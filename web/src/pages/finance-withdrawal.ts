@@ -51,7 +51,7 @@ export function buildAlipayWithdrawalTicketInput(input: {
     ticketType: "general",
     title: "供应商提现申请",
     firstMessage: [
-      `提现积分：${input.amount.trim()} 积分`,
+      `提现积分：${input.amount.trim()}`,
       "提现方式：支付宝",
       `备注：${input.note.trim() || "无"}`,
     ].join("\n"),

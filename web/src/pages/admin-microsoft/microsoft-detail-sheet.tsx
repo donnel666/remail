@@ -643,7 +643,7 @@ function RelatedOrdersTable({ resourceId, t }: { resourceId: number; t: TFunctio
           width: 110,
           render: (value: unknown) => (
             <span className="whitespace-nowrap font-mono text-sm font-medium tabular-nums">
-              {formatLedgerAmount(String(value), t("Points"))}
+              {formatLedgerAmount(String(value))}
             </span>
           ),
         },

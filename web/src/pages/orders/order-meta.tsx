@@ -1,7 +1,7 @@
 import { Tag } from "@douyinfe/semi-ui";
 
 import type { OrderServiceMode, OrderStatus } from "@/lib/orders-api";
-import { formatPoints } from "@/lib/points";
+import { formatPointsValue } from "@/lib/points";
 
 type Translator = (key: string) => string;
 
@@ -58,8 +58,8 @@ export function getOrderDomain(email: string) {
   return index === -1 ? "" : email.slice(index).toLowerCase();
 }
 
-export function formatLedgerAmount(value: string | number, unit = "积分") {
-  return formatPoints(value, unit);
+export function formatLedgerAmount(value: string | number) {
+  return formatPointsValue(value);
 }
 
 export function formatOrderDateTime(value?: string | null) {

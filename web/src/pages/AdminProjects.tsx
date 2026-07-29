@@ -1557,11 +1557,11 @@ function ProjectDetailSheet({
                   <div className="grid gap-2 text-sm sm:grid-cols-3">
                     <InfoItem
                       label={t("Code price")}
-                      value={product.codeEnabled ? `${moneyForDisplay(product.codePrice)} ${t("Points")}` : t("Disabled")}
+                      value={product.codeEnabled ? moneyForDisplay(product.codePrice) : t("Disabled")}
                     />
                     <InfoItem
                       label={t("Purchase price")}
-                      value={product.purchaseEnabled ? `${moneyForDisplay(product.purchasePrice)} ${t("Points")}` : t("Disabled")}
+                      value={product.purchaseEnabled ? moneyForDisplay(product.purchasePrice) : t("Disabled")}
                     />
                     <InfoItem
                       label={t("Service window")}

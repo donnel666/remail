@@ -71,7 +71,7 @@ export function HeaderWalletShortcut({
         )}
       >
         <Wallet className="size-3.5 shrink-0 text-muted-foreground" />
-        <span className="tabular-nums">{loading ? "..." : formatPoints(balance, t("Points"))}</span>
+        <span className="tabular-nums">{loading ? "..." : formatPoints(balance)}</span>
       </Link>
       <Link
         to="/wallet"

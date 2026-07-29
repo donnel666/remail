@@ -167,6 +167,7 @@ describe("wallet payment modal", () => {
 
     const payButton = await screen.findByRole("button", { name: "Alipay" });
     await waitFor(() => expect(payButton).toBeEnabled());
+    expect(screen.queryByText(/Fee points/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Billing" }));
     fireEvent.change(screen.getByLabelText("Order No."), { target: { value: "old-order" } });
     fireEvent.click(screen.getByRole("button", { name: "close-Recharge Billing" }));
@@ -246,7 +247,8 @@ describe("wallet payment modal", () => {
 
     const row = await screen.findByTestId("row-TX0002");
     expect(row).toHaveTextContent("Redemption Code");
-    expect(row.textContent?.match(/25 Points/g)).toHaveLength(1);
+    expect(row).toHaveTextContent("25");
+    expect(row).not.toHaveTextContent(/\bPoints?\b|积分|金额/);
     expect(container.querySelector(".lucide-gift")?.parentElement).toHaveClass(
       "w-6",
       "justify-start",

@@ -29,7 +29,7 @@ import { useAuth } from "@/context/auth-provider";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import { generateIdempotencyKey } from "@/lib/idempotency";
-import { formatPoints } from "@/lib/points";
+import { formatPoints, formatPointsValue } from "@/lib/points";
 import {
   getWallet,
   listWalletTransactions,
@@ -375,7 +375,7 @@ export default function FinanceCenter() {
             }`}
           >
             {String(value).trim()
-              ? `${record.direction === "in" ? "+" : "-"}${formatPoints(String(value).replace(/^-/, ""), t("Points"))}`
+              ? `${record.direction === "in" ? "+" : "-"}${formatPointsValue(String(value).replace(/^-/, ""))}`
               : "—"}
           </span>
         ),
@@ -385,7 +385,7 @@ export default function FinanceCenter() {
         dataIndex: "balanceAfter",
         width: 135,
         render: (value: unknown) => (
-          <span className="font-mono-data">{formatPoints(String(value), t("Points"))}</span>
+          <span className="font-mono-data">{formatPointsValue(String(value))}</span>
         ),
       },
       {
@@ -474,21 +474,21 @@ export default function FinanceCenter() {
               icon={<CircleDollarSign size={16} />}
               label={t("Income amount")}
               loading={walletLoading}
-              value={formatPoints(supplierIncome, t("Points"))}
+              value={formatPoints(supplierIncome)}
             />
             <MetricRow
               color="blue"
               icon={<ArrowRightLeft size={16} />}
               label={t("Withdrawable balance")}
               loading={walletLoading}
-              value={formatPoints(supplierAvailable, t("Points"))}
+              value={formatPoints(supplierAvailable)}
             />
             <MetricRow
               color="purple"
               icon={<Snowflake size={16} />}
               label={t("Frozen amount")}
               loading={walletLoading}
-              value={formatPoints(supplierFrozen, t("Points"))}
+              value={formatPoints(supplierFrozen)}
             />
           </div>
         </Card>
@@ -510,7 +510,7 @@ export default function FinanceCenter() {
             icon={<Wallet size={16} />}
             label={t("User wallet")}
             loading={walletLoading}
-            value={formatPoints(wallet?.consumerBalance, t("Points"))}
+            value={formatPoints(wallet?.consumerBalance)}
           />
         </Card>
       </div>
@@ -568,7 +568,7 @@ export default function FinanceCenter() {
               value={withdrawAmount}
             />
             <span className="mt-1 block text-xs text-[var(--semi-color-text-2)]">
-              {t("Withdrawable points")}: {formatPoints(supplierAvailable, t("Points"))}
+              {t("Withdrawable points")}: {formatPointsValue(supplierAvailable)}
             </span>
           </label>
 

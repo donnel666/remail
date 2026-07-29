@@ -129,7 +129,7 @@ export function TicketDetailSheet({
     Modal.confirm({
       title: t("Refund and close"),
       content: t("Refund and close confirm", {
-        amount: formatTicketAmount(amount, t("Points")),
+        amount: formatTicketAmount(amount),
       }),
       okText: t("Refund and close"),
       cancelText: t("Cancel"),
@@ -187,7 +187,7 @@ export function TicketDetailSheet({
                 : t("Purchase")}
             </Tag>
             <span className="font-mono-data text-xs font-semibold text-[var(--semi-color-text-1)]">
-              {formatTicketAmount(ticket.order.payAmount, t("Points"))}
+              {formatTicketAmount(ticket.order.payAmount)}
             </span>
           </div>
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 text-xs text-[var(--semi-color-text-2)]">
@@ -222,7 +222,7 @@ export function TicketDetailSheet({
       <div className="min-w-0 text-[13px] font-semibold">
         {ticket.resolution.kind === "refunded"
           ? t("Ticket refunded amount", {
-              amount: formatTicketAmount(ticket.resolution.refundAmount, t("Points")),
+              amount: formatTicketAmount(ticket.resolution.refundAmount),
             })
           : t("Ticket has been closed")}
       </div>

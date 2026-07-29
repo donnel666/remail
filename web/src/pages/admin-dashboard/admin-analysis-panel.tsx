@@ -94,7 +94,7 @@ function useAnalysisSpec(data: AdminDashboardData | null, view: AdminAnalysisVie
         seriesField: "Metric",
         title: chartTitle(
           t("Finance trend"),
-          `${labels.recharge}：${formatPoints(data?.stats.rechargeAmount, t("Points"))} / ${labels.spend}：${formatPoints(data?.stats.spendAmount, t("Points"))}`,
+          `${labels.recharge}：${formatPoints(data?.stats.rechargeAmount)} / ${labels.spend}：${formatPoints(data?.stats.spendAmount)}`,
         ),
         type: "line",
         xField: "Time",

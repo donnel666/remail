@@ -73,7 +73,7 @@ export default function UserGroupSection(_props: SectionProps) {
               {!group.enabled ? <span className="rounded bg-red-50 px-1.5 py-0.5 text-xs text-red-600">{t("已禁用")}</span> : null}
             </div>
             <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--semi-color-text-2)]">
-              <span>{t("并发")}: {group.apiConcurrencyLimit}</span><span>{t("折扣")}: {group.priceDiscountRatio}</span><span>{t("门槛")}: {group.topupThreshold} {t("Points")}</span><span>{t("自动升级")}: {group.autoUpgradeEnabled ? t("是") : t("否")}</span>
+              <span>{t("并发")}: {group.apiConcurrencyLimit}</span><span>{t("折扣")}: {group.priceDiscountRatio}</span><span>{t("门槛")}: {group.topupThreshold}</span><span>{t("自动升级")}: {group.autoUpgradeEnabled ? t("是") : t("否")}</span>
             </div>
           </div>
           <Button icon={<Edit size={14} />} theme="light" type="tertiary" onClick={() => { setEditing({ ...group }); setShowForm(true); }}>{t("编辑")}</Button>

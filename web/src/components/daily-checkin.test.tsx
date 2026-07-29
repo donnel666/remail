@@ -39,6 +39,6 @@ describe("DailyCheckin", () => {
     await act(async () => {
       resolveClaim({ enabled: true, firstClaim: true, rewardAmount: "50.00" });
     });
-    expect((await screen.findByRole("dialog", { name: "每日签到" })).textContent).toContain("签到成功，获得奖励 50 Points");
+    expect((await screen.findByRole("dialog", { name: "每日签到" })).textContent).toContain("签到成功，获得奖励 50");
   });
 });

@@ -158,7 +158,7 @@ export function OrderDetailModal({
             label={t("Pay amount")}
             value={
               <span className="font-mono-data font-semibold">
-                {formatLedgerAmount(order.payAmount, t("Points"))}
+                {formatLedgerAmount(order.payAmount)}
               </span>
             }
           />
@@ -167,7 +167,7 @@ export function OrderDetailModal({
               label={t("Refund amount")}
               value={
                 <span className="font-mono-data font-semibold text-[var(--semi-color-danger)]">
-                  {formatLedgerAmount(order.refundAmount, t("Points"))}
+                  {formatLedgerAmount(order.refundAmount)}
                 </span>
               }
             />

@@ -114,7 +114,7 @@ export function AdminDashboardSummaryCards({
           title: t("Recharge amount"),
           trendColor: "#3b82f6",
           trendData: trend.map((point) => point.rechargeAmount),
-          value: formatPoints(stats?.rechargeAmount, t("Points")),
+          value: formatPoints(stats?.rechargeAmount),
         },
         {
           avatarColor: "purple",
@@ -122,7 +122,7 @@ export function AdminDashboardSummaryCards({
           title: t("Spend amount"),
           trendColor: "#8b5cf6",
           trendData: trend.map((point) => point.spendAmount),
-          value: formatPoints(stats?.spendAmount, t("Points")),
+          value: formatPoints(stats?.spendAmount),
         },
         {
           avatarColor: "green",
@@ -130,7 +130,7 @@ export function AdminDashboardSummaryCards({
           title: t("Platform revenue"),
           trendColor: "#22a06b",
           trendData: trend.map((point) => point.platformRevenue),
-          value: formatPoints(stats?.platformRevenue, t("Points")),
+          value: formatPoints(stats?.platformRevenue),
         },
         {
           avatarColor: "orange",
@@ -138,7 +138,7 @@ export function AdminDashboardSummaryCards({
           title: t("Refund amount"),
           trendColor: "#f59e0b",
           trendData: trend.map((point) => point.refundAmount),
-          value: formatPoints(stats?.refundAmount, t("Points")),
+          value: formatPoints(stats?.refundAmount),
         },
         {
           avatarColor: "cyan",
@@ -146,7 +146,7 @@ export function AdminDashboardSummaryCards({
           title: t("Withdraw amount"),
           trendColor: "#06b6d4",
           trendData: trend.map((point) => point.withdrawAmount),
-          value: formatPoints(stats?.withdrawAmount, t("Points")),
+          value: formatPoints(stats?.withdrawAmount),
         },
       ],
     },

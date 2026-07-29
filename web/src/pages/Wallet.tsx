@@ -63,7 +63,7 @@ import {
 import { createMyInvite, getMyInvite } from "@/lib/iam-api";
 import { IamApiError } from "@/lib/api-client";
 import { getIamErrorMessage } from "@/lib/iam-errors";
-import { formatPoints, normalizePointValue } from "@/lib/points";
+import { formatPoints, formatPointsValue, normalizePointValue } from "@/lib/points";
 
 const { Text } = Typography;
 const EPAY_RETURN_MESSAGE = "remail:epay-return";
@@ -650,12 +650,12 @@ export default function Wallet() {
       {
         icon: <WalletIcon size={14} />,
         label: "Current Balance",
-        value: walletLoading ? "..." : formatPoints(wallet?.consumerBalance, t("Points")),
+        value: walletLoading ? "..." : formatPoints(wallet?.consumerBalance),
       },
       {
         icon: <TrendingUp size={14} />,
         label: "Historical Spend",
-        value: walletLoading ? "..." : formatPoints(wallet?.historicalSpend, t("Points")),
+        value: walletLoading ? "..." : formatPoints(wallet?.historicalSpend),
       },
       {
         icon: <BarChart2 size={14} />,
@@ -671,12 +671,12 @@ export default function Wallet() {
       {
         icon: <TrendingUp size={14} />,
         label: "Pending Rewards",
-        value: referralLoading ? "..." : formatPoints(referrals?.pendingRewards, t("Points")),
+        value: referralLoading ? "..." : formatPoints(referrals?.pendingRewards),
       },
       {
         icon: <BarChart2 size={14} />,
         label: "Total Earned",
-        value: referralLoading ? "..." : formatPoints(referrals?.totalEarned, t("Points")),
+        value: referralLoading ? "..." : formatPoints(referrals?.totalEarned),
       },
       {
         icon: <Users size={14} />,
@@ -692,14 +692,14 @@ export default function Wallet() {
       ...recharges.map((item) => ({
         ...item,
         orderNo: item.rechargeNo,
-        creditedPointsText: formatPoints(item.creditedPoints, t("Points")),
+        creditedPointsText: formatPointsValue(item.creditedPoints),
         createdAtText: formatDateTime(item.createdAt),
       })),
       ...redemptions.map((item) => ({
         ...item,
         orderNo: item.transactionNo,
         paymentMethod: "Redemption Code",
-        creditedPointsText: formatPoints(item.amount, t("Points")),
+        creditedPointsText: formatPointsValue(item.amount),
         status: "credited",
         createdAtText: formatDateTime(item.createdAt),
       })),
@@ -812,9 +812,7 @@ export default function Wallet() {
                         <Text type="secondary">
                           {rechargeQuote ? (
                             <>
-                              {t("Fee points")}: {formatPoints(rechargeQuote.feePoints, t("Points"))}
-                              {" · "}
-                              {t("Credited points")}: {formatPoints(rechargeQuote.creditedPoints, t("Points"))}
+                              {t("Credited points")}: {formatPointsValue(rechargeQuote.creditedPoints)}
                             </>
                           ) : t("Enter recharge points for a quote")}
                         </Text>
@@ -891,18 +889,15 @@ export default function Wallet() {
                               <div className="text-center">
                                 <div className="mb-2 flex items-center justify-center gap-1 text-base font-semibold">
                                   <Coins size={18} />
-                                  {formatPoints(tier.points, t("Points"))}
+                                  {formatPointsValue(tier.points)}
                                   {Number(tier.bonusPoints) > 0 ? (
                                     <Tag color="orange" size="small">
-                                      +{formatPoints(tier.bonusPoints, t("Points"))}
+                                      +{formatPointsValue(tier.bonusPoints)}
                                     </Tag>
                                   ) : null}
                                 </div>
                                 <div className="text-xs text-muted-foreground">
-                                  {t("Credited points")}: {formatPoints(tier.creditedPoints, t("Points"))}
-                                </div>
-                                <div className="mt-1 text-xs text-muted-foreground">
-                                  {t("Fee points")}: {formatPoints(tier.feePoints, t("Points"))}
+                                  {t("Credited points")}: {formatPointsValue(tier.creditedPoints)}
                                 </div>
                               </div>
                             </Card>

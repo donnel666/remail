@@ -5,7 +5,7 @@ import type {
   TicketStatus,
   TicketType,
 } from "./tickets-api";
-import { formatPoints, type PointValue } from "@/lib/points";
+import { formatPointsValue, type PointValue } from "@/lib/points";
 
 type Translator = (key: string, options?: Record<string, unknown>) => string;
 
@@ -91,8 +91,8 @@ export function renderSenderTag(sender: TicketSender, t: Translator) {
   );
 }
 
-export function formatTicketAmount(value: PointValue, unit = "积分") {
-  return formatPoints(value, unit);
+export function formatTicketAmount(value: PointValue) {
+  return formatPointsValue(value);
 }
 
 export function formatTicketDateTime(value?: string) {

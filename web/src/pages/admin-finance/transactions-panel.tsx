@@ -227,7 +227,7 @@ export function TransactionsPanel({ tabsArea }: { tabsArea: ReactNode }) {
           const formatted = formatMoney(String(value).replace(/^-/, ""));
           return (
             <span className={moneyClassName(record.direction)}>
-              {formatted === "—" ? formatted : `${record.direction === "in" ? "+" : "-"}${formatted} ${t("Points")}`}
+              {formatted === "—" ? formatted : `${record.direction === "in" ? "+" : "-"}${formatted}`}
             </span>
           );
         },
@@ -237,7 +237,7 @@ export function TransactionsPanel({ tabsArea }: { tabsArea: ReactNode }) {
         dataIndex: "balanceAfter",
         width: 130,
         render: (value: string) => (
-          <span className="font-mono-data">{formatMoney(value)}{formatMoney(value) === "—" ? "" : ` ${t("Points")}`}</span>
+          <span className="font-mono-data">{formatMoney(value)}</span>
         ),
       },
       {

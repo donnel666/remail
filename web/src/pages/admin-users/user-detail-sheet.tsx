@@ -407,14 +407,14 @@ function ProfileTab({
           label: t("Wallet balance"),
           value: metricValue(
             dashboardLoading,
-            stats ? `${formatMoney(stats.walletBalance)} ${t("Points")}` : "—"
+            stats ? formatMoney(stats.walletBalance) : "—"
           ),
         },
         {
           label: t("Historical spend"),
           value: metricValue(
             dashboardLoading,
-            stats ? `${formatMoney(stats.historicalSpend)} ${t("Points")}` : "—"
+            stats ? formatMoney(stats.historicalSpend) : "—"
           ),
         },
       ],
@@ -637,7 +637,7 @@ function ProfileTab({
           <InfoItem label={t("User Group")} value={user.userGroup.name} />
           <InfoItem
             label={t("Current Balance")}
-            value={<span className="font-mono-data">{formatMoney(user.consumerBalance)} {t("Points")}</span>}
+            value={<span className="font-mono-data">{formatMoney(user.consumerBalance)}</span>}
           />
           {canWithdraw ? (
             <InfoItem
@@ -647,7 +647,7 @@ function ProfileTab({
                   <Spin size="small" />
                 ) : (
                   <span className="font-mono-data font-semibold text-[var(--semi-color-primary)]">
-                    {formatMoney(walletSummary?.supplierAvailable ?? "0")} {t("Points")}
+                    {formatMoney(walletSummary?.supplierAvailable ?? "0")}
                   </span>
                 )
               }
@@ -988,7 +988,7 @@ export function WalletAdjustModal({
             {t("Current Balance")}
           </span>
           <span className="ml-2 font-mono-data font-semibold text-[var(--semi-color-text-0)]">
-            {balance === "-" ? "-" : `${formatMoney(balance)} ${t("Points")}`}
+            {balance === "-" ? "-" : formatMoney(balance)}
           </span>
         </div>
         <label className="block">
@@ -1013,7 +1013,7 @@ export function WalletAdjustModal({
                 size="small"
                 type="tertiary"
               >
-                {value > 0 ? "+" : "-"}{Math.abs(value).toLocaleString()} {t("Points")}
+                {value > 0 ? "+" : "-"}{Math.abs(value).toLocaleString()}
               </Button>
             ))}
           </div>
@@ -1124,7 +1124,7 @@ function WalletTab({
                     : "text-[var(--semi-color-warning)]"
                 }`}
               >
-                {formatted === "—" ? "—" : `${record.direction === "in" ? "+" : "-"}${formatted} ${t("Points")}`}
+                {formatted === "—" ? "—" : `${record.direction === "in" ? "+" : "-"}${formatted}`}
               </span>
             );
           },
@@ -1134,7 +1134,7 @@ function WalletTab({
           title: t("Balance after"),
           width: 130,
           render: (value: string) => (
-            <span className="font-mono-data">{formatMoney(value)}{formatMoney(value) === "—" ? "" : ` ${t("Points")}`}</span>
+            <span className="font-mono-data">{formatMoney(value)}</span>
           ),
         },
         {
@@ -1204,13 +1204,13 @@ function WalletTab({
             label={t("Current Balance")}
             value={
               <span className="font-mono-data font-semibold text-[var(--semi-color-primary)]">
-                {formatMoney(wallet.consumerBalance)} {t("Points")}
+                {formatMoney(wallet.consumerBalance)}
               </span>
             }
           />
           <InfoItem
             label={t("Historical Spend")}
-            value={<span className="font-mono-data">{formatMoney(wallet.historicalSpend)} {t("Points")}</span>}
+            value={<span className="font-mono-data">{formatMoney(wallet.historicalSpend)}</span>}
           />
           <InfoItem
             label={t("Order Count")}
@@ -1220,11 +1220,11 @@ function WalletTab({
             <>
               <InfoItem
                 label={t("Supplier available")}
-                value={<span className="font-mono-data">{formatMoney(wallet.supplierAvailable)} {t("Points")}</span>}
+                value={<span className="font-mono-data">{formatMoney(wallet.supplierAvailable)}</span>}
               />
               <InfoItem
                 label={t("Supplier frozen")}
-                value={<span className="font-mono-data">{formatMoney(wallet.supplierFrozen)} {t("Points")}</span>}
+                value={<span className="font-mono-data">{formatMoney(wallet.supplierFrozen)}</span>}
               />
             </>
           ) : null}

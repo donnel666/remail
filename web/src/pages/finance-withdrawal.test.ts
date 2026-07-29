@@ -84,7 +84,7 @@ describe("supplier withdrawal tickets", () => {
     ).toEqual({
       ticketType: "general",
       title: "供应商提现申请",
-      firstMessage: "提现积分：12.50 积分\n提现方式：支付宝\n备注：请处理",
+      firstMessage: "提现积分：12.50\n提现方式：支付宝\n备注：请处理",
       attachments: ["data:image/png;base64,qr"],
     });
   });

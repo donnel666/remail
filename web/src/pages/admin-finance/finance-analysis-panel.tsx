@@ -95,7 +95,7 @@ function useFinanceSpec(summary: FinanceSummary | null, view: FinanceAnalysisVie
         seriesField: "Metric",
         title: chartTitle(
           t("Cashflow trend"),
-          `${labels.recharge}：${formatMoney(summary?.rechargeAmount)} ${t("Points")} / ${labels.spend}：${formatMoney(summary?.spendAmount)} ${t("Points")}`,
+          `${labels.recharge}：${formatMoney(summary?.rechargeAmount)} / ${labels.spend}：${formatMoney(summary?.spendAmount)}`,
         ),
         type: "line",
         xField: "Time",
@@ -137,7 +137,7 @@ function useFinanceSpec(summary: FinanceSummary | null, view: FinanceAnalysisVie
       },
       title: chartTitle(
         t("Revenue structure"),
-        `${t("Platform revenue")}：${formatMoney(summary?.platformRevenue)} ${t("Points")}`,
+        `${t("Platform revenue")}：${formatMoney(summary?.platformRevenue)}`,
       ),
       type: "pie",
       valueField: "Value",

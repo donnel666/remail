@@ -465,7 +465,7 @@ export default function AdminOrders() {
       Modal.confirm({
         title: t("Refund order"),
         content: t("Refund order confirm", {
-          amount: formatLedgerAmount(order.payAmount, t("Points")),
+          amount: formatLedgerAmount(order.payAmount),
         }),
         okText: t("Refund"),
         cancelText: t("Cancel"),
@@ -560,7 +560,7 @@ export default function AdminOrders() {
           dataIndex: "payAmount",
           width: 100,
           render: (amount: string) => (
-            <span className="font-mono-data">{formatLedgerAmount(amount, t("Points"))}</span>
+            <span className="font-mono-data">{formatLedgerAmount(amount)}</span>
           ),
         },
         {
@@ -571,7 +571,7 @@ export default function AdminOrders() {
           render: (amount: string) =>
             Number(amount) > 0 ? (
               <span className="font-mono-data text-[var(--semi-color-danger)]">
-                {formatLedgerAmount(amount, t("Points"))}
+                {formatLedgerAmount(amount)}
               </span>
             ) : (
               <span className="text-[var(--semi-color-text-3)]">-</span>

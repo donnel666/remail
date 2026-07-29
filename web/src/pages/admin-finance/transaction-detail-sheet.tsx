@@ -99,7 +99,7 @@ export function TransactionDetailSheet({
                   <span className={moneyClassName(transaction.direction)}>
                     {formattedAmount === "—"
                       ? "—"
-                      : `${transaction.direction === "in" ? "+" : "-"}${formattedAmount} ${t("Points")}`}
+                      : `${transaction.direction === "in" ? "+" : "-"}${formattedAmount}`}
                   </span>
                 }
               />
@@ -107,7 +107,7 @@ export function TransactionDetailSheet({
                 label={t("Balance after")}
                 value={
                   <span className="font-mono-data">
-                    {formatMoney(transaction.balanceAfter)}{formatMoney(transaction.balanceAfter) === "—" ? "" : ` ${t("Points")}`}
+                    {formatMoney(transaction.balanceAfter)}
                   </span>
                 }
               />
@@ -115,7 +115,7 @@ export function TransactionDetailSheet({
                 label={t("Balance before")}
                 value={
                   <span className="font-mono-data">
-                    {formatMoney(transaction.balanceBefore)}{formatMoney(transaction.balanceBefore) === "—" ? "" : ` ${t("Points")}`}
+                    {formatMoney(transaction.balanceBefore)}
                   </span>
                 }
               />

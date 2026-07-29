@@ -130,7 +130,7 @@ function FinanceAdjustModal({
             {t("Current Balance")}
           </span>
           <span className="ml-2 font-mono-data font-semibold text-[var(--semi-color-text-0)]">
-            {balance === "-" ? "-" : `${formatMoney(balance)} ${t("Points")}`}
+            {balance === "-" ? "-" : formatMoney(balance)}
           </span>
         </div>
         <label className="block">
@@ -155,7 +155,7 @@ function FinanceAdjustModal({
                 size="small"
                 type="tertiary"
               >
-                {value > 0 ? "+" : "-"}{Math.abs(value).toLocaleString()} {t("Points")}
+                {value > 0 ? "+" : "-"}{Math.abs(value).toLocaleString()}
               </Button>
             ))}
           </div>
@@ -246,7 +246,7 @@ function FinanceWithdrawModal({
             {t("Withdrawable points")}
           </span>
           <span className="ml-2 font-mono-data font-semibold text-[var(--semi-color-text-0)]">
-            {formatMoney(user?.supplierAvailable ?? "0")} {t("Points")}
+            {formatMoney(user?.supplierAvailable ?? "0")}
           </span>
         </div>
         <label className="block">
@@ -271,7 +271,7 @@ function FinanceWithdrawModal({
                 size="small"
                 type="tertiary"
               >
-                {value.toLocaleString()} {t("Points")}
+                {value.toLocaleString()}
               </Button>
             ))}
             <Button
@@ -388,7 +388,7 @@ export function BalancesPanel({ tabsArea }: { tabsArea: ReactNode }) {
         width: 150,
         render: (value: string) => (
           <span className="font-mono-data font-semibold">
-            {formatMoney(value)} {t("Points")}
+            {formatMoney(value)}
           </span>
         ),
       },
@@ -397,7 +397,7 @@ export function BalancesPanel({ tabsArea }: { tabsArea: ReactNode }) {
         dataIndex: "supplierAvailable",
         width: 150,
         render: (value: string) => (
-          <span className="font-mono-data">{formatMoney(value)} {t("Points")}</span>
+          <span className="font-mono-data">{formatMoney(value)}</span>
         ),
       },
       {
@@ -405,7 +405,7 @@ export function BalancesPanel({ tabsArea }: { tabsArea: ReactNode }) {
         dataIndex: "supplierFrozen",
         width: 140,
         render: (value: string) => (
-          <span className="font-mono-data">{formatMoney(value)} {t("Points")}</span>
+          <span className="font-mono-data">{formatMoney(value)}</span>
         ),
       },
       {

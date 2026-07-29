@@ -84,7 +84,7 @@ function useAnalysisSpec(data: DashboardData | null, view: AnalysisView) {
         data: [{ id: "spendData", values }],
         legends: { selectMode: "single", visible: true },
         seriesField: "Project",
-        title: chartTitle(t("Spend distribution"), `${t("Total spend")}：${formatPoints(totalSpend, t("Points"))}`),
+        title: chartTitle(t("Spend distribution"), `${t("Total spend")}：${formatPoints(totalSpend)}`),
         type: "line",
         xField: "Time",
         yField: "Usage",
