@@ -772,15 +772,14 @@ func TestDotAliasVariantsSkipPositionsAdjacentToExistingDots(t *testing.T) {
 
 func TestAllocationRuntimeSettingsApplyToNewWork(t *testing.T) {
 	settings := map[string]string{
-		"candidate_window_size":                "2",
-		"global_candidate_window":              "3",
-		"bucket_probe_count":                   "2",
-		"alias_generation_window":              "3",
-		"candidate_retry_count":                "2",
-		"dot_alias_capacity_per_resource":      "2",
-		"inventory_refresh_interval_minutes":   "4",
-		"inventory_cache_activity_ttl_minutes": "5",
-		"inventory_cache_hard_ttl_hours":       "6",
+		"candidate_window_size":              "2",
+		"global_candidate_window":            "3",
+		"bucket_probe_count":                 "2",
+		"alias_generation_window":            "3",
+		"candidate_retry_count":              "2",
+		"dot_alias_capacity_per_resource":    "2",
+		"inventory_refresh_interval_minutes": "4",
+		"inventory_cache_hard_ttl_hours":     "6",
 	}
 	for key, value := range settings {
 		runtimeconfig.Set(key, value)
@@ -796,22 +795,21 @@ func TestAllocationRuntimeSettingsApplyToNewWork(t *testing.T) {
 	if got := len(dotAliasVariants("username@example.com")); got != 2 {
 		t.Fatalf("got %d dot aliases, want 2", got)
 	}
-	if InventoryRefreshIntervalValue() != 4*time.Minute || inventoryCacheActivityTTLValue() != 5*time.Minute || inventoryCacheHardTTLValue() != 6*time.Hour {
+	if InventoryRefreshIntervalValue() != 4*time.Minute || inventoryCacheHardTTLValue() != 6*time.Hour {
 		t.Fatal("inventory runtime settings were not applied")
 	}
 }
 
 func TestAllocationRuntimeSettingsClampUnsafeValues(t *testing.T) {
 	settings := map[string]string{
-		"candidate_window_size":                "2147483647",
-		"global_candidate_window":              "2147483647",
-		"bucket_probe_count":                   "2147483647",
-		"alias_generation_window":              "2147483647",
-		"candidate_retry_count":                "2147483647",
-		"dot_alias_capacity_per_resource":      "2147483647",
-		"inventory_refresh_interval_minutes":   "1000000",
-		"inventory_cache_activity_ttl_minutes": "1000000",
-		"inventory_cache_hard_ttl_hours":       "100000",
+		"candidate_window_size":              "2147483647",
+		"global_candidate_window":            "2147483647",
+		"bucket_probe_count":                 "2147483647",
+		"alias_generation_window":            "2147483647",
+		"candidate_retry_count":              "2147483647",
+		"dot_alias_capacity_per_resource":    "2147483647",
+		"inventory_refresh_interval_minutes": "1000000",
+		"inventory_cache_hard_ttl_hours":     "100000",
 	}
 	for key, value := range settings {
 		runtimeconfig.Set(key, value)
@@ -827,7 +825,7 @@ func TestAllocationRuntimeSettingsClampUnsafeValues(t *testing.T) {
 	if DotAliasCapacityPerResourceValue() != maxDotAliasCapacity {
 		t.Fatal("dot alias capacity was not clamped")
 	}
-	if InventoryRefreshIntervalValue() != maxInventoryRefreshInterval || inventoryCacheActivityTTLValue() != maxInventoryCacheActivityTTL || inventoryCacheHardTTLValue() != maxInventoryCacheHardTTL {
+	if InventoryRefreshIntervalValue() != maxInventoryRefreshInterval || inventoryCacheHardTTLValue() != maxInventoryCacheHardTTL {
 		t.Fatal("inventory durations were not clamped")
 	}
 }

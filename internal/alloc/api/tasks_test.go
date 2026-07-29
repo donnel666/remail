@@ -50,6 +50,10 @@ type failingInventoryTaskRepo struct {
 	deadline time.Time
 }
 
+func (*failingInventoryTaskRepo) ListInventoryProjectIDs(context.Context) ([]uint, error) {
+	return nil, nil
+}
+
 func (r *failingInventoryTaskRepo) GetInventoryStats(ctx context.Context, _ uint) (*allocapp.InventoryStats, error) {
 	r.calls.Add(1)
 	r.deadline, _ = ctx.Deadline()
@@ -62,7 +66,13 @@ type failingInventoryTaskCache struct {
 
 type boundedInventoryTaskRepo struct {
 	allocapp.Repository
-	calls atomic.Int32
+	calls            atomic.Int32
+	projectListCalls atomic.Int32
+}
+
+func (r *boundedInventoryTaskRepo) ListInventoryProjectIDs(context.Context) ([]uint, error) {
+	r.projectListCalls.Add(1)
+	return nil, nil
 }
 
 func (r *boundedInventoryTaskRepo) GetInventoryStats(_ context.Context, projectID uint) (*allocapp.InventoryStats, error) {
@@ -163,6 +173,7 @@ func TestInventoryRefreshTaskStopsNormallyAtItsWorkLimit(t *testing.T) {
 	require.Equal(t, inventoryRefreshMaxEntriesPerTask, result.Attempted)
 	require.Equal(t, inventoryRefreshMaxEntriesPerTask, result.Updated)
 	require.EqualValues(t, inventoryRefreshMaxEntriesPerTask, repo.calls.Load())
+	require.EqualValues(t, 1, repo.projectListCalls.Load(), "one task must discover projects only once")
 	require.Equal(t, inventoryRefreshMaxEntriesPerTask/5, cache.claims)
 }
 

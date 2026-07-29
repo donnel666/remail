@@ -176,8 +176,8 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 					if err := coreMod.ReindexDomainTLDs(ctx); err != nil {
 						return err
 					}
-					// ponytail: inactive persisted snapshots refresh after their next
-					// read; add cache generations only if TLD changes need instant purge.
+					// Existing and newly listed projects are rediscovered by the
+					// backend inventory schedule.
 					return allocMod.UseCase.ScheduleInventoryRefresh(ctx)
 				}
 			}

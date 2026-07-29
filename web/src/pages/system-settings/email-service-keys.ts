@@ -20,7 +20,6 @@ export const ALLOCATION_KEYS = [
   "candidate_retry_count",
   "dot_alias_capacity_per_resource",
   "inventory_refresh_interval_minutes",
-  "inventory_cache_activity_ttl_minutes",
   "inventory_cache_hard_ttl_hours",
 ] as const;
 

@@ -38,7 +38,6 @@ export default function AllocationSection({ options, onBulkSave }: SectionProps)
       {field("候选获取重试次数", "candidate_retry_count")}
       {field("点别名生成位置窗口", "dot_alias_capacity_per_resource")}
       {field("库存刷新间隔（分钟）", "inventory_refresh_interval_minutes")}
-      {field("库存缓存活跃有效期（分钟）", "inventory_cache_activity_ttl_minutes")}
       {field("库存缓存硬过期（小时）", "inventory_cache_hard_ttl_hours")}
     </SettingsFormGrid>
     <SettingsInvalidValuesNotice keys={invalidKeys} message={t("检测到无效数字配置，请修正后再保存")} />

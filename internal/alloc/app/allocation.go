@@ -19,9 +19,8 @@ import (
 )
 
 const (
-	inventoryCacheActivityTTL = 2 * InventoryRefreshInterval
-	inventoryCacheHardTTL     = 24 * time.Hour
-	inventoryRefreshLockTTL   = 10 * time.Minute
+	inventoryCacheHardTTL   = 24 * time.Hour
+	inventoryRefreshLockTTL = 10 * time.Minute
 	// ponytail: five cold keys bound each aggregate burst; raise only when the
 	// refresh p99 stays below one interval without affecting checkout/pickup.
 	inventoryRefreshBatchSize = 5
@@ -899,7 +898,37 @@ func (uc *UseCase) QueueRoutingCandidateRefresh(ctx context.Context, projectID u
 }
 
 func (uc *UseCase) RefreshInventoryCache(ctx context.Context) (*InventoryRefreshResult, error) {
+	if err := uc.EnsureInventoryRefreshSchedule(ctx); err != nil {
+		return nil, err
+	}
 	return uc.RefreshInventoryCacheBefore(ctx, time.Now())
+}
+
+// EnsureInventoryRefreshSchedule lets the backend discover new projects and
+// restore schedule entries lost by an interrupted refresh task.
+func (uc *UseCase) EnsureInventoryRefreshSchedule(ctx context.Context) error {
+	if uc == nil || uc.repo == nil || uc.inventoryCache == nil {
+		return nil
+	}
+	projectIDs, err := uc.repo.ListInventoryProjectIDs(ctx)
+	if err != nil {
+		return fmt.Errorf("list inventory projects: %w", err)
+	}
+	projectIDs = uniqueInventoryProjectIDs(projectIDs)
+	entries := make([]InventoryCacheEntry, 0, len(projectIDs)*2)
+	for _, projectID := range projectIDs {
+		entries = append(entries,
+			InventoryCacheEntry{Kind: InventoryCacheStats, ProjectID: projectID},
+			InventoryCacheEntry{Kind: InventoryCacheProducts, ProjectID: projectID},
+		)
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	if err := uc.inventoryCache.InitializeInventory(ctx, entries, inventoryCacheHardTTLValue()); err != nil {
+		return fmt.Errorf("initialize inventory refresh schedule: %w", err)
+	}
+	return nil
 }
 
 // RefreshInventoryCacheBefore refreshes entries whose backend schedule is due

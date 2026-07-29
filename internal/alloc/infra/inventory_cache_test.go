@@ -23,6 +23,13 @@ type inventoryCacheRepoStub struct {
 	productCalls int
 	accessCalls  int
 	accessErr    error
+	projectIDs   []uint
+	projectCalls int
+}
+
+func (r *inventoryCacheRepoStub) ListInventoryProjectIDs(context.Context) ([]uint, error) {
+	r.projectCalls++
+	return r.projectIDs, nil
 }
 
 type inventoryRefreshQueueStub struct {
@@ -155,8 +162,8 @@ func TestProductInventorySnapshotsQueueEveryColdProjectBeforeReturning(t *testin
 	require.True(t, snapshots[10].Cold)
 	require.True(t, snapshots[11].Cold)
 	require.Equal(t, 1, queue.calls)
-	require.NoError(t, client.ZScore(context.Background(), inventoryCacheActiveKey, inventoryCacheKey(allocapp.InventoryCacheProducts, 10)).Err())
-	require.NoError(t, client.ZScore(context.Background(), inventoryCacheActiveKey, inventoryCacheKey(allocapp.InventoryCacheProducts, 11)).Err())
+	require.NoError(t, client.ZScore(context.Background(), inventoryCacheScheduleKey, inventoryCacheKey(allocapp.InventoryCacheProducts, 10)).Err())
+	require.NoError(t, client.ZScore(context.Background(), inventoryCacheScheduleKey, inventoryCacheKey(allocapp.InventoryCacheProducts, 11)).Err())
 
 	result, err := useCase.RefreshInventoryCache(context.Background())
 	require.NoError(t, err)
@@ -216,7 +223,7 @@ func TestColdInventoryRemainsUnknownWhenImmediateRefreshEnqueueFails(t *testing.
 		{Kind: allocapp.InventoryCacheProducts, ProjectID: 10},
 		{Kind: allocapp.InventoryCacheProducts, ProjectID: 11},
 	} {
-		require.NoError(t, client.ZScore(context.Background(), inventoryCacheActiveKey, inventoryCacheKey(entry.Kind, entry.ProjectID)).Err())
+		require.NoError(t, client.ZScore(context.Background(), inventoryCacheScheduleKey, inventoryCacheKey(entry.Kind, entry.ProjectID)).Err())
 	}
 }
 
@@ -318,7 +325,7 @@ func TestCachedInventoryPrecheckTreatsColdSnapshotAsKnownZero(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.False(t, available)
-	require.EqualValues(t, 1, client.ZCard(context.Background(), inventoryCacheActiveKey).Val(), "a cold checkout must warm the shared project cache")
+	require.EqualValues(t, 1, client.ZCard(context.Background(), inventoryCacheScheduleKey).Val(), "a cold checkout must warm the shared project cache")
 }
 
 func TestProductUnavailableCorrectionDoesNotDoubleCountOverlappingProducts(t *testing.T) {
@@ -347,7 +354,7 @@ func TestInventoryCacheRewarmKeepsExistingDueSchedule(t *testing.T) {
 	useCase := allocapp.NewUseCase(repo)
 	useCase.SetInventoryCache(cache)
 	key := inventoryCacheKey(allocapp.InventoryCacheStats, 10)
-	require.NoError(t, client.ZAdd(context.Background(), inventoryCacheActiveKey, redis.Z{
+	require.NoError(t, client.ZAdd(context.Background(), inventoryCacheScheduleKey, redis.Z{
 		Score:  float64(time.Now().Add(-3 * time.Minute).UnixMilli()),
 		Member: key,
 	}).Err())
@@ -369,7 +376,7 @@ func TestClaimDueInventoryLeavesFutureEntriesScheduled(t *testing.T) {
 	cutoff := time.Now()
 	oldEntry := allocapp.InventoryCacheEntry{Kind: allocapp.InventoryCacheStats, ProjectID: 10}
 	freshEntry := allocapp.InventoryCacheEntry{Kind: allocapp.InventoryCacheStats, ProjectID: 11}
-	require.NoError(t, client.ZAdd(context.Background(), inventoryCacheActiveKey,
+	require.NoError(t, client.ZAdd(context.Background(), inventoryCacheScheduleKey,
 		redis.Z{Score: float64(cutoff.Add(-time.Minute).UnixMilli()), Member: inventoryCacheKey(oldEntry.Kind, oldEntry.ProjectID)},
 		redis.Z{Score: float64(cutoff.Add(time.Second).UnixMilli()), Member: inventoryCacheKey(freshEntry.Kind, freshEntry.ProjectID)},
 	).Err())
@@ -377,7 +384,7 @@ func TestClaimDueInventoryLeavesFutureEntriesScheduled(t *testing.T) {
 	claimed, err := cache.ClaimDueInventory(context.Background(), cutoff, 10)
 	require.NoError(t, err)
 	require.Equal(t, []allocapp.InventoryCacheEntry{oldEntry}, claimed)
-	require.NoError(t, client.ZScore(context.Background(), inventoryCacheActiveKey, inventoryCacheKey(freshEntry.Kind, freshEntry.ProjectID)).Err())
+	require.NoError(t, client.ZScore(context.Background(), inventoryCacheScheduleKey, inventoryCacheKey(freshEntry.Kind, freshEntry.ProjectID)).Err())
 }
 
 func TestInventoryReadsDoNotChangeRefreshSchedule(t *testing.T) {
@@ -394,7 +401,7 @@ func TestInventoryReadsDoNotChangeRefreshSchedule(t *testing.T) {
 	productsKey := inventoryCacheKey(productsEntry.Kind, productsEntry.ProjectID)
 	require.NoError(t, server.Set(statsKey, `{"ProjectID":10,"Microsoft":{"Enabled":true},"TotalAvailable":5}`))
 	require.NoError(t, server.Set(productsKey, `{"ProjectID":11,"TotalAvailable":0,"Cold":true}`))
-	require.NoError(t, client.ZAdd(ctx, inventoryCacheActiveKey,
+	require.NoError(t, client.ZAdd(ctx, inventoryCacheScheduleKey,
 		redis.Z{Score: queuedAt, Member: statsKey},
 		redis.Z{Score: queuedAt, Member: productsKey},
 	).Err())
@@ -403,12 +410,45 @@ func TestInventoryReadsDoNotChangeRefreshSchedule(t *testing.T) {
 	require.NoError(t, err)
 	_, err = cache.GetProductInventorySnapshots(ctx, []uint{productsEntry.ProjectID})
 	require.NoError(t, err)
-	require.Equal(t, queuedAt, client.ZScore(ctx, inventoryCacheActiveKey, statsKey).Val())
-	require.Equal(t, queuedAt, client.ZScore(ctx, inventoryCacheActiveKey, productsKey).Val())
+	require.Equal(t, queuedAt, client.ZScore(ctx, inventoryCacheScheduleKey, statsKey).Val())
+	require.Equal(t, queuedAt, client.ZScore(ctx, inventoryCacheScheduleKey, productsKey).Val())
 
 	claimed, err := cache.ClaimDueInventory(ctx, now, 10)
 	require.NoError(t, err)
 	require.ElementsMatch(t, []allocapp.InventoryCacheEntry{statsEntry, productsEntry}, claimed)
+}
+
+func TestInventoryRefreshDiscoversAndRestoresBackendSchedule(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	repo := &inventoryCacheRepoStub{
+		projectIDs: []uint{10},
+		stats: allocapp.InventoryStats{
+			ProjectID: 10, TotalAvailable: 3,
+			Microsoft: allocapp.MicrosoftInventoryStats{Enabled: true},
+		},
+		totals: allocapp.ProjectProductInventoryTotals{ProjectID: 10, TotalAvailable: 4},
+	}
+	cache := NewInventoryCache(client)
+	useCase := allocapp.NewUseCase(repo)
+	useCase.SetInventoryCache(cache)
+	ctx := context.Background()
+
+	result, err := useCase.RefreshInventoryCache(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 2, result.Updated, "backend discovery must warm both project snapshots without a read")
+	require.True(t, server.Exists(inventoryCacheKey(allocapp.InventoryCacheStats, 10)))
+	require.True(t, server.Exists(inventoryCacheKey(allocapp.InventoryCacheProducts, 10)))
+
+	require.NoError(t, client.ZRem(ctx, inventoryCacheScheduleKey,
+		inventoryCacheKey(allocapp.InventoryCacheStats, 10),
+		inventoryCacheKey(allocapp.InventoryCacheProducts, 10),
+	).Err())
+	result, err = useCase.RefreshInventoryCache(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 2, result.Updated, "backend discovery must restore lost schedule entries")
+	require.Equal(t, 2, repo.projectCalls)
 }
 
 func TestInventoryCacheV5DoesNotServeV4InventorySemantics(t *testing.T) {
@@ -429,9 +469,9 @@ func TestInventoryCacheV5DoesNotServeV4InventorySemantics(t *testing.T) {
 	claimed, err := cache.ClaimDueInventory(context.Background(), time.Now(), 10)
 	require.NoError(t, err)
 	require.Empty(t, claimed)
-	active, err := client.ZCard(context.Background(), inventoryCacheActiveKey).Result()
+	scheduled, err := client.ZCard(context.Background(), inventoryCacheScheduleKey).Result()
 	require.NoError(t, err)
-	require.Zero(t, active)
+	require.Zero(t, scheduled)
 	require.EqualValues(t, 1, client.ZCard(context.Background(), oldActiveKey).Val())
 }
 
@@ -454,7 +494,7 @@ func TestInventoryCacheV5KeysAreProjectScoped(t *testing.T) {
 	entry := allocapp.InventoryCacheEntry{Kind: allocapp.InventoryCacheStats, ProjectID: 10}
 	require.Equal(t, "alloc:inventory:v5:stats:10", inventoryCacheKey(entry.Kind, entry.ProjectID))
 	require.Equal(t, "alloc:inventory:v5:lock:stats:10", inventoryCacheLockKey(entry))
-	require.Equal(t, "alloc:inventory:v5:active", inventoryCacheActiveKey)
+	require.Equal(t, "alloc:inventory:v5:active", inventoryCacheScheduleKey)
 	require.Equal(t, "alloc:inventory:v5:unavailable:10:20:public:outlook.com", productUnavailableMarkerKey(
 		allocapp.ProductInventoryAvailabilityRequest{
 			ProjectID: 10, ProductID: 20, EmailSuffix: "@OUTLOOK.COM", PublicOnly: true,
@@ -551,11 +591,15 @@ func TestInventoryCacheColdMissesReturnImmediatelyWithoutDatabaseWork(t *testing
 	require.ErrorIs(t, <-errs, allocdomain.ErrInventoryRefreshInProgress)
 	require.ErrorIs(t, <-errs, allocdomain.ErrInventoryRefreshInProgress)
 	require.Zero(t, repo.calls.Load())
-	require.EqualValues(t, 1, client.ZCard(context.Background(), inventoryCacheActiveKey).Val())
+	require.EqualValues(t, 1, client.ZCard(context.Background(), inventoryCacheScheduleKey).Val())
 }
 
 type partialInventoryRefreshRepoStub struct {
 	allocapp.Repository
+}
+
+func (*partialInventoryRefreshRepoStub) ListInventoryProjectIDs(context.Context) ([]uint, error) {
+	return nil, nil
 }
 
 func (*partialInventoryRefreshRepoStub) GetInventoryStats(_ context.Context, projectID uint) (*allocapp.InventoryStats, error) {
@@ -604,5 +648,5 @@ func TestInventoryRefreshBatchIsBounded(t *testing.T) {
 	result, err := useCase.RefreshInventoryCache(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, 5, result.Attempted)
-	require.EqualValues(t, 101, client.ZCard(context.Background(), inventoryCacheActiveKey).Val(), "refreshed entries must schedule their next backend refresh")
+	require.EqualValues(t, 101, client.ZCard(context.Background(), inventoryCacheScheduleKey).Val(), "refreshed entries must schedule their next backend refresh")
 }

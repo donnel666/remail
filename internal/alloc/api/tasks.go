@@ -106,9 +106,12 @@ func RegisterAllocationTaskHandlers(mux *asynq.ServeMux, module *Module) func(co
 
 func refreshInventoryTask(ctx context.Context, useCase *allocapp.UseCase) (*allocapp.InventoryRefreshResult, bool, error) {
 	total := &allocapp.InventoryRefreshResult{}
-	activeBefore := time.Now()
+	if err := useCase.EnsureInventoryRefreshSchedule(ctx); err != nil {
+		return total, false, err
+	}
+	dueBefore := time.Now()
 	for total.Attempted < inventoryRefreshMaxEntriesPerTask {
-		batch, err := useCase.RefreshInventoryCacheBefore(ctx, activeBefore)
+		batch, err := useCase.RefreshInventoryCacheBefore(ctx, dueBefore)
 		if err != nil {
 			return total, false, err
 		}

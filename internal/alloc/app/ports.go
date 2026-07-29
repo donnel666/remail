@@ -10,25 +10,24 @@ import (
 )
 
 const (
-	MicrosoftBucketCount         = coredomain.MicrosoftAllocationBucketCount
-	DomainBucketCount            = coredomain.DomainAllocationBucketCount
-	GeneratedMailboxBucketCount  = coredomain.GeneratedMailboxBucketCount
-	DotAliasCapacityPerResource  = 10
-	InventoryRefreshInterval     = 10 * time.Minute
-	candidateWindowSize          = 4
-	globalCandidateWindow        = 8
-	bucketProbeCount             = 4
-	aliasGenerationWindow        = 32
-	candidateRetryCount          = 5
-	candidateRetryDelay          = 10 * time.Millisecond
-	maxCandidateWindowSize       = 100
-	maxBucketProbeCount          = 64
-	maxAliasGenerationWindow     = 1000
-	maxCandidateRetryCount       = 20
-	maxDotAliasCapacity          = 64
-	maxInventoryRefreshInterval  = 24 * time.Hour
-	maxInventoryCacheActivityTTL = 30 * 24 * time.Hour
-	maxInventoryCacheHardTTL     = 365 * 24 * time.Hour
+	MicrosoftBucketCount        = coredomain.MicrosoftAllocationBucketCount
+	DomainBucketCount           = coredomain.DomainAllocationBucketCount
+	GeneratedMailboxBucketCount = coredomain.GeneratedMailboxBucketCount
+	DotAliasCapacityPerResource = 10
+	InventoryRefreshInterval    = 10 * time.Minute
+	candidateWindowSize         = 4
+	globalCandidateWindow       = 8
+	bucketProbeCount            = 4
+	aliasGenerationWindow       = 32
+	candidateRetryCount         = 5
+	candidateRetryDelay         = 10 * time.Millisecond
+	maxCandidateWindowSize      = 100
+	maxBucketProbeCount         = 64
+	maxAliasGenerationWindow    = 1000
+	maxCandidateRetryCount      = 20
+	maxDotAliasCapacity         = 64
+	maxInventoryRefreshInterval = 24 * time.Hour
+	maxInventoryCacheHardTTL    = 365 * 24 * time.Hour
 )
 
 func candidateWindowSizeValue() int {
@@ -57,10 +56,6 @@ func DotAliasCapacityPerResourceValue() int {
 
 func InventoryRefreshIntervalValue() time.Duration {
 	return min(runtimeconfig.Duration("inventory_refresh_interval_minutes", InventoryRefreshInterval, time.Minute, 1), maxInventoryRefreshInterval)
-}
-
-func inventoryCacheActivityTTLValue() time.Duration {
-	return min(runtimeconfig.Duration("inventory_cache_activity_ttl_minutes", inventoryCacheActivityTTL, time.Minute, 1), maxInventoryCacheActivityTTL)
 }
 
 func inventoryCacheHardTTLValue() time.Duration {
@@ -402,6 +397,7 @@ type Repository interface {
 	ListActiveByRecipient(ctx context.Context, recipient string) ([]domain.UnifiedAllocation, error)
 
 	AssertProjectInventoryAccess(ctx context.Context, projectID uint, buyerUserID uint) error
+	ListInventoryProjectIDs(ctx context.Context) ([]uint, error)
 	GetInventoryStats(ctx context.Context, projectID uint) (*InventoryStats, error)
 	GetProductInventoryTotals(ctx context.Context, projectID uint) (*ProjectProductInventoryTotals, error)
 	RefreshRoutingCandidates(ctx context.Context, projectID uint) (int, error)

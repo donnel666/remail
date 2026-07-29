@@ -40,7 +40,7 @@ var integerRanges = map[string]integerRange{
 	"domain_max_subdomains_per_registrable_domain": positive(1000), "default_plus_daily_limit": positive(2_147_483_647), "default_mailbox_daily_limit": positive(2_147_483_647), "resource_validation_max_failures": positive(100),
 	"resource_import_max_bytes": positive(512 << 20), "max_project_logo_bytes": positive(20 << 20), "project_name_max": positive(120), "project_description_max": positive(1000), "project_target_platform_max": positive(120),
 	"candidate_window_size": positive(100), "global_candidate_window": positive(100), "bucket_probe_count": positive(64), "alias_generation_window": positive(1000),
-	"candidate_retry_count": positive(20), "dot_alias_capacity_per_resource": positive(64), "inventory_refresh_interval_minutes": positive(1440), "inventory_cache_activity_ttl_minutes": positive(43200), "inventory_cache_hard_ttl_hours": positive(8760),
+	"candidate_retry_count": positive(20), "dot_alias_capacity_per_resource": positive(64), "inventory_refresh_interval_minutes": positive(1440), "inventory_cache_hard_ttl_hours": positive(8760),
 	"fetch_lookback_window_days": positive(3650), "read_window_skew_minutes": positive(1440), "code_read_limit": positive(100), "purchase_read_limit": positive(500), "message_scan_limit": positive(500),
 	"projection_replay_limit": positive(1000), "pickup_fetch_reserve_ttl_minutes": positive(30), "pickup_fetch_lease_ttl_minutes": positive(10), "pickup_message_cache_ttl_seconds": positive(300),
 	"pickup_message_cache_limit": positive(100), "pickup_fetch_heartbeat_seconds": positive(300), "mailmatch_fetch_timeout_minutes": positive(60), "pickup_request_fetch_timeout_minutes": positive(30),
@@ -86,6 +86,7 @@ var removedKeys = map[string]struct{}{
 	"admin_log_max_limit": {}, "admin_message_max_limit": {}, "admin_resource_list_max_limit": {},
 	"admin_task_max_limit": {}, "api_key_cache_flush_interval_seconds": {}, "api_key_meta_ttl_seconds": {},
 	"bucket_count": {}, "msacl_content_search_window_minutes": {}, "outbound_mail_claim_timeout_minutes": {},
+	"inventory_cache_activity_ttl_minutes": {},
 }
 
 var booleanKeys = map[string]struct{}{
@@ -350,9 +351,6 @@ func sanitizeRelationships(values map[string]string) {
 	if value("global_candidate_window", 8) < value("candidate_window_size", 4) {
 		drop("candidate_window_size", "global_candidate_window")
 	}
-	if value("inventory_cache_hard_ttl_hours", 24)*60 < value("inventory_cache_activity_ttl_minutes", 20) {
-		drop("inventory_cache_activity_ttl_minutes", "inventory_cache_hard_ttl_hours")
-	}
 	if value("message_scan_limit", 40) < max(value("code_read_limit", 1), value("purchase_read_limit", 30)) {
 		drop("code_read_limit", "purchase_read_limit", "message_scan_limit")
 	}
@@ -408,7 +406,6 @@ func validateRelationships(values map[string]string) error {
 		return number
 	}
 	if value("global_candidate_window", 8) < value("candidate_window_size", 4) ||
-		value("inventory_cache_hard_ttl_hours", 24)*60 < value("inventory_cache_activity_ttl_minutes", 20) ||
 		value("message_scan_limit", 40) < max(value("code_read_limit", 1), value("purchase_read_limit", 30)) ||
 		value("pickup_fetch_heartbeat_seconds", 30) > min(value("pickup_fetch_reserve_ttl_minutes", 2), value("pickup_fetch_lease_ttl_minutes", 2))*30 ||
 		value("microsoft_alias_weekly_limit", 2) > value("microsoft_alias_yearly_limit", 10) ||

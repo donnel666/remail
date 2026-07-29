@@ -1359,6 +1359,19 @@ func (r *Repo) ListActiveByRecipient(ctx context.Context, recipient string) ([]d
 	return result, nil
 }
 
+func (r *Repo) ListInventoryProjectIDs(ctx context.Context) ([]uint, error) {
+	var projectIDs []uint
+	if err := r.dbFor(ctx).
+		Table("projects AS p").
+		Where("p.status = 'listed'").
+		Where("EXISTS (SELECT 1 FROM project_products pp WHERE pp.project_id = p.id AND pp.status = 'enabled')").
+		Order("p.id ASC").
+		Pluck("p.id", &projectIDs).Error; err != nil {
+		return nil, fmt.Errorf("list inventory projects: %w", err)
+	}
+	return projectIDs, nil
+}
+
 func (r *Repo) GetInventoryStats(ctx context.Context, projectID uint) (*allocapp.InventoryStats, error) {
 	stats := &allocapp.InventoryStats{ProjectID: projectID}
 	var productRows []struct {

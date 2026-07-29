@@ -32,7 +32,7 @@ func (q *CandidateRefreshQueue) EnqueueInventoryRefresh(ctx context.Context) err
 }
 
 func (q *CandidateRefreshQueue) EnqueueInventoryRefreshContinuation(ctx context.Context) error {
-	// The current task still owns the normal uniqueness lock. Active-cache claims
+	// The current task still owns the normal uniqueness lock. Scheduled-cache claims
 	// are atomic, so a rare duplicate continuation only finds a disjoint batch.
 	return q.enqueueInventoryRefresh(ctx, false)
 }

@@ -27,6 +27,10 @@ func (s *dashboardInventoryRepoStub) GetInventoryStats(_ context.Context, projec
 	}, nil
 }
 
+func (*dashboardInventoryRepoStub) ListInventoryProjectIDs(context.Context) ([]uint, error) {
+	return nil, nil
+}
+
 func TestProjectInventoryRankingSkipsColdPrivateProjectUntilRefresh(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:dashboard-inventory-ranking?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
