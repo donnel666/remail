@@ -523,11 +523,11 @@ export default function AdminSystemMonitoring() {
         dataIndex: "name",
         key: "metric",
         title: t("Metric"),
-        width: 300,
+        width: "20%",
         render: (value: unknown, metric: MonitoringMetric) => (
-          <Tooltip content={metric.help} position="topLeft">
+          <Tooltip content={`${String(value)}: ${metric.help}`} position="topLeft">
             <div className="min-w-0 cursor-help">
-              <code className="block break-all text-xs font-semibold text-[var(--semi-color-text-0)]">
+              <code className="block truncate text-xs font-semibold text-[var(--semi-color-text-0)]">
                 {String(value)}
               </code>
               <span className="mt-1 block truncate text-xs text-[var(--semi-color-text-2)]">
@@ -541,14 +541,13 @@ export default function AdminSystemMonitoring() {
         dataIndex: "type",
         key: "type",
         title: t("Type"),
-        width: 108,
-        render: (value: unknown) => <Tag color="blue">{String(value)}</Tag>,
+        render: (value: unknown) => <Tag className="max-w-full" color="blue">{String(value)}</Tag>,
       },
       {
         dataIndex: "labels",
         key: "labels",
         title: t("Labels"),
-        width: 270,
+        width: "15%",
         render: (value: unknown) => {
           const text = labelText(value as Record<string, string>);
           return (
@@ -561,7 +560,6 @@ export default function AdminSystemMonitoring() {
       {
         key: "current",
         title: t("Current"),
-        width: 115,
         render: (_: unknown, metric: MonitoringMetric) => (
           <span className="font-mono-data">
             {formatCount(metric.type === "histogram" ? metric.count : metric.value)}
@@ -572,7 +570,6 @@ export default function AdminSystemMonitoring() {
         dataIndex: "average",
         key: "average",
         title: t("Average"),
-        width: 105,
         render: (value: unknown, metric: MonitoringMetric) => (
           <span className="font-mono-data">
             {metric.type === "histogram" && metric.count > 0
@@ -585,7 +582,6 @@ export default function AdminSystemMonitoring() {
         dataIndex: "p50",
         key: "p50",
         title: "P50",
-        width: 100,
         render: (value: unknown, metric: MonitoringMetric) => (
           <span className="font-mono-data">
             {metric.type === "histogram" && metric.count > 0
@@ -598,7 +594,6 @@ export default function AdminSystemMonitoring() {
         dataIndex: "p95",
         key: "p95",
         title: "P95",
-        width: 100,
         render: (value: unknown, metric: MonitoringMetric) => (
           <span className="font-mono-data">
             {metric.type === "histogram" && metric.count > 0
@@ -610,7 +605,6 @@ export default function AdminSystemMonitoring() {
       {
         key: "rate",
         title: t("Rate per minute"),
-        width: 120,
         render: (_: unknown, metric: MonitoringMetric) => (
           <span className="font-mono-data">{formatRate(rates.metrics[metricSeriesKey(metric)])}</span>
         ),
@@ -924,11 +918,11 @@ export default function AdminSystemMonitoring() {
             </div>
             <div className="overflow-x-auto">
               <Table
+                className="[&_.semi-table]:table-fixed"
                 columns={metricColumns as never}
                 dataSource={filteredMetrics}
                 pagination={filteredMetrics.length > 20 ? { pageSize: 20 } : false}
                 rowKey={(metric) => metric ? metricSeriesKey(metric) : ""}
-                scroll={{ x: 1120 }}
                 size="small"
               />
             </div>
