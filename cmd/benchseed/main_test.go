@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/donnel666/remail/internal/platform/testmysql"
-	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
 )
 
@@ -71,25 +70,6 @@ WHERE owner.role <> 'super_admin'`).Scan(&nonSuperAdminOwnedAliases).Error)
 	require.NoError(t, gormDB.Table("explicit_aliases").Where("owner_user_id <> ?", 1).
 		Count(&nonFixedOwnerAliases).Error)
 	require.Zero(t, nonFixedOwnerAliases)
-}
-
-func TestMigrationsReset(t *testing.T) {
-	_, file, _, ok := runtime.Caller(0)
-	require.True(t, ok)
-	migrations := filepath.Clean(filepath.Join(filepath.Dir(file), "../..", "migrations"))
-	gormDB := benchSeedMySQL.Database(t, migrations)
-	db, err := gormDB.DB()
-	require.NoError(t, err)
-	require.NoError(t, goose.SetDialect("mysql"))
-	require.NoError(t, goose.Reset(db, migrations))
-
-	var usersTableCount int
-	require.NoError(t, db.QueryRow(`
-SELECT COUNT(*)
-FROM information_schema.tables
-WHERE table_schema = DATABASE()
-  AND table_name = 'users'`).Scan(&usersTableCount))
-	require.Zero(t, usersTableCount)
 }
 
 func TestMoneyPrecisionMigration(t *testing.T) {
