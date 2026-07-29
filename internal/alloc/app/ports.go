@@ -132,6 +132,8 @@ type InventoryStats struct {
 	TotalAvailable             int64
 	ActiveMicrosoftAllocations int64
 	ActiveDomainAllocations    int64
+	// Cold distinguishes an unrefreshed placeholder from a real zero inventory.
+	Cold bool
 }
 
 type ProductInventoryTotal struct {

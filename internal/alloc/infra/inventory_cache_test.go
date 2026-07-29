@@ -10,6 +10,7 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	allocapp "github.com/donnel666/remail/internal/alloc/app"
+	allocdomain "github.com/donnel666/remail/internal/alloc/domain"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )
@@ -69,7 +70,10 @@ func TestInventoryCacheServesRedisAndRefreshesActiveEntries(t *testing.T) {
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
 	t.Cleanup(func() { require.NoError(t, client.Close()) })
 	repo := &inventoryCacheRepoStub{
-		stats:  allocapp.InventoryStats{ProjectID: 10, TotalAvailable: 3},
+		stats: allocapp.InventoryStats{
+			ProjectID: 10, TotalAvailable: 3,
+			Microsoft: allocapp.MicrosoftInventoryStats{Enabled: true},
+		},
 		totals: allocapp.ProjectProductInventoryTotals{ProjectID: 10, TotalAvailable: 4},
 	}
 	queue := &inventoryRefreshQueueStub{}
@@ -77,9 +81,8 @@ func TestInventoryCacheServesRedisAndRefreshesActiveEntries(t *testing.T) {
 	useCase.SetInventoryCache(NewInventoryCache(client))
 
 	stats, err := useCase.GetInventoryStats(context.Background(), 10)
-	require.NoError(t, err)
-	require.Equal(t, uint(10), stats.ProjectID)
-	require.Zero(t, stats.TotalAvailable)
+	require.ErrorIs(t, err, allocdomain.ErrInventoryRefreshInProgress)
+	require.Nil(t, stats)
 	require.Zero(t, repo.statsCalls, "HTTP cold misses must not run aggregate SQL")
 	result, err := useCase.RefreshInventoryCache(context.Background())
 	require.NoError(t, err)
@@ -184,13 +187,14 @@ func TestInitializeInventoryDoesNotOverwriteWarmSnapshots(t *testing.T) {
 	stats, err := cache.GetInventoryStats(context.Background(), 10)
 	require.NoError(t, err)
 	require.EqualValues(t, 7, stats.TotalAvailable)
+	require.False(t, stats.Cold)
 	totals, err := cache.GetProductInventoryTotals(context.Background(), 10)
 	require.NoError(t, err)
 	require.EqualValues(t, 8, totals.TotalAvailable)
 	require.False(t, totals.Cold)
 }
 
-func TestColdInventoryReturnsZeroWhenImmediateRefreshEnqueueFails(t *testing.T) {
+func TestColdInventoryRemainsUnknownWhenImmediateRefreshEnqueueFails(t *testing.T) {
 	server := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
 	t.Cleanup(func() { require.NoError(t, client.Close()) })
@@ -199,9 +203,8 @@ func TestColdInventoryReturnsZeroWhenImmediateRefreshEnqueueFails(t *testing.T) 
 	useCase.SetInventoryCache(NewInventoryCache(client))
 
 	stats, err := useCase.GetInventoryStats(context.Background(), 10)
-	require.NoError(t, err)
-	require.Equal(t, uint(10), stats.ProjectID)
-	require.Zero(t, stats.TotalAvailable)
+	require.ErrorIs(t, err, allocdomain.ErrInventoryRefreshInProgress)
+	require.Nil(t, stats)
 	snapshots, err := useCase.GetProductInventorySnapshots(context.Background(), []uint{10, 11})
 	require.NoError(t, err)
 	require.True(t, snapshots[10].Cold)
@@ -337,7 +340,10 @@ func TestInventoryCacheRewarmUpdatesOldActiveMarker(t *testing.T) {
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
 	t.Cleanup(func() { require.NoError(t, client.Close()) })
 	cache := NewInventoryCache(client)
-	repo := &inventoryCacheRepoStub{stats: allocapp.InventoryStats{ProjectID: 10, TotalAvailable: 3}}
+	repo := &inventoryCacheRepoStub{stats: allocapp.InventoryStats{
+		ProjectID: 10, TotalAvailable: 3,
+		Microsoft: allocapp.MicrosoftInventoryStats{Enabled: true},
+	}}
 	useCase := allocapp.NewUseCase(repo)
 	useCase.SetInventoryCache(cache)
 	key := inventoryCacheKey(allocapp.InventoryCacheStats, 10)
@@ -347,9 +353,8 @@ func TestInventoryCacheRewarmUpdatesOldActiveMarker(t *testing.T) {
 	}).Err())
 
 	stats, err := useCase.GetInventoryStats(context.Background(), 10)
-	require.NoError(t, err)
-	require.Equal(t, uint(10), stats.ProjectID)
-	require.Zero(t, stats.TotalAvailable)
+	require.ErrorIs(t, err, allocdomain.ErrInventoryRefreshInProgress)
+	require.Nil(t, stats)
 	require.Zero(t, repo.statsCalls)
 	claimed, err := cache.ClaimActiveInventory(context.Background(), time.Now().Add(-2*time.Minute), time.Now(), 10)
 	require.NoError(t, err)
@@ -397,6 +402,21 @@ func TestInventoryCacheV5DoesNotServeV4InventorySemantics(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, active)
 	require.EqualValues(t, 1, client.ZCard(context.Background(), oldActiveKey).Val())
+}
+
+func TestInventoryCacheTreatsLegacyColdStatsAsUnknown(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	require.NoError(t, server.Set(inventoryCacheKey(allocapp.InventoryCacheStats, 10), `{"ProjectID":10,"TotalAvailable":0}`))
+	queue := &inventoryRefreshQueueStub{}
+	useCase := allocapp.NewUseCase(&inventoryCacheRepoStub{}, queue)
+	useCase.SetInventoryCache(NewInventoryCache(client))
+
+	stats, err := useCase.GetInventoryStats(context.Background(), 10)
+	require.ErrorIs(t, err, allocdomain.ErrInventoryRefreshInProgress)
+	require.Nil(t, stats)
+	require.Equal(t, 1, queue.calls)
 }
 
 func TestInventoryCacheV5KeysAreProjectScoped(t *testing.T) {
@@ -475,7 +495,10 @@ func (r *blockingInventoryRepoStub) GetInventoryStats(context.Context, uint) (*a
 	r.calls.Add(1)
 	r.once.Do(func() { close(r.started) })
 	<-r.release
-	return &allocapp.InventoryStats{ProjectID: 10, TotalAvailable: 3}, nil
+	return &allocapp.InventoryStats{
+		ProjectID: 10, TotalAvailable: 3,
+		Microsoft: allocapp.MicrosoftInventoryStats{Enabled: true},
+	}, nil
 }
 
 func TestInventoryCacheColdMissesReturnImmediatelyWithoutDatabaseWork(t *testing.T) {
@@ -494,8 +517,8 @@ func TestInventoryCacheColdMissesReturnImmediatelyWithoutDatabaseWork(t *testing
 		_, err := useCase.GetInventoryStats(context.Background(), 10)
 		errs <- err
 	}()
-	require.NoError(t, <-errs)
-	require.NoError(t, <-errs)
+	require.ErrorIs(t, <-errs, allocdomain.ErrInventoryRefreshInProgress)
+	require.ErrorIs(t, <-errs, allocdomain.ErrInventoryRefreshInProgress)
 	require.Zero(t, repo.calls.Load())
 	require.EqualValues(t, 1, client.ZCard(context.Background(), inventoryCacheActiveKey).Val())
 }
@@ -508,7 +531,10 @@ func (*partialInventoryRefreshRepoStub) GetInventoryStats(_ context.Context, pro
 	if projectID == 1 {
 		return nil, errors.New("project one failed")
 	}
-	return &allocapp.InventoryStats{ProjectID: projectID, TotalAvailable: 9}, nil
+	return &allocapp.InventoryStats{
+		ProjectID: projectID, TotalAvailable: 9,
+		Microsoft: allocapp.MicrosoftInventoryStats{Enabled: true},
+	}, nil
 }
 
 func TestInventoryRefreshContinuesAfterOneKeyFails(t *testing.T) {

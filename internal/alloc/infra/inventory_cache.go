@@ -100,8 +100,8 @@ func (c *InventoryCache) GetProductInventorySnapshots(ctx context.Context, proje
 	return result, nil
 }
 
-// InitializeInventory seeds cold keys with known-zero snapshots without
-// overwriting a concurrent background refresh.
+// InitializeInventory seeds cold placeholders without overwriting a concurrent
+// background refresh.
 func (c *InventoryCache) InitializeInventory(ctx context.Context, entries []allocapp.InventoryCacheEntry, ttl time.Duration) error {
 	if len(entries) == 0 {
 		return nil
@@ -112,7 +112,7 @@ func (c *InventoryCache) InitializeInventory(ctx context.Context, entries []allo
 			var value any
 			switch entry.Kind {
 			case allocapp.InventoryCacheStats:
-				value = &allocapp.InventoryStats{ProjectID: entry.ProjectID}
+				value = &allocapp.InventoryStats{ProjectID: entry.ProjectID, Cold: true}
 			case allocapp.InventoryCacheProducts:
 				value = &allocapp.ProjectProductInventoryTotals{ProjectID: entry.ProjectID, Cold: true}
 			default:

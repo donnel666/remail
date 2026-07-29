@@ -59,8 +59,7 @@ func dashboardMoneyFloat(s string) float64 {
 }
 
 // dashboardInventoryDirectory ranks listed projects by public available
-// inventory (ascending — low stock first) using alloc's per-project stats. The
-// per-project call is TTL-cached in alloc; buyerUserID 0 = public scope.
+// inventory (ascending — low stock first) using alloc's cached per-project stats.
 type dashboardInventoryDirectory struct {
 	db    *gorm.DB
 	alloc *allocapp.UseCase
@@ -81,7 +80,9 @@ func (d dashboardInventoryDirectory) ProjectInventoryRanking(ctx context.Context
 	items := make([]dashboardapp.AdminInventoryItem, 0, len(projects))
 	for _, p := range projects {
 		stats, err := d.alloc.GetInventoryStats(ctx, p.ID)
-		if errors.Is(err, allocdomain.ErrProjectNotAllocatable) {
+		if errors.Is(err, allocdomain.ErrProjectNotAllocatable) || errors.Is(err, allocdomain.ErrInventoryRefreshInProgress) {
+			// Cold entries are already queued for refresh and appear on the next
+			// dashboard refresh; unknown inventory must not be ranked as zero.
 			continue
 		}
 		if err != nil {

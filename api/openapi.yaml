@@ -4974,6 +4974,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "503":
+          description: Inventory cache is being prepared
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   # --- OpenAPI Credentials ---
   /v1/apikeys/usage:
     get:

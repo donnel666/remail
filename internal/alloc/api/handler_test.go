@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/donnel666/remail/api/middleware"
+	allocdomain "github.com/donnel666/remail/internal/alloc/domain"
 	iamdomain "github.com/donnel666/remail/internal/iam/domain"
 	"github.com/donnel666/remail/internal/platform/testmysql"
 	"github.com/gin-gonic/gin"
@@ -19,6 +20,17 @@ import (
 )
 
 var allocAPIMySQLTestServer = testmysql.New("remail_alloc_api_test")
+
+func TestInventoryRefreshInProgressReturnsRetryableServiceUnavailable(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	response := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(response)
+
+	writeAllocError(c, allocdomain.ErrInventoryRefreshInProgress)
+
+	require.Equal(t, http.StatusServiceUnavailable, response.Code)
+	require.Equal(t, "1", response.Header().Get("Retry-After"))
+}
 
 func TestMain(m *testing.M) {
 	code := m.Run()

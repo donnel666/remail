@@ -591,16 +591,31 @@ func (uc *UseCase) GetInventoryStats(ctx context.Context, projectID uint) (*Inve
 		return uc.repo.GetInventoryStats(ctx, projectID)
 	}
 	entry := InventoryCacheEntry{Kind: InventoryCacheStats, ProjectID: projectID}
-	return loadCachedInventory(
+	stats, err := loadCachedInventory(
 		ctx,
 		uc.inventoryCache,
 		entry,
 		func(ctx context.Context) (*InventoryStats, error) {
 			return uc.inventoryCache.GetInventoryStats(ctx, projectID)
 		},
-		func() *InventoryStats { return &InventoryStats{ProjectID: projectID} },
+		func() *InventoryStats { return &InventoryStats{ProjectID: projectID, Cold: true} },
 		uc.ScheduleInventoryRefresh,
 	)
+	if err != nil {
+		return nil, err
+	}
+	if stats != nil {
+		if stats.Cold {
+			return nil, domain.ErrInventoryRefreshInProgress
+		}
+		// Legacy v5 placeholders predate Cold and have neither source enabled;
+		// authoritative stats always enable at least one configured product type.
+		if !stats.Microsoft.Enabled && !stats.Domain.Enabled {
+			_ = uc.ScheduleInventoryRefresh(ctx)
+			return nil, domain.ErrInventoryRefreshInProgress
+		}
+	}
+	return stats, nil
 }
 
 func (uc *UseCase) GetProductInventoryTotals(ctx context.Context, projectID uint, viewerUserID uint) (*ProjectProductInventoryTotals, error) {

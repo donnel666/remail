@@ -50,11 +50,21 @@ func TestAdminDashboardCacheIgnoresPreviousSchemaVersion(t *testing.T) {
 		Data: &dashboardapp.AdminDashboard{Stats: dashboardapp.AdminStats{TotalUsers: 99}},
 	})
 	require.NoError(t, err)
-	oldKey := strings.Replace(adminDashboardCacheKey(nil, nil), adminDashboardCachePrefix, "dashboard:admin:v2:", 1)
+	oldKey := strings.Replace(adminDashboardCacheKey(nil, nil), adminDashboardCachePrefix, "dashboard:admin:v3:", 1)
 	require.NoError(t, client.Set(ctx, oldKey, payload, adminDashboardCacheTTL).Err())
+	require.NoError(t, client.ZAdd(ctx, adminDashboardActiveKey, redis.Z{
+		Score: float64(time.Now().UnixMilli()), Member: oldKey,
+	}).Err())
 
 	got, ok, err := cache.get(ctx, nil, nil)
 	require.NoError(t, err)
 	require.False(t, ok)
 	require.Nil(t, got)
+
+	loads := 0
+	require.NoError(t, cache.refresh(ctx, func(context.Context, *time.Time, *time.Time) (*dashboardapp.AdminDashboard, error) {
+		loads++
+		return &dashboardapp.AdminDashboard{}, nil
+	}))
+	require.Zero(t, loads, "background refresh must ignore previous payload versions")
 }

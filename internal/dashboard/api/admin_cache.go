@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	dashboardapp "github.com/donnel666/remail/internal/dashboard/app"
@@ -15,8 +16,8 @@ import (
 )
 
 const (
-	adminDashboardCachePrefix = "dashboard:admin:v3:"
-	adminDashboardActiveKey   = adminDashboardCachePrefix + "active"
+	adminDashboardCachePrefix = "dashboard:admin:v4:"
+	adminDashboardActiveKey   = "dashboard:admin:active"
 	adminDashboardCacheTTL    = 24 * time.Hour
 )
 
@@ -122,6 +123,9 @@ func (c *adminDashboardCache) refresh(ctx context.Context, load adminDashboardLo
 	}
 	var refreshErrors []error
 	for _, key := range keys {
+		if !strings.HasPrefix(key, adminDashboardCachePrefix) {
+			continue
+		}
 		payload, err := c.redis.Get(ctx, key).Bytes()
 		if errors.Is(err, redis.Nil) {
 			c.redis.ZRem(ctx, adminDashboardActiveKey, key)
