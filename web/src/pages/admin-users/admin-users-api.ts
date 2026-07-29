@@ -64,6 +64,8 @@ export interface AdminUser {
   role: AdminUserRole;
   userGroup: AdminUserGroup;
   permissions?: string[];
+  thirdPartyIdentities?: components["schemas"]["ThirdPartyIdentityResponse"][];
+  hasLocalPassword: boolean;
   enabled: boolean;
   createdAt: string;
   updatedAt: string;

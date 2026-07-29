@@ -27,6 +27,10 @@ export type ActivationUserResponse = JsonResponse<
 >;
 export type LoginResponse = components["schemas"]["LoginResponse"];
 export type LoginConfigResponse = components["schemas"]["LoginConfigResponse"];
+export type LinuxDOAccountMode = components["schemas"]["LinuxDOAccountMode"];
+export type LinuxDOPendingResponse = components["schemas"]["LinuxDOPendingResponse"];
+export type LinuxDOEmailCodeRequest = components["schemas"]["LinuxDOEmailCodeRequest"];
+export type LinuxDOCompleteRequest = components["schemas"]["LinuxDOCompleteRequest"];
 export type AdminUserListResponse =
   components["schemas"]["AdminUserListResponse"];
 export type CurrentInviteResponse =
@@ -80,6 +84,26 @@ export async function getLoginConfig() {
 
 export const linuxDOLoginURL = "/v1/oauth/linuxdo";
 export const linuxDOBindURL = "/v1/oauth/linuxdo/bind";
+
+export async function getLinuxDOPending() {
+  return unwrap<LinuxDOPendingResponse>(
+    await client.GET("/v1/oauth/linuxdo/pending")
+  );
+}
+
+export async function sendLinuxDOEmailCode(payload: LinuxDOEmailCodeRequest) {
+  const result = await client.POST("/v1/oauth/linuxdo/email/code", {
+    body: payload,
+  });
+  await unwrap<void>(result);
+  return Number.parseInt(result.response.headers.get("Retry-After") ?? "", 10) || 0;
+}
+
+export async function completeLinuxDO(payload: LinuxDOCompleteRequest) {
+  return unwrap<LoginResponse>(
+    await client.POST("/v1/oauth/linuxdo/complete", { body: payload })
+  );
+}
 
 export async function logout() {
   return unwrap<void>(await client.DELETE("/v1/sessions/current"));

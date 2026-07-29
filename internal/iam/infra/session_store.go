@@ -13,9 +13,10 @@ import (
 )
 
 const (
-	sessionKeyPrefix   = "session:"
-	userSessionsPrefix = "user_sessions:"
-	linuxDOFlowPrefix  = "linuxdo_oauth_flow:"
+	sessionKeyPrefix     = "session:"
+	userSessionsPrefix   = "user_sessions:"
+	linuxDOFlowPrefix    = "linuxdo_oauth_flow:"
+	linuxDOPendingPrefix = "linuxdo_oauth_pending:"
 )
 
 var consumeLinuxDOFlowScript = redis.NewScript(`
@@ -47,6 +48,10 @@ func userSessionsKey(userID uint) string {
 
 func linuxDOFlowKey(state string) string {
 	return linuxDOFlowPrefix + state
+}
+
+func linuxDOPendingKey(token string) string {
+	return linuxDOPendingPrefix + token
 }
 
 // sessionData is the JSON structure stored in Redis.
@@ -171,4 +176,46 @@ func (s *SessionStore) ConsumeLinuxDOFlow(ctx context.Context, state string) (*a
 		return nil, fmt.Errorf("unmarshal linuxdo oauth flow: %w", err)
 	}
 	return &flow, nil
+}
+
+func (s *SessionStore) PutLinuxDOPending(ctx context.Context, token string, pending app.LinuxDOPending, ttl time.Duration) error {
+	if strings.TrimSpace(token) == "" || ttl <= 0 {
+		return fmt.Errorf("invalid linuxdo oauth pending setup")
+	}
+	data, err := json.Marshal(pending)
+	if err != nil {
+		return fmt.Errorf("marshal linuxdo oauth pending setup: %w", err)
+	}
+	if err := s.rdb.Set(ctx, linuxDOPendingKey(token), data, ttl).Err(); err != nil {
+		return fmt.Errorf("redis linuxdo oauth pending setup put: %w", err)
+	}
+	return nil
+}
+
+func (s *SessionStore) GetLinuxDOPending(ctx context.Context, token string) (*app.LinuxDOPending, error) {
+	if strings.TrimSpace(token) == "" {
+		return nil, nil
+	}
+	data, err := s.rdb.Get(ctx, linuxDOPendingKey(token)).Bytes()
+	if err != nil {
+		if err == redis.Nil {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("redis linuxdo oauth pending setup get: %w", err)
+	}
+	var pending app.LinuxDOPending
+	if err := json.Unmarshal(data, &pending); err != nil {
+		return nil, fmt.Errorf("unmarshal linuxdo oauth pending setup: %w", err)
+	}
+	return &pending, nil
+}
+
+func (s *SessionStore) DeleteLinuxDOPending(ctx context.Context, token string) error {
+	if strings.TrimSpace(token) == "" {
+		return nil
+	}
+	if err := s.rdb.Del(ctx, linuxDOPendingKey(token)).Err(); err != nil {
+		return fmt.Errorf("redis linuxdo oauth pending setup delete: %w", err)
+	}
+	return nil
 }

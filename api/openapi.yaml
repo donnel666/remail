@@ -346,6 +346,152 @@ paths:
               schema:
                 type: string
 
+  /v1/oauth/linuxdo/pending:
+    get:
+      operationId: getLinuxDOPending
+      summary: Get the pending Linux DO account ownership choice
+      tags:
+        - IAM
+      responses:
+        "200":
+          description: Pending Linux DO profile and suggested account choice
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinuxDOPendingResponse"
+        "401":
+          description: Pending setup expired or is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Pending setup could not be loaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/oauth/linuxdo/email/code:
+    post:
+      operationId: postLinuxDOEmailCode
+      summary: Send the email verification code for Linux DO account ownership
+      tags:
+        - IAM
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LinuxDOEmailCodeRequest"
+      responses:
+        "204":
+          description: Verification code sent
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Pending setup expired or is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid email, account choice, or human verification
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Verification code request throttled
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: Human verification or mail delivery is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/oauth/linuxdo/complete:
+    post:
+      operationId: postLinuxDOComplete
+      summary: Bind or create the verified local account and finish Linux DO login
+      tags:
+        - IAM
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LinuxDOCompleteRequest"
+      responses:
+        "200":
+          description: Linux DO account ownership completed and session created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Pending setup expired or is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: New registration is disabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Email or third-party identity is already owned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Email, account choice, account state, or verification code is invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Too many verification attempts
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Account ownership could not be completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /v1/login:
     post:
       operationId: postLogin
@@ -13328,6 +13474,74 @@ components:
           type: boolean
       additionalProperties: false
 
+    LinuxDOAccountMode:
+      type: string
+      enum:
+        - existing
+        - new
+
+    LinuxDOPendingResponse:
+      type: object
+      required:
+        - provider
+        - providerUserId
+        - username
+        - suggestedEmail
+        - suggestedEmailExists
+        - registrationEnabled
+        - legacyAccount
+      properties:
+        provider:
+          type: string
+          enum:
+            - linuxdo
+        providerUserId:
+          type: string
+        username:
+          type: string
+        suggestedEmail:
+          type: string
+        suggestedEmailExists:
+          type: boolean
+        registrationEnabled:
+          type: boolean
+        legacyAccount:
+          type: boolean
+      additionalProperties: false
+
+    LinuxDOEmailCodeRequest:
+      type: object
+      required:
+        - mode
+        - email
+      properties:
+        mode:
+          $ref: "#/components/schemas/LinuxDOAccountMode"
+        email:
+          type: string
+          format: email
+        turnstileToken:
+          type: string
+          maxLength: 2048
+          description: Required when runtime human verification is enabled
+      additionalProperties: false
+
+    LinuxDOCompleteRequest:
+      type: object
+      required:
+        - mode
+        - email
+        - code
+      properties:
+        mode:
+          $ref: "#/components/schemas/LinuxDOAccountMode"
+        email:
+          type: string
+          format: email
+        code:
+          type: string
+      additionalProperties: false
+
     ChangePasswordRequest:
       type: object
       required:
@@ -13380,6 +13594,7 @@ components:
         - nickname
         - role
         - userGroup
+        - hasLocalPassword
         - enabled
         - createdAt
         - updatedAt
@@ -13403,6 +13618,12 @@ components:
           type: array
           items:
             type: string
+        thirdPartyIdentities:
+          type: array
+          items:
+            $ref: "#/components/schemas/ThirdPartyIdentityResponse"
+        hasLocalPassword:
+          type: boolean
         enabled:
           type: boolean
         createdAt:
@@ -13415,6 +13636,22 @@ components:
           type: string
           format: date-time
           nullable: true
+      additionalProperties: false
+
+    ThirdPartyIdentityResponse:
+      type: object
+      required:
+        - provider
+        - providerUserId
+        - createdAt
+      properties:
+        provider:
+          type: string
+        providerUserId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
       additionalProperties: false
 
     UserGroupResponse:

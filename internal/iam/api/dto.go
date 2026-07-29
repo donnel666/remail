@@ -39,6 +39,18 @@ type EmailCodeRequest struct {
 	TurnstileToken string `json:"turnstileToken" binding:"max=2048"`
 }
 
+type LinuxDOEmailCodeRequest struct {
+	Mode           app.LinuxDOAccountMode `json:"mode" binding:"required,oneof=existing new"`
+	Email          string                 `json:"email" binding:"required,email"`
+	TurnstileToken string                 `json:"turnstileToken" binding:"max=2048"`
+}
+
+type LinuxDOCompleteRequest struct {
+	Mode  app.LinuxDOAccountMode `json:"mode" binding:"required,oneof=existing new"`
+	Email string                 `json:"email" binding:"required,email"`
+	Code  string                 `json:"code" binding:"required"`
+}
+
 // ChangePasswordRequest is the request body for PATCH /v1/password.
 type ChangePasswordRequest struct {
 	OldPassword string `json:"oldPassword" binding:"required"`
@@ -149,16 +161,24 @@ type ActivationResponse struct {
 // UserResponse is the public representation of a user.
 // Never exposes passwordHash or tokenVersion.
 type UserResponse struct {
-	ID          uint              `json:"id"`
-	Email       string            `json:"email"`
-	Nickname    string            `json:"nickname"`
-	Role        string            `json:"role"`
-	UserGroup   UserGroupResponse `json:"userGroup"`
-	Permissions []string          `json:"permissions,omitempty"`
-	Enabled     bool              `json:"enabled"`
-	CreatedAt   time.Time         `json:"createdAt"`
-	UpdatedAt   time.Time         `json:"updatedAt"`
-	LastLoginAt *time.Time        `json:"lastLoginAt,omitempty"`
+	ID                   uint                         `json:"id"`
+	Email                string                       `json:"email"`
+	Nickname             string                       `json:"nickname"`
+	Role                 string                       `json:"role"`
+	UserGroup            UserGroupResponse            `json:"userGroup"`
+	Permissions          []string                     `json:"permissions,omitempty"`
+	ThirdPartyIdentities []ThirdPartyIdentityResponse `json:"thirdPartyIdentities,omitempty"`
+	HasLocalPassword     bool                         `json:"hasLocalPassword"`
+	Enabled              bool                         `json:"enabled"`
+	CreatedAt            time.Time                    `json:"createdAt"`
+	UpdatedAt            time.Time                    `json:"updatedAt"`
+	LastLoginAt          *time.Time                   `json:"lastLoginAt,omitempty"`
+}
+
+type ThirdPartyIdentityResponse struct {
+	Provider       string    `json:"provider"`
+	ProviderUserID string    `json:"providerUserId"`
+	CreatedAt      time.Time `json:"createdAt"`
 }
 
 type UserGroupResponse struct {
@@ -185,6 +205,16 @@ type LoginResponse struct {
 type LoginConfigResponse struct {
 	LinuxDOOAuthEnabled bool `json:"linuxdoOAuthEnabled"`
 	LinuxDOBound        bool `json:"linuxdoBound"`
+}
+
+type LinuxDOPendingResponse struct {
+	Provider             string `json:"provider"`
+	ProviderUserID       string `json:"providerUserId"`
+	Username             string `json:"username"`
+	SuggestedEmail       string `json:"suggestedEmail"`
+	SuggestedEmailExists bool   `json:"suggestedEmailExists"`
+	RegistrationEnabled  bool   `json:"registrationEnabled"`
+	LegacyAccount        bool   `json:"legacyAccount"`
 }
 
 // TurnstileConfigResponse exposes the runtime switch and public widget site key.
@@ -424,16 +454,26 @@ type SupplierApplicationListResponse struct {
 
 // toUserResponse converts a domain User to a safe API response.
 func toUserResponse(u *domain.User) UserResponse {
+	identities := make([]ThirdPartyIdentityResponse, len(u.ThirdPartyIdentities))
+	for i, identity := range u.ThirdPartyIdentities {
+		identities[i] = ThirdPartyIdentityResponse{
+			Provider:       identity.Provider,
+			ProviderUserID: identity.ProviderUserID,
+			CreatedAt:      identity.CreatedAt,
+		}
+	}
 	return UserResponse{
-		ID:          u.ID,
-		Email:       u.Email,
-		Nickname:    u.Nickname,
-		Role:        u.Role.String(),
-		UserGroup:   toUserGroupResponse(u.UserGroup),
-		Enabled:     u.IsActive(),
-		CreatedAt:   u.CreatedAt,
-		UpdatedAt:   u.UpdatedAt,
-		LastLoginAt: u.LastLoginAt,
+		ID:                   u.ID,
+		Email:                u.Email,
+		Nickname:             u.Nickname,
+		Role:                 u.Role.String(),
+		UserGroup:            toUserGroupResponse(u.UserGroup),
+		ThirdPartyIdentities: identities,
+		HasLocalPassword:     u.HasLocalPassword(),
+		Enabled:              u.IsActive(),
+		CreatedAt:            u.CreatedAt,
+		UpdatedAt:            u.UpdatedAt,
+		LastLoginAt:          u.LastLoginAt,
 	}
 }
 

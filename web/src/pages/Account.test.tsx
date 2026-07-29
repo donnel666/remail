@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
     name: "LinuxDo User",
     role: "user",
     permissions: [],
+    hasLocalPassword: false,
     enabled: true,
     createdAt: "2026-07-28T00:00:00Z",
     updatedAt: "2026-07-28T00:00:00Z",
@@ -39,7 +40,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: mocks.t }) }));
-vi.mock("@tanstack/react-router", () => ({ useNavigate: () => mocks.navigate }));
+vi.mock("@tanstack/react-router", () => ({
+  Link: ({ children, to }: any) => <a href={to}>{children}</a>,
+  useNavigate: () => mocks.navigate,
+}));
 vi.mock("@/context/auth-provider", () => ({
   useAuth: () => ({
     currentUser: mocks.currentUser,
@@ -102,6 +106,7 @@ describe("Account LinuxDO binding", () => {
     vi.clearAllMocks();
     window.history.replaceState({}, "", "/account");
     mocks.currentUser.email = "linuxdo-42@oauth.invalid";
+    mocks.currentUser.hasLocalPassword = false;
     mocks.getLoginConfig.mockResolvedValue({ linuxdoOAuthEnabled: true, linuxdoBound: false });
     mocks.getWallet.mockResolvedValue({ consumerBalance: "0", historicalSpend: "0" });
     mocks.getAPIKeyUsage.mockResolvedValue({ requestCount: 0 });
@@ -117,8 +122,8 @@ describe("Account LinuxDO binding", () => {
     expect(bind).toHaveAttribute("href", "/v1/oauth/linuxdo/bind");
     expect(screen.getByText("linuxdo-42@oauth.invalid")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Change Binding" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Unavailable" })).toBeDisabled();
-    expect(screen.getByText("LinuxDO-only accounts do not use a local password.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Set login password" })).toHaveAttribute("href", "/password-reset");
+    expect(screen.getByText("Set a password through email verification if you also want to sign in with email and password.")).toBeInTheDocument();
   });
 
   it("shows the bound state without an email-change action", async () => {
@@ -144,11 +149,12 @@ describe("Account LinuxDO binding", () => {
     render(<Account />);
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not load LinuxDO account status. Please try again later.");
-    expect(screen.getAllByRole("button", { name: "Unavailable" })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "Unavailable" })).toHaveLength(1);
   });
 
   it("keeps password management available for an account with a real email", async () => {
     mocks.currentUser.email = "user@example.com";
+    mocks.currentUser.hasLocalPassword = true;
     render(<Account />);
 
     expect(await screen.findByRole("link", { name: "Bind" })).toBeInTheDocument();

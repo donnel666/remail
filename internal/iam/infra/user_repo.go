@@ -25,18 +25,19 @@ const linuxDOIdentityProvider = "linuxdo"
 // UserModel is the GORM model for the users table.
 // This is the infra-layer representation, not exposed outside the package.
 type UserModel struct {
-	ID           uint           `gorm:"primaryKey;autoIncrement"`
-	Email        string         `gorm:"type:varchar(255);uniqueIndex;not null"`
-	PasswordHash string         `gorm:"type:varchar(255);not null;column:password_hash"`
-	Nickname     string         `gorm:"type:varchar(100);not null;default:''"`
-	Status       string         `gorm:"type:varchar(32);not null;default:'active'"`
-	Role         string         `gorm:"type:varchar(32);not null;default:'user'"`
-	UserGroupID  uint           `gorm:"not null;default:1;column:user_group_id"`
-	UserGroup    UserGroupModel `gorm:"foreignKey:UserGroupID"`
-	TokenVersion int            `gorm:"not null;default:0;column:token_version"`
-	LastLoginAt  *time.Time     `gorm:"column:last_login_at"`
-	CreatedAt    time.Time      `gorm:"not null;autoCreateTime"`
-	UpdatedAt    time.Time      `gorm:"not null;autoUpdateTime"`
+	ID                   uint                      `gorm:"primaryKey;autoIncrement"`
+	Email                string                    `gorm:"type:varchar(255);uniqueIndex;not null"`
+	PasswordHash         string                    `gorm:"type:varchar(255);not null;column:password_hash"`
+	Nickname             string                    `gorm:"type:varchar(100);not null;default:''"`
+	Status               string                    `gorm:"type:varchar(32);not null;default:'active'"`
+	Role                 string                    `gorm:"type:varchar(32);not null;default:'user'"`
+	UserGroupID          uint                      `gorm:"not null;default:1;column:user_group_id"`
+	UserGroup            UserGroupModel            `gorm:"foreignKey:UserGroupID"`
+	ThirdPartyIdentities []ThirdPartyIdentityModel `gorm:"foreignKey:UserID"`
+	TokenVersion         int                       `gorm:"not null;default:0;column:token_version"`
+	LastLoginAt          *time.Time                `gorm:"column:last_login_at"`
+	CreatedAt            time.Time                 `gorm:"not null;autoCreateTime"`
+	UpdatedAt            time.Time                 `gorm:"not null;autoUpdateTime"`
 }
 
 type ThirdPartyIdentityModel struct {
@@ -126,6 +127,16 @@ func (r *UserRepo) dbFor(ctx context.Context) *gorm.DB {
 
 // toDomain converts the GORM model to a domain entity.
 func (m *UserModel) toDomain() *domain.User {
+	identities := make([]domain.ThirdPartyIdentity, len(m.ThirdPartyIdentities))
+	for i, identity := range m.ThirdPartyIdentities {
+		identities[i] = domain.ThirdPartyIdentity{
+			ID:             identity.ID,
+			UserID:         identity.UserID,
+			Provider:       identity.Provider,
+			ProviderUserID: identity.ProviderUserID,
+			CreatedAt:      identity.CreatedAt,
+		}
+	}
 	return &domain.User{
 		ID:           m.ID,
 		Email:        m.Email,
@@ -147,10 +158,11 @@ func (m *UserModel) toDomain() *domain.User {
 			CreatedAt:           m.UserGroup.CreatedAt,
 			UpdatedAt:           m.UserGroup.UpdatedAt,
 		},
-		TokenVersion: m.TokenVersion,
-		LastLoginAt:  m.LastLoginAt,
-		CreatedAt:    m.CreatedAt,
-		UpdatedAt:    m.UpdatedAt,
+		ThirdPartyIdentities: identities,
+		TokenVersion:         m.TokenVersion,
+		LastLoginAt:          m.LastLoginAt,
+		CreatedAt:            m.CreatedAt,
+		UpdatedAt:            m.UpdatedAt,
 	}
 }
 
@@ -490,6 +502,48 @@ func (r *UserRepo) BindLinuxDOIdentity(ctx context.Context, userID uint, linuxDO
 				return domain.ErrLinuxDOIdentityAlreadyBound
 			}
 			return fmt.Errorf("bind linuxdo create identity: %w", err)
+		}
+		return nil
+	})
+}
+
+func (r *UserRepo) UpdateLinuxDOPlaceholder(ctx context.Context, legacyUserID uint, linuxDOID, email, passwordHash string) error {
+	linuxDOID = strings.TrimSpace(linuxDOID)
+	email = strings.ToLower(strings.TrimSpace(email))
+	if legacyUserID == 0 || linuxDOID == "" || email == "" || passwordHash == "" {
+		return domain.ErrLinuxDOAccountUnavailable
+	}
+
+	return r.dbFor(ctx).Transaction(func(tx *gorm.DB) error {
+		var identity ThirdPartyIdentityModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("provider = ? AND provider_user_id = ?", linuxDOIdentityProvider, linuxDOID).
+			First(&identity).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrLinuxDOAccountUnavailable
+			}
+			return fmt.Errorf("update linuxdo placeholder lock identity: %w", err)
+		}
+		if identity.UserID != legacyUserID {
+			return domain.ErrLinuxDOIdentityAlreadyBound
+		}
+
+		result := tx.Model(&UserModel{}).
+			Where("id = ? AND status = ? AND LOWER(email) LIKE ?", legacyUserID, domain.UserStatusActive, "%@oauth.invalid").
+			UpdateColumns(map[string]any{
+				"email":         email,
+				"password_hash": passwordHash,
+				"token_version": gorm.Expr("token_version + 1"),
+				"updated_at":    time.Now(),
+			})
+		if result.Error != nil {
+			if isIAMDuplicateKeyError(result.Error) {
+				return domain.ErrEmailAlreadyExists
+			}
+			return fmt.Errorf("update linuxdo placeholder: %w", result.Error)
+		}
+		if result.RowsAffected != 1 {
+			return domain.ErrLinuxDOAccountUnavailable
 		}
 		return nil
 	})
@@ -954,7 +1008,7 @@ func (r *UserRepo) List(ctx context.Context, offset, limit int) ([]domain.User, 
 
 func (r *UserRepo) ListByFilter(ctx context.Context, filter domain.UserListFilter, offset, limit int) ([]domain.User, error) {
 	var models []UserModel
-	err := applyUserListFilter(r.dbFor(ctx).Preload("UserGroup").Model(&UserModel{}), filter).
+	err := applyUserListFilter(r.dbFor(ctx).Preload("UserGroup").Preload("ThirdPartyIdentities").Model(&UserModel{}), filter).
 		Order("created_at DESC").
 		Offset(offset).
 		Limit(limit).

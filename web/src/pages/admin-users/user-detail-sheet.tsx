@@ -34,6 +34,7 @@ import { createCardProPagination } from "@/components/semi/card-pro-pagination";
 import { createCopyableConfig } from "@/components/semi/copyable-config";
 import { CopyableTableText } from "@/components/semi/copyable-table-text";
 import { OverflowTooltip } from "@/components/semi/overflow-tooltip";
+import { LinuxDoIcon } from "@/components/auth/LinuxDoIcon";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useSharedDashboardDateRange } from "@/hooks/use-shared-dashboard-date-range";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
@@ -495,7 +496,11 @@ function ProfileTab({
         enabled,
       });
       Toast.success(t("User updated."));
-      await onSaved(updated);
+      await onSaved({
+        ...updated,
+        thirdPartyIdentities:
+          updated.thirdPartyIdentities ?? user.thirdPartyIdentities,
+      });
     } catch (error) {
       Toast.error(getIamErrorMessage(t, error, "User update failed."));
     } finally {
@@ -527,6 +532,46 @@ function ProfileTab({
           <InfoItem label={t("Last login")} value={formatDateTime(user.lastLoginAt)} />
           <InfoItem label={t("Updated at")} value={formatDateTime(user.updatedAt)} />
         </div>
+      </section>
+
+      <section>
+        <div className="mb-3 text-sm font-semibold text-[var(--semi-color-text-0)]">
+          {t("Third-party login bindings")}
+        </div>
+        {user.thirdPartyIdentities?.length ? (
+          <div className="divide-y divide-[var(--semi-color-border)] overflow-hidden rounded-lg border border-[var(--semi-color-border)]">
+            {user.thirdPartyIdentities.map((identity) => (
+              <div
+                className="flex flex-col gap-3 px-3 py-3 sm:flex-row sm:items-center"
+                key={`${identity.provider}:${identity.providerUserId}`}
+              >
+                <div className="flex min-w-0 flex-1 items-center gap-3">
+                  {identity.provider === "linuxdo" ? (
+                    <LinuxDoIcon className="size-6 shrink-0" />
+                  ) : null}
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-[var(--semi-color-text-0)]">
+                      {identity.provider === "linuxdo" ? "LinuxDO" : identity.provider}
+                    </div>
+                    <div className="truncate text-xs text-[var(--semi-color-text-2)]">
+                      {t("Provider user ID")}: {identity.providerUserId}
+                    </div>
+                  </div>
+                </div>
+                <div className="text-xs text-[var(--semi-color-text-2)] sm:text-right">
+                  <div>{t("Bound at")}</div>
+                  <div className="mt-0.5 text-[var(--semi-color-text-1)]">
+                    {formatDateTime(identity.createdAt)}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-lg bg-[var(--semi-color-fill-0)] px-3 py-3 text-sm text-[var(--semi-color-text-2)]">
+            {t("No third-party login is bound.")}
+          </div>
+        )}
       </section>
 
       {canReadMetrics ? (

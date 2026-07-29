@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // UserStatus is the account lifecycle state and the single source of truth
 // for whether a user may authenticate.
@@ -88,18 +91,19 @@ type UserGroup struct {
 // User represents a platform user (admin, supplier, or regular user).
 // All roles share one user table (ADR-IAM-1).
 type User struct {
-	ID           uint
-	Email        string
-	PasswordHash string
-	Nickname     string
-	Status       UserStatus
-	Role         Role
-	UserGroupID  uint
-	UserGroup    UserGroup
-	TokenVersion int
-	LastLoginAt  *time.Time
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID                   uint
+	Email                string
+	PasswordHash         string
+	Nickname             string
+	Status               UserStatus
+	Role                 Role
+	UserGroupID          uint
+	UserGroup            UserGroup
+	ThirdPartyIdentities []ThirdPartyIdentity
+	TokenVersion         int
+	LastLoginAt          *time.Time
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
 }
 
 func (u User) IsActive() bool {
@@ -108,6 +112,10 @@ func (u User) IsActive() bool {
 
 func (u User) IsDeleted() bool {
 	return u.Status.IsDeleted()
+}
+
+func (u User) HasLocalPassword() bool {
+	return strings.HasPrefix(u.PasswordHash, "$2") && !strings.HasSuffix(strings.ToLower(u.Email), "@oauth.invalid")
 }
 
 type UserListFilter struct {

@@ -32,3 +32,23 @@ func TestSessionStoreConsumesLinuxDOFlowOnce(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, consumed)
 }
+
+func TestSessionStoreKeepsLinuxDOPendingServerSideUntilCompleted(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	store := NewSessionStore(client)
+	pending := app.LinuxDOPending{
+		Profile:        app.LinuxDOProfile{ID: "42", Username: "linuxdo-user", Email: "owner@qq.com", Active: true},
+		SuggestedEmail: "owner@qq.com",
+	}
+
+	require.NoError(t, store.PutLinuxDOPending(context.Background(), "opaque-token", pending, time.Minute))
+	stored, err := store.GetLinuxDOPending(context.Background(), "opaque-token")
+	require.NoError(t, err)
+	require.Equal(t, &pending, stored)
+	require.NoError(t, store.DeleteLinuxDOPending(context.Background(), "opaque-token"))
+	stored, err = store.GetLinuxDOPending(context.Background(), "opaque-token")
+	require.NoError(t, err)
+	require.Nil(t, stored)
+}

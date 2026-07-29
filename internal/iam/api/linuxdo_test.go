@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -72,6 +73,12 @@ func linuxDOTestClient(provider *httptest.Server) *linuxDOClient {
 	}
 }
 
+func TestParseLinuxDOUserIDFallsBackToOIDCSubject(t *testing.T) {
+	id, err := parseLinuxDOUserID(nil, "42")
+	require.NoError(t, err)
+	require.Equal(t, "42", id)
+}
+
 func linuxDOFlow(t *testing.T, response *httptest.ResponseRecorder) (string, *http.Cookie) {
 	t.Helper()
 	authorizeURL, err := url.Parse(response.Header().Get("Location"))
@@ -88,7 +95,7 @@ func linuxDOFlow(t *testing.T, response *httptest.ResponseRecorder) (string, *ht
 	return state, stateCookie
 }
 
-func TestLinuxDOOAuthCallbackCreatesMappedSession(t *testing.T) {
+func TestLinuxDOOAuthCallbackRequiresVerifiedAccountOwnership(t *testing.T) {
 	before := runtimeconfig.Snapshot()
 	t.Cleanup(func() {
 		settings := make([]settingsdomain.Setting, 0, len(before))
@@ -159,7 +166,7 @@ func TestLinuxDOOAuthCallbackCreatesMappedSession(t *testing.T) {
 	require.Equal(t, "client-id", authorizeURL.Query().Get("client_id"))
 	require.Equal(t, callbackURL, authorizeURL.Query().Get("redirect_uri"))
 	require.Equal(t, "code", authorizeURL.Query().Get("response_type"))
-	require.Equal(t, "user", authorizeURL.Query().Get("scope"))
+	require.Equal(t, "openid profile email", authorizeURL.Query().Get("scope"))
 	require.Equal(t, "S256", authorizeURL.Query().Get("code_challenge_method"))
 	codeChallenge = authorizeURL.Query().Get("code_challenge")
 	require.NotEmpty(t, codeChallenge)
@@ -182,16 +189,54 @@ func TestLinuxDOOAuthCallbackCreatesMappedSession(t *testing.T) {
 	request.AddCookie(stateCookie)
 	router.ServeHTTP(callback, request)
 	require.Equal(t, http.StatusSeeOther, callback.Code)
-	require.Equal(t, "/login", callback.Header().Get("Location"))
+	require.Equal(t, "/login?oauth_setup=linuxdo", callback.Header().Get("Location"))
 
 	user, err := testRepo(h).FindByLinuxDOID(context.Background(), "42")
 	require.NoError(t, err)
+	require.Nil(t, user)
+
+	var pendingCookie *http.Cookie
+	for _, cookie := range callback.Result().Cookies() {
+		if cookie.Name == linuxDOPendingCookieName {
+			pendingCookie = cookie
+		}
+		require.NotEqual(t, middleware.SessionCookieName, cookie.Name)
+	}
+	require.NotNil(t, pendingCookie)
+	require.True(t, pendingCookie.HttpOnly)
+	require.Equal(t, linuxDOPendingPath, pendingCookie.Path)
+
+	pendingResponse := httptest.NewRecorder()
+	pendingRequest := httptest.NewRequest(http.MethodGet, "/v1/oauth/linuxdo/pending", nil)
+	pendingRequest.AddCookie(pendingCookie)
+	router.ServeHTTP(pendingResponse, pendingRequest)
+	require.Equal(t, http.StatusOK, pendingResponse.Code)
+	require.Contains(t, pendingResponse.Body.String(), `"providerUserId":"42"`)
+
+	codeResponse := httptest.NewRecorder()
+	codeRequest := httptest.NewRequest(http.MethodPost, "/v1/oauth/linuxdo/email/code", strings.NewReader(`{"mode":"new","email":"user@qq.com","turnstileToken":"valid-turnstile"}`))
+	codeRequest.Header.Set("Content-Type", "application/json")
+	codeRequest.AddCookie(pendingCookie)
+	router.ServeHTTP(codeResponse, codeRequest)
+	require.Equal(t, http.StatusNoContent, codeResponse.Code)
+	code := h.module.EmailCodeStore.(*mockEmailCodeStore).firstCode()
+	require.NotEmpty(t, code)
+
+	completeResponse := httptest.NewRecorder()
+	completeRequest := httptest.NewRequest(http.MethodPost, "/v1/oauth/linuxdo/complete", strings.NewReader(`{"mode":"new","email":"user@qq.com","code":"`+code+`"}`))
+	completeRequest.Header.Set("Content-Type", "application/json")
+	completeRequest.AddCookie(pendingCookie)
+	router.ServeHTTP(completeResponse, completeRequest)
+	require.Equal(t, http.StatusOK, completeResponse.Code)
+
+	user, err = testRepo(h).FindByLinuxDOID(context.Background(), "42")
+	require.NoError(t, err)
 	require.NotNil(t, user)
-	require.Equal(t, "linuxdo-42@oauth.invalid", user.Email)
+	require.Equal(t, "user@qq.com", user.Email)
 	require.Equal(t, "LinuxDo User", user.Nickname)
 
 	var sessionID string
-	for _, cookie := range callback.Result().Cookies() {
+	for _, cookie := range completeResponse.Result().Cookies() {
 		if cookie.Name == middleware.SessionCookieName {
 			sessionID = cookie.Value
 		}
@@ -215,6 +260,9 @@ func TestLinuxDOOAuthBindsAuthenticatedUserWithoutReplacingSession(t *testing.T)
 	addAuthenticatedRequest(startRequest, "user-session")
 	router.ServeHTTP(start, startRequest)
 	require.Equal(t, http.StatusFound, start.Code)
+	authorizeURL, err := url.Parse(start.Header().Get("Location"))
+	require.NoError(t, err)
+	require.Equal(t, "openid profile", authorizeURL.Query().Get("scope"))
 	state, stateCookie := linuxDOFlow(t, start)
 
 	callback := httptest.NewRecorder()

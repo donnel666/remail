@@ -16,7 +16,7 @@ import {
   Toast,
   Typography,
 } from "@douyinfe/semi-ui";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import {
   BarChart2,
   Coins,
@@ -117,7 +117,7 @@ export default function Account() {
   const [submitting, setSubmitting] = useState(false);
 
   const displayName = currentUser?.nickname || currentUser?.name || "-";
-  const hasLocalPassword = !currentUser?.email?.toLowerCase().endsWith("@oauth.invalid");
+  const hasLocalPassword = currentUser?.hasLocalPassword ?? false;
   const roleLabel = t(getRoleLabel(currentUser?.role));
   const userGroupLabel = useMemo(() => {
     const group = currentUser?.userGroup;
@@ -443,12 +443,16 @@ export default function Account() {
                           {t("Change password")}
                         </Button>
                       ) : (
-                        <Button disabled icon={<IconLock />} theme="outline" type="tertiary">
-                          {t("Unavailable")}
-                        </Button>
+                        <Link
+                          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-[var(--semi-color-primary)] px-4 text-sm font-medium text-[var(--semi-color-primary)] transition-colors hover:bg-[var(--semi-color-primary-light-default)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--semi-color-primary)] focus-visible:ring-offset-2"
+                          to="/password-reset"
+                        >
+                          <IconLock aria-hidden="true" />
+                          {t("Set login password")}
+                        </Link>
                       )
                     }
-                    description={t(hasLocalPassword ? "Regularly changing your password improves account security." : "LinuxDO-only accounts do not use a local password.")}
+                    description={t(hasLocalPassword ? "Regularly changing your password improves account security." : "Set a password through email verification if you also want to sign in with email and password.")}
                     icon={<IconLock />}
                     iconTone="orange"
                     title={t("Password Management")}

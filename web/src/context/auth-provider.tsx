@@ -24,6 +24,7 @@ export interface CurrentUser {
   role: UserResponse["role"];
   userGroup: UserResponse["userGroup"];
   permissions: string[];
+  hasLocalPassword: boolean;
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
@@ -53,6 +54,7 @@ function toCurrentUser(user: UserResponse): CurrentUser {
     role: user.role,
     userGroup: user.userGroup,
     permissions: user.permissions ?? [],
+    hasLocalPassword: user.hasLocalPassword,
     enabled: user.enabled,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,

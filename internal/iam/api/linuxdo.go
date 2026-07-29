@@ -27,8 +27,11 @@ const (
 	linuxDOAuthorizeEndpoint = "https://connect.linux.do/oauth2/authorize"
 	linuxDOTokenEndpoint     = "https://connect.linux.do/oauth2/token"
 	linuxDOUserEndpoint      = "https://connect.linux.do/api/user"
+	linuxDOProvider          = "linuxdo"
 	linuxDOStateCookieName   = "linuxdo_oauth_state"
+	linuxDOPendingCookieName = "linuxdo_oauth_pending"
 	linuxDOCallbackPath      = "/v1/oauth/linuxdo/callback"
+	linuxDOPendingPath       = "/v1/oauth/linuxdo"
 	linuxDOIntentLogin       = "login"
 	linuxDOIntentBind        = "bind"
 	linuxDOFlowMaxAge        = 10 * time.Minute
@@ -142,7 +145,11 @@ func (h *IAMHandler) startLinuxDO(c *gin.Context, intent string) {
 	query.Set("code_challenge_method", "S256")
 	query.Set("redirect_uri", settings.CallbackURL)
 	query.Set("response_type", "code")
-	query.Set("scope", "user")
+	scope := "openid profile"
+	if intent == linuxDOIntentLogin {
+		scope += " email"
+	}
+	query.Set("scope", scope)
 	query.Set("state", state)
 	authorizeURL.RawQuery = query.Encode()
 	c.Redirect(http.StatusFound, authorizeURL.String())
@@ -237,7 +244,7 @@ func (h *IAMHandler) GetLinuxDOCallback(c *gin.Context) {
 		redirectLinuxDOError(c, intent, "failed")
 		return
 	}
-	result, err := h.module.LoginUseCase.LoginLinuxDO(c.Request.Context(), profile, app.LoginMeta{
+	result, pending, err := h.module.LoginUseCase.LoginLinuxDO(c.Request.Context(), profile, app.LoginMeta{
 		ClientIP:  c.ClientIP(),
 		UserAgent: c.Request.UserAgent(),
 	})
@@ -255,9 +262,181 @@ func (h *IAMHandler) GetLinuxDOCallback(c *gin.Context) {
 		}
 		return
 	}
-
+	if pending != nil {
+		if h.module.LinuxDOPendingStore == nil {
+			redirectLinuxDOError(c, intent, "failed")
+			return
+		}
+		token, err := newCSRFToken()
+		if err != nil {
+			slog.Error("generate linuxdo pending token", "request_id", middleware.GetRequestID(c), "error", err)
+			redirectLinuxDOError(c, intent, "failed")
+			return
+		}
+		if err := h.module.LinuxDOPendingStore.PutLinuxDOPending(c.Request.Context(), token, *pending, linuxDOFlowMaxAge); err != nil {
+			slog.Error("store linuxdo pending setup", "request_id", middleware.GetRequestID(c), "error", err)
+			redirectLinuxDOError(c, intent, "failed")
+			return
+		}
+		c.SetSameSite(http.SameSiteLaxMode)
+		c.SetCookie(linuxDOPendingCookieName, token, int(linuxDOFlowMaxAge.Seconds()), linuxDOPendingPath, "", h.sessionSecure, true)
+		c.Redirect(http.StatusSeeOther, "/login?oauth_setup=linuxdo")
+		return
+	}
+	if result == nil {
+		redirectLinuxDOError(c, intent, "failed")
+		return
+	}
 	setAuthCookies(c, result.Session.ID, csrfToken, result.SessionMaxAge, h.sessionSecure)
 	c.Redirect(http.StatusSeeOther, "/login")
+}
+
+func (h *IAMHandler) GetLinuxDOPending(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	_, pending, err := h.linuxDOPending(c)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, LinuxDOPendingResponse{
+		Provider:             linuxDOProvider,
+		ProviderUserID:       pending.Profile.ID,
+		Username:             linuxDOProfileName(pending.Profile),
+		SuggestedEmail:       pending.SuggestedEmail,
+		SuggestedEmailExists: pending.SuggestedEmailExists,
+		RegistrationEnabled:  pending.LegacyUserID != 0 || runtimeconfig.Bool("register_enabled", true),
+		LegacyAccount:        pending.LegacyUserID != 0,
+	})
+}
+
+func (h *IAMHandler) PostLinuxDOEmailCode(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	_, pending, err := h.linuxDOPending(c)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	var req LinuxDOEmailCodeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid request body.",
+			"fields":    validationErrors(err),
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+	if !h.verifyTurnstile(c, req.TurnstileToken, turnstileActionLinuxDOEmail) {
+		return
+	}
+	created, err := h.module.EmailCodeUseCase.RequestLinuxDO(c.Request.Context(), req.Email, pending.Profile.Email, req.Mode, pending.LegacyUserID != 0)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	if created && h.module.AbuseLimiter != nil {
+		if err := h.module.AbuseLimiter.ClearEmailCodeFailures(c.Request.Context(), req.Email); err != nil {
+			slog.Warn("clear linuxdo email code abuse limit", "request_id", middleware.GetRequestID(c), "error", err.Error())
+		}
+	}
+	c.Header("Retry-After", strconv.Itoa(app.EmailCodeResendGapSeconds()))
+	c.Status(http.StatusNoContent)
+}
+
+func (h *IAMHandler) PostLinuxDOComplete(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	token, pending, err := h.linuxDOPending(c)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	var req LinuxDOCompleteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid request body.",
+			"fields":    validationErrors(err),
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	clientIP := c.ClientIP()
+	csrfToken, err := newCSRFToken()
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	if h.module.AbuseLimiter != nil {
+		retryAfter, err := h.module.AbuseLimiter.TakeRegistration(c.Request.Context(), req.Email, clientIP)
+		if err != nil {
+			writeError(c, err)
+			return
+		}
+		if retryAfter > 0 {
+			writeTooManyRequests(c, retryAfter)
+			return
+		}
+	}
+	result, err := h.module.LoginUseCase.CompleteLinuxDO(c.Request.Context(), *pending, req.Mode, req.Email, req.Code, app.LoginMeta{
+		ClientIP:  clientIP,
+		UserAgent: c.Request.UserAgent(),
+	})
+	if err != nil {
+		if !errors.Is(err, domain.ErrVerificationCodeIncorrect) && h.module.AbuseLimiter != nil {
+			if limitErr := h.module.AbuseLimiter.CancelRegistration(c.Request.Context(), req.Email, clientIP); limitErr != nil {
+				writeError(c, limitErr)
+				return
+			}
+		}
+		writeError(c, err)
+		return
+	}
+	if h.module.AbuseLimiter != nil {
+		if err := h.module.AbuseLimiter.CompleteRegistration(c.Request.Context(), req.Email, clientIP); err != nil {
+			slog.Warn("clear linuxdo setup abuse limit", "request_id", middleware.GetRequestID(c), "error", err.Error())
+		}
+	}
+	if err := h.module.LinuxDOPendingStore.DeleteLinuxDOPending(c.Request.Context(), token); err != nil {
+		slog.Warn("delete linuxdo pending setup", "request_id", middleware.GetRequestID(c), "error", err.Error())
+	}
+	h.clearLinuxDOPendingCookie(c)
+	setAuthCookies(c, result.Session.ID, csrfToken, result.SessionMaxAge, h.sessionSecure)
+	c.JSON(http.StatusOK, LoginResponse{User: h.userResponseWithPermissions(c.Request.Context(), result.User)})
+}
+
+func (h *IAMHandler) linuxDOPending(c *gin.Context) (string, *app.LinuxDOPending, error) {
+	if h.module == nil || h.module.LinuxDOPendingStore == nil {
+		return "", nil, domain.ErrLinuxDOPendingExpired
+	}
+	token, err := c.Cookie(linuxDOPendingCookieName)
+	token = strings.TrimSpace(token)
+	if err != nil || token == "" || len(token) > 128 {
+		h.clearLinuxDOPendingCookie(c)
+		return "", nil, domain.ErrLinuxDOPendingExpired
+	}
+	pending, err := h.module.LinuxDOPendingStore.GetLinuxDOPending(c.Request.Context(), token)
+	if err != nil {
+		return "", nil, fmt.Errorf("get linuxdo pending setup: %w", err)
+	}
+	if pending == nil {
+		h.clearLinuxDOPendingCookie(c)
+		return "", nil, domain.ErrLinuxDOPendingExpired
+	}
+	return token, pending, nil
+}
+
+func (h *IAMHandler) clearLinuxDOPendingCookie(c *gin.Context) {
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(linuxDOPendingCookieName, "", -1, linuxDOPendingPath, "", h.sessionSecure, true)
+}
+
+func linuxDOProfileName(profile app.LinuxDOProfile) string {
+	if name := strings.TrimSpace(profile.Username); name != "" {
+		return name
+	}
+	if name := strings.TrimSpace(profile.Name); name != "" {
+		return name
+	}
+	return "LinuxDO User"
 }
 
 func (h *IAMHandler) clearLinuxDOFlowCookies(c *gin.Context) {
@@ -350,25 +529,52 @@ func (client *linuxDOClient) Exchange(ctx context.Context, code, codeVerifier st
 		return app.LinuxDOProfile{}, fmt.Errorf("linuxdo user status %d", response.StatusCode)
 	}
 	var user struct {
-		ID         uint64 `json:"id"`
-		Username   string `json:"username"`
-		Name       string `json:"name"`
-		Active     bool   `json:"active"`
-		Silenced   bool   `json:"silenced"`
-		TrustLevel int    `json:"trust_level"`
+		ID         json.RawMessage `json:"id"`
+		Sub        string          `json:"sub"`
+		Username   string          `json:"username"`
+		Name       string          `json:"name"`
+		Email      string          `json:"email"`
+		Active     bool            `json:"active"`
+		Silenced   bool            `json:"silenced"`
+		TrustLevel int             `json:"trust_level"`
 	}
 	if err := json.NewDecoder(io.LimitReader(response.Body, linuxDOMaxResponseBytes)).Decode(&user); err != nil {
 		return app.LinuxDOProfile{}, fmt.Errorf("decode linuxdo user: %w", err)
 	}
-	if user.ID == 0 {
+	linuxDOID, err := parseLinuxDOUserID(user.ID, user.Sub)
+	if err != nil {
 		return app.LinuxDOProfile{}, errors.New("linuxdo user id is empty")
 	}
 	return app.LinuxDOProfile{
-		ID:         strconv.FormatUint(user.ID, 10),
+		ID:         linuxDOID,
 		Username:   user.Username,
 		Name:       user.Name,
+		Email:      user.Email,
 		Active:     user.Active,
 		Silenced:   user.Silenced,
 		TrustLevel: user.TrustLevel,
 	}, nil
+}
+
+func parseLinuxDOUserID(raw json.RawMessage, sub string) (string, error) {
+	value := ""
+	if len(raw) > 0 && string(raw) != "null" {
+		var numeric uint64
+		if err := json.Unmarshal(raw, &numeric); err == nil && numeric > 0 {
+			value = strconv.FormatUint(numeric, 10)
+		} else {
+			var textID string
+			if err := json.Unmarshal(raw, &textID); err == nil {
+				value = strings.TrimSpace(textID)
+			}
+		}
+	}
+	if value == "" {
+		value = strings.TrimSpace(sub)
+	}
+	id, err := strconv.ParseUint(value, 10, 64)
+	if err != nil || id == 0 || strconv.FormatUint(id, 10) != value {
+		return "", domain.ErrLinuxDOAccountUnavailable
+	}
+	return value, nil
 }

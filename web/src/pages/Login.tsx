@@ -1,13 +1,23 @@
 import { Link, useNavigate } from "@tanstack/react-router";
+import { Button, Modal, Radio, RadioGroup } from "@douyinfe/semi-ui";
 import { Loader2 } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
+import { SendCodeField } from "@/components/auth/SendCodeField";
 import { TurnstileField } from "@/components/auth/TurnstileField";
 import { LinuxDoIcon } from "@/components/auth/LinuxDoIcon";
 import { useAuth } from "@/context/auth-provider";
 import { LOGIN_NOTICE_KEY, consumeLoginReturnTo } from "@/lib/auth-flow";
 import { getIamErrorMessage } from "@/lib/iam-errors";
-import { getLoginConfig, linuxDOLoginURL } from "@/lib/iam-api";
+import {
+  completeLinuxDO,
+  getLinuxDOPending,
+  getLoginConfig,
+  linuxDOLoginURL,
+  sendLinuxDOEmailCode,
+  type LinuxDOAccountMode,
+  type LinuxDOPendingResponse,
+} from "@/lib/iam-api";
 
 const linuxDOErrorKeys: Record<string, string> = {
   account: "LinuxDO account is unavailable.",
@@ -23,10 +33,21 @@ const linuxDOErrorKeys: Record<string, string> = {
 
 type LinuxDOConfigState = "loading" | "enabled" | "disabled" | "error";
 
+function removeSearchParam(name: string) {
+  const params = new URLSearchParams(window.location.search);
+  params.delete(name);
+  const search = params.toString();
+  window.history.replaceState(
+    {},
+    "",
+    window.location.pathname + (search ? `?${search}` : "") + window.location.hash
+  );
+}
+
 export default function Login() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { login, refreshCurrentUser } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [turnstileToken, setTurnstileToken] = useState("");
@@ -35,6 +56,14 @@ export default function Login() {
   const [notice, setNotice] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [linuxDOConfigState, setLinuxDOConfigState] = useState<LinuxDOConfigState>("loading");
+  const [linuxDOPending, setLinuxDOPending] = useState<LinuxDOPendingResponse | null>(null);
+  const [linuxDOPendingLoading, setLinuxDOPendingLoading] = useState(false);
+  const [linuxDOMode, setLinuxDOMode] = useState<LinuxDOAccountMode>("new");
+  const [linuxDOEmail, setLinuxDOEmail] = useState("");
+  const [linuxDOCode, setLinuxDOCode] = useState("");
+  const [linuxDOSetupError, setLinuxDOSetupError] = useState("");
+  const [linuxDOSetupNotice, setLinuxDOSetupNotice] = useState("");
+  const [linuxDOCompleting, setLinuxDOCompleting] = useState(false);
 
   useEffect(() => {
     const nextNotice = sessionStorage.getItem(LOGIN_NOTICE_KEY);
@@ -53,6 +82,40 @@ export default function Login() {
     }
 
     let cancelled = false;
+    if (params.get("oauth_setup") === "linuxdo") {
+      setLinuxDOPendingLoading(true);
+      void getLinuxDOPending()
+        .then((pending) => {
+          if (cancelled) return;
+          setLinuxDOPending(pending);
+          setLinuxDOMode(
+            pending.legacyAccount
+              ? "new"
+              : pending.suggestedEmailExists || !pending.registrationEnabled
+              ? "existing"
+              : "new"
+          );
+          setLinuxDOEmail(
+            pending.legacyAccount && pending.suggestedEmailExists
+              ? ""
+              : pending.suggestedEmail
+          );
+        })
+        .catch((nextError) => {
+          if (cancelled) return;
+          setError(
+            getIamErrorMessage(
+              t,
+              nextError,
+              "LinuxDO account setup expired. Please sign in with LinuxDO again."
+            )
+          );
+          removeSearchParam("oauth_setup");
+        })
+        .finally(() => {
+          if (!cancelled) setLinuxDOPendingLoading(false);
+        });
+    }
     void getLoginConfig()
       .then((config) => {
         if (!cancelled) setLinuxDOConfigState(config.linuxdoOAuthEnabled ? "enabled" : "disabled");
@@ -64,6 +127,43 @@ export default function Login() {
       cancelled = true;
     };
   }, [t]);
+
+  const closeLinuxDOSetup = () => {
+    setLinuxDOPending(null);
+    setLinuxDOCode("");
+    setLinuxDOSetupError("");
+    setLinuxDOSetupNotice("");
+    removeSearchParam("oauth_setup");
+  };
+
+  const handleLinuxDOComplete = async () => {
+    if (!linuxDOEmail.trim()) {
+      setLinuxDOSetupError(t("Please enter your email."));
+      return;
+    }
+    if (!linuxDOCode.trim()) {
+      setLinuxDOSetupError(t("Please enter the verification code."));
+      return;
+    }
+    setLinuxDOCompleting(true);
+    setLinuxDOSetupError("");
+    setLinuxDOSetupNotice("");
+    try {
+      await completeLinuxDO({
+        mode: linuxDOMode,
+        email: linuxDOEmail.trim(),
+        code: linuxDOCode.trim(),
+      });
+      await refreshCurrentUser();
+      void navigate({ to: consumeLoginReturnTo() as never, replace: true });
+    } catch (nextError) {
+      setLinuxDOSetupError(
+        getIamErrorMessage(t, nextError, "LinuxDO account setup failed.")
+      );
+    } finally {
+      setLinuxDOCompleting(false);
+    }
+  };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -103,6 +203,12 @@ export default function Login() {
         {notice ? (
           <div role="status" aria-live="polite" className="mb-4 rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300">
             {t(notice)}
+          </div>
+        ) : null}
+        {linuxDOPendingLoading ? (
+          <div role="status" aria-live="polite" className="mb-4 flex items-center gap-2 rounded-lg border border-[var(--divider)] px-3 py-2 text-sm text-[var(--ink-muted)]">
+            <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+            {t("Preparing LinuxDO account setup...")}
           </div>
         ) : null}
         {error ? (
@@ -181,6 +287,115 @@ export default function Login() {
           </div>
         </div>
       </div>
+
+      <Modal
+        centered
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button disabled={linuxDOCompleting} onClick={closeLinuxDOSetup} theme="light" type="tertiary">
+              {t("Cancel")}
+            </Button>
+            <Button loading={linuxDOCompleting} onClick={() => void handleLinuxDOComplete()} theme="solid" type="primary">
+              {t("Continue")}
+            </Button>
+          </div>
+        }
+        maskClosable={false}
+        onCancel={closeLinuxDOSetup}
+        title={t("Finish LinuxDO sign-in")}
+        visible={linuxDOPending !== null}
+        width="min(480px, calc(100vw - 32px))"
+      >
+        {linuxDOPending ? (
+          <div className="space-y-4 py-1">
+            <div className="rounded-lg bg-[var(--semi-color-fill-0)] px-3 py-2 text-sm text-[var(--semi-color-text-1)]">
+              <div className="font-medium text-[var(--semi-color-text-0)]">
+                {linuxDOPending.username}
+              </div>
+              <div className="mt-0.5 text-xs">LinuxDO ID: {linuxDOPending.providerUserId}</div>
+            </div>
+
+            <div>
+              <div className="mb-2 text-sm font-medium text-[var(--semi-color-text-0)]">
+                {t("Choose account ownership")}
+              </div>
+              <RadioGroup
+                type="button"
+                value={linuxDOMode}
+                onChange={(event) => {
+                  setLinuxDOMode(event.target.value as LinuxDOAccountMode);
+                  setLinuxDOCode("");
+                  setLinuxDOSetupError("");
+                  setLinuxDOSetupNotice("");
+                }}
+              >
+                <Radio disabled={linuxDOPending.legacyAccount} value="existing">
+                  {t("Bind existing account")}
+                </Radio>
+                <Radio
+                  disabled={!linuxDOPending.registrationEnabled && !linuxDOPending.legacyAccount}
+                  value="new"
+                >
+                  {t(linuxDOPending.legacyAccount ? "Upgrade current account" : "Create new account")}
+                </Radio>
+              </RadioGroup>
+              <p className="mt-2 text-xs leading-5 text-[var(--semi-color-text-2)]">
+                {t(
+                  linuxDOPending.legacyAccount
+                    ? "This legacy LinuxDO account already contains site data. Verify a new email to keep this account, balance, orders, and resources."
+                    : linuxDOMode === "existing"
+                    ? "Verify the email of your existing account. Its email and password will not be changed."
+                    : "Verify a receiving email to create an account. No password is set; use Forgot password later if needed."
+                )}
+              </p>
+            </div>
+
+            {linuxDOSetupNotice ? (
+              <div role="status" aria-live="polite" className="rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300">
+                {linuxDOSetupNotice}
+              </div>
+            ) : null}
+            {linuxDOSetupError ? (
+              <div role="alert" aria-live="assertive" className="rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:text-red-300">
+                {linuxDOSetupError}
+              </div>
+            ) : null}
+
+            <label htmlFor="linuxdo-account-email" className="block">
+              <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
+                {t("Email")}
+              </span>
+              <input
+                id="linuxdo-account-email"
+                autoComplete="email"
+                className="input-antd h-11 w-full"
+                disabled={linuxDOCompleting}
+                onChange={(event) => {
+                  setLinuxDOEmail(event.target.value);
+                  setLinuxDOCode("");
+                }}
+                placeholder={t("Email")}
+                required
+                type="email"
+                value={linuxDOEmail}
+              />
+            </label>
+
+            <SendCodeField
+              code={linuxDOCode}
+              disabled={linuxDOCompleting}
+              email={linuxDOEmail}
+              onCodeChange={setLinuxDOCode}
+              onError={setLinuxDOSetupError}
+              onNotice={setLinuxDOSetupNotice}
+              send={(payload) =>
+                sendLinuxDOEmailCode({ ...payload, mode: linuxDOMode })
+              }
+              turnstileAction="linuxdo_email_code"
+            />
+          </div>
+        ) : null}
+      </Modal>
     </div>
   );
 }

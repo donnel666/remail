@@ -1,6 +1,7 @@
 package app
 
 import (
+	"net/mail"
 	"strings"
 	"unicode"
 
@@ -12,6 +13,49 @@ const defaultRegistrationEmailWhitelist = "qq.com,foxmail.com,gmail.com,proton.m
 
 func normalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
+}
+
+func validateEmailAddress(email string) error {
+	normalized := normalizeEmail(email)
+	address, err := mail.ParseAddress(normalized)
+	if err != nil || address.Address == "" || !strings.EqualFold(address.Address, normalized) {
+		return domain.ErrInvalidEmailAddress
+	}
+	at := strings.LastIndex(normalized, "@")
+	if at <= 0 || at == len(normalized)-1 {
+		return domain.ErrInvalidEmailAddress
+	}
+	host := normalized[at+1:]
+	if !strings.Contains(host, ".") || strings.HasPrefix(host, ".") || strings.HasSuffix(host, ".") || strings.Contains(host, "..") {
+		return domain.ErrInvalidEmailAddress
+	}
+	if host == "invalid" || strings.HasSuffix(host, ".invalid") {
+		return domain.ErrInvalidEmailAddress
+	}
+	return nil
+}
+
+func trustedLinuxDOEmail(email string) string {
+	normalized := normalizeEmail(email)
+	if validateEmailAddress(normalized) != nil {
+		return ""
+	}
+	return normalized
+}
+
+func validateLinuxDOEmail(email, providerEmail string, mode LinuxDOAccountMode) error {
+	normalized := normalizeEmail(email)
+	switch mode {
+	case LinuxDOAccountExisting:
+		return validateEmailAddress(normalized)
+	case LinuxDOAccountNew:
+		if trusted := trustedLinuxDOEmail(providerEmail); trusted != "" && normalized == trusted {
+			return nil
+		}
+		return validateRegistrationEmail(normalized)
+	default:
+		return domain.ErrLinuxDOAccountModeInvalid
+	}
 }
 
 // validateRegistrationEmail enforces self-registration address rules:

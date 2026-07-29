@@ -226,6 +226,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/oauth/linuxdo/pending": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the pending Linux DO account ownership choice */
+        get: operations["getLinuxDOPending"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/oauth/linuxdo/email/code": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Send the email verification code for Linux DO account ownership */
+        post: operations["postLinuxDOEmailCode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/oauth/linuxdo/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Bind or create the verified local account and finish Linux DO login */
+        post: operations["postLinuxDOComplete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/login": {
         parameters: {
             query?: never;
@@ -4688,6 +4739,31 @@ export interface components {
             linuxdoOAuthEnabled: boolean;
             linuxdoBound: boolean;
         };
+        /** @enum {string} */
+        LinuxDOAccountMode: "existing" | "new";
+        LinuxDOPendingResponse: {
+            /** @enum {string} */
+            provider: "linuxdo";
+            providerUserId: string;
+            username: string;
+            suggestedEmail: string;
+            suggestedEmailExists: boolean;
+            registrationEnabled: boolean;
+            legacyAccount: boolean;
+        };
+        LinuxDOEmailCodeRequest: {
+            mode: components["schemas"]["LinuxDOAccountMode"];
+            /** Format: email */
+            email: string;
+            /** @description Required when runtime human verification is enabled */
+            turnstileToken?: string;
+        };
+        LinuxDOCompleteRequest: {
+            mode: components["schemas"]["LinuxDOAccountMode"];
+            /** Format: email */
+            email: string;
+            code: string;
+        };
         ChangePasswordRequest: {
             oldPassword: string;
             newPassword: string;
@@ -4712,6 +4788,8 @@ export interface components {
             role: "user" | "supplier" | "admin" | "super_admin";
             userGroup: components["schemas"]["UserGroupResponse"];
             permissions?: string[];
+            thirdPartyIdentities?: components["schemas"]["ThirdPartyIdentityResponse"][];
+            hasLocalPassword: boolean;
             enabled: boolean;
             /** Format: date-time */
             createdAt: string;
@@ -4719,6 +4797,12 @@ export interface components {
             updatedAt: string;
             /** Format: date-time */
             lastLoginAt?: string | null;
+        };
+        ThirdPartyIdentityResponse: {
+            provider: string;
+            providerUserId: string;
+            /** Format: date-time */
+            createdAt: string;
         };
         UserGroupResponse: {
             id: number;
@@ -7207,6 +7291,201 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    getLinuxDOPending: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Pending Linux DO profile and suggested account choice */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinuxDOPendingResponse"];
+                };
+            };
+            /** @description Pending setup expired or is unavailable */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Pending setup could not be loaded */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    postLinuxDOEmailCode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LinuxDOEmailCodeRequest"];
+            };
+        };
+        responses: {
+            /** @description Verification code sent */
+            204: {
+                headers: {
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Pending setup expired or is unavailable */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid email, account choice, or human verification */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Verification code request throttled */
+            429: {
+                headers: {
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Human verification or mail delivery is unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    postLinuxDOComplete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LinuxDOCompleteRequest"];
+            };
+        };
+        responses: {
+            /** @description Linux DO account ownership completed and session created */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Pending setup expired or is unavailable */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description New registration is disabled */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Email or third-party identity is already owned */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Email, account choice, account state, or verification code is invalid */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many verification attempts */
+            429: {
+                headers: {
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Account ownership could not be completed */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
             };
         };
     };

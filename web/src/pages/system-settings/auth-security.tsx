@@ -110,7 +110,7 @@ export default function AuthSecuritySection({ options, onBulkSave, canSensitive 
     <SettingsSection title={<SettingsCardHeader
       icon={<LinuxDoIcon className="size-4" />}
       title={t("LinuxDO third-party login")}
-      description={t("Configure LinuxDO Connect for user login and registration")}
+      description={t("Configure LinuxDO Connect for verified account login and binding")}
       enabled={!!form.linuxdo_oauth_enabled}
       onToggle={(value) => update("linuxdo_oauth_enabled", value)}
       statusText={form.linuxdo_oauth_enabled ? t("已启用") : t("已禁用")}

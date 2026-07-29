@@ -29,6 +29,7 @@ type UserRepository interface {
 	// cannot be reused after its local account is deleted.
 	FindByLinuxDOID(ctx context.Context, linuxDOID string) (*domain.User, error)
 	BindLinuxDOIdentity(ctx context.Context, userID uint, linuxDOID string) error
+	UpdateLinuxDOPlaceholder(ctx context.Context, legacyUserID uint, linuxDOID, email, passwordHash string) error
 	HasLinuxDOIdentity(ctx context.Context, userID uint) (bool, error)
 
 	// FindByID looks up a non-deleted user by primary key.
@@ -183,6 +184,12 @@ type LinuxDOFlow struct {
 	UserID       uint
 	SessionID    string
 	CodeVerifier string
+}
+
+type LinuxDOPendingStore interface {
+	PutLinuxDOPending(ctx context.Context, token string, pending LinuxDOPending, ttl time.Duration) error
+	GetLinuxDOPending(ctx context.Context, token string) (*LinuxDOPending, error)
+	DeleteLinuxDOPending(ctx context.Context, token string) error
 }
 
 // EmailCodeStore defines storage for email verification codes.

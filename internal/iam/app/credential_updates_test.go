@@ -55,11 +55,15 @@ func (credentialHasherStub) Verify(password, hash string) bool {
 
 type credentialSessionStoreStub struct {
 	SessionStore
-	created *domain.Session
-	deleted bool
+	created   *domain.Session
+	deleted   bool
+	createErr error
 }
 
 func (s *credentialSessionStoreStub) Create(_ context.Context, session *domain.Session, _ int) error {
+	if s.createErr != nil {
+		return s.createErr
+	}
 	cp := *session
 	s.created = &cp
 	return nil

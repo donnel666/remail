@@ -1579,6 +1579,39 @@ func (e InviteResponseKind) Valid() bool {
 	}
 }
 
+// Defines values for LinuxDOAccountMode.
+const (
+	Existing LinuxDOAccountMode = "existing"
+	New      LinuxDOAccountMode = "new"
+)
+
+// Valid indicates whether the value is a known member of the LinuxDOAccountMode enum.
+func (e LinuxDOAccountMode) Valid() bool {
+	switch e {
+	case Existing:
+		return true
+	case New:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LinuxDOPendingResponseProvider.
+const (
+	Linuxdo LinuxDOPendingResponseProvider = "linuxdo"
+)
+
+// Valid indicates whether the value is a known member of the LinuxDOPendingResponseProvider enum.
+func (e LinuxDOPendingResponseProvider) Valid() bool {
+	switch e {
+	case Linuxdo:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MonitoringMetricSeriesType.
 const (
 	Counter   MonitoringMetricSeriesType = "counter"
@@ -6021,6 +6054,39 @@ type InviteUseResponse struct {
 // LedgerAmount Signed internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the absolute value must fit DECIMAL(18,6).
 type LedgerAmount = string
 
+// LinuxDOAccountMode defines model for LinuxDOAccountMode.
+type LinuxDOAccountMode string
+
+// LinuxDOCompleteRequest defines model for LinuxDOCompleteRequest.
+type LinuxDOCompleteRequest struct {
+	Code  string              `json:"code"`
+	Email openapi_types.Email `json:"email"`
+	Mode  LinuxDOAccountMode  `json:"mode"`
+}
+
+// LinuxDOEmailCodeRequest defines model for LinuxDOEmailCodeRequest.
+type LinuxDOEmailCodeRequest struct {
+	Email openapi_types.Email `json:"email"`
+	Mode  LinuxDOAccountMode  `json:"mode"`
+
+	// TurnstileToken Required when runtime human verification is enabled
+	TurnstileToken *string `json:"turnstileToken,omitempty"`
+}
+
+// LinuxDOPendingResponse defines model for LinuxDOPendingResponse.
+type LinuxDOPendingResponse struct {
+	LegacyAccount        bool                           `json:"legacyAccount"`
+	Provider             LinuxDOPendingResponseProvider `json:"provider"`
+	ProviderUserId       string                         `json:"providerUserId"`
+	RegistrationEnabled  bool                           `json:"registrationEnabled"`
+	SuggestedEmail       string                         `json:"suggestedEmail"`
+	SuggestedEmailExists bool                           `json:"suggestedEmailExists"`
+	Username             string                         `json:"username"`
+}
+
+// LinuxDOPendingResponseProvider defines model for LinuxDOPendingResponse.Provider.
+type LinuxDOPendingResponseProvider string
+
 // LoginConfigResponse defines model for LoginConfigResponse.
 type LoginConfigResponse struct {
 	LinuxdoBound        bool `json:"linuxdoBound"`
@@ -7344,6 +7410,13 @@ type SystemNoticeResponse struct {
 	Notice string `json:"notice"`
 }
 
+// ThirdPartyIdentityResponse defines model for ThirdPartyIdentityResponse.
+type ThirdPartyIdentityResponse struct {
+	CreatedAt      time.Time `json:"createdAt"`
+	Provider       string    `json:"provider"`
+	ProviderUserId string    `json:"providerUserId"`
+}
+
 // TicketFacets defines model for TicketFacets.
 type TicketFacets struct {
 	Status     TicketStatusFacets `json:"status"`
@@ -7542,16 +7615,18 @@ type UserPermissionPoliciesResponse struct {
 
 // UserResponse defines model for UserResponse.
 type UserResponse struct {
-	CreatedAt   time.Time         `json:"createdAt"`
-	Email       string            `json:"email"`
-	Enabled     bool              `json:"enabled"`
-	Id          int               `json:"id"`
-	LastLoginAt *time.Time        `json:"lastLoginAt,omitempty"`
-	Nickname    string            `json:"nickname"`
-	Permissions *[]string         `json:"permissions,omitempty"`
-	Role        UserResponseRole  `json:"role"`
-	UpdatedAt   time.Time         `json:"updatedAt"`
-	UserGroup   UserGroupResponse `json:"userGroup"`
+	CreatedAt            time.Time                     `json:"createdAt"`
+	Email                string                        `json:"email"`
+	Enabled              bool                          `json:"enabled"`
+	HasLocalPassword     bool                          `json:"hasLocalPassword"`
+	Id                   int                           `json:"id"`
+	LastLoginAt          *time.Time                    `json:"lastLoginAt,omitempty"`
+	Nickname             string                        `json:"nickname"`
+	Permissions          *[]string                     `json:"permissions,omitempty"`
+	Role                 UserResponseRole              `json:"role"`
+	ThirdPartyIdentities *[]ThirdPartyIdentityResponse `json:"thirdPartyIdentities,omitempty"`
+	UpdatedAt            time.Time                     `json:"updatedAt"`
+	UserGroup            UserGroupResponse             `json:"userGroup"`
 }
 
 // UserResponseRole defines model for UserResponse.Role.
@@ -9597,6 +9672,12 @@ type PostEmailCodeJSONRequestBody = EmailCodeRequest
 // PostLoginJSONRequestBody defines body for PostLogin for application/json ContentType.
 type PostLoginJSONRequestBody = LoginRequest
 
+// PostLinuxDOCompleteJSONRequestBody defines body for PostLinuxDOComplete for application/json ContentType.
+type PostLinuxDOCompleteJSONRequestBody = LinuxDOCompleteRequest
+
+// PostLinuxDOEmailCodeJSONRequestBody defines body for PostLinuxDOEmailCode for application/json ContentType.
+type PostLinuxDOEmailCodeJSONRequestBody = LinuxDOEmailCodeRequest
+
 // PostOrderJSONRequestBody defines body for PostOrder for application/json ContentType.
 type PostOrderJSONRequestBody = CreateOrderRequest
 
@@ -10817,6 +10898,15 @@ type ServerInterface interface {
 	// Complete Linux DO OAuth login or binding
 	// (GET /v1/oauth/linuxdo/callback)
 	GetLinuxDOCallback(c *gin.Context, params GetLinuxDOCallbackParams)
+	// Bind or create the verified local account and finish Linux DO login
+	// (POST /v1/oauth/linuxdo/complete)
+	PostLinuxDOComplete(c *gin.Context)
+	// Send the email verification code for Linux DO account ownership
+	// (POST /v1/oauth/linuxdo/email/code)
+	PostLinuxDOEmailCode(c *gin.Context)
+	// Get the pending Linux DO account ownership choice
+	// (GET /v1/oauth/linuxdo/pending)
+	GetLinuxDOPending(c *gin.Context)
 	// List orders
 	// (GET /v1/orders)
 	GetOrders(c *gin.Context, params GetOrdersParams)
@@ -20550,6 +20640,45 @@ func (siw *ServerInterfaceWrapper) GetLinuxDOCallback(c *gin.Context) {
 	siw.Handler.GetLinuxDOCallback(c, params)
 }
 
+// PostLinuxDOComplete operation middleware
+func (siw *ServerInterfaceWrapper) PostLinuxDOComplete(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostLinuxDOComplete(c)
+}
+
+// PostLinuxDOEmailCode operation middleware
+func (siw *ServerInterfaceWrapper) PostLinuxDOEmailCode(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostLinuxDOEmailCode(c)
+}
+
+// GetLinuxDOPending operation middleware
+func (siw *ServerInterfaceWrapper) GetLinuxDOPending(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetLinuxDOPending(c)
+}
+
 // GetOrders operation middleware
 func (siw *ServerInterfaceWrapper) GetOrders(c *gin.Context) {
 
@@ -23215,6 +23344,9 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/oauth/linuxdo", wrapper.GetLinuxDOAuthorize)
 	router.GET(options.BaseURL+"/v1/oauth/linuxdo/bind", wrapper.GetLinuxDOBind)
 	router.GET(options.BaseURL+"/v1/oauth/linuxdo/callback", wrapper.GetLinuxDOCallback)
+	router.POST(options.BaseURL+"/v1/oauth/linuxdo/complete", wrapper.PostLinuxDOComplete)
+	router.POST(options.BaseURL+"/v1/oauth/linuxdo/email/code", wrapper.PostLinuxDOEmailCode)
+	router.GET(options.BaseURL+"/v1/oauth/linuxdo/pending", wrapper.GetLinuxDOPending)
 	router.GET(options.BaseURL+"/v1/orders", wrapper.GetOrders)
 	router.POST(options.BaseURL+"/v1/orders", wrapper.PostOrder)
 	router.POST(options.BaseURL+"/v1/orders/batch", wrapper.PostOrderBatch)

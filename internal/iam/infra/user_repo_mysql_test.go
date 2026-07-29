@@ -137,6 +137,22 @@ func TestUserRepoLinuxDOIdentityMySQL(t *testing.T) {
 	require.ErrorIs(t, repo.BindLinuxDOIdentity(context.Background(), user.ID, "99"), domain.ErrLinuxDOIdentityAlreadyBound)
 }
 
+func TestUserRepoMigratesLegacyLinuxDOPlaceholderMySQL(t *testing.T) {
+	db := newMySQLTestDB(t)
+	repo := NewUserRepo(db)
+	ctx := context.Background()
+
+	legacyForNew := &domain.User{Email: "linuxdo-42@oauth.invalid", PasswordHash: "legacy", Status: domain.UserStatusActive, Role: domain.RoleUser, UserGroupID: 1}
+	require.NoError(t, repo.CreateWithLinuxDOIdentity(ctx, legacyForNew, "42"))
+	require.NoError(t, repo.UpdateLinuxDOPlaceholder(ctx, legacyForNew.ID, "42", "verified@qq.com", "!oauth:marker"))
+	upgraded, err := repo.FindByLinuxDOID(ctx, "42")
+	require.NoError(t, err)
+	require.Equal(t, legacyForNew.ID, upgraded.ID)
+	require.Equal(t, "verified@qq.com", upgraded.Email)
+	require.Equal(t, "!oauth:marker", upgraded.PasswordHash)
+	require.Equal(t, 1, upgraded.TokenVersion)
+}
+
 func TestUserRepoBindLinuxDOIdentityConcurrentMySQL(t *testing.T) {
 	db := newMySQLTestDB(t)
 	repo := NewUserRepo(db)

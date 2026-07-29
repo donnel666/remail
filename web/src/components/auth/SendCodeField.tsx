@@ -104,11 +104,13 @@ export function SendCodeField({
       />
       <div className="grid grid-cols-[1fr_112px] gap-2">
         <input
+          aria-label={t("Verification code")}
+          disabled={disabled}
           type="text"
           value={code}
           onChange={(event) => onCodeChange(event.target.value)}
           placeholder={t("Verification code")}
-          className="input-antd min-w-0 w-full"
+          className="input-antd h-11 min-w-0 w-full"
           autoComplete="one-time-code"
           required
         />
@@ -116,7 +118,7 @@ export function SendCodeField({
           type="button"
           onClick={() => void handleRequestCode()}
           disabled={disabled || requesting || !turnstileToken || cooldown > 0}
-          className="flex h-9 w-28 items-center justify-center rounded-lg border border-[var(--divider)] px-3 text-sm font-medium text-[var(--ink-secondary)] transition-colors hover:bg-[var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-70"
+          className="flex h-11 w-28 items-center justify-center rounded-lg border border-[var(--divider)] px-3 text-sm font-medium text-[var(--ink-secondary)] transition-colors hover:bg-[var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-70"
         >
           {requesting ? (
             <Loader2 className="size-4 animate-spin" />

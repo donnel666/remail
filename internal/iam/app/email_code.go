@@ -50,8 +50,25 @@ func (uc *EmailCodeUseCase) Request(ctx context.Context, email string) (bool, er
 	if err := validateRegistrationEmail(normalized); err != nil {
 		return false, err
 	}
+	return uc.request(ctx, normalized, emailCodeKey(normalized))
+}
 
-	started, retryAfter, err := uc.store.StartCooldown(ctx, emailCodeKey(normalized), EmailCodeResendGapSeconds())
+func (uc *EmailCodeUseCase) RequestLinuxDO(ctx context.Context, email, providerEmail string, mode LinuxDOAccountMode, legacyAccount bool) (bool, error) {
+	normalized := normalizeEmail(email)
+	if err := validateLinuxDOEmail(normalized, providerEmail, mode); err != nil {
+		return false, err
+	}
+	if mode == LinuxDOAccountExisting && legacyAccount {
+		return false, domain.ErrLinuxDOLegacyMergeUnsupported
+	}
+	if mode == LinuxDOAccountNew && !legacyAccount && !runtimeconfig.Bool("register_enabled", true) {
+		return false, domain.ErrRegistrationDisabled
+	}
+	return uc.request(ctx, normalized, linuxDOEmailCodeKey(normalized))
+}
+
+func (uc *EmailCodeUseCase) request(ctx context.Context, normalized, key string) (bool, error) {
+	started, retryAfter, err := uc.store.StartCooldown(ctx, key, EmailCodeResendGapSeconds())
 	if err != nil {
 		return false, fmt.Errorf("email code cooldown: %w", err)
 	}
@@ -59,19 +76,22 @@ func (uc *EmailCodeUseCase) Request(ctx context.Context, email string) (bool, er
 		return false, &domain.EmailCodeThrottledError{RetryAfterSeconds: retryAfter}
 	}
 
-	return uc.deliver(ctx, normalized)
+	return uc.deliverKey(ctx, normalized, key)
 }
 
 // deliver stores and sends a code without touching the resend cooldown. Callers
 // that have already acquired the cooldown (e.g. password reset, which must
 // throttle registered and unknown emails identically) use this directly.
 func (uc *EmailCodeUseCase) deliver(ctx context.Context, normalizedEmail string) (bool, error) {
+	return uc.deliverKey(ctx, normalizedEmail, emailCodeKey(normalizedEmail))
+}
+
+func (uc *EmailCodeUseCase) deliverKey(ctx context.Context, normalizedEmail, key string) (bool, error) {
 	code, err := generateRandomDigits(runtimeconfig.Int("email_code_digit_len", emailCodeDigitLen, 1))
 	if err != nil {
 		return false, fmt.Errorf("generate email code: %w", err)
 	}
 
-	key := emailCodeKey(normalizedEmail)
 	// Reuse a still-valid code so a resend re-delivers the same digits.
 	storedCode, reused, err := uc.store.CreateIfAbsent(ctx, key, code, runtimeconfig.Int("email_code_ttl_seconds", emailCodeTTL, 1))
 	if err != nil {
@@ -109,4 +129,8 @@ func (uc *EmailCodeUseCase) createDummy(ctx context.Context, normalizedEmail str
 func emailCodeKey(email string) string {
 	sum := sha256.Sum256([]byte(email))
 	return hex.EncodeToString(sum[:])
+}
+
+func linuxDOEmailCodeKey(email string) string {
+	return "linuxdo:" + emailCodeKey(email)
 }

@@ -57,6 +57,7 @@ type IAMModule struct {
 	// the batch user-summary lookups (e.g. billing's wallet directory).
 	Users                      *infra.UserRepo
 	SessionStore               app.SessionStore
+	LinuxDOPendingStore        app.LinuxDOPendingStore
 	EmailCodeStore             app.EmailCodeStore
 	AbuseLimiter               abuseLimiter
 	TurnstileVerifier          turnstileVerifier
@@ -84,11 +85,13 @@ func NewIAMModule(db *gorm.DB, rdb redis.UniversalClient, mailDelivery mailapp.D
 	supplierApplicationRepo := infra.NewSupplierApplicationRepo(db)
 
 	emailCodeUseCase := app.NewEmailCodeUseCase(emailCodeStore, mailDelivery)
+	loginUseCase := app.NewLoginUseCase(userRepo, hasher, sessionStore, mailDelivery)
+	loginUseCase.SetEmailCodeStore(emailCodeStore)
 
 	return &IAMModule{
 		ActivationUseCase:          app.NewActivationUseCase(userRepo, hasher),
 		RegistrationUseCase:        app.NewRegistrationUseCase(userRepo, hasher, emailCodeStore),
-		LoginUseCase:               app.NewLoginUseCase(userRepo, hasher, sessionStore, mailDelivery),
+		LoginUseCase:               loginUseCase,
 		SessionUseCase:             app.NewSessionUseCase(sessionStore, userRepo),
 		ChangePasswordUseCase:      app.NewChangePasswordUseCase(userRepo, hasher, sessionStore),
 		PasswordResetUseCase:       app.NewPasswordResetUseCase(userRepo, hasher, sessionStore, emailCodeStore, emailCodeUseCase),
@@ -101,6 +104,7 @@ func NewIAMModule(db *gorm.DB, rdb redis.UniversalClient, mailDelivery mailapp.D
 		UserRepo:                   userRepo,
 		Users:                      userRepo,
 		SessionStore:               sessionStore,
+		LinuxDOPendingStore:        sessionStore,
 		EmailCodeStore:             emailCodeStore,
 		AbuseLimiter:               infra.NewAbuseLimiter(rdb),
 		TurnstileVerifier:          infra.NewTurnstileVerifier(turnstileSecretKey),

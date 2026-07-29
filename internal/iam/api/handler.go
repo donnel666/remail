@@ -73,6 +73,7 @@ const (
 	turnstileActionLogin         = "login"
 	turnstileActionRegister      = "register_email_code"
 	turnstileActionPasswordReset = "password_reset_code"
+	turnstileActionLinuxDOEmail  = "linuxdo_email_code"
 )
 
 // GET /v1/turnstile/config
@@ -1544,6 +1545,51 @@ func writeError(c *gin.Context, err error) {
 	case errors.Is(err, domain.ErrRegistrationEmailDomainBlocked):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
 			"message":   "Registration with this email domain is not allowed.",
+			"requestId": rid,
+		})
+	case errors.Is(err, domain.ErrInvalidEmailAddress):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message":   "Please enter a valid email address.",
+			"requestId": rid,
+		})
+	case errors.Is(err, domain.ErrLinuxDOPendingExpired):
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"message":   "LinuxDO account setup expired. Please sign in with LinuxDO again.",
+			"requestId": rid,
+		})
+	case errors.Is(err, domain.ErrLinuxDOExistingAccountNotFound):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message":   "No existing account uses this email. Choose Create new account instead.",
+			"requestId": rid,
+		})
+	case errors.Is(err, domain.ErrLinuxDONewEmailAlreadyExists):
+		c.JSON(http.StatusConflict, gin.H{
+			"message":   "This email already has an account. Choose Bind existing account instead.",
+			"requestId": rid,
+		})
+	case errors.Is(err, domain.ErrLinuxDOIdentityAlreadyBound):
+		c.JSON(http.StatusConflict, gin.H{
+			"message":   "This LinuxDO account is already bound to another account.",
+			"requestId": rid,
+		})
+	case errors.Is(err, domain.ErrLinuxDOAccountModeInvalid):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message":   "Choose whether to bind an existing account or create a new account.",
+			"requestId": rid,
+		})
+	case errors.Is(err, domain.ErrLinuxDOLegacyMergeUnsupported):
+		c.JSON(http.StatusConflict, gin.H{
+			"message":   "This legacy LinuxDO account already owns site data and cannot be merged automatically. Verify a new email to keep and upgrade this account.",
+			"requestId": rid,
+		})
+	case errors.Is(err, domain.ErrLinuxDOAccountUnavailable):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message":   "LinuxDO account is unavailable.",
+			"requestId": rid,
+		})
+	case errors.Is(err, domain.ErrLinuxDOTrustLevelTooLow):
+		c.JSON(http.StatusForbidden, gin.H{
+			"message":   "Your LinuxDO trust level is too low.",
 			"requestId": rid,
 		})
 	case errors.Is(err, domain.ErrAccountOrPasswordIncorrect):

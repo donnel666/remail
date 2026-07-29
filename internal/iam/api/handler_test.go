@@ -233,6 +233,9 @@ func (r *mockUserRepo) CreateWithLinuxDOIdentity(_ context.Context, user *domain
 		return err
 	}
 	r.byLinuxDO[linuxDOID] = user.ID
+	user.ThirdPartyIdentities = append(user.ThirdPartyIdentities, domain.ThirdPartyIdentity{
+		UserID: user.ID, Provider: linuxDOProvider, ProviderUserID: linuxDOID, CreatedAt: time.Now(),
+	})
 	return nil
 }
 
@@ -299,6 +302,27 @@ func (r *mockUserRepo) BindLinuxDOIdentity(_ context.Context, userID uint, linux
 		}
 	}
 	r.byLinuxDO[linuxDOID] = userID
+	user.ThirdPartyIdentities = append(user.ThirdPartyIdentities, domain.ThirdPartyIdentity{
+		UserID: userID, Provider: linuxDOProvider, ProviderUserID: linuxDOID, CreatedAt: time.Now(),
+	})
+	return nil
+}
+
+func (r *mockUserRepo) UpdateLinuxDOPlaceholder(_ context.Context, legacyUserID uint, linuxDOID, email, passwordHash string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	user := r.users[legacyUserID]
+	if user == nil || r.byLinuxDO[linuxDOID] != legacyUserID || !strings.HasSuffix(strings.ToLower(user.Email), "@oauth.invalid") {
+		return domain.ErrLinuxDOAccountUnavailable
+	}
+	if existingID, ok := r.byID[email]; ok && existingID != legacyUserID {
+		return domain.ErrEmailAlreadyExists
+	}
+	delete(r.byID, user.Email)
+	user.Email = strings.ToLower(strings.TrimSpace(email))
+	user.PasswordHash = passwordHash
+	user.TokenVersion++
+	r.byID[user.Email] = user.ID
 	return nil
 }
 
@@ -1035,6 +1059,7 @@ type mockSessionStore struct {
 	sessions          map[string]*domain.Session
 	byUser            map[uint][]string
 	linuxDOFlows      map[string]app.LinuxDOFlow
+	linuxDOPending    map[string]app.LinuxDOPending
 	getErr            error
 	deleteErr         error
 	deleteByUserIDErr error
@@ -1042,9 +1067,10 @@ type mockSessionStore struct {
 
 func newMockSessionStore() *mockSessionStore {
 	return &mockSessionStore{
-		sessions:     make(map[string]*domain.Session),
-		byUser:       make(map[uint][]string),
-		linuxDOFlows: make(map[string]app.LinuxDOFlow),
+		sessions:       make(map[string]*domain.Session),
+		byUser:         make(map[uint][]string),
+		linuxDOFlows:   make(map[string]app.LinuxDOFlow),
+		linuxDOPending: make(map[string]app.LinuxDOPending),
 	}
 }
 
@@ -1122,6 +1148,30 @@ func (s *mockSessionStore) ConsumeLinuxDOFlow(_ context.Context, state string) (
 	}
 	delete(s.linuxDOFlows, state)
 	return &flow, nil
+}
+
+func (s *mockSessionStore) PutLinuxDOPending(_ context.Context, token string, pending app.LinuxDOPending, _ time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.linuxDOPending[token] = pending
+	return nil
+}
+
+func (s *mockSessionStore) GetLinuxDOPending(_ context.Context, token string) (*app.LinuxDOPending, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pending, ok := s.linuxDOPending[token]
+	if !ok {
+		return nil, nil
+	}
+	return &pending, nil
+}
+
+func (s *mockSessionStore) DeleteLinuxDOPending(_ context.Context, token string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.linuxDOPending, token)
+	return nil
 }
 
 type mockTurnstileVerifier struct {
@@ -1297,10 +1347,12 @@ func newTestHandler() *IAMHandler {
 	hasher := infra.NewHasher()
 	emailCodeUseCase := app.NewEmailCodeUseCase(emailCodeStore, mockMailDelivery{})
 
+	loginUseCase := app.NewLoginUseCase(userRepo, hasher, sessionStore)
+	loginUseCase.SetEmailCodeStore(emailCodeStore)
 	mod := &IAMModule{
 		ActivationUseCase:          app.NewActivationUseCase(userRepo, hasher),
 		RegistrationUseCase:        app.NewRegistrationUseCase(userRepo, hasher, emailCodeStore),
-		LoginUseCase:               app.NewLoginUseCase(userRepo, hasher, sessionStore),
+		LoginUseCase:               loginUseCase,
 		SessionUseCase:             app.NewSessionUseCase(sessionStore, userRepo),
 		ChangePasswordUseCase:      app.NewChangePasswordUseCase(userRepo, hasher, sessionStore),
 		PasswordResetUseCase:       app.NewPasswordResetUseCase(userRepo, hasher, sessionStore, emailCodeStore, emailCodeUseCase),
@@ -1311,6 +1363,7 @@ func newTestHandler() *IAMHandler {
 		PermissionChecker:          allowPermissionChecker{},
 		UserRepo:                   userRepo,
 		SessionStore:               sessionStore,
+		LinuxDOPendingStore:        sessionStore,
 		EmailCodeStore:             emailCodeStore,
 		TurnstileVerifier:          &mockTurnstileVerifier{},
 		TurnstileSiteKey:           "test-site-key",
@@ -2058,6 +2111,22 @@ func TestAdminUsers_IDsFilter(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assert.NotContains(t, w.Body.String(), alpha.Email)
 	assert.Contains(t, w.Body.String(), beta.Email)
+}
+
+func TestAdminUsersIncludesThirdPartyLoginBindings(t *testing.T) {
+	h := newTestHandler()
+	r := setupTestRouterWithHandler(h)
+	seedAdminSession(t, h, "admin-session")
+	target := seedUser(t, h, "bound@example.com")
+	require.NoError(t, testRepo(h).BindLinuxDOIdentity(context.Background(), target.ID, "96729"))
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/v1/admin/users?ids=%d", target.ID), nil)
+	addAuthenticatedRequest(req, "admin-session")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), `"thirdPartyIdentities":[{"provider":"linuxdo","providerUserId":"96729"`)
 }
 
 func TestPatchAdminUserWritesOperationLog(t *testing.T) {
