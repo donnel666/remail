@@ -329,7 +329,7 @@ func loadSMTPConfig() SMTPConfig {
 		InboundWriteTimeout:    getDuration("SMTP_INBOUND_WRITE_TIMEOUT", 30*time.Second),
 		TicketMailFrom:         getEnv("SMTP_TICKET_MAIL_FROM", getEnv("SMTP_FROM", "no-reply@aishop6.com")),
 		TicketReplyLocalPart:   getEnv("SMTP_TICKET_REPLY_LOCAL", "support"),
-		TicketReplyDomain:      getEnv("SMTP_TICKET_REPLY_DOMAIN", getEnv("SMTP_INBOUND_DOMAIN", heloDomain)),
+		TicketReplyDomain:      getEnv("SMTP_TICKET_REPLY_DOMAIN", getEnv("SMTP_DOMAIN", "aishop6.com")),
 	}
 }
 
