@@ -118,6 +118,7 @@ type FetchedMessage struct {
 	ResourceType      domain.ResourceType
 	Recipient         string
 	Recipients        []string
+	ToRecipients      []string
 	Sender            string
 	Subject           string
 	Body              string

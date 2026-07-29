@@ -1401,10 +1401,22 @@ func TestHistoricalMessageMatchesProjectWithoutVerificationCode(t *testing.T) {
 	}
 
 	require.True(t, historicalMessageMatchesProject(message, "main@example.com", scope))
-	require.Equal(t, []string{"main@example.com"}, historicalRecipientCandidates("main@example.com", []string{
+	multipleRecipients := message
+	multipleRecipients.Recipients = []string{"main@example.com", "coworker@another-domain.test"}
+	require.False(t, historicalMessageMatchesProject(multipleRecipients, "main@example.com", scope))
+	historical := historicalMessagesFromFetched([]FetchedMessage{
+		{
+			Recipients:   []string{"main@example.com", "copied@example.com"},
+			ToRecipients: []string{"main@example.com"},
+		},
+		{Recipients: []string{"cc-only@example.com"}},
+	})
+	require.Equal(t, []string{"main@example.com"}, historical[0].Recipients)
+	require.Empty(t, historical[1].Recipients, "history matching must never fall back to To/Cc/Bcc recipients")
+	require.Empty(t, historicalRecipientCandidates([]string{
 		"main@example.com", "coworker@another-domain.test",
 	}))
-	require.Equal(t, []string{"custom-alias@example.com"}, historicalRecipientCandidates("main@example.com", []string{
+	require.Equal(t, []string{"custom-alias@example.com"}, historicalRecipientCandidates([]string{
 		"custom-alias@example.com",
 	}))
 	require.Equal(t, "plus", historicalRecipientKind("main@example.com", "main+github@example.com"))

@@ -44,3 +44,24 @@ func TestPickupRequestQueueSnapshotsExpiration(t *testing.T) {
 	runtimeconfig.Set("pickup_request_fetch_timeout_minutes", "1")
 	require.Equal(t, requestedAt.Add(3*time.Minute), payload.EffectiveExpiresAt())
 }
+
+func TestValidatedHistoryQueueRetriesThreeTimes(t *testing.T) {
+	server := miniredis.RunT(t)
+	options := asynq.RedisClientOpt{Addr: server.Addr()}
+	client := asynq.NewClient(options)
+	inspector := asynq.NewInspector(options)
+	t.Cleanup(func() {
+		require.NoError(t, inspector.Close())
+		require.NoError(t, client.Close())
+	})
+
+	require.NoError(t, NewFetchQueue(client).EnqueueValidatedMicrosoftHistoryScan(
+		context.Background(),
+		mailmatchapp.ValidatedMicrosoftHistoryScanTask{ResourceID: 1},
+	))
+	pending, err := inspector.ListPendingTasks(platform.QueueBackgroundProjectHistory)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	require.Equal(t, 3, ValidatedHistoryTaskMaxRetry)
+	require.Equal(t, ValidatedHistoryTaskMaxRetry, pending[0].MaxRetry)
+}

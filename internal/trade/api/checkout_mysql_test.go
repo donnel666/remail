@@ -269,6 +269,30 @@ func TestImportHistoricalMicrosoftUsageUsesExistingOrderAllocationAndWalletFacts
 	require.Zero(t, rolledBackAliases)
 }
 
+func TestHistoricalImportCommitsSingleEvidenceAliasMySQL(t *testing.T) {
+	db := newTradeMySQLTestDB(t)
+	seedTradeBase(t, db, "microsoft")
+	seedTradeMicrosoftResources(t, db, 1, 1000, 1, true)
+	matchedAt := time.Now().UTC().Add(-time.Hour)
+	uc := newTradeUseCase(db)
+
+	require.NoError(t, uc.ImportHistoricalMicrosoftUsage(context.Background(), []tradeapp.HistoricalMicrosoftUsage{{
+		ResourceID: 1000, ProjectID: 10, ProductID: 20, Mailbox: "alias", Email: "single-recipient@outlook.com",
+		FirstMatchedAt: matchedAt, LastMatchedAt: matchedAt, EvidenceCount: 1,
+	}}))
+
+	var aliases, historicalAllocations, historicalOrders int64
+	require.NoError(t, db.Table("explicit_aliases").
+		Where("resource_id = ? AND email = ?", 1000, "single-recipient@outlook.com").Count(&aliases).Error)
+	require.EqualValues(t, 1, aliases)
+	require.NoError(t, db.Table("microsoft_allocations").
+		Where("order_no LIKE 'HIST-%' AND mailbox = ? AND email = ?", "alias", "single-recipient@outlook.com").
+		Count(&historicalAllocations).Error)
+	require.EqualValues(t, 1, historicalAllocations)
+	require.NoError(t, db.Table("orders").Where("order_no LIKE 'HIST-%'").Count(&historicalOrders).Error)
+	require.EqualValues(t, 1, historicalOrders)
+}
+
 func TestCreateHistoricalOrderConflictStopsOuterTransactionMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	seedTradeBase(t, db, "microsoft")

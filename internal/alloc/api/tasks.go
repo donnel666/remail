@@ -149,18 +149,13 @@ func startAllocationTaskSeedersWithInventoryInterval(module *Module, candidateIn
 	go func() {
 		defer close(done)
 		candidateTicker := time.NewTicker(candidateInterval)
-		lastInventory := time.Now()
 		if err := module.UseCase.ScheduleInventoryRefresh(ctx); err != nil {
 			slog.Warn("enqueue initial inventory cache refresh failed", "error", err)
 		}
-		nextInventoryDelay := func() time.Duration {
-			delay := time.Until(lastInventory.Add(inventoryInterval()))
-			if delay <= 0 {
-				return time.Millisecond
-			}
-			return min(delay, time.Minute)
+		inventoryPollInterval := func() time.Duration {
+			return min(inventoryInterval(), time.Minute)
 		}
-		inventoryTimer := time.NewTimer(nextInventoryDelay())
+		inventoryTimer := time.NewTimer(inventoryPollInterval())
 		defer candidateTicker.Stop()
 		defer inventoryTimer.Stop()
 		for {
@@ -170,13 +165,10 @@ func startAllocationTaskSeedersWithInventoryInterval(module *Module, candidateIn
 			case <-candidateTicker.C:
 				module.UseCase.ScheduleCandidateRefreshDispatcher(ctx, 0)
 			case <-inventoryTimer.C:
-				if time.Since(lastInventory) >= inventoryInterval() {
-					if err := module.UseCase.ScheduleInventoryRefresh(ctx); err != nil {
-						slog.Warn("enqueue inventory cache refresh failed", "error", err)
-					}
-					lastInventory = time.Now()
+				if err := module.UseCase.ScheduleInventoryRefresh(ctx); err != nil {
+					slog.Warn("enqueue inventory cache refresh failed", "error", err)
 				}
-				inventoryTimer.Reset(nextInventoryDelay())
+				inventoryTimer.Reset(inventoryPollInterval())
 			}
 		}
 	}()

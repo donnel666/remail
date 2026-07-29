@@ -242,7 +242,8 @@ func TestProjectHistoryProcessCompletesCurrentGeneration(t *testing.T) {
 	}, events: &events}
 	transport := &projectHistoryTransportStub{result: &FetchMessagesResult{RefreshToken: "rotated"}, pages: [][]FetchedMessage{{{
 		EmailResourceID: 10, ResourceType: domain.ResourceTypeMicrosoft, Folder: "Inbox",
-		Recipients: []string{"main@example.com"}, Sender: "noreply@github.com", ReceivedAt: now,
+		Recipients: []string{"main@example.com"}, ToRecipients: []string{"main@example.com"},
+		Sender: "noreply@github.com", ReceivedAt: now,
 	}}}}
 	history := &projectHistoryUsageStub{events: &events}
 	queue := &projectHistoryQueueStub{accepted: true}
@@ -310,7 +311,8 @@ func TestValidatedMicrosoftHistoryPromotesIdentifyingResourceAfterImport(t *test
 	credentials := &projectHistoryCredentialsStub{resources: []*coreapp.MicrosoftCredentialScope{resource}}
 	transport := &projectHistoryTransportStub{result: &FetchMessagesResult{RefreshToken: "rotated"}, pages: [][]FetchedMessage{{{
 		EmailResourceID: 10, ResourceType: domain.ResourceTypeMicrosoft, Folder: "Inbox",
-		Recipients: []string{"main@example.com"}, Sender: "noreply@github.com", ReceivedAt: now,
+		Recipients: []string{"main@example.com"}, ToRecipients: []string{"main@example.com"},
+		Sender: "noreply@github.com", ReceivedAt: now,
 	}}}}
 	history := &projectHistoryUsageStub{}
 	uc := NewProjectHistoryScanUseCase(nil, matches, &projectHistoryQueueStub{}, transport)

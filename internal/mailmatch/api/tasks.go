@@ -181,6 +181,9 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) {
 					"error", err,
 				)
 			}
+			if retried, ok := asynq.GetRetryCount(ctx); ok {
+				return capValidatedMicrosoftHistoryRetry(retried, err)
+			}
 			return err
 		}
 		return nil
@@ -196,6 +199,13 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) {
 		}
 		return nil
 	})
+}
+
+func capValidatedMicrosoftHistoryRetry(retried int, err error) error {
+	if err == nil || retried < mailmatchinfra.ValidatedHistoryTaskMaxRetry || errors.Is(err, platform.ErrBackgroundExecutionDeferred) {
+		return err
+	}
+	return fmt.Errorf("validated microsoft history scan retry limit reached: %w: %w", err, asynq.SkipRetry)
 }
 
 func processPickupRequestFetchTask(ctx context.Context, task *asynq.Task, module *Module) error {

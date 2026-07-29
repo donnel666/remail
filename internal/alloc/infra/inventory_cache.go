@@ -15,6 +15,8 @@ import (
 
 const (
 	inventoryCacheKeyPrefix = "alloc:inventory:v5:"
+	// The Redis name is retained for compatibility; scores are backend-owned
+	// next-refresh times, not client activity times.
 	inventoryCacheActiveKey = "alloc:inventory:v5:active"
 )
 
@@ -93,8 +95,8 @@ func (c *InventoryCache) GetProductInventorySnapshots(ctx context.Context, proje
 		}
 	}
 	if len(loadedKeys) > 0 {
-		if err := c.redis.ZAdd(ctx, inventoryCacheActiveKey, loadedKeys...).Err(); err != nil {
-			return nil, fmt.Errorf("touch product inventory snapshots: %w", err)
+		if err := c.redis.ZAddArgs(ctx, inventoryCacheActiveKey, redis.ZAddArgs{NX: true, Members: loadedKeys}).Err(); err != nil {
+			return nil, fmt.Errorf("schedule product inventory snapshots: %w", err)
 		}
 	}
 	return result, nil
@@ -124,7 +126,7 @@ func (c *InventoryCache) InitializeInventory(ctx context.Context, entries []allo
 			}
 			key := inventoryCacheKey(entry.Kind, entry.ProjectID)
 			pipe.SetNX(ctx, key, payload, ttl)
-			pipe.ZAdd(ctx, inventoryCacheActiveKey, redis.Z{Score: now, Member: key})
+			pipe.ZAddArgs(ctx, inventoryCacheActiveKey, redis.ZAddArgs{NX: true, Members: []redis.Z{{Score: now, Member: key}}})
 		}
 		return nil
 	})
@@ -333,22 +335,19 @@ func markProductUnavailable(totals *allocapp.ProjectProductInventoryTotals, req 
 	return true
 }
 
-func (c *InventoryCache) ClaimActiveInventory(ctx context.Context, since time.Time, before time.Time, limit int) ([]allocapp.InventoryCacheEntry, error) {
+func (c *InventoryCache) ClaimDueInventory(ctx context.Context, before time.Time, limit int) ([]allocapp.InventoryCacheEntry, error) {
 	if limit <= 0 {
 		return nil, nil
 	}
 	if before.IsZero() {
 		before = time.Now()
 	}
-	minimum := strconv.FormatInt(since.UnixMilli(), 10)
 	items, err := claimActiveInventoryScript.Run(ctx, c.redis, []string{inventoryCacheActiveKey},
-		"("+minimum,
-		minimum,
 		strconv.FormatInt(before.UnixMilli(), 10),
 		limit,
 	).StringSlice()
 	if err != nil {
-		return nil, fmt.Errorf("claim active inventory cache keys: %w", err)
+		return nil, fmt.Errorf("claim due inventory cache keys: %w", err)
 	}
 	entries := make([]allocapp.InventoryCacheEntry, 0, len(items))
 	for _, item := range items {
@@ -425,8 +424,9 @@ func loadInventoryCache[T any](ctx context.Context, client redis.UniversalClient
 	if err := json.Unmarshal(payload, &value); err != nil {
 		return nil, fmt.Errorf("decode %s: %w", key, err)
 	}
-	if err := client.ZAdd(ctx, inventoryCacheActiveKey, redis.Z{Score: float64(time.Now().UnixMilli()), Member: key}).Err(); err != nil {
-		return nil, fmt.Errorf("touch %s: %w", key, err)
+	member := redis.Z{Score: float64(time.Now().UnixMilli()), Member: key}
+	if err := client.ZAddArgs(ctx, inventoryCacheActiveKey, redis.ZAddArgs{NX: true, Members: []redis.Z{member}}).Err(); err != nil {
+		return nil, fmt.Errorf("schedule %s: %w", key, err)
 	}
 	return &value, nil
 }
@@ -452,7 +452,13 @@ func refreshInventoryCache(ctx context.Context, client redis.UniversalClient, ke
 	if err != nil {
 		return fmt.Errorf("encode %s: %w", key, err)
 	}
-	if err := client.Set(ctx, key, payload, ttl).Err(); err != nil {
+	nextRefresh := float64(time.Now().Add(allocapp.InventoryRefreshIntervalValue()).UnixMilli())
+	_, err = client.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+		pipe.Set(ctx, key, payload, ttl)
+		pipe.ZAdd(ctx, inventoryCacheActiveKey, redis.Z{Score: nextRefresh, Member: key})
+		return nil
+	})
+	if err != nil {
 		return fmt.Errorf("refresh %s: %w", key, err)
 	}
 	return nil
@@ -490,8 +496,7 @@ return redis.call("DEL", KEYS[1])
 `)
 
 var claimActiveInventoryScript = redis.NewScript(`
-redis.call("ZREMRANGEBYSCORE", KEYS[1], "-inf", ARGV[1])
-local entries = redis.call("ZRANGEBYSCORE", KEYS[1], ARGV[2], ARGV[3], "LIMIT", 0, ARGV[4])
+local entries = redis.call("ZRANGEBYSCORE", KEYS[1], "-inf", ARGV[1], "LIMIT", 0, ARGV[2])
 if #entries > 0 then
   redis.call("ZREM", KEYS[1], unpack(entries))
 end

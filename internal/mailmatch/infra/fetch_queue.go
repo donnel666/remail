@@ -28,7 +28,7 @@ const (
 	resourceFetchTaskMaxRetry     = 3
 	mailmatchFetchTaskTimeout     = 20 * time.Minute
 	mailmatchDispatchTaskTimeout  = 30 * time.Second
-	validatedHistoryTaskMaxRetry  = 20
+	ValidatedHistoryTaskMaxRetry  = 3
 	projectHistoryTaskTimeout     = 20 * time.Minute
 	projectHistoryDispatchTimeout = 30 * time.Second
 
@@ -144,7 +144,7 @@ func (q *FetchQueue) EnqueueValidatedMicrosoftHistoryScan(ctx context.Context, t
 		asynq.NewTask(TypeValidatedMicrosoftHistoryScan, payload),
 		asynq.Queue(platform.QueueBackgroundProjectHistory),
 		asynq.Unique(timeout),
-		asynq.MaxRetry(validatedHistoryTaskMaxRetry),
+		asynq.MaxRetry(ValidatedHistoryTaskMaxRetry),
 		asynq.Timeout(timeout),
 		asynq.Retention(0),
 	)

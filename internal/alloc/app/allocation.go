@@ -902,8 +902,8 @@ func (uc *UseCase) RefreshInventoryCache(ctx context.Context) (*InventoryRefresh
 	return uc.RefreshInventoryCacheBefore(ctx, time.Now())
 }
 
-// RefreshInventoryCacheBefore refreshes only entries active before one task's
-// cutoff, so reads during aggregation are left for the next task.
+// RefreshInventoryCacheBefore refreshes entries whose backend schedule is due
+// before one task's fixed cutoff.
 func (uc *UseCase) RefreshInventoryCacheBefore(ctx context.Context, before time.Time) (*InventoryRefreshResult, error) {
 	if uc == nil || uc.inventoryCache == nil {
 		return &InventoryRefreshResult{}, nil
@@ -911,9 +911,9 @@ func (uc *UseCase) RefreshInventoryCacheBefore(ctx context.Context, before time.
 	if before.IsZero() {
 		before = time.Now()
 	}
-	entries, err := uc.inventoryCache.ClaimActiveInventory(ctx, before.Add(-inventoryCacheActivityTTLValue()), before, inventoryRefreshBatchSize)
+	entries, err := uc.inventoryCache.ClaimDueInventory(ctx, before, inventoryRefreshBatchSize)
 	if err != nil {
-		return nil, fmt.Errorf("claim active inventory cache entries: %w", err)
+		return nil, fmt.Errorf("claim due inventory cache entries: %w", err)
 	}
 	result := &InventoryRefreshResult{Attempted: len(entries)}
 	for i, entry := range entries {

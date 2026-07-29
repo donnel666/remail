@@ -70,7 +70,7 @@ func historicalProjectMatches(req HistoricalProjectMatchRequest, scopes []Histor
 	}]int)
 	for _, scope := range scopes {
 		for _, item := range req.Messages {
-			for _, recipient := range historicalRecipientCandidates(req.EmailAddress, item.Recipients) {
+			for _, recipient := range historicalRecipientCandidates(item.Recipients) {
 				if !historicalRecipientMatchesProject(item, req.EmailAddress, recipient, scope) {
 					continue
 				}
@@ -111,7 +111,7 @@ func historicalProjectMatches(req HistoricalProjectMatchRequest, scopes []Histor
 }
 
 func historicalMessageMatchesProject(message HistoricalProjectMessage, mainEmail string, scope HistoricalProjectScope) bool {
-	for _, recipient := range historicalRecipientCandidates(mainEmail, message.Recipients) {
+	for _, recipient := range historicalRecipientCandidates(message.Recipients) {
 		if historicalRecipientMatchesProject(message, mainEmail, recipient, scope) {
 			return true
 		}
@@ -119,18 +119,12 @@ func historicalMessageMatchesProject(message HistoricalProjectMessage, mainEmail
 	return false
 }
 
-func historicalRecipientCandidates(mainEmail string, recipients []string) []string {
+func historicalRecipientCandidates(recipients []string) []string {
 	candidates := normalizeRecipientCandidates(recipients)
-	if len(candidates) <= 1 {
-		return candidates
+	if len(candidates) != 1 {
+		return nil
 	}
-	filtered := candidates[:0]
-	for _, recipient := range candidates {
-		if historicalMailboxType(mainEmail, recipient) != HistoricalMailboxAlias {
-			filtered = append(filtered, recipient)
-		}
-	}
-	return filtered
+	return candidates
 }
 
 func historicalRecipientMatchesProject(message HistoricalProjectMessage, mainEmail, recipient string, scope HistoricalProjectScope) bool {

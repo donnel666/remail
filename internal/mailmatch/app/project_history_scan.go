@@ -552,7 +552,7 @@ func historicalMessagesFromFetched(messages []FetchedMessage) []HistoricalProjec
 	result := make([]HistoricalProjectMessage, len(messages))
 	for i := range messages {
 		result[i] = HistoricalProjectMessage{
-			Recipients: messages[i].Recipients, Sender: messages[i].Sender, Subject: messages[i].Subject,
+			Recipients: messages[i].ToRecipients, Sender: messages[i].Sender, Subject: messages[i].Subject,
 			Body: messages[i].Body, BodyPreview: messages[i].BodyPreview,
 			MessageIDHeader: messages[i].MessageIDHeader, ProviderMessageID: messages[i].ProviderMessageID,
 			Protocol: messages[i].Protocol, Folder: messages[i].Folder, ReceivedAt: messages[i].ReceivedAt,

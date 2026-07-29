@@ -189,7 +189,7 @@ type InventoryCache interface {
 	RefreshProductInventoryTotals(ctx context.Context, projectID uint, totals *ProjectProductInventoryTotals, ttl time.Duration) error
 	IsProductUnavailable(ctx context.Context, req ProductInventoryAvailabilityRequest) (bool, error)
 	MarkProductUnavailable(ctx context.Context, req ProductInventoryAvailabilityRequest) (bool, error)
-	ClaimActiveInventory(ctx context.Context, since time.Time, before time.Time, limit int) ([]InventoryCacheEntry, error)
+	ClaimDueInventory(ctx context.Context, before time.Time, limit int) ([]InventoryCacheEntry, error)
 	RequeueInventory(ctx context.Context, entries []InventoryCacheEntry) error
 	DeleteInventory(ctx context.Context, entry InventoryCacheEntry) error
 	AcquireInventoryRefresh(ctx context.Context, entry InventoryCacheEntry, ttl time.Duration) (token string, acquired bool, err error)

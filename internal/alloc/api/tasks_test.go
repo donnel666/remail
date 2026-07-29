@@ -75,7 +75,7 @@ type boundedInventoryTaskCache struct {
 	claims int
 }
 
-func (c *boundedInventoryTaskCache) ClaimActiveInventory(_ context.Context, _ time.Time, _ time.Time, limit int) ([]allocapp.InventoryCacheEntry, error) {
+func (c *boundedInventoryTaskCache) ClaimDueInventory(_ context.Context, _ time.Time, limit int) ([]allocapp.InventoryCacheEntry, error) {
 	c.claims++
 	entries := make([]allocapp.InventoryCacheEntry, limit)
 	for i := range entries {
@@ -96,7 +96,7 @@ func (*boundedInventoryTaskCache) ReleaseInventoryRefresh(context.Context, alloc
 	return nil
 }
 
-func (*failingInventoryTaskCache) ClaimActiveInventory(context.Context, time.Time, time.Time, int) ([]allocapp.InventoryCacheEntry, error) {
+func (*failingInventoryTaskCache) ClaimDueInventory(context.Context, time.Time, int) ([]allocapp.InventoryCacheEntry, error) {
 	return []allocapp.InventoryCacheEntry{{Kind: allocapp.InventoryCacheStats, ProjectID: 1}}, nil
 }
 
@@ -194,7 +194,7 @@ func TestAllocationTaskSeedersStopOnCleanup(t *testing.T) {
 	module := &Module{UseCase: allocapp.NewUseCase(nil, queue)}
 	cleanup := startAllocationTaskSeeders(module, 2*time.Millisecond, 2*time.Millisecond)
 	require.Eventually(t, func() bool {
-		return queue.candidateCalls.Load() > 0 && queue.inventoryCalls.Load() > 0
+		return queue.candidateCalls.Load() > 0 && queue.inventoryCalls.Load() > 1
 	}, 100*time.Millisecond, time.Millisecond)
 	cleanup(context.Background())
 	candidateCalls := queue.candidateCalls.Load()

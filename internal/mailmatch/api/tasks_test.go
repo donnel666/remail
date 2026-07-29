@@ -11,6 +11,7 @@ import (
 	mailmatchapp "github.com/donnel666/remail/internal/mailmatch/app"
 	"github.com/donnel666/remail/internal/mailmatch/domain"
 	mailmatchinfra "github.com/donnel666/remail/internal/mailmatch/infra"
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/hibiken/asynq"
 	"github.com/stretchr/testify/require"
@@ -100,6 +101,13 @@ func TestProjectHistoryCapacityUpdatesAtRuntime(t *testing.T) {
 	require.False(t, admitted)
 	first()
 	second()
+}
+
+func TestValidatedMicrosoftHistoryRetryCapAppliesToLegacyTasks(t *testing.T) {
+	failure := errors.New("history import failed")
+	require.False(t, errors.Is(capValidatedMicrosoftHistoryRetry(2, failure), asynq.SkipRetry))
+	require.True(t, errors.Is(capValidatedMicrosoftHistoryRetry(3, failure), asynq.SkipRetry))
+	require.False(t, errors.Is(capValidatedMicrosoftHistoryRetry(3, platform.ErrBackgroundExecutionDeferred), asynq.SkipRetry))
 }
 
 func TestPickupRequestTaskFallsBackToSecondOrderAndFetchesResourceOnce(t *testing.T) {

@@ -296,19 +296,27 @@ func TestMicrosoftMessagesToMailmatchPreservesCompleteProviderContent(t *testing
 	require.Empty(t, messages[1].Body)
 }
 
-func TestMicrosoftMessagesToMailmatchUsesCcAndKeepsUnaddressedIdentity(t *testing.T) {
+func TestMicrosoftMessagesToMailmatchTracksToRecipientsSeparately(t *testing.T) {
 	messages := microsoftMessagesToMailmatch(mailmatchapp.OrderScope{
 		EmailResourceID: 42,
 		Recipient:       "requesting-alias@example.com",
 	}, []mailinfra.MicrosoftFetchedMessage{
 		{ID: "without-recipient"},
-		{ID: "cc-recipient", Cc: "Alias <alias@example.com>"},
+		{ID: "cc-recipient", Cc: "Alias <cc@example.com>", Bcc: "bcc@example.com"},
+		{ID: "to-recipients", To: "First <first@example.com>, second@example.com", Cc: "ignored@example.com"},
 	})
 
-	require.Len(t, messages, 2)
+	require.Len(t, messages, 3)
 	require.Equal(t, "without-recipient", messages[0].ProviderMessageID)
 	require.Empty(t, messages[0].Recipient)
 	require.Empty(t, messages[0].Recipients)
-	require.Equal(t, "alias@example.com", messages[1].Recipient)
-	require.Equal(t, []string{"alias@example.com"}, messages[1].Recipients)
+	require.NotNil(t, messages[0].ToRecipients)
+	require.Empty(t, messages[0].ToRecipients)
+	require.Equal(t, "cc@example.com", messages[1].Recipient)
+	require.Equal(t, []string{"cc@example.com", "bcc@example.com"}, messages[1].Recipients)
+	require.NotNil(t, messages[1].ToRecipients)
+	require.Empty(t, messages[1].ToRecipients)
+	require.Equal(t, "first@example.com", messages[2].Recipient)
+	require.Equal(t, []string{"first@example.com", "second@example.com", "ignored@example.com"}, messages[2].Recipients)
+	require.Equal(t, []string{"first@example.com", "second@example.com"}, messages[2].ToRecipients)
 }
