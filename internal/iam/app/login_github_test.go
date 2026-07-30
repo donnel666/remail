@@ -57,7 +57,7 @@ func (r *githubLoginRepoStub) FindByThirdPartyIdentity(_ context.Context, provid
 	return r.find(r.byIdentity[providerUserID]), nil
 }
 
-func (r *githubLoginRepoStub) CreateWithThirdPartyIdentity(_ context.Context, user *domain.User, provider, providerUserID string) error {
+func (r *githubLoginRepoStub) CreateWithThirdPartyIdentity(_ context.Context, user *domain.User, _, providerUserID string) error {
 	if r.createConflict != nil {
 		conflict := r.createConflict
 		r.createConflict = nil
