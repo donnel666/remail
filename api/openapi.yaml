@@ -511,7 +511,7 @@ paths:
             Set-Cookie:
               schema:
                 type: string
-                description: sid_points_v2 HttpOnly cookie and csrf_token_points_v2 SameSite cookie
+                description: sid HttpOnly cookie and csrf_token SameSite cookie
           content:
             application/json:
               schema:
@@ -10920,7 +10920,7 @@ components:
       required: true
       schema:
         type: string
-      description: CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+      description: CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 
     OptionalCsrfToken:
       name: X-CSRF-Token
@@ -10928,7 +10928,7 @@ components:
       required: false
       schema:
         type: string
-      description: CSRF token from the csrf_token_points_v2 SameSite cookie; required for Session state-changing requests and ignored for API Key requests.
+      description: CSRF token from the csrf_token SameSite cookie; required for Session state-changing requests and ignored for API Key requests.
 
     IdempotencyKey:
       name: Idempotency-Key

@@ -7875,7 +7875,7 @@ type GetAdminCardsParamsOwnerRole string
 
 // PostAdminCardsParams defines parameters for PostAdminCards.
 type PostAdminCardsParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
@@ -7884,19 +7884,19 @@ type PostAdminCardsParams struct {
 
 // PostAdminCardsDisableParams defines parameters for PostAdminCardsDisable.
 type PostAdminCardsDisableParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminCardsEnableParams defines parameters for PostAdminCardsEnable.
 type PostAdminCardsEnableParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PatchAdminCardParams defines parameters for PatchAdminCard.
 type PatchAdminCardParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -7908,7 +7908,7 @@ type GetAdminDashboardParams struct {
 
 // PostAdminDomainMailboxDisableParams defines parameters for PostAdminDomainMailboxDisable.
 type PostAdminDomainMailboxDisableParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op.
@@ -7939,7 +7939,7 @@ type GetAdminDomainsParamsStatus string
 
 // PostAdminDomainParams defines parameters for PostAdminDomain.
 type PostAdminDomainParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -7948,7 +7948,7 @@ type PostAdminDomainParams struct {
 
 // PostAdminDomainsDeleteParams defines parameters for PostAdminDomainsDelete.
 type PostAdminDomainsDeleteParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -7957,7 +7957,7 @@ type PostAdminDomainsDeleteParams struct {
 
 // PostAdminDomainsDisableParams defines parameters for PostAdminDomainsDisable.
 type PostAdminDomainsDisableParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -7966,7 +7966,7 @@ type PostAdminDomainsDisableParams struct {
 
 // PostAdminDomainsPublishParams defines parameters for PostAdminDomainsPublish.
 type PostAdminDomainsPublishParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -7975,7 +7975,7 @@ type PostAdminDomainsPublishParams struct {
 
 // PostAdminDomainsUnpublishParams defines parameters for PostAdminDomainsUnpublish.
 type PostAdminDomainsUnpublishParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -7984,7 +7984,7 @@ type PostAdminDomainsUnpublishParams struct {
 
 // PostAdminDomainValidationsParams defines parameters for PostAdminDomainValidations.
 type PostAdminDomainValidationsParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -7996,7 +7996,7 @@ type DeleteAdminDomainParams struct {
 	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
 	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
 
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8008,7 +8008,7 @@ type PatchAdminDomainParams struct {
 	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
 	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
 
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8020,7 +8020,7 @@ type PostAdminDomainDisableParams struct {
 	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
 	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
 
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op.
@@ -8032,7 +8032,7 @@ type PostAdminDomainDnsStatusParams struct {
 	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
 	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
 
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op.
@@ -8044,7 +8044,7 @@ type PostAdminDomainEnableParams struct {
 	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
 	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
 
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8062,7 +8062,7 @@ type PostAdminDomainPublishParams struct {
 	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
 	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
 
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8074,7 +8074,7 @@ type PostAdminDomainRecoverParams struct {
 	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
 	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
 
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8086,7 +8086,7 @@ type PostAdminDomainUnpublishParams struct {
 	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
 	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
 
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8095,7 +8095,7 @@ type PostAdminDomainUnpublishParams struct {
 
 // PostAdminDomainValidateParams defines parameters for PostAdminDomainValidate.
 type PostAdminDomainValidateParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8127,31 +8127,31 @@ type GetAdminInvitesParamsOwnerRole string
 
 // PostAdminInviteParams defines parameters for PostAdminInvite.
 type PostAdminInviteParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminInvitesBatchParams defines parameters for PostAdminInvitesBatch.
 type PostAdminInvitesBatchParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminInvitesDisableParams defines parameters for PostAdminInvitesDisable.
 type PostAdminInvitesDisableParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminInvitesEnableParams defines parameters for PostAdminInvitesEnable.
 type PostAdminInvitesEnableParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PatchAdminInviteParams defines parameters for PatchAdminInvite.
 type PatchAdminInviteParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -8159,7 +8159,7 @@ type PatchAdminInviteParams struct {
 type DeleteAdminOperationLogsParams struct {
 	Before time.Time `form:"before" json:"before"`
 
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -8177,7 +8177,7 @@ type GetAdminOperationLogsParams struct {
 type DeleteAdminSystemLogsParams struct {
 	Before time.Time `form:"before" json:"before"`
 
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -8226,13 +8226,13 @@ type GetAdminMessageParamsType string
 
 // PostAdminOrderTimeoutScanParams defines parameters for PostAdminOrderTimeoutScan.
 type PostAdminOrderTimeoutScanParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminOrderCleanupRetryParams defines parameters for PostAdminOrderCleanupRetry.
 type PostAdminOrderCleanupRetryParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -8241,7 +8241,7 @@ type PostAdminOrderRefundParams struct {
 	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
 
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -8250,7 +8250,7 @@ type PostAdminOrderRefundRetryParams struct {
 	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
 
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -8259,25 +8259,25 @@ type PostAdminOrderTerminateParams struct {
 	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
 
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminProjectParams defines parameters for PostAdminProject.
 type PostAdminProjectParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminProjectsDeleteParams defines parameters for PostAdminProjectsDelete.
 type PostAdminProjectsDeleteParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminProjectsDelistParams defines parameters for PostAdminProjectsDelist.
 type PostAdminProjectsDelistParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -8288,79 +8288,79 @@ type PostAdminProjectLogoMultipartBody struct {
 
 // PostAdminProjectLogoParams defines parameters for PostAdminProjectLogo.
 type PostAdminProjectLogoParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminProjectsProductsParams defines parameters for PostAdminProjectsProducts.
 type PostAdminProjectsProductsParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminProjectsRejectParams defines parameters for PostAdminProjectsReject.
 type PostAdminProjectsRejectParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminProjectsRelistParams defines parameters for PostAdminProjectsRelist.
 type PostAdminProjectsRelistParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // DeleteAdminProjectParams defines parameters for DeleteAdminProject.
 type DeleteAdminProjectParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PutAdminProjectParams defines parameters for PutAdminProject.
 type PutAdminProjectParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminProjectAccessParams defines parameters for PostAdminProjectAccess.
 type PostAdminProjectAccessParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // DeleteAdminProjectAccessParams defines parameters for DeleteAdminProjectAccess.
 type DeleteAdminProjectAccessParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminProjectApproveParams defines parameters for PostAdminProjectApprove.
 type PostAdminProjectApproveParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminProjectDelistParams defines parameters for PostAdminProjectDelist.
 type PostAdminProjectDelistParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminProjectDuplicateParams defines parameters for PostAdminProjectDuplicate.
 type PostAdminProjectDuplicateParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminProjectRejectParams defines parameters for PostAdminProjectReject.
 type PostAdminProjectRejectParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminProjectRelistParams defines parameters for PostAdminProjectRelist.
 type PostAdminProjectRelistParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -8401,31 +8401,31 @@ type GetAdminProxyBindingsParamsIp string
 
 // PostAdminProxyCheckBatchParams defines parameters for PostAdminProxyCheckBatch.
 type PostAdminProxyCheckBatchParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminProxyDeleteBatchParams defines parameters for PostAdminProxyDeleteBatch.
 type PostAdminProxyDeleteBatchParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminProxyDisableBatchParams defines parameters for PostAdminProxyDisableBatch.
 type PostAdminProxyDisableBatchParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminProxyImportsParams defines parameters for PostAdminProxyImports.
 type PostAdminProxyImportsParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminResourceProxyParams defines parameters for PostAdminResourceProxy.
 type PostAdminResourceProxyParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -8452,19 +8452,19 @@ type GetAdminProxyStatsParamsStatus string
 
 // PostAdminSystemProxyParams defines parameters for PostAdminSystemProxy.
 type PostAdminSystemProxyParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PatchAdminProxyParams defines parameters for PatchAdminProxy.
 type PatchAdminProxyParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminProxyCheckParams defines parameters for PostAdminProxyCheck.
 type PostAdminProxyCheckParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -8509,7 +8509,7 @@ type GetAdminMicrosoftResourcesParamsType string
 
 // PostAdminMicrosoftResourcesDeleteParams defines parameters for PostAdminMicrosoftResourcesDelete.
 type PostAdminMicrosoftResourcesDeleteParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8518,7 +8518,7 @@ type PostAdminMicrosoftResourcesDeleteParams struct {
 
 // PostAdminMicrosoftResourcesDisableParams defines parameters for PostAdminMicrosoftResourcesDisable.
 type PostAdminMicrosoftResourcesDisableParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8537,7 +8537,7 @@ type PostAdminMicrosoftResourceImportMultipartBody struct {
 
 // PostAdminMicrosoftResourceImportParams defines parameters for PostAdminMicrosoftResourceImport.
 type PostAdminMicrosoftResourceImportParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8549,7 +8549,7 @@ type PostAdminMicrosoftResourceImportMultipartBodyErrorStrategy string
 
 // PostAdminMicrosoftResourcesMaintenanceParams defines parameters for PostAdminMicrosoftResourcesMaintenance.
 type PostAdminMicrosoftResourcesMaintenanceParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8558,7 +8558,7 @@ type PostAdminMicrosoftResourcesMaintenanceParams struct {
 
 // PostAdminMicrosoftResourcesPublishParams defines parameters for PostAdminMicrosoftResourcesPublish.
 type PostAdminMicrosoftResourcesPublishParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8567,7 +8567,7 @@ type PostAdminMicrosoftResourcesPublishParams struct {
 
 // PostAdminMicrosoftResourcesUnpublishParams defines parameters for PostAdminMicrosoftResourcesUnpublish.
 type PostAdminMicrosoftResourcesUnpublishParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8576,7 +8576,7 @@ type PostAdminMicrosoftResourcesUnpublishParams struct {
 
 // PostAdminMicrosoftResourceValidationsParams defines parameters for PostAdminMicrosoftResourceValidations.
 type PostAdminMicrosoftResourceValidationsParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8588,7 +8588,7 @@ type DeleteAdminMicrosoftResourceParams struct {
 	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
 	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
 
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8597,7 +8597,7 @@ type DeleteAdminMicrosoftResourceParams struct {
 
 // PatchAdminMicrosoftResourceParams defines parameters for PatchAdminMicrosoftResource.
 type PatchAdminMicrosoftResourceParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8616,7 +8616,7 @@ type GetAdminMicrosoftResourceAliasesParamsKind string
 
 // PostAdminMicrosoftResourceAliasParams defines parameters for PostAdminMicrosoftResourceAlias.
 type PostAdminMicrosoftResourceAliasParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8625,7 +8625,7 @@ type PostAdminMicrosoftResourceAliasParams struct {
 
 // PutAdminMicrosoftResourceCredentialsParams defines parameters for PutAdminMicrosoftResourceCredentials.
 type PutAdminMicrosoftResourceCredentialsParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8637,7 +8637,7 @@ type PostAdminMicrosoftResourceDisableParams struct {
 	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
 	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
 
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8649,7 +8649,7 @@ type PostAdminMicrosoftResourceEnableParams struct {
 	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
 	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
 
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8658,7 +8658,7 @@ type PostAdminMicrosoftResourceEnableParams struct {
 
 // PostAdminMicrosoftResourceMessagesFetchParams defines parameters for PostAdminMicrosoftResourceMessagesFetch.
 type PostAdminMicrosoftResourceMessagesFetchParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8667,7 +8667,7 @@ type PostAdminMicrosoftResourceMessagesFetchParams struct {
 
 // PostAdminMicrosoftResourceProjectScanParams defines parameters for PostAdminMicrosoftResourceProjectScan.
 type PostAdminMicrosoftResourceProjectScanParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8679,7 +8679,7 @@ type PostAdminMicrosoftResourcePublishParams struct {
 	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
 	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
 
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8691,7 +8691,7 @@ type PostAdminMicrosoftResourceRecoverParams struct {
 	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
 	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
 
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8700,7 +8700,7 @@ type PostAdminMicrosoftResourceRecoverParams struct {
 
 // PostAdminMicrosoftResourceTokenRefreshParams defines parameters for PostAdminMicrosoftResourceTokenRefresh.
 type PostAdminMicrosoftResourceTokenRefreshParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8712,7 +8712,7 @@ type PostAdminMicrosoftResourceUnpublishParams struct {
 	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
 	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
 
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8721,7 +8721,7 @@ type PostAdminMicrosoftResourceUnpublishParams struct {
 
 // PostAdminMicrosoftResourceValidateParams defines parameters for PostAdminMicrosoftResourceValidate.
 type PostAdminMicrosoftResourceValidateParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8736,25 +8736,25 @@ type GetAdminServersParams struct {
 
 // PostAdminServerParams defines parameters for PostAdminServer.
 type PostAdminServerParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PutAdminSettingsParams defines parameters for PutAdminSettings.
 type PutAdminSettingsParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // DeleteAdminSettingParams defines parameters for DeleteAdminSetting.
 type DeleteAdminSettingParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PutAdminSettingParams defines parameters for PutAdminSetting.
 type PutAdminSettingParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -8767,13 +8767,13 @@ type GetAdminSupplierApplicationsParams struct {
 
 // PostAdminSupplierApplicationApproveParams defines parameters for PostAdminSupplierApplicationApprove.
 type PostAdminSupplierApplicationApproveParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminSupplierApplicationRejectParams defines parameters for PostAdminSupplierApplicationReject.
 type PostAdminSupplierApplicationRejectParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -8816,19 +8816,19 @@ type GetAdminTicketsParamsStatus string
 
 // PostAdminTicketCloseParams defines parameters for PostAdminTicketClose.
 type PostAdminTicketCloseParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminTicketMessageParams defines parameters for PostAdminTicketMessage.
 type PostAdminTicketMessageParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminTicketReadParams defines parameters for PostAdminTicketRead.
 type PostAdminTicketReadParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -8837,7 +8837,7 @@ type PostAdminTicketRefundParams struct {
 	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
 
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -8860,7 +8860,7 @@ type GetAdminTransactionsParamsDirection string
 
 // PostAdminTransactionReverseParams defines parameters for PostAdminTransactionReverse.
 type PostAdminTransactionReverseParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -8889,55 +8889,55 @@ type GetAdminUsersParamsRole string
 
 // PostAdminUserParams defines parameters for PostAdminUser.
 type PostAdminUserParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminUsersDeleteParams defines parameters for PostAdminUsersDelete.
 type PostAdminUsersDeleteParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminUsersDisableParams defines parameters for PostAdminUsersDisable.
 type PostAdminUsersDisableParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminUsersEnableParams defines parameters for PostAdminUsersEnable.
 type PostAdminUsersEnableParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminUserGroupParams defines parameters for PostAdminUserGroup.
 type PostAdminUserGroupParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PatchAdminUserGroupParams defines parameters for PatchAdminUserGroup.
 type PatchAdminUserGroupParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminUsersRevokeSessionsParams defines parameters for PostAdminUsersRevokeSessions.
 type PostAdminUsersRevokeSessionsParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // DeleteAdminUserParams defines parameters for DeleteAdminUser.
 type DeleteAdminUserParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PatchAdminUserParams defines parameters for PatchAdminUser.
 type PatchAdminUserParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -8949,19 +8949,19 @@ type GetAdminUserApiKeysParams struct {
 
 // PostAdminUserApiKeyParams defines parameters for PostAdminUserApiKey.
 type PostAdminUserApiKeyParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // DeleteAdminUserApiKeyParams defines parameters for DeleteAdminUserApiKey.
 type DeleteAdminUserApiKeyParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PatchAdminUserApiKeyParams defines parameters for PatchAdminUserApiKey.
 type PatchAdminUserApiKeyParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -8973,13 +8973,13 @@ type GetAdminUserDashboardParams struct {
 
 // PutAdminUserPermissionsParams defines parameters for PutAdminUserPermissions.
 type PutAdminUserPermissionsParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminRevokeSessionsParams defines parameters for PostAdminRevokeSessions.
 type PostAdminRevokeSessionsParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -8992,7 +8992,7 @@ type GetAdminWalletsParams struct {
 
 // PostAdminWalletBulkAdjustParams defines parameters for PostAdminWalletBulkAdjust.
 type PostAdminWalletBulkAdjustParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -9004,7 +9004,7 @@ type GetAdminWalletBalancesParams struct {
 
 // PostAdminWalletCreditParams defines parameters for PostAdminWalletCredit.
 type PostAdminWalletCreditParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
@@ -9013,7 +9013,7 @@ type PostAdminWalletCreditParams struct {
 
 // PostAdminWalletDebitParams defines parameters for PostAdminWalletDebit.
 type PostAdminWalletDebitParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
@@ -9029,7 +9029,7 @@ type GetAdminWalletTransactionsParams struct {
 
 // PostAdminWalletWithdrawParams defines parameters for PostAdminWalletWithdraw.
 type PostAdminWalletWithdrawParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
@@ -9047,25 +9047,25 @@ type PostApiKeyParams struct {
 	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
 
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // DeleteApiKeyParams defines parameters for DeleteApiKey.
 type DeleteApiKeyParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PatchApiKeyParams defines parameters for PatchApiKey.
 type PatchApiKeyParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostCardRedeemParams defines parameters for PostCardRedeem.
 type PostCardRedeemParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
@@ -9080,7 +9080,7 @@ type GetDashboardParams struct {
 
 // PostDomainParams defines parameters for PostDomain.
 type PostDomainParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -9092,7 +9092,7 @@ type GetDomainMailboxesParams struct {
 
 // PostMeInviteParams defines parameters for PostMeInvite.
 type PostMeInviteParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -9143,7 +9143,7 @@ type PostOrderParams struct {
 	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
 
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for Session state-changing requests and ignored for API Key requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for Session state-changing requests and ignored for API Key requests.
 	XCSRFToken *OptionalCsrfToken `json:"X-CSRF-Token,omitempty"`
 }
 
@@ -9161,7 +9161,7 @@ type PostOrderBatchParams struct {
 	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
 
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for Session state-changing requests and ignored for API Key requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for Session state-changing requests and ignored for API Key requests.
 	XCSRFToken *OptionalCsrfToken `json:"X-CSRF-Token,omitempty"`
 }
 
@@ -9173,7 +9173,7 @@ type PostOrderBatchParamsSupply string
 
 // PostOrderArchiveParams defines parameters for PostOrderArchive.
 type PostOrderArchiveParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for Session state-changing requests and ignored for API Key requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for Session state-changing requests and ignored for API Key requests.
 	XCSRFToken *OptionalCsrfToken `json:"X-CSRF-Token,omitempty"`
 }
 
@@ -9185,7 +9185,7 @@ type GetOrderEventsParams struct {
 
 // PatchPasswordParams defines parameters for PatchPassword.
 type PatchPasswordParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -9230,13 +9230,13 @@ type GetProjectsParamsProductType string
 
 // PostProjectParams defines parameters for PostProject.
 type PostProjectParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostProjectResubmitParams defines parameters for PostProjectResubmit.
 type PostProjectResubmitParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -9257,7 +9257,7 @@ type GetRechargesParamsStatus string
 
 // PostRechargeParams defines parameters for PostRecharge.
 type PostRechargeParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 
 	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
@@ -9266,7 +9266,7 @@ type PostRechargeParams struct {
 
 // PostRechargeQuoteParams defines parameters for PostRechargeQuote.
 type PostRechargeQuoteParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -9323,7 +9323,7 @@ type GetResourcesParamsPurpose string
 
 // PostResourceDeleteBatchParams defines parameters for PostResourceDeleteBatch.
 type PostResourceDeleteBatchParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -9339,7 +9339,7 @@ type PostResourceImportMultipartBody struct {
 
 // PostResourceImportParams defines parameters for PostResourceImport.
 type PostResourceImportParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -9348,19 +9348,19 @@ type PostResourceImportMultipartBodyErrorStrategy string
 
 // PostResourcePublishBatchParams defines parameters for PostResourcePublishBatch.
 type PostResourcePublishBatchParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostResourceValidationsParams defines parameters for PostResourceValidations.
 type PostResourceValidationsParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // DeleteResourceParams defines parameters for DeleteResource.
 type DeleteResourceParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -9371,7 +9371,7 @@ type GetResourceDetail200JSONResponseBody struct {
 
 // PostResourcePublishParams defines parameters for PostResourcePublish.
 type PostResourcePublishParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -9382,7 +9382,7 @@ type PostResourcePublish200JSONResponseBody struct {
 
 // PostResourceValidateParams defines parameters for PostResourceValidate.
 type PostResourceValidateParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -9395,13 +9395,13 @@ type GetServersParams struct {
 
 // PostServerParams defines parameters for PostServer.
 type PostServerParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostSupplierApplicationParams defines parameters for PostSupplierApplication.
 type PostSupplierApplicationParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -9429,31 +9429,31 @@ type GetTicketsParamsStatus string
 
 // PostTicketParams defines parameters for PostTicket.
 type PostTicketParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostTicketCloseParams defines parameters for PostTicketClose.
 type PostTicketCloseParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostTicketMessageParams defines parameters for PostTicketMessage.
 type PostTicketMessageParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostTicketReadParams defines parameters for PostTicketRead.
 type PostTicketReadParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostWalletCheckinParams defines parameters for PostWalletCheckin.
 type PostWalletCheckinParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -9462,7 +9462,7 @@ type PostWalletReferralTransferParams struct {
 	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
 
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
@@ -9471,13 +9471,13 @@ type PostWalletSupplierTransferParams struct {
 	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
 
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostWalletSupplierWithdrawalParams defines parameters for PostWalletSupplierWithdrawal.
 type PostWalletSupplierWithdrawalParams struct {
-	// XCSRFToken CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests.
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 

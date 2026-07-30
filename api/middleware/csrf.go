@@ -8,8 +8,8 @@ import (
 )
 
 const (
-	SessionCookieName = "sid_points_v2"
-	CSRFCookieName    = "csrf_token_points_v2"
+	SessionCookieName = "sid"
+	CSRFCookieName    = "csrf_token"
 	CSRFHeaderName    = "X-CSRF-Token"
 )
 

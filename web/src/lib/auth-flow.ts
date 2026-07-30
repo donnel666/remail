@@ -3,7 +3,7 @@ export const LOGIN_RETURN_TO_KEY = "remail-login-return-to";
 export const AUTH_REQUIRED_EVENT = "remail-auth-required";
 export const AUTH_REQUIRED_NOTICE = "Authentication is required.";
 
-const authCookieNames = ["sid_points_v2", "csrf_token_points_v2"];
+const authCookieNames = ["sid", "csrf_token"];
 const cookieDeletePaths = ["/", "/v1"];
 const authPagePrefixes = ["/login", "/register", "/activation"];
 const loginReturnToTTLMS = 30 * 60 * 1000;

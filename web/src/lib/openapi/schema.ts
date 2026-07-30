@@ -6919,9 +6919,9 @@ export interface components {
         /** @description Last ticket id from the previous page. */
         AfterIdQuery: number;
         LimitQuery: number;
-        /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+        /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
         CsrfToken: string;
-        /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for Session state-changing requests and ignored for API Key requests. */
+        /** @description CSRF token from the csrf_token SameSite cookie; required for Session state-changing requests and ignored for API Key requests. */
         OptionalCsrfToken: string;
         /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
         IdempotencyKey: string;
@@ -7739,7 +7739,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -7780,7 +7780,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -7883,7 +7883,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -8116,7 +8116,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -8190,7 +8190,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -8253,7 +8253,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -8316,7 +8316,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -8379,7 +8379,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -8442,7 +8442,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -8501,7 +8501,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -8577,7 +8577,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -8723,7 +8723,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -8786,7 +8786,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -8889,7 +8889,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -8992,7 +8992,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -9055,7 +9055,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -9218,7 +9218,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -9332,7 +9332,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -9392,7 +9392,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -9554,7 +9554,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -9681,7 +9681,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -9755,7 +9755,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -9831,7 +9831,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -9885,7 +9885,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -9939,7 +9939,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -10093,7 +10093,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -10165,7 +10165,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -10300,7 +10300,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -10461,7 +10461,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -10579,7 +10579,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -10651,7 +10651,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -10714,7 +10714,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -10777,7 +10777,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -10840,7 +10840,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -10941,7 +10941,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -11004,7 +11004,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -11079,7 +11079,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -11162,7 +11162,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -11288,7 +11288,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -11362,7 +11362,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -11431,7 +11431,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -11505,7 +11505,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -11579,7 +11579,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -11653,7 +11653,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -11732,7 +11732,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -11919,7 +11919,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -11978,7 +11978,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -12050,7 +12050,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -12113,7 +12113,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -12183,7 +12183,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -12315,7 +12315,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -12385,7 +12385,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -12490,7 +12490,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -12544,7 +12544,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -13021,7 +13021,7 @@ export interface operations {
             header: {
                 /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -13133,7 +13133,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -13183,7 +13183,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -13307,7 +13307,7 @@ export interface operations {
             header: {
                 /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for Session state-changing requests and ignored for API Key requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for Session state-changing requests and ignored for API Key requests. */
                 "X-CSRF-Token"?: components["parameters"]["OptionalCsrfToken"];
             };
             path?: never;
@@ -13393,7 +13393,7 @@ export interface operations {
             header: {
                 /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for Session state-changing requests and ignored for API Key requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for Session state-changing requests and ignored for API Key requests. */
                 "X-CSRF-Token"?: components["parameters"]["OptionalCsrfToken"];
             };
             path?: never;
@@ -13584,7 +13584,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for Session state-changing requests and ignored for API Key requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for Session state-changing requests and ignored for API Key requests. */
                 "X-CSRF-Token"?: components["parameters"]["OptionalCsrfToken"];
             };
             path: {
@@ -13647,7 +13647,7 @@ export interface operations {
             header: {
                 /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -13723,7 +13723,7 @@ export interface operations {
             header: {
                 /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -13799,7 +13799,7 @@ export interface operations {
             header: {
                 /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -13873,7 +13873,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -13934,7 +13934,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -14334,7 +14334,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -14397,7 +14397,7 @@ export interface operations {
             header: {
                 /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -14458,7 +14458,7 @@ export interface operations {
             header: {
                 /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -14530,7 +14530,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -14675,7 +14675,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
@@ -14787,7 +14787,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -14970,7 +14970,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
@@ -15085,7 +15085,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -15250,7 +15250,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
@@ -15326,7 +15326,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
@@ -15447,7 +15447,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
@@ -15521,7 +15521,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -15595,7 +15595,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -15649,7 +15649,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -15807,7 +15807,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
                 "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
@@ -15939,7 +15939,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
                 "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
@@ -16232,7 +16232,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -16295,7 +16295,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -16358,7 +16358,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -16421,7 +16421,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -16484,7 +16484,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -16556,7 +16556,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -16628,7 +16628,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -16711,7 +16711,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -16809,7 +16809,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
                 "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
@@ -16844,7 +16844,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
                 "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
@@ -16877,7 +16877,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
                 "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
@@ -16910,7 +16910,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
                 "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
@@ -16944,7 +16944,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
                 "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
@@ -16978,7 +16978,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
                 "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
@@ -17041,7 +17041,7 @@ export interface operations {
                 version: components["parameters"]["ExpectedAdminResourceVersion"];
             };
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
                 "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
@@ -17074,7 +17074,7 @@ export interface operations {
                 version: components["parameters"]["ExpectedAdminResourceVersion"];
             };
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
                 "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
@@ -17140,7 +17140,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
                 "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
@@ -17175,7 +17175,7 @@ export interface operations {
                 version: components["parameters"]["ExpectedAdminResourceVersion"];
             };
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op. */
                 "Idempotency-Key": components["parameters"]["AdminStateCommandIdempotencyKey"];
@@ -17212,7 +17212,7 @@ export interface operations {
                 version: components["parameters"]["ExpectedAdminResourceVersion"];
             };
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op. */
                 "Idempotency-Key": components["parameters"]["AdminStateCommandIdempotencyKey"];
@@ -17245,7 +17245,7 @@ export interface operations {
                 version: components["parameters"]["ExpectedAdminResourceVersion"];
             };
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
                 "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
@@ -17280,7 +17280,7 @@ export interface operations {
                 version: components["parameters"]["ExpectedAdminResourceVersion"];
             };
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
                 "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
@@ -17313,7 +17313,7 @@ export interface operations {
                 version: components["parameters"]["ExpectedAdminResourceVersion"];
             };
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
                 "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
@@ -17346,7 +17346,7 @@ export interface operations {
                 version: components["parameters"]["ExpectedAdminResourceVersion"];
             };
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
                 "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
@@ -17378,7 +17378,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op. */
                 "Idempotency-Key": components["parameters"]["AdminStateCommandIdempotencyKey"];
@@ -17434,7 +17434,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -17514,7 +17514,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
                 "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
@@ -17586,7 +17586,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
                 "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
@@ -17622,7 +17622,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
                 "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
@@ -17658,7 +17658,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
                 "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
@@ -17694,7 +17694,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
                 "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
@@ -17730,7 +17730,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
                 "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
@@ -17766,7 +17766,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
                 "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
@@ -17832,7 +17832,7 @@ export interface operations {
                 version: components["parameters"]["ExpectedAdminResourceVersion"];
             };
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
                 "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
@@ -17864,7 +17864,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
                 "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
@@ -17902,7 +17902,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
                 "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
@@ -17940,7 +17940,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
                 "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
@@ -17977,7 +17977,7 @@ export interface operations {
                 version: components["parameters"]["ExpectedAdminResourceVersion"];
             };
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
                 "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
@@ -18014,7 +18014,7 @@ export interface operations {
                 version: components["parameters"]["ExpectedAdminResourceVersion"];
             };
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
                 "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
@@ -18049,7 +18049,7 @@ export interface operations {
                 version: components["parameters"]["ExpectedAdminResourceVersion"];
             };
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
                 "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
@@ -18084,7 +18084,7 @@ export interface operations {
                 version: components["parameters"]["ExpectedAdminResourceVersion"];
             };
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
                 "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
@@ -18119,7 +18119,7 @@ export interface operations {
                 version: components["parameters"]["ExpectedAdminResourceVersion"];
             };
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
                 "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
@@ -18153,7 +18153,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
                 "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
@@ -18219,7 +18219,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
                 "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
@@ -18253,7 +18253,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
                 "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
@@ -18287,7 +18287,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
                 "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
@@ -18354,7 +18354,7 @@ export interface operations {
                 before: string;
             };
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -18414,7 +18414,7 @@ export interface operations {
                 before: string;
             };
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -18673,7 +18673,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
@@ -18753,7 +18753,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -18787,7 +18787,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -18813,7 +18813,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -18876,7 +18876,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -18910,7 +18910,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -18936,7 +18936,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
@@ -18967,7 +18967,7 @@ export interface operations {
             header: {
                 /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                /** @description CSRF token from the csrf_token_points_v2 SameSite cookie; required for authenticated state-changing requests. */
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {

@@ -11,10 +11,10 @@ afterEach(() => {
 });
 
 describe("csrfHeader", () => {
-  it("uses the points-v2 cookie and ignores the legacy namespace", () => {
-    document.cookie = "csrf_token=legacy-csrf; path=/";
-    document.cookie = "csrf_token_points_v2=points-csrf; path=/";
+  it("uses the csrf cookie and ignores the points-v2 namespace", () => {
+    document.cookie = "csrf_token_points_v2=points-v2-csrf; path=/";
+    document.cookie = "csrf_token=csrf; path=/";
 
-    expect(csrfHeader()).toEqual({ "X-CSRF-Token": "points-csrf" });
+    expect(csrfHeader()).toEqual({ "X-CSRF-Token": "csrf" });
   });
 });

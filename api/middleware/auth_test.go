@@ -25,6 +25,11 @@ func (s failingSessionFetcher) FetchSession(context.Context, string) (uint, doma
 	return 0, "", "", false, s.err
 }
 
+func TestAuthCookieNamesRemainStable(t *testing.T) {
+	require.Equal(t, "sid", SessionCookieName)
+	require.Equal(t, "csrf_token", CSRFCookieName)
+}
+
 func (s middlewarePermissionCheckerStub) Check(context.Context, uint, domain.Role, string, string) (bool, error) {
 	return s.allowed, s.err
 }
@@ -81,7 +86,7 @@ func TestLoadSessionPreservesCookiesWhenSessionLookupFails(t *testing.T) {
 	}
 }
 
-func TestCSRFRequiredRejectsLegacyCookieNamespace(t *testing.T) {
+func TestCSRFRequiredRejectsPointsV2CookieNamespace(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.POST("/protected", CSRFRequired(), func(c *gin.Context) {
@@ -89,8 +94,8 @@ func TestCSRFRequiredRejectsLegacyCookieNamespace(t *testing.T) {
 	})
 
 	request := httptest.NewRequest(http.MethodPost, "/protected", nil)
-	request.AddCookie(&http.Cookie{Name: "csrf_token", Value: "legacy-csrf"})
-	request.Header.Set(CSRFHeaderName, "legacy-csrf")
+	request.AddCookie(&http.Cookie{Name: "csrf_token_points_v2", Value: "points-v2-csrf"})
+	request.Header.Set(CSRFHeaderName, "points-v2-csrf")
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 
