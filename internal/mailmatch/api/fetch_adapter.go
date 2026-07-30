@@ -278,7 +278,12 @@ func (a *MicrosoftFetchAdapter) reportProxyFailure(ctx context.Context, proxyID 
 func microsoftMessagesToMailmatch(scope mailmatchapp.OrderScope, messages []mailinfra.MicrosoftFetchedMessage) []mailmatchapp.FetchedMessage {
 	items := make([]mailmatchapp.FetchedMessage, 0, len(messages))
 	for _, message := range messages {
-		toRecipients := append([]string{}, recipientCandidates(message.To)...)
+		toRecipients := []string{}
+		if message.ToRecipientCount == 1 {
+			if candidates := recipientCandidates(message.To); len(candidates) == 1 {
+				toRecipients = append(toRecipients, candidates[0])
+			}
+		}
 		recipients := recipientCandidates(strings.Join([]string{message.To, message.Cc, message.Bcc}, ","))
 		primaryRecipient := firstNonEmpty(recipients...)
 		items = append(items, mailmatchapp.FetchedMessage{

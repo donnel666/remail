@@ -238,11 +238,11 @@ func TestProjectHistoryProcessCompletesCurrentGeneration(t *testing.T) {
 	matches := &projectHistoryMatchesStub{scope: projectHistoryScope()}
 	credentials := &projectHistoryCredentialsStub{maxID: 10, resources: []*coreapp.MicrosoftCredentialScope{
 		{ResourceID: 5},
-		{ResourceID: 10, EmailAddress: "main@example.com", ClientID: "client", RefreshToken: "refresh", CredentialRevision: 4},
+		{ResourceID: 10, EmailAddress: "main@outlook.com", ClientID: "client", RefreshToken: "refresh", CredentialRevision: 4},
 	}, events: &events}
 	transport := &projectHistoryTransportStub{result: &FetchMessagesResult{RefreshToken: "rotated"}, pages: [][]FetchedMessage{{{
 		EmailResourceID: 10, ResourceType: domain.ResourceTypeMicrosoft, Folder: "Inbox",
-		Recipients: []string{"main@example.com"}, ToRecipients: []string{"main@example.com"},
+		Recipients: []string{"main@outlook.com"}, ToRecipients: []string{"main@outlook.com"},
 		Sender: "noreply@github.com", ReceivedAt: now,
 	}}}}
 	history := &projectHistoryUsageStub{events: &events}
@@ -305,13 +305,13 @@ func TestValidatedMicrosoftHistoryPromotesIdentifyingResourceAfterImport(t *test
 	now := time.Now().UTC()
 	matches := &projectHistoryMatchesStub{scope: projectHistoryScope()}
 	resource := &coreapp.MicrosoftCredentialScope{
-		ResourceID: 10, Status: "identifying", EmailAddress: "main@example.com",
+		ResourceID: 10, Status: "identifying", EmailAddress: "main@outlook.com",
 		ClientID: "client", RefreshToken: "refresh", CredentialRevision: 4,
 	}
 	credentials := &projectHistoryCredentialsStub{resources: []*coreapp.MicrosoftCredentialScope{resource}}
 	transport := &projectHistoryTransportStub{result: &FetchMessagesResult{RefreshToken: "rotated"}, pages: [][]FetchedMessage{{{
 		EmailResourceID: 10, ResourceType: domain.ResourceTypeMicrosoft, Folder: "Inbox",
-		Recipients: []string{"main@example.com"}, ToRecipients: []string{"main@example.com"},
+		Recipients: []string{"main@outlook.com"}, ToRecipients: []string{"main@outlook.com"},
 		Sender: "noreply@github.com", ReceivedAt: now,
 	}}}}
 	history := &projectHistoryUsageStub{}
@@ -324,6 +324,30 @@ func TestValidatedMicrosoftHistoryPromotesIdentifyingResourceAfterImport(t *test
 	require.True(t, credentials.history.Completed)
 	require.Equal(t, "rotated", resource.RefreshToken)
 	require.Len(t, history.matches, 1)
+}
+
+func TestValidatedMicrosoftHistorySkipsNonWhitelistRecipientBeforeImport(t *testing.T) {
+	now := time.Now().UTC()
+	resource := &coreapp.MicrosoftCredentialScope{
+		ResourceID: 10, Status: "identifying", EmailAddress: "main@outlook.com",
+		ClientID: "client", RefreshToken: "refresh", CredentialRevision: 4,
+	}
+	credentials := &projectHistoryCredentialsStub{resources: []*coreapp.MicrosoftCredentialScope{resource}}
+	transport := &projectHistoryTransportStub{result: &FetchMessagesResult{}, pages: [][]FetchedMessage{{{
+		EmailResourceID: 10, ResourceType: domain.ResourceTypeMicrosoft, Folder: "Inbox",
+		Recipients: []string{"relay@privaterelay.appleid.com"}, ToRecipients: []string{"relay@privaterelay.appleid.com"},
+		Sender: "noreply@github.com", ReceivedAt: now,
+	}}}}
+	events := []string{}
+	history := &projectHistoryUsageStub{events: &events}
+	uc := NewProjectHistoryScanUseCase(nil, &projectHistoryMatchesStub{scope: projectHistoryScope()}, &projectHistoryQueueStub{}, transport)
+	uc.SetMicrosoftCredentialPort(credentials)
+	uc.SetHistoricalMicrosoftUsagePort(history)
+
+	require.NoError(t, uc.ProcessValidatedMicrosoftHistory(context.Background(), ValidatedMicrosoftHistoryScanTask{ResourceID: 10}))
+	require.Empty(t, events, "non-whitelist recipients must not enter historical import")
+	require.Empty(t, history.matches)
+	require.Equal(t, "normal", resource.Status)
 }
 
 func TestValidatedMicrosoftHistoryFailureLeavesResourceIdentifying(t *testing.T) {

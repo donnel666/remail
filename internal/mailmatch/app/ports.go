@@ -114,10 +114,11 @@ type OrderDelivery struct {
 }
 
 type FetchedMessage struct {
-	EmailResourceID   uint
-	ResourceType      domain.ResourceType
-	Recipient         string
-	Recipients        []string
+	EmailResourceID uint
+	ResourceType    domain.ResourceType
+	Recipient       string
+	Recipients      []string
+	// ToRecipients contains one address only when the provider reported exactly one original To entry.
 	ToRecipients      []string
 	Sender            string
 	Subject           string

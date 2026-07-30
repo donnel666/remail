@@ -102,15 +102,17 @@ type MicrosoftFetchedMessage struct {
 	Subject           string
 	From              string
 	To                string
-	Cc                string
-	Bcc               string
-	ReceivedAt        time.Time
-	Preview           string
-	Body              string
-	RawSource         string
-	ProviderPayload   string
-	Protocol          string
-	HasAttachments    bool
+	// ToRecipientCount preserves the provider's original To entry count before parsing or deduplication.
+	ToRecipientCount int
+	Cc               string
+	Bcc              string
+	ReceivedAt       time.Time
+	Preview          string
+	Body             string
+	RawSource        string
+	ProviderPayload  string
+	Protocol         string
+	HasAttachments   bool
 }
 
 type graphMessagesPage struct {
@@ -1179,6 +1181,7 @@ func normalizeGraphFetchedMessage(message graphMessage, folder MicrosoftMailFold
 		Subject:           strings.TrimSpace(message.Subject),
 		From:              formatGraphRecipientList([]graphRecipient{derefGraphRecipient(message.From)}),
 		To:                formatGraphRecipientList(message.ToRecipients),
+		ToRecipientCount:  len(message.ToRecipients),
 		Cc:                formatGraphRecipientList(message.CcRecipients),
 		Bcc:               formatGraphRecipientList(message.BccRecipients),
 		ReceivedAt:        receivedAt,
@@ -1213,6 +1216,7 @@ func normalizeIMAPFetchedMessage(row *imapclient.FetchMessageBuffer, folder Micr
 		message.Subject = strings.TrimSpace(row.Envelope.Subject)
 		message.From = formatIMAPAddressList(row.Envelope.From)
 		message.To = formatIMAPAddressList(row.Envelope.To)
+		message.ToRecipientCount = len(row.Envelope.To)
 		message.Cc = formatIMAPAddressList(row.Envelope.Cc)
 		message.Bcc = formatIMAPAddressList(row.Envelope.Bcc)
 		if message.ReceivedAt.IsZero() {

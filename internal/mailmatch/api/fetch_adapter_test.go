@@ -296,17 +296,20 @@ func TestMicrosoftMessagesToMailmatchPreservesCompleteProviderContent(t *testing
 	require.Empty(t, messages[1].Body)
 }
 
-func TestMicrosoftMessagesToMailmatchTracksToRecipientsSeparately(t *testing.T) {
+func TestMicrosoftMessagesToMailmatchRequiresExactlyOneOriginalToRecipient(t *testing.T) {
 	messages := microsoftMessagesToMailmatch(mailmatchapp.OrderScope{
 		EmailResourceID: 42,
 		Recipient:       "requesting-alias@example.com",
 	}, []mailinfra.MicrosoftFetchedMessage{
 		{ID: "without-recipient"},
 		{ID: "cc-recipient", Cc: "Alias <cc@example.com>", Bcc: "bcc@example.com"},
-		{ID: "to-recipients", To: "First <first@example.com>, second@example.com", Cc: "ignored@example.com"},
+		{ID: "to-recipients", To: "First <first@example.com>, second@example.com", ToRecipientCount: 2, Cc: "ignored@example.com"},
+		{ID: "single-to", To: "Only <only@hotmail.com>", ToRecipientCount: 1},
+		{ID: "duplicate-to", To: "same@hotmail.com, same@hotmail.com", ToRecipientCount: 2},
+		{ID: "malformed-second", To: "valid@outlook.com, malformed-recipient", ToRecipientCount: 2},
 	})
 
-	require.Len(t, messages, 3)
+	require.Len(t, messages, 6)
 	require.Equal(t, "without-recipient", messages[0].ProviderMessageID)
 	require.Empty(t, messages[0].Recipient)
 	require.Empty(t, messages[0].Recipients)
@@ -318,5 +321,10 @@ func TestMicrosoftMessagesToMailmatchTracksToRecipientsSeparately(t *testing.T) 
 	require.Empty(t, messages[1].ToRecipients)
 	require.Equal(t, "first@example.com", messages[2].Recipient)
 	require.Equal(t, []string{"first@example.com", "second@example.com", "ignored@example.com"}, messages[2].Recipients)
-	require.Equal(t, []string{"first@example.com", "second@example.com"}, messages[2].ToRecipients)
+	require.Empty(t, messages[2].ToRecipients)
+	require.Equal(t, []string{"only@hotmail.com"}, messages[3].ToRecipients)
+	require.Equal(t, []string{"same@hotmail.com"}, messages[4].Recipients)
+	require.Empty(t, messages[4].ToRecipients)
+	require.Equal(t, []string{"valid@outlook.com"}, messages[5].Recipients)
+	require.Empty(t, messages[5].ToRecipients)
 }

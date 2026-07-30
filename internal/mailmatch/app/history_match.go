@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	coredomain "github.com/donnel666/remail/internal/core/domain"
 	"github.com/donnel666/remail/internal/mailmatch/domain"
 )
 
@@ -121,7 +122,7 @@ func historicalMessageMatchesProject(message HistoricalProjectMessage, mainEmail
 
 func historicalRecipientCandidates(recipients []string) []string {
 	candidates := normalizeRecipientCandidates(recipients)
-	if len(candidates) != 1 {
+	if len(candidates) != 1 || !coredomain.IsMicrosoftEmailDomain(candidates[0]) {
 		return nil
 	}
 	return candidates

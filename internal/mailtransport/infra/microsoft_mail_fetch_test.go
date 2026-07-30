@@ -14,6 +14,7 @@ import (
 
 	"github.com/donnel666/remail/internal/mailtransport/infra/msacl"
 	"github.com/emersion/go-imap/v2"
+	"github.com/emersion/go-imap/v2/imapclient"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -561,9 +562,22 @@ func TestRequiredMicrosoftMailFoldersCompleted(t *testing.T) {
 }
 
 func TestMicrosoftHistoryNormalizationOmitsUnusedRawPayloads(t *testing.T) {
-	normalizedGraph := normalizeGraphFetchedMessage(graphMessage{ID: "message", Body: graphMessageBody{Content: "body"}}, defaultMicrosoftMailFolders[0], false)
+	normalizedGraph := normalizeGraphFetchedMessage(graphMessage{
+		ID: "message", Body: graphMessageBody{Content: "body"},
+		ToRecipients: []graphRecipient{
+			{EmailAddress: graphEmailAddress{Address: "first@outlook.com"}},
+			{EmailAddress: graphEmailAddress{Address: "second@hotmail.com"}},
+		},
+	}, defaultMicrosoftMailFolders[0], false)
 	require.Equal(t, "body", normalizedGraph.Body)
 	require.Empty(t, normalizedGraph.ProviderPayload)
+	require.Equal(t, 2, normalizedGraph.ToRecipientCount)
+
+	normalizedIMAP := normalizeIMAPFetchedMessage(&imapclient.FetchMessageBuffer{Envelope: &imap.Envelope{To: []imap.Address{
+		{Mailbox: "first", Host: "outlook.com"},
+		{Mailbox: "second", Host: "hotmail.com"},
+	}}}, defaultMicrosoftMailFolders[0], nil, false)
+	require.Equal(t, 2, normalizedIMAP.ToRecipientCount)
 
 	var imapMessage MicrosoftFetchedMessage
 	applyIMAPBody(&imapMessage, []byte("Subject: Test\r\n\r\nbody"), false)

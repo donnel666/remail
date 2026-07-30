@@ -1393,31 +1393,32 @@ func TestHistoricalMessageMatchesProjectWithoutVerificationCode(t *testing.T) {
 		},
 	}
 	message := HistoricalProjectMessage{
-		Recipients: []string{"main@example.com"},
+		Recipients: []string{"main@outlook.com"},
 		Sender:     "noreply@github.com",
 		Subject:    "Welcome to GitHub",
 		Body:       "Your account is ready.",
 		ReceivedAt: time.Now().UTC(),
 	}
 
-	require.True(t, historicalMessageMatchesProject(message, "main@example.com", scope))
+	require.True(t, historicalMessageMatchesProject(message, "main@outlook.com", scope))
 	multipleRecipients := message
-	multipleRecipients.Recipients = []string{"main@example.com", "coworker@another-domain.test"}
-	require.False(t, historicalMessageMatchesProject(multipleRecipients, "main@example.com", scope))
+	multipleRecipients.Recipients = []string{"main@outlook.com", "coworker@hotmail.com"}
+	require.False(t, historicalMessageMatchesProject(multipleRecipients, "main@outlook.com", scope))
 	historical := historicalMessagesFromFetched([]FetchedMessage{
 		{
-			Recipients:   []string{"main@example.com", "copied@example.com"},
-			ToRecipients: []string{"main@example.com"},
+			Recipients:   []string{"main@outlook.com", "copied@hotmail.com"},
+			ToRecipients: []string{"main@outlook.com"},
 		},
 		{Recipients: []string{"cc-only@example.com"}},
 	})
-	require.Equal(t, []string{"main@example.com"}, historical[0].Recipients)
+	require.Equal(t, []string{"main@outlook.com"}, historical[0].Recipients)
 	require.Empty(t, historical[1].Recipients, "history matching must never fall back to To/Cc/Bcc recipients")
 	require.Empty(t, historicalRecipientCandidates([]string{
-		"main@example.com", "coworker@another-domain.test",
+		"main@outlook.com", "coworker@hotmail.com",
 	}))
-	require.Equal(t, []string{"custom-alias@example.com"}, historicalRecipientCandidates([]string{
-		"custom-alias@example.com",
+	require.Empty(t, historicalRecipientCandidates([]string{"relay@privaterelay.appleid.com"}))
+	require.Equal(t, []string{"custom-alias@hotmail.com"}, historicalRecipientCandidates([]string{
+		"custom-alias@hotmail.com",
 	}))
 	require.Equal(t, "plus", historicalRecipientKind("main@example.com", "main+github@example.com"))
 	require.Equal(t, "dot", historicalRecipientKind("firstname@example.com", "first.name@example.com"))
