@@ -67,6 +67,14 @@ func (uc *EmailCodeUseCase) RequestLinuxDO(ctx context.Context, email, providerE
 	return uc.request(ctx, normalized, linuxDOEmailCodeKey(normalized))
 }
 
+func (uc *EmailCodeUseCase) RequestGitHub(ctx context.Context, email, expectedEmail string) (bool, error) {
+	normalized := normalizeEmail(email)
+	if normalized != normalizeEmail(expectedEmail) || validateEmailAddress(normalized) != nil {
+		return false, domain.ErrInvalidEmailAddress
+	}
+	return uc.request(ctx, normalized, githubEmailCodeKey(normalized))
+}
+
 func (uc *EmailCodeUseCase) request(ctx context.Context, normalized, key string) (bool, error) {
 	started, retryAfter, err := uc.store.StartCooldown(ctx, key, EmailCodeResendGapSeconds())
 	if err != nil {
@@ -133,4 +141,8 @@ func emailCodeKey(email string) string {
 
 func linuxDOEmailCodeKey(email string) string {
 	return "linuxdo:" + emailCodeKey(email)
+}
+
+func githubEmailCodeKey(email string) string {
+	return "github:" + emailCodeKey(email)
 }

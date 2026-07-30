@@ -237,8 +237,6 @@ func TestSensitiveSettingsRequireSensitivePermission(t *testing.T) {
 	require.Equal(t, []settingDTO{{Key: "site_title", Value: "ReMail", CreatedAt: "0001-01-01T00:00:00.000Z", UpdatedAt: "0001-01-01T00:00:00.000Z"}}, payload.Options)
 
 	for _, request := range []*http.Request{
-		requestWithSession(http.MethodGet, "/v1/admin/settings/github_client_secret", ""),
-		requestWithSession(http.MethodGet, "/v1/admin/settings/%20github_client_secret%20", ""),
 		requestWithSession(http.MethodPut, "/v1/admin/settings/github_client_secret", `{"value":"replacement"}`),
 		requestWithSession(http.MethodDelete, "/v1/admin/settings/epay_merchant_key", ""),
 	} {
@@ -246,6 +244,11 @@ func TestSensitiveSettingsRequireSensitivePermission(t *testing.T) {
 		r.ServeHTTP(response, request)
 		require.Equal(t, http.StatusForbidden, response.Code)
 		require.Equal(t, "no-store", response.Header().Get("Cache-Control"))
+	}
+	for _, path := range []string{"/v1/admin/settings/github_client_secret", "/v1/admin/settings/%20github_client_secret%20"} {
+		response := httptest.NewRecorder()
+		r.ServeHTTP(response, requestWithSession(http.MethodGet, path, ""))
+		require.Equal(t, http.StatusNotFound, response.Code)
 	}
 	require.Equal(t, "secret", repo.items["github_client_secret"].Value)
 	require.Equal(t, "merchant-secret", repo.items["epay_merchant_key"].Value)
@@ -266,6 +269,9 @@ func TestCredentialsAreWriteOnlyForPrivilegedAdmins(t *testing.T) {
 		"epay_merchant_key":        {Key: "epay_merchant_key", Value: "merchant-secret"},
 		"epay_private_key":         {Key: "epay_private_key", Value: "private-secret"},
 		"epay_platform_public_key": {Key: "epay_platform_public_key", Value: "public-key"},
+		"github_client_id":         {Key: "github_client_id", Value: "github-client"},
+		"github_client_secret":     {Key: "github_client_secret", Value: "github-secret"},
+		"linuxdo_client_id":        {Key: "linuxdo_client_id", Value: "linuxdo-client"},
 		"linuxdo_client_secret":    {Key: "linuxdo_client_secret", Value: "linuxdo-secret"},
 	}}
 	r := testRouter(repo)
@@ -275,10 +281,13 @@ func TestCredentialsAreWriteOnlyForPrivilegedAdmins(t *testing.T) {
 	require.Equal(t, http.StatusOK, list.Code)
 	require.NotContains(t, list.Body.String(), "merchant-secret")
 	require.NotContains(t, list.Body.String(), "private-secret")
+	require.NotContains(t, list.Body.String(), "github-client")
+	require.NotContains(t, list.Body.String(), "github-secret")
+	require.NotContains(t, list.Body.String(), "linuxdo-client")
 	require.NotContains(t, list.Body.String(), "linuxdo-secret")
 	require.Contains(t, list.Body.String(), "public-key")
 
-	for _, key := range []string{"epay_merchant_key", "epay_private_key", "linuxdo_client_secret"} {
+	for _, key := range []string{"epay_merchant_key", "epay_private_key", "github_client_id", "github_client_secret", "linuxdo_client_id", "linuxdo_client_secret"} {
 		response := httptest.NewRecorder()
 		r.ServeHTTP(response, requestWithSession(http.MethodGet, "/v1/admin/settings/"+key, ""))
 		require.Equal(t, http.StatusNotFound, response.Code)
@@ -292,11 +301,13 @@ func TestCredentialsAreWriteOnlyForPrivilegedAdmins(t *testing.T) {
 	require.Equal(t, "replacement-secret", repo.items["epay_merchant_key"].Value)
 
 	bulk := httptest.NewRecorder()
-	r.ServeHTTP(bulk, requestWithSession(http.MethodPut, "/v1/admin/settings", `{"settings":[{"key":"epay_private_key","value":"replacement-private"},{"key":"epay_platform_public_key","value":"replacement-public"}]}`))
+	r.ServeHTTP(bulk, requestWithSession(http.MethodPut, "/v1/admin/settings", `{"settings":[{"key":"epay_private_key","value":"replacement-private"},{"key":"epay_platform_public_key","value":"replacement-public"},{"key":"github_client_id","value":"replacement-client"}]}`))
 	require.Equal(t, http.StatusOK, bulk.Code)
 	require.NotContains(t, bulk.Body.String(), "replacement-private")
+	require.NotContains(t, bulk.Body.String(), "replacement-client")
 	require.Contains(t, bulk.Body.String(), "replacement-public")
 	require.Equal(t, "replacement-private", repo.items["epay_private_key"].Value)
+	require.Equal(t, "replacement-client", repo.items["github_client_id"].Value)
 }
 
 func TestBulkSettingsPermissionAndBlankSecretSafety(t *testing.T) {
@@ -345,8 +356,8 @@ func TestLinuxDOOAuthAppSettingsRequireSensitivePermission(t *testing.T) {
 	list := httptest.NewRecorder()
 	r.ServeHTTP(list, requestWithSession(http.MethodGet, "/v1/admin/settings", ""))
 	require.Equal(t, http.StatusOK, list.Code)
-	require.Contains(t, list.Body.String(), "original-client")
-	require.Contains(t, list.Body.String(), callbackURL)
+	require.NotContains(t, list.Body.String(), "original-client")
+	require.NotContains(t, list.Body.String(), callbackURL)
 	require.NotContains(t, list.Body.String(), "original-secret")
 
 	denied := httptest.NewRecorder()

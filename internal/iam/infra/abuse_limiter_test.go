@@ -28,14 +28,26 @@ func TestAbuseLimiterThresholdsAndClear(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, turnstileWindow, retry)
 
-	for range linuxDOOAuthLimit {
-		retry, err = limiter.HitLinuxDOOAuth(ctx, "203.0.113.17")
+	for range oauthLimit {
+		retry, err = limiter.HitOAuth(ctx, "linuxdo", "203.0.113.17")
 		require.NoError(t, err)
 		require.Zero(t, retry)
 	}
-	retry, err = limiter.HitLinuxDOOAuth(ctx, "203.0.113.17")
+	retry, err = limiter.HitOAuth(ctx, "linuxdo", "203.0.113.17")
 	require.NoError(t, err)
-	require.Equal(t, linuxDOOAuthWindow, retry)
+	require.Equal(t, oauthWindow, retry)
+
+	for range oauthStartLimit {
+		retry, err = limiter.HitOAuthStart(ctx, "github", "203.0.113.18")
+		require.NoError(t, err)
+		require.Zero(t, retry)
+	}
+	retry, err = limiter.HitOAuthStart(ctx, "github", "203.0.113.18")
+	require.NoError(t, err)
+	require.Equal(t, oauthStartWindow, retry)
+	retry, err = limiter.HitOAuth(ctx, "github", "203.0.113.18")
+	require.NoError(t, err)
+	require.Zero(t, retry)
 
 	for range loginEmailLimit {
 		retry, err = limiter.TakeLogin(ctx, " User@Test.COM ", "203.0.113.8")

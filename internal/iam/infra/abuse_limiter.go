@@ -14,8 +14,10 @@ import (
 const (
 	turnstileLimit      = 30
 	turnstileWindow     = 60
-	linuxDOOAuthLimit   = 30
-	linuxDOOAuthWindow  = 60
+	oauthLimit          = 30
+	oauthWindow         = 60
+	oauthStartLimit     = 30
+	oauthStartWindow    = 60
 	loginEmailLimit     = 10
 	loginIPLimit        = 60
 	loginWindow         = 15 * 60
@@ -99,13 +101,26 @@ func (l *AbuseLimiter) HitTurnstile(ctx context.Context, ip string) (int, error)
 	return retry, nil
 }
 
-// HitLinuxDOOAuth limits outbound Linux DO token exchanges by client IP.
-func (l *AbuseLimiter) HitLinuxDOOAuth(ctx context.Context, ip string) (int, error) {
-	retry, err := abuseHitScript.Run(ctx, l.rdb, []string{abuseIPKey("linuxdo_oauth", ip)}, linuxDOOAuthLimit, linuxDOOAuthWindow).Int()
+func (l *AbuseLimiter) hitOAuth(ctx context.Context, kind, provider, ip string, limit, window int) (int, error) {
+	provider = strings.TrimSpace(provider)
+	if provider == "" {
+		return 0, fmt.Errorf("oauth provider is required")
+	}
+	retry, err := abuseHitScript.Run(ctx, l.rdb, []string{abuseIPKey(kind+"_"+provider, ip)}, limit, window).Int()
 	if err != nil {
-		return 0, fmt.Errorf("redis linuxdo oauth abuse limit: %w", err)
+		return 0, fmt.Errorf("redis oauth abuse limit: %w", err)
 	}
 	return retry, nil
+}
+
+// HitOAuthStart bounds short-lived OAuth state keys created by client IP.
+func (l *AbuseLimiter) HitOAuthStart(ctx context.Context, provider, ip string) (int, error) {
+	return l.hitOAuth(ctx, "oauth_start", provider, ip, oauthStartLimit, oauthStartWindow)
+}
+
+// HitOAuth limits outbound provider token exchanges by client IP.
+func (l *AbuseLimiter) HitOAuth(ctx context.Context, provider, ip string) (int, error) {
+	return l.hitOAuth(ctx, "oauth", provider, ip, oauthLimit, oauthWindow)
 }
 
 func (l *AbuseLimiter) TakeLogin(ctx context.Context, email, ip string) (int, error) {

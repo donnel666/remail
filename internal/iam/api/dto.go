@@ -51,6 +51,15 @@ type LinuxDOCompleteRequest struct {
 	Code  string                 `json:"code" binding:"required"`
 }
 
+type GitHubEmailCodeRequest struct {
+	Email          string `json:"email" binding:"required,email"`
+	TurnstileToken string `json:"turnstileToken" binding:"max=2048"`
+}
+
+type GitHubCompleteRequest struct {
+	Code string `json:"code" binding:"required"`
+}
+
 // ChangePasswordRequest is the request body for PATCH /v1/password.
 type ChangePasswordRequest struct {
 	OldPassword string `json:"oldPassword" binding:"required"`
@@ -205,6 +214,8 @@ type LoginResponse struct {
 type LoginConfigResponse struct {
 	LinuxDOOAuthEnabled bool `json:"linuxdoOAuthEnabled"`
 	LinuxDOBound        bool `json:"linuxdoBound"`
+	GitHubOAuthEnabled  bool `json:"githubOAuthEnabled"`
+	GitHubBound         bool `json:"githubBound"`
 }
 
 type LinuxDOPendingResponse struct {
@@ -215,6 +226,14 @@ type LinuxDOPendingResponse struct {
 	SuggestedEmailExists bool   `json:"suggestedEmailExists"`
 	RegistrationEnabled  bool   `json:"registrationEnabled"`
 	LegacyAccount        bool   `json:"legacyAccount"`
+}
+
+type GitHubPendingResponse struct {
+	Provider       string `json:"provider"`
+	ProviderUserID string `json:"providerUserId"`
+	Username       string `json:"username"`
+	Email          string `json:"email"`
+	Intent         string `json:"intent"`
 }
 
 // TurnstileConfigResponse exposes the runtime switch and public widget site key.

@@ -1459,6 +1459,39 @@ func (e DomainResourceDetailPurpose) Valid() bool {
 	}
 }
 
+// Defines values for GitHubPendingResponseIntent.
+const (
+	Bind  GitHubPendingResponseIntent = "bind"
+	Login GitHubPendingResponseIntent = "login"
+)
+
+// Valid indicates whether the value is a known member of the GitHubPendingResponseIntent enum.
+func (e GitHubPendingResponseIntent) Valid() bool {
+	switch e {
+	case Bind:
+		return true
+	case Login:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GitHubPendingResponseProvider.
+const (
+	Github GitHubPendingResponseProvider = "github"
+)
+
+// Valid indicates whether the value is a known member of the GitHubPendingResponseProvider enum.
+func (e GitHubPendingResponseProvider) Valid() bool {
+	switch e {
+	case Github:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ImportProxiesRequestPool.
 const (
 	ImportProxiesRequestPoolResource ImportProxiesRequestPool = "resource"
@@ -5927,6 +5960,34 @@ type FinanceTrendPoint struct {
 	Withdraw        float32 `json:"withdraw"`
 }
 
+// GitHubCompleteRequest defines model for GitHubCompleteRequest.
+type GitHubCompleteRequest struct {
+	Code string `json:"code"`
+}
+
+// GitHubEmailCodeRequest defines model for GitHubEmailCodeRequest.
+type GitHubEmailCodeRequest struct {
+	Email openapi_types.Email `json:"email"`
+
+	// TurnstileToken Required when runtime human verification is enabled
+	TurnstileToken *string `json:"turnstileToken,omitempty"`
+}
+
+// GitHubPendingResponse defines model for GitHubPendingResponse.
+type GitHubPendingResponse struct {
+	Email          openapi_types.Email           `json:"email"`
+	Intent         GitHubPendingResponseIntent   `json:"intent"`
+	Provider       GitHubPendingResponseProvider `json:"provider"`
+	ProviderUserId string                        `json:"providerUserId"`
+	Username       string                        `json:"username"`
+}
+
+// GitHubPendingResponseIntent defines model for GitHubPendingResponse.Intent.
+type GitHubPendingResponseIntent string
+
+// GitHubPendingResponseProvider defines model for GitHubPendingResponse.Provider.
+type GitHubPendingResponseProvider string
+
 // GrantProjectAccessRequest defines model for GrantProjectAccessRequest.
 type GrantProjectAccessRequest struct {
 	UserId int `json:"userId"`
@@ -6101,6 +6162,8 @@ type LinuxDOPendingResponseProvider string
 
 // LoginConfigResponse defines model for LoginConfigResponse.
 type LoginConfigResponse struct {
+	GithubBound         bool `json:"githubBound"`
+	GithubOAuthEnabled  bool `json:"githubOAuthEnabled"`
 	LinuxdoBound        bool `json:"linuxdoBound"`
 	LinuxdoOAuthEnabled bool `json:"linuxdoOAuthEnabled"`
 }
@@ -9096,6 +9159,13 @@ type PostMeInviteParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// GetGitHubCallbackParams defines parameters for GetGitHubCallback.
+type GetGitHubCallbackParams struct {
+	Code  *string `form:"code,omitempty" json:"code,omitempty"`
+	State *string `form:"state,omitempty" json:"state,omitempty"`
+	Error *string `form:"error,omitempty" json:"error,omitempty"`
+}
+
 // GetLinuxDOCallbackParams defines parameters for GetLinuxDOCallback.
 type GetLinuxDOCallbackParams struct {
 	Code  *string `form:"code,omitempty" json:"code,omitempty"`
@@ -9720,6 +9790,12 @@ type PostEmailCodeJSONRequestBody = EmailCodeRequest
 
 // PostLoginJSONRequestBody defines body for PostLogin for application/json ContentType.
 type PostLoginJSONRequestBody = LoginRequest
+
+// PostGitHubCompleteJSONRequestBody defines body for PostGitHubComplete for application/json ContentType.
+type PostGitHubCompleteJSONRequestBody = GitHubCompleteRequest
+
+// PostGitHubEmailCodeJSONRequestBody defines body for PostGitHubEmailCode for application/json ContentType.
+type PostGitHubEmailCodeJSONRequestBody = GitHubEmailCodeRequest
 
 // PostLinuxDOCompleteJSONRequestBody defines body for PostLinuxDOComplete for application/json ContentType.
 type PostLinuxDOCompleteJSONRequestBody = LinuxDOCompleteRequest
@@ -10944,6 +11020,24 @@ type ServerInterface interface {
 	// Read the current system notice
 	// (GET /v1/notice)
 	GetSystemNotice(c *gin.Context)
+	// Start GitHub OAuth login
+	// (GET /v1/oauth/github)
+	GetGitHubAuthorize(c *gin.Context)
+	// Start GitHub binding for the current user
+	// (GET /v1/oauth/github/bind)
+	GetGitHubBind(c *gin.Context)
+	// Complete GitHub OAuth login or binding
+	// (GET /v1/oauth/github/callback)
+	GetGitHubCallback(c *gin.Context, params GetGitHubCallbackParams)
+	// Verify local mailbox ownership and finish GitHub login or binding
+	// (POST /v1/oauth/github/complete)
+	PostGitHubComplete(c *gin.Context)
+	// Send the local account email code for GitHub linking
+	// (POST /v1/oauth/github/email/code)
+	PostGitHubEmailCode(c *gin.Context)
+	// Get the pending GitHub account verification
+	// (GET /v1/oauth/github/pending)
+	GetGitHubPending(c *gin.Context)
 	// Start Linux DO OAuth login
 	// (GET /v1/oauth/linuxdo)
 	GetLinuxDOAuthorize(c *gin.Context)
@@ -20632,6 +20726,114 @@ func (siw *ServerInterfaceWrapper) GetSystemNotice(c *gin.Context) {
 	siw.Handler.GetSystemNotice(c)
 }
 
+// GetGitHubAuthorize operation middleware
+func (siw *ServerInterfaceWrapper) GetGitHubAuthorize(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetGitHubAuthorize(c)
+}
+
+// GetGitHubBind operation middleware
+func (siw *ServerInterfaceWrapper) GetGitHubBind(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetGitHubBind(c)
+}
+
+// GetGitHubCallback operation middleware
+func (siw *ServerInterfaceWrapper) GetGitHubCallback(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetGitHubCallbackParams
+
+	// ------------- Optional query parameter "code" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "code", c.Request.URL.Query(), &params.Code, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter code: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "state" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "state", c.Request.URL.Query(), &params.State, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter state: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "error" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "error", c.Request.URL.Query(), &params.Error, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter error: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetGitHubCallback(c, params)
+}
+
+// PostGitHubComplete operation middleware
+func (siw *ServerInterfaceWrapper) PostGitHubComplete(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostGitHubComplete(c)
+}
+
+// PostGitHubEmailCode operation middleware
+func (siw *ServerInterfaceWrapper) PostGitHubEmailCode(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostGitHubEmailCode(c)
+}
+
+// GetGitHubPending operation middleware
+func (siw *ServerInterfaceWrapper) GetGitHubPending(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetGitHubPending(c)
+}
+
 // GetLinuxDOAuthorize operation middleware
 func (siw *ServerInterfaceWrapper) GetLinuxDOAuthorize(c *gin.Context) {
 
@@ -23492,6 +23694,12 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/me/invite", wrapper.GetMeInvite)
 	router.POST(options.BaseURL+"/v1/me/invite", wrapper.PostMeInvite)
 	router.GET(options.BaseURL+"/v1/notice", wrapper.GetSystemNotice)
+	router.GET(options.BaseURL+"/v1/oauth/github", wrapper.GetGitHubAuthorize)
+	router.GET(options.BaseURL+"/v1/oauth/github/bind", wrapper.GetGitHubBind)
+	router.GET(options.BaseURL+"/v1/oauth/github/callback", wrapper.GetGitHubCallback)
+	router.POST(options.BaseURL+"/v1/oauth/github/complete", wrapper.PostGitHubComplete)
+	router.POST(options.BaseURL+"/v1/oauth/github/email/code", wrapper.PostGitHubEmailCode)
+	router.GET(options.BaseURL+"/v1/oauth/github/pending", wrapper.GetGitHubPending)
 	router.GET(options.BaseURL+"/v1/oauth/linuxdo", wrapper.GetLinuxDOAuthorize)
 	router.GET(options.BaseURL+"/v1/oauth/linuxdo/bind", wrapper.GetLinuxDOBind)
 	router.GET(options.BaseURL+"/v1/oauth/linuxdo/callback", wrapper.GetLinuxDOCallback)

@@ -20,4 +20,9 @@ export const AUTH_SECURITY_KEYS = [
   "linuxdo_client_secret",
   "linuxdo_callback_url",
   "linuxdo_minimum_trust_level",
+  "github_oauth_enabled",
+  "github_client_id",
+  "github_client_secret",
+  "github_callback_url",
+  "github_minimum_account_age_days",
 ] as const;

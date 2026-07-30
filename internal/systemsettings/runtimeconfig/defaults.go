@@ -2,7 +2,7 @@ package runtimeconfig
 
 import "github.com/donnel666/remail/internal/systemsettings/domain"
 
-const DefaultSettingsCount = 195
+const DefaultSettingsCount = 200
 
 // DefaultSettings is the single source of initial values for runtime-managed
 // settings. Startup inserts only keys that are not in storage.
@@ -32,6 +32,11 @@ var defaultSettings = []domain.Setting{
 	{Key: "linuxdo_client_secret", Value: ""},
 	{Key: "linuxdo_callback_url", Value: ""},
 	{Key: "linuxdo_minimum_trust_level", Value: "0"},
+	{Key: "github_oauth_enabled", Value: "false"},
+	{Key: "github_client_id", Value: ""},
+	{Key: "github_client_secret", Value: ""},
+	{Key: "github_callback_url", Value: ""},
+	{Key: "github_minimum_account_age_days", Value: "0"},
 	{Key: "announcement_enabled", Value: "true"},
 	{Key: "announcements", Value: "[]"},
 	{Key: "global_notice", Value: ""},

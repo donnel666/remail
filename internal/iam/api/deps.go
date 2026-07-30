@@ -21,7 +21,8 @@ type UserFinder interface {
 
 type abuseLimiter interface {
 	HitTurnstile(ctx context.Context, ip string) (int, error)
-	HitLinuxDOOAuth(ctx context.Context, ip string) (int, error)
+	HitOAuthStart(ctx context.Context, provider, ip string) (int, error)
+	HitOAuth(ctx context.Context, provider, ip string) (int, error)
 	TakeLogin(ctx context.Context, email, ip string) (int, error)
 	CancelLogin(ctx context.Context, email, ip string) error
 	CompleteLogin(ctx context.Context, email, ip string) error
@@ -58,11 +59,13 @@ type IAMModule struct {
 	Users                      *infra.UserRepo
 	SessionStore               app.SessionStore
 	LinuxDOPendingStore        app.LinuxDOPendingStore
+	GitHubPendingStore         app.GitHubPendingStore
 	EmailCodeStore             app.EmailCodeStore
 	AbuseLimiter               abuseLimiter
 	TurnstileVerifier          turnstileVerifier
 	TurnstileSiteKey           string
 	linuxDOClient              *linuxDOClient
+	githubClient               *githubClient
 	AdminResourceOwners        coreapp.OwnerQueryPort
 	AdminUserSelectionResolver *AdminUserSelectionResolver
 }
@@ -105,11 +108,13 @@ func NewIAMModule(db *gorm.DB, rdb redis.UniversalClient, mailDelivery mailapp.D
 		Users:                      userRepo,
 		SessionStore:               sessionStore,
 		LinuxDOPendingStore:        sessionStore,
+		GitHubPendingStore:         sessionStore,
 		EmailCodeStore:             emailCodeStore,
 		AbuseLimiter:               infra.NewAbuseLimiter(rdb),
 		TurnstileVerifier:          infra.NewTurnstileVerifier(turnstileSecretKey),
 		TurnstileSiteKey:           turnstileSiteKey,
 		linuxDOClient:              newLinuxDOClient(),
+		githubClient:               newGitHubClient(),
 		AdminResourceOwners:        NewAdminResourceOwnerAdapter(userRepo),
 		AdminUserSelectionResolver: NewAdminUserSelectionResolver(userRepo),
 	}, nil

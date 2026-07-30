@@ -15,11 +15,13 @@ import (
 const (
 	sessionKeyPrefix     = "session:"
 	userSessionsPrefix   = "user_sessions:"
+	oauthFlowPrefix      = "oauth_flow:"
 	linuxDOFlowPrefix    = "linuxdo_oauth_flow:"
 	linuxDOPendingPrefix = "linuxdo_oauth_pending:"
+	githubPendingPrefix  = "github_oauth_pending:"
 )
 
-var consumeLinuxDOFlowScript = redis.NewScript(`
+var consumeOAuthFlowScript = redis.NewScript(`
 local value = redis.call('GET', KEYS[1])
 if not value then
   return nil
@@ -46,12 +48,20 @@ func userSessionsKey(userID uint) string {
 	return fmt.Sprintf("%s%d", userSessionsPrefix, userID)
 }
 
+func oauthFlowKey(state string) string {
+	return oauthFlowPrefix + state
+}
+
 func linuxDOFlowKey(state string) string {
 	return linuxDOFlowPrefix + state
 }
 
 func linuxDOPendingKey(token string) string {
 	return linuxDOPendingPrefix + token
+}
+
+func githubPendingKey(token string) string {
+	return githubPendingPrefix + token
 }
 
 // sessionData is the JSON structure stored in Redis.
@@ -146,36 +156,47 @@ func (s *SessionStore) DeleteByUserID(ctx context.Context, userID uint) error {
 	return err
 }
 
-func (s *SessionStore) PutLinuxDOFlow(ctx context.Context, state string, flow app.LinuxDOFlow, ttl time.Duration) error {
-	if strings.TrimSpace(state) == "" || ttl <= 0 {
-		return fmt.Errorf("invalid linuxdo oauth flow")
+func (s *SessionStore) PutOAuthFlow(ctx context.Context, state string, flow app.OAuthFlow, ttl time.Duration) error {
+	if strings.TrimSpace(state) == "" || strings.TrimSpace(flow.Provider) == "" || ttl <= 0 {
+		return fmt.Errorf("invalid oauth flow")
 	}
 	data, err := json.Marshal(flow)
 	if err != nil {
-		return fmt.Errorf("marshal linuxdo oauth flow: %w", err)
+		return fmt.Errorf("marshal oauth flow: %w", err)
 	}
-	if err := s.rdb.Set(ctx, linuxDOFlowKey(state), data, ttl).Err(); err != nil {
-		return fmt.Errorf("redis linuxdo oauth flow put: %w", err)
+	key := oauthFlowKey(state)
+	if flow.Provider == "linuxdo" {
+		// Keep LinuxDO on its original key while old and new instances overlap.
+		key = linuxDOFlowKey(state)
+	}
+	if err := s.rdb.Set(ctx, key, data, ttl).Err(); err != nil {
+		return fmt.Errorf("redis oauth flow put: %w", err)
 	}
 	return nil
 }
 
-func (s *SessionStore) ConsumeLinuxDOFlow(ctx context.Context, state string) (*app.LinuxDOFlow, error) {
+func (s *SessionStore) ConsumeOAuthFlow(ctx context.Context, state string) (*app.OAuthFlow, error) {
 	if strings.TrimSpace(state) == "" {
 		return nil, nil
 	}
-	value, err := consumeLinuxDOFlowScript.Run(ctx, s.rdb, []string{linuxDOFlowKey(state)}).Text()
-	if err != nil {
-		if err == redis.Nil {
-			return nil, nil
+	for _, key := range []string{oauthFlowKey(state), linuxDOFlowKey(state)} {
+		value, err := consumeOAuthFlowScript.Run(ctx, s.rdb, []string{key}).Text()
+		if err != nil {
+			if err == redis.Nil {
+				continue
+			}
+			return nil, fmt.Errorf("redis oauth flow consume: %w", err)
 		}
-		return nil, fmt.Errorf("redis linuxdo oauth flow consume: %w", err)
+		var flow app.OAuthFlow
+		if err := json.Unmarshal([]byte(value), &flow); err != nil {
+			return nil, fmt.Errorf("unmarshal oauth flow: %w", err)
+		}
+		if key == linuxDOFlowKey(state) && flow.Provider == "" {
+			flow.Provider = "linuxdo"
+		}
+		return &flow, nil
 	}
-	var flow app.LinuxDOFlow
-	if err := json.Unmarshal([]byte(value), &flow); err != nil {
-		return nil, fmt.Errorf("unmarshal linuxdo oauth flow: %w", err)
-	}
-	return &flow, nil
+	return nil, nil
 }
 
 func (s *SessionStore) PutLinuxDOPending(ctx context.Context, token string, pending app.LinuxDOPending, ttl time.Duration) error {
@@ -216,6 +237,48 @@ func (s *SessionStore) DeleteLinuxDOPending(ctx context.Context, token string) e
 	}
 	if err := s.rdb.Del(ctx, linuxDOPendingKey(token)).Err(); err != nil {
 		return fmt.Errorf("redis linuxdo oauth pending setup delete: %w", err)
+	}
+	return nil
+}
+
+func (s *SessionStore) PutGitHubPending(ctx context.Context, token string, pending app.GitHubPending, ttl time.Duration) error {
+	if strings.TrimSpace(token) == "" || ttl <= 0 {
+		return fmt.Errorf("invalid github oauth pending verification")
+	}
+	data, err := json.Marshal(pending)
+	if err != nil {
+		return fmt.Errorf("marshal github oauth pending verification: %w", err)
+	}
+	if err := s.rdb.Set(ctx, githubPendingKey(token), data, ttl).Err(); err != nil {
+		return fmt.Errorf("redis github oauth pending verification put: %w", err)
+	}
+	return nil
+}
+
+func (s *SessionStore) GetGitHubPending(ctx context.Context, token string) (*app.GitHubPending, error) {
+	if strings.TrimSpace(token) == "" {
+		return nil, nil
+	}
+	data, err := s.rdb.Get(ctx, githubPendingKey(token)).Bytes()
+	if err != nil {
+		if err == redis.Nil {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("redis github oauth pending verification get: %w", err)
+	}
+	var pending app.GitHubPending
+	if err := json.Unmarshal(data, &pending); err != nil {
+		return nil, fmt.Errorf("unmarshal github oauth pending verification: %w", err)
+	}
+	return &pending, nil
+}
+
+func (s *SessionStore) DeleteGitHubPending(ctx context.Context, token string) error {
+	if strings.TrimSpace(token) == "" {
+		return nil
+	}
+	if err := s.rdb.Del(ctx, githubPendingKey(token)).Err(); err != nil {
+		return fmt.Errorf("redis github oauth pending verification delete: %w", err)
 	}
 	return nil
 }

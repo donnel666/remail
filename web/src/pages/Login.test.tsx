@@ -33,12 +33,16 @@ vi.mock("@douyinfe/semi-ui", () => ({
   ),
   RadioGroup: ({ children }: any) => <div>{children}</div>,
 }));
+vi.mock("@douyinfe/semi-icons", () => ({ IconGithubLogo: () => null }));
 vi.mock("@/components/auth/SendCodeField", () => ({
   SendCodeField: ({ code, onCodeChange }: any) => (
     <input aria-label="Verification code" onChange={(event) => onCodeChange(event.target.value)} value={code} />
   ),
 }));
 vi.mock("@/components/auth/TurnstileField", () => ({ TurnstileField: () => null }));
+vi.mock("@/components/auth/GitHubVerificationModal", () => ({
+  GitHubVerificationModal: ({ open }: { open: boolean }) => open ? <div role="dialog" aria-label="GitHub verification" /> : null,
+}));
 vi.mock("@/context/auth-provider", () => ({
   useAuth: () => ({ login: mocks.login, refreshCurrentUser: mocks.refreshCurrentUser }),
 }));
@@ -47,6 +51,7 @@ vi.mock("@/lib/iam-api", () => ({
   completeLinuxDO: mocks.completeLinuxDO,
   getLinuxDOPending: mocks.getLinuxDOPending,
   getLoginConfig: mocks.getLoginConfig,
+  githubLoginURL: "/v1/oauth/github",
   linuxDOLoginURL: "/v1/oauth/linuxdo",
   sendLinuxDOEmailCode: mocks.sendLinuxDOEmailCode,
 }));
@@ -54,7 +59,7 @@ vi.mock("@/lib/iam-api", () => ({
 import Login from "./Login";
 
 beforeEach(() => {
-  mocks.getLoginConfig.mockResolvedValue({ linuxdoOAuthEnabled: true });
+  mocks.getLoginConfig.mockResolvedValue({ githubOAuthEnabled: false, linuxdoOAuthEnabled: true });
   mocks.getLinuxDOPending.mockResolvedValue({
     provider: "linuxdo",
     providerUserId: "42",
@@ -81,6 +86,33 @@ it("shows LinuxDO before the password form and consumes callback errors", async 
   const email = screen.getByLabelText("Email");
   expect(linuxDOButton.compareDocumentPosition(email) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
   expect(window.location.search).toBe("");
+});
+
+it("shows GitHub login when enabled", async () => {
+  mocks.getLoginConfig.mockResolvedValue({ githubOAuthEnabled: true, linuxdoOAuthEnabled: false });
+  window.history.replaceState({}, "", "/login");
+
+  render(<Login />);
+
+  expect(await screen.findByRole("button", { name: "Continue with GitHub" })).toBeEnabled();
+  expect(screen.queryByRole("button", { name: "Continue with LinuxDO" })).not.toBeInTheDocument();
+});
+
+it("uses GitHub callback errors when the provider is GitHub", async () => {
+  window.history.replaceState({}, "", "/login?oauth_error=email&oauth_provider=github");
+
+  render(<Login />);
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("Your GitHub account has no verified email.");
+  expect(window.location.search).toBe("");
+});
+
+it("opens GitHub mailbox verification when OAuth requires account proof", async () => {
+  window.history.replaceState({}, "", "/login?oauth_setup=github");
+
+  render(<Login />);
+
+  expect(await screen.findByRole("dialog", { name: "GitHub verification" })).toBeInTheDocument();
 });
 
 it("shows an explicit loading state while login configuration is pending", () => {

@@ -199,6 +199,17 @@ eft = allow/deny
 | `GET` | `/v1/activation` | 查询系统是否需要首次激活。 |
 | `POST` | `/v1/activation` | 首次激活系统并创建超级管理员。 |
 
+GitHub OAuth：
+
+| 项目 | 规则 |
+|------|------|
+| 配置 | 后台系统设置填写写入后不回显的 `github_client_id`、`github_client_secret`、固定回调地址 `/v1/oauth/github/callback`，再开启 `github_oauth_enabled`。Callback URL 仅敏感设置权限可读。 |
+| 账号年龄 | `github_minimum_account_age_days=0` 表示不限制；`365` 表示 GitHub 返回的 `created_at` 必须已满 365 天。登录和绑定均在服务端校验。 |
+| 邮箱 | 申请 `user:email` scope，只接受 GitHub `/user/emails` 返回的已验证邮箱；不信任公开资料中的未验证邮箱。 |
+| 登录 | 已绑定身份直接登录；未绑定但已验证邮箱与本站账号相同时，必须向本站账号当前邮箱发送验证码，验证通过后才关联并登录；否则仅在允许注册时创建无本地密码的新账号。 |
+| 绑定 | 已登录用户通过 `GET /v1/oauth/github/bind` 发起绑定，验证当前本站账号邮箱后才写入身份；OAuth-only 账号同样通过邮箱验证码完成 step-up。 |
+| 安全 | OAuth 发起与 token exchange 分别按 provider/IP 限流；`state` 与 HttpOnly SameSite Cookie 双重校验，flow 在 Redis 中一次性消费；绑定 pending 还必须匹配发起时的用户和 Session。 |
+
 补充设计：
 
 | 方法 | URI | 说明 |

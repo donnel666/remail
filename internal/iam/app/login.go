@@ -64,6 +64,24 @@ type LinuxDOProfile struct {
 	TrustLevel int
 }
 
+const githubIdentityProvider = "github"
+
+type GitHubProfile struct {
+	ID        string
+	Username  string
+	Name      string
+	Email     string
+	CreatedAt time.Time
+}
+
+type GitHubPending struct {
+	Profile   GitHubProfile `json:"profile"`
+	Intent    string        `json:"intent"`
+	UserID    uint          `json:"userId"`
+	Email     string        `json:"email"`
+	SessionID string        `json:"sessionId,omitempty"`
+}
+
 type LinuxDOAccountMode string
 
 const (
@@ -148,6 +166,230 @@ func (uc *LoginUseCase) LoginLinuxDO(ctx context.Context, profile LinuxDOProfile
 	}
 	result, err := uc.finishLogin(ctx, user, true, metadata...)
 	return result, nil, err
+}
+
+func (uc *LoginUseCase) LoginGitHub(ctx context.Context, profile GitHubProfile, metadata ...LoginMeta) (*LoginResult, *GitHubPending, error) {
+	profile, err := normalizeGitHubProfile(profile)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	user, err := uc.repo.FindByThirdPartyIdentity(ctx, githubIdentityProvider, profile.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("github login find identity: %w", err)
+	}
+	if user != nil {
+		result, err := uc.finishGitHubLogin(ctx, user, profile.ID, metadata...)
+		return result, nil, err
+	}
+
+	user, err = uc.repo.FindByEmail(ctx, profile.Email)
+	if err != nil {
+		return nil, nil, fmt.Errorf("github login find email: %w", err)
+	}
+	if user != nil {
+		if !user.IsActive() {
+			return nil, nil, domain.ErrGitHubAccountUnavailable
+		}
+		return nil, githubPending(profile, user, "login", ""), nil
+	}
+	if !runtimeconfig.Bool("register_enabled", true) {
+		return nil, nil, domain.ErrRegistrationDisabled
+	}
+	passwordMarker, err := newOAuthPasswordMarker()
+	if err != nil {
+		return nil, nil, fmt.Errorf("github login generate password marker: %w", err)
+	}
+	user = &domain.User{
+		Email:        profile.Email,
+		PasswordHash: passwordMarker,
+		Nickname:     githubNickname(profile),
+		Status:       domain.UserStatusActive,
+		Role:         domain.RoleUser,
+		UserGroupID:  1,
+	}
+	if err := uc.repo.CreateWithThirdPartyIdentity(ctx, user, githubIdentityProvider, profile.ID); err != nil {
+		if !errors.Is(err, domain.ErrEmailAlreadyExists) && !errors.Is(err, domain.ErrThirdPartyIdentityAlreadyBound) {
+			return nil, nil, fmt.Errorf("github login create account: %w", err)
+		}
+		bound, findErr := uc.repo.FindByThirdPartyIdentity(ctx, githubIdentityProvider, profile.ID)
+		if findErr != nil {
+			return nil, nil, fmt.Errorf("github login resolve identity conflict: %w", findErr)
+		}
+		if bound != nil {
+			result, loginErr := uc.finishGitHubLogin(ctx, bound, profile.ID, metadata...)
+			return result, nil, loginErr
+		}
+		existing, findErr := uc.repo.FindByEmail(ctx, profile.Email)
+		if findErr != nil {
+			return nil, nil, fmt.Errorf("github login resolve email conflict: %w", findErr)
+		}
+		if existing != nil {
+			if !existing.IsActive() {
+				return nil, nil, domain.ErrGitHubAccountUnavailable
+			}
+			return nil, githubPending(profile, existing, "login", ""), nil
+		}
+		return nil, nil, fmt.Errorf("github login create account: %w", err)
+	}
+	grantRegistrationReward(ctx, uc.rewardWallet, user.ID)
+	result, err := uc.finishGitHubLogin(ctx, user, profile.ID, metadata...)
+	return result, nil, err
+}
+
+func (uc *LoginUseCase) NewGitHubBindPending(ctx context.Context, userID uint, sessionID string, profile GitHubProfile) (*GitHubPending, error) {
+	profile, err := normalizeGitHubProfile(profile)
+	if err != nil {
+		return nil, err
+	}
+	if userID == 0 || strings.TrimSpace(sessionID) == "" {
+		return nil, domain.ErrAuthenticationRequired
+	}
+	user, err := uc.repo.FindByID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("github bind find account: %w", err)
+	}
+	if user == nil || !user.IsActive() {
+		return nil, domain.ErrGitHubAccountUnavailable
+	}
+	bound, err := uc.repo.FindByThirdPartyIdentity(ctx, githubIdentityProvider, profile.ID)
+	if err != nil {
+		return nil, fmt.Errorf("github bind find identity: %w", err)
+	}
+	if bound != nil {
+		return nil, domain.ErrThirdPartyIdentityAlreadyBound
+	}
+	return githubPending(profile, user, "bind", sessionID), nil
+}
+
+func (uc *LoginUseCase) CompleteGitHub(ctx context.Context, pending GitHubPending, code string, metadata ...LoginMeta) (*LoginResult, error) {
+	if uc.codeStore == nil {
+		return nil, errors.New("github email code store is not configured")
+	}
+	profile, err := normalizeGitHubProfile(pending.Profile)
+	if err != nil {
+		return nil, err
+	}
+	if pending.Intent != "login" && pending.Intent != "bind" {
+		return nil, domain.ErrGitHubAccountUnavailable
+	}
+	email := normalizeEmail(pending.Email)
+	if validateEmailAddress(email) != nil || pending.UserID == 0 {
+		return nil, domain.ErrGitHubAccountUnavailable
+	}
+	user, err := uc.repo.FindByID(ctx, pending.UserID)
+	if err != nil {
+		return nil, fmt.Errorf("github verify find account: %w", err)
+	}
+	if user == nil || !user.IsActive() || normalizeEmail(user.Email) != email {
+		return nil, domain.ErrGitHubAccountUnavailable
+	}
+
+	key := githubEmailCodeKey(email)
+	code = strings.TrimSpace(code)
+	claimToken, err := newCryptoID()
+	if err != nil {
+		return nil, fmt.Errorf("github verify generate email claim: %w", err)
+	}
+	restore := func(cause error) error {
+		restoreCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+		defer cancel()
+		if _, restoreErr := uc.codeStore.Restore(restoreCtx, key, claimToken, code); restoreErr != nil {
+			return fmt.Errorf("restore github email code after %v: %w", cause, restoreErr)
+		}
+		return cause
+	}
+	claimed, err := uc.codeStore.Claim(ctx, key, code, claimToken)
+	if err != nil {
+		return nil, restore(fmt.Errorf("github verify claim email code: %w", err))
+	}
+	if !claimed {
+		return nil, domain.ErrVerificationCodeIncorrect
+	}
+	if err := uc.repo.BindThirdPartyIdentity(ctx, user.ID, githubIdentityProvider, profile.ID); err != nil {
+		return nil, restore(fmt.Errorf("github verify bind identity: %w", err))
+	}
+
+	var result *LoginResult
+	if pending.Intent == "login" {
+		result, err = uc.finishGitHubLogin(ctx, user, profile.ID, metadata...)
+		if err != nil {
+			return nil, restore(err)
+		}
+	}
+	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	if committed, commitErr := uc.codeStore.Commit(commitCtx, key, claimToken); commitErr != nil || !committed {
+		slog.Warn("commit github email code", "error", commitErr, "committed", committed)
+	}
+	return result, nil
+}
+
+func githubPending(profile GitHubProfile, user *domain.User, intent, sessionID string) *GitHubPending {
+	return &GitHubPending{
+		Profile:   profile,
+		Intent:    intent,
+		UserID:    user.ID,
+		Email:     normalizeEmail(user.Email),
+		SessionID: sessionID,
+	}
+}
+
+func (uc *LoginUseCase) finishGitHubLogin(ctx context.Context, user *domain.User, providerUserID string, metadata ...LoginMeta) (*LoginResult, error) {
+	if user == nil || !user.IsActive() {
+		return nil, domain.ErrGitHubAccountUnavailable
+	}
+	user, err := uc.repo.RecordThirdPartyLogin(ctx, user.ID, githubIdentityProvider, providerUserID)
+	if err != nil {
+		return nil, fmt.Errorf("github login update last login: %w", err)
+	}
+	if user == nil {
+		return nil, domain.ErrGitHubAccountUnavailable
+	}
+	return uc.finishLogin(ctx, user, true, metadata...)
+}
+
+func (uc *LoginUseCase) HasGitHubIdentity(ctx context.Context, userID uint) (bool, error) {
+	bound, err := uc.repo.HasThirdPartyIdentity(ctx, userID, githubIdentityProvider)
+	if err != nil {
+		return false, fmt.Errorf("has github identity: %w", err)
+	}
+	return bound, nil
+}
+
+func normalizeGitHubProfile(profile GitHubProfile) (GitHubProfile, error) {
+	profile.ID = strings.TrimSpace(profile.ID)
+	id, err := strconv.ParseUint(profile.ID, 10, 64)
+	if err != nil || id == 0 || strconv.FormatUint(id, 10) != profile.ID {
+		return GitHubProfile{}, domain.ErrGitHubAccountUnavailable
+	}
+	profile.Email = normalizeEmail(profile.Email)
+	if validateEmailAddress(profile.Email) != nil {
+		return GitHubProfile{}, domain.ErrGitHubVerifiedEmailUnavailable
+	}
+	now := time.Now()
+	if profile.CreatedAt.IsZero() || profile.CreatedAt.After(now) {
+		return GitHubProfile{}, domain.ErrGitHubAccountUnavailable
+	}
+	minimumAgeDays := runtimeconfig.Int("github_minimum_account_age_days", 0, 0)
+	if minimumAgeDays > 0 && profile.CreatedAt.After(now.AddDate(0, 0, -minimumAgeDays)) {
+		return GitHubProfile{}, domain.ErrGitHubAccountTooNew
+	}
+	return profile, nil
+}
+
+func githubNickname(profile GitHubProfile) string {
+	nickname := strings.TrimSpace(profile.Name)
+	if nickname == "" {
+		nickname = strings.TrimSpace(profile.Username)
+	}
+	if nickname == "" {
+		nickname = "GitHub User"
+	}
+	if runes := []rune(nickname); len(runes) > 100 {
+		nickname = string(runes[:100])
+	}
+	return nickname
 }
 
 func (uc *LoginUseCase) newLinuxDOPending(ctx context.Context, profile LinuxDOProfile) (*LinuxDOPending, error) {

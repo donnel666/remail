@@ -53,6 +53,7 @@ vi.mock("@/context/auth-provider", () => ({
 }));
 vi.mock("@/lib/iam-api", () => ({
   changePassword: vi.fn(),
+  githubBindURL: "/v1/oauth/github/bind",
   getLoginConfig: mocks.getLoginConfig,
   linuxDOBindURL: "/v1/oauth/linuxdo/bind",
 }));
@@ -63,6 +64,9 @@ vi.mock("@/lib/iam-errors", () => ({
 }));
 vi.mock("@/components/semi/overflow-tooltip", () => ({
   OverflowTooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
+}));
+vi.mock("@/components/auth/GitHubVerificationModal", () => ({
+  GitHubVerificationModal: ({ open }: { open: boolean }) => open ? <div role="dialog" aria-label="GitHub verification" /> : null,
 }));
 vi.mock("./account/api-key-panel", () => ({ ApiKeyPanel: () => null }));
 vi.mock("./account/change-password-dialog", () => ({ ChangePasswordDialog: () => null }));
@@ -107,7 +111,7 @@ describe("Account LinuxDO binding", () => {
     window.history.replaceState({}, "", "/account");
     mocks.currentUser.email = "linuxdo-42@oauth.invalid";
     mocks.currentUser.hasLocalPassword = false;
-    mocks.getLoginConfig.mockResolvedValue({ linuxdoOAuthEnabled: true, linuxdoBound: false });
+    mocks.getLoginConfig.mockResolvedValue({ githubOAuthEnabled: false, githubBound: false, linuxdoOAuthEnabled: true, linuxdoBound: false });
     mocks.getWallet.mockResolvedValue({ consumerBalance: "0", historicalSpend: "0" });
     mocks.getAPIKeyUsage.mockResolvedValue({ requestCount: 0 });
     mocks.refreshCurrentUser.mockResolvedValue(mocks.currentUser);
@@ -127,7 +131,7 @@ describe("Account LinuxDO binding", () => {
   });
 
   it("shows the bound state without an email-change action", async () => {
-    mocks.getLoginConfig.mockResolvedValue({ linuxdoOAuthEnabled: true, linuxdoBound: true });
+    mocks.getLoginConfig.mockResolvedValue({ githubOAuthEnabled: false, githubBound: false, linuxdoOAuthEnabled: true, linuxdoBound: true });
     render(<Account />);
 
     expect(await screen.findByRole("button", { name: "Bound" })).toBeDisabled();
@@ -148,8 +152,8 @@ describe("Account LinuxDO binding", () => {
     mocks.getLoginConfig.mockRejectedValue(new Error("network unavailable"));
     render(<Account />);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load LinuxDO account status. Please try again later.");
-    expect(screen.getAllByRole("button", { name: "Unavailable" })).toHaveLength(1);
+    expect(await screen.findByText("Could not load LinuxDO account status. Please try again later.")).toHaveAttribute("role", "alert");
+    expect(screen.getAllByRole("button", { name: "Unavailable" })).toHaveLength(2);
   });
 
   it("keeps password management available for an account with a real email", async () => {
@@ -159,6 +163,22 @@ describe("Account LinuxDO binding", () => {
 
     expect(await screen.findByRole("link", { name: "Bind" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Change password" })).toBeEnabled();
+  });
+
+  it("exposes the authenticated GitHub bind URL when enabled", async () => {
+    mocks.getLoginConfig.mockResolvedValue({ githubOAuthEnabled: true, githubBound: false, linuxdoOAuthEnabled: false, linuxdoBound: false });
+
+    render(<Account />);
+
+    expect(await screen.findByRole("link", { name: "Bind" })).toHaveAttribute("href", "/v1/oauth/github/bind");
+  });
+
+  it("opens GitHub mailbox verification after the binding callback", async () => {
+    window.history.replaceState({}, "", "/account?oauth_setup=github");
+
+    render(<Account />);
+
+    expect(await screen.findByRole("dialog", { name: "GitHub verification" })).toBeInTheDocument();
   });
 
   it("ignores unknown success notices and sanitizes unknown OAuth errors", async () => {

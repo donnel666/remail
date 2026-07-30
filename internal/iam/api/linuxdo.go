@@ -58,10 +58,17 @@ func currentLinuxDOSettings() (linuxDOSettings, bool) {
 func (h *IAMHandler) GetLoginConfig(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
 	_, linuxDOEnabled := currentLinuxDOSettings()
+	_, githubEnabled := currentGitHubSettings()
 	linuxDOBound := false
+	githubBound := false
 	if userID, ok := middleware.GetCurrentUserID(c); ok && h.module != nil && h.module.LoginUseCase != nil {
 		var err error
 		linuxDOBound, err = h.module.LoginUseCase.HasLinuxDOIdentity(c.Request.Context(), userID)
+		if err != nil {
+			writeError(c, err)
+			return
+		}
+		githubBound, err = h.module.LoginUseCase.HasGitHubIdentity(c.Request.Context(), userID)
 		if err != nil {
 			writeError(c, err)
 			return
@@ -70,6 +77,8 @@ func (h *IAMHandler) GetLoginConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, LoginConfigResponse{
 		LinuxDOOAuthEnabled: linuxDOEnabled,
 		LinuxDOBound:        linuxDOBound,
+		GitHubOAuthEnabled:  githubEnabled,
+		GitHubBound:         githubBound,
 	})
 }
 
@@ -104,6 +113,18 @@ func (h *IAMHandler) startLinuxDO(c *gin.Context, intent string) {
 		redirectLinuxDOError(c, intent, "disabled")
 		return
 	}
+	if h.module.AbuseLimiter != nil {
+		retryAfter, err := h.module.AbuseLimiter.HitOAuthStart(c.Request.Context(), linuxDOProvider, c.ClientIP())
+		if err != nil {
+			slog.Error("linuxdo oauth start abuse limit", "request_id", middleware.GetRequestID(c), "error", err)
+			redirectLinuxDOError(c, intent, "failed")
+			return
+		}
+		if retryAfter > 0 {
+			redirectLinuxDOError(c, intent, "rate_limited")
+			return
+		}
+	}
 
 	state, err := newCSRFToken()
 	if err != nil {
@@ -117,7 +138,7 @@ func (h *IAMHandler) startLinuxDO(c *gin.Context, intent string) {
 		redirectLinuxDOError(c, intent, "failed")
 		return
 	}
-	flow := app.LinuxDOFlow{Intent: intent, CodeVerifier: codeVerifier}
+	flow := app.OAuthFlow{Provider: linuxDOProvider, Intent: intent, CodeVerifier: codeVerifier}
 	if intent == linuxDOIntentBind {
 		userID, userOK := middleware.GetCurrentUserID(c)
 		sessionID, sessionOK := middleware.GetCurrentSessionID(c)
@@ -128,7 +149,7 @@ func (h *IAMHandler) startLinuxDO(c *gin.Context, intent string) {
 		flow.UserID = userID
 		flow.SessionID = sessionID
 	}
-	if err := h.module.SessionStore.PutLinuxDOFlow(c.Request.Context(), state, flow, linuxDOFlowMaxAge); err != nil {
+	if err := h.module.SessionStore.PutOAuthFlow(c.Request.Context(), state, flow, linuxDOFlowMaxAge); err != nil {
 		slog.Error("store linuxdo oauth flow", "request_id", middleware.GetRequestID(c), "error", err)
 		redirectLinuxDOError(c, intent, "failed")
 		return
@@ -168,13 +189,13 @@ func (h *IAMHandler) GetLinuxDOCallback(c *gin.Context) {
 		redirectLinuxDOError(c, linuxDOIntentLogin, "failed")
 		return
 	}
-	flow, err := h.module.SessionStore.ConsumeLinuxDOFlow(c.Request.Context(), state)
+	flow, err := h.module.SessionStore.ConsumeOAuthFlow(c.Request.Context(), state)
 	if err != nil {
 		slog.Error("consume linuxdo oauth flow", "request_id", middleware.GetRequestID(c), "error", err)
 		redirectLinuxDOError(c, linuxDOIntentLogin, "failed")
 		return
 	}
-	if flow == nil || flow.Intent != linuxDOIntentLogin && flow.Intent != linuxDOIntentBind {
+	if flow == nil || flow.Provider != linuxDOProvider || flow.Intent != linuxDOIntentLogin && flow.Intent != linuxDOIntentBind {
 		redirectLinuxDOError(c, linuxDOIntentLogin, "state")
 		return
 	}
@@ -199,7 +220,7 @@ func (h *IAMHandler) GetLinuxDOCallback(c *gin.Context) {
 		return
 	}
 	if h.module.AbuseLimiter != nil {
-		retryAfter, err := h.module.AbuseLimiter.HitLinuxDOOAuth(c.Request.Context(), c.ClientIP())
+		retryAfter, err := h.module.AbuseLimiter.HitOAuth(c.Request.Context(), linuxDOProvider, c.ClientIP())
 		if err != nil {
 			slog.Error("linuxdo oauth abuse limit", "request_id", middleware.GetRequestID(c), "error", err)
 			redirectLinuxDOError(c, intent, "failed")

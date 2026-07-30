@@ -31,6 +31,9 @@ export type LinuxDOAccountMode = components["schemas"]["LinuxDOAccountMode"];
 export type LinuxDOPendingResponse = components["schemas"]["LinuxDOPendingResponse"];
 export type LinuxDOEmailCodeRequest = components["schemas"]["LinuxDOEmailCodeRequest"];
 export type LinuxDOCompleteRequest = components["schemas"]["LinuxDOCompleteRequest"];
+export type GitHubPendingResponse = components["schemas"]["GitHubPendingResponse"];
+export type GitHubEmailCodeRequest = components["schemas"]["GitHubEmailCodeRequest"];
+export type GitHubCompleteRequest = components["schemas"]["GitHubCompleteRequest"];
 export type AdminUserListResponse =
   components["schemas"]["AdminUserListResponse"];
 export type CurrentInviteResponse =
@@ -84,6 +87,8 @@ export async function getLoginConfig() {
 
 export const linuxDOLoginURL = "/v1/oauth/linuxdo";
 export const linuxDOBindURL = "/v1/oauth/linuxdo/bind";
+export const githubLoginURL = "/v1/oauth/github";
+export const githubBindURL = "/v1/oauth/github/bind";
 
 export async function getLinuxDOPending() {
   return unwrap<LinuxDOPendingResponse>(
@@ -102,6 +107,26 @@ export async function sendLinuxDOEmailCode(payload: LinuxDOEmailCodeRequest) {
 export async function completeLinuxDO(payload: LinuxDOCompleteRequest) {
   return unwrap<LoginResponse>(
     await client.POST("/v1/oauth/linuxdo/complete", { body: payload })
+  );
+}
+
+export async function getGitHubPending() {
+  return unwrap<GitHubPendingResponse>(
+    await client.GET("/v1/oauth/github/pending")
+  );
+}
+
+export async function sendGitHubEmailCode(payload: GitHubEmailCodeRequest) {
+  const result = await client.POST("/v1/oauth/github/email/code", {
+    body: payload,
+  });
+  await unwrap<void>(result);
+  return Number.parseInt(result.response.headers.get("Retry-After") ?? "", 10) || 0;
+}
+
+export async function completeGitHub(payload: GitHubCompleteRequest) {
+  return unwrap<LoginResponse | undefined>(
+    await client.POST("/v1/oauth/github/complete", { body: payload })
   );
 }
 

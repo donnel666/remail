@@ -74,6 +74,7 @@ const (
 	turnstileActionRegister      = "register_email_code"
 	turnstileActionPasswordReset = "password_reset_code"
 	turnstileActionLinuxDOEmail  = "linuxdo_email_code"
+	turnstileActionGitHubEmail   = "github_email_code"
 )
 
 // GET /v1/turnstile/config
@@ -1555,6 +1556,31 @@ func writeError(c *gin.Context, err error) {
 	case errors.Is(err, domain.ErrLinuxDOPendingExpired):
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"message":   "LinuxDO account setup expired. Please sign in with LinuxDO again.",
+			"requestId": rid,
+		})
+	case errors.Is(err, domain.ErrGitHubPendingExpired):
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"message":   "GitHub account verification expired. Please sign in with GitHub again.",
+			"requestId": rid,
+		})
+	case errors.Is(err, domain.ErrThirdPartyIdentityAlreadyBound):
+		c.JSON(http.StatusConflict, gin.H{
+			"message":   "This GitHub account is already bound to another account.",
+			"requestId": rid,
+		})
+	case errors.Is(err, domain.ErrGitHubAccountUnavailable), errors.Is(err, domain.ErrThirdPartyIdentityUnavailable):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message":   "GitHub account is unavailable.",
+			"requestId": rid,
+		})
+	case errors.Is(err, domain.ErrGitHubAccountTooNew):
+		c.JSON(http.StatusForbidden, gin.H{
+			"message":   "Your GitHub account is too new.",
+			"requestId": rid,
+		})
+	case errors.Is(err, domain.ErrGitHubVerifiedEmailUnavailable):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message":   "Your GitHub account has no verified email.",
 			"requestId": rid,
 		})
 	case errors.Is(err, domain.ErrLinuxDOExistingAccountNotFound):

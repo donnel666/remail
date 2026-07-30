@@ -28,12 +28,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import coverImage from "@/assets/cover-4.webp";
+import { GitHubVerificationModal } from "@/components/auth/GitHubVerificationModal";
 import { LinuxDoIcon } from "@/components/auth/LinuxDoIcon";
 import { OverflowTooltip } from "@/components/semi/overflow-tooltip";
 import { useAuth, type CurrentUser } from "@/context/auth-provider";
 import { LOGIN_NOTICE_KEY, clearLoginReturnTo } from "@/lib/auth-flow";
 import {
   changePassword,
+  githubBindURL,
   getLoginConfig,
   linuxDOBindURL,
 } from "@/lib/iam-api";
@@ -50,6 +52,7 @@ import { SettingItem } from "./account/setting-item";
 const { Text } = Typography;
 
 const oauthNoticeKeys: Record<string, string> = {
+  github_bound: "GitHub account bound successfully.",
   linuxdo_bound: "LinuxDO account bound successfully.",
 };
 
@@ -65,7 +68,20 @@ const oauthErrorKeys: Record<string, string> = {
   trust_level: "Your LinuxDO trust level is too low.",
 };
 
-type LinuxDOConfigState = "loading" | "enabled" | "disabled" | "error";
+const githubOAuthErrorKeys: Record<string, string> = {
+  account: "GitHub account is unavailable.",
+  account_age: "Your GitHub account is too new.",
+  already_bound: "This GitHub account is already bound.",
+  cancelled: "GitHub authorization was cancelled.",
+  disabled: "GitHub login is unavailable.",
+  email: "Your GitHub account has no verified email.",
+  failed: "GitHub login failed.",
+  rate_limited: "Too many GitHub login attempts. Please try again later.",
+  session: "Your session expired. Please log in and try again.",
+  state: "GitHub login request expired. Please try again.",
+};
+
+type OAuthConfigState = "loading" | "enabled" | "disabled" | "error";
 
 function getRoleLabel(role?: CurrentUser["role"]) {
   if (!role) return "Unknown";
@@ -96,8 +112,11 @@ export default function Account() {
   const [wallet, setWallet] = useState<WalletResponse | null>(null);
   const [requestCount, setRequestCount] = useState<number | null>(null);
   const [overviewLoading, setOverviewLoading] = useState(false);
-  const [linuxDOConfigState, setLinuxDOConfigState] = useState<LinuxDOConfigState>("loading");
+  const [linuxDOConfigState, setLinuxDOConfigState] = useState<OAuthConfigState>("loading");
   const [linuxDOBound, setLinuxDOBound] = useState(false);
+  const [githubConfigState, setGitHubConfigState] = useState<OAuthConfigState>("loading");
+  const [githubBound, setGitHubBound] = useState(false);
+  const [githubSetupOpen, setGitHubSetupOpen] = useState(false);
   const [oauthNotice, setOAuthNotice] = useState("");
   const [oauthError, setOAuthError] = useState("");
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
@@ -157,9 +176,13 @@ export default function Account() {
         if (cancelled) return;
         setLinuxDOConfigState(config.linuxdoOAuthEnabled ? "enabled" : "disabled");
         setLinuxDOBound(config.linuxdoBound);
+        setGitHubConfigState(config.githubOAuthEnabled ? "enabled" : "disabled");
+        setGitHubBound(config.githubBound);
       })
       .catch(() => {
-        if (!cancelled) setLinuxDOConfigState("error");
+        if (cancelled) return;
+        setLinuxDOConfigState("error");
+        setGitHubConfigState("error");
       });
     return () => {
       cancelled = true;
@@ -170,11 +193,18 @@ export default function Account() {
     const params = new URLSearchParams(window.location.search);
     const notice = params.get("oauth_notice");
     const errorCode = params.get("oauth_error");
+    const provider = params.get("oauth_provider");
+    if (params.get("oauth_setup") === "github") setGitHubSetupOpen(true);
     if (notice && Object.prototype.hasOwnProperty.call(oauthNoticeKeys, notice)) setOAuthNotice(t(oauthNoticeKeys[notice]));
-    if (errorCode) setOAuthError(t(Object.prototype.hasOwnProperty.call(oauthErrorKeys, errorCode) ? oauthErrorKeys[errorCode] : "LinuxDO login failed."));
+    if (errorCode) {
+      const errorKeys = provider === "github" ? githubOAuthErrorKeys : oauthErrorKeys;
+      const fallback = provider === "github" ? "GitHub login failed." : "LinuxDO login failed.";
+      setOAuthError(t(Object.prototype.hasOwnProperty.call(errorKeys, errorCode) ? errorKeys[errorCode] : fallback));
+    }
     if (!notice && !errorCode) return;
     params.delete("oauth_notice");
     params.delete("oauth_error");
+    params.delete("oauth_provider");
     const search = params.toString();
     window.history.replaceState({}, "", window.location.pathname + (search ? `?${search}` : "") + window.location.hash);
   }, [t]);
@@ -399,11 +429,23 @@ export default function Account() {
                   />
                   <SettingItem
                     action={
-                      <Button disabled size="small" theme="outline" type="tertiary">
-                        {t("Not enabled")}
-                      </Button>
+                      githubConfigState === "loading" ? (
+                        <Button className="min-h-11" disabled loading size="small" theme="outline" type="tertiary">{t("Loading...")}</Button>
+                      ) : githubConfigState === "error" ? (
+                        <Button className="min-h-11" disabled size="small" theme="outline" type="tertiary">{t("Unavailable")}</Button>
+                      ) : githubConfigState === "enabled" && !githubBound ? (
+                        <a className="inline-flex min-h-11 items-center justify-center rounded-lg border border-[var(--semi-color-primary)] px-4 text-sm font-medium text-[var(--semi-color-primary)] transition-colors hover:bg-[var(--semi-color-primary-light-default)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--semi-color-primary)] focus-visible:ring-offset-2" href={githubBindURL}>{t("Bind")}</a>
+                      ) : (
+                        <Button className="min-h-11" disabled size="small" theme="outline" type="tertiary">{githubBound ? t("Bound") : t("Not enabled")}</Button>
+                      )
                     }
-                    description={t("Unbound")}
+                    description={
+                      githubConfigState === "loading"
+                        ? t("Loading GitHub account status...")
+                        : githubConfigState === "error"
+                          ? <span role="alert">{t("Could not load GitHub account status. Please try again later.")}</span>
+                          : githubBound ? t("Bound to GitHub") : t("Unbound")
+                    }
                     icon={<IconGithubLogo />}
                     title="GitHub"
                   />
@@ -485,6 +527,20 @@ export default function Account() {
         onOldPasswordChange={setOldPassword}
         open={showChangePasswordModal}
         submitting={submitting}
+      />
+      <GitHubVerificationModal
+        onCancel={() => setGitHubSetupOpen(false)}
+        onComplete={async (intent) => {
+          setGitHubSetupOpen(false);
+          if (intent === "bind") {
+            setGitHubBound(true);
+            setOAuthError("");
+            setOAuthNotice(t("GitHub account bound successfully."));
+            return;
+          }
+          await refreshCurrentUser();
+        }}
+        open={githubSetupOpen}
       />
     </div>
   );

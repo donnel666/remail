@@ -80,6 +80,11 @@ func TestValidateAuthSecuritySettings(t *testing.T) {
 	require.ErrorIs(t, Validate("linuxdo_callback_url", "http://mail.example.com/v1/oauth/linuxdo/callback"), domain.ErrInvalidValue)
 	require.ErrorIs(t, Validate("linuxdo_callback_url", "https://mail.example.com/v1/oauth/linuxdo/callback?"), domain.ErrInvalidValue)
 	require.ErrorIs(t, Validate("linuxdo_callback_url", "https://mail.example.com/v1/oauth/linuxdo/callback?next=/"), domain.ErrInvalidValue)
+	require.NoError(t, Validate("github_callback_url", "https://mail.example.com/v1/oauth/github/callback"))
+	require.NoError(t, Validate("github_callback_url", "http://localhost:8080/v1/oauth/github/callback"))
+	require.ErrorIs(t, Validate("github_callback_url", "https://mail.example.com/v1/oauth/linuxdo/callback"), domain.ErrInvalidValue)
+	require.NoError(t, Validate("github_minimum_account_age_days", "365"))
+	require.ErrorIs(t, Validate("github_minimum_account_age_days", "-1"), domain.ErrInvalidValue)
 
 	missingSecret := ValidatePersistedUpdates(DefaultSettings(), []domain.Setting{
 		{Key: "linuxdo_oauth_enabled", Value: "true"},
@@ -94,6 +99,20 @@ func TestValidateAuthSecuritySettings(t *testing.T) {
 		{Key: "linuxdo_client_id", Value: "client-id"},
 		{Key: "linuxdo_client_secret", Value: "client-secret"},
 		{Key: "linuxdo_callback_url", Value: "https://mail.example.com/v1/oauth/linuxdo/callback"},
+	}))
+
+	missingGitHubSecret := ValidatePersistedUpdates(DefaultSettings(), []domain.Setting{
+		{Key: "github_oauth_enabled", Value: "true"},
+		{Key: "github_client_id", Value: "client-id"},
+		{Key: "github_callback_url", Value: "https://mail.example.com/v1/oauth/github/callback"},
+	})
+	require.ErrorAs(t, missingGitHubSecret, &fields)
+	require.Contains(t, fields.Fields, "github_client_secret")
+	require.NoError(t, ValidatePersistedUpdates(DefaultSettings(), []domain.Setting{
+		{Key: "github_oauth_enabled", Value: "true"},
+		{Key: "github_client_id", Value: "client-id"},
+		{Key: "github_client_secret", Value: "client-secret"},
+		{Key: "github_callback_url", Value: "https://mail.example.com/v1/oauth/github/callback"},
 	}))
 }
 

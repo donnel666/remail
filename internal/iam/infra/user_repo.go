@@ -279,9 +279,20 @@ func (r *UserRepo) Create(ctx context.Context, user *domain.User) error {
 }
 
 func (r *UserRepo) CreateWithLinuxDOIdentity(ctx context.Context, user *domain.User, linuxDOID string) error {
-	linuxDOID = strings.TrimSpace(linuxDOID)
-	if linuxDOID == "" {
+	err := r.CreateWithThirdPartyIdentity(ctx, user, linuxDOIdentityProvider, linuxDOID)
+	if errors.Is(err, domain.ErrThirdPartyIdentityUnavailable) {
 		return domain.ErrLinuxDOAccountUnavailable
+	}
+	if errors.Is(err, domain.ErrThirdPartyIdentityAlreadyBound) {
+		return domain.ErrLinuxDOIdentityAlreadyBound
+	}
+	return err
+}
+
+func (r *UserRepo) CreateWithThirdPartyIdentity(ctx context.Context, user *domain.User, provider, providerUserID string) error {
+	provider, providerUserID, ok := normalizeThirdPartyIdentity(provider, providerUserID)
+	if !ok {
+		return domain.ErrThirdPartyIdentityUnavailable
 	}
 	err := r.dbFor(ctx).Transaction(func(tx *gorm.DB) error {
 		model := fromDomain(user)
@@ -289,18 +300,18 @@ func (r *UserRepo) CreateWithLinuxDOIdentity(ctx context.Context, user *domain.U
 			if errors.Is(err, gorm.ErrDuplicatedKey) {
 				return domain.ErrEmailAlreadyExists
 			}
-			return fmt.Errorf("create linuxdo user: %w", err)
+			return fmt.Errorf("create third-party user: %w", err)
 		}
 		identity := &ThirdPartyIdentityModel{
 			UserID:         model.ID,
-			Provider:       linuxDOIdentityProvider,
-			ProviderUserID: linuxDOID,
+			Provider:       provider,
+			ProviderUserID: providerUserID,
 		}
 		if err := tx.Create(identity).Error; err != nil {
 			if isIAMDuplicateKeyError(err) {
-				return domain.ErrLinuxDOIdentityAlreadyBound
+				return domain.ErrThirdPartyIdentityAlreadyBound
 			}
-			return fmt.Errorf("create linuxdo identity: %w", err)
+			return fmt.Errorf("create third-party identity: %w", err)
 		}
 		user.ID = model.ID
 		user.UserGroupID = model.UserGroupID
@@ -434,29 +445,44 @@ func (r *UserRepo) FindByEmail(ctx context.Context, email string) (*domain.User,
 }
 
 func (r *UserRepo) FindByLinuxDOID(ctx context.Context, linuxDOID string) (*domain.User, error) {
-	linuxDOID = strings.TrimSpace(linuxDOID)
-	if linuxDOID == "" {
+	return r.FindByThirdPartyIdentity(ctx, linuxDOIdentityProvider, linuxDOID)
+}
+
+func (r *UserRepo) FindByThirdPartyIdentity(ctx context.Context, provider, providerUserID string) (*domain.User, error) {
+	provider, providerUserID, ok := normalizeThirdPartyIdentity(provider, providerUserID)
+	if !ok {
 		return nil, nil
 	}
 	var model UserModel
 	err := r.dbFor(ctx).
 		Preload("UserGroup").
 		Joins("JOIN third_party_identities AS identity ON identity.user_id = users.id").
-		Where("identity.provider = ? AND identity.provider_user_id = ?", linuxDOIdentityProvider, linuxDOID).
+		Where("identity.provider = ? AND identity.provider_user_id = ?", provider, providerUserID).
 		First(&model).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("find user by linuxdo id: %w", err)
+		return nil, fmt.Errorf("find user by third-party identity: %w", err)
 	}
 	return model.toDomain(), nil
 }
 
 func (r *UserRepo) BindLinuxDOIdentity(ctx context.Context, userID uint, linuxDOID string) error {
-	linuxDOID = strings.TrimSpace(linuxDOID)
-	if userID == 0 || linuxDOID == "" {
+	err := r.BindThirdPartyIdentity(ctx, userID, linuxDOIdentityProvider, linuxDOID)
+	if errors.Is(err, domain.ErrThirdPartyIdentityUnavailable) {
 		return domain.ErrLinuxDOAccountUnavailable
+	}
+	if errors.Is(err, domain.ErrThirdPartyIdentityAlreadyBound) {
+		return domain.ErrLinuxDOIdentityAlreadyBound
+	}
+	return err
+}
+
+func (r *UserRepo) BindThirdPartyIdentity(ctx context.Context, userID uint, provider, providerUserID string) error {
+	provider, providerUserID, ok := normalizeThirdPartyIdentity(provider, providerUserID)
+	if userID == 0 || !ok {
+		return domain.ErrThirdPartyIdentityUnavailable
 	}
 
 	return r.dbFor(ctx).Transaction(func(tx *gorm.DB) error {
@@ -465,43 +491,43 @@ func (r *UserRepo) BindLinuxDOIdentity(ctx context.Context, userID uint, linuxDO
 			Select("id", "status").
 			First(&user, userID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return domain.ErrLinuxDOAccountUnavailable
+				return domain.ErrThirdPartyIdentityUnavailable
 			}
-			return fmt.Errorf("bind linuxdo lock user: %w", err)
+			return fmt.Errorf("bind third-party lock user: %w", err)
 		}
 		if user.Status != string(domain.UserStatusActive) {
-			return domain.ErrLinuxDOAccountUnavailable
+			return domain.ErrThirdPartyIdentityUnavailable
 		}
 
 		var identity ThirdPartyIdentityModel
-		err := tx.Where("provider = ? AND provider_user_id = ?", linuxDOIdentityProvider, linuxDOID).First(&identity).Error
+		err := tx.Where("provider = ? AND provider_user_id = ?", provider, providerUserID).First(&identity).Error
 		if err == nil {
 			if identity.UserID == userID {
 				return nil
 			}
-			return domain.ErrLinuxDOIdentityAlreadyBound
+			return domain.ErrThirdPartyIdentityAlreadyBound
 		}
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return fmt.Errorf("bind linuxdo find identity: %w", err)
+			return fmt.Errorf("bind third-party find identity: %w", err)
 		}
 
-		err = tx.Where("user_id = ? AND provider = ?", userID, linuxDOIdentityProvider).First(&identity).Error
+		err = tx.Where("user_id = ? AND provider = ?", userID, provider).First(&identity).Error
 		if err == nil {
-			return domain.ErrLinuxDOIdentityAlreadyBound
+			return domain.ErrThirdPartyIdentityAlreadyBound
 		}
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return fmt.Errorf("bind linuxdo find user identity: %w", err)
+			return fmt.Errorf("bind third-party find user identity: %w", err)
 		}
 
 		if err := tx.Create(&ThirdPartyIdentityModel{
 			UserID:         userID,
-			Provider:       linuxDOIdentityProvider,
-			ProviderUserID: linuxDOID,
+			Provider:       provider,
+			ProviderUserID: providerUserID,
 		}).Error; err != nil {
 			if isIAMDuplicateKeyError(err) {
-				return domain.ErrLinuxDOIdentityAlreadyBound
+				return domain.ErrThirdPartyIdentityAlreadyBound
 			}
-			return fmt.Errorf("bind linuxdo create identity: %w", err)
+			return fmt.Errorf("bind third-party create identity: %w", err)
 		}
 		return nil
 	})
@@ -550,14 +576,22 @@ func (r *UserRepo) UpdateLinuxDOPlaceholder(ctx context.Context, legacyUserID ui
 }
 
 func (r *UserRepo) HasLinuxDOIdentity(ctx context.Context, userID uint) (bool, error) {
+	return r.HasThirdPartyIdentity(ctx, userID, linuxDOIdentityProvider)
+}
+
+func (r *UserRepo) HasThirdPartyIdentity(ctx context.Context, userID uint, provider string) (bool, error) {
+	provider = strings.TrimSpace(provider)
 	if userID == 0 {
 		return false, nil
 	}
+	if provider == "" || len(provider) > 50 {
+		return false, domain.ErrThirdPartyIdentityUnavailable
+	}
 	var count int64
 	if err := r.dbFor(ctx).Model(&ThirdPartyIdentityModel{}).
-		Where("user_id = ? AND provider = ?", userID, linuxDOIdentityProvider).
+		Where("user_id = ? AND provider = ?", userID, provider).
 		Count(&count).Error; err != nil {
-		return false, fmt.Errorf("has linuxdo identity: %w", err)
+		return false, fmt.Errorf("has third-party identity: %w", err)
 	}
 	return count > 0, nil
 }
@@ -579,10 +613,24 @@ func (r *UserRepo) RecordLogin(ctx context.Context, userID uint, expectedPasswor
 }
 
 func (r *UserRepo) RecordLinuxDOLogin(ctx context.Context, userID uint, linuxDOID string) (*domain.User, error) {
+	return r.RecordThirdPartyLogin(ctx, userID, linuxDOIdentityProvider, linuxDOID)
+}
+
+func (r *UserRepo) RecordThirdPartyLogin(ctx context.Context, userID uint, provider, providerUserID string) (*domain.User, error) {
+	provider, providerUserID, ok := normalizeThirdPartyIdentity(provider, providerUserID)
+	if !ok {
+		return nil, domain.ErrThirdPartyIdentityUnavailable
+	}
 	return r.recordLogin(ctx, userID, `EXISTS (
 		SELECT 1 FROM third_party_identities AS identity
 		WHERE identity.user_id = users.id AND identity.provider = ? AND identity.provider_user_id = ?
-	)`, linuxDOIdentityProvider, strings.TrimSpace(linuxDOID))
+	)`, provider, providerUserID)
+}
+
+func normalizeThirdPartyIdentity(provider, providerUserID string) (string, string, bool) {
+	provider = strings.TrimSpace(provider)
+	providerUserID = strings.TrimSpace(providerUserID)
+	return provider, providerUserID, provider != "" && len(provider) <= 50 && providerUserID != "" && len(providerUserID) <= 255
 }
 
 func (r *UserRepo) recordLogin(ctx context.Context, userID uint, condition string, values ...any) (*domain.User, error) {

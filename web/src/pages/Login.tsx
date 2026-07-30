@@ -1,10 +1,12 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { Button, Modal, Radio, RadioGroup } from "@douyinfe/semi-ui";
+import { IconGithubLogo } from "@douyinfe/semi-icons";
 import { Loader2 } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { SendCodeField } from "@/components/auth/SendCodeField";
 import { TurnstileField } from "@/components/auth/TurnstileField";
+import { GitHubVerificationModal } from "@/components/auth/GitHubVerificationModal";
 import { LinuxDoIcon } from "@/components/auth/LinuxDoIcon";
 import { useAuth } from "@/context/auth-provider";
 import { LOGIN_NOTICE_KEY, consumeLoginReturnTo } from "@/lib/auth-flow";
@@ -13,6 +15,7 @@ import {
   completeLinuxDO,
   getLinuxDOPending,
   getLoginConfig,
+  githubLoginURL,
   linuxDOLoginURL,
   sendLinuxDOEmailCode,
   type LinuxDOAccountMode,
@@ -31,7 +34,21 @@ const linuxDOErrorKeys: Record<string, string> = {
   trust_level: "Your LinuxDO trust level is too low.",
 };
 
-type LinuxDOConfigState = "loading" | "enabled" | "disabled" | "error";
+const githubErrorKeys: Record<string, string> = {
+  account: "GitHub account is unavailable.",
+  account_age: "Your GitHub account is too new.",
+  already_bound: "This GitHub account is already bound.",
+  cancelled: "GitHub authorization was cancelled.",
+  disabled: "GitHub login is unavailable.",
+  email: "Your GitHub account has no verified email.",
+  failed: "GitHub login failed.",
+  rate_limited: "Too many GitHub login attempts. Please try again later.",
+  registration_disabled: "Registration is disabled.",
+  session: "Your session expired. Please log in and try again.",
+  state: "GitHub login request expired. Please try again.",
+};
+
+type OAuthConfigState = "loading" | "enabled" | "disabled" | "error";
 
 function removeSearchParam(name: string) {
   const params = new URLSearchParams(window.location.search);
@@ -55,7 +72,9 @@ export default function Login() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [linuxDOConfigState, setLinuxDOConfigState] = useState<LinuxDOConfigState>("loading");
+  const [linuxDOConfigState, setLinuxDOConfigState] = useState<OAuthConfigState>("loading");
+  const [githubConfigState, setGitHubConfigState] = useState<OAuthConfigState>("loading");
+  const [githubSetupOpen, setGitHubSetupOpen] = useState(false);
   const [linuxDOPending, setLinuxDOPending] = useState<LinuxDOPendingResponse | null>(null);
   const [linuxDOPendingLoading, setLinuxDOPendingLoading] = useState(false);
   const [linuxDOMode, setLinuxDOMode] = useState<LinuxDOAccountMode>("new");
@@ -75,8 +94,12 @@ export default function Login() {
     const params = new URLSearchParams(window.location.search);
     const oauthError = params.get("oauth_error");
     if (oauthError) {
-      setError(t(Object.prototype.hasOwnProperty.call(linuxDOErrorKeys, oauthError) ? linuxDOErrorKeys[oauthError] : "LinuxDO login failed."));
+      const provider = params.get("oauth_provider");
+      const errorKeys = provider === "github" ? githubErrorKeys : linuxDOErrorKeys;
+      const fallback = provider === "github" ? "GitHub login failed." : "LinuxDO login failed.";
+      setError(t(Object.prototype.hasOwnProperty.call(errorKeys, oauthError) ? errorKeys[oauthError] : fallback));
       params.delete("oauth_error");
+      params.delete("oauth_provider");
       const search = params.toString();
       window.history.replaceState({}, "", window.location.pathname + (search ? "?" + search : "") + window.location.hash);
     }
@@ -116,12 +139,19 @@ export default function Login() {
           if (!cancelled) setLinuxDOPendingLoading(false);
         });
     }
+    if (params.get("oauth_setup") === "github") {
+      setGitHubSetupOpen(true);
+    }
     void getLoginConfig()
       .then((config) => {
-        if (!cancelled) setLinuxDOConfigState(config.linuxdoOAuthEnabled ? "enabled" : "disabled");
+        if (cancelled) return;
+        setLinuxDOConfigState(config.linuxdoOAuthEnabled ? "enabled" : "disabled");
+        setGitHubConfigState(config.githubOAuthEnabled ? "enabled" : "disabled");
       })
       .catch(() => {
-        if (!cancelled) setLinuxDOConfigState("error");
+        if (cancelled) return;
+        setLinuxDOConfigState("error");
+        setGitHubConfigState("error");
       });
     return () => {
       cancelled = true;
@@ -216,28 +246,44 @@ export default function Login() {
             {error}
           </div>
         ) : null}
-        {linuxDOConfigState === "enabled" || linuxDOConfigState === "loading" ? (
+        {linuxDOConfigState === "enabled" || linuxDOConfigState === "loading" || githubConfigState === "enabled" || githubConfigState === "loading" ? (
           <div className="mb-5 space-y-4">
-            <button
-              type="button"
-              aria-busy={linuxDOConfigState === "loading"}
-              disabled={linuxDOConfigState === "loading"}
-              onClick={() => window.location.assign(linuxDOLoginURL)}
-              className="flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-[var(--divider)] bg-[var(--surface)] px-4 text-sm font-semibold text-[var(--ink-primary)] transition-colors duration-200 hover:bg-[var(--surface-sunken)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-start)] focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-70"
-            >
-              {linuxDOConfigState === "loading" ? <Loader2 className="size-5 animate-spin" aria-hidden="true" /> : <LinuxDoIcon className="size-5" />}
-              {t(linuxDOConfigState === "loading" ? "Loading LinuxDO login..." : "Continue with LinuxDO")}
-            </button>
+            {linuxDOConfigState === "enabled" || linuxDOConfigState === "loading" ? (
+              <button
+                type="button"
+                aria-busy={linuxDOConfigState === "loading"}
+                disabled={linuxDOConfigState === "loading"}
+                onClick={() => window.location.assign(linuxDOLoginURL)}
+                className="flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-[var(--divider)] bg-[var(--surface)] px-4 text-sm font-semibold text-[var(--ink-primary)] transition-colors duration-200 hover:bg-[var(--surface-sunken)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-start)] focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-70"
+              >
+                {linuxDOConfigState === "loading" ? <Loader2 className="size-5 animate-spin" aria-hidden="true" /> : <LinuxDoIcon className="size-5" />}
+                {t(linuxDOConfigState === "loading" ? "Loading LinuxDO login..." : "Continue with LinuxDO")}
+              </button>
+            ) : null}
+            {githubConfigState === "enabled" || githubConfigState === "loading" ? (
+              <button
+                type="button"
+                aria-busy={githubConfigState === "loading"}
+                disabled={githubConfigState === "loading"}
+                onClick={() => window.location.assign(githubLoginURL)}
+                className="flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-[var(--divider)] bg-[var(--surface)] px-4 text-sm font-semibold text-[var(--ink-primary)] transition-colors duration-200 hover:bg-[var(--surface-sunken)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-start)] focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-70"
+              >
+                {githubConfigState === "loading" ? <Loader2 className="size-5 animate-spin" aria-hidden="true" /> : <IconGithubLogo size="large" />}
+                {t(githubConfigState === "loading" ? "Loading GitHub login..." : "Continue with GitHub")}
+              </button>
+            ) : null}
             <div className="flex items-center gap-3" aria-hidden="true">
               <span className="h-px flex-1 bg-[var(--divider)]" />
               <span className="text-xs uppercase tracking-wide text-[var(--ink-muted)]">{t("or")}</span>
               <span className="h-px flex-1 bg-[var(--divider)]" />
             </div>
           </div>
-        ) : linuxDOConfigState === "error" ? (
-          <div role="alert" aria-live="polite" className="mb-5 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">
-            {t("Could not load LinuxDO login settings. Please refresh and try again.")}
-          </div>
+        ) : null}
+        {linuxDOConfigState === "error" ? (
+          <div role="alert" aria-live="polite" className="mb-3 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">{t("Could not load LinuxDO login settings. Please refresh and try again.")}</div>
+        ) : null}
+        {githubConfigState === "error" ? (
+          <div role="alert" aria-live="polite" className="mb-5 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">{t("Could not load GitHub login settings. Please refresh and try again.")}</div>
         ) : null}
         <form className="space-y-4" onSubmit={handleSubmit}>
           <label htmlFor="login-email" className="sr-only">{t("Email")}</label>
@@ -396,6 +442,16 @@ export default function Login() {
           </div>
         ) : null}
       </Modal>
+
+      <GitHubVerificationModal
+        onCancel={() => setGitHubSetupOpen(false)}
+        onComplete={async () => {
+          setGitHubSetupOpen(false);
+          await refreshCurrentUser();
+          void navigate({ to: consumeLoginReturnTo() as never, replace: true });
+        }}
+        open={githubSetupOpen}
+      />
     </div>
   );
 }

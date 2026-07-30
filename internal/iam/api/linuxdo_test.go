@@ -432,3 +432,23 @@ func TestLinuxDOOAuthCallbackRateLimitSkipsProviderRequest(t *testing.T) {
 	require.Equal(t, 1, limiter.linuxDOHits)
 	require.Zero(t, tokenCalls.Load())
 }
+
+func TestLinuxDOOAuthStartRateLimitDoesNotStoreFlow(t *testing.T) {
+	configureLinuxDOTest(t)
+	h := newTestHandler()
+	limiter := &fakeAbuseLimiter{oauthStartRetry: 60}
+	h.module.AbuseLimiter = limiter
+	router := setupTestRouterWithHandler(h)
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/oauth/linuxdo", nil))
+
+	require.Equal(t, http.StatusSeeOther, response.Code)
+	require.Equal(t, "/login?oauth_error=rate_limited", response.Header().Get("Location"))
+	require.Equal(t, 1, limiter.oauthStartHits)
+	store := h.module.SessionStore.(*mockSessionStore)
+	store.mu.Lock()
+	flowCount := len(store.oauthFlows)
+	store.mu.Unlock()
+	require.Zero(t, flowCount)
+}

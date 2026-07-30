@@ -33,6 +33,7 @@ var integerRanges = map[string]integerRange{
 	"email_code_ttl_seconds": positive(86400), "email_code_resend_gap_seconds": positive(3600), "email_code_digit_len": {min: 4, max: 10},
 	"bcrypt_cost": {min: 4, max: 16}, "session_max_age_seconds": {min: 300, max: 31_536_000},
 	"linuxdo_minimum_trust_level":         {min: 0, max: 4},
+	"github_minimum_account_age_days":     {min: 0, max: 36500},
 	"rebate_expiry_days":                  {min: 0, max: 36500},
 	"max_pending_recharge_orders":         positive(100),
 	"async_check_request_timeout_seconds": {min: 1, max: 30},
@@ -91,7 +92,7 @@ var removedKeys = map[string]struct{}{
 
 var booleanKeys = map[string]struct{}{
 	"register_enabled": {}, "captcha_enabled": {}, "announcement_enabled": {}, "faq_enabled": {}, "epay_enabled": {},
-	"daily_checkin_enabled": {}, "leaderboard_reward_enabled": {}, "linuxdo_oauth_enabled": {},
+	"daily_checkin_enabled": {}, "leaderboard_reward_enabled": {}, "linuxdo_oauth_enabled": {}, "github_oauth_enabled": {},
 }
 
 func Validate(key, value string) error {
@@ -185,14 +186,18 @@ func Validate(key, value string) error {
 		if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
 			return domain.ErrInvalidValue
 		}
-	case "linuxdo_callback_url":
+	case "linuxdo_callback_url", "github_callback_url":
 		if value == "" {
 			return nil
 		}
-		if rawValue != value || !validLinuxDOCallbackURL(value) {
+		callbackPath := "/v1/oauth/linuxdo/callback"
+		if key == "github_callback_url" {
+			callbackPath = "/v1/oauth/github/callback"
+		}
+		if rawValue != value || !validOAuthCallbackURL(value, callbackPath) {
 			return domain.ErrInvalidValue
 		}
-	case "linuxdo_client_id", "linuxdo_client_secret":
+	case "linuxdo_client_id", "linuxdo_client_secret", "github_client_id", "github_client_secret":
 		if rawValue != value || len(value) > 512 || strings.ContainsAny(value, "\r\n\x00") {
 			return domain.ErrInvalidValue
 		}
@@ -381,6 +386,9 @@ func sanitizeRelationships(values map[string]string) {
 	if strings.TrimSpace(values["linuxdo_oauth_enabled"]) == "true" && len(invalidLinuxDOConfigFields(values)) > 0 {
 		values["linuxdo_oauth_enabled"] = "false"
 	}
+	if strings.TrimSpace(values["github_oauth_enabled"]) == "true" && len(invalidGitHubConfigFields(values)) > 0 {
+		values["github_oauth_enabled"] = "false"
+	}
 	if strings.TrimSpace(values["daily_checkin_enabled"]) == "true" {
 		if rules, err := ParseCheckinRewardRules(values["daily_checkin_reward_rules"]); err != nil || len(rules) == 0 {
 			values["daily_checkin_enabled"] = "false"
@@ -429,6 +437,11 @@ func validateRelationships(values map[string]string) error {
 	}
 	if strings.TrimSpace(values["linuxdo_oauth_enabled"]) == "true" {
 		if fields := invalidLinuxDOConfigFields(values); len(fields) > 0 {
+			return &domain.InvalidValueFieldsError{Fields: fields}
+		}
+	}
+	if strings.TrimSpace(values["github_oauth_enabled"]) == "true" {
+		if fields := invalidGitHubConfigFields(values); len(fields) > 0 {
 			return &domain.InvalidValueFieldsError{Fields: fields}
 		}
 	}
@@ -483,6 +496,18 @@ func invalidLinuxDOConfigFields(values map[string]string) map[string]string {
 	return fields
 }
 
+func invalidGitHubConfigFields(values map[string]string) map[string]string {
+	fields := make(map[string]string)
+	for _, key := range []string{"github_client_id", "github_client_secret", "github_callback_url"} {
+		if strings.TrimSpace(values[key]) == "" {
+			fields[key] = "Required when GitHub OAuth is enabled."
+		} else if Validate(key, values[key]) != nil {
+			fields[key] = "Invalid value."
+		}
+	}
+	return fields
+}
+
 func smtpTaskBudgetSeconds(retries int) int {
 	return (retries+1)*30 + retries*(retries+1)/2
 }
@@ -504,9 +529,9 @@ func validDomain(value string) bool {
 	return true
 }
 
-func validLinuxDOCallbackURL(value string) bool {
+func validOAuthCallbackURL(value, callbackPath string) bool {
 	parsed, err := url.Parse(value)
-	if len(value) > 2048 || err != nil || parsed.Hostname() == "" || parsed.User != nil || parsed.ForceQuery || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.RawPath != "" || parsed.Path != "/v1/oauth/linuxdo/callback" {
+	if len(value) > 2048 || err != nil || parsed.Hostname() == "" || parsed.User != nil || parsed.ForceQuery || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.RawPath != "" || parsed.Path != callbackPath {
 		return false
 	}
 	if parsed.Scheme == "https" {

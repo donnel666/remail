@@ -18,6 +18,10 @@ type UserRepository interface {
 	// one transaction. Identity conflicts return ErrLinuxDOIdentityAlreadyBound.
 	CreateWithLinuxDOIdentity(ctx context.Context, user *domain.User, linuxDOID string) error
 
+	// CreateWithThirdPartyIdentity persists a user and external identity in one
+	// transaction. Identity conflicts return ErrThirdPartyIdentityAlreadyBound.
+	CreateWithThirdPartyIdentity(ctx context.Context, user *domain.User, provider, providerUserID string) error
+
 	// CreateWithInvite persists a new user and atomically consumes an invite.
 	CreateWithInvite(ctx context.Context, user *domain.User, inviteCode string) error
 
@@ -32,6 +36,10 @@ type UserRepository interface {
 	UpdateLinuxDOPlaceholder(ctx context.Context, legacyUserID uint, linuxDOID, email, passwordHash string) error
 	HasLinuxDOIdentity(ctx context.Context, userID uint) (bool, error)
 
+	FindByThirdPartyIdentity(ctx context.Context, provider, providerUserID string) (*domain.User, error)
+	BindThirdPartyIdentity(ctx context.Context, userID uint, provider, providerUserID string) error
+	HasThirdPartyIdentity(ctx context.Context, userID uint, provider string) (bool, error)
+
 	// FindByID looks up a non-deleted user by primary key.
 	FindByID(ctx context.Context, id uint) (*domain.User, error)
 
@@ -42,6 +50,10 @@ type UserRepository interface {
 	// RecordLinuxDOLogin updates last_login_at only while the account remains
 	// active and bound to the verified LinuxDo identity.
 	RecordLinuxDOLogin(ctx context.Context, userID uint, linuxDOID string) (*domain.User, error)
+
+	// RecordThirdPartyLogin updates last_login_at only while the account remains
+	// active and bound to the verified external identity.
+	RecordThirdPartyLogin(ctx context.Context, userID uint, provider, providerUserID string) (*domain.User, error)
 
 	// UpdatePassword updates only password_hash and atomically bumps
 	// token_version when the account is active and the password snapshot
@@ -172,24 +184,33 @@ type SessionStore interface {
 	// DeleteByUserID removes all sessions for a given user.
 	DeleteByUserID(ctx context.Context, userID uint) error
 
-	// PutLinuxDOFlow stores one short-lived OAuth flow keyed by its state.
-	PutLinuxDOFlow(ctx context.Context, state string, flow LinuxDOFlow, ttl time.Duration) error
+	// PutOAuthFlow stores one short-lived OAuth flow keyed by its state.
+	PutOAuthFlow(ctx context.Context, state string, flow OAuthFlow, ttl time.Duration) error
 
-	// ConsumeLinuxDOFlow atomically returns and deletes an OAuth flow.
-	ConsumeLinuxDOFlow(ctx context.Context, state string) (*LinuxDOFlow, error)
+	// ConsumeOAuthFlow atomically returns and deletes an OAuth flow.
+	ConsumeOAuthFlow(ctx context.Context, state string) (*OAuthFlow, error)
 }
 
-type LinuxDOFlow struct {
+type OAuthFlow struct {
+	Provider     string
 	Intent       string
 	UserID       uint
 	SessionID    string
 	CodeVerifier string
 }
 
+type LinuxDOFlow = OAuthFlow
+
 type LinuxDOPendingStore interface {
 	PutLinuxDOPending(ctx context.Context, token string, pending LinuxDOPending, ttl time.Duration) error
 	GetLinuxDOPending(ctx context.Context, token string) (*LinuxDOPending, error)
 	DeleteLinuxDOPending(ctx context.Context, token string) error
+}
+
+type GitHubPendingStore interface {
+	PutGitHubPending(ctx context.Context, token string, pending GitHubPending, ttl time.Duration) error
+	GetGitHubPending(ctx context.Context, token string) (*GitHubPending, error)
+	DeleteGitHubPending(ctx context.Context, token string) error
 }
 
 // EmailCodeStore defines storage for email verification codes.

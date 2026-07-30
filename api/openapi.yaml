@@ -492,6 +492,224 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/oauth/github:
+    get:
+      operationId: getGitHubAuthorize
+      summary: Start GitHub OAuth login
+      tags:
+        - IAM
+      responses:
+        "302":
+          description: Redirect to GitHub authorization
+          headers:
+            Location:
+              schema:
+                type: string
+        "303":
+          description: Redirect back to login when GitHub OAuth is unavailable
+          headers:
+            Location:
+              schema:
+                type: string
+
+  /v1/oauth/github/bind:
+    get:
+      operationId: getGitHubBind
+      summary: Start GitHub binding for the current user
+      tags:
+        - IAM
+      responses:
+        "302":
+          description: Redirect to GitHub authorization
+          headers:
+            Location:
+              schema:
+                type: string
+        "303":
+          description: Redirect back to login or account when binding cannot start
+          headers:
+            Location:
+              schema:
+                type: string
+
+  /v1/oauth/github/callback:
+    get:
+      operationId: getGitHubCallback
+      summary: Complete GitHub OAuth login or binding
+      tags:
+        - IAM
+      parameters:
+        - name: code
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: error
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "303":
+          description: Redirect to login or account with the OAuth result
+          headers:
+            Location:
+              schema:
+                type: string
+
+  /v1/oauth/github/pending:
+    get:
+      operationId: getGitHubPending
+      summary: Get the pending GitHub account verification
+      tags:
+        - IAM
+      responses:
+        "200":
+          description: Pending GitHub profile and local email to verify
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitHubPendingResponse"
+        "401":
+          description: Pending verification expired, or the binding session changed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Pending verification could not be loaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/oauth/github/email/code:
+    post:
+      operationId: postGitHubEmailCode
+      summary: Send the local account email code for GitHub linking
+      tags:
+        - IAM
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GitHubEmailCodeRequest"
+      responses:
+        "204":
+          description: Verification code sent
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Pending verification expired, or the binding session changed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Email or human verification is invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Verification code request throttled
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: Human verification or mail delivery is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/oauth/github/complete:
+    post:
+      operationId: postGitHubComplete
+      summary: Verify local mailbox ownership and finish GitHub login or binding
+      tags:
+        - IAM
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GitHubCompleteRequest"
+      responses:
+        "200":
+          description: Existing account linked and login session created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "204":
+          description: GitHub account bound to the current authenticated account
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Pending verification expired, or the binding session changed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: GitHub account no longer meets the configured age policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: GitHub identity is already bound to another account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Account state or verification code is invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Too many verification attempts
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Account verification could not be completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /v1/login:
     post:
       operationId: postLogin
@@ -13615,9 +13833,15 @@ components:
     LoginConfigResponse:
       type: object
       required:
+        - githubOAuthEnabled
+        - githubBound
         - linuxdoOAuthEnabled
         - linuxdoBound
       properties:
+        githubOAuthEnabled:
+          type: boolean
+        githubBound:
+          type: boolean
         linuxdoOAuthEnabled:
           type: boolean
         linuxdoBound:
@@ -13688,6 +13912,56 @@ components:
         email:
           type: string
           format: email
+        code:
+          type: string
+      additionalProperties: false
+
+    GitHubPendingResponse:
+      type: object
+      required:
+        - provider
+        - providerUserId
+        - username
+        - email
+        - intent
+      properties:
+        provider:
+          type: string
+          enum:
+            - github
+        providerUserId:
+          type: string
+        username:
+          type: string
+        email:
+          type: string
+          format: email
+        intent:
+          type: string
+          enum:
+            - login
+            - bind
+      additionalProperties: false
+
+    GitHubEmailCodeRequest:
+      type: object
+      required:
+        - email
+      properties:
+        email:
+          type: string
+          format: email
+        turnstileToken:
+          type: string
+          maxLength: 2048
+          description: Required when runtime human verification is enabled
+      additionalProperties: false
+
+    GitHubCompleteRequest:
+      type: object
+      required:
+        - code
+      properties:
         code:
           type: string
       additionalProperties: false

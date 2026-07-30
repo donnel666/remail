@@ -189,8 +189,8 @@ func (h *Handler) Delete(c *gin.Context) {
 
 func isSensitiveKey(key string) bool {
 	switch strings.ToLower(strings.TrimSpace(key)) {
-	case "github_client_secret",
-		"linuxdo_client_secret",
+	case "github_client_id", "github_client_secret", "github_callback_url",
+		"linuxdo_client_id", "linuxdo_client_secret", "linuxdo_callback_url",
 		"epay_enabled", "epay_version", "epay_gateway_url", "epay_merchant_id", "epay_merchant_key", "epay_private_key", "epay_platform_public_key", "epay_notify_url", "epay_return_url":
 		return true
 	default:
@@ -200,7 +200,7 @@ func isSensitiveKey(key string) bool {
 
 func isWriteOnlyKey(key string) bool {
 	switch strings.ToLower(strings.TrimSpace(key)) {
-	case "epay_merchant_key", "epay_private_key", "linuxdo_client_secret", "points_unit_migration_v1":
+	case "epay_merchant_key", "epay_private_key", "github_client_id", "github_client_secret", "linuxdo_client_id", "linuxdo_client_secret", "points_unit_migration_v1":
 		return true
 	default:
 		return false
@@ -209,7 +209,7 @@ func isWriteOnlyKey(key string) bool {
 
 func isSensitiveMutationKey(key string) bool {
 	switch strings.ToLower(strings.TrimSpace(key)) {
-	case "linuxdo_client_id", "linuxdo_callback_url":
+	case "github_client_id", "github_callback_url", "linuxdo_client_id", "linuxdo_callback_url":
 		return true
 	default:
 		return isSensitiveKey(key)
