@@ -38,6 +38,8 @@ interface PendingAttachment {
   dataUrl: string;
 }
 
+const TICKET_IMAGE_MIME = /^(image\/png|image\/jpeg|image\/gif|image\/webp)$/;
+
 function readImageAsDataUrl(file: File) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -139,7 +141,7 @@ export function CreateTicketModal({
     if (!files) return;
     const readId = attachmentReadIdRef.current;
     const selected = Array.from(files)
-      .filter((file) => file.type.startsWith("image/"))
+      .filter((file) => TICKET_IMAGE_MIME.test(file.type))
       .slice(0, Math.max(0, 3 - attachments.length));
     try {
       const next = await Promise.all(
@@ -394,7 +396,7 @@ export function CreateTicketModal({
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*"
+              accept="image/png,image/jpeg,image/gif,image/webp"
               multiple
               hidden
               onChange={(event) => void handlePickFiles(event.target.files)}

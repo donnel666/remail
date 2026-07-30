@@ -49,15 +49,20 @@ func (s *AsyncDeliveryService) Send(ctx context.Context, message domain.Outbound
 }
 
 type OutboundSendUseCase struct {
-	sender     SenderPort
-	retryDelay func(int) time.Duration
+	sender           SenderPort
+	attachmentReader OutboundAttachmentReader
+	retryDelay       func(int) time.Duration
 }
 
-func NewOutboundSendUseCase(sender SenderPort) *OutboundSendUseCase {
-	return &OutboundSendUseCase{
+func NewOutboundSendUseCase(sender SenderPort, attachmentReaders ...OutboundAttachmentReader) *OutboundSendUseCase {
+	uc := &OutboundSendUseCase{
 		sender:     sender,
 		retryDelay: func(attempt int) time.Duration { return time.Duration(attempt) * time.Second },
 	}
+	if len(attachmentReaders) > 0 {
+		uc.attachmentReader = attachmentReaders[0]
+	}
+	return uc
 }
 
 func (uc *OutboundSendUseCase) Process(ctx context.Context, task OutboundSendTask) error {
@@ -72,11 +77,20 @@ func (uc *OutboundSendUseCase) Process(ctx context.Context, task OutboundSendTas
 	if task.RetryCount != nil {
 		retries = min(max(*task.RetryCount, 0), 20)
 	}
+	sendMessage := message
+	imagesLoaded := false
 	for attempt := 0; ; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return deliveryUnavailable("outbound mail send interrupted", err)
 		}
-		err := uc.sender.Send(ctx, message)
+		var err error
+		if !imagesLoaded {
+			sendMessage, err = uc.loadInlineImages(ctx, message)
+			imagesLoaded = err == nil
+		}
+		if err == nil {
+			err = uc.sender.Send(ctx, sendMessage)
+		}
 		if err == nil {
 			return nil
 		}
@@ -104,13 +118,41 @@ func (uc *OutboundSendUseCase) Process(ctx context.Context, task OutboundSendTas
 	}
 }
 
+func (uc *OutboundSendUseCase) loadInlineImages(ctx context.Context, message domain.OutboundMessage) (domain.OutboundMessage, error) {
+	if len(message.InlineImages) == 0 {
+		return message, nil
+	}
+	loaded := make([]domain.OutboundInlineImage, 0, len(message.InlineImages))
+	for _, image := range message.InlineImages {
+		if len(image.Content) == 0 {
+			if uc.attachmentReader == nil || strings.TrimSpace(image.ObjectKey) == "" {
+				return message, errors.New("outbound inline image reader unavailable")
+			}
+			contentType, content, err := uc.attachmentReader.ReadOutboundAttachment(ctx, image.ObjectKey)
+			if err != nil {
+				return message, fmt.Errorf("read outbound inline image: %w", err)
+			}
+			if len(content) == 0 {
+				return message, errors.New("outbound inline image is empty")
+			}
+			image.Content = content
+			if strings.TrimSpace(image.ContentType) == "" {
+				image.ContentType = contentType
+			}
+		}
+		loaded = append(loaded, image)
+	}
+	message.InlineImages = loaded
+	return message, nil
+}
+
 func normalizeOutboundMessage(message domain.OutboundMessage) domain.OutboundMessage {
 	message.IdempotencyKey = strings.TrimSpace(message.IdempotencyKey)
 	message.From = strings.TrimSpace(message.From)
 	message.To = strings.TrimSpace(message.To)
 	message.Subject = bodyValue(message.Subject)
 	if message.IdempotencyKey == "" {
-		message.IdempotencyKey = messageDigest(message.Purpose, message.From, message.To, message.Subject, message.TextBody, message.HTMLBody)
+		message.IdempotencyKey = message.RequestHash()
 	}
 	return message
 }

@@ -513,8 +513,8 @@ func decodeImageDataURL(raw string) (string, []byte, error) {
 	if !ok || !strings.Contains(meta, "base64") {
 		return "", nil, domain.ErrAttachmentInvalid
 	}
-	mime := strings.SplitN(meta, ";", 2)[0]
-	if !strings.HasPrefix(mime, "image/") {
+	mime := normalizeTicketImageMime(strings.SplitN(meta, ";", 2)[0])
+	if mime == "" {
 		return "", nil, domain.ErrAttachmentInvalid
 	}
 	data, err := base64.StdEncoding.DecodeString(strings.TrimSpace(payload))
@@ -522,6 +522,21 @@ func decodeImageDataURL(raw string) (string, []byte, error) {
 		return "", nil, domain.ErrAttachmentInvalid
 	}
 	return mime, data, nil
+}
+
+func normalizeTicketImageMime(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "image/png":
+		return "image/png"
+	case "image/jpeg", "image/jpg":
+		return "image/jpeg"
+	case "image/gif":
+		return "image/gif"
+	case "image/webp":
+		return "image/webp"
+	default:
+		return ""
+	}
 }
 
 func extForMime(mime string) string {

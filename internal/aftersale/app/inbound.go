@@ -140,11 +140,11 @@ func (uc *UseCase) parseReplyRecipient(recipient string) (ticketNo, token string
 // delimiter (inserted into every outbound email) with quote-header heuristics as
 // a fallback, then trims trailing quoted/blank lines.
 func stripQuotedReply(body string) string {
-	normalized := strings.ReplaceAll(body, "\r\n", "\n")
+	normalized := strings.ReplaceAll(strings.ReplaceAll(body, "\r\n", "\n"), "\r", "\n")
 	lines := strings.Split(normalized, "\n")
 	kept := make([]string, 0, len(lines))
 	for _, line := range lines {
-		if strings.Contains(line, replyDelimiter) || isQuoteHeader(line) {
+		if strings.Contains(line, replyDelimiter) || isQuoteHeader(line) || isReplyFooter(line) {
 			break
 		}
 		kept = append(kept, line)
@@ -160,8 +160,22 @@ func stripQuotedReply(body string) string {
 	return strings.TrimSpace(strings.Join(kept, "\n"))
 }
 
+func isReplyFooter(line string) bool {
+	if strings.TrimLeft(line, " \t") == "-- " {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "sent from my iphone", "sent from my ipad", "get outlook for ios", "get outlook for android",
+		"发自我的 iphone", "从我的 iphone 发送":
+		return true
+	default:
+		return false
+	}
+}
+
 func isQuoteHeader(line string) bool {
-	trimmed := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), ">"))
+	trimmed := strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), ">"))
+	marker := strings.Trim(trimmed, "-—–－_=* ")
 	switch {
 	case trimmed == "":
 		return false
@@ -169,7 +183,7 @@ func isQuoteHeader(line string) bool {
 		return true
 	case strings.HasPrefix(trimmed, "On ") && strings.HasSuffix(trimmed, "wrote:"):
 		return true
-	case strings.HasPrefix(trimmed, "-----Original Message-----"):
+	case strings.EqualFold(marker, "Original Message"), marker == "原始邮件":
 		return true
 	case strings.HasPrefix(trimmed, "原始邮件"), strings.HasPrefix(trimmed, "发件人："), strings.HasPrefix(trimmed, "发件人:"):
 		return true

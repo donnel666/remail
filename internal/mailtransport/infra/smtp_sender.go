@@ -176,6 +176,25 @@ func newSMTPMessage(from string, to string, message domain.OutboundMessage) (*go
 			msg.AddAlternativeString(gomail.TypeTextHTML, message.HTMLBody)
 		}
 	}
+	for _, image := range message.InlineImages {
+		contentType := strings.ToLower(strings.TrimSpace(image.ContentType))
+		contentID := strings.Trim(strings.TrimSpace(firstLineValue(image.ContentID)), "<>")
+		fileName := strings.TrimSpace(firstLineValue(image.FileName))
+		if len(image.Content) == 0 || !strings.HasPrefix(contentType, "image/") || contentID == "" {
+			continue
+		}
+		if fileName == "" {
+			fileName = "image"
+		}
+		if err := msg.EmbedReader(
+			fileName,
+			bytes.NewReader(image.Content),
+			gomail.WithFileContentType(gomail.ContentType(contentType)),
+			gomail.WithFileContentID("<"+contentID+">"),
+		); err != nil {
+			return nil, err
+		}
+	}
 	return msg, nil
 }
 

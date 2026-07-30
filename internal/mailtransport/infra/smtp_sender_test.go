@@ -51,6 +51,23 @@ func TestSMTPMessageUsesMultipartAlternative(t *testing.T) {
 	assert.Contains(t, raw, "<h1")
 }
 
+func TestSMTPMessageEmbedsInlineImagesByContentID(t *testing.T) {
+	message := mailapp.VerificationCodeMessage("user@example.com", "123456")
+	message.HTMLBody = `<p>正文</p><img src="cid:aa1@remail" alt="工单回复图片">`
+	message.InlineImages = []domain.OutboundInlineImage{{
+		FileName: "AA1.png", ContentType: "image/png", ContentID: "aa1@remail", Content: []byte("image-bytes"),
+	}}
+
+	msg, err := newSMTPMessage("no-reply@example.com", "user@example.com", message)
+	require.NoError(t, err)
+	raw := renderSMTPMessage(t, msg)
+
+	assert.Contains(t, raw, "Content-Type: multipart/related")
+	assert.Contains(t, raw, "Content-Id: <aa1@remail>")
+	assert.Contains(t, raw, "Content-Type: image/png")
+	assert.Contains(t, raw, base64.StdEncoding.EncodeToString([]byte("image-bytes")))
+}
+
 func TestClassifySMTPFailureSeparatesRemoteBusinessResultsFromInfrastructure(t *testing.T) {
 	retryable := classifySMTPFailure("smtp send failed", &textproto.Error{Code: 451, Msg: "try later"})
 	var retryableFailure *mailapp.OutboundSendFailure

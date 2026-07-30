@@ -50,6 +50,8 @@ interface PendingImage {
   url: string;
 }
 
+const TICKET_IMAGE_MIME = /^(image\/png|image\/jpeg|image\/gif|image\/webp)$/;
+
 function readImageAsDataUrl(file: File) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -138,7 +140,7 @@ export function TicketConversation({
     if (!fileList) return;
     const readId = imageReadIdRef.current;
     const selected = Array.from(fileList)
-      .filter((file) => file.type.startsWith("image/"))
+      .filter((file) => TICKET_IMAGE_MIME.test(file.type))
       .slice(0, Math.max(0, 6 - images.length));
     try {
       const next = await Promise.all(
@@ -309,7 +311,7 @@ export function TicketConversation({
 
           <div className="flex items-end gap-2">
             <input
-              accept="image/*"
+              accept="image/png,image/jpeg,image/gif,image/webp"
               className="hidden"
               multiple
               onChange={(event) => void pickImages(event.target.files)}

@@ -104,6 +104,14 @@ type TicketMailCommand struct {
 	Subject        string
 	TextBody       string
 	HTMLBody       string
+	InlineImages   []TicketMailInlineImage
+}
+
+type TicketMailInlineImage struct {
+	ObjectKey   string
+	FileName    string
+	ContentType string
+	ContentID   string
 }
 
 // TicketMailConfig holds the addressing used to build ticket emails.

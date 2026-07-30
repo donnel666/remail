@@ -39,6 +39,15 @@ type OutboundMessage struct {
 	Subject        string
 	TextBody       string
 	HTMLBody       string
+	InlineImages   []OutboundInlineImage
+}
+
+type OutboundInlineImage struct {
+	ObjectKey   string `json:"objectKey"`
+	FileName    string `json:"fileName"`
+	ContentType string `json:"contentType"`
+	ContentID   string `json:"contentId"`
+	Content     []byte `json:"-"`
 }
 
 type OutboundMail struct {
@@ -84,6 +93,12 @@ func (m OutboundMessage) RequestHash() string {
 	for _, part := range []any{m.Purpose, m.From, m.To, m.Subject, m.TextBody, m.HTMLBody} {
 		_, _ = fmt.Fprint(h, part)
 		_, _ = h.Write([]byte{0})
+	}
+	for _, image := range m.InlineImages {
+		for _, part := range []string{image.ObjectKey, image.FileName, image.ContentType, image.ContentID} {
+			_, _ = fmt.Fprint(h, part)
+			_, _ = h.Write([]byte{0})
+		}
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }

@@ -199,6 +199,18 @@ func (m *MailTransportModule) SetMicrosoftCredentialPort(credentials coreapp.Mic
 	m.tokenRefreshRepo.SetMicrosoftCredentialPort(credentials)
 }
 
+type outboundAttachmentReader struct {
+	files governanceapp.FilePort
+}
+
+func (r outboundAttachmentReader) ReadOutboundAttachment(ctx context.Context, objectKey string) (string, []byte, error) {
+	file, err := r.files.ReadPrivate(ctx, objectKey)
+	if err != nil || file == nil {
+		return "", nil, err
+	}
+	return file.ContentType, file.ContentBytes, nil
+}
+
 func NewMailTransportModule(
 	db *gorm.DB,
 	files governanceapp.FilePort,
@@ -243,7 +255,7 @@ func NewMailTransportModule(
 	tokenRefreshService := mailapp.NewMicrosoftTokenRefreshService(tokenRefreshRepo, tokenRefreshQueue, validationAdapter)
 	module := &MailTransportModule{
 		DeliveryUseCase:     outboundDelivery,
-		OutboundSendUseCase: mailapp.NewOutboundSendUseCase(sender),
+		OutboundSendUseCase: mailapp.NewOutboundSendUseCase(sender, outboundAttachmentReader{files: files}),
 		OutboundQueue:       outboundQueue,
 		InboundUseCase:      inboundUseCase,
 		MicrosoftAliases:    aliasService,

@@ -52,6 +52,21 @@ func TestStripQuotedReply(t *testing.T) {
 		t.Fatalf("chinese quote strip = %q", got)
 	}
 
+	chineseOriginal := "只保留这段正文\n\n---原始邮件---\n发件人：客服\n历史内容"
+	if got := stripQuotedReply(chineseOriginal); got != "只保留这段正文" {
+		t.Fatalf("chinese original-message strip = %q", got)
+	}
+
+	signed := "正文\n\n-- \n张三\nexample.com"
+	if got := stripQuotedReply(signed); got != "正文" {
+		t.Fatalf("signature strip = %q", got)
+	}
+
+	mobile := "正文\n\nSent from my iPhone"
+	if got := stripQuotedReply(mobile); got != "正文" {
+		t.Fatalf("mobile signature strip = %q", got)
+	}
+
 	if got := stripQuotedReply("  仅一行  "); got != "仅一行" {
 		t.Fatalf("plain trim = %q", got)
 	}

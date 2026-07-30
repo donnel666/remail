@@ -19,6 +19,19 @@ type outboundQueueStub struct {
 
 type senderFunc func(context.Context, domain.OutboundMessage) error
 
+type attachmentReaderStub struct {
+	err   error
+	calls int
+}
+
+func (s *attachmentReaderStub) ReadOutboundAttachment(context.Context, string) (string, []byte, error) {
+	s.calls++
+	if s.err != nil {
+		return "", nil, s.err
+	}
+	return "image/png", []byte("image-bytes"), nil
+}
+
 func (send senderFunc) Send(ctx context.Context, message domain.OutboundMessage) error {
 	return send(ctx, message)
 }
@@ -62,6 +75,38 @@ func TestOutboundSendUseCaseRetriesInfrastructureFailureThreeTimes(t *testing.T)
 	err := useCase.Process(context.Background(), task)
 	require.ErrorIs(t, err, domain.ErrDeliveryUnavailable)
 	require.Equal(t, 4, sender.calls)
+}
+
+func TestOutboundSendUseCaseLoadsInlineImagesAtSendTime(t *testing.T) {
+	reader := &attachmentReaderStub{}
+	useCase := NewOutboundSendUseCase(senderFunc(func(_ context.Context, message domain.OutboundMessage) error {
+		require.Len(t, message.InlineImages, 1)
+		require.Equal(t, []byte("image-bytes"), message.InlineImages[0].Content)
+		return nil
+	}), reader)
+	message := VerificationCodeMessage("user@example.com", "123456")
+	message.InlineImages = []domain.OutboundInlineImage{{ObjectKey: "aftersale/AS1/AA1", ContentID: "aa1@remail"}}
+
+	require.NoError(t, useCase.Process(context.Background(), OutboundSendTask{Message: message}))
+	require.Equal(t, 1, reader.calls)
+}
+
+func TestOutboundSendUseCaseDoesNotSendBrokenInlineImage(t *testing.T) {
+	reader := &attachmentReaderStub{err: errors.New("object storage unavailable")}
+	senderCalls := 0
+	useCase := NewOutboundSendUseCase(senderFunc(func(context.Context, domain.OutboundMessage) error {
+		senderCalls++
+		return nil
+	}), reader)
+	useCase.retryDelay = func(int) time.Duration { return 0 }
+	message := VerificationCodeMessage("user@example.com", "123456")
+	message.InlineImages = []domain.OutboundInlineImage{{ObjectKey: "aftersale/AS1/AA1", ContentID: "aa1@remail"}}
+
+	err := useCase.Process(context.Background(), OutboundSendTask{Message: message})
+
+	require.ErrorIs(t, err, domain.ErrDeliveryUnavailable)
+	require.Equal(t, 4, reader.calls)
+	require.Zero(t, senderCalls)
 }
 
 func TestOutboundSendUseCaseDoesNotRetryPermanentSMTPFailure(t *testing.T) {

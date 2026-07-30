@@ -71,6 +71,9 @@ func TestOutboundMailQueueStoresFiveMinutePayloadAndQueuesOnlyReference(t *testi
 	queue := NewOutboundMailQueue(client, redisClient)
 	ctx := context.Background()
 	message := mailapp.VerificationCodeMessage("user@example.com", "123456")
+	message.InlineImages = []maildomain.OutboundInlineImage{{
+		ObjectKey: "aftersale/AS1/AA1", FileName: "AA1.png", ContentType: "image/png", ContentID: "aa1@remail", Content: []byte("image-bytes"),
+	}}
 
 	accepted, err := queue.EnqueueOutboundSend(ctx, mailapp.OutboundSendTask{Message: message})
 	require.NoError(t, err)
@@ -98,6 +101,8 @@ func TestOutboundMailQueueStoresFiveMinutePayloadAndQueuesOnlyReference(t *testi
 	require.True(t, found)
 	require.Equal(t, message.To, stored.Message.To)
 	require.Equal(t, message.HTMLBody, stored.Message.HTMLBody)
+	require.Equal(t, "aftersale/AS1/AA1", stored.Message.InlineImages[0].ObjectKey)
+	require.Empty(t, stored.Message.InlineImages[0].Content)
 
 	server.FastForward(outboundPayloadTTL + time.Second)
 	accepted, err = queue.EnqueueOutboundSend(ctx, mailapp.OutboundSendTask{Message: message})

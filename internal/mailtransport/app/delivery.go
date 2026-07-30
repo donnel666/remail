@@ -23,6 +23,10 @@ type SenderPort interface {
 	Send(ctx context.Context, message domain.OutboundMessage) error
 }
 
+type OutboundAttachmentReader interface {
+	ReadOutboundAttachment(ctx context.Context, objectKey string) (contentType string, content []byte, err error)
+}
+
 // OutboundSendFailure is an explicit remote business result. Unknown sender
 // errors are infrastructure failures and must not consume the business budget.
 type OutboundSendFailure struct {

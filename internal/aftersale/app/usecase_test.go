@@ -208,10 +208,11 @@ func TestDecodeImageDataURL(t *testing.T) {
 		t.Fatalf("valid data url: mime=%q data=%q err=%v", mime, data, err)
 	}
 	for name, raw := range map[string]string{
-		"not data url": "https://example.com/a.png",
-		"not base64":   "data:image/png,hello",
-		"not image":    "data:text/plain;base64,aGVsbG8=",
-		"bad base64":   "data:image/png;base64,!!!!",
+		"not data url":      "https://example.com/a.png",
+		"not base64":        "data:image/png,hello",
+		"not image":         "data:text/plain;base64,aGVsbG8=",
+		"unsupported image": "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=",
+		"bad base64":        "data:image/png;base64,!!!!",
 	} {
 		if _, _, err := decodeImageDataURL(raw); err == nil {
 			t.Errorf("%s: expected error, got nil", name)
@@ -477,6 +478,71 @@ func TestCreateTicketNotifiesRequesterAndSuperAdmin(t *testing.T) {
 	}
 	if strings.Contains(requesterMail.TextBody, "提交用户信息") || strings.Contains(requesterMail.HTMLBody, "提交用户信息") {
 		t.Fatalf("requester mail must not expose the admin-only detail block: %+v", requesterMail)
+	}
+	htmlMessageAt, htmlUserAt := strings.Index(adminMail.HTMLBody, "hi<br>&lt;script&gt;alert(1)&lt;/script&gt;"), strings.Index(adminMail.HTMLBody, "用户 ID")
+	textMessageAt, textUserAt := strings.Index(adminMail.TextBody, "hi\n<script>alert(1)</script>"), strings.Index(adminMail.TextBody, "提交用户信息")
+	if htmlMessageAt < 0 || htmlUserAt < 0 || htmlMessageAt > htmlUserAt || textMessageAt < 0 || textUserAt < 0 || textMessageAt > textUserAt {
+		t.Fatalf("admin ticket mail must put the message before requester details: %+v", adminMail)
+	}
+}
+
+func TestTicketMailEmbedsWebReplyImages(t *testing.T) {
+	uc, _, _, _ := newTestUseCase()
+	mailer := &fakeMail{}
+	uc.mail = mailer
+	view := &TicketView{
+		Ticket: &domain.Ticket{
+			TicketNo: "AS1", Title: "图片问题", ReplyToken: "tok", RequesterUserID: 7,
+			Messages: []domain.TicketMessage{{
+				ID: 9, SenderType: domain.SenderTypeUser, Content: "[图片]",
+				Attachments: []domain.TicketAttachment{
+					{AttachmentNo: "AA1", ObjectKey: "aftersale/AS1/AA1", Mime: "image/png"},
+					{AttachmentNo: "AA2", ObjectKey: "aftersale/AS1/AA2", Mime: "image/jpeg"},
+				},
+			}},
+		},
+		Requester: &RequesterSummary{ID: 7, Nickname: "nick", Email: "u@example.com", GroupName: "VIP", Role: "user"},
+	}
+
+	uc.sendTicketMail(context.Background(), view, "admin@example.com", "admin-token", 42, ticketMailReplied, true)
+
+	if len(mailer.sent) != 1 || len(mailer.sent[0].InlineImages) != 2 {
+		t.Fatalf("inline images missing: %+v", mailer.sent)
+	}
+	mail := mailer.sent[0]
+	if mail.InlineImages[0].ObjectKey != "aftersale/AS1/AA1" || mail.InlineImages[0].ContentID != "aa1@remail" {
+		t.Fatalf("unexpected inline image: %+v", mail.InlineImages[0])
+	}
+	imageAt, userAt := strings.Index(mail.HTMLBody, `src="cid:aa1@remail"`), strings.Index(mail.HTMLBody, "用户 ID")
+	if imageAt < 0 || !strings.Contains(mail.HTMLBody, `src="cid:aa2@remail"`) || userAt < 0 || imageAt > userAt || strings.Contains(mail.HTMLBody, "[图片]") {
+		t.Fatalf("image must replace the placeholder and precede requester details: %s", mail.HTMLBody)
+	}
+}
+
+func TestTicketMailUsesPlaceholderForMoreThanTwoImages(t *testing.T) {
+	uc, _, _, _ := newTestUseCase()
+	mailer := &fakeMail{}
+	uc.mail = mailer
+	attachments := []domain.TicketAttachment{
+		{AttachmentNo: "AA1", ObjectKey: "aftersale/AS1/AA1", Mime: "image/png"},
+		{AttachmentNo: "AA2", ObjectKey: "aftersale/AS1/AA2", Mime: "image/png"},
+		{AttachmentNo: "AA3", ObjectKey: "aftersale/AS1/AA3", Mime: "image/png"},
+	}
+	view := &TicketView{
+		Ticket: &domain.Ticket{
+			TicketNo: "AS1", Title: "图片问题", ReplyToken: "tok", RequesterUserID: 7,
+			Messages: []domain.TicketMessage{{ID: 9, SenderType: domain.SenderTypeUser, Content: "请查看截图", Attachments: attachments}},
+		},
+		Requester: &RequesterSummary{ID: 7, Email: "u@example.com"},
+	}
+
+	uc.sendTicketMail(context.Background(), view, "admin@example.com", "admin-token", 42, ticketMailReplied, true)
+
+	mail := mailer.sent[0]
+	notice := "（本次回复包含 3 张图片，请登录工单查看）"
+	messageAt, noticeAt, userAt := strings.Index(mail.HTMLBody, "请查看截图"), strings.Index(mail.HTMLBody, notice), strings.Index(mail.HTMLBody, "用户 ID")
+	if len(mail.InlineImages) != 0 || strings.Contains(mail.HTMLBody, "cid:") || messageAt < 0 || noticeAt < messageAt || userAt < noticeAt {
+		t.Fatalf("large image reply must use a placeholder before requester details: %+v", mail)
 	}
 }
 

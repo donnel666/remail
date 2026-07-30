@@ -18,7 +18,7 @@ type aftersaleMailAdapter struct {
 }
 
 func (a aftersaleMailAdapter) SendTicketMail(ctx context.Context, mail aftersaleapp.TicketMailCommand) error {
-	return a.delivery.Send(ctx, mailtransportdomain.OutboundMessage{
+	message := mailtransportdomain.OutboundMessage{
 		IdempotencyKey: mail.IdempotencyKey,
 		Purpose:        mailtransportdomain.PurposeSystemNotice,
 		From:           a.from,
@@ -27,7 +27,16 @@ func (a aftersaleMailAdapter) SendTicketMail(ctx context.Context, mail aftersale
 		Subject:        mail.Subject,
 		TextBody:       mail.TextBody,
 		HTMLBody:       mail.HTMLBody,
-	})
+	}
+	for _, image := range mail.InlineImages {
+		message.InlineImages = append(message.InlineImages, mailtransportdomain.OutboundInlineImage{
+			ObjectKey:   image.ObjectKey,
+			FileName:    image.FileName,
+			ContentType: image.ContentType,
+			ContentID:   image.ContentID,
+		})
+	}
+	return a.delivery.Send(ctx, message)
 }
 
 // ticketInboundRouter sends plus-addressed ticket replies to the aftersale
