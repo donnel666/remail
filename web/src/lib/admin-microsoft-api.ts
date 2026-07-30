@@ -665,7 +665,7 @@ async function setAdminMicrosoftResourcesForSale(
   const response: AdminMicrosoftBulkCommandResponse = forSale
     ? await unwrap(await client.POST("/v1/admin/resources/publish", options))
     : await unwrap(await client.POST("/v1/admin/resources/unpublish", options));
-  if ("affected" in response) return response;
+  if ("affected" in response || selection.mode === "filter") return response;
   return {
     ...response,
     task: await waitForAdminMicrosoftTask(response.task),
@@ -691,7 +691,7 @@ async function deleteAdminMicrosoftResources(
       params: { header: commandHeaders() },
     })
   );
-  if ("affected" in response) return response;
+  if ("affected" in response || selection.mode === "filter") return response;
   return {
     ...response,
     task: await waitForAdminMicrosoftTask(response.task),

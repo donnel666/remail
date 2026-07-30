@@ -35,6 +35,12 @@ func (q *adminResourceBulkQueueStub) EnqueueAdminResourceBulk(_ context.Context,
 func (*adminResourceBulkQueueStub) RefreshAdminResourceBulk(context.Context, AdminResourceBulkTask) (bool, error) {
 	return true, nil
 }
+func (*adminResourceBulkQueueStub) RecordAdminResourceBulkPage(context.Context, AdminResourceBulkTask, AdminResourceBulkPageResult) error {
+	return nil
+}
+func (*adminResourceBulkQueueStub) FailAdminResourceBulk(context.Context, AdminResourceBulkTask) error {
+	return nil
+}
 func (q *adminResourceBulkQueueStub) ReleaseAdminResourceBulk(context.Context, AdminResourceBulkTask) error {
 	q.released = true
 	return nil

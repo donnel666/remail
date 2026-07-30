@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
@@ -20,11 +22,22 @@ import (
 // errors, payloads, filters, object keys, candidates, claims, leases or fencing
 // tokens.
 type AdminTaskViewRepo struct {
-	db *gorm.DB
+	db    *gorm.DB
+	redis redis.UniversalClient
 }
 
-func NewAdminTaskViewRepo(db *gorm.DB) *AdminTaskViewRepo {
-	return &AdminTaskViewRepo{db: db}
+func NewAdminTaskViewRepo(db *gorm.DB, redisClients ...redis.UniversalClient) *AdminTaskViewRepo {
+	var redisClient redis.UniversalClient
+	if len(redisClients) > 0 {
+		redisClient = redisClients[0]
+	}
+	return &AdminTaskViewRepo{db: db, redis: redisClient}
+}
+
+const adminResourceBulkStatusKeyPrefix = "remail:core:admin-resource-bulk-status:"
+
+func AdminResourceBulkStatusKey(commandID uint64) string {
+	return adminResourceBulkStatusKeyPrefix + strconv.FormatUint(commandID, 10)
 }
 
 type adminTaskRow struct {
@@ -255,8 +268,8 @@ SELECT
 FROM mailmatch_resource_fetch_states AS state
 WHERE state.operation_kind IN ('resource_fetch', 'resource_history')`
 
-// Redis-only bulk cursors are intentionally absent: this view exposes durable
-// business facts only.
+// Redis-only bulk cursors are absent from per-resource lists. Their bounded
+// live status remains available through the source-qualified lookup below.
 const microsoftResourceTaskUnion = importResourceTaskSelect + `
 UNION ALL
 ` + aliasAttemptTaskSelect + `
@@ -384,7 +397,13 @@ LIMIT ? OFFSET ?`, pageArgs...).Scan(&rows).Error; err != nil {
 }
 
 func (r *AdminTaskViewRepo) FindByRef(ctx context.Context, ref governanceapp.AdminTaskRef) (*governanceapp.AdminTaskView, error) {
-	if r == nil || r.db == nil {
+	if r == nil {
+		return nil, errors.New("administrator task repository is unavailable")
+	}
+	if ref.Source == governanceapp.AdminTaskSourceBulk {
+		return r.findBulkTask(ctx, ref.ID)
+	}
+	if r.db == nil {
 		return nil, errors.New("administrator task database is unavailable")
 	}
 	selectSQL, err := singleTaskSelect(ref.Source)
@@ -413,6 +432,165 @@ LIMIT 1`, ref.ID).Scan(&row)
 		}
 	}
 	return &items[0], nil
+}
+
+func (r *AdminTaskViewRepo) findBulkTask(ctx context.Context, commandID uint64) (*governanceapp.AdminTaskView, error) {
+	if r.redis == nil {
+		return nil, errors.New("administrator bulk task store is unavailable")
+	}
+	values, err := r.redis.HGetAll(ctx, AdminResourceBulkStatusKey(commandID)).Result()
+	if err != nil {
+		return nil, fmt.Errorf("read administrator bulk task: %w", err)
+	}
+	if len(values) == 0 {
+		return nil, governanceapp.ErrAdminTaskNotFound
+	}
+	kind, err := adminBulkTaskKind(values["action"])
+	if err != nil {
+		return nil, err
+	}
+	status := strings.TrimSpace(values["status"])
+	if !validAdminBulkTaskStatus(status) {
+		return nil, errors.New("administrator bulk task status is invalid")
+	}
+	attempts, err := adminBulkTaskCount(values, "attempts")
+	if err != nil {
+		return nil, err
+	}
+	maxAttempts, err := adminBulkTaskCount(values, "max_attempts")
+	if err != nil || maxAttempts < 1 {
+		return nil, errors.New("administrator bulk task retry state is invalid")
+	}
+	queuedAt, err := adminBulkTaskTime(values, "queued_at", true)
+	if err != nil {
+		return nil, err
+	}
+	startedAt, err := adminBulkTaskTime(values, "started_at", false)
+	if err != nil {
+		return nil, err
+	}
+	finishedAt, err := adminBulkTaskTime(values, "finished_at", false)
+	if err != nil {
+		return nil, err
+	}
+	updatedAt, err := adminBulkTaskTime(values, "updated_at", true)
+	if err != nil {
+		return nil, err
+	}
+	total, err := adminBulkTaskCount(values, "total")
+	if err != nil {
+		return nil, err
+	}
+	processed, err := adminBulkTaskCount(values, "processed")
+	if err != nil {
+		return nil, err
+	}
+	succeeded, err := adminBulkTaskCount(values, "succeeded")
+	if err != nil {
+		return nil, err
+	}
+	skipped, err := adminBulkTaskCount(values, "skipped")
+	if err != nil {
+		return nil, err
+	}
+	failed, err := adminBulkTaskCount(values, "failed")
+	if err != nil {
+		return nil, err
+	}
+	if total < processed && status == governanceapp.AdminTaskStatusSucceeded {
+		total = processed
+	}
+	reasons := make(map[string]int64)
+	for key, raw := range values {
+		if !strings.HasPrefix(key, "reason:") {
+			continue
+		}
+		count, parseErr := strconv.ParseInt(raw, 10, 64)
+		if parseErr != nil || count < 0 {
+			return nil, errors.New("administrator bulk task reason state is invalid")
+		}
+		reasons[safeReason(strings.TrimPrefix(key, "reason:"))] += count
+	}
+	return &governanceapp.AdminTaskView{
+		Ref:         governanceapp.AdminTaskRef{Source: governanceapp.AdminTaskSourceBulk, ID: commandID},
+		BizType:     governanceapp.AdminTaskBizMicrosoftResourceBulk,
+		BizID:       commandID,
+		Kind:        kind,
+		Status:      status,
+		Attempts:    int(attempts),
+		MaxAttempts: int(maxAttempts),
+		QueuedAt:    *queuedAt,
+		StartedAt:   startedAt,
+		FinishedAt:  finishedAt,
+		UpdatedAt:   *updatedAt,
+		Progress: &governanceapp.AdminTaskProgress{
+			Total: total, Processed: processed, Succeeded: succeeded, Skipped: skipped, Failed: failed,
+			ReasonCounts: reasonCountMap(reasons),
+		},
+	}, nil
+}
+
+func adminBulkTaskKind(action string) (string, error) {
+	switch strings.TrimSpace(action) {
+	case "validate":
+		return governanceapp.AdminTaskKindBulkValidate, nil
+	case "alias":
+		return governanceapp.AdminTaskKindBulkAlias, nil
+	case "history":
+		return governanceapp.AdminTaskKindBulkHistory, nil
+	case "token":
+		return governanceapp.AdminTaskKindBulkToken, nil
+	case "publish":
+		return governanceapp.AdminTaskKindBulkPublish, nil
+	case "unpublish":
+		return governanceapp.AdminTaskKindBulkUnpublish, nil
+	case "delete":
+		return governanceapp.AdminTaskKindBulkDelete, nil
+	default:
+		return "", errors.New("administrator bulk task action is invalid")
+	}
+}
+
+func validAdminBulkTaskStatus(status string) bool {
+	switch status {
+	case governanceapp.AdminTaskStatusQueued,
+		governanceapp.AdminTaskStatusRunning,
+		governanceapp.AdminTaskStatusSucceeded,
+		governanceapp.AdminTaskStatusFailed,
+		governanceapp.AdminTaskStatusUncertain,
+		governanceapp.AdminTaskStatusCanceled:
+		return true
+	default:
+		return false
+	}
+}
+
+func adminBulkTaskCount(values map[string]string, key string) (int64, error) {
+	value, ok := values[key]
+	if !ok {
+		return 0, fmt.Errorf("administrator bulk task field %s is missing", key)
+	}
+	result, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || result < 0 {
+		return 0, fmt.Errorf("administrator bulk task field %s is invalid", key)
+	}
+	return result, nil
+}
+
+func adminBulkTaskTime(values map[string]string, key string, required bool) (*time.Time, error) {
+	raw := strings.TrimSpace(values[key])
+	if raw == "" {
+		if required {
+			return nil, fmt.Errorf("administrator bulk task field %s is missing", key)
+		}
+		return nil, nil
+	}
+	milliseconds, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || milliseconds <= 0 {
+		return nil, fmt.Errorf("administrator bulk task field %s is invalid", key)
+	}
+	value := time.UnixMilli(milliseconds).UTC()
+	return &value, nil
 }
 
 func singleTaskSelect(source string) (string, error) {

@@ -25,6 +25,7 @@ import {
   createAdminMicrosoftExplicitAlias,
   deleteAdminMicrosoftResource,
   deleteAdminMicrosoftResourcesByFilter,
+  deleteAdminMicrosoftResourcesByIds,
   disableAdminMicrosoftResource,
   disableAdminMicrosoftResourcesByIds,
   enableAdminMicrosoftResource,
@@ -513,39 +514,23 @@ describe("admin Microsoft API adapter", () => {
     expectCommandHeader(apiMocks.POST, 1);
   });
 
-  it("keeps filter-mode commands pending until the durable task finishes", async () => {
-    vi.useFakeTimers();
-    try {
-      apiMocks.POST.mockResolvedValueOnce({
-        data: {
-          task: { status: "queued", taskId: "bulk-delete-queued" },
-          reused: false,
-        },
-      });
-      apiMocks.GET
-        .mockResolvedValueOnce({
-          data: { status: "running", taskId: "bulk-delete-queued" },
-        })
-        .mockResolvedValueOnce({
-          data: { status: "succeeded", taskId: "bulk-delete-queued" },
-        });
+  it("returns filter-mode commands once background processing is accepted", async () => {
+    apiMocks.POST.mockResolvedValueOnce({
+      data: {
+        task: { status: "queued", taskId: "bulk:42" },
+        reused: false,
+      },
+    });
 
-      const result = deleteAdminMicrosoftResourcesByFilter({ status: "normal" });
-      await vi.runAllTimersAsync();
-
-      await expect(result).resolves.toMatchObject({
-        task: { status: "succeeded", taskId: "bulk-delete-queued" },
-      });
-      expect(apiMocks.GET.mock.calls.map((call) => call[0])).toEqual([
-        "/v1/admin/tasks/{taskId}",
-        "/v1/admin/tasks/{taskId}",
-      ]);
-    } finally {
-      vi.useRealTimers();
-    }
+    await expect(
+      deleteAdminMicrosoftResourcesByFilter({ status: "normal" })
+    ).resolves.toMatchObject({
+      task: { status: "queued", taskId: "bulk:42" },
+    });
+    expect(apiMocks.GET).not.toHaveBeenCalled();
   });
 
-  it("keeps safe final progress when a filter-mode command fails", async () => {
+  it("keeps safe final progress when a bounded command fails", async () => {
     vi.useFakeTimers();
     try {
       apiMocks.POST.mockResolvedValueOnce({
@@ -569,7 +554,7 @@ describe("admin Microsoft API adapter", () => {
         },
       });
 
-      const result = deleteAdminMicrosoftResourcesByFilter({ status: "normal" });
+      const result = deleteAdminMicrosoftResourcesByIds([1, 2, 3, 4]);
       const rejection = expect(result).rejects.toThrow(
         "Processed 4/4; succeeded 2, skipped 1, failed 1. Reasons: active_allocation: 1."
       );

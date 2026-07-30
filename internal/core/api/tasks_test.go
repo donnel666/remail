@@ -164,6 +164,7 @@ func TestResourceValidationDispatcherDeadlinesAllowLaterTicksAndShutdown(t *test
 
 type adminResourceBulkCleanupQueue struct {
 	released atomic.Bool
+	failed   atomic.Bool
 }
 
 func (*adminResourceBulkCleanupQueue) EnqueueAdminResourceBulk(context.Context, coreapp.AdminResourceBulkTask) (bool, error) {
@@ -172,6 +173,15 @@ func (*adminResourceBulkCleanupQueue) EnqueueAdminResourceBulk(context.Context, 
 
 func (*adminResourceBulkCleanupQueue) RefreshAdminResourceBulk(context.Context, coreapp.AdminResourceBulkTask) (bool, error) {
 	return false, nil
+}
+
+func (*adminResourceBulkCleanupQueue) RecordAdminResourceBulkPage(context.Context, coreapp.AdminResourceBulkTask, coreapp.AdminResourceBulkPageResult) error {
+	return nil
+}
+
+func (q *adminResourceBulkCleanupQueue) FailAdminResourceBulk(context.Context, coreapp.AdminResourceBulkTask) error {
+	q.failed.Store(true)
+	return nil
 }
 
 func (q *adminResourceBulkCleanupQueue) ReleaseAdminResourceBulk(context.Context, coreapp.AdminResourceBulkTask) error {
@@ -188,4 +198,5 @@ func TestAdminResourceBulkCleanupReleasesExhaustedLease(t *testing.T) {
 	})
 
 	require.True(t, queue.released.Load())
+	require.True(t, queue.failed.Load())
 }

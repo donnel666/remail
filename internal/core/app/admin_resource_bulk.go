@@ -102,11 +102,12 @@ type AdminResourceBulkTask struct {
 }
 
 type AdminResourceBulkPageResult struct {
-	Affected  int
-	Skipped   int
-	AfterID   uint
-	ThroughID uint
-	Done      bool
+	Affected     int
+	Skipped      int
+	AfterID      uint
+	ThroughID    uint
+	Done         bool
+	ReasonCounts map[string]int64
 }
 
 // AdminResourceBulkRepository performs read-only, bounded candidate paging.
@@ -119,6 +120,8 @@ type AdminResourceBulkRepository interface {
 type AdminResourceBulkQueue interface {
 	EnqueueAdminResourceBulk(ctx context.Context, task AdminResourceBulkTask) (accepted bool, err error)
 	RefreshAdminResourceBulk(ctx context.Context, task AdminResourceBulkTask) (owned bool, err error)
+	RecordAdminResourceBulkPage(ctx context.Context, task AdminResourceBulkTask, page AdminResourceBulkPageResult) error
+	FailAdminResourceBulk(ctx context.Context, task AdminResourceBulkTask) error
 	ReleaseAdminResourceBulk(ctx context.Context, task AdminResourceBulkTask) error
 }
 
@@ -252,6 +255,9 @@ func (s *AdminResourceBulkService) Process(ctx context.Context, task AdminResour
 	if err != nil {
 		return err
 	}
+	if err := s.queue.RecordAdminResourceBulkPage(ctx, task, *page); err != nil {
+		return err
+	}
 	if page.Done {
 		return s.queue.ReleaseAdminResourceBulk(ctx, task)
 	}
@@ -262,7 +268,9 @@ func (s *AdminResourceBulkService) Process(ctx context.Context, task AdminResour
 }
 
 func (s *AdminResourceBulkService) applyPage(ctx context.Context, task AdminResourceBulkTask, limit int) (*AdminResourceBulkPageResult, error) {
-	result := &AdminResourceBulkPageResult{AfterID: task.AfterID, ThroughID: task.ThroughID}
+	result := &AdminResourceBulkPageResult{
+		AfterID: task.AfterID, ThroughID: task.ThroughID, ReasonCounts: map[string]int64{},
+	}
 	var ids []uint
 	var err error
 	switch task.Selection.Mode {
@@ -310,6 +318,7 @@ func (s *AdminResourceBulkService) applyPage(ctx context.Context, task AdminReso
 			}
 			if reason != "" {
 				result.Skipped++
+				result.ReasonCounts[reason]++
 				continue
 			}
 			reason, itemErr := s.maintenance.SubmitAdminResourceMaintenance(ctx, AdminResourceMaintenanceCommand{
@@ -324,6 +333,7 @@ func (s *AdminResourceBulkService) applyPage(ctx context.Context, task AdminReso
 				result.Affected++
 			} else {
 				result.Skipped++
+				result.ReasonCounts[reason]++
 			}
 		}
 		result.AfterID = checkpoint
@@ -334,10 +344,11 @@ func (s *AdminResourceBulkService) applyPage(ctx context.Context, task AdminReso
 		for _, resourceID := range ids {
 			var changed bool
 			var itemErr error
+			var reason string
 			if task.Action == AdminResourceBulkValidate {
-				changed, _, itemErr = s.commands.validateOneForBulk(txCtx, resourceID)
+				changed, reason, itemErr = s.commands.validateOneForBulk(txCtx, resourceID)
 			} else {
-				changed, _, itemErr = s.commands.applyStateOneForBulk(txCtx, AdminMicrosoftStateCommand(task.Action), resourceID)
+				changed, reason, itemErr = s.commands.applyStateOneForBulk(txCtx, AdminMicrosoftStateCommand(task.Action), resourceID)
 			}
 			if itemErr != nil {
 				return itemErr
@@ -346,6 +357,10 @@ func (s *AdminResourceBulkService) applyPage(ctx context.Context, task AdminReso
 				result.Affected++
 			} else {
 				result.Skipped++
+				if reason == "" {
+					reason = "not_changed"
+				}
+				result.ReasonCounts[reason]++
 			}
 		}
 		return nil
@@ -365,6 +380,13 @@ func (s *AdminResourceBulkService) ReleaseBatch(ctx context.Context, task AdminR
 		return nil
 	}
 	return s.queue.ReleaseAdminResourceBulk(ctx, task)
+}
+
+func (s *AdminResourceBulkService) FailBatch(ctx context.Context, task AdminResourceBulkTask) error {
+	if s == nil || s.queue == nil {
+		return nil
+	}
+	return s.queue.FailAdminResourceBulk(ctx, task)
 }
 
 func adminResourceBulkIDPage(ids []uint, afterID uint, limit int) []uint {

@@ -1460,6 +1460,7 @@
   "Microsoft resource converted to private.": "Microsoft resource converted to private.",
   "Microsoft resources published for public sale.": "Published {{count}} Microsoft resources for public sale.",
   "Microsoft resources converted to private.": "Converted {{count}} Microsoft resources to private.",
+  "Microsoft resources bulk operation submitted.": "Microsoft resource bulk operation submitted for background processing.",
   "Put all on sale": "Put all on sale",
   "Convert all to private": "Convert all to private",
   "A valid Microsoft email address is required.": "A valid Microsoft email address is required.",

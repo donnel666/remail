@@ -264,6 +264,12 @@ func (q adminHandlerBulkQueue) EnqueueAdminResourceBulk(_ context.Context, task 
 func (adminHandlerBulkQueue) RefreshAdminResourceBulk(context.Context, coreapp.AdminResourceBulkTask) (bool, error) {
 	return true, nil
 }
+func (adminHandlerBulkQueue) RecordAdminResourceBulkPage(context.Context, coreapp.AdminResourceBulkTask, coreapp.AdminResourceBulkPageResult) error {
+	return nil
+}
+func (adminHandlerBulkQueue) FailAdminResourceBulk(context.Context, coreapp.AdminResourceBulkTask) error {
+	return nil
+}
 func (adminHandlerBulkQueue) ReleaseAdminResourceBulk(context.Context, coreapp.AdminResourceBulkTask) error {
 	return nil
 }

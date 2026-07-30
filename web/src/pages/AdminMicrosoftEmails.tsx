@@ -312,6 +312,10 @@ export default function AdminMicrosoftEmails() {
 
   const showBulkOutcome = useCallback(
     (response: AdminMicrosoftBulkCommandResponse, successKey: string) => {
+      if (!("affected" in response) && response.task.status !== "succeeded") {
+        Toast.success(t("Microsoft resources bulk operation submitted."));
+        return;
+      }
       const outcome = bulkOutcome(response);
       Toast.success(t(successKey, { count: outcome.succeeded }));
       if (outcome.skipped === 0) return;

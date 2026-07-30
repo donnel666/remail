@@ -3,6 +3,7 @@ package api
 import (
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
@@ -12,8 +13,8 @@ type Module struct {
 	CoreTaskQuery *CoreTaskQueryAdapter
 }
 
-func NewModule(db *gorm.DB) *Module {
-	tasks := governanceapp.NewAdminTaskQueryService(governanceinfra.NewAdminTaskViewRepo(db))
+func NewModule(db *gorm.DB, redisClients ...redis.UniversalClient) *Module {
+	tasks := governanceapp.NewAdminTaskQueryService(governanceinfra.NewAdminTaskViewRepo(db, redisClients...))
 	logs := governanceapp.NewAdminLogService(governanceinfra.NewAdminLogRepo(db))
 	return &Module{
 		Tasks:         tasks,

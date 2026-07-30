@@ -45,6 +45,7 @@ const (
 	AdminTaskSourceAliasSchedule = "alias_schedule"
 	AdminTaskSourceToken         = "token"
 	AdminTaskSourceFetch         = "fetch"
+	AdminTaskSourceBulk          = "bulk"
 )
 
 func AdminTaskLimits() (int, int) {
@@ -96,7 +97,8 @@ func isAdminTaskSource(value string) bool {
 		AdminTaskSourceAlias,
 		AdminTaskSourceAliasSchedule,
 		AdminTaskSourceToken,
-		AdminTaskSourceFetch:
+		AdminTaskSourceFetch,
+		AdminTaskSourceBulk:
 		return true
 	default:
 		return false

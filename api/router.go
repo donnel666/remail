@@ -164,7 +164,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		coreMod.SetAdminProxyBindingQueryPort(proxyapi.NewAdminResourceProxyBindingQueryAdapter(proxyMod.AdminResourceBindings))
 		coreMod.SetMicrosoftAliasScheduleTrigger(mailapi.NewMicrosoftAliasValidationAdapter(mailMod))
 		coreapi.RegisterCoreTaskHandlers(taskMux, coreMod)
-		governanceMod := governanceapi.NewModule(p.DB)
+		governanceMod := governanceapi.NewModule(p.DB, p.Redis)
 		governanceapi.RegisterRoutes(v1, governanceMod, iamSessionFetcher, iamMod.PermissionChecker)
 		mailapi.RegisterMailTransportRoutes(v1, mailMod, iamSessionFetcher, iamMod.PermissionChecker)
 

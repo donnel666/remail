@@ -52,11 +52,7 @@ func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 		}
 		if !admitted {
 			if !platform.BackgroundTaskHasRetryHeadroom(ctx) {
-				recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), backgroundLegacyReleaseTimeout)
-				defer cancel()
-				if err := module.AdminBulk.ReleaseBatch(recoveryCtx, payload); err != nil {
-					return fmt.Errorf("release admin resource bulk batch: %w", err)
-				}
+				cleanupAdminResourceBulk(ctx, module, payload)
 				return nil
 			}
 			return platform.ErrBackgroundExecutionDeferred
@@ -308,6 +304,9 @@ func cleanupAdminResourceBulk(ctx context.Context, module *CoreModule, task core
 	}
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), backgroundLegacyReleaseTimeout)
 	defer cancel()
+	if err := module.AdminBulk.FailBatch(cleanupCtx, task); err != nil {
+		slog.Warn("mark admin resource bulk task failed", "command_id", task.CommandID, "error", err)
+	}
 	if err := module.AdminBulk.ReleaseBatch(cleanupCtx, task); err != nil {
 		slog.Warn("release admin resource bulk lease failed", "command_id", task.CommandID, "error", err)
 	}

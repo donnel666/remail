@@ -1460,6 +1460,7 @@
   "Microsoft resource converted to private.": "Microsoft 资源已转为私有。",
   "Microsoft resources published for public sale.": "已将 {{count}} 个 Microsoft 资源发布为公开出售。",
   "Microsoft resources converted to private.": "已将 {{count}} 个 Microsoft 资源转为私有。",
+  "Microsoft resources bulk operation submitted.": "微软邮箱批量操作已提交后台处理。",
   "Put all on sale": "全部出售",
   "Convert all to private": "全部私有",
   "A valid Microsoft email address is required.": "请填写有效的 Microsoft 邮箱地址。",
