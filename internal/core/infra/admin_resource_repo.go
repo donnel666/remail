@@ -183,13 +183,15 @@ func (r *AdminResourceRepo) LockAdminMicrosoft(ctx context.Context, resourceID u
 
 func (r *AdminResourceRepo) MaxMicrosoftResourceID(ctx context.Context) (uint, error) {
 	var maxID uint
-	err := r.dbFor(ctx).Raw(`
-SELECT COALESCE(MAX(er.id), 0)
-FROM email_resources AS er
-JOIN microsoft_resources AS mr ON mr.id = er.id
-WHERE er.type = ? AND mr.status <> ?`, domain.ResourceTypeMicrosoft, domain.MicrosoftStatusDeleted).Scan(&maxID).Error
-	if err != nil {
-		return 0, fmt.Errorf("find maximum microsoft resource id: %w", err)
+	result := r.dbFor(ctx).
+		Table("microsoft_resources").
+		Select("id").
+		Where("status <> ?", domain.MicrosoftStatusDeleted).
+		Order("id DESC").
+		Limit(1).
+		Scan(&maxID)
+	if result.Error != nil {
+		return 0, fmt.Errorf("find maximum microsoft resource id: %w", result.Error)
 	}
 	return maxID, nil
 }
@@ -202,7 +204,6 @@ func (r *AdminResourceRepo) FindNextMicrosoft(ctx context.Context, afterID, maxI
 	result := r.dbFor(ctx).
 		Table("microsoft_resources AS mr").
 		Select("mr.id, mr.status, mr.email_address, mr.client_id, mr.refresh_token, mr.credential_revision").
-		Joins("JOIN email_resources AS er ON er.id = mr.id AND er.type = ?", domain.ResourceTypeMicrosoft).
 		Where("mr.id > ? AND mr.id <= ? AND mr.status <> ?", afterID, maxID, domain.MicrosoftStatusDeleted).
 		Order("mr.id ASC").
 		Limit(1).
