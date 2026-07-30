@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -529,6 +530,85 @@ func TestProxyRepoAcquireResourceBindingMySQL(t *testing.T) {
 	}, 0, 20)
 	require.NoError(t, err)
 	require.Len(t, bindings, 1)
+}
+
+func TestProxyRepoAcquireResourceDoesNotRetryUnselectableInventoryMySQL(t *testing.T) {
+	db := newProxyMySQLTestDB(t)
+	repo := NewProxyRepo(db)
+	now := time.Now().UTC()
+	require.NoError(t, repo.Create(context.Background(), &domain.Proxy{
+		Pool:      domain.ProxyPoolResource,
+		URL:       "http://127.0.0.1:18083",
+		ExpireAt:  now.Add(time.Hour),
+		IPVersion: domain.ProxyIPv4,
+		Country:   "US",
+		Status:    domain.ProxyStatusPending,
+	}))
+
+	type queryProbeKey struct{}
+	var candidateQueries atomic.Int32
+	var serverLocks atomic.Int32
+	const rowCallback = "test:count_unselectable_proxy_candidates"
+	const queryCallback = "test:count_unselectable_proxy_server_locks"
+	require.NoError(t, db.Callback().Row().Before("gorm:row").Register(rowCallback, func(tx *gorm.DB) {
+		if tx.Statement.Context.Value(queryProbeKey{}) == true {
+			candidateQueries.Add(1)
+		}
+	}))
+	require.NoError(t, db.Callback().Query().Before("gorm:query").Register(queryCallback, func(tx *gorm.DB) {
+		_, locking := tx.Statement.Clauses["FOR"]
+		if tx.Statement.Context.Value(queryProbeKey{}) == true && tx.Statement.Table == "proxy_servers" && locking {
+			serverLocks.Add(1)
+		}
+	}))
+	t.Cleanup(func() {
+		require.NoError(t, db.Callback().Row().Remove(rowCallback))
+		require.NoError(t, db.Callback().Query().Remove(queryCallback))
+	})
+
+	ctx := context.WithValue(context.Background(), queryProbeKey{}, true)
+	_, err := repo.AcquireResourceProxy(ctx, "unavailable@example.com", domain.ProxyIPv4, now, time.Hour)
+	require.ErrorIs(t, err, domain.ErrProxyUnavailable)
+	require.EqualValues(t, 1, candidateQueries.Load())
+	require.Zero(t, serverLocks.Load())
+}
+
+func TestProxyRepoAcquireResourceBoundsLockedInventoryRetriesMySQL(t *testing.T) {
+	db := newProxyMySQLTestDB(t)
+	repo := NewProxyRepo(db)
+	now := time.Now().UTC()
+	proxy := &domain.Proxy{
+		Pool:      domain.ProxyPoolResource,
+		URL:       "http://127.0.0.1:18084",
+		ExpireAt:  now.Add(time.Hour),
+		IPVersion: domain.ProxyIPv4,
+		Country:   "US",
+		Status:    domain.ProxyStatusNormal,
+	}
+	require.NoError(t, repo.Create(context.Background(), proxy))
+
+	locked := db.Begin()
+	require.NoError(t, locked.Error)
+	t.Cleanup(func() { _ = locked.Rollback().Error })
+	var lockedProxy ProxyModel
+	require.NoError(t, locked.Raw("SELECT * FROM proxies WHERE id = ? FOR UPDATE", proxy.ID).Scan(&lockedProxy).Error)
+	require.Equal(t, proxy.ID, lockedProxy.ID)
+
+	type queryProbeKey struct{}
+	var serverLocks atomic.Int32
+	const queryCallback = "test:count_locked_proxy_server_locks"
+	require.NoError(t, db.Callback().Query().Before("gorm:query").Register(queryCallback, func(tx *gorm.DB) {
+		_, locking := tx.Statement.Clauses["FOR"]
+		if tx.Statement.Context.Value(queryProbeKey{}) == true && tx.Statement.Table == "proxy_servers" && locking {
+			serverLocks.Add(1)
+		}
+	}))
+	t.Cleanup(func() { require.NoError(t, db.Callback().Query().Remove(queryCallback)) })
+
+	ctx := context.WithValue(context.Background(), queryProbeKey{}, true)
+	_, err := repo.AcquireResourceProxy(ctx, "locked@example.com", domain.ProxyIPv4, now, time.Hour)
+	require.ErrorIs(t, err, domain.ErrProxyUnavailable)
+	require.EqualValues(t, proxySelectionRetryAttempts, serverLocks.Load())
 }
 
 func TestProxyRepoListsSafeAdminResourceBindingMetadataMySQL(t *testing.T) {

@@ -66,6 +66,43 @@ func BalanceWarningMessage(recipient, balance, threshold string, cycle uint64) d
 	)
 }
 
+func SystemLoadAlertMessage(recipient, hostname, episodeID string, threshold int, cpuPercent, memoryPercent float64, memoryValid bool, observedAt time.Time) domain.OutboundMessage {
+	recipient = strings.TrimSpace(recipient)
+	hostname = oneLine(hostname, 240)
+	episodeID = oneLine(episodeID, 128)
+	if hostname == "" {
+		hostname = "未知服务器"
+	}
+	if episodeID == "" {
+		episodeID = observedAt.UTC().Format(time.RFC3339Nano)
+	}
+	memoryUsage := "采集失败"
+	if memoryValid {
+		memoryUsage = fmt.Sprintf("%.1f%%", memoryPercent)
+	}
+	observedTime := observedAt.In(time.FixedZone("Asia/Shanghai", 8*60*60)).Format("2006-01-02 15:04:05 MST")
+	details := []notificationDetail{
+		{Label: "服务器", Value: hostname},
+		{Label: "告警阈值", Value: fmt.Sprintf("≥%d%%", threshold)},
+		{Label: "当前 CPU", Value: fmt.Sprintf("%.1f%%", cpuPercent)},
+		{Label: "当前内存", Value: memoryUsage},
+		{Label: "检测时间", Value: observedTime},
+		{Label: "建议操作", Value: "请尽快检查高占用进程、数据库慢查询和后台任务队列。"},
+	}
+	return notificationMessage(
+		domain.PurposeSystemNotice,
+		messageDigest("system_load_alert", hostname, episodeID, threshold, recipient),
+		recipient,
+		fmt.Sprintf("ReMail 系统负载告警（%d%%）", threshold),
+		"系统负载告警",
+		"服务器 CPU 使用率已达到或超过告警阈值。",
+		notificationDetailsText(details),
+		notificationTableContentTemplate,
+		details,
+		"同一轮高负载中，每个告警档位仅通知一次；CPU 持续低于 80% 一分钟后重新计数。",
+	)
+}
+
 func RechargeCreditedMessage(recipient, rechargeNo, amount, balance string) domain.OutboundMessage {
 	recipient = strings.TrimSpace(recipient)
 	details := []notificationDetail{

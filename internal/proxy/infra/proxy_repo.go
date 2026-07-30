@@ -97,10 +97,14 @@ type ProxyRepo struct {
 
 const (
 	transactionRetryAttempts       = 8
+	proxySelectionRetryAttempts    = 2
 	proxyServerFailoverLogInterval = 5 * time.Minute
 )
 
-var errRetryProxyAcquire = errors.New("retry proxy acquire")
+var (
+	errRetryProxyAcquire       = errors.New("retry proxy acquire")
+	errProxySelectionContended = errors.New("proxy selection contended")
+)
 
 func NewProxyRepo(db *gorm.DB) *ProxyRepo {
 	return &ProxyRepo{
@@ -734,9 +738,15 @@ func (r *ProxyRepo) AcquireResourceProxy(ctx context.Context, key string, ipVers
 			var proxy *domain.Proxy
 			orderedServers := orderProxyServers(key, servers)
 			preferredFailure := ""
-			// ponytail: fallback is O(eligible servers); batch availability summaries
-			// only if profiling shows hundreds of misses on the common path.
+			hadSelectableProxy := false
 			for index, server := range orderedServers {
+				if !server.HasSelectableProxy {
+					if index == 0 {
+						preferredFailure = "preferred server had no selectable resource route"
+					}
+					continue
+				}
+				hadSelectableProxy = true
 				eligible, err := lockEligibleProxyServer(ctx, tx, server.ID)
 				if err != nil {
 					return err
@@ -762,7 +772,10 @@ func (r *ProxyRepo) AcquireResourceProxy(ctx context.Context, key string, ipVers
 				}
 			}
 			if proxy == nil {
-				return errRetryProxyAcquire
+				if !hadSelectableProxy {
+					return domain.ErrProxyUnavailable
+				}
+				return errProxySelectionContended
 			}
 			bindingExpireAt := now.Add(bindingTTL)
 			if !proxy.ExpireAt.IsZero() && proxy.ExpireAt.Before(bindingExpireAt) {
@@ -815,7 +828,7 @@ func (r *ProxyRepo) AcquireResourceProxy(ctx context.Context, key string, ipVers
 		})
 	})
 	if err != nil {
-		if errors.Is(err, errRetryProxyAcquire) {
+		if errors.Is(err, errRetryProxyAcquire) || errors.Is(err, errProxySelectionContended) {
 			return nil, domain.ErrProxyUnavailable
 		}
 		return nil, err
@@ -849,6 +862,12 @@ func (r *ProxyRepo) AcquireSystemProxy(ctx context.Context, ipVersion domain.Pro
 			if _, avoid := avoidServerIDs[server.ID]; avoid {
 				if index == 0 {
 					preferredFailure = "preferred server was excluded after a request failure"
+				}
+				continue
+			}
+			if !server.HasSelectableProxy {
+				if index == 0 {
+					preferredFailure = "preferred server had no selectable system route"
 				}
 				continue
 			}
@@ -1238,9 +1257,10 @@ func coverInvalidBinding(ctx context.Context, tx *gorm.DB, key string, proxy *do
 }
 
 type proxyServerCandidate struct {
-	ID             uint   `gorm:"column:id"`
-	ServerIP       string `gorm:"column:server_ip"`
-	CapacityWeight uint   `gorm:"column:capacity_weight"`
+	ID                 uint   `gorm:"column:id"`
+	ServerIP           string `gorm:"column:server_ip"`
+	CapacityWeight     uint   `gorm:"column:capacity_weight"`
+	HasSelectableProxy bool   `gorm:"column:has_selectable_proxy"`
 }
 
 type proxyServerFailover struct {
@@ -1268,9 +1288,26 @@ func listEligibleProxyServers(
 	if pool == domain.ProxyPoolResource {
 		index = "idx_proxies_resource_server_select"
 	}
+	ipOperator := "= ?"
+	var ipArg any = string(ipVersion)
+	if ipVersion == domain.ProxyIPAuto {
+		ipOperator = "IN ?"
+		ipArg = []string{string(domain.ProxyIPv4), string(domain.ProxyIPv6)}
+	}
+	selectableSQL := `EXISTS (
+		SELECT 1 FROM proxies AS selectable_p FORCE INDEX (` + index + `)
+		WHERE selectable_p.proxy_server_id = s.id
+		  AND selectable_p.pool = ?
+		  AND selectable_p.status = ?
+		  AND selectable_p.ip_version ` + ipOperator + `
+		  AND (selectable_p.expire_at IS NULL OR selectable_p.expire_at > ?)
+	)`
 	query := tx.WithContext(ctx).
 		Table("proxy_servers AS s").
-		Select("s.id, s.server_ip, s.capacity_weight").
+		Select(
+			"s.id, s.server_ip, s.capacity_weight, "+selectableSQL+" AS has_selectable_proxy",
+			string(pool), string(domain.ProxyStatusNormal), ipArg, now,
+		).
 		Where("s.admin_status = ? AND s.health_status = ?", string(domain.ProxyServerAdminOnline), string(domain.ProxyServerHealthy))
 	proxyStatuses := []string{
 		string(domain.ProxyStatusNormal),
@@ -1283,15 +1320,9 @@ func listEligibleProxyServers(
 		WHERE p.proxy_server_id = s.id
 		  AND p.pool = ?
 		  AND p.status IN ?
+		  AND p.ip_version ` + ipOperator + `
 		  AND (p.expire_at IS NULL OR p.expire_at > ?)`
-	args := []any{string(pool), proxyStatuses, now}
-	if ipVersion == domain.ProxyIPAuto {
-		existsSQL += " AND p.ip_version IN ?"
-		args = append(args, []string{string(domain.ProxyIPv4), string(domain.ProxyIPv6)})
-	} else {
-		existsSQL += " AND p.ip_version = ?"
-		args = append(args, string(ipVersion))
-	}
+	args := []any{string(pool), proxyStatuses, ipArg, now}
 	query = query.Where(existsSQL+")", args...)
 	if err := query.Scan(&servers).Error; err != nil {
 		return nil, fmt.Errorf("list eligible proxy servers: %w", err)
@@ -1837,8 +1868,18 @@ func withTransactionRetry(fn func() error) error {
 	var err error
 	for attempt := 0; attempt < transactionRetryAttempts; attempt++ {
 		err = fn()
-		if err == nil || (!errors.Is(err, errRetryProxyAcquire) && !isRetryableTransactionError(err)) {
+		if err == nil {
+			return nil
+		}
+		if errors.Is(err, errProxySelectionContended) {
+			if attempt+1 >= proxySelectionRetryAttempts {
+				return err
+			}
+		} else if !errors.Is(err, errRetryProxyAcquire) && !isRetryableTransactionError(err) {
 			return err
+		}
+		if attempt+1 >= transactionRetryAttempts {
+			break
 		}
 		time.Sleep(time.Duration(attempt+1) * 10 * time.Millisecond)
 	}

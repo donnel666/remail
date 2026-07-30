@@ -71,6 +71,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 	taskMux := asynq.NewServeMux()
 	var mailMod *mailapi.MailTransportModule
 	var coreMod *coreapi.CoreModule
+	var loadAlerter *systemLoadAlerter
 	v1 := r.Group("/v1")
 	{
 		systemSettingsMod, err := systemsettingsapi.NewModule(p.DB, p.Redis)
@@ -137,6 +138,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 			return nil, cleanup, err
 		}
 		announcementMail := announcementMailer{users: iamMod.Users, delivery: mailMod.DeliveryUseCase, client: p.Asynq}
+		loadAlerter = &systemLoadAlerter{users: iamMod.Users, delivery: mailMod.DeliveryUseCase, redis: p.Redis}
 		systemSettingsMod.Settings.SetAnnouncementPublisher(announcementMail)
 		registerSystemEmailTaskHandlers(taskMux, announcementMail)
 		iamapi.RegisterIAMRoutes(v1, iamMod, p.SessionSecure)
@@ -295,6 +297,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 	}
 	if p.BackgroundLoad != nil {
 		cleanupFuncs = append(cleanupFuncs, p.BackgroundLoad.Start(context.Background()))
+		cleanupFuncs = append(cleanupFuncs, startSystemLoadAlerts(context.Background(), p.BackgroundLoad, loadAlerter))
 	}
 	if err := p.BackgroundAsynqServer.Start(taskMux); err != nil {
 		p.ShutdownWorkers()
