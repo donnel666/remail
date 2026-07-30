@@ -733,6 +733,27 @@ func (r *BillingRepo) AdjustConsumerBalance(ctx context.Context, req billingapp.
 	return &result, nil
 }
 
+func (r *BillingRepo) RecordHistoricalZeroDebit(ctx context.Context, req billingapp.AdjustConsumerBalanceCommand) (*domain.Transaction, error) {
+	db := r.db
+	if tx, ok := platform.GormTxFromContext(ctx); ok {
+		db = tx
+	}
+	transaction := WalletTransactionModel{
+		TransactionNo: nextTransactionNo(), UserID: req.UserID,
+		TransactionType: string(domain.TransactionTypeDebit),
+		BalanceBucket:   string(domain.BalanceBucketConsumer),
+		Direction:       string(domain.TransactionDirectionOut),
+		Amount:          "0.00", BalanceBefore: "0.00", BalanceAfter: "0.00",
+		BizType: "historical_order", BizID: trimBizID(req.Reason),
+		IdempotencyKey: req.IdempotencyKey, RequestID: req.RequestID, CreatedAt: req.Now,
+	}
+	if err := db.WithContext(ctx).Create(&transaction).Error; err != nil {
+		return nil, fmt.Errorf("create historical zero debit: %w", err)
+	}
+	result := transactionModelToDomain(transaction)
+	return &result, nil
+}
+
 func (r *BillingRepo) ClaimDailyCheckin(ctx context.Context, command billingapp.DailyCheckinCommand) (*billingapp.DailyCheckinResult, error) {
 	var result billingapp.DailyCheckinResult
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {

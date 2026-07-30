@@ -11,20 +11,15 @@ import (
 
 type historicalImportRepoSpy struct {
 	Repository
-	events  *[]string
-	ownerID uint
+	events *[]string
 }
 
 func (r *historicalImportRepoSpy) WithTx(ctx context.Context, fn func(context.Context) error) error {
 	return fn(ctx)
 }
 
-func (r *historicalImportRepoSpy) FindHistoricalOrderOwner(context.Context) (uint, error) {
-	*r.events = append(*r.events, "owner")
-	return r.ownerID, nil
-}
-
-func (*historicalImportRepoSpy) CreateHistoricalOrder(context.Context, CreateHistoricalOrderCommand) error {
+func (r *historicalImportRepoSpy) CreateHistoricalOrder(context.Context, CreateHistoricalOrderCommand) error {
+	*r.events = append(*r.events, "order")
 	return nil
 }
 
@@ -33,9 +28,9 @@ type historicalImportWalletSpy struct {
 	events *[]string
 }
 
-func (w *historicalImportWalletSpy) LockConsumer(context.Context, uint) error {
-	*w.events = append(*w.events, "wallet")
-	return nil
+func (w *historicalImportWalletSpy) RecordHistoricalZeroDebit(context.Context, WalletCommand) (*WalletTransaction, error) {
+	*w.events = append(*w.events, "zero-debit")
+	return &WalletTransaction{ID: 1}, nil
 }
 
 type historicalImportAllocationSpy struct {
@@ -49,37 +44,7 @@ func (a *historicalImportAllocationSpy) ImportHistoricalMicrosoftAllocation(cont
 	return a.result, nil
 }
 
-func TestHistoricalImportLocksWalletBeforeAllocationRoot(t *testing.T) {
-	events := []string{}
-	repo := &historicalImportRepoSpy{events: &events, ownerID: 7}
-	allocation := &historicalImportAllocationSpy{events: &events}
-	uc := NewUseCase(repo, nil, &historicalImportWalletSpy{events: &events}, allocation, nil)
-
-	err := uc.ImportHistoricalMicrosoftUsage(context.Background(), []HistoricalMicrosoftUsage{{
-		ResourceID: 1, ProjectID: 2, ProductID: 3, Mailbox: "main", Email: "main@example.com",
-		FirstMatchedAt: time.Now().Add(-time.Hour), LastMatchedAt: time.Now(), EvidenceCount: 1,
-	}})
-
-	require.NoError(t, err)
-	require.Equal(t, []string{"owner", "wallet", "allocation"}, events)
-}
-
-func TestHistoricalImportNoopDoesNotRequireOwnerOrWallet(t *testing.T) {
-	events := []string{}
-	repo := &historicalImportRepoSpy{events: &events}
-	allocation := &historicalImportAllocationSpy{events: &events}
-	uc := NewUseCase(repo, nil, &historicalImportWalletSpy{events: &events}, allocation, nil)
-
-	err := uc.ImportHistoricalMicrosoftUsage(context.Background(), []HistoricalMicrosoftUsage{{
-		ResourceID: 1, ProjectID: 2, ProductID: 3, Mailbox: "main", Email: "main@example.com",
-		FirstMatchedAt: time.Now().Add(-time.Hour), LastMatchedAt: time.Now(), EvidenceCount: 1,
-	}})
-
-	require.NoError(t, err)
-	require.Equal(t, []string{"owner", "allocation"}, events)
-}
-
-func TestHistoricalImportCannotCreateWithoutOwner(t *testing.T) {
+func TestHistoricalImportRecordsZeroDebitWithoutLockingWallet(t *testing.T) {
 	events := []string{}
 	repo := &historicalImportRepoSpy{events: &events}
 	allocation := &historicalImportAllocationSpy{events: &events, result: &AllocationResult{
@@ -92,6 +57,21 @@ func TestHistoricalImportCannotCreateWithoutOwner(t *testing.T) {
 		FirstMatchedAt: time.Now().Add(-time.Hour), LastMatchedAt: time.Now(), EvidenceCount: 1,
 	}})
 
-	require.ErrorIs(t, err, ErrHistoricalAllocationOwnerRequired)
-	require.Equal(t, []string{"owner", "allocation"}, events)
+	require.NoError(t, err)
+	require.Equal(t, []string{"allocation", "zero-debit", "order"}, events)
+}
+
+func TestHistoricalImportNoopDoesNotWriteWalletOrOrder(t *testing.T) {
+	events := []string{}
+	repo := &historicalImportRepoSpy{events: &events}
+	allocation := &historicalImportAllocationSpy{events: &events}
+	uc := NewUseCase(repo, nil, &historicalImportWalletSpy{events: &events}, allocation, nil)
+
+	err := uc.ImportHistoricalMicrosoftUsage(context.Background(), []HistoricalMicrosoftUsage{{
+		ResourceID: 1, ProjectID: 2, ProductID: 3, Mailbox: "main", Email: "main@example.com",
+		FirstMatchedAt: time.Now().Add(-time.Hour), LastMatchedAt: time.Now(), EvidenceCount: 1,
+	}})
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"allocation"}, events)
 }

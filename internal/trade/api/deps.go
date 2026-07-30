@@ -279,6 +279,17 @@ func (a billingWalletAdapter) DebitConsumer(ctx context.Context, cmd tradeapp.Wa
 	return &tradeapp.WalletTransaction{ID: result.Transaction.ID}, nil
 }
 
+func (a billingWalletAdapter) RecordHistoricalZeroDebit(ctx context.Context, cmd tradeapp.WalletCommand) (*tradeapp.WalletTransaction, error) {
+	result, err := a.wallet.RecordHistoricalZeroDebit(ctx, billingapp.AdjustConsumerBalanceRequest{
+		UserID: cmd.UserID, Amount: cmd.Amount, Reason: cmd.Reason,
+		IdempotencyKey: cmd.IdempotencyKey, RequestID: cmd.RequestID,
+	})
+	if err != nil {
+		return nil, mapBillingError(err)
+	}
+	return &tradeapp.WalletTransaction{ID: result.ID}, nil
+}
+
 func (a billingWalletAdapter) RefundConsumer(ctx context.Context, cmd tradeapp.WalletCommand) (*tradeapp.WalletTransaction, error) {
 	result, err := a.wallet.RefundConsumer(ctx, billingapp.AdjustConsumerBalanceRequest{
 		UserID:         cmd.UserID,

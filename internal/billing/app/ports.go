@@ -28,6 +28,7 @@ type WalletRepository interface {
 	CountRecharges(ctx context.Context, filter RechargeListFilter) (int64, error)
 	RedeemCard(ctx context.Context, req RedeemCardCommand) (*RedeemCardResult, error)
 	AdjustConsumerBalance(ctx context.Context, req AdjustConsumerBalanceCommand) (*AdjustBalanceResult, error)
+	RecordHistoricalZeroDebit(ctx context.Context, req AdjustConsumerBalanceCommand) (*domain.Transaction, error)
 	ClaimBalanceWarnings(ctx context.Context, limit int) ([]BalanceWarningClaim, error)
 	ReleaseBalanceWarning(ctx context.Context, claim BalanceWarningClaim) error
 	ListCards(ctx context.Context, filter CardListFilter, offset, limit int) ([]domain.CardKey, error)
@@ -379,6 +380,27 @@ func (uc *WalletUseCase) GrantRegistrationReward(ctx context.Context, userID uin
 func (uc *WalletUseCase) DebitConsumer(ctx context.Context, req AdjustConsumerBalanceRequest) (*AdjustBalanceResult, error) {
 	req.TransactionType = domain.TransactionTypeDebit
 	return uc.adjustConsumer(ctx, req, domain.TransactionDirectionOut, false)
+}
+
+// RecordHistoricalZeroDebit writes the audit transaction required by a
+// historical order without reading, locking, or updating the user's wallet.
+func (uc *WalletUseCase) RecordHistoricalZeroDebit(ctx context.Context, req AdjustConsumerBalanceRequest) (*domain.Transaction, error) {
+	amount, err := domain.NormalizeNonNegativeMoney(req.Amount)
+	if err != nil || amount != "0.00" {
+		return nil, domain.ErrInvalidAmount
+	}
+	reason := strings.TrimSpace(req.Reason)
+	idempotencyKey := strings.TrimSpace(req.IdempotencyKey)
+	if req.UserID == 0 || reason == "" {
+		return nil, domain.ErrInvalidRecharge
+	}
+	if idempotencyKey == "" {
+		return nil, domain.ErrIdempotencyRequired
+	}
+	return uc.repo.RecordHistoricalZeroDebit(ctx, AdjustConsumerBalanceCommand{
+		UserID: req.UserID, Reason: reason, IdempotencyKey: idempotencyKey,
+		RequestID: strings.TrimSpace(req.RequestID), Now: uc.now(),
+	})
 }
 
 func (uc *WalletUseCase) LockConsumer(ctx context.Context, userID uint) error {

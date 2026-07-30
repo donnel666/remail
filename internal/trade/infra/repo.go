@@ -124,25 +124,6 @@ func (r *Repo) dbFor(ctx context.Context) *gorm.DB {
 	return r.db.WithContext(ctx)
 }
 
-func (r *Repo) FindHistoricalOrderOwner(ctx context.Context) (uint, error) {
-	var owner struct {
-		ID uint `gorm:"column:id"`
-	}
-	if err := r.dbFor(ctx).Raw(`
-SELECT id
-FROM users
-WHERE role = 'super_admin'
-ORDER BY id ASC
-LIMIT 1
-FOR SHARE`).Scan(&owner).Error; err != nil {
-		return 0, fmt.Errorf("find historical order owner: %w", err)
-	}
-	if owner.ID == 0 {
-		return 0, nil
-	}
-	return owner.ID, nil
-}
-
 func (r *Repo) CreateHistoricalOrder(ctx context.Context, cmd tradeapp.CreateHistoricalOrderCommand) error {
 	orderNo := strings.TrimSpace(cmd.OrderNo)
 	deliveryEmail := strings.ToLower(strings.TrimSpace(cmd.DeliveryEmail))
@@ -178,16 +159,7 @@ func (r *Repo) CreateHistoricalOrder(ctx context.Context, cmd tradeapp.CreateHis
 		}
 		return fmt.Errorf("create historical order: %w", err)
 	}
-	return r.appendEvent(
-		ctx,
-		tx,
-		orderNo,
-		"order.history_imported",
-		nil,
-		ptrStatus(domain.OrderStatusCompleted),
-		domain.OperatorTypeSystem,
-		"Historical Microsoft mailbox usage identified.",
-	)
+	return nil
 }
 
 func (r *Repo) LoadOrCreatePendingOrder(ctx context.Context, cmd tradeapp.CreatePendingOrderCommand) (*domain.Order, bool, error) {

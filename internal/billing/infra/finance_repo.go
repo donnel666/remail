@@ -247,6 +247,9 @@ func (r *BillingRepo) reverseTransactionInTx(ctx context.Context, tx *gorm.DB, c
 		}
 		return nil, fmt.Errorf("lock transaction: %w", err)
 	}
+	if original.BizType == "historical_order" {
+		return nil, domain.ErrTransactionNotReversible
+	}
 	if original.ReversalOfNo != nil {
 		return nil, domain.ErrTransactionNotReversible
 	}

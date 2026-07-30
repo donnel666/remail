@@ -50,6 +50,7 @@ type WalletPort interface {
 	ConsumerBalance(ctx context.Context, userID uint) (string, error)
 	LockConsumer(ctx context.Context, userID uint) error
 	DebitConsumer(ctx context.Context, cmd WalletCommand) (*WalletTransaction, error)
+	RecordHistoricalZeroDebit(ctx context.Context, cmd WalletCommand) (*WalletTransaction, error)
 	RefundConsumer(ctx context.Context, cmd WalletCommand) (*WalletTransaction, error)
 }
 
@@ -117,6 +118,8 @@ type HistoricalMicrosoftAllocationPort interface {
 }
 
 var ErrHistoricalAllocationOwnerRequired = errors.New("historical allocation owner is required")
+
+const historicalMicrosoftOwnerUserID uint = 1
 
 type OrderToken struct {
 	TokenPlain string
@@ -211,7 +214,6 @@ type Repository interface {
 }
 
 type HistoricalOrderRepository interface {
-	FindHistoricalOrderOwner(ctx context.Context) (uint, error)
 	CreateHistoricalOrder(ctx context.Context, cmd CreateHistoricalOrderCommand) error
 }
 
@@ -470,18 +472,8 @@ func (uc *UseCase) ImportHistoricalMicrosoftUsage(ctx context.Context, matches [
 	if uc == nil || uc.repo == nil || uc.wallet == nil || uc.historicalOrders == nil || uc.historicalAllocations == nil {
 		return domain.ErrInvalidOrderRequest
 	}
+	ownerID := historicalMicrosoftOwnerUserID
 	return uc.repo.WithTx(ctx, func(txCtx context.Context) error {
-		ownerID, err := uc.historicalOrders.FindHistoricalOrderOwner(txCtx)
-		if err != nil {
-			return err
-		}
-		if ownerID != 0 {
-			// Checkout takes the wallet before Allocation's resource root. Historical
-			// imports use the same order so the two flows cannot wait on each other.
-			if err := uc.wallet.LockConsumer(txCtx, ownerID); err != nil {
-				return err
-			}
-		}
 		now := uc.now()
 		expiryCutoff := now.Add(-time.Second).Truncate(time.Second)
 		for _, match := range matches {
@@ -514,24 +506,11 @@ func (uc *UseCase) ImportHistoricalMicrosoftUsage(ctx context.Context, matches [
 			if allocation == nil {
 				continue
 			}
-			if ownerID == 0 {
-				return ErrHistoricalAllocationOwnerRequired
-			}
 			if strings.TrimSpace(allocation.OrderNo) == "" || allocation.ID == 0 || allocation.Type != domain.AllocationTypeMicrosoft {
 				return domain.ErrInvalidOrderRequest
 			}
 			orderNo := strings.TrimSpace(allocation.OrderNo)
-			existing, err := uc.repo.FindOrder(txCtx, orderNo)
-			if err == nil {
-				if !sameHistoricalMicrosoftOrder(*existing, ownerID, allocation.ID, match) {
-					return domain.ErrIdempotencyConflict
-				}
-				continue
-			}
-			if !errors.Is(err, domain.ErrOrderNotFound) {
-				return err
-			}
-			debit, err := uc.wallet.DebitConsumer(txCtx, WalletCommand{
+			debit, err := uc.wallet.RecordHistoricalZeroDebit(txCtx, WalletCommand{
 				UserID: ownerID, Amount: "0", Reason: "order:" + orderNo,
 				IdempotencyKey: "history:" + orderNo + ":debit",
 			})
@@ -562,14 +541,6 @@ func validHistoricalMicrosoftMailbox(mailbox string) bool {
 	default:
 		return false
 	}
-}
-
-func sameHistoricalMicrosoftOrder(order domain.Order, ownerID uint, allocationID uint, match HistoricalMicrosoftUsage) bool {
-	emailMatches := match.Mailbox == "main" || order.DeliveryEmail == strings.ToLower(strings.TrimSpace(match.Email))
-	return order.UserID == ownerID && order.ProjectID == match.ProjectID && order.ProjectProductID == match.ProductID &&
-		order.ProductType == domain.ProductTypeMicrosoft && order.ServiceMode == domain.ServiceModePurchase &&
-		order.Status == domain.OrderStatusCompleted && emailMatches &&
-		order.MicrosoftAllocID != nil && *order.MicrosoftAllocID == allocationID
 }
 
 func (uc *UseCase) Checkout(ctx context.Context, req CheckoutRequest) (result *CheckoutResult, runErr error) {

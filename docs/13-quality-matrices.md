@@ -348,7 +348,7 @@ API/SDK：
 - [ ] API Key 创建、列表、详情均允许 owner 查看明文；普通日志不得出现 Key、Token、RT、密码或正文。
 - [ ] Microsoft 验证只完成 Inbox/Junk 轻量可读性探测；健康结果最终提交前必须先幂等创建独立历史识别任务，投递失败保持 `validating` 由现有 validation retry 恢复，worker 仅在资源 `normal` 后全量流式扫描。MailMatch 仅提交识别结果，Trade 通过既有 Billing/Alloc Port 先创建/复用具体点号、加号、显式别名，再为超级管理员幂等创建 0 积分、已过保、Allocation 已 released 的历史订单；不得由 MailMatch repository 跨域直写订单、钱包或 Allocation。任务执行失败不改变已经提交的资源健康，后续分配只排除同项目下相同邮箱实体。
 - [ ] Microsoft 显式别名 dispatcher 无条件持续运行，为全部 `status=normal` 的公开和私有资源创建；`forSale` 切换不得暂停 schedule、取消 attempt 或阻止远端请求，非 `normal` 状态仍须在领取和远端调用前被拦截；按 Asia/Shanghai 自然周最多 2 个、自然年最多 10 个，运行中与结果不确定的候选预占额度，确认失败后释放，次年自动恢复。
-- [ ] 每条 `explicit_aliases.owner_user_id` 必须恒等于首个超级管理员 `users.id=1`；成功事务必须共享锁定并验证该用户仍为 `role=super_admin`，不得继承主资源 owner、接受调用方 owner、为空或降级给其他用户。历史记录迁移和重复 alias 再确认都必须收敛到 1，数据库 CHECK 必须拒绝非 1 写入；ID 1 身份无效时成功落库整体回滚。
+- [ ] 每条 `explicit_aliases.owner_user_id` 必须恒等于首个超级管理员 `users.id=1`；成功事务必须验证该用户仍为 `role=super_admin`，不得继承主资源 owner、接受调用方 owner、为空或降级给其他用户。历史记录迁移和重复 alias 再确认都必须收敛到 1，数据库 CHECK 必须拒绝非 1 写入；ID 1 身份无效时成功落库整体回滚。
 - [ ] 交易走同步请求路径即时成交；接码拉取额外获得 32-worker 专用实时池，长任务占满共享池时也保证有 worker 可用。
 - [ ] 异步执行分为 32-worker 接码实时池、64-worker 邮件交付/default 前台池和 32-worker 验证/显式别名后台池；后台两队列都有积压时按 3:1 调度，单队列可借满空闲容量。
 - [ ] 资源验证 dispatcher 必须保证全库 `validating` 临时分配水位不超过当前自适应 execution window，不能因周期唤醒持续堆积 Redis；显式别名仍从 durable schedule 领取，并在发起外部请求前经过同一 execution admission。

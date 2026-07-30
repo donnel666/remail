@@ -1216,7 +1216,7 @@ func (s *MicrosoftAliasStore) Complete(ctx context.Context, resourceID uint, cla
 		for _, outcome := range outcomes {
 			if normalizeMicrosoftAliasAttemptStatus(outcome.Status) == mailapp.MicrosoftAliasAttemptSucceeded {
 				var err error
-				ownerUserID, err = lockMicrosoftExplicitAliasOwner(tx)
+				ownerUserID, err = findMicrosoftExplicitAliasOwner(tx)
 				if err != nil {
 					return err
 				}
@@ -1304,7 +1304,7 @@ func (s *MicrosoftAliasStore) Complete(ctx context.Context, resourceID uint, cla
 	})
 }
 
-func lockMicrosoftExplicitAliasOwner(tx *gorm.DB) (uint, error) {
+func findMicrosoftExplicitAliasOwner(tx *gorm.DB) (uint, error) {
 	var owner struct {
 		ID uint `gorm:"column:id"`
 	}
@@ -1313,9 +1313,8 @@ SELECT id
 FROM users
 WHERE id = ?
   AND role = 'super_admin'
-LIMIT 1
-FOR SHARE`, microsoftExplicitAliasOwnerUserID).Scan(&owner).Error; err != nil {
-		return 0, fmt.Errorf("lock microsoft alias super administrator owner: %w", err)
+LIMIT 1`, microsoftExplicitAliasOwnerUserID).Scan(&owner).Error; err != nil {
+		return 0, fmt.Errorf("find microsoft alias super administrator owner: %w", err)
 	}
 	if owner.ID != microsoftExplicitAliasOwnerUserID {
 		return 0, mailapp.ErrMicrosoftAliasOwnerUnavailable
@@ -1597,7 +1596,7 @@ func (s *MicrosoftAliasStore) BackfillExistingAliases(ctx context.Context, resou
 }
 
 func backfillExistingAliasesTx(db *gorm.DB, resourceID uint, aliases []string) error {
-	ownerUserID, err := lockMicrosoftExplicitAliasOwner(db)
+	ownerUserID, err := findMicrosoftExplicitAliasOwner(db)
 	if err != nil {
 		return err
 	}

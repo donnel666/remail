@@ -168,7 +168,7 @@ Microsoft ACL 是 Go 进程内模块，通过 Port/Adapter 暴露方法。
 | 2. 轻量收件探测 | 优先用 RT 换 Graph AT，对 `Inbox` 和 `JunkEmail` 各读取至多一封；Graph 不可用时用同一 RT 换 IMAP token 回退 Outlook IMAP，并完成两个文件夹探测。 | 是。Graph 或 IMAP 任一路径读取接口返回正常，即资源验证可成功。 |
 | 3. 全量历史识别任务 | Core 在健康结果最终提交前先幂等投递 MailMatch 任务；投递失败保持 `validating` 由现有验证任务重试，worker 只在资源已经 `normal` 后重新读取已提交凭据。任务流式全量扫描 Inbox/Junk，按地址规则识别具体 main/dot/plus/explicit alias，再把识别结果交给 BC-TRADE。BC-TRADE 复用 BC-BILLING 与 BC-ALLOC 现有 Port，先创建或复用别名，再补一笔超级管理员 0 积分已过保历史订单。 | 否。该独立任务不参与资源本体是否正常的判断。 |
 
-第三阶段与验证 worker 解耦。历史订单号由 BC-ALLOC 按 `resourceId + projectId + mailboxType + mailboxId` 确定性生成；BC-TRADE 使用既有 Billing 零积分扣款、Allocation 和 Order repository 在同一事务内编排，重复验证不会重复创建订单、0 积分钱包流水、Allocation 或事件。Allocation 创建后立即为 `released`，订单固定为 `purchase/completed` 且 `afterSaleUntil` 已过期，因此不会参与收件、退款、结算或占用活动库存。BC-ALLOC 按具体主邮箱或别名 ID 查询所有历史 Allocation，只阻止同一邮箱实体再次进入同一项目，不误伤同一主资源下的其他别名；BC-MAILMATCH 仅保存识别和旧兼容事实，不跨域写上述三类事实。
+第三阶段与验证 worker 解耦。历史订单号由 BC-ALLOC 按 `resourceId + projectId + mailboxType + mailboxId` 确定性生成；BC-TRADE 使用 Billing 的历史审计专用通道、Allocation 和 Order repository 在同一事务内编排。该专用通道在关系创建事务内直接写入金额及前后余额均为 0 的钱包流水，不读取、锁定或更新超级管理员钱包，也不创建独立 Billing 幂等回执；Allocation 关系判重保证重复验证不会重复创建订单或流水。Allocation 创建后立即为 `released`，订单固定为 `purchase/completed` 且 `afterSaleUntil` 已过期，因此不会参与收件、退款、结算或占用活动库存。BC-ALLOC 按具体主邮箱或别名 ID 查询所有历史 Allocation，只阻止同一邮箱实体再次进入同一项目，不误伤同一主资源下的其他别名；BC-MAILMATCH 仅保存识别和旧兼容事实，不跨域写上述三类事实。
 
 收件策略：
 

@@ -504,6 +504,56 @@ func TestBillingRepoAdjustConsumerBalanceMySQL(t *testing.T) {
 	require.Equal(t, "-5.50", clamped.Transaction.Amount)
 }
 
+func TestBillingRepoRecordHistoricalZeroDebitDoesNotTouchWalletMySQL(t *testing.T) {
+	db := newBillingMySQLTestDB(t)
+	ctx := context.Background()
+	userID := createBillingTestUser(t, db, "historical-zero@example.com")
+	repo := NewBillingRepo(db)
+	_, err := repo.GetOrCreateWalletSummary(ctx, userID)
+	require.NoError(t, err)
+	require.NoError(t, db.Model(&WalletModel{}).Where("user_id = ?", userID).Updates(map[string]any{
+		"consumer_balance": "123.45", "total_spend": "67.89", "spend_count": 11,
+	}).Error)
+
+	type walletFacts struct {
+		ConsumerBalance string
+		TotalSpend      string
+		SpendCount      int64
+	}
+	var before walletFacts
+	require.NoError(t, db.Table("wallets").Where("user_id = ?", userID).Take(&before).Error)
+	command := billingapp.AdjustConsumerBalanceCommand{
+		UserID: userID, Reason: "order:HIST-1",
+		IdempotencyKey: "history:HIST-1:debit",
+		RequestID:      "history-request", Now: time.Now().UTC(),
+	}
+	first, err := repo.RecordHistoricalZeroDebit(ctx, command)
+	require.NoError(t, err)
+
+	var after walletFacts
+	require.NoError(t, db.Table("wallets").Where("user_id = ?", userID).Take(&after).Error)
+	require.Equal(t, before, after)
+	var transaction WalletTransactionModel
+	require.NoError(t, db.Where("id = ?", first.ID).Take(&transaction).Error)
+	require.Equal(t, "0.000000", transaction.Amount)
+	require.Equal(t, "0.000000", transaction.BalanceBefore)
+	require.Equal(t, "0.000000", transaction.BalanceAfter)
+	require.Equal(t, "historical_order", transaction.BizType)
+	_, err = repo.ReverseTransaction(ctx, billingapp.ReverseTransactionCommand{
+		Original: *first, IdempotencyKey: "reverse-history:HIST-1",
+		RequestFingerprint: "reverse-history:HIST-1", RequestID: "reverse-history-request", Now: time.Now().UTC(),
+	})
+	require.ErrorIs(t, err, domain.ErrTransactionNotReversible)
+	var reversals int64
+	require.NoError(t, db.Model(&WalletTransactionModel{}).Where("reversal_of_no = ?", first.TransactionNo).Count(&reversals).Error)
+	require.Zero(t, reversals)
+	var count int64
+	require.NoError(t, db.Model(&WalletTransactionModel{}).Where("idempotency_key = ?", command.IdempotencyKey).Count(&count).Error)
+	require.EqualValues(t, 1, count)
+	require.NoError(t, db.Model(&IdempotencyKeyModel{}).Where("owner_user_id = ? AND idempotency_key = ?", userID, command.IdempotencyKey).Count(&count).Error)
+	require.Zero(t, count)
+}
+
 func TestBillingRepoConsumerBalanceSixDecimalPrecisionMySQL(t *testing.T) {
 	db := newBillingMySQLTestDB(t)
 	ctx := context.Background()
