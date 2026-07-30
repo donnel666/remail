@@ -82,7 +82,12 @@ vi.mock("@douyinfe/semi-ui", async () => {
   Form.Slot = Box;
   const Input = ({ onChange, placeholder, value }: any) => <input aria-label={placeholder} onChange={(event) => onChange?.(event.target.value)} value={value} />;
   const Modal = ({ children, footer, onCancel, title, visible }: any) => visible ? <div aria-label={title} role="dialog"><button aria-label={`close-${title}`} onClick={onCancel}>close</button>{children}{footer}</div> : null;
-  const Table = ({ columns = [], dataSource = [] }: any) => <div>{dataSource.map((item: any) => <div data-testid={`row-${item.orderNo}`} key={item.orderNo}>{columns.map((column: any) => <span key={column.key}>{column.render ? column.render(item[column.dataIndex], item) : item[column.dataIndex]}</span>)}</div>)}</div>;
+  const Table = ({ columns = [], dataSource = [], pagination }: any) => {
+    const currentPage = pagination?.currentPage ?? 1;
+    const pageSize = pagination?.pageSize ?? dataSource.length;
+    const total = pagination?.total ?? dataSource.length;
+    return <div>{dataSource.map((item: any) => <div data-testid={`row-${item.orderNo}`} key={item.orderNo}>{columns.map((column: any) => <span key={column.key}>{column.render ? column.render(item[column.dataIndex], item) : item[column.dataIndex]}</span>)}</div>)}{currentPage * pageSize < total ? <button aria-label="next-page" onClick={() => pagination.onPageChange(currentPage + 1)}>next</button> : null}</div>;
+  };
   return {
     Avatar: Box,
     Button,
@@ -265,6 +270,39 @@ describe("wallet payment modal", () => {
       "w-6",
       "justify-start",
     );
+  });
+
+  it("paginates billing records", async () => {
+    mocks.listRecharges.mockResolvedValue({
+      items: Array.from({ length: 11 }, (_, index) => ({
+        ...payingRecharge,
+        id: index + 1,
+        rechargeNo: `RC${String(index + 1).padStart(4, "0")}`,
+        createdAt: `2026-07-26T00:${String(index).padStart(2, "0")}:00Z`,
+      })),
+      total: 11,
+      offset: 0,
+      limit: 100,
+    });
+    render(<Wallet />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Billing" }));
+
+    expect(await screen.findByTestId("row-RC0011")).toBeVisible();
+    expect(screen.queryByTestId("row-RC0001")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "next-page" }));
+    expect(await screen.findByTestId("row-RC0001")).toBeVisible();
+
+    mocks.listRecharges.mockResolvedValue({
+      items: [{ ...payingRecharge, id: 99, rechargeNo: "RC9999", status: "credited" }],
+      total: 1,
+      offset: 0,
+      limit: 100,
+    });
+    await waitFor(() => expect(paymentPoll).toBeTypeOf("function"));
+    act(() => paymentPoll?.());
+
+    expect(await screen.findByTestId("row-RC9999")).toBeVisible();
   });
 
   it("keeps recharge records when redemption history fails", async () => {

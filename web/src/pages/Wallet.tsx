@@ -67,6 +67,7 @@ import { formatPoints, formatPointsValue, normalizePointValue } from "@/lib/poin
 
 const { Text } = Typography;
 const EPAY_RETURN_MESSAGE = "remail:epay-return";
+const BILLING_PAGE_SIZE = 10;
 
 interface BannerStat {
   icon: ReactNode;
@@ -170,6 +171,7 @@ export default function Wallet() {
   const [redemptionCode, setRedemptionCode] = useState("");
   const [billingOpen, setBillingOpen] = useState(false);
   const [billingKeyword, setBillingKeyword] = useState("");
+  const [billingPage, setBillingPage] = useState(1);
   const [debouncedBillingKeyword, flushBillingKeyword] = useDebouncedValue(billingKeyword);
   const [debouncedCustomPoints, flushCustomPoints] = useDebouncedValue(customAmount, 250);
   const [wallet, setWallet] = useState<WalletResponse | null>(null);
@@ -214,6 +216,7 @@ export default function Wallet() {
 
   const openBilling = useCallback(() => {
     setBillingKeyword("");
+    setBillingPage(1);
     flushBillingKeyword("");
     setBillingOpen(true);
   }, [flushBillingKeyword]);
@@ -713,6 +716,20 @@ export default function Wallet() {
     [recharges, redemptions, t]
   );
 
+  const billingPageCount = Math.max(
+    1,
+    Math.ceil(billingData.length / BILLING_PAGE_SIZE)
+  );
+  const safeBillingPage = Math.min(billingPage, billingPageCount);
+  const billingPageData = billingData.slice(
+    (safeBillingPage - 1) * BILLING_PAGE_SIZE,
+    safeBillingPage * BILLING_PAGE_SIZE
+  );
+
+  useEffect(() => {
+    setBillingPage((page) => Math.min(page, billingPageCount));
+  }, [billingPageCount]);
+
   const billingColumns = useMemo(
     () => [
       {
@@ -1106,6 +1123,10 @@ export default function Wallet() {
       </Modal>
 
       <Modal
+        bodyStyle={{
+          maxHeight: isMobile ? "calc(100vh - 152px)" : "min(720px, calc(100vh - 180px))",
+          overflowY: "auto",
+        }}
         footer={null}
         onCancel={() => setBillingOpen(false)}
         size={isMobile ? "full-width" : "large"}
@@ -1114,7 +1135,10 @@ export default function Wallet() {
       >
         <div className="mb-3">
           <Input
-            onChange={(value) => setBillingKeyword(String(value))}
+            onChange={(value) => {
+              setBillingKeyword(String(value));
+              setBillingPage(1);
+            }}
             placeholder={t("Order No.")}
             prefix={<IconSearch />}
             showClear
@@ -1124,7 +1148,7 @@ export default function Wallet() {
         <div>
           <Table
             columns={billingColumns}
-            dataSource={billingData}
+            dataSource={billingPageData}
             empty={
               <Empty
                 darkModeImage={
@@ -1140,8 +1164,14 @@ export default function Wallet() {
               />
             }
             loading={billingLoading}
-            pagination={false}
+            pagination={{
+              currentPage: safeBillingPage,
+              onPageChange: setBillingPage,
+              pageSize: BILLING_PAGE_SIZE,
+              total: billingData.length,
+            }}
             rowKey="orderNo"
+            scroll={{ x: "max-content" }}
             size="small"
           />
           {billingHasMore ? (
