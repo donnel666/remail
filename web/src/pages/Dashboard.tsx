@@ -55,7 +55,10 @@ import type {
   WorkbenchProduct,
   WorkbenchProject,
 } from "./workbench/types";
-import { matchesProjectEmailSearch } from "./workbench/utils";
+import {
+  compareProjectNames,
+  matchesProjectEmailSearch,
+} from "./workbench/utils";
 
 function filterProjects(projects: WorkbenchProject[], search: string) {
   const q = search.trim().toLowerCase();
@@ -68,7 +71,9 @@ function filterProjects(projects: WorkbenchProject[], search: string) {
       )
     : projects;
   return [...filtered].sort((a, b) => {
-    if (a.visibility === b.visibility) return a.name.localeCompare(b.name);
+    if (a.visibility === b.visibility) {
+      return compareProjectNames(a.name, b.name);
+    }
     return a.visibility === "private" ? -1 : 1;
   });
 }

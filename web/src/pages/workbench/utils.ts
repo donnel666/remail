@@ -90,6 +90,13 @@ export function productTypeLabel(type: ProductType, t: (key: string) => string) 
   return t("Random email");
 }
 
+export function compareProjectNames(left: string, right: string) {
+  const leftIsChinese = /\p{Script=Han}/u.test(left);
+  const rightIsChinese = /\p{Script=Han}/u.test(right);
+  if (leftIsChinese !== rightIsChinese) return leftIsChinese ? 1 : -1;
+  return left.localeCompare(right);
+}
+
 export function serviceStateMeta(
   state: ServiceState,
   t: (key: string) => string
