@@ -75,7 +75,7 @@ func (c *MicrosoftOAuthClient) AcquireToken(ctx context.Context, req MicrosoftOA
 	}
 	result, err := msacl.Authorize(ctx, email, password, req.ProxyURL, req.BindingAddress)
 	if err != nil {
-		return microsoftOAuthFailure("request", "Microsoft mail service is temporarily unavailable.", strings.TrimSpace(req.ProxyURL) != ""), err
+		return microsoftOAuthFailure("request", "Microsoft mail service is temporarily unavailable.", result.ProxyFailure), err
 	}
 	clientID := strings.TrimSpace(result.ClientID)
 	if clientID == "" {
@@ -162,7 +162,7 @@ func classifyMicrosoftTokenFailure(statusCode int, body map[string]any) (string,
 	errorDescription := strings.ToLower(strings.TrimSpace(stringValue(body["error_description"])))
 	switch {
 	case statusCode == 429 || statusCode >= 500:
-		return "request", "Microsoft mail service is temporarily unavailable.", true
+		return "request", "Microsoft mail service is temporarily unavailable.", false
 	case strings.Contains(errorCode, "invalid_grant") || strings.Contains(errorDescription, "invalid grant"):
 		return "oauth_invalid_grant", "Microsoft refresh token is invalid or expired.", false
 	case strings.Contains(errorDescription, "mfa") || strings.Contains(errorDescription, "multi-factor"):
@@ -182,7 +182,7 @@ func classifyMicrosoftTokenFailure(statusCode int, body map[string]any) (string,
 	case strings.Contains(errorDescription, "consent") || strings.Contains(errorDescription, "permission"):
 		return "oauth_permission", "Microsoft OAuth permission is not available.", false
 	default:
-		return "request", "Microsoft mail service is temporarily unavailable.", statusCode >= 500
+		return "request", "Microsoft mail service is temporarily unavailable.", false
 	}
 }
 

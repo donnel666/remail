@@ -1124,7 +1124,7 @@ func mapExplicitAliasError(err error) ExplicitAliasResult {
 	case AuthStatusAuthTimeout:
 		return failure("auth_timeout", "Microsoft alias authorization timed out.", false)
 	case AuthStatusRequestError:
-		return failure("request", "Microsoft alias service is temporarily unavailable.", sessionTransportUsedProxy(err))
+		return failure("request", "Microsoft alias service is temporarily unavailable.", IsProxyTransportError(err))
 	default:
 		return failure("alias_failed", "Microsoft alias creation failed.", false)
 	}

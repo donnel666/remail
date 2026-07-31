@@ -285,9 +285,6 @@ func (c *MicrosoftMailFetchClient) fetchAll(ctx context.Context, req MicrosoftMa
 			}
 			tokenResult.GraphSafeError = graphSafeError
 			tokenResult.FallbackFrom = "graph"
-			if graphResult.ProxyFailure {
-				tokenResult.ProxyFailure = true
-			}
 			return tokenResult, nil
 		}
 	}
@@ -318,8 +315,8 @@ func (c *MicrosoftMailFetchClient) fetchGraphAll(ctx context.Context, req Micros
 	if accessToken == "" {
 		var err error
 		tokenResult, err = exchangeMicrosoftAccessToken(ctx, req.ClientID, req.RefreshToken, defaultMicrosoftScopes, microsoftTokenURL, req.ProxyURL, timeout)
-		if err != nil {
-			tokenResult = microsoftOAuthFailure("request", "Microsoft mail service is temporarily unavailable.", true)
+		if err != nil && strings.TrimSpace(tokenResult.Category) == "" {
+			tokenResult = microsoftOAuthFailure("request", "Microsoft mail service is temporarily unavailable.", msacl.IsProxyTransportError(err))
 		}
 		if !tokenResult.Valid {
 			return mailFetchResultFromOAuth(tokenResult), nil
@@ -333,7 +330,7 @@ func (c *MicrosoftMailFetchClient) fetchGraphAll(ctx context.Context, req Micros
 	}
 	session, err := newGraphSession(ctx, req.ProxyURL, timeoutSeconds(timeout))
 	if err != nil {
-		failure := microsoftMailFetchFailure("request", "Microsoft mail service is temporarily unavailable.", strings.TrimSpace(req.ProxyURL) != "")
+		failure := microsoftMailFetchFailure("request", "Microsoft mail service is temporarily unavailable.", msacl.IsProxyTransportError(err))
 		// Session construction happens after a possible OAuth exchange. Keep the
 		// exchange's rotated RT even if the subsequent Graph client cannot start.
 		failure.RefreshToken = refreshToken
@@ -581,7 +578,7 @@ func (c *MicrosoftMailFetchClient) exchangeIMAPAccessToken(ctx context.Context, 
 	}
 	result, err := exchangeMicrosoftAccessToken(ctx, req.ClientID, req.RefreshToken, "", microsoftIMAPTokenURL, req.ProxyURL, c.requestTimeout())
 	if err != nil {
-		return "", "", microsoftMailFetchFailure("request", "Microsoft mail service is temporarily unavailable.", strings.TrimSpace(req.ProxyURL) != ""), err
+		return "", "", microsoftMailFetchFailure("request", "Microsoft mail service is temporarily unavailable.", result.ProxyFailure), err
 	}
 	if !result.Valid {
 		return "", "", mailFetchResultFromOAuth(result), nil
@@ -601,7 +598,7 @@ func (outlookIMAPClient) FetchAll(ctx context.Context, req MicrosoftMailFetchReq
 	defer cancel()
 	client, err := dialOutlookIMAPClient(operationCtx, req.ProxyURL)
 	if err != nil {
-		return microsoftMailFetchFailure("request", "Microsoft mail service is temporarily unavailable.", strings.TrimSpace(req.ProxyURL) != ""), err
+		return microsoftMailFetchFailure("request", "Microsoft mail service is temporarily unavailable.", isMicrosoftIMAPProxyTransportError(err, req.ProxyURL)), err
 	}
 	var closeOnce sync.Once
 	closeClient := func() {
@@ -618,7 +615,7 @@ func (outlookIMAPClient) FetchAll(ctx context.Context, req MicrosoftMailFetchReq
 		if isDefinitiveMicrosoftIMAPAuthenticationFailure(err) {
 			return microsoftMailFetchFailure("imap_auth_failed", "Microsoft IMAP authentication failed.", false), err
 		}
-		return microsoftMailFetchFailure("request", "Microsoft mail service is temporarily unavailable.", strings.TrimSpace(req.ProxyURL) != ""), err
+		return microsoftMailFetchFailure("request", "Microsoft mail service is temporarily unavailable.", isMicrosoftIMAPProxyTransportError(err, req.ProxyURL)), err
 	}
 
 	streamMessages := req.OnMessages
@@ -791,6 +788,14 @@ func isDefinitiveMicrosoftIMAPAuthenticationFailure(err error) bool {
 		strings.Contains(text, "authentication failed") ||
 		strings.Contains(text, "login failed") ||
 		strings.Contains(text, "invalid credentials")
+}
+
+func isMicrosoftIMAPProxyTransportError(err error, proxyURL string) bool {
+	if err == nil || strings.TrimSpace(proxyURL) == "" || errors.Is(err, context.Canceled) {
+		return false
+	}
+	var imapErr *imap.Error
+	return !errors.As(err, &imapErr)
 }
 
 func dialOutlookIMAPClient(ctx context.Context, proxyURL string) (*imapclient.Client, error) {
@@ -1116,7 +1121,7 @@ func exchangeMicrosoftAccessToken(ctx context.Context, clientID, refreshToken, s
 	}
 	session, err := msacl.NewAPISession(ctx, proxyURL, timeoutSeconds(timeout))
 	if err != nil {
-		return microsoftOAuthFailure("request", "Microsoft mail service is temporarily unavailable.", strings.TrimSpace(proxyURL) != ""), err
+		return microsoftOAuthFailure("request", "Microsoft mail service is temporarily unavailable.", msacl.IsProxyTransportError(err)), err
 	}
 	form := map[string]string{
 		"client_id":     clientID,
@@ -1132,7 +1137,7 @@ func exchangeMicrosoftAccessToken(ctx context.Context, clientID, refreshToken, s
 		"Accept":       "application/json",
 	}, &body)
 	if err != nil {
-		return microsoftOAuthFailure("request", "Microsoft mail service is temporarily unavailable.", strings.TrimSpace(proxyURL) != ""), err
+		return microsoftOAuthFailure("request", "Microsoft mail service is temporarily unavailable.", msacl.IsProxyTransportError(err)), err
 	}
 	if resp.StatusCode != 200 {
 		category, message, proxyFailure := classifyMicrosoftTokenFailure(resp.StatusCode, body)
@@ -1409,8 +1414,14 @@ func classifyMicrosoftGraphFailure(err error) (string, string, bool) {
 	if err == nil {
 		return "", "", false
 	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if errors.Is(err, context.Canceled) {
+		return "request", "Microsoft mail service is temporarily unavailable.", false
+	}
+	if msacl.IsProxyTransportError(err) {
 		return "request", "Microsoft mail service is temporarily unavailable.", true
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "request", "Microsoft mail service is temporarily unavailable.", false
 	}
 	var httpErr *microsoftGraphHTTPError
 	if errors.As(err, &httpErr) {
@@ -1420,12 +1431,12 @@ func classifyMicrosoftGraphFailure(err error) (string, string, bool) {
 		case httpErr.statusCode == 403:
 			return "graph_forbidden", "Microsoft Graph mailbox permission is not available.", false
 		case httpErr.statusCode == 429 || httpErr.statusCode >= 500:
-			return "request", "Microsoft mail service is temporarily unavailable.", true
+			return "request", "Microsoft mail service is temporarily unavailable.", false
 		default:
 			return "request", "Microsoft mail service is temporarily unavailable.", false
 		}
 	}
-	return "request", "Microsoft mail service is temporarily unavailable.", true
+	return "request", "Microsoft mail service is temporarily unavailable.", false
 }
 
 func microsoftMailFetchFailure(category, message string, proxyFailure bool) MicrosoftMailFetchResult {

@@ -54,7 +54,7 @@ func newSessionTransportError(err error, usesProxy bool) error {
 	return &sessionTransportError{error: err, usesProxy: usesProxy}
 }
 
-func sessionTransportUsedProxy(err error) bool {
+func IsProxyTransportError(err error) bool {
 	if err == nil || errors.Is(err, context.Canceled) {
 		return false
 	}

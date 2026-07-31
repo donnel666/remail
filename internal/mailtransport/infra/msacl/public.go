@@ -23,14 +23,13 @@ type Result struct {
 func Authorize(ctx context.Context, email, password, proxy string, preferredBindingAddress string) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{
-			Category:     "request",
-			SafeMessage:  "Microsoft mail service is temporarily unavailable.",
-			ProxyFailure: strings.TrimSpace(proxy) != "",
+			Category:    "request",
+			SafeMessage: "Microsoft mail service is temporarily unavailable.",
 		}, err
 	}
 	success, err := authorizeAccount(ctx, email, password, proxy, preferredBindingAddress)
 	if err != nil {
-		return mapAuthError(err, strings.TrimSpace(proxy) != ""), nil
+		return mapAuthError(err), nil
 	}
 	return Result{
 		Valid:          true,
@@ -42,7 +41,7 @@ func Authorize(ctx context.Context, email, password, proxy string, preferredBind
 	}, nil
 }
 
-func mapAuthError(err error, proxyFailure bool) Result {
+func mapAuthError(err error) Result {
 	var authErr *AuthError
 	status := AuthStatusUnknownError
 	if errors.As(err, &authErr) && strings.TrimSpace(authErr.Status) != "" {
@@ -94,11 +93,11 @@ func mapAuthError(err error, proxyFailure bool) Result {
 		}
 		return result
 	case AuthStatusAuthTimeout:
-		return aclFailure("auth_timeout", "Microsoft authorization timed out.", proxyFailure)
+		return aclFailure("auth_timeout", "Microsoft authorization timed out.", false)
 	case AuthStatusRequestError:
-		return aclFailure("request", "Microsoft authorization request failed temporarily.", proxyFailure)
+		return aclFailure("request", "Microsoft authorization request failed temporarily.", IsProxyTransportError(err))
 	default:
-		return aclFailure("request", "Microsoft authorization request failed temporarily.", proxyFailure)
+		return aclFailure("request", "Microsoft authorization request failed temporarily.", IsProxyTransportError(err))
 	}
 }
 

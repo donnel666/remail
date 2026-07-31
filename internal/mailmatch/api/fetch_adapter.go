@@ -122,30 +122,42 @@ func (a *MicrosoftFetchAdapter) FetchMicrosoftMessages(ctx context.Context, req 
 			req.Scope.MicrosoftRT = rotated
 		}
 		if err != nil {
-			lastFailure = &mailmatchapp.MailFetchFailure{
-				Category:     "request",
-				SafeMessage:  "Microsoft mail service is temporarily unavailable.",
-				Retryable:    true,
-				RefreshToken: strings.TrimSpace(req.Scope.MicrosoftRT),
-				Cause:        err,
-			}
+			lastFailure = microsoftFetchFailure(result.Category, result.SafeMessage, result.ProxyFailure)
+			lastFailure.RefreshToken = strings.TrimSpace(req.Scope.MicrosoftRT)
+			lastFailure.Cause = err
 			slog.Warn(
 				"microsoft mail fetch attempt failed",
 				"attempt", attempt+1,
 				"proxy_id", proxyID,
 				"direct", proxyConfig == nil || proxyConfig.Direct,
-				"category", "request",
-				"safe_message", "Microsoft mail service is temporarily unavailable.",
+				"category", lastFailure.Category,
+				"proxy_failure", result.ProxyFailure,
+				"safe_message", lastFailure.SafeMessage,
 			)
-			avoidServerIDs = proxyapp.AppendAvoidProxyServerID(avoidServerIDs, proxyConfig)
-			_ = a.reportProxyFailure(ctx, proxyID, "Microsoft mail fetch failed.")
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				lastFailure.Cause = ctxErr
+				return nil, lastFailure
+			}
+			if errors.Is(err, context.Canceled) {
+				return nil, lastFailure
+			}
+			if result.ProxyFailure {
+				avoidServerIDs = proxyapp.AppendAvoidProxyServerID(avoidServerIDs, proxyConfig)
+				_ = a.reportProxyFailure(ctx, proxyID, lastFailure.SafeMessage)
+			}
 			if streamed {
 				if req.OnReset == nil {
 					return nil, lastFailure
 				}
 				req.OnReset()
 			}
-			continue
+			if result.ProxyFailure {
+				continue
+			}
+			if strings.TrimSpace(result.Category) != "" {
+				_ = a.reportProxySuccess(ctx, proxyID)
+			}
+			return a.finishFailure(ctx, req, lastFailure)
 		}
 		if result.Valid {
 			_ = a.reportProxySuccess(ctx, proxyID)
@@ -166,6 +178,10 @@ func (a *MicrosoftFetchAdapter) FetchMicrosoftMessages(ctx context.Context, req 
 			"proxy_failure", result.ProxyFailure,
 			"safe_message", failure.SafeMessage,
 		)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			failure.Cause = ctxErr
+			return nil, failure
+		}
 		if result.ProxyFailure {
 			avoidServerIDs = proxyapp.AppendAvoidProxyServerID(avoidServerIDs, proxyConfig)
 			_ = a.reportProxyFailure(ctx, proxyID, result.SafeMessage)
@@ -262,14 +278,14 @@ func retryableMicrosoftFetchCategory(category string, proxyFailure bool) bool {
 }
 
 func (a *MicrosoftFetchAdapter) reportProxySuccess(ctx context.Context, proxyID uint) error {
-	if a == nil || a.proxies == nil || proxyID == 0 {
+	if a == nil || a.proxies == nil || proxyID == 0 || (ctx != nil && ctx.Err() != nil) {
 		return nil
 	}
 	return a.proxies.ReportSuccess(ctx, proxyID)
 }
 
 func (a *MicrosoftFetchAdapter) reportProxyFailure(ctx context.Context, proxyID uint, safeError string) error {
-	if a == nil || a.proxies == nil || proxyID == 0 {
+	if a == nil || a.proxies == nil || proxyID == 0 || (ctx != nil && ctx.Err() != nil) {
 		return nil
 	}
 	return a.proxies.ReportFailure(ctx, proxyID, safeError)

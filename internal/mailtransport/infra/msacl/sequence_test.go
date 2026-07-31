@@ -94,7 +94,7 @@ func TestSessionTransportFailureTracksWhetherRequestUsedProxy(t *testing.T) {
 	_, err := session.Get(addAssocIDURL, requestOptions{})
 
 	require.Error(t, err)
-	require.True(t, sessionTransportUsedProxy(err))
+	require.True(t, IsProxyTransportError(err))
 	client.requireDone()
 }
 

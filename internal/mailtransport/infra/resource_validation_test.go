@@ -74,7 +74,13 @@ func TestClassifyMicrosoftTokenFailureKeepsActionableCategories(t *testing.T) {
 			body:        map[string]any{},
 			category:    "request",
 			safeMessage: "Microsoft mail service is temporarily unavailable.",
-			proxy:       true,
+		},
+		{
+			name:        "server unavailable",
+			statusCode:  503,
+			body:        map[string]any{},
+			category:    "request",
+			safeMessage: "Microsoft mail service is temporarily unavailable.",
 		},
 	}
 

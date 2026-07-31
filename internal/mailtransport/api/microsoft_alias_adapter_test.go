@@ -50,6 +50,63 @@ func TestAuthorizeAliasBindingAvoidsFailedProxyServerOnRetry(t *testing.T) {
 	require.Equal(t, []uint{1}, proxies.requests[1].AvoidProxyServerIDs)
 }
 
+func TestAuthorizeAliasBindingDoesNotFailProxyForTaskError(t *testing.T) {
+	proxies := &microsoftProxyProviderStub{acquireFn: func(proxyapp.AcquireProxyRequest) (*proxyapp.ProxyConfig, error) {
+		return &proxyapp.ProxyConfig{ID: 10, ProxyServerID: 1, URL: "socks5://server.invalid:1080"}, nil
+	}}
+	adapter := &MicrosoftAliasCreationAdapter{
+		proxies: proxies,
+		authorize: func(context.Context, string, string, string, string) (msacl.Result, error) {
+			return msacl.Result{
+				Category:    "request",
+				SafeMessage: "Microsoft alias service is temporarily unavailable.",
+			}, errors.New("response parsing failed")
+		},
+	}
+
+	result, err := adapter.PrepareMicrosoftAliasBinding(context.Background(), mailapp.MicrosoftAliasCreationRequest{
+		ResourceID: 8, EmailAddress: "owner@example.test", Password: "secret",
+	})
+
+	require.Error(t, err)
+	require.Equal(t, "request", result.Category)
+	require.Len(t, proxies.requests, 1)
+	require.Empty(t, proxies.failures)
+}
+
+func TestMicrosoftAliasBindingLeavesProxyNeutralWhenAcquireFails(t *testing.T) {
+	acquireErr := errors.New("proxy repository unavailable")
+	proxies := &microsoftProxyProviderStub{acquireFn: func(proxyapp.AcquireProxyRequest) (*proxyapp.ProxyConfig, error) {
+		return nil, acquireErr
+	}}
+	adapter := &MicrosoftAliasCreationAdapter{proxies: proxies}
+	req := mailapp.MicrosoftAliasCreationRequest{
+		ResourceID: 9, EmailAddress: "owner@example.test", Password: "secret",
+	}
+
+	checks := []func() (mailapp.MicrosoftAliasBindingPreparationResult, error){
+		func() (mailapp.MicrosoftAliasBindingPreparationResult, error) {
+			return adapter.authorizeAliasBinding(context.Background(), req, "binding@recovery.test", "")
+		},
+		func() (mailapp.MicrosoftAliasBindingPreparationResult, error) {
+			return adapter.recoverAliasBindingViaPasswordRecovery(context.Background(), req, "b*****g@recovery.test")
+		},
+		func() (mailapp.MicrosoftAliasBindingPreparationResult, error) {
+			return adapter.confirmCurrentAliasBinding(context.Background(), req, "binding@recovery.test")
+		},
+	}
+	for _, check := range checks {
+		result, err := check()
+		require.ErrorIs(t, err, acquireErr)
+		require.False(t, result.ProxyFailure)
+		require.Equal(t, "request", result.Category)
+	}
+
+	require.Len(t, proxies.requests, len(checks))
+	require.Empty(t, proxies.failures)
+	require.Empty(t, proxies.successes)
+}
+
 func TestConfirmedAddedAliasesRejectsFailedAndRateLimitedResults(t *testing.T) {
 	confirmed := confirmedAddedAliases([]msacl.ExplicitAliasResult{
 		{Aliases: []string{"ADDED@OUTLOOK.COM"}, Category: "added"},

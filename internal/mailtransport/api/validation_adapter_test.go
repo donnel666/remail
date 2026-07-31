@@ -215,6 +215,42 @@ func TestMicrosoftTokenRefreshACLConvertsProtocolErrorsToSafeRetryableResult(t *
 	require.NotContains(t, result.SafeMessage, "canary")
 }
 
+func TestMicrosoftTokenRefreshLeavesProxyNeutralForTaskError(t *testing.T) {
+	proxies := purposeProxyStub()
+	adapter := &ResourceValidationAdapter{
+		proxies:   proxies,
+		microsoft: &microsoftOAuthProtocolStub{err: errors.New("local task failure")},
+	}
+
+	result, err := adapter.RefreshMicrosoftToken(context.Background(), mailapp.MicrosoftTokenRefreshProtocolRequest{
+		EmailAddress: "owner@example.test",
+	})
+
+	require.NoError(t, err)
+	require.False(t, result.Valid)
+	require.Equal(t, "request", result.Category)
+	require.Empty(t, proxies.failures)
+	require.Empty(t, proxies.successes)
+}
+
+func TestMicrosoftTokenRefreshLeavesProxyNeutralForCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	proxies := purposeProxyStub()
+	adapter := &ResourceValidationAdapter{
+		proxies:   proxies,
+		microsoft: &microsoftOAuthProtocolStub{err: errors.New("local task failure")},
+	}
+
+	_, err := adapter.RefreshMicrosoftToken(ctx, mailapp.MicrosoftTokenRefreshProtocolRequest{
+		EmailAddress: "owner@example.test",
+	})
+
+	require.ErrorIs(t, err, context.Canceled)
+	require.Empty(t, proxies.failures)
+	require.Empty(t, proxies.successes)
+}
+
 func TestMicrosoftTokenRefreshACLUsesRuntimeProxyAttemptLimit(t *testing.T) {
 	runtimeconfig.Set("max_proxy_attempts", "1")
 	t.Cleanup(func() { runtimeconfig.Delete("max_proxy_attempts") })
@@ -1807,7 +1843,11 @@ func TestValidateMicrosoftFetchProxyRetryDoesNotStartBindingFlow(t *testing.T) {
 	fetcher := &microsoftMailFetcherStub{}
 	fetcher.fetchFn = func(mailinfra.MicrosoftMailFetchRequest) (mailinfra.MicrosoftMailFetchResult, error) {
 		if fetcher.calls == 1 {
-			return mailinfra.MicrosoftMailFetchResult{}, errors.New("temporary fetch proxy failure")
+			return mailinfra.MicrosoftMailFetchResult{
+				Category:     "request",
+				SafeMessage:  "Microsoft mail service is temporarily unavailable.",
+				ProxyFailure: true,
+			}, errors.New("temporary fetch proxy failure")
 		}
 		return mailinfra.MicrosoftMailFetchResult{Valid: true, Protocol: "graph"}, nil
 	}
@@ -1835,6 +1875,69 @@ func TestValidateMicrosoftFetchProxyRetryDoesNotStartBindingFlow(t *testing.T) {
 	require.Nil(t, result.BindingObservation)
 }
 
+func TestValidateMicrosoftIMAPAuthFailureDoesNotReportProxyFailure(t *testing.T) {
+	proxies := purposeProxyStub()
+	adapter := &ResourceValidationAdapter{
+		proxies: proxies,
+		microsoft: &microsoftOAuthProtocolStub{result: verifiedOAuthResult(
+			"client-id", "refresh-token", "access-token", "",
+		)},
+		fetcher: &microsoftMailFetcherStub{
+			result: mailinfra.MicrosoftMailFetchResult{
+				Category:    "imap_auth_failed",
+				SafeMessage: "Microsoft IMAP authentication failed.",
+			},
+			err: errors.New("imap authentication failed"),
+		},
+		bindings: &microsoftValidationBindingStoreStub{binding: &maildomain.MicrosoftBindingMailbox{
+			ID:             53,
+			ResourceID:     1242,
+			AccountEmail:   "owner@example.test",
+			BindingAddress: "verified@recovery.test",
+			Status:         maildomain.MicrosoftBindingVerified,
+		}},
+	}
+
+	result, err := adapter.ValidateMicrosoft(context.Background(), coreapp.MicrosoftValidationRequest{
+		ResourceID:   1242,
+		EmailAddress: "owner@example.test",
+		ClientID:     "client-id",
+		RefreshToken: "refresh-token",
+	})
+
+	require.NoError(t, err)
+	require.False(t, result.Valid)
+	require.Equal(t, "imap_auth_failed", result.Category)
+	require.Len(t, proxies.requests, 1)
+	require.Empty(t, proxies.failures)
+	require.Equal(t, []uint{100}, proxies.successes)
+}
+
+func TestValidateMicrosoftLeavesProxyNeutralForUnstructuredFetchError(t *testing.T) {
+	proxies := purposeProxyStub()
+	adapter := &ResourceValidationAdapter{
+		proxies: proxies,
+		microsoft: &microsoftOAuthProtocolStub{result: verifiedOAuthResult(
+			"client-id", "refresh-token", "access-token", "",
+		)},
+		fetcher:  &microsoftMailFetcherStub{err: errors.New("local task failure")},
+		bindings: &microsoftValidationBindingStoreStub{},
+	}
+
+	result, err := adapter.ValidateMicrosoft(context.Background(), coreapp.MicrosoftValidationRequest{
+		ResourceID:   1243,
+		EmailAddress: "owner@example.test",
+		ClientID:     "client-id",
+		RefreshToken: "refresh-token",
+	})
+
+	require.NoError(t, err)
+	require.False(t, result.Valid)
+	require.Equal(t, "request", result.Category)
+	require.Empty(t, proxies.failures)
+	require.Empty(t, proxies.successes)
+}
+
 func TestFetchMicrosoftValidationKeepsRotatedTokenReturnedWithError(t *testing.T) {
 	adapter := &ResourceValidationAdapter{fetcher: &microsoftMailFetcherStub{
 		result: mailinfra.MicrosoftMailFetchResult{RefreshToken: "fetch-rotated-refresh"},
@@ -1848,6 +1951,7 @@ func TestFetchMicrosoftValidationKeepsRotatedTokenReturnedWithError(t *testing.T
 	require.False(t, result.Valid)
 	require.Equal(t, "request", result.Category)
 	require.Equal(t, "fetch-rotated-refresh", result.RefreshToken)
+	require.False(t, result.ProxyFailure)
 }
 
 func TestValidateMicrosoftOuterRetryPreservesLastAuthoritativeRotatedCredentials(t *testing.T) {
@@ -1869,7 +1973,14 @@ func TestValidateMicrosoftOuterRetryPreservesLastAuthoritativeRotatedCredentials
 			SafeMessage: "Microsoft OAuth client is invalid or not allowed.",
 		}, nil
 	}}
-	fetcher := &microsoftMailFetcherStub{err: errors.New("temporary fetch proxy failure")}
+	fetcher := &microsoftMailFetcherStub{
+		result: mailinfra.MicrosoftMailFetchResult{
+			Category:     "request",
+			SafeMessage:  "Microsoft mail service is temporarily unavailable.",
+			ProxyFailure: true,
+		},
+		err: errors.New("temporary fetch proxy failure"),
+	}
 	adapter := &ResourceValidationAdapter{
 		proxies:   purposeProxyStub(),
 		microsoft: oauth,

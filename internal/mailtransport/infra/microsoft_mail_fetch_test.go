@@ -99,6 +99,31 @@ func TestMicrosoftMailFetchClientFallsBackToIMAPAfterGraphFailure(t *testing.T) 
 	assert.Equal(t, "Microsoft mail service is temporarily unavailable.", result.GraphSafeError)
 }
 
+func TestMicrosoftMailFetchClientIMAPAuthFailureDoesNotInheritGraphProxyFailure(t *testing.T) {
+	client := &MicrosoftMailFetchClient{
+		graphFetch: func(context.Context, MicrosoftMailFetchRequest) (MicrosoftMailFetchResult, error) {
+			return microsoftMailFetchFailure("request", "Microsoft mail service is temporarily unavailable.", true), errors.New("graph proxy failure")
+		},
+		exchangeIMAPToken: func(context.Context, MicrosoftMailFetchRequest) (string, string, MicrosoftMailFetchResult, error) {
+			return "imap-access-token", "imap-rotated-rt", MicrosoftMailFetchResult{}, nil
+		},
+	}
+	imapFallback := &fakeMicrosoftIMAPClient{
+		result: microsoftMailFetchFailure("imap_auth_failed", "Microsoft IMAP authentication failed.", false),
+		err:    errors.New("imap authentication failed"),
+	}
+
+	result, err := client.fetchAll(context.Background(), MicrosoftMailFetchRequest{
+		EmailAddress: "user@example.com",
+		ClientID:     "client-id",
+		RefreshToken: "refresh-token",
+	}, imapFallback)
+
+	require.NoError(t, err)
+	require.Equal(t, "imap_auth_failed", result.Category)
+	require.False(t, result.ProxyFailure)
+}
+
 func TestMicrosoftMailFetchClientKeepsGraphRotatedTokenWhenIMAPExchangeFails(t *testing.T) {
 	client := &MicrosoftMailFetchClient{
 		graphFetch: func(context.Context, MicrosoftMailFetchRequest) (MicrosoftMailFetchResult, error) {
@@ -717,6 +742,7 @@ func TestMicrosoftGraphIdentityStatusUsesMailAndUPN(t *testing.T) {
 }
 
 func TestMicrosoftIMAPAuthenticationFailureClassification(t *testing.T) {
+	proxyURL := "socks5://proxy.invalid:1080"
 	require.True(t, isDefinitiveMicrosoftIMAPAuthenticationFailure(&imap.Error{
 		Type: imap.StatusResponseTypeNo,
 		Code: imap.ResponseCodeAuthenticationFailed,
@@ -732,6 +758,10 @@ func TestMicrosoftIMAPAuthenticationFailureClassification(t *testing.T) {
 		Text: "Service temporarily unavailable",
 	}))
 	require.False(t, isDefinitiveMicrosoftIMAPAuthenticationFailure(io.EOF))
+	require.False(t, isMicrosoftIMAPProxyTransportError(context.Canceled, proxyURL))
+	require.False(t, isMicrosoftIMAPProxyTransportError(&imap.Error{Type: imap.StatusResponseTypeNo}, proxyURL))
+	require.True(t, isMicrosoftIMAPProxyTransportError(io.EOF, proxyURL))
+	require.False(t, isMicrosoftIMAPProxyTransportError(io.EOF, ""))
 }
 
 func TestDialHTTPConnectHonorsContextWhenProxyGoesSilent(t *testing.T) {
@@ -836,7 +866,12 @@ func TestClassifyMicrosoftGraphFailureKeepsAuthFailureGranularity(t *testing.T) 
 			},
 			category:    "request",
 			safeMessage: "Microsoft mail service is temporarily unavailable.",
-			proxy:       true,
+		},
+		{
+			name:        "local request failure",
+			err:         errors.New("response decode failed"),
+			category:    "request",
+			safeMessage: "Microsoft mail service is temporarily unavailable.",
 		},
 	}
 

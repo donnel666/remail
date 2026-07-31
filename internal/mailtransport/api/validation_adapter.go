@@ -121,11 +121,23 @@ func (a *ResourceValidationAdapter) RefreshMicrosoftToken(
 			RefreshToken: request.RefreshToken,
 			ProxyURL:     proxyURL,
 		})
+		structuredResult := strings.TrimSpace(raw.Category) != ""
 		if refreshErr != nil {
-			raw = mailinfra.MicrosoftOAuthResult{
-				Category:     "request",
-				SafeMessage:  "Microsoft mail service is temporarily unavailable.",
-				ProxyFailure: proxyID != 0,
+			if cancelErr := microsoftRecoveryContextError(ctx, refreshErr); cancelErr != nil {
+				return mailapp.MicrosoftTokenRefreshProtocolResult{}, cancelErr
+			}
+			raw.Valid = false
+			if !structuredResult {
+				raw = mailinfra.MicrosoftOAuthResult{
+					Category:     "request",
+					SafeMessage:  "Microsoft mail service is temporarily unavailable.",
+					ProxyFailure: msacl.IsProxyTransportError(refreshErr),
+				}
+			}
+		}
+		if !raw.Valid {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return mailapp.MicrosoftTokenRefreshProtocolResult{}, ctxErr
 			}
 		}
 		last = safeMicrosoftTokenRefreshProtocolResult(raw)
@@ -141,7 +153,7 @@ func (a *ResourceValidationAdapter) RefreshMicrosoftToken(
 		if raw.ProxyFailure && proxyID == 0 && attempt < maxProxyAttempts {
 			continue
 		}
-		if proxyID != 0 {
+		if proxyID != 0 && (refreshErr == nil || structuredResult) {
 			_ = a.reportProxySuccess(ctx, proxyID)
 		}
 		return last, nil
@@ -286,14 +298,25 @@ func (a *ResourceValidationAdapter) ValidateMicrosoft(ctx context.Context, req c
 			proxyID = proxyConfig.ID
 		}
 		rawResult, recoveryAction, credentialsAuthoritative, err := a.runMicrosoftValidation(ctx, req, proxyURL, effectiveBindingAddress, bindingAddressTrusted)
+		proxyResultAuthoritative := err == nil || strings.TrimSpace(rawResult.Category) != ""
+		if err != nil && rawResult.MailFetch != nil {
+			proxyResultAuthoritative = strings.TrimSpace(rawResult.MailFetch.Category) != ""
+		}
+		if !rawResult.Valid {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return coreapp.MicrosoftValidationResult{}, ctxErr
+			}
+		}
 		if err != nil {
 			if cancelErr := microsoftRecoveryContextError(ctx, err); cancelErr != nil {
 				return coreapp.MicrosoftValidationResult{}, cancelErr
 			}
 			rawResult.Valid = false
-			rawResult.Category = "request"
-			rawResult.SafeMessage = "Microsoft mail service is temporarily unavailable."
-			rawResult.ProxyFailure = proxyID != 0
+			if strings.TrimSpace(rawResult.Category) == "" {
+				rawResult.Category = "request"
+				rawResult.SafeMessage = "Microsoft mail service is temporarily unavailable."
+				rawResult.ProxyFailure = msacl.IsProxyTransportError(err)
+			}
 		}
 		if recoveryAction == microsoftBindingRecoveryNone &&
 			recoveredBinding == nil &&
@@ -413,7 +436,7 @@ func (a *ResourceValidationAdapter) ValidateMicrosoft(ctx context.Context, req c
 		if rawResult.ProxyFailure && proxyID == 0 && attempt < maxProxyAttempts {
 			continue
 		}
-		if proxyID != 0 {
+		if proxyID != 0 && proxyResultAuthoritative {
 			_ = a.reportProxySuccess(ctx, proxyID)
 		}
 		return last, nil
@@ -639,7 +662,7 @@ func (a *ResourceValidationAdapter) acquireTokenWithBindingProxy(
 		}
 		if acquireErr != nil && strings.TrimSpace(result.Category) == "" {
 			result = unavailableMicrosoftBindingResult()
-			result.ProxyFailure = proxyID != 0
+			result.ProxyFailure = msacl.IsProxyTransportError(acquireErr)
 		}
 		if result.ProxyFailure {
 			avoidServerIDs = proxyapp.AppendAvoidProxyServerID(avoidServerIDs, proxyConfig)
@@ -696,9 +719,15 @@ func (a *ResourceValidationAdapter) fetchMicrosoftValidation(
 	}
 	if err != nil {
 		result.Valid = false
-		result.Category = "request"
-		result.SafeMessage = "Microsoft mail service is temporarily unavailable."
-		result.ProxyFailure = strings.TrimSpace(proxyURL) != ""
+		if strings.TrimSpace(fetchResult.Category) != "" {
+			result.Category = fetchResult.Category
+			result.SafeMessage = fetchResult.SafeMessage
+			result.ProxyFailure = fetchResult.ProxyFailure
+		} else {
+			result.Category = "request"
+			result.SafeMessage = "Microsoft mail service is temporarily unavailable."
+			result.ProxyFailure = msacl.IsProxyTransportError(err)
+		}
 		return result, err
 	}
 	result.Valid = fetchResult.Valid
@@ -854,14 +883,14 @@ func unavailableMicrosoftBindingRecoveryResult(result mailinfra.MicrosoftOAuthRe
 }
 
 func (a *ResourceValidationAdapter) reportProxySuccess(ctx context.Context, proxyID uint) error {
-	if a == nil || a.proxies == nil || proxyID == 0 {
+	if a == nil || a.proxies == nil || proxyID == 0 || (ctx != nil && ctx.Err() != nil) {
 		return nil
 	}
 	return a.proxies.ReportSuccess(ctx, proxyID)
 }
 
 func (a *ResourceValidationAdapter) reportProxyFailure(ctx context.Context, proxyID uint, safeError string) error {
-	if a == nil || a.proxies == nil || proxyID == 0 {
+	if a == nil || a.proxies == nil || proxyID == 0 || (ctx != nil && ctx.Err() != nil) {
 		return nil
 	}
 	return a.proxies.ReportFailure(ctx, proxyID, safeError)

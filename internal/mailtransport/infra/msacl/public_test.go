@@ -1,6 +1,8 @@
 package msacl
 
 import (
+	"context"
+	"io"
 	"testing"
 
 	maildomain "github.com/donnel666/remail/internal/mailtransport/domain"
@@ -84,13 +86,33 @@ func TestMapAuthErrorKeepsReferenceStatusGranularity(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := mapAuthError(tt.err, true)
+			result := mapAuthError(tt.err)
 
 			assert.False(t, result.Valid)
 			assert.Equal(t, tt.category, result.Category)
 			assert.Equal(t, tt.safeMessage, result.SafeMessage)
+			assert.False(t, result.ProxyFailure)
 		})
 	}
+}
+
+func TestMapAuthErrorOnlyMarksProxiedTransportFailure(t *testing.T) {
+	plain := mapAuthError(newAuthError("request failed", AuthStatusRequestError))
+	assert.False(t, plain.ProxyFailure)
+
+	proxied := mapAuthError(wrapAuthError(
+		"request failed",
+		AuthStatusRequestError,
+		newSessionTransportError(io.ErrUnexpectedEOF, true),
+	))
+	assert.True(t, proxied.ProxyFailure)
+
+	canceled := mapAuthError(wrapAuthError(
+		"request canceled",
+		AuthStatusRequestError,
+		newSessionTransportError(context.Canceled, true),
+	))
+	assert.False(t, canceled.ProxyFailure)
 }
 
 func TestMapAuthErrorAlreadyBoundPreservesBindingStateWithoutLeakingDisplay(t *testing.T) {
@@ -98,7 +120,7 @@ func TestMapAuthErrorAlreadyBoundPreservesBindingStateWithoutLeakingDisplay(t *t
 		Message:      "已绑定辅助邮箱(masked@example.com)",
 		Status:       AuthStatusAlreadyBound,
 		BoundMailbox: "binding@example.com",
-	}, false)
+	})
 
 	assert.False(t, result.Valid)
 	assert.Equal(t, "already_bound", result.Category)
@@ -113,7 +135,7 @@ func TestMapAuthErrorAlreadyBoundStoresMaskInBindingAddress(t *testing.T) {
 		Message:      "已绑定辅助邮箱(masked@example.com)",
 		Status:       AuthStatusAlreadyBound,
 		BoundMailbox: "m*****d@example.com",
-	}, false)
+	})
 
 	assert.Equal(t, "m*****d@example.com", result.BindingAddress)
 }

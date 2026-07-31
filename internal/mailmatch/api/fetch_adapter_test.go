@@ -16,10 +16,13 @@ import (
 type microsoftMessageFetchClientStub struct {
 	requests []mailinfra.MicrosoftMailFetchRequest
 	results  []mailinfra.MicrosoftMailFetchResult
+	errs     []error
 }
 
 type microsoftFetchProxyProviderStub struct {
-	requests []proxyapp.AcquireProxyRequest
+	requests  []proxyapp.AcquireProxyRequest
+	successes []uint
+	failures  []uint
 }
 
 func (s *microsoftFetchProxyProviderStub) Acquire(_ context.Context, req proxyapp.AcquireProxyRequest) (*proxyapp.ProxyConfig, error) {
@@ -28,8 +31,12 @@ func (s *microsoftFetchProxyProviderStub) Acquire(_ context.Context, req proxyap
 	return &proxyapp.ProxyConfig{ID: serverID + 1, ProxyServerID: serverID, URL: "socks5://proxy.invalid:1080"}, nil
 }
 
-func (*microsoftFetchProxyProviderStub) ReportSuccess(context.Context, uint) error { return nil }
-func (*microsoftFetchProxyProviderStub) ReportFailure(context.Context, uint, string) error {
+func (s *microsoftFetchProxyProviderStub) ReportSuccess(_ context.Context, proxyID uint) error {
+	s.successes = append(s.successes, proxyID)
+	return nil
+}
+func (s *microsoftFetchProxyProviderStub) ReportFailure(_ context.Context, proxyID uint, _ string) error {
+	s.failures = append(s.failures, proxyID)
 	return nil
 }
 
@@ -73,10 +80,15 @@ func TestMicrosoftFetchAdapterRealtimeUsesPurchaseReadLimitWithinRequestedWindow
 func (s *microsoftMessageFetchClientStub) FetchAll(_ context.Context, req mailinfra.MicrosoftMailFetchRequest) (mailinfra.MicrosoftMailFetchResult, error) {
 	s.requests = append(s.requests, req)
 	index := len(s.requests) - 1
-	if index >= len(s.results) {
-		return mailinfra.MicrosoftMailFetchResult{}, nil
+	var result mailinfra.MicrosoftMailFetchResult
+	if index < len(s.results) {
+		result = s.results[index]
 	}
-	return s.results[index], nil
+	var err error
+	if index < len(s.errs) {
+		err = s.errs[index]
+	}
+	return result, err
 }
 
 func TestMicrosoftFetchAdapterRetriesWithLatestRotatedRefreshToken(t *testing.T) {
@@ -130,6 +142,69 @@ func TestMicrosoftFetchAdapterAvoidsFailedProxyServerOnRetry(t *testing.T) {
 	require.Len(t, proxies.requests, 2)
 	require.Empty(t, proxies.requests[0].AvoidProxyServerIDs)
 	require.Equal(t, []uint{10}, proxies.requests[1].AvoidProxyServerIDs)
+}
+
+func TestMicrosoftFetchAdapterDoesNotFailProxyForIMAPAuthenticationFailure(t *testing.T) {
+	client := &microsoftMessageFetchClientStub{
+		results: []mailinfra.MicrosoftMailFetchResult{{
+			Category:    "imap_auth_failed",
+			SafeMessage: "Microsoft IMAP authentication failed.",
+		}},
+		errs: []error{errors.New("imap authentication failed")},
+	}
+	proxies := &microsoftFetchProxyProviderStub{}
+	adapter := &MicrosoftFetchAdapter{client: client, proxies: proxies}
+
+	_, err := adapter.FetchMicrosoftMessages(context.Background(), mailmatchapp.FetchMessagesRequest{
+		Scope: mailmatchapp.OrderScope{
+			MicrosoftEmail: "owner@example.test", MicrosoftClientID: "client-id", MicrosoftRT: "refresh-token",
+		},
+	})
+
+	var failure *mailmatchapp.MailFetchFailure
+	require.ErrorAs(t, err, &failure)
+	require.Equal(t, "imap_auth_failed", failure.Category)
+	require.Len(t, client.requests, 1)
+	require.Empty(t, proxies.failures)
+	require.Equal(t, []uint{11}, proxies.successes)
+}
+
+func TestMicrosoftFetchAdapterLeavesProxyNeutralForTaskError(t *testing.T) {
+	taskErr := errors.New("local task failure")
+	client := &microsoftMessageFetchClientStub{errs: []error{taskErr}}
+	proxies := &microsoftFetchProxyProviderStub{}
+	adapter := &MicrosoftFetchAdapter{client: client, proxies: proxies}
+
+	_, err := adapter.FetchMicrosoftMessages(context.Background(), mailmatchapp.FetchMessagesRequest{
+		Scope: mailmatchapp.OrderScope{
+			MicrosoftEmail: "owner@example.test", MicrosoftClientID: "client-id", MicrosoftRT: "refresh-token",
+		},
+	})
+
+	var failure *mailmatchapp.MailFetchFailure
+	require.ErrorAs(t, err, &failure)
+	require.ErrorIs(t, err, taskErr)
+	require.True(t, failure.Retryable)
+	require.Len(t, client.requests, 1)
+	require.Empty(t, proxies.failures)
+	require.Empty(t, proxies.successes)
+}
+
+func TestMicrosoftFetchAdapterLeavesProxyNeutralForCancellation(t *testing.T) {
+	client := &microsoftMessageFetchClientStub{errs: []error{context.Canceled}}
+	proxies := &microsoftFetchProxyProviderStub{}
+	adapter := &MicrosoftFetchAdapter{client: client, proxies: proxies}
+
+	_, err := adapter.FetchMicrosoftMessages(context.Background(), mailmatchapp.FetchMessagesRequest{
+		Scope: mailmatchapp.OrderScope{
+			MicrosoftEmail: "owner@example.test", MicrosoftClientID: "client-id", MicrosoftRT: "refresh-token",
+		},
+	})
+
+	require.ErrorIs(t, err, context.Canceled)
+	require.Len(t, client.requests, 1)
+	require.Empty(t, proxies.failures)
+	require.Empty(t, proxies.successes)
 }
 
 func TestMicrosoftFetchAdapterStopsAfterTwoInternalAttempts(t *testing.T) {

@@ -74,7 +74,10 @@ func (a *MicrosoftAliasCreationAdapter) authorizeAliasBinding(ctx context.Contex
 	for attempt := 0; attempt <= maxAliasProxyAttempts; attempt++ {
 		proxyConfig, err := a.acquireAliasProxy(ctx, req, attempt, avoidServerIDs)
 		if err != nil {
-			continue
+			return mailapp.MicrosoftAliasBindingPreparationResult{
+				Category:    "request",
+				SafeMessage: "Microsoft alias service is temporarily unavailable.",
+			}, err
 		}
 		proxyURL := ""
 		proxyID := uint(0)
@@ -87,10 +90,22 @@ func (a *MicrosoftAliasCreationAdapter) authorizeAliasBinding(ctx context.Contex
 			authorize = msacl.Authorize
 		}
 		result, err := authorize(ctx, req.EmailAddress, req.Password, proxyURL, preferredAddress)
-		if err != nil || result.ProxyFailure {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return mailapp.MicrosoftAliasBindingPreparationResult{
+				Category:    "request",
+				SafeMessage: "Microsoft alias service is temporarily unavailable.",
+			}, ctxErr
+		}
+		if result.ProxyFailure {
 			avoidServerIDs = proxyapp.AppendAvoidProxyServerID(avoidServerIDs, proxyConfig)
 			a.reportAliasProxyFailure(ctx, proxyID, result.SafeMessage)
 			continue
+		}
+		if err != nil {
+			return mailapp.MicrosoftAliasBindingPreparationResult{
+				Category:    "request",
+				SafeMessage: "Microsoft alias service is temporarily unavailable.",
+			}, err
 		}
 		a.reportAliasProxySuccess(ctx, proxyID)
 		address := strings.ToLower(strings.TrimSpace(result.BindingAddress))
@@ -116,7 +131,10 @@ func (a *MicrosoftAliasCreationAdapter) recoverAliasBindingViaPasswordRecovery(c
 	for attempt := 0; attempt <= maxAliasProxyAttempts; attempt++ {
 		proxyConfig, err := a.acquireAliasProxy(ctx, req, attempt, nil)
 		if err != nil {
-			continue
+			return mailapp.MicrosoftAliasBindingPreparationResult{
+				Category:    "request",
+				SafeMessage: "Microsoft alias service is temporarily unavailable.",
+			}, err
 		}
 		proxyURL := ""
 		proxyID := uint(0)
@@ -131,6 +149,9 @@ func (a *MicrosoftAliasCreationAdapter) recoverAliasBindingViaPasswordRecovery(c
 		confirmed, err := confirm(ctx, req.EmailAddress, proxyURL, msacl.PasswordRecoveryConfirmationOptions{
 			ExpectedBindingAddress: maskedAddress,
 		})
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return mailapp.MicrosoftAliasBindingPreparationResult{BindingAddress: maskedAddress}, ctxErr
+		}
 		if err != nil {
 			// The recovery session may already have sent a code. Do not rotate the
 			// proxy and start another session for the same masked proof. Return the
@@ -147,7 +168,10 @@ func (a *MicrosoftAliasCreationAdapter) recoverAliasBindingViaPasswordRecovery(c
 		}
 		return mailapp.MicrosoftAliasBindingPreparationResult{Category: "request", SafeMessage: "Microsoft recovery mailbox relationship could not be resolved."}, nil
 	}
-	return mailapp.MicrosoftAliasBindingPreparationResult{ProxyFailure: true}, nil
+	return mailapp.MicrosoftAliasBindingPreparationResult{
+		Category:    "request",
+		SafeMessage: "Microsoft alias service is temporarily unavailable.",
+	}, nil
 }
 
 func (a *MicrosoftAliasCreationAdapter) confirmCurrentAliasBinding(ctx context.Context, req mailapp.MicrosoftAliasCreationRequest, currentAddress string) (mailapp.MicrosoftAliasBindingPreparationResult, error) {
@@ -159,7 +183,10 @@ func (a *MicrosoftAliasCreationAdapter) confirmCurrentAliasBinding(ctx context.C
 	for attempt := 0; attempt <= maxAliasProxyAttempts; attempt++ {
 		proxyConfig, err := a.acquireAliasProxy(ctx, req, attempt, avoidServerIDs)
 		if err != nil {
-			continue
+			return mailapp.MicrosoftAliasBindingPreparationResult{
+				Category:    "request",
+				SafeMessage: "Microsoft recovery mailbox lookup is temporarily unavailable.",
+			}, err
 		}
 		proxyURL := ""
 		proxyID := uint(0)
@@ -168,14 +195,26 @@ func (a *MicrosoftAliasCreationAdapter) confirmCurrentAliasBinding(ctx context.C
 			proxyID = proxyConfig.ID
 		}
 		result, err := probe(ctx, req.EmailAddress, proxyURL, "")
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return mailapp.MicrosoftAliasBindingPreparationResult{
+				Category:    "request",
+				SafeMessage: "Microsoft recovery mailbox lookup is temporarily unavailable.",
+			}, ctxErr
+		}
 		if err != nil {
 			if failure, permanent := aliasBindingProbeFailure(err); permanent {
 				a.reportAliasProxySuccess(ctx, proxyID)
 				return failure, nil
 			}
-			avoidServerIDs = proxyapp.AppendAvoidProxyServerID(avoidServerIDs, proxyConfig)
-			a.reportAliasProxyFailure(ctx, proxyID, "Microsoft recovery mailbox lookup failed.")
-			continue
+			if msacl.IsProxyTransportError(err) {
+				avoidServerIDs = proxyapp.AppendAvoidProxyServerID(avoidServerIDs, proxyConfig)
+				a.reportAliasProxyFailure(ctx, proxyID, "Microsoft recovery mailbox lookup failed.")
+				continue
+			}
+			return mailapp.MicrosoftAliasBindingPreparationResult{
+				Category:    "request",
+				SafeMessage: "Microsoft recovery mailbox lookup is temporarily unavailable.",
+			}, err
 		}
 		a.reportAliasProxySuccess(ctx, proxyID)
 
@@ -457,14 +496,14 @@ func (a *MicrosoftAliasCreationAdapter) acquireAliasProxy(ctx context.Context, r
 }
 
 func (a *MicrosoftAliasCreationAdapter) reportAliasProxySuccess(ctx context.Context, proxyID uint) {
-	if a == nil || a.proxies == nil || proxyID == 0 {
+	if a == nil || a.proxies == nil || proxyID == 0 || (ctx != nil && ctx.Err() != nil) {
 		return
 	}
 	_ = a.proxies.ReportSuccess(ctx, proxyID)
 }
 
 func (a *MicrosoftAliasCreationAdapter) reportAliasProxyFailure(ctx context.Context, proxyID uint, safeError string) {
-	if a == nil || a.proxies == nil || proxyID == 0 {
+	if a == nil || a.proxies == nil || proxyID == 0 || (ctx != nil && ctx.Err() != nil) {
 		return
 	}
 	_ = a.proxies.ReportFailure(ctx, proxyID, safeError)
