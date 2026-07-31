@@ -25,4 +25,19 @@ describe("shared search debounce", () => {
     expect(result.current[0]).toBe("second");
     expect(SHARED_SEARCH_DEBOUNCE_MS).toBe(1_000);
   });
+
+  it("keeps flush stable across value changes and flushes the latest value", () => {
+    vi.useFakeTimers();
+    const { result, rerender } = renderHook(
+      ({ value }) => useDebouncedValue(value),
+      { initialProps: { value: "first" } }
+    );
+    const flush = result.current[1];
+
+    rerender({ value: "second" });
+    expect(result.current[1]).toBe(flush);
+
+    act(() => flush());
+    expect(result.current[0]).toBe("second");
+  });
 });
