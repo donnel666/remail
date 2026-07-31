@@ -4,15 +4,16 @@ import (
 	"context"
 	cryptorand "crypto/rand"
 	"fmt"
+	"math"
 	"math/big"
 	"strings"
 	"time"
 
 	"github.com/donnel666/remail/internal/businessday"
+	"github.com/donnel666/remail/internal/money"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
+	"github.com/shopspring/decimal"
 )
-
-const probabilityUnits = int64(1_000_000)
 
 type DailyCheckinCommand struct {
 	UserID         uint
@@ -76,20 +77,67 @@ func (uc *WalletUseCase) ClaimDailyCheckin(ctx context.Context, userID uint, req
 }
 
 func randomCheckinReward(rules []runtimeconfig.CheckinRewardRule) (string, error) {
-	value, err := cryptorand.Int(cryptorand.Reader, big.NewInt(probabilityUnits))
-	if err != nil {
-		return "", fmt.Errorf("draw daily check-in reward: %w", err)
+	var total int64
+	for _, rule := range rules {
+		if rule.ProbabilityUnits <= 0 || total > math.MaxInt64-rule.ProbabilityUnits {
+			return "", fmt.Errorf("draw daily check-in reward: invalid weights")
+		}
+		total += rule.ProbabilityUnits
 	}
-	return checkinRewardAt(rules, value.Int64()), nil
+	if total <= 0 {
+		return "", fmt.Errorf("draw daily check-in reward: weights are empty")
+	}
+	roll, err := cryptorand.Int(cryptorand.Reader, big.NewInt(total))
+	if err != nil {
+		return "", fmt.Errorf("draw daily check-in reward tier: %w", err)
+	}
+	index := checkinRewardIndexAt(rules, roll.Int64())
+	if index < 0 {
+		return "", fmt.Errorf("draw daily check-in reward: invalid weight total")
+	}
+	// Descending tiers map to (next lower bound, current upper bound]; the lowest tier is fixed.
+	upper := checkinRewardAmount(rules[index])
+	lower := upper
+	if index+1 < len(rules) {
+		lower = checkinRewardAmount(rules[index+1])
+	}
+	if index+1 < len(rules) && upper <= lower {
+		return "", fmt.Errorf("draw daily check-in reward: invalid range")
+	}
+	var offset int64
+	if span := upper - lower; span > 0 {
+		value, err := cryptorand.Int(cryptorand.Reader, big.NewInt(span))
+		if err != nil {
+			return "", fmt.Errorf("draw daily check-in reward amount: %w", err)
+		}
+		offset = value.Int64()
+	}
+	return checkinRewardAt(rules, index, offset), nil
 }
 
-func checkinRewardAt(rules []runtimeconfig.CheckinRewardRule, roll int64) string {
+func checkinRewardIndexAt(rules []runtimeconfig.CheckinRewardRule, roll int64) int {
 	var cumulative int64
-	for _, rule := range rules {
+	for i, rule := range rules {
 		cumulative += rule.ProbabilityUnits
 		if roll < cumulative {
-			return rule.Amount
+			return i
 		}
 	}
-	return "0.00"
+	return -1
+}
+
+func checkinRewardAt(rules []runtimeconfig.CheckinRewardRule, index int, offset int64) string {
+	reward := checkinRewardAmount(rules[index])
+	if index+1 < len(rules) {
+		reward = checkinRewardAmount(rules[index+1]) + offset + 1
+	}
+	return money.Format(decimal.NewFromInt(reward))
+}
+
+func checkinRewardAmount(rule runtimeconfig.CheckinRewardRule) int64 {
+	amount, err := money.Parse(rule.Amount)
+	if err != nil {
+		return 0
+	}
+	return amount.IntPart()
 }

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -13,8 +15,7 @@ import (
 )
 
 const (
-	maxRewardRules       = 100
-	probabilityUnitTotal = int64(1_000_000)
+	maxRewardRules = 100
 )
 
 type CheckinRewardRule struct {
@@ -48,18 +49,33 @@ func ParseCheckinRewardRules(value string) ([]CheckinRewardRule, error) {
 	var total int64
 	for i, rule := range raw {
 		amount, err := money.Parse(string(rule.Amount))
-		probability, probabilityErr := decimal.NewFromString(string(rule.Probability))
-		if err != nil || !amount.IsPositive() || probabilityErr != nil || !probability.IsPositive() || probability.GreaterThan(decimal.NewFromInt(1)) || probability.Exponent() < -6 {
+		weight, weightErr := decimal.NewFromString(string(rule.Probability))
+		if err != nil || !amount.IsPositive() || !amount.Equal(amount.Truncate(0)) || weightErr != nil || !weight.IsPositive() || weight.Exponent() < -money.Scale {
 			return nil, fmt.Errorf("invalid check-in reward rule")
 		}
-		units := probability.Shift(6).IntPart()
-		if units <= 0 || total+units > probabilityUnitTotal {
-			return nil, fmt.Errorf("invalid check-in reward probability")
+		unitsDecimal := weight.Shift(money.Scale)
+		if unitsDecimal.GreaterThan(decimal.NewFromInt(math.MaxInt64)) {
+			return nil, fmt.Errorf("invalid check-in reward weight")
+		}
+		units := unitsDecimal.IntPart()
+		if units <= 0 || total > math.MaxInt64-units {
+			return nil, fmt.Errorf("invalid check-in reward weight")
 		}
 		total += units
 		rules[i] = CheckinRewardRule{Amount: money.Format(amount), ProbabilityUnits: units}
 	}
+	sort.Slice(rules, func(i, j int) bool { return checkinRewardAmount(rules[i]) > checkinRewardAmount(rules[j]) })
+	for i := 1; i < len(rules); i++ {
+		if checkinRewardAmount(rules[i]) == checkinRewardAmount(rules[i-1]) {
+			return nil, fmt.Errorf("duplicate check-in reward amount")
+		}
+	}
 	return rules, nil
+}
+
+func checkinRewardAmount(rule CheckinRewardRule) int64 {
+	amount, _ := money.Parse(rule.Amount)
+	return amount.IntPart()
 }
 
 func ParseLeaderboardRewardRules(value string) ([]LeaderboardRewardRule, error) {

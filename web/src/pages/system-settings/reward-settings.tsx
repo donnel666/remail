@@ -23,22 +23,24 @@ const D: Record<string, unknown> = {
 export default function RewardSettings({ options, onBulkSave }: SectionProps) {
   const { t } = useTranslation();
   const [form, setForm] = useState(() => parseOption(options, D as any) as Record<string, unknown>);
-  const [checkinRules, setCheckinRules] = useState<CheckinRule[]>(() => parseSettingsList<CheckinRule>(form.daily_checkin_reward_rules));
+  const [checkinRules, setCheckinRules] = useState<CheckinRule[]>(() => sortCheckinRules(parseSettingsList<CheckinRule>(form.daily_checkin_reward_rules)));
   const [leaderboardRules, setLeaderboardRules] = useState<LeaderboardRule[]>(() => parseSettingsList<LeaderboardRule>(form.leaderboard_reward_rules));
   const [saving, setSaving] = useState<"checkin" | "leaderboard" | null>(null);
-  const probabilityTotal = useMemo(() => checkinRules.reduce((sum, rule) => sum + Number(rule.probability || 0), 0), [checkinRules]);
+  const weightTotal = useMemo(() => checkinRules.reduce((sum, rule) => sum + Number(rule.probability || 0), 0), [checkinRules]);
   const update = (key: string, value: unknown) => setForm((current) => ({ ...current, [key]: value }));
 
   const saveCheckin = async () => {
-    if ((form.daily_checkin_enabled && checkinRules.length === 0) || checkinRules.some((rule) => rule.amount <= 0 || rule.probability <= 0) || probabilityTotal > 1.0000001) {
-      Toast.warning(t("签到奖励积分和概率必须大于 0，累计概率不能超过 1"));
+    const invalid = checkinRules.some((rule) => !Number.isSafeInteger(rule.amount) || rule.amount <= 0 || !Number.isFinite(rule.probability) || rule.probability <= 0);
+    if ((form.daily_checkin_enabled && checkinRules.length === 0) || invalid || new Set(checkinRules.map((rule) => rule.amount)).size !== checkinRules.length) {
+      Toast.warning(t("签到奖励积分必须为正整数，权重必须大于 0，积分档位不能重复"));
       return;
     }
+    const orderedRules = sortCheckinRules(checkinRules);
     setSaving("checkin");
     try {
       await onBulkSave(DAILY_CHECKIN_REWARD_KEYS.map((key) => ({
         key,
-        value: key === "daily_checkin_reward_rules" ? JSON.stringify(checkinRules) : String(form[key]),
+        value: key === "daily_checkin_reward_rules" ? JSON.stringify(orderedRules) : String(form[key]),
       })));
     } finally { setSaving(null); }
   };
@@ -60,15 +62,15 @@ export default function RewardSettings({ options, onBulkSave }: SectionProps) {
 
   return <>
     <SettingsSection title={<SettingsCardHeader icon={<CalendarCheck size={16} />} title={t("每日签到奖励")} description={t("用户每天首次打开页面或进入数据看板时，按上海日期自动签到并抽取一次奖励")} enabled={!!form.daily_checkin_enabled} onToggle={(value) => update("daily_checkin_enabled", value)} statusText={form.daily_checkin_enabled ? t("已启用") : t("已禁用")} />}>
-      <RuleHeader title={t("奖励档位")} description={t("例如奖励 100 积分、概率 0.005，表示以 0.5% 概率获得 100 积分；剩余概率不中奖")} onAdd={() => setCheckinRules((current) => [...current, { amount: 1, probability: 0.01 }])} addText={t("添加")} />
-      <div className="hidden grid-cols-[1fr_1fr_32px] gap-4 border-x border-t border-[var(--semi-color-border)] px-4 py-2 text-xs text-[var(--semi-color-text-2)] sm:grid"><span>{t("奖励积分")}</span><span>{t("中奖概率（0-1）")}</span><span /></div>
+      <RuleHeader title={t("奖励档位")} description={t("每行积分必须为整数，是该档范围上限；按积分从高到低，相邻档位组成左开右闭范围，最低档固定；实际概率按本档权重除以总权重计算")} onAdd={() => setCheckinRules((current) => sortCheckinRules([...current, { amount: 1, probability: 0.01 }]))} addText={t("添加")} />
+      <div className="hidden grid-cols-[1fr_1fr_32px] gap-4 border-x border-t border-[var(--semi-color-border)] px-4 py-2 text-xs text-[var(--semi-color-text-2)] sm:grid"><span>{t("奖励积分（整数范围上限）")}</span><span>{t("抽取权重")}</span><span /></div>
       {checkinRules.map((rule, index) => <div key={index} className="grid gap-3 border-x border-b border-[var(--semi-color-border)] px-4 py-3 sm:grid-cols-[1fr_1fr_32px] sm:items-center sm:gap-4">
-        <InputNumber aria-label={t("奖励积分")} min={0.000001} onNumberChange={(value) => setCheckinRules((current) => current.map((item, i) => i === index ? { ...item, amount: Number(value) || 0 } : item))} precision={6} style={{ width: "100%" }} value={rule.amount} />
-        <InputNumber aria-label={t("中奖概率（0-1）")} min={0.000001} max={1} onNumberChange={(value) => setCheckinRules((current) => current.map((item, i) => i === index ? { ...item, probability: Number(value) || 0 } : item))} precision={6} step={0.001} style={{ width: "100%" }} value={rule.probability} />
+        <InputNumber aria-label={t("奖励积分（整数范围上限）")} min={1} onNumberChange={(value) => setCheckinRules((current) => sortCheckinRules(current.map((item, i) => i === index ? { ...item, amount: Math.trunc(Number(value) || 0) } : item)))} precision={0} step={1} style={{ width: "100%" }} value={rule.amount} />
+        <InputNumber aria-label={t("抽取权重")} min={0.000001} onNumberChange={(value) => setCheckinRules((current) => current.map((item, i) => i === index ? { ...item, probability: Number(value) || 0 } : item))} precision={6} step={0.000001} style={{ width: "100%" }} value={rule.probability} />
         <Button aria-label={t("删除奖励档位")} icon={<Trash2 size={14} />} onClick={() => setCheckinRules((current) => current.filter((_, i) => i !== index))} size="small" theme="borderless" type="danger" />
       </div>)}
       {!checkinRules.length ? <EmptyRows text={t("暂无奖励档位")} /> : null}
-      <div className="mt-2 text-xs text-[var(--semi-color-text-2)]">{t("累计中奖概率")}：{probabilityTotal.toFixed(6)}；{t("不中奖概率")}：{Math.max(0, 1 - probabilityTotal).toFixed(6)}</div>
+      <div className="mt-2 text-xs text-[var(--semi-color-text-2)]">{t("总权重")}：{weightTotal.toFixed(6)}；{t("各档实际概率 = 本档权重 ÷ 总权重")}</div>
       <Button className="mt-5" icon={<Save size={14} />} loading={saving === "checkin"} onClick={() => void saveCheckin().catch(() => undefined)} theme="solid" type="primary">{t("保存设置")}</Button>
     </SettingsSection>
 
@@ -96,4 +98,8 @@ function RuleHeader({ title, description, onAdd, addText }: { title: string; des
 
 function EmptyRows({ text }: { text: string }) {
   return <div className="border border-t-0 border-[var(--semi-color-border)] px-4 py-8 text-center text-sm text-[var(--semi-color-text-2)]">{text}</div>;
+}
+
+function sortCheckinRules(rules: CheckinRule[]) {
+  return [...rules].sort((a, b) => b.amount - a.amount);
 }

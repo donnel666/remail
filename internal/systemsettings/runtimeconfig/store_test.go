@@ -128,8 +128,16 @@ func TestValidateRechargeRebateSettings(t *testing.T) {
 
 func TestValidateDailyRewardSettings(t *testing.T) {
 	require.NoError(t, Validate("daily_checkin_reward_rules", `[{"amount":100,"probability":0.005},{"amount":50,"probability":0.1}]`))
-	require.ErrorIs(t, Validate("daily_checkin_reward_rules", `[{"amount":100,"probability":0.8},{"amount":50,"probability":0.3}]`), domain.ErrInvalidValue)
+	require.NoError(t, Validate("daily_checkin_reward_rules", `[{"amount":100,"probability":0.8},{"amount":50,"probability":0.3}]`))
+	require.NoError(t, Validate("daily_checkin_reward_rules", `[{"amount":100,"probability":10},{"amount":50,"probability":20}]`))
+	require.ErrorIs(t, Validate("daily_checkin_reward_rules", `[{"amount":100,"probability":9223372036854.775807},{"amount":50,"probability":0.000001}]`), domain.ErrInvalidValue)
+	require.ErrorIs(t, Validate("daily_checkin_reward_rules", `[{"amount":100.5,"probability":1}]`), domain.ErrInvalidValue)
 	require.ErrorIs(t, Validate("daily_checkin_reward_rules", `[{"amount":100,"probability":0.0000001}]`), domain.ErrInvalidValue)
+	require.ErrorIs(t, Validate("daily_checkin_reward_rules", `[{"amount":100,"probability":0.8},{"amount":100.0,"probability":0.2}]`), domain.ErrInvalidValue)
+	rules, err := ParseCheckinRewardRules(`[{"amount":10,"probability":0.7},{"amount":1000,"probability":0.1},{"amount":500,"probability":0.2}]`)
+	require.NoError(t, err)
+	require.Equal(t, []string{"1000.00", "500.00", "10.00"}, []string{rules[0].Amount, rules[1].Amount, rules[2].Amount})
+	require.Equal(t, []int64{100_000, 200_000, 700_000}, []int64{rules[0].ProbabilityUnits, rules[1].ProbabilityUnits, rules[2].ProbabilityUnits})
 	require.NoError(t, Validate("leaderboard_reward_rules", `[{"rankFrom":1,"rankTo":1,"amount":100},{"rankFrom":2,"rankTo":6,"amount":20}]`))
 	require.ErrorIs(t, Validate("leaderboard_reward_rules", `[{"rankFrom":1,"rankTo":3,"amount":100},{"rankFrom":3,"rankTo":6,"amount":20}]`), domain.ErrInvalidValue)
 	require.NoError(t, Validate("leaderboard_settlement_time", "00:00"))
