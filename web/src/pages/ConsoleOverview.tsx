@@ -21,6 +21,7 @@ import {
   getAPIKeyRealtimeUsage,
   type APIKeyRealtimeUsageResponse,
 } from "@/lib/openapi-credentials-api";
+import { subscribeWalletUpdated } from "@/lib/wallet-events";
 
 import {
   DashboardAnalysisPanel,
@@ -74,7 +75,9 @@ export default function ConsoleOverview() {
 
   useEffect(() => {
     void load();
+    const unsubscribe = subscribeWalletUpdated(() => void load());
     return () => {
+      unsubscribe();
       requestSequence.current += 1;
     };
   }, [load]);

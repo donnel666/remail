@@ -121,7 +121,7 @@ export function DashboardSummaryCards({
         {
           avatarColor: "blue",
           icon: <IconMoneyExchangeStroked />,
-          title: t("Wallet balance"),
+          title: t("Wallet points"),
           trendColor: "#3b82f6",
           value: formatPoints(stats?.walletBalance),
         },
