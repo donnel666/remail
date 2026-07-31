@@ -128,50 +128,44 @@ func (a *MicrosoftAliasCreationAdapter) authorizeAliasBinding(ctx context.Contex
 
 func (a *MicrosoftAliasCreationAdapter) recoverAliasBindingViaPasswordRecovery(ctx context.Context, req mailapp.MicrosoftAliasCreationRequest, maskedAddress string) (mailapp.MicrosoftAliasBindingPreparationResult, error) {
 	ctx = msacl.WithRecoveryLeaseScope(ctx, req.ResourceID, maskedAddress)
-	for attempt := 0; attempt <= maxAliasProxyAttempts; attempt++ {
-		proxyConfig, err := a.acquireAliasProxy(ctx, req, attempt, nil)
-		if err != nil {
-			return mailapp.MicrosoftAliasBindingPreparationResult{
-				Category:    "request",
-				SafeMessage: "Microsoft alias service is temporarily unavailable.",
-			}, err
-		}
-		proxyURL := ""
-		proxyID := uint(0)
-		if proxyConfig != nil && !proxyConfig.Direct {
-			proxyURL = proxyConfig.URL
-			proxyID = proxyConfig.ID
-		}
-		confirm := a.confirmPasswordRecovery
-		if confirm == nil {
-			confirm = msacl.ConfirmPasswordRecoveryBinding
-		}
-		confirmed, err := confirm(ctx, req.EmailAddress, proxyURL, msacl.PasswordRecoveryConfirmationOptions{
-			ExpectedBindingAddress: maskedAddress,
-		})
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return mailapp.MicrosoftAliasBindingPreparationResult{BindingAddress: maskedAddress}, ctxErr
-		}
-		if err != nil {
-			// The recovery session may already have sent a code. Do not rotate the
-			// proxy and start another session for the same masked proof. Return the
-			// observed mask so the task can persist that Microsoft fact before retrying.
-			return mailapp.MicrosoftAliasBindingPreparationResult{BindingAddress: maskedAddress}, err
-		}
-		a.reportAliasProxySuccess(ctx, proxyID)
-		address := strings.ToLower(strings.TrimSpace(confirmed.Probe.BindingAddress))
-		if confirmed.BindingConfirmed && isCompleteMicrosoftBindingAddress(address) && msacl.UsesActiveAuxiliaryDomain(address) {
-			return mailapp.MicrosoftAliasBindingPreparationResult{
-				BindingAddress:       address,
-				ReleaseRecoveryLease: msacl.RecoveryLeaseReleaser(ctx),
-			}, nil
-		}
-		return mailapp.MicrosoftAliasBindingPreparationResult{Category: "request", SafeMessage: "Microsoft recovery mailbox relationship could not be resolved."}, nil
+	proxyConfig, err := a.acquireAliasProxy(ctx, req, 0, nil)
+	if err != nil {
+		return mailapp.MicrosoftAliasBindingPreparationResult{
+			Category:    "request",
+			SafeMessage: "Microsoft alias service is temporarily unavailable.",
+		}, err
 	}
-	return mailapp.MicrosoftAliasBindingPreparationResult{
-		Category:    "request",
-		SafeMessage: "Microsoft alias service is temporarily unavailable.",
-	}, nil
+	proxyURL := ""
+	proxyID := uint(0)
+	if proxyConfig != nil && !proxyConfig.Direct {
+		proxyURL = proxyConfig.URL
+		proxyID = proxyConfig.ID
+	}
+	confirm := a.confirmPasswordRecovery
+	if confirm == nil {
+		confirm = msacl.ConfirmPasswordRecoveryBinding
+	}
+	confirmed, err := confirm(ctx, req.EmailAddress, proxyURL, msacl.PasswordRecoveryConfirmationOptions{
+		ExpectedBindingAddress: maskedAddress,
+	})
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return mailapp.MicrosoftAliasBindingPreparationResult{BindingAddress: maskedAddress}, ctxErr
+	}
+	if err != nil {
+		// The recovery session may already have sent a code. Do not rotate the
+		// proxy and start another session for the same masked proof. Return the
+		// observed mask so the task can persist that Microsoft fact before retrying.
+		return mailapp.MicrosoftAliasBindingPreparationResult{BindingAddress: maskedAddress}, err
+	}
+	a.reportAliasProxySuccess(ctx, proxyID)
+	address := strings.ToLower(strings.TrimSpace(confirmed.Probe.BindingAddress))
+	if confirmed.BindingConfirmed && isCompleteMicrosoftBindingAddress(address) && msacl.UsesActiveAuxiliaryDomain(address) {
+		return mailapp.MicrosoftAliasBindingPreparationResult{
+			BindingAddress:       address,
+			ReleaseRecoveryLease: msacl.RecoveryLeaseReleaser(ctx),
+		}, nil
+	}
+	return mailapp.MicrosoftAliasBindingPreparationResult{Category: "request", SafeMessage: "Microsoft recovery mailbox relationship could not be resolved."}, nil
 }
 
 func (a *MicrosoftAliasCreationAdapter) confirmCurrentAliasBinding(ctx context.Context, req mailapp.MicrosoftAliasCreationRequest, currentAddress string) (mailapp.MicrosoftAliasBindingPreparationResult, error) {
