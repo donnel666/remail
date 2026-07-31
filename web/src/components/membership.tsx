@@ -76,7 +76,7 @@ export function MembershipOverview({
     <>
       <Card
         bodyStyle={{ padding: 0 }}
-        className="!rounded-2xl overflow-hidden border-0 shadow-sm"
+        className="!rounded-2xl mt-2 overflow-hidden border-0 shadow-sm"
       >
         <div className="px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
