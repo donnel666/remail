@@ -954,7 +954,7 @@ export default function Wallet() {
                       onChange={(value) => setRedemptionCode(String(value))}
                       placeholder={t("Enter redemption code")}
                       prefix={
-                        <span className="flex w-6 shrink-0 justify-start text-muted-foreground">
+                        <span className="flex w-7 shrink-0 items-center justify-center text-muted-foreground">
                           <Gift aria-hidden size={15} />
                         </span>
                       }
@@ -972,6 +972,19 @@ export default function Wallet() {
                       }
                     />
                   </Form>
+                  {rechargeConfig?.redemptionCodePurchaseUrl ? (
+                    <p className="mt-1.5 text-sm text-[var(--semi-color-text-2)]">
+                      {t("Looking for a redemption code?")}{" "}
+                      <a
+                        className="inline-flex min-h-11 cursor-pointer items-center text-foreground underline underline-offset-2 hover:text-brand-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-start)]"
+                        href={rechargeConfig.redemptionCodePurchaseUrl}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        {t("Buy a redemption code")}
+                      </a>
+                    </p>
+                  ) : null}
                 </Card>
               </div>
             </Card>

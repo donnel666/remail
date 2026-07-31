@@ -7136,7 +7136,10 @@ type RechargeConfigResponse struct {
 
 	// MinPoints Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	MinPoints NonNegativeLedgerAmount `json:"minPoints"`
-	Tiers     []RechargeTier          `json:"tiers"`
+
+	// RedemptionCodePurchaseUrl Configured HTTPS destination for buying redemption codes; omitted when not configured.
+	RedemptionCodePurchaseUrl *string        `json:"redemptionCodePurchaseUrl,omitempty"`
+	Tiers                     []RechargeTier `json:"tiers"`
 }
 
 // RechargeItem defines model for RechargeItem.

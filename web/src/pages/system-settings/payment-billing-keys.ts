@@ -20,6 +20,7 @@ export const TOPUP_KEYS = [
   "topup_amount_presets",
   "topup_amount_bonus",
   "max_pending_recharge_orders",
+  "redemption_code_purchase_url",
 ] as const;
 
 export const RECHARGE_CHECK_KEYS = [

@@ -152,7 +152,7 @@ describe("wallet payment modal", () => {
     vi.spyOn(window, "clearInterval").mockImplementation(() => undefined);
     mocks.getWallet.mockResolvedValue({ consumerBalance: "0.00", supplierAvailable: "0.00", supplierFrozen: "0.00", totalRecharged: "0.00", historicalSpend: "0.00", orderCount: 0 });
     mocks.getWalletReferrals.mockResolvedValue({ inviteCount: 0, pendingRewards: "0.00", totalEarned: "0.00" });
-    mocks.getRechargeConfig.mockResolvedValue({ enabled: true, minPoints: "1000.00", feeRate: "0.6", feeCapPoints: "0", tiers: [{ points: "1000.00", bonusPoints: "0.00", feePoints: "6.00", creditedPoints: "1000.00" }] });
+    mocks.getRechargeConfig.mockResolvedValue({ enabled: true, minPoints: "1000.00", feeRate: "0.6", feeCapPoints: "0", redemptionCodePurchaseUrl: "https://shop.example.com/cards", tiers: [{ points: "1000.00", bonusPoints: "0.00", feePoints: "6.00", creditedPoints: "1000.00" }] });
     mocks.quoteRecharge.mockResolvedValue({ points: "1000.00", bonusPoints: "0.00", feePoints: "6.00", creditedPoints: "1000.00" });
     mocks.listRecharges.mockResolvedValue({ items: [], total: 0, offset: 0, limit: 100 });
     mocks.listWalletTransactions.mockResolvedValue({ items: [], hasNext: false, limit: 100 });
@@ -204,6 +204,20 @@ describe("wallet payment modal", () => {
     expect(screen.getByRole("dialog", { name: "Recharge Billing" })).toBeVisible();
     expect(screen.getByLabelText("Order No.")).toHaveValue("");
     expect(mocks.refreshCurrentUser).toHaveBeenCalledTimes(2);
+  });
+
+  it("links to the configured redemption code store and centers the input icon", async () => {
+    const { container } = render(<Wallet />);
+
+    const link = await screen.findByRole("link", { name: "Buy a redemption code" });
+    expect(link).toHaveAttribute("href", "https://shop.example.com/cards");
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveClass("inline-flex", "min-h-11", "items-center", "text-foreground");
+    expect(container.querySelector(".lucide-gift")?.parentElement).toHaveClass(
+      "w-7",
+      "items-center",
+      "justify-center",
+    );
   });
 
   it("rejects fractional recharge points before creating an order", async () => {
@@ -258,7 +272,7 @@ describe("wallet payment modal", () => {
       hasNext: false,
       limit: 100,
     });
-    const { container } = render(<Wallet />);
+    render(<Wallet />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Billing" }));
 
@@ -266,10 +280,6 @@ describe("wallet payment modal", () => {
     expect(row).toHaveTextContent("Redemption Code");
     expect(row).toHaveTextContent("25");
     expect(row).not.toHaveTextContent(/\bPoints?\b|积分|金额/);
-    expect(container.querySelector(".lucide-gift")?.parentElement).toHaveClass(
-      "w-6",
-      "justify-start",
-    );
   });
 
   it("paginates billing records", async () => {

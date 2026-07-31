@@ -2,7 +2,7 @@ package runtimeconfig
 
 import "github.com/donnel666/remail/internal/systemsettings/domain"
 
-const DefaultSettingsCount = 200
+const DefaultSettingsCount = 201
 
 // DefaultSettings is the single source of initial values for runtime-managed
 // settings. Startup inserts only keys that are not in storage.
@@ -60,6 +60,7 @@ var defaultSettings = []domain.Setting{
 	{Key: "epay_platform_public_key", Value: ""},
 	{Key: "epay_notify_url", Value: ""},
 	{Key: "epay_return_url", Value: ""},
+	{Key: "redemption_code_purchase_url", Value: ""},
 	{Key: "points_per_yuan", Value: "1000"},
 	{Key: "min_topup_amount", Value: "10000"},
 	{Key: "topup_fee_rate", Value: "0"},

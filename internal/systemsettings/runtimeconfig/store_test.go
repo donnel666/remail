@@ -143,6 +143,8 @@ func TestValidateRechargePaymentSettings(t *testing.T) {
 	require.ErrorIs(t, Validate("epay_version", "v3"), domain.ErrInvalidValue)
 	require.NoError(t, Validate("epay_gateway_url", "https://pay.example.com/"))
 	require.ErrorIs(t, Validate("epay_gateway_url", "http://pay.example.com/"), domain.ErrInvalidValue)
+	require.NoError(t, Validate("redemption_code_purchase_url", "https://shop.example.com/cards"))
+	require.ErrorIs(t, Validate("redemption_code_purchase_url", "javascript:alert(1)"), domain.ErrInvalidValue)
 	require.ErrorIs(t, Validate("topup_amount_presets", "[10,20.5]"), domain.ErrInvalidValue)
 	require.NoError(t, Validate("topup_amount_presets", "[10,20.00]"))
 	require.ErrorIs(t, Validate("topup_amount_presets", "[10,10.00]"), domain.ErrInvalidValue)

@@ -10,7 +10,7 @@ import { applyEPayURLDefaults, changeEPayVersion, EPAY_GATEWAY_KEYS, EPAY_WRITE_
 import { SettingsAccessBoundary, SettingsCardHeader, SettingsFormGrid, SettingsNumberField, SettingsSection, SettingsSelectField, SettingsTextField, SettingsTextareaField } from "./settings-layout";
 import { parseTopupTiers, serializeTopupTiers, type TopupTier } from "./topup-tiers";
 
-const D: Record<string, unknown> = { epay_enabled: false, epay_version: "v1", epay_gateway_url: "", epay_merchant_id: "", epay_merchant_key: "", epay_private_key: "", epay_platform_public_key: "", epay_notify_url: "", epay_return_url: "", points_per_yuan: 1000, min_topup_amount: 10000, topup_fee_rate: 0, topup_fee_cap: 0, topup_amount_presets: "[10000, 20000, 50000, 100000, 200000, 500000]", topup_amount_bonus: "{}", max_pending_recharge_orders: 10, async_check_request_timeout_seconds: 5 };
+const D: Record<string, unknown> = { epay_enabled: false, epay_version: "v1", epay_gateway_url: "", epay_merchant_id: "", epay_merchant_key: "", epay_private_key: "", epay_platform_public_key: "", epay_notify_url: "", epay_return_url: "", points_per_yuan: 1000, min_topup_amount: 10000, topup_fee_rate: 0, topup_fee_cap: 0, topup_amount_presets: "[10000, 20000, 50000, 100000, 200000, 500000]", topup_amount_bonus: "{}", max_pending_recharge_orders: 10, redemption_code_purchase_url: "", async_check_request_timeout_seconds: 5 };
 const EPAY_WRITE_ONLY = new Set<string>(EPAY_WRITE_ONLY_KEYS);
 
 export default function PaymentSection({ options, onBulkSave, canSensitive }: SectionProps) {
@@ -79,6 +79,7 @@ export default function PaymentSection({ options, onBulkSave, canSensitive }: Se
         <SettingsNumberField label={t("充值手续费率（%）")} description={t("千分之六请输入 0.6")} value={number(form.topup_fee_rate)} onChange={(value) => update("topup_fee_rate", value)} min={0} max={100} precision={6} step={0.1} />
         <SettingsNumberField label={t("手续费封顶积分")} description={t("0 表示不封顶")} value={number(form.topup_fee_cap)} onChange={(value) => update("topup_fee_cap", value)} min={0} precision={6} step={0.01} />
         <SettingsNumberField label={t("单用户最大未支付充值订单数")} value={number(form.max_pending_recharge_orders)} onChange={(value) => update("max_pending_recharge_orders", value)} min={1} max={100} precision={0} />
+        <SettingsTextField label={t("兑换码购买地址")} value={String(form.redemption_code_purchase_url)} onChange={(value) => update("redemption_code_purchase_url", value)} placeholder="https://shop.example.com/cards" />
       </SettingsFormGrid>
       <div className="mt-5 overflow-hidden rounded-lg border border-[var(--semi-color-border)]">
         <div className="flex items-center justify-between gap-4 bg-[var(--semi-color-fill-0)] px-4 py-3">

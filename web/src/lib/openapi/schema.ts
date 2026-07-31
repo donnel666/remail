@@ -4348,6 +4348,11 @@ export interface components {
             feeRate: components["schemas"]["NonNegativeLedgerAmount"];
             feeCapPoints: components["schemas"]["NonNegativeLedgerAmount"];
             tiers: components["schemas"]["RechargeTier"][];
+            /**
+             * Format: uri
+             * @description Configured HTTPS destination for buying redemption codes; omitted when not configured.
+             */
+            redemptionCodePurchaseUrl?: string;
         };
         CreateRechargeRequest: {
             points: components["schemas"]["PositiveIntegerPointAmount"];

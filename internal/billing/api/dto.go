@@ -97,11 +97,12 @@ type RechargeTierResponse struct {
 }
 
 type RechargeConfigResponse struct {
-	Enabled      bool                   `json:"enabled"`
-	MinPoints    string                 `json:"minPoints"`
-	FeeRate      string                 `json:"feeRate"`
-	FeeCapPoints string                 `json:"feeCapPoints"`
-	Tiers        []RechargeTierResponse `json:"tiers"`
+	Enabled                   bool                   `json:"enabled"`
+	MinPoints                 string                 `json:"minPoints"`
+	FeeRate                   string                 `json:"feeRate"`
+	FeeCapPoints              string                 `json:"feeCapPoints"`
+	Tiers                     []RechargeTierResponse `json:"tiers"`
+	RedemptionCodePurchaseURL string                 `json:"redemptionCodePurchaseUrl,omitempty"`
 }
 
 type CreateRechargeRequest struct {

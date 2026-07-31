@@ -178,7 +178,7 @@ func Validate(key, value string) error {
 		if value != "v1" && value != "v2" {
 			return domain.ErrInvalidValue
 		}
-	case "epay_gateway_url", "epay_notify_url", "epay_return_url":
+	case "epay_gateway_url", "epay_notify_url", "epay_return_url", "redemption_code_purchase_url":
 		if value == "" {
 			return nil
 		}

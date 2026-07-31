@@ -12382,6 +12382,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/RechargeTier"
+        redemptionCodePurchaseUrl:
+          type: string
+          format: uri
+          description: Configured HTTPS destination for buying redemption codes; omitted when not configured.
       additionalProperties: false
 
     CreateRechargeRequest:

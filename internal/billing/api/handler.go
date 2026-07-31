@@ -12,6 +12,7 @@ import (
 	billingapp "github.com/donnel666/remail/internal/billing/app"
 	"github.com/donnel666/remail/internal/billing/domain"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/time/rate"
 )
@@ -257,6 +258,7 @@ func (h *BillingHandler) GetRechargeConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, RechargeConfigResponse{
 		Enabled: result.Enabled, MinPoints: result.MinPoints,
 		FeeRate: result.FeeRate, FeeCapPoints: result.FeeCapPoints, Tiers: tiers,
+		RedemptionCodePurchaseURL: strings.TrimSpace(runtimeconfig.String("redemption_code_purchase_url", "")),
 	})
 }
 
