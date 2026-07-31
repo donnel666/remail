@@ -223,9 +223,10 @@ func (uc *ResourceFetchUseCase) Process(ctx context.Context, task ResourceFetchT
 			MicrosoftRT:        scope.RefreshToken,
 			CredentialRevision: job.ExpectedCredentialRevision,
 		},
-		SinceAt:   dereferenceTime(job.SinceAt, uc.now().Add(-boundedRuntimeDuration("fetch_lookback_window_days", resourceFetchLookbackWindow, 24*time.Hour, maxFetchLookbackWindow))),
-		UntilAt:   dereferenceTime(job.UntilAt, uc.now()),
-		RequestID: job.RequestID,
+		SinceAt:     dereferenceTime(job.SinceAt, uc.now().Add(-boundedRuntimeDuration("fetch_lookback_window_days", resourceFetchLookbackWindow, 24*time.Hour, maxFetchLookbackWindow))),
+		UntilAt:     dereferenceTime(job.UntilAt, uc.now()),
+		RequestID:   job.RequestID,
+		FullHistory: true,
 	})
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {

@@ -51,6 +51,57 @@ func TestResourceFetchMarksProcessingOnlyAfterAcceptedEnqueue(t *testing.T) {
 	require.Equal(t, 1, repo.processing)
 }
 
+type resourceFetchProcessRepoStub struct {
+	ResourceFetchRepository
+	job   domain.ResourceFetchJob
+	scope domain.ResourceFetchScope
+}
+
+func (*resourceFetchProcessRepoStub) MarkResourceFetchProcessing(context.Context, uint, uint64) (bool, error) {
+	return true, nil
+}
+
+func (s *resourceFetchProcessRepoStub) FindResourceFetch(context.Context, uint, uint64) (*domain.ResourceFetchJob, error) {
+	return &s.job, nil
+}
+
+func (s *resourceFetchProcessRepoStub) LoadResourceFetchScope(context.Context, uint, uint64) (*domain.ResourceFetchScope, error) {
+	return &s.scope, nil
+}
+
+func (*resourceFetchProcessRepoStub) MarkResourceFetchFailure(context.Context, uint, uint64, string, bool, time.Time, *governancedomain.SystemLog) (bool, error) {
+	return false, nil
+}
+
+type resourceFetchTransportStub struct{ request FetchMessagesRequest }
+
+func (s *resourceFetchTransportStub) FetchMicrosoftMessages(_ context.Context, request FetchMessagesRequest) (*FetchMessagesResult, error) {
+	s.request = request
+	return nil, &MailFetchFailure{SafeMessage: "stop after request capture", Retryable: true}
+}
+
+func TestResourceFetchUsesUnlimitedAdministratorChannel(t *testing.T) {
+	sinceAt := time.Now().Add(-90 * 24 * time.Hour)
+	untilAt := time.Now()
+	repo := &resourceFetchProcessRepoStub{
+		job: domain.ResourceFetchJob{
+			ID: 1, ResourceID: 100, Generation: 2, ExpectedCredentialRevision: 3,
+			SinceAt: &sinceAt, UntilAt: &untilAt,
+		},
+		scope: domain.ResourceFetchScope{
+			ResourceID: 100, EmailAddress: "owner@example.test", ClientID: "client-id",
+			RefreshToken: "refresh-token", CredentialRevision: 3,
+		},
+	}
+	transport := &resourceFetchTransportStub{}
+	uc := NewResourceFetchUseCase(repo, nil, transport, nil, nil)
+
+	require.NoError(t, uc.Process(context.Background(), ResourceFetchTask{ResourceID: 100, Generation: 2}))
+	require.True(t, transport.request.FullHistory)
+	require.Equal(t, sinceAt, transport.request.SinceAt)
+	require.Equal(t, untilAt, transport.request.UntilAt)
+}
+
 type resourceFetchReleaseRepoStub struct {
 	ResourceFetchRepository
 }
