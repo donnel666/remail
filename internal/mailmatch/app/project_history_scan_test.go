@@ -204,7 +204,7 @@ func (s *projectHistoryTransportStub) FetchMicrosoftMessages(ctx context.Context
 	return s.result, s.err
 }
 
-func TestProjectHistoryMailboxTimeoutFollowsIMAPFullHistorySetting(t *testing.T) {
+func TestValidatedMicrosoftHistoryUsesUnlimitedWindowAndFullHistoryTimeout(t *testing.T) {
 	defer runtimeconfig.Delete("imap_full_history_timeout_minutes")
 	runtimeconfig.Set("imap_full_history_timeout_minutes", "30")
 	resource := &coreapp.MicrosoftCredentialScope{
@@ -217,6 +217,9 @@ func TestProjectHistoryMailboxTimeoutFollowsIMAPFullHistorySetting(t *testing.T)
 
 	require.NoError(t, uc.ProcessValidatedMicrosoftHistory(context.Background(), ValidatedMicrosoftHistoryScanTask{ResourceID: 10}))
 	require.WithinDuration(t, time.Now().Add(30*time.Minute), transport.deadline, time.Second)
+	require.True(t, transport.request.FullHistory)
+	require.True(t, transport.request.SinceAt.IsZero())
+	require.True(t, transport.request.UntilAt.IsZero())
 }
 
 func TestProjectHistoryDispatchMarksProcessingOnlyAfterAcceptedEnqueue(t *testing.T) {
@@ -265,6 +268,9 @@ func TestProjectHistoryProcessCompletesCurrentGeneration(t *testing.T) {
 	require.Equal(t, 1, jobs.completedSkipped)
 	require.Equal(t, "rotated", credentials.rotation.RefreshToken)
 	require.Equal(t, []string{"history", "credential"}, events)
+	require.True(t, transport.request.FullHistory)
+	require.True(t, transport.request.SinceAt.IsZero())
+	require.True(t, transport.request.UntilAt.IsZero())
 }
 
 func TestProjectHistoryRetryableBusinessFailureIsRecorded(t *testing.T) {

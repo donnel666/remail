@@ -80,13 +80,13 @@ func (s *resourceFetchTransportStub) FetchMicrosoftMessages(_ context.Context, r
 	return nil, &MailFetchFailure{SafeMessage: "stop after request capture", Retryable: true}
 }
 
-func TestResourceFetchUsesUnlimitedAdministratorChannel(t *testing.T) {
-	sinceAt := time.Now().Add(-90 * 24 * time.Hour)
+func TestResourceFetchIgnoresLegacyLookbackForUnlimitedAdministratorChannel(t *testing.T) {
+	legacySinceAt := time.Now().Add(-90 * 24 * time.Hour)
 	untilAt := time.Now()
 	repo := &resourceFetchProcessRepoStub{
 		job: domain.ResourceFetchJob{
 			ID: 1, ResourceID: 100, Generation: 2, ExpectedCredentialRevision: 3,
-			SinceAt: &sinceAt, UntilAt: &untilAt,
+			SinceAt: &legacySinceAt, UntilAt: &untilAt,
 		},
 		scope: domain.ResourceFetchScope{
 			ResourceID: 100, EmailAddress: "owner@example.test", ClientID: "client-id",
@@ -98,7 +98,7 @@ func TestResourceFetchUsesUnlimitedAdministratorChannel(t *testing.T) {
 
 	require.NoError(t, uc.Process(context.Background(), ResourceFetchTask{ResourceID: 100, Generation: 2}))
 	require.True(t, transport.request.FullHistory)
-	require.Equal(t, sinceAt, transport.request.SinceAt)
+	require.True(t, transport.request.SinceAt.IsZero())
 	require.Equal(t, untilAt, transport.request.UntilAt)
 }
 

@@ -43,7 +43,7 @@ export default function MailmatchSection({ options, onBulkSave }: SectionProps) 
 
   return <SettingsSection title={<SettingsCardHeader icon={<MailSearch size={16} />} title={t("接码服务")} description={t("配置邮件拉取、匹配、接码会话缓存和调度参数")} />}>
     <SettingsFormGrid className="mt-4">
-      {field("邮件回溯窗口（天）", "fetch_lookback_window_days")}
+      {field("订单实时收件回溯窗口（天）", "fetch_lookback_window_days")}
       {field("时间偏差容忍（分钟）", "read_window_skew_minutes")}
       {field("验证码读取上限", "code_read_limit")}
       {field("购买邮件读取上限", "purchase_read_limit")}

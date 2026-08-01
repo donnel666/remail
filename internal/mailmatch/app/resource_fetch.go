@@ -14,10 +14,7 @@ import (
 	"github.com/donnel666/remail/internal/platform"
 )
 
-const (
-	resourceFetchLookbackWindow       = 90 * 24 * time.Hour
-	resourceFetchDefaultDispatchLimit = 100
-)
+const resourceFetchDefaultDispatchLimit = 100
 
 // MailFetchFailure carries the ACL's safe classification without exposing raw
 // upstream content. Existing order-scoped callers may continue treating it as
@@ -160,8 +157,6 @@ func (uc *ResourceFetchUseCase) Submit(ctx context.Context, cmd ResourceFetchSub
 		IdempotencyKey: cmd.IdempotencyKey,
 	}
 	if cmd.Kind == domain.ResourceFetchJobFetch {
-		sinceAt := now.Add(-boundedRuntimeDuration("fetch_lookback_window_days", resourceFetchLookbackWindow, 24*time.Hour, maxFetchLookbackWindow))
-		job.SinceAt = &sinceAt
 		job.UntilAt = &now
 	}
 	log := &governancedomain.OperationLog{
@@ -223,7 +218,7 @@ func (uc *ResourceFetchUseCase) Process(ctx context.Context, task ResourceFetchT
 			MicrosoftRT:        scope.RefreshToken,
 			CredentialRevision: job.ExpectedCredentialRevision,
 		},
-		SinceAt:     dereferenceTime(job.SinceAt, uc.now().Add(-boundedRuntimeDuration("fetch_lookback_window_days", resourceFetchLookbackWindow, 24*time.Hour, maxFetchLookbackWindow))),
+		SinceAt:     time.Time{},
 		UntilAt:     dereferenceTime(job.UntilAt, uc.now()),
 		RequestID:   job.RequestID,
 		FullHistory: true,

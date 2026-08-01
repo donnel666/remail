@@ -266,6 +266,7 @@ func (uc *ProjectHistoryScanUseCase) scanValidatedMicrosoftHistory(ctx context.C
 			MicrosoftEmail: resource.EmailAddress, MicrosoftClientID: resource.ClientID, MicrosoftRT: resource.RefreshToken,
 			CredentialRevision: resource.CredentialRevision,
 		},
+		SinceAt: time.Time{}, UntilAt: time.Time{},
 		RequestID: strings.TrimSpace(task.RequestID), FullHistory: true,
 		OnMessages: accumulator.add, OnReset: accumulator.reset,
 	})
@@ -387,6 +388,7 @@ func (uc *ProjectHistoryScanUseCase) scanProjectHistoryResource(
 			MicrosoftEmail: resource.EmailAddress, MicrosoftClientID: resource.ClientID, MicrosoftRT: resource.RefreshToken,
 			CredentialRevision: resource.CredentialRevision,
 		},
+		SinceAt: time.Time{}, UntilAt: time.Time{},
 		RequestID: task.RequestID, FullHistory: true, OnMessages: accumulator.add, OnReset: accumulator.reset,
 	})
 	cancelFetch()

@@ -70,9 +70,8 @@ func (a *MicrosoftFetchAdapter) FetchMicrosoftMessages(ctx context.Context, req 
 	untilAt := req.UntilAt
 	stopAfterLimit := req.Realtime
 	if req.FullHistory {
+		// Full history removes the row cap; zero caller bounds mean all time.
 		maxMessages = 0
-		sinceAt = req.SinceAt
-		untilAt = req.UntilAt
 		stopAfterLimit = false
 	}
 	proxyAttempts := min(runtimeconfig.Int("max_proxy_attempts", fetchProxyAttempts, 1), maxFetchProxyAttempts)

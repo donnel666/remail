@@ -256,20 +256,25 @@ func TestMicrosoftFetchAdapterProxyAttemptsUpdateAtRuntime(t *testing.T) {
 	require.Len(t, client.requests, 1)
 }
 
-func TestMicrosoftFetchAdapterFullHistoryHasNoMessageLimit(t *testing.T) {
+func TestMicrosoftFetchAdapterFullHistoryPreservesWindowWithoutMessageLimit(t *testing.T) {
 	client := &microsoftMessageFetchClientStub{results: []mailinfra.MicrosoftMailFetchResult{{Valid: true}}}
 	adapter := &MicrosoftFetchAdapter{client: client}
+	sinceAt := time.Now().Add(-90 * 24 * time.Hour)
+	untilAt := time.Now()
 
 	_, err := adapter.FetchMicrosoftMessages(context.Background(), mailmatchapp.FetchMessagesRequest{
 		Scope: mailmatchapp.OrderScope{
 			MicrosoftEmail: "owner@example.test", MicrosoftClientID: "client-id", MicrosoftRT: "refresh-token",
 		},
-		FullHistory: true,
+		SinceAt: sinceAt, UntilAt: untilAt, FullHistory: true,
 	})
 
 	require.NoError(t, err)
 	require.Len(t, client.requests, 1)
 	require.Zero(t, client.requests[0].MaxMessages)
+	require.Equal(t, sinceAt, client.requests[0].SinceAt)
+	require.Equal(t, untilAt, client.requests[0].UntilAt)
+	require.False(t, client.requests[0].StopAfterLimit)
 }
 
 func TestMicrosoftFetchAdapterReturnsRotatedTokenOnFetchFailure(t *testing.T) {
