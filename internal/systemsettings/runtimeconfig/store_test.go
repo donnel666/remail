@@ -216,12 +216,24 @@ func TestValidateSystemOperationsSettings(t *testing.T) {
 	require.ErrorIs(t, Validate("background_load_overload_percent", "10"), domain.ErrInvalidValue)
 	require.NoError(t, Validate("project_history_concurrency", "8096"))
 	require.ErrorIs(t, Validate("project_history_concurrency", "8097"), domain.ErrInvalidValue)
+	require.NoError(t, Validate("resource_fetch_dispatch_limit", "10000"))
+	require.ErrorIs(t, Validate("resource_fetch_dispatch_limit", "10001"), domain.ErrInvalidValue)
+	require.NoError(t, Validate("fetch_dispatcher_timeout_seconds", "3600"))
+	require.ErrorIs(t, Validate("fetch_dispatcher_timeout_seconds", "3601"), domain.ErrInvalidValue)
 	for _, key := range []string{
 		"background_worker_minimum", "background_worker_initial", "background_worker_increase_step",
 		"asynq_worker_concurrency", "asynq_realtime_worker_concurrency", "asynq_background_worker_concurrency",
 	} {
 		require.NoError(t, Validate(key, "8096"))
 		require.ErrorIs(t, Validate(key, "8097"), domain.ErrInvalidValue)
+	}
+	for _, key := range []string{
+		"asynq_queue_mailfetch_weight", "asynq_queue_payment_reconcile_weight", "asynq_queue_mailtransport_weight", "asynq_queue_default_weight",
+		"asynq_queue_background_validation_weight", "asynq_queue_background_domain_validation_weight", "asynq_queue_background_alias_weight",
+		"asynq_queue_background_token_refresh_weight", "asynq_queue_resource_weight", "asynq_queue_background_project_history_weight", "asynq_queue_background_inventory_weight",
+	} {
+		require.NoError(t, Validate(key, "10000"))
+		require.ErrorIs(t, Validate(key, "10001"), domain.ErrInvalidValue)
 	}
 	require.NoError(t, Validate("retention_daily_run_hour", "23"))
 	require.ErrorIs(t, Validate("retention_daily_run_hour", "24"), domain.ErrInvalidValue)

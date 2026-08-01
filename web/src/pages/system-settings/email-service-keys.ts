@@ -39,6 +39,8 @@ export const MAILMATCH_KEYS = [
   "pickup_request_fetch_timeout_minutes",
   "project_history_timeout_minutes",
   "fetch_dispatcher_interval_seconds",
+  "fetch_dispatcher_timeout_seconds",
+  "resource_fetch_dispatch_limit",
   "project_history_concurrency",
   "project_history_dispatch_limit",
   "verification_code_pattern",

@@ -29,7 +29,7 @@ export default function MailmatchSection({ options, onBulkSave }: SectionProps) 
   };
   const invalidKeys = invalidNumericKeys(form, NUMERIC_KEYS);
   const verificationPatterns = String(form.verification_code_pattern ?? "").split(/\r?\n/).map((pattern) => pattern.trim()).filter(Boolean);
-  const field = (label: string, key: string) => <SettingsNumberField label={t(label)} value={number(form[key])} onChange={(value) => update(key, value)} min={1} />;
+  const field = (label: string, key: string, max?: number) => <SettingsNumberField label={t(label)} value={number(form[key])} onChange={(value) => update(key, value)} min={1} max={max} />;
   const save = async () => {
     setSaving(true);
     try {
@@ -58,6 +58,8 @@ export default function MailmatchSection({ options, onBulkSave }: SectionProps) 
       {field("接码请求超时（分钟）", "pickup_request_fetch_timeout_minutes")}
       {field("项目历史超时（分钟）", "project_history_timeout_minutes")}
       {field("拉取调度间隔（秒）", "fetch_dispatcher_interval_seconds")}
+      {field("拉取调度任务超时（秒）", "fetch_dispatcher_timeout_seconds", 3600)}
+      {field("资源收件每轮投递上限", "resource_fetch_dispatch_limit", 10000)}
       {field("项目历史并发数", "project_history_concurrency")}
       {field("项目历史每轮上限", "project_history_dispatch_limit")}
       <SettingsTextareaField

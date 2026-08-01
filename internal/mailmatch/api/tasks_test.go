@@ -108,6 +108,14 @@ func TestProjectHistoryCapacitySupportsConfiguredMaximum(t *testing.T) {
 	require.False(t, admitted)
 }
 
+func TestResourceFetchDispatchLimitUsesRuntimeSettingAndCapsMaximum(t *testing.T) {
+	t.Cleanup(func() { runtimeconfig.Delete("resource_fetch_dispatch_limit") })
+	runtimeconfig.Set("resource_fetch_dispatch_limit", "4096")
+	require.Equal(t, 4096, resourceFetchDispatchLimitValue())
+	runtimeconfig.Set("resource_fetch_dispatch_limit", "10001")
+	require.Equal(t, mailmatchapp.ResourceFetchDefaultDispatchLimit, resourceFetchDispatchLimitValue())
+}
+
 func TestValidatedMicrosoftHistoryRetryCapAppliesToLegacyTasks(t *testing.T) {
 	failure := errors.New("history import failed")
 	require.False(t, errors.Is(capValidatedMicrosoftHistoryRetry(2, failure), asynq.SkipRetry))

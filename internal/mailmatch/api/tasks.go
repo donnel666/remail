@@ -35,7 +35,7 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) {
 		}
 		var dispatchErrors []error
 		if module.ResourceFetch != nil {
-			result, err := module.ResourceFetch.DispatchPending(ctx, 0)
+			result, err := module.ResourceFetch.DispatchPending(ctx, resourceFetchDispatchLimitValue())
 			if err != nil {
 				slog.Warn("mailmatch resource fetch dispatcher failed", "error", err)
 				dispatchErrors = append(dispatchErrors, err)
@@ -274,6 +274,10 @@ func pickupRequestTaskSize(quantity int) string {
 	default:
 		return "101_200"
 	}
+}
+
+func resourceFetchDispatchLimitValue() int {
+	return min(runtimeconfig.Int("resource_fetch_dispatch_limit", mailmatchapp.ResourceFetchDefaultDispatchLimit, 1), mailmatchapp.ResourceFetchDefaultDispatchLimit)
 }
 
 func startFetchDispatcherSeeder(module *Module) {

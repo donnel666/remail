@@ -27,7 +27,7 @@ export default function BackgroundJobSection({ options, onBulkSave }: SectionPro
     finally { setSaving(false); }
   };
 
-  return <SettingsSection title={<SettingsCardHeader icon={<Cpu size={16} />} title={t("后台任务调度")} description={t("配置自适应并发、Asynq Worker、重试和调度吞吐；初始并发、Worker 并发与停机超时重启后生效")} />}>
+  return <SettingsSection title={<SettingsCardHeader icon={<Cpu size={16} />} title={t("后台任务调度")} description={t("配置自适应并发、Asynq Worker、队列调度权重和重试；Worker 并发、队列权重与停机超时重启后生效")} />}>
     <SettingsFormGrid className="mt-4">
       {field("负载过载阈值（%）", "background_load_overload_percent", 11, 100)}
       {field("最小并发数", "background_worker_minimum")}
@@ -41,6 +41,17 @@ export default function BackgroundJobSection({ options, onBulkSave }: SectionPro
       {field("通用队列 Worker 并发数", "asynq_worker_concurrency")}
       {field("实时队列 Worker 并发数", "asynq_realtime_worker_concurrency")}
       {field("后台队列 Worker 并发数", "asynq_background_worker_concurrency")}
+      {field("实时收件队列权重（mailfetch）", "asynq_queue_mailfetch_weight", 1, 10000)}
+      {field("支付对账队列权重（payment_reconcile）", "asynq_queue_payment_reconcile_weight", 1, 10000)}
+      {field("邮件发送队列权重（mailtransport）", "asynq_queue_mailtransport_weight", 1, 10000)}
+      {field("通用任务队列权重（default）", "asynq_queue_default_weight", 1, 10000)}
+      {field("微软验证队列权重（background_validation）", "asynq_queue_background_validation_weight", 1, 10000)}
+      {field("域名验证队列权重（background_domain_validation）", "asynq_queue_background_domain_validation_weight", 1, 10000)}
+      {field("别名维护队列权重（background_alias）", "asynq_queue_background_alias_weight", 1, 10000)}
+      {field("Token 刷新队列权重（background_token_refresh）", "asynq_queue_background_token_refresh_weight", 1, 10000)}
+      {field("资源批处理队列权重（resource）", "asynq_queue_resource_weight", 1, 10000)}
+      {field("项目历史队列权重（background_project_history）", "asynq_queue_background_project_history_weight", 1, 10000)}
+      {field("库存刷新队列权重（background_inventory）", "asynq_queue_background_inventory_weight", 1, 10000)}
       {field("停机超时（秒）", "asynq_shutdown_timeout_seconds", 1, 300)}
       {field("验证调度最大下发数", "validation_dispatch_maximum", 1, 10000)}
       {field("入站 SMTP 最大并发连接数", "default_inbound_smtp_max_connections", 1, 10000)}

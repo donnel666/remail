@@ -14,7 +14,7 @@ import (
 	"github.com/donnel666/remail/internal/platform"
 )
 
-const resourceFetchDefaultDispatchLimit = 100
+const ResourceFetchDefaultDispatchLimit = 10000
 
 // MailFetchFailure carries the ACL's safe classification without exposing raw
 // upstream content. Existing order-scoped callers may continue treating it as
@@ -327,7 +327,7 @@ func (uc *ResourceFetchUseCase) DispatchPending(ctx context.Context, limit int) 
 		return nil, domain.ErrFetchQueueUnavailable
 	}
 	if limit <= 0 {
-		limit = resourceFetchDefaultDispatchLimit
+		limit = ResourceFetchDefaultDispatchLimit
 	}
 	jobs, err := uc.repo.ListPendingResourceFetches(ctx, limit)
 	if err != nil {

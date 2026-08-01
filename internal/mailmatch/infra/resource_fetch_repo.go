@@ -156,7 +156,7 @@ func (r *ResourceFetchRepo) FindResourceFetch(ctx context.Context, resourceID ui
 
 func (r *ResourceFetchRepo) ListPendingResourceFetches(ctx context.Context, limit int) ([]domain.ResourceFetchJob, error) {
 	if limit <= 0 {
-		limit = 100
+		limit = app.ResourceFetchDefaultDispatchLimit
 	}
 	var states []FetchStateModel
 	err := r.dbFor(ctx).

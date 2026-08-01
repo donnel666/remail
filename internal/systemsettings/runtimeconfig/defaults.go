@@ -2,7 +2,7 @@ package runtimeconfig
 
 import "github.com/donnel666/remail/internal/systemsettings/domain"
 
-const DefaultSettingsCount = 201
+const DefaultSettingsCount = 214
 
 // DefaultSettings is the single source of initial values for runtime-managed
 // settings. Startup inserts only keys that are not in storage.
@@ -114,6 +114,8 @@ var defaultSettings = []domain.Setting{
 	{Key: "pickup_request_fetch_timeout_minutes", Value: "2"},
 	{Key: "project_history_timeout_minutes", Value: "20"},
 	{Key: "fetch_dispatcher_interval_seconds", Value: "15"},
+	{Key: "fetch_dispatcher_timeout_seconds", Value: "300"},
+	{Key: "resource_fetch_dispatch_limit", Value: "10000"},
 	{Key: "project_history_concurrency", Value: "4"},
 	{Key: "project_history_dispatch_limit", Value: "4"},
 	{Key: "verification_code_pattern", Value: `["(?:^|[^\\d])(\\d{6,8})(?:[^\\d]|$)"]`},
@@ -184,6 +186,17 @@ var defaultSettings = []domain.Setting{
 	{Key: "asynq_worker_concurrency", Value: "768"},
 	{Key: "asynq_realtime_worker_concurrency", Value: "256"},
 	{Key: "asynq_background_worker_concurrency", Value: "512"},
+	{Key: "asynq_queue_mailfetch_weight", Value: "4"},
+	{Key: "asynq_queue_payment_reconcile_weight", Value: "2"},
+	{Key: "asynq_queue_mailtransport_weight", Value: "4"},
+	{Key: "asynq_queue_default_weight", Value: "3"},
+	{Key: "asynq_queue_background_validation_weight", Value: "3"},
+	{Key: "asynq_queue_background_domain_validation_weight", Value: "1"},
+	{Key: "asynq_queue_background_alias_weight", Value: "1"},
+	{Key: "asynq_queue_background_token_refresh_weight", Value: "1"},
+	{Key: "asynq_queue_resource_weight", Value: "2"},
+	{Key: "asynq_queue_background_project_history_weight", Value: "1"},
+	{Key: "asynq_queue_background_inventory_weight", Value: "1"},
 	{Key: "asynq_shutdown_timeout_seconds", Value: "5"},
 	{Key: "validation_dispatch_maximum", Value: "128"},
 	{Key: "default_inbound_smtp_max_connections", Value: "200"},

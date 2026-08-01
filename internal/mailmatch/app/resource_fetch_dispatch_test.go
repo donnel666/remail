@@ -15,9 +15,11 @@ type resourceFetchDispatchRepoStub struct {
 	ResourceFetchRepository
 	pending    []domain.ResourceFetchJob
 	processing int
+	limit      int
 }
 
-func (s *resourceFetchDispatchRepoStub) ListPendingResourceFetches(context.Context, int) ([]domain.ResourceFetchJob, error) {
+func (s *resourceFetchDispatchRepoStub) ListPendingResourceFetches(_ context.Context, limit int) ([]domain.ResourceFetchJob, error) {
+	s.limit = limit
 	return s.pending, nil
 }
 
@@ -49,6 +51,16 @@ func TestResourceFetchMarksProcessingOnlyAfterAcceptedEnqueue(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, result.Queued)
 	require.Equal(t, 1, repo.processing)
+}
+
+func TestResourceFetchDefaultDispatchLimitIsTenThousand(t *testing.T) {
+	repo := &resourceFetchDispatchRepoStub{}
+	uc := NewResourceFetchUseCase(repo, resourceFetchDispatchQueueStub{}, nil, nil, nil)
+
+	_, err := uc.DispatchPending(context.Background(), 0)
+
+	require.NoError(t, err)
+	require.Equal(t, 10000, repo.limit)
 }
 
 type resourceFetchProcessRepoStub struct {

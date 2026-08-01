@@ -1,6 +1,11 @@
 package platform
 
-import "testing"
+import (
+	"strconv"
+	"testing"
+
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
+)
 
 func TestForegroundExcludesDedicatedCodePickupQueue(t *testing.T) {
 	fg := foregroundQueueConfig()
@@ -42,6 +47,46 @@ func TestBackgroundTierOnlyServesBackgroundQueues(t *testing.T) {
 	}
 	if bg[QueueBackgroundValidation] != 3 || bg[QueueBackgroundDomainValidation] != 1 || bg[QueueBackgroundAlias] != 1 || bg[QueueBackgroundTokenRefresh] != 1 || bg[QueueBackgroundProjectHistory] != 1 || bg[QueueBackgroundInventory] != 1 || bg[QueueResource] != 2 {
 		t.Fatalf("background queues must retain non-zero weighted fairness, got %#v", bg)
+	}
+}
+
+func TestEveryQueueWeightUsesItsRuntimeSetting(t *testing.T) {
+	type queueSetting struct {
+		key    string
+		queue  string
+		config func() map[string]int
+	}
+	settings := []queueSetting{
+		{"asynq_queue_mailfetch_weight", QueueMailfetch, realtimeQueueConfig},
+		{"asynq_queue_payment_reconcile_weight", QueuePaymentReconcile, realtimeQueueConfig},
+		{"asynq_queue_mailtransport_weight", QueueMailtransport, foregroundQueueConfig},
+		{"asynq_queue_default_weight", QueueDefault, foregroundQueueConfig},
+		{"asynq_queue_background_validation_weight", QueueBackgroundValidation, backgroundQueueConfig},
+		{"asynq_queue_background_domain_validation_weight", QueueBackgroundDomainValidation, backgroundQueueConfig},
+		{"asynq_queue_background_alias_weight", QueueBackgroundAlias, backgroundQueueConfig},
+		{"asynq_queue_background_token_refresh_weight", QueueBackgroundTokenRefresh, backgroundQueueConfig},
+		{"asynq_queue_resource_weight", QueueResource, backgroundQueueConfig},
+		{"asynq_queue_background_project_history_weight", QueueBackgroundProjectHistory, backgroundQueueConfig},
+		{"asynq_queue_background_inventory_weight", QueueBackgroundInventory, backgroundQueueConfig},
+	}
+	if len(settings) != len(AllQueueNames) {
+		t.Fatalf("every queue must expose one weight setting: got %d settings for %d queues", len(settings), len(AllQueueNames))
+	}
+	seen := make(map[string]struct{}, len(settings))
+	for index, setting := range settings {
+		seen[setting.queue] = struct{}{}
+		value := index + 1
+		runtimeconfig.Set(setting.key, strconv.Itoa(value))
+		key := setting.key
+		t.Cleanup(func() { runtimeconfig.Delete(key) })
+		if got := setting.config()[setting.queue]; got != value {
+			t.Fatalf("queue %s weight must use %s: got %d want %d", setting.queue, setting.key, got, value)
+		}
+	}
+	for _, queue := range AllQueueNames {
+		if _, ok := seen[queue]; !ok {
+			t.Fatalf("queue %s has no runtime weight setting", queue)
+		}
 	}
 }
 

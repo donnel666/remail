@@ -36,8 +36,8 @@ const (
 // long-running lower-priority tasks in the shared pool can never starve them.
 func realtimeQueueConfig() map[string]int {
 	return map[string]int{
-		QueueMailfetch:        4,
-		QueuePaymentReconcile: 2,
+		QueueMailfetch:        runtimeconfig.Int("asynq_queue_mailfetch_weight", 4, 1),
+		QueuePaymentReconcile: runtimeconfig.Int("asynq_queue_payment_reconcile_weight", 2, 1),
 	}
 }
 
@@ -45,8 +45,8 @@ func realtimeQueueConfig() map[string]int {
 // own pool, so the shared pool must never starve mailtransport/default work.
 func foregroundQueueConfig() map[string]int {
 	return map[string]int{
-		QueueMailtransport: 4,
-		QueueDefault:       3,
+		QueueMailtransport: runtimeconfig.Int("asynq_queue_mailtransport_weight", 4, 1),
+		QueueDefault:       runtimeconfig.Int("asynq_queue_default_weight", 3, 1),
 	}
 }
 
@@ -54,16 +54,16 @@ func foregroundQueueConfig() map[string]int {
 // realtime and foreground tiers.
 func backgroundQueueConfig() map[string]int {
 	return map[string]int{
-		QueueBackgroundValidation:       BackgroundMicrosoftValidationWeight,
-		QueueBackgroundDomainValidation: BackgroundDomainValidationWeight,
-		QueueBackgroundAlias:            1,
-		QueueBackgroundTokenRefresh:     1,
-		QueueBackgroundProjectHistory:   1,
-		QueueBackgroundInventory:        1,
+		QueueBackgroundValidation:       runtimeconfig.Int("asynq_queue_background_validation_weight", BackgroundMicrosoftValidationWeight, 1),
+		QueueBackgroundDomainValidation: runtimeconfig.Int("asynq_queue_background_domain_validation_weight", BackgroundDomainValidationWeight, 1),
+		QueueBackgroundAlias:            runtimeconfig.Int("asynq_queue_background_alias_weight", 1, 1),
+		QueueBackgroundTokenRefresh:     runtimeconfig.Int("asynq_queue_background_token_refresh_weight", 1, 1),
+		QueueBackgroundProjectHistory:   runtimeconfig.Int("asynq_queue_background_project_history_weight", 1, 1),
+		QueueBackgroundInventory:        runtimeconfig.Int("asynq_queue_background_inventory_weight", 1, 1),
 		// Admin resource bulk operations (validate/publish/unpublish/delete) are
 		// enqueued to the resource queue; without it here no server consumes them
 		// and every bulk command sits queued forever.
-		QueueResource: 2,
+		QueueResource: runtimeconfig.Int("asynq_queue_resource_weight", 2, 1),
 	}
 }
 

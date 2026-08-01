@@ -27,7 +27,7 @@ const (
 	pickupRequestFetchTaskTimeout = 2 * time.Minute
 	resourceFetchTaskMaxRetry     = 3
 	mailmatchFetchTaskTimeout     = 20 * time.Minute
-	mailmatchDispatchTaskTimeout  = 30 * time.Second
+	mailmatchDispatchTaskTimeout  = 5 * time.Minute
 	ValidatedHistoryTaskMaxRetry  = 3
 	projectHistoryTaskTimeout     = 20 * time.Minute
 	projectHistoryDispatchTimeout = 30 * time.Second
@@ -190,7 +190,8 @@ func (q *FetchQueue) EnqueueFetchDispatcher(ctx context.Context, delay time.Dura
 		return fmt.Errorf("mailmatch fetch dispatcher queue is unavailable")
 	}
 	task := asynq.NewTask(TypeMailmatchFetchDispatcher, nil)
-	uniqueTTL := mailmatchDispatchTaskTimeout
+	timeout := runtimeconfig.Duration("fetch_dispatcher_timeout_seconds", mailmatchDispatchTaskTimeout, time.Second, 1)
+	uniqueTTL := timeout
 	if delay > 0 {
 		uniqueTTL += delay
 	}
@@ -198,7 +199,7 @@ func (q *FetchQueue) EnqueueFetchDispatcher(ctx context.Context, delay time.Dura
 		asynq.Queue(platform.QueueBackgroundProjectHistory),
 		asynq.Unique(uniqueTTL),
 		asynq.MaxRetry(0),
-		asynq.Timeout(mailmatchDispatchTaskTimeout),
+		asynq.Timeout(timeout),
 		asynq.Retention(0),
 	}
 	if delay > 0 {

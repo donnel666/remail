@@ -40,6 +40,10 @@ func TestDefaultSettingsAreValidAndIndependent(t *testing.T) {
 	require.Equal(t, "3", keys["proxy_server_failure_threshold"])
 	require.Equal(t, "80", keys["proxy_server_inventory_threshold_percent"])
 	require.Equal(t, `["(?:^|[^\\d])(\\d{6,8})(?:[^\\d]|$)"]`, keys["verification_code_pattern"])
+	require.Equal(t, "300", keys["fetch_dispatcher_timeout_seconds"])
+	require.Equal(t, "10000", keys["resource_fetch_dispatch_limit"])
+	require.Equal(t, "4", keys["asynq_queue_mailfetch_weight"])
+	require.Equal(t, "1", keys["asynq_queue_background_project_history_weight"])
 	whitelistValue := ""
 	for _, setting := range defaults {
 		if setting.Key == "microsoft_domain_whitelist" {
