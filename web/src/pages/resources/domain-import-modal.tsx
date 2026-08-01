@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Button,
   Input,
@@ -9,6 +9,7 @@ import {
 } from "@douyinfe/semi-ui";
 import { useTranslation } from "react-i18next";
 
+import { requireTurnstile } from "@/components/auth/TurnstileGate";
 import { createCopyableConfig } from "@/components/semi/copyable-config";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import { createDomainResource } from "@/lib/resources-api";
@@ -32,8 +33,21 @@ export function ImportDomainModal({
   const { t } = useTranslation();
   const [domain, setDomain] = useState("");
   const [busy, setBusy] = useState(false);
+  const importAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (open) return;
+    importAbortRef.current?.abort();
+    importAbortRef.current = null;
+    setDomain("");
+    setBusy(false);
+  }, [open]);
+
+  useEffect(() => () => importAbortRef.current?.abort(), []);
 
   const reset = () => {
+    importAbortRef.current?.abort();
+    importAbortRef.current = null;
     setDomain("");
     setBusy(false);
   };
@@ -45,16 +59,35 @@ export function ImportDomainModal({
 
   const handleImport = async () => {
     const domainName = domain.trim().toLowerCase().replace(/\.$/, "");
-    if (!domainName) return;
+    if (!domainName || importAbortRef.current) return;
+    const controller = new AbortController();
+    importAbortRef.current = controller;
     setBusy(true);
     try {
-      await createDomainResource({ domain: domainName });
+      const turnstileToken = await requireTurnstile(
+        "domain_import",
+        controller.signal
+      );
+      if (!turnstileToken || controller.signal.aborted) return;
+      await createDomainResource(
+        { domain: domainName },
+        turnstileToken,
+        controller.signal
+      );
+      if (controller.signal.aborted) return;
       Toast.success(t("Domain submitted for verification"));
+      if (importAbortRef.current === controller) importAbortRef.current = null;
       close();
       await onSuccess();
     } catch (error) {
-      Toast.error(getIamErrorMessage(t, error, "Domain import failed."));
-      setBusy(false);
+      if (!controller.signal.aborted) {
+        Toast.error(getIamErrorMessage(t, error, "Domain import failed."));
+      }
+    } finally {
+      if (importAbortRef.current === controller) {
+        importAbortRef.current = null;
+        setBusy(false);
+      }
     }
   };
 

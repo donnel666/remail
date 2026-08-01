@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Input, Modal, Select, TextArea, Toast } from "@douyinfe/semi-ui";
 import { useTranslation } from "react-i18next";
 
+import { requireTurnstile } from "@/components/auth/TurnstileGate";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import {
   createProjectApplication,
@@ -143,10 +144,14 @@ export function ApplyProjectModal({
 
     setSubmitting(true);
     try {
-      const response =
-        mode === "resubmit" && projectId
-          ? await resubmitProjectApplication(projectId, payload)
-          : await createProjectApplication(payload);
+      const isResubmit = mode === "resubmit" && projectId;
+      const turnstileToken = await requireTurnstile(
+        isResubmit ? "project_resubmit" : "project_submit"
+      );
+      if (!turnstileToken) return;
+      const response = isResubmit
+        ? await resubmitProjectApplication(projectId, payload, turnstileToken)
+        : await createProjectApplication(payload, turnstileToken);
       Toast.success(
         mode === "resubmit"
           ? t("Project application resubmitted.")

@@ -37,6 +37,7 @@ import { SiAlipay } from "react-icons/si";
 import { useTranslation } from "react-i18next";
 
 import sampleProjectCover from "@/assets/cover-4.webp";
+import { requireTurnstile } from "@/components/auth/TurnstileGate";
 import { MembershipOverview } from "@/components/membership";
 import { useAuth } from "@/context/auth-provider";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
@@ -601,7 +602,9 @@ export default function Wallet() {
     setTransferringRewards(true);
     transferAttemptRef.current ??= generateIdempotencyKey();
     try {
-      await transferReferralRewards(transferAttemptRef.current);
+      const turnstileToken = await requireTurnstile("referral_transfer");
+      if (!turnstileToken) return;
+      await transferReferralRewards(turnstileToken, transferAttemptRef.current);
       Toast.success(t("Transfer completed."));
       transferAttemptRef.current = null;
       await refreshWallet();
@@ -634,7 +637,9 @@ export default function Wallet() {
       };
     }
     try {
-      await redeemCard(code, redeemAttemptRef.current.key);
+      const turnstileToken = await requireTurnstile("card_redeem");
+      if (!turnstileToken) return;
+      await redeemCard(code, turnstileToken, redeemAttemptRef.current.key);
       Toast.success(t("Redemption completed."));
       redeemAttemptRef.current = null;
       setRedemptionCode("");

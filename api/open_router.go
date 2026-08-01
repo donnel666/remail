@@ -7,7 +7,13 @@ import (
 	openapiapi "github.com/donnel666/remail/internal/openapi/api"
 	tradeapi "github.com/donnel666/remail/internal/trade/api"
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 )
+
+// openCardRedeemPerMinute bounds card-key redemption on the API-key surface.
+// The console route is protected by a Turnstile challenge, which an API-key
+// client cannot solve, so brute force would otherwise just move here.
+const openCardRedeemPerMinute = 1
 
 func registerOpenRoutes(
 	v1 *gin.RouterGroup,
@@ -16,6 +22,7 @@ func registerOpenRoutes(
 	billingMod *billingapi.BillingModule,
 	tradeMod *tradeapi.Module,
 	checker middleware.PermissionChecker,
+	rdb redis.UniversalClient,
 ) {
 	open := v1.Group("/open")
 	open.Use(openapiapi.LoadAPIKey(openapiMod.UseCase))
@@ -39,7 +46,11 @@ func registerOpenRoutes(
 	open.GET("/wallet", billingHandler.GetWallet)
 	open.GET("/wallet/transactions", billingHandler.GetWalletTransactions)
 	open.GET("/recharges", billingHandler.GetRecharges)
-	open.POST("/cards/redeem", billingHandler.PostCardRedeem)
+	open.POST(
+		"/cards/redeem",
+		middleware.RateLimitPerUser(rdb, "open_card_redeem", openCardRedeemPerMinute, 60),
+		billingHandler.PostCardRedeem,
+	)
 
 	open.GET("/resources", coreHandler.GetResources)
 	open.GET("/resources/:resourceId", coreHandler.GetResourceDetail)

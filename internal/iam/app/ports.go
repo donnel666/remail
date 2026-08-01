@@ -151,17 +151,6 @@ type InviteRepository interface {
 	GetOrCreateReferralInvite(ctx context.Context, userID uint, code string, maxUse int) (*domain.Invite, error)
 }
 
-// SupplierApplicationRepository defines supplier permission application persistence.
-type SupplierApplicationRepository interface {
-	CreateSupplierApplicationReviewing(ctx context.Context, application *domain.SupplierApplication) error
-	FindLatestSupplierApplicationByApplicantUserID(ctx context.Context, applicantUserID uint) (*domain.SupplierApplication, error)
-	FindSupplierApplicationByID(ctx context.Context, id uint) (*domain.SupplierApplication, error)
-	ListSupplierApplications(ctx context.Context, status string, offset, limit int) ([]domain.SupplierApplication, error)
-	CountSupplierApplications(ctx context.Context, status string) (int64, error)
-	ApproveSupplierApplicationWithUserAndLog(ctx context.Context, application *domain.SupplierApplication, user *domain.User, log *governancedomain.OperationLog) error
-	RejectSupplierApplicationWithLog(ctx context.Context, application *domain.SupplierApplication, log *governancedomain.OperationLog) error
-}
-
 // PermissionRepository defines user-level Casbin policy management.
 type PermissionRepository interface {
 	ListUserPermissionPolicies(ctx context.Context, userID uint) ([]domain.PermissionPolicy, error)

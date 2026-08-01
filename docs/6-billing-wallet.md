@@ -165,7 +165,7 @@ stateDiagram-v2
 | `GET` | `/v1/recharges` | 充值单列表；支持 `scope=mine/all`。 |
 | `GET` | `/v1/recharges/config` | 当前用户可见的充值档位、赠送和手续费配置。 |
 | `GET` | `/v1/recharges/{rechargeNo}` | 查询本人的充值单及主动查账状态。 |
-| `POST` | `/v1/cards/redeem` | 兑换卡密。 |
+| `POST` | `/v1/cards/redeem` | 兑换卡密；需要 `X-Turnstile-Token`(action `card_redeem`)。 |
 | `GET` | `/v1/settlements` | 供应商结算列表；支持 `scope=mine/all`。 |
 
 当前无用户侧支付宝提现写接口；支付宝申请使用 BC-AFTERSALE general 工单。供应商余额转消费余额使用上述 Billing 写接口直接完成。

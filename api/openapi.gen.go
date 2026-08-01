@@ -2569,30 +2569,6 @@ func (e ResourceItemPurpose) Valid() bool {
 	}
 }
 
-// Defines values for SupplierApplicationResponseStatus.
-const (
-	SupplierApplicationResponseStatusApproved  SupplierApplicationResponseStatus = "approved"
-	SupplierApplicationResponseStatusCanceled  SupplierApplicationResponseStatus = "canceled"
-	SupplierApplicationResponseStatusRejected  SupplierApplicationResponseStatus = "rejected"
-	SupplierApplicationResponseStatusReviewing SupplierApplicationResponseStatus = "reviewing"
-)
-
-// Valid indicates whether the value is a known member of the SupplierApplicationResponseStatus enum.
-func (e SupplierApplicationResponseStatus) Valid() bool {
-	switch e {
-	case SupplierApplicationResponseStatusApproved:
-		return true
-	case SupplierApplicationResponseStatusCanceled:
-		return true
-	case SupplierApplicationResponseStatusRejected:
-		return true
-	case SupplierApplicationResponseStatusReviewing:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for SystemAnnouncementType.
 const (
 	SystemAnnouncementTypeDefault SystemAnnouncementType = "default"
@@ -3660,19 +3636,19 @@ func (e GetProjectsParamsScope) Valid() bool {
 
 // Defines values for GetProjectsParamsStatus.
 const (
-	GetProjectsParamsStatusDelisted  GetProjectsParamsStatus = "delisted"
-	GetProjectsParamsStatusListed    GetProjectsParamsStatus = "listed"
-	GetProjectsParamsStatusReviewing GetProjectsParamsStatus = "reviewing"
+	Delisted  GetProjectsParamsStatus = "delisted"
+	Listed    GetProjectsParamsStatus = "listed"
+	Reviewing GetProjectsParamsStatus = "reviewing"
 )
 
 // Valid indicates whether the value is a known member of the GetProjectsParamsStatus enum.
 func (e GetProjectsParamsStatus) Valid() bool {
 	switch e {
-	case GetProjectsParamsStatusDelisted:
+	case Delisted:
 		return true
-	case GetProjectsParamsStatusListed:
+	case Listed:
 		return true
-	case GetProjectsParamsStatusReviewing:
+	case Reviewing:
 		return true
 	default:
 		return false
@@ -5007,11 +4983,6 @@ type AdminReasonCount struct {
 
 // AdminRejectProjectRequest defines model for AdminRejectProjectRequest.
 type AdminRejectProjectRequest struct {
-	ReviewReason string `json:"reviewReason"`
-}
-
-// AdminRejectSupplierApplicationRequest defines model for AdminRejectSupplierApplicationRequest.
-type AdminRejectSupplierApplicationRequest struct {
 	ReviewReason string `json:"reviewReason"`
 }
 
@@ -7435,40 +7406,6 @@ type ServerListResponse struct {
 	Total  int          `json:"total"`
 }
 
-// SupplierApplicationCurrentResponse defines model for SupplierApplicationCurrentResponse.
-type SupplierApplicationCurrentResponse struct {
-	Application *SupplierApplicationResponse `json:"application"`
-}
-
-// SupplierApplicationListResponse defines model for SupplierApplicationListResponse.
-type SupplierApplicationListResponse struct {
-	Applications []SupplierApplicationResponse `json:"applications"`
-	Limit        int                           `json:"limit"`
-	Offset       int                           `json:"offset"`
-	Total        int                           `json:"total"`
-}
-
-// SupplierApplicationRequest defines model for SupplierApplicationRequest.
-type SupplierApplicationRequest struct {
-	Reason string `json:"reason"`
-}
-
-// SupplierApplicationResponse defines model for SupplierApplicationResponse.
-type SupplierApplicationResponse struct {
-	ApplicantUserId int                               `json:"applicantUserId"`
-	CreatedAt       time.Time                         `json:"createdAt"`
-	Id              int                               `json:"id"`
-	Reason          string                            `json:"reason"`
-	ReviewReason    string                            `json:"reviewReason"`
-	ReviewedAt      *time.Time                        `json:"reviewedAt,omitempty"`
-	ReviewedBy      *int                              `json:"reviewedBy,omitempty"`
-	Status          SupplierApplicationResponseStatus `json:"status"`
-	UpdatedAt       time.Time                         `json:"updatedAt"`
-}
-
-// SupplierApplicationResponseStatus defines model for SupplierApplicationResponse.Status.
-type SupplierApplicationResponseStatus string
-
 // SystemAnnouncement defines model for SystemAnnouncement.
 type SystemAnnouncement struct {
 	// Content Maximum 1 MiB when UTF-8 encoded.
@@ -7842,6 +7779,9 @@ type TicketStatusQuery string
 // TicketTypeQuery defines model for TicketTypeQuery.
 type TicketTypeQuery string
 
+// TurnstileToken defines model for TurnstileToken.
+type TurnstileToken = string
+
 // BadGateway defines model for BadGateway.
 type BadGateway = Error
 
@@ -7859,6 +7799,9 @@ type NotFound = Error
 
 // ServiceUnavailable defines model for ServiceUnavailable.
 type ServiceUnavailable = Error
+
+// TooManyRequests defines model for TooManyRequests.
+type TooManyRequests = Error
 
 // Unauthorized defines model for Unauthorized.
 type Unauthorized = Error
@@ -8824,25 +8767,6 @@ type PutAdminSettingParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
-// GetAdminSupplierApplicationsParams defines parameters for GetAdminSupplierApplications.
-type GetAdminSupplierApplicationsParams struct {
-	Status *string `form:"status,omitempty" json:"status,omitempty"`
-	Offset *int    `form:"offset,omitempty" json:"offset,omitempty"`
-	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
-}
-
-// PostAdminSupplierApplicationApproveParams defines parameters for PostAdminSupplierApplicationApprove.
-type PostAdminSupplierApplicationApproveParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
-	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
-}
-
-// PostAdminSupplierApplicationRejectParams defines parameters for PostAdminSupplierApplicationReject.
-type PostAdminSupplierApplicationRejectParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
-	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
-}
-
 // GetAdminTasksParams defines parameters for GetAdminTasks.
 type GetAdminTasksParams struct {
 	BizType GetAdminTasksParamsBizType `form:"bizType" json:"bizType"`
@@ -9136,6 +9060,9 @@ type PostCardRedeemParams struct {
 
 	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+
+	// XTurnstileToken Single-use Cloudflare Turnstile token. Required when captcha_enabled is on for low-frequency, high-damage writes (money movement, submissions entering a human review queue, bulk supplier imports). Each route expects a token minted for its own action string, so a token cannot be replayed across routes. Ignored when the captcha_enabled system setting is off. Not required on the API-key /v1/open surface.
+	XTurnstileToken *TurnstileToken `json:"X-Turnstile-Token,omitempty"`
 }
 
 // GetDashboardParams defines parameters for GetDashboard.
@@ -9148,6 +9075,9 @@ type GetDashboardParams struct {
 type PostDomainParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// XTurnstileToken Single-use Cloudflare Turnstile token. Required when captcha_enabled is on for low-frequency, high-damage writes (money movement, submissions entering a human review queue, bulk supplier imports). Each route expects a token minted for its own action string, so a token cannot be replayed across routes. Ignored when the captcha_enabled system setting is off. Not required on the API-key /v1/open surface.
+	XTurnstileToken *TurnstileToken `json:"X-Turnstile-Token,omitempty"`
 }
 
 // GetDomainMailboxesParams defines parameters for GetDomainMailboxes.
@@ -9305,12 +9235,18 @@ type GetProjectsParamsProductType string
 type PostProjectParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// XTurnstileToken Single-use Cloudflare Turnstile token. Required when captcha_enabled is on for low-frequency, high-damage writes (money movement, submissions entering a human review queue, bulk supplier imports). Each route expects a token minted for its own action string, so a token cannot be replayed across routes. Ignored when the captcha_enabled system setting is off. Not required on the API-key /v1/open surface.
+	XTurnstileToken *TurnstileToken `json:"X-Turnstile-Token,omitempty"`
 }
 
 // PostProjectResubmitParams defines parameters for PostProjectResubmit.
 type PostProjectResubmitParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// XTurnstileToken Single-use Cloudflare Turnstile token. Required when captcha_enabled is on for low-frequency, high-damage writes (money movement, submissions entering a human review queue, bulk supplier imports). Each route expects a token minted for its own action string, so a token cannot be replayed across routes. Ignored when the captcha_enabled system setting is off. Not required on the API-key /v1/open surface.
+	XTurnstileToken *TurnstileToken `json:"X-Turnstile-Token,omitempty"`
 }
 
 // GetRechargesParams defines parameters for GetRecharges.
@@ -9414,6 +9350,9 @@ type PostResourceImportMultipartBody struct {
 type PostResourceImportParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// XTurnstileToken Single-use Cloudflare Turnstile token. Required when captcha_enabled is on for low-frequency, high-damage writes (money movement, submissions entering a human review queue, bulk supplier imports). Each route expects a token minted for its own action string, so a token cannot be replayed across routes. Ignored when the captcha_enabled system setting is off. Not required on the API-key /v1/open surface.
+	XTurnstileToken *TurnstileToken `json:"X-Turnstile-Token,omitempty"`
 }
 
 // PostResourceImportMultipartBodyErrorStrategy defines parameters for PostResourceImport.
@@ -9472,12 +9411,6 @@ type PostServerParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
-// PostSupplierApplicationParams defines parameters for PostSupplierApplication.
-type PostSupplierApplicationParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
-	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
-}
-
 // GetTicketsParams defines parameters for GetTickets.
 type GetTicketsParams struct {
 	TicketType  *GetTicketsParamsTicketType `form:"ticketType,omitempty" json:"ticketType,omitempty"`
@@ -9504,6 +9437,9 @@ type GetTicketsParamsStatus string
 type PostTicketParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// XTurnstileToken Single-use Cloudflare Turnstile token. Required when captcha_enabled is on for low-frequency, high-damage writes (money movement, submissions entering a human review queue, bulk supplier imports). Each route expects a token minted for its own action string, so a token cannot be replayed across routes. Ignored when the captcha_enabled system setting is off. Not required on the API-key /v1/open surface.
+	XTurnstileToken *TurnstileToken `json:"X-Turnstile-Token,omitempty"`
 }
 
 // PostTicketCloseParams defines parameters for PostTicketClose.
@@ -9537,6 +9473,9 @@ type PostWalletReferralTransferParams struct {
 
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// XTurnstileToken Single-use Cloudflare Turnstile token. Required when captcha_enabled is on for low-frequency, high-damage writes (money movement, submissions entering a human review queue, bulk supplier imports). Each route expects a token minted for its own action string, so a token cannot be replayed across routes. Ignored when the captcha_enabled system setting is off. Not required on the API-key /v1/open surface.
+	XTurnstileToken *TurnstileToken `json:"X-Turnstile-Token,omitempty"`
 }
 
 // PostWalletSupplierTransferParams defines parameters for PostWalletSupplierTransfer.
@@ -9546,12 +9485,18 @@ type PostWalletSupplierTransferParams struct {
 
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// XTurnstileToken Single-use Cloudflare Turnstile token. Required when captcha_enabled is on for low-frequency, high-damage writes (money movement, submissions entering a human review queue, bulk supplier imports). Each route expects a token minted for its own action string, so a token cannot be replayed across routes. Ignored when the captcha_enabled system setting is off. Not required on the API-key /v1/open surface.
+	XTurnstileToken *TurnstileToken `json:"X-Turnstile-Token,omitempty"`
 }
 
 // PostWalletSupplierWithdrawalParams defines parameters for PostWalletSupplierWithdrawal.
 type PostWalletSupplierWithdrawalParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// XTurnstileToken Single-use Cloudflare Turnstile token. Required when captcha_enabled is on for low-frequency, high-damage writes (money movement, submissions entering a human review queue, bulk supplier imports). Each route expects a token minted for its own action string, so a token cannot be replayed across routes. Ignored when the captcha_enabled system setting is off. Not required on the API-key /v1/open surface.
+	XTurnstileToken *TurnstileToken `json:"X-Turnstile-Token,omitempty"`
 }
 
 // GetWalletTransactionsParams defines parameters for GetWalletTransactions.
@@ -9725,9 +9670,6 @@ type PutAdminSettingsJSONRequestBody = AdminSystemSettingsBulkRequest
 // PutAdminSettingJSONRequestBody defines body for PutAdminSetting for application/json ContentType.
 type PutAdminSettingJSONRequestBody = AdminSystemSettingRequest
 
-// PostAdminSupplierApplicationRejectJSONRequestBody defines body for PostAdminSupplierApplicationReject for application/json ContentType.
-type PostAdminSupplierApplicationRejectJSONRequestBody = AdminRejectSupplierApplicationRequest
-
 // PostAdminTicketMessageJSONRequestBody defines body for PostAdminTicketMessage for application/json ContentType.
 type PostAdminTicketMessageJSONRequestBody = ReplyTicketRequest
 
@@ -9850,9 +9792,6 @@ type PostResourceValidationsJSONRequestBody = ValidateResourcesRequest
 
 // PostServerJSONRequestBody defines body for PostServer for application/json ContentType.
 type PostServerJSONRequestBody = CreateMailServerRequest
-
-// PostSupplierApplicationJSONRequestBody defines body for PostSupplierApplication for application/json ContentType.
-type PostSupplierApplicationJSONRequestBody = SupplierApplicationRequest
 
 // PostTicketJSONRequestBody defines body for PostTicket for application/json ContentType.
 type PostTicketJSONRequestBody = CreateTicketRequest
@@ -10840,15 +10779,6 @@ type ServerInterface interface {
 	// Upsert one system setting (admin only)
 	// (PUT /v1/admin/settings/{key})
 	PutAdminSetting(c *gin.Context, key string, params PutAdminSettingParams)
-	// List supplier applications
-	// (GET /v1/admin/suppliers/applications)
-	GetAdminSupplierApplications(c *gin.Context, params GetAdminSupplierApplicationsParams)
-	// Approve supplier application
-	// (POST /v1/admin/suppliers/applications/{applicationId}/approve)
-	PostAdminSupplierApplicationApprove(c *gin.Context, applicationId int, params PostAdminSupplierApplicationApproveParams)
-	// Reject supplier application
-	// (POST /v1/admin/suppliers/applications/{applicationId}/reject)
-	PostAdminSupplierApplicationReject(c *gin.Context, applicationId int, params PostAdminSupplierApplicationRejectParams)
 	// List normalized administrator tasks for a Microsoft or domain resource
 	// (GET /v1/admin/tasks)
 	GetAdminTasks(c *gin.Context, params GetAdminTasksParams)
@@ -11179,12 +11109,6 @@ type ServerInterface interface {
 	// Logout and delete current session
 	// (DELETE /v1/sessions/current)
 	DeleteSession(c *gin.Context)
-	// Submit current user's supplier application
-	// (POST /v1/suppliers/applications)
-	PostSupplierApplication(c *gin.Context, params PostSupplierApplicationParams)
-	// Get current user's latest supplier application
-	// (GET /v1/suppliers/applications/current)
-	GetCurrentSupplierApplication(c *gin.Context)
 	// List the caller's after-sales tickets
 	// (GET /v1/tickets)
 	GetTickets(c *gin.Context, params GetTicketsParams)
@@ -17958,159 +17882,6 @@ func (siw *ServerInterfaceWrapper) PutAdminSetting(c *gin.Context) {
 	siw.Handler.PutAdminSetting(c, key, params)
 }
 
-// GetAdminSupplierApplications operation middleware
-func (siw *ServerInterfaceWrapper) GetAdminSupplierApplications(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	c.Set(string(CookieAuthScopes), []string{})
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params GetAdminSupplierApplicationsParams
-
-	// ------------- Optional query parameter "status" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", c.Request.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter status: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	// ------------- Optional query parameter "offset" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	// ------------- Optional query parameter "limit" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.GetAdminSupplierApplications(c, params)
-}
-
-// PostAdminSupplierApplicationApprove operation middleware
-func (siw *ServerInterfaceWrapper) PostAdminSupplierApplicationApprove(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "applicationId" -------------
-	var applicationId int
-
-	err = runtime.BindStyledParameterWithOptions("simple", "applicationId", c.Param("applicationId"), &applicationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter applicationId: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(CookieAuthScopes), []string{})
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params PostAdminSupplierApplicationApproveParams
-
-	headers := c.Request.Header
-
-	// ------------- Required header parameter "X-CSRF-Token" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
-		var XCSRFToken CsrfToken
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
-			return
-		}
-
-		params.XCSRFToken = XCSRFToken
-
-	} else {
-		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
-		return
-	}
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.PostAdminSupplierApplicationApprove(c, applicationId, params)
-}
-
-// PostAdminSupplierApplicationReject operation middleware
-func (siw *ServerInterfaceWrapper) PostAdminSupplierApplicationReject(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "applicationId" -------------
-	var applicationId int
-
-	err = runtime.BindStyledParameterWithOptions("simple", "applicationId", c.Param("applicationId"), &applicationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter applicationId: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(CookieAuthScopes), []string{})
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params PostAdminSupplierApplicationRejectParams
-
-	headers := c.Request.Header
-
-	// ------------- Required header parameter "X-CSRF-Token" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
-		var XCSRFToken CsrfToken
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
-			return
-		}
-
-		params.XCSRFToken = XCSRFToken
-
-	} else {
-		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
-		return
-	}
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.PostAdminSupplierApplicationReject(c, applicationId, params)
-}
-
 // GetAdminTasks operation middleware
 func (siw *ServerInterfaceWrapper) GetAdminTasks(c *gin.Context) {
 
@@ -20451,6 +20222,25 @@ func (siw *ServerInterfaceWrapper) PostCardRedeem(c *gin.Context) {
 		return
 	}
 
+	// ------------- Optional header parameter "X-Turnstile-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Turnstile-Token")]; found {
+		var XTurnstileToken TurnstileToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Turnstile-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Turnstile-Token", valueList[0], &XTurnstileToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Turnstile-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XTurnstileToken = &XTurnstileToken
+
+	}
+
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
 		if c.IsAborted() {
@@ -20531,6 +20321,25 @@ func (siw *ServerInterfaceWrapper) PostDomain(c *gin.Context) {
 	} else {
 		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
 		return
+	}
+
+	// ------------- Optional header parameter "X-Turnstile-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Turnstile-Token")]; found {
+		var XTurnstileToken TurnstileToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Turnstile-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Turnstile-Token", valueList[0], &XTurnstileToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Turnstile-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XTurnstileToken = &XTurnstileToken
+
 	}
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -21705,6 +21514,25 @@ func (siw *ServerInterfaceWrapper) PostProject(c *gin.Context) {
 		return
 	}
 
+	// ------------- Optional header parameter "X-Turnstile-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Turnstile-Token")]; found {
+		var XTurnstileToken TurnstileToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Turnstile-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Turnstile-Token", valueList[0], &XTurnstileToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Turnstile-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XTurnstileToken = &XTurnstileToken
+
+	}
+
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
 		if c.IsAborted() {
@@ -21838,6 +21666,25 @@ func (siw *ServerInterfaceWrapper) PostProjectResubmit(c *gin.Context) {
 	} else {
 		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
 		return
+	}
+
+	// ------------- Optional header parameter "X-Turnstile-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Turnstile-Token")]; found {
+		var XTurnstileToken TurnstileToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Turnstile-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Turnstile-Token", valueList[0], &XTurnstileToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Turnstile-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XTurnstileToken = &XTurnstileToken
+
 	}
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -22302,6 +22149,25 @@ func (siw *ServerInterfaceWrapper) PostResourceImport(c *gin.Context) {
 		return
 	}
 
+	// ------------- Optional header parameter "X-Turnstile-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Turnstile-Token")]; found {
+		var XTurnstileToken TurnstileToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Turnstile-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Turnstile-Token", valueList[0], &XTurnstileToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Turnstile-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XTurnstileToken = &XTurnstileToken
+
+	}
+
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
 		if c.IsAborted() {
@@ -22721,66 +22587,6 @@ func (siw *ServerInterfaceWrapper) DeleteSession(c *gin.Context) {
 	siw.Handler.DeleteSession(c)
 }
 
-// PostSupplierApplication operation middleware
-func (siw *ServerInterfaceWrapper) PostSupplierApplication(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	c.Set(string(CookieAuthScopes), []string{})
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params PostSupplierApplicationParams
-
-	headers := c.Request.Header
-
-	// ------------- Required header parameter "X-CSRF-Token" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
-		var XCSRFToken CsrfToken
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
-			return
-		}
-
-		params.XCSRFToken = XCSRFToken
-
-	} else {
-		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
-		return
-	}
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.PostSupplierApplication(c, params)
-}
-
-// GetCurrentSupplierApplication operation middleware
-func (siw *ServerInterfaceWrapper) GetCurrentSupplierApplication(c *gin.Context) {
-
-	c.Set(string(CookieAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.GetCurrentSupplierApplication(c)
-}
-
 // GetTickets operation middleware
 func (siw *ServerInterfaceWrapper) GetTickets(c *gin.Context) {
 
@@ -22899,6 +22705,25 @@ func (siw *ServerInterfaceWrapper) PostTicket(c *gin.Context) {
 	} else {
 		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
 		return
+	}
+
+	// ------------- Optional header parameter "X-Turnstile-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Turnstile-Token")]; found {
+		var XTurnstileToken TurnstileToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Turnstile-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Turnstile-Token", valueList[0], &XTurnstileToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Turnstile-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XTurnstileToken = &XTurnstileToken
+
 	}
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -23309,6 +23134,25 @@ func (siw *ServerInterfaceWrapper) PostWalletReferralTransfer(c *gin.Context) {
 		return
 	}
 
+	// ------------- Optional header parameter "X-Turnstile-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Turnstile-Token")]; found {
+		var XTurnstileToken TurnstileToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Turnstile-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Turnstile-Token", valueList[0], &XTurnstileToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Turnstile-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XTurnstileToken = &XTurnstileToken
+
+	}
+
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
 		if c.IsAborted() {
@@ -23376,6 +23220,25 @@ func (siw *ServerInterfaceWrapper) PostWalletSupplierTransfer(c *gin.Context) {
 		return
 	}
 
+	// ------------- Optional header parameter "X-Turnstile-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Turnstile-Token")]; found {
+		var XTurnstileToken TurnstileToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Turnstile-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Turnstile-Token", valueList[0], &XTurnstileToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Turnstile-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XTurnstileToken = &XTurnstileToken
+
+	}
+
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
 		if c.IsAborted() {
@@ -23419,6 +23282,25 @@ func (siw *ServerInterfaceWrapper) PostWalletSupplierWithdrawal(c *gin.Context) 
 	} else {
 		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
 		return
+	}
+
+	// ------------- Optional header parameter "X-Turnstile-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Turnstile-Token")]; found {
+		var XTurnstileToken TurnstileToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Turnstile-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Turnstile-Token", valueList[0], &XTurnstileToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Turnstile-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XTurnstileToken = &XTurnstileToken
+
 	}
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -23636,9 +23518,6 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.DELETE(options.BaseURL+"/v1/admin/settings/:key", wrapper.DeleteAdminSetting)
 	router.GET(options.BaseURL+"/v1/admin/settings/:key", wrapper.GetAdminSetting)
 	router.PUT(options.BaseURL+"/v1/admin/settings/:key", wrapper.PutAdminSetting)
-	router.GET(options.BaseURL+"/v1/admin/suppliers/applications", wrapper.GetAdminSupplierApplications)
-	router.POST(options.BaseURL+"/v1/admin/suppliers/applications/:applicationId/approve", wrapper.PostAdminSupplierApplicationApprove)
-	router.POST(options.BaseURL+"/v1/admin/suppliers/applications/:applicationId/reject", wrapper.PostAdminSupplierApplicationReject)
 	router.GET(options.BaseURL+"/v1/admin/tasks", wrapper.GetAdminTasks)
 	router.GET(options.BaseURL+"/v1/admin/tasks/:taskId", wrapper.GetAdminTask)
 	router.GET(options.BaseURL+"/v1/admin/tickets", wrapper.GetAdminTickets)
@@ -23749,8 +23628,6 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/servers", wrapper.GetServers)
 	router.POST(options.BaseURL+"/v1/servers", wrapper.PostServer)
 	router.DELETE(options.BaseURL+"/v1/sessions/current", wrapper.DeleteSession)
-	router.POST(options.BaseURL+"/v1/suppliers/applications", wrapper.PostSupplierApplication)
-	router.GET(options.BaseURL+"/v1/suppliers/applications/current", wrapper.GetCurrentSupplierApplication)
 	router.GET(options.BaseURL+"/v1/tickets", wrapper.GetTickets)
 	router.POST(options.BaseURL+"/v1/tickets", wrapper.PostTicket)
 	router.GET(options.BaseURL+"/v1/tickets/:ticketNo", wrapper.GetTicket)

@@ -41,19 +41,18 @@ type turnstileVerifier interface {
 
 // IAMModule holds all wired dependencies for the IAM module.
 type IAMModule struct {
-	ActivationUseCase          *app.ActivationUseCase
-	RegistrationUseCase        *app.RegistrationUseCase
-	LoginUseCase               *app.LoginUseCase
-	SessionUseCase             *app.SessionUseCase
-	ChangePasswordUseCase      *app.ChangePasswordUseCase
-	PasswordResetUseCase       *app.PasswordResetUseCase
-	AdminUseCase               *app.AdminUseCase
-	InviteUseCase              *app.InviteUseCase
-	SupplierApplicationUseCase *app.SupplierApplicationUseCase
-	EmailCodeUseCase           *app.EmailCodeUseCase
-	PermissionChecker          app.PermissionChecker
-	Hasher                     *infra.Hasher
-	UserRepo                   UserFinder
+	ActivationUseCase     *app.ActivationUseCase
+	RegistrationUseCase   *app.RegistrationUseCase
+	LoginUseCase          *app.LoginUseCase
+	SessionUseCase        *app.SessionUseCase
+	ChangePasswordUseCase *app.ChangePasswordUseCase
+	PasswordResetUseCase  *app.PasswordResetUseCase
+	AdminUseCase          *app.AdminUseCase
+	InviteUseCase         *app.InviteUseCase
+	EmailCodeUseCase      *app.EmailCodeUseCase
+	PermissionChecker     app.PermissionChecker
+	Hasher                *infra.Hasher
+	UserRepo              UserFinder
 	// Users is the concrete repo, exposed for cross-context wiring that needs
 	// the batch user-summary lookups (e.g. billing's wallet directory).
 	Users                      *infra.UserRepo
@@ -85,7 +84,6 @@ func NewIAMModule(db *gorm.DB, rdb redis.UniversalClient, mailDelivery mailapp.D
 	if err != nil {
 		return nil, err
 	}
-	supplierApplicationRepo := infra.NewSupplierApplicationRepo(db)
 
 	emailCodeUseCase := app.NewEmailCodeUseCase(emailCodeStore, mailDelivery)
 	loginUseCase := app.NewLoginUseCase(userRepo, hasher, sessionStore, mailDelivery)
@@ -100,7 +98,6 @@ func NewIAMModule(db *gorm.DB, rdb redis.UniversalClient, mailDelivery mailapp.D
 		PasswordResetUseCase:       app.NewPasswordResetUseCase(userRepo, hasher, sessionStore, emailCodeStore, emailCodeUseCase),
 		AdminUseCase:               app.NewAdminUseCase(userRepo, sessionStore, userRepo, permissionService, hasher, operationLogRepo),
 		InviteUseCase:              app.NewInviteUseCase(userRepo),
-		SupplierApplicationUseCase: app.NewSupplierApplicationUseCase(supplierApplicationRepo, userRepo),
 		EmailCodeUseCase:           emailCodeUseCase,
 		PermissionChecker:          permissionService,
 		Hasher:                     hasher,

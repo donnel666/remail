@@ -1,5 +1,5 @@
 import type { components } from "./openapi/schema";
-import { apiClient as client, csrfHeader, unwrap } from "./api-client";
+import { apiClient as client, csrfHeader, turnstileHeader, unwrap } from "./api-client";
 import { generateIdempotencyKey } from "./idempotency";
 import { notifyWalletUpdated } from "./wallet-events";
 
@@ -54,12 +54,16 @@ export async function getWalletReferrals() {
   );
 }
 
-export async function transferReferralRewards(key = generateIdempotencyKey()) {
+export async function transferReferralRewards(
+  turnstileToken: string,
+  key = generateIdempotencyKey()
+) {
   const response = await unwrap<WalletReferralTransferResponse>(
     await client.POST("/v1/wallet/referrals/transfer", {
       params: {
         header: {
           ...csrfHeader(),
+          ...turnstileHeader(turnstileToken),
           "Idempotency-Key": key,
         },
       },
@@ -71,7 +75,8 @@ export async function transferReferralRewards(key = generateIdempotencyKey()) {
 
 export async function transferSupplierBalance(
   amount: string,
-  key: string
+  key: string,
+  turnstileToken: string
 ) {
   const response = await unwrap<WalletResponse>(
     await client.POST("/v1/wallet/supplier-transfers", {
@@ -79,6 +84,7 @@ export async function transferSupplierBalance(
       params: {
         header: {
           ...csrfHeader(),
+          ...turnstileHeader(turnstileToken),
           "Idempotency-Key": key,
         },
       },
@@ -91,12 +97,15 @@ export async function transferSupplierBalance(
 export async function createSupplierWithdrawal(
   amount: string,
   note: string,
-  paymentQrCode: string
+  paymentQrCode: string,
+  turnstileToken: string
 ) {
   return unwrap<SupplierWithdrawalResponse>(
     await client.POST("/v1/wallet/supplier-withdrawals", {
       body: { amount, note, paymentQrCode },
-      params: { header: csrfHeader() },
+      params: {
+        header: { ...csrfHeader(), ...turnstileHeader(turnstileToken) },
+      },
     })
   );
 }
@@ -194,6 +203,7 @@ export async function listWalletTransactions(
 
 export async function redeemCard(
   cardKey: string,
+  turnstileToken: string,
   key = generateIdempotencyKey()
 ) {
   const response = await unwrap<RedeemCardResponse>(
@@ -202,6 +212,7 @@ export async function redeemCard(
       params: {
         header: {
           ...csrfHeader(),
+          ...turnstileHeader(turnstileToken),
           "Idempotency-Key": key,
         },
       },

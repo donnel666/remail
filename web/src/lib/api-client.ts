@@ -162,3 +162,12 @@ export function csrfHeader() {
     [csrfHeaderName]: readCookie(csrfCookieName),
   };
 }
+
+// Single-use Turnstile token for the guarded write routes. Obtain it from
+// requireTurnstile() in the component; see api/middleware/turnstile.go for the
+// route list and the action string each route expects.
+export function turnstileHeader(token: string) {
+  return {
+    "X-Turnstile-Token": token,
+  };
+}

@@ -116,8 +116,6 @@ INSERT INTO casbin_rule (ptype, v0, v1, v2, v3) VALUES
     ('p', 'role:admin', 'iam:invite', 'read', 'allow'),
     ('p', 'role:admin', 'iam:invite', 'write', 'allow'),
     ('p', 'role:admin', 'iam:invite', 'operate', 'allow'),
-    ('p', 'role:admin', 'iam:supplier_application', 'read', 'allow'),
-    ('p', 'role:admin', 'iam:supplier_application', 'operate', 'allow'),
     ('p', 'role:admin', 'core:resource', 'read', 'allow'),
     ('p', 'role:admin', 'core:resource', 'write', 'allow'),
     ('p', 'role:admin', 'core:resource', 'operate', 'allow'),
@@ -131,8 +129,6 @@ INSERT INTO casbin_rule (ptype, v0, v1, v2, v3) VALUES
     ('p', 'role:super_admin', 'iam:invite', 'read', 'allow'),
     ('p', 'role:super_admin', 'iam:invite', 'write', 'allow'),
     ('p', 'role:super_admin', 'iam:invite', 'operate', 'allow'),
-    ('p', 'role:super_admin', 'iam:supplier_application', 'read', 'allow'),
-    ('p', 'role:super_admin', 'iam:supplier_application', 'operate', 'allow'),
     ('p', 'role:super_admin', 'core:resource', 'read', 'allow'),
     ('p', 'role:super_admin', 'core:resource', 'write', 'allow'),
     ('p', 'role:super_admin', 'core:resource', 'operate', 'allow');

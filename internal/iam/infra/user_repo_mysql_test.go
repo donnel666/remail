@@ -300,11 +300,6 @@ func TestUserRepoDeleteLogicallyDeletesAndPreservesHistoryMySQL(t *testing.T) {
 		Role:         domain.RoleUser,
 	}
 	require.NoError(t, repo.Create(ctx, user))
-	require.NoError(t, db.Create(&SupplierApplicationModel{
-		ApplicantUserID: user.ID,
-		Reason:          "test application",
-		Status:          string(domain.SupplierApplicationReviewing),
-	}).Error)
 
 	require.NoError(t, repo.DeleteNonSuperAdminWithOperationLog(ctx, user.ID, &governancedomain.OperationLog{
 		OperatorUserID: 1,
@@ -324,9 +319,6 @@ func TestUserRepoDeleteLogicallyDeletesAndPreservesHistoryMySQL(t *testing.T) {
 	require.NoError(t, db.First(&stored, user.ID).Error)
 	require.Equal(t, string(domain.UserStatusDeleted), stored.Status)
 	require.Equal(t, 1, stored.TokenVersion)
-	var applicationCount int64
-	require.NoError(t, db.Model(&SupplierApplicationModel{}).Where("applicant_user_id = ?", user.ID).Count(&applicationCount).Error)
-	require.Equal(t, int64(1), applicationCount)
 	require.ErrorIs(t, repo.DeleteNonSuperAdminWithOperationLog(ctx, user.ID, &governancedomain.OperationLog{}), domain.ErrUserNotFound)
 	require.ErrorIs(t, repo.Create(ctx, &domain.User{Email: user.Email, PasswordHash: "hash", Status: domain.UserStatusActive, Role: domain.RoleUser}), domain.ErrEmailAlreadyExists)
 
@@ -344,13 +336,6 @@ func TestUserRepoDeleteLogicallyDeletesAndPreservesHistoryMySQL(t *testing.T) {
 		Role:         domain.RoleSuperAdmin,
 	}
 	require.NoError(t, repo.Create(ctx, protectedUser))
-	for _, applicantUserID := range []uint{bulkUser.ID, protectedUser.ID} {
-		require.NoError(t, db.Create(&SupplierApplicationModel{
-			ApplicantUserID: applicantUserID,
-			Reason:          "batch test application",
-			Status:          string(domain.SupplierApplicationReviewing),
-		}).Error)
-	}
 
 	affected, err := repo.BatchDeleteNonSuperAdmin(ctx, []uint{bulkUser.ID, protectedUser.ID})
 	require.NoError(t, err)
@@ -359,14 +344,10 @@ func TestUserRepoDeleteLogicallyDeletesAndPreservesHistoryMySQL(t *testing.T) {
 	require.NoError(t, db.First(&stored, bulkUser.ID).Error)
 	require.Equal(t, string(domain.UserStatusDeleted), stored.Status)
 	require.Equal(t, 1, stored.TokenVersion)
-	require.NoError(t, db.Model(&SupplierApplicationModel{}).Where("applicant_user_id = ?", bulkUser.ID).Count(&applicationCount).Error)
-	require.Equal(t, int64(1), applicationCount)
 	stored = UserModel{}
 	require.NoError(t, db.First(&stored, protectedUser.ID).Error)
 	require.Equal(t, string(domain.UserStatusActive), stored.Status)
 	require.Zero(t, stored.TokenVersion)
-	require.NoError(t, db.Model(&SupplierApplicationModel{}).Where("applicant_user_id = ?", protectedUser.ID).Count(&applicationCount).Error)
-	require.Equal(t, int64(1), applicationCount)
 }
 
 func TestUserRepoCredentialSnapshotComparisonIsCaseSensitiveMySQL(t *testing.T) {

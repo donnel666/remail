@@ -977,7 +977,7 @@ func TestAdminMicrosoftAdminRoutesEnforceCSRFAheadOfCasbin(t *testing.T) {
 	})
 	router := gin.New()
 	router.Use(middleware.RequestID())
-	RegisterCoreRoutes(router.Group("/v1"), &CoreModule{}, fetcher, checker)
+	RegisterCoreRoutes(router.Group("/v1"), &CoreModule{}, fetcher, checker, nil)
 
 	withoutCSRF := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/v1/admin/resources/42/disable?version=1", nil)
@@ -1063,6 +1063,7 @@ func TestAdminMicrosoftCoreRouteSecurityMatrix(t *testing.T) {
 				return 9, iamdomain.RoleAdmin, "admin@test.local", true
 			}),
 			checker,
+			nil,
 		)
 		return router
 	}

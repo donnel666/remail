@@ -146,7 +146,7 @@ SDK 可调用接口示例：
 | `GET` | `/v1/open/wallet` | API Key 查询自己的钱包。 |
 | `GET` | `/v1/open/wallet/transactions` | API Key 查询自己的钱包流水。 |
 | `GET` | `/v1/open/recharges` | API Key 查询自己的充值记录。 |
-| `POST` | `/v1/open/cards/redeem` | API Key 兑换卡密充值。 |
+| `POST` | `/v1/open/cards/redeem` | API Key 兑换卡密充值；按用户限流 1 次/分钟(控制台同名接口走人机验证，API Key 无法验证，只能限流)。 |
 | `GET` | `/v1/open/resources` | API Key 查询自己的资源。 |
 | `GET` | `/v1/open/resources/{resourceId}` | API Key 查询自己的资源详情。 |
 | `DELETE` | `/v1/open/resources/{resourceId}` | API Key 删除自己的资源。 |

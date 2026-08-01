@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createTicket: vi.fn(),
+  requireTurnstile: vi.fn(),
   toastSuccess: vi.fn(),
   translate: (key: string) => key,
 }));
@@ -46,6 +47,10 @@ vi.mock("../tickets/tickets-api", () => ({
   createTicket: mocks.createTicket,
 }));
 
+vi.mock("@/components/auth/TurnstileGate", () => ({
+  requireTurnstile: mocks.requireTurnstile,
+}));
+
 import {
   ensureSupplierRole,
   SupplierApplicationModal,
@@ -55,6 +60,7 @@ describe("SupplierApplicationModal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.createTicket.mockResolvedValue({});
+    mocks.requireTurnstile.mockResolvedValue("turnstile-token");
   });
 
   afterEach(() => cleanup());
@@ -89,11 +95,14 @@ describe("SupplierApplicationModal", () => {
     fireEvent.click(screen.getByRole("button", { name: "Submit" }));
 
     await waitFor(() =>
-      expect(mocks.createTicket).toHaveBeenCalledWith({
-        ticketType: "general",
-        title: "供应商申请",
-        firstMessage: "My reason",
-      })
+      expect(mocks.createTicket).toHaveBeenCalledWith(
+        {
+          ticketType: "general",
+          title: "供应商申请",
+          firstMessage: "My reason",
+        },
+        "turnstile-token"
+      )
     );
     expect(onOpenChange).toHaveBeenCalledWith(false);
     expect(onSuccess).toHaveBeenCalledOnce();

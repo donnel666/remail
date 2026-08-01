@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   listWalletTransactions: vi.fn(),
   transferSupplierBalance: vi.fn(),
   createSupplierWithdrawal: vi.fn(),
+  requireTurnstile: vi.fn(),
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
   toastWarning: vi.fn(),
@@ -24,6 +25,10 @@ vi.mock("@/context/auth-provider", () => ({
 }));
 
 vi.mock("@/hooks/use-is-mobile", () => ({ useIsMobile: () => false }));
+
+vi.mock("@/components/auth/TurnstileGate", () => ({
+  requireTurnstile: mocks.requireTurnstile,
+}));
 
 vi.mock("@/lib/iam-errors", () => ({
   getIamErrorMessage: (_t: unknown, _error: unknown, fallback: string) => fallback,
@@ -127,6 +132,7 @@ describe("FinanceCenter", () => {
       supplierAvailable: "999999999994.999999",
     });
     mocks.createSupplierWithdrawal.mockResolvedValue({});
+    mocks.requireTurnstile.mockResolvedValue("turnstile-token");
   });
 
   afterEach(() => cleanup());
@@ -164,7 +170,11 @@ describe("FinanceCenter", () => {
     fireEvent.click(screen.getByRole("button", { name: "Confirm transfer" }));
 
     await waitFor(() =>
-      expect(mocks.transferSupplierBalance).toHaveBeenCalledWith("5", expect.any(String)),
+      expect(mocks.transferSupplierBalance).toHaveBeenCalledWith(
+        "5",
+        expect.any(String),
+        "turnstile-token",
+      ),
     );
     expect(mocks.createSupplierWithdrawal).not.toHaveBeenCalled();
     expect(mocks.toastSuccess).toHaveBeenCalledWith("Wallet transfer completed.");
@@ -187,6 +197,7 @@ describe("FinanceCenter", () => {
         "5",
         "please process",
         expect.stringMatching(/^data:image\/png;base64,/),
+        "turnstile-token",
       ),
     );
     expect(mocks.transferSupplierBalance).not.toHaveBeenCalled();
@@ -211,7 +222,11 @@ describe("FinanceCenter", () => {
     fireEvent.click(screen.getByRole("button", { name: "Confirm transfer" }));
 
     await waitFor(() => expect(mocks.transferSupplierBalance).toHaveBeenCalledTimes(2));
-    expect(mocks.transferSupplierBalance.mock.calls[1]).toEqual(["5", firstKey]);
+    expect(mocks.transferSupplierBalance.mock.calls[1]).toEqual([
+      "5",
+      firstKey,
+      "turnstile-token",
+    ]);
   });
 
   it("does not submit fractional supplier points", async () => {

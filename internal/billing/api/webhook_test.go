@@ -25,7 +25,7 @@ const (
 func TestEPayWebhookOnlyAcknowledges(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	RegisterBillingRoutes(router.Group("/v1"), &BillingModule{}, nil, nil)
+	RegisterBillingRoutes(router.Group("/v1"), &BillingModule{}, nil, nil, nil)
 
 	for _, version := range []string{"v1", "v2"} {
 		for _, method := range []string{http.MethodGet, http.MethodPost} {
@@ -43,7 +43,7 @@ func TestEPayWebhookStartsUntrustedReconciliationSignal(t *testing.T) {
 	queue := &webhookRechargeQueueStub{}
 	module := &BillingModule{RechargeUseCase: billingapp.NewRechargeUseCase(repo, nil, nil, queue)}
 	router := gin.New()
-	RegisterBillingRoutes(router.Group("/v1"), module, nil, nil)
+	RegisterBillingRoutes(router.Group("/v1"), module, nil, nil, nil)
 
 	get := httptest.NewRecorder()
 	router.ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/v1/payments/webhooks/epay/v1?out_trade_no="+validWebhookRechargeOne+"&trade_status=TRADE_SUCCESS", nil))
@@ -67,7 +67,7 @@ func TestEPayWebhookIsOpaqueAndBodyLimited(t *testing.T) {
 	t.Run("unknown order", func(t *testing.T) {
 		repo := &webhookRechargeRepoStub{}
 		router := gin.New()
-		RegisterBillingRoutes(router.Group("/v1"), &BillingModule{RechargeUseCase: billingapp.NewRechargeUseCase(repo, nil, nil, &webhookRechargeQueueStub{})}, nil, nil)
+		RegisterBillingRoutes(router.Group("/v1"), &BillingModule{RechargeUseCase: billingapp.NewRechargeUseCase(repo, nil, nil, &webhookRechargeQueueStub{})}, nil, nil, nil)
 		response := httptest.NewRecorder()
 		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/payments/webhooks/epay/v1?out_trade_no=UNKNOWN", nil))
 		require.Equal(t, http.StatusOK, response.Code)
@@ -77,7 +77,7 @@ func TestEPayWebhookIsOpaqueAndBodyLimited(t *testing.T) {
 	t.Run("database failure", func(t *testing.T) {
 		repo := &webhookRechargeRepoStub{err: errors.New("database details must stay private")}
 		router := gin.New()
-		RegisterBillingRoutes(router.Group("/v1"), &BillingModule{RechargeUseCase: billingapp.NewRechargeUseCase(repo, nil, nil, &webhookRechargeQueueStub{})}, nil, nil)
+		RegisterBillingRoutes(router.Group("/v1"), &BillingModule{RechargeUseCase: billingapp.NewRechargeUseCase(repo, nil, nil, &webhookRechargeQueueStub{})}, nil, nil, nil)
 		response := httptest.NewRecorder()
 		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/payments/webhooks/epay/v1?out_trade_no="+validWebhookRechargeOne, nil))
 		require.Equal(t, http.StatusInternalServerError, response.Code)
@@ -87,7 +87,7 @@ func TestEPayWebhookIsOpaqueAndBodyLimited(t *testing.T) {
 	t.Run("oversized form", func(t *testing.T) {
 		repo := &webhookRechargeRepoStub{marked: true}
 		router := gin.New()
-		RegisterBillingRoutes(router.Group("/v1"), &BillingModule{RechargeUseCase: billingapp.NewRechargeUseCase(repo, nil, nil, &webhookRechargeQueueStub{})}, nil, nil)
+		RegisterBillingRoutes(router.Group("/v1"), &BillingModule{RechargeUseCase: billingapp.NewRechargeUseCase(repo, nil, nil, &webhookRechargeQueueStub{})}, nil, nil, nil)
 		request := httptest.NewRequest(http.MethodPost, "/v1/payments/webhooks/epay/v1", strings.NewReader("out_trade_no="+strings.Repeat("x", maxEPayWebhookBytes)))
 		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		response := httptest.NewRecorder()

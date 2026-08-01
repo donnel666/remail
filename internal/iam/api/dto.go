@@ -122,14 +122,6 @@ type AdminUpdateInviteRequest struct {
 	ExpireAt json.RawMessage `json:"expireAt,omitempty"`
 }
 
-type SupplierApplicationRequest struct {
-	Reason string `json:"reason" binding:"required,max=1000"`
-}
-
-type AdminRejectSupplierApplicationRequest struct {
-	ReviewReason string `json:"reviewReason" binding:"required,max=500"`
-}
-
 // AdminUserBulkFilterRequest mirrors the browse-list filter for selection-based
 // bulk user actions.
 type AdminUserBulkFilterRequest struct {
@@ -446,29 +438,6 @@ type InviteUsesResponse struct {
 	Uses []InviteUseResponse `json:"uses"`
 }
 
-type SupplierApplicationResponse struct {
-	ID              uint       `json:"id"`
-	ApplicantUserID uint       `json:"applicantUserId"`
-	Reason          string     `json:"reason"`
-	Status          string     `json:"status"`
-	ReviewReason    string     `json:"reviewReason"`
-	ReviewedBy      *uint      `json:"reviewedBy,omitempty"`
-	ReviewedAt      *time.Time `json:"reviewedAt,omitempty"`
-	CreatedAt       time.Time  `json:"createdAt"`
-	UpdatedAt       time.Time  `json:"updatedAt"`
-}
-
-type SupplierApplicationCurrentResponse struct {
-	Application *SupplierApplicationResponse `json:"application"`
-}
-
-type SupplierApplicationListResponse struct {
-	Applications []SupplierApplicationResponse `json:"applications"`
-	Total        int64                         `json:"total"`
-	Offset       int                           `json:"offset"`
-	Limit        int                           `json:"limit"`
-}
-
 // --- Helpers ---
 
 // toUserResponse converts a domain User to a safe API response.
@@ -645,18 +614,4 @@ func toInviteUseResponse(item app.InviteUseItem) InviteUseResponse {
 		resp.UserGroupName = &groupName
 	}
 	return resp
-}
-
-func toSupplierApplicationResponse(application *domain.SupplierApplication) SupplierApplicationResponse {
-	return SupplierApplicationResponse{
-		ID:              application.ID,
-		ApplicantUserID: application.ApplicantUserID,
-		Reason:          application.Reason,
-		Status:          string(application.Status),
-		ReviewReason:    application.ReviewReason,
-		ReviewedBy:      application.ReviewedBy,
-		ReviewedAt:      application.ReviewedAt,
-		CreatedAt:       application.CreatedAt,
-		UpdatedAt:       application.UpdatedAt,
-	}
 }

@@ -16,6 +16,7 @@
 | 2026-07-19 | V1.9 | Codex | 用户生命周期统一为 `active/disabled/deleted`，`status` 是唯一状态源；管理员删除改为逻辑删除并保留订单、钱包、资源和供应商申请等跨 BC 历史。现有 API `enabled` 字段和筛选保持兼容，由 `status=active` 派生。 |
 | 2026-07-20 | V1.10 | Codex | 新增 `governance:log(read/operate)` 权限目录与角色基线；admin/super_admin 可读，operate 仅默认授予 super_admin，日志清理仍额外校验 super_admin 角色。 |
 | 2026-07-26 | V1.11 | Codex | 供应商权限申请改为 BC-AFTERSALE 非订单工单：标题固定为“供应商申请”，正文为用户填写内容；管理员看到工单后通过用户管理人工将角色改为 supplier，不再进入独立审批状态机。旧 SupplierApplication 数据和接口仅保留存量兼容。 |
+| 2026-07-31 | V1.12 | Codex | 删除 V1.11 起已无入口的独立供应商审批实现：移除 `/v1/suppliers/applications`、`/v1/suppliers/applications/current`、三个后台审批接口、`SupplierApplication` 领域/用例/仓储和 `iam:supplier_application` 权限。`supplier_applications` 表保留存量数据，不再有代码读写。 |
 
 > 通用域。BC-IAM 回答“你是谁、你能做什么”。管理员、供应商、普通用户共用一张用户表。
 
@@ -42,7 +43,6 @@
 | `ThirdPartyIdentity` | 第三方账号绑定 |
 | `UserLoginDevice` | 设备指纹和最近登录 |
 | `CasbinRule` | Casbin policy 存储 |
-| `SupplierApplication` | 历史供应商申请审核记录；新申请不再写入。 |
 
 RBAC 角色：
 
@@ -244,7 +244,7 @@ GitHub OAuth：
 
 管理员在工单列表看到申请后，通过 `PATCH /v1/admin/users/{userId}` 人工将申请人的 RBAC `role` 改为 `supplier`，再按实际处理结果回复或关闭工单。角色变更不自动发布任何 Microsoft/Domain 资源；用户成为 `supplier` 后仍需在资源页主动执行出售。
 
-旧 `/v1/suppliers/applications`、`/v1/suppliers/applications/current` 及后台审批接口和 `SupplierApplication` 数据仅用于兼容存量记录，不参与新的出售入口和供应商权限申请流程。
+独立供应商审批实现已删除：`/v1/suppliers/applications`、`/v1/suppliers/applications/current`、后台审批接口、`SupplierApplication` 领域模型与 `iam:supplier_application` 权限均不再存在。`supplier_applications` 表保留存量行，但没有任何代码读写它。
 
 后台：
 

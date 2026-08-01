@@ -4,6 +4,7 @@ import type { TFunction } from "i18next";
 import { FileText, Upload } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { requireTurnstile } from "@/components/auth/TurnstileGate";
 import { getApiErrorBodyMessage, getIamErrorMessage } from "@/lib/iam-errors";
 import {
   importMicrosoftResources,
@@ -124,9 +125,14 @@ export function ImportMicrosoftEmailsModal({
         type: "text/plain",
       });
 
+      // Challenged only after preprocessing passes, so a file that fails
+      // validation never costs the user a verification.
+      const turnstileToken = await requireTurnstile("resource_import");
+      if (!turnstileToken) return;
       const result = await importMicrosoftResources(
         uploadFile,
         lifetimeType === "long_lived",
+        turnstileToken,
         errorStrategy
       );
       Toast.success(t("Resource import accepted."));

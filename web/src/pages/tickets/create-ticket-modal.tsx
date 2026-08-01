@@ -14,6 +14,7 @@ import { IconSearch } from "@douyinfe/semi-icons";
 import { FileImage, Paperclip, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { requireTurnstile } from "@/components/auth/TurnstileGate";
 import { OverflowTooltip } from "@/components/semi/overflow-tooltip";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { listOrders, type OrderResponse } from "@/lib/orders-api";
@@ -166,16 +167,21 @@ export function CreateTicketModal({
     if (!canSubmit) return;
     setSubmitting(true);
     try {
-      const ticket = await createTicket({
-        ticketType,
-        title: title.trim(),
-        firstMessage: description.trim(),
-        order: ticketType === "order" ? selectedOrder ?? undefined : undefined,
-        attachments:
-          attachments.length > 0
-            ? attachments.map((attachment) => attachment.dataUrl)
-            : undefined,
-      });
+      const turnstileToken = await requireTurnstile("ticket_create");
+      if (!turnstileToken) return;
+      const ticket = await createTicket(
+        {
+          ticketType,
+          title: title.trim(),
+          firstMessage: description.trim(),
+          order: ticketType === "order" ? selectedOrder ?? undefined : undefined,
+          attachments:
+            attachments.length > 0
+              ? attachments.map((attachment) => attachment.dataUrl)
+              : undefined,
+        },
+        turnstileToken
+      );
       onCreated();
       onOpenChange(false);
       onViewTicket(ticket);

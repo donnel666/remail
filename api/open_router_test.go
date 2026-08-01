@@ -19,7 +19,7 @@ func TestOpenRoutesRequireAPIKey(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	r := gin.New()
-	registerOpenRoutes(r.Group("/v1"), &openapiapi.Module{}, nil, nil, nil, nil)
+	registerOpenRoutes(r.Group("/v1"), &openapiapi.Module{}, nil, nil, nil, nil, nil)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/open/projects", nil)
@@ -34,7 +34,7 @@ func TestOpenRoutesMatchPublicOpenAPISpec(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	r := gin.New()
-	registerOpenRoutes(r.Group("/v1"), &openapiapi.Module{}, nil, nil, nil, nil)
+	registerOpenRoutes(r.Group("/v1"), &openapiapi.Module{}, nil, nil, nil, nil, nil)
 	mailmatchapi.RegisterRoutes(r.Group("/v1"), nil)
 
 	got := make([]string, 0)

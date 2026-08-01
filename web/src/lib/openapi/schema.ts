@@ -468,40 +468,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/suppliers/applications": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Submit current user's supplier application */
-        post: operations["postSupplierApplication"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/suppliers/applications/current": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get current user's latest supplier application */
-        get: operations["getCurrentSupplierApplication"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/password": {
         parameters: {
             query?: never;
@@ -991,57 +957,6 @@ export interface paths {
         get: operations["getAdminInviteUses"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/admin/suppliers/applications": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List supplier applications */
-        get: operations["getAdminSupplierApplications"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/admin/suppliers/applications/{applicationId}/approve": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Approve supplier application */
-        post: operations["postAdminSupplierApplicationApprove"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/admin/suppliers/applications/{applicationId}/reject": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Reject supplier application */
-        post: operations["postAdminSupplierApplicationReject"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5296,36 +5211,6 @@ export interface components {
             affected: number;
             skipped: number;
         };
-        SupplierApplicationRequest: {
-            reason: string;
-        };
-        AdminRejectSupplierApplicationRequest: {
-            reviewReason: string;
-        };
-        SupplierApplicationResponse: {
-            id: number;
-            applicantUserId: number;
-            reason: string;
-            /** @enum {string} */
-            status: "reviewing" | "approved" | "rejected" | "canceled";
-            reviewReason: string;
-            reviewedBy?: number | null;
-            /** Format: date-time */
-            reviewedAt?: string | null;
-            /** Format: date-time */
-            createdAt: string;
-            /** Format: date-time */
-            updatedAt: string;
-        };
-        SupplierApplicationCurrentResponse: {
-            application: components["schemas"]["SupplierApplicationResponse"] | null;
-        };
-        SupplierApplicationListResponse: {
-            applications: components["schemas"]["SupplierApplicationResponse"][];
-            total: number;
-            offset: number;
-            limit: number;
-        };
         ResourceListResponse: {
             items: components["schemas"]["ResourceItem"][];
             /** @description Omitted when `includeTotal=false`. */
@@ -7016,6 +6901,17 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
+        /** @description Request rate limit exceeded */
+        TooManyRequests: {
+            headers: {
+                /** @description Seconds until the request may be retried */
+                "Retry-After"?: number;
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
         /** @description An authorized upstream content read failed safely */
         BadGateway: {
             headers: {
@@ -7051,6 +6947,8 @@ export interface components {
         CsrfToken: string;
         /** @description CSRF token from the csrf_token SameSite cookie; required for Session state-changing requests and ignored for API Key requests. */
         OptionalCsrfToken: string;
+        /** @description Single-use Cloudflare Turnstile token. Required when captcha_enabled is on for low-frequency, high-damage writes (money movement, submissions entering a human review queue, bulk supplier imports). Each route expects a token minted for its own action string, so a token cannot be replayed across routes. Ignored when the captcha_enabled system setting is off. Not required on the API-key /v1/open surface. */
+        TurnstileToken: string;
         /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
         IdempotencyKey: string;
         /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
@@ -8174,109 +8072,6 @@ export interface operations {
             };
             /** @description Permission denied */
             403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    postSupplierApplication: {
-        parameters: {
-            query?: never;
-            header: {
-                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
-                "X-CSRF-Token": components["parameters"]["CsrfToken"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SupplierApplicationRequest"];
-            };
-        };
-        responses: {
-            /** @description Supplier application submitted */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        application: components["schemas"]["SupplierApplicationResponse"];
-                    };
-                };
-            };
-            /** @description Invalid request body */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Authentication required */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Permission denied */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Supplier application is already under review */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Invalid supplier application */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    getCurrentSupplierApplication: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Current supplier application */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SupplierApplicationCurrentResponse"];
-                };
-            };
-            /** @description Authentication required */
-            401: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10445,205 +10240,6 @@ export interface operations {
             };
         };
     };
-    getAdminSupplierApplications: {
-        parameters: {
-            query?: {
-                status?: string;
-                offset?: number;
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Supplier application list */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SupplierApplicationListResponse"];
-                };
-            };
-            /** @description Invalid query parameters */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Authentication required */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Permission denied */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    postAdminSupplierApplicationApprove: {
-        parameters: {
-            query?: never;
-            header: {
-                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
-                "X-CSRF-Token": components["parameters"]["CsrfToken"];
-            };
-            path: {
-                applicationId: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Supplier application approved */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        application: components["schemas"]["SupplierApplicationResponse"];
-                    };
-                };
-            };
-            /** @description Invalid supplier application ID */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Authentication required */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Permission denied */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Supplier application not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Invalid supplier application status */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    postAdminSupplierApplicationReject: {
-        parameters: {
-            query?: never;
-            header: {
-                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
-                "X-CSRF-Token": components["parameters"]["CsrfToken"];
-            };
-            path: {
-                applicationId: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AdminRejectSupplierApplicationRequest"];
-            };
-        };
-        responses: {
-            /** @description Supplier application rejected */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        application: components["schemas"]["SupplierApplicationResponse"];
-                    };
-                };
-            };
-            /** @description Invalid request body or supplier application ID */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Authentication required */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Permission denied */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Supplier application not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Invalid supplier application */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
     getProjects: {
         parameters: {
             query?: {
@@ -10709,6 +10305,8 @@ export interface operations {
             header: {
                 /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Single-use Cloudflare Turnstile token. Required when captcha_enabled is on for low-frequency, high-damage writes (money movement, submissions entering a human review queue, bulk supplier imports). Each route expects a token minted for its own action string, so a token cannot be replayed across routes. Ignored when the captcha_enabled system setting is off. Not required on the API-key /v1/open surface. */
+                "X-Turnstile-Token"?: components["parameters"]["TurnstileToken"];
             };
             path?: never;
             cookie?: never;
@@ -10755,7 +10353,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Invalid project application */
+            /** @description Invalid project application or human verification failed */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -10764,6 +10362,8 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getProject: {
@@ -10870,6 +10470,8 @@ export interface operations {
             header: {
                 /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Single-use Cloudflare Turnstile token. Required when captcha_enabled is on for low-frequency, high-damage writes (money movement, submissions entering a human review queue, bulk supplier imports). Each route expects a token minted for its own action string, so a token cannot be replayed across routes. Ignored when the captcha_enabled system setting is off. Not required on the API-key /v1/open surface. */
+                "X-Turnstile-Token"?: components["parameters"]["TurnstileToken"];
             };
             path: {
                 projectId: number;
@@ -10918,7 +10520,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Project is not rejected or application is invalid */
+            /** @description Project is not rejected, the application is invalid, or human verification failed */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -10927,6 +10529,8 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getProjectLogo: {
@@ -12592,6 +12196,8 @@ export interface operations {
             header: {
                 /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Single-use Cloudflare Turnstile token. Required when captcha_enabled is on for low-frequency, high-damage writes (money movement, submissions entering a human review queue, bulk supplier imports). Each route expects a token minted for its own action string, so a token cannot be replayed across routes. Ignored when the captcha_enabled system setting is off. Not required on the API-key /v1/open surface. */
+                "X-Turnstile-Token"?: components["parameters"]["TurnstileToken"];
             };
             path?: never;
             cookie?: never;
@@ -12649,7 +12255,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Empty import file */
+            /** @description Empty import file or human verification failed */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -12658,7 +12264,8 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description File storage temporarily unavailable */
+            429: components["responses"]["TooManyRequests"];
+            /** @description File storage or human verification temporarily unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -12953,6 +12560,8 @@ export interface operations {
             header: {
                 /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Single-use Cloudflare Turnstile token. Required when captcha_enabled is on for low-frequency, high-damage writes (money movement, submissions entering a human review queue, bulk supplier imports). Each route expects a token minted for its own action string, so a token cannot be replayed across routes. Ignored when the captcha_enabled system setting is off. Not required on the API-key /v1/open surface. */
+                "X-Turnstile-Token"?: components["parameters"]["TurnstileToken"];
             };
             path?: never;
             cookie?: never;
@@ -13017,7 +12626,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Invalid purpose */
+            /** @description Invalid purpose or human verification failed */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -13026,6 +12635,8 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getDomainMailboxes: {
@@ -14806,6 +14417,8 @@ export interface operations {
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
                 /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Single-use Cloudflare Turnstile token. Required when captcha_enabled is on for low-frequency, high-damage writes (money movement, submissions entering a human review queue, bulk supplier imports). Each route expects a token minted for its own action string, so a token cannot be replayed across routes. Ignored when the captcha_enabled system setting is off. Not required on the API-key /v1/open surface. */
+                "X-Turnstile-Token"?: components["parameters"]["TurnstileToken"];
             };
             path?: never;
             cookie?: never;
@@ -14848,7 +14461,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description No referral rewards available */
+            /** @description No referral rewards available or human verification failed */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -14857,6 +14470,8 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     postWalletSupplierTransfer: {
@@ -14867,6 +14482,8 @@ export interface operations {
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
                 /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Single-use Cloudflare Turnstile token. Required when captcha_enabled is on for low-frequency, high-damage writes (money movement, submissions entering a human review queue, bulk supplier imports). Each route expects a token minted for its own action string, so a token cannot be replayed across routes. Ignored when the captcha_enabled system setting is off. Not required on the API-key /v1/open surface. */
+                "X-Turnstile-Token"?: components["parameters"]["TurnstileToken"];
             };
             path?: never;
             cookie?: never;
@@ -14922,7 +14539,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Invalid amount or insufficient supplier balance */
+            /** @description Invalid amount, insufficient supplier balance, or human verification failed */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -14931,6 +14548,8 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     postWalletSupplierWithdrawal: {
@@ -14939,6 +14558,8 @@ export interface operations {
             header: {
                 /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Single-use Cloudflare Turnstile token. Required when captcha_enabled is on for low-frequency, high-damage writes (money movement, submissions entering a human review queue, bulk supplier imports). Each route expects a token minted for its own action string, so a token cannot be replayed across routes. Ignored when the captcha_enabled system setting is off. Not required on the API-key /v1/open surface. */
+                "X-Turnstile-Token"?: components["parameters"]["TurnstileToken"];
             };
             path?: never;
             cookie?: never;
@@ -14969,7 +14590,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description Invalid amount, insufficient supplier balance, invalid note, or invalid payment QR code */
+            /** @description Invalid amount, insufficient supplier balance, invalid note, invalid payment QR code, or human verification failed */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -14978,6 +14599,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["TooManyRequests"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -15381,6 +15003,8 @@ export interface operations {
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description Single-use Cloudflare Turnstile token. Required when captcha_enabled is on for low-frequency, high-damage writes (money movement, submissions entering a human review queue, bulk supplier imports). Each route expects a token minted for its own action string, so a token cannot be replayed across routes. Ignored when the captcha_enabled system setting is off. Not required on the API-key /v1/open surface. */
+                "X-Turnstile-Token"?: components["parameters"]["TurnstileToken"];
             };
             path?: never;
             cookie?: never;
@@ -15427,7 +15051,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Invalid card key or card key cannot be redeemed */
+            /** @description Invalid card key, card key cannot be redeemed, or human verification failed */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -15436,6 +15060,8 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getAdminWalletBalances: {
@@ -19082,6 +18708,8 @@ export interface operations {
             header: {
                 /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Single-use Cloudflare Turnstile token. Required when captcha_enabled is on for low-frequency, high-damage writes (money movement, submissions entering a human review queue, bulk supplier imports). Each route expects a token minted for its own action string, so a token cannot be replayed across routes. Ignored when the captcha_enabled system setting is off. Not required on the API-key /v1/open surface. */
+                "X-Turnstile-Token"?: components["parameters"]["TurnstileToken"];
             };
             path?: never;
             cookie?: never;
@@ -19102,7 +18730,17 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            422: components["responses"]["UnprocessableEntity"];
+            /** @description Ticket input is invalid or human verification failed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getTicket: {

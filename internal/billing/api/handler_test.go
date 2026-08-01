@@ -418,7 +418,7 @@ func newBillingAPIRouterWithChecker(db *gorm.DB, sessions map[string]sessionFixt
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.Use(middleware.RequestID())
-	RegisterBillingRoutes(router.Group("/v1"), NewBillingModule(db), fakeSessionFetcher{sessions: sessions}, checker)
+	RegisterBillingRoutes(router.Group("/v1"), NewBillingModule(db), fakeSessionFetcher{sessions: sessions}, checker, nil)
 	return router
 }
 

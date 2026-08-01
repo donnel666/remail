@@ -4,7 +4,7 @@
 // into the console-friendly shapes the UI already consumes.
 
 import type { components } from "@/lib/openapi/schema";
-import { apiClient, csrfHeader, unwrap } from "@/lib/api-client";
+import { apiClient, csrfHeader, turnstileHeader, unwrap } from "@/lib/api-client";
 import { generateIdempotencyKey } from "@/lib/idempotency";
 
 import type {
@@ -209,7 +209,10 @@ export interface CreateTicketInput {
   attachments?: string[];
 }
 
-export async function createTicket(input: CreateTicketInput): Promise<Ticket> {
+export async function createTicket(
+  input: CreateTicketInput,
+  turnstileToken: string
+): Promise<Ticket> {
   return toTicket(
     await unwrap<TicketResponse>(
       await apiClient.POST("/v1/tickets", {
@@ -220,7 +223,9 @@ export async function createTicket(input: CreateTicketInput): Promise<Ticket> {
           orderNo: input.order?.orderNo,
           attachments: input.attachments,
         },
-        params: { header: csrfHeader() },
+        params: {
+          header: { ...csrfHeader(), ...turnstileHeader(turnstileToken) },
+        },
       })
     )
   );

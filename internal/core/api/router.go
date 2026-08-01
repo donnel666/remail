@@ -8,7 +8,7 @@ import (
 // RegisterCoreRoutes registers all Core (resource) routes on the given router group.
 // P1-I2: supplier resource upload, list, detail, plus administrator resource operations.
 // The fetcher is used by LoadSession middleware to authenticate users.
-func RegisterCoreRoutes(rg *gin.RouterGroup, mod *CoreModule, fetcher middleware.SessionFetcher, checker middleware.PermissionChecker) {
+func RegisterCoreRoutes(rg *gin.RouterGroup, mod *CoreModule, fetcher middleware.SessionFetcher, checker middleware.PermissionChecker, turnstileGuard gin.HandlerFunc) {
 	h := NewCoreHandler(mod, checker)
 
 	// ---- Authenticated routes (any role) ----
@@ -16,6 +16,9 @@ func RegisterCoreRoutes(rg *gin.RouterGroup, mod *CoreModule, fetcher middleware
 	auth.Use(middleware.LoadSession(fetcher))
 	auth.Use(middleware.AuthRequired())
 	auth.Use(middleware.CSRFRequired())
+	if turnstileGuard != nil {
+		auth.Use(turnstileGuard)
+	}
 	{
 		// Resource management (supplier self-service)
 		auth.GET("/resources", h.GetResources)

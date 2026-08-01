@@ -20,7 +20,7 @@ func TestCORSTrustedOriginAllowsRequiredAdminCommandHeaders(t *testing.T) {
 	request := httptest.NewRequest(http.MethodOptions, "/v1/admin/resources/42/disable", nil)
 	request.Header.Set("Origin", "http://localhost:3000")
 	request.Header.Set("Access-Control-Request-Method", http.MethodPost)
-	request.Header.Set("Access-Control-Request-Headers", "X-CSRF-Token, Idempotency-Key")
+	request.Header.Set("Access-Control-Request-Headers", "X-CSRF-Token, X-Turnstile-Token, Idempotency-Key")
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 
@@ -28,7 +28,9 @@ func TestCORSTrustedOriginAllowsRequiredAdminCommandHeaders(t *testing.T) {
 	require.Equal(t, "http://localhost:3000", response.Header().Get("Access-Control-Allow-Origin"))
 	require.Equal(t, "true", response.Header().Get("Access-Control-Allow-Credentials"))
 	require.Contains(t, response.Header().Get("Access-Control-Allow-Headers"), "X-CSRF-Token")
+	require.Contains(t, response.Header().Get("Access-Control-Allow-Headers"), "X-Turnstile-Token")
 	require.Contains(t, response.Header().Get("Access-Control-Allow-Headers"), "Idempotency-Key")
+	require.Equal(t, "Retry-After", response.Header().Get("Access-Control-Expose-Headers"))
 }
 
 func TestCORSUntrustedOriginDoesNotReceiveCredentialHeaders(t *testing.T) {

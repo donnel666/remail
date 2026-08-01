@@ -12,13 +12,16 @@ var (
 	ticketOperatePermissions = [][2]string{{"iam:user", "operate"}, {"trade:order", "operate"}}
 )
 
-func RegisterRoutes(rg *gin.RouterGroup, mod *Module, fetcher middleware.SessionFetcher, checker middleware.PermissionChecker) {
+func RegisterRoutes(rg *gin.RouterGroup, mod *Module, fetcher middleware.SessionFetcher, checker middleware.PermissionChecker, turnstileGuard gin.HandlerFunc) {
 	h := NewHandler(mod)
 
 	auth := rg.Group("")
 	auth.Use(middleware.LoadSession(fetcher))
 	auth.Use(middleware.AuthRequired())
 	auth.Use(middleware.CSRFRequired())
+	if turnstileGuard != nil {
+		auth.Use(turnstileGuard)
+	}
 	{
 		auth.GET("/tickets", h.GetTickets)
 		auth.GET("/tickets/:ticketNo", h.GetTicket)

@@ -30,6 +30,7 @@ const errorResponses = {
   "422": { $ref: "#/components/responses/UnprocessableEntity" },
   "429": { $ref: "#/components/responses/TooManyRequests" },
   "500": { $ref: "#/components/responses/InternalError" },
+  "503": { $ref: "#/components/responses/ServiceUnavailable" },
 };
 
 const apiKeySecurity = [{ remailApiKey: [] }];
@@ -775,8 +776,17 @@ const spec = {
       Conflict: { description: "请求与已有业务事实冲突。", ...json(ref("ErrorResponse")) },
       UnprocessableEntity: { description: "业务校验未通过。", ...json(ref("ErrorResponse")) },
       PayloadTooLarge: { description: "请求体过大。", ...json(ref("ErrorResponse")) },
-      TooManyRequests: { description: "请求超过 API Key 限制。", ...json(ref("ErrorResponse")) },
-      ServiceUnavailable: { description: "邮件服务暂时不可用。", ...json(ref("ErrorResponse")) },
+      TooManyRequests: {
+        description: "请求超过 API Key 限制。",
+        headers: {
+          "Retry-After": {
+            description: "可重试前需等待的秒数。",
+            schema: { type: "integer" },
+          },
+        },
+        ...json(ref("ErrorResponse")),
+      },
+      ServiceUnavailable: { description: "所需服务暂时不可用。", ...json(ref("ErrorResponse")) },
       InternalError: { description: "服务端异常。", ...json(ref("ErrorResponse")) },
     },
     schemas,

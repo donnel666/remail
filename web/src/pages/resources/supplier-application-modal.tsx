@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Button, Modal, Space, TextArea, Toast } from "@douyinfe/semi-ui";
 import { useTranslation } from "react-i18next";
 
+import { requireTurnstile } from "@/components/auth/TurnstileGate";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 
 import { createTicket } from "../tickets/tickets-api";
@@ -16,12 +17,18 @@ export function hasSupplierRole(role?: string | null) {
   return role === "supplier" || role === "admin" || role === "super_admin";
 }
 
-export function createSupplierApplicationTicket(reason: string) {
-  return createTicket({
-    ticketType: "general",
-    title: "供应商申请",
-    firstMessage: reason,
-  });
+export async function createSupplierApplicationTicket(
+  reason: string,
+  turnstileToken: string
+) {
+  return createTicket(
+    {
+      ticketType: "general",
+      title: "供应商申请",
+      firstMessage: reason,
+    },
+    turnstileToken
+  );
 }
 
 export async function ensureSupplierRole(
@@ -59,7 +66,9 @@ export function SupplierApplicationModal({
 
     setBusy(true);
     try {
-      await createSupplierApplicationTicket(trimmedReason);
+      const turnstileToken = await requireTurnstile("ticket_create");
+      if (!turnstileToken) return;
+      await createSupplierApplicationTicket(trimmedReason, turnstileToken);
       Toast.success(t("Supplier application submitted."));
       close();
       onSuccess();

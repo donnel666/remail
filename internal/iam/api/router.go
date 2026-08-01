@@ -100,8 +100,6 @@ func RegisterIAMRoutes(rg *gin.RouterGroup, mod *IAMModule, sessionSecure bool) 
 		auth.GET("/me/invite", h.GetMeInvite)
 		auth.POST("/me/invite", h.PostMeInvite)
 		auth.PATCH("/password", h.PatchPassword)
-		auth.POST("/suppliers/applications", h.PostSupplierApplication)
-		auth.GET("/suppliers/applications/current", h.GetCurrentSupplierApplication)
 	}
 
 	// Admin routes are authorized by Casbin RBAC permissions.
@@ -135,8 +133,5 @@ func RegisterIAMRoutes(rg *gin.RouterGroup, mod *IAMModule, sessionSecure bool) 
 		admin.POST("/invites/disable", middleware.PermissionRequired(mod.PermissionChecker, "iam:invite", "write"), h.PostAdminInvitesDisable)
 		admin.GET("/invites/:code/uses", middleware.PermissionRequired(mod.PermissionChecker, "iam:invite", "read"), h.GetAdminInviteUses)
 		admin.PATCH("/invites/:code", middleware.PermissionRequired(mod.PermissionChecker, "iam:invite", "operate"), h.PatchAdminInvite)
-		admin.GET("/suppliers/applications", middleware.PermissionRequired(mod.PermissionChecker, "iam:supplier_application", "read"), h.GetAdminSupplierApplications)
-		admin.POST("/suppliers/applications/:applicationId/approve", middleware.PermissionRequired(mod.PermissionChecker, "iam:supplier_application", "operate"), h.PostAdminSupplierApplicationApprove)
-		admin.POST("/suppliers/applications/:applicationId/reject", middleware.PermissionRequired(mod.PermissionChecker, "iam:supplier_application", "operate"), h.PostAdminSupplierApplicationReject)
 	}
 }

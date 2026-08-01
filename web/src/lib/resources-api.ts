@@ -2,6 +2,7 @@ import type { components, operations } from "./openapi/schema";
 import {
   apiClient as client,
   csrfHeader,
+  turnstileHeader,
   unwrap,
 } from "./api-client";
 
@@ -104,6 +105,7 @@ async function listOwnedResources(
 export async function importMicrosoftResources(
   file: File,
   longLived: boolean,
+  turnstileToken: string,
   errorStrategy: ImportErrorStrategy = "skip"
 ) {
   const formData = new FormData();
@@ -115,7 +117,9 @@ export async function importMicrosoftResources(
     await client.POST("/v1/resources/imports", {
       body: formData as never,
       bodySerializer: (body) => body,
-      params: { header: csrfHeader() },
+      params: {
+        header: { ...csrfHeader(), ...turnstileHeader(turnstileToken) },
+      },
     })
   );
 }
@@ -309,11 +313,18 @@ async function publishResource(resourceId: number) {
   );
 }
 
-export async function createDomainResource(payload: CreateDomainRequest) {
+export async function createDomainResource(
+  payload: CreateDomainRequest,
+  turnstileToken: string,
+  signal?: AbortSignal
+) {
   return unwrap<DomainResourceDetail>(
     await client.POST("/v1/domains", {
       body: payload,
-      params: { header: csrfHeader() },
+      params: {
+        header: { ...csrfHeader(), ...turnstileHeader(turnstileToken) },
+      },
+      signal,
     })
   );
 }

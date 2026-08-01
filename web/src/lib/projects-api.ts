@@ -2,6 +2,7 @@ import type { components } from "./openapi/schema";
 import {
   apiClient as client,
   csrfHeader,
+  turnstileHeader,
   unwrap,
 } from "./api-client";
 
@@ -111,25 +112,29 @@ export async function getProjectInventory(projectId: number) {
 }
 
 export async function createProjectApplication(
-  payload: CreateProjectApplicationRequest
+  payload: CreateProjectApplicationRequest,
+  turnstileToken: string
 ) {
   return unwrap<ProjectDetailResponse>(
     await client.POST("/v1/projects", {
       body: payload,
-      params: { header: csrfHeader() },
+      params: {
+        header: { ...csrfHeader(), ...turnstileHeader(turnstileToken) },
+      },
     })
   );
 }
 
 export async function resubmitProjectApplication(
   projectId: number,
-  payload: CreateProjectApplicationRequest
+  payload: CreateProjectApplicationRequest,
+  turnstileToken: string
 ) {
   return unwrap<ProjectDetailResponse>(
     await client.POST("/v1/projects/{projectId}/resubmit", {
       body: payload,
       params: {
-        header: csrfHeader(),
+        header: { ...csrfHeader(), ...turnstileHeader(turnstileToken) },
         path: { projectId },
       },
     })

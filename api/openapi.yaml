@@ -887,88 +887,6 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
-  /v1/suppliers/applications:
-    post:
-      operationId: postSupplierApplication
-      summary: Submit current user's supplier application
-      tags:
-        - IAM
-      security:
-        - cookieAuth: []
-      parameters:
-        - $ref: "#/components/parameters/CsrfToken"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/SupplierApplicationRequest"
-      responses:
-        "201":
-          description: Supplier application submitted
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                  - application
-                properties:
-                  application:
-                    $ref: "#/components/schemas/SupplierApplicationResponse"
-                additionalProperties: false
-        "400":
-          description: Invalid request body
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "401":
-          description: Authentication required
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "403":
-          description: Permission denied
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "409":
-          description: Supplier application is already under review
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "422":
-          description: Invalid supplier application
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-
-  /v1/suppliers/applications/current:
-    get:
-      operationId: getCurrentSupplierApplication
-      summary: Get current user's latest supplier application
-      tags:
-        - IAM
-      security:
-        - cookieAuth: []
-      responses:
-        "200":
-          description: Current supplier application
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SupplierApplicationCurrentResponse"
-        "401":
-          description: Authentication required
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-
   # --- Password Change ---
   /v1/password:
     patch:
@@ -2733,180 +2651,6 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
-  /v1/admin/suppliers/applications:
-    get:
-      operationId: getAdminSupplierApplications
-      summary: List supplier applications
-      tags:
-        - Admin
-      security:
-        - cookieAuth: []
-      parameters:
-        - name: status
-          in: query
-          schema:
-            type: string
-            default: all
-        - name: offset
-          in: query
-          schema:
-            type: integer
-            default: 0
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            default: 20
-      responses:
-        "200":
-          description: Supplier application list
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SupplierApplicationListResponse"
-        "400":
-          description: Invalid query parameters
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "401":
-          description: Authentication required
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "403":
-          description: Permission denied
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-
-  /v1/admin/suppliers/applications/{applicationId}/approve:
-    post:
-      operationId: postAdminSupplierApplicationApprove
-      summary: Approve supplier application
-      tags:
-        - Admin
-      security:
-        - cookieAuth: []
-      parameters:
-        - $ref: "#/components/parameters/CsrfToken"
-        - name: applicationId
-          in: path
-          required: true
-          schema:
-            type: integer
-      responses:
-        "200":
-          description: Supplier application approved
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                  - application
-                properties:
-                  application:
-                    $ref: "#/components/schemas/SupplierApplicationResponse"
-                additionalProperties: false
-        "400":
-          description: Invalid supplier application ID
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "401":
-          description: Authentication required
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "403":
-          description: Permission denied
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "404":
-          description: Supplier application not found
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "422":
-          description: Invalid supplier application status
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-
-  /v1/admin/suppliers/applications/{applicationId}/reject:
-    post:
-      operationId: postAdminSupplierApplicationReject
-      summary: Reject supplier application
-      tags:
-        - Admin
-      security:
-        - cookieAuth: []
-      parameters:
-        - $ref: "#/components/parameters/CsrfToken"
-        - name: applicationId
-          in: path
-          required: true
-          schema:
-            type: integer
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/AdminRejectSupplierApplicationRequest"
-      responses:
-        "200":
-          description: Supplier application rejected
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                  - application
-                properties:
-                  application:
-                    $ref: "#/components/schemas/SupplierApplicationResponse"
-                additionalProperties: false
-        "400":
-          description: Invalid request body or supplier application ID
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "401":
-          description: Authentication required
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "403":
-          description: Permission denied
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "404":
-          description: Supplier application not found
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "422":
-          description: Invalid supplier application
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-
   # --- Projects (P1-I4) ---
   /v1/projects:
     get:
@@ -3000,12 +2744,14 @@ paths:
     post:
       operationId: postProject
       summary: Create a user project application
+      x-turnstile-action: project_submit
       tags:
         - Projects
       security:
         - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/TurnstileToken"
       requestBody:
         required: true
         content:
@@ -3038,11 +2784,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "422":
-          description: Invalid project application
+          description: Invalid project application or human verification failed
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 
   /v1/projects/{projectId}:
     get:
@@ -3127,12 +2877,14 @@ paths:
     post:
       operationId: postProjectResubmit
       summary: Resubmit a rejected project application
+      x-turnstile-action: project_resubmit
       tags:
         - Projects
       security:
         - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/TurnstileToken"
         - name: projectId
           in: path
           required: true
@@ -3170,11 +2922,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "422":
-          description: Project is not rejected or application is invalid
+          description: Project is not rejected, the application is invalid, or human verification failed
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 
   /v1/projects/logos/{logoKey}:
     get:
@@ -4541,12 +4297,14 @@ paths:
     post:
       operationId: postResourceImport
       summary: Import Microsoft resources from TXT
+      x-turnstile-action: resource_import
       tags:
         - Resources
       security:
         - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/TurnstileToken"
       requestBody:
         required: true
         content:
@@ -4596,13 +4354,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "422":
-          description: Empty import file
+          description: Empty import file or human verification failed
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
         "503":
-          description: File storage temporarily unavailable
+          description: File storage or human verification temporarily unavailable
           content:
             application/json:
               schema:
@@ -4853,12 +4613,14 @@ paths:
     post:
       operationId: postDomain
       summary: Create a domain resource
+      x-turnstile-action: domain_import
       tags:
         - Domains
       security:
         - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/TurnstileToken"
       requestBody:
         required: true
         content:
@@ -4903,11 +4665,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "422":
-          description: Invalid purpose
+          description: Invalid purpose or human verification failed
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 
   /v1/domains/{domainId}/mailboxes:
     get:
@@ -6462,6 +6228,7 @@ paths:
     post:
       operationId: postWalletReferralTransfer
       summary: Transfer available referral rewards to consumer balance
+      x-turnstile-action: referral_transfer
       tags:
         - Billing
       security:
@@ -6469,6 +6236,7 @@ paths:
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/TurnstileToken"
       responses:
         "200":
           description: Referral rewards transferred
@@ -6495,16 +6263,21 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "422":
-          description: No referral rewards available
+          description: No referral rewards available or human verification failed
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 
   /v1/wallet/supplier-transfers:
     post:
       operationId: postWalletSupplierTransfer
       summary: Transfer supplier available balance to the current user's consumer wallet
+      x-turnstile-action: supplier_transfer
       description: Atomically debits supplierAvailable and credits consumer balance. Available only to supplier, admin, and super-admin roles.
       tags:
         - Billing
@@ -6513,6 +6286,7 @@ paths:
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/TurnstileToken"
       requestBody:
         required: true
         content:
@@ -6551,16 +6325,21 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "422":
-          description: Invalid amount or insufficient supplier balance
+          description: Invalid amount, insufficient supplier balance, or human verification failed
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 
   /v1/wallet/supplier-withdrawals:
     post:
       operationId: postWalletSupplierWithdrawal
       summary: Create an Alipay supplier withdrawal request
+      x-turnstile-action: supplier_withdrawal
       description: Validates supplier access, a positive whole-number amount, current withdrawable balance, note, and payment QR code before creating a trusted system-authored ticket.
       tags:
         - Billing
@@ -6568,6 +6347,7 @@ paths:
         - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/TurnstileToken"
       requestBody:
         required: true
         content:
@@ -6592,11 +6372,13 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
         "422":
-          description: Invalid amount, insufficient supplier balance, invalid note, or invalid payment QR code
+          description: Invalid amount, insufficient supplier balance, invalid note, invalid payment QR code, or human verification failed
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 
@@ -6940,6 +6722,7 @@ paths:
     post:
       operationId: postCardRedeem
       summary: Redeem a card key into consumer balance
+      x-turnstile-action: card_redeem
       tags:
         - Billing
       security:
@@ -6947,6 +6730,7 @@ paths:
       parameters:
         - $ref: "#/components/parameters/CsrfToken"
         - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/TurnstileToken"
       requestBody:
         required: true
         content:
@@ -6979,11 +6763,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "422":
-          description: Invalid card key or card key cannot be redeemed
+          description: Invalid card key, card key cannot be redeemed, or human verification failed
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 
   /v1/admin/wallets/balances:
     get:
@@ -10770,12 +10558,14 @@ paths:
     post:
       operationId: postTicket
       summary: Open an after-sales ticket
+      x-turnstile-action: ticket_create
       tags:
         - Aftersale
       security:
         - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/TurnstileToken"
       requestBody:
         required: true
         content:
@@ -10792,7 +10582,15 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "422":
-          $ref: "#/components/responses/UnprocessableEntity"
+          description: Ticket input is invalid or human verification failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 
   /v1/tickets/{ticketNo}:
     get:
@@ -11148,6 +10946,21 @@ components:
         type: string
       description: CSRF token from the csrf_token SameSite cookie; required for Session state-changing requests and ignored for API Key requests.
 
+    TurnstileToken:
+      name: X-Turnstile-Token
+      in: header
+      required: false
+      schema:
+        type: string
+      description: >-
+        Single-use Cloudflare Turnstile token. Required when captcha_enabled is
+        on for low-frequency,
+        high-damage writes (money movement, submissions entering a human review
+        queue, bulk supplier imports). Each route expects a token minted for its
+        own action string, so a token cannot be replayed across routes. Ignored
+        when the captcha_enabled system setting is off. Not required on the
+        API-key /v1/open surface.
+
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -11237,6 +11050,17 @@ components:
             $ref: "#/components/schemas/Error"
     UnprocessableEntity:
       description: The request is syntactically valid but violates field or domain constraints
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    TooManyRequests:
+      description: Request rate limit exceeded
+      headers:
+        Retry-After:
+          description: Seconds until the request may be retried
+          schema:
+            type: integer
       content:
         application/json:
           schema:
@@ -14936,98 +14760,6 @@ components:
         affected:
           type: integer
         skipped:
-          type: integer
-      additionalProperties: false
-
-    SupplierApplicationRequest:
-      type: object
-      required:
-        - reason
-      properties:
-        reason:
-          type: string
-          maxLength: 1000
-      additionalProperties: false
-
-    AdminRejectSupplierApplicationRequest:
-      type: object
-      required:
-        - reviewReason
-      properties:
-        reviewReason:
-          type: string
-          maxLength: 500
-      additionalProperties: false
-
-    SupplierApplicationResponse:
-      type: object
-      required:
-        - id
-        - applicantUserId
-        - reason
-        - status
-        - reviewReason
-        - createdAt
-        - updatedAt
-      properties:
-        id:
-          type: integer
-        applicantUserId:
-          type: integer
-        reason:
-          type: string
-        status:
-          type: string
-          enum:
-            - reviewing
-            - approved
-            - rejected
-            - canceled
-        reviewReason:
-          type: string
-        reviewedBy:
-          type: integer
-          nullable: true
-        reviewedAt:
-          type: string
-          format: date-time
-          nullable: true
-        createdAt:
-          type: string
-          format: date-time
-        updatedAt:
-          type: string
-          format: date-time
-      additionalProperties: false
-
-    SupplierApplicationCurrentResponse:
-      type: object
-      required:
-        - application
-      properties:
-        application:
-          nullable: true
-          allOf:
-            - $ref: "#/components/schemas/SupplierApplicationResponse"
-      additionalProperties: false
-
-    SupplierApplicationListResponse:
-      type: object
-      required:
-        - applications
-        - total
-        - offset
-        - limit
-      properties:
-        applications:
-          type: array
-          items:
-            $ref: "#/components/schemas/SupplierApplicationResponse"
-        total:
-          type: integer
-        offset:
-          type: integer
-        limit:
           type: integer
       additionalProperties: false
 

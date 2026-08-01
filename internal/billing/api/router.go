@@ -5,7 +5,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func RegisterBillingRoutes(rg *gin.RouterGroup, mod *BillingModule, fetcher middleware.SessionFetcher, checker middleware.PermissionChecker) {
+func RegisterBillingRoutes(rg *gin.RouterGroup, mod *BillingModule, fetcher middleware.SessionFetcher, checker middleware.PermissionChecker, turnstileGuard gin.HandlerFunc) {
 	h := NewBillingHandler(mod, checker)
 	rg.GET("/payments/webhooks/epay/v1", h.EPayWebhook)
 	rg.POST("/payments/webhooks/epay/v1", h.EPayWebhook)
@@ -16,6 +16,9 @@ func RegisterBillingRoutes(rg *gin.RouterGroup, mod *BillingModule, fetcher midd
 	auth.Use(middleware.LoadSession(fetcher))
 	auth.Use(middleware.AuthRequired())
 	auth.Use(middleware.CSRFRequired())
+	if turnstileGuard != nil {
+		auth.Use(turnstileGuard)
+	}
 	{
 		auth.GET("/wallet", h.GetWallet)
 		auth.POST("/wallet/check-ins", h.PostWalletCheckin)

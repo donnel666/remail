@@ -137,6 +137,8 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		if err != nil {
 			return nil, cleanup, err
 		}
+		turnstileGuard := middleware.TurnstileGuard(iamMod.TurnstileVerifier, iamMod.AbuseLimiter)
+
 		announcementMail := announcementMailer{users: iamMod.Users, delivery: mailMod.DeliveryUseCase, client: p.Asynq}
 		loadAlerter = &systemLoadAlerter{users: iamMod.Users, delivery: mailMod.DeliveryUseCase, redis: p.Redis}
 		systemSettingsMod.Settings.SetAnnouncementPublisher(announcementMail)
@@ -198,7 +200,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 			governanceMod.CoreTaskQuery,
 			mailMod.AliasScheduleQuery,
 		)
-		coreapi.RegisterCoreRoutes(v1, coreMod, iamSessionFetcher, iamMod.PermissionChecker)
+		coreapi.RegisterCoreRoutes(v1, coreMod, iamSessionFetcher, iamMod.PermissionChecker, turnstileGuard)
 		allocapi.RegisterRoutes(v1, allocMod, iamSessionFetcher, iamMod.PermissionChecker)
 
 		// Billing module (wallet, recharge ledger and card-key redemption)
@@ -208,7 +210,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		billingMod.SetMailDelivery(mailMod.DeliveryUseCase)
 		iamMod.RegistrationUseCase.SetRegistrationRewardWallet(billingMod.WalletUseCase)
 		iamMod.LoginUseCase.SetRegistrationRewardWallet(billingMod.WalletUseCase)
-		billingapi.RegisterBillingRoutes(v1, billingMod, iamSessionFetcher, iamMod.PermissionChecker)
+		billingapi.RegisterBillingRoutes(v1, billingMod, iamSessionFetcher, iamMod.PermissionChecker, turnstileGuard)
 		cleanupFuncs = append(cleanupFuncs, billingapi.RegisterBillingTaskHandlers(taskMux, billingMod))
 
 		// OpenAPI credentials and order service tokens.
@@ -243,7 +245,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		}
 		aftersaleMod.UseCase.SetOwnerLookupPort(ticketParticipantDirectory{owners: iamMod.AdminResourceOwners, users: iamMod.Users})
 		aftersaleMod.UseCase.SetSupplierWalletPort(supplierWithdrawalWalletAdapter{wallets: billingMod.WalletUseCase})
-		aftersaleapi.RegisterRoutes(v1, aftersaleMod, iamSessionFetcher, iamMod.PermissionChecker)
+		aftersaleapi.RegisterRoutes(v1, aftersaleMod, iamSessionFetcher, iamMod.PermissionChecker, turnstileGuard)
 
 		// MailMatch module (order-scoped message cache, async fetch and matching).
 		mailmatchMod := mailmatchapi.NewModule(p.DB, fileStore, p.Redis, p.Asynq, proxyMod.ProxyUseCase, tradeMod.UseCase, coreMod.ValidationUseCase)
@@ -267,7 +269,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		mailmatchapi.RegisterRoutes(v1, mailmatchMod)
 		mailmatchapi.RegisterAdminRoutes(v1, mailmatchMod, iamSessionFetcher, iamMod.PermissionChecker)
 
-		registerOpenRoutes(v1, openapiMod, coreMod, billingMod, tradeMod, iamMod.PermissionChecker)
+		registerOpenRoutes(v1, openapiMod, coreMod, billingMod, tradeMod, iamMod.PermissionChecker, p.Redis)
 
 		// Dashboard module (read-only console analytics; self-contained raw-SQL
 		// aggregates over orders, code receipts, wallets, projects and users).

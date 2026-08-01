@@ -36,6 +36,7 @@ import {
 import { resolveRouteAuthorizationRedirect } from "./lib/route-gate";
 import AppShell from "./components/layout/AppShell";
 import DailyCheckin from "./components/daily-checkin";
+import { cancelTurnstile } from "./components/auth/TurnstileGate";
 import {
   ROUTES_WITH_SIDEBAR,
   getSidebarRouteRequiredPermissions,
@@ -467,13 +468,16 @@ function RouteGate({ children }: { children: ReactNode }) {
 }
 
 function RootRouteLayout() {
+  const location = useLocation();
+  useEffect(() => () => cancelTurnstile(), [location.href]);
+
   const content = (
     <Suspense fallback={<Loading />}>
       <Outlet />
     </Suspense>
   );
 
-  if (useLocation().pathname === "/payment/return") return <><DailyCheckin />{content}</>;
+  if (location.pathname === "/payment/return") return <><DailyCheckin />{content}</>;
 
   return (
     <>

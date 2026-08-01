@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { requireTurnstile } from "@/components/auth/TurnstileGate";
 import { CardTable } from "@/components/semi/card-table";
 import { useAuth } from "@/context/auth-provider";
 import { useIsMobile } from "@/hooks/use-is-mobile";
@@ -118,7 +119,9 @@ function SupplierApplicationPanel() {
     }
     setSubmitting(true);
     try {
-      await createSupplierApplicationTicket(value);
+      const turnstileToken = await requireTurnstile("ticket_create");
+      if (!turnstileToken) return;
+      await createSupplierApplicationTicket(value, turnstileToken);
       setReason("");
       setSubmitted(true);
       Toast.success(t("Supplier application submitted."));
@@ -313,14 +316,27 @@ export default function FinanceCenter() {
           attempt = { amount, key: generateIdempotencyKey() };
           transferAttemptRef.current = attempt;
         }
-        const updatedWallet = await transferSupplierBalance(amount, attempt.key);
+        const turnstileToken = await requireTurnstile("supplier_transfer");
+        if (!turnstileToken) return;
+        const updatedWallet = await transferSupplierBalance(
+          amount,
+          attempt.key,
+          turnstileToken,
+        );
         setWallet(updatedWallet);
         Toast.success(t("Wallet transfer completed."));
         closeWithdrawal();
         void load();
         return;
       }
-      await createSupplierWithdrawal(withdrawAmount.trim(), note.trim(), paymentQrCode);
+      const turnstileToken = await requireTurnstile("supplier_withdrawal");
+      if (!turnstileToken) return;
+      await createSupplierWithdrawal(
+        withdrawAmount.trim(),
+        note.trim(),
+        paymentQrCode,
+        turnstileToken,
+      );
       Toast.success(t("Withdrawal submitted."));
       closeWithdrawal();
     } catch (error) {
