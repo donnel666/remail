@@ -34,3 +34,16 @@ func TestOrderProxyServersFixedVectorsAndWeights(t *testing.T) {
 	require.InDelta(t, 0.2, float64(first[11])/20000, 0.03)
 	require.InDelta(t, 0.2, float64(first[22])/20000, 0.03)
 }
+
+func TestTransactionRetryKeepsWaitingAfterProxySelectionContention(t *testing.T) {
+	attempts := 0
+	err := withTransactionRetry(func() error {
+		attempts++
+		if attempts <= proxySelectionRetryAttempts {
+			return errProxySelectionContended
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, proxySelectionRetryAttempts+1, attempts)
+}

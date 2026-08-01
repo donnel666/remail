@@ -720,6 +720,7 @@ func (r *ProxyRepo) AcquireResourceProxy(ctx context.Context, key string, ipVers
 	}
 	var selected *domain.Proxy
 	var failover *proxyServerFailover
+	selectionContentions := 0
 	err := withTransactionRetry(func() error {
 		selected = nil
 		failover = nil
@@ -729,6 +730,10 @@ func (r *ProxyRepo) AcquireResourceProxy(ctx context.Context, key string, ipVers
 			} else if bound != nil {
 				selected = bound
 				return nil
+			}
+			// Keep waiting for a concurrent binding without repeating inventory scans.
+			if selectionContentions >= proxySelectionRetryAttempts {
+				return errProxySelectionContended
 			}
 
 			servers, err := listEligibleProxyServers(ctx, tx, domain.ProxyPoolResource, ipVersion, now)
@@ -775,6 +780,7 @@ func (r *ProxyRepo) AcquireResourceProxy(ctx context.Context, key string, ipVers
 				if !hadSelectableProxy {
 					return domain.ErrProxyUnavailable
 				}
+				selectionContentions++
 				return errProxySelectionContended
 			}
 			bindingExpireAt := now.Add(bindingTTL)
@@ -1871,11 +1877,9 @@ func withTransactionRetry(fn func() error) error {
 		if err == nil {
 			return nil
 		}
-		if errors.Is(err, errProxySelectionContended) {
-			if attempt+1 >= proxySelectionRetryAttempts {
-				return err
-			}
-		} else if !errors.Is(err, errRetryProxyAcquire) && !isRetryableTransactionError(err) {
+		if !errors.Is(err, errRetryProxyAcquire) &&
+			!errors.Is(err, errProxySelectionContended) &&
+			!isRetryableTransactionError(err) {
 			return err
 		}
 		if attempt+1 >= transactionRetryAttempts {
