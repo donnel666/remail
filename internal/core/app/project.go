@@ -218,9 +218,10 @@ type ProjectMailRuleRequest struct {
 
 // ProjectUseCase handles project/product/rule commands.
 type ProjectUseCase struct {
-	projects    ProjectRepository
-	owners      OwnerQueryPort
-	historyScan func(context.Context, uint, string) error
+	projects            ProjectRepository
+	owners              OwnerQueryPort
+	historyScan         func(context.Context, uint, string) error
+	applicationNotifier func(context.Context, domain.Project, string) error
 }
 
 func NewProjectUseCase(projects ProjectRepository) *ProjectUseCase {
@@ -233,6 +234,10 @@ func (uc *ProjectUseCase) SetHistoryScan(scan func(context.Context, uint, string
 
 func (uc *ProjectUseCase) SetOwnerQueryPort(owners OwnerQueryPort) {
 	uc.owners = owners
+}
+
+func (uc *ProjectUseCase) SetApplicationNotifier(notify func(context.Context, domain.Project, string) error) {
+	uc.applicationNotifier = notify
 }
 
 func (uc *ProjectUseCase) List(ctx context.Context, filter ProjectListFilter, offset, limit int) (*ProjectListResult, error) {
@@ -400,6 +405,7 @@ func (uc *ProjectUseCase) Apply(ctx context.Context, applicantUserID uint, req C
 	if err := uc.projects.CreateWithLog(ctx, detail, log); err != nil {
 		return nil, err
 	}
+	uc.notifyApplication(ctx, detail.Project, requestID)
 	return detail, nil
 }
 
@@ -427,6 +433,7 @@ func (uc *ProjectUseCase) Resubmit(ctx context.Context, applicantUserID, project
 	if err := uc.projects.ResubmitWithLog(ctx, applicantUserID, detail, log); err != nil {
 		return nil, err
 	}
+	uc.notifyApplication(ctx, detail.Project, requestID)
 	return detail, nil
 }
 
@@ -548,6 +555,15 @@ func (uc *ProjectUseCase) scheduleHistoryScan(ctx context.Context, detail *domai
 	}
 	if err := uc.historyScan(context.WithoutCancel(ctx), detail.Project.ID, requestID); err != nil {
 		slog.Warn("project history scan enqueue failed", "project_id", detail.Project.ID, "request_id", requestID, "error", err)
+	}
+}
+
+func (uc *ProjectUseCase) notifyApplication(ctx context.Context, project domain.Project, requestID string) {
+	if uc.applicationNotifier == nil {
+		return
+	}
+	if err := uc.applicationNotifier(context.WithoutCancel(ctx), project, requestID); err != nil {
+		slog.Warn("project application notification failed", "project_id", project.ID, "request_id", requestID, "error", err)
 	}
 }
 

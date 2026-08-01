@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	coredomain "github.com/donnel666/remail/internal/core/domain"
 	iamdomain "github.com/donnel666/remail/internal/iam/domain"
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	"github.com/donnel666/remail/internal/platform"
@@ -380,6 +381,28 @@ func (m announcementMailer) PublishAnnouncements(ctx context.Context, announceme
 		}
 	}
 	return errors.Join(enqueueErrors...)
+}
+
+func (m announcementMailer) notifyProjectApplication(ctx context.Context, project coredomain.Project, requestID string) error {
+	if m.users == nil || m.delivery == nil || project.ID == 0 || project.ApplicantUserID == nil {
+		return nil
+	}
+	role, enabled := iamdomain.RoleSuperAdmin, true
+	users, err := m.users.ListByFilter(ctx, iamdomain.UserListFilter{Role: &role, Enabled: &enabled}, 0, -1)
+	if err != nil {
+		return fmt.Errorf("list super administrators for project application: %w", err)
+	}
+	var sendErrors []error
+	for _, user := range users {
+		if user.Role != iamdomain.RoleSuperAdmin || !user.IsActive() || strings.TrimSpace(user.Email) == "" {
+			continue
+		}
+		message := mailapp.ProjectApplicationMessage(user.Email, project.ID, *project.ApplicantUserID, project.Name, project.TargetPlatform, requestID)
+		if err := m.delivery.Send(ctx, message); err != nil {
+			sendErrors = append(sendErrors, fmt.Errorf("send project application notification to user %d: %w", user.ID, err))
+		}
+	}
+	return errors.Join(sendErrors...)
 }
 
 func registerSystemEmailTaskHandlers(mux *asynq.ServeMux, mailer announcementMailer) {

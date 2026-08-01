@@ -66,6 +66,29 @@ func BalanceWarningMessage(recipient, balance, threshold string, cycle uint64) d
 	)
 }
 
+func ProjectApplicationMessage(recipient string, projectID, applicantUserID uint, projectName, targetPlatform, eventID string) domain.OutboundMessage {
+	recipient = strings.TrimSpace(recipient)
+	details := []notificationDetail{
+		{Label: "项目 ID", Value: fmt.Sprint(projectID)},
+		{Label: "项目名称", Value: oneLine(projectName, 120)},
+		{Label: "目标平台", Value: oneLine(targetPlatform, 120)},
+		{Label: "申请人 ID", Value: fmt.Sprint(applicantUserID)},
+		{Label: "审批状态", Value: "待审批"},
+	}
+	return notificationMessage(
+		domain.PurposeSystemNotice,
+		messageDigest("project_application", recipient, projectID, applicantUserID, eventID),
+		recipient,
+		"ReMail 新项目申请待审批",
+		"新项目申请待审批",
+		"有用户提交了项目申请，请及时审批。",
+		notificationDetailsText(details),
+		notificationTableContentTemplate,
+		details,
+		"请登录管理后台，在项目管理中完成审批。",
+	)
+}
+
 func SystemLoadAlertMessage(recipient, hostname, episodeID string, threshold int, cpuPercent, memoryPercent float64, memoryValid bool, observedAt time.Time) domain.OutboundMessage {
 	recipient = strings.TrimSpace(recipient)
 	hostname = oneLine(hostname, 240)

@@ -162,6 +162,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		if err != nil {
 			return nil, cleanup, err
 		}
+		coreMod.ProjectUseCase.SetApplicationNotifier(announcementMail.notifyProjectApplication)
 		mailMod.SetMicrosoftCredentialPort(coreMod.MicrosoftCredentials)
 		coreMod.SetMicrosoftValidationBindingCommitPort(mailMod.ValidationBinding)
 		coreMod.SetBackgroundExecutionGate(p.BackgroundLoad)

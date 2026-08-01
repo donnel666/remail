@@ -198,6 +198,35 @@ func TestProjectUseCaseListEnrichesAdminProjectOwners(t *testing.T) {
 	require.Equal(t, "owner@example.com", result.Items[0].Owner.Email)
 }
 
+func TestProjectUseCaseNotifiesAfterApplyAndResubmit(t *testing.T) {
+	repo := &fakeProjectRepo{}
+	uc := NewProjectUseCase(repo)
+	var notified []domain.Project
+	uc.SetApplicationNotifier(func(_ context.Context, project domain.Project, _ string) error {
+		notified = append(notified, project)
+		return errors.New("mail queue unavailable")
+	})
+
+	req := CreateProjectRequest{
+		Name:           "GitHub",
+		TargetPlatform: "github.com",
+		AccessType:     "public",
+		MailRules: []ProjectMailRuleRequest{
+			{RuleType: "sender", Pattern: "noreply@github.com", Enabled: true},
+			{RuleType: "recipient", Pattern: "exact", Enabled: true},
+		},
+	}
+	created, err := uc.Apply(context.Background(), 7, req, "req-apply", "/v1/projects")
+	require.NoError(t, err)
+	require.Equal(t, uint(101), created.Project.ID)
+
+	resubmitted, err := uc.Resubmit(context.Background(), 7, 55, req, "req-resubmit", "/v1/projects/:projectId/resubmit")
+	require.NoError(t, err)
+	require.Equal(t, uint(55), resubmitted.Project.ID)
+	require.Len(t, notified, 2)
+	require.Equal(t, []uint{101, 55}, []uint{notified[0].ID, notified[1].ID})
+}
+
 func TestNormalizeOrderingAmountPreservesLedgerPrecision(t *testing.T) {
 	t.Parallel()
 

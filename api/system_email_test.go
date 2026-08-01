@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	coredomain "github.com/donnel666/remail/internal/core/domain"
 	iamdomain "github.com/donnel666/remail/internal/iam/domain"
 	maildomain "github.com/donnel666/remail/internal/mailtransport/domain"
 	"github.com/donnel666/remail/internal/platform"
@@ -80,6 +81,33 @@ func TestAnnouncementBroadcastHonorsActiveWindowAndGlobalSwitch(t *testing.T) {
 	runtimeconfig.Set("announcement_enabled", "false")
 	require.NoError(t, mailer.processAnnouncementBroadcast(context.Background(), announcementBroadcastTask{ID: future.ID, StartTime: future.StartTime}, now.Add(2*time.Hour)))
 	require.Len(t, delivery.messages, 1)
+}
+
+func TestProjectApplicationNotificationEmailsActiveSuperAdmins(t *testing.T) {
+	applicantID := uint(7)
+	users := &announcementRecipientStub{users: []iamdomain.User{
+		{ID: 1, Email: "root@example.com", Role: iamdomain.RoleSuperAdmin, Status: iamdomain.UserStatusActive},
+		{ID: 2, Email: "disabled@example.com", Role: iamdomain.RoleSuperAdmin, Status: iamdomain.UserStatusDisabled},
+		{ID: 3, Email: "admin@example.com", Role: iamdomain.RoleAdmin, Status: iamdomain.UserStatusActive},
+	}}
+	delivery := &announcementDeliveryStub{}
+	mailer := announcementMailer{users: users, delivery: delivery}
+
+	err := mailer.notifyProjectApplication(context.Background(), coredomain.Project{
+		ID:              42,
+		ApplicantUserID: &applicantID,
+		Name:            "GitHub",
+		TargetPlatform:  "github.com",
+	}, "request-1")
+
+	require.NoError(t, err)
+	require.Len(t, users.filters, 1)
+	require.Equal(t, iamdomain.RoleSuperAdmin, *users.filters[0].Role)
+	require.True(t, *users.filters[0].Enabled)
+	require.Len(t, delivery.messages, 1)
+	require.Equal(t, "root@example.com", delivery.messages[0].To)
+	require.Contains(t, delivery.messages[0].Subject, "项目申请")
+	require.Contains(t, delivery.messages[0].TextBody, "项目 ID：42")
 }
 
 func TestAnnouncementPublisherSchedulesFutureBroadcastAtStartTime(t *testing.T) {
