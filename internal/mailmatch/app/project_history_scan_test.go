@@ -56,7 +56,6 @@ func (s *projectHistoryJobsStub) RecordProjectHistoryFailure(context.Context, ui
 type projectHistoryMatchesStub struct {
 	scope        *HistoricalProjectScope
 	scopes       []HistoricalProjectScope
-	lockedScopes []HistoricalProjectScope
 	cleared      uint
 	clearProject uint
 }
@@ -73,16 +72,7 @@ func (s *projectHistoryMatchesStub) ListHistoricalProjectScopes(context.Context)
 	}
 	return []HistoricalProjectScope{*s.scope}, nil
 }
-func (s *projectHistoryMatchesStub) ListHistoricalProjectScopesForUpdate(context.Context) ([]HistoricalProjectScope, error) {
-	if s.lockedScopes != nil {
-		return s.lockedScopes, nil
-	}
-	return s.ListHistoricalProjectScopes(context.Background())
-}
 func (s *projectHistoryMatchesStub) FindHistoricalProjectScope(context.Context, uint) (*HistoricalProjectScope, error) {
-	return s.scope, nil
-}
-func (s *projectHistoryMatchesStub) FindHistoricalProjectScopeForUpdate(context.Context, uint) (*HistoricalProjectScope, error) {
 	return s.scope, nil
 }
 func (s *projectHistoryMatchesStub) ClearLegacyMicrosoftProjectHistory(_ context.Context, resourceID uint, projectID uint) error {

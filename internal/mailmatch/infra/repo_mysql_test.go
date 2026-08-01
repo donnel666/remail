@@ -822,7 +822,7 @@ INSERT INTO microsoft_allocations(
 	}
 }
 
-func TestHistoricalProjectScopeLockAndLegacyClearMySQL(t *testing.T) {
+func TestHistoricalProjectScopeReadAndLegacyClearMySQL(t *testing.T) {
 	db := newMailmatchMySQLTestDB(t)
 	seedMailmatchOrder(t, db, "OR_HISTORY_MATCH")
 	require.NoError(t, db.Exec(`
@@ -835,6 +835,16 @@ VALUES
 	require.NoError(t, err)
 	require.Len(t, scopes, 1)
 	require.Len(t, scopes[0].Rules, 2)
+	locker := db.Begin()
+	require.NoError(t, locker.Error)
+	var lockedRuleIDs []uint
+	require.NoError(t, locker.Raw("SELECT id FROM project_mail_rules WHERE project_id = ? FOR UPDATE", 10).Scan(&lockedRuleIDs).Error)
+	readCtx, cancelRead := context.WithTimeout(context.Background(), time.Second)
+	currentScopes, err := repo.ListHistoricalProjectScopes(readCtx)
+	cancelRead()
+	require.NoError(t, err, "historical scope reads must not wait on project rule write locks")
+	require.Equal(t, scopes, currentScopes)
+	require.NoError(t, locker.Rollback().Error)
 
 	first := time.Now().UTC().Add(-24 * time.Hour)
 	last := time.Now().UTC()
@@ -843,9 +853,9 @@ INSERT INTO microsoft_resource_project_matches(
     resource_id, project_id, first_matched_at, last_matched_at, evidence_count, last_scanned_at
 ) VALUES (100, 10, ?, ?, 1, ?)`, first, last, last).Error)
 	require.NoError(t, repo.WithTx(context.Background(), func(txCtx context.Context) error {
-		lockedScopes, err := repo.ListHistoricalProjectScopesForUpdate(txCtx)
+		currentScopes, err := repo.ListHistoricalProjectScopes(txCtx)
 		require.NoError(t, err)
-		require.Equal(t, scopes, lockedScopes)
+		require.Equal(t, scopes, currentScopes)
 		return repo.ClearLegacyMicrosoftProjectHistory(txCtx, 100, 10)
 	}))
 

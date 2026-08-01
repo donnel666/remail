@@ -5,34 +5,21 @@ import (
 	"fmt"
 
 	"github.com/donnel666/remail/internal/mailmatch/app"
-	"gorm.io/gorm/clause"
 )
 
 func (r *Repo) ListHistoricalProjectScopes(ctx context.Context) ([]app.HistoricalProjectScope, error) {
-	return r.listHistoricalProjectScopes(ctx, 0, false)
-}
-
-func (r *Repo) ListHistoricalProjectScopesForUpdate(ctx context.Context) ([]app.HistoricalProjectScope, error) {
-	return r.listHistoricalProjectScopes(ctx, 0, true)
+	return r.listHistoricalProjectScopes(ctx, 0)
 }
 
 func (r *Repo) FindHistoricalProjectScope(ctx context.Context, projectID uint) (*app.HistoricalProjectScope, error) {
-	scopes, err := r.listHistoricalProjectScopes(ctx, projectID, false)
+	scopes, err := r.listHistoricalProjectScopes(ctx, projectID)
 	if err != nil || len(scopes) == 0 {
 		return nil, err
 	}
 	return &scopes[0], nil
 }
 
-func (r *Repo) FindHistoricalProjectScopeForUpdate(ctx context.Context, projectID uint) (*app.HistoricalProjectScope, error) {
-	scopes, err := r.listHistoricalProjectScopes(ctx, projectID, true)
-	if err != nil || len(scopes) == 0 {
-		return nil, err
-	}
-	return &scopes[0], nil
-}
-
-func (r *Repo) listHistoricalProjectScopes(ctx context.Context, projectID uint, lock bool) ([]app.HistoricalProjectScope, error) {
+func (r *Repo) listHistoricalProjectScopes(ctx context.Context, projectID uint) ([]app.HistoricalProjectScope, error) {
 	var rows []struct {
 		ProjectID               uint   `gorm:"column:project_id"`
 		ProductID               uint   `gorm:"column:product_id"`
@@ -53,9 +40,6 @@ func (r *Repo) listHistoricalProjectScopes(ctx context.Context, projectID uint, 
 		Where("p.status IN ?", []string{"listed", "delisted"})
 	if projectID > 0 {
 		query = query.Where("p.id = ?", projectID)
-	}
-	if lock {
-		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
 	}
 	if err := query.
 		Order("p.id ASC, pmr.id ASC").

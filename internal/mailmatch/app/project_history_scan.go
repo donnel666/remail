@@ -60,9 +60,7 @@ type ProjectHistoryScanRepository interface {
 type ProjectHistoryMatchRepository interface {
 	WithTx(ctx context.Context, fn func(context.Context) error) error
 	ListHistoricalProjectScopes(ctx context.Context) ([]HistoricalProjectScope, error)
-	ListHistoricalProjectScopesForUpdate(ctx context.Context) ([]HistoricalProjectScope, error)
 	FindHistoricalProjectScope(ctx context.Context, projectID uint) (*HistoricalProjectScope, error)
-	FindHistoricalProjectScopeForUpdate(ctx context.Context, projectID uint) (*HistoricalProjectScope, error)
 	ClearLegacyMicrosoftProjectHistory(ctx context.Context, resourceID uint, projectID uint) error
 }
 
@@ -286,11 +284,11 @@ func (uc *ProjectHistoryScanUseCase) scanValidatedMicrosoftHistory(ctx context.C
 	}
 	err = uc.matches.WithTx(ctx, func(txCtx context.Context) error {
 		if fetchErr == nil {
-			lockedScopes, err := uc.matches.ListHistoricalProjectScopesForUpdate(txCtx)
+			currentScopes, err := uc.matches.ListHistoricalProjectScopes(txCtx)
 			if err != nil {
 				return err
 			}
-			if !sameHistoricalProjectScopes(scopes, lockedScopes) {
+			if !sameHistoricalProjectScopes(scopes, currentScopes) {
 				return errProjectHistoryScopeChanged
 			}
 		}
@@ -425,11 +423,11 @@ func (uc *ProjectHistoryScanUseCase) scanProjectHistoryResource(
 		if err := uc.jobs.AssertProjectHistoryFence(txCtx, task.ProjectID, task.Generation); err != nil {
 			return err
 		}
-		lockedScope, err := uc.matches.FindHistoricalProjectScopeForUpdate(txCtx, task.ProjectID)
+		currentScope, err := uc.matches.FindHistoricalProjectScope(txCtx, task.ProjectID)
 		if err != nil {
 			return err
 		}
-		if lockedScope == nil || !sameHistoricalProjectScope(&scope, lockedScope) {
+		if currentScope == nil || !sameHistoricalProjectScope(&scope, currentScope) {
 			return errProjectHistoryScopeChanged
 		}
 		if len(matches) > 0 {
