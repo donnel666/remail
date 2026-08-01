@@ -373,7 +373,7 @@ Domain 创建接口只接受 canonical ASCII 域名：服务端必须统一 lowe
 
 - 同 `resourceId + email` 唯一，查询必须同时按 `resourceId + ownerUserId` 过滤。
 - 分配时优先复用已有 `normal` 邮箱。
-- 允许跨项目复用，同项目唯一由 BC-ALLOC 分配约束兜底。
+- 允许跨项目复用；同一项目历史交付过的实际邮箱地址不得再次分配，由 BC-ALLOC 历史查询和分配约束共同兜底。
 - 自建库存展示可用域名数量，同时管理端返回邮箱数量 `mailboxCount`：`not_sale/sale` 统计未退役 `GeneratedMailbox`，`binding` 统计 MailTransport 当前有效且归属该域名的 Microsoft 辅助绑定地址；禁止前端本地推算。
 - 已删除 Domain 被重新创建恢复时，原 `GeneratedMailbox` 派生邮箱池必须在同一事务中清空，避免跨 owner 继承旧生成邮箱；无 allocation 引用的行物理删除，被 released allocation 引用的行改为内部 `retired` 并从列表、计数、入站解析和后续分配中排除，`DomainAllocation.email` 继续保存历史交付快照；新的邮箱池由后续分配重新生成。
 

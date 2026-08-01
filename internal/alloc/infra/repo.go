@@ -580,8 +580,8 @@ func (r *Repo) ListGeneratedMailboxCandidates(ctx context.Context, projectID uin
 		`NOT EXISTS (
             SELECT 1
             FROM domain_allocations da
-            WHERE da.active_project_id = ?
-              AND da.active_mailbox_id = gm.id
+            WHERE da.project_id = ?
+              AND da.email = gm.email
         )`,
 	}
 	switch scope {
@@ -788,8 +788,8 @@ WHERE gm.id = ?
   AND NOT EXISTS (
       SELECT 1
       FROM domain_allocations da
-      WHERE da.active_project_id = ?
-        AND da.active_mailbox_id = gm.id
+      WHERE da.project_id = ?
+        AND da.email = gm.email
   )
 LIMIT 1
 FOR UPDATE SKIP LOCKED`, mailboxID, resourceID, projectID).Scan(&row).Error; err != nil {
@@ -867,8 +867,9 @@ SELECT EXISTS (
 	return matched, nil
 }
 
-func (r *Repo) IsDomainMailboxAllocated(ctx context.Context, projectID uint, mailboxID uint) (bool, error) {
-	if projectID == 0 || mailboxID == 0 {
+func (r *Repo) IsDomainEmailHistoricallyAllocated(ctx context.Context, projectID uint, email string) (bool, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if projectID == 0 || email == "" {
 		return false, domain.ErrInvalidAllocationRequest
 	}
 	var allocated bool
@@ -876,10 +877,10 @@ func (r *Repo) IsDomainMailboxAllocated(ctx context.Context, projectID uint, mai
 SELECT EXISTS (
     SELECT 1
     FROM domain_allocations
-    WHERE active_project_id = ? AND active_mailbox_id = ?
+    WHERE project_id = ? AND email = ?
     LIMIT 1
-)`, projectID, mailboxID).Scan(&allocated).Error; err != nil {
-		return false, fmt.Errorf("check domain mailbox allocation: %w", err)
+)`, projectID, email).Scan(&allocated).Error; err != nil {
+		return false, fmt.Errorf("check domain email history: %w", err)
 	}
 	return allocated, nil
 }
@@ -1073,8 +1074,8 @@ WHERE gm.resource_id = ?
   AND NOT EXISTS (
       SELECT 1
       FROM domain_allocations da
-      WHERE da.active_project_id = ?
-        AND da.active_mailbox_id = gm.id
+      WHERE da.project_id = ?
+        AND da.email = gm.email
   )
 ORDER BY gm.last_allocated_at ASC, gm.id ASC
 LIMIT 1`, resourceID, projectID).Scan(&candidate).Error; err != nil {
@@ -1094,8 +1095,8 @@ WHERE gm.id = ?
   AND NOT EXISTS (
       SELECT 1
       FROM domain_allocations da
-      WHERE da.active_project_id = ?
-        AND da.active_mailbox_id = gm.id
+      WHERE da.project_id = ?
+        AND da.email = gm.email
   )
 LIMIT 1
 FOR UPDATE SKIP LOCKED`, candidate.ID, resourceID, projectID).Scan(&locked).Error; err != nil {

@@ -1591,11 +1591,11 @@ func (uc *UseCase) tryDomainCandidate(ctx context.Context, cmd AllocateCommand, 
 		if mailbox == nil {
 			continue
 		}
-		allocated, err := uc.repo.IsDomainMailboxAllocated(ctx, config.ProjectID, mailbox.ID)
+		historicallyAllocated, err := uc.repo.IsDomainEmailHistoricallyAllocated(ctx, config.ProjectID, mailbox.Email)
 		if err != nil {
 			return nil, err
 		}
-		if allocated {
+		if historicallyAllocated {
 			continue
 		}
 		return uc.createDomainAllocation(ctx, cmd, config, candidate.ResourceID, mailbox.ID, mailbox.Email, now, &dailyUsage)

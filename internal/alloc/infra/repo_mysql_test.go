@@ -802,7 +802,7 @@ func TestFindOrCreateGeneratedMailboxAssignsExpandedBucketMySQL(t *testing.T) {
 	require.Equal(t, coredomain.GeneratedMailboxBucket(mailbox.Email), bucket)
 }
 
-func TestGeneratedMailboxReuseUsesActiveColumnsMySQL(t *testing.T) {
+func TestGeneratedMailboxReuseSkipsProjectEmailHistoryMySQL(t *testing.T) {
 	db := newAllocMySQLTestDB(t)
 	seedAllocBase(t, db, "domain", 0, 0, 0)
 	seedDomainResources(t, db, 1, 4095, 1)
@@ -839,7 +839,34 @@ WHERE order_no = 'ord-active-generated'`).Error)
 	reusable, err = repo.FindReusableGeneratedMailbox(context.Background(), 10, 4095)
 	require.NoError(t, err)
 	require.NotNil(t, reusable)
-	require.Equal(t, uint(2047), reusable.ID)
+	require.Equal(t, uint(2048), reusable.ID)
+
+	require.NoError(t, db.Exec(`
+	UPDATE generated_mailboxes
+	SET email = '__retired_2047@invalid.local', status = 'retired'
+	WHERE id = 2047`).Error)
+	require.NoError(t, db.Exec(`
+	INSERT INTO generated_mailboxes(id, resource_id, owner_user_id, email, status, alloc_bucket)
+	VALUES (2049, 4095, 1, 'active@d4095.example.com', 'normal', 2047)`).Error)
+	require.NoError(t, db.Exec("UPDATE generated_mailboxes SET last_allocated_at = NOW() WHERE id = 2048").Error)
+
+	candidates, err = repo.ListGeneratedMailboxCandidates(context.Background(), 10, 2, domain.SupplyScopePublic, &bucket, 4, "")
+	require.NoError(t, err)
+	require.Empty(t, candidates)
+	reusable, err = repo.FindReusableGeneratedMailbox(context.Background(), 10, 4095)
+	require.NoError(t, err)
+	require.NotNil(t, reusable)
+	require.Equal(t, uint(2048), reusable.ID)
+	locked, err = repo.LockGeneratedMailboxCandidate(context.Background(), 2049, 4095, 10)
+	require.NoError(t, err)
+	require.Nil(t, locked)
+	historicallyAllocated, err := repo.IsDomainEmailHistoricallyAllocated(context.Background(), 10, "ACTIVE@d4095.example.com")
+	require.NoError(t, err)
+	require.True(t, historicallyAllocated)
+
+	locked, err = repo.LockGeneratedMailboxCandidate(context.Background(), 2049, 4095, 11)
+	require.NoError(t, err)
+	require.NotNil(t, locked)
 }
 
 func TestFindOrCreateMicrosoftAliasesDoNotReuseDisabledRowsMySQL(t *testing.T) {
@@ -1452,6 +1479,7 @@ VALUES (CURRENT_DATE(), 'microsoft', 1000, 'plus', 1)`).Error)
 		{"domain_allocations", "idx_domain_alloc_mailbox_resource"},
 		{"domain_allocations", "idx_domain_alloc_resource_created"},
 		{"domain_allocations", "idx_domain_alloc_email_status"},
+		{"domain_allocations", "idx_domain_alloc_email_project"},
 	} {
 		requireIndexExists(t, db, item.table, item.index)
 	}
@@ -1518,6 +1546,10 @@ VALUES (CURRENT_DATE(), 'microsoft', 1000, 'plus', 1)`).Error)
 	requireExplainUsesIndex(t, db,
 		"idx_domain_alloc_active_mailbox",
 		fmt.Sprintf("EXPLAIN SELECT 1 FROM domain_allocations FORCE INDEX (idx_domain_alloc_active_mailbox) WHERE active_project_id = 10 AND active_mailbox_id = %d LIMIT 1", activeMailboxID),
+	)
+	requireExplainUsesIndex(t, db,
+		"idx_domain_alloc_email_project",
+		"EXPLAIN SELECT 1 FROM domain_allocations FORCE INDEX (idx_domain_alloc_email_project) WHERE email = 'a@d2000.example.com' AND project_id = 10 LIMIT 1",
 	)
 }
 

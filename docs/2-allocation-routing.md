@@ -116,7 +116,7 @@ Domain 候选也分为两类：
 | `status` | `allocated/released` |
 | `createdAt/releasedAt` | 时间 |
 
-同一项目同一 `mailboxId` 只能存在一个 `allocated` 分配，允许跨项目复用。
+同一项目同一实际 `email` 只能创建一条分配事实，释放后、Domain 删除恢复导致 `mailboxId` 变化后也不得再次分配给该项目；允许跨项目复用。
 
 ### 2.4 `OrderGuard`
 
@@ -180,7 +180,7 @@ sequenceDiagram
     participant C as BC-CORE
     T->>A: allocate(projectProductId, orderNo)
     A->>C: 按 supplyScope 查询 normal + server online 自建资源
-    A->>C: 排除本项目已占用 mailboxId 后选择/创建自建生成邮箱
+    A->>C: 排除本项目历史已交付 email 后选择/创建自建生成邮箱
     A->>A: 创建 DomainAllocation
     A-->>T: allocationId + deliveryEmail
 ```
@@ -248,7 +248,7 @@ MySQL 没有 partial unique index，P1-I5 使用 generated column 表达 active 
 |----|------|
 | `allocation_order_guards` | `orderNo` 主键；allocation 子表通过 `(orderNo, guardType)` 复合外键指向 `(orderNo, type)`，保证一个订单只能进入 Microsoft 或 Domain 其中一种分配。 |
 | `microsoft_allocations` | active main 对 `resourceId` 唯一；active explicit alias 对 `explicitAliasId` 唯一；active dot 对 `projectId + dotAliasId` 唯一；active plus 对 `projectId + plusAliasId` 唯一。 |
-| `domain_allocations` | active domain 对 `projectId + mailboxId` 唯一。 |
+| `domain_allocations` | active domain 对 `projectId + mailboxId` 唯一；历史查询按 `projectId + email` 禁止同项目再次交付同一实际邮箱地址。 |
 
 补充约束：`microsoft_allocations/domain_allocations` 必须写入 `supplyScope=owned/public`，作为 Trade 计算订单实际应付金额的分配事实；`microsoft_allocations` 的显式别名、点别名和加号别名必须通过 `(aliasId, resourceId)` 复合外键确认归属同一个 Microsoft 主资源；`domain_allocations` 的生成邮箱必须通过 `(mailboxId, resourceId)` 复合外键确认归属同一个 Domain 资源；`productId + projectId` 也必须有复合外键确认商品属于该项目。`explicit_aliases.owner_user_id` 固定为首个超级管理员 `users.id=1`，且数据库拒绝任何非 1 的 owner；但显式别名的创建资格与供给范围解耦：`status=normal` 的私有主资源也会预创建别名，BC-ALLOC 仍按 alias 所属 `resource_id`、主资源的 `forSale + owner/buyer` 规则和 allocation 占用状态决定 `owned/public` 可用性，不把 alias owner 字段改造成新的供给过滤条件，也不因 alias 归超级管理员而把私有主资源变成公开供给。以上是数据库兜底，不替代领域层校验。
 

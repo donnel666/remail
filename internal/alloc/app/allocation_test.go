@@ -197,13 +197,16 @@ func TestCandidateRefreshThirdBusinessFailureBecomesAbnormal(t *testing.T) {
 
 type generatedMailboxRetryRepo struct {
 	Repository
-	candidate      DomainCandidate
-	reusable       *GeneratedMailboxCandidate
-	domainBuckets  []int
-	generatedLists int
-	calls          int
-	consumeCalls   int
-	domainCreates  int
+	candidate       DomainCandidate
+	reusable        *GeneratedMailboxCandidate
+	domainBuckets   []int
+	generatedLists  int
+	calls           int
+	historyChecks   int
+	historyEmails   []string
+	historicalFirst bool
+	consumeCalls    int
+	domainCreates   int
 }
 
 type allocationLockRepo struct {
@@ -287,7 +290,7 @@ func (*randomAllocationRepo) FindOrCreateGeneratedMailbox(context.Context, uint,
 	return &GeneratedMailboxCandidate{ID: 9, ResourceID: 2, Email: "random@example.com"}, nil
 }
 
-func (*randomAllocationRepo) IsDomainMailboxAllocated(context.Context, uint, uint) (bool, error) {
+func (*randomAllocationRepo) IsDomainEmailHistoricallyAllocated(context.Context, uint, string) (bool, error) {
 	return false, nil
 }
 
@@ -697,8 +700,10 @@ func (*generatedMailboxRetryRepo) EnsureDailyUsageAvailable(context.Context, str
 	return nil
 }
 
-func (*generatedMailboxRetryRepo) IsDomainMailboxAllocated(context.Context, uint, uint) (bool, error) {
-	return false, nil
+func (r *generatedMailboxRetryRepo) IsDomainEmailHistoricallyAllocated(_ context.Context, _ uint, email string) (bool, error) {
+	r.historyChecks++
+	r.historyEmails = append(r.historyEmails, email)
+	return r.historicalFirst && r.historyChecks == 1, nil
 }
 
 func (r *generatedMailboxRetryRepo) FindReusableGeneratedMailbox(context.Context, uint, uint) (*GeneratedMailboxCandidate, error) {
@@ -710,7 +715,7 @@ func (r *generatedMailboxRetryRepo) FindOrCreateGeneratedMailbox(_ context.Conte
 	if r.calls == 1 {
 		return nil, nil
 	}
-	return &GeneratedMailboxCandidate{ID: 7, Email: email}, nil
+	return &GeneratedMailboxCandidate{ID: uint(5 + r.calls), Email: email}, nil
 }
 
 func (r *generatedMailboxRetryRepo) CreateDomainAllocation(_ context.Context, allocation *domain.GeneratedMailboxAllocation) error {
@@ -972,5 +977,25 @@ func TestDomainAllocationTriesAnotherAddressAfterDisabledMailbox(t *testing.T) {
 	}
 	if repo.calls != 2 || result == nil {
 		t.Fatalf("generated mailbox attempts = %d, result = %#v; want two attempts and an allocation", repo.calls, result)
+	}
+}
+
+func TestDomainAllocationGeneratesAnotherAddressAfterProjectHistory(t *testing.T) {
+	repo := &generatedMailboxRetryRepo{
+		candidate:       DomainCandidate{ResourceID: 1, OwnerUserID: 2, Domain: "example.com", MailboxDailyLimit: 10},
+		historicalFirst: true,
+	}
+	result, err := NewUseCase(repo).tryDomainCandidate(
+		context.Background(),
+		AllocateCommand{OrderNo: "order-1", BuyerUserID: 3, SupplyScope: domain.SupplyScopeOwned, ensureOrderGuard: func(context.Context, domain.AllocationType) error { return nil }},
+		ProductAllocationConfig{ProjectID: 4, ProductID: 5},
+		repo.candidate,
+		time.Now().UTC(),
+	)
+	if err != nil || result == nil {
+		t.Fatalf("tryDomainCandidate() result = %#v, error = %v", result, err)
+	}
+	if repo.calls != 3 || repo.historyChecks != 2 || len(repo.historyEmails) != 2 || !strings.HasSuffix(repo.historyEmails[0], "@example.com") {
+		t.Fatalf("generated attempts/history checks/result = %d/%d/%#v; want 3/2/new mailbox", repo.calls, repo.historyChecks, result)
 	}
 }

@@ -371,7 +371,7 @@ type Repository interface {
 	AssertNoActiveAllocations(ctx context.Context, resourceIDs []uint) error
 
 	IsMicrosoftMailboxHistoricallyMatched(ctx context.Context, projectID uint, mailbox domain.MicrosoftMailbox, mailboxID uint) (bool, error)
-	IsDomainMailboxAllocated(ctx context.Context, projectID uint, mailboxID uint) (bool, error)
+	IsDomainEmailHistoricallyAllocated(ctx context.Context, projectID uint, email string) (bool, error)
 	FindReusableExplicitAlias(ctx context.Context, projectID uint, resourceID uint, emailSuffix string) (*AliasCandidate, error)
 	FindReusableDotAlias(ctx context.Context, projectID uint, resourceID uint) (*AliasCandidate, error)
 	FindReusablePlusAlias(ctx context.Context, projectID uint, resourceID uint) (*AliasCandidate, error)
