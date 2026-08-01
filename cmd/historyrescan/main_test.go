@@ -1,6 +1,11 @@
 package main
 
-import "testing"
+import (
+	"context"
+	"strings"
+	"testing"
+	"time"
+)
 
 func TestBatchRange(t *testing.T) {
 	tests := []struct {
@@ -21,5 +26,14 @@ func TestBatchRange(t *testing.T) {
 	}
 	if count := batchCount(345708, 100000); count != 4 {
 		t.Fatalf("batchCount = %d, want 4", count)
+	}
+}
+
+func TestRunRequiresManifestForAbnormalRecovery(t *testing.T) {
+	err := run(context.Background(), config{
+		batchSize: 1, chunkSize: 1, pollInterval: time.Second, restoreAbnormal: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "--restore-abnormal requires --manifest") {
+		t.Fatalf("run() error = %v, want manifest requirement", err)
 	}
 }

@@ -29,14 +29,16 @@ const (
 )
 
 type config struct {
-	apply        bool
-	batchSize    int
-	canarySize   int
-	chunkSize    int
-	operatorID   uint64
-	pollInterval time.Duration
-	statePath    string
-	runID        string
+	apply           bool
+	batchSize       int
+	canarySize      int
+	chunkSize       int
+	operatorID      uint64
+	pollInterval    time.Duration
+	statePath       string
+	runID           string
+	manifestPath    string
+	restoreAbnormal bool
 }
 
 type checkpoint struct {
@@ -99,6 +101,8 @@ func parseFlags() config {
 	flag.DurationVar(&cfg.pollInterval, "poll-interval", 30*time.Second, "batch progress polling interval")
 	flag.StringVar(&cfg.statePath, "state", "/state/history-rescan.json", "durable checkpoint path")
 	flag.StringVar(&cfg.runID, "run-id", "", "safe run identifier; generated when omitted")
+	flag.StringVar(&cfg.manifestPath, "manifest", "", "existing newline-delimited resource ID manifest")
+	flag.BoolVar(&cfg.restoreAbnormal, "restore-abnormal", false, "allow listed sellable abnormal resources to be rescanned")
 	flag.Parse()
 	return cfg
 }
@@ -106,6 +110,9 @@ func parseFlags() config {
 func run(ctx context.Context, cfg config) error {
 	if cfg.batchSize < 1 || cfg.batchSize > 100000 || cfg.canarySize < 0 || cfg.canarySize > cfg.batchSize || cfg.chunkSize < 1 || cfg.chunkSize > 5000 || cfg.pollInterval < time.Second {
 		return errors.New("invalid batch, canary, chunk, or poll configuration")
+	}
+	if cfg.restoreAbnormal && strings.TrimSpace(cfg.manifestPath) == "" {
+		return errors.New("--restore-abnormal requires --manifest")
 	}
 	dsn := strings.TrimSpace(os.Getenv("MYSQL_DSN"))
 	if dsn == "" {
@@ -146,7 +153,13 @@ func run(ctx context.Context, cfg config) error {
 		cfg.operatorID = state.OperatorID
 		log.Printf("resuming run=%s stage=%s batch=%d/%d candidates=%d", state.RunID, state.Stage, state.BatchIndex+1, batchCount(len(ids), state.BatchSize), len(ids))
 	} else {
-		ids, err = snapshotCandidates(ctx, conn)
+		manifestPath := strings.TrimSpace(cfg.manifestPath)
+		if manifestPath != "" {
+			ids, err = loadManifest(manifestPath)
+		} else {
+			ids, err = snapshotCandidates(ctx, conn)
+			manifestPath = cfg.statePath + ".ids"
+		}
 		if err != nil {
 			return err
 		}
@@ -164,9 +177,10 @@ func run(ctx context.Context, cfg config) error {
 		if err != nil {
 			return err
 		}
-		manifestPath := cfg.statePath + ".ids"
-		if err := saveManifest(manifestPath, ids); err != nil {
-			return err
+		if strings.TrimSpace(cfg.manifestPath) == "" {
+			if err := saveManifest(manifestPath, ids); err != nil {
+				return err
+			}
 		}
 		stage := stageBatchSubmit
 		if cfg.canarySize > 0 && len(ids) > 0 {
@@ -305,7 +319,7 @@ func run(ctx context.Context, cfg config) error {
 func submitRange(ctx context.Context, conn *sql.Conn, cfg config, state *checkpoint, ids []uint64, tag string, limit int, allowIdentifying bool) error {
 	for state.SubmitOffset < limit {
 		end := min(state.SubmitOffset+cfg.chunkSize, limit)
-		accounted, submitted, err := submitChunk(ctx, conn, ids[state.SubmitOffset:end], tag, state.OperatorID, allowIdentifying)
+		accounted, submitted, err := submitChunk(ctx, conn, ids[state.SubmitOffset:end], tag, state.OperatorID, allowIdentifying, cfg.restoreAbnormal)
 		if err != nil {
 			return err
 		}
@@ -341,7 +355,7 @@ func waitBatch(ctx context.Context, conn *sql.Conn, cfg config, state *checkpoin
 		log.Printf("reconciling missing history tasks run=%s pass=%d resources=%d", tag, state.ReconcilePass, len(result.RetryIDs))
 		for start := 0; start < len(result.RetryIDs); start += cfg.chunkSize {
 			end := min(start+cfg.chunkSize, len(result.RetryIDs))
-			if _, _, err := submitChunk(ctx, conn, result.RetryIDs[start:end], tag, state.OperatorID, true); err != nil {
+			if _, _, err := submitChunk(ctx, conn, result.RetryIDs[start:end], tag, state.OperatorID, true, cfg.restoreAbnormal); err != nil {
 				return false, reconciliation{}, err
 			}
 		}
@@ -360,7 +374,7 @@ func waitBatch(ctx context.Context, conn *sql.Conn, cfg config, state *checkpoin
 	return true, result, nil
 }
 
-func submitChunk(ctx context.Context, conn *sql.Conn, ids []uint64, tag string, operatorID uint64, allowIdentifying bool) (accounted int, submitted int, resultErr error) {
+func submitChunk(ctx context.Context, conn *sql.Conn, ids []uint64, tag string, operatorID uint64, allowIdentifying bool, restoreAbnormal bool) (accounted int, submitted int, resultErr error) {
 	if len(ids) == 0 {
 		return 0, 0, nil
 	}
@@ -400,6 +414,9 @@ func submitChunk(ctx context.Context, conn *sql.Conn, ids []uint64, tag string, 
 	if allowIdentifying {
 		statusPredicate = "((m.status = 'normal' AND m.for_sale = 1) OR m.status = 'identifying')"
 	}
+	if restoreAbnormal {
+		statusPredicate = "((m.status IN ('normal', 'abnormal') AND m.for_sale = 1) OR m.status = 'identifying')"
+	}
 	eligibleArgs := uint64Args(ids)
 	currentTaskPredicate := ""
 	if !allowIdentifying {
@@ -426,10 +443,20 @@ func submitChunk(ctx context.Context, conn *sql.Conn, ids []uint64, tag string, 
 	if len(eligible) > 0 {
 		eligiblePlaceholders := sqlPlaceholders(len(eligible))
 		eligibleArgs := uint64Args(eligible)
-		if _, err := tx.ExecContext(ctx, "UPDATE email_resources er JOIN microsoft_resources m ON m.id = er.id SET er.version = er.version + 1, er.updated_at = UTC_TIMESTAMP(3) WHERE er.id IN ("+eligiblePlaceholders+") AND m.status = 'normal'", eligibleArgs...); err != nil {
+		versionStatuses := "m.status = 'normal'"
+		if restoreAbnormal {
+			versionStatuses = "m.status IN ('normal', 'abnormal')"
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE email_resources er JOIN microsoft_resources m ON m.id = er.id SET er.version = er.version + 1, er.updated_at = UTC_TIMESTAMP(3) WHERE er.id IN ("+eligiblePlaceholders+") AND "+versionStatuses, eligibleArgs...); err != nil {
 			return 0, 0, fmt.Errorf("advance resource versions: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx, "UPDATE microsoft_resources SET status = 'identifying', updated_at = UTC_TIMESTAMP(3) WHERE id IN ("+eligiblePlaceholders+") AND status = 'normal' AND for_sale = 1", eligibleArgs...); err != nil {
+		statusUpdate := "status = 'normal' AND for_sale = 1"
+		resourceUpdates := "status = 'identifying', updated_at = UTC_TIMESTAMP(3)"
+		if restoreAbnormal {
+			statusUpdate = "status IN ('normal', 'abnormal') AND for_sale = 1"
+			resourceUpdates = "status = 'identifying', validation_failures = 0, last_safe_error = '', updated_at = UTC_TIMESTAMP(3)"
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE microsoft_resources SET "+resourceUpdates+" WHERE id IN ("+eligiblePlaceholders+") AND "+statusUpdate, eligibleArgs...); err != nil {
 			return 0, 0, fmt.Errorf("mark resources identifying: %w", err)
 		}
 		insertArgs := make([]any, 0, 3+len(eligible))
