@@ -45,6 +45,7 @@ export const RETENTION_KEYS = [
   "idempotency_key_retain_days",
   "mailmatch_ms_retain_days",
   "mailmatch_domain_retain_days",
+  "gmail_code_retain_days",
   "daily_usage_retain_days",
   "outbound_mail_retain_days",
   "inbound_mail_retain_days",

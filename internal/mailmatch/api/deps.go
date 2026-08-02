@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"time"
 
 	coreapp "github.com/donnel666/remail/internal/core/app"
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
@@ -26,6 +27,31 @@ type Module struct {
 	AdminMessages       *mailmatchapp.AdminMessageUseCase
 	BackgroundExecution BackgroundExecutionGate
 	resourceFetchRepo   *mailmatchinfra.ResourceFetchRepo
+	CodeOnlyPickup      CodeOnlyPickupPort
+}
+
+type CodeOnlyPickupCode struct {
+	Seq        int
+	Code       string
+	ReceivedAt time.Time
+}
+
+type CodeOnlyPickupResult struct {
+	Email         string
+	Codes         []CodeOnlyPickupCode
+	ReceivedCount int
+	MaxCodes      int
+	ExpiresAt     *time.Time
+}
+
+type CodeOnlyPickupPort interface {
+	ReadCodeOnlyPickup(ctx context.Context, email, token string) (*CodeOnlyPickupResult, bool, error)
+}
+
+func (m *Module) SetCodeOnlyPickup(port CodeOnlyPickupPort) {
+	if m != nil {
+		m.CodeOnlyPickup = port
+	}
 }
 
 func (m *Module) SetBackgroundExecutionGate(gate BackgroundExecutionGate) {

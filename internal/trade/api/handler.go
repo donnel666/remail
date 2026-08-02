@@ -162,6 +162,10 @@ func batchOrderItemError(err error) *OrderBatchItemErrorResponse {
 		return &OrderBatchItemErrorResponse{Code: "insufficient_balance", Message: "Insufficient balance."}
 	case errors.Is(err, domain.ErrInsufficientInventory):
 		return &OrderBatchItemErrorResponse{Code: "insufficient_inventory", Message: "Insufficient inventory."}
+	case errors.Is(err, domain.ErrUpstreamPriceProtected):
+		return &OrderBatchItemErrorResponse{Code: "upstream_price_protected", Message: "Order price is below the configured upstream margin floor."}
+	case errors.Is(err, domain.ErrUpstreamUnavailable):
+		return &OrderBatchItemErrorResponse{Code: "upstream_unavailable", Message: "Upstream Gmail supply is temporarily unavailable."}
 	case errors.Is(err, domain.ErrIdempotencyConflict):
 		return &OrderBatchItemErrorResponse{Code: "idempotency_conflict", Message: "Idempotency-Key conflicts with a different request."}
 	default:
@@ -211,6 +215,10 @@ func checkoutMetricResult(err error) string {
 		return "insufficient_balance"
 	case errors.Is(err, domain.ErrInsufficientInventory):
 		return "insufficient_inventory"
+	case errors.Is(err, domain.ErrUpstreamPriceProtected):
+		return "upstream_price_protected"
+	case errors.Is(err, domain.ErrUpstreamUnavailable):
+		return "upstream_unavailable"
 	case errors.Is(err, domain.ErrIdempotencyConflict):
 		return "idempotency_conflict"
 	default:
@@ -646,11 +654,21 @@ func orderResponse(result tradeapp.CheckoutResult) OrderResponse {
 	if order.AllocationType != nil {
 		allocationType = string(*order.AllocationType)
 	}
+	codes := make([]GmailCodeResponse, len(result.GmailCodes))
+	for i := range result.GmailCodes {
+		codes[i] = GmailCodeResponse{
+			Seq: result.GmailCodes[i].Seq, Code: result.GmailCodes[i].Code, ReceivedAt: result.GmailCodes[i].ReceivedAt,
+		}
+	}
 	switch {
 	case order.MicrosoftAllocID != nil:
 		allocationID = *order.MicrosoftAllocID
 	case order.DomainAllocID != nil:
 		allocationID = *order.DomainAllocID
+	case order.GmailSessionID != nil:
+		allocationID = *order.GmailSessionID
+	case order.GmailResourceID != nil:
+		allocationID = *order.GmailResourceID
 	}
 	return OrderResponse{
 		ID:                   order.ID,
@@ -682,6 +700,14 @@ func orderResponse(result tradeapp.CheckoutResult) OrderResponse {
 		HasDelivery:          result.HasDelivery,
 		VerificationCode:     result.VerificationCode,
 		LastMailReceivedAt:   result.LastMailReceivedAt,
+		ContentMode:          result.ContentMode,
+		Codes:                codes,
+		ReceivedCount:        result.ReceivedCount,
+		MaxCodes:             result.MaxCodes,
+		CodesExpireAt:        result.CodesExpireAt,
+		GmailPassword:        result.GmailPassword,
+		GmailTwoFactorSecret: result.GmailTwoFactorSecret,
+		GmailAppPassword:     result.GmailAppPassword,
 		ArchivedAt:           order.ArchivedAt,
 		CreatedAt:            order.CreatedAt,
 		UpdatedAt:            order.UpdatedAt,
@@ -721,6 +747,10 @@ func writeTradeError(c *gin.Context, err error) {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Insufficient balance.", "requestId": requestID})
 	case errors.Is(err, domain.ErrInsufficientInventory):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Insufficient inventory.", "requestId": requestID})
+	case errors.Is(err, domain.ErrUpstreamPriceProtected):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Order price is below the configured upstream margin floor.", "requestId": requestID})
+	case errors.Is(err, domain.ErrUpstreamUnavailable):
+		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "Upstream Gmail supply is temporarily unavailable.", "requestId": requestID})
 	case errors.Is(err, domain.ErrProjectUnavailable):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Project is not available for ordering.", "requestId": requestID})
 	case errors.Is(err, domain.ErrCheckoutBusy):

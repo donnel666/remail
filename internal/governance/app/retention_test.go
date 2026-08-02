@@ -77,6 +77,7 @@ func TestRetentionRunOnceDeletesInboundObjectsAndOrphans(t *testing.T) {
 	require.Empty(t, repo.inboundRows)
 	require.Equal(t, now.AddDate(0, 0, -3), repo.messageCutoffs["microsoft"])
 	require.Equal(t, now.AddDate(0, 0, -30), repo.messageCutoffs["domain"])
+	require.Equal(t, now.AddDate(0, 0, -3), repo.gmailCutoff)
 	for objectKey := range files.objects {
 		require.NotContains(t, objectKey, "/bulk-")
 	}
@@ -85,6 +86,7 @@ func TestRetentionRunOnceDeletesInboundObjectsAndOrphans(t *testing.T) {
 type retentionRepoStub struct {
 	inboundRows    map[uint64]string
 	messageCutoffs map[string]time.Time
+	gmailCutoff    time.Time
 	existingKeys   map[string]struct{}
 }
 
@@ -94,6 +96,11 @@ func (r *retentionRepoStub) DeleteIdempotencyKeysBefore(context.Context, time.Ti
 
 func (r *retentionRepoStub) DeleteMailmatchMessagesBefore(_ context.Context, before time.Time, resourceType string, _ int) (int64, error) {
 	r.messageCutoffs[resourceType] = before
+	return 0, nil
+}
+
+func (r *retentionRepoStub) RedactGmailCodesBefore(_ context.Context, before time.Time, _ int) (int64, error) {
+	r.gmailCutoff = before
 	return 0, nil
 }
 

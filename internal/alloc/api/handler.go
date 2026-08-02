@@ -152,10 +152,14 @@ func (h *Handler) GetUserProjectInventory(c *gin.Context) {
 	products := make([]ProjectProductInventoryTotalResponse, len(stats.Items))
 	for i := range stats.Items {
 		products[i] = ProjectProductInventoryTotalResponse{
-			ProductID:       stats.Items[i].ProductID,
-			TotalAvailable:  stats.Items[i].TotalAvailable,
-			PublicAvailable: stats.Items[i].PublicAvailable,
-			Suffixes:        productSuffixInventoryResponse(stats.Items[i].Suffixes),
+			ProductID:               stats.Items[i].ProductID,
+			TotalAvailable:          stats.Items[i].TotalAvailable,
+			PublicAvailable:         stats.Items[i].PublicAvailable,
+			CodeAvailable:           stats.Items[i].CodeAvailable,
+			CodePublicAvailable:     stats.Items[i].CodePublicAvailable,
+			PurchaseAvailable:       stats.Items[i].PurchaseAvailable,
+			PurchasePublicAvailable: stats.Items[i].PurchasePublicAvailable,
+			Suffixes:                productSuffixInventoryResponse(stats.Items[i].Suffixes),
 		}
 	}
 	c.JSON(http.StatusOK, ProjectInventoryTotalResponse{

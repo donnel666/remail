@@ -132,10 +132,14 @@ type InventoryStats struct {
 }
 
 type ProductInventoryTotal struct {
-	ProductID       uint
-	TotalAvailable  int64
-	PublicAvailable int64
-	Suffixes        []ProductInventorySuffixTotal
+	ProductID               uint
+	TotalAvailable          int64
+	PublicAvailable         int64
+	CodeAvailable           *int64
+	CodePublicAvailable     *int64
+	PurchaseAvailable       *int64
+	PurchasePublicAvailable *int64
+	Suffixes                []ProductInventorySuffixTotal
 }
 
 type ProductInventorySuffixTotal struct {
@@ -152,6 +156,12 @@ type ProjectProductInventoryTotals struct {
 	// has not completed yet. It makes every product/suffix a known zero without
 	// requiring synchronous aggregate SQL on a cache miss.
 	Cold bool
+}
+
+// ProductInventoryOverlay merges inventory owned outside Allocation into the
+// shared product snapshot used by every inventory endpoint.
+type ProductInventoryOverlay interface {
+	OverlayProductInventory(ctx context.Context, projectIDs []uint, snapshots map[uint]*ProjectProductInventoryTotals) error
 }
 
 type ProductInventoryAvailabilityRequest struct {

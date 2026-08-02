@@ -4288,7 +4288,9 @@ func TestCoreHandler_AdminProjectPriceDefaults(t *testing.T) {
 	var response ProjectPriceDefaultsResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 	require.Equal(t, "0.123456", response.Defaults[key])
-	require.Len(t, response.Defaults, 8)
+	require.Equal(t, "8", response.Defaults["default_project_gmail_code_price"])
+	require.Equal(t, "0", response.Defaults["default_project_gmail_purchase_price"])
+	require.Len(t, response.Defaults, 12)
 }
 
 func TestCoreHandler_AdminProjectsProductsLimitsRequestBody(t *testing.T) {

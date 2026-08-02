@@ -34,6 +34,10 @@ var projectPriceFallbacks = map[string]string{
 	"default_project_domain_code_supplier_price":        "40",
 	"default_project_domain_purchase_price":             "0",
 	"default_project_domain_purchase_supplier_price":    "0",
+	"default_project_gmail_code_price":                  "8",
+	"default_project_gmail_code_supplier_price":         "0",
+	"default_project_gmail_purchase_price":              "0",
+	"default_project_gmail_purchase_supplier_price":     "0",
 }
 
 func projectNameMaxValue() int {
@@ -124,6 +128,7 @@ type ProjectProductTypeFacets struct {
 	Microsoft int64
 	Domain    int64
 	Random    int64
+	Gmail     int64
 }
 
 type ProjectListFacets struct {
@@ -902,13 +907,18 @@ func normalizeProductRequests(requests []ProjectProductRequest, requireEnabled, 
 			product.DotWeight = 1
 			product.PlusWeight = 1
 		}
+		if product.Type == domain.ProductTypeGmail {
+			if product.CodeEnabled {
+				product.CodeWindowMinutes = 24 * 60
+			}
+		}
 		if product.CodeEnabled && product.CodeWindowMinutes <= 0 {
 			return nil, domain.ErrInvalidProduct
 		}
 		if product.PurchaseEnabled && (product.ActivationWindowMinutes <= 0 || product.WarrantyMinutes <= 0) {
 			return nil, domain.ErrInvalidProduct
 		}
-		if product.Type == domain.ProductTypeMicrosoft && product.MainWeight+product.DotWeight+product.PlusWeight <= 0 {
+		if (product.Type == domain.ProductTypeMicrosoft || product.Type == domain.ProductTypeGmail) && product.MainWeight+product.DotWeight+product.PlusWeight <= 0 {
 			return nil, domain.ErrInvalidProduct
 		}
 		if product.Type == domain.ProductTypeDomain {

@@ -73,6 +73,31 @@ describe("mergeOrderRuntimeState", () => {
 
     expect(merged.verificationCode).toBe("344992");
   });
+
+  it("keeps all received Gmail codes when an older order refresh arrives", () => {
+    const current = order({
+      codes: [
+        { code: "111111", receivedAt: "2026-07-10T10:01:00Z", seq: 1 },
+        { code: "222222", receivedAt: "2026-07-10T10:02:00Z", seq: 2 },
+      ],
+      contentMode: "code_only",
+      maxCodes: 3,
+      receivedCount: 2,
+    });
+
+    const merged = mergeOrderRuntimeState(
+      order({
+        codes: [{ code: "111111", receivedAt: "2026-07-10T10:01:00Z", seq: 1 }],
+        contentMode: "code_only",
+        maxCodes: 3,
+        receivedCount: 1,
+      }),
+      current,
+    );
+
+    expect(merged.codes).toEqual(current.codes);
+    expect(merged.receivedCount).toBe(2);
+  });
 });
 
 describe("shouldShowQuickFetchControl", () => {
@@ -100,6 +125,18 @@ describe("shouldShowQuickFetchControl", () => {
         }),
       ),
     ).toBe(true);
+  });
+
+  it("keeps Gmail code refresh available until all three codes arrive", () => {
+    const gmail = order({
+      contentMode: "code_only",
+      maxCodes: 3,
+      receivedCount: 1,
+      verificationCode: "123456",
+    });
+
+    expect(shouldShowQuickFetchControl(gmail)).toBe(true);
+    expect(shouldShowQuickFetchControl({ ...gmail, receivedCount: 3 })).toBe(false);
   });
 });
 

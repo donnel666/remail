@@ -386,6 +386,7 @@ type ProjectProductTypeFacetsResponse struct {
 	Microsoft int64 `json:"microsoft"`
 	Domain    int64 `json:"domain"`
 	Random    int64 `json:"random"`
+	Gmail     int64 `json:"gmail"`
 }
 
 // ProjectProductResponse is a product view under a project.
@@ -405,6 +406,10 @@ type ProjectProductResponse struct {
 	WarrantyMinutes         int                                     `json:"warrantyMinutes"`
 	TotalAvailable          *int64                                  `json:"totalAvailable,omitempty"`
 	PublicAvailable         *int64                                  `json:"publicAvailable,omitempty"`
+	CodeAvailable           *int64                                  `json:"codeAvailable,omitempty"`
+	CodePublicAvailable     *int64                                  `json:"codePublicAvailable,omitempty"`
+	PurchaseAvailable       *int64                                  `json:"purchaseAvailable,omitempty"`
+	PurchasePublicAvailable *int64                                  `json:"purchasePublicAvailable,omitempty"`
 	Suffixes                []ProjectProductSuffixInventoryResponse `json:"suffixes,omitempty"`
 	MainWeight              *int                                    `json:"mainWeight,omitempty"`
 	DotWeight               *int                                    `json:"dotWeight,omitempty"`
@@ -427,6 +432,10 @@ type ProjectProductSummaryResponse struct {
 	WarrantyMinutes         int                                     `json:"warrantyMinutes"`
 	TotalAvailable          int64                                   `json:"totalAvailable"`
 	PublicAvailable         int64                                   `json:"publicAvailable"`
+	CodeAvailable           *int64                                  `json:"codeAvailable,omitempty"`
+	CodePublicAvailable     *int64                                  `json:"codePublicAvailable,omitempty"`
+	PurchaseAvailable       *int64                                  `json:"purchaseAvailable,omitempty"`
+	PurchasePublicAvailable *int64                                  `json:"purchasePublicAvailable,omitempty"`
 	Suffixes                []ProjectProductSuffixInventoryResponse `json:"suffixes,omitempty"`
 }
 

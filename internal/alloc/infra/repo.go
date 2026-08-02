@@ -1682,7 +1682,7 @@ JOIN project_products pp ON pp.project_id = p.id
 			item.Suffixes, err = r.microsoftProductInventorySuffixTotals(ctx, projectID, row)
 		case coredomain.ProductTypeDomain:
 			item.Suffixes, err = r.domainProductInventorySuffixTotals(ctx)
-		case coredomain.ProductTypeRandom:
+		case coredomain.ProductTypeRandom, coredomain.ProductTypeGmail:
 		default:
 			return nil, domain.ErrProjectNotAllocatable
 		}

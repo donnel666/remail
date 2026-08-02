@@ -17,6 +17,7 @@ import (
 	billingapi "github.com/donnel666/remail/internal/billing/api"
 	coreapi "github.com/donnel666/remail/internal/core/api"
 	dashboardapi "github.com/donnel666/remail/internal/dashboard/api"
+	gmailapi "github.com/donnel666/remail/internal/gmail"
 	governanceapi "github.com/donnel666/remail/internal/governance/api"
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
@@ -71,6 +72,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 	taskMux := asynq.NewServeMux()
 	var mailMod *mailapi.MailTransportModule
 	var coreMod *coreapi.CoreModule
+	var gmailMod *gmailapi.Module
 	var loadAlerter *systemLoadAlerter
 	v1 := r.Group("/v1")
 	{
@@ -176,15 +178,27 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		// Allocation module (admin diagnostics and Trade-facing application port)
 		allocMod := allocapi.NewModule(p.DB, p.Redis, p.Asynq)
 		systemSettingsMod.SetRuntimeUpdateHook(func(ctx context.Context, settings []settingsdomain.Setting) error {
+			domainTLDChanged := false
+			upstreamChanged := false
 			for _, setting := range settings {
-				if strings.EqualFold(strings.TrimSpace(setting.Key), "domain_custom_tlds") {
-					if err := coreMod.ReindexDomainTLDs(ctx); err != nil {
-						return err
-					}
-					// Existing and newly listed projects are rediscovered by the
-					// backend inventory schedule.
-					return allocMod.UseCase.ScheduleInventoryRefresh(ctx)
+				key := strings.ToLower(strings.TrimSpace(setting.Key))
+				if key == "domain_custom_tlds" {
+					domainTLDChanged = true
 				}
+				if strings.HasPrefix(key, "smsbower_") {
+					upstreamChanged = true
+				}
+			}
+			if domainTLDChanged {
+				if err := coreMod.ReindexDomainTLDs(ctx); err != nil {
+					return err
+				}
+				if err := allocMod.UseCase.ScheduleInventoryRefresh(ctx); err != nil {
+					return err
+				}
+			}
+			if upstreamChanged && gmailMod != nil {
+				return gmailMod.Service.ScheduleSync(ctx)
 			}
 			return nil
 		})
@@ -223,8 +237,16 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		})
 		openapiapi.RegisterRoutes(v1, openapiMod, iamSessionFetcher, iamMod.PermissionChecker)
 
+		gmailMod = gmailapi.NewModule(p.DB, p.Asynq)
+		gmailMod.Service.SetNotifier(smsbowerAlertMailer{users: iamMod.Users, delivery: mailMod.DeliveryUseCase})
+		allocMod.UseCase.SetProductInventoryOverlay(gmailInventoryOverlay{gmail: gmailMod.Service})
+		gmailapi.RegisterRoutes(v1, gmailMod, iamSessionFetcher, iamMod.PermissionChecker)
+		cleanupFuncs = append(cleanupFuncs, gmailapi.RegisterTaskHandlers(taskMux, gmailMod.Service))
+
 		// Trade module (unified console/API Key checkout and order query).
 		tradeMod := tradeapi.NewModule(p.DB, coreMod.ProjectUseCase, billingMod.WalletUseCase, allocMod.UseCase, openapiMod.UseCase)
+		tradeMod.UseCase.SetGmailPorts(gmailMod.Service, gmailMod.Service)
+		gmailMod.Service.SetTrade(tradeMod.UseCase)
 		tradeMod.UseCase.SetOwnerLookupPort(orderOwnerDirectory{owners: iamMod.AdminResourceOwners})
 		tradeapi.RegisterRoutes(v1, tradeMod, iamSessionFetcher, iamMod.PermissionChecker)
 		cleanupFuncs = append(cleanupFuncs, tradeapi.StartLifecycleScanner(tradeMod))
@@ -250,6 +272,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 
 		// MailMatch module (order-scoped message cache, async fetch and matching).
 		mailmatchMod := mailmatchapi.NewModule(p.DB, fileStore, p.Redis, p.Asynq, proxyMod.ProxyUseCase, tradeMod.UseCase, coreMod.ValidationUseCase)
+		mailmatchMod.SetCodeOnlyPickup(gmailPickupAdapter{service: gmailMod.Service, tokens: openapiMod.UseCase})
 		mailmatchMod.SetMicrosoftCredentialPort(coreMod.MicrosoftCredentials)
 		mailmatchMod.SetBackgroundExecutionGate(p.BackgroundLoad)
 		coreMod.SetAdminResourceMaintenancePort(adminMicrosoftMaintenanceAdapter{

@@ -116,6 +116,23 @@ const initialOrderHasMore: Record<ServiceMode, boolean> = {
   purchase: false,
 };
 
+async function listAllPaidOrders(serviceMode: ServiceMode) {
+  const items: OrderResponse[] = [];
+  let afterId: number | undefined;
+  do {
+    const page = await listOrders({
+      afterId,
+      limit: 1000,
+      serviceMode,
+      status: "paid",
+    });
+    items.push(...page.items);
+    if (!page.hasNext || !page.nextAfterId || page.nextAfterId === afterId) break;
+    afterId = page.nextAfterId;
+  } while (afterId);
+  return items;
+}
+
 function toWorkbenchProject(
   project: ProjectItem,
   inventory?: ProjectInventoryTotalResponse,
@@ -151,15 +168,32 @@ function toWorkbenchProducts(
       ? "Microsoft"
       : product.type === "domain"
         ? "Domain"
+        : product.type === "gmail"
+          ? "Gmail"
         : "Random";
   const totalAvailable =
     inventory?.totalAvailable ?? product.totalAvailable ?? 0;
   const publicAvailable =
     inventory?.publicAvailable ?? product.publicAvailable ?? 0;
+  const codeAvailable =
+    inventory?.codeAvailable ?? product.codeAvailable ?? totalAvailable;
+  const codePublicAvailable =
+    inventory?.codePublicAvailable ??
+    product.codePublicAvailable ??
+    publicAvailable;
+  const purchaseAvailable =
+    inventory?.purchaseAvailable ??
+    product.purchaseAvailable ??
+    totalAvailable;
+  const purchasePublicAvailable =
+    inventory?.purchasePublicAvailable ??
+    product.purchasePublicAvailable ??
+    publicAvailable;
   const baseProduct: WorkbenchProduct = {
     activationWindowMinutes: product.activationWindowMinutes,
     codeEnabled: product.codeEnabled,
-    codeInventory: totalAvailable,
+    codeInventory: codeAvailable,
+    codePublicInventory: codePublicAvailable,
     codePrice: moneyToNumber(product.codePrice),
     codeWindowMinutes: product.codeWindowMinutes,
     emailSuffix: "",
@@ -167,10 +201,10 @@ function toWorkbenchProducts(
     label,
     productId: String(product.id),
     productType: product.type,
-    publicInventory: publicAvailable,
     projectId: String(projectId),
     purchaseEnabled: product.purchaseEnabled,
-    purchaseInventory: totalAvailable,
+    purchaseInventory: purchaseAvailable,
+    purchasePublicInventory: purchasePublicAvailable,
     purchasePrice: moneyToNumber(product.purchasePrice),
     suffix: label,
     warrantyHours: Math.max(1, Math.ceil(product.warrantyMinutes / 60)),
@@ -187,10 +221,11 @@ function toWorkbenchProducts(
           .map((suffix) => ({
             ...baseProduct,
             codeInventory: suffix.totalAvailable ?? 0,
+            codePublicInventory: suffix.publicAvailable ?? 0,
             emailSuffix: suffix.suffix,
             id: `${product.id}:${suffix.suffix}`,
-            publicInventory: suffix.publicAvailable ?? 0,
             purchaseInventory: suffix.totalAvailable ?? 0,
+            purchasePublicInventory: suffix.publicAvailable ?? 0,
             suffix: `@${suffix.suffix}`,
           }));
   return [baseProduct, ...suffixProducts];
@@ -216,11 +251,14 @@ function mergeProjectInventory(
       const publicAvailable = inventoryItem.publicAvailable ?? 0;
       const baseProduct: WorkbenchProduct = {
         ...product,
-        codeInventory: totalAvailable,
+        codeInventory: inventoryItem.codeAvailable ?? totalAvailable,
+        codePublicInventory:
+          inventoryItem.codePublicAvailable ?? publicAvailable,
         emailSuffix: "",
         id: product.productId,
-        publicInventory: publicAvailable,
-        purchaseInventory: totalAvailable,
+        purchaseInventory: inventoryItem.purchaseAvailable ?? totalAvailable,
+        purchasePublicInventory:
+          inventoryItem.purchasePublicAvailable ?? publicAvailable,
         suffix: product.label,
       };
       const suffixProducts =
@@ -235,10 +273,11 @@ function mergeProjectInventory(
               .map((suffix) => ({
                 ...baseProduct,
                 codeInventory: suffix.totalAvailable ?? 0,
+                codePublicInventory: suffix.publicAvailable ?? 0,
                 emailSuffix: suffix.suffix,
                 id: `${product.productId}:${suffix.suffix}`,
-                publicInventory: suffix.publicAvailable ?? 0,
                 purchaseInventory: suffix.totalAvailable ?? 0,
+                purchasePublicInventory: suffix.publicAvailable ?? 0,
                 suffix: `@${suffix.suffix}`,
               }));
       return [baseProduct, ...suffixProducts];
@@ -256,6 +295,9 @@ function toWorkbenchOrder(order: OrderResponse): WorkbenchOrder {
     afterSaleUntil:
       order.afterSaleUntil ?? order.receiveUntil ?? order.updatedAt,
     createdAt: order.createdAt,
+    codes: order.codes ?? [],
+    codesExpireAt: order.codesExpireAt ?? undefined,
+    contentMode: order.contentMode,
     deliveryEmail: order.deliveryEmail,
     hasDelivery: order.hasDelivery ?? false,
     id: String(order.id),
@@ -269,6 +311,8 @@ function toWorkbenchOrder(order: OrderResponse): WorkbenchOrder {
     productId: String(order.projectProductId),
     projectId: String(order.projectId),
     quantity: 1,
+    maxCodes: order.maxCodes ?? 0,
+    receivedCount: order.receivedCount ?? 0,
     receiveUntil:
       order.serviceMode === "code"
         ? (order.receiveUntil ?? undefined)
@@ -299,7 +343,31 @@ function toWorkbenchMessages(
   });
 }
 
+function pickupResultToOrderPatch(
+  result: OrderMailResponse,
+): Partial<WorkbenchOrder> {
+  if (result.contentMode !== "code_only") {
+    return { messages: toWorkbenchMessages(result.items) };
+  }
+  const codes = result.codes ?? [];
+  const latest = codes[codes.length - 1];
+  return {
+    codes,
+    codesExpireAt: result.expiresAt ?? undefined,
+    contentMode: "code_only",
+    hasDelivery: codes.length > 0,
+    lastMailReceivedAt: latest?.receivedAt,
+    maxCodes: result.maxCodes ?? 3,
+    messages: [],
+    receivedCount: result.receivedCount ?? codes.length,
+    verificationCode: latest?.code,
+  };
+}
+
 function orderServiceState(order: OrderResponse): ServiceState {
+  if (order.status === "paid") {
+    return "waiting_upstream";
+  }
   if (order.status === "completed") {
     return order.serviceMode === "code" ? "code_received" : "warranty_ended";
   }
@@ -329,7 +397,11 @@ function getProductInventory(
   inventoryScope: InventoryScope,
 ) {
   if (!product) return 0;
-  if (inventoryScope === "public_only") return product.publicInventory;
+  if (inventoryScope === "public_only") {
+    return serviceMode === "code"
+      ? product.codePublicInventory
+      : product.purchasePublicInventory;
+  }
   return serviceMode === "code"
     ? product.codeInventory
     : product.purchaseInventory;
@@ -559,13 +631,18 @@ export default function Dashboard() {
     const seq = (refreshOrdersSeqRef.current.get(mode) ?? 0) + 1;
     refreshOrdersSeqRef.current.set(mode, seq);
     try {
-      const list = await listOrders({
-        limit: orderPageLimit,
-        serviceMode: mode,
-        status: "active",
-      });
+      const [list, paid] = await Promise.all([
+        listOrders({
+          limit: orderPageLimit,
+          serviceMode: mode,
+          status: "active",
+        }),
+        listAllPaidOrders(mode),
+      ]);
       if (refreshOrdersSeqRef.current.get(mode) !== seq) return;
-      const nextOrders = list.items.map(toWorkbenchOrder);
+      const nextOrders = [...paid, ...list.items]
+        .sort((left, right) => right.id - left.id)
+        .map(toWorkbenchOrder);
       setOrderCursors((prev) => ({ ...prev, [mode]: list.nextAfterId }));
       setOrderHasMore((prev) => ({ ...prev, [mode]: list.hasNext }));
       setOrders((prev) => {
@@ -625,19 +702,7 @@ export default function Dashboard() {
     setOrders((prev) =>
       prev.map((item) =>
         item.orderNo === orderNo
-          ? {
-              ...detail,
-              hasDelivery: detail.hasDelivery || item.hasDelivery,
-              messages: item.messages,
-              lastFetchedAt:
-                detail.lastMailReceivedAt ?? item.lastFetchedAt,
-              lastMailReceivedAt:
-                detail.lastMailReceivedAt ?? item.lastMailReceivedAt,
-              verificationCode:
-                detail.hasDelivery
-                  ? detail.verificationCode
-                  : item.verificationCode,
-            }
+          ? mergeOrderRuntimeState(detail, item)
           : item,
       ),
     );
@@ -754,14 +819,14 @@ export default function Dashboard() {
         const result = await readPickupMail(target.deliveryEmail, target.token);
         if (fetchSeqRef.current.get(target.orderNo) !== seq) return;
 
-        const messages = toWorkbenchMessages(result.items);
+        const pickupPatch = pickupResultToOrderPatch(result);
         const lastFetchedAt =
           result.fetch?.lastReceivedAt ??
           result.fetch?.lastSuccessAt ??
           result.fetch?.lastSubmittedAt ??
           new Date().toISOString();
         let refreshedDetail: WorkbenchOrder | undefined;
-        if (messages.length > 0) {
+        if (result.items.length > 0 || (result.codes?.length ?? 0) > 0) {
           try {
             refreshedDetail = toWorkbenchOrder(await getOrder(target.orderNo));
           } catch {
@@ -773,18 +838,12 @@ export default function Dashboard() {
           prev.map((item) =>
             item.orderNo === target.orderNo
               ? {
-                  ...(refreshedDetail ?? item),
-                  messages,
-                  hasDelivery: refreshedDetail?.hasDelivery || item.hasDelivery,
+                  ...mergeOrderRuntimeState(
+                    { ...(refreshedDetail ?? item), ...pickupPatch, lastFetchedAt },
+                    item,
+                  ),
                   lastFetchedAt,
-                  lastMailReceivedAt:
-                    refreshedDetail?.lastMailReceivedAt ??
-                    item.lastMailReceivedAt,
-                  verificationCode: refreshedDetail?.hasDelivery
-                    ? refreshedDetail.verificationCode
-                    : item.verificationCode,
-                  serviceState:
-                    refreshedDetail?.serviceState ?? item.serviceState,
+                  messages: pickupPatch.messages ?? item.messages,
                 }
               : item,
           ),
@@ -859,10 +918,14 @@ export default function Dashboard() {
             ) {
               return order;
             }
-            const messages = toWorkbenchMessages(result.items);
+            const pickupPatch = pickupResultToOrderPatch(result);
+            const merged = mergeOrderRuntimeState(
+              { ...order, ...pickupPatch },
+              order,
+            );
             return {
-              ...order,
-              messages,
+              ...merged,
+              messages: pickupPatch.messages ?? order.messages,
               lastFetchedAt:
                 result.fetch?.lastReceivedAt ??
                 result.fetch?.lastSuccessAt ??
@@ -1020,6 +1083,7 @@ export default function Dashboard() {
           Boolean(mailClientOrder && shouldAutoFetchOrderMail(mailClientOrder))
         }
         email={mailClientParams?.email}
+        fetchEnabled={mailClientOrder?.contentMode !== "code_only"}
         fetchKey={mailClientParams?.orderNo}
         messages={mailClientOrder?.messages ?? []}
         onClose={() => setMailClientParams(null)}

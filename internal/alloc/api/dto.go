@@ -68,10 +68,14 @@ type ProjectInventoryTotalResponse struct {
 }
 
 type ProjectProductInventoryTotalResponse struct {
-	ProductID       uint                                    `json:"productId"`
-	TotalAvailable  int64                                   `json:"totalAvailable"`
-	PublicAvailable int64                                   `json:"publicAvailable"`
-	Suffixes        []ProjectProductSuffixInventoryResponse `json:"suffixes,omitempty"`
+	ProductID               uint                                    `json:"productId"`
+	TotalAvailable          int64                                   `json:"totalAvailable"`
+	PublicAvailable         int64                                   `json:"publicAvailable"`
+	CodeAvailable           *int64                                  `json:"codeAvailable,omitempty"`
+	CodePublicAvailable     *int64                                  `json:"codePublicAvailable,omitempty"`
+	PurchaseAvailable       *int64                                  `json:"purchaseAvailable,omitempty"`
+	PurchasePublicAvailable *int64                                  `json:"purchasePublicAvailable,omitempty"`
+	Suffixes                []ProjectProductSuffixInventoryResponse `json:"suffixes,omitempty"`
 }
 
 type ProjectProductSuffixInventoryResponse struct {

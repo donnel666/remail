@@ -54,6 +54,7 @@ export default function BatchDataSection({ options, onBulkSave }: SectionProps) 
         {field("幂等键保留天数", "idempotency_key_retain_days", 1, 3650)}
         {field("微软邮箱接码消息保留天数", "mailmatch_ms_retain_days", 1, 3650)}
         {field("域名邮箱接码消息保留天数", "mailmatch_domain_retain_days", 1, 3650)}
+        {field("Gmail 验证码保留天数", "gmail_code_retain_days", 1, 3650)}
         {field("每日用量记录保留天数", "daily_usage_retain_days", 1, 3650)}
         {field("外发邮件记录保留天数", "outbound_mail_retain_days", 1, 3650)}
         {field("入站邮件记录保留天数", "inbound_mail_retain_days", 1, 3650)}

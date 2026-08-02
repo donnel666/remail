@@ -45,6 +45,7 @@ export function productTypeLabel(type: string, t: (key: string) => string) {
   if (type === "microsoft") return t("Microsoft email");
   if (type === "domain") return t("Domain email");
   if (type === "random") return t("Random email");
+  if (type === "gmail") return t("Gmail email");
   return type;
 }
 
@@ -264,6 +265,7 @@ export function ApplyProjectModal({
           >
             <Select.Option value="microsoft">{t("Microsoft email")}</Select.Option>
             <Select.Option value="domain">{t("Domain email")}</Select.Option>
+            <Select.Option value="gmail">{t("Gmail email")}</Select.Option>
           </Select>
         </label>
 

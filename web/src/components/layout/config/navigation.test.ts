@@ -36,6 +36,14 @@ describe("admin navigation permissions", () => {
     expect(visiblePaths(["billing:wallet:read"])).toContain("/admin/finance");
   });
 
+  it("guards the Gmail resource page with resource read permission", () => {
+    expect(visiblePaths([])).not.toContain("/admin/gmail");
+    expect(visiblePaths(["core:resource:read"])).toContain("/admin/gmail");
+    expect(getSidebarRouteRequiredPermissions("/admin/gmail")).toEqual([
+      "core:resource:read",
+    ]);
+  });
+
   it("guards system monitoring with diagnostics read permission", () => {
     expect(visiblePaths([])).not.toContain("/admin/monitoring");
     expect(visiblePaths(["governance:log:read"])).toContain("/admin/monitoring");

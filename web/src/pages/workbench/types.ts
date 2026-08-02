@@ -10,9 +10,10 @@ export type OrderStatus =
   | "refunded"
   | "failed"
   | "closed";
-export type ProductType = "microsoft" | "domain" | "random";
+export type ProductType = "microsoft" | "domain" | "random" | "gmail";
 export type ServiceMode = "purchase" | "code";
 export type ServiceState =
+  | "waiting_upstream"
   | "waiting_mail"
   | "code_received"
   | "pending_activation"
@@ -39,6 +40,7 @@ export interface WorkbenchProduct {
   activationWindowMinutes: number;
   codeEnabled: boolean;
   codeInventory: number;
+  codePublicInventory: number;
   codePrice: number;
   codeWindowMinutes: number;
   emailSuffix: string;
@@ -46,10 +48,10 @@ export interface WorkbenchProduct {
   label: string;
   productId: string;
   productType: ProductType;
-  publicInventory: number;
   projectId: string;
   purchaseEnabled: boolean;
   purchaseInventory: number;
+  purchasePublicInventory: number;
   purchasePrice: number;
   suffix: string;
   warrantyHours: number;
@@ -67,11 +69,20 @@ export interface WorkbenchMessage {
   verificationCode?: string;
 }
 
+export interface WorkbenchCode {
+  code: string;
+  receivedAt: string;
+  seq: number;
+}
+
 export interface WorkbenchOrder {
   afterSaleUntil: string;
   activationUntil?: string;
   activatedAt?: string;
   createdAt: string;
+  codes?: WorkbenchCode[];
+  codesExpireAt?: string;
+  contentMode?: "code_only";
   deliveryEmail: string;
   hasDelivery: boolean;
   id: string;
@@ -85,6 +96,8 @@ export interface WorkbenchOrder {
   productId: string;
   projectId: string;
   quantity: number;
+  maxCodes?: number;
+  receivedCount?: number;
   receiveUntil?: string;
   serviceMode: ServiceMode;
   serviceState: ServiceState;

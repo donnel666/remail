@@ -421,6 +421,48 @@ func (e AdminDomainItemStatus) Valid() bool {
 	}
 }
 
+// Defines values for AdminGmailResourceImportRequestErrorStrategy.
+const (
+	AdminGmailResourceImportRequestErrorStrategyAbort AdminGmailResourceImportRequestErrorStrategy = "abort"
+	AdminGmailResourceImportRequestErrorStrategySkip  AdminGmailResourceImportRequestErrorStrategy = "skip"
+)
+
+// Valid indicates whether the value is a known member of the AdminGmailResourceImportRequestErrorStrategy enum.
+func (e AdminGmailResourceImportRequestErrorStrategy) Valid() bool {
+	switch e {
+	case AdminGmailResourceImportRequestErrorStrategyAbort:
+		return true
+	case AdminGmailResourceImportRequestErrorStrategySkip:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminGmailResourceStatus.
+const (
+	AdminGmailResourceStatusAvailable AdminGmailResourceStatus = "available"
+	AdminGmailResourceStatusDisabled  AdminGmailResourceStatus = "disabled"
+	AdminGmailResourceStatusLeased    AdminGmailResourceStatus = "leased"
+	AdminGmailResourceStatusSold      AdminGmailResourceStatus = "sold"
+)
+
+// Valid indicates whether the value is a known member of the AdminGmailResourceStatus enum.
+func (e AdminGmailResourceStatus) Valid() bool {
+	switch e {
+	case AdminGmailResourceStatusAvailable:
+		return true
+	case AdminGmailResourceStatusDisabled:
+		return true
+	case AdminGmailResourceStatusLeased:
+		return true
+	case AdminGmailResourceStatusSold:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AdminLogLevel.
 const (
 	AdminLogLevelError   AdminLogLevel = "error"
@@ -1492,6 +1534,144 @@ func (e GitHubPendingResponseProvider) Valid() bool {
 	}
 }
 
+// Defines values for GmailUpstreamActivationItemSource.
+const (
+	GmailUpstreamActivationItemSourceLocal    GmailUpstreamActivationItemSource = "local"
+	GmailUpstreamActivationItemSourceSmsbower GmailUpstreamActivationItemSource = "smsbower"
+)
+
+// Valid indicates whether the value is a known member of the GmailUpstreamActivationItemSource enum.
+func (e GmailUpstreamActivationItemSource) Valid() bool {
+	switch e {
+	case GmailUpstreamActivationItemSourceLocal:
+		return true
+	case GmailUpstreamActivationItemSourceSmsbower:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GmailUpstreamActivationItemStatus.
+const (
+	GmailUpstreamActivationItemStatusActive       GmailUpstreamActivationItemStatus = "active"
+	GmailUpstreamActivationItemStatusCancelled    GmailUpstreamActivationItemStatus = "cancelled"
+	GmailUpstreamActivationItemStatusCancelling   GmailUpstreamActivationItemStatus = "cancelling"
+	GmailUpstreamActivationItemStatusCompleted    GmailUpstreamActivationItemStatus = "completed"
+	GmailUpstreamActivationItemStatusCompleting   GmailUpstreamActivationItemStatus = "completing"
+	GmailUpstreamActivationItemStatusFailed       GmailUpstreamActivationItemStatus = "failed"
+	GmailUpstreamActivationItemStatusPending      GmailUpstreamActivationItemStatus = "pending"
+	GmailUpstreamActivationItemStatusProvisioning GmailUpstreamActivationItemStatus = "provisioning"
+	GmailUpstreamActivationItemStatusUnknown      GmailUpstreamActivationItemStatus = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the GmailUpstreamActivationItemStatus enum.
+func (e GmailUpstreamActivationItemStatus) Valid() bool {
+	switch e {
+	case GmailUpstreamActivationItemStatusActive:
+		return true
+	case GmailUpstreamActivationItemStatusCancelled:
+		return true
+	case GmailUpstreamActivationItemStatusCancelling:
+		return true
+	case GmailUpstreamActivationItemStatusCompleted:
+		return true
+	case GmailUpstreamActivationItemStatusCompleting:
+		return true
+	case GmailUpstreamActivationItemStatusFailed:
+		return true
+	case GmailUpstreamActivationItemStatusPending:
+		return true
+	case GmailUpstreamActivationItemStatusProvisioning:
+		return true
+	case GmailUpstreamActivationItemStatusUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GmailUpstreamMappingItemSource.
+const (
+	GmailUpstreamMappingItemSourceLocal    GmailUpstreamMappingItemSource = "local"
+	GmailUpstreamMappingItemSourceSmsbower GmailUpstreamMappingItemSource = "smsbower"
+)
+
+// Valid indicates whether the value is a known member of the GmailUpstreamMappingItemSource enum.
+func (e GmailUpstreamMappingItemSource) Valid() bool {
+	switch e {
+	case GmailUpstreamMappingItemSourceLocal:
+		return true
+	case GmailUpstreamMappingItemSourceSmsbower:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GmailUpstreamMappingRequestSource.
+const (
+	GmailUpstreamMappingRequestSourceLocal    GmailUpstreamMappingRequestSource = "local"
+	GmailUpstreamMappingRequestSourceSmsbower GmailUpstreamMappingRequestSource = "smsbower"
+)
+
+// Valid indicates whether the value is a known member of the GmailUpstreamMappingRequestSource enum.
+func (e GmailUpstreamMappingRequestSource) Valid() bool {
+	switch e {
+	case GmailUpstreamMappingRequestSourceLocal:
+		return true
+	case GmailUpstreamMappingRequestSourceSmsbower:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GmailUpstreamUnsafeReason.
+const (
+	InsufficientUpstreamBalance GmailUpstreamUnsafeReason = "insufficient_upstream_balance"
+	InvalidPrice                GmailUpstreamUnsafeReason = "invalid_price"
+	LocalSupplyNotConfigured    GmailUpstreamUnsafeReason = "local_supply_not_configured"
+	MarginBelowFloor            GmailUpstreamUnsafeReason = "margin_below_floor"
+	ModeDisabled                GmailUpstreamUnsafeReason = "mode_disabled"
+	OutOfStock                  GmailUpstreamUnsafeReason = "out_of_stock"
+	ProviderModeUnsupported     GmailUpstreamUnsafeReason = "provider_mode_unsupported"
+	QuoteStale                  GmailUpstreamUnsafeReason = "quote_stale"
+	RouteDisabled               GmailUpstreamUnsafeReason = "route_disabled"
+	RouteMissing                GmailUpstreamUnsafeReason = "route_missing"
+	ServiceInactive             GmailUpstreamUnsafeReason = "service_inactive"
+)
+
+// Valid indicates whether the value is a known member of the GmailUpstreamUnsafeReason enum.
+func (e GmailUpstreamUnsafeReason) Valid() bool {
+	switch e {
+	case InsufficientUpstreamBalance:
+		return true
+	case InvalidPrice:
+		return true
+	case LocalSupplyNotConfigured:
+		return true
+	case MarginBelowFloor:
+		return true
+	case ModeDisabled:
+		return true
+	case OutOfStock:
+		return true
+	case ProviderModeUnsupported:
+		return true
+	case QuoteStale:
+		return true
+	case RouteDisabled:
+		return true
+	case RouteMissing:
+		return true
+	case ServiceInactive:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ImportProxiesRequestPool.
 const (
 	ImportProxiesRequestPoolResource ImportProxiesRequestPool = "resource"
@@ -1671,19 +1851,19 @@ func (e MonitoringMetricSeriesType) Valid() bool {
 
 // Defines values for MonitoringStatus.
 const (
-	Degraded    MonitoringStatus = "degraded"
-	Healthy     MonitoringStatus = "healthy"
-	Unavailable MonitoringStatus = "unavailable"
+	MonitoringStatusDegraded    MonitoringStatus = "degraded"
+	MonitoringStatusHealthy     MonitoringStatus = "healthy"
+	MonitoringStatusUnavailable MonitoringStatus = "unavailable"
 )
 
 // Valid indicates whether the value is a known member of the MonitoringStatus enum.
 func (e MonitoringStatus) Valid() bool {
 	switch e {
-	case Degraded:
+	case MonitoringStatusDegraded:
 		return true
-	case Healthy:
+	case MonitoringStatusHealthy:
 		return true
-	case Unavailable:
+	case MonitoringStatusUnavailable:
 		return true
 	default:
 		return false
@@ -1692,8 +1872,10 @@ func (e MonitoringStatus) Valid() bool {
 
 // Defines values for OrderBatchItemErrorResponseCode.
 const (
-	OrderBatchItemErrorResponseCodeInsufficientBalance   OrderBatchItemErrorResponseCode = "insufficient_balance"
-	OrderBatchItemErrorResponseCodeInsufficientInventory OrderBatchItemErrorResponseCode = "insufficient_inventory"
+	OrderBatchItemErrorResponseCodeInsufficientBalance    OrderBatchItemErrorResponseCode = "insufficient_balance"
+	OrderBatchItemErrorResponseCodeInsufficientInventory  OrderBatchItemErrorResponseCode = "insufficient_inventory"
+	OrderBatchItemErrorResponseCodeUpstreamPriceProtected OrderBatchItemErrorResponseCode = "upstream_price_protected"
+	OrderBatchItemErrorResponseCodeUpstreamUnavailable    OrderBatchItemErrorResponseCode = "upstream_unavailable"
 )
 
 // Valid indicates whether the value is a known member of the OrderBatchItemErrorResponseCode enum.
@@ -1702,6 +1884,10 @@ func (e OrderBatchItemErrorResponseCode) Valid() bool {
 	case OrderBatchItemErrorResponseCodeInsufficientBalance:
 		return true
 	case OrderBatchItemErrorResponseCodeInsufficientInventory:
+		return true
+	case OrderBatchItemErrorResponseCodeUpstreamPriceProtected:
+		return true
+	case OrderBatchItemErrorResponseCodeUpstreamUnavailable:
 		return true
 	default:
 		return false
@@ -1732,9 +1918,25 @@ func (e OrderEventResponseOperatorType) Valid() bool {
 	}
 }
 
+// Defines values for OrderMailResponseContentMode.
+const (
+	OrderMailResponseContentModeCodeOnly OrderMailResponseContentMode = "code_only"
+)
+
+// Valid indicates whether the value is a known member of the OrderMailResponseContentMode enum.
+func (e OrderMailResponseContentMode) Valid() bool {
+	switch e {
+	case OrderMailResponseContentModeCodeOnly:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for OrderResponseAllocationType.
 const (
 	OrderResponseAllocationTypeDomain    OrderResponseAllocationType = "domain"
+	OrderResponseAllocationTypeGmail     OrderResponseAllocationType = "gmail"
 	OrderResponseAllocationTypeMicrosoft OrderResponseAllocationType = "microsoft"
 )
 
@@ -1742,6 +1944,8 @@ const (
 func (e OrderResponseAllocationType) Valid() bool {
 	switch e {
 	case OrderResponseAllocationTypeDomain:
+		return true
+	case OrderResponseAllocationTypeGmail:
 		return true
 	case OrderResponseAllocationTypeMicrosoft:
 		return true
@@ -1762,6 +1966,21 @@ func (e OrderResponseClientChannel) Valid() bool {
 	case ApiKey:
 		return true
 	case Console:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for OrderResponseContentMode.
+const (
+	OrderResponseContentModeCodeOnly OrderResponseContentMode = "code_only"
+)
+
+// Valid indicates whether the value is a known member of the OrderResponseContentMode enum.
+func (e OrderResponseContentMode) Valid() bool {
+	switch e {
+	case OrderResponseContentModeCodeOnly:
 		return true
 	default:
 		return false
@@ -1801,6 +2020,7 @@ func (e OrderResponseFailureCode) Valid() bool {
 // Defines values for OrderResponseProductType.
 const (
 	OrderResponseProductTypeDomain    OrderResponseProductType = "domain"
+	OrderResponseProductTypeGmail     OrderResponseProductType = "gmail"
 	OrderResponseProductTypeMicrosoft OrderResponseProductType = "microsoft"
 	OrderResponseProductTypeRandom    OrderResponseProductType = "random"
 )
@@ -1809,6 +2029,8 @@ const (
 func (e OrderResponseProductType) Valid() bool {
 	switch e {
 	case OrderResponseProductTypeDomain:
+		return true
+	case OrderResponseProductTypeGmail:
 		return true
 	case OrderResponseProductTypeMicrosoft:
 		return true
@@ -2038,6 +2260,7 @@ func (e ProjectBulkFilterAccessType) Valid() bool {
 // Defines values for ProjectBulkFilterProductType.
 const (
 	ProjectBulkFilterProductTypeDomain    ProjectBulkFilterProductType = "domain"
+	ProjectBulkFilterProductTypeGmail     ProjectBulkFilterProductType = "gmail"
 	ProjectBulkFilterProductTypeMicrosoft ProjectBulkFilterProductType = "microsoft"
 	ProjectBulkFilterProductTypeRandom    ProjectBulkFilterProductType = "random"
 )
@@ -2046,6 +2269,8 @@ const (
 func (e ProjectBulkFilterProductType) Valid() bool {
 	switch e {
 	case ProjectBulkFilterProductTypeDomain:
+		return true
+	case ProjectBulkFilterProductTypeGmail:
 		return true
 	case ProjectBulkFilterProductTypeMicrosoft:
 		return true
@@ -2203,6 +2428,7 @@ func (e ProjectProductStatus) Valid() bool {
 // Defines values for ProjectProductType.
 const (
 	ProjectProductTypeDomain    ProjectProductType = "domain"
+	ProjectProductTypeGmail     ProjectProductType = "gmail"
 	ProjectProductTypeMicrosoft ProjectProductType = "microsoft"
 	ProjectProductTypeRandom    ProjectProductType = "random"
 )
@@ -2211,6 +2437,8 @@ const (
 func (e ProjectProductType) Valid() bool {
 	switch e {
 	case ProjectProductTypeDomain:
+		return true
+	case ProjectProductTypeGmail:
 		return true
 	case ProjectProductTypeMicrosoft:
 		return true
@@ -2242,6 +2470,7 @@ func (e ProjectProductRequestStatus) Valid() bool {
 // Defines values for ProjectProductRequestType.
 const (
 	ProjectProductRequestTypeDomain    ProjectProductRequestType = "domain"
+	ProjectProductRequestTypeGmail     ProjectProductRequestType = "gmail"
 	ProjectProductRequestTypeMicrosoft ProjectProductRequestType = "microsoft"
 	ProjectProductRequestTypeRandom    ProjectProductRequestType = "random"
 )
@@ -2250,6 +2479,8 @@ const (
 func (e ProjectProductRequestType) Valid() bool {
 	switch e {
 	case ProjectProductRequestTypeDomain:
+		return true
+	case ProjectProductRequestTypeGmail:
 		return true
 	case ProjectProductRequestTypeMicrosoft:
 		return true
@@ -2281,6 +2512,7 @@ func (e ProjectProductSummaryStatus) Valid() bool {
 // Defines values for ProjectProductSummaryType.
 const (
 	ProjectProductSummaryTypeDomain    ProjectProductSummaryType = "domain"
+	ProjectProductSummaryTypeGmail     ProjectProductSummaryType = "gmail"
 	ProjectProductSummaryTypeMicrosoft ProjectProductSummaryType = "microsoft"
 	ProjectProductSummaryTypeRandom    ProjectProductSummaryType = "random"
 )
@@ -2289,6 +2521,8 @@ const (
 func (e ProjectProductSummaryType) Valid() bool {
 	switch e {
 	case ProjectProductSummaryTypeDomain:
+		return true
+	case ProjectProductSummaryTypeGmail:
 		return true
 	case ProjectProductSummaryTypeMicrosoft:
 		return true
@@ -2563,6 +2797,30 @@ func (e ResourceItemPurpose) Valid() bool {
 	case ResourceItemPurposeNotSale:
 		return true
 	case ResourceItemPurposeSale:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SMSBowerAccountStatusHealthStatus.
+const (
+	SMSBowerAccountStatusHealthStatusDegraded    SMSBowerAccountStatusHealthStatus = "degraded"
+	SMSBowerAccountStatusHealthStatusDisabled    SMSBowerAccountStatusHealthStatus = "disabled"
+	SMSBowerAccountStatusHealthStatusHealthy     SMSBowerAccountStatusHealthStatus = "healthy"
+	SMSBowerAccountStatusHealthStatusUnavailable SMSBowerAccountStatusHealthStatus = "unavailable"
+)
+
+// Valid indicates whether the value is a known member of the SMSBowerAccountStatusHealthStatus enum.
+func (e SMSBowerAccountStatusHealthStatus) Valid() bool {
+	switch e {
+	case SMSBowerAccountStatusHealthStatusDegraded:
+		return true
+	case SMSBowerAccountStatusHealthStatusDisabled:
+		return true
+	case SMSBowerAccountStatusHealthStatusHealthy:
+		return true
+	case SMSBowerAccountStatusHealthStatusUnavailable:
 		return true
 	default:
 		return false
@@ -3255,28 +3513,28 @@ func (e GetAdminProxyStatsParamsIp) Valid() bool {
 
 // Defines values for GetAdminProxyStatsParamsStatus.
 const (
-	GetAdminProxyStatsParamsStatusAbnormal GetAdminProxyStatsParamsStatus = "abnormal"
-	GetAdminProxyStatsParamsStatusChecking GetAdminProxyStatsParamsStatus = "checking"
-	GetAdminProxyStatsParamsStatusDisabled GetAdminProxyStatsParamsStatus = "disabled"
-	GetAdminProxyStatsParamsStatusExpired  GetAdminProxyStatsParamsStatus = "expired"
-	GetAdminProxyStatsParamsStatusNormal   GetAdminProxyStatsParamsStatus = "normal"
-	GetAdminProxyStatsParamsStatusPending  GetAdminProxyStatsParamsStatus = "pending"
+	Abnormal GetAdminProxyStatsParamsStatus = "abnormal"
+	Checking GetAdminProxyStatsParamsStatus = "checking"
+	Disabled GetAdminProxyStatsParamsStatus = "disabled"
+	Expired  GetAdminProxyStatsParamsStatus = "expired"
+	Normal   GetAdminProxyStatsParamsStatus = "normal"
+	Pending  GetAdminProxyStatsParamsStatus = "pending"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminProxyStatsParamsStatus enum.
 func (e GetAdminProxyStatsParamsStatus) Valid() bool {
 	switch e {
-	case GetAdminProxyStatsParamsStatusAbnormal:
+	case Abnormal:
 		return true
-	case GetAdminProxyStatsParamsStatusChecking:
+	case Checking:
 		return true
-	case GetAdminProxyStatsParamsStatusDisabled:
+	case Disabled:
 		return true
-	case GetAdminProxyStatsParamsStatusExpired:
+	case Expired:
 		return true
-	case GetAdminProxyStatsParamsStatusNormal:
+	case Normal:
 		return true
-	case GetAdminProxyStatsParamsStatusPending:
+	case Pending:
 		return true
 	default:
 		return false
@@ -3442,6 +3700,24 @@ func (e GetAdminTransactionsParamsDirection) Valid() bool {
 	case In:
 		return true
 	case Out:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DeleteAdminSMSBowerMappingParamsSource.
+const (
+	DeleteAdminSMSBowerMappingParamsSourceLocal    DeleteAdminSMSBowerMappingParamsSource = "local"
+	DeleteAdminSMSBowerMappingParamsSourceSmsbower DeleteAdminSMSBowerMappingParamsSource = "smsbower"
+)
+
+// Valid indicates whether the value is a known member of the DeleteAdminSMSBowerMappingParamsSource enum.
+func (e DeleteAdminSMSBowerMappingParamsSource) Valid() bool {
+	switch e {
+	case DeleteAdminSMSBowerMappingParamsSourceLocal:
+		return true
+	case DeleteAdminSMSBowerMappingParamsSourceSmsbower:
 		return true
 	default:
 		return false
@@ -3676,6 +3952,7 @@ func (e GetProjectsParamsAccessType) Valid() bool {
 // Defines values for GetProjectsParamsProductType.
 const (
 	GetProjectsParamsProductTypeDomain    GetProjectsParamsProductType = "domain"
+	GetProjectsParamsProductTypeGmail     GetProjectsParamsProductType = "gmail"
 	GetProjectsParamsProductTypeMicrosoft GetProjectsParamsProductType = "microsoft"
 	GetProjectsParamsProductTypeRandom    GetProjectsParamsProductType = "random"
 )
@@ -3684,6 +3961,8 @@ const (
 func (e GetProjectsParamsProductType) Valid() bool {
 	switch e {
 	case GetProjectsParamsProductTypeDomain:
+		return true
+	case GetProjectsParamsProductTypeGmail:
 		return true
 	case GetProjectsParamsProductTypeMicrosoft:
 		return true
@@ -3714,25 +3993,25 @@ func (e GetRechargesParamsScope) Valid() bool {
 
 // Defines values for GetRechargesParamsStatus.
 const (
-	Callback   GetRechargesParamsStatus = "callback"
-	Credited   GetRechargesParamsStatus = "credited"
-	Failed     GetRechargesParamsStatus = "failed"
-	Paying     GetRechargesParamsStatus = "paying"
-	Reconciled GetRechargesParamsStatus = "reconciled"
+	GetRechargesParamsStatusCallback   GetRechargesParamsStatus = "callback"
+	GetRechargesParamsStatusCredited   GetRechargesParamsStatus = "credited"
+	GetRechargesParamsStatusFailed     GetRechargesParamsStatus = "failed"
+	GetRechargesParamsStatusPaying     GetRechargesParamsStatus = "paying"
+	GetRechargesParamsStatusReconciled GetRechargesParamsStatus = "reconciled"
 )
 
 // Valid indicates whether the value is a known member of the GetRechargesParamsStatus enum.
 func (e GetRechargesParamsStatus) Valid() bool {
 	switch e {
-	case Callback:
+	case GetRechargesParamsStatusCallback:
 		return true
-	case Credited:
+	case GetRechargesParamsStatusCredited:
 		return true
-	case Failed:
+	case GetRechargesParamsStatusFailed:
 		return true
-	case Paying:
+	case GetRechargesParamsStatusPaying:
 		return true
-	case Reconciled:
+	case GetRechargesParamsStatusReconciled:
 		return true
 	default:
 		return false
@@ -3783,16 +4062,16 @@ func (e GetResourcesParamsPurpose) Valid() bool {
 
 // Defines values for PostResourceImportMultipartBodyErrorStrategy.
 const (
-	PostResourceImportMultipartBodyErrorStrategyAbort PostResourceImportMultipartBodyErrorStrategy = "abort"
-	PostResourceImportMultipartBodyErrorStrategySkip  PostResourceImportMultipartBodyErrorStrategy = "skip"
+	Abort PostResourceImportMultipartBodyErrorStrategy = "abort"
+	Skip  PostResourceImportMultipartBodyErrorStrategy = "skip"
 )
 
 // Valid indicates whether the value is a known member of the PostResourceImportMultipartBodyErrorStrategy enum.
 func (e PostResourceImportMultipartBodyErrorStrategy) Valid() bool {
 	switch e {
-	case PostResourceImportMultipartBodyErrorStrategyAbort:
+	case Abort:
 		return true
-	case PostResourceImportMultipartBodyErrorStrategySkip:
+	case Skip:
 		return true
 	default:
 		return false
@@ -4408,6 +4687,60 @@ type AdminDomainListResponse struct {
 type AdminDomainValidationResponse struct {
 	Queued int `json:"queued"`
 }
+
+// AdminGmailResourceFacets defines model for AdminGmailResourceFacets.
+type AdminGmailResourceFacets struct {
+	All       int64 `json:"all"`
+	Available int64 `json:"available"`
+	Disabled  int64 `json:"disabled"`
+	Leased    int64 `json:"leased"`
+	Sold      int64 `json:"sold"`
+}
+
+// AdminGmailResourceImportRequest defines model for AdminGmailResourceImportRequest.
+type AdminGmailResourceImportRequest struct {
+	// Content Write-only TXT content. Credential values are never returned.
+	Content       string                                        `json:"content"`
+	ErrorStrategy *AdminGmailResourceImportRequestErrorStrategy `json:"errorStrategy,omitempty"`
+}
+
+// AdminGmailResourceImportRequestErrorStrategy defines model for AdminGmailResourceImportRequest.ErrorStrategy.
+type AdminGmailResourceImportRequestErrorStrategy string
+
+// AdminGmailResourceImportResult defines model for AdminGmailResourceImportResult.
+type AdminGmailResourceImportResult struct {
+	Imported int `json:"imported"`
+	Invalid  int `json:"invalid"`
+	Skipped  int `json:"skipped"`
+	Total    int `json:"total"`
+	Updated  int `json:"updated"`
+}
+
+// AdminGmailResourceItem defines model for AdminGmailResourceItem.
+type AdminGmailResourceItem struct {
+	AppPasswordConfigured bool                     `json:"appPasswordConfigured"`
+	CreatedAt             time.Time                `json:"createdAt"`
+	Email                 openapi_types.Email      `json:"email"`
+	Id                    int                      `json:"id"`
+	LastCheckedAt         *time.Time               `json:"lastCheckedAt,omitempty"`
+	LastSafeError         *string                  `json:"lastSafeError,omitempty"`
+	PasswordConfigured    bool                     `json:"passwordConfigured"`
+	Status                AdminGmailResourceStatus `json:"status"`
+	TwoFactorConfigured   bool                     `json:"twoFactorConfigured"`
+	UpdatedAt             time.Time                `json:"updatedAt"`
+}
+
+// AdminGmailResourceList defines model for AdminGmailResourceList.
+type AdminGmailResourceList struct {
+	Facets AdminGmailResourceFacets `json:"facets"`
+	Items  []AdminGmailResourceItem `json:"items"`
+	Limit  int                      `json:"limit"`
+	Offset int                      `json:"offset"`
+	Total  int64                    `json:"total"`
+}
+
+// AdminGmailResourceStatus defines model for AdminGmailResourceStatus.
+type AdminGmailResourceStatus string
 
 // AdminInviteBulkRequest defines model for AdminInviteBulkRequest.
 type AdminInviteBulkRequest struct {
@@ -5959,6 +6292,177 @@ type GitHubPendingResponseIntent string
 // GitHubPendingResponseProvider defines model for GitHubPendingResponse.Provider.
 type GitHubPendingResponseProvider string
 
+// GmailCodeResponse defines model for GmailCodeResponse.
+type GmailCodeResponse struct {
+	Code       string    `json:"code"`
+	ReceivedAt time.Time `json:"receivedAt"`
+	Seq        int       `json:"seq"`
+}
+
+// GmailUpstreamActivationItem defines model for GmailUpstreamActivationItem.
+type GmailUpstreamActivationItem struct {
+	CompletedAt *time.Time `json:"completedAt,omitempty"`
+
+	// CostPoints Non-negative point amount with up to 6 decimal places.
+	CostPoints          NonNegativeLedgerAmountResponse   `json:"costPoints"`
+	CreatedAt           time.Time                         `json:"createdAt"`
+	Email               *openapi_types.Email              `json:"email,omitempty"`
+	ExpiresAt           *time.Time                        `json:"expiresAt,omitempty"`
+	Id                  int                               `json:"id"`
+	LastSafeError       *string                           `json:"lastSafeError,omitempty"`
+	OrderNo             string                            `json:"orderNo"`
+	ProjectId           int                               `json:"projectId"`
+	ProjectName         string                            `json:"projectName"`
+	ProviderServiceCode string                            `json:"providerServiceCode"`
+	ReceivedCount       int                               `json:"receivedCount"`
+	Source              GmailUpstreamActivationItemSource `json:"source"`
+	StartedAt           *time.Time                        `json:"startedAt,omitempty"`
+	Status              GmailUpstreamActivationItemStatus `json:"status"`
+}
+
+// GmailUpstreamActivationItemSource defines model for GmailUpstreamActivationItem.Source.
+type GmailUpstreamActivationItemSource string
+
+// GmailUpstreamActivationItemStatus defines model for GmailUpstreamActivationItem.Status.
+type GmailUpstreamActivationItemStatus string
+
+// GmailUpstreamActivationList defines model for GmailUpstreamActivationList.
+type GmailUpstreamActivationList struct {
+	Items  []GmailUpstreamActivationItem `json:"items"`
+	Limit  int                           `json:"limit"`
+	Offset int                           `json:"offset"`
+	Total  int64                         `json:"total"`
+}
+
+// GmailUpstreamFinanceBreakdown defines model for GmailUpstreamFinanceBreakdown.
+type GmailUpstreamFinanceBreakdown struct {
+	// Cost Non-negative point amount with up to 6 decimal places.
+	Cost NonNegativeLedgerAmountResponse `json:"cost"`
+	Key  string                          `json:"key"`
+	Name string                          `json:"name"`
+
+	// NetRevenue Non-negative point amount with up to 6 decimal places.
+	NetRevenue NonNegativeLedgerAmountResponse `json:"netRevenue"`
+	OrderCount int64                           `json:"orderCount"`
+
+	// Profit Signed point amount with up to 6 decimal places.
+	Profit LedgerAmountResponse `json:"profit"`
+}
+
+// GmailUpstreamFinanceOverview defines model for GmailUpstreamFinanceOverview.
+type GmailUpstreamFinanceOverview struct {
+	ActivationCount int64 `json:"activationCount"`
+
+	// ConservativeCost Non-negative point amount with up to 6 decimal places.
+	ConservativeCost NonNegativeLedgerAmountResponse `json:"conservativeCost"`
+
+	// ConservativeMarginRate Signed point amount with up to 6 decimal places.
+	ConservativeMarginRate LedgerAmountResponse `json:"conservativeMarginRate"`
+
+	// ConservativeProfit Signed point amount with up to 6 decimal places.
+	ConservativeProfit LedgerAmountResponse `json:"conservativeProfit"`
+
+	// NetRevenue Non-negative point amount with up to 6 decimal places.
+	NetRevenue   NonNegativeLedgerAmountResponse `json:"netRevenue"`
+	OneCodeCount int64                           `json:"oneCodeCount"`
+	OrderCount   int64                           `json:"orderCount"`
+
+	// Refunds Non-negative point amount with up to 6 decimal places.
+	Refunds NonNegativeLedgerAmountResponse `json:"refunds"`
+
+	// ReservedCost Non-negative point amount with up to 6 decimal places.
+	ReservedCost NonNegativeLedgerAmountResponse `json:"reservedCost"`
+
+	// Sales Non-negative point amount with up to 6 decimal places.
+	Sales NonNegativeLedgerAmountResponse `json:"sales"`
+
+	// SettledCost Non-negative point amount with up to 6 decimal places.
+	SettledCost    NonNegativeLedgerAmountResponse `json:"settledCost"`
+	ThreeCodeCount int64                           `json:"threeCodeCount"`
+	TwoCodeCount   int64                           `json:"twoCodeCount"`
+
+	// UnknownCost Non-negative point amount with up to 6 decimal places.
+	UnknownCost   NonNegativeLedgerAmountResponse `json:"unknownCost"`
+	ZeroCodeCount int64                           `json:"zeroCodeCount"`
+}
+
+// GmailUpstreamFinanceReport defines model for GmailUpstreamFinanceReport.
+type GmailUpstreamFinanceReport struct {
+	ByProject []GmailUpstreamFinanceBreakdown `json:"byProject"`
+	ByService []GmailUpstreamFinanceBreakdown `json:"byService"`
+	BySource  []GmailUpstreamFinanceBreakdown `json:"bySource"`
+	Overview  GmailUpstreamFinanceOverview    `json:"overview"`
+}
+
+// GmailUpstreamMappingItem defines model for GmailUpstreamMappingItem.
+type GmailUpstreamMappingItem struct {
+	CodeEnabled bool `json:"codeEnabled"`
+
+	// CodeMarginRate Signed point amount with up to 6 decimal places.
+	CodeMarginRate LedgerAmountResponse `json:"codeMarginRate"`
+
+	// CodePrice Non-negative point amount with up to 6 decimal places.
+	CodePrice        NonNegativeLedgerAmountResponse `json:"codePrice"`
+	CodeSafe         bool                            `json:"codeSafe"`
+	CodeUnsafeReason *GmailUpstreamUnsafeReason      `json:"codeUnsafeReason,omitempty"`
+
+	// CostPoints Non-negative point amount with up to 6 decimal places.
+	CostPoints NonNegativeLedgerAmountResponse `json:"costPoints"`
+	Enabled    bool                            `json:"enabled"`
+
+	// MinimumCodeSalePrice Non-negative point amount with up to 6 decimal places.
+	MinimumCodeSalePrice NonNegativeLedgerAmountResponse `json:"minimumCodeSalePrice"`
+
+	// MinimumPurchaseSalePrice Non-negative point amount with up to 6 decimal places.
+	MinimumPurchaseSalePrice NonNegativeLedgerAmountResponse `json:"minimumPurchaseSalePrice"`
+	ProductId                int                             `json:"productId"`
+	ProjectId                int                             `json:"projectId"`
+	ProjectName              string                          `json:"projectName"`
+	ProviderServiceCode      *string                         `json:"providerServiceCode,omitempty"`
+	ProviderServiceName      *string                         `json:"providerServiceName,omitempty"`
+	PurchaseEnabled          bool                            `json:"purchaseEnabled"`
+
+	// PurchaseMarginRate Signed point amount with up to 6 decimal places.
+	PurchaseMarginRate LedgerAmountResponse `json:"purchaseMarginRate"`
+
+	// PurchasePrice Non-negative point amount with up to 6 decimal places.
+	PurchasePrice        NonNegativeLedgerAmountResponse `json:"purchasePrice"`
+	PurchaseSafe         bool                            `json:"purchaseSafe"`
+	PurchaseUnsafeReason *GmailUpstreamUnsafeReason      `json:"purchaseUnsafeReason,omitempty"`
+	Source               *GmailUpstreamMappingItemSource `json:"source,omitempty"`
+
+	// UpstreamPrice Non-negative point amount with up to 6 decimal places.
+	UpstreamPrice NonNegativeLedgerAmountResponse `json:"upstreamPrice"`
+}
+
+// GmailUpstreamMappingItemSource defines model for GmailUpstreamMappingItem.Source.
+type GmailUpstreamMappingItemSource string
+
+// GmailUpstreamMappingList defines model for GmailUpstreamMappingList.
+type GmailUpstreamMappingList struct {
+	Items []GmailUpstreamMappingItem `json:"items"`
+}
+
+// GmailUpstreamMappingRequest defines model for GmailUpstreamMappingRequest.
+type GmailUpstreamMappingRequest struct {
+	// CodeEnabled Whether this route participates in Gmail verification-code fulfillment.
+	CodeEnabled bool `json:"codeEnabled"`
+	Enabled     bool `json:"enabled"`
+
+	// ProviderServiceCode Required for SMSBower and empty for local supply.
+	ProviderServiceCode *string `json:"providerServiceCode,omitempty"`
+
+	// PurchaseEnabled Whether this route participates in Gmail purchase fulfillment.
+	PurchaseEnabled bool                              `json:"purchaseEnabled"`
+	Source          GmailUpstreamMappingRequestSource `json:"source"`
+}
+
+// GmailUpstreamMappingRequestSource defines model for GmailUpstreamMappingRequest.Source.
+type GmailUpstreamMappingRequestSource string
+
+// GmailUpstreamUnsafeReason defines model for GmailUpstreamUnsafeReason.
+type GmailUpstreamUnsafeReason string
+
 // GrantProjectAccessRequest defines model for GrantProjectAccessRequest.
 type GrantProjectAccessRequest struct {
 	UserId int `json:"userId"`
@@ -6421,9 +6925,20 @@ type OrderListResponse struct {
 
 // OrderMailResponse defines model for OrderMailResponse.
 type OrderMailResponse struct {
-	Fetch *FetchStateResponse   `json:"fetch,omitempty"`
-	Items []MailContentResponse `json:"items"`
+	Codes *[]GmailCodeResponse `json:"codes,omitempty"`
+
+	// ContentMode Present for Gmail code-only pickup responses.
+	ContentMode   *OrderMailResponseContentMode `json:"contentMode,omitempty"`
+	Email         *openapi_types.Email          `json:"email,omitempty"`
+	ExpiresAt     *time.Time                    `json:"expiresAt,omitempty"`
+	Fetch         *FetchStateResponse           `json:"fetch,omitempty"`
+	Items         []MailContentResponse         `json:"items"`
+	MaxCodes      *int                          `json:"maxCodes,omitempty"`
+	ReceivedCount *int                          `json:"receivedCount,omitempty"`
 }
+
+// OrderMailResponseContentMode Present for Gmail code-only pickup responses.
+type OrderMailResponseContentMode string
 
 // OrderOwnerSummary Safe buyer summary attached to admin site-wide order rows; omitted on the buyer's own order list.
 type OrderOwnerSummary struct {
@@ -6452,9 +6967,23 @@ type OrderResponse struct {
 	ApiKeyId       *int                         `json:"apiKeyId,omitempty"`
 	ArchivedAt     *time.Time                   `json:"archivedAt,omitempty"`
 	ClientChannel  OrderResponseClientChannel   `json:"clientChannel"`
-	CreatedAt      time.Time                    `json:"createdAt"`
-	DeliveryEmail  string                       `json:"deliveryEmail"`
-	FailureCode    *OrderResponseFailureCode    `json:"failureCode,omitempty"`
+	Codes          *[]GmailCodeResponse         `json:"codes,omitempty"`
+	CodesExpireAt  *time.Time                   `json:"codesExpireAt,omitempty"`
+
+	// ContentMode Gmail upstream orders expose verification codes only and never synthesize mail content.
+	ContentMode   *OrderResponseContentMode `json:"contentMode,omitempty"`
+	CreatedAt     time.Time                 `json:"createdAt"`
+	DeliveryEmail string                    `json:"deliveryEmail"`
+	FailureCode   *OrderResponseFailureCode `json:"failureCode,omitempty"`
+
+	// GmailAppPassword Local Gmail purchase application password. Returned only by checkout and authorized order-detail reads.
+	GmailAppPassword *string `json:"gmailAppPassword,omitempty"`
+
+	// GmailPassword Local Gmail purchase password. Returned only by checkout and authorized order-detail reads; omitted from order lists and resource APIs.
+	GmailPassword *string `json:"gmailPassword,omitempty"`
+
+	// GmailTwoFactorSecret Local Gmail purchase 2FA secret. Returned only by checkout and authorized order-detail reads.
+	GmailTwoFactorSecret *string `json:"gmailTwoFactorSecret,omitempty"`
 
 	// HasDelivery Whether the order already has a matched delivery. Purchase deliveries may have no verification code.
 	HasDelivery bool `json:"hasDelivery"`
@@ -6462,6 +6991,7 @@ type OrderResponse struct {
 
 	// LastMailReceivedAt Provider receive time of the delivered message.
 	LastMailReceivedAt *time.Time `json:"lastMailReceivedAt,omitempty"`
+	MaxCodes           *int       `json:"maxCodes,omitempty"`
 	OrderNo            string     `json:"orderNo"`
 
 	// Owner Safe buyer summary attached to admin site-wide order rows; omitted on the buyer's own order list.
@@ -6480,6 +7010,7 @@ type OrderResponse struct {
 	ProjectProductId int        `json:"projectProductId"`
 	ReceiveStartedAt *time.Time `json:"receiveStartedAt,omitempty"`
 	ReceiveUntil     *time.Time `json:"receiveUntil,omitempty"`
+	ReceivedCount    *int       `json:"receivedCount,omitempty"`
 
 	// RefundAmount Non-negative point amount with up to 6 decimal places.
 	RefundAmount         NonNegativeLedgerAmountResponse `json:"refundAmount"`
@@ -6502,6 +7033,9 @@ type OrderResponseAllocationType string
 
 // OrderResponseClientChannel defines model for OrderResponse.ClientChannel.
 type OrderResponseClientChannel string
+
+// OrderResponseContentMode Gmail upstream orders expose verification codes only and never synthesize mail content.
+type OrderResponseContentMode string
 
 // OrderResponseFailureCode defines model for OrderResponse.FailureCode.
 type OrderResponseFailureCode string
@@ -6843,11 +7377,13 @@ type ProjectPriceDefaultsResponse struct {
 
 // ProjectProduct defines model for ProjectProduct.
 type ProjectProduct struct {
-	ActivationWindowMinutes int  `json:"activationWindowMinutes"`
-	CodeEnabled             bool `json:"codeEnabled"`
+	ActivationWindowMinutes int    `json:"activationWindowMinutes"`
+	CodeAvailable           *int64 `json:"codeAvailable,omitempty"`
+	CodeEnabled             bool   `json:"codeEnabled"`
 
 	// CodePrice Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
-	CodePrice NonNegativeLedgerAmount `json:"codePrice"`
+	CodePrice           NonNegativeLedgerAmount `json:"codePrice"`
+	CodePublicAvailable *int64                  `json:"codePublicAvailable,omitempty"`
 
 	// CodeSupplierPrice Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	CodeSupplierPrice *NonNegativeLedgerAmount `json:"codeSupplierPrice,omitempty"`
@@ -6862,19 +7398,24 @@ type ProjectProduct struct {
 	MainWeight *int `json:"mainWeight,omitempty"`
 
 	// PlusWeight Internal allocation weight; only returned to project admins.
-	PlusWeight      *int `json:"plusWeight,omitempty"`
-	ProjectId       int  `json:"projectId"`
-	PurchaseEnabled bool `json:"purchaseEnabled"`
+	PlusWeight        *int   `json:"plusWeight,omitempty"`
+	ProjectId         int    `json:"projectId"`
+	PublicAvailable   *int64 `json:"publicAvailable,omitempty"`
+	PurchaseAvailable *int64 `json:"purchaseAvailable,omitempty"`
+	PurchaseEnabled   bool   `json:"purchaseEnabled"`
 
 	// PurchasePrice Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
-	PurchasePrice NonNegativeLedgerAmount `json:"purchasePrice"`
+	PurchasePrice           NonNegativeLedgerAmount `json:"purchasePrice"`
+	PurchasePublicAvailable *int64                  `json:"purchasePublicAvailable,omitempty"`
 
 	// PurchaseSupplierPrice Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
-	PurchaseSupplierPrice *NonNegativeLedgerAmount `json:"purchaseSupplierPrice,omitempty"`
-	Status                ProjectProductStatus     `json:"status"`
-	Type                  ProjectProductType       `json:"type"`
-	UpdatedAt             time.Time                `json:"updatedAt"`
-	WarrantyMinutes       int                      `json:"warrantyMinutes"`
+	PurchaseSupplierPrice *NonNegativeLedgerAmount  `json:"purchaseSupplierPrice,omitempty"`
+	Status                ProjectProductStatus      `json:"status"`
+	Suffixes              *[]ProductSuffixInventory `json:"suffixes,omitempty"`
+	TotalAvailable        *int64                    `json:"totalAvailable,omitempty"`
+	Type                  ProjectProductType        `json:"type"`
+	UpdatedAt             time.Time                 `json:"updatedAt"`
+	WarrantyMinutes       int                       `json:"warrantyMinutes"`
 }
 
 // ProjectProductStatus defines model for ProjectProduct.Status.
@@ -6885,10 +7426,14 @@ type ProjectProductType string
 
 // ProjectProductInventoryTotal defines model for ProjectProductInventoryTotal.
 type ProjectProductInventoryTotal struct {
-	ProductId       int                       `json:"productId"`
-	PublicAvailable int                       `json:"publicAvailable"`
-	Suffixes        *[]ProductSuffixInventory `json:"suffixes,omitempty"`
-	TotalAvailable  int                       `json:"totalAvailable"`
+	CodeAvailable           *int64                    `json:"codeAvailable,omitempty"`
+	CodePublicAvailable     *int64                    `json:"codePublicAvailable,omitempty"`
+	ProductId               int                       `json:"productId"`
+	PublicAvailable         int                       `json:"publicAvailable"`
+	PurchaseAvailable       *int64                    `json:"purchaseAvailable,omitempty"`
+	PurchasePublicAvailable *int64                    `json:"purchasePublicAvailable,omitempty"`
+	Suffixes                *[]ProductSuffixInventory `json:"suffixes,omitempty"`
+	TotalAvailable          int                       `json:"totalAvailable"`
 }
 
 // ProjectProductRequest defines model for ProjectProductRequest.
@@ -6925,22 +7470,26 @@ type ProjectProductRequestType string
 
 // ProjectProductSummary defines model for ProjectProductSummary.
 type ProjectProductSummary struct {
-	ActivationWindowMinutes int  `json:"activationWindowMinutes"`
-	CodeEnabled             bool `json:"codeEnabled"`
+	ActivationWindowMinutes int    `json:"activationWindowMinutes"`
+	CodeAvailable           *int64 `json:"codeAvailable,omitempty"`
+	CodeEnabled             bool   `json:"codeEnabled"`
 
 	// CodePrice Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
-	CodePrice         NonNegativeLedgerAmount `json:"codePrice"`
-	CodeWindowMinutes int                     `json:"codeWindowMinutes"`
-	Id                int                     `json:"id"`
+	CodePrice           NonNegativeLedgerAmount `json:"codePrice"`
+	CodePublicAvailable *int64                  `json:"codePublicAvailable,omitempty"`
+	CodeWindowMinutes   int                     `json:"codeWindowMinutes"`
+	Id                  int                     `json:"id"`
 
 	// PublicAvailable User-safe public inventory currently available for this product summary.
-	PublicAvailable int64 `json:"publicAvailable"`
-	PurchaseEnabled bool  `json:"purchaseEnabled"`
+	PublicAvailable   int64  `json:"publicAvailable"`
+	PurchaseAvailable *int64 `json:"purchaseAvailable,omitempty"`
+	PurchaseEnabled   bool   `json:"purchaseEnabled"`
 
 	// PurchasePrice Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
-	PurchasePrice NonNegativeLedgerAmount     `json:"purchasePrice"`
-	Status        ProjectProductSummaryStatus `json:"status"`
-	Suffixes      *[]ProductSuffixInventory   `json:"suffixes,omitempty"`
+	PurchasePrice           NonNegativeLedgerAmount     `json:"purchasePrice"`
+	PurchasePublicAvailable *int64                      `json:"purchasePublicAvailable,omitempty"`
+	Status                  ProjectProductSummaryStatus `json:"status"`
+	Suffixes                *[]ProductSuffixInventory   `json:"suffixes,omitempty"`
 
 	// TotalAvailable User-safe total currently available for this product summary. It is an allocation read model hint, not a reservation.
 	TotalAvailable  int64                     `json:"totalAvailable"`
@@ -6958,6 +7507,7 @@ type ProjectProductSummaryType string
 type ProjectProductTypeFacets struct {
 	All       int `json:"all"`
 	Domain    int `json:"domain"`
+	Gmail     int `json:"gmail"`
 	Microsoft int `json:"microsoft"`
 	Random    int `json:"random"`
 }
@@ -7378,6 +7928,43 @@ type ResourceValidationsResponse struct {
 
 	// Requested Number of explicit IDs accepted into Redis. Filter submissions return zero because matching is intentionally deferred.
 	Requested int `json:"requested"`
+}
+
+// SMSBowerAccountStatus defines model for SMSBowerAccountStatus.
+type SMSBowerAccountStatus struct {
+	// Balance Non-negative point amount with up to 6 decimal places.
+	Balance NonNegativeLedgerAmountResponse `json:"balance"`
+
+	// Configured Whether an API Key is stored. The key itself is never returned.
+	Configured          bool                              `json:"configured"`
+	ConsecutiveFailures int                               `json:"consecutiveFailures"`
+	Enabled             bool                              `json:"enabled"`
+	HealthStatus        SMSBowerAccountStatusHealthStatus `json:"healthStatus"`
+	LastSafeError       *string                           `json:"lastSafeError,omitempty"`
+	LastSuccessAt       *time.Time                        `json:"lastSuccessAt,omitempty"`
+	LastSyncedAt        *time.Time                        `json:"lastSyncedAt,omitempty"`
+}
+
+// SMSBowerAccountStatusHealthStatus defines model for SMSBowerAccountStatus.HealthStatus.
+type SMSBowerAccountStatusHealthStatus string
+
+// SMSBowerServiceItem defines model for SMSBowerServiceItem.
+type SMSBowerServiceItem struct {
+	Active bool   `json:"active"`
+	Code   string `json:"code"`
+
+	// GmailPrice Non-negative point amount with up to 6 decimal places.
+	GmailPrice     NonNegativeLedgerAmountResponse  `json:"gmailPrice"`
+	GmailStock     int                              `json:"gmailStock"`
+	LastSeenAt     time.Time                        `json:"lastSeenAt"`
+	Name           string                           `json:"name"`
+	PreviousPrice  *NonNegativeLedgerAmountResponse `json:"previousPrice,omitempty"`
+	PriceChangedAt *time.Time                       `json:"priceChangedAt,omitempty"`
+}
+
+// SMSBowerServiceList defines model for SMSBowerServiceList.
+type SMSBowerServiceList struct {
+	Items []SMSBowerServiceItem `json:"items"`
 }
 
 // ServerCreateResponse defines model for ServerCreateResponse.
@@ -8115,6 +8702,33 @@ type PostAdminDomainValidateParams struct {
 type GetAdminFinanceSummaryParams struct {
 	CreatedFrom *time.Time `form:"createdFrom,omitempty" json:"createdFrom,omitempty"`
 	CreatedTo   *time.Time `form:"createdTo,omitempty" json:"createdTo,omitempty"`
+}
+
+// GetAdminGmailResourcesParams defines parameters for GetAdminGmailResources.
+type GetAdminGmailResourcesParams struct {
+	// Offset Row offset used when afterId is absent.
+	Offset *OffsetQuery              `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *int                      `form:"limit,omitempty" json:"limit,omitempty"`
+	Search *string                   `form:"search,omitempty" json:"search,omitempty"`
+	Status *AdminGmailResourceStatus `form:"status,omitempty" json:"status,omitempty"`
+}
+
+// PostAdminGmailResourceImportParams defines parameters for PostAdminGmailResourceImport.
+type PostAdminGmailResourceImportParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminGmailResourceDisableParams defines parameters for PostAdminGmailResourceDisable.
+type PostAdminGmailResourceDisableParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminGmailResourceEnableParams defines parameters for PostAdminGmailResourceEnable.
+type PostAdminGmailResourceEnableParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // GetAdminInvitesParams defines parameters for GetAdminInvites.
@@ -8857,6 +9471,36 @@ type PostAdminTransactionReverseParams struct {
 	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
 }
 
+// GetAdminSMSBowerActivationsParams defines parameters for GetAdminSMSBowerActivations.
+type GetAdminSMSBowerActivationsParams struct {
+	// Offset Row offset used when afterId is absent.
+	Offset *OffsetQuery `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *int         `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// DeleteAdminSMSBowerMappingParams defines parameters for DeleteAdminSMSBowerMapping.
+type DeleteAdminSMSBowerMappingParams struct {
+	Source DeleteAdminSMSBowerMappingParamsSource `form:"source" json:"source"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// DeleteAdminSMSBowerMappingParamsSource defines parameters for DeleteAdminSMSBowerMapping.
+type DeleteAdminSMSBowerMappingParamsSource string
+
+// PutAdminSMSBowerMappingParams defines parameters for PutAdminSMSBowerMapping.
+type PutAdminSMSBowerMappingParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminSMSBowerSyncParams defines parameters for PostAdminSMSBowerSync.
+type PostAdminSMSBowerSyncParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // GetAdminUsersParams defines parameters for GetAdminUsers.
 type GetAdminUsersParams struct {
 	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
@@ -9553,6 +10197,9 @@ type PatchAdminDomainJSONRequestBody = PatchAdminDomainRequest
 // PostAdminDomainDnsStatusJSONRequestBody defines body for PostAdminDomainDnsStatus for application/json ContentType.
 type PostAdminDomainDnsStatusJSONRequestBody = AdminDomainDnsStatusRequest
 
+// PostAdminGmailResourceImportJSONRequestBody defines body for PostAdminGmailResourceImport for application/json ContentType.
+type PostAdminGmailResourceImportJSONRequestBody = AdminGmailResourceImportRequest
+
 // PostAdminInviteJSONRequestBody defines body for PostAdminInvite for application/json ContentType.
 type PostAdminInviteJSONRequestBody = AdminCreateInviteRequest
 
@@ -9672,6 +10319,9 @@ type PutAdminSettingJSONRequestBody = AdminSystemSettingRequest
 
 // PostAdminTicketMessageJSONRequestBody defines body for PostAdminTicketMessage for application/json ContentType.
 type PostAdminTicketMessageJSONRequestBody = ReplyTicketRequest
+
+// PutAdminSMSBowerMappingJSONRequestBody defines body for PutAdminSMSBowerMapping for application/json ContentType.
+type PutAdminSMSBowerMappingJSONRequestBody = GmailUpstreamMappingRequest
 
 // PostAdminUserJSONRequestBody defines body for PostAdminUser for application/json ContentType.
 type PostAdminUserJSONRequestBody = AdminCreateUserRequest
@@ -10533,6 +11183,18 @@ type ServerInterface interface {
 	// Finance summary
 	// (GET /v1/admin/finance/summary)
 	GetAdminFinanceSummary(c *gin.Context, params GetAdminFinanceSummaryParams)
+	// List locally managed Gmail accounts without credentials
+	// (GET /v1/admin/gmail/resources)
+	GetAdminGmailResources(c *gin.Context, params GetAdminGmailResourcesParams)
+	// Import local Gmail accounts as a write-only credential set
+	// (POST /v1/admin/gmail/resources/import)
+	PostAdminGmailResourceImport(c *gin.Context, params PostAdminGmailResourceImportParams)
+	// Disable an available local Gmail account
+	// (POST /v1/admin/gmail/resources/{resourceId}/disable)
+	PostAdminGmailResourceDisable(c *gin.Context, resourceId int, params PostAdminGmailResourceDisableParams)
+	// Enable an available local Gmail account
+	// (POST /v1/admin/gmail/resources/{resourceId}/enable)
+	PostAdminGmailResourceEnable(c *gin.Context, resourceId int, params PostAdminGmailResourceEnableParams)
 	// List invites
 	// (GET /v1/admin/invites)
 	GetAdminInvites(c *gin.Context, params GetAdminInvitesParams)
@@ -10806,6 +11468,30 @@ type ServerInterface interface {
 	// Reverse a transaction
 	// (POST /v1/admin/transactions/{id}/reverse)
 	PostAdminTransactionReverse(c *gin.Context, id int, params PostAdminTransactionReverseParams)
+	// List Gmail upstream activation sessions
+	// (GET /v1/admin/upstreams/smsbower/activations)
+	GetAdminSMSBowerActivations(c *gin.Context, params GetAdminSMSBowerActivationsParams)
+	// Get Gmail upstream revenue, cost and conservative profit
+	// (GET /v1/admin/upstreams/smsbower/finance)
+	GetAdminSMSBowerFinance(c *gin.Context)
+	// List Gmail project to upstream service mappings and margin safety
+	// (GET /v1/admin/upstreams/smsbower/mappings)
+	GetAdminSMSBowerMappings(c *gin.Context)
+	// Delete one Gmail project supply mapping source
+	// (DELETE /v1/admin/upstreams/smsbower/mappings/{projectId})
+	DeleteAdminSMSBowerMapping(c *gin.Context, projectId int, params DeleteAdminSMSBowerMappingParams)
+	// Create or update one Gmail project supply mapping
+	// (PUT /v1/admin/upstreams/smsbower/mappings/{projectId})
+	PutAdminSMSBowerMapping(c *gin.Context, projectId int, params PutAdminSMSBowerMappingParams)
+	// List the synchronized SMSBower mail service catalog
+	// (GET /v1/admin/upstreams/smsbower/services)
+	GetAdminSMSBowerServices(c *gin.Context)
+	// Get SMSBower account balance and health
+	// (GET /v1/admin/upstreams/smsbower/status)
+	GetAdminSMSBowerStatus(c *gin.Context)
+	// Queue an immediate SMSBower balance, service and price sync
+	// (POST /v1/admin/upstreams/smsbower/sync)
+	PostAdminSMSBowerSync(c *gin.Context, params PostAdminSMSBowerSyncParams)
 	// List all users (admin only)
 	// (GET /v1/admin/users)
 	GetAdminUsers(c *gin.Context, params GetAdminUsersParams)
@@ -13248,6 +13934,212 @@ func (siw *ServerInterfaceWrapper) GetAdminFinanceSummary(c *gin.Context) {
 	}
 
 	siw.Handler.GetAdminFinanceSummary(c, params)
+}
+
+// GetAdminGmailResources operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminGmailResources(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminGmailResourcesParams
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", c.Request.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter search: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", c.Request.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter status: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminGmailResources(c, params)
+}
+
+// PostAdminGmailResourceImport operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminGmailResourceImport(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminGmailResourceImportParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminGmailResourceImport(c, params)
+}
+
+// PostAdminGmailResourceDisable operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminGmailResourceDisable(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminGmailResourceDisableParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminGmailResourceDisable(c, resourceId, params)
+}
+
+// PostAdminGmailResourceEnable operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminGmailResourceEnable(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminGmailResourceEnableParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminGmailResourceEnable(c, resourceId, params)
 }
 
 // GetAdminInvites operation middleware
@@ -18454,6 +19346,264 @@ func (siw *ServerInterfaceWrapper) PostAdminTransactionReverse(c *gin.Context) {
 	siw.Handler.PostAdminTransactionReverse(c, id, params)
 }
 
+// GetAdminSMSBowerActivations operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminSMSBowerActivations(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminSMSBowerActivationsParams
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminSMSBowerActivations(c, params)
+}
+
+// GetAdminSMSBowerFinance operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminSMSBowerFinance(c *gin.Context) {
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminSMSBowerFinance(c)
+}
+
+// GetAdminSMSBowerMappings operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminSMSBowerMappings(c *gin.Context) {
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminSMSBowerMappings(c)
+}
+
+// DeleteAdminSMSBowerMapping operation middleware
+func (siw *ServerInterfaceWrapper) DeleteAdminSMSBowerMapping(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", c.Param("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteAdminSMSBowerMappingParams
+
+	// ------------- Required query parameter "source" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "source", c.Request.URL.Query(), &params.Source, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter source: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DeleteAdminSMSBowerMapping(c, projectId, params)
+}
+
+// PutAdminSMSBowerMapping operation middleware
+func (siw *ServerInterfaceWrapper) PutAdminSMSBowerMapping(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", c.Param("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PutAdminSMSBowerMappingParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PutAdminSMSBowerMapping(c, projectId, params)
+}
+
+// GetAdminSMSBowerServices operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminSMSBowerServices(c *gin.Context) {
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminSMSBowerServices(c)
+}
+
+// GetAdminSMSBowerStatus operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminSMSBowerStatus(c *gin.Context) {
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminSMSBowerStatus(c)
+}
+
+// PostAdminSMSBowerSync operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminSMSBowerSync(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminSMSBowerSyncParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminSMSBowerSync(c, params)
+}
+
 // GetAdminUsers operation middleware
 func (siw *ServerInterfaceWrapper) GetAdminUsers(c *gin.Context) {
 
@@ -23436,6 +24586,10 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/domains/:domainId/unpublish", wrapper.PostAdminDomainUnpublish)
 	router.POST(options.BaseURL+"/v1/admin/domains/:domainId/validate", wrapper.PostAdminDomainValidate)
 	router.GET(options.BaseURL+"/v1/admin/finance/summary", wrapper.GetAdminFinanceSummary)
+	router.GET(options.BaseURL+"/v1/admin/gmail/resources", wrapper.GetAdminGmailResources)
+	router.POST(options.BaseURL+"/v1/admin/gmail/resources/import", wrapper.PostAdminGmailResourceImport)
+	router.POST(options.BaseURL+"/v1/admin/gmail/resources/:resourceId/disable", wrapper.PostAdminGmailResourceDisable)
+	router.POST(options.BaseURL+"/v1/admin/gmail/resources/:resourceId/enable", wrapper.PostAdminGmailResourceEnable)
 	router.GET(options.BaseURL+"/v1/admin/invites", wrapper.GetAdminInvites)
 	router.POST(options.BaseURL+"/v1/admin/invites", wrapper.PostAdminInvite)
 	router.POST(options.BaseURL+"/v1/admin/invites/batch", wrapper.PostAdminInvitesBatch)
@@ -23527,6 +24681,14 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/tickets/:ticketNo/refund", wrapper.PostAdminTicketRefund)
 	router.GET(options.BaseURL+"/v1/admin/transactions", wrapper.GetAdminTransactions)
 	router.POST(options.BaseURL+"/v1/admin/transactions/:id/reverse", wrapper.PostAdminTransactionReverse)
+	router.GET(options.BaseURL+"/v1/admin/upstreams/smsbower/activations", wrapper.GetAdminSMSBowerActivations)
+	router.GET(options.BaseURL+"/v1/admin/upstreams/smsbower/finance", wrapper.GetAdminSMSBowerFinance)
+	router.GET(options.BaseURL+"/v1/admin/upstreams/smsbower/mappings", wrapper.GetAdminSMSBowerMappings)
+	router.DELETE(options.BaseURL+"/v1/admin/upstreams/smsbower/mappings/:projectId", wrapper.DeleteAdminSMSBowerMapping)
+	router.PUT(options.BaseURL+"/v1/admin/upstreams/smsbower/mappings/:projectId", wrapper.PutAdminSMSBowerMapping)
+	router.GET(options.BaseURL+"/v1/admin/upstreams/smsbower/services", wrapper.GetAdminSMSBowerServices)
+	router.GET(options.BaseURL+"/v1/admin/upstreams/smsbower/status", wrapper.GetAdminSMSBowerStatus)
+	router.POST(options.BaseURL+"/v1/admin/upstreams/smsbower/sync", wrapper.PostAdminSMSBowerSync)
 	router.GET(options.BaseURL+"/v1/admin/users", wrapper.GetAdminUsers)
 	router.POST(options.BaseURL+"/v1/admin/users", wrapper.PostAdminUser)
 	router.POST(options.BaseURL+"/v1/admin/users/delete", wrapper.PostAdminUsersDelete)

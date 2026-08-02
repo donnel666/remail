@@ -88,7 +88,7 @@ const projectLogoGalleryStorageKey = "remail.project.logo.gallery.v1";
 
 type ProjectStatusFilter = "all" | "reviewing" | "listed" | "delisted";
 type BooleanFilter = "all" | "yes" | "no";
-type ProjectProductType = "microsoft" | "domain";
+type ProjectProductType = "microsoft" | "domain" | "gmail";
 type ProjectProductStatus = "enabled" | "disabled";
 type ProjectProductTypeFilter = "all" | ProjectProductType;
 type ProjectMailRuleType = "sender" | "recipient" | "subject" | "body";
@@ -141,6 +141,12 @@ const fallbackProjectPriceDefaults: ProjectPriceDefaults = {
     purchasePrice: "0",
     purchaseSupplierPrice: "0",
   },
+  gmail: {
+    codePrice: "8",
+    codeSupplierPrice: "0",
+    purchasePrice: "0",
+    purchaseSupplierPrice: "0",
+  },
 };
 
 function projectPriceDefaultsFromValues(values: Record<string, string>): ProjectPriceDefaults {
@@ -162,6 +168,12 @@ function projectPriceDefaultsFromValues(values: Record<string, string>): Project
       codeSupplierPrice: read("default_project_domain_code_supplier_price", fallbackProjectPriceDefaults.domain.codeSupplierPrice),
       purchasePrice: read("default_project_domain_purchase_price", fallbackProjectPriceDefaults.domain.purchasePrice),
       purchaseSupplierPrice: read("default_project_domain_purchase_supplier_price", fallbackProjectPriceDefaults.domain.purchaseSupplierPrice),
+    },
+    gmail: {
+      codePrice: read("default_project_gmail_code_price", fallbackProjectPriceDefaults.gmail.codePrice),
+      codeSupplierPrice: read("default_project_gmail_code_supplier_price", fallbackProjectPriceDefaults.gmail.codeSupplierPrice),
+      purchasePrice: read("default_project_gmail_purchase_price", fallbackProjectPriceDefaults.gmail.purchasePrice),
+      purchaseSupplierPrice: read("default_project_gmail_purchase_supplier_price", fallbackProjectPriceDefaults.gmail.purchaseSupplierPrice),
     },
   };
 }
@@ -202,21 +214,23 @@ function createDefaultProduct(
   priceDefaults: ProjectPriceDefaults = fallbackProjectPriceDefaults
 ): ProductDraft {
   const isMicrosoft = type === "microsoft";
+  const isGmail = type === "gmail";
+  const usesMailboxWeights = isMicrosoft || isGmail;
   return {
     activationWindowMinutes: "60",
     codeEnabled: true,
     codePrice: priceDefaults[type].codePrice,
     codeSupplierPrice: priceDefaults[type].codeSupplierPrice,
-    codeWindowMinutes: "10",
+    codeWindowMinutes: isGmail ? "1440" : "10",
     dotWeight: "0",
-    mainWeight: isMicrosoft ? "1" : "0",
+    mainWeight: usesMailboxWeights ? "1" : "0",
     plusWeight: "0",
     purchaseEnabled: isMicrosoft,
     purchasePrice: priceDefaults[type].purchasePrice,
     purchaseSupplierPrice: priceDefaults[type].purchaseSupplierPrice,
     status: "enabled",
     type,
-    warrantyMinutes: isMicrosoft ? "1440" : "60",
+    warrantyMinutes: usesMailboxWeights ? "1440" : "60",
   };
 }
 
@@ -258,6 +272,7 @@ function booleanTag(value: boolean, t: (key: string) => string) {
 function productTypeLabel(type: string, t: (key: string) => string) {
   if (type === "microsoft") return t("Microsoft email");
   if (type === "domain") return t("Domain email");
+  if (type === "gmail") return t("Gmail email");
   return type;
 }
 
@@ -332,7 +347,7 @@ function detailToDraft(
           codeEnabled: product.codeEnabled,
           codePrice: moneyToDraft(product.codePrice),
           codeSupplierPrice: moneyToDraft(product.codeSupplierPrice),
-          codeWindowMinutes: String(product.codeWindowMinutes ?? 0),
+          codeWindowMinutes: product.type === "gmail" ? "1440" : String(product.codeWindowMinutes ?? 0),
           dotWeight: String(product.dotWeight ?? 0),
           mainWeight: String(product.mainWeight ?? 0),
           plusWeight: String(product.plusWeight ?? 0),
@@ -429,13 +444,13 @@ function productDraftToRequest(
     return null;
   }
   if (
-    product.type === "microsoft" &&
+    (product.type === "microsoft" || product.type === "gmail") &&
     toNonNegativeInt(product.mainWeight) +
       toNonNegativeInt(product.dotWeight) +
       toNonNegativeInt(product.plusWeight) <=
       0
   ) {
-    Toast.error(t("Microsoft weights must be positive."));
+    Toast.error(t("Mailbox weights must be positive."));
     return null;
   }
 
@@ -444,10 +459,10 @@ function productDraftToRequest(
     codeEnabled: product.codeEnabled,
     codePrice: normalizedMoney(product.codePrice),
     codeSupplierPrice: normalizedMoney(product.codeSupplierPrice),
-    codeWindowMinutes: toNonNegativeInt(product.codeWindowMinutes),
-    dotWeight: product.type === "microsoft" ? toNonNegativeInt(product.dotWeight) : 0,
-    mainWeight: product.type === "microsoft" ? toNonNegativeInt(product.mainWeight) : 0,
-    plusWeight: product.type === "microsoft" ? toNonNegativeInt(product.plusWeight) : 0,
+    codeWindowMinutes: product.type === "gmail" && product.codeEnabled ? 1440 : toNonNegativeInt(product.codeWindowMinutes),
+    dotWeight: product.type === "microsoft" || product.type === "gmail" ? toNonNegativeInt(product.dotWeight) : 0,
+    mainWeight: product.type === "microsoft" || product.type === "gmail" ? toNonNegativeInt(product.mainWeight) : 0,
+    plusWeight: product.type === "microsoft" || product.type === "gmail" ? toNonNegativeInt(product.plusWeight) : 0,
     purchaseEnabled: product.purchaseEnabled,
     purchasePrice: normalizedMoney(product.purchasePrice),
     purchaseSupplierPrice: normalizedMoney(product.purchaseSupplierPrice),
@@ -554,6 +569,8 @@ function ProductDraftCard({
 }) {
   const { t } = useTranslation();
   const isMicrosoft = draft.type === "microsoft";
+  const isGmail = draft.type === "gmail";
+  const usesMailboxWeights = isMicrosoft || isGmail;
   const fields: Array<[keyof ProductDraft, string]> = [
     ["codePrice", `${t("Code price")}（${t("Points")}）`],
     ["codeSupplierPrice", `${t("Code supplier price")}（${t("Points")}）`],
@@ -568,7 +585,7 @@ function ProductDraftCard({
     <div className="rounded-lg border border-[var(--semi-color-border)] p-3">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <Space wrap>
-          <Tag color={isMicrosoft ? "blue" : "green"} shape="circle">
+          <Tag color={isMicrosoft ? "blue" : isGmail ? "purple" : "green"} shape="circle">
             {productTypeLabel(draft.type, t)}
           </Tag>
           {statusEditable ? (
@@ -587,7 +604,10 @@ function ProductDraftCard({
         <Space wrap>
           <Checkbox
             checked={draft.codeEnabled}
-            onChange={(event) => onChange({ codeEnabled: event.target.checked })}
+            onChange={(event) => onChange({
+              codeEnabled: event.target.checked,
+              ...(isGmail && event.target.checked ? { codeWindowMinutes: "1440" } : {}),
+            })}
           >
             {t("Code service")}
           </Checkbox>
@@ -607,6 +627,7 @@ function ProductDraftCard({
               {label}
             </span>
             <Input
+              disabled={key === "codeWindowMinutes" && isGmail}
               onChange={(value) => onChange({ [key]: String(value) } as Partial<ProductDraft>)}
               value={String(draft[key])}
             />
@@ -614,7 +635,7 @@ function ProductDraftCard({
         ))}
       </div>
 
-      {isMicrosoft ? (
+      {usesMailboxWeights ? (
         <div className="mt-3 grid gap-3 sm:grid-cols-3">
           {[
             ["mainWeight", t("Main weight")],
@@ -1342,7 +1363,7 @@ function ProjectEditorSheet({
                 {t("Products")}
               </div>
               <Space wrap>
-                {(["microsoft", "domain"] as ProjectProductType[]).map((type) => {
+                {(["microsoft", "domain", "gmail"] as ProjectProductType[]).map((type) => {
                   const product = draft.products.find((item) => item.type === type);
                   const active = product?.status === "enabled";
                   return (
@@ -1425,6 +1446,7 @@ function BulkProductModal({
     setProducts([
       createDefaultProduct("microsoft", priceDefaults),
       createDefaultProduct("domain", priceDefaults),
+      createDefaultProduct("gmail", priceDefaults),
     ]);
     setSelectedTypes([]);
   }, [priceDefaults, visible]);
@@ -1547,7 +1569,7 @@ function ProjectDetailSheet({
                   key={product.id}
                 >
                   <div className="mb-2 flex flex-wrap items-center gap-2">
-                    <Tag color={product.type === "microsoft" ? "blue" : "green"} shape="circle">
+                    <Tag color={product.type === "microsoft" ? "blue" : product.type === "gmail" ? "purple" : "green"} shape="circle">
                       {productTypeLabel(product.type, t)}
                     </Tag>
                     <Tag color={product.status === "enabled" ? "green" : "grey"} shape="circle">
@@ -1714,6 +1736,7 @@ export default function AdminProjects() {
       productType: {
         all: total,
         domain: 0,
+        gmail: 0,
         microsoft: 0,
       },
       status: {
@@ -1740,6 +1763,7 @@ export default function AdminProjects() {
       productType: {
         all: facets.productType.all,
         domain: facets.productType.domain,
+        gmail: facets.productType.gmail,
         microsoft: facets.productType.microsoft,
       },
       status: {
@@ -2681,6 +2705,13 @@ export default function AdminProjects() {
                   label={t("Domain email")}
                   onSelect={applyProductTypeFilter}
                   value="domain"
+                />
+                <StatisticFilterOption
+                  active={productTypeFilter === "gmail"}
+                  count={projectFilterStats.productType.gmail}
+                  label={t("Gmail email")}
+                  onSelect={applyProductTypeFilter}
+                  value="gmail"
                 />
               </div>
             </div>

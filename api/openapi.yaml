@@ -2685,7 +2685,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [microsoft, domain, random]
+            enum: [microsoft, domain, random, gmail]
         - name: search
           in: query
           schema:
@@ -10873,6 +10873,314 @@ paths:
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
 
+  /v1/admin/upstreams/smsbower/status:
+    get:
+      operationId: getAdminSMSBowerStatus
+      summary: Get SMSBower account balance and health
+      tags: [SystemSettings]
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: SMSBower account status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SMSBowerAccountStatus"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /v1/admin/gmail/resources:
+    get:
+      operationId: getAdminGmailResources
+      summary: List locally managed Gmail accounts without credentials
+      tags: [Core]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OffsetQuery"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 20
+        - name: search
+          in: query
+          schema:
+            type: string
+            maxLength: 320
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/AdminGmailResourceStatus"
+      responses:
+        "200":
+          description: Safe Gmail resource page; credential values are never returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminGmailResourceList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /v1/admin/gmail/resources/import:
+    post:
+      operationId: postAdminGmailResourceImport
+      summary: Import local Gmail accounts as a write-only credential set
+      description: Each non-empty line uses `email----password----2FA secret----Gmail app password`. Existing available or disabled accounts are updated; leased and sold accounts are skipped. Credentials are never returned.
+      tags: [Core]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminGmailResourceImportRequest"
+      responses:
+        "200":
+          description: Import result counters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminGmailResourceImportResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "413":
+          description: Import request exceeds the 10 MiB limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /v1/admin/gmail/resources/{resourceId}/enable:
+    post:
+      operationId: postAdminGmailResourceEnable
+      summary: Enable an available local Gmail account
+      tags: [Core]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "204":
+          description: Gmail resource enabled
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/admin/gmail/resources/{resourceId}/disable:
+    post:
+      operationId: postAdminGmailResourceDisable
+      summary: Disable an available local Gmail account
+      tags: [Core]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "204":
+          description: Gmail resource disabled
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/admin/upstreams/smsbower/sync:
+    post:
+      operationId: postAdminSMSBowerSync
+      summary: Queue an immediate SMSBower balance, service and price sync
+      tags: [SystemSettings]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "202":
+          description: Sync queued
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /v1/admin/upstreams/smsbower/services:
+    get:
+      operationId: getAdminSMSBowerServices
+      summary: List the synchronized SMSBower mail service catalog
+      tags: [SystemSettings]
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: SMSBower services
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SMSBowerServiceList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /v1/admin/upstreams/smsbower/mappings:
+    get:
+      operationId: getAdminSMSBowerMappings
+      summary: List Gmail project to upstream service mappings and margin safety
+      tags: [SystemSettings]
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Gmail upstream mappings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GmailUpstreamMappingList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /v1/admin/upstreams/smsbower/mappings/{projectId}:
+    put:
+      operationId: putAdminSMSBowerMapping
+      summary: Create or update one Gmail project supply mapping
+      tags: [SystemSettings]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GmailUpstreamMappingRequest"
+      responses:
+        "204":
+          description: Mapping saved
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+    delete:
+      operationId: deleteAdminSMSBowerMapping
+      summary: Delete one Gmail project supply mapping source
+      tags: [SystemSettings]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - name: source
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [smsbower, local]
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "204":
+          description: Mapping deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /v1/admin/upstreams/smsbower/finance:
+    get:
+      operationId: getAdminSMSBowerFinance
+      summary: Get Gmail upstream revenue, cost and conservative profit
+      tags: [Billing]
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Gmail upstream finance report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GmailUpstreamFinanceReport"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /v1/admin/upstreams/smsbower/activations:
+    get:
+      operationId: getAdminSMSBowerActivations
+      summary: List Gmail upstream activation sessions
+      tags: [Billing]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OffsetQuery"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        "200":
+          description: Gmail activation sessions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GmailUpstreamActivationList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
 components:
   parameters:
     TicketNoPath:
@@ -11335,7 +11643,7 @@ components:
       properties:
         code:
           type: string
-          enum: [insufficient_balance, insufficient_inventory]
+          enum: [insufficient_balance, insufficient_inventory, upstream_price_protected, upstream_unavailable]
         message:
           type: string
       additionalProperties: false
@@ -11482,7 +11790,7 @@ components:
           type: integer
         productType:
           type: string
-          enum: [microsoft, domain, random]
+          enum: [microsoft, domain, random, gmail]
         serviceMode:
           type: string
           enum: [code, purchase]
@@ -11507,7 +11815,7 @@ components:
           $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
         allocationType:
           type: string
-          enum: [microsoft, domain]
+          enum: [microsoft, domain, gmail]
         allocationId:
           type: integer
         deliveryEmail:
@@ -11550,6 +11858,36 @@ components:
           format: date-time
           nullable: true
           description: Provider receive time of the delivered message.
+        contentMode:
+          type: string
+          enum: [code_only]
+          description: Gmail upstream orders expose verification codes only and never synthesize mail content.
+        codes:
+          type: array
+          maxItems: 3
+          items:
+            $ref: "#/components/schemas/GmailCodeResponse"
+        receivedCount:
+          type: integer
+          minimum: 0
+          maximum: 3
+        maxCodes:
+          type: integer
+          minimum: 3
+          maximum: 3
+        codesExpireAt:
+          type: string
+          format: date-time
+          nullable: true
+        gmailPassword:
+          type: string
+          description: Local Gmail purchase password. Returned only by checkout and authorized order-detail reads; omitted from order lists and resource APIs.
+        gmailTwoFactorSecret:
+          type: string
+          description: Local Gmail purchase 2FA secret. Returned only by checkout and authorized order-detail reads.
+        gmailAppPassword:
+          type: string
+          description: Local Gmail purchase application password. Returned only by checkout and authorized order-detail reads.
         archivedAt:
           type: string
           format: date-time
@@ -11816,12 +12154,54 @@ components:
       required:
         - items
       properties:
+        contentMode:
+          type: string
+          enum: [code_only]
+          description: Present for Gmail code-only pickup responses.
+        email:
+          type: string
+          format: email
+        receivedCount:
+          type: integer
+          minimum: 0
+          maximum: 3
+        maxCodes:
+          type: integer
+          minimum: 3
+          maximum: 3
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        codes:
+          type: array
+          maxItems: 3
+          items:
+            $ref: "#/components/schemas/GmailCodeResponse"
         items:
           type: array
           items:
             $ref: "#/components/schemas/MailContentResponse"
         fetch:
           $ref: "#/components/schemas/FetchStateResponse"
+      additionalProperties: false
+
+    GmailCodeResponse:
+      type: object
+      required:
+        - seq
+        - code
+        - receivedAt
+      properties:
+        seq:
+          type: integer
+          minimum: 1
+          maximum: 3
+        code:
+          type: string
+        receivedAt:
+          type: string
+          format: date-time
       additionalProperties: false
 
     PickupCredentialRequest:
@@ -15159,7 +15539,7 @@ components:
           type: boolean
         productType:
           type: string
-          enum: [microsoft, domain, random]
+          enum: [microsoft, domain, random, gmail]
         search:
           type: string
         targetPlatform:
@@ -15285,7 +15665,7 @@ components:
       properties:
         type:
           type: string
-          enum: [microsoft, domain, random]
+          enum: [microsoft, domain, random, gmail]
         status:
           type: string
           enum: [enabled, disabled]
@@ -15420,7 +15800,7 @@ components:
 
     ProjectProductTypeFacets:
       type: object
-      required: [all, microsoft, domain, random]
+      required: [all, microsoft, domain, random, gmail]
       properties:
         all:
           type: integer
@@ -15429,6 +15809,8 @@ components:
         domain:
           type: integer
         random:
+          type: integer
+        gmail:
           type: integer
       additionalProperties: false
 
@@ -15515,7 +15897,7 @@ components:
           type: integer
         type:
           type: string
-          enum: [microsoft, domain, random]
+          enum: [microsoft, domain, random, gmail]
         status:
           type: string
           enum: [enabled, disabled]
@@ -15541,6 +15923,18 @@ components:
           type: integer
           format: int64
           description: User-safe public inventory currently available for this product summary.
+        codeAvailable:
+          type: integer
+          format: int64
+        codePublicAvailable:
+          type: integer
+          format: int64
+        purchaseAvailable:
+          type: integer
+          format: int64
+        purchasePublicAvailable:
+          type: integer
+          format: int64
         suffixes:
           type: array
           items:
@@ -15588,7 +15982,7 @@ components:
           type: integer
         type:
           type: string
-          enum: [microsoft, domain, random]
+          enum: [microsoft, domain, random, gmail]
         status:
           type: string
           enum: [enabled, disabled]
@@ -15610,6 +16004,28 @@ components:
           type: integer
         warrantyMinutes:
           type: integer
+        totalAvailable:
+          type: integer
+          format: int64
+        publicAvailable:
+          type: integer
+          format: int64
+        codeAvailable:
+          type: integer
+          format: int64
+        codePublicAvailable:
+          type: integer
+          format: int64
+        purchaseAvailable:
+          type: integer
+          format: int64
+        purchasePublicAvailable:
+          type: integer
+          format: int64
+        suffixes:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductSuffixInventory"
         mainWeight:
           type: integer
           description: Internal allocation weight; only returned to project admins.
@@ -16275,6 +16691,18 @@ components:
           type: integer
         publicAvailable:
           type: integer
+        codeAvailable:
+          type: integer
+          format: int64
+        codePublicAvailable:
+          type: integer
+          format: int64
+        purchaseAvailable:
+          type: integer
+          format: int64
+        purchasePublicAvailable:
+          type: integer
+          format: int64
         suffixes:
           type: array
           items:
@@ -18524,6 +18952,501 @@ components:
           type: integer
           minimum: 1
           maximum: 100
+      additionalProperties: false
+
+    SMSBowerAccountStatus:
+      type: object
+      required:
+        - enabled
+        - configured
+        - balance
+        - healthStatus
+        - consecutiveFailures
+      properties:
+        enabled:
+          type: boolean
+        configured:
+          type: boolean
+          description: Whether an API Key is stored. The key itself is never returned.
+        balance:
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
+        healthStatus:
+          type: string
+          enum: [disabled, healthy, degraded, unavailable]
+        consecutiveFailures:
+          type: integer
+          minimum: 0
+        lastSafeError:
+          type: string
+        lastSyncedAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastSuccessAt:
+          type: string
+          format: date-time
+          nullable: true
+      additionalProperties: false
+
+    AdminGmailResourceStatus:
+      type: string
+      enum: [available, disabled, leased, sold]
+
+    AdminGmailResourceFacets:
+      type: object
+      required: [all, available, disabled, leased, sold]
+      properties:
+        all:
+          type: integer
+          format: int64
+          minimum: 0
+        available:
+          type: integer
+          format: int64
+          minimum: 0
+        disabled:
+          type: integer
+          format: int64
+          minimum: 0
+        leased:
+          type: integer
+          format: int64
+          minimum: 0
+        sold:
+          type: integer
+          format: int64
+          minimum: 0
+      additionalProperties: false
+
+    AdminGmailResourceItem:
+      type: object
+      required:
+        - id
+        - email
+        - status
+        - passwordConfigured
+        - twoFactorConfigured
+        - appPasswordConfigured
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+          format: email
+        status:
+          $ref: "#/components/schemas/AdminGmailResourceStatus"
+        passwordConfigured:
+          type: boolean
+        twoFactorConfigured:
+          type: boolean
+        appPasswordConfigured:
+          type: boolean
+        lastSafeError:
+          type: string
+        lastCheckedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    AdminGmailResourceList:
+      type: object
+      required: [items, total, offset, limit, facets]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminGmailResourceItem"
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+        offset:
+          type: integer
+          minimum: 0
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 200
+        facets:
+          $ref: "#/components/schemas/AdminGmailResourceFacets"
+      additionalProperties: false
+
+    AdminGmailResourceImportRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+          minLength: 1
+          maxLength: 10485760
+          description: Write-only TXT content. Credential values are never returned.
+        errorStrategy:
+          type: string
+          enum: [skip, abort]
+          default: skip
+      additionalProperties: false
+
+    AdminGmailResourceImportResult:
+      type: object
+      required: [imported, updated, skipped, invalid, total]
+      properties:
+        imported:
+          type: integer
+          minimum: 0
+        updated:
+          type: integer
+          minimum: 0
+        skipped:
+          type: integer
+          minimum: 0
+        invalid:
+          type: integer
+          minimum: 0
+        total:
+          type: integer
+          minimum: 0
+      additionalProperties: false
+
+    SMSBowerServiceList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/SMSBowerServiceItem"
+      additionalProperties: false
+
+    SMSBowerServiceItem:
+      type: object
+      required:
+        - code
+        - name
+        - gmailPrice
+        - gmailStock
+        - active
+        - lastSeenAt
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+        gmailPrice:
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
+        gmailStock:
+          type: integer
+          minimum: 0
+        previousPrice:
+          allOf:
+            - $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
+          nullable: true
+        active:
+          type: boolean
+        priceChangedAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastSeenAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    GmailUpstreamMappingRequest:
+      type: object
+      required:
+        - source
+        - enabled
+        - codeEnabled
+        - purchaseEnabled
+      properties:
+        source:
+          type: string
+          enum: [smsbower, local]
+        providerServiceCode:
+          type: string
+          maxLength: 64
+          description: Required for SMSBower and empty for local supply.
+        enabled:
+          type: boolean
+        codeEnabled:
+          type: boolean
+          description: Whether this route participates in Gmail verification-code fulfillment.
+        purchaseEnabled:
+          type: boolean
+          description: Whether this route participates in Gmail purchase fulfillment.
+      additionalProperties: false
+
+    GmailUpstreamMappingList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/GmailUpstreamMappingItem"
+      additionalProperties: false
+
+    GmailUpstreamMappingItem:
+      type: object
+      required:
+        - projectId
+        - projectName
+        - productId
+        - codePrice
+        - purchasePrice
+        - minimumCodeSalePrice
+        - minimumPurchaseSalePrice
+        - enabled
+        - codeEnabled
+        - purchaseEnabled
+        - upstreamPrice
+        - costPoints
+        - codeMarginRate
+        - purchaseMarginRate
+        - codeSafe
+        - purchaseSafe
+      properties:
+        projectId:
+          type: integer
+        projectName:
+          type: string
+        productId:
+          type: integer
+        codePrice:
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
+        purchasePrice:
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
+        minimumCodeSalePrice:
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
+        minimumPurchaseSalePrice:
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
+        source:
+          type: string
+          enum: [smsbower, local]
+        providerServiceCode:
+          type: string
+        providerServiceName:
+          type: string
+        enabled:
+          type: boolean
+        codeEnabled:
+          type: boolean
+        purchaseEnabled:
+          type: boolean
+        upstreamPrice:
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
+        costPoints:
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
+        codeMarginRate:
+          $ref: "#/components/schemas/LedgerAmountResponse"
+        purchaseMarginRate:
+          $ref: "#/components/schemas/LedgerAmountResponse"
+        codeSafe:
+          type: boolean
+        purchaseSafe:
+          type: boolean
+        codeUnsafeReason:
+          $ref: "#/components/schemas/GmailUpstreamUnsafeReason"
+        purchaseUnsafeReason:
+          $ref: "#/components/schemas/GmailUpstreamUnsafeReason"
+      additionalProperties: false
+
+    GmailUpstreamUnsafeReason:
+      type: string
+      enum:
+        - mode_disabled
+        - route_missing
+        - route_disabled
+        - local_supply_not_configured
+        - provider_mode_unsupported
+        - service_inactive
+        - out_of_stock
+        - insufficient_upstream_balance
+        - quote_stale
+        - invalid_price
+        - margin_below_floor
+
+    GmailUpstreamFinanceReport:
+      type: object
+      required: [overview, byProject, byService, bySource]
+      properties:
+        overview:
+          $ref: "#/components/schemas/GmailUpstreamFinanceOverview"
+        byProject:
+          type: array
+          items:
+            $ref: "#/components/schemas/GmailUpstreamFinanceBreakdown"
+        byService:
+          type: array
+          items:
+            $ref: "#/components/schemas/GmailUpstreamFinanceBreakdown"
+        bySource:
+          type: array
+          items:
+            $ref: "#/components/schemas/GmailUpstreamFinanceBreakdown"
+      additionalProperties: false
+
+    GmailUpstreamFinanceOverview:
+      type: object
+      required:
+        - orderCount
+        - activationCount
+        - zeroCodeCount
+        - oneCodeCount
+        - twoCodeCount
+        - threeCodeCount
+        - sales
+        - refunds
+        - netRevenue
+        - settledCost
+        - reservedCost
+        - unknownCost
+        - conservativeCost
+        - conservativeProfit
+        - conservativeMarginRate
+      properties:
+        orderCount:
+          type: integer
+          format: int64
+        activationCount:
+          type: integer
+          format: int64
+        zeroCodeCount:
+          type: integer
+          format: int64
+        oneCodeCount:
+          type: integer
+          format: int64
+        twoCodeCount:
+          type: integer
+          format: int64
+        threeCodeCount:
+          type: integer
+          format: int64
+        sales:
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
+        refunds:
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
+        netRevenue:
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
+        settledCost:
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
+        reservedCost:
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
+        unknownCost:
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
+        conservativeCost:
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
+        conservativeProfit:
+          $ref: "#/components/schemas/LedgerAmountResponse"
+        conservativeMarginRate:
+          $ref: "#/components/schemas/LedgerAmountResponse"
+      additionalProperties: false
+
+    GmailUpstreamFinanceBreakdown:
+      type: object
+      required: [key, name, orderCount, netRevenue, cost, profit]
+      properties:
+        key:
+          type: string
+        name:
+          type: string
+        orderCount:
+          type: integer
+          format: int64
+        netRevenue:
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
+        cost:
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
+        profit:
+          $ref: "#/components/schemas/LedgerAmountResponse"
+      additionalProperties: false
+
+    GmailUpstreamActivationList:
+      type: object
+      required: [items, total, offset, limit]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/GmailUpstreamActivationItem"
+        total:
+          type: integer
+          format: int64
+        offset:
+          type: integer
+          minimum: 0
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 200
+      additionalProperties: false
+
+    GmailUpstreamActivationItem:
+      type: object
+      required:
+        - id
+        - orderNo
+        - projectId
+        - projectName
+        - source
+        - providerServiceCode
+        - status
+        - receivedCount
+        - costPoints
+        - createdAt
+      properties:
+        id:
+          type: integer
+        orderNo:
+          type: string
+        projectId:
+          type: integer
+        projectName:
+          type: string
+        source:
+          type: string
+          enum: [smsbower, local]
+        providerServiceCode:
+          type: string
+        email:
+          type: string
+          format: email
+        status:
+          type: string
+          enum: [pending, provisioning, active, completing, completed, cancelling, cancelled, failed, unknown]
+        receivedCount:
+          type: integer
+          minimum: 0
+          maximum: 3
+        costPoints:
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
+        lastSafeError:
+          type: string
+        startedAt:
+          type: string
+          format: date-time
+          nullable: true
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
       additionalProperties: false
 
     CreateTicketRequest:

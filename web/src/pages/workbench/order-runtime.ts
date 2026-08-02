@@ -24,9 +24,17 @@ export function shouldAutoFetchOrderMail(
 export function shouldShowQuickFetchControl(
   order: Pick<
     WorkbenchOrder,
-    "hasDelivery" | "serviceMode" | "verificationCode"
+    | "contentMode"
+    | "hasDelivery"
+    | "maxCodes"
+    | "receivedCount"
+    | "serviceMode"
+    | "verificationCode"
   >,
 ) {
+  if (order.contentMode === "code_only") {
+    return (order.receivedCount ?? 0) < (order.maxCodes || 3);
+  }
   return (
     !order.verificationCode &&
     (!order.hasDelivery || order.serviceMode === "purchase")
@@ -39,17 +47,27 @@ export function mergeOrderRuntimeState(
 ): WorkbenchOrder {
   if (!current) return next;
   const preserveDeliveredState = current.hasDelivery && !next.hasDelivery;
+  const preserveCodes = (current.codes?.length ?? 0) > (next.codes?.length ?? 0);
   return {
     ...next,
+    codes: preserveCodes ? current.codes : next.codes,
+    codesExpireAt: next.codesExpireAt ?? current.codesExpireAt,
+    contentMode: next.contentMode ?? current.contentMode,
     hasDelivery: next.hasDelivery || current.hasDelivery,
     lastFetchedAt:
       next.lastMailReceivedAt ?? current.lastFetchedAt ?? next.lastFetchedAt,
     lastMailReceivedAt:
-      next.lastMailReceivedAt ?? current.lastMailReceivedAt,
+      preserveCodes
+        ? current.lastMailReceivedAt
+        : next.lastMailReceivedAt ?? current.lastMailReceivedAt,
     messages: current.messages,
-    serviceState: preserveDeliveredState ? current.serviceState : next.serviceState,
+    maxCodes: next.maxCodes || current.maxCodes,
+    receivedCount: preserveCodes
+      ? current.receivedCount
+      : next.receivedCount,
+    serviceState: preserveDeliveredState || preserveCodes ? current.serviceState : next.serviceState,
     token: next.token || current.token,
-    verificationCode: preserveDeliveredState
+    verificationCode: preserveDeliveredState || preserveCodes
       ? current.verificationCode
       : next.verificationCode,
   };

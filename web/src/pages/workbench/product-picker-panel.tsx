@@ -30,7 +30,11 @@ function getScopedInventory(
   serviceMode: ServiceMode,
   inventoryScope: InventoryScope
 ) {
-  if (inventoryScope === "public_only") return product.publicInventory;
+  if (inventoryScope === "public_only") {
+    return serviceMode === "code"
+      ? product.codePublicInventory
+      : product.purchasePublicInventory;
+  }
   return getInventory(product, serviceMode);
 }
 

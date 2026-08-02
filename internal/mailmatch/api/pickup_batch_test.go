@@ -109,6 +109,10 @@ func TestPickupBatchDoesNotRateLimitRepeatedIPOrTokens(t *testing.T) {
 }
 
 func TestPickupBatchServiceResult(t *testing.T) {
+	require.True(t, isPickupBusinessError(mailmatchdomain.ErrPickupCredentialInvalid))
+	require.True(t, isPickupBusinessError(mailmatchdomain.ErrOrderUnavailable))
+	require.False(t, isPickupBusinessError(context.DeadlineExceeded))
+
 	tests := []struct {
 		name                        string
 		succeeded, business, system int

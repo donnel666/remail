@@ -197,6 +197,9 @@ function parseEmailTypes(value?: string) {
     if (normalized.includes("domain") || normalized.includes("域名")) {
       types.add("domain");
     }
+    if (normalized.includes("gmail")) {
+      types.add("gmail");
+    }
   }
   return Array.from(types);
 }
@@ -780,6 +783,7 @@ function ProjectSquareSidebar({
           },
           { count: productTypeCounts.domain, label: t("Domain email"), value: "domain" },
           { count: productTypeCounts.random, label: t("Random email"), value: "random" },
+          { count: productTypeCounts.gmail, label: t("Gmail email"), value: "gmail" },
         ]}
         onChange={onProductTypeChange}
         title={t("Product type")}
@@ -1113,6 +1117,7 @@ export default function Projects() {
   const [productTypeCounts, setProductTypeCounts] = useState<Record<ProductTypeFilter, number>>({
     all: 0,
     domain: 0,
+    gmail: 0,
     microsoft: 0,
     random: 0,
   });
@@ -1162,6 +1167,7 @@ export default function Projects() {
       setProductTypeCounts({
         all: facets?.productType.all ?? listResponse.total,
         domain: facets?.productType.domain ?? 0,
+        gmail: facets?.productType.gmail ?? 0,
         microsoft: facets?.productType.microsoft ?? 0,
         random: facets?.productType.random ?? 0,
       });

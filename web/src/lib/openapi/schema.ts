@@ -3801,6 +3801,197 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/upstreams/smsbower/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get SMSBower account balance and health */
+        get: operations["getAdminSMSBowerStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/gmail/resources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List locally managed Gmail accounts without credentials */
+        get: operations["getAdminGmailResources"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/gmail/resources/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import local Gmail accounts as a write-only credential set
+         * @description Each non-empty line uses `email----password----2FA secret----Gmail app password`. Existing available or disabled accounts are updated; leased and sold accounts are skipped. Credentials are never returned.
+         */
+        post: operations["postAdminGmailResourceImport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/gmail/resources/{resourceId}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Enable an available local Gmail account */
+        post: operations["postAdminGmailResourceEnable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/gmail/resources/{resourceId}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Disable an available local Gmail account */
+        post: operations["postAdminGmailResourceDisable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/upstreams/smsbower/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Queue an immediate SMSBower balance, service and price sync */
+        post: operations["postAdminSMSBowerSync"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/upstreams/smsbower/services": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the synchronized SMSBower mail service catalog */
+        get: operations["getAdminSMSBowerServices"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/upstreams/smsbower/mappings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Gmail project to upstream service mappings and margin safety */
+        get: operations["getAdminSMSBowerMappings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/upstreams/smsbower/mappings/{projectId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Create or update one Gmail project supply mapping */
+        put: operations["putAdminSMSBowerMapping"];
+        post?: never;
+        /** Delete one Gmail project supply mapping source */
+        delete: operations["deleteAdminSMSBowerMapping"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/upstreams/smsbower/finance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Gmail upstream revenue, cost and conservative profit */
+        get: operations["getAdminSMSBowerFinance"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/upstreams/smsbower/activations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Gmail upstream activation sessions */
+        get: operations["getAdminSMSBowerActivations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3925,7 +4116,7 @@ export interface components {
         CreateOrderBatchResponse: components["schemas"]["CreateOrderBatchItemResponse"][];
         OrderBatchItemErrorResponse: {
             /** @enum {string} */
-            code: "insufficient_balance" | "insufficient_inventory";
+            code: "insufficient_balance" | "insufficient_inventory" | "upstream_price_protected" | "upstream_unavailable";
             message: string;
         };
         CreateOrderBatchItemResponse: {
@@ -3978,7 +4169,7 @@ export interface components {
             projectLogoUrl?: string;
             projectProductId: number;
             /** @enum {string} */
-            productType: "microsoft" | "domain" | "random";
+            productType: "microsoft" | "domain" | "random" | "gmail";
             /** @enum {string} */
             serviceMode: "code" | "purchase";
             /** @enum {string} */
@@ -3990,7 +4181,7 @@ export interface components {
             payAmount: components["schemas"]["NonNegativeLedgerAmountResponse"];
             refundAmount: components["schemas"]["NonNegativeLedgerAmountResponse"];
             /** @enum {string} */
-            allocationType?: "microsoft" | "domain";
+            allocationType?: "microsoft" | "domain" | "gmail";
             allocationId?: number;
             deliveryEmail: string;
             /** Format: date-time */
@@ -4016,6 +4207,22 @@ export interface components {
              * @description Provider receive time of the delivered message.
              */
             lastMailReceivedAt?: string | null;
+            /**
+             * @description Gmail upstream orders expose verification codes only and never synthesize mail content.
+             * @enum {string}
+             */
+            contentMode?: "code_only";
+            codes?: components["schemas"]["GmailCodeResponse"][];
+            receivedCount?: number;
+            maxCodes?: number;
+            /** Format: date-time */
+            codesExpireAt?: string | null;
+            /** @description Local Gmail purchase password. Returned only by checkout and authorized order-detail reads; omitted from order lists and resource APIs. */
+            gmailPassword?: string;
+            /** @description Local Gmail purchase 2FA secret. Returned only by checkout and authorized order-detail reads. */
+            gmailTwoFactorSecret?: string;
+            /** @description Local Gmail purchase application password. Returned only by checkout and authorized order-detail reads. */
+            gmailAppPassword?: string;
             /** Format: date-time */
             archivedAt?: string | null;
             /** Format: date-time */
@@ -4123,8 +4330,26 @@ export interface components {
             lastSafeError?: string;
         };
         OrderMailResponse: {
+            /**
+             * @description Present for Gmail code-only pickup responses.
+             * @enum {string}
+             */
+            contentMode?: "code_only";
+            /** Format: email */
+            email?: string;
+            receivedCount?: number;
+            maxCodes?: number;
+            /** Format: date-time */
+            expiresAt?: string | null;
+            codes?: components["schemas"]["GmailCodeResponse"][];
             items: components["schemas"]["MailContentResponse"][];
             fetch?: components["schemas"]["FetchStateResponse"];
+        };
+        GmailCodeResponse: {
+            seq: number;
+            code: string;
+            /** Format: date-time */
+            receivedAt: string;
         };
         PickupCredentialRequest: {
             /** Format: email */
@@ -5380,7 +5605,7 @@ export interface components {
             accessType?: "public" | "private";
             looseMatch?: boolean;
             /** @enum {string} */
-            productType?: "microsoft" | "domain" | "random";
+            productType?: "microsoft" | "domain" | "random" | "gmail";
             search?: string;
             targetPlatform?: string;
             /** Format: date-time */
@@ -5421,7 +5646,7 @@ export interface components {
         };
         ProjectProductRequest: {
             /** @enum {string} */
-            type: "microsoft" | "domain" | "random";
+            type: "microsoft" | "domain" | "random" | "gmail";
             /**
              * @default enabled
              * @enum {string}
@@ -5481,6 +5706,7 @@ export interface components {
             microsoft: number;
             domain: number;
             random: number;
+            gmail: number;
         };
         ProjectItem: {
             id: number;
@@ -5512,7 +5738,7 @@ export interface components {
         ProjectProductSummary: {
             id: number;
             /** @enum {string} */
-            type: "microsoft" | "domain" | "random";
+            type: "microsoft" | "domain" | "random" | "gmail";
             /** @enum {string} */
             status: "enabled" | "disabled";
             codeEnabled: boolean;
@@ -5532,6 +5758,14 @@ export interface components {
              * @description User-safe public inventory currently available for this product summary.
              */
             publicAvailable: number;
+            /** Format: int64 */
+            codeAvailable?: number;
+            /** Format: int64 */
+            codePublicAvailable?: number;
+            /** Format: int64 */
+            purchaseAvailable?: number;
+            /** Format: int64 */
+            purchasePublicAvailable?: number;
             suffixes?: components["schemas"]["ProductSuffixInventory"][];
         };
         ProductSuffixInventory: {
@@ -5546,7 +5780,7 @@ export interface components {
             id: number;
             projectId: number;
             /** @enum {string} */
-            type: "microsoft" | "domain" | "random";
+            type: "microsoft" | "domain" | "random" | "gmail";
             /** @enum {string} */
             status: "enabled" | "disabled";
             codeEnabled: boolean;
@@ -5558,6 +5792,19 @@ export interface components {
             codeWindowMinutes: number;
             activationWindowMinutes: number;
             warrantyMinutes: number;
+            /** Format: int64 */
+            totalAvailable?: number;
+            /** Format: int64 */
+            publicAvailable?: number;
+            /** Format: int64 */
+            codeAvailable?: number;
+            /** Format: int64 */
+            codePublicAvailable?: number;
+            /** Format: int64 */
+            purchaseAvailable?: number;
+            /** Format: int64 */
+            purchasePublicAvailable?: number;
+            suffixes?: components["schemas"]["ProductSuffixInventory"][];
             /** @description Internal allocation weight; only returned to project admins. */
             mainWeight?: number;
             /** @description Internal allocation weight; only returned to project admins. */
@@ -5823,6 +6070,14 @@ export interface components {
             productId: number;
             totalAvailable: number;
             publicAvailable: number;
+            /** Format: int64 */
+            codeAvailable?: number;
+            /** Format: int64 */
+            codePublicAvailable?: number;
+            /** Format: int64 */
+            purchaseAvailable?: number;
+            /** Format: int64 */
+            purchasePublicAvailable?: number;
             suffixes?: components["schemas"]["ProductSuffixInventory"][];
         };
         MicrosoftInventory: {
@@ -6746,6 +7001,198 @@ export interface components {
             total: number;
             offset: number;
             limit: number;
+        };
+        SMSBowerAccountStatus: {
+            enabled: boolean;
+            /** @description Whether an API Key is stored. The key itself is never returned. */
+            configured: boolean;
+            balance: components["schemas"]["NonNegativeLedgerAmountResponse"];
+            /** @enum {string} */
+            healthStatus: "disabled" | "healthy" | "degraded" | "unavailable";
+            consecutiveFailures: number;
+            lastSafeError?: string;
+            /** Format: date-time */
+            lastSyncedAt?: string | null;
+            /** Format: date-time */
+            lastSuccessAt?: string | null;
+        };
+        /** @enum {string} */
+        AdminGmailResourceStatus: "available" | "disabled" | "leased" | "sold";
+        AdminGmailResourceFacets: {
+            /** Format: int64 */
+            all: number;
+            /** Format: int64 */
+            available: number;
+            /** Format: int64 */
+            disabled: number;
+            /** Format: int64 */
+            leased: number;
+            /** Format: int64 */
+            sold: number;
+        };
+        AdminGmailResourceItem: {
+            id: number;
+            /** Format: email */
+            email: string;
+            status: components["schemas"]["AdminGmailResourceStatus"];
+            passwordConfigured: boolean;
+            twoFactorConfigured: boolean;
+            appPasswordConfigured: boolean;
+            lastSafeError?: string;
+            /** Format: date-time */
+            lastCheckedAt?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        AdminGmailResourceList: {
+            items: components["schemas"]["AdminGmailResourceItem"][];
+            /** Format: int64 */
+            total: number;
+            offset: number;
+            limit: number;
+            facets: components["schemas"]["AdminGmailResourceFacets"];
+        };
+        AdminGmailResourceImportRequest: {
+            /** @description Write-only TXT content. Credential values are never returned. */
+            content: string;
+            /**
+             * @default skip
+             * @enum {string}
+             */
+            errorStrategy: "skip" | "abort";
+        };
+        AdminGmailResourceImportResult: {
+            imported: number;
+            updated: number;
+            skipped: number;
+            invalid: number;
+            total: number;
+        };
+        SMSBowerServiceList: {
+            items: components["schemas"]["SMSBowerServiceItem"][];
+        };
+        SMSBowerServiceItem: {
+            code: string;
+            name: string;
+            gmailPrice: components["schemas"]["NonNegativeLedgerAmountResponse"];
+            gmailStock: number;
+            previousPrice?: components["schemas"]["NonNegativeLedgerAmountResponse"] | null;
+            active: boolean;
+            /** Format: date-time */
+            priceChangedAt?: string | null;
+            /** Format: date-time */
+            lastSeenAt: string;
+        };
+        GmailUpstreamMappingRequest: {
+            /** @enum {string} */
+            source: "smsbower" | "local";
+            /** @description Required for SMSBower and empty for local supply. */
+            providerServiceCode?: string;
+            enabled: boolean;
+            /** @description Whether this route participates in Gmail verification-code fulfillment. */
+            codeEnabled: boolean;
+            /** @description Whether this route participates in Gmail purchase fulfillment. */
+            purchaseEnabled: boolean;
+        };
+        GmailUpstreamMappingList: {
+            items: components["schemas"]["GmailUpstreamMappingItem"][];
+        };
+        GmailUpstreamMappingItem: {
+            projectId: number;
+            projectName: string;
+            productId: number;
+            codePrice: components["schemas"]["NonNegativeLedgerAmountResponse"];
+            purchasePrice: components["schemas"]["NonNegativeLedgerAmountResponse"];
+            minimumCodeSalePrice: components["schemas"]["NonNegativeLedgerAmountResponse"];
+            minimumPurchaseSalePrice: components["schemas"]["NonNegativeLedgerAmountResponse"];
+            /** @enum {string} */
+            source?: "smsbower" | "local";
+            providerServiceCode?: string;
+            providerServiceName?: string;
+            enabled: boolean;
+            codeEnabled: boolean;
+            purchaseEnabled: boolean;
+            upstreamPrice: components["schemas"]["NonNegativeLedgerAmountResponse"];
+            costPoints: components["schemas"]["NonNegativeLedgerAmountResponse"];
+            codeMarginRate: components["schemas"]["LedgerAmountResponse"];
+            purchaseMarginRate: components["schemas"]["LedgerAmountResponse"];
+            codeSafe: boolean;
+            purchaseSafe: boolean;
+            codeUnsafeReason?: components["schemas"]["GmailUpstreamUnsafeReason"];
+            purchaseUnsafeReason?: components["schemas"]["GmailUpstreamUnsafeReason"];
+        };
+        /** @enum {string} */
+        GmailUpstreamUnsafeReason: "mode_disabled" | "route_missing" | "route_disabled" | "local_supply_not_configured" | "provider_mode_unsupported" | "service_inactive" | "out_of_stock" | "insufficient_upstream_balance" | "quote_stale" | "invalid_price" | "margin_below_floor";
+        GmailUpstreamFinanceReport: {
+            overview: components["schemas"]["GmailUpstreamFinanceOverview"];
+            byProject: components["schemas"]["GmailUpstreamFinanceBreakdown"][];
+            byService: components["schemas"]["GmailUpstreamFinanceBreakdown"][];
+            bySource: components["schemas"]["GmailUpstreamFinanceBreakdown"][];
+        };
+        GmailUpstreamFinanceOverview: {
+            /** Format: int64 */
+            orderCount: number;
+            /** Format: int64 */
+            activationCount: number;
+            /** Format: int64 */
+            zeroCodeCount: number;
+            /** Format: int64 */
+            oneCodeCount: number;
+            /** Format: int64 */
+            twoCodeCount: number;
+            /** Format: int64 */
+            threeCodeCount: number;
+            sales: components["schemas"]["NonNegativeLedgerAmountResponse"];
+            refunds: components["schemas"]["NonNegativeLedgerAmountResponse"];
+            netRevenue: components["schemas"]["NonNegativeLedgerAmountResponse"];
+            settledCost: components["schemas"]["NonNegativeLedgerAmountResponse"];
+            reservedCost: components["schemas"]["NonNegativeLedgerAmountResponse"];
+            unknownCost: components["schemas"]["NonNegativeLedgerAmountResponse"];
+            conservativeCost: components["schemas"]["NonNegativeLedgerAmountResponse"];
+            conservativeProfit: components["schemas"]["LedgerAmountResponse"];
+            conservativeMarginRate: components["schemas"]["LedgerAmountResponse"];
+        };
+        GmailUpstreamFinanceBreakdown: {
+            key: string;
+            name: string;
+            /** Format: int64 */
+            orderCount: number;
+            netRevenue: components["schemas"]["NonNegativeLedgerAmountResponse"];
+            cost: components["schemas"]["NonNegativeLedgerAmountResponse"];
+            profit: components["schemas"]["LedgerAmountResponse"];
+        };
+        GmailUpstreamActivationList: {
+            items: components["schemas"]["GmailUpstreamActivationItem"][];
+            /** Format: int64 */
+            total: number;
+            offset: number;
+            limit: number;
+        };
+        GmailUpstreamActivationItem: {
+            id: number;
+            orderNo: string;
+            projectId: number;
+            projectName: string;
+            /** @enum {string} */
+            source: "smsbower" | "local";
+            providerServiceCode: string;
+            /** Format: email */
+            email?: string;
+            /** @enum {string} */
+            status: "pending" | "provisioning" | "active" | "completing" | "completed" | "cancelling" | "cancelled" | "failed" | "unknown";
+            receivedCount: number;
+            costPoints: components["schemas"]["NonNegativeLedgerAmountResponse"];
+            lastSafeError?: string;
+            /** Format: date-time */
+            startedAt?: string | null;
+            /** Format: date-time */
+            expiresAt?: string | null;
+            /** Format: date-time */
+            completedAt?: string | null;
+            /** Format: date-time */
+            createdAt: string;
         };
         CreateTicketRequest: {
             /** @enum {string} */
@@ -10247,7 +10694,7 @@ export interface operations {
                 status?: "reviewing" | "listed" | "delisted";
                 accessType?: "public" | "private";
                 looseMatch?: boolean;
-                productType?: "microsoft" | "domain" | "random";
+                productType?: "microsoft" | "domain" | "random" | "gmail";
                 search?: string;
                 targetPlatform?: string;
                 createdFrom?: string;
@@ -19036,6 +19483,322 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    getAdminSMSBowerStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SMSBower account status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SMSBowerAccountStatus"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getAdminGmailResources: {
+        parameters: {
+            query?: {
+                /** @description Row offset used when afterId is absent. */
+                offset?: components["parameters"]["OffsetQuery"];
+                limit?: number;
+                search?: string;
+                status?: components["schemas"]["AdminGmailResourceStatus"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Safe Gmail resource page; credential values are never returned */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminGmailResourceList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    postAdminGmailResourceImport: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminGmailResourceImportRequest"];
+            };
+        };
+        responses: {
+            /** @description Import result counters */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminGmailResourceImportResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Import request exceeds the 10 MiB limit */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    postAdminGmailResourceEnable: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gmail resource enabled */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    postAdminGmailResourceDisable: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gmail resource disabled */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    postAdminSMSBowerSync: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sync queued */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getAdminSMSBowerServices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SMSBower services */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SMSBowerServiceList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getAdminSMSBowerMappings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gmail upstream mappings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GmailUpstreamMappingList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    putAdminSMSBowerMapping: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GmailUpstreamMappingRequest"];
+            };
+        };
+        responses: {
+            /** @description Mapping saved */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    deleteAdminSMSBowerMapping: {
+        parameters: {
+            query: {
+                source: "smsbower" | "local";
+            };
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Mapping deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getAdminSMSBowerFinance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gmail upstream finance report */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GmailUpstreamFinanceReport"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getAdminSMSBowerActivations: {
+        parameters: {
+            query?: {
+                /** @description Row offset used when afterId is absent. */
+                offset?: components["parameters"]["OffsetQuery"];
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gmail activation sessions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GmailUpstreamActivationList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
 }

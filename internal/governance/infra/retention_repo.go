@@ -28,6 +28,21 @@ func (r *RetentionRepo) DeleteMailmatchMessagesBefore(ctx context.Context, befor
 	return r.deleteBySQL(ctx, "DELETE FROM mailmatch_messages WHERE resource_type = ? AND received_at < ? ORDER BY received_at, id LIMIT ?", resourceType, before, limit)
 }
 
+func (r *RetentionRepo) RedactGmailCodesBefore(ctx context.Context, before time.Time, limit int) (int64, error) {
+	return r.deleteBySQL(ctx, `UPDATE gmail_code_sessions
+SET codes_json = JSON_ARRAY()
+WHERE id IN (
+  SELECT id FROM (
+    SELECT id FROM gmail_code_sessions
+    WHERE status IN ('completed', 'cancelled', 'failed', 'unknown')
+      AND completed_at < ?
+      AND JSON_EXTRACT(codes_json, '$[0]') IS NOT NULL
+    ORDER BY completed_at, id
+    LIMIT ?
+  ) AS expired_gmail_codes
+)`, before, limit)
+}
+
 func (r *RetentionRepo) DeleteAllocationDailyUsagesBefore(ctx context.Context, before time.Time, limit int) (int64, error) {
 	return r.deleteBySQL(ctx, "DELETE FROM allocation_daily_usages WHERE usage_date < ? ORDER BY usage_date LIMIT ?", before.UTC().Format("2006-01-02"), limit)
 }

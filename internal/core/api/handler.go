@@ -1613,6 +1613,7 @@ func toProjectListFacetsResponse(facets *coreapp.ProjectListFacets) *ProjectList
 			Microsoft: facets.ProductType.Microsoft,
 			Domain:    facets.ProductType.Domain,
 			Random:    facets.ProductType.Random,
+			Gmail:     facets.ProductType.Gmail,
 		},
 	}
 }
@@ -1638,6 +1639,10 @@ func toProjectProductSummaryResponses(products []coredomain.Product, inventoryBy
 			WarrantyMinutes:         product.WarrantyMinutes,
 			TotalAvailable:          inventory.TotalAvailable,
 			PublicAvailable:         inventory.PublicAvailable,
+			CodeAvailable:           inventory.CodeAvailable,
+			CodePublicAvailable:     inventory.CodePublicAvailable,
+			PurchaseAvailable:       inventory.PurchaseAvailable,
+			PurchasePublicAvailable: inventory.PurchasePublicAvailable,
 			Suffixes:                toProjectProductSuffixInventoryResponses(inventory.Suffixes),
 		}
 	}
@@ -1687,6 +1692,10 @@ func toProjectDetailResponseWithInventory(detail *coredomain.ProjectDetail, incl
 		if inventoryByProductID != nil {
 			products[i].TotalAvailable = int64Ptr(inventory.TotalAvailable)
 			products[i].PublicAvailable = int64Ptr(inventory.PublicAvailable)
+			products[i].CodeAvailable = inventory.CodeAvailable
+			products[i].CodePublicAvailable = inventory.CodePublicAvailable
+			products[i].PurchaseAvailable = inventory.PurchaseAvailable
+			products[i].PurchasePublicAvailable = inventory.PurchasePublicAvailable
 			products[i].Suffixes = toProjectProductSuffixInventoryResponses(inventory.Suffixes)
 		}
 		if includeInternal {

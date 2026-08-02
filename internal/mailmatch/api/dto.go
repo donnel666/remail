@@ -18,8 +18,20 @@ type MailContentDetailResponse struct {
 }
 
 type OrderMailResponse struct {
-	Items []MailContentResponse `json:"items"`
-	Fetch *FetchStateResponse   `json:"fetch,omitempty"`
+	ContentMode   string                   `json:"contentMode,omitempty"`
+	Email         string                   `json:"email,omitempty"`
+	ReceivedCount int                      `json:"receivedCount,omitempty"`
+	MaxCodes      int                      `json:"maxCodes,omitempty"`
+	ExpiresAt     *time.Time               `json:"expiresAt,omitempty"`
+	Codes         []CodeOnlyPickupResponse `json:"codes,omitempty"`
+	Items         []MailContentResponse    `json:"items"`
+	Fetch         *FetchStateResponse      `json:"fetch,omitempty"`
+}
+
+type CodeOnlyPickupResponse struct {
+	Seq        int       `json:"seq"`
+	Code       string    `json:"code"`
+	ReceivedAt time.Time `json:"receivedAt"`
 }
 
 type PickupCredentialRequest struct {

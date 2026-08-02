@@ -26,6 +26,7 @@ const (
 	ProductTypeMicrosoft ProductType = "microsoft"
 	ProductTypeDomain    ProductType = "domain"
 	ProductTypeRandom    ProductType = "random"
+	ProductTypeGmail     ProductType = "gmail"
 )
 
 type OrderStatus string
@@ -63,6 +64,7 @@ type AllocationType string
 const (
 	AllocationTypeMicrosoft AllocationType = "microsoft"
 	AllocationTypeDomain    AllocationType = "domain"
+	AllocationTypeGmail     AllocationType = "gmail"
 )
 
 type OperatorType string
@@ -97,6 +99,8 @@ type Order struct {
 	AllocationType           *AllocationType
 	MicrosoftAllocID         *uint
 	DomainAllocID            *uint
+	GmailSessionID           *uint
+	GmailResourceID          *uint
 	DeliveryEmail            string
 	ReceiveStartedAt         *time.Time
 	ReceiveUntil             *time.Time
@@ -135,6 +139,8 @@ var (
 	ErrIdempotencyConflict    = errors.New("trade: idempotency conflict")
 	ErrInsufficientInventory  = errors.New("trade: insufficient inventory")
 	ErrInsufficientBalance    = errors.New("trade: insufficient balance")
+	ErrUpstreamUnavailable    = errors.New("trade: upstream unavailable")
+	ErrUpstreamPriceProtected = errors.New("trade: upstream price protection blocked checkout")
 	ErrProjectUnavailable     = errors.New("trade: project is not available")
 	ErrOrderCompensationError = errors.New("trade: order compensation failed")
 	ErrCheckoutBusy           = errors.New("trade: checkout already queued for user")

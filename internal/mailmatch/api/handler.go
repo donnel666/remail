@@ -36,6 +36,27 @@ func (h *Handler) GetPickupMessages(c *gin.Context) {
 	serviceStarted := time.Now()
 	serviceResult := "succeeded"
 	defer func() { platform.ObserveServiceDuration("pickup_single", "single", serviceResult, serviceStarted) }()
+	if h.mod.CodeOnlyPickup != nil {
+		pickup, matched, err := h.mod.CodeOnlyPickup.ReadCodeOnlyPickup(ctx, email, tokenPlain)
+		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				serviceResult = "canceled"
+				writePickupUnavailable(c)
+				return
+			}
+			if isPickupBusinessError(err) {
+				serviceResult = "business_failed"
+			} else {
+				serviceResult = "system_failed"
+			}
+			writeMailmatchError(c, err)
+			return
+		}
+		if matched {
+			c.JSON(http.StatusOK, codeOnlyMailResponse(pickup))
+			return
+		}
+	}
 	items, state, err := h.mod.UseCase.ListPickupMail(ctx, tokenPlain, email)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -43,7 +64,7 @@ func (h *Handler) GetPickupMessages(c *gin.Context) {
 			writePickupUnavailable(c)
 			return
 		}
-		if errors.Is(err, domain.ErrPickupCredentialInvalid) || errors.Is(err, domain.ErrOrderUnavailable) {
+		if isPickupBusinessError(err) {
 			serviceResult = "business_failed"
 		} else {
 			serviceResult = "system_failed"
@@ -82,6 +103,30 @@ func (h *Handler) PostPickupMessagesBatch(c *gin.Context) {
 			businessFailedItems++
 			continue
 		}
+		if h.mod.CodeOnlyPickup != nil {
+			pickup, matched, err := h.mod.CodeOnlyPickup.ReadCodeOnlyPickup(c.Request.Context(), credential.Email, credential.Token)
+			if err != nil {
+				resp[i].Status = "failed"
+				resp[i].Error = pickupBatchItemError(err)
+				if resp[i].Error.Code == "service_unavailable" {
+					c.Header("Retry-After", "1")
+				}
+				failed = true
+				if isPickupBusinessError(err) {
+					businessFailedItems++
+				} else {
+					systemFailedItems++
+				}
+				continue
+			}
+			if matched {
+				data := codeOnlyMailResponse(pickup)
+				resp[i].Status = "succeeded"
+				resp[i].Data = &data
+				succeededItems++
+				continue
+			}
+		}
 		credentials = append(credentials, credential)
 		credentialIndexes = append(credentialIndexes, i)
 	}
@@ -101,7 +146,7 @@ func (h *Handler) PostPickupMessagesBatch(c *gin.Context) {
 				c.Header("Retry-After", "1")
 			}
 			failed = true
-			if errors.Is(results[i].Err, domain.ErrPickupCredentialInvalid) || errors.Is(results[i].Err, domain.ErrOrderUnavailable) {
+			if isPickupBusinessError(results[i].Err) {
 				businessFailedItems++
 			} else {
 				systemFailedItems++
@@ -128,6 +173,10 @@ func (h *Handler) PostPickupMessagesBatch(c *gin.Context) {
 	}
 	serviceResult = pickupBatchServiceResult(succeededItems, businessFailedItems, systemFailedItems)
 	c.JSON(status, resp)
+}
+
+func isPickupBusinessError(err error) bool {
+	return errors.Is(err, domain.ErrPickupCredentialInvalid) || errors.Is(err, domain.ErrOrderUnavailable)
 }
 
 func pickupBatchServiceResult(succeeded, businessFailed, systemFailed int) string {
@@ -262,6 +311,20 @@ func orderMailResponse(items []domain.MailContent, state *domain.FetchState) Ord
 		}
 	}
 	return resp
+}
+
+func codeOnlyMailResponse(item *CodeOnlyPickupResult) OrderMailResponse {
+	if item == nil {
+		return OrderMailResponse{ContentMode: "code_only", MaxCodes: 3, Items: []MailContentResponse{}}
+	}
+	codes := make([]CodeOnlyPickupResponse, len(item.Codes))
+	for i := range item.Codes {
+		codes[i] = CodeOnlyPickupResponse{Seq: item.Codes[i].Seq, Code: item.Codes[i].Code, ReceivedAt: item.Codes[i].ReceivedAt}
+	}
+	return OrderMailResponse{
+		ContentMode: "code_only", Email: item.Email, ReceivedCount: item.ReceivedCount,
+		MaxCodes: item.MaxCodes, ExpiresAt: item.ExpiresAt, Codes: codes, Items: []MailContentResponse{},
+	}
 }
 
 func mailContentResponse(item domain.MailContent) MailContentResponse {

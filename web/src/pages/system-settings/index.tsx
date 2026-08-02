@@ -8,7 +8,7 @@ import {
 import { useAuth, hasPermissionKey } from "@/context/auth-provider";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import {
-  Shield, Mail, Cpu, ShoppingCart, Cog, Users,
+  Shield, Mail, Cpu, ShoppingCart, Cog, Users, Cloud,
 } from "lucide-react";
 
 // Section components
@@ -18,6 +18,7 @@ import EmailServiceSection from "./email-service";
 import OrdersPaymentSection from "./orders-payment";
 import SystemOperationsSection from "./system-operations";
 import UsersRebatesSection from "./users-rebates";
+import UpstreamsSection from "./upstreams";
 import { SettingsAccessBoundary } from "./settings-layout";
 
 export interface SectionProps {
@@ -43,6 +44,7 @@ const SECTIONS: Section[] = [
   { key: "site-content", label: "内容管理", labelEn: "Content", icon: <Cog size={18} />, component: SiteContentSection },
   { key: "auth", label: "认证安全", labelEn: "Auth & Security", icon: <Shield size={18} />, component: AuthSecuritySection },
   { key: "email-service", label: "邮箱服务", labelEn: "Email Service", icon: <Mail size={18} />, component: EmailServiceSection },
+  { key: "upstreams", label: "上游设置", labelEn: "Upstreams", icon: <Cloud size={18} />, component: UpstreamsSection },
   { key: "orders-payment", label: "订单支付", labelEn: "Orders & Payment", icon: <ShoppingCart size={18} />, component: OrdersPaymentSection },
   { key: "users-rebates", label: "用户返利", labelEn: "Users & Rebates", icon: <Users size={18} />, component: UsersRebatesSection },
   { key: "system-operations", label: "系统运维", labelEn: "System Operations", icon: <Cpu size={18} />, component: SystemOperationsSection },
@@ -157,7 +159,7 @@ export default function SystemSettingsPage() {
             >
               <div hidden={activeSection !== section.key} className="min-h-40">
                 <Spin spinning={loading} size="large">
-                  {section.key === "users-rebates" || !content
+                  {section.key === "users-rebates" || section.key === "upstreams" || !content
                     ? content
                     : <SettingsAccessBoundary canWrite={canWrite}>{content}</SettingsAccessBoundary>}
                 </Spin>

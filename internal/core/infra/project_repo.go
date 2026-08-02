@@ -754,6 +754,8 @@ func (r *ProjectRepo) Facets(ctx context.Context, filter coreapp.ProjectListFilt
 			facets.ProductType.Domain = row.Count
 		case domain.ProductTypeRandom:
 			facets.ProductType.Random = row.Count
+		case domain.ProductTypeGmail:
+			facets.ProductType.Gmail = row.Count
 		}
 	}
 	return facets, nil

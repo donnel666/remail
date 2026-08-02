@@ -191,7 +191,8 @@ func isSensitiveKey(key string) bool {
 	switch strings.ToLower(strings.TrimSpace(key)) {
 	case "github_client_id", "github_client_secret", "github_callback_url",
 		"linuxdo_client_id", "linuxdo_client_secret", "linuxdo_callback_url",
-		"epay_enabled", "epay_version", "epay_gateway_url", "epay_merchant_id", "epay_merchant_key", "epay_private_key", "epay_platform_public_key", "epay_notify_url", "epay_return_url":
+		"epay_enabled", "epay_version", "epay_gateway_url", "epay_merchant_id", "epay_merchant_key", "epay_private_key", "epay_platform_public_key", "epay_notify_url", "epay_return_url",
+		"smsbower_api_key":
 		return true
 	default:
 		return false
@@ -200,7 +201,7 @@ func isSensitiveKey(key string) bool {
 
 func isWriteOnlyKey(key string) bool {
 	switch strings.ToLower(strings.TrimSpace(key)) {
-	case "epay_merchant_key", "epay_private_key", "github_client_id", "github_client_secret", "linuxdo_client_id", "linuxdo_client_secret", "points_unit_migration_v1":
+	case "epay_merchant_key", "epay_private_key", "github_client_id", "github_client_secret", "linuxdo_client_id", "linuxdo_client_secret", "smsbower_api_key", "points_unit_migration_v1":
 		return true
 	default:
 		return false

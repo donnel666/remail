@@ -68,6 +68,7 @@ vi.mock("./email-service", () => ({
 vi.mock("./orders-payment", () => ({ default: () => <div data-testid="settings-section" /> }));
 vi.mock("./system-operations", () => ({ default: () => <div data-testid="settings-section" /> }));
 vi.mock("./users-rebates", () => ({ default: () => <div data-testid="settings-section" /> }));
+vi.mock("./upstreams", () => ({ default: () => <div data-testid="settings-section" /> }));
 
 import SystemSettingsPage from "./index";
 

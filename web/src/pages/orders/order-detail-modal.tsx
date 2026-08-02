@@ -112,9 +112,12 @@ export function OrderDetailModal({
 }) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
+  const codeOnly = order?.contentMode === "code_only";
+  const maxCodes = order?.maxCodes || 3;
 
-  const receiveUntilLabel =
-    order?.serviceMode === "purchase" && !order.activatedAt
+  const receiveUntilLabel = codeOnly
+    ? t("Codes expire at")
+    : order?.serviceMode === "purchase" && !order.activatedAt
       ? t("Activation until")
       : t("Receive until");
   const pickupUrl = order?.serviceToken
@@ -141,6 +144,11 @@ export function OrderDetailModal({
             <Tag color="white" shape="circle">
               {order.clientChannel === "console" ? t("Console") : "API Key"}
             </Tag>
+            {codeOnly ? (
+              <Tag color="purple" shape="circle">
+                {t("Code-only delivery")}
+              </Tag>
+            ) : null}
           </div>
 
           <DetailRow
@@ -149,6 +157,26 @@ export function OrderDetailModal({
               <CopyableValue copiedText={t("Copied")} text={order.deliveryEmail} />
             }
           />
+          {order.productType === "gmail" && order.serviceMode === "purchase" && order.gmailPassword ? (
+            <>
+              <DetailRow
+                label={t("Password")}
+                value={<SecretValue copyContent={order.gmailPassword} text={maskSecret(order.gmailPassword)} />}
+              />
+              {order.gmailTwoFactorSecret ? (
+                <DetailRow
+                  label="2FA"
+                  value={<SecretValue copyContent={order.gmailTwoFactorSecret} text={maskSecret(order.gmailTwoFactorSecret)} />}
+                />
+              ) : null}
+              {order.gmailAppPassword ? (
+                <DetailRow
+                  label={t("App password")}
+                  value={<SecretValue copyContent={order.gmailAppPassword} text={maskSecret(order.gmailAppPassword)} />}
+                />
+              ) : null}
+            </>
+          ) : null}
           <DetailRow
             label={t("Order No")}
             value={<CopyableValue copiedText={t("Copied")} text={order.orderNo} />}
@@ -172,30 +200,63 @@ export function OrderDetailModal({
               }
             />
           ) : null}
-          <DetailRow
-            label={t(
-              order.verificationCode
-                ? mailExtractionLabelKey(order.verificationCode, "Code")
-                : "Code"
+          {codeOnly
+            ? Array.from({ length: maxCodes }, (_, index) => {
+                const sequence = index + 1;
+                const item = order.codes?.find((code) => code.seq === sequence);
+                return (
+                  <DetailRow
+                    key={sequence}
+                    label={t("Verification code slot", {
+                      current: sequence,
+                      total: maxCodes,
+                    })}
+                    value={
+                      item ? (
+                        <div className="flex items-center gap-2">
+                          <CopyableEllipsisText
+                            className="font-mono-data"
+                            text={item.code}
+                          />
+                          <span className="text-[var(--semi-color-text-2)]">
+                            {formatOrderDateTime(item.receivedAt)}
+                          </span>
+                        </div>
+                      ) : (
+                        <Tag color="grey" shape="circle">
+                          {t("Waiting")}
+                        </Tag>
+                      )
+                    }
+                  />
+                );
+              })
+            : (
+              <DetailRow
+                label={t(
+                  order.verificationCode
+                    ? mailExtractionLabelKey(order.verificationCode, "Code")
+                    : "Code"
+                )}
+                value={
+                  order.verificationCode ? (
+                    <CopyableEllipsisText
+                      className="font-mono-data"
+                      text={order.verificationCode}
+                    />
+                  ) : order.status === "active" ? (
+                    <Tag color="grey" shape="circle">
+                      {t("Waiting")}
+                    </Tag>
+                  ) : (
+                    <span className="text-[var(--semi-color-text-3)]">-</span>
+                  )
+                }
+              />
             )}
-            value={
-              order.verificationCode ? (
-                <CopyableEllipsisText
-                  className="font-mono-data"
-                  text={order.verificationCode}
-                />
-              ) : order.status === "active" ? (
-                <Tag color="grey" shape="circle">
-                  {t("Waiting")}
-                </Tag>
-              ) : (
-                <span className="text-[var(--semi-color-text-3)]">-</span>
-              )
-            }
-          />
           <DetailRow
             label={receiveUntilLabel}
-            value={formatOrderDateTime(order.receiveUntil)}
+            value={formatOrderDateTime(codeOnly ? order.codesExpireAt : order.receiveUntil)}
           />
           {order.activatedAt ? (
             <DetailRow

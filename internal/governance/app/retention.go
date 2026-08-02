@@ -21,6 +21,7 @@ const (
 type RetentionRepository interface {
 	DeleteIdempotencyKeysBefore(ctx context.Context, before time.Time, limit int) (int64, error)
 	DeleteMailmatchMessagesBefore(ctx context.Context, before time.Time, resourceType string, limit int) (int64, error)
+	RedactGmailCodesBefore(ctx context.Context, before time.Time, limit int) (int64, error)
 	DeleteAllocationDailyUsagesBefore(ctx context.Context, before time.Time, limit int) (int64, error)
 	DeleteOutboundMailsTerminalBefore(ctx context.Context, before time.Time, limit int) (int64, error)
 	DeleteSystemLogsBefore(ctx context.Context, before time.Time, limit int) (int64, error)
@@ -40,6 +41,7 @@ type retentionSettings struct {
 	idempotencyDays     int
 	mailmatchMSDays     int
 	mailmatchDomainDays int
+	gmailCodeDays       int
 	dailyUsageDays      int
 	outboundMailDays    int
 	inboundMailDays     int
@@ -54,6 +56,7 @@ func currentRetentionSettings() retentionSettings {
 		idempotencyDays:     settings.Int("idempotency_key_retain_days", 30, 1),
 		mailmatchMSDays:     settings.Int("mailmatch_ms_retain_days", 3, 1),
 		mailmatchDomainDays: settings.Int("mailmatch_domain_retain_days", 30, 1),
+		gmailCodeDays:       settings.Int("gmail_code_retain_days", 3, 1),
 		dailyUsageDays:      settings.Int("daily_usage_retain_days", 14, 1),
 		outboundMailDays:    settings.Int("outbound_mail_retain_days", 30, 1),
 		inboundMailDays:     settings.Int("inbound_mail_retain_days", 30, 1),
@@ -140,6 +143,9 @@ func (s *RetentionService) RunOnce(ctx context.Context) {
 	}))
 	summary = append(summary, s.deleteLoop(ctx, "mailmatch_messages_domain", now.AddDate(0, 0, -settings.mailmatchDomainDays), settings, func(ctx context.Context, before time.Time) (int64, error) {
 		return s.repo.DeleteMailmatchMessagesBefore(ctx, before, "domain", settings.batchSize)
+	}))
+	summary = append(summary, s.deleteLoop(ctx, "gmail_codes", now.AddDate(0, 0, -settings.gmailCodeDays), settings, func(ctx context.Context, before time.Time) (int64, error) {
+		return s.repo.RedactGmailCodesBefore(ctx, before, settings.batchSize)
 	}))
 	summary = append(summary, s.deleteLoop(ctx, "allocation_daily_usages", now.AddDate(0, 0, -settings.dailyUsageDays), settings, func(ctx context.Context, before time.Time) (int64, error) {
 		return s.repo.DeleteAllocationDailyUsagesBefore(ctx, before, settings.batchSize)

@@ -22,6 +22,7 @@ import {
 } from "./system-operations-keys";
 import { DAILY_CHECKIN_REWARD_KEYS, LEADERBOARD_REWARD_KEYS, RECHARGE_REBATE_KEYS } from "./users-rebates-keys";
 import { PAYMENT_BILLING_KEYS } from "./payment-billing-keys";
+import { SMSBOWER_UPSTREAM_KEYS } from "./upstream-settings-values";
 
 const defaultsSource = readFileSync(
   new URL("../../../../internal/systemsettings/runtimeconfig/defaults.go", import.meta.url),
@@ -47,6 +48,7 @@ const frontendGroups = [
   ["announcement_enabled", "announcements", "global_notice", "faq_enabled", "faq_list"],
   AUTH_SECURITY_KEYS,
   PAYMENT_BILLING_KEYS,
+  SMSBOWER_UPSTREAM_KEYS,
   RECHARGE_REBATE_KEYS,
   DAILY_CHECKIN_REWARD_KEYS,
   LEADERBOARD_REWARD_KEYS,

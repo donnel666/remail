@@ -114,6 +114,14 @@ func TestValidateAuthSecuritySettings(t *testing.T) {
 		{Key: "github_client_secret", Value: "client-secret"},
 		{Key: "github_callback_url", Value: "https://mail.example.com/v1/oauth/github/callback"},
 	}))
+
+	missingSMSBowerKey := ValidatePersistedUpdates(DefaultSettings(), []domain.Setting{{Key: "smsbower_enabled", Value: "true"}})
+	require.ErrorAs(t, missingSMSBowerKey, &fields)
+	require.Contains(t, fields.Fields, "smsbower_api_key")
+	require.NoError(t, ValidatePersistedUpdates(DefaultSettings(), []domain.Setting{
+		{Key: "smsbower_enabled", Value: "true"},
+		{Key: "smsbower_api_key", Value: "test-key"},
+	}))
 }
 
 func TestValidateRechargeRebateSettings(t *testing.T) {

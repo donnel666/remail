@@ -6,6 +6,7 @@ import {
   Database,
   Globe,
   Headphones,
+  Mail,
   Network,
   PackageOpen,
   ScrollText,
@@ -67,6 +68,12 @@ export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
         path: "/admin/microsoft",
         labelKey: "Admin Microsoft Emails",
         icon: Database,
+        requiredPermission: permissionKey("core:resource", "read"),
+      },
+      {
+        path: "/admin/gmail",
+        labelKey: "Admin Gmail Emails",
+        icon: Mail,
         requiredPermission: permissionKey("core:resource", "read"),
       },
       {

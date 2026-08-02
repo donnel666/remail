@@ -87,6 +87,7 @@ export function inventoryScopeLabel(
 export function productTypeLabel(type: ProductType, t: (key: string) => string) {
   if (type === "microsoft") return t("Microsoft email");
   if (type === "domain") return t("Domain email");
+  if (type === "gmail") return t("Gmail email");
   return t("Random email");
 }
 
@@ -101,6 +102,9 @@ export function serviceStateMeta(
   state: ServiceState,
   t: (key: string) => string
 ) {
+  if (state === "waiting_upstream") {
+    return { color: "amber" as const, label: t("Waiting upstream allocation") };
+  }
   if (state === "waiting_mail") {
     return { color: "amber" as const, label: t("Waiting mail") };
   }

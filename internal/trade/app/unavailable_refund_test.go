@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -134,6 +135,17 @@ type unavailableRefundDeliveryStub struct {
 	delivery *OrderDeliverySummary
 }
 
+type unavailableRefundGmailStub struct {
+	GmailSupplyPort
+	cancelled []string
+	err       error
+}
+
+func (s *unavailableRefundGmailStub) CancelGmailOrder(_ context.Context, orderNo string) error {
+	s.cancelled = append(s.cancelled, orderNo)
+	return s.err
+}
+
 func (s unavailableRefundDeliveryStub) FindOrderDelivery(context.Context, uint) (*OrderDeliverySummary, error) {
 	return s.delivery, nil
 }
@@ -215,4 +227,36 @@ func TestRefundedOrderWithMissingCleanupIsRecovered(t *testing.T) {
 	require.Equal(t, []string{repo.order.OrderNo}, allocation.released)
 	require.Equal(t, []string{repo.order.OrderNo}, tokens.disabled)
 	require.Equal(t, "succeeded", repo.cleanupStatus)
+}
+
+func TestGmailCleanupCancelsUpstreamAndRecordsFailure(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		cancelErr  error
+		wantStatus string
+		wantErr    bool
+	}{
+		{name: "success", wantStatus: "succeeded"},
+		{name: "cancel failure", cancelErr: errors.New("upstream unavailable"), wantStatus: "partial_failure", wantErr: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repo := &unavailableRefundRepoStub{order: domain.Order{OrderNo: "GMAIL-CLEANUP", ProductType: domain.ProductTypeGmail}}
+			allocation := &unavailableRefundAllocationStub{}
+			tokens := &unavailableRefundTokenStub{}
+			gmail := &unavailableRefundGmailStub{err: test.cancelErr}
+			uc := NewUseCase(repo, nil, nil, allocation, tokens)
+			uc.SetGmailPorts(gmail, nil)
+
+			err := uc.cleanupOrderService(context.Background(), repo.order, true, "Order refunded.", "request-1")
+			if test.wantErr {
+				require.ErrorIs(t, err, domain.ErrOrderCompensationError)
+			} else {
+				require.NoError(t, err)
+			}
+			require.Equal(t, []string{repo.order.OrderNo}, gmail.cancelled)
+			require.Empty(t, allocation.released)
+			require.Equal(t, []string{repo.order.OrderNo}, tokens.disabled)
+			require.Equal(t, test.wantStatus, repo.cleanupStatus)
+		})
+	}
 }
