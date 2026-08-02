@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/donnel666/remail/internal/money"
 	tradeapp "github.com/donnel666/remail/internal/trade/app"
 	tradedomain "github.com/donnel666/remail/internal/trade/domain"
 	"gorm.io/gorm"
@@ -126,12 +127,12 @@ func (s *Service) localResourceFacets(ctx context.Context, search string) (Local
 	return facets, nil
 }
 
-func (s *Service) ImportLocalResources(ctx context.Context, content, strategy string) (*LocalResourceImportResult, error) {
+func (s *Service) ImportLocalResources(ctx context.Context, ownerUserID uint, content, strategy string) (*LocalResourceImportResult, error) {
 	strategy = strings.ToLower(strings.TrimSpace(strategy))
 	if strategy == "" {
 		strategy = "skip"
 	}
-	if strategy != "skip" && strategy != "abort" || len(content) == 0 || len(content) > localResourceImportMaxBytes {
+	if ownerUserID == 0 || strategy != "skip" && strategy != "abort" || len(content) == 0 || len(content) > localResourceImportMaxBytes {
 		return nil, ErrInvalidLocalResource
 	}
 
@@ -206,6 +207,18 @@ func (s *Service) ImportLocalResources(ctx context.Context, content, strategy st
 			result.Updated++
 		}
 		if len(create) > 0 {
+			roots := make([]resourceRootModel, len(create))
+			for i := range roots {
+				roots[i] = resourceRootModel{Type: "gmail", OwnerUserID: ownerUserID}
+			}
+			if err := tx.CreateInBatches(&roots, 500).Error; err != nil {
+				return err
+			}
+			for i := range create {
+				create[i].ID = roots[i].ID
+				create[i].ResourceType = "gmail"
+				create[i].OwnerUserID = ownerUserID
+			}
 			if err := tx.CreateInBatches(create, 500).Error; err != nil {
 				return err
 			}
@@ -270,29 +283,43 @@ func removeWhitespace(value string) string {
 	}, value)
 }
 
-func (s *Service) AllocateLocalPurchase(ctx context.Context, quote tradeapp.GmailSupplyQuote) (*tradeapp.GmailPurchaseDelivery, error) {
-	if strings.TrimSpace(quote.Source) != SourceLocal {
+func (s *Service) AllocateLocalPurchase(ctx context.Context, orderNo string, quote tradeapp.GmailSupplyQuote) (*tradeapp.GmailPurchaseDelivery, error) {
+	orderNo = strings.TrimSpace(orderNo)
+	cost, err := money.Parse(quote.CostPoints)
+	if orderNo == "" || strings.TrimSpace(quote.Source) != SourceLocal || err != nil || cost.IsNegative() {
 		return nil, ErrInvalidRoute
 	}
-	db := s.dbFor(ctx)
-	var resource localResourceModel
-	if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).Where("status = ?", LocalResourceAvailable).Order("id ASC").Take(&resource).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, tradedomain.ErrInsufficientInventory
+	var delivery *tradeapp.GmailPurchaseDelivery
+	err = s.dbFor(ctx).Transaction(func(tx *gorm.DB) error {
+		var resource localResourceModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("status = ?", LocalResourceAvailable).Order("id ASC").Take(&resource).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return tradedomain.ErrInsufficientInventory
+			}
+			return fmt.Errorf("lock local Gmail purchase resource: %w", err)
 		}
-		return nil, fmt.Errorf("lock local Gmail purchase resource: %w", err)
-	}
-	updated := db.Model(&localResourceModel{}).Where("id = ? AND status = ?", resource.ID, LocalResourceAvailable).Update("status", LocalResourceSold)
-	if updated.Error != nil {
-		return nil, fmt.Errorf("sell local Gmail resource: %w", updated.Error)
-	}
-	if updated.RowsAffected != 1 {
-		return nil, tradedomain.ErrInsufficientInventory
-	}
-	return &tradeapp.GmailPurchaseDelivery{
-		ResourceID: resource.ID, Email: resource.Email, Password: resource.Password,
-		TwoFactorSecret: resource.TwoFactorSecret, AppPassword: resource.AppPassword,
-	}, nil
+		updated := tx.Model(&localResourceModel{}).Where("id = ? AND status = ?", resource.ID, LocalResourceAvailable).Update("status", LocalResourceSold)
+		if updated.Error != nil {
+			return fmt.Errorf("sell local Gmail resource: %w", updated.Error)
+		}
+		if updated.RowsAffected != 1 {
+			return tradedomain.ErrInsufficientInventory
+		}
+		resourceID := resource.ID
+		allocation := allocationModel{
+			OrderNo: orderNo, Source: SourceLocal, ServiceMode: string(tradedomain.ServiceModePurchase),
+			ResourceID: &resourceID, Email: resource.Email, CostPointsSnapshot: money.Format(cost),
+		}
+		if err := tx.Create(&allocation).Error; err != nil {
+			return fmt.Errorf("create local Gmail allocation: %w", err)
+		}
+		delivery = &tradeapp.GmailPurchaseDelivery{
+			AllocationID: allocation.ID, ResourceID: resource.ID, Email: resource.Email, Password: resource.Password,
+			TwoFactorSecret: resource.TwoFactorSecret, AppPassword: resource.AppPassword,
+		}
+		return nil
+	})
+	return delivery, err
 }
 
 func (s *Service) FindLocalPurchase(ctx context.Context, orderNo string) (*tradeapp.GmailPurchaseDelivery, error) {
@@ -300,12 +327,19 @@ func (s *Service) FindLocalPurchase(ctx context.Context, orderNo string) (*trade
 	if orderNo == "" {
 		return nil, ErrLocalResourceMissing
 	}
-	var resource localResourceModel
-	err := s.dbFor(ctx).Table("orders AS o").
-		Select("r.id, r.email, r.password, r.two_factor_secret, r.app_password, r.status").
-		Joins("JOIN gmail_resources AS r ON r.id = o.gmail_resource_id").
-		Where("o.order_no = ? AND o.product_type = ? AND o.service_mode = ?", orderNo, "gmail", "purchase").
-		Take(&resource).Error
+	var row struct {
+		AllocationID    uint   `gorm:"column:allocation_id"`
+		ResourceID      uint   `gorm:"column:resource_id"`
+		Email           string `gorm:"column:email"`
+		Password        string `gorm:"column:password"`
+		TwoFactorSecret string `gorm:"column:two_factor_secret"`
+		AppPassword     string `gorm:"column:app_password"`
+	}
+	err := s.dbFor(ctx).Table("gmail_allocations AS a").
+		Select("a.id AS allocation_id, r.id AS resource_id, r.email, r.password, r.two_factor_secret, r.app_password").
+		Joins("JOIN gmail_resources AS r ON r.id = a.resource_id").
+		Where("a.order_no = ? AND a.service_mode = ?", orderNo, string(tradedomain.ServiceModePurchase)).
+		Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrLocalResourceMissing
 	}
@@ -313,8 +347,8 @@ func (s *Service) FindLocalPurchase(ctx context.Context, orderNo string) (*trade
 		return nil, fmt.Errorf("load local Gmail purchase: %w", err)
 	}
 	return &tradeapp.GmailPurchaseDelivery{
-		ResourceID: resource.ID, Email: resource.Email, Password: resource.Password,
-		TwoFactorSecret: resource.TwoFactorSecret, AppPassword: resource.AppPassword,
+		AllocationID: row.AllocationID, ResourceID: row.ResourceID, Email: row.Email, Password: row.Password,
+		TwoFactorSecret: row.TwoFactorSecret, AppPassword: row.AppPassword,
 	}, nil
 }
 

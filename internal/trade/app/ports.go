@@ -179,6 +179,7 @@ type GmailCode struct {
 }
 
 type GmailDeliverySummary struct {
+	AllocationID  uint
 	Codes         []GmailCode
 	ReceivedCount int
 	MaxCodes      int
@@ -190,6 +191,7 @@ type GmailDeliveryPort interface {
 }
 
 type GmailPurchaseDelivery struct {
+	AllocationID    uint
 	ResourceID      uint
 	Email           string
 	Password        string
@@ -198,7 +200,7 @@ type GmailPurchaseDelivery struct {
 }
 
 type GmailPurchaseSupplyPort interface {
-	AllocateLocalPurchase(ctx context.Context, quote GmailSupplyQuote) (*GmailPurchaseDelivery, error)
+	AllocateLocalPurchase(ctx context.Context, orderNo string, quote GmailSupplyQuote) (*GmailPurchaseDelivery, error)
 	FindLocalPurchase(ctx context.Context, orderNo string) (*GmailPurchaseDelivery, error)
 }
 
@@ -294,8 +296,6 @@ type MarkActiveCommand struct {
 	OrderNo          string
 	AllocationType   domain.AllocationType
 	AllocationID     uint
-	GmailResourceID  uint
-	GmailCostPoints  string
 	DeliveryEmail    string
 	ReceiveStartedAt time.Time
 	ReceiveUntil     time.Time
@@ -431,6 +431,7 @@ type CheckoutRequest struct {
 
 type CheckoutResult struct {
 	Order                domain.Order
+	AllocationID         uint
 	ProjectName          string
 	ProjectLogoURL       string
 	ServiceToken         string
@@ -462,11 +463,12 @@ type MatchCodeResultRequest struct {
 }
 
 type ActivateGmailOrderRequest struct {
-	OrderNo   string
-	SessionID uint
-	Email     string
-	StartedAt time.Time
-	ExpiresAt time.Time
+	OrderNo      string
+	AllocationID uint
+	SessionID    uint
+	Email        string
+	StartedAt    time.Time
+	ExpiresAt    time.Time
 }
 
 type AdminOrderCommandRequest struct {
@@ -1141,7 +1143,7 @@ func (uc *UseCase) checkoutGmailPurchasePrepared(ctx context.Context, prepared c
 			result = &CheckoutResult{Order: *order, Created: created}
 			return nil
 		}
-		delivery, err := purchases.AllocateLocalPurchase(txCtx, *prepared.gmailQuote)
+		delivery, err := purchases.AllocateLocalPurchase(txCtx, order.OrderNo, *prepared.gmailQuote)
 		if err != nil {
 			if !errors.Is(err, domain.ErrInsufficientInventory) {
 				return err
@@ -1158,8 +1160,7 @@ func (uc *UseCase) checkoutGmailPurchasePrepared(ctx context.Context, prepared c
 		receiveUntil := serviceReceiveUntil(now, *prepared.quote, domain.ServiceModePurchase)
 		afterSaleUntil := now.Add(time.Duration(prepared.quote.WarrantyMinutes) * time.Minute)
 		activated, err := uc.repo.MarkActive(txCtx, MarkActiveCommand{
-			OrderNo: order.OrderNo, AllocationType: domain.AllocationTypeGmail, AllocationID: delivery.ResourceID,
-			GmailResourceID: delivery.ResourceID, GmailCostPoints: prepared.gmailQuote.CostPoints, DeliveryEmail: delivery.Email,
+			OrderNo: order.OrderNo, AllocationType: domain.AllocationTypeGmail, AllocationID: delivery.AllocationID, DeliveryEmail: delivery.Email,
 			ReceiveStartedAt: now, ReceiveUntil: receiveUntil, ActivatedAt: &now, AfterSaleUntil: &afterSaleUntil,
 		})
 		if err != nil {
@@ -1195,6 +1196,11 @@ func (uc *UseCase) gmailCheckoutResult(ctx context.Context, order domain.Order, 
 		}
 		return result, nil
 	}
+	items := []CheckoutResult{*result}
+	if err := uc.attachGmailDeliveries(ctx, items); err != nil {
+		return nil, err
+	}
+	*result = items[0]
 	token, err := uc.tokens.FindOrderTokenByOrder(ctx, order.OrderNo)
 	if err != nil {
 		return nil, err
@@ -1218,6 +1224,7 @@ func (uc *UseCase) attachGmailPurchase(ctx context.Context, result *CheckoutResu
 	if err != nil {
 		return err
 	}
+	result.AllocationID = delivery.AllocationID
 	result.GmailPassword = delivery.Password
 	result.GmailTwoFactorSecret = delivery.TwoFactorSecret
 	result.GmailAppPassword = delivery.AppPassword
@@ -1875,6 +1882,10 @@ func (uc *UseCase) attachGmailDeliveries(ctx context.Context, results []Checkout
 		if !ok {
 			continue
 		}
+		results[i].AllocationID = delivery.AllocationID
+		if results[i].Order.ServiceMode != domain.ServiceModeCode {
+			continue
+		}
 		results[i].ContentMode = "code_only"
 		results[i].GmailCodes = delivery.Codes
 		results[i].ReceivedCount = delivery.ReceivedCount
@@ -2203,8 +2214,11 @@ func (uc *UseCase) NotifyMatchedCode(ctx context.Context, req MatchCodeResultReq
 func (uc *UseCase) ActivateGmailOrder(ctx context.Context, req ActivateGmailOrderRequest) error {
 	req.OrderNo = strings.TrimSpace(req.OrderNo)
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
-	if req.OrderNo == "" || req.Email == "" || req.SessionID == 0 || req.StartedAt.IsZero() || !req.ExpiresAt.After(req.StartedAt) {
+	if req.OrderNo == "" || req.Email == "" || req.AllocationID == 0 || req.SessionID == 0 || req.StartedAt.IsZero() || !req.ExpiresAt.After(req.StartedAt) {
 		return domain.ErrInvalidOrderRequest
+	}
+	if uc.gmailSupply == nil {
+		return domain.ErrUpstreamUnavailable
 	}
 	order, err := uc.repo.FindOrder(ctx, req.OrderNo)
 	if err != nil {
@@ -2214,7 +2228,11 @@ func (uc *UseCase) ActivateGmailOrder(ctx context.Context, req ActivateGmailOrde
 		return domain.ErrInvalidOrderRequest
 	}
 	if order.Status == domain.OrderStatusActive || order.Status == domain.OrderStatusCompleted {
-		if order.GmailSessionID != nil && *order.GmailSessionID == req.SessionID {
+		sessionID, findErr := uc.gmailSupply.FindSessionID(ctx, req.OrderNo)
+		if findErr != nil {
+			return findErr
+		}
+		if sessionID == req.SessionID {
 			return nil
 		}
 		return domain.ErrOrderStateConflict
@@ -2234,14 +2252,16 @@ func (uc *UseCase) ActivateGmailOrder(ctx context.Context, req ActivateGmailOrde
 	}
 	afterSaleUntil := req.ExpiresAt.UTC()
 	_, err = uc.repo.MarkActive(ctx, MarkActiveCommand{
-		OrderNo: req.OrderNo, AllocationType: domain.AllocationTypeGmail, AllocationID: req.SessionID,
+		OrderNo: req.OrderNo, AllocationType: domain.AllocationTypeGmail, AllocationID: req.AllocationID,
 		DeliveryEmail: req.Email, ReceiveStartedAt: req.StartedAt.UTC(), ReceiveUntil: req.ExpiresAt.UTC(), AfterSaleUntil: &afterSaleUntil,
 	})
 	if errors.Is(err, domain.ErrOrderStateConflict) {
 		reloaded, reloadErr := uc.repo.FindOrder(ctx, req.OrderNo)
-		if reloadErr == nil && reloaded.GmailSessionID != nil && *reloaded.GmailSessionID == req.SessionID &&
-			(reloaded.Status == domain.OrderStatusActive || reloaded.Status == domain.OrderStatusCompleted) {
-			return nil
+		if reloadErr == nil && (reloaded.Status == domain.OrderStatusActive || reloaded.Status == domain.OrderStatusCompleted) {
+			sessionID, findErr := uc.gmailSupply.FindSessionID(ctx, req.OrderNo)
+			if findErr == nil && sessionID == req.SessionID {
+				return nil
+			}
 		}
 	}
 	return err

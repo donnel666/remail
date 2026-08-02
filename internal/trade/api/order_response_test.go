@@ -38,3 +38,14 @@ func TestOrderResponseOmitsBlankProjectLogoURL(t *testing.T) {
 	require.NoError(t, err)
 	require.NotContains(t, string(payload), "projectLogoUrl")
 }
+
+func TestOrderResponseUsesUnifiedAllocationID(t *testing.T) {
+	allocationType := domain.AllocationTypeGmail
+	resp := orderResponse(tradeapp.CheckoutResult{
+		Order:        domain.Order{AllocationType: &allocationType},
+		AllocationID: 77,
+	})
+
+	require.Equal(t, "gmail", resp.AllocationType)
+	require.EqualValues(t, 77, resp.AllocationID)
+}

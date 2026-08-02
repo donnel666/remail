@@ -5668,6 +5668,7 @@ export interface components {
         ProjectMailRuleRequest: {
             /** @enum {string} */
             ruleType: "sender" | "recipient" | "subject" | "body";
+            /** @description Body rules allow up to 10000 characters; all other rule types remain limited to 500. */
             pattern: string;
             enabled: boolean;
         };
@@ -7086,9 +7087,9 @@ export interface components {
             lastSeenAt: string;
         };
         GmailUpstreamMappingRequest: {
-            /** @enum {string} */
-            source: "smsbower" | "local";
-            /** @description Required for SMSBower and empty for local supply. */
+            /** @description Stable provider key; use local for the built-in Gmail resource pool. */
+            source: string;
+            /** @description Empty for local supply and required for external providers. */
             providerServiceCode?: string;
             enabled: boolean;
             /** @description Whether this route participates in Gmail verification-code fulfillment. */
@@ -7107,8 +7108,7 @@ export interface components {
             purchasePrice: components["schemas"]["NonNegativeLedgerAmountResponse"];
             minimumCodeSalePrice: components["schemas"]["NonNegativeLedgerAmountResponse"];
             minimumPurchaseSalePrice: components["schemas"]["NonNegativeLedgerAmountResponse"];
-            /** @enum {string} */
-            source?: "smsbower" | "local";
+            source?: string;
             providerServiceCode?: string;
             providerServiceName?: string;
             enabled: boolean;
@@ -7175,8 +7175,7 @@ export interface components {
             orderNo: string;
             projectId: number;
             projectName: string;
-            /** @enum {string} */
-            source: "smsbower" | "local";
+            source: string;
             providerServiceCode: string;
             /** Format: email */
             email?: string;
@@ -19729,7 +19728,7 @@ export interface operations {
     deleteAdminSMSBowerMapping: {
         parameters: {
             query: {
-                source: "smsbower" | "local";
+                source: string;
             };
             header: {
                 /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */

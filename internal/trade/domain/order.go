@@ -99,8 +99,6 @@ type Order struct {
 	AllocationType           *AllocationType
 	MicrosoftAllocID         *uint
 	DomainAllocID            *uint
-	GmailSessionID           *uint
-	GmailResourceID          *uint
 	DeliveryEmail            string
 	ReceiveStartedAt         *time.Time
 	ReceiveUntil             *time.Time

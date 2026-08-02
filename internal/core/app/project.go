@@ -15,11 +15,12 @@ import (
 )
 
 const (
-	projectNameMax           = 120
-	projectTargetPlatformMax = 120
-	projectLogoURLMax        = 500
-	projectDescriptionMax    = 1000
-	projectRulePatternMax    = 500
+	projectNameMax            = 120
+	projectTargetPlatformMax  = 120
+	projectLogoURLMax         = 500
+	projectDescriptionMax     = 1000
+	projectRulePatternMax     = 500
+	projectBodyRulePatternMax = 10000
 )
 
 // ProjectBulkMaxExplicitIDs bounds project bulk commands selected by ID.
@@ -1025,7 +1026,11 @@ func normalizeMailRuleRequests(requests []ProjectMailRuleRequest, requireComplet
 			return nil, domain.ErrInvalidMailRule
 		}
 		pattern := strings.TrimSpace(req.Pattern)
-		if pattern == "" || len([]rune(pattern)) > projectRulePatternMax {
+		patternMax := projectRulePatternMax
+		if ruleType == domain.MailRuleBody {
+			patternMax = projectBodyRulePatternMax
+		}
+		if pattern == "" || len([]rune(pattern)) > patternMax {
 			return nil, domain.ErrInvalidMailRule
 		}
 		if ruleType == domain.MailRuleRecipient && !isValidRecipientPattern(pattern) {

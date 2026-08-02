@@ -50,7 +50,7 @@ export async function saveGmailUpstreamMapping(
 
 export async function deleteGmailUpstreamMapping(
   projectId: number,
-  source: "smsbower" | "local"
+  source: string
 ) {
   await unwrap<void>(
     await apiClient.DELETE("/v1/admin/upstreams/smsbower/mappings/{projectId}", {

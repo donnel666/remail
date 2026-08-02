@@ -179,7 +179,12 @@ func (h *handler) importLocalResources(c *gin.Context) {
 		writeGmailError(c, ErrInvalidLocalResource)
 		return
 	}
-	result, err := h.service.ImportLocalResources(c.Request.Context(), req.Content, req.ErrorStrategy)
+	ownerUserID, ok := middleware.GetCurrentUserID(c)
+	if !ok {
+		c.Status(http.StatusUnauthorized)
+		return
+	}
+	result, err := h.service.ImportLocalResources(c.Request.Context(), ownerUserID, req.Content, req.ErrorStrategy)
 	if err != nil {
 		writeGmailError(c, err)
 		return

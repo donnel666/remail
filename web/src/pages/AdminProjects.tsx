@@ -98,6 +98,8 @@ type ProjectListFacets = NonNullable<ProjectListResponse["facets"]>;
 type ProjectAccessUser = Pick<UserResponse, "email" | "id" | "nickname">;
 
 const recipientPatterns: RecipientPattern[] = ["exact", "dot", "plus"];
+const mailRulePatternMaxLength = 500;
+const mailBodyRulePatternMaxLength = 10000;
 
 interface MailRuleDraft {
   enabled: boolean;
@@ -510,6 +512,18 @@ function buildProjectPayload(
   }
   if (
     mailRules.some(
+      (rule) =>
+        Array.from(rule.pattern).length >
+        (rule.ruleType === "body"
+          ? mailBodyRulePatternMaxLength
+          : mailRulePatternMaxLength)
+    )
+  ) {
+    Toast.error(t("Mail rule pattern is too long."));
+    return null;
+  }
+  if (
+    mailRules.some(
       (rule) => rule.ruleType === "recipient" && !isRecipientPattern(rule.pattern)
     )
   ) {
@@ -751,7 +765,11 @@ function MailRuleDraftList({
               </Select>
             ) : (
               <Input
-                maxLength={500}
+                maxLength={
+                  rule.ruleType === "body"
+                    ? mailBodyRulePatternMaxLength
+                    : mailRulePatternMaxLength
+                }
                 onChange={(nextValue) =>
                   changeRule(rule.key, { pattern: String(nextValue) })
                 }

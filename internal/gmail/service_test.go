@@ -118,7 +118,7 @@ func TestCreateSessionIsIdempotentAndBadKeyDoesNotRetry(t *testing.T) {
 	require.False(t, errors.Is(gmailSyncTaskError(ErrRemote), asynq.SkipRetry))
 }
 
-func TestPutMappingRoutesCodeAndPurchaseIndependently(t *testing.T) {
+func TestPutMappingOnlyEnablesImplementedModes(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:gmail-route-modes?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.Exec("CREATE TABLE project_products (id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, type TEXT NOT NULL)").Error)
@@ -129,29 +129,78 @@ func TestPutMappingRoutesCodeAndPurchaseIndependently(t *testing.T) {
 
 	service := NewService(db, nil)
 	require.NoError(t, service.PutMapping(context.Background(), 7, SourceSMSBower, "gm", true, true, false))
-	require.NoError(t, service.PutMapping(context.Background(), 7, SourceLocal, "", true, false, true))
 	require.ErrorIs(t, service.PutMapping(context.Background(), 7, SourceSMSBower, "gm", true, true, true), ErrInvalidRoute)
-	require.ErrorIs(t, service.PutMapping(context.Background(), 7, SourceLocal, "", true, true, false), ErrInvalidRoute)
-	require.NoError(t, service.PutMapping(context.Background(), 7, SourceLocal, "", false, false, false))
+	var route routeModel
+	require.NoError(t, db.Where("source = ?", SourceSMSBower).Take(&route).Error)
+	require.True(t, route.Enabled)
+	require.True(t, route.CodeEnabled)
+	require.False(t, route.PurchaseEnabled)
+
+	require.NoError(t, service.PutMapping(context.Background(), 7, SourceLocal, "", true, false, true))
+	require.ErrorIs(t, service.PutMapping(context.Background(), 7, SourceLocal, "", true, true, true), ErrInvalidRoute)
+	route = routeModel{}
+	require.NoError(t, db.Where("source = ?", SourceLocal).Take(&route).Error)
+	require.True(t, route.Enabled)
+	require.False(t, route.CodeEnabled)
+	require.True(t, route.PurchaseEnabled)
+
+	require.ErrorIs(t, service.PutMapping(context.Background(), 7, " Vendor-X ", "gmail-us", true, true, false), ErrInvalidRoute)
+	require.NoError(t, service.PutMapping(context.Background(), 7, " Vendor-X ", "gmail-us", false, true, true))
+	route = routeModel{}
+	require.NoError(t, db.Where("source = ?", "vendor-x").Take(&route).Error)
+	require.False(t, route.Enabled)
+	require.True(t, route.CodeEnabled)
+	require.True(t, route.PurchaseEnabled)
+	route = routeModel{}
+	require.NoError(t, db.Where("source = ?", SourceSMSBower).Take(&route).Error)
+	require.True(t, route.Enabled)
+	require.True(t, route.CodeEnabled)
+	require.ErrorIs(t, service.PutMapping(context.Background(), 7, "vendor-y", "", true, true, true), ErrInvalidRoute)
+	require.ErrorIs(t, service.PutMapping(context.Background(), 7, SourceLocal, "gm", true, true, true), ErrInvalidRoute)
 
 	var routes []routeModel
 	require.NoError(t, db.Order("source").Find(&routes).Error)
-	require.Len(t, routes, 2)
-	for _, route := range routes {
-		if route.Source == SourceSMSBower {
-			require.True(t, route.CodeEnabled)
-			require.False(t, route.PurchaseEnabled)
-		} else {
-			require.False(t, route.CodeEnabled)
-			require.False(t, route.PurchaseEnabled)
-			require.False(t, route.Enabled)
-		}
-	}
-	require.NoError(t, service.DeleteMapping(context.Background(), 7, SourceLocal))
+	require.Len(t, routes, 3)
+	require.NoError(t, service.DeleteMapping(context.Background(), 7, "VENDOR-X"))
 	routes = nil
 	require.NoError(t, db.Find(&routes).Error)
-	require.Len(t, routes, 1)
-	require.Equal(t, SourceSMSBower, routes[0].Source)
+	require.Len(t, routes, 2)
+}
+
+func TestListMappingsDoesNotUseSMSBowerQuoteForCustomProvider(t *testing.T) {
+	setGmailRuntime(t, map[string]string{
+		"smsbower_points_per_unit": "2",
+		"smsbower_min_margin_rate": "0.10",
+	})
+	db, err := gorm.Open(sqlite.Open("file:gmail-custom-provider-quote?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.Exec("CREATE TABLE projects (id INTEGER PRIMARY KEY, name TEXT NOT NULL)").Error)
+	require.NoError(t, db.Exec(`CREATE TABLE project_products (
+		id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, type TEXT NOT NULL,
+		code_price TEXT NOT NULL, purchase_price TEXT NOT NULL,
+		code_supplier_price TEXT NOT NULL, purchase_supplier_price TEXT NOT NULL
+	)`).Error)
+	require.NoError(t, db.Exec("CREATE TABLE user_groups (enabled BOOLEAN NOT NULL, price_discount_ratio TEXT NOT NULL)").Error)
+	require.NoError(t, db.AutoMigrate(&accountStateModel{}, &serviceModel{}, &routeModel{}, &localResourceModel{}))
+	now := time.Date(2026, 8, 1, 1, 0, 0, 0, time.UTC)
+	require.NoError(t, db.Exec("INSERT INTO projects(id, name) VALUES (7, 'Gmail Project')").Error)
+	require.NoError(t, db.Exec("INSERT INTO project_products(id, project_id, type, code_price, purchase_price, code_supplier_price, purchase_supplier_price) VALUES (71, 7, 'gmail', '20', '20', '1', '1')").Error)
+	require.NoError(t, db.Exec("INSERT INTO user_groups(enabled, price_discount_ratio) VALUES (1, '1')").Error)
+	require.NoError(t, db.Create(&accountStateModel{ID: 1, Balance: "100", HealthStatus: "healthy", LastSuccessAt: &now, Generation: 1}).Error)
+	require.NoError(t, db.Create(&serviceModel{Code: "gm", Name: "SMSBower Gmail", GmailPrice: "9", GmailStock: 5, Active: true, LastSeenAt: now}).Error)
+	require.NoError(t, db.Create(&routeModel{ProjectID: 7, Source: "vendor-x", ProviderServiceCode: "gm", Enabled: true, CodeEnabled: true}).Error)
+
+	service := NewService(db, nil)
+	service.now = func() time.Time { return now }
+	items, err := service.ListMappings(context.Background())
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.Equal(t, "vendor-x", items[0].Source)
+	require.Empty(t, items[0].ProviderServiceName)
+	require.Equal(t, "0", items[0].UpstreamPrice)
+	require.Equal(t, "0.00", items[0].CostPoints)
+	require.False(t, items[0].CodeSafe)
+	require.Equal(t, "provider_mode_unsupported", items[0].CodeUnsafeReason)
 }
 
 func TestLocalPurchaseSupplyUsesLocalCostProtectionOnly(t *testing.T) {
@@ -283,6 +332,56 @@ func TestRemoteTerminalStatusCompletesLocalAction(t *testing.T) {
 	require.Equal(t, []string{"GMAIL-COMPLETE"}, trade.completed)
 }
 
+func TestUncertainCancelRefundsAndKeepsCostUnknown(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("Bad actual activation status"))
+	}))
+	defer server.Close()
+	setGmailRuntime(t, map[string]string{"smsbower_api_key": "secret"})
+
+	db, err := gorm.Open(sqlite.Open("file:gmail-uncertain-cancel?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&sessionModel{}, &allocationModel{}, &serviceModel{}))
+	require.NoError(t, db.Exec("CREATE TABLE projects (id INTEGER PRIMARY KEY, name TEXT NOT NULL)").Error)
+	require.NoError(t, db.Exec(`CREATE TABLE orders (
+		order_no TEXT PRIMARY KEY, project_id INTEGER NOT NULL, debit_tx_id INTEGER,
+		product_type TEXT NOT NULL, pay_amount TEXT NOT NULL, refund_amount TEXT NOT NULL
+	)`).Error)
+	require.NoError(t, db.Exec("INSERT INTO projects(id, name) VALUES (7, 'Gmail Project')").Error)
+	require.NoError(t, db.Exec("INSERT INTO orders(order_no, project_id, debit_tx_id, product_type, pay_amount, refund_amount) VALUES ('GMAIL-CANCEL-UNKNOWN', 7, 1, 'gmail', '8', '8')").Error)
+	now := time.Date(2026, 8, 1, 2, 20, 0, 0, time.UTC)
+	session := sessionModel{
+		OrderNo: "GMAIL-CANCEL-UNKNOWN", Source: SourceSMSBower, SourceRef: "42", ProviderServiceCode: "gm",
+		Email: "demo@gmail.com", Status: SessionCancelling, CodesJSON: []byte("[]"), CostPointsSnapshot: "3",
+		PendingRemoteAction: ActionCancel, NextPollAt: &now, Version: 1,
+	}
+	require.NoError(t, db.Create(&session).Error)
+	trade := &gmailTradeSpy{}
+	notifier := &gmailAlertNotifierSpy{}
+	service := NewService(db, nil)
+	service.client = newSMSBowerClient(server.URL, server.Client())
+	service.SetTrade(trade)
+	service.SetNotifier(notifier)
+	service.now = func() time.Time { return now }
+
+	require.NoError(t, service.Poll(context.Background(), session.ID))
+	sessionID := session.ID
+	session = sessionModel{}
+	require.NoError(t, db.First(&session, sessionID).Error)
+	require.Equal(t, SessionUnknown, session.Status)
+	require.Empty(t, session.PendingRemoteAction)
+	require.Contains(t, session.LastSafeError, "取消结果不确定")
+	require.NotNil(t, session.CompletedAt)
+	require.Nil(t, session.NextPollAt)
+	require.Equal(t, []string{session.OrderNo}, trade.failed)
+	require.Len(t, notifier.alerts, 1)
+
+	report, err := service.Finance(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "3.00", report.Overview.UnknownCost)
+	require.Equal(t, "3.00", report.Overview.ConservativeCost)
+}
+
 func TestCancelGmailOrderPersistsIntentBeforeScheduling(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"status":1}`))
@@ -336,7 +435,7 @@ func TestMissingRemoteActivationSettlesByReceivedCodeCount(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			db, err := gorm.Open(sqlite.Open("file:gmail-missing-"+test.name+"?mode=memory&cache=shared"), &gorm.Config{})
 			require.NoError(t, err)
-			require.NoError(t, db.AutoMigrate(&sessionModel{}))
+			require.NoError(t, db.AutoMigrate(&sessionModel{}, &allocationModel{}))
 			now := time.Date(2026, 8, 1, 3, 4, 5, 0, time.UTC)
 			expiresAt := now.Add(time.Hour)
 			session := sessionModel{
@@ -354,6 +453,11 @@ func TestMissingRemoteActivationSettlesByReceivedCodeCount(t *testing.T) {
 			require.NoError(t, service.Poll(context.Background(), session.ID))
 			require.NoError(t, db.First(&session, session.ID).Error)
 			require.Equal(t, test.wantStatus, session.Status)
+			require.Len(t, trade.activations, 1)
+			var allocation allocationModel
+			require.NoError(t, db.Where("order_no = ?", session.OrderNo).Take(&allocation).Error)
+			require.Equal(t, allocation.ID, trade.activations[0].AllocationID)
+			require.Equal(t, session.ID, trade.activations[0].SessionID)
 			if test.wantComplete {
 				require.Equal(t, []string{session.OrderNo}, trade.completed)
 				require.Empty(t, trade.failed)
@@ -492,12 +596,11 @@ func TestSyncRejectsMissingPriceForEnabledMapping(t *testing.T) {
 func TestFinanceUsesOrderRevenueAndConservativeSessionCost(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:gmail-finance?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&sessionModel{}, &serviceModel{}))
+	require.NoError(t, db.AutoMigrate(&sessionModel{}, &serviceModel{}, &allocationModel{}))
 	require.NoError(t, db.Exec("CREATE TABLE projects (id INTEGER PRIMARY KEY, name TEXT NOT NULL)").Error)
 	require.NoError(t, db.Exec(`CREATE TABLE orders (
 		order_no TEXT PRIMARY KEY, project_id INTEGER NOT NULL, debit_tx_id INTEGER,
-		product_type TEXT NOT NULL, pay_amount TEXT NOT NULL, refund_amount TEXT NOT NULL,
-		gmail_resource_id INTEGER, gmail_cost_points_snapshot TEXT NOT NULL DEFAULT '0'
+		product_type TEXT NOT NULL, pay_amount TEXT NOT NULL, refund_amount TEXT NOT NULL
 	)`).Error)
 	require.NoError(t, db.Exec("INSERT INTO projects(id, name) VALUES (7, 'Gmail Project')").Error)
 	require.NoError(t, db.Create(&serviceModel{Code: "gm", Name: "Gmail", GmailPrice: "1", Active: true, LastSeenAt: time.Now().UTC()}).Error)

@@ -661,14 +661,12 @@ func orderResponse(result tradeapp.CheckoutResult) OrderResponse {
 		}
 	}
 	switch {
+	case result.AllocationID > 0:
+		allocationID = result.AllocationID
 	case order.MicrosoftAllocID != nil:
 		allocationID = *order.MicrosoftAllocID
 	case order.DomainAllocID != nil:
 		allocationID = *order.DomainAllocID
-	case order.GmailSessionID != nil:
-		allocationID = *order.GmailSessionID
-	case order.GmailResourceID != nil:
-		allocationID = *order.GmailResourceID
 	}
 	return OrderResponse{
 		ID:                   order.ID,

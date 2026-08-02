@@ -11124,7 +11124,8 @@ paths:
           required: true
           schema:
             type: string
-            enum: [smsbower, local]
+            minLength: 1
+            maxLength: 64
         - $ref: "#/components/parameters/CsrfToken"
       responses:
         "204":
@@ -15714,7 +15715,7 @@ components:
           enum: [sender, recipient, subject, body]
         pattern:
           type: string
-          maxLength: 500
+          description: Body rules allow up to 10000 characters; all other rule types remain limited to 500.
         enabled:
           type: boolean
       additionalProperties: false
@@ -19170,11 +19171,13 @@ components:
       properties:
         source:
           type: string
-          enum: [smsbower, local]
+          minLength: 1
+          maxLength: 64
+          description: Stable provider key; use local for the built-in Gmail resource pool.
         providerServiceCode:
           type: string
           maxLength: 64
-          description: Required for SMSBower and empty for local supply.
+          description: Empty for local supply and required for external providers.
         enabled:
           type: boolean
         codeEnabled:
@@ -19231,7 +19234,7 @@ components:
           $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
         source:
           type: string
-          enum: [smsbower, local]
+          maxLength: 64
         providerServiceCode:
           type: string
         providerServiceName:
@@ -19415,7 +19418,7 @@ components:
           type: string
         source:
           type: string
-          enum: [smsbower, local]
+          maxLength: 64
         providerServiceCode:
           type: string
         email:

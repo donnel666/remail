@@ -273,6 +273,19 @@ func TestProjectUseCaseAdminCreateListedRejectsIncompleteRulesAndInvalidWeights(
 	require.ErrorIs(t, err, domain.ErrInvalidProduct)
 }
 
+func TestNormalizeMailRuleRequestsAllowsTenThousandCharacterBodies(t *testing.T) {
+	body := strings.Repeat("字", projectBodyRulePatternMax)
+	rules, err := normalizeMailRuleRequests([]ProjectMailRuleRequest{{RuleType: "body", Pattern: body}}, false, false)
+	require.NoError(t, err)
+	require.Equal(t, body, rules[0].Pattern)
+
+	_, err = normalizeMailRuleRequests([]ProjectMailRuleRequest{{RuleType: "body", Pattern: body + "字"}}, false, false)
+	require.ErrorIs(t, err, domain.ErrInvalidMailRule)
+
+	_, err = normalizeMailRuleRequests([]ProjectMailRuleRequest{{RuleType: "subject", Pattern: strings.Repeat("字", projectRulePatternMax+1)}}, false, false)
+	require.ErrorIs(t, err, domain.ErrInvalidMailRule)
+}
+
 func TestProjectUseCaseAdminCreateListedCreatesCompleteProjectAndLog(t *testing.T) {
 	repo := &fakeProjectRepo{}
 	uc := NewProjectUseCase(repo)

@@ -1031,7 +1031,8 @@ func (r *ResourceRepo) listQuery(ctx context.Context, ownerUserID uint, filter c
 	}
 	switch filter.ResourceType {
 	case "":
-		q = q.Joins("LEFT JOIN microsoft_resources ms_filter ON ms_filter.id = email_resources.id").
+		q = q.Where("email_resources.type IN ?", []string{string(domain.ResourceTypeMicrosoft), string(domain.ResourceTypeDomain)}).
+			Joins("LEFT JOIN microsoft_resources ms_filter ON ms_filter.id = email_resources.id").
 			Joins("LEFT JOIN domain_resources dr_filter ON dr_filter.id = email_resources.id").
 			Where("email_resources.type <> ? OR ms_filter.status <> ?", string(domain.ResourceTypeMicrosoft), string(domain.MicrosoftStatusDeleted)).
 			Where("email_resources.type <> ? OR dr_filter.status <> ?", string(domain.ResourceTypeDomain), string(domain.DomainStatusDeleted))

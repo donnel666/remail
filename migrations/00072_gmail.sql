@@ -18,9 +18,30 @@ ALTER TABLE project_products
         OR code_window_minutes = 1440
     );
 
+-- ponytail: enforcing replacement CHECKs copies the large orders table; the
+-- application and typed allocation table enforce these invariants online.
 ALTER TABLE orders
     DROP CHECK chk_orders_product_type,
-    ADD CONSTRAINT chk_orders_product_type CHECK (product_type IN ('microsoft', 'domain', 'random', 'gmail'));
+    DROP CHECK chk_orders_allocation_shape,
+    ADD CONSTRAINT chk_orders_product_type CHECK (
+        product_type IN ('microsoft', 'domain', 'random', 'gmail')
+    ) NOT ENFORCED,
+    ADD CONSTRAINT chk_orders_allocation_shape CHECK (
+        (allocation_type IS NULL AND microsoft_alloc_id IS NULL AND domain_alloc_id IS NULL)
+        OR (allocation_type = 'microsoft' AND microsoft_alloc_id IS NOT NULL AND domain_alloc_id IS NULL)
+        OR (allocation_type = 'domain' AND domain_alloc_id IS NOT NULL AND microsoft_alloc_id IS NULL)
+        OR (allocation_type = 'gmail' AND microsoft_alloc_id IS NULL AND domain_alloc_id IS NULL)
+    ) NOT ENFORCED,
+    ALGORITHM=INSTANT;
+
+-- ponytail: the typed child foreign key keeps Gmail roots valid without
+-- rebuilding the large shared resource table to enforce this CHECK.
+ALTER TABLE email_resources
+    DROP CHECK chk_email_resources_type,
+    ADD CONSTRAINT chk_email_resources_type CHECK (
+        type IN ('microsoft', 'domain', 'gmail')
+    ) NOT ENFORCED,
+    ALGORITHM=INSTANT;
 
 CREATE TABLE smsbower_account_state (
     id TINYINT UNSIGNED NOT NULL PRIMARY KEY,
@@ -37,7 +58,9 @@ CREATE TABLE smsbower_account_state (
     updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
     CONSTRAINT chk_smsbower_account_singleton CHECK (id = 1),
     CONSTRAINT chk_smsbower_account_balance CHECK (balance >= 0),
-    CONSTRAINT chk_smsbower_account_health CHECK (health_status IN ('disabled', 'healthy', 'degraded', 'unavailable')),
+    CONSTRAINT chk_smsbower_account_health CHECK (
+        health_status IN ('disabled', 'healthy', 'degraded', 'unavailable')
+    ),
     CONSTRAINT chk_smsbower_account_generation CHECK (generation > 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -64,7 +87,7 @@ CREATE TABLE smsbower_services (
 CREATE TABLE gmail_supply_routes (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     project_id BIGINT UNSIGNED NOT NULL,
-    source VARCHAR(24) NOT NULL DEFAULT 'smsbower' COMMENT 'smsbower|local',
+    source VARCHAR(64) NOT NULL DEFAULT 'smsbower' COMMENT 'provider key or local',
     provider_service_code VARCHAR(64) NOT NULL DEFAULT '',
     enabled TINYINT(1) NOT NULL DEFAULT 1,
     code_enabled TINYINT(1) NOT NULL DEFAULT 1,
@@ -72,11 +95,14 @@ CREATE TABLE gmail_supply_routes (
     created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
     UNIQUE INDEX idx_gmail_supply_routes_project_source (project_id, source),
-    INDEX idx_gmail_supply_routes_provider (source, provider_service_code, enabled, code_enabled, purchase_enabled),
-    CONSTRAINT fk_gmail_supply_routes_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-    CONSTRAINT chk_gmail_supply_routes_source CHECK (source IN ('smsbower', 'local')),
+    INDEX idx_gmail_supply_routes_provider (
+        source, provider_service_code, enabled, code_enabled, purchase_enabled
+    ),
+    CONSTRAINT fk_gmail_supply_routes_project
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    CONSTRAINT chk_gmail_supply_routes_source CHECK (source <> ''),
     CONSTRAINT chk_gmail_supply_routes_provider CHECK (
-        (source = 'smsbower' AND provider_service_code <> '')
+        (source <> 'local' AND provider_service_code <> '')
         OR (source = 'local' AND provider_service_code = '')
     ),
     CONSTRAINT chk_gmail_supply_routes_modes CHECK (
@@ -87,7 +113,7 @@ CREATE TABLE gmail_supply_routes (
 CREATE TABLE gmail_code_sessions (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     order_no VARCHAR(64) NOT NULL,
-    source VARCHAR(24) NOT NULL DEFAULT 'smsbower' COMMENT 'smsbower|local',
+    source VARCHAR(64) NOT NULL DEFAULT 'smsbower' COMMENT 'provider key',
     source_ref VARCHAR(191) NOT NULL DEFAULT '',
     provider_service_code VARCHAR(64) NOT NULL DEFAULT '',
     email VARCHAR(320) NOT NULL DEFAULT '',
@@ -112,8 +138,10 @@ CREATE TABLE gmail_code_sessions (
     INDEX idx_gmail_code_sessions_expiry (status, expires_at, id),
     INDEX idx_gmail_code_sessions_retention (status, completed_at, id),
     INDEX idx_gmail_code_sessions_source_created (source, created_at, id),
-    CONSTRAINT chk_gmail_code_sessions_source CHECK (source IN ('smsbower', 'local')),
-    CONSTRAINT chk_gmail_code_sessions_status CHECK (status IN ('pending', 'provisioning', 'active', 'completing', 'completed', 'cancelling', 'cancelled', 'failed', 'unknown')),
+    CONSTRAINT chk_gmail_code_sessions_source CHECK (source <> ''),
+    CONSTRAINT chk_gmail_code_sessions_status CHECK (
+        status IN ('pending', 'provisioning', 'active', 'completing', 'completed', 'cancelling', 'cancelled', 'failed', 'unknown')
+    ),
     CONSTRAINT chk_gmail_code_sessions_count CHECK (received_count <= 3),
     CONSTRAINT chk_gmail_code_sessions_cost CHECK (
         upstream_price_snapshot >= 0
@@ -121,58 +149,121 @@ CREATE TABLE gmail_code_sessions (
         AND cost_points_snapshot >= 0
         AND max_price_snapshot >= 0
     ),
-    CONSTRAINT chk_gmail_code_sessions_action CHECK (pending_remote_action IN ('', 'wait_next', 'complete', 'cancel')),
+    CONSTRAINT chk_gmail_code_sessions_action CHECK (
+        pending_remote_action IN ('', 'wait_next', 'complete', 'cancel')
+    ),
     CONSTRAINT chk_gmail_code_sessions_version CHECK (version > 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-ALTER TABLE orders
-    ADD COLUMN gmail_session_id BIGINT UNSIGNED NULL AFTER domain_alloc_id,
-    ADD CONSTRAINT fk_orders_gmail_session FOREIGN KEY (gmail_session_id) REFERENCES gmail_code_sessions(id) ON DELETE RESTRICT,
-    DROP CHECK chk_orders_allocation_shape,
-    ADD CONSTRAINT chk_orders_allocation_shape CHECK (
-        (allocation_type IS NULL AND microsoft_alloc_id IS NULL AND domain_alloc_id IS NULL AND gmail_session_id IS NULL)
-        OR (allocation_type = 'microsoft' AND microsoft_alloc_id IS NOT NULL AND domain_alloc_id IS NULL AND gmail_session_id IS NULL)
-        OR (allocation_type = 'domain' AND domain_alloc_id IS NOT NULL AND microsoft_alloc_id IS NULL AND gmail_session_id IS NULL)
-        OR (allocation_type = 'gmail' AND gmail_session_id IS NOT NULL AND microsoft_alloc_id IS NULL AND domain_alloc_id IS NULL)
-    );
+CREATE TABLE gmail_resources (
+    id BIGINT UNSIGNED PRIMARY KEY,
+    resource_type VARCHAR(32) NOT NULL DEFAULT 'gmail',
+    owner_user_id BIGINT UNSIGNED NOT NULL,
+    email VARCHAR(320) NOT NULL,
+    identity VARCHAR(320) NOT NULL,
+    password VARCHAR(512) NOT NULL,
+    two_factor_secret VARCHAR(512) NOT NULL,
+    app_password VARCHAR(128) NOT NULL,
+    status VARCHAR(24) NOT NULL DEFAULT 'available' COMMENT 'available|disabled|leased|sold',
+    last_safe_error VARCHAR(500) NOT NULL DEFAULT '',
+    last_checked_at DATETIME(3) NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    UNIQUE INDEX idx_gmail_resources_email (email),
+    UNIQUE INDEX idx_gmail_resources_identity (identity),
+    INDEX idx_gmail_resources_status_created (status, created_at, id),
+    INDEX idx_gmail_resources_owner_created (owner_user_id, created_at, id),
+    CONSTRAINT fk_gmail_resources_root
+        FOREIGN KEY (id, resource_type, owner_user_id)
+        REFERENCES email_resources(id, type, owner_user_id) ON DELETE CASCADE,
+    CONSTRAINT chk_gmail_resources_type CHECK (resource_type = 'gmail'),
+    CONSTRAINT chk_gmail_resources_email CHECK (email <> ''),
+    CONSTRAINT chk_gmail_resources_credentials CHECK (
+        password <> '' AND two_factor_secret <> '' AND app_password <> ''
+    ),
+    CONSTRAINT chk_gmail_resources_status CHECK (
+        status IN ('available', 'disabled', 'leased', 'sold')
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE gmail_allocations (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    order_no VARCHAR(64) NOT NULL,
+    source VARCHAR(64) NOT NULL,
+    source_ref VARCHAR(191) NOT NULL DEFAULT '',
+    service_mode VARCHAR(32) NOT NULL COMMENT 'code|purchase',
+    resource_id BIGINT UNSIGNED NULL COMMENT 'email_resources.id for local inventory',
+    email VARCHAR(320) NOT NULL,
+    cost_points_snapshot DECIMAL(18,6) NOT NULL DEFAULT 0,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    UNIQUE INDEX idx_gmail_allocations_order (order_no),
+    UNIQUE INDEX idx_gmail_allocations_resource (resource_id),
+    INDEX idx_gmail_allocations_source_created (source, created_at, id),
+    CONSTRAINT fk_gmail_allocations_resource
+        FOREIGN KEY (resource_id) REFERENCES gmail_resources(id) ON DELETE RESTRICT,
+    CONSTRAINT chk_gmail_allocations_source CHECK (source <> ''),
+    CONSTRAINT chk_gmail_allocations_mode CHECK (service_mode IN ('code', 'purchase')),
+    CONSTRAINT chk_gmail_allocations_email CHECK (email <> ''),
+    CONSTRAINT chk_gmail_allocations_cost CHECK (cost_points_snapshot >= 0),
+    CONSTRAINT chk_gmail_allocations_target CHECK (
+        (resource_id IS NOT NULL AND source_ref = '')
+        OR (resource_id IS NULL AND source_ref <> '')
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- +goose Down
 
-DROP TEMPORARY TABLE IF EXISTS gmail_upstream_down_guard;
-CREATE TEMPORARY TABLE gmail_upstream_down_guard (
+DROP TEMPORARY TABLE IF EXISTS gmail_down_guard;
+CREATE TEMPORARY TABLE gmail_down_guard (
     gmail_rows BIGINT NOT NULL,
-    CONSTRAINT chk_gmail_upstream_down_guard CHECK (gmail_rows = 0)
+    CONSTRAINT chk_gmail_down_guard CHECK (gmail_rows = 0)
 );
-INSERT INTO gmail_upstream_down_guard (gmail_rows)
+INSERT INTO gmail_down_guard (gmail_rows)
 SELECT
-    (SELECT COUNT(*) FROM orders WHERE product_type = 'gmail')
+    (SELECT COUNT(*) FROM orders WHERE product_type = 'gmail' OR allocation_type = 'gmail')
     + (SELECT COUNT(*) FROM project_products WHERE type = 'gmail')
     + (SELECT COUNT(*) FROM gmail_code_sessions)
-    + (SELECT COUNT(*) FROM gmail_supply_routes);
-DROP TEMPORARY TABLE gmail_upstream_down_guard;
+    + (SELECT COUNT(*) FROM gmail_supply_routes)
+    + (SELECT COUNT(*) FROM gmail_allocations)
+    + (SELECT COUNT(*) FROM gmail_resources)
+    + (SELECT COUNT(*) FROM email_resources WHERE type = 'gmail');
+DROP TEMPORARY TABLE gmail_down_guard;
 
-ALTER TABLE orders
-    DROP CHECK chk_orders_allocation_shape,
-    DROP FOREIGN KEY fk_orders_gmail_session,
-    DROP COLUMN gmail_session_id,
-    ADD CONSTRAINT chk_orders_allocation_shape CHECK (
-        (allocation_type IS NULL AND microsoft_alloc_id IS NULL AND domain_alloc_id IS NULL)
-        OR (allocation_type = 'microsoft' AND microsoft_alloc_id IS NOT NULL AND domain_alloc_id IS NULL)
-        OR (allocation_type = 'domain' AND domain_alloc_id IS NOT NULL AND microsoft_alloc_id IS NULL)
-    ),
-    DROP CHECK chk_orders_product_type,
-    ADD CONSTRAINT chk_orders_product_type CHECK (product_type IN ('microsoft', 'domain', 'random'));
-
+DROP TABLE gmail_allocations;
+DROP TABLE gmail_resources;
+DELETE FROM email_resources WHERE type = 'gmail';
 DROP TABLE gmail_code_sessions;
 DROP TABLE gmail_supply_routes;
 DROP TABLE smsbower_services;
 DROP TABLE smsbower_account_state;
 
+ALTER TABLE email_resources
+    DROP CHECK chk_email_resources_type,
+    ADD CONSTRAINT chk_email_resources_type CHECK (
+        type IN ('microsoft', 'domain')
+    ) NOT ENFORCED,
+    ALGORITHM=INSTANT;
+
+ALTER TABLE orders
+    DROP CHECK chk_orders_product_type,
+    DROP CHECK chk_orders_allocation_shape,
+    ADD CONSTRAINT chk_orders_product_type CHECK (
+        product_type IN ('microsoft', 'domain', 'random')
+    ) NOT ENFORCED,
+    ADD CONSTRAINT chk_orders_allocation_shape CHECK (
+        (allocation_type IS NULL AND microsoft_alloc_id IS NULL AND domain_alloc_id IS NULL)
+        OR (allocation_type = 'microsoft' AND microsoft_alloc_id IS NOT NULL AND domain_alloc_id IS NULL)
+        OR (allocation_type = 'domain' AND domain_alloc_id IS NOT NULL AND microsoft_alloc_id IS NULL)
+    ) NOT ENFORCED,
+    ALGORITHM=INSTANT;
+
 ALTER TABLE project_products
     DROP CHECK chk_project_products_gmail,
     DROP CHECK chk_project_products_type,
     DROP CHECK chk_project_products_weights,
-    ADD CONSTRAINT chk_project_products_type CHECK (type IN ('microsoft', 'domain', 'random')),
+    ADD CONSTRAINT chk_project_products_type CHECK (
+        type IN ('microsoft', 'domain', 'random')
+    ),
     ADD CONSTRAINT chk_project_products_weights CHECK (
         main_weight >= 0
         AND dot_weight >= 0

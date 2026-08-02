@@ -144,10 +144,6 @@ func (r *batchRepoSpy) MarkActive(_ context.Context, cmd MarkActiveCommand) (*do
 		order.ReceiveUntil = &cmd.ReceiveUntil
 		order.ActivatedAt = cmd.ActivatedAt
 		order.AfterSaleUntil = cmd.AfterSaleUntil
-		if cmd.GmailResourceID > 0 {
-			id := cmd.GmailResourceID
-			order.GmailResourceID = &id
-		}
 		r.orders[key] = order
 		return &order, nil
 	}
@@ -422,14 +418,14 @@ func (*checkoutGmailSupplySpy) ListGmailDeliveries(context.Context, []string) (m
 	return map[string]GmailDeliverySummary{}, nil
 }
 
-func (s *checkoutGmailSupplySpy) AllocateLocalPurchase(context.Context, GmailSupplyQuote) (*GmailPurchaseDelivery, error) {
+func (s *checkoutGmailSupplySpy) AllocateLocalPurchase(context.Context, string, GmailSupplyQuote) (*GmailPurchaseDelivery, error) {
 	s.purchases++
 	if s.purchaseErr != nil {
 		return nil, s.purchaseErr
 	}
 	if s.purchase == nil {
 		s.purchase = &GmailPurchaseDelivery{
-			ResourceID: 51, Email: "buyer@gmail.com", Password: "password",
+			AllocationID: 61, ResourceID: 51, Email: "buyer@gmail.com", Password: "password",
 			TwoFactorSecret: "JBSWY3DPEHPK3PXP", AppPassword: "abcdefghijklmnop",
 		}
 	}
@@ -658,8 +654,7 @@ func TestGmailLocalPurchaseChargesAndDeliversCredentialsOnce(t *testing.T) {
 	result, err := uc.Checkout(context.Background(), request)
 	require.NoError(t, err)
 	require.Equal(t, domain.OrderStatusActive, result.Order.Status)
-	require.NotNil(t, result.Order.GmailResourceID)
-	require.EqualValues(t, 51, *result.Order.GmailResourceID)
+	require.EqualValues(t, 61, result.AllocationID)
 	require.Equal(t, "buyer@gmail.com", result.Order.DeliveryEmail)
 	require.Equal(t, "password", result.GmailPassword)
 	require.Equal(t, "JBSWY3DPEHPK3PXP", result.GmailTwoFactorSecret)

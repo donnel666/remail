@@ -44,9 +44,6 @@ type OrderModel struct {
 	AllocationType           *string        `gorm:"type:varchar(32);column:allocation_type"`
 	MicrosoftAllocID         *uint          `gorm:"column:microsoft_alloc_id"`
 	DomainAllocID            *uint          `gorm:"column:domain_alloc_id"`
-	GmailSessionID           *uint          `gorm:"column:gmail_session_id"`
-	GmailResourceID          *uint          `gorm:"column:gmail_resource_id"`
-	GmailCostPointsSnapshot  string         `gorm:"type:decimal(18,6);not null;default:0;column:gmail_cost_points_snapshot"`
 	DeliveryEmail            string         `gorm:"type:varchar(255);not null;column:delivery_email"`
 	ReceiveStartedAt         *time.Time     `gorm:"column:receive_started_at"`
 	ReceiveUntil             *time.Time     `gorm:"column:receive_until"`
@@ -356,19 +353,13 @@ func (r *Repo) MarkActive(ctx context.Context, cmd tradeapp.MarkActiveCommand) (
 			"version":                gorm.Expr("version + 1"),
 			"microsoft_alloc_id":     nil,
 			"domain_alloc_id":        nil,
-			"gmail_session_id":       nil,
-			"gmail_resource_id":      nil,
 			"service_cleanup_status": "none",
 		}
 		if cmd.ActivatedAt != nil {
 			updates["activated_at"] = cmd.ActivatedAt.UTC()
 		}
-		if cmd.GmailCostPoints != "" {
-			cost, err := moneyfmt.Normalize(cmd.GmailCostPoints)
-			if err != nil {
-				return domain.ErrInvalidOrderRequest
-			}
-			updates["gmail_cost_points_snapshot"] = cost
+		if cmd.AllocationID == 0 {
+			return domain.ErrInvalidOrderRequest
 		}
 		switch cmd.AllocationType {
 		case domain.AllocationTypeMicrosoft:
@@ -376,11 +367,6 @@ func (r *Repo) MarkActive(ctx context.Context, cmd tradeapp.MarkActiveCommand) (
 		case domain.AllocationTypeDomain:
 			updates["domain_alloc_id"] = cmd.AllocationID
 		case domain.AllocationTypeGmail:
-			if cmd.GmailResourceID > 0 {
-				updates["gmail_resource_id"] = cmd.GmailResourceID
-			} else {
-				updates["gmail_session_id"] = cmd.AllocationID
-			}
 		default:
 			return domain.ErrInvalidOrderRequest
 		}
@@ -868,9 +854,10 @@ func (r *Repo) ListEvents(ctx context.Context, orderNo string, userID uint, isAd
 }
 
 func (r *Repo) ListExpiredCodeOrderNos(ctx context.Context, now time.Time, limit int) ([]string, error) {
-	return r.listOrderNos(ctx, limit, "status = ? AND service_mode = ? AND gmail_session_id IS NULL AND receive_until IS NOT NULL AND receive_until < ?",
+	return r.listOrderNos(ctx, limit, "status = ? AND service_mode = ? AND product_type <> ? AND receive_until IS NOT NULL AND receive_until < ?",
 		string(domain.OrderStatusActive),
 		string(domain.ServiceModeCode),
+		string(domain.ProductTypeGmail),
 		now.UTC(),
 	)
 }
@@ -912,9 +899,10 @@ func (r *Repo) ListUnavailableMicrosoftOrderNos(ctx context.Context, resourceID 
 }
 
 func (r *Repo) ListCodeOrderNosReadyForCleanup(ctx context.Context, now time.Time, limit int) ([]string, error) {
-	return r.listOrderNos(ctx, limit, "status IN ? AND service_mode = ? AND gmail_session_id IS NULL AND service_cleanup_status = ? AND after_sale_until IS NOT NULL AND after_sale_until < ?",
+	return r.listOrderNos(ctx, limit, "status IN ? AND service_mode = ? AND product_type <> ? AND service_cleanup_status = ? AND after_sale_until IS NOT NULL AND after_sale_until < ?",
 		[]string{string(domain.OrderStatusCompleted), string(domain.OrderStatusRefunded)},
 		string(domain.ServiceModeCode),
+		string(domain.ProductTypeGmail),
 		"none",
 		now.UTC(),
 	)
@@ -1205,8 +1193,6 @@ func orderModelToDomain(model OrderModel) domain.Order {
 		AllocationType:           allocationType,
 		MicrosoftAllocID:         model.MicrosoftAllocID,
 		DomainAllocID:            model.DomainAllocID,
-		GmailSessionID:           model.GmailSessionID,
-		GmailResourceID:          model.GmailResourceID,
 		DeliveryEmail:            model.DeliveryEmail,
 		ReceiveStartedAt:         model.ReceiveStartedAt,
 		ReceiveUntil:             model.ReceiveUntil,

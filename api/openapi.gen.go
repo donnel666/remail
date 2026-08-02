@@ -1534,24 +1534,6 @@ func (e GitHubPendingResponseProvider) Valid() bool {
 	}
 }
 
-// Defines values for GmailUpstreamActivationItemSource.
-const (
-	GmailUpstreamActivationItemSourceLocal    GmailUpstreamActivationItemSource = "local"
-	GmailUpstreamActivationItemSourceSmsbower GmailUpstreamActivationItemSource = "smsbower"
-)
-
-// Valid indicates whether the value is a known member of the GmailUpstreamActivationItemSource enum.
-func (e GmailUpstreamActivationItemSource) Valid() bool {
-	switch e {
-	case GmailUpstreamActivationItemSourceLocal:
-		return true
-	case GmailUpstreamActivationItemSourceSmsbower:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for GmailUpstreamActivationItemStatus.
 const (
 	GmailUpstreamActivationItemStatusActive       GmailUpstreamActivationItemStatus = "active"
@@ -1585,42 +1567,6 @@ func (e GmailUpstreamActivationItemStatus) Valid() bool {
 	case GmailUpstreamActivationItemStatusProvisioning:
 		return true
 	case GmailUpstreamActivationItemStatusUnknown:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for GmailUpstreamMappingItemSource.
-const (
-	GmailUpstreamMappingItemSourceLocal    GmailUpstreamMappingItemSource = "local"
-	GmailUpstreamMappingItemSourceSmsbower GmailUpstreamMappingItemSource = "smsbower"
-)
-
-// Valid indicates whether the value is a known member of the GmailUpstreamMappingItemSource enum.
-func (e GmailUpstreamMappingItemSource) Valid() bool {
-	switch e {
-	case GmailUpstreamMappingItemSourceLocal:
-		return true
-	case GmailUpstreamMappingItemSourceSmsbower:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for GmailUpstreamMappingRequestSource.
-const (
-	GmailUpstreamMappingRequestSourceLocal    GmailUpstreamMappingRequestSource = "local"
-	GmailUpstreamMappingRequestSourceSmsbower GmailUpstreamMappingRequestSource = "smsbower"
-)
-
-// Valid indicates whether the value is a known member of the GmailUpstreamMappingRequestSource enum.
-func (e GmailUpstreamMappingRequestSource) Valid() bool {
-	switch e {
-	case GmailUpstreamMappingRequestSourceLocal:
-		return true
-	case GmailUpstreamMappingRequestSourceSmsbower:
 		return true
 	default:
 		return false
@@ -3700,24 +3646,6 @@ func (e GetAdminTransactionsParamsDirection) Valid() bool {
 	case In:
 		return true
 	case Out:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for DeleteAdminSMSBowerMappingParamsSource.
-const (
-	DeleteAdminSMSBowerMappingParamsSourceLocal    DeleteAdminSMSBowerMappingParamsSource = "local"
-	DeleteAdminSMSBowerMappingParamsSourceSmsbower DeleteAdminSMSBowerMappingParamsSource = "smsbower"
-)
-
-// Valid indicates whether the value is a known member of the DeleteAdminSMSBowerMappingParamsSource enum.
-func (e DeleteAdminSMSBowerMappingParamsSource) Valid() bool {
-	switch e {
-	case DeleteAdminSMSBowerMappingParamsSourceLocal:
-		return true
-	case DeleteAdminSMSBowerMappingParamsSourceSmsbower:
 		return true
 	default:
 		return false
@@ -6315,13 +6243,10 @@ type GmailUpstreamActivationItem struct {
 	ProjectName         string                            `json:"projectName"`
 	ProviderServiceCode string                            `json:"providerServiceCode"`
 	ReceivedCount       int                               `json:"receivedCount"`
-	Source              GmailUpstreamActivationItemSource `json:"source"`
+	Source              string                            `json:"source"`
 	StartedAt           *time.Time                        `json:"startedAt,omitempty"`
 	Status              GmailUpstreamActivationItemStatus `json:"status"`
 }
-
-// GmailUpstreamActivationItemSource defines model for GmailUpstreamActivationItem.Source.
-type GmailUpstreamActivationItemSource string
 
 // GmailUpstreamActivationItemStatus defines model for GmailUpstreamActivationItem.Status.
 type GmailUpstreamActivationItemStatus string
@@ -6429,14 +6354,11 @@ type GmailUpstreamMappingItem struct {
 	PurchasePrice        NonNegativeLedgerAmountResponse `json:"purchasePrice"`
 	PurchaseSafe         bool                            `json:"purchaseSafe"`
 	PurchaseUnsafeReason *GmailUpstreamUnsafeReason      `json:"purchaseUnsafeReason,omitempty"`
-	Source               *GmailUpstreamMappingItemSource `json:"source,omitempty"`
+	Source               *string                         `json:"source,omitempty"`
 
 	// UpstreamPrice Non-negative point amount with up to 6 decimal places.
 	UpstreamPrice NonNegativeLedgerAmountResponse `json:"upstreamPrice"`
 }
-
-// GmailUpstreamMappingItemSource defines model for GmailUpstreamMappingItem.Source.
-type GmailUpstreamMappingItemSource string
 
 // GmailUpstreamMappingList defines model for GmailUpstreamMappingList.
 type GmailUpstreamMappingList struct {
@@ -6449,16 +6371,15 @@ type GmailUpstreamMappingRequest struct {
 	CodeEnabled bool `json:"codeEnabled"`
 	Enabled     bool `json:"enabled"`
 
-	// ProviderServiceCode Required for SMSBower and empty for local supply.
+	// ProviderServiceCode Empty for local supply and required for external providers.
 	ProviderServiceCode *string `json:"providerServiceCode,omitempty"`
 
 	// PurchaseEnabled Whether this route participates in Gmail purchase fulfillment.
-	PurchaseEnabled bool                              `json:"purchaseEnabled"`
-	Source          GmailUpstreamMappingRequestSource `json:"source"`
-}
+	PurchaseEnabled bool `json:"purchaseEnabled"`
 
-// GmailUpstreamMappingRequestSource defines model for GmailUpstreamMappingRequest.Source.
-type GmailUpstreamMappingRequestSource string
+	// Source Stable provider key; use local for the built-in Gmail resource pool.
+	Source string `json:"source"`
+}
 
 // GmailUpstreamUnsafeReason defines model for GmailUpstreamUnsafeReason.
 type GmailUpstreamUnsafeReason string
@@ -7355,7 +7276,9 @@ type ProjectMailRuleRuleType string
 
 // ProjectMailRuleRequest defines model for ProjectMailRuleRequest.
 type ProjectMailRuleRequest struct {
-	Enabled  bool                           `json:"enabled"`
+	Enabled bool `json:"enabled"`
+
+	// Pattern Body rules allow up to 10000 characters; all other rule types remain limited to 500.
 	Pattern  string                         `json:"pattern"`
 	RuleType ProjectMailRuleRequestRuleType `json:"ruleType"`
 }
@@ -9480,14 +9403,11 @@ type GetAdminSMSBowerActivationsParams struct {
 
 // DeleteAdminSMSBowerMappingParams defines parameters for DeleteAdminSMSBowerMapping.
 type DeleteAdminSMSBowerMappingParams struct {
-	Source DeleteAdminSMSBowerMappingParamsSource `form:"source" json:"source"`
+	Source string `form:"source" json:"source"`
 
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
-
-// DeleteAdminSMSBowerMappingParamsSource defines parameters for DeleteAdminSMSBowerMapping.
-type DeleteAdminSMSBowerMappingParamsSource string
 
 // PutAdminSMSBowerMappingParams defines parameters for PutAdminSMSBowerMapping.
 type PutAdminSMSBowerMappingParams struct {

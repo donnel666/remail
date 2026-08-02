@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   Checkbox,
+  Input,
   Select,
   Spin,
   Switch,
@@ -48,17 +49,17 @@ const SETTINGS_DEFAULTS = {
   smsbower_min_margin_rate: 0.1,
 };
 
-type RouteSource = "smsbower" | "local";
+const DEFAULT_ROUTE_SOURCES = ["smsbower", "local"];
 type RouteDraft = {
   codeEnabled: boolean;
   enabled: boolean;
   providerServiceCode: string;
   purchaseEnabled: boolean;
-  source: RouteSource;
+  source: string;
 };
-type RouteRow = GmailUpstreamMapping & { source: RouteSource };
+type RouteRow = GmailUpstreamMapping & { source: string };
 
-function routeKey(projectId: number, source: RouteSource) {
+function routeKey(projectId: number, source: string) {
   return `${projectId}:${source}`;
 }
 
@@ -125,6 +126,7 @@ export default function UpstreamsSection({
   const [services, setServices] = useState<SMSBowerService[]>([]);
   const [mappings, setMappings] = useState<GmailUpstreamMapping[]>([]);
   const [drafts, setDrafts] = useState<Record<string, RouteDraft>>({});
+  const [newRoute, setNewRoute] = useState({ projectId: 0, providerServiceCode: "", source: "" });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -150,18 +152,26 @@ export default function UpstreamsSection({
       const nextDrafts: Record<string, RouteDraft> = {};
       const projectIds = Array.from(new Set(nextMappings.map((item) => item.projectId)));
       for (const projectId of projectIds) {
-        for (const source of ["smsbower", "local"] as const) {
+        const sources = new Set(DEFAULT_ROUTE_SOURCES);
+        for (const item of nextMappings) {
+          if (item.projectId === projectId && item.source) sources.add(item.source);
+        }
+        for (const source of sources) {
           const route = nextMappings.find((item) => item.projectId === projectId && item.source === source);
           nextDrafts[routeKey(projectId, source)] = {
-            codeEnabled: source === "smsbower" ? route?.codeEnabled ?? true : false,
+            codeEnabled: source === "local" ? false : route?.codeEnabled ?? source === "smsbower",
             enabled: route?.enabled ?? false,
-            providerServiceCode: source === "smsbower" ? route?.providerServiceCode ?? firstService : "",
-            purchaseEnabled: source === "local" ? route?.purchaseEnabled ?? true : false,
+            providerServiceCode: source === "local" ? "" : route?.providerServiceCode ?? (source === "smsbower" ? firstService : ""),
+            purchaseEnabled: source === "smsbower" ? false : route?.purchaseEnabled ?? source === "local",
             source,
           };
         }
       }
       setDrafts(nextDrafts);
+      setNewRoute((current) => ({
+        ...current,
+        projectId: projectIds.includes(current.projectId) ? current.projectId : projectIds[0] ?? 0,
+      }));
     } catch (error) {
       if (controller.signal.aborted) return;
       Toast.error(getIamErrorMessage(t, error, "Upstream settings load failed."));
@@ -183,8 +193,12 @@ export default function UpstreamsSection({
     for (const item of mappings) {
       if (!projects.has(item.projectId)) projects.set(item.projectId, item);
     }
-    return Array.from(projects.values()).flatMap((project) =>
-      (["smsbower", "local"] as const).map((source) => {
+    return Array.from(projects.values()).flatMap((project) => {
+      const sources = new Set(DEFAULT_ROUTE_SOURCES);
+      for (const item of mappings) {
+        if (item.projectId === project.projectId && item.source) sources.add(item.source);
+      }
+      return Array.from(sources).map((source) => {
         const existing = mappings.find((item) => item.projectId === project.projectId && item.source === source);
         if (existing) return { ...existing, source };
         return {
@@ -204,11 +218,11 @@ export default function UpstreamsSection({
           source,
           upstreamPrice: "0",
         };
-      })
-    );
+      });
+    });
   }, [mappings]);
 
-  const updateDraft = (projectId: number, source: RouteSource, patch: Partial<RouteDraft>) => {
+  const updateDraft = (projectId: number, source: string, patch: Partial<RouteDraft>) => {
     const key = routeKey(projectId, source);
     setDrafts((current) => ({ ...current, [key]: { ...current[key], source, ...patch } }));
   };
@@ -251,6 +265,37 @@ export default function UpstreamsSection({
     }
   };
 
+  const addRoute = async () => {
+    const source = newRoute.source.trim().toLowerCase();
+    const providerServiceCode = newRoute.providerServiceCode.trim();
+    if (!newRoute.projectId || !source || source.length > 64 || !providerServiceCode || providerServiceCode.length > 64) {
+      Toast.warning("请选择系统项目，并填写不超过 64 个字符的渠道标识和上游项目代码。");
+      return;
+    }
+    if (routeRows.some((row) => row.projectId === newRoute.projectId && row.source === source)) {
+      Toast.warning("该项目已存在此渠道，请直接编辑对应行。");
+      return;
+    }
+    const key = `new:${newRoute.projectId}:${source}`;
+    setSavingRoute(key);
+    try {
+      await saveGmailUpstreamMapping(newRoute.projectId, {
+        codeEnabled: false,
+        enabled: false,
+        providerServiceCode,
+        purchaseEnabled: false,
+        source,
+      });
+      setNewRoute((current) => ({ ...current, providerServiceCode: "", source: "" }));
+      Toast.success("第三方 Gmail 渠道已添加。");
+      await load();
+    } catch (error) {
+      Toast.error(getIamErrorMessage(t, error, "Mapping save failed."));
+    } finally {
+      setSavingRoute(null);
+    }
+  };
+
   const saveRoute = async (row: RouteRow) => {
     const key = routeKey(row.projectId, row.source);
     const draft = drafts[key];
@@ -258,8 +303,8 @@ export default function UpstreamsSection({
       Toast.warning("启用渠道时至少选择参与接码或参与购买。");
       return;
     }
-    if (draft.source === "smsbower" && !draft.providerServiceCode) {
-      Toast.warning("请选择 SMSBower 上游项目。");
+    if (draft.source !== "local" && !draft.providerServiceCode.trim()) {
+      Toast.warning("请选择或填写上游项目代码。");
       return;
     }
     setSavingRoute(key);
@@ -324,19 +369,27 @@ export default function UpstreamsSection({
         </Spin>
       </SettingsSection>
 
-      <SettingsSection title={<SettingsCardHeader icon={<Link2 size={16} />} title="Gmail 商品与渠道映射" description="SMSBower 当前只参与接码，自有 Gmail 当前只参与购买；每种模式仅保留一个生效渠道" />}>
+      <SettingsSection title={<SettingsCardHeader icon={<Link2 size={16} />} title="Gmail 商品与渠道映射" description="SMSBower 只支持接码，自有 Gmail 只支持购买；第三方可预配置，接入履约适配器后才能启用" />}>
         <Spin spinning={loading}>
+          <div className="mb-4 grid gap-2 md:grid-cols-[minmax(180px,1fr)_minmax(180px,1fr)_minmax(220px,1.2fr)_auto]">
+            <Select aria-label="系统项目" disabled={!canWrite} onChange={(value) => setNewRoute((current) => ({ ...current, projectId: Number(value ?? 0) }))} optionList={Array.from(new Map(mappings.map((item) => [item.projectId, { label: item.projectName, value: item.projectId }])).values())} placeholder="选择系统项目" value={newRoute.projectId || undefined} />
+            <Input aria-label="第三方渠道标识" disabled={!canWrite} maxLength={64} onChange={(source) => setNewRoute((current) => ({ ...current, source }))} placeholder="渠道标识，如 provider-x" value={newRoute.source} />
+            <Input aria-label="第三方上游项目代码" disabled={!canWrite} maxLength={64} onChange={(providerServiceCode) => setNewRoute((current) => ({ ...current, providerServiceCode }))} placeholder="该渠道的上游项目代码" value={newRoute.providerServiceCode} />
+            <Button disabled={!canWrite || mappings.length === 0} loading={savingRoute?.startsWith("new:")} onClick={() => void addRoute()} theme="light" type="primary">新增渠道</Button>
+          </div>
           <Table
             columns={[
               { title: "系统项目", dataIndex: "projectName", width: 180, render: (_value, row: RouteRow) => <div><div className="font-medium">{row.projectName}</div><Text type="tertiary" size="small">#{row.projectId}</Text></div> },
-              { title: "渠道", dataIndex: "source", width: 130, render: (value: RouteSource) => <Tag color={value === "smsbower" ? "blue" : "green"} shape="circle">{value === "smsbower" ? "SMSBower" : "自有 Gmail"}</Tag> },
+              { title: "渠道", dataIndex: "source", width: 150, render: (value: string) => <Tag color={value === "smsbower" ? "blue" : value === "local" ? "green" : "grey"} shape="circle">{value === "smsbower" ? "SMSBower" : value === "local" ? "自有 Gmail" : value}</Tag> },
               { title: "上游项目", width: 210, render: (_value, row: RouteRow) => {
                 const draft = drafts[routeKey(row.projectId, row.source)];
-                return row.source === "smsbower" ? <Select disabled={!canWrite} filter optionList={services.map((item) => ({ label: `${item.name} (${item.code}) · ${formatPoints(item.gmailPrice)} / 库存 ${item.gmailStock}`, value: item.code }))} onChange={(value) => updateDraft(row.projectId, row.source, { providerServiceCode: String(value ?? "") })} style={{ width: "100%" }} value={draft?.providerServiceCode} /> : <Text type="tertiary">本地 Gmail 资源池</Text>;
+                if (row.source === "local") return <Text type="tertiary">本地 Gmail 资源池</Text>;
+                if (row.source === "smsbower") return <Select disabled={!canWrite} filter optionList={services.map((item) => ({ label: `${item.name} (${item.code}) · ${formatPoints(item.gmailPrice)} / 库存 ${item.gmailStock}`, value: item.code }))} onChange={(value) => updateDraft(row.projectId, row.source, { providerServiceCode: String(value ?? "") })} style={{ width: "100%" }} value={draft?.providerServiceCode} />;
+                return <Input aria-label={`${row.source} 上游项目代码`} disabled={!canWrite} maxLength={64} onChange={(providerServiceCode) => updateDraft(row.projectId, row.source, { providerServiceCode })} value={draft?.providerServiceCode} />;
               } },
               { title: "参与模式", width: 220, render: (_value, row: RouteRow) => {
                 const draft = drafts[routeKey(row.projectId, row.source)];
-                return <div className="flex flex-wrap items-center gap-3"><Switch checked={draft?.enabled ?? false} disabled={!canWrite} onChange={(enabled) => updateDraft(row.projectId, row.source, { enabled })} size="small" /><Checkbox checked={draft?.codeEnabled ?? false} disabled={!canWrite || row.source === "local"} onChange={(event) => updateDraft(row.projectId, row.source, { codeEnabled: event.target.checked })}>接码</Checkbox><Checkbox checked={draft?.purchaseEnabled ?? false} disabled={!canWrite || row.source === "smsbower"} onChange={(event) => updateDraft(row.projectId, row.source, { purchaseEnabled: event.target.checked })}>购买</Checkbox></div>;
+                return <div className="flex flex-wrap items-center gap-3"><Switch checked={draft?.enabled ?? false} disabled={!canWrite || row.source !== "smsbower" && row.source !== "local" && !draft?.enabled} onChange={(enabled) => updateDraft(row.projectId, row.source, { enabled })} size="small" /><Checkbox checked={draft?.codeEnabled ?? false} disabled={!canWrite || row.source === "local"} onChange={(event) => updateDraft(row.projectId, row.source, { codeEnabled: event.target.checked })}>接码</Checkbox><Checkbox checked={draft?.purchaseEnabled ?? false} disabled={!canWrite || row.source === "smsbower"} onChange={(event) => updateDraft(row.projectId, row.source, { purchaseEnabled: event.target.checked })}>购买</Checkbox></div>;
               } },
               { title: "接码防亏", width: 160, render: (_value, row: RouteRow) => <SafetyTag safe={row.codeSafe} reason={row.codeUnsafeReason} rate={row.codeMarginRate} /> },
               { title: "购买防亏", width: 180, render: (_value, row: RouteRow) => <SafetyTag safe={row.purchaseSafe} reason={row.purchaseUnsafeReason} rate={row.purchaseMarginRate} /> },

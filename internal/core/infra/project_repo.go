@@ -144,7 +144,7 @@ type ProjectMailRuleModel struct {
 	ID        uint      `gorm:"primaryKey;autoIncrement"`
 	ProjectID uint      `gorm:"not null;column:project_id"`
 	RuleType  string    `gorm:"type:varchar(32);not null;column:rule_type"`
-	Pattern   string    `gorm:"type:varchar(500);not null"`
+	Pattern   string    `gorm:"type:varchar(10000);not null"`
 	Enabled   bool      `gorm:"not null"`
 	CreatedAt time.Time `gorm:"not null;autoCreateTime"`
 	UpdatedAt time.Time `gorm:"not null;autoUpdateTime"`

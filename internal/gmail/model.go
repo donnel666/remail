@@ -44,6 +44,8 @@ var (
 
 type localResourceModel struct {
 	ID              uint       `gorm:"column:id;primaryKey"`
+	ResourceType    string     `gorm:"column:resource_type"`
+	OwnerUserID     uint       `gorm:"column:owner_user_id"`
 	Email           string     `gorm:"column:email;uniqueIndex"`
 	Identity        string     `gorm:"column:identity;uniqueIndex"`
 	Password        string     `gorm:"column:password"`
@@ -57,6 +59,30 @@ type localResourceModel struct {
 }
 
 func (localResourceModel) TableName() string { return "gmail_resources" }
+
+type resourceRootModel struct {
+	ID          uint      `gorm:"column:id;primaryKey;autoIncrement"`
+	Type        string    `gorm:"column:type"`
+	OwnerUserID uint      `gorm:"column:owner_user_id"`
+	CreatedAt   time.Time `gorm:"column:created_at"`
+	UpdatedAt   time.Time `gorm:"column:updated_at"`
+}
+
+func (resourceRootModel) TableName() string { return "email_resources" }
+
+type allocationModel struct {
+	ID                 uint      `gorm:"column:id;primaryKey"`
+	OrderNo            string    `gorm:"column:order_no"`
+	Source             string    `gorm:"column:source"`
+	SourceRef          string    `gorm:"column:source_ref"`
+	ServiceMode        string    `gorm:"column:service_mode"`
+	ResourceID         *uint     `gorm:"column:resource_id"`
+	Email              string    `gorm:"column:email"`
+	CostPointsSnapshot string    `gorm:"column:cost_points_snapshot"`
+	CreatedAt          time.Time `gorm:"column:created_at"`
+}
+
+func (allocationModel) TableName() string { return "gmail_allocations" }
 
 type LocalResourceItem struct {
 	ID                    uint       `json:"id"`

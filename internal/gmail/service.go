@@ -92,9 +92,9 @@ func (s *Service) CheckSupply(ctx context.Context, projectID uint, mode tradedom
 		Table("gmail_supply_routes AS r").
 		Select(`r.source, r.provider_service_code, svc.gmail_price, svc.gmail_stock,
 svc.active AS service_active, account.balance, account.health_status, account.last_success_at,
-pp.purchase_supplier_price`).
+		pp.purchase_supplier_price`).
 		Joins("JOIN project_products AS pp ON pp.project_id = r.project_id AND pp.type = ?", "gmail").
-		Joins("LEFT JOIN smsbower_services AS svc ON svc.code = r.provider_service_code").
+		Joins("LEFT JOIN smsbower_services AS svc ON r.source = ? AND svc.code = r.provider_service_code", SourceSMSBower).
 		Joins("JOIN smsbower_account_state AS account ON account.id = 1").
 		Where("r.project_id = ? AND r.enabled = ? AND "+modeColumn+" = ?", projectID, true, true).
 		Limit(2).Scan(&rows).Error
@@ -411,6 +411,13 @@ func (s *Service) ListGmailDeliveries(ctx context.Context, orderNos []string) (m
 	if len(orderNos) == 0 {
 		return result, nil
 	}
+	var allocations []allocationModel
+	if err := s.dbFor(ctx).Where("order_no IN ?", orderNos).Find(&allocations).Error; err != nil {
+		return nil, fmt.Errorf("list Gmail allocations: %w", err)
+	}
+	for _, allocation := range allocations {
+		result[allocation.OrderNo] = tradeapp.GmailDeliverySummary{AllocationID: allocation.ID}
+	}
 	var sessions []sessionModel
 	if err := s.dbFor(ctx).Where("order_no IN ?", orderNos).Find(&sessions).Error; err != nil {
 		return nil, fmt.Errorf("list Gmail deliveries: %w", err)
@@ -424,9 +431,12 @@ func (s *Service) ListGmailDeliveries(ctx context.Context, orderNos []string) (m
 		for i := range codes {
 			items[i] = tradeapp.GmailCode{Seq: codes[i].Seq, Code: codes[i].Code, ReceivedAt: codes[i].ReceivedAt}
 		}
-		result[session.OrderNo] = tradeapp.GmailDeliverySummary{
-			Codes: items, ReceivedCount: int(session.ReceivedCount), MaxCodes: MaxCodes, ExpiresAt: session.ExpiresAt,
-		}
+		delivery := result[session.OrderNo]
+		delivery.Codes = items
+		delivery.ReceivedCount = int(session.ReceivedCount)
+		delivery.MaxCodes = MaxCodes
+		delivery.ExpiresAt = session.ExpiresAt
+		result[session.OrderNo] = delivery
 	}
 	return result, nil
 }
@@ -482,12 +492,15 @@ func (s *Service) ListServices(ctx context.Context) ([]ServiceItem, error) {
 func (s *Service) PutMapping(ctx context.Context, projectID uint, source, serviceCode string, enabled, codeEnabled, purchaseEnabled bool) error {
 	source = strings.ToLower(strings.TrimSpace(source))
 	serviceCode = strings.TrimSpace(serviceCode)
-	if projectID == 0 || source != SourceSMSBower && source != SourceLocal || source == SourceSMSBower && serviceCode == "" || source == SourceLocal && serviceCode != "" ||
-		source == SourceSMSBower && purchaseEnabled || source == SourceLocal && codeEnabled {
+	if projectID == 0 || source == "" || len(source) > 64 || len(serviceCode) > 64 ||
+		source == SourceLocal && serviceCode != "" || source != SourceLocal && serviceCode == "" {
 		return ErrInvalidRoute
 	}
 	if !codeEnabled && !purchaseEnabled {
 		enabled = false
+	}
+	if enabled && (codeEnabled && source != SourceSMSBower || purchaseEnabled && source != SourceLocal) {
+		return ErrInvalidRoute
 	}
 	model := routeModel{
 		ProjectID: projectID, Source: source, ProviderServiceCode: serviceCode,
@@ -537,7 +550,7 @@ func (s *Service) PutMapping(ctx context.Context, projectID uint, source, servic
 
 func (s *Service) DeleteMapping(ctx context.Context, projectID uint, source string) error {
 	source = strings.ToLower(strings.TrimSpace(source))
-	if projectID == 0 || source != SourceSMSBower && source != SourceLocal {
+	if projectID == 0 || source == "" || len(source) > 64 {
 		return ErrInvalidRoute
 	}
 	return s.dbFor(ctx).Where("project_id = ? AND source = ?", projectID, source).Delete(&routeModel{}).Error
@@ -577,7 +590,7 @@ COALESCE(svc.active, 0) AS service_active, account.health_status, account.balanc
 (SELECT COUNT(*) FROM gmail_resources WHERE status = ?) AS local_stock`, LocalResourceAvailable).
 		Joins("JOIN projects AS p ON p.id = pp.project_id").
 		Joins("LEFT JOIN gmail_supply_routes AS r ON r.project_id = p.id").
-		Joins("LEFT JOIN smsbower_services AS svc ON svc.code = r.provider_service_code").
+		Joins("LEFT JOIN smsbower_services AS svc ON r.source = ? AND svc.code = r.provider_service_code", SourceSMSBower).
 		Joins("JOIN smsbower_account_state AS account ON account.id = 1").
 		Where("pp.type = ?", "gmail").Order("p.name ASC, p.id ASC, r.source ASC").Scan(&rows).Error; err != nil {
 		return nil, fmt.Errorf("list Gmail supply mappings: %w", err)
@@ -610,7 +623,7 @@ COALESCE(svc.active, 0) AS service_active, account.health_status, account.balanc
 		}
 		if row.Source == SourceLocal && purchaseSupplierPriceErr == nil {
 			cost = purchaseSupplierPrice
-		} else if upstreamSettingsErr == nil && upstreamErr == nil {
+		} else if row.Source == SourceSMSBower && upstreamSettingsErr == nil && upstreamErr == nil {
 			cost = upstream.Mul(pointsPerUnit)
 		}
 		baseReason := ""
@@ -700,7 +713,7 @@ func (s *Service) Finance(ctx context.Context) (*FinanceReport, error) {
 	}
 	if err := s.dbFor(ctx).Table("orders AS o").
 		Select(`COUNT(*) AS order_count,
-COALESCE(SUM(CASE WHEN s.email <> '' OR o.gmail_resource_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS activation_count,
+COALESCE(SUM(CASE WHEN ga.id IS NOT NULL THEN 1 ELSE 0 END), 0) AS activation_count,
 COALESCE(SUM(CASE WHEN s.id IS NOT NULL AND s.received_count = 0 THEN 1 ELSE 0 END), 0) AS zero_code_count,
 COALESCE(SUM(CASE WHEN s.received_count = 1 THEN 1 ELSE 0 END), 0) AS one_code_count,
 COALESCE(SUM(CASE WHEN s.received_count = 2 THEN 1 ELSE 0 END), 0) AS two_code_count,
@@ -708,10 +721,11 @@ COALESCE(SUM(CASE WHEN s.received_count = 3 THEN 1 ELSE 0 END), 0) AS three_code
 COALESCE(SUM(CASE WHEN o.debit_tx_id IS NOT NULL THEN o.pay_amount ELSE 0 END), 0) AS sales,
 COALESCE(SUM(o.refund_amount), 0) AS refunds,
 COALESCE(SUM(CASE WHEN s.status = 'completed' THEN s.cost_points_snapshot ELSE 0 END), 0)
-	+ COALESCE(SUM(CASE WHEN o.gmail_resource_id IS NOT NULL THEN o.gmail_cost_points_snapshot ELSE 0 END), 0) AS settled_cost,
+	+ COALESCE(SUM(CASE WHEN ga.resource_id IS NOT NULL THEN ga.cost_points_snapshot ELSE 0 END), 0) AS settled_cost,
 COALESCE(SUM(CASE WHEN s.status IN ('pending','provisioning','active','completing','cancelling') THEN s.cost_points_snapshot ELSE 0 END), 0) AS reserved_cost,
 COALESCE(SUM(CASE WHEN s.status = 'unknown' THEN s.cost_points_snapshot ELSE 0 END), 0) AS unknown_cost`).
 		Joins("LEFT JOIN gmail_code_sessions AS s ON s.order_no = o.order_no").
+		Joins("LEFT JOIN gmail_allocations AS ga ON ga.order_no = o.order_no").
 		Where("o.product_type = ?", "gmail").Scan(&row).Error; err != nil {
 		return nil, fmt.Errorf("load Gmail finance overview: %w", err)
 	}
@@ -739,14 +753,14 @@ COALESCE(SUM(CASE WHEN s.status = 'unknown' THEN s.cost_points_snapshot ELSE 0 E
 		return nil, err
 	}
 	if report.ByService, err = s.financeBreakdown(ctx,
-		"CASE WHEN o.gmail_resource_id IS NOT NULL THEN 'local' ELSE s.provider_service_code END",
-		"CASE WHEN o.gmail_resource_id IS NOT NULL THEN '自有 Gmail' ELSE COALESCE(svc.name, s.provider_service_code) END",
+		"CASE WHEN ga.resource_id IS NOT NULL THEN ga.source ELSE s.provider_service_code END",
+		"CASE WHEN ga.resource_id IS NOT NULL THEN '自有 Gmail' ELSE COALESCE(svc.name, s.provider_service_code) END",
 		"LEFT JOIN smsbower_services AS svc ON svc.code = s.provider_service_code"); err != nil {
 		return nil, err
 	}
 	if report.BySource, err = s.financeBreakdown(ctx,
-		"CASE WHEN o.gmail_resource_id IS NOT NULL THEN 'local' ELSE s.source END",
-		"CASE WHEN o.gmail_resource_id IS NOT NULL THEN 'local' ELSE s.source END", ""); err != nil {
+		"COALESCE(ga.source, s.source, '')",
+		"COALESCE(ga.source, s.source, '')", ""); err != nil {
 		return nil, err
 	}
 	return report, nil
@@ -765,8 +779,9 @@ func (s *Service) financeBreakdown(ctx context.Context, keyExpr, nameExpr, join 
 		Select(keyExpr+` AS item_key, `+nameExpr+` AS item_name, COUNT(*) AS order_count,
 COALESCE(SUM(CASE WHEN o.debit_tx_id IS NOT NULL THEN o.pay_amount ELSE 0 END), 0) - COALESCE(SUM(o.refund_amount), 0) AS net_revenue,
 COALESCE(SUM(CASE WHEN s.status IN ('completed','pending','provisioning','active','completing','cancelling','unknown') THEN s.cost_points_snapshot ELSE 0 END), 0)
-	+ COALESCE(SUM(CASE WHEN o.gmail_resource_id IS NOT NULL THEN o.gmail_cost_points_snapshot ELSE 0 END), 0) AS cost`).
+	+ COALESCE(SUM(CASE WHEN ga.resource_id IS NOT NULL THEN ga.cost_points_snapshot ELSE 0 END), 0) AS cost`).
 		Joins("LEFT JOIN gmail_code_sessions AS s ON s.order_no = o.order_no").
+		Joins("LEFT JOIN gmail_allocations AS ga ON ga.order_no = o.order_no").
 		Where("o.product_type = ?", "gmail")
 	if join != "" {
 		query = query.Joins(join)
@@ -1261,10 +1276,38 @@ func (s *Service) ensureTradeActivation(ctx context.Context, session sessionMode
 	if s.trade == nil || session.StartedAt == nil || session.ExpiresAt == nil || session.Email == "" {
 		return errors.New("gmail: activation callback unavailable")
 	}
+	allocationID, err := s.ensureCodeAllocation(ctx, session)
+	if err != nil {
+		return err
+	}
 	return s.trade.ActivateGmailOrder(ctx, tradeapp.ActivateGmailOrderRequest{
-		OrderNo: session.OrderNo, SessionID: session.ID, Email: session.Email,
+		OrderNo: session.OrderNo, AllocationID: allocationID, SessionID: session.ID, Email: session.Email,
 		StartedAt: session.StartedAt.UTC(), ExpiresAt: session.ExpiresAt.UTC(),
 	})
+}
+
+func (s *Service) ensureCodeAllocation(ctx context.Context, session sessionModel) (uint, error) {
+	model := allocationModel{
+		OrderNo: session.OrderNo, Source: session.Source, SourceRef: strconv.FormatUint(uint64(session.ID), 10),
+		ServiceMode: string(tradedomain.ServiceModeCode), Email: session.Email,
+		CostPointsSnapshot: session.CostPointsSnapshot,
+	}
+	db := s.dbFor(ctx)
+	created := db.Clauses(clause.OnConflict{DoNothing: true}).Create(&model)
+	if created.Error != nil {
+		return 0, fmt.Errorf("create Gmail code allocation: %w", created.Error)
+	}
+	if created.RowsAffected == 1 {
+		return model.ID, nil
+	}
+	if err := db.Where("order_no = ?", session.OrderNo).Take(&model).Error; err != nil {
+		return 0, fmt.Errorf("load Gmail code allocation: %w", err)
+	}
+	if model.ResourceID != nil || model.Source != session.Source || model.SourceRef != strconv.FormatUint(uint64(session.ID), 10) ||
+		model.ServiceMode != string(tradedomain.ServiceModeCode) || !strings.EqualFold(model.Email, session.Email) {
+		return 0, errors.New("gmail: allocation conflict")
+	}
+	return model.ID, nil
 }
 
 func (s *Service) Poll(ctx context.Context, sessionID uint) error {
@@ -1292,7 +1335,15 @@ func (s *Service) Poll(ctx context.Context, sessionID uint) error {
 			return err
 		}
 		return s.clearNextPoll(ctx, session.ID)
-	case SessionFailed, SessionUnknown, SessionPending, SessionProvisioning:
+	case SessionUnknown:
+		if s.trade == nil {
+			return errors.New("gmail: trade callback unavailable")
+		}
+		if err := s.trade.FailGmailOrder(ctx, session.OrderNo, session.LastSafeError); err != nil {
+			return err
+		}
+		return s.clearNextPoll(ctx, session.ID)
+	case SessionFailed, SessionPending, SessionProvisioning:
 		return nil
 	}
 	if session.Status == SessionActive {
@@ -1422,10 +1473,16 @@ func (s *Service) applyRemoteAction(ctx context.Context, session sessionModel) e
 	default:
 		return errors.New("gmail: invalid pending remote action")
 	}
-	if err := s.client.SetStatus(ctx, apiKey, mailID, status); err != nil && !remoteActionFinal(err) {
-		return s.deferPoll(ctx, session.ID, safeUpstreamError(err), err)
+	remoteErr := s.client.SetStatus(ctx, apiKey, mailID, status)
+	if remoteErr != nil && !remoteActionFinal(remoteErr) {
+		return s.deferPoll(ctx, session.ID, safeUpstreamError(remoteErr), remoteErr)
 	}
 	now := s.now()
+	uncertainCancel := session.PendingRemoteAction == ActionCancel && errors.Is(remoteErr, ErrActivationStatus)
+	cancelReason := "Gmail 在 24 小时内未收到验证码，订单已退款。"
+	if uncertainCancel {
+		cancelReason = "SMSBower 取消结果不确定，订单已进入退款流程，请管理员核对上游是否产生费用。"
+	}
 	updates := map[string]any{
 		"pending_remote_action": "", "last_safe_error": "", "version": gorm.Expr("version + 1"),
 	}
@@ -1439,6 +1496,10 @@ func (s *Service) applyRemoteAction(ctx context.Context, session sessionModel) e
 		updates["next_poll_at"] = now
 	case ActionCancel:
 		updates["status"] = SessionCancelled
+		if uncertainCancel {
+			updates["status"] = SessionUnknown
+			updates["last_safe_error"] = cancelReason
+		}
 		updates["completed_at"] = now
 		updates["next_poll_at"] = now
 	}
@@ -1460,13 +1521,20 @@ func (s *Service) applyRemoteAction(ctx context.Context, session sessionModel) e
 		}
 		return s.clearNextPoll(ctx, session.ID)
 	case ActionCancel:
+		var callbackErr error
 		if s.trade == nil {
-			return errors.New("gmail: trade callback unavailable")
+			callbackErr = errors.New("gmail: trade callback unavailable")
+		} else if callbackErr = s.trade.FailGmailOrder(ctx, session.OrderNo, cancelReason); callbackErr == nil {
+			callbackErr = s.clearNextPoll(ctx, session.ID)
 		}
-		if err := s.trade.FailGmailOrder(ctx, session.OrderNo, "Gmail 在 24 小时内未收到验证码，订单已退款。"); err != nil {
-			return err
+		if !uncertainCancel {
+			return callbackErr
 		}
-		return s.clearNextPoll(ctx, session.ID)
+		alertErr := s.notify(ctx, Alert{
+			ID: "smsbower-cancel-uncertain-" + stableDigest(session.OrderNo), Subject: "SMSBower Gmail 取消结果待人工核对",
+			Body: fmt.Sprintf("订单 %s 的 SMSBower Gmail 取消结果不确定。系统已将成本归入未知并进入用户退款流程；请在上游后台核对激活状态和实际扣费。", session.OrderNo),
+		})
+		return errors.Join(callbackErr, alertErr)
 	default:
 		return nil
 	}

@@ -13,6 +13,9 @@ import {
 
 export type ApplyModalMode = "create" | "resubmit";
 
+const mailBodyMaxLength = 10000;
+const projectDescriptionMaxLength = 1000;
+
 export interface ApplyFormState {
   codeMaxPrice: string;
   codeMinPrice: string;
@@ -67,9 +70,6 @@ function buildProjectApplicationPayload(
   const targetPlatform = extractTargetPlatform(form.projectURL, form.projectName);
   const description = [
     `${t("Project URL")}: ${form.projectURL.trim()}`,
-    `${t("Sender email")}: ${form.senderPattern.trim()}`,
-    `${t("Mail subject")}: ${form.mailSubject.trim()}`,
-    `${t("Mail body")}: ${form.mailBody.trim()}`,
     `${t("Expected email types")}: ${form.emailTypes.map((type) => productTypeLabel(type, t)).join(", ")}`,
     form.codeMinPrice || form.codeMaxPrice
       ? `${t("Code price expectation")}: ${form.codeMinPrice || "-"} - ${form.codeMaxPrice || "-"}`
@@ -136,12 +136,20 @@ export function ApplyProjectModal({
       Toast.error(t("Please complete required project application fields."));
       return;
     }
+    if (Array.from(form.mailBody.trim()).length > mailBodyMaxLength) {
+      Toast.error(t("Mail body is too long."));
+      return;
+    }
     if (mode === "resubmit" && !projectId) {
       Toast.error(t("Project application resubmit failed."));
       return;
     }
 
     const payload = buildProjectApplicationPayload(form, t);
+    if (Array.from(payload.description ?? "").length > projectDescriptionMaxLength) {
+      Toast.error(t("Project application details are too long."));
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -240,7 +248,8 @@ export function ApplyProjectModal({
             {t("Mail body")} *
           </span>
           <TextArea
-            maxCount={500}
+            maxCount={mailBodyMaxLength}
+            maxLength={mailBodyMaxLength}
             onChange={(value) => setField("mailBody", String(value))}
             placeholder={t("Mail body placeholder")}
             rows={3}
