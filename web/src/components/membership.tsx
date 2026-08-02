@@ -198,7 +198,7 @@ export function MembershipOverview({
 
       <Card
         bodyStyle={{ padding: 0 }}
-        className="!rounded-2xl order-last mt-5 overflow-hidden border-0 shadow-sm"
+        className="!mt-5 !rounded-2xl order-last overflow-hidden border-0 shadow-sm"
       >
         <div className="overflow-x-auto">
           <table
