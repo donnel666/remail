@@ -1033,7 +1033,7 @@ func (uc *UseCase) checkoutGmailPrepared(ctx context.Context, prepared checkoutP
 		return result, checkoutErr
 	}
 	if result == nil {
-		return nil, errors.New("Gmail checkout returned no order")
+		return nil, errors.New("gmail checkout returned no order")
 	}
 	if sessionID > 0 {
 		if err := uc.gmailSupply.ScheduleProvision(context.WithoutCancel(ctx), sessionID); err != nil {
@@ -1175,7 +1175,7 @@ func (uc *UseCase) checkoutGmailPurchasePrepared(ctx context.Context, prepared c
 		return result, checkoutErr
 	}
 	if result == nil {
-		return nil, errors.New("Gmail purchase checkout returned no order")
+		return nil, errors.New("gmail purchase checkout returned no order")
 	}
 	return uc.gmailCheckoutResult(ctx, result.Order, result.Created)
 }
@@ -1679,11 +1679,11 @@ func (uc *UseCase) GetOrder(ctx context.Context, orderNo string, userID uint, is
 		return nil, err
 	}
 	if result.Order.ProductType == domain.ProductTypeGmail {
-		copy := []CheckoutResult{*result}
-		if err := uc.attachGmailDeliveries(ctx, copy); err != nil {
+		gmailResults := []CheckoutResult{*result}
+		if err := uc.attachGmailDeliveries(ctx, gmailResults); err != nil {
 			return nil, err
 		}
-		*result = copy[0]
+		*result = gmailResults[0]
 		if err := uc.attachGmailPurchase(ctx, result); err != nil {
 			return nil, err
 		}
@@ -2227,7 +2227,7 @@ func (uc *UseCase) ActivateGmailOrder(ctx context.Context, req ActivateGmailOrde
 		return err
 	}
 	if token == nil {
-		token, err = uc.tokens.IssueOrderToken(ctx, req.OrderNo, &req.ExpiresAt)
+		_, err = uc.tokens.IssueOrderToken(ctx, req.OrderNo, &req.ExpiresAt)
 		if err != nil {
 			return err
 		}
