@@ -5,6 +5,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/platform/testmysql"
 	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
@@ -16,14 +17,16 @@ func TestGmailUpstreamMigrationMySQL(t *testing.T) {
 	_, file, _, ok := runtime.Caller(0)
 	require.True(t, ok)
 	migrations := filepath.Clean(filepath.Join(filepath.Dir(file), "../..", "migrations"))
-	db := gmailMigrationMySQL.Database(t, migrations)
+	baselineMigrations := testmysql.MigrationsThrough(t, migrations, 71)
+	db := gmailMigrationMySQL.Database(t, baselineMigrations)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
+	require.NoError(t, platform.RunMigrations(sqlDB, migrations))
 	goose.SetTableName("goose_db_version")
 	require.NoError(t, goose.SetDialect("mysql"))
 	version, err := goose.GetDBVersion(sqlDB)
 	require.NoError(t, err)
-	require.EqualValues(t, 70, version)
+	require.EqualValues(t, 73, version)
 	require.True(t, db.Migrator().HasTable("gmail_resources"))
 	require.True(t, db.Migrator().HasColumn("orders", "gmail_resource_id"))
 	require.True(t, db.Migrator().HasColumn("orders", "gmail_cost_points_snapshot"))
@@ -46,17 +49,17 @@ warranty_minutes, main_weight, dot_weight, plus_weight
 VALUES ('first.last@gmail.com', 'firstlast@gmail.com', 'password', 'JBSWY3DPEHPK3PXP', 'abcdefghijklmnop')`).Error)
 	require.Error(t, db.Exec(`INSERT INTO gmail_resources(email, identity, password, two_factor_secret, app_password)
 VALUES ('firstlast@googlemail.com', 'firstlast@gmail.com', 'password', 'JBSWY3DPEHPK3PXP', 'abcdefghijklmnop')`).Error)
-	require.Error(t, goose.DownTo(sqlDB, migrations, 69))
+	require.Error(t, goose.DownTo(sqlDB, migrations, 72))
 	require.NoError(t, db.Exec("DELETE FROM gmail_resources").Error)
-	require.NoError(t, goose.DownTo(sqlDB, migrations, 69))
+	require.NoError(t, goose.DownTo(sqlDB, migrations, 72))
 	require.False(t, db.Migrator().HasTable("gmail_resources"))
 	require.False(t, db.Migrator().HasColumn("orders", "gmail_resource_id"))
-	require.NoError(t, goose.UpTo(sqlDB, migrations, 70))
+	require.NoError(t, goose.UpTo(sqlDB, migrations, 73))
 
 	require.NoError(t, db.Exec("DELETE FROM gmail_supply_routes WHERE project_id = 990069").Error)
 	require.NoError(t, db.Exec("DELETE FROM project_products WHERE project_id = 990069").Error)
 	require.NoError(t, db.Exec("DELETE FROM projects WHERE id = 990069").Error)
 	require.NoError(t, db.Exec("DELETE FROM smsbower_services WHERE code = 'gm'").Error)
 	require.NoError(t, goose.DownTo(sqlDB, migrations, 68))
-	require.NoError(t, goose.UpTo(sqlDB, migrations, 70))
+	require.NoError(t, goose.UpTo(sqlDB, migrations, 73))
 }
