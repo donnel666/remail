@@ -374,6 +374,13 @@ func TestBodyRuleOnlyFallsBackToFullMatchWithoutCaptureGroups(t *testing.T) {
 	require.Empty(t, extractByBodyRule("prefix", `prefix(optional)?`))
 }
 
+func TestBodyRuleDecodesExtractedHTMLURL(t *testing.T) {
+	body := `<a href="https://clerk.skyvern.com/v1/verify?_clerk_js_version=5.127.1&amp;token=abc.def-_">Sign up</a>`
+	want := `https://clerk.skyvern.com/v1/verify?_clerk_js_version=5.127.1&token=abc.def-_`
+
+	require.Equal(t, want, extractByBodyRule(body, `href="([^"]+)"`))
+}
+
 func TestBodyRuleSkipsExtractionLargerThanStorageLimit(t *testing.T) {
 	value, index := extractByBodyRulesWithIndex(
 		strings.Repeat("a", maxExtractedValueSize+1)+" ok",

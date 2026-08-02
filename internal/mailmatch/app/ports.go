@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"log/slog"
 	"mime"
@@ -2041,7 +2042,7 @@ func extractByBodyRule(body string, pattern string) string {
 }
 
 func validExtractedValue(value string) string {
-	value = strings.TrimSpace(value)
+	value = strings.TrimSpace(html.UnescapeString(value))
 	if len(value) > maxExtractedValueSize {
 		return ""
 	}
