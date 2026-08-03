@@ -1581,6 +1581,7 @@ const (
 	MarginBelowFloor            GmailUpstreamUnsafeReason = "margin_below_floor"
 	ModeDisabled                GmailUpstreamUnsafeReason = "mode_disabled"
 	OutOfStock                  GmailUpstreamUnsafeReason = "out_of_stock"
+	ProductMissing              GmailUpstreamUnsafeReason = "product_missing"
 	ProviderModeUnsupported     GmailUpstreamUnsafeReason = "provider_mode_unsupported"
 	QuoteStale                  GmailUpstreamUnsafeReason = "quote_stale"
 	RouteDisabled               GmailUpstreamUnsafeReason = "route_disabled"
@@ -1602,6 +1603,8 @@ func (e GmailUpstreamUnsafeReason) Valid() bool {
 	case ModeDisabled:
 		return true
 	case OutOfStock:
+		return true
+	case ProductMissing:
 		return true
 	case ProviderModeUnsupported:
 		return true

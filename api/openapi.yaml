@@ -19267,6 +19267,7 @@ components:
       type: string
       enum:
         - mode_disabled
+        - product_missing
         - route_missing
         - route_disabled
         - local_supply_not_configured

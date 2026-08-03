@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"sort"
 	"strconv"
 	"strings"
@@ -72,6 +73,10 @@ func (s *Service) CheckSupply(ctx context.Context, projectID uint, mode tradedom
 	if projectID == 0 || mode != tradedomain.ServiceModeCode && mode != tradedomain.ServiceModePurchase {
 		return nil, tradedomain.ErrUpstreamUnavailable
 	}
+	pay, err := money.Parse(payAmount)
+	if err != nil || !pay.IsPositive() {
+		return nil, tradedomain.ErrInvalidOrderRequest
+	}
 	modeColumn := "r.code_enabled"
 	if mode == tradedomain.ServiceModePurchase {
 		modeColumn = "r.purchase_enabled"
@@ -88,84 +93,77 @@ func (s *Service) CheckSupply(ctx context.Context, projectID uint, mode tradedom
 		PurchaseSupplierPrice string     `gorm:"column:purchase_supplier_price"`
 	}
 	var rows []supplyRow
-	err := s.dbFor(ctx).
+	err = s.dbFor(ctx).
 		Table("gmail_supply_routes AS r").
-		Select(`r.source, r.provider_service_code, svc.gmail_price, svc.gmail_stock,
-svc.active AS service_active, account.balance, account.health_status, account.last_success_at,
-		pp.purchase_supplier_price`).
+		Select(`r.source, r.provider_service_code, COALESCE(svc.gmail_price, 0) AS gmail_price,
+COALESCE(svc.gmail_stock, 0) AS gmail_stock, COALESCE(svc.active, 0) AS service_active,
+COALESCE(account.balance, 0) AS balance, COALESCE(account.health_status, '') AS health_status,
+account.last_success_at, pp.purchase_supplier_price`).
 		Joins("JOIN project_products AS pp ON pp.project_id = r.project_id AND pp.type = ?", "gmail").
 		Joins("LEFT JOIN smsbower_services AS svc ON r.source = ? AND svc.code = r.provider_service_code", SourceSMSBower).
-		Joins("JOIN smsbower_account_state AS account ON account.id = 1").
+		Joins("LEFT JOIN smsbower_account_state AS account ON account.id = 1").
 		Where("r.project_id = ? AND r.enabled = ? AND "+modeColumn+" = ?", projectID, true, true).
-		Limit(2).Scan(&rows).Error
+		Scan(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("load Gmail supply route: %w", err)
 	}
-	if len(rows) != 1 {
-		return nil, tradedomain.ErrUpstreamUnavailable
-	}
-	row := rows[0]
-	pay, err := money.Parse(payAmount)
-	if err != nil || pay.IsNegative() {
-		return nil, tradedomain.ErrInvalidOrderRequest
-	}
-	if row.Source == SourceLocal {
-		if mode != tradedomain.ServiceModePurchase {
-			return nil, tradedomain.ErrUpstreamUnavailable
-		}
-		var available int64
-		if err := s.dbFor(ctx).Model(&localResourceModel{}).Where("status = ?", LocalResourceAvailable).Count(&available).Error; err != nil {
-			return nil, fmt.Errorf("count local Gmail purchase inventory: %w", err)
-		}
-		if available == 0 {
-			return nil, tradedomain.ErrUpstreamUnavailable
-		}
-		cost, costErr := money.Parse(row.PurchaseSupplierPrice)
-		minMargin, settingsErr := minimumMarginSetting()
-		if costErr != nil || settingsErr != nil || cost.IsNegative() || !pay.IsPositive() || pay.Sub(cost).Div(pay).LessThan(minMargin) {
-			return nil, tradedomain.ErrUpstreamPriceProtected
-		}
-		return &tradeapp.GmailSupplyQuote{
-			Source: SourceLocal, UpstreamPrice: "0", PointsPerUnit: "1", CostPoints: money.Format(cost), MaxPrice: "0",
-		}, nil
-	}
-	if row.Source != SourceSMSBower || mode != tradedomain.ServiceModeCode {
-		return nil, tradedomain.ErrUpstreamUnavailable
-	}
-	if !runtimeconfig.Bool("smsbower_enabled", false) || strings.TrimSpace(runtimeconfig.String("smsbower_api_key", "")) == "" {
-		return nil, tradedomain.ErrUpstreamUnavailable
-	}
-	if row.Source != SourceSMSBower || row.ProviderServiceCode == "" || !row.ServiceActive || row.Stock == 0 || row.HealthStatus != "healthy" || row.LastSuccessAt == nil {
-		return nil, tradedomain.ErrUpstreamUnavailable
-	}
+	rand.Shuffle(len(rows), func(i, j int) { rows[i], rows[j] = rows[j], rows[i] })
+	priceProtected := false
 	staleAfter := time.Duration(runtimeconfig.Int("smsbower_sync_interval_minutes", 5, 1)*3) * time.Minute
-	if s.now().Sub(row.LastSuccessAt.UTC()) > staleAfter {
-		return nil, tradedomain.ErrUpstreamUnavailable
+	for _, row := range rows {
+		switch {
+		case row.Source == SourceLocal && mode == tradedomain.ServiceModePurchase:
+			var available int64
+			if err := s.dbFor(ctx).Model(&localResourceModel{}).Where("status = ?", LocalResourceAvailable).Count(&available).Error; err != nil {
+				return nil, fmt.Errorf("count local Gmail purchase inventory: %w", err)
+			}
+			if available == 0 {
+				continue
+			}
+			cost, costErr := money.Parse(row.PurchaseSupplierPrice)
+			minMargin, settingsErr := minimumMarginSetting()
+			if costErr != nil || settingsErr != nil || cost.IsNegative() || pay.Sub(cost).Div(pay).LessThan(minMargin) {
+				priceProtected = true
+				continue
+			}
+			return &tradeapp.GmailSupplyQuote{
+				Source: SourceLocal, UpstreamPrice: "0", PointsPerUnit: "1", CostPoints: money.Format(cost), MaxPrice: "0",
+			}, nil
+
+		case row.Source == SourceSMSBower && mode == tradedomain.ServiceModeCode:
+			if !runtimeconfig.Bool("smsbower_enabled", false) || strings.TrimSpace(runtimeconfig.String("smsbower_api_key", "")) == "" ||
+				row.ProviderServiceCode == "" || !row.ServiceActive || row.Stock == 0 || row.HealthStatus != "healthy" || row.LastSuccessAt == nil ||
+				s.now().Sub(row.LastSuccessAt.UTC()) > staleAfter {
+				continue
+			}
+			upstream, parseErr := money.Parse(row.Price)
+			if parseErr != nil || upstream.IsNegative() {
+				continue
+			}
+			balance, parseErr := money.Parse(row.Balance)
+			if parseErr != nil || balance.LessThan(upstream) {
+				continue
+			}
+			pointsPerUnit, minMargin, settingsErr := upstreamPricingSettings()
+			if settingsErr != nil {
+				continue
+			}
+			cost, allowedPrice, _, safe := calculateSupplyMargin(pay, upstream, pointsPerUnit, minMargin)
+			if !safe {
+				priceProtected = true
+				continue
+			}
+			return &tradeapp.GmailSupplyQuote{
+				Source: SourceSMSBower, ProviderServiceCode: row.ProviderServiceCode,
+				UpstreamPrice: money.Format(upstream), PointsPerUnit: money.Format(pointsPerUnit),
+				CostPoints: money.Format(cost), MaxPrice: money.Format(minDecimal(upstream, allowedPrice)),
+			}, nil
+		}
 	}
-	if !pay.IsPositive() {
-		return nil, tradedomain.ErrInvalidOrderRequest
-	}
-	upstream, err := money.Parse(row.Price)
-	if err != nil || upstream.IsNegative() {
-		return nil, tradedomain.ErrUpstreamUnavailable
-	}
-	balance, err := money.Parse(row.Balance)
-	if err != nil || balance.LessThan(upstream) {
-		return nil, tradedomain.ErrUpstreamUnavailable
-	}
-	pointsPerUnit, minMargin, err := upstreamPricingSettings()
-	if err != nil {
-		return nil, tradedomain.ErrUpstreamUnavailable
-	}
-	cost, allowedPrice, _, safe := calculateSupplyMargin(pay, upstream, pointsPerUnit, minMargin)
-	if !safe {
+	if priceProtected {
 		return nil, tradedomain.ErrUpstreamPriceProtected
 	}
-	return &tradeapp.GmailSupplyQuote{
-		Source: SourceSMSBower, ProviderServiceCode: row.ProviderServiceCode,
-		UpstreamPrice: money.Format(upstream), PointsPerUnit: money.Format(pointsPerUnit),
-		CostPoints: money.Format(cost), MaxPrice: money.Format(minDecimal(upstream, allowedPrice)),
-	}, nil
+	return nil, tradedomain.ErrUpstreamUnavailable
 }
 
 func (s *Service) ListInventory(ctx context.Context, projectIDs []uint) ([]InventoryItem, error) {
@@ -179,6 +177,8 @@ func (s *Service) ListInventory(ctx context.Context, projectIDs []uint) ([]Inven
 		ProductStatus         string     `gorm:"column:product_status"`
 		CodeEnabled           bool       `gorm:"column:code_enabled"`
 		PurchaseEnabled       bool       `gorm:"column:purchase_enabled"`
+		Source                string     `gorm:"column:source"`
+		RouteEnabled          bool       `gorm:"column:route_enabled"`
 		CodeRouteEnabled      bool       `gorm:"column:code_route_enabled"`
 		PurchaseRouteEnabled  bool       `gorm:"column:purchase_route_enabled"`
 		CodePrice             string     `gorm:"column:code_price"`
@@ -196,14 +196,14 @@ func (s *Service) ListInventory(ctx context.Context, projectIDs []uint) ([]Inven
 	if err := s.dbFor(ctx).Table("project_products AS pp").
 		Select(`pp.project_id, pp.id AS product_id, pp.status AS product_status, pp.code_enabled, pp.purchase_enabled,
 pp.code_price, pp.purchase_price, pp.purchase_supplier_price,
-COALESCE(code_route.enabled, 0) AS code_route_enabled, COALESCE(purchase_route.enabled, 0) AS purchase_route_enabled,
+COALESCE(r.source, '') AS source, COALESCE(r.enabled, 0) AS route_enabled,
+COALESCE(r.code_enabled, 0) AS code_route_enabled, COALESCE(r.purchase_enabled, 0) AS purchase_route_enabled,
 COALESCE(svc.gmail_price, 0) AS gmail_price,
 COALESCE(svc.gmail_stock, 0) AS gmail_stock, COALESCE(svc.active, 0) AS service_active,
 COALESCE(account.balance, 0) AS balance, COALESCE(account.health_status, '') AS health_status,
 account.last_success_at, (SELECT COUNT(*) FROM gmail_resources WHERE status = ?) AS local_stock`, LocalResourceAvailable).
-		Joins("LEFT JOIN gmail_supply_routes AS code_route ON code_route.project_id = pp.project_id AND code_route.source = ? AND code_route.code_enabled = ?", SourceSMSBower, true).
-		Joins("LEFT JOIN gmail_supply_routes AS purchase_route ON purchase_route.project_id = pp.project_id AND purchase_route.source = ? AND purchase_route.purchase_enabled = ?", SourceLocal, true).
-		Joins("LEFT JOIN smsbower_services AS svc ON svc.code = code_route.provider_service_code").
+		Joins("LEFT JOIN gmail_supply_routes AS r ON r.project_id = pp.project_id").
+		Joins("LEFT JOIN smsbower_services AS svc ON r.source = ? AND svc.code = r.provider_service_code", SourceSMSBower).
 		Joins("LEFT JOIN smsbower_account_state AS account ON account.id = 1").
 		Where("pp.project_id IN ? AND pp.type = ?", projectIDs, "gmail").
 		Scan(&rows).Error; err != nil {
@@ -221,10 +221,20 @@ account.last_success_at, (SELECT COUNT(*) FROM gmail_resources WHERE status = ?)
 		minimumRatio = parsed
 	}
 	staleAfter := time.Duration(runtimeconfig.Int("smsbower_sync_interval_minutes", 5, 1)*3) * time.Minute
-	items := make([]InventoryItem, 0, len(rows))
+	items := make([]InventoryItem, 0, len(projectIDs))
+	itemIndexes := make(map[uint]int, len(projectIDs))
 	for _, row := range rows {
-		item := InventoryItem{ProjectID: row.ProjectID, ProductID: row.ProductID}
-		if configured && upstreamSettingsErr == nil && row.ProductStatus == "enabled" && row.CodeEnabled && row.CodeRouteEnabled &&
+		index, exists := itemIndexes[row.ProjectID]
+		if !exists {
+			index = len(items)
+			itemIndexes[row.ProjectID] = index
+			items = append(items, InventoryItem{ProjectID: row.ProjectID, ProductID: row.ProductID})
+		}
+		item := &items[index]
+		if !row.RouteEnabled || row.ProductStatus != "enabled" {
+			continue
+		}
+		if row.Source == SourceSMSBower && configured && upstreamSettingsErr == nil && row.CodeEnabled && row.CodeRouteEnabled &&
 			row.ServiceActive && row.Stock > 0 && row.HealthStatus == "healthy" && row.LastSuccessAt != nil &&
 			s.now().Sub(row.LastSuccessAt.UTC()) <= staleAfter {
 			sale, saleErr := money.Parse(row.CodePrice)
@@ -234,20 +244,19 @@ account.last_success_at, (SELECT COUNT(*) FROM gmail_resources WHERE status = ?)
 				_, _, _, safe := calculateSupplyMargin(sale.Mul(minimumRatio), upstream, pointsPerUnit, minMargin)
 				if safe {
 					// ponytail: this is a non-reserving per-product hint; CheckSupply rechecks balance and price at checkout.
-					item.CodeAvailable = int64(affordableStock(row.Stock, balance, upstream))
+					item.CodeAvailable += int64(affordableStock(row.Stock, balance, upstream))
 				}
 			}
 		}
-		if marginSettingsErr == nil && row.ProductStatus == "enabled" && row.PurchaseEnabled && row.PurchaseRouteEnabled && row.LocalStock > 0 {
+		if row.Source == SourceLocal && marginSettingsErr == nil && row.PurchaseEnabled && row.PurchaseRouteEnabled && row.LocalStock > 0 {
 			sale, saleErr := money.Parse(row.PurchasePrice)
 			cost, costErr := money.Parse(row.PurchaseSupplierPrice)
 			effectiveSale := sale.Mul(minimumRatio)
 			if saleErr == nil && costErr == nil && effectiveSale.IsPositive() && !cost.IsNegative() &&
 				!effectiveSale.Sub(cost).Div(effectiveSale).LessThan(minMargin) {
-				item.PurchaseAvailable = row.LocalStock
+				item.PurchaseAvailable += row.LocalStock
 			}
 		}
-		items = append(items, item)
 	}
 	return items, nil
 }
@@ -499,21 +508,18 @@ func (s *Service) PutMapping(ctx context.Context, projectID uint, source, servic
 	if !codeEnabled && !purchaseEnabled {
 		enabled = false
 	}
-	if enabled && (codeEnabled && source != SourceSMSBower || purchaseEnabled && source != SourceLocal) {
-		return ErrInvalidRoute
-	}
 	model := routeModel{
 		ProjectID: projectID, Source: source, ProviderServiceCode: serviceCode,
 		Enabled: enabled, CodeEnabled: codeEnabled, PurchaseEnabled: purchaseEnabled,
 	}
 	return s.dbFor(ctx).Transaction(func(tx *gorm.DB) error {
-		var productID uint
-		if err := tx.Table("project_products").Clauses(clause.Locking{Strength: "UPDATE"}).
-			Select("id").Where("project_id = ? AND type = ?", projectID, "gmail").Take(&productID).Error; err != nil {
+		var lockedProjectID uint
+		if err := tx.Table("projects").Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id").Where("id = ?", projectID).Take(&lockedProjectID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrInvalidRoute
 			}
-			return fmt.Errorf("lock Gmail project product: %w", err)
+			return fmt.Errorf("lock Gmail supply project: %w", err)
 		}
 		if source == SourceSMSBower {
 			var serviceCount int64
@@ -522,16 +528,6 @@ func (s *Service) PutMapping(ctx context.Context, projectID uint, source, servic
 			}
 			if serviceCount == 0 {
 				return ErrInvalidRoute
-			}
-		}
-		if enabled && codeEnabled {
-			if err := tx.Model(&routeModel{}).Where("project_id = ? AND source <> ?", projectID, source).Update("code_enabled", false).Error; err != nil {
-				return err
-			}
-		}
-		if enabled && purchaseEnabled {
-			if err := tx.Model(&routeModel{}).Where("project_id = ? AND source <> ?", projectID, source).Update("purchase_enabled", false).Error; err != nil {
-				return err
 			}
 		}
 		if err := tx.Clauses(clause.OnConflict{
@@ -579,20 +575,23 @@ func (s *Service) ListMappings(ctx context.Context) ([]MappingItem, error) {
 		LastSuccessAt         *time.Time `gorm:"column:last_success_at"`
 		LocalStock            int64      `gorm:"column:local_stock"`
 	}
-	if err := s.dbFor(ctx).Table("project_products AS pp").
-		Select(`p.id AS project_id, p.name AS project_name, pp.id AS product_id, pp.code_price, pp.purchase_price,
-pp.code_supplier_price, pp.purchase_supplier_price,
+	if err := s.dbFor(ctx).Table("projects AS p").
+		Select(`p.id AS project_id, p.name AS project_name, COALESCE(pp.id, 0) AS product_id,
+COALESCE(pp.code_price, 0) AS code_price, COALESCE(pp.purchase_price, 0) AS purchase_price,
+COALESCE(pp.code_supplier_price, 0) AS code_supplier_price,
+COALESCE(pp.purchase_supplier_price, 0) AS purchase_supplier_price,
 COALESCE(r.source, '') AS source, COALESCE(r.provider_service_code, '') AS provider_service_code,
 r.enabled AS route_enabled, COALESCE(r.code_enabled, 0) AS code_enabled, COALESCE(r.purchase_enabled, 0) AS purchase_enabled,
 COALESCE(svc.name, '') AS service_name,
 COALESCE(svc.gmail_price, 0) AS gmail_price, COALESCE(svc.gmail_stock, 0) AS gmail_stock,
-COALESCE(svc.active, 0) AS service_active, account.health_status, account.balance, account.last_success_at,
+COALESCE(svc.active, 0) AS service_active, COALESCE(account.health_status, '') AS health_status,
+COALESCE(account.balance, 0) AS balance, account.last_success_at,
 (SELECT COUNT(*) FROM gmail_resources WHERE status = ?) AS local_stock`, LocalResourceAvailable).
-		Joins("JOIN projects AS p ON p.id = pp.project_id").
+		Joins("LEFT JOIN project_products AS pp ON pp.project_id = p.id AND pp.type = ?", "gmail").
 		Joins("LEFT JOIN gmail_supply_routes AS r ON r.project_id = p.id").
 		Joins("LEFT JOIN smsbower_services AS svc ON r.source = ? AND svc.code = r.provider_service_code", SourceSMSBower).
-		Joins("JOIN smsbower_account_state AS account ON account.id = 1").
-		Where("pp.type = ?", "gmail").Order("p.name ASC, p.id ASC, r.source ASC").Scan(&rows).Error; err != nil {
+		Joins("LEFT JOIN smsbower_account_state AS account ON account.id = 1").
+		Order("p.name ASC, p.id ASC, r.source ASC").Scan(&rows).Error; err != nil {
 		return nil, fmt.Errorf("list Gmail supply mappings: %w", err)
 	}
 	var minimumRatioValue string
@@ -628,6 +627,8 @@ COALESCE(svc.active, 0) AS service_active, account.health_status, account.balanc
 		}
 		baseReason := ""
 		switch {
+		case row.ProductID == 0:
+			baseReason = "product_missing"
 		case row.Source == "":
 			baseReason = "route_missing"
 		case row.RouteEnabled == nil || !*row.RouteEnabled:
@@ -648,7 +649,7 @@ COALESCE(svc.active, 0) AS service_active, account.health_status, account.balanc
 			baseReason = "invalid_price"
 		}
 		evaluate := func(enabled bool, sale decimal.Decimal, saleErr error, providerSupported bool, localCost decimal.Decimal) (bool, decimal.Decimal, string) {
-			if baseReason == "route_missing" || baseReason == "route_disabled" {
+			if baseReason == "product_missing" || baseReason == "route_missing" || baseReason == "route_disabled" {
 				return false, decimal.Zero, baseReason
 			}
 			if !enabled {
@@ -842,16 +843,11 @@ type priceChange struct {
 }
 
 func (s *Service) Sync(ctx context.Context) error {
-	now := s.now().UTC().Truncate(time.Millisecond)
-	if !runtimeconfig.Bool("smsbower_enabled", false) {
-		return s.dbFor(ctx).Model(&accountStateModel{}).Where("id = 1").Updates(map[string]any{
-			"health_status": "disabled", "last_safe_error": "", "consecutive_failures": 0, "last_synced_at": now,
-		}).Error
-	}
 	apiKey := strings.TrimSpace(runtimeconfig.String("smsbower_api_key", ""))
 	if apiKey == "" {
-		return s.syncFailure(ctx, ErrBadKey)
+		return nil
 	}
+	now := s.now().UTC().Truncate(time.Millisecond)
 	balance, err := s.client.Balance(ctx, apiKey)
 	if err != nil {
 		return s.syncFailure(ctx, err)

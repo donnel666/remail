@@ -7124,7 +7124,7 @@ export interface components {
             purchaseUnsafeReason?: components["schemas"]["GmailUpstreamUnsafeReason"];
         };
         /** @enum {string} */
-        GmailUpstreamUnsafeReason: "mode_disabled" | "route_missing" | "route_disabled" | "local_supply_not_configured" | "provider_mode_unsupported" | "service_inactive" | "out_of_stock" | "insufficient_upstream_balance" | "quote_stale" | "invalid_price" | "margin_below_floor";
+        GmailUpstreamUnsafeReason: "mode_disabled" | "product_missing" | "route_missing" | "route_disabled" | "local_supply_not_configured" | "provider_mode_unsupported" | "service_inactive" | "out_of_stock" | "insufficient_upstream_balance" | "quote_stale" | "invalid_price" | "margin_below_floor";
         GmailUpstreamFinanceReport: {
             overview: components["schemas"]["GmailUpstreamFinanceOverview"];
             byProject: components["schemas"]["GmailUpstreamFinanceBreakdown"][];

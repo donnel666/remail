@@ -89,6 +89,7 @@ function unsafeReasonLabel(reason?: string) {
     margin_below_floor: "低于最低毛利率",
     mode_disabled: "该渠道未参与此模式",
     out_of_stock: "上游暂无库存",
+    product_missing: "项目尚未配置 Gmail 商品",
     provider_mode_unsupported: "该渠道暂不支持此履约模式",
     quote_stale: "价格或账户状态已过期",
     route_disabled: "渠道已停用",
@@ -159,10 +160,10 @@ export default function UpstreamsSection({
         for (const source of sources) {
           const route = nextMappings.find((item) => item.projectId === projectId && item.source === source);
           nextDrafts[routeKey(projectId, source)] = {
-            codeEnabled: source === "local" ? false : route?.codeEnabled ?? source === "smsbower",
+            codeEnabled: route?.codeEnabled ?? false,
             enabled: route?.enabled ?? false,
             providerServiceCode: source === "local" ? "" : route?.providerServiceCode ?? (source === "smsbower" ? firstService : ""),
-            purchaseEnabled: source === "smsbower" ? false : route?.purchaseEnabled ?? source === "local",
+            purchaseEnabled: route?.purchaseEnabled ?? false,
             source,
           };
         }
@@ -206,7 +207,7 @@ export default function UpstreamsSection({
           codeEnabled: false,
           codeMarginRate: "0",
           codeSafe: false,
-          codeUnsafeReason: "route_missing" as const,
+          codeUnsafeReason: project.productId ? "route_missing" as const : "product_missing" as const,
           costPoints: "0",
           enabled: false,
           providerServiceCode: "",
@@ -214,7 +215,7 @@ export default function UpstreamsSection({
           purchaseEnabled: false,
           purchaseMarginRate: "0",
           purchaseSafe: false,
-          purchaseUnsafeReason: "route_missing" as const,
+          purchaseUnsafeReason: project.productId ? "route_missing" as const : "product_missing" as const,
           source,
           upstreamPrice: "0",
         };
@@ -352,7 +353,7 @@ export default function UpstreamsSection({
           </div>
           {status?.lastSafeError ? <div className="mb-4 rounded-lg bg-[var(--semi-color-danger-light-default)] px-3 py-2 text-sm text-[var(--semi-color-danger)]">{status.lastSafeError}</div> : null}
           <SettingsAccessBoundary canWrite={canWrite}>
-            <SettingsSwitchField checked={form.smsbower_enabled} onChange={(value) => setForm((current) => ({ ...current, smsbower_enabled: value }))} label="启用 SMSBower" description="关闭后停止新采购；已创建会话仍按订单快照完成或退款" />
+            <SettingsSwitchField checked={form.smsbower_enabled} onChange={(value) => setForm((current) => ({ ...current, smsbower_enabled: value }))} label="启用 SMSBower" description="仅控制是否参与库存统计和新订单分配；同步、余额、价格及健康监控不受影响" />
             <SettingsFormGrid className="mt-4">
               <SettingsNumberField label="同步间隔（分钟）" value={form.smsbower_sync_interval_minutes} onChange={(value) => setForm((current) => ({ ...current, smsbower_sync_interval_minutes: value }))} min={1} max={1440} precision={0} />
               <SettingsNumberField label="余额预警阈值" value={form.smsbower_balance_warning_threshold} onChange={(value) => setForm((current) => ({ ...current, smsbower_balance_warning_threshold: value }))} min={0} precision={6} />
@@ -369,10 +370,10 @@ export default function UpstreamsSection({
         </Spin>
       </SettingsSection>
 
-      <SettingsSection title={<SettingsCardHeader icon={<Link2 size={16} />} title="Gmail 商品与渠道映射" description="SMSBower 只支持接码，自有 Gmail 只支持购买；第三方可预配置，接入履约适配器后才能启用" />}>
+      <SettingsSection title={<SettingsCardHeader icon={<Link2 size={16} />} title="Gmail 商品与渠道映射" description="由管理员决定每个渠道是否启用及参与接码、购买；同一模式的多个可履约渠道会随机分配" />}>
         <Spin spinning={loading}>
           <div className="mb-4 grid gap-2 md:grid-cols-[minmax(180px,1fr)_minmax(180px,1fr)_minmax(220px,1.2fr)_auto]">
-            <Select aria-label="系统项目" disabled={!canWrite} onChange={(value) => setNewRoute((current) => ({ ...current, projectId: Number(value ?? 0) }))} optionList={Array.from(new Map(mappings.map((item) => [item.projectId, { label: item.projectName, value: item.projectId }])).values())} placeholder="选择系统项目" value={newRoute.projectId || undefined} />
+            <Select aria-label="系统项目" disabled={!canWrite} filter onChange={(value) => setNewRoute((current) => ({ ...current, projectId: Number(value ?? 0) }))} optionList={Array.from(new Map(mappings.map((item) => [item.projectId, { label: item.projectName, value: item.projectId }])).values())} placeholder="选择系统项目" value={newRoute.projectId || undefined} />
             <Input aria-label="第三方渠道标识" disabled={!canWrite} maxLength={64} onChange={(source) => setNewRoute((current) => ({ ...current, source }))} placeholder="渠道标识，如 provider-x" value={newRoute.source} />
             <Input aria-label="第三方上游项目代码" disabled={!canWrite} maxLength={64} onChange={(providerServiceCode) => setNewRoute((current) => ({ ...current, providerServiceCode }))} placeholder="该渠道的上游项目代码" value={newRoute.providerServiceCode} />
             <Button disabled={!canWrite || mappings.length === 0} loading={savingRoute?.startsWith("new:")} onClick={() => void addRoute()} theme="light" type="primary">新增渠道</Button>
@@ -389,7 +390,7 @@ export default function UpstreamsSection({
               } },
               { title: "参与模式", width: 220, render: (_value, row: RouteRow) => {
                 const draft = drafts[routeKey(row.projectId, row.source)];
-                return <div className="flex flex-wrap items-center gap-3"><Switch checked={draft?.enabled ?? false} disabled={!canWrite || row.source !== "smsbower" && row.source !== "local" && !draft?.enabled} onChange={(enabled) => updateDraft(row.projectId, row.source, { enabled })} size="small" /><Checkbox checked={draft?.codeEnabled ?? false} disabled={!canWrite || row.source === "local"} onChange={(event) => updateDraft(row.projectId, row.source, { codeEnabled: event.target.checked })}>接码</Checkbox><Checkbox checked={draft?.purchaseEnabled ?? false} disabled={!canWrite || row.source === "smsbower"} onChange={(event) => updateDraft(row.projectId, row.source, { purchaseEnabled: event.target.checked })}>购买</Checkbox></div>;
+                return <div className="flex flex-wrap items-center gap-3"><Switch checked={draft?.enabled ?? false} disabled={!canWrite} onChange={(enabled) => updateDraft(row.projectId, row.source, { enabled })} size="small" /><Checkbox checked={draft?.codeEnabled ?? false} disabled={!canWrite} onChange={(event) => updateDraft(row.projectId, row.source, { codeEnabled: event.target.checked })}>接码</Checkbox><Checkbox checked={draft?.purchaseEnabled ?? false} disabled={!canWrite} onChange={(event) => updateDraft(row.projectId, row.source, { purchaseEnabled: event.target.checked })}>购买</Checkbox></div>;
               } },
               { title: "接码防亏", width: 160, render: (_value, row: RouteRow) => <SafetyTag safe={row.codeSafe} reason={row.codeUnsafeReason} rate={row.codeMarginRate} /> },
               { title: "购买防亏", width: 180, render: (_value, row: RouteRow) => <SafetyTag safe={row.purchaseSafe} reason={row.purchaseUnsafeReason} rate={row.purchaseMarginRate} /> },
@@ -401,7 +402,7 @@ export default function UpstreamsSection({
               } },
             ]}
             dataSource={routeRows}
-            empty={<div className="py-10 text-center text-[var(--semi-color-text-2)]">请先在项目管理中添加 Gmail 商品</div>}
+            empty={<div className="py-10 text-center text-[var(--semi-color-text-2)]">暂无系统项目</div>}
             pagination={false}
             rowKey={(row) => row ? routeKey(row.projectId, row.source) : ""}
             scroll={{ x: 1350 }}
