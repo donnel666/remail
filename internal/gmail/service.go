@@ -137,7 +137,7 @@ account.last_success_at, pp.purchase_supplier_price`).
 				continue
 			}
 			upstream, parseErr := money.Parse(row.Price)
-			if parseErr != nil || upstream.IsNegative() {
+			if parseErr != nil || !upstream.IsPositive() {
 				continue
 			}
 			balance, parseErr := money.Parse(row.Balance)
@@ -240,10 +240,10 @@ account.last_success_at, (SELECT COUNT(*) FROM gmail_resources WHERE status = ?)
 			sale, saleErr := money.Parse(row.CodePrice)
 			upstream, upstreamErr := money.Parse(row.UpstreamPrice)
 			balance, balanceErr := money.Parse(row.Balance)
-			if saleErr == nil && upstreamErr == nil && balanceErr == nil && !upstream.IsNegative() {
+			if saleErr == nil && upstreamErr == nil && balanceErr == nil && upstream.IsPositive() {
 				_, _, _, safe := calculateSupplyMargin(sale.Mul(minimumRatio), upstream, pointsPerUnit, minMargin)
 				if safe {
-					// ponytail: this is a non-reserving per-product hint; CheckSupply rechecks balance and price at checkout.
+					// ponytail: min(upstream stock, floor(balance/price)) is a non-reserving hint; checkout rechecks.
 					item.CodeAvailable += int64(affordableStock(row.Stock, balance, upstream))
 				}
 			}
@@ -278,11 +278,8 @@ func uniqueUintValues(values []uint) []uint {
 }
 
 func affordableStock(stock uint, balance, unitPrice decimal.Decimal) uint {
-	if stock == 0 || balance.IsNegative() || unitPrice.IsNegative() {
+	if stock == 0 || balance.IsNegative() || !unitPrice.IsPositive() {
 		return 0
-	}
-	if unitPrice.IsZero() {
-		return stock
 	}
 	affordable := balance.Div(unitPrice).Floor()
 	if !affordable.IsPositive() {
@@ -643,7 +640,7 @@ COALESCE(account.balance, 0) AS balance, account.last_success_at,
 			baseReason = "insufficient_upstream_balance"
 		case row.Source == SourceSMSBower && (row.HealthStatus != "healthy" || row.LastSuccessAt == nil || s.now().Sub(row.LastSuccessAt.UTC()) > staleAfter):
 			baseReason = "quote_stale"
-		case row.Source == SourceSMSBower && (upstreamSettingsErr != nil || upstreamErr != nil || balanceErr != nil):
+		case row.Source == SourceSMSBower && (upstreamSettingsErr != nil || upstreamErr != nil || balanceErr != nil || !upstream.IsPositive()):
 			baseReason = "invalid_price"
 		case row.Source == SourceLocal && (purchaseSupplierPriceErr != nil || marginSettingsErr != nil):
 			baseReason = "invalid_price"

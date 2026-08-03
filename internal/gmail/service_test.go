@@ -80,7 +80,7 @@ func TestSupplyMarginAndThreeCodeState(t *testing.T) {
 	require.True(t, safe)
 	require.EqualValues(t, 3, affordableStock(10, decimal.RequireFromString("4.9"), decimal.RequireFromString("1.5")))
 	require.EqualValues(t, 10, affordableStock(10, decimal.RequireFromString("100"), decimal.RequireFromString("1.5")))
-	require.EqualValues(t, 10, affordableStock(10, decimal.Zero, decimal.Zero))
+	require.Zero(t, affordableStock(10, decimal.Zero, decimal.Zero))
 
 	for count := 1; count <= MaxCodes; count++ {
 		action, status := nextCodeAction(count)
@@ -292,7 +292,7 @@ func TestListInventorySeparatesModesAndKeepsUnroutedGmailAtZero(t *testing.T) {
 	now := time.Date(2026, 8, 1, 1, 0, 0, 0, time.UTC)
 	require.NoError(t, db.Exec("INSERT INTO project_products(id, project_id, type, status, code_enabled, purchase_enabled, code_price, purchase_price, purchase_supplier_price) VALUES (71, 7, 'gmail', 'enabled', 1, 1, '2', '2', '1'), (81, 8, 'gmail', 'enabled', 1, 1, '2', '1.05', '1')").Error)
 	require.NoError(t, db.Exec("INSERT INTO user_groups(enabled, price_discount_ratio) VALUES (1, '1')").Error)
-	require.NoError(t, db.Create(&accountStateModel{ID: 1, Balance: "10", HealthStatus: "healthy", LastSuccessAt: &now, Generation: 1}).Error)
+	require.NoError(t, db.Create(&accountStateModel{ID: 1, Balance: "2.5", HealthStatus: "healthy", LastSuccessAt: &now, Generation: 1}).Error)
 	require.NoError(t, db.Create(&serviceModel{Code: "gm", Name: "Gmail", GmailPrice: "1", GmailStock: 7, Active: true, LastSeenAt: now}).Error)
 	require.NoError(t, db.Create(&routeModel{ProjectID: 7, Source: SourceSMSBower, ProviderServiceCode: "gm", Enabled: true, CodeEnabled: true, PurchaseEnabled: true}).Error)
 	require.NoError(t, db.Create(&routeModel{ProjectID: 7, Source: SourceLocal, Enabled: true, CodeEnabled: true, PurchaseEnabled: true}).Error)
@@ -308,7 +308,7 @@ func TestListInventorySeparatesModesAndKeepsUnroutedGmailAtZero(t *testing.T) {
 	items, err := service.ListInventory(context.Background(), []uint{7, 8})
 	require.NoError(t, err)
 	require.ElementsMatch(t, []InventoryItem{
-		{ProjectID: 7, ProductID: 71, CodeAvailable: 7, PurchaseAvailable: 1},
+		{ProjectID: 7, ProductID: 71, CodeAvailable: 2, PurchaseAvailable: 1},
 		{ProjectID: 8, ProductID: 81},
 	}, items)
 }
