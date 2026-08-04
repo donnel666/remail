@@ -392,7 +392,7 @@ func (s *Service) ProcessGmailResourceImport(ctx context.Context, task gmailReso
 	// Persist the safe row result before MySQL commits. A Redis failure rolls
 	// the transaction back; a commit followed by a Redis finish failure is
 	// finalized from this prepared result without recreating Gmail resources.
-	writes, err := s.createGmailResourcesForImport(ctx, record.OwnerUserID, lines, func(created []gmailResourceImportWrite) error {
+	writes, err := s.createGmailResourcesForImport(ctx, record.OwnerUserID, record.RequestID, lines, func(created []gmailResourceImportWrite) error {
 		items := gmailResourceImportResultItems(lines, created, failures)
 		return s.prepareGmailResourceImportResult(
 			ctx, record.ImportID, task.Generation, claimToken, items,
@@ -411,7 +411,7 @@ func (s *Service) ProcessGmailResourceImport(ctx context.Context, task gmailReso
 		return err
 	}
 	if len(writes) > 0 {
-		if err := s.scheduleDispatcher(ctx); err != nil {
+		if err := s.scheduleLocalResourceValidationDispatcher(ctx, 0); err != nil {
 			slog.Warn("wake Gmail validation dispatcher after import failed", "import_id", record.ImportID, "error", err)
 		}
 	}
@@ -556,6 +556,7 @@ func gmailResourceImportResultItems(
 func (s *Service) createGmailResourcesForImport(
 	ctx context.Context,
 	ownerUserID uint,
+	requestID string,
 	lines []localResourceImportLine,
 	beforeCommit func([]gmailResourceImportWrite) error,
 ) ([]gmailResourceImportWrite, error) {
@@ -631,7 +632,13 @@ func (s *Service) createGmailResourcesForImport(
 					"resource_type": "gmail", "owner_user_id": ownerUserID,
 					"email": line.email, "identity": line.identity, "password": line.password,
 					"two_factor_secret": line.twoFactorSecret, "app_password": line.appPassword,
-					"status": LocalResourcePending, "last_safe_error": "", "last_checked_at": nil,
+					"credential_revision":   gorm.Expr("CASE WHEN credential_revision < 1 THEN 1 ELSE credential_revision + 1 END"),
+					"credential_updated_at": now, "for_sale": false,
+					"status":                LocalResourcePending,
+					"validation_generation": gorm.Expr("CASE WHEN validation_generation < 1 THEN 1 ELSE validation_generation + 1 END"),
+					"validation_failures":   0, "validation_request_id": strings.TrimSpace(requestID), "validation_command_hash": "",
+					"alloc_bucket": uint16(item.ID % 2048), "last_allocated_at": nil,
+					"last_safe_error": "", "last_checked_at": nil,
 					"updated_at": now,
 				})
 			if resourceResult.Error != nil {
@@ -658,7 +665,10 @@ func (s *Service) createGmailResourcesForImport(
 					ID: roots[i].ID, ResourceType: "gmail", OwnerUserID: ownerUserID,
 					Email: line.email, Identity: line.identity, Password: line.password,
 					TwoFactorSecret: line.twoFactorSecret, AppPassword: line.appPassword,
-					Status: LocalResourcePending, CreatedAt: now, UpdatedAt: now,
+					CredentialRevision: 1, CredentialUpdatedAt: now, ForSale: false,
+					Status: LocalResourcePending, ValidationGeneration: 1,
+					ValidationRequestID: strings.TrimSpace(requestID), AllocBucket: uint16(roots[i].ID % 2048),
+					CreatedAt: now, UpdatedAt: now,
 				}
 				writes[lineIndex] = gmailResourceImportWrite{ResourceID: roots[i].ID}
 			}

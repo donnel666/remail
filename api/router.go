@@ -238,6 +238,8 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		openapiapi.RegisterRoutes(v1, openapiMod, iamSessionFetcher, iamMod.PermissionChecker)
 
 		gmailMod = gmailapi.NewModule(p.DB, p.Redis, p.Asynq, fileStore)
+		gmailMod.Service.SetBackgroundExecutionGate(p.BackgroundLoad)
+		gmailMod.Service.SetPickupProxyProvider(proxyMod.ProxyUseCase)
 		gmailMod.Service.SetImportOwnerValidator(func(ctx context.Context, ownerID uint) (bool, error) {
 			owner, err := iamMod.AdminResourceOwners.ValidateTargetOwner(ctx, ownerID)
 			return owner != nil && owner.ID != 0 && owner.Enabled, err
@@ -277,6 +279,9 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		// MailMatch module (order-scoped message cache, async fetch and matching).
 		mailmatchMod := mailmatchapi.NewModule(p.DB, fileStore, p.Redis, p.Asynq, proxyMod.ProxyUseCase, tradeMod.UseCase, coreMod.ValidationUseCase)
 		mailmatchMod.SetCodeOnlyPickup(gmailPickupAdapter{service: gmailMod.Service, tokens: openapiMod.UseCase})
+		mailmatchMod.SetGmailMatchPort(gmailMod.Service)
+		mailmatchMod.SetGmailPurchaseFetchPort(gmailMod.Service)
+		gmailMod.Service.SetMailIngest(gmailMailIngestAdapter{mailmatch: mailmatchMod.UseCase})
 		mailmatchMod.SetMicrosoftCredentialPort(coreMod.MicrosoftCredentials)
 		mailmatchMod.SetBackgroundExecutionGate(p.BackgroundLoad)
 		coreMod.SetAdminResourceMaintenancePort(adminMicrosoftMaintenanceAdapter{
@@ -285,6 +290,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 			history: mailmatchMod.ResourceFetch,
 		})
 		coreMod.ProjectUseCase.SetHistoryScan(mailmatchMod.ProjectHistory.Schedule)
+		coreMod.ProjectUseCase.SetGmailHistoryScan(gmailMod.Service.ScheduleProjectHistory)
 		coreMod.SetMicrosoftHistoryScanTrigger(mailmatchMod.ProjectHistory)
 		// Inbound mail: ticket reply plus-addresses go to aftersale, everything
 		// else keeps flowing to mailmatch's resource inbound consumer.

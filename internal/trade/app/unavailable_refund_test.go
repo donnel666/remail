@@ -17,7 +17,7 @@ type unavailableRefundRepoStub struct {
 	refundCalls      int
 	cleanupStatus    string
 	unavailableLimit int
-	stalePending     bool
+	checkoutRecovery bool
 }
 
 func (s *unavailableRefundRepoStub) WithTx(ctx context.Context, fn func(context.Context) error) error {
@@ -38,6 +38,20 @@ func (s *unavailableRefundRepoStub) MarkFailed(_ context.Context, cmd MarkFailed
 	if s.order.Status == domain.OrderStatusPendingPayment {
 		s.order.Status = domain.OrderStatusFailed
 		s.order.FailureCode = cmd.FailureCode
+	}
+	order := s.order
+	return &order, nil
+}
+
+func (s *unavailableRefundRepoStub) MarkActive(_ context.Context, cmd MarkActiveCommand) (*domain.Order, error) {
+	if s.order.Status == domain.OrderStatusPaid {
+		s.order.Status = domain.OrderStatusActive
+		s.order.AllocationType = &cmd.AllocationType
+		s.order.DeliveryEmail = cmd.DeliveryEmail
+		s.order.ReceiveStartedAt = &cmd.ReceiveStartedAt
+		s.order.ReceiveUntil = &cmd.ReceiveUntil
+		s.order.ActivatedAt = cmd.ActivatedAt
+		s.order.AfterSaleUntil = cmd.AfterSaleUntil
 	}
 	order := s.order
 	return &order, nil
@@ -73,7 +87,7 @@ func (s *unavailableRefundRepoStub) MarkServiceCleanup(_ context.Context, _ stri
 
 func (s *unavailableRefundRepoStub) ListUnavailableMicrosoftOrderNos(_ context.Context, resourceID uint, limit int) ([]string, error) {
 	s.unavailableLimit = limit
-	if s.order.Status != domain.OrderStatusActive || s.order.RefundTxID != nil || (resourceID != 0 && resourceID != s.resourceID) {
+	if s.order.ProductType == domain.ProductTypeGmail || s.order.Status != domain.OrderStatusActive || s.order.RefundTxID != nil || (resourceID != 0 && resourceID != s.resourceID) {
 		return nil, nil
 	}
 	return []string{s.order.OrderNo}, nil
@@ -92,8 +106,10 @@ func (*unavailableRefundRepoStub) ListExpiredPurchaseWarrantyOrderNos(context.Co
 }
 
 func (s *unavailableRefundRepoStub) ListCheckoutAllocationRecoveries(_ context.Context, before time.Time, _ int) ([]CheckoutAllocationRecovery, error) {
-	if s.stalePending && s.order.Status == domain.OrderStatusPendingPayment && s.order.ProductType != domain.ProductTypeGmail && s.order.CreatedAt.Before(before) {
-		return []CheckoutAllocationRecovery{{OrderNo: s.order.OrderNo, Status: s.order.Status}}, nil
+	if s.checkoutRecovery && s.order.CreatedAt.Before(before) {
+		return []CheckoutAllocationRecovery{{
+			OrderNo: s.order.OrderNo, Status: s.order.Status, ProductType: s.order.ProductType,
+		}}, nil
 	}
 	return nil, nil
 }
@@ -155,6 +171,7 @@ type unavailableRefundDeliveryStub struct {
 type unavailableRefundGmailStub struct {
 	GmailSupplyPort
 	cancelled []string
+	released  []string
 	err       error
 }
 
@@ -163,13 +180,18 @@ func (s *unavailableRefundGmailStub) CancelGmailOrder(_ context.Context, orderNo
 	return s.err
 }
 
+func (s *unavailableRefundGmailStub) ReleaseLocalAllocation(_ context.Context, orderNo string) error {
+	s.released = append(s.released, orderNo)
+	return nil
+}
+
 func (s unavailableRefundDeliveryStub) FindOrderDelivery(context.Context, uint) (*OrderDeliverySummary, error) {
 	return s.delivery, nil
 }
 
 func TestExpireDueOrdersReleasesStalePendingAllocation(t *testing.T) {
 	now := time.Date(2026, 8, 4, 10, 0, 0, 0, time.UTC)
-	repo := &unavailableRefundRepoStub{stalePending: true, order: domain.Order{
+	repo := &unavailableRefundRepoStub{checkoutRecovery: true, order: domain.Order{
 		OrderNo: "OR_STALE_PENDING", UserID: 42, ProductType: domain.ProductTypeMicrosoft,
 		Status: domain.OrderStatusPendingPayment, CreatedAt: now.Add(-16 * time.Minute),
 	}}
@@ -184,6 +206,60 @@ func TestExpireDueOrdersReleasesStalePendingAllocation(t *testing.T) {
 	require.Equal(t, domain.OrderStatusFailed, repo.order.Status)
 	require.Equal(t, domain.OrderFailureAllocation, repo.order.FailureCode)
 	require.Equal(t, []string{repo.order.OrderNo}, allocation.released)
+}
+
+func TestExpireDueOrdersReleasesStalePendingGmailAllocation(t *testing.T) {
+	now := time.Date(2026, 8, 4, 10, 0, 0, 0, time.UTC)
+	repo := &unavailableRefundRepoStub{checkoutRecovery: true, order: domain.Order{
+		OrderNo: "OR_STALE_GMAIL", UserID: 42, ProductType: domain.ProductTypeGmail,
+		Status: domain.OrderStatusPendingPayment, CreatedAt: now.Add(-16 * time.Minute),
+	}}
+	allocation := &unavailableRefundAllocationStub{}
+	gmail := &unavailableRefundGmailStub{}
+	uc := NewUseCase(repo, nil, nil, allocation, &unavailableRefundTokenStub{})
+	uc.SetGmailPorts(gmail, nil)
+	uc.now = func() time.Time { return now }
+
+	result, err := uc.ExpireDueOrders(context.Background(), 200)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, result.CheckoutRecovered)
+	require.Zero(t, result.Failed)
+	require.Equal(t, domain.OrderStatusFailed, repo.order.Status)
+	require.Equal(t, domain.OrderFailureAllocation, repo.order.FailureCode)
+	require.Equal(t, []string{repo.order.OrderNo}, gmail.released)
+	require.Empty(t, allocation.released)
+}
+
+func TestExpireDueOrdersResumesPaidGmailPurchaseWithoutSupplyPrecheck(t *testing.T) {
+	now := time.Date(2026, 8, 4, 10, 0, 0, 0, time.UTC)
+	repo := &unavailableRefundRepoStub{checkoutRecovery: true, order: domain.Order{
+		ID: 71, OrderNo: "OR_PAID_GMAIL", UserID: 42, ProjectID: 8, ProjectProductID: 9,
+		ProductType: domain.ProductTypeGmail, ServiceMode: domain.ServiceModePurchase,
+		SupplyPolicy: domain.SupplyPolicyPrivateFirst, Status: domain.OrderStatusPaid,
+		PayAmount: "1.000000", ActivationWindowMinutes: 10, WarrantyMinutes: 10,
+		CreatedAt: now.Add(-16 * time.Minute),
+	}}
+	supply := &checkoutGmailSupplySpy{purchase: &GmailPurchaseDelivery{
+		AllocationID: 61, ResourceID: 51, SupplyScope: SupplyScopePublic,
+		Email: "buyer@gmail.com", Password: "password",
+		TwoFactorSecret: "JBSWY3DPEHPK3PXP", AppPassword: "abcdefghijklmnop",
+	}}
+	tokens := &issuedOrderTokenSpy{tokens: map[string]*OrderToken{}}
+	uc := NewUseCase(repo, nil, nil, nil, tokens)
+	uc.SetGmailPorts(supply, supply)
+	uc.now = func() time.Time { return now }
+
+	result, err := uc.ExpireDueOrders(context.Background(), 200)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, result.CheckoutRecovered)
+	require.Zero(t, result.Failed)
+	require.Zero(t, supply.checks)
+	require.Equal(t, 1, supply.purchases)
+	require.Equal(t, domain.OrderStatusActive, repo.order.Status)
+	require.Equal(t, "buyer@gmail.com", repo.order.DeliveryEmail)
+	require.Equal(t, 1, tokens.issues)
 }
 
 func TestUnavailableMicrosoftResourceRefundIsImmediateAndIdempotent(t *testing.T) {
@@ -290,6 +366,7 @@ func TestGmailCleanupCancelsUpstreamAndRecordsFailure(t *testing.T) {
 				require.NoError(t, err)
 			}
 			require.Equal(t, []string{repo.order.OrderNo}, gmail.cancelled)
+			require.Equal(t, []string{repo.order.OrderNo}, gmail.released)
 			require.Empty(t, allocation.released)
 			require.Equal(t, []string{repo.order.OrderNo}, tokens.disabled)
 			require.Equal(t, test.wantStatus, repo.cleanupStatus)

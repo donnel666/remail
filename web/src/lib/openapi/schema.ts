@@ -3875,6 +3875,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/gmail/resources/validations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Queue asynchronous validation for selected Gmail resources
+         * @description Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. The bounded resource ID set is expanded through a Redis-backed cursor; each eligible row is fenced by owner, validation generation, and credential revision before the Gmail IMAP worker runs.
+         */
+        post: operations["postAdminGmailResourceValidations"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/gmail/resources/validations/{batchId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a Redis-backed Gmail validation batch */
+        get: operations["getAdminGmailResourceValidationBatch"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/gmail/resources/{resourceId}/enable": {
         parameters: {
             query?: never;
@@ -3901,8 +3938,59 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Disable an available local Gmail account */
+        /** Disable a local Gmail account */
         post: operations["postAdminGmailResourceDisable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/gmail/resources/{resourceId}/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Queue validation for one Gmail resource */
+        post: operations["postAdminGmailResourceValidate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/gmail/resources/{resourceId}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Publish one healthy Gmail resource for public allocation */
+        post: operations["postAdminGmailResourcePublish"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/gmail/resources/{resourceId}/unpublish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Make one Gmail resource private for future allocation */
+        post: operations["postAdminGmailResourceUnpublish"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3950,7 +4038,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Gmail project to upstream service mappings and margin safety */
+        /** List saved system project to SMSBower service mappings */
         get: operations["getAdminSMSBowerMappings"];
         put?: never;
         post?: never;
@@ -3968,10 +4056,10 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Create or update one Gmail project supply mapping */
+        /** Create or update one system project to SMSBower service mapping */
         put: operations["putAdminSMSBowerMapping"];
         post?: never;
-        /** Delete one Gmail project supply mapping source */
+        /** Delete one system project to SMSBower service mapping */
         delete: operations["deleteAdminSMSBowerMapping"];
         options?: never;
         head?: never;
@@ -3985,7 +4073,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Gmail upstream revenue, cost and conservative profit */
+        /** Get Gmail revenue, cost and conservative profit */
         get: operations["getAdminSMSBowerFinance"];
         put?: never;
         post?: never;
@@ -4002,7 +4090,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Gmail upstream activation sessions */
+        /** List Gmail code sessions */
         get: operations["getAdminSMSBowerActivations"];
         put?: never;
         post?: never;
@@ -4228,7 +4316,7 @@ export interface components {
              */
             lastMailReceivedAt?: string | null;
             /**
-             * @description Gmail upstream orders expose verification codes only and never synthesize mail content.
+             * @description Gmail code-mode orders expose verification codes only and never synthesize mail content.
              * @enum {string}
              */
             contentMode?: "code_only";
@@ -7038,35 +7126,40 @@ export interface components {
             lastSuccessAt?: string | null;
         };
         /** @enum {string} */
-        AdminGmailResourceStatus: "available" | "pending" | "validating" | "normal" | "abnormal" | "disabled" | "leased" | "sold";
+        AdminGmailResourceStatus: "pending" | "validating" | "identifying" | "normal" | "abnormal" | "disabled";
         AdminGmailResourceFacets: {
             /** Format: int64 */
             all: number;
             /** Format: int64 */
-            available: number;
-            /** Format: int64 */
             pending: number;
             /** Format: int64 */
             validating: number;
+            /** Format: int64 */
+            identifying: number;
             /** Format: int64 */
             normal: number;
             /** Format: int64 */
             abnormal: number;
             /** Format: int64 */
             disabled: number;
-            /** Format: int64 */
-            leased: number;
-            /** Format: int64 */
-            sold: number;
         };
         AdminGmailResourceItem: {
             id: number;
+            /** Format: int64 */
+            version: number;
+            ownerUserId: number;
             /** Format: email */
             email: string;
             status: components["schemas"]["AdminGmailResourceStatus"];
+            forSale: boolean;
             passwordConfigured: boolean;
             twoFactorConfigured: boolean;
             appPasswordConfigured: boolean;
+            /** Format: int64 */
+            credentialRevision: number;
+            validationFailures: number;
+            /** Format: date-time */
+            lastAllocatedAt?: string | null;
             lastSafeError?: string;
             /** Format: date-time */
             lastCheckedAt?: string | null;
@@ -7074,6 +7167,28 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
+        };
+        AdminGmailValidationAccepted: {
+            requested: number;
+            queued: number;
+            reused: boolean;
+        };
+        AdminGmailValidationBatchRequest: {
+            resourceIds: number[];
+        };
+        AdminGmailValidationBatch: {
+            batchId: string;
+            /** @enum {string} */
+            status: "queued" | "processing" | "completed";
+            requested: number;
+            processed: number;
+            queued: number;
+            skipped: number;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            reused?: boolean;
         };
         AdminGmailResourceList: {
             items: components["schemas"]["AdminGmailResourceItem"][];
@@ -7122,15 +7237,8 @@ export interface components {
             lastSeenAt: string;
         };
         GmailUpstreamMappingRequest: {
-            /** @description Stable provider key; use local for the built-in Gmail resource pool. */
-            source: string;
-            /** @description Empty for local supply and required for external providers. */
-            providerServiceCode?: string;
-            enabled: boolean;
-            /** @description Whether this route participates in Gmail verification-code fulfillment. */
-            codeEnabled: boolean;
-            /** @description Whether this route participates in Gmail purchase fulfillment. */
-            purchaseEnabled: boolean;
+            /** @description SMSBower service code synchronized from the upstream catalog. */
+            providerServiceCode: string;
         };
         GmailUpstreamMappingList: {
             items: components["schemas"]["GmailUpstreamMappingItem"][];
@@ -7138,28 +7246,13 @@ export interface components {
         GmailUpstreamMappingItem: {
             projectId: number;
             projectName: string;
-            productId: number;
+            providerServiceCode: string;
+            providerServiceName?: string;
             codePrice: components["schemas"]["NonNegativeLedgerAmountResponse"];
             purchasePrice: components["schemas"]["NonNegativeLedgerAmountResponse"];
-            minimumCodeSalePrice: components["schemas"]["NonNegativeLedgerAmountResponse"];
-            minimumPurchaseSalePrice: components["schemas"]["NonNegativeLedgerAmountResponse"];
-            source?: string;
-            providerServiceCode?: string;
-            providerServiceName?: string;
-            enabled: boolean;
-            codeEnabled: boolean;
-            purchaseEnabled: boolean;
             upstreamPrice: components["schemas"]["NonNegativeLedgerAmountResponse"];
             costPoints: components["schemas"]["NonNegativeLedgerAmountResponse"];
-            codeMarginRate: components["schemas"]["LedgerAmountResponse"];
-            purchaseMarginRate: components["schemas"]["LedgerAmountResponse"];
-            codeSafe: boolean;
-            purchaseSafe: boolean;
-            codeUnsafeReason?: components["schemas"]["GmailUpstreamUnsafeReason"];
-            purchaseUnsafeReason?: components["schemas"]["GmailUpstreamUnsafeReason"];
         };
-        /** @enum {string} */
-        GmailUpstreamUnsafeReason: "mode_disabled" | "product_missing" | "route_missing" | "route_disabled" | "local_supply_not_configured" | "provider_mode_unsupported" | "service_inactive" | "out_of_stock" | "insufficient_upstream_balance" | "quote_stale" | "invalid_price" | "margin_below_floor";
         GmailUpstreamFinanceReport: {
             overview: components["schemas"]["GmailUpstreamFinanceOverview"];
             byProject: components["schemas"]["GmailUpstreamFinanceBreakdown"][];
@@ -19641,12 +19734,78 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
-    postAdminGmailResourceEnable: {
+    postAdminGmailResourceValidations: {
         parameters: {
             query?: never;
             header: {
                 /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminGmailValidationBatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Redis-backed Gmail validation batch accepted or reused */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminGmailValidationBatch"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getAdminGmailResourceValidationBatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batchId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gmail validation batch progress */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminGmailValidationBatch"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminGmailResourceEnable: {
+        parameters: {
+            query: {
+                /** @description Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write. */
+                version: components["parameters"]["ExpectedAdminResourceVersion"];
+            };
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op. */
+                "Idempotency-Key": components["parameters"]["AdminStateCommandIdempotencyKey"];
             };
             path: {
                 resourceId: number;
@@ -19666,14 +19825,21 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     postAdminGmailResourceDisable: {
         parameters: {
-            query?: never;
+            query: {
+                /** @description Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write. */
+                version: components["parameters"]["ExpectedAdminResourceVersion"];
+            };
             header: {
                 /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op. */
+                "Idempotency-Key": components["parameters"]["AdminStateCommandIdempotencyKey"];
             };
             path: {
                 resourceId: number;
@@ -19693,6 +19859,112 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminGmailResourceValidate: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gmail resource validation accepted or reused */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminGmailValidationAccepted"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminGmailResourcePublish: {
+        parameters: {
+            query: {
+                /** @description Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write. */
+                version: components["parameters"]["ExpectedAdminResourceVersion"];
+            };
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op. */
+                "Idempotency-Key": components["parameters"]["AdminStateCommandIdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gmail resource published */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminGmailResourceUnpublish: {
+        parameters: {
+            query: {
+                /** @description Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write. */
+                version: components["parameters"]["ExpectedAdminResourceVersion"];
+            };
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op. */
+                "Idempotency-Key": components["parameters"]["AdminStateCommandIdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gmail resource made private */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     postAdminSMSBowerSync: {
@@ -19794,9 +20066,7 @@ export interface operations {
     };
     deleteAdminSMSBowerMapping: {
         parameters: {
-            query: {
-                source: string;
-            };
+            query?: never;
             header: {
                 /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
@@ -19828,7 +20098,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Gmail upstream finance report */
+            /** @description Gmail finance report */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -19854,7 +20124,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Gmail activation sessions */
+            /** @description Gmail code sessions */
             200: {
                 headers: {
                     [name: string]: unknown;

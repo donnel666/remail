@@ -636,6 +636,249 @@ VALUES (?, ?, ?)`, orderID, stored[0].ID, now).Error)
 	}
 }
 
+func TestGmailScopesKeepHistoryButStopMatchingReleasedAllocationMySQL(t *testing.T) {
+	db := newMailmatchMySQLTestDB(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	seedGmailMailmatchScope(t, db, now)
+	repo := NewRepo(db, nil)
+	ctx := context.Background()
+
+	assertReadable := func() {
+		scope, err := repo.LoadOrderScope(ctx, "OR_GMAIL_SCOPE", 2, false)
+		require.NoError(t, err)
+		require.Equal(t, domain.ResourceTypeGmail, scope.AllocationType)
+		require.Equal(t, uint(100), scope.EmailResourceID)
+		require.Equal(t, "exact", scope.RecipientKind)
+
+		scope, err = repo.LoadPickupScope(ctx, "gmail-token", "user@gmail.com")
+		require.NoError(t, err)
+		require.Equal(t, domain.ResourceTypeGmail, scope.AllocationType)
+
+		reads, err := repo.ReadPickupBatch(ctx, []app.PickupCredential{
+			{Token: "gmail-token", Email: "user@gmail.com"},
+			{Token: "gmail-upstream-token", Email: "upstream@gmail.com"},
+		}, now, 40)
+		require.NoError(t, err)
+		require.Len(t, reads, 2)
+		require.NoError(t, reads[0].Err)
+		require.NotNil(t, reads[0].Scope)
+		require.Equal(t, domain.ResourceTypeGmail, reads[0].Scope.AllocationType)
+		require.ErrorIs(t, reads[1].Err, domain.ErrPickupCredentialInvalid)
+		require.Nil(t, reads[1].Scope)
+	}
+	assertReadable()
+
+	scopes, err := repo.ListMatchingScopesByRecipient(ctx, domain.ResourceTypeGmail, 100, "user@gmail.com", now)
+	require.NoError(t, err)
+	require.Len(t, scopes, 1)
+
+	require.NoError(t, db.Table("gmail_allocations").Where("order_no = 'OR_GMAIL_SCOPE'").Updates(map[string]any{
+		"status": "released", "released_at": now,
+	}).Error)
+	assertReadable()
+
+	scopes, err = repo.ListMatchingScopesByRecipient(ctx, domain.ResourceTypeGmail, 100, "user@gmail.com", now)
+	require.NoError(t, err)
+	require.Empty(t, scopes)
+}
+
+func TestGmailScopesUseDotPlusKindsAndPreferExactAliasMySQL(t *testing.T) {
+	db := newMailmatchMySQLTestDB(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	seedGmailMailmatchScope(t, db, now)
+	require.NoError(t, db.Table("gmail_resources").Where("id = 100").Updates(map[string]any{
+		"email": "firstname@gmail.com", "identity": "firstname@gmail.com",
+	}).Error)
+	require.NoError(t, db.Table("gmail_allocations").Where("order_no = 'OR_GMAIL_SCOPE'").Updates(map[string]any{
+		"mailbox": "main", "email": "firstname@gmail.com",
+	}).Error)
+	require.NoError(t, db.Table("orders").Where("order_no = 'OR_GMAIL_SCOPE'").Update("delivery_email", "firstname@gmail.com").Error)
+
+	require.NoError(t, db.Exec(`
+INSERT INTO wallet_transactions(
+    transaction_no, user_id, transaction_type, balance_bucket, direction,
+    amount, balance_before, balance_after, biz_type, biz_id, idempotency_key
+) VALUES ('TX_GMAIL_ALIAS_SCOPE', 2, 'debit', 'consumer', 'out', -1, 9, 8, 'order', 'OR_GMAIL_ALIAS_SCOPE', 'TX_GMAIL_ALIAS_SCOPE')`).Error)
+	var debitID uint
+	require.NoError(t, db.Table("wallet_transactions").Select("id").Where("transaction_no = 'TX_GMAIL_ALIAS_SCOPE'").Scan(&debitID).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO orders(
+    order_no, user_id, project_id, project_product_id, product_type, service_mode,
+    supply_policy, status, pay_amount, refund_amount, debit_tx_id, allocation_type,
+    delivery_email, receive_started_at, receive_until, client_channel,
+    idempotency_key, request_fingerprint, service_cleanup_status
+) VALUES (
+    'OR_GMAIL_ALIAS_SCOPE', 2, 10, 20, 'gmail', 'code',
+    'public_only', 'active', 1, 0, ?, 'gmail',
+    'first.name+tag@googlemail.com', ?, ?, 'console',
+    'OR_GMAIL_ALIAS_SCOPE-idem', REPEAT('h', 64), 'none'
+)`, debitID, now.Add(-time.Minute), now.Add(time.Hour)).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO allocation_order_guards(order_no, type)
+VALUES ('OR_GMAIL_ALIAS_SCOPE', 'gmail')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO gmail_allocations(
+    order_no, guard_type, project_id, product_id, source, source_ref,
+    service_mode, resource_id, supply_scope, mailbox, email, status, cost_points_snapshot
+) VALUES (
+    'OR_GMAIL_ALIAS_SCOPE', 'gmail', 10, 20, 'local', '',
+    'code', 100, 'public', 'plus', 'first.name+tag@googlemail.com', 'allocated', 0
+)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO order_tokens(token_prefix, token_plain, order_no, enabled)
+VALUES ('gmail-alias-prefix', 'gmail-alias-token', 'OR_GMAIL_ALIAS_SCOPE', 1)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO wallet_transactions(
+    transaction_no, user_id, transaction_type, balance_bucket, direction,
+    amount, balance_before, balance_after, biz_type, biz_id, idempotency_key
+) VALUES ('TX_GMAIL_SECOND_ALIAS_SCOPE', 2, 'debit', 'consumer', 'out', -1, 8, 7, 'order', 'OR_GMAIL_SECOND_ALIAS_SCOPE', 'TX_GMAIL_SECOND_ALIAS_SCOPE')`).Error)
+	var secondDebitID uint
+	require.NoError(t, db.Table("wallet_transactions").Select("id").Where("transaction_no = 'TX_GMAIL_SECOND_ALIAS_SCOPE'").Scan(&secondDebitID).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO orders(
+    order_no, user_id, project_id, project_product_id, product_type, service_mode,
+    supply_policy, status, pay_amount, refund_amount, debit_tx_id, allocation_type,
+    delivery_email, receive_started_at, receive_until, client_channel,
+    idempotency_key, request_fingerprint, service_cleanup_status
+) VALUES (
+    'OR_GMAIL_SECOND_ALIAS_SCOPE', 2, 10, 20, 'gmail', 'code',
+    'public_only', 'active', 1, 0, ?, 'gmail',
+    'firstname+second@gmail.com', ?, ?, 'console',
+    'OR_GMAIL_SECOND_ALIAS_SCOPE-idem', REPEAT('s', 64), 'none'
+)`, secondDebitID, now.Add(-time.Minute), now.Add(time.Hour)).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO allocation_order_guards(order_no, type)
+VALUES ('OR_GMAIL_SECOND_ALIAS_SCOPE', 'gmail')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO gmail_allocations(
+    order_no, guard_type, project_id, product_id, source, source_ref,
+    service_mode, resource_id, supply_scope, mailbox, email, status, cost_points_snapshot
+) VALUES (
+    'OR_GMAIL_SECOND_ALIAS_SCOPE', 'gmail', 10, 20, 'local', '',
+    'code', 100, 'public', 'plus', 'firstname+second@gmail.com', 'allocated', 0
+)`).Error)
+
+	repo := NewRepo(db, nil)
+	ctx := context.Background()
+	scopes, err := repo.ListMatchingScopesByRecipient(
+		ctx, domain.ResourceTypeGmail, 100, "first.name+tag@googlemail.com", now,
+	)
+	require.NoError(t, err)
+	require.Len(t, scopes, 1)
+	require.Equal(t, "OR_GMAIL_ALIAS_SCOPE", scopes[0].OrderNo)
+	require.Equal(t, "plus", scopes[0].RecipientKind)
+
+	scopes, err = repo.ListMatchingScopesByRecipient(
+		ctx, domain.ResourceTypeGmail, 100, "firstname+second@gmail.com", now,
+	)
+	require.NoError(t, err)
+	require.Len(t, scopes, 1)
+	require.Equal(t, "OR_GMAIL_SECOND_ALIAS_SCOPE", scopes[0].OrderNo)
+	require.Equal(t, "plus", scopes[0].RecipientKind)
+
+	scopes, err = repo.ListMatchingScopesByRecipient(
+		ctx, domain.ResourceTypeGmail, 100, "first.name+other@googlemail.com", now,
+	)
+	require.NoError(t, err)
+	require.Len(t, scopes, 1)
+	require.Equal(t, "OR_GMAIL_SCOPE", scopes[0].OrderNo)
+	require.Equal(t, "exact", scopes[0].RecipientKind)
+
+	orderScope, err := repo.LoadOrderScope(ctx, "OR_GMAIL_ALIAS_SCOPE", 2, false)
+	require.NoError(t, err)
+	require.Equal(t, "plus", orderScope.RecipientKind)
+	pickupScope, err := repo.LoadPickupScope(ctx, "gmail-alias-token", "first.name+tag@googlemail.com")
+	require.NoError(t, err)
+	require.Equal(t, "plus", pickupScope.RecipientKind)
+}
+
+func seedGmailMailmatchScope(t *testing.T, db *gorm.DB, now time.Time) {
+	t.Helper()
+	require.NoError(t, db.Exec(`
+INSERT INTO users(id, email, password_hash, nickname, status, role) VALUES
+    (1, 'supplier@test.local', 'hash', 'supplier', 'active', 'supplier'),
+    (2, 'buyer@test.local', 'hash', 'buyer', 'active', 'user')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO projects(id, name, target_platform, status, access_type, loose_match)
+VALUES (10, 'Gmail MailMatch Project', 'gmail', 'listed', 'public', TRUE)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO project_products(
+    id, project_id, type, status, code_enabled, purchase_enabled,
+    code_price, purchase_price, code_supplier_price, purchase_supplier_price,
+    code_window_minutes, activation_window_minutes, warranty_minutes,
+    main_weight, dot_weight, plus_weight
+) VALUES (20, 10, 'gmail', 'enabled', TRUE, TRUE, 1, 2, 0, 0, 1440, 60, 60, 1, 0, 0)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO email_resources(id, type, owner_user_id) VALUES (100, 'gmail', 1)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO gmail_resources(
+    id, resource_type, owner_user_id, email, identity, password,
+    two_factor_secret, app_password, status
+) VALUES (
+    100, 'gmail', 1, 'user@gmail.com', 'user@gmail.com', 'password',
+    'JBSWY3DPEHPK3PXP', 'abcdefghijklmnop', 'normal'
+)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO wallet_transactions(
+    transaction_no, user_id, transaction_type, balance_bucket, direction,
+    amount, balance_before, balance_after, biz_type, biz_id, idempotency_key
+) VALUES ('TX_GMAIL_SCOPE', 2, 'debit', 'consumer', 'out', -1, 10, 9, 'order', 'OR_GMAIL_SCOPE', 'TX_GMAIL_SCOPE')`).Error)
+	var debitID uint
+	require.NoError(t, db.Table("wallet_transactions").Select("id").Where("transaction_no = 'TX_GMAIL_SCOPE'").Scan(&debitID).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO orders(
+    order_no, user_id, project_id, project_product_id, product_type, service_mode,
+    supply_policy, status, pay_amount, refund_amount, debit_tx_id, allocation_type,
+    delivery_email, receive_started_at, receive_until, client_channel,
+    idempotency_key, request_fingerprint, service_cleanup_status
+) VALUES (
+    'OR_GMAIL_SCOPE', 2, 10, 20, 'gmail', 'code',
+    'public_only', 'active', 1, 0, ?, 'gmail',
+    'user@gmail.com', ?, ?, 'console',
+    'OR_GMAIL_SCOPE-idem', REPEAT('g', 64), 'none'
+)`, debitID, now.Add(-time.Minute), now.Add(time.Hour)).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO allocation_order_guards(order_no, type)
+VALUES ('OR_GMAIL_SCOPE', 'gmail')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO gmail_allocations(
+    order_no, guard_type, project_id, product_id, source, source_ref,
+    service_mode, resource_id, supply_scope, email, status, cost_points_snapshot
+) VALUES (
+    'OR_GMAIL_SCOPE', 'gmail', 10, 20, 'local', '',
+    'code', 100, 'public', 'user@gmail.com', 'allocated', 0
+)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO order_tokens(token_prefix, token_plain, order_no, enabled)
+VALUES ('gmail-prefix', 'gmail-token', 'OR_GMAIL_SCOPE', 1)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO orders(
+    order_no, user_id, project_id, project_product_id, product_type, service_mode,
+    supply_policy, status, pay_amount, refund_amount, allocation_type,
+    delivery_email, client_channel, idempotency_key, request_fingerprint,
+    service_cleanup_status
+) VALUES (
+    'OR_GMAIL_UPSTREAM_SCOPE', 2, 10, 20, 'gmail', 'code',
+    'public_only', 'pending_payment', 1, 0, 'gmail',
+    'upstream@gmail.com', 'console', 'OR_GMAIL_UPSTREAM_SCOPE-idem',
+    REPEAT('u', 64), 'none'
+)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO allocation_order_guards(order_no, type)
+VALUES ('OR_GMAIL_UPSTREAM_SCOPE', 'gmail')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO gmail_allocations(
+    order_no, guard_type, project_id, product_id, source, source_ref,
+    service_mode, resource_id, supply_scope, email, status, cost_points_snapshot
+) VALUES (
+    'OR_GMAIL_UPSTREAM_SCOPE', 'gmail', 10, 20, 'smsbower', 'mail-upstream',
+    'code', NULL, 'public', 'upstream@gmail.com', 'allocated', 0
+)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO order_tokens(token_prefix, token_plain, order_no, enabled)
+VALUES ('gmail-upstream-prefix', 'gmail-upstream-token', 'OR_GMAIL_UPSTREAM_SCOPE', 1)`).Error)
+}
+
 func TestFirstFetchStateCreationAvoidsGapDeadlockMySQL(t *testing.T) {
 	db := newMailmatchMySQLTestDB(t)
 	seedMailmatchFetchResource(t, db)

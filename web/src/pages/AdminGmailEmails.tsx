@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
+  Dropdown,
+  Empty,
   Input,
   Modal,
   Select,
@@ -8,10 +10,15 @@ import {
   Tag,
   TextArea,
   Toast,
+  Tooltip,
   Typography,
 } from "@douyinfe/semi-ui";
 import { IconSearch } from "@douyinfe/semi-icons";
-import { FileText, Mail, RefreshCw, Upload } from "lucide-react";
+import {
+  IllustrationNoResult,
+  IllustrationNoResultDark,
+} from "@douyinfe/semi-illustrations";
+import { SlidersHorizontal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { CardPro } from "@/components/semi/card-pro";
@@ -20,13 +27,18 @@ import {
   CardTable,
   DESKTOP_TABLE_SCROLL_Y,
 } from "@/components/semi/card-table";
+import { CompactModeToggle } from "@/components/semi/compact-mode-toggle";
 import { CopyableTableText } from "@/components/semi/copyable-table-text";
+import { StatisticFilterOption } from "@/components/semi/statistic-filter-option";
 import {
   hasPermissionKey,
   permissionKey,
   useAuth,
 } from "@/context/auth-provider";
-import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import {
+  SHARED_SEARCH_DEBOUNCE_MS,
+  useDebouncedValue,
+} from "@/hooks/use-debounced-value";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import {
@@ -34,6 +46,8 @@ import {
   listAdminGmailOwners,
   listAdminGmailResources,
   setAdminGmailResourceEnabled,
+  setAdminGmailResourceForSale,
+  validateAdminGmailResource,
   type AdminGmailImportErrorStrategy,
   type AdminGmailOwner,
   type AdminGmailResourceItem,
@@ -42,21 +56,20 @@ import {
 } from "@/lib/admin-gmail-api";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 
-const { Text, Title } = Typography;
+const { Text } = Typography;
 type StatusFilter = "all" | AdminGmailResourceStatus;
+const IMPORT_ENTRY_AREA_HEIGHT = 208;
 
 const statusMeta: Record<
   AdminGmailResourceStatus,
   { color: "green" | "grey" | "orange" | "blue"; label: string }
 > = {
-  available: { color: "green", label: "Available" },
   pending: { color: "blue", label: "Pending" },
   validating: { color: "orange", label: "Validating" },
+  identifying: { color: "blue", label: "Identifying" },
   normal: { color: "green", label: "Normal" },
   abnormal: { color: "orange", label: "Abnormal" },
   disabled: { color: "grey", label: "Disabled" },
-  leased: { color: "orange", label: "Leased" },
-  sold: { color: "blue", label: "Sold" },
 };
 
 function formatTime(value?: string | null) {
@@ -65,12 +78,111 @@ function formatTime(value?: string | null) {
   return Number.isNaN(date.getTime()) ? "-" : date.toLocaleString();
 }
 
+function switchButtonClass(active: boolean) {
+  return [
+    "flex h-12 w-full items-center justify-center gap-2 rounded-lg border-2 px-4 text-sm font-semibold transition-all",
+    active
+      ? "border-[var(--semi-color-primary)] bg-[var(--semi-color-primary-light-default)] text-[var(--semi-color-primary)]"
+      : "border-[var(--semi-color-border)] bg-[var(--semi-color-bg-2)] text-[var(--semi-color-text-1)] hover:border-[var(--semi-color-primary)] hover:bg-[var(--semi-color-fill-0)]",
+  ].join(" ");
+}
+
 function ConfiguredTag({ configured }: { configured: boolean }) {
   const { t } = useTranslation();
   return (
-    <Tag color={configured ? "green" : "red"} shape="circle" size="small">
-      {configured ? t("Configured") : t("Missing")}
+    <Tag color={configured ? "green" : "grey"} shape="circle" size="small">
+      {configured ? t("Configured") : t("Not configured")}
     </Tag>
+  );
+}
+
+function ownerRoleLabel(role: AdminGmailOwner["role"]) {
+  switch (role) {
+    case "super_admin":
+      return "Super Admin";
+    case "admin":
+      return "Admin";
+    case "supplier":
+      return "Supplier";
+    default:
+      return "User";
+  }
+}
+
+function OwnerSelect({
+  onChange,
+  owners,
+  t,
+  value,
+}: {
+  onChange: (ownerId: number) => void;
+  owners: AdminGmailOwner[];
+  t: ReturnType<typeof useTranslation>["t"];
+  value?: number;
+}) {
+  const [options, setOptions] = useState(owners);
+  const [loading, setLoading] = useState(false);
+  const requestSequence = useRef(0);
+  const searchDebounce = useRef<ReturnType<typeof globalThis.setTimeout> | null>(
+    null,
+  );
+
+  useEffect(() => setOptions(owners), [owners]);
+  useEffect(
+    () => () => {
+      if (searchDebounce.current) globalThis.clearTimeout(searchDebounce.current);
+    },
+    [],
+  );
+
+  const searchOwners = async (keyword: string) => {
+    const sequence = ++requestSequence.current;
+    setLoading(true);
+    try {
+      const result = await listAdminGmailOwners(keyword);
+      if (requestSequence.current === sequence) {
+        const selected = owners.find((owner) => owner.id === value);
+        setOptions(
+          selected && !result.some((owner) => owner.id === selected.id)
+            ? [selected, ...result]
+            : result,
+        );
+      }
+    } catch {
+      // Keep the previous bounded result; the next search retries IAM.
+    } finally {
+      if (requestSequence.current === sequence) setLoading(false);
+    }
+  };
+
+  const queueOwnerSearch = (keyword: string) => {
+    if (searchDebounce.current) globalThis.clearTimeout(searchDebounce.current);
+    searchDebounce.current = globalThis.setTimeout(() => {
+      void searchOwners(keyword);
+    }, SHARED_SEARCH_DEBOUNCE_MS);
+  };
+
+  return (
+    <Select
+      emptyContent={t("No users found")}
+      filter
+      loading={loading}
+      onChange={(next) => onChange(Number(next))}
+      onDropdownVisibleChange={(nextVisible) => {
+        if (nextVisible && options.length === 0) void searchOwners("");
+      }}
+      onSearch={queueOwnerSearch}
+      optionList={options.map((owner) => ({
+        disabled: !owner.enabled,
+        label: `${owner.email} · ${owner.nickname} · ${t(ownerRoleLabel(owner.role))} · ${owner.groupName}`,
+        value: owner.id,
+      }))}
+      placeholder={t("Search user by email, nickname or ID")}
+      remote
+      searchPosition="dropdown"
+      style={{ width: "100%" }}
+      value={value}
+    />
   );
 }
 
@@ -91,31 +203,25 @@ function ImportGmailModal({
   const [errorStrategy, setErrorStrategy] =
     useState<AdminGmailImportErrorStrategy>("skip");
   const [submitting, setSubmitting] = useState(false);
-  const [fileName, setFileName] = useState("");
-  const fileRef = useRef<HTMLInputElement | null>(null);
+  const previousVisible = useRef(false);
   const lineCount = useMemo(
     () => content.split(/\r?\n/).filter((line) => line.trim()).length,
     [content],
   );
 
   useEffect(() => {
-    if (!visible) return;
+    const opened = visible && !previousVisible.current;
+    previousVisible.current = visible;
+    if (!opened) return;
     setContent("");
-    setOwnerId(owners.find((owner) => owner.enabled)?.id ?? owners[0]?.id);
+    setOwnerId(undefined);
     setErrorStrategy("skip");
-    setFileName("");
-    if (fileRef.current) fileRef.current.value = "";
-  }, [owners, visible]);
+  }, [visible]);
 
-  const selectFile = async (file?: File) => {
-    if (!file) return;
-    try {
-      setContent(await file.text());
-      setFileName(file.name);
-    } catch {
-      Toast.error(t("Gmail import failed."));
-    }
-  };
+  useEffect(() => {
+    if (!visible || ownerId !== undefined) return;
+    setOwnerId(owners.find((owner) => owner.enabled)?.id ?? owners[0]?.id);
+  }, [ownerId, owners, visible]);
 
   const submit = async () => {
     if (!ownerId) {
@@ -176,61 +282,63 @@ function ImportGmailModal({
       width="min(666px, calc(100vw - 32px))"
     >
       <div className="space-y-4 py-1">
-        <Select
-          disabled={owners.length === 0}
-          onChange={(value) => setOwnerId(Number(value))}
-          optionList={owners.map((owner) => ({
-            disabled: !owner.enabled,
-            label: `${owner.email} · ${owner.nickname} · ${owner.groupName}`,
-            value: owner.id,
-          }))}
-          placeholder={t("Please select an owner.")}
-          style={{ width: "100%" }}
-          value={ownerId}
-        />
-        <div className="flex flex-wrap items-center gap-2">
-          <Button icon={<FileText size={14} />} onClick={() => fileRef.current?.click()} type="tertiary">
-            {t("TXT file")}
-          </Button>
-          <input
-            accept=".txt,text/plain"
-            className="hidden"
-            onChange={(event) => void selectFile(event.target.files?.[0])}
-            ref={fileRef}
-            type="file"
+        <label className="block">
+          <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
+            {t("Owner")} *
+          </span>
+          <OwnerSelect
+            onChange={setOwnerId}
+            owners={owners}
+            t={t}
+            value={ownerId}
           />
-          <Text size="small" type="tertiary">{fileName || t("Manual input")}</Text>
+        </label>
+
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            className={switchButtonClass(errorStrategy === "skip")}
+            onClick={() => setErrorStrategy("skip")}
+            type="button"
+          >
+            {t("Skip errors")}
+          </button>
+          <button
+            className={switchButtonClass(errorStrategy === "abort")}
+            onClick={() => setErrorStrategy("abort")}
+            type="button"
+          >
+            {t("Abort on error")}
+          </button>
         </div>
-        <TextArea
-          className="font-mono"
-          onChange={setContent}
-          placeholder="email@gmail.com----password----2FA----app-password"
-          rows={9}
-          style={{ resize: "none" }}
-          value={content}
-        />
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <Text size="small" type="tertiary">
-            {t("Parsed entries", { count: lineCount })}
-          </Text>
-          <Select
-            onChange={(value) => setErrorStrategy(String(value) as "skip" | "abort")}
-            optionList={[
-              { label: t("Skip errors"), value: "skip" },
-              { label: t("Abort on error"), value: "abort" },
-            ]}
-            style={{ width: 150 }}
-            value={errorStrategy}
+
+        <label className="block">
+          <span className="mb-1.5 flex items-center justify-between text-sm font-medium text-[var(--semi-color-text-0)]">
+            <span>{t("Gmail resource entries")} *</span>
+            <Text size="small" type="tertiary">
+              {t("Parsed entries", { count: lineCount })}
+            </Text>
+          </span>
+          <TextArea
+            className="font-mono"
+            onChange={setContent}
+            placeholder="email@gmail.com----password----2FA----app-password"
+            rows={8}
+            style={{ height: IMPORT_ENTRY_AREA_HEIGHT, resize: "none" }}
+            value={content}
           />
-        </div>
+        </label>
+
         <div className="rounded-xl border border-[var(--semi-color-border)] bg-[var(--semi-color-fill-0)] p-3">
-          <Text strong>{t("Supported format")}</Text>
-          <pre className="mt-2 overflow-x-auto font-mono text-xs text-[var(--semi-color-text-2)]">
+          <div className="mb-1 text-xs font-medium text-[var(--semi-color-text-0)]">
+            {t("Supported format")}
+          </div>
+          <pre className="overflow-x-auto font-mono text-xs leading-relaxed text-[var(--semi-color-text-2)]">
             email@gmail.com----password----2FA----app-password
           </pre>
-          <Text size="small" type="tertiary">
-            {t("Gmail credentials are write-only and never returned by the resource API.")}
-          </Text>
+        </div>
+
+        <div className="rounded-lg border border-[var(--semi-color-border)] bg-[var(--semi-color-fill-0)] px-3 py-2 text-xs leading-5 text-[var(--semi-color-text-2)]">
+          {t("Gmail credentials are write-only and never returned by the resource API.")}
         </div>
       </div>
     </Modal>
@@ -243,14 +351,19 @@ export default function AdminGmailEmails() {
   const isMobile = useIsMobile();
   const [pageSize, setPageSize] = useSharedPageSize();
   const [activePage, setActivePage] = useState(1);
-  const [search, setSearch] = useState("");
-  const [debouncedSearch, flushSearch] = useDebouncedValue(search);
-  const [status, setStatus] = useState<StatusFilter>("all");
+  const [searchKeyword, setSearchKeyword] = useState("");
+  const [debouncedSearchKeyword, flushSearchKeyword] =
+    useDebouncedValue(searchKeyword);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [compactMode, setCompactMode] = useState(false);
   const [response, setResponse] = useState<AdminGmailResourceList | null>(null);
   const [owners, setOwners] = useState<AdminGmailOwner[]>([]);
   const [loading, setLoading] = useState(true);
   const [importVisible, setImportVisible] = useState(false);
-  const [busyId, setBusyId] = useState<number | null>(null);
+  const [rowBusy, setRowBusy] = useState<{
+    action: "publish" | "toggle" | "validate";
+    id: number;
+  } | null>(null);
   const listRequestRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -260,7 +373,7 @@ export default function AdminGmailEmails() {
         if (!controller.signal.aborted) setOwners(items);
       })
       .catch(() => {
-        // The resource list remains usable if owner choices cannot be loaded.
+        // Owner choices are optional UI data; the resource list remains usable.
       });
     return () => controller.abort();
   }, []);
@@ -283,9 +396,9 @@ export default function AdminGmailEmails() {
       const next = await listAdminGmailResources({
         limit: pageSize,
         offset: (activePage - 1) * pageSize,
-        search: debouncedSearch.trim() || undefined,
+        search: debouncedSearchKeyword.trim() || undefined,
         signal: controller.signal,
-        status: status === "all" ? undefined : status,
+        status: statusFilter === "all" ? undefined : statusFilter,
       });
       if (controller.signal.aborted) return;
       setResponse(next);
@@ -300,50 +413,87 @@ export default function AdminGmailEmails() {
         setLoading(false);
       }
     }
-  }, [activePage, debouncedSearch, pageSize, status, t]);
+  }, [activePage, debouncedSearchKeyword, pageSize, statusFilter, t]);
 
   useEffect(() => {
     void load();
     return () => listRequestRef.current?.abort();
   }, [load]);
 
-  useEffect(() => setActivePage(1), [debouncedSearch, pageSize, status]);
+  useEffect(
+    () => setActivePage(1),
+    [debouncedSearchKeyword, pageSize, statusFilter],
+  );
 
-  const toggleResource = async (item: AdminGmailResourceItem) => {
-    const enabled = item.status === "disabled";
-    setBusyId(item.id);
+  const runResourceOperation = async (
+    item: AdminGmailResourceItem,
+    action: "publish" | "toggle" | "validate",
+    operation: () => Promise<unknown>,
+    successKey: string,
+  ) => {
+    setRowBusy({ action, id: item.id });
     try {
-      await setAdminGmailResourceEnabled(item.id, enabled);
-      Toast.success(t(enabled ? "Gmail account enabled." : "Gmail account disabled."));
+      await operation();
+      Toast.success(t(successKey));
       await load();
     } catch (error) {
       Toast.error(getIamErrorMessage(t, error, "Gmail resource operation failed."));
     } finally {
-      setBusyId(null);
+      setRowBusy(null);
     }
   };
 
+  const toggleResource = (item: AdminGmailResourceItem) => {
+    const enabled = item.status === "disabled";
+    return runResourceOperation(
+      item,
+      "toggle",
+      () => setAdminGmailResourceEnabled(item.id, item.version, enabled),
+      enabled ? "Gmail account enabled." : "Gmail account disabled.",
+    );
+  };
+
+  const validateResource = (item: AdminGmailResourceItem) =>
+    runResourceOperation(
+      item,
+      "validate",
+      () => validateAdminGmailResource(item.id),
+      "Resource validation submitted.",
+    );
+
+  const toggleResourceForSale = (item: AdminGmailResourceItem) =>
+    runResourceOperation(
+      item,
+      "publish",
+      () => setAdminGmailResourceForSale(item.id, item.version, !item.forSale),
+      item.forSale
+        ? "Gmail resource converted to private."
+        : "Gmail resource published for public sale.",
+    );
+
   const facets = response?.facets ?? {
     all: 0,
-    available: 0,
     pending: 0,
     validating: 0,
+    identifying: 0,
     normal: 0,
     abnormal: 0,
     disabled: 0,
-    leased: 0,
-    sold: 0,
   };
-  const statusOptions = useMemo(
-    () => [
-      { label: `${t("All")} (${facets.all})`, value: "all" },
-      ...Object.entries(statusMeta).map(([value, meta]) => ({
-        label: `${t(meta.label)} (${facets[value as AdminGmailResourceStatus]})`,
-        value,
-      })),
-    ],
-    [facets, t],
-  );
+
+  const applyStatusFilter = (value: StatusFilter) => {
+    setStatusFilter(value);
+    setActivePage(1);
+  };
+
+  const resetFilters = () => {
+    setSearchKeyword("");
+    flushSearchKeyword("");
+    setStatusFilter("all");
+    setActivePage(1);
+  };
+
+  const activeFilterCount = statusFilter === "all" ? 0 : 1;
 
   const columns = [
     {
@@ -358,16 +508,28 @@ export default function AdminGmailEmails() {
       dataIndex: "status",
       title: t("Status"),
       width: 120,
-      render: (value: unknown) => {
+      render: (value: unknown, item: AdminGmailResourceItem) => {
         const meta = statusMeta[value as AdminGmailResourceStatus];
-        return meta ? (
-          <Tag color={meta.color} shape="circle">
+        if (!meta) return "-";
+        const tag = (
+          <Tag color={meta.color} shape="circle" size="small">
             {t(meta.label)}
           </Tag>
-        ) : (
-          "-"
         );
+        return item.lastSafeError ? (
+          <Tooltip content={item.lastSafeError}>{tag}</Tooltip>
+        ) : tag;
       },
+    },
+    {
+      dataIndex: "forSale",
+      title: t("Private"),
+      width: 100,
+      render: (value: unknown) => (
+        <Tag color={!value ? "green" : "grey"} shape="circle" size="small">
+          {!value ? t("Yes") : t("No")}
+        </Tag>
+      ),
     },
     {
       dataIndex: "passwordConfigured",
@@ -391,119 +553,250 @@ export default function AdminGmailEmails() {
       dataIndex: "lastCheckedAt",
       title: t("Last checked"),
       width: 180,
-      render: (value: unknown) => formatTime(value ? String(value) : undefined),
+      render: (value: unknown) => (
+        <span className="text-xs text-[var(--semi-color-text-2)]">
+          {formatTime(value ? String(value) : undefined)}
+        </span>
+      ),
     },
     {
       dataIndex: "createdAt",
       title: t("Created at"),
       width: 180,
-      render: (value: unknown) => formatTime(String(value)),
+      render: (value: unknown) => (
+        <span className="text-xs text-[var(--semi-color-text-2)]">
+          {formatTime(String(value))}
+        </span>
+      ),
     },
     {
-      key: "actions",
+      dataIndex: "operate",
       fixed: "right" as const,
-      title: t("Actions"),
-      width: 110,
-      render: (_value: unknown, item: AdminGmailResourceItem) =>
-        canOperate && item.status !== "leased" && item.status !== "sold" ? (
-          <Button
-            loading={busyId === item.id}
-            onClick={() => void toggleResource(item)}
-            size="small"
-            type={item.status === "disabled" ? "primary" : "tertiary"}
-          >
-            {t(item.status === "disabled" ? "Enable" : "Disable")}
-          </Button>
-        ) : (
-          <Text type="tertiary">-</Text>
-        ),
+      key: "operate",
+      title: t("Action"),
+      width: 330,
+      render: (_value: unknown, item: AdminGmailResourceItem) => {
+        if (!canOperate) return <Text type="tertiary">-</Text>;
+        const busyAction = rowBusy?.id === item.id ? rowBusy.action : null;
+        return (
+          <Space spacing={4} wrap={false}>
+            <Button
+              disabled={Boolean(rowBusy) || item.status === "disabled"}
+              loading={busyAction === "validate"}
+              onClick={() => void validateResource(item)}
+              size="small"
+              type="tertiary"
+            >
+              {t("Validate")}
+            </Button>
+            <Button
+              disabled={Boolean(rowBusy && busyAction !== "toggle")}
+              loading={busyAction === "toggle"}
+              onClick={() => void toggleResource(item)}
+              size="small"
+              type="tertiary"
+            >
+              {t(item.status === "disabled" ? "Enable" : "Disable")}
+            </Button>
+            <Button
+              disabled={Boolean(rowBusy && busyAction !== "publish")}
+              loading={busyAction === "publish"}
+              onClick={() => void toggleResourceForSale(item)}
+              size="small"
+              type="tertiary"
+            >
+              {item.forSale ? t("Convert to private") : t("Put on sale")}
+            </Button>
+          </Space>
+        );
+      },
     },
   ];
 
+  const tableColumns = compactMode
+    ? columns.map((column) => {
+        if (column.dataIndex !== "operate") return column;
+        const { fixed: _fixed, ...rest } = column;
+        return rest;
+      })
+    : columns;
+
+  const actionsArea = (
+    <div className="flex w-full flex-col items-center justify-between gap-2 md:flex-row">
+      <div className="order-2 flex w-full flex-wrap gap-2 md:order-1 md:w-auto">
+        <Button
+          className="flex-1 md:flex-initial"
+          disabled={!canWrite}
+          onClick={() => setImportVisible(true)}
+          size="small"
+          type="primary"
+        >
+          {t("Import")}
+        </Button>
+        <Button
+          className="remail-toolbar-fixed-button flex-1 md:flex-none"
+          loading={loading}
+          onClick={() => void load()}
+          size="small"
+          type="tertiary"
+        >
+          {t("Refresh")}
+        </Button>
+        <CompactModeToggle
+          compactMode={compactMode}
+          setCompactMode={setCompactMode}
+          t={t}
+        />
+      </div>
+
+      <div className="order-1 flex w-full flex-col items-center gap-2 md:order-2 md:w-auto md:flex-row">
+        <Dropdown
+          position="bottomRight"
+          render={
+            <div className="w-[280px] p-2">
+              <div className="px-2 pb-1 text-xs font-medium text-[var(--semi-color-text-2)]">
+                {t("Status")}
+              </div>
+              <div className="space-y-1">
+                <StatisticFilterOption
+                  active={statusFilter === "all"}
+                  count={facets.all}
+                  label={t("All")}
+                  onSelect={applyStatusFilter}
+                  value="all"
+                />
+                {(Object.entries(statusMeta) as Array<
+                  [
+                    AdminGmailResourceStatus,
+                    (typeof statusMeta)[AdminGmailResourceStatus],
+                  ]
+                >).map(([value, meta]) => (
+                  <StatisticFilterOption
+                    active={statusFilter === value}
+                    count={facets[value]}
+                    key={value}
+                    label={t(meta.label)}
+                    onSelect={applyStatusFilter}
+                    value={value}
+                  />
+                ))}
+              </div>
+            </div>
+          }
+          trigger="click"
+        >
+          <Button
+            className="flex-1 md:flex-initial"
+            icon={<SlidersHorizontal size={14} />}
+            size="small"
+            type="tertiary"
+          >
+            {activeFilterCount > 0
+              ? `${t("Filters")} (${activeFilterCount})`
+              : t("Filters")}
+          </Button>
+        </Dropdown>
+
+        <Input
+          className="resources-search-input w-full md:w-56"
+          onChange={(value) => {
+            setSearchKeyword(String(value));
+            setActivePage(1);
+          }}
+          onEnterPress={() => {
+            flushSearchKeyword();
+            setActivePage(1);
+          }}
+          placeholder={t("Search Gmail address")}
+          prefix={<IconSearch />}
+          showClear
+          size="small"
+          style={{ width: isMobile ? "100%" : 224 }}
+          value={searchKeyword}
+        />
+
+        <div className="flex w-full gap-2 md:w-auto">
+          <Button
+            className="remail-toolbar-fixed-button flex-1 md:flex-none"
+            loading={loading}
+            onClick={() => {
+              flushSearchKeyword();
+              setActivePage(1);
+            }}
+            size="small"
+            type="tertiary"
+          >
+            {t("Query")}
+          </Button>
+          <Button
+            className="flex-1 md:flex-initial"
+            onClick={resetFilters}
+            size="small"
+            type="tertiary"
+          >
+            {t("Reset")}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const paginationArea = createCardProPagination({
+    currentPage: activePage,
+    isMobile,
+    onPageChange: setActivePage,
+    onPageSizeChange: (size) => {
+      setPageSize(size);
+      setActivePage(1);
+    },
+    pageSize,
+    t,
+    total: response?.total ?? 0,
+  });
+
   return (
-    <>
+    <div className="console-content-width py-5">
       <CardPro
-        actionsArea={
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <Space wrap>
-              <Button
-                disabled={!canWrite}
-                icon={<Upload size={14} />}
-                onClick={() => setImportVisible(true)}
-                theme="solid"
-                type="primary"
-              >
-                {t("Import Gmail Accounts")}
-              </Button>
-              <Button icon={<RefreshCw size={14} />} loading={loading} onClick={() => void load()}>
-                {t("Refresh")}
-              </Button>
-            </Space>
-            <Text type="tertiary">
-              {t("Gmail resource total", { count: response?.total ?? 0 })}
-            </Text>
-          </div>
-        }
-        descriptionArea={
-          <div className="flex items-center gap-3">
-            <div className="rounded-xl bg-[var(--semi-color-primary-light-default)] p-2 text-[var(--semi-color-primary)]">
-              <Mail size={20} />
-            </div>
-            <div>
-              <Title heading={4}>{t("Admin Gmail Emails")}</Title>
-              <Text type="tertiary">
-                {t("Manage local Gmail account inventory and write-only credentials.")}
-              </Text>
-            </div>
-          </div>
-        }
-        paginationArea={createCardProPagination({
-          currentPage: activePage,
-          isMobile,
-          onPageChange: setActivePage,
-          onPageSizeChange: setPageSize,
-          pageSize,
-          t,
-          total: response?.total ?? 0,
-        })}
-        searchArea={
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <Input
-              onChange={setSearch}
-              onEnterPress={() => flushSearch(search)}
-              placeholder={t("Search Gmail address")}
-              prefix={<IconSearch />}
-              showClear
-              value={search}
-            />
-            <Select
-              onChange={(value) => setStatus(String(value) as StatusFilter)}
-              optionList={statusOptions}
-              style={{ minWidth: 190 }}
-              value={status}
-            />
-          </div>
-        }
+        actionsArea={actionsArea}
+        paginationArea={paginationArea}
         t={t}
-        type="type1"
+        type="type3"
       >
         <CardTable
-          columns={columns}
+          className="overflow-hidden rounded-xl"
+          columns={tableColumns}
           dataSource={response?.items ?? []}
+          empty={
+            <Empty
+              darkModeImage={
+                <IllustrationNoResultDark style={{ height: 150, width: 150 }} />
+              }
+              description={t("No Gmail resources found")}
+              image={<IllustrationNoResult style={{ height: 150, width: 150 }} />}
+              style={{ padding: 30 }}
+            />
+          }
           hidePagination
           loading={loading}
           pagination={false}
           rowKey="id"
-          scroll={{ x: 1200, y: DESKTOP_TABLE_SCROLL_Y }}
+          scroll={{ x: "max(100%, 1500px)", y: DESKTOP_TABLE_SCROLL_Y }}
+          size="middle"
         />
       </CardPro>
 
       <ImportGmailModal
         onCancel={() => setImportVisible(false)}
-        onImported={load}
+        onImported={async () => {
+          if (activePage === 1) {
+            await load();
+            return;
+          }
+          setActivePage(1);
+        }}
         owners={owners}
         visible={importVisible && canWrite}
       />
-    </>
+    </div>
   );
 }

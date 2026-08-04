@@ -68,7 +68,7 @@ export function GmailUpstreamPanel({ tabsArea }: { tabsArea: ReactNode }) {
       setTotal(nextActivations.total);
     } catch (error) {
       if (controller.signal.aborted) return;
-      Toast.error(getIamErrorMessage(t, error, "Gmail upstream finance load failed."));
+      Toast.error(getIamErrorMessage(t, error, "Gmail finance load failed."));
     } finally {
       if (loadRequestRef.current === controller) {
         loadRequestRef.current = null;
@@ -104,7 +104,7 @@ export function GmailUpstreamPanel({ tabsArea }: { tabsArea: ReactNode }) {
       {tabsArea}
       <div className="mb-4 flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-semibold text-[var(--semi-color-text-0)]">Gmail 上游经营</h2>
+          <h2 className="text-xl font-semibold text-[var(--semi-color-text-0)]">Gmail 经营</h2>
           <Text type="tertiary">收入按订单统计，成本按已结算、预留和未知状态保守计算</Text>
         </div>
         <Button icon={<RefreshCw size={14} />} loading={loading} onClick={() => void load()}>刷新</Button>
@@ -124,7 +124,7 @@ export function GmailUpstreamPanel({ tabsArea }: { tabsArea: ReactNode }) {
           <div><Text type="tertiary">已结算成本</Text><div className="font-semibold">{amount(overview?.settledCost)}</div></div>
           <div><Text type="tertiary">预留成本</Text><div className="font-semibold">{amount(overview?.reservedCost)}</div></div>
           <div><Text type="tertiary">未知成本</Text><div className="font-semibold">{amount(overview?.unknownCost)}</div></div>
-          <div><Text type="tertiary">订单 / 激活</Text><div className="font-semibold">{overview?.orderCount ?? 0} / {overview?.activationCount ?? 0}</div></div>
+          <div><Text type="tertiary">订单 / 分配</Text><div className="font-semibold">{overview?.orderCount ?? 0} / {overview?.activationCount ?? 0}</div></div>
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
           <Tag shape="circle">0 码 {overview?.zeroCodeCount ?? 0}</Tag>
@@ -139,7 +139,7 @@ export function GmailUpstreamPanel({ tabsArea }: { tabsArea: ReactNode }) {
           <Tabs.TabPane itemKey="project" tab="按项目">
             <Table columns={breakdownColumns} dataSource={report?.byProject ?? []} pagination={false} rowKey="key" />
           </Tabs.TabPane>
-          <Tabs.TabPane itemKey="service" tab="按上游项目">
+          <Tabs.TabPane itemKey="service" tab="按履约资源">
             <Table columns={breakdownColumns} dataSource={report?.byService ?? []} pagination={false} rowKey="key" />
           </Tabs.TabPane>
           <Tabs.TabPane itemKey="source" tab="按来源">
@@ -148,13 +148,13 @@ export function GmailUpstreamPanel({ tabsArea }: { tabsArea: ReactNode }) {
         </Tabs>
       </Card>
 
-      <Card title="激活记录">
+      <Card title="接码会话记录">
         <Table
           columns={[
             { title: "订单号", dataIndex: "orderNo", width: 180 },
             { title: "项目", dataIndex: "projectName", width: 150 },
             { title: "渠道", dataIndex: "source", width: 100 },
-            { title: "上游项目", dataIndex: "providerServiceCode", width: 110 },
+            { title: "服务代码", dataIndex: "providerServiceCode", width: 110, render: (value: unknown) => String(value || "自有资源") },
             { title: "邮箱", dataIndex: "email", width: 220, render: (value: unknown) => String(value || "等待分配") },
             { title: "状态", dataIndex: "status", width: 120, render: (value: GmailUpstreamActivation["status"]) => statusTag(value) },
             { title: "验证码", dataIndex: "receivedCount", width: 90, render: (value: unknown) => `${Number(value || 0)}/3` },

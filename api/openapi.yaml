@@ -11018,6 +11018,74 @@ paths:
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 
+  /v1/admin/gmail/resources/validations:
+    post:
+      operationId: postAdminGmailResourceValidations
+      summary: Queue asynchronous validation for selected Gmail resources
+      description: Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. The bounded resource ID set is expanded through a Redis-backed cursor; each eligible row is fenced by owner, validation generation, and credential revision before the Gmail IMAP worker runs.
+      tags: [Core]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminGmailValidationBatchRequest"
+      responses:
+        "202":
+          description: Redis-backed Gmail validation batch accepted or reused
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminGmailValidationBatch"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/admin/gmail/resources/validations/{batchId}:
+    get:
+      operationId: getAdminGmailResourceValidationBatch
+      summary: Get a Redis-backed Gmail validation batch
+      tags: [Core]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: batchId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 64
+      responses:
+        "200":
+          description: Gmail validation batch progress
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminGmailValidationBatch"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
   /v1/admin/gmail/resources/{resourceId}/enable:
     post:
       operationId: postAdminGmailResourceEnable
@@ -11033,6 +11101,8 @@ paths:
             type: integer
             minimum: 1
         - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminStateCommandIdempotencyKey"
+        - $ref: "#/components/parameters/ExpectedAdminResourceVersion"
       responses:
         "204":
           description: Gmail resource enabled
@@ -11044,11 +11114,15 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 
   /v1/admin/gmail/resources/{resourceId}/disable:
     post:
       operationId: postAdminGmailResourceDisable
-      summary: Disable an available local Gmail account
+      summary: Disable a local Gmail account
       tags: [Core]
       security:
         - cookieAuth: []
@@ -11060,6 +11134,8 @@ paths:
             type: integer
             minimum: 1
         - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminStateCommandIdempotencyKey"
+        - $ref: "#/components/parameters/ExpectedAdminResourceVersion"
       responses:
         "204":
           description: Gmail resource disabled
@@ -11071,6 +11147,118 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/admin/gmail/resources/{resourceId}/validate:
+    post:
+      operationId: postAdminGmailResourceValidate
+      summary: Queue validation for one Gmail resource
+      tags: [Core]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+      responses:
+        "202":
+          description: Gmail resource validation accepted or reused
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminGmailValidationAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/admin/gmail/resources/{resourceId}/publish:
+    post:
+      operationId: postAdminGmailResourcePublish
+      summary: Publish one healthy Gmail resource for public allocation
+      tags: [Core]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminStateCommandIdempotencyKey"
+        - $ref: "#/components/parameters/ExpectedAdminResourceVersion"
+      responses:
+        "204":
+          description: Gmail resource published
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/admin/gmail/resources/{resourceId}/unpublish:
+    post:
+      operationId: postAdminGmailResourceUnpublish
+      summary: Make one Gmail resource private for future allocation
+      tags: [Core]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminStateCommandIdempotencyKey"
+        - $ref: "#/components/parameters/ExpectedAdminResourceVersion"
+      responses:
+        "204":
+          description: Gmail resource made private
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 
   /v1/admin/upstreams/smsbower/sync:
     post:
@@ -11111,7 +11299,7 @@ paths:
   /v1/admin/upstreams/smsbower/mappings:
     get:
       operationId: getAdminSMSBowerMappings
-      summary: List Gmail project to upstream service mappings and margin safety
+      summary: List saved system project to SMSBower service mappings
       tags: [SystemSettings]
       security:
         - cookieAuth: []
@@ -11130,7 +11318,7 @@ paths:
   /v1/admin/upstreams/smsbower/mappings/{projectId}:
     put:
       operationId: putAdminSMSBowerMapping
-      summary: Create or update one Gmail project supply mapping
+      summary: Create or update one system project to SMSBower service mapping
       tags: [SystemSettings]
       security:
         - cookieAuth: []
@@ -11159,7 +11347,7 @@ paths:
           $ref: "#/components/responses/UnprocessableEntity"
     delete:
       operationId: deleteAdminSMSBowerMapping
-      summary: Delete one Gmail project supply mapping source
+      summary: Delete one system project to SMSBower service mapping
       tags: [SystemSettings]
       security:
         - cookieAuth: []
@@ -11170,13 +11358,6 @@ paths:
           schema:
             type: integer
             minimum: 1
-        - name: source
-          in: query
-          required: true
-          schema:
-            type: string
-            minLength: 1
-            maxLength: 64
         - $ref: "#/components/parameters/CsrfToken"
       responses:
         "204":
@@ -11189,13 +11370,13 @@ paths:
   /v1/admin/upstreams/smsbower/finance:
     get:
       operationId: getAdminSMSBowerFinance
-      summary: Get Gmail upstream revenue, cost and conservative profit
+      summary: Get Gmail revenue, cost and conservative profit
       tags: [Billing]
       security:
         - cookieAuth: []
       responses:
         "200":
-          description: Gmail upstream finance report
+          description: Gmail finance report
           content:
             application/json:
               schema:
@@ -11208,7 +11389,7 @@ paths:
   /v1/admin/upstreams/smsbower/activations:
     get:
       operationId: getAdminSMSBowerActivations
-      summary: List Gmail upstream activation sessions
+      summary: List Gmail code sessions
       tags: [Billing]
       security:
         - cookieAuth: []
@@ -11223,7 +11404,7 @@ paths:
             default: 50
       responses:
         "200":
-          description: Gmail activation sessions
+          description: Gmail code sessions
           content:
             application/json:
               schema:
@@ -11913,7 +12094,7 @@ components:
         contentMode:
           type: string
           enum: [code_only]
-          description: Gmail upstream orders expose verification codes only and never synthesize mail content.
+          description: Gmail code-mode orders expose verification codes only and never synthesize mail content.
         codes:
           type: array
           maxItems: 3
@@ -19042,17 +19223,13 @@ components:
 
     AdminGmailResourceStatus:
       type: string
-      enum: [available, pending, validating, normal, abnormal, disabled, leased, sold]
+      enum: [pending, validating, identifying, normal, abnormal, disabled]
 
     AdminGmailResourceFacets:
       type: object
-      required: [all, available, pending, validating, normal, abnormal, disabled, leased, sold]
+      required: [all, pending, validating, identifying, normal, abnormal, disabled]
       properties:
         all:
-          type: integer
-          format: int64
-          minimum: 0
-        available:
           type: integer
           format: int64
           minimum: 0
@@ -19061,6 +19238,10 @@ components:
           format: int64
           minimum: 0
         validating:
+          type: integer
+          format: int64
+          minimum: 0
+        identifying:
           type: integer
           format: int64
           minimum: 0
@@ -19076,41 +19257,59 @@ components:
           type: integer
           format: int64
           minimum: 0
-        leased:
-          type: integer
-          format: int64
-          minimum: 0
-        sold:
-          type: integer
-          format: int64
-          minimum: 0
       additionalProperties: false
 
     AdminGmailResourceItem:
       type: object
       required:
         - id
+        - version
+        - ownerUserId
         - email
         - status
+        - forSale
         - passwordConfigured
         - twoFactorConfigured
         - appPasswordConfigured
+        - credentialRevision
+        - validationFailures
         - createdAt
         - updatedAt
       properties:
         id:
           type: integer
+        version:
+          type: integer
+          format: int64
+          minimum: 1
+        ownerUserId:
+          type: integer
+          minimum: 1
         email:
           type: string
           format: email
         status:
           $ref: "#/components/schemas/AdminGmailResourceStatus"
+        forSale:
+          type: boolean
         passwordConfigured:
           type: boolean
         twoFactorConfigured:
           type: boolean
         appPasswordConfigured:
           type: boolean
+        credentialRevision:
+          type: integer
+          format: int64
+          minimum: 1
+        validationFailures:
+          type: integer
+          minimum: 0
+          maximum: 3
+        lastAllocatedAt:
+          type: string
+          format: date-time
+          nullable: true
         lastSafeError:
           type: string
         lastCheckedAt:
@@ -19123,6 +19322,67 @@ components:
         updatedAt:
           type: string
           format: date-time
+      additionalProperties: false
+
+    AdminGmailValidationAccepted:
+      type: object
+      required: [requested, queued, reused]
+      properties:
+        requested:
+          type: integer
+          minimum: 1
+        queued:
+          type: integer
+          minimum: 1
+        reused:
+          type: boolean
+      additionalProperties: false
+
+    AdminGmailValidationBatchRequest:
+      type: object
+      required: [resourceIds]
+      properties:
+        resourceIds:
+          type: array
+          minItems: 1
+          maxItems: 10000
+          uniqueItems: true
+          items:
+            type: integer
+            minimum: 1
+      additionalProperties: false
+
+    AdminGmailValidationBatch:
+      type: object
+      required: [batchId, status, requested, processed, queued, skipped, createdAt, updatedAt]
+      properties:
+        batchId:
+          type: string
+          minLength: 1
+          maxLength: 64
+        status:
+          type: string
+          enum: [queued, processing, completed]
+        requested:
+          type: integer
+          minimum: 0
+        processed:
+          type: integer
+          minimum: 0
+        queued:
+          type: integer
+          minimum: 0
+        skipped:
+          type: integer
+          minimum: 0
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        reused:
+          type: boolean
       additionalProperties: false
 
     AdminGmailResourceList:
@@ -19253,29 +19513,13 @@ components:
 
     GmailUpstreamMappingRequest:
       type: object
-      required:
-        - source
-        - enabled
-        - codeEnabled
-        - purchaseEnabled
+      required: [providerServiceCode]
       properties:
-        source:
+        providerServiceCode:
           type: string
           minLength: 1
           maxLength: 64
-          description: Stable provider key; use local for the built-in Gmail resource pool.
-        providerServiceCode:
-          type: string
-          maxLength: 64
-          description: Empty for local supply and required for external providers.
-        enabled:
-          type: boolean
-        codeEnabled:
-          type: boolean
-          description: Whether this route participates in Gmail verification-code fulfillment.
-        purchaseEnabled:
-          type: boolean
-          description: Whether this route participates in Gmail purchase fulfillment.
+          description: SMSBower service code synchronized from the upstream catalog.
       additionalProperties: false
 
     GmailUpstreamMappingList:
@@ -19293,81 +19537,32 @@ components:
       required:
         - projectId
         - projectName
-        - productId
+        - providerServiceCode
         - codePrice
         - purchasePrice
-        - minimumCodeSalePrice
-        - minimumPurchaseSalePrice
-        - enabled
-        - codeEnabled
-        - purchaseEnabled
         - upstreamPrice
         - costPoints
-        - codeMarginRate
-        - purchaseMarginRate
-        - codeSafe
-        - purchaseSafe
       properties:
         projectId:
           type: integer
+          minimum: 1
         projectName:
           type: string
-        productId:
-          type: integer
+        providerServiceCode:
+          type: string
+          minLength: 1
+          maxLength: 64
+        providerServiceName:
+          type: string
         codePrice:
           $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
         purchasePrice:
           $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
-        minimumCodeSalePrice:
-          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
-        minimumPurchaseSalePrice:
-          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
-        source:
-          type: string
-          maxLength: 64
-        providerServiceCode:
-          type: string
-        providerServiceName:
-          type: string
-        enabled:
-          type: boolean
-        codeEnabled:
-          type: boolean
-        purchaseEnabled:
-          type: boolean
         upstreamPrice:
           $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
         costPoints:
           $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
-        codeMarginRate:
-          $ref: "#/components/schemas/LedgerAmountResponse"
-        purchaseMarginRate:
-          $ref: "#/components/schemas/LedgerAmountResponse"
-        codeSafe:
-          type: boolean
-        purchaseSafe:
-          type: boolean
-        codeUnsafeReason:
-          $ref: "#/components/schemas/GmailUpstreamUnsafeReason"
-        purchaseUnsafeReason:
-          $ref: "#/components/schemas/GmailUpstreamUnsafeReason"
       additionalProperties: false
-
-    GmailUpstreamUnsafeReason:
-      type: string
-      enum:
-        - mode_disabled
-        - product_missing
-        - route_missing
-        - route_disabled
-        - local_supply_not_configured
-        - provider_mode_unsupported
-        - service_inactive
-        - out_of_stock
-        - insufficient_upstream_balance
-        - quote_stale
-        - invalid_price
-        - margin_below_floor
 
     GmailUpstreamFinanceReport:
       type: object

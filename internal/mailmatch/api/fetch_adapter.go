@@ -85,7 +85,7 @@ func (a *MicrosoftFetchAdapter) FetchMicrosoftMessages(ctx context.Context, req 
 				req.OnMessages(microsoftMessagesToMailmatch(req.Scope, messages))
 			}
 		}
-		proxyConfig, err := a.acquireProxy(ctx, req.Scope, req.RequestID, attempt, avoidServerIDs)
+		proxyConfig, err := a.acquireProxy(ctx, req.Scope, req.RequestID, req.FullHistory, attempt, avoidServerIDs)
 		if err != nil {
 			return nil, &mailmatchapp.MailFetchFailure{
 				Category:     "request",
@@ -229,13 +229,17 @@ func (a *MicrosoftFetchAdapter) finishFailure(ctx context.Context, req mailmatch
 	return nil, failure
 }
 
-func (a *MicrosoftFetchAdapter) acquireProxy(ctx context.Context, scope mailmatchapp.OrderScope, requestID string, attempt int, avoidServerIDs []uint) (*proxyapp.ProxyConfig, error) {
+func (a *MicrosoftFetchAdapter) acquireProxy(ctx context.Context, scope mailmatchapp.OrderScope, requestID string, fullHistory bool, attempt int, avoidServerIDs []uint) (*proxyapp.ProxyConfig, error) {
 	if a == nil || a.proxies == nil {
 		return &proxyapp.ProxyConfig{Direct: true}, nil
 	}
+	ipVersion := proxydomain.ProxyIPv4
+	if fullHistory {
+		ipVersion = proxydomain.ProxyIPv6
+	}
 	return a.proxies.Acquire(ctx, proxyapp.AcquireProxyRequest{
 		Key:                 strings.ToLower(strings.TrimSpace(scope.MicrosoftEmail)),
-		IPVersion:           proxydomain.ProxyIPv4,
+		IPVersion:           ipVersion,
 		Purpose:             proxydomain.ProxyPurposeFetch,
 		AllowSystemFallback: true,
 		Attempt:             attempt,

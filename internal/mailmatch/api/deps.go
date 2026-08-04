@@ -27,6 +27,7 @@ type Module struct {
 	AdminMessages       *mailmatchapp.AdminMessageUseCase
 	BackgroundExecution BackgroundExecutionGate
 	resourceFetchRepo   *mailmatchinfra.ResourceFetchRepo
+	matchResults        *matchResultAdapter
 	CodeOnlyPickup      CodeOnlyPickupPort
 }
 
@@ -51,6 +52,18 @@ type CodeOnlyPickupPort interface {
 func (m *Module) SetCodeOnlyPickup(port CodeOnlyPickupPort) {
 	if m != nil {
 		m.CodeOnlyPickup = port
+	}
+}
+
+func (m *Module) SetGmailMatchPort(port GmailMatchPort) {
+	if m != nil && m.matchResults != nil {
+		m.matchResults.gmail = port
+	}
+}
+
+func (m *Module) SetGmailPurchaseFetchPort(port mailmatchapp.GmailPurchaseFetchPort) {
+	if m != nil && m.UseCase != nil {
+		m.UseCase.SetGmailPurchaseFetchPort(port)
 	}
 }
 
@@ -85,7 +98,8 @@ func NewModule(db *gorm.DB, files governanceapp.FilePort, redisClient redis.Univ
 	if validation != nil && trade != nil {
 		transport.SetPermanentMicrosoftFetchFailurePort(permanentMicrosoftFetchFailureAdapter{validation: validation, trade: trade})
 	}
-	useCase := mailmatchapp.NewUseCase(repo, queue, transport, matchResultAdapter{trade: trade})
+	matchResults := &matchResultAdapter{trade: trade}
+	useCase := mailmatchapp.NewUseCase(repo, queue, transport, matchResults)
 	useCase.SetPickupFetchStatePort(mailmatchinfra.NewPickupFetchState(redisClient))
 	useCase.SetPickupMessageCachePort(mailmatchinfra.NewPickupMessageCache(redisClient))
 	projectHistory := mailmatchapp.NewProjectHistoryScanUseCase(projectHistoryRepo, repo, queue, transport)
@@ -106,6 +120,7 @@ func NewModule(db *gorm.DB, files governanceapp.FilePort, redisClient redis.Univ
 		ProjectHistory:    projectHistory,
 		AdminMessages:     mailmatchapp.NewAdminMessageUseCase(adminMessageRepo),
 		resourceFetchRepo: resourceFetchRepo,
+		matchResults:      matchResults,
 	}
 }
 

@@ -15,10 +15,13 @@ func TestLocalResourcesAPIKeepsCredentialsWriteOnly(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db, err := gorm.Open(sqlite.Open("file:gmail-local-api-safe-list?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&localResourceModel{}))
+	require.NoError(t, db.AutoMigrate(&resourceRootModel{}, &localResourceModel{}))
+	root := resourceRootModel{Type: "gmail", OwnerUserID: 1, Version: 1}
+	require.NoError(t, db.Create(&root).Error)
 	require.NoError(t, db.Create(&localResourceModel{
+		ID:    root.ID,
 		Email: "safe@gmail.com", Identity: "safe@gmail.com", Password: "login-password",
-		TwoFactorSecret: "JBSWY3DPEHPK3PXP", AppPassword: "abcdefghijklmnop", Status: LocalResourceAvailable,
+		TwoFactorSecret: "JBSWY3DPEHPK3PXP", AppPassword: "abcdefghijklmnop", Status: LocalResourceNormal,
 	}).Error)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)

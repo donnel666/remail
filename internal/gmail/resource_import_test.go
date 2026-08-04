@@ -221,15 +221,21 @@ func TestGmailResourceImportUsesRedisReferenceTaskAndSafeLineResults(t *testing.
 	require.Equal(t, "duplicate_email", items[2].Category)
 	require.Equal(t, "invalid_format", items[3].Category)
 
-	dispatchTasks, err := harness.inspector.ListPendingTasks(platform.QueueBackgroundInventory)
+	dispatchTasks, err := harness.inspector.ListPendingTasks(platform.QueueDefault)
 	require.NoError(t, err)
 	require.Len(t, dispatchTasks, 1)
-	require.Equal(t, typeGmailDispatch, dispatchTasks[0].Type)
+	require.Equal(t, typeGmailValidationDispatcher, dispatchTasks[0].Type)
 	require.NoError(t, harness.service.DispatchLocalResourceValidations(ctx, localGmailValidationBatchMax))
-	validationTasks, err := harness.inspector.ListPendingTasks(platform.QueueBackgroundValidation)
+	validationTasks, err := harness.inspector.ListScheduledTasks(platform.QueueBackgroundValidation)
 	require.NoError(t, err)
 	require.Len(t, validationTasks, 1)
-	require.JSONEq(t, fmt.Sprintf(`{"resourceId":%d}`, resource.ID), string(validationTasks[0].Payload))
+	var validationTask localResourceValidationTask
+	require.NoError(t, json.Unmarshal(validationTasks[0].Payload, &validationTask))
+	require.Equal(t, resource.ID, validationTask.ResourceID)
+	require.EqualValues(t, 7, validationTask.OwnerUserID)
+	require.EqualValues(t, 1, validationTask.ValidationGeneration)
+	require.EqualValues(t, 1, validationTask.ExpectedCredentialRevision)
+	require.Equal(t, "request-1", validationTask.RequestID)
 
 	var audit governanceinfra.OperationLogModel
 	require.NoError(t, harness.db.First(&audit).Error)
@@ -415,7 +421,7 @@ func TestGmailResourceImportFinalizesPreparedRedisResultWithoutRecreatingResourc
 	line, valid := parseLocalResourceImportLine("prepared@gmail.com----password----JBSWY3DPEHPK3PXP----abcdefghijklmnop")
 	require.True(t, valid)
 	line.lineNumber = 1
-	writes, err := harness.service.createGmailResourcesForImport(ctx, 7, []localResourceImportLine{line}, func(created []gmailResourceImportWrite) error {
+	writes, err := harness.service.createGmailResourcesForImport(ctx, 7, "request-prepared", []localResourceImportLine{line}, func(created []gmailResourceImportWrite) error {
 		return harness.service.prepareGmailResourceImportResult(
 			ctx, accepted.ImportID, 1, claimToken,
 			gmailResourceImportResultItems([]localResourceImportLine{line}, created, nil),
@@ -455,7 +461,7 @@ func TestGmailResourceImportClearsPreparedResultAfterDatabaseRollback(t *testing
 	line, valid := parseLocalResourceImportLine("rollback@gmail.com----password----JBSWY3DPEHPK3PXP----abcdefghijklmnop")
 	require.True(t, valid)
 	line.lineNumber = 1
-	_, err = harness.service.createGmailResourcesForImport(ctx, 7, []localResourceImportLine{line}, func(created []gmailResourceImportWrite) error {
+	_, err = harness.service.createGmailResourcesForImport(ctx, 7, "request-rollback", []localResourceImportLine{line}, func(created []gmailResourceImportWrite) error {
 		if err := harness.service.prepareGmailResourceImportResult(
 			ctx, accepted.ImportID, 1, claimToken,
 			gmailResourceImportResultItems([]localResourceImportLine{line}, created, nil),

@@ -2,7 +2,7 @@ package runtimeconfig
 
 import "github.com/donnel666/remail/internal/systemsettings/domain"
 
-const DefaultSettingsCount = 225
+const DefaultSettingsCount = 228
 
 // DefaultSettings is the single source of initial values for runtime-managed
 // settings. Startup inserts only keys that are not in storage.
@@ -83,6 +83,8 @@ var defaultSettings = []domain.Setting{
 	{Key: "default_project_gmail_purchase_supplier_price", Value: "0"},
 
 	{Key: "smsbower_enabled", Value: "false"},
+	{Key: "smsbower_code_enabled", Value: "true"},
+	{Key: "smsbower_purchase_enabled", Value: "false"},
 	{Key: "smsbower_api_key", Value: ""},
 	{Key: "smsbower_sync_interval_minutes", Value: "5"},
 	{Key: "smsbower_balance_warning_threshold", Value: "0"},
@@ -128,6 +130,7 @@ var defaultSettings = []domain.Setting{
 	{Key: "fetch_dispatcher_timeout_seconds", Value: "300"},
 	{Key: "resource_fetch_dispatch_limit", Value: "10000"},
 	{Key: "project_history_concurrency", Value: "4"},
+	{Key: "gmail_history_concurrency", Value: "4"},
 	{Key: "project_history_dispatch_limit", Value: "4"},
 	{Key: "verification_code_pattern", Value: `["(?:^|[^\\d])(\\d{6,8})(?:[^\\d]|$)"]`},
 

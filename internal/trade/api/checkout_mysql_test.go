@@ -30,6 +30,7 @@ import (
 	openapiapp "github.com/donnel666/remail/internal/openapi/app"
 	openapidomain "github.com/donnel666/remail/internal/openapi/domain"
 	openapiinfra "github.com/donnel666/remail/internal/openapi/infra"
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/platform/testmysql"
 	tradeapp "github.com/donnel666/remail/internal/trade/app"
 	tradedomain "github.com/donnel666/remail/internal/trade/domain"
@@ -268,6 +269,107 @@ func TestImportHistoricalMicrosoftUsageUsesExistingOrderAllocationAndWalletFacts
 	var rolledBackAliases int64
 	require.NoError(t, db.Table("explicit_aliases").Where("resource_id = ? AND email = ?", 1000, "rolled-back@outlook.com").Count(&rolledBackAliases).Error)
 	require.Zero(t, rolledBackAliases)
+}
+
+func TestImportHistoricalGmailUsagePersistsFactsAndUsesOuterTransactionMySQL(t *testing.T) {
+	db := newTradeMySQLTestDB(t)
+	seedTradeBase(t, db, "gmail")
+	require.NoError(t, db.Exec(`
+INSERT INTO email_resources(id, type, owner_user_id)
+VALUES (1000, 'gmail', 1)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO gmail_resources(
+    id, resource_type, owner_user_id, email, identity, password,
+    two_factor_secret, app_password, status
+) VALUES (
+    1000, 'gmail', 1, 'firstname@gmail.com', 'firstname@gmail.com', 'password',
+    'JBSWY3DPEHPK3PXP', 'abcdefghijklmnop', 'normal'
+)`).Error)
+
+	createdAt := time.Now().UTC().Add(-24 * time.Hour).Truncate(time.Second)
+	expiredAt := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	insertAllocation := func(conn *gorm.DB, orderNo, mailbox, email string) uint {
+		require.NoError(t, conn.Exec(`
+INSERT INTO allocation_order_guards(order_no, type, created_at)
+VALUES (?, 'gmail', ?)`, orderNo, createdAt).Error)
+		require.NoError(t, conn.Exec(`
+INSERT INTO gmail_allocations(
+    order_no, guard_type, project_id, product_id, source, source_ref,
+    service_mode, resource_id, supply_scope, mailbox, email, status,
+    cost_points_snapshot, created_at, released_at
+) VALUES (
+    ?, 'gmail', 10, 20, 'local', '',
+    'purchase', 1000, 'public', ?, ?, 'released',
+    0, ?, ?
+)`, orderNo, mailbox, email, createdAt, expiredAt).Error)
+		var allocationID uint
+		require.NoError(t, conn.Table("gmail_allocations").Select("id").Where("order_no = ?", orderNo).Scan(&allocationID).Error)
+		require.NotZero(t, allocationID)
+		return allocationID
+	}
+
+	uc := newTradeUseCase(db)
+	orderNo := "HIST-GMAIL-TRADE-FACTS"
+	allocationID := insertAllocation(db, orderNo, "plus", "firstname+legacy@gmail.com")
+	require.NoError(t, uc.ImportHistoricalGmailUsage(context.Background(), []tradeapp.HistoricalGmailUsage{{
+		OrderNo: orderNo, AllocationID: allocationID, ProjectID: 10, ProductID: 20,
+		Email: "firstname+legacy@gmail.com", FirstMatchedAt: createdAt, LastMatchedAt: expiredAt, EvidenceCount: 2,
+	}}))
+
+	var order struct {
+		UserID             uint   `gorm:"column:user_id"`
+		ProductType        string `gorm:"column:product_type"`
+		ServiceMode        string `gorm:"column:service_mode"`
+		Status             string `gorm:"column:status"`
+		PayAmount          string `gorm:"column:pay_amount"`
+		AllocationType     string `gorm:"column:allocation_type"`
+		MicrosoftAllocID   *uint  `gorm:"column:microsoft_alloc_id"`
+		DomainAllocID      *uint  `gorm:"column:domain_alloc_id"`
+		DebitTransactionID uint   `gorm:"column:debit_tx_id"`
+	}
+	require.NoError(t, db.Table("orders").Where("order_no = ?", orderNo).Take(&order).Error)
+	require.Equal(t, uint(1), order.UserID)
+	require.Equal(t, "gmail", order.ProductType)
+	require.Equal(t, "purchase", order.ServiceMode)
+	require.Equal(t, "completed", order.Status)
+	require.Equal(t, "0.000000", order.PayAmount)
+	require.Equal(t, "gmail", order.AllocationType)
+	require.Nil(t, order.MicrosoftAllocID)
+	require.Nil(t, order.DomainAllocID)
+	require.NotZero(t, order.DebitTransactionID)
+
+	var debit struct {
+		UserID         uint   `gorm:"column:user_id"`
+		Amount         string `gorm:"column:amount"`
+		IdempotencyKey string `gorm:"column:idempotency_key"`
+	}
+	require.NoError(t, db.Table("wallet_transactions").Where("id = ?", order.DebitTransactionID).Take(&debit).Error)
+	require.Equal(t, uint(1), debit.UserID)
+	require.Equal(t, "0.000000", debit.Amount)
+	require.Equal(t, "history:"+orderNo+":debit", debit.IdempotencyKey)
+
+	rollbackOrderNo := "HIST-GMAIL-TRADE-ROLLBACK"
+	rollbackErr := errors.New("rollback Gmail historical facts")
+	err := db.Transaction(func(tx *gorm.DB) error {
+		rollbackAllocationID := insertAllocation(tx, rollbackOrderNo, "dot", "first.name@gmail.com")
+		if err := uc.ImportHistoricalGmailUsage(platform.WithGormTx(context.Background(), tx), []tradeapp.HistoricalGmailUsage{{
+			OrderNo: rollbackOrderNo, AllocationID: rollbackAllocationID, ProjectID: 10, ProductID: 20,
+			Email: "first.name@gmail.com", FirstMatchedAt: createdAt, LastMatchedAt: expiredAt, EvidenceCount: 1,
+		}}); err != nil {
+			return err
+		}
+		return rollbackErr
+	})
+	require.ErrorIs(t, err, rollbackErr)
+	for _, table := range []string{"allocation_order_guards", "gmail_allocations", "orders"} {
+		var count int64
+		require.NoError(t, db.Table(table).Where("order_no = ?", rollbackOrderNo).Count(&count).Error)
+		require.Zero(t, count, table)
+	}
+	var rollbackDebits int64
+	require.NoError(t, db.Table("wallet_transactions").
+		Where("idempotency_key = ?", "history:"+rollbackOrderNo+":debit").Count(&rollbackDebits).Error)
+	require.Zero(t, rollbackDebits)
 }
 
 func TestHistoricalImportCommitsSingleEvidenceAliasMySQL(t *testing.T) {
@@ -2451,8 +2553,12 @@ func seedTradeBaseFacts(t *testing.T, db *gorm.DB, productType string) {
 	mainWeight := 0
 	dotWeight := 0
 	plusWeight := 0
-	if productType == "microsoft" {
+	codeWindowMinutes := 10
+	if productType == "microsoft" || productType == "gmail" {
 		mainWeight = 1
+	}
+	if productType == "gmail" {
+		codeWindowMinutes = 1440
 	}
 	require.NoError(t, db.Exec(`
 INSERT INTO projects(id, name, target_platform, logo_url, status, access_type, loose_match)
@@ -2463,8 +2569,9 @@ INSERT INTO project_products(
     code_price, purchase_price, code_supplier_price, purchase_supplier_price,
     code_window_minutes, activation_window_minutes, warranty_minutes,
     main_weight, dot_weight, plus_weight
-) VALUES (20, 10, ?, 'enabled', TRUE, TRUE, 1.00, 2.00, 0.50, 1.00, 10, 60, 1440, ?, ?, ?)`,
+) VALUES (20, 10, ?, 'enabled', TRUE, TRUE, 1.00, 2.00, 0.50, 1.00, ?, 60, 1440, ?, ?, ?)`,
 		productType,
+		codeWindowMinutes,
 		mainWeight,
 		dotWeight,
 		plusWeight,

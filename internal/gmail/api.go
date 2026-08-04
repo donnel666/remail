@@ -45,8 +45,13 @@ func RegisterRoutes(rg *gin.RouterGroup, module *Module, fetcher middleware.Sess
 	resources.GET("", middleware.PermissionRequired(checker, "core:resource", "read"), h.localResources)
 	resources.POST("/imports", middleware.PermissionRequired(checker, "core:resource", "write"), h.importLocalResources)
 	resources.GET("/imports/:importId", middleware.PermissionRequired(checker, "core:resource", "read"), h.localResourceImport)
+	resources.POST("/validations", middleware.PermissionRequired(checker, "core:resource", "operate"), h.validateLocalResources)
+	resources.GET("/validations/:batchId", middleware.PermissionRequired(checker, "core:resource", "read"), h.localResourceValidationBatch)
 	resources.POST("/:resourceId/enable", middleware.PermissionRequired(checker, "core:resource", "operate"), h.enableLocalResource)
 	resources.POST("/:resourceId/disable", middleware.PermissionRequired(checker, "core:resource", "operate"), h.disableLocalResource)
+	resources.POST("/:resourceId/validate", middleware.PermissionRequired(checker, "core:resource", "operate"), h.validateLocalResource)
+	resources.POST("/:resourceId/publish", middleware.PermissionRequired(checker, "core:resource", "operate"), h.publishLocalResource)
+	resources.POST("/:resourceId/unpublish", middleware.PermissionRequired(checker, "core:resource", "operate"), h.unpublishLocalResource)
 }
 
 type handler struct{ service *Service }
@@ -88,21 +93,17 @@ func (h *handler) mappings(c *gin.Context) {
 }
 
 type mappingRequest struct {
-	Source              string `json:"source" binding:"required"`
-	ProviderServiceCode string `json:"providerServiceCode"`
-	Enabled             *bool  `json:"enabled" binding:"required"`
-	CodeEnabled         *bool  `json:"codeEnabled" binding:"required"`
-	PurchaseEnabled     *bool  `json:"purchaseEnabled" binding:"required"`
+	ProviderServiceCode string `json:"providerServiceCode" binding:"required"`
 }
 
 func (h *handler) putMapping(c *gin.Context) {
 	projectID, err := strconv.ParseUint(strings.TrimSpace(c.Param("projectId")), 10, 64)
 	var req mappingRequest
-	if err != nil || projectID == 0 || c.ShouldBindJSON(&req) != nil || req.Enabled == nil || req.CodeEnabled == nil || req.PurchaseEnabled == nil {
+	if err != nil || projectID == 0 || c.ShouldBindJSON(&req) != nil {
 		writeGmailError(c, ErrInvalidRoute)
 		return
 	}
-	if err := h.service.PutMapping(c.Request.Context(), uint(projectID), req.Source, req.ProviderServiceCode, *req.Enabled, *req.CodeEnabled, *req.PurchaseEnabled); err != nil {
+	if err := h.service.PutMapping(c.Request.Context(), uint(projectID), req.ProviderServiceCode); err != nil {
 		writeGmailError(c, err)
 		return
 	}
@@ -115,7 +116,7 @@ func (h *handler) deleteMapping(c *gin.Context) {
 		writeGmailError(c, ErrInvalidRoute)
 		return
 	}
-	if err := h.service.DeleteMapping(c.Request.Context(), uint(projectID), c.Query("source")); err != nil {
+	if err := h.service.DeleteMapping(c.Request.Context(), uint(projectID)); err != nil {
 		writeGmailError(c, err)
 		return
 	}
@@ -296,16 +297,140 @@ func (h *handler) disableLocalResource(c *gin.Context) {
 }
 
 func (h *handler) setLocalResourceEnabled(c *gin.Context, enabled bool) {
+	resourceID, version, ok := parseLocalResourceVersionCommand(c)
+	if !ok {
+		return
+	}
+	if !validGmailIdempotencyKey(c.GetHeader("Idempotency-Key")) {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid Idempotency-Key.", "requestId": middleware.GetRequestID(c)})
+		return
+	}
+	operatorUserID, ok := middleware.GetCurrentUserID(c)
+	if !ok {
+		c.Status(http.StatusUnauthorized)
+		return
+	}
+	if err := h.service.SetAdminLocalResourceEnabled(
+		c.Request.Context(), resourceID, version, enabled, operatorUserID, c.GetHeader("Idempotency-Key"), middleware.GetRequestID(c), c.FullPath(),
+	); err != nil {
+		writeGmailError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (h *handler) validateLocalResource(c *gin.Context) {
 	resourceID, err := strconv.ParseUint(strings.TrimSpace(c.Param("resourceId")), 10, 64)
 	if err != nil || resourceID == 0 {
 		writeGmailError(c, ErrLocalResourceMissing)
 		return
 	}
-	if err := h.service.SetLocalResourceEnabled(c.Request.Context(), uint(resourceID), enabled); err != nil {
+	idempotencyKey := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+	if !validGmailIdempotencyKey(idempotencyKey) {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid Idempotency-Key.", "requestId": middleware.GetRequestID(c)})
+		return
+	}
+	operatorUserID, ok := middleware.GetCurrentUserID(c)
+	if !ok {
+		c.Status(http.StatusUnauthorized)
+		return
+	}
+	reused, err := h.service.RequestAdminLocalResourceValidation(
+		c.Request.Context(), uint(resourceID), operatorUserID, idempotencyKey, middleware.GetRequestID(c), c.FullPath(),
+	)
+	if err != nil {
+		writeGmailError(c, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"requested": 1, "queued": 1, "reused": reused})
+}
+
+type localResourceValidationBatchRequest struct {
+	ResourceIDs []uint `json:"resourceIds" binding:"required"`
+}
+
+func (h *handler) validateLocalResources(c *gin.Context) {
+	idempotencyKey := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+	if !validGmailIdempotencyKey(idempotencyKey) {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid Idempotency-Key.", "requestId": middleware.GetRequestID(c)})
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
+	var request localResourceValidationBatchRequest
+	if c.ShouldBindJSON(&request) != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request body.", "requestId": middleware.GetRequestID(c)})
+		return
+	}
+	operatorUserID, ok := middleware.GetCurrentUserID(c)
+	if !ok {
+		c.Status(http.StatusUnauthorized)
+		return
+	}
+	result, err := h.service.AcceptAdminLocalResourceValidationBatch(
+		c.Request.Context(), request.ResourceIDs, operatorUserID, idempotencyKey,
+		middleware.GetRequestID(c), c.FullPath(),
+	)
+	if err != nil {
+		writeGmailError(c, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, result)
+}
+
+func (h *handler) localResourceValidationBatch(c *gin.Context) {
+	result, err := h.service.GetAdminLocalResourceValidationBatch(c.Request.Context(), c.Param("batchId"))
+	if err != nil {
+		writeGmailError(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *handler) publishLocalResource(c *gin.Context) {
+	h.setLocalResourceForSale(c, true)
+}
+
+func (h *handler) unpublishLocalResource(c *gin.Context) {
+	h.setLocalResourceForSale(c, false)
+}
+
+func (h *handler) setLocalResourceForSale(c *gin.Context, forSale bool) {
+	resourceID, version, ok := parseLocalResourceVersionCommand(c)
+	if !ok {
+		return
+	}
+	if !validGmailIdempotencyKey(c.GetHeader("Idempotency-Key")) {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid Idempotency-Key.", "requestId": middleware.GetRequestID(c)})
+		return
+	}
+	operatorUserID, ok := middleware.GetCurrentUserID(c)
+	if !ok {
+		c.Status(http.StatusUnauthorized)
+		return
+	}
+	if err := h.service.SetAdminLocalResourceForSale(
+		c.Request.Context(), resourceID, version, forSale, operatorUserID, c.GetHeader("Idempotency-Key"), middleware.GetRequestID(c), c.FullPath(),
+	); err != nil {
 		writeGmailError(c, err)
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+func parseLocalResourceVersionCommand(c *gin.Context) (uint, uint64, bool) {
+	resourceID, resourceErr := strconv.ParseUint(strings.TrimSpace(c.Param("resourceId")), 10, 64)
+	version, versionErr := strconv.ParseUint(strings.TrimSpace(c.Query("version")), 10, 64)
+	if resourceErr != nil || resourceID == 0 || versionErr != nil || version == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid resource version.", "requestId": middleware.GetRequestID(c)})
+		return 0, 0, false
+	}
+	return uint(resourceID), version, true
+}
+
+func validGmailIdempotencyKey(value string) bool {
+	value = strings.TrimSpace(value)
+	return value != "" && len(value) <= 128
 }
 
 func writeGmailError(c *gin.Context, err error) {
@@ -319,7 +444,13 @@ func writeGmailError(c *gin.Context, err error) {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Invalid resource command.", "requestId": requestID})
 	case errors.Is(err, ErrGmailImportConflict):
 		c.JSON(http.StatusConflict, gin.H{"message": "Idempotency key was already used for a different command.", "requestId": requestID})
+	case errors.Is(err, ErrLocalValidationConflict):
+		c.JSON(http.StatusConflict, gin.H{"message": "Idempotency key was already used for a different command.", "requestId": requestID})
+	case errors.Is(err, ErrLocalResourceVersion):
+		c.JSON(http.StatusConflict, gin.H{"message": "Resource changed; refresh and try again.", "requestId": requestID})
 	case errors.Is(err, ErrGmailImportDependency), errors.Is(err, ErrGmailImportStorage):
+		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "Resource service is temporarily unavailable.", "requestId": requestID})
+	case errors.Is(err, ErrLocalValidationDependency):
 		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "Resource service is temporarily unavailable.", "requestId": requestID})
 	case errors.Is(err, ErrLocalResourceBusy):
 		c.JSON(http.StatusConflict, gin.H{"message": "Gmail resource is leased or sold.", "requestId": requestID})

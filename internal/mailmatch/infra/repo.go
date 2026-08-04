@@ -172,7 +172,7 @@ func (r *Repo) LoadPickupScope(ctx context.Context, token string, email string) 
 		return nil, domain.ErrPickupCredentialInvalid
 	}
 	var row orderScopeRow
-	if err := r.dbFor(ctx).Raw(pickupScopeSQL, token, email, email).Scan(&row).Error; err != nil {
+	if err := r.dbFor(ctx).Raw(pickupScopeSQL, token, email, email, email).Scan(&row).Error; err != nil {
 		return nil, fmt.Errorf("load pickup mail scope: %w", err)
 	}
 	if row.OrderNo == "" {
@@ -460,21 +460,30 @@ type orderScopeRow struct {
 
 const orderScopeSQL = `
 SELECT
-	    o.id AS order_id,
+    o.id AS order_id,
     o.order_no,
     o.user_id,
     o.project_id,
     o.project_product_id AS product_id,
     o.service_mode,
-	    o.status AS order_status,
-	    o.allocation_type,
-	    COALESCE(o.microsoft_alloc_id, o.domain_alloc_id, 0) AS allocation_id,
-	    CASE
-	      WHEN o.allocation_type = 'microsoft' AND ma.mailbox IN ('dot', 'plus') THEN ma.mailbox
-	      ELSE 'exact'
-	    END AS recipient_kind,
-	    CASE WHEN o.allocation_type = 'microsoft' THEN ma.resource_id ELSE da.resource_id END AS email_resource_id,
-    CASE WHEN o.allocation_type = 'microsoft' THEN ma.email ELSE da.email END AS recipient,
+    o.status AS order_status,
+    o.allocation_type,
+    COALESCE(o.microsoft_alloc_id, o.domain_alloc_id, ga.id, 0) AS allocation_id,
+    CASE
+      WHEN o.allocation_type = 'microsoft' AND ma.mailbox IN ('dot', 'plus') THEN ma.mailbox
+      WHEN o.allocation_type = 'gmail' AND ga.mailbox IN ('dot', 'plus') THEN ga.mailbox
+      ELSE 'exact'
+    END AS recipient_kind,
+    CASE
+      WHEN o.allocation_type = 'microsoft' THEN ma.resource_id
+      WHEN o.allocation_type = 'domain' THEN da.resource_id
+      ELSE ga.resource_id
+    END AS email_resource_id,
+    CASE
+      WHEN o.allocation_type = 'microsoft' THEN ma.email
+      WHEN o.allocation_type = 'domain' THEN da.email
+      ELSE ga.email
+    END AS recipient,
     o.receive_started_at,
     o.receive_until,
     o.activated_at,
@@ -489,12 +498,14 @@ JOIN projects p ON p.id = o.project_id
 LEFT JOIN microsoft_allocations ma ON ma.id = o.microsoft_alloc_id AND o.allocation_type = 'microsoft'
 LEFT JOIN microsoft_resources mr ON mr.id = ma.resource_id
 LEFT JOIN domain_allocations da ON da.id = o.domain_alloc_id AND o.allocation_type = 'domain'
+LEFT JOIN gmail_allocations ga ON ga.order_no = o.order_no AND o.allocation_type = 'gmail'
 WHERE o.order_no = ?
   AND (
     (o.allocation_type = 'microsoft' AND ma.order_no = ?)
     OR (o.allocation_type = 'domain' AND da.order_no = ?)
-	  )
-	LIMIT 1`
+    OR (o.allocation_type = 'gmail' AND ga.order_no = o.order_no AND ga.resource_id IS NOT NULL)
+  )
+LIMIT 1`
 
 const pickupScopeSQL = `
 SELECT
@@ -506,13 +517,22 @@ SELECT
     o.service_mode,
     o.status AS order_status,
     o.allocation_type,
-    COALESCE(o.microsoft_alloc_id, o.domain_alloc_id, 0) AS allocation_id,
+    COALESCE(o.microsoft_alloc_id, o.domain_alloc_id, ga.id, 0) AS allocation_id,
     CASE
       WHEN o.allocation_type = 'microsoft' AND ma.mailbox IN ('dot', 'plus') THEN ma.mailbox
+      WHEN o.allocation_type = 'gmail' AND ga.mailbox IN ('dot', 'plus') THEN ga.mailbox
       ELSE 'exact'
     END AS recipient_kind,
-    CASE WHEN o.allocation_type = 'microsoft' THEN ma.resource_id ELSE da.resource_id END AS email_resource_id,
-    CASE WHEN o.allocation_type = 'microsoft' THEN ma.email ELSE da.email END AS recipient,
+    CASE
+      WHEN o.allocation_type = 'microsoft' THEN ma.resource_id
+      WHEN o.allocation_type = 'domain' THEN da.resource_id
+      ELSE ga.resource_id
+    END AS email_resource_id,
+    CASE
+      WHEN o.allocation_type = 'microsoft' THEN ma.email
+      WHEN o.allocation_type = 'domain' THEN da.email
+      ELSE ga.email
+    END AS recipient,
     o.receive_started_at,
     o.receive_until,
     o.activated_at,
@@ -533,6 +553,9 @@ LEFT JOIN domain_allocations da
   ON da.id = o.domain_alloc_id
  AND o.allocation_type = 'domain'
  AND da.order_no = o.order_no
+LEFT JOIN gmail_allocations ga
+  ON ga.order_no = o.order_no
+ AND o.allocation_type = 'gmail'
 WHERE t.token_plain = ?
   AND t.enabled = 1
   AND (t.expire_at IS NULL OR t.expire_at > UTC_TIMESTAMP())
@@ -540,6 +563,8 @@ WHERE t.token_plain = ?
     (o.allocation_type = 'microsoft' AND ma.order_no = o.order_no AND ma.email = ?)
     OR
     (o.allocation_type = 'domain' AND da.order_no = o.order_no AND da.email = ?)
+    OR
+    (o.allocation_type = 'gmail' AND ga.order_no = o.order_no AND ga.resource_id IS NOT NULL AND ga.email = ?)
   )
 LIMIT 1`
 
@@ -554,13 +579,22 @@ SELECT
     o.service_mode,
     o.status AS order_status,
     o.allocation_type,
-    COALESCE(o.microsoft_alloc_id, o.domain_alloc_id, 0) AS allocation_id,
+    COALESCE(o.microsoft_alloc_id, o.domain_alloc_id, ga.id, 0) AS allocation_id,
     CASE
       WHEN o.allocation_type = 'microsoft' AND ma.mailbox IN ('dot', 'plus') THEN ma.mailbox
+      WHEN o.allocation_type = 'gmail' AND ga.mailbox IN ('dot', 'plus') THEN ga.mailbox
       ELSE 'exact'
     END AS recipient_kind,
-    CASE WHEN o.allocation_type = 'microsoft' THEN ma.resource_id ELSE da.resource_id END AS email_resource_id,
-    CASE WHEN o.allocation_type = 'microsoft' THEN ma.email ELSE da.email END AS recipient,
+    CASE
+      WHEN o.allocation_type = 'microsoft' THEN ma.resource_id
+      WHEN o.allocation_type = 'domain' THEN da.resource_id
+      ELSE ga.resource_id
+    END AS email_resource_id,
+    CASE
+      WHEN o.allocation_type = 'microsoft' THEN ma.email
+      WHEN o.allocation_type = 'domain' THEN da.email
+      ELSE ga.email
+    END AS recipient,
     o.receive_started_at,
     o.receive_until,
     o.activated_at,
@@ -582,9 +616,13 @@ LEFT JOIN domain_allocations da
   ON da.id = o.domain_alloc_id
  AND o.allocation_type = 'domain'
  AND da.order_no = o.order_no
+LEFT JOIN gmail_allocations ga
+  ON ga.order_no = o.order_no
+ AND o.allocation_type = 'gmail'
 WHERE t.token_plain IN ?
   AND t.enabled = 1
-  AND (t.expire_at IS NULL OR t.expire_at > UTC_TIMESTAMP())`
+  AND (t.expire_at IS NULL OR t.expire_at > UTC_TIMESTAMP())
+  AND (o.allocation_type <> 'gmail' OR ga.resource_id IS NOT NULL)`
 
 const microsoftMatchingScopesSQL = `
 SELECT
@@ -664,6 +702,54 @@ JOIN projects p ON p.id = o.project_id
 WHERE da.resource_id = ?
   AND da.email = ?
   AND da.status = 'allocated'
+  AND (o.receive_started_at IS NULL OR ? >= DATE_SUB(o.receive_started_at, INTERVAL 2 MINUTE))
+  AND (
+    (
+      o.service_mode = 'code'
+      AND o.status = 'active'
+      AND (o.receive_until IS NULL OR ? <= o.receive_until)
+    )
+    OR
+    (o.service_mode = 'purchase' AND o.status IN ('active', 'completed'))
+  )
+ORDER BY o.created_at ASC, o.id ASC`
+
+const gmailMatchingScopesSQL = `
+SELECT
+    o.id AS order_id,
+    o.order_no,
+    o.user_id,
+    o.project_id,
+    o.project_product_id AS product_id,
+    o.service_mode,
+    o.status AS order_status,
+    o.allocation_type,
+    ga.id AS allocation_id,
+    CASE WHEN ga.mailbox IN ('dot', 'plus') THEN ga.mailbox ELSE 'exact' END AS recipient_kind,
+    ga.resource_id AS email_resource_id,
+    ga.email AS recipient,
+    o.receive_started_at,
+    o.receive_until,
+    o.activated_at,
+    o.after_sale_until,
+    p.loose_match,
+    '' AS microsoft_email,
+    '' AS microsoft_client_id,
+    '' AS microsoft_rt,
+    0 AS credential_revision
+FROM gmail_allocations ga
+JOIN orders o ON o.order_no = ga.order_no AND o.allocation_type = 'gmail'
+JOIN projects p ON p.id = o.project_id
+WHERE ga.resource_id = ?
+  AND (
+    ga.email = ?
+    OR (
+      ga.mailbox = 'main'
+      AND LOWER(SUBSTRING_INDEX(ga.email, '@', -1)) IN ('gmail.com', 'googlemail.com')
+      AND REPLACE(LOWER(SUBSTRING_INDEX(ga.email, '@', 1)), '.', '') = ?
+    )
+  )
+  AND ga.status = 'allocated'
   AND (o.receive_started_at IS NULL OR ? >= DATE_SUB(o.receive_started_at, INTERVAL 2 MINUTE))
   AND (
     (
@@ -908,6 +994,27 @@ func (r *Repo) ListMatchingScopesByRecipient(ctx context.Context, resourceType d
 		}
 	case domain.ResourceTypeDomain:
 		err = r.dbFor(ctx).Raw(domainMatchingScopesSQL, emailResourceID, recipient, receivedAt, receivedAt).Scan(&rows).Error
+	case domain.ResourceTypeGmail:
+		_, _, canonical, ok := domain.RecipientAliasForms(recipient)
+		if !ok {
+			return nil, nil
+		}
+		canonicalLocal, canonicalHost, _ := strings.Cut(canonical, "@")
+		if canonicalHost != "gmail.com" && canonicalHost != "googlemail.com" {
+			return nil, nil
+		}
+		err = r.dbFor(ctx).Raw(gmailMatchingScopesSQL, emailResourceID, recipient, canonicalLocal, receivedAt, receivedAt).Scan(&rows).Error
+		if err == nil {
+			exact := make([]orderScopeRow, 0, len(rows))
+			for _, row := range rows {
+				if strings.EqualFold(strings.TrimSpace(row.Recipient), recipient) {
+					exact = append(exact, row)
+				}
+			}
+			if len(exact) > 0 {
+				rows = exact
+			}
+		}
 	default:
 		return nil, nil
 	}

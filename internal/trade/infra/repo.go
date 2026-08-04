@@ -162,6 +162,41 @@ func (r *Repo) CreateHistoricalOrder(ctx context.Context, cmd tradeapp.CreateHis
 	return nil
 }
 
+func (r *Repo) CreateHistoricalGmailOrder(ctx context.Context, cmd tradeapp.CreateHistoricalGmailOrderCommand) error {
+	orderNo := strings.TrimSpace(cmd.OrderNo)
+	deliveryEmail := strings.ToLower(strings.TrimSpace(cmd.DeliveryEmail))
+	if orderNo == "" || cmd.UserID == 0 || cmd.ProjectID == 0 || cmd.ProjectProductID == 0 ||
+		cmd.DebitTxID == 0 || cmd.GmailAllocationID == 0 || deliveryEmail == "" ||
+		cmd.CreatedAt.IsZero() || cmd.ExpiredAt.IsZero() || !cmd.ExpiredAt.Before(cmd.Now) {
+		return domain.ErrInvalidOrderRequest
+	}
+	allocationType := string(domain.AllocationTypeGmail)
+	debitTxID := cmd.DebitTxID
+	createdAt := cmd.CreatedAt.UTC()
+	expiredAt := cmd.ExpiredAt.UTC()
+	requestFingerprint := fmt.Sprintf("%x", sha256.Sum256([]byte(orderNo)))
+	model := OrderModel{
+		OrderNo: orderNo, UserID: cmd.UserID, ProjectID: cmd.ProjectID, ProjectProductID: cmd.ProjectProductID,
+		ProductType: string(domain.ProductTypeGmail), ServiceMode: string(domain.ServiceModePurchase),
+		SupplyPolicy: string(domain.SupplyPolicyPublicOnly), Status: string(domain.OrderStatusCompleted),
+		FailureCode: "", PayAmount: "0", RefundAmount: "0",
+		CodeWindowMinutes: cmd.CodeWindowMinutes, ActivationWindowMinutes: cmd.ActivationWindowMinutes,
+		WarrantyMinutes: cmd.WarrantyMinutes, DebitTxID: &debitTxID, AllocationType: &allocationType,
+		DeliveryEmail: deliveryEmail, ReceiveStartedAt: &createdAt, ReceiveUntil: &expiredAt,
+		ActivatedAt: &createdAt, AfterSaleUntil: &expiredAt,
+		ClientChannel: string(domain.ClientChannelConsole), IdempotencyKey: "history:" + orderNo,
+		RequestFingerprint: requestFingerprint, ServiceCleanupStatus: "succeeded",
+		CreatedAt: createdAt, UpdatedAt: cmd.Now.UTC(), Version: 1,
+	}
+	if err := r.dbFor(ctx).Create(&model).Error; err != nil {
+		if isDuplicateKeyError(err) {
+			return domain.ErrIdempotencyConflict
+		}
+		return fmt.Errorf("create historical Gmail order: %w", err)
+	}
+	return nil
+}
+
 func (r *Repo) LoadOrCreatePendingOrder(ctx context.Context, cmd tradeapp.CreatePendingOrderCommand) (*domain.Order, bool, error) {
 	var model OrderModel
 	created := false
@@ -886,7 +921,7 @@ func (r *Repo) ListCheckoutAllocationRecoveries(ctx context.Context, staleBefore
 	// Keep orders as the driving table: allocation guards are much larger than
 	// the pending/paid/failed recovery status ranges in production.
 	if err := r.dbFor(ctx).Table("orders AS o").
-		Select("o.order_no, o.status").
+		Select("o.order_no, o.status, o.product_type").
 		Joins("STRAIGHT_JOIN allocation_order_guards AS g ON g.order_no = o.order_no").
 		Joins("LEFT JOIN microsoft_allocations AS ma ON g.type = ? AND ma.order_no = g.order_no AND ma.status = ?", domain.AllocationTypeMicrosoft, "allocated").
 		Joins("LEFT JOIN domain_allocations AS da ON g.type = ? AND da.order_no = g.order_no AND da.status = ?", domain.AllocationTypeDomain, "allocated").
@@ -900,6 +935,22 @@ func (r *Repo) ListCheckoutAllocationRecoveries(ctx context.Context, staleBefore
 		Scan(&recoveries).Error; err != nil {
 		return nil, fmt.Errorf("list checkout allocation recoveries: %w", err)
 	}
+	var gmailRecoveries []tradeapp.CheckoutAllocationRecovery
+	if err := r.dbFor(ctx).Table("orders AS o").
+		Select("o.order_no, o.status, o.product_type").
+		Joins("STRAIGHT_JOIN allocation_order_guards AS g ON g.order_no = o.order_no AND g.type = ?", domain.AllocationTypeGmail).
+		Joins("JOIN gmail_allocations AS ga ON ga.order_no = g.order_no AND ga.guard_type = ? AND ga.status = ?", domain.AllocationTypeGmail, "allocated").
+		Where("o.product_type = ? AND (o.status = ? OR (o.status = ? AND ga.created_at < ?) OR (o.status = ? AND o.updated_at < ?))",
+			domain.ProductTypeGmail,
+			domain.OrderStatusFailed,
+			domain.OrderStatusPendingPayment, staleBefore.UTC(),
+			domain.OrderStatusPaid, staleBefore.UTC()).
+		Order("o.created_at ASC, o.id ASC").
+		Limit(limit).
+		Scan(&gmailRecoveries).Error; err != nil {
+		return nil, fmt.Errorf("list Gmail checkout allocation recoveries: %w", err)
+	}
+	recoveries = append(recoveries, gmailRecoveries...)
 	return recoveries, nil
 }
 

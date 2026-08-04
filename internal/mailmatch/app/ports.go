@@ -153,16 +153,23 @@ type FetchMessagesResult struct {
 }
 
 type InboundMailRequest struct {
-	EmailResourceID uint
-	ResourceType    domain.ResourceType
-	Recipient       string
-	EnvelopeFrom    string
-	Raw             []byte
-	ReceivedAt      time.Time
+	EmailResourceID   uint
+	ResourceType      domain.ResourceType
+	Recipient         string
+	EnvelopeFrom      string
+	Raw               []byte
+	ReceivedAt        time.Time
+	ProviderMessageID string
+	Protocol          string
+	Folder            string
 }
 
 type MailTransportFetchPort interface {
 	FetchMicrosoftMessages(ctx context.Context, req FetchMessagesRequest) (*FetchMessagesResult, error)
+}
+
+type GmailPurchaseFetchPort interface {
+	FetchLocalPurchaseMail(ctx context.Context, orderNo string) error
 }
 
 type Repository interface {
@@ -207,6 +214,8 @@ type MatchResultPort interface {
 
 type MatchResult struct {
 	OrderNo          string
+	ResourceType     domain.ResourceType
+	ServiceMode      string
 	VerificationCode string
 	MatchedAt        time.Time
 }
@@ -299,6 +308,7 @@ type UseCase struct {
 	transport      MailTransportFetchPort
 	matches        MatchResultPort
 	credentials    coreapp.MicrosoftCredentialPort
+	gmailPurchase  GmailPurchaseFetchPort
 	pickupFetch    PickupFetchStatePort
 	pickupMessages PickupMessageCachePort
 	now            func() time.Time
@@ -329,6 +339,12 @@ func NewUseCase(repo Repository, queue FetchQueue, transport MailTransportFetchP
 func (uc *UseCase) SetMicrosoftCredentialPort(credentials coreapp.MicrosoftCredentialPort) {
 	if uc != nil {
 		uc.credentials = credentials
+	}
+}
+
+func (uc *UseCase) SetGmailPurchaseFetchPort(fetch GmailPurchaseFetchPort) {
+	if uc != nil {
+		uc.gmailPurchase = fetch
 	}
 }
 
@@ -473,7 +489,7 @@ func (uc *UseCase) listPickupMailBatchBulk(
 			continue
 		}
 		results[i] = PickupMailResult{Items: items, Fetch: state}
-		if read.Scope.AllocationType == domain.ResourceTypeMicrosoft && !cacheSatisfied[read.Scope.EmailResourceID] && shouldScheduleReadFetch(*read.Scope, hasDelivery) {
+		if scopeFetchable(*read.Scope, uc.now) && !cacheSatisfied[read.Scope.EmailResourceID] && shouldScheduleReadFetch(*read.Scope, hasDelivery) {
 			fetchScopes = append(fetchScopes, *read.Scope)
 		}
 	}
@@ -763,7 +779,7 @@ func (uc *UseCase) scheduleScopeFetches(ctx context.Context, scopes []OrderScope
 	positions := make(map[uint]int, len(scopes))
 	requestScopes := make([]PickupRequestFetchScope, 0, len(scopes))
 	for _, scope := range scopes {
-		if scope.AllocationType != domain.ResourceTypeMicrosoft || !scopeFetchable(scope, uc.now) {
+		if !scopeFetchable(scope, uc.now) {
 			continue
 		}
 		orderNo := strings.TrimSpace(scope.OrderNo)
@@ -897,8 +913,7 @@ func (uc *UseCase) selectPickupRequestOrder(ctx context.Context, request PickupR
 		if err != nil {
 			return "", err
 		}
-		if scope == nil || scope.EmailResourceID != request.EmailResourceID ||
-			scope.AllocationType != domain.ResourceTypeMicrosoft || !scopeFetchable(*scope, uc.now) {
+		if scope == nil || scope.EmailResourceID != request.EmailResourceID || !scopeFetchable(*scope, uc.now) {
 			continue
 		}
 		return strings.TrimSpace(scope.OrderNo), nil
@@ -975,6 +990,12 @@ func (uc *UseCase) processFetch(ctx context.Context, task FetchTask, timing pick
 	}
 	if scope.EmailResourceID != task.EmailResourceID || !scopeFetchable(*scope, uc.now) {
 		return nil
+	}
+	if scope.AllocationType == domain.ResourceTypeGmail {
+		if uc.gmailPurchase == nil {
+			return domain.ErrMailServiceUnavailable
+		}
+		return uc.gmailPurchase.FetchLocalPurchaseMail(ctx, scope.OrderNo)
 	}
 	var cachedMessages []FetchedMessage
 	if uc.pickupMessages != nil {
@@ -1205,13 +1226,13 @@ func (uc *UseCase) IngestInboundMail(ctx context.Context, req InboundMailRequest
 	if req.ResourceType == "" {
 		req.ResourceType = domain.ResourceTypeDomain
 	}
-	if req.ResourceType != domain.ResourceTypeDomain {
+	if req.ResourceType != domain.ResourceTypeDomain && req.ResourceType != domain.ResourceTypeGmail {
 		return nil
 	}
 	_, _, _, err := uc.ingestFetchedMessagesForResourcesWithFence(
 		ctx,
 		[]FetchedMessage{inboundFetchedMessage(req)},
-		domain.ResourceTypeDomain,
+		req.ResourceType,
 		[]uint{req.EmailResourceID},
 		nil,
 	)
@@ -1351,6 +1372,7 @@ func (uc *UseCase) ingestFetchedMessagesForResourcesWithFence(
 		for _, message := range messages {
 			storedByIdentity[mailMessageIdentity(message)] = message
 		}
+		deliveredMessageIDs := make(map[uint]struct{}, len(matchDeliveries))
 		for _, delivery := range matchDeliveries {
 			message, ok := storedByIdentity[mailMessageIdentity(delivery.message)]
 			if !ok {
@@ -1359,9 +1381,13 @@ func (uc *UseCase) ingestFetchedMessagesForResourcesWithFence(
 			if message.MatchedOrderID == nil || *message.MatchedOrderID != delivery.scope.OrderID {
 				continue
 			}
+			if _, delivered := deliveredMessageIDs[message.ID]; delivered {
+				continue
+			}
 			if err := uc.saveOrderDelivery(txCtx, delivery.scope, message); err != nil {
 				return &mailIngestError{safe: "Mail delivery storage failed.", err: err}
 			}
+			deliveredMessageIDs[message.ID] = struct{}{}
 			delivery.message = message
 			storedDeliveries = append(storedDeliveries, delivery)
 		}
@@ -1376,19 +1402,24 @@ func (uc *UseCase) ingestFetchedMessagesForResourcesWithFence(
 		}
 	}
 	for _, delivery := range storedDeliveries {
-		// Notify from the immutable head, not from a later matching pull.
-		canonical, findErr := uc.repo.FindOrderDelivery(ctx, delivery.scope.OrderID)
-		if findErr != nil {
-			return stored, matched, lastReceivedAt, &mailIngestError{safe: "Mail delivery lookup failed.", err: findErr}
-		}
-		if canonical != nil {
-			delivery.message = domain.Message{ReceivedAt: canonical.ReceivedAt}
-			if canonical.Message != nil {
-				delivery.message = *canonical.Message
+		// Microsoft/domain orders have a single immutable delivery head. Gmail
+		// code sessions intentionally accept up to three distinct messages.
+		if delivery.scope.AllocationType != domain.ResourceTypeGmail {
+			canonical, findErr := uc.repo.FindOrderDelivery(ctx, delivery.scope.OrderID)
+			if findErr != nil {
+				return stored, matched, lastReceivedAt, &mailIngestError{safe: "Mail delivery lookup failed.", err: findErr}
+			}
+			if canonical != nil {
+				delivery.message = domain.Message{ReceivedAt: canonical.ReceivedAt}
+				if canonical.Message != nil {
+					delivery.message = *canonical.Message
+				}
 			}
 		}
 		result := MatchResult{
 			OrderNo:          delivery.scope.OrderNo,
+			ResourceType:     delivery.scope.AllocationType,
+			ServiceMode:      delivery.scope.ServiceMode,
 			VerificationCode: delivery.message.VerificationCode,
 			MatchedAt:        delivery.message.ReceivedAt,
 		}
@@ -1424,11 +1455,11 @@ func listUnprojectedMessages(
 	storedMessages []domain.Message,
 ) ([]domain.Message, error) {
 	resourceIDsByType := map[domain.ResourceType][]uint{}
-	if replayResourceType == domain.ResourceTypeMicrosoft || replayResourceType == domain.ResourceTypeDomain {
+	if replayResourceType == domain.ResourceTypeMicrosoft || replayResourceType == domain.ResourceTypeDomain || replayResourceType == domain.ResourceTypeGmail {
 		resourceIDsByType[replayResourceType] = append(resourceIDsByType[replayResourceType], replayResourceIDs...)
 	}
 	for _, message := range storedMessages {
-		if message.ResourceType != domain.ResourceTypeMicrosoft && message.ResourceType != domain.ResourceTypeDomain {
+		if message.ResourceType != domain.ResourceTypeMicrosoft && message.ResourceType != domain.ResourceTypeDomain && message.ResourceType != domain.ResourceTypeGmail {
 			continue
 		}
 		resourceIDsByType[message.ResourceType] = append(resourceIDsByType[message.ResourceType], message.EmailResourceID)
@@ -1436,7 +1467,7 @@ func listUnprojectedMessages(
 
 	limit := boundedRuntimeInt("projection_replay_limit", projectionReplayLimit, maxProjectionReplayLimit)
 	pending := make([]domain.Message, 0, limit)
-	for _, resourceType := range []domain.ResourceType{domain.ResourceTypeMicrosoft, domain.ResourceTypeDomain} {
+	for _, resourceType := range []domain.ResourceType{domain.ResourceTypeMicrosoft, domain.ResourceTypeDomain, domain.ResourceTypeGmail} {
 		resourceIDs := mergeResourceIDs(resourceIDsByType[resourceType], nil)
 		if len(resourceIDs) == 0 {
 			continue
@@ -1517,18 +1548,33 @@ func earliestOrderDeliveries(deliveries []matchedDelivery) []matchedDelivery {
 		return deliveries
 	}
 	earliestByOrder := make(map[uint]matchedDelivery, len(deliveries))
+	gmailDeliveries := make([]matchedDelivery, 0, len(deliveries))
 	for _, delivery := range deliveries {
+		if delivery.scope.AllocationType == domain.ResourceTypeGmail {
+			gmailDeliveries = append(gmailDeliveries, delivery)
+			continue
+		}
 		current, exists := earliestByOrder[delivery.scope.OrderID]
 		if !exists || deliveryPrecedes(delivery, current) {
 			earliestByOrder[delivery.scope.OrderID] = delivery
 		}
 	}
-	result := make([]matchedDelivery, 0, len(earliestByOrder))
+	result := make([]matchedDelivery, 0, len(earliestByOrder)+len(gmailDeliveries))
 	for _, delivery := range earliestByOrder {
 		result = append(result, delivery)
 	}
+	result = append(result, gmailDeliveries...)
 	sort.Slice(result, func(i, j int) bool {
-		return result[i].scope.OrderID < result[j].scope.OrderID
+		if result[i].scope.OrderID != result[j].scope.OrderID {
+			return result[i].scope.OrderID < result[j].scope.OrderID
+		}
+		if result[i].scope.AllocationType == domain.ResourceTypeGmail && result[j].scope.AllocationType == domain.ResourceTypeGmail {
+			if !result[i].message.ReceivedAt.Equal(result[j].message.ReceivedAt) {
+				return result[i].message.ReceivedAt.Before(result[j].message.ReceivedAt)
+			}
+			return result[i].message.DedupeKey < result[j].message.DedupeKey
+		}
+		return deliveryPrecedes(result[i], result[j])
 	})
 	return result
 }
@@ -1591,10 +1637,15 @@ func scopeReadUntil(scope OrderScope) *time.Time {
 }
 
 func scopeFetchable(scope OrderScope, now func() time.Time) bool {
-	if !scopeReadable(scope, now) {
+	if !pickupFetchSupported(scope) || !scopeReadable(scope, now) {
 		return false
 	}
 	return scope.AllocationID > 0 && scope.EmailResourceID > 0
+}
+
+func pickupFetchSupported(scope OrderScope) bool {
+	return scope.AllocationType == domain.ResourceTypeMicrosoft ||
+		scope.AllocationType == domain.ResourceTypeGmail && scope.ServiceMode == "purchase"
 }
 
 func (uc *UseCase) fetchedMessageToDomain(ctx context.Context, item FetchedMessage) (domain.Message, *OrderScope, extractionPriority, error) {
@@ -1756,17 +1807,24 @@ func inboundFetchedMessage(req InboundMailRequest) FetchedMessage {
 	}
 	body := string(req.Raw)
 	item := FetchedMessage{
-		EmailResourceID: req.EmailResourceID,
-		ResourceType:    req.ResourceType,
-		Recipient:       recipient,
-		Recipients:      []string{recipient},
-		Sender:          strings.TrimSpace(req.EnvelopeFrom),
-		Body:            body,
-		BodyPreview:     bodyPreview(body),
-		MessageIDHeader: hashParts("inbound-raw", recipient, fmt.Sprintf("%d", receivedAt.UnixNano()), body),
-		Protocol:        "smtp",
-		Folder:          "inbound",
-		ReceivedAt:      receivedAt.UTC(),
+		EmailResourceID:   req.EmailResourceID,
+		ResourceType:      req.ResourceType,
+		Recipient:         recipient,
+		Recipients:        []string{recipient},
+		Sender:            strings.TrimSpace(req.EnvelopeFrom),
+		Body:              body,
+		BodyPreview:       bodyPreview(body),
+		MessageIDHeader:   hashParts("inbound-raw", recipient, fmt.Sprintf("%d", receivedAt.UnixNano()), body),
+		ProviderMessageID: strings.TrimSpace(req.ProviderMessageID),
+		Protocol:          strings.TrimSpace(req.Protocol),
+		Folder:            strings.TrimSpace(req.Folder),
+		ReceivedAt:        receivedAt.UTC(),
+	}
+	if item.Protocol == "" {
+		item.Protocol = "smtp"
+	}
+	if item.Folder == "" {
+		item.Folder = "inbound"
 	}
 	msg, err := stdmail.ReadMessage(bytes.NewReader(req.Raw))
 	if err != nil {
@@ -1779,12 +1837,16 @@ func inboundFetchedMessage(req InboundMailRequest) FetchedMessage {
 	if from := decodeMIMEHeader(decoder, msg.Header.Get("From")); from != "" {
 		item.Sender = from
 	}
-	item.Recipients = normalizeRecipientCandidates(append(item.Recipients, mailAddressCandidates(msg.Header.Get("To"))...))
-	item.Recipients = normalizeRecipientCandidates(append(item.Recipients, mailAddressCandidates(msg.Header.Get("Cc"))...))
+	if req.ResourceType != domain.ResourceTypeGmail || recipient == "" {
+		item.Recipients = normalizeRecipientCandidates(append(item.Recipients, mailAddressCandidates(msg.Header.Get("To"))...))
+		item.Recipients = normalizeRecipientCandidates(append(item.Recipients, mailAddressCandidates(msg.Header.Get("Cc"))...))
+	}
 	if messageID := strings.Trim(strings.TrimSpace(msg.Header.Get("Message-Id")), "<>"); messageID != "" {
 		item.MessageIDHeader = messageID
 	}
-	if date, err := stdmail.ParseDate(msg.Header.Get("Date")); err == nil {
+	// A transport-provided timestamp (SMTP receipt or IMAP INTERNALDATE) is
+	// authoritative; message headers are sender controlled.
+	if date, err := stdmail.ParseDate(msg.Header.Get("Date")); req.ReceivedAt.IsZero() && err == nil {
 		item.ReceivedAt = date.UTC()
 	}
 	if parsedBody, bodyErr := readMIMEBody(msg.Header.Get("Content-Type"), msg.Header.Get("Content-Transfer-Encoding"), msg.Body); bodyErr == nil {
@@ -1940,6 +2002,48 @@ func matchRecipientPatterns(patterns []string, message FetchedMessage, scope Ord
 		case "exact", "dot", "plus":
 			allowed[pattern] = true
 		}
+	}
+	if message.ResourceType == domain.ResourceTypeGmail {
+		recipient, recipientPlus, recipientDots, ok := domain.RecipientAliasForms(message.Recipient)
+		if !ok {
+			return false
+		}
+		recipientLocal, recipientHost, _ := strings.Cut(recipient, "@")
+		recipientPlusLocal, _, _ := strings.Cut(recipientPlus, "@")
+		recipientDotsLocal, _, _ := strings.Cut(recipientDots, "@")
+		if recipientHost != "gmail.com" && recipientHost != "googlemail.com" {
+			return false
+		}
+		recipient = recipientLocal + "@gmail.com"
+		recipientPlus = recipientPlusLocal + "@gmail.com"
+		recipientDots = recipientDotsLocal + "@gmail.com"
+
+		target, targetPlus, targetDots, ok := domain.RecipientAliasForms(scope.Recipient)
+		if !ok {
+			return false
+		}
+		targetLocal, targetHost, _ := strings.Cut(target, "@")
+		targetPlusLocal, _, _ := strings.Cut(targetPlus, "@")
+		targetDotsLocal, _, _ := strings.Cut(targetDots, "@")
+		if targetHost != "gmail.com" && targetHost != "googlemail.com" {
+			return false
+		}
+		target = targetLocal + "@gmail.com"
+		targetPlus = targetPlusLocal + "@gmail.com"
+		targetDots = targetDotsLocal + "@gmail.com"
+
+		if recipient == target {
+			return allowed[recipientKind(scope)]
+		}
+		if recipientDots != targetDots {
+			return false
+		}
+		requiresPlus := recipient != recipientPlus
+		requiresDot := recipientPlus != targetPlus
+		if !requiresPlus && !requiresDot {
+			return false
+		}
+		return (!requiresPlus || allowed["plus"]) && (!requiresDot || allowed["dot"])
 	}
 	recipient, recipientPlus, recipientDots, ok := domain.RecipientAliasForms(message.Recipient)
 	if !ok {
@@ -2192,6 +2296,16 @@ func decodeTransferReader(body io.Reader, transferEncoding string) io.Reader {
 }
 
 func messageDedupeKey(item FetchedMessage) string {
+	if item.ResourceType == domain.ResourceTypeGmail {
+		if providerMessageID := strings.ToLower(strings.TrimSpace(item.ProviderMessageID)); providerMessageID != "" {
+			return hashParts(
+				"provider",
+				strings.ToLower(strings.TrimSpace(item.Protocol)),
+				strings.ToLower(strings.TrimSpace(item.Folder)),
+				providerMessageID,
+			)
+		}
+	}
 	if messageID := strings.ToLower(strings.Trim(strings.TrimSpace(item.MessageIDHeader), "<>")); messageID != "" {
 		return hashParts("message-id", messageID)
 	}

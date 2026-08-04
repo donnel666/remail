@@ -18,8 +18,9 @@ import (
 
 type matchingRepoStub struct {
 	Repository
-	scopes           []OrderScope
-	purchaseDelivery *domain.Message
+	scopes               []OrderScope
+	matchedResourceTypes []domain.ResourceType
+	purchaseDelivery     *domain.Message
 }
 
 type appendFenceRepoStub struct {
@@ -110,7 +111,8 @@ func (r *appendFenceRepoStub) InsertMessageProjections(_ context.Context, messag
 	return projected, newlyMatched, nil
 }
 
-func (r *matchingRepoStub) ListMatchingScopesByRecipient(context.Context, domain.ResourceType, uint, string, time.Time) ([]OrderScope, error) {
+func (r *matchingRepoStub) ListMatchingScopesByRecipient(_ context.Context, resourceType domain.ResourceType, _ uint, _ string, _ time.Time) ([]OrderScope, error) {
+	r.matchedResourceTypes = append(r.matchedResourceTypes, resourceType)
 	return r.scopes, nil
 }
 
@@ -332,6 +334,133 @@ func TestAppendOnlyIngestCountsOnlyNewFactsAndMatches(t *testing.T) {
 	require.Zero(t, stored)
 	require.Zero(t, matched)
 	require.Len(t, matches.results, 2, "the idempotent Trade notification must be replayed after its first post-commit attempt could have failed")
+}
+
+func TestGmailInboundUsesItsOwnResourceType(t *testing.T) {
+	now := time.Date(2026, 8, 3, 10, 0, 0, 0, time.UTC)
+	repo := &matchingRepoStub{scopes: []OrderScope{{
+		OrderID: 51, OrderNo: "OR_GMAIL_INBOUND", AllocationType: domain.ResourceTypeGmail,
+		EmailResourceID: 7, Recipient: "gmail@gmail.com", RecipientKind: "exact",
+		ServiceMode: "code", OrderStatus: "active", LooseMatch: true,
+		Rules: []MailRule{
+			{Type: MailRuleRecipient, Pattern: "exact", Enabled: true},
+			{Type: MailRuleSender, Pattern: `sender@example\.net`, Enabled: true},
+			{Type: MailRuleBody, Pattern: `code:\s*(\d{6})`, Enabled: true},
+		},
+	}}}
+	matches := &matchResultStub{}
+	uc := NewUseCase(repo, nil, nil, matches)
+
+	err := uc.IngestInboundMail(context.Background(), InboundMailRequest{
+		EmailResourceID: 7,
+		ResourceType:    domain.ResourceTypeGmail,
+		Recipient:       "gmail@gmail.com",
+		EnvelopeFrom:    "sender@example.net",
+		Raw:             []byte("From: sender@example.net\r\nTo: gmail@gmail.com\r\n\r\ncode: 123456"),
+		ReceivedAt:      now,
+	})
+
+	require.NoError(t, err)
+	require.NotEmpty(t, repo.matchedResourceTypes)
+	for _, resourceType := range repo.matchedResourceTypes {
+		require.Equal(t, domain.ResourceTypeGmail, resourceType)
+	}
+	require.Len(t, matches.results, 1)
+	require.Equal(t, domain.ResourceTypeGmail, matches.results[0].ResourceType)
+	require.Equal(t, "code", matches.results[0].ServiceMode)
+	require.Equal(t, "123456", matches.results[0].VerificationCode)
+}
+
+func TestGmailAppendOnlyReplaysAllMatchesForTheSessionInvariant(t *testing.T) {
+	base := time.Date(2026, 8, 3, 10, 0, 0, 0, time.UTC)
+	repo := &appendFenceRepoStub{matchingRepoStub: &matchingRepoStub{
+		scopes: []OrderScope{{
+			OrderID: 52, OrderNo: "OR_GMAIL_THREE", AllocationType: domain.ResourceTypeGmail,
+			EmailResourceID: 8, Recipient: "gmail@gmail.com", RecipientKind: "exact",
+			ServiceMode: "code", OrderStatus: "active", LooseMatch: true,
+			Rules: []MailRule{
+				{Type: MailRuleRecipient, Pattern: "exact", Enabled: true},
+				{Type: MailRuleSender, Pattern: `sender@example\.net`, Enabled: true},
+				{Type: MailRuleBody, Pattern: `code:\s*(\d{6})`, Enabled: true},
+			},
+		}},
+	}}
+	matches := &matchResultStub{}
+	uc := NewUseCase(repo, nil, nil, matches)
+	fetched := make([]FetchedMessage, 4)
+	for i := range fetched {
+		sequence := 4 - i
+		fetched[i] = FetchedMessage{
+			EmailResourceID:   8,
+			ResourceType:      domain.ResourceTypeGmail,
+			Recipient:         "gmail@gmail.com",
+			Sender:            "sender@example.net",
+			Body:              fmt.Sprintf("code: %06d", sequence),
+			ProviderMessageID: fmt.Sprintf("gmail-%d", sequence),
+			Protocol:          "imap",
+			ReceivedAt:        base.Add(time.Duration(sequence) * time.Minute),
+		}
+	}
+
+	stored, matched, _, err := uc.ingestFetchedMessages(context.Background(), fetched)
+
+	require.NoError(t, err)
+	require.Equal(t, 4, stored)
+	require.Equal(t, 4, matched)
+	require.Len(t, matches.results, 4)
+	require.Equal(t, []string{"000001", "000002", "000003", "000004"}, []string{
+		matches.results[0].VerificationCode,
+		matches.results[1].VerificationCode,
+		matches.results[2].VerificationCode,
+		matches.results[3].VerificationCode,
+	})
+	for _, result := range matches.results {
+		require.Equal(t, domain.ResourceTypeGmail, result.ResourceType)
+	}
+
+	stored, matched, _, err = uc.ingestFetchedMessages(context.Background(), fetched)
+	require.NoError(t, err)
+	require.Zero(t, stored)
+	require.Zero(t, matched)
+	require.Len(t, matches.results, 8, "Gmail callbacks are replayed so a post-projection failure cannot lose a code")
+	require.Equal(t, []string{"000001", "000002", "000003", "000004"}, []string{
+		matches.results[4].VerificationCode,
+		matches.results[5].VerificationCode,
+		matches.results[6].VerificationCode,
+		matches.results[7].VerificationCode,
+	})
+}
+
+func TestGmailCodeSkipsOrdinaryMailAndContinuesToLaterCode(t *testing.T) {
+	base := time.Date(2026, 8, 3, 10, 0, 0, 0, time.UTC)
+	repo := &matchingRepoStub{scopes: []OrderScope{{
+		OrderID: 53, OrderNo: "OR_GMAIL_LATER", AllocationType: domain.ResourceTypeGmail,
+		EmailResourceID: 9, Recipient: "gmail@gmail.com", RecipientKind: "exact",
+		ServiceMode: "code", OrderStatus: "active", LooseMatch: true,
+		Rules: []MailRule{
+			{Type: MailRuleRecipient, Pattern: "exact", Enabled: true},
+			{Type: MailRuleSender, Pattern: `sender@example\.net`, Enabled: true},
+		},
+	}}}
+	matches := &matchResultStub{}
+	uc := NewUseCase(repo, nil, nil, matches)
+
+	_, _, _, err := uc.ingestFetchedMessages(context.Background(), []FetchedMessage{
+		{
+			EmailResourceID: 9, ResourceType: domain.ResourceTypeGmail,
+			Recipient: "gmail@gmail.com", Sender: "sender@example.net",
+			Body: "Welcome to the service.", ProviderMessageID: "ordinary", Protocol: "imap", ReceivedAt: base,
+		},
+		{
+			EmailResourceID: 9, ResourceType: domain.ResourceTypeGmail,
+			Recipient: "gmail@gmail.com", Sender: "sender@example.net",
+			Body: "Your code is 123456.", ProviderMessageID: "code", Protocol: "imap", ReceivedAt: base.Add(time.Minute),
+		},
+	})
+
+	require.NoError(t, err)
+	require.Len(t, matches.results, 1)
+	require.Equal(t, "123456", matches.results[0].VerificationCode)
 }
 
 func TestMergePickupMessagesKeepsNewestThirty(t *testing.T) {
@@ -869,6 +998,31 @@ func TestSchedulePickupRequestKeepsAllOrdersForSharedResource(t *testing.T) {
 	require.Equal(t, []string{"ORDER-B", "ORDER-A"}, requests[0].Scopes[0].OrderNos)
 }
 
+func TestSchedulePickupRequestUsesGmailPurchaseButNotCode(t *testing.T) {
+	now := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
+	queue := &pickupBatchQueueStub{}
+	uc := NewUseCase(nil, queue, nil, nil)
+	uc.now = func() time.Time { return now }
+	scope := func(orderNo, mode string, resourceID uint) OrderScope {
+		return OrderScope{
+			OrderNo: orderNo, OrderStatus: "active", ServiceMode: mode,
+			AllocationType: domain.ResourceTypeGmail, AllocationID: resourceID,
+			EmailResourceID: resourceID, Recipient: "user@gmail.com",
+		}
+	}
+
+	uc.scheduleScopeFetches(context.Background(), []OrderScope{
+		scope("GMAIL-PURCHASE", "purchase", 31),
+		scope("GMAIL-CODE", "code", 32),
+	})
+
+	requests := queue.snapshot()
+	require.Len(t, requests, 1)
+	require.Equal(t, []PickupRequestFetchScope{{
+		OrderNo: "GMAIL-PURCHASE", OrderNos: []string{"GMAIL-PURCHASE"}, EmailResourceID: 31,
+	}}, requests[0].Scopes)
+}
+
 func TestListPickupMailBatchKeepsValidFallbackOrderForSharedResource(t *testing.T) {
 	now := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
 	scope := func(orderNo, recipient string) *OrderScope {
@@ -1024,6 +1178,27 @@ func TestRecipientRulesNormalizePlusAndDotAliases(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGmailRecipientRulesNormalizeGooglemailDotAndPlusAliases(t *testing.T) {
+	matched, code, _ := matchAndExtract(FetchedMessage{
+		ResourceType: domain.ResourceTypeGmail,
+		Recipient:    "first.name+tag@googlemail.com",
+		Sender:       "sender@example.net",
+		Body:         "Code: 654321",
+	}, OrderScope{
+		Recipient:     "firstname@gmail.com",
+		RecipientKind: "exact",
+		LooseMatch:    true,
+		Rules: []MailRule{
+			{Type: MailRuleRecipient, Pattern: "dot", Enabled: true},
+			{Type: MailRuleRecipient, Pattern: "plus", Enabled: true},
+			{Type: MailRuleSender, Pattern: `sender@example\.net`, Enabled: true},
+		},
+	})
+
+	require.True(t, matched)
+	require.Equal(t, "654321", code)
 }
 
 func TestRecipientBuiltInStrategyMustMatchAllocationKind(t *testing.T) {
@@ -1259,6 +1434,16 @@ func TestInboundFetchedMessagePreservesPreferredHTMLPart(t *testing.T) {
 	require.Equal(t, htmlBody, message.Body)
 }
 
+func TestInboundFetchedMessageKeepsTransportReceivedAt(t *testing.T) {
+	receivedAt := time.Date(2026, 8, 3, 10, 0, 0, 0, time.UTC)
+	message := inboundFetchedMessage(InboundMailRequest{
+		ResourceType: domain.ResourceTypeGmail, Recipient: "user@gmail.com", ReceivedAt: receivedAt,
+		Raw: []byte("Date: Tue, 01 Jan 2030 00:00:00 +0000\r\n\r\ncode 123456"),
+	})
+
+	require.Equal(t, receivedAt, message.ReceivedAt)
+}
+
 func TestInboundFetchedMessagePrefersHTMLAcrossNestedMultiparts(t *testing.T) {
 	htmlBody := `<a href="https://example.com/verify?token=nested">Nested HTML</a>`
 	raw := strings.Join([]string{
@@ -1388,6 +1573,19 @@ func TestMessageDedupeKeyMatchesAcrossProvidersWithoutMessageID(t *testing.T) {
 	differentLink := graph
 	differentLink.Body = `<p>Your code is <a href="https://example.com/other">123456</a></p>`
 	require.NotEqual(t, messageDedupeKey(graph), messageDedupeKey(differentLink))
+}
+
+func TestGmailMessageDedupeUsesIMAPUID(t *testing.T) {
+	message := FetchedMessage{
+		ResourceType: domain.ResourceTypeGmail, MessageIDHeader: "same@example.net",
+		ProviderMessageID: "101", Protocol: "imap", Folder: "INBOX",
+		Recipient: "user@gmail.com", Body: "code 123456", ReceivedAt: time.Now().UTC(),
+	}
+	otherUID := message
+	otherUID.ProviderMessageID = "102"
+
+	require.NotEqual(t, messageDedupeKey(message), messageDedupeKey(otherUID))
+	require.Equal(t, messageDedupeKey(message), messageDedupeKey(message))
 }
 
 func TestHistoricalMessageMatchesProjectWithoutVerificationCode(t *testing.T) {

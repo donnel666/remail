@@ -351,6 +351,64 @@ func TestProjectUseCaseRandomProductSchedulesMicrosoftHistoryScan(t *testing.T) 
 	require.Equal(t, 1, detail.Products[2].PlusWeight)
 }
 
+func TestProjectUseCaseGmailHistoryScanRunsAfterCreateButNotUpdate(t *testing.T) {
+	repo := &fakeProjectRepo{}
+	uc := NewProjectUseCase(repo)
+	scans := 0
+	uc.SetGmailHistoryScan(func(_ context.Context, projectID uint, requestID string) error {
+		scans++
+		require.Equal(t, uint(101), projectID)
+		require.Equal(t, "req-gmail-create", requestID)
+		return nil
+	})
+	req := validProjectCreateRequest()
+	req.Products[0].Type = "gmail"
+
+	created, err := uc.AdminCreateListed(context.Background(), 9, req, "req-gmail-create", "/v1/admin/projects")
+	require.NoError(t, err)
+	require.Equal(t, 1, scans)
+
+	_, err = uc.AdminUpdate(context.Background(), 9, created.Project.ID, req, "req-gmail-update", "/v1/admin/projects/:projectId")
+	require.NoError(t, err)
+	require.Equal(t, 1, scans)
+}
+
+func TestProjectUseCaseGmailHistoryScanRunsAfterApprove(t *testing.T) {
+	detail := validProjectDetailForUseCase()
+	detail.Products[0].Type = domain.ProductTypeGmail
+	uc := NewProjectUseCase(&fakeProjectRepo{detail: detail})
+	scans := 0
+	uc.SetGmailHistoryScan(func(_ context.Context, projectID uint, requestID string) error {
+		scans++
+		require.Equal(t, uint(55), projectID)
+		require.Equal(t, "req-gmail-approve", requestID)
+		return nil
+	})
+
+	_, err := uc.AdminApprove(context.Background(), 9, 55, "req-gmail-approve", "/v1/admin/projects/:projectId/approve")
+
+	require.NoError(t, err)
+	require.Equal(t, 1, scans)
+}
+
+func TestProjectUseCaseGmailHistoryScanRunsAfterApproveWithConfig(t *testing.T) {
+	uc := NewProjectUseCase(&fakeProjectRepo{})
+	scans := 0
+	uc.SetGmailHistoryScan(func(_ context.Context, projectID uint, requestID string) error {
+		scans++
+		require.Equal(t, uint(55), projectID)
+		require.Equal(t, "req-gmail-approve-config", requestID)
+		return nil
+	})
+	req := validProjectCreateRequest()
+	req.Products[0].Type = "gmail"
+
+	_, err := uc.AdminApproveWithConfig(context.Background(), 9, 55, req, "req-gmail-approve-config", "/v1/admin/projects/:projectId/approve")
+
+	require.NoError(t, err)
+	require.Equal(t, 1, scans)
+}
+
 func TestProjectUseCaseRejectsRandomProductWithoutBothPriceSources(t *testing.T) {
 	uc := NewProjectUseCase(&fakeProjectRepo{})
 	req := validProjectCreateRequest()

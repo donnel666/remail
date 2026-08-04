@@ -444,14 +444,12 @@ func (e AdminGmailImportResponseStatus) Valid() bool {
 
 // Defines values for AdminGmailResourceStatus.
 const (
-	AdminGmailResourceStatusAbnormal   AdminGmailResourceStatus = "abnormal"
-	AdminGmailResourceStatusAvailable  AdminGmailResourceStatus = "available"
-	AdminGmailResourceStatusDisabled   AdminGmailResourceStatus = "disabled"
-	AdminGmailResourceStatusLeased     AdminGmailResourceStatus = "leased"
-	AdminGmailResourceStatusNormal     AdminGmailResourceStatus = "normal"
-	AdminGmailResourceStatusPending    AdminGmailResourceStatus = "pending"
-	AdminGmailResourceStatusSold       AdminGmailResourceStatus = "sold"
-	AdminGmailResourceStatusValidating AdminGmailResourceStatus = "validating"
+	AdminGmailResourceStatusAbnormal    AdminGmailResourceStatus = "abnormal"
+	AdminGmailResourceStatusDisabled    AdminGmailResourceStatus = "disabled"
+	AdminGmailResourceStatusIdentifying AdminGmailResourceStatus = "identifying"
+	AdminGmailResourceStatusNormal      AdminGmailResourceStatus = "normal"
+	AdminGmailResourceStatusPending     AdminGmailResourceStatus = "pending"
+	AdminGmailResourceStatusValidating  AdminGmailResourceStatus = "validating"
 )
 
 // Valid indicates whether the value is a known member of the AdminGmailResourceStatus enum.
@@ -459,19 +457,36 @@ func (e AdminGmailResourceStatus) Valid() bool {
 	switch e {
 	case AdminGmailResourceStatusAbnormal:
 		return true
-	case AdminGmailResourceStatusAvailable:
-		return true
 	case AdminGmailResourceStatusDisabled:
 		return true
-	case AdminGmailResourceStatusLeased:
+	case AdminGmailResourceStatusIdentifying:
 		return true
 	case AdminGmailResourceStatusNormal:
 		return true
 	case AdminGmailResourceStatusPending:
 		return true
-	case AdminGmailResourceStatusSold:
-		return true
 	case AdminGmailResourceStatusValidating:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminGmailValidationBatchStatus.
+const (
+	AdminGmailValidationBatchStatusCompleted  AdminGmailValidationBatchStatus = "completed"
+	AdminGmailValidationBatchStatusProcessing AdminGmailValidationBatchStatus = "processing"
+	AdminGmailValidationBatchStatusQueued     AdminGmailValidationBatchStatus = "queued"
+)
+
+// Valid indicates whether the value is a known member of the AdminGmailValidationBatchStatus enum.
+func (e AdminGmailValidationBatchStatus) Valid() bool {
+	switch e {
+	case AdminGmailValidationBatchStatusCompleted:
+		return true
+	case AdminGmailValidationBatchStatusProcessing:
+		return true
+	case AdminGmailValidationBatchStatusQueued:
 		return true
 	default:
 		return false
@@ -1585,54 +1600,6 @@ func (e GmailUpstreamActivationItemStatus) Valid() bool {
 	case GmailUpstreamActivationItemStatusProvisioning:
 		return true
 	case GmailUpstreamActivationItemStatusUnknown:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for GmailUpstreamUnsafeReason.
-const (
-	InsufficientUpstreamBalance GmailUpstreamUnsafeReason = "insufficient_upstream_balance"
-	InvalidPrice                GmailUpstreamUnsafeReason = "invalid_price"
-	LocalSupplyNotConfigured    GmailUpstreamUnsafeReason = "local_supply_not_configured"
-	MarginBelowFloor            GmailUpstreamUnsafeReason = "margin_below_floor"
-	ModeDisabled                GmailUpstreamUnsafeReason = "mode_disabled"
-	OutOfStock                  GmailUpstreamUnsafeReason = "out_of_stock"
-	ProductMissing              GmailUpstreamUnsafeReason = "product_missing"
-	ProviderModeUnsupported     GmailUpstreamUnsafeReason = "provider_mode_unsupported"
-	QuoteStale                  GmailUpstreamUnsafeReason = "quote_stale"
-	RouteDisabled               GmailUpstreamUnsafeReason = "route_disabled"
-	RouteMissing                GmailUpstreamUnsafeReason = "route_missing"
-	ServiceInactive             GmailUpstreamUnsafeReason = "service_inactive"
-)
-
-// Valid indicates whether the value is a known member of the GmailUpstreamUnsafeReason enum.
-func (e GmailUpstreamUnsafeReason) Valid() bool {
-	switch e {
-	case InsufficientUpstreamBalance:
-		return true
-	case InvalidPrice:
-		return true
-	case LocalSupplyNotConfigured:
-		return true
-	case MarginBelowFloor:
-		return true
-	case ModeDisabled:
-		return true
-	case OutOfStock:
-		return true
-	case ProductMissing:
-		return true
-	case ProviderModeUnsupported:
-		return true
-	case QuoteStale:
-		return true
-	case RouteDisabled:
-		return true
-	case RouteMissing:
-		return true
-	case ServiceInactive:
 		return true
 	default:
 		return false
@@ -3960,25 +3927,25 @@ func (e GetRechargesParamsScope) Valid() bool {
 
 // Defines values for GetRechargesParamsStatus.
 const (
-	Callback   GetRechargesParamsStatus = "callback"
-	Credited   GetRechargesParamsStatus = "credited"
-	Failed     GetRechargesParamsStatus = "failed"
-	Paying     GetRechargesParamsStatus = "paying"
-	Reconciled GetRechargesParamsStatus = "reconciled"
+	GetRechargesParamsStatusCallback   GetRechargesParamsStatus = "callback"
+	GetRechargesParamsStatusCredited   GetRechargesParamsStatus = "credited"
+	GetRechargesParamsStatusFailed     GetRechargesParamsStatus = "failed"
+	GetRechargesParamsStatusPaying     GetRechargesParamsStatus = "paying"
+	GetRechargesParamsStatusReconciled GetRechargesParamsStatus = "reconciled"
 )
 
 // Valid indicates whether the value is a known member of the GetRechargesParamsStatus enum.
 func (e GetRechargesParamsStatus) Valid() bool {
 	switch e {
-	case Callback:
+	case GetRechargesParamsStatusCallback:
 		return true
-	case Credited:
+	case GetRechargesParamsStatusCredited:
 		return true
-	case Failed:
+	case GetRechargesParamsStatusFailed:
 		return true
-	case Paying:
+	case GetRechargesParamsStatusPaying:
 		return true
-	case Reconciled:
+	case GetRechargesParamsStatusReconciled:
 		return true
 	default:
 		return false
@@ -4682,29 +4649,33 @@ type AdminGmailImportResponseStatus string
 
 // AdminGmailResourceFacets defines model for AdminGmailResourceFacets.
 type AdminGmailResourceFacets struct {
-	Abnormal   int64 `json:"abnormal"`
-	All        int64 `json:"all"`
-	Available  int64 `json:"available"`
-	Disabled   int64 `json:"disabled"`
-	Leased     int64 `json:"leased"`
-	Normal     int64 `json:"normal"`
-	Pending    int64 `json:"pending"`
-	Sold       int64 `json:"sold"`
-	Validating int64 `json:"validating"`
+	Abnormal    int64 `json:"abnormal"`
+	All         int64 `json:"all"`
+	Disabled    int64 `json:"disabled"`
+	Identifying int64 `json:"identifying"`
+	Normal      int64 `json:"normal"`
+	Pending     int64 `json:"pending"`
+	Validating  int64 `json:"validating"`
 }
 
 // AdminGmailResourceItem defines model for AdminGmailResourceItem.
 type AdminGmailResourceItem struct {
 	AppPasswordConfigured bool                     `json:"appPasswordConfigured"`
 	CreatedAt             time.Time                `json:"createdAt"`
+	CredentialRevision    int64                    `json:"credentialRevision"`
 	Email                 openapi_types.Email      `json:"email"`
+	ForSale               bool                     `json:"forSale"`
 	Id                    int                      `json:"id"`
+	LastAllocatedAt       *time.Time               `json:"lastAllocatedAt,omitempty"`
 	LastCheckedAt         *time.Time               `json:"lastCheckedAt,omitempty"`
 	LastSafeError         *string                  `json:"lastSafeError,omitempty"`
+	OwnerUserId           int                      `json:"ownerUserId"`
 	PasswordConfigured    bool                     `json:"passwordConfigured"`
 	Status                AdminGmailResourceStatus `json:"status"`
 	TwoFactorConfigured   bool                     `json:"twoFactorConfigured"`
 	UpdatedAt             time.Time                `json:"updatedAt"`
+	ValidationFailures    int                      `json:"validationFailures"`
+	Version               int64                    `json:"version"`
 }
 
 // AdminGmailResourceList defines model for AdminGmailResourceList.
@@ -4718,6 +4689,34 @@ type AdminGmailResourceList struct {
 
 // AdminGmailResourceStatus defines model for AdminGmailResourceStatus.
 type AdminGmailResourceStatus string
+
+// AdminGmailValidationAccepted defines model for AdminGmailValidationAccepted.
+type AdminGmailValidationAccepted struct {
+	Queued    int  `json:"queued"`
+	Requested int  `json:"requested"`
+	Reused    bool `json:"reused"`
+}
+
+// AdminGmailValidationBatch defines model for AdminGmailValidationBatch.
+type AdminGmailValidationBatch struct {
+	BatchId   string                          `json:"batchId"`
+	CreatedAt time.Time                       `json:"createdAt"`
+	Processed int                             `json:"processed"`
+	Queued    int                             `json:"queued"`
+	Requested int                             `json:"requested"`
+	Reused    *bool                           `json:"reused,omitempty"`
+	Skipped   int                             `json:"skipped"`
+	Status    AdminGmailValidationBatchStatus `json:"status"`
+	UpdatedAt time.Time                       `json:"updatedAt"`
+}
+
+// AdminGmailValidationBatchStatus defines model for AdminGmailValidationBatch.Status.
+type AdminGmailValidationBatchStatus string
+
+// AdminGmailValidationBatchRequest defines model for AdminGmailValidationBatchRequest.
+type AdminGmailValidationBatchRequest struct {
+	ResourceIds []int `json:"resourceIds"`
+}
 
 // AdminInviteBulkRequest defines model for AdminInviteBulkRequest.
 type AdminInviteBulkRequest struct {
@@ -6370,40 +6369,18 @@ type GmailUpstreamFinanceReport struct {
 
 // GmailUpstreamMappingItem defines model for GmailUpstreamMappingItem.
 type GmailUpstreamMappingItem struct {
-	CodeEnabled bool `json:"codeEnabled"`
-
-	// CodeMarginRate Signed point amount with up to 6 decimal places.
-	CodeMarginRate LedgerAmountResponse `json:"codeMarginRate"`
-
 	// CodePrice Non-negative point amount with up to 6 decimal places.
-	CodePrice        NonNegativeLedgerAmountResponse `json:"codePrice"`
-	CodeSafe         bool                            `json:"codeSafe"`
-	CodeUnsafeReason *GmailUpstreamUnsafeReason      `json:"codeUnsafeReason,omitempty"`
+	CodePrice NonNegativeLedgerAmountResponse `json:"codePrice"`
 
 	// CostPoints Non-negative point amount with up to 6 decimal places.
-	CostPoints NonNegativeLedgerAmountResponse `json:"costPoints"`
-	Enabled    bool                            `json:"enabled"`
-
-	// MinimumCodeSalePrice Non-negative point amount with up to 6 decimal places.
-	MinimumCodeSalePrice NonNegativeLedgerAmountResponse `json:"minimumCodeSalePrice"`
-
-	// MinimumPurchaseSalePrice Non-negative point amount with up to 6 decimal places.
-	MinimumPurchaseSalePrice NonNegativeLedgerAmountResponse `json:"minimumPurchaseSalePrice"`
-	ProductId                int                             `json:"productId"`
-	ProjectId                int                             `json:"projectId"`
-	ProjectName              string                          `json:"projectName"`
-	ProviderServiceCode      *string                         `json:"providerServiceCode,omitempty"`
-	ProviderServiceName      *string                         `json:"providerServiceName,omitempty"`
-	PurchaseEnabled          bool                            `json:"purchaseEnabled"`
-
-	// PurchaseMarginRate Signed point amount with up to 6 decimal places.
-	PurchaseMarginRate LedgerAmountResponse `json:"purchaseMarginRate"`
+	CostPoints          NonNegativeLedgerAmountResponse `json:"costPoints"`
+	ProjectId           int                             `json:"projectId"`
+	ProjectName         string                          `json:"projectName"`
+	ProviderServiceCode string                          `json:"providerServiceCode"`
+	ProviderServiceName *string                         `json:"providerServiceName,omitempty"`
 
 	// PurchasePrice Non-negative point amount with up to 6 decimal places.
-	PurchasePrice        NonNegativeLedgerAmountResponse `json:"purchasePrice"`
-	PurchaseSafe         bool                            `json:"purchaseSafe"`
-	PurchaseUnsafeReason *GmailUpstreamUnsafeReason      `json:"purchaseUnsafeReason,omitempty"`
-	Source               *string                         `json:"source,omitempty"`
+	PurchasePrice NonNegativeLedgerAmountResponse `json:"purchasePrice"`
 
 	// UpstreamPrice Non-negative point amount with up to 6 decimal places.
 	UpstreamPrice NonNegativeLedgerAmountResponse `json:"upstreamPrice"`
@@ -6416,22 +6393,9 @@ type GmailUpstreamMappingList struct {
 
 // GmailUpstreamMappingRequest defines model for GmailUpstreamMappingRequest.
 type GmailUpstreamMappingRequest struct {
-	// CodeEnabled Whether this route participates in Gmail verification-code fulfillment.
-	CodeEnabled bool `json:"codeEnabled"`
-	Enabled     bool `json:"enabled"`
-
-	// ProviderServiceCode Empty for local supply and required for external providers.
-	ProviderServiceCode *string `json:"providerServiceCode,omitempty"`
-
-	// PurchaseEnabled Whether this route participates in Gmail purchase fulfillment.
-	PurchaseEnabled bool `json:"purchaseEnabled"`
-
-	// Source Stable provider key; use local for the built-in Gmail resource pool.
-	Source string `json:"source"`
+	// ProviderServiceCode SMSBower service code synchronized from the upstream catalog.
+	ProviderServiceCode string `json:"providerServiceCode"`
 }
-
-// GmailUpstreamUnsafeReason defines model for GmailUpstreamUnsafeReason.
-type GmailUpstreamUnsafeReason string
 
 // GrantProjectAccessRequest defines model for GrantProjectAccessRequest.
 type GrantProjectAccessRequest struct {
@@ -6940,7 +6904,7 @@ type OrderResponse struct {
 	Codes          *[]GmailCodeResponse         `json:"codes,omitempty"`
 	CodesExpireAt  *time.Time                   `json:"codesExpireAt,omitempty"`
 
-	// ContentMode Gmail upstream orders expose verification codes only and never synthesize mail content.
+	// ContentMode Gmail code-mode orders expose verification codes only and never synthesize mail content.
 	ContentMode   *OrderResponseContentMode `json:"contentMode,omitempty"`
 	CreatedAt     time.Time                 `json:"createdAt"`
 	DeliveryEmail string                    `json:"deliveryEmail"`
@@ -7004,7 +6968,7 @@ type OrderResponseAllocationType string
 // OrderResponseClientChannel defines model for OrderResponse.ClientChannel.
 type OrderResponseClientChannel string
 
-// OrderResponseContentMode Gmail upstream orders expose verification codes only and never synthesize mail content.
+// OrderResponseContentMode Gmail code-mode orders expose verification codes only and never synthesize mail content.
 type OrderResponseContentMode string
 
 // OrderResponseFailureCode defines model for OrderResponse.FailureCode.
@@ -8706,16 +8670,70 @@ type PostAdminGmailResourceImportParams struct {
 // PostAdminGmailResourceImportMultipartBodyErrorStrategy defines parameters for PostAdminGmailResourceImport.
 type PostAdminGmailResourceImportMultipartBodyErrorStrategy string
 
-// PostAdminGmailResourceDisableParams defines parameters for PostAdminGmailResourceDisable.
-type PostAdminGmailResourceDisableParams struct {
+// PostAdminGmailResourceValidationsParams defines parameters for PostAdminGmailResourceValidations.
+type PostAdminGmailResourceValidationsParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminGmailResourceDisableParams defines parameters for PostAdminGmailResourceDisable.
+type PostAdminGmailResourceDisableParams struct {
+	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
+	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op.
+	IdempotencyKey AdminStateCommandIdempotencyKey `json:"Idempotency-Key"`
 }
 
 // PostAdminGmailResourceEnableParams defines parameters for PostAdminGmailResourceEnable.
 type PostAdminGmailResourceEnableParams struct {
+	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
+	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
+
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op.
+	IdempotencyKey AdminStateCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminGmailResourcePublishParams defines parameters for PostAdminGmailResourcePublish.
+type PostAdminGmailResourcePublishParams struct {
+	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
+	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op.
+	IdempotencyKey AdminStateCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminGmailResourceUnpublishParams defines parameters for PostAdminGmailResourceUnpublish.
+type PostAdminGmailResourceUnpublishParams struct {
+	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
+	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op.
+	IdempotencyKey AdminStateCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminGmailResourceValidateParams defines parameters for PostAdminGmailResourceValidate.
+type PostAdminGmailResourceValidateParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
 }
 
 // GetAdminInvitesParams defines parameters for GetAdminInvites.
@@ -9467,8 +9485,6 @@ type GetAdminSMSBowerActivationsParams struct {
 
 // DeleteAdminSMSBowerMappingParams defines parameters for DeleteAdminSMSBowerMapping.
 type DeleteAdminSMSBowerMappingParams struct {
-	Source string `form:"source" json:"source"`
-
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
@@ -10183,6 +10199,9 @@ type PostAdminDomainDnsStatusJSONRequestBody = AdminDomainDnsStatusRequest
 
 // PostAdminGmailResourceImportMultipartRequestBody defines body for PostAdminGmailResourceImport for multipart/form-data ContentType.
 type PostAdminGmailResourceImportMultipartRequestBody PostAdminGmailResourceImportMultipartBody
+
+// PostAdminGmailResourceValidationsJSONRequestBody defines body for PostAdminGmailResourceValidations for application/json ContentType.
+type PostAdminGmailResourceValidationsJSONRequestBody = AdminGmailValidationBatchRequest
 
 // PostAdminInviteJSONRequestBody defines body for PostAdminInvite for application/json ContentType.
 type PostAdminInviteJSONRequestBody = AdminCreateInviteRequest
@@ -11176,12 +11195,27 @@ type ServerInterface interface {
 	// Get an administrator Gmail-resource import
 	// (GET /v1/admin/gmail/resources/imports/{importId})
 	GetAdminGmailResourceImport(c *gin.Context, importId int)
-	// Disable an available local Gmail account
+	// Queue asynchronous validation for selected Gmail resources
+	// (POST /v1/admin/gmail/resources/validations)
+	PostAdminGmailResourceValidations(c *gin.Context, params PostAdminGmailResourceValidationsParams)
+	// Get a Redis-backed Gmail validation batch
+	// (GET /v1/admin/gmail/resources/validations/{batchId})
+	GetAdminGmailResourceValidationBatch(c *gin.Context, batchId string)
+	// Disable a local Gmail account
 	// (POST /v1/admin/gmail/resources/{resourceId}/disable)
 	PostAdminGmailResourceDisable(c *gin.Context, resourceId int, params PostAdminGmailResourceDisableParams)
 	// Enable a disabled local Gmail account and queue validation
 	// (POST /v1/admin/gmail/resources/{resourceId}/enable)
 	PostAdminGmailResourceEnable(c *gin.Context, resourceId int, params PostAdminGmailResourceEnableParams)
+	// Publish one healthy Gmail resource for public allocation
+	// (POST /v1/admin/gmail/resources/{resourceId}/publish)
+	PostAdminGmailResourcePublish(c *gin.Context, resourceId int, params PostAdminGmailResourcePublishParams)
+	// Make one Gmail resource private for future allocation
+	// (POST /v1/admin/gmail/resources/{resourceId}/unpublish)
+	PostAdminGmailResourceUnpublish(c *gin.Context, resourceId int, params PostAdminGmailResourceUnpublishParams)
+	// Queue validation for one Gmail resource
+	// (POST /v1/admin/gmail/resources/{resourceId}/validate)
+	PostAdminGmailResourceValidate(c *gin.Context, resourceId int, params PostAdminGmailResourceValidateParams)
 	// List invites
 	// (GET /v1/admin/invites)
 	GetAdminInvites(c *gin.Context, params GetAdminInvitesParams)
@@ -11455,19 +11489,19 @@ type ServerInterface interface {
 	// Reverse a transaction
 	// (POST /v1/admin/transactions/{id}/reverse)
 	PostAdminTransactionReverse(c *gin.Context, id int, params PostAdminTransactionReverseParams)
-	// List Gmail upstream activation sessions
+	// List Gmail code sessions
 	// (GET /v1/admin/upstreams/smsbower/activations)
 	GetAdminSMSBowerActivations(c *gin.Context, params GetAdminSMSBowerActivationsParams)
-	// Get Gmail upstream revenue, cost and conservative profit
+	// Get Gmail revenue, cost and conservative profit
 	// (GET /v1/admin/upstreams/smsbower/finance)
 	GetAdminSMSBowerFinance(c *gin.Context)
-	// List Gmail project to upstream service mappings and margin safety
+	// List saved system project to SMSBower service mappings
 	// (GET /v1/admin/upstreams/smsbower/mappings)
 	GetAdminSMSBowerMappings(c *gin.Context)
-	// Delete one Gmail project supply mapping source
+	// Delete one system project to SMSBower service mapping
 	// (DELETE /v1/admin/upstreams/smsbower/mappings/{projectId})
 	DeleteAdminSMSBowerMapping(c *gin.Context, projectId int, params DeleteAdminSMSBowerMappingParams)
-	// Create or update one Gmail project supply mapping
+	// Create or update one system project to SMSBower service mapping
 	// (PUT /v1/admin/upstreams/smsbower/mappings/{projectId})
 	PutAdminSMSBowerMapping(c *gin.Context, projectId int, params PutAdminSMSBowerMappingParams)
 	// List the synchronized SMSBower mail service catalog
@@ -14070,25 +14104,16 @@ func (siw *ServerInterfaceWrapper) GetAdminGmailResourceImport(c *gin.Context) {
 	siw.Handler.GetAdminGmailResourceImport(c, importId)
 }
 
-// PostAdminGmailResourceDisable operation middleware
-func (siw *ServerInterfaceWrapper) PostAdminGmailResourceDisable(c *gin.Context) {
+// PostAdminGmailResourceValidations operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminGmailResourceValidations(c *gin.Context) {
 
 	var err error
 	_ = err
 
-	// ------------- Path parameter "resourceId" -------------
-	var resourceId int
-
-	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
-		return
-	}
-
 	c.Set(string(CookieAuthScopes), []string{})
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostAdminGmailResourceDisableParams
+	var params PostAdminGmailResourceValidationsParams
 
 	headers := c.Request.Header
 
@@ -14111,6 +14136,139 @@ func (siw *ServerInterfaceWrapper) PostAdminGmailResourceDisable(c *gin.Context)
 
 	} else {
 		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminGmailResourceValidations(c, params)
+}
+
+// GetAdminGmailResourceValidationBatch operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminGmailResourceValidationBatch(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "batchId" -------------
+	var batchId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "batchId", c.Param("batchId"), &batchId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter batchId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminGmailResourceValidationBatch(c, batchId)
+}
+
+// PostAdminGmailResourceDisable operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminGmailResourceDisable(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminGmailResourceDisableParams
+
+	// ------------- Required query parameter "version" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "version", c.Request.URL.Query(), &params.Version, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter version: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminStateCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
 		return
 	}
 
@@ -14144,6 +14302,14 @@ func (siw *ServerInterfaceWrapper) PostAdminGmailResourceEnable(c *gin.Context) 
 	// Parameter object where we will unmarshal all parameters from the context
 	var params PostAdminGmailResourceEnableParams
 
+	// ------------- Required query parameter "version" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "version", c.Request.URL.Query(), &params.Version, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter version: %w", err), http.StatusBadRequest)
+		return
+	}
+
 	headers := c.Request.Header
 
 	// ------------- Required header parameter "X-CSRF-Token" -------------
@@ -14168,6 +14334,28 @@ func (siw *ServerInterfaceWrapper) PostAdminGmailResourceEnable(c *gin.Context) 
 		return
 	}
 
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminStateCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
 		if c.IsAborted() {
@@ -14176,6 +14364,250 @@ func (siw *ServerInterfaceWrapper) PostAdminGmailResourceEnable(c *gin.Context) 
 	}
 
 	siw.Handler.PostAdminGmailResourceEnable(c, resourceId, params)
+}
+
+// PostAdminGmailResourcePublish operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminGmailResourcePublish(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminGmailResourcePublishParams
+
+	// ------------- Required query parameter "version" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "version", c.Request.URL.Query(), &params.Version, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter version: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminStateCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminGmailResourcePublish(c, resourceId, params)
+}
+
+// PostAdminGmailResourceUnpublish operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminGmailResourceUnpublish(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminGmailResourceUnpublishParams
+
+	// ------------- Required query parameter "version" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "version", c.Request.URL.Query(), &params.Version, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter version: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminStateCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminGmailResourceUnpublish(c, resourceId, params)
+}
+
+// PostAdminGmailResourceValidate operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminGmailResourceValidate(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminGmailResourceValidateParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminGmailResourceValidate(c, resourceId, params)
 }
 
 // GetAdminInvites operation middleware
@@ -19469,14 +19901,6 @@ func (siw *ServerInterfaceWrapper) DeleteAdminSMSBowerMapping(c *gin.Context) {
 	// Parameter object where we will unmarshal all parameters from the context
 	var params DeleteAdminSMSBowerMappingParams
 
-	// ------------- Required query parameter "source" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, true, "source", c.Request.URL.Query(), &params.Source, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter source: %w", err), http.StatusBadRequest)
-		return
-	}
-
 	headers := c.Request.Header
 
 	// ------------- Required header parameter "X-CSRF-Token" -------------
@@ -24625,8 +25049,13 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/admin/gmail/resources", wrapper.GetAdminGmailResources)
 	router.POST(options.BaseURL+"/v1/admin/gmail/resources/imports", wrapper.PostAdminGmailResourceImport)
 	router.GET(options.BaseURL+"/v1/admin/gmail/resources/imports/:importId", wrapper.GetAdminGmailResourceImport)
+	router.POST(options.BaseURL+"/v1/admin/gmail/resources/validations", wrapper.PostAdminGmailResourceValidations)
+	router.GET(options.BaseURL+"/v1/admin/gmail/resources/validations/:batchId", wrapper.GetAdminGmailResourceValidationBatch)
 	router.POST(options.BaseURL+"/v1/admin/gmail/resources/:resourceId/disable", wrapper.PostAdminGmailResourceDisable)
 	router.POST(options.BaseURL+"/v1/admin/gmail/resources/:resourceId/enable", wrapper.PostAdminGmailResourceEnable)
+	router.POST(options.BaseURL+"/v1/admin/gmail/resources/:resourceId/publish", wrapper.PostAdminGmailResourcePublish)
+	router.POST(options.BaseURL+"/v1/admin/gmail/resources/:resourceId/unpublish", wrapper.PostAdminGmailResourceUnpublish)
+	router.POST(options.BaseURL+"/v1/admin/gmail/resources/:resourceId/validate", wrapper.PostAdminGmailResourceValidate)
 	router.GET(options.BaseURL+"/v1/admin/invites", wrapper.GetAdminInvites)
 	router.POST(options.BaseURL+"/v1/admin/invites", wrapper.PostAdminInvite)
 	router.POST(options.BaseURL+"/v1/admin/invites/batch", wrapper.PostAdminInvitesBatch)

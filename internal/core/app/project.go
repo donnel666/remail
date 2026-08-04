@@ -227,6 +227,7 @@ type ProjectUseCase struct {
 	projects            ProjectRepository
 	owners              OwnerQueryPort
 	historyScan         func(context.Context, uint, string) error
+	gmailHistoryScan    func(context.Context, uint, string) error
 	applicationNotifier func(context.Context, domain.Project, string) error
 }
 
@@ -236,6 +237,10 @@ func NewProjectUseCase(projects ProjectRepository) *ProjectUseCase {
 
 func (uc *ProjectUseCase) SetHistoryScan(scan func(context.Context, uint, string) error) {
 	uc.historyScan = scan
+}
+
+func (uc *ProjectUseCase) SetGmailHistoryScan(scan func(context.Context, uint, string) error) {
+	uc.gmailHistoryScan = scan
 }
 
 func (uc *ProjectUseCase) SetOwnerQueryPort(owners OwnerQueryPort) {
@@ -472,6 +477,7 @@ func (uc *ProjectUseCase) AdminCreateListed(ctx context.Context, operatorUserID 
 		return nil, err
 	}
 	uc.scheduleHistoryScan(ctx, detail, requestID)
+	uc.scheduleGmailHistoryScan(ctx, detail, requestID)
 	return detail, nil
 }
 
@@ -517,6 +523,7 @@ func (uc *ProjectUseCase) AdminApprove(ctx context.Context, operatorUserID, proj
 		return nil, err
 	}
 	uc.scheduleHistoryScan(ctx, detail, requestID)
+	uc.scheduleGmailHistoryScan(ctx, detail, requestID)
 	return detail, nil
 }
 
@@ -552,6 +559,7 @@ func (uc *ProjectUseCase) AdminApproveWithConfig(ctx context.Context, operatorUs
 		return nil, err
 	}
 	uc.scheduleHistoryScan(ctx, detail, requestID)
+	uc.scheduleGmailHistoryScan(ctx, detail, requestID)
 	return detail, nil
 }
 
@@ -561,6 +569,15 @@ func (uc *ProjectUseCase) scheduleHistoryScan(ctx context.Context, detail *domai
 	}
 	if err := uc.historyScan(context.WithoutCancel(ctx), detail.Project.ID, requestID); err != nil {
 		slog.Warn("project history scan enqueue failed", "project_id", detail.Project.ID, "request_id", requestID, "error", err)
+	}
+}
+
+func (uc *ProjectUseCase) scheduleGmailHistoryScan(ctx context.Context, detail *domain.ProjectDetail, requestID string) {
+	if uc.gmailHistoryScan == nil || detail == nil || detail.Project.ID == 0 || !projectHasGmailProduct(detail.Products) {
+		return
+	}
+	if err := uc.gmailHistoryScan(context.WithoutCancel(ctx), detail.Project.ID, requestID); err != nil {
+		slog.Warn("Gmail project history scan enqueue failed", "project_id", detail.Project.ID, "request_id", requestID, "error", err)
 	}
 }
 
@@ -576,6 +593,15 @@ func (uc *ProjectUseCase) notifyApplication(ctx context.Context, project domain.
 func projectHasMicrosoftProduct(products []domain.Product) bool {
 	for _, product := range products {
 		if product.Type == domain.ProductTypeMicrosoft || product.Type == domain.ProductTypeRandom {
+			return true
+		}
+	}
+	return false
+}
+
+func projectHasGmailProduct(products []domain.Product) bool {
+	for _, product := range products {
+		if product.Type == domain.ProductTypeGmail {
 			return true
 		}
 	}

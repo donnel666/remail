@@ -93,6 +93,16 @@ type legacyFetchCredentialStub struct {
 	err    error
 }
 
+type gmailPurchaseFetchStub struct {
+	orderNos []string
+	err      error
+}
+
+func (s *gmailPurchaseFetchStub) FetchLocalPurchaseMail(_ context.Context, orderNo string) error {
+	s.orderNos = append(s.orderNos, orderNo)
+	return s.err
+}
+
 type pickupFetchLeaseSequenceStub struct {
 	*pickupFetchStateStub
 	mu      sync.Mutex
@@ -143,6 +153,34 @@ func TestPickupFetchUsesCredentialRevisionFence(t *testing.T) {
 	require.Equal(t, 1, cache.stores)
 	require.Equal(t, uint(91), cache.storeID)
 	require.Equal(t, pickupMessageCacheTTL, cache.storeTTL)
+}
+
+func TestPickupRequestFetchRoutesLocalGmailPurchaseAndReleasesLease(t *testing.T) {
+	now := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
+	repo := &legacyFetchRepoStub{scope: OrderScope{
+		OrderNo: "GMAIL-PURCHASE", OrderStatus: "active", ServiceMode: "purchase",
+		AllocationType: domain.ResourceTypeGmail, AllocationID: 8, EmailResourceID: 91,
+		Recipient: "user@gmail.com",
+	}}
+	state := &pickupFetchStateStub{}
+	gmail := &gmailPurchaseFetchStub{}
+	uc := NewUseCase(repo, nil, nil, nil)
+	uc.SetPickupFetchStatePort(state)
+	uc.SetGmailPurchaseFetchPort(gmail)
+	uc.now = func() time.Time { return now }
+
+	err := uc.ProcessPickupRequestFetch(context.Background(), PickupRequestFetchTask{
+		RequestedAt: now,
+		Scopes: []PickupRequestFetchScope{{
+			OrderNo: "GMAIL-PURCHASE", EmailResourceID: 91,
+		}},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"GMAIL-PURCHASE"}, gmail.orderNos)
+	acquired, released := state.snapshot()
+	require.Equal(t, []uint{91}, acquired)
+	require.Equal(t, 1, released)
 }
 
 func TestPickupFetchUsesCachedMessageIDsAndRefreshesCacheWithoutNewMail(t *testing.T) {

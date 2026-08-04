@@ -48,13 +48,10 @@ export async function saveGmailUpstreamMapping(
   );
 }
 
-export async function deleteGmailUpstreamMapping(
-  projectId: number,
-  source: string
-) {
+export async function deleteGmailUpstreamMapping(projectId: number) {
   await unwrap<void>(
     await apiClient.DELETE("/v1/admin/upstreams/smsbower/mappings/{projectId}", {
-      params: { header: csrfHeader(), path: { projectId }, query: { source } },
+      params: { header: csrfHeader(), path: { projectId } },
     })
   );
 }

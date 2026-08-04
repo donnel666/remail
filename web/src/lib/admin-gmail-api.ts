@@ -148,11 +148,13 @@ export async function waitForAdminGmailResourceImport(
 
 export async function setAdminGmailResourceEnabled(
   resourceId: number,
+  version: number,
   enabled: boolean,
 ) {
   const params = {
-    header: csrfHeader(),
+    header: commandHeaders(),
     path: { resourceId },
+    query: { version },
   };
   if (enabled) {
     await unwrap<void>(
@@ -164,6 +166,42 @@ export async function setAdminGmailResourceEnabled(
   }
   await unwrap<void>(
     await client.POST("/v1/admin/gmail/resources/{resourceId}/disable", {
+      params,
+    }),
+  );
+}
+
+export async function validateAdminGmailResource(resourceId: number) {
+  return unwrap(
+    await client.POST("/v1/admin/gmail/resources/{resourceId}/validate", {
+      params: {
+        header: commandHeaders(),
+        path: { resourceId },
+      },
+    }),
+  );
+}
+
+export async function setAdminGmailResourceForSale(
+  resourceId: number,
+  version: number,
+  forSale: boolean,
+) {
+  const params = {
+    header: commandHeaders(),
+    path: { resourceId },
+    query: { version },
+  };
+  if (forSale) {
+    await unwrap<void>(
+      await client.POST("/v1/admin/gmail/resources/{resourceId}/publish", {
+        params,
+      }),
+    );
+    return;
+  }
+  await unwrap<void>(
+    await client.POST("/v1/admin/gmail/resources/{resourceId}/unpublish", {
       params,
     }),
   );

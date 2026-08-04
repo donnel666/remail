@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"github.com/donnel666/remail/internal/platform"
@@ -14,14 +15,20 @@ import (
 )
 
 const (
-	typeGmailSync           = "gmail:smsbower_sync"
-	typeGmailDispatch       = "gmail:dispatch"
-	typeGmailProvision      = "gmail:provision"
-	typeGmailPoll           = "gmail:poll"
-	typeGmailResourceImport = "gmail:resource_import"
-	gmailSyncTimeout        = 45 * time.Second
-	gmailDispatchPeriod     = 5 * time.Second
+	typeGmailSync                 = "gmail:smsbower_sync"
+	typeGmailDispatch             = "gmail:dispatch"
+	typeGmailProvision            = "gmail:provision"
+	typeGmailPoll                 = "gmail:poll"
+	typeGmailResourceImport       = "gmail:resource_import"
+	gmailSyncTimeout              = 45 * time.Second
+	gmailDispatchPeriod           = 5 * time.Second
+	gmailValidationDispatchPeriod = 30 * time.Second
+	gmailHistoryDispatchPeriod    = 15 * time.Second
+	gmailHistoryConcurrency       = 4
+	gmailHistoryMaxConcurrency    = 8096
 )
+
+var localGmailHistoryActive atomic.Int64
 
 func (s *Service) ScheduleSync(ctx context.Context) error {
 	if s == nil || s.queue == nil {
@@ -56,9 +63,26 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, service *Service) func(context.Co
 	})
 	mux.HandleFunc(typeGmailDispatch, func(ctx context.Context, _ *asynq.Task) error {
 		_, sessionErr := service.DispatchDueSessions(ctx, 200)
-		validationErr := service.DispatchLocalResourceValidations(ctx, localGmailValidationBatchMax)
 		importErr := service.DispatchGmailResourceImports(ctx, 100)
-		return errors.Join(sessionErr, validationErr, importErr)
+		return errors.Join(sessionErr, importErr)
+	})
+	mux.HandleFunc(typeGmailValidationDispatcher, func(ctx context.Context, _ *asynq.Task) error {
+		if err := service.DispatchLocalResourceValidations(ctx, localGmailValidationBatchMax); err != nil {
+			slog.Warn("Gmail resource validation dispatcher failed", "error", err)
+		}
+		return nil
+	})
+	mux.HandleFunc(typeGmailValidationBatch, func(ctx context.Context, task *asynq.Task) error {
+		var payload localGmailValidationBatchTask
+		if task == nil || json.Unmarshal(task.Payload(), &payload) != nil || payload.BatchID == "" || payload.ClaimToken == "" || payload.Cursor < 0 {
+			return fmt.Errorf("decode Gmail validation batch task: %w", asynq.SkipRetry)
+		}
+		release, admitted := platform.AcquireBackgroundExecution(ctx, service.backgroundExecution)
+		if !admitted {
+			return platform.ErrBackgroundExecutionDeferred
+		}
+		defer release()
+		return service.ProcessLocalResourceValidationBatch(ctx, payload)
 	})
 	mux.HandleFunc(typeGmailProvision, func(ctx context.Context, task *asynq.Task) error {
 		payload, err := decodeSessionTask(task)
@@ -75,11 +99,79 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, service *Service) func(context.Co
 		return service.Poll(ctx, payload.SessionID)
 	})
 	mux.HandleFunc(typeGmailValidateLocal, func(ctx context.Context, task *asynq.Task) error {
-		resourceID, err := decodeLocalResourceValidationTask(task)
+		payload, err := decodeLocalResourceValidationTask(task)
 		if err != nil {
 			return err
 		}
-		return service.ValidateLocalResource(ctx, resourceID)
+		release, admitted := platform.AcquireBackgroundExecution(ctx, service.backgroundExecution)
+		if !admitted {
+			if platform.BackgroundTaskHasRetryHeadroom(ctx) {
+				return platform.ErrBackgroundExecutionDeferred
+			}
+			return service.ReleaseLocalResourceValidation(context.WithoutCancel(ctx), payload)
+		}
+		defer release()
+		if err := service.ProcessLocalResourceValidation(ctx, payload); err != nil {
+			if platform.BackgroundTaskHasRetryHeadroom(ctx) {
+				return err
+			}
+			if releaseErr := service.ReleaseLocalResourceValidation(context.WithoutCancel(ctx), payload); releaseErr != nil {
+				return errors.Join(err, releaseErr)
+			}
+			return nil
+		}
+		_ = service.scheduleLocalResourceValidationDispatcher(context.WithoutCancel(ctx), time.Second)
+		return nil
+	})
+	mux.HandleFunc(typeGmailValidatedHistoryScan, func(ctx context.Context, task *asynq.Task) error {
+		payload, err := decodeLocalGmailHistoryTask(task)
+		if err != nil {
+			return err
+		}
+		release, admitted := acquireLocalGmailHistoryCapacity(ctx, service)
+		if !admitted {
+			if platform.BackgroundTaskHasRetryHeadroom(ctx) {
+				return platform.ErrBackgroundExecutionDeferred
+			}
+			return nil
+		}
+		defer release()
+		if err := service.ProcessValidatedLocalGmailHistory(ctx, payload); err != nil {
+			if !errors.Is(err, platform.ErrBackgroundExecutionDeferred) {
+				slog.Warn(
+					"validated Gmail history scan task failed",
+					"resource_id", payload.ResourceID,
+					"request_id", payload.RequestID,
+					"error", err,
+				)
+			}
+			return err
+		}
+		return nil
+	})
+	mux.HandleFunc(typeGmailProjectHistoryDispatcher, func(ctx context.Context, _ *asynq.Task) error {
+		return service.DispatchLocalGmailProjectHistory(ctx, localGmailProjectHistoryLimit)
+	})
+	mux.HandleFunc(typeGmailProjectHistoryScan, func(ctx context.Context, task *asynq.Task) error {
+		var payload localGmailProjectHistoryTask
+		if task == nil || json.Unmarshal(task.Payload(), &payload) != nil || payload.ProjectID == 0 || payload.Generation == 0 {
+			return fmt.Errorf("decode Gmail project history task: %w", asynq.SkipRetry)
+		}
+		release, admitted := acquireLocalGmailHistoryCapacity(ctx, service)
+		if !admitted {
+			if !platform.BackgroundTaskHasRetryHeadroom(ctx) {
+				releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				defer cancel()
+				return service.ReleaseLocalGmailProjectHistoryDispatch(releaseCtx, payload)
+			}
+			return platform.ErrBackgroundExecutionDeferred
+		}
+		defer release()
+		if err := service.ProcessLocalGmailProjectHistory(ctx, payload); err != nil {
+			slog.Warn("Gmail project history scan task failed", "project_id", payload.ProjectID, "generation", payload.Generation, "error", err)
+			return err
+		}
+		return nil
 	})
 	mux.HandleFunc(typeGmailResourceImport, func(ctx context.Context, task *asynq.Task) error {
 		payload, err := decodeGmailResourceImportTask(task)
@@ -144,6 +236,8 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, service *Service) func(context.Co
 		defer ticker.Stop()
 		lastSync := time.Time{}
 		lastDispatch := time.Time{}
+		lastValidationDispatch := time.Time{}
+		lastHistoryDispatch := time.Time{}
 		for {
 			now := time.Now()
 			if lastSync.IsZero() || now.Sub(lastSync) >= time.Duration(runtimeconfig.Int("smsbower_sync_interval_minutes", 5, 1))*time.Minute {
@@ -158,6 +252,18 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, service *Service) func(context.Co
 				}
 				lastDispatch = now
 			}
+			if lastValidationDispatch.IsZero() || now.Sub(lastValidationDispatch) >= gmailValidationDispatchPeriod {
+				if err := service.scheduleLocalResourceValidationDispatcher(ctx, 0); err != nil && !errors.Is(err, context.Canceled) {
+					slog.Warn("schedule Gmail validation dispatcher failed", "error", err)
+				}
+				lastValidationDispatch = now
+			}
+			if lastHistoryDispatch.IsZero() || now.Sub(lastHistoryDispatch) >= gmailHistoryDispatchPeriod {
+				if err := service.scheduleLocalGmailProjectHistoryDispatcher(ctx, 0); err != nil && !errors.Is(err, context.Canceled) {
+					slog.Warn("schedule Gmail project history dispatcher failed", "error", err)
+				}
+				lastHistoryDispatch = now
+			}
 			select {
 			case <-ctx.Done():
 				return
@@ -170,6 +276,27 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, service *Service) func(context.Co
 		select {
 		case <-done:
 		case <-shutdownCtx.Done():
+		}
+	}
+}
+
+func acquireLocalGmailHistoryCapacity(ctx context.Context, service *Service) (func(), bool) {
+	backgroundRelease, admitted := platform.AcquireBackgroundExecution(ctx, service.backgroundExecution)
+	if !admitted {
+		return func() {}, false
+	}
+	limit := int64(min(runtimeconfig.Int("gmail_history_concurrency", gmailHistoryConcurrency, 1), gmailHistoryMaxConcurrency))
+	for {
+		active := localGmailHistoryActive.Load()
+		if active >= limit {
+			backgroundRelease()
+			return func() {}, false
+		}
+		if localGmailHistoryActive.CompareAndSwap(active, active+1) {
+			return func() {
+				localGmailHistoryActive.Add(-1)
+				backgroundRelease()
+			}, true
 		}
 	}
 }

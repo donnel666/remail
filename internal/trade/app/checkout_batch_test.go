@@ -16,18 +16,20 @@ type batchTxContextKey struct{}
 
 type batchRepoSpy struct {
 	Repository
-	mu         sync.Mutex
-	orders     map[string]domain.Order
-	events     *[]string
-	paidInTx   bool
-	failedInTx bool
-	finds      int
-	findsInTx  int
-	topTx      int
-	nestedTx   int
-	committed  int
-	rolledBack int
-	findErrors map[string]error
+	mu              sync.Mutex
+	orders          map[string]domain.Order
+	events          *[]string
+	paidInTx        bool
+	failedInTx      bool
+	activeCalls     int
+	activeConflicts int
+	finds           int
+	findsInTx       int
+	topTx           int
+	nestedTx        int
+	committed       int
+	rolledBack      int
+	findErrors      map[string]error
 }
 
 func (r *batchRepoSpy) WithTx(ctx context.Context, fn func(context.Context) error) error {
@@ -141,6 +143,7 @@ func (r *batchRepoSpy) MarkPaid(ctx context.Context, cmd MarkPaidCommand) (*doma
 func (r *batchRepoSpy) MarkActive(_ context.Context, cmd MarkActiveCommand) (*domain.Order, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.activeCalls++
 	for key, order := range r.orders {
 		if order.OrderNo != cmd.OrderNo {
 			continue
@@ -153,6 +156,10 @@ func (r *batchRepoSpy) MarkActive(_ context.Context, cmd MarkActiveCommand) (*do
 		order.ActivatedAt = cmd.ActivatedAt
 		order.AfterSaleUntil = cmd.AfterSaleUntil
 		r.orders[key] = order
+		if r.activeConflicts > 0 {
+			r.activeConflicts--
+			return nil, domain.ErrOrderStateConflict
+		}
 		return &order, nil
 	}
 	return nil, domain.ErrOrderNotFound
@@ -401,9 +408,17 @@ type checkoutGmailSupplySpy struct {
 	purchases   int
 	purchase    *GmailPurchaseDelivery
 	purchaseErr error
+	releases    int
+	releaseInTx bool
 }
 
-func (s *checkoutGmailSupplySpy) CheckSupply(_ context.Context, _ uint, mode domain.ServiceMode, _ string) (*GmailSupplyQuote, error) {
+func (s *checkoutGmailSupplySpy) CheckSupply(
+	_ context.Context,
+	_, _, _ uint,
+	mode domain.ServiceMode,
+	_ domain.SupplyPolicy,
+	_ string,
+) (*GmailSupplyQuote, error) {
 	s.checks++
 	s.lastMode = mode
 	if s.checkErr != nil {
@@ -442,18 +457,28 @@ func (s *checkoutGmailSupplySpy) CancelGmailOrder(context.Context, string) error
 	return nil
 }
 
+func (s *checkoutGmailSupplySpy) AllocateLocalCode(context.Context, string, uint, uint, uint, domain.SupplyPolicy, GmailSupplyQuote) (*GmailLocalAllocation, error) {
+	return &GmailLocalAllocation{AllocationID: 61, Email: "buyer@gmail.com", SupplyScope: SupplyScopePublic}, nil
+}
+
+func (s *checkoutGmailSupplySpy) ReleaseLocalAllocation(ctx context.Context, _ string) error {
+	s.releases++
+	s.releaseInTx = ctx.Value(batchTxContextKey{}) != nil
+	return nil
+}
+
 func (*checkoutGmailSupplySpy) ListGmailDeliveries(context.Context, []string) (map[string]GmailDeliverySummary, error) {
 	return map[string]GmailDeliverySummary{}, nil
 }
 
-func (s *checkoutGmailSupplySpy) AllocateLocalPurchase(context.Context, string, GmailSupplyQuote) (*GmailPurchaseDelivery, error) {
+func (s *checkoutGmailSupplySpy) AllocateLocalPurchase(context.Context, string, uint, uint, uint, domain.SupplyPolicy, GmailSupplyQuote) (*GmailPurchaseDelivery, error) {
 	s.purchases++
 	if s.purchaseErr != nil {
 		return nil, s.purchaseErr
 	}
 	if s.purchase == nil {
 		s.purchase = &GmailPurchaseDelivery{
-			AllocationID: 61, ResourceID: 51, Email: "buyer@gmail.com", Password: "password",
+			AllocationID: 61, ResourceID: 51, SupplyScope: SupplyScopePublic, Email: "buyer@gmail.com", Password: "password",
 			TwoFactorSecret: "JBSWY3DPEHPK3PXP", AppPassword: "abcdefghijklmnop",
 		}
 	}
@@ -732,6 +757,8 @@ func TestGmailCodeCheckoutUsesUpstreamWithoutLocalAllocation(t *testing.T) {
 	require.Equal(t, "code_only", result.ContentMode)
 	require.Equal(t, 3, result.MaxCodes)
 	require.Equal(t, result.Order.OrderNo, supply.lastSession.OrderNo)
+	require.Equal(t, result.Order.ProjectID, supply.lastSession.ProjectID)
+	require.Equal(t, result.Order.ProjectProductID, supply.lastSession.ProductID)
 
 	retried, err := uc.Checkout(context.Background(), request)
 	require.NoError(t, err)
@@ -746,7 +773,8 @@ func TestGmailLocalPurchaseChargesAndDeliversCredentialsOnce(t *testing.T) {
 	wallet := &batchWalletSpy{}
 	ordering := &batchOrderingSpy{productType: domain.ProductTypeGmail}
 	supply := &checkoutGmailSupplySpy{}
-	uc := NewUseCase(repo, ordering, wallet, &checkoutInventorySpy{}, emptyOrderTokenSpy{})
+	tokens := &issuedOrderTokenSpy{tokens: map[string]*OrderToken{}}
+	uc := NewUseCase(repo, ordering, wallet, &checkoutInventorySpy{}, tokens)
 	uc.SetGmailPorts(supply, supply)
 	request := batchRequest("gmail-local-purchase", 1)
 
@@ -758,6 +786,7 @@ func TestGmailLocalPurchaseChargesAndDeliversCredentialsOnce(t *testing.T) {
 	require.Equal(t, "password", result.GmailPassword)
 	require.Equal(t, "JBSWY3DPEHPK3PXP", result.GmailTwoFactorSecret)
 	require.Equal(t, "abcdefghijklmnop", result.GmailAppPassword)
+	require.Equal(t, "token-"+result.Order.OrderNo, result.ServiceToken)
 	require.Equal(t, 1, wallet.debits)
 	require.Equal(t, 1, supply.purchases)
 	require.Zero(t, supply.creates)
@@ -766,9 +795,11 @@ func TestGmailLocalPurchaseChargesAndDeliversCredentialsOnce(t *testing.T) {
 	retried, err := uc.Checkout(context.Background(), request)
 	require.NoError(t, err)
 	require.Equal(t, result.Order.OrderNo, retried.Order.OrderNo)
+	require.Equal(t, result.ServiceToken, retried.ServiceToken)
 	require.Equal(t, "password", retried.GmailPassword)
 	require.Equal(t, 1, wallet.debits)
 	require.Equal(t, 1, supply.purchases)
+	require.Equal(t, 1, tokens.issues)
 
 	forbidden, err := uc.GetOrder(context.Background(), result.Order.OrderNo, 999, false)
 	require.Nil(t, forbidden)
@@ -776,9 +807,98 @@ func TestGmailLocalPurchaseChargesAndDeliversCredentialsOnce(t *testing.T) {
 	owner, err := uc.GetOrder(context.Background(), result.Order.OrderNo, result.Order.UserID, false)
 	require.NoError(t, err)
 	require.Equal(t, "password", owner.GmailPassword)
+	require.Equal(t, result.ServiceToken, owner.ServiceToken)
 	admin, err := uc.GetOrder(context.Background(), result.Order.OrderNo, 999, true)
 	require.NoError(t, err)
 	require.Equal(t, "abcdefghijklmnop", admin.GmailAppPassword)
+}
+
+func TestGmailLocalPurchaseReloadsAfterActivationStateConflict(t *testing.T) {
+	repo := &batchRepoSpy{orders: map[string]domain.Order{}, activeConflicts: 1}
+	wallet := &batchWalletSpy{}
+	supply := &checkoutGmailSupplySpy{}
+	tokens := &issuedOrderTokenSpy{tokens: map[string]*OrderToken{}}
+	uc := NewUseCase(repo, &batchOrderingSpy{productType: domain.ProductTypeGmail}, wallet, &checkoutInventorySpy{}, tokens)
+	uc.SetGmailPorts(supply, supply)
+
+	result, err := uc.Checkout(context.Background(), batchRequest("gmail-activation-conflict", 1))
+
+	require.NoError(t, err)
+	require.Equal(t, domain.OrderStatusActive, result.Order.Status)
+	require.Equal(t, "token-"+result.Order.OrderNo, result.ServiceToken)
+	require.Equal(t, 1, repo.activeCalls)
+	require.Equal(t, 1, wallet.debits)
+	require.Zero(t, wallet.refunds)
+	require.Zero(t, supply.releases)
+	require.Equal(t, 1, tokens.issues)
+}
+
+func TestGmailLocalPurchaseCompensatesServiceTokenFailureInOneShortTransaction(t *testing.T) {
+	storeErr := errors.New("token store unavailable")
+	for _, test := range []struct {
+		name     string
+		issueErr error
+	}{
+		{name: "store error", issueErr: storeErr},
+		{name: "nil token"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repo := &batchRepoSpy{orders: map[string]domain.Order{}}
+			wallet := &batchWalletSpy{}
+			supply := &checkoutGmailSupplySpy{}
+			tokens := &checkoutIssueTokenErrorSpy{err: test.issueErr}
+			uc := NewUseCase(repo, &batchOrderingSpy{productType: domain.ProductTypeGmail}, wallet, &checkoutInventorySpy{}, tokens)
+			uc.SetGmailPorts(supply, supply)
+
+			result, err := uc.Checkout(context.Background(), batchRequest("gmail-token-failure", 1))
+
+			require.Nil(t, result)
+			if test.issueErr != nil {
+				require.ErrorIs(t, err, test.issueErr)
+			} else {
+				require.EqualError(t, err, "issue order token returned no token")
+			}
+			require.Equal(t, domain.OrderStatusFailed, repo.orders["gmail-token-failure"].Status)
+			require.Equal(t, domain.OrderFailureServiceToken, repo.orders["gmail-token-failure"].FailureCode)
+			require.Equal(t, 1, wallet.debits)
+			require.Equal(t, 1, wallet.refunds)
+			require.Equal(t, 1, supply.releases)
+			require.True(t, supply.releaseInTx)
+			require.Equal(t, 1, tokens.disables)
+			require.True(t, tokens.disableInTx)
+			require.True(t, repo.failedInTx)
+			require.Equal(t, 2, repo.topTx)
+			require.Equal(t, 2, repo.committed)
+			require.Zero(t, repo.rolledBack)
+		})
+	}
+}
+
+func TestGetHistoricalGmailPurchaseBackfillsServiceToken(t *testing.T) {
+	order := domain.Order{
+		ID: 1, OrderNo: "GMAIL-HISTORICAL", UserID: 7, ProjectID: 8, ProjectProductID: 9,
+		ProductType: domain.ProductTypeGmail, ServiceMode: domain.ServiceModePurchase,
+		Status: domain.OrderStatusActive, DeliveryEmail: "history@gmail.com",
+		ActivationWindowMinutes: 10, WarrantyMinutes: 10,
+	}
+	repo := &batchRepoSpy{orders: map[string]domain.Order{"historical": order}}
+	tokens := &issuedOrderTokenSpy{tokens: map[string]*OrderToken{}}
+	supply := &checkoutGmailSupplySpy{purchase: &GmailPurchaseDelivery{
+		AllocationID: 61, ResourceID: 51, Email: order.DeliveryEmail, Password: "password",
+		TwoFactorSecret: "JBSWY3DPEHPK3PXP", AppPassword: "abcdefghijklmnop",
+	}}
+	uc := NewUseCase(repo, &batchOrderingSpy{}, &batchWalletSpy{}, &checkoutInventorySpy{}, tokens)
+	uc.SetGmailPorts(supply, supply)
+
+	result, err := uc.GetOrder(context.Background(), order.OrderNo, order.UserID, false)
+
+	require.NoError(t, err)
+	require.Equal(t, "token-"+order.OrderNo, result.ServiceToken)
+	require.Equal(t, 1, tokens.issues)
+	replayed, err := uc.GetOrder(context.Background(), order.OrderNo, order.UserID, false)
+	require.NoError(t, err)
+	require.Equal(t, result.ServiceToken, replayed.ServiceToken)
+	require.Equal(t, 1, tokens.issues)
 }
 
 func TestGmailLocalPurchaseRefundsOnceWhenInventoryDisappears(t *testing.T) {
@@ -792,15 +912,15 @@ func TestGmailLocalPurchaseRefundsOnceWhenInventoryDisappears(t *testing.T) {
 	result, err := uc.Checkout(context.Background(), request)
 	require.ErrorIs(t, err, domain.ErrInsufficientInventory)
 	require.Equal(t, domain.OrderStatusFailed, result.Order.Status)
-	require.Equal(t, 1, wallet.debits)
-	require.Equal(t, 1, wallet.refunds)
+	require.Zero(t, wallet.debits)
+	require.Zero(t, wallet.refunds)
 	require.Equal(t, 1, supply.purchases)
 
 	retried, err := uc.Checkout(context.Background(), request)
 	require.ErrorIs(t, err, domain.ErrInsufficientInventory)
 	require.Equal(t, result.Order.OrderNo, retried.Order.OrderNo)
-	require.Equal(t, 1, wallet.debits)
-	require.Equal(t, 1, wallet.refunds)
+	require.Zero(t, wallet.debits)
+	require.Zero(t, wallet.refunds)
 	require.Equal(t, 1, supply.purchases)
 }
 

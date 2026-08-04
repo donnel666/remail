@@ -9,6 +9,7 @@ import (
 	mailmatchapp "github.com/donnel666/remail/internal/mailmatch/app"
 	mailinfra "github.com/donnel666/remail/internal/mailtransport/infra"
 	proxyapp "github.com/donnel666/remail/internal/proxy/app"
+	proxydomain "github.com/donnel666/remail/internal/proxy/domain"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/stretchr/testify/require"
 )
@@ -140,6 +141,7 @@ func TestMicrosoftFetchAdapterAvoidsFailedProxyServerOnRetry(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Len(t, proxies.requests, 2)
+	require.Equal(t, proxydomain.ProxyIPv4, proxies.requests[0].IPVersion)
 	require.Empty(t, proxies.requests[0].AvoidProxyServerIDs)
 	require.Equal(t, []uint{10}, proxies.requests[1].AvoidProxyServerIDs)
 }
@@ -258,7 +260,8 @@ func TestMicrosoftFetchAdapterProxyAttemptsUpdateAtRuntime(t *testing.T) {
 
 func TestMicrosoftFetchAdapterFullHistoryPreservesWindowWithoutMessageLimit(t *testing.T) {
 	client := &microsoftMessageFetchClientStub{results: []mailinfra.MicrosoftMailFetchResult{{Valid: true}}}
-	adapter := &MicrosoftFetchAdapter{client: client}
+	proxies := &microsoftFetchProxyProviderStub{}
+	adapter := &MicrosoftFetchAdapter{client: client, proxies: proxies}
 	sinceAt := time.Now().Add(-90 * 24 * time.Hour)
 	untilAt := time.Now()
 
@@ -271,6 +274,8 @@ func TestMicrosoftFetchAdapterFullHistoryPreservesWindowWithoutMessageLimit(t *t
 
 	require.NoError(t, err)
 	require.Len(t, client.requests, 1)
+	require.Len(t, proxies.requests, 1)
+	require.Equal(t, proxydomain.ProxyIPv6, proxies.requests[0].IPVersion)
 	require.Zero(t, client.requests[0].MaxMessages)
 	require.Equal(t, sinceAt, client.requests[0].SinceAt)
 	require.Equal(t, untilAt, client.requests[0].UntilAt)

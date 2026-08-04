@@ -47,7 +47,7 @@ export default function AdminFinance() {
       ) : null}
       <Tabs.TabPane itemKey="transactions" tab={t("Transactions")} />
       <Tabs.TabPane itemKey="balances" tab={t("User balances")} />
-      <Tabs.TabPane itemKey="gmail" tab="Gmail 上游" />
+      <Tabs.TabPane itemKey="gmail" tab="Gmail 经营" />
     </Tabs>
   );
 
