@@ -1,7 +1,6 @@
 package gmail
 
 import (
-	"context"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -60,13 +59,14 @@ warranty_minutes, main_weight, dot_weight, plus_weight
 VALUES ('gm', 'Gmail', 1.2, 10, NOW(3))`).Error)
 	require.NoError(t, db.Exec(`INSERT INTO gmail_supply_routes(project_id, source, provider_service_code, code_enabled, purchase_enabled)
 VALUES (990069, 'smsbower', 'gm', 1, 0), (990069, 'local', '', 0, 1)`).Error)
-	imported, err := NewService(db, nil).ImportLocalResources(context.Background(), 990072,
-		"first.last@gmail.com----password----JBSWY3DPEHPK3PXP----abcdefghijklmnop", "abort")
-	require.NoError(t, err)
-	require.Equal(t, 1, imported.Imported)
-	var gmailResourceID uint
-	require.NoError(t, db.Table("gmail_resources").Where("identity = ?", "firstlast@gmail.com").Pluck("id", &gmailResourceID).Error)
-	require.NotZero(t, gmailResourceID)
+	root := resourceRootModel{Type: "gmail", OwnerUserID: 990072, Version: 1}
+	require.NoError(t, db.Create(&root).Error)
+	require.NoError(t, db.Create(&localResourceModel{
+		ID: root.ID, ResourceType: "gmail", OwnerUserID: 990072,
+		Email: "first.last@gmail.com", Identity: "firstlast@gmail.com", Password: "password",
+		TwoFactorSecret: "JBSWY3DPEHPK3PXP", AppPassword: "abcdefghijklmnop", Status: LocalResourceAvailable,
+	}).Error)
+	gmailResourceID := root.ID
 	var rootCount int64
 	require.NoError(t, db.Table("email_resources").Where("id = ? AND type = 'gmail' AND owner_user_id = ?", gmailResourceID, 990072).Count(&rootCount).Error)
 	require.EqualValues(t, 1, rootCount)
@@ -89,4 +89,40 @@ VALUES ('GMAIL-MIGRATION-1', 'local', 'purchase', ?, 'first.last@gmail.com', 7)`
 	require.False(t, db.Migrator().HasColumn("orders", "gmail_session_id"))
 	require.NoError(t, db.Exec("DELETE FROM users WHERE id = 990072").Error)
 	require.NoError(t, goose.UpTo(sqlDB, gmailMigrations, 72))
+}
+
+func TestGmailDeletedRestoreMigrationMySQL(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	require.True(t, ok)
+	migrations := filepath.Clean(filepath.Join(filepath.Dir(file), "../..", "migrations"))
+	baselineMigrations := testmysql.MigrationsThrough(t, migrations, 74)
+	gmailMigrations := testmysql.MigrationsThrough(t, migrations, 76)
+	db := gmailMigrationMySQL.Database(t, baselineMigrations)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, platform.RunMigrations(sqlDB, gmailMigrations))
+	goose.SetTableName("goose_db_version")
+	require.NoError(t, goose.SetDialect("mysql"))
+	version, err := goose.GetDBVersion(sqlDB)
+	require.NoError(t, err)
+	require.EqualValues(t, 76, version)
+
+	var statusCheck string
+	require.NoError(t, db.Raw(`SELECT cc.CHECK_CLAUSE
+FROM information_schema.TABLE_CONSTRAINTS AS tc
+JOIN information_schema.CHECK_CONSTRAINTS AS cc
+  ON cc.CONSTRAINT_SCHEMA = tc.CONSTRAINT_SCHEMA
+ AND cc.CONSTRAINT_NAME = tc.CONSTRAINT_NAME
+WHERE tc.CONSTRAINT_SCHEMA = DATABASE()
+  AND tc.TABLE_NAME = 'gmail_resources'
+  AND tc.CONSTRAINT_NAME = 'chk_gmail_resources_status'`).Scan(&statusCheck).Error)
+	require.Contains(t, statusCheck, "deleted")
+
+	var updateRule string
+	require.NoError(t, db.Raw(`SELECT update_rule
+FROM information_schema.REFERENTIAL_CONSTRAINTS
+WHERE constraint_schema = DATABASE()
+  AND table_name = 'gmail_resources'
+  AND constraint_name = 'fk_gmail_resources_root_owner'`).Scan(&updateRule).Error)
+	require.Equal(t, "CASCADE", updateRule)
 }

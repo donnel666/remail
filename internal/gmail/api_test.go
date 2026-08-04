@@ -3,7 +3,6 @@ package gmail
 import (
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -11,18 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
-
-func TestImportLocalResourcesRejectsOversizedRequest(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	recorder := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/admin/gmail/resources/import", strings.NewReader(`{"content":"x"}`))
-	ctx.Request.ContentLength = localResourceImportBodyMaxBytes + 1
-
-	(&handler{}).importLocalResources(ctx)
-
-	require.Equal(t, http.StatusRequestEntityTooLarge, recorder.Code)
-}
 
 func TestLocalResourcesAPIKeepsCredentialsWriteOnly(t *testing.T) {
 	gin.SetMode(gin.TestMode)

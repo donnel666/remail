@@ -2,13 +2,18 @@ package gmail
 
 import (
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/donnel666/remail/api/middleware"
+	governanceapp "github.com/donnel666/remail/internal/governance/app"
 	"github.com/gin-gonic/gin"
 	"github.com/hibiken/asynq"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
@@ -16,8 +21,10 @@ type Module struct {
 	Service *Service
 }
 
-func NewModule(db *gorm.DB, queue *asynq.Client) *Module {
-	return &Module{Service: NewService(db, queue)}
+func NewModule(db *gorm.DB, redisClient redis.UniversalClient, queue *asynq.Client, files governanceapp.FilePort) *Module {
+	service := NewService(db, queue)
+	service.SetResourceImportDependencies(redisClient, files)
+	return &Module{Service: service}
 }
 
 func RegisterRoutes(rg *gin.RouterGroup, module *Module, fetcher middleware.SessionFetcher, checker middleware.PermissionChecker) {
@@ -36,7 +43,8 @@ func RegisterRoutes(rg *gin.RouterGroup, module *Module, fetcher middleware.Sess
 	resources := rg.Group("/admin/gmail/resources")
 	resources.Use(middleware.LoadSession(fetcher), middleware.AuthRequired(), middleware.CSRFRequired())
 	resources.GET("", middleware.PermissionRequired(checker, "core:resource", "read"), h.localResources)
-	resources.POST("/import", middleware.PermissionRequired(checker, "core:resource", "write"), h.importLocalResources)
+	resources.POST("/imports", middleware.PermissionRequired(checker, "core:resource", "write"), h.importLocalResources)
+	resources.GET("/imports/:importId", middleware.PermissionRequired(checker, "core:resource", "read"), h.localResourceImport)
 	resources.POST("/:resourceId/enable", middleware.PermissionRequired(checker, "core:resource", "operate"), h.enableLocalResource)
 	resources.POST("/:resourceId/disable", middleware.PermissionRequired(checker, "core:resource", "operate"), h.disableLocalResource)
 }
@@ -158,42 +166,125 @@ func (h *handler) localResources(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
-type localResourceImportRequest struct {
-	Content       string `json:"content" binding:"required"`
-	ErrorStrategy string `json:"errorStrategy"`
+type gmailResourceImportTaskResponse struct {
+	TaskID             string      `json:"taskId"`
+	BizType            string      `json:"bizType"`
+	BizID              uint64      `json:"bizId"`
+	Kind               string      `json:"kind"`
+	Status             string      `json:"status"`
+	Attempts           int         `json:"attempts"`
+	MaxAttempts        int         `json:"maxAttempts"`
+	RemainingAttempts  int         `json:"remainingAttempts"`
+	CredentialRevision *uint64     `json:"credentialRevision"`
+	QueuedAt           time.Time   `json:"queuedAt"`
+	StartedAt          *time.Time  `json:"startedAt"`
+	FinishedAt         *time.Time  `json:"finishedAt"`
+	UpdatedAt          time.Time   `json:"updatedAt"`
+	Progress           interface{} `json:"progress"`
+}
+
+type gmailResourceImportResponse struct {
+	ImportID      uint64                          `json:"importId"`
+	TaskID        string                          `json:"taskId"`
+	RequestID     string                          `json:"requestId"`
+	Status        string                          `json:"status"`
+	Accepted      int64                           `json:"accepted"`
+	Imported      int64                           `json:"imported"`
+	Skipped       int64                           `json:"skipped"`
+	LastSafeError *string                         `json:"lastSafeError"`
+	Task          gmailResourceImportTaskResponse `json:"task"`
+	Reused        bool                            `json:"reused"`
+	CreatedAt     time.Time                       `json:"createdAt"`
+	UpdatedAt     time.Time                       `json:"updatedAt"`
 }
 
 func (h *handler) importLocalResources(c *gin.Context) {
-	if c.Request.ContentLength > localResourceImportBodyMaxBytes {
-		writeLocalResourceImportTooLarge(c)
+	if strings.TrimSpace(c.GetHeader("Idempotency-Key")) == "" || len(strings.TrimSpace(c.GetHeader("Idempotency-Key"))) > 128 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid Idempotency-Key.", "requestId": middleware.GetRequestID(c)})
 		return
 	}
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, localResourceImportBodyMaxBytes)
-	var req localResourceImportRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		var maxBytesError *http.MaxBytesError
-		if errors.As(err, &maxBytesError) {
-			writeLocalResourceImportTooLarge(c)
-			return
-		}
-		writeGmailError(c, ErrInvalidLocalResource)
+	maxBytes := maxGmailResourceImportBytesValue()
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, gmailResourceImportMultipartMaxBytes(maxBytes))
+	file, header, err := c.Request.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid import file.", "requestId": middleware.GetRequestID(c)})
 		return
 	}
-	ownerUserID, ok := middleware.GetCurrentUserID(c)
+	defer file.Close()
+	ownerID, err := strconv.ParseUint(strings.TrimSpace(c.PostForm("ownerId")), 10, 64)
+	if err != nil || ownerID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid ownerId value.", "requestId": middleware.GetRequestID(c)})
+		return
+	}
+	if err := h.service.validateGmailResourceImportOwner(c.Request.Context(), uint(ownerID)); err != nil {
+		writeGmailError(c, err)
+		return
+	}
+	strategy, ok := normalizeGmailImportErrorStrategy(c.PostForm("errorStrategy"))
+	if !ok {
+		writeGmailError(c, ErrGmailImportInvalidCommand)
+		return
+	}
+	content, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
+	if err != nil || int64(len(content)) > maxBytes {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid import file.", "requestId": middleware.GetRequestID(c)})
+		return
+	}
+	operatorUserID, ok := middleware.GetCurrentUserID(c)
 	if !ok {
 		c.Status(http.StatusUnauthorized)
 		return
 	}
-	result, err := h.service.ImportLocalResources(c.Request.Context(), ownerUserID, req.Content, req.ErrorStrategy)
+	result, reused, err := h.service.AcceptAdminGmailTXTFile(
+		c.Request.Context(), operatorUserID, uint(ownerID), header.Filename, content, strategy,
+		c.GetHeader("Idempotency-Key"), middleware.GetRequestID(c), c.FullPath(),
+	)
 	if err != nil {
 		writeGmailError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	c.JSON(http.StatusAccepted, toGmailResourceImportResponse(result, reused))
 }
 
-func writeLocalResourceImportTooLarge(c *gin.Context) {
-	c.JSON(http.StatusRequestEntityTooLarge, gin.H{"message": "Gmail resource import is too large.", "requestId": middleware.GetRequestID(c)})
+func (h *handler) localResourceImport(c *gin.Context) {
+	importID, err := strconv.ParseUint(strings.TrimSpace(c.Param("importId")), 10, 64)
+	if err != nil || importID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid import ID.", "requestId": middleware.GetRequestID(c)})
+		return
+	}
+	result, err := h.service.GetAdminGmailResourceImport(c.Request.Context(), importID)
+	if err != nil {
+		writeGmailError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, toGmailResourceImportResponse(result, false))
+}
+
+func toGmailResourceImportResponse(item *GmailResourceImportStatusView, reused bool) gmailResourceImportResponse {
+	taskStatus := item.TaskStatus
+	if taskStatus == "" || taskStatus == "pending" || taskStatus == "uploading" {
+		taskStatus = "queued"
+	}
+	var safeError *string
+	if value := strings.TrimSpace(item.LastSafeError); value != "" {
+		safeError = &value
+	}
+	remaining := item.MaxAttempts - item.Attempts
+	if remaining < 0 {
+		remaining = 0
+	}
+	taskID := fmt.Sprintf("gmail_import:%d", item.ImportID)
+	return gmailResourceImportResponse{
+		ImportID: item.ImportID, TaskID: taskID, RequestID: item.RequestID,
+		Status: item.Status, Accepted: int64(item.Accepted), Imported: int64(item.Imported), Skipped: int64(item.Skipped),
+		LastSafeError: safeError, Reused: reused, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
+		Task: gmailResourceImportTaskResponse{
+			TaskID: taskID, BizType: "gmail_resource_import", BizID: item.ImportID,
+			Kind: "import", Status: taskStatus, Attempts: item.Attempts, MaxAttempts: item.MaxAttempts,
+			RemainingAttempts: remaining, QueuedAt: item.CreatedAt, StartedAt: item.StartedAt,
+			FinishedAt: item.FinishedAt, UpdatedAt: item.UpdatedAt,
+		},
+	}
 }
 
 func (h *handler) enableLocalResource(c *gin.Context) {
@@ -224,9 +315,15 @@ func writeGmailError(c *gin.Context, err error) {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Invalid Gmail upstream mapping.", "requestId": requestID})
 	case errors.Is(err, ErrInvalidLocalResource):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Invalid Gmail resource input.", "requestId": requestID})
+	case errors.Is(err, ErrGmailImportInvalidCommand), errors.Is(err, ErrGmailImportInvalidOwner):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Invalid resource command.", "requestId": requestID})
+	case errors.Is(err, ErrGmailImportConflict):
+		c.JSON(http.StatusConflict, gin.H{"message": "Idempotency key was already used for a different command.", "requestId": requestID})
+	case errors.Is(err, ErrGmailImportDependency), errors.Is(err, ErrGmailImportStorage):
+		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "Resource service is temporarily unavailable.", "requestId": requestID})
 	case errors.Is(err, ErrLocalResourceBusy):
 		c.JSON(http.StatusConflict, gin.H{"message": "Gmail resource is leased or sold.", "requestId": requestID})
-	case errors.Is(err, ErrRouteNotFound), errors.Is(err, ErrSessionMissing), errors.Is(err, ErrLocalResourceMissing):
+	case errors.Is(err, ErrRouteNotFound), errors.Is(err, ErrSessionMissing), errors.Is(err, ErrLocalResourceMissing), errors.Is(err, ErrGmailImportNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"message": "Resource not found.", "requestId": requestID})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "An unexpected error occurred.", "requestId": requestID})

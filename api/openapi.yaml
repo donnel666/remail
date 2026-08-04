@@ -10931,46 +10931,97 @@ paths:
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
 
-  /v1/admin/gmail/resources/import:
+  /v1/admin/gmail/resources/imports:
     post:
       operationId: postAdminGmailResourceImport
-      summary: Import local Gmail accounts as a write-only credential set
-      description: Each non-empty line uses `email----password----2FA secret----Gmail app password`. Existing available or disabled accounts are updated; leased and sold accounts are skipped. Credentials are never returned.
+      summary: Import Gmail resources for a selected owner
+      description: |
+        Requires `core:resource/write`, Session authentication, CSRF, and an idempotency key. The request stores the original TXT in private object storage and the asynchronous import state in Redis before returning 202. Each non-empty line uses `email----password----2FA secret----Gmail app password`. Parsing, canonical duplicate handling, Gmail resource creation or deleted-resource restoration, and IMAP validation run asynchronously. A restored resource keeps its original resource ID, moves to the selected owner, replaces its Gmail credentials with the imported values, and returns to `pending` validation. The private source TXT is retained; skipped or failed rows are retained in a private `gmail-import-failures.csv` artifact. Uploaded text, credentials, private object keys, and failure-row email values are never returned or written to ordinary logs.
       tags: [Core]
       security:
         - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
       requestBody:
         required: true
         content:
-          application/json:
+          multipart/form-data:
             schema:
-              $ref: "#/components/schemas/AdminGmailResourceImportRequest"
+              type: object
+              required:
+                - file
+                - ownerId
+                - errorStrategy
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: UTF-8 TXT with one `email----password----2FA secret----Gmail app password` credential per non-empty line.
+                ownerId:
+                  type: integer
+                  minimum: 1
+                errorStrategy:
+                  type: string
+                  enum: [skip, abort]
+              additionalProperties: false
       responses:
-        "200":
-          description: Import result counters
+        "202":
+          description: Asynchronous Redis-backed import accepted
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AdminGmailResourceImportResult"
+                $ref: "#/components/schemas/AdminGmailImportResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
-        "413":
-          description: Import request exceeds the 10 MiB limit
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/admin/gmail/resources/imports/{importId}:
+    get:
+      operationId: getAdminGmailResourceImport
+      summary: Get an administrator Gmail-resource import
+      description: Requires `core:resource/read`. Returns only safe counters, status, diagnostic text, and the Redis-backed task reference; it never returns uploaded text, credentials, private object keys, or row values containing an email address.
+      tags: [Core]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: importId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Import status
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Error"
-        "422":
-          $ref: "#/components/responses/UnprocessableEntity"
+                $ref: "#/components/schemas/AdminGmailImportResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 
   /v1/admin/gmail/resources/{resourceId}/enable:
     post:
       operationId: postAdminGmailResourceEnable
-      summary: Enable an available local Gmail account
+      summary: Enable a disabled local Gmail account and queue validation
       tags: [Core]
       security:
         - cookieAuth: []
@@ -18326,7 +18377,7 @@ components:
       enum: [queued, running, succeeded, failed, uncertain, canceled]
     AdminTaskBizType:
       type: string
-      enum: [microsoft_resource, domain_resource, microsoft_resource_import, microsoft_resource_bulk]
+      enum: [microsoft_resource, domain_resource, microsoft_resource_import, gmail_resource_import, microsoft_resource_bulk]
     AdminTaskProgress:
       type: object
       required:
@@ -18991,17 +19042,33 @@ components:
 
     AdminGmailResourceStatus:
       type: string
-      enum: [available, disabled, leased, sold]
+      enum: [available, pending, validating, normal, abnormal, disabled, leased, sold]
 
     AdminGmailResourceFacets:
       type: object
-      required: [all, available, disabled, leased, sold]
+      required: [all, available, pending, validating, normal, abnormal, disabled, leased, sold]
       properties:
         all:
           type: integer
           format: int64
           minimum: 0
         available:
+          type: integer
+          format: int64
+          minimum: 0
+        pending:
+          type: integer
+          format: int64
+          minimum: 0
+        validating:
+          type: integer
+          format: int64
+          minimum: 0
+        normal:
+          type: integer
+          format: int64
+          minimum: 0
+        abnormal:
           type: integer
           format: int64
           minimum: 0
@@ -19081,40 +19148,63 @@ components:
           $ref: "#/components/schemas/AdminGmailResourceFacets"
       additionalProperties: false
 
-    AdminGmailResourceImportRequest:
+    AdminGmailImportResponse:
       type: object
-      required: [content]
+      required:
+        - importId
+        - taskId
+        - requestId
+        - status
+        - accepted
+        - imported
+        - skipped
+        - lastSafeError
+        - task
+        - reused
+        - createdAt
+        - updatedAt
       properties:
-        content:
+        importId:
+          type: integer
+          minimum: 1
+        taskId:
           type: string
           minLength: 1
-          maxLength: 10485760
-          description: Write-only TXT content. Credential values are never returned.
-        errorStrategy:
+          description: Stable source-qualified identifier of the Redis-backed Gmail import task.
+        requestId:
           type: string
-          enum: [skip, abort]
-          default: skip
-      additionalProperties: false
-
-    AdminGmailResourceImportResult:
-      type: object
-      required: [imported, updated, skipped, invalid, total]
-      properties:
+          minLength: 1
+          maxLength: 64
+          description: Safe request identifier persisted with the Redis import state.
+        status:
+          type: string
+          enum: [processing, imported, failed]
+        accepted:
+          type: integer
+          format: int64
+          minimum: 0
         imported:
           type: integer
-          minimum: 0
-        updated:
-          type: integer
+          format: int64
           minimum: 0
         skipped:
           type: integer
+          format: int64
           minimum: 0
-        invalid:
-          type: integer
-          minimum: 0
-        total:
-          type: integer
-          minimum: 0
+        lastSafeError:
+          type: string
+          nullable: true
+        task:
+          $ref: "#/components/schemas/AdminTaskView"
+        reused:
+          type: boolean
+          description: True only when the POST replayed an existing import; status GET responses return false.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
       additionalProperties: false
 
     SMSBowerServiceList:

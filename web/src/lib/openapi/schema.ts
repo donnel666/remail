@@ -3835,7 +3835,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/admin/gmail/resources/import": {
+    "/v1/admin/gmail/resources/imports": {
         parameters: {
             query?: never;
             header?: never;
@@ -3845,10 +3845,30 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Import local Gmail accounts as a write-only credential set
-         * @description Each non-empty line uses `email----password----2FA secret----Gmail app password`. Existing available or disabled accounts are updated; leased and sold accounts are skipped. Credentials are never returned.
+         * Import Gmail resources for a selected owner
+         * @description Requires `core:resource/write`, Session authentication, CSRF, and an idempotency key. The request stores the original TXT in private object storage and the asynchronous import state in Redis before returning 202. Each non-empty line uses `email----password----2FA secret----Gmail app password`. Parsing, canonical duplicate handling, Gmail resource creation or deleted-resource restoration, and IMAP validation run asynchronously. A restored resource keeps its original resource ID, moves to the selected owner, replaces its Gmail credentials with the imported values, and returns to `pending` validation. The private source TXT is retained; skipped or failed rows are retained in a private `gmail-import-failures.csv` artifact. Uploaded text, credentials, private object keys, and failure-row email values are never returned or written to ordinary logs.
          */
         post: operations["postAdminGmailResourceImport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/gmail/resources/imports/{importId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get an administrator Gmail-resource import
+         * @description Requires `core:resource/read`. Returns only safe counters, status, diagnostic text, and the Redis-backed task reference; it never returns uploaded text, credentials, private object keys, or row values containing an email address.
+         */
+        get: operations["getAdminGmailResourceImport"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3864,7 +3884,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Enable an available local Gmail account */
+        /** Enable a disabled local Gmail account and queue validation */
         post: operations["postAdminGmailResourceEnable"];
         delete?: never;
         options?: never;
@@ -6760,7 +6780,7 @@ export interface components {
         /** @enum {string} */
         AdminTaskStatus: "queued" | "running" | "succeeded" | "failed" | "uncertain" | "canceled";
         /** @enum {string} */
-        AdminTaskBizType: "microsoft_resource" | "domain_resource" | "microsoft_resource_import" | "microsoft_resource_bulk";
+        AdminTaskBizType: "microsoft_resource" | "domain_resource" | "microsoft_resource_import" | "gmail_resource_import" | "microsoft_resource_bulk";
         AdminTaskProgress: {
             /** Format: int64 */
             total: number;
@@ -7018,12 +7038,20 @@ export interface components {
             lastSuccessAt?: string | null;
         };
         /** @enum {string} */
-        AdminGmailResourceStatus: "available" | "disabled" | "leased" | "sold";
+        AdminGmailResourceStatus: "available" | "pending" | "validating" | "normal" | "abnormal" | "disabled" | "leased" | "sold";
         AdminGmailResourceFacets: {
             /** Format: int64 */
             all: number;
             /** Format: int64 */
             available: number;
+            /** Format: int64 */
+            pending: number;
+            /** Format: int64 */
+            validating: number;
+            /** Format: int64 */
+            normal: number;
+            /** Format: int64 */
+            abnormal: number;
             /** Format: int64 */
             disabled: number;
             /** Format: int64 */
@@ -7055,21 +7083,28 @@ export interface components {
             limit: number;
             facets: components["schemas"]["AdminGmailResourceFacets"];
         };
-        AdminGmailResourceImportRequest: {
-            /** @description Write-only TXT content. Credential values are never returned. */
-            content: string;
-            /**
-             * @default skip
-             * @enum {string}
-             */
-            errorStrategy: "skip" | "abort";
-        };
-        AdminGmailResourceImportResult: {
+        AdminGmailImportResponse: {
+            importId: number;
+            /** @description Stable source-qualified identifier of the Redis-backed Gmail import task. */
+            taskId: string;
+            /** @description Safe request identifier persisted with the Redis import state. */
+            requestId: string;
+            /** @enum {string} */
+            status: "processing" | "imported" | "failed";
+            /** Format: int64 */
+            accepted: number;
+            /** Format: int64 */
             imported: number;
-            updated: number;
+            /** Format: int64 */
             skipped: number;
-            invalid: number;
-            total: number;
+            lastSafeError: string | null;
+            task: components["schemas"]["AdminTaskView"];
+            /** @description True only when the POST replayed an existing import; status GET responses return false. */
+            reused: boolean;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
         };
         SMSBowerServiceList: {
             items: components["schemas"]["SMSBowerServiceItem"][];
@@ -19541,37 +19576,69 @@ export interface operations {
             header: {
                 /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
             };
             path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AdminGmailResourceImportRequest"];
+                "multipart/form-data": {
+                    /**
+                     * Format: binary
+                     * @description UTF-8 TXT with one `email----password----2FA secret----Gmail app password` credential per non-empty line.
+                     */
+                    file: string;
+                    ownerId: number;
+                    /** @enum {string} */
+                    errorStrategy: "skip" | "abort";
+                };
             };
         };
         responses: {
-            /** @description Import result counters */
+            /** @description Asynchronous Redis-backed import accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminGmailImportResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getAdminGmailResourceImport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                importId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Import status */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AdminGmailResourceImportResult"];
+                    "application/json": components["schemas"]["AdminGmailImportResponse"];
                 };
             };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description Import request exceeds the 10 MiB limit */
-            413: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            422: components["responses"]["UnprocessableEntity"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     postAdminGmailResourceEnable: {

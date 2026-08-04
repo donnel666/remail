@@ -31,8 +31,11 @@ import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import {
   importAdminGmailResources,
+  listAdminGmailOwners,
   listAdminGmailResources,
   setAdminGmailResourceEnabled,
+  type AdminGmailImportErrorStrategy,
+  type AdminGmailOwner,
   type AdminGmailResourceItem,
   type AdminGmailResourceList,
   type AdminGmailResourceStatus,
@@ -47,6 +50,10 @@ const statusMeta: Record<
   { color: "green" | "grey" | "orange" | "blue"; label: string }
 > = {
   available: { color: "green", label: "Available" },
+  pending: { color: "blue", label: "Pending" },
+  validating: { color: "orange", label: "Validating" },
+  normal: { color: "green", label: "Normal" },
+  abnormal: { color: "orange", label: "Abnormal" },
   disabled: { color: "grey", label: "Disabled" },
   leased: { color: "orange", label: "Leased" },
   sold: { color: "blue", label: "Sold" },
@@ -70,15 +77,19 @@ function ConfiguredTag({ configured }: { configured: boolean }) {
 function ImportGmailModal({
   onCancel,
   onImported,
+  owners,
   visible,
 }: {
   onCancel: () => void;
   onImported: () => Promise<void>;
+  owners: AdminGmailOwner[];
   visible: boolean;
 }) {
   const { t } = useTranslation();
   const [content, setContent] = useState("");
-  const [errorStrategy, setErrorStrategy] = useState<"skip" | "abort">("skip");
+  const [ownerId, setOwnerId] = useState<number | undefined>();
+  const [errorStrategy, setErrorStrategy] =
+    useState<AdminGmailImportErrorStrategy>("skip");
   const [submitting, setSubmitting] = useState(false);
   const [fileName, setFileName] = useState("");
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -90,17 +101,14 @@ function ImportGmailModal({
   useEffect(() => {
     if (!visible) return;
     setContent("");
+    setOwnerId(owners.find((owner) => owner.enabled)?.id ?? owners[0]?.id);
     setErrorStrategy("skip");
     setFileName("");
     if (fileRef.current) fileRef.current.value = "";
-  }, [visible]);
+  }, [owners, visible]);
 
   const selectFile = async (file?: File) => {
     if (!file) return;
-    if (file.size > 10 * 1024 * 1024) {
-      Toast.warning(t("Gmail resource import is too large."));
-      return;
-    }
     try {
       setContent(await file.text());
       setFileName(file.name);
@@ -110,6 +118,10 @@ function ImportGmailModal({
   };
 
   const submit = async () => {
+    if (!ownerId) {
+      Toast.warning(t("Please select an owner."));
+      return;
+    }
     if (!lineCount) {
       Toast.warning(t("Please enter Gmail accounts."));
       return;
@@ -120,7 +132,11 @@ function ImportGmailModal({
       result = await importAdminGmailResources({
         content,
         errorStrategy,
+        ownerId,
       });
+      if (result.status === "failed") {
+        throw new Error(result.lastSafeError || "Gmail import failed.");
+      }
     } catch (error) {
       Toast.error(getIamErrorMessage(t, error, "Gmail import failed."));
       setSubmitting(false);
@@ -128,15 +144,13 @@ function ImportGmailModal({
     }
     Toast.success(
       t("Gmail accounts imported.", {
-        imported: result.imported,
-        updated: result.updated,
+        count: result.imported,
       }),
     );
-    if (result.skipped || result.invalid) {
+    if (result.skipped) {
       Toast.warning(
         t("Gmail import skipped entries.", {
-          invalid: result.invalid,
-          skipped: result.skipped,
+          count: result.skipped,
         }),
       );
     }
@@ -162,6 +176,18 @@ function ImportGmailModal({
       width="min(666px, calc(100vw - 32px))"
     >
       <div className="space-y-4 py-1">
+        <Select
+          disabled={owners.length === 0}
+          onChange={(value) => setOwnerId(Number(value))}
+          optionList={owners.map((owner) => ({
+            disabled: !owner.enabled,
+            label: `${owner.email} · ${owner.nickname} · ${owner.groupName}`,
+            value: owner.id,
+          }))}
+          placeholder={t("Please select an owner.")}
+          style={{ width: "100%" }}
+          value={ownerId}
+        />
         <div className="flex flex-wrap items-center gap-2">
           <Button icon={<FileText size={14} />} onClick={() => fileRef.current?.click()} type="tertiary">
             {t("TXT file")}
@@ -221,10 +247,23 @@ export default function AdminGmailEmails() {
   const [debouncedSearch, flushSearch] = useDebouncedValue(search);
   const [status, setStatus] = useState<StatusFilter>("all");
   const [response, setResponse] = useState<AdminGmailResourceList | null>(null);
+  const [owners, setOwners] = useState<AdminGmailOwner[]>([]);
   const [loading, setLoading] = useState(true);
   const [importVisible, setImportVisible] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
   const listRequestRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void listAdminGmailOwners("", controller.signal)
+      .then((items) => {
+        if (!controller.signal.aborted) setOwners(items);
+      })
+      .catch(() => {
+        // The resource list remains usable if owner choices cannot be loaded.
+      });
+    return () => controller.abort();
+  }, []);
 
   const canWrite = hasPermissionKey(
     currentUser,
@@ -287,6 +326,10 @@ export default function AdminGmailEmails() {
   const facets = response?.facets ?? {
     all: 0,
     available: 0,
+    pending: 0,
+    validating: 0,
+    normal: 0,
+    abnormal: 0,
     disabled: 0,
     leased: 0,
     sold: 0,
@@ -362,7 +405,7 @@ export default function AdminGmailEmails() {
       title: t("Actions"),
       width: 110,
       render: (_value: unknown, item: AdminGmailResourceItem) =>
-        canOperate && (item.status === "available" || item.status === "disabled") ? (
+        canOperate && item.status !== "leased" && item.status !== "sold" ? (
           <Button
             loading={busyId === item.id}
             onClick={() => void toggleResource(item)}
@@ -458,6 +501,7 @@ export default function AdminGmailEmails() {
       <ImportGmailModal
         onCancel={() => setImportVisible(false)}
         onImported={load}
+        owners={owners}
         visible={importVisible && canWrite}
       />
     </>

@@ -1,11 +1,11 @@
 package gmail
 
 import (
-	"bufio"
 	"context"
 	"encoding/base32"
 	"errors"
 	"fmt"
+	"log/slog"
 	stdmail "net/mail"
 	"strings"
 	"time"
@@ -18,11 +18,6 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-const (
-	localResourceImportMaxBytes     = 10 << 20
-	localResourceImportBodyMaxBytes = localResourceImportMaxBytes*6 + 1024
-)
-
 type LocalResourceListFilter struct {
 	Search string
 	Status string
@@ -31,6 +26,7 @@ type LocalResourceListFilter struct {
 }
 
 type localResourceImportLine struct {
+	lineNumber      int
 	email           string
 	identity        string
 	password        string
@@ -52,11 +48,18 @@ func (s *Service) ListLocalResources(ctx context.Context, filter LocalResourceLi
 	}
 
 	db := s.dbFor(ctx).Model(&localResourceModel{})
+	if filter.Status == "" {
+		db = db.Where("status <> ?", LocalResourceDeleted)
+	}
 	if filter.Search != "" {
 		db = db.Where("email LIKE ?", "%"+filter.Search+"%")
 	}
 	if filter.Status != "" {
-		db = db.Where("status = ?", filter.Status)
+		if filter.Status == LocalResourceNormal {
+			db = db.Where("status IN (?, ?)", LocalResourceNormal, LocalResourceAvailable)
+		} else {
+			db = db.Where("status = ?", filter.Status)
+		}
 	}
 	var total int64
 	if err := db.Count(&total).Error; err != nil {
@@ -112,10 +115,21 @@ func (s *Service) localResourceFacets(ctx context.Context, search string) (Local
 	}
 	var facets LocalResourceFacets
 	for _, item := range rows {
+		if item.Status == LocalResourceDeleted {
+			continue
+		}
 		facets.All += item.Count
 		switch item.Status {
 		case LocalResourceAvailable:
 			facets.Available = item.Count
+		case LocalResourcePending:
+			facets.Pending = item.Count
+		case LocalResourceValidating:
+			facets.Validating = item.Count
+		case LocalResourceNormal:
+			facets.Normal = item.Count
+		case LocalResourceAbnormal:
+			facets.Abnormal = item.Count
 		case LocalResourceDisabled:
 			facets.Disabled = item.Count
 		case LocalResourceLeased:
@@ -125,111 +139,6 @@ func (s *Service) localResourceFacets(ctx context.Context, search string) (Local
 		}
 	}
 	return facets, nil
-}
-
-func (s *Service) ImportLocalResources(ctx context.Context, ownerUserID uint, content, strategy string) (*LocalResourceImportResult, error) {
-	strategy = strings.ToLower(strings.TrimSpace(strategy))
-	if strategy == "" {
-		strategy = "skip"
-	}
-	if ownerUserID == 0 || strategy != "skip" && strategy != "abort" || len(content) == 0 || len(content) > localResourceImportMaxBytes {
-		return nil, ErrInvalidLocalResource
-	}
-
-	result := &LocalResourceImportResult{}
-	lines := make([]localResourceImportLine, 0)
-	seen := make(map[string]struct{})
-	scanner := bufio.NewScanner(strings.NewReader(content))
-	scanner.Buffer(make([]byte, 64*1024), localResourceImportMaxBytes)
-	for scanner.Scan() {
-		raw := strings.TrimSuffix(scanner.Text(), "\r")
-		if strings.TrimSpace(raw) == "" {
-			continue
-		}
-		result.Total++
-		line, ok := parseLocalResourceImportLine(raw)
-		if !ok {
-			result.Invalid++
-			continue
-		}
-		if _, exists := seen[line.identity]; exists {
-			result.Skipped++
-			continue
-		}
-		seen[line.identity] = struct{}{}
-		lines = append(lines, line)
-	}
-	if err := scanner.Err(); err != nil || result.Total == 0 || strategy == "abort" && result.Invalid > 0 {
-		return nil, ErrInvalidLocalResource
-	}
-
-	err := s.dbFor(ctx).Transaction(func(tx *gorm.DB) error {
-		identities := make([]string, len(lines))
-		for i := range lines {
-			identities[i] = lines[i].identity
-		}
-		var existing []localResourceModel
-		if len(identities) > 0 {
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id, identity, status").Where("identity IN ?", identities).Find(&existing).Error; err != nil {
-				return err
-			}
-		}
-		byIdentity := make(map[string]localResourceModel, len(existing))
-		for _, item := range existing {
-			byIdentity[item.Identity] = item
-		}
-		create := make([]localResourceModel, 0, len(lines))
-		for _, line := range lines {
-			item, exists := byIdentity[line.identity]
-			if !exists {
-				create = append(create, localResourceModel{
-					Email: line.email, Identity: line.identity, Password: line.password, TwoFactorSecret: line.twoFactorSecret,
-					AppPassword: line.appPassword, Status: LocalResourceAvailable,
-				})
-				continue
-			}
-			if item.Status == LocalResourceLeased || item.Status == LocalResourceSold {
-				result.Skipped++
-				continue
-			}
-			updated := tx.Model(&localResourceModel{}).Where("id = ? AND status IN ?", item.ID, []string{LocalResourceAvailable, LocalResourceDisabled}).Updates(map[string]any{
-				"email":    line.email,
-				"password": line.password, "two_factor_secret": line.twoFactorSecret,
-				"app_password": line.appPassword, "status": LocalResourceAvailable, "last_safe_error": "",
-			})
-			if updated.Error != nil {
-				return updated.Error
-			}
-			if updated.RowsAffected != 1 {
-				result.Skipped++
-				continue
-			}
-			result.Updated++
-		}
-		if len(create) > 0 {
-			roots := make([]resourceRootModel, len(create))
-			for i := range roots {
-				roots[i] = resourceRootModel{Type: "gmail", OwnerUserID: ownerUserID}
-			}
-			if err := tx.CreateInBatches(&roots, 500).Error; err != nil {
-				return err
-			}
-			for i := range create {
-				create[i].ID = roots[i].ID
-				create[i].ResourceType = "gmail"
-				create[i].OwnerUserID = ownerUserID
-			}
-			if err := tx.CreateInBatches(create, 500).Error; err != nil {
-				return err
-			}
-			result.Imported += len(create)
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("import local Gmail resources: %w", err)
-	}
-	return result, nil
 }
 
 func parseLocalResourceImportLine(raw string) (localResourceImportLine, bool) {
@@ -356,33 +265,46 @@ func (s *Service) SetLocalResourceEnabled(ctx context.Context, resourceID uint, 
 	if resourceID == 0 {
 		return ErrLocalResourceMissing
 	}
-	return s.dbFor(ctx).Transaction(func(tx *gorm.DB) error {
-		var item localResourceModel
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&item, resourceID).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return ErrLocalResourceMissing
-			}
+	shouldSchedule := false
+	err := s.dbFor(ctx).Transaction(func(tx *gorm.DB) error {
+		item, err := lockLocalResource(tx, resourceID)
+		if err != nil {
 			return err
+		}
+		if item.Status == LocalResourceDeleted {
+			return ErrLocalResourceMissing
 		}
 		if item.Status == LocalResourceLeased || item.Status == LocalResourceSold {
 			return ErrLocalResourceBusy
 		}
-		next := LocalResourceDisabled
 		if enabled {
-			next = LocalResourceAvailable
+			if item.Status != LocalResourceDisabled {
+				return nil
+			}
+			shouldSchedule = true
+			return tx.Model(&localResourceModel{}).Where("id = ?", item.ID).Updates(map[string]any{
+				"status": LocalResourcePending, "last_safe_error": "", "last_checked_at": nil,
+			}).Error
 		}
-		if item.Status == next {
+		if item.Status == LocalResourceDisabled {
 			return nil
 		}
-		return tx.Model(&localResourceModel{}).Where("id = ?", item.ID).Updates(map[string]any{
-			"status": next, "last_safe_error": "",
-		}).Error
+		return tx.Model(&localResourceModel{}).Where("id = ?", item.ID).
+			Update("status", LocalResourceDisabled).Error
 	})
+	if err != nil || !shouldSchedule {
+		return err
+	}
+	if err := s.scheduleLocalResourceValidation(ctx, resourceID); err != nil {
+		slog.Warn("schedule local Gmail validation failed", "resource_id", resourceID, "error", err)
+	}
+	return nil
 }
 
 func isLocalResourceStatus(status string) bool {
 	switch status {
-	case LocalResourceAvailable, LocalResourceDisabled, LocalResourceLeased, LocalResourceSold:
+	case LocalResourceAvailable, LocalResourcePending, LocalResourceValidating, LocalResourceNormal,
+		LocalResourceAbnormal, LocalResourceDisabled, LocalResourceLeased, LocalResourceSold:
 		return true
 	default:
 		return false

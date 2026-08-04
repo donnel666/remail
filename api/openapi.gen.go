@@ -421,18 +421,21 @@ func (e AdminDomainItemStatus) Valid() bool {
 	}
 }
 
-// Defines values for AdminGmailResourceImportRequestErrorStrategy.
+// Defines values for AdminGmailImportResponseStatus.
 const (
-	AdminGmailResourceImportRequestErrorStrategyAbort AdminGmailResourceImportRequestErrorStrategy = "abort"
-	AdminGmailResourceImportRequestErrorStrategySkip  AdminGmailResourceImportRequestErrorStrategy = "skip"
+	AdminGmailImportResponseStatusFailed     AdminGmailImportResponseStatus = "failed"
+	AdminGmailImportResponseStatusImported   AdminGmailImportResponseStatus = "imported"
+	AdminGmailImportResponseStatusProcessing AdminGmailImportResponseStatus = "processing"
 )
 
-// Valid indicates whether the value is a known member of the AdminGmailResourceImportRequestErrorStrategy enum.
-func (e AdminGmailResourceImportRequestErrorStrategy) Valid() bool {
+// Valid indicates whether the value is a known member of the AdminGmailImportResponseStatus enum.
+func (e AdminGmailImportResponseStatus) Valid() bool {
 	switch e {
-	case AdminGmailResourceImportRequestErrorStrategyAbort:
+	case AdminGmailImportResponseStatusFailed:
 		return true
-	case AdminGmailResourceImportRequestErrorStrategySkip:
+	case AdminGmailImportResponseStatusImported:
+		return true
+	case AdminGmailImportResponseStatusProcessing:
 		return true
 	default:
 		return false
@@ -441,22 +444,34 @@ func (e AdminGmailResourceImportRequestErrorStrategy) Valid() bool {
 
 // Defines values for AdminGmailResourceStatus.
 const (
-	AdminGmailResourceStatusAvailable AdminGmailResourceStatus = "available"
-	AdminGmailResourceStatusDisabled  AdminGmailResourceStatus = "disabled"
-	AdminGmailResourceStatusLeased    AdminGmailResourceStatus = "leased"
-	AdminGmailResourceStatusSold      AdminGmailResourceStatus = "sold"
+	AdminGmailResourceStatusAbnormal   AdminGmailResourceStatus = "abnormal"
+	AdminGmailResourceStatusAvailable  AdminGmailResourceStatus = "available"
+	AdminGmailResourceStatusDisabled   AdminGmailResourceStatus = "disabled"
+	AdminGmailResourceStatusLeased     AdminGmailResourceStatus = "leased"
+	AdminGmailResourceStatusNormal     AdminGmailResourceStatus = "normal"
+	AdminGmailResourceStatusPending    AdminGmailResourceStatus = "pending"
+	AdminGmailResourceStatusSold       AdminGmailResourceStatus = "sold"
+	AdminGmailResourceStatusValidating AdminGmailResourceStatus = "validating"
 )
 
 // Valid indicates whether the value is a known member of the AdminGmailResourceStatus enum.
 func (e AdminGmailResourceStatus) Valid() bool {
 	switch e {
+	case AdminGmailResourceStatusAbnormal:
+		return true
 	case AdminGmailResourceStatusAvailable:
 		return true
 	case AdminGmailResourceStatusDisabled:
 		return true
 	case AdminGmailResourceStatusLeased:
 		return true
+	case AdminGmailResourceStatusNormal:
+		return true
+	case AdminGmailResourceStatusPending:
+		return true
 	case AdminGmailResourceStatusSold:
+		return true
+	case AdminGmailResourceStatusValidating:
 		return true
 	default:
 		return false
@@ -910,6 +925,7 @@ func (e AdminSystemLogItemCategory) Valid() bool {
 // Defines values for AdminTaskBizType.
 const (
 	AdminTaskBizTypeDomainResource          AdminTaskBizType = "domain_resource"
+	AdminTaskBizTypeGmailResourceImport     AdminTaskBizType = "gmail_resource_import"
 	AdminTaskBizTypeMicrosoftResource       AdminTaskBizType = "microsoft_resource"
 	AdminTaskBizTypeMicrosoftResourceBulk   AdminTaskBizType = "microsoft_resource_bulk"
 	AdminTaskBizTypeMicrosoftResourceImport AdminTaskBizType = "microsoft_resource_import"
@@ -919,6 +935,8 @@ const (
 func (e AdminTaskBizType) Valid() bool {
 	switch e {
 	case AdminTaskBizTypeDomainResource:
+		return true
+	case AdminTaskBizTypeGmailResourceImport:
 		return true
 	case AdminTaskBizTypeMicrosoftResource:
 		return true
@@ -3250,6 +3268,24 @@ func (e GetAdminDomainsParamsStatus) Valid() bool {
 	}
 }
 
+// Defines values for PostAdminGmailResourceImportMultipartBodyErrorStrategy.
+const (
+	PostAdminGmailResourceImportMultipartBodyErrorStrategyAbort PostAdminGmailResourceImportMultipartBodyErrorStrategy = "abort"
+	PostAdminGmailResourceImportMultipartBodyErrorStrategySkip  PostAdminGmailResourceImportMultipartBodyErrorStrategy = "skip"
+)
+
+// Valid indicates whether the value is a known member of the PostAdminGmailResourceImportMultipartBodyErrorStrategy enum.
+func (e PostAdminGmailResourceImportMultipartBodyErrorStrategy) Valid() bool {
+	switch e {
+	case PostAdminGmailResourceImportMultipartBodyErrorStrategyAbort:
+		return true
+	case PostAdminGmailResourceImportMultipartBodyErrorStrategySkip:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetAdminInvitesParamsKind.
 const (
 	GetAdminInvitesParamsKindAdmin    GetAdminInvitesParamsKind = "admin"
@@ -3924,25 +3960,25 @@ func (e GetRechargesParamsScope) Valid() bool {
 
 // Defines values for GetRechargesParamsStatus.
 const (
-	GetRechargesParamsStatusCallback   GetRechargesParamsStatus = "callback"
-	GetRechargesParamsStatusCredited   GetRechargesParamsStatus = "credited"
-	GetRechargesParamsStatusFailed     GetRechargesParamsStatus = "failed"
-	GetRechargesParamsStatusPaying     GetRechargesParamsStatus = "paying"
-	GetRechargesParamsStatusReconciled GetRechargesParamsStatus = "reconciled"
+	Callback   GetRechargesParamsStatus = "callback"
+	Credited   GetRechargesParamsStatus = "credited"
+	Failed     GetRechargesParamsStatus = "failed"
+	Paying     GetRechargesParamsStatus = "paying"
+	Reconciled GetRechargesParamsStatus = "reconciled"
 )
 
 // Valid indicates whether the value is a known member of the GetRechargesParamsStatus enum.
 func (e GetRechargesParamsStatus) Valid() bool {
 	switch e {
-	case GetRechargesParamsStatusCallback:
+	case Callback:
 		return true
-	case GetRechargesParamsStatusCredited:
+	case Credited:
 		return true
-	case GetRechargesParamsStatusFailed:
+	case Failed:
 		return true
-	case GetRechargesParamsStatusPaying:
+	case Paying:
 		return true
-	case GetRechargesParamsStatusReconciled:
+	case Reconciled:
 		return true
 	default:
 		return false
@@ -4619,32 +4655,42 @@ type AdminDomainValidationResponse struct {
 	Queued int `json:"queued"`
 }
 
+// AdminGmailImportResponse defines model for AdminGmailImportResponse.
+type AdminGmailImportResponse struct {
+	Accepted      int64     `json:"accepted"`
+	CreatedAt     time.Time `json:"createdAt"`
+	ImportId      int       `json:"importId"`
+	Imported      int64     `json:"imported"`
+	LastSafeError *string   `json:"lastSafeError"`
+
+	// RequestId Safe request identifier persisted with the Redis import state.
+	RequestId string `json:"requestId"`
+
+	// Reused True only when the POST replayed an existing import; status GET responses return false.
+	Reused  bool                           `json:"reused"`
+	Skipped int64                          `json:"skipped"`
+	Status  AdminGmailImportResponseStatus `json:"status"`
+	Task    AdminTaskView                  `json:"task"`
+
+	// TaskId Stable source-qualified identifier of the Redis-backed Gmail import task.
+	TaskId    string    `json:"taskId"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// AdminGmailImportResponseStatus defines model for AdminGmailImportResponse.Status.
+type AdminGmailImportResponseStatus string
+
 // AdminGmailResourceFacets defines model for AdminGmailResourceFacets.
 type AdminGmailResourceFacets struct {
-	All       int64 `json:"all"`
-	Available int64 `json:"available"`
-	Disabled  int64 `json:"disabled"`
-	Leased    int64 `json:"leased"`
-	Sold      int64 `json:"sold"`
-}
-
-// AdminGmailResourceImportRequest defines model for AdminGmailResourceImportRequest.
-type AdminGmailResourceImportRequest struct {
-	// Content Write-only TXT content. Credential values are never returned.
-	Content       string                                        `json:"content"`
-	ErrorStrategy *AdminGmailResourceImportRequestErrorStrategy `json:"errorStrategy,omitempty"`
-}
-
-// AdminGmailResourceImportRequestErrorStrategy defines model for AdminGmailResourceImportRequest.ErrorStrategy.
-type AdminGmailResourceImportRequestErrorStrategy string
-
-// AdminGmailResourceImportResult defines model for AdminGmailResourceImportResult.
-type AdminGmailResourceImportResult struct {
-	Imported int `json:"imported"`
-	Invalid  int `json:"invalid"`
-	Skipped  int `json:"skipped"`
-	Total    int `json:"total"`
-	Updated  int `json:"updated"`
+	Abnormal   int64 `json:"abnormal"`
+	All        int64 `json:"all"`
+	Available  int64 `json:"available"`
+	Disabled   int64 `json:"disabled"`
+	Leased     int64 `json:"leased"`
+	Normal     int64 `json:"normal"`
+	Pending    int64 `json:"pending"`
+	Sold       int64 `json:"sold"`
+	Validating int64 `json:"validating"`
 }
 
 // AdminGmailResourceItem defines model for AdminGmailResourceItem.
@@ -8639,11 +8685,26 @@ type GetAdminGmailResourcesParams struct {
 	Status *AdminGmailResourceStatus `form:"status,omitempty" json:"status,omitempty"`
 }
 
+// PostAdminGmailResourceImportMultipartBody defines parameters for PostAdminGmailResourceImport.
+type PostAdminGmailResourceImportMultipartBody struct {
+	ErrorStrategy PostAdminGmailResourceImportMultipartBodyErrorStrategy `json:"errorStrategy"`
+
+	// File UTF-8 TXT with one `email----password----2FA secret----Gmail app password` credential per non-empty line.
+	File    openapi_types.File `json:"file"`
+	OwnerId int                `json:"ownerId"`
+}
+
 // PostAdminGmailResourceImportParams defines parameters for PostAdminGmailResourceImport.
 type PostAdminGmailResourceImportParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
 }
+
+// PostAdminGmailResourceImportMultipartBodyErrorStrategy defines parameters for PostAdminGmailResourceImport.
+type PostAdminGmailResourceImportMultipartBodyErrorStrategy string
 
 // PostAdminGmailResourceDisableParams defines parameters for PostAdminGmailResourceDisable.
 type PostAdminGmailResourceDisableParams struct {
@@ -10120,8 +10181,8 @@ type PatchAdminDomainJSONRequestBody = PatchAdminDomainRequest
 // PostAdminDomainDnsStatusJSONRequestBody defines body for PostAdminDomainDnsStatus for application/json ContentType.
 type PostAdminDomainDnsStatusJSONRequestBody = AdminDomainDnsStatusRequest
 
-// PostAdminGmailResourceImportJSONRequestBody defines body for PostAdminGmailResourceImport for application/json ContentType.
-type PostAdminGmailResourceImportJSONRequestBody = AdminGmailResourceImportRequest
+// PostAdminGmailResourceImportMultipartRequestBody defines body for PostAdminGmailResourceImport for multipart/form-data ContentType.
+type PostAdminGmailResourceImportMultipartRequestBody PostAdminGmailResourceImportMultipartBody
 
 // PostAdminInviteJSONRequestBody defines body for PostAdminInvite for application/json ContentType.
 type PostAdminInviteJSONRequestBody = AdminCreateInviteRequest
@@ -11109,13 +11170,16 @@ type ServerInterface interface {
 	// List locally managed Gmail accounts without credentials
 	// (GET /v1/admin/gmail/resources)
 	GetAdminGmailResources(c *gin.Context, params GetAdminGmailResourcesParams)
-	// Import local Gmail accounts as a write-only credential set
-	// (POST /v1/admin/gmail/resources/import)
+	// Import Gmail resources for a selected owner
+	// (POST /v1/admin/gmail/resources/imports)
 	PostAdminGmailResourceImport(c *gin.Context, params PostAdminGmailResourceImportParams)
+	// Get an administrator Gmail-resource import
+	// (GET /v1/admin/gmail/resources/imports/{importId})
+	GetAdminGmailResourceImport(c *gin.Context, importId int)
 	// Disable an available local Gmail account
 	// (POST /v1/admin/gmail/resources/{resourceId}/disable)
 	PostAdminGmailResourceDisable(c *gin.Context, resourceId int, params PostAdminGmailResourceDisableParams)
-	// Enable an available local Gmail account
+	// Enable a disabled local Gmail account and queue validation
 	// (POST /v1/admin/gmail/resources/{resourceId}/enable)
 	PostAdminGmailResourceEnable(c *gin.Context, resourceId int, params PostAdminGmailResourceEnableParams)
 	// List invites
@@ -13947,6 +14011,28 @@ func (siw *ServerInterfaceWrapper) PostAdminGmailResourceImport(c *gin.Context) 
 		return
 	}
 
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
 		if c.IsAborted() {
@@ -13955,6 +14041,33 @@ func (siw *ServerInterfaceWrapper) PostAdminGmailResourceImport(c *gin.Context) 
 	}
 
 	siw.Handler.PostAdminGmailResourceImport(c, params)
+}
+
+// GetAdminGmailResourceImport operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminGmailResourceImport(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "importId" -------------
+	var importId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "importId", c.Param("importId"), &importId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter importId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminGmailResourceImport(c, importId)
 }
 
 // PostAdminGmailResourceDisable operation middleware
@@ -24510,7 +24623,8 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/domains/:domainId/validate", wrapper.PostAdminDomainValidate)
 	router.GET(options.BaseURL+"/v1/admin/finance/summary", wrapper.GetAdminFinanceSummary)
 	router.GET(options.BaseURL+"/v1/admin/gmail/resources", wrapper.GetAdminGmailResources)
-	router.POST(options.BaseURL+"/v1/admin/gmail/resources/import", wrapper.PostAdminGmailResourceImport)
+	router.POST(options.BaseURL+"/v1/admin/gmail/resources/imports", wrapper.PostAdminGmailResourceImport)
+	router.GET(options.BaseURL+"/v1/admin/gmail/resources/imports/:importId", wrapper.GetAdminGmailResourceImport)
 	router.POST(options.BaseURL+"/v1/admin/gmail/resources/:resourceId/disable", wrapper.PostAdminGmailResourceDisable)
 	router.POST(options.BaseURL+"/v1/admin/gmail/resources/:resourceId/enable", wrapper.PostAdminGmailResourceEnable)
 	router.GET(options.BaseURL+"/v1/admin/invites", wrapper.GetAdminInvites)

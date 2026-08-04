@@ -10,10 +10,19 @@ const (
 	SourceSMSBower = "smsbower"
 	SourceLocal    = "local"
 
-	LocalResourceAvailable = "available"
-	LocalResourceDisabled  = "disabled"
-	LocalResourceLeased    = "leased"
-	LocalResourceSold      = "sold"
+	LocalResourceAvailable  = "available"
+	LocalResourceDisabled   = "disabled"
+	LocalResourceLeased     = "leased"
+	LocalResourceSold       = "sold"
+	LocalResourcePending    = "pending"
+	LocalResourceValidating = "validating"
+	LocalResourceNormal     = "normal"
+	LocalResourceAbnormal   = "abnormal"
+	LocalResourceDeleted    = "deleted"
+
+	localResourceRollbackNormal = LocalResourceAvailable
+	localResourceRollbackLeased = LocalResourceLeased
+	localResourceRollbackSold   = LocalResourceSold
 
 	SessionPending      = "pending"
 	SessionProvisioning = "provisioning"
@@ -64,6 +73,7 @@ type resourceRootModel struct {
 	ID          uint      `gorm:"column:id;primaryKey;autoIncrement"`
 	Type        string    `gorm:"column:type"`
 	OwnerUserID uint      `gorm:"column:owner_user_id"`
+	Version     uint64    `gorm:"column:version;default:1"`
 	CreatedAt   time.Time `gorm:"column:created_at"`
 	UpdatedAt   time.Time `gorm:"column:updated_at"`
 }
@@ -98,11 +108,15 @@ type LocalResourceItem struct {
 }
 
 type LocalResourceFacets struct {
-	All       int64 `json:"all"`
-	Available int64 `json:"available"`
-	Disabled  int64 `json:"disabled"`
-	Leased    int64 `json:"leased"`
-	Sold      int64 `json:"sold"`
+	All        int64 `json:"all"`
+	Available  int64 `json:"available"`
+	Pending    int64 `json:"pending"`
+	Validating int64 `json:"validating"`
+	Normal     int64 `json:"normal"`
+	Abnormal   int64 `json:"abnormal"`
+	Disabled   int64 `json:"disabled"`
+	Leased     int64 `json:"leased"`
+	Sold       int64 `json:"sold"`
 }
 
 type LocalResourceList struct {
@@ -111,14 +125,6 @@ type LocalResourceList struct {
 	Offset int                 `json:"offset"`
 	Limit  int                 `json:"limit"`
 	Facets LocalResourceFacets `json:"facets"`
-}
-
-type LocalResourceImportResult struct {
-	Imported int `json:"imported"`
-	Updated  int `json:"updated"`
-	Skipped  int `json:"skipped"`
-	Invalid  int `json:"invalid"`
-	Total    int `json:"total"`
 }
 
 type accountStateModel struct {

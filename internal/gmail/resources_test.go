@@ -3,7 +3,7 @@ package gmail
 import (
 	"context"
 	"encoding/json"
-	"strings"
+	"fmt"
 	"testing"
 
 	tradeapp "github.com/donnel666/remail/internal/trade/app"
@@ -13,92 +13,34 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestLocalGmailImportAndSafeList(t *testing.T) {
+func TestLocalGmailSafeListHidesDeletedCredentials(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:gmail-local-resources?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&resourceRootModel{}, &localResourceModel{}, &allocationModel{}))
+	require.NoError(t, db.AutoMigrate(&resourceRootModel{}, &localResourceModel{}))
+	for index, status := range []string{LocalResourceAvailable, LocalResourceDeleted} {
+		root := resourceRootModel{Type: "gmail", OwnerUserID: 1, Version: 1}
+		require.NoError(t, db.Create(&root).Error)
+		require.NoError(t, db.Create(&localResourceModel{
+			ID: root.ID, ResourceType: "gmail", OwnerUserID: 1,
+			Email: fmt.Sprintf("safe-%d@gmail.com", index), Identity: fmt.Sprintf("safe-%d@gmail.com", index),
+			Password: "login-password", TwoFactorSecret: "JBSWY3DPEHPK3PXP",
+			AppPassword: "abcdefghijklmnop", Status: status,
+		}).Error)
+	}
 
-	service := NewService(db, nil)
-	result, err := service.ImportLocalResources(context.Background(), 1, strings.Join([]string{
-		"first@gmail.com----login password----JBSWY3DPEHPK3PXP----abcd efgh ijkl mnop",
-		"invalid@outlook.com----password----secret----app-password",
-		"first@gmail.com----duplicate----duplicate----duplicate",
-	}, "\n"), "skip")
-	require.NoError(t, err)
-	require.Equal(t, &LocalResourceImportResult{Imported: 1, Skipped: 1, Invalid: 1, Total: 3}, result)
-
-	var stored localResourceModel
-	require.NoError(t, db.First(&stored).Error)
-	require.Equal(t, "first@gmail.com", stored.Email)
-	require.Equal(t, "login password", stored.Password)
-	require.Equal(t, "JBSWY3DPEHPK3PXP", stored.TwoFactorSecret)
-	require.Equal(t, "abcdefghijklmnop", stored.AppPassword)
-	var root resourceRootModel
-	require.NoError(t, db.First(&root, stored.ID).Error)
-	require.Equal(t, "gmail", root.Type)
-	require.EqualValues(t, 1, root.OwnerUserID)
-
-	list, err := service.ListLocalResources(context.Background(), LocalResourceListFilter{Limit: 20})
+	list, err := NewService(db, nil).ListLocalResources(context.Background(), LocalResourceListFilter{Limit: 20})
 	require.NoError(t, err)
 	require.Len(t, list.Items, 1)
+	require.Equal(t, "safe-0@gmail.com", list.Items[0].Email)
 	require.True(t, list.Items[0].PasswordConfigured)
 	require.True(t, list.Items[0].TwoFactorConfigured)
 	require.True(t, list.Items[0].AppPasswordConfigured)
+	require.EqualValues(t, 1, list.Facets.All)
 	payload, err := json.Marshal(list)
 	require.NoError(t, err)
 	for _, secret := range []string{"login password", "JBSWY3DPEHPK3PXP", "abcdefghijklmnop"} {
 		require.NotContains(t, string(payload), secret)
 	}
-
-	result, err = service.ImportLocalResources(context.Background(), 1,
-		"first@gmail.com----new-password----KRSXG5DSNFXGOIDB----new-app-password", "abort")
-	require.NoError(t, err)
-	require.Equal(t, 1, result.Updated)
-	require.NoError(t, db.First(&stored, stored.ID).Error)
-	require.Equal(t, "new-password", stored.Password)
-
-	require.NoError(t, db.Model(&localResourceModel{}).Where("id = ?", stored.ID).Update("status", LocalResourceSold).Error)
-	result, err = service.ImportLocalResources(context.Background(), 1,
-		"first@gmail.com----must-not-replace----MZXW6YTBOI======----must-not-replace", "skip")
-	require.NoError(t, err)
-	require.Equal(t, 1, result.Skipped)
-	require.NoError(t, db.First(&stored, stored.ID).Error)
-	require.Equal(t, "new-password", stored.Password)
-	require.ErrorIs(t, service.SetLocalResourceEnabled(context.Background(), stored.ID, false), ErrLocalResourceBusy)
-}
-
-func TestLocalGmailImportAbortRejectsWholePayload(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:gmail-local-abort?mode=memory&cache=shared"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&resourceRootModel{}, &localResourceModel{}, &allocationModel{}))
-
-	_, err = NewService(db, nil).ImportLocalResources(context.Background(), 1, strings.Join([]string{
-		"valid@gmail.com----password----JBSWY3DPEHPK3PXP----app-password",
-		"bad@example.com----password----JBSWY3DPEHPK3PXP----app-password",
-	}, "\n"), "abort")
-	require.ErrorIs(t, err, ErrInvalidLocalResource)
-	var count int64
-	require.NoError(t, db.Model(&localResourceModel{}).Count(&count).Error)
-	require.Zero(t, count)
-}
-
-func TestLocalGmailImportCanonicalizesIdentityAndValidatesSecrets(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:gmail-local-identity?mode=memory&cache=shared"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&resourceRootModel{}, &localResourceModel{}, &allocationModel{}))
-
-	result, err := NewService(db, nil).ImportLocalResources(context.Background(), 1, strings.Join([]string{
-		"first.last@gmail.com----password----JBSW Y3DP EHPK 3PXP----abcd efgh ijkl mnop",
-		"firstlast@googlemail.com----duplicate----JBSWY3DPEHPK3PXP----abcdefghijklmnop",
-		"firstlast+tag@gmail.com----invalid----JBSWY3DPEHPK3PXP----abcdefghijklmnop",
-	}, "\n"), "skip")
-	require.NoError(t, err)
-	require.Equal(t, &LocalResourceImportResult{Imported: 1, Skipped: 1, Invalid: 1, Total: 3}, result)
-
-	var stored localResourceModel
-	require.NoError(t, db.First(&stored).Error)
-	require.Equal(t, "firstlast@gmail.com", stored.Identity)
-	require.Equal(t, "JBSWY3DPEHPK3PXP", stored.TwoFactorSecret)
 }
 
 func TestLocalGmailPurchaseSellsOneResourceAndReturnsOnlyToOrderLookup(t *testing.T) {

@@ -13,12 +13,15 @@ import (
 	"strings"
 	"time"
 
+	governanceapp "github.com/donnel666/remail/internal/governance/app"
+	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	"github.com/donnel666/remail/internal/money"
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	tradeapp "github.com/donnel666/remail/internal/trade/app"
 	tradedomain "github.com/donnel666/remail/internal/trade/domain"
 	"github.com/hibiken/asynq"
+	"github.com/redis/go-redis/v9"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -47,20 +50,38 @@ type AlertNotifier interface {
 }
 
 type Service struct {
-	db       *gorm.DB
-	client   *SMSBowerClient
-	queue    *asynq.Client
-	trade    TradePort
-	notifier AlertNotifier
-	now      func() time.Time
+	db                  *gorm.DB
+	client              *SMSBowerClient
+	queue               *asynq.Client
+	trade               TradePort
+	notifier            AlertNotifier
+	redis               redis.UniversalClient
+	files               governanceapp.FilePort
+	logs                *governanceinfra.OperationLogRepo
+	validateImportOwner func(context.Context, uint) (bool, error)
+	now                 func() time.Time
 }
 
 func NewService(db *gorm.DB, queue *asynq.Client) *Service {
-	return &Service{db: db, client: NewSMSBowerClient(), queue: queue, now: func() time.Time { return time.Now().UTC() }}
+	service := &Service{db: db, client: NewSMSBowerClient(), queue: queue, now: func() time.Time { return time.Now().UTC() }}
+	if db != nil {
+		service.logs = governanceinfra.NewOperationLogRepo(db)
+	}
+	return service
 }
 
 func (s *Service) SetTrade(port TradePort)            { s.trade = port }
 func (s *Service) SetNotifier(notifier AlertNotifier) { s.notifier = notifier }
+func (s *Service) SetResourceImportDependencies(redisClient redis.UniversalClient, files governanceapp.FilePort) {
+	if s != nil {
+		s.redis, s.files = redisClient, files
+	}
+}
+func (s *Service) SetImportOwnerValidator(validate func(context.Context, uint) (bool, error)) {
+	if s != nil {
+		s.validateImportOwner = validate
+	}
+}
 
 func (s *Service) dbFor(ctx context.Context) *gorm.DB {
 	if tx, ok := platform.GormTxFromContext(ctx); ok {

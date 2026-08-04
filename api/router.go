@@ -237,7 +237,11 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		})
 		openapiapi.RegisterRoutes(v1, openapiMod, iamSessionFetcher, iamMod.PermissionChecker)
 
-		gmailMod = gmailapi.NewModule(p.DB, p.Asynq)
+		gmailMod = gmailapi.NewModule(p.DB, p.Redis, p.Asynq, fileStore)
+		gmailMod.Service.SetImportOwnerValidator(func(ctx context.Context, ownerID uint) (bool, error) {
+			owner, err := iamMod.AdminResourceOwners.ValidateTargetOwner(ctx, ownerID)
+			return owner != nil && owner.ID != 0 && owner.Enabled, err
+		})
 		gmailMod.Service.SetNotifier(smsbowerAlertMailer{users: iamMod.Users, delivery: mailMod.DeliveryUseCase})
 		allocMod.UseCase.SetProductInventoryOverlay(gmailInventoryOverlay{gmail: gmailMod.Service})
 		gmailapi.RegisterRoutes(v1, gmailMod, iamSessionFetcher, iamMod.PermissionChecker)

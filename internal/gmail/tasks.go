@@ -14,12 +14,13 @@ import (
 )
 
 const (
-	typeGmailSync       = "gmail:smsbower_sync"
-	typeGmailDispatch   = "gmail:dispatch"
-	typeGmailProvision  = "gmail:provision"
-	typeGmailPoll       = "gmail:poll"
-	gmailSyncTimeout    = 45 * time.Second
-	gmailDispatchPeriod = 5 * time.Second
+	typeGmailSync           = "gmail:smsbower_sync"
+	typeGmailDispatch       = "gmail:dispatch"
+	typeGmailProvision      = "gmail:provision"
+	typeGmailPoll           = "gmail:poll"
+	typeGmailResourceImport = "gmail:resource_import"
+	gmailSyncTimeout        = 45 * time.Second
+	gmailDispatchPeriod     = 5 * time.Second
 )
 
 func (s *Service) ScheduleSync(ctx context.Context) error {
@@ -54,8 +55,10 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, service *Service) func(context.Co
 		return gmailSyncTaskError(service.Sync(ctx))
 	})
 	mux.HandleFunc(typeGmailDispatch, func(ctx context.Context, _ *asynq.Task) error {
-		_, err := service.DispatchDueSessions(ctx, 200)
-		return err
+		_, sessionErr := service.DispatchDueSessions(ctx, 200)
+		validationErr := service.DispatchLocalResourceValidations(ctx, localGmailValidationBatchMax)
+		importErr := service.DispatchGmailResourceImports(ctx, 100)
+		return errors.Join(sessionErr, validationErr, importErr)
 	})
 	mux.HandleFunc(typeGmailProvision, func(ctx context.Context, task *asynq.Task) error {
 		payload, err := decodeSessionTask(task)
@@ -70,6 +73,67 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, service *Service) func(context.Co
 			return err
 		}
 		return service.Poll(ctx, payload.SessionID)
+	})
+	mux.HandleFunc(typeGmailValidateLocal, func(ctx context.Context, task *asynq.Task) error {
+		resourceID, err := decodeLocalResourceValidationTask(task)
+		if err != nil {
+			return err
+		}
+		return service.ValidateLocalResource(ctx, resourceID)
+	})
+	mux.HandleFunc(typeGmailResourceImport, func(ctx context.Context, task *asynq.Task) error {
+		payload, err := decodeGmailResourceImportTask(task)
+		if err != nil {
+			return err
+		}
+		record, _ := service.gmailResourceImportRecord(ctx, payload.ImportID)
+		ownerUserID := uint(0)
+		requestID := ""
+		if record != nil {
+			ownerUserID, requestID = record.OwnerUserID, record.RequestID
+		}
+		slog.Info(
+			"processing Gmail resource import task",
+			"import_id", payload.ImportID,
+			"owner_user_id", ownerUserID,
+			"request_id", requestID,
+		)
+		err = service.ProcessGmailResourceImport(ctx, payload)
+		if err == nil {
+			finished, _ := service.gmailResourceImportRecord(ctx, payload.ImportID)
+			validationsPending := 0
+			if finished != nil && finished.Status == "imported" {
+				validationsPending = finished.Imported
+			}
+			slog.Info(
+				"Gmail resource import task finished",
+				"import_id", payload.ImportID,
+				"owner_user_id", ownerUserID,
+				"request_id", requestID,
+				"validations_pending", validationsPending,
+			)
+			return nil
+		}
+		finalAttempt := gmailImportFinalAttempt(ctx)
+		slog.Warn(
+			"Gmail resource import task failed",
+			"import_id", payload.ImportID,
+			"owner_user_id", ownerUserID,
+			"request_id", requestID,
+			"final_attempt", finalAttempt,
+			"error", err,
+		)
+		if errors.Is(err, ErrGmailImportInvalidCommand) || errors.Is(err, ErrGmailImportInvalidClaim) {
+			return fmt.Errorf("discard Gmail resource import task: %w: %w", err, asynq.SkipRetry)
+		}
+		if !finalAttempt {
+			return err
+		}
+		releaseErr := service.ReleaseGmailResourceImport(ctx, payload, "Import infrastructure is temporarily unavailable; dispatcher will retry.")
+		if releaseErr != nil && !errors.Is(releaseErr, ErrGmailImportInvalidClaim) {
+			return errors.Join(err, releaseErr)
+		}
+		return err
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -126,4 +190,18 @@ func decodeSessionTask(task *asynq.Task) (*sessionTaskPayload, error) {
 		return nil, fmt.Errorf("decode Gmail session task: %w", asynq.SkipRetry)
 	}
 	return &payload, nil
+}
+
+func decodeGmailResourceImportTask(task *asynq.Task) (gmailResourceImportTask, error) {
+	var payload gmailResourceImportTask
+	if task == nil || json.Unmarshal(task.Payload(), &payload) != nil || payload.ImportID == 0 || payload.Generation == 0 {
+		return gmailResourceImportTask{}, fmt.Errorf("decode Gmail resource import task: %w", asynq.SkipRetry)
+	}
+	return payload, nil
+}
+
+func gmailImportFinalAttempt(ctx context.Context) bool {
+	retried, retryOK := asynq.GetRetryCount(ctx)
+	maximum, maximumOK := asynq.GetMaxRetry(ctx)
+	return retryOK && maximumOK && retried >= maximum
 }
