@@ -18,6 +18,9 @@ type batchRepoSpy struct {
 	Repository
 	mu         sync.Mutex
 	orders     map[string]domain.Order
+	events     *[]string
+	paidInTx   bool
+	failedInTx bool
 	finds      int
 	findsInTx  int
 	topTx      int
@@ -100,9 +103,10 @@ func (r *batchRepoSpy) LoadOrCreatePendingOrder(_ context.Context, cmd CreatePen
 	return &order, true, nil
 }
 
-func (r *batchRepoSpy) MarkFailed(_ context.Context, cmd MarkFailedCommand) (*domain.Order, error) {
+func (r *batchRepoSpy) MarkFailed(ctx context.Context, cmd MarkFailedCommand) (*domain.Order, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.failedInTx = ctx.Value(batchTxContextKey{}) != nil
 	for key, order := range r.orders {
 		if order.OrderNo != cmd.OrderNo {
 			continue
@@ -115,9 +119,13 @@ func (r *batchRepoSpy) MarkFailed(_ context.Context, cmd MarkFailedCommand) (*do
 	return nil, domain.ErrOrderNotFound
 }
 
-func (r *batchRepoSpy) MarkPaid(_ context.Context, cmd MarkPaidCommand) (*domain.Order, error) {
+func (r *batchRepoSpy) MarkPaid(ctx context.Context, cmd MarkPaidCommand) (*domain.Order, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.events != nil {
+		*r.events = append(*r.events, "mark_paid")
+	}
+	r.paidInTx = ctx.Value(batchTxContextKey{}) != nil
 	for key, order := range r.orders {
 		if order.OrderNo != cmd.OrderNo {
 			continue
@@ -153,6 +161,7 @@ func (r *batchRepoSpy) MarkActive(_ context.Context, cmd MarkActiveCommand) (*do
 type batchWalletSpy struct {
 	WalletPort
 	mu            sync.Mutex
+	events        *[]string
 	balance       string
 	balanceChecks int
 	locks         int
@@ -176,6 +185,9 @@ func (w *batchWalletSpy) LockConsumer(ctx context.Context, _ uint) error {
 		return errors.New("wallet lock outside item transaction")
 	}
 	w.mu.Lock()
+	if w.events != nil {
+		*w.events = append(*w.events, "wallet_lock")
+	}
 	w.locks++
 	w.mu.Unlock()
 	return nil
@@ -187,6 +199,9 @@ func (w *batchWalletSpy) DebitConsumer(ctx context.Context, _ WalletCommand) (*W
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if w.events != nil {
+		*w.events = append(*w.events, "debit")
+	}
 	w.debits++
 	if w.debitErr != nil {
 		return nil, w.debitErr
@@ -214,6 +229,26 @@ type emptyOrderTokenSpy struct{ OrderTokenPort }
 
 func (emptyOrderTokenSpy) FindOrderTokenByOrder(context.Context, string) (*OrderToken, error) {
 	return nil, nil
+}
+
+type issuedOrderTokenSpy struct {
+	OrderTokenPort
+	tokens map[string]*OrderToken
+	issues int
+}
+
+func (s *issuedOrderTokenSpy) FindOrderTokenByOrder(_ context.Context, orderNo string) (*OrderToken, error) {
+	return s.tokens[orderNo], nil
+}
+
+func (s *issuedOrderTokenSpy) IssueOrderToken(_ context.Context, orderNo string, expireAt *time.Time) (*OrderToken, error) {
+	if token := s.tokens[orderNo]; token != nil {
+		return token, nil
+	}
+	s.issues++
+	token := &OrderToken{TokenPlain: "token-" + orderNo, ExpireAt: expireAt}
+	s.tokens[orderNo] = token
+	return token, nil
 }
 
 type batchOrderingSpy struct {
@@ -289,6 +324,13 @@ type batchErrorTokenSpy struct {
 	err error
 }
 
+type checkoutIssueTokenErrorSpy struct {
+	OrderTokenPort
+	err         error
+	disables    int
+	disableInTx bool
+}
+
 type batchOrderErrorTokenSpy struct {
 	OrderTokenPort
 	orderNo string
@@ -299,38 +341,21 @@ func (s batchErrorTokenSpy) FindOrderTokenByOrder(context.Context, string) (*Ord
 	return nil, s.err
 }
 
+func (s *checkoutIssueTokenErrorSpy) IssueOrderToken(context.Context, string, *time.Time) (*OrderToken, error) {
+	return nil, s.err
+}
+
+func (s *checkoutIssueTokenErrorSpy) DisableOrderToken(ctx context.Context, _ string, _ string) error {
+	s.disables++
+	s.disableInTx = ctx.Value(batchTxContextKey{}) != nil
+	return nil
+}
+
 func (s batchOrderErrorTokenSpy) FindOrderTokenByOrder(_ context.Context, orderNo string) (*OrderToken, error) {
 	if orderNo == s.orderNo {
 		return nil, s.err
 	}
 	return &OrderToken{TokenPlain: "token-" + orderNo}, nil
-}
-
-type batchRetryRepoSpy struct {
-	*batchRepoSpy
-}
-
-func (r *batchRetryRepoSpy) WithTx(ctx context.Context, fn func(context.Context) error) error {
-	if ctx.Value(batchTxContextKey{}) != nil {
-		return r.batchRepoSpy.WithTx(ctx, fn)
-	}
-	r.mu.Lock()
-	r.topTx++
-	r.mu.Unlock()
-	txCtx := context.WithValue(ctx, batchTxContextKey{}, true)
-	if err := fn(txCtx); err != nil {
-		return err
-	}
-	r.mu.Lock()
-	r.rolledBack++
-	r.mu.Unlock()
-	if err := fn(txCtx); err != nil {
-		return err
-	}
-	r.mu.Lock()
-	r.committed++
-	r.mu.Unlock()
-	return nil
 }
 
 func (s *batchCancelTokenSpy) FindOrderTokenByOrder(_ context.Context, orderNo string) (*OrderToken, error) {
@@ -352,6 +377,9 @@ type checkoutInventorySpy struct {
 	available       bool
 	err             error
 	allocation      *AllocationResult
+	events          *[]string
+	allocationInTx  bool
+	releaseInTx     bool
 	checks          int
 	allocationCalls int
 	releaseCalls    int
@@ -447,16 +475,24 @@ func (s *checkoutInventorySpy) HasAvailableInventory(context.Context, InventoryA
 	return s.available, s.err
 }
 
-func (s *checkoutInventorySpy) Allocate(context.Context, AllocationCommand) (*AllocationResult, error) {
+func (s *checkoutInventorySpy) Allocate(ctx context.Context, _ AllocationCommand) (*AllocationResult, error) {
 	s.allocationCalls++
+	s.allocationInTx = ctx.Value(batchTxContextKey{}) != nil
+	if s.events != nil {
+		*s.events = append(*s.events, "allocate")
+	}
 	if s.allocation != nil {
 		return s.allocation, nil
 	}
 	return nil, domain.ErrInsufficientInventory
 }
 
-func (s *checkoutInventorySpy) ReleaseByOrder(_ context.Context, orderNo string) error {
+func (s *checkoutInventorySpy) ReleaseByOrder(ctx context.Context, orderNo string) error {
 	s.releaseCalls++
+	s.releaseInTx = ctx.Value(batchTxContextKey{}) != nil
+	if s.events != nil {
+		*s.events = append(*s.events, "release")
+	}
 	s.releasedOrderNo = orderNo
 	return nil
 }
@@ -556,6 +592,69 @@ func TestPaidCheckoutStopsImmediatelyOnAllocationWriteError(t *testing.T) {
 
 	require.Nil(t, result)
 	require.ErrorIs(t, err, wantErr)
+}
+
+func TestCheckoutAllocatesBeforeOpeningShortPaymentTransaction(t *testing.T) {
+	events := []string{}
+	order := batchOrder("short-payment", domain.OrderStatusPendingPayment, "")
+	repo := &batchRepoSpy{orders: map[string]domain.Order{"short-payment": order}, events: &events}
+	wallet := &batchWalletSpy{events: &events}
+	allocation := &checkoutInventorySpy{
+		events: &events,
+		allocation: &AllocationResult{
+			Type: domain.AllocationTypeMicrosoft, ID: 1,
+			Email: "allocated@example.com", SupplyScope: SupplyScopePublic,
+		},
+	}
+	tokens := &issuedOrderTokenSpy{tokens: map[string]*OrderToken{}}
+	uc := NewUseCase(repo, nil, wallet, allocation, tokens)
+
+	result, err := uc.resumeCheckout(context.Background(), order, OrderingQuote{
+		ProjectID: order.ProjectID, ProductID: order.ProjectProductID,
+		ProductType: order.ProductType, PayAmount: order.PayAmount,
+		ActivationWindowMinutes: order.ActivationWindowMinutes, WarrantyMinutes: order.WarrantyMinutes,
+	}, "", "request-1")
+
+	require.NoError(t, err)
+	require.Equal(t, domain.OrderStatusActive, result.Order.Status)
+	require.Equal(t, []string{"allocate", "wallet_lock", "debit", "mark_paid"}, events)
+	require.False(t, allocation.allocationInTx)
+	require.True(t, repo.paidInTx)
+	require.Equal(t, 1, repo.topTx)
+}
+
+func TestCheckoutCompensatesPaidFailureInOneShortTransaction(t *testing.T) {
+	wantErr := errors.New("token store unavailable")
+	order := batchOrder("token-failure", domain.OrderStatusPendingPayment, "")
+	repo := &batchRepoSpy{orders: map[string]domain.Order{"token-failure": order}}
+	wallet := &batchWalletSpy{}
+	allocation := &checkoutInventorySpy{allocation: &AllocationResult{
+		Type: domain.AllocationTypeMicrosoft, ID: 1,
+		Email: "allocated@example.com", SupplyScope: SupplyScopePublic,
+	}}
+	tokens := &checkoutIssueTokenErrorSpy{err: wantErr}
+	uc := NewUseCase(repo, nil, wallet, allocation, tokens)
+
+	result, err := uc.resumeCheckout(context.Background(), order, OrderingQuote{
+		ProjectID: order.ProjectID, ProductID: order.ProjectProductID,
+		ProductType: order.ProductType, PayAmount: order.PayAmount,
+		ActivationWindowMinutes: order.ActivationWindowMinutes, WarrantyMinutes: order.WarrantyMinutes,
+	}, "", "request-1")
+
+	require.Nil(t, result)
+	require.ErrorIs(t, err, wantErr)
+	require.Equal(t, domain.OrderStatusFailed, repo.orders["token-failure"].Status)
+	require.Equal(t, domain.OrderFailureServiceToken, repo.orders["token-failure"].FailureCode)
+	require.Equal(t, 1, wallet.debits)
+	require.Equal(t, 1, wallet.refunds)
+	require.Equal(t, 1, allocation.releaseCalls)
+	require.True(t, allocation.releaseInTx)
+	require.Equal(t, 1, tokens.disables)
+	require.True(t, tokens.disableInTx)
+	require.True(t, repo.failedInTx)
+	require.Equal(t, 2, repo.topTx)
+	require.Equal(t, 2, repo.committed)
+	require.Zero(t, repo.rolledBack)
 }
 
 func TestCheckoutRejectsZeroInventoryBeforeOpeningTransaction(t *testing.T) {
@@ -787,9 +886,11 @@ func TestCheckoutCommitsFailedOrderWhenBalanceDropsAfterPrecheck(t *testing.T) {
 	require.Equal(t, 1, inventory.allocationCalls)
 	require.Equal(t, 1, inventory.releaseCalls)
 	require.Equal(t, stored.OrderNo, inventory.releasedOrderNo)
-	require.Equal(t, 1, repo.topTx)
+	require.False(t, inventory.allocationInTx)
+	require.True(t, inventory.releaseInTx)
+	require.Equal(t, 2, repo.topTx)
 	require.Equal(t, 1, repo.committed)
-	require.Zero(t, repo.rolledBack)
+	require.Equal(t, 1, repo.rolledBack)
 }
 
 func TestCheckoutIdempotentReplaySkipsZeroBalancePrecheck(t *testing.T) {
@@ -812,9 +913,9 @@ func TestCheckoutIdempotentReplaySkipsZeroBalancePrecheck(t *testing.T) {
 	require.Zero(t, wallet.debits)
 	require.Zero(t, ordering.calls)
 	require.Zero(t, inventory.checks)
-	require.Equal(t, 1, wallet.locks)
-	require.Equal(t, 1, repo.topTx)
-	require.Equal(t, 1, repo.committed)
+	require.Zero(t, wallet.locks)
+	require.Zero(t, repo.topTx)
+	require.Zero(t, repo.committed)
 	require.Zero(t, repo.rolledBack)
 }
 
@@ -909,7 +1010,7 @@ func TestCheckoutBatchMarksAllocatorExhaustionAndSkipsMatchingTail(t *testing.T)
 	require.Equal(t, uint(8), inventory.marked.ProjectID)
 	require.Equal(t, uint(9), inventory.marked.ProductID)
 	require.Equal(t, 1, repo.topTx)
-	require.Equal(t, 1, wallet.locks)
+	require.Zero(t, wallet.locks)
 }
 
 func TestCheckoutBatchDoesNotSkipPrivateFirstTailFromSharedPublicCorrection(t *testing.T) {
@@ -934,10 +1035,10 @@ func TestCheckoutBatchDoesNotSkipPrivateFirstTailFromSharedPublicCorrection(t *t
 	require.Equal(t, len(requests), inventory.allocationCalls)
 	require.Equal(t, len(requests), inventory.marks)
 	require.Equal(t, len(requests), repo.topTx)
-	require.Equal(t, len(requests), wallet.locks)
+	require.Zero(t, wallet.locks)
 }
 
-func TestCheckoutBatchUsesIndependentItemTransactionsAndKeepsPartialSuccess(t *testing.T) {
+func TestCheckoutBatchKeepsPartialSuccessWithoutLockingWalletsForTerminalOrders(t *testing.T) {
 	repo := &batchRepoSpy{orders: map[string]domain.Order{
 		"first":  batchOrder("first", domain.OrderStatusActive, ""),
 		"second": batchOrder("second", domain.OrderStatusFailed, domain.OrderFailureInsufficientInventory),
@@ -954,11 +1055,11 @@ func TestCheckoutBatchUsesIndependentItemTransactionsAndKeepsPartialSuccess(t *t
 	require.NoError(t, items[0].Err)
 	require.Equal(t, "order-first", items[0].Result.Order.OrderNo)
 	require.ErrorIs(t, items[1].Err, domain.ErrInsufficientInventory)
-	require.Equal(t, 2, repo.topTx)
+	require.Zero(t, repo.topTx)
 	require.Zero(t, repo.nestedTx)
-	require.Equal(t, 2, repo.committed)
+	require.Zero(t, repo.committed)
 	require.Zero(t, repo.rolledBack)
-	require.Equal(t, 2, wallet.locks)
+	require.Zero(t, wallet.locks)
 }
 
 func TestPrepareCheckoutBatchUsesOnePreloadAndOneQuoteOutsideTransaction(t *testing.T) {
@@ -999,12 +1100,12 @@ func TestCheckoutBatchHandlesOneHundredItemsInOneBoundedCall(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, items, 100)
 	require.Less(t, time.Since(started), time.Second)
-	require.Equal(t, 100, repo.topTx)
+	require.Zero(t, repo.topTx)
 	require.Zero(t, repo.nestedTx)
-	require.Equal(t, 100, repo.committed)
+	require.Zero(t, repo.committed)
 }
 
-func TestCheckoutBatchKeepsCommittedItemsWhenRequestIsCanceled(t *testing.T) {
+func TestCheckoutBatchStopsAfterRequestIsCanceled(t *testing.T) {
 	repo := &batchRepoSpy{orders: map[string]domain.Order{
 		"first":  batchOrder("first", domain.OrderStatusActive, ""),
 		"second": batchOrder("second", domain.OrderStatusActive, ""),
@@ -1018,12 +1119,12 @@ func TestCheckoutBatchKeepsCommittedItemsWhenRequestIsCanceled(t *testing.T) {
 
 	require.ErrorIs(t, err, context.Canceled)
 	require.Nil(t, items)
-	require.Equal(t, 1, repo.topTx)
-	require.Equal(t, 1, repo.committed)
+	require.Zero(t, repo.topTx)
+	require.Zero(t, repo.committed)
 	require.Zero(t, repo.rolledBack)
 }
 
-func TestCheckoutBatchReturnsFixedQuantityAfterItemInfrastructureRollback(t *testing.T) {
+func TestCheckoutBatchReturnsFixedQuantityAfterItemInfrastructureFailure(t *testing.T) {
 	wantErr := errors.New("database unavailable")
 	repo := &batchRepoSpy{orders: map[string]domain.Order{
 		"first":  batchOrder("first", domain.OrderStatusActive, ""),
@@ -1043,10 +1144,10 @@ func TestCheckoutBatchReturnsFixedQuantityAfterItemInfrastructureRollback(t *tes
 	}
 	require.True(t, items[0].attempted)
 	require.False(t, items[1].attempted)
-	require.Equal(t, 1, repo.rolledBack)
+	require.Zero(t, repo.rolledBack)
 }
 
-func TestCheckoutBatchKeepsEarlierCommitWhenLaterItemHasInfrastructureFailure(t *testing.T) {
+func TestCheckoutBatchKeepsEarlierResultWhenLaterItemHasInfrastructureFailure(t *testing.T) {
 	wantErr := errors.New("database unavailable")
 	repo := &batchRepoSpy{orders: map[string]domain.Order{
 		"first":  batchOrder("first", domain.OrderStatusActive, ""),
@@ -1072,28 +1173,9 @@ func TestCheckoutBatchKeepsEarlierCommitWhenLaterItemHasInfrastructureFailure(t 
 	require.True(t, items[0].attempted)
 	require.True(t, items[1].attempted)
 	require.False(t, items[2].attempted)
-	require.Equal(t, 2, repo.topTx)
-	require.Equal(t, 1, repo.committed)
-	require.Equal(t, 1, repo.rolledBack)
-}
-
-func TestCheckoutBatchResetsResultsWhenTransactionRetries(t *testing.T) {
-	base := &batchRepoSpy{orders: map[string]domain.Order{
-		"first":  batchOrder("first", domain.OrderStatusActive, ""),
-		"second": batchOrder("second", domain.OrderStatusActive, ""),
-	}}
-	repo := &batchRetryRepoSpy{batchRepoSpy: base}
-	uc := NewUseCase(repo, nil, &batchWalletSpy{}, nil, batchTokenSpy{})
-
-	items, err := uc.CheckoutBatch(context.Background(), []CheckoutRequest{
-		batchRequest("first", 2), batchRequest("second", 2),
-	})
-
-	require.NoError(t, err)
-	require.Len(t, items, 2)
-	require.Equal(t, 2, base.topTx)
-	require.Equal(t, 2, base.rolledBack)
-	require.Equal(t, 2, base.committed)
+	require.Zero(t, repo.topTx)
+	require.Zero(t, repo.committed)
+	require.Zero(t, repo.rolledBack)
 }
 
 func TestCheckoutBatchMetricsKeepWorkUnitConservation(t *testing.T) {
@@ -1177,7 +1259,7 @@ func TestCheckoutBatchContinuesAfterItemIdempotencyConflict(t *testing.T) {
 	require.NoError(t, items[0].Err)
 	require.ErrorIs(t, items[1].Err, domain.ErrIdempotencyConflict)
 	require.NoError(t, items[2].Err)
-	require.Equal(t, 2, repo.topTx)
+	require.Zero(t, repo.topTx)
 	require.Zero(t, repo.nestedTx)
 }
 

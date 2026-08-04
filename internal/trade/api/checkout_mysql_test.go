@@ -18,6 +18,7 @@ import (
 
 	"github.com/donnel666/remail/api/middleware"
 	allocapp "github.com/donnel666/remail/internal/alloc/app"
+	allocdomain "github.com/donnel666/remail/internal/alloc/domain"
 	allocinfra "github.com/donnel666/remail/internal/alloc/infra"
 	billingapp "github.com/donnel666/remail/internal/billing/app"
 	billinginfra "github.com/donnel666/remail/internal/billing/infra"
@@ -614,7 +615,7 @@ func TestCheckoutAllocatorExhaustionWithoutCacheCreatesNoDebitMySQL(t *testing.T
 	require.Equal(t, "10.00", summary.Wallet.ConsumerBalance)
 }
 
-func TestCheckoutMarkFailedErrorRollsBackPendingOrderMySQL(t *testing.T) {
+func TestCheckoutMarkFailedErrorPreservesPendingOrderForRetryMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	seedTradeBase(t, db, "microsoft")
 	creditBuyer(t, db, 2, "10.00")
@@ -643,15 +644,370 @@ func TestCheckoutMarkFailedErrorRollsBackPendingOrderMySQL(t *testing.T) {
 	require.Error(t, err)
 	require.NotErrorIs(t, err, tradedomain.ErrInsufficientInventory)
 
-	var orderCount int64
-	require.NoError(t, db.Table("orders").
+	var order struct {
+		Status string
+	}
+	require.NoError(t, db.Table("orders").Select("status").
 		Where("idempotency_key = ?", "order-idem-mark-failed-rollback").
-		Count(&orderCount).Error)
-	require.Zero(t, orderCount)
+		Take(&order).Error)
+	require.Equal(t, string(tradedomain.OrderStatusPendingPayment), order.Status)
+}
+
+func TestExpireDueOrdersReleasesStalePendingAllocationMySQL(t *testing.T) {
+	db := newTradeMySQLTestDB(t)
+	seedTradeBase(t, db, "microsoft")
+	seedTradeMicrosoftResources(t, db, 1, 1000, 1, true)
+	repo := tradeinfra.NewRepo(db)
+	order, created, err := repo.LoadOrCreatePendingOrder(context.Background(), tradeapp.CreatePendingOrderCommand{
+		OrderNo: "OR_STALE_PENDING_ALLOCATION", UserID: 2, ProjectID: 10, ProjectProductID: 20,
+		ProductType: tradedomain.ProductTypeMicrosoft, ServiceMode: tradedomain.ServiceModeCode,
+		SupplyPolicy: tradedomain.SupplyPolicyPublicOnly, PayAmount: "1.00",
+		CodeWindowMinutes: 10, ActivationWindowMinutes: 60, WarrantyMinutes: 1440,
+		ClientChannel: tradedomain.ClientChannelConsole, IdempotencyKey: "stale-pending-allocation",
+		RequestFingerprint: strings.Repeat("a", 64), Now: time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	require.True(t, created)
+	_, err = allocapp.NewUseCase(allocinfra.NewRepo(db)).Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo: order.OrderNo, BuyerUserID: order.UserID, ProjectProductID: order.ProjectProductID,
+		SupplyScope: allocdomain.SupplyScopePublic, FulfillExistingOrder: true,
+	})
+	require.NoError(t, err)
+	require.NoError(t, db.Table("microsoft_allocations").Where("order_no = ?", order.OrderNo).
+		Update("created_at", time.Now().UTC().Add(-16*time.Minute)).Error)
+
+	result, err := newTradeUseCase(db).ExpireDueOrders(context.Background(), 200)
+
+	require.NoError(t, err)
+	require.Zero(t, result.Failed)
+	var state struct {
+		OrderStatus      string `gorm:"column:order_status"`
+		FailureCode      string `gorm:"column:failure_code"`
+		AllocationStatus string `gorm:"column:allocation_status"`
+	}
+	require.NoError(t, db.Table("orders AS o").
+		Select("o.status AS order_status, o.failure_code, ma.status AS allocation_status").
+		Joins("JOIN microsoft_allocations AS ma ON ma.order_no = o.order_no").
+		Where("o.order_no = ?", order.OrderNo).Take(&state).Error)
+	require.Equal(t, string(tradedomain.OrderStatusFailed), state.OrderStatus)
+	require.Equal(t, string(tradedomain.OrderFailureAllocation), state.FailureCode)
+	require.Equal(t, string(allocdomain.AllocationStatusReleased), state.AllocationStatus)
+	var walletTransactions int64
+	require.NoError(t, db.Table("wallet_transactions").Where("user_id = ?", order.UserID).Count(&walletTransactions).Error)
+	require.Zero(t, walletTransactions)
+}
+
+func TestExpireDueOrdersKeepsFreshAllocationOnOldPendingOrderMySQL(t *testing.T) {
+	db := newTradeMySQLTestDB(t)
+	seedTradeBase(t, db, "microsoft")
+	seedTradeMicrosoftResources(t, db, 1, 1000, 1, true)
+	repo := tradeinfra.NewRepo(db)
+	order, created, err := repo.LoadOrCreatePendingOrder(context.Background(), tradeapp.CreatePendingOrderCommand{
+		OrderNo: "OR_OLD_PENDING_FRESH_ALLOCATION", UserID: 2, ProjectID: 10, ProjectProductID: 20,
+		ProductType: tradedomain.ProductTypeMicrosoft, ServiceMode: tradedomain.ServiceModeCode,
+		SupplyPolicy: tradedomain.SupplyPolicyPublicOnly, PayAmount: "1.00",
+		CodeWindowMinutes: 10, ActivationWindowMinutes: 60, WarrantyMinutes: 1440,
+		ClientChannel: tradedomain.ClientChannelConsole, IdempotencyKey: "old-pending-fresh-allocation",
+		RequestFingerprint: strings.Repeat("c", 64), Now: time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	require.True(t, created)
+	require.NoError(t, db.Table("orders").Where("order_no = ?", order.OrderNo).
+		Update("created_at", time.Now().UTC().Add(-time.Hour)).Error)
+	_, err = allocapp.NewUseCase(allocinfra.NewRepo(db)).Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo: order.OrderNo, BuyerUserID: order.UserID, ProjectProductID: order.ProjectProductID,
+		SupplyScope: allocdomain.SupplyScopePublic, FulfillExistingOrder: true,
+	})
+	require.NoError(t, err)
+
+	result, err := newTradeUseCase(db).ExpireDueOrders(context.Background(), 200)
+
+	require.NoError(t, err)
+	require.Zero(t, result.Failed)
+	require.Zero(t, result.CheckoutRecovered)
+	var state struct {
+		OrderStatus      string `gorm:"column:order_status"`
+		AllocationStatus string `gorm:"column:allocation_status"`
+	}
+	require.NoError(t, db.Table("orders AS o").
+		Select("o.status AS order_status, ma.status AS allocation_status").
+		Joins("JOIN microsoft_allocations AS ma ON ma.order_no = o.order_no").
+		Where("o.order_no = ?", order.OrderNo).Take(&state).Error)
+	require.Equal(t, string(tradedomain.OrderStatusPendingPayment), state.OrderStatus)
+	require.Equal(t, string(allocdomain.AllocationStatusAllocated), state.AllocationStatus)
+}
+
+func TestExpireDueOrdersResumesStalePaidAllocationMySQL(t *testing.T) {
+	db := newTradeMySQLTestDB(t)
+	seedTradeBase(t, db, "microsoft")
+	seedTradeMicrosoftResources(t, db, 1, 1000, 1, true)
+	creditBuyer(t, db, 2, "10.00")
+
+	repo := tradeinfra.NewRepo(db)
+	order, created, err := repo.LoadOrCreatePendingOrder(context.Background(), tradeapp.CreatePendingOrderCommand{
+		OrderNo: "OR_STALE_PAID_ALLOCATION", UserID: 2, ProjectID: 10, ProjectProductID: 20,
+		ProductType: tradedomain.ProductTypeMicrosoft, ServiceMode: tradedomain.ServiceModeCode,
+		SupplyPolicy: tradedomain.SupplyPolicyPublicOnly, PayAmount: "1.00",
+		CodeWindowMinutes: 10, ActivationWindowMinutes: 60, WarrantyMinutes: 1440,
+		ClientChannel: tradedomain.ClientChannelConsole, IdempotencyKey: "stale-paid-allocation",
+		RequestFingerprint: strings.Repeat("b", 64), Now: time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	require.True(t, created)
+	_, err = allocapp.NewUseCase(allocinfra.NewRepo(db)).Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo: order.OrderNo, BuyerUserID: order.UserID, ProjectProductID: order.ProjectProductID,
+		SupplyScope: allocdomain.SupplyScopePublic, FulfillExistingOrder: true,
+	})
+	require.NoError(t, err)
+	wallet := billingWalletAdapter{wallet: billingapp.NewWalletUseCase(billinginfra.NewBillingRepo(db))}
+	require.NoError(t, repo.WithTx(context.Background(), func(txCtx context.Context) error {
+		if err := wallet.LockConsumer(txCtx, order.UserID); err != nil {
+			return err
+		}
+		debit, err := wallet.DebitConsumer(txCtx, tradeapp.WalletCommand{
+			UserID: order.UserID, Amount: order.PayAmount, Reason: "order:" + order.OrderNo,
+			IdempotencyKey: "order:" + order.OrderNo + ":debit", RequestID: "req-stale-paid",
+		})
+		if err != nil {
+			return err
+		}
+		_, err = repo.MarkPaid(txCtx, tradeapp.MarkPaidCommand{
+			OrderNo: order.OrderNo, DebitTxID: debit.ID, PayAmount: order.PayAmount,
+		})
+		return err
+	}))
+	require.NoError(t, db.Table("orders").Where("order_no = ?", order.OrderNo).
+		Update("updated_at", time.Now().UTC().Add(-16*time.Minute)).Error)
+
+	result, err := newTradeUseCase(db).ExpireDueOrders(context.Background(), 200)
+
+	require.NoError(t, err)
+	require.Zero(t, result.Failed)
+	require.Equal(t, 1, result.CheckoutRecovered)
+	var state struct {
+		OrderStatus      string `gorm:"column:order_status"`
+		AllocationStatus string `gorm:"column:allocation_status"`
+		EnabledToken     bool   `gorm:"column:enabled_token"`
+	}
+	require.NoError(t, db.Table("orders AS o").
+		Select("o.status AS order_status, ma.status AS allocation_status, ot.enabled AS enabled_token").
+		Joins("JOIN microsoft_allocations AS ma ON ma.order_no = o.order_no").
+		Joins("JOIN order_tokens AS ot ON ot.order_no = o.order_no").
+		Where("o.order_no = ?", order.OrderNo).Take(&state).Error)
+	require.Equal(t, string(tradedomain.OrderStatusActive), state.OrderStatus)
+	require.Equal(t, string(allocdomain.AllocationStatusAllocated), state.AllocationStatus)
+	require.True(t, state.EnabledToken)
+	var debits, refunds int64
+	require.NoError(t, db.Table("wallet_transactions").
+		Where("user_id = ? AND transaction_type = ? AND biz_id = ?", order.UserID, "debit", "order:"+order.OrderNo).
+		Count(&debits).Error)
+	require.NoError(t, db.Table("wallet_transactions").
+		Where("user_id = ? AND transaction_type = ? AND biz_id = ?", order.UserID, "refund", "order:"+order.OrderNo).
+		Count(&refunds).Error)
+	require.EqualValues(t, 1, debits)
+	require.Zero(t, refunds)
+}
+
+func TestCheckoutCompensationFailureRollsBackTokenReleaseAndRefundMySQL(t *testing.T) {
+	db := newTradeMySQLTestDB(t)
+	seedTradeBase(t, db, "microsoft")
+	seedTradeMicrosoftResources(t, db, 1, 1000, 1, true)
+	creditBuyer(t, db, 2, "10.00")
+
+	baseRepo := tradeinfra.NewRepo(db)
+	projects := coreapp.NewProjectUseCase(coreinfra.NewProjectRepo(db))
+	wallet := billingapp.NewWalletUseCase(billinginfra.NewBillingRepo(db))
+	alloc := allocapp.NewUseCase(allocinfra.NewRepo(db))
+	tokens := openapiapp.NewUseCase(openapiinfra.NewRepo(db))
+	wantActivationErr := errors.New("forced activation error")
+	wantMarkFailedErr := errors.New("forced compensation mark failed error")
+	uc := tradeapp.NewUseCase(
+		&activationCompensationErrorRepo{Repository: baseRepo, activationErr: wantActivationErr, markFailedErr: wantMarkFailedErr},
+		coreOrderingAdapter{projects: projects, db: db},
+		billingWalletAdapter{wallet: wallet},
+		allocationAdapter{alloc: alloc},
+		orderTokenAdapter{tokens: tokens},
+	)
+	request := tradeapp.CheckoutRequest{
+		UserID: 2, ProjectID: 10, ProductID: 20, ServiceMode: "code", SupplyPolicy: "public_only",
+		ClientChannel: tradedomain.ClientChannelConsole, IdempotencyKey: "compensation-rollback",
+		RequestID: "req-compensation-rollback",
+	}
+
+	_, err := uc.Checkout(context.Background(), request)
+	require.ErrorIs(t, err, tradedomain.ErrOrderCompensationError)
+	require.ErrorContains(t, err, wantMarkFailedErr.Error())
+
+	var state struct {
+		OrderNo          string
+		OrderStatus      string `gorm:"column:order_status"`
+		AllocationStatus string `gorm:"column:allocation_status"`
+		EnabledToken     bool   `gorm:"column:enabled_token"`
+		DebitTxID        *uint
+		RefundTxID       *uint
+	}
+	require.NoError(t, db.Table("orders AS o").
+		Select("o.order_no, o.status AS order_status, o.debit_tx_id, o.refund_tx_id, ma.status AS allocation_status, ot.enabled AS enabled_token").
+		Joins("JOIN microsoft_allocations AS ma ON ma.order_no = o.order_no").
+		Joins("JOIN order_tokens AS ot ON ot.order_no = o.order_no").
+		Where("o.idempotency_key = ?", request.IdempotencyKey).Take(&state).Error)
+	require.Equal(t, string(tradedomain.OrderStatusPaid), state.OrderStatus)
+	require.Equal(t, string(allocdomain.AllocationStatusAllocated), state.AllocationStatus)
+	require.True(t, state.EnabledToken)
+	require.NotNil(t, state.DebitTxID)
+	require.Nil(t, state.RefundTxID)
+	var transactions int64
+	require.NoError(t, db.Table("wallet_transactions").
+		Where("user_id = ? AND biz_id = ?", request.UserID, "order:"+state.OrderNo).
+		Count(&transactions).Error)
+	require.EqualValues(t, 1, transactions)
+
+	retried, err := newTradeUseCase(db).Checkout(context.Background(), request)
+	require.NoError(t, err)
+	require.Equal(t, tradedomain.OrderStatusActive, retried.Order.Status)
+	require.NotEmpty(t, retried.ServiceToken)
+}
+
+func TestCheckoutActivationFailureAtomicallyDisablesReleasesAndRefundsMySQL(t *testing.T) {
+	db := newTradeMySQLTestDB(t)
+	seedTradeBase(t, db, "microsoft")
+	seedTradeMicrosoftResources(t, db, 1, 1000, 1, true)
+	creditBuyer(t, db, 2, "10.00")
+
+	baseRepo := tradeinfra.NewRepo(db)
+	projects := coreapp.NewProjectUseCase(coreinfra.NewProjectRepo(db))
+	wallet := billingapp.NewWalletUseCase(billinginfra.NewBillingRepo(db))
+	alloc := allocapp.NewUseCase(allocinfra.NewRepo(db))
+	tokens := openapiapp.NewUseCase(openapiinfra.NewRepo(db))
+	wantErr := errors.New("forced activation error")
+	uc := tradeapp.NewUseCase(
+		&activationCompensationErrorRepo{Repository: baseRepo, activationErr: wantErr},
+		coreOrderingAdapter{projects: projects, db: db},
+		billingWalletAdapter{wallet: wallet},
+		allocationAdapter{alloc: alloc},
+		orderTokenAdapter{tokens: tokens},
+	)
+	request := tradeapp.CheckoutRequest{
+		UserID: 2, ProjectID: 10, ProductID: 20, ServiceMode: "code", SupplyPolicy: "public_only",
+		ClientChannel: tradedomain.ClientChannelConsole, IdempotencyKey: "activation-compensation",
+		RequestID: "req-activation-compensation",
+	}
+
+	_, err := uc.Checkout(context.Background(), request)
+	require.ErrorIs(t, err, wantErr)
+
+	var state struct {
+		OrderNo          string
+		OrderStatus      string `gorm:"column:order_status"`
+		FailureCode      string
+		AllocationStatus string `gorm:"column:allocation_status"`
+		EnabledToken     bool   `gorm:"column:enabled_token"`
+		DebitTxID        *uint
+		RefundTxID       *uint
+	}
+	require.NoError(t, db.Table("orders AS o").
+		Select("o.order_no, o.status AS order_status, o.failure_code, o.debit_tx_id, o.refund_tx_id, ma.status AS allocation_status, ot.enabled AS enabled_token").
+		Joins("JOIN microsoft_allocations AS ma ON ma.order_no = o.order_no").
+		Joins("JOIN order_tokens AS ot ON ot.order_no = o.order_no").
+		Where("o.idempotency_key = ?", request.IdempotencyKey).Take(&state).Error)
+	require.Equal(t, string(tradedomain.OrderStatusFailed), state.OrderStatus)
+	require.Equal(t, string(tradedomain.OrderFailureActivation), state.FailureCode)
+	require.Equal(t, string(allocdomain.AllocationStatusReleased), state.AllocationStatus)
+	require.False(t, state.EnabledToken)
+	require.NotNil(t, state.DebitTxID)
+	require.NotNil(t, state.RefundTxID)
+	var transactions int64
+	require.NoError(t, db.Table("wallet_transactions").
+		Where("user_id = ? AND biz_id = ?", request.UserID, "order:"+state.OrderNo).
+		Count(&transactions).Error)
+	require.EqualValues(t, 2, transactions)
+}
+
+func TestCheckoutMarkPaidFailureRollsBackDebitAndKeepsAllocationRetryableMySQL(t *testing.T) {
+	db := newTradeMySQLTestDB(t)
+	seedTradeBase(t, db, "microsoft")
+	seedTradeMicrosoftResources(t, db, 1, 1000, 1, true)
+	creditBuyer(t, db, 2, "10.00")
+
+	baseRepo := tradeinfra.NewRepo(db)
+	projects := coreapp.NewProjectUseCase(coreinfra.NewProjectRepo(db))
+	wallet := billingapp.NewWalletUseCase(billinginfra.NewBillingRepo(db))
+	alloc := allocapp.NewUseCase(allocinfra.NewRepo(db))
+	tokens := openapiapp.NewUseCase(openapiinfra.NewRepo(db))
+	wantErr := errors.New("forced mark paid error")
+	uc := tradeapp.NewUseCase(
+		&markPaidErrorRepo{Repository: baseRepo, err: wantErr},
+		coreOrderingAdapter{projects: projects, db: db},
+		billingWalletAdapter{wallet: wallet},
+		allocationAdapter{alloc: alloc},
+		orderTokenAdapter{tokens: tokens},
+	)
+	request := tradeapp.CheckoutRequest{
+		UserID: 2, ProjectID: 10, ProductID: 20, ServiceMode: "code", SupplyPolicy: "public_only",
+		ClientChannel: tradedomain.ClientChannelConsole, IdempotencyKey: "mark-paid-rollback",
+		RequestID: "req-mark-paid-rollback",
+	}
+
+	_, err := uc.Checkout(context.Background(), request)
+	require.ErrorIs(t, err, wantErr)
+
+	var state struct {
+		OrderNo          string
+		OrderStatus      string `gorm:"column:order_status"`
+		AllocationStatus string `gorm:"column:allocation_status"`
+		DebitTxID        *uint
+	}
+	require.NoError(t, db.Table("orders AS o").
+		Select("o.order_no, o.status AS order_status, o.debit_tx_id, ma.status AS allocation_status").
+		Joins("JOIN microsoft_allocations AS ma ON ma.order_no = o.order_no").
+		Where("o.idempotency_key = ?", request.IdempotencyKey).Take(&state).Error)
+	require.Equal(t, string(tradedomain.OrderStatusPendingPayment), state.OrderStatus)
+	require.Equal(t, string(allocdomain.AllocationStatusAllocated), state.AllocationStatus)
+	require.Nil(t, state.DebitTxID)
+	var transactions int64
+	require.NoError(t, db.Table("wallet_transactions").
+		Where("user_id = ? AND biz_id = ?", request.UserID, "order:"+state.OrderNo).
+		Count(&transactions).Error)
+	require.Zero(t, transactions)
+
+	retried, err := newTradeUseCase(db).Checkout(context.Background(), request)
+	require.NoError(t, err)
+	require.Equal(t, tradedomain.OrderStatusActive, retried.Order.Status)
+	require.NotNil(t, retried.Order.DebitTxID)
+	require.NoError(t, db.Table("wallet_transactions").
+		Where("user_id = ? AND biz_id = ?", request.UserID, "order:"+state.OrderNo).
+		Count(&transactions).Error)
+	require.EqualValues(t, 1, transactions)
 }
 
 type markFailedErrorRepo struct {
 	tradeapp.Repository
+}
+
+type activationCompensationErrorRepo struct {
+	tradeapp.Repository
+	activationErr error
+	markFailedErr error
+}
+
+type markPaidErrorRepo struct {
+	tradeapp.Repository
+	err error
+}
+
+func (r *activationCompensationErrorRepo) MarkActive(context.Context, tradeapp.MarkActiveCommand) (*tradedomain.Order, error) {
+	return nil, r.activationErr
+}
+
+func (r *activationCompensationErrorRepo) MarkFailed(ctx context.Context, cmd tradeapp.MarkFailedCommand) (*tradedomain.Order, error) {
+	if r.markFailedErr != nil {
+		return nil, r.markFailedErr
+	}
+	return r.Repository.MarkFailed(ctx, cmd)
+}
+
+func (r *markPaidErrorRepo) MarkPaid(context.Context, tradeapp.MarkPaidCommand) (*tradedomain.Order, error) {
+	return nil, r.err
 }
 
 type forcedAvailableAllocationAdapter struct {

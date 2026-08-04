@@ -194,7 +194,7 @@ func (r *Repo) LoadOrCreatePendingOrder(ctx context.Context, cmd tradeapp.Create
 			if !isDuplicateKeyError(err) {
 				return fmt.Errorf("create order: %w", err)
 			}
-			return r.lockOrderByIdempotency(txCtx, tx, cmd.ClientChannel, cmd.UserID, cmd.APIKeyID, cmd.IdempotencyKey, cmd.RequestFingerprint, &model)
+			return r.findOrderByIdempotency(txCtx, tx, cmd.ClientChannel, cmd.UserID, cmd.APIKeyID, cmd.IdempotencyKey, cmd.RequestFingerprint, &model)
 		}
 		model = candidate
 		created = true
@@ -878,6 +878,31 @@ func (r *Repo) ListExpiredPurchaseWarrantyOrderNos(ctx context.Context, now time
 	)
 }
 
+func (r *Repo) ListCheckoutAllocationRecoveries(ctx context.Context, staleBefore time.Time, limit int) ([]tradeapp.CheckoutAllocationRecovery, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	var recoveries []tradeapp.CheckoutAllocationRecovery
+	// Keep orders as the driving table: allocation guards are much larger than
+	// the pending/paid/failed recovery status ranges in production.
+	if err := r.dbFor(ctx).Table("orders AS o").
+		Select("o.order_no, o.status").
+		Joins("STRAIGHT_JOIN allocation_order_guards AS g ON g.order_no = o.order_no").
+		Joins("LEFT JOIN microsoft_allocations AS ma ON g.type = ? AND ma.order_no = g.order_no AND ma.status = ?", domain.AllocationTypeMicrosoft, "allocated").
+		Joins("LEFT JOIN domain_allocations AS da ON g.type = ? AND da.order_no = g.order_no AND da.status = ?", domain.AllocationTypeDomain, "allocated").
+		Where("o.product_type <> ? AND (ma.id IS NOT NULL OR da.id IS NOT NULL) AND (o.status = ? OR (o.status = ? AND COALESCE(ma.created_at, da.created_at) < ?) OR (o.status = ? AND o.updated_at < ?))",
+			domain.ProductTypeGmail,
+			domain.OrderStatusFailed,
+			domain.OrderStatusPendingPayment, staleBefore.UTC(),
+			domain.OrderStatusPaid, staleBefore.UTC()).
+		Order("o.created_at ASC, o.id ASC").
+		Limit(limit).
+		Scan(&recoveries).Error; err != nil {
+		return nil, fmt.Errorf("list checkout allocation recoveries: %w", err)
+	}
+	return recoveries, nil
+}
+
 func (r *Repo) ListUnavailableMicrosoftOrderNos(ctx context.Context, resourceID uint, limit int) ([]string, error) {
 	var orderNos []string
 	query := r.dbFor(ctx).Table("orders AS o").
@@ -1039,10 +1064,9 @@ func (r *Repo) ActivatePurchaseOrder(ctx context.Context, orderNo string, matche
 	return &order, changed, nil
 }
 
-func (r *Repo) lockOrderByIdempotency(ctx context.Context, tx *gorm.DB, channel domain.ClientChannel, userID uint, apiKeyID *uint, idempotencyKey string, fingerprint string, out *OrderModel) error {
+func (r *Repo) findOrderByIdempotency(ctx context.Context, tx *gorm.DB, channel domain.ClientChannel, userID uint, apiKeyID *uint, idempotencyKey string, fingerprint string, out *OrderModel) error {
 	subject := idempotencySubject(channel, userID, apiKeyID)
 	if err := tx.WithContext(ctx).
-		Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("idempotency_subject = ? AND idempotency_key = ?", subject, strings.TrimSpace(idempotencyKey)).
 		First(out).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {

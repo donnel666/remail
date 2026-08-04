@@ -17,6 +17,7 @@ type unavailableRefundRepoStub struct {
 	refundCalls      int
 	cleanupStatus    string
 	unavailableLimit int
+	stalePending     bool
 }
 
 func (s *unavailableRefundRepoStub) WithTx(ctx context.Context, fn func(context.Context) error) error {
@@ -29,6 +30,15 @@ func (s *unavailableRefundRepoStub) FindOrder(context.Context, string) (*domain.
 }
 
 func (s *unavailableRefundRepoStub) LockOrderForUpdate(context.Context, string) (*domain.Order, error) {
+	order := s.order
+	return &order, nil
+}
+
+func (s *unavailableRefundRepoStub) MarkFailed(_ context.Context, cmd MarkFailedCommand) (*domain.Order, error) {
+	if s.order.Status == domain.OrderStatusPendingPayment {
+		s.order.Status = domain.OrderStatusFailed
+		s.order.FailureCode = cmd.FailureCode
+	}
 	order := s.order
 	return &order, nil
 }
@@ -78,6 +88,13 @@ func (*unavailableRefundRepoStub) ListExpiredPurchaseActivationOrderNos(context.
 }
 
 func (*unavailableRefundRepoStub) ListExpiredPurchaseWarrantyOrderNos(context.Context, time.Time, int) ([]string, error) {
+	return nil, nil
+}
+
+func (s *unavailableRefundRepoStub) ListCheckoutAllocationRecoveries(_ context.Context, before time.Time, _ int) ([]CheckoutAllocationRecovery, error) {
+	if s.stalePending && s.order.Status == domain.OrderStatusPendingPayment && s.order.ProductType != domain.ProductTypeGmail && s.order.CreatedAt.Before(before) {
+		return []CheckoutAllocationRecovery{{OrderNo: s.order.OrderNo, Status: s.order.Status}}, nil
+	}
 	return nil, nil
 }
 
@@ -148,6 +165,25 @@ func (s *unavailableRefundGmailStub) CancelGmailOrder(_ context.Context, orderNo
 
 func (s unavailableRefundDeliveryStub) FindOrderDelivery(context.Context, uint) (*OrderDeliverySummary, error) {
 	return s.delivery, nil
+}
+
+func TestExpireDueOrdersReleasesStalePendingAllocation(t *testing.T) {
+	now := time.Date(2026, 8, 4, 10, 0, 0, 0, time.UTC)
+	repo := &unavailableRefundRepoStub{stalePending: true, order: domain.Order{
+		OrderNo: "OR_STALE_PENDING", UserID: 42, ProductType: domain.ProductTypeMicrosoft,
+		Status: domain.OrderStatusPendingPayment, CreatedAt: now.Add(-16 * time.Minute),
+	}}
+	allocation := &unavailableRefundAllocationStub{}
+	uc := NewUseCase(repo, nil, &unavailableRefundWalletStub{}, allocation, &unavailableRefundTokenStub{})
+	uc.now = func() time.Time { return now }
+
+	result, err := uc.ExpireDueOrders(context.Background(), 200)
+
+	require.NoError(t, err)
+	require.Zero(t, result.Failed)
+	require.Equal(t, domain.OrderStatusFailed, repo.order.Status)
+	require.Equal(t, domain.OrderFailureAllocation, repo.order.FailureCode)
+	require.Equal(t, []string{repo.order.OrderNo}, allocation.released)
 }
 
 func TestUnavailableMicrosoftResourceRefundIsImmediateAndIdempotent(t *testing.T) {
