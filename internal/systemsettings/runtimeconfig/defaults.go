@@ -2,7 +2,7 @@ package runtimeconfig
 
 import "github.com/donnel666/remail/internal/systemsettings/domain"
 
-const DefaultSettingsCount = 226
+const DefaultSettingsCount = 218
 
 // DefaultSettings is the single source of initial values for runtime-managed
 // settings. Startup inserts only keys that are not in storage.
@@ -81,15 +81,6 @@ var defaultSettings = []domain.Setting{
 	{Key: "default_project_gmail_code_supplier_price", Value: "0"},
 	{Key: "default_project_gmail_purchase_price", Value: "0"},
 	{Key: "default_project_gmail_purchase_supplier_price", Value: "0"},
-
-	{Key: "smsbower_enabled", Value: "false"},
-	{Key: "smsbower_code_enabled", Value: "true"},
-	{Key: "smsbower_purchase_enabled", Value: "false"},
-	{Key: "smsbower_api_key", Value: ""},
-	{Key: "smsbower_sync_interval_minutes", Value: "5"},
-	{Key: "smsbower_balance_warning_threshold", Value: "0"},
-	{Key: "smsbower_points_per_unit", Value: "1"},
-	{Key: "smsbower_min_margin_rate", Value: "0.10"},
 
 	{Key: "microsoft_domain_whitelist", Value: "outlook.com,hotmail.com,outlook.sa,outlook.com.ar,outlook.com.au,outlook.at,outlook.be,outlook.com.br,outlook.cl,outlook.cz,outlook.fr,outlook.de,outlook.com.gr,outlook.co.il,outlook.in,outlook.co.id,outlook.ie,outlook.it,outlook.hu,outlook.jp,outlook.kr,outlook.lv,outlook.my,outlook.co.nz,outlook.ph,outlook.pt,outlook.sg,outlook.sk,outlook.es,outlook.co.th,outlook.com.tr,outlook.com.vn"},
 	{Key: "domain_custom_tlds", Value: ""},

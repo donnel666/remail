@@ -29,7 +29,12 @@ func (r *RetentionRepo) DeleteMailmatchMessagesBefore(ctx context.Context, befor
 }
 
 func (r *RetentionRepo) RedactGmailCodesBefore(ctx context.Context, before time.Time, limit int) (int64, error) {
-	return r.deleteBySQL(ctx, `UPDATE gmail_code_sessions
+	if limit <= 0 {
+		return 0, nil
+	}
+	var affected int64
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Exec(`UPDATE gmail_code_sessions
 SET codes_json = JSON_ARRAY()
 WHERE id IN (
   SELECT id FROM (
@@ -39,8 +44,35 @@ WHERE id IN (
       AND JSON_EXTRACT(codes_json, '$[0]') IS NOT NULL
     ORDER BY completed_at, id
     LIMIT ?
-  ) AS expired_gmail_codes
-)`, before, limit)
+	  ) AS expired_gmail_codes
+	)`, before, limit)
+		if result.Error != nil {
+			return result.Error
+		}
+		affected = result.RowsAffected
+		remaining := limit - int(result.RowsAffected)
+		if remaining <= 0 {
+			return nil
+		}
+		result = tx.Exec(`UPDATE smsbower_orders
+SET codes_json = JSON_ARRAY()
+WHERE id IN (
+  SELECT id FROM (
+    SELECT id FROM smsbower_orders
+    WHERE status IN ('completed', 'cancelled', 'failed', 'unknown')
+      AND completed_at < ?
+      AND JSON_EXTRACT(codes_json, '$[0]') IS NOT NULL
+    ORDER BY completed_at, id
+    LIMIT ?
+  ) AS expired_smsbower_codes
+)`, before, remaining)
+		if result.Error != nil {
+			return result.Error
+		}
+		affected += result.RowsAffected
+		return nil
+	})
+	return affected, err
 }
 
 func (r *RetentionRepo) DeleteAllocationDailyUsagesBefore(ctx context.Context, before time.Time, limit int) (int64, error) {

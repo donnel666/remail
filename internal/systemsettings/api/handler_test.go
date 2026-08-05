@@ -273,7 +273,6 @@ func TestCredentialsAreWriteOnlyForPrivilegedAdmins(t *testing.T) {
 		"github_client_secret":     {Key: "github_client_secret", Value: "github-secret"},
 		"linuxdo_client_id":        {Key: "linuxdo_client_id", Value: "linuxdo-client"},
 		"linuxdo_client_secret":    {Key: "linuxdo_client_secret", Value: "linuxdo-secret"},
-		"smsbower_api_key":         {Key: "smsbower_api_key", Value: "smsbower-secret"},
 	}}
 	r := testRouter(repo)
 
@@ -286,10 +285,9 @@ func TestCredentialsAreWriteOnlyForPrivilegedAdmins(t *testing.T) {
 	require.NotContains(t, list.Body.String(), "github-secret")
 	require.NotContains(t, list.Body.String(), "linuxdo-client")
 	require.NotContains(t, list.Body.String(), "linuxdo-secret")
-	require.NotContains(t, list.Body.String(), "smsbower-secret")
 	require.Contains(t, list.Body.String(), "public-key")
 
-	for _, key := range []string{"epay_merchant_key", "epay_private_key", "github_client_id", "github_client_secret", "linuxdo_client_id", "linuxdo_client_secret", "smsbower_api_key"} {
+	for _, key := range []string{"epay_merchant_key", "epay_private_key", "github_client_id", "github_client_secret", "linuxdo_client_id", "linuxdo_client_secret"} {
 		response := httptest.NewRecorder()
 		r.ServeHTTP(response, requestWithSession(http.MethodGet, "/v1/admin/settings/"+key, ""))
 		require.Equal(t, http.StatusNotFound, response.Code)

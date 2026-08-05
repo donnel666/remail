@@ -29,9 +29,11 @@ import (
 	openapiapi "github.com/donnel666/remail/internal/openapi/api"
 	"github.com/donnel666/remail/internal/platform"
 	proxyapi "github.com/donnel666/remail/internal/proxy/api"
+	"github.com/donnel666/remail/internal/smsbower"
 	systemsettingsapi "github.com/donnel666/remail/internal/systemsettings/api"
 	settingsdomain "github.com/donnel666/remail/internal/systemsettings/domain"
 	tradeapi "github.com/donnel666/remail/internal/trade/api"
+	"github.com/donnel666/remail/internal/upstream"
 	"github.com/gin-gonic/gin"
 	"github.com/hibiken/asynq"
 )
@@ -179,14 +181,10 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		allocMod := allocapi.NewModule(p.DB, p.Redis, p.Asynq)
 		systemSettingsMod.SetRuntimeUpdateHook(func(ctx context.Context, settings []settingsdomain.Setting) error {
 			domainTLDChanged := false
-			upstreamChanged := false
 			for _, setting := range settings {
 				key := strings.ToLower(strings.TrimSpace(setting.Key))
 				if key == "domain_custom_tlds" {
 					domainTLDChanged = true
-				}
-				if strings.HasPrefix(key, "smsbower_") {
-					upstreamChanged = true
 				}
 			}
 			if domainTLDChanged {
@@ -196,9 +194,6 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 				if err := allocMod.UseCase.ScheduleInventoryRefresh(ctx); err != nil {
 					return err
 				}
-			}
-			if upstreamChanged && gmailMod != nil {
-				return gmailMod.Service.ScheduleSync(ctx)
 			}
 			return nil
 		})
@@ -244,15 +239,24 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 			owner, err := iamMod.AdminResourceOwners.ValidateTargetOwner(ctx, ownerID)
 			return owner != nil && owner.ID != 0 && owner.Enabled, err
 		})
-		gmailMod.Service.SetNotifier(smsbowerAlertMailer{users: iamMod.Users, delivery: mailMod.DeliveryUseCase})
-		allocMod.UseCase.SetProductInventoryOverlay(gmailInventoryOverlay{gmail: gmailMod.Service})
+		smsbowerMod := smsbower.NewModule(p.DB, p.Asynq)
+		upstreamRouter := upstream.NewRouter(smsbowerMod.Service)
+		smsbowerMod.Service.SetNotifier(smsbowerAlertMailer{users: iamMod.Users, delivery: mailMod.DeliveryUseCase})
+		allocMod.UseCase.SetProductInventoryOverlay(productInventoryOverlayChain{
+			gmailInventoryOverlay{gmail: gmailMod.Service},
+			smsbowerInventoryOverlay{smsbower: smsbowerMod.Service},
+		})
 		gmailapi.RegisterRoutes(v1, gmailMod, iamSessionFetcher, iamMod.PermissionChecker)
 		cleanupFuncs = append(cleanupFuncs, gmailapi.RegisterTaskHandlers(taskMux, gmailMod.Service))
+		smsbower.RegisterRoutes(v1, smsbowerMod, iamSessionFetcher, iamMod.PermissionChecker)
+		cleanupFuncs = append(cleanupFuncs, smsbower.RegisterTaskHandlers(taskMux, smsbowerMod.Service))
 
 		// Trade module (unified console/API Key checkout and order query).
 		tradeMod := tradeapi.NewModule(p.DB, coreMod.ProjectUseCase, billingMod.WalletUseCase, allocMod.UseCase, openapiMod.UseCase)
-		tradeMod.UseCase.SetGmailPorts(gmailMod.Service, gmailMod.Service)
+		tradeMod.UseCase.SetGmailPorts(gmailMod.Service, gmailDeliveryComposite{gmail: gmailMod.Service, smsbower: smsbowerMod.Service})
+		tradeMod.UseCase.SetUpstreams(upstreamRouter)
 		gmailMod.Service.SetTrade(tradeMod.UseCase)
+		smsbowerMod.Service.SetTrade(tradeMod.UseCase)
 		tradeMod.UseCase.SetOwnerLookupPort(orderOwnerDirectory{owners: iamMod.AdminResourceOwners})
 		tradeapi.RegisterRoutes(v1, tradeMod, iamSessionFetcher, iamMod.PermissionChecker)
 		cleanupFuncs = append(cleanupFuncs, tradeapi.StartLifecycleScanner(tradeMod))
@@ -278,7 +282,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 
 		// MailMatch module (order-scoped message cache, async fetch and matching).
 		mailmatchMod := mailmatchapi.NewModule(p.DB, fileStore, p.Redis, p.Asynq, proxyMod.ProxyUseCase, tradeMod.UseCase, coreMod.ValidationUseCase)
-		mailmatchMod.SetCodeOnlyPickup(gmailPickupAdapter{service: gmailMod.Service, tokens: openapiMod.UseCase})
+		mailmatchMod.SetCodeOnlyPickup(gmailPickupAdapter{service: gmailMod.Service, upstreams: upstreamRouter, tokens: openapiMod.UseCase})
 		mailmatchMod.SetGmailMatchPort(gmailMod.Service)
 		mailmatchMod.SetGmailPurchaseFetchPort(gmailMod.Service)
 		gmailMod.Service.SetMailIngest(gmailMailIngestAdapter{mailmatch: mailmatchMod.UseCase})

@@ -1,4 +1,4 @@
-package gmail
+package smsbower
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSMSBowerClientParsesCatalogActivationAndThreeCodeActions(t *testing.T) {
+func TestClientParsesCatalogActivationAndThreeCodeActions(t *testing.T) {
 	statuses := make([]string, 0, 3)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "secret", r.URL.Query().Get("api_key"))
@@ -39,14 +39,14 @@ func TestSMSBowerClientParsesCatalogActivationAndThreeCodeActions(t *testing.T) 
 		}
 	}))
 	defer server.Close()
-	client := newSMSBowerClient(server.URL, server.Client())
+	client := newTestClient(server.URL, server.Client())
 
 	balance, err := client.Balance(context.Background(), "secret")
 	require.NoError(t, err)
 	require.True(t, balance.Equal(decimal.RequireFromString("12.5")))
 	services, err := client.Services(context.Background(), "secret")
 	require.NoError(t, err)
-	require.Equal(t, []SMSBowerService{{Code: "go", Name: "Google"}}, services)
+	require.Equal(t, []remoteService{{Code: "go", Name: "Google"}}, services)
 	prices, err := client.GmailPrices(context.Background(), "secret")
 	require.NoError(t, err)
 	require.Equal(t, 7, prices["go"].Count)
@@ -62,7 +62,7 @@ func TestSMSBowerClientParsesCatalogActivationAndThreeCodeActions(t *testing.T) 
 	require.Equal(t, []string{"5", "5", "3"}, statuses)
 }
 
-func TestSMSBowerActivationTransportFailureIsUncertainAndWaitingIsSafe(t *testing.T) {
+func TestActivationTransportFailureIsUncertainAndWaitingIsSafe(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/mail/getCode" {
 			_, _ = w.Write([]byte("Code has not been received yet, please try again later"))
@@ -70,7 +70,7 @@ func TestSMSBowerActivationTransportFailureIsUncertainAndWaitingIsSafe(t *testin
 		}
 		panic(http.ErrAbortHandler)
 	}))
-	client := newSMSBowerClient(server.URL, server.Client())
+	client := newTestClient(server.URL, server.Client())
 	_, err := client.Code(context.Background(), "secret", 1)
 	require.ErrorIs(t, err, ErrCodeWaiting)
 	_, err = client.Activate(context.Background(), "secret", "go", decimal.NewFromInt(1))
@@ -79,48 +79,84 @@ func TestSMSBowerActivationTransportFailureIsUncertainAndWaitingIsSafe(t *testin
 	server.Close()
 }
 
-func TestSMSBowerClientClassifiesNoAccessJSONAsBadKey(t *testing.T) {
+func TestClientClassifiesNoAccessJSONAsBadKey(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"status":0,"message":"No access","data":[]}`))
 	}))
 	defer server.Close()
 
-	_, err := newSMSBowerClient(server.URL, server.Client()).Balance(context.Background(), "invalid")
+	_, err := newTestClient(server.URL, server.Client()).Balance(context.Background(), "invalid")
 	require.ErrorIs(t, err, ErrBadKey)
 }
 
-func TestSMSBowerClientClassifiesTerminalActivationErrors(t *testing.T) {
+func TestClientRejectsInvalidActivationEmail(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"status":1,"mail":"@gmail.com","mailId":41}`))
+	}))
+	defer server.Close()
+
+	_, err := newTestClient(server.URL, server.Client()).Activate(context.Background(), "secret", "go", decimal.NewFromInt(1))
+	require.ErrorIs(t, err, ErrRemote)
+}
+
+func TestClientRejectsNumbersOutsideDatabasePrecision(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Query().Get("action") {
+		case "getBalance":
+			_, _ = w.Write([]byte("ACCESS_BALANCE:1.0000001"))
+		default:
+			_, _ = w.Write([]byte(`{"status":1,"data":{"go":{"gmail.com":{"price":1000000000000,"count":7}}}}`))
+		}
+	}))
+	defer server.Close()
+	client := newTestClient(server.URL, server.Client())
+
+	_, err := client.Balance(context.Background(), "secret")
+	require.ErrorIs(t, err, ErrRemote)
+	prices, err := client.GmailPrices(context.Background(), "secret")
+	require.NoError(t, err)
+	require.Empty(t, prices)
+}
+
+func TestClientClassifiesTerminalActivationErrors(t *testing.T) {
 	for _, test := range []struct {
 		name string
 		body string
-		call func(*SMSBowerClient) error
+		call func(*client) error
 		want error
 	}{
 		{
 			name: "missing activation", body: "No activation found with such id", want: ErrActivationMissing,
-			call: func(client *SMSBowerClient) error {
+			call: func(client *client) error {
 				_, err := client.Code(context.Background(), "secret", 1)
 				return err
 			},
 		},
 		{
 			name: "invalid mail id", body: `{"status":0,"error":"Pass mail id"}`, want: ErrActivationMissing,
-			call: func(client *SMSBowerClient) error {
+			call: func(client *client) error {
 				_, err := client.Code(context.Background(), "secret", 1)
 				return err
 			},
 		},
 		{
 			name: "terminal status", body: "Bad actual activation status", want: ErrActivationStatus,
-			call: func(client *SMSBowerClient) error {
+			call: func(client *client) error {
 				return client.SetStatus(context.Background(), "secret", 1, 3)
 			},
 		},
 		{
 			name: "already cancelled", body: "Activation is already canceled", want: ErrActivationStatus,
-			call: func(client *SMSBowerClient) error {
+			call: func(client *client) error {
 				_, err := client.Code(context.Background(), "secret", 1)
+				return err
+			},
+		},
+		{
+			name: "no mail token", body: "NO_MAIL", want: ErrNoMail,
+			call: func(client *client) error {
+				_, err := client.Activate(context.Background(), "secret", "go", decimal.NewFromInt(1))
 				return err
 			},
 		},
@@ -130,7 +166,7 @@ func TestSMSBowerClientClassifiesTerminalActivationErrors(t *testing.T) {
 				_, _ = w.Write([]byte(test.body))
 			}))
 			defer server.Close()
-			require.ErrorIs(t, test.call(newSMSBowerClient(server.URL, server.Client())), test.want)
+			require.ErrorIs(t, test.call(newTestClient(server.URL, server.Client())), test.want)
 		})
 	}
 }

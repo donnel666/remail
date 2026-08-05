@@ -14,24 +14,24 @@ import { useTranslation } from "react-i18next";
 
 import {
   deleteGmailUpstreamMapping,
+  getSMSBowerConfig,
   getSMSBowerStatus,
   listGmailUpstreamMappings,
   listSMSBowerServices,
   saveGmailUpstreamMapping,
   syncSMSBower,
+  updateSMSBowerConfig,
   type GmailUpstreamMapping,
   type SMSBowerAccountStatus,
+  type SMSBowerConfig,
   type SMSBowerService,
+  type SMSBowerStrategy,
 } from "@/lib/gmail-upstream-api";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import type { ProjectItem } from "@/lib/projects-api";
-import { parseOption } from "@/lib/system-settings-api";
 
 import type { SectionProps } from "./index";
-import {
-  buildSMSBowerSettingsUpdates,
-  loadAllProjects,
-} from "./upstream-settings-values";
+import { loadAllProjects } from "./upstream-settings-values";
 import {
   SettingsAccessBoundary,
   SettingsCardHeader,
@@ -43,14 +43,14 @@ import {
 } from "./settings-layout";
 
 const { Text } = Typography;
-const SETTINGS_DEFAULTS = {
-  smsbower_enabled: false,
-  smsbower_code_enabled: true,
-  smsbower_purchase_enabled: false,
-  smsbower_sync_interval_minutes: 5,
-  smsbower_balance_warning_threshold: 0,
-  smsbower_points_per_unit: 1,
-  smsbower_min_margin_rate: 0.1,
+const EMPTY_FORM = {
+  apiKey: "",
+  balanceWarningThreshold: 0,
+  enabled: false,
+  minMarginPercent: 10,
+  pointsPerUnit: 1,
+  strategy: "local_first" as SMSBowerStrategy,
+  syncIntervalMinutes: 5,
 };
 
 type MappingDraft = {
@@ -79,16 +79,10 @@ function formatPoints(value?: string) {
 export default function UpstreamsSection({
   canSensitive,
   canWrite,
-  onBulkSave,
-  options,
 }: SectionProps) {
   const { t } = useTranslation();
-  const initial = parseOption(options, SETTINGS_DEFAULTS);
-  const [form, setForm] = useState({
-    ...initial,
-    smsbower_api_key: "",
-    smsbower_min_margin_percent: initial.smsbower_min_margin_rate * 100,
-  });
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [config, setConfig] = useState<SMSBowerConfig | null>(null);
   const [status, setStatus] = useState<SMSBowerAccountStatus | null>(null);
   const [services, setServices] = useState<SMSBowerService[]>([]);
   const [projects, setProjects] = useState<ProjectItem[]>([]);
@@ -108,13 +102,24 @@ export default function UpstreamsSection({
     loadRequestRef.current = controller;
     setLoading(true);
     try {
-      const [nextStatus, nextServices, nextMappings, nextProjects] = await Promise.all([
+      const [nextConfig, nextStatus, nextServices, nextMappings, nextProjects] = await Promise.all([
+        getSMSBowerConfig(controller.signal),
         getSMSBowerStatus(controller.signal),
         listSMSBowerServices(controller.signal),
         listGmailUpstreamMappings(controller.signal),
         loadAllProjects(),
       ]);
       if (controller.signal.aborted) return;
+      setConfig(nextConfig);
+      setForm({
+        apiKey: "",
+        balanceWarningThreshold: Number(nextConfig.balanceWarningThreshold),
+        enabled: nextConfig.enabled,
+        minMarginPercent: Number(nextConfig.minMarginRate) * 100,
+        pointsPerUnit: Number(nextConfig.pointsPerUnit),
+        strategy: nextConfig.strategy,
+        syncIntervalMinutes: nextConfig.syncIntervalMinutes,
+      });
       setStatus(nextStatus);
       setServices(nextServices);
       setMappings(nextMappings);
@@ -155,26 +160,36 @@ export default function UpstreamsSection({
   );
 
   const saveSettings = async () => {
-    if (form.smsbower_enabled && !status?.configured && !form.smsbower_api_key.trim()) {
+    if (form.enabled && !config?.configured && !form.apiKey.trim()) {
       Toast.warning("首次启用 SMSBower 时必须填写 API Key。");
       return;
     }
     if (
-      form.smsbower_sync_interval_minutes < 1 ||
-      form.smsbower_sync_interval_minutes > 1440 ||
-      form.smsbower_balance_warning_threshold < 0 ||
-      form.smsbower_points_per_unit <= 0 ||
-      form.smsbower_min_margin_percent < 0 ||
-      form.smsbower_min_margin_percent >= 100
+      form.syncIntervalMinutes < 1 ||
+      form.syncIntervalMinutes > 1440 ||
+      form.balanceWarningThreshold < 0 ||
+      form.pointsPerUnit <= 0 ||
+      form.minMarginPercent < 0 ||
+      form.minMarginPercent >= 100
     ) {
       Toast.warning("请检查同步周期、余额阈值、换算率和最低毛利率。");
       return;
     }
     setSaving(true);
     try {
-      await onBulkSave(buildSMSBowerSettingsUpdates(form, canSensitive));
-      setForm((current) => ({ ...current, smsbower_api_key: "" }));
+      await updateSMSBowerConfig({
+        enabled: form.enabled,
+        strategy: form.strategy,
+        syncIntervalMinutes: form.syncIntervalMinutes,
+        balanceWarningThreshold: String(form.balanceWarningThreshold),
+        pointsPerUnit: String(form.pointsPerUnit),
+        minMarginRate: String(form.minMarginPercent / 100),
+        ...(canSensitive && form.apiKey.trim() ? { apiKey: form.apiKey.trim() } : {}),
+      });
+      Toast.success("SMSBower 上游设置已保存。");
       await load();
+    } catch (error) {
+      Toast.error(getIamErrorMessage(t, error, "Upstream settings save failed."));
     } finally {
       setSaving(false);
     }
@@ -266,16 +281,27 @@ export default function UpstreamsSection({
           {status?.lastSafeError ? <div className="mb-4 rounded-lg bg-[var(--semi-color-danger-light-default)] px-3 py-2 text-sm text-[var(--semi-color-danger)]">{status.lastSafeError}</div> : null}
           <SettingsAccessBoundary canWrite={canWrite}>
             <div className="space-y-3">
-              <SettingsSwitchField checked={form.smsbower_enabled} onChange={(value) => setForm((current) => ({ ...current, smsbower_enabled: value }))} label="启用 SMSBower" description="控制 SMSBower 是否参与库存统计和新订单分配；同步、余额、价格及健康监控不受影响" />
-              <SettingsSwitchField checked={form.smsbower_code_enabled} onChange={(value) => setForm((current) => ({ ...current, smsbower_code_enabled: value }))} label="参与接码" description="开启后，已映射的 SMSBower 服务可以参与 Gmail 接码履约" />
-              <SettingsSwitchField checked={form.smsbower_purchase_enabled} onChange={(value) => setForm((current) => ({ ...current, smsbower_purchase_enabled: value }))} label="参与购买（预配置）" description="当前 SMSBower Mails 仅支持接码；接入能交付密码、2FA 和专用密钥的购买接口后生效" />
+              <SettingsSwitchField checked={form.enabled} onChange={(value) => setForm((current) => ({ ...current, enabled: value }))} label="启用 SMSBower" description="启用后，已映射服务参与 Gmail 接码库存和订单路由；SMSBower 不参与完整邮箱购买" />
             </div>
             <SettingsFormGrid className="mt-4">
-              <SettingsNumberField label="同步间隔（分钟）" value={form.smsbower_sync_interval_minutes} onChange={(value) => setForm((current) => ({ ...current, smsbower_sync_interval_minutes: value }))} min={1} max={1440} precision={0} />
-              <SettingsNumberField label="余额预警阈值" value={form.smsbower_balance_warning_threshold} onChange={(value) => setForm((current) => ({ ...current, smsbower_balance_warning_threshold: value }))} min={0} precision={6} />
-              <SettingsNumberField label="1 上游单位折合积分" value={form.smsbower_points_per_unit} onChange={(value) => setForm((current) => ({ ...current, smsbower_points_per_unit: value }))} min={0.000001} precision={6} />
-              <SettingsNumberField label="最低毛利率（%）" value={form.smsbower_min_margin_percent} onChange={(value) => setForm((current) => ({ ...current, smsbower_min_margin_percent: value }))} min={0} max={99.999999} precision={6} />
-              {canSensitive ? <SettingsTextField label="API Key" value={form.smsbower_api_key} onChange={(value) => setForm((current) => ({ ...current, smsbower_api_key: value }))} type="password" placeholder="已保存密钥不会回显；留空保持不变" /> : null}
+              <div>
+                <div className="mb-2 text-sm font-medium">履约优先策略</div>
+                <Select
+                  aria-label="SMSBower 履约优先策略"
+                  onChange={(value) => setForm((current) => ({ ...current, strategy: String(value) as SMSBowerStrategy }))}
+                  optionList={[
+                    { label: "本地优先：本地 Gmail 无库存后使用 SMSBower", value: "local_first" },
+                    { label: "上游优先：SMSBower 无库存后使用本地 Gmail", value: "upstream_first" },
+                  ]}
+                  style={{ width: "100%" }}
+                  value={form.strategy}
+                />
+              </div>
+              <SettingsNumberField label="同步间隔（分钟）" value={form.syncIntervalMinutes} onChange={(value) => setForm((current) => ({ ...current, syncIntervalMinutes: value }))} min={1} max={1440} precision={0} />
+              <SettingsNumberField label="余额预警阈值" value={form.balanceWarningThreshold} onChange={(value) => setForm((current) => ({ ...current, balanceWarningThreshold: value }))} min={0} precision={6} />
+              <SettingsNumberField label="1 上游单位折合积分" value={form.pointsPerUnit} onChange={(value) => setForm((current) => ({ ...current, pointsPerUnit: value }))} min={0.000001} precision={6} />
+              <SettingsNumberField label="最低毛利率（%）" value={form.minMarginPercent} onChange={(value) => setForm((current) => ({ ...current, minMarginPercent: value }))} min={0} max={99.999999} precision={6} />
+              {canSensitive ? <SettingsTextField label="API Key" value={form.apiKey} onChange={(value) => setForm((current) => ({ ...current, apiKey: value }))} type="password" placeholder="已保存密钥不会回显；留空保持不变" /> : null}
             </SettingsFormGrid>
             <Button className="mt-5" icon={<Save size={14} />} loading={saving} onClick={() => void saveSettings().catch(() => undefined)} theme="solid" type="primary">保存上游设置</Button>
           </SettingsAccessBoundary>
@@ -286,7 +312,7 @@ export default function UpstreamsSection({
         </Spin>
       </SettingsSection>
 
-      <SettingsSection title={<SettingsCardHeader icon={<Link2 size={16} />} title="SMSBower 项目映射" description="可提前建立任意系统项目与 SMSBower 服务的对应关系；对应 Gmail 商品入口开启后才参与库存和履约" />}>
+      <SettingsSection title={<SettingsCardHeader icon={<Link2 size={16} />} title="SMSBower 项目映射" description="建立系统项目与 SMSBower 服务的对应关系；仅 Gmail 接码商品参与库存和履约" />}>
         <Spin spinning={loading}>
           <div className="mb-4 flex justify-end">
             <Button disabled={!canWrite} icon={<Plus size={14} />} onClick={openCreateMapping} theme="solid" type="primary">新建映射</Button>

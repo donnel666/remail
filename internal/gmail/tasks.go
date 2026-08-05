@@ -15,12 +15,10 @@ import (
 )
 
 const (
-	typeGmailSync                 = "gmail:smsbower_sync"
 	typeGmailDispatch             = "gmail:dispatch"
 	typeGmailProvision            = "gmail:provision"
 	typeGmailPoll                 = "gmail:poll"
 	typeGmailResourceImport       = "gmail:resource_import"
-	gmailSyncTimeout              = 45 * time.Second
 	gmailDispatchPeriod           = 5 * time.Second
 	gmailValidationDispatchPeriod = 30 * time.Second
 	gmailHistoryDispatchPeriod    = 15 * time.Second
@@ -29,20 +27,6 @@ const (
 )
 
 var localGmailHistoryActive atomic.Int64
-
-func (s *Service) ScheduleSync(ctx context.Context) error {
-	if s == nil || s.queue == nil {
-		return errors.New("gmail: task queue unavailable")
-	}
-	interval := time.Duration(runtimeconfig.Int("smsbower_sync_interval_minutes", 5, 1)) * time.Minute
-	_, err := s.queue.EnqueueContext(ctx, asynq.NewTask(typeGmailSync, nil),
-		asynq.Queue(platform.QueueBackgroundInventory), asynq.Unique(max(interval, gmailSyncTimeout)),
-		asynq.MaxRetry(platform.BackgroundTaskMaxRetryValue()), asynq.Timeout(gmailSyncTimeout), asynq.Retention(0))
-	if errors.Is(err, asynq.ErrDuplicateTask) {
-		return nil
-	}
-	return err
-}
 
 func (s *Service) scheduleDispatcher(ctx context.Context) error {
 	if s == nil || s.queue == nil {
@@ -58,9 +42,6 @@ func (s *Service) scheduleDispatcher(ctx context.Context) error {
 }
 
 func RegisterTaskHandlers(mux *asynq.ServeMux, service *Service) func(context.Context) {
-	mux.HandleFunc(typeGmailSync, func(ctx context.Context, _ *asynq.Task) error {
-		return gmailSyncTaskError(service.Sync(ctx))
-	})
 	mux.HandleFunc(typeGmailDispatch, func(ctx context.Context, _ *asynq.Task) error {
 		_, sessionErr := service.DispatchDueSessions(ctx, 200)
 		importErr := service.DispatchGmailResourceImports(ctx, 100)
@@ -234,18 +215,11 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, service *Service) func(context.Co
 		defer close(done)
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
-		lastSync := time.Time{}
 		lastDispatch := time.Time{}
 		lastValidationDispatch := time.Time{}
 		lastHistoryDispatch := time.Time{}
 		for {
 			now := time.Now()
-			if lastSync.IsZero() || now.Sub(lastSync) >= time.Duration(runtimeconfig.Int("smsbower_sync_interval_minutes", 5, 1))*time.Minute {
-				if err := service.ScheduleSync(ctx); err != nil && !errors.Is(err, context.Canceled) {
-					slog.Warn("schedule SMSBower sync failed", "error", err)
-				}
-				lastSync = now
-			}
 			if lastDispatch.IsZero() || now.Sub(lastDispatch) >= gmailDispatchPeriod {
 				if err := service.scheduleDispatcher(ctx); err != nil && !errors.Is(err, context.Canceled) {
 					slog.Warn("schedule Gmail dispatcher failed", "error", err)
@@ -299,16 +273,6 @@ func acquireLocalGmailHistoryCapacity(ctx context.Context, service *Service) (fu
 			}, true
 		}
 	}
-}
-
-func gmailSyncTaskError(err error) error {
-	if err == nil {
-		return nil
-	}
-	if errors.Is(err, ErrBadKey) {
-		return fmt.Errorf("sync SMSBower: %w: %w", err, asynq.SkipRetry)
-	}
-	return fmt.Errorf("sync SMSBower: %w", err)
 }
 
 func decodeSessionTask(task *asynq.Task) (*sessionTaskPayload, error) {

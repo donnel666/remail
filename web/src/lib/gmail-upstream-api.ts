@@ -2,11 +2,29 @@ import { apiClient, csrfHeader, unwrap } from "./api-client";
 import type { components } from "./openapi/schema";
 
 export type SMSBowerAccountStatus = components["schemas"]["SMSBowerAccountStatus"];
+export type SMSBowerConfig = components["schemas"]["SMSBowerConfig"];
+export type SMSBowerConfigUpdate = components["schemas"]["SMSBowerConfigUpdate"];
+export type SMSBowerStrategy = components["schemas"]["SMSBowerStrategy"];
 export type SMSBowerService = components["schemas"]["SMSBowerServiceItem"];
 export type GmailUpstreamMapping = components["schemas"]["GmailUpstreamMappingItem"];
 export type GmailUpstreamMappingRequest = components["schemas"]["GmailUpstreamMappingRequest"];
 export type GmailUpstreamFinanceReport = components["schemas"]["GmailUpstreamFinanceReport"];
 export type GmailUpstreamActivation = components["schemas"]["GmailUpstreamActivationItem"];
+
+export async function getSMSBowerConfig(signal?: AbortSignal) {
+  return unwrap<SMSBowerConfig>(
+    await apiClient.GET("/v1/admin/upstreams/smsbower/config", { signal })
+  );
+}
+
+export async function updateSMSBowerConfig(request: SMSBowerConfigUpdate) {
+  return unwrap<SMSBowerConfig>(
+    await apiClient.PUT("/v1/admin/upstreams/smsbower/config", {
+      body: request,
+      params: { header: csrfHeader() },
+    })
+  );
+}
 
 export async function getSMSBowerStatus(signal?: AbortSignal) {
   return unwrap<SMSBowerAccountStatus>(

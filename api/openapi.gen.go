@@ -2761,6 +2761,24 @@ func (e SMSBowerAccountStatusHealthStatus) Valid() bool {
 	}
 }
 
+// Defines values for SMSBowerStrategy.
+const (
+	LocalFirst    SMSBowerStrategy = "local_first"
+	UpstreamFirst SMSBowerStrategy = "upstream_first"
+)
+
+// Valid indicates whether the value is a known member of the SMSBowerStrategy enum.
+func (e SMSBowerStrategy) Valid() bool {
+	switch e {
+	case LocalFirst:
+		return true
+	case UpstreamFirst:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SystemAnnouncementType.
 const (
 	SystemAnnouncementTypeDefault SystemAnnouncementType = "default"
@@ -7884,6 +7902,42 @@ type SMSBowerAccountStatus struct {
 // SMSBowerAccountStatusHealthStatus defines model for SMSBowerAccountStatus.HealthStatus.
 type SMSBowerAccountStatusHealthStatus string
 
+// SMSBowerConfig defines model for SMSBowerConfig.
+type SMSBowerConfig struct {
+	// BalanceWarningThreshold Non-negative point amount with up to 6 decimal places.
+	BalanceWarningThreshold NonNegativeLedgerAmountResponse `json:"balanceWarningThreshold"`
+
+	// Configured Whether an API Key is stored. The key itself is never returned.
+	Configured bool `json:"configured"`
+	Enabled    bool `json:"enabled"`
+
+	// MinMarginRate Non-negative point amount with up to 6 decimal places.
+	MinMarginRate NonNegativeLedgerAmountResponse `json:"minMarginRate"`
+
+	// PointsPerUnit Non-negative point amount with up to 6 decimal places.
+	PointsPerUnit       NonNegativeLedgerAmountResponse `json:"pointsPerUnit"`
+	Strategy            SMSBowerStrategy                `json:"strategy"`
+	SyncIntervalMinutes int                             `json:"syncIntervalMinutes"`
+}
+
+// SMSBowerConfigUpdate defines model for SMSBowerConfigUpdate.
+type SMSBowerConfigUpdate struct {
+	// ApiKey Leave empty to keep the stored API Key unchanged.
+	ApiKey *string `json:"apiKey,omitempty"`
+
+	// BalanceWarningThreshold Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	BalanceWarningThreshold NonNegativeLedgerAmount `json:"balanceWarningThreshold"`
+	Enabled                 bool                    `json:"enabled"`
+
+	// MinMarginRate Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	MinMarginRate NonNegativeLedgerAmount `json:"minMarginRate"`
+
+	// PointsPerUnit Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	PointsPerUnit       NonNegativeLedgerAmount `json:"pointsPerUnit"`
+	Strategy            SMSBowerStrategy        `json:"strategy"`
+	SyncIntervalMinutes int                     `json:"syncIntervalMinutes"`
+}
+
 // SMSBowerServiceItem defines model for SMSBowerServiceItem.
 type SMSBowerServiceItem struct {
 	Active bool   `json:"active"`
@@ -7902,6 +7956,9 @@ type SMSBowerServiceItem struct {
 type SMSBowerServiceList struct {
 	Items []SMSBowerServiceItem `json:"items"`
 }
+
+// SMSBowerStrategy defines model for SMSBowerStrategy.
+type SMSBowerStrategy string
 
 // ServerCreateResponse defines model for ServerCreateResponse.
 type ServerCreateResponse struct {
@@ -9483,6 +9540,12 @@ type GetAdminSMSBowerActivationsParams struct {
 	Limit  *int         `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// PutAdminSMSBowerConfigParams defines parameters for PutAdminSMSBowerConfig.
+type PutAdminSMSBowerConfigParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // DeleteAdminSMSBowerMappingParams defines parameters for DeleteAdminSMSBowerMapping.
 type DeleteAdminSMSBowerMappingParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
@@ -10322,6 +10385,9 @@ type PutAdminSettingJSONRequestBody = AdminSystemSettingRequest
 
 // PostAdminTicketMessageJSONRequestBody defines body for PostAdminTicketMessage for application/json ContentType.
 type PostAdminTicketMessageJSONRequestBody = ReplyTicketRequest
+
+// PutAdminSMSBowerConfigJSONRequestBody defines body for PutAdminSMSBowerConfig for application/json ContentType.
+type PutAdminSMSBowerConfigJSONRequestBody = SMSBowerConfigUpdate
 
 // PutAdminSMSBowerMappingJSONRequestBody defines body for PutAdminSMSBowerMapping for application/json ContentType.
 type PutAdminSMSBowerMappingJSONRequestBody = GmailUpstreamMappingRequest
@@ -11492,6 +11558,12 @@ type ServerInterface interface {
 	// List Gmail code sessions
 	// (GET /v1/admin/upstreams/smsbower/activations)
 	GetAdminSMSBowerActivations(c *gin.Context, params GetAdminSMSBowerActivationsParams)
+	// Get SMSBower provider configuration without exposing the API Key
+	// (GET /v1/admin/upstreams/smsbower/config)
+	GetAdminSMSBowerConfig(c *gin.Context)
+	// Update SMSBower provider configuration and routing strategy
+	// (PUT /v1/admin/upstreams/smsbower/config)
+	PutAdminSMSBowerConfig(c *gin.Context, params PutAdminSMSBowerConfigParams)
 	// Get Gmail revenue, cost and conservative profit
 	// (GET /v1/admin/upstreams/smsbower/finance)
 	GetAdminSMSBowerFinance(c *gin.Context)
@@ -19851,6 +19923,66 @@ func (siw *ServerInterfaceWrapper) GetAdminSMSBowerActivations(c *gin.Context) {
 	siw.Handler.GetAdminSMSBowerActivations(c, params)
 }
 
+// GetAdminSMSBowerConfig operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminSMSBowerConfig(c *gin.Context) {
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminSMSBowerConfig(c)
+}
+
+// PutAdminSMSBowerConfig operation middleware
+func (siw *ServerInterfaceWrapper) PutAdminSMSBowerConfig(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PutAdminSMSBowerConfigParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PutAdminSMSBowerConfig(c, params)
+}
+
 // GetAdminSMSBowerFinance operation middleware
 func (siw *ServerInterfaceWrapper) GetAdminSMSBowerFinance(c *gin.Context) {
 
@@ -25148,6 +25280,8 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/admin/transactions", wrapper.GetAdminTransactions)
 	router.POST(options.BaseURL+"/v1/admin/transactions/:id/reverse", wrapper.PostAdminTransactionReverse)
 	router.GET(options.BaseURL+"/v1/admin/upstreams/smsbower/activations", wrapper.GetAdminSMSBowerActivations)
+	router.GET(options.BaseURL+"/v1/admin/upstreams/smsbower/config", wrapper.GetAdminSMSBowerConfig)
+	router.PUT(options.BaseURL+"/v1/admin/upstreams/smsbower/config", wrapper.PutAdminSMSBowerConfig)
 	router.GET(options.BaseURL+"/v1/admin/upstreams/smsbower/finance", wrapper.GetAdminSMSBowerFinance)
 	router.GET(options.BaseURL+"/v1/admin/upstreams/smsbower/mappings", wrapper.GetAdminSMSBowerMappings)
 	router.DELETE(options.BaseURL+"/v1/admin/upstreams/smsbower/mappings/:projectId", wrapper.DeleteAdminSMSBowerMapping)

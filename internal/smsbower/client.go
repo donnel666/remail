@@ -1,4 +1,4 @@
-package gmail
+package smsbower
 
 import (
 	"context"
@@ -12,10 +12,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/donnel666/remail/internal/money"
 	"github.com/shopspring/decimal"
 )
 
-const smsbowerBaseURL = "https://smsbower.page"
+const baseURL = "https://smsbower.page"
 
 var (
 	ErrBadKey              = errors.New("smsbower: bad api key")
@@ -33,38 +34,35 @@ type UncertainActivationError struct{ Err error }
 func (e *UncertainActivationError) Error() string { return "smsbower: activation result is uncertain" }
 func (e *UncertainActivationError) Unwrap() error { return e.Err }
 
-type SMSBowerService struct {
+type remoteService struct {
 	Code string
 	Name string
 }
 
-type SMSBowerPriceRest struct {
+type remotePriceRest struct {
 	Price decimal.Decimal
 	Count int
 }
 
-type SMSBowerActivation struct {
+type remoteActivation struct {
 	Email  string
 	MailID uint64
 }
 
-type SMSBowerClient struct {
+type client struct {
 	baseURL string
 	http    *http.Client
 }
 
-func NewSMSBowerClient() *SMSBowerClient {
-	return &SMSBowerClient{
-		baseURL: smsbowerBaseURL,
-		http:    &http.Client{Timeout: 15 * time.Second},
-	}
+func newClient() *client {
+	return &client{baseURL: baseURL, http: &http.Client{Timeout: 15 * time.Second}}
 }
 
-func newSMSBowerClient(baseURL string, client *http.Client) *SMSBowerClient {
-	return &SMSBowerClient{baseURL: strings.TrimRight(baseURL, "/"), http: client}
+func newTestClient(endpoint string, httpClient *http.Client) *client {
+	return &client{baseURL: strings.TrimRight(endpoint, "/"), http: httpClient}
 }
 
-func (c *SMSBowerClient) Balance(ctx context.Context, apiKey string) (decimal.Decimal, error) {
+func (c *client) Balance(ctx context.Context, apiKey string) (decimal.Decimal, error) {
 	body, err := c.get(ctx, "/stubs/handler_api.php", url.Values{"action": {"getBalance"}, "api_key": {apiKey}}, false)
 	if err != nil {
 		return decimal.Zero, err
@@ -77,14 +75,14 @@ func (c *SMSBowerClient) Balance(ctx context.Context, apiKey string) (decimal.De
 	if !ok || !strings.EqualFold(strings.TrimSpace(prefix), "ACCESS_BALANCE") {
 		return decimal.Zero, classifyRemoteError(value)
 	}
-	parsed, err := decimal.NewFromString(strings.TrimSpace(balance))
+	parsed, err := money.Parse(strings.TrimSpace(balance))
 	if err != nil || parsed.IsNegative() {
 		return decimal.Zero, ErrRemote
 	}
 	return parsed, nil
 }
 
-func (c *SMSBowerClient) Services(ctx context.Context, apiKey string) ([]SMSBowerService, error) {
+func (c *client) Services(ctx context.Context, apiKey string) ([]remoteService, error) {
 	body, err := c.get(ctx, "/stubs/handler_api.php", url.Values{"action": {"getMailServicesList"}, "api_key": {apiKey}}, false)
 	if err != nil {
 		return nil, err
@@ -102,19 +100,20 @@ func (c *SMSBowerClient) Services(ctx context.Context, apiKey string) ([]SMSBowe
 	if err := json.Unmarshal(body, &response); err != nil || !remoteStatusOK(response.Status) {
 		return nil, ErrRemote
 	}
-	services := make([]SMSBowerService, 0, len(response.Services))
+	services := make([]remoteService, 0, len(response.Services))
 	for _, item := range response.Services {
 		code := strings.TrimSpace(item.Code)
 		name := strings.TrimSpace(item.Name)
-		if code == "" || len(code) > 64 || name == "" {
+		if code == "" || len(code) > 64 || name == "" || len(name) > 191 ||
+			strings.ContainsAny(code+name, "\r\n\x00") {
 			continue
 		}
-		services = append(services, SMSBowerService{Code: code, Name: name})
+		services = append(services, remoteService{Code: code, Name: name})
 	}
 	return services, nil
 }
 
-func (c *SMSBowerClient) GmailPrices(ctx context.Context, apiKey string) (map[string]SMSBowerPriceRest, error) {
+func (c *client) GmailPrices(ctx context.Context, apiKey string) (map[string]remotePriceRest, error) {
 	body, err := c.get(ctx, "/api/mail/getPriceRests", url.Values{"api_key": {apiKey}, "domain": {"gmail.com"}}, false)
 	if err != nil {
 		return nil, err
@@ -134,22 +133,22 @@ func (c *SMSBowerClient) GmailPrices(ctx context.Context, apiKey string) (map[st
 	if err := decoder.Decode(&response); err != nil || !remoteStatusOK(response.Status) {
 		return nil, ErrRemote
 	}
-	result := make(map[string]SMSBowerPriceRest, len(response.Data))
+	result := make(map[string]remotePriceRest, len(response.Data))
 	for serviceCode, domains := range response.Data {
 		item, ok := domains["gmail.com"]
 		if !ok {
 			continue
 		}
-		price, err := decimal.NewFromString(string(item.Price))
-		if err != nil || price.IsNegative() || item.Count < 0 {
+		price, err := money.Parse(string(item.Price))
+		if err != nil || price.IsNegative() || item.Count < 0 || uint64(item.Count) > uint64(^uint32(0)) {
 			continue
 		}
-		result[strings.TrimSpace(serviceCode)] = SMSBowerPriceRest{Price: price, Count: item.Count}
+		result[strings.TrimSpace(serviceCode)] = remotePriceRest{Price: price, Count: item.Count}
 	}
 	return result, nil
 }
 
-func (c *SMSBowerClient) Activate(ctx context.Context, apiKey, service string, maxPrice decimal.Decimal) (*SMSBowerActivation, error) {
+func (c *client) Activate(ctx context.Context, apiKey, service string, maxPrice decimal.Decimal) (*remoteActivation, error) {
 	body, err := c.get(ctx, "/api/mail/getActivation", url.Values{
 		"api_key": {apiKey}, "service": {strings.TrimSpace(service)}, "domain": {"gmail.com"},
 		"maxPrice": {maxPrice.String()}, "alias": {"0"},
@@ -172,13 +171,15 @@ func (c *SMSBowerClient) Activate(ctx context.Context, apiKey, service string, m
 	}
 	mailID, err := strconv.ParseUint(string(response.MailID), 10, 64)
 	email := strings.ToLower(strings.TrimSpace(response.Mail))
-	if err != nil || mailID == 0 || !strings.HasSuffix(email, "@gmail.com") {
+	local, domain, validEmail := strings.Cut(email, "@")
+	if err != nil || mailID == 0 || len(email) > 320 || !validEmail || local == "" || domain != "gmail.com" ||
+		strings.ContainsAny(email, "\r\n\t ") {
 		return nil, ErrRemote
 	}
-	return &SMSBowerActivation{Email: email, MailID: mailID}, nil
+	return &remoteActivation{Email: email, MailID: mailID}, nil
 }
 
-func (c *SMSBowerClient) Code(ctx context.Context, apiKey string, mailID uint64) (string, error) {
+func (c *client) Code(ctx context.Context, apiKey string, mailID uint64) (string, error) {
 	body, err := c.get(ctx, "/api/mail/getCode", url.Values{"api_key": {apiKey}, "mailId": {strconv.FormatUint(mailID, 10)}}, false)
 	if err != nil {
 		return "", err
@@ -200,7 +201,7 @@ func (c *SMSBowerClient) Code(ctx context.Context, apiKey string, mailID uint64)
 	return code, nil
 }
 
-func (c *SMSBowerClient) SetStatus(ctx context.Context, apiKey string, mailID uint64, status int) error {
+func (c *client) SetStatus(ctx context.Context, apiKey string, mailID uint64, status int) error {
 	if status != 2 && status != 3 && status != 5 {
 		return fmt.Errorf("invalid SMSBower status: %d", status)
 	}
@@ -226,7 +227,7 @@ func (c *SMSBowerClient) SetStatus(ctx context.Context, apiKey string, mailID ui
 	return ErrRemote
 }
 
-func (c *SMSBowerClient) get(ctx context.Context, path string, query url.Values, uncertain bool) ([]byte, error) {
+func (c *client) get(ctx context.Context, path string, query url.Values, uncertain bool) ([]byte, error) {
 	endpoint, err := url.Parse(c.baseURL + path)
 	if err != nil {
 		return nil, ErrRemote
@@ -266,7 +267,7 @@ func remoteStatusOK(raw json.RawMessage) bool {
 }
 
 func classifyKnownRemoteError(value string) error {
-	lower := strings.ToLower(strings.TrimSpace(value))
+	lower := strings.NewReplacer("_", " ", "-", " ").Replace(strings.ToLower(strings.TrimSpace(value)))
 	switch {
 	case strings.Contains(lower, "bad_key") || strings.Contains(lower, "bad key") || strings.Contains(lower, "no access"):
 		return ErrBadKey

@@ -35,7 +35,6 @@ func newLocalCodeSession(t *testing.T, name string, clock *time.Time) (*gorm.DB,
 
 	service := NewService(db, nil)
 	service.now = func() time.Time { return clock.UTC() }
-	service.pick = func(uint64) uint64 { return 0 }
 	orderNo := "ORDER-" + name
 	resourceID := root.ID
 	require.NoError(t, db.Create(&localAllocationGuardModel{OrderNo: orderNo, Type: "gmail"}).Error)
@@ -48,9 +47,7 @@ func newLocalCodeSession(t *testing.T, name string, clock *time.Time) (*gorm.DB,
 	}).Error)
 	sessionID, err := service.CreateSession(context.Background(), tradeapp.GmailSessionCommand{
 		OrderNo: orderNo, ProjectID: 7, ProductID: 71,
-		Quote: tradeapp.GmailSupplyQuote{
-			Source: SourceLocal, UpstreamPrice: "0", PointsPerUnit: "1", CostPoints: "1", MaxPrice: "0",
-		},
+		Quote: tradeapp.GmailSupplyQuote{Source: SourceLocal, CostPoints: "1"},
 	})
 	require.NoError(t, err)
 	var session sessionModel
@@ -426,49 +423,9 @@ func TestCancelLocalGmailReleasesWithoutRemoteAction(t *testing.T) {
 	require.NoError(t, service.CancelGmailOrder(context.Background(), session.OrderNo))
 	session = loadGmailSession(t, db, session.ID)
 	require.Equal(t, SessionCancelled, session.Status)
-	require.Empty(t, session.PendingRemoteAction)
 	require.Nil(t, session.NextPollAt)
 	require.Equal(t, []string{session.OrderNo}, trade.failed)
 	var allocation allocationModel
 	require.NoError(t, db.Where("order_no = ?", session.OrderNo).Take(&allocation).Error)
 	require.Equal(t, AllocationStatusReleased, allocation.Status)
-}
-
-func TestSMSBowerCodeAllocationUsesOrderProjectAndUnifiedGuard(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:gmail-smsbower-allocation?mode=memory&cache=shared"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&localAllocationGuardModel{}, &allocationModel{}, &sessionModel{}))
-	require.NoError(t, db.Exec("CREATE UNIQUE INDEX idx_test_smsbower_allocation_order ON gmail_allocations(order_no)").Error)
-	require.NoError(t, db.Exec(`CREATE TABLE orders (
-		order_no TEXT PRIMARY KEY, project_id INTEGER NOT NULL, project_product_id INTEGER NOT NULL,
-		product_type TEXT NOT NULL, service_mode TEXT NOT NULL
-	)`).Error)
-	require.NoError(t, db.Exec(
-		"INSERT INTO orders(order_no, project_id, project_product_id, product_type, service_mode) VALUES (?, 7, 71, 'gmail', 'code')",
-		"SMS-ALLOCATION",
-	).Error)
-	session := sessionModel{
-		OrderNo: "SMS-ALLOCATION", Source: SourceSMSBower, SourceRef: "8123", ServiceMode: string(tradedomain.ServiceModeCode),
-		Email: "upstream@gmail.com", Status: SessionActive, CodesJSON: []byte("[]"), CostPointsSnapshot: "1.25",
-	}
-	require.NoError(t, db.Create(&session).Error)
-	service := NewService(db, nil)
-	first, err := service.ensureCodeAllocation(context.Background(), session)
-	require.NoError(t, err)
-	second, err := service.ensureCodeAllocation(context.Background(), session)
-	require.NoError(t, err)
-	require.Equal(t, first, second)
-
-	var guard localAllocationGuardModel
-	require.NoError(t, db.Where("order_no = ?", session.OrderNo).Take(&guard).Error)
-	require.Equal(t, "gmail", guard.Type)
-	var allocation allocationModel
-	require.NoError(t, db.First(&allocation, first).Error)
-	require.EqualValues(t, 7, allocation.ProjectID)
-	require.EqualValues(t, 71, allocation.ProductID)
-	require.Equal(t, "gmail", allocation.GuardType)
-	require.Equal(t, AllocationSupplyPublic, allocation.SupplyScope)
-	require.Equal(t, AllocationStatusAllocated, allocation.Status)
-	require.Nil(t, allocation.ResourceID)
-	require.Equal(t, fmt.Sprint(session.ID), allocation.SourceRef)
 }

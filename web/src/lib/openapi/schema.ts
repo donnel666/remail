@@ -3801,6 +3801,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/upstreams/smsbower/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get SMSBower provider configuration without exposing the API Key */
+        get: operations["getAdminSMSBowerConfig"];
+        /** Update SMSBower provider configuration and routing strategy */
+        put: operations["putAdminSMSBowerConfig"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/upstreams/smsbower/status": {
         parameters: {
             query?: never;
@@ -7110,6 +7128,28 @@ export interface components {
             total: number;
             offset: number;
             limit: number;
+        };
+        /** @enum {string} */
+        SMSBowerStrategy: "local_first" | "upstream_first";
+        SMSBowerConfig: {
+            enabled: boolean;
+            /** @description Whether an API Key is stored. The key itself is never returned. */
+            configured: boolean;
+            strategy: components["schemas"]["SMSBowerStrategy"];
+            syncIntervalMinutes: number;
+            balanceWarningThreshold: components["schemas"]["NonNegativeLedgerAmountResponse"];
+            pointsPerUnit: components["schemas"]["NonNegativeLedgerAmountResponse"];
+            minMarginRate: components["schemas"]["NonNegativeLedgerAmountResponse"];
+        };
+        SMSBowerConfigUpdate: {
+            enabled: boolean;
+            /** @description Leave empty to keep the stored API Key unchanged. */
+            apiKey?: string;
+            strategy: components["schemas"]["SMSBowerStrategy"];
+            syncIntervalMinutes: number;
+            balanceWarningThreshold: components["schemas"]["NonNegativeLedgerAmount"];
+            pointsPerUnit: components["schemas"]["NonNegativeLedgerAmount"];
+            minMarginRate: components["schemas"]["NonNegativeLedgerAmount"];
         };
         SMSBowerAccountStatus: {
             enabled: boolean;
@@ -19609,6 +19649,58 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    getAdminSMSBowerConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SMSBower provider configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SMSBowerConfig"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    putAdminSMSBowerConfig: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SMSBowerConfigUpdate"];
+            };
+        };
+        responses: {
+            /** @description Updated SMSBower provider configuration; the API Key is never returned */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SMSBowerConfig"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             422: components["responses"]["UnprocessableEntity"];
         };
     };

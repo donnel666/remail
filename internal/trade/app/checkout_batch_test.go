@@ -396,20 +396,23 @@ type checkoutInventorySpy struct {
 }
 
 type checkoutGmailSupplySpy struct {
-	checks      int
-	creates     int
-	finds       int
-	schedules   int
-	cancels     int
-	sessionID   uint
-	checkErr    error
-	lastMode    domain.ServiceMode
-	lastSession GmailSessionCommand
-	purchases   int
-	purchase    *GmailPurchaseDelivery
-	purchaseErr error
-	releases    int
-	releaseInTx bool
+	checks        int
+	creates       int
+	finds         int
+	schedules     int
+	cancels       int
+	sessionID     uint
+	checkErr      error
+	lastMode      domain.ServiceMode
+	lastSession   GmailSessionCommand
+	allocations   int
+	allocation    *GmailLocalAllocation
+	allocationErr error
+	purchases     int
+	purchase      *GmailPurchaseDelivery
+	purchaseErr   error
+	releases      int
+	releaseInTx   bool
 }
 
 func (s *checkoutGmailSupplySpy) CheckSupply(
@@ -424,15 +427,7 @@ func (s *checkoutGmailSupplySpy) CheckSupply(
 	if s.checkErr != nil {
 		return nil, s.checkErr
 	}
-	quote := &GmailSupplyQuote{
-		Source: "smsbower", ProviderServiceCode: "gm", UpstreamPrice: "1",
-		PointsPerUnit: "1", CostPoints: "1", MaxPrice: "1",
-	}
-	if mode == domain.ServiceModePurchase {
-		quote.Source = "local"
-		quote.ProviderServiceCode = ""
-	}
-	return quote, nil
+	return &GmailSupplyQuote{Source: "local", CostPoints: "1"}, nil
 }
 
 func (s *checkoutGmailSupplySpy) FindSessionID(context.Context, string) (uint, error) {
@@ -458,7 +453,14 @@ func (s *checkoutGmailSupplySpy) CancelGmailOrder(context.Context, string) error
 }
 
 func (s *checkoutGmailSupplySpy) AllocateLocalCode(context.Context, string, uint, uint, uint, domain.SupplyPolicy, GmailSupplyQuote) (*GmailLocalAllocation, error) {
-	return &GmailLocalAllocation{AllocationID: 61, Email: "buyer@gmail.com", SupplyScope: SupplyScopePublic}, nil
+	s.allocations++
+	if s.allocationErr != nil {
+		return nil, s.allocationErr
+	}
+	if s.allocation == nil {
+		s.allocation = &GmailLocalAllocation{AllocationID: 61, Email: "buyer@gmail.com", SupplyScope: SupplyScopePublic}
+	}
+	return s.allocation, nil
 }
 
 func (s *checkoutGmailSupplySpy) ReleaseLocalAllocation(ctx context.Context, _ string) error {
@@ -734,7 +736,7 @@ func TestCheckoutIgnoresRandomEmailSuffixBeforeInventoryPrecheck(t *testing.T) {
 	require.Empty(t, prepared.emailSuffix)
 }
 
-func TestGmailCodeCheckoutUsesUpstreamWithoutLocalAllocation(t *testing.T) {
+func TestGmailCodeCheckoutUsesLocalGmailAllocation(t *testing.T) {
 	repo := &batchRepoSpy{orders: map[string]domain.Order{}}
 	wallet := &batchWalletSpy{}
 	allocation := &checkoutInventorySpy{}

@@ -29,17 +29,6 @@ func NewModule(db *gorm.DB, redisClient redis.UniversalClient, queue *asynq.Clie
 
 func RegisterRoutes(rg *gin.RouterGroup, module *Module, fetcher middleware.SessionFetcher, checker middleware.PermissionChecker) {
 	h := &handler{service: module.Service}
-	admin := rg.Group("/admin/upstreams/smsbower")
-	admin.Use(middleware.LoadSession(fetcher), middleware.AuthRequired(), middleware.CSRFRequired())
-	admin.GET("/status", middleware.PermissionRequired(checker, "system:settings", "read"), h.status)
-	admin.POST("/sync", middleware.PermissionRequired(checker, "system:settings", "write"), h.sync)
-	admin.GET("/services", middleware.PermissionRequired(checker, "system:settings", "read"), h.services)
-	admin.GET("/mappings", middleware.PermissionRequired(checker, "system:settings", "read"), h.mappings)
-	admin.PUT("/mappings/:projectId", middleware.PermissionRequired(checker, "system:settings", "write"), h.putMapping)
-	admin.DELETE("/mappings/:projectId", middleware.PermissionRequired(checker, "system:settings", "write"), h.deleteMapping)
-	admin.GET("/finance", middleware.PermissionRequired(checker, "billing:wallet", "read"), h.finance)
-	admin.GET("/activations", middleware.PermissionRequired(checker, "billing:wallet", "read"), h.activations)
-
 	resources := rg.Group("/admin/gmail/resources")
 	resources.Use(middleware.LoadSession(fetcher), middleware.AuthRequired(), middleware.CSRFRequired())
 	resources.GET("", middleware.PermissionRequired(checker, "core:resource", "read"), h.localResources)
@@ -55,99 +44,6 @@ func RegisterRoutes(rg *gin.RouterGroup, module *Module, fetcher middleware.Sess
 }
 
 type handler struct{ service *Service }
-
-func (h *handler) status(c *gin.Context) {
-	status, err := h.service.AccountStatus(c.Request.Context())
-	if err != nil {
-		writeGmailError(c, err)
-		return
-	}
-	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusOK, status)
-}
-
-func (h *handler) sync(c *gin.Context) {
-	if err := h.service.ScheduleSync(c.Request.Context()); err != nil {
-		writeGmailError(c, err)
-		return
-	}
-	c.Status(http.StatusAccepted)
-}
-
-func (h *handler) services(c *gin.Context) {
-	items, err := h.service.ListServices(c.Request.Context())
-	if err != nil {
-		writeGmailError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"items": items})
-}
-
-func (h *handler) mappings(c *gin.Context) {
-	items, err := h.service.ListMappings(c.Request.Context())
-	if err != nil {
-		writeGmailError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"items": items})
-}
-
-type mappingRequest struct {
-	ProviderServiceCode string `json:"providerServiceCode" binding:"required"`
-}
-
-func (h *handler) putMapping(c *gin.Context) {
-	projectID, err := strconv.ParseUint(strings.TrimSpace(c.Param("projectId")), 10, 64)
-	var req mappingRequest
-	if err != nil || projectID == 0 || c.ShouldBindJSON(&req) != nil {
-		writeGmailError(c, ErrInvalidRoute)
-		return
-	}
-	if err := h.service.PutMapping(c.Request.Context(), uint(projectID), req.ProviderServiceCode); err != nil {
-		writeGmailError(c, err)
-		return
-	}
-	c.Status(http.StatusNoContent)
-}
-
-func (h *handler) deleteMapping(c *gin.Context) {
-	projectID, err := strconv.ParseUint(strings.TrimSpace(c.Param("projectId")), 10, 64)
-	if err != nil || projectID == 0 {
-		writeGmailError(c, ErrInvalidRoute)
-		return
-	}
-	if err := h.service.DeleteMapping(c.Request.Context(), uint(projectID)); err != nil {
-		writeGmailError(c, err)
-		return
-	}
-	c.Status(http.StatusNoContent)
-}
-
-func (h *handler) finance(c *gin.Context) {
-	report, err := h.service.Finance(c.Request.Context())
-	if err != nil {
-		writeGmailError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, report)
-}
-
-func (h *handler) activations(c *gin.Context) {
-	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
-	if offset < 0 {
-		offset = 0
-	}
-	if limit <= 0 || limit > 200 {
-		limit = 50
-	}
-	items, total, err := h.service.ListActivations(c.Request.Context(), offset, limit)
-	if err != nil {
-		writeGmailError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"items": items, "total": total, "offset": offset, "limit": limit})
-}
 
 func (h *handler) localResources(c *gin.Context) {
 	offset, offsetErr := strconv.Atoi(c.DefaultQuery("offset", "0"))
@@ -437,7 +333,7 @@ func writeGmailError(c *gin.Context, err error) {
 	requestID := middleware.GetRequestID(c)
 	switch {
 	case errors.Is(err, ErrInvalidRoute):
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Invalid Gmail upstream mapping.", "requestId": requestID})
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Invalid Gmail request.", "requestId": requestID})
 	case errors.Is(err, ErrInvalidLocalResource):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Invalid Gmail resource input.", "requestId": requestID})
 	case errors.Is(err, ErrGmailImportInvalidCommand), errors.Is(err, ErrGmailImportInvalidOwner):
@@ -454,7 +350,7 @@ func writeGmailError(c *gin.Context, err error) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "Resource service is temporarily unavailable.", "requestId": requestID})
 	case errors.Is(err, ErrLocalResourceBusy):
 		c.JSON(http.StatusConflict, gin.H{"message": "Gmail resource is leased or sold.", "requestId": requestID})
-	case errors.Is(err, ErrRouteNotFound), errors.Is(err, ErrSessionMissing), errors.Is(err, ErrLocalResourceMissing), errors.Is(err, ErrGmailImportNotFound):
+	case errors.Is(err, ErrSessionMissing), errors.Is(err, ErrLocalResourceMissing), errors.Is(err, ErrGmailImportNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"message": "Resource not found.", "requestId": requestID})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "An unexpected error occurred.", "requestId": requestID})

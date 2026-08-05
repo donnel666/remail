@@ -10873,6 +10873,52 @@ paths:
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
 
+  /v1/admin/upstreams/smsbower/config:
+    get:
+      operationId: getAdminSMSBowerConfig
+      summary: Get SMSBower provider configuration without exposing the API Key
+      tags: [SystemSettings]
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: SMSBower provider configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SMSBowerConfig"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    put:
+      operationId: putAdminSMSBowerConfig
+      summary: Update SMSBower provider configuration and routing strategy
+      tags: [SystemSettings]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SMSBowerConfigUpdate"
+      responses:
+        "200":
+          description: Updated SMSBower provider configuration; the API Key is never returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SMSBowerConfig"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
   /v1/admin/upstreams/smsbower/status:
     get:
       operationId: getAdminSMSBowerStatus
@@ -19185,6 +19231,70 @@ components:
           type: integer
           minimum: 1
           maximum: 100
+      additionalProperties: false
+
+    SMSBowerStrategy:
+      type: string
+      enum: [local_first, upstream_first]
+
+    SMSBowerConfig:
+      type: object
+      required:
+        - enabled
+        - configured
+        - strategy
+        - syncIntervalMinutes
+        - balanceWarningThreshold
+        - pointsPerUnit
+        - minMarginRate
+      properties:
+        enabled:
+          type: boolean
+        configured:
+          type: boolean
+          description: Whether an API Key is stored. The key itself is never returned.
+        strategy:
+          $ref: "#/components/schemas/SMSBowerStrategy"
+        syncIntervalMinutes:
+          type: integer
+          minimum: 1
+          maximum: 1440
+        balanceWarningThreshold:
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
+        pointsPerUnit:
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
+        minMarginRate:
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
+      additionalProperties: false
+
+    SMSBowerConfigUpdate:
+      type: object
+      required:
+        - enabled
+        - strategy
+        - syncIntervalMinutes
+        - balanceWarningThreshold
+        - pointsPerUnit
+        - minMarginRate
+      properties:
+        enabled:
+          type: boolean
+        apiKey:
+          type: string
+          maxLength: 512
+          description: Leave empty to keep the stored API Key unchanged.
+        strategy:
+          $ref: "#/components/schemas/SMSBowerStrategy"
+        syncIntervalMinutes:
+          type: integer
+          minimum: 1
+          maximum: 1440
+        balanceWarningThreshold:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        pointsPerUnit:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        minMarginRate:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
       additionalProperties: false
 
     SMSBowerAccountStatus:

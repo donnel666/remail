@@ -59,6 +59,7 @@ export default function MailmatchSection({ options, onBulkSave }: SectionProps) 
       {field("拉取调度任务超时（秒）", "fetch_dispatcher_timeout_seconds", 3600)}
       {field("资源收件每轮投递上限", "resource_fetch_dispatch_limit", 10000)}
       {field("项目历史并发数", "project_history_concurrency")}
+      {field("Gmail 历史并发数", "gmail_history_concurrency")}
       {field("项目历史每轮上限", "project_history_dispatch_limit")}
       <SettingsTextareaField
         label={t("系统兜底提取规则（从上到下优先）")}

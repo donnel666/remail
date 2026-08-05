@@ -37,7 +37,6 @@ var integerRanges = map[string]integerRange{
 	"rebate_expiry_days":                  {min: 0, max: 36500},
 	"max_pending_recharge_orders":         positive(100),
 	"async_check_request_timeout_seconds": {min: 1, max: 30},
-	"smsbower_sync_interval_minutes":      {min: 1, max: 1440},
 
 	"domain_max_subdomains_per_registrable_domain": positive(1000), "default_plus_daily_limit": positive(2_147_483_647), "default_mailbox_daily_limit": positive(2_147_483_647), "resource_validation_max_failures": positive(100),
 	"resource_import_max_bytes": positive(512 << 20), "max_project_logo_bytes": positive(20 << 20), "project_name_max": positive(120), "project_description_max": positive(1000), "project_target_platform_max": positive(120),
@@ -92,12 +91,13 @@ var removedKeys = map[string]struct{}{
 	"admin_task_max_limit": {}, "api_key_cache_flush_interval_seconds": {}, "api_key_meta_ttl_seconds": {},
 	"bucket_count": {}, "msacl_content_search_window_minutes": {}, "outbound_mail_claim_timeout_minutes": {},
 	"inventory_cache_activity_ttl_minutes": {}, "message_scan_limit": {}, "projection_replay_limit": {},
+	"smsbower_enabled": {}, "smsbower_code_enabled": {}, "smsbower_purchase_enabled": {}, "smsbower_api_key": {},
+	"smsbower_sync_interval_minutes": {}, "smsbower_balance_warning_threshold": {}, "smsbower_points_per_unit": {}, "smsbower_min_margin_rate": {},
 }
 
 var booleanKeys = map[string]struct{}{
 	"register_enabled": {}, "captcha_enabled": {}, "announcement_enabled": {}, "faq_enabled": {}, "epay_enabled": {},
 	"daily_checkin_enabled": {}, "leaderboard_reward_enabled": {}, "linuxdo_oauth_enabled": {}, "github_oauth_enabled": {},
-	"smsbower_enabled": {}, "smsbower_code_enabled": {}, "smsbower_purchase_enabled": {},
 }
 
 func Validate(key, value string) error {
@@ -135,8 +135,7 @@ func Validate(key, value string) error {
 		"default_project_domain_code_price", "default_project_domain_code_supplier_price",
 		"default_project_domain_purchase_price", "default_project_domain_purchase_supplier_price",
 		"default_project_gmail_code_price", "default_project_gmail_code_supplier_price",
-		"default_project_gmail_purchase_price", "default_project_gmail_purchase_supplier_price",
-		"smsbower_balance_warning_threshold":
+		"default_project_gmail_purchase_price", "default_project_gmail_purchase_supplier_price":
 		amount, err := money.Parse(value)
 		if err != nil || amount.IsNegative() {
 			return domain.ErrInvalidValue
@@ -158,16 +157,6 @@ func Validate(key, value string) error {
 	case "first_order_rebate_ratio":
 		ratio, err := money.Parse(value)
 		if err != nil || ratio.IsNegative() || ratio.GreaterThan(decimal.NewFromInt(1)) {
-			return domain.ErrInvalidValue
-		}
-	case "smsbower_min_margin_rate":
-		ratio, err := money.Parse(value)
-		if err != nil || ratio.IsNegative() || ratio.GreaterThanOrEqual(decimal.NewFromInt(1)) {
-			return domain.ErrInvalidValue
-		}
-	case "smsbower_points_per_unit":
-		amount, err := money.Parse(value)
-		if err != nil || !amount.IsPositive() {
 			return domain.ErrInvalidValue
 		}
 	case "token_refresh_hour":
@@ -215,7 +204,7 @@ func Validate(key, value string) error {
 		if rawValue != value || !validOAuthCallbackURL(value, callbackPath) {
 			return domain.ErrInvalidValue
 		}
-	case "linuxdo_client_id", "linuxdo_client_secret", "github_client_id", "github_client_secret", "smsbower_api_key":
+	case "linuxdo_client_id", "linuxdo_client_secret", "github_client_id", "github_client_secret":
 		if rawValue != value || len(value) > 512 || strings.ContainsAny(value, "\r\n\x00") {
 			return domain.ErrInvalidValue
 		}
@@ -404,9 +393,6 @@ func sanitizeRelationships(values map[string]string) {
 	if strings.TrimSpace(values["github_oauth_enabled"]) == "true" && len(invalidGitHubConfigFields(values)) > 0 {
 		values["github_oauth_enabled"] = "false"
 	}
-	if strings.TrimSpace(values["smsbower_enabled"]) == "true" && strings.TrimSpace(values["smsbower_api_key"]) == "" {
-		values["smsbower_enabled"] = "false"
-	}
 	if strings.TrimSpace(values["daily_checkin_enabled"]) == "true" {
 		if rules, err := ParseCheckinRewardRules(values["daily_checkin_reward_rules"]); err != nil || len(rules) == 0 {
 			values["daily_checkin_enabled"] = "false"
@@ -461,9 +447,6 @@ func validateRelationships(values map[string]string) error {
 		if fields := invalidGitHubConfigFields(values); len(fields) > 0 {
 			return &domain.InvalidValueFieldsError{Fields: fields}
 		}
-	}
-	if strings.TrimSpace(values["smsbower_enabled"]) == "true" && strings.TrimSpace(values["smsbower_api_key"]) == "" {
-		return &domain.InvalidValueFieldsError{Fields: map[string]string{"smsbower_api_key": "Required when SMSBower is enabled."}}
 	}
 	if strings.TrimSpace(values["daily_checkin_enabled"]) == "true" {
 		if rules, err := ParseCheckinRewardRules(values["daily_checkin_reward_rules"]); err != nil || len(rules) == 0 {

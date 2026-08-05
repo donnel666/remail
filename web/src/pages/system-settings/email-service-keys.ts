@@ -40,6 +40,7 @@ export const MAILMATCH_KEYS = [
   "fetch_dispatcher_timeout_seconds",
   "resource_fetch_dispatch_limit",
   "project_history_concurrency",
+  "gmail_history_concurrency",
   "project_history_dispatch_limit",
   "verification_code_pattern",
 ] as const;

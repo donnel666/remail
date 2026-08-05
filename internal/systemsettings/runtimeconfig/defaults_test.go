@@ -23,6 +23,8 @@ func TestDefaultSettingsAreValidAndIndependent(t *testing.T) {
 		"api_key_meta_ttl_seconds", "api_key_cache_flush_interval_seconds",
 		"bucket_count", "inventory_cache_activity_ttl_minutes", "msacl_content_search_window_minutes", "outbound_mail_claim_timeout_minutes",
 		"message_scan_limit", "projection_replay_limit",
+		"smsbower_enabled", "smsbower_code_enabled", "smsbower_purchase_enabled", "smsbower_api_key",
+		"smsbower_sync_interval_minutes", "smsbower_balance_warning_threshold", "smsbower_points_per_unit", "smsbower_min_margin_rate",
 	} {
 		if _, exists := keys[key]; exists {
 			t.Fatalf("removed key %q is still seeded", key)
@@ -42,12 +44,6 @@ func TestDefaultSettingsAreValidAndIndependent(t *testing.T) {
 	require.Equal(t, "80", keys["proxy_server_inventory_threshold_percent"])
 	require.Equal(t, `["(?:^|[^\\d])(\\d{6,8})(?:[^\\d]|$)"]`, keys["verification_code_pattern"])
 	require.Equal(t, "8", keys["default_project_gmail_code_price"])
-	require.Equal(t, "false", keys["smsbower_enabled"])
-	require.Equal(t, "true", keys["smsbower_code_enabled"])
-	require.Equal(t, "false", keys["smsbower_purchase_enabled"])
-	require.Equal(t, "5", keys["smsbower_sync_interval_minutes"])
-	require.Equal(t, "1", keys["smsbower_points_per_unit"])
-	require.Equal(t, "0.10", keys["smsbower_min_margin_rate"])
 	require.Equal(t, "3", keys["gmail_code_retain_days"])
 	require.Equal(t, "300", keys["fetch_dispatcher_timeout_seconds"])
 	require.Equal(t, "10000", keys["resource_fetch_dispatch_limit"])

@@ -393,13 +393,16 @@ func (r *Repo) MarkActive(ctx context.Context, cmd tradeapp.MarkActiveCommand) (
 		if cmd.ActivatedAt != nil {
 			updates["activated_at"] = cmd.ActivatedAt.UTC()
 		}
-		if cmd.AllocationID == 0 {
-			return domain.ErrInvalidOrderRequest
-		}
 		switch cmd.AllocationType {
 		case domain.AllocationTypeMicrosoft:
+			if cmd.AllocationID == 0 {
+				return domain.ErrInvalidOrderRequest
+			}
 			updates["microsoft_alloc_id"] = cmd.AllocationID
 		case domain.AllocationTypeDomain:
+			if cmd.AllocationID == 0 {
+				return domain.ErrInvalidOrderRequest
+			}
 			updates["domain_alloc_id"] = cmd.AllocationID
 		case domain.AllocationTypeGmail:
 		default:
