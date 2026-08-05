@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-
-	maildomain "github.com/donnel666/remail/internal/mailtransport/domain"
 )
 
 // ReauthorizeResult reports a validation-only account-wide consent cleanup,
@@ -57,13 +55,14 @@ func ReauthorizeWithAliases(
 		public.Result = aclFailure("request", "Microsoft refresh token authorization is temporarily unavailable.", false)
 		return public, nil
 	}
+	bindingAddress, bindingStatus := authSuccessBinding(result.oauth)
 	public.Result = Result{
 		Valid:          true,
 		ClientID:       strings.TrimSpace(result.oauth.ClientID),
 		AccessToken:    strings.TrimSpace(result.oauth.AccessToken),
 		RefreshToken:   strings.TrimSpace(result.oauth.RefreshToken),
-		BindingAddress: strings.TrimSpace(result.oauth.BoundMailbox),
-		BindingStatus:  string(maildomain.MicrosoftBindingVerified),
+		BindingAddress: bindingAddress,
+		BindingStatus:  bindingStatus,
 	}
 	return public, nil
 }
@@ -78,6 +77,8 @@ func reauthorizeAccountImpl(
 	if err != nil {
 		return result, err
 	}
+	confirmedBindingAddress := pending.boundMailbox
+	observedBindingAddress := pending.observedBindingAddress
 	consentPage, _, consentBinding, err := loginMicrosoftConsentManageWithBinding(
 		pending.session,
 		email,
@@ -89,6 +90,7 @@ func reauthorizeAccountImpl(
 		return result, err
 	}
 	pending.boundMailbox = firstNonEmpty(consentBinding, pending.boundMailbox)
+	confirmedBindingAddress = firstNonEmpty(pending.boundMailbox, confirmedBindingAddress)
 	aliasSession := pending.session
 	if !pending.hasEmailProof && strings.TrimSpace(pending.boundMailbox) == "" {
 		pending.boundMailbox, aliasSession, err = bindMissingAuxiliaryEmail(
@@ -101,6 +103,7 @@ func reauthorizeAccountImpl(
 		if err != nil {
 			return result, err
 		}
+		confirmedBindingAddress = firstNonEmpty(pending.boundMailbox, confirmedBindingAddress)
 		// Binding finishes on AddAssocId. Re-enter consent/Manage with the same
 		// cookie jar before listing grants; some accounts otherwise stop on the
 		// authenticated OAuth relay instead of returning the consent page.
@@ -135,10 +138,14 @@ func reauthorizeAccountImpl(
 	if err != nil {
 		return result, err
 	}
+	observedBindingAddress = firstNonEmpty(pending.observedBindingAddress, observedBindingAddress)
+	confirmedBindingAddress = firstNonEmpty(pending.boundMailbox, confirmedBindingAddress)
 	result.oauth, err = completeAccountAuthorization(pending)
 	if err != nil {
 		return result, err
 	}
+	result.oauth.BoundMailbox = firstNonEmpty(result.oauth.BoundMailbox, confirmedBindingAddress)
+	result.oauth.ObservedBindingAddress = firstNonEmpty(result.oauth.ObservedBindingAddress, observedBindingAddress)
 	bindingAddress := firstNonEmpty(result.oauth.BoundMailbox, preferredBindingAddress)
 	result.aliasResults = addExplicitAliasCandidatesWithSession(
 		aliasSession,

@@ -139,3 +139,20 @@ func TestMapAuthErrorAlreadyBoundStoresMaskInBindingAddress(t *testing.T) {
 
 	assert.Equal(t, "m*****d@example.com", result.BindingAddress)
 }
+
+func TestAuthSuccessBindingKeepsUnchallengedProofAsPending(t *testing.T) {
+	address, status := authSuccessBinding(&AuthSuccess{
+		ObservedBindingAddress: " Q*****A@Recovery.Test ",
+	})
+
+	assert.Equal(t, "q*****a@recovery.test", address)
+	assert.Equal(t, string(maildomain.MicrosoftBindingPending), status)
+
+	address, status = authSuccessBinding(&AuthSuccess{
+		BoundMailbox:           "verified@recovery.test",
+		ObservedBindingAddress: "q*****a@recovery.test",
+	})
+
+	assert.Equal(t, "verified@recovery.test", address)
+	assert.Equal(t, string(maildomain.MicrosoftBindingVerified), status)
+}

@@ -31,14 +31,32 @@ func Authorize(ctx context.Context, email, password, proxy string, preferredBind
 	if err != nil {
 		return mapAuthError(err), nil
 	}
+	bindingAddress, bindingStatus := authSuccessBinding(success)
 	return Result{
 		Valid:          true,
 		ClientID:       success.ClientID,
 		AccessToken:    success.AccessToken,
 		RefreshToken:   success.RefreshToken,
-		BindingAddress: strings.TrimSpace(success.BoundMailbox),
-		BindingStatus:  string(maildomain.MicrosoftBindingVerified),
+		BindingAddress: bindingAddress,
+		BindingStatus:  bindingStatus,
 	}, nil
+}
+
+func authSuccessBinding(success *AuthSuccess) (string, string) {
+	if success == nil {
+		return "", ""
+	}
+	if address := normalizeRecoveryMailbox(success.BoundMailbox); address != "" {
+		return address, string(maildomain.MicrosoftBindingVerified)
+	}
+	observed := strings.TrimSpace(success.ObservedBindingAddress)
+	if address := normalizeRecoveryMailbox(observed); address != "" {
+		return address, string(maildomain.MicrosoftBindingPending)
+	}
+	if address := normalizeRecoveryMask(observed); address != "" {
+		return address, string(maildomain.MicrosoftBindingPending)
+	}
+	return "", ""
 }
 
 func mapAuthError(err error) Result {

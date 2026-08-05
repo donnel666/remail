@@ -15,19 +15,21 @@ import (
 )
 
 type AuthSuccess struct {
-	ClientID     string
-	AccessToken  string
-	RefreshToken string
-	BoundMailbox string
+	ClientID               string
+	AccessToken            string
+	RefreshToken           string
+	BoundMailbox           string
+	ObservedBindingAddress string
 }
 
 type pendingAccountAuthorization struct {
-	session       *Session
-	page          string
-	currentURL    string
-	deviceCode    string
-	boundMailbox  string
-	hasEmailProof bool
+	session                *Session
+	page                   string
+	currentURL             string
+	deviceCode             string
+	boundMailbox           string
+	observedBindingAddress string
+	hasEmailProof          bool
 }
 
 func requestDeviceCode(session *Session) (string, string, error) {
@@ -743,12 +745,13 @@ func beginAccountAuthorizationWithSession(session *Session, email, password, pro
 	}
 	boundMailbox := firstNonEmpty(bound1, bound2)
 	return &pendingAccountAuthorization{
-		session:       session,
-		page:          page,
-		currentURL:    currentURL,
-		deviceCode:    deviceCode,
-		boundMailbox:  boundMailbox,
-		hasEmailProof: hasEmailProof,
+		session:                session,
+		page:                   page,
+		currentURL:             currentURL,
+		deviceCode:             deviceCode,
+		boundMailbox:           boundMailbox,
+		observedBindingAddress: firstEmailProofDisplay(proofData),
+		hasEmailProof:          hasEmailProof,
 	}, nil
 }
 
@@ -769,10 +772,11 @@ func completeAccountAuthorization(pending *pendingAccountAuthorization) (*AuthSu
 	refreshToken := asString(tokens["refresh_token"])
 	accessToken := asString(tokens["access_token"])
 	return &AuthSuccess{
-		ClientID:     clientID,
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
-		BoundMailbox: pending.boundMailbox,
+		ClientID:               clientID,
+		AccessToken:            accessToken,
+		RefreshToken:           refreshToken,
+		BoundMailbox:           pending.boundMailbox,
+		ObservedBindingAddress: pending.observedBindingAddress,
 	}, nil
 }
 
