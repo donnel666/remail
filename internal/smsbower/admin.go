@@ -15,13 +15,21 @@ import (
 )
 
 func (s *Service) AccountStatus(ctx context.Context) (*AccountStatus, error) {
+	// Keep the joined projection explicit; GORM drops fields from the unexported embedded model.
 	var row struct {
-		accountStateModel
-		Enabled    bool `gorm:"column:provider_enabled"`
-		Configured bool `gorm:"column:provider_configured"`
+		Balance             string     `gorm:"column:balance"`
+		HealthStatus        string     `gorm:"column:health_status"`
+		ConsecutiveFailures uint       `gorm:"column:consecutive_failures"`
+		LastSafeError       string     `gorm:"column:last_safe_error"`
+		LastSyncedAt        *time.Time `gorm:"column:last_synced_at"`
+		LastSuccessAt       *time.Time `gorm:"column:last_success_at"`
+		Enabled             bool       `gorm:"column:provider_enabled"`
+		Configured          bool       `gorm:"column:provider_configured"`
 	}
 	if err := s.dbFor(ctx).Table("smsbower_account_state AS account").
-		Select("account.*, cfg.enabled AS provider_enabled, (cfg.api_key <> '') AS provider_configured").
+		Select(`account.balance, account.health_status, account.consecutive_failures,
+account.last_safe_error, account.last_synced_at, account.last_success_at,
+cfg.enabled AS provider_enabled, (cfg.api_key <> '') AS provider_configured`).
 		Joins("JOIN smsbower_config AS cfg ON cfg.id = account.id").
 		Where("account.id = 1").Take(&row).Error; err != nil {
 		return nil, fmt.Errorf("load SMSBower account status: %w", err)

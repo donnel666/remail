@@ -145,6 +145,20 @@ func newServiceHarness(t *testing.T) (*Service, *gorm.DB, time.Time) {
 	return service, db, now
 }
 
+func TestAccountStatusLoadsPersistedState(t *testing.T) {
+	service, _, now := newServiceHarness(t)
+
+	status, err := service.AccountStatus(context.Background())
+
+	require.NoError(t, err)
+	require.True(t, status.Enabled)
+	require.True(t, status.Configured)
+	require.Equal(t, "100", status.Balance)
+	require.Equal(t, "healthy", status.HealthStatus)
+	require.NotNil(t, status.LastSuccessAt)
+	require.Equal(t, now.Add(-time.Minute), *status.LastSuccessAt)
+}
+
 func paidOrder(orderNo string) upstream.PaidOrder {
 	return upstream.PaidOrder{
 		OrderNo: orderNo, ProjectID: 1, ProductID: 2, BuyerID: 3,
