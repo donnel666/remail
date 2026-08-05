@@ -26,11 +26,14 @@ func TestLoadRecoveryRuntimeSettings(t *testing.T) {
 	require.NoError(t, db.AutoMigrate(&systemsettingsinfra.SettingModel{}))
 	_, err = systemsettingsinfra.NewRepository(db).Upsert(context.Background(), "slow_sql_threshold_ms", "321")
 	require.NoError(t, err)
-	t.Cleanup(func() { runtimeconfig.Delete("slow_sql_threshold_ms") })
+	_, err = systemsettingsinfra.NewRepository(db).Upsert(context.Background(), "max_proxy_attempts", "7")
+	require.NoError(t, err)
+	t.Cleanup(func() { runtimeconfig.Replace(nil) })
 
 	loadRecoveryRuntimeSettings(context.Background(), db)
 
 	require.Equal(t, 321*time.Millisecond, runtimeconfig.Duration("slow_sql_threshold_ms", 200*time.Millisecond, time.Millisecond, 0))
+	require.Equal(t, 7, runtimeconfig.Int("max_proxy_attempts", 3, 1))
 }
 
 func TestParseCommandOptionsDefaultsToSafeBindingDryRun(t *testing.T) {
@@ -83,6 +86,42 @@ func TestParseCommandOptionsRequiresAllResetConfirmations(t *testing.T) {
 		"-confirm-reset-email", "owner@example.test",
 	}, new(bytes.Buffer))
 	require.ErrorContains(t, err, "password-artifact")
+}
+
+func TestParseCommandOptionsGuardsHardReauthorization(t *testing.T) {
+	dryRun, err := parseCommandOptions([]string{
+		"-resource-id", "2",
+		"-mode", recoveryModeReauthorize,
+	}, new(bytes.Buffer))
+	require.NoError(t, err)
+	require.False(t, dryRun.Apply)
+	require.Equal(t, 2, dryRun.AliasCount)
+
+	_, err = parseCommandOptions([]string{
+		"-email", "owner@outlook.com",
+		"-mode", recoveryModeReauthorize,
+	}, new(bytes.Buffer))
+	require.ErrorContains(t, err, "requires -resource-id")
+
+	_, err = parseCommandOptions([]string{
+		"-resource-id", "2",
+		"-mode", recoveryModeReauthorize,
+		"-apply",
+		"-operator-user-id", "1",
+	}, new(bytes.Buffer))
+	require.ErrorContains(t, err, "confirm-email")
+
+	options, err := parseCommandOptions([]string{
+		"-resource-id", "2",
+		"-mode", recoveryModeReauthorize,
+		"-apply",
+		"-operator-user-id", "1",
+		"-confirm-email", "Owner@Outlook.com",
+		"-alias-count", "1",
+	}, new(bytes.Buffer))
+	require.NoError(t, err)
+	require.Equal(t, "owner@outlook.com", options.ConfirmEmail)
+	require.Equal(t, 1, options.AliasCount)
 }
 
 func TestAllowedBindingAddressRequiresConfiguredLocalDomain(t *testing.T) {
@@ -211,6 +250,27 @@ func TestSameNormalRecoveryAccountRequiresNormalMatchingResource(t *testing.T) {
 			require.Equal(t, tt.want, sameNormalRecoveryAccount(tt.resource, tt.email))
 		})
 	}
+}
+
+func TestSameReauthorizeSnapshotFencesEveryCredential(t *testing.T) {
+	snapshot := recoverySnapshot{
+		ResourceID:         2,
+		OwnerUserID:        3,
+		ResourceVersion:    4,
+		AccountEmail:       "owner@outlook.com",
+		Password:           "password",
+		ClientID:           "client",
+		RefreshToken:       "refresh",
+		CredentialRevision: 5,
+	}
+	root := &coredomain.EmailResource{ID: 2, OwnerUserID: 3, Version: 4}
+	resource := &coredomain.MicrosoftResource{
+		ID: 2, EmailAddress: "OWNER@outlook.com", Password: "password", ClientID: "client", RefreshToken: "refresh", CredentialRevision: 5,
+	}
+	require.True(t, sameReauthorizeSnapshot(root, resource, snapshot))
+
+	resource.RefreshToken = "changed"
+	require.False(t, sameReauthorizeSnapshot(root, resource, snapshot))
 }
 
 func TestWrapRecoveredBindingConfirmationErrorPreservesCategory(t *testing.T) {

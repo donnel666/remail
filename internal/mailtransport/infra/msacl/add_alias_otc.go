@@ -56,6 +56,25 @@ func loginForExplicitAliasOTC(session *Session, email, proxy, bindingAddress str
 
 	ppft := extractPPFT(page)
 	postURL := extractPostURL(page)
+	advanceAuthenticatedRelay := func() error {
+		var err error
+		page, currentURL, err = continueExplicitAliasLoginRelay(session, page, currentURL, 6)
+		if err != nil {
+			return err
+		}
+		page, currentURL, err = followExplicitAliasTarget(session, page, currentURL, 10)
+		return err
+	}
+	if ppft == "" || postURL == "" {
+		if err := advanceAuthenticatedRelay(); err != nil {
+			return "", "", err
+		}
+		if strings.Contains(strings.ToLower(currentURL), "account.live.com/addassocid") || isExplicitAliasManageURL(currentURL) {
+			return page, currentURL, nil
+		}
+		ppft = extractPPFT(page)
+		postURL = extractPostURL(page)
+	}
 	if ppft == "" || postURL == "" {
 		resp, err = session.Get("https://login.live.com/login.srf", requestOptions{
 			Headers:           navHeaders(session, nil),
@@ -68,6 +87,16 @@ func loginForExplicitAliasOTC(session *Session, email, proxy, bindingAddress str
 		page, currentURL = resp.Body, resp.URL
 		ppft = extractPPFT(page)
 		postURL = extractPostURL(page)
+		if ppft == "" || postURL == "" {
+			if err := advanceAuthenticatedRelay(); err != nil {
+				return "", "", err
+			}
+			if strings.Contains(strings.ToLower(currentURL), "account.live.com/addassocid") || isExplicitAliasManageURL(currentURL) {
+				return page, currentURL, nil
+			}
+			ppft = extractPPFT(page)
+			postURL = extractPostURL(page)
+		}
 	}
 	if ppft == "" || postURL == "" {
 		stage := explicitAliasStageLoginMissingPPFT

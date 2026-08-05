@@ -566,7 +566,12 @@ func checkExplicitAliasPassword(session *Session, email, password, uaid, referer
 		if parsed, err := strconv.Atoi(resp.Header.Get("retry-after")); err == nil && parsed > 0 {
 			retryAfter = parsed
 		}
-		return "", newAuthError(fmt.Sprintf("密码验证频率受限 (429), 请 %ds 后重试", retryAfter), AuthStatusRateLimited)
+		logWarning("Microsoft authorization rate limited: stage=web_checkpassword status=429 retry_after=%d", retryAfter)
+		return "", wrapAuthError(
+			fmt.Sprintf("密码验证频率受限 (429), 请 %ds 后重试", retryAfter),
+			AuthStatusRateLimited,
+			newSessionTransportError(fmt.Errorf("Microsoft web checkpassword HTTP 429"), session != nil && session.usesProxy),
+		)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", newAuthError(fmt.Sprintf("密码验证请求失败 (HTTP %d)", resp.StatusCode), AuthStatusRequestError)
@@ -803,15 +808,15 @@ func addSingleExplicitAlias(session *Session, candidate, email, proxy, preferred
 	}
 
 	attempted := true
+	addFields := extractHiddenInputs(page)
+	addFields["canary"] = canary
+	addFields["PostOption"] = "NONE"
+	addFields["SingleDomain"] = domain
+	addFields["UpSell"] = ""
+	addFields["AddAssocIdOptions"] = options
+	addFields["AssociatedIdLive"] = prefix
 	resp, err := session.Post(addAssocIDURL, requestOptions{
-		Data: map[string]string{
-			"canary":            canary,
-			"PostOption":        "NONE",
-			"SingleDomain":      domain,
-			"UpSell":            "",
-			"AddAssocIdOptions": options,
-			"AssociatedIdLive":  prefix,
-		},
+		Data: addFields,
 		Headers: navHeaders(session, map[string]string{
 			"Content-Type": "application/x-www-form-urlencoded",
 			"Origin":       "https://account.live.com",
@@ -825,6 +830,10 @@ func addSingleExplicitAlias(session *Session, candidate, email, proxy, preferred
 	}
 	redirectURL := resp.Header.Get("Location")
 	category := classifyAddAssocIDResponse(resp.StatusCode, redirectURL, resp.Body)
+	logInfo("AddAssocId 响应: status=%d url=%s location=%s category=%s page_id=%s action=%s", resp.StatusCode, resp.URL, redirectURL, category, extractPageID(resp.Body), extractFormAction(resp.Body))
+	if msaclDebugLogs && category != aliasCategoryAdded {
+		_ = os.WriteFile("/tmp/msacl_addassocid_response.html", []byte(resp.Body), 0o600)
+	}
 	switch category {
 	case aliasCategoryAdded:
 		return fullAlias, aliasCategoryAdded, attempted, nil
@@ -1017,6 +1026,10 @@ func confirmExplicitAliasPresent(session *Session, alias, referer string) (bool,
 		return false, newAuthError(fmt.Sprintf("查询 Microsoft 别名列表失败 (HTTP %d)", resp.StatusCode), AuthStatusRequestError)
 	}
 	if !isExplicitAliasManageURL(resp.URL) {
+		if msaclDebugLogs {
+			_ = os.WriteFile("/tmp/msacl_alias_manage_redirected.html", []byte(resp.Body), 0o600)
+		}
+		logWarning("Microsoft alias manage redirected: status=%d url=%s page_id=%s action=%s", resp.StatusCode, resp.URL, extractPageID(resp.Body), extractFormAction(resp.Body))
 		return false, newExplicitAliasStageError(
 			"Microsoft alias session is no longer authenticated.",
 			AuthStatusAuthTimeout,
@@ -1106,7 +1119,7 @@ func mapExplicitAliasError(err error) ExplicitAliasResult {
 	case AuthStatusAccountAbnormal:
 		return failure("account_abnormal", "Microsoft account is restricted or requires recovery.", false)
 	case AuthStatusRateLimited:
-		return failure(aliasCategoryRateLimited, "Microsoft alias creation is rate limited.", false)
+		return failure(aliasCategoryRateLimited, "Microsoft alias creation is rate limited.", IsProxyTransportError(err))
 	case AuthStatusAlreadyBound:
 		display := ""
 		if authErr != nil {

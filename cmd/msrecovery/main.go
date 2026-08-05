@@ -1,7 +1,5 @@
-// Command msrecovery recovers the Microsoft recovery-mailbox relationship
-// from the official password-reset proof picker. Password reset support is
-// compiled in but requires several explicit destructive-action gates and is
-// disabled by default.
+// Command msrecovery provides guarded, single-resource Microsoft account
+// recovery and validation diagnostics.
 package main
 
 import (
@@ -14,6 +12,7 @@ import (
 	"log/slog"
 	stdmail "net/mail"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,8 +20,10 @@ import (
 	mailinfra "github.com/donnel666/remail/internal/mailtransport/infra"
 	"github.com/donnel666/remail/internal/mailtransport/infra/msacl"
 	"github.com/donnel666/remail/internal/platform"
+	proxyapi "github.com/donnel666/remail/internal/proxy/api"
 	systemsettingsinfra "github.com/donnel666/remail/internal/systemsettings/infra"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
+	"github.com/hibiken/asynq"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"gorm.io/driver/mysql"
@@ -30,8 +31,9 @@ import (
 )
 
 const (
-	recoveryModeBinding = "recover-binding"
-	recoveryModeReset   = "reset-password"
+	recoveryModeBinding     = "recover-binding"
+	recoveryModeReset       = "reset-password"
+	recoveryModeReauthorize = "hard-reauthorize"
 )
 
 type commandOptions struct {
@@ -45,6 +47,8 @@ type commandOptions struct {
 	Timeout           time.Duration
 	HistoryWindow     time.Duration
 	ConfirmResetEmail string
+	ConfirmEmail      string
+	AliasCount        int
 	PasswordArtifact  string
 	JSON              bool
 }
@@ -70,11 +74,29 @@ type commandResult struct {
 	DatabasePasswordUpdated  bool                              `json:"database_password_updated"`
 	CredentialRevision       uint64                            `json:"credential_revision,omitempty"`
 	PasswordArtifactRetained bool                              `json:"password_artifact_retained"`
+	SecurityBranch           string                            `json:"security_branch,omitempty"`
+	Category                 string                            `json:"category,omitempty"`
+	ExternalBinding          bool                              `json:"external_binding"`
+	ConsentCleanupAttempted  bool                              `json:"consent_cleanup_attempted"`
+	ConsentsBefore           int                               `json:"consents_before"`
+	ConsentsRemoved          int                               `json:"consents_removed"`
+	ConsentsRemaining        int                               `json:"consents_remaining"`
+	NewRefreshTokenObtained  bool                              `json:"new_rt_obtained"`
+	NewRefreshTokenPersisted bool                              `json:"new_rt_persisted"`
+	OldRefreshTokenChecked   bool                              `json:"old_rt_checked"`
+	OldRefreshTokenRejected  bool                              `json:"old_rt_rejected"`
+	GraphAvailable           bool                              `json:"graph_available"`
+	AliasCandidates          int                               `json:"alias_candidates"`
+	AliasAttempted           int                               `json:"alias_attempted"`
+	AliasConfirmed           int                               `json:"alias_confirmed"`
+	ProxyRoute               string                            `json:"proxy_route,omitempty"`
+	ProxyAttempts            int                               `json:"proxy_attempts,omitempty"`
 }
 
 type recoveryRuntime struct {
 	store   *recoveryStore
 	domains map[string]struct{}
+	proxies reauthorizeProxyProvider
 	close   func() error
 }
 
@@ -128,14 +150,16 @@ func parseCommandOptions(args []string, stderr io.Writer) (commandOptions, error
 	fs.SetOutput(stderr)
 	fs.UintVar(&options.ResourceID, "resource-id", 0, "Microsoft resource ID (exclusive with -email)")
 	fs.StringVar(&options.Email, "email", "", "Microsoft account email (exclusive with -resource-id)")
-	fs.StringVar(&options.Mode, "mode", recoveryModeBinding, "recover-binding or reset-password")
-	fs.BoolVar(&options.Apply, "apply", false, "commit the recovered fact (default is dry-run)")
+	fs.StringVar(&options.Mode, "mode", recoveryModeBinding, "recover-binding, reset-password, or hard-reauthorize")
+	fs.BoolVar(&options.Apply, "apply", false, "perform and commit the selected operation (default is dry-run)")
 	fs.UintVar(&options.OperatorUserID, "operator-user-id", 0, "enabled admin/super-admin user ID required for writes")
 	fs.StringVar(&options.RequestID, "request-id", "", "safe audit request ID (generated when omitted)")
-	fs.StringVar(&options.Proxy, "proxy", "", "optional Microsoft HTTP proxy URL; never logged")
+	fs.StringVar(&options.Proxy, "proxy", "", "optional Microsoft HTTP proxy override; hard-reauthorize uses the production proxy pool when omitted")
 	fs.DurationVar(&options.Timeout, "timeout", 3*time.Minute, "overall command timeout")
 	fs.DurationVar(&options.HistoryWindow, "history-window", 90*24*time.Hour, "maximum inbound-mail evidence age")
 	fs.StringVar(&options.ConfirmResetEmail, "confirm-reset-email", "", "exact target email required for password reset")
+	fs.StringVar(&options.ConfirmEmail, "confirm-email", "", "exact target email required for hard reauthorization")
+	fs.IntVar(&options.AliasCount, "alias-count", 2, "explicit aliases to create during hard reauthorization (1 or 2)")
 	fs.StringVar(&options.PasswordArtifact, "password-artifact", "", "0600 recovery artifact path required for password reset")
 	fs.BoolVar(&options.JSON, "json", false, "emit a machine-readable, secret-free result")
 	if err := fs.Parse(args); err != nil {
@@ -147,12 +171,14 @@ func parseCommandOptions(args []string, stderr io.Writer) (commandOptions, error
 	options.Email = strings.ToLower(strings.TrimSpace(options.Email))
 	options.Mode = strings.ToLower(strings.TrimSpace(options.Mode))
 	options.RequestID = strings.TrimSpace(options.RequestID)
+	options.Proxy = strings.TrimSpace(options.Proxy)
 	options.ConfirmResetEmail = strings.ToLower(strings.TrimSpace(options.ConfirmResetEmail))
+	options.ConfirmEmail = strings.ToLower(strings.TrimSpace(options.ConfirmEmail))
 	options.PasswordArtifact = strings.TrimSpace(options.PasswordArtifact)
 	if (options.ResourceID == 0) == (options.Email == "") {
 		return commandOptions{}, fmt.Errorf("provide exactly one of -resource-id or -email")
 	}
-	if options.Mode != recoveryModeBinding && options.Mode != recoveryModeReset {
+	if options.Mode != recoveryModeBinding && options.Mode != recoveryModeReset && options.Mode != recoveryModeReauthorize {
 		return commandOptions{}, fmt.Errorf("unsupported -mode %q", options.Mode)
 	}
 	if options.Timeout <= 0 || options.HistoryWindow <= 0 {
@@ -181,6 +207,17 @@ func parseCommandOptions(args []string, stderr io.Writer) (commandOptions, error
 			return commandOptions{}, fmt.Errorf("reset-password requires -password-artifact")
 		}
 	}
+	if options.Mode == recoveryModeReauthorize {
+		if options.ResourceID == 0 || options.Email != "" {
+			return commandOptions{}, fmt.Errorf("hard-reauthorize requires -resource-id")
+		}
+		if options.AliasCount < 1 || options.AliasCount > 2 {
+			return commandOptions{}, fmt.Errorf("hard-reauthorize requires -alias-count between 1 and 2")
+		}
+		if options.Apply && options.ConfirmEmail == "" {
+			return commandOptions{}, fmt.Errorf("hard-reauthorize requires -confirm-email with -apply")
+		}
+	}
 	return options, nil
 }
 
@@ -200,6 +237,9 @@ func executeCommand(ctx context.Context, options commandOptions) (*commandResult
 		return nil, err
 	}
 	result := newCommandResult(options, *snapshot)
+	if options.Mode == recoveryModeReauthorize {
+		return executeHardReauthorize(ctx, runtime, options, *snapshot, result)
+	}
 	if options.Mode == recoveryModeReset && !strings.EqualFold(snapshot.AccountEmail, options.ConfirmResetEmail) {
 		return result, fmt.Errorf("confirmed reset email does not match the selected resource")
 	}
@@ -392,10 +432,33 @@ func openRecoveryRuntime(ctx context.Context, historyWindow time.Duration) (*rec
 			allowedDomains[normalized] = struct{}{}
 		}
 	}
+	redisAddress := strings.TrimSpace(os.Getenv("REDIS_ADDR"))
+	if redisAddress == "" {
+		redisAddress = "127.0.0.1:6379"
+	}
+	redisDB := 0
+	if value, parseErr := strconv.Atoi(strings.TrimSpace(os.Getenv("REDIS_DB"))); parseErr == nil && value >= 0 {
+		redisDB = value
+	}
+	asynqClient := asynq.NewClient(asynq.RedisClientOpt{
+		Addr:     redisAddress,
+		Password: os.Getenv("REDIS_PASSWORD"),
+		DB:       redisDB,
+		PoolSize: 4,
+	})
+	proxyModule, err := proxyapi.NewProxyModule(db, asynqClient)
+	if err != nil {
+		_ = asynqClient.Close()
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("initialize production proxy selection: %w", err)
+	}
 	return &recoveryRuntime{
 		store:   store,
 		domains: allowedDomains,
-		close:   sqlDB.Close,
+		proxies: proxyModule.ProxyUseCase,
+		close: func() error {
+			return errors.Join(asynqClient.Close(), sqlDB.Close())
+		},
 	}, nil
 }
 
@@ -403,11 +466,11 @@ func loadRecoveryRuntimeSettings(ctx context.Context, db *gorm.DB) {
 	if db == nil {
 		return
 	}
-	setting, err := systemsettingsinfra.NewRepository(db).Get(ctx, "slow_sql_threshold_ms")
-	if err != nil || runtimeconfig.Validate(setting.Key, setting.Value) != nil {
+	settings, err := systemsettingsinfra.NewRepository(db).List(ctx)
+	if err != nil {
 		return
 	}
-	runtimeconfig.Set(setting.Key, setting.Value)
+	runtimeconfig.Replace(settings)
 }
 
 func newCommandResult(options commandOptions, snapshot recoverySnapshot) *commandResult {
@@ -496,6 +559,33 @@ func writeCommandResult(w io.Writer, jsonOutput bool, result commandResult) erro
 			result.DatabasePasswordUpdated,
 			result.CredentialRevision,
 			result.PasswordArtifactRetained,
+		)
+	}
+	if result.Mode == recoveryModeReauthorize {
+		fmt.Fprintf(&output, "proxy_route=%s proxy_attempts=%d\n", result.ProxyRoute, result.ProxyAttempts)
+		fmt.Fprintf(
+			&output,
+			"security_branch=%s category=%s external_binding=%t cleanup_attempted=%t consents_before=%d removed=%d remaining=%d\n",
+			result.SecurityBranch,
+			result.Category,
+			result.ExternalBinding,
+			result.ConsentCleanupAttempted,
+			result.ConsentsBefore,
+			result.ConsentsRemoved,
+			result.ConsentsRemaining,
+		)
+		fmt.Fprintf(
+			&output,
+			"new_rt_obtained=%t new_rt_persisted=%t old_rt_checked=%t old_rt_rejected=%t graph_available=%t alias_candidates=%d attempted=%d confirmed=%d credential_revision=%d\n",
+			result.NewRefreshTokenObtained,
+			result.NewRefreshTokenPersisted,
+			result.OldRefreshTokenChecked,
+			result.OldRefreshTokenRejected,
+			result.GraphAvailable,
+			result.AliasCandidates,
+			result.AliasAttempted,
+			result.AliasConfirmed,
+			result.CredentialRevision,
 		)
 	}
 	text := output.String()

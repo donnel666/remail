@@ -102,6 +102,7 @@ type MicrosoftValidationResult struct {
 	// code, or other Microsoft protocol material.
 	RecoveredBinding     *MicrosoftRecoveredBinding
 	BindingObservation   *MicrosoftBindingObservation
+	ConfirmedAliases     []string
 	ReleaseRecoveryLease func(context.Context) error
 }
 
@@ -134,6 +135,7 @@ type MicrosoftValidationBindingCommand struct {
 	AccountEmail       string
 	RecoveredBinding   *MicrosoftRecoveredBinding
 	BindingObservation *MicrosoftBindingObservation
+	ConfirmedAliases   []string
 }
 
 type DomainValidationRequest struct {
@@ -667,7 +669,9 @@ func isRetryableValidationCategory(category string) bool {
 	switch strings.ToLower(strings.TrimSpace(category)) {
 	case "oauth_invalid_grant", "refresh_token_expired", "oauth_refresh_token_expired",
 		"oauth_client", "oauth_permission", "mfa", "passkey", "phone", "password",
-		"unknown_mailbox", "locked", "account_abnormal", "dns":
+		"unknown_mailbox", "locked", "account_abnormal", "dns",
+		"hard_reauthorize_incomplete", "consent_cleanup_incomplete", "alias_incomplete",
+		"old_rt_unverified", "old_rt_still_valid", "hard_reauthorize_graph":
 		return false
 	default:
 		return true

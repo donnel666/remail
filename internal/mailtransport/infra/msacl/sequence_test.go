@@ -618,6 +618,78 @@ func TestDevicePasswordCheckTreatsServerFailureAsRetryable(t *testing.T) {
 	client.requireDone()
 }
 
+func TestPasswordChecksClassifyProxied429(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		run  func(*Session) error
+	}{
+		{
+			name: "device",
+			run: func(session *Session) error {
+				_, err := checkPassword(session, "owner@example.com", "secret", "uaid", 1)
+				return err
+			},
+		},
+		{
+			name: "web",
+			run: func(session *Session) error {
+				_, err := checkExplicitAliasPassword(session, "owner@example.com", "secret", "uaid", "https://login.live.com/login.srf")
+				return err
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			session, client := newScriptedSession(t, func(req *http.Request, _ bool) (*http.Response, error) {
+				requireRequest(t, req, http.MethodPost, "https://login.live.com/checkpassword.srf")
+				return scriptedResponse(req, http.StatusTooManyRequests, req.URL.String(), "", map[string]string{"Retry-After": "1"}), nil
+			})
+			session.usesProxy = true
+
+			result := mapAuthError(test.run(session))
+
+			require.Equal(t, "request", result.Category)
+			require.True(t, result.ProxyFailure)
+			client.requireDone()
+		})
+	}
+}
+
+func TestExplicitAliasConvergencePollsI5600BeforeRetryingAddAssocID(t *testing.T) {
+	const currentURL = "https://login.live.com/oauth20_authorize.srf?client_id=alias"
+	const stateURL = "https://login.live.com/GetSessionState.srf"
+	const postURL = "https://login.live.com/ppsecure/post.srf?approval=1"
+	page := `<script>var ServerData = {"sPageId":"i5600","urlSessionState":"https://login.live.com/GetSessionState.srf","sSessionLookupKey":"","urlPost":"` + postURL + `","sFT":"approval-token","sSignInUsername":"owner@example.com","iPollingInterval":1,"iPollingTimeout":1};</script>`
+	session, client := newScriptedSession(t,
+		func(req *http.Request, follow bool) (*http.Response, error) {
+			requireRequest(t, req, http.MethodPost, stateURL)
+			require.True(t, follow)
+			require.Equal(t, currentURL, req.Header.Get("Referer"))
+			require.Equal(t, "application/json; charset=utf-8", req.Header.Get("Content-Type"))
+			return scriptedResponse(req, 200, stateURL, `{"AuthorizationState":2}`, nil), nil
+		},
+		func(req *http.Request, follow bool) (*http.Response, error) {
+			requireRequest(t, req, http.MethodPost, postURL)
+			require.True(t, follow)
+			body, err := io.ReadAll(req.Body)
+			require.NoError(t, err)
+			fields, err := url.ParseQuery(string(body))
+			require.NoError(t, err)
+			require.Equal(t, "22", fields.Get("type"))
+			require.Equal(t, "approval-token", fields.Get("PPFT"))
+			require.Empty(t, fields.Get("SLK"))
+			require.Equal(t, "eOTT_OneTimePassword", fields.Get("purpose"))
+			return scriptedResponse(req, 200, addAssocIDURL, `<input name="canary" value="fresh-canary">`, nil), nil
+		},
+	)
+
+	nextPage, nextURL, err := convergeExplicitAliasToAddAssocID(session, page, currentURL)
+
+	require.NoError(t, err)
+	require.Equal(t, `<input name="canary" value="fresh-canary">`, nextPage)
+	require.Equal(t, addAssocIDURL, nextURL)
+	client.requireDone()
+}
+
 func TestDeclineKMSIUsesCurrentPromptAsReferer(t *testing.T) {
 	const kmsiURL = "https://login.live.com/ppsecure/post.srf?kmsi=1"
 	session, client := newScriptedSession(t,

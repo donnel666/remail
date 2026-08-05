@@ -1013,6 +1013,7 @@ func bindAuxiliaryEmail(session *Session, page, rawURL, proxy, accountEmail stri
 			canary = m[1]
 		}
 	}
+	canary = firstNonEmpty(canary, extractConfigString(page, "canary"), extractConfigString(page, "sCanary"))
 
 	tempMail, err := createTempMailbox(session.context(), accountEmail, preferredBindingAddress)
 	if err != nil {
@@ -1023,22 +1024,21 @@ func bindAuxiliaryEmail(session *Session, page, rawURL, proxy, accountEmail stri
 	if err != nil {
 		return "", "", "", wrapAuthError(fmt.Sprintf("读取辅助邮箱基线失败: %s", err), AuthStatusRequestError, err, tempMail)
 	}
-	watcher := startCodeWatcher(session.context(), tempMail, proxy, 0, seenKeys)
-	logDebug("已启动后台收码线程, 监听邮箱: %s", tempMail)
 
 	logInfo("提交临时邮箱到 AddProof")
 	logDebug("AddProof: mailbox=%s, action=%s", tempMail, action)
+	addProofFields := extractHiddenInputs(page)
+	logInfo("AddProof 上下文: canary=%t hidden_fields=%d", canary != "", len(addProofFields))
+	addProofFields["iProofOptions"] = "Email"
+	addProofFields["DisplayPhoneCountryISO"] = "CN"
+	addProofFields["DisplayPhoneNumber"] = ""
+	addProofFields["EmailAddress"] = tempMail
+	addProofFields["canary"] = canary
+	addProofFields["action"] = "AddProof"
+	addProofFields["PhoneNumber"] = ""
+	addProofFields["PhoneCountryISO"] = ""
 	resp, err := session.Post(action, requestOptions{
-		Data: map[string]string{
-			"iProofOptions":          "Email",
-			"DisplayPhoneCountryISO": "CN",
-			"DisplayPhoneNumber":     "",
-			"EmailAddress":           tempMail,
-			"canary":                 canary,
-			"action":                 "AddProof",
-			"PhoneNumber":            "",
-			"PhoneCountryISO":        "",
-		},
+		Data: addProofFields,
 		Headers: navHeaders(session, map[string]string{
 			"Content-Type": "application/x-www-form-urlencoded",
 			"Origin":       "https://account.live.com",
@@ -1052,9 +1052,23 @@ func bindAuxiliaryEmail(session *Session, page, rawURL, proxy, accountEmail stri
 	}
 	verifyPage := resp.Body
 	verifyURL := resp.URL
-	logDebug("AddProof 响应 url=%s", verifyURL)
+	logInfo("AddProof 响应: status=%d url=%s page_id=%s action=%s", resp.StatusCode, verifyURL, extractPageID(verifyPage), extractFormAction(verifyPage))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", "", "", newAuthError(fmt.Sprintf("AddProof 请求失败 (HTTP %d)", resp.StatusCode), AuthStatusRequestError, tempMail)
+	}
 
 	verifyAction := extractFormAction(verifyPage)
+	resolvedVerifyAction := verifyAction
+	if resolvedVerifyAction != "" && resolvedVerifyAction != "#" {
+		resolvedVerifyAction = resolveURL(verifyURL, resolvedVerifyAction)
+	}
+	if isAddEmailPage(verifyPage, resolvedVerifyAction) {
+		hint := extractPageHint(verifyPage, 220)
+		if hint != "" {
+			logWarning("AddProof 后仍停留绑定页: %s", hint)
+		}
+		return "", "", "", newAuthError("Microsoft did not accept the recovery mailbox binding.", AuthStatusAuthTimeout, tempMail)
+	}
 	if verifyAction == "" || !strings.HasPrefix(verifyAction, "http") {
 		verifyAction = verifyURL
 	}
@@ -1069,6 +1083,8 @@ func bindAuxiliaryEmail(session *Session, page, rawURL, proxy, accountEmail stri
 			verifyCanary = firstNonEmpty(m[1], canary)
 		}
 	}
+	watcher := startCodeWatcher(session.context(), tempMail, proxy, 0, seenKeys)
+	logDebug("已启动后台收码线程, 监听邮箱: %s", tempMail)
 
 	code, err := watcher.getCode(0)
 	if err != nil {
@@ -1134,7 +1150,19 @@ func bindAuxiliaryEmail(session *Session, page, rawURL, proxy, accountEmail stri
 }
 
 func isAddEmailPage(page, action string) bool {
-	return (strings.Contains(page, "EmailAddress") || strings.Contains(page, "AddProof") || strings.Contains(page, "备用电子邮件")) && action != "" && action != "#" && strings.HasPrefix(action, "http")
+	if action == "" || action == "#" || !strings.HasPrefix(action, "http") {
+		return false
+	}
+	parsed, err := url.Parse(action)
+	if err == nil && strings.EqualFold(parsed.Hostname(), "account.live.com") {
+		switch strings.ToLower(strings.TrimRight(parsed.Path, "/")) {
+		case "/proofs/add":
+			return true
+		case "/proofs/verify":
+			return false
+		}
+	}
+	return strings.Contains(page, "EmailAddress") || strings.Contains(page, "AddProof") || strings.Contains(page, "备用电子邮件")
 }
 
 func trySkipProofsPage(session *Session, page, rawURL, action string) (string, string, error) {
@@ -1340,6 +1368,10 @@ func handleAccountPagesWithOptions(session *Session, page, rawURL, proxy string,
 	action := extractFormAction(page)
 	isIdentity, isProofs := accountVerificationPageKinds(page, rawURL, action)
 	if isInterruptPage(rawURL) || isIdentity || isProofs || isAutoSubmitPage(page, action) {
+		if msaclDebugLogs {
+			_ = os.WriteFile("/tmp/msacl_account_page_stuck.html", []byte(page), 0o600)
+		}
+		logPageScene("Microsoft account flow 未完成", page, rawURL)
 		return "", "", "", newAuthError("Microsoft account page flow did not complete.", AuthStatusAuthTimeout, boundMailbox)
 	}
 	return page, rawURL, boundMailbox, nil

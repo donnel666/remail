@@ -260,7 +260,7 @@ func NewMailTransportModule(
 		BindingRecorder:     NewMicrosoftBindingInputAdapter(bindingRepo),
 		BindingQuery:        NewMicrosoftBindingQueryAdapter(bindingRepo),
 		BindingAdmin:        NewMicrosoftBindingAdminAdapter(bindingRepo),
-		ValidationBinding:   NewMicrosoftValidationBindingCommitAdapter(bindingRepo),
+		ValidationBinding:   NewMicrosoftValidationBindingCommitAdapter(bindingRepo, aliasStore),
 		InboundSMTPEnabled:  inboundCfg.Enabled,
 		AliasDispatch:       aliasStore,
 		tokenRefreshRepo:    tokenRefreshRepo,

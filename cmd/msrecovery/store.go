@@ -28,6 +28,8 @@ var (
 	errRecoveryValidationActive       = errors.New("resource validation is queued or running")
 	errRecoveryAliasActivityActive    = errors.New("alias activity must be paused before password reset")
 	errRecoveryPasswordReconciliation = errors.New("remote password changed but local credentials require reconciliation")
+	errReauthorizeResourceIneligible  = errors.New("resource must be normal, private, and unallocated")
+	errReauthorizeAliasActivity       = errors.New("alias activity is currently running")
 )
 
 type recoverySnapshot struct {
@@ -36,6 +38,8 @@ type recoverySnapshot struct {
 	ResourceVersion    uint64
 	AccountEmail       string
 	Password           string
+	ClientID           string
+	RefreshToken       string
 	CredentialRevision uint64
 	Status             coredomain.MicrosoftResourceStatus
 	Binding            *maildomain.MicrosoftBindingMailbox
@@ -64,6 +68,10 @@ func (s recoverySnapshot) recoveredBindingInput(address string) mailinfra.Micros
 }
 
 type passwordCommitResult struct {
+	CredentialRevision uint64
+}
+
+type reauthorizeCommitResult struct {
 	CredentialRevision uint64
 }
 
@@ -128,6 +136,8 @@ func (s *recoveryStore) loadSnapshot(ctx context.Context, resourceID uint, email
 		ResourceVersion:    root.Version,
 		AccountEmail:       strings.ToLower(strings.TrimSpace(resource.EmailAddress)),
 		Password:           resource.Password,
+		ClientID:           resource.ClientID,
+		RefreshToken:       resource.RefreshToken,
 		CredentialRevision: resource.CredentialRevision,
 		Status:             resource.Status,
 		Binding:            binding,
@@ -162,6 +172,216 @@ func (s *recoveryStore) preflightBindingApply(ctx context.Context, snapshot reco
 		}
 		return ensureNoActiveValidation(resource)
 	})
+}
+
+func (s *recoveryStore) preflightReauthorize(ctx context.Context, snapshot recoverySnapshot, operatorUserID uint, requireOperator bool) error {
+	return s.admin.WithTx(ctx, func(txCtx context.Context) error {
+		if requireOperator {
+			if err := s.validateOperator(txCtx, operatorUserID); err != nil {
+				return err
+			}
+		}
+		root, resource, err := s.admin.LockAdminMicrosoft(txCtx, snapshot.ResourceID)
+		if err != nil {
+			return err
+		}
+		if !sameReauthorizeSnapshot(root, resource, snapshot) {
+			return errRecoveryResourceChanged
+		}
+		if resource.Status != coredomain.MicrosoftStatusNormal || resource.ForSale {
+			return errReauthorizeResourceIneligible
+		}
+		if err := ensureNoActiveMicrosoftAllocation(txCtx, snapshot.ResourceID); err != nil {
+			return err
+		}
+		return ensureNoRunningAliasActivity(txCtx, snapshot.ResourceID)
+	})
+}
+
+func (s *recoveryStore) commitReauthorization(
+	ctx context.Context,
+	snapshot recoverySnapshot,
+	clientID, refreshToken string,
+	graphAvailable, oldRTChecked, oldRTRejected, aliasesComplete bool,
+	aliases []string,
+	operatorUserID uint,
+	requestID, branch string,
+) (*reauthorizeCommitResult, error) {
+	clientID = strings.TrimSpace(clientID)
+	refreshToken = strings.TrimSpace(refreshToken)
+	if clientID == "" || refreshToken == "" {
+		return nil, errReauthorizeResourceIneligible
+	}
+	var committed reauthorizeCommitResult
+	err := s.admin.WithTx(ctx, func(txCtx context.Context) error {
+		if err := s.validateOperator(txCtx, operatorUserID); err != nil {
+			return err
+		}
+		root, resource, err := s.admin.LockAdminMicrosoft(txCtx, snapshot.ResourceID)
+		if err != nil {
+			return err
+		}
+		if !sameReauthorizeSnapshot(root, resource, snapshot) {
+			return errRecoveryResourceChanged
+		}
+		if resource.Status != coredomain.MicrosoftStatusNormal || resource.ForSale {
+			return errReauthorizeResourceIneligible
+		}
+		if err := ensureNoActiveMicrosoftAllocation(txCtx, snapshot.ResourceID); err != nil {
+			return err
+		}
+		if err := ensureNoRunningAliasActivity(txCtx, snapshot.ResourceID); err != nil {
+			return err
+		}
+
+		now := time.Now().UTC()
+		credentialsChanged := clientID != strings.TrimSpace(resource.ClientID) || refreshToken != strings.TrimSpace(resource.RefreshToken)
+		resource.ClientID = clientID
+		resource.RefreshToken = refreshToken
+		resource.GraphAvailable = graphAvailable
+		resource.LastSafeError = ""
+		if !graphAvailable {
+			resource.LastSafeError = "Microsoft Graph verification did not complete."
+		}
+		resource.TokenLastRefreshedAt = &now
+		resource.TokenLastRequestID = strings.TrimSpace(requestID)
+		if credentialsChanged {
+			resource.CredentialRevision++
+			resource.CredentialUpdatedAt = now
+		}
+		if err := s.admin.SaveAdminMicrosoft(txCtx, root, resource, root.Version); err != nil {
+			return err
+		}
+		committed.CredentialRevision = resource.CredentialRevision
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	aliasErr := s.aliases.BackfillExistingAliases(ctx, snapshot.ResourceID, aliases)
+	aliasesStored := aliasErr == nil
+	auditResult, summary := reauthorizationAudit(
+		snapshot,
+		branch,
+		graphAvailable,
+		oldRTChecked,
+		oldRTRejected,
+		aliasesComplete,
+		aliasesStored,
+	)
+	logErr := s.logs.Create(ctx, &governancedomain.OperationLog{
+		OperatorUserID: operatorUserID,
+		OperationType:  "mailtransport.microsoft.hard_reauthorize",
+		ResourceType:   "microsoft_resource",
+		ResourceID:     strconv.FormatUint(uint64(snapshot.ResourceID), 10),
+		Path:           "cmd/msrecovery",
+		Result:         auditResult,
+		SafeSummary:    summary,
+		RequestID:      strings.TrimSpace(requestID),
+	})
+	if aliasErr != nil {
+		aliasErr = errors.New("confirmed Microsoft aliases could not be recorded locally")
+	}
+	if logErr != nil {
+		logErr = fmt.Errorf("record Microsoft reauthorization audit: %w", logErr)
+	}
+	return &committed, errors.Join(aliasErr, logErr)
+}
+
+func reauthorizationAudit(
+	snapshot recoverySnapshot,
+	branch string,
+	graphAvailable, oldRTChecked, oldRTRejected, aliasesComplete, aliasesStored bool,
+) (string, string) {
+	complete := graphAvailable
+	summary := "Microsoft OAuth credentials were refreshed through the external-binding downgrade path."
+	if branch == reauthorizeBranchHard {
+		summary = "Microsoft account grants were removed and fresh OAuth credentials were stored."
+		oldRTRequired := strings.TrimSpace(snapshot.ClientID) != "" || strings.TrimSpace(snapshot.RefreshToken) != ""
+		if oldRTRequired {
+			if oldRTChecked && oldRTRejected {
+				summary += " Previous refresh-token rejection was verified."
+			} else {
+				complete = false
+				summary += " Previous refresh-token rejection was not verified."
+			}
+		}
+		if !aliasesComplete {
+			complete = false
+			summary += " Explicit alias creation was incomplete."
+		}
+		if !aliasesStored {
+			complete = false
+			summary += " Confirmed aliases were not fully recorded locally."
+		}
+	} else if branch != reauthorizeBranchExternal {
+		complete = false
+		summary = "Microsoft OAuth credentials were stored through an unknown reauthorization path."
+	}
+	if graphAvailable {
+		summary += " Graph access was verified."
+	} else {
+		summary += " Graph access was not verified."
+	}
+	if !complete {
+		return "failure", summary
+	}
+	return "success", summary
+}
+
+func sameReauthorizeSnapshot(root *coredomain.EmailResource, resource *coredomain.MicrosoftResource, snapshot recoverySnapshot) bool {
+	return root != nil && resource != nil &&
+		root.OwnerUserID == snapshot.OwnerUserID &&
+		root.Version == snapshot.ResourceVersion &&
+		strings.EqualFold(strings.TrimSpace(resource.EmailAddress), snapshot.AccountEmail) &&
+		resource.CredentialRevision == snapshot.CredentialRevision &&
+		samePrivateValue(resource.Password, snapshot.Password) &&
+		samePrivateValue(resource.ClientID, snapshot.ClientID) &&
+		samePrivateValue(resource.RefreshToken, snapshot.RefreshToken)
+}
+
+func ensureNoActiveMicrosoftAllocation(ctx context.Context, resourceID uint) error {
+	tx, ok := platform.GormTxFromContext(ctx)
+	if !ok {
+		return errors.New("allocation check requires a transaction")
+	}
+	var count int64
+	if err := tx.WithContext(ctx).Table("microsoft_allocations").
+		Where("resource_id = ? AND status = ?", resourceID, "allocated").
+		Count(&count).Error; err != nil {
+		return fmt.Errorf("check active microsoft allocations: %w", err)
+	}
+	if count != 0 {
+		return errReauthorizeResourceIneligible
+	}
+	return nil
+}
+
+func ensureNoRunningAliasActivity(ctx context.Context, resourceID uint) error {
+	tx, ok := platform.GormTxFromContext(ctx)
+	if !ok {
+		return errors.New("alias activity check requires a transaction")
+	}
+	var count int64
+	if err := tx.WithContext(ctx).Table("microsoft_alias_attempts").
+		Where("resource_id = ? AND status = ?", resourceID, "running").
+		Count(&count).Error; err != nil {
+		return fmt.Errorf("check running microsoft alias attempts: %w", err)
+	}
+	if count != 0 {
+		return errReauthorizeAliasActivity
+	}
+	count = 0
+	if err := tx.WithContext(ctx).Table("microsoft_alias_schedules").
+		Where("resource_id = ? AND status IN ?", resourceID, []string{"queued", "running"}).
+		Count(&count).Error; err != nil {
+		return fmt.Errorf("check running microsoft alias schedule: %w", err)
+	}
+	if count != 0 {
+		return errReauthorizeAliasActivity
+	}
+	return nil
 }
 
 func (s *recoveryStore) applyRecoveredBinding(
@@ -312,6 +532,10 @@ func sameNormalRecoveryAccount(resource *coredomain.MicrosoftResource, expected 
 }
 
 func samePrivatePassword(current, expected string) bool {
+	return samePrivateValue(current, expected)
+}
+
+func samePrivateValue(current, expected string) bool {
 	if len(current) != len(expected) {
 		return false
 	}

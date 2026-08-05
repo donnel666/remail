@@ -75,7 +75,7 @@ func (r *ResourceValidationRepo) commitMicrosoftValidationBindingTx(
 	ms *MicrosoftResourceModel,
 	result coreapp.MicrosoftValidationResult,
 ) (bool, error) {
-	if result.RecoveredBinding == nil && result.BindingObservation == nil {
+	if result.RecoveredBinding == nil && result.BindingObservation == nil && len(result.ConfirmedAliases) == 0 {
 		return false, nil
 	}
 	if r.microsoftBindingCommit == nil || root == nil || ms == nil {
@@ -89,6 +89,7 @@ func (r *ResourceValidationRepo) commitMicrosoftValidationBindingTx(
 			AccountEmail:       ms.EmailAddress,
 			RecoveredBinding:   result.RecoveredBinding,
 			BindingObservation: result.BindingObservation,
+			ConfirmedAliases:   result.ConfirmedAliases,
 		},
 	)
 	if err != nil {
@@ -104,7 +105,7 @@ func (r *ResourceValidationRepo) commitMicrosoftValidationBindingWithSavepointTx
 	ms *MicrosoftResourceModel,
 	result coreapp.MicrosoftValidationResult,
 ) (bool, error) {
-	if result.RecoveredBinding == nil && result.BindingObservation == nil {
+	if result.RecoveredBinding == nil && result.BindingObservation == nil && len(result.ConfirmedAliases) == 0 {
 		return false, nil
 	}
 	const savepoint = "microsoft_validation_binding"
@@ -119,6 +120,9 @@ func (r *ResourceValidationRepo) commitMicrosoftValidationBindingWithSavepointTx
 		return false, errors.Join(err, fmt.Errorf("rollback microsoft validation binding savepoint: %w", rollbackErr))
 	}
 	if errors.Is(err, coreapp.ErrValidationResultStale) {
+		return false, err
+	}
+	if len(result.ConfirmedAliases) > 0 {
 		return false, err
 	}
 	// Auxiliary-mailbox persistence is supplementary once the current OAuth

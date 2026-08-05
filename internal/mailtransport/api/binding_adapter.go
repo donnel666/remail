@@ -21,7 +21,8 @@ type MicrosoftBindingAdminAdapter struct {
 }
 
 type MicrosoftValidationBindingCommitAdapter struct {
-	repo *mailinfra.MicrosoftBindingRepo
+	repo    *mailinfra.MicrosoftBindingRepo
+	aliases *mailinfra.MicrosoftAliasStore
 }
 
 var (
@@ -42,14 +43,19 @@ func NewMicrosoftBindingAdminAdapter(repo *mailinfra.MicrosoftBindingRepo) *Micr
 	return &MicrosoftBindingAdminAdapter{repo: repo}
 }
 
-func NewMicrosoftValidationBindingCommitAdapter(repo *mailinfra.MicrosoftBindingRepo) *MicrosoftValidationBindingCommitAdapter {
-	return &MicrosoftValidationBindingCommitAdapter{repo: repo}
+func NewMicrosoftValidationBindingCommitAdapter(repo *mailinfra.MicrosoftBindingRepo, aliases ...*mailinfra.MicrosoftAliasStore) *MicrosoftValidationBindingCommitAdapter {
+	adapter := &MicrosoftValidationBindingCommitAdapter{repo: repo}
+	if len(aliases) > 0 {
+		adapter.aliases = aliases[0]
+	}
+	return adapter
 }
 
 func (a *MicrosoftValidationBindingCommitAdapter) CommitValidationBinding(ctx context.Context, command coreapp.MicrosoftValidationBindingCommand) (bool, error) {
 	if a == nil || a.repo == nil {
 		return false, coreapp.ErrValidationTemporaryUnavailable
 	}
+	changed := false
 	if recovered := command.RecoveredBinding; recovered != nil {
 		result, err := a.repo.ApplyRecoveredBindingForValidation(ctx, mailinfra.MicrosoftRecoveredBindingInput{
 			ResourceID:               command.ResourceID,
@@ -63,10 +69,9 @@ func (a *MicrosoftValidationBindingCommitAdapter) CommitValidationBinding(ctx co
 		if err != nil {
 			return false, mapMicrosoftValidationBindingError(err)
 		}
-		return result != nil && result.Changed, nil
-	}
-	if observation := command.BindingObservation; observation != nil {
-		changed, err := a.repo.ApplyValidationBindingObservation(ctx, mailinfra.MicrosoftValidationBindingObservationInput{
+		changed = result != nil && result.Changed
+	} else if observation := command.BindingObservation; observation != nil {
+		bindingChanged, err := a.repo.ApplyValidationBindingObservation(ctx, mailinfra.MicrosoftValidationBindingObservationInput{
 			ResourceID:   command.ResourceID,
 			OwnerUserID:  command.OwnerUserID,
 			AccountEmail: command.AccountEmail,
@@ -77,9 +82,18 @@ func (a *MicrosoftValidationBindingCommitAdapter) CommitValidationBinding(ctx co
 		if err != nil {
 			return false, mapMicrosoftValidationBindingError(err)
 		}
-		return changed, nil
+		changed = bindingChanged
 	}
-	return false, nil
+	if len(command.ConfirmedAliases) > 0 {
+		if a.aliases == nil {
+			return false, coreapp.ErrValidationTemporaryUnavailable
+		}
+		if err := a.aliases.BackfillExistingAliases(ctx, command.ResourceID, command.ConfirmedAliases); err != nil {
+			return false, err
+		}
+		changed = true
+	}
+	return changed, nil
 }
 
 func mapMicrosoftValidationBindingError(err error) error {

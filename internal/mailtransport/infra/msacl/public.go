@@ -67,7 +67,7 @@ func mapAuthError(err error) Result {
 	case AuthStatusAccountAbnormal:
 		return aclFailure("account_abnormal", "Microsoft account is restricted or requires recovery.", false)
 	case AuthStatusRateLimited:
-		return aclFailure("request", "Microsoft authorization is temporarily rate limited.", false)
+		return aclFailure("request", "Microsoft authorization is temporarily rate limited.", IsProxyTransportError(err))
 	case AuthStatusAlreadyBound:
 		// Keep the public SafeMessage generic (no masked-address leak).  The
 		// structured binding address is authoritative and may be either the

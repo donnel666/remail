@@ -61,15 +61,26 @@ type microsoftOAuthProtocol interface {
 	AcquireToken(ctx context.Context, req mailinfra.MicrosoftOAuthRequest) (mailinfra.MicrosoftOAuthResult, error)
 }
 
-type microsoftProxyProvider interface {
+type MicrosoftProxyProvider interface {
 	Acquire(ctx context.Context, req proxyapp.AcquireProxyRequest) (*proxyapp.ProxyConfig, error)
 	ReportSuccess(ctx context.Context, proxyID uint) error
 	ReportFailure(ctx context.Context, proxyID uint, safeError string) error
 }
 
+type microsoftProxyProvider = MicrosoftProxyProvider
+
 type microsoftMailFetcher interface {
 	FetchAll(ctx context.Context, req mailinfra.MicrosoftMailFetchRequest) (mailinfra.MicrosoftMailFetchResult, error)
 }
+
+type microsoftHardReauthorizeProtocol func(
+	context.Context,
+	string,
+	string,
+	string,
+	string,
+	[]string,
+) (msacl.ReauthorizeResult, error)
 
 type microsoftValidationBindingStore interface {
 	FindByResourceIDs(ctx context.Context, resourceIDs []uint) (map[uint]maildomain.MicrosoftBindingMailbox, error)
@@ -87,6 +98,7 @@ type ResourceValidationAdapter struct {
 	bindings                   microsoftValidationBindingStore
 	probePasswordRecovery      func(context.Context, string, string, string) (msacl.PasswordRecoveryProbeResult, error)
 	evaluateBindingEligibility func(context.Context, msacl.PasswordRecoveryProbeResult) msacl.BindingRecoveryEligibility
+	hardReauthorize            microsoftHardReauthorizeProtocol
 }
 
 // RefreshMicrosoftToken is the MailTransport ACL used by the durable
@@ -242,7 +254,16 @@ func NewResourceValidationAdapter(proxies *proxyapp.ProxyUseCase, bindings *mail
 		bindings:                   bindings,
 		probePasswordRecovery:      msacl.ProbePasswordRecovery,
 		evaluateBindingEligibility: msacl.EvaluateActiveBindingRecoveryEligibility,
+		hardReauthorize:            msacl.ReauthorizeWithAliases,
 	}
+	if proxies != nil {
+		adapter.proxies = proxies
+	}
+	return adapter
+}
+
+func NewResourceValidationAdapterWithProxyProvider(proxies MicrosoftProxyProvider, bindings *mailinfra.MicrosoftBindingRepo) *ResourceValidationAdapter {
+	adapter := NewResourceValidationAdapter(nil, bindings)
 	if proxies != nil {
 		adapter.proxies = proxies
 	}
@@ -258,6 +279,9 @@ func (a *ResourceValidationAdapter) ValidateMicrosoft(ctx context.Context, req c
 		}, nil
 	}
 	ctx = msacl.WithRecoveryLeaseScope(ctx, req.ResourceID, "")
+	if a.hardReauthorize != nil {
+		return a.validateMicrosoftHardReauthorize(ctx, req)
+	}
 
 	bindingSnapshot, err := a.microsoftBindingSnapshot(ctx, req.ResourceID)
 	if err != nil {

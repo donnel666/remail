@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -18,6 +19,15 @@ type AuthSuccess struct {
 	AccessToken  string
 	RefreshToken string
 	BoundMailbox string
+}
+
+type pendingAccountAuthorization struct {
+	session       *Session
+	page          string
+	currentURL    string
+	deviceCode    string
+	boundMailbox  string
+	hasEmailProof bool
 }
 
 func requestDeviceCode(session *Session) (string, string, error) {
@@ -225,14 +235,18 @@ func checkPassword(session *Session, email, password, uaid string, maxRetries in
 			if parsed, err := strconv.Atoi(resp.Header.Get("retry-after")); err == nil && parsed > 0 {
 				retryAfter = parsed
 			}
-			logWarning("checkpassword 返回 429 (Too Many Requests), 等待 %ds 后重试 (%d/%d)", retryAfter, attempt, maxRetries)
+			logWarning("Microsoft authorization rate limited: stage=device_checkpassword status=429 retry_after=%d attempt=%d/%d", retryAfter, attempt, maxRetries)
 			if attempt < maxRetries {
 				if err := session.sleep(time.Duration(retryAfter) * time.Second); err != nil {
 					return "", wrapAuthError(fmt.Sprintf("checkpassword 请求取消: %s", err), AuthStatusRequestError, err)
 				}
 				continue
 			}
-			return "", newAuthError(fmt.Sprintf("密码验证频率受限 (429), 请 %ds 后重试", retryAfter), AuthStatusRateLimited)
+			return "", wrapAuthError(
+				fmt.Sprintf("密码验证频率受限 (429), 请 %ds 后重试", retryAfter),
+				AuthStatusRateLimited,
+				newSessionTransportError(fmt.Errorf("Microsoft device checkpassword HTTP 429"), session != nil && session.usesProxy),
+			)
 		}
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			return "", newAuthError(fmt.Sprintf("密码验证请求失败 (HTTP %d)", resp.StatusCode), AuthStatusRequestError)
@@ -361,9 +375,6 @@ func isKMSIPage(page string) bool {
 }
 
 func handleJSPollingPage(session *Session, page, rawURL string) (string, string, error) {
-	if !strings.Contains(rawURL, "ppsecure/post.srf") {
-		return page, rawURL, nil
-	}
 	if strings.Contains(page, "account.live.com/Abuse") {
 		return "", "", newAuthError("账号已锁定", AuthStatusAccountLocked)
 	}
@@ -384,6 +395,9 @@ func handleJSPollingPage(session *Session, page, rawURL string) (string, string,
 			return "", "", newAuthError("账号不存在", AuthStatusUnknownMailbox)
 		}
 		logWarning("步骤6.5: 页面错误 code=%s", errCode)
+	}
+	if asString(sd["urlSessionState"]) != "" {
+		return handleSessionApprovalPolling(session, page, rawURL, sd)
 	}
 	if asBoolDefault(sd["fPollingDisabled"], true) {
 		return page, rawURL, nil
@@ -465,6 +479,99 @@ func handleJSPollingPage(session *Session, page, rawURL string) (string, string,
 	}
 	logWarning("步骤6.5: JS 轮询超时 (%ds, %d 次)", timeout, pollCount)
 	return page, rawURL, nil
+}
+
+func handleSessionApprovalPolling(session *Session, page, rawURL string, sd map[string]any) (string, string, error) {
+	pollURL, err := url.Parse(asString(sd["urlSessionState"]))
+	if err != nil {
+		return "", "", newAuthError("Microsoft session approval URL is invalid.", AuthStatusAuthTimeout)
+	}
+	lookupKey := asString(sd["sSessionLookupKey"])
+	if lookupKey != "" {
+		query := pollURL.Query()
+		query.Set("slk", lookupKey)
+		pollURL.RawQuery = query.Encode()
+	}
+
+	timeout := min(asIntDefault(sd["iPollingTimeout"], 60), 15)
+	interval := max(asIntDefault(sd["iPollingInterval"], 1), 1)
+	logInfo("步骤6.5: 轮询 Session Approval (超时 %ds)", timeout)
+	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
+	for time.Now().Before(deadline) {
+		if err := session.sleep(time.Duration(interval) * time.Second); err != nil {
+			return "", "", wrapAuthError(fmt.Sprintf("Session Approval 轮询取消: %s", err), AuthStatusRequestError, err)
+		}
+		resp, err := session.Post(pollURL.String(), requestOptions{
+			Headers: corsHeaders(session, map[string]string{
+				"Accept":       "application/json",
+				"Content-Type": "application/json; charset=utf-8",
+				"Origin":       "https://login.live.com",
+				"Referer":      rawURL,
+			}),
+		})
+		if err != nil {
+			return "", "", wrapAuthError(fmt.Sprintf("Session Approval 轮询异常: %s", err), AuthStatusRequestError, err)
+		}
+		var state map[string]any
+		if err := resp.JSON(&state); err != nil {
+			return "", "", wrapAuthError("Session Approval returned an invalid response.", AuthStatusRequestError, err)
+		}
+		authorizationState := asInt(state["AuthorizationState"])
+		logInfo("步骤6.5: Session Approval state=%d", authorizationState)
+		switch authorizationState {
+		case 0, 7:
+			continue
+		case 2:
+			postURL := resolveURL(rawURL, asString(sd["urlPost"]))
+			if postURL == "" || asString(sd["sFT"]) == "" {
+				return "", "", newAuthError("Microsoft session approval page is incomplete.", AuthStatusAuthTimeout)
+			}
+			infoPageShown := "0"
+			if asBool(sd["fIsInfoPageShown"]) {
+				infoPageShown = "1"
+			}
+			approved, err := session.Post(postURL, requestOptions{
+				Data: map[string]string{
+					"type":               "22",
+					"login":              asString(sd["sSignInUsername"]),
+					"PPFT":               asString(sd["sFT"]),
+					"hpgrequestid":       "",
+					"sacxt":              strconv.Itoa(asInt(sd["iSAContext"])),
+					"hideSmsInMfaProofs": strconv.FormatBool(asBool(sd["fHideSmsInMfaProofs"])),
+					"canary":             firstNonEmpty(asString(sd["sCanary"]), asString(sd["sCanaryToken"])),
+					"SLK":                lookupKey,
+					"purpose":            "eOTT_OneTimePassword",
+					"request":            asString(sd["sCtx"]),
+					"infoPageShown":      infoPageShown,
+				},
+				Headers: navHeaders(session, map[string]string{
+					"Content-Type": "application/x-www-form-urlencoded",
+					"Origin":       "https://login.live.com",
+					"Referer":      rawURL,
+				}),
+				AllowRedirects:    true,
+				HasAllowRedirects: true,
+			})
+			if err != nil {
+				return "", "", wrapAuthError(fmt.Sprintf("Session Approval 提交异常: %s", err), AuthStatusRequestError, err)
+			}
+			logInfo("步骤6.5: Session Approval 已完成")
+			return approved.Body, approved.URL, nil
+		case 1:
+			return "", "", newAuthError("Microsoft session approval was denied.", AuthStatusVerifyCodeError)
+		default:
+			return "", "", newExplicitAliasStageError(
+				"Microsoft session approval did not complete.",
+				AuthStatusAuthTimeout,
+				explicitAliasStageAccountPageIncomplete,
+			)
+		}
+	}
+	return page, rawURL, newExplicitAliasStageError(
+		"Microsoft session approval timed out.",
+		AuthStatusAuthTimeout,
+		explicitAliasStageAccountPageIncomplete,
+	)
 }
 
 func handleConsent(session *Session, page, rawURL string) (string, string, error) {
@@ -570,10 +677,17 @@ func pollForToken(session *Session, deviceCode, boundMailbox string) (map[string
 	return nil, newAuthError("授权超时", AuthStatusAuthTimeout, boundMailbox)
 }
 
-func authorizeAccountImpl(ctx context.Context, email, password, proxy string, preferredBindingAddress string) (*AuthSuccess, error) {
+func beginAccountAuthorization(ctx context.Context, email, password, proxy string, preferredBindingAddress string) (*pendingAccountAuthorization, error) {
 	session, err := newBrowserSession(ctx, proxy)
 	if err != nil {
 		return nil, wrapAuthError(fmt.Sprintf("创建微软会话失败: %s", err), AuthStatusRequestError, err)
+	}
+	return beginAccountAuthorizationWithSession(session, email, password, proxy, preferredBindingAddress)
+}
+
+func beginAccountAuthorizationWithSession(session *Session, email, password, proxy string, preferredBindingAddress string) (*pendingAccountAuthorization, error) {
+	if session == nil {
+		return nil, newAuthError("Microsoft authorization session is unavailable.", AuthStatusRequestError)
 	}
 	userCode, deviceCode, err := requestDeviceCode(session)
 	if err != nil {
@@ -591,6 +705,7 @@ func authorizeAccountImpl(ctx context.Context, email, password, proxy string, pr
 	if err != nil {
 		return nil, err
 	}
+	hasEmailProof := false
 	for _, proof := range proofData {
 		display := proof.Display
 		if proof.Type == 1 && display != "" && strings.Contains(display, "@") {
@@ -598,6 +713,7 @@ func authorizeAccountImpl(ctx context.Context, email, password, proxy string, pr
 			if !domainInProject(domain) {
 				return nil, &AuthError{Message: fmt.Sprintf("已绑定辅助邮箱(%s)", display), Status: AuthStatusAlreadyBound, BoundMailbox: display}
 			}
+			hasEmailProof = true
 		} else if proof.Type == 2 || proof.Type == 3 {
 			return nil, newAuthError(fmt.Sprintf("需要手机验证 (%s)", display), AuthStatusPhoneVerification)
 		} else if proof.Type == 10 {
@@ -626,13 +742,27 @@ func authorizeAccountImpl(ctx context.Context, email, password, proxy string, pr
 		return nil, err
 	}
 	boundMailbox := firstNonEmpty(bound1, bound2)
-	page, currentURL, err = handleConsent(session, page, currentURL)
+	return &pendingAccountAuthorization{
+		session:       session,
+		page:          page,
+		currentURL:    currentURL,
+		deviceCode:    deviceCode,
+		boundMailbox:  boundMailbox,
+		hasEmailProof: hasEmailProof,
+	}, nil
+}
+
+func completeAccountAuthorization(pending *pendingAccountAuthorization) (*AuthSuccess, error) {
+	if pending == nil || pending.session == nil {
+		return nil, newAuthError("Microsoft authorization session is unavailable.", AuthStatusRequestError)
+	}
+	page, currentURL, err := handleConsent(pending.session, pending.page, pending.currentURL)
 	if err != nil {
 		return nil, err
 	}
 	_ = page
 	_ = currentURL
-	tokens, err := pollForToken(session, deviceCode, boundMailbox)
+	tokens, err := pollForToken(pending.session, pending.deviceCode, pending.boundMailbox)
 	if err != nil {
 		return nil, err
 	}
@@ -642,8 +772,16 @@ func authorizeAccountImpl(ctx context.Context, email, password, proxy string, pr
 		ClientID:     clientID,
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		BoundMailbox: boundMailbox,
+		BoundMailbox: pending.boundMailbox,
 	}, nil
+}
+
+func authorizeAccountImpl(ctx context.Context, email, password, proxy string, preferredBindingAddress string) (*AuthSuccess, error) {
+	pending, err := beginAccountAuthorization(ctx, email, password, proxy, preferredBindingAddress)
+	if err != nil {
+		return nil, err
+	}
+	return completeAccountAuthorization(pending)
 }
 
 func authorizeAccount(ctx context.Context, email, password, proxy string, preferredBindingAddress string) (*AuthSuccess, error) {

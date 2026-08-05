@@ -234,8 +234,8 @@ func createTempMailbox(ctx context.Context, accountEmail string, preferredBindin
 		return "", wrapAuthError(fmt.Sprintf("生成辅助邮箱取消: %s", err), AuthStatusRequestError, err)
 	}
 	if preferred := normalizeRecoveryMailbox(preferredBindingAddress); preferred != "" {
-		if !usesAuxiliaryAllocationDomain(preferred) {
-			return "", newAuthError("辅助邮箱域名未开启新分配权限", AuthStatusRequestError)
+		if !UsesActiveAuxiliaryDomain(preferred) {
+			return "", newAuthError("辅助邮箱域名不是有效系统域名", AuthStatusRequestError)
 		}
 		logInfo("使用导入指定辅助邮箱")
 		logDebug("辅助邮箱地址: %s", preferred)

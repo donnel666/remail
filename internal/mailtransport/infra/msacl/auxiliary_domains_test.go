@@ -65,8 +65,9 @@ func TestAuxiliaryDomainPolicyKeepsExistingBindingsWithoutNewAllocation(t *testi
 	if _, err := nextAuxiliaryDomain(); err == nil {
 		t.Fatal("domain without allocation permission must not generate a new binding")
 	}
-	if _, err := createTempMailbox(t.Context(), "owner@example.test", "chosen@receive.test"); err == nil {
-		t.Fatal("domain without allocation permission must not accept a preferred new binding")
+	preferred, err := createTempMailbox(t.Context(), "owner@example.test", "chosen@receive.test")
+	if err != nil || preferred != "chosen@receive.test" {
+		t.Fatalf("existing preferred binding must remain usable: mailbox=%q err=%v", preferred, err)
 	}
 }
 

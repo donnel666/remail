@@ -64,20 +64,14 @@ func extractMatchingUserProof(page, bindingAddress string) (data, display string
 	return "", firstDisplay
 }
 
-// loginForExplicitAliasPassword performs the password login → eOTT_OneTimePassword
-// verify flow and returns the alias management page (account.live.com/AddAssocId).
-func loginForExplicitAliasPassword(session *Session, email, password, proxy, bindingAddress string) (string, string, error) {
-	if strings.TrimSpace(bindingAddress) == "" {
-		return "", "", fmt.Errorf("password login requires a binding mailbox address")
-	}
-	if strings.Contains(bindingAddress, "*") {
-		return "", "", &AuthError{Message: "辅助邮箱为掩码/外部地址, 无法接收验证码", Status: AuthStatusAlreadyBound, BoundMailbox: bindingAddress}
+func loadExplicitAliasPasswordIdentity(session *Session, email, password string) (string, string, string, error) {
+	if session == nil {
+		return "", "", "", newAuthError("Microsoft authorization session is unavailable.", AuthStatusRequestError)
 	}
 	if strings.TrimSpace(password) == "" {
-		return "", "", newAuthError("password login requires the account password", AuthStatusPasswordError)
+		return "", "", "", newAuthError("password login requires the account password", AuthStatusPasswordError)
 	}
 
-	// ---- 步骤1-2: GET AddAssocId → 提交账号邮箱 (与 OTC 前段一致) ----
 	logInfo("PWD 步骤1: 访问 AddAssocId")
 	resp, err := session.Get(addAssocIDURL, requestOptions{
 		Headers:           navHeaders(session, nil),
@@ -85,11 +79,11 @@ func loginForExplicitAliasPassword(session *Session, email, password, proxy, bin
 		HasAllowRedirects: true,
 	})
 	if err != nil {
-		return "", "", wrapAuthError(fmt.Sprintf("加载 AddAssocId 请求异常: %s", err), AuthStatusRequestError, err)
+		return "", "", "", wrapAuthError(fmt.Sprintf("加载 AddAssocId 请求异常: %s", err), AuthStatusRequestError, err)
 	}
 	page, currentURL := resp.Body, resp.URL
 	if strings.Contains(strings.ToLower(currentURL), "account.live.com/addassocid") {
-		return page, currentURL, nil
+		return page, currentURL, "", nil
 	}
 
 	ppft := extractPPFT(page)
@@ -101,7 +95,7 @@ func loginForExplicitAliasPassword(session *Session, email, password, proxy, bin
 			HasAllowRedirects: true,
 		})
 		if err != nil {
-			return "", "", wrapAuthError(fmt.Sprintf("加载微软登录页异常: %s", err), AuthStatusRequestError, err)
+			return "", "", "", wrapAuthError(fmt.Sprintf("加载微软登录页异常: %s", err), AuthStatusRequestError, err)
 		}
 		page, currentURL = resp.Body, resp.URL
 		ppft = extractPPFT(page)
@@ -112,7 +106,11 @@ func loginForExplicitAliasPassword(session *Session, email, password, proxy, bin
 		if ppft != "" {
 			stage = explicitAliasStageLoginMissingPostURL
 		}
-		return "", "", newExplicitAliasStageError("OAuth 登录页缺少 PPFT 或提交地址", AuthStatusAuthTimeout, stage)
+		if msaclDebugLogs {
+			_ = os.WriteFile("/tmp/msacl_pwd_login_stuck.html", []byte(page), 0o600)
+		}
+		logPageScene("PWD 登录页缺少字段", page, currentURL)
+		return "", "", "", newExplicitAliasStageError("OAuth 登录页缺少 PPFT 或提交地址", AuthStatusAuthTimeout, stage)
 	}
 	uaid := firstNonEmpty(getQueryParam(postURL, "uaid"), getQueryParam(currentURL, "uaid"))
 
@@ -132,26 +130,40 @@ func loginForExplicitAliasPassword(session *Session, email, password, proxy, bin
 		HasAllowRedirects: true,
 	})
 	if err != nil {
-		return "", "", wrapAuthError(fmt.Sprintf("提交微软账号异常: %s", err), AuthStatusRequestError, err)
+		return "", "", "", wrapAuthError(fmt.Sprintf("提交微软账号异常: %s", err), AuthStatusRequestError, err)
 	}
 	page, currentURL = resp.Body, resp.URL
 	ppft = firstNonEmpty(extractPPFT(page), ppft)
 	postURL = firstNonEmpty(extractPostURL(page), postURL)
 
-	// ---- 步骤3: checkpassword → vanguardflowtoken ----
 	logInfo("PWD 步骤3: checkpassword 验证密码")
 	vanguardToken, err := checkExplicitAliasPassword(session, email, password, uaid, currentURL)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 
-	// ---- 步骤4: 提交凭据 (passwd) → i5600/身份验证页 ----
 	logInfo("PWD 步骤4: 提交凭据 (passwd)")
 	page, currentURL, err = submitExplicitAliasCredentials(session, email, password, ppft, postURL, vanguardToken, currentURL)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	logDebug("PWD 提交凭据后落 %s pageID=%s", currentURL, extractPageID(page))
+	return page, currentURL, uaid, nil
+}
+
+// loginForExplicitAliasPassword performs the password login → eOTT_OneTimePassword
+// verify flow and returns the alias management page (account.live.com/AddAssocId).
+func loginForExplicitAliasPassword(session *Session, email, password, proxy, bindingAddress string) (string, string, error) {
+	if strings.TrimSpace(bindingAddress) == "" {
+		return "", "", fmt.Errorf("password login requires a binding mailbox address")
+	}
+	if strings.Contains(bindingAddress, "*") {
+		return "", "", &AuthError{Message: "辅助邮箱为掩码/外部地址, 无法接收验证码", Status: AuthStatusAlreadyBound, BoundMailbox: bindingAddress}
+	}
+	page, currentURL, uaid, err := loadExplicitAliasPasswordIdentity(session, email, password)
+	if err != nil {
+		return "", "", err
+	}
 
 	// 身份验证页内嵌 arrUserProofs。若未直接出现 (JS 轮询页), 尝试推进一步再取。
 	proofData, proofDisplay := extractMatchingUserProof(page, bindingAddress)
@@ -249,7 +261,7 @@ func loginForExplicitAliasPassword(session *Session, email, password, proxy, bin
 
 	// ---- 步骤7: 提交验证码 (type=18) ----
 	logInfo("PWD 步骤7: 提交验证码 (type=18)")
-	resp, err = session.Post(verifyPostURL, requestOptions{
+	resp, err := session.Post(verifyPostURL, requestOptions{
 		Data: map[string]string{
 			"AddTD":              "true",
 			"SentProofIDE":       proofData,
@@ -298,6 +310,10 @@ func convergeExplicitAliasToAddAssocID(session *Session, page, currentURL string
 			break
 		}
 		var err error
+		page, currentURL, err = handleJSPollingPage(session, page, currentURL)
+		if err != nil {
+			return "", "", err
+		}
 		page, currentURL, _, err = declineKMSI(session, page, currentURL, currentURL)
 		if err != nil {
 			return "", "", err
