@@ -9,6 +9,7 @@ services:
       - --max-connections=550
       - --innodb-buffer-pool-size=4G
       - --innodb-lock-wait-timeout=3
+      - --binlog-expire-logs-seconds=864000
     environment:
       TZ: Asia/Shanghai
       MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD}"
