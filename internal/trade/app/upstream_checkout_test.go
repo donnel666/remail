@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/donnel666/remail/internal/trade/domain"
 	"github.com/donnel666/remail/internal/upstream"
@@ -113,7 +114,7 @@ func TestPaidProviderOrderResumesOwnerWithoutRecheckingSupply(t *testing.T) {
 		ID: 1, OrderNo: "ORDER-UPSTREAM-PAID", UserID: 7, ProjectID: 8, ProjectProductID: 9,
 		ProductType: domain.ProductTypeGmail, ServiceMode: domain.ServiceModeCode,
 		SupplyPolicy: domain.SupplyPolicyPublicOnly, Status: domain.OrderStatusPaid,
-		PayAmount: "1.00", CodeWindowMinutes: 1440, ClientChannel: domain.ClientChannelConsole,
+		PayAmount: "1.00", CodeWindowMinutes: 10, ClientChannel: domain.ClientChannelConsole,
 		IdempotencyKey: "gmail-upstream-replay",
 	}
 	repo := &batchRepoSpy{orders: map[string]domain.Order{"gmail-upstream-replay": order}}
@@ -136,6 +137,31 @@ func TestPaidProviderOrderResumesOwnerWithoutRecheckingSupply(t *testing.T) {
 	require.False(t, provider.accepted[0].Selected)
 	require.Zero(t, gmail.checks)
 	require.Zero(t, wallet.debits)
+}
+
+func TestActivateUpstreamOrderUsesProviderWindowForReceiveAndWarranty(t *testing.T) {
+	startedAt := time.Date(2026, 8, 5, 1, 0, 0, 0, time.UTC)
+	expiresAt := startedAt.Add(24 * time.Hour)
+	order := domain.Order{
+		ID: 1, OrderNo: "ORDER-UPSTREAM-ACTIVE", UserID: 7, ProjectID: 8, ProjectProductID: 9,
+		ProductType: domain.ProductTypeGmail, ServiceMode: domain.ServiceModeCode,
+		SupplyPolicy: domain.SupplyPolicyPublicOnly, Status: domain.OrderStatusPaid,
+		CodeWindowMinutes: 10,
+	}
+	repo := &batchRepoSpy{orders: map[string]domain.Order{"upstream-active": order}}
+	provider := &checkoutUpstreamSpy{owned: true}
+	uc := NewUseCase(repo, &batchOrderingSpy{productType: domain.ProductTypeGmail}, &batchWalletSpy{}, &checkoutInventorySpy{}, batchTokenSpy{})
+	uc.SetUpstreams(upstream.NewRouter(provider))
+
+	err := uc.ActivateUpstreamOrder(context.Background(), upstream.Activation{
+		OrderNo: order.OrderNo, Email: "upstream@gmail.com", StartedAt: startedAt, ExpiresAt: expiresAt,
+	})
+
+	require.NoError(t, err)
+	activated := repo.orders["upstream-active"]
+	require.Equal(t, domain.OrderStatusActive, activated.Status)
+	require.Equal(t, expiresAt, *activated.ReceiveUntil)
+	require.Equal(t, expiresAt, *activated.AfterSaleUntil)
 }
 
 func TestLocalFirstGmailFallsBackUpstreamAfterFinalAllocationMiss(t *testing.T) {

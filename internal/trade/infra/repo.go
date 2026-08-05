@@ -1040,14 +1040,18 @@ func (r *Repo) CompleteCodeOrder(ctx context.Context, orderNo string, matchedAt 
 			return nil
 		}
 		previous := current
+		updates := map[string]any{
+			"status":        string(domain.OrderStatusCompleted),
+			"receive_until": readUntil.UTC(),
+			"version":       gorm.Expr("version + 1"),
+		}
+		// Gmail warranty is fixed by the local session or upstream activation.
+		if model.ProductType != string(domain.ProductTypeGmail) || model.AfterSaleUntil == nil {
+			updates["after_sale_until"] = readUntil.UTC()
+		}
 		result := tx.Model(&OrderModel{}).
 			Where("order_no = ? AND service_mode = ? AND status = ?", orderNo, string(domain.ServiceModeCode), string(domain.OrderStatusActive)).
-			Updates(map[string]any{
-				"status":           string(domain.OrderStatusCompleted),
-				"receive_until":    readUntil.UTC(),
-				"after_sale_until": readUntil.UTC(),
-				"version":          gorm.Expr("version + 1"),
-			})
+			Updates(updates)
 		if result.Error != nil {
 			return fmt.Errorf("complete code order: %w", result.Error)
 		}

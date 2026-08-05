@@ -160,10 +160,11 @@ type GmailSupplyQuote struct {
 }
 
 type GmailSessionCommand struct {
-	OrderNo   string
-	ProjectID uint
-	ProductID uint
-	Quote     GmailSupplyQuote
+	OrderNo           string
+	ProjectID         uint
+	ProductID         uint
+	CodeWindowMinutes int
+	Quote             GmailSupplyQuote
 }
 
 type GmailLocalAllocation struct {
@@ -1398,7 +1399,8 @@ func (uc *UseCase) checkoutLocalGmailCodePrepared(ctx context.Context, prepared 
 			if sessionID == 0 {
 				sessionID, err = uc.gmailSupply.CreateSession(ctx, GmailSessionCommand{
 					OrderNo: order.OrderNo, ProjectID: order.ProjectID, ProductID: order.ProjectProductID,
-					Quote: *prepared.gmailQuote,
+					CodeWindowMinutes: order.CodeWindowMinutes,
+					Quote:             *prepared.gmailQuote,
 				})
 				if err != nil {
 					return nil, err

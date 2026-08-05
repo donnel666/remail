@@ -286,9 +286,6 @@ func (s *batchOrderingSpy) GetOrderingQuote(ctx context.Context, projectID uint,
 		quote.MicrosoftPayAmount = "1.20"
 		quote.DomainPayAmount = "0.80"
 	}
-	if productType == domain.ProductTypeGmail {
-		quote.CodeWindowMinutes = 1440
-	}
 	return quote, nil
 }
 
@@ -761,6 +758,7 @@ func TestGmailCodeCheckoutUsesLocalGmailAllocation(t *testing.T) {
 	require.Equal(t, result.Order.OrderNo, supply.lastSession.OrderNo)
 	require.Equal(t, result.Order.ProjectID, supply.lastSession.ProjectID)
 	require.Equal(t, result.Order.ProjectProductID, supply.lastSession.ProductID)
+	require.Equal(t, 10, supply.lastSession.CodeWindowMinutes)
 
 	retried, err := uc.Checkout(context.Background(), request)
 	require.NoError(t, err)

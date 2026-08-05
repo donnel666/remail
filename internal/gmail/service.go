@@ -23,10 +23,7 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-const (
-	gmailLifetime     = 24 * time.Hour
-	gmailPollInterval = 5 * time.Second
-)
+const gmailPollInterval = 5 * time.Second
 
 type TradePort interface {
 	ActivateGmailOrder(ctx context.Context, req tradeapp.ActivateGmailOrderRequest) error
@@ -283,7 +280,7 @@ func (s *Service) CreateSession(ctx context.Context, cmd tradeapp.GmailSessionCo
 	cmd.OrderNo = strings.TrimSpace(cmd.OrderNo)
 	quote := cmd.Quote
 	quote.Source = strings.TrimSpace(quote.Source)
-	if cmd.OrderNo == "" || quote.Source != SourceLocal || cmd.ProjectID == 0 || cmd.ProductID == 0 {
+	if cmd.OrderNo == "" || quote.Source != SourceLocal || cmd.ProjectID == 0 || cmd.ProductID == 0 || cmd.CodeWindowMinutes <= 0 {
 		return 0, ErrInvalidRoute
 	}
 	cost, err := money.Parse(quote.CostPoints)
@@ -324,7 +321,7 @@ func (s *Service) CreateSession(ctx context.Context, cmd tradeapp.GmailSessionCo
 			return fmt.Errorf("load local Gmail code resource: %w", err)
 		}
 		now := s.now()
-		expiresAt := now.Add(gmailLifetime)
+		expiresAt := now.Add(time.Duration(cmd.CodeWindowMinutes) * time.Minute)
 		model.SourceRef = strconv.FormatUint(uint64(allocation.ID), 10)
 		model.Email = allocation.Email
 		model.Status = SessionActive
@@ -556,7 +553,7 @@ func gmailCompletionReason(session sessionModel) string {
 	if session.ReceivedCount >= MaxCodes {
 		return "Gmail 已接收 3 个验证码，接码会话完成。"
 	}
-	return fmt.Sprintf("Gmail 24 小时接码窗口结束，共接收 %d 个验证码。", session.ReceivedCount)
+	return fmt.Sprintf("Gmail 接码窗口结束，共接收 %d 个验证码。", session.ReceivedCount)
 }
 
 func (s *Service) deferPoll(ctx context.Context, sessionID uint, safeMessage string, cause error) error {

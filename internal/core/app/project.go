@@ -934,11 +934,6 @@ func normalizeProductRequests(requests []ProjectProductRequest, requireEnabled, 
 			product.DotWeight = 1
 			product.PlusWeight = 1
 		}
-		if product.Type == domain.ProductTypeGmail {
-			if product.CodeEnabled {
-				product.CodeWindowMinutes = 24 * 60
-			}
-		}
 		if product.CodeEnabled && product.CodeWindowMinutes <= 0 {
 			return nil, domain.ErrInvalidProduct
 		}

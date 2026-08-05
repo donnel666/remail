@@ -626,7 +626,7 @@ func (s *Service) finishLocalSession(ctx context.Context, session sessionModel) 
 	case SessionCancelled:
 		reason := strings.TrimSpace(session.LastSafeError)
 		if reason == "" {
-			reason = "Gmail 在 24 小时内未收到验证码，订单已退款。"
+			reason = "Gmail 接码窗口结束，订单已退款。"
 		}
 		err = s.trade.FailGmailOrder(ctx, session.OrderNo, reason)
 	case SessionFailed:

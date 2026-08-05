@@ -223,7 +223,7 @@ function createDefaultProduct(
     codeEnabled: true,
     codePrice: priceDefaults[type].codePrice,
     codeSupplierPrice: priceDefaults[type].codeSupplierPrice,
-    codeWindowMinutes: isGmail ? "1440" : "10",
+    codeWindowMinutes: "10",
     dotWeight: "0",
     mainWeight: usesMailboxWeights ? "1" : "0",
     plusWeight: "0",
@@ -349,7 +349,7 @@ function detailToDraft(
           codeEnabled: product.codeEnabled,
           codePrice: moneyToDraft(product.codePrice),
           codeSupplierPrice: moneyToDraft(product.codeSupplierPrice),
-          codeWindowMinutes: product.type === "gmail" ? "1440" : String(product.codeWindowMinutes ?? 0),
+          codeWindowMinutes: String(product.codeWindowMinutes ?? 0),
           dotWeight: String(product.dotWeight ?? 0),
           mainWeight: String(product.mainWeight ?? 0),
           plusWeight: String(product.plusWeight ?? 0),
@@ -461,7 +461,7 @@ function productDraftToRequest(
     codeEnabled: product.codeEnabled,
     codePrice: normalizedMoney(product.codePrice),
     codeSupplierPrice: normalizedMoney(product.codeSupplierPrice),
-    codeWindowMinutes: product.type === "gmail" && product.codeEnabled ? 1440 : toNonNegativeInt(product.codeWindowMinutes),
+    codeWindowMinutes: toNonNegativeInt(product.codeWindowMinutes),
     dotWeight: product.type === "microsoft" || product.type === "gmail" ? toNonNegativeInt(product.dotWeight) : 0,
     mainWeight: product.type === "microsoft" || product.type === "gmail" ? toNonNegativeInt(product.mainWeight) : 0,
     plusWeight: product.type === "microsoft" || product.type === "gmail" ? toNonNegativeInt(product.plusWeight) : 0,
@@ -620,7 +620,9 @@ function ProductDraftCard({
             checked={draft.codeEnabled}
             onChange={(event) => onChange({
               codeEnabled: event.target.checked,
-              ...(isGmail && event.target.checked ? { codeWindowMinutes: "1440" } : {}),
+              ...(event.target.checked && toNonNegativeInt(draft.codeWindowMinutes) <= 0
+                ? { codeWindowMinutes: "10" }
+                : {}),
             })}
           >
             {t("Code service")}
@@ -641,7 +643,6 @@ function ProductDraftCard({
               {label}
             </span>
             <Input
-              disabled={key === "codeWindowMinutes" && isGmail}
               onChange={(value) => onChange({ [key]: String(value) } as Partial<ProductDraft>)}
               value={String(draft[key])}
             />

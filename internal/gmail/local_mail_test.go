@@ -15,8 +15,12 @@ import (
 	"gorm.io/gorm"
 )
 
-func newLocalCodeSession(t *testing.T, name string, clock *time.Time) (*gorm.DB, *Service, sessionModel, uint) {
+func newLocalCodeSession(t *testing.T, name string, clock *time.Time, codeWindowMinutes ...int) (*gorm.DB, *Service, sessionModel, uint) {
 	t.Helper()
+	windowMinutes := 10
+	if len(codeWindowMinutes) > 0 {
+		windowMinutes = codeWindowMinutes[0]
+	}
 	db, err := gorm.Open(sqlite.Open("file:"+name+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(
@@ -46,13 +50,22 @@ func newLocalCodeSession(t *testing.T, name string, clock *time.Time) (*gorm.DB,
 		CostPointsSnapshot: "1",
 	}).Error)
 	sessionID, err := service.CreateSession(context.Background(), tradeapp.GmailSessionCommand{
-		OrderNo: orderNo, ProjectID: 7, ProductID: 71,
+		OrderNo: orderNo, ProjectID: 7, ProductID: 71, CodeWindowMinutes: windowMinutes,
 		Quote: tradeapp.GmailSupplyQuote{Source: SourceLocal, CostPoints: "1"},
 	})
 	require.NoError(t, err)
 	var session sessionModel
 	require.NoError(t, db.First(&session, sessionID).Error)
 	return db, service, session, root.ID
+}
+
+func TestLocalGmailSessionUsesProjectCodeWindow(t *testing.T) {
+	clock := time.Date(2026, 8, 5, 0, 0, 0, 0, time.UTC)
+	_, _, session, _ := newLocalCodeSession(t, "gmail-local-project-window", &clock, 17)
+
+	require.NotNil(t, session.StartedAt)
+	require.NotNil(t, session.ExpiresAt)
+	require.Equal(t, 17*time.Minute, session.ExpiresAt.Sub(*session.StartedAt))
 }
 
 func loadGmailSession(t *testing.T, db *gorm.DB, sessionID uint) sessionModel {
@@ -69,7 +82,7 @@ func TestLocalGmailRecordsThreeCodesAndDeduplicatesReplayedMail(t *testing.T) {
 	service.SetTrade(trade)
 
 	require.NoError(t, service.RecordMatchedCode(context.Background(), session.OrderNo, "too-early", clock.Add(-time.Second)))
-	require.NoError(t, service.RecordMatchedCode(context.Background(), session.OrderNo, "too-late", clock.Add(gmailLifetime)))
+	require.NoError(t, service.RecordMatchedCode(context.Background(), session.OrderNo, "too-late", clock.Add(10*time.Minute)))
 	firstReceivedAt := clock.Add(time.Minute)
 	require.NoError(t, service.RecordMatchedCode(context.Background(), session.OrderNo, "111111", firstReceivedAt))
 	require.NoError(t, service.RecordMatchedCode(context.Background(), session.OrderNo, "111111", firstReceivedAt))
@@ -116,7 +129,7 @@ func TestLocalGmailExpirySettlesByCodeCount(t *testing.T) {
 					context.Background(), session.OrderNo, fmt.Sprintf("code-%d", i+1), startedAt.Add(time.Duration(i+1)*time.Minute),
 				))
 			}
-			clock = startedAt.Add(gmailLifetime)
+			clock = startedAt.Add(10 * time.Minute)
 			require.NoError(t, service.Poll(context.Background(), session.ID))
 
 			session = loadGmailSession(t, db, session.ID)

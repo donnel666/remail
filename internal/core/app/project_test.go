@@ -419,14 +419,14 @@ func TestProjectUseCaseRejectsRandomProductWithoutBothPriceSources(t *testing.T)
 	require.ErrorIs(t, err, domain.ErrInvalidProduct)
 }
 
-func TestProjectUseCaseNormalizesGmailProduct(t *testing.T) {
+func TestProjectUseCasePreservesGmailCodeWindow(t *testing.T) {
 	repo := &fakeProjectRepo{}
 	uc := NewProjectUseCase(repo)
 	req := validProjectCreateRequest()
 	req.Products[0] = ProjectProductRequest{
 		Type: "gmail", Status: "enabled", CodeEnabled: true, PurchaseEnabled: true,
 		CodePrice: "8", PurchasePrice: "99", CodeSupplierPrice: "5", PurchaseSupplierPrice: "4",
-		CodeWindowMinutes: 10, ActivationWindowMinutes: 60, WarrantyMinutes: 30,
+		CodeWindowMinutes: 17, ActivationWindowMinutes: 60, WarrantyMinutes: 30,
 		MainWeight: 2, DotWeight: 3, PlusWeight: 4,
 	}
 
@@ -442,7 +442,7 @@ func TestProjectUseCaseNormalizesGmailProduct(t *testing.T) {
 	require.Equal(t, "99.000000", product.PurchasePrice)
 	require.Equal(t, "5.000000", product.CodeSupplierPrice)
 	require.Equal(t, "4.000000", product.PurchaseSupplierPrice)
-	require.Equal(t, 24*60, product.CodeWindowMinutes)
+	require.Equal(t, 17, product.CodeWindowMinutes)
 	require.Equal(t, 60, product.ActivationWindowMinutes)
 	require.Equal(t, 30, product.WarrantyMinutes)
 	require.Equal(t, 2, product.MainWeight)

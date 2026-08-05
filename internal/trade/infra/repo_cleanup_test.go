@@ -3,6 +3,7 @@ package infra
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/donnel666/remail/internal/trade/domain"
 	"github.com/glebarez/sqlite"
@@ -27,4 +28,28 @@ func TestCleanupRecoveryIncludesRefundedOrdersWithNoCleanupAttempt(t *testing.T)
 
 	require.NoError(t, err)
 	require.ElementsMatch(t, []string{"REFUNDED-NONE", "REFUNDED-PARTIAL"}, orderNos)
+}
+
+func TestCompleteGmailCodeOrderPreservesWarrantyDeadline(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:trade-gmail-code-warranty?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&OrderModel{}, &OrderEventModel{}))
+
+	startedAt := time.Date(2026, 8, 5, 1, 0, 0, 0, time.UTC)
+	warrantyUntil := startedAt.Add(24 * time.Hour)
+	readUntil := startedAt.Add(time.Hour)
+	require.NoError(t, db.Create(&OrderModel{
+		OrderNo: "GMAIL-WARRANTY-1", UserID: 1, ProjectID: 1, ProjectProductID: 1,
+		ProductType: string(domain.ProductTypeGmail), ServiceMode: string(domain.ServiceModeCode),
+		Status: string(domain.OrderStatusActive), PayAmount: "1", RefundAmount: "0",
+		ReceiveStartedAt: &startedAt, ReceiveUntil: &warrantyUntil, AfterSaleUntil: &warrantyUntil,
+	}).Error)
+
+	completed, changed, err := NewRepo(db).CompleteCodeOrder(context.Background(), "GMAIL-WARRANTY-1", startedAt.Add(5*time.Minute), readUntil)
+
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, domain.OrderStatusCompleted, completed.Status)
+	require.Equal(t, readUntil, *completed.ReceiveUntil)
+	require.Equal(t, warrantyUntil, *completed.AfterSaleUntil)
 }
