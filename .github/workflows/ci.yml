@@ -508,7 +508,7 @@ jobs:
             exit 1
           fi
           wait_for_health() {
-            for _ in $(seq 1 10); do
+            for _ in $(seq 1 30); do
               if docker compose --env-file .env -f compose.yml exec -T server wget -qO- http://127.0.0.1:8080/readyz | grep -q '"ok"'; then
                 return 0
               fi
