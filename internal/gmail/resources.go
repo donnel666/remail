@@ -582,7 +582,7 @@ func listLocalGmailAllocationCandidates(
 
 func lockLocalGmailAllocationRoot(tx *gorm.DB, resourceID uint, skipLocked bool) (bool, error) {
 	var id uint
-	if tx.Dialector.Name() != "mysql" {
+	if tx.Name() != "mysql" {
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Model(&resourceRootModel{}).
 			Where("id = ? AND type = ?", resourceID, "gmail").Pluck("id", &id).Error
 		return id != 0, err
@@ -617,7 +617,7 @@ func lockLocalGmailAllocationCandidate(
 	} else {
 		query = query.Where("r.for_sale = ? AND owner.status = ? AND owner.role IN ?", true, "active", []string{"supplier", "admin", "super_admin"})
 	}
-	if tx.Dialector.Name() == "mysql" {
+	if tx.Name() == "mysql" {
 		query = query.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"})
 	} else {
 		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
@@ -785,7 +785,7 @@ func (s *Service) withLocalGmailAllocationTx(ctx context.Context, fn func(contex
 	var err error
 	for attempt := 0; attempt < 2; attempt++ {
 		txOptions := &sql.TxOptions{Isolation: sql.LevelReadCommitted}
-		if s.db.Dialector.Name() != "mysql" {
+		if s.db.Name() != "mysql" {
 			txOptions = nil
 		}
 		err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {

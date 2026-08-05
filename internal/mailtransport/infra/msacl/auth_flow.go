@@ -245,7 +245,7 @@ func checkPassword(session *Session, email, password, uaid string, maxRetries in
 			return "", wrapAuthError(
 				fmt.Sprintf("密码验证频率受限 (429), 请 %ds 后重试", retryAfter),
 				AuthStatusRateLimited,
-				newSessionTransportError(fmt.Errorf("Microsoft device checkpassword HTTP 429"), session != nil && session.usesProxy),
+				newSessionTransportError(fmt.Errorf("microsoft device checkpassword HTTP 429"), session != nil && session.usesProxy),
 			)
 		}
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {

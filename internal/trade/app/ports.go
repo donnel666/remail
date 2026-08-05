@@ -985,26 +985,26 @@ func (uc *UseCase) checkoutUpstreamAfterLocalInventoryMiss(
 	prepared checkoutPreparation,
 	order *domain.Order,
 	created bool,
-) (*CheckoutResult, error, bool) {
+) (*CheckoutResult, bool, error) {
 	if prepared.fallbackAttempted || prepared.upstreamOwned || prepared.mode != domain.ServiceModeCode || prepared.quote == nil || order == nil {
-		return nil, nil, false
+		return nil, false, nil
 	}
 	if err := uc.gmailSupply.ReleaseLocalAllocation(ctx, order.OrderNo); err != nil {
-		return nil, err, true
+		return nil, true, err
 	}
 	demand, err := gmailUpstreamDemand(order.ProjectID, order.ProjectProductID, order.UserID, order.ServiceMode, order.PayAmount)
 	if err != nil {
-		return nil, err, true
+		return nil, true, err
 	}
 	offer, useLocal, err := uc.upstreams.Choose(ctx, demand, false)
 	if err != nil {
 		if errors.Is(err, upstream.ErrUnavailable) || errors.Is(err, upstream.ErrPriceProtected) {
-			return nil, nil, false
+			return nil, false, nil
 		}
-		return nil, tradeUpstreamError(err), true
+		return nil, true, tradeUpstreamError(err)
 	}
 	if useLocal || offer == nil {
-		return nil, nil, false
+		return nil, false, nil
 	}
 	prepared.existing = order
 	prepared.gmailQuote = nil
@@ -1012,12 +1012,12 @@ func (uc *UseCase) checkoutUpstreamAfterLocalInventoryMiss(
 	prepared.fallbackAttempted = true
 	result, err := uc.checkoutUpstreamGmailPrepared(ctx, prepared)
 	if errors.Is(err, domain.ErrUpstreamUnavailable) {
-		return nil, nil, false
+		return nil, false, nil
 	}
 	if result != nil && created {
 		result.Created = true
 	}
-	return result, err, true
+	return result, true, err
 }
 
 func (uc *UseCase) checkoutPrepared(ctx context.Context, prepared checkoutPreparation) (*CheckoutResult, error) {
@@ -1321,7 +1321,7 @@ func (uc *UseCase) checkoutLocalGmailCodePrepared(ctx context.Context, prepared 
 				if !errors.Is(err, domain.ErrInsufficientInventory) {
 					return nil, err
 				}
-				if result, fallbackErr, handled := uc.checkoutUpstreamAfterLocalInventoryMiss(ctx, prepared, order, created); handled {
+				if result, handled, fallbackErr := uc.checkoutUpstreamAfterLocalInventoryMiss(ctx, prepared, order, created); handled {
 					return result, fallbackErr
 				}
 				failed, failErr := uc.failPendingGmailCheckout(ctx, order.OrderNo, domain.OrderFailureInsufficientInventory, "Allocation failed.")
@@ -1371,7 +1371,7 @@ func (uc *UseCase) checkoutLocalGmailCodePrepared(ctx context.Context, prepared 
 					if !errors.Is(err, domain.ErrInsufficientInventory) {
 						return nil, err
 					}
-					if result, fallbackErr, handled := uc.checkoutUpstreamAfterLocalInventoryMiss(ctx, prepared, order, created); handled {
+					if result, handled, fallbackErr := uc.checkoutUpstreamAfterLocalInventoryMiss(ctx, prepared, order, created); handled {
 						return result, fallbackErr
 					}
 					failed, refundErr := uc.compensatePaidGmailCheckout(ctx, *order, domain.OrderFailureInsufficientInventory, "Allocation failed.")
@@ -1516,7 +1516,7 @@ func (uc *UseCase) checkoutGmailPurchasePrepared(ctx context.Context, prepared c
 				return &CheckoutResult{Order: *failed, Created: created}, checkoutErrorForFailedOrder(*failed)
 			}
 			if delivery == nil {
-				return nil, errors.New("Gmail purchase allocation returned no result")
+				return nil, errors.New("gmail purchase allocation returned no result")
 			}
 			payAmount := checkoutPayAmount(order.PayAmount, delivery.SupplyScope)
 			paid, err := uc.payPendingCheckout(ctx, order.OrderNo, order.UserID, payAmount, prepared.requestID)
@@ -1563,7 +1563,7 @@ func (uc *UseCase) checkoutGmailPurchasePrepared(ctx context.Context, prepared c
 					return &CheckoutResult{Order: *failed, Created: created}, checkoutErrorForFailedOrder(*failed)
 				}
 				if delivery == nil {
-					return nil, errors.New("Gmail purchase allocation returned no result")
+					return nil, errors.New("gmail purchase allocation returned no result")
 				}
 			}
 			now := uc.now()

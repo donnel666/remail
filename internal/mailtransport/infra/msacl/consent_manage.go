@@ -676,7 +676,7 @@ func microsoftConsentRateLimitError(session *Session, statusCode int, stage stri
 	return wrapAuthError(
 		"Microsoft account authorization is temporarily rate limited.",
 		AuthStatusRateLimited,
-		newSessionTransportError(errors.New("Microsoft consent HTTP 429"), usesProxy),
+		newSessionTransportError(errors.New("microsoft consent HTTP 429"), usesProxy),
 	)
 }
 

@@ -353,12 +353,7 @@ func (s *Service) processLocalResourceValidationWith(
 	validation := validate(ctx, resource.Email, resource.AppPassword)
 	if validation.Err == nil {
 		enqueueCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		enqueueErr := s.enqueueValidatedLocalGmailHistory(enqueueCtx, localGmailHistoryTask{
-			ResourceID: task.ResourceID, OwnerUserID: task.OwnerUserID,
-			ValidationGeneration:       task.ValidationGeneration,
-			ExpectedCredentialRevision: task.ExpectedCredentialRevision,
-			RequestID:                  task.RequestID,
-		})
+		enqueueErr := s.enqueueValidatedLocalGmailHistory(enqueueCtx, localGmailHistoryTask(task))
 		cancel()
 		if enqueueErr != nil {
 			return fmt.Errorf("create validated Gmail history task: %w", ErrLocalValidationDependency)

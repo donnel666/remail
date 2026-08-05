@@ -134,11 +134,11 @@ func (s *Service) ProcessLocalGmailProjectHistory(ctx context.Context, task loca
 		return err
 	}
 	if err == nil {
-		if _, enqueueErr := s.enqueueLocalGmailProjectHistory(ctx, next); enqueueErr == nil {
+		_, enqueueErr := s.enqueueLocalGmailProjectHistory(ctx, next)
+		if enqueueErr == nil {
 			return nil
-		} else {
-			err = fmt.Errorf("%w: enqueue Gmail project history continuation: %v", errLocalGmailProjectHistoryInfrastructure, enqueueErr)
 		}
+		err = fmt.Errorf("%w: enqueue Gmail project history continuation: %v", errLocalGmailProjectHistoryInfrastructure, enqueueErr)
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
 		errors.Is(err, errLocalGmailProjectHistoryInfrastructure) {

@@ -47,10 +47,6 @@ const (
 	MaxCodes = 3
 )
 
-func isLocalResourceHealthy(status string) bool {
-	return status == LocalResourceNormal || status == localResourceRollbackNormal
-}
-
 var (
 	ErrInvalidRoute              = errors.New("gmail: invalid supply route")
 	ErrSessionMissing            = errors.New("gmail: code session not found")

@@ -157,7 +157,7 @@ func (h *handler) localResourceImport(c *gin.Context) {
 	c.JSON(http.StatusOK, toGmailResourceImportResponse(result, false))
 }
 
-func toGmailResourceImportResponse(item *GmailResourceImportStatusView, reused bool) gmailResourceImportResponse {
+func toGmailResourceImportResponse(item *ResourceImportStatusView, reused bool) gmailResourceImportResponse {
 	taskStatus := item.TaskStatus
 	if taskStatus == "" || taskStatus == "pending" || taskStatus == "uploading" {
 		taskStatus = "queued"

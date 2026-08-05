@@ -218,8 +218,8 @@ func (p *validationProxyLeasePool) Acquire(ctx context.Context, req proxyapp.Acq
 	defer p.mu.Unlock()
 	if current, ok := p.leased[key]; ok {
 		if !proxyServerIsAvoided(current.ProxyServerID, req.AvoidProxyServerIDs) {
-			copy := current
-			return &copy, nil
+			leased := current
+			return &leased, nil
 		}
 		delete(p.leased, key)
 		p.available = append(p.available, current)
@@ -235,8 +235,8 @@ func (p *validationProxyLeasePool) Acquire(ctx context.Context, req proxyapp.Acq
 		p.leased[key] = candidate
 		p.used[candidate.ID] = struct{}{}
 		p.peak = max(p.peak, len(p.leased))
-		copy := candidate
-		return &copy, nil
+		leased := candidate
+		return &leased, nil
 	}
 	return nil, errors.New("no unleased validation IPv4 proxy is available")
 }

@@ -56,7 +56,7 @@ type gmailResourceImportTask struct {
 	Generation uint64 `json:"generation"`
 }
 
-type GmailResourceImportStatusView struct {
+type ResourceImportStatusView struct {
 	ImportID      uint64
 	Status        string
 	Accepted      int
@@ -74,7 +74,7 @@ type GmailResourceImportStatusView struct {
 }
 
 type gmailResourceImportRecord struct {
-	GmailResourceImportStatusView
+	ResourceImportStatusView
 	OwnerUserID         uint
 	OperatorUserID      uint
 	SourceObjectKey     string
@@ -142,7 +142,7 @@ func (s *Service) AcceptAdminGmailTXTFile(
 	idempotencyKey string,
 	requestID string,
 	pathValue string,
-) (*GmailResourceImportStatusView, bool, error) {
+) (*ResourceImportStatusView, bool, error) {
 	if s == nil || s.redis == nil || s.queue == nil || s.files == nil {
 		return nil, false, ErrGmailImportDependency
 	}
@@ -227,7 +227,7 @@ func (s *Service) AcceptAdminGmailTXTFile(
 	return view, false, err
 }
 
-func (s *Service) GetAdminGmailResourceImport(ctx context.Context, importID uint64) (*GmailResourceImportStatusView, error) {
+func (s *Service) GetAdminGmailResourceImport(ctx context.Context, importID uint64) (*ResourceImportStatusView, error) {
 	record, err := s.gmailResourceImportRecord(ctx, importID)
 	if err != nil {
 		return nil, err
@@ -235,7 +235,7 @@ func (s *Service) GetAdminGmailResourceImport(ctx context.Context, importID uint
 	if record.Status == "accepting" {
 		return nil, ErrGmailImportDependency
 	}
-	view := record.GmailResourceImportStatusView
+	view := record.ResourceImportStatusView
 	return &view, nil
 }
 
@@ -910,7 +910,7 @@ func (s *Service) rollbackGmailResourceImportAcceptance(ctx context.Context, imp
 	return rolledBack == 1
 }
 
-func (s *Service) findGmailResourceImportByIdempotency(ctx context.Context, operatorUserID uint, idempotencyKey, fingerprint string) (*GmailResourceImportStatusView, bool, error) {
+func (s *Service) findGmailResourceImportByIdempotency(ctx context.Context, operatorUserID uint, idempotencyKey, fingerprint string) (*ResourceImportStatusView, bool, error) {
 	value, err := s.redis.Get(ctx, gmailResourceImportIdempotencyKey(operatorUserID, idempotencyKey)).Result()
 	if errors.Is(err, redis.Nil) {
 		return nil, false, nil

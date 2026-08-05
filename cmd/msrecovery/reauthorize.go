@@ -153,7 +153,7 @@ func executeHardReauthorize(
 
 	candidates, err := msacl.GenerateExplicitAliasCandidates(options.AliasCount, snapshot.AccountEmail)
 	if err != nil {
-		return result, errors.New("Microsoft alias candidates could not be generated")
+		return result, errors.New("microsoft alias candidates could not be generated")
 	}
 	raw, proxyRoute, err := executeReauthorizationWithProxy(
 		ctx,
@@ -202,7 +202,7 @@ func executeHardReauthorize(
 		proxyFailure = proxyFailure || oauthResult.ProxyFailure || msacl.IsProxyTransportError(err)
 		proxySafeError = firstCommandValue(oauthResult.SafeMessage, proxySafeError)
 		if err != nil {
-			return result, errors.New("Microsoft refresh-token exchange is temporarily unavailable")
+			return result, errors.New("microsoft refresh-token exchange is temporarily unavailable")
 		}
 		if !oauthResult.Valid {
 			result.Category = strings.TrimSpace(oauthResult.Category)
@@ -227,7 +227,7 @@ func executeHardReauthorize(
 	refreshToken := strings.TrimSpace(oauthResult.RefreshToken)
 	result.NewRefreshTokenObtained = clientID != "" && refreshToken != ""
 	if !result.NewRefreshTokenObtained {
-		return result, errors.New("Microsoft reauthorization returned incomplete OAuth credentials")
+		return result, errors.New("microsoft reauthorization returned incomplete OAuth credentials")
 	}
 	revocationCheckErr := error(nil)
 	revocationCategory := ""

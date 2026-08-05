@@ -570,7 +570,7 @@ func checkExplicitAliasPassword(session *Session, email, password, uaid, referer
 		return "", wrapAuthError(
 			fmt.Sprintf("密码验证频率受限 (429), 请 %ds 后重试", retryAfter),
 			AuthStatusRateLimited,
-			newSessionTransportError(fmt.Errorf("Microsoft web checkpassword HTTP 429"), session != nil && session.usesProxy),
+			newSessionTransportError(fmt.Errorf("microsoft web checkpassword HTTP 429"), session != nil && session.usesProxy),
 		)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
