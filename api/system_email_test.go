@@ -131,7 +131,7 @@ func TestAnnouncementPublisherSchedulesFutureBroadcastAtStartTime(t *testing.T) 
 	require.WithinDuration(t, start, tasks[0].NextProcessAt, time.Second)
 }
 
-func TestSystemLoadAlerterSendsCrossedThresholdsOnceAndDebouncesRecovery(t *testing.T) {
+func TestSystemLoadAlerterRequiresContinuousOverloadAndResetsImmediately(t *testing.T) {
 	server := miniredis.RunT(t)
 	redisClient := redis.NewClient(&redis.Options{Addr: server.Addr()})
 	t.Cleanup(func() { require.NoError(t, redisClient.Close()) })
@@ -153,39 +153,95 @@ func TestSystemLoadAlerterSendsCrossedThresholdsOnceAndDebouncesRecovery(t *test
 	}
 
 	observe(0, 100, false)
-	observe(time.Second, 79, true)
-	observe(2*time.Second, 80, true)
-	observe(3*time.Second, 94, true)
-	observe(4*time.Second, 97, true)
-	observe(5*time.Second, 97, true)
-	observe(6*time.Second, 100, true)
+	observe(time.Second, 80, true)
+	observe(10*time.Minute, 80, true)
+	require.Empty(t, delivery.messages)
 
-	require.Len(t, delivery.messages, len(systemLoadAlertThresholds)*2)
-	for i, threshold := range systemLoadAlertThresholds {
-		messages := delivery.messages[i*2 : i*2+2]
-		require.Contains(t, messages[0].Subject, fmt.Sprintf("（%d%%）", threshold))
-		require.ElementsMatch(t, []string{"root-1@example.com", "root-2@example.com"}, []string{messages[0].To, messages[1].To})
-	}
-	require.Len(t, users.filters, 4)
-	for _, filter := range users.filters {
-		require.NotNil(t, filter.Role)
-		require.Equal(t, iamdomain.RoleSuperAdmin, *filter.Role)
-		require.NotNil(t, filter.Enabled)
-		require.True(t, *filter.Enabled)
-	}
+	observe(10*time.Minute+time.Second, 79, true)
+	observe(10*time.Minute+2*time.Second, 80, true)
+	observe(20*time.Minute+time.Second, 80, true)
+	require.Empty(t, delivery.messages)
 
-	observe(7*time.Second, 79, true)
-	observe(8*time.Second, 80, true)
-	observe(9*time.Second, 79, true)
-	observe(68*time.Second, 79, true)
-	observe(69*time.Second, 80, true)
-	require.Len(t, delivery.messages, len(systemLoadAlertThresholds)*2)
+	observe(20*time.Minute+2*time.Second, 80, true)
+	require.Len(t, delivery.messages, 2)
+	require.Contains(t, delivery.messages[0].Subject, fmt.Sprintf("（%d%%）", systemLoadAlertThresholds[0]))
+	require.ElementsMatch(t, []string{"root-1@example.com", "root-2@example.com"}, []string{delivery.messages[0].To, delivery.messages[1].To})
+	require.Len(t, users.filters, 1)
+	require.Equal(t, iamdomain.RoleSuperAdmin, *users.filters[0].Role)
+	require.True(t, *users.filters[0].Enabled)
 
-	observe(70*time.Second, 79, true)
-	observe(130*time.Second, 79, true)
-	observe(131*time.Second, 80, true)
-	require.Len(t, delivery.messages, len(systemLoadAlertThresholds)*2+2)
+	observe(20*time.Minute+3*time.Second, 100, true)
+	require.Len(t, delivery.messages, 2)
+
+	observe(20*time.Minute+4*time.Second, 100, false)
+	observe(20*time.Minute+5*time.Second, 100, true)
+	observe(30*time.Minute+4*time.Second, 100, true)
+	require.Len(t, delivery.messages, 2)
+
+	observe(30*time.Minute+5*time.Second, 100, true)
+	require.Len(t, delivery.messages, 4)
+	require.Contains(t, delivery.messages[2].Subject, fmt.Sprintf("（%d%%）", systemLoadAlertThresholds[len(systemLoadAlertThresholds)-1]))
+	require.Len(t, users.filters, 2)
 	require.Equal(t, systemLoadAlertStateTTL, server.TTL(systemLoadAlertStateKey("load-host")))
+}
+
+func TestSystemLoadAlerterRenewsActiveEpisodeTTL(t *testing.T) {
+	server := miniredis.RunT(t)
+	redisClient := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { require.NoError(t, redisClient.Close()) })
+	delivery := &announcementDeliveryStub{}
+	alerter := systemLoadAlerter{
+		users:    &announcementRecipientStub{users: []iamdomain.User{{ID: 1, Email: "root@example.com", Role: iamdomain.RoleSuperAdmin, Status: iamdomain.UserStatusActive}}},
+		delivery: delivery,
+		redis:    redisClient,
+		hostname: "ttl-host",
+	}
+	base := time.Date(2026, time.July, 30, 12, 0, 0, 0, time.UTC)
+	observe := func(offset time.Duration) {
+		require.NoError(t, alerter.observe(context.Background(), platform.BackgroundLoadSnapshot{CPUPercent: 80, CPUValid: true, SampledAt: base.Add(offset)}))
+	}
+
+	observe(0)
+	observe(systemLoadAlertConfirmWindow)
+	require.Len(t, delivery.messages, 1)
+
+	server.FastForward(59 * time.Minute)
+	observe(systemLoadAlertConfirmWindow + 59*time.Minute)
+	require.Len(t, delivery.messages, 1)
+	require.Equal(t, systemLoadAlertStateTTL, server.TTL(systemLoadAlertStateKey("ttl-host")))
+
+	server.FastForward(59 * time.Minute)
+	observe(systemLoadAlertConfirmWindow + 118*time.Minute)
+	require.Len(t, delivery.messages, 1)
+	require.Equal(t, systemLoadAlertStateTTL, server.TTL(systemLoadAlertStateKey("ttl-host")))
+}
+
+func TestSystemLoadAlerterRemembersInterruptionDuringRedisBackoff(t *testing.T) {
+	server := miniredis.RunT(t)
+	redisClient := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { require.NoError(t, redisClient.Close()) })
+	delivery := &announcementDeliveryStub{}
+	alerter := systemLoadAlerter{
+		users:    &announcementRecipientStub{users: []iamdomain.User{{ID: 1, Email: "root@example.com", Role: iamdomain.RoleSuperAdmin, Status: iamdomain.UserStatusActive}}},
+		delivery: delivery,
+		redis:    redisClient,
+		hostname: "backoff-host",
+	}
+	base := time.Date(2026, time.July, 30, 12, 0, 0, 0, time.UTC)
+	observe := func(offset time.Duration, cpu float64) error {
+		return alerter.observe(context.Background(), platform.BackgroundLoadSnapshot{CPUPercent: cpu, CPUValid: true, SampledAt: base.Add(offset)})
+	}
+
+	require.NoError(t, observe(0, 80))
+	server.SetError("LOADING Redis is loading the dataset in memory")
+	require.Error(t, observe(5*time.Minute, 80))
+	server.SetError("")
+	require.NoError(t, observe(5*time.Minute+10*time.Second, 79))
+
+	require.NoError(t, observe(10*time.Minute, 80))
+	require.Empty(t, delivery.messages)
+	require.NoError(t, observe(20*time.Minute, 80))
+	require.Len(t, delivery.messages, 1)
 }
 
 func TestSystemLoadAlerterRetriesTheSameEventAfterBackoffAndAcrossRestart(t *testing.T) {
@@ -200,22 +256,24 @@ func TestSystemLoadAlerterRetriesTheSameEventAfterBackoffAndAcrossRestart(t *tes
 		return platform.BackgroundLoadSnapshot{CPUPercent: 80, CPUValid: true, SampledAt: base.Add(offset)}
 	}
 
-	require.Error(t, first.observe(context.Background(), snapshot(0)))
+	require.NoError(t, first.observe(context.Background(), snapshot(0)))
+	require.Empty(t, firstDelivery.messages)
+	require.Error(t, first.observe(context.Background(), snapshot(systemLoadAlertConfirmWindow)))
 	require.Len(t, firstDelivery.messages, 1)
-	require.NoError(t, first.observe(context.Background(), snapshot(30*time.Second)))
+	require.NoError(t, first.observe(context.Background(), snapshot(systemLoadAlertConfirmWindow+30*time.Second)))
 	require.Len(t, firstDelivery.messages, 1)
 
 	secondDelivery := &announcementDeliveryStub{}
 	second := systemLoadAlerter{users: users, delivery: secondDelivery, redis: redisClient, hostname: "retry-host"}
-	require.NoError(t, second.observe(context.Background(), snapshot(30*time.Second)))
+	require.NoError(t, second.observe(context.Background(), snapshot(systemLoadAlertConfirmWindow+30*time.Second)))
 	require.Empty(t, secondDelivery.messages)
-	require.NoError(t, second.observe(context.Background(), snapshot(time.Minute)))
+	require.NoError(t, second.observe(context.Background(), snapshot(systemLoadAlertConfirmWindow+time.Minute)))
 	require.Len(t, secondDelivery.messages, 1)
 	require.Equal(t, firstDelivery.messages[0], secondDelivery.messages[0])
 
 	thirdDelivery := &announcementDeliveryStub{}
 	third := systemLoadAlerter{users: users, delivery: thirdDelivery, redis: redisClient, hostname: "retry-host"}
-	require.NoError(t, third.observe(context.Background(), snapshot(time.Minute+time.Second)))
+	require.NoError(t, third.observe(context.Background(), snapshot(systemLoadAlertConfirmWindow+time.Minute+time.Second)))
 	require.Empty(t, thirdDelivery.messages)
 	require.Equal(t, systemLoadAlertStateTTL, server.TTL(systemLoadAlertStateKey("retry-host")))
 
@@ -223,6 +281,8 @@ func TestSystemLoadAlerterRetriesTheSameEventAfterBackoffAndAcrossRestart(t *tes
 	fourthDelivery := &announcementDeliveryStub{}
 	fourth := systemLoadAlerter{users: users, delivery: fourthDelivery, redis: redisClient, hostname: "retry-host"}
 	require.NoError(t, fourth.observe(context.Background(), snapshot(2*time.Hour)))
+	require.Empty(t, fourthDelivery.messages)
+	require.NoError(t, fourth.observe(context.Background(), snapshot(2*time.Hour+systemLoadAlertConfirmWindow)))
 	require.Len(t, fourthDelivery.messages, 1)
 }
 
@@ -238,13 +298,15 @@ func TestSystemLoadAlerterBacksOffSuperAdminQueries(t *testing.T) {
 		return alerter.observe(context.Background(), platform.BackgroundLoadSnapshot{CPUPercent: 80, CPUValid: true, SampledAt: base.Add(offset)})
 	}
 
-	require.Error(t, observe(0))
-	require.NoError(t, observe(2*time.Second))
-	require.NoError(t, observe(59*time.Second))
+	require.NoError(t, observe(0))
+	require.Empty(t, users.filters)
+	require.Error(t, observe(systemLoadAlertConfirmWindow))
+	require.NoError(t, observe(systemLoadAlertConfirmWindow+2*time.Second))
+	require.NoError(t, observe(systemLoadAlertConfirmWindow+59*time.Second))
 	require.Len(t, users.filters, 1)
 	users.err = nil
 	users.users = []iamdomain.User{{ID: 1, Email: "root@example.com", Role: iamdomain.RoleSuperAdmin, Status: iamdomain.UserStatusActive}}
-	require.NoError(t, observe(time.Minute))
+	require.NoError(t, observe(systemLoadAlertConfirmWindow+time.Minute))
 	require.Len(t, users.filters, 2)
 	require.Len(t, delivery.messages, 1)
 }

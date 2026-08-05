@@ -118,11 +118,11 @@ func SystemLoadAlertMessage(recipient, hostname, episodeID string, threshold int
 		recipient,
 		fmt.Sprintf("ReMail 系统负载告警（%d%%）", threshold),
 		"系统负载告警",
-		"服务器 CPU 使用率已达到或超过告警阈值。",
+		"服务器 CPU 使用率已连续 10 分钟处于过载状态，当前达到或超过告警阈值。",
 		notificationDetailsText(details),
 		notificationTableContentTemplate,
 		details,
-		"同一轮高负载中，每个告警档位仅通知一次；CPU 持续低于 80% 一分钟后重新计数。",
+		"CPU 连续达到 80% 满 10 分钟后才通知；同一轮连续过载仅通知一次；任一次低于 80% 或 CPU 采样无效后重新计时。",
 	)
 }
 

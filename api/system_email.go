@@ -24,8 +24,8 @@ const typeAnnouncementBroadcast = "system:announcement_broadcast"
 
 const (
 	systemLoadAlertInterval        = 2 * time.Second
+	systemLoadAlertConfirmWindow   = 10 * time.Minute
 	systemLoadAlertRetryInterval   = time.Minute
-	systemLoadAlertRecoveryWindow  = time.Minute
 	systemLoadAlertStateTTL        = time.Hour
 	systemLoadAlertLeaseTTL        = time.Minute
 	systemLoadAlertRefreshInterval = time.Minute
@@ -59,14 +59,14 @@ type systemLoadAlerter struct {
 	cached       systemLoadAlertState
 	refreshAt    time.Time
 	redisRetryAt time.Time
+	interrupted  bool
 }
 
 type systemLoadAlertState struct {
-	EpisodeID        string                 `json:"episodeId,omitempty"`
-	HighestThreshold int                    `json:"highestThreshold,omitempty"`
-	RecoverySince    time.Time              `json:"recoverySince,omitempty"`
-	NextRetryAt      time.Time              `json:"nextRetryAt,omitempty"`
-	Pending          []systemLoadAlertEvent `json:"pending,omitempty"`
+	EpisodeID     string                 `json:"episodeId,omitempty"`
+	ExceededSince time.Time              `json:"exceededSince,omitempty"`
+	NextRetryAt   time.Time              `json:"nextRetryAt,omitempty"`
+	Pending       []systemLoadAlertEvent `json:"pending,omitempty"`
 }
 
 type systemLoadAlertEvent struct {
@@ -129,6 +129,10 @@ func (a *systemLoadAlerter) observe(ctx context.Context, snapshot platform.Backg
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if (!snapshot.CPUValid || snapshot.CPUPercent < float64(systemLoadAlertThresholds[0])) &&
+		(a.cached.EpisodeID != "" || !a.cached.ExceededSince.IsZero()) {
+		a.interrupted = true
+	}
 	if !a.shouldRefresh(snapshot, observedAt) {
 		return nil
 	}
@@ -163,18 +167,23 @@ func (a *systemLoadAlerter) observe(ctx context.Context, snapshot platform.Backg
 		a.redisRetryAt = observedAt.Add(systemLoadAlertRetryInterval)
 		return err
 	}
-	changed := state.apply(snapshot, observedAt)
+	changed := false
+	if a.interrupted {
+		changed = state.resetEpisode()
+	}
+	changed = state.apply(snapshot, observedAt) || changed
 	ready := len(state.Pending) > 0 && (state.NextRetryAt.IsZero() || !observedAt.Before(state.NextRetryAt))
 	if ready {
 		state.NextRetryAt = observedAt.Add(systemLoadAlertRetryInterval)
 		changed = true
 	}
-	if changed {
+	if changed || state.EpisodeID != "" || !state.ExceededSince.IsZero() || len(state.Pending) > 0 {
 		if err := storeSystemLoadAlertState(ctx, a.redis, stateKey, state); err != nil {
 			a.redisRetryAt = observedAt.Add(systemLoadAlertRetryInterval)
 			return err
 		}
 	}
+	a.interrupted = false
 	a.cache(state, observedAt)
 	if !ready {
 		return nil
@@ -225,19 +234,22 @@ func (a *systemLoadAlerter) shouldRefresh(snapshot platform.BackgroundLoadSnapsh
 	if !a.redisRetryAt.IsZero() && observedAt.Before(a.redisRetryAt) {
 		return false
 	}
+	if a.interrupted {
+		return true
+	}
 	if !a.initialized || !observedAt.Before(a.refreshAt) {
 		return true
 	}
 	if len(a.cached.Pending) > 0 && (a.cached.NextRetryAt.IsZero() || !observedAt.Before(a.cached.NextRetryAt)) {
 		return true
 	}
-	if !snapshot.CPUValid {
-		return !a.cached.RecoverySince.IsZero()
+	if !snapshot.CPUValid || snapshot.CPUPercent < float64(systemLoadAlertThresholds[0]) {
+		return a.cached.EpisodeID != "" || !a.cached.ExceededSince.IsZero()
 	}
-	if snapshot.CPUPercent >= float64(systemLoadAlertThresholds[0]) {
-		return !a.cached.RecoverySince.IsZero() || systemLoadAlertThreshold(snapshot.CPUPercent) > a.cached.HighestThreshold
+	if a.cached.EpisodeID != "" {
+		return false
 	}
-	return a.cached.EpisodeID != "" && (a.cached.RecoverySince.IsZero() || !observedAt.Before(a.cached.RecoverySince.Add(systemLoadAlertRecoveryWindow)))
+	return a.cached.ExceededSince.IsZero() || !observedAt.Before(a.cached.ExceededSince.Add(systemLoadAlertConfirmWindow))
 }
 
 func (a *systemLoadAlerter) cache(state systemLoadAlertState, observedAt time.Time) {
@@ -248,56 +260,40 @@ func (a *systemLoadAlerter) cache(state systemLoadAlertState, observedAt time.Ti
 }
 
 func (s *systemLoadAlertState) apply(snapshot platform.BackgroundLoadSnapshot, observedAt time.Time) bool {
-	if !snapshot.CPUValid {
-		if s.RecoverySince.IsZero() {
-			return false
-		}
-		s.RecoverySince = time.Time{}
+	if !snapshot.CPUValid || snapshot.CPUPercent < float64(systemLoadAlertThresholds[0]) {
+		return s.resetEpisode()
+	}
+	if s.EpisodeID != "" {
+		return false
+	}
+	if s.ExceededSince.IsZero() {
+		s.ExceededSince = observedAt
 		return true
 	}
-	if snapshot.CPUPercent < float64(systemLoadAlertThresholds[0]) {
-		if s.EpisodeID == "" {
-			return false
-		}
-		if s.RecoverySince.IsZero() {
-			s.RecoverySince = observedAt
-			return true
-		}
-		if observedAt.Before(s.RecoverySince.Add(systemLoadAlertRecoveryWindow)) {
-			return false
-		}
-		s.EpisodeID = ""
-		s.HighestThreshold = 0
-		s.RecoverySince = time.Time{}
-		return true
+	if observedAt.Before(s.ExceededSince.Add(systemLoadAlertConfirmWindow)) {
+		return false
 	}
+	s.EpisodeID = platform.NewUUIDV7String()
+	s.ExceededSince = time.Time{}
+	threshold := systemLoadAlertThreshold(snapshot.CPUPercent)
+	s.Pending = append(s.Pending, systemLoadAlertEvent{
+		EpisodeID:     s.EpisodeID,
+		Threshold:     threshold,
+		CPUPercent:    snapshot.CPUPercent,
+		MemoryPercent: snapshot.MemoryPercent,
+		MemoryValid:   snapshot.MemoryValid,
+		ObservedAt:    observedAt,
+	})
+	return true
+}
 
-	changed := false
-	if !s.RecoverySince.IsZero() {
-		s.RecoverySince = time.Time{}
-		changed = true
+func (s *systemLoadAlertState) resetEpisode() bool {
+	if s.EpisodeID == "" && s.ExceededSince.IsZero() {
+		return false
 	}
-	if s.EpisodeID == "" {
-		s.EpisodeID = platform.NewUUIDV7String()
-		s.HighestThreshold = 0
-		changed = true
-	}
-	for _, threshold := range systemLoadAlertThresholds {
-		if threshold <= s.HighestThreshold || snapshot.CPUPercent < float64(threshold) {
-			continue
-		}
-		s.Pending = append(s.Pending, systemLoadAlertEvent{
-			EpisodeID:     s.EpisodeID,
-			Threshold:     threshold,
-			CPUPercent:    snapshot.CPUPercent,
-			MemoryPercent: snapshot.MemoryPercent,
-			MemoryValid:   snapshot.MemoryValid,
-			ObservedAt:    observedAt,
-		})
-		s.HighestThreshold = threshold
-		changed = true
-	}
-	return changed
+	s.EpisodeID = ""
+	s.ExceededSince = time.Time{}
+	return true
 }
 
 func systemLoadAlertThreshold(cpuPercent float64) int {

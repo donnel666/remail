@@ -374,30 +374,26 @@ func (r *allocationLockRepo) ListMicrosoftSourceCandidates(_ context.Context, _ 
 	return r.candidates, nil
 }
 
-func TestSpecifiedSuffixFallsBackAfterFirstEmptyBucket(t *testing.T) {
-	firstBucket := bucketProbeSequence("order-1", 4, string(domain.MicrosoftMailboxPlus), MicrosoftBucketCount)[0]
-	tests := []struct {
-		name        string
-		emailSuffix string
-		wantGlobal  bool
-	}{
-		{name: "specified suffix", emailSuffix: "example.com", wantGlobal: true},
-		{name: "random suffix", wantGlobal: false},
+func TestSpecifiedSuffixProbesEveryBucketBeforeGlobalFallback(t *testing.T) {
+	buckets := bucketProbeSequence("order-1", 4, string(domain.MicrosoftMailboxPlus), MicrosoftBucketCount)
+	emptyBuckets := make(map[uint16]bool, len(buckets))
+	wantBuckets := make([]int, 0, len(buckets)+1)
+	for _, bucket := range buckets {
+		emptyBuckets[bucket] = true
+		wantBuckets = append(wantBuckets, int(bucket))
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			repo := &allocationLockRepo{emptyBuckets: map[uint16]bool{firstBucket: true}}
-			result, err := NewUseCase(repo).Allocate(context.Background(), AllocateCommand{
-				OrderNo: "order-1", BuyerUserID: 3, ProjectProductID: 5, EmailSuffix: tt.emailSuffix,
-			})
+	wantBuckets = append(wantBuckets, -1)
 
-			if err != nil || result == nil {
-				t.Fatalf("Allocate() result = %#v, error = %v; want success", result, err)
-			}
-			if len(repo.listedBuckets) != 2 || (repo.listedBuckets[1] == -1) != tt.wantGlobal {
-				t.Fatalf("listed buckets = %v, want second query global = %v", repo.listedBuckets, tt.wantGlobal)
-			}
-		})
+	repo := &allocationLockRepo{emptyBuckets: emptyBuckets}
+	result, err := NewUseCase(repo).Allocate(context.Background(), AllocateCommand{
+		OrderNo: "order-1", BuyerUserID: 3, ProjectProductID: 5, EmailSuffix: "example.com",
+	})
+
+	if err != nil || result == nil {
+		t.Fatalf("Allocate() result = %#v, error = %v; want success", result, err)
+	}
+	if !slices.Equal(repo.listedBuckets, wantBuckets) {
+		t.Fatalf("listed buckets = %v, want all configured probes then global %v", repo.listedBuckets, wantBuckets)
 	}
 }
 
