@@ -75,9 +75,8 @@ type microsoftAutoRefreshLister interface {
 }
 
 const (
-	// microsoftBindingRecoveryHistoryWindow lets the validation safeguard use
-	// older inbound Microsoft security-mail evidence when reconstructing a
-	// recovery mailbox. Exact OTP List queries are unaffected by this window.
+	// microsoftBindingRecoveryHistoryWindow bounds exact mailbox reads. Masked
+	// OTP recovery uses its own per-attempt window and never scans this history.
 	microsoftBindingRecoveryHistoryWindow = 90 * 24 * time.Hour
 
 	// auxiliaryDomainRefreshInterval controls how often the binding-domain list

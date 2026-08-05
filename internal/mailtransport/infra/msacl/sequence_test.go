@@ -412,7 +412,11 @@ func (*sequencedMailboxReader) SearchByContent(context.Context, string, int) ([]
 }
 
 type maskedSequenceMailboxReader struct {
-	sent atomic.Bool
+	sent          atomic.Bool
+	metadataCalls atomic.Int32
+	bodyCalls     atomic.Int32
+	afterID       atomic.Uint64
+	sinceSet      atomic.Bool
 }
 
 func (*maskedSequenceMailboxReader) List(context.Context, string, int, bool) ([]EmailObj, error) {
@@ -423,7 +427,16 @@ func (*maskedSequenceMailboxReader) SearchByContent(context.Context, string, int
 	return nil, nil
 }
 
-func (r *maskedSequenceMailboxReader) ListMasked(context.Context, string, int) ([]EmailObj, error) {
+func (r *maskedSequenceMailboxReader) ListMasked(_ context.Context, _ string, query MaskedMailboxQuery) ([]EmailObj, error) {
+	if !query.Since.IsZero() {
+		r.sinceSet.Store(true)
+	}
+	if !query.LoadBody {
+		r.metadataCalls.Add(1)
+		return []EmailObj{{ID: 1, To: "xbaseline9@aishop6.com"}}, nil
+	}
+	r.bodyCalls.Add(1)
+	r.afterID.Store(query.AfterID)
 	if !r.sent.Load() {
 		return nil, nil
 	}
@@ -528,6 +541,10 @@ func TestOTPSequenceFallsBackToMaskedRecipientRecovery(t *testing.T) {
 	_, _, mailbox, err := handleOTPVerification(session, page, "https://account.live.com/identity/confirm", "owner@example.com", "", nil, "")
 	require.NoError(t, err)
 	require.Equal(t, "xrandom9@aishop6.com", mailbox)
+	require.True(t, reader.sinceSet.Load())
+	require.EqualValues(t, 1, reader.metadataCalls.Load())
+	require.GreaterOrEqual(t, reader.bodyCalls.Load(), int32(1))
+	require.EqualValues(t, 1, reader.afterID.Load())
 	client.requireDone()
 }
 

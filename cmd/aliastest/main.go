@@ -25,6 +25,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/base64"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -51,6 +52,9 @@ type dbReader struct {
 	bucket string
 }
 
+var _ msacl.MailboxReader = (*dbReader)(nil)
+var _ msacl.MaskedMailboxReader = (*dbReader)(nil)
+
 func (r *dbReader) List(ctx context.Context, mailbox string, limit int, fuzzy bool) ([]msacl.EmailObj, error) {
 	mailbox = strings.ToLower(strings.TrimSpace(mailbox))
 	if mailbox == "" {
@@ -68,7 +72,42 @@ func (r *dbReader) List(ctx context.Context, mailbox string, limit int, fuzzy bo
 	q := "SELECT id, recipient, subject, body_preview, verification_code, source_object_key, header_from, parsed_at " +
 		"FROM inbound_mails WHERE " + where + " AND status IN ('pending','processing','stored') " +
 		"ORDER BY created_at DESC, id DESC LIMIT ?"
-	rows, err := r.db.QueryContext(ctx, q, arg, limit)
+	return r.queryEmails(ctx, q, true, arg, limit)
+}
+
+func (r *dbReader) ListMasked(ctx context.Context, maskedMailbox string, query msacl.MaskedMailboxQuery) ([]msacl.EmailObj, error) {
+	local, domain, ok := strings.Cut(strings.ToLower(strings.TrimSpace(maskedMailbox)), "@")
+	firstStar := strings.Index(local, "*")
+	lastStar := strings.LastIndex(local, "*")
+	if !ok || firstStar <= 0 || domain == "" {
+		return nil, nil
+	}
+	if query.Since.IsZero() {
+		return nil, errors.New("masked mailbox query requires since")
+	}
+	if query.Limit <= 0 || query.Limit > 50 {
+		query.Limit = 50
+	}
+	pattern := escapeMailboxLike(local[:firstStar]) + "%" + escapeMailboxLike(local[lastStar+1:]+"@"+domain)
+	q := "SELECT id, recipient, subject, body_preview, verification_code, source_object_key, header_from, parsed_at " +
+		"FROM inbound_mails FORCE INDEX (idx_inbound_mails_status_created) " +
+		"WHERE status IN ('pending','processing','stored') AND created_at >= ? AND recipient LIKE ? ESCAPE '!'"
+	args := []any{query.Since.UTC(), pattern}
+	if query.AfterID > 0 {
+		q += " AND id > ?"
+		args = append(args, query.AfterID)
+	}
+	q += " ORDER BY created_at DESC, id DESC LIMIT ?"
+	args = append(args, query.Limit)
+	return r.queryEmails(ctx, q, query.LoadBody, args...)
+}
+
+func escapeMailboxLike(value string) string {
+	return strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(value)
+}
+
+func (r *dbReader) queryEmails(ctx context.Context, query string, loadBody bool, args ...any) ([]msacl.EmailObj, error) {
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -82,8 +121,9 @@ func (r *dbReader) List(ctx context.Context, mailbox string, limit int, fuzzy bo
 			return nil, err
 		}
 		e := msacl.EmailObj{ID: id, Subject: subject, Preview: preview, VerificationCode: vcode, To: recipient, From: from}
-		// If not parsed yet, pull raw .eml from MinIO and parse.
-		if !parsedAt.Valid || (subject == "" && preview == "") {
+		// Snapshot queries only need the row ID and SMTP recipient. Avoid pulling
+		// historical raw messages from MinIO until a new candidate needs a code.
+		if loadBody && (!parsedAt.Valid || (subject == "" && preview == "")) {
 			if raw, rerr := r.readObject(ctx, key); rerr == nil {
 				s, f, b := parseEML(raw)
 				if s != "" {
@@ -100,10 +140,6 @@ func (r *dbReader) List(ctx context.Context, mailbox string, limit int, fuzzy bo
 		out = append(out, e)
 	}
 	return out, rows.Err()
-}
-
-func (r *dbReader) SearchByContent(_ context.Context, _ string, _ int) ([]msacl.EmailObj, error) {
-	return nil, nil // not needed for OTC login
 }
 
 func (r *dbReader) readObject(ctx context.Context, key string) ([]byte, error) {

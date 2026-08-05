@@ -16,6 +16,10 @@ type fakeMailboxReader struct {
 
 type failingMailboxReader struct{}
 
+type listOnlyMailboxReader struct {
+	calls atomic.Int32
+}
+
 func (failingMailboxReader) List(context.Context, string, int, bool) ([]EmailObj, error) {
 	return nil, errors.New("mailbox unavailable")
 }
@@ -39,6 +43,27 @@ func (r *fakeMailboxReader) List(_ context.Context, mailbox string, _ int, _ boo
 
 func (r *fakeMailboxReader) SearchByContent(context.Context, string, int) ([]EmailObj, error) {
 	return nil, nil
+}
+
+func (r *listOnlyMailboxReader) List(context.Context, string, int, bool) ([]EmailObj, error) {
+	r.calls.Add(1)
+	return nil, nil
+}
+
+func TestMailListMaskedRejectsReaderWithoutSafeMaskedQuery(t *testing.T) {
+	previousReader := activeMailboxReader()
+	defer SetMailboxReader(previousReader)
+	reader := &listOnlyMailboxReader{}
+	SetMailboxReader(reader)
+
+	emails, err := mailListMasked(context.Background(), "qa*****1@recovery.test", MaskedMailboxQuery{
+		Since: time.Now().UTC().Add(-time.Minute),
+		Limit: 50,
+	})
+
+	require.Error(t, err)
+	require.Empty(t, emails)
+	require.Zero(t, reader.calls.Load())
 }
 
 func TestMailWaitCodeUsesLateArrivalGrace(t *testing.T) {

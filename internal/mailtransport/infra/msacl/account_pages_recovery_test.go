@@ -8,160 +8,32 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type recoveryEvidenceReader struct {
-	mailboxes []string
+type lookupHistoryReader struct {
+	calls int
 }
 
-func (r recoveryEvidenceReader) List(context.Context, string, int, bool) ([]EmailObj, error) {
-	return recoveryEvidenceEmails(r.mailboxes), nil
+func (*lookupHistoryReader) List(context.Context, string, int, bool) ([]EmailObj, error) {
+	return nil, nil
 }
 
-func (r recoveryEvidenceReader) SearchByContent(context.Context, string, int) ([]EmailObj, error) {
-	return recoveryEvidenceEmails(r.mailboxes), nil
+func (r *lookupHistoryReader) ListMasked(context.Context, string, MaskedMailboxQuery) ([]EmailObj, error) {
+	r.calls++
+	return nil, nil
 }
 
-func recoveryEvidenceEmails(mailboxes []string) []EmailObj {
-	items := make([]EmailObj, 0, len(mailboxes))
-	for index, mailbox := range mailboxes {
-		items = append(items, EmailObj{ID: index + 1, To: mailbox})
-	}
-	return items
-}
-
-type accountLocalEvidenceReader struct {
-	exact   []EmailObj
-	content []EmailObj
-}
-
-func (r accountLocalEvidenceReader) List(context.Context, string, int, bool) ([]EmailObj, error) {
-	return append([]EmailObj(nil), r.exact...), nil
-}
-
-func (r accountLocalEvidenceReader) SearchByContent(context.Context, string, int) ([]EmailObj, error) {
-	return append([]EmailObj(nil), r.content...), nil
-}
-
-func TestLookupRealMailboxRequiresUniqueHistoricalEvidence(t *testing.T) {
+func TestLookupRealMailboxDoesNotReadStaleMailboxHistory(t *testing.T) {
 	previousReader := activeMailboxReader()
+	previousDomains := activeAuxiliaryDomains()
 	defer SetMailboxReader(previousReader)
-	defer SetAuxiliaryDomains([]string{"aishop6.com"})
+	defer SetAuxiliaryDomains(previousDomains)
+	reader := &lookupHistoryReader{}
+	SetMailboxReader(reader)
 	SetAuxiliaryDomains([]string{"recovery.test"})
 
-	SetMailboxReader(recoveryEvidenceReader{mailboxes: []string{
-		"qalpha01@recovery.test",
-		"qanother@recovery.test",
-	}})
-	resolved := lookupRealMailbox(
-		context.Background(),
-		"qa*****@recovery.test",
-		"owner@example.test",
-		"",
-		"",
-	)
+	resolved := lookupRealMailbox(context.Background(), "q*****9@recovery.test", "owner@example.test", "", "")
+
 	require.Empty(t, resolved)
-
-	SetMailboxReader(recoveryEvidenceReader{mailboxes: []string{"qalpha01@recovery.test"}})
-	resolved = lookupRealMailbox(
-		context.Background(),
-		"qa*****@recovery.test",
-		"owner@example.test",
-		"",
-		"",
-	)
-	require.Equal(t, "qalpha01@recovery.test", resolved)
-}
-
-func TestLookupRealMailboxDeduplicatesRepeatedHistoricalAddress(t *testing.T) {
-	previousReader := activeMailboxReader()
-	defer SetMailboxReader(previousReader)
-	defer SetAuxiliaryDomains([]string{"aishop6.com"})
-	SetAuxiliaryDomains([]string{"recovery.test"})
-	SetMailboxReader(recoveryEvidenceReader{mailboxes: []string{
-		"qalpha01@recovery.test",
-		"QALPHA01@RECOVERY.TEST",
-		" qalpha01@recovery.test ",
-	}})
-
-	resolved := lookupRealMailbox(
-		context.Background(),
-		"qa*****@recovery.test",
-		"owner@example.test",
-		"",
-		"",
-	)
-	require.Equal(t, "qalpha01@recovery.test", resolved)
-}
-
-func TestLookupRealMailboxPrefersAccountLocalMailboxWithExactAccountEvidence(t *testing.T) {
-	previousReader := activeMailboxReader()
-	defer SetMailboxReader(previousReader)
-	defer SetAuxiliaryDomains([]string{"aishop6.com"})
-	SetAuxiliaryDomains([]string{"recovery.test"})
-	SetMailboxReader(accountLocalEvidenceReader{
-		exact: []EmailObj{{
-			To:      "brittanycoleman1901@recovery.test",
-			Preview: "Security code for br*****1@outlook.com",
-		}},
-		content: []EmailObj{
-			{To: "brandonking4691@recovery.test"},
-			{To: "brittanycoleman1901@recovery.test"},
-		},
-	})
-
-	resolved := lookupRealMailbox(
-		context.Background(),
-		"br*****@recovery.test",
-		"brittanycoleman1901@outlook.com",
-		"",
-		"",
-	)
-	require.Equal(t, "brittanycoleman1901@recovery.test", resolved)
-}
-
-func TestLookupRealMailboxUsesAccountLocalRuleWithoutHistoricalEvidence(t *testing.T) {
-	previousReader := activeMailboxReader()
-	defer SetMailboxReader(previousReader)
-	defer SetAuxiliaryDomains([]string{"aishop6.com"})
-	SetAuxiliaryDomains([]string{"recovery.test"})
-	SetMailboxReader(accountLocalEvidenceReader{
-		exact: []EmailObj{{
-			To:      "brittanycoleman1901@recovery.test",
-			Preview: "Security code for another account",
-		}},
-		content: []EmailObj{
-			{To: "brandonking4691@recovery.test"},
-			{To: "brittanycoleman1901@recovery.test"},
-		},
-	})
-
-	resolved := lookupRealMailbox(
-		context.Background(),
-		"br*****@recovery.test",
-		"brittanycoleman1901@outlook.com",
-		"",
-		"",
-	)
-	require.Equal(t, "brittanycoleman1901@recovery.test", resolved)
-}
-
-func TestLookupRealMailboxCountsOnlyFullMaskMatches(t *testing.T) {
-	previousReader := activeMailboxReader()
-	defer SetMailboxReader(previousReader)
-	defer SetAuxiliaryDomains([]string{"aishop6.com"})
-	SetAuxiliaryDomains([]string{"recovery.test"})
-	SetMailboxReader(recoveryEvidenceReader{mailboxes: []string{
-		"qalpha01@recovery.test",
-		"qanother@recovery.test",
-	}})
-
-	resolved := lookupRealMailbox(
-		context.Background(),
-		"qa*****1@recovery.test",
-		"owner@example.test",
-		"",
-		"",
-	)
-	require.Equal(t, "qalpha01@recovery.test", resolved)
+	require.Zero(t, reader.calls)
 }
 
 func TestLookupRealMailboxPrefersInferenceOverHistoricalEvidence(t *testing.T) {
@@ -176,7 +48,8 @@ func TestLookupRealMailboxPrefersInferenceOverHistoricalEvidence(t *testing.T) {
 	require.True(t, ok)
 	require.GreaterOrEqual(t, len(local), 2)
 	historical := local[:2] + "historical@recovery.test"
-	SetMailboxReader(recoveryEvidenceReader{mailboxes: []string{historical}})
+	reader := &lookupHistoryReader{}
+	SetMailboxReader(reader)
 
 	resolved := lookupRealMailbox(
 		context.Background(),
@@ -187,6 +60,7 @@ func TestLookupRealMailboxPrefersInferenceOverHistoricalEvidence(t *testing.T) {
 	)
 	require.Equal(t, generated, resolved)
 	require.NotEqual(t, historical, resolved)
+	require.Zero(t, reader.calls)
 }
 
 func TestInferBindingAddressChecksDeterministicThenResourcePrefix(t *testing.T) {
@@ -207,7 +81,7 @@ func TestLookupRealMailboxDoesNotTreatMaskedPreferredAddressAsConcrete(t *testin
 	previousDomains := activeAuxiliaryDomains()
 	defer SetMailboxReader(previousReader)
 	defer SetAuxiliaryDomains(previousDomains)
-	SetMailboxReader(recoveryEvidenceReader{})
+	SetMailboxReader(&lookupHistoryReader{})
 	SetAuxiliaryDomains([]string{"recovery.test"})
 
 	resolved := lookupRealMailbox(
@@ -230,7 +104,7 @@ func TestLookupRealMailboxRejectsExternalPreferredAddress(t *testing.T) {
 	previousDomains := activeAuxiliaryDomains()
 	defer SetMailboxReader(previousReader)
 	defer SetAuxiliaryDomains(previousDomains)
-	SetMailboxReader(recoveryEvidenceReader{})
+	SetMailboxReader(&lookupHistoryReader{})
 	SetAuxiliaryDomains([]string{"recovery.test"})
 
 	resolved := lookupRealMailbox(

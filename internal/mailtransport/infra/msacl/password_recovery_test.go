@@ -336,7 +336,10 @@ func (*maskedPasswordRecoveryReader) SearchByContent(context.Context, string, in
 	return nil, nil
 }
 
-func (r *maskedPasswordRecoveryReader) ListMasked(context.Context, string, int) ([]EmailObj, error) {
+func (r *maskedPasswordRecoveryReader) ListMasked(_ context.Context, _ string, query MaskedMailboxQuery) ([]EmailObj, error) {
+	if !query.LoadBody {
+		return []EmailObj{{ID: 1, To: "qbaseline01@recovery.test"}}, nil
+	}
 	if !r.sent.Load() {
 		return nil, nil
 	}

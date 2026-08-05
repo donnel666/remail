@@ -33,10 +33,9 @@ func NewMSACLMailboxReader(db *gorm.DB, files governanceapp.FilePort) *MSACLMail
 	return NewMSACLMailboxReaderWithContentWindow(db, files, msaclContentSearchWindow)
 }
 
-// NewMSACLMailboxReaderWithContentWindow creates a mailbox reader whose
-// content lookup may inspect older inbound evidence. Callers choose the bounded
-// window explicitly; NewMSACLMailboxReader retains the historical ten-minute
-// default.
+// NewMSACLMailboxReaderWithContentWindow creates a mailbox reader whose exact
+// recipient lookup may inspect older inbound evidence. Masked OTP lookups pass
+// their own per-attempt window.
 func NewMSACLMailboxReaderWithContentWindow(db *gorm.DB, files governanceapp.FilePort, window time.Duration) *MSACLMailboxReader {
 	if window <= 0 {
 		window = msaclContentSearchWindow
@@ -56,7 +55,9 @@ func (r *MSACLMailboxReader) List(ctx context.Context, mailbox string, limit int
 		limit = 50
 	}
 
-	query := r.db.WithContext(ctx).Model(&InboundMailModel{}).Where("status IN ?", msaclReadableInboundStatuses())
+	query := r.db.WithContext(ctx).Model(&InboundMailModel{}).
+		Where("status IN ?", msaclReadableInboundStatuses()).
+		Where("created_at >= ?", r.lookupSince())
 	if fuzzy && !strings.Contains(mailbox, "@") {
 		query = query.Where("recipient LIKE ?", mailbox+"%")
 	} else {
@@ -70,80 +71,57 @@ func (r *MSACLMailboxReader) List(ctx context.Context, mailbox string, limit int
 	return r.rowsToEmailObjects(ctx, rows)
 }
 
-func (r *MSACLMailboxReader) SearchByContent(ctx context.Context, content string, limit int) ([]msacl.EmailObj, error) {
-	content = strings.ToLower(strings.Trim(strings.TrimSpace(content), "%"))
-	if content == "" {
+func (r *MSACLMailboxReader) ListMasked(ctx context.Context, maskedMailbox string, query msacl.MaskedMailboxQuery) ([]msacl.EmailObj, error) {
+	local, domainName, ok := strings.Cut(strings.ToLower(strings.TrimSpace(maskedMailbox)), "@")
+	firstStar := strings.Index(local, "*")
+	lastStar := strings.LastIndex(local, "*")
+	if !ok || firstStar <= 0 || domainName == "" {
 		return nil, nil
 	}
-	if limit <= 0 {
-		limit = 20
+	if query.Since.IsZero() {
+		return nil, fmt.Errorf("list masked inbound mailbox: since is required")
 	}
-	if limit > 50 {
-		limit = 50
+	if query.Limit <= 0 || query.Limit > 50 {
+		query.Limit = 50
 	}
+	pattern := escapeMSACLLike(local[:firstStar]) + "%" + escapeMSACLLike(local[lastStar+1:]+"@"+domainName)
+	columns := "*"
+	if !query.LoadBody {
+		columns = "id, recipient, received_at, status, created_at"
+	}
+	statement := "SELECT " + columns + `
+FROM inbound_mails FORCE INDEX (idx_inbound_mails_status_created)
+WHERE status IN ?
+  AND created_at >= ?
+  AND recipient LIKE ? ESCAPE '!'`
+	args := []any{msaclReadableInboundStatuses(), query.Since.UTC(), pattern}
+	if query.AfterID > 0 {
+		statement += "\n  AND id > ?"
+		args = append(args, query.AfterID)
+	}
+	statement += "\nORDER BY created_at DESC, id DESC LIMIT ?"
+	args = append(args, query.Limit)
 
+	var rows []InboundMailModel
+	if err := r.db.WithContext(ctx).Raw(statement, args...).Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list masked inbound mailbox: %w", err)
+	}
+	if !query.LoadBody {
+		emails := make([]msacl.EmailObj, 0, len(rows))
+		for _, row := range rows {
+			emails = append(emails, newMSACLInboundEmail(row))
+		}
+		return emails, nil
+	}
+	return r.rowsToEmailObjects(ctx, rows)
+}
+
+func (r *MSACLMailboxReader) lookupSince() time.Time {
 	window := r.contentSearchWindow
 	if window <= 0 {
 		window = msaclContentSearchWindow
 	}
-	like := "%" + escapeMSACLLike(content) + "%"
-	var rows []InboundMailModel
-	since := time.Now().UTC().Add(-window)
-	if err := r.db.WithContext(ctx).
-		Model(&InboundMailModel{}).
-		Where("status IN ?", msaclReadableInboundStatuses()).
-		Where("created_at >= ?", since).
-		Where(`(
-			LOWER(body_preview) LIKE ? ESCAPE '!' OR
-			LOWER(subject) LIKE ? ESCAPE '!' OR
-			LOWER(recipient) LIKE ? ESCAPE '!' OR
-			(parsed_at IS NULL AND (
-				LOWER(header_from) LIKE '%microsoft%' OR
-				LOWER(envelope_from) LIKE '%microsoft%'
-			))
-		)`, like, like, like).
-		Order("created_at DESC, id DESC").
-		Limit(limit * 4).
-		Find(&rows).Error; err != nil {
-		return nil, fmt.Errorf("search inbound mailbox: %w", err)
-	}
-
-	emails, err := r.rowsToEmailObjects(ctx, rows)
-	if err != nil {
-		return nil, err
-	}
-	filtered := make([]msacl.EmailObj, 0, limit)
-	for _, email := range emails {
-		haystack := strings.ToLower(email.Subject + " " + email.Preview + " " + email.To)
-		if strings.Contains(haystack, content) {
-			filtered = append(filtered, email)
-			if len(filtered) >= limit {
-				break
-			}
-		}
-	}
-	return filtered, nil
-}
-
-func (r *MSACLMailboxReader) ListMasked(ctx context.Context, maskedMailbox string, limit int) ([]msacl.EmailObj, error) {
-	local, domainName, ok := strings.Cut(strings.ToLower(strings.TrimSpace(maskedMailbox)), "@")
-	firstStar := strings.Index(local, "*")
-	lastStar := strings.LastIndex(local, "*")
-	if !ok || firstStar < 0 || domainName == "" {
-		return nil, nil
-	}
-	if limit <= 0 || limit > 50 {
-		limit = 50
-	}
-	pattern := escapeMSACLLike(local[:firstStar]) + "%" + escapeMSACLLike(local[lastStar+1:]+"@"+domainName)
-	var rows []InboundMailModel
-	if err := r.db.WithContext(ctx).Model(&InboundMailModel{}).
-		Where("status IN ?", msaclReadableInboundStatuses()).
-		Where("LOWER(recipient) LIKE ? ESCAPE '!'", pattern).
-		Order("created_at DESC, id DESC").Limit(limit * 4).Find(&rows).Error; err != nil {
-		return nil, fmt.Errorf("list masked inbound mailbox: %w", err)
-	}
-	return r.rowsToEmailObjects(ctx, rows)
+	return time.Now().UTC().Add(-window)
 }
 
 func escapeMSACLLike(value string) string {
@@ -217,9 +195,6 @@ func parseMSACLInboundEmail(row InboundMailModel, raw []byte) msacl.EmailObj {
 		email.From = from
 	} else if email.From == "" {
 		email.From = row.EnvelopeFrom
-	}
-	if to := decodeMIMEHeader(decoder, msg.Header.Get("To")); to != "" {
-		email.To = to
 	}
 	body, isHTML, _, _ := readMIMEBodyPart(msg.Header.Get("Content-Type"), msg.Header.Get("Content-Transfer-Encoding"), msg.Body)
 	if isHTML {

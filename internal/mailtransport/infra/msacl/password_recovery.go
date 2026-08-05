@@ -347,8 +347,11 @@ func verifyPasswordRecoveryBindingWithSession(
 	defer lease.releaseIfUnsent(session.context())
 
 	var seenKeys map[string]struct{}
+	var maskedSince time.Time
+	var maskedAfterID uint64
 	if resolveByRecipient {
-		seenKeys, err = snapshotMaskedMailboxKeys(session.context(), maskedProof, proxy)
+		maskedSince = maskedMailboxWindowStart()
+		seenKeys, maskedAfterID, err = snapshotMaskedMailboxKeys(session.context(), maskedProof, maskedSince)
 	} else {
 		seenKeys, err = snapshotMailboxKeys(session.context(), probe.BindingAddress, proxy)
 	}
@@ -378,7 +381,7 @@ func verifyPasswordRecoveryBindingWithSession(
 	}
 	var code string
 	if resolveByRecipient {
-		code, probe.BindingAddress, err = mailWaitMaskedCode(session.context(), maskedProof, proxy, watchSeconds, seenKeys)
+		code, probe.BindingAddress, err = mailWaitMaskedCode(session.context(), maskedProof, maskedSince, maskedAfterID, watchSeconds, seenKeys)
 		probe.BindingAddress = normalizeRecoveryMailbox(probe.BindingAddress)
 		probe.BindingResolved = probe.BindingAddress != ""
 		result.probe = probe

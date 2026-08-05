@@ -9,6 +9,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 )
 
 var transientRequestMarkers = []string{
@@ -367,8 +368,11 @@ func handleOTPVerification(session *Session, page, rawURL, email, proxy string, 
 	defer lease.releaseIfUnsent(session.context())
 
 	var seenKeys map[string]struct{}
+	var maskedSince time.Time
+	var maskedAfterID uint64
 	if resolveByRecipient {
-		seenKeys, err = snapshotMaskedMailboxKeys(session.context(), maskedEmail, proxy)
+		maskedSince = maskedMailboxWindowStart()
+		seenKeys, maskedAfterID, err = snapshotMaskedMailboxKeys(session.context(), maskedEmail, maskedSince)
 	} else {
 		seenKeys, err = snapshotMailboxKeys(session.context(), realMailbox, proxy)
 	}
@@ -429,7 +433,7 @@ func handleOTPVerification(session *Session, page, rawURL, email, proxy string, 
 
 	var code string
 	if resolveByRecipient {
-		code, realMailbox, err = mailWaitMaskedCode(session.context(), maskedEmail, proxy, 0, seenKeys)
+		code, realMailbox, err = mailWaitMaskedCode(session.context(), maskedEmail, maskedSince, maskedAfterID, 0, seenKeys)
 	} else {
 		code, err = watcher.getCode(0)
 	}
@@ -596,40 +600,7 @@ func extractPageHint(page string, limit int) string {
 	return text
 }
 
-func accountEmailMask(accountEmail string) string {
-	local, domain, ok := strings.Cut(accountEmail, "@")
-	if !ok || local == "" || domain == "" {
-		return ""
-	}
-	if len(local) >= 3 {
-		return fmt.Sprintf("%s**%s@%s", local[:2], local[len(local)-1:], domain)
-	}
-	if len(local) == 2 {
-		return fmt.Sprintf("%s**%s@%s", local[:1], local[1:], domain)
-	}
-	return local + "**@" + domain
-}
-
-func accountEmailMaskPattern(accountEmail string) *regexp.Regexp {
-	local, domain, ok := strings.Cut(strings.ToLower(strings.TrimSpace(accountEmail)), "@")
-	if !ok || local == "" || domain == "" {
-		return nil
-	}
-	prefix := local
-	suffix := ""
-	if len(local) >= 3 {
-		prefix = local[:2]
-		suffix = local[len(local)-1:]
-	} else if len(local) == 2 {
-		prefix = local[:1]
-		suffix = local[1:]
-	}
-	return regexp.MustCompile(
-		`(?i)` + regexp.QuoteMeta(prefix) + `\*+` + regexp.QuoteMeta(suffix+"@"+domain),
-	)
-}
-
-func lookupRealMailbox(ctx context.Context, maskedEmail, accountEmail, proxy string, preferredBindingAddress string) string {
+func lookupRealMailbox(_ context.Context, maskedEmail, accountEmail, _ string, preferredBindingAddress string) string {
 	// A preferred project mailbox wins if it matches the mask. External
 	// mailboxes are intentionally not returned because this service cannot read
 	// their OTP; the caller will fail before asking Microsoft to send one.
@@ -638,47 +609,13 @@ func lookupRealMailbox(ctx context.Context, maskedEmail, accountEmail, proxy str
 		logDebug("导入输入匹配: account=%s, real_mailbox=%s", accountEmail, preferred)
 		return preferred
 	}
-	// Pure rules run before any historical/content lookup.  When either rule
-	// matches, login authorization can snapshot and read that exact mailbox;
-	// recipient-based recovery is only for the remaining random-local-part case.
+	// Pure rules are the only pre-send resolution path. Random local parts are
+	// resolved from the recipient of the fresh OTP sent by this attempt; stale
+	// mailbox history is never treated as proof of a current binding.
 	if inferred := InferBindingAddress(accountEmail, maskedEmail); inferred != "" {
 		logInfo("通过辅助邮箱规则直接推算真实地址")
 		logDebug("规则推算匹配: account=%s, masked_email=%s, real_mailbox=%s", accountEmail, maskedEmail, inferred)
 		return inferred
-	}
-	// Decide which binding domains to resolve against. If the masked proof
-	// already carries a domain, only that domain is relevant AND it must be one
-	// of ours (∈ binding list) — an external domain returns "" so the caller
-	// records the masked display instead. Otherwise MATCH against ALL binding
-	// domains (the account's recovery could live on any of them).
-	var domains []string
-	if strings.Contains(maskedEmail, "@") {
-		d := strings.ToLower(strings.SplitN(maskedEmail, "@", 2)[1])
-		if !domainInProject(d) {
-			return ""
-		}
-		domains = []string{d}
-	} else {
-		domains = activeAuxiliaryDomains()
-	}
-	var candidates []string
-	seen := make(map[string]struct{}, len(domains))
-	for _, domain := range domains {
-		addr := strings.ToLower(strings.TrimSpace(resolveRealMailboxForDomain(ctx, maskedEmail, accountEmail, proxy, domain)))
-		if addr == "" {
-			continue
-		}
-		if _, ok := seen[addr]; ok {
-			continue
-		}
-		seen[addr] = struct{}{}
-		candidates = append(candidates, addr)
-	}
-	if len(candidates) == 1 {
-		return candidates[0]
-	}
-	if len(candidates) > 1 {
-		logWarning("辅助邮箱掩码匹配到多个域候选, 保持未解析: account=%s, candidates=%v", accountEmail, firstN(candidates, 5))
 	}
 	return ""
 }
@@ -690,115 +627,6 @@ func ResolveBindingAddress(ctx context.Context, maskedEmail, accountEmail, proxy
 	return lookupRealMailbox(ctx, maskedEmail, accountEmail, proxy, preferredBindingAddress)
 }
 
-// resolveRealMailboxForDomain resolves the account's real recovery mailbox on a
-// SINGLE binding domain: deterministic rule → recorded output → content search
-// by account mask → API search by masked prefix. Returns "" if none match.
-func resolveRealMailboxForDomain(ctx context.Context, maskedEmail, accountEmail, proxy, domain string) string {
-	prefix := ""
-	if m := regexp.MustCompile(`(?i)^([a-z0-9]{1,5})\*+`).FindStringSubmatch(maskedEmail); len(m) > 1 {
-		prefix = m[1]
-	} else {
-		prefix = strings.Split(maskedEmail, "*")[0]
-	}
-	prefix = regexp.MustCompile(`[^a-z0-9]`).ReplaceAllString(strings.ToLower(prefix), "")
-	accountKey := strings.ToLower(strings.TrimSpace(accountEmail))
-
-	if recorded := lookupRecordedMailboxForAccount(accountKey, domain); recorded != "" && mailboxMatchesMasked(maskedEmail, recorded) {
-		logInfo("通过输出记录找到当前账号真实辅助邮箱")
-		logDebug("输出记录匹配: account=%s, real_mailbox=%s", accountEmail, recorded)
-		return recorded
-	}
-
-	// Recent imports use the Microsoft local part verbatim on the selected
-	// binding domain. A broad account-mask search is often ambiguous because
-	// many accounts share the same first/last characters (for example
-	// br*****1@...). Prefer the exact account-local mailbox only when the local
-	// receiving store already contains a message addressed to that mailbox whose
-	// body names this exact account mask. This is evidence, not a guessed binding:
-	// callers must still complete the normal password/OTP confirmation before
-	// persisting the relationship as verified.
-	if direct := accountLocalAuxiliaryAddressForDomain(accountEmail, domain); direct != "" &&
-		mailboxMatchesMasked(maskedEmail, direct) &&
-		mailboxHasAccountMaskEvidence(ctx, direct, accountEmail, proxy) {
-		logInfo("通过账号同名辅助邮箱的精确收件证据找到真实辅助邮箱")
-		logDebug("账号同名收件证据匹配: account=%s, real_mailbox=%s", accountEmail, direct)
-		return direct
-	}
-
-	if mask := accountEmailMask(accountEmail); mask != "" {
-		var found string
-		ambiguous := false
-		func() {
-			defer func() {
-				if recover() != nil {
-					logWarning("按账号掩码搜索临时邮箱失败")
-				}
-			}()
-			results := searchMailboxesByContent(ctx, mask, proxy)
-			var candidates []string
-			seenCandidates := make(map[string]struct{}, len(results))
-			for _, addr := range results {
-				addr = strings.ToLower(strings.TrimSpace(addr))
-				matchesFullMask := !strings.Contains(maskedEmail, "@") || mailboxMatchesMasked(maskedEmail, addr)
-				if addr != "" && strings.HasSuffix(addr, "@"+domain) &&
-					(prefix == "" || strings.HasPrefix(addr, prefix)) && matchesFullMask {
-					if _, exists := seenCandidates[addr]; exists {
-						continue
-					}
-					seenCandidates[addr] = struct{}{}
-					candidates = append(candidates, addr)
-				}
-			}
-			if len(candidates) == 1 {
-				logInfo("通过邮件正文账号掩码找到真实辅助邮箱")
-				logDebug("正文掩码匹配: account=%s, mask=%s, real_mailbox=%s", accountEmail, mask, candidates[0])
-				found = candidates[0]
-			} else if len(candidates) > 1 {
-				logWarning("正文掩码匹配到多个邮箱, 保持未解析: account=%s, mask=%s, candidates=%v", accountEmail, mask, firstN(candidates, 5))
-				ambiguous = true
-			}
-		}()
-		if ambiguous {
-			return ""
-		}
-		if found != "" {
-			return found
-		}
-	}
-
-	if recorded := lookupRecordedMailboxByPrefix(prefix, domain); recorded != "" && mailboxMatchesMasked(maskedEmail, recorded) {
-		logInfo("通过输出记录找到掩码邮箱对应真实地址")
-		logDebug("输出记录前缀匹配: masked_email=%s, real_mailbox=%s", maskedEmail, recorded)
-		return recorded
-	}
-
-	results := searchMailboxes(ctx, prefix, proxy)
-	var candidates []string
-	seenCandidates := make(map[string]struct{}, len(results))
-	for _, result := range results {
-		addr := strings.ToLower(strings.TrimSpace(result))
-		matchesFullMask := !strings.Contains(maskedEmail, "@") || mailboxMatchesMasked(maskedEmail, addr)
-		if strings.HasPrefix(addr, prefix) && strings.HasSuffix(addr, "@"+domain) && matchesFullMask {
-			if _, exists := seenCandidates[addr]; exists {
-				continue
-			}
-			seenCandidates[addr] = struct{}{}
-			candidates = append(candidates, addr)
-		}
-	}
-	if len(candidates) == 1 {
-		logInfo("通过 API 找到掩码邮箱对应真实地址")
-		logDebug("掩码邮箱匹配: masked_email=%s, real_mailbox=%s", maskedEmail, candidates[0])
-		return candidates[0]
-	}
-	if len(candidates) > 1 {
-		logWarning("掩码邮箱匹配到多个候选, 保持未解析: masked_email=%s, candidates=%v", maskedEmail, firstN(candidates, 5))
-		return ""
-	}
-
-	return ""
-}
-
 func accountLocalAuxiliaryAddressForDomain(accountEmail, domain string) string {
 	accountEmail = strings.ToLower(strings.TrimSpace(accountEmail))
 	domain = strings.Trim(strings.ToLower(strings.TrimSpace(domain)), ".")
@@ -807,104 +635,6 @@ func accountLocalAuxiliaryAddressForDomain(accountEmail, domain string) string {
 		return ""
 	}
 	return normalizeRecoveryMailbox(local + "@" + domain)
-}
-
-func mailboxHasAccountMaskEvidence(ctx context.Context, mailbox, accountEmail, proxy string) bool {
-	mailbox = normalizeRecoveryMailbox(mailbox)
-	maskPattern := accountEmailMaskPattern(accountEmail)
-	if mailbox == "" || maskPattern == nil {
-		return false
-	}
-	emails, err := mailList(ctx, mailbox, proxy, 10, false)
-	if err != nil {
-		return false
-	}
-	for _, email := range emails {
-		if !recoveryMailboxEvidenceMatches(mailbox, email.To) {
-			continue
-		}
-		if maskPattern.MatchString(email.Subject + " " + email.Preview) {
-			return true
-		}
-	}
-	return false
-}
-
-func resultRecordFiles() []string {
-	return nil
-}
-
-func lookupRecordedMailboxForAccount(accountKey, domain string) string {
-	if accountKey == "" {
-		return ""
-	}
-	var matches []string
-	for _, filePath := range resultRecordFiles() {
-		data, err := os.ReadFile(filePath)
-		if err != nil {
-			continue
-		}
-		for _, rawLine := range strings.Split(string(data), "\n") {
-			sourceEmail, mailbox := parseRecordedMailboxLine(rawLine, domain)
-			if sourceEmail == accountKey && mailbox != "" {
-				matches = append(matches, mailbox)
-			}
-		}
-	}
-	if len(matches) == 0 {
-		return ""
-	}
-	return matches[len(matches)-1]
-}
-
-func lookupRecordedMailboxByPrefix(prefix, domain string) string {
-	if len(prefix) < 4 {
-		return ""
-	}
-	var matches []string
-	for _, filePath := range resultRecordFiles() {
-		data, err := os.ReadFile(filePath)
-		if err != nil {
-			continue
-		}
-		for _, rawLine := range strings.Split(string(data), "\n") {
-			_, mailbox := parseRecordedMailboxLine(rawLine, domain)
-			if mailbox != "" && strings.HasPrefix(mailbox, prefix) {
-				matches = append(matches, mailbox)
-			}
-		}
-	}
-	if len(matches) == 0 {
-		return ""
-	}
-	return matches[len(matches)-1]
-}
-
-func parseRecordedMailboxLine(line, domain string) (string, string) {
-	line = stripProgressPrefix(strings.TrimSpace(line))
-	if line == "" {
-		return "", ""
-	}
-	if strings.Contains(line, ">") {
-		line = strings.TrimSpace(strings.SplitN(line, ">", 2)[0])
-	}
-	parts := strings.Split(line, "----")
-	if len(parts) < 3 {
-		return "", ""
-	}
-	sourceEmail := strings.ToLower(strings.TrimSpace(parts[0]))
-	candidates := []string{}
-	if len(parts) >= 5 {
-		candidates = append(candidates, parts[4])
-	}
-	candidates = append(candidates, parts[2])
-	for _, candidate := range candidates {
-		mailbox := strings.ToLower(strings.TrimSpace(candidate))
-		if mailbox != "" && strings.HasSuffix(mailbox, "@"+domain) {
-			return sourceEmail, mailbox
-		}
-	}
-	return sourceEmail, ""
 }
 
 func cleanProofDisplay(value string) string {
@@ -1406,11 +1136,4 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func firstN(values []string, n int) []string {
-	if len(values) <= n {
-		return values
-	}
-	return values[:n]
 }
