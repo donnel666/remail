@@ -185,13 +185,6 @@ func (m *MailTransportModule) scanExpiringTokenRefresh(ctx context.Context) {
 	slog.Info("microsoft rt auto-refresh scan done", "candidates", len(candidates), "enqueued", enqueued)
 }
 
-func (m *MailTransportModule) SetInboundConsumer(consumer mailapp.InboundConsumerPort) {
-	if m == nil || m.InboundUseCase == nil {
-		return
-	}
-	m.InboundUseCase.SetConsumer(consumer)
-}
-
 func (m *MailTransportModule) SetMicrosoftCredentialPort(credentials coreapp.MicrosoftCredentialPort) {
 	if m == nil || m.tokenRefreshRepo == nil {
 		return

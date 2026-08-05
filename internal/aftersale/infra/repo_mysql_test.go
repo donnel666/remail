@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	aftersaleapp "github.com/donnel666/remail/internal/aftersale/app"
 	"github.com/donnel666/remail/internal/aftersale/domain"
@@ -123,6 +124,86 @@ func TestRepoReplyTransitionsMySQL(t *testing.T) {
 	require.Equal(t, 0, updated.RequesterUnreadCount)
 	require.Equal(t, 1, updated.PlatformUnreadCount)
 	require.Len(t, updated.Messages, 3)
+}
+
+func TestRepoInboundReplyReceiptIsIdempotentMySQL(t *testing.T) {
+	repo := NewRepo(newAftersaleTestDB(t))
+	ctx := context.Background()
+	_, err := repo.Create(ctx, aftersaleapp.CreateTicketParams{
+		TicketNo: "ASINBOUND", TicketType: domain.TicketTypeGeneral, Title: "t", RequesterUserID: 7,
+		FirstMessage: userMessage("hi"),
+	})
+	require.NoError(t, err)
+
+	params := aftersaleapp.ReplyParams{TicketNo: "ASINBOUND", Message: userMessage("email reply")}
+	updated, created, err := repo.ReplyInbound(ctx, 501, params)
+	require.NoError(t, err)
+	require.True(t, created)
+	require.Len(t, updated.Messages, 2)
+
+	updated, created, err = repo.ReplyInbound(ctx, 501, params)
+	require.NoError(t, err)
+	require.False(t, created)
+	require.Nil(t, updated)
+
+	require.NoError(t, repo.IgnoreInboundReply(ctx, 502, "ASINBOUND"))
+	require.NoError(t, repo.IgnoreInboundReply(ctx, 502, "ASINBOUND"))
+	updated, created, err = repo.ReplyInbound(ctx, 502, params)
+	require.NoError(t, err)
+	require.False(t, created)
+	require.Nil(t, updated)
+
+	var receiptCount int64
+	require.NoError(t, repo.db.Model(&InboundReceiptModel{}).Count(&receiptCount).Error)
+	require.Equal(t, int64(2), receiptCount)
+	ticket, err := repo.Get(ctx, "ASINBOUND", true)
+	require.NoError(t, err)
+	require.Len(t, ticket.Messages, 2)
+}
+
+type inboundMailboxFileStore struct {
+	content map[string][]byte
+}
+
+func (*inboundMailboxFileStore) Save(context.Context, string, string, string, []byte) error {
+	return nil
+}
+
+func (s *inboundMailboxFileStore) Read(_ context.Context, objectKey string) (string, []byte, error) {
+	return "message/rfc822", s.content[objectKey], nil
+}
+
+func TestInboundMailboxScopesByTicketRecipientMySQL(t *testing.T) {
+	db := newAftersaleTestDB(t)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	require.NoError(t, db.Exec(`INSERT INTO users(id, email, password_hash) VALUES (1, 'mailbox-owner@example.com', 'test')`).Error)
+	require.NoError(t, db.Exec(`INSERT INTO email_resources(id, type, owner_user_id) VALUES (1, 'domain', 1)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO inbound_mails(
+    envelope_from, recipient, mailbox_key, resource_id, resource_type,
+    owner_user_id, source_object_key, status, created_at, updated_at
+) VALUES
+    ('customer@example.com', 'support+asmail-tok@tickets.example.com', 'support@tickets.example.com', 1, 'domain', 1, 'mail/asmail.eml', 'stored', ?, ?),
+    ('other@example.com', 'support+asother-tok@tickets.example.com', 'support@tickets.example.com', 1, 'domain', 1, 'mail/other.eml', 'stored', ?, ?)`,
+		now, now, now, now).Error)
+	files := &inboundMailboxFileStore{content: map[string][]byte{
+		"mail/asmail.eml": []byte("From: customer@example.com\r\n\r\nreply"),
+		"mail/other.eml":  []byte("From: other@example.com\r\n\r\nother"),
+	}}
+	mailbox := NewInboundMailbox(db, files, aftersaleapp.TicketMailConfig{
+		ReplyLocalPart: "support", ReplyDomain: "tickets.example.com", ReplySecret: "secret",
+	})
+
+	messages, err := mailbox.ListTicketReplies(context.Background(), "ASMAIL", now.Add(-time.Minute), 30)
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	require.Equal(t, "support+asmail-tok@tickets.example.com", messages[0].Recipient)
+	require.Equal(t, files.content["mail/asmail.eml"], messages[0].Raw)
+
+	require.NoError(t, NewRepo(db).IgnoreInboundReply(context.Background(), messages[0].ID, "ASMAIL"))
+	messages, err = mailbox.ListTicketReplies(context.Background(), "ASMAIL", now.Add(-time.Minute), 30)
+	require.NoError(t, err)
+	require.Empty(t, messages)
 }
 
 func TestRepoCloseMySQL(t *testing.T) {

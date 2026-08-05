@@ -47,8 +47,6 @@ export default function MailmatchSection({ options, onBulkSave }: SectionProps) 
       {field("时间偏差容忍（分钟）", "read_window_skew_minutes")}
       {field("验证码读取上限", "code_read_limit")}
       {field("购买邮件读取上限", "purchase_read_limit")}
-      {field("邮件扫描上限", "message_scan_limit")}
-      {field("投影重放上限", "projection_replay_limit")}
       {field("接码预留有效期（分钟）", "pickup_fetch_reserve_ttl_minutes")}
       {field("接码租约有效期（分钟）", "pickup_fetch_lease_ttl_minutes")}
       {field("消息缓存有效期（秒）", "pickup_message_cache_ttl_seconds")}

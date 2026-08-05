@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/donnel666/remail/internal/mailbox"
 )
 
 type ResourceType string
@@ -23,20 +25,9 @@ const (
 )
 
 // RecipientAliasForms returns the exact address, the address without a plus
-// tag, and the dot-insensitive form used to find the owning Microsoft mailbox.
+// tag, and the dot-insensitive form used for mailbox matching.
 func RecipientAliasForms(value string) (exact string, plusBase string, dotBase string, ok bool) {
-	exact = strings.ToLower(strings.TrimSpace(value))
-	local, host, found := strings.Cut(exact, "@")
-	if !found || local == "" || host == "" || strings.Contains(host, "@") {
-		return "", "", "", false
-	}
-	plusLocal := local
-	if plus := strings.IndexByte(plusLocal, '+'); plus > 0 {
-		plusLocal = plusLocal[:plus]
-	}
-	plusBase = plusLocal + "@" + host
-	dotBase = strings.ReplaceAll(plusLocal, ".", "") + "@" + host
-	return exact, plusBase, dotBase, true
+	return mailbox.AliasForms(value)
 }
 
 type FetchPurpose string

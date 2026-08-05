@@ -28,8 +28,6 @@ export const MAILMATCH_KEYS = [
   "read_window_skew_minutes",
   "code_read_limit",
   "purchase_read_limit",
-  "message_scan_limit",
-  "projection_replay_limit",
   "pickup_fetch_reserve_ttl_minutes",
   "pickup_fetch_lease_ttl_minutes",
   "pickup_message_cache_ttl_seconds",

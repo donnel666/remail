@@ -73,6 +73,15 @@ type TicketAttachmentModel struct {
 
 func (TicketAttachmentModel) TableName() string { return "aftersale_ticket_attachments" }
 
+type InboundReceiptModel struct {
+	InboundMailID uint      `gorm:"primaryKey;column:inbound_mail_id"`
+	TicketNo      string    `gorm:"type:varchar(64);not null;column:ticket_no"`
+	Outcome       string    `gorm:"type:varchar(16);not null"`
+	CreatedAt     time.Time `gorm:"not null;autoCreateTime;column:created_at"`
+}
+
+func (InboundReceiptModel) TableName() string { return "aftersale_inbound_receipts" }
+
 type Repo struct {
 	db  *gorm.DB
 	now func() time.Time
@@ -242,8 +251,28 @@ func (r *Repo) Facets(ctx context.Context, filter aftersaleapp.ListFilter) (*aft
 }
 
 func (r *Repo) Reply(ctx context.Context, params aftersaleapp.ReplyParams) (*domain.Ticket, error) {
+	ticket, _, err := r.reply(ctx, 0, params)
+	return ticket, err
+}
+
+func (r *Repo) ReplyInbound(ctx context.Context, inboundMailID uint, params aftersaleapp.ReplyParams) (*domain.Ticket, bool, error) {
+	if inboundMailID == 0 {
+		return nil, false, domain.ErrInvalidTicketRequest
+	}
+	return r.reply(ctx, inboundMailID, params)
+}
+
+func (r *Repo) reply(ctx context.Context, inboundMailID uint, params aftersaleapp.ReplyParams) (*domain.Ticket, bool, error) {
 	now := r.now()
+	created := true
 	err := r.withTx(ctx, func(txCtx context.Context) error {
+		if inboundMailID > 0 {
+			var err error
+			created, err = r.insertInboundReceipt(txCtx, inboundMailID, params.TicketNo, "replied", now)
+			if err != nil || !created {
+				return err
+			}
+		}
 		model, err := r.lockTicket(txCtx, params.TicketNo)
 		if err != nil {
 			return err
@@ -273,9 +302,34 @@ func (r *Repo) Reply(ctx context.Context, params aftersaleapp.ReplyParams) (*dom
 		return r.applyTicketUpdates(txCtx, params.TicketNo, updates)
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return r.Get(ctx, params.TicketNo, true)
+	if !created {
+		return nil, false, nil
+	}
+	ticket, err := r.Get(ctx, params.TicketNo, true)
+	return ticket, true, err
+}
+
+func (r *Repo) IgnoreInboundReply(ctx context.Context, inboundMailID uint, ticketNo string) error {
+	if inboundMailID == 0 {
+		return domain.ErrInvalidTicketRequest
+	}
+	_, err := r.insertInboundReceipt(ctx, inboundMailID, ticketNo, "ignored", r.now())
+	return err
+}
+
+func (r *Repo) insertInboundReceipt(ctx context.Context, inboundMailID uint, ticketNo, outcome string, now time.Time) (bool, error) {
+	result := r.dbFor(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&InboundReceiptModel{
+		InboundMailID: inboundMailID,
+		TicketNo:      strings.ToUpper(strings.TrimSpace(ticketNo)),
+		Outcome:       outcome,
+		CreatedAt:     now,
+	})
+	if result.Error != nil {
+		return false, fmt.Errorf("insert aftersale inbound receipt: %w", result.Error)
+	}
+	return result.RowsAffected == 1, nil
 }
 
 func (r *Repo) MarkRead(ctx context.Context, ticketNo string, platformSide bool) (*domain.Ticket, error) {

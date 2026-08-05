@@ -3,43 +3,89 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 
 	"github.com/donnel666/remail/internal/aftersale/domain"
 )
 
+const inboundReplyReadLimit = 30
+
+func (uc *UseCase) syncInboundReplies(ctx context.Context, ticket *domain.Ticket) (bool, error) {
+	if uc == nil || uc.inbound == nil || ticket == nil || ticket.Status.IsTerminal() {
+		return false, nil
+	}
+	messages, err := uc.inbound.ListTicketReplies(ctx, ticket.TicketNo, ticket.CreatedAt, inboundReplyReadLimit)
+	if err != nil {
+		return false, err
+	}
+	changed := false
+	for _, source := range messages {
+		if source.ID == 0 {
+			continue
+		}
+		if isBounceEnvelope(source.EnvelopeFrom) {
+			if err := uc.repo.IgnoreInboundReply(ctx, source.ID, ticket.TicketNo); err != nil {
+				return changed, err
+			}
+			continue
+		}
+		body, auto := parseInboundEmail(source.Raw)
+		if auto || strings.TrimSpace(body) == "" {
+			if err := uc.repo.IgnoreInboundReply(ctx, source.ID, ticket.TicketNo); err != nil {
+				return changed, err
+			}
+			continue
+		}
+		created, err := uc.ingestInboundReply(ctx, InboundReplyCommand{
+			Recipient: source.Recipient,
+			Body:      body,
+		}, source.ID, ticket.TicketNo)
+		if err != nil {
+			return changed, err
+		}
+		changed = changed || created
+	}
+	return changed, nil
+}
+
 // IngestInboundReply appends an authenticated requester or super-admin email
 // reply and notifies the other side. Permanent problems return nil so the mail
 // is not retried; only transient repository/directory errors propagate.
 func (uc *UseCase) IngestInboundReply(ctx context.Context, cmd InboundReplyCommand) error {
+	_, err := uc.ingestInboundReply(ctx, cmd, 0, "")
+	return err
+}
+
+func (uc *UseCase) ingestInboundReply(ctx context.Context, cmd InboundReplyCommand, inboundMailID uint, expectedTicketNo string) (bool, error) {
 	ticketNo, token, ok := uc.parseReplyRecipient(cmd.Recipient)
 	if !ok {
-		return nil
+		return false, uc.ignoreInboundReply(ctx, inboundMailID, expectedTicketNo)
 	}
 	ticket, err := uc.repo.Get(ctx, ticketNo, false)
 	if err != nil {
 		if errors.Is(err, domain.ErrTicketNotFound) {
-			return nil
+			return false, uc.ignoreInboundReply(ctx, inboundMailID, ticketNo)
 		}
-		return err
+		return false, err
 	}
 	if ticket.Status.IsTerminal() {
 		slog.Info("aftersale inbound reply to closed ticket dropped", "ticketNo", ticketNo)
-		return nil
+		return false, uc.ignoreInboundReply(ctx, inboundMailID, ticketNo)
 	}
 	content := stripQuotedReply(cmd.Body)
 	if content == "" {
-		return nil
+		return false, uc.ignoreInboundReply(ctx, inboundMailID, ticketNo)
 	}
 
 	view, err := uc.viewOf(ctx, ticket)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if view.Requester == nil {
 		slog.Warn("aftersale inbound reply rejected: requester unavailable", "ticketNo", ticketNo)
-		return nil
+		return false, uc.ignoreInboundReply(ctx, inboundMailID, ticketNo)
 	}
 
 	message := MessageInsert{Content: content}
@@ -55,11 +101,11 @@ func (uc *UseCase) IngestInboundReply(ctx context.Context, cmd InboundReplyComma
 		message.SenderEmail = strings.TrimSpace(view.Requester.Email)
 	} else {
 		if uc.owners == nil {
-			return nil
+			return false, uc.ignoreInboundReply(ctx, inboundMailID, ticketNo)
 		}
 		admins, lookupErr := uc.owners.ListActiveSuperAdmins(ctx)
 		if lookupErr != nil {
-			return lookupErr
+			return false, lookupErr
 		}
 		var sender *RequesterSummary
 		for i := range admins {
@@ -71,7 +117,7 @@ func (uc *UseCase) IngestInboundReply(ctx context.Context, cmd InboundReplyComma
 		}
 		if sender == nil {
 			slog.Warn("aftersale inbound reply rejected: token mismatch", "ticketNo", ticketNo)
-			return nil
+			return false, uc.ignoreInboundReply(ctx, inboundMailID, ticketNo)
 		}
 		name := strings.TrimSpace(sender.Nickname)
 		if name == "" {
@@ -84,17 +130,25 @@ func (uc *UseCase) IngestInboundReply(ctx context.Context, cmd InboundReplyComma
 		platformSender = true
 	}
 
-	// ponytail: inbound tasks lack a stable source ID; add one plus a unique
-	// constraint if crash-window duplicate replies become a real issue.
-	updated, err := uc.repo.Reply(ctx, ReplyParams{
+	params := ReplyParams{
 		TicketNo: ticketNo,
 		Message:  message,
-	})
+	}
+	var updated *domain.Ticket
+	created := true
+	if inboundMailID > 0 {
+		updated, created, err = uc.repo.ReplyInbound(ctx, inboundMailID, params)
+	} else {
+		updated, err = uc.repo.Reply(ctx, params)
+	}
 	if err != nil {
 		if errors.Is(err, domain.ErrTicketClosed) {
-			return nil
+			return false, uc.ignoreInboundReply(ctx, inboundMailID, ticketNo)
 		}
-		return err
+		return false, err
+	}
+	if !created {
+		return false, nil
 	}
 	view.Ticket = updated
 	if platformSender {
@@ -102,13 +156,22 @@ func (uc *UseCase) IngestInboundReply(ctx context.Context, cmd InboundReplyComma
 	} else {
 		uc.notifySuperAdmins(ctx, view, ticketMailReplied)
 	}
+	return true, nil
+}
+
+func (uc *UseCase) ignoreInboundReply(ctx context.Context, inboundMailID uint, ticketNo string) error {
+	if inboundMailID == 0 {
+		return nil
+	}
+	if err := uc.repo.IgnoreInboundReply(ctx, inboundMailID, strings.ToUpper(strings.TrimSpace(ticketNo))); err != nil {
+		return fmt.Errorf("ignore aftersale inbound reply: %w", err)
+	}
 	return nil
 }
 
 // parseReplyRecipient extracts the ticket number and token from a plus-address
-// like "support+AS123-token@domain" (case-insensitive; the SMTP layer lowercased
-// it). Ticket numbers and tokens are hyphen-free hex, so a single '-' separates
-// them.
+// like "support+AS123-token@domain". Matching is case-insensitive while the
+// SMTP envelope recipient remains stored in its original form.
 func (uc *UseCase) parseReplyRecipient(recipient string) (ticketNo, token string, ok bool) {
 	at := strings.LastIndex(recipient, "@")
 	if at <= 0 {

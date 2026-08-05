@@ -147,6 +147,27 @@ type matchResultStub struct {
 	results []MatchResult
 }
 
+type domainMailboxRepoStub struct {
+	*matchingRepoStub
+	messages []FetchedMessage
+	since    time.Time
+	until    time.Time
+	limit    int
+	reads    int
+}
+
+func (r *domainMailboxRepoStub) ListDomainMailboxMessages(_ context.Context, _ OrderScope, since, until time.Time, limit int) ([]FetchedMessage, error) {
+	r.reads++
+	r.since = since
+	r.until = until
+	r.limit = limit
+	return r.messages, nil
+}
+
+func (r *domainMailboxRepoStub) ListOrderMessages(context.Context, OrderScope, int) ([]domain.Message, error) {
+	return nil, nil
+}
+
 type pickupBatchRepoStub struct {
 	Repository
 	scopes          map[string]OrderScope
@@ -224,7 +245,111 @@ func (s *matchResultStub) NotifyMatchedCode(_ context.Context, result MatchResul
 	return nil
 }
 
-func TestAppendOnlyIngestDoesNotProjectBeforeSecondFence(t *testing.T) {
+func TestDomainMailboxReadUsesOrderWindowAndLimitBeforeMatching(t *testing.T) {
+	defer runtimeconfig.Delete("fetch_lookback_window_days")
+	defer runtimeconfig.Delete("read_window_skew_minutes")
+	defer runtimeconfig.Delete("code_read_limit")
+	runtimeconfig.Set("fetch_lookback_window_days", "7")
+	runtimeconfig.Set("read_window_skew_minutes", "3")
+	runtimeconfig.Set("code_read_limit", "2")
+	now := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
+	startedAt := now.Add(-time.Hour)
+	receiveUntil := now.Add(time.Minute)
+	scope := OrderScope{
+		OrderID: 42, OrderNo: "OR_DOMAIN", AllocationType: domain.ResourceTypeDomain,
+		EmailResourceID: 9, Recipient: "username@example.com", RecipientKind: "exact",
+		ServiceMode: "code", OrderStatus: "active", ReceiveStartedAt: &startedAt, ReceiveUntil: &receiveUntil,
+		LooseMatch: true,
+		Rules: []MailRule{
+			{Type: MailRuleRecipient, Pattern: "exact", Enabled: true},
+			{Type: MailRuleSender, Pattern: `sender@example\.net`, Enabled: true},
+			{Type: MailRuleBody, Pattern: `(\d{6})`, Enabled: true},
+		},
+	}
+	repo := &domainMailboxRepoStub{
+		matchingRepoStub: &matchingRepoStub{},
+		messages: []FetchedMessage{{
+			EmailResourceID: 9, ResourceType: domain.ResourceTypeDomain,
+			Recipient: "User.Name+tag@Example.COM", Sender: "sender@example.net",
+			Body: "code 123456", ReceivedAt: now.Add(-2 * time.Minute),
+		}},
+	}
+	matches := &matchResultStub{}
+	uc := NewUseCase(repo, nil, nil, matches)
+	uc.now = func() time.Time { return now }
+
+	changed, err := uc.syncDomainMailbox(context.Background(), scope)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, 2, repo.limit)
+	require.Equal(t, startedAt.Add(-3*time.Minute), repo.since)
+	require.Equal(t, now, repo.until)
+	require.Empty(t, repo.matchedResourceTypes, "Domain reads must match only the requested order scope")
+	require.Len(t, matches.results, 1)
+	require.Equal(t, "123456", matches.results[0].VerificationCode)
+}
+
+func TestDomainMailboxDoesNotReadUnavailableOrder(t *testing.T) {
+	now := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
+	receiveUntil := now.Add(-time.Second)
+	repo := &domainMailboxRepoStub{matchingRepoStub: &matchingRepoStub{}, messages: []FetchedMessage{{
+		EmailResourceID: 9, ResourceType: domain.ResourceTypeDomain,
+		Recipient: "user@example.com", Body: "code 123456", ReceivedAt: now.Add(-time.Minute),
+	}}}
+	matches := &matchResultStub{}
+	uc := NewUseCase(repo, nil, nil, matches)
+	uc.now = func() time.Time { return now }
+
+	_, err := uc.syncDomainMailbox(context.Background(), OrderScope{
+		OrderID: 42, OrderNo: "OR_EXPIRED", AllocationType: domain.ResourceTypeDomain,
+		EmailResourceID: 9, Recipient: "user@example.com", ServiceMode: "code",
+		OrderStatus: "active", ReceiveUntil: &receiveUntil,
+	})
+
+	require.ErrorIs(t, err, domain.ErrOrderUnavailable)
+	require.Zero(t, repo.reads)
+	require.Nil(t, repo.purchaseDelivery)
+	require.Empty(t, matches.results)
+}
+
+func TestDomainCodePickupDoesNotReadMailboxAfterDelivery(t *testing.T) {
+	now := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
+	receiveUntil := now.Add(time.Minute)
+	repo := &domainMailboxRepoStub{
+		matchingRepoStub: &matchingRepoStub{},
+		messages: []FetchedMessage{{
+			EmailResourceID: 9, ResourceType: domain.ResourceTypeDomain,
+			Recipient: "user@example.com", Sender: "sender@example.net",
+			Body: "code 123456", ReceivedAt: now,
+		}},
+	}
+	scope := OrderScope{
+		OrderID: 42, OrderNo: "OR_CODE", AllocationType: domain.ResourceTypeDomain,
+		EmailResourceID: 9, Recipient: "user@example.com", RecipientKind: "exact",
+		ServiceMode: "code", OrderStatus: "active", ReceiveUntil: &receiveUntil,
+		LooseMatch: true, Rules: []MailRule{
+			{Type: MailRuleRecipient, Pattern: "exact", Enabled: true},
+			{Type: MailRuleSender, Pattern: `sender@example\.net`, Enabled: true},
+			{Type: MailRuleBody, Pattern: `(\d{6})`, Enabled: true},
+		},
+	}
+	uc := NewUseCase(repo, nil, nil, &matchResultStub{})
+	uc.now = func() time.Time { return now }
+
+	items, _, hasDelivery, _, err := uc.listOrderMailWithPickupCache(context.Background(), scope)
+	require.NoError(t, err)
+	require.True(t, hasDelivery)
+	require.Len(t, items, 1)
+	require.Equal(t, 1, repo.reads)
+
+	items, _, hasDelivery, _, err = uc.listOrderMailWithPickupCache(context.Background(), scope)
+	require.NoError(t, err)
+	require.True(t, hasDelivery)
+	require.Len(t, items, 1)
+	require.Equal(t, 1, repo.reads)
+}
+
+func TestAppendOnlyRemoteIngestRecoversAfterSecondFenceFails(t *testing.T) {
 	now := time.Now().UTC()
 	repo := &appendFenceRepoStub{matchingRepoStub: &matchingRepoStub{
 		scopes: []OrderScope{{
@@ -240,11 +365,11 @@ func TestAppendOnlyIngestDoesNotProjectBeforeSecondFence(t *testing.T) {
 	uc := NewUseCase(repo, nil, nil, &matchResultStub{})
 	fenceCalls := 0
 
-	_, _, _, err := uc.ingestFetchedMessagesWithFence(context.Background(), []FetchedMessage{{
+	_, _, _, err := uc.ingestFetchedMessagesForResourcesWithFence(context.Background(), []FetchedMessage{{
 		EmailResourceID: 1, ResourceType: domain.ResourceTypeMicrosoft,
 		Recipient: "user@example.com", Sender: "sender@example.net",
 		Body: "Your code is 123456", ReceivedAt: now,
-	}}, func(context.Context) error {
+	}}, domain.ResourceTypeMicrosoft, []uint{1}, func(context.Context) error {
 		fenceCalls++
 		if fenceCalls == 2 {
 			return domain.ErrFetchJobConflict
@@ -258,8 +383,6 @@ func TestAppendOnlyIngestDoesNotProjectBeforeSecondFence(t *testing.T) {
 	require.Zero(t, repo.projected)
 	require.Nil(t, repo.purchaseDelivery)
 
-	// A later provider response may no longer contain the first message. The
-	// append-only fact must still be replayed from MySQL and made visible.
 	_, matched, _, err := uc.ingestFetchedMessagesForResourcesWithFence(context.Background(), nil, domain.ResourceTypeMicrosoft, []uint{1}, func(context.Context) error {
 		fenceCalls++
 		return nil
@@ -270,6 +393,31 @@ func TestAppendOnlyIngestDoesNotProjectBeforeSecondFence(t *testing.T) {
 	require.Equal(t, []domain.ResourceType{domain.ResourceTypeMicrosoft, domain.ResourceTypeMicrosoft}, repo.replayTypes)
 	require.NotNil(t, repo.purchaseDelivery)
 	require.Equal(t, "123456", repo.purchaseDelivery.VerificationCode)
+}
+
+func TestDomainFixedScopeIngestNeverReplaysResourceHistory(t *testing.T) {
+	now := time.Now().UTC()
+	repo := &appendFenceRepoStub{matchingRepoStub: &matchingRepoStub{}}
+	uc := NewUseCase(repo, nil, nil, &matchResultStub{})
+
+	_, matched, _, err := uc.ingestFetchedMessagesForScope(context.Background(), []FetchedMessage{{
+		EmailResourceID: 1, ResourceType: domain.ResourceTypeDomain,
+		Recipient: "user@example.com", Sender: "sender@example.net",
+		Body: "Your code is 123456", ReceivedAt: now,
+	}}, OrderScope{
+		OrderID: 42, OrderNo: "OR_DOMAIN", EmailResourceID: 1,
+		AllocationType: domain.ResourceTypeDomain, Recipient: "user@example.com", RecipientKind: "exact",
+		ServiceMode: "code", OrderStatus: "active", LooseMatch: true,
+		Rules: []MailRule{
+			{Type: MailRuleRecipient, Pattern: "exact", Enabled: true},
+			{Type: MailRuleSender, Pattern: `sender@example\.net`, Enabled: true},
+			{Type: MailRuleBody, Pattern: `(\d{6})`, Enabled: true},
+		},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, matched)
+	require.Empty(t, repo.replayTypes)
 }
 
 func TestPickupMessageCacheMatchesExplicitAliasOnLaterRequest(t *testing.T) {
@@ -538,12 +686,6 @@ func TestPickupRequestLegacyExpirationRemainsTwoMinutes(t *testing.T) {
 	require.Equal(t, requestedAt.Add(2*time.Minute), (PickupRequestFetchTask{RequestedAt: requestedAt}).EffectiveExpiresAt())
 }
 
-func TestProjectionReplayLimitIsLocallyBounded(t *testing.T) {
-	defer runtimeconfig.Delete("projection_replay_limit")
-	runtimeconfig.Set("projection_replay_limit", "2147483647")
-	require.Equal(t, maxProjectionReplayLimit, boundedRuntimeInt("projection_replay_limit", projectionReplayLimit, maxProjectionReplayLimit))
-}
-
 func TestFetchLookbackWindowAppliesWhenTaskHasNoExplicitWindow(t *testing.T) {
 	defer runtimeconfig.Delete("fetch_lookback_window_days")
 	runtimeconfig.Set("fetch_lookback_window_days", "7")
@@ -769,11 +911,21 @@ type pickupBatchReaderStub struct {
 	requestCalls  int
 	blockRequest  bool
 	requestedJobs []*domain.FetchJob
+	codeLimit     int
+	purchaseLimit int
+	mailboxReads  int
 }
 
-func (r *pickupBatchReaderStub) ReadPickupBatch(context.Context, []PickupCredential, time.Time, int) ([]PickupBatchRead, error) {
+func (r *pickupBatchReaderStub) ReadPickupBatch(_ context.Context, _ []PickupCredential, _ time.Time, codeLimit, purchaseLimit int) ([]PickupBatchRead, error) {
 	r.calls++
+	r.codeLimit = codeLimit
+	r.purchaseLimit = purchaseLimit
 	return r.reads, nil
+}
+
+func (r *pickupBatchReaderStub) ListDomainMailboxMessages(context.Context, OrderScope, time.Time, time.Time, int) ([]FetchedMessage, error) {
+	r.mailboxReads++
+	return nil, nil
 }
 
 func (r *pickupBatchReaderStub) LoadOrderScopeForServiceToken(_ context.Context, orderNo string) (*OrderScope, error) {
@@ -912,6 +1064,10 @@ func (s *pickupFetchStateStub) snapshot() ([]uint, int) {
 }
 
 func TestListPickupMailBatchUsesBulkReader(t *testing.T) {
+	defer runtimeconfig.Delete("code_read_limit")
+	defer runtimeconfig.Delete("purchase_read_limit")
+	runtimeconfig.Set("code_read_limit", "2")
+	runtimeconfig.Set("purchase_read_limit", "17")
 	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
 	repo := &pickupBatchReaderStub{reads: []PickupBatchRead{
 		{
@@ -954,6 +1110,8 @@ func TestListPickupMailBatchUsesBulkReader(t *testing.T) {
 	})
 
 	require.Equal(t, 1, repo.calls)
+	require.Equal(t, 2, repo.codeLimit)
+	require.Equal(t, 17, repo.purchaseLimit)
 	require.Zero(t, repo.txCalls)
 	require.Zero(t, repo.lockCalls)
 	require.Zero(t, repo.requestCalls)
@@ -971,6 +1129,31 @@ func TestListPickupMailBatchUsesBulkReader(t *testing.T) {
 	require.NoError(t, results[2].Err)
 	require.Equal(t, uint(303), results[2].Items[0].ID)
 	require.ErrorIs(t, results[3].Err, domain.ErrPickupCredentialInvalid)
+}
+
+func TestListPickupMailBatchSkipsDeliveredDomainCodeMailbox(t *testing.T) {
+	now := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
+	delivery := domain.Message{ID: 7, Recipient: "user@example.com", VerificationCode: "123456", ReceivedAt: now}
+	repo := &pickupBatchReaderStub{reads: []PickupBatchRead{{
+		Scope: &OrderScope{
+			OrderID: 1, OrderNo: "ORDER-DOMAIN", ServiceMode: "code", OrderStatus: "active",
+			AllocationType: domain.ResourceTypeDomain, EmailResourceID: 9, Recipient: "user@example.com",
+		},
+		Delivery: &OrderDelivery{Message: &delivery, ReceivedAt: now},
+	}}}
+	uc := NewUseCase(repo, nil, nil, nil)
+	uc.now = func() time.Time { return now }
+
+	results := uc.ListPickupMailBatch(context.Background(), []PickupCredential{{
+		Email: "user@example.com", Token: "token",
+	}})
+
+	require.Len(t, results, 1)
+	require.NoError(t, results[0].Err)
+	require.Len(t, results[0].Items, 1)
+	require.Equal(t, uint(7), results[0].Items[0].ID)
+	require.Equal(t, 1, repo.calls)
+	require.Zero(t, repo.mailboxReads)
 }
 
 func TestSchedulePickupRequestKeepsAllOrdersForSharedResource(t *testing.T) {
@@ -1178,6 +1361,14 @@ func TestRecipientRulesNormalizePlusAndDotAliases(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDomainRecipientAliasesMatchCanonicalMailboxAsExact(t *testing.T) {
+	scope := OrderScope{Recipient: "username@example.com", RecipientKind: "exact"}
+	message := FetchedMessage{ResourceType: domain.ResourceTypeDomain, Recipient: "User.Name+tag@Example.COM"}
+
+	require.True(t, matchRecipientPatterns([]string{"exact"}, message, scope))
+	require.False(t, matchRecipientPatterns([]string{"plus"}, message, scope))
 }
 
 func TestGmailRecipientRulesNormalizeGooglemailDotAndPlusAliases(t *testing.T) {
@@ -1588,6 +1779,20 @@ func TestGmailMessageDedupeUsesIMAPUID(t *testing.T) {
 	require.Equal(t, messageDedupeKey(message), messageDedupeKey(message))
 }
 
+func TestDomainMessageDedupeIncludesCanonicalMailbox(t *testing.T) {
+	message := FetchedMessage{
+		ResourceType: domain.ResourceTypeDomain, MessageIDHeader: "same@example.net",
+		Recipient: "User.One+tag@example.com", Body: "code 123456", ReceivedAt: time.Now().UTC(),
+	}
+	alias := message
+	alias.Recipient = "userone@example.com"
+	otherMailbox := message
+	otherMailbox.Recipient = "user.two@example.com"
+
+	require.Equal(t, messageDedupeKey(message), messageDedupeKey(alias))
+	require.NotEqual(t, messageDedupeKey(message), messageDedupeKey(otherMailbox))
+}
+
 func TestHistoricalMessageMatchesProjectWithoutVerificationCode(t *testing.T) {
 	scope := HistoricalProjectScope{
 		ProjectID:  10,
@@ -1749,7 +1954,7 @@ func TestLaterPullNotifiesWithImmutableDeliveryHead(t *testing.T) {
 	require.Equal(t, base, matches.results[1].MatchedAt)
 }
 
-func TestCodePickupIncludesOtherStoredMessagesAfterDelivery(t *testing.T) {
+func TestCodePickupReadLimitStillAppliesAfterDelivery(t *testing.T) {
 	now := time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC)
 	scope := OrderScope{
 		OrderID: 1, OrderNo: "OR_CODE", EmailResourceID: 1,
@@ -1768,7 +1973,6 @@ func TestCodePickupIncludesOtherStoredMessagesAfterDelivery(t *testing.T) {
 
 	require.NoError(t, err)
 	require.True(t, hasDelivery)
-	require.Len(t, items, 2)
+	require.Len(t, items, 1)
 	require.Equal(t, uint(delivered.ID), items[0].ID)
-	require.Equal(t, uint(other.ID), items[1].ID)
 }

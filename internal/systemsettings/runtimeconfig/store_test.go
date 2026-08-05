@@ -253,7 +253,7 @@ func TestValidateSystemOperationsSettings(t *testing.T) {
 	for _, key := range []string{
 		"admin_resource_list_max_limit", "admin_log_max_limit", "admin_task_max_limit", "admin_message_max_limit",
 		"api_key_meta_ttl_seconds", "api_key_cache_flush_interval_seconds",
-		"inventory_cache_activity_ttl_minutes",
+		"inventory_cache_activity_ttl_minutes", "message_scan_limit", "projection_replay_limit",
 	} {
 		require.ErrorIs(t, Validate(key, "100"), domain.ErrInvalidKey)
 	}

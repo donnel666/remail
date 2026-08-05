@@ -21,6 +21,8 @@ type fakeRepo struct {
 	closeCalls  []CloseParams
 	readCalls   []bool
 	attachment  *domain.TicketAttachment
+	receipts    map[uint]bool
+	ignored     []uint
 }
 
 func (f *fakeRepo) Create(_ context.Context, params CreateTicketParams) (*domain.Ticket, error) {
@@ -79,6 +81,29 @@ func (f *fakeRepo) Reply(_ context.Context, params ReplyParams) (*domain.Ticket,
 		f.ticket.Status = domain.TicketStatusProcessing
 	}
 	return f.ticket, nil
+}
+
+func (f *fakeRepo) ReplyInbound(ctx context.Context, inboundMailID uint, params ReplyParams) (*domain.Ticket, bool, error) {
+	if f.receipts == nil {
+		f.receipts = make(map[uint]bool)
+	}
+	if f.receipts[inboundMailID] {
+		return nil, false, nil
+	}
+	f.receipts[inboundMailID] = true
+	ticket, err := f.Reply(ctx, params)
+	return ticket, err == nil, err
+}
+
+func (f *fakeRepo) IgnoreInboundReply(_ context.Context, inboundMailID uint, _ string) error {
+	if f.receipts == nil {
+		f.receipts = make(map[uint]bool)
+	}
+	if !f.receipts[inboundMailID] {
+		f.receipts[inboundMailID] = true
+		f.ignored = append(f.ignored, inboundMailID)
+	}
+	return nil
 }
 
 func (f *fakeRepo) MarkRead(_ context.Context, _ string, platformSide bool) (*domain.Ticket, error) {
@@ -175,6 +200,20 @@ type fakeMail struct {
 func (f *fakeMail) SendTicketMail(_ context.Context, mail TicketMailCommand) error {
 	f.sent = append(f.sent, mail)
 	return nil
+}
+
+type fakeInboundMailbox struct {
+	messages []InboundMailboxMessage
+	calls    int
+	since    time.Time
+	limit    int
+}
+
+func (f *fakeInboundMailbox) ListTicketReplies(_ context.Context, _ string, since time.Time, limit int) ([]InboundMailboxMessage, error) {
+	f.calls++
+	f.since = since
+	f.limit = limit
+	return f.messages, nil
 }
 
 func newTestUseCase() (*UseCase, *fakeRepo, *fakeRefundPort, *fakeFileStore) {
@@ -275,6 +314,45 @@ func TestCheckOrderEligibility(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Orchestration
 // ---------------------------------------------------------------------------
+
+func TestGetTicketSyncsLocalInboundReplyOnce(t *testing.T) {
+	uc, repo, _, _ := newTestUseCase()
+	createdAt := uc.now().Add(-time.Hour)
+	repo.ticket = &domain.Ticket{
+		TicketNo: "AS1", Title: "help", ReplyToken: "tok", RequesterUserID: 7,
+		Status: domain.TicketStatusOpen, CreatedAt: createdAt,
+		Messages: []domain.TicketMessage{{ID: 1, TicketNo: "AS1", SenderType: domain.SenderTypeUser, Content: "first"}},
+	}
+	uc.SetOwnerLookupPort(fakeOwners{admins: []RequesterSummary{{
+		ID: 42, Email: "admin@example.com", Nickname: "Admin", Role: "super_admin", Enabled: true,
+	}}})
+	mailer := &fakeMail{}
+	uc.mail = mailer
+	mailbox := &fakeInboundMailbox{messages: []InboundMailboxMessage{{
+		ID: 101, Recipient: "support+as1-tok@tickets.example.com", EnvelopeFrom: "customer@example.com",
+		Raw: []byte("From: customer@example.com\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\nEmail reply\r\n"),
+	}}}
+	uc.SetInboundMailboxPort(mailbox)
+
+	view, err := uc.GetTicket(context.Background(), "AS1", 7, false)
+	if err != nil {
+		t.Fatalf("first get: %v", err)
+	}
+	if len(view.Ticket.Messages) != 2 || len(repo.replyCalls) != 1 || len(mailer.sent) != 1 {
+		t.Fatalf("messages=%d replies=%d mails=%d", len(view.Ticket.Messages), len(repo.replyCalls), len(mailer.sent))
+	}
+	if mailbox.limit != inboundReplyReadLimit || !mailbox.since.Equal(createdAt) {
+		t.Fatalf("mailbox window since=%v limit=%d", mailbox.since, mailbox.limit)
+	}
+
+	view, err = uc.GetTicket(context.Background(), "AS1", 7, false)
+	if err != nil {
+		t.Fatalf("second get: %v", err)
+	}
+	if len(view.Ticket.Messages) != 2 || len(repo.replyCalls) != 1 || len(mailer.sent) != 1 {
+		t.Fatalf("duplicate sync messages=%d replies=%d mails=%d", len(view.Ticket.Messages), len(repo.replyCalls), len(mailer.sent))
+	}
+}
 
 func TestCreateTicketGeneral(t *testing.T) {
 	uc, repo, _, files := newTestUseCase()

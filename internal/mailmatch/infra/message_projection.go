@@ -117,11 +117,10 @@ func (r *Repo) resolveAppendedMessages(ctx context.Context, messages []domain.Me
 	return stored, nil
 }
 
-// ListUnprojectedMessages returns the newest facts whose matching decision was
-// not committed. A later fetch for the same resource replays these rows even
-// when Microsoft no longer includes them in its newest-message response.
+// ListUnprojectedMessages returns a bounded set of remote-mail facts whose
+// matching transaction did not commit. Domain mailboxes deliberately never use it.
 func (r *Repo) ListUnprojectedMessages(ctx context.Context, resourceType domain.ResourceType, emailResourceIDs []uint, limit int) ([]domain.Message, error) {
-	if (resourceType != domain.ResourceTypeMicrosoft && resourceType != domain.ResourceTypeDomain && resourceType != domain.ResourceTypeGmail) || len(emailResourceIDs) == 0 || limit <= 0 {
+	if (resourceType != domain.ResourceTypeMicrosoft && resourceType != domain.ResourceTypeGmail) || len(emailResourceIDs) == 0 || limit <= 0 {
 		return nil, nil
 	}
 	var rows []MessageModel

@@ -22,6 +22,7 @@ func TestDefaultSettingsAreValidAndIndependent(t *testing.T) {
 		"admin_resource_list_max_limit", "admin_log_max_limit", "admin_task_max_limit", "admin_message_max_limit",
 		"api_key_meta_ttl_seconds", "api_key_cache_flush_interval_seconds",
 		"bucket_count", "inventory_cache_activity_ttl_minutes", "msacl_content_search_window_minutes", "outbound_mail_claim_timeout_minutes",
+		"message_scan_limit", "projection_replay_limit",
 	} {
 		if _, exists := keys[key]; exists {
 			t.Fatalf("removed key %q is still seeded", key)

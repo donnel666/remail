@@ -33,6 +33,7 @@ type UseCase struct {
 	supplierWallet SupplierWalletPort
 	mail           MailPort
 	mailConfig     TicketMailConfig
+	inbound        InboundMailboxPort
 	now            func() time.Time
 }
 
@@ -60,6 +61,8 @@ func (uc *UseCase) SetOwnerLookupPort(owners OwnerLookupPort) { uc.owners = owne
 
 // SetSupplierWalletPort attaches billing's wallet query at the composition root.
 func (uc *UseCase) SetSupplierWalletPort(wallet SupplierWalletPort) { uc.supplierWallet = wallet }
+
+func (uc *UseCase) SetInboundMailboxPort(inbound InboundMailboxPort) { uc.inbound = inbound }
 
 func (uc *UseCase) ListTickets(ctx context.Context, filter ListFilter, offset int, afterID uint, limit int) (*TicketListResult, error) {
 	if limit <= 0 || limit > 1000 {
@@ -97,6 +100,16 @@ func (uc *UseCase) GetTicket(ctx context.Context, ticketNo string, userID uint, 
 	}
 	if !isAdmin && ticket.RequesterUserID != userID {
 		return nil, domain.ErrTicketForbidden
+	}
+	changed, err := uc.syncInboundReplies(ctx, ticket)
+	if err != nil {
+		return nil, err
+	}
+	if changed {
+		ticket, err = uc.repo.Get(ctx, ticketNo, true)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return uc.viewOf(ctx, ticket)
 }

@@ -26,16 +26,19 @@ func TestRetentionRunOnceDeletesInboundObjectsAndOrphans(t *testing.T) {
 	oldRecordedKey := "mailtransport/inbound/2026/03/01/recorded.eml"
 	oldOrphanKey := "mailtransport/inbound/2026/03/01/orphan.eml"
 	oldReferencedKey := "mailtransport/inbound/2026/03/01/referenced.eml"
+	oldSharedKey := "mailtransport/inbound/2026/03/01/shared.eml"
 	recentOrphanKey := "mailtransport/inbound/2026/07/09/recent.eml"
 
 	repo := &retentionRepoStub{
 		inboundRows: map[uint64]string{
 			1: oldRecordedKey,
+			2: oldSharedKey,
 		},
 		messageCutoffs: make(map[string]time.Time),
-		existingKeys: map[string]struct{}{
-			oldRecordedKey:   {},
-			oldReferencedKey: {},
+		referenceCounts: map[string]int{
+			oldRecordedKey:   1,
+			oldReferencedKey: 1,
+			oldSharedKey:     2,
 		},
 	}
 	files := &retentionFileStoreStub{
@@ -50,6 +53,10 @@ func TestRetentionRunOnceDeletesInboundObjectsAndOrphans(t *testing.T) {
 			},
 			oldReferencedKey: {
 				ObjectKey:    oldReferencedKey,
+				LastModified: now.AddDate(0, 0, -120),
+			},
+			oldSharedKey: {
+				ObjectKey:    oldSharedKey,
 				LastModified: now.AddDate(0, 0, -120),
 			},
 			recentOrphanKey: {
@@ -73,6 +80,7 @@ func TestRetentionRunOnceDeletesInboundObjectsAndOrphans(t *testing.T) {
 	require.NotContains(t, files.objects, oldRecordedKey)
 	require.NotContains(t, files.objects, oldOrphanKey)
 	require.Contains(t, files.objects, oldReferencedKey)
+	require.Contains(t, files.objects, oldSharedKey)
 	require.Contains(t, files.objects, recentOrphanKey)
 	require.Empty(t, repo.inboundRows)
 	require.Equal(t, now.AddDate(0, 0, -3), repo.messageCutoffs["microsoft"])
@@ -84,10 +92,10 @@ func TestRetentionRunOnceDeletesInboundObjectsAndOrphans(t *testing.T) {
 }
 
 type retentionRepoStub struct {
-	inboundRows    map[uint64]string
-	messageCutoffs map[string]time.Time
-	gmailCutoff    time.Time
-	existingKeys   map[string]struct{}
+	inboundRows     map[uint64]string
+	messageCutoffs  map[string]time.Time
+	gmailCutoff     time.Time
+	referenceCounts map[string]int
 }
 
 func (r *retentionRepoStub) DeleteIdempotencyKeysBefore(context.Context, time.Time, int) (int64, error) {
@@ -132,7 +140,7 @@ func (r *retentionRepoStub) ListInboundMailObjectsBefore(context.Context, time.T
 func (r *retentionRepoStub) ListExistingInboundObjectKeys(_ context.Context, objectKeys []string) (map[string]struct{}, error) {
 	out := make(map[string]struct{}, len(objectKeys))
 	for _, objectKey := range objectKeys {
-		if _, ok := r.existingKeys[objectKey]; ok {
+		if r.referenceCounts[objectKey] > 0 {
 			out[objectKey] = struct{}{}
 		}
 	}
@@ -144,7 +152,7 @@ func (r *retentionRepoStub) DeleteInboundMailsByID(_ context.Context, ids []uint
 	for _, id := range ids {
 		if objectKey, ok := r.inboundRows[id]; ok {
 			delete(r.inboundRows, id)
-			delete(r.existingKeys, objectKey)
+			r.referenceCounts[objectKey]--
 			deleted++
 		}
 	}

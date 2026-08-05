@@ -14,7 +14,6 @@ import (
 	"github.com/donnel666/remail/internal/mailmatch/app"
 	"github.com/donnel666/remail/internal/mailmatch/domain"
 	"github.com/donnel666/remail/internal/platform"
-	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -45,8 +44,6 @@ type MessageModel struct {
 	CreatedAt         time.Time      `gorm:"not null;autoCreateTime;column:created_at"`
 	UpdatedAt         time.Time      `gorm:"not null;autoUpdateTime;column:updated_at"`
 }
-
-const maxMailmatchReadWindowSkew = 24 * time.Hour
 
 func (MessageModel) TableName() string { return "mailmatch_messages" }
 
@@ -189,14 +186,18 @@ func (r *Repo) ReadPickupBatch(
 	ctx context.Context,
 	credentials []app.PickupCredential,
 	now time.Time,
-	limit int,
+	codeLimit int,
+	purchaseLimit int,
 ) ([]app.PickupBatchRead, error) {
 	reads := make([]app.PickupBatchRead, len(credentials))
 	if len(credentials) == 0 {
 		return reads, nil
 	}
-	if limit <= 0 {
-		limit = 40
+	if codeLimit <= 0 {
+		codeLimit = 1
+	}
+	if purchaseLimit <= 0 {
+		purchaseLimit = 30
 	}
 
 	tokens := make([]string, 0, len(credentials))
@@ -276,7 +277,7 @@ func (r *Repo) ReadPickupBatch(
 		if err != nil {
 			return err
 		}
-		messages, err := r.readPickupMessages(txCtx, orderIDs, validScopeRows, now, limit)
+		messages, err := r.readPickupMessages(txCtx, orderIDs, validScopeRows, now, codeLimit, purchaseLimit)
 		if err != nil {
 			return err
 		}
@@ -340,35 +341,30 @@ func (r *Repo) readPickupMessages(
 	orderIDs []uint,
 	scopeRows []orderScopeRow,
 	now time.Time,
-	limit int,
+	codeLimit int,
+	purchaseLimit int,
 ) (map[uint][]domain.Message, error) {
 	result := make(map[uint][]domain.Message, len(orderIDs))
 	start := now
 	end := now
+	windowSet := false
 	for _, row := range scopeRows {
-		candidate := now.Add(-30 * 24 * time.Hour)
-		if domain.ResourceType(row.AllocationType) == domain.ResourceTypeMicrosoft {
-			candidate = now.Add(-3 * 24 * time.Hour)
+		scope := row.toScope(nil)
+		candidateStart, candidateEnd := app.OrderReadWindow(*scope, now)
+		if !windowSet || candidateStart.Before(start) {
+			start = candidateStart
 		}
-		if row.ReceiveStartedAt != nil {
-			serviceStart := row.ReceiveStartedAt.Add(-min(runtimeconfig.Duration("read_window_skew_minutes", 2*time.Minute, time.Minute, 1), maxMailmatchReadWindowSkew))
-			if serviceStart.After(candidate) {
-				candidate = serviceStart
-			}
+		if !windowSet || candidateEnd.After(end) {
+			end = candidateEnd
 		}
-		if candidate.Before(start) {
-			start = candidate
-		}
-		if row.ServiceMode == "code" && row.ReceiveUntil != nil && row.ReceiveUntil.After(end) {
-			end = *row.ReceiveUntil
-		}
+		windowSet = true
 	}
 	var models []MessageModel
 	query := fmt.Sprintf(`
-SELECT id, email_resource_id, resource_type, matched_order_id, recipient, recipients_json,
-       sender, subject, body_preview, verification_code, message_id_header,
-       provider_message_id, dedupe_key, protocol, folder, status, match_diagnostic,
-       received_at, created_at, updated_at
+SELECT ranked.id, ranked.email_resource_id, ranked.resource_type, ranked.matched_order_id, ranked.recipient, ranked.recipients_json,
+       ranked.sender, ranked.subject, ranked.body_preview, ranked.verification_code, ranked.message_id_header,
+       ranked.provider_message_id, ranked.dedupe_key, ranked.protocol, ranked.folder, ranked.status, ranked.match_diagnostic,
+       ranked.received_at, ranked.created_at, ranked.updated_at
 FROM (
 	    SELECT owned.*,
 	           ROW_NUMBER() OVER (
@@ -392,13 +388,14 @@ FROM (
 	          AND m.received_at <= ?
 	    ) AS owned
 ) AS ranked
-WHERE ranked.rn <= ?
+JOIN orders AS pickup_order ON pickup_order.id = ranked.matched_order_id
+WHERE ranked.rn <= CASE WHEN pickup_order.service_mode = 'code' THEN ? ELSE ? END
 	ORDER BY ranked.matched_order_id ASC, ranked.received_at DESC, ranked.id DESC`,
 		projectionOwnedMessageColumns(false), legacyMessageColumns(false))
 	err := r.dbFor(ctx).Raw(query,
 		orderIDs, start, end,
 		orderIDs, start, end,
-		limit,
+		codeLimit, purchaseLimit,
 	).Scan(&models).Error
 	if err != nil {
 		return nil, fmt.Errorf("read pickup messages: %w", err)
@@ -673,47 +670,6 @@ WHERE ma.resource_id = ?
   )
 ORDER BY o.created_at ASC, o.id ASC`
 
-const domainMatchingScopesSQL = `
-SELECT
-	    o.id AS order_id,
-    o.order_no,
-    o.user_id,
-    o.project_id,
-    o.project_product_id AS product_id,
-    o.service_mode,
-    o.status AS order_status,
-    o.allocation_type,
-    da.id AS allocation_id,
-    'exact' AS recipient_kind,
-    da.resource_id AS email_resource_id,
-    da.email AS recipient,
-    o.receive_started_at,
-    o.receive_until,
-    o.activated_at,
-    o.after_sale_until,
-    p.loose_match,
-    '' AS microsoft_email,
-    '' AS microsoft_client_id,
-    '' AS microsoft_rt,
-    0 AS credential_revision
-FROM domain_allocations da
-JOIN orders o ON o.domain_alloc_id = da.id AND o.allocation_type = 'domain'
-JOIN projects p ON p.id = o.project_id
-WHERE da.resource_id = ?
-  AND da.email = ?
-  AND da.status = 'allocated'
-  AND (o.receive_started_at IS NULL OR ? >= DATE_SUB(o.receive_started_at, INTERVAL 2 MINUTE))
-  AND (
-    (
-      o.service_mode = 'code'
-      AND o.status = 'active'
-      AND (o.receive_until IS NULL OR ? <= o.receive_until)
-    )
-    OR
-    (o.service_mode = 'purchase' AND o.status IN ('active', 'completed'))
-  )
-ORDER BY o.created_at ASC, o.id ASC`
-
 const gmailMatchingScopesSQL = `
 SELECT
     o.id AS order_id,
@@ -831,22 +787,7 @@ func (r *Repo) ListOrderMessages(ctx context.Context, scope app.OrderScope, limi
 		limit = 30
 	}
 	now := time.Now().UTC()
-	start := now.Add(-30 * 24 * time.Hour)
-	if scope.AllocationType == domain.ResourceTypeMicrosoft {
-		start = now.Add(-3 * 24 * time.Hour)
-	}
-	if scope.ReceiveStartedAt != nil {
-		serviceStart := scope.ReceiveStartedAt.Add(-min(runtimeconfig.Duration("read_window_skew_minutes", 2*time.Minute, time.Minute, 1), maxMailmatchReadWindowSkew))
-		if serviceStart.After(start) {
-			start = serviceStart
-		}
-	}
-	end := now
-	if scope.ServiceMode == "code" {
-		if scope.ReceiveUntil != nil {
-			end = *scope.ReceiveUntil
-		}
-	}
+	start, end := app.OrderReadWindow(scope, now)
 	var models []MessageModel
 	query := fmt.Sprintf(`
 SELECT *
@@ -992,8 +933,6 @@ func (r *Repo) ListMatchingScopesByRecipient(ctx context.Context, resourceType d
 				rows = exact
 			}
 		}
-	case domain.ResourceTypeDomain:
-		err = r.dbFor(ctx).Raw(domainMatchingScopesSQL, emailResourceID, recipient, receivedAt, receivedAt).Scan(&rows).Error
 	case domain.ResourceTypeGmail:
 		_, _, canonical, ok := domain.RecipientAliasForms(recipient)
 		if !ok {

@@ -3,6 +3,8 @@ package domain
 import (
 	"errors"
 	"time"
+
+	"github.com/donnel666/remail/internal/mailbox"
 )
 
 var (
@@ -45,7 +47,8 @@ type InboundMail struct {
 	ID                uint                `json:"id"`
 	EnvelopeFrom      string              `json:"envelopeFrom"`
 	HeaderFrom        string              `json:"headerFrom"`
-	Recipient         string              `json:"recipient"`
+	Recipient         string              `json:"recipient"`  // Original SMTP envelope recipient.
+	MailboxKey        string              `json:"mailboxKey"` // Normalized bucket key; never replaces Recipient.
 	Subject           string              `json:"subject"`
 	BodyPreview       string              `json:"bodyPreview"`
 	VerificationCode  string              `json:"verificationCode"`
@@ -78,9 +81,11 @@ type InboundMailSummary struct {
 }
 
 func NewInboundMail(envelopeFrom string, recipient InboundRecipient, sourceObjectKey string, now time.Time) *InboundMail {
+	_, mailboxKey, _ := mailbox.Address(recipient.Email)
 	return &InboundMail{
 		EnvelopeFrom:      envelopeFrom,
 		Recipient:         recipient.Email,
+		MailboxKey:        mailboxKey,
 		ResourceID:        recipient.ResourceID,
 		ResourceType:      recipient.ResourceType,
 		OwnerUserID:       recipient.OwnerUserID,

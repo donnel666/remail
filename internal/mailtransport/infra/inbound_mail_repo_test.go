@@ -11,7 +11,7 @@ import (
 func TestInboundMailModelRoundTripKeepsDispatchState(t *testing.T) {
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	mail := domain.NewInboundMail("sender@test.local", domain.InboundRecipient{
-		Email:        "recipient@test.local",
+		Email:        "Recipient.Name+Tag@Test.Local",
 		ResourceID:   42,
 		ResourceType: domain.InboundResourceDomain,
 		OwnerUserID:  7,
@@ -26,4 +26,6 @@ func TestInboundMailModelRoundTripKeepsDispatchState(t *testing.T) {
 	assert.Equal(t, mail.Status, roundTrip.Status)
 	assert.Equal(t, mail.ProcessGeneration, roundTrip.ProcessGeneration)
 	assert.Equal(t, mail.ProcessAttempts, roundTrip.ProcessAttempts)
+	assert.Equal(t, "Recipient.Name+Tag@Test.Local", roundTrip.Recipient)
+	assert.Equal(t, "recipientname@test.local", roundTrip.MailboxKey)
 }

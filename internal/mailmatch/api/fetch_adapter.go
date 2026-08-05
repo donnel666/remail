@@ -65,7 +65,10 @@ func (a *MicrosoftFetchAdapter) FetchMicrosoftMessages(ctx context.Context, req 
 		}
 	}
 	var lastFailure *mailmatchapp.MailFetchFailure
-	maxMessages := runtimeconfig.Int("purchase_read_limit", 30, 1)
+	maxMessages := req.MaxMessages
+	if maxMessages <= 0 {
+		maxMessages = mailmatchapp.OrderReadLimit(req.Scope)
+	}
 	sinceAt := req.SinceAt
 	untilAt := req.UntilAt
 	stopAfterLimit := req.Realtime

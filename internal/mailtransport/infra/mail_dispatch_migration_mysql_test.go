@@ -22,12 +22,12 @@ func TestMailDispatchStateMigrationReleasesInflightRowsMySQL(t *testing.T) {
 	db := server.Database(t, copyMigrationsThrough(t, 28))
 
 	require.NoError(t, db.Exec("INSERT INTO users(id, email, password_hash, role) VALUES (99001, 'mail-dispatch@test.local', 'hash', 'supplier')").Error)
-	require.NoError(t, db.Exec("INSERT INTO email_resources(id, type, owner_user_id) VALUES (99002, 'domain', 99001)").Error)
+	require.NoError(t, db.Exec("INSERT INTO email_resources(id, type, owner_user_id) VALUES (99002, 'microsoft', 99001)").Error)
 	require.NoError(t, db.Exec(`
 INSERT INTO inbound_mails(
     envelope_from, recipient, resource_id, resource_type, owner_user_id,
     source_object_key, status
-) VALUES ('sender@test.local', 'recipient@test.local', 99002, 'domain', 99001, 'mail.eml', 'processing')`).Error)
+) VALUES ('sender@test.local', 'recipient@test.local', 99002, 'microsoft', 99001, 'mail.eml', 'processing')`).Error)
 	require.NoError(t, db.Exec(`
 INSERT INTO outbound_mails(
     idempotency_key, request_hash, purpose, sender, recipient, subject,

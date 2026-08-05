@@ -16,6 +16,7 @@ type InboundMailModel struct {
 	EnvelopeFrom      string     `gorm:"type:varchar(320);not null;column:envelope_from"`
 	HeaderFrom        string     `gorm:"type:varchar(320);not null;default:'';column:header_from"`
 	Recipient         string     `gorm:"type:varchar(320);not null"`
+	MailboxKey        string     `gorm:"type:varchar(320);not null;default:'';column:mailbox_key"`
 	Subject           string     `gorm:"type:varchar(500);not null;default:''"`
 	BodyPreview       string     `gorm:"type:varchar(1000);not null;default:'';column:body_preview"`
 	VerificationCode  string     `gorm:"type:varchar(64);not null;default:'';column:verification_code"`
@@ -44,6 +45,7 @@ func (m *InboundMailModel) toDomain() *domain.InboundMail {
 		EnvelopeFrom:      m.EnvelopeFrom,
 		HeaderFrom:        m.HeaderFrom,
 		Recipient:         m.Recipient,
+		MailboxKey:        m.MailboxKey,
 		Subject:           m.Subject,
 		BodyPreview:       m.BodyPreview,
 		VerificationCode:  m.VerificationCode,
@@ -69,6 +71,7 @@ func inboundMailFromDomain(mail domain.InboundMail) *InboundMailModel {
 		EnvelopeFrom:      mail.EnvelopeFrom,
 		HeaderFrom:        mail.HeaderFrom,
 		Recipient:         mail.Recipient,
+		MailboxKey:        mail.MailboxKey,
 		Subject:           mail.Subject,
 		BodyPreview:       mail.BodyPreview,
 		VerificationCode:  mail.VerificationCode,
@@ -127,6 +130,26 @@ func (r *InboundMailRepo) FindByID(ctx context.Context, id uint) (*domain.Inboun
 	return model.toDomain(), nil
 }
 
+func (r *InboundMailRepo) MarkAcceptedStored(ctx context.Context, ids []uint) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	result := r.db.WithContext(ctx).Model(&InboundMailModel{}).
+		Where("id IN ? AND status = ?", ids, string(domain.InboundStatusPending)).
+		Updates(map[string]any{
+			"status":         string(domain.InboundStatusStored),
+			"failure_reason": "",
+			"updated_at":     time.Now().UTC(),
+		})
+	if result.Error != nil {
+		return fmt.Errorf("mark accepted inbound mails stored: %w", result.Error)
+	}
+	if result.RowsAffected != int64(len(ids)) {
+		return fmt.Errorf("mark accepted inbound mails stored: updated %d of %d", result.RowsAffected, len(ids))
+	}
+	return nil
+}
+
 func (r *InboundMailRepo) ActivateProcessing(ctx context.Context, id uint, generation uint64) (bool, error) {
 	result := r.db.WithContext(ctx).Model(&InboundMailModel{}).
 		Where("id = ? AND status = ? AND process_generation = ?", id, string(domain.InboundStatusPending), generation).
@@ -148,7 +171,7 @@ func (r *InboundMailRepo) ListPending(ctx context.Context, limit int) ([]domain.
 	var models []InboundMailModel
 	if err := r.db.WithContext(ctx).
 		Select("id", "process_generation").
-		Where("status = ?", string(domain.InboundStatusPending)).
+		Where("status = ? AND resource_type = ?", string(domain.InboundStatusPending), string(domain.InboundResourceMicrosoft)).
 		Order("created_at ASC, id ASC").
 		Limit(limit).
 		Find(&models).Error; err != nil {

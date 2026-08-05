@@ -2,7 +2,7 @@ package runtimeconfig
 
 import "github.com/donnel666/remail/internal/systemsettings/domain"
 
-const DefaultSettingsCount = 228
+const DefaultSettingsCount = 226
 
 // DefaultSettings is the single source of initial values for runtime-managed
 // settings. Startup inserts only keys that are not in storage.
@@ -116,8 +116,6 @@ var defaultSettings = []domain.Setting{
 	{Key: "read_window_skew_minutes", Value: "2"},
 	{Key: "code_read_limit", Value: "1"},
 	{Key: "purchase_read_limit", Value: "30"},
-	{Key: "message_scan_limit", Value: "40"},
-	{Key: "projection_replay_limit", Value: "100"},
 	{Key: "pickup_fetch_reserve_ttl_minutes", Value: "2"},
 	{Key: "pickup_fetch_lease_ttl_minutes", Value: "2"},
 	{Key: "pickup_message_cache_ttl_seconds", Value: "10"},

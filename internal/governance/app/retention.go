@@ -195,8 +195,18 @@ func (s *RetentionService) deleteInboundMails(ctx context.Context, before time.T
 			return fmt.Sprintf("inbound_mails=%d", total)
 		}
 		ids := make([]uint64, 0, len(objects))
+		objectKeys := make([]string, 0, len(objects))
+		seenObjectKeys := make(map[string]struct{}, len(objects))
 		for _, object := range objects {
 			ids = append(ids, object.ID)
+			if object.ObjectKey == "" {
+				continue
+			}
+			if _, exists := seenObjectKeys[object.ObjectKey]; exists {
+				continue
+			}
+			seenObjectKeys[object.ObjectKey] = struct{}{}
+			objectKeys = append(objectKeys, object.ObjectKey)
 		}
 		deleted, err := s.repo.DeleteInboundMailsByID(ctx, ids)
 		if err != nil {
@@ -204,8 +214,15 @@ func (s *RetentionService) deleteInboundMails(ctx context.Context, before time.T
 		}
 		total += deleted
 		if s.files != nil {
-			for _, object := range objects {
-				if err := s.files.DeletePrivate(ctx, object.ObjectKey); err != nil {
+			existing, err := s.repo.ListExistingInboundObjectKeys(ctx, objectKeys)
+			if err != nil {
+				return fmt.Sprintf("inbound_mails=%d object_reference_error=%s", total, safeRetentionDetail(err))
+			}
+			for _, objectKey := range objectKeys {
+				if _, referenced := existing[objectKey]; referenced {
+					continue
+				}
+				if err := s.files.DeletePrivate(ctx, objectKey); err != nil {
 					return fmt.Sprintf("inbound_mails=%d object_error=%s", total, safeRetentionDetail(err))
 				}
 			}

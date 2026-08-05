@@ -167,7 +167,7 @@ type pickupBatchRepoStub struct {
 	blockRead bool
 }
 
-func (r *pickupBatchRepoStub) ReadPickupBatch(ctx context.Context, credentials []mailmatchapp.PickupCredential, _ time.Time, _ int) ([]mailmatchapp.PickupBatchRead, error) {
+func (r *pickupBatchRepoStub) ReadPickupBatch(ctx context.Context, credentials []mailmatchapp.PickupCredential, _ time.Time, _, _ int) ([]mailmatchapp.PickupBatchRead, error) {
 	r.loadCalls.Add(1)
 	if r.blockRead {
 		<-ctx.Done()

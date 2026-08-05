@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 
-	aftersaleapi "github.com/donnel666/remail/internal/aftersale/api"
 	aftersaleapp "github.com/donnel666/remail/internal/aftersale/app"
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	mailtransportdomain "github.com/donnel666/remail/internal/mailtransport/domain"
@@ -37,22 +36,4 @@ func (a aftersaleMailAdapter) SendTicketMail(ctx context.Context, mail aftersale
 		})
 	}
 	return a.delivery.Send(ctx, message)
-}
-
-// ticketInboundRouter sends plus-addressed ticket replies to the aftersale
-// consumer and everything else to the existing mailmatch consumer, so a single
-// inbound SMTP server can serve both.
-type ticketInboundRouter struct {
-	ticket   *aftersaleapi.InboundConsumer
-	fallback mailapp.InboundConsumerPort
-}
-
-func (r ticketInboundRouter) IngestInboundMail(ctx context.Context, req mailapp.InboundConsumeRequest) error {
-	if r.ticket != nil && r.ticket.Handles(req.Recipient) {
-		return r.ticket.IngestInboundMail(ctx, req)
-	}
-	if r.fallback != nil {
-		return r.fallback.IngestInboundMail(ctx, req)
-	}
-	return nil
 }

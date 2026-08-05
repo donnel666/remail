@@ -20,6 +20,8 @@ type Repository interface {
 	Count(ctx context.Context, filter ListFilter) (int64, error)
 	Facets(ctx context.Context, filter ListFilter) (*TicketFacets, error)
 	Reply(ctx context.Context, params ReplyParams) (*domain.Ticket, error)
+	ReplyInbound(ctx context.Context, inboundMailID uint, params ReplyParams) (*domain.Ticket, bool, error)
+	IgnoreInboundReply(ctx context.Context, inboundMailID uint, ticketNo string) error
 	MarkRead(ctx context.Context, ticketNo string, platformSide bool) (*domain.Ticket, error)
 	Close(ctx context.Context, params CloseParams) (*domain.Ticket, error)
 	FindAttachment(ctx context.Context, ticketNo, attachmentNo string) (*domain.TicketAttachment, error)
@@ -157,6 +159,17 @@ func ticketMailIdempotencyKey(ticketNo string, messageID, adminID uint) string {
 type InboundReplyCommand struct {
 	Recipient string // the plus-addressed RCPT TO, e.g. support+AS1-tok@domain
 	Body      string
+}
+
+type InboundMailboxMessage struct {
+	ID           uint
+	Recipient    string
+	EnvelopeFrom string
+	Raw          []byte
+}
+
+type InboundMailboxPort interface {
+	ListTicketReplies(ctx context.Context, ticketNo string, since time.Time, limit int) ([]InboundMailboxMessage, error)
 }
 
 // ---------------------------------------------------------------------------

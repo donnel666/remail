@@ -20,17 +20,19 @@ type Module struct {
 
 func NewModule(db *gorm.DB, trade *tradeapp.UseCase, fileStore governanceapp.FilePort, mail aftersaleapp.MailPort, mailConfig aftersaleapp.TicketMailConfig) (*Module, error) {
 	repo := infra.NewRepo(db)
+	files := fileStoreAdapter{store: fileStore}
 	uc, err := aftersaleapp.NewUseCase(
 		repo,
 		tradeOrderAdapter{trade: trade},
 		tradeRefundAdapter{trade: trade},
-		fileStoreAdapter{store: fileStore},
+		files,
 		mail,
 		mailConfig,
 	)
 	if err != nil {
 		return nil, err
 	}
+	uc.SetInboundMailboxPort(infra.NewInboundMailbox(db, files, mailConfig))
 	return &Module{UseCase: uc}, nil
 }
 

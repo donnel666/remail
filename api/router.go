@@ -292,13 +292,6 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		coreMod.ProjectUseCase.SetHistoryScan(mailmatchMod.ProjectHistory.Schedule)
 		coreMod.ProjectUseCase.SetGmailHistoryScan(gmailMod.Service.ScheduleProjectHistory)
 		coreMod.SetMicrosoftHistoryScanTrigger(mailmatchMod.ProjectHistory)
-		// Inbound mail: ticket reply plus-addresses go to aftersale, everything
-		// else keeps flowing to mailmatch's resource inbound consumer.
-		mailmatchInbound := mailmatchapi.NewInboundConsumerAdapter(mailmatchMod.UseCase)
-		mailMod.SetInboundConsumer(ticketInboundRouter{
-			ticket:   aftersaleapi.NewInboundConsumer(aftersaleMod.UseCase, p.SMTP.TicketReplyLocalPart),
-			fallback: mailmatchInbound,
-		})
 		mailmatchapi.RegisterTaskHandlers(taskMux, mailmatchMod)
 		mailmatchapi.RegisterRoutes(v1, mailmatchMod)
 		mailmatchapi.RegisterAdminRoutes(v1, mailmatchMod, iamSessionFetcher, iamMod.PermissionChecker)
