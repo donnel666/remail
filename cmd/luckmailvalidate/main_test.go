@@ -128,8 +128,49 @@ func TestValidationProxyPoolLeasesUniqueRoutesAndRotatesAvoidedRoute(t *testing.
 	}
 }
 
+func TestValidationProxyPoolCoolsRateLimitedRoute(t *testing.T) {
+	p := newValidationProxyLeasePool(nil, []proxyapp.ProxyConfig{
+		{ID: 1, ProxyServerID: 11, URL: "socks5://one.invalid", IPVersion: proxydomain.ProxyIPv4},
+		{ID: 2, ProxyServerID: 22, URL: "socks5://two.invalid", IPVersion: proxydomain.ProxyIPv4},
+	})
+	first, err := p.Acquire(context.Background(), proxyapp.AcquireProxyRequest{Key: "first@example.com", IPVersion: proxydomain.ProxyIPv4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.ReportFailure(context.Background(), first.ID, "Microsoft authorization is temporarily rate limited."); err != nil {
+		t.Fatal(err)
+	}
+	p.Release("first@example.com")
+
+	second, err := p.Acquire(context.Background(), proxyapp.AcquireProxyRequest{Key: "second@example.com", IPVersion: proxydomain.ProxyIPv4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.ID == first.ID {
+		t.Fatalf("rate-limited route %d was immediately reused", first.ID)
+	}
+	p.Release("second@example.com")
+
+	oneRoute := newValidationProxyLeasePool(nil, []proxyapp.ProxyConfig{{ID: 3, ProxyServerID: 33, URL: "socks5://three.invalid", IPVersion: proxydomain.ProxyIPv4}})
+	leased, err := oneRoute.Acquire(context.Background(), proxyapp.AcquireProxyRequest{Key: "cooldown@example.com", IPVersion: proxydomain.ProxyIPv4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := oneRoute.ReportFailure(context.Background(), leased.ID, "Microsoft authorization is temporarily rate limited."); err != nil {
+		t.Fatal(err)
+	}
+	oneRoute.Release("cooldown@example.com")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if _, err := oneRoute.Acquire(ctx, proxyapp.AcquireProxyRequest{Key: "retry@example.com", IPVersion: proxydomain.ProxyIPv4}); err == nil {
+		t.Fatal("Acquire reused a route during its rate-limit cooldown")
+	}
+}
+
 func TestTrackerWritesRateLimitedFailuresTo429File(t *testing.T) {
-	if !isRateLimitedSafeMessage("Microsoft authorization is temporarily rate limited.") || isRateLimitedSafeMessage("Microsoft authorization timed out.") {
+	if !isRateLimitedSafeMessage("Microsoft authorization is temporarily rate limited.") ||
+		!isRateLimitedSafeMessage("rate_limited") ||
+		isRateLimitedSafeMessage("Microsoft authorization timed out.") {
 		t.Fatal("rate-limit safe-message classification is incorrect")
 	}
 	dir := t.TempDir()

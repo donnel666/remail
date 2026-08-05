@@ -242,12 +242,9 @@ func getMicrosoftConsentCredentialType(session *Session, email, ppft, uaid, opid
 	if err != nil {
 		return wrapAuthError(fmt.Sprintf("Microsoft 授权管理 GetCredentialType 异常: %s", err), AuthStatusRequestError, err)
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return newAuthError(fmt.Sprintf("Microsoft account credential lookup failed (HTTP %d).", resp.StatusCode), AuthStatusRequestError)
-	}
-	var data map[string]any
-	if err := resp.JSON(&data); err != nil {
-		return newAuthError("Microsoft account credential lookup returned an invalid response.", AuthStatusRequestError)
+	data, err := decodeCredentialTypeResponse(session, resp, "consent")
+	if err != nil {
+		return err
 	}
 	if asInt(data["IfExistsResult"]) != 0 {
 		return newAuthError("账号不存在", AuthStatusUnknownMailbox)

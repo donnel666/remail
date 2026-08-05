@@ -512,10 +512,9 @@ func getOTCCredentialType(session *Session, email, ppft, uaid, opid, referer str
 	if err != nil {
 		return nil, wrapAuthError(fmt.Sprintf("GetCredentialType 请求异常: %s", err), AuthStatusRequestError, err)
 	}
-	var data map[string]any
-	if err := resp.JSON(&data); err != nil {
-		logWarning("OTC GetCredentialType 返回非 JSON")
-		return nil, nil
+	data, err := decodeCredentialTypeResponse(session, resp, "otc")
+	if err != nil {
+		return nil, err
 	}
 	if asInt(data["IfExistsResult"]) != 0 {
 		return nil, newAuthError("账号不存在", AuthStatusUnknownMailbox)

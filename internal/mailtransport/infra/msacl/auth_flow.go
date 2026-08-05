@@ -133,6 +133,41 @@ func submitUserCode(session *Session, userCode, ppft string) (string, string, st
 	return page, ppft2, postURL, uaid, opid, nil
 }
 
+// decodeCredentialTypeResponse keeps upstream throttling and challenge pages
+// out of the password decision path. Microsoft sometimes returns an HTML
+// throttle page with HTTP 200, so an invalid JSON body is conservatively
+// treated as a rate limit rather than as an empty credential response.
+func decodeCredentialTypeResponse(session *Session, resp *HTTPResponse, stage string) (map[string]any, error) {
+	if resp == nil {
+		return nil, newAuthError("GetCredentialType 未返回响应", AuthStatusRequestError)
+	}
+	if resp.StatusCode == 429 {
+		retryAfter := 60
+		if parsed, err := strconv.Atoi(resp.Header.Get("retry-after")); err == nil && parsed > 0 {
+			retryAfter = parsed
+		}
+		logWarning("Microsoft authorization rate limited: stage=%s status=429 retry_after=%d", stage, retryAfter)
+		return nil, wrapAuthError(
+			fmt.Sprintf("GetCredentialType 频率受限 (429), 请 %ds 后重试", retryAfter),
+			AuthStatusRateLimited,
+			newSessionTransportError(fmt.Errorf("microsoft %s GetCredentialType HTTP 429", stage), session != nil && session.usesProxy),
+		)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, newAuthError(fmt.Sprintf("GetCredentialType 请求失败 (HTTP %d)", resp.StatusCode), AuthStatusRequestError)
+	}
+	var data map[string]any
+	if err := resp.JSON(&data); err != nil {
+		logWarning("%s GetCredentialType 返回非 JSON: status=%d", stage, resp.StatusCode)
+		return nil, wrapAuthError(
+			"GetCredentialType 返回异常响应",
+			AuthStatusRateLimited,
+			newSessionTransportError(err, session != nil && session.usesProxy),
+		)
+	}
+	return data, nil
+}
+
 func getCredentialType(session *Session, email, ppft, uaid, opid string) ([]ProofData, error) {
 	logInfo("步骤4: 检查账号登录方式")
 	logDebug("步骤4: email=%s, uaid=%s, opid=%s", email, uaid, opid)
@@ -170,10 +205,9 @@ func getCredentialType(session *Session, email, ppft, uaid, opid string) ([]Proo
 	if err != nil {
 		return nil, wrapAuthError(fmt.Sprintf("GetCredentialType 请求异常: %s", err), AuthStatusRequestError, err)
 	}
-	var data map[string]any
-	if err := resp.JSON(&data); err != nil {
-		logWarning("步骤4: GetCredentialType 返回非 JSON")
-		return nil, nil
+	data, err := decodeCredentialTypeResponse(session, resp, "device")
+	if err != nil {
+		return nil, err
 	}
 	if asInt(data["IfExistsResult"]) != 0 {
 		return nil, newAuthError("账号不存在", AuthStatusUnknownMailbox)

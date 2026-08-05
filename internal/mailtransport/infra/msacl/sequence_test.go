@@ -300,6 +300,56 @@ func TestGetExplicitAliasCredentialTypeKeepsOptionalProofsForLaterChallenge(t *t
 	client.requireDone()
 }
 
+func TestCredentialTypeRateLimitsNeverFallThroughToPasswordFlow(t *testing.T) {
+	calls := []struct {
+		name string
+		call func(*Session) error
+	}{
+		{name: "device", call: func(session *Session) error {
+			_, err := getCredentialType(session, "owner@outlook.com", "flow", "uaid", "opid")
+			return err
+		}},
+		{name: "explicit_alias", call: func(session *Session) error {
+			_, err := getExplicitAliasCredentialType(session, "owner@outlook.com", "flow", "uaid", "opid", "https://login.live.com/login.srf")
+			return err
+		}},
+		{name: "otc", call: func(session *Session) error {
+			_, err := getOTCCredentialType(session, "owner@outlook.com", "flow", "uaid", "opid", "https://login.live.com/login.srf")
+			return err
+		}},
+		{name: "consent", call: func(session *Session) error {
+			return getMicrosoftConsentCredentialType(session, "owner@outlook.com", "flow", "uaid", "opid", "https://login.live.com/login.srf")
+		}},
+	}
+	for _, test := range calls {
+		t.Run(test.name, func(t *testing.T) {
+			session, client := newScriptedSession(t, func(req *http.Request, _ bool) (*http.Response, error) {
+				return scriptedResponse(req, http.StatusTooManyRequests, req.URL.String(), `<html>rate limited</html>`, map[string]string{"Retry-After": "7"}), nil
+			})
+			session.usesProxy = true
+			err := test.call(session)
+			require.Error(t, err)
+			var authErr *AuthError
+			require.ErrorAs(t, err, &authErr)
+			require.Equal(t, AuthStatusRateLimited, authErr.Status)
+			require.True(t, IsProxyTransportError(err))
+			client.requireDone()
+		})
+	}
+
+	session, client := newScriptedSession(t, func(req *http.Request, _ bool) (*http.Response, error) {
+		return scriptedResponse(req, http.StatusOK, req.URL.String(), `<html>throttle page</html>`, nil), nil
+	})
+	session.usesProxy = true
+	_, err := getCredentialType(session, "owner@outlook.com", "flow", "uaid", "opid")
+	require.Error(t, err)
+	var authErr *AuthError
+	require.ErrorAs(t, err, &authErr)
+	require.Equal(t, AuthStatusRateLimited, authErr.Status)
+	require.True(t, IsProxyTransportError(err))
+	client.requireDone()
+}
+
 func TestHandleProofsPageTriesSkipBeforeBinding(t *testing.T) {
 	session, client := newScriptedSession(t,
 		func(req *http.Request, _ bool) (*http.Response, error) {

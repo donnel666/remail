@@ -49,6 +49,8 @@ const (
 	phaseProcessing = "processing"
 	phaseDone       = "done"
 
+	validationProxyCooldown = time.Minute
+
 	requestPath = "/ops/luckmail-validation"
 )
 
@@ -130,14 +132,16 @@ type validationProxyRoute struct {
 }
 
 type validationProxyLeasePool struct {
-	upstream  *proxyapp.ProxyUseCase
-	mu        sync.Mutex
-	available []proxyapp.ProxyConfig
-	leased    map[string]proxyapp.ProxyConfig
-	used      map[uint]struct{}
-	capacity  int
-	rotations int
-	peak      int
+	upstream      *proxyapp.ProxyUseCase
+	mu            sync.Mutex
+	available     []proxyapp.ProxyConfig
+	leased        map[string]proxyapp.ProxyConfig
+	cooldownUntil map[uint]time.Time
+	wake          chan struct{}
+	used          map[uint]struct{}
+	capacity      int
+	rotations     int
+	peak          int
 }
 
 type tracker struct {
@@ -198,8 +202,10 @@ func newValidationProxyLeasePool(upstream *proxyapp.ProxyUseCase, routes []proxy
 	available := append([]proxyapp.ProxyConfig(nil), routes...)
 	return &validationProxyLeasePool{
 		upstream: upstream, available: available,
-		leased: make(map[string]proxyapp.ProxyConfig, len(available)),
-		used:   make(map[uint]struct{}, len(available)), capacity: len(available),
+		leased:        make(map[string]proxyapp.ProxyConfig, len(available)),
+		cooldownUntil: make(map[uint]time.Time, len(available)),
+		wake:          make(chan struct{}, 1),
+		used:          make(map[uint]struct{}, len(available)), capacity: len(available),
 	}
 }
 
@@ -214,42 +220,129 @@ func (p *validationProxyLeasePool) Acquire(ctx context.Context, req proxyapp.Acq
 		}
 		return p.upstream.Acquire(ctx, req)
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if current, ok := p.leased[key]; ok {
-		if !proxyServerIsAvoided(current.ProxyServerID, req.AvoidProxyServerIDs) {
-			leased := current
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		p.mu.Lock()
+		now := time.Now()
+		if current, ok := p.leased[key]; ok {
+			_, cooling := p.cooldownUntil[current.ID]
+			if until, ok := p.cooldownUntil[current.ID]; ok && !now.Before(until) {
+				delete(p.cooldownUntil, current.ID)
+				cooling = false
+			}
+			if !proxyServerIsAvoided(current.ProxyServerID, req.AvoidProxyServerIDs) && !cooling {
+				leased := current
+				p.mu.Unlock()
+				return &leased, nil
+			}
+			delete(p.leased, key)
+			p.available = append(p.available, current)
+			p.rotations++
+		}
+
+		availableCount := len(p.available)
+		skippedAvoided := 0
+		var earliestCooldown time.Time
+		for remaining := availableCount; remaining > 0; remaining-- {
+			candidate := p.available[0]
+			p.available = p.available[1:]
+			if until, ok := p.cooldownUntil[candidate.ID]; ok {
+				if now.Before(until) {
+					p.available = append(p.available, candidate)
+					if earliestCooldown.IsZero() || until.Before(earliestCooldown) {
+						earliestCooldown = until
+					}
+					continue
+				}
+				delete(p.cooldownUntil, candidate.ID)
+			}
+			if proxyServerIsAvoided(candidate.ProxyServerID, req.AvoidProxyServerIDs) {
+				p.available = append(p.available, candidate)
+				skippedAvoided++
+				continue
+			}
+			p.leased[key] = candidate
+			p.used[candidate.ID] = struct{}{}
+			p.peak = max(p.peak, len(p.leased))
+			leased := candidate
+			p.mu.Unlock()
 			return &leased, nil
 		}
-		delete(p.leased, key)
-		p.available = append(p.available, current)
-		p.rotations++
-	}
-	for remaining := len(p.available); remaining > 0; remaining-- {
-		candidate := p.available[0]
-		p.available = p.available[1:]
-		if proxyServerIsAvoided(candidate.ProxyServerID, req.AvoidProxyServerIDs) {
-			p.available = append(p.available, candidate)
+		leasedCount := len(p.leased)
+		p.mu.Unlock()
+
+		if availableCount > 0 && skippedAvoided == availableCount && earliestCooldown.IsZero() {
+			return nil, errors.New("no unleased validation IPv4 proxy is available")
+		}
+		if availableCount == 0 && leasedCount == 0 {
+			return nil, errors.New("no validation IPv4 proxy is available")
+		}
+		if earliestCooldown.IsZero() {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-p.wake:
+				continue
+			}
+		}
+		wait := time.Until(earliestCooldown)
+		if wait <= 0 {
 			continue
 		}
-		p.leased[key] = candidate
-		p.used[candidate.ID] = struct{}{}
-		p.peak = max(p.peak, len(p.leased))
-		leased := candidate
-		return &leased, nil
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return nil, ctx.Err()
+		case <-p.wake:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+		case <-timer.C:
+		}
 	}
-	return nil, errors.New("no unleased validation IPv4 proxy is available")
 }
 
 func (p *validationProxyLeasePool) ReportSuccess(ctx context.Context, proxyID uint) error {
-	if p == nil || p.upstream == nil {
+	if p == nil {
+		return nil
+	}
+	if proxyID != 0 {
+		p.mu.Lock()
+		delete(p.cooldownUntil, proxyID)
+		p.mu.Unlock()
+		p.notify()
+	}
+	if p.upstream == nil {
 		return nil
 	}
 	return p.upstream.ReportSuccess(ctx, proxyID)
 }
 
 func (p *validationProxyLeasePool) ReportFailure(ctx context.Context, proxyID uint, safeError string) error {
-	if p == nil || p.upstream == nil {
+	if p == nil {
+		return nil
+	}
+	if proxyID != 0 && isRateLimitedSafeMessage(safeError) {
+		until := time.Now().Add(validationProxyCooldown)
+		p.mu.Lock()
+		if previous, ok := p.cooldownUntil[proxyID]; !ok || until.After(previous) {
+			p.cooldownUntil[proxyID] = until
+		}
+		p.mu.Unlock()
+		p.notify()
+	}
+	if p.upstream == nil {
 		return nil
 	}
 	return p.upstream.ReportFailure(ctx, proxyID, safeError)
@@ -261,10 +354,21 @@ func (p *validationProxyLeasePool) Release(key string) {
 	}
 	key = strings.ToLower(strings.TrimSpace(key))
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	if current, ok := p.leased[key]; ok {
 		delete(p.leased, key)
 		p.available = append(p.available, current)
+	}
+	p.mu.Unlock()
+	p.notify()
+}
+
+func (p *validationProxyLeasePool) notify() {
+	if p == nil || p.wake == nil {
+		return
+	}
+	select {
+	case p.wake <- struct{}{}:
+	default:
 	}
 }
 
@@ -856,9 +960,10 @@ func recoverAbandonedValidations(ctx context.Context, conn *sql.Conn, manifest [
 		}
 		placeholders := sqlPlaceholders(len(ids))
 		if _, err := conn.ExecContext(ctx, `UPDATE microsoft_resources
-SET status = 'pending', validation_generation = validation_generation + 1, updated_at = UTC_TIMESTAMP(3)
-WHERE id IN (`+placeholders+`) AND status = 'validating'`, uint64Args(ids)...); err != nil {
-			return fmt.Errorf("recover abandoned validating resources: %w", err)
+SET status = 'pending', validation_generation = validation_generation + 1, updated_at = UTC_TIMESTAMP(3),
+validation_failures = 0, graph_available = 0, last_safe_error = ''
+WHERE id IN (`+placeholders+`) AND status IN ('validating','abnormal')`, uint64Args(ids)...); err != nil {
+			return fmt.Errorf("recover abandoned validation resources: %w", err)
 		}
 	}
 	return nil
@@ -1255,7 +1360,12 @@ func validationFailureWasRateLimited(ctx context.Context, runtime *commandRuntim
 }
 
 func isRateLimitedSafeMessage(message string) bool {
-	return strings.Contains(strings.ToLower(strings.TrimSpace(message)), "rate limited")
+	message = strings.ToLower(strings.TrimSpace(message))
+	return strings.Contains(message, "rate limit") ||
+		strings.Contains(message, "rate_limited") ||
+		strings.Contains(message, "too many requests") ||
+		strings.Contains(message, "429") ||
+		strings.Contains(message, "频率受限")
 }
 
 func newTracker(errorOut string, previousSuccess map[string]struct{}) *tracker {
