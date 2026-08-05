@@ -15,6 +15,7 @@ import (
 
 	"github.com/donnel666/remail/internal/alloc/domain"
 	coredomain "github.com/donnel666/remail/internal/core/domain"
+	"github.com/donnel666/remail/internal/mailbox"
 	"github.com/donnel666/remail/internal/platform"
 )
 
@@ -329,6 +330,14 @@ func (uc *UseCase) ImportHistoricalMicrosoftAllocation(ctx context.Context, cmd 
 		if !lockedRoot {
 			return domain.ErrInvalidAllocationRequest
 		}
+		if cmd.Mailbox == domain.MicrosoftMailboxAlias {
+			if mailboxType, explicitBase := historicalAliasMailbox(cmd.Email); mailboxType != domain.MicrosoftMailboxAlias {
+				if err := uc.historicalMicrosoftAliases.BackfillExistingAliases(txCtx, cmd.ResourceID, []string{explicitBase}); err != nil {
+					return err
+				}
+				cmd.Mailbox = mailboxType
+			}
+		}
 		var explicitAliasID, dotAliasID, plusAliasID *uint
 		mailboxID := cmd.ResourceID
 		switch cmd.Mailbox {
@@ -430,6 +439,20 @@ func (uc *UseCase) ImportHistoricalMicrosoftAllocation(ctx context.Context, cmd 
 func historicalMicrosoftAllocationOrderNo(cmd HistoricalMicrosoftAllocationCommand, mailboxID uint) string {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%d:%d:%s:%d", cmd.ResourceID, cmd.ProjectID, cmd.Mailbox, mailboxID)))
 	return "HIST-" + hex.EncodeToString(sum[:20])
+}
+
+func historicalAliasMailbox(email string) (domain.MicrosoftMailbox, string) {
+	exact, plusBase, dotBase, ok := mailbox.AliasForms(email)
+	if !ok {
+		return domain.MicrosoftMailboxAlias, ""
+	}
+	if exact != plusBase {
+		return domain.MicrosoftMailboxPlus, dotBase
+	}
+	if plusBase != dotBase {
+		return domain.MicrosoftMailboxDot, dotBase
+	}
+	return domain.MicrosoftMailboxAlias, exact
 }
 
 func sameHistoricalMicrosoftAllocation(existing domain.UnifiedAllocation, orderNo string, cmd HistoricalMicrosoftAllocationCommand) bool {

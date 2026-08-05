@@ -396,6 +396,36 @@ func TestHistoricalImportCommitsSingleEvidenceAliasMySQL(t *testing.T) {
 	require.EqualValues(t, 1, historicalOrders)
 }
 
+func TestHistoricalImportClassifiesExplicitAliasVariantsMySQL(t *testing.T) {
+	db := newTradeMySQLTestDB(t)
+	seedTradeBase(t, db, "microsoft")
+	seedTradeMicrosoftResources(t, db, 1, 1000, 1, true)
+	matchedAt := time.Now().UTC().Add(-time.Hour)
+
+	require.NoError(t, newTradeUseCase(db).ImportHistoricalMicrosoftUsage(context.Background(), []tradeapp.HistoricalMicrosoftUsage{
+		{ResourceID: 1000, ProjectID: 10, ProductID: 20, Mailbox: "alias", Email: "named.alias+6@outlook.com", FirstMatchedAt: matchedAt, LastMatchedAt: matchedAt, EvidenceCount: 1},
+		{ResourceID: 1000, ProjectID: 10, ProductID: 20, Mailbox: "alias", Email: "named.alias@outlook.com", FirstMatchedAt: matchedAt, LastMatchedAt: matchedAt, EvidenceCount: 1},
+	}))
+
+	var explicitVariants int64
+	require.NoError(t, db.Table("explicit_aliases").Where("email IN ?", []string{"named.alias+6@outlook.com", "named.alias@outlook.com"}).Count(&explicitVariants).Error)
+	require.Zero(t, explicitVariants)
+	var explicitBases int64
+	require.NoError(t, db.Table("explicit_aliases").Where("resource_id = ? AND email = ?", 1000, "namedalias@outlook.com").Count(&explicitBases).Error)
+	require.EqualValues(t, 1, explicitBases)
+	for table, email := range map[string]string{
+		"plus_aliases": "named.alias+6@outlook.com",
+		"dot_aliases":  "named.alias@outlook.com",
+	} {
+		var count int64
+		require.NoError(t, db.Table(table).Where("resource_id = ? AND email = ?", 1000, email).Count(&count).Error)
+		require.EqualValues(t, 1, count, table)
+	}
+	var mailboxes []string
+	require.NoError(t, db.Table("microsoft_allocations").Where("order_no LIKE 'HIST-%'").Order("mailbox").Pluck("mailbox", &mailboxes).Error)
+	require.Equal(t, []string{"dot", "plus"}, mailboxes)
+}
+
 func TestCreateHistoricalOrderConflictStopsOuterTransactionMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	seedTradeBase(t, db, "microsoft")
