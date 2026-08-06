@@ -166,7 +166,7 @@ type sessionModel struct {
 	Email              string     `gorm:"column:email"`
 	Status             string     `gorm:"column:status"`
 	ReceivedCount      uint8      `gorm:"column:received_count"`
-	CodesJSON          []byte     `gorm:"column:codes_json"`
+	CodesJSON          string     `gorm:"column:codes_json"`
 	CostPointsSnapshot string     `gorm:"column:cost_points_snapshot"`
 	ProviderCursor     uint64     `gorm:"column:provider_cursor"`
 	ProviderSpamCursor uint64     `gorm:"column:provider_spam_cursor"`
@@ -188,12 +188,12 @@ type Code struct {
 	ReceivedAt time.Time `json:"receivedAt"`
 }
 
-func decodeCodes(raw []byte) ([]Code, error) {
+func decodeCodes(raw string) ([]Code, error) {
 	if len(raw) == 0 {
 		return []Code{}, nil
 	}
 	var codes []Code
-	if err := json.Unmarshal(raw, &codes); err != nil || len(codes) > MaxCodes {
+	if err := json.Unmarshal([]byte(raw), &codes); err != nil || len(codes) > MaxCodes {
 		return nil, errors.New("gmail: invalid stored codes")
 	}
 	return codes, nil

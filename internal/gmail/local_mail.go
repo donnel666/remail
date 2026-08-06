@@ -392,7 +392,7 @@ func (s *Service) RecordMatchedCode(ctx context.Context, orderNo, value string, 
 		}
 		now := s.now()
 		updates := map[string]any{
-			"codes_json": payload, "received_count": count, "last_safe_error": "",
+			"codes_json": string(payload), "received_count": count, "last_safe_error": "",
 			"next_poll_at": now.Add(gmailPollInterval), "version": gorm.Expr("version + 1"),
 		}
 		if count >= MaxCodes {
@@ -404,7 +404,7 @@ func (s *Service) RecordMatchedCode(ctx context.Context, orderNo, value string, 
 		if err := tx.Model(&sessionModel{}).Where("id = ? AND status = ?", session.ID, SessionActive).Updates(updates).Error; err != nil {
 			return err
 		}
-		session.CodesJSON = payload
+		session.CodesJSON = string(payload)
 		session.ReceivedCount = uint8(count)
 		if completed {
 			session.Status = SessionCompleted

@@ -461,12 +461,12 @@ func (s *Service) recordCode(ctx context.Context, orderID uint, value string) (*
 		}
 		action, status := nextCodeAction(count)
 		if err := tx.Model(&orderModel{}).Where("id = ?", order.ID).Updates(map[string]any{
-			"codes_json": payload, "received_count": count, "pending_remote_action": action,
+			"codes_json": string(payload), "received_count": count, "pending_remote_action": action,
 			"status": status, "next_poll_at": now, "last_safe_error": "", "version": gorm.Expr("version + 1"),
 		}).Error; err != nil {
 			return err
 		}
-		order.CodesJSON, order.ReceivedCount = payload, uint8(count)
+		order.CodesJSON, order.ReceivedCount = string(payload), uint8(count)
 		order.PendingRemoteAction, order.Status = action, status
 		return nil
 	})

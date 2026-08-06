@@ -61,15 +61,15 @@ func (s *Service) ListServices(ctx context.Context) ([]ServiceItem, error) {
 	return items, nil
 }
 
-func (s *Service) PutMapping(ctx context.Context, projectID uint, serviceCode string, meta MutationMeta) error {
+func (s *Service) PutMapping(ctx context.Context, projectID uint, serviceCode string, enabled bool, meta MutationMeta) error {
 	serviceCode = strings.TrimSpace(serviceCode)
 	if projectID == 0 || serviceCode == "" || len(serviceCode) > 64 {
 		return ErrInvalidRoute
 	}
-	model := routeModel{ProjectID: projectID, ServiceCode: serviceCode, Enabled: true}
+	model := routeModel{ProjectID: projectID, ServiceCode: serviceCode, Enabled: enabled}
 	return s.mutate(ctx, meta, &governancedomain.OperationLog{
 		OperationType: "smsbower.mapping.put", ResourceType: "project", ResourceID: fmt.Sprintf("%d", projectID),
-		Result: "success", SafeSummary: fmt.Sprintf("updated SMSBower project mapping project_id=%d", projectID),
+		Result: "success", SafeSummary: fmt.Sprintf("updated SMSBower project mapping project_id=%d enabled=%t", projectID, enabled),
 	}, func(txCtx context.Context) error {
 		db := s.dbFor(txCtx)
 		var lockedProjectID uint
@@ -90,7 +90,7 @@ func (s *Service) PutMapping(ctx context.Context, projectID uint, serviceCode st
 		return db.Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "project_id"}},
 			DoUpdates: clause.Assignments(map[string]any{
-				"service_code": serviceCode, "enabled": true, "updated_at": s.now(),
+				"service_code": serviceCode, "enabled": enabled, "updated_at": s.now(),
 			}),
 		}).Create(&model).Error
 	})
@@ -116,13 +116,14 @@ func (s *Service) ListMappings(ctx context.Context) ([]MappingItem, error) {
 		PurchasePrice string `gorm:"column:purchase_price"`
 		ServiceCode   string `gorm:"column:service_code"`
 		ServiceName   string `gorm:"column:service_name"`
+		Enabled       bool   `gorm:"column:enabled"`
 		UpstreamPrice string `gorm:"column:gmail_price"`
 		PointsPerUnit string `gorm:"column:points_per_unit"`
 	}
 	if err := s.dbFor(ctx).Table("smsbower_project_routes AS r").
 		Select(`p.id AS project_id, p.name AS project_name,
 COALESCE(pp.code_price, 0) AS code_price, COALESCE(pp.purchase_price, 0) AS purchase_price,
-r.service_code, COALESCE(svc.name, '') AS service_name,
+r.service_code, r.enabled, COALESCE(svc.name, '') AS service_name,
 COALESCE(svc.gmail_price, 0) AS gmail_price, cfg.points_per_unit`).
 		Joins("JOIN projects AS p ON p.id = r.project_id").
 		Joins("LEFT JOIN project_products AS pp ON pp.project_id = p.id AND pp.type = ?", "gmail").
@@ -138,6 +139,7 @@ COALESCE(svc.gmail_price, 0) AS gmail_price, cfg.points_per_unit`).
 		items[i] = MappingItem{
 			ProjectID: row.ProjectID, ProjectName: row.ProjectName,
 			ProviderServiceCode: row.ServiceCode, ProviderServiceName: row.ServiceName,
+			Enabled:       row.Enabled,
 			UpstreamPrice: row.UpstreamPrice, CostPoints: money.Format(upstreamPrice.Mul(points)),
 			CodePrice: row.CodePrice, PurchasePrice: row.PurchasePrice,
 		}

@@ -4,6 +4,7 @@ import {
   Modal,
   Select,
   Spin,
+  Switch,
   Table,
   Tag,
   Toast,
@@ -56,11 +57,13 @@ const EMPTY_FORM = {
 type MappingDraft = {
   projectId: number;
   providerServiceCode: string;
+  enabled: boolean;
 };
 
 const EMPTY_MAPPING_DRAFT: MappingDraft = {
   projectId: 0,
   providerServiceCode: "",
+  enabled: true,
 };
 
 function formatTime(value?: string | null) {
@@ -218,6 +221,7 @@ export default function UpstreamsSection({
     setMappingDraft({
       projectId: mapping.projectId,
       providerServiceCode: mapping.providerServiceCode ?? "",
+      enabled: mapping.enabled,
     });
     setMappingModalOpen(true);
   };
@@ -235,10 +239,29 @@ export default function UpstreamsSection({
     const key = `save:${mappingDraft.projectId}`;
     setSavingMapping(key);
     try {
-      await saveGmailUpstreamMapping(mappingDraft.projectId, { providerServiceCode });
+      await saveGmailUpstreamMapping(mappingDraft.projectId, { providerServiceCode, enabled: mappingDraft.enabled });
       setMappingModalOpen(false);
       Toast.success(editingProjectId === null ? "SMSBower 项目映射已创建。" : "SMSBower 项目映射已更新。");
       await load();
+    } catch (error) {
+      Toast.error(getIamErrorMessage(t, error, "Mapping save failed."));
+    } finally {
+      setSavingMapping(null);
+    }
+  };
+
+  const toggleMapping = async (mapping: GmailUpstreamMapping, enabled: boolean) => {
+    const key = `toggle:${mapping.projectId}`;
+    setSavingMapping(key);
+    try {
+      await saveGmailUpstreamMapping(mapping.projectId, {
+        providerServiceCode: mapping.providerServiceCode,
+        enabled,
+      });
+      setMappings((current) => current.map((item) => (
+        item.projectId === mapping.projectId ? { ...item, enabled } : item
+      )));
+      Toast.success(enabled ? "SMSBower 项目映射已启用。" : "SMSBower 项目映射已禁用。");
     } catch (error) {
       Toast.error(getIamErrorMessage(t, error, "Mapping save failed."));
     } finally {
@@ -323,13 +346,14 @@ export default function UpstreamsSection({
               { title: "SMSBower 服务", width: 250, render: (_value, row: GmailUpstreamMapping) => <div><div className="font-medium">{row.providerServiceName || services.find((service) => service.code === row.providerServiceCode)?.name || "-"}</div><Text type="tertiary" size="small">{row.providerServiceCode || "-"}</Text></div> },
               { title: "上游成本", width: 170, render: (_value, row: GmailUpstreamMapping) => <div><div>{formatPoints(row.costPoints)} 积分</div><Text type="tertiary" size="small">{formatPoints(row.upstreamPrice)} 上游单位</Text></div> },
               { title: "系统出售价格", width: 190, render: (_value, row: GmailUpstreamMapping) => <div><div>接码 {formatPoints(row.codePrice)} 积分</div><Text type="tertiary" size="small">购买 {formatPoints(row.purchasePrice)} 积分</Text></div> },
+              { title: "状态", width: 110, render: (_value, row: GmailUpstreamMapping) => <Switch aria-label={`${row.projectName} SMSBower 映射`} checked={row.enabled} disabled={!canWrite} loading={savingMapping === `toggle:${row.projectId}`} onChange={(enabled) => void toggleMapping(row, enabled)} /> },
               { title: "操作", fixed: "right" as const, width: 130, render: (_value, row: GmailUpstreamMapping) => <div className="flex gap-1"><Button disabled={!canWrite} icon={<Pencil size={13} />} onClick={() => openEditMapping(row)} size="small" theme="borderless">编辑</Button><Button disabled={!canWrite} icon={<Trash2 size={13} />} loading={savingMapping === `delete:${row.projectId}`} onClick={() => Modal.confirm({ title: "删除 SMSBower 项目映射", content: `确认删除“${row.projectName}”的 SMSBower 映射吗？`, okButtonProps: { type: "danger" }, onOk: () => removeMapping(row) })} size="small" theme="borderless" type="danger" /></div> },
             ]}
             dataSource={mappings}
             empty={<div className="py-10 text-center text-[var(--semi-color-text-2)]">暂无 SMSBower 项目映射</div>}
             pagination={false}
             rowKey="projectId"
-            scroll={{ x: 940 }}
+            scroll={{ x: 1050 }}
           />
         </Spin>
       </SettingsSection>

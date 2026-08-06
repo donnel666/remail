@@ -366,7 +366,7 @@ func (s *Service) AcceptPaidOrder(ctx context.Context, order upstream.PaidOrder)
 	}
 	model := orderModel{
 		OrderNo: order.OrderNo, ProjectID: order.ProjectID, ProductID: order.ProductID,
-		ServiceCode: route.ServiceCode, Status: StatusPending, CodesJSON: []byte("[]"),
+		ServiceCode: route.ServiceCode, Status: StatusPending, CodesJSON: "[]",
 		UpstreamPriceSnapshot: money.Format(upstreamPrice), PointsPerUnitSnapshot: money.Format(points),
 		CostPointsSnapshot: money.Format(cost), MaxPriceSnapshot: money.Format(minDecimal(upstreamPrice, allowedPrice)),
 		NextPollAt: &now, Version: 1,

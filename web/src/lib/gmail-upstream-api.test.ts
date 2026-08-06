@@ -31,6 +31,7 @@ describe("Gmail upstream API adapter", () => {
         projectName: "GPT",
         providerServiceCode: "gpt",
         providerServiceName: "ChatGPT",
+        enabled: false,
         upstreamPrice: "0.1",
         costPoints: "0.2",
         codePrice: "1",
@@ -47,12 +48,12 @@ describe("Gmail upstream API adapter", () => {
   it("writes the SMSBower-only mapping contract", async () => {
     apiMocks.PUT.mockResolvedValueOnce({ data: undefined });
 
-    await saveGmailUpstreamMapping(42, { providerServiceCode: "gpt" });
+    await saveGmailUpstreamMapping(42, { providerServiceCode: "gpt", enabled: false });
 
     expect(apiMocks.PUT).toHaveBeenCalledWith(
       "/v1/admin/upstreams/smsbower/mappings/{projectId}",
       {
-        body: { providerServiceCode: "gpt" },
+        body: { providerServiceCode: "gpt", enabled: false },
         params: {
           header: { "X-CSRF-Token": "upstream-csrf" },
           path: { projectId: 42 },

@@ -6392,6 +6392,7 @@ type GmailUpstreamMappingItem struct {
 
 	// CostPoints Non-negative point amount with up to 6 decimal places.
 	CostPoints          NonNegativeLedgerAmountResponse `json:"costPoints"`
+	Enabled             bool                            `json:"enabled"`
 	ProjectId           int                             `json:"projectId"`
 	ProjectName         string                          `json:"projectName"`
 	ProviderServiceCode string                          `json:"providerServiceCode"`
@@ -6411,6 +6412,9 @@ type GmailUpstreamMappingList struct {
 
 // GmailUpstreamMappingRequest defines model for GmailUpstreamMappingRequest.
 type GmailUpstreamMappingRequest struct {
+	// Enabled Whether the saved mapping participates in Gmail inventory and fulfillment. Omitted values default to true.
+	Enabled *bool `json:"enabled,omitempty"`
+
 	// ProviderServiceCode SMSBower service code synchronized from the upstream catalog.
 	ProviderServiceCode string `json:"providerServiceCode"`
 }

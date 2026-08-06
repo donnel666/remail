@@ -19630,6 +19630,10 @@ components:
           minLength: 1
           maxLength: 64
           description: SMSBower service code synchronized from the upstream catalog.
+        enabled:
+          type: boolean
+          default: true
+          description: Whether the saved mapping participates in Gmail inventory and fulfillment. Omitted values default to true.
       additionalProperties: false
 
     GmailUpstreamMappingList:
@@ -19648,6 +19652,7 @@ components:
         - projectId
         - projectName
         - providerServiceCode
+        - enabled
         - codePrice
         - purchasePrice
         - upstreamPrice
@@ -19664,6 +19669,8 @@ components:
           maxLength: 64
         providerServiceName:
           type: string
+        enabled:
+          type: boolean
         codePrice:
           $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
         purchasePrice:

@@ -9,11 +9,12 @@ import (
 	"github.com/donnel666/remail/internal/platform/testmysql"
 	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 var smsbowerMigrationMySQL = testmysql.New("remail_smsbower_migration")
 
-func TestSMSBowerMigrationPreservesDisabledCodeSwitch(t *testing.T) {
+func TestSMSBowerMigrationMySQL(t *testing.T) {
 	_, file, _, ok := runtime.Caller(0)
 	require.True(t, ok)
 	source := filepath.Clean(filepath.Join(filepath.Dir(file), "../..", "migrations"))
@@ -32,6 +33,22 @@ func TestSMSBowerMigrationPreservesDisabledCodeSwitch(t *testing.T) {
 	var enabled bool
 	require.NoError(t, db.Table("smsbower_config").Where("id = 1").Pluck("enabled", &enabled).Error)
 	require.False(t, enabled)
+
+	model := orderModel{
+		OrderNo: "MYSQL-GMAIL-ORDER", ProjectID: 1, ProductID: 1, ServiceCode: "svc",
+		Status: StatusPending, CodesJSON: "[]", UpstreamPriceSnapshot: "1",
+		PointsPerUnitSnapshot: "1", CostPointsSnapshot: "1", MaxPriceSnapshot: "1", Version: 1,
+	}
+	require.NoError(t, db.Connection(func(tx *gorm.DB) error {
+		if err := tx.Exec("SET FOREIGN_KEY_CHECKS = 0").Error; err != nil {
+			return err
+		}
+		defer tx.Exec("SET FOREIGN_KEY_CHECKS = 1")
+		return tx.Create(&model).Error
+	}))
+	var stored orderModel
+	require.NoError(t, db.Where("order_no = ?", model.OrderNo).Take(&stored).Error)
+	require.JSONEq(t, "[]", stored.CodesJSON)
 
 	goose.SetTableName("goose_db_version")
 	require.NoError(t, goose.SetDialect("mysql"))

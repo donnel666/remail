@@ -112,7 +112,7 @@ type orderModel struct {
 	Email                 string     `gorm:"column:email"`
 	Status                string     `gorm:"column:status"`
 	ReceivedCount         uint8      `gorm:"column:received_count"`
-	CodesJSON             []byte     `gorm:"column:codes_json"`
+	CodesJSON             string     `gorm:"column:codes_json"`
 	UpstreamPriceSnapshot string     `gorm:"column:upstream_price_snapshot"`
 	PointsPerUnitSnapshot string     `gorm:"column:points_per_unit_snapshot"`
 	CostPointsSnapshot    string     `gorm:"column:cost_points_snapshot"`
@@ -136,12 +136,12 @@ type Code struct {
 	ReceivedAt time.Time `json:"receivedAt"`
 }
 
-func decodeCodes(raw []byte) ([]Code, error) {
+func decodeCodes(raw string) ([]Code, error) {
 	if len(raw) == 0 {
 		return []Code{}, nil
 	}
 	var codes []Code
-	if err := json.Unmarshal(raw, &codes); err != nil || len(codes) > MaxCodes {
+	if err := json.Unmarshal([]byte(raw), &codes); err != nil || len(codes) > MaxCodes {
 		return nil, errors.New("smsbower: invalid stored codes")
 	}
 	return codes, nil
@@ -200,6 +200,7 @@ type MappingItem struct {
 	ProjectName         string `json:"projectName"`
 	ProviderServiceCode string `json:"providerServiceCode"`
 	ProviderServiceName string `json:"providerServiceName,omitempty"`
+	Enabled             bool   `json:"enabled"`
 	UpstreamPrice       string `json:"upstreamPrice"`
 	CostPoints          string `json:"costPoints"`
 	CodePrice           string `json:"codePrice"`

@@ -124,6 +124,7 @@ func (h *handler) mappings(c *gin.Context) {
 
 type mappingRequest struct {
 	ProviderServiceCode string `json:"providerServiceCode" binding:"required"`
+	Enabled             *bool  `json:"enabled"`
 }
 
 func (h *handler) putMapping(c *gin.Context) {
@@ -134,7 +135,11 @@ func (h *handler) putMapping(c *gin.Context) {
 		writeError(c, ErrInvalidRoute)
 		return
 	}
-	if err := h.service.PutMapping(c.Request.Context(), uint(projectID), request.ProviderServiceCode, mutationMeta(c)); err != nil {
+	enabled := true
+	if request.Enabled != nil {
+		enabled = *request.Enabled
+	}
+	if err := h.service.PutMapping(c.Request.Context(), uint(projectID), request.ProviderServiceCode, enabled, mutationMeta(c)); err != nil {
 		writeError(c, err)
 		return
 	}

@@ -7279,6 +7279,11 @@ export interface components {
         GmailUpstreamMappingRequest: {
             /** @description SMSBower service code synchronized from the upstream catalog. */
             providerServiceCode: string;
+            /**
+             * @description Whether the saved mapping participates in Gmail inventory and fulfillment. Omitted values default to true.
+             * @default true
+             */
+            enabled: boolean;
         };
         GmailUpstreamMappingList: {
             items: components["schemas"]["GmailUpstreamMappingItem"][];
@@ -7288,6 +7293,7 @@ export interface components {
             projectName: string;
             providerServiceCode: string;
             providerServiceName?: string;
+            enabled: boolean;
             codePrice: components["schemas"]["NonNegativeLedgerAmountResponse"];
             purchasePrice: components["schemas"]["NonNegativeLedgerAmountResponse"];
             upstreamPrice: components["schemas"]["NonNegativeLedgerAmountResponse"];

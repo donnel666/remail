@@ -302,7 +302,7 @@ func (s *Service) CreateSession(ctx context.Context, cmd tradeapp.GmailSessionCo
 
 		model = sessionModel{
 			OrderNo: cmd.OrderNo, Source: SourceLocal,
-			ServiceMode: string(tradedomain.ServiceModeCode), Status: SessionPending, CodesJSON: []byte("[]"),
+			ServiceMode: string(tradedomain.ServiceModeCode), Status: SessionPending, CodesJSON: "[]",
 			CostPointsSnapshot: money.Format(cost), Version: 1,
 		}
 		var allocation allocationModel

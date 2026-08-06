@@ -24,6 +24,7 @@ import (
 
 type testProjectModel struct {
 	ID         uint   `gorm:"column:id;primaryKey"`
+	Name       string `gorm:"column:name"`
 	Status     string `gorm:"column:status"`
 	AccessType string `gorm:"column:access_type"`
 }
@@ -31,12 +32,13 @@ type testProjectModel struct {
 func (testProjectModel) TableName() string { return "projects" }
 
 type testProductModel struct {
-	ID          uint   `gorm:"column:id;primaryKey"`
-	ProjectID   uint   `gorm:"column:project_id"`
-	Type        string `gorm:"column:type"`
-	Status      string `gorm:"column:status"`
-	CodeEnabled bool   `gorm:"column:code_enabled"`
-	CodePrice   string `gorm:"column:code_price"`
+	ID            uint   `gorm:"column:id;primaryKey"`
+	ProjectID     uint   `gorm:"column:project_id"`
+	Type          string `gorm:"column:type"`
+	Status        string `gorm:"column:status"`
+	CodeEnabled   bool   `gorm:"column:code_enabled"`
+	CodePrice     string `gorm:"column:code_price"`
+	PurchasePrice string `gorm:"column:purchase_price"`
 }
 
 func (testProductModel) TableName() string { return "project_products" }
@@ -118,9 +120,9 @@ func newServiceHarness(t *testing.T) (*Service, *gorm.DB, time.Time) {
 	))
 	now := time.Date(2026, 8, 5, 8, 0, 0, 0, time.UTC)
 	lastSuccess := now.Add(-time.Minute)
-	require.NoError(t, db.Create(&testProjectModel{ID: 1, Status: "listed", AccessType: "public"}).Error)
+	require.NoError(t, db.Create(&testProjectModel{ID: 1, Name: "Test Gmail", Status: "listed", AccessType: "public"}).Error)
 	require.NoError(t, db.Create(&testProductModel{
-		ID: 2, ProjectID: 1, Type: "gmail", Status: "enabled", CodeEnabled: true, CodePrice: "10",
+		ID: 2, ProjectID: 1, Type: "gmail", Status: "enabled", CodeEnabled: true, CodePrice: "10", PurchasePrice: "20",
 	}).Error)
 	require.NoError(t, db.Create(&configModel{
 		ID: 1, Enabled: true, APIKey: "secret", Strategy: string(upstream.StrategyUpstreamFirst),
@@ -159,6 +161,28 @@ func TestAccountStatusLoadsPersistedState(t *testing.T) {
 	require.Equal(t, now.Add(-time.Minute), *status.LastSuccessAt)
 }
 
+func TestPutMappingPreservesMappingWhileTogglingAvailability(t *testing.T) {
+	service, db, _ := newServiceHarness(t)
+	logs := &operationLogSpy{}
+	service.SetOperationLogs(logs)
+	meta := MutationMeta{OperatorUserID: 1, RequestID: "mapping-toggle", Path: "/admin/upstreams/smsbower/mappings/1"}
+
+	require.NoError(t, service.PutMapping(context.Background(), 1, "svc", false, meta))
+	var route routeModel
+	require.NoError(t, db.First(&route, "project_id = ?", 1).Error)
+	require.False(t, route.Enabled)
+
+	mappings, err := service.ListMappings(context.Background())
+	require.NoError(t, err)
+	require.Len(t, mappings, 1)
+	require.False(t, mappings[0].Enabled)
+
+	require.NoError(t, service.PutMapping(context.Background(), 1, "svc", true, meta))
+	require.NoError(t, db.First(&route, "project_id = ?", 1).Error)
+	require.True(t, route.Enabled)
+	require.Len(t, logs.items, 2)
+}
+
 func paidOrder(orderNo string) upstream.PaidOrder {
 	return upstream.PaidOrder{
 		OrderNo: orderNo, ProjectID: 1, ProductID: 2, BuyerID: 3,
@@ -172,7 +196,7 @@ func createPendingProviderOrder(t *testing.T, db *gorm.DB, orderNo string, now t
 	nextPoll := now
 	model := orderModel{
 		OrderNo: orderNo, ProjectID: 1, ProductID: 2, ServiceCode: "svc",
-		Status: StatusPending, CodesJSON: []byte("[]"), UpstreamPriceSnapshot: "2",
+		Status: StatusPending, CodesJSON: "[]", UpstreamPriceSnapshot: "2",
 		PointsPerUnitSnapshot: "1", CostPointsSnapshot: "2", MaxPriceSnapshot: "2",
 		NextPollAt: &nextPoll, Version: 1,
 	}
@@ -247,7 +271,7 @@ func TestAvailableSupplyReservesServiceStockAndSharedBalance(t *testing.T) {
 	lastSuccess := now.Add(-time.Minute)
 	require.NoError(t, db.Create(&orderModel{
 		OrderNo: "ORDER-B", ProjectID: 1, ProductID: 2, ServiceCode: "other", Status: StatusPending,
-		CodesJSON: []byte("[]"), UpstreamPriceSnapshot: "3", PointsPerUnitSnapshot: "1",
+		CodesJSON: "[]", UpstreamPriceSnapshot: "3", PointsPerUnitSnapshot: "1",
 		CostPointsSnapshot: "3", MaxPriceSnapshot: "3", Version: 1, CreatedAt: now,
 	}).Error)
 	row := supplyRow{
@@ -261,7 +285,7 @@ func TestAvailableSupplyReservesServiceStockAndSharedBalance(t *testing.T) {
 
 	require.NoError(t, db.Create(&orderModel{
 		OrderNo: "ORDER-A", ProjectID: 1, ProductID: 2, ServiceCode: "svc", Status: StatusPending,
-		CodesJSON: []byte("[]"), UpstreamPriceSnapshot: "2", PointsPerUnitSnapshot: "1",
+		CodesJSON: "[]", UpstreamPriceSnapshot: "2", PointsPerUnitSnapshot: "1",
 		CostPointsSnapshot: "2", MaxPriceSnapshot: "2", Version: 1, CreatedAt: now,
 	}).Error)
 	available, balance, err = service.availableSupply(context.Background(), row)
@@ -366,7 +390,7 @@ func TestReservationsKeepUnpurchasedOrdersAcrossSyncBoundary(t *testing.T) {
 	for index, status := range []string{StatusPending, StatusProvisioning, StatusUnknown, StatusActive} {
 		require.NoError(t, db.Create(&orderModel{
 			OrderNo: fmt.Sprintf("ORDER-RESERVE-%d", index), ProjectID: 1, ProductID: 2,
-			ServiceCode: "svc", Status: status, CodesJSON: []byte("[]"), UpstreamPriceSnapshot: "2",
+			ServiceCode: "svc", Status: status, CodesJSON: "[]", UpstreamPriceSnapshot: "2",
 			PointsPerUnitSnapshot: "1", CostPointsSnapshot: "2", MaxPriceSnapshot: "2",
 			Version: 1, CreatedAt: old,
 		}).Error)
@@ -391,7 +415,7 @@ func TestPollClaimUsesDurableOrderLease(t *testing.T) {
 	nextPoll := now
 	order := orderModel{
 		OrderNo: "ORDER-POLL-LEASE", ProjectID: 1, ProductID: 2, ServiceCode: "svc",
-		RemoteMailID: &mailID, Email: "buyer@gmail.com", Status: StatusActive, CodesJSON: []byte("[]"),
+		RemoteMailID: &mailID, Email: "buyer@gmail.com", Status: StatusActive, CodesJSON: "[]",
 		UpstreamPriceSnapshot: "2", PointsPerUnitSnapshot: "1", CostPointsSnapshot: "2", MaxPriceSnapshot: "2",
 		NextPollAt: &nextPoll, Version: 1,
 	}
