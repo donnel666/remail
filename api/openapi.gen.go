@@ -7918,6 +7918,9 @@ type SMSBowerConfig struct {
 	// MinMarginRate Non-negative point amount with up to 6 decimal places.
 	MinMarginRate NonNegativeLedgerAmountResponse `json:"minMarginRate"`
 
+	// NoCodeRefundTimeoutMinutes Automatically cancel the upstream activation when no first verification code arrives within this many minutes.
+	NoCodeRefundTimeoutMinutes int `json:"noCodeRefundTimeoutMinutes"`
+
 	// PointsPerUnit Non-negative point amount with up to 6 decimal places.
 	PointsPerUnit       NonNegativeLedgerAmountResponse `json:"pointsPerUnit"`
 	Strategy            SMSBowerStrategy                `json:"strategy"`
@@ -7935,6 +7938,9 @@ type SMSBowerConfigUpdate struct {
 
 	// MinMarginRate Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	MinMarginRate NonNegativeLedgerAmount `json:"minMarginRate"`
+
+	// NoCodeRefundTimeoutMinutes Automatically cancel the upstream activation when no first verification code arrives within this many minutes.
+	NoCodeRefundTimeoutMinutes *int `json:"noCodeRefundTimeoutMinutes,omitempty"`
 
 	// PointsPerUnit Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	PointsPerUnit       NonNegativeLedgerAmount `json:"pointsPerUnit"`

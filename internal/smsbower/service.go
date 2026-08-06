@@ -11,6 +11,7 @@ import (
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	"github.com/donnel666/remail/internal/money"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/donnel666/remail/internal/upstream"
 	"github.com/hibiken/asynq"
 	"github.com/shopspring/decimal"
@@ -29,6 +30,7 @@ type TradePort interface {
 	ActivateUpstreamOrder(context.Context, upstream.Activation) error
 	CompleteGmailOrder(context.Context, string, string) error
 	FailGmailOrder(context.Context, string, string) error
+	GmailOrderReceiveUntil(context.Context, string) (time.Time, error)
 }
 
 type Service struct {
@@ -79,8 +81,9 @@ func configFromModel(model configModel) *Config {
 	return &Config{
 		Enabled: model.Enabled, Configured: strings.TrimSpace(model.APIKey) != "",
 		Strategy: upstream.Strategy(model.Strategy), SyncIntervalMinutes: model.SyncIntervalMinutes,
-		BalanceWarningThreshold: model.BalanceWarningThreshold,
-		PointsPerUnit:           model.PointsPerUnit, MinMarginRate: model.MinMarginRate,
+		NoCodeRefundTimeoutMinutes: uint(runtimeconfig.Int(runtimeconfig.SMSBowerNoCodeRefundTimeoutMinutesKey, 10, 1)),
+		BalanceWarningThreshold:    model.BalanceWarningThreshold,
+		PointsPerUnit:              model.PointsPerUnit, MinMarginRate: model.MinMarginRate,
 	}
 }
 

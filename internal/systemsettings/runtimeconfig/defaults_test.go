@@ -44,6 +44,7 @@ func TestDefaultSettingsAreValidAndIndependent(t *testing.T) {
 	require.Equal(t, "80", keys["proxy_server_inventory_threshold_percent"])
 	require.Equal(t, `["(?:^|[^\\d])(\\d{6,8})(?:[^\\d]|$)"]`, keys["verification_code_pattern"])
 	require.Equal(t, "8", keys["default_project_gmail_code_price"])
+	require.Equal(t, "10", keys[SMSBowerNoCodeRefundTimeoutMinutesKey])
 	require.Equal(t, "3", keys["gmail_code_retain_days"])
 	require.Equal(t, "300", keys["fetch_dispatcher_timeout_seconds"])
 	require.Equal(t, "10000", keys["resource_fetch_dispatch_limit"])

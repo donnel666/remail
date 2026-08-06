@@ -148,23 +148,25 @@ func decodeCodes(raw string) ([]Code, error) {
 }
 
 type Config struct {
-	Enabled                 bool              `json:"enabled"`
-	Configured              bool              `json:"configured"`
-	Strategy                upstream.Strategy `json:"strategy"`
-	SyncIntervalMinutes     uint              `json:"syncIntervalMinutes"`
-	BalanceWarningThreshold string            `json:"balanceWarningThreshold"`
-	PointsPerUnit           string            `json:"pointsPerUnit"`
-	MinMarginRate           string            `json:"minMarginRate"`
+	Enabled                    bool              `json:"enabled"`
+	Configured                 bool              `json:"configured"`
+	Strategy                   upstream.Strategy `json:"strategy"`
+	SyncIntervalMinutes        uint              `json:"syncIntervalMinutes"`
+	NoCodeRefundTimeoutMinutes uint              `json:"noCodeRefundTimeoutMinutes"`
+	BalanceWarningThreshold    string            `json:"balanceWarningThreshold"`
+	PointsPerUnit              string            `json:"pointsPerUnit"`
+	MinMarginRate              string            `json:"minMarginRate"`
 }
 
 type ConfigUpdate struct {
-	Enabled                 bool              `json:"enabled"`
-	APIKey                  string            `json:"apiKey"`
-	Strategy                upstream.Strategy `json:"strategy"`
-	SyncIntervalMinutes     uint              `json:"syncIntervalMinutes"`
-	BalanceWarningThreshold string            `json:"balanceWarningThreshold"`
-	PointsPerUnit           string            `json:"pointsPerUnit"`
-	MinMarginRate           string            `json:"minMarginRate"`
+	Enabled                    bool              `json:"enabled"`
+	APIKey                     string            `json:"apiKey"`
+	Strategy                   upstream.Strategy `json:"strategy"`
+	SyncIntervalMinutes        uint              `json:"syncIntervalMinutes"`
+	NoCodeRefundTimeoutMinutes *uint             `json:"noCodeRefundTimeoutMinutes,omitempty"`
+	BalanceWarningThreshold    string            `json:"balanceWarningThreshold"`
+	PointsPerUnit              string            `json:"pointsPerUnit"`
+	MinMarginRate              string            `json:"minMarginRate"`
 }
 
 type AccountStatus struct {

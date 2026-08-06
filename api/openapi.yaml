@@ -19244,6 +19244,7 @@ components:
         - configured
         - strategy
         - syncIntervalMinutes
+        - noCodeRefundTimeoutMinutes
         - balanceWarningThreshold
         - pointsPerUnit
         - minMarginRate
@@ -19259,6 +19260,11 @@ components:
           type: integer
           minimum: 1
           maximum: 1440
+        noCodeRefundTimeoutMinutes:
+          type: integer
+          minimum: 1
+          maximum: 25
+          description: Automatically cancel the upstream activation when no first verification code arrives within this many minutes.
         balanceWarningThreshold:
           $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
         pointsPerUnit:
@@ -19289,6 +19295,11 @@ components:
           type: integer
           minimum: 1
           maximum: 1440
+        noCodeRefundTimeoutMinutes:
+          type: integer
+          minimum: 1
+          maximum: 25
+          description: Automatically cancel the upstream activation when no first verification code arrives within this many minutes.
         balanceWarningThreshold:
           $ref: "#/components/schemas/NonNegativeLedgerAmount"
         pointsPerUnit:

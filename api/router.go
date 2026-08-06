@@ -248,7 +248,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		})
 		gmailapi.RegisterRoutes(v1, gmailMod, iamSessionFetcher, iamMod.PermissionChecker)
 		cleanupFuncs = append(cleanupFuncs, gmailapi.RegisterTaskHandlers(taskMux, gmailMod.Service))
-		smsbower.RegisterRoutes(v1, smsbowerMod, iamSessionFetcher, iamMod.PermissionChecker)
+		smsbower.RegisterRoutes(v1, smsbowerMod, iamSessionFetcher, iamMod.PermissionChecker, systemSettingsMod.Settings)
 		cleanupFuncs = append(cleanupFuncs, smsbower.RegisterTaskHandlers(taskMux, smsbowerMod.Service))
 
 		// Trade module (unified console/API Key checkout and order query).

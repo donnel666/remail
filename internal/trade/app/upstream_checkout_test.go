@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/donnel666/remail/internal/trade/domain"
 	"github.com/donnel666/remail/internal/upstream"
 	"github.com/stretchr/testify/require"
@@ -182,7 +183,9 @@ func TestPaidProviderOrderResumesOwnerWithoutRecheckingSupply(t *testing.T) {
 	require.Zero(t, wallet.debits)
 }
 
-func TestActivateUpstreamOrderUsesProviderWindowForReceiveAndWarranty(t *testing.T) {
+func TestActivateUpstreamOrderUsesConfiguredReceiveWindowAndProviderWarranty(t *testing.T) {
+	runtimeconfig.Set(runtimeconfig.SMSBowerNoCodeRefundTimeoutMinutesKey, "7")
+	t.Cleanup(func() { runtimeconfig.Delete(runtimeconfig.SMSBowerNoCodeRefundTimeoutMinutesKey) })
 	startedAt := time.Date(2026, 8, 5, 1, 0, 0, 0, time.UTC)
 	expiresAt := startedAt.Add(24 * time.Hour)
 	order := domain.Order{
@@ -203,8 +206,11 @@ func TestActivateUpstreamOrderUsesProviderWindowForReceiveAndWarranty(t *testing
 	require.NoError(t, err)
 	activated := repo.orders["upstream-active"]
 	require.Equal(t, domain.OrderStatusActive, activated.Status)
-	require.Equal(t, expiresAt, *activated.ReceiveUntil)
+	require.Equal(t, startedAt.Add(7*time.Minute), *activated.ReceiveUntil)
 	require.Equal(t, expiresAt, *activated.AfterSaleUntil)
+	receiveUntil, err := uc.GmailOrderReceiveUntil(context.Background(), order.OrderNo)
+	require.NoError(t, err)
+	require.Equal(t, startedAt.Add(7*time.Minute), receiveUntil)
 }
 
 func TestLocalFirstGmailFallsBackUpstreamAfterFinalAllocationMiss(t *testing.T) {

@@ -15,6 +15,7 @@ import (
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	moneyfmt "github.com/donnel666/remail/internal/money"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/donnel666/remail/internal/trade/domain"
 	"github.com/donnel666/remail/internal/upstream"
 )
@@ -2841,10 +2842,13 @@ func (uc *UseCase) ActivateUpstreamOrder(ctx context.Context, req upstream.Activ
 		}
 	}
 	afterSaleUntil := req.ExpiresAt.UTC()
+	receiveUntil := req.StartedAt.UTC().Add(runtimeconfig.Duration(
+		runtimeconfig.SMSBowerNoCodeRefundTimeoutMinutesKey, 10*time.Minute, time.Minute, 1,
+	))
 	_, err = uc.repo.MarkActive(ctx, MarkActiveCommand{
 		OrderNo: req.OrderNo, AllocationType: domain.AllocationTypeGmail,
 		DeliveryEmail: req.Email, ReceiveStartedAt: req.StartedAt.UTC(),
-		ReceiveUntil: req.ExpiresAt.UTC(), AfterSaleUntil: &afterSaleUntil,
+		ReceiveUntil: receiveUntil, AfterSaleUntil: &afterSaleUntil,
 	})
 	if errors.Is(err, domain.ErrOrderStateConflict) {
 		reloaded, reloadErr := uc.repo.FindOrder(ctx, req.OrderNo)
@@ -2854,6 +2858,17 @@ func (uc *UseCase) ActivateUpstreamOrder(ctx context.Context, req upstream.Activ
 		}
 	}
 	return err
+}
+
+func (uc *UseCase) GmailOrderReceiveUntil(ctx context.Context, orderNo string) (time.Time, error) {
+	order, err := uc.repo.FindOrder(ctx, strings.TrimSpace(orderNo))
+	if err != nil {
+		return time.Time{}, err
+	}
+	if order.ProductType != domain.ProductTypeGmail || order.ServiceMode != domain.ServiceModeCode || order.ReceiveUntil == nil || order.ReceiveUntil.IsZero() {
+		return time.Time{}, domain.ErrInvalidOrderRequest
+	}
+	return order.ReceiveUntil.UTC(), nil
 }
 
 func (uc *UseCase) CompleteGmailOrder(ctx context.Context, orderNo, reason string) error {
@@ -2892,6 +2907,9 @@ func (uc *UseCase) FailGmailOrder(ctx context.Context, orderNo, reason string) e
 		})
 		return err
 	case domain.OrderStatusPaid:
+		if err := uc.confirmGmailUpstreamCancellation(ctx, *order); err != nil {
+			return err
+		}
 		return uc.repo.WithTx(ctx, func(txCtx context.Context) error {
 			if err := uc.wallet.LockConsumer(txCtx, order.UserID); err != nil {
 				return err
@@ -2995,6 +3013,21 @@ func (uc *UseCase) refundOrder(ctx context.Context, req refundOrderRequest) (*do
 	if err != nil {
 		return nil, false, err
 	}
+	if owner.Status != domain.OrderStatusRefunded && statusAllowed(owner.Status, req.AllowedStatuses) {
+		delivered := false
+		if req.ReconcileDelivery && owner.ServiceMode == domain.ServiceModeCode && uc.deliveries != nil {
+			delivery, deliveryErr := uc.deliveries.FindOrderDelivery(ctx, owner.ID)
+			if deliveryErr != nil {
+				return nil, false, deliveryErr
+			}
+			delivered = delivery != nil
+		}
+		if !delivered {
+			if err := uc.confirmGmailUpstreamCancellation(ctx, *owner); err != nil {
+				return nil, false, err
+			}
+		}
+	}
 	err = uc.repo.WithTx(ctx, func(txCtx context.Context) error {
 		if err := uc.wallet.LockConsumer(txCtx, owner.UserID); err != nil {
 			return err
@@ -3051,6 +3084,14 @@ func (uc *UseCase) refundOrder(ctx context.Context, req refundOrderRequest) (*do
 		return nil
 	})
 	return refunded, changed, err
+}
+
+func (uc *UseCase) confirmGmailUpstreamCancellation(ctx context.Context, order domain.Order) error {
+	if order.ProductType != domain.ProductTypeGmail {
+		return nil
+	}
+	_, err := uc.upstreams.CancelOrder(ctx, order.OrderNo)
+	return err
 }
 
 func (uc *UseCase) cleanupOrderService(ctx context.Context, order domain.Order, releaseAllocation bool, reason string, requestID string) error {

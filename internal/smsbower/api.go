@@ -1,6 +1,7 @@
 package smsbower
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -9,6 +10,9 @@ import (
 
 	"github.com/donnel666/remail/api/middleware"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
+	settingsapp "github.com/donnel666/remail/internal/systemsettings/app"
+	settingsdomain "github.com/donnel666/remail/internal/systemsettings/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/gin-gonic/gin"
 	"github.com/hibiken/asynq"
 	"gorm.io/gorm"
@@ -22,8 +26,8 @@ func NewModule(db *gorm.DB, queue *asynq.Client) *Module {
 	return &Module{Service: service}
 }
 
-func RegisterRoutes(rg *gin.RouterGroup, module *Module, fetcher middleware.SessionFetcher, checker middleware.PermissionChecker) {
-	h := &handler{service: module.Service, checker: checker}
+func RegisterRoutes(rg *gin.RouterGroup, module *Module, fetcher middleware.SessionFetcher, checker middleware.PermissionChecker, settings *settingsapp.SystemSettingsUseCase) {
+	h := &handler{service: module.Service, checker: checker, settings: settings}
 	admin := rg.Group("/admin/upstreams/smsbower")
 	admin.Use(middleware.LoadSession(fetcher), middleware.AuthRequired(), middleware.CSRFRequired())
 	admin.GET("/config", middleware.PermissionRequired(checker, "system:settings", "read"), h.config)
@@ -39,8 +43,9 @@ func RegisterRoutes(rg *gin.RouterGroup, module *Module, fetcher middleware.Sess
 }
 
 type handler struct {
-	service *Service
-	checker middleware.PermissionChecker
+	service  *Service
+	checker  middleware.PermissionChecker
+	settings *settingsapp.SystemSettingsUseCase
 }
 
 func (h *handler) config(c *gin.Context) {
@@ -64,7 +69,7 @@ func (h *handler) putConfig(c *gin.Context) {
 		c.JSON(http.StatusForbidden, gin.H{"message": "Permission denied.", "requestId": middleware.GetRequestID(c)})
 		return
 	}
-	config, err := h.service.UpdateConfig(c.Request.Context(), request, mutationMeta(c))
+	config, err := h.updateConfig(c.Request.Context(), request, mutationMeta(c))
 	if err != nil {
 		writeError(c, err)
 		return
@@ -74,6 +79,32 @@ func (h *handler) putConfig(c *gin.Context) {
 	}
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, config)
+}
+
+func (h *handler) updateConfig(ctx context.Context, request ConfigUpdate, meta MutationMeta) (*Config, error) {
+	timeout := request.NoCodeRefundTimeoutMinutes
+	if timeout == nil {
+		return h.service.UpdateConfig(ctx, request, meta)
+	}
+	if *timeout < 1 || *timeout > 25 {
+		return nil, ErrInvalidConfig
+	}
+	if h.settings == nil {
+		return nil, errors.New("smsbower: system settings unavailable")
+	}
+	var config *Config
+	_, err := h.settings.MutateWithSettings(ctx, []settingsdomain.Setting{{
+		Key: runtimeconfig.SMSBowerNoCodeRefundTimeoutMinutesKey, Value: strconv.FormatUint(uint64(*timeout), 10),
+	}}, func(txCtx context.Context) error {
+		var updateErr error
+		config, updateErr = h.service.UpdateConfig(txCtx, request, meta)
+		return updateErr
+	})
+	if err != nil {
+		return nil, err
+	}
+	config.NoCodeRefundTimeoutMinutes = *timeout
+	return config, nil
 }
 
 func (h *handler) canWriteSensitive(c *gin.Context) bool {
@@ -195,7 +226,7 @@ func (h *handler) activations(c *gin.Context) {
 func writeError(c *gin.Context, err error) {
 	requestID := middleware.GetRequestID(c)
 	switch {
-	case errors.Is(err, ErrInvalidConfig), errors.Is(err, ErrInvalidRoute):
+	case errors.Is(err, ErrInvalidConfig), errors.Is(err, ErrInvalidRoute), errors.Is(err, settingsdomain.ErrInvalidValue):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Invalid SMSBower configuration.", "requestId": requestID})
 	case errors.Is(err, ErrRouteNotFound), errors.Is(err, ErrOrderMissing):
 		c.JSON(http.StatusNotFound, gin.H{"message": "Resource not found.", "requestId": requestID})

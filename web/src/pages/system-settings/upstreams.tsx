@@ -52,6 +52,7 @@ const EMPTY_FORM = {
   pointsPerUnit: 1,
   strategy: "local_first" as SMSBowerStrategy,
   syncIntervalMinutes: 5,
+  noCodeRefundTimeoutMinutes: 10,
 };
 
 type MappingDraft = {
@@ -122,6 +123,7 @@ export default function UpstreamsSection({
         pointsPerUnit: Number(nextConfig.pointsPerUnit),
         strategy: nextConfig.strategy,
         syncIntervalMinutes: nextConfig.syncIntervalMinutes,
+        noCodeRefundTimeoutMinutes: nextConfig.noCodeRefundTimeoutMinutes,
       });
       setStatus(nextStatus);
       setServices(nextServices);
@@ -170,12 +172,14 @@ export default function UpstreamsSection({
     if (
       form.syncIntervalMinutes < 1 ||
       form.syncIntervalMinutes > 1440 ||
+      form.noCodeRefundTimeoutMinutes < 1 ||
+      form.noCodeRefundTimeoutMinutes > 25 ||
       form.balanceWarningThreshold < 0 ||
       form.pointsPerUnit <= 0 ||
       form.minMarginPercent < 0 ||
       form.minMarginPercent >= 100
     ) {
-      Toast.warning("请检查同步周期、余额阈值、换算率和最低毛利率。");
+      Toast.warning("请检查同步周期、无首码退款时间、余额阈值、换算率和最低毛利率。");
       return;
     }
     setSaving(true);
@@ -184,6 +188,7 @@ export default function UpstreamsSection({
         enabled: form.enabled,
         strategy: form.strategy,
         syncIntervalMinutes: form.syncIntervalMinutes,
+        noCodeRefundTimeoutMinutes: form.noCodeRefundTimeoutMinutes,
         balanceWarningThreshold: String(form.balanceWarningThreshold),
         pointsPerUnit: String(form.pointsPerUnit),
         minMarginRate: String(form.minMarginPercent / 100),
@@ -321,6 +326,7 @@ export default function UpstreamsSection({
                 />
               </div>
               <SettingsNumberField label="同步间隔（分钟）" value={form.syncIntervalMinutes} onChange={(value) => setForm((current) => ({ ...current, syncIntervalMinutes: value }))} min={1} max={1440} precision={0} />
+              <SettingsNumberField label="无首码自动退款（分钟）" description="超过该时间仍未收到首个验证码时，先取消上游订单，再给用户退款。默认 10 分钟。" value={form.noCodeRefundTimeoutMinutes} onChange={(value) => setForm((current) => ({ ...current, noCodeRefundTimeoutMinutes: value }))} min={1} max={25} precision={0} />
               <SettingsNumberField label="余额预警阈值" value={form.balanceWarningThreshold} onChange={(value) => setForm((current) => ({ ...current, balanceWarningThreshold: value }))} min={0} precision={6} />
               <SettingsNumberField label="1 上游单位折合积分" value={form.pointsPerUnit} onChange={(value) => setForm((current) => ({ ...current, pointsPerUnit: value }))} min={0.000001} precision={6} />
               <SettingsNumberField label="最低毛利率（%）" value={form.minMarginPercent} onChange={(value) => setForm((current) => ({ ...current, minMarginPercent: value }))} min={0} max={99.999999} precision={6} />

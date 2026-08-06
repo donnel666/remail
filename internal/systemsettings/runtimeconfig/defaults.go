@@ -2,7 +2,10 @@ package runtimeconfig
 
 import "github.com/donnel666/remail/internal/systemsettings/domain"
 
-const DefaultSettingsCount = 218
+const (
+	DefaultSettingsCount                  = 219
+	SMSBowerNoCodeRefundTimeoutMinutesKey = "smsbower_no_code_refund_timeout_minutes"
+)
 
 // DefaultSettings is the single source of initial values for runtime-managed
 // settings. Startup inserts only keys that are not in storage.
@@ -69,6 +72,7 @@ var defaultSettings = []domain.Setting{
 	{Key: "topup_amount_bonus", Value: "{}"},
 	{Key: "max_pending_recharge_orders", Value: "10"},
 	{Key: "async_check_request_timeout_seconds", Value: "5"},
+	{Key: SMSBowerNoCodeRefundTimeoutMinutesKey, Value: "10"},
 	{Key: "default_project_microsoft_code_price", Value: "8"},
 	{Key: "default_project_microsoft_code_supplier_price", Value: "5"},
 	{Key: "default_project_microsoft_purchase_price", Value: "10"},

@@ -37,6 +37,7 @@ var integerRanges = map[string]integerRange{
 	"rebate_expiry_days":                  {min: 0, max: 36500},
 	"max_pending_recharge_orders":         positive(100),
 	"async_check_request_timeout_seconds": {min: 1, max: 30},
+	SMSBowerNoCodeRefundTimeoutMinutesKey: positive(25),
 
 	"domain_max_subdomains_per_registrable_domain": positive(1000), "default_plus_daily_limit": positive(2_147_483_647), "default_mailbox_daily_limit": positive(2_147_483_647), "resource_validation_max_failures": positive(100),
 	"resource_import_max_bytes": positive(512 << 20), "max_project_logo_bytes": positive(20 << 20), "project_name_max": positive(120), "project_description_max": positive(1000), "project_target_platform_max": positive(120),

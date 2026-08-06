@@ -37,6 +37,8 @@ func TestDurationPreservesNonIntegralFallback(t *testing.T) {
 }
 
 func TestValidateEmailServiceSettings(t *testing.T) {
+	require.NoError(t, Validate(SMSBowerNoCodeRefundTimeoutMinutesKey, "25"))
+	require.ErrorIs(t, Validate(SMSBowerNoCodeRefundTimeoutMinutesKey, "26"), domain.ErrInvalidValue)
 	require.NoError(t, Validate("token_refresh_hour", "23"))
 	require.ErrorIs(t, Validate("token_refresh_hour", "24"), domain.ErrInvalidValue)
 	require.NoError(t, Validate("verification_code_pattern", `(^|[^\d])(\d{6})([^\d]|$)`))

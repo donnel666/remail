@@ -132,32 +132,15 @@ func (uc *SystemSettingsUseCase) BulkUpsert(ctx context.Context, settings []doma
 		}
 	}()
 	defer uc.mu.Unlock()
-	normalized := make([]domain.Setting, 0, len(settings))
-	for _, setting := range settings {
-		key, err := normalizeKey(setting.Key)
-		if err != nil {
-			return nil, err
-		}
-		if err := runtimeconfig.Validate(key, setting.Value); err != nil {
-			// Keep an invalid legacy value from blocking unrelated fields in the
-			// same form. It is skipped only when the client sent the exact value
-			// already stored; changing it still requires a valid replacement.
-			if !errors.Is(err, domain.ErrInvalidValue) {
-				return nil, err
-			}
-			existing, getErr := uc.repo.Get(ctx, key)
-			if getErr != nil || existing == nil || existing.Value != setting.Value {
-				return nil, invalidValueField(key, err)
-			}
-			continue
-		}
-		normalized = append(normalized, domain.Setting{Key: key, Value: setting.Value})
+	normalized, err := uc.normalizeBulkUpdates(ctx, settings)
+	if err != nil {
+		return nil, err
 	}
 	if len(normalized) == 0 {
 		return []domain.Setting{}, nil
 	}
 	var saved []domain.Setting
-	err := uc.mutate(ctx, &governancedomain.OperationLog{
+	err = uc.mutate(ctx, &governancedomain.OperationLog{
 		OperatorUserID: meta.OperatorUserID,
 		OperationType:  "system_settings.bulk_upsert",
 		ResourceType:   "system_setting",
@@ -188,6 +171,72 @@ func (uc *SystemSettingsUseCase) BulkUpsert(ctx context.Context, settings []doma
 	runtimeconfig.SetMany(saved)
 	uc.publishRuntimeSettings(ctx)
 	return saved, nil
+}
+
+// MutateWithSettings commits a bounded related mutation and its runtime
+// setting updates together. The related mutation owns its audit record.
+func (uc *SystemSettingsUseCase) MutateWithSettings(ctx context.Context, settings []domain.Setting, mutate func(context.Context) error) ([]domain.Setting, error) {
+	if mutate == nil {
+		return nil, errors.New("system settings related mutation is required")
+	}
+	uc.mu.Lock()
+	defer uc.mu.Unlock()
+	normalized, err := uc.normalizeBulkUpdates(ctx, settings)
+	if err != nil {
+		return nil, err
+	}
+	if len(normalized) == 0 {
+		return nil, errors.New("system settings related mutation has no updates")
+	}
+	var saved []domain.Setting
+	err = uc.repo.WithTx(ctx, func(txCtx context.Context) error {
+		persisted, err := uc.repo.List(txCtx)
+		if err != nil {
+			return err
+		}
+		if err := runtimeconfig.ValidatePersistedUpdates(persisted, normalized); err != nil {
+			return err
+		}
+		if err := mutate(txCtx); err != nil {
+			return err
+		}
+		saved, err = uc.repo.BulkUpsert(txCtx, normalized)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := uc.runRuntimeUpdateHook(ctx, saved); err != nil {
+		return saved, err
+	}
+	runtimeconfig.SetMany(saved)
+	uc.publishRuntimeSettings(ctx)
+	return saved, nil
+}
+
+func (uc *SystemSettingsUseCase) normalizeBulkUpdates(ctx context.Context, settings []domain.Setting) ([]domain.Setting, error) {
+	normalized := make([]domain.Setting, 0, len(settings))
+	for _, setting := range settings {
+		key, err := normalizeKey(setting.Key)
+		if err != nil {
+			return nil, err
+		}
+		if err := runtimeconfig.Validate(key, setting.Value); err != nil {
+			// Keep an invalid legacy value from blocking unrelated fields in the
+			// same form. It is skipped only when the client sent the exact value
+			// already stored; changing it still requires a valid replacement.
+			if !errors.Is(err, domain.ErrInvalidValue) {
+				return nil, err
+			}
+			existing, getErr := uc.repo.Get(ctx, key)
+			if getErr != nil || existing == nil || existing.Value != setting.Value {
+				return nil, invalidValueField(key, err)
+			}
+			continue
+		}
+		normalized = append(normalized, domain.Setting{Key: key, Value: setting.Value})
+	}
+	return normalized, nil
 }
 
 func (uc *SystemSettingsUseCase) Delete(ctx context.Context, key string, meta MutationMeta) error {

@@ -15,6 +15,10 @@ import (
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	iamdomain "github.com/donnel666/remail/internal/iam/domain"
 	"github.com/donnel666/remail/internal/platform"
+	settingsapp "github.com/donnel666/remail/internal/systemsettings/app"
+	settingsdomain "github.com/donnel666/remail/internal/systemsettings/domain"
+	settingsinfra "github.com/donnel666/remail/internal/systemsettings/infra"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/donnel666/remail/internal/upstream"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -64,6 +68,9 @@ type tradePortSpy struct {
 	activationErr error
 	completions   int
 	failures      int
+	failure       func()
+	receiveUntil  time.Time
+	receiveErr    error
 }
 
 func (s *tradePortSpy) ActivateUpstreamOrder(_ context.Context, activation upstream.Activation) error {
@@ -79,7 +86,20 @@ func (s *tradePortSpy) CompleteGmailOrder(context.Context, string, string) error
 
 func (s *tradePortSpy) FailGmailOrder(context.Context, string, string) error {
 	s.failures++
+	if s.failure != nil {
+		s.failure()
+	}
 	return nil
+}
+
+func (s *tradePortSpy) GmailOrderReceiveUntil(context.Context, string) (time.Time, error) {
+	if s.receiveErr != nil {
+		return time.Time{}, s.receiveErr
+	}
+	if !s.receiveUntil.IsZero() {
+		return s.receiveUntil, nil
+	}
+	return time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC), nil
 }
 
 type notifierSpy struct {
@@ -96,6 +116,15 @@ type operationLogSpy struct {
 	items []*governancedomain.OperationLog
 	err   error
 	inTx  bool
+}
+
+type failingSettingsRepository struct {
+	*settingsinfra.Repository
+	err error
+}
+
+func (r *failingSettingsRepository) BulkUpsert(context.Context, []settingsdomain.Setting) ([]settingsdomain.Setting, error) {
+	return nil, r.err
 }
 
 func (s *operationLogSpy) Create(ctx context.Context, log *governancedomain.OperationLog) error {
@@ -358,6 +387,42 @@ func TestUpdateConfigRejectsOversizedAPIKey(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidConfig)
 }
 
+func newSMSBowerConfigSettings(t *testing.T, db *gorm.DB) *settingsapp.SystemSettingsUseCase {
+	t.Helper()
+	require.NoError(t, db.AutoMigrate(&settingsinfra.SettingModel{}))
+	repo := settingsinfra.NewRepository(db)
+	_, err := repo.Upsert(context.Background(), runtimeconfig.SMSBowerNoCodeRefundTimeoutMinutesKey, "10")
+	require.NoError(t, err)
+	return settingsapp.NewSystemSettingsUseCase(repo, nil)
+}
+
+func TestConfigUpdateRollsBackWhenNoCodeRefundTimeoutWriteFails(t *testing.T) {
+	service, db, _ := newServiceHarness(t)
+	settings := newSMSBowerConfigSettings(t, db)
+	repo := settingsinfra.NewRepository(db)
+	settings = settingsapp.NewSystemSettingsUseCase(&failingSettingsRepository{Repository: repo, err: errors.New("settings write failed")}, nil)
+	service.SetOperationLogs(&operationLogSpy{})
+	runtimeconfig.Set(runtimeconfig.SMSBowerNoCodeRefundTimeoutMinutesKey, "10")
+	t.Cleanup(func() { runtimeconfig.Delete(runtimeconfig.SMSBowerNoCodeRefundTimeoutMinutesKey) })
+	timeout := uint(9)
+
+	_, err := (&handler{service: service, settings: settings}).updateConfig(context.Background(), ConfigUpdate{
+		Enabled: true, Strategy: upstream.StrategyLocalFirst, SyncIntervalMinutes: 30,
+		NoCodeRefundTimeoutMinutes: &timeout,
+		BalanceWarningThreshold:    "1", PointsPerUnit: "1", MinMarginRate: "0.10",
+	}, MutationMeta{OperatorUserID: 7, RequestID: "config-timeout", Path: "/v1/admin/upstreams/smsbower/config"})
+
+	require.Error(t, err)
+	var stored configModel
+	require.NoError(t, db.First(&stored, "id = 1").Error)
+	require.Equal(t, string(upstream.StrategyUpstreamFirst), stored.Strategy)
+	require.Equal(t, uint(5), stored.SyncIntervalMinutes)
+	setting, getErr := settings.Get(context.Background(), runtimeconfig.SMSBowerNoCodeRefundTimeoutMinutesKey)
+	require.NoError(t, getErr)
+	require.Equal(t, "10", setting.Value)
+	require.Equal(t, "10", runtimeconfig.String(runtimeconfig.SMSBowerNoCodeRefundTimeoutMinutesKey, ""))
+}
+
 func TestAcceptPaidOrderDoesNotStealLocalGmailOwner(t *testing.T) {
 	service, db, now := newServiceHarness(t)
 	require.NoError(t, db.Create(&orderGuardModel{OrderNo: "ORDER-LOCAL", Type: "gmail", CreatedAt: now}).Error)
@@ -423,7 +488,7 @@ func TestProvisionExplicitFailureRefundsWithoutRetryingRemote(t *testing.T) {
 	require.Nil(t, stored.NextPollAt)
 }
 
-func TestProvisionUncertainResultRetriesOnceThenStops(t *testing.T) {
+func TestProvisionUncertainResultHoldsForReviewWithoutRefund(t *testing.T) {
 	service, db, now := newServiceHarness(t)
 	trade := &tradePortSpy{}
 	notifier := &notifierSpy{}
@@ -439,7 +504,7 @@ func TestProvisionUncertainResultRetriesOnceThenStops(t *testing.T) {
 
 	require.Error(t, service.Provision(context.Background(), order.ID))
 	require.Equal(t, int32(2), calls.Load())
-	require.Equal(t, 1, trade.failures)
+	require.Zero(t, trade.failures)
 	require.Equal(t, 1, notifier.alerts)
 	var stored orderModel
 	require.NoError(t, db.First(&stored, order.ID).Error)
@@ -451,7 +516,7 @@ func TestProvisionUncertainResultRetriesOnceThenStops(t *testing.T) {
 	stored = orderModel{}
 	require.NoError(t, db.First(&stored, order.ID).Error)
 	require.Nil(t, stored.NextPollAt)
-	require.Equal(t, 2, trade.failures)
+	require.Zero(t, trade.failures)
 	require.Equal(t, 2, notifier.alerts)
 	require.Equal(t, int32(2), calls.Load())
 }
@@ -470,7 +535,7 @@ func TestProvisioningLeaseExpiryBecomesUnknownWithoutRemoteCall(t *testing.T) {
 	}).Error)
 
 	require.NoError(t, service.Provision(context.Background(), order.ID))
-	require.Equal(t, 1, trade.failures)
+	require.Zero(t, trade.failures)
 	require.Equal(t, 1, notifier.alerts)
 	require.NoError(t, db.First(&order, order.ID).Error)
 	require.Equal(t, StatusUnknown, order.Status)
@@ -488,6 +553,39 @@ func TestCancelPendingOrderDoesNotCallRemote(t *testing.T) {
 	require.NoError(t, db.First(&stored, order.ID).Error)
 	require.Equal(t, StatusCancelled, stored.Status)
 	require.Nil(t, stored.NextPollAt)
+}
+
+func TestCancelActiveOrderConfirmsUpstreamBeforeReturning(t *testing.T) {
+	service, db, now := newServiceHarness(t)
+	var cancellationCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		require.Equal(t, "/api/mail/setStatus", request.URL.Path)
+		require.Equal(t, "2", request.URL.Query().Get("status"))
+		cancellationCalls.Add(1)
+		_, _ = writer.Write([]byte(`{"status":1}`))
+	}))
+	t.Cleanup(server.Close)
+	service.client = newTestClient(server.URL, server.Client())
+	mailID := uint64(44)
+	nextPoll := now
+	order := orderModel{
+		OrderNo: "ORDER-CANCEL-ACTIVE", ProjectID: 1, ProductID: 2, ServiceCode: "svc",
+		RemoteMailID: &mailID, Email: "active@gmail.com", Status: StatusActive, CodesJSON: "[]",
+		UpstreamPriceSnapshot: "2", PointsPerUnitSnapshot: "1", CostPointsSnapshot: "2", MaxPriceSnapshot: "2",
+		NextPollAt: &nextPoll, Version: 1,
+	}
+	require.NoError(t, db.Create(&order).Error)
+
+	handled, err := service.CancelOrder(context.Background(), order.OrderNo)
+
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.Equal(t, int32(1), cancellationCalls.Load())
+	var stored orderModel
+	require.NoError(t, db.First(&stored, order.ID).Error)
+	require.Equal(t, StatusCancelled, stored.Status)
+	require.Empty(t, stored.PendingRemoteAction)
+	require.NotNil(t, stored.NextPollAt)
 }
 
 func TestReservationsKeepUnpurchasedOrdersAcrossSyncBoundary(t *testing.T) {
@@ -538,7 +636,7 @@ func TestPollClaimUsesDurableOrderLease(t *testing.T) {
 	require.False(t, claimed)
 }
 
-func TestPollUsesUpstreamTerminalStateInsteadOfLocalExpiry(t *testing.T) {
+func TestPollUsesUpstreamTerminalStateAfterReceivingCode(t *testing.T) {
 	service, db, now := newServiceHarness(t)
 	trade := &tradePortSpy{}
 	service.SetTrade(trade)
@@ -563,7 +661,8 @@ func TestPollUsesUpstreamTerminalStateInsteadOfLocalExpiry(t *testing.T) {
 	nextPoll := now
 	order := orderModel{
 		OrderNo: "ORDER-UPSTREAM-ENDED", ProjectID: 1, ProductID: 2, ServiceCode: "svc",
-		RemoteMailID: &mailID, Email: "ended@gmail.com", Status: StatusActive, CodesJSON: "[]",
+		RemoteMailID: &mailID, Email: "ended@gmail.com", Status: StatusActive, ReceivedCount: 1,
+		CodesJSON:             `[{"seq":1,"code":"123456","receivedAt":"2026-08-05T08:00:00Z"}]`,
 		UpstreamPriceSnapshot: "2", PointsPerUnitSnapshot: "1", CostPointsSnapshot: "2", MaxPriceSnapshot: "2",
 		NextPollAt: &nextPoll, StartedAt: &startedAt, ExpiresAt: &expiresAt, Version: 1,
 	}
@@ -573,44 +672,240 @@ func TestPollUsesUpstreamTerminalStateInsteadOfLocalExpiry(t *testing.T) {
 
 	require.Equal(t, int32(1), codeCalls.Load())
 	require.Zero(t, statusCalls.Load())
+	require.Equal(t, 1, trade.completions)
+	var stored orderModel
+	require.NoError(t, db.First(&stored, order.ID).Error)
+	require.Equal(t, StatusCompleted, stored.Status)
+	require.Nil(t, stored.NextPollAt)
+}
+
+func TestPollHoldsUnconfirmedZeroCodeActivationForReview(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		body string
+	}{
+		{name: "already cancelled", body: "Activation is already canceled"},
+		{name: "missing", body: "No activation found with such id"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			service, db, now := newServiceHarness(t)
+			trade := &tradePortSpy{}
+			notifier := &notifierSpy{}
+			service.SetTrade(trade)
+			service.SetNotifier(notifier)
+			var statusCalls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				switch request.URL.Path {
+				case "/api/mail/getCode":
+					_, _ = writer.Write([]byte(test.body))
+				case "/api/mail/setStatus":
+					statusCalls.Add(1)
+					_, _ = writer.Write([]byte(`{"status":1}`))
+				default:
+					http.NotFound(writer, request)
+				}
+			}))
+			t.Cleanup(server.Close)
+			service.client = newTestClient(server.URL, server.Client())
+			mailID := uint64(46)
+			expiresAt := now.Add(time.Hour)
+			nextPoll := now
+			order := orderModel{
+				OrderNo: "ORDER-UPSTREAM-" + strings.ReplaceAll(test.name, " ", "-"), ProjectID: 1, ProductID: 2, ServiceCode: "svc",
+				RemoteMailID: &mailID, Email: "missing@gmail.com", Status: StatusActive, CodesJSON: "[]",
+				UpstreamPriceSnapshot: "2", PointsPerUnitSnapshot: "1", CostPointsSnapshot: "2", MaxPriceSnapshot: "2",
+				NextPollAt: &nextPoll, StartedAt: &now, ExpiresAt: &expiresAt, Version: 1,
+			}
+			require.NoError(t, db.Create(&order).Error)
+
+			require.NoError(t, service.Poll(context.Background(), order.ID))
+
+			require.Zero(t, statusCalls.Load())
+			require.Zero(t, trade.failures)
+			require.Equal(t, 1, notifier.alerts)
+			var stored orderModel
+			require.NoError(t, db.First(&stored, order.ID).Error)
+			require.Equal(t, StatusCancelling, stored.Status)
+			require.Equal(t, ActionCancel, stored.PendingRemoteAction)
+			require.Contains(t, stored.LastSafeError, "尚未退款")
+			require.Nil(t, stored.NextPollAt)
+		})
+	}
+}
+
+func TestPollCancelsUpstreamAndRefundsAfterNoCodeTimeout(t *testing.T) {
+	service, db, now := newServiceHarness(t)
+	var codeCalls, cancelCalls atomic.Int32
+	trade := &tradePortSpy{
+		receiveUntil: now.Add(-time.Second),
+		failure:      func() { require.Equal(t, int32(1), cancelCalls.Load()) },
+	}
+	service.SetTrade(trade)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/mail/getCode":
+			codeCalls.Add(1)
+			_, _ = writer.Write([]byte("Code has not been received yet, please try again later"))
+		case "/api/mail/setStatus":
+			require.Equal(t, "2", request.URL.Query().Get("status"))
+			cancelCalls.Add(1)
+			_, _ = writer.Write([]byte(`{"status":1}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	t.Cleanup(server.Close)
+	service.client = newTestClient(server.URL, server.Client())
+	mailID := uint64(47)
+	startedAt := now.Add(-4 * time.Minute)
+	expiresAt := now.Add(lifetime)
+	nextPoll := now
+	order := orderModel{
+		OrderNo: "ORDER-NO-CODE-TIMEOUT", ProjectID: 1, ProductID: 2, ServiceCode: "svc",
+		RemoteMailID: &mailID, Email: "timeout@gmail.com", Status: StatusActive, CodesJSON: "[]",
+		UpstreamPriceSnapshot: "2", PointsPerUnitSnapshot: "1", CostPointsSnapshot: "2",
+		MaxPriceSnapshot: "2", NextPollAt: &nextPoll, StartedAt: &startedAt, ExpiresAt: &expiresAt, Version: 1,
+	}
+	require.NoError(t, db.Create(&order).Error)
+
+	require.NoError(t, service.Poll(context.Background(), order.ID))
+	require.Zero(t, codeCalls.Load())
+	require.Equal(t, int32(1), cancelCalls.Load())
 	require.Equal(t, 1, trade.failures)
 	var stored orderModel
 	require.NoError(t, db.First(&stored, order.ID).Error)
 	require.Equal(t, StatusCancelled, stored.Status)
+	require.Empty(t, stored.PendingRemoteAction)
 	require.Nil(t, stored.NextPollAt)
 }
 
-func TestPollKeepsMissingActivationSeparateFromCancelled(t *testing.T) {
+func TestPollHoldsUnconfirmedUpstreamCancellationForReview(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		body string
+	}{
+		{name: "already cancelled", body: "Activation is already canceled"},
+		{name: "missing", body: "No activation found with such id"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			service, db, now := newServiceHarness(t)
+			trade := &tradePortSpy{receiveUntil: now.Add(-time.Second)}
+			notifier := &notifierSpy{}
+			service.SetTrade(trade)
+			service.SetNotifier(notifier)
+			var cancelCalls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				require.Equal(t, "/api/mail/setStatus", request.URL.Path)
+				require.Equal(t, "2", request.URL.Query().Get("status"))
+				cancelCalls.Add(1)
+				_, _ = writer.Write([]byte(test.body))
+			}))
+			t.Cleanup(server.Close)
+			service.client = newTestClient(server.URL, server.Client())
+			mailID := uint64(47)
+			startedAt := now.Add(-4 * time.Minute)
+			expiresAt := now.Add(lifetime)
+			nextPoll := now
+			order := orderModel{
+				OrderNo: "ORDER-CANCEL-" + strings.ReplaceAll(test.name, " ", "-"), ProjectID: 1, ProductID: 2, ServiceCode: "svc",
+				RemoteMailID: &mailID, Email: "timeout@gmail.com", Status: StatusActive, CodesJSON: "[]",
+				UpstreamPriceSnapshot: "2", PointsPerUnitSnapshot: "1", CostPointsSnapshot: "2",
+				MaxPriceSnapshot: "2", NextPollAt: &nextPoll, StartedAt: &startedAt, ExpiresAt: &expiresAt, Version: 1,
+			}
+			require.NoError(t, db.Create(&order).Error)
+
+			require.NoError(t, service.Poll(context.Background(), order.ID))
+
+			require.Equal(t, int32(1), cancelCalls.Load())
+			require.Zero(t, trade.failures)
+			require.Equal(t, 1, notifier.alerts)
+			var stored orderModel
+			require.NoError(t, db.First(&stored, order.ID).Error)
+			require.Equal(t, StatusCancelling, stored.Status)
+			require.Equal(t, ActionCancel, stored.PendingRemoteAction)
+			require.Contains(t, stored.LastSafeError, "尚未退款")
+			require.Nil(t, stored.NextPollAt)
+		})
+	}
+}
+
+func TestPollRetriesCancellationReviewWhenNotificationFails(t *testing.T) {
 	service, db, now := newServiceHarness(t)
-	trade := &tradePortSpy{}
-	notifier := &notifierSpy{}
+	current := now
+	service.now = func() time.Time { return current }
+	trade := &tradePortSpy{receiveUntil: now.Add(-time.Second)}
+	notifier := &notifierSpy{err: errors.New("alert queue unavailable")}
 	service.SetTrade(trade)
 	service.SetNotifier(notifier)
+	var cancellationCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		require.Equal(t, "/api/mail/getCode", request.URL.Path)
-		_, _ = writer.Write([]byte("No activation found with such id"))
+		require.Equal(t, "/api/mail/setStatus", request.URL.Path)
+		cancellationCalls.Add(1)
+		_, _ = writer.Write([]byte("Activation is already canceled"))
 	}))
 	t.Cleanup(server.Close)
 	service.client = newTestClient(server.URL, server.Client())
-	mailID := uint64(46)
-	expiresAt := now.Add(time.Hour)
+	mailID := uint64(48)
+	expiresAt := now.Add(lifetime)
 	nextPoll := now
 	order := orderModel{
-		OrderNo: "ORDER-UPSTREAM-MISSING", ProjectID: 1, ProductID: 2, ServiceCode: "svc",
-		RemoteMailID: &mailID, Email: "missing@gmail.com", Status: StatusActive, CodesJSON: "[]",
+		OrderNo: "ORDER-CANCEL-NOTIFY-RETRY", ProjectID: 1, ProductID: 2, ServiceCode: "svc",
+		RemoteMailID: &mailID, Email: "retry@gmail.com", Status: StatusActive, CodesJSON: "[]",
 		UpstreamPriceSnapshot: "2", PointsPerUnitSnapshot: "1", CostPointsSnapshot: "2", MaxPriceSnapshot: "2",
 		NextPollAt: &nextPoll, StartedAt: &now, ExpiresAt: &expiresAt, Version: 1,
 	}
 	require.NoError(t, db.Create(&order).Error)
 
-	require.NoError(t, service.Poll(context.Background(), order.ID))
-
-	require.Equal(t, 1, trade.failures)
-	require.Equal(t, 1, notifier.alerts)
+	require.Error(t, service.Poll(context.Background(), order.ID))
 	var stored orderModel
 	require.NoError(t, db.First(&stored, order.ID).Error)
-	require.Equal(t, StatusUnknown, stored.Status)
+	require.NotNil(t, stored.NextPollAt)
+
+	notifier.err = nil
+	current = current.Add(pollLease)
+	require.NoError(t, service.Poll(context.Background(), order.ID))
+	stored = orderModel{}
+	require.NoError(t, db.First(&stored, order.ID).Error)
 	require.Nil(t, stored.NextPollAt)
+	require.Equal(t, 2, notifier.alerts)
+	require.Equal(t, int32(2), cancellationCalls.Load())
+	require.Zero(t, trade.failures)
+}
+
+func TestPollUsesPersistedReceiveDeadline(t *testing.T) {
+	service, db, now := newServiceHarness(t)
+	trade := &tradePortSpy{receiveUntil: now.Add(time.Minute)}
+	service.SetTrade(trade)
+	var codeCalls, cancellationCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/mail/getCode":
+			codeCalls.Add(1)
+			_, _ = writer.Write([]byte("Code has not been received yet, please try again later"))
+		case "/api/mail/setStatus":
+			cancellationCalls.Add(1)
+			_, _ = writer.Write([]byte(`{"status":1}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	t.Cleanup(server.Close)
+	service.client = newTestClient(server.URL, server.Client())
+	mailID := uint64(49)
+	startedAt := now.Add(-24 * time.Hour)
+	expiresAt := now.Add(lifetime)
+	nextPoll := now
+	order := orderModel{
+		OrderNo: "ORDER-PERSISTED-DEADLINE", ProjectID: 1, ProductID: 2, ServiceCode: "svc",
+		RemoteMailID: &mailID, Email: "deadline@gmail.com", Status: StatusActive, CodesJSON: "[]",
+		UpstreamPriceSnapshot: "2", PointsPerUnitSnapshot: "1", CostPointsSnapshot: "2", MaxPriceSnapshot: "2",
+		NextPollAt: &nextPoll, StartedAt: &startedAt, ExpiresAt: &expiresAt, Version: 1,
+	}
+	require.NoError(t, db.Create(&order).Error)
+
+	require.NoError(t, service.Poll(context.Background(), order.ID))
+	require.Equal(t, int32(1), codeCalls.Load())
+	require.Zero(t, cancellationCalls.Load())
 }
 
 func TestProvisionKeepsRemoteActivationWhenCancellationWinsStateRace(t *testing.T) {
@@ -704,22 +999,29 @@ func TestSMSBowerMutationsWriteSafeAuditInSameTransaction(t *testing.T) {
 }
 
 func TestPutConfigReturnsCommittedResultWhenSyncQueueIsUnavailable(t *testing.T) {
-	service, _, _ := newServiceHarness(t)
+	service, db, _ := newServiceHarness(t)
+	settings := newSMSBowerConfigSettings(t, db)
 	logs := &operationLogSpy{}
 	service.SetOperationLogs(logs)
+	runtimeconfig.Set(runtimeconfig.SMSBowerNoCodeRefundTimeoutMinutesKey, "10")
+	t.Cleanup(func() { runtimeconfig.Delete(runtimeconfig.SMSBowerNoCodeRefundTimeoutMinutesKey) })
 	recorder := httptest.NewRecorder()
 	context, _ := gin.CreateTestContext(recorder)
 	context.Request = httptest.NewRequest(http.MethodPut, "/v1/admin/upstreams/smsbower/config", strings.NewReader(`{
 		"enabled":true,"apiKey":"","strategy":"local_first","syncIntervalMinutes":5,
-		"balanceWarningThreshold":"1","pointsPerUnit":"1","minMarginRate":"0.10"
+		"noCodeRefundTimeoutMinutes":9,"balanceWarningThreshold":"1","pointsPerUnit":"1","minMarginRate":"0.10"
 	}`))
 	context.Request.Header.Set("Content-Type", "application/json")
 	context.Set("request_id", "request-2")
 	middleware.SetCurrentUser(context, 7, iamdomain.RoleAdmin, "admin@example.com", "session")
 
-	(&handler{service: service}).putConfig(context)
+	(&handler{service: service, settings: settings}).putConfig(context)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.Len(t, logs.items, 1)
 	require.Equal(t, uint(7), logs.items[0].OperatorUserID)
+	require.Contains(t, recorder.Body.String(), `"noCodeRefundTimeoutMinutes":9`)
+	setting, err := settings.Get(context.Request.Context(), runtimeconfig.SMSBowerNoCodeRefundTimeoutMinutesKey)
+	require.NoError(t, err)
+	require.Equal(t, "9", setting.Value)
 }

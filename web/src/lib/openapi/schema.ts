@@ -7137,6 +7137,8 @@ export interface components {
             configured: boolean;
             strategy: components["schemas"]["SMSBowerStrategy"];
             syncIntervalMinutes: number;
+            /** @description Automatically cancel the upstream activation when no first verification code arrives within this many minutes. */
+            noCodeRefundTimeoutMinutes: number;
             balanceWarningThreshold: components["schemas"]["NonNegativeLedgerAmountResponse"];
             pointsPerUnit: components["schemas"]["NonNegativeLedgerAmountResponse"];
             minMarginRate: components["schemas"]["NonNegativeLedgerAmountResponse"];
@@ -7147,6 +7149,8 @@ export interface components {
             apiKey?: string;
             strategy: components["schemas"]["SMSBowerStrategy"];
             syncIntervalMinutes: number;
+            /** @description Automatically cancel the upstream activation when no first verification code arrives within this many minutes. */
+            noCodeRefundTimeoutMinutes?: number;
             balanceWarningThreshold: components["schemas"]["NonNegativeLedgerAmount"];
             pointsPerUnit: components["schemas"]["NonNegativeLedgerAmount"];
             minMarginRate: components["schemas"]["NonNegativeLedgerAmount"];
