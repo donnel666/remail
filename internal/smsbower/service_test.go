@@ -398,9 +398,9 @@ func newSMSBowerConfigSettings(t *testing.T, db *gorm.DB) *settingsapp.SystemSet
 
 func TestConfigUpdateRollsBackWhenNoCodeRefundTimeoutWriteFails(t *testing.T) {
 	service, db, _ := newServiceHarness(t)
-	settings := newSMSBowerConfigSettings(t, db)
+	newSMSBowerConfigSettings(t, db)
 	repo := settingsinfra.NewRepository(db)
-	settings = settingsapp.NewSystemSettingsUseCase(&failingSettingsRepository{Repository: repo, err: errors.New("settings write failed")}, nil)
+	settings := settingsapp.NewSystemSettingsUseCase(&failingSettingsRepository{Repository: repo, err: errors.New("settings write failed")}, nil)
 	service.SetOperationLogs(&operationLogSpy{})
 	runtimeconfig.Set(runtimeconfig.SMSBowerNoCodeRefundTimeoutMinutesKey, "10")
 	t.Cleanup(func() { runtimeconfig.Delete(runtimeconfig.SMSBowerNoCodeRefundTimeoutMinutesKey) })
