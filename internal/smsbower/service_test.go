@@ -931,9 +931,9 @@ func TestProvisionKeepsRemoteActivationWhenCancellationWinsStateRace(t *testing.
 	go func() { provisionErr <- service.Provision(context.Background(), order.ID) }()
 	<-requestStarted
 	handled, err := service.CancelOrder(context.Background(), order.OrderNo)
-	require.NoError(t, err)
-	require.True(t, handled)
 	close(releaseRequest)
+	require.ErrorIs(t, err, ErrCancellationUnconfirmed)
+	require.True(t, handled)
 	require.Error(t, <-provisionErr)
 
 	var stored orderModel
