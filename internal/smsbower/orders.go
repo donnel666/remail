@@ -328,7 +328,7 @@ func (s *Service) Poll(ctx context.Context, orderID uint) error {
 		if s.trade == nil {
 			return errors.New("smsbower: trade callback unavailable")
 		}
-		if err := s.trade.FailGmailOrder(ctx, order.OrderNo, "Gmail 在 24 小时内未收到验证码，订单已退款。"); err != nil {
+		if err := s.trade.FailGmailOrder(ctx, order.OrderNo, "SMSBower 接码生命周期已结束且未收到验证码，订单已退款。"); err != nil {
 			return err
 		}
 		return s.clearNextPoll(ctx, order.ID, StatusCancelled)
@@ -348,14 +348,6 @@ func (s *Service) Poll(ctx context.Context, orderID uint) error {
 	if order.Status != StatusActive {
 		return nil
 	}
-	now := s.now()
-	if order.ExpiresAt != nil && !now.Before(order.ExpiresAt.UTC()) {
-		updated, err := s.prepareExpiryAction(ctx, order.ID)
-		if err != nil {
-			return err
-		}
-		return s.applyRemoteAction(ctx, *updated)
-	}
 	var config configModel
 	if err := s.dbFor(ctx).First(&config, "id = 1").Error; err != nil || order.RemoteMailID == nil || *order.RemoteMailID == 0 || strings.TrimSpace(config.APIKey) == "" {
 		return s.deferPoll(ctx, order.ID, "SMSBower 激活信息不可用", ErrRemote)
@@ -364,12 +356,15 @@ func (s *Service) Poll(ctx context.Context, orderID uint) error {
 	if errors.Is(err, ErrCodeWaiting) {
 		return s.deferPoll(ctx, order.ID, "", nil)
 	}
-	if remoteActionFinal(err) {
-		updated, prepareErr := s.prepareExpiryAction(ctx, order.ID)
+	if errors.Is(err, ErrActivationStatus) {
+		updated, prepareErr := s.prepareTerminalAction(ctx, order.ID)
 		if prepareErr != nil {
 			return prepareErr
 		}
-		return s.applyRemoteAction(ctx, *updated)
+		return s.finishRemoteAction(ctx, *updated, nil)
+	}
+	if errors.Is(err, ErrActivationMissing) {
+		return s.markActivationMissing(ctx, *order)
 	}
 	if err != nil {
 		return s.deferPoll(ctx, order.ID, safeRemoteError(err), err)
@@ -415,7 +410,7 @@ func (s *Service) claimPoll(ctx context.Context, orderID uint) (*orderModel, boo
 	return &order, claimed, err
 }
 
-func (s *Service) prepareExpiryAction(ctx context.Context, orderID uint) (*orderModel, error) {
+func (s *Service) prepareTerminalAction(ctx context.Context, orderID uint) (*orderModel, error) {
 	var order orderModel
 	err := s.dbFor(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&order, orderID).Error; err != nil {
@@ -500,11 +495,15 @@ func (s *Service) applyRemoteAction(ctx context.Context, order orderModel) error
 	if remoteErr != nil && !remoteActionFinal(remoteErr) {
 		return s.deferPoll(ctx, order.ID, safeRemoteError(remoteErr), remoteErr)
 	}
+	return s.finishRemoteAction(ctx, order, remoteErr)
+}
+
+func (s *Service) finishRemoteAction(ctx context.Context, order orderModel, remoteErr error) error {
 	now := s.now()
-	uncertainCancel := order.PendingRemoteAction == ActionCancel && errors.Is(remoteErr, ErrActivationStatus)
-	cancelReason := "Gmail 在 24 小时内未收到验证码，订单已退款。"
+	uncertainCancel := order.PendingRemoteAction == ActionCancel && errors.Is(remoteErr, ErrActivationMissing)
+	cancelReason := "SMSBower 接码生命周期已结束且未收到验证码，订单已退款。"
 	if uncertainCancel {
-		cancelReason = "SMSBower 取消结果不确定，订单已进入退款流程，请管理员核对上游是否产生费用。"
+		cancelReason = "SMSBower 无法查询该激活记录，订单已进入退款流程，请管理员核对上游是否产生费用。"
 	}
 	updates := map[string]any{
 		"pending_remote_action": "", "last_safe_error": "", "version": gorm.Expr("version + 1"),
@@ -563,11 +562,33 @@ func (s *Service) applyRemoteAction(ctx context.Context, order orderModel) error
 	}
 }
 
+func (s *Service) markActivationMissing(ctx context.Context, order orderModel) error {
+	now := s.now()
+	reason := "SMSBower 无法查询该激活记录，订单已进入退款流程，请管理员核对上游。"
+	result := s.dbFor(ctx).Model(&orderModel{}).
+		Where("id = ? AND status = ? AND pending_remote_action = ''", order.ID, StatusActive).
+		Updates(map[string]any{
+			"status": StatusUnknown, "completed_at": now, "next_poll_at": now,
+			"last_safe_error": reason, "version": gorm.Expr("version + 1"),
+		})
+	if result.Error != nil {
+		return fmt.Errorf("mark missing SMSBower activation: %w", result.Error)
+	}
+	if result.RowsAffected != 1 {
+		return errors.New("smsbower: missing activation state conflict")
+	}
+	order.Status = StatusUnknown
+	order.CompletedAt = &now
+	order.NextPollAt = &now
+	order.LastSafeError = reason
+	return s.settleUnknown(ctx, order)
+}
+
 func completionReason(order orderModel) string {
 	if order.ReceivedCount >= MaxCodes {
 		return "Gmail 已接收 3 个验证码，接码会话完成。"
 	}
-	return fmt.Sprintf("Gmail 24 小时接码窗口结束，共接收 %d 个验证码。", order.ReceivedCount)
+	return fmt.Sprintf("SMSBower 接码生命周期已结束，共接收 %d 个验证码。", order.ReceivedCount)
 }
 
 func (s *Service) deferPoll(ctx context.Context, orderID uint, safeMessage string, cause error) error {

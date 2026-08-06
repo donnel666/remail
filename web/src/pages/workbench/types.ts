@@ -13,7 +13,6 @@ export type OrderStatus =
 export type ProductType = "microsoft" | "domain" | "random" | "gmail";
 export type ServiceMode = "purchase" | "code";
 export type ServiceState =
-  | "waiting_upstream"
   | "waiting_mail"
   | "code_received"
   | "pending_activation"

@@ -59,14 +59,17 @@ type testUserGroupModel struct {
 func (testUserGroupModel) TableName() string { return "user_groups" }
 
 type tradePortSpy struct {
-	activations int
-	completions int
-	failures    int
+	activations   int
+	activation    upstream.Activation
+	activationErr error
+	completions   int
+	failures      int
 }
 
-func (s *tradePortSpy) ActivateUpstreamOrder(context.Context, upstream.Activation) error {
+func (s *tradePortSpy) ActivateUpstreamOrder(_ context.Context, activation upstream.Activation) error {
 	s.activations++
-	return nil
+	s.activation = activation
+	return s.activationErr
 }
 
 func (s *tradePortSpy) CompleteGmailOrder(context.Context, string, string) error {
@@ -191,6 +194,11 @@ func paidOrder(orderNo string) upstream.PaidOrder {
 	}
 }
 
+func paidOrderTxContext(tx *gorm.DB) context.Context {
+	ctx, _ := platform.WithGormRollback(context.Background())
+	return platform.WithGormTx(ctx, tx)
+}
+
 func createPendingProviderOrder(t *testing.T, db *gorm.DB, orderNo string, now time.Time) orderModel {
 	t.Helper()
 	nextPoll := now
@@ -205,41 +213,140 @@ func createPendingProviderOrder(t *testing.T, db *gorm.DB, orderNo string, now t
 }
 
 func TestAcceptPaidOrderRequiresAndSharesTradeTransaction(t *testing.T) {
-	service, db, _ := newServiceHarness(t)
-	service.client = nil
+	service, db, now := newServiceHarness(t)
+	trade := &tradePortSpy{}
+	service.SetTrade(trade)
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		require.Equal(t, "/api/mail/getActivation", request.URL.Path)
+		require.Equal(t, "svc", request.URL.Query().Get("service"))
+		require.Equal(t, "2", request.URL.Query().Get("maxPrice"))
+		calls.Add(1)
+		_, _ = writer.Write([]byte(`{"status":1,"mail":"buyer@gmail.com","mailId":41}`))
+	}))
+	t.Cleanup(server.Close)
+	service.client = newTestClient(server.URL, server.Client())
 
 	handled, err := service.AcceptPaidOrder(context.Background(), paidOrder("ORDER-TX"))
 	require.False(t, handled)
 	require.ErrorIs(t, err, errPaidOrderTx)
-
-	rollback := errors.New("rollback test")
-	err = db.Transaction(func(tx *gorm.DB) error {
-		handled, acceptErr := service.AcceptPaidOrder(platform.WithGormTx(context.Background(), tx), paidOrder("ORDER-TX"))
-		if acceptErr != nil {
-			return acceptErr
-		}
-		if !handled {
-			return errors.New("provider did not handle selected order")
-		}
-		return rollback
-	})
-	require.ErrorIs(t, err, rollback)
-	var orderCount, guardCount int64
-	require.NoError(t, db.Model(&orderModel{}).Where("order_no = ?", "ORDER-TX").Count(&orderCount).Error)
-	require.NoError(t, db.Model(&orderGuardModel{}).Where("order_no = ?", "ORDER-TX").Count(&guardCount).Error)
-	require.Zero(t, orderCount)
-	require.Zero(t, guardCount)
+	require.Zero(t, calls.Load())
 
 	require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
-		handled, acceptErr := service.AcceptPaidOrder(platform.WithGormTx(context.Background(), tx), paidOrder("ORDER-TX"))
+		handled, acceptErr := service.AcceptPaidOrder(paidOrderTxContext(tx), paidOrder("ORDER-TX"))
 		require.True(t, handled)
 		return acceptErr
 	}))
 	var stored orderModel
 	require.NoError(t, db.Where("order_no = ?", "ORDER-TX").Take(&stored).Error)
-	require.Equal(t, StatusPending, stored.Status)
+	require.Equal(t, StatusActive, stored.Status)
+	require.Equal(t, "buyer@gmail.com", stored.Email)
+	require.NotNil(t, stored.RemoteMailID)
+	require.Equal(t, uint64(41), *stored.RemoteMailID)
+	require.NotNil(t, stored.StartedAt)
+	require.NotNil(t, stored.ExpiresAt)
+	require.Equal(t, now, stored.StartedAt.UTC())
+	require.Equal(t, now.Add(lifetime), stored.ExpiresAt.UTC())
 	require.Equal(t, "2.00", stored.UpstreamPriceSnapshot)
 	require.NoError(t, db.Where("order_no = ? AND type = ?", "ORDER-TX", "gmail").Take(&orderGuardModel{}).Error)
+	require.Equal(t, int32(1), calls.Load())
+	require.Equal(t, 1, trade.activations)
+	require.Equal(t, "ORDER-TX", trade.activation.OrderNo)
+	require.Equal(t, "buyer@gmail.com", trade.activation.Email)
+}
+
+func TestAcceptPaidOrderRemoteFailureRollsBackReservation(t *testing.T) {
+	service, db, _ := newServiceHarness(t)
+	service.SetTrade(&tradePortSpy{})
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		_, _ = writer.Write([]byte("NO_MAIL"))
+	}))
+	t.Cleanup(server.Close)
+	service.client = newTestClient(server.URL, server.Client())
+
+	err := db.Transaction(func(tx *gorm.DB) error {
+		_, acceptErr := service.AcceptPaidOrder(paidOrderTxContext(tx), paidOrder("ORDER-NO-MAIL"))
+		return acceptErr
+	})
+	require.ErrorIs(t, err, upstream.ErrUnavailable)
+	var orderCount, guardCount int64
+	require.NoError(t, db.Model(&orderModel{}).Where("order_no = ?", "ORDER-NO-MAIL").Count(&orderCount).Error)
+	require.NoError(t, db.Model(&orderGuardModel{}).Where("order_no = ?", "ORDER-NO-MAIL").Count(&guardCount).Error)
+	require.Zero(t, orderCount)
+	require.Zero(t, guardCount)
+}
+
+func TestAcceptPaidOrderCancelsRemoteWhenLocalActivationFails(t *testing.T) {
+	service, db, _ := newServiceHarness(t)
+	wantErr := errors.New("activate trade order failed")
+	service.SetTrade(&tradePortSpy{activationErr: wantErr})
+	var cancelled atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/mail/getActivation":
+			_, _ = writer.Write([]byte(`{"status":1,"mail":"buyer@gmail.com","mailId":42}`))
+		case "/api/mail/setStatus":
+			require.Equal(t, "42", request.URL.Query().Get("id"))
+			require.Equal(t, "2", request.URL.Query().Get("status"))
+			cancelled.Store(true)
+			_, _ = writer.Write([]byte(`{"status":1}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	t.Cleanup(server.Close)
+	service.client = newTestClient(server.URL, server.Client())
+
+	err := db.Transaction(func(tx *gorm.DB) error {
+		_, acceptErr := service.AcceptPaidOrder(paidOrderTxContext(tx), paidOrder("ORDER-CALLBACK-FAIL"))
+		return acceptErr
+	})
+	require.ErrorIs(t, err, wantErr)
+	require.True(t, cancelled.Load())
+	var orderCount int64
+	require.NoError(t, db.Model(&orderModel{}).Where("order_no = ?", "ORDER-CALLBACK-FAIL").Count(&orderCount).Error)
+	require.Zero(t, orderCount)
+}
+
+func TestAcceptPaidOrderCancelsRemoteWhenTransactionRollsBack(t *testing.T) {
+	service, db, _ := newServiceHarness(t)
+	service.SetTrade(&tradePortSpy{})
+	var activationCalls, cancellationCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/mail/getActivation":
+			activationCalls.Add(1)
+			_, _ = writer.Write([]byte(`{"status":1,"mail":"rollback@gmail.com","mailId":44}`))
+		case "/api/mail/setStatus":
+			require.Equal(t, "44", request.URL.Query().Get("id"))
+			require.Equal(t, "2", request.URL.Query().Get("status"))
+			cancellationCalls.Add(1)
+			_, _ = writer.Write([]byte(`{"status":1}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	t.Cleanup(server.Close)
+	service.client = newTestClient(server.URL, server.Client())
+	wantRollback := errors.New("commit failed")
+	var rollback func(context.Context) error
+
+	err := db.Transaction(func(tx *gorm.DB) error {
+		txCtx, runRollback := platform.WithGormRollback(context.Background())
+		rollback = runRollback
+		_, acceptErr := service.AcceptPaidOrder(platform.WithGormTx(txCtx, tx), paidOrder("ORDER-ROLLBACK"))
+		if acceptErr != nil {
+			return acceptErr
+		}
+		return wantRollback
+	})
+	require.ErrorIs(t, err, wantRollback)
+	require.NoError(t, rollback(context.Background()))
+	require.Equal(t, int32(1), activationCalls.Load())
+	require.Equal(t, int32(1), cancellationCalls.Load())
+	var orderCount int64
+	require.NoError(t, db.Model(&orderModel{}).Where("order_no = ?", "ORDER-ROLLBACK").Count(&orderCount).Error)
+	require.Zero(t, orderCount)
 }
 
 func TestUpdateConfigRejectsOversizedAPIKey(t *testing.T) {
@@ -256,7 +363,7 @@ func TestAcceptPaidOrderDoesNotStealLocalGmailOwner(t *testing.T) {
 	require.NoError(t, db.Create(&orderGuardModel{OrderNo: "ORDER-LOCAL", Type: "gmail", CreatedAt: now}).Error)
 
 	err := db.Transaction(func(tx *gorm.DB) error {
-		handled, acceptErr := service.AcceptPaidOrder(platform.WithGormTx(context.Background(), tx), paidOrder("ORDER-LOCAL"))
+		handled, acceptErr := service.AcceptPaidOrder(paidOrderTxContext(tx), paidOrder("ORDER-LOCAL"))
 		require.True(t, handled)
 		return acceptErr
 	})
@@ -316,7 +423,7 @@ func TestProvisionExplicitFailureRefundsWithoutRetryingRemote(t *testing.T) {
 	require.Nil(t, stored.NextPollAt)
 }
 
-func TestProvisionUncertainResultStopsAutomaticRepurchase(t *testing.T) {
+func TestProvisionUncertainResultRetriesOnceThenStops(t *testing.T) {
 	service, db, now := newServiceHarness(t)
 	trade := &tradePortSpy{}
 	notifier := &notifierSpy{}
@@ -331,7 +438,7 @@ func TestProvisionUncertainResultStopsAutomaticRepurchase(t *testing.T) {
 	order := createPendingProviderOrder(t, db, "ORDER-UNCERTAIN", now)
 
 	require.Error(t, service.Provision(context.Background(), order.ID))
-	require.Equal(t, int32(1), calls.Load())
+	require.Equal(t, int32(2), calls.Load())
 	require.Equal(t, 1, trade.failures)
 	require.Equal(t, 1, notifier.alerts)
 	var stored orderModel
@@ -346,7 +453,7 @@ func TestProvisionUncertainResultStopsAutomaticRepurchase(t *testing.T) {
 	require.Nil(t, stored.NextPollAt)
 	require.Equal(t, 2, trade.failures)
 	require.Equal(t, 2, notifier.alerts)
-	require.Equal(t, int32(1), calls.Load())
+	require.Equal(t, int32(2), calls.Load())
 }
 
 func TestProvisioningLeaseExpiryBecomesUnknownWithoutRemoteCall(t *testing.T) {
@@ -429,6 +536,81 @@ func TestPollClaimUsesDurableOrderLease(t *testing.T) {
 	_, claimed, err = service.claimPoll(context.Background(), order.ID)
 	require.NoError(t, err)
 	require.False(t, claimed)
+}
+
+func TestPollUsesUpstreamTerminalStateInsteadOfLocalExpiry(t *testing.T) {
+	service, db, now := newServiceHarness(t)
+	trade := &tradePortSpy{}
+	service.SetTrade(trade)
+	var codeCalls, statusCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/mail/getCode":
+			codeCalls.Add(1)
+			_, _ = writer.Write([]byte("Activation is already canceled"))
+		case "/api/mail/setStatus":
+			statusCalls.Add(1)
+			_, _ = writer.Write([]byte(`{"status":1}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	t.Cleanup(server.Close)
+	service.client = newTestClient(server.URL, server.Client())
+	mailID := uint64(45)
+	startedAt := now.Add(-25 * time.Hour)
+	expiresAt := now.Add(-time.Hour)
+	nextPoll := now
+	order := orderModel{
+		OrderNo: "ORDER-UPSTREAM-ENDED", ProjectID: 1, ProductID: 2, ServiceCode: "svc",
+		RemoteMailID: &mailID, Email: "ended@gmail.com", Status: StatusActive, CodesJSON: "[]",
+		UpstreamPriceSnapshot: "2", PointsPerUnitSnapshot: "1", CostPointsSnapshot: "2", MaxPriceSnapshot: "2",
+		NextPollAt: &nextPoll, StartedAt: &startedAt, ExpiresAt: &expiresAt, Version: 1,
+	}
+	require.NoError(t, db.Create(&order).Error)
+
+	require.NoError(t, service.Poll(context.Background(), order.ID))
+
+	require.Equal(t, int32(1), codeCalls.Load())
+	require.Zero(t, statusCalls.Load())
+	require.Equal(t, 1, trade.failures)
+	var stored orderModel
+	require.NoError(t, db.First(&stored, order.ID).Error)
+	require.Equal(t, StatusCancelled, stored.Status)
+	require.Nil(t, stored.NextPollAt)
+}
+
+func TestPollKeepsMissingActivationSeparateFromCancelled(t *testing.T) {
+	service, db, now := newServiceHarness(t)
+	trade := &tradePortSpy{}
+	notifier := &notifierSpy{}
+	service.SetTrade(trade)
+	service.SetNotifier(notifier)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		require.Equal(t, "/api/mail/getCode", request.URL.Path)
+		_, _ = writer.Write([]byte("No activation found with such id"))
+	}))
+	t.Cleanup(server.Close)
+	service.client = newTestClient(server.URL, server.Client())
+	mailID := uint64(46)
+	expiresAt := now.Add(time.Hour)
+	nextPoll := now
+	order := orderModel{
+		OrderNo: "ORDER-UPSTREAM-MISSING", ProjectID: 1, ProductID: 2, ServiceCode: "svc",
+		RemoteMailID: &mailID, Email: "missing@gmail.com", Status: StatusActive, CodesJSON: "[]",
+		UpstreamPriceSnapshot: "2", PointsPerUnitSnapshot: "1", CostPointsSnapshot: "2", MaxPriceSnapshot: "2",
+		NextPollAt: &nextPoll, StartedAt: &now, ExpiresAt: &expiresAt, Version: 1,
+	}
+	require.NoError(t, db.Create(&order).Error)
+
+	require.NoError(t, service.Poll(context.Background(), order.ID))
+
+	require.Equal(t, 1, trade.failures)
+	require.Equal(t, 1, notifier.alerts)
+	var stored orderModel
+	require.NoError(t, db.First(&stored, order.ID).Error)
+	require.Equal(t, StatusUnknown, stored.Status)
+	require.Nil(t, stored.NextPollAt)
 }
 
 func TestProvisionKeepsRemoteActivationWhenCancellationWinsStateRace(t *testing.T) {

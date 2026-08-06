@@ -1248,6 +1248,13 @@ func (uc *UseCase) checkoutUpstreamGmailPrepared(ctx context.Context, prepared c
 		if err != nil {
 			return tradeUpstreamError(err)
 		}
+		order, err = uc.repo.FindOrder(txCtx, order.OrderNo)
+		if err != nil {
+			return err
+		}
+		if order.Status != domain.OrderStatusActive && order.Status != domain.OrderStatusCompleted {
+			return errors.New("upstream provider returned without activating order")
+		}
 		result = &CheckoutResult{Order: *order, Created: created}
 		return nil
 	})

@@ -102,9 +102,6 @@ export function serviceStateMeta(
   state: ServiceState,
   t: (key: string) => string
 ) {
-  if (state === "waiting_upstream") {
-    return { color: "amber" as const, label: t("Waiting upstream allocation") };
-  }
   if (state === "waiting_mail") {
     return { color: "amber" as const, label: t("Waiting mail") };
   }

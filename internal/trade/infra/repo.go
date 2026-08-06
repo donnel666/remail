@@ -93,9 +93,15 @@ func (r *Repo) WithTx(ctx context.Context, fn func(context.Context) error) error
 	for attempt := 0; attempt < 2; attempt++ {
 		// Allocation runs inside this parent transaction, so it needs the same
 		// statement-level snapshots as Allocation's own top-level transaction.
+		attemptCtx, rollback := platform.WithGormRollback(ctx)
 		err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			return fn(platform.WithGormTx(ctx, tx))
+			return fn(platform.WithGormTx(attemptCtx, tx))
 		}, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+		if err != nil {
+			if rollbackErr := rollback(context.WithoutCancel(ctx)); rollbackErr != nil {
+				return errors.Join(err, rollbackErr)
+			}
+		}
 		if err == nil || !isDeadlockError(err) {
 			return err
 		}

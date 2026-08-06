@@ -3,8 +3,11 @@ package smsbower
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -77,6 +80,68 @@ func TestActivationTransportFailureIsUncertainAndWaitingIsSafe(t *testing.T) {
 	var uncertain *UncertainActivationError
 	require.True(t, errors.As(err, &uncertain))
 	server.Close()
+}
+
+func TestActivationRecoversOrRetriesUncertainResponse(t *testing.T) {
+	t.Run("retry once when response is lost", func(t *testing.T) {
+		var calls atomic.Int32
+		httpClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			if calls.Add(1) == 1 {
+				return nil, errors.New("connection reset")
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK, Header: make(http.Header), Request: request,
+				Body: io.NopCloser(strings.NewReader(`{"status":1,"mail":"retry@gmail.com","mailId":42}`)),
+			}, nil
+		})}
+
+		activation, err := newTestClient("https://example.invalid", httpClient).
+			Activate(context.Background(), "secret", "go", decimal.NewFromInt(1))
+
+		require.NoError(t, err)
+		require.Equal(t, "retry@gmail.com", activation.Email)
+		require.Equal(t, uint64(42), activation.MailID)
+		require.Equal(t, int32(2), calls.Load())
+	})
+
+	t.Run("claim activation from an error response", func(t *testing.T) {
+		var calls atomic.Int32
+		server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+			calls.Add(1)
+			writer.WriteHeader(http.StatusBadGateway)
+			_, _ = writer.Write([]byte(`{"status":1,"mail":"recovered@gmail.com","mailId":43}`))
+		}))
+		defer server.Close()
+
+		activation, err := newTestClient(server.URL, server.Client()).
+			Activate(context.Background(), "secret", "go", decimal.NewFromInt(1))
+
+		require.NoError(t, err)
+		require.Equal(t, "recovered@gmail.com", activation.Email)
+		require.Equal(t, uint64(43), activation.MailID)
+		require.Equal(t, int32(1), calls.Load())
+	})
+
+	t.Run("keep first uncertain result when retry has no mail", func(t *testing.T) {
+		var calls atomic.Int32
+		httpClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			if calls.Add(1) == 1 {
+				return nil, errors.New("connection reset")
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK, Header: make(http.Header), Request: request,
+				Body: io.NopCloser(strings.NewReader("NO_MAIL")),
+			}, nil
+		})}
+
+		_, err := newTestClient("https://example.invalid", httpClient).
+			Activate(context.Background(), "secret", "go", decimal.NewFromInt(1))
+
+		var uncertain *UncertainActivationError
+		require.ErrorAs(t, err, &uncertain)
+		require.NotErrorIs(t, err, ErrNoMail)
+		require.Equal(t, int32(2), calls.Load())
+	})
 }
 
 func TestClientClassifiesNoAccessJSONAsBadKey(t *testing.T) {

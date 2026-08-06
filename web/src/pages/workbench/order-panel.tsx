@@ -61,44 +61,6 @@ function getPrice(
     : product.purchasePrice * Math.max(1, quantity);
 }
 
-function GmailCodeSlots({ order }: { order: WorkbenchOrder }) {
-  const { t } = useTranslation();
-  const codes = order.codes ?? [];
-  const maxCodes = order.maxCodes || 3;
-  const bySequence = new Map(codes.map((item) => [item.seq, item]));
-  return (
-    <div className="mt-2 grid gap-2 sm:grid-cols-3">
-      {Array.from({ length: maxCodes }, (_, index) => {
-        const sequence = index + 1;
-        const item = bySequence.get(sequence);
-        return (
-          <div
-            className="rounded-lg border border-[var(--semi-color-border)] bg-[var(--semi-color-bg-0)] p-2"
-            key={sequence}
-          >
-            <div className="mb-1 text-xs text-[var(--semi-color-text-2)]">
-              {t("Verification code slot", { current: sequence, total: maxCodes })}
-            </div>
-            {item ? (
-              <>
-                <CopyableEllipsisText
-                  className="workbench-inline-code"
-                  text={item.code}
-                />
-                <div className="mt-1 text-xs text-[var(--semi-color-text-2)]">
-                  {formatDateTime(item.receivedAt)}
-                </div>
-              </>
-            ) : (
-              <Text type="tertiary">{t("Waiting")}</Text>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 function OrderAccordionItem({
   expanded,
   onFetchMail,
@@ -125,9 +87,6 @@ function OrderAccordionItem({
 }) {
   const { t } = useTranslation();
   const state = serviceStateMeta(order.serviceState, t);
-  const codeOnly = order.contentMode === "code_only";
-  const codes = order.codes ?? [];
-  const latestCode = codes[codes.length - 1]?.code ?? order.verificationCode;
   const pickupUrl = buildPickupUrl(order.deliveryEmail, order.token);
   const maskedToken = maskSecret(order.token);
   const maskedPickupUrl = maskMiddle(
@@ -142,17 +101,9 @@ function OrderAccordionItem({
       token: order.token,
     });
   const receiveLabel =
-    codeOnly
-      ? t("Codes expire at")
-      : order.serviceMode === "code"
-        ? t("Receive until")
-        : t("Activation until");
+    order.serviceMode === "code" ? t("Receive until") : t("Activation until");
   const receiveValue =
-    codeOnly
-      ? order.codesExpireAt ?? order.receiveUntil
-      : order.serviceMode === "code"
-        ? order.receiveUntil
-        : order.activationUntil;
+    order.serviceMode === "code" ? order.receiveUntil : order.activationUntil;
 
   return (
     <div className={cn("workbench-order-item", expanded && "is-expanded")}>
@@ -190,9 +141,9 @@ function OrderAccordionItem({
             <span className="workbench-order-summary-subtitle">
               <OverflowTooltip
                 className="font-mono-data"
-                content={order.deliveryEmail || t("Waiting upstream allocation")}
+                content={order.deliveryEmail}
               >
-                {order.deliveryEmail || t("Waiting upstream allocation")}
+                {order.deliveryEmail}
               </OverflowTooltip>
               <OverflowTooltip content={order.orderNo}>
                 {order.orderNo}
@@ -200,28 +151,25 @@ function OrderAccordionItem({
             </span>
           </span>
         </button>
-        {!codeOnly ? (
-          <Button
-            className="workbench-order-summary-mail"
-            disabled={!order.deliveryEmail || !order.token}
-            icon={<Mail size={14} />}
-            onClick={openMailbox}
-            size="small"
-            theme="outline"
-            type="tertiary"
-          >
-            {t("Open mailbox")}
-          </Button>
-        ) : null}
+        <Button
+          className="workbench-order-summary-mail"
+          icon={<Mail size={14} />}
+          onClick={openMailbox}
+          size="small"
+          theme="outline"
+          type="tertiary"
+        >
+          {t("Open mailbox")}
+        </Button>
         <div
           className="workbench-order-summary-state"
           onClick={onToggle}
         >
           <span className="workbench-order-summary-side">
-            {latestCode ? (
+            {order.verificationCode ? (
               <CopyableEllipsisText
                 className="workbench-order-summary-code"
-                text={latestCode}
+                text={order.verificationCode}
               />
             ) : (
               <strong>
@@ -258,12 +206,12 @@ function OrderAccordionItem({
                 <Text
                   className="workbench-copyable-value font-mono-data text-[14px] font-bold"
                   copyable={createCopyableConfig(
-                    order.deliveryEmail || t("Waiting upstream allocation"),
+                    order.deliveryEmail,
                     t("Copied"),
                   )}
                 >
-                  <OverflowTooltip content={order.deliveryEmail || t("Waiting upstream allocation")}>
-                    {order.deliveryEmail || t("Waiting upstream allocation")}
+                  <OverflowTooltip content={order.deliveryEmail}>
+                    {order.deliveryEmail}
                   </OverflowTooltip>
                 </Text>
               </div>
@@ -272,12 +220,7 @@ function OrderAccordionItem({
             <div className="workbench-code-line">
               <div className="workbench-code-content">
                 <div className="workbench-mini-label">
-                  {codeOnly
-                    ? t("Gmail verification codes", {
-                        current: order.receivedCount ?? order.codes?.length ?? 0,
-                        total: order.maxCodes || 3,
-                      })
-                    : order.verificationCode
+                  {order.verificationCode
                     ? t(
                         mailExtractionLabelKey(
                           order.verificationCode,
@@ -290,22 +233,18 @@ function OrderAccordionItem({
                       ? t("Verification code")
                       : t("Quick verification code")}
                 </div>
-                {codeOnly ? (
-                  <GmailCodeSlots order={order} />
-                ) : (
-                  <div className="workbench-code-value-row">
-                    {order.verificationCode ? (
-                      <CopyableEllipsisText
-                        className="workbench-inline-code"
-                        text={order.verificationCode}
-                      />
-                    ) : (
-                      <Text className="workbench-inline-code is-empty">
-                        {t("Waiting")}
-                      </Text>
-                    )}
-                  </div>
-                )}
+                <div className="workbench-code-value-row">
+                  {order.verificationCode ? (
+                    <CopyableEllipsisText
+                      className="workbench-inline-code"
+                      text={order.verificationCode}
+                    />
+                  ) : (
+                    <Text className="workbench-inline-code is-empty">
+                      {t("Waiting")}
+                    </Text>
+                  )}
+                </div>
                 {shouldShowQuickFetchControl(order) ? (
                   <FetchControl
                     actionLabelKey="Refresh"
@@ -329,32 +268,28 @@ function OrderAccordionItem({
               <span>{t("After-sales until")}</span>
               <strong>{formatDateTime(order.afterSaleUntil)}</strong>
             </div>
-            {order.token ? (
-              <>
-                <div className="workbench-order-meta-item is-wide">
-                  <span>{t("Service Token")}</span>
-                  <Text
-                    className="workbench-copyable-value font-mono-data font-bold"
-                    copyable={createCopyableConfig(order.token, t("Copied"))}
-                  >
-                    <OverflowTooltip content={maskedToken}>
-                      {maskedToken}
-                    </OverflowTooltip>
-                  </Text>
-                </div>
-                <div className="workbench-order-meta-item is-wide">
-                  <span>{t("Pickup URL")}</span>
-                  <Text
-                    className="workbench-copyable-value font-mono-data font-bold"
-                    copyable={createCopyableConfig(pickupUrl, t("Copied"))}
-                  >
-                    <OverflowTooltip content={maskedPickupUrl}>
-                      {maskedPickupUrl}
-                    </OverflowTooltip>
-                  </Text>
-                </div>
-              </>
-            ) : null}
+            <div className="workbench-order-meta-item is-wide">
+              <span>{t("Service Token")}</span>
+              <Text
+                className="workbench-copyable-value font-mono-data font-bold"
+                copyable={createCopyableConfig(order.token, t("Copied"))}
+              >
+                <OverflowTooltip content={maskedToken}>
+                  {maskedToken}
+                </OverflowTooltip>
+              </Text>
+            </div>
+            <div className="workbench-order-meta-item is-wide">
+              <span>{t("Pickup URL")}</span>
+              <Text
+                className="workbench-copyable-value font-mono-data font-bold"
+                copyable={createCopyableConfig(pickupUrl, t("Copied"))}
+              >
+                <OverflowTooltip content={maskedPickupUrl}>
+                  {maskedPickupUrl}
+                </OverflowTooltip>
+              </Text>
+            </div>
           </div>
         </div>
       ) : null}

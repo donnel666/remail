@@ -149,16 +149,38 @@ func (c *client) GmailPrices(ctx context.Context, apiKey string) (map[string]rem
 }
 
 func (c *client) Activate(ctx context.Context, apiKey, service string, maxPrice decimal.Decimal) (*remoteActivation, error) {
-	body, err := c.get(ctx, "/api/mail/getActivation", url.Values{
+	query := url.Values{
 		"api_key": {apiKey}, "service": {strings.TrimSpace(service)}, "domain": {"gmail.com"},
 		"maxPrice": {maxPrice.String()}, "alias": {"0"},
-	}, true)
-	if err != nil {
-		return nil, err
 	}
-	if classified := classifyKnownRemoteError(string(body)); classified != nil {
-		return nil, classified
+	var uncertainErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		body, requestErr := c.get(ctx, "/api/mail/getActivation", query, true)
+		activation, statusOK := parseRemoteActivation(body)
+		if activation != nil && statusOK {
+			return activation, nil
+		}
+		if classified := classifyKnownRemoteError(string(body)); classified != nil {
+			if uncertainErr != nil {
+				return nil, uncertainErr
+			}
+			return nil, classified
+		}
+		if activation != nil && requestErr != nil {
+			return activation, nil
+		}
+		if requestErr == nil {
+			requestErr = &UncertainActivationError{Err: ErrRemote}
+		}
+		uncertainErr = requestErr
+		if attempt == 1 || ctx.Err() != nil {
+			return nil, requestErr
+		}
 	}
+	return nil, &UncertainActivationError{Err: ErrRemote}
+}
+
+func parseRemoteActivation(body []byte) (*remoteActivation, bool) {
 	var response struct {
 		Status json.RawMessage `json:"status"`
 		Mail   string          `json:"mail"`
@@ -166,17 +188,17 @@ func (c *client) Activate(ctx context.Context, apiKey, service string, maxPrice 
 	}
 	decoder := json.NewDecoder(strings.NewReader(string(body)))
 	decoder.UseNumber()
-	if err := decoder.Decode(&response); err != nil || !remoteStatusOK(response.Status) {
-		return nil, ErrRemote
+	if err := decoder.Decode(&response); err != nil {
+		return nil, false
 	}
 	mailID, err := strconv.ParseUint(string(response.MailID), 10, 64)
 	email := strings.ToLower(strings.TrimSpace(response.Mail))
 	local, domain, validEmail := strings.Cut(email, "@")
 	if err != nil || mailID == 0 || len(email) > 320 || !validEmail || local == "" || domain != "gmail.com" ||
 		strings.ContainsAny(email, "\r\n\t ") {
-		return nil, ErrRemote
+		return nil, false
 	}
-	return &remoteActivation{Email: email, MailID: mailID}, nil
+	return &remoteActivation{Email: email, MailID: mailID}, remoteStatusOK(response.Status)
 }
 
 func (c *client) Code(ctx context.Context, apiKey string, mailID uint64) (string, error) {
@@ -248,15 +270,15 @@ func (c *client) get(ctx context.Context, path string, query url.Values, uncerta
 	body, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
 	if err != nil {
 		if uncertain {
-			return nil, &UncertainActivationError{Err: err}
+			return body, &UncertainActivationError{Err: err}
 		}
-		return nil, ErrRemote
+		return body, ErrRemote
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		if uncertain {
-			return nil, &UncertainActivationError{Err: ErrRemote}
+			return body, &UncertainActivationError{Err: ErrRemote}
 		}
-		return nil, classifyRemoteError(string(body))
+		return body, classifyRemoteError(string(body))
 	}
 	return body, nil
 }

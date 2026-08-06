@@ -2,14 +2,43 @@ package infra
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/trade/domain"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+func TestWithTxRunsRegisteredRollbackOnlyOnFailure(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:trade-rollback-callback?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	repo := NewRepo(db)
+	wantErr := errors.New("rollback")
+	callbacks := 0
+
+	err = repo.WithTx(context.Background(), func(ctx context.Context) error {
+		require.True(t, platform.RegisterGormRollback(ctx, func(context.Context) error {
+			callbacks++
+			return nil
+		}))
+		return wantErr
+	})
+	require.ErrorIs(t, err, wantErr)
+	require.Equal(t, 1, callbacks)
+
+	require.NoError(t, repo.WithTx(context.Background(), func(ctx context.Context) error {
+		require.True(t, platform.RegisterGormRollback(ctx, func(context.Context) error {
+			callbacks++
+			return nil
+		}))
+		return nil
+	}))
+	require.Equal(t, 1, callbacks)
+}
 
 func TestCleanupRecoveryIncludesRefundedOrdersWithNoCleanupAttempt(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:trade-cleanup-recovery?mode=memory&cache=shared"), &gorm.Config{})

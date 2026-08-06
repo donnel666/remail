@@ -268,7 +268,7 @@ func (s *Service) availableSupply(ctx context.Context, row supplyRow) (uint, dec
 }
 
 func (s *Service) AcceptPaidOrder(ctx context.Context, order upstream.PaidOrder) (bool, error) {
-	if _, ok := platform.GormTxFromContext(ctx); !ok {
+	if _, ok := platform.GormTxFromContext(ctx); !ok || !platform.HasGormRollback(ctx) {
 		return false, errPaidOrderTx
 	}
 	order.OrderNo = strings.TrimSpace(order.OrderNo)
@@ -332,6 +332,9 @@ func (s *Service) AcceptPaidOrder(ctx context.Context, order upstream.PaidOrder)
 	if productCount != 1 || !supplyRowHealthy(row, s.now()) {
 		return true, upstream.ErrUnavailable
 	}
+	if s.client == nil {
+		return true, upstream.ErrUnavailable
+	}
 	available, _, err := s.availableSupply(ctx, row)
 	if err != nil || available == 0 {
 		if err != nil {
@@ -348,8 +351,8 @@ func (s *Service) AcceptPaidOrder(ctx context.Context, order upstream.PaidOrder)
 	if !safe {
 		return true, upstream.ErrPriceProtected
 	}
-	now := s.now()
-	claimed, err := claimGmailOrderGuard(db, order.OrderNo, now)
+	maxPrice := minDecimal(upstreamPrice, allowedPrice)
+	claimed, err := claimGmailOrderGuard(db, order.OrderNo, s.now())
 	if err != nil {
 		return true, err
 	}
@@ -364,23 +367,58 @@ func (s *Service) AcceptPaidOrder(ctx context.Context, order upstream.PaidOrder)
 		}
 		return true, upstream.ErrUnavailable
 	}
+	if s.trade == nil {
+		return true, errors.New("smsbower: trade callback unavailable")
+	}
+	apiKey := strings.TrimSpace(config.APIKey)
+	activation, err := s.client.Activate(ctx, apiKey, route.ServiceCode, maxPrice)
+	if err != nil {
+		return true, synchronousActivationError(err)
+	}
+	now := s.now()
+	expiresAt := now.Add(lifetime)
+	mailID := activation.MailID
 	model := orderModel{
 		OrderNo: order.OrderNo, ProjectID: order.ProjectID, ProductID: order.ProductID,
-		ServiceCode: route.ServiceCode, Status: StatusPending, CodesJSON: "[]",
+		ServiceCode: route.ServiceCode, RemoteMailID: &mailID, Email: activation.Email,
+		Status: StatusActive, CodesJSON: "[]",
 		UpstreamPriceSnapshot: money.Format(upstreamPrice), PointsPerUnitSnapshot: money.Format(points),
-		CostPointsSnapshot: money.Format(cost), MaxPriceSnapshot: money.Format(minDecimal(upstreamPrice, allowedPrice)),
-		NextPollAt: &now, Version: 1,
+		CostPointsSnapshot: money.Format(cost), MaxPriceSnapshot: money.Format(maxPrice),
+		NextPollAt: &now, StartedAt: &now, ExpiresAt: &expiresAt, Version: 1,
 	}
-	result := db.Clauses(clause.OnConflict{DoNothing: true}).Create(&model)
-	if result.Error != nil {
-		return true, fmt.Errorf("create SMSBower order: %w", result.Error)
+	if err := db.Create(&model).Error; err != nil {
+		return true, s.cancelRemoteActivation(ctx, apiKey, mailID, fmt.Errorf("create SMSBower order: %w", err))
 	}
-	if result.RowsAffected == 0 {
-		if err := db.Where("order_no = ?", order.OrderNo).Take(&existing).Error; err != nil {
-			return true, err
-		}
+	if err := s.ensureTradeActivation(ctx, model); err != nil {
+		return true, s.cancelRemoteActivation(ctx, apiKey, mailID, err)
+	}
+	if !platform.RegisterGormRollback(ctx, func(rollbackCtx context.Context) error {
+		return s.cancelRemoteActivation(rollbackCtx, apiKey, mailID, nil)
+	}) {
+		return true, s.cancelRemoteActivation(ctx, apiKey, mailID, errPaidOrderTx)
 	}
 	return true, nil
+}
+
+func synchronousActivationError(err error) error {
+	switch {
+	case errors.Is(err, ErrPriceChanged):
+		return upstream.ErrPriceProtected
+	case errors.Is(err, ErrBadKey), errors.Is(err, ErrNoMail), errors.Is(err, ErrInsufficientBalance):
+		return upstream.ErrUnavailable
+	default:
+		return err
+	}
+}
+
+func (s *Service) cancelRemoteActivation(ctx context.Context, apiKey string, mailID uint64, cause error) error {
+	cancelCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	err := s.client.SetStatus(cancelCtx, apiKey, mailID, 2)
+	if err == nil || errors.Is(err, ErrActivationStatus) {
+		return cause
+	}
+	return errors.Join(cause, fmt.Errorf("cancel SMSBower activation %d: %w", mailID, err))
 }
 
 func claimGmailOrderGuard(db *gorm.DB, orderNo string, now time.Time) (bool, error) {

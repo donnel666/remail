@@ -116,23 +116,6 @@ const initialOrderHasMore: Record<ServiceMode, boolean> = {
   purchase: false,
 };
 
-async function listAllPaidOrders(serviceMode: ServiceMode) {
-  const items: OrderResponse[] = [];
-  let afterId: number | undefined;
-  do {
-    const page = await listOrders({
-      afterId,
-      limit: 1000,
-      serviceMode,
-      status: "paid",
-    });
-    items.push(...page.items);
-    if (!page.hasNext || !page.nextAfterId || page.nextAfterId === afterId) break;
-    afterId = page.nextAfterId;
-  } while (afterId);
-  return items;
-}
-
 function toWorkbenchProject(
   project: ProjectItem,
   inventory?: ProjectInventoryTotalResponse,
@@ -365,9 +348,6 @@ function pickupResultToOrderPatch(
 }
 
 function orderServiceState(order: OrderResponse): ServiceState {
-  if (order.status === "paid") {
-    return "waiting_upstream";
-  }
   if (order.status === "completed") {
     return order.serviceMode === "code" ? "code_received" : "warranty_ended";
   }
@@ -631,18 +611,13 @@ export default function Dashboard() {
     const seq = (refreshOrdersSeqRef.current.get(mode) ?? 0) + 1;
     refreshOrdersSeqRef.current.set(mode, seq);
     try {
-      const [list, paid] = await Promise.all([
-        listOrders({
-          limit: orderPageLimit,
-          serviceMode: mode,
-          status: "active",
-        }),
-        listAllPaidOrders(mode),
-      ]);
+      const list = await listOrders({
+        limit: orderPageLimit,
+        serviceMode: mode,
+        status: "active",
+      });
       if (refreshOrdersSeqRef.current.get(mode) !== seq) return;
-      const nextOrders = [...paid, ...list.items]
-        .sort((left, right) => right.id - left.id)
-        .map(toWorkbenchOrder);
+      const nextOrders = list.items.map(toWorkbenchOrder);
       setOrderCursors((prev) => ({ ...prev, [mode]: list.nextAfterId }));
       setOrderHasMore((prev) => ({ ...prev, [mode]: list.hasNext }));
       setOrders((prev) => {
@@ -1083,7 +1058,6 @@ export default function Dashboard() {
           Boolean(mailClientOrder && shouldAutoFetchOrderMail(mailClientOrder))
         }
         email={mailClientParams?.email}
-        fetchEnabled={mailClientOrder?.contentMode !== "code_only"}
         fetchKey={mailClientParams?.orderNo}
         messages={mailClientOrder?.messages ?? []}
         onClose={() => setMailClientParams(null)}
