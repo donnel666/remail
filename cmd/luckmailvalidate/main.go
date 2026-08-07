@@ -33,6 +33,7 @@ import (
 	mailapi "github.com/donnel666/remail/internal/mailtransport/api"
 	mailinfra "github.com/donnel666/remail/internal/mailtransport/infra"
 	"github.com/donnel666/remail/internal/mailtransport/infra/msacl"
+	openapiapi "github.com/donnel666/remail/internal/openapi/api"
 	"github.com/donnel666/remail/internal/platform"
 	proxyapi "github.com/donnel666/remail/internal/proxy/api"
 	proxyapp "github.com/donnel666/remail/internal/proxy/app"
@@ -760,7 +761,7 @@ func openRuntime(ctx context.Context) (*commandRuntime, error) {
 	billing := billingapi.NewBillingModule(p.DB, p.Asynq)
 	allocation := allocapi.NewModule(p.DB, p.Redis, p.Asynq)
 	projects := coreapp.NewProjectUseCase(coreinfra.NewProjectRepo(p.DB))
-	trade := tradeapi.NewModule(p.DB, projects, billing.WalletUseCase, allocation.UseCase, nil)
+	trade := tradeapi.NewModule(p.DB, projects, billing.WalletUseCase, allocation.UseCase, openapiapi.NewModule(p.DB, p.Redis).UseCase)
 	mailmatch := mailmatchapi.NewModule(p.DB, files, p.Redis, p.Asynq, proxyModule.ProxyUseCase, trade.UseCase, validation)
 	mailmatch.SetMicrosoftCredentialPort(credentials)
 	return &commandRuntime{
