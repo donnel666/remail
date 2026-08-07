@@ -45,6 +45,7 @@ type Service struct {
 	now                 func() time.Time
 	fetch               localGmailFetchFunc
 	pickup              *localGmailPickupClient
+	validationProxies   localGmailPickupProxyProvider
 }
 
 func NewService(db *gorm.DB, queue *asynq.Client) *Service {

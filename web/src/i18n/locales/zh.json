@@ -1499,6 +1499,7 @@
   "A valid Microsoft email address is required.": "请填写有效的 Microsoft 邮箱地址。",
   "A valid auxiliary mailbox address is required.": "请填写有效的辅助邮箱地址。",
   "Auxiliary email": "辅助邮箱",
+  "Binding email": "绑定邮箱",
   "Optional recovery mailbox": "可选的辅助/找回邮箱",
   "Credentials": "凭据",
   "Leave blank to keep current": "留空则保持不变",

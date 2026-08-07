@@ -631,6 +631,7 @@ func (s *Service) createGmailResourcesForImport(
 				Updates(map[string]any{
 					"resource_type": "gmail", "owner_user_id": ownerUserID,
 					"email": line.email, "identity": line.identity, "password": line.password,
+					"binding_email":     line.bindingEmail,
 					"two_factor_secret": line.twoFactorSecret, "app_password": line.appPassword,
 					"credential_revision":   gorm.Expr("CASE WHEN credential_revision < 1 THEN 1 ELSE credential_revision + 1 END"),
 					"credential_updated_at": now, "for_sale": false,
@@ -664,6 +665,7 @@ func (s *Service) createGmailResourcesForImport(
 				resources[i] = localResourceModel{
 					ID: roots[i].ID, ResourceType: "gmail", OwnerUserID: ownerUserID,
 					Email: line.email, Identity: line.identity, Password: line.password,
+					BindingEmail:    line.bindingEmail,
 					TwoFactorSecret: line.twoFactorSecret, AppPassword: line.appPassword,
 					CredentialRevision: 1, CredentialUpdatedAt: now, ForSale: false,
 					Status: LocalResourcePending, ValidationGeneration: 1,

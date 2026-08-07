@@ -3864,7 +3864,7 @@ export interface paths {
         put?: never;
         /**
          * Import Gmail resources for a selected owner
-         * @description Requires `core:resource/write`, Session authentication, CSRF, and an idempotency key. The request stores the original TXT in private object storage and the asynchronous import state in Redis before returning 202. Each non-empty line uses `email----password----2FA secret----Gmail app password`. Parsing, canonical duplicate handling, Gmail resource creation or deleted-resource restoration, and IMAP validation run asynchronously. A restored resource keeps its original resource ID, moves to the selected owner, replaces its Gmail credentials with the imported values, and returns to `pending` validation. The private source TXT is retained; skipped or failed rows are retained in a private `gmail-import-failures.csv` artifact. Uploaded text, credentials, private object keys, and failure-row email values are never returned or written to ordinary logs.
+         * @description Requires `core:resource/write`, Session authentication, CSRF, and an idempotency key. The request stores the original TXT in private object storage and the asynchronous import state in Redis before returning 202. Each non-empty line may use `email----password`, `email----password----2FA secret`, `email----password----binding email`, `email----password----2FA secret----Gmail app password`, or `email----password----binding email----2FA secret`. The optional binding email is stored using the same account-binding concept as Microsoft resources and is used when Google requests email confirmation. Parsing, canonical duplicate handling, Gmail resource creation or deleted-resource restoration, browser-based credential rotation, and project-history identification run asynchronously. Validation replaces the Authenticator secret, revokes every existing Gmail App Password, creates one new App Password, and only then persists a complete email/password/2FA/App-Password credential set before history identification. A restored resource keeps its original resource ID, moves to the selected owner, and returns to `pending` validation. The private source TXT is retained; skipped or failed rows are retained in a private `gmail-import-failures.csv` artifact. Uploaded text, credentials, private object keys, and failure-row email values are never returned or written to ordinary logs.
          */
         post: operations["postAdminGmailResourceImport"];
         delete?: never;
@@ -3904,7 +3904,7 @@ export interface paths {
         put?: never;
         /**
          * Queue asynchronous validation for selected Gmail resources
-         * @description Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. The bounded resource ID set is expanded through a Redis-backed cursor; each eligible row is fenced by owner, validation generation, and credential revision before the Gmail IMAP worker runs.
+         * @description Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. The bounded resource ID set is expanded through a Redis-backed cursor; each eligible row is fenced by owner, validation generation, and credential revision before the Gmail browser worker replaces 2FA, revokes old App Passwords, creates a new App Password, and queues history identification.
          */
         post: operations["postAdminGmailResourceValidations"];
         delete?: never;
@@ -7194,6 +7194,11 @@ export interface components {
             ownerUserId: number;
             /** Format: email */
             email: string;
+            /**
+             * Format: email
+             * @description Optional imported binding email used for Google account challenges.
+             */
+            bindingEmail?: string;
             status: components["schemas"]["AdminGmailResourceStatus"];
             forSale: boolean;
             passwordConfigured: boolean;
@@ -19782,7 +19787,7 @@ export interface operations {
                 "multipart/form-data": {
                     /**
                      * Format: binary
-                     * @description UTF-8 TXT with one `email----password----2FA secret----Gmail app password` credential per non-empty line.
+                     * @description UTF-8 TXT with one Gmail account per non-empty line in one of the five documented `----`-delimited formats; a third field containing an email address is parsed as the optional binding email.
                      */
                     file: string;
                     ownerId: number;

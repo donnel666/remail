@@ -24,9 +24,14 @@ const (
 	gmailHistoryDispatchPeriod    = 15 * time.Second
 	gmailHistoryConcurrency       = 4
 	gmailHistoryMaxConcurrency    = 8096
+	gmailValidationConcurrency    = 2
+	gmailValidationMaxConcurrency = 64
 )
 
-var localGmailHistoryActive atomic.Int64
+var (
+	localGmailHistoryActive    atomic.Int64
+	localGmailValidationActive atomic.Int64
+)
 
 func (s *Service) scheduleDispatcher(ctx context.Context) error {
 	if s == nil || s.queue == nil {
@@ -84,7 +89,7 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, service *Service) func(context.Co
 		if err != nil {
 			return err
 		}
-		release, admitted := platform.AcquireBackgroundExecution(ctx, service.backgroundExecution)
+		release, admitted := acquireLocalGmailValidationCapacity(ctx, service)
 		if !admitted {
 			if platform.BackgroundTaskHasRetryHeadroom(ctx) {
 				return platform.ErrBackgroundExecutionDeferred
@@ -250,6 +255,27 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, service *Service) func(context.Co
 		select {
 		case <-done:
 		case <-shutdownCtx.Done():
+		}
+	}
+}
+
+func acquireLocalGmailValidationCapacity(ctx context.Context, service *Service) (func(), bool) {
+	backgroundRelease, admitted := platform.AcquireBackgroundExecution(ctx, service.backgroundExecution)
+	if !admitted {
+		return func() {}, false
+	}
+	limit := int64(min(runtimeconfig.Int("gmail_validation_concurrency", gmailValidationConcurrency, 1), gmailValidationMaxConcurrency))
+	for {
+		active := localGmailValidationActive.Load()
+		if active >= limit {
+			backgroundRelease()
+			return func() {}, false
+		}
+		if localGmailValidationActive.CompareAndSwap(active, active+1) {
+			return func() {
+				localGmailValidationActive.Add(-1)
+				backgroundRelease()
+			}, true
 		}
 	}
 }

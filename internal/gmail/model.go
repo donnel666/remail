@@ -66,6 +66,7 @@ type localResourceModel struct {
 	Email                 string     `gorm:"column:email;uniqueIndex"`
 	Identity              string     `gorm:"column:identity;uniqueIndex"`
 	Password              string     `gorm:"column:password"`
+	BindingEmail          string     `gorm:"column:binding_email"`
 	TwoFactorSecret       string     `gorm:"column:two_factor_secret"`
 	AppPassword           string     `gorm:"column:app_password"`
 	CredentialRevision    uint64     `gorm:"column:credential_revision"`
@@ -125,6 +126,7 @@ type LocalResourceItem struct {
 	Version               uint64     `json:"version"`
 	OwnerUserID           uint       `json:"ownerUserId"`
 	Email                 string     `json:"email"`
+	BindingEmail          string     `json:"bindingEmail,omitempty"`
 	Status                string     `json:"status"`
 	ForSale               bool       `json:"forSale"`
 	PasswordConfigured    bool       `json:"passwordConfigured"`

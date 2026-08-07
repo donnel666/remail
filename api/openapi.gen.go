@@ -4678,22 +4678,25 @@ type AdminGmailResourceFacets struct {
 
 // AdminGmailResourceItem defines model for AdminGmailResourceItem.
 type AdminGmailResourceItem struct {
-	AppPasswordConfigured bool                     `json:"appPasswordConfigured"`
-	CreatedAt             time.Time                `json:"createdAt"`
-	CredentialRevision    int64                    `json:"credentialRevision"`
-	Email                 openapi_types.Email      `json:"email"`
-	ForSale               bool                     `json:"forSale"`
-	Id                    int                      `json:"id"`
-	LastAllocatedAt       *time.Time               `json:"lastAllocatedAt,omitempty"`
-	LastCheckedAt         *time.Time               `json:"lastCheckedAt,omitempty"`
-	LastSafeError         *string                  `json:"lastSafeError,omitempty"`
-	OwnerUserId           int                      `json:"ownerUserId"`
-	PasswordConfigured    bool                     `json:"passwordConfigured"`
-	Status                AdminGmailResourceStatus `json:"status"`
-	TwoFactorConfigured   bool                     `json:"twoFactorConfigured"`
-	UpdatedAt             time.Time                `json:"updatedAt"`
-	ValidationFailures    int                      `json:"validationFailures"`
-	Version               int64                    `json:"version"`
+	AppPasswordConfigured bool `json:"appPasswordConfigured"`
+
+	// BindingEmail Optional imported binding email used for Google account challenges.
+	BindingEmail        *openapi_types.Email     `json:"bindingEmail,omitempty"`
+	CreatedAt           time.Time                `json:"createdAt"`
+	CredentialRevision  int64                    `json:"credentialRevision"`
+	Email               openapi_types.Email      `json:"email"`
+	ForSale             bool                     `json:"forSale"`
+	Id                  int                      `json:"id"`
+	LastAllocatedAt     *time.Time               `json:"lastAllocatedAt,omitempty"`
+	LastCheckedAt       *time.Time               `json:"lastCheckedAt,omitempty"`
+	LastSafeError       *string                  `json:"lastSafeError,omitempty"`
+	OwnerUserId         int                      `json:"ownerUserId"`
+	PasswordConfigured  bool                     `json:"passwordConfigured"`
+	Status              AdminGmailResourceStatus `json:"status"`
+	TwoFactorConfigured bool                     `json:"twoFactorConfigured"`
+	UpdatedAt           time.Time                `json:"updatedAt"`
+	ValidationFailures  int                      `json:"validationFailures"`
+	Version             int64                    `json:"version"`
 }
 
 // AdminGmailResourceList defines model for AdminGmailResourceList.
@@ -8720,7 +8723,7 @@ type GetAdminGmailResourcesParams struct {
 type PostAdminGmailResourceImportMultipartBody struct {
 	ErrorStrategy PostAdminGmailResourceImportMultipartBodyErrorStrategy `json:"errorStrategy"`
 
-	// File UTF-8 TXT with one `email----password----2FA secret----Gmail app password` credential per non-empty line.
+	// File UTF-8 TXT with one Gmail account per non-empty line in one of the five documented `----`-delimited formats; a third field containing an email address is parsed as the optional binding email.
 	File    openapi_types.File `json:"file"`
 	OwnerId int                `json:"ownerId"`
 }

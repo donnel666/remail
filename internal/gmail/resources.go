@@ -72,6 +72,7 @@ type localResourceImportLine struct {
 	email           string
 	identity        string
 	password        string
+	bindingEmail    string
 	twoFactorSecret string
 	appPassword     string
 }
@@ -113,6 +114,7 @@ func (s *Service) ListLocalResources(ctx context.Context, filter LocalResourceLi
 		Version               uint64     `gorm:"column:version"`
 		OwnerUserID           uint       `gorm:"column:owner_user_id"`
 		Email                 string     `gorm:"column:email"`
+		BindingEmail          string     `gorm:"column:binding_email"`
 		Status                string     `gorm:"column:status"`
 		ForSale               bool       `gorm:"column:for_sale"`
 		PasswordConfigured    bool       `gorm:"column:password_configured"`
@@ -126,7 +128,7 @@ func (s *Service) ListLocalResources(ctx context.Context, filter LocalResourceLi
 		CreatedAt             time.Time  `gorm:"column:created_at"`
 		UpdatedAt             time.Time  `gorm:"column:updated_at"`
 	}
-	if err := db.Select(`gr.id, er.version, er.owner_user_id, gr.email, gr.status, gr.for_sale,
+	if err := db.Select(`gr.id, er.version, er.owner_user_id, gr.email, gr.binding_email, gr.status, gr.for_sale,
 gr.password <> '' AS password_configured,
 gr.two_factor_secret <> '' AS two_factor_configured, gr.app_password <> '' AS app_password_configured,
 gr.credential_revision, gr.validation_failures, gr.last_allocated_at,
@@ -143,7 +145,7 @@ gr.last_safe_error, gr.last_checked_at, gr.created_at, gr.updated_at`).
 		}
 		items[i] = LocalResourceItem{
 			ID: rows[i].ID, Version: rows[i].Version, OwnerUserID: rows[i].OwnerUserID,
-			Email: rows[i].Email, Status: status, ForSale: rows[i].ForSale,
+			Email: rows[i].Email, BindingEmail: rows[i].BindingEmail, Status: status, ForSale: rows[i].ForSale,
 			PasswordConfigured: rows[i].PasswordConfigured, TwoFactorConfigured: rows[i].TwoFactorConfigured,
 			AppPasswordConfigured: rows[i].AppPasswordConfigured,
 			CredentialRevision:    rows[i].CredentialRevision, ValidationFailures: rows[i].ValidationFailures,
@@ -197,44 +199,72 @@ func (s *Service) localResourceFacets(ctx context.Context, search string) (Local
 
 func parseLocalResourceImportLine(raw string) (localResourceImportLine, bool) {
 	parts := strings.Split(raw, "----")
-	if len(parts) != 4 {
+	if len(parts) < 2 || len(parts) > 4 {
 		return localResourceImportLine{}, false
 	}
 	email := strings.ToLower(strings.TrimSpace(parts[0]))
 	password := parts[1]
-	twoFactorSecret := strings.ToUpper(strings.TrimRight(removeWhitespace(parts[2]), "="))
-	appPassword := strings.Map(func(r rune) rune {
-		if unicode.IsSpace(r) {
-			return -1
+	bindingEmail, twoFactorSecret, appPassword := "", "", ""
+	if len(parts) >= 3 {
+		if candidate := strings.ToLower(strings.TrimSpace(parts[2])); validLocalGmailEmailAddress(candidate) {
+			bindingEmail = candidate
+		} else {
+			twoFactorSecret = strings.ToUpper(strings.TrimRight(removeWhitespace(parts[2]), "="))
 		}
-		return r
-	}, parts[3])
+	}
+	if len(parts) == 4 {
+		if bindingEmail != "" {
+			twoFactorSecret = strings.ToUpper(strings.TrimRight(removeWhitespace(parts[3]), "="))
+		} else {
+			appPassword = removeWhitespace(parts[3])
+		}
+	}
 	if len(email) > 320 || strings.TrimSpace(password) == "" || len(password) > 512 ||
-		twoFactorSecret == "" || len(twoFactorSecret) > 512 || appPassword == "" || len(appPassword) > 128 {
+		len(bindingEmail) > 320 || len(twoFactorSecret) > 512 || len(appPassword) > 128 ||
+		len(parts) == 3 && bindingEmail == "" && twoFactorSecret == "" ||
+		len(parts) == 4 && (twoFactorSecret == "" || bindingEmail == "" && appPassword == "") {
 		return localResourceImportLine{}, false
 	}
-	address, err := stdmail.ParseAddress(email)
-	if err != nil || !strings.EqualFold(strings.TrimSpace(address.Address), email) {
+	if !validLocalGmailEmailAddress(email) {
 		return localResourceImportLine{}, false
+	}
+	identity, ok := localGmailIdentity(email)
+	if !ok {
+		return localResourceImportLine{}, false
+	}
+	if twoFactorSecret != "" {
+		if _, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(twoFactorSecret); err != nil {
+			return localResourceImportLine{}, false
+		}
+	}
+	return localResourceImportLine{
+		email: email, identity: identity, password: password,
+		bindingEmail: bindingEmail, twoFactorSecret: twoFactorSecret, appPassword: appPassword,
+	}, true
+}
+
+func localGmailIdentity(email string) (string, bool) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if !validLocalGmailEmailAddress(email) {
+		return "", false
 	}
 	local, domain, ok := strings.Cut(email, "@")
-	if !ok || domain != "gmail.com" && domain != "googlemail.com" {
-		return localResourceImportLine{}, false
-	}
-	if strings.Contains(local, "+") {
-		return localResourceImportLine{}, false
+	if !ok || domain != "gmail.com" && domain != "googlemail.com" || strings.Contains(local, "+") {
+		return "", false
 	}
 	canonicalLocal := strings.ReplaceAll(local, ".", "")
 	if canonicalLocal == "" {
-		return localResourceImportLine{}, false
+		return "", false
 	}
-	if _, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(twoFactorSecret); err != nil {
-		return localResourceImportLine{}, false
+	return canonicalLocal + "@gmail.com", true
+}
+
+func validLocalGmailEmailAddress(value string) bool {
+	if value == "" || len(value) > 320 || strings.Count(value, "@") != 1 {
+		return false
 	}
-	return localResourceImportLine{
-		email: email, identity: canonicalLocal + "@gmail.com", password: password,
-		twoFactorSecret: twoFactorSecret, appPassword: appPassword,
-	}, true
+	address, err := stdmail.ParseAddress(value)
+	return err == nil && strings.EqualFold(strings.TrimSpace(address.Address), value)
 }
 
 func removeWhitespace(value string) string {

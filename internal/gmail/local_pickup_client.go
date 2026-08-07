@@ -22,10 +22,14 @@ import (
 )
 
 const (
+	localGmailIMAPAddress                 = "imap.gmail.com:993"
+	localGmailIMAPServerName              = "imap.gmail.com"
 	localGmailPickupProxyAttempts         = 2
 	localGmailPickupMaxProxyAttempts      = 20
 	localGmailPickupProxyHandshakeTimeout = 30 * time.Second
 )
+
+var errLocalGmailAuthentication = errors.New("gmail: local IMAP authentication failed")
 
 type localGmailPickupProxyProvider interface {
 	Acquire(context.Context, proxyapp.AcquireProxyRequest) (*proxyapp.ProxyConfig, error)
@@ -60,8 +64,11 @@ func newLocalGmailPickupClient(proxies localGmailPickupProxyProvider) *localGmai
 // SetPickupProxyProvider injects only the shared proxy pool. Gmail keeps its
 // own fingerprint, dialing, retry and provider protocol implementation.
 func (s *Service) SetPickupProxyProvider(proxies *proxyapp.ProxyUseCase) {
-	if s != nil && s.pickup != nil {
-		s.pickup.proxies = proxies
+	if s != nil {
+		s.validationProxies = proxies
+		if s.pickup != nil {
+			s.pickup.proxies = proxies
+		}
 	}
 }
 
@@ -220,6 +227,22 @@ func newLocalGmailClientFingerprint() localGmailClientFingerprint {
 			Environment: "gmail-imap",
 		},
 	}
+}
+
+func isDefinitiveLocalGmailAuthFailure(err error) bool {
+	var imapErr *imap.Error
+	if !errors.As(err, &imapErr) || imapErr == nil {
+		return false
+	}
+	if imapErr.Code == imap.ResponseCodeAuthenticationFailed || imapErr.Code == imap.ResponseCodeAuthorizationFailed {
+		return true
+	}
+	if imapErr.Type != imap.StatusResponseTypeNo {
+		return false
+	}
+	text := strings.ToLower(strings.TrimSpace(imapErr.Text))
+	return strings.Contains(text, "authentication failed") || strings.Contains(text, "login failed") ||
+		strings.Contains(text, "invalid credentials") || strings.Contains(text, "app password")
 }
 
 func openLocalGmailPickupIMAP(

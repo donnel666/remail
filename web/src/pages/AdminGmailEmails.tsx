@@ -321,7 +321,7 @@ function ImportGmailModal({
           <TextArea
             className="font-mono"
             onChange={setContent}
-            placeholder="email@gmail.com----password----2FA----app-password"
+            placeholder="email@gmail.com----password"
             rows={8}
             style={{ height: IMPORT_ENTRY_AREA_HEIGHT, resize: "none" }}
             value={content}
@@ -333,7 +333,11 @@ function ImportGmailModal({
             {t("Supported format")}
           </div>
           <pre className="overflow-x-auto font-mono text-xs leading-relaxed text-[var(--semi-color-text-2)]">
-            email@gmail.com----password----2FA----app-password
+            {`email@gmail.com----password
+email@gmail.com----password----2FA
+email@gmail.com----password----binding-email
+email@gmail.com----password----2FA----app-password
+email@gmail.com----password----binding-email----2FA`}
           </pre>
         </div>
 
@@ -503,6 +507,17 @@ export default function AdminGmailEmails() {
       render: (value: unknown) => (
         <CopyableTableText copiedText={t("Copied")} text={String(value)} />
       ),
+    },
+    {
+      dataIndex: "bindingEmail",
+      title: t("Binding email"),
+      width: 250,
+      render: (value: unknown) =>
+        value ? (
+          <CopyableTableText copiedText={t("Copied")} text={String(value)} />
+        ) : (
+          "-"
+        ),
     },
     {
       dataIndex: "status",

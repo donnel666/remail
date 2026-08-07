@@ -2,11 +2,9 @@ package gmail
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"strconv"
 	"strings"
 	"time"
@@ -14,8 +12,6 @@ import (
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
-	"github.com/emersion/go-imap/v2"
-	"github.com/emersion/go-imap/v2/imapclient"
 	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
@@ -25,17 +21,13 @@ import (
 const (
 	typeGmailValidateLocal             = "gmail:validate_local"
 	typeGmailValidationDispatcher      = "gmail:resource_validation_dispatcher"
-	localGmailIMAPAddress              = "imap.gmail.com:993"
-	localGmailIMAPServerName           = "imap.gmail.com"
-	localGmailValidationTimeout        = 20 * time.Second
-	localGmailValidationTaskTTL        = time.Minute
+	localGmailValidationTimeout        = 8 * time.Minute
+	localGmailValidationTaskTTL        = 10 * time.Minute
 	localGmailValidationDispatchUnique = 30 * time.Second
 	localGmailValidationSettleAfter    = time.Second
 	localGmailValidationBatchMax       = 200
 	localGmailValidationMaxFailures    = 3
 )
-
-var errLocalGmailAuthentication = errors.New("gmail: local IMAP authentication failed")
 
 const localGmailValidationIdempotencyTTL = 24 * time.Hour
 
@@ -47,11 +39,29 @@ type localResourceValidationTask struct {
 	RequestID                  string `json:"requestId,omitempty"`
 }
 
-type localIMAPValidationResult struct {
-	SafeError string
-	Temporary bool
-	Err       error
+type localGmailValidationInput struct {
+	ResourceID           uint
+	ValidationGeneration uint64
+	Email                string
+	Password             string
+	BindingEmail         string
+	TwoFactorSecret      string
+	AppPassword          string
+	RequestID            string
 }
+
+type localGmailValidationResult struct {
+	TwoFactorSecret          string
+	AppPassword              string
+	TwoFactorAuthoritative   bool
+	AppPasswordAuthoritative bool
+	SafeError                string
+	Temporary                bool
+	ProxyFailure             bool
+	Err                      error
+}
+
+type localGmailValidationFunc func(context.Context, localGmailValidationInput) localGmailValidationResult
 
 func (s *Service) RequestAdminLocalResourceValidation(
 	ctx context.Context,
@@ -191,7 +201,9 @@ func (s *Service) DispatchLocalResourceValidations(ctx context.Context, limit in
 	if limit <= 0 || limit > localGmailValidationBatchMax {
 		limit = localGmailValidationBatchMax
 	}
+	historyErr := s.dispatchIdentifyingLocalGmailHistory(ctx, limit)
 	window := min(limit, runtimeconfig.Int("validation_dispatch_maximum", 128, 1))
+	window = min(window, runtimeconfig.Int("gmail_validation_concurrency", gmailValidationConcurrency, 1))
 	if s.backgroundExecution != nil {
 		window = min(window, s.backgroundExecution.Snapshot().Limit)
 	}
@@ -201,7 +213,7 @@ func (s *Service) DispatchLocalResourceValidations(ctx context.Context, limit in
 	}
 	capacity := min(limit, max(0, window-int(validating)))
 	if capacity <= 0 {
-		return nil
+		return historyErr
 	}
 	var tasks []localResourceValidationTask
 	if err := s.dbFor(ctx).Table("gmail_resources AS gr").
@@ -235,7 +247,26 @@ AND EXISTS (SELECT 1 FROM email_resources AS er WHERE er.id = gmail_resources.id
 			dispatchErr = errors.Join(dispatchErr, fmt.Errorf("activate local Gmail validation %d: %w", task.ResourceID, result.Error))
 		}
 	}
-	return dispatchErr
+	return errors.Join(historyErr, dispatchErr)
+}
+
+func (s *Service) dispatchIdentifyingLocalGmailHistory(ctx context.Context, limit int) error {
+	var tasks []localGmailHistoryTask
+	if err := s.dbFor(ctx).Table("gmail_resources AS gr").
+		Select(`gr.id AS resource_id, er.owner_user_id, gr.validation_generation,
+gr.credential_revision AS expected_credential_revision, gr.validation_request_id AS request_id`).
+		Joins("JOIN email_resources AS er ON er.id = gr.id AND er.type = ?", "gmail").
+		Where("gr.status = ? AND gr.validation_generation > 0 AND gr.credential_revision > 0", LocalResourceIdentifying).
+		Order("gr.updated_at ASC, gr.id ASC").Limit(limit).Scan(&tasks).Error; err != nil {
+		return fmt.Errorf("list identifying local Gmail resources: %w", err)
+	}
+	var result error
+	for _, task := range tasks {
+		if err := s.enqueueValidatedLocalGmailHistory(ctx, task); err != nil {
+			result = errors.Join(result, fmt.Errorf("schedule local Gmail history %d: %w", task.ResourceID, err))
+		}
+	}
+	return result
 }
 
 func (s *Service) enqueueLocalResourceValidation(ctx context.Context, task localResourceValidationTask) error {
@@ -248,7 +279,7 @@ func (s *Service) enqueueLocalResourceValidation(ctx context.Context, task local
 		asynq.ProcessIn(localGmailValidationSettleAfter),
 		asynq.Unique(localGmailValidationTaskTTL),
 		asynq.MaxRetry(platform.BackgroundTaskMaxRetryValue()),
-		asynq.Timeout(localGmailValidationTimeout+5*time.Second),
+		asynq.Timeout(localGmailValidationTimeout+30*time.Second),
 		asynq.Retention(0),
 	)
 	if errors.Is(err, asynq.ErrDuplicateTask) {
@@ -268,13 +299,13 @@ func decodeLocalResourceValidationTask(task *asynq.Task) (localResourceValidatio
 }
 
 func (s *Service) ValidateLocalResource(ctx context.Context, resourceID uint) error {
-	return s.validateLocalResourceWith(ctx, resourceID, validateLocalGmailIMAP)
+	return s.validateLocalResourceWith(ctx, resourceID, s.validateLocalGmailAccount)
 }
 
 func (s *Service) validateLocalResourceWith(
 	ctx context.Context,
 	resourceID uint,
-	validate func(context.Context, string, string) localIMAPValidationResult,
+	validate localGmailValidationFunc,
 ) error {
 	if s == nil || s.db == nil || resourceID == 0 || validate == nil {
 		return ErrLocalResourceMissing
@@ -318,13 +349,13 @@ func (s *Service) validateLocalResourceWith(
 }
 
 func (s *Service) ProcessLocalResourceValidation(ctx context.Context, task localResourceValidationTask) error {
-	return s.processLocalResourceValidationWith(ctx, task, validateLocalGmailIMAP)
+	return s.processLocalResourceValidationWith(ctx, task, s.validateLocalGmailAccount)
 }
 
 func (s *Service) processLocalResourceValidationWith(
 	ctx context.Context,
 	task localResourceValidationTask,
-	validate func(context.Context, string, string) localIMAPValidationResult,
+	validate localGmailValidationFunc,
 ) error {
 	if s == nil || s.db == nil || validate == nil || task.ResourceID == 0 || task.OwnerUserID == 0 ||
 		task.ValidationGeneration == 0 || task.ExpectedCredentialRevision == 0 {
@@ -350,18 +381,36 @@ func (s *Service) processLocalResourceValidationWith(
 		return nil
 	}
 
-	validation := validate(ctx, resource.Email, resource.AppPassword)
-	if validation.Err == nil {
-		enqueueCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		enqueueErr := s.enqueueValidatedLocalGmailHistory(enqueueCtx, localGmailHistoryTask(task))
-		cancel()
-		if enqueueErr != nil {
-			return fmt.Errorf("create validated Gmail history task: %w", ErrLocalValidationDependency)
-		}
+	validation := validate(ctx, localGmailValidationInput{
+		ResourceID: task.ResourceID, ValidationGeneration: task.ValidationGeneration,
+		Email: resource.Email, Password: resource.Password, BindingEmail: resource.BindingEmail, TwoFactorSecret: resource.TwoFactorSecret,
+		AppPassword: resource.AppPassword, RequestID: task.RequestID,
+	})
+	if validation.TwoFactorAuthoritative && !validLocalGmailTOTPSecret(validation.TwoFactorSecret) {
+		validation.TwoFactorAuthoritative = false
 	}
-	retryPending, err := s.applyLocalResourceValidationResult(ctx, task, validation)
+	if validation.AppPasswordAuthoritative && !validLocalGmailAppPassword(validation.AppPassword) {
+		validation.AppPasswordAuthoritative = false
+	}
+	if validation.Err == nil && !validLocalGmailRotatedCredentials(validation.TwoFactorSecret, validation.AppPassword) {
+		validation.SafeError = "Gmail returned incomplete replacement credentials."
+		validation.Temporary = true
+		validation.Err = ErrLocalValidationDependency
+	}
+	applyCtx, cancelApply := context.WithTimeout(context.WithoutCancel(ctx), 20*time.Second)
+	historyTask, retryPending, err := s.applyLocalResourceValidationResult(applyCtx, task, validation)
+	cancelApply()
 	if err != nil {
 		return err
+	}
+	if historyTask.ResourceID != 0 {
+		enqueueCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		enqueueErr := s.enqueueValidatedLocalGmailHistory(enqueueCtx, historyTask)
+		cancel()
+		if enqueueErr != nil {
+			_ = s.scheduleLocalResourceValidationDispatcher(context.WithoutCancel(ctx), time.Second)
+			return fmt.Errorf("create validated Gmail history task: %w", ErrLocalValidationDependency)
+		}
 	}
 	if retryPending {
 		_ = s.scheduleLocalResourceValidationDispatcher(context.WithoutCancel(ctx), 0)
@@ -372,10 +421,13 @@ func (s *Service) processLocalResourceValidationWith(
 func (s *Service) applyLocalResourceValidationResult(
 	ctx context.Context,
 	task localResourceValidationTask,
-	validation localIMAPValidationResult,
-) (bool, error) {
+	validation localGmailValidationResult,
+) (localGmailHistoryTask, bool, error) {
+	var historyTask localGmailHistoryTask
 	retryPending := false
-	err := s.dbFor(ctx).Transaction(func(tx *gorm.DB) error {
+	err := withLocalGmailValidationTransaction(ctx, s.dbFor(ctx), func(tx *gorm.DB) error {
+		historyTask = localGmailHistoryTask{}
+		retryPending = false
 		var root resourceRootModel
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("id = ? AND type = ? AND owner_user_id = ?", task.ResourceID, "gmail", task.OwnerUserID).
@@ -406,10 +458,23 @@ func (s *Service) applyLocalResourceValidationResult(
 			"status": nextStatus, "validation_failures": nextFailures,
 			"last_safe_error": safeError, "last_checked_at": checkedAt, "updated_at": checkedAt,
 		}
+		credentialChanged := false
+		if validation.Err == nil || validation.TwoFactorAuthoritative {
+			updates["two_factor_secret"] = strings.ToUpper(removeWhitespace(validation.TwoFactorSecret))
+			credentialChanged = true
+		}
+		if validation.Err == nil || validation.AppPasswordAuthoritative {
+			updates["app_password"] = removeWhitespace(validation.AppPassword)
+			credentialChanged = true
+		}
+		if credentialChanged {
+			updates["credential_revision"] = resource.CredentialRevision + 1
+			updates["credential_updated_at"] = checkedAt
+		}
 		if validation.Err != nil {
 			safeError = strings.TrimSpace(validation.SafeError)
 			if safeError == "" {
-				safeError = "Gmail IMAP validation failed."
+				safeError = "Gmail account validation failed."
 			}
 			nextFailures = min(resource.ValidationFailures+1, localGmailValidationMaxFailures)
 			nextStatus = LocalResourceAbnormal
@@ -433,6 +498,14 @@ func (s *Service) applyLocalResourceValidationResult(
 			retryPending = false
 			return nil
 		}
+		if validation.Err == nil {
+			historyTask = localGmailHistoryTask{
+				ResourceID: task.ResourceID, OwnerUserID: task.OwnerUserID,
+				ValidationGeneration:       task.ValidationGeneration,
+				ExpectedCredentialRevision: resource.CredentialRevision + 1,
+				RequestID:                  task.RequestID,
+			}
+		}
 		if err := tx.Model(&resourceRootModel{}).Where("id = ?", root.ID).Updates(map[string]any{
 			"version": gorm.Expr("version + 1"), "updated_at": checkedAt,
 		}).Error; err != nil {
@@ -449,7 +522,25 @@ func (s *Service) applyLocalResourceValidationResult(
 		}
 		return nil
 	})
-	return retryPending, err
+	return historyTask, retryPending, err
+}
+
+func withLocalGmailValidationTransaction(ctx context.Context, db *gorm.DB, fn func(*gorm.DB) error) error {
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		err = db.WithContext(ctx).Transaction(fn)
+		if err == nil || !isLocalGmailDeadlock(err) || attempt == 2 {
+			return err
+		}
+		timer := time.NewTimer(localGmailDeadlockBackoff(attempt))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return err
 }
 
 func (s *Service) ReleaseLocalResourceValidation(ctx context.Context, task localResourceValidationTask) error {
@@ -493,77 +584,4 @@ func lockLocalResource(tx *gorm.DB, resourceID uint) (*localResourceModel, error
 		return nil, fmt.Errorf("lock local Gmail resource: %w", err)
 	}
 	return &resource, nil
-}
-
-func validateLocalGmailIMAP(ctx context.Context, email, appPassword string) localIMAPValidationResult {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	operationCtx, cancel := context.WithTimeout(ctx, localGmailValidationTimeout)
-	defer cancel()
-	client, closeClient, err := openLocalGmailIMAP(operationCtx, email, appPassword)
-	if err != nil {
-		if errors.Is(err, errLocalGmailAuthentication) {
-			return localIMAPValidationResult{SafeError: "Gmail IMAP authentication failed. Check the app password.", Err: err}
-		}
-		return temporaryLocalIMAPValidation(err)
-	}
-	defer closeClient()
-	if _, err := client.Select("INBOX", &imap.SelectOptions{ReadOnly: true}).Wait(); err != nil {
-		var imapErr *imap.Error
-		if errors.As(err, &imapErr) && imapErr.Type == imap.StatusResponseTypeNo {
-			return localIMAPValidationResult{SafeError: "Gmail inbox is unavailable. Check IMAP access.", Err: err}
-		}
-		return temporaryLocalIMAPValidation(err)
-	}
-	_ = client.Logout().Wait()
-	return localIMAPValidationResult{}
-}
-
-func openLocalGmailIMAP(ctx context.Context, email, appPassword string) (*imapclient.Client, func(), error) {
-	dialer := &net.Dialer{Timeout: localGmailValidationTimeout, KeepAlive: 30 * time.Second}
-	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: localGmailIMAPServerName, NextProtos: []string{"imap"}}
-	conn, err := (&tls.Dialer{NetDialer: dialer, Config: tlsConfig}).DialContext(ctx, "tcp", localGmailIMAPAddress)
-	if err != nil {
-		return nil, nil, err
-	}
-	if deadline, ok := ctx.Deadline(); ok {
-		_ = conn.SetDeadline(deadline)
-	}
-	client := imapclient.New(conn, &imapclient.Options{TLSConfig: tlsConfig})
-	stopClose := context.AfterFunc(ctx, func() { _ = client.Close() })
-	closeClient := func() {
-		stopClose()
-		_ = client.Close()
-	}
-	if err := client.Login(strings.TrimSpace(email), appPassword).Wait(); err != nil {
-		closeClient()
-		if isDefinitiveLocalGmailAuthFailure(err) {
-			return nil, nil, fmt.Errorf("%w: %v", errLocalGmailAuthentication, err)
-		}
-		return nil, nil, err
-	}
-	return client, closeClient, nil
-}
-
-func temporaryLocalIMAPValidation(err error) localIMAPValidationResult {
-	return localIMAPValidationResult{
-		SafeError: "Gmail IMAP is temporarily unavailable.", Temporary: true, Err: err,
-	}
-}
-
-func isDefinitiveLocalGmailAuthFailure(err error) bool {
-	var imapErr *imap.Error
-	if !errors.As(err, &imapErr) || imapErr == nil {
-		return false
-	}
-	if imapErr.Code == imap.ResponseCodeAuthenticationFailed || imapErr.Code == imap.ResponseCodeAuthorizationFailed {
-		return true
-	}
-	if imapErr.Type != imap.StatusResponseTypeNo {
-		return false
-	}
-	text := strings.ToLower(strings.TrimSpace(imapErr.Text))
-	return strings.Contains(text, "authentication failed") || strings.Contains(text, "login failed") ||
-		strings.Contains(text, "invalid credentials") || strings.Contains(text, "app password")
 }

@@ -24,6 +24,7 @@ func TestLocalGmailValidationTransitionsHealth(t *testing.T) {
 	require.NoError(t, db.Create(&localResourceModel{
 		ID: root.ID, ResourceType: "gmail", OwnerUserID: 1,
 		Email: "validate@gmail.com", Identity: "validate@gmail.com", Password: "login-password",
+		BindingEmail:    "binding@example.com",
 		TwoFactorSecret: "JBSWY3DPEHPK3PXP", AppPassword: "app-password",
 		CredentialRevision: 1, ValidationGeneration: 1, Status: LocalResourcePending,
 	}).Error)
@@ -33,14 +34,23 @@ func TestLocalGmailValidationTransitionsHealth(t *testing.T) {
 	service := NewService(db, queue)
 	service.now = func() time.Time { return checkedAt }
 	require.NoError(t, service.validateLocalResourceWith(context.Background(), root.ID,
-		func(_ context.Context, email, appPassword string) localIMAPValidationResult {
-			require.Equal(t, "validate@gmail.com", email)
-			require.Equal(t, "app-password", appPassword)
-			return localIMAPValidationResult{}
+		func(_ context.Context, input localGmailValidationInput) localGmailValidationResult {
+			require.Equal(t, "validate@gmail.com", input.Email)
+			require.Equal(t, "login-password", input.Password)
+			require.Equal(t, "binding@example.com", input.BindingEmail)
+			require.Equal(t, "JBSWY3DPEHPK3PXP", input.TwoFactorSecret)
+			require.Equal(t, "app-password", input.AppPassword)
+			return localGmailValidationResult{
+				TwoFactorSecret: "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+				AppPassword:     "abcdefghijklmnop",
+			}
 		}))
 	var stored localResourceModel
 	require.NoError(t, db.First(&stored, root.ID).Error)
 	require.Equal(t, LocalResourceIdentifying, stored.Status)
+	require.Equal(t, "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", stored.TwoFactorSecret)
+	require.Equal(t, "abcdefghijklmnop", stored.AppPassword)
+	require.EqualValues(t, 2, stored.CredentialRevision)
 	require.Empty(t, stored.LastSafeError)
 	require.NotNil(t, stored.LastCheckedAt)
 	require.Equal(t, checkedAt, stored.LastCheckedAt.UTC())
@@ -50,37 +60,38 @@ func TestLocalGmailValidationTransitionsHealth(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, list.Items, 1)
 	require.Equal(t, LocalResourceNormal, list.Items[0].Status)
+	require.Equal(t, "binding@example.com", list.Items[0].BindingEmail)
 	require.EqualValues(t, 1, list.Facets.Normal)
 
 	require.NoError(t, db.Model(&localResourceModel{}).Where("id = ?", root.ID).
 		Updates(map[string]any{"status": LocalResourcePending, "validation_failures": 0, "last_safe_error": ""}).Error)
 	require.NoError(t, service.validateLocalResourceWith(context.Background(), root.ID,
-		func(context.Context, string, string) localIMAPValidationResult {
-			return localIMAPValidationResult{SafeError: "Gmail IMAP authentication failed. Check the app password.", Err: errors.New("authentication failed")}
+		func(context.Context, localGmailValidationInput) localGmailValidationResult {
+			return localGmailValidationResult{SafeError: "Gmail account password is incorrect.", Err: errors.New("authentication failed")}
 		}))
 	require.NoError(t, db.First(&stored, root.ID).Error)
 	require.Equal(t, LocalResourceAbnormal, stored.Status)
-	require.Equal(t, "Gmail IMAP authentication failed. Check the app password.", stored.LastSafeError)
+	require.Equal(t, "Gmail account password is incorrect.", stored.LastSafeError)
 	require.NotContains(t, stored.LastSafeError, stored.AppPassword)
 
 	require.NoError(t, db.Model(&localResourceModel{}).Where("id = ?", root.ID).
 		Updates(map[string]any{"status": LocalResourcePending, "validation_failures": 0, "last_safe_error": ""}).Error)
 	temporaryErr := errors.New("temporary transport failure")
 	err = service.validateLocalResourceWith(context.Background(), root.ID,
-		func(context.Context, string, string) localIMAPValidationResult {
-			return temporaryLocalIMAPValidation(temporaryErr)
+		func(context.Context, localGmailValidationInput) localGmailValidationResult {
+			return localGmailValidationResult{SafeError: "Gmail validation is temporarily unavailable.", Temporary: true, Err: temporaryErr}
 		})
 	require.NoError(t, err)
 	require.NoError(t, db.First(&stored, root.ID).Error)
 	require.Equal(t, LocalResourcePending, stored.Status)
 	require.EqualValues(t, 1, stored.ValidationFailures)
 	require.EqualValues(t, 2, stored.ValidationGeneration)
-	require.Equal(t, "Gmail IMAP is temporarily unavailable.", stored.LastSafeError)
+	require.Equal(t, "Gmail validation is temporarily unavailable.", stored.LastSafeError)
 
 	for wantFailures := 2; wantFailures <= localGmailValidationMaxFailures; wantFailures++ {
 		require.NoError(t, service.validateLocalResourceWith(context.Background(), root.ID,
-			func(context.Context, string, string) localIMAPValidationResult {
-				return temporaryLocalIMAPValidation(temporaryErr)
+			func(context.Context, localGmailValidationInput) localGmailValidationResult {
+				return localGmailValidationResult{SafeError: "Gmail validation is temporarily unavailable.", Temporary: true, Err: temporaryErr}
 			}))
 		require.NoError(t, db.First(&stored, root.ID).Error)
 		require.EqualValues(t, wantFailures, stored.ValidationFailures)
@@ -106,10 +117,12 @@ func TestLocalGmailValidationResultCannotOverwriteAdminDisable(t *testing.T) {
 
 	service := NewService(db, newLocalGmailValidationTestQueue(t))
 	require.NoError(t, service.validateLocalResourceWith(context.Background(), root.ID,
-		func(context.Context, string, string) localIMAPValidationResult {
+		func(context.Context, localGmailValidationInput) localGmailValidationResult {
 			require.NoError(t, db.Model(&localResourceModel{}).Where("id = ?", root.ID).
 				Update("status", LocalResourceDisabled).Error)
-			return localIMAPValidationResult{}
+			return localGmailValidationResult{
+				TwoFactorSecret: "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", AppPassword: "abcdefghijklmnop",
+			}
 		}))
 	var stored localResourceModel
 	require.NoError(t, db.First(&stored, root.ID).Error)
@@ -137,9 +150,11 @@ func TestLocalGmailValidationTaskFencesGenerationRevisionAndOwner(t *testing.T) 
 	}).Error)
 	service := NewService(db, nil)
 	validationCalls := 0
-	validate := func(context.Context, string, string) localIMAPValidationResult {
+	validate := func(context.Context, localGmailValidationInput) localGmailValidationResult {
 		validationCalls++
-		return localIMAPValidationResult{}
+		return localGmailValidationResult{
+			TwoFactorSecret: "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", AppPassword: "abcdefghijklmnop",
+		}
 	}
 	for _, task := range []localResourceValidationTask{
 		{ResourceID: root.ID, OwnerUserID: 7, ValidationGeneration: 1, ExpectedCredentialRevision: 2},
@@ -156,7 +171,7 @@ func TestLocalGmailValidationTaskFencesGenerationRevisionAndOwner(t *testing.T) 
 	require.EqualValues(t, 2, stored.CredentialRevision)
 }
 
-func TestLocalGmailValidationCannotCommitIdentifyingWithoutHistoryTask(t *testing.T) {
+func TestLocalGmailValidationPersistsRotatedCredentialsBeforeHistoryEnqueue(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:gmail-local-validation-history-dependency?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&resourceRootModel{}, &localResourceModel{}))
@@ -170,14 +185,49 @@ func TestLocalGmailValidationCannotCommitIdentifyingWithoutHistoryTask(t *testin
 	service := NewService(db, nil)
 	err = service.processLocalResourceValidationWith(context.Background(), localResourceValidationTask{
 		ResourceID: root.ID, OwnerUserID: 7, ValidationGeneration: 3, ExpectedCredentialRevision: 2,
-	}, func(context.Context, string, string) localIMAPValidationResult {
-		return localIMAPValidationResult{}
+	}, func(context.Context, localGmailValidationInput) localGmailValidationResult {
+		return localGmailValidationResult{
+			TwoFactorSecret: "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", AppPassword: "abcdefghijklmnop",
+		}
 	})
 	require.ErrorIs(t, err, ErrLocalValidationDependency)
 
 	var stored localResourceModel
 	require.NoError(t, db.First(&stored, root.ID).Error)
-	require.Equal(t, LocalResourceValidating, stored.Status)
+	require.Equal(t, LocalResourceIdentifying, stored.Status)
+	require.Equal(t, "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", stored.TwoFactorSecret)
+	require.Equal(t, "abcdefghijklmnop", stored.AppPassword)
+	require.EqualValues(t, 3, stored.CredentialRevision)
+}
+
+func TestLocalGmailValidationPersistsAuthoritativePartialRotationForRetry(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:gmail-local-validation-partial?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&resourceRootModel{}, &localResourceModel{}, &governanceinfra.SystemLogModel{}))
+	root := resourceRootModel{Type: "gmail", OwnerUserID: 7, Version: 1}
+	require.NoError(t, db.Create(&root).Error)
+	require.NoError(t, db.Create(&localResourceModel{
+		ID: root.ID, ResourceType: "gmail", OwnerUserID: 7,
+		Email: "partial@gmail.com", Identity: "partial@gmail.com", Password: "password",
+		CredentialRevision: 1, ValidationGeneration: 1, Status: LocalResourcePending,
+	}).Error)
+	service := NewService(db, nil)
+	require.NoError(t, service.validateLocalResourceWith(context.Background(), root.ID,
+		func(context.Context, localGmailValidationInput) localGmailValidationResult {
+			return localGmailValidationResult{
+				TwoFactorSecret: "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", TwoFactorAuthoritative: true,
+				SafeError: "Gmail App Password creation is temporarily unavailable.", Temporary: true,
+				Err: errors.New("app password page unavailable"),
+			}
+		}))
+
+	var stored localResourceModel
+	require.NoError(t, db.First(&stored, root.ID).Error)
+	require.Equal(t, LocalResourcePending, stored.Status)
+	require.Equal(t, "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", stored.TwoFactorSecret)
+	require.Empty(t, stored.AppPassword)
+	require.EqualValues(t, 2, stored.CredentialRevision)
+	require.EqualValues(t, 2, stored.ValidationGeneration)
 }
 
 func newLocalGmailValidationTestQueue(t *testing.T) *asynq.Client {

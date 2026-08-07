@@ -3,7 +3,7 @@ package runtimeconfig
 import "github.com/donnel666/remail/internal/systemsettings/domain"
 
 const (
-	DefaultSettingsCount                  = 219
+	DefaultSettingsCount                  = 220
 	SMSBowerNoCodeRefundTimeoutMinutesKey = "smsbower_no_code_refund_timeout_minutes"
 )
 
@@ -123,6 +123,7 @@ var defaultSettings = []domain.Setting{
 	{Key: "fetch_dispatcher_timeout_seconds", Value: "300"},
 	{Key: "resource_fetch_dispatch_limit", Value: "10000"},
 	{Key: "project_history_concurrency", Value: "4"},
+	{Key: "gmail_validation_concurrency", Value: "2"},
 	{Key: "gmail_history_concurrency", Value: "4"},
 	{Key: "project_history_dispatch_limit", Value: "4"},
 	{Key: "verification_code_pattern", Value: `["(?:^|[^\\d])(\\d{6,8})(?:[^\\d]|$)"]`},

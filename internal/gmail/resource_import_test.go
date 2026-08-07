@@ -106,6 +106,44 @@ func newGmailImportHarness(t *testing.T) *gmailImportHarness {
 	return &gmailImportHarness{service: service, db: db, redis: redisClient, inspector: inspector, files: files}
 }
 
+func TestGmailResourceImportAcceptsSupportedCredentialFormats(t *testing.T) {
+	harness := newGmailImportHarness(t)
+	accepted, _, err := harness.service.AcceptAdminGmailTXTFile(
+		context.Background(), 9, 7, "gmail.txt", []byte(strings.Join([]string{
+			"two.fields@gmail.com----password-2",
+			"three.fields@gmail.com----password-3----JBSW Y3DP EHPK 3PXP",
+			"binding.only@gmail.com----password-binding-only----Backup.Only@Example.NET",
+			"four.fields@gmail.com----password-4----JBSWY3DPEHPK3PXP----abcd efgh ijkl mnop",
+			"binding.fields@gmail.com----password-binding----Backup.Address@Example.COM----JBSW Y3DP EHPK 3PXP",
+		}, "\n")), "skip", "gmail-import-formats", "request-formats", "/v1/admin/gmail/resources/imports",
+	)
+	require.NoError(t, err)
+	require.NoError(t, harness.service.ProcessGmailResourceImport(context.Background(), gmailResourceImportTask{
+		ImportID: accepted.ImportID, Generation: 1,
+	}))
+
+	var resources []localResourceModel
+	require.NoError(t, harness.db.Order("email ASC").Find(&resources).Error)
+	require.Len(t, resources, 5)
+	byEmail := make(map[string]localResourceModel, len(resources))
+	for _, resource := range resources {
+		byEmail[resource.Email] = resource
+		require.Equal(t, LocalResourcePending, resource.Status)
+	}
+	require.Empty(t, byEmail["two.fields@gmail.com"].TwoFactorSecret)
+	require.Empty(t, byEmail["two.fields@gmail.com"].AppPassword)
+	require.Equal(t, "JBSWY3DPEHPK3PXP", byEmail["three.fields@gmail.com"].TwoFactorSecret)
+	require.Empty(t, byEmail["three.fields@gmail.com"].AppPassword)
+	require.Equal(t, "backup.only@example.net", byEmail["binding.only@gmail.com"].BindingEmail)
+	require.Empty(t, byEmail["binding.only@gmail.com"].TwoFactorSecret)
+	require.Empty(t, byEmail["binding.only@gmail.com"].AppPassword)
+	require.Equal(t, "JBSWY3DPEHPK3PXP", byEmail["four.fields@gmail.com"].TwoFactorSecret)
+	require.Equal(t, "abcdefghijklmnop", byEmail["four.fields@gmail.com"].AppPassword)
+	require.Equal(t, "backup.address@example.com", byEmail["binding.fields@gmail.com"].BindingEmail)
+	require.Equal(t, "JBSWY3DPEHPK3PXP", byEmail["binding.fields@gmail.com"].TwoFactorSecret)
+	require.Empty(t, byEmail["binding.fields@gmail.com"].AppPassword)
+}
+
 func TestGmailResourceImportUsesRedisReferenceTaskAndSafeLineResults(t *testing.T) {
 	harness := newGmailImportHarness(t)
 	ctx := context.Background()

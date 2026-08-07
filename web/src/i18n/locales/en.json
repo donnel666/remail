@@ -1499,6 +1499,7 @@
   "A valid Microsoft email address is required.": "A valid Microsoft email address is required.",
   "A valid auxiliary mailbox address is required.": "A valid auxiliary mailbox address is required.",
   "Auxiliary email": "Auxiliary email",
+  "Binding email": "Binding email",
   "Optional recovery mailbox": "Optional recovery mailbox",
   "Credentials": "Credentials",
   "Leave blank to keep current": "Leave blank to keep current",

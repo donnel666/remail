@@ -72,6 +72,7 @@ services:
       MINIO_BUCKET: "remail"
       SESSION_SECRET: "dev-secret-do-not-use-in-production"
       MIGRATIONS_DIR: "/app/migrations"
+      GMAIL_BROWSER_BINARY: "${GMAIL_BROWSER_BINARY:-}"
       SMTP_ADDR: "${SMTP_ADDR:-}"
       SMTP_USERNAME: "${SMTP_USERNAME:-}"
       SMTP_PASSWORD: "${SMTP_PASSWORD:-}"
