@@ -613,9 +613,6 @@ func (s *Service) finishLocalSession(ctx context.Context, session sessionModel) 
 	if session.Status != SessionCompleted && session.Status != SessionCancelled && session.Status != SessionFailed {
 		return errors.New("gmail: local session is not terminal")
 	}
-	if err := s.releaseLocalCodeAllocation(ctx, session.OrderNo); err != nil {
-		return err
-	}
 	if s.trade == nil {
 		return errors.New("gmail: trade callback unavailable")
 	}
@@ -641,27 +638,6 @@ func (s *Service) finishLocalSession(ctx context.Context, session sessionModel) 
 	}
 	return s.clearNextPoll(ctx, session.ID)
 }
-
-func (s *Service) releaseLocalCodeAllocation(ctx context.Context, orderNo string) error {
-	return s.dbFor(ctx).Transaction(func(tx *gorm.DB) error {
-		var allocation allocationModel
-		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("order_no = ?", orderNo).Take(&allocation).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		if allocation.Source != SourceLocal || allocation.ServiceMode != string(tradedomain.ServiceModeCode) ||
-			allocation.Status != AllocationStatusAllocated {
-			return nil
-		}
-		now := s.now()
-		return tx.Model(&allocationModel{}).Where("id = ? AND status = ?", allocation.ID, AllocationStatusAllocated).
-			Updates(map[string]any{"status": AllocationStatusReleased, "released_at": now}).Error
-	})
-}
-
 func (s *Service) markLocalResourceAbnormal(ctx context.Context, resourceID uint, safeError string) error {
 	return s.dbFor(ctx).Transaction(func(tx *gorm.DB) error {
 		resource, err := lockLocalResource(tx, resourceID)

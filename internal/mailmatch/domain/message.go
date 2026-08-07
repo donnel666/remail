@@ -14,6 +14,7 @@ const (
 	ResourceTypeMicrosoft ResourceType = "microsoft"
 	ResourceTypeDomain    ResourceType = "domain"
 	ResourceTypeGmail     ResourceType = "gmail"
+	ResourceTypeICloud    ResourceType = "icloud"
 )
 
 type MessageStatus string

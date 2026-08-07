@@ -244,7 +244,6 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		upstreamRouter := upstream.NewRouter(smsbowerMod.Service)
 		smsbowerMod.Service.SetNotifier(smsbowerAlertMailer{users: iamMod.Users, delivery: mailMod.DeliveryUseCase})
 		allocMod.UseCase.SetProductInventoryOverlay(productInventoryOverlayChain{
-			gmailInventoryOverlay{gmail: gmailMod.Service},
 			smsbowerInventoryOverlay{smsbower: smsbowerMod.Service},
 		})
 		gmailapi.RegisterRoutes(v1, gmailMod, iamSessionFetcher, iamMod.PermissionChecker)

@@ -338,9 +338,11 @@ func (a allocationAdapter) Allocate(ctx context.Context, cmd tradeapp.Allocation
 		OrderNo:              cmd.OrderNo,
 		BuyerUserID:          cmd.BuyerUserID,
 		ProjectProductID:     cmd.ProjectProductID,
+		ServiceMode:          allocdomain.GmailServiceMode(cmd.ServiceMode),
 		SupplyScope:          scope,
 		SupplyScopes:         scopes,
 		EmailSuffix:          cmd.EmailSuffix,
+		RequiredUntil:        cmd.RequiredUntil,
 		FulfillExistingOrder: cmd.FulfillExistingOrder,
 	})
 	if err != nil {
@@ -365,6 +367,24 @@ func (a allocationAdapter) ImportHistoricalMicrosoftAllocation(ctx context.Conte
 		if errors.Is(err, allocdomain.ErrHistoricalAllocationOwnerRequired) {
 			return nil, tradeapp.ErrHistoricalAllocationOwnerRequired
 		}
+		return nil, mapAllocationError(err)
+	}
+	if result == nil {
+		return nil, nil
+	}
+	return &tradeapp.AllocationResult{
+		OrderNo: result.OrderNo, Type: domain.AllocationType(result.Type), ID: result.ID, Email: result.Email,
+		SupplyScope: tradeSupplyScope(result.SupplyScope),
+	}, nil
+}
+
+func (a allocationAdapter) ImportHistoricalGmailAllocation(ctx context.Context, cmd tradeapp.HistoricalGmailAllocationCommand) (*tradeapp.AllocationResult, error) {
+	result, err := a.alloc.ImportHistoricalGmailAllocation(ctx, allocapp.HistoricalGmailAllocationCommand{
+		ProjectID: cmd.ProjectID, ProductID: cmd.ProductID, ResourceID: cmd.ResourceID,
+		Mailbox: allocdomain.GmailMailbox(cmd.Mailbox), Email: cmd.Email,
+		CreatedAt: cmd.CreatedAt, ReleasedAt: cmd.ReleasedAt,
+	})
+	if err != nil {
 		return nil, mapAllocationError(err)
 	}
 	if result == nil {

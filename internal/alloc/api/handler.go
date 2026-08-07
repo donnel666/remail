@@ -128,9 +128,13 @@ func (h *Handler) GetProjectInventory(c *gin.Context) {
 		ProjectID:                  stats.ProjectID,
 		Microsoft:                  microsoftInventoryResponse(stats.Microsoft),
 		Domain:                     domainInventoryResponse(stats.Domain),
+		Gmail:                      gmailInventoryResponse(stats.Gmail),
+		ICloud:                     icloudInventoryResponse(stats.ICloud),
 		TotalAvailable:             stats.TotalAvailable,
 		ActiveMicrosoftAllocations: stats.ActiveMicrosoftAllocations,
 		ActiveDomainAllocations:    stats.ActiveDomainAllocations,
+		ActiveGmailAllocations:     stats.ActiveGmailAllocations,
+		ActiveICloudAllocations:    stats.ActiveICloudAllocations,
 	})
 }
 
@@ -309,6 +313,25 @@ func domainInventoryResponse(stats allocapp.DomainInventoryStats) DomainInventor
 		MailboxDailyUsed:      stats.MailboxDailyUsed,
 		MailboxDailyAvailable: stats.MailboxDailyAvailable,
 		TotalAvailable:        stats.TotalAvailable,
+	}
+}
+
+func gmailInventoryResponse(stats allocapp.GmailInventoryStats) GmailInventoryResponse {
+	return GmailInventoryResponse{
+		Enabled: stats.Enabled, CodeEnabled: stats.CodeEnabled, PurchaseEnabled: stats.PurchaseEnabled,
+		MainEnabled: stats.MainEnabled, DotEnabled: stats.DotEnabled, PlusEnabled: stats.PlusEnabled,
+		EligibleResources: stats.EligibleResources, PublicEligibleResources: stats.PublicEligibleResources,
+		MainAvailable: stats.MainAvailable, MainPublicAvailable: stats.MainPublicAvailable,
+		DotAvailable: stats.DotAvailable, DotPublicAvailable: stats.DotPublicAvailable,
+		PlusAvailable: stats.PlusAvailable, PlusPublicAvailable: stats.PlusPublicAvailable,
+		TotalAvailable: stats.TotalAvailable, PublicAvailable: stats.PublicAvailable,
+	}
+}
+
+func icloudInventoryResponse(stats allocapp.ICloudInventoryStats) ICloudInventoryResponse {
+	return ICloudInventoryResponse{
+		Enabled: stats.Enabled, EligibleResources: stats.EligibleResources,
+		AliasAvailable: stats.AliasAvailable, TotalAvailable: stats.TotalAvailable,
 	}
 }
 

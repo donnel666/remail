@@ -216,12 +216,13 @@ func TestActivateUpstreamOrderUsesConfiguredReceiveWindowAndProviderWarranty(t *
 func TestLocalFirstGmailFallsBackUpstreamAfterFinalAllocationMiss(t *testing.T) {
 	repo := &batchRepoSpy{orders: map[string]domain.Order{}}
 	wallet := &batchWalletSpy{}
-	gmail := &checkoutGmailSupplySpy{allocationErr: domain.ErrInsufficientInventory}
+	gmail := &checkoutGmailSupplySpy{}
+	allocation := &checkoutInventorySpy{allocationErr: domain.ErrInsufficientInventory}
 	provider := &checkoutUpstreamSpy{
 		quote:  &upstream.SupplyQuote{Strategy: upstream.StrategyLocalFirst, Available: 1},
 		accept: activateAcceptedOrder(repo),
 	}
-	uc := NewUseCase(repo, &batchOrderingSpy{productType: domain.ProductTypeGmail}, wallet, &checkoutInventorySpy{}, batchTokenSpy{})
+	uc := NewUseCase(repo, &batchOrderingSpy{productType: domain.ProductTypeGmail}, wallet, allocation, batchTokenSpy{})
 	uc.SetGmailPorts(gmail, gmail)
 	uc.SetUpstreams(upstream.NewRouter(provider))
 	request := batchRequest("gmail-local-final-miss", 1)
@@ -233,8 +234,8 @@ func TestLocalFirstGmailFallsBackUpstreamAfterFinalAllocationMiss(t *testing.T) 
 	require.NotNil(t, result)
 	require.True(t, result.Created)
 	require.Equal(t, domain.OrderStatusActive, result.Order.Status)
-	require.Equal(t, 1, gmail.allocations)
-	require.Equal(t, 1, gmail.releases)
+	require.Equal(t, 1, allocation.allocationCalls)
+	require.Equal(t, 1, allocation.releaseCalls)
 	require.Equal(t, 1, provider.acceptCalls)
 	require.Equal(t, 1, wallet.debits)
 }
@@ -247,7 +248,8 @@ func TestUpstreamFirstGmailFallsBackLocalAfterFinalReservationMiss(t *testing.T)
 		quote:     &upstream.SupplyQuote{Strategy: upstream.StrategyUpstreamFirst, Available: 1},
 		acceptErr: upstream.ErrUnavailable,
 	}
-	uc := NewUseCase(repo, &batchOrderingSpy{productType: domain.ProductTypeGmail}, wallet, &checkoutInventorySpy{}, batchTokenSpy{})
+	allocation := newCheckoutGmailInventorySpy()
+	uc := NewUseCase(repo, &batchOrderingSpy{productType: domain.ProductTypeGmail}, wallet, allocation, batchTokenSpy{})
 	uc.SetGmailPorts(gmail, gmail)
 	uc.SetUpstreams(upstream.NewRouter(provider))
 	request := batchRequest("gmail-upstream-final-miss", 1)
@@ -260,7 +262,7 @@ func TestUpstreamFirstGmailFallsBackLocalAfterFinalReservationMiss(t *testing.T)
 	require.Equal(t, domain.OrderStatusPaid, result.Order.Status)
 	require.Equal(t, 1, provider.acceptCalls)
 	require.Equal(t, 2, gmail.checks)
-	require.Equal(t, 1, gmail.allocations)
+	require.Equal(t, 1, allocation.allocationCalls)
 	require.Equal(t, 1, gmail.creates)
 	require.Equal(t, 1, gmail.schedules)
 }

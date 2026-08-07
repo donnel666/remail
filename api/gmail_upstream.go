@@ -31,54 +31,6 @@ func (chain productInventoryOverlayChain) OverlayProductInventory(ctx context.Co
 	return nil
 }
 
-type gmailInventoryOverlay struct {
-	gmail *gmail.Service
-}
-
-func (o gmailInventoryOverlay) OverlayProductInventory(ctx context.Context, projectIDs []uint, snapshots map[uint]*allocapp.ProjectProductInventoryTotals) error {
-	items, err := o.gmail.ListInventory(ctx, projectIDs)
-	if err != nil {
-		return err
-	}
-	overlayGmailInventory(snapshots, items)
-	return nil
-}
-
-func overlayGmailInventory(snapshots map[uint]*allocapp.ProjectProductInventoryTotals, items []gmail.InventoryItem) {
-	for _, upstream := range items {
-		snapshot := snapshots[upstream.ProjectID]
-		if snapshot == nil {
-			snapshot = &allocapp.ProjectProductInventoryTotals{ProjectID: upstream.ProjectID}
-			snapshots[upstream.ProjectID] = snapshot
-		}
-		found := false
-		for i := range snapshot.Items {
-			if snapshot.Items[i].ProductID != upstream.ProductID {
-				continue
-			}
-			previous := snapshot.Items[i].TotalAvailable
-			applyGmailModeInventory(&snapshot.Items[i], upstream)
-			snapshot.TotalAvailable = max(0, snapshot.TotalAvailable+snapshot.Items[i].TotalAvailable-previous)
-			found = true
-			break
-		}
-		if !found {
-			item := allocapp.ProductInventoryTotal{ProductID: upstream.ProductID}
-			applyGmailModeInventory(&item, upstream)
-			snapshot.Items = append(snapshot.Items, item)
-			snapshot.TotalAvailable += item.TotalAvailable
-		}
-	}
-}
-
-func applyGmailModeInventory(item *allocapp.ProductInventoryTotal, upstream gmail.InventoryItem) {
-	code, purchase := upstream.CodeAvailable, upstream.PurchaseAvailable
-	item.CodeAvailable, item.CodePublicAvailable = &code, &code
-	item.PurchaseAvailable, item.PurchasePublicAvailable = &purchase, &purchase
-	item.TotalAvailable = max(code, purchase)
-	item.PublicAvailable = item.TotalAvailable
-}
-
 type smsbowerInventoryOverlay struct{ smsbower *smsbower.Service }
 
 func (o smsbowerInventoryOverlay) OverlayProductInventory(ctx context.Context, projectIDs []uint, snapshots map[uint]*allocapp.ProjectProductInventoryTotals) error {

@@ -288,33 +288,21 @@ INSERT INTO gmail_resources(
 
 	createdAt := time.Now().UTC().Add(-24 * time.Hour).Truncate(time.Second)
 	expiredAt := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
-	insertAllocation := func(conn *gorm.DB, orderNo, mailbox, email string) uint {
-		require.NoError(t, conn.Exec(`
-INSERT INTO allocation_order_guards(order_no, type, created_at)
-VALUES (?, 'gmail', ?)`, orderNo, createdAt).Error)
-		require.NoError(t, conn.Exec(`
-INSERT INTO gmail_allocations(
-    order_no, guard_type, project_id, product_id, source, source_ref,
-    service_mode, resource_id, supply_scope, mailbox, email, status,
-    cost_points_snapshot, created_at, released_at
-) VALUES (
-    ?, 'gmail', 10, 20, 'local', '',
-    'purchase', 1000, 'public', ?, ?, 'released',
-    0, ?, ?
-)`, orderNo, mailbox, email, createdAt, expiredAt).Error)
-		var allocationID uint
-		require.NoError(t, conn.Table("gmail_allocations").Select("id").Where("order_no = ?", orderNo).Scan(&allocationID).Error)
-		require.NotZero(t, allocationID)
-		return allocationID
-	}
-
 	uc := newTradeUseCase(db)
-	orderNo := "HIST-GMAIL-TRADE-FACTS"
-	allocationID := insertAllocation(db, orderNo, "plus", "firstname+legacy@gmail.com")
 	require.NoError(t, uc.ImportHistoricalGmailUsage(context.Background(), []tradeapp.HistoricalGmailUsage{{
-		OrderNo: orderNo, AllocationID: allocationID, ProjectID: 10, ProductID: 20,
+		ResourceID: 1000, ProjectID: 10, ProductID: 20, Mailbox: "plus",
 		Email: "firstname+legacy@gmail.com", FirstMatchedAt: createdAt, LastMatchedAt: expiredAt, EvidenceCount: 2,
 	}}))
+	var allocation struct {
+		ID      uint   `gorm:"column:id"`
+		OrderNo string `gorm:"column:order_no"`
+	}
+	require.NoError(t, db.Table("gmail_allocations").
+		Where("resource_id = ? AND project_id = ? AND mailbox = ? AND email = ?", 1000, 10, "plus", "firstname+legacy@gmail.com").
+		Take(&allocation).Error)
+	require.NotZero(t, allocation.ID)
+	require.True(t, strings.HasPrefix(allocation.OrderNo, "HIST-GMAIL-"))
+	orderNo := allocation.OrderNo
 
 	var order struct {
 		UserID             uint   `gorm:"column:user_id"`
@@ -348,16 +336,20 @@ INSERT INTO gmail_allocations(
 	require.Equal(t, "0.000000", debit.Amount)
 	require.Equal(t, "history:"+orderNo+":debit", debit.IdempotencyKey)
 
-	rollbackOrderNo := "HIST-GMAIL-TRADE-ROLLBACK"
+	var rollbackOrderNo string
 	rollbackErr := errors.New("rollback Gmail historical facts")
 	err := db.Transaction(func(tx *gorm.DB) error {
-		rollbackAllocationID := insertAllocation(tx, rollbackOrderNo, "dot", "first.name@gmail.com")
 		if err := uc.ImportHistoricalGmailUsage(platform.WithGormTx(context.Background(), tx), []tradeapp.HistoricalGmailUsage{{
-			OrderNo: rollbackOrderNo, AllocationID: rollbackAllocationID, ProjectID: 10, ProductID: 20,
+			ResourceID: 1000, ProjectID: 10, ProductID: 20, Mailbox: "dot",
 			Email: "first.name@gmail.com", FirstMatchedAt: createdAt, LastMatchedAt: expiredAt, EvidenceCount: 1,
 		}}); err != nil {
 			return err
 		}
+		if err := tx.Table("gmail_allocations").Where("email = ? AND mailbox = ?", "first.name@gmail.com", "dot").
+			Pluck("order_no", &rollbackOrderNo).Error; err != nil {
+			return err
+		}
+		require.NotEmpty(t, rollbackOrderNo)
 		return rollbackErr
 	})
 	require.ErrorIs(t, err, rollbackErr)

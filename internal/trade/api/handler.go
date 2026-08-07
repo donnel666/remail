@@ -667,6 +667,8 @@ func orderResponse(result tradeapp.CheckoutResult) OrderResponse {
 		allocationID = *order.MicrosoftAllocID
 	case order.DomainAllocID != nil:
 		allocationID = *order.DomainAllocID
+	case order.ICloudAllocID != nil:
+		allocationID = *order.ICloudAllocID
 	}
 	return OrderResponse{
 		ID:                   order.ID,

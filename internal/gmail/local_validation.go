@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"strconv"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
+	"github.com/go-sql-driver/mysql"
 	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
@@ -541,6 +543,16 @@ func withLocalGmailValidationTransaction(ctx context.Context, db *gorm.DB, fn fu
 		}
 	}
 	return err
+}
+
+func isLocalGmailDeadlock(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	return errors.As(err, &mysqlErr) && (mysqlErr.Number == 1213 || mysqlErr.Number == 1205)
+}
+
+func localGmailDeadlockBackoff(attempt int) time.Duration {
+	attempt = max(0, min(attempt, 5))
+	return time.Duration(10*(1<<attempt))*time.Millisecond + time.Duration(rand.IntN(25+attempt*10))*time.Millisecond
 }
 
 func (s *Service) ReleaseLocalResourceValidation(ctx context.Context, task localResourceValidationTask) error {

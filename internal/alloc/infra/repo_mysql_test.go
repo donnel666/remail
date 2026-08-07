@@ -190,6 +190,87 @@ VALUES (1003, 'running', UTC_TIMESTAMP(3))`).Error)
 	require.Equal(t, uint(1004), manualFetchAllocation.ResourceID)
 }
 
+func TestGmailUnifiedAllocationInventoryMySQL(t *testing.T) {
+	db := newAllocMySQLTestDB(t)
+	seedAllocBase(t, db, "gmail", 1, 1, 1)
+	seedGmailResources(t, db, []gmailResourceSeed{
+		{ID: 1000, OwnerUserID: 1, Email: "firstname@gmail.com", ForSale: true},
+		{ID: 1001, OwnerUserID: 1, Email: "ab@gmail.com", ForSale: true},
+		{ID: 1002, OwnerUserID: 3, Email: "ignored@gmail.com", ForSale: true},
+	})
+
+	repo := NewRepo(db)
+	uc := allocapp.NewUseCase(repo)
+	createdAt := time.Now().UTC().Add(-24 * time.Hour).Truncate(time.Second)
+	releasedAt := createdAt.Add(time.Hour)
+	for _, history := range []allocapp.HistoricalGmailAllocationCommand{
+		{ProjectID: 10, ProductID: 20, ResourceID: 1000, Mailbox: domain.GmailMailboxMain, Email: "firstname@gmail.com", CreatedAt: createdAt, ReleasedAt: releasedAt},
+		{ProjectID: 10, ProductID: 20, ResourceID: 1000, Mailbox: domain.GmailMailboxDot, Email: "first.name@gmail.com", CreatedAt: createdAt, ReleasedAt: releasedAt},
+	} {
+		allocation, err := uc.ImportHistoricalGmailAllocation(context.Background(), history)
+		require.NoError(t, err)
+		require.NotNil(t, allocation)
+		require.Equal(t, domain.AllocationTypeGmail, allocation.Type)
+		require.Equal(t, domain.AllocationStatusReleased, allocation.Status)
+	}
+
+	assertInventory := func(codeEnabled, purchaseEnabled bool) {
+		t.Helper()
+		stats, err := repo.GetInventoryStats(context.Background(), 10)
+		require.NoError(t, err)
+		require.True(t, stats.Gmail.Enabled)
+		require.Equal(t, codeEnabled, stats.Gmail.CodeEnabled)
+		require.Equal(t, purchaseEnabled, stats.Gmail.PurchaseEnabled)
+		require.Equal(t, int64(2), stats.Gmail.EligibleResources)
+		require.Equal(t, int64(1), stats.Gmail.MainAvailable)
+		require.Equal(t, int64(8), stats.Gmail.DotAvailable)
+		require.Equal(t, int64(2), stats.Gmail.PlusAvailable)
+		require.Equal(t, int64(11), stats.Gmail.TotalAvailable)
+		require.Equal(t, int64(11), stats.TotalAvailable)
+
+		totals, err := repo.GetProductInventoryTotals(context.Background(), 10)
+		require.NoError(t, err)
+		require.Len(t, totals.Items, 1)
+		item := totals.Items[0]
+		require.NotNil(t, item.CodeAvailable)
+		require.NotNil(t, item.PurchaseAvailable)
+		if codeEnabled {
+			require.Equal(t, int64(11), *item.CodeAvailable)
+		} else {
+			require.Zero(t, *item.CodeAvailable)
+		}
+		if purchaseEnabled {
+			require.Equal(t, int64(11), *item.PurchaseAvailable)
+		} else {
+			require.Zero(t, *item.PurchaseAvailable)
+		}
+	}
+
+	assertInventory(true, false)
+	require.NoError(t, db.Table("project_products").Where("id = ?", 20).
+		Updates(map[string]any{"main_weight": 0, "dot_weight": 0, "plus_weight": 1}).Error)
+	active, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo: "ord-gmail-active", BuyerUserID: 2, ProjectProductID: 20,
+		ServiceMode: domain.GmailServiceModeCode, SupplyScope: domain.SupplyScopePublic,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "plus", active.Mailbox)
+	require.NoError(t, db.Table("project_products").Where("id = ?", 20).
+		Updates(map[string]any{"main_weight": 1, "dot_weight": 1, "plus_weight": 1}).Error)
+	stats, err := repo.GetInventoryStats(context.Background(), 10)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), stats.ActiveGmailAllocations)
+	_, err = uc.ReleaseByOrder(context.Background(), active.OrderNo)
+	require.NoError(t, err)
+	stats, err = repo.GetInventoryStats(context.Background(), 10)
+	require.NoError(t, err)
+	require.Zero(t, stats.ActiveGmailAllocations)
+
+	require.NoError(t, db.Table("project_products").Where("id = ?", 20).
+		Updates(map[string]any{"code_enabled": false, "purchase_enabled": true}).Error)
+	assertInventory(false, true)
+}
+
 func TestAllocationAllowsDelistedProductOnlyForExistingOrderMySQL(t *testing.T) {
 	db := newAllocMySQLTestDB(t)
 	seedAllocBase(t, db, "microsoft", 1, 0, 0)
@@ -1618,6 +1699,29 @@ func seedMicrosoftResources(t *testing.T, db *gorm.DB, ownerID, startID, count i
 	}
 	require.NoError(t, db.Table("email_resources").CreateInBatches(roots, 1000).Error)
 	require.NoError(t, db.Table("microsoft_resources").CreateInBatches(resources, 1000).Error)
+}
+
+type gmailResourceSeed struct {
+	ID          int
+	OwnerUserID int
+	Email       string
+	ForSale     bool
+}
+
+func seedGmailResources(t *testing.T, db *gorm.DB, items []gmailResourceSeed) {
+	t.Helper()
+	for _, item := range items {
+		require.NoError(t, db.Exec(
+			"INSERT INTO email_resources(id, type, owner_user_id) VALUES (?, 'gmail', ?)", item.ID, item.OwnerUserID,
+		).Error)
+		require.NoError(t, db.Exec(`
+INSERT INTO gmail_resources(
+    id, resource_type, owner_user_id, email, identity, password,
+    two_factor_secret, app_password, for_sale, status, alloc_bucket
+) VALUES (?, 'gmail', ?, ?, ?, 'password', 'JBSWY3DPEHPK3PXP', 'abcdefghijklmnop', ?, 'normal', MOD(?, 2048))`,
+			item.ID, item.OwnerUserID, item.Email, item.Email, item.ForSale, item.ID,
+		).Error)
+	}
 }
 
 func requireIndexExists(t *testing.T, db *gorm.DB, tableName string, indexName string) {

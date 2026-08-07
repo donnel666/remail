@@ -1614,6 +1614,7 @@ func toProjectListFacetsResponse(facets *coreapp.ProjectListFacets) *ProjectList
 			Domain:    facets.ProductType.Domain,
 			Random:    facets.ProductType.Random,
 			Gmail:     facets.ProductType.Gmail,
+			ICloud:    facets.ProductType.ICloud,
 		},
 	}
 }

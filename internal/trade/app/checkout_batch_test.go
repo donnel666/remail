@@ -381,6 +381,8 @@ type checkoutInventorySpy struct {
 	available       bool
 	err             error
 	allocation      *AllocationResult
+	allocationErr   error
+	lastAllocation  AllocationCommand
 	events          *[]string
 	allocationInTx  bool
 	releaseInTx     bool
@@ -393,23 +395,18 @@ type checkoutInventorySpy struct {
 }
 
 type checkoutGmailSupplySpy struct {
-	checks        int
-	creates       int
-	finds         int
-	schedules     int
-	cancels       int
-	sessionID     uint
-	checkErr      error
-	lastMode      domain.ServiceMode
-	lastSession   GmailSessionCommand
-	allocations   int
-	allocation    *GmailLocalAllocation
-	allocationErr error
-	purchases     int
-	purchase      *GmailPurchaseDelivery
-	purchaseErr   error
-	releases      int
-	releaseInTx   bool
+	checks      int
+	creates     int
+	finds       int
+	schedules   int
+	cancels     int
+	sessionID   uint
+	checkErr    error
+	lastMode    domain.ServiceMode
+	lastSession GmailSessionCommand
+	purchases   int
+	purchase    *GmailPurchaseDelivery
+	purchaseErr error
 }
 
 func (s *checkoutGmailSupplySpy) CheckSupply(
@@ -449,28 +446,11 @@ func (s *checkoutGmailSupplySpy) CancelGmailOrder(context.Context, string) error
 	return nil
 }
 
-func (s *checkoutGmailSupplySpy) AllocateLocalCode(context.Context, string, uint, uint, uint, domain.SupplyPolicy, GmailSupplyQuote) (*GmailLocalAllocation, error) {
-	s.allocations++
-	if s.allocationErr != nil {
-		return nil, s.allocationErr
-	}
-	if s.allocation == nil {
-		s.allocation = &GmailLocalAllocation{AllocationID: 61, Email: "buyer@gmail.com", SupplyScope: SupplyScopePublic}
-	}
-	return s.allocation, nil
-}
-
-func (s *checkoutGmailSupplySpy) ReleaseLocalAllocation(ctx context.Context, _ string) error {
-	s.releases++
-	s.releaseInTx = ctx.Value(batchTxContextKey{}) != nil
-	return nil
-}
-
 func (*checkoutGmailSupplySpy) ListGmailDeliveries(context.Context, []string) (map[string]GmailDeliverySummary, error) {
 	return map[string]GmailDeliverySummary{}, nil
 }
 
-func (s *checkoutGmailSupplySpy) AllocateLocalPurchase(context.Context, string, uint, uint, uint, domain.SupplyPolicy, GmailSupplyQuote) (*GmailPurchaseDelivery, error) {
+func (s *checkoutGmailSupplySpy) FindLocalPurchase(context.Context, string) (*GmailPurchaseDelivery, error) {
 	s.purchases++
 	if s.purchaseErr != nil {
 		return nil, s.purchaseErr
@@ -481,10 +461,6 @@ func (s *checkoutGmailSupplySpy) AllocateLocalPurchase(context.Context, string, 
 			TwoFactorSecret: "JBSWY3DPEHPK3PXP", AppPassword: "abcdefghijklmnop",
 		}
 	}
-	return s.purchase, nil
-}
-
-func (s *checkoutGmailSupplySpy) FindLocalPurchase(context.Context, string) (*GmailPurchaseDelivery, error) {
 	return s.purchase, nil
 }
 
@@ -499,16 +475,26 @@ func (s *checkoutInventorySpy) HasAvailableInventory(context.Context, InventoryA
 	return s.available, s.err
 }
 
-func (s *checkoutInventorySpy) Allocate(ctx context.Context, _ AllocationCommand) (*AllocationResult, error) {
+func (s *checkoutInventorySpy) Allocate(ctx context.Context, cmd AllocationCommand) (*AllocationResult, error) {
 	s.allocationCalls++
 	s.allocationInTx = ctx.Value(batchTxContextKey{}) != nil
+	s.lastAllocation = cmd
 	if s.events != nil {
 		*s.events = append(*s.events, "allocate")
+	}
+	if s.allocationErr != nil {
+		return nil, s.allocationErr
 	}
 	if s.allocation != nil {
 		return s.allocation, nil
 	}
 	return nil, domain.ErrInsufficientInventory
+}
+
+func newCheckoutGmailInventorySpy() *checkoutInventorySpy {
+	return &checkoutInventorySpy{allocation: &AllocationResult{
+		Type: domain.AllocationTypeGmail, ID: 61, Email: "buyer@gmail.com", SupplyScope: SupplyScopePublic,
+	}}
 }
 
 func (s *checkoutInventorySpy) ReleaseByOrder(ctx context.Context, orderNo string) error {
@@ -736,7 +722,7 @@ func TestCheckoutIgnoresRandomEmailSuffixBeforeInventoryPrecheck(t *testing.T) {
 func TestGmailCodeCheckoutUsesLocalGmailAllocation(t *testing.T) {
 	repo := &batchRepoSpy{orders: map[string]domain.Order{}}
 	wallet := &batchWalletSpy{}
-	allocation := &checkoutInventorySpy{}
+	allocation := newCheckoutGmailInventorySpy()
 	ordering := &batchOrderingSpy{productType: domain.ProductTypeGmail}
 	supply := &checkoutGmailSupplySpy{}
 	uc := NewUseCase(repo, ordering, wallet, allocation, batchTokenSpy{})
@@ -750,7 +736,8 @@ func TestGmailCodeCheckoutUsesLocalGmailAllocation(t *testing.T) {
 	require.Equal(t, domain.OrderStatusPaid, result.Order.Status)
 	require.Equal(t, 1, wallet.debits)
 	require.Zero(t, allocation.checks)
-	require.Zero(t, allocation.allocationCalls)
+	require.Equal(t, 1, allocation.allocationCalls)
+	require.Equal(t, domain.ServiceModeCode, allocation.lastAllocation.ServiceMode)
 	require.Equal(t, 1, supply.creates)
 	require.Equal(t, 1, supply.schedules)
 	require.Equal(t, "code_only", result.ContentMode)
@@ -766,6 +753,36 @@ func TestGmailCodeCheckoutUsesLocalGmailAllocation(t *testing.T) {
 	require.Equal(t, 1, wallet.debits)
 	require.Equal(t, 1, supply.creates)
 	require.Equal(t, 2, supply.schedules)
+	require.Equal(t, 1, allocation.allocationCalls)
+}
+
+func TestGmailTerminalReplayReleasesUnifiedAllocation(t *testing.T) {
+	for _, status := range []domain.OrderStatus{
+		domain.OrderStatusFailed,
+		domain.OrderStatusRefunded,
+		domain.OrderStatusClosed,
+	} {
+		t.Run(string(status), func(t *testing.T) {
+			allocation := &checkoutInventorySpy{}
+			uc := NewUseCase(nil, nil, nil, allocation, nil)
+			uc.SetGmailPorts(&checkoutGmailSupplySpy{}, nil)
+			order := domain.Order{
+				OrderNo: "gmail-terminal-" + string(status), ProductType: domain.ProductTypeGmail,
+				ServiceMode: domain.ServiceModeCode, Status: status,
+				FailureCode: domain.OrderFailureInsufficientInventory,
+			}
+
+			result, err := uc.checkoutGmailPrepared(context.Background(), checkoutPreparation{existing: &order})
+			require.NotNil(t, result)
+			if status == domain.OrderStatusFailed {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+			require.Equal(t, 1, allocation.releaseCalls)
+			require.Equal(t, order.OrderNo, allocation.releasedOrderNo)
+		})
+	}
 }
 
 func TestGmailLocalPurchaseChargesAndDeliversCredentialsOnce(t *testing.T) {
@@ -774,7 +791,8 @@ func TestGmailLocalPurchaseChargesAndDeliversCredentialsOnce(t *testing.T) {
 	ordering := &batchOrderingSpy{productType: domain.ProductTypeGmail}
 	supply := &checkoutGmailSupplySpy{}
 	tokens := &issuedOrderTokenSpy{tokens: map[string]*OrderToken{}}
-	uc := NewUseCase(repo, ordering, wallet, &checkoutInventorySpy{}, tokens)
+	allocation := newCheckoutGmailInventorySpy()
+	uc := NewUseCase(repo, ordering, wallet, allocation, tokens)
 	uc.SetGmailPorts(supply, supply)
 	request := batchRequest("gmail-local-purchase", 1)
 
@@ -788,7 +806,8 @@ func TestGmailLocalPurchaseChargesAndDeliversCredentialsOnce(t *testing.T) {
 	require.Equal(t, "abcdefghijklmnop", result.GmailAppPassword)
 	require.Equal(t, "token-"+result.Order.OrderNo, result.ServiceToken)
 	require.Equal(t, 1, wallet.debits)
-	require.Equal(t, 1, supply.purchases)
+	require.Equal(t, domain.ServiceModePurchase, allocation.lastAllocation.ServiceMode)
+	require.Equal(t, 2, supply.purchases)
 	require.Zero(t, supply.creates)
 	require.Zero(t, supply.schedules)
 
@@ -798,7 +817,7 @@ func TestGmailLocalPurchaseChargesAndDeliversCredentialsOnce(t *testing.T) {
 	require.Equal(t, result.ServiceToken, retried.ServiceToken)
 	require.Equal(t, "password", retried.GmailPassword)
 	require.Equal(t, 1, wallet.debits)
-	require.Equal(t, 1, supply.purchases)
+	require.Equal(t, 3, supply.purchases)
 	require.Equal(t, 1, tokens.issues)
 
 	forbidden, err := uc.GetOrder(context.Background(), result.Order.OrderNo, 999, false)
@@ -818,7 +837,8 @@ func TestGmailLocalPurchaseReloadsAfterActivationStateConflict(t *testing.T) {
 	wallet := &batchWalletSpy{}
 	supply := &checkoutGmailSupplySpy{}
 	tokens := &issuedOrderTokenSpy{tokens: map[string]*OrderToken{}}
-	uc := NewUseCase(repo, &batchOrderingSpy{productType: domain.ProductTypeGmail}, wallet, &checkoutInventorySpy{}, tokens)
+	allocation := newCheckoutGmailInventorySpy()
+	uc := NewUseCase(repo, &batchOrderingSpy{productType: domain.ProductTypeGmail}, wallet, allocation, tokens)
 	uc.SetGmailPorts(supply, supply)
 
 	result, err := uc.Checkout(context.Background(), batchRequest("gmail-activation-conflict", 1))
@@ -829,7 +849,7 @@ func TestGmailLocalPurchaseReloadsAfterActivationStateConflict(t *testing.T) {
 	require.Equal(t, 1, repo.activeCalls)
 	require.Equal(t, 1, wallet.debits)
 	require.Zero(t, wallet.refunds)
-	require.Zero(t, supply.releases)
+	require.Zero(t, allocation.releaseCalls)
 	require.Equal(t, 1, tokens.issues)
 }
 
@@ -847,7 +867,8 @@ func TestGmailLocalPurchaseCompensatesServiceTokenFailureInOneShortTransaction(t
 			wallet := &batchWalletSpy{}
 			supply := &checkoutGmailSupplySpy{}
 			tokens := &checkoutIssueTokenErrorSpy{err: test.issueErr}
-			uc := NewUseCase(repo, &batchOrderingSpy{productType: domain.ProductTypeGmail}, wallet, &checkoutInventorySpy{}, tokens)
+			allocation := newCheckoutGmailInventorySpy()
+			uc := NewUseCase(repo, &batchOrderingSpy{productType: domain.ProductTypeGmail}, wallet, allocation, tokens)
 			uc.SetGmailPorts(supply, supply)
 
 			result, err := uc.Checkout(context.Background(), batchRequest("gmail-token-failure", 1))
@@ -862,8 +883,8 @@ func TestGmailLocalPurchaseCompensatesServiceTokenFailureInOneShortTransaction(t
 			require.Equal(t, domain.OrderFailureServiceToken, repo.orders["gmail-token-failure"].FailureCode)
 			require.Equal(t, 1, wallet.debits)
 			require.Equal(t, 1, wallet.refunds)
-			require.Equal(t, 1, supply.releases)
-			require.True(t, supply.releaseInTx)
+			require.Equal(t, 1, allocation.releaseCalls)
+			require.True(t, allocation.releaseInTx)
 			require.Equal(t, 1, tokens.disables)
 			require.True(t, tokens.disableInTx)
 			require.True(t, repo.failedInTx)
@@ -904,8 +925,11 @@ func TestGetHistoricalGmailPurchaseBackfillsServiceToken(t *testing.T) {
 func TestGmailLocalPurchaseRefundsOnceWhenInventoryDisappears(t *testing.T) {
 	repo := &batchRepoSpy{orders: map[string]domain.Order{}}
 	wallet := &batchWalletSpy{}
-	supply := &checkoutGmailSupplySpy{purchaseErr: domain.ErrInsufficientInventory}
-	uc := NewUseCase(repo, &batchOrderingSpy{productType: domain.ProductTypeGmail}, wallet, &checkoutInventorySpy{}, emptyOrderTokenSpy{})
+	supply := &checkoutGmailSupplySpy{}
+	allocation := newCheckoutGmailInventorySpy()
+	allocation.allocation = nil
+	allocation.allocationErr = domain.ErrInsufficientInventory
+	uc := NewUseCase(repo, &batchOrderingSpy{productType: domain.ProductTypeGmail}, wallet, allocation, emptyOrderTokenSpy{})
 	uc.SetGmailPorts(supply, supply)
 	request := batchRequest("gmail-local-empty", 1)
 
@@ -914,14 +938,16 @@ func TestGmailLocalPurchaseRefundsOnceWhenInventoryDisappears(t *testing.T) {
 	require.Equal(t, domain.OrderStatusFailed, result.Order.Status)
 	require.Zero(t, wallet.debits)
 	require.Zero(t, wallet.refunds)
-	require.Equal(t, 1, supply.purchases)
+	require.Zero(t, supply.purchases)
+	require.Equal(t, 1, allocation.allocationCalls)
 
 	retried, err := uc.Checkout(context.Background(), request)
 	require.ErrorIs(t, err, domain.ErrInsufficientInventory)
 	require.Equal(t, result.Order.OrderNo, retried.Order.OrderNo)
 	require.Zero(t, wallet.debits)
 	require.Zero(t, wallet.refunds)
-	require.Equal(t, 1, supply.purchases)
+	require.Zero(t, supply.purchases)
+	require.Equal(t, 1, allocation.allocationCalls)
 }
 
 func TestGmailPurchaseWithoutSupportedRouteStopsBeforeCharging(t *testing.T) {

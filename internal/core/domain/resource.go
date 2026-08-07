@@ -17,6 +17,7 @@ type ResourceType string
 const (
 	ResourceTypeMicrosoft ResourceType = "microsoft"
 	ResourceTypeDomain    ResourceType = "domain"
+	ResourceTypeICloud    ResourceType = "icloud"
 )
 
 // Allocation bucket counts are persisted data invariants. Keep these in sync
@@ -95,7 +96,7 @@ type EmailResource struct {
 
 // IsValidResourceType returns true if the type is recognized.
 func IsValidResourceType(t ResourceType) bool {
-	return t == ResourceTypeMicrosoft || t == ResourceTypeDomain
+	return t == ResourceTypeMicrosoft || t == ResourceTypeDomain || t == ResourceTypeICloud
 }
 
 // IsValidPurpose returns true if the purpose is recognized.

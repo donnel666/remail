@@ -174,7 +174,15 @@ func (s *unavailableRefundWalletStub) RefundConsumer(_ context.Context, cmd Wall
 
 type unavailableRefundAllocationStub struct {
 	AllocationPort
-	released []string
+	allocation *AllocationResult
+	released   []string
+}
+
+func (s *unavailableRefundAllocationStub) Allocate(context.Context, AllocationCommand) (*AllocationResult, error) {
+	if s.allocation != nil {
+		return s.allocation, nil
+	}
+	return &AllocationResult{Type: domain.AllocationTypeGmail, ID: 61, Email: "buyer@gmail.com", SupplyScope: SupplyScopePublic}, nil
 }
 
 func (s *unavailableRefundAllocationStub) ReleaseByOrder(_ context.Context, orderNo string) error {
@@ -206,18 +214,12 @@ type unavailableRefundDeliveryStub struct {
 type unavailableRefundGmailStub struct {
 	GmailSupplyPort
 	cancelled []string
-	released  []string
 	err       error
 }
 
 func (s *unavailableRefundGmailStub) CancelGmailOrder(_ context.Context, orderNo string) error {
 	s.cancelled = append(s.cancelled, orderNo)
 	return s.err
-}
-
-func (s *unavailableRefundGmailStub) ReleaseLocalAllocation(_ context.Context, orderNo string) error {
-	s.released = append(s.released, orderNo)
-	return nil
 }
 
 func (s unavailableRefundDeliveryStub) FindOrderDelivery(context.Context, uint) (*OrderDeliverySummary, error) {
@@ -262,8 +264,7 @@ func TestExpireDueOrdersReleasesStalePendingGmailAllocation(t *testing.T) {
 	require.Zero(t, result.Failed)
 	require.Equal(t, domain.OrderStatusFailed, repo.order.Status)
 	require.Equal(t, domain.OrderFailureAllocation, repo.order.FailureCode)
-	require.Equal(t, []string{repo.order.OrderNo}, gmail.released)
-	require.Empty(t, allocation.released)
+	require.Equal(t, []string{repo.order.OrderNo}, allocation.released)
 }
 
 func TestExpireDueOrdersResumesPaidGmailPurchaseWithoutSupplyPrecheck(t *testing.T) {
@@ -281,7 +282,8 @@ func TestExpireDueOrdersResumesPaidGmailPurchaseWithoutSupplyPrecheck(t *testing
 		TwoFactorSecret: "JBSWY3DPEHPK3PXP", AppPassword: "abcdefghijklmnop",
 	}}
 	tokens := &issuedOrderTokenSpy{tokens: map[string]*OrderToken{}}
-	uc := NewUseCase(repo, nil, nil, nil, tokens)
+	allocation := &unavailableRefundAllocationStub{}
+	uc := NewUseCase(repo, nil, nil, allocation, tokens)
 	uc.SetGmailPorts(supply, supply)
 	uc.now = func() time.Time { return now }
 
@@ -291,7 +293,7 @@ func TestExpireDueOrdersResumesPaidGmailPurchaseWithoutSupplyPrecheck(t *testing
 	require.Equal(t, 1, result.CheckoutRecovered)
 	require.Zero(t, result.Failed)
 	require.Zero(t, supply.checks)
-	require.Equal(t, 1, supply.purchases)
+	require.Equal(t, 2, supply.purchases)
 	require.Equal(t, domain.OrderStatusActive, repo.order.Status)
 	require.Equal(t, "buyer@gmail.com", repo.order.DeliveryEmail)
 	require.Equal(t, 1, tokens.issues)
@@ -401,8 +403,7 @@ func TestGmailCleanupCancelsUpstreamAndRecordsFailure(t *testing.T) {
 				require.NoError(t, err)
 			}
 			require.Equal(t, []string{repo.order.OrderNo}, gmail.cancelled)
-			require.Equal(t, []string{repo.order.OrderNo}, gmail.released)
-			require.Empty(t, allocation.released)
+			require.Equal(t, []string{repo.order.OrderNo}, allocation.released)
 			require.Equal(t, []string{repo.order.OrderNo}, tokens.disabled)
 			require.Equal(t, test.wantStatus, repo.cleanupStatus)
 		})

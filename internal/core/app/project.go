@@ -130,6 +130,7 @@ type ProjectProductTypeFacets struct {
 	Domain    int64
 	Random    int64
 	Gmail     int64
+	ICloud    int64
 }
 
 type ProjectListFacets struct {
@@ -940,7 +941,7 @@ func normalizeProductRequests(requests []ProjectProductRequest, requireEnabled, 
 		if product.PurchaseEnabled && (product.ActivationWindowMinutes <= 0 || product.WarrantyMinutes <= 0) {
 			return nil, domain.ErrInvalidProduct
 		}
-		if (product.Type == domain.ProductTypeMicrosoft || product.Type == domain.ProductTypeGmail) && product.MainWeight+product.DotWeight+product.PlusWeight <= 0 {
+		if (product.Type == domain.ProductTypeMicrosoft || product.Type == domain.ProductTypeGmail || product.Type == domain.ProductTypeICloud) && product.MainWeight+product.DotWeight+product.PlusWeight <= 0 {
 			return nil, domain.ErrInvalidProduct
 		}
 		if product.Type == domain.ProductTypeDomain {

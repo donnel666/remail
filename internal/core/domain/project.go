@@ -40,6 +40,7 @@ const (
 	ProductTypeDomain    ProductType = "domain"
 	ProductTypeRandom    ProductType = "random"
 	ProductTypeGmail     ProductType = "gmail"
+	ProductTypeICloud    ProductType = "icloud"
 )
 
 // MailRuleType identifies which part of a message a rule matches.
@@ -147,7 +148,7 @@ func IsValidProductStatus(status ProductStatus) bool {
 
 func IsValidProductType(productType ProductType) bool {
 	switch productType {
-	case ProductTypeMicrosoft, ProductTypeDomain, ProductTypeRandom, ProductTypeGmail:
+	case ProductTypeMicrosoft, ProductTypeDomain, ProductTypeRandom, ProductTypeGmail, ProductTypeICloud:
 		return true
 	default:
 		return false
@@ -208,6 +209,8 @@ func NormalizeProductType(productType string) (ProductType, bool) {
 		return ProductTypeRandom, true
 	case ProductTypeGmail:
 		return ProductTypeGmail, true
+	case ProductTypeICloud:
+		return ProductTypeICloud, true
 	default:
 		return "", false
 	}

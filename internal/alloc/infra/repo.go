@@ -22,6 +22,7 @@ import (
 )
 
 const (
+	gmailLocalSource                              = "local"
 	microsoftNotUnderBlockingMaintenanceCondition = `ms.token_refresh_status NOT IN ('pending', 'processing')
 			AND NOT EXISTS (
 				SELECT 1
@@ -114,9 +115,13 @@ func (r *Repo) WithTx(ctx context.Context, fn func(context.Context) error) error
 	for attempt := 0; attempt < 2; attempt++ {
 		// Candidate rechecks must see commits made while waiting for a resource
 		// root; READ COMMITTED also avoids RR gap locks on missing history rows.
+		txOptions := &sql.TxOptions{Isolation: sql.LevelReadCommitted}
+		if r.db.Name() != "mysql" {
+			txOptions = nil
+		}
 		err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			return fn(platform.WithGormTx(ctx, tx))
-		}, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+		}, txOptions)
 		if err == nil || !isDeadlockError(err) {
 			return err
 		}
@@ -229,6 +234,104 @@ func (m MicrosoftAllocationModel) unified() domain.UnifiedAllocation {
 		Status:      domain.AllocationStatus(m.Status),
 		CreatedAt:   m.CreatedAt,
 		ReleasedAt:  m.ReleasedAt,
+	}
+}
+
+type GmailAllocationModel struct {
+	ID                 uint       `gorm:"primaryKey;autoIncrement"`
+	OrderNo            string     `gorm:"type:varchar(64);not null;column:order_no"`
+	GuardType          string     `gorm:"type:varchar(32);not null;column:guard_type"`
+	ProjectID          uint       `gorm:"column:project_id"`
+	ProductID          uint       `gorm:"column:product_id"`
+	Source             string     `gorm:"type:varchar(64);not null;column:source"`
+	SourceRef          string     `gorm:"type:varchar(128);not null;column:source_ref"`
+	ProviderCursor     uint64     `gorm:"not null;column:provider_cursor"`
+	ProviderSpamCursor uint64     `gorm:"not null;column:provider_spam_cursor"`
+	ServiceMode        string     `gorm:"type:varchar(32);not null;column:service_mode"`
+	ResourceID         uint       `gorm:"column:resource_id"`
+	SupplyScope        string     `gorm:"type:varchar(16);not null;column:supply_scope"`
+	Mailbox            string     `gorm:"type:varchar(16);not null;column:mailbox"`
+	Email              string     `gorm:"type:varchar(320);not null;column:email"`
+	Status             string     `gorm:"type:varchar(32);not null;column:status"`
+	CostPointsSnapshot string     `gorm:"type:decimal(18,6);not null;column:cost_points_snapshot"`
+	CreatedAt          time.Time  `gorm:"not null;autoCreateTime;column:created_at"`
+	ReleasedAt         *time.Time `gorm:"column:released_at"`
+}
+
+func (GmailAllocationModel) TableName() string { return "gmail_allocations" }
+
+func gmailAllocationFromDomain(allocation *domain.GmailAllocation) *GmailAllocationModel {
+	return &GmailAllocationModel{
+		ID: allocation.ID, OrderNo: allocation.OrderNo, GuardType: string(domain.AllocationTypeGmail),
+		ProjectID: allocation.ProjectID, ProductID: allocation.ProductID, Source: gmailLocalSource,
+		ServiceMode: string(allocation.ServiceMode), ResourceID: allocation.ResourceID,
+		SupplyScope: string(domain.NormalizeSupplyScope(allocation.SupplyScope)), Mailbox: string(allocation.Mailbox),
+		Email: strings.ToLower(strings.TrimSpace(allocation.Email)), Status: string(allocation.Status),
+		CostPointsSnapshot: allocation.CostPointsSnapshot, CreatedAt: allocation.CreatedAt, ReleasedAt: allocation.ReleasedAt,
+	}
+}
+
+func (m GmailAllocationModel) toDomain() domain.GmailAllocation {
+	return domain.GmailAllocation{
+		ID: m.ID, OrderNo: m.OrderNo, ProjectID: m.ProjectID, ProductID: m.ProductID, ResourceID: m.ResourceID,
+		SupplyScope: domain.NormalizeSupplyScope(domain.SupplyScope(m.SupplyScope)), Mailbox: domain.GmailMailbox(m.Mailbox),
+		ServiceMode: domain.GmailServiceMode(m.ServiceMode), Email: m.Email, Status: domain.AllocationStatus(m.Status),
+		CostPointsSnapshot: m.CostPointsSnapshot, CreatedAt: m.CreatedAt, ReleasedAt: m.ReleasedAt,
+	}
+}
+
+func (m GmailAllocationModel) unified() domain.UnifiedAllocation {
+	return domain.UnifiedAllocation{
+		Type: domain.AllocationTypeGmail, ID: m.ID, OrderNo: m.OrderNo,
+		ProjectID: m.ProjectID, ProductID: m.ProductID, ResourceID: m.ResourceID,
+		SupplyScope: domain.NormalizeSupplyScope(domain.SupplyScope(m.SupplyScope)),
+		Mailbox:     m.Mailbox, Email: m.Email, Status: domain.AllocationStatus(m.Status),
+		CreatedAt: m.CreatedAt, ReleasedAt: m.ReleasedAt,
+	}
+}
+
+type ICloudAllocationModel struct {
+	ID          uint       `gorm:"primaryKey;autoIncrement"`
+	OrderNo     string     `gorm:"type:varchar(64);not null;column:order_no"`
+	ProjectID   uint       `gorm:"not null;column:project_id"`
+	ProductID   uint       `gorm:"not null;column:product_id"`
+	ResourceID  uint       `gorm:"not null;column:resource_id"`
+	AliasID     uint       `gorm:"not null;column:alias_id"`
+	SupplyScope string     `gorm:"type:varchar(16);not null;column:supply_scope"`
+	Email       string     `gorm:"type:varchar(320);not null"`
+	Status      string     `gorm:"type:varchar(32);not null;default:'allocated'"`
+	CreatedAt   time.Time  `gorm:"not null;autoCreateTime;column:created_at"`
+	ReleasedAt  *time.Time `gorm:"column:released_at"`
+}
+
+func (ICloudAllocationModel) TableName() string { return "icloud_allocations" }
+
+func icloudAllocationFromDomain(allocation *domain.ICloudAllocation) *ICloudAllocationModel {
+	return &ICloudAllocationModel{
+		ID: allocation.ID, OrderNo: allocation.OrderNo, ProjectID: allocation.ProjectID,
+		ProductID: allocation.ProductID, ResourceID: allocation.ResourceID, AliasID: allocation.AliasID,
+		SupplyScope: string(domain.NormalizeSupplyScope(allocation.SupplyScope)),
+		Email:       strings.ToLower(strings.TrimSpace(allocation.Email)), Status: string(allocation.Status),
+		CreatedAt: allocation.CreatedAt, ReleasedAt: allocation.ReleasedAt,
+	}
+}
+
+func (m ICloudAllocationModel) toDomain() domain.ICloudAllocation {
+	return domain.ICloudAllocation{
+		ID: m.ID, OrderNo: m.OrderNo, ProjectID: m.ProjectID, ProductID: m.ProductID,
+		ResourceID: m.ResourceID, AliasID: m.AliasID,
+		SupplyScope: domain.NormalizeSupplyScope(domain.SupplyScope(m.SupplyScope)),
+		Email:       m.Email, Status: domain.AllocationStatus(m.Status), CreatedAt: m.CreatedAt, ReleasedAt: m.ReleasedAt,
+	}
+}
+
+func (m ICloudAllocationModel) unified() domain.UnifiedAllocation {
+	return domain.UnifiedAllocation{
+		Type: domain.AllocationTypeICloud, ID: m.ID, OrderNo: m.OrderNo,
+		ProjectID: m.ProjectID, ProductID: m.ProductID, ResourceID: m.ResourceID,
+		SupplyScope: domain.NormalizeSupplyScope(domain.SupplyScope(m.SupplyScope)),
+		Mailbox:     "alias", Email: m.Email, Status: domain.AllocationStatus(m.Status),
+		CreatedAt: m.CreatedAt, ReleasedAt: m.ReleasedAt,
 	}
 }
 
@@ -439,12 +542,16 @@ func (r *Repo) CreateOrderGuard(ctx context.Context, orderNo string, allocationT
 
 func (r *Repo) LoadProductConfig(ctx context.Context, productID uint, buyerUserID uint, fulfillExistingOrder bool) (*allocapp.ProductAllocationConfig, error) {
 	type row struct {
-		ProjectID  uint
-		ProductID  uint
-		Type       string
-		MainWeight int
-		DotWeight  int
-		PlusWeight int
+		ProjectID             uint
+		ProductID             uint
+		Type                  string
+		CodeEnabled           bool
+		PurchaseEnabled       bool
+		CodeSupplierPrice     string
+		PurchaseSupplierPrice string
+		MainWeight            int
+		DotWeight             int
+		PlusWeight            int
 	}
 	var item row
 	err := r.dbFor(ctx).Raw(`
@@ -452,6 +559,10 @@ SELECT
     pp.project_id AS project_id,
     pp.id AS product_id,
     pp.type AS type,
+	pp.code_enabled AS code_enabled,
+	pp.purchase_enabled AS purchase_enabled,
+	pp.code_supplier_price AS code_supplier_price,
+	pp.purchase_supplier_price AS purchase_supplier_price,
     pp.main_weight AS main_weight,
     pp.dot_weight AS dot_weight,
     pp.plus_weight AS plus_weight
@@ -479,13 +590,49 @@ LIMIT 1`, productID, fulfillExistingOrder, buyerUserID).Scan(&item).Error
 		return nil, domain.ErrProjectNotAllocatable
 	}
 	return &allocapp.ProductAllocationConfig{
-		ProjectID:   item.ProjectID,
-		ProductID:   item.ProductID,
-		ProductType: productType,
-		MainWeight:  item.MainWeight,
-		DotWeight:   item.DotWeight,
-		PlusWeight:  item.PlusWeight,
+		ProjectID:             item.ProjectID,
+		ProductID:             item.ProductID,
+		ProductType:           productType,
+		CodeEnabled:           item.CodeEnabled,
+		PurchaseEnabled:       item.PurchaseEnabled,
+		CodeSupplierPrice:     item.CodeSupplierPrice,
+		PurchaseSupplierPrice: item.PurchaseSupplierPrice,
+		MainWeight:            item.MainWeight,
+		DotWeight:             item.DotWeight,
+		PlusWeight:            item.PlusWeight,
 	}, nil
+}
+
+func (r *Repo) ListGmailSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.GmailMailbox, bucket *uint16, limit int) ([]allocapp.GmailCandidate, error) {
+	if projectID == 0 || buyerUserID == 0 || limit <= 0 || !domain.IsValidGmailMailbox(mailbox) {
+		return nil, domain.ErrInvalidAllocationRequest
+	}
+	query := gmailSourceCandidateQuery(r.dbFor(ctx), projectID, buyerUserID, scope, mailbox)
+	if bucket != nil {
+		query = query.Where("gr.alloc_bucket = ?", *bucket)
+	}
+	var rows []allocapp.GmailCandidate
+	if err := query.Select("gr.id AS resource_id, gr.email AS email").
+		Order("gr.last_allocated_at ASC, gr.id ASC").Limit(limit).Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list Gmail allocation candidates: %w", err)
+	}
+	return rows, nil
+}
+
+func gmailSourceCandidateQuery(db *gorm.DB, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.GmailMailbox) *gorm.DB {
+	query := db.Table("gmail_resources AS gr").
+		Joins("JOIN email_resources AS er ON er.id = gr.id AND er.type = ?", string(domain.AllocationTypeGmail)).
+		Joins("JOIN users AS owner ON owner.id = er.owner_user_id").
+		Where("gr.status IN (?, ?)", "normal", "available")
+	if mailbox == domain.GmailMailboxMain {
+		query = query.
+			Where("NOT EXISTS (SELECT 1 FROM gmail_allocations active WHERE active.source = ? AND active.resource_id = gr.id AND active.mailbox = ? AND active.status = ?)", gmailLocalSource, domain.GmailMailboxMain, domain.AllocationStatusAllocated).
+			Where("NOT EXISTS (SELECT 1 FROM gmail_allocations history WHERE history.source = ? AND history.resource_id = gr.id AND history.project_id = ? AND history.mailbox = ?)", gmailLocalSource, projectID, domain.GmailMailboxMain)
+	}
+	if scope == domain.SupplyScopeOwned {
+		return query.Where("gr.for_sale = FALSE AND er.owner_user_id = ?", buyerUserID)
+	}
+	return query.Where("gr.for_sale = TRUE AND owner.status = 'active' AND owner.role IN ('supplier', 'admin', 'super_admin')")
 }
 
 func (r *Repo) ListMicrosoftSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.MicrosoftMailbox, bucket *uint16, limit int, emailSuffix string) ([]allocapp.MicrosoftCandidate, error) {
@@ -529,6 +676,60 @@ LIMIT ?`
 	var rows []allocapp.MicrosoftCandidate
 	if err := r.dbFor(ctx).Raw(query, args...).Scan(&rows).Error; err != nil {
 		return nil, fmt.Errorf("list microsoft source allocation candidates: %w", err)
+	}
+	return rows, nil
+}
+
+func (r *Repo) ListICloudSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, requiredUntil time.Time, limit int) ([]allocapp.ICloudCandidate, error) {
+	if projectID == 0 || limit <= 0 {
+		return nil, domain.ErrInvalidAllocationRequest
+	}
+	where := []string{
+		"ir.status = 'normal'",
+		"ir.session_status = 'valid'",
+		"ir.expire_at >= ?",
+		"ir.alias_count = 750",
+		"ir.delivery_probe_verified_at IS NOT NULL",
+		"ia.status = 'normal'",
+		"ir.gmail_resource_id IS NOT NULL",
+		"ir.selected_forward_to <> ''",
+		"LOWER(TRIM(ia.forward_to_email)) = LOWER(TRIM(ir.selected_forward_to))",
+		`EXISTS (
+            SELECT 1 FROM gmail_resources gr
+		    WHERE gr.id = ir.gmail_resource_id
+              AND gr.status IN ('normal', 'available')
+              AND LOWER(TRIM(gr.email)) = LOWER(TRIM(ir.selected_forward_to))
+        )`,
+		`NOT EXISTS (
+            SELECT 1 FROM icloud_allocations history
+            WHERE history.alias_id = ia.id AND history.project_id = ?
+        )`,
+		`NOT EXISTS (
+            SELECT 1 FROM icloud_allocations active
+            WHERE active.alias_id = ia.id AND active.status = 'allocated'
+        )`,
+	}
+	args := []any{requiredUntil.UTC(), projectID}
+	switch scope {
+	case domain.SupplyScopeOwned:
+		where = append(where, "ir.for_sale = FALSE", "er.owner_user_id = ?")
+		args = append(args, buyerUserID)
+	default:
+		where = append(where, "ir.for_sale = TRUE", "u.status = 'active'", "u.role IN ('supplier', 'admin', 'super_admin')")
+	}
+	args = append(args, limit)
+	var rows []allocapp.ICloudCandidate
+	query := `
+SELECT ir.id AS resource_id, ia.id AS alias_id, ia.email AS email
+FROM icloud_aliases ia
+JOIN icloud_resources ir ON ir.id = ia.resource_id
+JOIN email_resources er ON er.id = ir.id AND er.type = 'icloud'
+JOIN users u ON u.id = er.owner_user_id
+WHERE ` + strings.Join(where, " AND ") + `
+ORDER BY ir.last_allocated_at ASC, ia.last_allocated_at ASC, ia.id ASC
+LIMIT ?`
+	if err := r.dbFor(ctx).Raw(query, args...).Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list iCloud allocation candidates: %w", err)
 	}
 	return rows, nil
 }
@@ -642,6 +843,14 @@ func (r *Repo) lockResourceRoot(ctx context.Context, resourceID uint, allocation
 	var row struct {
 		ID uint `gorm:"column:id"`
 	}
+	if r.dbFor(ctx).Name() != "mysql" {
+		if err := r.dbFor(ctx).Table("email_resources").
+			Where("id = ? AND type = ?", resourceID, string(allocationType)).
+			Limit(1).Scan(&row).Error; err != nil {
+			return false, fmt.Errorf("lock allocation resource root: %w", err)
+		}
+		return row.ID != 0, nil
+	}
 	query := `
 SELECT id
 FROM email_resources
@@ -720,6 +929,77 @@ FOR UPDATE SKIP LOCKED`
 	var row allocapp.MicrosoftCandidate
 	if err := r.dbFor(ctx).Raw(query, args...).Scan(&row).Error; err != nil {
 		return nil, fmt.Errorf("lock microsoft allocation candidate: %w", err)
+	}
+	if row.ResourceID == 0 {
+		return nil, nil
+	}
+	return &row, nil
+}
+
+func (r *Repo) LockGmailCandidate(ctx context.Context, resourceID uint, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.GmailMailbox) (*allocapp.GmailCandidate, error) {
+	if resourceID == 0 || projectID == 0 || buyerUserID == 0 || !domain.IsValidGmailMailbox(mailbox) {
+		return nil, domain.ErrInvalidAllocationRequest
+	}
+	query := gmailSourceCandidateQuery(r.dbFor(ctx), projectID, buyerUserID, scope, mailbox).
+		Select("gr.id AS resource_id, gr.email AS email").Where("gr.id = ?", resourceID)
+	if r.dbFor(ctx).Name() == "mysql" {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"})
+	}
+	var row allocapp.GmailCandidate
+	if err := query.Limit(1).Scan(&row).Error; err != nil {
+		return nil, fmt.Errorf("lock Gmail allocation candidate: %w", err)
+	}
+	if row.ResourceID == 0 {
+		return nil, nil
+	}
+	return &row, nil
+}
+
+func (r *Repo) LockICloudCandidate(ctx context.Context, resourceID uint, aliasID uint, projectID uint, buyerUserID uint, scope domain.SupplyScope, requiredUntil time.Time) (*allocapp.ICloudCandidate, error) {
+	if resourceID == 0 || aliasID == 0 || projectID == 0 {
+		return nil, domain.ErrInvalidAllocationRequest
+	}
+	where := []string{
+		"ia.id = ?", "ia.resource_id = ?", "ia.status = 'normal'",
+		"ir.status = 'normal'", "ir.session_status = 'valid'", "ir.expire_at >= ?",
+		"ir.alias_count = 750", "ir.delivery_probe_verified_at IS NOT NULL",
+		"ir.gmail_resource_id IS NOT NULL", "ir.selected_forward_to <> ''",
+		"LOWER(TRIM(ia.forward_to_email)) = LOWER(TRIM(ir.selected_forward_to))",
+		`EXISTS (
+            SELECT 1 FROM gmail_resources gr
+		    WHERE gr.id = ir.gmail_resource_id
+              AND gr.status IN ('normal', 'available')
+              AND LOWER(TRIM(gr.email)) = LOWER(TRIM(ir.selected_forward_to))
+        )`,
+		`NOT EXISTS (
+            SELECT 1 FROM icloud_allocations history
+            WHERE history.alias_id = ia.id AND history.project_id = ?
+        )`,
+		`NOT EXISTS (
+            SELECT 1 FROM icloud_allocations active
+            WHERE active.alias_id = ia.id AND active.status = 'allocated'
+        )`,
+	}
+	args := []any{aliasID, resourceID, requiredUntil.UTC(), projectID}
+	switch scope {
+	case domain.SupplyScopeOwned:
+		where = append(where, "ir.for_sale = FALSE", "er.owner_user_id = ?")
+		args = append(args, buyerUserID)
+	default:
+		where = append(where, "ir.for_sale = TRUE", "u.status = 'active'", "u.role IN ('supplier', 'admin', 'super_admin')")
+	}
+	var row allocapp.ICloudCandidate
+	query := `
+SELECT ir.id AS resource_id, ia.id AS alias_id, ia.email AS email
+FROM icloud_aliases ia
+JOIN icloud_resources ir ON ir.id = ia.resource_id
+JOIN email_resources er ON er.id = ir.id AND er.type = 'icloud'
+JOIN users u ON u.id = er.owner_user_id
+WHERE ` + strings.Join(where, " AND ") + `
+LIMIT 1
+FOR UPDATE SKIP LOCKED`
+	if err := r.dbFor(ctx).Raw(query, args...).Scan(&row).Error; err != nil {
+		return nil, fmt.Errorf("lock iCloud allocation candidate: %w", err)
 	}
 	if row.ResourceID == 0 {
 		return nil, nil
@@ -813,11 +1093,14 @@ func (r *Repo) AssertNoActiveAllocations(ctx context.Context, resourceIDs []uint
 		return domain.ErrAllocationTxRequired
 	}
 	queries := []struct {
-		table string
-		label string
+		table     string
+		label     string
+		condition string
 	}{
-		{table: "microsoft_allocations", label: "microsoft"},
-		{table: "domain_allocations", label: "domain"},
+		{table: "microsoft_allocations", label: "microsoft", condition: "resource_id IN ? AND status = 'allocated'"},
+		{table: "domain_allocations", label: "domain", condition: "resource_id IN ? AND status = 'allocated'"},
+		{table: "gmail_allocations", label: "Gmail", condition: "resource_id IN ? AND source = 'local' AND status = 'allocated'"},
+		{table: "icloud_allocations", label: "iCloud", condition: "resource_id IN ? AND status = 'allocated'"},
 	}
 	for _, query := range queries {
 		var row struct {
@@ -826,10 +1109,12 @@ func (r *Repo) AssertNoActiveAllocations(ctx context.Context, resourceIDs []uint
 		statement := fmt.Sprintf(`
 SELECT id
 FROM %s
-WHERE resource_id IN ? AND status = 'allocated'
+WHERE %s
 ORDER BY resource_id ASC, id ASC
-LIMIT 1
-FOR UPDATE`, query.table)
+LIMIT 1`, query.table, query.condition)
+		if r.dbFor(ctx).Name() == "mysql" {
+			statement += " FOR UPDATE"
+		}
 		if err := r.dbFor(ctx).Raw(statement, resourceIDs).Scan(&row).Error; err != nil {
 			return fmt.Errorf("check active %s allocations: %w", query.label, err)
 		}
@@ -865,6 +1150,42 @@ SELECT EXISTS (
 		return false, fmt.Errorf("check microsoft mailbox project history: %w", err)
 	}
 	return matched, nil
+}
+
+func (r *Repo) IsGmailMailboxAvailable(ctx context.Context, resourceID uint, projectID uint, mailbox domain.GmailMailbox, email string) (bool, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if resourceID == 0 || projectID == 0 || email == "" || !domain.IsValidGmailMailbox(mailbox) {
+		return false, domain.ErrInvalidAllocationRequest
+	}
+	var unavailable bool
+	var err error
+	if mailbox == domain.GmailMailboxMain {
+		err = r.dbFor(ctx).Raw(`
+SELECT EXISTS (
+    SELECT 1
+    FROM gmail_allocations
+    WHERE source = ?
+      AND resource_id = ?
+      AND mailbox = ?
+      AND (project_id = ? OR status = ?)
+    LIMIT 1
+)`, gmailLocalSource, resourceID, domain.GmailMailboxMain, projectID, domain.AllocationStatusAllocated).Scan(&unavailable).Error
+	} else {
+		err = r.dbFor(ctx).Raw(`
+SELECT EXISTS (
+    SELECT 1
+    FROM gmail_allocations
+    WHERE source = ?
+      AND project_id = ?
+      AND mailbox = ?
+      AND LOWER(TRIM(email)) = ?
+    LIMIT 1
+)`, gmailLocalSource, projectID, mailbox, email).Scan(&unavailable).Error
+	}
+	if err != nil {
+		return false, fmt.Errorf("check Gmail mailbox history: %w", err)
+	}
+	return !unavailable, nil
 }
 
 func (r *Repo) IsDomainEmailHistoricallyAllocated(ctx context.Context, projectID uint, email string) (bool, error) {
@@ -1202,6 +1523,46 @@ func (r *Repo) CreateMicrosoftAllocation(ctx context.Context, allocation *domain
 	return nil
 }
 
+func (r *Repo) CreateGmailAllocation(ctx context.Context, allocation *domain.GmailAllocation) error {
+	if allocation == nil || allocation.ProjectID == 0 || allocation.ProductID == 0 || allocation.ResourceID == 0 ||
+		!domain.IsValidGmailMailbox(allocation.Mailbox) || !domain.IsValidGmailServiceMode(allocation.ServiceMode) {
+		return domain.ErrInvalidAllocationRequest
+	}
+	if allocation.Status == "" {
+		allocation.Status = domain.AllocationStatusAllocated
+	}
+	model := gmailAllocationFromDomain(allocation)
+	if err := r.dbFor(ctx).Create(model).Error; err != nil {
+		if isDuplicateKeyError(err) {
+			return domain.ErrAllocationConflict
+		}
+		if isForeignKeyError(err) {
+			return domain.ErrInvalidAllocationRequest
+		}
+		return fmt.Errorf("create Gmail allocation: %w", err)
+	}
+	*allocation = model.toDomain()
+	return nil
+}
+
+func (r *Repo) CreateICloudAllocation(ctx context.Context, allocation *domain.ICloudAllocation) error {
+	if allocation.Status == "" {
+		allocation.Status = domain.AllocationStatusAllocated
+	}
+	model := icloudAllocationFromDomain(allocation)
+	if err := r.dbFor(ctx).Create(model).Error; err != nil {
+		if isDuplicateKeyError(err) {
+			return domain.ErrAllocationConflict
+		}
+		if isForeignKeyError(err) {
+			return domain.ErrInvalidAllocationRequest
+		}
+		return fmt.Errorf("create iCloud allocation: %w", err)
+	}
+	*allocation = model.toDomain()
+	return nil
+}
+
 func (r *Repo) CreateDomainAllocation(ctx context.Context, allocation *domain.GeneratedMailboxAllocation) error {
 	if allocation.Status == "" {
 		allocation.Status = domain.AllocationStatusAllocated
@@ -1226,6 +1587,29 @@ func (r *Repo) TouchMicrosoftAllocated(ctx context.Context, resourceID uint, all
 		Where("id = ?", resourceID).
 		Updates(map[string]any{"last_allocated_at": allocatedAt}).Error; err != nil {
 		return fmt.Errorf("touch microsoft allocated: %w", err)
+	}
+	return nil
+}
+
+func (r *Repo) TouchGmailAllocated(ctx context.Context, resourceID uint, allocatedAt time.Time) error {
+	if err := r.dbFor(ctx).Table("gmail_resources").Where("id = ?", resourceID).
+		Update("last_allocated_at", allocatedAt).Error; err != nil {
+		return fmt.Errorf("touch Gmail allocated: %w", err)
+	}
+	return nil
+}
+
+func (r *Repo) TouchICloudAllocated(ctx context.Context, resourceID uint, aliasID uint, allocatedAt time.Time) error {
+	db := r.dbFor(ctx)
+	if err := db.Model(&struct{}{}).Table("icloud_resources").
+		Where("id = ?", resourceID).
+		Updates(map[string]any{"last_allocated_at": allocatedAt}).Error; err != nil {
+		return fmt.Errorf("touch iCloud resource allocated: %w", err)
+	}
+	if err := db.Model(&struct{}{}).Table("icloud_aliases").
+		Where("id = ? AND resource_id = ?", aliasID, resourceID).
+		Updates(map[string]any{"last_allocated_at": allocatedAt}).Error; err != nil {
+		return fmt.Errorf("touch iCloud alias allocated: %w", err)
 	}
 	return nil
 }
@@ -1286,6 +1670,40 @@ func (r *Repo) ReleaseByOrder(ctx context.Context, orderNo string, releasedAt ti
 		}
 		result := model.unified()
 		return &result, nil
+	case domain.AllocationTypeGmail:
+		var model GmailAllocationModel
+		if err := r.dbFor(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("order_no = ? AND source = ? AND resource_id IS NOT NULL AND project_id IS NOT NULL AND product_id IS NOT NULL", orderNo, gmailLocalSource).
+			First(&model).Error; err != nil {
+			return nil, findAllocationError(err, "find Gmail allocation for release")
+		}
+		if model.Status == string(domain.AllocationStatusAllocated) {
+			if err := r.dbFor(ctx).Model(&GmailAllocationModel{}).
+				Where("id = ? AND source = ? AND status = ?", model.ID, gmailLocalSource, string(domain.AllocationStatusAllocated)).
+				Updates(map[string]any{"status": string(domain.AllocationStatusReleased), "released_at": releasedAt}).Error; err != nil {
+				return nil, fmt.Errorf("release Gmail allocation: %w", err)
+			}
+			model.Status = string(domain.AllocationStatusReleased)
+			model.ReleasedAt = &releasedAt
+		}
+		result := model.unified()
+		return &result, nil
+	case domain.AllocationTypeICloud:
+		var model ICloudAllocationModel
+		if err := r.dbFor(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Where("order_no = ?", orderNo).First(&model).Error; err != nil {
+			return nil, findAllocationError(err, "find iCloud allocation for release")
+		}
+		if model.Status == string(domain.AllocationStatusAllocated) {
+			if err := r.dbFor(ctx).Model(&ICloudAllocationModel{}).
+				Where("id = ? AND status = ?", model.ID, string(domain.AllocationStatusAllocated)).
+				Updates(map[string]any{"status": string(domain.AllocationStatusReleased), "released_at": releasedAt}).Error; err != nil {
+				return nil, fmt.Errorf("release iCloud allocation: %w", err)
+			}
+			model.Status = string(domain.AllocationStatusReleased)
+			model.ReleasedAt = &releasedAt
+		}
+		result := model.unified()
+		return &result, nil
 	default:
 		return nil, domain.ErrAllocationNotFound
 	}
@@ -1320,6 +1738,22 @@ func (r *Repo) FindAllocationDetail(ctx context.Context, allocationType domain.A
 		}
 		result := model.unified()
 		return &result, nil
+	case domain.AllocationTypeGmail:
+		var model GmailAllocationModel
+		if err := r.dbFor(ctx).
+			Where("id = ? AND source = ? AND resource_id IS NOT NULL AND project_id IS NOT NULL AND product_id IS NOT NULL", allocationID, gmailLocalSource).
+			First(&model).Error; err != nil {
+			return nil, findAllocationError(err, "find Gmail allocation detail")
+		}
+		result := model.unified()
+		return &result, nil
+	case domain.AllocationTypeICloud:
+		var model ICloudAllocationModel
+		if err := r.dbFor(ctx).Where("id = ?", allocationID).First(&model).Error; err != nil {
+			return nil, findAllocationError(err, "find iCloud allocation detail")
+		}
+		result := model.unified()
+		return &result, nil
 	default:
 		return nil, domain.ErrInvalidAllocationRequest
 	}
@@ -1350,11 +1784,29 @@ func (r *Repo) ListActiveByRecipient(ctx context.Context, recipient string) ([]d
 		Find(&ds).Error; err != nil {
 		return nil, fmt.Errorf("list domain allocation by recipient: %w", err)
 	}
-	result := make([]domain.UnifiedAllocation, 0, len(ms)+len(ds))
+	var is []ICloudAllocationModel
+	if err := r.dbFor(ctx).
+		Where("email = ? AND status = ?", recipient, string(domain.AllocationStatusAllocated)).
+		Find(&is).Error; err != nil {
+		return nil, fmt.Errorf("list iCloud allocation by recipient: %w", err)
+	}
+	var gs []GmailAllocationModel
+	if err := r.dbFor(ctx).
+		Where("email = ? AND source = ? AND resource_id IS NOT NULL AND project_id IS NOT NULL AND product_id IS NOT NULL AND status = ?", recipient, gmailLocalSource, string(domain.AllocationStatusAllocated)).
+		Find(&gs).Error; err != nil {
+		return nil, fmt.Errorf("list Gmail allocation by recipient: %w", err)
+	}
+	result := make([]domain.UnifiedAllocation, 0, len(ms)+len(ds)+len(gs)+len(is))
 	for _, item := range ms {
 		result = append(result, item.unified())
 	}
 	for _, item := range ds {
+		result = append(result, item.unified())
+	}
+	for _, item := range gs {
+		result = append(result, item.unified())
+	}
+	for _, item := range is {
 		result = append(result, item.unified())
 	}
 	return result, nil
@@ -1376,13 +1828,20 @@ func (r *Repo) ListInventoryProjectIDs(ctx context.Context) ([]uint, error) {
 func (r *Repo) GetInventoryStats(ctx context.Context, projectID uint) (*allocapp.InventoryStats, error) {
 	stats := &allocapp.InventoryStats{ProjectID: projectID}
 	var productRows []struct {
-		Type       string
-		MainWeight int
-		DotWeight  int
-		PlusWeight int
+		Type            string
+		CodeEnabled     bool
+		PurchaseEnabled bool
+		MainWeight      int
+		DotWeight       int
+		PlusWeight      int
 	}
 	if err := r.dbFor(ctx).Raw(`
-SELECT pp.type AS type, pp.main_weight AS main_weight, pp.dot_weight AS dot_weight, pp.plus_weight AS plus_weight
+SELECT pp.type AS type,
+       pp.code_enabled AS code_enabled,
+       pp.purchase_enabled AS purchase_enabled,
+       pp.main_weight AS main_weight,
+       pp.dot_weight AS dot_weight,
+       pp.plus_weight AS plus_weight
 FROM projects p
 JOIN project_products pp ON pp.project_id = p.id
 	WHERE p.id = ?
@@ -1409,6 +1868,15 @@ JOIN project_products pp ON pp.project_id = p.id
 			stats.Microsoft.DotEnabled = true
 			stats.Microsoft.PlusEnabled = true
 			stats.Domain.Enabled = true
+		case coredomain.ProductTypeGmail:
+			stats.Gmail.Enabled = true
+			stats.Gmail.CodeEnabled = stats.Gmail.CodeEnabled || row.CodeEnabled
+			stats.Gmail.PurchaseEnabled = stats.Gmail.PurchaseEnabled || row.PurchaseEnabled
+			stats.Gmail.MainEnabled = stats.Gmail.MainEnabled || row.MainWeight > 0
+			stats.Gmail.DotEnabled = stats.Gmail.DotEnabled || row.DotWeight > 0
+			stats.Gmail.PlusEnabled = stats.Gmail.PlusEnabled || row.PlusWeight > 0
+		case coredomain.ProductTypeICloud:
+			stats.ICloud.Enabled = true
 		}
 	}
 	scan := func(target any, query string, args ...any) error {
@@ -1594,13 +2062,153 @@ WHERE adu.usage_date = ?
 		stats.Domain.MailboxDailyAvailable = nonNegative(stats.Domain.MailboxDailyLimit - stats.Domain.MailboxDailyUsed)
 		stats.Domain.TotalAvailable = stats.Domain.MailboxDailyAvailable
 	}
+	if stats.Gmail.Enabled && (stats.Gmail.CodeEnabled || stats.Gmail.PurchaseEnabled) {
+		gmailScope := "gr.for_sale = TRUE AND owner.status = 'active' AND owner.role IN ('supplier', 'admin', 'super_admin')"
+		if err := scan(&stats.Gmail.EligibleResources, `
+SELECT COUNT(*)
+FROM gmail_resources gr
+JOIN email_resources er ON er.id = gr.id AND er.type = 'gmail'
+JOIN users owner ON owner.id = er.owner_user_id
+WHERE gr.status IN ('normal', 'available')
+  AND `+gmailScope); err != nil {
+			return nil, err
+		}
+		stats.Gmail.PublicEligibleResources = stats.Gmail.EligibleResources
+		if stats.Gmail.MainEnabled {
+			if err := scan(&stats.Gmail.MainAvailable, `
+SELECT COUNT(*)
+FROM gmail_resources gr
+JOIN email_resources er ON er.id = gr.id AND er.type = 'gmail'
+JOIN users owner ON owner.id = er.owner_user_id
+WHERE gr.status IN ('normal', 'available')
+  AND `+gmailScope+`
+  AND NOT EXISTS (
+      SELECT 1 FROM gmail_allocations active
+      WHERE active.source = 'local'
+        AND active.resource_id = gr.id
+        AND active.mailbox = 'main'
+        AND active.status = 'allocated'
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM gmail_allocations history
+      WHERE history.source = 'local'
+        AND history.resource_id = gr.id
+        AND history.project_id = ?
+        AND history.mailbox = 'main'
+  )`, projectID); err != nil {
+				return nil, err
+			}
+			stats.Gmail.MainPublicAvailable = stats.Gmail.MainAvailable
+		}
+		if stats.Gmail.DotEnabled {
+			var dot struct {
+				Capacity int64
+				Used     int64
+			}
+			if err := scan(&dot, `
+SELECT COALESCE(SUM(`+gmailDotCapacityExpression("gr")+`), 0) AS capacity,
+       COALESCE((
+           SELECT COUNT(*)
+           FROM gmail_allocations history
+           JOIN gmail_resources history_gr ON history_gr.id = history.resource_id
+           JOIN email_resources history_er ON history_er.id = history_gr.id AND history_er.type = 'gmail'
+           JOIN users history_owner ON history_owner.id = history_er.owner_user_id
+           WHERE history.source = 'local'
+             AND history.project_id = ?
+             AND history.mailbox = 'dot'
+             AND history_gr.status IN ('normal', 'available')
+             AND history_gr.for_sale = TRUE
+             AND history_owner.status = 'active'
+             AND history_owner.role IN ('supplier', 'admin', 'super_admin')
+       ), 0) AS used
+FROM gmail_resources gr
+JOIN email_resources er ON er.id = gr.id AND er.type = 'gmail'
+JOIN users owner ON owner.id = er.owner_user_id
+WHERE gr.status IN ('normal', 'available')
+  AND `+gmailScope, projectID); err != nil {
+				return nil, err
+			}
+			stats.Gmail.DotAvailable = nonNegative(dot.Capacity - dot.Used)
+			stats.Gmail.DotPublicAvailable = stats.Gmail.DotAvailable
+		}
+		if stats.Gmail.PlusEnabled {
+			stats.Gmail.PlusAvailable = stats.Gmail.EligibleResources
+			stats.Gmail.PlusPublicAvailable = stats.Gmail.PlusAvailable
+		}
+		stats.Gmail.TotalAvailable = stats.Gmail.MainAvailable + stats.Gmail.DotAvailable + stats.Gmail.PlusAvailable
+		stats.Gmail.PublicAvailable = stats.Gmail.TotalAvailable
+	}
+	if stats.ICloud.Enabled {
+		if err := scan(&stats.ICloud.EligibleResources, `
+SELECT COUNT(*)
+FROM icloud_resources ir
+JOIN email_resources er ON er.id = ir.id AND er.type = 'icloud'
+JOIN users u ON u.id = er.owner_user_id
+WHERE ir.status = 'normal'
+  AND ir.session_status = 'valid'
+  AND ir.expire_at >= UTC_TIMESTAMP(3)
+  AND ir.alias_count = 750
+  AND ir.delivery_probe_verified_at IS NOT NULL
+  AND ir.gmail_resource_id IS NOT NULL
+  AND ir.selected_forward_to <> ''
+  AND EXISTS (
+      SELECT 1 FROM gmail_resources gr
+      WHERE gr.id = ir.gmail_resource_id
+        AND gr.status IN ('normal', 'available')
+        AND LOWER(TRIM(gr.email)) = LOWER(TRIM(ir.selected_forward_to))
+  )
+  AND ((ir.for_sale = TRUE AND u.status = 'active' AND u.role IN ('supplier', 'admin', 'super_admin'))
+       OR ir.for_sale = FALSE)`); err != nil {
+			return nil, err
+		}
+		if err := scan(&stats.ICloud.AliasAvailable, `
+SELECT COUNT(*)
+FROM icloud_aliases ia
+JOIN icloud_resources ir ON ir.id = ia.resource_id
+JOIN email_resources er ON er.id = ir.id AND er.type = 'icloud'
+JOIN users u ON u.id = er.owner_user_id
+WHERE ia.status = 'normal'
+  AND ir.status = 'normal'
+  AND ir.session_status = 'valid'
+  AND ir.expire_at >= UTC_TIMESTAMP(3)
+  AND ir.alias_count = 750
+  AND ir.delivery_probe_verified_at IS NOT NULL
+  AND ir.gmail_resource_id IS NOT NULL
+  AND ir.selected_forward_to <> ''
+  AND LOWER(TRIM(ia.forward_to_email)) = LOWER(TRIM(ir.selected_forward_to))
+  AND EXISTS (
+      SELECT 1 FROM gmail_resources gr
+      WHERE gr.id = ir.gmail_resource_id
+        AND gr.status IN ('normal', 'available')
+        AND LOWER(TRIM(gr.email)) = LOWER(TRIM(ir.selected_forward_to))
+  )
+  AND ((ir.for_sale = TRUE AND u.status = 'active' AND u.role IN ('supplier', 'admin', 'super_admin'))
+       OR ir.for_sale = FALSE)
+  AND NOT EXISTS (
+      SELECT 1 FROM icloud_allocations history
+      WHERE history.alias_id = ia.id AND history.project_id = ?
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM icloud_allocations active
+      WHERE active.alias_id = ia.id AND active.status = 'allocated'
+  )`, projectID); err != nil {
+			return nil, err
+		}
+		stats.ICloud.TotalAvailable = stats.ICloud.AliasAvailable
+	}
 	if err := scan(&stats.ActiveMicrosoftAllocations, `SELECT COUNT(*) FROM microsoft_allocations WHERE project_id = ? AND status = 'allocated'`, projectID); err != nil {
 		return nil, err
 	}
 	if err := scan(&stats.ActiveDomainAllocations, `SELECT COUNT(*) FROM domain_allocations WHERE project_id = ? AND status = 'allocated'`, projectID); err != nil {
 		return nil, err
 	}
-	stats.TotalAvailable = stats.Microsoft.TotalAvailable + stats.Domain.TotalAvailable
+	if err := scan(&stats.ActiveGmailAllocations, `SELECT COUNT(*) FROM gmail_allocations WHERE source = 'local' AND project_id = ? AND status = 'allocated'`, projectID); err != nil {
+		return nil, err
+	}
+	if err := scan(&stats.ActiveICloudAllocations, `SELECT COUNT(*) FROM icloud_allocations WHERE project_id = ? AND status = 'allocated'`, projectID); err != nil {
+		return nil, err
+	}
+	stats.TotalAvailable = stats.Microsoft.TotalAvailable + stats.Domain.TotalAvailable + stats.Gmail.TotalAvailable + stats.ICloud.TotalAvailable
 	return stats, nil
 }
 
@@ -1635,11 +2243,13 @@ SELECT EXISTS (
 }
 
 type productInventoryRow struct {
-	ProductID  uint
-	Type       string
-	MainWeight int
-	DotWeight  int
-	PlusWeight int
+	ProductID       uint
+	Type            string
+	CodeEnabled     bool
+	PurchaseEnabled bool
+	MainWeight      int
+	DotWeight       int
+	PlusWeight      int
 }
 
 func (r *Repo) GetProductInventoryTotals(ctx context.Context, projectID uint) (*allocapp.ProjectProductInventoryTotals, error) {
@@ -1648,6 +2258,8 @@ func (r *Repo) GetProductInventoryTotals(ctx context.Context, projectID uint) (*
 SELECT
     pp.id AS product_id,
     pp.type AS type,
+	pp.code_enabled AS code_enabled,
+	pp.purchase_enabled AS purchase_enabled,
     pp.main_weight AS main_weight,
     pp.dot_weight AS dot_weight,
     pp.plus_weight AS plus_weight
@@ -1675,14 +2287,27 @@ JOIN project_products pp ON pp.project_id = p.id
 		item := allocapp.ProductInventoryTotal{
 			ProductID:       row.ProductID,
 			TotalAvailable:  productInventoryTotalFromStats(row, stats),
-			PublicAvailable: productInventoryTotalFromStats(row, stats),
+			PublicAvailable: productInventoryPublicTotalFromStats(row, stats),
 		}
 		switch coredomain.ProductType(row.Type) {
 		case coredomain.ProductTypeMicrosoft:
 			item.Suffixes, err = r.microsoftProductInventorySuffixTotals(ctx, projectID, row)
 		case coredomain.ProductTypeDomain:
 			item.Suffixes, err = r.domainProductInventorySuffixTotals(ctx)
-		case coredomain.ProductTypeRandom, coredomain.ProductTypeGmail:
+		case coredomain.ProductTypeGmail:
+			codeAvailable, codePublicAvailable := int64(0), int64(0)
+			purchaseAvailable, purchasePublicAvailable := int64(0), int64(0)
+			if row.CodeEnabled {
+				codeAvailable, codePublicAvailable = item.TotalAvailable, item.PublicAvailable
+			}
+			if row.PurchaseEnabled {
+				purchaseAvailable, purchasePublicAvailable = item.TotalAvailable, item.PublicAvailable
+			}
+			item.CodeAvailable, item.CodePublicAvailable = &codeAvailable, &codePublicAvailable
+			item.PurchaseAvailable, item.PurchasePublicAvailable = &purchaseAvailable, &purchasePublicAvailable
+			item.TotalAvailable = max(codeAvailable, purchaseAvailable)
+			item.PublicAvailable = max(codePublicAvailable, purchasePublicAvailable)
+		case coredomain.ProductTypeRandom, coredomain.ProductTypeICloud:
 		default:
 			return nil, domain.ErrProjectNotAllocatable
 		}
@@ -1715,9 +2340,40 @@ func productInventoryTotalFromStats(row productInventoryRow, stats *allocapp.Inv
 		return stats.Domain.TotalAvailable
 	case coredomain.ProductTypeRandom:
 		return stats.Microsoft.TotalAvailable + stats.Domain.TotalAvailable
+	case coredomain.ProductTypeGmail:
+		total := int64(0)
+		if row.MainWeight > 0 {
+			total += stats.Gmail.MainAvailable
+		}
+		if row.DotWeight > 0 {
+			total += stats.Gmail.DotAvailable
+		}
+		if row.PlusWeight > 0 {
+			total += stats.Gmail.PlusAvailable
+		}
+		return total
+	case coredomain.ProductTypeICloud:
+		return stats.ICloud.TotalAvailable
 	default:
 		return 0
 	}
+}
+
+func productInventoryPublicTotalFromStats(row productInventoryRow, stats *allocapp.InventoryStats) int64 {
+	if stats == nil || coredomain.ProductType(row.Type) != coredomain.ProductTypeGmail {
+		return productInventoryTotalFromStats(row, stats)
+	}
+	total := int64(0)
+	if row.MainWeight > 0 {
+		total += stats.Gmail.MainPublicAvailable
+	}
+	if row.DotWeight > 0 {
+		total += stats.Gmail.DotPublicAvailable
+	}
+	if row.PlusWeight > 0 {
+		total += stats.Gmail.PlusPublicAvailable
+	}
+	return total
 }
 
 type suffixInventoryValue struct {
@@ -2540,6 +3196,28 @@ func (r *Repo) findByGuard(ctx context.Context, guard OrderGuardModel) (*domain.
 		}
 		result := model.unified()
 		return &result, nil
+	case domain.AllocationTypeGmail:
+		var model GmailAllocationModel
+		if err := r.dbFor(ctx).
+			Where("order_no = ? AND source = ? AND resource_id IS NOT NULL AND project_id IS NOT NULL AND product_id IS NOT NULL", guard.OrderNo, gmailLocalSource).
+			First(&model).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("find Gmail allocation by guard: %w", err)
+		}
+		result := model.unified()
+		return &result, nil
+	case domain.AllocationTypeICloud:
+		var model ICloudAllocationModel
+		if err := r.dbFor(ctx).Where("order_no = ?", guard.OrderNo).First(&model).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("find iCloud allocation by guard: %w", err)
+		}
+		result := model.unified()
+		return &result, nil
 	default:
 		return nil, domain.ErrAllocationNotFound
 	}
@@ -2579,6 +3257,23 @@ func (r *Repo) queryUnifiedAllocations(ctx context.Context, filter allocapp.Allo
 		if filter.Mailbox == "" || filter.Mailbox == "domain" {
 			conditions, condArgs := allocationConditions(filter)
 			addSelect("domain_allocations", string(domain.AllocationTypeDomain), "'domain'", conditions, condArgs)
+		}
+	}
+	if filter.Type == "" || filter.Type == domain.AllocationTypeGmail {
+		if filter.Mailbox == "" || domain.IsValidGmailMailbox(domain.GmailMailbox(filter.Mailbox)) {
+			conditions, condArgs := allocationConditions(filter)
+			conditions = append(conditions, "source = 'local'", "resource_id IS NOT NULL", "project_id IS NOT NULL", "product_id IS NOT NULL")
+			if filter.Mailbox != "" {
+				conditions = append(conditions, "mailbox = ?")
+				condArgs = append(condArgs, filter.Mailbox)
+			}
+			addSelect("gmail_allocations", string(domain.AllocationTypeGmail), "mailbox", conditions, condArgs)
+		}
+	}
+	if filter.Type == "" || filter.Type == domain.AllocationTypeICloud {
+		if filter.Mailbox == "" || filter.Mailbox == "alias" {
+			conditions, condArgs := allocationConditions(filter)
+			addSelect("icloud_allocations", string(domain.AllocationTypeICloud), "'alias'", conditions, condArgs)
 		}
 	}
 	if len(selects) == 0 {
@@ -2667,7 +3362,14 @@ func microsoftProjectInventoryScopeSQL(projectID uint) (string, []any) {
 }
 
 func microsoftDotCapacityExpression(tableAlias string) string {
-	localPart := "SUBSTRING_INDEX(" + tableAlias + ".email_address, '@', 1)"
+	return dotCapacityExpression("SUBSTRING_INDEX(" + tableAlias + ".email_address, '@', 1)")
+}
+
+func gmailDotCapacityExpression(tableAlias string) string {
+	return dotCapacityExpression("SUBSTRING_INDEX(" + tableAlias + ".email, '@', 1)")
+}
+
+func dotCapacityExpression(localPart string) string {
 	capacity := allocapp.DotAliasCapacityPerResourceValue()
 	positions := make([]string, 0, capacity)
 	for position := 1; position <= capacity; position++ {

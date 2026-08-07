@@ -346,19 +346,6 @@ func (s *Service) importLocalGmailHistoryMatch(ctx context.Context, tx *gorm.DB,
 		match.EvidenceCount <= 0 || !isGmailMailbox(match.Mailbox) {
 		return ErrLocalValidationConflict
 	}
-	var historyCount int64
-	history := tx.Model(&allocationModel{}).Where("project_id = ? AND mailbox = ?", match.ProjectID, match.Mailbox)
-	if match.Mailbox == GmailMailboxMain {
-		history = history.Where("resource_id = ?", match.ResourceID)
-	} else {
-		history = history.Where("email = ?", match.Email)
-	}
-	if err := history.Count(&historyCount).Error; err != nil {
-		return fmt.Errorf("check Gmail history allocation: %w", err)
-	}
-	if historyCount > 0 {
-		return nil
-	}
 	createdAt := match.FirstMatchedAt.UTC()
 	releasedAt := match.LastMatchedAt.UTC()
 	if createdAt.IsZero() {
@@ -367,58 +354,16 @@ func (s *Service) importLocalGmailHistoryMatch(ctx context.Context, tx *gorm.DB,
 	if releasedAt.IsZero() || releasedAt.Before(createdAt) {
 		releasedAt = createdAt
 	}
-	orderNo := "HIST-GMAIL-" + stableDigest(fmt.Sprintf(
-		"%d:%d:%s:%s", match.ResourceID, match.ProjectID, match.Mailbox, match.Email,
-	))[:40]
-	guard := localAllocationGuardModel{OrderNo: orderNo, Type: "gmail", CreatedAt: createdAt}
-	if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&guard).Error; err != nil {
-		return fmt.Errorf("create Gmail history allocation guard: %w", err)
+	if s.trade == nil {
+		return ErrLocalValidationDependency
 	}
-	var storedGuard localAllocationGuardModel
-	if err := tx.Where("order_no = ?", orderNo).Take(&storedGuard).Error; err != nil {
-		return fmt.Errorf("load Gmail history allocation guard: %w", err)
-	}
-	if storedGuard.Type != "gmail" {
-		return ErrLocalValidationConflict
-	}
-	resourceID := match.ResourceID
-	allocation := allocationModel{
-		OrderNo: orderNo, GuardType: "gmail", ProjectID: match.ProjectID, ProductID: match.ProductID,
-		Source: SourceLocal, SourceRef: "", ServiceMode: "purchase", ResourceID: &resourceID,
-		SupplyScope: AllocationSupplyPublic, Mailbox: match.Mailbox, Email: match.Email,
-		Status: AllocationStatusReleased, CostPointsSnapshot: "0.00",
-		CreatedAt: createdAt, ReleasedAt: &releasedAt,
-	}
-	result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&allocation)
-	if result.Error != nil {
-		return fmt.Errorf("create Gmail history allocation: %w", result.Error)
-	}
-	if result.RowsAffected == 1 {
-		historyTrade, ok := s.trade.(interface {
-			ImportHistoricalGmailUsage(context.Context, []tradeapp.HistoricalGmailUsage) error
-		})
-		if !ok {
-			return ErrLocalValidationDependency
-		}
-		return historyTrade.ImportHistoricalGmailUsage(platform.WithGormTx(ctx, tx), []tradeapp.HistoricalGmailUsage{{
-			OrderNo: allocation.OrderNo, AllocationID: allocation.ID,
-			ProjectID: match.ProjectID, ProductID: match.ProductID, Email: match.Email,
-			CodeWindowMinutes: match.CodeWindowMinutes, ActivationWindowMinutes: match.ActivationWindowMinutes,
-			WarrantyMinutes: match.WarrantyMinutes, FirstMatchedAt: createdAt, LastMatchedAt: releasedAt,
-			EvidenceCount: match.EvidenceCount,
-		}})
-	}
-	var existing allocationModel
-	if err := tx.Where("order_no = ?", orderNo).Take(&existing).Error; err != nil {
-		return fmt.Errorf("load Gmail history allocation: %w", err)
-	}
-	if existing.GuardType != "gmail" || existing.ProjectID != match.ProjectID || existing.ProductID != match.ProductID ||
-		existing.ResourceID == nil || *existing.ResourceID != match.ResourceID || existing.Mailbox != match.Mailbox ||
-		existing.Status != AllocationStatusReleased ||
-		(match.Mailbox != GmailMailboxMain && !strings.EqualFold(existing.Email, match.Email)) {
-		return ErrLocalValidationConflict
-	}
-	return nil
+	return s.trade.ImportHistoricalGmailUsage(platform.WithGormTx(ctx, tx), []tradeapp.HistoricalGmailUsage{{
+		ResourceID: match.ResourceID, ProjectID: match.ProjectID, ProductID: match.ProductID,
+		Mailbox: match.Mailbox, Email: match.Email,
+		CodeWindowMinutes: match.CodeWindowMinutes, ActivationWindowMinutes: match.ActivationWindowMinutes,
+		WarrantyMinutes: match.WarrantyMinutes, FirstMatchedAt: createdAt, LastMatchedAt: releasedAt,
+		EvidenceCount: match.EvidenceCount,
+	}})
 }
 
 func sameLocalGmailHistoryScopes(left, right []localGmailHistoryScope) bool {

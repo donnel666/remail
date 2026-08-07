@@ -27,6 +27,7 @@ const (
 	ProductTypeDomain    ProductType = "domain"
 	ProductTypeRandom    ProductType = "random"
 	ProductTypeGmail     ProductType = "gmail"
+	ProductTypeICloud    ProductType = "icloud"
 )
 
 type OrderStatus string
@@ -65,6 +66,7 @@ const (
 	AllocationTypeMicrosoft AllocationType = "microsoft"
 	AllocationTypeDomain    AllocationType = "domain"
 	AllocationTypeGmail     AllocationType = "gmail"
+	AllocationTypeICloud    AllocationType = "icloud"
 )
 
 type OperatorType string
@@ -99,6 +101,7 @@ type Order struct {
 	AllocationType           *AllocationType
 	MicrosoftAllocID         *uint
 	DomainAllocID            *uint
+	ICloudAllocID            *uint
 	DeliveryEmail            string
 	ReceiveStartedAt         *time.Time
 	ReceiveUntil             *time.Time

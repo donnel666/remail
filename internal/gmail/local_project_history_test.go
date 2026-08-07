@@ -35,7 +35,7 @@ func newLocalGmailProjectHistoryHarness(t *testing.T) *localGmailProjectHistoryH
 		&resourceRootModel{}, &localResourceModel{}, &localAllocationGuardModel{}, &allocationModel{},
 	))
 	prepareLocalGmailHistorySchema(t, db)
-	trade := &gmailTradeSpy{}
+	trade := newGmailHistoryTradeSpy(db)
 	service := NewService(db, queue)
 	service.SetTrade(trade)
 	service.now = func() time.Time { return time.Date(2026, 8, 4, 8, 0, 0, 0, time.UTC) }

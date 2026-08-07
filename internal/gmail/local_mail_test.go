@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	allocapp "github.com/donnel666/remail/internal/alloc/app"
+	allocinfra "github.com/donnel666/remail/internal/alloc/infra"
 	tradeapp "github.com/donnel666/remail/internal/trade/app"
 	tradedomain "github.com/donnel666/remail/internal/trade/domain"
 	"github.com/emersion/go-imap/v2"
@@ -51,7 +53,6 @@ func newLocalCodeSession(t *testing.T, name string, clock *time.Time, codeWindow
 	}).Error)
 	sessionID, err := service.CreateSession(context.Background(), tradeapp.GmailSessionCommand{
 		OrderNo: orderNo, ProjectID: 7, ProductID: 71, CodeWindowMinutes: windowMinutes,
-		Quote: tradeapp.GmailSupplyQuote{Source: SourceLocal, CostPoints: "1"},
 	})
 	require.NoError(t, err)
 	var session sessionModel
@@ -75,10 +76,18 @@ func loadGmailSession(t *testing.T, db *gorm.DB, sessionID uint) sessionModel {
 	return session
 }
 
+func newLocalGmailTradeSpy(db *gorm.DB) *gmailTradeSpy {
+	allocator := allocapp.NewUseCase(allocinfra.NewRepo(db))
+	return &gmailTradeSpy{release: func(ctx context.Context, orderNo string) error {
+		_, err := allocator.ReleaseByOrder(ctx, orderNo)
+		return err
+	}}
+}
+
 func TestLocalGmailRecordsThreeCodesAndDeduplicatesReplayedMail(t *testing.T) {
 	clock := time.Date(2026, 8, 3, 1, 2, 3, 0, time.UTC)
 	db, service, session, _ := newLocalCodeSession(t, "gmail-local-three-codes", &clock)
-	trade := &gmailTradeSpy{}
+	trade := newLocalGmailTradeSpy(db)
 	service.SetTrade(trade)
 
 	require.NoError(t, service.RecordMatchedCode(context.Background(), session.OrderNo, "too-early", clock.Add(-time.Second)))
@@ -122,7 +131,7 @@ func TestLocalGmailExpirySettlesByCodeCount(t *testing.T) {
 			startedAt := time.Date(2026, 8, 3, 2, 0, 0, 0, time.UTC)
 			clock := startedAt
 			db, service, session, _ := newLocalCodeSession(t, fmt.Sprintf("gmail-local-expiry-%d", test.count), &clock)
-			trade := &gmailTradeSpy{}
+			trade := newLocalGmailTradeSpy(db)
 			service.SetTrade(trade)
 			for i := 0; i < test.count; i++ {
 				require.NoError(t, service.RecordMatchedCode(
@@ -155,19 +164,19 @@ type retryGmailTradeSpy struct {
 	completeFailures int
 }
 
-func (s *retryGmailTradeSpy) CompleteGmailOrder(_ context.Context, orderNo, _ string) error {
-	s.completed = append(s.completed, orderNo)
+func (s *retryGmailTradeSpy) CompleteGmailOrder(ctx context.Context, orderNo, reason string) error {
 	if s.completeFailures > 0 {
+		s.completed = append(s.completed, orderNo)
 		s.completeFailures--
 		return errors.New("trade temporarily unavailable")
 	}
-	return nil
+	return s.gmailTradeSpy.CompleteGmailOrder(ctx, orderNo, reason)
 }
 
-func TestLocalGmailTerminalCallbackRetriesAfterAllocationRelease(t *testing.T) {
+func TestLocalGmailTerminalCallbackRetriesBeforeAllocationRelease(t *testing.T) {
 	clock := time.Date(2026, 8, 3, 3, 0, 0, 0, time.UTC)
 	db, service, session, _ := newLocalCodeSession(t, "gmail-local-callback-retry", &clock)
-	trade := &retryGmailTradeSpy{completeFailures: 1}
+	trade := &retryGmailTradeSpy{gmailTradeSpy: *newLocalGmailTradeSpy(db), completeFailures: 1}
 	service.SetTrade(trade)
 	for i := 0; i < MaxCodes; i++ {
 		err := service.RecordMatchedCode(
@@ -185,12 +194,14 @@ func TestLocalGmailTerminalCallbackRetriesAfterAllocationRelease(t *testing.T) {
 	require.NotNil(t, session.NextPollAt)
 	var allocation allocationModel
 	require.NoError(t, db.Where("order_no = ?", session.OrderNo).Take(&allocation).Error)
-	require.Equal(t, AllocationStatusReleased, allocation.Status)
+	require.Equal(t, AllocationStatusAllocated, allocation.Status)
 
 	require.NoError(t, service.Poll(context.Background(), session.ID))
 	session = loadGmailSession(t, db, session.ID)
 	require.Nil(t, session.NextPollAt)
 	require.Equal(t, []string{session.OrderNo, session.OrderNo}, trade.completed)
+	require.NoError(t, db.Where("order_no = ?", session.OrderNo).Take(&allocation).Error)
+	require.Equal(t, AllocationStatusReleased, allocation.Status)
 }
 
 type localMailIngestSpy struct {
@@ -213,7 +224,7 @@ func (s *localMailIngestSpy) IngestGmailMail(_ context.Context, _ uint, recipien
 func TestLocalGmailCursorAdvancesOnlyAfterWholeFetchIsIngested(t *testing.T) {
 	clock := time.Date(2026, 8, 3, 4, 0, 0, 0, time.UTC)
 	db, service, session, _ := newLocalCodeSession(t, "gmail-local-cursor", &clock)
-	service.SetTrade(&gmailTradeSpy{})
+	service.SetTrade(newLocalGmailTradeSpy(db))
 	cursors := make([]localGmailFolderCursors, 0, 2)
 	service.fetch = func(_ context.Context, email, _ string, cursor localGmailFolderCursors, _ time.Time, fullHistory bool) ([]localGmailFetchedMessage, localGmailFolderCursors, error) {
 		require.Equal(t, "local@gmail.com", email)
@@ -407,7 +418,7 @@ func TestFetchLocalPurchaseMailUsesTypedAllocationAndStableUIDs(t *testing.T) {
 func TestLocalGmailAuthenticationFailureDisablesSupplyAndRefunds(t *testing.T) {
 	clock := time.Date(2026, 8, 3, 5, 0, 0, 0, time.UTC)
 	db, service, session, resourceID := newLocalCodeSession(t, "gmail-local-auth-failure", &clock)
-	trade := &gmailTradeSpy{}
+	trade := newLocalGmailTradeSpy(db)
 	service.SetTrade(trade)
 	service.SetMailIngest(&localMailIngestSpy{})
 	service.fetch = func(context.Context, string, string, localGmailFolderCursors, time.Time, bool) ([]localGmailFetchedMessage, localGmailFolderCursors, error) {
@@ -430,7 +441,7 @@ func TestLocalGmailAuthenticationFailureDisablesSupplyAndRefunds(t *testing.T) {
 func TestCancelLocalGmailReleasesWithoutRemoteAction(t *testing.T) {
 	clock := time.Date(2026, 8, 3, 6, 0, 0, 0, time.UTC)
 	db, service, session, _ := newLocalCodeSession(t, "gmail-local-cancel", &clock)
-	trade := &gmailTradeSpy{}
+	trade := newLocalGmailTradeSpy(db)
 	service.SetTrade(trade)
 
 	require.NoError(t, service.CancelGmailOrder(context.Background(), session.OrderNo))

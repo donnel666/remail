@@ -5,19 +5,17 @@ import (
 	"testing"
 	"time"
 
+	allocapp "github.com/donnel666/remail/internal/alloc/app"
 	allocdomain "github.com/donnel666/remail/internal/alloc/domain"
-	tradeapp "github.com/donnel666/remail/internal/trade/app"
+	allocinfra "github.com/donnel666/remail/internal/alloc/infra"
 	tradedomain "github.com/donnel666/remail/internal/trade/domain"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
 
-func TestLocalGmailPurchaseSellsOneResourceAndReturnsOnlyToOrderLookup(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:gmail-local-purchase?mode=memory&cache=shared"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&resourceRootModel{}, &localResourceModel{}, &localAllocationGuardModel{}, &allocationModel{}))
-	prepareLocalGmailAllocationTestSchema(t, db)
+func TestLocalGmailPurchaseUsesUnifiedAllocationAndOrderLookup(t *testing.T) {
+	db := newLocalGmailAllocationTestDB(t, "gmail-local-purchase")
 	root := resourceRootModel{Type: "gmail", OwnerUserID: 1}
 	require.NoError(t, db.Create(&root).Error)
 	require.NoError(t, db.Create(&localResourceModel{
@@ -26,40 +24,38 @@ func TestLocalGmailPurchaseSellsOneResourceAndReturnsOnlyToOrderLookup(t *testin
 		TwoFactorSecret: "JBSWY3DPEHPK3PXP", AppPassword: "abcdefghijklmnop", ForSale: true, Status: localResourceRollbackNormal,
 	}).Error)
 
+	allocator := allocapp.NewUseCase(allocinfra.NewRepo(db))
+	allocation := allocateLocalGmailTest(t, allocator, "PURCHASE-1", 2, 12, allocdomain.GmailServiceModePurchase, allocdomain.SupplyScopePublic)
 	service := NewService(db, nil)
-	delivery, err := service.AllocateLocalPurchase(context.Background(), "PURCHASE-1", 2, 11, 12, tradedomain.SupplyPolicyPublicOnly, tradeapp.GmailSupplyQuote{Source: SourceLocal, CostPoints: "0"})
+	delivery, err := service.FindLocalPurchase(context.Background(), "PURCHASE-1")
 	require.NoError(t, err)
+	require.Equal(t, allocation.ID, delivery.AllocationID)
 	require.Equal(t, "purchase@gmail.com", delivery.Email)
 	require.Equal(t, "password", delivery.Password)
+
 	var resource localResourceModel
 	require.NoError(t, db.First(&resource, root.ID).Error)
 	require.Equal(t, localResourceRollbackNormal, resource.Status, "allocation occupancy must not overwrite resource health")
-	var allocation allocationModel
-	require.NoError(t, db.Where("order_no = ?", "PURCHASE-1").First(&allocation).Error)
-	require.EqualValues(t, 11, allocation.ProjectID)
-	require.EqualValues(t, 12, allocation.ProductID)
-	require.Equal(t, AllocationStatusAllocated, allocation.Status)
-	require.NoError(t, service.releaseLocalCodeAllocation(context.Background(), "PURCHASE-1"))
-	require.NoError(t, db.First(&allocation, allocation.ID).Error)
-	require.Equal(t, AllocationStatusAllocated, allocation.Status, "purchase allocations are permanent")
-	stored, err := service.FindLocalPurchase(context.Background(), "PURCHASE-1")
+	stored := mustLocalGmailAllocation(t, db, allocation.ID)
+	require.EqualValues(t, 11, stored.ProjectID)
+	require.EqualValues(t, 12, stored.ProductID)
+	require.Equal(t, AllocationStatusAllocated, stored.Status)
+
+	replayed := allocateLocalGmailTest(t, allocator, "PURCHASE-1", 2, 12, allocdomain.GmailServiceModePurchase, allocdomain.SupplyScopePublic)
+	require.Equal(t, allocation.ID, replayed.ID)
+	_, err = allocator.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo: "PURCHASE-2", BuyerUserID: 2, ProjectProductID: 12,
+		ServiceMode: allocdomain.GmailServiceModePurchase, SupplyScope: allocdomain.SupplyScopePublic,
+	})
+	require.ErrorIs(t, err, allocdomain.ErrInsufficientInventory)
+
+	_, err = allocator.ReleaseByOrder(context.Background(), "PURCHASE-1")
 	require.NoError(t, err)
-	require.Equal(t, delivery, stored)
-	replayed, err := service.AllocateLocalPurchase(context.Background(), "PURCHASE-1", 2, 11, 12, tradedomain.SupplyPolicyPublicOnly, tradeapp.GmailSupplyQuote{Source: SourceLocal, CostPoints: "0"})
-	require.NoError(t, err)
-	require.Equal(t, delivery, replayed)
-	_, err = service.AllocateLocalPurchase(context.Background(), "PURCHASE-2", 2, 11, 12, tradedomain.SupplyPolicyPublicOnly, tradeapp.GmailSupplyQuote{Source: SourceLocal, CostPoints: "0"})
-	require.ErrorIs(t, err, tradedomain.ErrInsufficientInventory)
-	require.NoError(t, service.ReleaseLocalAllocation(context.Background(), "PURCHASE-1"))
-	require.NoError(t, db.First(&allocation, allocation.ID).Error)
-	require.Equal(t, AllocationStatusReleased, allocation.Status)
+	require.Equal(t, AllocationStatusReleased, mustLocalGmailAllocation(t, db, allocation.ID).Status)
 }
 
-func TestLocalGmailPurchaseRechecksProjectHistory(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:gmail-local-purchase-history?mode=memory&cache=shared"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&resourceRootModel{}, &localResourceModel{}, &localAllocationGuardModel{}, &allocationModel{}))
-	prepareLocalGmailAllocationTestSchema(t, db)
+func TestUnifiedGmailAllocationRechecksProjectHistory(t *testing.T) {
+	db := newLocalGmailAllocationTestDB(t, "gmail-local-purchase-history")
 	resources := make([]localResourceModel, 2)
 	for i, email := range []string{"history@gmail.com", "fresh@gmail.com"} {
 		root := resourceRootModel{Type: "gmail", OwnerUserID: 1}
@@ -76,24 +72,56 @@ func TestLocalGmailPurchaseRechecksProjectHistory(t *testing.T) {
 	releasedAt := time.Now().UTC()
 	require.NoError(t, db.Create(&allocationModel{
 		OrderNo: "HISTORY-1", GuardType: "gmail", ProjectID: 11, ProductID: 12,
-		Source: SourceLocal, ServiceMode: string(tradedomain.ServiceModeCode), ResourceID: &historyResourceID,
+		Source: SourceLocal, ServiceMode: string(allocdomain.GmailServiceModeCode), ResourceID: &historyResourceID,
 		SupplyScope: AllocationSupplyPublic, Email: resources[0].Email, Status: AllocationStatusReleased,
 		ReleasedAt: &releasedAt,
 	}).Error)
 
-	delivery, err := NewService(db, nil).AllocateLocalPurchase(
-		context.Background(), "PURCHASE-AFTER-HISTORY", 2, 11, 12, tradedomain.SupplyPolicyPublicOnly,
-		tradeapp.GmailSupplyQuote{Source: SourceLocal, CostPoints: "0"},
+	allocation := allocateLocalGmailTest(
+		t, allocapp.NewUseCase(allocinfra.NewRepo(db)), "PURCHASE-AFTER-HISTORY", 2, 12,
+		allocdomain.GmailServiceModePurchase, allocdomain.SupplyScopePublic,
 	)
-	require.NoError(t, err)
-	require.Equal(t, resources[1].ID, delivery.ResourceID)
+	require.Equal(t, resources[1].ID, allocation.ResourceID)
 }
 
-func TestLocalGmailAllocationHonorsPrivateFirstAndPublicOnly(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:gmail-local-allocation-policy?mode=memory&cache=shared"), &gorm.Config{})
+func TestLocalGmailSupplyIgnoresUpstreamHistoryButKeepsLocalHistory(t *testing.T) {
+	db := newLocalGmailAllocationTestDB(t, "gmail-local-supply-history")
+	root := resourceRootModel{Type: "gmail", OwnerUserID: 1}
+	require.NoError(t, db.Create(&root).Error)
+	require.NoError(t, db.Create(&localResourceModel{
+		ID: root.ID, ResourceType: "gmail", OwnerUserID: 1, Email: "supply@gmail.com", Identity: "supply@gmail.com",
+		Password: "password", TwoFactorSecret: "JBSWY3DPEHPK3PXP", AppPassword: "app-password",
+		ForSale: true, Status: LocalResourceNormal,
+	}).Error)
+	resourceID := root.ID
+	require.NoError(t, db.Create(&allocationModel{
+		OrderNo: "UPSTREAM-HISTORY", GuardType: "gmail", ProjectID: 11, ProductID: 12,
+		Source: "smsbower", ServiceMode: string(allocdomain.GmailServiceModeCode), ResourceID: &resourceID,
+		SupplyScope: AllocationSupplyPublic, Mailbox: GmailMailboxMain, Email: "supply@gmail.com",
+		Status: AllocationStatusAllocated,
+	}).Error)
+
+	service := NewService(db, nil)
+	quote, err := service.CheckSupply(
+		context.Background(), 11, 12, 2,
+		tradedomain.ServiceModeCode, tradedomain.SupplyPolicyPublicOnly, "1.00",
+	)
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&resourceRootModel{}, &localResourceModel{}, &localAllocationGuardModel{}, &allocationModel{}))
-	prepareLocalGmailAllocationTestSchema(t, db)
+	require.EqualValues(t, 1, quote.Available)
+
+	require.NoError(t, db.Model(&allocationModel{}).Where("order_no = ?", "UPSTREAM-HISTORY").Updates(map[string]any{
+		"source": SourceLocal,
+		"status": AllocationStatusReleased,
+	}).Error)
+	_, err = service.CheckSupply(
+		context.Background(), 11, 12, 2,
+		tradedomain.ServiceModeCode, tradedomain.SupplyPolicyPublicOnly, "1.00",
+	)
+	require.ErrorIs(t, err, tradedomain.ErrUpstreamUnavailable)
+}
+
+func TestUnifiedGmailAllocationHonorsPrivateFirstAndPublicOnly(t *testing.T) {
+	db := newLocalGmailAllocationTestDB(t, "gmail-local-allocation-policy")
 	require.NoError(t, db.Exec("INSERT INTO users(id, status, role) VALUES (2, 'active', 'user')").Error)
 
 	privateRoot := resourceRootModel{Type: "gmail", OwnerUserID: 2}
@@ -107,67 +135,60 @@ func TestLocalGmailAllocationHonorsPrivateFirstAndPublicOnly(t *testing.T) {
 		require.NoError(t, db.Create(&resource).Error)
 	}
 
-	service := NewService(db, nil)
-	owned, err := service.AllocateLocalCode(
-		context.Background(), "GMAIL-PRIVATE-FIRST", 2, 11, 12, tradedomain.SupplyPolicyPrivateFirst,
-		tradeapp.GmailSupplyQuote{Source: SourceLocal, CostPoints: "7"},
-	)
+	allocator := allocapp.NewUseCase(allocinfra.NewRepo(db))
+	owned, err := allocator.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo: "GMAIL-PRIVATE-FIRST", BuyerUserID: 2, ProjectProductID: 12,
+		ServiceMode:  allocdomain.GmailServiceModeCode,
+		SupplyScopes: []allocdomain.SupplyScope{allocdomain.SupplyScopeOwned, allocdomain.SupplyScopePublic},
+	})
 	require.NoError(t, err)
-	require.Equal(t, privateRoot.ID, uint(*mustLocalGmailAllocation(t, db, owned.AllocationID).ResourceID))
-	require.Equal(t, tradeapp.SupplyScopeOwned, owned.SupplyScope)
-	require.Equal(t, "0.00", mustLocalGmailAllocation(t, db, owned.AllocationID).CostPointsSnapshot)
+	require.Equal(t, privateRoot.ID, owned.ResourceID)
+	require.Equal(t, allocdomain.SupplyScopeOwned, owned.SupplyScope)
+	require.Equal(t, "0.00", mustLocalGmailAllocation(t, db, owned.ID).CostPointsSnapshot)
 
-	public, err := service.AllocateLocalCode(
-		context.Background(), "GMAIL-PUBLIC-ONLY", 2, 11, 12, tradedomain.SupplyPolicyPublicOnly,
-		tradeapp.GmailSupplyQuote{Source: SourceLocal, CostPoints: "7"},
+	public := allocateLocalGmailTest(
+		t, allocator, "GMAIL-PUBLIC-ONLY", 2, 12,
+		allocdomain.GmailServiceModeCode, allocdomain.SupplyScopePublic,
 	)
-	require.NoError(t, err)
-	require.Equal(t, publicRoot.ID, uint(*mustLocalGmailAllocation(t, db, public.AllocationID).ResourceID))
-	require.Equal(t, tradeapp.SupplyScopePublic, public.SupplyScope)
+	require.Equal(t, publicRoot.ID, public.ResourceID)
+	require.Equal(t, allocdomain.SupplyScopePublic, public.SupplyScope)
+	require.Equal(t, "7.00", mustLocalGmailAllocation(t, db, public.ID).CostPointsSnapshot)
 }
 
-func TestLocalGmailAllocationRechecksProductModeAndPublicOwner(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:gmail-local-allocation-recheck?mode=memory&cache=shared"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&resourceRootModel{}, &localResourceModel{}, &localAllocationGuardModel{}, &allocationModel{}))
-	prepareLocalGmailAllocationTestSchema(t, db)
+func TestUnifiedGmailAllocationRechecksProductModeAndPublicOwner(t *testing.T) {
+	db := newLocalGmailAllocationTestDB(t, "gmail-local-allocation-recheck")
 	root := resourceRootModel{Type: "gmail", OwnerUserID: 1}
 	require.NoError(t, db.Create(&root).Error)
 	require.NoError(t, db.Create(&localResourceModel{
 		ID: root.ID, ResourceType: "gmail", OwnerUserID: 1, Email: "guarded@gmail.com", Identity: "guarded@gmail.com",
 		Password: "password", TwoFactorSecret: "JBSWY3DPEHPK3PXP", AppPassword: "app-password", ForSale: true, Status: LocalResourceNormal,
 	}).Error)
-	service := NewService(db, nil)
+	allocator := allocapp.NewUseCase(allocinfra.NewRepo(db))
 
 	require.NoError(t, db.Exec("UPDATE project_products SET purchase_enabled = 0 WHERE id = 12").Error)
-	_, err = service.AllocateLocalPurchase(
-		context.Background(), "GMAIL-MODE-DISABLED", 2, 11, 12, tradedomain.SupplyPolicyPublicOnly,
-		tradeapp.GmailSupplyQuote{Source: SourceLocal, CostPoints: "1"},
-	)
+	_, err := allocator.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo: "GMAIL-MODE-DISABLED", BuyerUserID: 2, ProjectProductID: 12,
+		ServiceMode: allocdomain.GmailServiceModePurchase, SupplyScope: allocdomain.SupplyScopePublic,
+	})
 	require.ErrorIs(t, err, allocdomain.ErrProjectNotAllocatable)
 
 	require.NoError(t, db.Exec("UPDATE users SET role = 'user' WHERE id = 1").Error)
-	_, err = service.AllocateLocalCode(
-		context.Background(), "GMAIL-INELIGIBLE-OWNER", 2, 11, 12, tradedomain.SupplyPolicyPublicOnly,
-		tradeapp.GmailSupplyQuote{Source: SourceLocal, CostPoints: "1"},
-	)
-	require.ErrorIs(t, err, tradedomain.ErrInsufficientInventory)
+	_, err = allocator.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo: "GMAIL-INELIGIBLE-OWNER", BuyerUserID: 2, ProjectProductID: 12,
+		ServiceMode: allocdomain.GmailServiceModeCode, SupplyScope: allocdomain.SupplyScopePublic,
+	})
+	require.ErrorIs(t, err, allocdomain.ErrInsufficientInventory)
 }
 
-func TestLocalGmailDotAndPlusAllocationKeepsAliasHistoryPerProject(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:gmail-local-alias-allocation?mode=memory&cache=shared"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&resourceRootModel{}, &localResourceModel{}, &localAllocationGuardModel{}, &allocationModel{}))
-	prepareLocalGmailAllocationTestSchema(t, db)
-	require.NoError(t, db.Exec(`
-INSERT INTO projects(id, status, access_type) VALUES (21, 'listed', 'public')`).Error)
+func TestUnifiedGmailDotAndPlusHistoryIsProjectScoped(t *testing.T) {
+	db := newLocalGmailAllocationTestDB(t, "gmail-local-alias-allocation")
+	require.NoError(t, db.Exec("INSERT INTO projects(id, status, access_type) VALUES (21, 'listed', 'public')").Error)
 	require.NoError(t, db.Exec(`
 INSERT INTO project_products(
     id, project_id, type, status, code_enabled, purchase_enabled,
-    main_weight, dot_weight, plus_weight
-) VALUES (22, 21, 'gmail', 'enabled', 1, 1, 0, 1, 0)`).Error)
-	require.NoError(t, db.Exec(`
-UPDATE project_products SET main_weight = 0, dot_weight = 1, plus_weight = 0 WHERE id = 12`).Error)
+    code_supplier_price, purchase_supplier_price, main_weight, dot_weight, plus_weight
+) VALUES (22, 21, 'gmail', 'enabled', 1, 1, '0', '0', 0, 1, 0)`).Error)
+	require.NoError(t, db.Exec("UPDATE project_products SET main_weight = 0, dot_weight = 1, plus_weight = 0 WHERE id = 12").Error)
 
 	root := resourceRootModel{Type: "gmail", OwnerUserID: 1}
 	require.NoError(t, db.Create(&root).Error)
@@ -176,54 +197,66 @@ UPDATE project_products SET main_weight = 0, dot_weight = 1, plus_weight = 0 WHE
 		Email: "firstname@gmail.com", Identity: "firstname@gmail.com", Password: "password",
 		TwoFactorSecret: "JBSWY3DPEHPK3PXP", AppPassword: "app-password", ForSale: true, Status: LocalResourceNormal,
 	}).Error)
-	service := NewService(db, nil)
-	allocate := func(orderNo string, projectID, productID uint) allocationModel {
-		result, err := service.AllocateLocalCode(
-			context.Background(), orderNo, 2, projectID, productID, tradedomain.SupplyPolicyPublicOnly,
-			tradeapp.GmailSupplyQuote{Source: SourceLocal, CostPoints: "0"},
+	allocator := allocapp.NewUseCase(allocinfra.NewRepo(db))
+	allocateDot := func(orderNo string, productID uint) allocationModel {
+		result := allocateLocalGmailTest(
+			t, allocator, orderNo, 2, productID,
+			allocdomain.GmailServiceModeCode, allocdomain.SupplyScopePublic,
 		)
-		require.NoError(t, err)
-		allocation := mustLocalGmailAllocation(t, db, result.AllocationID)
+		allocation := mustLocalGmailAllocation(t, db, result.ID)
 		require.Equal(t, GmailMailboxDot, allocation.Mailbox)
 		require.NotEqual(t, "firstname@gmail.com", allocation.Email)
 		return allocation
 	}
 
-	first := allocate("GMAIL-DOT-FIRST", 11, 12)
-	require.NoError(t, service.ReleaseLocalAllocation(context.Background(), first.OrderNo))
-	second := allocate("GMAIL-DOT-SECOND", 11, 12)
+	first := allocateDot("GMAIL-DOT-FIRST", 12)
+	_, err := allocator.ReleaseByOrder(context.Background(), first.OrderNo)
+	require.NoError(t, err)
+	second := allocateDot("GMAIL-DOT-SECOND", 12)
 	require.NotEqual(t, first.Email, second.Email, "one project must not reuse the same dot alias")
-	require.NoError(t, service.ReleaseLocalAllocation(context.Background(), second.OrderNo))
-	otherProject := allocate("GMAIL-DOT-OTHER-PROJECT", 21, 22)
+	_, err = allocator.ReleaseByOrder(context.Background(), second.OrderNo)
+	require.NoError(t, err)
+	otherProject := allocateDot("GMAIL-DOT-OTHER-PROJECT", 22)
 	require.Equal(t, first.Email, otherProject.Email, "another project may reuse the same Gmail dot alias")
 
-	require.NoError(t, service.ReleaseLocalAllocation(context.Background(), otherProject.OrderNo))
-	require.NoError(t, db.Exec(`
-UPDATE project_products SET main_weight = 0, dot_weight = 0, plus_weight = 1 WHERE id = 12`).Error)
-	plus, err := service.AllocateLocalCode(
-		context.Background(), "GMAIL-PLUS", 2, 11, 12, tradedomain.SupplyPolicyPublicOnly,
-		tradeapp.GmailSupplyQuote{Source: SourceLocal, CostPoints: "0"},
-	)
+	_, err = allocator.ReleaseByOrder(context.Background(), otherProject.OrderNo)
 	require.NoError(t, err)
-	plusAllocation := mustLocalGmailAllocation(t, db, plus.AllocationID)
+	require.NoError(t, db.Exec("UPDATE project_products SET main_weight = 0, dot_weight = 0, plus_weight = 1 WHERE id = 12").Error)
+	plus := allocateLocalGmailTest(
+		t, allocator, "GMAIL-PLUS", 2, 12,
+		allocdomain.GmailServiceModeCode, allocdomain.SupplyScopePublic,
+	)
+	plusAllocation := mustLocalGmailAllocation(t, db, plus.ID)
 	require.Equal(t, GmailMailboxPlus, plusAllocation.Mailbox)
 	require.Contains(t, plusAllocation.Email, "+p")
 }
 
-func TestGmailMailboxPreferencesHonorProductWeights(t *testing.T) {
-	for _, test := range []struct {
-		name   string
-		config localGmailProductConfig
-		want   string
-	}{
-		{name: "main", config: localGmailProductConfig{ProductID: 1, MainWeight: 1}, want: GmailMailboxMain},
-		{name: "dot", config: localGmailProductConfig{ProductID: 1, DotWeight: 1}, want: GmailMailboxDot},
-		{name: "plus", config: localGmailProductConfig{ProductID: 1, PlusWeight: 1}, want: GmailMailboxPlus},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			require.Equal(t, []string{test.want}, gmailMailboxPreferences("ORDER", test.config))
-		})
-	}
+func newLocalGmailAllocationTestDB(t *testing.T, name string) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open("file:"+name+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&resourceRootModel{}, &localResourceModel{}, &localAllocationGuardModel{}, &allocationModel{}))
+	prepareLocalGmailAllocationTestSchema(t, db)
+	return db
+}
+
+func allocateLocalGmailTest(
+	t *testing.T,
+	allocator *allocapp.UseCase,
+	orderNo string,
+	buyerUserID, productID uint,
+	mode allocdomain.GmailServiceMode,
+	scope allocdomain.SupplyScope,
+) *allocdomain.UnifiedAllocation {
+	t.Helper()
+	result, err := allocator.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo: orderNo, BuyerUserID: buyerUserID, ProjectProductID: productID,
+		ServiceMode: mode, SupplyScope: scope,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, allocdomain.AllocationTypeGmail, result.Type)
+	return result
 }
 
 func mustLocalGmailAllocation(t *testing.T, db *gorm.DB, allocationID uint) allocationModel {
@@ -237,9 +270,9 @@ func prepareLocalGmailAllocationTestSchema(t *testing.T, db *gorm.DB) {
 	t.Helper()
 	require.NoError(t, db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, status TEXT NOT NULL, role TEXT NOT NULL)").Error)
 	require.NoError(t, db.Exec("CREATE TABLE projects (id INTEGER PRIMARY KEY, status TEXT NOT NULL, access_type TEXT NOT NULL)").Error)
-	require.NoError(t, db.Exec("CREATE TABLE project_products (id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, type TEXT NOT NULL, status TEXT NOT NULL, code_enabled INTEGER NOT NULL, purchase_enabled INTEGER NOT NULL, main_weight INTEGER NOT NULL DEFAULT 1, dot_weight INTEGER NOT NULL DEFAULT 0, plus_weight INTEGER NOT NULL DEFAULT 0)").Error)
+	require.NoError(t, db.Exec("CREATE TABLE project_products (id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, type TEXT NOT NULL, status TEXT NOT NULL, code_enabled INTEGER NOT NULL, purchase_enabled INTEGER NOT NULL, code_supplier_price TEXT NOT NULL DEFAULT '0', purchase_supplier_price TEXT NOT NULL DEFAULT '0', main_weight INTEGER NOT NULL DEFAULT 1, dot_weight INTEGER NOT NULL DEFAULT 0, plus_weight INTEGER NOT NULL DEFAULT 0)").Error)
 	require.NoError(t, db.Exec("CREATE TABLE project_accesses (project_id INTEGER NOT NULL, user_id INTEGER NOT NULL)").Error)
 	require.NoError(t, db.Exec("INSERT INTO users(id, status, role) VALUES (1, 'active', 'supplier')").Error)
 	require.NoError(t, db.Exec("INSERT INTO projects(id, status, access_type) VALUES (11, 'listed', 'public')").Error)
-	require.NoError(t, db.Exec("INSERT INTO project_products(id, project_id, type, status, code_enabled, purchase_enabled, main_weight, dot_weight, plus_weight) VALUES (12, 11, 'gmail', 'enabled', 1, 1, 1, 0, 0)").Error)
+	require.NoError(t, db.Exec("INSERT INTO project_products(id, project_id, type, status, code_enabled, purchase_enabled, code_supplier_price, purchase_supplier_price, main_weight, dot_weight, plus_weight) VALUES (12, 11, 'gmail', 'enabled', 1, 1, '7', '8', 1, 0, 0)").Error)
 }

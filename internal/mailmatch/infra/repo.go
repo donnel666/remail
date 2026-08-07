@@ -169,7 +169,7 @@ func (r *Repo) LoadPickupScope(ctx context.Context, token string, email string) 
 		return nil, domain.ErrPickupCredentialInvalid
 	}
 	var row orderScopeRow
-	if err := r.dbFor(ctx).Raw(pickupScopeSQL, token, email, email, email).Scan(&row).Error; err != nil {
+	if err := r.dbFor(ctx).Raw(pickupScopeSQL, token, email, email, email, email).Scan(&row).Error; err != nil {
 		return nil, fmt.Errorf("load pickup mail scope: %w", err)
 	}
 	if row.OrderNo == "" {
@@ -416,7 +416,7 @@ func (r *Repo) loadOrderScope(ctx context.Context, orderNo string) (*app.OrderSc
 		return nil, domain.ErrInvalidRequest
 	}
 	var row orderScopeRow
-	err := r.dbFor(ctx).Raw(orderScopeSQL, orderNo, orderNo, orderNo).Scan(&row).Error
+	err := r.dbFor(ctx).Raw(orderScopeSQL, orderNo, orderNo, orderNo, orderNo).Scan(&row).Error
 	if err != nil {
 		return nil, fmt.Errorf("load order mail scope: %w", err)
 	}
@@ -465,21 +465,23 @@ SELECT
     o.service_mode,
     o.status AS order_status,
     o.allocation_type,
-    COALESCE(o.microsoft_alloc_id, o.domain_alloc_id, ga.id, 0) AS allocation_id,
+	COALESCE(o.microsoft_alloc_id, o.domain_alloc_id, ga.id, o.icloud_alloc_id, 0) AS allocation_id,
     CASE
       WHEN o.allocation_type = 'microsoft' AND ma.mailbox IN ('dot', 'plus') THEN ma.mailbox
-      WHEN o.allocation_type = 'gmail' AND ga.mailbox IN ('dot', 'plus') THEN ga.mailbox
+	      WHEN o.allocation_type = 'gmail' AND ga.mailbox IN ('dot', 'plus') THEN ga.mailbox
       ELSE 'exact'
     END AS recipient_kind,
     CASE
       WHEN o.allocation_type = 'microsoft' THEN ma.resource_id
-      WHEN o.allocation_type = 'domain' THEN da.resource_id
-      ELSE ga.resource_id
+	      WHEN o.allocation_type = 'domain' THEN da.resource_id
+	      WHEN o.allocation_type = 'icloud' THEN ia.resource_id
+	      ELSE ga.resource_id
     END AS email_resource_id,
     CASE
       WHEN o.allocation_type = 'microsoft' THEN ma.email
-      WHEN o.allocation_type = 'domain' THEN da.email
-      ELSE ga.email
+	      WHEN o.allocation_type = 'domain' THEN da.email
+	      WHEN o.allocation_type = 'icloud' THEN ia.email
+	      ELSE ga.email
     END AS recipient,
     o.receive_started_at,
     o.receive_until,
@@ -495,12 +497,14 @@ JOIN projects p ON p.id = o.project_id
 LEFT JOIN microsoft_allocations ma ON ma.id = o.microsoft_alloc_id AND o.allocation_type = 'microsoft'
 LEFT JOIN microsoft_resources mr ON mr.id = ma.resource_id
 LEFT JOIN domain_allocations da ON da.id = o.domain_alloc_id AND o.allocation_type = 'domain'
-LEFT JOIN gmail_allocations ga ON ga.order_no = o.order_no AND o.allocation_type = 'gmail'
+	LEFT JOIN gmail_allocations ga ON ga.order_no = o.order_no AND o.allocation_type = 'gmail'
+	LEFT JOIN icloud_allocations ia ON ia.id = o.icloud_alloc_id AND o.allocation_type = 'icloud'
 WHERE o.order_no = ?
   AND (
     (o.allocation_type = 'microsoft' AND ma.order_no = ?)
     OR (o.allocation_type = 'domain' AND da.order_no = ?)
-    OR (o.allocation_type = 'gmail' AND ga.order_no = o.order_no AND ga.resource_id IS NOT NULL)
+	    OR (o.allocation_type = 'gmail' AND ga.order_no = o.order_no AND ga.resource_id IS NOT NULL)
+	    OR (o.allocation_type = 'icloud' AND ia.order_no = o.order_no AND ia.status = 'allocated')
   )
 LIMIT 1`
 
@@ -514,21 +518,23 @@ SELECT
     o.service_mode,
     o.status AS order_status,
     o.allocation_type,
-    COALESCE(o.microsoft_alloc_id, o.domain_alloc_id, ga.id, 0) AS allocation_id,
+	COALESCE(o.microsoft_alloc_id, o.domain_alloc_id, ga.id, o.icloud_alloc_id, 0) AS allocation_id,
     CASE
       WHEN o.allocation_type = 'microsoft' AND ma.mailbox IN ('dot', 'plus') THEN ma.mailbox
-      WHEN o.allocation_type = 'gmail' AND ga.mailbox IN ('dot', 'plus') THEN ga.mailbox
+	      WHEN o.allocation_type = 'gmail' AND ga.mailbox IN ('dot', 'plus') THEN ga.mailbox
       ELSE 'exact'
     END AS recipient_kind,
     CASE
       WHEN o.allocation_type = 'microsoft' THEN ma.resource_id
-      WHEN o.allocation_type = 'domain' THEN da.resource_id
-      ELSE ga.resource_id
+	      WHEN o.allocation_type = 'domain' THEN da.resource_id
+	      WHEN o.allocation_type = 'icloud' THEN ia.resource_id
+	      ELSE ga.resource_id
     END AS email_resource_id,
     CASE
       WHEN o.allocation_type = 'microsoft' THEN ma.email
-      WHEN o.allocation_type = 'domain' THEN da.email
-      ELSE ga.email
+	      WHEN o.allocation_type = 'domain' THEN da.email
+	      WHEN o.allocation_type = 'icloud' THEN ia.email
+	      ELSE ga.email
     END AS recipient,
     o.receive_started_at,
     o.receive_until,
@@ -550,9 +556,12 @@ LEFT JOIN domain_allocations da
   ON da.id = o.domain_alloc_id
  AND o.allocation_type = 'domain'
  AND da.order_no = o.order_no
-LEFT JOIN gmail_allocations ga
+	LEFT JOIN gmail_allocations ga
   ON ga.order_no = o.order_no
- AND o.allocation_type = 'gmail'
+	 AND o.allocation_type = 'gmail'
+	LEFT JOIN icloud_allocations ia
+	  ON ia.id = o.icloud_alloc_id
+	 AND o.allocation_type = 'icloud'
 WHERE t.token_plain = ?
   AND t.enabled = 1
   AND (t.expire_at IS NULL OR t.expire_at > UTC_TIMESTAMP())
@@ -561,7 +570,8 @@ WHERE t.token_plain = ?
     OR
     (o.allocation_type = 'domain' AND da.order_no = o.order_no AND da.email = ?)
     OR
-    (o.allocation_type = 'gmail' AND ga.order_no = o.order_no AND ga.resource_id IS NOT NULL AND ga.email = ?)
+	    (o.allocation_type = 'gmail' AND ga.order_no = o.order_no AND ga.resource_id IS NOT NULL AND ga.email = ?)
+	    OR (o.allocation_type = 'icloud' AND ia.order_no = o.order_no AND ia.status = 'allocated' AND ia.email = ?)
   )
 LIMIT 1`
 
@@ -576,21 +586,23 @@ SELECT
     o.service_mode,
     o.status AS order_status,
     o.allocation_type,
-    COALESCE(o.microsoft_alloc_id, o.domain_alloc_id, ga.id, 0) AS allocation_id,
+	COALESCE(o.microsoft_alloc_id, o.domain_alloc_id, ga.id, o.icloud_alloc_id, 0) AS allocation_id,
     CASE
       WHEN o.allocation_type = 'microsoft' AND ma.mailbox IN ('dot', 'plus') THEN ma.mailbox
-      WHEN o.allocation_type = 'gmail' AND ga.mailbox IN ('dot', 'plus') THEN ga.mailbox
+	      WHEN o.allocation_type = 'gmail' AND ga.mailbox IN ('dot', 'plus') THEN ga.mailbox
       ELSE 'exact'
     END AS recipient_kind,
     CASE
       WHEN o.allocation_type = 'microsoft' THEN ma.resource_id
-      WHEN o.allocation_type = 'domain' THEN da.resource_id
-      ELSE ga.resource_id
+	      WHEN o.allocation_type = 'domain' THEN da.resource_id
+	      WHEN o.allocation_type = 'icloud' THEN ia.resource_id
+	      ELSE ga.resource_id
     END AS email_resource_id,
     CASE
       WHEN o.allocation_type = 'microsoft' THEN ma.email
-      WHEN o.allocation_type = 'domain' THEN da.email
-      ELSE ga.email
+	      WHEN o.allocation_type = 'domain' THEN da.email
+	      WHEN o.allocation_type = 'icloud' THEN ia.email
+	      ELSE ga.email
     END AS recipient,
     o.receive_started_at,
     o.receive_until,
@@ -613,13 +625,16 @@ LEFT JOIN domain_allocations da
   ON da.id = o.domain_alloc_id
  AND o.allocation_type = 'domain'
  AND da.order_no = o.order_no
-LEFT JOIN gmail_allocations ga
+	LEFT JOIN gmail_allocations ga
   ON ga.order_no = o.order_no
- AND o.allocation_type = 'gmail'
+	 AND o.allocation_type = 'gmail'
+	LEFT JOIN icloud_allocations ia
+	  ON ia.id = o.icloud_alloc_id
+	 AND o.allocation_type = 'icloud'
 WHERE t.token_plain IN ?
   AND t.enabled = 1
   AND (t.expire_at IS NULL OR t.expire_at > UTC_TIMESTAMP())
-  AND (o.allocation_type <> 'gmail' OR ga.resource_id IS NOT NULL)`
+	AND (o.allocation_type NOT IN ('gmail', 'icloud') OR ga.resource_id IS NOT NULL OR ia.status = 'allocated')`
 
 const microsoftMatchingScopesSQL = `
 SELECT
@@ -715,6 +730,42 @@ WHERE ga.resource_id = ?
     )
     OR
     (o.service_mode = 'purchase' AND o.status IN ('active', 'completed'))
+  )
+ORDER BY o.created_at ASC, o.id ASC`
+
+const icloudMatchingScopesSQL = `
+SELECT
+    o.id AS order_id,
+    o.order_no,
+    o.user_id,
+    o.project_id,
+    o.project_product_id AS product_id,
+    o.service_mode,
+    o.status AS order_status,
+    o.allocation_type,
+    ia.id AS allocation_id,
+    'exact' AS recipient_kind,
+    ia.resource_id AS email_resource_id,
+    ia.email AS recipient,
+    o.receive_started_at,
+    o.receive_until,
+    o.activated_at,
+    o.after_sale_until,
+    p.loose_match,
+    '' AS microsoft_email,
+    '' AS microsoft_client_id,
+    '' AS microsoft_rt,
+    0 AS credential_revision
+FROM icloud_allocations ia
+JOIN orders o ON o.icloud_alloc_id = ia.id AND o.allocation_type = 'icloud'
+JOIN projects p ON p.id = o.project_id
+WHERE ia.resource_id = ?
+  AND ia.email = ?
+  AND ia.status = 'allocated'
+  AND (o.receive_started_at IS NULL OR ? >= DATE_SUB(o.receive_started_at, INTERVAL 2 MINUTE))
+  AND (
+    (o.service_mode = 'code' AND o.status = 'active' AND (o.receive_until IS NULL OR ? <= o.receive_until))
+    OR (o.service_mode = 'purchase' AND o.status IN ('active', 'completed'))
   )
 ORDER BY o.created_at ASC, o.id ASC`
 
@@ -954,6 +1005,8 @@ func (r *Repo) ListMatchingScopesByRecipient(ctx context.Context, resourceType d
 				rows = exact
 			}
 		}
+	case domain.ResourceTypeICloud:
+		err = r.dbFor(ctx).Raw(icloudMatchingScopesSQL, emailResourceID, recipient, receivedAt, receivedAt).Scan(&rows).Error
 	default:
 		return nil, nil
 	}

@@ -29,6 +29,7 @@ type TradePort interface {
 	ActivateGmailOrder(ctx context.Context, req tradeapp.ActivateGmailOrderRequest) error
 	CompleteGmailOrder(ctx context.Context, orderNo, reason string) error
 	FailGmailOrder(ctx context.Context, orderNo, reason string) error
+	ImportHistoricalGmailUsage(ctx context.Context, history []tradeapp.HistoricalGmailUsage) error
 }
 
 type Service struct {
@@ -133,8 +134,8 @@ func (s *Service) checkLocalSupply(
 	 WHERE gr.status IN (?, ?)
 	   AND (
 	     (pp.main_weight > 0
-	       AND NOT EXISTS (SELECT 1 FROM gmail_allocations AS active WHERE active.resource_id = gr.id AND active.mailbox = 'main' AND active.status = ?)
-	       AND NOT EXISTS (SELECT 1 FROM gmail_allocations AS history WHERE history.resource_id = gr.id AND history.project_id = pp.project_id AND history.mailbox = 'main'))
+	       AND NOT EXISTS (SELECT 1 FROM gmail_allocations AS active WHERE active.source = 'local' AND active.resource_id = gr.id AND active.mailbox = 'main' AND active.status = ?)
+	       AND NOT EXISTS (SELECT 1 FROM gmail_allocations AS history WHERE history.source = 'local' AND history.resource_id = gr.id AND history.project_id = pp.project_id AND history.mailbox = 'main'))
 	     OR (pp.dot_weight > 0 AND gr.email LIKE '__%@%')
 	     OR pp.plus_weight > 0
 	   )
@@ -159,64 +160,6 @@ func (s *Service) checkLocalSupply(
 	return &tradeapp.GmailSupplyQuote{
 		Source: SourceLocal, CostPoints: money.Format(cost), Available: row.Available,
 	}, nil
-}
-
-func (s *Service) ListInventory(ctx context.Context, projectIDs []uint) ([]InventoryItem, error) {
-	projectIDs = uniqueUintValues(projectIDs)
-	if len(projectIDs) == 0 {
-		return []InventoryItem{}, nil
-	}
-	type inventoryRow struct {
-		ProjectID       uint   `gorm:"column:project_id"`
-		ProductID       uint   `gorm:"column:product_id"`
-		ProductStatus   string `gorm:"column:product_status"`
-		CodeEnabled     bool   `gorm:"column:code_enabled"`
-		PurchaseEnabled bool   `gorm:"column:purchase_enabled"`
-		LocalStock      int64  `gorm:"column:local_stock"`
-	}
-	var rows []inventoryRow
-	if err := s.dbFor(ctx).Table("project_products AS pp").
-		Select(`pp.project_id, pp.id AS product_id, pp.status AS product_status, pp.code_enabled, pp.purchase_enabled,
-	(SELECT COUNT(*) FROM gmail_resources AS gr
-	 WHERE gr.status IN (?, ?)
-	   AND NOT EXISTS (SELECT 1 FROM gmail_allocations AS active WHERE active.resource_id = gr.id AND active.status = ?)
-	   AND NOT EXISTS (SELECT 1 FROM gmail_allocations AS history WHERE history.resource_id = gr.id AND history.project_id = pp.project_id)) AS local_stock`, LocalResourceNormal, localResourceRollbackNormal, AllocationStatusAllocated).
-		Where("pp.project_id IN ? AND pp.type = ?", projectIDs, "gmail").
-		Scan(&rows).Error; err != nil {
-		return nil, fmt.Errorf("load Gmail inventory: %w", err)
-	}
-	items := make([]InventoryItem, 0, len(rows))
-	for _, row := range rows {
-		item := InventoryItem{ProjectID: row.ProjectID, ProductID: row.ProductID}
-		if row.ProductStatus != "enabled" {
-			items = append(items, item)
-			continue
-		}
-		if row.LocalStock > 0 && row.CodeEnabled {
-			item.CodeAvailable += row.LocalStock
-		}
-		if row.LocalStock > 0 && row.PurchaseEnabled {
-			item.PurchaseAvailable += row.LocalStock
-		}
-		items = append(items, item)
-	}
-	return items, nil
-}
-
-func uniqueUintValues(values []uint) []uint {
-	result := make([]uint, 0, len(values))
-	seen := make(map[uint]struct{}, len(values))
-	for _, value := range values {
-		if value == 0 {
-			continue
-		}
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		result = append(result, value)
-	}
-	return result
 }
 
 func (s *Service) FindSessionID(ctx context.Context, orderNo string) (uint, error) {
@@ -279,17 +222,11 @@ func (s *Service) CancelGmailOrder(ctx context.Context, orderNo string) error {
 
 func (s *Service) CreateSession(ctx context.Context, cmd tradeapp.GmailSessionCommand) (uint, error) {
 	cmd.OrderNo = strings.TrimSpace(cmd.OrderNo)
-	quote := cmd.Quote
-	quote.Source = strings.TrimSpace(quote.Source)
-	if cmd.OrderNo == "" || quote.Source != SourceLocal || cmd.ProjectID == 0 || cmd.ProductID == 0 || cmd.CodeWindowMinutes <= 0 {
-		return 0, ErrInvalidRoute
-	}
-	cost, err := money.Parse(quote.CostPoints)
-	if err != nil || cost.IsNegative() {
+	if cmd.OrderNo == "" || cmd.ProjectID == 0 || cmd.ProductID == 0 || cmd.CodeWindowMinutes <= 0 {
 		return 0, ErrInvalidRoute
 	}
 	var model sessionModel
-	err = s.dbFor(ctx).Transaction(func(tx *gorm.DB) error {
+	err := s.dbFor(ctx).Transaction(func(tx *gorm.DB) error {
 		err := tx.Where("order_no = ?", cmd.OrderNo).Take(&model).Error
 		if err == nil {
 			if model.Source != SourceLocal || model.ServiceMode != string(tradedomain.ServiceModeCode) {
@@ -301,11 +238,6 @@ func (s *Service) CreateSession(ctx context.Context, cmd tradeapp.GmailSessionCo
 			return err
 		}
 
-		model = sessionModel{
-			OrderNo: cmd.OrderNo, Source: SourceLocal,
-			ServiceMode: string(tradedomain.ServiceModeCode), Status: SessionPending, CodesJSON: "[]",
-			CostPointsSnapshot: money.Format(cost), Version: 1,
-		}
 		var allocation allocationModel
 		if err := tx.Where("order_no = ?", cmd.OrderNo).Take(&allocation).Error; err != nil {
 			return fmt.Errorf("load local Gmail code allocation: %w", err)
@@ -316,6 +248,15 @@ func (s *Service) CreateSession(ctx context.Context, cmd tradeapp.GmailSessionCo
 			!isGmailMailbox(allocation.Mailbox) ||
 			(allocation.SupplyScope != AllocationSupplyOwned && allocation.SupplyScope != AllocationSupplyPublic) {
 			return ErrInvalidRoute
+		}
+		cost, err := money.Parse(allocation.CostPointsSnapshot)
+		if err != nil || cost.IsNegative() {
+			return ErrInvalidRoute
+		}
+		model = sessionModel{
+			OrderNo: cmd.OrderNo, Source: SourceLocal,
+			ServiceMode: string(tradedomain.ServiceModeCode), Status: SessionPending, CodesJSON: "[]",
+			CostPointsSnapshot: money.Format(cost), Version: 1,
 		}
 		var resource localResourceModel
 		if err := tx.Where("id = ?", *allocation.ResourceID).Take(&resource).Error; err != nil {

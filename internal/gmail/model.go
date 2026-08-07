@@ -208,10 +208,3 @@ type CodeOnlyPickup struct {
 	MaxCodes      int
 	ExpiresAt     *time.Time
 }
-
-type InventoryItem struct {
-	ProjectID         uint
-	ProductID         uint
-	CodeAvailable     int64
-	PurchaseAvailable int64
-}

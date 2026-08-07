@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	allocdomain "github.com/donnel666/remail/internal/alloc/domain"
+	allocinfra "github.com/donnel666/remail/internal/alloc/infra"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/glebarez/sqlite"
@@ -35,7 +37,7 @@ func TestValidatedLocalGmailHistoryIdentifiesMainDotAndPlusUsage(t *testing.T) {
 
 	base := time.Date(2026, 8, 4, 1, 2, 3, 0, time.UTC)
 	service := NewService(db, nil)
-	trade := &gmailTradeSpy{}
+	trade := newGmailHistoryTradeSpy(db)
 	service.SetTrade(trade)
 	service.now = func() time.Time { return base.Add(time.Hour) }
 	var cursors []localGmailFolderCursors
@@ -95,7 +97,9 @@ func TestValidatedLocalGmailHistoryIdentifiesMainDotAndPlusUsage(t *testing.T) {
 	require.Equal(t, "first.name@gmail.com", byMailbox[GmailMailboxDot].Email)
 	require.Equal(t, "first.name+legacy@googlemail.com", byMailbox[GmailMailboxPlus].Email)
 
-	available, err := localGmailMailboxAvailable(db, root.ID, 11, GmailMailboxMain, "firstname@gmail.com")
+	available, err := allocinfra.NewRepo(db).IsGmailMailboxAvailable(
+		context.Background(), root.ID, 11, allocdomain.GmailMailboxMain, "firstname@gmail.com",
+	)
 	require.NoError(t, err)
 	require.False(t, available, "identified main-mailbox history must prevent reuse by the old project")
 

@@ -7,6 +7,8 @@ type AllocationType string
 const (
 	AllocationTypeMicrosoft AllocationType = "microsoft"
 	AllocationTypeDomain    AllocationType = "domain"
+	AllocationTypeGmail     AllocationType = "gmail"
+	AllocationTypeICloud    AllocationType = "icloud"
 )
 
 type AllocationStatus string
@@ -23,6 +25,21 @@ const (
 	MicrosoftMailboxAlias MicrosoftMailbox = "alias"
 	MicrosoftMailboxDot   MicrosoftMailbox = "dot"
 	MicrosoftMailboxPlus  MicrosoftMailbox = "plus"
+)
+
+type GmailMailbox string
+
+const (
+	GmailMailboxMain GmailMailbox = "main"
+	GmailMailboxDot  GmailMailbox = "dot"
+	GmailMailboxPlus GmailMailbox = "plus"
+)
+
+type GmailServiceMode string
+
+const (
+	GmailServiceModeCode     GmailServiceMode = "code"
+	GmailServiceModePurchase GmailServiceMode = "purchase"
 )
 
 type SupplyScope string
@@ -76,6 +93,36 @@ type GeneratedMailboxAllocation struct {
 	ReleasedAt  *time.Time
 }
 
+type ICloudAllocation struct {
+	ID          uint
+	OrderNo     string
+	ProjectID   uint
+	ProductID   uint
+	ResourceID  uint
+	AliasID     uint
+	SupplyScope SupplyScope
+	Email       string
+	Status      AllocationStatus
+	CreatedAt   time.Time
+	ReleasedAt  *time.Time
+}
+
+type GmailAllocation struct {
+	ID                 uint
+	OrderNo            string
+	ProjectID          uint
+	ProductID          uint
+	ResourceID         uint
+	SupplyScope        SupplyScope
+	Mailbox            GmailMailbox
+	ServiceMode        GmailServiceMode
+	Email              string
+	Status             AllocationStatus
+	CostPointsSnapshot string
+	CreatedAt          time.Time
+	ReleasedAt         *time.Time
+}
+
 type UnifiedAllocation struct {
 	Type        AllocationType
 	ID          uint
@@ -92,7 +139,20 @@ type UnifiedAllocation struct {
 }
 
 func IsValidAllocationType(value AllocationType) bool {
-	return value == AllocationTypeMicrosoft || value == AllocationTypeDomain
+	return value == AllocationTypeMicrosoft || value == AllocationTypeDomain || value == AllocationTypeGmail || value == AllocationTypeICloud
+}
+
+func IsValidGmailMailbox(value GmailMailbox) bool {
+	switch value {
+	case GmailMailboxMain, GmailMailboxDot, GmailMailboxPlus:
+		return true
+	default:
+		return false
+	}
+}
+
+func IsValidGmailServiceMode(value GmailServiceMode) bool {
+	return value == GmailServiceModeCode || value == GmailServiceModePurchase
 }
 
 func IsValidAllocationStatus(value AllocationStatus) bool {

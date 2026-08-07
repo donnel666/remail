@@ -12,6 +12,7 @@ import (
 const (
 	MicrosoftBucketCount        = coredomain.MicrosoftAllocationBucketCount
 	DomainBucketCount           = coredomain.DomainAllocationBucketCount
+	GmailBucketCount            = 2048
 	GeneratedMailboxBucketCount = coredomain.GeneratedMailboxBucketCount
 	DotAliasCapacityPerResource = 10
 	InventoryRefreshInterval    = 10 * time.Minute
@@ -63,12 +64,16 @@ func inventoryCacheHardTTLValue() time.Duration {
 }
 
 type ProductAllocationConfig struct {
-	ProjectID   uint
-	ProductID   uint
-	ProductType coredomain.ProductType
-	MainWeight  int
-	DotWeight   int
-	PlusWeight  int
+	ProjectID             uint
+	ProductID             uint
+	ProductType           coredomain.ProductType
+	CodeEnabled           bool
+	PurchaseEnabled       bool
+	CodeSupplierPrice     string
+	PurchaseSupplierPrice string
+	MainWeight            int
+	DotWeight             int
+	PlusWeight            int
 }
 
 type MicrosoftCandidate struct {
@@ -77,6 +82,17 @@ type MicrosoftCandidate struct {
 	QualityScore   int
 	PlusDailyLimit int
 	MainAllocated  bool
+}
+
+type ICloudCandidate struct {
+	ResourceID uint
+	AliasID    uint
+	Email      string
+}
+
+type GmailCandidate struct {
+	ResourceID uint
+	Email      string
 }
 
 type DomainCandidate struct {
@@ -116,6 +132,16 @@ type HistoricalMicrosoftAllocationCommand struct {
 	ReleasedAt   time.Time
 }
 
+type HistoricalGmailAllocationCommand struct {
+	ProjectID  uint
+	ProductID  uint
+	ResourceID uint
+	Mailbox    domain.GmailMailbox
+	Email      string
+	CreatedAt  time.Time
+	ReleasedAt time.Time
+}
+
 type HistoricalMicrosoftAliasPort interface {
 	BackfillExistingAliases(ctx context.Context, resourceID uint, aliases []string) error
 }
@@ -124,11 +150,41 @@ type InventoryStats struct {
 	ProjectID                  uint
 	Microsoft                  MicrosoftInventoryStats
 	Domain                     DomainInventoryStats
+	Gmail                      GmailInventoryStats
+	ICloud                     ICloudInventoryStats
 	TotalAvailable             int64
 	ActiveMicrosoftAllocations int64
 	ActiveDomainAllocations    int64
+	ActiveGmailAllocations     int64
+	ActiveICloudAllocations    int64
 	// Cold distinguishes an unrefreshed placeholder from a real zero inventory.
 	Cold bool
+}
+
+type GmailInventoryStats struct {
+	Enabled                 bool
+	CodeEnabled             bool
+	PurchaseEnabled         bool
+	MainEnabled             bool
+	DotEnabled              bool
+	PlusEnabled             bool
+	EligibleResources       int64
+	PublicEligibleResources int64
+	MainAvailable           int64
+	MainPublicAvailable     int64
+	DotAvailable            int64
+	DotPublicAvailable      int64
+	PlusAvailable           int64
+	PlusPublicAvailable     int64
+	TotalAvailable          int64
+	PublicAvailable         int64
+}
+
+type ICloudInventoryStats struct {
+	Enabled           bool
+	EligibleResources int64
+	AliasAvailable    int64
+	TotalAvailable    int64
 }
 
 type ProductInventoryTotal struct {
@@ -371,16 +427,21 @@ type Repository interface {
 	LoadProductConfig(ctx context.Context, productID uint, buyerUserID uint, fulfillExistingOrder bool) (*ProductAllocationConfig, error)
 
 	ListMicrosoftSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.MicrosoftMailbox, bucket *uint16, limit int, emailSuffix string) ([]MicrosoftCandidate, error)
+	ListGmailSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.GmailMailbox, bucket *uint16, limit int) ([]GmailCandidate, error)
+	ListICloudSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, requiredUntil time.Time, limit int) ([]ICloudCandidate, error)
 	ListDomainSourceCandidates(ctx context.Context, buyerUserID uint, scope domain.SupplyScope, bucket *uint16, limit int, emailSuffix string) ([]DomainCandidate, error)
 	ListGeneratedMailboxCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, bucket *uint16, limit int, emailSuffix string) ([]GeneratedMailboxCandidate, error)
 	LockResourceRoot(ctx context.Context, resourceID uint, allocationType domain.AllocationType) (bool, error)
 	TryLockResourceRoot(ctx context.Context, resourceID uint, allocationType domain.AllocationType) (bool, error)
 	LockMicrosoftCandidate(ctx context.Context, resourceID uint, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.MicrosoftMailbox, emailSuffix string) (*MicrosoftCandidate, error)
+	LockGmailCandidate(ctx context.Context, resourceID uint, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.GmailMailbox) (*GmailCandidate, error)
+	LockICloudCandidate(ctx context.Context, resourceID uint, aliasID uint, projectID uint, buyerUserID uint, scope domain.SupplyScope, requiredUntil time.Time) (*ICloudCandidate, error)
 	LockDomainCandidate(ctx context.Context, resourceID uint, buyerUserID uint, scope domain.SupplyScope, emailSuffix string) (*DomainCandidate, error)
 	LockGeneratedMailboxCandidate(ctx context.Context, mailboxID uint, resourceID uint, projectID uint) (*GeneratedMailboxCandidate, error)
 	AssertNoActiveAllocations(ctx context.Context, resourceIDs []uint) error
 
 	IsMicrosoftMailboxHistoricallyMatched(ctx context.Context, projectID uint, mailbox domain.MicrosoftMailbox, mailboxID uint) (bool, error)
+	IsGmailMailboxAvailable(ctx context.Context, resourceID uint, projectID uint, mailbox domain.GmailMailbox, email string) (bool, error)
 	IsDomainEmailHistoricallyAllocated(ctx context.Context, projectID uint, email string) (bool, error)
 	FindReusableExplicitAlias(ctx context.Context, projectID uint, resourceID uint, emailSuffix string) (*AliasCandidate, error)
 	FindReusableDotAlias(ctx context.Context, projectID uint, resourceID uint) (*AliasCandidate, error)
@@ -396,8 +457,12 @@ type Repository interface {
 	ConsumeDailyUsage(ctx context.Context, usageDate string, allocationType domain.AllocationType, resourceID uint, kind domain.DailyUsageKind, limit int) error
 
 	CreateMicrosoftAllocation(ctx context.Context, allocation *domain.MicrosoftAllocation) error
+	CreateGmailAllocation(ctx context.Context, allocation *domain.GmailAllocation) error
+	CreateICloudAllocation(ctx context.Context, allocation *domain.ICloudAllocation) error
 	CreateDomainAllocation(ctx context.Context, allocation *domain.GeneratedMailboxAllocation) error
 	TouchMicrosoftAllocated(ctx context.Context, resourceID uint, allocatedAt time.Time) error
+	TouchGmailAllocated(ctx context.Context, resourceID uint, allocatedAt time.Time) error
+	TouchICloudAllocated(ctx context.Context, resourceID uint, aliasID uint, allocatedAt time.Time) error
 	TouchDomainAllocated(ctx context.Context, resourceID uint, mailboxID uint, allocatedAt time.Time) error
 
 	ReleaseByOrder(ctx context.Context, orderNo string, releasedAt time.Time) (*domain.UnifiedAllocation, error)

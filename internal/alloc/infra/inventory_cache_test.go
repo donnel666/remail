@@ -490,6 +490,25 @@ func TestInventoryCacheTreatsLegacyColdStatsAsUnknown(t *testing.T) {
 	require.Equal(t, 1, queue.calls)
 }
 
+func TestInventoryCacheAcceptsGmailOnlyStats(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	cache := NewInventoryCache(client)
+	require.NoError(t, cache.SetInventoryStats(context.Background(), 10, &allocapp.InventoryStats{
+		ProjectID: 10,
+		Gmail:     allocapp.GmailInventoryStats{Enabled: true},
+	}, time.Hour))
+	queue := &inventoryRefreshQueueStub{}
+	useCase := allocapp.NewUseCase(&inventoryCacheRepoStub{}, queue)
+	useCase.SetInventoryCache(cache)
+
+	stats, err := useCase.GetInventoryStats(context.Background(), 10)
+	require.NoError(t, err)
+	require.True(t, stats.Gmail.Enabled)
+	require.Zero(t, queue.calls)
+}
+
 func TestInventoryCacheV5KeysAreProjectScoped(t *testing.T) {
 	entry := allocapp.InventoryCacheEntry{Kind: allocapp.InventoryCacheStats, ProjectID: 10}
 	require.Equal(t, "alloc:inventory:v5:stats:10", inventoryCacheKey(entry.Kind, entry.ProjectID))

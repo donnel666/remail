@@ -16,6 +16,7 @@ import (
 	"github.com/donnel666/remail/internal/alloc/domain"
 	coredomain "github.com/donnel666/remail/internal/core/domain"
 	"github.com/donnel666/remail/internal/mailbox"
+	moneyfmt "github.com/donnel666/remail/internal/money"
 	"github.com/donnel666/remail/internal/platform"
 )
 
@@ -54,6 +55,10 @@ type AllocateCommand struct {
 	SupplyScope      domain.SupplyScope
 	SupplyScopes     []domain.SupplyScope
 	EmailSuffix      string
+	ServiceMode      domain.GmailServiceMode
+	// RequiredUntil is the latest instant for which the allocated resource must
+	// remain usable. Trade supplies the immutable order service-window bound.
+	RequiredUntil time.Time
 	// FulfillExistingOrder is set only by Trade after an order is persisted.
 	// A delisted product cannot receive new orders, but it must remain
 	// allocatable for an already accepted order.
@@ -230,6 +235,10 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *d
 						result, err = uc.allocateMicrosoft(txCtx, attemptCmd, *config)
 					case coredomain.ProductTypeDomain:
 						result, err = uc.allocateDomain(txCtx, attemptCmd, *config)
+					case coredomain.ProductTypeGmail:
+						result, err = uc.allocateGmail(txCtx, attemptCmd, *config)
+					case coredomain.ProductTypeICloud:
+						result, err = uc.allocateICloud(txCtx, attemptCmd, *config)
 					default:
 						return domain.ErrProjectNotAllocatable
 					}
@@ -463,6 +472,84 @@ func sameHistoricalMicrosoftAllocation(existing domain.UnifiedAllocation, orderN
 		existing.Status == domain.AllocationStatusReleased
 }
 
+func (uc *UseCase) ImportHistoricalGmailAllocation(ctx context.Context, cmd HistoricalGmailAllocationCommand) (*domain.UnifiedAllocation, error) {
+	cmd.Email = strings.ToLower(strings.TrimSpace(cmd.Email))
+	cmd.CreatedAt = cmd.CreatedAt.UTC()
+	cmd.ReleasedAt = cmd.ReleasedAt.UTC()
+	if uc == nil || uc.repo == nil || cmd.ProjectID == 0 || cmd.ProductID == 0 || cmd.ResourceID == 0 ||
+		cmd.Email == "" || !domain.IsValidGmailMailbox(cmd.Mailbox) || cmd.CreatedAt.IsZero() ||
+		cmd.ReleasedAt.IsZero() || cmd.ReleasedAt.Before(cmd.CreatedAt) {
+		return nil, domain.ErrInvalidAllocationRequest
+	}
+
+	var result *domain.UnifiedAllocation
+	err := uc.repo.WithTx(ctx, func(txCtx context.Context) error {
+		lockedRoot, err := uc.repo.LockResourceRoot(txCtx, cmd.ResourceID, domain.AllocationTypeGmail)
+		if err != nil {
+			return err
+		}
+		if !lockedRoot {
+			return domain.ErrInvalidAllocationRequest
+		}
+		orderNo := historicalGmailAllocationOrderNo(cmd)
+		existing, err := uc.repo.FindExistingAllocation(txCtx, orderNo)
+		if err != nil {
+			return err
+		}
+		if existing != nil {
+			if !sameHistoricalGmailAllocation(*existing, orderNo, cmd) {
+				return domain.ErrAllocationConflict
+			}
+			result = existing
+			return nil
+		}
+		available, err := uc.repo.IsGmailMailboxAvailable(txCtx, cmd.ResourceID, cmd.ProjectID, cmd.Mailbox, cmd.Email)
+		if err != nil {
+			return err
+		}
+		if !available {
+			return nil
+		}
+		if err := uc.repo.CreateOrderGuard(txCtx, orderNo, domain.AllocationTypeGmail); err != nil {
+			return err
+		}
+		releasedAt := cmd.ReleasedAt
+		allocation := &domain.GmailAllocation{
+			OrderNo: orderNo, ProjectID: cmd.ProjectID, ProductID: cmd.ProductID, ResourceID: cmd.ResourceID,
+			SupplyScope: domain.SupplyScopePublic, Mailbox: cmd.Mailbox, ServiceMode: domain.GmailServiceModePurchase,
+			Email: cmd.Email, Status: domain.AllocationStatusReleased, CostPointsSnapshot: "0.00",
+			CreatedAt: cmd.CreatedAt, ReleasedAt: &releasedAt,
+		}
+		if err := uc.repo.CreateGmailAllocation(txCtx, allocation); err != nil {
+			return err
+		}
+		unified := domain.UnifiedAllocation{
+			Type: domain.AllocationTypeGmail, ID: allocation.ID, OrderNo: allocation.OrderNo,
+			ProjectID: allocation.ProjectID, ProductID: allocation.ProductID, ResourceID: allocation.ResourceID,
+			SupplyScope: allocation.SupplyScope, Mailbox: string(allocation.Mailbox), Email: allocation.Email,
+			Status: allocation.Status, CreatedAt: allocation.CreatedAt, ReleasedAt: allocation.ReleasedAt,
+		}
+		result = &unified
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func historicalGmailAllocationOrderNo(cmd HistoricalGmailAllocationCommand) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%d:%d:%s:%s", cmd.ResourceID, cmd.ProjectID, cmd.Mailbox, cmd.Email)))
+	return "HIST-GMAIL-" + hex.EncodeToString(sum[:20])
+}
+
+func sameHistoricalGmailAllocation(existing domain.UnifiedAllocation, orderNo string, cmd HistoricalGmailAllocationCommand) bool {
+	emailMatches := cmd.Mailbox == domain.GmailMailboxMain || strings.EqualFold(existing.Email, cmd.Email)
+	return existing.Type == domain.AllocationTypeGmail && existing.OrderNo == orderNo &&
+		existing.ProjectID == cmd.ProjectID && existing.ProductID == cmd.ProductID && existing.ResourceID == cmd.ResourceID &&
+		existing.Mailbox == string(cmd.Mailbox) && emailMatches && existing.Status == domain.AllocationStatusReleased
+}
+
 func (uc *UseCase) ReleaseByOrder(ctx context.Context, orderNo string) (*domain.UnifiedAllocation, error) {
 	orderNo = strings.TrimSpace(orderNo)
 	if orderNo == "" {
@@ -639,7 +726,7 @@ func (uc *UseCase) GetInventoryStats(ctx context.Context, projectID uint) (*Inve
 		}
 		// Legacy v5 placeholders predate Cold and have neither source enabled;
 		// authoritative stats always enable at least one configured product type.
-		if !stats.Microsoft.Enabled && !stats.Domain.Enabled {
+		if !stats.Microsoft.Enabled && !stats.Domain.Enabled && !stats.Gmail.Enabled && !stats.ICloud.Enabled {
 			_ = uc.ScheduleInventoryRefresh(ctx)
 			return nil, domain.ErrInventoryRefreshInProgress
 		}
@@ -1178,6 +1265,284 @@ func (uc *UseCase) ListRoutingCandidates(ctx context.Context, filter CandidateFi
 
 func (uc *UseCase) allocateMicrosoft(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig) (*domain.UnifiedAllocation, error) {
 	return uc.allocateMicrosoftOnce(ctx, cmd, config)
+}
+
+func (uc *UseCase) allocateGmail(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig) (*domain.UnifiedAllocation, error) {
+	if cmd.EmailSuffix != "" || !domain.IsValidGmailServiceMode(cmd.ServiceMode) {
+		return nil, domain.ErrInvalidAllocationRequest
+	}
+	cost, err := gmailAllocationCost(config, cmd.ServiceMode, cmd.SupplyScope)
+	if err != nil {
+		return nil, err
+	}
+	preferences := gmailMailboxPreferences(cmd.OrderNo, config)
+	if len(preferences) == 0 {
+		return nil, domain.ErrProjectNotAllocatable
+	}
+	now := time.Now().UTC()
+	resourceBusy := false
+	for _, mailbox := range preferences {
+		for _, bucket := range bucketProbeSequence(cmd.OrderNo, config.ProjectID, "gmail|"+string(mailbox), GmailBucketCount) {
+			result, busy, err := uc.tryGmailBucket(ctx, cmd, config, mailbox, &bucket, cost, now)
+			if err != nil {
+				return nil, err
+			}
+			resourceBusy = resourceBusy || busy
+			if result != nil {
+				return result, nil
+			}
+		}
+		platform.RecordAllocationBucketFallback(string(domain.AllocationTypeGmail), "probes_exhausted")
+		result, busy, err := uc.tryGmailBucket(ctx, cmd, config, mailbox, nil, cost, now)
+		if err != nil {
+			return nil, err
+		}
+		resourceBusy = resourceBusy || busy
+		if result != nil {
+			return result, nil
+		}
+	}
+	if resourceBusy {
+		return nil, errResourceTypeBusy
+	}
+	return nil, domain.ErrInsufficientInventory
+}
+
+func gmailAllocationCost(config ProductAllocationConfig, mode domain.GmailServiceMode, scope domain.SupplyScope) (string, error) {
+	enabled, value := config.CodeEnabled, config.CodeSupplierPrice
+	if mode == domain.GmailServiceModePurchase {
+		enabled, value = config.PurchaseEnabled, config.PurchaseSupplierPrice
+	}
+	if !enabled {
+		return "", domain.ErrProjectNotAllocatable
+	}
+	cost, err := moneyfmt.Parse(value)
+	if err != nil || cost.IsNegative() {
+		return "", domain.ErrProjectNotAllocatable
+	}
+	if scope == domain.SupplyScopeOwned {
+		return "0.00", nil
+	}
+	return moneyfmt.Format(cost), nil
+}
+
+func (uc *UseCase) tryGmailBucket(
+	ctx context.Context,
+	cmd AllocateCommand,
+	config ProductAllocationConfig,
+	mailbox domain.GmailMailbox,
+	bucket *uint16,
+	cost string,
+	now time.Time,
+) (*domain.UnifiedAllocation, bool, error) {
+	limit := candidateWindowSizeValue()
+	if bucket == nil {
+		limit = globalCandidateWindowValue()
+	}
+	candidates, err := uc.repo.ListGmailSourceCandidates(
+		ctx, config.ProjectID, cmd.BuyerUserID, cmd.SupplyScope, mailbox, bucket, limit,
+	)
+	if err != nil {
+		return nil, false, err
+	}
+	resourceBusy := false
+	for _, candidate := range candidates {
+		platform.AddAllocationCandidateAttempts(string(domain.AllocationTypeGmail), 1)
+		result, err := uc.tryGmailCandidate(ctx, cmd, config, mailbox, candidate, cost, now)
+		if err == nil && result != nil {
+			return result, false, nil
+		}
+		if errors.Is(err, errResourceRootBusy) {
+			resourceBusy = true
+			continue
+		}
+		if errors.Is(err, domain.ErrInsufficientInventory) || errors.Is(err, errCandidateUnavailable) {
+			continue
+		}
+		return nil, false, err
+	}
+	return nil, resourceBusy, nil
+}
+
+func (uc *UseCase) tryGmailCandidate(
+	ctx context.Context,
+	cmd AllocateCommand,
+	config ProductAllocationConfig,
+	mailbox domain.GmailMailbox,
+	candidate GmailCandidate,
+	cost string,
+	now time.Time,
+) (*domain.UnifiedAllocation, error) {
+	lockRoot := uc.repo.LockResourceRoot
+	if cmd.lockResourceRoot != nil {
+		lockRoot = cmd.lockResourceRoot
+	}
+	lockedRoot, err := lockRoot(ctx, candidate.ResourceID, domain.AllocationTypeGmail)
+	if err != nil {
+		return nil, err
+	}
+	if !lockedRoot {
+		return nil, errResourceRootBusy
+	}
+	locked, err := uc.repo.LockGmailCandidate(
+		ctx, candidate.ResourceID, config.ProjectID, cmd.BuyerUserID, cmd.SupplyScope, mailbox,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if locked == nil {
+		platform.RecordAllocationCandidateRecheckMiss(string(domain.AllocationTypeGmail))
+		return nil, errCandidateUnavailable
+	}
+	candidate = *locked
+
+	var emails []string
+	switch mailbox {
+	case domain.GmailMailboxMain:
+		emails = []string{candidate.Email}
+	case domain.GmailMailboxDot:
+		emails = dotAliasVariants(candidate.Email)
+	case domain.GmailMailboxPlus:
+		emails = plusAliasVariants(candidate.Email, config.ProjectID, cmd.OrderNo)
+	default:
+		return nil, domain.ErrInvalidAllocationRequest
+	}
+	for _, email := range emails {
+		email = strings.ToLower(strings.TrimSpace(email))
+		if email == "" || len(email) > 320 {
+			continue
+		}
+		available, err := uc.repo.IsGmailMailboxAvailable(ctx, candidate.ResourceID, config.ProjectID, mailbox, email)
+		if err != nil {
+			return nil, err
+		}
+		if available {
+			return uc.createGmailAllocation(ctx, cmd, config, candidate.ResourceID, mailbox, email, cost, now)
+		}
+	}
+	return nil, errCandidateUnavailable
+}
+
+func (uc *UseCase) createGmailAllocation(
+	ctx context.Context,
+	cmd AllocateCommand,
+	config ProductAllocationConfig,
+	resourceID uint,
+	mailbox domain.GmailMailbox,
+	email, cost string,
+	now time.Time,
+) (*domain.UnifiedAllocation, error) {
+	if cmd.ensureOrderGuard == nil {
+		return nil, domain.ErrAllocationTxRequired
+	}
+	allocation := &domain.GmailAllocation{
+		OrderNo: cmd.OrderNo, ProjectID: config.ProjectID, ProductID: config.ProductID,
+		ResourceID: resourceID, SupplyScope: cmd.SupplyScope, Mailbox: mailbox,
+		ServiceMode: cmd.ServiceMode, Email: strings.ToLower(strings.TrimSpace(email)),
+		Status: domain.AllocationStatusAllocated, CostPointsSnapshot: cost, CreatedAt: now,
+	}
+	if allocation.Email == "" || !domain.IsValidGmailMailbox(allocation.Mailbox) {
+		return nil, domain.ErrInvalidAllocationRequest
+	}
+	if err := cmd.ensureOrderGuard(ctx, domain.AllocationTypeGmail); err != nil {
+		return nil, err
+	}
+	if err := uc.repo.CreateGmailAllocation(ctx, allocation); err != nil {
+		return nil, err
+	}
+	if err := uc.repo.TouchGmailAllocated(ctx, resourceID, now); err != nil {
+		return nil, err
+	}
+	return &domain.UnifiedAllocation{
+		Type: domain.AllocationTypeGmail, ID: allocation.ID, OrderNo: allocation.OrderNo,
+		ProjectID: allocation.ProjectID, ProductID: allocation.ProductID, ResourceID: allocation.ResourceID,
+		SupplyScope: allocation.SupplyScope, Mailbox: string(allocation.Mailbox), Email: allocation.Email,
+		Status: allocation.Status, CreatedAt: allocation.CreatedAt,
+	}, nil
+}
+
+func (uc *UseCase) allocateICloud(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig) (*domain.UnifiedAllocation, error) {
+	now := time.Now().UTC()
+	requiredUntil := cmd.RequiredUntil.UTC()
+	if requiredUntil.Before(now) {
+		requiredUntil = now
+	}
+	candidates, err := uc.repo.ListICloudSourceCandidates(
+		ctx, config.ProjectID, cmd.BuyerUserID, cmd.SupplyScope, requiredUntil, globalCandidateWindowValue(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	resourceBusy := false
+	for _, candidate := range candidates {
+		platform.AddAllocationCandidateAttempts(string(domain.AllocationTypeICloud), 1)
+		result, err := uc.tryICloudCandidate(ctx, cmd, config, candidate, requiredUntil, now)
+		if err == nil && result != nil {
+			return result, nil
+		}
+		if errors.Is(err, errResourceRootBusy) {
+			resourceBusy = true
+			continue
+		}
+		if errors.Is(err, errCandidateUnavailable) || errors.Is(err, domain.ErrInsufficientInventory) {
+			continue
+		}
+		return nil, err
+	}
+	if resourceBusy {
+		return nil, errResourceTypeBusy
+	}
+	return nil, domain.ErrInsufficientInventory
+}
+
+func (uc *UseCase) tryICloudCandidate(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig, candidate ICloudCandidate, requiredUntil, now time.Time) (*domain.UnifiedAllocation, error) {
+	lockRoot := uc.repo.LockResourceRoot
+	if cmd.lockResourceRoot != nil {
+		lockRoot = cmd.lockResourceRoot
+	}
+	lockedRoot, err := lockRoot(ctx, candidate.ResourceID, domain.AllocationTypeICloud)
+	if err != nil {
+		return nil, err
+	}
+	if !lockedRoot {
+		return nil, errResourceRootBusy
+	}
+	locked, err := uc.repo.LockICloudCandidate(
+		ctx, candidate.ResourceID, candidate.AliasID, config.ProjectID, cmd.BuyerUserID, cmd.SupplyScope, requiredUntil,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if locked == nil {
+		platform.RecordAllocationCandidateRecheckMiss(string(domain.AllocationTypeICloud))
+		return nil, errCandidateUnavailable
+	}
+	if cmd.ensureOrderGuard == nil {
+		return nil, domain.ErrAllocationTxRequired
+	}
+	allocation := &domain.ICloudAllocation{
+		OrderNo: cmd.OrderNo, ProjectID: config.ProjectID, ProductID: config.ProductID,
+		ResourceID: locked.ResourceID, AliasID: locked.AliasID, SupplyScope: cmd.SupplyScope,
+		Email: strings.ToLower(strings.TrimSpace(locked.Email)), Status: domain.AllocationStatusAllocated,
+	}
+	if allocation.Email == "" {
+		return nil, domain.ErrInvalidAllocationRequest
+	}
+	if err := cmd.ensureOrderGuard(ctx, domain.AllocationTypeICloud); err != nil {
+		return nil, err
+	}
+	if err := uc.repo.CreateICloudAllocation(ctx, allocation); err != nil {
+		return nil, err
+	}
+	if err := uc.repo.TouchICloudAllocated(ctx, allocation.ResourceID, allocation.AliasID, now); err != nil {
+		return nil, err
+	}
+	return &domain.UnifiedAllocation{
+		Type: domain.AllocationTypeICloud, ID: allocation.ID, OrderNo: allocation.OrderNo,
+		ProjectID: allocation.ProjectID, ProductID: allocation.ProductID, ResourceID: allocation.ResourceID,
+		SupplyScope: allocation.SupplyScope, Mailbox: "alias", Email: allocation.Email,
+		Status: allocation.Status, CreatedAt: allocation.CreatedAt,
+	}, nil
 }
 
 func (uc *UseCase) allocateMicrosoftOnce(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig) (*domain.UnifiedAllocation, error) {
@@ -1725,6 +2090,15 @@ func microsoftMailboxPreferences(orderNo string, config ProductAllocationConfig)
 			continue
 		}
 		result = append(result, item.mailbox)
+	}
+	return result
+}
+
+func gmailMailboxPreferences(orderNo string, config ProductAllocationConfig) []domain.GmailMailbox {
+	microsoft := microsoftMailboxPreferences(orderNo, config)
+	result := make([]domain.GmailMailbox, 0, len(microsoft))
+	for _, mailbox := range microsoft {
+		result = append(result, domain.GmailMailbox(mailbox))
 	}
 	return result
 }

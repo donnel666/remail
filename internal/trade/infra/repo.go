@@ -44,6 +44,7 @@ type OrderModel struct {
 	AllocationType           *string        `gorm:"type:varchar(32);column:allocation_type"`
 	MicrosoftAllocID         *uint          `gorm:"column:microsoft_alloc_id"`
 	DomainAllocID            *uint          `gorm:"column:domain_alloc_id"`
+	ICloudAllocID            *uint          `gorm:"column:icloud_alloc_id"`
 	DeliveryEmail            string         `gorm:"type:varchar(255);not null;column:delivery_email"`
 	ReceiveStartedAt         *time.Time     `gorm:"column:receive_started_at"`
 	ReceiveUntil             *time.Time     `gorm:"column:receive_until"`
@@ -394,6 +395,7 @@ func (r *Repo) MarkActive(ctx context.Context, cmd tradeapp.MarkActiveCommand) (
 			"version":                gorm.Expr("version + 1"),
 			"microsoft_alloc_id":     nil,
 			"domain_alloc_id":        nil,
+			"icloud_alloc_id":        nil,
 			"service_cleanup_status": "none",
 		}
 		if cmd.ActivatedAt != nil {
@@ -411,6 +413,11 @@ func (r *Repo) MarkActive(ctx context.Context, cmd tradeapp.MarkActiveCommand) (
 			}
 			updates["domain_alloc_id"] = cmd.AllocationID
 		case domain.AllocationTypeGmail:
+		case domain.AllocationTypeICloud:
+			if cmd.AllocationID == 0 {
+				return domain.ErrInvalidOrderRequest
+			}
+			updates["icloud_alloc_id"] = cmd.AllocationID
 		default:
 			return domain.ErrInvalidOrderRequest
 		}
@@ -934,8 +941,9 @@ func (r *Repo) ListCheckoutAllocationRecoveries(ctx context.Context, staleBefore
 		Joins("STRAIGHT_JOIN allocation_order_guards AS g ON g.order_no = o.order_no").
 		Joins("LEFT JOIN microsoft_allocations AS ma ON g.type = ? AND ma.order_no = g.order_no AND ma.status = ?", domain.AllocationTypeMicrosoft, "allocated").
 		Joins("LEFT JOIN domain_allocations AS da ON g.type = ? AND da.order_no = g.order_no AND da.status = ?", domain.AllocationTypeDomain, "allocated").
-		Where("o.product_type <> ? AND (ma.id IS NOT NULL OR da.id IS NOT NULL) AND (o.status = ? OR (o.status = ? AND COALESCE(ma.created_at, da.created_at) < ?) OR (o.status = ? AND o.updated_at < ?))",
-			domain.ProductTypeGmail,
+		Joins("LEFT JOIN gmail_allocations AS ga ON g.type = ? AND ga.order_no = g.order_no AND ga.source = ? AND ga.status = ?", domain.AllocationTypeGmail, "local", "allocated").
+		Joins("LEFT JOIN icloud_allocations AS ia ON g.type = ? AND ia.order_no = g.order_no AND ia.status = ?", domain.AllocationTypeICloud, "allocated").
+		Where("(ma.id IS NOT NULL OR da.id IS NOT NULL OR ga.id IS NOT NULL OR ia.id IS NOT NULL) AND (o.status = ? OR (o.status = ? AND COALESCE(ma.created_at, da.created_at, ga.created_at, ia.created_at) < ?) OR (o.status = ? AND o.updated_at < ?))",
 			domain.OrderStatusFailed,
 			domain.OrderStatusPendingPayment, staleBefore.UTC(),
 			domain.OrderStatusPaid, staleBefore.UTC()).
@@ -944,22 +952,6 @@ func (r *Repo) ListCheckoutAllocationRecoveries(ctx context.Context, staleBefore
 		Scan(&recoveries).Error; err != nil {
 		return nil, fmt.Errorf("list checkout allocation recoveries: %w", err)
 	}
-	var gmailRecoveries []tradeapp.CheckoutAllocationRecovery
-	if err := r.dbFor(ctx).Table("orders AS o").
-		Select("o.order_no, o.status, o.product_type").
-		Joins("STRAIGHT_JOIN allocation_order_guards AS g ON g.order_no = o.order_no AND g.type = ?", domain.AllocationTypeGmail).
-		Joins("JOIN gmail_allocations AS ga ON ga.order_no = g.order_no AND ga.guard_type = ? AND ga.status = ?", domain.AllocationTypeGmail, "allocated").
-		Where("o.product_type = ? AND (o.status = ? OR (o.status = ? AND ga.created_at < ?) OR (o.status = ? AND o.updated_at < ?))",
-			domain.ProductTypeGmail,
-			domain.OrderStatusFailed,
-			domain.OrderStatusPendingPayment, staleBefore.UTC(),
-			domain.OrderStatusPaid, staleBefore.UTC()).
-		Order("o.created_at ASC, o.id ASC").
-		Limit(limit).
-		Scan(&gmailRecoveries).Error; err != nil {
-		return nil, fmt.Errorf("list Gmail checkout allocation recoveries: %w", err)
-	}
-	recoveries = append(recoveries, gmailRecoveries...)
 	return recoveries, nil
 }
 
@@ -1281,6 +1273,7 @@ func orderModelToDomain(model OrderModel) domain.Order {
 		AllocationType:           allocationType,
 		MicrosoftAllocID:         model.MicrosoftAllocID,
 		DomainAllocID:            model.DomainAllocID,
+		ICloudAllocID:            model.ICloudAllocID,
 		DeliveryEmail:            model.DeliveryEmail,
 		ReceiveStartedAt:         model.ReceiveStartedAt,
 		ReceiveUntil:             model.ReceiveUntil,

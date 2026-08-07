@@ -387,6 +387,7 @@ type ProjectProductTypeFacetsResponse struct {
 	Domain    int64 `json:"domain"`
 	Random    int64 `json:"random"`
 	Gmail     int64 `json:"gmail"`
+	ICloud    int64 `json:"icloud"`
 }
 
 // ProjectProductResponse is a product view under a project.

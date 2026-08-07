@@ -56,9 +56,13 @@ type ProjectInventoryResponse struct {
 	ProjectID                  uint                       `json:"projectId"`
 	Microsoft                  MicrosoftInventoryResponse `json:"microsoft"`
 	Domain                     DomainInventoryResponse    `json:"domain"`
+	Gmail                      GmailInventoryResponse     `json:"gmail"`
+	ICloud                     ICloudInventoryResponse    `json:"icloud"`
 	TotalAvailable             int64                      `json:"totalAvailable"`
 	ActiveMicrosoftAllocations int64                      `json:"activeMicrosoftAllocations"`
 	ActiveDomainAllocations    int64                      `json:"activeDomainAllocations"`
+	ActiveGmailAllocations     int64                      `json:"activeGmailAllocations"`
+	ActiveICloudAllocations    int64                      `json:"activeICloudAllocations"`
 }
 
 type ProjectInventoryTotalResponse struct {
@@ -108,6 +112,32 @@ type DomainInventoryResponse struct {
 	MailboxDailyUsed      int64 `json:"mailboxDailyUsed"`
 	MailboxDailyAvailable int64 `json:"mailboxDailyAvailable"`
 	TotalAvailable        int64 `json:"totalAvailable"`
+}
+
+type GmailInventoryResponse struct {
+	Enabled                 bool  `json:"enabled"`
+	CodeEnabled             bool  `json:"codeEnabled"`
+	PurchaseEnabled         bool  `json:"purchaseEnabled"`
+	MainEnabled             bool  `json:"mainEnabled"`
+	DotEnabled              bool  `json:"dotEnabled"`
+	PlusEnabled             bool  `json:"plusEnabled"`
+	EligibleResources       int64 `json:"eligibleResources"`
+	PublicEligibleResources int64 `json:"publicEligibleResources"`
+	MainAvailable           int64 `json:"mainAvailable"`
+	MainPublicAvailable     int64 `json:"mainPublicAvailable"`
+	DotAvailable            int64 `json:"dotAvailable"`
+	DotPublicAvailable      int64 `json:"dotPublicAvailable"`
+	PlusAvailable           int64 `json:"plusAvailable"`
+	PlusPublicAvailable     int64 `json:"plusPublicAvailable"`
+	TotalAvailable          int64 `json:"totalAvailable"`
+	PublicAvailable         int64 `json:"publicAvailable"`
+}
+
+type ICloudInventoryResponse struct {
+	Enabled           bool  `json:"enabled"`
+	EligibleResources int64 `json:"eligibleResources"`
+	AliasAvailable    int64 `json:"aliasAvailable"`
+	TotalAvailable    int64 `json:"totalAvailable"`
 }
 
 type RoutingCandidateResponse struct {
