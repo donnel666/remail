@@ -3544,12 +3544,7 @@ func allocationRequiredUntil(order domain.Order) time.Time {
 	if order.ServiceMode == domain.ServiceModeCode {
 		until = now.Add(time.Duration(order.CodeWindowMinutes) * time.Minute)
 	} else {
-		activation := now.Add(time.Duration(order.ActivationWindowMinutes) * time.Minute)
-		warranty := now.Add(time.Duration(order.WarrantyMinutes) * time.Minute)
-		until = activation
-		if warranty.After(until) {
-			until = warranty
-		}
+		until = now.Add(time.Duration(order.ActivationWindowMinutes+order.WarrantyMinutes) * time.Minute)
 	}
 	return until
 }

@@ -21,11 +21,34 @@ func (a gmailMailIngestAdapter) IngestGmailMail(
 	receivedAt time.Time,
 	providerMessageID, folder string,
 ) error {
+	return a.ingest(ctx, mailmatchdomain.ResourceTypeGmail, resourceID, recipient, raw, receivedAt, providerMessageID, folder)
+}
+
+func (a gmailMailIngestAdapter) IngestICloudMail(
+	ctx context.Context,
+	resourceID uint,
+	recipient string,
+	raw []byte,
+	receivedAt time.Time,
+	providerMessageID, folder string,
+) error {
+	return a.ingest(ctx, mailmatchdomain.ResourceTypeICloud, resourceID, recipient, raw, receivedAt, providerMessageID, folder)
+}
+
+func (a gmailMailIngestAdapter) ingest(
+	ctx context.Context,
+	resourceType mailmatchdomain.ResourceType,
+	resourceID uint,
+	recipient string,
+	raw []byte,
+	receivedAt time.Time,
+	providerMessageID, folder string,
+) error {
 	if a.mailmatch == nil {
 		return nil
 	}
 	return a.mailmatch.IngestInboundMail(ctx, mailmatchapp.InboundMailRequest{
-		EmailResourceID: resourceID, ResourceType: mailmatchdomain.ResourceTypeGmail,
+		EmailResourceID: resourceID, ResourceType: resourceType,
 		Recipient: recipient, Raw: raw, ReceivedAt: receivedAt,
 		ProviderMessageID: providerMessageID, Protocol: "imap", Folder: folder,
 	})

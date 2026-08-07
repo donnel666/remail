@@ -120,7 +120,7 @@ func (r *Repo) resolveAppendedMessages(ctx context.Context, messages []domain.Me
 // ListUnprojectedMessages returns a bounded set of remote-mail facts whose
 // matching transaction did not commit. Domain mailboxes deliberately never use it.
 func (r *Repo) ListUnprojectedMessages(ctx context.Context, resourceType domain.ResourceType, emailResourceIDs []uint, limit int) ([]domain.Message, error) {
-	if (resourceType != domain.ResourceTypeMicrosoft && resourceType != domain.ResourceTypeGmail) || len(emailResourceIDs) == 0 || limit <= 0 {
+	if (resourceType != domain.ResourceTypeMicrosoft && resourceType != domain.ResourceTypeGmail && resourceType != domain.ResourceTypeICloud) || len(emailResourceIDs) == 0 || limit <= 0 {
 		return nil, nil
 	}
 	var rows []MessageModel

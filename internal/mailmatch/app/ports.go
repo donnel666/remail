@@ -192,6 +192,7 @@ type MailTransportFetchPort interface {
 
 type GmailPurchaseFetchPort interface {
 	FetchLocalPurchaseMail(ctx context.Context, orderNo string) error
+	FetchICloudMail(ctx context.Context, orderNo string) error
 }
 
 type Repository interface {
@@ -1071,9 +1072,12 @@ func (uc *UseCase) processFetch(ctx context.Context, task FetchTask, timing pick
 	if scope.EmailResourceID != task.EmailResourceID || !scopeFetchable(*scope, uc.now) {
 		return nil
 	}
-	if scope.AllocationType == domain.ResourceTypeGmail {
+	if scope.AllocationType == domain.ResourceTypeGmail || scope.AllocationType == domain.ResourceTypeICloud {
 		if uc.gmailPurchase == nil {
 			return domain.ErrMailServiceUnavailable
+		}
+		if scope.AllocationType == domain.ResourceTypeICloud {
+			return uc.gmailPurchase.FetchICloudMail(ctx, scope.OrderNo)
 		}
 		return uc.gmailPurchase.FetchLocalPurchaseMail(ctx, scope.OrderNo)
 	}
@@ -1305,13 +1309,13 @@ func (uc *UseCase) IngestInboundMail(ctx context.Context, req InboundMailRequest
 	if req.EmailResourceID == 0 || strings.TrimSpace(req.Recipient) == "" || len(req.Raw) == 0 {
 		return domain.ErrInvalidRequest
 	}
-	if req.ResourceType != domain.ResourceTypeGmail {
+	if req.ResourceType != domain.ResourceTypeGmail && req.ResourceType != domain.ResourceTypeICloud {
 		return domain.ErrInvalidRequest
 	}
 	_, _, _, err := uc.ingestFetchedMessagesForResourcesWithFence(
 		ctx,
 		[]FetchedMessage{inboundFetchedMessage(req)},
-		domain.ResourceTypeGmail,
+		req.ResourceType,
 		[]uint{req.EmailResourceID},
 		nil,
 	)
@@ -1536,7 +1540,7 @@ func listUnprojectedMessages(
 	resourceType domain.ResourceType,
 	resourceIDs []uint,
 ) ([]domain.Message, error) {
-	if resourceType != domain.ResourceTypeMicrosoft && resourceType != domain.ResourceTypeGmail {
+	if resourceType != domain.ResourceTypeMicrosoft && resourceType != domain.ResourceTypeGmail && resourceType != domain.ResourceTypeICloud {
 		return nil, nil
 	}
 	resourceIDs = mergeResourceIDs(resourceIDs)
@@ -1717,7 +1721,8 @@ func scopeFetchable(scope OrderScope, now func() time.Time) bool {
 
 func pickupFetchSupported(scope OrderScope) bool {
 	return scope.AllocationType == domain.ResourceTypeMicrosoft ||
-		scope.AllocationType == domain.ResourceTypeGmail && scope.ServiceMode == "purchase"
+		scope.AllocationType == domain.ResourceTypeGmail && scope.ServiceMode == "purchase" ||
+		scope.AllocationType == domain.ResourceTypeICloud
 }
 
 func (uc *UseCase) fetchedMessageToDomain(ctx context.Context, item FetchedMessage) (domain.Message, *OrderScope, extractionPriority, error) {
@@ -1931,7 +1936,7 @@ func inboundFetchedMessage(req InboundMailRequest) FetchedMessage {
 	if from := decodeMIMEHeader(decoder, msg.Header.Get("From")); from != "" {
 		item.Sender = from
 	}
-	if (req.ResourceType != domain.ResourceTypeDomain && req.ResourceType != domain.ResourceTypeGmail) || recipient == "" {
+	if (req.ResourceType != domain.ResourceTypeDomain && req.ResourceType != domain.ResourceTypeGmail && req.ResourceType != domain.ResourceTypeICloud) || recipient == "" {
 		item.Recipients = normalizeRecipientCandidates(append(item.Recipients, mailAddressCandidates(msg.Header.Get("To"))...))
 		item.Recipients = normalizeRecipientCandidates(append(item.Recipients, mailAddressCandidates(msg.Header.Get("Cc"))...))
 	}
@@ -2103,6 +2108,9 @@ func matchRecipientPatterns(patterns []string, message FetchedMessage, scope Ord
 	}
 	if message.ResourceType == domain.ResourceTypeDomain {
 		return allowed["exact"] && mailbox.Normalize(message.Recipient) != "" && mailbox.Normalize(message.Recipient) == mailbox.Normalize(scope.Recipient)
+	}
+	if message.ResourceType == domain.ResourceTypeICloud {
+		return allowed["exact"] && normalizeEmail(message.Recipient) != "" && normalizeEmail(message.Recipient) == normalizeEmail(scope.Recipient)
 	}
 	if message.ResourceType == domain.ResourceTypeGmail {
 		recipient, recipientPlus, recipientDots, ok := domain.RecipientAliasForms(message.Recipient)
@@ -2401,7 +2409,7 @@ func messageDedupeKey(item FetchedMessage) string {
 	if item.ResourceType == domain.ResourceTypeDomain {
 		mailboxKey = mailbox.Normalize(item.Recipient)
 	}
-	if item.ResourceType == domain.ResourceTypeGmail {
+	if item.ResourceType == domain.ResourceTypeGmail || item.ResourceType == domain.ResourceTypeICloud {
 		if providerMessageID := strings.ToLower(strings.TrimSpace(item.ProviderMessageID)); providerMessageID != "" {
 			return hashParts(
 				"provider",

@@ -144,6 +144,8 @@ type iCloudResourceModel struct {
 	ClientMasteringNumber   string     `gorm:"column:client_mastering_number"`
 	Cookie                  string     `gorm:"column:cookie"`
 	GmailResourceID         uint       `gorm:"column:gmail_resource_id"`
+	ProviderCursor          uint64     `gorm:"column:provider_cursor"`
+	ProviderSpamCursor      uint64     `gorm:"column:provider_spam_cursor"`
 	LangCode                string     `gorm:"column:lang_code"`
 	Origin                  string     `gorm:"column:origin"`
 	Referer                 string     `gorm:"column:referer"`

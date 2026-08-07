@@ -43,21 +43,22 @@ const (
 )
 
 type iCloudImportLine struct {
-	LineNumber            int
-	ExistingResourceID    uint
-	PrimaryEmail          string
-	Host                  string
-	DSID                  string
-	ClientID              string
-	ClientBuildNumber     string
-	ClientMasteringNumber string
-	Cookie                string
-	GmailEmail            string
-	GmailResourceID       uint
-	LangCode              string
-	Origin                string
-	Referer               string
-	UserAgent             string
+	LineNumber              int
+	ExistingResourceID      uint
+	ExistingGmailResourceID uint
+	PrimaryEmail            string
+	Host                    string
+	DSID                    string
+	ClientID                string
+	ClientBuildNumber       string
+	ClientMasteringNumber   string
+	Cookie                  string
+	GmailEmail              string
+	GmailResourceID         uint
+	LangCode                string
+	Origin                  string
+	Referer                 string
+	UserAgent               string
 }
 
 type iCloudImportFailure struct {
@@ -682,38 +683,42 @@ func (s *Service) removeExistingICloudImportLines(ctx context.Context, ownerUser
 		dsids = append(dsids, line.DSID)
 	}
 	var existing []struct {
-		ID            uint   `gorm:"column:id"`
-		OwnerUserID   uint   `gorm:"column:owner_user_id"`
-		PrimaryEmail  string `gorm:"column:primary_email"`
-		DSID          string `gorm:"column:dsid"`
-		Status        string `gorm:"column:status"`
-		SessionStatus string `gorm:"column:session_status"`
+		ID              uint   `gorm:"column:id"`
+		OwnerUserID     uint   `gorm:"column:owner_user_id"`
+		PrimaryEmail    string `gorm:"column:primary_email"`
+		DSID            string `gorm:"column:dsid"`
+		GmailResourceID uint   `gorm:"column:gmail_resource_id"`
+		Status          string `gorm:"column:status"`
+		SessionStatus   string `gorm:"column:session_status"`
 	}
 	if err := s.db.WithContext(ctx).Table("icloud_resources AS ir").
-		Select("ir.id, er.owner_user_id, ir.primary_email, ir.dsid, ir.status, ir.session_status").
+		Select("ir.id, er.owner_user_id, ir.primary_email, ir.dsid, ir.gmail_resource_id, ir.status, ir.session_status").
 		Joins("JOIN email_resources AS er ON er.id = ir.id AND er.type = ?", "icloud").
 		Where("ir.primary_email IN ? OR ir.dsid IN ?", emails, dsids).Find(&existing).Error; err != nil {
 		return nil, nil, nil, ErrICloudImportTemporary
 	}
 	byEmail := make(map[string]struct {
-		ID            uint
-		OwnerUserID   uint
-		Status        string
-		SessionStatus string
+		ID              uint
+		OwnerUserID     uint
+		GmailResourceID uint
+		Status          string
+		SessionStatus   string
 	}, len(existing))
 	byDSID := make(map[string]struct {
-		ID            uint
-		OwnerUserID   uint
-		Status        string
-		SessionStatus string
+		ID              uint
+		OwnerUserID     uint
+		GmailResourceID uint
+		Status          string
+		SessionStatus   string
 	}, len(existing))
 	for _, item := range existing {
 		value := struct {
-			ID            uint
-			OwnerUserID   uint
-			Status        string
-			SessionStatus string
-		}{item.ID, item.OwnerUserID, item.Status, item.SessionStatus}
+			ID              uint
+			OwnerUserID     uint
+			GmailResourceID uint
+			Status          string
+			SessionStatus   string
+		}{item.ID, item.OwnerUserID, item.GmailResourceID, item.Status, item.SessionStatus}
 		byEmail[iCloudImportEmailKey(item.PrimaryEmail)] = value
 		byDSID[iCloudImportDSIDKey(item.DSID)] = value
 	}
@@ -747,6 +752,7 @@ func (s *Service) removeExistingICloudImportLines(ctx context.Context, ownerUser
 		// invalid. Every other existing resource remains immutable through import.
 		if match.ID != 0 && match.OwnerUserID == ownerUserID && match.SessionStatus == iCloudSessionInvalid {
 			line.ExistingResourceID = match.ID
+			line.ExistingGmailResourceID = match.GmailResourceID
 			result = append(result, line)
 			continue
 		}
@@ -800,7 +806,41 @@ func (s *Service) resolveICloudImportGmails(ctx context.Context, lines []iCloudI
 		}
 		failures = append(failures, failure)
 	}
-	return result, failures, nil, nil
+	changedResourceIDs := make([]uint, 0, len(result))
+	for _, line := range result {
+		if line.ExistingResourceID != 0 && line.ExistingGmailResourceID != line.GmailResourceID {
+			changedResourceIDs = append(changedResourceIDs, line.ExistingResourceID)
+		}
+	}
+	if len(changedResourceIDs) == 0 {
+		return result, failures, nil, nil
+	}
+	var activeResourceIDs []uint
+	if err := s.db.WithContext(ctx).Table("icloud_allocations").Distinct("resource_id").
+		Where("resource_id IN ? AND status = ?", changedResourceIDs, "allocated").
+		Pluck("resource_id", &activeResourceIDs).Error; err != nil {
+		return nil, nil, nil, ErrICloudImportTemporary
+	}
+	active := make(map[uint]struct{}, len(activeResourceIDs))
+	for _, resourceID := range activeResourceIDs {
+		active[resourceID] = struct{}{}
+	}
+	allowed := result[:0]
+	for _, line := range result {
+		if _, blocked := active[line.ExistingResourceID]; !blocked {
+			allowed = append(allowed, line)
+			continue
+		}
+		failure := iCloudImportFailure{
+			Line: line.LineNumber, Email: line.PrimaryEmail, Category: "active_gmail_binding",
+			SafeMessage: "Linked Gmail cannot be changed while the iCloud resource has active allocations.",
+		}
+		if strategy == coreDomain.ImportErrorStrategyAbort {
+			return nil, nil, &failure, nil
+		}
+		failures = append(failures, failure)
+	}
+	return allowed, failures, nil, nil
 }
 
 func (s *Service) createICloudResourcesAndMarkImportSucceeded(
@@ -870,7 +910,7 @@ func (s *Service) createICloudResourcesAndMarkImportSucceeded(
 					if validationGeneration == 1 {
 						validationGeneration = 2
 					}
-					resourceUpdated := tx.Model(&iCloudResourceModel{}).Where("id = ?", existing.ID).Updates(map[string]any{
+					updates := map[string]any{
 						"host": line.Host, "dsid": line.DSID, "client_id": line.ClientID,
 						"client_build_number": line.ClientBuildNumber, "client_mastering_number": line.ClientMasteringNumber,
 						"cookie": line.Cookie, "gmail_resource_id": line.GmailResourceID,
@@ -883,7 +923,12 @@ func (s *Service) createICloudResourcesAndMarkImportSucceeded(
 						"delivery_probe_token": "", "delivery_probe_alias": "", "delivery_probe_started_at": nil, "delivery_probe_verified_at": nil,
 						"next_keepalive_at": nil, "last_checked_at": nil, "last_valid_at": nil, "last_alias_sync_at": nil,
 						"last_safe_error": "", "updated_at": now,
-					})
+					}
+					if existing.GmailResourceID != line.GmailResourceID {
+						updates["provider_cursor"] = 0
+						updates["provider_spam_cursor"] = 0
+					}
+					resourceUpdated := tx.Model(&iCloudResourceModel{}).Where("id = ?", existing.ID).Updates(updates)
 					if resourceUpdated.Error != nil {
 						return resourceUpdated.Error
 					}

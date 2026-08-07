@@ -519,6 +519,46 @@ func TestGmailInboundUsesItsOwnResourceType(t *testing.T) {
 	require.Equal(t, "123456", matches.results[0].VerificationCode)
 }
 
+func TestICloudInboundUsesExactSelectedAliasAndReplaysItsResourceType(t *testing.T) {
+	now := time.Date(2026, 8, 7, 10, 0, 0, 0, time.UTC)
+	repo := &appendFenceRepoStub{matchingRepoStub: &matchingRepoStub{scopes: []OrderScope{{
+		OrderID: 61, OrderNo: "OR_ICLOUD_INBOUND", AllocationType: domain.ResourceTypeICloud,
+		EmailResourceID: 17, Recipient: "alias@icloud.com", RecipientKind: "exact",
+		ServiceMode: "purchase", OrderStatus: "completed", LooseMatch: true,
+		Rules: []MailRule{
+			{Type: MailRuleRecipient, Pattern: "exact", Enabled: true},
+			{Type: MailRuleSender, Pattern: `sender@example\.net`, Enabled: true},
+		},
+	}}}}
+	matches := &matchResultStub{}
+	uc := NewUseCase(repo, nil, nil, matches)
+
+	err := uc.IngestInboundMail(context.Background(), InboundMailRequest{
+		EmailResourceID:   17,
+		ResourceType:      domain.ResourceTypeICloud,
+		Recipient:         "alias@icloud.com",
+		EnvelopeFrom:      "sender@example.net",
+		Raw:               []byte("From: sender@example.net\r\nTo: different@icloud.com\r\n\r\nwelcome"),
+		ReceivedAt:        now,
+		ProviderMessageID: "inbox:91:101",
+		Protocol:          "imap",
+		Folder:            "Inbox",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, []domain.ResourceType{domain.ResourceTypeICloud}, repo.replayTypes)
+	require.NotEmpty(t, repo.matchedResourceTypes)
+	for _, resourceType := range repo.matchedResourceTypes {
+		require.Equal(t, domain.ResourceTypeICloud, resourceType)
+	}
+	require.NotNil(t, repo.purchaseDelivery)
+	require.Equal(t, "alias@icloud.com", repo.purchaseDelivery.Recipient)
+	require.Equal(t, []string{"alias@icloud.com"}, repo.purchaseDelivery.Recipients)
+	require.Len(t, matches.results, 1)
+	require.Equal(t, domain.ResourceTypeICloud, matches.results[0].ResourceType)
+	require.Equal(t, "purchase", matches.results[0].ServiceMode)
+}
+
 func TestGmailAppendOnlyReplaysAllMatchesForTheSessionInvariant(t *testing.T) {
 	base := time.Date(2026, 8, 3, 10, 0, 0, 0, time.UTC)
 	repo := &appendFenceRepoStub{matchingRepoStub: &matchingRepoStub{
@@ -1392,6 +1432,17 @@ func TestGmailRecipientRulesNormalizeGooglemailDotAndPlusAliases(t *testing.T) {
 	require.Equal(t, "654321", code)
 }
 
+func TestICloudRecipientRulesAreExactOnly(t *testing.T) {
+	scope := OrderScope{Recipient: "alias.name@icloud.com", RecipientKind: "exact"}
+
+	require.True(t, matchRecipientPatterns([]string{"exact"}, FetchedMessage{
+		ResourceType: domain.ResourceTypeICloud, Recipient: "Alias.Name@iCloud.com",
+	}, scope))
+	require.False(t, matchRecipientPatterns([]string{"dot", "plus"}, FetchedMessage{
+		ResourceType: domain.ResourceTypeICloud, Recipient: "aliasname+tag@icloud.com",
+	}, scope))
+}
+
 func TestRecipientBuiltInStrategyMustMatchAllocationKind(t *testing.T) {
 	message := FetchedMessage{
 		Recipient: "name.tag@example.com",
@@ -1776,6 +1827,19 @@ func TestGmailMessageDedupeUsesIMAPUID(t *testing.T) {
 	otherUID.ProviderMessageID = "102"
 
 	require.NotEqual(t, messageDedupeKey(message), messageDedupeKey(otherUID))
+	require.Equal(t, messageDedupeKey(message), messageDedupeKey(message))
+}
+
+func TestICloudMessageDedupeUsesLinkedGmailIMAPUID(t *testing.T) {
+	message := FetchedMessage{
+		ResourceType: domain.ResourceTypeICloud, MessageIDHeader: "same@example.net",
+		ProviderMessageID: "gmail:11:inbox:91:101", Protocol: "imap", Folder: "Inbox",
+		Recipient: "alias@icloud.com", Body: "welcome", ReceivedAt: time.Now().UTC(),
+	}
+	otherGmail := message
+	otherGmail.ProviderMessageID = "gmail:25:inbox:91:101"
+
+	require.NotEqual(t, messageDedupeKey(message), messageDedupeKey(otherGmail))
 	require.Equal(t, messageDedupeKey(message), messageDedupeKey(message))
 }
 
