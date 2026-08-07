@@ -69,7 +69,7 @@ type AllocateCommand struct {
 
 type UseCase struct {
 	repo                       Repository
-	queue                      CandidateRefreshQueue
+	queue                      InventoryRefreshQueue
 	adminAllocationEnrichment  AdminAllocationEnrichmentPort
 	historicalMicrosoftAliases HistoricalMicrosoftAliasPort
 	inventoryCache             InventoryCache
@@ -100,8 +100,8 @@ func (uc *UseCase) SetAdminAllocationEnrichmentPort(port AdminAllocationEnrichme
 	}
 }
 
-func NewUseCase(repo Repository, queues ...CandidateRefreshQueue) *UseCase {
-	var queue CandidateRefreshQueue
+func NewUseCase(repo Repository, queues ...InventoryRefreshQueue) *UseCase {
+	var queue InventoryRefreshQueue
 	if len(queues) > 0 {
 		queue = queues[0]
 	}
@@ -984,43 +984,6 @@ func loadCachedInventory[T any](
 	return cold(), nil
 }
 
-func (uc *UseCase) RefreshRoutingCandidates(ctx context.Context, projectID uint) (int, error) {
-	if projectID == 0 {
-		return 0, domain.ErrInvalidAllocationRequest
-	}
-	return uc.repo.RefreshRoutingCandidates(ctx, projectID)
-}
-
-func (uc *UseCase) QueueRoutingCandidateRefresh(ctx context.Context, projectID uint, operatorUserID uint, requestID string, path string) (*CandidateRefreshSubmitResult, error) {
-	if projectID == 0 || operatorUserID == 0 {
-		return nil, domain.ErrInvalidAllocationRequest
-	}
-	state, err := uc.repo.RequestCandidateRefresh(
-		ctx,
-		projectID,
-		operatorUserID,
-		strings.TrimSpace(requestID),
-		strings.TrimSpace(path),
-	)
-	if err != nil {
-		return nil, err
-	}
-	uc.ScheduleCandidateRefreshDispatcher(ctx, 0)
-	requestedAt := state.UpdatedAt
-	if state.RequestedAt != nil {
-		requestedAt = *state.RequestedAt
-	}
-	return &CandidateRefreshSubmitResult{
-		JobID:     state.ProjectID,
-		ProjectID: state.ProjectID,
-		Status:    state.Status,
-		Created:   true,
-		Message:   "Candidate refresh accepted.",
-		CreatedAt: requestedAt,
-		UpdatedAt: state.UpdatedAt,
-	}, nil
-}
-
 func (uc *UseCase) RefreshInventoryCache(ctx context.Context) (*InventoryRefreshResult, error) {
 	if err := uc.EnsureInventoryRefreshSchedule(ctx); err != nil {
 		return nil, err
@@ -1143,74 +1106,6 @@ func requeueInventory(cache InventoryCache, entries []InventoryCacheEntry) error
 	return cache.RequeueInventory(cleanupCtx, entries)
 }
 
-func (uc *UseCase) ProcessCandidateRefresh(ctx context.Context, task CandidateRefreshTask) error {
-	if task.ProjectID == 0 || task.Generation == 0 {
-		return domain.ErrAllocationNotFound
-	}
-	if _, err := uc.repo.MarkCandidateRefreshProcessing(ctx, task.ProjectID, task.Generation); err != nil {
-		return err
-	}
-	_, current, err := uc.repo.RunCandidateRefresh(ctx, task.ProjectID, task.Generation)
-	if err == nil || !current {
-		return nil
-	}
-	if errors.Is(err, domain.ErrCandidateRefreshInfrastructure) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		if _, releaseErr := uc.repo.ReleaseCandidateRefreshInfrastructureFailure(
-			cleanupCtx,
-			task.ProjectID,
-			task.Generation,
-			"Candidate refresh infrastructure failed; dispatcher will retry.",
-		); releaseErr != nil {
-			return errors.Join(err, releaseErr)
-		}
-		return err
-	}
-	recorded, abnormal, recordErr := uc.repo.RecordCandidateRefreshFailure(
-		ctx,
-		task.ProjectID,
-		task.Generation,
-		"Candidate refresh failed.",
-	)
-	if recordErr != nil {
-		return errors.Join(err, recordErr)
-	}
-	if recorded && !abnormal {
-		uc.ScheduleCandidateRefreshDispatcher(ctx, time.Second)
-	}
-	return err
-}
-
-func (uc *UseCase) DispatchCandidateRefreshes(ctx context.Context, limit int) (*CandidateRefreshDispatchResult, error) {
-	if limit <= 0 {
-		limit = 100
-	}
-	states, err := uc.repo.ListPendingCandidateRefreshes(ctx, limit)
-	if err != nil {
-		return nil, err
-	}
-	result := &CandidateRefreshDispatchResult{Attempted: len(states)}
-	for i := range states {
-		queued, err := uc.enqueueCandidateRefresh(ctx, states[i])
-		if err != nil {
-			result.Failed++
-			continue
-		}
-		if queued {
-			result.Queued++
-		}
-	}
-	return result, nil
-}
-
-func (uc *UseCase) ScheduleCandidateRefreshDispatcher(ctx context.Context, delay time.Duration) {
-	if uc == nil || uc.queue == nil {
-		return
-	}
-	_ = uc.queue.EnqueueCandidateRefreshDispatcher(ctx, delay)
-}
-
 func (uc *UseCase) ScheduleInventoryRefresh(ctx context.Context) error {
 	if uc == nil || uc.queue == nil {
 		return nil
@@ -1223,44 +1118,6 @@ func (uc *UseCase) ScheduleInventoryRefreshContinuation(ctx context.Context) err
 		return nil
 	}
 	return uc.queue.EnqueueInventoryRefreshContinuation(ctx)
-}
-
-func (uc *UseCase) enqueueCandidateRefresh(ctx context.Context, state domain.CandidateRefresh) (bool, error) {
-	if uc == nil || uc.queue == nil {
-		return false, domain.ErrInvalidAllocationRequest
-	}
-	if state.ProjectID == 0 || state.Generation == 0 {
-		return false, domain.ErrInvalidAllocationRequest
-	}
-	accepted, err := uc.queue.EnqueueCandidateRefresh(ctx, CandidateRefreshTask{
-		ProjectID:  state.ProjectID,
-		Generation: state.Generation,
-		RequestID:  state.RequestID,
-	})
-	if err != nil || !accepted {
-		return false, err
-	}
-	processing, err := uc.repo.MarkCandidateRefreshProcessing(ctx, state.ProjectID, state.Generation)
-	if err != nil {
-		return false, err
-	}
-	return processing, nil
-}
-
-func (uc *UseCase) ListRoutingCandidates(ctx context.Context, filter CandidateFilter) (*CandidateListResult, error) {
-	if filter.ProjectID == 0 {
-		return nil, domain.ErrInvalidAllocationRequest
-	}
-	if filter.Type != "" && !domain.IsValidAllocationType(filter.Type) {
-		return nil, domain.ErrInvalidAllocationRequest
-	}
-	if filter.Limit <= 0 || filter.Limit > 100 {
-		filter.Limit = 20
-	}
-	if filter.Offset < 0 {
-		filter.Offset = 0
-	}
-	return uc.repo.ListRoutingCandidates(ctx, filter)
 }
 
 func (uc *UseCase) allocateMicrosoft(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig) (*domain.UnifiedAllocation, error) {

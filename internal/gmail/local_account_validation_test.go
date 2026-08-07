@@ -88,6 +88,30 @@ func TestLocalGmailAccountValidationReturnsAuthoritativeCredentialsBeforeProxyRe
 	require.Empty(t, proxies.successes)
 }
 
+func TestLocalGmailAccountValidationReturnsRevocationBeforeProxyRetry(t *testing.T) {
+	setGmailRuntime(t, map[string]string{"max_proxy_attempts": "2"})
+	proxies := &localGmailPickupProxyStub{configs: []*proxyapp.ProxyConfig{
+		{ID: 11, ProxyServerID: 10, URL: "http://first.invalid:8080"},
+		{ID: 21, ProxyServerID: 20, URL: "http://second.invalid:8080"},
+	}}
+	calls := 0
+	result := validateLocalGmailAccountWith(context.Background(), proxies, localGmailValidationInput{
+		ResourceID: 9, ValidationGeneration: 5, Email: "revoked@gmail.com", Password: "password",
+	}, func(context.Context, localGmailValidationInput, string, localGmailBrowserFingerprint) localGmailValidationResult {
+		calls++
+		return localGmailValidationResult{
+			AppPasswordRevoked: true, SafeError: "Gmail proxy transport failed.", Temporary: true,
+			ProxyFailure: true, Err: errors.New("proxy connection reset"),
+		}
+	})
+
+	require.Error(t, result.Err)
+	require.True(t, result.AppPasswordRevoked)
+	require.Equal(t, 1, calls)
+	require.Len(t, proxies.requests, 1)
+	require.Equal(t, []uint{11}, proxies.failures)
+}
+
 func TestGenerateLocalGmailTOTPUsesRFC6238(t *testing.T) {
 	code, err := generateLocalGmailTOTP("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", time.Unix(59, 0))
 	require.NoError(t, err)

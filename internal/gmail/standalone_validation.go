@@ -22,6 +22,8 @@ type StandaloneRotationResult struct {
 	AppPassword              string
 	TwoFactorAuthoritative   bool
 	AppPasswordAuthoritative bool
+	TwoFactorRevoked         bool
+	AppPasswordRevoked       bool
 	SafeError                string
 	Temporary                bool
 	ProxyFailure             bool

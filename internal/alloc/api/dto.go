@@ -139,34 +139,3 @@ type ICloudInventoryResponse struct {
 	AliasAvailable    int64 `json:"aliasAvailable"`
 	TotalAvailable    int64 `json:"totalAvailable"`
 }
-
-type RoutingCandidateResponse struct {
-	ID              uint       `json:"id"`
-	Type            string     `json:"type"`
-	ProjectID       uint       `json:"projectId"`
-	ResourceID      uint       `json:"resourceId"`
-	Address         string     `json:"address"`
-	DomainSuffix    string     `json:"domainSuffix"`
-	ForSale         bool       `json:"forSale"`
-	QualityScore    int        `json:"qualityScore"`
-	Status          string     `json:"status"`
-	Bucket          uint16     `json:"bucket"`
-	LastAllocatedAt *time.Time `json:"lastAllocatedAt,omitempty"`
-	CreatedAt       time.Time  `json:"createdAt"`
-	UpdatedAt       time.Time  `json:"updatedAt"`
-}
-
-type RoutingCandidateListResponse struct {
-	Items  []RoutingCandidateResponse `json:"items"`
-	Total  int64                      `json:"total"`
-	Offset int                        `json:"offset"`
-	Limit  int                        `json:"limit"`
-}
-
-type CandidateRefreshResponse struct {
-	JobID     uint   `json:"jobId"`
-	ProjectID uint   `json:"projectId"`
-	Status    string `json:"status"`
-	Created   bool   `json:"created"`
-	Message   string `json:"message"`
-}

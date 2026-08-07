@@ -188,87 +188,6 @@ func productSuffixInventoryResponse(items []allocapp.ProductInventorySuffixTotal
 	return result
 }
 
-func (h *Handler) GetProjectCandidates(c *gin.Context) {
-	projectID, ok := parsePathUint(c, "projectId")
-	if !ok {
-		return
-	}
-	candidateType := domain.AllocationType(strings.TrimSpace(c.Query("type")))
-	if candidateType != "" && !domain.IsValidAllocationType(candidateType) {
-		writeAllocError(c, domain.ErrInvalidAllocationRequest)
-		return
-	}
-	offset, limit, ok := parsePagination(c)
-	if !ok {
-		return
-	}
-	result, err := h.module.UseCase.ListRoutingCandidates(c.Request.Context(), allocapp.CandidateFilter{
-		ProjectID: projectID,
-		Type:      candidateType,
-		Offset:    offset,
-		Limit:     limit,
-	})
-	if err != nil {
-		writeAllocError(c, err)
-		return
-	}
-	items := make([]RoutingCandidateResponse, len(result.Items))
-	for i := range result.Items {
-		item := result.Items[i]
-		items[i] = RoutingCandidateResponse{
-			ID:              item.ID,
-			Type:            string(item.Type),
-			ProjectID:       item.ProjectID,
-			ResourceID:      item.ResourceID,
-			Address:         item.Address,
-			DomainSuffix:    item.DomainSuffix,
-			ForSale:         item.ForSale,
-			QualityScore:    item.QualityScore,
-			Status:          item.Status,
-			Bucket:          item.Bucket,
-			LastAllocatedAt: item.LastAllocatedAt,
-			CreatedAt:       item.CreatedAt,
-			UpdatedAt:       item.UpdatedAt,
-		}
-	}
-	c.JSON(http.StatusOK, RoutingCandidateListResponse{
-		Items:  items,
-		Total:  result.Total,
-		Offset: result.Offset,
-		Limit:  result.Limit,
-	})
-}
-
-func (h *Handler) PostProjectCandidatesRefresh(c *gin.Context) {
-	projectID, ok := parsePathUint(c, "projectId")
-	if !ok {
-		return
-	}
-	operatorUserID, ok := middleware.GetCurrentUserID(c)
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"message": "Authentication is required.", "requestId": middleware.GetRequestID(c)})
-		return
-	}
-	result, err := h.module.UseCase.QueueRoutingCandidateRefresh(
-		c.Request.Context(),
-		projectID,
-		operatorUserID,
-		middleware.GetRequestID(c),
-		c.FullPath(),
-	)
-	if err != nil {
-		writeAllocError(c, err)
-		return
-	}
-	c.JSON(http.StatusAccepted, CandidateRefreshResponse{
-		JobID:     result.JobID,
-		ProjectID: result.ProjectID,
-		Status:    string(result.Status),
-		Created:   result.Created,
-		Message:   result.Message,
-	})
-}
-
 func allocationResponse(item domain.UnifiedAllocation) AllocationItemResponse {
 	return AllocationItemResponse{
 		Type:        string(item.Type),
@@ -333,13 +252,6 @@ func icloudInventoryResponse(stats allocapp.ICloudInventoryStats) ICloudInventor
 		Enabled: stats.Enabled, EligibleResources: stats.EligibleResources,
 		AliasAvailable: stats.AliasAvailable, TotalAvailable: stats.TotalAvailable,
 	}
-}
-
-func parsePagination(c *gin.Context) (int, int, bool) {
-	return middleware.ParsePagination(c, middleware.PaginationOptions{
-		DefaultLimit: 20,
-		MaxLimit:     10000,
-	})
 }
 
 func parsePathUint(c *gin.Context, name string) (uint, bool) {

@@ -2,64 +2,20 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
 	allocapp "github.com/donnel666/remail/internal/alloc/app"
-	"github.com/donnel666/remail/internal/alloc/domain"
 	allocinfra "github.com/donnel666/remail/internal/alloc/infra"
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/hibiken/asynq"
 )
 
-const (
-	candidateRefreshDispatcherInterval = 30 * time.Second
-	inventoryRefreshMaxEntriesPerTask  = 50
-)
+const inventoryRefreshMaxEntriesPerTask = 50
 
 func RegisterAllocationTaskHandlers(mux *asynq.ServeMux, module *Module) func(context.Context) {
-	mux.HandleFunc(allocinfra.TypeCandidateRefreshDispatcher, func(ctx context.Context, _ *asynq.Task) error {
-		if module == nil || module.UseCase == nil {
-			return nil
-		}
-		result, err := module.UseCase.DispatchCandidateRefreshes(ctx, 0)
-		if err != nil {
-			slog.Warn("candidate refresh dispatcher failed", "error", err)
-			return err
-		}
-		if result != nil && result.Attempted > 0 {
-			slog.Info(
-				"candidate refresh dispatcher finished",
-				"attempted", result.Attempted,
-				"queued", result.Queued,
-				"failed", result.Failed,
-			)
-		}
-		return nil
-	})
-	mux.HandleFunc(allocinfra.TypeCandidateRefresh, func(ctx context.Context, task *asynq.Task) error {
-		if module == nil || module.UseCase == nil {
-			return nil
-		}
-		var payload allocapp.CandidateRefreshTask
-		if err := json.Unmarshal(task.Payload(), &payload); err != nil {
-			return fmt.Errorf("decode candidate refresh task: %w: %w", err, asynq.SkipRetry)
-		}
-		slog.Info("processing candidate refresh task", "project_id", payload.ProjectID, "generation", payload.Generation, "request_id", payload.RequestID)
-		if err := module.UseCase.ProcessCandidateRefresh(ctx, payload); err != nil {
-			slog.Warn("candidate refresh task failed", "project_id", payload.ProjectID, "generation", payload.Generation, "request_id", payload.RequestID, "error", err)
-			if errors.Is(err, domain.ErrAllocationNotFound) || errors.Is(err, domain.ErrInvalidAllocationRequest) {
-				return fmt.Errorf("non-retryable candidate refresh task failure: %w: %w", err, asynq.SkipRetry)
-			}
-			return err
-		}
-		slog.Info("candidate refresh task finished", "project_id", payload.ProjectID, "generation", payload.Generation, "request_id", payload.RequestID)
-		return nil
-	})
-
 	mux.HandleFunc(allocinfra.TypeInventoryRefresh, func(ctx context.Context, _ *asynq.Task) error {
 		if module == nil || module.UseCase == nil {
 			return nil
@@ -100,8 +56,7 @@ func RegisterAllocationTaskHandlers(mux *asynq.ServeMux, module *Module) func(co
 	if module == nil || module.UseCase == nil {
 		return func(context.Context) {}
 	}
-	module.UseCase.ScheduleCandidateRefreshDispatcher(context.Background(), 0)
-	return startAllocationTaskSeedersWithInventoryInterval(module, candidateRefreshDispatcherInterval, allocapp.InventoryRefreshIntervalValue)
+	return startInventoryRefreshSeeder(module, allocapp.InventoryRefreshIntervalValue)
 }
 
 func refreshInventoryTask(ctx context.Context, useCase *allocapp.UseCase) (*allocapp.InventoryRefreshResult, bool, error) {
@@ -139,11 +94,7 @@ func refreshInventoryTask(ctx context.Context, useCase *allocapp.UseCase) (*allo
 	return total, false, nil
 }
 
-func startAllocationTaskSeeders(module *Module, candidateInterval time.Duration, inventoryInterval time.Duration) func(context.Context) {
-	return startAllocationTaskSeedersWithInventoryInterval(module, candidateInterval, func() time.Duration { return inventoryInterval })
-}
-
-func startAllocationTaskSeedersWithInventoryInterval(module *Module, candidateInterval time.Duration, inventoryInterval func() time.Duration) func(context.Context) {
+func startInventoryRefreshSeeder(module *Module, interval func() time.Duration) func(context.Context) {
 	if module == nil || module.UseCase == nil {
 		return func(context.Context) {}
 	}
@@ -151,27 +102,23 @@ func startAllocationTaskSeedersWithInventoryInterval(module *Module, candidateIn
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		candidateTicker := time.NewTicker(candidateInterval)
 		if err := module.UseCase.ScheduleInventoryRefresh(ctx); err != nil {
 			slog.Warn("enqueue initial inventory cache refresh failed", "error", err)
 		}
-		inventoryPollInterval := func() time.Duration {
-			return min(inventoryInterval(), time.Minute)
+		pollInterval := func() time.Duration {
+			return min(interval(), time.Minute)
 		}
-		inventoryTimer := time.NewTimer(inventoryPollInterval())
-		defer candidateTicker.Stop()
-		defer inventoryTimer.Stop()
+		timer := time.NewTimer(pollInterval())
+		defer timer.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-candidateTicker.C:
-				module.UseCase.ScheduleCandidateRefreshDispatcher(ctx, 0)
-			case <-inventoryTimer.C:
+			case <-timer.C:
 				if err := module.UseCase.ScheduleInventoryRefresh(ctx); err != nil {
 					slog.Warn("enqueue inventory cache refresh failed", "error", err)
 				}
-				inventoryTimer.Reset(inventoryPollInterval())
+				timer.Reset(pollInterval())
 			}
 		}
 	}()

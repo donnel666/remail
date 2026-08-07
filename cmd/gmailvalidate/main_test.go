@@ -34,6 +34,17 @@ func TestCredentialSelectionCheckpointAndSuccessReplacement(t *testing.T) {
 	if loaded.Accounts[credential.Email].TwoFactorSecret == "" {
 		t.Fatal("authoritative 2FA checkpoint was lost")
 	}
+	revoked := loaded.Accounts[credential.Email]
+	revoked.TwoFactorSecret = ""
+	revoked.TwoFactorRevoked = true
+	loaded.Accounts[credential.Email] = revoked
+	if err := saveCheckpoint(statePath, loaded); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err = loadCheckpoint(statePath)
+	if err != nil || !loaded.Accounts[credential.Email].TwoFactorRevoked {
+		t.Fatal("revoked 2FA checkpoint was lost")
+	}
 	info, err := os.Stat(statePath)
 	if err != nil || info.Mode().Perm() != 0o600 {
 		t.Fatalf("checkpoint mode = %v, err = %v", info.Mode().Perm(), err)

@@ -43,9 +43,11 @@ type checkpointFile struct {
 }
 
 type accountCheckpoint struct {
-	TwoFactorSecret string    `json:"twoFactorSecret,omitempty"`
-	AppPassword     string    `json:"appPassword,omitempty"`
-	UpdatedAt       time.Time `json:"updatedAt"`
+	TwoFactorSecret    string    `json:"twoFactorSecret,omitempty"`
+	AppPassword        string    `json:"appPassword,omitempty"`
+	TwoFactorRevoked   bool      `json:"twoFactorRevoked,omitempty"`
+	AppPasswordRevoked bool      `json:"appPasswordRevoked,omitempty"`
+	UpdatedAt          time.Time `json:"updatedAt"`
 }
 
 type productionProxyRuntime struct {
@@ -108,10 +110,14 @@ func run(args []string, stdout, stderr io.Writer) error {
 	}
 	key := strings.ToLower(credential.Email)
 	if saved, ok := state.Accounts[key]; ok {
-		if saved.TwoFactorSecret != "" {
+		if saved.TwoFactorRevoked {
+			credential.TwoFactorSecret = ""
+		} else if saved.TwoFactorSecret != "" {
 			credential.TwoFactorSecret = saved.TwoFactorSecret
 		}
-		if saved.AppPassword != "" {
+		if saved.AppPasswordRevoked {
+			credential.AppPassword = ""
+		} else if saved.AppPassword != "" {
 			credential.AppPassword = saved.AppPassword
 		}
 	}
@@ -132,13 +138,27 @@ func run(args []string, stdout, stderr io.Writer) error {
 	}
 	saved := state.Accounts[key]
 	changed := false
+	if result.TwoFactorRevoked {
+		saved.TwoFactorSecret = ""
+		saved.TwoFactorRevoked = true
+		credential.TwoFactorSecret = ""
+		changed = true
+	}
 	if result.TwoFactorAuthoritative {
 		saved.TwoFactorSecret = result.TwoFactorSecret
+		saved.TwoFactorRevoked = false
 		credential.TwoFactorSecret = result.TwoFactorSecret
+		changed = true
+	}
+	if result.AppPasswordRevoked {
+		saved.AppPassword = ""
+		saved.AppPasswordRevoked = true
+		credential.AppPassword = ""
 		changed = true
 	}
 	if result.AppPasswordAuthoritative {
 		saved.AppPassword = result.AppPassword
+		saved.AppPasswordRevoked = false
 		credential.AppPassword = result.AppPassword
 		changed = true
 	}

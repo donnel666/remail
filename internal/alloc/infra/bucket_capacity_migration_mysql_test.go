@@ -35,15 +35,6 @@ INSERT INTO domain_resources(
 	require.NoError(t, db.Exec(`
 INSERT INTO generated_mailboxes(id, resource_id, owner_user_id, email, status)
 VALUES (2047, 4095, 1, ' Existing@D4095.Example.com ', 'normal')`).Error)
-	require.NoError(t, db.Exec(`
-INSERT INTO microsoft_routing_candidates(
-    id, project_id, resource_id, email_address, domain_suffix, for_sale, quality_score, status, alloc_bucket
-) VALUES (990461, 10, 2047, 'ms2047@example.com', 'example.com', TRUE, 100, 'normal', MOD(2047, 64))`).Error)
-	require.NoError(t, db.Exec(`
-INSERT INTO domain_routing_candidates(
-    id, project_id, resource_id, domain, domain_tld, purpose, status, alloc_bucket
-) VALUES (990462, 10, 4095, 'd4095.example.com', 'example.com', 'sale', 'normal', MOD(4095, 64))`).Error)
-
 	require.NoError(t, goose.UpTo(sqlDB, migrationsDir, 46))
 	assertAllocationBuckets(t, db, 2047, 511)
 	requireIndexExists(t, db, "generated_mailboxes", "idx_generated_mailboxes_alloc_reuse")
@@ -74,9 +65,7 @@ func assertAllocationBuckets(t *testing.T, db *gorm.DB, microsoftWant uint16, do
 		want  uint16
 	}{
 		{query: "SELECT alloc_bucket FROM microsoft_resources WHERE id = 2047", want: microsoftWant},
-		{query: "SELECT alloc_bucket FROM microsoft_routing_candidates WHERE resource_id = 2047", want: microsoftWant},
 		{query: "SELECT alloc_bucket FROM domain_resources WHERE id = 4095", want: domainWant},
-		{query: "SELECT alloc_bucket FROM domain_routing_candidates WHERE resource_id = 4095", want: domainWant},
 	} {
 		var got uint16
 		require.NoError(t, db.Raw(test.query).Scan(&got).Error)

@@ -15,18 +15,8 @@ import (
 )
 
 type allocationTaskQueueStub struct {
-	candidateCalls    atomic.Int32
 	inventoryCalls    atomic.Int32
 	continuationCalls atomic.Int32
-}
-
-func (*allocationTaskQueueStub) EnqueueCandidateRefresh(context.Context, allocapp.CandidateRefreshTask) (bool, error) {
-	return false, nil
-}
-
-func (q *allocationTaskQueueStub) EnqueueCandidateRefreshDispatcher(context.Context, time.Duration) error {
-	q.candidateCalls.Add(1)
-	return nil
 }
 
 func (q *allocationTaskQueueStub) EnqueueInventoryRefresh(context.Context) error {
@@ -192,7 +182,7 @@ func TestInventoryRefreshTaskQueuesContinuationAtItsWorkLimit(t *testing.T) {
 func TestAllocationTaskSeedersQueueInventoryRefreshImmediately(t *testing.T) {
 	queue := &allocationTaskQueueStub{}
 	module := &Module{UseCase: allocapp.NewUseCase(nil, queue)}
-	cleanup := startAllocationTaskSeeders(module, time.Hour, time.Hour)
+	cleanup := startInventoryRefreshSeeder(module, func() time.Duration { return time.Hour })
 	t.Cleanup(func() { cleanup(context.Background()) })
 
 	require.Eventually(t, func() bool {
@@ -203,14 +193,12 @@ func TestAllocationTaskSeedersQueueInventoryRefreshImmediately(t *testing.T) {
 func TestAllocationTaskSeedersStopOnCleanup(t *testing.T) {
 	queue := &allocationTaskQueueStub{}
 	module := &Module{UseCase: allocapp.NewUseCase(nil, queue)}
-	cleanup := startAllocationTaskSeeders(module, 2*time.Millisecond, 2*time.Millisecond)
+	cleanup := startInventoryRefreshSeeder(module, func() time.Duration { return 2 * time.Millisecond })
 	require.Eventually(t, func() bool {
-		return queue.candidateCalls.Load() > 0 && queue.inventoryCalls.Load() > 1
+		return queue.inventoryCalls.Load() > 1
 	}, 100*time.Millisecond, time.Millisecond)
 	cleanup(context.Background())
-	candidateCalls := queue.candidateCalls.Load()
 	inventoryCalls := queue.inventoryCalls.Load()
 	time.Sleep(10 * time.Millisecond)
-	require.Equal(t, candidateCalls, queue.candidateCalls.Load())
 	require.Equal(t, inventoryCalls, queue.inventoryCalls.Load())
 }

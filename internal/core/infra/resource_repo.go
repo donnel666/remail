@@ -633,9 +633,6 @@ func (r *ResourceRepo) ReindexDomainTLDs(ctx context.Context) error {
 				if err := tx.Model(&DomainResourceModel{}).Where("id IN ?", ids).UpdateColumn("domain_tld", tld).Error; err != nil {
 					return fmt.Errorf("update domain TLD index: %w", err)
 				}
-				if err := tx.Table("domain_routing_candidates").Where("resource_id IN ?", ids).Update("domain_tld", tld).Error; err != nil {
-					return fmt.Errorf("update domain routing TLD index: %w", err)
-				}
 			}
 			afterID = rows[len(rows)-1].ID
 			if len(rows) < batchSize {

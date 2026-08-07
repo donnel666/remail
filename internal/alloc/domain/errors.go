@@ -12,5 +12,4 @@ var (
 	ErrInsufficientInventory             = errors.New("insufficient inventory")
 	ErrProjectNotAllocatable             = errors.New("project is not allocatable")
 	ErrInventoryRefreshInProgress        = errors.New("inventory refresh is in progress")
-	ErrCandidateRefreshInfrastructure    = errors.New("candidate refresh infrastructure failure")
 )

@@ -481,6 +481,10 @@ func TestGmailResourceImportFinalizesPreparedRedisResultWithoutRecreatingResourc
 	var resourceCount int64
 	require.NoError(t, harness.db.Model(&localResourceModel{}).Count(&resourceCount).Error)
 	require.EqualValues(t, 1, resourceCount)
+	dispatchTasks, err := harness.inspector.ListPendingTasks(platform.QueueDefault)
+	require.NoError(t, err)
+	require.Len(t, dispatchTasks, 1)
+	require.Equal(t, typeGmailValidationDispatcher, dispatchTasks[0].Type)
 }
 
 func TestGmailResourceImportClearsPreparedResultAfterDatabaseRollback(t *testing.T) {

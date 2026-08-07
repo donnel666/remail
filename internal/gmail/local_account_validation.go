@@ -128,7 +128,7 @@ func validateLocalGmailAccountWith(
 		// A successful remote credential mutation is irreversible from this
 		// attempt's perspective. Persist the partial result before changing
 		// proxies; retrying with the old secret can lock the account out.
-		if last.TwoFactorAuthoritative || last.AppPasswordAuthoritative {
+		if last.TwoFactorAuthoritative || last.AppPasswordAuthoritative || last.TwoFactorRevoked || last.AppPasswordRevoked {
 			if last.ProxyFailure {
 				reportLocalGmailValidationProxy(ctx, proxies, proxyID, false, last.SafeError)
 			} else {
@@ -231,6 +231,7 @@ func rotateLocalGmailAccount(
 	result := localGmailValidationResult{}
 	if strings.TrimSpace(input.TwoFactorSecret) == "" {
 		secret, err := browser.replaceAuthenticator(input.Password, "")
+		result.TwoFactorRevoked = browser.twoFactorRevoked
 		if secret != "" {
 			result.TwoFactorSecret = secret
 			result.TwoFactorAuthoritative = true
@@ -239,6 +240,7 @@ func rotateLocalGmailAccount(
 			return localGmailValidationFailure(result, err)
 		}
 		appPassword, err := browser.replaceAppPasswords(input.Password, secret)
+		result.AppPasswordRevoked = browser.appPasswordRevoked
 		if appPassword != "" {
 			result.AppPassword = appPassword
 			result.AppPasswordAuthoritative = true
@@ -248,6 +250,7 @@ func rotateLocalGmailAccount(
 		}
 	} else {
 		appPassword, err := browser.replaceAppPasswords(input.Password, input.TwoFactorSecret)
+		result.AppPasswordRevoked = browser.appPasswordRevoked
 		if appPassword != "" {
 			result.AppPassword = appPassword
 			result.AppPasswordAuthoritative = true
@@ -256,6 +259,7 @@ func rotateLocalGmailAccount(
 			return localGmailValidationFailure(result, err)
 		}
 		secret, err := browser.replaceAuthenticator(input.Password, input.TwoFactorSecret)
+		result.TwoFactorRevoked = browser.twoFactorRevoked
 		if secret != "" {
 			result.TwoFactorSecret = secret
 			result.TwoFactorAuthoritative = true
@@ -324,14 +328,16 @@ func verifyLocalGmailAppPassword(ctx context.Context, email, appPassword, proxyU
 }
 
 type localGmailBrowser struct {
-	ctx          context.Context
-	cancel       context.CancelFunc
-	allocCancel  context.CancelFunc
-	proxyClose   func()
-	email        string
-	rapt         string
-	bindingEmail string
-	usesProxy    bool
+	ctx                context.Context
+	cancel             context.CancelFunc
+	allocCancel        context.CancelFunc
+	proxyClose         func()
+	email              string
+	rapt               string
+	bindingEmail       string
+	usesProxy          bool
+	twoFactorRevoked   bool
+	appPasswordRevoked bool
 }
 
 func newLocalGmailBrowser(
@@ -609,6 +615,7 @@ func (b *localGmailBrowser) replaceAuthenticator(password, currentSecret string)
 	if err := b.submitTOTP(secret, []string{"Verify", "验证"}, `input[autocomplete="one-time-code"], input[type="tel"], input[type="text"]`, localGmailChangeTOTPAttempts); err != nil {
 		return "", err
 	}
+	b.twoFactorRevoked = true
 	if err := b.waitForText([]string{"Authenticator app has been changed", "身份验证器应用已更改", "Added just now", "刚刚添加"}, 15*time.Second); err != nil {
 		// The TOTP form has already disappeared, so Google accepted the new
 		// secret even if a localized success banner did not render.
@@ -633,6 +640,7 @@ func (b *localGmailBrowser) replaceAppPasswords(password, currentSecret string) 
 			return "", err
 		}
 		if count == 0 {
+			b.appPasswordRevoked = true
 			break
 		}
 		if revoked > 100 {
@@ -641,6 +649,7 @@ func (b *localGmailBrowser) replaceAppPasswords(password, currentSecret string) 
 		if err := b.clickText([]string{"Revoke app password", "撤销应用专用密码", "撤销应用密码"}, false); err != nil {
 			return "", err
 		}
+		b.appPasswordRevoked = true
 		if err := b.waitControlCountBelow([]string{"Revoke app password", "撤销应用专用密码", "撤销应用密码"}, count, 10*time.Second); err != nil {
 			_, _ = b.clickAnyText([]string{"Revoke", "撤销", "Remove", "移除"})
 			if err := b.waitControlCountBelow([]string{"Revoke app password", "撤销应用专用密码", "撤销应用密码"}, count, 5*time.Second); err != nil {

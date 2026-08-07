@@ -57,6 +57,8 @@ type localGmailValidationResult struct {
 	AppPassword              string
 	TwoFactorAuthoritative   bool
 	AppPasswordAuthoritative bool
+	TwoFactorRevoked         bool
+	AppPasswordRevoked       bool
 	SafeError                string
 	Temporary                bool
 	ProxyFailure             bool
@@ -461,12 +463,20 @@ func (s *Service) applyLocalResourceValidationResult(
 			"last_safe_error": safeError, "last_checked_at": checkedAt, "updated_at": checkedAt,
 		}
 		credentialChanged := false
-		if validation.Err == nil || validation.TwoFactorAuthoritative {
-			updates["two_factor_secret"] = strings.ToUpper(removeWhitespace(validation.TwoFactorSecret))
+		if validation.Err == nil || validation.TwoFactorAuthoritative || validation.TwoFactorRevoked {
+			twoFactorSecret := ""
+			if validation.Err == nil || validation.TwoFactorAuthoritative {
+				twoFactorSecret = strings.ToUpper(removeWhitespace(validation.TwoFactorSecret))
+			}
+			updates["two_factor_secret"] = twoFactorSecret
 			credentialChanged = true
 		}
-		if validation.Err == nil || validation.AppPasswordAuthoritative {
-			updates["app_password"] = removeWhitespace(validation.AppPassword)
+		if validation.Err == nil || validation.AppPasswordAuthoritative || validation.AppPasswordRevoked {
+			appPassword := ""
+			if validation.Err == nil || validation.AppPasswordAuthoritative {
+				appPassword = removeWhitespace(validation.AppPassword)
+			}
+			updates["app_password"] = appPassword
 			credentialChanged = true
 		}
 		if credentialChanged {

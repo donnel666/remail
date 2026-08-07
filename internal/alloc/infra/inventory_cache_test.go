@@ -37,14 +37,6 @@ type inventoryRefreshQueueStub struct {
 	err   error
 }
 
-func (*inventoryRefreshQueueStub) EnqueueCandidateRefresh(context.Context, allocapp.CandidateRefreshTask) (bool, error) {
-	return false, nil
-}
-
-func (*inventoryRefreshQueueStub) EnqueueCandidateRefreshDispatcher(context.Context, time.Duration) error {
-	return nil
-}
-
 func (q *inventoryRefreshQueueStub) EnqueueInventoryRefresh(context.Context) error {
 	q.calls++
 	return q.err

@@ -292,44 +292,6 @@ type DomainInventoryStats struct {
 	TotalAvailable        int64
 }
 
-type RoutingCandidate struct {
-	ID              uint
-	Type            domain.AllocationType
-	ProjectID       uint
-	ResourceID      uint
-	Address         string
-	DomainSuffix    string
-	ForSale         bool
-	QualityScore    int
-	Status          string
-	Bucket          uint16
-	LastAllocatedAt *time.Time
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-}
-
-type CandidateRefreshTask struct {
-	ProjectID  uint   `json:"projectId"`
-	Generation uint64 `json:"generation"`
-	RequestID  string `json:"requestId"`
-}
-
-type CandidateRefreshSubmitResult struct {
-	JobID     uint
-	ProjectID uint
-	Status    domain.CandidateRefreshStatus
-	Created   bool
-	Message   string
-	CreatedAt time.Time
-	UpdatedAt time.Time
-}
-
-type CandidateRefreshDispatchResult struct {
-	Attempted int
-	Queued    int
-	Failed    int
-}
-
 type AllocationFilter struct {
 	Type       domain.AllocationType
 	OrderNo    string
@@ -397,23 +359,7 @@ type AdminAllocationListResult struct {
 	Limit  int
 }
 
-type CandidateFilter struct {
-	ProjectID uint
-	Type      domain.AllocationType
-	Offset    int
-	Limit     int
-}
-
-type CandidateListResult struct {
-	Items  []RoutingCandidate
-	Total  int64
-	Offset int
-	Limit  int
-}
-
-type CandidateRefreshQueue interface {
-	EnqueueCandidateRefresh(ctx context.Context, task CandidateRefreshTask) (bool, error)
-	EnqueueCandidateRefreshDispatcher(ctx context.Context, delay time.Duration) error
+type InventoryRefreshQueue interface {
 	EnqueueInventoryRefresh(ctx context.Context) error
 	EnqueueInventoryRefreshContinuation(ctx context.Context) error
 }
@@ -475,13 +421,4 @@ type Repository interface {
 	ListInventoryProjectIDs(ctx context.Context) ([]uint, error)
 	GetInventoryStats(ctx context.Context, projectID uint) (*InventoryStats, error)
 	GetProductInventoryTotals(ctx context.Context, projectID uint) (*ProjectProductInventoryTotals, error)
-	RefreshRoutingCandidates(ctx context.Context, projectID uint) (int, error)
-	ListRoutingCandidates(ctx context.Context, filter CandidateFilter) (*CandidateListResult, error)
-
-	RequestCandidateRefresh(ctx context.Context, projectID uint, operatorUserID uint, requestID string, path string) (*domain.CandidateRefresh, error)
-	ListPendingCandidateRefreshes(ctx context.Context, limit int) ([]domain.CandidateRefresh, error)
-	MarkCandidateRefreshProcessing(ctx context.Context, projectID uint, generation uint64) (bool, error)
-	RunCandidateRefresh(ctx context.Context, projectID uint, generation uint64) (affected int, current bool, err error)
-	ReleaseCandidateRefreshInfrastructureFailure(ctx context.Context, projectID uint, generation uint64, safeError string) (bool, error)
-	RecordCandidateRefreshFailure(ctx context.Context, projectID uint, generation uint64, safeError string) (recorded bool, abnormal bool, err error)
 }

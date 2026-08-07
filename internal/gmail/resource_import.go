@@ -1170,7 +1170,7 @@ func (s *Service) finalizePreparedGmailResourceImport(
 		return false, err
 	}
 	if record.PreparedImported > 0 {
-		if err := s.scheduleDispatcher(ctx); err != nil {
+		if err := s.scheduleLocalResourceValidationDispatcher(ctx, 0); err != nil {
 			slog.Warn("wake Gmail validation dispatcher after resumed import failed", "import_id", record.ImportID, "error", err)
 		}
 	}

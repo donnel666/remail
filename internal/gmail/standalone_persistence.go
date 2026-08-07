@@ -61,7 +61,8 @@ func (s *Service) CommitStandaloneValidatedCredentials(
 	if rotation.AppPasswordAuthoritative && !validLocalGmailAppPassword(appPassword) {
 		return StandaloneCommitResult{}, errors.New("gmail returned an invalid replacement app password")
 	}
-	if !complete && !rotation.TwoFactorAuthoritative && !rotation.AppPasswordAuthoritative {
+	if !complete && !rotation.TwoFactorAuthoritative && !rotation.AppPasswordAuthoritative &&
+		!rotation.TwoFactorRevoked && !rotation.AppPasswordRevoked {
 		return StandaloneCommitResult{}, rotation.Err
 	}
 
@@ -145,13 +146,21 @@ func (s *Service) CommitStandaloneValidatedCredentials(
 				updates["binding_email"] = bindingEmail
 			}
 			credentialChanged := resource.Password != credential.Password
-			if complete || rotation.TwoFactorAuthoritative {
-				updates["two_factor_secret"] = twoFactor
-				credentialChanged = credentialChanged || resource.TwoFactorSecret != twoFactor
+			if complete || rotation.TwoFactorAuthoritative || rotation.TwoFactorRevoked {
+				value := ""
+				if complete || rotation.TwoFactorAuthoritative {
+					value = twoFactor
+				}
+				updates["two_factor_secret"] = value
+				credentialChanged = credentialChanged || resource.TwoFactorSecret != value
 			}
-			if complete || rotation.AppPasswordAuthoritative {
-				updates["app_password"] = appPassword
-				credentialChanged = credentialChanged || resource.AppPassword != appPassword
+			if complete || rotation.AppPasswordAuthoritative || rotation.AppPasswordRevoked {
+				value := ""
+				if complete || rotation.AppPasswordAuthoritative {
+					value = appPassword
+				}
+				updates["app_password"] = value
+				credentialChanged = credentialChanged || resource.AppPassword != value
 			}
 			newRevision := resource.CredentialRevision
 			if newRevision == 0 {

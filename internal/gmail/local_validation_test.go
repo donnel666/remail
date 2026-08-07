@@ -73,6 +73,8 @@ func TestLocalGmailValidationTransitionsHealth(t *testing.T) {
 	require.Equal(t, LocalResourceAbnormal, stored.Status)
 	require.Equal(t, "Gmail account password is incorrect.", stored.LastSafeError)
 	require.NotContains(t, stored.LastSafeError, stored.AppPassword)
+	require.Equal(t, "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", stored.TwoFactorSecret)
+	require.Equal(t, "abcdefghijklmnop", stored.AppPassword)
 
 	require.NoError(t, db.Model(&localResourceModel{}).Where("id = ?", root.ID).
 		Updates(map[string]any{"status": LocalResourcePending, "validation_failures": 0, "last_safe_error": ""}).Error)
@@ -209,6 +211,7 @@ func TestLocalGmailValidationPersistsAuthoritativePartialRotationForRetry(t *tes
 	require.NoError(t, db.Create(&localResourceModel{
 		ID: root.ID, ResourceType: "gmail", OwnerUserID: 7,
 		Email: "partial@gmail.com", Identity: "partial@gmail.com", Password: "password",
+		TwoFactorSecret: "JBSWY3DPEHPK3PXP", AppPassword: "old-app-password",
 		CredentialRevision: 1, ValidationGeneration: 1, Status: LocalResourcePending,
 	}).Error)
 	service := NewService(db, nil)
@@ -216,7 +219,8 @@ func TestLocalGmailValidationPersistsAuthoritativePartialRotationForRetry(t *tes
 		func(context.Context, localGmailValidationInput) localGmailValidationResult {
 			return localGmailValidationResult{
 				TwoFactorSecret: "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", TwoFactorAuthoritative: true,
-				SafeError: "Gmail App Password creation is temporarily unavailable.", Temporary: true,
+				AppPasswordRevoked: true,
+				SafeError:          "Gmail App Password creation is temporarily unavailable.", Temporary: true,
 				Err: errors.New("app password page unavailable"),
 			}
 		}))
