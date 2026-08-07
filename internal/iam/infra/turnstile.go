@@ -28,7 +28,7 @@ type TurnstileVerifier struct {
 func NewTurnstileVerifier(secretKey string) *TurnstileVerifier {
 	return &TurnstileVerifier{
 		secretKey: secretKey,
-		client:    &http.Client{Timeout: 5 * time.Second},
+		client:    &http.Client{Timeout: 10 * time.Second},
 		verifyURL: turnstileVerifyURL,
 	}
 }
