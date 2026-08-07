@@ -141,7 +141,7 @@ func (h *handler) validateResource(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"resourceId": uint(resourceID), "status": iCloudResourcePending})
 }
 
-func toICloudImportResponse(item *ICloudImportStatusView, reused bool) iCloudImportResponse {
+func toICloudImportResponse(item *ImportStatusView, reused bool) iCloudImportResponse {
 	taskStatus := item.TaskStatus
 	if taskStatus == "" || taskStatus == "pending" {
 		taskStatus = "queued"

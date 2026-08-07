@@ -98,14 +98,14 @@ func NewHMEClient(client *http.Client) *HMEClient {
 	// HME is a single-host API. Do not let a provider redirect carry the
 	// session Cookie to an unrelated host.
 	if client.CheckRedirect == nil {
-		copy := *client
-		copy.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
-		client = &copy
+		clientCopy := *client
+		clientCopy.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
+		client = &clientCopy
 	}
 	return &HMEClient{httpClient: client}
 }
 
-func (c *HMEClient) List(ctx context.Context, config hmeConfig) (hmeListResult, error) {
+func (c *HMEClient) list(ctx context.Context, config hmeConfig) (hmeListResult, error) {
 	config = normalizeHMEConfig(config)
 	currentCookie := config.Cookie
 	result := hmeListResult{Aliases: make([]hmeAlias, 0)}
@@ -124,9 +124,9 @@ func (c *HMEClient) List(ctx context.Context, config hmeConfig) (hmeListResult, 
 		body, updatedCookie, err := c.request(ctx, pageConfig, http.MethodGet, "/v2/hme/list", nil, extra)
 		if err != nil {
 			if providerErr, ok := err.(*hmeError); ok && providerErr.UpdatedCookie == "" && currentCookie != config.Cookie {
-				copy := *providerErr
-				copy.UpdatedCookie = currentCookie
-				err = &copy
+				providerErrCopy := *providerErr
+				providerErrCopy.UpdatedCookie = currentCookie
+				err = &providerErrCopy
 			}
 			return hmeListResult{}, err
 		}
@@ -217,7 +217,7 @@ func (c *HMEClient) Generate(ctx context.Context, config hmeConfig) (string, str
 	return strings.ToLower(strings.TrimSpace(candidate)), updatedCookie, nil
 }
 
-func (c *HMEClient) Reserve(ctx context.Context, config hmeConfig, candidate, label, note string) (hmeAlias, string, error) {
+func (c *HMEClient) reserve(ctx context.Context, config hmeConfig, candidate, label, note string) (hmeAlias, string, error) {
 	candidate = strings.ToLower(strings.TrimSpace(candidate))
 	label = strings.TrimSpace(label)
 	note = strings.TrimSpace(note)

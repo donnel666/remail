@@ -45,11 +45,13 @@ var (
 
 const iCloudMaxAliases = 750
 
-type ICloudOutboundDelivery interface {
+// OutboundDelivery sends HME validation probes through the outbound mail transport.
+type OutboundDelivery interface {
 	Send(context.Context, mailtransportdomain.OutboundMessage) error
 }
 
-type ICloudGmailDeliveryProbe interface {
+// GmailDeliveryProbe checks whether the linked Gmail received an HME validation probe.
+type GmailDeliveryProbe interface {
 	ProbeICloudDelivery(context.Context, uint, string, string, time.Time) (bool, error)
 }
 
@@ -77,8 +79,8 @@ type Service struct {
 	operationLogs       *governanceinfra.OperationLogRepo
 	systemLogs          *governanceinfra.SystemLogRepo
 	hme                 *HMEClient
-	delivery            ICloudOutboundDelivery
-	gmailProbe          ICloudGmailDeliveryProbe
+	delivery            OutboundDelivery
+	gmailProbe          GmailDeliveryProbe
 	now                 func() time.Time
 	validateImportOwner func(context.Context, uint) (bool, error)
 	backgroundExecution BackgroundExecutionGate
@@ -108,13 +110,13 @@ func (s *Service) SetBackgroundExecutionGate(gate BackgroundExecutionGate) {
 	}
 }
 
-func (s *Service) SetDeliveryPort(port ICloudOutboundDelivery) {
+func (s *Service) SetDeliveryPort(port OutboundDelivery) {
 	if s != nil {
 		s.delivery = port
 	}
 }
 
-func (s *Service) SetGmailDeliveryProbe(port ICloudGmailDeliveryProbe) {
+func (s *Service) SetGmailDeliveryProbe(port GmailDeliveryProbe) {
 	if s != nil {
 		s.gmailProbe = port
 	}
@@ -261,8 +263,8 @@ type iCloudImportItemModel struct {
 
 func (iCloudImportItemModel) TableName() string { return "icloud_resource_import_items" }
 
-// ICloudImportStatusView is deliberately artifact- and secret-free.
-type ICloudImportStatusView struct {
+// ImportStatusView is deliberately artifact- and secret-free.
+type ImportStatusView struct {
 	ImportID      uint
 	Status        string
 	Accepted      int
@@ -279,8 +281,8 @@ type ICloudImportStatusView struct {
 	UpdatedAt     time.Time
 }
 
-func (m iCloudImportModel) statusView() *ICloudImportStatusView {
-	return &ICloudImportStatusView{
+func (m iCloudImportModel) statusView() *ImportStatusView {
+	return &ImportStatusView{
 		ImportID: m.ID, Status: m.Status, Accepted: m.AcceptedCount, Imported: m.ImportedCount,
 		Skipped: m.SkippedCount, TaskStatus: m.DispatchStatus, Attempts: m.Attempts,
 		MaxAttempts: m.MaxAttempts, StartedAt: m.StartedAt, FinishedAt: m.FinishedAt,

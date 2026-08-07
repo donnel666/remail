@@ -23,7 +23,7 @@ func TestHMEListBuildsSafeRequestAndMergesSetCookie(t *testing.T) {
 			Body: io.NopCloser(strings.NewReader(`{"success":true,"result":{"selectedForwardTo":"target@gmail.com","hmeEmails":[{"hme":"abc@icloud.com","anonymousId":"anon-1","label":"label","note":"note","forwardToEmail":"target@gmail.com","domain":"icloud.com","recipientMailId":"mail-1","isActive":true,"createTimestamp":1700000000000}]}}`)),
 		}, nil
 	})})
-	result, err := client.List(context.Background(), hmeConfig{
+	result, err := client.list(context.Background(), hmeConfig{
 		Host: "p119-maildomainws.icloud.com", DSID: "123", ClientID: "client", ClientBuildNumber: "build", ClientMasteringNumber: "mastering", Cookie: cookie,
 	})
 	if err != nil {
@@ -45,7 +45,7 @@ func TestHMEListDoesNotExposeSessionMaterialOnUnauthorized(t *testing.T) {
 	client := NewHMEClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusUnauthorized, Body: io.NopCloser(strings.NewReader(secret))}, nil
 	})})
-	_, err := client.List(context.Background(), hmeConfig{
+	_, err := client.list(context.Background(), hmeConfig{
 		Host: "p119-maildomainws.icloud.com", DSID: "123", ClientID: "client", ClientBuildNumber: "build", ClientMasteringNumber: "mastering",
 		Cookie: "X-APPLE-DS-WEB-SESSION-TOKEN=session; X-APPLE-WEBAUTH-USER=user; X-APPLE-WEBAUTH-TOKEN=token",
 	})
@@ -66,7 +66,7 @@ func TestHMEListKeepsSafeCookieRotationOnProviderError(t *testing.T) {
 			Body:       io.NopCloser(strings.NewReader("provider-secret")),
 		}, nil
 	})})
-	_, err := client.List(context.Background(), hmeConfig{
+	_, err := client.list(context.Background(), hmeConfig{
 		Host: "p119-maildomainws.icloud.com", DSID: "123", ClientID: "client", ClientBuildNumber: "build", ClientMasteringNumber: "mastering",
 		Cookie: "X-APPLE-DS-WEB-SESSION-TOKEN=session; X-APPLE-WEBAUTH-USER=user; X-APPLE-WEBAUTH-TOKEN=token",
 	})
@@ -87,7 +87,7 @@ func TestHMEListRejectsRotationThatRemovesCoreSessionCookie(t *testing.T) {
 			Body:       io.NopCloser(strings.NewReader(`{"success":true,"result":{"hmeEmails":[]}}`)),
 		}, nil
 	})})
-	_, err := client.List(context.Background(), hmeConfig{
+	_, err := client.list(context.Background(), hmeConfig{
 		Host: "p119-maildomainws.icloud.com", DSID: "123", ClientID: "client", ClientBuildNumber: "build", ClientMasteringNumber: "mastering",
 		Cookie: "X-APPLE-DS-WEB-SESSION-TOKEN=session; X-APPLE-WEBAUTH-USER=user; X-APPLE-WEBAUTH-TOKEN=token",
 	})
@@ -107,7 +107,7 @@ func TestHMEListRejectsOversizedRotatedCookie(t *testing.T) {
 			Body:       io.NopCloser(strings.NewReader(`{"success":true,"result":{"hmeEmails":[]}}`)),
 		}, nil
 	})})
-	_, err := client.List(context.Background(), hmeConfig{
+	_, err := client.list(context.Background(), hmeConfig{
 		Host: "p119-maildomainws.icloud.com", DSID: "123", ClientID: "client", ClientBuildNumber: "build", ClientMasteringNumber: "mastering", Cookie: cookie,
 	})
 	providerErr, ok := err.(*hmeError)
@@ -121,7 +121,7 @@ func TestHMEListRejectsOversizedAliasField(t *testing.T) {
 		body := `{"success":true,"result":{"hmeEmails":[{"hme":"alias@icloud.com","anonymousId":"id","label":"` + strings.Repeat("x", iCloudHMELabelMaxLength+1) + `","isActive":true}]}}`
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
 	})})
-	_, err := client.List(context.Background(), hmeConfig{
+	_, err := client.list(context.Background(), hmeConfig{
 		Host: "p119-maildomainws.icloud.com", DSID: "123", ClientID: "client", ClientBuildNumber: "build", ClientMasteringNumber: "mastering",
 		Cookie: "X-APPLE-DS-WEB-SESSION-TOKEN=session; X-APPLE-WEBAUTH-USER=user; X-APPLE-WEBAUTH-TOKEN=token",
 	})
@@ -137,7 +137,7 @@ func TestHMEListRejectsMissingAliasSnapshot(t *testing.T) {
 			`{"success":true,"result":{"selectedForwardTo":"target@gmail.com"}}`,
 		))}, nil
 	})})
-	_, err := client.List(context.Background(), hmeConfig{
+	_, err := client.list(context.Background(), hmeConfig{
 		Host: "p119-maildomainws.icloud.com", DSID: "123", ClientID: "client", ClientBuildNumber: "build", ClientMasteringNumber: "mastering",
 		Cookie: "X-APPLE-DS-WEB-SESSION-TOKEN=session; X-APPLE-WEBAUTH-USER=user; X-APPLE-WEBAUTH-TOKEN=token",
 	})
@@ -158,7 +158,7 @@ func TestHMEListFollowsContinuationAndRequiresCompleteTotal(t *testing.T) {
 		}
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
 	})})
-	result, err := client.List(context.Background(), hmeConfig{
+	result, err := client.list(context.Background(), hmeConfig{
 		Host: "p119-maildomainws.icloud.com", DSID: "123", ClientID: "client", ClientBuildNumber: "build", ClientMasteringNumber: "mastering", Cookie: cookie,
 	})
 	if err != nil || !result.Complete || len(result.Aliases) != 2 || calls != 2 {
@@ -173,7 +173,7 @@ func TestHMEListFollowsContinuationAndRequiresCompleteTotal(t *testing.T) {
 			`{"success":true,"result":{"total":2,"hasMore":false,"hmeEmails":[{"hme":"one@icloud.com","anonymousId":"one","isActive":true}]}}`,
 		))}, nil
 	})})
-	_, err = incomplete.List(context.Background(), hmeConfig{
+	_, err = incomplete.list(context.Background(), hmeConfig{
 		Host: "p119-maildomainws.icloud.com", DSID: "123", ClientID: "client", ClientBuildNumber: "build", ClientMasteringNumber: "mastering", Cookie: cookie,
 	})
 	providerErr, ok := err.(*hmeError)
@@ -198,7 +198,7 @@ func TestHMEListCarriesEarlierPageCookieAcrossTransportFailure(t *testing.T) {
 			)),
 		}, nil
 	})})
-	_, err := client.List(context.Background(), hmeConfig{
+	_, err := client.list(context.Background(), hmeConfig{
 		Host: "p119-maildomainws.icloud.com", DSID: "123", ClientID: "client", ClientBuildNumber: "build", ClientMasteringNumber: "mastering", Cookie: cookie,
 	})
 	providerErr, ok := err.(*hmeError)
@@ -216,9 +216,10 @@ func TestHMEGenerateReserveAndActivateUseTheImportedRequestContext(t *testing.T)
 			t.Fatalf("unexpected mutation request: %s %s", request.Method, request.URL.String())
 		}
 		body := `{"success":true,"result":{"hme":"candidate@icloud.com"}}`
-		if request.URL.Path == "/v1/hme/reserve" {
+		switch request.URL.Path {
+		case "/v1/hme/reserve":
 			body = `{"success":true,"result":{"hme":{"hme":"candidate@icloud.com","anonymousId":"candidate-id","forwardToEmail":"target@gmail.com","isActive":true}}}`
-		} else if request.URL.Path == "/v1/hme/activate" {
+		case "/v1/hme/activate":
 			body = `{"success":true}`
 		}
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
@@ -228,7 +229,7 @@ func TestHMEGenerateReserveAndActivateUseTheImportedRequestContext(t *testing.T)
 	if err != nil || candidate != "candidate@icloud.com" || updatedCookie != cookie {
 		t.Fatalf("generate: candidate=%q cookie=%q err=%v", candidate, updatedCookie, err)
 	}
-	alias, _, err := client.Reserve(context.Background(), config, candidate, "ReMail", "")
+	alias, _, err := client.reserve(context.Background(), config, candidate, "ReMail", "")
 	if err != nil || alias.Email != candidate || alias.AnonymousID != "candidate-id" {
 		t.Fatalf("reserve: alias=%#v err=%v", alias, err)
 	}

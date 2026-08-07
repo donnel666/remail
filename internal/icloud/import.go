@@ -114,7 +114,7 @@ func (s *Service) AcceptAdminICloudTXTFile(
 	idempotencyKey string,
 	requestID string,
 	pathValue string,
-) (*ICloudImportStatusView, bool, error) {
+) (*ImportStatusView, bool, error) {
 	if s == nil || s.db == nil || s.queue == nil || s.files == nil {
 		return nil, false, ErrICloudImportDependency
 	}
@@ -184,7 +184,7 @@ func (s *Service) AcceptAdminICloudTXTFile(
 	return model.statusView(), false, nil
 }
 
-func (s *Service) GetAdminICloudResourceImport(ctx context.Context, importID uint) (*ICloudImportStatusView, error) {
+func (s *Service) GetAdminICloudResourceImport(ctx context.Context, importID uint) (*ImportStatusView, error) {
 	if s == nil || s.db == nil || importID == 0 {
 		return nil, ErrICloudImportNotFound
 	}

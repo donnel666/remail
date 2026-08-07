@@ -94,7 +94,7 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 	if client == nil {
 		client = NewHMEClient(nil)
 	}
-	list, err := client.List(ctx, resource.hmeConfig())
+	list, err := client.list(ctx, resource.hmeConfig())
 	if err != nil {
 		if providerErr, ok := err.(*hmeError); ok {
 			result := iCloudValidationResult{
@@ -168,7 +168,6 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 	candidate := strings.TrimSpace(resource.AliasProvisionCandidate)
 	if candidate != "" {
 		if findICloudAlias(list.Aliases, candidate) != nil {
-			candidate = ""
 			resultBase.ProvisionCandidate = iCloudStringPointer("")
 			resultBase.ProvisionReconcile = iCloudBoolPointer(false)
 			if len(list.Aliases) < iCloudMaxAliases {
@@ -179,7 +178,7 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 				return s.applyICloudValidationResult(ctx, task, resultBase)
 			}
 		} else if len(list.Aliases) < iCloudMaxAliases {
-			_, updatedCookie, reserveErr := client.Reserve(ctx, mutationConfig, candidate, "ReMail", "")
+			_, updatedCookie, reserveErr := client.reserve(ctx, mutationConfig, candidate, "ReMail", "")
 			if updatedCookie != "" {
 				resultBase.UpdatedCookie = updatedCookie
 			}
@@ -480,14 +479,11 @@ func (s *Service) DispatchICloudValidations(ctx context.Context, limit int) erro
 		if !claimed {
 			continue
 		}
-		accepted, enqueueErr := s.enqueueICloudValidation(ctx, task)
+		// A duplicate queue task already carries this durable validation fence.
+		_, enqueueErr := s.enqueueICloudValidation(ctx, task)
 		if enqueueErr != nil {
 			_ = s.releaseICloudValidation(ctx, task, "iCloud validation is temporarily unavailable; dispatcher will retry.")
 			result = errors.Join(result, enqueueErr)
-			continue
-		}
-		if !accepted {
-			// An identical task is already queued under the same durable fence.
 			continue
 		}
 	}
@@ -853,7 +849,8 @@ func minICloudValidationFailures(value uint8) uint8 {
 }
 
 func minICloudSessionFailures(value uint8) uint8 {
-	if value == 0 || value > 255 {
+	// SessionFailures+1 wraps from 255 to 0; keep the counter saturated.
+	if value == 0 {
 		return 255
 	}
 	return value

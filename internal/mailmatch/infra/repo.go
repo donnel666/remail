@@ -416,7 +416,7 @@ func (r *Repo) loadOrderScope(ctx context.Context, orderNo string) (*app.OrderSc
 		return nil, domain.ErrInvalidRequest
 	}
 	var row orderScopeRow
-	err := r.dbFor(ctx).Raw(orderScopeSQL, orderNo, orderNo, orderNo, orderNo).Scan(&row).Error
+	err := r.dbFor(ctx).Raw(orderScopeSQL, orderNo, orderNo, orderNo).Scan(&row).Error
 	if err != nil {
 		return nil, fmt.Errorf("load order mail scope: %w", err)
 	}
