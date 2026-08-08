@@ -23,26 +23,113 @@ func RegisterRoutes(rg *gin.RouterGroup, module *Module, fetcher middleware.Sess
 	h := &handler{service: module.Service}
 	resources := rg.Group("/admin/icloud/resources")
 	resources.Use(middleware.LoadSession(fetcher), middleware.AuthRequired(), middleware.CSRFRequired())
+	resources.GET("", middleware.PermissionRequired(checker, "core:resource", "read"), h.listResources)
 	resources.POST("/imports", middleware.PermissionRequired(checker, "core:resource", "write"), h.importResources)
 	resources.GET("/imports/:importId", middleware.PermissionRequired(checker, "core:resource", "read"), h.resourceImport)
-	resources.POST("/:resourceId/validation", middleware.PermissionRequired(checker, "core:resource", "operate"), h.validateResource)
+	resources.POST("/batch/validation", middleware.PermissionRequired(checker, "core:resource", "operate"), h.batchResourceCommand(AdminICloudValidate))
+	resources.POST("/batch/disable", middleware.PermissionRequired(checker, "core:resource", "operate"), h.batchResourceCommand(AdminICloudDisable))
+	resources.POST("/batch/publish", middleware.PermissionRequired(checker, "core:resource", "operate"), h.batchResourceCommand(AdminICloudPublish))
+	resources.POST("/batch/unpublish", middleware.PermissionRequired(checker, "core:resource", "operate"), h.batchResourceCommand(AdminICloudUnpublish))
+	resources.POST("/batch/delete", middleware.PermissionRequired(checker, "core:resource", "operate"), h.batchResourceCommand(AdminICloudDelete))
+	resources.GET("/:resourceId/aliases", middleware.PermissionRequired(checker, "core:resource", "read"), h.listAliases)
+	resources.POST("/:resourceId/validation", middleware.PermissionRequired(checker, "core:resource", "operate"), h.resourceCommand(AdminICloudValidate))
+	resources.POST("/:resourceId/enable", middleware.PermissionRequired(checker, "core:resource", "operate"), h.resourceCommand(AdminICloudEnable))
+	resources.POST("/:resourceId/disable", middleware.PermissionRequired(checker, "core:resource", "operate"), h.resourceCommand(AdminICloudDisable))
+	resources.POST("/:resourceId/publish", middleware.PermissionRequired(checker, "core:resource", "operate"), h.resourceCommand(AdminICloudPublish))
+	resources.POST("/:resourceId/unpublish", middleware.PermissionRequired(checker, "core:resource", "operate"), h.resourceCommand(AdminICloudUnpublish))
+	resources.POST("/:resourceId/recover", middleware.PermissionRequired(checker, "core:resource", "operate"), h.resourceCommand(AdminICloudRecover))
+	resources.DELETE("/:resourceId", middleware.PermissionRequired(checker, "core:resource", "operate"), h.resourceCommand(AdminICloudDelete))
 }
 
 type handler struct{ service *Service }
 
+func (h *handler) listResources(c *gin.Context) {
+	offset, offsetErr := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	limit, limitErr := strconv.Atoi(c.DefaultQuery("limit", strconv.Itoa(adminICloudResourceDefaultLimit)))
+	if offsetErr != nil || limitErr != nil {
+		writeICloudError(c, ErrICloudResourceQuery)
+		return
+	}
+	var forSale *bool
+	if value, exists := c.GetQuery("forSale"); exists {
+		parsed, err := strconv.ParseBool(strings.TrimSpace(value))
+		if err != nil {
+			writeICloudError(c, ErrICloudResourceQuery)
+			return
+		}
+		forSale = &parsed
+	}
+	createdFrom, ok := parseICloudQueryTime(c.Query("createdFrom"))
+	if !ok {
+		writeICloudError(c, ErrICloudResourceQuery)
+		return
+	}
+	createdTo, ok := parseICloudQueryTime(c.Query("createdTo"))
+	if !ok {
+		writeICloudError(c, ErrICloudResourceQuery)
+		return
+	}
+	includeFacets, ok := parseICloudQueryBool(c, "includeFacets", true)
+	if !ok {
+		writeICloudError(c, ErrICloudResourceQuery)
+		return
+	}
+	includeTotal, ok := parseICloudQueryBool(c, "includeTotal", true)
+	if !ok {
+		writeICloudError(c, ErrICloudResourceQuery)
+		return
+	}
+	result, err := h.service.ListAdminICloudResources(c.Request.Context(), AdminICloudResourceListFilter{
+		Search: c.Query("search"), Suffix: c.Query("suffix"), Status: c.Query("status"),
+		ForSale: forSale, SessionStatus: c.Query("sessionStatus"), CreatedFrom: createdFrom,
+		CreatedTo: createdTo, Offset: offset, Limit: limit,
+		IncludeFacets: &includeFacets, IncludeTotal: &includeTotal,
+	})
+	if err != nil {
+		writeICloudError(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, result)
+}
+
+func parseICloudQueryBool(c *gin.Context, name string, defaultValue bool) (bool, bool) {
+	value, exists := c.GetQuery(name)
+	if !exists || strings.TrimSpace(value) == "" {
+		return defaultValue, true
+	}
+	parsed, err := strconv.ParseBool(strings.TrimSpace(value))
+	return parsed, err == nil
+}
+
+func parseICloudQueryTime(value string) (*time.Time, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil, true
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return nil, false
+	}
+	parsed = parsed.UTC()
+	return &parsed, true
+}
+
 type iCloudImportTaskResponse struct {
-	TaskID            string     `json:"taskId"`
-	BizType           string     `json:"bizType"`
-	BizID             uint       `json:"bizId"`
-	Kind              string     `json:"kind"`
-	Status            string     `json:"status"`
-	Attempts          int        `json:"attempts"`
-	MaxAttempts       int        `json:"maxAttempts"`
-	RemainingAttempts int        `json:"remainingAttempts"`
-	QueuedAt          time.Time  `json:"queuedAt"`
-	StartedAt         *time.Time `json:"startedAt"`
-	FinishedAt        *time.Time `json:"finishedAt"`
-	UpdatedAt         time.Time  `json:"updatedAt"`
+	TaskID             string     `json:"taskId"`
+	BizType            string     `json:"bizType"`
+	BizID              uint       `json:"bizId"`
+	Kind               string     `json:"kind"`
+	Status             string     `json:"status"`
+	CredentialRevision *uint64    `json:"credentialRevision"`
+	Progress           any        `json:"progress"`
+	Attempts           int        `json:"attempts"`
+	MaxAttempts        int        `json:"maxAttempts"`
+	RemainingAttempts  int        `json:"remainingAttempts"`
+	QueuedAt           time.Time  `json:"queuedAt"`
+	StartedAt          *time.Time `json:"startedAt"`
+	FinishedAt         *time.Time `json:"finishedAt"`
+	UpdatedAt          time.Time  `json:"updatedAt"`
 }
 
 type iCloudImportResponse struct {
@@ -61,11 +148,10 @@ type iCloudImportResponse struct {
 }
 
 func (h *handler) importResources(c *gin.Context) {
-	idempotencyKey := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
-	if idempotencyKey == "" || len(idempotencyKey) > 128 {
-		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid Idempotency-Key.", "requestId": middleware.GetRequestID(c)})
+	if !requireICloudIdempotencyKey(c) {
 		return
 	}
+	idempotencyKey := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
 	maxBytes := maxICloudImportBytesValue()
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, iCloudImportMultipartMaxBytes(maxBytes))
 	file, header, err := c.Request.FormFile("file")
@@ -121,24 +207,111 @@ func (h *handler) resourceImport(c *gin.Context) {
 	c.JSON(http.StatusOK, toICloudImportResponse(result, false))
 }
 
-func (h *handler) validateResource(c *gin.Context) {
-	resourceID, err := strconv.ParseUint(strings.TrimSpace(c.Param("resourceId")), 10, 64)
-	if err != nil || resourceID == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid resource ID.", "requestId": middleware.GetRequestID(c)})
-		return
-	}
-	operatorUserID, ok := middleware.GetCurrentUserID(c)
+func (h *handler) listAliases(c *gin.Context) {
+	resourceID, ok := parseICloudResourceID(c)
 	if !ok {
-		c.Status(http.StatusUnauthorized)
 		return
 	}
-	if err := h.service.RequestAdminICloudValidation(
-		c.Request.Context(), operatorUserID, uint(resourceID), middleware.GetRequestID(c), c.FullPath(),
-	); err != nil {
+	offset, offsetErr := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	limit, limitErr := strconv.Atoi(c.DefaultQuery("limit", strconv.Itoa(adminICloudResourceDefaultLimit)))
+	if offsetErr != nil || limitErr != nil {
+		writeICloudError(c, ErrICloudResourceQuery)
+		return
+	}
+	result, err := h.service.ListAdminICloudAliases(c.Request.Context(), resourceID, offset, limit)
+	if err != nil {
 		writeICloudError(c, err)
 		return
 	}
-	c.JSON(http.StatusAccepted, gin.H{"resourceId": uint(resourceID), "status": iCloudResourcePending})
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *handler) resourceCommand(command AdminICloudCommand) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !requireICloudIdempotencyKey(c) {
+			return
+		}
+		resourceID, ok := parseICloudResourceID(c)
+		if !ok {
+			return
+		}
+		version, err := strconv.ParseUint(strings.TrimSpace(c.Query("version")), 10, 64)
+		if err != nil || version == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid resource version.", "requestId": middleware.GetRequestID(c)})
+			return
+		}
+		operatorUserID, ok := middleware.GetCurrentUserID(c)
+		if !ok {
+			c.Status(http.StatusUnauthorized)
+			return
+		}
+		result, err := h.service.ApplyAdminICloudCommand(
+			c.Request.Context(), command, resourceID, version, operatorUserID,
+			c.GetHeader("Idempotency-Key"), middleware.GetRequestID(c), c.FullPath(),
+		)
+		if err != nil {
+			writeICloudError(c, err)
+			return
+		}
+		c.Header("Cache-Control", "no-store")
+		status := http.StatusOK
+		if command == AdminICloudValidate {
+			status = http.StatusAccepted
+		}
+		c.JSON(status, result)
+	}
+}
+
+type iCloudBatchCommandRequest struct {
+	Selection AdminICloudResourceSelection `json:"selection" binding:"required"`
+}
+
+func (h *handler) batchResourceCommand(command AdminICloudCommand) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !requireICloudIdempotencyKey(c) {
+			return
+		}
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
+		var request iCloudBatchCommandRequest
+		if err := c.ShouldBindJSON(&request); err != nil {
+			writeICloudError(c, ErrICloudResourceSelection)
+			return
+		}
+		operatorUserID, ok := middleware.GetCurrentUserID(c)
+		if !ok {
+			c.Status(http.StatusUnauthorized)
+			return
+		}
+		result, err := h.service.ApplyAdminICloudBatch(
+			c.Request.Context(), command, request.Selection, operatorUserID,
+			c.GetHeader("Idempotency-Key"), middleware.GetRequestID(c), c.FullPath(),
+		)
+		if err != nil {
+			writeICloudError(c, err)
+			return
+		}
+		c.Header("Cache-Control", "no-store")
+		c.JSON(http.StatusOK, result)
+	}
+}
+
+func requireICloudIdempotencyKey(c *gin.Context) bool {
+	value := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+	if value != "" && len(value) <= 128 {
+		return true
+	}
+	c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid Idempotency-Key.", "requestId": middleware.GetRequestID(c)})
+	return false
+}
+
+func parseICloudResourceID(c *gin.Context) (uint, bool) {
+	resourceID, err := strconv.ParseUint(strings.TrimSpace(c.Param("resourceId")), 10, 64)
+	if err != nil || resourceID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid resource ID.", "requestId": middleware.GetRequestID(c)})
+		return 0, false
+	}
+	return uint(resourceID), true
 }
 
 func toICloudImportResponse(item *ImportStatusView, reused bool) iCloudImportResponse {
@@ -161,7 +334,7 @@ func toICloudImportResponse(item *ImportStatusView, reused bool) iCloudImportRes
 		LastSafeError: safeError, Reused: reused, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
 		Task: iCloudImportTaskResponse{
 			TaskID: taskID, BizType: "icloud_resource_import", BizID: item.ImportID, Kind: "import",
-			Status: taskStatus, Attempts: item.Attempts, MaxAttempts: item.MaxAttempts, RemainingAttempts: remaining,
+			Status: taskStatus, CredentialRevision: nil, Attempts: item.Attempts, MaxAttempts: item.MaxAttempts, RemainingAttempts: remaining,
 			QueuedAt: item.CreatedAt, StartedAt: item.StartedAt, FinishedAt: item.FinishedAt, UpdatedAt: item.UpdatedAt,
 		},
 	}
@@ -170,6 +343,10 @@ func toICloudImportResponse(item *ImportStatusView, reused bool) iCloudImportRes
 func writeICloudError(c *gin.Context, err error) {
 	requestID := middleware.GetRequestID(c)
 	switch {
+	case errors.Is(err, ErrICloudResourceQuery):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Invalid iCloud resource query.", "requestId": requestID})
+	case errors.Is(err, ErrICloudResourceSelection):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Invalid or too large iCloud resource selection.", "requestId": requestID})
 	case errors.Is(err, ErrICloudImportInvalid), errors.Is(err, ErrICloudImportInvalidOwner):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Invalid iCloud resource command.", "requestId": requestID})
 	case errors.Is(err, ErrICloudImportConflict):
@@ -179,8 +356,14 @@ func writeICloudError(c *gin.Context, err error) {
 	case errors.Is(err, ErrICloudResourceNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"message": "iCloud resource not found.", "requestId": requestID})
 	case errors.Is(err, ErrICloudResourceStatus):
-		c.JSON(http.StatusConflict, gin.H{"message": "iCloud resource status does not allow validation.", "requestId": requestID})
-	case errors.Is(err, ErrICloudImportDependency), errors.Is(err, ErrICloudImportStorage), errors.Is(err, ErrICloudImportTemporary), errors.Is(err, ErrICloudValidationTemp):
+		c.JSON(http.StatusConflict, gin.H{"message": "iCloud resource status does not allow this operation.", "requestId": requestID})
+	case errors.Is(err, ErrICloudResourceVersion):
+		c.JSON(http.StatusConflict, gin.H{"message": "iCloud resource was changed by another operation.", "requestId": requestID})
+	case errors.Is(err, ErrICloudResourceAllocation):
+		c.JSON(http.StatusConflict, gin.H{"message": "iCloud resource still has an active allocation.", "requestId": requestID})
+	case errors.Is(err, ErrICloudResourceOwner):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "iCloud resource owner is not eligible for public supply.", "requestId": requestID})
+	case errors.Is(err, ErrICloudImportDependency), errors.Is(err, ErrICloudImportStorage), errors.Is(err, ErrICloudImportTemporary), errors.Is(err, ErrICloudValidationTemp), errors.Is(err, ErrICloudResourceQueryTemporary):
 		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "iCloud resource service is temporarily unavailable.", "requestId": requestID})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "An unexpected error occurred.", "requestId": requestID})

@@ -3,6 +3,7 @@ package icloud
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -293,6 +294,10 @@ func TestICloudImportGmailRebindRequiresNoActiveAllocationAndResetsCursors(t *te
 	if err := db.Delete(&iCloudImportAllocationTestModel{}, 1).Error; err != nil {
 		t.Fatalf("release allocation: %v", err)
 	}
+	allowed, failures, fatal, err = service.resolveICloudImportGmails(context.Background(), lines, coreDomain.ImportErrorStrategySkip)
+	if err != nil || fatal != nil || len(allowed) != 1 || len(failures) != 0 {
+		t.Fatalf("released Gmail rebind was not allowed: allowed=%#v failures=%#v fatal=%#v err=%v", allowed, failures, fatal, err)
+	}
 
 	files := &icloudImportFileStore{}
 	newCookie := "X-APPLE-DS-WEB-SESSION-TOKEN=new-session; X-APPLE-WEBAUTH-USER=new-user; X-APPLE-WEBAUTH-TOKEN=new-token"
@@ -308,6 +313,15 @@ func TestICloudImportGmailRebindRequiresNoActiveAllocationAndResetsCursors(t *te
 	}
 	if err := db.Create(&record).Error; err != nil {
 		t.Fatalf("create import: %v", err)
+	}
+	if err := db.Create(&iCloudImportAllocationTestModel{ID: 2, ResourceID: 1, Status: "allocated"}).Error; err != nil {
+		t.Fatalf("create late active allocation: %v", err)
+	}
+	if err := service.createICloudResourcesAndMarkImportSucceeded(context.Background(), &record, allowed, nil, "", ""); !errors.Is(err, ErrICloudImportTemporary) {
+		t.Fatalf("late active allocation error = %v", err)
+	}
+	if err := db.Delete(&iCloudImportAllocationTestModel{}, 2).Error; err != nil {
+		t.Fatalf("release late allocation: %v", err)
 	}
 	service = NewService(db, nil, files)
 	service.now = func() time.Time { return now.Add(time.Minute) }

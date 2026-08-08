@@ -890,17 +890,26 @@ func (s *Service) createICloudResourcesAndMarkImportSucceeded(
 			items := make([]iCloudImportItemModel, 0, len(chunk))
 			for index, line := range chunk {
 				if line.ExistingResourceID != 0 {
-					var existing iCloudResourceModel
-					if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&existing, line.ExistingResourceID).Error; err != nil {
-						return err
-					}
 					var root iCloudRootModel
 					if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-						Where("id = ? AND type = ? AND owner_user_id = ?", existing.ID, "icloud", locked.OwnerUserID).First(&root).Error; err != nil {
+						Where("id = ? AND type = ? AND owner_user_id = ?", line.ExistingResourceID, "icloud", locked.OwnerUserID).First(&root).Error; err != nil {
 						return ErrICloudImportClaim
+					}
+					var existing iCloudResourceModel
+					if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&existing, root.ID).Error; err != nil {
+						return err
 					}
 					if existing.SessionStatus != iCloudSessionInvalid {
 						return ErrICloudImportClaim
+					}
+					if existing.GmailResourceID != line.GmailResourceID {
+						var activeAllocations int64
+						if err := tx.Table("icloud_allocations").Where("resource_id = ? AND status = ?", existing.ID, "allocated").Count(&activeAllocations).Error; err != nil {
+							return err
+						}
+						if activeAllocations > 0 {
+							return ErrICloudImportTemporary
+						}
 					}
 					credentialRevision := existing.CredentialRevision + 1
 					if credentialRevision == 1 {

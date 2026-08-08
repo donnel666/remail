@@ -131,6 +131,38 @@ func TestICloudAliasReadinessRequiresExactly750(t *testing.T) {
 	}
 }
 
+func TestSyncICloudAliasesRestoresProviderAliasFromDeletedState(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:icloud-alias-restore?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	if err := db.AutoMigrate(&iCloudAliasModel{}); err != nil {
+		t.Fatalf("migrate database: %v", err)
+	}
+	now := time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC)
+	if err := db.Create(&iCloudAliasModel{
+		ResourceID: 1, AnonymousID: "alias-id", Email: "old@icloud.com", Status: iCloudResourceDeleted,
+		CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour),
+	}).Error; err != nil {
+		t.Fatalf("create deleted alias: %v", err)
+	}
+	err = db.Transaction(func(tx *gorm.DB) error {
+		return syncICloudAliasesTx(tx, 1, []hmeAlias{{
+			AnonymousID: "alias-id", Email: "restored@icloud.com", ForwardToEmail: "target@gmail.com", Active: true,
+		}}, "target@gmail.com", true, now)
+	})
+	if err != nil {
+		t.Fatalf("sync aliases: %v", err)
+	}
+	var alias iCloudAliasModel
+	if err := db.Where("resource_id = ? AND anonymous_id = ?", 1, "alias-id").First(&alias).Error; err != nil {
+		t.Fatalf("read alias: %v", err)
+	}
+	if alias.Status != iCloudResourceNormal || alias.Email != "restored@icloud.com" || alias.LastSeenAt == nil {
+		t.Fatalf("provider snapshot must restore the alias: %#v", alias)
+	}
+}
+
 func TestICloudValidationProvisionsOneAliasAtATime(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:icloud-validation-provision?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
@@ -168,6 +200,50 @@ func TestICloudValidationProvisionsOneAliasAtATime(t *testing.T) {
 	}
 	if len(calls) != 2 || calls[0] != "/v2/hme/list" || calls[1] != "/v1/hme/generate" {
 		t.Fatalf("validation must perform one provisioning action: %#v", calls)
+	}
+}
+
+func TestICloudProviderRateLimitUsesRetryAfter(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:icloud-validation-provider-rate-limit?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudGmailResourceModel{}, &iCloudAliasModel{}); err != nil {
+		t.Fatalf("migrate database: %v", err)
+	}
+	now := time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC)
+	createICloudValidationResource(t, db, now)
+	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", 1).Updates(map[string]any{
+		"alias_provision_candidate": "candidate@icloud.com",
+		"expire_at":                 now.Add(2 * time.Hour),
+	}).Error; err != nil {
+		t.Fatalf("prepare candidate: %v", err)
+	}
+	calls := make([]string, 0, 2)
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	service.hme = NewHMEClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		calls = append(calls, request.URL.Path)
+		if request.URL.Path == "/v1/hme/reserve" {
+			return &http.Response{
+				StatusCode: http.StatusTooManyRequests,
+				Header:     http.Header{"Retry-After": {"900"}},
+				Body:       io.NopCloser(strings.NewReader("")),
+			}, nil
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(iCloudHMEListJSON(t, iCloudMaxAliases-1, "target@gmail.com")))}, nil
+	})})
+	task := iCloudValidationTask{ResourceID: 1, OwnerUserID: 7, ValidationGeneration: 1, ExpectedCredentialRevision: 1}
+	if err := service.ProcessICloudValidation(context.Background(), task); err != nil {
+		t.Fatalf("process provider rate limit: %v", err)
+	}
+	var resource iCloudResourceModel
+	if err := db.First(&resource, 1).Error; err != nil {
+		t.Fatalf("read provider rate limit: %v", err)
+	}
+	if len(calls) != 2 || resource.Status != iCloudResourcePending || resource.AliasProvisionReconcile ||
+		resource.NextValidationAt == nil || !resource.NextValidationAt.Equal(now.Add(15*time.Minute)) {
+		t.Fatalf("provider rate limit must honor Retry-After: calls=%#v resource=%#v", calls, resource)
 	}
 }
 

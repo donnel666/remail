@@ -784,6 +784,7 @@ function ProjectSquareSidebar({
           { count: productTypeCounts.domain, label: t("Domain email"), value: "domain" },
           { count: productTypeCounts.random, label: t("Random email"), value: "random" },
           { count: productTypeCounts.gmail, label: t("Gmail email"), value: "gmail" },
+          { count: productTypeCounts.icloud, label: t("iCloud email"), value: "icloud" },
         ]}
         onChange={onProductTypeChange}
         title={t("Product type")}
@@ -1118,6 +1119,7 @@ export default function Projects() {
     all: 0,
     domain: 0,
     gmail: 0,
+    icloud: 0,
     microsoft: 0,
     random: 0,
   });
@@ -1168,6 +1170,7 @@ export default function Projects() {
         all: facets?.productType.all ?? listResponse.total,
         domain: facets?.productType.domain ?? 0,
         gmail: facets?.productType.gmail ?? 0,
+        icloud: facets?.productType.icloud ?? 0,
         microsoft: facets?.productType.microsoft ?? 0,
         random: facets?.productType.random ?? 0,
       });

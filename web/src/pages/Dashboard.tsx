@@ -153,7 +153,9 @@ function toWorkbenchProducts(
         ? "Domain"
         : product.type === "gmail"
           ? "Gmail"
-        : "Random";
+          : product.type === "icloud"
+            ? "iCloud"
+            : "Random";
   const totalAvailable =
     inventory?.totalAvailable ?? product.totalAvailable ?? 0;
   const publicAvailable =

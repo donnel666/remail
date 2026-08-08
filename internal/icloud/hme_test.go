@@ -40,6 +40,16 @@ func TestHMEListBuildsSafeRequestAndMergesSetCookie(t *testing.T) {
 	}
 }
 
+func TestMergeICloudCookiesKeepsOneEntryAfterDeleteAndReplace(t *testing.T) {
+	got := mergeICloudCookies("session=old; other=value", []*http.Cookie{
+		{Name: "session", MaxAge: -1},
+		{Name: "session", Value: "new"},
+	})
+	if got != "session=new; other=value" {
+		t.Fatalf("merged Cookie = %q", got)
+	}
+}
+
 func TestHMEListDoesNotExposeSessionMaterialOnUnauthorized(t *testing.T) {
 	const secret = "session-secret-value"
 	client := NewHMEClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
@@ -179,6 +189,22 @@ func TestHMEListFollowsContinuationAndRequiresCompleteTotal(t *testing.T) {
 	providerErr, ok := err.(*hmeError)
 	if !ok || providerErr.Category != "snapshot_incomplete" {
 		t.Fatalf("incomplete total must be rejected, err=%#v", err)
+	}
+}
+
+func TestHMEListRejectsContradictoryContinuationMetadata(t *testing.T) {
+	client := NewHMEClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(
+			`{"success":true,"result":{"selectedForwardTo":"target@gmail.com","hasMore":false,"nextPageToken":"page-2","hmeEmails":[]}}`,
+		))}, nil
+	})})
+	_, err := client.list(context.Background(), hmeConfig{
+		Host: "p119-maildomainws.icloud.com", DSID: "123", ClientID: "client", ClientBuildNumber: "build", ClientMasteringNumber: "mastering",
+		Cookie: "X-APPLE-DS-WEB-SESSION-TOKEN=session; X-APPLE-WEBAUTH-USER=user; X-APPLE-WEBAUTH-TOKEN=token",
+	})
+	providerErr, ok := err.(*hmeError)
+	if !ok || providerErr.Category != "snapshot_incomplete" {
+		t.Fatalf("contradictory continuation metadata must be rejected, err=%#v", err)
 	}
 }
 

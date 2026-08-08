@@ -21,6 +21,7 @@ const (
 	iCloudValidationRetryInterval  = 30 * time.Second
 	iCloudAliasProvisionInterval   = time.Second
 	iCloudProvisionFailureInterval = 5 * time.Minute
+	iCloudRateLimitRetryInterval   = 30 * time.Minute
 	iCloudDeliveryProbeTimeout     = 10 * time.Minute
 	iCloudValidationBatchLimit     = 128
 	iCloudValidationRunningLease   = 5 * time.Minute
@@ -104,7 +105,7 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 			}
 			if providerErr.Retryable {
 				result.Deferred = true
-				result.NextValidationAt = iCloudTimePointer(now.Add(iCloudProvisionFailureInterval))
+				result.NextValidationAt = iCloudTimePointer(iCloudProviderRetryAt(now, providerErr))
 			}
 			return s.applyICloudValidationResult(ctx, task, result)
 		}
@@ -178,6 +179,13 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 				return s.applyICloudValidationResult(ctx, task, resultBase)
 			}
 		} else if len(list.Aliases) < iCloudMaxAliases {
+			markErr := s.markICloudAliasReserveAttempt(ctx, task)
+			if errors.Is(markErr, errICloudValidationStale) {
+				return nil
+			}
+			if markErr != nil {
+				return ErrICloudValidationTemp
+			}
 			_, updatedCookie, reserveErr := client.reserve(ctx, mutationConfig, candidate, "ReMail", "")
 			if updatedCookie != "" {
 				resultBase.UpdatedCookie = updatedCookie
@@ -190,6 +198,9 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 					resultBase.ProvisionCandidate = iCloudStringPointer("")
 					resultBase.ProvisionReconcile = iCloudBoolPointer(false)
 					return s.applyICloudProviderError(ctx, task, resultBase, reserveErr, false)
+				}
+				if providerErr, ok := reserveErr.(*hmeError); ok && providerErr.Category == "rate_limited" {
+					resultBase.ProvisionReconcile = iCloudBoolPointer(false)
 				}
 				return s.applyICloudProviderError(ctx, task, resultBase, reserveErr, true)
 			}
@@ -381,6 +392,12 @@ func (s *Service) applyICloudProviderError(ctx context.Context, task iCloudValid
 		result.Category = "provider_unavailable"
 		result.SafeMessage = "iCloud HME service is temporarily unavailable."
 	}
+	if result.Category == "rate_limited" {
+		result.Deferred = true
+		if providerErr, ok := err.(*hmeError); ok {
+			result.NextValidationAt = iCloudTimePointer(iCloudProviderRetryAt(s.now().UTC(), providerErr))
+		}
+	}
 	if deferred && result.Retryable {
 		result.Deferred = true
 		if result.NextValidationAt == nil {
@@ -395,6 +412,38 @@ func iCloudStringPointer(value string) *string { return &value }
 func iCloudBoolPointer(value bool) *bool { return &value }
 
 func iCloudTimePointer(value time.Time) *time.Time { return &value }
+
+func iCloudProviderRetryAt(now time.Time, providerErr *hmeError) time.Time {
+	if providerErr != nil && providerErr.Category == "rate_limited" {
+		if providerErr.RetryAfter > 0 {
+			return now.Add(providerErr.RetryAfter)
+		}
+		return now.Add(iCloudRateLimitRetryInterval)
+	}
+	return now.Add(iCloudProvisionFailureInterval)
+}
+
+// markICloudAliasReserveAttempt persists the uncertain candidate before the
+// provider side effect so a crash retries by listing instead of creating alias 751.
+func (s *Service) markICloudAliasReserveAttempt(ctx context.Context, task iCloudValidationTask) error {
+	if s == nil || s.db == nil {
+		return ErrICloudValidationTemp
+	}
+	updated := s.db.WithContext(ctx).Model(&iCloudResourceModel{}).
+		Where("id = ? AND status = ? AND validation_generation = ? AND credential_revision = ?",
+			task.ResourceID, iCloudResourceValidating, task.ValidationGeneration, task.ExpectedCredentialRevision).
+		Updates(map[string]any{
+			"alias_provision_reconcile": true,
+			"updated_at":                s.now().UTC(),
+		})
+	if updated.Error != nil {
+		return updated.Error
+	}
+	if updated.RowsAffected != 1 {
+		return errICloudValidationStale
+	}
+	return nil
+}
 
 func iCloudDeliveryProbeToken(resourceID uint, generation uint64, alias string) string {
 	digest := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(alias))))
@@ -799,9 +848,6 @@ func syncICloudAliasesTx(tx *gorm.DB, resourceID uint, aliases []hmeAlias, expec
 			status = iCloudResourceDisabled
 		}
 		if existing, found := currentByAnonymousID[alias.AnonymousID]; found {
-			if existing.Status == "deleted" {
-				continue
-			}
 			updated := tx.Model(&iCloudAliasModel{}).Where("id = ? AND resource_id = ?", existing.ID, resourceID).Updates(map[string]any{
 				"email": alias.Email, "label": alias.Label, "note": alias.Note, "forward_to_email": alias.ForwardToEmail,
 				"origin": alias.Origin, "provider_domain": alias.ProviderDomain, "recipient_mail_id": alias.RecipientMailID,

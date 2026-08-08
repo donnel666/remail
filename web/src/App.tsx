@@ -69,6 +69,7 @@ const pageLoaders = {
   adminDashboard: () => import("./pages/AdminDashboard"),
   adminSystemMonitoring: () => import("./pages/AdminSystemMonitoring"),
   adminMicrosoftEmails: () => import("./pages/AdminMicrosoftEmails"),
+  adminICloudEmails: () => import("./pages/AdminICloudEmails"),
   adminGmailEmails: () => import("./pages/AdminGmailEmails"),
   adminDomainEmails: () => import("./pages/AdminDomainEmails"),
   adminProjects: () => import("./pages/AdminProjects"),
@@ -104,6 +105,7 @@ const DomainEmails = lazy(pageLoaders.domainEmails);
 const AdminDashboard = lazy(pageLoaders.adminDashboard);
 const AdminSystemMonitoring = lazy(pageLoaders.adminSystemMonitoring);
 const AdminMicrosoftEmails = lazy(pageLoaders.adminMicrosoftEmails);
+const AdminICloudEmails = lazy(pageLoaders.adminICloudEmails);
 const AdminGmailEmails = lazy(pageLoaders.adminGmailEmails);
 const AdminDomainEmails = lazy(pageLoaders.adminDomainEmails);
 const AdminProjects = lazy(pageLoaders.adminProjects);
@@ -134,6 +136,7 @@ const routePreloadPriority = [
   "adminDashboard",
   "adminSystemMonitoring",
   "adminMicrosoftEmails",
+  "adminICloudEmails",
   "adminGmailEmails",
   "adminDomainEmails",
   "adminProjects",
@@ -170,6 +173,7 @@ const preloadRouteByLoader: Partial<Record<PageLoaderKey, string>> = {
   adminDomainEmails: "/admin/domains",
   adminFinance: "/admin/finance",
   adminGmailEmails: "/admin/gmail",
+  adminICloudEmails: "/admin/icloud",
   adminMicrosoftEmails: "/admin/microsoft",
   adminProjects: "/admin/projects",
   adminTickets: "/admin/tickets",
@@ -556,6 +560,11 @@ const routeTree = rootRoute.addChildren([
     getParentRoute: () => rootRoute,
     path: "/admin/microsoft",
     component: AdminMicrosoftEmails,
+  }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/admin/icloud",
+    component: AdminICloudEmails,
   }),
   createRoute({
     getParentRoute: () => rootRoute,

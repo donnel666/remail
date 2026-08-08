@@ -71,6 +71,12 @@ export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
         requiredPermission: permissionKey("core:resource", "read"),
       },
       {
+        path: "/admin/icloud",
+        labelKey: "Admin iCloud Emails",
+        icon: Database,
+        requiredPermission: permissionKey("core:resource", "read"),
+      },
+      {
         path: "/admin/gmail",
         labelKey: "Admin Gmail Emails",
         icon: Mail,

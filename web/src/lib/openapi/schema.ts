@@ -3445,6 +3445,281 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/icloud/resources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List administrator-safe iCloud resources */
+        get: operations["getAdminICloudResources"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/icloud/resources/imports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import iCloud resources for a selected owner
+         * @description Cookie, DSID, client context, and the source object remain write-only.
+         */
+        post: operations["postAdminICloudResourceImport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/icloud/resources/imports/{importId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get an iCloud resource import status */
+        get: operations["getAdminICloudResourceImport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/icloud/resources/batch/validation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Queue validation for selected iCloud resources */
+        post: operations["postAdminICloudResourcesValidate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/icloud/resources/batch/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Disable selected iCloud resources */
+        post: operations["postAdminICloudResourcesDisable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/icloud/resources/batch/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Publish selected iCloud resources */
+        post: operations["postAdminICloudResourcesPublish"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/icloud/resources/batch/unpublish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Convert selected iCloud resources to private supply */
+        post: operations["postAdminICloudResourcesUnpublish"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/icloud/resources/batch/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Logically delete selected iCloud resources without active allocations */
+        post: operations["postAdminICloudResourcesDelete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/icloud/resources/{resourceId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Logically delete one iCloud resource */
+        delete: operations["deleteAdminICloudResource"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/icloud/resources/{resourceId}/aliases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List one iCloud resource's safe HME aliases */
+        get: operations["getAdminICloudResourceAliases"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/icloud/resources/{resourceId}/validation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Queue one iCloud resource for validation */
+        post: operations["postAdminICloudResourceValidate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/icloud/resources/{resourceId}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Enable one disabled iCloud resource and queue validation */
+        post: operations["postAdminICloudResourceEnable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/icloud/resources/{resourceId}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Disable one iCloud resource without changing existing allocations */
+        post: operations["postAdminICloudResourceDisable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/icloud/resources/{resourceId}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Publish one iCloud resource for public supply */
+        post: operations["postAdminICloudResourcePublish"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/icloud/resources/{resourceId}/unpublish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Convert one iCloud resource to private supply */
+        post: operations["postAdminICloudResourceUnpublish"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/icloud/resources/{resourceId}/recover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Recover one deleted iCloud resource as private and pending */
+        post: operations["postAdminICloudResourceRecover"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/logs/system": {
         parameters: {
             query?: never;
@@ -4295,7 +4570,7 @@ export interface components {
             projectLogoUrl?: string;
             projectProductId: number;
             /** @enum {string} */
-            productType: "microsoft" | "domain" | "random" | "gmail";
+            productType: "microsoft" | "domain" | "random" | "gmail" | "icloud";
             /** @enum {string} */
             serviceMode: "code" | "purchase";
             /** @enum {string} */
@@ -4307,7 +4582,7 @@ export interface components {
             payAmount: components["schemas"]["NonNegativeLedgerAmountResponse"];
             refundAmount: components["schemas"]["NonNegativeLedgerAmountResponse"];
             /** @enum {string} */
-            allocationType?: "microsoft" | "domain" | "gmail";
+            allocationType?: "microsoft" | "domain" | "gmail" | "icloud";
             allocationId?: number;
             deliveryEmail: string;
             /** Format: date-time */
@@ -5731,7 +6006,7 @@ export interface components {
             accessType?: "public" | "private";
             looseMatch?: boolean;
             /** @enum {string} */
-            productType?: "microsoft" | "domain" | "random" | "gmail";
+            productType?: "microsoft" | "domain" | "random" | "gmail" | "icloud";
             search?: string;
             targetPlatform?: string;
             /** Format: date-time */
@@ -5772,7 +6047,7 @@ export interface components {
         };
         ProjectProductRequest: {
             /** @enum {string} */
-            type: "microsoft" | "domain" | "random" | "gmail";
+            type: "microsoft" | "domain" | "random" | "gmail" | "icloud";
             /**
              * @default enabled
              * @enum {string}
@@ -5834,6 +6109,7 @@ export interface components {
             domain: number;
             random: number;
             gmail: number;
+            icloud: number;
         };
         ProjectItem: {
             id: number;
@@ -5865,7 +6141,7 @@ export interface components {
         ProjectProductSummary: {
             id: number;
             /** @enum {string} */
-            type: "microsoft" | "domain" | "random" | "gmail";
+            type: "microsoft" | "domain" | "random" | "gmail" | "icloud";
             /** @enum {string} */
             status: "enabled" | "disabled";
             codeEnabled: boolean;
@@ -5907,7 +6183,7 @@ export interface components {
             id: number;
             projectId: number;
             /** @enum {string} */
-            type: "microsoft" | "domain" | "random" | "gmail";
+            type: "microsoft" | "domain" | "random" | "gmail" | "icloud";
             /** @enum {string} */
             status: "enabled" | "disabled";
             codeEnabled: boolean;
@@ -6156,7 +6432,7 @@ export interface components {
         };
         AllocationItem: {
             /** @enum {string} */
-            type: "microsoft" | "domain";
+            type: "microsoft" | "domain" | "gmail" | "icloud";
             id: number;
             orderNo: string;
             projectId: number;
@@ -6184,9 +6460,13 @@ export interface components {
             projectId: number;
             microsoft: components["schemas"]["MicrosoftInventory"];
             domain: components["schemas"]["DomainInventory"];
+            gmail: components["schemas"]["GmailInventory"];
+            icloud: components["schemas"]["ICloudInventory"];
             totalAvailable: number;
             activeMicrosoftAllocations: number;
             activeDomainAllocations: number;
+            activeGmailAllocations: number;
+            activeICloudAllocations: number;
         };
         ProjectInventoryTotalResponse: {
             projectId: number;
@@ -6229,6 +6509,30 @@ export interface components {
             mailboxDailyLimit: number;
             mailboxDailyUsed: number;
             mailboxDailyAvailable: number;
+            totalAvailable: number;
+        };
+        GmailInventory: {
+            enabled: boolean;
+            codeEnabled: boolean;
+            purchaseEnabled: boolean;
+            mainEnabled: boolean;
+            dotEnabled: boolean;
+            plusEnabled: boolean;
+            eligibleResources: number;
+            publicEligibleResources: number;
+            mainAvailable: number;
+            mainPublicAvailable: number;
+            dotAvailable: number;
+            dotPublicAvailable: number;
+            plusAvailable: number;
+            plusPublicAvailable: number;
+            totalAvailable: number;
+            publicAvailable: number;
+        };
+        ICloudInventory: {
+            enabled: boolean;
+            eligibleResources: number;
+            aliasAvailable: number;
             totalAvailable: number;
         };
         ProxyBindingListResponse: {
@@ -6539,6 +6843,169 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
         };
+        /** @enum {string} */
+        AdminICloudResourceStatus: "pending" | "validating" | "normal" | "abnormal" | "disabled" | "deleted";
+        /** @enum {string} */
+        AdminICloudSessionStatus: "unchecked" | "valid" | "invalid";
+        AdminICloudOwnerSummary: {
+            id: number;
+            /** Format: email */
+            email: string;
+            nickname: string;
+            groupName: string;
+            /** @enum {string} */
+            role: "user" | "supplier" | "admin" | "super_admin";
+            enabled: boolean;
+        };
+        /** @description Administrator-safe operational facts. Cookie, DSID, host, client context, and provider request payloads are never returned. */
+        AdminICloudResourceItem: {
+            id: number;
+            version: number;
+            /** Format: email */
+            primaryEmail: string;
+            suffix: string;
+            /** Format: email */
+            gmailEmail: string;
+            selectedForwardTo: string;
+            owner: components["schemas"]["AdminICloudOwnerSummary"];
+            status: components["schemas"]["AdminICloudResourceStatus"];
+            forSale: boolean;
+            sessionStatus: components["schemas"]["AdminICloudSessionStatus"];
+            aliasCount: number;
+            /** Format: date-time */
+            expireAt: string;
+            /** Format: date-time */
+            nextValidationAt: string | null;
+            /** Format: date-time */
+            nextKeepaliveAt: string | null;
+            /** Format: date-time */
+            lastCheckedAt: string | null;
+            /** Format: date-time */
+            lastValidAt: string | null;
+            /** Format: date-time */
+            lastAliasSyncAt: string | null;
+            /** Format: date-time */
+            deliveryProbeVerifiedAt: string | null;
+            /** Format: date-time */
+            lastAllocatedAt: string | null;
+            lastSafeError: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        AdminICloudStatusFacet: {
+            /** Format: int64 */
+            all: number;
+            /** Format: int64 */
+            pending: number;
+            /** Format: int64 */
+            validating: number;
+            /** Format: int64 */
+            normal: number;
+            /** Format: int64 */
+            abnormal: number;
+            /** Format: int64 */
+            disabled: number;
+            /** Format: int64 */
+            deleted: number;
+        };
+        AdminICloudSessionFacet: {
+            /** Format: int64 */
+            all: number;
+            /** Format: int64 */
+            unchecked: number;
+            /** Format: int64 */
+            valid: number;
+            /** Format: int64 */
+            invalid: number;
+        };
+        AdminICloudSuffixFacet: {
+            key: string;
+            /** Format: int64 */
+            count: number;
+        };
+        AdminICloudFacets: {
+            status: components["schemas"]["AdminICloudStatusFacet"];
+            forSale: components["schemas"]["AdminMicrosoftBooleanFacet"];
+            sessionStatus: components["schemas"]["AdminICloudSessionFacet"];
+            suffixes: components["schemas"]["AdminICloudSuffixFacet"][];
+        };
+        AdminICloudResourceListResponse: {
+            items: components["schemas"]["AdminICloudResourceItem"][];
+            /**
+             * Format: int64
+             * @description Zero when includeTotal=false.
+             */
+            total: number;
+            offset: number;
+            limit: number;
+            /** @enum {integer} */
+            aliasLimit: 750;
+            /** @description Zero-valued when includeFacets=false. */
+            facets: components["schemas"]["AdminICloudFacets"];
+        };
+        AdminICloudImportResponse: components["schemas"]["AdminMicrosoftImportResponse"];
+        /** @enum {string} */
+        AdminICloudAliasStatus: "normal" | "disabled" | "missing" | "deleted";
+        AdminICloudAliasItem: {
+            id: number;
+            /** Format: email */
+            email: string;
+            status: components["schemas"]["AdminICloudAliasStatus"];
+            forwardToEmail: string;
+            origin: string;
+            providerDomain: string;
+            /** Format: date-time */
+            providerCreatedAt: string | null;
+            /** Format: date-time */
+            lastSeenAt: string | null;
+            /** Format: date-time */
+            lastAllocatedAt: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        AdminICloudAliasListResponse: {
+            items: components["schemas"]["AdminICloudAliasItem"][];
+            /** Format: int64 */
+            total: number;
+            offset: number;
+            limit: number;
+        };
+        AdminICloudMutationResponse: {
+            resourceId: number;
+            version: number;
+            status: components["schemas"]["AdminICloudResourceStatus"];
+            forSale: boolean;
+        };
+        AdminICloudBulkFilter: {
+            search?: string;
+            suffix?: string;
+            status?: components["schemas"]["AdminICloudResourceStatus"];
+            forSale?: boolean;
+            sessionStatus?: components["schemas"]["AdminICloudSessionStatus"];
+            /** Format: date-time */
+            createdFrom?: string;
+            /** Format: date-time */
+            createdTo?: string;
+        };
+        AdminICloudIdsSelection: {
+            /** @enum {string} */
+            mode: "ids";
+            resourceIds: number[];
+        };
+        AdminICloudFilterSelection: {
+            /** @enum {string} */
+            mode: "filter";
+            filter: components["schemas"]["AdminICloudBulkFilter"];
+        };
+        AdminICloudBulkSelection: components["schemas"]["AdminICloudIdsSelection"] | components["schemas"]["AdminICloudFilterSelection"];
+        AdminICloudBulkCommandRequest: {
+            selection: components["schemas"]["AdminICloudBulkSelection"];
+        };
+        AdminICloudBulkResult: components["schemas"]["AdminMicrosoftBulkResult"];
         /** @enum {string} */
         AdminMicrosoftResourceStatus: "pending" | "validating" | "identifying" | "normal" | "abnormal" | "disabled" | "deleted";
         /**
@@ -6886,7 +7353,7 @@ export interface components {
         /** @enum {string} */
         AdminTaskStatus: "queued" | "running" | "succeeded" | "failed" | "uncertain" | "canceled";
         /** @enum {string} */
-        AdminTaskBizType: "microsoft_resource" | "domain_resource" | "microsoft_resource_import" | "gmail_resource_import" | "microsoft_resource_bulk";
+        AdminTaskBizType: "microsoft_resource" | "domain_resource" | "microsoft_resource_import" | "gmail_resource_import" | "microsoft_resource_bulk" | "icloud_resource_import";
         AdminTaskProgress: {
             /** Format: int64 */
             total: number;
@@ -7093,7 +7560,7 @@ export interface components {
         };
         AdminAllocationItem: {
             /** @enum {string} */
-            type: "microsoft" | "domain";
+            type: "microsoft" | "domain" | "gmail" | "icloud";
             /** @description Allocation ID. */
             id: number;
             orderNo: string;
@@ -10876,7 +11343,7 @@ export interface operations {
                 status?: "reviewing" | "listed" | "delisted";
                 accessType?: "public" | "private";
                 looseMatch?: boolean;
-                productType?: "microsoft" | "domain" | "random" | "gmail";
+                productType?: "microsoft" | "domain" | "random" | "gmail" | "icloud";
                 search?: string;
                 targetPlatform?: string;
                 createdFrom?: string;
@@ -13332,7 +13799,7 @@ export interface operations {
     getAdminAllocations: {
         parameters: {
             query?: {
-                type?: "microsoft" | "domain";
+                type?: "microsoft" | "domain" | "gmail" | "icloud";
                 orderNo?: string;
                 projectId?: number;
                 resourceId?: number;
@@ -13390,7 +13857,7 @@ export interface operations {
     getAdminAllocation: {
         parameters: {
             query: {
-                type: "microsoft" | "domain";
+                type: "microsoft" | "domain" | "gmail" | "icloud";
             };
             header?: never;
             path: {
@@ -18976,6 +19443,569 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getAdminICloudResources: {
+        parameters: {
+            query?: {
+                search?: string;
+                suffix?: string;
+                status?: components["schemas"]["AdminICloudResourceStatus"];
+                forSale?: boolean;
+                sessionStatus?: components["schemas"]["AdminICloudSessionStatus"];
+                createdFrom?: string;
+                createdTo?: string;
+                /** @description Set false for page-only requests to skip facet aggregation. */
+                includeFacets?: boolean;
+                /** @description Set false for page-only requests to skip the complete-set count. */
+                includeTotal?: boolean;
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paginated safe iCloud resource list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudResourceListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminICloudResourceImport: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    file: string;
+                    ownerId: number;
+                    /** @enum {string} */
+                    errorStrategy: "skip" | "abort";
+                };
+            };
+        };
+        responses: {
+            /** @description Durable import accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudImportResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getAdminICloudResourceImport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                importId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Safe import status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudImportResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminICloudResourcesValidate: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op. */
+                "Idempotency-Key": components["parameters"]["AdminStateCommandIdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminICloudBulkCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Synchronous bounded selection result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudBulkResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminICloudResourcesDisable: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op. */
+                "Idempotency-Key": components["parameters"]["AdminStateCommandIdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminICloudBulkCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Synchronous bounded selection result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudBulkResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminICloudResourcesPublish: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op. */
+                "Idempotency-Key": components["parameters"]["AdminStateCommandIdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminICloudBulkCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Synchronous bounded selection result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudBulkResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminICloudResourcesUnpublish: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op. */
+                "Idempotency-Key": components["parameters"]["AdminStateCommandIdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminICloudBulkCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Synchronous bounded selection result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudBulkResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminICloudResourcesDelete: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op. */
+                "Idempotency-Key": components["parameters"]["AdminStateCommandIdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminICloudBulkCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Synchronous bounded selection result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudBulkResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    deleteAdminICloudResource: {
+        parameters: {
+            query: {
+                /** @description Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write. */
+                version: components["parameters"]["ExpectedAdminResourceVersion"];
+            };
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op. */
+                "Idempotency-Key": components["parameters"]["AdminStateCommandIdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Updated safe state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudMutationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getAdminICloudResourceAliases: {
+        parameters: {
+            query?: {
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paginated safe alias inventory */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudAliasListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminICloudResourceValidate: {
+        parameters: {
+            query: {
+                /** @description Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write. */
+                version: components["parameters"]["ExpectedAdminResourceVersion"];
+            };
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op. */
+                "Idempotency-Key": components["parameters"]["AdminStateCommandIdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Validation queued */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudMutationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminICloudResourceEnable: {
+        parameters: {
+            query: {
+                /** @description Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write. */
+                version: components["parameters"]["ExpectedAdminResourceVersion"];
+            };
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op. */
+                "Idempotency-Key": components["parameters"]["AdminStateCommandIdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Updated safe state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudMutationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminICloudResourceDisable: {
+        parameters: {
+            query: {
+                /** @description Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write. */
+                version: components["parameters"]["ExpectedAdminResourceVersion"];
+            };
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op. */
+                "Idempotency-Key": components["parameters"]["AdminStateCommandIdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Updated safe state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudMutationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminICloudResourcePublish: {
+        parameters: {
+            query: {
+                /** @description Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write. */
+                version: components["parameters"]["ExpectedAdminResourceVersion"];
+            };
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op. */
+                "Idempotency-Key": components["parameters"]["AdminStateCommandIdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Updated safe state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudMutationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminICloudResourceUnpublish: {
+        parameters: {
+            query: {
+                /** @description Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write. */
+                version: components["parameters"]["ExpectedAdminResourceVersion"];
+            };
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op. */
+                "Idempotency-Key": components["parameters"]["AdminStateCommandIdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Updated safe state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudMutationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminICloudResourceRecover: {
+        parameters: {
+            query: {
+                /** @description Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write. */
+                version: components["parameters"]["ExpectedAdminResourceVersion"];
+            };
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op. */
+                "Idempotency-Key": components["parameters"]["AdminStateCommandIdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Updated safe state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudMutationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };

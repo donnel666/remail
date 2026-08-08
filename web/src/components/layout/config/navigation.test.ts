@@ -44,6 +44,14 @@ describe("admin navigation permissions", () => {
     ]);
   });
 
+  it("guards the iCloud resource page with resource read permission", () => {
+    expect(visiblePaths([])).not.toContain("/admin/icloud");
+    expect(visiblePaths(["core:resource:read"])).toContain("/admin/icloud");
+    expect(getSidebarRouteRequiredPermissions("/admin/icloud")).toEqual([
+      "core:resource:read",
+    ]);
+  });
+
   it("guards system monitoring with diagnostics read permission", () => {
     expect(visiblePaths([])).not.toContain("/admin/monitoring");
     expect(visiblePaths(["governance:log:read"])).toContain("/admin/monitoring");

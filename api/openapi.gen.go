@@ -136,6 +136,8 @@ func (e AdminAllocationItemSupplyScope) Valid() bool {
 // Defines values for AdminAllocationItemType.
 const (
 	AdminAllocationItemTypeDomain    AdminAllocationItemType = "domain"
+	AdminAllocationItemTypeGmail     AdminAllocationItemType = "gmail"
+	AdminAllocationItemTypeIcloud    AdminAllocationItemType = "icloud"
 	AdminAllocationItemTypeMicrosoft AdminAllocationItemType = "microsoft"
 )
 
@@ -143,6 +145,10 @@ const (
 func (e AdminAllocationItemType) Valid() bool {
 	switch e {
 	case AdminAllocationItemTypeDomain:
+		return true
+	case AdminAllocationItemTypeGmail:
+		return true
+	case AdminAllocationItemTypeIcloud:
 		return true
 	case AdminAllocationItemTypeMicrosoft:
 		return true
@@ -487,6 +493,150 @@ func (e AdminGmailValidationBatchStatus) Valid() bool {
 	case AdminGmailValidationBatchStatusProcessing:
 		return true
 	case AdminGmailValidationBatchStatusQueued:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminICloudAliasStatus.
+const (
+	AdminICloudAliasStatusDeleted  AdminICloudAliasStatus = "deleted"
+	AdminICloudAliasStatusDisabled AdminICloudAliasStatus = "disabled"
+	AdminICloudAliasStatusMissing  AdminICloudAliasStatus = "missing"
+	AdminICloudAliasStatusNormal   AdminICloudAliasStatus = "normal"
+)
+
+// Valid indicates whether the value is a known member of the AdminICloudAliasStatus enum.
+func (e AdminICloudAliasStatus) Valid() bool {
+	switch e {
+	case AdminICloudAliasStatusDeleted:
+		return true
+	case AdminICloudAliasStatusDisabled:
+		return true
+	case AdminICloudAliasStatusMissing:
+		return true
+	case AdminICloudAliasStatusNormal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminICloudFilterSelectionMode.
+const (
+	AdminICloudFilterSelectionModeFilter AdminICloudFilterSelectionMode = "filter"
+)
+
+// Valid indicates whether the value is a known member of the AdminICloudFilterSelectionMode enum.
+func (e AdminICloudFilterSelectionMode) Valid() bool {
+	switch e {
+	case AdminICloudFilterSelectionModeFilter:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminICloudIdsSelectionMode.
+const (
+	AdminICloudIdsSelectionModeIds AdminICloudIdsSelectionMode = "ids"
+)
+
+// Valid indicates whether the value is a known member of the AdminICloudIdsSelectionMode enum.
+func (e AdminICloudIdsSelectionMode) Valid() bool {
+	switch e {
+	case AdminICloudIdsSelectionModeIds:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminICloudOwnerSummaryRole.
+const (
+	AdminICloudOwnerSummaryRoleAdmin      AdminICloudOwnerSummaryRole = "admin"
+	AdminICloudOwnerSummaryRoleSuperAdmin AdminICloudOwnerSummaryRole = "super_admin"
+	AdminICloudOwnerSummaryRoleSupplier   AdminICloudOwnerSummaryRole = "supplier"
+	AdminICloudOwnerSummaryRoleUser       AdminICloudOwnerSummaryRole = "user"
+)
+
+// Valid indicates whether the value is a known member of the AdminICloudOwnerSummaryRole enum.
+func (e AdminICloudOwnerSummaryRole) Valid() bool {
+	switch e {
+	case AdminICloudOwnerSummaryRoleAdmin:
+		return true
+	case AdminICloudOwnerSummaryRoleSuperAdmin:
+		return true
+	case AdminICloudOwnerSummaryRoleSupplier:
+		return true
+	case AdminICloudOwnerSummaryRoleUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminICloudResourceListResponseAliasLimit.
+const (
+	N750 AdminICloudResourceListResponseAliasLimit = 750
+)
+
+// Valid indicates whether the value is a known member of the AdminICloudResourceListResponseAliasLimit enum.
+func (e AdminICloudResourceListResponseAliasLimit) Valid() bool {
+	switch e {
+	case N750:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminICloudResourceStatus.
+const (
+	AdminICloudResourceStatusAbnormal   AdminICloudResourceStatus = "abnormal"
+	AdminICloudResourceStatusDeleted    AdminICloudResourceStatus = "deleted"
+	AdminICloudResourceStatusDisabled   AdminICloudResourceStatus = "disabled"
+	AdminICloudResourceStatusNormal     AdminICloudResourceStatus = "normal"
+	AdminICloudResourceStatusPending    AdminICloudResourceStatus = "pending"
+	AdminICloudResourceStatusValidating AdminICloudResourceStatus = "validating"
+)
+
+// Valid indicates whether the value is a known member of the AdminICloudResourceStatus enum.
+func (e AdminICloudResourceStatus) Valid() bool {
+	switch e {
+	case AdminICloudResourceStatusAbnormal:
+		return true
+	case AdminICloudResourceStatusDeleted:
+		return true
+	case AdminICloudResourceStatusDisabled:
+		return true
+	case AdminICloudResourceStatusNormal:
+		return true
+	case AdminICloudResourceStatusPending:
+		return true
+	case AdminICloudResourceStatusValidating:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminICloudSessionStatus.
+const (
+	AdminICloudSessionStatusInvalid   AdminICloudSessionStatus = "invalid"
+	AdminICloudSessionStatusUnchecked AdminICloudSessionStatus = "unchecked"
+	AdminICloudSessionStatusValid     AdminICloudSessionStatus = "valid"
+)
+
+// Valid indicates whether the value is a known member of the AdminICloudSessionStatus enum.
+func (e AdminICloudSessionStatus) Valid() bool {
+	switch e {
+	case AdminICloudSessionStatusInvalid:
+		return true
+	case AdminICloudSessionStatusUnchecked:
+		return true
+	case AdminICloudSessionStatusValid:
 		return true
 	default:
 		return false
@@ -941,6 +1091,7 @@ func (e AdminSystemLogItemCategory) Valid() bool {
 const (
 	AdminTaskBizTypeDomainResource          AdminTaskBizType = "domain_resource"
 	AdminTaskBizTypeGmailResourceImport     AdminTaskBizType = "gmail_resource_import"
+	AdminTaskBizTypeIcloudResourceImport    AdminTaskBizType = "icloud_resource_import"
 	AdminTaskBizTypeMicrosoftResource       AdminTaskBizType = "microsoft_resource"
 	AdminTaskBizTypeMicrosoftResourceBulk   AdminTaskBizType = "microsoft_resource_bulk"
 	AdminTaskBizTypeMicrosoftResourceImport AdminTaskBizType = "microsoft_resource_import"
@@ -952,6 +1103,8 @@ func (e AdminTaskBizType) Valid() bool {
 	case AdminTaskBizTypeDomainResource:
 		return true
 	case AdminTaskBizTypeGmailResourceImport:
+		return true
+	case AdminTaskBizTypeIcloudResourceImport:
 		return true
 	case AdminTaskBizTypeMicrosoftResource:
 		return true
@@ -1252,6 +1405,8 @@ func (e AllocationItemSupplyScope) Valid() bool {
 // Defines values for AllocationItemType.
 const (
 	AllocationItemTypeDomain    AllocationItemType = "domain"
+	AllocationItemTypeGmail     AllocationItemType = "gmail"
+	AllocationItemTypeIcloud    AllocationItemType = "icloud"
 	AllocationItemTypeMicrosoft AllocationItemType = "microsoft"
 )
 
@@ -1259,6 +1414,10 @@ const (
 func (e AllocationItemType) Valid() bool {
 	switch e {
 	case AllocationItemTypeDomain:
+		return true
+	case AllocationItemTypeGmail:
+		return true
+	case AllocationItemTypeIcloud:
 		return true
 	case AllocationItemTypeMicrosoft:
 		return true
@@ -1871,6 +2030,7 @@ func (e OrderMailResponseContentMode) Valid() bool {
 const (
 	OrderResponseAllocationTypeDomain    OrderResponseAllocationType = "domain"
 	OrderResponseAllocationTypeGmail     OrderResponseAllocationType = "gmail"
+	OrderResponseAllocationTypeIcloud    OrderResponseAllocationType = "icloud"
 	OrderResponseAllocationTypeMicrosoft OrderResponseAllocationType = "microsoft"
 )
 
@@ -1880,6 +2040,8 @@ func (e OrderResponseAllocationType) Valid() bool {
 	case OrderResponseAllocationTypeDomain:
 		return true
 	case OrderResponseAllocationTypeGmail:
+		return true
+	case OrderResponseAllocationTypeIcloud:
 		return true
 	case OrderResponseAllocationTypeMicrosoft:
 		return true
@@ -1955,6 +2117,7 @@ func (e OrderResponseFailureCode) Valid() bool {
 const (
 	OrderResponseProductTypeDomain    OrderResponseProductType = "domain"
 	OrderResponseProductTypeGmail     OrderResponseProductType = "gmail"
+	OrderResponseProductTypeIcloud    OrderResponseProductType = "icloud"
 	OrderResponseProductTypeMicrosoft OrderResponseProductType = "microsoft"
 	OrderResponseProductTypeRandom    OrderResponseProductType = "random"
 )
@@ -1965,6 +2128,8 @@ func (e OrderResponseProductType) Valid() bool {
 	case OrderResponseProductTypeDomain:
 		return true
 	case OrderResponseProductTypeGmail:
+		return true
+	case OrderResponseProductTypeIcloud:
 		return true
 	case OrderResponseProductTypeMicrosoft:
 		return true
@@ -2195,6 +2360,7 @@ func (e ProjectBulkFilterAccessType) Valid() bool {
 const (
 	ProjectBulkFilterProductTypeDomain    ProjectBulkFilterProductType = "domain"
 	ProjectBulkFilterProductTypeGmail     ProjectBulkFilterProductType = "gmail"
+	ProjectBulkFilterProductTypeIcloud    ProjectBulkFilterProductType = "icloud"
 	ProjectBulkFilterProductTypeMicrosoft ProjectBulkFilterProductType = "microsoft"
 	ProjectBulkFilterProductTypeRandom    ProjectBulkFilterProductType = "random"
 )
@@ -2205,6 +2371,8 @@ func (e ProjectBulkFilterProductType) Valid() bool {
 	case ProjectBulkFilterProductTypeDomain:
 		return true
 	case ProjectBulkFilterProductTypeGmail:
+		return true
+	case ProjectBulkFilterProductTypeIcloud:
 		return true
 	case ProjectBulkFilterProductTypeMicrosoft:
 		return true
@@ -2363,6 +2531,7 @@ func (e ProjectProductStatus) Valid() bool {
 const (
 	ProjectProductTypeDomain    ProjectProductType = "domain"
 	ProjectProductTypeGmail     ProjectProductType = "gmail"
+	ProjectProductTypeIcloud    ProjectProductType = "icloud"
 	ProjectProductTypeMicrosoft ProjectProductType = "microsoft"
 	ProjectProductTypeRandom    ProjectProductType = "random"
 )
@@ -2373,6 +2542,8 @@ func (e ProjectProductType) Valid() bool {
 	case ProjectProductTypeDomain:
 		return true
 	case ProjectProductTypeGmail:
+		return true
+	case ProjectProductTypeIcloud:
 		return true
 	case ProjectProductTypeMicrosoft:
 		return true
@@ -2405,6 +2576,7 @@ func (e ProjectProductRequestStatus) Valid() bool {
 const (
 	ProjectProductRequestTypeDomain    ProjectProductRequestType = "domain"
 	ProjectProductRequestTypeGmail     ProjectProductRequestType = "gmail"
+	ProjectProductRequestTypeIcloud    ProjectProductRequestType = "icloud"
 	ProjectProductRequestTypeMicrosoft ProjectProductRequestType = "microsoft"
 	ProjectProductRequestTypeRandom    ProjectProductRequestType = "random"
 )
@@ -2415,6 +2587,8 @@ func (e ProjectProductRequestType) Valid() bool {
 	case ProjectProductRequestTypeDomain:
 		return true
 	case ProjectProductRequestTypeGmail:
+		return true
+	case ProjectProductRequestTypeIcloud:
 		return true
 	case ProjectProductRequestTypeMicrosoft:
 		return true
@@ -2447,6 +2621,7 @@ func (e ProjectProductSummaryStatus) Valid() bool {
 const (
 	ProjectProductSummaryTypeDomain    ProjectProductSummaryType = "domain"
 	ProjectProductSummaryTypeGmail     ProjectProductSummaryType = "gmail"
+	ProjectProductSummaryTypeIcloud    ProjectProductSummaryType = "icloud"
 	ProjectProductSummaryTypeMicrosoft ProjectProductSummaryType = "microsoft"
 	ProjectProductSummaryTypeRandom    ProjectProductSummaryType = "random"
 )
@@ -2457,6 +2632,8 @@ func (e ProjectProductSummaryType) Valid() bool {
 	case ProjectProductSummaryTypeDomain:
 		return true
 	case ProjectProductSummaryTypeGmail:
+		return true
+	case ProjectProductSummaryTypeIcloud:
 		return true
 	case ProjectProductSummaryTypeMicrosoft:
 		return true
@@ -3082,6 +3259,8 @@ func (e TicketTypeQuery) Valid() bool {
 // Defines values for GetAdminAllocationsParamsType.
 const (
 	GetAdminAllocationsParamsTypeDomain    GetAdminAllocationsParamsType = "domain"
+	GetAdminAllocationsParamsTypeGmail     GetAdminAllocationsParamsType = "gmail"
+	GetAdminAllocationsParamsTypeIcloud    GetAdminAllocationsParamsType = "icloud"
 	GetAdminAllocationsParamsTypeMicrosoft GetAdminAllocationsParamsType = "microsoft"
 )
 
@@ -3089,6 +3268,10 @@ const (
 func (e GetAdminAllocationsParamsType) Valid() bool {
 	switch e {
 	case GetAdminAllocationsParamsTypeDomain:
+		return true
+	case GetAdminAllocationsParamsTypeGmail:
+		return true
+	case GetAdminAllocationsParamsTypeIcloud:
 		return true
 	case GetAdminAllocationsParamsTypeMicrosoft:
 		return true
@@ -3145,6 +3328,8 @@ func (e GetAdminAllocationsParamsMailbox) Valid() bool {
 // Defines values for GetAdminAllocationParamsType.
 const (
 	GetAdminAllocationParamsTypeDomain    GetAdminAllocationParamsType = "domain"
+	GetAdminAllocationParamsTypeGmail     GetAdminAllocationParamsType = "gmail"
+	GetAdminAllocationParamsTypeIcloud    GetAdminAllocationParamsType = "icloud"
 	GetAdminAllocationParamsTypeMicrosoft GetAdminAllocationParamsType = "microsoft"
 )
 
@@ -3152,6 +3337,10 @@ const (
 func (e GetAdminAllocationParamsType) Valid() bool {
 	switch e {
 	case GetAdminAllocationParamsTypeDomain:
+		return true
+	case GetAdminAllocationParamsTypeGmail:
+		return true
+	case GetAdminAllocationParamsTypeIcloud:
 		return true
 	case GetAdminAllocationParamsTypeMicrosoft:
 		return true
@@ -3265,6 +3454,24 @@ func (e PostAdminGmailResourceImportMultipartBodyErrorStrategy) Valid() bool {
 	case PostAdminGmailResourceImportMultipartBodyErrorStrategyAbort:
 		return true
 	case PostAdminGmailResourceImportMultipartBodyErrorStrategySkip:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PostAdminICloudResourceImportMultipartBodyErrorStrategy.
+const (
+	PostAdminICloudResourceImportMultipartBodyErrorStrategyAbort PostAdminICloudResourceImportMultipartBodyErrorStrategy = "abort"
+	PostAdminICloudResourceImportMultipartBodyErrorStrategySkip  PostAdminICloudResourceImportMultipartBodyErrorStrategy = "skip"
+)
+
+// Valid indicates whether the value is a known member of the PostAdminICloudResourceImportMultipartBodyErrorStrategy enum.
+func (e PostAdminICloudResourceImportMultipartBodyErrorStrategy) Valid() bool {
+	switch e {
+	case PostAdminICloudResourceImportMultipartBodyErrorStrategyAbort:
+		return true
+	case PostAdminICloudResourceImportMultipartBodyErrorStrategySkip:
 		return true
 	default:
 		return false
@@ -3483,28 +3690,28 @@ func (e GetAdminProxyStatsParamsIp) Valid() bool {
 
 // Defines values for GetAdminProxyStatsParamsStatus.
 const (
-	Abnormal GetAdminProxyStatsParamsStatus = "abnormal"
-	Checking GetAdminProxyStatsParamsStatus = "checking"
-	Disabled GetAdminProxyStatsParamsStatus = "disabled"
-	Expired  GetAdminProxyStatsParamsStatus = "expired"
-	Normal   GetAdminProxyStatsParamsStatus = "normal"
-	Pending  GetAdminProxyStatsParamsStatus = "pending"
+	GetAdminProxyStatsParamsStatusAbnormal GetAdminProxyStatsParamsStatus = "abnormal"
+	GetAdminProxyStatsParamsStatusChecking GetAdminProxyStatsParamsStatus = "checking"
+	GetAdminProxyStatsParamsStatusDisabled GetAdminProxyStatsParamsStatus = "disabled"
+	GetAdminProxyStatsParamsStatusExpired  GetAdminProxyStatsParamsStatus = "expired"
+	GetAdminProxyStatsParamsStatusNormal   GetAdminProxyStatsParamsStatus = "normal"
+	GetAdminProxyStatsParamsStatusPending  GetAdminProxyStatsParamsStatus = "pending"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminProxyStatsParamsStatus enum.
 func (e GetAdminProxyStatsParamsStatus) Valid() bool {
 	switch e {
-	case Abnormal:
+	case GetAdminProxyStatsParamsStatusAbnormal:
 		return true
-	case Checking:
+	case GetAdminProxyStatsParamsStatusChecking:
 		return true
-	case Disabled:
+	case GetAdminProxyStatsParamsStatusDisabled:
 		return true
-	case Expired:
+	case GetAdminProxyStatsParamsStatusExpired:
 		return true
-	case Normal:
+	case GetAdminProxyStatsParamsStatusNormal:
 		return true
-	case Pending:
+	case GetAdminProxyStatsParamsStatusPending:
 		return true
 	default:
 		return false
@@ -3678,22 +3885,22 @@ func (e GetAdminTransactionsParamsDirection) Valid() bool {
 
 // Defines values for GetAdminUsersParamsRole.
 const (
-	GetAdminUsersParamsRoleAdmin      GetAdminUsersParamsRole = "admin"
-	GetAdminUsersParamsRoleSuperAdmin GetAdminUsersParamsRole = "super_admin"
-	GetAdminUsersParamsRoleSupplier   GetAdminUsersParamsRole = "supplier"
-	GetAdminUsersParamsRoleUser       GetAdminUsersParamsRole = "user"
+	Admin      GetAdminUsersParamsRole = "admin"
+	SuperAdmin GetAdminUsersParamsRole = "super_admin"
+	Supplier   GetAdminUsersParamsRole = "supplier"
+	User       GetAdminUsersParamsRole = "user"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminUsersParamsRole enum.
 func (e GetAdminUsersParamsRole) Valid() bool {
 	switch e {
-	case GetAdminUsersParamsRoleAdmin:
+	case Admin:
 		return true
-	case GetAdminUsersParamsRoleSuperAdmin:
+	case SuperAdmin:
 		return true
-	case GetAdminUsersParamsRoleSupplier:
+	case Supplier:
 		return true
-	case GetAdminUsersParamsRoleUser:
+	case User:
 		return true
 	default:
 		return false
@@ -3905,6 +4112,7 @@ func (e GetProjectsParamsAccessType) Valid() bool {
 const (
 	GetProjectsParamsProductTypeDomain    GetProjectsParamsProductType = "domain"
 	GetProjectsParamsProductTypeGmail     GetProjectsParamsProductType = "gmail"
+	GetProjectsParamsProductTypeIcloud    GetProjectsParamsProductType = "icloud"
 	GetProjectsParamsProductTypeMicrosoft GetProjectsParamsProductType = "microsoft"
 	GetProjectsParamsProductTypeRandom    GetProjectsParamsProductType = "random"
 )
@@ -3915,6 +4123,8 @@ func (e GetProjectsParamsProductType) Valid() bool {
 	case GetProjectsParamsProductTypeDomain:
 		return true
 	case GetProjectsParamsProductTypeGmail:
+		return true
+	case GetProjectsParamsProductTypeIcloud:
 		return true
 	case GetProjectsParamsProductTypeMicrosoft:
 		return true
@@ -4014,16 +4224,16 @@ func (e GetResourcesParamsPurpose) Valid() bool {
 
 // Defines values for PostResourceImportMultipartBodyErrorStrategy.
 const (
-	Abort PostResourceImportMultipartBodyErrorStrategy = "abort"
-	Skip  PostResourceImportMultipartBodyErrorStrategy = "skip"
+	PostResourceImportMultipartBodyErrorStrategyAbort PostResourceImportMultipartBodyErrorStrategy = "abort"
+	PostResourceImportMultipartBodyErrorStrategySkip  PostResourceImportMultipartBodyErrorStrategy = "skip"
 )
 
 // Valid indicates whether the value is a known member of the PostResourceImportMultipartBodyErrorStrategy enum.
 func (e PostResourceImportMultipartBodyErrorStrategy) Valid() bool {
 	switch e {
-	case Abort:
+	case PostResourceImportMultipartBodyErrorStrategyAbort:
 		return true
-	case Skip:
+	case PostResourceImportMultipartBodyErrorStrategySkip:
 		return true
 	default:
 		return false
@@ -4737,6 +4947,180 @@ type AdminGmailValidationBatchStatus string
 // AdminGmailValidationBatchRequest defines model for AdminGmailValidationBatchRequest.
 type AdminGmailValidationBatchRequest struct {
 	ResourceIds []int `json:"resourceIds"`
+}
+
+// AdminICloudAliasItem defines model for AdminICloudAliasItem.
+type AdminICloudAliasItem struct {
+	CreatedAt         time.Time              `json:"createdAt"`
+	Email             openapi_types.Email    `json:"email"`
+	ForwardToEmail    string                 `json:"forwardToEmail"`
+	Id                int                    `json:"id"`
+	LastAllocatedAt   *time.Time             `json:"lastAllocatedAt"`
+	LastSeenAt        *time.Time             `json:"lastSeenAt"`
+	Origin            string                 `json:"origin"`
+	ProviderCreatedAt *time.Time             `json:"providerCreatedAt"`
+	ProviderDomain    string                 `json:"providerDomain"`
+	Status            AdminICloudAliasStatus `json:"status"`
+	UpdatedAt         time.Time              `json:"updatedAt"`
+}
+
+// AdminICloudAliasListResponse defines model for AdminICloudAliasListResponse.
+type AdminICloudAliasListResponse struct {
+	Items  []AdminICloudAliasItem `json:"items"`
+	Limit  int                    `json:"limit"`
+	Offset int                    `json:"offset"`
+	Total  int64                  `json:"total"`
+}
+
+// AdminICloudAliasStatus defines model for AdminICloudAliasStatus.
+type AdminICloudAliasStatus string
+
+// AdminICloudBulkCommandRequest defines model for AdminICloudBulkCommandRequest.
+type AdminICloudBulkCommandRequest struct {
+	Selection AdminICloudBulkSelection `json:"selection"`
+}
+
+// AdminICloudBulkFilter defines model for AdminICloudBulkFilter.
+type AdminICloudBulkFilter struct {
+	CreatedFrom   *time.Time                 `json:"createdFrom,omitempty"`
+	CreatedTo     *time.Time                 `json:"createdTo,omitempty"`
+	ForSale       *bool                      `json:"forSale,omitempty"`
+	Search        *string                    `json:"search,omitempty"`
+	SessionStatus *AdminICloudSessionStatus  `json:"sessionStatus,omitempty"`
+	Status        *AdminICloudResourceStatus `json:"status,omitempty"`
+	Suffix        *string                    `json:"suffix,omitempty"`
+}
+
+// AdminICloudBulkResult defines model for AdminICloudBulkResult.
+type AdminICloudBulkResult = AdminMicrosoftBulkResult
+
+// AdminICloudBulkSelection defines model for AdminICloudBulkSelection.
+type AdminICloudBulkSelection struct {
+	union json.RawMessage
+}
+
+// AdminICloudFacets defines model for AdminICloudFacets.
+type AdminICloudFacets struct {
+	ForSale       AdminMicrosoftBooleanFacet `json:"forSale"`
+	SessionStatus AdminICloudSessionFacet    `json:"sessionStatus"`
+	Status        AdminICloudStatusFacet     `json:"status"`
+	Suffixes      []AdminICloudSuffixFacet   `json:"suffixes"`
+}
+
+// AdminICloudFilterSelection defines model for AdminICloudFilterSelection.
+type AdminICloudFilterSelection struct {
+	Filter AdminICloudBulkFilter          `json:"filter"`
+	Mode   AdminICloudFilterSelectionMode `json:"mode"`
+}
+
+// AdminICloudFilterSelectionMode defines model for AdminICloudFilterSelection.Mode.
+type AdminICloudFilterSelectionMode string
+
+// AdminICloudIdsSelection defines model for AdminICloudIdsSelection.
+type AdminICloudIdsSelection struct {
+	Mode        AdminICloudIdsSelectionMode `json:"mode"`
+	ResourceIds []int                       `json:"resourceIds"`
+}
+
+// AdminICloudIdsSelectionMode defines model for AdminICloudIdsSelection.Mode.
+type AdminICloudIdsSelectionMode string
+
+// AdminICloudImportResponse defines model for AdminICloudImportResponse.
+type AdminICloudImportResponse = AdminMicrosoftImportResponse
+
+// AdminICloudMutationResponse defines model for AdminICloudMutationResponse.
+type AdminICloudMutationResponse struct {
+	ForSale    bool                      `json:"forSale"`
+	ResourceId int                       `json:"resourceId"`
+	Status     AdminICloudResourceStatus `json:"status"`
+	Version    int                       `json:"version"`
+}
+
+// AdminICloudOwnerSummary defines model for AdminICloudOwnerSummary.
+type AdminICloudOwnerSummary struct {
+	Email     openapi_types.Email         `json:"email"`
+	Enabled   bool                        `json:"enabled"`
+	GroupName string                      `json:"groupName"`
+	Id        int                         `json:"id"`
+	Nickname  string                      `json:"nickname"`
+	Role      AdminICloudOwnerSummaryRole `json:"role"`
+}
+
+// AdminICloudOwnerSummaryRole defines model for AdminICloudOwnerSummary.Role.
+type AdminICloudOwnerSummaryRole string
+
+// AdminICloudResourceItem Administrator-safe operational facts. Cookie, DSID, host, client context, and provider request payloads are never returned.
+type AdminICloudResourceItem struct {
+	AliasCount              int                       `json:"aliasCount"`
+	CreatedAt               time.Time                 `json:"createdAt"`
+	DeliveryProbeVerifiedAt *time.Time                `json:"deliveryProbeVerifiedAt"`
+	ExpireAt                time.Time                 `json:"expireAt"`
+	ForSale                 bool                      `json:"forSale"`
+	GmailEmail              openapi_types.Email       `json:"gmailEmail"`
+	Id                      int                       `json:"id"`
+	LastAliasSyncAt         *time.Time                `json:"lastAliasSyncAt"`
+	LastAllocatedAt         *time.Time                `json:"lastAllocatedAt"`
+	LastCheckedAt           *time.Time                `json:"lastCheckedAt"`
+	LastSafeError           *string                   `json:"lastSafeError"`
+	LastValidAt             *time.Time                `json:"lastValidAt"`
+	NextKeepaliveAt         *time.Time                `json:"nextKeepaliveAt"`
+	NextValidationAt        *time.Time                `json:"nextValidationAt"`
+	Owner                   AdminICloudOwnerSummary   `json:"owner"`
+	PrimaryEmail            openapi_types.Email       `json:"primaryEmail"`
+	SelectedForwardTo       string                    `json:"selectedForwardTo"`
+	SessionStatus           AdminICloudSessionStatus  `json:"sessionStatus"`
+	Status                  AdminICloudResourceStatus `json:"status"`
+	Suffix                  string                    `json:"suffix"`
+	UpdatedAt               time.Time                 `json:"updatedAt"`
+	Version                 int                       `json:"version"`
+}
+
+// AdminICloudResourceListResponse defines model for AdminICloudResourceListResponse.
+type AdminICloudResourceListResponse struct {
+	AliasLimit AdminICloudResourceListResponseAliasLimit `json:"aliasLimit"`
+
+	// Facets Zero-valued when includeFacets=false.
+	Facets AdminICloudFacets         `json:"facets"`
+	Items  []AdminICloudResourceItem `json:"items"`
+	Limit  int                       `json:"limit"`
+	Offset int                       `json:"offset"`
+
+	// Total Zero when includeTotal=false.
+	Total int64 `json:"total"`
+}
+
+// AdminICloudResourceListResponseAliasLimit defines model for AdminICloudResourceListResponse.AliasLimit.
+type AdminICloudResourceListResponseAliasLimit int
+
+// AdminICloudResourceStatus defines model for AdminICloudResourceStatus.
+type AdminICloudResourceStatus string
+
+// AdminICloudSessionFacet defines model for AdminICloudSessionFacet.
+type AdminICloudSessionFacet struct {
+	All       int64 `json:"all"`
+	Invalid   int64 `json:"invalid"`
+	Unchecked int64 `json:"unchecked"`
+	Valid     int64 `json:"valid"`
+}
+
+// AdminICloudSessionStatus defines model for AdminICloudSessionStatus.
+type AdminICloudSessionStatus string
+
+// AdminICloudStatusFacet defines model for AdminICloudStatusFacet.
+type AdminICloudStatusFacet struct {
+	Abnormal   int64 `json:"abnormal"`
+	All        int64 `json:"all"`
+	Deleted    int64 `json:"deleted"`
+	Disabled   int64 `json:"disabled"`
+	Normal     int64 `json:"normal"`
+	Pending    int64 `json:"pending"`
+	Validating int64 `json:"validating"`
+}
+
+// AdminICloudSuffixFacet defines model for AdminICloudSuffixFacet.
+type AdminICloudSuffixFacet struct {
+	Count int64  `json:"count"`
+	Key   string `json:"key"`
 }
 
 // AdminInviteBulkRequest defines model for AdminInviteBulkRequest.
@@ -6296,6 +6680,26 @@ type GmailCodeResponse struct {
 	Seq        int       `json:"seq"`
 }
 
+// GmailInventory defines model for GmailInventory.
+type GmailInventory struct {
+	CodeEnabled             bool `json:"codeEnabled"`
+	DotAvailable            int  `json:"dotAvailable"`
+	DotEnabled              bool `json:"dotEnabled"`
+	DotPublicAvailable      int  `json:"dotPublicAvailable"`
+	EligibleResources       int  `json:"eligibleResources"`
+	Enabled                 bool `json:"enabled"`
+	MainAvailable           int  `json:"mainAvailable"`
+	MainEnabled             bool `json:"mainEnabled"`
+	MainPublicAvailable     int  `json:"mainPublicAvailable"`
+	PlusAvailable           int  `json:"plusAvailable"`
+	PlusEnabled             bool `json:"plusEnabled"`
+	PlusPublicAvailable     int  `json:"plusPublicAvailable"`
+	PublicAvailable         int  `json:"publicAvailable"`
+	PublicEligibleResources int  `json:"publicEligibleResources"`
+	PurchaseEnabled         bool `json:"purchaseEnabled"`
+	TotalAvailable          int  `json:"totalAvailable"`
+}
+
 // GmailUpstreamActivationItem defines model for GmailUpstreamActivationItem.
 type GmailUpstreamActivationItem struct {
 	CompletedAt *time.Time `json:"completedAt,omitempty"`
@@ -6430,6 +6834,14 @@ type GrantProjectAccessRequest struct {
 // HealthResponse defines model for HealthResponse.
 type HealthResponse struct {
 	Status string `json:"status"`
+}
+
+// ICloudInventory defines model for ICloudInventory.
+type ICloudInventory struct {
+	AliasAvailable    int  `json:"aliasAvailable"`
+	EligibleResources int  `json:"eligibleResources"`
+	Enabled           bool `json:"enabled"`
+	TotalAvailable    int  `json:"totalAvailable"`
 }
 
 // ImportProxiesRequest defines model for ImportProxiesRequest.
@@ -7228,8 +7640,12 @@ type ProjectDetailResponse struct {
 // ProjectInventoryResponse defines model for ProjectInventoryResponse.
 type ProjectInventoryResponse struct {
 	ActiveDomainAllocations    int                `json:"activeDomainAllocations"`
+	ActiveGmailAllocations     int                `json:"activeGmailAllocations"`
+	ActiveICloudAllocations    int                `json:"activeICloudAllocations"`
 	ActiveMicrosoftAllocations int                `json:"activeMicrosoftAllocations"`
 	Domain                     DomainInventory    `json:"domain"`
+	Gmail                      GmailInventory     `json:"gmail"`
+	Icloud                     ICloudInventory    `json:"icloud"`
 	Microsoft                  MicrosoftInventory `json:"microsoft"`
 	ProjectId                  int                `json:"projectId"`
 	TotalAvailable             int                `json:"totalAvailable"`
@@ -7469,6 +7885,7 @@ type ProjectProductTypeFacets struct {
 	All       int `json:"all"`
 	Domain    int `json:"domain"`
 	Gmail     int `json:"gmail"`
+	Icloud    int `json:"icloud"`
 	Microsoft int `json:"microsoft"`
 	Random    int `json:"random"`
 }
@@ -8804,6 +9221,179 @@ type PostAdminGmailResourceValidateParams struct {
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
 	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// GetAdminICloudResourcesParams defines parameters for GetAdminICloudResources.
+type GetAdminICloudResourcesParams struct {
+	Search        *string                    `form:"search,omitempty" json:"search,omitempty"`
+	Suffix        *string                    `form:"suffix,omitempty" json:"suffix,omitempty"`
+	Status        *AdminICloudResourceStatus `form:"status,omitempty" json:"status,omitempty"`
+	ForSale       *bool                      `form:"forSale,omitempty" json:"forSale,omitempty"`
+	SessionStatus *AdminICloudSessionStatus  `form:"sessionStatus,omitempty" json:"sessionStatus,omitempty"`
+	CreatedFrom   *time.Time                 `form:"createdFrom,omitempty" json:"createdFrom,omitempty"`
+	CreatedTo     *time.Time                 `form:"createdTo,omitempty" json:"createdTo,omitempty"`
+
+	// IncludeFacets Set false for page-only requests to skip facet aggregation.
+	IncludeFacets *bool `form:"includeFacets,omitempty" json:"includeFacets,omitempty"`
+
+	// IncludeTotal Set false for page-only requests to skip the complete-set count.
+	IncludeTotal *bool `form:"includeTotal,omitempty" json:"includeTotal,omitempty"`
+	Offset       *int  `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit        *int  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// PostAdminICloudResourcesDeleteParams defines parameters for PostAdminICloudResourcesDelete.
+type PostAdminICloudResourcesDeleteParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op.
+	IdempotencyKey AdminStateCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminICloudResourcesDisableParams defines parameters for PostAdminICloudResourcesDisable.
+type PostAdminICloudResourcesDisableParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op.
+	IdempotencyKey AdminStateCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminICloudResourcesPublishParams defines parameters for PostAdminICloudResourcesPublish.
+type PostAdminICloudResourcesPublishParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op.
+	IdempotencyKey AdminStateCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminICloudResourcesUnpublishParams defines parameters for PostAdminICloudResourcesUnpublish.
+type PostAdminICloudResourcesUnpublishParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op.
+	IdempotencyKey AdminStateCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminICloudResourcesValidateParams defines parameters for PostAdminICloudResourcesValidate.
+type PostAdminICloudResourcesValidateParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op.
+	IdempotencyKey AdminStateCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminICloudResourceImportMultipartBody defines parameters for PostAdminICloudResourceImport.
+type PostAdminICloudResourceImportMultipartBody struct {
+	ErrorStrategy PostAdminICloudResourceImportMultipartBodyErrorStrategy `json:"errorStrategy"`
+	File          openapi_types.File                                      `json:"file"`
+	OwnerId       int                                                     `json:"ownerId"`
+}
+
+// PostAdminICloudResourceImportParams defines parameters for PostAdminICloudResourceImport.
+type PostAdminICloudResourceImportParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminICloudResourceImportMultipartBodyErrorStrategy defines parameters for PostAdminICloudResourceImport.
+type PostAdminICloudResourceImportMultipartBodyErrorStrategy string
+
+// DeleteAdminICloudResourceParams defines parameters for DeleteAdminICloudResource.
+type DeleteAdminICloudResourceParams struct {
+	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
+	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op.
+	IdempotencyKey AdminStateCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// GetAdminICloudResourceAliasesParams defines parameters for GetAdminICloudResourceAliases.
+type GetAdminICloudResourceAliasesParams struct {
+	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// PostAdminICloudResourceDisableParams defines parameters for PostAdminICloudResourceDisable.
+type PostAdminICloudResourceDisableParams struct {
+	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
+	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op.
+	IdempotencyKey AdminStateCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminICloudResourceEnableParams defines parameters for PostAdminICloudResourceEnable.
+type PostAdminICloudResourceEnableParams struct {
+	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
+	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op.
+	IdempotencyKey AdminStateCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminICloudResourcePublishParams defines parameters for PostAdminICloudResourcePublish.
+type PostAdminICloudResourcePublishParams struct {
+	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
+	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op.
+	IdempotencyKey AdminStateCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminICloudResourceRecoverParams defines parameters for PostAdminICloudResourceRecover.
+type PostAdminICloudResourceRecoverParams struct {
+	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
+	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op.
+	IdempotencyKey AdminStateCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminICloudResourceUnpublishParams defines parameters for PostAdminICloudResourceUnpublish.
+type PostAdminICloudResourceUnpublishParams struct {
+	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
+	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op.
+	IdempotencyKey AdminStateCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminICloudResourceValidateParams defines parameters for PostAdminICloudResourceValidate.
+type PostAdminICloudResourceValidateParams struct {
+	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
+	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op.
+	IdempotencyKey AdminStateCommandIdempotencyKey `json:"Idempotency-Key"`
 }
 
 // GetAdminInvitesParams defines parameters for GetAdminInvites.
@@ -10279,6 +10869,24 @@ type PostAdminGmailResourceImportMultipartRequestBody PostAdminGmailResourceImpo
 // PostAdminGmailResourceValidationsJSONRequestBody defines body for PostAdminGmailResourceValidations for application/json ContentType.
 type PostAdminGmailResourceValidationsJSONRequestBody = AdminGmailValidationBatchRequest
 
+// PostAdminICloudResourcesDeleteJSONRequestBody defines body for PostAdminICloudResourcesDelete for application/json ContentType.
+type PostAdminICloudResourcesDeleteJSONRequestBody = AdminICloudBulkCommandRequest
+
+// PostAdminICloudResourcesDisableJSONRequestBody defines body for PostAdminICloudResourcesDisable for application/json ContentType.
+type PostAdminICloudResourcesDisableJSONRequestBody = AdminICloudBulkCommandRequest
+
+// PostAdminICloudResourcesPublishJSONRequestBody defines body for PostAdminICloudResourcesPublish for application/json ContentType.
+type PostAdminICloudResourcesPublishJSONRequestBody = AdminICloudBulkCommandRequest
+
+// PostAdminICloudResourcesUnpublishJSONRequestBody defines body for PostAdminICloudResourcesUnpublish for application/json ContentType.
+type PostAdminICloudResourcesUnpublishJSONRequestBody = AdminICloudBulkCommandRequest
+
+// PostAdminICloudResourcesValidateJSONRequestBody defines body for PostAdminICloudResourcesValidate for application/json ContentType.
+type PostAdminICloudResourcesValidateJSONRequestBody = AdminICloudBulkCommandRequest
+
+// PostAdminICloudResourceImportMultipartRequestBody defines body for PostAdminICloudResourceImport for multipart/form-data ContentType.
+type PostAdminICloudResourceImportMultipartRequestBody PostAdminICloudResourceImportMultipartBody
+
 // PostAdminInviteJSONRequestBody defines body for PostAdminInvite for application/json ContentType.
 type PostAdminInviteJSONRequestBody = AdminCreateInviteRequest
 
@@ -10598,6 +11206,68 @@ func (t AdminDomainBulkSelection) MarshalJSON() ([]byte, error) {
 }
 
 func (t *AdminDomainBulkSelection) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsAdminICloudIdsSelection returns the union data inside the AdminICloudBulkSelection as a AdminICloudIdsSelection
+func (t AdminICloudBulkSelection) AsAdminICloudIdsSelection() (AdminICloudIdsSelection, error) {
+	var body AdminICloudIdsSelection
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromAdminICloudIdsSelection overwrites any union data inside the AdminICloudBulkSelection as the provided AdminICloudIdsSelection
+func (t *AdminICloudBulkSelection) FromAdminICloudIdsSelection(v AdminICloudIdsSelection) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeAdminICloudIdsSelection performs a merge with any union data inside the AdminICloudBulkSelection, using the provided AdminICloudIdsSelection
+func (t *AdminICloudBulkSelection) MergeAdminICloudIdsSelection(v AdminICloudIdsSelection) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsAdminICloudFilterSelection returns the union data inside the AdminICloudBulkSelection as a AdminICloudFilterSelection
+func (t AdminICloudBulkSelection) AsAdminICloudFilterSelection() (AdminICloudFilterSelection, error) {
+	var body AdminICloudFilterSelection
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromAdminICloudFilterSelection overwrites any union data inside the AdminICloudBulkSelection as the provided AdminICloudFilterSelection
+func (t *AdminICloudBulkSelection) FromAdminICloudFilterSelection(v AdminICloudFilterSelection) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeAdminICloudFilterSelection performs a merge with any union data inside the AdminICloudBulkSelection, using the provided AdminICloudFilterSelection
+func (t *AdminICloudBulkSelection) MergeAdminICloudFilterSelection(v AdminICloudFilterSelection) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t AdminICloudBulkSelection) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *AdminICloudBulkSelection) UnmarshalJSON(b []byte) error {
 	err := t.union.UnmarshalJSON(b)
 	return err
 }
@@ -11295,6 +11965,54 @@ type ServerInterface interface {
 	// Queue validation for one Gmail resource
 	// (POST /v1/admin/gmail/resources/{resourceId}/validate)
 	PostAdminGmailResourceValidate(c *gin.Context, resourceId int, params PostAdminGmailResourceValidateParams)
+	// List administrator-safe iCloud resources
+	// (GET /v1/admin/icloud/resources)
+	GetAdminICloudResources(c *gin.Context, params GetAdminICloudResourcesParams)
+	// Logically delete selected iCloud resources without active allocations
+	// (POST /v1/admin/icloud/resources/batch/delete)
+	PostAdminICloudResourcesDelete(c *gin.Context, params PostAdminICloudResourcesDeleteParams)
+	// Disable selected iCloud resources
+	// (POST /v1/admin/icloud/resources/batch/disable)
+	PostAdminICloudResourcesDisable(c *gin.Context, params PostAdminICloudResourcesDisableParams)
+	// Publish selected iCloud resources
+	// (POST /v1/admin/icloud/resources/batch/publish)
+	PostAdminICloudResourcesPublish(c *gin.Context, params PostAdminICloudResourcesPublishParams)
+	// Convert selected iCloud resources to private supply
+	// (POST /v1/admin/icloud/resources/batch/unpublish)
+	PostAdminICloudResourcesUnpublish(c *gin.Context, params PostAdminICloudResourcesUnpublishParams)
+	// Queue validation for selected iCloud resources
+	// (POST /v1/admin/icloud/resources/batch/validation)
+	PostAdminICloudResourcesValidate(c *gin.Context, params PostAdminICloudResourcesValidateParams)
+	// Import iCloud resources for a selected owner
+	// (POST /v1/admin/icloud/resources/imports)
+	PostAdminICloudResourceImport(c *gin.Context, params PostAdminICloudResourceImportParams)
+	// Get an iCloud resource import status
+	// (GET /v1/admin/icloud/resources/imports/{importId})
+	GetAdminICloudResourceImport(c *gin.Context, importId int)
+	// Logically delete one iCloud resource
+	// (DELETE /v1/admin/icloud/resources/{resourceId})
+	DeleteAdminICloudResource(c *gin.Context, resourceId int, params DeleteAdminICloudResourceParams)
+	// List one iCloud resource's safe HME aliases
+	// (GET /v1/admin/icloud/resources/{resourceId}/aliases)
+	GetAdminICloudResourceAliases(c *gin.Context, resourceId int, params GetAdminICloudResourceAliasesParams)
+	// Disable one iCloud resource without changing existing allocations
+	// (POST /v1/admin/icloud/resources/{resourceId}/disable)
+	PostAdminICloudResourceDisable(c *gin.Context, resourceId int, params PostAdminICloudResourceDisableParams)
+	// Enable one disabled iCloud resource and queue validation
+	// (POST /v1/admin/icloud/resources/{resourceId}/enable)
+	PostAdminICloudResourceEnable(c *gin.Context, resourceId int, params PostAdminICloudResourceEnableParams)
+	// Publish one iCloud resource for public supply
+	// (POST /v1/admin/icloud/resources/{resourceId}/publish)
+	PostAdminICloudResourcePublish(c *gin.Context, resourceId int, params PostAdminICloudResourcePublishParams)
+	// Recover one deleted iCloud resource as private and pending
+	// (POST /v1/admin/icloud/resources/{resourceId}/recover)
+	PostAdminICloudResourceRecover(c *gin.Context, resourceId int, params PostAdminICloudResourceRecoverParams)
+	// Convert one iCloud resource to private supply
+	// (POST /v1/admin/icloud/resources/{resourceId}/unpublish)
+	PostAdminICloudResourceUnpublish(c *gin.Context, resourceId int, params PostAdminICloudResourceUnpublishParams)
+	// Queue one iCloud resource for validation
+	// (POST /v1/admin/icloud/resources/{resourceId}/validation)
+	PostAdminICloudResourceValidate(c *gin.Context, resourceId int, params PostAdminICloudResourceValidateParams)
 	// List invites
 	// (GET /v1/admin/invites)
 	GetAdminInvites(c *gin.Context, params GetAdminInvitesParams)
@@ -14693,6 +15411,1178 @@ func (siw *ServerInterfaceWrapper) PostAdminGmailResourceValidate(c *gin.Context
 	}
 
 	siw.Handler.PostAdminGmailResourceValidate(c, resourceId, params)
+}
+
+// GetAdminICloudResources operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminICloudResources(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminICloudResourcesParams
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", c.Request.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter search: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "suffix" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "suffix", c.Request.URL.Query(), &params.Suffix, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter suffix: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", c.Request.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter status: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "forSale" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "forSale", c.Request.URL.Query(), &params.ForSale, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter forSale: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "sessionStatus" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "sessionStatus", c.Request.URL.Query(), &params.SessionStatus, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter sessionStatus: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdFrom" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdFrom", c.Request.URL.Query(), &params.CreatedFrom, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdFrom: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdTo" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdTo", c.Request.URL.Query(), &params.CreatedTo, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdTo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "includeFacets" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "includeFacets", c.Request.URL.Query(), &params.IncludeFacets, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter includeFacets: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "includeTotal" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "includeTotal", c.Request.URL.Query(), &params.IncludeTotal, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter includeTotal: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminICloudResources(c, params)
+}
+
+// PostAdminICloudResourcesDelete operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminICloudResourcesDelete(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminICloudResourcesDeleteParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminStateCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminICloudResourcesDelete(c, params)
+}
+
+// PostAdminICloudResourcesDisable operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminICloudResourcesDisable(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminICloudResourcesDisableParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminStateCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminICloudResourcesDisable(c, params)
+}
+
+// PostAdminICloudResourcesPublish operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminICloudResourcesPublish(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminICloudResourcesPublishParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminStateCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminICloudResourcesPublish(c, params)
+}
+
+// PostAdminICloudResourcesUnpublish operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminICloudResourcesUnpublish(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminICloudResourcesUnpublishParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminStateCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminICloudResourcesUnpublish(c, params)
+}
+
+// PostAdminICloudResourcesValidate operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminICloudResourcesValidate(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminICloudResourcesValidateParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminStateCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminICloudResourcesValidate(c, params)
+}
+
+// PostAdminICloudResourceImport operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminICloudResourceImport(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminICloudResourceImportParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminICloudResourceImport(c, params)
+}
+
+// GetAdminICloudResourceImport operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminICloudResourceImport(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "importId" -------------
+	var importId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "importId", c.Param("importId"), &importId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter importId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminICloudResourceImport(c, importId)
+}
+
+// DeleteAdminICloudResource operation middleware
+func (siw *ServerInterfaceWrapper) DeleteAdminICloudResource(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteAdminICloudResourceParams
+
+	// ------------- Required query parameter "version" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "version", c.Request.URL.Query(), &params.Version, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter version: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminStateCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DeleteAdminICloudResource(c, resourceId, params)
+}
+
+// GetAdminICloudResourceAliases operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminICloudResourceAliases(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminICloudResourceAliasesParams
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminICloudResourceAliases(c, resourceId, params)
+}
+
+// PostAdminICloudResourceDisable operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminICloudResourceDisable(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminICloudResourceDisableParams
+
+	// ------------- Required query parameter "version" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "version", c.Request.URL.Query(), &params.Version, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter version: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminStateCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminICloudResourceDisable(c, resourceId, params)
+}
+
+// PostAdminICloudResourceEnable operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminICloudResourceEnable(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminICloudResourceEnableParams
+
+	// ------------- Required query parameter "version" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "version", c.Request.URL.Query(), &params.Version, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter version: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminStateCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminICloudResourceEnable(c, resourceId, params)
+}
+
+// PostAdminICloudResourcePublish operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminICloudResourcePublish(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminICloudResourcePublishParams
+
+	// ------------- Required query parameter "version" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "version", c.Request.URL.Query(), &params.Version, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter version: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminStateCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminICloudResourcePublish(c, resourceId, params)
+}
+
+// PostAdminICloudResourceRecover operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminICloudResourceRecover(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminICloudResourceRecoverParams
+
+	// ------------- Required query parameter "version" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "version", c.Request.URL.Query(), &params.Version, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter version: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminStateCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminICloudResourceRecover(c, resourceId, params)
+}
+
+// PostAdminICloudResourceUnpublish operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminICloudResourceUnpublish(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminICloudResourceUnpublishParams
+
+	// ------------- Required query parameter "version" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "version", c.Request.URL.Query(), &params.Version, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter version: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminStateCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminICloudResourceUnpublish(c, resourceId, params)
+}
+
+// PostAdminICloudResourceValidate operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminICloudResourceValidate(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminICloudResourceValidateParams
+
+	// ------------- Required query parameter "version" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "version", c.Request.URL.Query(), &params.Version, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter version: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminStateCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminICloudResourceValidate(c, resourceId, params)
 }
 
 // GetAdminInvites operation middleware
@@ -25201,6 +27091,22 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/gmail/resources/:resourceId/publish", wrapper.PostAdminGmailResourcePublish)
 	router.POST(options.BaseURL+"/v1/admin/gmail/resources/:resourceId/unpublish", wrapper.PostAdminGmailResourceUnpublish)
 	router.POST(options.BaseURL+"/v1/admin/gmail/resources/:resourceId/validate", wrapper.PostAdminGmailResourceValidate)
+	router.GET(options.BaseURL+"/v1/admin/icloud/resources", wrapper.GetAdminICloudResources)
+	router.POST(options.BaseURL+"/v1/admin/icloud/resources/batch/delete", wrapper.PostAdminICloudResourcesDelete)
+	router.POST(options.BaseURL+"/v1/admin/icloud/resources/batch/disable", wrapper.PostAdminICloudResourcesDisable)
+	router.POST(options.BaseURL+"/v1/admin/icloud/resources/batch/publish", wrapper.PostAdminICloudResourcesPublish)
+	router.POST(options.BaseURL+"/v1/admin/icloud/resources/batch/unpublish", wrapper.PostAdminICloudResourcesUnpublish)
+	router.POST(options.BaseURL+"/v1/admin/icloud/resources/batch/validation", wrapper.PostAdminICloudResourcesValidate)
+	router.POST(options.BaseURL+"/v1/admin/icloud/resources/imports", wrapper.PostAdminICloudResourceImport)
+	router.GET(options.BaseURL+"/v1/admin/icloud/resources/imports/:importId", wrapper.GetAdminICloudResourceImport)
+	router.DELETE(options.BaseURL+"/v1/admin/icloud/resources/:resourceId", wrapper.DeleteAdminICloudResource)
+	router.GET(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/aliases", wrapper.GetAdminICloudResourceAliases)
+	router.POST(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/disable", wrapper.PostAdminICloudResourceDisable)
+	router.POST(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/enable", wrapper.PostAdminICloudResourceEnable)
+	router.POST(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/publish", wrapper.PostAdminICloudResourcePublish)
+	router.POST(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/recover", wrapper.PostAdminICloudResourceRecover)
+	router.POST(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/unpublish", wrapper.PostAdminICloudResourceUnpublish)
+	router.POST(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/validation", wrapper.PostAdminICloudResourceValidate)
 	router.GET(options.BaseURL+"/v1/admin/invites", wrapper.GetAdminInvites)
 	router.POST(options.BaseURL+"/v1/admin/invites", wrapper.PostAdminInvite)
 	router.POST(options.BaseURL+"/v1/admin/invites/batch", wrapper.PostAdminInvitesBatch)

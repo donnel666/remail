@@ -2685,7 +2685,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [microsoft, domain, random, gmail]
+            enum: [microsoft, domain, random, gmail, icloud]
         - name: search
           in: query
           schema:
@@ -4747,7 +4747,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [microsoft, domain]
+            enum: [microsoft, domain, gmail, icloud]
         - name: orderNo
           in: query
           schema:
@@ -4834,7 +4834,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [microsoft, domain]
+            enum: [microsoft, domain, gmail, icloud]
       responses:
         "200":
           description: Allocation detail
@@ -10013,6 +10013,653 @@ paths:
           $ref: "#/components/responses/UnprocessableEntity"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/admin/icloud/resources:
+    get:
+      operationId: getAdminICloudResources
+      summary: List administrator-safe iCloud resources
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: search
+          in: query
+          schema:
+            type: string
+            maxLength: 320
+        - name: suffix
+          in: query
+          schema:
+            type: string
+            maxLength: 255
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/AdminICloudResourceStatus"
+        - name: forSale
+          in: query
+          schema:
+            type: boolean
+        - name: sessionStatus
+          in: query
+          schema:
+            $ref: "#/components/schemas/AdminICloudSessionStatus"
+        - name: createdFrom
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: createdTo
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: includeFacets
+          in: query
+          description: Set false for page-only requests to skip facet aggregation.
+          schema:
+            type: boolean
+            default: true
+        - name: includeTotal
+          in: query
+          description: Set false for page-only requests to skip the complete-set count.
+          schema:
+            type: boolean
+            default: true
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Paginated safe iCloud resource list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudResourceListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/admin/icloud/resources/imports:
+    post:
+      operationId: postAdminICloudResourceImport
+      summary: Import iCloud resources for a selected owner
+      description: Cookie, DSID, client context, and the source object remain write-only.
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, ownerId, errorStrategy]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                ownerId:
+                  type: integer
+                  minimum: 1
+                errorStrategy:
+                  type: string
+                  enum: [skip, abort]
+              additionalProperties: false
+      responses:
+        "202":
+          description: Durable import accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudImportResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/admin/icloud/resources/imports/{importId}:
+    get:
+      operationId: getAdminICloudResourceImport
+      summary: Get an iCloud resource import status
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: importId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Safe import status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudImportResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/admin/icloud/resources/batch/validation:
+    post:
+      operationId: postAdminICloudResourcesValidate
+      summary: Queue validation for selected iCloud resources
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminStateCommandIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminICloudBulkCommandRequest"
+      responses:
+        "200":
+          description: Synchronous bounded selection result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudBulkResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/admin/icloud/resources/batch/disable:
+    post:
+      operationId: postAdminICloudResourcesDisable
+      summary: Disable selected iCloud resources
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminStateCommandIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminICloudBulkCommandRequest"
+      responses:
+        "200":
+          description: Synchronous bounded selection result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudBulkResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/admin/icloud/resources/batch/publish:
+    post:
+      operationId: postAdminICloudResourcesPublish
+      summary: Publish selected iCloud resources
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminStateCommandIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminICloudBulkCommandRequest"
+      responses:
+        "200":
+          description: Synchronous bounded selection result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudBulkResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/admin/icloud/resources/batch/unpublish:
+    post:
+      operationId: postAdminICloudResourcesUnpublish
+      summary: Convert selected iCloud resources to private supply
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminStateCommandIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminICloudBulkCommandRequest"
+      responses:
+        "200":
+          description: Synchronous bounded selection result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudBulkResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/admin/icloud/resources/batch/delete:
+    post:
+      operationId: postAdminICloudResourcesDelete
+      summary: Logically delete selected iCloud resources without active allocations
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminStateCommandIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminICloudBulkCommandRequest"
+      responses:
+        "200":
+          description: Synchronous bounded selection result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudBulkResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/admin/icloud/resources/{resourceId}:
+    delete:
+      operationId: deleteAdminICloudResource
+      summary: Logically delete one iCloud resource
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/ExpectedAdminResourceVersion"
+        - $ref: "#/components/parameters/AdminStateCommandIdempotencyKey"
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Updated safe state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudMutationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/admin/icloud/resources/{resourceId}/aliases:
+    get:
+      operationId: getAdminICloudResourceAliases
+      summary: List one iCloud resource's safe HME aliases
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Paginated safe alias inventory
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudAliasListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/admin/icloud/resources/{resourceId}/validation:
+    post:
+      operationId: postAdminICloudResourceValidate
+      summary: Queue one iCloud resource for validation
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/ExpectedAdminResourceVersion"
+        - $ref: "#/components/parameters/AdminStateCommandIdempotencyKey"
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "202":
+          description: Validation queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudMutationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/admin/icloud/resources/{resourceId}/enable:
+    post:
+      operationId: postAdminICloudResourceEnable
+      summary: Enable one disabled iCloud resource and queue validation
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/ExpectedAdminResourceVersion"
+        - $ref: "#/components/parameters/AdminStateCommandIdempotencyKey"
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Updated safe state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudMutationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/admin/icloud/resources/{resourceId}/disable:
+    post:
+      operationId: postAdminICloudResourceDisable
+      summary: Disable one iCloud resource without changing existing allocations
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/ExpectedAdminResourceVersion"
+        - $ref: "#/components/parameters/AdminStateCommandIdempotencyKey"
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Updated safe state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudMutationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/admin/icloud/resources/{resourceId}/publish:
+    post:
+      operationId: postAdminICloudResourcePublish
+      summary: Publish one iCloud resource for public supply
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/ExpectedAdminResourceVersion"
+        - $ref: "#/components/parameters/AdminStateCommandIdempotencyKey"
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Updated safe state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudMutationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/admin/icloud/resources/{resourceId}/unpublish:
+    post:
+      operationId: postAdminICloudResourceUnpublish
+      summary: Convert one iCloud resource to private supply
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/ExpectedAdminResourceVersion"
+        - $ref: "#/components/parameters/AdminStateCommandIdempotencyKey"
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Updated safe state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudMutationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/admin/icloud/resources/{resourceId}/recover:
+    post:
+      operationId: postAdminICloudResourceRecover
+      summary: Recover one deleted iCloud resource as private and pending
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/ExpectedAdminResourceVersion"
+        - $ref: "#/components/parameters/AdminStateCommandIdempotencyKey"
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Updated safe state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudMutationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
   /v1/admin/logs/system:
     get:
       operationId: getAdminSystemLogs
@@ -12069,7 +12716,7 @@ components:
           type: integer
         productType:
           type: string
-          enum: [microsoft, domain, random, gmail]
+          enum: [microsoft, domain, random, gmail, icloud]
         serviceMode:
           type: string
           enum: [code, purchase]
@@ -12094,7 +12741,7 @@ components:
           $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
         allocationType:
           type: string
-          enum: [microsoft, domain, gmail]
+          enum: [microsoft, domain, gmail, icloud]
         allocationId:
           type: integer
         deliveryEmail:
@@ -15818,7 +16465,7 @@ components:
           type: boolean
         productType:
           type: string
-          enum: [microsoft, domain, random, gmail]
+          enum: [microsoft, domain, random, gmail, icloud]
         search:
           type: string
         targetPlatform:
@@ -15944,7 +16591,7 @@ components:
       properties:
         type:
           type: string
-          enum: [microsoft, domain, random, gmail]
+          enum: [microsoft, domain, random, gmail, icloud]
         status:
           type: string
           enum: [enabled, disabled]
@@ -16079,7 +16726,7 @@ components:
 
     ProjectProductTypeFacets:
       type: object
-      required: [all, microsoft, domain, random, gmail]
+      required: [all, microsoft, domain, random, gmail, icloud]
       properties:
         all:
           type: integer
@@ -16090,6 +16737,8 @@ components:
         random:
           type: integer
         gmail:
+          type: integer
+        icloud:
           type: integer
       additionalProperties: false
 
@@ -16176,7 +16825,7 @@ components:
           type: integer
         type:
           type: string
-          enum: [microsoft, domain, random, gmail]
+          enum: [microsoft, domain, random, gmail, icloud]
         status:
           type: string
           enum: [enabled, disabled]
@@ -16261,7 +16910,7 @@ components:
           type: integer
         type:
           type: string
-          enum: [microsoft, domain, random, gmail]
+          enum: [microsoft, domain, random, gmail, icloud]
         status:
           type: string
           enum: [enabled, disabled]
@@ -16865,7 +17514,7 @@ components:
       properties:
         type:
           type: string
-          enum: [microsoft, domain]
+          enum: [microsoft, domain, gmail, icloud]
         id:
           type: integer
         orderNo:
@@ -16922,9 +17571,13 @@ components:
         - projectId
         - microsoft
         - domain
+        - gmail
+        - icloud
         - totalAvailable
         - activeMicrosoftAllocations
         - activeDomainAllocations
+        - activeGmailAllocations
+        - activeICloudAllocations
       properties:
         projectId:
           type: integer
@@ -16932,11 +17585,19 @@ components:
           $ref: "#/components/schemas/MicrosoftInventory"
         domain:
           $ref: "#/components/schemas/DomainInventory"
+        gmail:
+          $ref: "#/components/schemas/GmailInventory"
+        icloud:
+          $ref: "#/components/schemas/ICloudInventory"
         totalAvailable:
           type: integer
         activeMicrosoftAllocations:
           type: integer
         activeDomainAllocations:
+          type: integer
+        activeGmailAllocations:
+          type: integer
+        activeICloudAllocations:
           type: integer
       additionalProperties: false
 
@@ -17055,6 +17716,78 @@ components:
         mailboxDailyUsed:
           type: integer
         mailboxDailyAvailable:
+          type: integer
+        totalAvailable:
+          type: integer
+      additionalProperties: false
+
+    GmailInventory:
+      type: object
+      required:
+        - enabled
+        - codeEnabled
+        - purchaseEnabled
+        - mainEnabled
+        - dotEnabled
+        - plusEnabled
+        - eligibleResources
+        - publicEligibleResources
+        - mainAvailable
+        - mainPublicAvailable
+        - dotAvailable
+        - dotPublicAvailable
+        - plusAvailable
+        - plusPublicAvailable
+        - totalAvailable
+        - publicAvailable
+      properties:
+        enabled:
+          type: boolean
+        codeEnabled:
+          type: boolean
+        purchaseEnabled:
+          type: boolean
+        mainEnabled:
+          type: boolean
+        dotEnabled:
+          type: boolean
+        plusEnabled:
+          type: boolean
+        eligibleResources:
+          type: integer
+        publicEligibleResources:
+          type: integer
+        mainAvailable:
+          type: integer
+        mainPublicAvailable:
+          type: integer
+        dotAvailable:
+          type: integer
+        dotPublicAvailable:
+          type: integer
+        plusAvailable:
+          type: integer
+        plusPublicAvailable:
+          type: integer
+        totalAvailable:
+          type: integer
+        publicAvailable:
+          type: integer
+      additionalProperties: false
+
+    ICloudInventory:
+      type: object
+      required:
+        - enabled
+        - eligibleResources
+        - aliasAvailable
+        - totalAvailable
+      properties:
+        enabled:
+          type: boolean
+        eligibleResources:
+          type: integer
+        aliasAvailable:
           type: integer
         totalAvailable:
           type: integer
@@ -17769,6 +18502,353 @@ components:
           type: string
           format: date-time
       additionalProperties: false
+
+    AdminICloudResourceStatus:
+      type: string
+      enum: [pending, validating, normal, abnormal, disabled, deleted]
+    AdminICloudSessionStatus:
+      type: string
+      enum: [unchecked, valid, invalid]
+    AdminICloudOwnerSummary:
+      type: object
+      required: [id, email, nickname, groupName, role, enabled]
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        email:
+          type: string
+          format: email
+        nickname:
+          type: string
+        groupName:
+          type: string
+        role:
+          type: string
+          enum: [user, supplier, admin, super_admin]
+        enabled:
+          type: boolean
+      additionalProperties: false
+    AdminICloudResourceItem:
+      type: object
+      description: Administrator-safe operational facts. Cookie, DSID, host, client context, and provider request payloads are never returned.
+      required:
+        - id
+        - version
+        - primaryEmail
+        - suffix
+        - gmailEmail
+        - selectedForwardTo
+        - owner
+        - status
+        - forSale
+        - sessionStatus
+        - aliasCount
+        - expireAt
+        - nextValidationAt
+        - nextKeepaliveAt
+        - lastCheckedAt
+        - lastValidAt
+        - lastAliasSyncAt
+        - deliveryProbeVerifiedAt
+        - lastAllocatedAt
+        - lastSafeError
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        version:
+          type: integer
+          minimum: 1
+        primaryEmail:
+          type: string
+          format: email
+        suffix:
+          type: string
+        gmailEmail:
+          type: string
+          format: email
+        selectedForwardTo:
+          type: string
+        owner:
+          $ref: "#/components/schemas/AdminICloudOwnerSummary"
+        status:
+          $ref: "#/components/schemas/AdminICloudResourceStatus"
+        forSale:
+          type: boolean
+        sessionStatus:
+          $ref: "#/components/schemas/AdminICloudSessionStatus"
+        aliasCount:
+          type: integer
+          minimum: 0
+        expireAt:
+          type: string
+          format: date-time
+        nextValidationAt:
+          type: string
+          format: date-time
+          nullable: true
+        nextKeepaliveAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastCheckedAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastValidAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastAliasSyncAt:
+          type: string
+          format: date-time
+          nullable: true
+        deliveryProbeVerifiedAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastAllocatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastSafeError:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+    AdminICloudStatusFacet:
+      type: object
+      required: [all, pending, validating, normal, abnormal, disabled, deleted]
+      properties:
+        all: { type: integer, format: int64, minimum: 0 }
+        pending: { type: integer, format: int64, minimum: 0 }
+        validating: { type: integer, format: int64, minimum: 0 }
+        normal: { type: integer, format: int64, minimum: 0 }
+        abnormal: { type: integer, format: int64, minimum: 0 }
+        disabled: { type: integer, format: int64, minimum: 0 }
+        deleted: { type: integer, format: int64, minimum: 0 }
+      additionalProperties: false
+    AdminICloudSessionFacet:
+      type: object
+      required: [all, unchecked, valid, invalid]
+      properties:
+        all: { type: integer, format: int64, minimum: 0 }
+        unchecked: { type: integer, format: int64, minimum: 0 }
+        valid: { type: integer, format: int64, minimum: 0 }
+        invalid: { type: integer, format: int64, minimum: 0 }
+      additionalProperties: false
+    AdminICloudSuffixFacet:
+      type: object
+      required: [key, count]
+      properties:
+        key:
+          type: string
+        count:
+          type: integer
+          format: int64
+          minimum: 0
+      additionalProperties: false
+    AdminICloudFacets:
+      type: object
+      required: [status, forSale, sessionStatus, suffixes]
+      properties:
+        status:
+          $ref: "#/components/schemas/AdminICloudStatusFacet"
+        forSale:
+          $ref: "#/components/schemas/AdminMicrosoftBooleanFacet"
+        sessionStatus:
+          $ref: "#/components/schemas/AdminICloudSessionFacet"
+        suffixes:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminICloudSuffixFacet"
+      additionalProperties: false
+    AdminICloudResourceListResponse:
+      type: object
+      required: [items, total, offset, limit, aliasLimit, facets]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminICloudResourceItem"
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Zero when includeTotal=false.
+        offset:
+          type: integer
+          minimum: 0
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+        aliasLimit:
+          type: integer
+          minimum: 1
+          enum: [750]
+        facets:
+          description: Zero-valued when includeFacets=false.
+          allOf:
+            - $ref: "#/components/schemas/AdminICloudFacets"
+      additionalProperties: false
+    AdminICloudImportResponse:
+      $ref: "#/components/schemas/AdminMicrosoftImportResponse"
+    AdminICloudAliasStatus:
+      type: string
+      enum: [normal, disabled, missing, deleted]
+    AdminICloudAliasItem:
+      type: object
+      required:
+        - id
+        - email
+        - status
+        - forwardToEmail
+        - origin
+        - providerDomain
+        - providerCreatedAt
+        - lastSeenAt
+        - lastAllocatedAt
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        email:
+          type: string
+          format: email
+        status:
+          $ref: "#/components/schemas/AdminICloudAliasStatus"
+        forwardToEmail:
+          type: string
+        origin:
+          type: string
+        providerDomain:
+          type: string
+        providerCreatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastSeenAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastAllocatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+    AdminICloudAliasListResponse:
+      type: object
+      required: [items, total, offset, limit]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminICloudAliasItem"
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+        offset:
+          type: integer
+          minimum: 0
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+      additionalProperties: false
+    AdminICloudMutationResponse:
+      type: object
+      required: [resourceId, version, status, forSale]
+      properties:
+        resourceId:
+          type: integer
+          minimum: 1
+        version:
+          type: integer
+          minimum: 1
+        status:
+          $ref: "#/components/schemas/AdminICloudResourceStatus"
+        forSale:
+          type: boolean
+      additionalProperties: false
+    AdminICloudBulkFilter:
+      type: object
+      properties:
+        search:
+          type: string
+          maxLength: 320
+        suffix:
+          type: string
+          maxLength: 255
+        status:
+          $ref: "#/components/schemas/AdminICloudResourceStatus"
+        forSale:
+          type: boolean
+        sessionStatus:
+          $ref: "#/components/schemas/AdminICloudSessionStatus"
+        createdFrom:
+          type: string
+          format: date-time
+        createdTo:
+          type: string
+          format: date-time
+      additionalProperties: false
+    AdminICloudIdsSelection:
+      type: object
+      required: [mode, resourceIds]
+      properties:
+        mode:
+          type: string
+          enum: [ids]
+        resourceIds:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          uniqueItems: true
+          items:
+            type: integer
+            minimum: 1
+      additionalProperties: false
+    AdminICloudFilterSelection:
+      type: object
+      required: [mode, filter]
+      properties:
+        mode:
+          type: string
+          enum: [filter]
+        filter:
+          $ref: "#/components/schemas/AdminICloudBulkFilter"
+      additionalProperties: false
+    AdminICloudBulkSelection:
+      oneOf:
+        - $ref: "#/components/schemas/AdminICloudIdsSelection"
+        - $ref: "#/components/schemas/AdminICloudFilterSelection"
+    AdminICloudBulkCommandRequest:
+      type: object
+      required: [selection]
+      properties:
+        selection:
+          $ref: "#/components/schemas/AdminICloudBulkSelection"
+      additionalProperties: false
+    AdminICloudBulkResult:
+      $ref: "#/components/schemas/AdminMicrosoftBulkResult"
 
     AdminMicrosoftResourceStatus:
       type: string
@@ -18604,7 +19684,7 @@ components:
       enum: [queued, running, succeeded, failed, uncertain, canceled]
     AdminTaskBizType:
       type: string
-      enum: [microsoft_resource, domain_resource, microsoft_resource_import, gmail_resource_import, microsoft_resource_bulk]
+      enum: [microsoft_resource, domain_resource, microsoft_resource_import, gmail_resource_import, microsoft_resource_bulk, icloud_resource_import]
     AdminTaskProgress:
       type: object
       required:
@@ -19156,7 +20236,7 @@ components:
       properties:
         type:
           type: string
-          enum: [microsoft, domain]
+          enum: [microsoft, domain, gmail, icloud]
         id:
           type: integer
           minimum: 1

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -73,6 +74,7 @@ type hmeError struct {
 	Category      string
 	SafeMessage   string
 	Retryable     bool
+	RetryAfter    time.Duration
 	SessionKnown  bool
 	SessionValid  bool
 	UpdatedCookie string
@@ -178,6 +180,9 @@ func (c *HMEClient) list(ctx context.Context, config hmeConfig) (hmeListResult, 
 			expectedTotal = &total
 		}
 		nextToken, nextTokenKey = hmeNextToken(payload.Result)
+		if payload.Result.HasMore != nil && !*payload.Result.HasMore && nextToken != "" {
+			return hmeListResult{}, hmeResponseError("snapshot_incomplete", "iCloud HME alias snapshot is incomplete.", true, currentCookie)
+		}
 		hasMore := nextToken != ""
 		if payload.Result.HasMore != nil {
 			hasMore = *payload.Result.HasMore
@@ -474,18 +479,32 @@ func (c *HMEClient) request(ctx context.Context, config hmeConfig, method, reque
 		return nil, "", &hmeError{Category: "session_invalid", SafeMessage: "iCloud session is invalid.", SessionKnown: true, SessionValid: false, UpdatedCookie: updatedCookie}
 	}
 	if response.StatusCode == http.StatusTooManyRequests {
-		return nil, "", hmeResponseError("rate_limited", "iCloud alias creation is temporarily rate limited.", true, updatedCookie)
+		providerErr := hmeResponseError("rate_limited", "iCloud alias creation is temporarily rate limited.", true, updatedCookie)
+		providerErr.RetryAfter = iCloudRetryAfter(response.Header.Get("Retry-After"), time.Now().UTC())
+		return nil, "", providerErr
 	}
 	if response.StatusCode == http.StatusRequestTimeout || response.StatusCode >= 500 {
 		return nil, "", hmeResponseError("provider_unavailable", "iCloud HME service is temporarily unavailable.", true, updatedCookie)
 	}
 	if response.StatusCode >= 400 {
 		if providerErr := hmeProviderErrorResponse(responseBody, updatedCookie); providerErr != nil {
+			providerErr.RetryAfter = iCloudRetryAfter(response.Header.Get("Retry-After"), time.Now().UTC())
 			return nil, "", providerErr
 		}
 		return nil, "", &hmeError{Category: "provider_rejected", SafeMessage: "iCloud HME request was rejected.", UpdatedCookie: updatedCookie}
 	}
 	return responseBody, updatedCookie, nil
+}
+
+func iCloudRetryAfter(value string, now time.Time) time.Duration {
+	value = strings.TrimSpace(value)
+	if seconds, err := strconv.ParseInt(value, 10, 64); err == nil && seconds > 0 {
+		return min(time.Duration(seconds)*time.Second, 2*time.Hour)
+	}
+	if retryAt, err := http.ParseTime(value); err == nil && retryAt.After(now) {
+		return min(retryAt.Sub(now), 2*time.Hour)
+	}
+	return 0
 }
 
 func hmeResponseError(category, message string, retryable bool, updatedCookie string) *hmeError {
@@ -578,14 +597,16 @@ func iCloudCookieValues(value string) map[string]string {
 func mergeICloudCookies(current string, updates []*http.Cookie) string {
 	order := make([]string, 0)
 	values := make(map[string]string)
+	seenNames := make(map[string]struct{})
 	for _, part := range strings.Split(current, ";") {
 		name, value, found := strings.Cut(part, "=")
 		name = strings.TrimSpace(name)
 		if !found || name == "" {
 			continue
 		}
-		if _, exists := values[name]; !exists {
+		if _, exists := seenNames[name]; !exists {
 			order = append(order, name)
+			seenNames[name] = struct{}{}
 		}
 		values[name] = strings.TrimSpace(value)
 	}
@@ -594,12 +615,13 @@ func mergeICloudCookies(current string, updates []*http.Cookie) string {
 			continue
 		}
 		name := strings.TrimSpace(cookie.Name)
+		if _, exists := seenNames[name]; !exists {
+			order = append(order, name)
+			seenNames[name] = struct{}{}
+		}
 		if cookie.MaxAge < 0 || (!cookie.Expires.IsZero() && cookie.Expires.Before(time.Now())) {
 			delete(values, name)
 			continue
-		}
-		if _, exists := values[name]; !exists {
-			order = append(order, name)
 		}
 		values[name] = cookie.Value
 	}
