@@ -70,6 +70,20 @@ func TestResourceFetchRepoUsesCurrentResourceStateAndGenerationFenceMySQL(t *tes
 	require.NoError(t, repo.AssertResourceFetchFence(ctx, 100, second.Generation, 7))
 }
 
+func TestResourceFetchStateAcceptsICloudOperationKindMySQL(t *testing.T) {
+	db := newMailmatchMySQLTestDB(t)
+	require.NoError(t, db.Exec(`
+INSERT INTO users(id, email, password_hash, nickname, status, role)
+VALUES (1, 'icloud-owner@test.local', 'hash', 'owner', 'active', 'supplier')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO email_resources(id, type, owner_user_id)
+VALUES (101, 'icloud', 1)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO mailmatch_resource_fetch_states(
+    email_resource_id, status, generation, operation_kind
+) VALUES (101, 'pending', 1, 'icloud_resource_fetch')`).Error)
+}
+
 func TestResourceFetchRepoBoundsInfrastructureFailuresMySQL(t *testing.T) {
 	db := newMailmatchMySQLTestDB(t)
 	seedMailmatchFetchResource(t, db)

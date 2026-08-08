@@ -9938,8 +9938,8 @@ paths:
   /v1/admin/resources/{resourceId}/messages/fetch:
     post:
       operationId: postAdminMicrosoftResourceMessagesFetch
-      summary: Queue a resource-level Microsoft mail fetch
-      description: Requires `mailmatch:message/operate`, Session authentication, CSRF, and an idempotency key. MailMatch updates the resource's current fetch generation before returning 202; Redis/Asynq carries only temporary execution data. Graph/IMAP work, deduplication, storage, and matching run asynchronously. Disabled resources may be diagnosed without being enabled; deleted resources return 409.
+      summary: Queue a resource-level mail fetch
+      description: Requires `mailmatch:message/operate`, Session authentication, CSRF, and an idempotency key. `type=microsoft` uses the Microsoft resource transport; `type=icloud` reuses the active iCloud allocation and linked Gmail pickup pipeline. MailMatch updates the resource's current fetch generation before returning 202. Disabled resources may be diagnosed without being enabled; deleted resources return 409.
       tags:
         - Admin
       security:
@@ -9953,6 +9953,13 @@ paths:
           schema:
             type: integer
             minimum: 1
+        - name: type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [microsoft, icloud]
+            default: microsoft
       responses:
         "202":
           description: Durable resource fetch accepted or reused
@@ -10210,6 +10217,42 @@ paths:
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 
+  /v1/admin/icloud/resources/batch/alias:
+    post:
+      operationId: postAdminICloudResourcesCreateAliases
+      summary: Queue alias provisioning for selected iCloud resources below the alias limit
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminStateCommandIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminICloudBulkCommandRequest"
+      responses:
+        "200":
+          description: Synchronous bounded selection result; resources already at the alias limit are skipped
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudBulkResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
   /v1/admin/icloud/resources/batch/disable:
     post:
       operationId: postAdminICloudResourcesDisable
@@ -10355,6 +10398,80 @@ paths:
           $ref: "#/components/responses/ServiceUnavailable"
 
   /v1/admin/icloud/resources/{resourceId}:
+    get:
+      operationId: getAdminICloudResource
+      summary: Get one iCloud resource with safe maintenance diagnostics
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Safe resource detail without HME credentials or request context
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudResourceDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    patch:
+      operationId: patchAdminICloudResource
+      summary: Atomically edit an iCloud resource
+      description: |
+        Base fields require `core:resource/write`. Supplying `forSale` or `credentials` additionally requires `core:resource/operate`. Session authentication, CSRF, and an idempotency key are required. Credentials are a complete write-only HME set and are never returned. Changing the primary email requires the complete credential set. Email, owner, or credential changes conflict with an active Allocation, advance the validation fence, force private supply, and immediately re-queue validation unless the resource is disabled.
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminICloudUpdateRequest"
+      responses:
+        "200":
+          description: Atomic edit committed; credential changes that require validation leave the resource pending
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudMutationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
     delete:
       operationId: deleteAdminICloudResource
       summary: Logically delete one iCloud resource
@@ -10431,6 +10548,49 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    post:
+      operationId: postAdminICloudResourceCreateAliases
+      summary: Queue alias provisioning for one iCloud resource below the alias limit
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/ExpectedAdminResourceVersion"
+        - $ref: "#/components/parameters/AdminStateCommandIdempotencyKey"
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Alias target already reached; no maintenance work was queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudMutationResponse"
+        "202":
+          description: Alias provisioning queued through the fenced iCloud maintenance worker
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudMutationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "503":
@@ -10839,7 +10999,7 @@ paths:
   /v1/admin/tasks:
     get:
       operationId: getAdminTasks
-      summary: List normalized administrator tasks for a Microsoft or domain resource
+      summary: List normalized administrator tasks for a Microsoft, iCloud, or domain resource
       description: |
         Requires `governance:task/read`. Governance normalizes durable facts from their owning contexts without becoming their source of truth. Results use source-qualified task IDs, the stable `queued/running/succeeded/failed/uncertain/canceled` status union, and safe progress only. Internal table paths, claim/dispatch/lease/fencing tokens, upstream payloads, and raw errors are never returned. If any required task source is unavailable, the request returns 503 instead of a stale or partial success.
       tags:
@@ -10852,7 +11012,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [microsoft_resource, domain_resource]
+            enum: [microsoft_resource, icloud_resource, domain_resource]
         - name: bizId
           in: query
           required: true
@@ -10950,7 +11110,7 @@ paths:
           description: Resource type; defaults to microsoft for backward compatibility.
           schema:
             type: string
-            enum: [microsoft, domain]
+            enum: [microsoft, icloud, domain]
             default: microsoft
         - name: resourceId
           in: query
@@ -11040,7 +11200,7 @@ paths:
           description: Resource type; defaults to microsoft for backward compatibility.
           schema:
             type: string
-            enum: [microsoft, domain]
+            enum: [microsoft, icloud, domain]
             default: microsoft
       responses:
         "200":
@@ -18624,6 +18784,53 @@ components:
           type: string
           format: date-time
       additionalProperties: false
+    AdminICloudResourceDetail:
+      description: Administrator-safe iCloud resource detail with maintenance diagnostics. HME credentials, cookies, DSID, and request context are never returned.
+      allOf:
+        - $ref: "#/components/schemas/AdminICloudResourceItem"
+        - type: object
+          required:
+            - aliasLimit
+            - aliasRemaining
+            - aliasProvisioning
+            - credentialRevision
+            - credentialUpdatedAt
+            - validationGeneration
+            - validationFailures
+            - sessionFailures
+            - deliveryProbeStartedAt
+          properties:
+            aliasLimit:
+              type: integer
+              minimum: 1
+              enum: [750]
+            aliasRemaining:
+              type: integer
+              minimum: 0
+              maximum: 750
+            aliasProvisioning:
+              type: boolean
+            credentialRevision:
+              type: integer
+              format: int64
+              minimum: 1
+            credentialUpdatedAt:
+              type: string
+              format: date-time
+            validationGeneration:
+              type: integer
+              format: int64
+              minimum: 1
+            validationFailures:
+              type: integer
+              minimum: 0
+            sessionFailures:
+              type: integer
+              minimum: 0
+            deliveryProbeStartedAt:
+              type: string
+              format: date-time
+              nullable: true
     AdminICloudStatusFacet:
       type: object
       required: [all, pending, validating, normal, abnormal, disabled, deleted]
@@ -18773,9 +18980,66 @@ components:
           minimum: 1
           maximum: 100
       additionalProperties: false
+    AdminICloudCredentialsInput:
+      type: object
+      description: Complete write-only HME credential and request-context set. Omission from PATCH preserves the current credential revision.
+      required: [host, dsid, clientId, clientBuildNumber, clientMasteringNumber, cookie]
+      properties:
+        host:
+          type: string
+          minLength: 1
+          maxLength: 255
+          writeOnly: true
+        dsid:
+          type: string
+          minLength: 1
+          maxLength: 191
+          writeOnly: true
+        clientId:
+          type: string
+          minLength: 1
+          maxLength: 191
+          writeOnly: true
+        clientBuildNumber:
+          type: string
+          minLength: 1
+          maxLength: 64
+          writeOnly: true
+        clientMasteringNumber:
+          type: string
+          minLength: 1
+          maxLength: 64
+          writeOnly: true
+        cookie:
+          type: string
+          format: password
+          minLength: 1
+          maxLength: 65535
+          writeOnly: true
+      additionalProperties: false
+    AdminICloudUpdateRequest:
+      type: object
+      required: [version]
+      minProperties: 2
+      properties:
+        version:
+          type: integer
+          minimum: 1
+          description: Last observed resource version; stale writes return 409.
+        primaryEmail:
+          type: string
+          format: email
+        ownerId:
+          type: integer
+          minimum: 1
+        forSale:
+          type: boolean
+        credentials:
+          $ref: "#/components/schemas/AdminICloudCredentialsInput"
+      additionalProperties: false
     AdminICloudMutationResponse:
       type: object
-      required: [resourceId, version, status, forSale]
+      required: [resourceId, version, status, forSale, changed]
       properties:
         resourceId:
           type: integer
@@ -18787,6 +19051,9 @@ components:
           $ref: "#/components/schemas/AdminICloudResourceStatus"
         forSale:
           type: boolean
+        changed:
+          type: boolean
+          description: Whether this command changed resource state or queued new work.
       additionalProperties: false
     AdminICloudBulkFilter:
       type: object
@@ -19668,6 +19935,7 @@ components:
       type: string
       enum:
         - import
+        - validation
         - alias
         - token
         - fetch
@@ -19684,7 +19952,7 @@ components:
       enum: [queued, running, succeeded, failed, uncertain, canceled]
     AdminTaskBizType:
       type: string
-      enum: [microsoft_resource, domain_resource, microsoft_resource_import, gmail_resource_import, microsoft_resource_bulk, icloud_resource_import]
+      enum: [microsoft_resource, icloud_resource, domain_resource, microsoft_resource_import, gmail_resource_import, microsoft_resource_bulk, icloud_resource_import]
     AdminTaskProgress:
       type: object
       required:

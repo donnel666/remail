@@ -31,7 +31,7 @@ func TestICloudValidationStateMachineAndCookieRotation(t *testing.T) {
 			if err != nil {
 				t.Fatalf("open database: %v", err)
 			}
-			if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudGmailResourceModel{}, &iCloudAliasModel{}); err != nil {
+			if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudGmailResourceModel{}, &iCloudAliasModel{}, &iCloudMaintenanceRunModel{}); err != nil {
 				t.Fatalf("migrate database: %v", err)
 			}
 			now := time.Date(2026, 8, 6, 0, 0, 0, 0, time.UTC)
@@ -168,7 +168,7 @@ func TestICloudValidationProvisionsOneAliasAtATime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open database: %v", err)
 	}
-	if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudGmailResourceModel{}, &iCloudAliasModel{}); err != nil {
+	if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudGmailResourceModel{}, &iCloudAliasModel{}, &iCloudMaintenanceRunModel{}); err != nil {
 		t.Fatalf("migrate database: %v", err)
 	}
 	now := time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC)
@@ -208,7 +208,7 @@ func TestICloudProviderRateLimitUsesRetryAfter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open database: %v", err)
 	}
-	if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudGmailResourceModel{}, &iCloudAliasModel{}); err != nil {
+	if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudGmailResourceModel{}, &iCloudAliasModel{}, &iCloudMaintenanceRunModel{}); err != nil {
 		t.Fatalf("migrate database: %v", err)
 	}
 	now := time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC)
@@ -252,7 +252,7 @@ func TestICloudValidationDiscardsExplicitlyRejectedCandidate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open database: %v", err)
 	}
-	if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudGmailResourceModel{}, &iCloudAliasModel{}); err != nil {
+	if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudGmailResourceModel{}, &iCloudAliasModel{}, &iCloudMaintenanceRunModel{}); err != nil {
 		t.Fatalf("migrate database: %v", err)
 	}
 	now := time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC)
@@ -289,7 +289,7 @@ func TestICloudValidationRetriesReservedCandidateAfterReconcileMiss(t *testing.T
 	if err != nil {
 		t.Fatalf("open database: %v", err)
 	}
-	if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudGmailResourceModel{}, &iCloudAliasModel{}); err != nil {
+	if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudGmailResourceModel{}, &iCloudAliasModel{}, &iCloudMaintenanceRunModel{}); err != nil {
 		t.Fatalf("migrate database: %v", err)
 	}
 	now := time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC)
@@ -345,7 +345,7 @@ func TestICloudValidationActivatesOneInactiveAliasWithoutCreatingAnother(t *test
 	if err != nil {
 		t.Fatalf("open database: %v", err)
 	}
-	if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudGmailResourceModel{}, &iCloudAliasModel{}); err != nil {
+	if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudGmailResourceModel{}, &iCloudAliasModel{}, &iCloudMaintenanceRunModel{}); err != nil {
 		t.Fatalf("migrate database: %v", err)
 	}
 	now := time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC)
@@ -383,7 +383,7 @@ func TestICloudValidationDefersTransportErrorsAndKeepsRotatedCookie(t *testing.T
 		if err != nil {
 			t.Fatalf("open database: %v", err)
 		}
-		if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudGmailResourceModel{}, &iCloudAliasModel{}); err != nil {
+		if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudGmailResourceModel{}, &iCloudAliasModel{}, &iCloudMaintenanceRunModel{}); err != nil {
 			t.Fatalf("migrate database: %v", err)
 		}
 		now := time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC)
@@ -412,7 +412,7 @@ func TestICloudValidationDefersTransportErrorsAndKeepsRotatedCookie(t *testing.T
 		if err != nil {
 			t.Fatalf("open database: %v", err)
 		}
-		if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudGmailResourceModel{}, &iCloudAliasModel{}); err != nil {
+		if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudGmailResourceModel{}, &iCloudAliasModel{}, &iCloudMaintenanceRunModel{}); err != nil {
 			t.Fatalf("migrate database: %v", err)
 		}
 		now := time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC)
@@ -451,7 +451,8 @@ func TestRequestAdminICloudValidationRestartsProbeAndRejectsInactiveResources(t 
 		t.Fatalf("open database: %v", err)
 	}
 	if err := db.AutoMigrate(
-		&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudGmailResourceModel{}, &iCloudAliasModel{}, &governanceinfra.OperationLogModel{},
+		&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudGmailResourceModel{}, &iCloudAliasModel{},
+		&iCloudMaintenanceRunModel{}, &governanceinfra.OperationLogModel{},
 	); err != nil {
 		t.Fatalf("migrate database: %v", err)
 	}
@@ -503,7 +504,7 @@ func TestICloudValidationSendsProbeOnceAndRequiresGmailReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open database: %v", err)
 	}
-	if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudGmailResourceModel{}, &iCloudAliasModel{}); err != nil {
+	if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudGmailResourceModel{}, &iCloudAliasModel{}, &iCloudMaintenanceRunModel{}); err != nil {
 		t.Fatalf("migrate database: %v", err)
 	}
 	now := time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC)
@@ -618,7 +619,7 @@ func TestICloudValidationDispatcherRecoversStaleLease(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open database: %v", err)
 	}
-	if err := db.AutoMigrate(&iCloudResourceModel{}); err != nil {
+	if err := db.AutoMigrate(&iCloudResourceModel{}, &iCloudMaintenanceRunModel{}); err != nil {
 		t.Fatalf("migrate database: %v", err)
 	}
 	now := time.Date(2026, 8, 6, 0, 0, 0, 0, time.UTC)
@@ -640,5 +641,96 @@ func TestICloudValidationDispatcherRecoversStaleLease(t *testing.T) {
 	}
 	if resource.Status != iCloudResourcePending || resource.ValidationGeneration != 5 {
 		t.Fatalf("unexpected recovered state: %#v", resource)
+	}
+}
+
+func TestICloudMaintenanceRunKeepsAliasIntentAcrossGenerations(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:icloud-maintenance-alias-generations?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudMaintenanceRunModel{}); err != nil {
+		t.Fatalf("migrate database: %v", err)
+	}
+	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	if err := db.Create(&iCloudRootModel{ID: 1, Type: "icloud", OwnerUserID: 7, Version: 1, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatalf("create root: %v", err)
+	}
+	if err := db.Create(&iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "alias@icloud.com", Status: iCloudResourcePending,
+		CredentialRevision: 2, ValidationGeneration: 4, ExpireAt: now.Add(time.Hour),
+		NextValidationAt: &now, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create resource: %v", err)
+	}
+	if err := db.Create(&iCloudMaintenanceRunModel{
+		ResourceID: 1, ValidationGeneration: 4, Kind: iCloudMaintenanceAlias,
+		Status: iCloudMaintenanceQueued, MaxAttempts: 3, CredentialRevision: 2,
+		QueuedAt: now, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create maintenance run: %v", err)
+	}
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	task, claimed, err := service.markICloudValidationDispatched(context.Background(), iCloudValidationTask{
+		ResourceID: 1, OwnerUserID: 7, ValidationGeneration: 4, ExpectedCredentialRevision: 2,
+	})
+	if err != nil || !claimed || task.MaintenanceKind != iCloudMaintenanceAlias {
+		t.Fatalf("claim alias maintenance: task=%#v claimed=%v err=%v", task, claimed, err)
+	}
+	next := now.Add(time.Minute)
+	if err := service.applyICloudValidationResult(context.Background(), task, iCloudValidationResult{
+		Deferred: true, Retryable: true, SafeMessage: "Alias provisioning continues.", NextValidationAt: &next,
+	}); err != nil {
+		t.Fatalf("apply deferred alias maintenance: %v", err)
+	}
+	var runs []iCloudMaintenanceRunModel
+	if err := db.Order("validation_generation ASC").Find(&runs).Error; err != nil {
+		t.Fatalf("list maintenance runs: %v", err)
+	}
+	if len(runs) != 2 || runs[0].Kind != iCloudMaintenanceAlias || runs[0].Status != iCloudMaintenanceSucceeded ||
+		runs[1].ValidationGeneration != 5 || runs[1].Kind != iCloudMaintenanceAlias || runs[1].Status != iCloudMaintenanceQueued {
+		t.Fatalf("alias maintenance intent was not preserved: %#v", runs)
+	}
+}
+
+func TestICloudLegacyValidationTaskFinishesBackfilledMaintenanceRun(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:icloud-maintenance-legacy-payload?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudMaintenanceRunModel{}); err != nil {
+		t.Fatalf("migrate database: %v", err)
+	}
+	now := time.Date(2026, 8, 8, 13, 0, 0, 0, time.UTC)
+	if err := db.Create(&iCloudRootModel{ID: 1, Type: "icloud", OwnerUserID: 7, Version: 1, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatalf("create root: %v", err)
+	}
+	if err := db.Create(&iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "legacy@icloud.com", Status: iCloudResourceValidating,
+		CredentialRevision: 2, ValidationGeneration: 4, ExpireAt: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create resource: %v", err)
+	}
+	if err := db.Create(&iCloudMaintenanceRunModel{
+		ResourceID: 1, ValidationGeneration: 4, Kind: iCloudMaintenanceValidation,
+		Status: iCloudMaintenanceRunning, Attempts: 1, MaxAttempts: 3, CredentialRevision: 2,
+		QueuedAt: now, StartedAt: &now, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create maintenance run: %v", err)
+	}
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	if err := service.applyICloudValidationResult(context.Background(), iCloudValidationTask{
+		ResourceID: 1, OwnerUserID: 7, ValidationGeneration: 4, ExpectedCredentialRevision: 2,
+	}, iCloudValidationResult{Valid: true}); err != nil {
+		t.Fatalf("apply legacy validation result: %v", err)
+	}
+	var run iCloudMaintenanceRunModel
+	if err := db.First(&run).Error; err != nil {
+		t.Fatalf("read maintenance run: %v", err)
+	}
+	if run.Status != iCloudMaintenanceSucceeded || run.FinishedAt == nil {
+		t.Fatalf("legacy task left maintenance run active: %#v", run)
 	}
 }

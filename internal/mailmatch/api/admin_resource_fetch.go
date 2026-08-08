@@ -93,8 +93,20 @@ func (h *Handler) postAdminMicrosoftResourceFetch(c *gin.Context, kind domain.Re
 		})
 		return
 	}
+	resourceType := domain.ResourceType(strings.ToLower(strings.TrimSpace(c.Query("type"))))
+	if resourceType == "" {
+		resourceType = domain.ResourceTypeMicrosoft
+	}
+	if resourceType != domain.ResourceTypeMicrosoft && resourceType != domain.ResourceTypeICloud {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid request parameters.",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
 	result, err := h.mod.ResourceFetch.Submit(c.Request.Context(), mailmatchapp.ResourceFetchSubmitCommand{
 		Kind:           kind,
+		ResourceType:   resourceType,
 		ResourceID:     uint(resourceID64),
 		OperatorUserID: operatorUserID,
 		IdempotencyKey: idempotencyKey,
@@ -124,7 +136,7 @@ func adminResourceFetchTaskResponse(job domain.ResourceFetchJob) adminResourceFe
 	credentialRevision := job.ExpectedCredentialRevision
 	return adminResourceFetchTaskView{
 		TaskID:             "fetch:" + strconv.FormatUint(uint64(job.ResourceID), 10),
-		BizType:            "microsoft_resource",
+		BizType:            resourceFetchBizType(job.ResourceType),
 		BizID:              job.ResourceID,
 		Kind:               string(job.Kind),
 		Status:             adminResourceFetchStatus(job.Status),
@@ -165,10 +177,17 @@ func writeAdminResourceFetchError(c *gin.Context, err error) {
 	case errors.Is(err, domain.ErrResourceFetchIdempotencyConflict):
 		c.JSON(http.StatusConflict, gin.H{"message": "Idempotency-Key conflicts with a different request.", "requestId": requestID})
 	case errors.Is(err, domain.ErrResourceFetchCredentialsMissing):
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Microsoft mail fetch credentials are incomplete.", "requestId": requestID})
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Mail fetch credentials are incomplete.", "requestId": requestID})
 	case errors.Is(err, domain.ErrFetchQueueUnavailable), errors.Is(err, domain.ErrMailServiceUnavailable):
 		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "Mail service is temporarily unavailable.", "requestId": requestID})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "An unexpected error occurred.", "requestId": requestID})
 	}
+}
+
+func resourceFetchBizType(resourceType domain.ResourceType) string {
+	if resourceType == domain.ResourceTypeICloud {
+		return "icloud_resource"
+	}
+	return "microsoft_resource"
 }

@@ -109,6 +109,20 @@ func TestAdminMessageListAcceptsStableCursorAndSkipsRepeatedTotal(t *testing.T) 
 	require.Equal(t, float64(7), body["nextBeforeId"])
 }
 
+
+func TestAdminMessageListAcceptsICloudResourceType(t *testing.T) {
+	router, repo, _ := newAdminMessageTestRouter(true)
+
+	response := performAdminMessageGET(router, "/v1/admin/messages?resourceId=100&type=icloud")
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.Equal(t, mailmatchdomain.ResourceTypeICloud, repo.listQuery.ResourceType)
+
+	response = performAdminMessageGET(router, "/v1/admin/messages/7?resourceId=100&type=icloud")
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.Equal(t, mailmatchdomain.ResourceTypeICloud, repo.readResourceType)
+	require.Equal(t, "icloud_message", repo.readLog.ResourceType)
+}
+
 func TestAdminMessageRoutesUseSafeNotFoundAndValidatePagination(t *testing.T) {
 	router, _, _ := newAdminMessageTestRouter(true)
 
@@ -170,9 +184,10 @@ func (c *adminMessagePermissionChecker) Check(_ context.Context, _ uint, _ iamdo
 }
 
 type adminMessageRepoStub struct {
-	listQuery   mailmatchapp.AdminMessageListQuery
-	listHasMore bool
-	readLog     *governancedomain.OperationLog
+	listQuery        mailmatchapp.AdminMessageListQuery
+	listHasMore      bool
+	readLog          *governancedomain.OperationLog
+	readResourceType mailmatchdomain.ResourceType
 }
 
 func (*adminMessageRepoStub) AdminMessageResourceExists(_ context.Context, resourceID uint, _ mailmatchdomain.ResourceType) (bool, error) {
@@ -197,12 +212,13 @@ func (r *adminMessageRepoStub) ListAdminMessageSummaries(_ context.Context, quer
 	}}, 37, r.listHasMore, nil
 }
 
-func (r *adminMessageRepoStub) FindAdminMessageDetailWithLog(_ context.Context, resourceID uint, _ mailmatchdomain.ResourceType, messageID uint, log *governancedomain.OperationLog) (*mailmatchapp.AdminMessageDetail, error) {
+func (r *adminMessageRepoStub) FindAdminMessageDetailWithLog(_ context.Context, resourceID uint, resourceType mailmatchdomain.ResourceType, messageID uint, log *governancedomain.OperationLog) (*mailmatchapp.AdminMessageDetail, error) {
 	if resourceID != 100 || messageID != 7 {
 		return nil, mailmatchdomain.ErrMessageNotFound
 	}
 	copyLog := *log
 	r.readLog = &copyLog
+	r.readResourceType = resourceType
 	code := "123456"
 	orderNo := "OR-ADMIN-MESSAGE"
 	diagnostic := "Message did not match any active order service."

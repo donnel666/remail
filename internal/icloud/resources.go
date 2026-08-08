@@ -68,6 +68,70 @@ type AdminICloudResourceView struct {
 	UpdatedAt               time.Time            `json:"updatedAt"`
 }
 
+type AdminICloudResourceDetail struct {
+	AdminICloudResourceView
+	AliasLimit             uint       `json:"aliasLimit"`
+	AliasRemaining         uint       `json:"aliasRemaining"`
+	AliasProvisioning      bool       `json:"aliasProvisioning"`
+	CredentialRevision     uint64     `json:"credentialRevision"`
+	CredentialUpdatedAt    time.Time  `json:"credentialUpdatedAt"`
+	ValidationGeneration   uint64     `json:"validationGeneration"`
+	ValidationFailures     uint8      `json:"validationFailures"`
+	SessionFailures        uint8      `json:"sessionFailures"`
+	DeliveryProbeStartedAt *time.Time `json:"deliveryProbeStartedAt"`
+}
+
+type adminICloudResourceRow struct {
+	ID                      uint       `gorm:"column:id"`
+	Version                 uint64     `gorm:"column:version"`
+	PrimaryEmail            string     `gorm:"column:primary_email"`
+	GmailEmail              string     `gorm:"column:gmail_email"`
+	SelectedForwardTo       string     `gorm:"column:selected_forward_to"`
+	OwnerID                 uint       `gorm:"column:owner_id"`
+	OwnerEmail              string     `gorm:"column:owner_email"`
+	OwnerNickname           string     `gorm:"column:owner_nickname"`
+	OwnerGroupName          string     `gorm:"column:owner_group_name"`
+	OwnerRole               string     `gorm:"column:owner_role"`
+	OwnerStatus             string     `gorm:"column:owner_status"`
+	Status                  string     `gorm:"column:status"`
+	ForSale                 bool       `gorm:"column:for_sale"`
+	SessionStatus           string     `gorm:"column:session_status"`
+	SessionFailures         uint8      `gorm:"column:session_failures"`
+	CredentialRevision      uint64     `gorm:"column:credential_revision"`
+	CredentialUpdatedAt     time.Time  `gorm:"column:credential_updated_at"`
+	ValidationGeneration    uint64     `gorm:"column:validation_generation"`
+	ValidationFailures      uint8      `gorm:"column:validation_failures"`
+	AliasCount              uint       `gorm:"column:alias_count"`
+	AliasProvisionCandidate string     `gorm:"column:alias_provision_candidate"`
+	AliasProvisionReconcile bool       `gorm:"column:alias_provision_reconcile"`
+	ExpireAt                time.Time  `gorm:"column:expire_at"`
+	NextValidationAt        *time.Time `gorm:"column:next_validation_at"`
+	NextKeepaliveAt         *time.Time `gorm:"column:next_keepalive_at"`
+	LastCheckedAt           *time.Time `gorm:"column:last_checked_at"`
+	LastValidAt             *time.Time `gorm:"column:last_valid_at"`
+	LastAliasSyncAt         *time.Time `gorm:"column:last_alias_sync_at"`
+	DeliveryProbeStartedAt  *time.Time `gorm:"column:delivery_probe_started_at"`
+	DeliveryProbeVerifiedAt *time.Time `gorm:"column:delivery_probe_verified_at"`
+	LastAllocatedAt         *time.Time `gorm:"column:last_allocated_at"`
+	LastSafeError           string     `gorm:"column:last_safe_error"`
+	CreatedAt               time.Time  `gorm:"column:created_at"`
+	UpdatedAt               time.Time  `gorm:"column:updated_at"`
+}
+
+const adminICloudResourceSelect = `
+	ir.id, er.version, ir.primary_email, gr.email AS gmail_email,
+	ir.selected_forward_to, er.owner_user_id AS owner_id,
+	u.email AS owner_email, u.nickname AS owner_nickname,
+	COALESCE(ug.name, '') AS owner_group_name, u.role AS owner_role,
+	u.status AS owner_status, ir.status, ir.for_sale, ir.session_status,
+	ir.session_failures, ir.credential_revision, ir.credential_updated_at,
+	ir.validation_generation, ir.validation_failures, ir.alias_count,
+	ir.alias_provision_candidate, ir.alias_provision_reconcile, ir.expire_at,
+	ir.next_validation_at, ir.next_keepalive_at, ir.last_checked_at,
+	ir.last_valid_at, ir.last_alias_sync_at, ir.delivery_probe_started_at,
+	ir.delivery_probe_verified_at, ir.last_allocated_at, ir.last_safe_error,
+	ir.created_at, ir.updated_at`
+
 type AdminICloudStatusFacets struct {
 	All        int64 `json:"all"`
 	Pending    int64 `json:"pending"`
@@ -157,71 +221,16 @@ func (s *Service) ListAdminICloudResources(ctx context.Context, filter AdminIClo
 		}
 	}
 
-	var rows []struct {
-		ID                      uint       `gorm:"column:id"`
-		Version                 uint64     `gorm:"column:version"`
-		PrimaryEmail            string     `gorm:"column:primary_email"`
-		GmailEmail              string     `gorm:"column:gmail_email"`
-		SelectedForwardTo       string     `gorm:"column:selected_forward_to"`
-		OwnerID                 uint       `gorm:"column:owner_id"`
-		OwnerEmail              string     `gorm:"column:owner_email"`
-		OwnerNickname           string     `gorm:"column:owner_nickname"`
-		OwnerGroupName          string     `gorm:"column:owner_group_name"`
-		OwnerRole               string     `gorm:"column:owner_role"`
-		OwnerStatus             string     `gorm:"column:owner_status"`
-		Status                  string     `gorm:"column:status"`
-		ForSale                 bool       `gorm:"column:for_sale"`
-		SessionStatus           string     `gorm:"column:session_status"`
-		AliasCount              uint       `gorm:"column:alias_count"`
-		ExpireAt                time.Time  `gorm:"column:expire_at"`
-		NextValidationAt        *time.Time `gorm:"column:next_validation_at"`
-		NextKeepaliveAt         *time.Time `gorm:"column:next_keepalive_at"`
-		LastCheckedAt           *time.Time `gorm:"column:last_checked_at"`
-		LastValidAt             *time.Time `gorm:"column:last_valid_at"`
-		LastAliasSyncAt         *time.Time `gorm:"column:last_alias_sync_at"`
-		DeliveryProbeVerifiedAt *time.Time `gorm:"column:delivery_probe_verified_at"`
-		LastAllocatedAt         *time.Time `gorm:"column:last_allocated_at"`
-		LastSafeError           string     `gorm:"column:last_safe_error"`
-		CreatedAt               time.Time  `gorm:"column:created_at"`
-		UpdatedAt               time.Time  `gorm:"column:updated_at"`
-	}
+	var rows []adminICloudResourceRow
 	query := s.applyAdminICloudResourceFilter(s.adminICloudResourceQuery(ctx), filter, adminICloudFilterIgnore{})
-	if err := query.Select(`
-		ir.id, er.version, ir.primary_email, gr.email AS gmail_email,
-		ir.selected_forward_to, er.owner_user_id AS owner_id,
-		u.email AS owner_email, u.nickname AS owner_nickname,
-		COALESCE(ug.name, '') AS owner_group_name, u.role AS owner_role,
-		u.status AS owner_status, ir.status, ir.for_sale, ir.session_status,
-		ir.alias_count, ir.expire_at, ir.next_validation_at,
-		ir.next_keepalive_at, ir.last_checked_at, ir.last_valid_at,
-		ir.last_alias_sync_at, ir.delivery_probe_verified_at,
-		ir.last_allocated_at, ir.last_safe_error, ir.created_at, ir.updated_at`).
+	if err := query.Select(adminICloudResourceSelect).
 		Order("ir.id DESC").Offset(filter.Offset).Limit(filter.Limit).Scan(&rows).Error; err != nil {
 		return nil, fmt.Errorf("list administrator iCloud resources: %w", ErrICloudResourceQueryTemporary)
 	}
 
 	items := make([]AdminICloudResourceView, len(rows))
 	for index, row := range rows {
-		var safeError *string
-		if value := strings.TrimSpace(row.LastSafeError); value != "" {
-			safeError = &value
-		}
-		items[index] = AdminICloudResourceView{
-			ID: row.ID, Version: row.Version, PrimaryEmail: row.PrimaryEmail,
-			Suffix: iCloudEmailSuffix(row.PrimaryEmail), GmailEmail: row.GmailEmail,
-			SelectedForwardTo: row.SelectedForwardTo,
-			Owner: AdminICloudOwnerView{
-				ID: row.OwnerID, Email: row.OwnerEmail, Nickname: row.OwnerNickname,
-				GroupName: row.OwnerGroupName, Role: row.OwnerRole, Enabled: row.OwnerStatus == "active",
-			},
-			Status: row.Status, ForSale: row.ForSale, SessionStatus: row.SessionStatus,
-			AliasCount: row.AliasCount, ExpireAt: row.ExpireAt,
-			NextValidationAt: row.NextValidationAt, NextKeepaliveAt: row.NextKeepaliveAt,
-			LastCheckedAt: row.LastCheckedAt, LastValidAt: row.LastValidAt,
-			LastAliasSyncAt: row.LastAliasSyncAt, DeliveryProbeVerifiedAt: row.DeliveryProbeVerifiedAt,
-			LastAllocatedAt: row.LastAllocatedAt, LastSafeError: safeError,
-			CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
-		}
+		items[index] = adminICloudResourceView(row)
 	}
 
 	facets := AdminICloudResourceFacets{Suffixes: []AdminICloudSuffixFacet{}}
@@ -235,6 +244,64 @@ func (s *Service) ListAdminICloudResources(ctx context.Context, filter AdminIClo
 		Items: items, Total: total, Offset: filter.Offset, Limit: filter.Limit,
 		AliasLimit: iCloudMaxAliases, Facets: facets,
 	}, nil
+}
+
+func (s *Service) GetAdminICloudResource(ctx context.Context, resourceID uint) (*AdminICloudResourceDetail, error) {
+	if s == nil || s.db == nil {
+		return nil, ErrICloudResourceQueryTemporary
+	}
+	if resourceID == 0 {
+		return nil, ErrICloudResourceQuery
+	}
+
+	var row adminICloudResourceRow
+	err := s.adminICloudResourceQuery(ctx).Where("ir.id = ?", resourceID).
+		Select(adminICloudResourceSelect).Take(&row).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrICloudResourceNotFound
+		}
+		return nil, ErrICloudResourceQueryTemporary
+	}
+	remaining := uint(0)
+	if row.AliasCount < iCloudMaxAliases {
+		remaining = iCloudMaxAliases - row.AliasCount
+	}
+	return &AdminICloudResourceDetail{
+		AdminICloudResourceView: adminICloudResourceView(row),
+		AliasLimit:              iCloudMaxAliases,
+		AliasRemaining:          remaining,
+		AliasProvisioning:       strings.TrimSpace(row.AliasProvisionCandidate) != "" || row.AliasProvisionReconcile,
+		CredentialRevision:      row.CredentialRevision,
+		CredentialUpdatedAt:     row.CredentialUpdatedAt,
+		ValidationGeneration:    row.ValidationGeneration,
+		ValidationFailures:      row.ValidationFailures,
+		SessionFailures:         row.SessionFailures,
+		DeliveryProbeStartedAt:  row.DeliveryProbeStartedAt,
+	}, nil
+}
+
+func adminICloudResourceView(row adminICloudResourceRow) AdminICloudResourceView {
+	var safeError *string
+	if value := strings.TrimSpace(row.LastSafeError); value != "" {
+		safeError = &value
+	}
+	return AdminICloudResourceView{
+		ID: row.ID, Version: row.Version, PrimaryEmail: row.PrimaryEmail,
+		Suffix: iCloudEmailSuffix(row.PrimaryEmail), GmailEmail: row.GmailEmail,
+		SelectedForwardTo: row.SelectedForwardTo,
+		Owner: AdminICloudOwnerView{
+			ID: row.OwnerID, Email: row.OwnerEmail, Nickname: row.OwnerNickname,
+			GroupName: row.OwnerGroupName, Role: row.OwnerRole, Enabled: row.OwnerStatus == "active",
+		},
+		Status: row.Status, ForSale: row.ForSale, SessionStatus: row.SessionStatus,
+		AliasCount: row.AliasCount, ExpireAt: row.ExpireAt,
+		NextValidationAt: row.NextValidationAt, NextKeepaliveAt: row.NextKeepaliveAt,
+		LastCheckedAt: row.LastCheckedAt, LastValidAt: row.LastValidAt,
+		LastAliasSyncAt: row.LastAliasSyncAt, DeliveryProbeVerifiedAt: row.DeliveryProbeVerifiedAt,
+		LastAllocatedAt: row.LastAllocatedAt, LastSafeError: safeError,
+		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
+	}
 }
 
 func includeAdminICloudListSection(value *bool) bool {

@@ -31,6 +31,16 @@ const adminMessageMailboxSQL = `CASE
     ELSE 'main'
 END`
 
+
+const adminICloudMessageMailboxSQL = `CASE
+    WHEN LOWER(m.recipient) = LOWER(ir.primary_email) THEN 'main'
+    WHEN EXISTS (
+        SELECT 1 FROM icloud_aliases ia
+        WHERE ia.resource_id = m.email_resource_id AND LOWER(ia.email) = LOWER(m.recipient)
+    ) THEN 'alias'
+    ELSE 'main'
+END`
+
 type adminMessageRow struct {
 	ID               uint
 	Mailbox          string
@@ -64,9 +74,12 @@ func (r *AdminMessageRepo) AdminMessageResourceExists(ctx context.Context, resou
 		Table("email_resources AS er").
 		Select("er.id").
 		Where("er.id = ? AND er.type = ?", resourceID, string(resourceType))
-	if resourceType == domain.ResourceTypeDomain {
+	switch resourceType {
+	case domain.ResourceTypeDomain:
 		query = query.Joins("JOIN domain_resources dr ON dr.id = er.id")
-	} else {
+	case domain.ResourceTypeICloud:
+		query = query.Joins("JOIN icloud_resources ir ON ir.id = er.id")
+	default:
 		query = query.Joins("JOIN microsoft_resources mr ON mr.id = er.id")
 	}
 	err := query.
@@ -193,9 +206,12 @@ func adminMessageBaseQueryDB(db *gorm.DB, resourceID uint, resourceType domain.R
 		Joins("LEFT JOIN mailmatch_message_projections AS mp ON mp.message_id = m.id").
 		Joins("LEFT JOIN orders o ON o.id = "+effectiveMessageOwnerSQL).
 		Where("m.email_resource_id = ? AND m.resource_type = ?", resourceID, string(resourceType))
-	if resourceType == domain.ResourceTypeDomain {
+	switch resourceType {
+	case domain.ResourceTypeDomain:
 		db = db.Joins("JOIN domain_resources dr ON dr.id = m.email_resource_id")
-	} else {
+	case domain.ResourceTypeICloud:
+		db = db.Joins("JOIN icloud_resources ir ON ir.id = m.email_resource_id")
+	default:
 		db = db.Joins("JOIN microsoft_resources mr ON mr.id = m.email_resource_id")
 	}
 	search = strings.TrimSpace(search)
@@ -218,10 +234,14 @@ func escapeAdminMessageLike(value string) string {
 }
 
 func adminMessageMailboxSelect(resourceType domain.ResourceType) string {
-	if resourceType == domain.ResourceTypeDomain {
+	switch resourceType {
+	case domain.ResourceTypeDomain:
 		return "'main'"
+	case domain.ResourceTypeICloud:
+		return adminICloudMessageMailboxSQL
+	default:
+		return adminMessageMailboxSQL
 	}
-	return adminMessageMailboxSQL
 }
 
 func adminMessageSummaryFromRow(row adminMessageRow) app.AdminMessageSummary {

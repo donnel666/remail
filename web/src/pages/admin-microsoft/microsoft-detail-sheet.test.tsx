@@ -2,6 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { TFunction } from "i18next";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AdminMicrosoftResourceDetail } from "./admin-microsoft-types";
@@ -197,7 +198,7 @@ vi.mock("@/lib/admin-microsoft-api", () => ({
   validateAdminMicrosoftResource: mocks.validate,
 }));
 
-import { MicrosoftDetailSheet } from "./microsoft-detail-sheet";
+import { MicrosoftDetailSheet, ResourceMailsPanel } from "./microsoft-detail-sheet";
 
 const EMPTY_PAGE = {
   items: [],
@@ -335,7 +336,9 @@ describe("admin Microsoft detail sheet runtime", () => {
     ]);
 
     fireEvent.click(screen.getByRole("tab", { name: "Orders" }));
-    await waitFor(() => expect(mocks.allocationPage).toHaveBeenCalledWith(41));
+    await waitFor(() =>
+      expect(mocks.allocationPage).toHaveBeenCalledWith(41, "microsoft")
+    );
 
     fireEvent.click(screen.getByRole("tab", { name: "Explicit aliases" }));
     await waitFor(() =>
@@ -359,7 +362,8 @@ describe("admin Microsoft detail sheet runtime", () => {
         "",
         20,
         undefined,
-        expect.any(AbortSignal)
+        expect.any(AbortSignal),
+        "microsoft"
       )
     );
 
@@ -409,6 +413,7 @@ describe("admin Microsoft detail sheet runtime", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Mailbox" }));
 
     expect(await screen.findByText("Message 20")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Message 20/ })).toHaveAttribute("aria-pressed");
     expect(screen.getByText("Mail count")).toBeInTheDocument();
     expect(screen.getByText("21")).toBeInTheDocument();
 
@@ -429,7 +434,8 @@ describe("admin Microsoft detail sheet runtime", () => {
           beforeReceivedAt: mail(20).receivedAt,
           beforeId: 20,
         },
-        expect.any(AbortSignal)
+        expect.any(AbortSignal),
+        "microsoft"
       )
     );
     expect(await screen.findByText("Message 21")).toBeInTheDocument();
@@ -458,9 +464,11 @@ describe("admin Microsoft detail sheet runtime", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Mailbox" }));
 
     expect(await screen.findByText("Email URL")).toBeVisible();
+    const row = screen.getByRole("button", { name: /Verification/ });
+    expect(row.querySelector("button, [role='button']")).toBeNull();
     const copyControls = screen.getAllByRole("button", { name: `Copy: ${url}` });
-    expect(copyControls).toHaveLength(2);
-    copyControls.forEach((control) => expect(control.closest("button")).toBeNull());
+    expect(copyControls).toHaveLength(1);
+    expect(copyControls[0]?.closest("button")).toBeNull();
   });
 
   it("retries a failed continuation with the same cursor", async () => {
@@ -569,7 +577,7 @@ describe("admin Microsoft detail sheet runtime", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Fetch mail" }));
 
-    await waitFor(() => expect(mocks.fetchMail).toHaveBeenCalledWith(42));
+    await waitFor(() => expect(mocks.fetchMail).toHaveBeenCalledWith(42, "microsoft"));
     await waitFor(() =>
       expect(mocks.getTask).toHaveBeenCalledWith("fetch:42", expect.any(AbortSignal))
     );
@@ -595,6 +603,21 @@ describe("admin Microsoft detail sheet runtime", () => {
 
     resolveFetch({ task: { status: "succeeded", taskId: "fetch:42" } });
     await waitFor(() => expect(mocks.messages).toHaveBeenCalledTimes(2));
+  });
+
+  it("passes the iCloud resource type to the shared mailbox fetch", async () => {
+    render(
+      <ResourceMailsPanel
+        resourceId={77}
+        resourceType="icloud"
+        t={((key: string) => key) as TFunction}
+      />
+    );
+    await waitFor(() => expect(mocks.messages).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("button", { name: "Fetch mail" }));
+
+    await waitFor(() => expect(mocks.fetchMail).toHaveBeenCalledWith(77, "icloud"));
   });
 
   it("polls active tasks and stops after the task reaches a terminal state", async () => {

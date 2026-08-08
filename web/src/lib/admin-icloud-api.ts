@@ -11,6 +11,8 @@ export type AdminICloudAliasStatus =
 export type AdminICloudOwner = components["schemas"]["AdminICloudOwnerSummary"];
 export type AdminICloudResourceItem =
   components["schemas"]["AdminICloudResourceItem"];
+export type AdminICloudResourceDetail =
+  components["schemas"]["AdminICloudResourceDetail"];
 export type AdminICloudResourceList =
   components["schemas"]["AdminICloudResourceListResponse"];
 export type AdminICloudResourceFacets =
@@ -23,11 +25,17 @@ export type AdminICloudImportResponse =
   components["schemas"]["AdminICloudImportResponse"];
 export type AdminICloudMutationResponse =
   components["schemas"]["AdminICloudMutationResponse"];
+export type AdminICloudTask = components["schemas"]["AdminTaskView"];
+export type AdminICloudTaskList =
+  components["schemas"]["AdminTaskListResponse"];
+export type AdminICloudUpdateRequest =
+  components["schemas"]["AdminICloudUpdateRequest"];
 export type AdminICloudBulkResponse =
   components["schemas"]["AdminICloudBulkResult"];
 export type AdminICloudImportErrorStrategy = "skip" | "abort";
 export type AdminICloudBatchAction =
   | "validate"
+  | "alias"
   | "disable"
   | "publish"
   | "unpublish"
@@ -148,6 +156,18 @@ export async function listAdminICloudOwners(
   }));
 }
 
+export async function getAdminICloudResourceDetail(
+  resourceId: number,
+  signal?: AbortSignal,
+): Promise<AdminICloudResourceDetail> {
+  return unwrap(
+    await client.GET("/v1/admin/icloud/resources/{resourceId}", {
+      params: { path: { resourceId } },
+      signal,
+    }),
+  );
+}
+
 export async function importAdminICloudResources(
   request: AdminICloudImportRequest,
   signal?: AbortSignal,
@@ -236,6 +256,44 @@ export async function listAdminICloudAliases(
   );
 }
 
+export async function listAdminICloudTasks(
+  resourceId: number,
+  offset = 0,
+  limit = 20,
+  signal?: AbortSignal,
+): Promise<AdminICloudTaskList> {
+  return unwrap(
+    await client.GET("/v1/admin/tasks", {
+      params: {
+        query: {
+          bizType: "icloud_resource",
+          bizId: resourceId,
+          offset: Math.max(0, Math.trunc(offset)),
+          limit: pageLimit(limit),
+        },
+      },
+      signal,
+    }),
+  );
+}
+
+export async function updateAdminICloudResource(
+  resourceId: number,
+  request: AdminICloudUpdateRequest,
+  signal?: AbortSignal,
+): Promise<AdminICloudMutationResponse> {
+  return unwrap(
+    await client.PATCH("/v1/admin/icloud/resources/{resourceId}", {
+      body: request,
+      params: {
+        header: commandHeaders(),
+        path: { resourceId },
+      },
+      signal,
+    }),
+  );
+}
+
 export async function validateAdminICloudResource(
   resourceId: number,
   version: number,
@@ -243,6 +301,23 @@ export async function validateAdminICloudResource(
 ) {
   return unwrap(
     await client.POST("/v1/admin/icloud/resources/{resourceId}/validation", {
+      params: {
+        header: commandHeaders(),
+        path: { resourceId },
+        query: { version },
+      },
+      signal,
+    }),
+  );
+}
+
+export async function createAdminICloudAliases(
+  resourceId: number,
+  version: number,
+  signal?: AbortSignal,
+) {
+  return unwrap(
+    await client.POST("/v1/admin/icloud/resources/{resourceId}/aliases", {
       params: {
         header: commandHeaders(),
         path: { resourceId },
@@ -385,6 +460,10 @@ async function batchAdminICloudResources(
     case "validate":
       return unwrap(
         await client.POST("/v1/admin/icloud/resources/batch/validation", options),
+      );
+    case "alias":
+      return unwrap(
+        await client.POST("/v1/admin/icloud/resources/batch/alias", options),
       );
     case "disable":
       return unwrap(

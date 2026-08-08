@@ -243,7 +243,10 @@ SELECT
     'fetch' AS source,
     state.email_resource_id AS source_id,
     state.email_resource_id AS resource_scope_id,
-    'microsoft_resource' AS biz_type,
+    CASE
+        WHEN state.operation_kind = 'icloud_resource_fetch' THEN 'icloud_resource'
+        ELSE 'microsoft_resource'
+    END AS biz_type,
     state.email_resource_id AS biz_id,
     CASE WHEN state.operation_kind = 'resource_history' THEN 'history' ELSE 'fetch' END AS kind,
     CASE state.status
@@ -266,7 +269,67 @@ SELECT
     0 AS progress_failed,
     NULL AS reason_buckets
 FROM mailmatch_resource_fetch_states AS state
-WHERE state.operation_kind IN ('resource_fetch', 'resource_history')`
+WHERE state.operation_kind IN ('resource_fetch', 'resource_history', 'icloud_resource_fetch')`
+
+const iCloudImportResourceTaskSelect = `
+SELECT
+    'icloud_import' AS source,
+    imp.id AS source_id,
+    item.resource_id AS resource_scope_id,
+    'icloud_resource_import' AS biz_type,
+    imp.id AS biz_id,
+    'import' AS kind,
+    CASE WHEN imp.dispatch_status = 'pending' THEN 'queued' ELSE imp.dispatch_status END AS status,
+    imp.attempts AS attempts,
+    imp.max_attempts AS max_attempts,
+    NULL AS credential_revision,
+    imp.created_at AS queued_at,
+    imp.started_at AS started_at,
+    imp.finished_at AS finished_at,
+    imp.updated_at AS updated_at,
+    GREATEST(imp.accepted_count + imp.skipped_count, imp.imported_count + imp.skipped_count) AS progress_total,
+    LEAST(
+        GREATEST(imp.accepted_count + imp.skipped_count, imp.imported_count + imp.skipped_count),
+        imp.imported_count + imp.skipped_count
+    ) AS progress_processed,
+    imp.imported_count AS progress_succeeded,
+    imp.skipped_count AS progress_skipped,
+    GREATEST(
+        GREATEST(imp.accepted_count + imp.skipped_count, imp.imported_count + imp.skipped_count)
+            - imp.imported_count - imp.skipped_count,
+        0
+    ) AS progress_failed,
+    NULL AS reason_buckets
+FROM icloud_resource_imports AS imp
+JOIN (
+    SELECT DISTINCT import_id, resource_id
+    FROM icloud_resource_import_items
+    WHERE resource_id IS NOT NULL
+) AS item ON item.import_id = imp.id`
+
+const iCloudValidationTaskSelect = `
+SELECT
+    'icloud_validation' AS source,
+    run.id AS source_id,
+    run.resource_id AS resource_scope_id,
+    'icloud_resource' AS biz_type,
+    run.resource_id AS biz_id,
+    run.kind AS kind,
+    run.status AS status,
+    run.attempts AS attempts,
+    run.max_attempts AS max_attempts,
+    run.credential_revision AS credential_revision,
+    run.queued_at AS queued_at,
+    run.started_at AS started_at,
+    run.finished_at AS finished_at,
+    run.updated_at AS updated_at,
+    NULL AS progress_total,
+    NULL AS progress_processed,
+    NULL AS progress_succeeded,
+    NULL AS progress_skipped,
+    NULL AS progress_failed,
+    NULL AS reason_buckets
+FROM icloud_maintenance_runs AS run`
 
 // Redis-only bulk cursors are absent from per-resource lists. Their bounded
 // live status remains available through the source-qualified lookup below.
@@ -284,6 +347,12 @@ UNION ALL
 ` + fetchTaskSelect
 
 const domainResourceTaskUnion = emptyTaskSelect
+
+const iCloudResourceTaskUnion = iCloudImportResourceTaskSelect + `
+UNION ALL
+` + iCloudValidationTaskSelect + `
+UNION ALL
+` + fetchTaskSelect
 
 const importSingleTaskSelect = `
 SELECT
@@ -320,6 +389,37 @@ SELECT
 FROM resource_imports AS imp
 WHERE imp.resource_type = 'microsoft'`
 
+const iCloudImportSingleTaskSelect = `
+SELECT
+    'icloud_import' AS source,
+    imp.id AS source_id,
+    0 AS resource_scope_id,
+    'icloud_resource_import' AS biz_type,
+    imp.id AS biz_id,
+    'import' AS kind,
+    CASE WHEN imp.dispatch_status = 'pending' THEN 'queued' ELSE imp.dispatch_status END AS status,
+    imp.attempts AS attempts,
+    imp.max_attempts AS max_attempts,
+    NULL AS credential_revision,
+    imp.created_at AS queued_at,
+    imp.started_at AS started_at,
+    imp.finished_at AS finished_at,
+    imp.updated_at AS updated_at,
+    GREATEST(imp.accepted_count + imp.skipped_count, imp.imported_count + imp.skipped_count) AS progress_total,
+    LEAST(
+        GREATEST(imp.accepted_count + imp.skipped_count, imp.imported_count + imp.skipped_count),
+        imp.imported_count + imp.skipped_count
+    ) AS progress_processed,
+    imp.imported_count AS progress_succeeded,
+    imp.skipped_count AS progress_skipped,
+    GREATEST(
+        GREATEST(imp.accepted_count + imp.skipped_count, imp.imported_count + imp.skipped_count)
+            - imp.imported_count - imp.skipped_count,
+        0
+    ) AS progress_failed,
+    NULL AS reason_buckets
+FROM icloud_resource_imports AS imp`
+
 func (r *AdminTaskViewRepo) MicrosoftResourceExists(ctx context.Context, resourceID uint) (bool, error) {
 	if r == nil || r.db == nil || resourceID == 0 {
 		return false, nil
@@ -350,12 +450,31 @@ func (r *AdminTaskViewRepo) DomainResourceExists(ctx context.Context, resourceID
 	return count > 0, nil
 }
 
+func (r *AdminTaskViewRepo) ICloudResourceExists(ctx context.Context, resourceID uint) (bool, error) {
+	if r == nil || r.db == nil || resourceID == 0 {
+		return false, nil
+	}
+	var count int64
+	if err := r.db.WithContext(ctx).
+		Table("email_resources AS root").
+		Joins("JOIN icloud_resources AS icloud ON icloud.id = root.id").
+		Where("root.id = ? AND root.type = ?", resourceID, "icloud").
+		Count(&count).Error; err != nil {
+		return false, fmt.Errorf("check icloud task resource: %w", err)
+	}
+	return count > 0, nil
+}
+
 func (r *AdminTaskViewRepo) ListForMicrosoftResource(ctx context.Context, filter governanceapp.AdminTaskListFilter) ([]governanceapp.AdminTaskView, int64, int64, error) {
 	return r.listForResource(ctx, filter, microsoftResourceTaskUnion)
 }
 
 func (r *AdminTaskViewRepo) ListForDomainResource(ctx context.Context, filter governanceapp.AdminTaskListFilter) ([]governanceapp.AdminTaskView, int64, int64, error) {
 	return r.listForResource(ctx, filter, domainResourceTaskUnion)
+}
+
+func (r *AdminTaskViewRepo) ListForICloudResource(ctx context.Context, filter governanceapp.AdminTaskListFilter) ([]governanceapp.AdminTaskView, int64, int64, error) {
+	return r.listForResource(ctx, filter, iCloudResourceTaskUnion)
 }
 
 func (r *AdminTaskViewRepo) listForResource(ctx context.Context, filter governanceapp.AdminTaskListFilter, taskUnion string) ([]governanceapp.AdminTaskView, int64, int64, error) {
@@ -390,7 +509,10 @@ LIMIT ? OFFSET ?`, pageArgs...).Scan(&rows).Error; err != nil {
 		return nil, 0, 0, fmt.Errorf("list normalized administrator tasks: %w", err)
 	}
 	items := adminTaskViews(rows)
-	if err := r.attachImportReasonCounts(ctx, items); err != nil {
+	if err := r.attachImportReasonCounts(ctx, items, governanceapp.AdminTaskSourceImport, "resource_import_items"); err != nil {
+		return nil, 0, 0, err
+	}
+	if err := r.attachImportReasonCounts(ctx, items, governanceapp.AdminTaskSourceICloudImport, "icloud_resource_import_items"); err != nil {
 		return nil, 0, 0, err
 	}
 	return items, aggregate.Total, aggregate.Succeeded, nil
@@ -427,7 +549,12 @@ LIMIT 1`, ref.ID).Scan(&row)
 		return nil, governanceapp.ErrAdminTaskNotFound
 	}
 	if ref.Source == governanceapp.AdminTaskSourceImport {
-		if err := r.attachImportReasonCounts(ctx, items); err != nil {
+		if err := r.attachImportReasonCounts(ctx, items, governanceapp.AdminTaskSourceImport, "resource_import_items"); err != nil {
+			return nil, err
+		}
+	}
+	if ref.Source == governanceapp.AdminTaskSourceICloudImport {
+		if err := r.attachImportReasonCounts(ctx, items, governanceapp.AdminTaskSourceICloudImport, "icloud_resource_import_items"); err != nil {
 			return nil, err
 		}
 	}
@@ -605,6 +732,10 @@ func singleTaskSelect(source string) (string, error) {
 		return tokenTaskSelect, nil
 	case governanceapp.AdminTaskSourceFetch:
 		return fetchTaskSelect, nil
+	case governanceapp.AdminTaskSourceICloudImport:
+		return iCloudImportSingleTaskSelect, nil
+	case governanceapp.AdminTaskSourceICloudValidate:
+		return iCloudValidationTaskSelect, nil
 	default:
 		return "", governanceapp.ErrInvalidAdminTaskQuery
 	}
@@ -669,10 +800,10 @@ func adminTaskView(row adminTaskRow) governanceapp.AdminTaskView {
 	return view
 }
 
-func (r *AdminTaskViewRepo) attachImportReasonCounts(ctx context.Context, items []governanceapp.AdminTaskView) error {
+func (r *AdminTaskViewRepo) attachImportReasonCounts(ctx context.Context, items []governanceapp.AdminTaskView, source, table string) error {
 	ids := make([]uint64, 0)
 	for i := range items {
-		if items[i].Ref.Source == governanceapp.AdminTaskSourceImport && items[i].Progress != nil {
+		if items[i].Ref.Source == source && items[i].Progress != nil {
 			ids = append(ids, items[i].Ref.ID)
 		}
 	}
@@ -680,15 +811,15 @@ func (r *AdminTaskViewRepo) attachImportReasonCounts(ctx context.Context, items 
 		return nil
 	}
 	rows := make([]adminTaskReasonRow, 0)
-	if err := r.db.WithContext(ctx).Raw(`
+	if err := r.db.WithContext(ctx).Raw(fmt.Sprintf(`
 SELECT item.import_id AS source_id,
        item.category AS reason,
        COUNT(*) AS count
-FROM resource_import_items AS item
+FROM %s AS item
 WHERE item.import_id IN ?
   AND item.outcome = 'skipped'
 GROUP BY item.import_id, item.category
-ORDER BY item.import_id, item.category`, ids).Scan(&rows).Error; err != nil {
+ORDER BY item.import_id, item.category`, table), ids).Scan(&rows).Error; err != nil {
 		return fmt.Errorf("load safe import reason counts: %w", err)
 	}
 	byID := make(map[uint64]map[string]int64)
@@ -700,7 +831,7 @@ ORDER BY item.import_id, item.category`, ids).Scan(&rows).Error; err != nil {
 		byID[rows[i].SourceID][reason] += nonNegativeInt64(rows[i].Count)
 	}
 	for i := range items {
-		if items[i].Ref.Source != governanceapp.AdminTaskSourceImport || items[i].Progress == nil {
+		if items[i].Ref.Source != source || items[i].Progress == nil {
 			continue
 		}
 		items[i].Progress.ReasonCounts = reasonCountMap(byID[items[i].Ref.ID])

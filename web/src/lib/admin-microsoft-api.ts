@@ -128,13 +128,14 @@ export async function listAdminMicrosoftAllocations(
   resourceId: number,
   offset = 0,
   limit = 20,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  resourceType: "microsoft" | "icloud" = "microsoft"
 ): Promise<AdminMicrosoftAllocationListResponse> {
   return unwrap(
     await client.GET("/v1/admin/allocations", {
       params: {
         query: {
-          type: "microsoft",
+          type: resourceType,
           resourceId,
           offset: Math.max(0, Math.trunc(offset)),
           limit: pageLimit(limit),
@@ -396,11 +397,16 @@ export async function createAdminMicrosoftExplicitAlias(
 }
 
 export async function fetchAdminMicrosoftMail(
-  resourceId: number
+  resourceId: number,
+  resourceType: "microsoft" | "icloud" = "microsoft"
 ): Promise<AdminMicrosoftTaskAcceptedResponse> {
   return unwrap(
     await client.POST("/v1/admin/resources/{resourceId}/messages/fetch", {
-      params: { header: commandHeaders(), path: { resourceId } },
+      params: {
+        header: commandHeaders(),
+        path: { resourceId },
+        query: { type: resourceType },
+      },
     })
   );
 }
@@ -510,14 +516,15 @@ export async function listAdminMicrosoftMessages(
   search = "",
   limit = 100,
   cursor?: AdminMicrosoftMessageCursor,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  resourceType: "microsoft" | "icloud" = "microsoft"
 ): Promise<AdminMicrosoftMessageListResponse> {
   return unwrap(
     await client.GET("/v1/admin/messages", {
       params: {
         query: {
           resourceId,
-          type: "microsoft",
+          type: resourceType,
           search: search.trim() || undefined,
           offset: cursor ? undefined : 0,
           beforeReceivedAt: cursor?.beforeReceivedAt,
@@ -534,11 +541,12 @@ export async function listAdminMicrosoftMessages(
 export async function getAdminMicrosoftMessage(
   resourceId: number,
   messageId: number,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  resourceType: "microsoft" | "icloud" = "microsoft"
 ): Promise<AdminMicrosoftMessageDetail> {
   return unwrap(
     await client.GET("/v1/admin/messages/{messageId}", {
-      params: { path: { messageId }, query: { resourceId } },
+      params: { path: { messageId }, query: { resourceId, type: resourceType } },
       signal,
     })
   );

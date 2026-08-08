@@ -35,6 +35,11 @@ func (s *apiTaskRepoStub) DomainResourceExists(context.Context, uint) (bool, err
 	return s.exists, s.err
 }
 
+func (s *apiTaskRepoStub) ICloudResourceExists(context.Context, uint) (bool, error) {
+	s.existsCalls++
+	return s.exists, s.err
+}
+
 func (s *apiTaskRepoStub) ListForMicrosoftResource(context.Context, governanceapp.AdminTaskListFilter) ([]governanceapp.AdminTaskView, int64, int64, error) {
 	s.lists++
 	if s.err != nil {
@@ -47,6 +52,10 @@ func (s *apiTaskRepoStub) ListForMicrosoftResource(context.Context, governanceap
 }
 
 func (s *apiTaskRepoStub) ListForDomainResource(ctx context.Context, filter governanceapp.AdminTaskListFilter) ([]governanceapp.AdminTaskView, int64, int64, error) {
+	return s.ListForMicrosoftResource(ctx, filter)
+}
+
+func (s *apiTaskRepoStub) ListForICloudResource(ctx context.Context, filter governanceapp.AdminTaskListFilter) ([]governanceapp.AdminTaskView, int64, int64, error) {
 	return s.ListForMicrosoftResource(ctx, filter)
 }
 
@@ -146,6 +155,24 @@ func TestAdminTaskRoutesRequireGovernancePermissionAndReturnSafeDTO(t *testing.T
 	for _, forbidden := range []string{"claimToken", "dispatchToken", "fencing", "selection_json", "never-return-secret"} {
 		require.NotContains(t, response.Body.String(), forbidden)
 	}
+}
+
+func TestAdminTaskRoutesAcceptICloudResource(t *testing.T) {
+	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	repo := &apiTaskRepoStub{exists: true, task: &governanceapp.AdminTaskView{
+		Ref:     governanceapp.AdminTaskRef{Source: governanceapp.AdminTaskSourceICloudValidate, ID: 61},
+		BizType: governanceapp.AdminTaskBizICloudResource, BizID: 61,
+		Kind: governanceapp.AdminTaskKindValidation, Status: governanceapp.AdminTaskStatusRunning,
+		MaxAttempts: 3, QueuedAt: now, UpdatedAt: now,
+	}}
+	router := adminTaskTestRouter(repo, &taskPermissionChecker{allow: true})
+	request := httptest.NewRequest(http.MethodGet, "/v1/admin/tasks?bizType=icloud_resource&bizId=61", nil)
+	request.AddCookie(&http.Cookie{Name: middleware.SessionCookieName, Value: "admin-session"})
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.Contains(t, response.Body.String(), `"taskId":"icloud_validation:61"`)
 }
 
 func TestAdminTaskRoutesRejectPermissionBeforeQuery(t *testing.T) {

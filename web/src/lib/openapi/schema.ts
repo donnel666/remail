@@ -3415,8 +3415,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Queue a resource-level Microsoft mail fetch
-         * @description Requires `mailmatch:message/operate`, Session authentication, CSRF, and an idempotency key. MailMatch updates the resource's current fetch generation before returning 202; Redis/Asynq carries only temporary execution data. Graph/IMAP work, deduplication, storage, and matching run asynchronously. Disabled resources may be diagnosed without being enabled; deleted resources return 409.
+         * Queue a resource-level mail fetch
+         * @description Requires `mailmatch:message/operate`, Session authentication, CSRF, and an idempotency key. `type=microsoft` uses the Microsoft resource transport; `type=icloud` reuses the active iCloud allocation and linked Gmail pickup pipeline. MailMatch updates the resource's current fetch generation before returning 202. Disabled resources may be diagnosed without being enabled; deleted resources return 409.
          */
         post: operations["postAdminMicrosoftResourceMessagesFetch"];
         delete?: never;
@@ -3516,6 +3516,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/icloud/resources/batch/alias": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Queue alias provisioning for selected iCloud resources below the alias limit */
+        post: operations["postAdminICloudResourcesCreateAliases"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/icloud/resources/batch/disable": {
         parameters: {
             query?: never;
@@ -3591,14 +3608,19 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Get one iCloud resource with safe maintenance diagnostics */
+        get: operations["getAdminICloudResource"];
         put?: never;
         post?: never;
         /** Logically delete one iCloud resource */
         delete: operations["deleteAdminICloudResource"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Atomically edit an iCloud resource
+         * @description Base fields require `core:resource/write`. Supplying `forSale` or `credentials` additionally requires `core:resource/operate`. Session authentication, CSRF, and an idempotency key are required. Credentials are a complete write-only HME set and are never returned. Changing the primary email requires the complete credential set. Email, owner, or credential changes conflict with an active Allocation, advance the validation fence, force private supply, and immediately re-queue validation unless the resource is disabled.
+         */
+        patch: operations["patchAdminICloudResource"];
         trace?: never;
     };
     "/v1/admin/icloud/resources/{resourceId}/aliases": {
@@ -3611,7 +3633,8 @@ export interface paths {
         /** List one iCloud resource's safe HME aliases */
         get: operations["getAdminICloudResourceAliases"];
         put?: never;
-        post?: never;
+        /** Queue alias provisioning for one iCloud resource below the alias limit */
+        post: operations["postAdminICloudResourceCreateAliases"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3776,7 +3799,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List normalized administrator tasks for a Microsoft or domain resource
+         * List normalized administrator tasks for a Microsoft, iCloud, or domain resource
          * @description Requires `governance:task/read`. Governance normalizes durable facts from their owning contexts without becoming their source of truth. Results use source-qualified task IDs, the stable `queued/running/succeeded/failed/uncertain/canceled` status union, and safe progress only. Internal table paths, claim/dispatch/lease/fencing tokens, upstream payloads, and raw errors are never returned. If any required task source is unavailable, the request returns 503 instead of a stale or partial success.
          */
         get: operations["getAdminTasks"];
@@ -6894,6 +6917,23 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
         };
+        /** @description Administrator-safe iCloud resource detail with maintenance diagnostics. HME credentials, cookies, DSID, and request context are never returned. */
+        AdminICloudResourceDetail: components["schemas"]["AdminICloudResourceItem"] & {
+            /** @enum {integer} */
+            aliasLimit: 750;
+            aliasRemaining: number;
+            aliasProvisioning: boolean;
+            /** Format: int64 */
+            credentialRevision: number;
+            /** Format: date-time */
+            credentialUpdatedAt: string;
+            /** Format: int64 */
+            validationGeneration: number;
+            validationFailures: number;
+            sessionFailures: number;
+            /** Format: date-time */
+            deliveryProbeStartedAt: string | null;
+        };
         AdminICloudStatusFacet: {
             /** Format: int64 */
             all: number;
@@ -6974,11 +7014,32 @@ export interface components {
             offset: number;
             limit: number;
         };
+        /** @description Complete write-only HME credential and request-context set. Omission from PATCH preserves the current credential revision. */
+        AdminICloudCredentialsInput: {
+            host: string;
+            dsid: string;
+            clientId: string;
+            clientBuildNumber: string;
+            clientMasteringNumber: string;
+            /** Format: password */
+            cookie: string;
+        };
+        AdminICloudUpdateRequest: {
+            /** @description Last observed resource version; stale writes return 409. */
+            version: number;
+            /** Format: email */
+            primaryEmail?: string;
+            ownerId?: number;
+            forSale?: boolean;
+            credentials?: components["schemas"]["AdminICloudCredentialsInput"];
+        };
         AdminICloudMutationResponse: {
             resourceId: number;
             version: number;
             status: components["schemas"]["AdminICloudResourceStatus"];
             forSale: boolean;
+            /** @description Whether this command changed resource state or queued new work. */
+            changed: boolean;
         };
         AdminICloudBulkFilter: {
             search?: string;
@@ -7349,11 +7410,11 @@ export interface components {
             removed: number;
         };
         /** @enum {string} */
-        AdminTaskKind: "import" | "alias" | "token" | "fetch" | "history" | "bulk_validation" | "bulk_alias" | "bulk_history" | "bulk_token" | "bulk_publish" | "bulk_unpublish" | "bulk_delete";
+        AdminTaskKind: "import" | "validation" | "alias" | "token" | "fetch" | "history" | "bulk_validation" | "bulk_alias" | "bulk_history" | "bulk_token" | "bulk_publish" | "bulk_unpublish" | "bulk_delete";
         /** @enum {string} */
         AdminTaskStatus: "queued" | "running" | "succeeded" | "failed" | "uncertain" | "canceled";
         /** @enum {string} */
-        AdminTaskBizType: "microsoft_resource" | "domain_resource" | "microsoft_resource_import" | "gmail_resource_import" | "microsoft_resource_bulk" | "icloud_resource_import";
+        AdminTaskBizType: "microsoft_resource" | "icloud_resource" | "domain_resource" | "microsoft_resource_import" | "gmail_resource_import" | "microsoft_resource_bulk" | "icloud_resource_import";
         AdminTaskProgress: {
             /** Format: int64 */
             total: number;
@@ -19380,7 +19441,9 @@ export interface operations {
     };
     postAdminMicrosoftResourceMessagesFetch: {
         parameters: {
-            query?: never;
+            query?: {
+                type?: "microsoft" | "icloud";
+            };
             header: {
                 /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
@@ -19586,6 +19649,41 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    postAdminICloudResourcesCreateAliases: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op. */
+                "Idempotency-Key": components["parameters"]["AdminStateCommandIdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminICloudBulkCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Synchronous bounded selection result; resources already at the alias limit are skipped */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudBulkResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     postAdminICloudResourcesDisable: {
         parameters: {
             query?: never;
@@ -19726,6 +19824,33 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    getAdminICloudResource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Safe resource detail without HME credentials or request context */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudResourceDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     deleteAdminICloudResource: {
         parameters: {
             query: {
@@ -19762,6 +19887,44 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    patchAdminICloudResource: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminICloudUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Atomic edit committed; credential changes that require validation leave the resource pending */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudMutationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     getAdminICloudResourceAliases: {
         parameters: {
             query?: {
@@ -19788,6 +19951,52 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminICloudResourceCreateAliases: {
+        parameters: {
+            query: {
+                /** @description Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write. */
+                version: components["parameters"]["ExpectedAdminResourceVersion"];
+            };
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op. */
+                "Idempotency-Key": components["parameters"]["AdminStateCommandIdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Alias target already reached; no maintenance work was queued */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudMutationResponse"];
+                };
+            };
+            /** @description Alias provisioning queued through the fenced iCloud maintenance worker */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudMutationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["UnprocessableEntity"];
             503: components["responses"]["ServiceUnavailable"];
         };
@@ -20132,7 +20341,7 @@ export interface operations {
     getAdminTasks: {
         parameters: {
             query: {
-                bizType: "microsoft_resource" | "domain_resource";
+                bizType: "microsoft_resource" | "icloud_resource" | "domain_resource";
                 /** @description Resource ID matching bizType. */
                 bizId: number;
                 kind?: components["schemas"]["AdminTaskKind"];
@@ -20194,7 +20403,7 @@ export interface operations {
         parameters: {
             query: {
                 /** @description Resource type; defaults to microsoft for backward compatibility. */
-                type?: "microsoft" | "domain";
+                type?: "microsoft" | "icloud" | "domain";
                 resourceId: number;
                 search?: string;
                 offset?: number;
@@ -20234,7 +20443,7 @@ export interface operations {
             query: {
                 resourceId: number;
                 /** @description Resource type; defaults to microsoft for backward compatibility. */
-                type?: "microsoft" | "domain";
+                type?: "microsoft" | "icloud" | "domain";
             };
             header?: never;
             path: {

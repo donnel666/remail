@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const apiMocks = vi.hoisted(() => ({
   DELETE: vi.fn(),
   GET: vi.fn(),
+  PATCH: vi.fn(),
   POST: vi.fn(),
 }));
 const idempotencyMock = vi.hoisted(() => vi.fn());
@@ -22,10 +23,14 @@ vi.mock("./idempotency", () => ({
 import {
   batchAdminICloudResourcesByFilter,
   batchAdminICloudResourcesByIds,
+  createAdminICloudAliases,
   deleteAdminICloudResource,
+  getAdminICloudResourceDetail,
   importAdminICloudResources,
   listAdminICloudAliases,
   listAdminICloudResources,
+  listAdminICloudTasks,
+  updateAdminICloudResource,
   validateAdminICloudResource,
   waitForAdminICloudResourceImport,
   type AdminICloudImportResponse,
@@ -153,6 +158,10 @@ describe("admin iCloud API adapter", () => {
     apiMocks.GET.mockResolvedValueOnce({
       data: { items: [], total: 0, offset: 0, limit: 20 },
     });
+    apiMocks.GET.mockResolvedValueOnce({ data: { id: 7, aliasLimit: 750 } });
+    apiMocks.GET.mockResolvedValueOnce({
+      data: { items: [], total: 0, succeeded: 0, offset: 0, limit: 20 },
+    });
     apiMocks.POST.mockResolvedValue({
       data: {
         requested: 2,
@@ -168,7 +177,11 @@ describe("admin iCloud API adapter", () => {
     });
 
     await listAdminICloudAliases(7, 20, 10);
+    await getAdminICloudResourceDetail(7);
+    await listAdminICloudTasks(7, 20, 10);
     await validateAdminICloudResource(7, 4);
+    await createAdminICloudAliases(7, 4);
+    await batchAdminICloudResourcesByIds("alias", [7, 8]);
     await batchAdminICloudResourcesByIds("disable", [8, 7, 7, 0]);
     await batchAdminICloudResourcesByFilter("publish", {
       status: "normal",
@@ -180,6 +193,23 @@ describe("admin iCloud API adapter", () => {
       "/v1/admin/icloud/resources/{resourceId}/aliases",
       expect.objectContaining({
         params: { path: { resourceId: 7 }, query: { offset: 20, limit: 10 } },
+      }),
+    );
+    expect(apiMocks.GET).toHaveBeenCalledWith(
+      "/v1/admin/icloud/resources/{resourceId}",
+      expect.objectContaining({ params: { path: { resourceId: 7 } } }),
+    );
+    expect(apiMocks.GET).toHaveBeenCalledWith(
+      "/v1/admin/tasks",
+      expect.objectContaining({
+        params: {
+          query: {
+            bizType: "icloud_resource",
+            bizId: 7,
+            offset: 20,
+            limit: 10,
+          },
+        },
       }),
     );
     expect(apiMocks.POST).toHaveBeenNthCalledWith(
@@ -198,6 +228,23 @@ describe("admin iCloud API adapter", () => {
     );
     expect(apiMocks.POST).toHaveBeenNthCalledWith(
       2,
+      "/v1/admin/icloud/resources/{resourceId}/aliases",
+      expect.objectContaining({
+        params: expect.objectContaining({
+          path: { resourceId: 7 },
+          query: { version: 4 },
+        }),
+      }),
+    );
+    expect(apiMocks.POST).toHaveBeenNthCalledWith(
+      3,
+      "/v1/admin/icloud/resources/batch/alias",
+      expect.objectContaining({
+        body: { selection: { mode: "ids", resourceIds: [7, 8] } },
+      }),
+    );
+    expect(apiMocks.POST).toHaveBeenNthCalledWith(
+      4,
       "/v1/admin/icloud/resources/batch/disable",
       expect.objectContaining({
         body: { selection: { mode: "ids", resourceIds: [8, 7] } },
@@ -210,7 +257,7 @@ describe("admin iCloud API adapter", () => {
       }),
     );
     expect(apiMocks.POST).toHaveBeenNthCalledWith(
-      3,
+      5,
       "/v1/admin/icloud/resources/batch/publish",
       expect.objectContaining({
         body: {
@@ -242,6 +289,40 @@ describe("admin iCloud API adapter", () => {
           query: { version: 4 },
         }),
       }),
+    );
+  });
+
+  it("patches safe fields and complete write-only credentials with command headers", async () => {
+    apiMocks.PATCH.mockResolvedValueOnce({
+      data: { resourceId: 7, version: 5, status: "pending", forSale: false },
+    });
+
+    await updateAdminICloudResource(7, {
+      version: 4,
+      ownerId: 101,
+      credentials: {
+        host: "www.icloud.com",
+        dsid: "dsid",
+        clientId: "client",
+        clientBuildNumber: "build",
+        clientMasteringNumber: "master",
+        cookie: "X-APPLE-WEBAUTH-TOKEN=value; X-APPLE-WEBAUTH-USER=value",
+      },
+    });
+
+    expect(apiMocks.PATCH).toHaveBeenCalledWith(
+      "/v1/admin/icloud/resources/{resourceId}",
+      {
+        body: expect.objectContaining({ version: 4, ownerId: 101 }),
+        params: {
+          header: {
+            "X-CSRF-Token": "admin-csrf",
+            "Idempotency-Key": "icloud-command-1",
+          },
+          path: { resourceId: 7 },
+        },
+        signal: undefined,
+      },
     );
   });
 

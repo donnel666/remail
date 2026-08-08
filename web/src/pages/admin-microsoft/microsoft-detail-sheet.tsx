@@ -342,7 +342,7 @@ function CredentialDiagnostics({
   );
 }
 
-function ServerPaginatedDrawerTable({
+export function ServerPaginatedDrawerTable({
   columns,
   dataSource,
   emptyDescription,
@@ -545,8 +545,16 @@ function AliasPanel({
   );
 }
 
-function RelatedOrdersTable({ resourceId, t }: { resourceId: number; t: TFunction }) {
-  const pageState = useAdminMicrosoftAllocationPage(resourceId);
+export function RelatedOrdersTable({
+  resourceId,
+  resourceType = "microsoft",
+  t,
+}: {
+  resourceId: number;
+  resourceType?: "microsoft" | "icloud";
+  t: TFunction;
+}) {
+  const pageState = useAdminMicrosoftAllocationPage(resourceId, resourceType);
 
   useEffect(() => {
     if (pageState.error) {
@@ -944,23 +952,27 @@ function mailboxOf(message: MailSummary): AdminMicrosoftMailboxKind {
   return "mailbox" in message ? message.mailbox : "main";
 }
 
-function ResourceMailsPanel({
+export function ResourceMailsPanel({
   auxiliary = false,
   emptyDescription,
   extraOffset = 0,
+  fetchEnabled = true,
   fetchDisabled = false,
   hideMailboxMeta = false,
   onRefresh,
   resourceId,
+  resourceType = "microsoft",
   t,
 }: {
   auxiliary?: boolean;
   emptyDescription?: string;
   extraOffset?: number;
+  fetchEnabled?: boolean;
   fetchDisabled?: boolean;
   hideMailboxMeta?: boolean;
   onRefresh?: () => void | Promise<void>;
   resourceId: number;
+  resourceType?: "microsoft" | "icloud";
   t: TFunction;
 }) {
   const [search, setSearch] = useState("");
@@ -982,7 +994,7 @@ function ResourceMailsPanel({
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<MailDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  const listScope = `${auxiliary}\u0000${resourceId}\u0000${debouncedSearch}\u0000${pageSize}`;
+  const listScope = `${auxiliary}\u0000${resourceType}\u0000${resourceId}\u0000${debouncedSearch}\u0000${pageSize}`;
   const listScopeRef = useRef(listScope);
 
   useEffect(() => {
@@ -995,7 +1007,7 @@ function ResourceMailsPanel({
     setSelectedId(null);
     setSelectedDetail(null);
     setAddressFilter("all");
-  }, [auxiliary, debouncedSearch, pageSize, resourceId]);
+  }, [auxiliary, debouncedSearch, pageSize, resourceId, resourceType]);
 
   useEffect(
     () => () => {
@@ -1025,7 +1037,8 @@ function ResourceMailsPanel({
           debouncedSearch,
           pageSize,
           cursor ?? undefined,
-          controller.signal
+          controller.signal,
+          resourceType
         );
     void request
       .then((response) => {
@@ -1056,7 +1069,9 @@ function ResourceMailsPanel({
           const message = getIamErrorMessage(
             t,
             error,
-            "Microsoft mail load failed."
+              resourceType === "icloud"
+                ? "iCloud mail load failed."
+              : "Microsoft mail load failed."
           );
           setListError(message);
           Toast.error(message);
@@ -1066,7 +1081,7 @@ function ResourceMailsPanel({
         if (!controller.signal.aborted) setListLoading(false);
       });
     return () => controller.abort();
-  }, [auxiliary, cursor, debouncedSearch, listScope, pageSize, resourceId, retryKey, t]);
+  }, [auxiliary, cursor, debouncedSearch, listScope, pageSize, resourceId, resourceType, retryKey, t]);
 
   const addresses = useMemo(() => {
     const map = new Map<string, AdminMicrosoftMailboxKind>();
@@ -1104,21 +1119,34 @@ function ResourceMailsPanel({
     setDetailLoading(true);
     const request = auxiliary
       ? getAdminMicrosoftBindingMessage(resourceId, selectedId, controller.signal)
-      : getAdminMicrosoftMessage(resourceId, selectedId, controller.signal);
+      : getAdminMicrosoftMessage(
+          resourceId,
+          selectedId,
+          controller.signal,
+          resourceType
+        );
     void request
       .then((message) => {
         if (!controller.signal.aborted) setSelectedDetail(message);
       })
       .catch((error: unknown) => {
         if (!controller.signal.aborted) {
-          Toast.error(getIamErrorMessage(t, error, "Microsoft mail detail load failed."));
+          Toast.error(
+            getIamErrorMessage(
+              t,
+              error,
+                resourceType === "icloud"
+                  ? "iCloud mail detail load failed."
+                : "Microsoft mail detail load failed."
+            )
+          );
         }
       })
       .finally(() => {
         if (!controller.signal.aborted) setDetailLoading(false);
       });
     return () => controller.abort();
-  }, [auxiliary, resourceId, selectedId, t]);
+  }, [auxiliary, resourceId, resourceType, selectedId, t]);
 
   const loadMore = useCallback(
     (element: HTMLDivElement) => {
@@ -1137,7 +1165,7 @@ function ResourceMailsPanel({
     fetchPollAbortRef.current?.abort();
     fetchPollAbortRef.current = controller;
     try {
-      const accepted = await fetchAdminMicrosoftMail(resourceId);
+      const accepted = await fetchAdminMicrosoftMail(resourceId, resourceType);
       Toast.success(t("Mail fetch submitted."));
       let task = accepted.task;
       let lastPollError: unknown = null;
@@ -1163,7 +1191,13 @@ function ResourceMailsPanel({
         lastPollError &&
         (task.status === "queued" || task.status === "running")
       ) {
-        Toast.error(getIamErrorMessage(t, lastPollError, "Microsoft task load failed."));
+        Toast.error(
+          getIamErrorMessage(
+            t,
+            lastPollError,
+            resourceType === "icloud" ? "iCloud task load failed." : "Microsoft task load failed."
+          )
+        );
       }
       if (["failed", "uncertain", "canceled"].includes(task.status)) {
         Toast.error(t("Fetch failed"));
@@ -1175,7 +1209,13 @@ function ResourceMailsPanel({
         await onRefresh?.();
       } catch (error) {
         Toast.error(
-          getIamErrorMessage(t, error, "Admin Microsoft resources load failed.")
+          getIamErrorMessage(
+            t,
+            error,
+            resourceType === "icloud"
+              ? "iCloud resources load failed."
+              : "Admin Microsoft resources load failed."
+          )
         );
       }
     } catch (error) {
@@ -1215,7 +1255,7 @@ function ResourceMailsPanel({
               <span>{t("Mail count")}</span>
               <span className="font-mono tabular-nums">{total}</span>
             </div>
-            {auxiliary ? null : (
+            {auxiliary || !fetchEnabled ? null : (
               <Button
                 disabled={fetchDisabled || fetchLoading}
                 loading={fetchLoading}
@@ -1272,7 +1312,8 @@ function ResourceMailsPanel({
             />
           ) : (
             filtered.map((message) => (
-              <div
+              <button
+                aria-pressed={selected?.id === message.id}
                 className={`block w-full border-b border-[var(--semi-color-border)] px-3 py-2.5 text-left transition-colors ${
                   selected?.id === message.id
                     ? "bg-[var(--semi-color-primary-light-default)]"
@@ -1280,41 +1321,34 @@ function ResourceMailsPanel({
                 }`}
                 key={message.id}
                 onClick={() => setSelectedId(message.id)}
+                type="button"
               >
-                <div className="flex items-center justify-between gap-2">
-                  <button
-                    aria-pressed={selected?.id === message.id}
-                    className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-sm font-medium text-[var(--semi-color-text-0)]"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setSelectedId(message.id);
-                    }}
-                    type="button"
-                  >
+                <span className="flex items-center justify-between gap-2">
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--semi-color-text-0)]">
                     {message.subject}
-                  </button>
+                  </span>
                   {message.verificationCode ? (
-                    <span className="inline-flex min-w-0 max-w-[45%] shrink-0">
-                      <CopyableEllipsisText
-                        className="font-mono text-xs font-semibold text-[var(--semi-color-success)]"
-                        text={message.verificationCode}
-                      />
+                    <span
+                      className="min-w-0 max-w-[45%] shrink-0 truncate font-mono text-xs font-semibold text-[var(--semi-color-success)]"
+                      title={message.verificationCode}
+                    >
+                      {message.verificationCode}
                     </span>
                   ) : (
                     <span className="shrink-0">{renderMessageStatusTag(message.status, t)}</span>
                   )}
-                </div>
-                <div className="mt-1 flex min-w-0 items-center gap-1.5">
+                </span>
+                <span className="mt-1 flex min-w-0 items-center gap-1.5">
                   {hideMailboxMeta ? null : renderMailboxTag(mailboxOf(message), t)}
                   <span className="min-w-0 flex-1 truncate text-xs text-[var(--semi-color-text-2)]">
                     {message.recipient}
                   </span>
-                </div>
-                <div className="mt-1 flex items-center justify-between gap-2 text-xs text-[var(--semi-color-text-2)]">
+                </span>
+                <span className="mt-1 flex items-center justify-between gap-2 text-xs text-[var(--semi-color-text-2)]">
                   <span className="min-w-0 flex-1 truncate">{message.sender}</span>
                   <span className="shrink-0">{formatTime(message.receivedAt)}</span>
-                </div>
-              </div>
+                </span>
+              </button>
             ))
           )}
           {listError && messages.length > 0 ? (

@@ -42,6 +42,7 @@ func TestListAdminICloudResourcesReturnsOnlySafeOperationalFacts(t *testing.T) {
 	}
 
 	now := time.Date(2026, 8, 7, 8, 0, 0, 0, time.UTC)
+	probeStartedAt := now.Add(-time.Minute)
 	models := []any{
 		&iCloudAdminTestGroup{ID: 3, Name: "Suppliers"},
 		&iCloudAdminTestUser{ID: 7, Email: "owner@example.com", Nickname: "Owner", Status: "active", Role: "supplier", UserGroupID: 3},
@@ -54,8 +55,10 @@ func TestListAdminICloudResourcesReturnsOnlySafeOperationalFacts(t *testing.T) {
 			DSID: "secret-dsid", ClientID: "secret-client", ClientBuildNumber: "build", ClientMasteringNumber: "master",
 			Cookie: "secret-cookie", GmailResourceID: 11, SelectedForwardTo: "target@gmail.com",
 			ExpireAt: now.Add(30 * 24 * time.Hour), Status: iCloudResourceNormal, SessionStatus: iCloudSessionValid,
-			AliasCount: iCloudMaxAliases, CredentialRevision: 1, ValidationGeneration: 1,
-			CredentialUpdatedAt: now, CreatedAt: now.Add(-2 * time.Hour), UpdatedAt: now,
+			AliasCount: iCloudMaxAliases - 1, AliasProvisionCandidate: "candidate@icloud.com",
+			CredentialRevision: 3, ValidationGeneration: 4, ValidationFailures: 2, SessionFailures: 1,
+			DeliveryProbeStartedAt: &probeStartedAt,
+			CredentialUpdatedAt:    now, CreatedAt: now.Add(-2 * time.Hour), UpdatedAt: now,
 		},
 		&iCloudResourceModel{
 			ID: 2, ResourceType: "icloud", PrimaryEmail: "pending@me.com", Host: "www.icloud.com",
@@ -85,7 +88,7 @@ func TestListAdminICloudResourcesReturnsOnlySafeOperationalFacts(t *testing.T) {
 		t.Fatalf("result size = total %d items %d", result.Total, len(result.Items))
 	}
 	item := result.Items[0]
-	if item.PrimaryEmail != "main@icloud.com" || item.GmailEmail != "target@gmail.com" || item.AliasCount != iCloudMaxAliases {
+	if item.PrimaryEmail != "main@icloud.com" || item.GmailEmail != "target@gmail.com" || item.AliasCount != iCloudMaxAliases-1 {
 		t.Fatalf("unexpected safe item: %#v", item)
 	}
 	if item.Owner.ID != 7 || item.Owner.GroupName != "Suppliers" || !item.Owner.Enabled {
@@ -101,6 +104,24 @@ func TestListAdminICloudResourcesReturnsOnlySafeOperationalFacts(t *testing.T) {
 	for _, secret := range []string{"secret-cookie", "secret-dsid", "secret-client"} {
 		if bytes.Contains(payload, []byte(secret)) {
 			t.Fatalf("safe response exposed %q: %s", secret, payload)
+		}
+	}
+	detail, err := service.GetAdminICloudResource(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("get resource detail: %v", err)
+	}
+	if detail.Version != 4 || detail.AliasLimit != iCloudMaxAliases || detail.AliasRemaining != 1 ||
+		!detail.AliasProvisioning || detail.CredentialRevision != 3 || detail.ValidationGeneration != 4 ||
+		detail.ValidationFailures != 2 || detail.SessionFailures != 1 || detail.DeliveryProbeStartedAt == nil {
+		t.Fatalf("unexpected safe detail: %#v", detail)
+	}
+	detailPayload, err := json.Marshal(detail)
+	if err != nil {
+		t.Fatalf("marshal safe detail: %v", err)
+	}
+	for _, secret := range []string{"secret-cookie", "secret-dsid", "secret-client"} {
+		if bytes.Contains(detailPayload, []byte(secret)) {
+			t.Fatalf("safe detail exposed %q: %s", secret, detailPayload)
 		}
 	}
 

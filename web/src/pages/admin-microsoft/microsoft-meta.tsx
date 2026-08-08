@@ -184,8 +184,10 @@ export function ownerRoleLabel(role: AdminMicrosoftOwnerRole) {
 
 export function taskKindLabel(kind: AdminMicrosoftAsyncTaskKind) {
   switch (kind) {
-	case "import":
+    case "import":
       return "Import";
+    case "validation":
+      return "Validation";
     case "alias":
       return "Alias replenishment";
     case "token":

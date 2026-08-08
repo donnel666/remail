@@ -300,5 +300,26 @@ type iCloudValidationTask struct {
 	OwnerUserID                uint   `json:"ownerUserId"`
 	ValidationGeneration       uint64 `json:"validationGeneration"`
 	ExpectedCredentialRevision uint64 `json:"expectedCredentialRevision"`
+	MaintenanceRunID           uint64 `json:"maintenanceRunId,omitempty"`
+	MaintenanceKind            string `json:"maintenanceKind,omitempty"`
 	RequestID                  string `json:"requestId,omitempty"`
 }
+
+type iCloudMaintenanceRunModel struct {
+	ID                   uint64     `gorm:"column:id;primaryKey;autoIncrement"`
+	ResourceID           uint       `gorm:"column:resource_id;not null;uniqueIndex:uk_icloud_maintenance_resource_generation,priority:1"`
+	ValidationGeneration uint64     `gorm:"column:validation_generation;not null;uniqueIndex:uk_icloud_maintenance_resource_generation,priority:2"`
+	Kind                 string     `gorm:"column:kind;type:varchar(24);not null"`
+	Status               string     `gorm:"column:status;type:varchar(24);not null"`
+	Attempts             int        `gorm:"column:attempts;not null"`
+	MaxAttempts          int        `gorm:"column:max_attempts;not null"`
+	CredentialRevision   uint64     `gorm:"column:credential_revision;not null"`
+	QueuedAt             time.Time  `gorm:"column:queued_at;not null"`
+	StartedAt            *time.Time `gorm:"column:started_at"`
+	FinishedAt           *time.Time `gorm:"column:finished_at"`
+	LastSafeError        string     `gorm:"column:last_safe_error;type:varchar(500);not null"`
+	CreatedAt            time.Time  `gorm:"column:created_at;not null"`
+	UpdatedAt            time.Time  `gorm:"column:updated_at;not null"`
+}
+
+func (iCloudMaintenanceRunModel) TableName() string { return "icloud_maintenance_runs" }

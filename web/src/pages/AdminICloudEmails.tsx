@@ -10,6 +10,7 @@ import {
   SideSheet,
   Space,
   Spin,
+  Switch,
   Table,
   Tabs,
   Tag,
@@ -23,7 +24,7 @@ import {
   IllustrationNoResult,
   IllustrationNoResultDark,
 } from "@douyinfe/semi-illustrations";
-import { Layers, SlidersHorizontal } from "lucide-react";
+import { AtSign, FileText, Layers, ShieldCheck, SlidersHorizontal, Upload } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { CardPro } from "@/components/semi/card-pro";
@@ -49,16 +50,20 @@ import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import {
   batchAdminICloudResourcesByFilter,
   batchAdminICloudResourcesByIds,
+  createAdminICloudAliases,
   deleteAdminICloudResource,
   disableAdminICloudResource,
   enableAdminICloudResource,
+  getAdminICloudResourceDetail,
   importAdminICloudResources,
   listAdminICloudAliases,
   listAdminICloudOwners,
   listAdminICloudResources,
+  listAdminICloudTasks,
   publishAdminICloudResource,
   recoverAdminICloudResource,
   unpublishAdminICloudResource,
+  updateAdminICloudResource,
   validateAdminICloudResource,
   type AdminICloudAliasItem,
   type AdminICloudBatchAction,
@@ -66,11 +71,15 @@ import {
   type AdminICloudImportErrorStrategy,
   type AdminICloudMutationResponse,
   type AdminICloudOwner,
+  type AdminICloudResourceDetail,
   type AdminICloudResourceItem,
   type AdminICloudResourceFacets,
   type AdminICloudResourceListFilter,
   type AdminICloudResourceStatus,
   type AdminICloudSessionStatus,
+  type AdminICloudTask,
+  type AdminICloudTaskList,
+  type AdminICloudUpdateRequest,
 } from "@/lib/admin-icloud-api";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 
@@ -81,7 +90,14 @@ import {
   OwnerIdentity,
   formatTime,
   ownerRoleLabel,
+  renderTaskStatusTag,
+  taskKindLabel,
 } from "./admin-microsoft/microsoft-meta";
+import {
+  RelatedOrdersTable,
+  ResourceMailsPanel,
+  ServerPaginatedDrawerTable,
+} from "./admin-microsoft/microsoft-detail-sheet";
 import {
   DATE_RANGE_DROPDOWN_CLASS,
   createDateRangePresets,
@@ -99,11 +115,16 @@ type StatusFilter = "all" | AdminICloudResourceStatus;
 type SessionFilter = "all" | AdminICloudSessionStatus;
 type BooleanFilter = "all" | "yes" | "no";
 type RowAction =
-  | "validate"
   | "toggle"
   | "publish"
   | "delete"
   | "recover";
+type ImportMode = "paste" | "file";
+type ICloudMaintenanceAction = "validate" | "alias";
+type ICloudMaintenanceTarget =
+  | { item: AdminICloudResourceItem; mode: "row" }
+  | { count: number; mode: "ids"; resourceIds: number[] }
+  | { count: number; filter: AdminICloudResourceListFilter; mode: "filter" };
 
 const EMPTY_FACETS: AdminICloudResourceFacets = {
   status: {
@@ -276,7 +297,7 @@ function OwnerSelect({
   );
 }
 
-function ImportICloudModal({
+export function ImportICloudModal({
   onCancel,
   onImported,
   owners,
@@ -288,11 +309,14 @@ function ImportICloudModal({
   visible: boolean;
 }) {
   const { t } = useTranslation();
+  const [mode, setMode] = useState<ImportMode>("paste");
   const [content, setContent] = useState("");
+  const [file, setFile] = useState<File | null>(null);
   const [ownerId, setOwnerId] = useState<number | undefined>();
   const [errorStrategy, setErrorStrategy] =
     useState<AdminICloudImportErrorStrategy>("skip");
   const [submitting, setSubmitting] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
   const previousVisible = useRef(false);
   const lineCount = useMemo(
     () => content.split(/\r?\n/).filter((line) => line.trim()).length,
@@ -303,7 +327,10 @@ function ImportICloudModal({
     const opened = visible && !previousVisible.current;
     previousVisible.current = visible;
     if (!opened) return;
+    setMode("paste");
     setContent("");
+    setFile(null);
+    if (fileRef.current) fileRef.current.value = "";
     setOwnerId(undefined);
     setErrorStrategy("skip");
   }, [visible]);
@@ -318,14 +345,30 @@ function ImportICloudModal({
       Toast.warning(t("Please select an owner."));
       return;
     }
-    if (!lineCount) {
+    let sourceContent = content;
+    if (mode === "file") {
+      if (!file) {
+        Toast.warning(t("Please select a TXT file."));
+        return;
+      }
+      try {
+        sourceContent = await file.text();
+      } catch (error) {
+        Toast.error(getIamErrorMessage(t, error, "iCloud import failed."));
+        return;
+      }
+    }
+    const sourceLineCount = sourceContent
+      .split(/\r?\n/)
+      .filter((line) => line.trim()).length;
+    if (!sourceLineCount) {
       Toast.warning(t("Please enter iCloud resources."));
       return;
     }
     setSubmitting(true);
     try {
       const result = await importAdminICloudResources({
-        content,
+        content: sourceContent,
         errorStrategy,
         ownerId,
       });
@@ -383,6 +426,35 @@ function ImportICloudModal({
 
         <div className="grid grid-cols-2 gap-2">
           <button
+            aria-pressed={mode === "paste"}
+            className={switchButtonClass(mode === "paste")}
+            onClick={() => {
+              setMode("paste");
+              setFile(null);
+              if (fileRef.current) fileRef.current.value = "";
+            }}
+            type="button"
+          >
+            <FileText size={16} />
+            {t("Manual input")}
+          </button>
+          <button
+            aria-pressed={mode === "file"}
+            className={switchButtonClass(mode === "file")}
+            onClick={() => {
+              setMode("file");
+              setContent("");
+            }}
+            type="button"
+          >
+            <Upload size={16} />
+            {t("TXT file")}
+          </button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            aria-pressed={errorStrategy === "skip"}
             className={switchButtonClass(errorStrategy === "skip")}
             onClick={() => setErrorStrategy("skip")}
             type="button"
@@ -390,6 +462,7 @@ function ImportICloudModal({
             {t("Skip errors")}
           </button>
           <button
+            aria-pressed={errorStrategy === "abort"}
             className={switchButtonClass(errorStrategy === "abort")}
             onClick={() => setErrorStrategy("abort")}
             type="button"
@@ -398,30 +471,59 @@ function ImportICloudModal({
           </button>
         </div>
 
-        <label className="block">
-          <span className="mb-1.5 flex items-center justify-between text-sm font-medium text-[var(--semi-color-text-0)]">
-            <span>{t("iCloud resource entries")} *</span>
-            <Text size="small" type="tertiary">
-              {t("Parsed entries", { count: lineCount })}
-            </Text>
-          </span>
-          <TextArea
-            className="font-mono"
-            onChange={setContent}
-            placeholder="primary@icloud.com----host----dsid----clientId----clientBuildNumber----clientMasteringNumber----Cookie----gmail@gmail.com"
-            rows={8}
-            style={{ height: IMPORT_ENTRY_AREA_HEIGHT, resize: "none" }}
-            value={content}
-          />
-        </label>
+        <div>
+          {mode === "paste" ? (
+            <label className="block">
+              <span className="mb-1.5 flex items-center justify-between text-sm font-medium text-[var(--semi-color-text-0)]">
+                <span>{t("iCloud resource entries")} *</span>
+                <Text size="small" type="tertiary">
+                  {t("Parsed entries", { count: lineCount })}
+                </Text>
+              </span>
+              <TextArea
+                className="font-mono"
+                onChange={setContent}
+                placeholder="primary@icloud.com----host----dsid----clientId----clientBuildNumber----clientMasteringNumber----Cookie----gmail@gmail.com"
+                rows={8}
+                style={{ height: IMPORT_ENTRY_AREA_HEIGHT, resize: "none" }}
+                value={content}
+              />
+            </label>
+          ) : (
+            <>
+              <input
+                accept=".txt,text/plain"
+                className="hidden"
+                onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+                ref={fileRef}
+                type="file"
+              />
+              <button
+                aria-label={t("Select TXT file")}
+                className="flex w-full cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-[var(--semi-color-border)] bg-[var(--semi-color-fill-0)] p-6 text-center transition-colors hover:bg-[var(--semi-color-fill-1)]"
+                onClick={() => fileRef.current?.click()}
+                style={{ height: IMPORT_ENTRY_AREA_HEIGHT }}
+                type="button"
+              >
+                <FileText className="mb-2 size-8 text-[var(--semi-color-text-2)]" />
+                <Text strong>{file ? file.name : t("Select TXT file")}</Text>
+                <Text size="small" type="tertiary">
+                  {file
+                    ? `${(file.size / 1024).toFixed(1)} KB`
+                    : t("Supports .txt files, one entry per line")}
+                </Text>
+              </button>
+            </>
+          )}
+        </div>
 
         <div className="rounded-xl border border-[var(--semi-color-border)] bg-[var(--semi-color-fill-0)] p-3">
           <div className="mb-1 text-xs font-medium text-[var(--semi-color-text-0)]">
             {t("Supported format")}
           </div>
-          <pre className="overflow-x-auto font-mono text-xs leading-relaxed text-[var(--semi-color-text-2)]">
+          <code className="block break-all whitespace-normal font-mono text-xs leading-relaxed text-[var(--semi-color-text-2)]">
             primaryEmail----host----dsid----clientId----clientBuildNumber----clientMasteringNumber----Cookie----Gmail
-          </pre>
+          </code>
         </div>
 
         <div className="rounded-lg border border-[var(--semi-color-border)] bg-[var(--semi-color-fill-0)] px-3 py-2 text-xs leading-5 text-[var(--semi-color-text-2)]">
@@ -434,30 +536,665 @@ function ImportICloudModal({
   );
 }
 
-function ICloudDetailSheet({
+export function EditICloudModal({
+  canOperate,
+  credentialsOnly = false,
+  onCancel,
+  onSaved,
+  owners,
+  target,
+}: {
+  canOperate: boolean;
+  credentialsOnly?: boolean;
+  onCancel: () => void;
+  onSaved: (resourceId: number) => void | Promise<void>;
+  owners: AdminICloudOwner[];
+  target: AdminICloudResourceItem | null;
+}) {
+  const { t } = useTranslation();
+  const [primaryEmail, setPrimaryEmail] = useState("");
+  const [ownerId, setOwnerId] = useState<number | undefined>();
+  const [forSale, setForSale] = useState(false);
+  const [host, setHost] = useState("");
+  const [dsid, setDsid] = useState("");
+  const [clientId, setClientId] = useState("");
+  const [clientBuildNumber, setClientBuildNumber] = useState("");
+  const [clientMasteringNumber, setClientMasteringNumber] = useState("");
+  const [cookie, setCookie] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const credentialPlaceholder = t(credentialsOnly ? "Required" : "Leave blank to keep current");
+
+  useEffect(() => {
+    if (!target) return;
+    setPrimaryEmail(target.primaryEmail);
+    setOwnerId(target.owner.id);
+    setForSale(target.forSale);
+    setHost("");
+    setDsid("");
+    setClientId("");
+    setClientBuildNumber("");
+    setClientMasteringNumber("");
+    setCookie("");
+  }, [target]);
+
+  const submit = async () => {
+    if (!target || (!credentialsOnly && !ownerId)) return;
+    const nextEmail = primaryEmail.trim().toLowerCase();
+    if (!credentialsOnly && !nextEmail) {
+      Toast.warning(t("A valid iCloud email address is required."));
+      return;
+    }
+    const credentialValues = [
+      host,
+      dsid,
+      clientId,
+      clientBuildNumber,
+      clientMasteringNumber,
+      cookie,
+    ].map((value) => value.trim());
+    const wantsCredentialChange = credentialValues.some(Boolean);
+    const emailChanged = !credentialsOnly && nextEmail !== target.primaryEmail;
+    const requiresCredentials = credentialsOnly || emailChanged;
+    if (requiresCredentials && (!canOperate || !credentialValues.every(Boolean))) {
+      Toast.warning(t("Changing the primary email or replacing credentials requires every iCloud credential field."));
+      return;
+    }
+    if (wantsCredentialChange && (!canOperate || !credentialValues.every(Boolean))) {
+      Toast.warning(t("Complete every iCloud credential field or leave all of them blank."));
+      return;
+    }
+
+    const request: AdminICloudUpdateRequest = { version: target.version };
+    if (!credentialsOnly) {
+      if (emailChanged) request.primaryEmail = nextEmail;
+      if (ownerId !== target.owner.id) request.ownerId = ownerId;
+      if (canOperate && forSale !== target.forSale) request.forSale = forSale;
+    }
+    if (requiresCredentials || wantsCredentialChange) {
+      request.credentials = {
+        host: credentialValues[0],
+        dsid: credentialValues[1],
+        clientId: credentialValues[2],
+        clientBuildNumber: credentialValues[3],
+        clientMasteringNumber: credentialValues[4],
+        cookie: credentialValues[5],
+      };
+    }
+    if (Object.keys(request).length === 1) {
+      Toast.info(t("No changes to save."));
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await updateAdminICloudResource(target.id, request);
+      Toast.success(t(credentialsOnly
+        ? "Credentials replaced and validation queued."
+        : "iCloud resource updated."));
+      await onSaved(target.id);
+      onCancel();
+    } catch (error) {
+      Toast.error(getIamErrorMessage(t, error, "iCloud resource update failed."));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal
+      cancelText={t("Cancel")}
+      centered
+      confirmLoading={submitting}
+      onCancel={onCancel}
+      onOk={() => void submit()}
+      okText={t(credentialsOnly ? "Replace credentials" : "Save")}
+      title={t(credentialsOnly ? "Replace iCloud credentials" : "Edit iCloud resource")}
+      visible={Boolean(target)}
+      width="min(680px, calc(100vw - 32px))"
+    >
+      {target ? (
+        <div className="space-y-4 py-1">
+          {credentialsOnly ? (
+            <>
+              <div className="rounded-lg border border-[var(--semi-color-warning-light-active)] bg-[var(--semi-color-warning-light-default)] px-3 py-2 text-sm text-[var(--semi-color-text-0)]">
+                {t("All credential fields are write-only. Existing values are never displayed, and submitting replaces the complete credential set.")}
+              </div>
+              <InfoItem
+                label={t("Primary email")}
+                value={<span className="font-mono">{target.primaryEmail}</span>}
+              />
+            </>
+          ) : (
+            <>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block">
+              <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
+                {t("Primary email")} *
+              </span>
+              <Input
+                className="font-mono"
+                disabled={!canOperate}
+                onChange={(value) => setPrimaryEmail(String(value))}
+                placeholder="name@icloud.com"
+                value={primaryEmail}
+              />
+            </label>
+            <div>
+              <div className="mb-1.5 text-sm font-medium text-[var(--semi-color-text-0)]">
+                {t("Linked Gmail")}
+              </div>
+              <div className="flex h-8 items-center rounded-md bg-[var(--semi-color-fill-0)] px-3 font-mono text-sm text-[var(--semi-color-text-1)]">
+                {target.gmailEmail}
+              </div>
+            </div>
+          </div>
+
+          <label className="block">
+            <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
+              {t("Owner")}
+            </span>
+            <OwnerSelect onChange={setOwnerId} owners={owners} t={t} value={ownerId} />
+          </label>
+
+          <div className="text-xs leading-5 text-[var(--semi-color-text-2)]">
+            {t("Changing the primary email requires the complete write-only credential set and re-queues validation.")}
+          </div>
+
+          {canOperate ? (
+            <div className="flex items-center justify-between rounded-lg bg-[var(--semi-color-fill-0)] px-3 py-2.5">
+              <div>
+                <div className="text-sm font-medium text-[var(--semi-color-text-0)]">
+                  {t("Public sale")}
+                </div>
+                <div className="text-xs text-[var(--semi-color-text-2)]">
+                  {t("Credential replacement automatically converts the resource to private supply.")}
+                </div>
+              </div>
+              <Switch
+                aria-label={t("Public sale")}
+                checked={forSale}
+                onChange={setForSale}
+                size="small"
+              />
+            </div>
+          ) : null}
+            </>
+          )}
+
+          {canOperate ? (
+            <div className="rounded-lg border border-[var(--semi-color-border)] p-3">
+              <div className="mb-1 text-sm font-medium text-[var(--semi-color-text-0)]">
+                {t("Credentials")}
+              </div>
+              <div className="mb-3 text-xs leading-5 text-[var(--semi-color-text-2)]">
+                {t(credentialsOnly
+                  ? "All credential fields are required and replace the complete HME credential set."
+                  : "Write-only. Leave every field blank to keep the current values; complete all fields to replace the HME credential set and re-queue validation.")}
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block sm:col-span-2">
+                  <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
+                    {t("Host")}
+                  </span>
+                  <Input
+                    className="font-mono"
+                    onChange={(value) => setHost(String(value))}
+                    placeholder="p119-maildomainws.icloud.com"
+                    value={host}
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
+                    {t("DSID")}
+                  </span>
+                  <Input
+                    autoComplete="off"
+                    mode="password"
+                    onChange={(value) => setDsid(String(value))}
+                    placeholder={credentialPlaceholder}
+                    value={dsid}
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
+                    {t("Client ID")}
+                  </span>
+                  <Input
+                    autoComplete="off"
+                    mode="password"
+                    onChange={(value) => setClientId(String(value))}
+                    placeholder={credentialPlaceholder}
+                    value={clientId}
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
+                    {t("Client build number")}
+                  </span>
+                  <Input
+                    className="font-mono"
+                    onChange={(value) => setClientBuildNumber(String(value))}
+                    placeholder={credentialPlaceholder}
+                    value={clientBuildNumber}
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
+                    {t("Client mastering number")}
+                  </span>
+                  <Input
+                    className="font-mono"
+                    onChange={(value) => setClientMasteringNumber(String(value))}
+                    placeholder={credentialPlaceholder}
+                    value={clientMasteringNumber}
+                  />
+                </label>
+                <label className="block sm:col-span-2">
+                  <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
+                    {t("Cookie")}
+                  </span>
+                  <TextArea
+                    className="font-mono"
+                    onChange={setCookie}
+                    placeholder={credentialPlaceholder}
+                    rows={4}
+                    style={{ resize: "none" }}
+                    value={cookie}
+                  />
+                </label>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </Modal>
+  );
+}
+
+export function ICloudMaintenanceModal({
+  aliasLimit,
+  onCancel,
+  onCompleted,
+  target,
+}: {
+  aliasLimit: number;
+  onCancel: () => void;
+  onCompleted: (resourceId?: number) => void | Promise<void>;
+  target: ICloudMaintenanceTarget | null;
+}) {
+  const { t } = useTranslation();
+  const [selected, setSelected] = useState<ICloudMaintenanceAction>("validate");
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (target) setSelected("validate");
+  }, [target]);
+
+  if (!target) return null;
+
+  const rowDisabled = target.mode === "row" &&
+    (target.item.status === "disabled" || target.item.status === "deleted");
+  const actions = [
+    {
+      description: "Run the complete iCloud health check, session refresh, alias sync and delivery verification.",
+      disabled: rowDisabled,
+      icon: ShieldCheck,
+      key: "validate" as const,
+      label: "Validate resource",
+    },
+    {
+      description: "Queue the fenced iCloud maintenance flow to create and activate missing HME aliases.",
+      disabled: rowDisabled || (target.mode === "row" && target.item.aliasCount >= aliasLimit),
+      icon: AtSign,
+      key: "alias" as const,
+      label: "Create alias",
+    },
+  ];
+  const selectedAction = actions.find((item) => item.key === selected) ?? actions[0];
+  const rowItem = target.mode === "row" ? target.item : null;
+  const maintenanceState = rowItem?.status === "validating"
+    ? "Running"
+    : rowItem?.status === "pending"
+      ? "Queued"
+      : "Idle";
+
+  const submit = async () => {
+    if (!selectedAction || selectedAction.disabled) return;
+    setSubmitting(true);
+    try {
+      // iCloud validation already owns session refresh, alias synchronization,
+      // missing-alias provisioning, and delivery verification as one fenced task.
+      let count = 1;
+      if (target.mode === "row") {
+        if (selected === "alias") {
+          const result = await createAdminICloudAliases(target.item.id, target.item.version);
+          if (!result.changed) {
+            Toast.info(t("Alias target already reached."));
+            await onCompleted(target.item.id);
+            onCancel();
+            return;
+          }
+        } else {
+          await validateAdminICloudResource(target.item.id, target.item.version);
+        }
+      } else {
+        const response = target.mode === "ids"
+          ? await batchAdminICloudResourcesByIds(selected, target.resourceIds)
+          : await batchAdminICloudResourcesByFilter(selected, target.filter);
+        count = response.affected;
+      }
+      Toast.success(t(
+        selected === "alias" ? "Alias creation batch submitted." : "Resource validation batch submitted.",
+        { count },
+      ));
+      await onCompleted(target.mode === "row" ? target.item.id : undefined);
+      onCancel();
+    } catch (error) {
+      Toast.error(getIamErrorMessage(t, error, "iCloud resource operation failed."));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal
+      cancelText={t("Cancel")}
+      centered
+      confirmLoading={submitting}
+      okButtonProps={{ disabled: selectedAction.disabled }}
+      okText={t("Submit maintenance task")}
+      onCancel={onCancel}
+      onOk={() => void submit()}
+      title={t("iCloud resource maintenance")}
+      visible
+      width="min(680px, calc(100vw - 32px))"
+    >
+      <div className="space-y-4 py-1">
+        <div className="flex items-center justify-between gap-3 rounded-lg bg-[var(--semi-color-fill-0)] px-3 py-2">
+          <div>
+            <div className="text-xs text-[var(--semi-color-text-2)]">
+              {t(target.mode === "row" ? "Resource" : "Scope")}
+            </div>
+            <div className="mt-1 break-all text-sm font-medium text-[var(--semi-color-text-0)]">
+              {target.mode === "row"
+                ? target.item.primaryEmail
+                : t(target.mode === "ids" ? "Selected iCloud resources" : "Matching resources", {
+                    count: target.count,
+                  })}
+            </div>
+          </div>
+          {target.mode === "row" ? null : (
+            <Tag color="blue" shape="circle">{target.count}</Tag>
+          )}
+        </div>
+
+        <div className="text-sm leading-6 text-[var(--semi-color-text-1)]">
+          {t("Choose one maintenance operation. Ineligible resources will be skipped and counted by the server.")}
+        </div>
+
+        {rowItem ? (
+          <div className="grid gap-3 rounded-lg border border-[var(--semi-color-border)] p-3 sm:grid-cols-2">
+            <InfoItem
+              label={t("Maintenance status")}
+              value={
+                <Tag
+                  color={maintenanceState === "Running" ? "orange" : maintenanceState === "Queued" ? "blue" : "grey"}
+                  shape="circle"
+                  size="small"
+                >
+                  {t(maintenanceState)}
+                </Tag>
+              }
+            />
+            <InfoItem
+              label={t("Alias count")}
+              value={<AliasCountTag count={rowItem.aliasCount} limit={aliasLimit} />}
+            />
+            <InfoItem label={t("Last checked")} value={formatTime(rowItem.lastCheckedAt)} />
+            <InfoItem label={t("Next run at")} value={formatTime(rowItem.nextValidationAt)} />
+            {rowItem.lastSafeError ? (
+              <div className="sm:col-span-2 rounded-lg bg-[var(--semi-color-warning-light-default)] px-3 py-2 text-sm text-[var(--semi-color-text-0)]">
+                {rowItem.lastSafeError}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          {actions.map((item) => {
+            const Icon = item.icon;
+            const active = selected === item.key;
+            return (
+              <button
+                aria-pressed={active}
+                className={`min-h-32 rounded-xl border p-4 text-left transition-colors ${
+                  item.disabled
+                    ? "cursor-not-allowed border-[var(--semi-color-border)] bg-[var(--semi-color-fill-0)] opacity-60"
+                    : active
+                    ? "border-[var(--semi-color-primary)] bg-[var(--semi-color-primary-light-default)]"
+                    : "cursor-pointer border-[var(--semi-color-border)] bg-[var(--semi-color-bg-2)] hover:border-[var(--semi-color-primary)] hover:bg-[var(--semi-color-fill-0)]"
+                }`}
+                disabled={submitting || item.disabled}
+                key={item.key}
+                onClick={() => setSelected(item.key)}
+                type="button"
+              >
+                <div className="flex items-start gap-3">
+                  <span className="rounded-lg bg-[var(--semi-color-fill-0)] p-2 text-[var(--semi-color-primary)]">
+                    <Icon aria-hidden size={20} />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="font-semibold text-[var(--semi-color-text-0)]">
+                      {t(item.label)}
+                    </span>
+                    <span className="mt-1.5 block text-xs leading-5 text-[var(--semi-color-text-2)]">
+                      {t(item.description)}
+                    </span>
+                  </span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+export function ICloudTasksPanel({
+  refreshGeneration,
+  resourceId,
+}: {
+  refreshGeneration: number;
+  resourceId: number;
+}) {
+  const { t } = useTranslation();
+  const [pageSize, setPageSize] = useSharedPageSize();
+  const [page, setPage] = useState(1);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [response, setResponse] = useState<AdminICloudTaskList>({
+    items: [],
+    limit: pageSize,
+    offset: 0,
+    succeeded: 0,
+    total: 0,
+  });
+
+  useEffect(() => setPage(1), [pageSize, resourceId]);
+  useEffect(() => {
+    const controller = new AbortController();
+    let pollTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
+    setLoading(true);
+    setErrorMessage(null);
+    void listAdminICloudTasks(
+      resourceId,
+      (page - 1) * pageSize,
+      pageSize,
+      controller.signal,
+    )
+      .then((next) => {
+        if (controller.signal.aborted) return;
+        const lastPage = Math.max(1, Math.ceil(next.total / pageSize));
+        if (page > lastPage) {
+          setPage(lastPage);
+          return;
+        }
+        setResponse(next);
+        if (next.items.some((task) => task.status === "queued" || task.status === "running")) {
+          pollTimer = globalThis.setTimeout(
+            () => setRefreshKey((value) => value + 1),
+            1500,
+          );
+        }
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) {
+          const message = getIamErrorMessage(t, error, "iCloud task load failed.");
+          setErrorMessage(message);
+          Toast.error(message);
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => {
+      controller.abort();
+      if (pollTimer) globalThis.clearTimeout(pollTimer);
+    };
+  }, [page, pageSize, refreshGeneration, refreshKey, resourceId, t]);
+
+  const columns = useMemo(
+    () => [
+      {
+        dataIndex: "kind",
+        title: t("Type"),
+        width: 140,
+        render: (value: unknown) => t(taskKindLabel(value as AdminICloudTask["kind"])),
+      },
+      {
+        dataIndex: "status",
+        title: t("Status"),
+        width: 110,
+        render: (value: unknown) => renderTaskStatusTag(value as AdminICloudTask["status"], t),
+      },
+      {
+        dataIndex: "remainingAttempts",
+        title: t("Remaining attempts"),
+        width: 120,
+        render: (value: unknown) => <span className="font-mono tabular-nums">{Number(value)}</span>,
+      },
+      {
+        dataIndex: "queuedAt",
+        title: t("Queued at"),
+        width: 170,
+        render: (value: unknown) => formatTime(value ? String(value) : null),
+      },
+      {
+        dataIndex: "startedAt",
+        title: t("Started at"),
+        width: 170,
+        render: (value: unknown) => formatTime(value ? String(value) : null),
+      },
+      {
+        dataIndex: "finishedAt",
+        title: t("Finished at"),
+        width: 170,
+        render: (value: unknown) => formatTime(value ? String(value) : null),
+      },
+      {
+        dataIndex: "updatedAt",
+        title: t("Updated at"),
+        width: 170,
+        render: (value: unknown) => formatTime(value ? String(value) : null),
+      },
+    ],
+    [t],
+  );
+  const successRate = response.total > 0
+    ? Math.round((response.succeeded / response.total) * 100)
+    : 0;
+
+  return (
+    <div>
+      <div className="mb-4 grid gap-3 sm:grid-cols-3">
+        <InfoItem label={t("Total tasks")} value={<span className="font-mono tabular-nums">{response.total}</span>} />
+        <InfoItem label={t("Succeeded tasks")} value={<span className="font-mono tabular-nums">{response.succeeded}</span>} />
+        <InfoItem label={t("Success rate")} value={<span className="font-mono tabular-nums">{successRate}%</span>} />
+      </div>
+      {errorMessage ? (
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-[var(--semi-color-danger-light-active)] bg-[var(--semi-color-danger-light-default)] px-3 py-2 text-sm text-[var(--semi-color-text-0)]">
+          <span>{errorMessage}</span>
+          <Button onClick={() => setRefreshKey((value) => value + 1)} size="small">
+            {t("Try again")}
+          </Button>
+        </div>
+      ) : null}
+      <ServerPaginatedDrawerTable
+        columns={columns}
+        dataSource={response.items}
+        emptyDescription={t("No task records")}
+        extraOffset={110}
+        loading={loading}
+        onPageChange={setPage}
+        onPageSizeChange={(size) => {
+          setPageSize(size);
+          setPage(1);
+        }}
+        page={page}
+        pageSize={pageSize}
+        rowKey="taskId"
+        scrollX={1050}
+        t={t}
+        total={response.total}
+      />
+    </div>
+  );
+}
+
+export function ICloudDetailSheet({
   aliasLimit,
   busyAction,
+  canFetchMessages,
   canOperate,
+  canReadMessages,
+  canReadOrders,
+  canReadTasks,
+  canWrite,
   item,
+  loading,
+  resourceId,
   refreshGeneration,
   onCancel,
   onDelete,
+  onEdit,
+  onMaintain,
+  onReplaceCredentials,
   onRecover,
   onToggleDisabled,
   onTogglePublish,
-  onValidate,
 }: {
   aliasLimit: number;
   busyAction: RowAction | null;
+  canFetchMessages: boolean;
   canOperate: boolean;
-  item: AdminICloudResourceItem | null;
+  canReadMessages: boolean;
+  canReadOrders: boolean;
+  canReadTasks: boolean;
+  canWrite: boolean;
+  item: AdminICloudResourceDetail | null;
+  loading: boolean;
+  resourceId: number | null;
   refreshGeneration: number;
   onCancel: () => void;
   onDelete: (item: AdminICloudResourceItem) => void;
+  onEdit: (item: AdminICloudResourceItem) => void;
+  onMaintain: (item: AdminICloudResourceItem) => void;
+  onReplaceCredentials: (item: AdminICloudResourceItem) => void;
   onRecover: (item: AdminICloudResourceItem) => void;
   onToggleDisabled: (item: AdminICloudResourceItem) => void;
   onTogglePublish: (item: AdminICloudResourceItem) => void;
-  onValidate: (item: AdminICloudResourceItem) => void;
 }) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
@@ -587,14 +1324,18 @@ function ICloudDetailSheet({
       onCancel={onCancel}
       placement="right"
       title={
-        item
-          ? `${t("iCloud resource detail")} #${item.id}`
+        resourceId
+          ? `${t("iCloud resource detail")} #${resourceId}`
           : t("iCloud resource detail")
       }
-      visible={Boolean(item)}
+      visible={Boolean(resourceId)}
       width={isMobile ? "100%" : 940}
     >
-      {item ? (
+      {loading && !item ? (
+        <div className="flex min-h-80 items-center justify-center">
+          <Spin size="large" />
+        </div>
+      ) : item ? (
         <div className="flex min-h-full flex-col">
           <div className="sticky top-0 z-10 bg-[var(--semi-color-bg-2)] px-5 pt-2">
             <Tabs
@@ -604,8 +1345,11 @@ function ICloudDetailSheet({
               type="line"
             >
               <Tabs.TabPane itemKey="basic" tab={t("Basic info")} />
+              {canReadOrders ? <Tabs.TabPane itemKey="orders" tab={t("Orders")} /> : null}
               <Tabs.TabPane itemKey="validation" tab={t("Validation")} />
               <Tabs.TabPane itemKey="aliases" tab={t("Aliases")} />
+              {canReadTasks ? <Tabs.TabPane itemKey="tasks" tab={t("Task details")} /> : null}
+              {canReadMessages ? <Tabs.TabPane itemKey="mails" tab={t("Mailbox")} /> : null}
             </Tabs>
           </div>
 
@@ -671,12 +1415,26 @@ function ICloudDetailSheet({
                     label={t("Alias count")}
                     value={<AliasCountTag count={item.aliasCount} limit={aliasLimit} />}
                   />
+                  <InfoItem label={t("Aliases remaining")} value={item.aliasRemaining} />
+                  <InfoItem
+                    label={t("Alias provisioning")}
+                    value={t(item.aliasProvisioning ? "Running" : "Idle")}
+                  />
+                  <InfoItem label={t("Credential revision")} value={item.credentialRevision} />
+                  <InfoItem label={t("Credential updated at")} value={formatTime(item.credentialUpdatedAt)} />
+                  <InfoItem label={t("Validation generation")} value={item.validationGeneration} />
+                  <InfoItem label={t("Validation failures")} value={item.validationFailures} />
+                  <InfoItem label={t("Session failures")} value={item.sessionFailures} />
                   <InfoItem label={t("Resource expires at")} value={formatTime(item.expireAt)} />
                   <InfoItem label={t("Next validation")} value={formatTime(item.nextValidationAt)} />
                   <InfoItem label={t("Next keepalive")} value={formatTime(item.nextKeepaliveAt)} />
                   <InfoItem label={t("Last checked")} value={formatTime(item.lastCheckedAt)} />
                   <InfoItem label={t("Last valid")} value={formatTime(item.lastValidAt)} />
                   <InfoItem label={t("Last alias sync")} value={formatTime(item.lastAliasSyncAt)} />
+                  <InfoItem
+                    label={t("Delivery probe started at")}
+                    value={formatTime(item.deliveryProbeStartedAt)}
+                  />
                   <InfoItem
                     label={t("Gmail delivery verified at")}
                     value={formatTime(item.deliveryProbeVerifiedAt)}
@@ -688,6 +1446,15 @@ function ICloudDetailSheet({
                   </div>
                 ) : null}
               </div>
+            ) : null}
+
+            {activeTab === "orders" && canReadOrders ? (
+              <RelatedOrdersTable
+                key={`${item.id}-${refreshGeneration}`}
+                resourceId={item.id}
+                resourceType="icloud"
+                t={t}
+              />
             ) : null}
 
             {activeTab === "aliases" ? (
@@ -718,53 +1485,84 @@ function ICloudDetailSheet({
                 ) : null}
               </div>
             ) : null}
+
+            {activeTab === "tasks" && canReadTasks ? (
+              <ICloudTasksPanel
+                refreshGeneration={refreshGeneration}
+                resourceId={item.id}
+              />
+            ) : null}
+
+            {activeTab === "mails" && canReadMessages ? (
+              <ResourceMailsPanel
+                fetchDisabled={item.status === "deleted"}
+                fetchEnabled={canFetchMessages}
+                key={`${item.id}-${refreshGeneration}`}
+                resourceId={item.id}
+                resourceType="icloud"
+                t={t}
+              />
+            ) : null}
           </div>
 
-          {canOperate ? (
+          {canWrite || canOperate ? (
             <div className="sticky bottom-0 flex flex-wrap items-center justify-end gap-2 border-t border-[var(--semi-color-border)] bg-[var(--semi-color-bg-0)] px-5 py-3">
               {item.status === "deleted" ? (
-                <Button
-                  disabled={Boolean(busyAction)}
-                  loading={busyAction === "recover"}
-                  onClick={() => onRecover(item)}
-                  type="primary"
-                >
-                  {t("Recover")}
-                </Button>
-              ) : (
-                <>
+                canOperate ? (
                   <Button
-                    disabled={Boolean(busyAction) || item.status === "disabled"}
-                    loading={busyAction === "validate"}
-                    onClick={() => onValidate(item)}
+                    disabled={Boolean(busyAction)}
+                    loading={busyAction === "recover"}
+                    onClick={() => onRecover(item)}
                     type="primary"
                   >
-                    {t("Validate")}
+                    {t("Recover")}
                   </Button>
-                  <Button
-                    disabled={Boolean(busyAction)}
-                    loading={busyAction === "toggle"}
-                    onClick={() => onToggleDisabled(item)}
-                    type="tertiary"
-                  >
-                    {item.status === "disabled" ? t("Enable") : t("Disable")}
-                  </Button>
-                  <Button
-                    disabled={Boolean(busyAction)}
-                    loading={busyAction === "publish"}
-                    onClick={() => onTogglePublish(item)}
-                    type="tertiary"
-                  >
-                    {item.forSale ? t("Convert to private") : t("Put on sale")}
-                  </Button>
-                  <Button
-                    disabled={Boolean(busyAction)}
-                    loading={busyAction === "delete"}
-                    onClick={() => onDelete(item)}
-                    type="danger"
-                  >
-                    {t("Delete")}
-                  </Button>
+                ) : null
+              ) : (
+                <>
+                  {canWrite ? (
+                    <Button disabled={Boolean(busyAction)} onClick={() => onEdit(item)} type="tertiary">
+                      {t("Edit")}
+                    </Button>
+                  ) : null}
+                  {canOperate ? (
+                    <>
+                      <Button
+                        disabled={Boolean(busyAction)}
+                        onClick={() => onReplaceCredentials(item)}
+                        type="tertiary"
+                      >
+                        {t("Replace credentials")}
+                      </Button>
+                      <Button disabled={Boolean(busyAction)} onClick={() => onMaintain(item)} type="primary">
+                        {t("Maintenance")}
+                      </Button>
+                      <Button
+                        disabled={Boolean(busyAction)}
+                        loading={busyAction === "toggle"}
+                        onClick={() => onToggleDisabled(item)}
+                        type="tertiary"
+                      >
+                        {item.status === "disabled" ? t("Enable") : t("Disable")}
+                      </Button>
+                      <Button
+                        disabled={Boolean(busyAction)}
+                        loading={busyAction === "publish"}
+                        onClick={() => onTogglePublish(item)}
+                        type="tertiary"
+                      >
+                        {item.forSale ? t("Convert to private") : t("Put on sale")}
+                      </Button>
+                      <Button
+                        disabled={Boolean(busyAction)}
+                        loading={busyAction === "delete"}
+                        onClick={() => onDelete(item)}
+                        type="danger"
+                      >
+                        {t("Delete")}
+                      </Button>
+                    </>
+                  ) : null}
                 </>
               )}
             </div>
@@ -795,15 +1593,25 @@ export default function AdminICloudEmails() {
   const [owners, setOwners] = useState<AdminICloudOwner[]>([]);
   const [loading, setLoading] = useState(true);
   const [importOpen, setImportOpen] = useState(false);
-  const [detail, setDetail] = useState<AdminICloudResourceItem | null>(null);
+  const [detailId, setDetailId] = useState<number | null>(null);
+  const [detail, setDetail] = useState<AdminICloudResourceDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [editTarget, setEditTarget] = useState<AdminICloudResourceItem | null>(null);
+  const [credentialTarget, setCredentialTarget] =
+    useState<AdminICloudResourceItem | null>(null);
+  const [maintenanceTarget, setMaintenanceTarget] =
+    useState<ICloudMaintenanceTarget | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<number[]>([]);
   const [rowBusy, setRowBusy] = useState<{ action: RowAction; id: number } | null>(
     null,
   );
-  const [bulkBusy, setBulkBusy] = useState<AdminICloudBatchAction | null>(null);
+  const [bulkBusy, setBulkBusy] =
+    useState<Exclude<AdminICloudBatchAction, "validate" | "alias"> | null>(null);
   const [refreshGeneration, setRefreshGeneration] = useState(0);
   const listRequestRef = useRef<AbortController | null>(null);
   const statsRequestRef = useRef<AbortController | null>(null);
+  const detailRequestRef = useRef<AbortController | null>(null);
+  const detailIdRef = useRef<number | null>(null);
   const [debouncedSearchKeyword, flushSearchKeyword] =
     useDebouncedValue(searchKeyword);
   const dateRangePresets = useMemo(() => createDateRangePresets(t), [t]);
@@ -816,6 +1624,22 @@ export default function AdminICloudEmails() {
     currentUser,
     permissionKey("core:resource", "operate"),
   );
+  const canReadOrders = hasPermissionKey(
+    currentUser,
+    permissionKey("alloc:allocation", "read"),
+  );
+  const canReadTasks = hasPermissionKey(
+    currentUser,
+    permissionKey("governance:task", "read"),
+  );
+  const canReadMessages = hasPermissionKey(
+    currentUser,
+    permissionKey("mailmatch:message", "read"),
+  );
+  const canFetchMessages = hasPermissionKey(
+    currentUser,
+    permissionKey("mailmatch:message", "operate"),
+  );
 
   useEffect(() => {
     const controller = new AbortController();
@@ -827,6 +1651,11 @@ export default function AdminICloudEmails() {
         // Owner choices are optional UI data; the resource list remains usable.
       });
     return () => controller.abort();
+  }, []);
+
+  useEffect(() => () => {
+    detailIdRef.current = null;
+    detailRequestRef.current?.abort();
   }, []);
 
   const filter = useMemo<AdminICloudResourceListFilter>(() => {
@@ -855,6 +1684,78 @@ export default function AdminICloudEmails() {
     setRefreshGeneration((value) => value + 1);
   }, []);
 
+  const loadDetail = useCallback(async (resourceId: number, silent = false) => {
+    if (detailIdRef.current !== resourceId) return true;
+    detailRequestRef.current?.abort();
+    const controller = new AbortController();
+    detailRequestRef.current = controller;
+    setDetailLoading(true);
+    try {
+      const response = await getAdminICloudResourceDetail(resourceId, controller.signal);
+      if (controller.signal.aborted || detailIdRef.current !== resourceId) return true;
+      setDetail(response);
+      setAliasLimit(response.aliasLimit);
+      return true;
+    } catch (error) {
+      if (controller.signal.aborted || detailIdRef.current !== resourceId) return true;
+      if (!silent) {
+        Toast.error(getIamErrorMessage(t, error, "iCloud resource detail load failed."));
+      }
+      return false;
+    } finally {
+      if (detailRequestRef.current === controller) {
+        detailRequestRef.current = null;
+        if (detailIdRef.current === resourceId) setDetailLoading(false);
+      }
+    }
+  }, [t]);
+
+  const openDetail = useCallback((resourceId: number) => {
+    detailIdRef.current = resourceId;
+    setDetailId(resourceId);
+    setDetail(null);
+    void loadDetail(resourceId).then((loaded) => {
+      if (!loaded && detailIdRef.current === resourceId) {
+        detailIdRef.current = null;
+        setDetailId(null);
+      }
+    });
+  }, [loadDetail]);
+
+  const closeDetail = useCallback(() => {
+    detailIdRef.current = null;
+    detailRequestRef.current?.abort();
+    detailRequestRef.current = null;
+    setDetailId(null);
+    setDetail(null);
+    setDetailLoading(false);
+  }, []);
+
+  useEffect(() => {
+    const resourceId = detailIdRef.current;
+    if (resourceId === null) return;
+    void loadDetail(resourceId, true);
+  }, [loadDetail, refreshGeneration]);
+
+  useEffect(() => {
+    if (detailId === null || (detail?.status !== "pending" && detail?.status !== "validating")) {
+      return;
+    }
+    let stopped = false;
+    let timeoutId: number | undefined;
+    const poll = () => {
+      timeoutId = window.setTimeout(async () => {
+        await loadDetail(detailId, true);
+        if (!stopped && detailIdRef.current === detailId) poll();
+      }, 3000);
+    };
+    poll();
+    return () => {
+      stopped = true;
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+    };
+  }, [detail?.status, detailId, loadDetail]);
+
   useEffect(() => {
     listRequestRef.current?.abort();
     const controller = new AbortController();
@@ -869,11 +1770,6 @@ export default function AdminICloudEmails() {
       .then((response) => {
         if (controller.signal.aborted) return;
         setItems(response.items);
-        setDetail((current) =>
-          current
-            ? response.items.find((item) => item.id === current.id) ?? current
-            : null,
-        );
         setAliasLimit(response.aliasLimit);
       })
       .catch((error) => {
@@ -950,9 +1846,6 @@ export default function AdminICloudEmails() {
           candidate.id === item.id ? { ...candidate, ...patch } : candidate,
         ),
       );
-      setDetail((current) =>
-        current?.id === item.id ? { ...current, ...patch } : current,
-      );
     },
     [],
   );
@@ -972,22 +1865,12 @@ export default function AdminICloudEmails() {
         refresh();
       } catch (error) {
         Toast.error(getIamErrorMessage(t, error, "iCloud resource operation failed."));
+        if (detailIdRef.current === item.id) await loadDetail(item.id, true);
       } finally {
         setRowBusy(null);
       }
     },
-    [applyMutation, refresh, t],
-  );
-
-  const validateResource = useCallback(
-    (item: AdminICloudResourceItem) =>
-      runRowOperation(
-        item,
-        "validate",
-        () => validateAdminICloudResource(item.id, item.version),
-        "Resource validation submitted.",
-      ),
-    [runRowOperation],
+    [applyMutation, loadDetail, refresh, t],
   );
 
   const toggleDisabled = useCallback(
@@ -1095,7 +1978,10 @@ export default function AdminICloudEmails() {
   );
 
   const runBatch = useCallback(
-    async (action: AdminICloudBatchAction, allMatching: boolean) => {
+    async (
+      action: Exclude<AdminICloudBatchAction, "validate" | "alias">,
+      allMatching: boolean,
+    ) => {
       const count = allMatching ? total : selectedKeys.length;
       if (count === 0) {
         Toast.info(t("No resources to check."));
@@ -1115,7 +2001,6 @@ export default function AdminICloudEmails() {
           ? await batchAdminICloudResourcesByFilter(action, filter)
           : await batchAdminICloudResourcesByIds(action, selectedKeys);
         const successKey = {
-          validate: "iCloud resources queued for validation.",
           disable: "iCloud resources disabled.",
           publish: "iCloud resources published for public sale.",
           unpublish: "iCloud resources converted to private.",
@@ -1135,7 +2020,7 @@ export default function AdminICloudEmails() {
   );
 
   const confirmBatch = useCallback(
-    (action: Exclude<AdminICloudBatchAction, "validate">, allMatching: boolean) => {
+    (action: Exclude<AdminICloudBatchAction, "validate" | "alias">, allMatching: boolean) => {
       const count = allMatching ? total : selectedKeys.length;
       if (count === 0) {
         Toast.info(t("No resources to check."));
@@ -1179,9 +2064,32 @@ export default function AdminICloudEmails() {
     [runBatch, selectedKeys.length, t, total],
   );
 
+  const openBulkMaintenance = useCallback(
+    (allMatching: boolean) => {
+      const count = allMatching ? total : selectedKeys.length;
+      if (count === 0) {
+        Toast.info(t("No resources to check."));
+        return;
+      }
+      if (allMatching && count > ADMIN_ICLOUD_BATCH_MAX) {
+        Toast.warning(
+          t("iCloud bulk selection limit exceeded.", {
+            limit: ADMIN_ICLOUD_BATCH_MAX,
+          }),
+        );
+        return;
+      }
+      setMaintenanceTarget(
+        allMatching
+          ? { count, filter, mode: "filter" }
+          : { count, mode: "ids", resourceIds: [...selectedKeys] },
+      );
+    },
+    [filter, selectedKeys, t, total],
+  );
+
   useSelectionNotification({
-    checkLabelKey: "Validate",
-    checkLoading: bulkBusy === "validate",
+    checkLabelKey: "Maintenance",
     deleteLoading: bulkBusy === "delete",
     extraActions: [
       {
@@ -1199,11 +2107,11 @@ export default function AdminICloudEmails() {
         type: "tertiary",
       },
     ],
-    onCheck: () => void runBatch("validate", false),
+    onCheck: () => openBulkMaintenance(false),
     onClear: () => setSelectedKeys([]),
     onDelete: () => confirmBatch("delete", false),
     onSell: () => confirmBatch("disable", false),
-    selectedCount: selectedKeys.length,
+    selectedCount: canOperate ? selectedKeys.length : 0,
     selectionDescriptionKey: "Selected iCloud resources",
     sellLabelKey: "Disable",
     sellLoading: bulkBusy === "disable",
@@ -1218,7 +2126,7 @@ export default function AdminICloudEmails() {
           <Space spacing={4} wrap={false}>
             <Button
               disabled={Boolean(busyAction)}
-              onClick={() => setDetail(item)}
+              onClick={() => openDetail(item.id)}
               size="small"
               type="tertiary"
             >
@@ -1243,25 +2151,31 @@ export default function AdminICloudEmails() {
         <Space spacing={4} wrap={false}>
           <Button
             disabled={Boolean(busyAction)}
-            onClick={() => setDetail(item)}
+            onClick={() => openDetail(item.id)}
             size="small"
             type="tertiary"
           >
             {t("Details")}
           </Button>
+          {canWrite ? (
+            <Button
+              disabled={Boolean(busyAction)}
+              onClick={() => setEditTarget(item)}
+              size="small"
+              type="tertiary"
+            >
+              {t("Edit")}
+            </Button>
+          ) : null}
           {canOperate ? (
             <>
               <Button
-                disabled={
-                  Boolean(rowBusy && busyAction !== "validate") ||
-                  item.status === "disabled"
-                }
-                loading={busyAction === "validate"}
-                onClick={() => void validateResource(item)}
+                disabled={Boolean(busyAction)}
+                onClick={() => setMaintenanceTarget({ item, mode: "row" })}
                 size="small"
                 type="tertiary"
               >
-                {t("Validate")}
+                {t("Maintenance")}
               </Button>
               <Button
                 disabled={Boolean(rowBusy && busyAction !== "toggle")}
@@ -1297,13 +2211,14 @@ export default function AdminICloudEmails() {
     },
     [
       canOperate,
+      canWrite,
       confirmDelete,
+      openDetail,
       recoverResource,
       rowBusy,
       t,
       toggleDisabled,
       togglePublish,
-      validateResource,
     ],
   );
 
@@ -1498,19 +2413,18 @@ export default function AdminICloudEmails() {
         {canOperate ? (
           <>
             <Tooltip
-              content={t("Validate all matching iCloud resources")}
+              content={t("Maintain all")}
               mouseEnterDelay={0}
               mouseLeaveDelay={0.05}
               position="top"
             >
               <Button
                 className="flex-1 md:flex-initial"
-                loading={bulkBusy === "validate"}
-                onClick={() => void runBatch("validate", true)}
+                onClick={() => openBulkMaintenance(true)}
                 size="small"
                 type="tertiary"
               >
-                {t("Validate all")}
+                {t("Maintenance")}
               </Button>
             </Tooltip>
             <Tooltip
@@ -1762,7 +2676,7 @@ export default function AdminICloudEmails() {
           loading={loading}
           pagination={false}
           rowKey="id"
-          rowSelection={rowSelection}
+          rowSelection={canOperate ? rowSelection : undefined}
           scroll={{ x: "max(100%, 2010px)", y: DESKTOP_TABLE_SCROLL_Y }}
           size="middle"
         />
@@ -1779,18 +2693,58 @@ export default function AdminICloudEmails() {
         visible={importOpen && canWrite}
       />
 
+      <EditICloudModal
+        canOperate={canOperate}
+        onCancel={() => setEditTarget(null)}
+        onSaved={() => {
+          refresh();
+        }}
+        owners={owners}
+        target={editTarget}
+      />
+
+      <EditICloudModal
+        canOperate
+        credentialsOnly
+        onCancel={() => setCredentialTarget(null)}
+        onSaved={() => {
+          refresh();
+        }}
+        owners={owners}
+        target={credentialTarget}
+      />
+
+      <ICloudMaintenanceModal
+        aliasLimit={aliasLimit}
+        onCancel={() => setMaintenanceTarget(null)}
+        onCompleted={() => {
+          setSelectedKeys([]);
+          refresh();
+        }}
+        target={canOperate ? maintenanceTarget : null}
+      />
+
       <ICloudDetailSheet
         aliasLimit={aliasLimit}
-        busyAction={rowBusy?.id === detail?.id ? rowBusy?.action ?? null : null}
+        busyAction={rowBusy?.id === detailId ? rowBusy?.action ?? null : null}
+        canFetchMessages={canFetchMessages}
         canOperate={canOperate}
+        canReadMessages={canReadMessages}
+        canReadOrders={canReadOrders}
+        canReadTasks={canReadTasks}
+        canWrite={canWrite}
         item={detail}
+        loading={detailLoading}
+        resourceId={detailId}
         refreshGeneration={refreshGeneration}
-        onCancel={() => setDetail(null)}
+        onCancel={closeDetail}
         onDelete={confirmDelete}
+        onEdit={setEditTarget}
+        onMaintain={(item) => setMaintenanceTarget({ item, mode: "row" })}
+        onReplaceCredentials={setCredentialTarget}
         onRecover={recoverResource}
         onToggleDisabled={toggleDisabled}
         onTogglePublish={togglePublish}
-        onValidate={(item) => void validateResource(item)}
       />
     </div>
   );

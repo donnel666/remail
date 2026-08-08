@@ -87,7 +87,7 @@ func (uc *AdminMessageUseCase) List(ctx context.Context, query AdminMessageListQ
 	if query.ResourceType == "" {
 		query.ResourceType = domain.ResourceTypeMicrosoft
 	}
-	if query.ResourceType != domain.ResourceTypeMicrosoft && query.ResourceType != domain.ResourceTypeDomain {
+	if query.ResourceType != domain.ResourceTypeMicrosoft && query.ResourceType != domain.ResourceTypeDomain && query.ResourceType != domain.ResourceTypeICloud {
 		return nil, domain.ErrInvalidRequest
 	}
 	defaultLimit, maxLimit, maxSearch := AdminMessageLimits()
@@ -140,12 +140,15 @@ func (uc *AdminMessageUseCase) Get(
 	requestID string,
 	path string,
 ) (*AdminMessageDetail, error) {
-	if uc == nil || uc.repo == nil || operatorUserID == 0 || resourceID == 0 || messageID == 0 || (resourceType != domain.ResourceTypeMicrosoft && resourceType != domain.ResourceTypeDomain) {
+	if uc == nil || uc.repo == nil || operatorUserID == 0 || resourceID == 0 || messageID == 0 ||
+		(resourceType != domain.ResourceTypeMicrosoft && resourceType != domain.ResourceTypeDomain && resourceType != domain.ResourceTypeICloud) {
 		return nil, domain.ErrInvalidRequest
 	}
 	resourceName := "microsoft_message"
 	if resourceType == domain.ResourceTypeDomain {
 		resourceName = "domain_message"
+	} else if resourceType == domain.ResourceTypeICloud {
+		resourceName = "icloud_message"
 	}
 	return uc.repo.FindAdminMessageDetailWithLog(ctx, resourceID, resourceType, messageID, &governancedomain.OperationLog{
 		OperatorUserID: operatorUserID,

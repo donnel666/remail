@@ -5,7 +5,10 @@ import { listAdminMicrosoftAllocations } from "../../lib/admin-microsoft-api";
 
 import type { AdminMicrosoftAllocation } from "./admin-microsoft-types";
 
-export function useAdminMicrosoftAllocationPage(resourceId: number) {
+export function useAdminMicrosoftAllocationPage(
+  resourceId: number,
+  resourceType: "microsoft" | "icloud" = "microsoft"
+) {
   const [pageSize, setPageSize] = useSharedPageSize();
   const [pagination, setPagination] = useState({ page: 1, resourceId });
   const [items, setItems] = useState<AdminMicrosoftAllocation[]>([]);
@@ -37,7 +40,8 @@ export function useAdminMicrosoftAllocationPage(resourceId: number) {
       resourceId,
       (page - 1) * pageSize,
       pageSize,
-      controller.signal
+      controller.signal,
+      resourceType
     )
       .then((result) => {
         if (controller.signal.aborted) return;
@@ -58,7 +62,7 @@ export function useAdminMicrosoftAllocationPage(resourceId: number) {
       });
 
     return () => controller.abort();
-  }, [page, pageSize, resourceId, setPage]);
+  }, [page, pageSize, resourceId, resourceType, setPage]);
 
   return {
     error,

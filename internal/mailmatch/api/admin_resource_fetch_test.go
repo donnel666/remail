@@ -98,6 +98,24 @@ func TestAdminResourceFetchRouteReturnsOpenAPITaskShapeWithoutSecrets(t *testing
 	}
 }
 
+func TestAdminResourceFetchRouteAcceptsICloudType(t *testing.T) {
+	router, repo, _ := newAdminResourceFetchTestRouter(true)
+	req := httptest.NewRequest(http.MethodPost, "/v1/admin/resources/100/messages/fetch?type=icloud", nil)
+	req.Header.Set("X-Request-ID", "icloud-fetch-request")
+	req.Header.Set("Idempotency-Key", "icloud-fetch-idempotency")
+	req.AddCookie(&http.Cookie{Name: middleware.SessionCookieName, Value: "valid"})
+	req.AddCookie(&http.Cookie{Name: middleware.CSRFCookieName, Value: "csrf"})
+	req.Header.Set(middleware.CSRFHeaderName, "csrf")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, req)
+
+	require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
+	require.Equal(t, "mailmatch.admin_icloud_resource.fetch", repo.operationLog.OperationType)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+	require.Equal(t, "icloud_resource", body["task"].(map[string]any)["bizType"])
+}
+
 func TestAdminResourceProjectScanReusesDurableFetchTaskState(t *testing.T) {
 	router, repo, checker := newAdminResourceFetchTestRouter(true)
 	response := performAdminResourceHistoryRequest(router)
@@ -216,7 +234,7 @@ func (*adminResourceFetchRepoStub) ReleaseResourceFetchInfrastructureFailure(con
 	return false, nil
 }
 
-func (*adminResourceFetchRepoStub) LoadResourceFetchScope(context.Context, uint, uint64) (*mailmatchdomain.ResourceFetchScope, error) {
+func (*adminResourceFetchRepoStub) LoadResourceFetchScope(context.Context, uint, uint64, mailmatchdomain.ResourceType) (*mailmatchdomain.ResourceFetchScope, error) {
 	return nil, nil
 }
 

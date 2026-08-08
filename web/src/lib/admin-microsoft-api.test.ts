@@ -629,6 +629,7 @@ describe("admin Microsoft API adapter", () => {
       "/v1/admin/resources/{resourceId}/aliases",
       "/v1/admin/resources/{resourceId}/messages/fetch",
     ]);
+    expect(callOptions(apiMocks.POST, 3).params?.query).toEqual({ type: "microsoft" });
     for (let index = 0; index < 4; index += 1) expectCommandHeader(apiMocks.POST, index);
   });
 
@@ -667,6 +668,10 @@ describe("admin Microsoft API adapter", () => {
       offset: 0,
       includeTotal: true,
     });
+    expect(callOptions(apiMocks.GET, 3).params?.query).toEqual({
+      resourceId: 55,
+      type: "microsoft",
+    });
     expect(callOptions(apiMocks.GET, 4).params?.query).toMatchObject({
       resourceId: 55,
       offset: 0,
@@ -697,6 +702,29 @@ describe("admin Microsoft API adapter", () => {
         limit: 20,
       });
     }
+  });
+
+  it("routes iCloud orders and mailbox reads with the explicit iCloud resource type", async () => {
+    apiMocks.GET.mockResolvedValue({
+      data: { items: [], offset: 0, limit: 20, total: 0, hasMore: false },
+    });
+
+    await listAdminMicrosoftAllocations(55, 0, 20, undefined, "icloud");
+    await listAdminMicrosoftMessages(55, "code", 20, undefined, undefined, "icloud");
+    await getAdminMicrosoftMessage(55, 9, undefined, "icloud");
+
+    expect(callOptions(apiMocks.GET, 0).params?.query).toMatchObject({
+      resourceId: 55,
+      type: "icloud",
+    });
+    expect(callOptions(apiMocks.GET, 1).params?.query).toMatchObject({
+      resourceId: 55,
+      type: "icloud",
+    });
+    expect(callOptions(apiMocks.GET, 2).params?.query).toEqual({
+      resourceId: 55,
+      type: "icloud",
+    });
   });
 
   it("versions independent credential replacement and gives every write a fresh key", async () => {

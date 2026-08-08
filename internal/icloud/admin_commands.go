@@ -34,6 +34,7 @@ type AdminICloudCommand string
 
 const (
 	AdminICloudValidate  AdminICloudCommand = "validate"
+	AdminICloudAlias     AdminICloudCommand = "alias"
 	AdminICloudEnable    AdminICloudCommand = "enable"
 	AdminICloudDisable   AdminICloudCommand = "disable"
 	AdminICloudPublish   AdminICloudCommand = "publish"
@@ -47,6 +48,7 @@ type AdminICloudMutationResult struct {
 	Version    uint64 `json:"version"`
 	Status     string `json:"status"`
 	ForSale    bool   `json:"forSale"`
+	Changed    bool   `json:"changed"`
 }
 
 type AdminICloudResourceSelection struct {
@@ -112,6 +114,7 @@ func (s *Service) ApplyAdminICloudCommand(
 			return err
 		}
 		*result = *state
+		result.Changed = changed
 		summary := "iCloud resource already had the requested state."
 		if changed {
 			summary = "iCloud resource command applied."
@@ -133,7 +136,7 @@ func (s *Service) ApplyAdminICloudCommand(
 	if err != nil {
 		return nil, normalizeAdminICloudCommandError(err)
 	}
-	if !replayed && commandQueuesICloudValidation(command) {
+	if !replayed && result.Changed && commandQueuesICloudValidation(command) {
 		_ = s.ScheduleICloudValidationDispatcher(context.WithoutCancel(ctx), 0)
 	}
 	return result, nil
@@ -299,7 +302,7 @@ func (s *Service) completeAdminICloudCommand(ctx context.Context, tx *gorm.DB, o
 
 func validAdminICloudCommand(command AdminICloudCommand) bool {
 	switch command {
-	case AdminICloudValidate, AdminICloudEnable, AdminICloudDisable, AdminICloudPublish,
+	case AdminICloudValidate, AdminICloudAlias, AdminICloudEnable, AdminICloudDisable, AdminICloudPublish,
 		AdminICloudUnpublish, AdminICloudDelete, AdminICloudRecover:
 		return true
 	default:
@@ -309,7 +312,7 @@ func validAdminICloudCommand(command AdminICloudCommand) bool {
 
 func validAdminICloudBatchCommand(command AdminICloudCommand) bool {
 	switch command {
-	case AdminICloudValidate, AdminICloudDisable, AdminICloudPublish, AdminICloudUnpublish, AdminICloudDelete:
+	case AdminICloudValidate, AdminICloudAlias, AdminICloudDisable, AdminICloudPublish, AdminICloudUnpublish, AdminICloudDelete:
 		return true
 	default:
 		return false
@@ -317,7 +320,7 @@ func validAdminICloudBatchCommand(command AdminICloudCommand) bool {
 }
 
 func commandQueuesICloudValidation(command AdminICloudCommand) bool {
-	return command == AdminICloudValidate || command == AdminICloudEnable || command == AdminICloudRecover
+	return command == AdminICloudValidate || command == AdminICloudAlias || command == AdminICloudEnable || command == AdminICloudRecover
 }
 
 func resolveAdminICloudSelectionTx(ctx context.Context, tx *gorm.DB, selection AdminICloudResourceSelection) ([]uint, error) {
@@ -399,6 +402,7 @@ func mutateAdminICloudResourceTx(
 	}
 
 	updates := make(map[string]any)
+	queuedGeneration := uint64(0)
 	switch command {
 	case AdminICloudValidate:
 		if resource.Status == iCloudResourceDeleted {
@@ -407,12 +411,23 @@ func mutateAdminICloudResourceTx(
 		if resource.Status == iCloudResourceDisabled {
 			return nil, false, ErrICloudResourceStatus
 		}
-		queueAdminICloudValidation(updates, resource, now, false)
+		queuedGeneration = queueAdminICloudValidation(updates, resource, now, false)
+	case AdminICloudAlias:
+		if resource.Status == iCloudResourceDeleted {
+			return nil, false, ErrICloudResourceNotFound
+		}
+		if resource.Status == iCloudResourceDisabled {
+			return nil, false, ErrICloudResourceStatus
+		}
+		if resource.AliasCount >= iCloudMaxAliases {
+			return adminICloudMutationResult(root, resource), false, nil
+		}
+		queuedGeneration = queueAdminICloudValidation(updates, resource, now, false)
 	case AdminICloudEnable:
 		if resource.Status != iCloudResourceDisabled {
 			return nil, false, ErrICloudResourceStatus
 		}
-		queueAdminICloudValidation(updates, resource, now, true)
+		queuedGeneration = queueAdminICloudValidation(updates, resource, now, true)
 	case AdminICloudDisable:
 		if resource.Status == iCloudResourceDeleted {
 			return nil, false, ErrICloudResourceNotFound
@@ -459,7 +474,7 @@ func mutateAdminICloudResourceTx(
 		if resource.Status != iCloudResourceDeleted {
 			return nil, false, ErrICloudResourceStatus
 		}
-		queueAdminICloudValidation(updates, resource, now, true)
+		queuedGeneration = queueAdminICloudValidation(updates, resource, now, true)
 	default:
 		return nil, false, ErrICloudResourceQuery
 	}
@@ -467,6 +482,18 @@ func mutateAdminICloudResourceTx(
 	updates["updated_at"] = now
 	if err := tx.WithContext(ctx).Model(&iCloudResourceModel{}).Where("id = ?", resourceID).Updates(updates).Error; err != nil {
 		return nil, false, err
+	}
+	if queuedGeneration > 0 {
+		if _, err := ensureICloudMaintenanceRunTx(
+			ctx, tx, resourceID, queuedGeneration, iCloudMaintenanceKindForCommand(command),
+			resource.CredentialRevision, 0, now,
+		); err != nil {
+			return nil, false, err
+		}
+	} else if command == AdminICloudDisable || command == AdminICloudDelete {
+		if err := cancelActiveICloudMaintenanceRunsTx(ctx, tx, resourceID, 0, now); err != nil {
+			return nil, false, err
+		}
 	}
 	rootUpdate := tx.WithContext(ctx).Model(&iCloudRootModel{}).
 		Where("id = ? AND type = ? AND version = ?", resourceID, "icloud", root.Version).
@@ -484,13 +511,15 @@ func mutateAdminICloudResourceTx(
 			resource.Status = value.(string)
 		case "for_sale":
 			resource.ForSale = value.(bool)
+		case "validation_generation":
+			resource.ValidationGeneration = value.(uint64)
 		}
 	}
 	root.Version++
 	return adminICloudMutationResult(root, resource), true, nil
 }
 
-func queueAdminICloudValidation(updates map[string]any, resource iCloudResourceModel, now time.Time, resetSession bool) {
+func queueAdminICloudValidation(updates map[string]any, resource iCloudResourceModel, now time.Time, resetSession bool) uint64 {
 	generation := resource.ValidationGeneration
 	if generation == 0 {
 		generation = 1
@@ -513,6 +542,7 @@ func queueAdminICloudValidation(updates map[string]any, resource iCloudResourceM
 		updates["next_keepalive_at"] = nil
 		updates["last_valid_at"] = nil
 	}
+	return generation
 }
 
 func adminICloudMutationResult(root iCloudRootModel, resource iCloudResourceModel) *AdminICloudMutationResult {
@@ -602,7 +632,8 @@ func normalizeAdminICloudCommandError(err error) error {
 	case errors.Is(err, ErrICloudResourceQuery), errors.Is(err, ErrICloudResourceSelection),
 		errors.Is(err, ErrICloudResourceNotFound), errors.Is(err, ErrICloudResourceStatus),
 		errors.Is(err, ErrICloudResourceVersion), errors.Is(err, ErrICloudResourceOwner),
-		errors.Is(err, ErrICloudResourceAllocation):
+		errors.Is(err, ErrICloudResourceAllocation), errors.Is(err, ErrICloudResourceUpdate),
+		errors.Is(err, ErrICloudResourceIdentity):
 		return err
 	default:
 		return ErrICloudResourceQueryTemporary

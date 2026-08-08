@@ -17,4 +17,8 @@ describe("locale contracts", () => {
       expect(interpolationNames(en[key]), key).toEqual(interpolationNames(zh[key]));
     }
   });
+
+  it("uses the aligned Chinese Apple mailbox navigation label", () => {
+    expect(zh["Admin iCloud Emails"]).toBe("苹果邮箱");
+  });
 });

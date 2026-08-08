@@ -17,10 +17,13 @@ const (
 
 	AdminTaskBizMicrosoftResource       = "microsoft_resource"
 	AdminTaskBizDomainResource          = "domain_resource"
+	AdminTaskBizICloudResource          = "icloud_resource"
 	AdminTaskBizMicrosoftResourceImport = "microsoft_resource_import"
+	AdminTaskBizICloudResourceImport    = "icloud_resource_import"
 	AdminTaskBizMicrosoftResourceBulk   = "microsoft_resource_bulk"
 
 	AdminTaskKindImport        = "import"
+	AdminTaskKindValidation    = "validation"
 	AdminTaskKindAlias         = "alias"
 	AdminTaskKindToken         = "token"
 	AdminTaskKindFetch         = "fetch"
@@ -40,12 +43,14 @@ const (
 	AdminTaskStatusUncertain = "uncertain"
 	AdminTaskStatusCanceled  = "canceled"
 
-	AdminTaskSourceImport        = "import"
-	AdminTaskSourceAlias         = "alias"
-	AdminTaskSourceAliasSchedule = "alias_schedule"
-	AdminTaskSourceToken         = "token"
-	AdminTaskSourceFetch         = "fetch"
-	AdminTaskSourceBulk          = "bulk"
+	AdminTaskSourceImport         = "import"
+	AdminTaskSourceAlias          = "alias"
+	AdminTaskSourceAliasSchedule  = "alias_schedule"
+	AdminTaskSourceToken          = "token"
+	AdminTaskSourceFetch          = "fetch"
+	AdminTaskSourceBulk           = "bulk"
+	AdminTaskSourceICloudImport   = "icloud_import"
+	AdminTaskSourceICloudValidate = "icloud_validation"
 )
 
 func AdminTaskLimits() (int, int) {
@@ -98,7 +103,9 @@ func isAdminTaskSource(value string) bool {
 		AdminTaskSourceAliasSchedule,
 		AdminTaskSourceToken,
 		AdminTaskSourceFetch,
-		AdminTaskSourceBulk:
+		AdminTaskSourceBulk,
+		AdminTaskSourceICloudImport,
+		AdminTaskSourceICloudValidate:
 		return true
 	default:
 		return false
@@ -162,8 +169,10 @@ type AdminTaskListResult struct {
 type AdminTaskViewRepository interface {
 	MicrosoftResourceExists(ctx context.Context, resourceID uint) (bool, error)
 	DomainResourceExists(ctx context.Context, resourceID uint) (bool, error)
+	ICloudResourceExists(ctx context.Context, resourceID uint) (bool, error)
 	ListForMicrosoftResource(ctx context.Context, filter AdminTaskListFilter) ([]AdminTaskView, int64, int64, error)
 	ListForDomainResource(ctx context.Context, filter AdminTaskListFilter) ([]AdminTaskView, int64, int64, error)
+	ListForICloudResource(ctx context.Context, filter AdminTaskListFilter) ([]AdminTaskView, int64, int64, error)
 	FindByRef(ctx context.Context, ref AdminTaskRef) (*AdminTaskView, error)
 }
 
@@ -191,6 +200,8 @@ func (s *AdminTaskQueryService) List(ctx context.Context, filter AdminTaskListFi
 		exists, err = s.repo.MicrosoftResourceExists(ctx, normalized.BizID)
 	case AdminTaskBizDomainResource:
 		exists, err = s.repo.DomainResourceExists(ctx, normalized.BizID)
+	case AdminTaskBizICloudResource:
+		exists, err = s.repo.ICloudResourceExists(ctx, normalized.BizID)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: check task resource", ErrAdminTaskUnavailable)
@@ -203,6 +214,8 @@ func (s *AdminTaskQueryService) List(ctx context.Context, filter AdminTaskListFi
 		items, total, succeeded, err = s.repo.ListForMicrosoftResource(ctx, normalized)
 	case AdminTaskBizDomainResource:
 		items, total, succeeded, err = s.repo.ListForDomainResource(ctx, normalized)
+	case AdminTaskBizICloudResource:
+		items, total, succeeded, err = s.repo.ListForICloudResource(ctx, normalized)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: list normalized tasks", ErrAdminTaskUnavailable)
@@ -244,7 +257,7 @@ func normalizeAdminTaskListFilter(filter AdminTaskListFilter) (AdminTaskListFilt
 	filter.BizType = strings.TrimSpace(filter.BizType)
 	filter.Kind = strings.TrimSpace(filter.Kind)
 	filter.Status = strings.TrimSpace(filter.Status)
-	if (filter.BizType != AdminTaskBizMicrosoftResource && filter.BizType != AdminTaskBizDomainResource) || filter.BizID == 0 || filter.Offset < 0 {
+	if (filter.BizType != AdminTaskBizMicrosoftResource && filter.BizType != AdminTaskBizDomainResource && filter.BizType != AdminTaskBizICloudResource) || filter.BizID == 0 || filter.Offset < 0 {
 		return AdminTaskListFilter{}, ErrInvalidAdminTaskQuery
 	}
 	defaultLimit, maxLimit := AdminTaskLimits()
@@ -266,6 +279,7 @@ func normalizeAdminTaskListFilter(filter AdminTaskListFilter) (AdminTaskListFilt
 func isAdminTaskKind(value string) bool {
 	switch value {
 	case AdminTaskKindImport,
+		AdminTaskKindValidation,
 		AdminTaskKindAlias,
 		AdminTaskKindToken,
 		AdminTaskKindFetch,

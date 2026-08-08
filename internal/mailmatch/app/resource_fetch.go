@@ -52,6 +52,7 @@ func (e *MailFetchFailure) Unwrap() error {
 
 type ResourceFetchSubmitCommand struct {
 	Kind           domain.ResourceFetchJobKind
+	ResourceType   domain.ResourceType
 	ResourceID     uint
 	OperatorUserID uint
 	IdempotencyKey string
@@ -82,7 +83,7 @@ type ResourceFetchRepository interface {
 	ListPendingResourceFetches(ctx context.Context, limit int) ([]domain.ResourceFetchJob, error)
 	MarkResourceFetchProcessing(ctx context.Context, resourceID uint, generation uint64) (bool, error)
 	ReleaseResourceFetchInfrastructureFailure(ctx context.Context, resourceID uint, generation uint64, safeError string, log *governancedomain.SystemLog) (bool, error)
-	LoadResourceFetchScope(ctx context.Context, resourceID uint, expectedCredentialRevision uint64) (*domain.ResourceFetchScope, error)
+	LoadResourceFetchScope(ctx context.Context, resourceID uint, expectedCredentialRevision uint64, resourceType domain.ResourceType) (*domain.ResourceFetchScope, error)
 	AssertResourceFetchFence(ctx context.Context, resourceID uint, generation uint64, expectedCredentialRevision uint64) error
 	CompleteResourceFetch(ctx context.Context, resourceID uint, generation uint64, expectedCredentialRevision uint64, rotatedRefreshToken string, fetched int, stored int, matched int, now time.Time, log *governancedomain.SystemLog) error
 	CompleteResourceFetchTask(ctx context.Context, resourceID uint, generation uint64, now time.Time, log *governancedomain.SystemLog) error
@@ -145,9 +146,17 @@ func (uc *ResourceFetchUseCase) Submit(ctx context.Context, cmd ResourceFetchSub
 	if !domain.IsValidResourceFetchJobKind(cmd.Kind) {
 		return nil, domain.ErrInvalidRequest
 	}
+	if cmd.ResourceType == "" {
+		cmd.ResourceType = domain.ResourceTypeMicrosoft
+	}
+	if (cmd.ResourceType != domain.ResourceTypeMicrosoft && cmd.ResourceType != domain.ResourceTypeICloud) ||
+		(cmd.ResourceType == domain.ResourceTypeICloud && cmd.Kind != domain.ResourceFetchJobFetch) {
+		return nil, domain.ErrInvalidRequest
+	}
 	now := uc.now()
 	job := &domain.ResourceFetchJob{
 		Kind:           cmd.Kind,
+		ResourceType:   cmd.ResourceType,
 		ResourceID:     cmd.ResourceID,
 		OperatorUserID: cmd.OperatorUserID,
 		Status:         domain.ResourceFetchJobQueued,
@@ -161,12 +170,12 @@ func (uc *ResourceFetchUseCase) Submit(ctx context.Context, cmd ResourceFetchSub
 	}
 	log := &governancedomain.OperationLog{
 		OperatorUserID: cmd.OperatorUserID,
-		OperationType:  resourceFetchOperationType(cmd.Kind),
-		ResourceType:   "microsoft_resource",
+		OperationType:  resourceFetchOperationType(cmd.ResourceType, cmd.Kind),
+		ResourceType:   resourceFetchBizType(cmd.ResourceType),
 		ResourceID:     fmt.Sprintf("%d", cmd.ResourceID),
 		Path:           strings.TrimSpace(cmd.Path),
 		Result:         "success",
-		SafeSummary:    resourceFetchAcceptedSummary(cmd.Kind),
+		SafeSummary:    resourceFetchAcceptedSummary(cmd.ResourceType, cmd.Kind),
 		RequestID:      strings.TrimSpace(cmd.RequestID),
 	}
 	reused, err := uc.repo.CreateOrReuseResourceFetch(ctx, job, log)
@@ -197,12 +206,15 @@ func (uc *ResourceFetchUseCase) Process(ctx context.Context, task ResourceFetchT
 	}
 	platform.ObserveQueueWait("mailmatch_resource_fetch", job.CreatedAt)
 
-	scope, err := uc.repo.LoadResourceFetchScope(ctx, job.ResourceID, job.ExpectedCredentialRevision)
+	scope, err := uc.repo.LoadResourceFetchScope(ctx, job.ResourceID, job.ExpectedCredentialRevision, job.ResourceType)
 	if err != nil {
 		return uc.finishScopeFailure(ctx, *job, err)
 	}
 	if job.Kind == domain.ResourceFetchJobHistory {
 		return uc.processResourceHistory(ctx, *job)
+	}
+	if job.ResourceType == domain.ResourceTypeICloud {
+		return uc.processICloudResourceFetch(ctx, *job, *scope)
 	}
 	if uc.transport == nil {
 		return uc.releaseResourceFetchInfrastructure(ctx, job.ResourceID, job.Generation, errors.New("microsoft mail transport is unavailable"))
@@ -282,6 +294,30 @@ func (uc *ResourceFetchUseCase) Process(ctx context.Context, task ResourceFetchT
 		if errors.Is(err, domain.ErrResourceFetchInvalidClaim) {
 			return nil
 		}
+		return uc.releaseResourceFetchInfrastructure(ctx, job.ResourceID, job.Generation, err)
+	}
+	return nil
+}
+
+func (uc *ResourceFetchUseCase) processICloudResourceFetch(ctx context.Context, job domain.ResourceFetchJob, scope domain.ResourceFetchScope) error {
+	if uc.messages == nil || uc.messages.gmailPurchase == nil {
+		return uc.releaseResourceFetchInfrastructure(ctx, job.ResourceID, job.Generation, errors.New("iCloud mail fetch service is unavailable"))
+	}
+	if err := uc.messages.gmailPurchase.FetchICloudMail(ctx, scope.OrderNo); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return uc.releaseResourceFetchInfrastructure(ctx, job.ResourceID, job.Generation, err)
+		}
+		return uc.retryResourceFetch(ctx, job, "iCloud mail service is temporarily unavailable.", "request", true, err)
+	}
+	now := uc.now()
+	err := uc.repo.CompleteResourceFetchTask(
+		ctx, job.ResourceID, job.Generation, now,
+		resourceFetchSystemLog(job, "info", "resource_fetch_succeeded", "iCloud resource mail fetch completed.", ""),
+	)
+	if errors.Is(err, domain.ErrResourceFetchInvalidClaim) {
+		return nil
+	}
+	if err != nil {
 		return uc.releaseResourceFetchInfrastructure(ctx, job.ResourceID, job.Generation, err)
 	}
 	return nil
@@ -367,7 +403,7 @@ func (uc *ResourceFetchUseCase) ReleaseDispatch(ctx context.Context, task Resour
 		return nil
 	}
 	released, err := uc.repo.ReleaseResourceFetchInfrastructureFailure(
-		ctx, task.ResourceID, task.Generation, "Microsoft resource fetch execution capacity is temporarily unavailable.", nil,
+		ctx, task.ResourceID, task.Generation, "Resource fetch execution capacity is temporarily unavailable.", nil,
 	)
 	if released {
 		uc.ScheduleDispatcher(context.WithoutCancel(ctx), 0)
@@ -387,7 +423,7 @@ func (uc *ResourceFetchUseCase) finishScopeFailure(ctx context.Context, job doma
 	switch {
 	case errors.Is(err, domain.ErrResourceFetchCredentialChanged):
 		return uc.cancelResourceFetch(ctx, job, "Resource credentials changed before "+operation+" started.", "credential_changed")
-	case errors.Is(err, domain.ErrResourceFetchDeleted), errors.Is(err, domain.ErrResourceFetchNotFound):
+	case errors.Is(err, domain.ErrResourceFetchDeleted), errors.Is(err, domain.ErrResourceFetchNotFound), errors.Is(err, domain.ErrResourceFetchJobConflict):
 		return uc.cancelResourceFetch(ctx, job, "Resource is not available for "+operation+".", "resource_unavailable")
 	case errors.Is(err, domain.ErrResourceFetchCredentialsMissing):
 		return uc.retryResourceFetch(ctx, job, "Microsoft mail fetch credentials are incomplete.", "missing_token", false, err)
@@ -399,7 +435,7 @@ func (uc *ResourceFetchUseCase) finishScopeFailure(ctx context.Context, job doma
 func (uc *ResourceFetchUseCase) releaseResourceFetchInfrastructure(ctx context.Context, resourceID uint, generation uint64, cause error) error {
 	released, err := uc.repo.ReleaseResourceFetchInfrastructureFailure(
 		context.WithoutCancel(ctx), resourceID, generation,
-		"Microsoft resource fetch infrastructure is temporarily unavailable.", nil,
+		"Resource fetch infrastructure is temporarily unavailable.", nil,
 	)
 	if err != nil {
 		return errors.Join(cause, err)
@@ -472,7 +508,7 @@ func (uc *ResourceFetchUseCase) wakeDispatcher(ctx context.Context, job domain.R
 		job,
 		"warning",
 		"resource_fetch_dispatch_wakeup_failed",
-		"Microsoft resource "+resourceFetchOperationLabel(job.Kind)+" was saved and awaits dispatcher recovery.",
+		resourceFetchResourceLabel(job.ResourceType)+" resource "+resourceFetchOperationLabel(job.Kind)+" was saved and awaits dispatcher recovery.",
 		"queue_unavailable",
 	))
 }
@@ -504,25 +540,28 @@ func resourceFetchSystemLog(job domain.ResourceFetchJob, level string, eventType
 		Module:    "mailmatch",
 		EventType: eventType,
 		RequestID: job.RequestID,
-		BizType:   "microsoft_resource",
+		BizType:   resourceFetchBizType(job.ResourceType),
 		BizID:     fmt.Sprintf("%d", job.ResourceID),
 		Message:   strings.TrimSpace(message),
 		Detail:    safeDetail,
 	}
 }
 
-func resourceFetchOperationType(kind domain.ResourceFetchJobKind) string {
+func resourceFetchOperationType(resourceType domain.ResourceType, kind domain.ResourceFetchJobKind) string {
 	if kind == domain.ResourceFetchJobHistory {
 		return "mailmatch.admin_resource.history_scan"
+	}
+	if resourceType == domain.ResourceTypeICloud {
+		return "mailmatch.admin_icloud_resource.fetch"
 	}
 	return "mailmatch.admin_resource.fetch"
 }
 
-func resourceFetchAcceptedSummary(kind domain.ResourceFetchJobKind) string {
+func resourceFetchAcceptedSummary(resourceType domain.ResourceType, kind domain.ResourceFetchJobKind) string {
 	if kind == domain.ResourceFetchJobHistory {
 		return "Microsoft resource project history scan accepted."
 	}
-	return "Microsoft resource mail fetch accepted."
+	return resourceFetchResourceLabel(resourceType) + " resource mail fetch accepted."
 }
 
 func resourceFetchOperationLabel(kind domain.ResourceFetchJobKind) string {
@@ -530,6 +569,20 @@ func resourceFetchOperationLabel(kind domain.ResourceFetchJobKind) string {
 		return "project history scan"
 	}
 	return "mail fetch"
+}
+
+func resourceFetchBizType(resourceType domain.ResourceType) string {
+	if resourceType == domain.ResourceTypeICloud {
+		return governanceapp.AdminTaskBizICloudResource
+	}
+	return governanceapp.AdminTaskBizMicrosoftResource
+}
+
+func resourceFetchResourceLabel(resourceType domain.ResourceType) string {
+	if resourceType == domain.ResourceTypeICloud {
+		return "iCloud"
+	}
+	return "Microsoft"
 }
 
 func safeResourceFetchCategory(value string) string {

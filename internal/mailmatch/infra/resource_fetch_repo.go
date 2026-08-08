@@ -67,9 +67,16 @@ func (r *ResourceFetchRepo) CreateOrReuseResourceFetch(ctx context.Context, job 
 	if !domain.IsValidResourceFetchJobKind(job.Kind) {
 		return false, domain.ErrInvalidRequest
 	}
+	if job.ResourceType == "" {
+		job.ResourceType = domain.ResourceTypeMicrosoft
+	}
+	if (job.ResourceType != domain.ResourceTypeMicrosoft && job.ResourceType != domain.ResourceTypeICloud) ||
+		(job.ResourceType == domain.ResourceTypeICloud && job.Kind != domain.ResourceFetchJobFetch) {
+		return false, domain.ErrInvalidRequest
+	}
 	reused := false
 	err := r.withTx(ctx, func(txCtx context.Context, tx *gorm.DB) error {
-		scope, err := r.lockResourceFetchScope(txCtx, job.ResourceID)
+		scope, err := r.lockResourceFetchScope(txCtx, job.ResourceID, job.ResourceType)
 		if err != nil {
 			return err
 		}
@@ -79,7 +86,7 @@ func (r *ResourceFetchRepo) CreateOrReuseResourceFetch(ctx context.Context, job 
 
 		var state FetchStateModel
 		err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&state, "email_resource_id = ?", job.ResourceID).Error
-		operationKind := resourceFetchOperationKind(job.Kind)
+		operationKind := resourceFetchOperationKind(job.Kind, job.ResourceType)
 		if err == nil && state.IdempotencyKey == job.IdempotencyKey {
 			if state.OperationKind != operationKind || state.OperatorUserID == nil || *state.OperatorUserID != job.OperatorUserID {
 				return domain.ErrResourceFetchIdempotencyConflict
@@ -102,6 +109,7 @@ func (r *ResourceFetchRepo) CreateOrReuseResourceFetch(ctx context.Context, job 
 		requested := FetchStateModel{
 			EmailResourceID: job.ResourceID, Status: string(domain.ResourceFetchJobQueued), Generation: generation,
 			Failures: 0, OperationKind: operationKind, OperatorUserID: &job.OperatorUserID,
+			OrderNo:                    scope.OrderNo,
 			ExpectedCredentialRevision: scope.CredentialRevision,
 			SinceAt:                    job.SinceAt, UntilAt: job.UntilAt,
 			RequestID: strings.TrimSpace(job.RequestID), Path: strings.TrimSpace(job.Path), IdempotencyKey: job.IdempotencyKey,
@@ -110,7 +118,7 @@ func (r *ResourceFetchRepo) CreateOrReuseResourceFetch(ctx context.Context, job 
 		if err == nil {
 			result := tx.Model(&FetchStateModel{}).Where("email_resource_id = ?", job.ResourceID).Updates(map[string]any{
 				"status": string(domain.ResourceFetchJobQueued), "generation": generation, "failures": 0,
-				"operation_kind": operationKind, "order_no": "", "purpose": "order_fetch",
+				"operation_kind": operationKind, "order_no": scope.OrderNo, "purpose": "order_fetch",
 				"operator_user_id": job.OperatorUserID, "expected_credential_revision": scope.CredentialRevision,
 				"since_at": job.SinceAt, "until_at": job.UntilAt,
 				"fetched_count": 0, "stored_count": 0, "matched_count": 0,
@@ -125,6 +133,7 @@ func (r *ResourceFetchRepo) CreateOrReuseResourceFetch(ctx context.Context, job 
 		}
 		*job = resourceFetchStateToDomain(requested)
 		job.Recipient = strings.ToLower(strings.TrimSpace(scope.EmailAddress))
+		job.OrderNo = strings.TrimSpace(scope.OrderNo)
 		return r.createResourceFetchOperationLog(txCtx, tx, job, false, log)
 	})
 	return reused, err
@@ -135,8 +144,8 @@ func (r *ResourceFetchRepo) createResourceFetchOperationLog(ctx context.Context,
 		return nil
 	}
 	log.SafeSummary = fmt.Sprintf(
-		"Microsoft resource %s accepted; task=fetch:%d:%d; reused=%t.",
-		resourceFetchOperationLabel(job.Kind), job.ResourceID, job.Generation, reused,
+		"%s resource %s accepted; task=fetch:%d:%d; reused=%t.",
+		resourceFetchResourceLabel(job.ResourceType), resourceFetchOperationLabel(job.Kind), job.ResourceID, job.Generation, reused,
 	)
 	return r.operationLogs.CreateInTx(ctx, tx, log)
 }
@@ -234,8 +243,8 @@ func (r *ResourceFetchRepo) ReleaseResourceFetchInfrastructureFailure(ctx contex
 	return retryScheduled, err
 }
 
-func (r *ResourceFetchRepo) LoadResourceFetchScope(ctx context.Context, resourceID uint, expectedCredentialRevision uint64) (*domain.ResourceFetchScope, error) {
-	scope, err := r.lockResourceFetchScope(ctx, resourceID)
+func (r *ResourceFetchRepo) LoadResourceFetchScope(ctx context.Context, resourceID uint, expectedCredentialRevision uint64, resourceType domain.ResourceType) (*domain.ResourceFetchScope, error) {
+	scope, err := r.lockResourceFetchScope(ctx, resourceID, resourceType)
 	if err != nil {
 		return nil, err
 	}
@@ -250,7 +259,7 @@ func (r *ResourceFetchRepo) AssertResourceFetchFence(ctx context.Context, resour
 		if err := r.lockResourceFetchState(tx, resourceID, generation); err != nil {
 			return err
 		}
-		scope, err := r.lockResourceFetchScope(txCtx, resourceID)
+		scope, err := r.lockResourceFetchScope(txCtx, resourceID, domain.ResourceTypeMicrosoft)
 		if err != nil {
 			return err
 		}
@@ -263,7 +272,7 @@ func (r *ResourceFetchRepo) CompleteResourceFetch(ctx context.Context, resourceI
 		if err := r.lockResourceFetchState(tx, resourceID, generation); err != nil {
 			return err
 		}
-		scope, err := r.lockResourceFetchScope(txCtx, resourceID)
+		scope, err := r.lockResourceFetchScope(txCtx, resourceID, domain.ResourceTypeMicrosoft)
 		if err != nil {
 			return err
 		}
@@ -340,7 +349,7 @@ func (r *ResourceFetchRepo) MarkResourceFetchFailure(ctx context.Context, resour
 		}
 		if retryScheduled {
 			log.EventType = "resource_fetch_retry_scheduled"
-			log.Message = "Microsoft resource mail fetch retry scheduled."
+			log.Message = "Resource mail fetch retry scheduled."
 		}
 		return r.systemLogs.CreateInTx(txCtx, tx, log)
 	})
@@ -374,7 +383,10 @@ func (r *ResourceFetchRepo) lockResourceFetchState(tx *gorm.DB, resourceID uint,
 	return err
 }
 
-func (r *ResourceFetchRepo) lockResourceFetchScope(ctx context.Context, resourceID uint) (*domain.ResourceFetchScope, error) {
+func (r *ResourceFetchRepo) lockResourceFetchScope(ctx context.Context, resourceID uint, resourceType domain.ResourceType) (*domain.ResourceFetchScope, error) {
+	if resourceType == domain.ResourceTypeICloud {
+		return r.lockICloudResourceFetchScope(ctx, resourceID)
+	}
 	if r == nil || r.credentials == nil {
 		return nil, fmt.Errorf("load resource fetch credential scope: credential port is unavailable")
 	}
@@ -383,9 +395,39 @@ func (r *ResourceFetchRepo) lockResourceFetchScope(ctx context.Context, resource
 		return nil, resourceFetchCredentialError("load resource fetch credential scope", err)
 	}
 	return &domain.ResourceFetchScope{
-		ResourceID: scope.ResourceID, Status: scope.Status, EmailAddress: scope.EmailAddress,
+		ResourceID: scope.ResourceID, ResourceType: domain.ResourceTypeMicrosoft, Status: scope.Status, EmailAddress: scope.EmailAddress,
 		ClientID: scope.ClientID, RefreshToken: scope.RefreshToken, CredentialRevision: scope.CredentialRevision,
 	}, nil
+}
+
+func (r *ResourceFetchRepo) lockICloudResourceFetchScope(ctx context.Context, resourceID uint) (*domain.ResourceFetchScope, error) {
+	if r == nil || r.db == nil || resourceID == 0 {
+		return nil, domain.ErrResourceFetchNotFound
+	}
+	var scope domain.ResourceFetchScope
+	err := r.dbFor(ctx).Table("icloud_resources AS resource").
+		Select("resource.id AS resource_id, resource.status, resource.primary_email AS email_address, resource.credential_revision").
+		Joins("JOIN email_resources AS root ON root.id = resource.id AND root.type = ?", string(domain.ResourceTypeICloud)).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("resource.id = ?", resourceID).Take(&scope).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, domain.ErrResourceFetchNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load iCloud resource fetch scope: %w", err)
+	}
+	scope.ResourceType = domain.ResourceTypeICloud
+	var allocation struct {
+		OrderNo string `gorm:"column:order_no"`
+	}
+	err = r.dbFor(ctx).Table("icloud_allocations").Select("order_no").
+		Where("resource_id = ? AND status = ?", resourceID, "allocated").
+		Order("created_at ASC, id ASC").Limit(1).Take(&allocation).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, fmt.Errorf("load active iCloud resource allocation: %w", err)
+	}
+	scope.OrderNo = strings.TrimSpace(allocation.OrderNo)
+	return &scope, nil
 }
 
 func (r *ResourceFetchRepo) applyResourceFetchRefreshToken(ctx context.Context, update coreapp.MicrosoftFetchRefreshTokenRotation) error {
@@ -420,6 +462,12 @@ func validateResourceFetchScope(row *domain.ResourceFetchScope, expectedCredenti
 	if expectedCredentialRevision > 0 && row.CredentialRevision != expectedCredentialRevision {
 		return domain.ErrResourceFetchCredentialChanged
 	}
+	if row.ResourceType == domain.ResourceTypeICloud {
+		if strings.TrimSpace(row.EmailAddress) == "" || strings.TrimSpace(row.OrderNo) == "" {
+			return domain.ErrResourceFetchJobConflict
+		}
+		return nil
+	}
 	if strings.TrimSpace(row.EmailAddress) == "" || strings.TrimSpace(row.ClientID) == "" || strings.TrimSpace(row.RefreshToken) == "" {
 		return domain.ErrResourceFetchCredentialsMissing
 	}
@@ -428,8 +476,11 @@ func validateResourceFetchScope(row *domain.ResourceFetchScope, expectedCredenti
 
 func resourceFetchStateToDomain(state FetchStateModel) domain.ResourceFetchJob {
 	kind := domain.ResourceFetchJobFetch
+	resourceType := domain.ResourceTypeMicrosoft
 	if state.OperationKind == "resource_history" {
 		kind = domain.ResourceFetchJobHistory
+	} else if state.OperationKind == "icloud_resource_fetch" {
+		resourceType = domain.ResourceTypeICloud
 	}
 	operatorID := uint(0)
 	if state.OperatorUserID != nil {
@@ -440,33 +491,45 @@ func resourceFetchStateToDomain(state FetchStateModel) domain.ResourceFetchJob {
 		createdAt = *state.RequestedAt
 	}
 	return domain.ResourceFetchJob{
-		ID: state.EmailResourceID, Generation: state.Generation, Kind: kind,
+		ID: state.EmailResourceID, Generation: state.Generation, Kind: kind, ResourceType: resourceType,
 		ResourceID: state.EmailResourceID, OperatorUserID: operatorID,
 		ExpectedCredentialRevision: state.ExpectedCredentialRevision,
 		Status:                     domain.ResourceFetchJobStatus(state.Status), Attempts: state.Failures,
 		MaxAttempts:  domain.ResourceFetchDefaultMaxAttempts,
 		FetchedCount: state.FetchedCount, StoredCount: state.StoredCount, MatchedCount: state.MatchedCount,
 		SinceAt: state.SinceAt, UntilAt: state.UntilAt,
-		LastSafeError: state.LastSafeError, RequestID: state.RequestID, Path: state.Path,
+		OrderNo: state.OrderNo, LastSafeError: state.LastSafeError, RequestID: state.RequestID, Path: state.Path,
 		IdempotencyKey: state.IdempotencyKey, StartedAt: state.StartedAt, FinishedAt: state.FinishedAt,
 		CreatedAt: createdAt, UpdatedAt: state.UpdatedAt,
 	}
 }
 
-func resourceFetchOperationKind(kind domain.ResourceFetchJobKind) string {
+func resourceFetchOperationKind(kind domain.ResourceFetchJobKind, resourceType domain.ResourceType) string {
 	if kind == domain.ResourceFetchJobHistory {
 		return "resource_history"
+	}
+	if resourceType == domain.ResourceTypeICloud {
+		return "icloud_resource_fetch"
 	}
 	return "resource_fetch"
 }
 
-func resourceFetchOperationKinds() []string { return []string{"resource_fetch", "resource_history"} }
+func resourceFetchOperationKinds() []string {
+	return []string{"resource_fetch", "resource_history", "icloud_resource_fetch"}
+}
 
 func resourceFetchOperationLabel(kind domain.ResourceFetchJobKind) string {
 	if kind == domain.ResourceFetchJobHistory {
 		return "project history scan"
 	}
 	return "mail fetch"
+}
+
+func resourceFetchResourceLabel(resourceType domain.ResourceType) string {
+	if resourceType == domain.ResourceTypeICloud {
+		return "iCloud"
+	}
+	return "Microsoft"
 }
 
 var _ app.ResourceFetchRepository = (*ResourceFetchRepo)(nil)

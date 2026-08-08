@@ -6,7 +6,7 @@ import (
 )
 
 // ResourceFetchJobStatus is the current lifecycle of an administrator-triggered
-// Microsoft resource fetch stored on the resource fetch state row.
+// resource fetch stored on the resource fetch state row.
 type ResourceFetchJobStatus string
 
 type ResourceFetchJobKind string
@@ -30,10 +30,12 @@ type ResourceFetchJob struct {
 	ID                         uint
 	Generation                 uint64
 	Kind                       ResourceFetchJobKind
+	ResourceType               ResourceType
 	ResourceID                 uint
 	OperatorUserID             uint
 	ExpectedCredentialRevision uint64
 	Recipient                  string
+	OrderNo                    string
 	Status                     ResourceFetchJobStatus
 	Attempts                   int
 	MaxAttempts                int
@@ -61,8 +63,10 @@ func IsValidResourceFetchJobKind(kind ResourceFetchJobKind) bool {
 // system log.
 type ResourceFetchScope struct {
 	ResourceID         uint
+	ResourceType       ResourceType
 	Status             string
 	EmailAddress       string
+	OrderNo            string
 	ClientID           string
 	RefreshToken       string
 	CredentialRevision uint64

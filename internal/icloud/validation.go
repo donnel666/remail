@@ -67,6 +67,14 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 		return err
 	}
 	if !found {
+		if task.MaintenanceRunID > 0 {
+			_ = s.db.WithContext(context.WithoutCancel(ctx)).Transaction(func(tx *gorm.DB) error {
+				return finishICloudMaintenanceRunTx(
+					context.WithoutCancel(ctx), tx, task.MaintenanceRunID,
+					iCloudMaintenanceCanceled, "iCloud resource changed before maintenance started.", s.now().UTC(),
+				)
+			})
+		}
 		return nil
 	}
 	now := s.now().UTC()
@@ -346,9 +354,10 @@ func (s *Service) RequestAdminICloudValidation(ctx context.Context, operatorUser
 		case iCloudResourceDisabled:
 			return ErrICloudResourceStatus
 		}
+		nextGeneration := resource.ValidationGeneration + 1
 		updated := tx.Model(&iCloudResourceModel{}).Where("id = ? AND validation_generation = ?", resource.ID, resource.ValidationGeneration).
 			Updates(map[string]any{
-				"status": iCloudResourcePending, "validation_generation": resource.ValidationGeneration + 1,
+				"status": iCloudResourcePending, "validation_generation": nextGeneration,
 				"validation_failures": 0, "next_validation_at": now, "last_safe_error": "", "updated_at": now,
 				"delivery_probe_token": "", "delivery_probe_alias": "",
 				"delivery_probe_started_at": nil, "delivery_probe_verified_at": nil,
@@ -358,6 +367,12 @@ func (s *Service) RequestAdminICloudValidation(ctx context.Context, operatorUser
 		}
 		if updated.RowsAffected != 1 {
 			return errICloudValidationStale
+		}
+		if _, err := ensureICloudMaintenanceRunTx(
+			ctx, tx, resource.ID, nextGeneration, iCloudMaintenanceValidation,
+			resource.CredentialRevision, 0, now,
+		); err != nil {
+			return err
 		}
 		return s.operationLogs.CreateInTx(ctx, tx, &governancedomain.OperationLog{
 			OperatorUserID: operatorUserID, OperationType: "icloud.admin_resource.validate",
@@ -520,7 +535,7 @@ func (s *Service) DispatchICloudValidations(ctx context.Context, limit int) erro
 	}
 	var result error
 	for _, task := range tasks {
-		claimed, claimErr := s.markICloudValidationDispatched(ctx, task)
+		claimedTask, claimed, claimErr := s.markICloudValidationDispatched(ctx, task)
 		if claimErr != nil {
 			result = errors.Join(result, claimErr)
 			continue
@@ -529,9 +544,9 @@ func (s *Service) DispatchICloudValidations(ctx context.Context, limit int) erro
 			continue
 		}
 		// A duplicate queue task already carries this durable validation fence.
-		_, enqueueErr := s.enqueueICloudValidation(ctx, task)
+		_, enqueueErr := s.enqueueICloudValidation(ctx, claimedTask)
 		if enqueueErr != nil {
-			_ = s.releaseICloudValidation(ctx, task, "iCloud validation is temporarily unavailable; dispatcher will retry.")
+			_ = s.releaseICloudValidation(ctx, claimedTask, "iCloud validation is temporarily unavailable; dispatcher will retry.")
 			result = errors.Join(result, enqueueErr)
 			continue
 		}
@@ -546,17 +561,18 @@ func (s *Service) recoverStaleICloudValidations(ctx context.Context, now time.Ti
 	if s == nil || s.db == nil {
 		return ErrICloudValidationTemp
 	}
-	result := s.db.WithContext(ctx).Model(&iCloudResourceModel{}).
-		Where("status = ? AND updated_at <= ?", iCloudResourceValidating, now.Add(-iCloudValidationRunningLease)).
-		Updates(map[string]any{
-			"status":                iCloudResourcePending,
-			"validation_generation": gorm.Expr("validation_generation + 1"),
-			"next_validation_at":    now,
-			"last_safe_error":       "iCloud validation lease expired; dispatcher will retry.",
-			"updated_at":            now,
-		})
-	if result.Error != nil {
+	var tasks []iCloudValidationTask
+	if err := s.db.WithContext(ctx).Table("icloud_resources AS ir").
+		Select("ir.id AS resource_id, ir.validation_generation, ir.credential_revision AS expected_credential_revision, COALESCE(run.id, 0) AS maintenance_run_id, COALESCE(run.kind, 'validation') AS maintenance_kind").
+		Joins("LEFT JOIN icloud_maintenance_runs AS run ON run.resource_id = ir.id AND run.validation_generation = ir.validation_generation").
+		Where("ir.status = ? AND ir.updated_at <= ?", iCloudResourceValidating, now.Add(-iCloudValidationRunningLease)).
+		Order("ir.id ASC").Scan(&tasks).Error; err != nil {
 		return ErrICloudValidationTemp
+	}
+	for _, task := range tasks {
+		if err := s.releaseICloudValidation(ctx, task, "iCloud validation lease expired; dispatcher will retry."); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -566,11 +582,12 @@ func (s *Service) iCloudValidationCandidates(ctx context.Context, limit int) ([]
 	var rows []struct {
 		ID                   uint   `gorm:"column:id"`
 		OwnerUserID          uint   `gorm:"column:owner_user_id"`
+		Status               string `gorm:"column:status"`
 		CredentialRevision   uint64 `gorm:"column:credential_revision"`
 		ValidationGeneration uint64 `gorm:"column:validation_generation"`
 	}
 	err := s.db.WithContext(ctx).Table("icloud_resources AS ir").
-		Select("ir.id, er.owner_user_id, ir.credential_revision, ir.validation_generation").
+		Select("ir.id, er.owner_user_id, ir.status, ir.credential_revision, ir.validation_generation").
 		Joins("JOIN email_resources AS er ON er.id = ir.id AND er.type = ?", "icloud").
 		Where(`(ir.status = ? AND (ir.next_validation_at IS NULL OR ir.next_validation_at <= ?)) OR
 			(ir.status = ? AND ir.expire_at <= ?) OR
@@ -585,28 +602,94 @@ func (s *Service) iCloudValidationCandidates(ctx context.Context, limit int) ([]
 		if row.ID == 0 || row.OwnerUserID == 0 || row.CredentialRevision == 0 || row.ValidationGeneration == 0 {
 			continue
 		}
+		generation := row.ValidationGeneration
+		if row.Status == iCloudResourceNormal {
+			generation++
+		}
 		tasks = append(tasks, iCloudValidationTask{
-			ResourceID: row.ID, OwnerUserID: row.OwnerUserID, ValidationGeneration: row.ValidationGeneration,
+			ResourceID: row.ID, OwnerUserID: row.OwnerUserID, ValidationGeneration: generation,
 			ExpectedCredentialRevision: row.CredentialRevision,
 		})
 	}
 	return tasks, nil
 }
 
-func (s *Service) markICloudValidationDispatched(ctx context.Context, task iCloudValidationTask) (bool, error) {
-	if s == nil || s.db == nil || task.ResourceID == 0 || task.ValidationGeneration == 0 || task.ExpectedCredentialRevision == 0 {
-		return false, ErrICloudValidationTemp
+func (s *Service) markICloudValidationDispatched(ctx context.Context, task iCloudValidationTask) (iCloudValidationTask, bool, error) {
+	if s == nil || s.db == nil || task.ResourceID == 0 || task.OwnerUserID == 0 || task.ValidationGeneration == 0 || task.ExpectedCredentialRevision == 0 {
+		return task, false, ErrICloudValidationTemp
 	}
 	now := s.now().UTC()
-	result := s.db.WithContext(ctx).Model(&iCloudResourceModel{}).
-		Where(`id = ? AND validation_generation = ? AND credential_revision = ? AND ((status = ? AND (next_validation_at IS NULL OR next_validation_at <= ?)) OR (status = ? AND expire_at <= ?) OR (status = ? AND session_status = ? AND next_keepalive_at IS NOT NULL AND next_keepalive_at <= ? AND expire_at > ?))`,
-			task.ResourceID, task.ValidationGeneration, task.ExpectedCredentialRevision,
-			iCloudResourcePending, now, iCloudResourceNormal, now, iCloudResourceNormal, iCloudSessionValid, now, now).
-		Updates(map[string]any{"status": iCloudResourceValidating, "last_safe_error": "", "updated_at": now})
-	if result.Error != nil {
-		return false, ErrICloudValidationTemp
+	claimed := false
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var root iCloudRootModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND type = ? AND owner_user_id = ?", task.ResourceID, "icloud", task.OwnerUserID).
+			Take(&root).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return err
+		}
+		var resource iCloudResourceModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Take(&resource, task.ResourceID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return err
+		}
+		if resource.CredentialRevision != task.ExpectedCredentialRevision {
+			return nil
+		}
+		pendingDue := resource.Status == iCloudResourcePending &&
+			resource.ValidationGeneration == task.ValidationGeneration &&
+			(resource.NextValidationAt == nil || !resource.NextValidationAt.After(now))
+		normalDue := resource.Status == iCloudResourceNormal &&
+			resource.ValidationGeneration+1 == task.ValidationGeneration &&
+			(!resource.ExpireAt.After(now) ||
+				(resource.SessionStatus == iCloudSessionValid && resource.NextKeepaliveAt != nil &&
+					!resource.NextKeepaliveAt.After(now) && resource.ExpireAt.After(now)))
+		if !pendingDue && !normalDue {
+			return nil
+		}
+		run, err := ensureICloudMaintenanceRunTx(
+			ctx, tx, resource.ID, task.ValidationGeneration, iCloudMaintenanceValidation,
+			resource.CredentialRevision, int(resource.ValidationFailures), now,
+		)
+		if err != nil {
+			return err
+		}
+		result := tx.Model(&iCloudMaintenanceRunModel{}).
+			Where("id = ? AND status = ?", run.ID, iCloudMaintenanceQueued).
+			Updates(map[string]any{
+				"status":          iCloudMaintenanceRunning,
+				"attempts":        min(run.Attempts+1, run.MaxAttempts),
+				"started_at":      now,
+				"finished_at":     nil,
+				"last_safe_error": "",
+				"updated_at":      now,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return nil
+		}
+		updates := map[string]any{"status": iCloudResourceValidating, "last_safe_error": "", "updated_at": now}
+		if normalDue {
+			updates["validation_generation"] = task.ValidationGeneration
+		}
+		if err := tx.Model(&iCloudResourceModel{}).Where("id = ?", resource.ID).Updates(updates).Error; err != nil {
+			return err
+		}
+		task.MaintenanceRunID = run.ID
+		task.MaintenanceKind = run.Kind
+		claimed = true
+		return nil
+	})
+	if err != nil {
+		return task, false, ErrICloudValidationTemp
 	}
-	return result.RowsAffected == 1, nil
+	return task, claimed, nil
 }
 
 func (s *Service) applyICloudValidationResult(ctx context.Context, task iCloudValidationTask, result iCloudValidationResult) error {
@@ -653,6 +736,14 @@ func (s *Service) applyICloudValidationResultOnce(ctx context.Context, task iClo
 			return err
 		}
 		if resource.Status != iCloudResourceValidating || resource.ValidationGeneration != task.ValidationGeneration || resource.CredentialRevision != task.ExpectedCredentialRevision {
+			stale = true
+			return nil
+		}
+		maintenanceRun, runErr := findICloudMaintenanceRunTx(ctx, tx, task)
+		if runErr != nil {
+			return runErr
+		}
+		if task.MaintenanceRunID > 0 && maintenanceRun == nil {
 			stale = true
 			return nil
 		}
@@ -764,6 +855,27 @@ func (s *Service) applyICloudValidationResultOnce(ctx context.Context, task iClo
 		if rootUpdated.RowsAffected != 1 {
 			return errICloudValidationStale
 		}
+		if maintenanceRun != nil {
+			runStatus := iCloudMaintenanceSucceeded
+			if nextStatus == iCloudResourceAbnormal || (!result.Valid && !result.Deferred) {
+				runStatus = iCloudMaintenanceFailed
+			}
+			if err := finishICloudMaintenanceRunTx(ctx, tx, maintenanceRun.ID, runStatus, safeMessage, now); err != nil {
+				return err
+			}
+			if nextStatus == iCloudResourcePending {
+				nextCredentialRevision := resource.CredentialRevision
+				if updatedCookie != "" && updatedCookie != resource.Cookie {
+					nextCredentialRevision++
+				}
+				if _, err := ensureICloudMaintenanceRunTx(
+					ctx, tx, resource.ID, resource.ValidationGeneration+1, maintenanceRun.Kind,
+					nextCredentialRevision, int(nextFailures), now,
+				); err != nil {
+					return err
+				}
+			}
+		}
 		return nil
 	})
 	if err != nil {
@@ -779,13 +891,63 @@ func (s *Service) releaseICloudValidation(ctx context.Context, task iCloudValida
 	if s == nil || s.db == nil || task.ResourceID == 0 || task.ValidationGeneration == 0 || task.ExpectedCredentialRevision == 0 {
 		return ErrICloudValidationTemp
 	}
-	result := s.db.WithContext(ctx).Model(&iCloudResourceModel{}).
-		Where("id = ? AND status = ? AND validation_generation = ? AND credential_revision = ?", task.ResourceID, iCloudResourceValidating, task.ValidationGeneration, task.ExpectedCredentialRevision).
-		Updates(map[string]any{
-			"status": iCloudResourcePending, "validation_generation": gorm.Expr("validation_generation + 1"),
-			"last_safe_error": safeICloudValidationMessage(safeError), "updated_at": s.now().UTC(),
-		})
-	if result.Error != nil {
+	now := s.now().UTC()
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var resource iCloudResourceModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND status = ? AND validation_generation = ? AND credential_revision = ?",
+				task.ResourceID, iCloudResourceValidating, task.ValidationGeneration, task.ExpectedCredentialRevision).
+			Take(&resource).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return err
+		}
+		run, err := findICloudMaintenanceRunTx(ctx, tx, task)
+		if err != nil {
+			return err
+		}
+		if run == nil {
+			run, err = ensureICloudMaintenanceRunTx(
+				ctx, tx, resource.ID, resource.ValidationGeneration, task.MaintenanceKind,
+				resource.CredentialRevision, 0, now,
+			)
+			if err != nil {
+				return err
+			}
+		}
+		if err := finishICloudMaintenanceRunTx(ctx, tx, run.ID, iCloudMaintenanceFailed, safeError, now); err != nil {
+			return err
+		}
+		retry := run.Attempts < run.MaxAttempts
+		updates := map[string]any{
+			"status": iCloudResourceAbnormal, "validation_failures": min(run.Attempts, iCloudValidationMaxFailures),
+			"next_validation_at": nil, "last_safe_error": safeICloudValidationMessage(safeError), "updated_at": now,
+		}
+		if retry {
+			updates["status"] = iCloudResourcePending
+			updates["validation_generation"] = resource.ValidationGeneration + 1
+			updates["next_validation_at"] = now
+		}
+		result := tx.Model(&iCloudResourceModel{}).
+			Where("id = ? AND status = ? AND validation_generation = ? AND credential_revision = ?",
+				resource.ID, iCloudResourceValidating, resource.ValidationGeneration, resource.CredentialRevision).
+			Updates(updates)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return errICloudValidationStale
+		}
+		if retry {
+			_, err = ensureICloudMaintenanceRunTx(
+				ctx, tx, resource.ID, resource.ValidationGeneration+1, run.Kind,
+				resource.CredentialRevision, run.Attempts, now,
+			)
+		}
+		return err
+	})
+	if err != nil && !errors.Is(err, errICloudValidationStale) {
 		return ErrICloudValidationTemp
 	}
 	return nil

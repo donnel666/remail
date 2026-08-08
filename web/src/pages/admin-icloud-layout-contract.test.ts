@@ -38,16 +38,33 @@ describe("admin iCloud page layout", () => {
       "rowSelection",
       "useSelectionNotification",
       "listAdminICloudAliases",
+      "listAdminICloudTasks",
       "includeFacets: false",
       "includeTotal: false",
       "batchAdminICloudResourcesByIds",
       "batchAdminICloudResourcesByFilter",
       "recoverAdminICloudResource",
       "deleteAdminICloudResource",
+      "updateAdminICloudResource",
+      "<EditICloudModal",
+      "<ICloudMaintenanceModal",
+      "setMaintenanceTarget",
+      't("Maintenance")',
+      'label: "Create alias"',
+      'accept=".txt,text/plain"',
+      "await file.text()",
+      "break-all whitespace-normal",
       '<Tabs.TabPane itemKey="aliases"',
+      '<Tabs.TabPane itemKey="orders"',
+      '<Tabs.TabPane itemKey="tasks"',
+      '<Tabs.TabPane itemKey="mails"',
+      'resourceType="icloud"',
     ]) {
       expect(icloudSource).toContain(fragment);
     }
+
+    expect(icloudSource).not.toContain("onValidate");
+    expect(icloudSource).not.toContain("overflow-x-auto");
 
     expect(appSource).toContain(
       'adminICloudEmails: () => import("./pages/AdminICloudEmails")',
