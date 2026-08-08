@@ -672,6 +672,42 @@ func (uc *UseCase) FindAllocationByOrder(ctx context.Context, orderNo string) (*
 	return uc.repo.FindAllocationByOrder(ctx, orderNo)
 }
 
+func (uc *UseCase) FindAllocationsByOrders(ctx context.Context, orderNos []string) (map[string]domain.UnifiedAllocation, error) {
+	normalized := make([]string, 0, len(orderNos))
+	seen := make(map[string]struct{}, len(orderNos))
+	for _, orderNo := range orderNos {
+		orderNo = strings.TrimSpace(orderNo)
+		if orderNo == "" {
+			continue
+		}
+		if _, exists := seen[orderNo]; exists {
+			continue
+		}
+		seen[orderNo] = struct{}{}
+		normalized = append(normalized, orderNo)
+	}
+	if len(normalized) == 0 {
+		return map[string]domain.UnifiedAllocation{}, nil
+	}
+	if reader, ok := uc.repo.(interface {
+		FindAllocationsByOrders(context.Context, []string) (map[string]domain.UnifiedAllocation, error)
+	}); ok {
+		return reader.FindAllocationsByOrders(ctx, normalized)
+	}
+	result := make(map[string]domain.UnifiedAllocation, len(normalized))
+	for _, orderNo := range normalized {
+		allocation, err := uc.repo.FindAllocationByOrder(ctx, orderNo)
+		if errors.Is(err, domain.ErrAllocationNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		result[orderNo] = *allocation
+	}
+	return result, nil
+}
+
 func (uc *UseCase) ListActiveByRecipient(ctx context.Context, recipient string) ([]domain.UnifiedAllocation, error) {
 	recipient = strings.ToLower(strings.TrimSpace(recipient))
 	if recipient == "" {

@@ -465,7 +465,7 @@ SELECT
     o.service_mode,
     o.status AS order_status,
     o.allocation_type,
-	COALESCE(o.microsoft_alloc_id, o.domain_alloc_id, ga.id, o.icloud_alloc_id, 0) AS allocation_id,
+    COALESCE(ma.id, da.id, ga.id, ia.id, 0) AS allocation_id,
     CASE
       WHEN o.allocation_type = 'microsoft' AND ma.mailbox IN ('dot', 'plus') THEN ma.mailbox
 	      WHEN o.allocation_type = 'gmail' AND ga.mailbox IN ('dot', 'plus') THEN ga.mailbox
@@ -494,11 +494,11 @@ SELECT
     COALESCE(mr.credential_revision, 0) AS credential_revision
 FROM orders o
 JOIN projects p ON p.id = o.project_id
-LEFT JOIN microsoft_allocations ma ON ma.id = o.microsoft_alloc_id AND o.allocation_type = 'microsoft'
+LEFT JOIN microsoft_allocations ma ON ma.order_no = o.order_no AND o.allocation_type = 'microsoft'
 LEFT JOIN microsoft_resources mr ON mr.id = ma.resource_id
-LEFT JOIN domain_allocations da ON da.id = o.domain_alloc_id AND o.allocation_type = 'domain'
-	LEFT JOIN gmail_allocations ga ON ga.order_no = o.order_no AND o.allocation_type = 'gmail'
-	LEFT JOIN icloud_allocations ia ON ia.id = o.icloud_alloc_id AND o.allocation_type = 'icloud'
+LEFT JOIN domain_allocations da ON da.order_no = o.order_no AND o.allocation_type = 'domain'
+LEFT JOIN gmail_allocations ga ON ga.order_no = o.order_no AND o.allocation_type = 'gmail'
+LEFT JOIN icloud_allocations ia ON ia.order_no = o.order_no AND o.allocation_type = 'icloud'
 WHERE o.order_no = ?
   AND (
     (o.allocation_type = 'microsoft' AND ma.order_no = ?)
@@ -518,7 +518,7 @@ SELECT
     o.service_mode,
     o.status AS order_status,
     o.allocation_type,
-	COALESCE(o.microsoft_alloc_id, o.domain_alloc_id, ga.id, o.icloud_alloc_id, 0) AS allocation_id,
+    COALESCE(ma.id, da.id, ga.id, ia.id, 0) AS allocation_id,
     CASE
       WHEN o.allocation_type = 'microsoft' AND ma.mailbox IN ('dot', 'plus') THEN ma.mailbox
 	      WHEN o.allocation_type = 'gmail' AND ga.mailbox IN ('dot', 'plus') THEN ga.mailbox
@@ -549,19 +549,17 @@ FROM order_tokens t
 JOIN orders o ON o.order_no = t.order_no
 JOIN projects p ON p.id = o.project_id
 LEFT JOIN microsoft_allocations ma
-  ON ma.id = o.microsoft_alloc_id
+  ON ma.order_no = o.order_no
  AND o.allocation_type = 'microsoft'
- AND ma.order_no = o.order_no
 LEFT JOIN domain_allocations da
-  ON da.id = o.domain_alloc_id
+  ON da.order_no = o.order_no
  AND o.allocation_type = 'domain'
- AND da.order_no = o.order_no
-	LEFT JOIN gmail_allocations ga
+LEFT JOIN gmail_allocations ga
   ON ga.order_no = o.order_no
-	 AND o.allocation_type = 'gmail'
-	LEFT JOIN icloud_allocations ia
-	  ON ia.id = o.icloud_alloc_id
-	 AND o.allocation_type = 'icloud'
+ AND o.allocation_type = 'gmail'
+LEFT JOIN icloud_allocations ia
+  ON ia.order_no = o.order_no
+ AND o.allocation_type = 'icloud'
 WHERE t.token_plain = ?
   AND t.enabled = 1
   AND (t.expire_at IS NULL OR t.expire_at > UTC_TIMESTAMP())
@@ -586,7 +584,7 @@ SELECT
     o.service_mode,
     o.status AS order_status,
     o.allocation_type,
-	COALESCE(o.microsoft_alloc_id, o.domain_alloc_id, ga.id, o.icloud_alloc_id, 0) AS allocation_id,
+    COALESCE(ma.id, da.id, ga.id, ia.id, 0) AS allocation_id,
     CASE
       WHEN o.allocation_type = 'microsoft' AND ma.mailbox IN ('dot', 'plus') THEN ma.mailbox
 	      WHEN o.allocation_type = 'gmail' AND ga.mailbox IN ('dot', 'plus') THEN ga.mailbox
@@ -617,20 +615,18 @@ FROM order_tokens t
 JOIN orders o ON o.order_no = t.order_no
 JOIN projects p ON p.id = o.project_id
 LEFT JOIN microsoft_allocations ma
-  ON ma.id = o.microsoft_alloc_id
+  ON ma.order_no = o.order_no
  AND o.allocation_type = 'microsoft'
- AND ma.order_no = o.order_no
 LEFT JOIN microsoft_resources mr ON mr.id = ma.resource_id
 LEFT JOIN domain_allocations da
-  ON da.id = o.domain_alloc_id
+  ON da.order_no = o.order_no
  AND o.allocation_type = 'domain'
- AND da.order_no = o.order_no
-	LEFT JOIN gmail_allocations ga
+LEFT JOIN gmail_allocations ga
   ON ga.order_no = o.order_no
-	 AND o.allocation_type = 'gmail'
-	LEFT JOIN icloud_allocations ia
-	  ON ia.id = o.icloud_alloc_id
-	 AND o.allocation_type = 'icloud'
+ AND o.allocation_type = 'gmail'
+LEFT JOIN icloud_allocations ia
+  ON ia.order_no = o.order_no
+ AND o.allocation_type = 'icloud'
 WHERE t.token_plain IN ?
   AND t.enabled = 1
   AND (t.expire_at IS NULL OR t.expire_at > UTC_TIMESTAMP())
@@ -660,7 +656,7 @@ SELECT
     COALESCE(mr.refresh_token, '') AS microsoft_rt,
     COALESCE(mr.credential_revision, 0) AS credential_revision
 FROM microsoft_allocations ma
-JOIN orders o ON o.microsoft_alloc_id = ma.id AND o.allocation_type = 'microsoft'
+JOIN orders o ON o.order_no = ma.order_no AND o.allocation_type = 'microsoft'
 JOIN projects p ON p.id = o.project_id
 JOIN microsoft_resources mr ON mr.id = ma.resource_id
 WHERE ma.resource_id = ?
@@ -757,7 +753,7 @@ SELECT
     '' AS microsoft_rt,
     0 AS credential_revision
 FROM icloud_allocations ia
-JOIN orders o ON o.icloud_alloc_id = ia.id AND o.allocation_type = 'icloud'
+JOIN orders o ON o.order_no = ia.order_no AND o.allocation_type = 'icloud'
 JOIN projects p ON p.id = o.project_id
 WHERE ia.resource_id = ?
   AND ia.email = ?

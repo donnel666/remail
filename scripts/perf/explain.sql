@@ -48,9 +48,9 @@ FROM order_tokens t
 JOIN orders o ON o.order_no = t.order_no
 JOIN projects p ON p.id = o.project_id
 LEFT JOIN microsoft_allocations ma
-  ON ma.id = o.microsoft_alloc_id AND o.allocation_type = 'microsoft'
+  ON ma.order_no = o.order_no AND o.allocation_type = 'microsoft'
 LEFT JOIN domain_allocations da
-  ON da.id = o.domain_alloc_id AND o.allocation_type = 'domain'
+  ON da.order_no = o.order_no AND o.allocation_type = 'domain'
 WHERE t.token_plain = 'st_bench_000000000000'
   AND t.enabled = 1
   AND (t.expire_at IS NULL OR t.expire_at > UTC_TIMESTAMP())

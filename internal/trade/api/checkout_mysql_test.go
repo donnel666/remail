@@ -115,7 +115,7 @@ func TestCheckoutSuccessAndIdempotentReplayMySQL(t *testing.T) {
 	require.NotEmpty(t, first.Order.DeliveryEmail)
 	require.NotEmpty(t, first.ServiceToken)
 	require.NotNil(t, first.Order.DebitTxID)
-	require.NotNil(t, first.Order.MicrosoftAllocID)
+	require.NotZero(t, first.AllocationID)
 	require.NotNil(t, first.Order.ReceiveStartedAt)
 	require.NotNil(t, first.Order.ReceiveUntil)
 	require.Nil(t, first.Order.ActivatedAt)
@@ -136,6 +136,7 @@ func TestCheckoutSuccessAndIdempotentReplayMySQL(t *testing.T) {
 	require.False(t, replay.Created)
 	require.Equal(t, first.Order.OrderNo, replay.Order.OrderNo)
 	require.Equal(t, first.ServiceToken, replay.ServiceToken)
+	require.Equal(t, first.AllocationID, replay.AllocationID)
 
 	var txCount int64
 	require.NoError(t, db.Table("wallet_transactions").
@@ -311,8 +312,6 @@ INSERT INTO gmail_resources(
 		Status             string `gorm:"column:status"`
 		PayAmount          string `gorm:"column:pay_amount"`
 		AllocationType     string `gorm:"column:allocation_type"`
-		MicrosoftAllocID   *uint  `gorm:"column:microsoft_alloc_id"`
-		DomainAllocID      *uint  `gorm:"column:domain_alloc_id"`
 		DebitTransactionID uint   `gorm:"column:debit_tx_id"`
 	}
 	require.NoError(t, db.Table("orders").Where("order_no = ?", orderNo).Take(&order).Error)
@@ -322,8 +321,6 @@ INSERT INTO gmail_resources(
 	require.Equal(t, "completed", order.Status)
 	require.Equal(t, "0.000000", order.PayAmount)
 	require.Equal(t, "gmail", order.AllocationType)
-	require.Nil(t, order.MicrosoftAllocID)
-	require.Nil(t, order.DomainAllocID)
 	require.NotZero(t, order.DebitTransactionID)
 
 	var debit struct {
@@ -430,20 +427,22 @@ func TestCreateHistoricalOrderConflictStopsOuterTransactionMySQL(t *testing.T) {
 	}}))
 
 	var existing struct {
-		OrderNo             string `gorm:"column:order_no"`
-		DebitTxID           uint   `gorm:"column:debit_tx_id"`
-		MicrosoftAllocation uint   `gorm:"column:microsoft_alloc_id"`
+		OrderNo   string `gorm:"column:order_no"`
+		DebitTxID uint   `gorm:"column:debit_tx_id"`
 	}
 	require.NoError(t, db.Table("orders").
-		Select("order_no, debit_tx_id, microsoft_alloc_id").
+		Select("order_no, debit_tx_id").
 		Where("order_no LIKE 'HIST-%'").Take(&existing).Error)
+	var allocationID uint
+	require.NoError(t, db.Table("microsoft_allocations").
+		Select("id").Where("order_no = ?", existing.OrderNo).Scan(&allocationID).Error)
 
 	repo := tradeinfra.NewRepo(db)
 	continued := false
 	err := repo.WithTx(context.Background(), func(txCtx context.Context) error {
 		if err := repo.CreateHistoricalOrder(txCtx, tradeapp.CreateHistoricalOrderCommand{
 			OrderNo: existing.OrderNo, UserID: 3, ProjectID: 10, ProjectProductID: 20,
-			DebitTxID: existing.DebitTxID, MicrosoftAllocationID: existing.MicrosoftAllocation,
+			DebitTxID: existing.DebitTxID, MicrosoftAllocationID: allocationID,
 			DeliveryEmail: "ms1000@example.com", CreatedAt: createdAt, ExpiredAt: expiredAt, Now: time.Now().UTC(),
 		}); err != nil {
 			return err
@@ -631,7 +630,7 @@ func TestCheckoutOwnedMicrosoftStockCreatesZeroDebitMySQL(t *testing.T) {
 	require.Equal(t, tradedomain.OrderStatusActive, result.Order.Status)
 	require.Equal(t, "0.00", result.Order.PayAmount)
 	require.NotNil(t, result.Order.DebitTxID)
-	require.NotNil(t, result.Order.MicrosoftAllocID)
+	require.NotZero(t, result.AllocationID)
 	require.Equal(t, "ms1000@example.com", result.Order.DeliveryEmail)
 
 	var tx struct {
@@ -649,7 +648,7 @@ func TestCheckoutOwnedMicrosoftStockCreatesZeroDebitMySQL(t *testing.T) {
 	var supplyScope string
 	require.NoError(t, db.Table("microsoft_allocations").
 		Select("supply_scope").
-		Where("id = ?", *result.Order.MicrosoftAllocID).
+		Where("id = ?", result.AllocationID).
 		Scan(&supplyScope).Error)
 	require.Equal(t, "owned", supplyScope)
 }
@@ -675,7 +674,7 @@ func TestCheckoutOwnedDomainStockCreatesZeroDebitMySQL(t *testing.T) {
 	require.Equal(t, tradedomain.OrderStatusActive, result.Order.Status)
 	require.Equal(t, "0.00", result.Order.PayAmount)
 	require.NotNil(t, result.Order.DebitTxID)
-	require.NotNil(t, result.Order.DomainAllocID)
+	require.NotZero(t, result.AllocationID)
 	require.Contains(t, result.Order.DeliveryEmail, "@trade2000.example.com")
 
 	var tx struct {
@@ -693,7 +692,7 @@ func TestCheckoutOwnedDomainStockCreatesZeroDebitMySQL(t *testing.T) {
 	var supplyScope string
 	require.NoError(t, db.Table("domain_allocations").
 		Select("supply_scope").
-		Where("id = ?", *result.Order.DomainAllocID).
+		Where("id = ?", result.AllocationID).
 		Scan(&supplyScope).Error)
 	require.Equal(t, "owned", supplyScope)
 }
@@ -1294,7 +1293,7 @@ func TestExpireDueOrdersCompletesExpiredCodeWithDeliveryWithoutRefundMySQL(t *te
 	var resourceID uint
 	require.NoError(t, db.Table("microsoft_allocations").
 		Select("resource_id").
-		Where("id = ?", result.Order.MicrosoftAllocID).
+		Where("id = ?", result.AllocationID).
 		Scan(&resourceID).Error)
 	require.NotZero(t, resourceID)
 	require.NoError(t, db.Exec(`
@@ -1962,7 +1961,7 @@ func TestCheckoutEmailSuffixFiltersAllocationSourceMySQL(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, tradedomain.OrderStatusActive, result.Order.Status)
 	require.Equal(t, "first@example.com", result.Order.DeliveryEmail)
-	require.NotNil(t, result.Order.MicrosoftAllocID)
+	require.NotZero(t, result.AllocationID)
 }
 
 func TestCheckoutEmailSuffixMismatchDoesNotDebitMySQL(t *testing.T) {

@@ -524,13 +524,10 @@ VALUES ('OR_PICKUP_BATCH', 'microsoft')`).Error)
 INSERT INTO microsoft_allocations(
     order_no, project_id, product_id, resource_id, supply_scope, mailbox, email
 ) VALUES ('OR_PICKUP_BATCH', 10, 20, 100, 'public', 'main', 'main@example.com')`).Error)
-	var allocationID uint
-	require.NoError(t, db.Table("microsoft_allocations").Select("id").Where("order_no = ?", "OR_PICKUP_BATCH").Scan(&allocationID).Error)
 	require.NoError(t, db.Table("orders").Where("id = ?", orderID).Updates(map[string]any{
 		"status":             "active",
 		"debit_tx_id":        debitID,
 		"allocation_type":    "microsoft",
-		"microsoft_alloc_id": allocationID,
 		"delivery_email":     "main@example.com",
 		"receive_started_at": now.Add(-time.Minute),
 		"receive_until":      now.Add(10 * time.Minute),
@@ -950,13 +947,10 @@ VALUES ('OR_NORMALIZED_RECIPIENT', 'microsoft')`).Error)
 INSERT INTO microsoft_allocations(
     order_no, project_id, product_id, resource_id, supply_scope, mailbox, email
 ) VALUES ('OR_NORMALIZED_RECIPIENT', 10, 20, 100, 'public', 'main', 'firstname@example.com')`).Error)
-	var allocationID uint
-	require.NoError(t, db.Table("microsoft_allocations").Select("id").Where("order_no = ?", "OR_NORMALIZED_RECIPIENT").Scan(&allocationID).Error)
 	require.NoError(t, db.Table("orders").Where("id = ?", orderID).Updates(map[string]any{
 		"status":             "active",
 		"debit_tx_id":        debitID,
 		"allocation_type":    "microsoft",
-		"microsoft_alloc_id": allocationID,
 		"delivery_email":     "firstname@example.com",
 		"receive_started_at": now.Add(-time.Minute),
 		"receive_until":      now.Add(10 * time.Minute),
@@ -1000,13 +994,10 @@ VALUES ('OR_EXPLICIT_ALIAS_PLUS', 'microsoft')`).Error)
 INSERT INTO microsoft_allocations(
     order_no, project_id, product_id, resource_id, supply_scope, mailbox, explicit_alias_id, email
 ) VALUES ('OR_EXPLICIT_ALIAS_PLUS', 10, 20, 100, 'public', 'alias', ?, 'explicitalias@example.com')`, aliasID).Error)
-	var allocationID uint
-	require.NoError(t, db.Table("microsoft_allocations").Select("id").Where("order_no = ?", "OR_EXPLICIT_ALIAS_PLUS").Scan(&allocationID).Error)
 	require.NoError(t, db.Table("orders").Where("id = ?", orderID).Updates(map[string]any{
 		"status":             "active",
 		"debit_tx_id":        debitID,
 		"allocation_type":    "microsoft",
-		"microsoft_alloc_id": allocationID,
 		"delivery_email":     "explicitalias@example.com",
 		"receive_started_at": now.Add(-time.Minute),
 		"receive_until":      now.Add(10 * time.Minute),

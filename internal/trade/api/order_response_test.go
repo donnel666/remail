@@ -50,13 +50,12 @@ func TestOrderResponseUsesUnifiedAllocationID(t *testing.T) {
 	require.EqualValues(t, 77, resp.AllocationID)
 }
 
-func TestOrderResponseFallsBackToICloudAllocationID(t *testing.T) {
+func TestOrderResponseUsesUnifiedICloudAllocationID(t *testing.T) {
 	allocationType := domain.AllocationTypeICloud
-	allocationID := uint(88)
-	resp := orderResponse(tradeapp.CheckoutResult{Order: domain.Order{
-		AllocationType: &allocationType,
-		ICloudAllocID:  &allocationID,
-	}})
+	resp := orderResponse(tradeapp.CheckoutResult{
+		Order:        domain.Order{AllocationType: &allocationType},
+		AllocationID: 88,
+	})
 
 	require.Equal(t, "icloud", resp.AllocationType)
 	require.EqualValues(t, 88, resp.AllocationID)

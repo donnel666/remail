@@ -36,7 +36,9 @@ ALTER TABLE allocation_order_guards
     ) NOT ENFORCED,
     ALGORITHM=INSTANT;
 
-CREATE TABLE icloud_resources (
+-- MySQL DDL autocommits. IF NOT EXISTS lets Goose resume 00083 after an
+-- earlier deployment created these tables but failed before recording v83.
+CREATE TABLE IF NOT EXISTS icloud_resources (
     id BIGINT UNSIGNED PRIMARY KEY,
     resource_type VARCHAR(32) NOT NULL DEFAULT 'icloud'
         COMMENT 'mirrors email_resources.type',
@@ -149,7 +151,7 @@ CREATE TABLE icloud_resources (
         )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE icloud_aliases (
+CREATE TABLE IF NOT EXISTS icloud_aliases (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     resource_id BIGINT UNSIGNED NOT NULL,
     anonymous_id VARCHAR(191) NOT NULL,
@@ -191,7 +193,7 @@ CREATE TABLE icloud_aliases (
 -- its worker are the stable Microsoft import contract.  The source artifact
 -- contains an Apple session Cookie, so it stays in private object storage and
 -- only this durable, fenced row is sent through Asynq.
-CREATE TABLE icloud_resource_imports (
+CREATE TABLE IF NOT EXISTS icloud_resource_imports (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     owner_user_id BIGINT UNSIGNED NOT NULL,
     operator_user_id BIGINT UNSIGNED NOT NULL,
@@ -246,7 +248,7 @@ CREATE TABLE icloud_resource_imports (
         CHECK (generation > 0 AND attempts <= max_attempts AND max_attempts > 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE icloud_resource_import_items (
+CREATE TABLE IF NOT EXISTS icloud_resource_import_items (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     import_id BIGINT UNSIGNED NOT NULL,
     resource_id BIGINT UNSIGNED NULL,
@@ -268,7 +270,7 @@ CREATE TABLE icloud_resource_import_items (
         CHECK (outcome IN ('imported', 'skipped'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE icloud_allocations (
+CREATE TABLE IF NOT EXISTS icloud_allocations (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     order_no VARCHAR(64) NOT NULL,
     guard_type VARCHAR(32) NOT NULL DEFAULT 'icloud',
@@ -320,12 +322,8 @@ CREATE TABLE icloud_allocations (
         CHECK (email <> '')
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-ALTER TABLE orders
-    ADD COLUMN icloud_alloc_id BIGINT UNSIGNED NULL AFTER domain_alloc_id,
-    ADD CONSTRAINT fk_orders_icloud_alloc
-        FOREIGN KEY (icloud_alloc_id)
-        REFERENCES icloud_allocations(id) ON DELETE RESTRICT;
-
+-- Orders reference allocations only by their unique order_no. Type-specific
+-- allocation IDs do not belong on orders.
 ALTER TABLE orders
     DROP CHECK chk_orders_product_type,
     DROP CHECK chk_orders_allocation_shape,
@@ -333,26 +331,8 @@ ALTER TABLE orders
         product_type IN ('microsoft', 'domain', 'random', 'gmail', 'icloud')
     ) NOT ENFORCED,
     ADD CONSTRAINT chk_orders_allocation_shape CHECK (
-        (allocation_type IS NULL
-            AND microsoft_alloc_id IS NULL
-            AND domain_alloc_id IS NULL
-            AND icloud_alloc_id IS NULL)
-        OR (allocation_type = 'microsoft'
-            AND microsoft_alloc_id IS NOT NULL
-            AND domain_alloc_id IS NULL
-            AND icloud_alloc_id IS NULL)
-        OR (allocation_type = 'domain'
-            AND domain_alloc_id IS NOT NULL
-            AND microsoft_alloc_id IS NULL
-            AND icloud_alloc_id IS NULL)
-        OR (allocation_type = 'gmail'
-            AND microsoft_alloc_id IS NULL
-            AND domain_alloc_id IS NULL
-            AND icloud_alloc_id IS NULL)
-        OR (allocation_type = 'icloud'
-            AND icloud_alloc_id IS NOT NULL
-            AND microsoft_alloc_id IS NULL
-            AND domain_alloc_id IS NULL)
+        allocation_type IS NULL
+        OR allocation_type IN ('microsoft', 'domain', 'gmail', 'icloud')
     ) NOT ENFORCED,
     ALGORITHM=INSTANT;
 
@@ -399,24 +379,10 @@ ALTER TABLE orders
         product_type IN ('microsoft', 'domain', 'random', 'gmail')
     ) NOT ENFORCED,
     ADD CONSTRAINT chk_orders_allocation_shape CHECK (
-        (allocation_type IS NULL
-            AND microsoft_alloc_id IS NULL
-            AND domain_alloc_id IS NULL)
-        OR (allocation_type = 'microsoft'
-            AND microsoft_alloc_id IS NOT NULL
-            AND domain_alloc_id IS NULL)
-        OR (allocation_type = 'domain'
-            AND domain_alloc_id IS NOT NULL
-            AND microsoft_alloc_id IS NULL)
-        OR (allocation_type = 'gmail'
-            AND microsoft_alloc_id IS NULL
-            AND domain_alloc_id IS NULL)
+        allocation_type IS NULL
+        OR allocation_type IN ('microsoft', 'domain', 'gmail')
     ) NOT ENFORCED,
     ALGORITHM=INSTANT;
-
-ALTER TABLE orders
-    DROP FOREIGN KEY fk_orders_icloud_alloc,
-    DROP COLUMN icloud_alloc_id;
 
 DROP TABLE icloud_allocations;
 DROP TABLE icloud_aliases;

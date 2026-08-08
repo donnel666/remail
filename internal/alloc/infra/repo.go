@@ -1689,6 +1689,21 @@ func (r *Repo) FindAllocationByOrder(ctx context.Context, orderNo string) (*doma
 	return result, nil
 }
 
+func (r *Repo) FindAllocationsByOrders(ctx context.Context, orderNos []string) (map[string]domain.UnifiedAllocation, error) {
+	items, _, err := r.queryUnifiedAllocations(ctx, allocapp.AllocationFilter{OrderNos: orderNos}, false)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]domain.UnifiedAllocation, len(items))
+	for _, item := range items {
+		if _, exists := result[item.OrderNo]; exists {
+			return nil, domain.ErrAllocationConflict
+		}
+		result[item.OrderNo] = item
+	}
+	return result, nil
+}
+
 func (r *Repo) ListActiveByRecipient(ctx context.Context, recipient string) ([]domain.UnifiedAllocation, error) {
 	recipient = strings.ToLower(strings.TrimSpace(recipient))
 	var ms []MicrosoftAllocationModel
@@ -2737,6 +2752,10 @@ func allocationConditions(filter allocapp.AllocationFilter) ([]string, []any) {
 	if filter.OrderNo != "" {
 		conditions = append(conditions, "order_no = ?")
 		args = append(args, filter.OrderNo)
+	}
+	if len(filter.OrderNos) > 0 {
+		conditions = append(conditions, "order_no IN ?")
+		args = append(args, filter.OrderNos)
 	}
 	if filter.ProjectID > 0 {
 		conditions = append(conditions, "project_id = ?")

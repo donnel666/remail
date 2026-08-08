@@ -1523,3 +1523,26 @@ func TestCheckoutBatchMetricUsesBoundedQuantityClasses(t *testing.T) {
 		require.Equal(t, "checkout_batch_"+test.size, taskType)
 	}
 }
+
+type allocationLookupStub struct {
+	AllocationPort
+	items map[string]AllocationResult
+}
+
+func (s allocationLookupStub) FindAllocationsByOrders(_ context.Context, _ []string) (map[string]AllocationResult, error) {
+	return s.items, nil
+}
+
+func TestAttachAllocationIDsUsesOrderNumberAndAllowsUpstreamGmail(t *testing.T) {
+	microsoft := domain.AllocationTypeMicrosoft
+	gmail := domain.AllocationTypeGmail
+	uc := &UseCase{allocation: allocationLookupStub{items: map[string]AllocationResult{
+		"OR-MS": {OrderNo: "OR-MS", Type: microsoft, ID: 71},
+	}}}
+	microsoftResult := &CheckoutResult{Order: domain.Order{OrderNo: "OR-MS", AllocationType: &microsoft}}
+	upstreamGmailResult := &CheckoutResult{Order: domain.Order{OrderNo: "OR-UPSTREAM", AllocationType: &gmail}}
+
+	require.NoError(t, uc.attachAllocationIDs(context.Background(), microsoftResult, upstreamGmailResult))
+	require.EqualValues(t, 71, microsoftResult.AllocationID)
+	require.Zero(t, upstreamGmailResult.AllocationID)
+}

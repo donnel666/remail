@@ -295,6 +295,7 @@ type DomainInventoryStats struct {
 type AllocationFilter struct {
 	Type       domain.AllocationType
 	OrderNo    string
+	OrderNos   []string
 	ProjectID  uint
 	ResourceID uint
 	Status     domain.AllocationStatus

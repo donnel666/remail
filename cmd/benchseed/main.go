@@ -214,7 +214,7 @@ func seedOrders(ctx context.Context, db *sql.DB, count, resources int64, batchSi
 		}
 		if err := insertRows(ctx, tx, `INSERT IGNORE INTO orders(
 			id,order_no,user_id,project_id,project_product_id,product_type,service_mode,supply_policy,
-			status,failure_code,pay_amount,refund_amount,debit_tx_id,allocation_type,microsoft_alloc_id,
+			status,failure_code,pay_amount,refund_amount,debit_tx_id,allocation_type,
 			delivery_email,receive_started_at,receive_until,after_sale_until,client_channel,
 			idempotency_key,request_fingerprint,service_cleanup_status
 		) VALUES `, start, end, func(i int64) (string, []any) {
@@ -232,10 +232,10 @@ func seedOrders(ctx context.Context, db *sql.DB, count, resources int64, batchSi
 				}
 				afterSaleUntil = receiveUntil
 			}
-			return "(?,?,?, ?,?,'microsoft',?,'public_only',?,'',0,0,?,'microsoft',?,?,NOW(),?,?,'console',?,?,'none')", []any{
+			return "(?,?,?, ?,?,'microsoft',?,'public_only',?,'',0,0,?,'microsoft',?,NOW(),?,?,'console',?,?,'none')", []any{
 				orderIDBase + i, benchOrderNo(i), benchUserID, benchProjectID, benchProductID,
 				serviceMode, status, walletTxIDBase + i,
-				allocationIDBase + i, fmt.Sprintf("ms-%d@bench.local", resourceIndex),
+				fmt.Sprintf("ms-%d@bench.local", resourceIndex),
 				receiveUntil, afterSaleUntil,
 				fmt.Sprintf("bench-order-%d", i), hashHex(fmt.Sprintf("bench-order-%d", i)),
 			}

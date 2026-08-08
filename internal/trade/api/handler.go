@@ -660,16 +660,7 @@ func orderResponse(result tradeapp.CheckoutResult) OrderResponse {
 			Seq: result.GmailCodes[i].Seq, Code: result.GmailCodes[i].Code, ReceivedAt: result.GmailCodes[i].ReceivedAt,
 		}
 	}
-	switch {
-	case result.AllocationID > 0:
-		allocationID = result.AllocationID
-	case order.MicrosoftAllocID != nil:
-		allocationID = *order.MicrosoftAllocID
-	case order.DomainAllocID != nil:
-		allocationID = *order.DomainAllocID
-	case order.ICloudAllocID != nil:
-		allocationID = *order.ICloudAllocID
-	}
+	allocationID = result.AllocationID
 	return OrderResponse{
 		ID:                   order.ID,
 		OrderNo:              order.OrderNo,

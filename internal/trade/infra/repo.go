@@ -42,9 +42,6 @@ type OrderModel struct {
 	DebitTxID                *uint          `gorm:"column:debit_tx_id"`
 	RefundTxID               *uint          `gorm:"column:refund_tx_id"`
 	AllocationType           *string        `gorm:"type:varchar(32);column:allocation_type"`
-	MicrosoftAllocID         *uint          `gorm:"column:microsoft_alloc_id"`
-	DomainAllocID            *uint          `gorm:"column:domain_alloc_id"`
-	ICloudAllocID            *uint          `gorm:"column:icloud_alloc_id"`
 	DeliveryEmail            string         `gorm:"type:varchar(255);not null;column:delivery_email"`
 	ReceiveStartedAt         *time.Time     `gorm:"column:receive_started_at"`
 	ReceiveUntil             *time.Time     `gorm:"column:receive_until"`
@@ -141,7 +138,6 @@ func (r *Repo) CreateHistoricalOrder(ctx context.Context, cmd tradeapp.CreateHis
 	}
 	allocationType := string(domain.AllocationTypeMicrosoft)
 	debitTxID := cmd.DebitTxID
-	allocationID := cmd.MicrosoftAllocationID
 	createdAt := cmd.CreatedAt.UTC()
 	expiredAt := cmd.ExpiredAt.UTC()
 	requestFingerprint := fmt.Sprintf("%x", sha256.Sum256([]byte(orderNo)))
@@ -152,8 +148,8 @@ func (r *Repo) CreateHistoricalOrder(ctx context.Context, cmd tradeapp.CreateHis
 		FailureCode: "", PayAmount: "0", RefundAmount: "0",
 		CodeWindowMinutes: cmd.CodeWindowMinutes, ActivationWindowMinutes: cmd.ActivationWindowMinutes,
 		WarrantyMinutes: cmd.WarrantyMinutes, DebitTxID: &debitTxID,
-		AllocationType: &allocationType, MicrosoftAllocID: &allocationID,
-		DeliveryEmail: deliveryEmail, ReceiveStartedAt: &createdAt, ReceiveUntil: &expiredAt,
+		AllocationType: &allocationType,
+		DeliveryEmail:  deliveryEmail, ReceiveStartedAt: &createdAt, ReceiveUntil: &expiredAt,
 		ActivatedAt: &createdAt, AfterSaleUntil: &expiredAt,
 		ClientChannel: string(domain.ClientChannelConsole), IdempotencyKey: "history:" + orderNo,
 		RequestFingerprint: requestFingerprint, ServiceCleanupStatus: "succeeded",
@@ -393,31 +389,17 @@ func (r *Repo) MarkActive(ctx context.Context, cmd tradeapp.MarkActiveCommand) (
 			"receive_until":          cmd.ReceiveUntil,
 			"after_sale_until":       cmd.AfterSaleUntil,
 			"version":                gorm.Expr("version + 1"),
-			"microsoft_alloc_id":     nil,
-			"domain_alloc_id":        nil,
-			"icloud_alloc_id":        nil,
 			"service_cleanup_status": "none",
 		}
 		if cmd.ActivatedAt != nil {
 			updates["activated_at"] = cmd.ActivatedAt.UTC()
 		}
 		switch cmd.AllocationType {
-		case domain.AllocationTypeMicrosoft:
+		case domain.AllocationTypeMicrosoft, domain.AllocationTypeDomain, domain.AllocationTypeICloud:
 			if cmd.AllocationID == 0 {
 				return domain.ErrInvalidOrderRequest
 			}
-			updates["microsoft_alloc_id"] = cmd.AllocationID
-		case domain.AllocationTypeDomain:
-			if cmd.AllocationID == 0 {
-				return domain.ErrInvalidOrderRequest
-			}
-			updates["domain_alloc_id"] = cmd.AllocationID
 		case domain.AllocationTypeGmail:
-		case domain.AllocationTypeICloud:
-			if cmd.AllocationID == 0 {
-				return domain.ErrInvalidOrderRequest
-			}
-			updates["icloud_alloc_id"] = cmd.AllocationID
 		default:
 			return domain.ErrInvalidOrderRequest
 		}
@@ -959,7 +941,7 @@ func (r *Repo) ListUnavailableMicrosoftOrderNos(ctx context.Context, resourceID 
 	var orderNos []string
 	query := r.dbFor(ctx).Table("orders AS o").
 		Select("o.order_no").
-		Joins("JOIN microsoft_allocations AS ma ON ma.id = o.microsoft_alloc_id AND ma.order_no = o.order_no AND ma.status = ?", "allocated").
+		Joins("JOIN microsoft_allocations AS ma ON ma.order_no = o.order_no AND ma.status = ?", "allocated").
 		Joins("JOIN microsoft_resources AS mr ON mr.id = ma.resource_id AND mr.status = ?", "abnormal").
 		Where("o.allocation_type = ? AND o.status = ? AND o.debit_tx_id IS NOT NULL AND o.refund_tx_id IS NULL", string(domain.AllocationTypeMicrosoft), string(domain.OrderStatusActive)).
 		Order("o.id ASC")
@@ -1271,9 +1253,6 @@ func orderModelToDomain(model OrderModel) domain.Order {
 		DebitTxID:                model.DebitTxID,
 		RefundTxID:               model.RefundTxID,
 		AllocationType:           allocationType,
-		MicrosoftAllocID:         model.MicrosoftAllocID,
-		DomainAllocID:            model.DomainAllocID,
-		ICloudAllocID:            model.ICloudAllocID,
 		DeliveryEmail:            model.DeliveryEmail,
 		ReceiveStartedAt:         model.ReceiveStartedAt,
 		ReceiveUntil:             model.ReceiveUntil,

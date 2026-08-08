@@ -801,6 +801,11 @@ func (uc *UseCase) Checkout(ctx context.Context, req CheckoutRequest) (result *C
 	uc.precheckCheckoutBalance(ctx, preparedItems)
 	uc.precheckCheckoutInventory(ctx, preparedItems)
 	result, runErr = uc.checkoutPrepared(ctx, preparedItems[0])
+	if result != nil {
+		if err := uc.attachAllocationIDs(ctx, result); err != nil {
+			return nil, err
+		}
+	}
 	if errors.Is(runErr, domain.ErrInsufficientInventory) && result != nil && result.Created {
 		uc.markCheckoutInventoryUnavailable(ctx, preparedItems[0])
 	}
@@ -1816,6 +1821,17 @@ func (uc *UseCase) CheckoutBatch(ctx context.Context, requests []CheckoutRequest
 	uc.precheckCheckoutBalance(ctx, prepared)
 	uc.precheckCheckoutInventory(ctx, prepared)
 	items, runErr = uc.checkoutBatch(ctx, prepared)
+	if runErr == nil {
+		results := make([]*CheckoutResult, 0, len(items))
+		for i := range items {
+			if items[i].Result != nil {
+				results = append(results, items[i].Result)
+			}
+		}
+		if err := uc.attachAllocationIDs(ctx, results...); err != nil {
+			return items, err
+		}
+	}
 	return items, runErr
 }
 
@@ -2222,6 +2238,9 @@ func (uc *UseCase) GetOrder(ctx context.Context, orderNo string, userID uint, is
 			return nil, err
 		}
 	}
+	if err := uc.attachAllocationIDs(ctx, result); err != nil {
+		return nil, err
+	}
 	displayed := []CheckoutResult{*result}
 	if err := uc.attachProjectDisplays(ctx, displayed, nil); err != nil {
 		return nil, err
@@ -2272,6 +2291,13 @@ func (uc *UseCase) ListOrders(ctx context.Context, filter OrderListFilter, offse
 		}
 	}
 	if err := uc.attachGmailDeliveries(ctx, results); err != nil {
+		return nil, err
+	}
+	allocationResults := make([]*CheckoutResult, len(results))
+	for i := range results {
+		allocationResults[i] = &results[i]
+	}
+	if err := uc.attachAllocationIDs(ctx, allocationResults...); err != nil {
 		return nil, err
 	}
 	if err := uc.attachProjectDisplays(ctx, results, facets.Projects); err != nil {
@@ -2382,6 +2408,56 @@ func attachOrderDeliverySummary(result *CheckoutResult, delivery OrderDeliverySu
 	result.HasDelivery = true
 	result.VerificationCode = delivery.VerificationCode
 	result.LastMailReceivedAt = &receivedAt
+}
+
+func (uc *UseCase) attachAllocationIDs(ctx context.Context, results ...*CheckoutResult) error {
+	reader, ok := uc.allocation.(interface {
+		FindAllocationsByOrders(context.Context, []string) (map[string]AllocationResult, error)
+	})
+	if !ok || len(results) == 0 {
+		return nil
+	}
+	orderNos := make([]string, 0, len(results))
+	seen := make(map[string]struct{}, len(results))
+	for _, result := range results {
+		if result == nil || result.AllocationID > 0 || result.Order.AllocationType == nil {
+			continue
+		}
+		orderNo := strings.TrimSpace(result.Order.OrderNo)
+		if orderNo == "" {
+			continue
+		}
+		if _, exists := seen[orderNo]; exists {
+			continue
+		}
+		seen[orderNo] = struct{}{}
+		orderNos = append(orderNos, orderNo)
+	}
+	if len(orderNos) == 0 {
+		return nil
+	}
+	allocations, err := reader.FindAllocationsByOrders(ctx, orderNos)
+	if err != nil {
+		return err
+	}
+	for _, result := range results {
+		if result == nil || result.AllocationID > 0 || result.Order.AllocationType == nil {
+			continue
+		}
+		orderNo := strings.TrimSpace(result.Order.OrderNo)
+		allocation, exists := allocations[orderNo]
+		if !exists {
+			if *result.Order.AllocationType != domain.AllocationTypeGmail {
+				return fmt.Errorf("%w: allocation missing for order %s", domain.ErrOrderStateConflict, orderNo)
+			}
+			continue
+		}
+		if allocation.ID == 0 || allocation.Type != *result.Order.AllocationType {
+			return fmt.Errorf("%w: allocation mismatch for order %s", domain.ErrOrderStateConflict, orderNo)
+		}
+		result.AllocationID = allocation.ID
+	}
+	return nil
 }
 
 func (uc *UseCase) attachGmailDeliveries(ctx context.Context, results []CheckoutResult) error {

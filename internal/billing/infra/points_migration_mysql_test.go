@@ -64,17 +64,17 @@ func TestPointsMigrationConvertsEveryStoredAmountExactlyOnceMySQL(t *testing.T) 
     id, order_no, user_id, project_id, project_product_id, product_type, service_mode,
     supply_policy, status, failure_code, pay_amount, random_microsoft_pay_amount,
     random_domain_pay_amount, refund_amount, debit_tx_id, refund_tx_id,
-    allocation_type, microsoft_alloc_id, delivery_email, client_channel,
+    allocation_type, delivery_email, client_channel,
     idempotency_key, request_fingerprint
 ) VALUES
-    (9101, 'POINTS-ORDER-PENDING',   9001, 9001, 9001, 'microsoft', 'code', 'private_first', 'pending_payment', '',        0.001, NULL,  NULL, 0,     NULL, NULL, NULL,        NULL, '',                  'console', 'points-order-1', REPEAT('a', 64)),
-    (9102, 'POINTS-ORDER-PAID',      9001, 9001, 9001, 'microsoft', 'code', 'private_first', 'paid',            '',        0.002, NULL,  NULL, 0,     9001, NULL, NULL,        NULL, '',                  'console', 'points-order-2', REPEAT('b', 64)),
-    (9103, 'POINTS-ORDER-ACTIVE',    9001, 9001, 9001, 'microsoft', 'code', 'private_first', 'active',          '',        0.003, NULL,  NULL, 0,     9001, NULL, 'microsoft', 9001, 'active@example.test', 'console', 'points-order-3', REPEAT('c', 64)),
-    (9104, 'POINTS-ORDER-COMPLETED', 9001, 9001, 9001, 'microsoft', 'code', 'private_first', 'completed',       '',        0.004, NULL,  NULL, 0,     9001, NULL, 'microsoft', 9001, 'done@example.test',   'console', 'points-order-4', REPEAT('d', 64)),
-    (9105, 'POINTS-ORDER-REFUNDED',  9001, 9001, 9001, 'microsoft', 'code', 'private_first', 'refunded',        '',        0.005, NULL,  NULL, 0.004, 9001, 9002, NULL,        NULL, '',                  'console', 'points-order-5', REPEAT('e', 64)),
-    (9106, 'POINTS-ORDER-FAILED',    9001, 9001, 9001, 'microsoft', 'code', 'private_first', 'failed',          'unknown', 0.006, NULL,  NULL, 0,     NULL, NULL, NULL,        NULL, '',                  'console', 'points-order-6', REPEAT('f', 64)),
-    (9107, 'POINTS-ORDER-CLOSED',    9001, 9001, 9001, 'microsoft', 'code', 'private_first', 'closed',          '',        0.007, NULL,  NULL, 0,     NULL, NULL, NULL,        NULL, '',                  'console', 'points-order-7', REPEAT('1', 64)),
-    (9108, 'POINTS-ORDER-RANDOM',    9001, 9001, 9001, 'random',    'code', 'private_first', 'pending_payment', '',        0.01,  0.008, 0.009, 0,     NULL, NULL, NULL,        NULL, '',                  'console', 'points-order-8', REPEAT('2', 64))`,
+    (9101, 'POINTS-ORDER-PENDING',   9001, 9001, 9001, 'microsoft', 'code', 'private_first', 'pending_payment', '',        0.001, NULL,  NULL, 0,     NULL, NULL, NULL,        '',                  'console', 'points-order-1', REPEAT('a', 64)),
+    (9102, 'POINTS-ORDER-PAID',      9001, 9001, 9001, 'microsoft', 'code', 'private_first', 'paid',            '',        0.002, NULL,  NULL, 0,     9001, NULL, NULL,        '',                  'console', 'points-order-2', REPEAT('b', 64)),
+    (9103, 'POINTS-ORDER-ACTIVE',    9001, 9001, 9001, 'microsoft', 'code', 'private_first', 'active',          '',        0.003, NULL,  NULL, 0,     9001, NULL, 'microsoft', 'active@example.test', 'console', 'points-order-3', REPEAT('c', 64)),
+    (9104, 'POINTS-ORDER-COMPLETED', 9001, 9001, 9001, 'microsoft', 'code', 'private_first', 'completed',       '',        0.004, NULL,  NULL, 0,     9001, NULL, 'microsoft', 'done@example.test',   'console', 'points-order-4', REPEAT('d', 64)),
+    (9105, 'POINTS-ORDER-REFUNDED',  9001, 9001, 9001, 'microsoft', 'code', 'private_first', 'refunded',        '',        0.005, NULL,  NULL, 0.004, 9001, 9002, NULL,        '',                  'console', 'points-order-5', REPEAT('e', 64)),
+    (9106, 'POINTS-ORDER-FAILED',    9001, 9001, 9001, 'microsoft', 'code', 'private_first', 'failed',          'unknown', 0.006, NULL,  NULL, 0,     NULL, NULL, NULL,        '',                  'console', 'points-order-6', REPEAT('f', 64)),
+    (9107, 'POINTS-ORDER-CLOSED',    9001, 9001, 9001, 'microsoft', 'code', 'private_first', 'closed',          '',        0.007, NULL,  NULL, 0,     NULL, NULL, NULL,        '',                  'console', 'points-order-7', REPEAT('1', 64)),
+    (9108, 'POINTS-ORDER-RANDOM',    9001, 9001, 9001, 'random',    'code', 'private_first', 'pending_payment', '',        0.01,  0.008, 0.009, 0,     NULL, NULL, NULL,        '',                  'console', 'points-order-8', REPEAT('2', 64))`,
 	))
 
 	legacyRefundMessage := "平台已退款 " + string(rune(0x00a5)) + "6.8 并关闭工单。"

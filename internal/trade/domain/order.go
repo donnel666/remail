@@ -99,9 +99,6 @@ type Order struct {
 	DebitTxID                *uint
 	RefundTxID               *uint
 	AllocationType           *AllocationType
-	MicrosoftAllocID         *uint
-	DomainAllocID            *uint
-	ICloudAllocID            *uint
 	DeliveryEmail            string
 	ReceiveStartedAt         *time.Time
 	ReceiveUntil             *time.Time

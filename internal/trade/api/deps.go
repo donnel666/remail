@@ -357,6 +357,21 @@ func (a allocationAdapter) Allocate(ctx context.Context, cmd tradeapp.Allocation
 	}, nil
 }
 
+func (a allocationAdapter) FindAllocationsByOrders(ctx context.Context, orderNos []string) (map[string]tradeapp.AllocationResult, error) {
+	allocations, err := a.alloc.FindAllocationsByOrders(ctx, orderNos)
+	if err != nil {
+		return nil, mapAllocationError(err)
+	}
+	result := make(map[string]tradeapp.AllocationResult, len(allocations))
+	for orderNo, allocation := range allocations {
+		result[orderNo] = tradeapp.AllocationResult{
+			OrderNo: allocation.OrderNo, Type: domain.AllocationType(allocation.Type), ID: allocation.ID,
+			Email: allocation.Email, SupplyScope: tradeSupplyScope(allocation.SupplyScope),
+		}
+	}
+	return result, nil
+}
+
 func (a allocationAdapter) ImportHistoricalMicrosoftAllocation(ctx context.Context, cmd tradeapp.HistoricalMicrosoftAllocationCommand) (*tradeapp.AllocationResult, error) {
 	result, err := a.alloc.ImportHistoricalMicrosoftAllocation(ctx, allocapp.HistoricalMicrosoftAllocationCommand{
 		AliasOwnerID: cmd.AliasOwnerID, ProjectID: cmd.ProjectID, ProductID: cmd.ProductID, ResourceID: cmd.ResourceID,
