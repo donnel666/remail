@@ -229,8 +229,9 @@ func (s *Service) markLocalGmailBatchValidationPending(
 			return nil
 		}
 		now := s.now().UTC()
+		nextGeneration := nextAdminLocalResourceGeneration(resource.ValidationGeneration)
 		result := tx.Model(&localResourceModel{}).Where("id = ?", resourceID).Updates(map[string]any{
-			"status": LocalResourcePending, "validation_generation": gorm.Expr("validation_generation + 1"),
+			"status": LocalResourcePending, "validation_generation": nextGeneration,
 			"validation_failures": 0, "validation_request_id": record.RequestID,
 			"validation_command_hash": commandHash, "last_safe_error": "", "last_checked_at": nil,
 			"updated_at": now,
@@ -240,6 +241,12 @@ func (s *Service) markLocalGmailBatchValidationPending(
 		}
 		if result.RowsAffected != 1 {
 			return ErrLocalValidationConflict
+		}
+		if _, err := ensureGmailMaintenanceRunTx(
+			ctx, tx, resource.ID, nextGeneration, gmailMaintenanceValidation,
+			resource.CredentialRevision, 0, now,
+		); err != nil {
+			return err
 		}
 		if err := tx.Model(&resourceRootModel{}).Where("id = ? AND version = ?", root.ID, root.Version).
 			Updates(map[string]any{"version": gorm.Expr("version + 1"), "updated_at": now}).Error; err != nil {

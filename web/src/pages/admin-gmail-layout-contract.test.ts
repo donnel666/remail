@@ -32,6 +32,45 @@ describe("admin Gmail page layout", () => {
 
     expect(gmailSource).toContain("<StatisticFilterOption");
     expect(gmailSource).toContain("<CompactModeToggle");
+    for (const fragment of [
+      "rowSelection=",
+      "useSelectionNotification({",
+      't("Details")',
+      't("Edit")',
+      't("Maintenance")',
+      't("Delete")',
+      't("Recover")',
+      "openBulkMaintenance(true)",
+      'confirmBatch("publish", true)',
+      'confirmBatch("unpublish", true)',
+      'confirmBatch("delete", true)',
+      "<GmailDetailSheet",
+      "<EditGmailModal",
+      "<ReplaceGmailCredentialsModal",
+      "<GmailMaintenanceModal",
+      "<RelatedOrdersTable",
+      "<GmailTaskDiagnostics",
+      "<ResourceMailsPanel",
+      't("Replace credentials")',
+      'tab={t("Validation")}',
+      'tab={t("Other aliases")}',
+      'tab={t("Orders")}',
+      'tab={t("Task details")}',
+      'tab={t("Mailbox")}',
+      'resourceType="gmail"',
+      "batchAllMatchingAdminGmailResources",
+      'activeTab === "validation"',
+      'activeTab === "other"',
+    ]) {
+      expect(gmailSource).toContain(fragment);
+    }
+    const basicTabBody = gmailSource.match(
+      /\{activeTab === "basic" \? \(([\s\S]*?)\) : null\}/,
+    )?.[1];
+    expect(basicTabBody).toBeDefined();
+    expect(basicTabBody).not.toContain("ConfiguredTag");
+    expect(gmailSource).not.toContain("ADMIN_GMAIL_BATCH_MAX");
+    expect(gmailSource).not.toContain("request.credentials");
     expect(gmailSource).not.toContain('type="type1"');
     expect(gmailSource).not.toContain("descriptionArea=");
   });

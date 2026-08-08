@@ -183,10 +183,29 @@ func (s *Service) CommitStandaloneValidatedCredentials(
 			committed = StandaloneCommitResult{ResourceID: resource.ID, ValidationGeneration: resource.ValidationGeneration, CredentialRevision: newRevision}
 		}
 		if complete {
+			validationRun, err := ensureGmailMaintenanceRunTx(
+				ctx, tx, committed.ResourceID, committed.ValidationGeneration, gmailMaintenanceValidation,
+				committed.CredentialRevision, 0, now,
+			)
+			if err != nil {
+				return err
+			}
+			if err := finishGmailMaintenanceRunTx(
+				ctx, tx, validationRun.ID, gmailMaintenanceSucceeded, "", now,
+			); err != nil {
+				return err
+			}
+			historyRun, err := ensureGmailMaintenanceRunTx(
+				ctx, tx, committed.ResourceID, committed.ValidationGeneration, gmailMaintenanceHistory,
+				committed.CredentialRevision, 0, now,
+			)
+			if err != nil {
+				return err
+			}
 			historyTask = localGmailHistoryTask{
 				ResourceID: committed.ResourceID, OwnerUserID: ownerUserID,
 				ValidationGeneration: committed.ValidationGeneration, ExpectedCredentialRevision: committed.CredentialRevision,
-				RequestID: requestID,
+				MaintenanceRunID: historyRun.ID, RequestID: requestID,
 			}
 		}
 		if s.logs != nil {

@@ -38,6 +38,7 @@ type localResourceValidationTask struct {
 	OwnerUserID                uint   `json:"ownerUserId"`
 	ValidationGeneration       uint64 `json:"validationGeneration"`
 	ExpectedCredentialRevision uint64 `json:"expectedCredentialRevision"`
+	MaintenanceRunID           uint64 `json:"maintenanceRunId,omitempty"`
 	RequestID                  string `json:"requestId,omitempty"`
 }
 
@@ -107,8 +108,9 @@ func (s *Service) RequestAdminLocalResourceValidation(
 			return ErrInvalidLocalResource
 		}
 		now := s.now().UTC()
+		nextGeneration := nextAdminLocalResourceGeneration(resource.ValidationGeneration)
 		result := tx.Model(&localResourceModel{}).Where("id = ?", resourceID).Updates(map[string]any{
-			"status": LocalResourcePending, "validation_generation": gorm.Expr("validation_generation + 1"),
+			"status": LocalResourcePending, "validation_generation": nextGeneration,
 			"validation_failures": 0, "validation_request_id": requestID,
 			"validation_command_hash": commandHash, "last_safe_error": "", "last_checked_at": nil,
 			"updated_at": now,
@@ -118,6 +120,12 @@ func (s *Service) RequestAdminLocalResourceValidation(
 		}
 		if result.RowsAffected != 1 {
 			return ErrLocalValidationConflict
+		}
+		if _, err := ensureGmailMaintenanceRunTx(
+			ctx, tx, resource.ID, nextGeneration, gmailMaintenanceValidation,
+			resource.CredentialRevision, 0, now,
+		); err != nil {
+			return err
 		}
 		if err := tx.Model(&resourceRootModel{}).Where("id = ? AND version = ?", root.ID, root.Version).
 			Updates(map[string]any{"version": gorm.Expr("version + 1"), "updated_at": now}).Error; err != nil {
@@ -235,6 +243,15 @@ gr.validation_request_id AS request_id`).
 		if task.RequestID == "" {
 			task.RequestID = fmt.Sprintf("gmail-validation-%d-%d", task.ResourceID, task.ValidationGeneration)
 		}
+		run, err := s.ensureGmailMaintenanceRun(
+			ctx, task.ResourceID, task.ValidationGeneration, gmailMaintenanceValidation,
+			task.ExpectedCredentialRevision, 0,
+		)
+		if err != nil {
+			dispatchErr = errors.Join(dispatchErr, fmt.Errorf("record local Gmail validation %d: %w", task.ResourceID, err))
+			continue
+		}
+		task.MaintenanceRunID = run.ID
 		if err := s.enqueueLocalResourceValidation(ctx, task); err != nil {
 			dispatchErr = errors.Join(dispatchErr, fmt.Errorf("schedule local Gmail validation %d: %w", task.ResourceID, err))
 			continue
@@ -256,12 +273,14 @@ AND EXISTS (SELECT 1 FROM email_resources AS er WHERE er.id = gmail_resources.id
 
 func (s *Service) dispatchIdentifyingLocalGmailHistory(ctx context.Context, limit int) error {
 	var tasks []localGmailHistoryTask
-	if err := s.dbFor(ctx).Table("gmail_resources AS gr").
-		Select(`gr.id AS resource_id, er.owner_user_id, gr.validation_generation,
+	if err := s.dbFor(ctx).Table("gmail_maintenance_runs AS run").
+		Select(`run.id AS maintenance_run_id, gr.id AS resource_id, er.owner_user_id, gr.validation_generation,
 gr.credential_revision AS expected_credential_revision, gr.validation_request_id AS request_id`).
+		Joins("JOIN gmail_resources AS gr ON gr.id = run.resource_id AND gr.validation_generation = run.validation_generation AND gr.credential_revision = run.credential_revision").
 		Joins("JOIN email_resources AS er ON er.id = gr.id AND er.type = ?", "gmail").
-		Where("gr.status = ? AND gr.validation_generation > 0 AND gr.credential_revision > 0", LocalResourceIdentifying).
-		Order("gr.updated_at ASC, gr.id ASC").Limit(limit).Scan(&tasks).Error; err != nil {
+		Where("run.kind = ? AND run.status IN ? AND gr.status = ?", gmailMaintenanceHistory,
+			[]string{gmailMaintenanceQueued, gmailMaintenanceRunning}, LocalResourceIdentifying).
+		Order("run.updated_at ASC, run.id ASC").Limit(limit).Scan(&tasks).Error; err != nil {
 		return fmt.Errorf("list identifying local Gmail resources: %w", err)
 	}
 	var result error
@@ -373,17 +392,40 @@ func (s *Service) processLocalResourceValidationWith(
 		return fmt.Errorf("load local Gmail validation state: %w", result.Error)
 	}
 	if resource.ID == 0 || resource.OwnerUserID != task.OwnerUserID {
+		_ = s.finishGmailMaintenanceRunForTask(
+			context.WithoutCancel(ctx), task.MaintenanceRunID, task.ResourceID, task.ValidationGeneration,
+			gmailMaintenanceValidation, gmailMaintenanceCanceled, "Gmail resource ownership changed before validation started.",
+		)
 		return nil
 	}
 	if resource.ValidationGeneration != task.ValidationGeneration || resource.CredentialRevision != task.ExpectedCredentialRevision {
+		_ = s.finishGmailMaintenanceRunForTask(
+			context.WithoutCancel(ctx), task.MaintenanceRunID, task.ResourceID, task.ValidationGeneration,
+			gmailMaintenanceValidation, gmailMaintenanceCanceled, "Gmail resource changed before validation started.",
+		)
 		return nil
 	}
 	if resource.Status == LocalResourcePending {
 		return ErrLocalValidationDependency
 	}
 	if resource.Status != LocalResourceValidating {
+		_ = s.finishGmailMaintenanceRunForTask(
+			context.WithoutCancel(ctx), task.MaintenanceRunID, task.ResourceID, task.ValidationGeneration,
+			gmailMaintenanceValidation, gmailMaintenanceCanceled, "Gmail validation was canceled before it started.",
+		)
 		return nil
 	}
+	runID, started, err := s.startGmailMaintenanceRun(
+		ctx, task.MaintenanceRunID, task.ResourceID, task.ValidationGeneration,
+		gmailMaintenanceValidation, task.ExpectedCredentialRevision,
+	)
+	if err != nil {
+		return fmt.Errorf("start local Gmail maintenance run: %w", err)
+	}
+	if !started {
+		return nil
+	}
+	task.MaintenanceRunID = runID
 
 	validation := validate(ctx, localGmailValidationInput{
 		ResourceID: task.ResourceID, ValidationGeneration: task.ValidationGeneration,
@@ -448,10 +490,31 @@ func (s *Service) applyLocalResourceValidationResult(
 			}
 			return fmt.Errorf("lock local Gmail validation resource: %w", err)
 		}
+		maintenanceRun, err := findGmailMaintenanceRunTx(
+			ctx, tx, task.MaintenanceRunID, task.ResourceID, task.ValidationGeneration, gmailMaintenanceValidation,
+		)
+		if err != nil {
+			return err
+		}
 		if resource.OwnerUserID != task.OwnerUserID || resource.Status != LocalResourceValidating ||
 			resource.ValidationGeneration != task.ValidationGeneration ||
 			resource.CredentialRevision != task.ExpectedCredentialRevision {
+			if maintenanceRun != nil {
+				return finishGmailMaintenanceRunTx(
+					ctx, tx, maintenanceRun.ID, gmailMaintenanceCanceled,
+					"Gmail resource changed before validation completed.", s.now().UTC(),
+				)
+			}
 			return nil
+		}
+		if maintenanceRun == nil {
+			maintenanceRun, err = ensureGmailMaintenanceRunTx(
+				ctx, tx, resource.ID, resource.ValidationGeneration, gmailMaintenanceValidation,
+				resource.CredentialRevision, int(resource.ValidationFailures), s.now().UTC(),
+			)
+			if err != nil {
+				return err
+			}
 		}
 
 		checkedAt := s.now().UTC()
@@ -499,6 +562,10 @@ func (s *Service) applyLocalResourceValidationResult(
 			updates["validation_failures"] = nextFailures
 			updates["last_safe_error"] = safeError
 		}
+		nextCredentialRevision := resource.CredentialRevision
+		if credentialChanged {
+			nextCredentialRevision++
+		}
 		result := tx.Model(&localResourceModel{}).
 			Where("id = ? AND status = ? AND validation_generation = ? AND credential_revision = ?",
 				task.ResourceID, LocalResourceValidating, task.ValidationGeneration, task.ExpectedCredentialRevision).
@@ -511,11 +578,38 @@ func (s *Service) applyLocalResourceValidationResult(
 			return nil
 		}
 		if validation.Err == nil {
+			if err := finishGmailMaintenanceRunTx(
+				ctx, tx, maintenanceRun.ID, gmailMaintenanceSucceeded, "", checkedAt,
+			); err != nil {
+				return err
+			}
+			historyRun, err := ensureGmailMaintenanceRunTx(
+				ctx, tx, task.ResourceID, task.ValidationGeneration, gmailMaintenanceHistory,
+				nextCredentialRevision, 0, checkedAt,
+			)
+			if err != nil {
+				return err
+			}
 			historyTask = localGmailHistoryTask{
 				ResourceID: task.ResourceID, OwnerUserID: task.OwnerUserID,
 				ValidationGeneration:       task.ValidationGeneration,
-				ExpectedCredentialRevision: resource.CredentialRevision + 1,
+				ExpectedCredentialRevision: nextCredentialRevision,
+				MaintenanceRunID:           historyRun.ID,
 				RequestID:                  task.RequestID,
+			}
+		} else {
+			if err := finishGmailMaintenanceRunTx(
+				ctx, tx, maintenanceRun.ID, gmailMaintenanceFailed, safeError, checkedAt,
+			); err != nil {
+				return err
+			}
+			if retryPending {
+				if _, err := ensureGmailMaintenanceRunTx(
+					ctx, tx, task.ResourceID, task.ValidationGeneration+1, gmailMaintenanceValidation,
+					nextCredentialRevision, nextFailures, checkedAt,
+				); err != nil {
+					return err
+				}
 			}
 		}
 		if err := tx.Model(&resourceRootModel{}).Where("id = ?", root.ID).Updates(map[string]any{
@@ -570,20 +664,69 @@ func (s *Service) ReleaseLocalResourceValidation(ctx context.Context, task local
 		task.ValidationGeneration == 0 || task.ExpectedCredentialRevision == 0 {
 		return nil
 	}
-	result := s.dbFor(ctx).Model(&localResourceModel{}).
-		Where(`id = ? AND status = ? AND validation_generation = ? AND credential_revision = ?
+	changed := false
+	now := s.now().UTC()
+	err := s.dbFor(ctx).Transaction(func(tx *gorm.DB) error {
+		var resource localResourceModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where(`id = ? AND status = ? AND validation_generation = ? AND credential_revision = ?
 AND EXISTS (SELECT 1 FROM email_resources AS er WHERE er.id = gmail_resources.id AND er.type = 'gmail' AND er.owner_user_id = ?)`,
-			task.ResourceID, LocalResourceValidating, task.ValidationGeneration,
-			task.ExpectedCredentialRevision, task.OwnerUserID).
-		Updates(map[string]any{
-			"status":                LocalResourcePending,
-			"validation_generation": task.ValidationGeneration + 1,
-			"updated_at":            s.now().UTC(),
-		})
-	if result.Error != nil {
-		return fmt.Errorf("release local Gmail validation: %w", result.Error)
+				task.ResourceID, LocalResourceValidating, task.ValidationGeneration,
+				task.ExpectedCredentialRevision, task.OwnerUserID).
+			Take(&resource).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return err
+		}
+		run, err := findGmailMaintenanceRunTx(
+			ctx, tx, task.MaintenanceRunID, task.ResourceID, task.ValidationGeneration, gmailMaintenanceValidation,
+		)
+		if err != nil {
+			return err
+		}
+		if run == nil {
+			run, err = ensureGmailMaintenanceRunTx(
+				ctx, tx, resource.ID, resource.ValidationGeneration, gmailMaintenanceValidation,
+				resource.CredentialRevision, int(resource.ValidationFailures), now,
+			)
+			if err != nil {
+				return err
+			}
+		}
+		result := tx.Model(&localResourceModel{}).
+			Where("id = ? AND status = ? AND validation_generation = ? AND credential_revision = ?",
+				resource.ID, LocalResourceValidating, resource.ValidationGeneration, resource.CredentialRevision).
+			Updates(map[string]any{
+				"status":                LocalResourcePending,
+				"validation_generation": resource.ValidationGeneration + 1,
+				"updated_at":            now,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return nil
+		}
+		if err := finishGmailMaintenanceRunTx(
+			ctx, tx, run.ID, gmailMaintenanceFailed,
+			"Gmail validation worker exhausted its retry budget.", now,
+		); err != nil {
+			return err
+		}
+		if _, err := ensureGmailMaintenanceRunTx(
+			ctx, tx, resource.ID, resource.ValidationGeneration+1, gmailMaintenanceValidation,
+			resource.CredentialRevision, run.Attempts, now,
+		); err != nil {
+			return err
+		}
+		changed = true
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("release local Gmail validation: %w", err)
 	}
-	if result.RowsAffected == 1 {
+	if changed {
 		_ = s.scheduleLocalResourceValidationDispatcher(context.WithoutCancel(ctx), 0)
 	}
 	return nil

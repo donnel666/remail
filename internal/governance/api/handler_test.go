@@ -35,6 +35,11 @@ func (s *apiTaskRepoStub) DomainResourceExists(context.Context, uint) (bool, err
 	return s.exists, s.err
 }
 
+func (s *apiTaskRepoStub) GmailResourceExists(context.Context, uint) (bool, error) {
+	s.existsCalls++
+	return s.exists, s.err
+}
+
 func (s *apiTaskRepoStub) ICloudResourceExists(context.Context, uint) (bool, error) {
 	s.existsCalls++
 	return s.exists, s.err
@@ -52,6 +57,10 @@ func (s *apiTaskRepoStub) ListForMicrosoftResource(context.Context, governanceap
 }
 
 func (s *apiTaskRepoStub) ListForDomainResource(ctx context.Context, filter governanceapp.AdminTaskListFilter) ([]governanceapp.AdminTaskView, int64, int64, error) {
+	return s.ListForMicrosoftResource(ctx, filter)
+}
+
+func (s *apiTaskRepoStub) ListForGmailResource(ctx context.Context, filter governanceapp.AdminTaskListFilter) ([]governanceapp.AdminTaskView, int64, int64, error) {
 	return s.ListForMicrosoftResource(ctx, filter)
 }
 

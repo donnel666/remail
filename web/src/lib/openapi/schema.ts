@@ -3799,7 +3799,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List normalized administrator tasks for a Microsoft, iCloud, or domain resource
+         * List normalized administrator tasks for a Microsoft, Gmail, iCloud, or domain resource
          * @description Requires `governance:task/read`. Governance normalizes durable facts from their owning contexts without becoming their source of truth. Results use source-qualified task IDs, the stable `queued/running/succeeded/failed/uncertain/canceled` status union, and safe progress only. Internal table paths, claim/dispatch/lease/fencing tokens, upstream payloads, and raw errors are never returned. If any required task source is unavailable, the request returns 503 instead of a stale or partial success.
          */
         get: operations["getAdminTasks"];
@@ -4228,6 +4228,170 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/gmail/resources/batch/validation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Queue validation for selected Gmail resources */
+        post: operations["postAdminGmailResourcesValidate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/gmail/resources/batch/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Queue project-history identification for selected Gmail resources */
+        post: operations["postAdminGmailResourcesHistory"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/gmail/resources/batch/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Disable selected Gmail resources */
+        post: operations["postAdminGmailResourcesDisable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/gmail/resources/batch/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Publish selected Gmail resources for public allocation */
+        post: operations["postAdminGmailResourcesPublish"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/gmail/resources/batch/unpublish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Convert selected Gmail resources to private supply */
+        post: operations["postAdminGmailResourcesUnpublish"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/gmail/resources/batch/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Logically delete selected Gmail resources without active allocations */
+        post: operations["postAdminGmailResourcesDelete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/gmail/resources/{resourceId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get one safe Gmail resource detail */
+        get: operations["getAdminGmailResource"];
+        put?: never;
+        post?: never;
+        /** Logically delete one Gmail resource without an active allocation */
+        delete: operations["deleteAdminGmailResource"];
+        options?: never;
+        head?: never;
+        /**
+         * Atomically edit Gmail resource metadata
+         * @description Requires `core:resource/write`. Credential values are not accepted here; use the dedicated credential replacement endpoint, which requires `core:resource/operate`.
+         */
+        patch: operations["patchAdminGmailResource"];
+        trace?: never;
+    };
+    "/v1/admin/gmail/resources/{resourceId}/aliases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a Gmail resource's observed dot and plus aliases
+         * @description Requires `core:resource/read`. Gmail aliases are generated on demand, so this endpoint returns only distinct dot and plus addresses that have actually been allocated for the resource. The result includes released allocation history and never enumerates theoretical alias combinations.
+         */
+        get: operations["getAdminGmailResourceAliases"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/gmail/resources/{resourceId}/credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Replace Gmail credentials as one write-only set
+         * @description Requires `core:resource/operate`. Existing credential values are never returned. Password is required; omitted 2FA and App Password values keep their current values. A successful replacement advances the credential revision and queues validation.
+         */
+        put: operations["putAdminGmailResourceCredentials"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/gmail/resources/{resourceId}/enable": {
         parameters: {
             query?: never;
@@ -4279,6 +4443,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/gmail/resources/{resourceId}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Queue project-history identification for one healthy Gmail resource */
+        post: operations["postAdminGmailResourceHistory"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/gmail/resources/{resourceId}/publish": {
         parameters: {
             query?: never;
@@ -4307,6 +4488,23 @@ export interface paths {
         put?: never;
         /** Make one Gmail resource private for future allocation */
         post: operations["postAdminGmailResourceUnpublish"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/gmail/resources/{resourceId}/recover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Recover one deleted Gmail resource as private and pending validation */
+        post: operations["postAdminGmailResourceRecover"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7414,7 +7612,7 @@ export interface components {
         /** @enum {string} */
         AdminTaskStatus: "queued" | "running" | "succeeded" | "failed" | "uncertain" | "canceled";
         /** @enum {string} */
-        AdminTaskBizType: "microsoft_resource" | "icloud_resource" | "domain_resource" | "microsoft_resource_import" | "gmail_resource_import" | "microsoft_resource_bulk" | "icloud_resource_import";
+        AdminTaskBizType: "microsoft_resource" | "gmail_resource" | "icloud_resource" | "domain_resource" | "microsoft_resource_import" | "gmail_resource_import" | "microsoft_resource_bulk" | "icloud_resource_import";
         AdminTaskProgress: {
             /** Format: int64 */
             total: number;
@@ -7698,7 +7896,15 @@ export interface components {
             lastSuccessAt?: string | null;
         };
         /** @enum {string} */
-        AdminGmailResourceStatus: "pending" | "validating" | "identifying" | "normal" | "abnormal" | "disabled";
+        AdminGmailResourceStatus: "pending" | "validating" | "identifying" | "normal" | "abnormal" | "disabled" | "deleted";
+        AdminGmailBooleanFacet: {
+            /** Format: int64 */
+            all: number;
+            /** Format: int64 */
+            yes: number;
+            /** Format: int64 */
+            no: number;
+        };
         AdminGmailResourceFacets: {
             /** Format: int64 */
             all: number;
@@ -7714,12 +7920,26 @@ export interface components {
             abnormal: number;
             /** Format: int64 */
             disabled: number;
+            /** Format: int64 */
+            deleted: number;
+            forSale: components["schemas"]["AdminGmailBooleanFacet"];
+        };
+        AdminGmailOwnerSummary: {
+            id: number;
+            /** Format: email */
+            email: string;
+            nickname: string;
+            groupName: string;
+            /** @enum {string} */
+            role: "user" | "supplier" | "admin" | "super_admin";
+            enabled: boolean;
         };
         AdminGmailResourceItem: {
             id: number;
             /** Format: int64 */
             version: number;
             ownerUserId: number;
+            owner: components["schemas"]["AdminGmailOwnerSummary"];
             /** Format: email */
             email: string;
             /**
@@ -7734,6 +7954,8 @@ export interface components {
             appPasswordConfigured: boolean;
             /** Format: int64 */
             credentialRevision: number;
+            /** Format: date-time */
+            credentialUpdatedAt: string;
             validationFailures: number;
             /** Format: date-time */
             lastAllocatedAt?: string | null;
@@ -7745,6 +7967,62 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
         };
+        AdminGmailResourceUpdateRequest: {
+            /**
+             * Format: int64
+             * @description Last observed resource version; stale writes return 409.
+             */
+            version: number;
+            ownerId: number;
+            /** Format: email */
+            email: string;
+            /** @description Optional recovery or challenge mailbox; an empty string clears it. */
+            bindingEmail?: string;
+        };
+        AdminGmailCredentialsReplaceRequest: {
+            /**
+             * Format: int64
+             * @description Last observed resource version; stale replacements return 409.
+             */
+            version: number;
+            /** Format: password */
+            password: string;
+            /** @description Blank keeps the current Authenticator secret. */
+            twoFactorSecret?: string;
+            /** @description Blank keeps the current Gmail App Password. */
+            appPassword?: string;
+        };
+        AdminGmailMutationResponse: {
+            resourceId: number;
+            /** Format: int64 */
+            version: number;
+            status: components["schemas"]["AdminGmailResourceStatus"];
+            forSale: boolean;
+        };
+        AdminGmailBulkFilter: {
+            search?: string;
+            status?: components["schemas"]["AdminGmailResourceStatus"];
+            forSale?: boolean;
+            /** Format: date-time */
+            createdFrom?: string;
+            /** Format: date-time */
+            createdTo?: string;
+        };
+        AdminGmailIdsSelection: {
+            /** @enum {string} */
+            mode: "ids";
+            resourceIds: number[];
+        };
+        AdminGmailFilterSelection: {
+            /** @enum {string} */
+            mode: "filter";
+            filter: components["schemas"]["AdminGmailBulkFilter"];
+        };
+        AdminGmailBulkSelection: components["schemas"]["AdminGmailIdsSelection"] | components["schemas"]["AdminGmailFilterSelection"];
+        AdminGmailBulkCommandRequest: {
+            selection: components["schemas"]["AdminGmailBulkSelection"];
+        };
+        AdminGmailBulkResult: components["schemas"]["AdminMicrosoftBulkResult"];
         AdminGmailValidationAccepted: {
             requested: number;
             queued: number;
@@ -7774,6 +8052,22 @@ export interface components {
             offset: number;
             limit: number;
             facets: components["schemas"]["AdminGmailResourceFacets"];
+        };
+        AdminGmailAliasItem: {
+            id: number;
+            /** @enum {string} */
+            kind: "dot" | "plus";
+            /** Format: email */
+            emailAddress: string;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        AdminGmailAliasListResponse: {
+            items: components["schemas"]["AdminGmailAliasItem"][];
+            /** Format: int64 */
+            total: number;
+            offset: number;
+            limit: number;
         };
         AdminGmailImportResponse: {
             importId: number;
@@ -20341,7 +20635,7 @@ export interface operations {
     getAdminTasks: {
         parameters: {
             query: {
-                bizType: "microsoft_resource" | "icloud_resource" | "domain_resource";
+                bizType: "microsoft_resource" | "gmail_resource" | "icloud_resource" | "domain_resource";
                 /** @description Resource ID matching bizType. */
                 bizId: number;
                 kind?: components["schemas"]["AdminTaskKind"];
@@ -20403,7 +20697,7 @@ export interface operations {
         parameters: {
             query: {
                 /** @description Resource type; defaults to microsoft for backward compatibility. */
-                type?: "microsoft" | "icloud" | "domain";
+                type?: "microsoft" | "gmail" | "icloud" | "domain";
                 resourceId: number;
                 search?: string;
                 offset?: number;
@@ -20443,7 +20737,7 @@ export interface operations {
             query: {
                 resourceId: number;
                 /** @description Resource type; defaults to microsoft for backward compatibility. */
-                type?: "microsoft" | "icloud" | "domain";
+                type?: "microsoft" | "gmail" | "icloud" | "domain";
             };
             header?: never;
             path: {
@@ -20988,6 +21282,9 @@ export interface operations {
                 limit?: number;
                 search?: string;
                 status?: components["schemas"]["AdminGmailResourceStatus"];
+                forSale?: boolean;
+                createdFrom?: string;
+                createdTo?: string;
             };
             header?: never;
             path?: never;
@@ -21141,6 +21438,388 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    postAdminGmailResourcesValidate: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op. */
+                "Idempotency-Key": components["parameters"]["AdminStateCommandIdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminGmailBulkCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Synchronous bounded selection result; affected resources were queued */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminGmailBulkResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminGmailResourcesHistory: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op. */
+                "Idempotency-Key": components["parameters"]["AdminStateCommandIdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminGmailBulkCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Synchronous bounded selection result; affected resources were queued */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminGmailBulkResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminGmailResourcesDisable: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op. */
+                "Idempotency-Key": components["parameters"]["AdminStateCommandIdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminGmailBulkCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Synchronous bounded selection result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminGmailBulkResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminGmailResourcesPublish: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op. */
+                "Idempotency-Key": components["parameters"]["AdminStateCommandIdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminGmailBulkCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Synchronous bounded selection result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminGmailBulkResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminGmailResourcesUnpublish: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op. */
+                "Idempotency-Key": components["parameters"]["AdminStateCommandIdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminGmailBulkCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Synchronous bounded selection result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminGmailBulkResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminGmailResourcesDelete: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op. */
+                "Idempotency-Key": components["parameters"]["AdminStateCommandIdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminGmailBulkCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Synchronous bounded selection result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminGmailBulkResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getAdminGmailResource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Safe Gmail resource detail without credential values */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminGmailResourceItem"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    deleteAdminGmailResource: {
+        parameters: {
+            query: {
+                /** @description Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write. */
+                version: components["parameters"]["ExpectedAdminResourceVersion"];
+            };
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op. */
+                "Idempotency-Key": components["parameters"]["AdminStateCommandIdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Updated safe state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminGmailMutationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    patchAdminGmailResource: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminGmailResourceUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Edit committed and validation queued when identity, owner, or binding changed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminGmailMutationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getAdminGmailResourceAliases: {
+        parameters: {
+            query: {
+                kind: "other";
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paginated observed Gmail aliases */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminGmailAliasListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    putAdminGmailResourceCredentials: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminGmailCredentialsReplaceRequest"];
+            };
+        };
+        responses: {
+            /** @description Credentials replaced and validation queued */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminGmailMutationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     postAdminGmailResourceEnable: {
         parameters: {
             query: {
@@ -21243,6 +21922,40 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    postAdminGmailResourceHistory: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Project-history identification queued */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminGmailMutationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     postAdminGmailResourcePublish: {
         parameters: {
             query: {
@@ -21303,6 +22016,43 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminGmailResourceRecover: {
+        parameters: {
+            query: {
+                /** @description Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write. */
+                version: components["parameters"]["ExpectedAdminResourceVersion"];
+            };
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op. */
+                "Idempotency-Key": components["parameters"]["AdminStateCommandIdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gmail resource recovered and validation queued */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminGmailMutationResponse"];
+                };
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];

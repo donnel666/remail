@@ -32,28 +32,196 @@ func RegisterRoutes(rg *gin.RouterGroup, module *Module, fetcher middleware.Sess
 	resources := rg.Group("/admin/gmail/resources")
 	resources.Use(middleware.LoadSession(fetcher), middleware.AuthRequired(), middleware.CSRFRequired())
 	resources.GET("", middleware.PermissionRequired(checker, "core:resource", "read"), h.localResources)
+	resources.GET("/:resourceId/aliases", middleware.PermissionRequired(checker, "core:resource", "read"), h.localResourceAliases)
 	resources.POST("/imports", middleware.PermissionRequired(checker, "core:resource", "write"), h.importLocalResources)
 	resources.GET("/imports/:importId", middleware.PermissionRequired(checker, "core:resource", "read"), h.localResourceImport)
 	resources.POST("/validations", middleware.PermissionRequired(checker, "core:resource", "operate"), h.validateLocalResources)
 	resources.GET("/validations/:batchId", middleware.PermissionRequired(checker, "core:resource", "read"), h.localResourceValidationBatch)
+	resources.POST("/batch/validation", middleware.PermissionRequired(checker, "core:resource", "operate"), h.batchLocalResourceCommand(AdminLocalResourceValidate))
+	resources.POST("/batch/history", middleware.PermissionRequired(checker, "core:resource", "operate"), h.batchLocalResourceCommand(AdminLocalResourceHistory))
+	resources.POST("/batch/disable", middleware.PermissionRequired(checker, "core:resource", "operate"), h.batchLocalResourceCommand(AdminLocalResourceDisable))
+	resources.POST("/batch/publish", middleware.PermissionRequired(checker, "core:resource", "operate"), h.batchLocalResourceCommand(AdminLocalResourcePublish))
+	resources.POST("/batch/unpublish", middleware.PermissionRequired(checker, "core:resource", "operate"), h.batchLocalResourceCommand(AdminLocalResourceUnpublish))
+	resources.POST("/batch/delete", middleware.PermissionRequired(checker, "core:resource", "operate"), h.batchLocalResourceCommand(AdminLocalResourceDelete))
+	resources.GET("/:resourceId", middleware.PermissionRequired(checker, "core:resource", "read"), h.localResource)
+	resources.PATCH("/:resourceId", middleware.PermissionRequired(checker, "core:resource", "write"), h.updateLocalResource)
+	resources.PUT("/:resourceId/credentials", middleware.PermissionRequired(checker, "core:resource", "operate"), h.replaceLocalResourceCredentials)
+	resources.DELETE("/:resourceId", middleware.PermissionRequired(checker, "core:resource", "operate"), h.localResourceCommand(AdminLocalResourceDelete))
 	resources.POST("/:resourceId/enable", middleware.PermissionRequired(checker, "core:resource", "operate"), h.enableLocalResource)
 	resources.POST("/:resourceId/disable", middleware.PermissionRequired(checker, "core:resource", "operate"), h.disableLocalResource)
 	resources.POST("/:resourceId/validate", middleware.PermissionRequired(checker, "core:resource", "operate"), h.validateLocalResource)
+	resources.POST("/:resourceId/history", middleware.PermissionRequired(checker, "core:resource", "operate"), h.localResourceCommand(AdminLocalResourceHistory))
 	resources.POST("/:resourceId/publish", middleware.PermissionRequired(checker, "core:resource", "operate"), h.publishLocalResource)
 	resources.POST("/:resourceId/unpublish", middleware.PermissionRequired(checker, "core:resource", "operate"), h.unpublishLocalResource)
+	resources.POST("/:resourceId/recover", middleware.PermissionRequired(checker, "core:resource", "operate"), h.localResourceCommand(AdminLocalResourceRecover))
 }
 
 type handler struct{ service *Service }
 
 func (h *handler) localResources(c *gin.Context) {
+	offset, limit, ok := middleware.ParsePagination(c, middleware.PaginationOptions{
+		DefaultLimit: 20,
+		MaxLimit:     adminGmailResourceMaxLimit,
+	})
+	if !ok {
+		return
+	}
+	var forSale *bool
+	if value, exists := c.GetQuery("forSale"); exists {
+		parsed, err := strconv.ParseBool(strings.TrimSpace(value))
+		if err != nil {
+			writeGmailError(c, ErrInvalidLocalResource)
+			return
+		}
+		forSale = &parsed
+	}
+	createdFrom, ok := parseAdminGmailQueryTime(c.Query("createdFrom"))
+	if !ok {
+		writeGmailError(c, ErrInvalidLocalResource)
+		return
+	}
+	createdTo, ok := parseAdminGmailQueryTime(c.Query("createdTo"))
+	if !ok {
+		writeGmailError(c, ErrInvalidLocalResource)
+		return
+	}
+	result, err := h.service.ListLocalResources(c.Request.Context(), LocalResourceListFilter{
+		Search: c.Query("search"), Status: c.Query("status"), ForSale: forSale,
+		CreatedFrom: createdFrom, CreatedTo: createdTo, Offset: offset, Limit: limit,
+	})
+	if err != nil {
+		writeGmailError(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, result)
+}
+
+func parseAdminGmailQueryTime(value string) (*time.Time, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil, true
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return nil, false
+	}
+	parsed = parsed.UTC()
+	return &parsed, true
+}
+
+func (h *handler) localResource(c *gin.Context) {
+	resourceID, ok := parseAdminGmailResourceID(c)
+	if !ok {
+		return
+	}
+	result, err := h.service.GetAdminLocalResource(c.Request.Context(), resourceID)
+	if err != nil {
+		writeGmailError(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *handler) localResourceAliases(c *gin.Context) {
+	resourceID, ok := parseAdminGmailResourceID(c)
+	if !ok {
+		return
+	}
+	if strings.ToLower(strings.TrimSpace(c.Query("kind"))) != "other" {
+		writeGmailError(c, ErrInvalidLocalResource)
+		return
+	}
 	offset, offsetErr := strconv.Atoi(c.DefaultQuery("offset", "0"))
 	limit, limitErr := strconv.Atoi(c.DefaultQuery("limit", "20"))
 	if offsetErr != nil || limitErr != nil {
 		writeGmailError(c, ErrInvalidLocalResource)
 		return
 	}
-	result, err := h.service.ListLocalResources(c.Request.Context(), LocalResourceListFilter{
-		Search: c.Query("search"), Status: c.Query("status"), Offset: offset, Limit: limit,
+	result, err := h.service.ListAdminGmailAliases(c.Request.Context(), resourceID, offset, limit)
+	if err != nil {
+		writeGmailError(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, result)
+}
+
+type adminLocalResourceUpdateRequest struct {
+	Version      uint64 `json:"version" binding:"required"`
+	OwnerID      uint   `json:"ownerId" binding:"required"`
+	Email        string `json:"email" binding:"required"`
+	BindingEmail string `json:"bindingEmail"`
+}
+
+func (h *handler) updateLocalResource(c *gin.Context) {
+	resourceID, ok := parseAdminGmailResourceID(c)
+	if !ok || !requireAdminGmailIdempotencyKey(c) {
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
+	var request adminLocalResourceUpdateRequest
+	if c.ShouldBindJSON(&request) != nil {
+		writeGmailError(c, ErrInvalidLocalResource)
+		return
+	}
+	operatorUserID, ok := middleware.GetCurrentUserID(c)
+	if !ok {
+		c.Status(http.StatusUnauthorized)
+		return
+	}
+	result, err := h.service.UpdateAdminLocalResource(c.Request.Context(), AdminLocalResourceEditCommand{
+		ResourceID: resourceID, Version: request.Version, OperatorID: operatorUserID,
+		OwnerUserID: request.OwnerID, Email: request.Email, BindingEmail: request.BindingEmail,
+		IdempotencyKey: c.GetHeader("Idempotency-Key"),
+		RequestID:      middleware.GetRequestID(c), Path: c.FullPath(),
+	})
+	if err != nil {
+		writeGmailError(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, result)
+}
+
+type adminLocalResourceCredentialsRequest struct {
+	Version         uint64 `json:"version" binding:"required"`
+	Password        string `json:"password" binding:"required"`
+	TwoFactorSecret string `json:"twoFactorSecret"`
+	AppPassword     string `json:"appPassword"`
+}
+
+func (h *handler) replaceLocalResourceCredentials(c *gin.Context) {
+	resourceID, ok := parseAdminGmailResourceID(c)
+	if !ok || !requireAdminGmailIdempotencyKey(c) {
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
+	var request adminLocalResourceCredentialsRequest
+	if c.ShouldBindJSON(&request) != nil {
+		writeGmailError(c, ErrInvalidLocalResource)
+		return
+	}
+	operatorUserID, ok := middleware.GetCurrentUserID(c)
+	if !ok {
+		c.Status(http.StatusUnauthorized)
+		return
+	}
+	resource, err := h.service.GetAdminLocalResource(c.Request.Context(), resourceID)
+	if err != nil {
+		writeGmailError(c, err)
+		return
+	}
+	result, err := h.service.UpdateAdminLocalResource(c.Request.Context(), AdminLocalResourceEditCommand{
+		ResourceID: resourceID, Version: request.Version, OperatorID: operatorUserID,
+		OwnerUserID: resource.OwnerUserID, Email: resource.Email, BindingEmail: resource.BindingEmail,
+		Credentials: &AdminLocalResourceCredentialsInput{
+			Password: request.Password, TwoFactorSecret: request.TwoFactorSecret, AppPassword: request.AppPassword,
+		},
+		CredentialReplacement: true,
+		IdempotencyKey:        c.GetHeader("Idempotency-Key"),
+		RequestID:             middleware.GetRequestID(c), Path: c.FullPath(),
 	})
 	if err != nil {
 		writeGmailError(c, err)
@@ -283,6 +451,83 @@ func (h *handler) localResourceValidationBatch(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+func (h *handler) localResourceCommand(command AdminLocalResourceCommand) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !requireAdminGmailIdempotencyKey(c) {
+			return
+		}
+		resourceID, ok := parseAdminGmailResourceID(c)
+		if !ok {
+			return
+		}
+		var version uint64
+		if command != AdminLocalResourceValidate && command != AdminLocalResourceHistory {
+			parsed, err := strconv.ParseUint(strings.TrimSpace(c.Query("version")), 10, 64)
+			if err != nil || parsed == 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid resource version.", "requestId": middleware.GetRequestID(c)})
+				return
+			}
+			version = parsed
+		}
+		operatorUserID, ok := middleware.GetCurrentUserID(c)
+		if !ok {
+			c.Status(http.StatusUnauthorized)
+			return
+		}
+		result, err := h.service.ApplyAdminLocalResourceCommand(
+			c.Request.Context(), command, resourceID, version, operatorUserID,
+			c.GetHeader("Idempotency-Key"), middleware.GetRequestID(c), c.FullPath(),
+		)
+		if err != nil {
+			writeGmailError(c, err)
+			return
+		}
+		c.Header("Cache-Control", "no-store")
+		status := http.StatusOK
+		if command == AdminLocalResourceValidate || command == AdminLocalResourceHistory || command == AdminLocalResourceRecover {
+			status = http.StatusAccepted
+		}
+		c.JSON(status, result)
+	}
+}
+
+type adminLocalResourceBatchRequest struct {
+	Selection AdminLocalResourceSelection `json:"selection" binding:"required"`
+}
+
+func (h *handler) batchLocalResourceCommand(command AdminLocalResourceCommand) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !requireAdminGmailIdempotencyKey(c) {
+			return
+		}
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
+		var request adminLocalResourceBatchRequest
+		if c.ShouldBindJSON(&request) != nil {
+			writeGmailError(c, ErrLocalResourceSelection)
+			return
+		}
+		operatorUserID, ok := middleware.GetCurrentUserID(c)
+		if !ok {
+			c.Status(http.StatusUnauthorized)
+			return
+		}
+		result, err := h.service.ApplyAdminLocalResourceBatch(
+			c.Request.Context(), command, request.Selection, operatorUserID,
+			c.GetHeader("Idempotency-Key"), middleware.GetRequestID(c), c.FullPath(),
+		)
+		if err != nil {
+			writeGmailError(c, err)
+			return
+		}
+		c.Header("Cache-Control", "no-store")
+		status := http.StatusOK
+		if command == AdminLocalResourceValidate || command == AdminLocalResourceHistory {
+			status = http.StatusAccepted
+		}
+		c.JSON(status, result)
+	}
+}
+
 func (h *handler) publishLocalResource(c *gin.Context) {
 	h.setLocalResourceForSale(c, true)
 }
@@ -324,6 +569,23 @@ func parseLocalResourceVersionCommand(c *gin.Context) (uint, uint64, bool) {
 	return uint(resourceID), version, true
 }
 
+func parseAdminGmailResourceID(c *gin.Context) (uint, bool) {
+	resourceID, err := strconv.ParseUint(strings.TrimSpace(c.Param("resourceId")), 10, 64)
+	if err != nil || resourceID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid resource ID.", "requestId": middleware.GetRequestID(c)})
+		return 0, false
+	}
+	return uint(resourceID), true
+}
+
+func requireAdminGmailIdempotencyKey(c *gin.Context) bool {
+	if validGmailIdempotencyKey(c.GetHeader("Idempotency-Key")) {
+		return true
+	}
+	c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid Idempotency-Key.", "requestId": middleware.GetRequestID(c)})
+	return false
+}
+
 func validGmailIdempotencyKey(value string) bool {
 	value = strings.TrimSpace(value)
 	return value != "" && len(value) <= 128
@@ -336,6 +598,10 @@ func writeGmailError(c *gin.Context, err error) {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Invalid Gmail request.", "requestId": requestID})
 	case errors.Is(err, ErrInvalidLocalResource):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Invalid Gmail resource input.", "requestId": requestID})
+	case errors.Is(err, ErrLocalResourceSelection):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Invalid or too large Gmail resource selection.", "requestId": requestID})
+	case errors.Is(err, ErrLocalResourceOwner):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Gmail resource owner is not eligible for this operation.", "requestId": requestID})
 	case errors.Is(err, ErrGmailImportInvalidCommand), errors.Is(err, ErrGmailImportInvalidOwner):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Invalid resource command.", "requestId": requestID})
 	case errors.Is(err, ErrGmailImportConflict):
@@ -344,6 +610,8 @@ func writeGmailError(c *gin.Context, err error) {
 		c.JSON(http.StatusConflict, gin.H{"message": "Idempotency key was already used for a different command.", "requestId": requestID})
 	case errors.Is(err, ErrLocalResourceVersion):
 		c.JSON(http.StatusConflict, gin.H{"message": "Resource changed; refresh and try again.", "requestId": requestID})
+	case errors.Is(err, ErrLocalResourceState):
+		c.JSON(http.StatusConflict, gin.H{"message": "Gmail resource status does not allow this operation.", "requestId": requestID})
 	case errors.Is(err, ErrGmailImportDependency), errors.Is(err, ErrGmailImportStorage):
 		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "Resource service is temporarily unavailable.", "requestId": requestID})
 	case errors.Is(err, ErrLocalValidationDependency):

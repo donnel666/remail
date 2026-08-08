@@ -158,6 +158,30 @@ email_resource_id, resource_type, recipient, dedupe_key, received_at
 	require.Error(t, goose.DownTo(sqlDB, migrations, 76))
 }
 
+func TestGmailMaintenanceMigrationMySQL(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	require.True(t, ok)
+	source := filepath.Clean(filepath.Join(filepath.Dir(file), "../..", "migrations"))
+	baseline := testmysql.MigrationsThrough(t, source, 71)
+	through87 := testmysql.MigrationsThrough(t, source, 87)
+	through88 := testmysql.MigrationsThrough(t, source, 88)
+	db := gmailMigrationMySQL.Database(t, baseline)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, platform.RunMigrations(sqlDB, through87))
+	requireMigrationVersion(t, sqlDB, 87)
+	require.NoError(t, platform.RunMigrations(sqlDB, through88))
+	requireMigrationVersion(t, sqlDB, 88)
+	require.True(t, db.Migrator().HasTable("gmail_maintenance_runs"))
+	for _, index := range []string{
+		"idx_gmail_maintenance_resource_updated",
+		"idx_gmail_maintenance_resource_generation",
+		"idx_gmail_maintenance_dispatch",
+	} {
+		require.True(t, migrationIndexExists(t, db, "gmail_maintenance_runs", index), index)
+	}
+}
+
 func TestGmailDeletedRestoreMigrationMySQL(t *testing.T) {
 	_, file, _, ok := runtime.Caller(0)
 	require.True(t, ok)

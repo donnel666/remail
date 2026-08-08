@@ -7,7 +7,7 @@ import type { AdminMicrosoftAllocation } from "./admin-microsoft-types";
 
 export function useAdminMicrosoftAllocationPage(
   resourceId: number,
-  resourceType: "microsoft" | "icloud" = "microsoft"
+  resourceType: "microsoft" | "gmail" | "icloud" = "microsoft"
 ) {
   const [pageSize, setPageSize] = useSharedPageSize();
   const [pagination, setPagination] = useState({ page: 1, resourceId });

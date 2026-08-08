@@ -31,6 +31,11 @@ const adminMessageMailboxSQL = `CASE
     ELSE 'main'
 END`
 
+const adminGmailMessageMailboxSQL = `CASE
+    WHEN LOWER(m.recipient) = LOWER(gr.email) THEN 'main'
+    WHEN LOWER(m.recipient) LIKE '%+%@%' THEN 'plus'
+    ELSE 'dot'
+END`
 
 const adminICloudMessageMailboxSQL = `CASE
     WHEN LOWER(m.recipient) = LOWER(ir.primary_email) THEN 'main'
@@ -77,6 +82,8 @@ func (r *AdminMessageRepo) AdminMessageResourceExists(ctx context.Context, resou
 	switch resourceType {
 	case domain.ResourceTypeDomain:
 		query = query.Joins("JOIN domain_resources dr ON dr.id = er.id")
+	case domain.ResourceTypeGmail:
+		query = query.Joins("JOIN gmail_resources gr ON gr.id = er.id")
 	case domain.ResourceTypeICloud:
 		query = query.Joins("JOIN icloud_resources ir ON ir.id = er.id")
 	default:
@@ -209,6 +216,8 @@ func adminMessageBaseQueryDB(db *gorm.DB, resourceID uint, resourceType domain.R
 	switch resourceType {
 	case domain.ResourceTypeDomain:
 		db = db.Joins("JOIN domain_resources dr ON dr.id = m.email_resource_id")
+	case domain.ResourceTypeGmail:
+		db = db.Joins("JOIN gmail_resources gr ON gr.id = m.email_resource_id")
 	case domain.ResourceTypeICloud:
 		db = db.Joins("JOIN icloud_resources ir ON ir.id = m.email_resource_id")
 	default:
@@ -237,6 +246,8 @@ func adminMessageMailboxSelect(resourceType domain.ResourceType) string {
 	switch resourceType {
 	case domain.ResourceTypeDomain:
 		return "'main'"
+	case domain.ResourceTypeGmail:
+		return adminGmailMessageMailboxSQL
 	case domain.ResourceTypeICloud:
 		return adminICloudMessageMailboxSQL
 	default:

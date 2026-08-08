@@ -154,7 +154,7 @@ func (h *Handler) GetAdminMessage(c *gin.Context) {
 
 func adminMessageResourceType(c *gin.Context) (domain.ResourceType, bool) {
 	value := domain.ResourceType(strings.TrimSpace(c.DefaultQuery("type", string(domain.ResourceTypeMicrosoft))))
-	return value, value == domain.ResourceTypeMicrosoft || value == domain.ResourceTypeDomain || value == domain.ResourceTypeICloud
+	return value, value == domain.ResourceTypeMicrosoft || value == domain.ResourceTypeDomain || value == domain.ResourceTypeGmail || value == domain.ResourceTypeICloud
 }
 
 func adminMessageSummaryDTO(item mailmatchapp.AdminMessageSummary) adminMessageSummaryResponse {

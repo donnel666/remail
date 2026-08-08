@@ -87,6 +87,25 @@ type localResourceModel struct {
 
 func (localResourceModel) TableName() string { return "gmail_resources" }
 
+type gmailMaintenanceRunModel struct {
+	ID                   uint64     `gorm:"column:id;primaryKey;autoIncrement"`
+	ResourceID           uint       `gorm:"column:resource_id;not null"`
+	ValidationGeneration uint64     `gorm:"column:validation_generation;not null"`
+	Kind                 string     `gorm:"column:kind;type:varchar(24);not null"`
+	Status               string     `gorm:"column:status;type:varchar(24);not null"`
+	Attempts             int        `gorm:"column:attempts;not null"`
+	MaxAttempts          int        `gorm:"column:max_attempts;not null"`
+	CredentialRevision   uint64     `gorm:"column:credential_revision;not null"`
+	QueuedAt             time.Time  `gorm:"column:queued_at;not null"`
+	StartedAt            *time.Time `gorm:"column:started_at"`
+	FinishedAt           *time.Time `gorm:"column:finished_at"`
+	LastSafeError        string     `gorm:"column:last_safe_error;type:varchar(500);not null"`
+	CreatedAt            time.Time  `gorm:"column:created_at;not null"`
+	UpdatedAt            time.Time  `gorm:"column:updated_at;not null"`
+}
+
+func (gmailMaintenanceRunModel) TableName() string { return "gmail_maintenance_runs" }
+
 type resourceRootModel struct {
 	ID          uint      `gorm:"column:id;primaryKey;autoIncrement"`
 	Type        string    `gorm:"column:type"`
@@ -122,33 +141,52 @@ type allocationModel struct {
 func (allocationModel) TableName() string { return "gmail_allocations" }
 
 type LocalResourceItem struct {
-	ID                    uint       `json:"id"`
-	Version               uint64     `json:"version"`
-	OwnerUserID           uint       `json:"ownerUserId"`
-	Email                 string     `json:"email"`
-	BindingEmail          string     `json:"bindingEmail,omitempty"`
-	Status                string     `json:"status"`
-	ForSale               bool       `json:"forSale"`
-	PasswordConfigured    bool       `json:"passwordConfigured"`
-	TwoFactorConfigured   bool       `json:"twoFactorConfigured"`
-	AppPasswordConfigured bool       `json:"appPasswordConfigured"`
-	CredentialRevision    uint64     `json:"credentialRevision"`
-	ValidationFailures    int        `json:"validationFailures"`
-	LastAllocatedAt       *time.Time `json:"lastAllocatedAt,omitempty"`
-	LastSafeError         string     `json:"lastSafeError,omitempty"`
-	LastCheckedAt         *time.Time `json:"lastCheckedAt,omitempty"`
-	CreatedAt             time.Time  `json:"createdAt"`
-	UpdatedAt             time.Time  `json:"updatedAt"`
+	ID                    uint               `json:"id"`
+	Version               uint64             `json:"version"`
+	OwnerUserID           uint               `json:"ownerUserId"`
+	Owner                 LocalResourceOwner `json:"owner"`
+	Email                 string             `json:"email"`
+	BindingEmail          string             `json:"bindingEmail,omitempty"`
+	Status                string             `json:"status"`
+	ForSale               bool               `json:"forSale"`
+	PasswordConfigured    bool               `json:"passwordConfigured"`
+	TwoFactorConfigured   bool               `json:"twoFactorConfigured"`
+	AppPasswordConfigured bool               `json:"appPasswordConfigured"`
+	CredentialRevision    uint64             `json:"credentialRevision"`
+	CredentialUpdatedAt   time.Time          `json:"credentialUpdatedAt"`
+	ValidationFailures    int                `json:"validationFailures"`
+	LastAllocatedAt       *time.Time         `json:"lastAllocatedAt,omitempty"`
+	LastSafeError         string             `json:"lastSafeError,omitempty"`
+	LastCheckedAt         *time.Time         `json:"lastCheckedAt,omitempty"`
+	CreatedAt             time.Time          `json:"createdAt"`
+	UpdatedAt             time.Time          `json:"updatedAt"`
+}
+
+type LocalResourceOwner struct {
+	ID        uint   `json:"id"`
+	Email     string `json:"email"`
+	Nickname  string `json:"nickname"`
+	GroupName string `json:"groupName"`
+	Role      string `json:"role"`
+	Enabled   bool   `json:"enabled"`
+}
+
+type LocalResourceBooleanFacets struct {
+	All int64 `json:"all"`
+	Yes int64 `json:"yes"`
+	No  int64 `json:"no"`
 }
 
 type LocalResourceFacets struct {
-	All         int64 `json:"all"`
-	Pending     int64 `json:"pending"`
-	Validating  int64 `json:"validating"`
-	Identifying int64 `json:"identifying"`
-	Normal      int64 `json:"normal"`
-	Abnormal    int64 `json:"abnormal"`
-	Disabled    int64 `json:"disabled"`
+	All         int64                      `json:"all"`
+	Pending     int64                      `json:"pending"`
+	Validating  int64                      `json:"validating"`
+	Identifying int64                      `json:"identifying"`
+	Normal      int64                      `json:"normal"`
+	Abnormal    int64                      `json:"abnormal"`
+	Disabled    int64                      `json:"disabled"`
+	Deleted     int64                      `json:"deleted"`
+	ForSale     LocalResourceBooleanFacets `json:"forSale"`
 }
 
 type LocalResourceList struct {

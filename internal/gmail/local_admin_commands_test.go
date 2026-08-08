@@ -18,7 +18,9 @@ func TestLocalGmailAdminCommandsAreIdempotentAndGuardPublicOwner(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, redisClient.Close()) })
 	db, err := gorm.Open(sqlite.Open("file:gmail-admin-command-idempotency?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&resourceRootModel{}, &localResourceModel{}, &governanceinfra.OperationLogModel{}))
+	require.NoError(t, db.AutoMigrate(
+		&resourceRootModel{}, &localResourceModel{}, &gmailMaintenanceRunModel{}, &governanceinfra.OperationLogModel{},
+	))
 	require.NoError(t, db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, status TEXT NOT NULL, role TEXT NOT NULL)").Error)
 	require.NoError(t, db.Exec("INSERT INTO users(id, status, role) VALUES (7, 'active', 'user')").Error)
 	root := resourceRootModel{Type: "gmail", OwnerUserID: 7, Version: 5}

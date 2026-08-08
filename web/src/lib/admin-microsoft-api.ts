@@ -129,7 +129,7 @@ export async function listAdminMicrosoftAllocations(
   offset = 0,
   limit = 20,
   signal?: AbortSignal,
-  resourceType: "microsoft" | "icloud" = "microsoft"
+  resourceType: "microsoft" | "gmail" | "icloud" = "microsoft"
 ): Promise<AdminMicrosoftAllocationListResponse> {
   return unwrap(
     await client.GET("/v1/admin/allocations", {
@@ -517,7 +517,7 @@ export async function listAdminMicrosoftMessages(
   limit = 100,
   cursor?: AdminMicrosoftMessageCursor,
   signal?: AbortSignal,
-  resourceType: "microsoft" | "icloud" = "microsoft"
+  resourceType: "microsoft" | "gmail" | "icloud" = "microsoft"
 ): Promise<AdminMicrosoftMessageListResponse> {
   return unwrap(
     await client.GET("/v1/admin/messages", {
@@ -542,7 +542,7 @@ export async function getAdminMicrosoftMessage(
   resourceId: number,
   messageId: number,
   signal?: AbortSignal,
-  resourceType: "microsoft" | "icloud" = "microsoft"
+  resourceType: "microsoft" | "gmail" | "icloud" = "microsoft"
 ): Promise<AdminMicrosoftMessageDetail> {
   return unwrap(
     await client.GET("/v1/admin/messages/{messageId}", {

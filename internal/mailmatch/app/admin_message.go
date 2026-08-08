@@ -87,7 +87,7 @@ func (uc *AdminMessageUseCase) List(ctx context.Context, query AdminMessageListQ
 	if query.ResourceType == "" {
 		query.ResourceType = domain.ResourceTypeMicrosoft
 	}
-	if query.ResourceType != domain.ResourceTypeMicrosoft && query.ResourceType != domain.ResourceTypeDomain && query.ResourceType != domain.ResourceTypeICloud {
+	if query.ResourceType != domain.ResourceTypeMicrosoft && query.ResourceType != domain.ResourceTypeDomain && query.ResourceType != domain.ResourceTypeGmail && query.ResourceType != domain.ResourceTypeICloud {
 		return nil, domain.ErrInvalidRequest
 	}
 	defaultLimit, maxLimit, maxSearch := AdminMessageLimits()
@@ -141,12 +141,14 @@ func (uc *AdminMessageUseCase) Get(
 	path string,
 ) (*AdminMessageDetail, error) {
 	if uc == nil || uc.repo == nil || operatorUserID == 0 || resourceID == 0 || messageID == 0 ||
-		(resourceType != domain.ResourceTypeMicrosoft && resourceType != domain.ResourceTypeDomain && resourceType != domain.ResourceTypeICloud) {
+		(resourceType != domain.ResourceTypeMicrosoft && resourceType != domain.ResourceTypeDomain && resourceType != domain.ResourceTypeGmail && resourceType != domain.ResourceTypeICloud) {
 		return nil, domain.ErrInvalidRequest
 	}
 	resourceName := "microsoft_message"
 	if resourceType == domain.ResourceTypeDomain {
 		resourceName = "domain_message"
+	} else if resourceType == domain.ResourceTypeGmail {
+		resourceName = "gmail_message"
 	} else if resourceType == domain.ResourceTypeICloud {
 		resourceName = "icloud_message"
 	}

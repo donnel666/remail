@@ -271,6 +271,56 @@ SELECT
 FROM mailmatch_resource_fetch_states AS state
 WHERE state.operation_kind IN ('resource_fetch', 'resource_history', 'icloud_resource_fetch')`
 
+const gmailValidationTaskSelect = `
+SELECT
+    'gmail_validation' AS source,
+    run.id AS source_id,
+    run.resource_id AS resource_scope_id,
+    'gmail_resource' AS biz_type,
+    run.resource_id AS biz_id,
+    'validation' AS kind,
+    run.status AS status,
+    run.attempts AS attempts,
+    run.max_attempts AS max_attempts,
+    run.credential_revision AS credential_revision,
+    run.queued_at AS queued_at,
+    run.started_at AS started_at,
+    run.finished_at AS finished_at,
+    run.updated_at AS updated_at,
+    NULL AS progress_total,
+    NULL AS progress_processed,
+    NULL AS progress_succeeded,
+    NULL AS progress_skipped,
+    NULL AS progress_failed,
+    NULL AS reason_buckets
+FROM gmail_maintenance_runs AS run
+WHERE run.kind = 'validation'`
+
+const gmailHistoryTaskSelect = `
+SELECT
+    'gmail_history' AS source,
+    run.id AS source_id,
+    run.resource_id AS resource_scope_id,
+    'gmail_resource' AS biz_type,
+    run.resource_id AS biz_id,
+    'history' AS kind,
+    run.status AS status,
+    run.attempts AS attempts,
+    run.max_attempts AS max_attempts,
+    run.credential_revision AS credential_revision,
+    run.queued_at AS queued_at,
+    run.started_at AS started_at,
+    run.finished_at AS finished_at,
+    run.updated_at AS updated_at,
+    NULL AS progress_total,
+    NULL AS progress_processed,
+    NULL AS progress_succeeded,
+    NULL AS progress_skipped,
+    NULL AS progress_failed,
+    NULL AS reason_buckets
+FROM gmail_maintenance_runs AS run
+WHERE run.kind = 'history'`
+
 const iCloudImportResourceTaskSelect = `
 SELECT
     'icloud_import' AS source,
@@ -347,6 +397,10 @@ UNION ALL
 ` + fetchTaskSelect
 
 const domainResourceTaskUnion = emptyTaskSelect
+
+const gmailResourceTaskUnion = gmailValidationTaskSelect + `
+UNION ALL
+` + gmailHistoryTaskSelect
 
 const iCloudResourceTaskUnion = iCloudImportResourceTaskSelect + `
 UNION ALL
@@ -450,6 +504,21 @@ func (r *AdminTaskViewRepo) DomainResourceExists(ctx context.Context, resourceID
 	return count > 0, nil
 }
 
+func (r *AdminTaskViewRepo) GmailResourceExists(ctx context.Context, resourceID uint) (bool, error) {
+	if r == nil || r.db == nil || resourceID == 0 {
+		return false, nil
+	}
+	var count int64
+	if err := r.db.WithContext(ctx).
+		Table("email_resources AS root").
+		Joins("JOIN gmail_resources AS gmail ON gmail.id = root.id").
+		Where("root.id = ? AND root.type = ?", resourceID, "gmail").
+		Count(&count).Error; err != nil {
+		return false, fmt.Errorf("check gmail task resource: %w", err)
+	}
+	return count > 0, nil
+}
+
 func (r *AdminTaskViewRepo) ICloudResourceExists(ctx context.Context, resourceID uint) (bool, error) {
 	if r == nil || r.db == nil || resourceID == 0 {
 		return false, nil
@@ -471,6 +540,10 @@ func (r *AdminTaskViewRepo) ListForMicrosoftResource(ctx context.Context, filter
 
 func (r *AdminTaskViewRepo) ListForDomainResource(ctx context.Context, filter governanceapp.AdminTaskListFilter) ([]governanceapp.AdminTaskView, int64, int64, error) {
 	return r.listForResource(ctx, filter, domainResourceTaskUnion)
+}
+
+func (r *AdminTaskViewRepo) ListForGmailResource(ctx context.Context, filter governanceapp.AdminTaskListFilter) ([]governanceapp.AdminTaskView, int64, int64, error) {
+	return r.listForResource(ctx, filter, gmailResourceTaskUnion)
 }
 
 func (r *AdminTaskViewRepo) ListForICloudResource(ctx context.Context, filter governanceapp.AdminTaskListFilter) ([]governanceapp.AdminTaskView, int64, int64, error) {
@@ -732,6 +805,10 @@ func singleTaskSelect(source string) (string, error) {
 		return tokenTaskSelect, nil
 	case governanceapp.AdminTaskSourceFetch:
 		return fetchTaskSelect, nil
+	case governanceapp.AdminTaskSourceGmailValidate:
+		return gmailValidationTaskSelect, nil
+	case governanceapp.AdminTaskSourceGmailHistory:
+		return gmailHistoryTaskSelect, nil
 	case governanceapp.AdminTaskSourceICloudImport:
 		return iCloudImportSingleTaskSelect, nil
 	case governanceapp.AdminTaskSourceICloudValidate:

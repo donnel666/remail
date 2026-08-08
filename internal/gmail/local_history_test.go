@@ -20,7 +20,7 @@ func TestValidatedLocalGmailHistoryIdentifiesMainDotAndPlusUsage(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:gmail-validated-history?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(
-		&resourceRootModel{}, &localResourceModel{}, &localAllocationGuardModel{}, &allocationModel{},
+		&resourceRootModel{}, &localResourceModel{}, &gmailMaintenanceRunModel{}, &localAllocationGuardModel{}, &allocationModel{},
 		&governanceinfra.SystemLogModel{},
 	))
 	prepareLocalGmailHistorySchema(t, db)
@@ -70,8 +70,17 @@ func TestValidatedLocalGmailHistoryIdentifiesMainDotAndPlusUsage(t *testing.T) {
 		ResourceID: root.ID, OwnerUserID: 7, ValidationGeneration: 4,
 		ExpectedCredentialRevision: 3, RequestID: "history-request",
 	}
+	historyRun, err := service.ensureGmailMaintenanceRun(
+		context.Background(), root.ID, 4, gmailMaintenanceHistory, 3, 0,
+	)
+	require.NoError(t, err)
+	task.MaintenanceRunID = historyRun.ID
 	require.NoError(t, service.ProcessValidatedLocalGmailHistory(context.Background(), task))
 	require.Equal(t, []localGmailFolderCursors{{}, {Inbox: 3}}, cursors)
+	require.NoError(t, db.First(historyRun, historyRun.ID).Error)
+	require.Equal(t, gmailMaintenanceSucceeded, historyRun.Status)
+	require.NotNil(t, historyRun.StartedAt)
+	require.NotNil(t, historyRun.FinishedAt)
 
 	var resource localResourceModel
 	require.NoError(t, db.First(&resource, root.ID).Error)
@@ -113,12 +122,16 @@ func TestValidatedLocalGmailHistoryIdentifiesMainDotAndPlusUsage(t *testing.T) {
 	require.NoError(t, service.ProcessValidatedLocalGmailHistory(context.Background(), task))
 	require.NoError(t, db.Model(&allocationModel{}).Count(&guardCount).Error)
 	require.EqualValues(t, 3, guardCount, "history task replay must be idempotent")
+	var historyRunCount int64
+	require.NoError(t, db.Model(&gmailMaintenanceRunModel{}).Where("resource_id = ? AND kind = ?", root.ID, gmailMaintenanceHistory).
+		Count(&historyRunCount).Error)
+	require.EqualValues(t, 1, historyRunCount, "history task replay must reuse its maintenance run")
 }
 
 func TestValidatedLocalGmailHistoryDefersBeforeValidationCommitAndIgnoresStaleFence(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:gmail-validated-history-fence?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&resourceRootModel{}, &localResourceModel{}))
+	require.NoError(t, db.AutoMigrate(&resourceRootModel{}, &localResourceModel{}, &gmailMaintenanceRunModel{}))
 	root := resourceRootModel{Type: "gmail", OwnerUserID: 7, Version: 1}
 	require.NoError(t, db.Create(&root).Error)
 	require.NoError(t, db.Create(&localResourceModel{

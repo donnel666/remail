@@ -704,6 +704,31 @@ describe("admin Microsoft API adapter", () => {
     }
   });
 
+  it("routes Gmail mailbox reads with the explicit Gmail resource type", async () => {
+    apiMocks.GET.mockResolvedValue({
+      data: { items: [], offset: 0, limit: 20, total: 0, hasMore: false },
+    });
+
+    await listAdminMicrosoftMessages(
+      55,
+      "code",
+      20,
+      undefined,
+      undefined,
+      "gmail",
+    );
+    await getAdminMicrosoftMessage(55, 9, undefined, "gmail");
+
+    expect(callOptions(apiMocks.GET, 0).params?.query).toMatchObject({
+      resourceId: 55,
+      type: "gmail",
+    });
+    expect(callOptions(apiMocks.GET, 1).params?.query).toEqual({
+      resourceId: 55,
+      type: "gmail",
+    });
+  });
+
   it("routes iCloud orders and mailbox reads with the explicit iCloud resource type", async () => {
     apiMocks.GET.mockResolvedValue({
       data: { items: [], offset: 0, limit: 20, total: 0, hasMore: false },

@@ -43,6 +43,7 @@ type localGmailHistoryTask struct {
 	OwnerUserID                uint   `json:"ownerUserId"`
 	ValidationGeneration       uint64 `json:"validationGeneration"`
 	ExpectedCredentialRevision uint64 `json:"expectedCredentialRevision"`
+	MaintenanceRunID           uint64 `json:"maintenanceRunId,omitempty"`
 	RequestID                  string `json:"requestId,omitempty"`
 }
 
@@ -136,16 +137,38 @@ func (s *Service) ProcessValidatedLocalGmailHistory(ctx context.Context, task lo
 		return ErrLocalValidationConflict
 	}
 	resource, err := s.loadLocalGmailHistoryResource(ctx, task)
-	if err != nil || resource == nil {
+	if err != nil {
 		return err
+	}
+	if resource == nil {
+		_ = s.finishGmailMaintenanceRunForTask(
+			context.WithoutCancel(ctx), task.MaintenanceRunID, task.ResourceID, task.ValidationGeneration,
+			gmailMaintenanceHistory, gmailMaintenanceCanceled, "Gmail resource changed before history scanning started.",
+		)
+		return nil
 	}
 	switch resource.Status {
 	case LocalResourcePending, LocalResourceValidating:
 		return platform.ErrBackgroundExecutionDeferred
 	case LocalResourceIdentifying, LocalResourceNormal, localResourceRollbackNormal:
 	default:
+		_ = s.finishGmailMaintenanceRunForTask(
+			context.WithoutCancel(ctx), task.MaintenanceRunID, task.ResourceID, task.ValidationGeneration,
+			gmailMaintenanceHistory, gmailMaintenanceCanceled, "Gmail history scanning was canceled before it started.",
+		)
 		return nil
 	}
+	runID, started, err := s.startGmailMaintenanceRun(
+		ctx, task.MaintenanceRunID, task.ResourceID, task.ValidationGeneration,
+		gmailMaintenanceHistory, task.ExpectedCredentialRevision,
+	)
+	if err != nil {
+		return fmt.Errorf("start Gmail history maintenance run: %w", err)
+	}
+	if !started {
+		return nil
+	}
+	task.MaintenanceRunID = runID
 
 	scopes, err := s.listLocalGmailHistoryScopes(ctx)
 	if err != nil {
@@ -286,13 +309,40 @@ func (s *Service) commitLocalGmailHistory(
 			}
 			return fmt.Errorf("lock Gmail history resource: %w", err)
 		}
+		maintenanceRun, err := findGmailMaintenanceRunTx(
+			ctx, tx, task.MaintenanceRunID, task.ResourceID, task.ValidationGeneration, gmailMaintenanceHistory,
+		)
+		if err != nil {
+			return err
+		}
 		if resource.OwnerUserID != task.OwnerUserID || resource.ValidationGeneration != task.ValidationGeneration ||
 			resource.CredentialRevision != task.ExpectedCredentialRevision {
+			if maintenanceRun != nil {
+				return finishGmailMaintenanceRunTx(
+					ctx, tx, maintenanceRun.ID, gmailMaintenanceCanceled,
+					"Gmail resource changed before history scanning completed.", s.now().UTC(),
+				)
+			}
 			return nil
 		}
 		if resource.Status != LocalResourceIdentifying && resource.Status != LocalResourceNormal &&
 			resource.Status != localResourceRollbackNormal {
+			if maintenanceRun != nil {
+				return finishGmailMaintenanceRunTx(
+					ctx, tx, maintenanceRun.ID, gmailMaintenanceCanceled,
+					"Gmail history scanning was canceled before completion.", s.now().UTC(),
+				)
+			}
 			return nil
+		}
+		if maintenanceRun == nil {
+			maintenanceRun, err = ensureGmailMaintenanceRunTx(
+				ctx, tx, resource.ID, resource.ValidationGeneration, gmailMaintenanceHistory,
+				resource.CredentialRevision, 0, s.now().UTC(),
+			)
+			if err != nil {
+				return err
+			}
 		}
 		currentScopes, err := s.listLocalGmailHistoryScopes(platform.WithGormTx(ctx, tx))
 		if err != nil {
@@ -307,7 +357,9 @@ func (s *Service) commitLocalGmailHistory(
 			}
 		}
 		if resource.Status != LocalResourceIdentifying {
-			return nil
+			return finishGmailMaintenanceRunTx(
+				ctx, tx, maintenanceRun.ID, gmailMaintenanceSucceeded, "", s.now().UTC(),
+			)
 		}
 		now := s.now().UTC()
 		result := tx.Model(&localResourceModel{}).
@@ -322,6 +374,11 @@ func (s *Service) commitLocalGmailHistory(
 		}
 		if result.RowsAffected != 1 {
 			return nil
+		}
+		if err := finishGmailMaintenanceRunTx(
+			ctx, tx, maintenanceRun.ID, gmailMaintenanceSucceeded, "", now,
+		); err != nil {
+			return err
 		}
 		if err := tx.Model(&resourceRootModel{}).Where("id = ? AND version = ?", root.ID, root.Version).
 			Updates(map[string]any{"version": gorm.Expr("version + 1"), "updated_at": now}).Error; err != nil {

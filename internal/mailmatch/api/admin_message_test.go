@@ -109,6 +109,14 @@ func TestAdminMessageListAcceptsStableCursorAndSkipsRepeatedTotal(t *testing.T) 
 	require.Equal(t, float64(7), body["nextBeforeId"])
 }
 
+func TestAdminMessageListAcceptsGmailResourceType(t *testing.T) {
+	router, repo, _ := newAdminMessageTestRouter(true)
+
+	response := performAdminMessageGET(router, "/v1/admin/messages?resourceId=100&type=gmail")
+
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.Equal(t, mailmatchdomain.ResourceTypeGmail, repo.listQuery.ResourceType)
+}
 
 func TestAdminMessageListAcceptsICloudResourceType(t *testing.T) {
 	router, repo, _ := newAdminMessageTestRouter(true)

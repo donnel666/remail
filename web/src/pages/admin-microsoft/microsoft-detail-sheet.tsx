@@ -91,6 +91,14 @@ import { useAdminMicrosoftAllocationPage } from "./use-admin-microsoft-allocatio
 
 const { Text } = Typography;
 
+type AliasListResponse = {
+  items: AdminMicrosoftAliasSample[];
+  total: number;
+  offset: number;
+  limit: number;
+  schedule?: AdminMicrosoftAliasListResponse["schedule"];
+};
+
 function ResourceOverview({
   detail,
   t,
@@ -419,18 +427,30 @@ export function ServerPaginatedDrawerTable({
   );
 }
 
-function AliasPanel({
+type AliasListFetcher = (
+  resourceId: number,
+  kind: "explicit" | "other",
+  offset?: number,
+  limit?: number,
+  signal?: AbortSignal,
+) => Promise<AliasListResponse>;
+
+export function AliasPanel({
+  errorMessage = "Microsoft alias load failed.",
   kind,
+  listAliases = listAdminMicrosoftAliases,
   resourceId,
   t,
 }: {
+  errorMessage?: string;
   kind: "explicit" | "other";
+  listAliases?: AliasListFetcher;
   resourceId: number;
   t: TFunction;
 }) {
   const [pageSize, setPageSize] = useSharedPageSize();
   const [page, setPage] = useState(1);
-  const [response, setResponse] = useState<AdminMicrosoftAliasListResponse>({
+  const [response, setResponse] = useState<AliasListResponse>({
     items: [],
     limit: pageSize,
     offset: 0,
@@ -444,7 +464,7 @@ function AliasPanel({
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
-    void listAdminMicrosoftAliases(
+    void listAliases(
       resourceId,
       kind,
       (page - 1) * pageSize,
@@ -462,14 +482,14 @@ function AliasPanel({
       })
       .catch((error: unknown) => {
         if (!controller.signal.aborted) {
-          Toast.error(getIamErrorMessage(t, error, "Microsoft alias load failed."));
+          Toast.error(getIamErrorMessage(t, error, errorMessage));
         }
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [kind, page, pageSize, resourceId, t]);
+  }, [errorMessage, kind, listAliases, page, pageSize, resourceId, t]);
 
   const columns = useMemo(
     () =>
@@ -551,7 +571,7 @@ export function RelatedOrdersTable({
   t,
 }: {
   resourceId: number;
-  resourceType?: "microsoft" | "icloud";
+  resourceType?: "microsoft" | "gmail" | "icloud";
   t: TFunction;
 }) {
   const pageState = useAdminMicrosoftAllocationPage(resourceId, resourceType);
@@ -972,7 +992,7 @@ export function ResourceMailsPanel({
   hideMailboxMeta?: boolean;
   onRefresh?: () => void | Promise<void>;
   resourceId: number;
-  resourceType?: "microsoft" | "icloud";
+  resourceType?: "microsoft" | "gmail" | "icloud";
   t: TFunction;
 }) {
   const [search, setSearch] = useState("");
@@ -1069,7 +1089,9 @@ export function ResourceMailsPanel({
           const message = getIamErrorMessage(
             t,
             error,
-              resourceType === "icloud"
+            resourceType === "gmail"
+              ? "Gmail mail load failed."
+              : resourceType === "icloud"
                 ? "iCloud mail load failed."
               : "Microsoft mail load failed."
           );
@@ -1135,7 +1157,9 @@ export function ResourceMailsPanel({
             getIamErrorMessage(
               t,
               error,
-                resourceType === "icloud"
+              resourceType === "gmail"
+                ? "Gmail mail detail load failed."
+                : resourceType === "icloud"
                   ? "iCloud mail detail load failed."
                 : "Microsoft mail detail load failed."
             )
@@ -1158,6 +1182,7 @@ export function ResourceMailsPanel({
   );
 
   const fetchMail = async () => {
+    if (resourceType === "gmail") return;
     if (fetchInFlightRef.current) return;
     fetchInFlightRef.current = true;
     setFetchLoading(true);

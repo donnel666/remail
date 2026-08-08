@@ -131,6 +131,16 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, service *Service) func(context.Co
 					"error", err,
 				)
 			}
+			if !errors.Is(err, platform.ErrBackgroundExecutionDeferred) && !platform.BackgroundTaskHasRetryHeadroom(ctx) {
+				if finishErr := service.finishGmailMaintenanceRunForTask(
+					context.WithoutCancel(ctx), payload.MaintenanceRunID, payload.ResourceID,
+					payload.ValidationGeneration, gmailMaintenanceHistory, gmailMaintenanceFailed,
+					"Gmail history scanning failed after its retry budget was exhausted.",
+				); finishErr != nil {
+					return errors.Join(err, finishErr)
+				}
+				return nil
+			}
 			return err
 		}
 		return nil

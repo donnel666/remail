@@ -3,8 +3,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const apiMocks = vi.hoisted(() => ({
+  DELETE: vi.fn(),
   GET: vi.fn(),
+  PATCH: vi.fn(),
   POST: vi.fn(),
+  PUT: vi.fn(),
 }));
 const idempotencyMock = vi.hoisted(() => vi.fn());
 
@@ -19,8 +22,19 @@ vi.mock("./idempotency", () => ({
 }));
 
 import {
+  batchAllMatchingAdminGmailResources,
+  batchAdminGmailResourcesByFilter,
+  batchAdminGmailResourcesByIds,
+  deleteAdminGmailResource,
+  getAdminGmailResource,
   importAdminGmailResources,
+  listAdminGmailAliases,
   listAdminGmailOwners,
+  listAdminGmailTasks,
+  recoverAdminGmailResource,
+  replaceAdminGmailCredentials,
+  scanAdminGmailResourceHistory,
+  updateAdminGmailResource,
   waitForAdminGmailResourceImport,
   type AdminGmailImportResponse,
 } from "./admin-gmail-api";
@@ -62,7 +76,7 @@ function callOptions(mock: ReturnType<typeof vi.fn>, index = 0) {
     params?: {
       header?: Record<string, string>;
       path?: Record<string, string | number>;
-      query?: Record<string, string | number | undefined>;
+      query?: Record<string, string | number | boolean | undefined>;
     };
   };
 }
@@ -214,6 +228,260 @@ describe("admin Gmail API adapter", () => {
       search: "owner",
       offset: 0,
       limit: 100,
+    });
+  });
+
+  it("lists observed dot and plus aliases through the Gmail resource route", async () => {
+    const response = {
+      items: [
+        {
+          id: 12,
+          kind: "plus",
+          emailAddress: "mail+tag@gmail.com",
+          createdAt: "2026-08-08T08:00:00Z",
+        },
+      ],
+      total: 1,
+      offset: 20,
+      limit: 20,
+    } as const;
+    apiMocks.GET.mockResolvedValueOnce({ data: response });
+
+    await expect(listAdminGmailAliases(7, 20, 20)).resolves.toEqual(
+      response,
+    );
+    expect(apiMocks.GET).toHaveBeenCalledWith(
+      "/v1/admin/gmail/resources/{resourceId}/aliases",
+      expect.objectContaining({
+        params: {
+          path: { resourceId: 7 },
+          query: { kind: "other", offset: 20, limit: 20 },
+        },
+      }),
+    );
+  });
+
+  it("uses safe detail/edit and fenced row management routes", async () => {
+    const resource = {
+      id: 7,
+      version: 3,
+      ownerUserId: 9,
+      owner: {
+        id: 9,
+        email: "owner@example.com",
+        nickname: "Owner",
+        groupName: "Suppliers",
+        role: "supplier",
+        enabled: true,
+      },
+      email: "mail@gmail.com",
+      bindingEmail: "recovery@example.com",
+      status: "normal",
+      forSale: false,
+      passwordConfigured: true,
+      twoFactorConfigured: true,
+      appPasswordConfigured: true,
+      credentialRevision: 2,
+      credentialUpdatedAt: "2026-08-08T08:00:00Z",
+      validationFailures: 0,
+      createdAt: "2026-08-08T08:00:00Z",
+      updatedAt: "2026-08-08T08:00:00Z",
+    } as const;
+    const mutation = {
+      resourceId: 7,
+      version: 4,
+      status: "pending",
+      forSale: false,
+    } as const;
+    apiMocks.GET.mockResolvedValueOnce({ data: resource });
+    apiMocks.PATCH.mockResolvedValueOnce({ data: mutation });
+    apiMocks.PUT.mockResolvedValueOnce({ data: mutation });
+    apiMocks.POST.mockResolvedValueOnce({ data: mutation });
+    apiMocks.DELETE.mockResolvedValueOnce({ data: mutation });
+    apiMocks.POST.mockResolvedValueOnce({ data: mutation });
+
+    await expect(getAdminGmailResource(7)).resolves.toEqual(resource);
+    await expect(
+      updateAdminGmailResource(7, {
+        version: 3,
+        ownerId: 9,
+        email: "mail@gmail.com",
+        bindingEmail: "recovery@example.com",
+      }),
+    ).resolves.toEqual(mutation);
+    await expect(
+      replaceAdminGmailCredentials(7, {
+        version: 3,
+        password: "write-only-password",
+        twoFactorSecret: "JBSWY3DPEHPK3PXP",
+        appPassword: "abcdefghijklmnop",
+      }),
+    ).resolves.toEqual(mutation);
+    await expect(scanAdminGmailResourceHistory(7)).resolves.toEqual(mutation);
+    await expect(deleteAdminGmailResource(7, 4)).resolves.toEqual(mutation);
+    await expect(recoverAdminGmailResource(7, 4)).resolves.toEqual(mutation);
+
+    expect(apiMocks.PATCH).toHaveBeenCalledWith(
+      "/v1/admin/gmail/resources/{resourceId}",
+      expect.objectContaining({
+        params: expect.objectContaining({ path: { resourceId: 7 } }),
+      }),
+    );
+    expect(apiMocks.PUT).toHaveBeenCalledWith(
+      "/v1/admin/gmail/resources/{resourceId}/credentials",
+      expect.objectContaining({
+        body: {
+          version: 3,
+          password: "write-only-password",
+          twoFactorSecret: "JBSWY3DPEHPK3PXP",
+          appPassword: "abcdefghijklmnop",
+        },
+        params: expect.objectContaining({ path: { resourceId: 7 } }),
+      }),
+    );
+    expect(callOptions(apiMocks.DELETE).params?.query).toEqual({ version: 4 });
+  });
+
+  it("loads Gmail resource tasks through the governance owner", async () => {
+    apiMocks.GET.mockResolvedValueOnce({
+      data: { items: [], total: 0, succeeded: 0, offset: 20, limit: 20 },
+    });
+
+    await expect(listAdminGmailTasks(7, 20, 20)).resolves.toEqual({
+      items: [],
+      total: 0,
+      succeeded: 0,
+      offset: 20,
+      limit: 20,
+    });
+    expect(apiMocks.GET).toHaveBeenCalledWith("/v1/admin/tasks", {
+      params: {
+        query: {
+          bizType: "gmail_resource",
+          bizId: 7,
+          offset: 20,
+          limit: 20,
+        },
+      },
+      signal: undefined,
+    });
+  });
+
+  it("snapshots every matching ID and submits bounded command chunks", async () => {
+    const page = (start: number, end: number) => ({
+      data: {
+        items: Array.from({ length: end - start + 1 }, (_, index) => ({
+          id: start + index,
+        })),
+        total: 1001,
+      },
+    });
+    apiMocks.GET
+      .mockResolvedValueOnce(page(1, 200))
+      .mockResolvedValueOnce(page(200, 399))
+      .mockResolvedValueOnce(page(400, 599))
+      .mockResolvedValueOnce(page(600, 799))
+      .mockResolvedValueOnce(page(800, 999))
+      .mockResolvedValueOnce(page(1000, 1001));
+    apiMocks.POST
+      .mockResolvedValueOnce({
+        data: {
+          requested: 1000,
+          affected: 999,
+          skipped: 1,
+          affectedResourceIds: Array.from(
+            { length: 999 },
+            (_, index) => index + 1,
+          ),
+          skippedResourceIds: [1000],
+          reasonCounts: [{ reason: "invalid_state", count: 1 }],
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          requested: 1,
+          affected: 0,
+          skipped: 1,
+          affectedResourceIds: [],
+          skippedResourceIds: [1001],
+          reasonCounts: [{ reason: "invalid_state", count: 1 }],
+        },
+      });
+
+    await expect(
+      batchAllMatchingAdminGmailResources("disable", {
+        search: "owner",
+        status: "normal",
+      }),
+    ).resolves.toMatchObject({
+      requested: 1001,
+      affected: 999,
+      skipped: 2,
+      skippedResourceIds: [1000, 1001],
+      reasonCounts: [{ reason: "invalid_state", count: 2 }],
+    });
+
+    expect(
+      apiMocks.GET.mock.calls.map(
+        (call) => (call[1] as { params: { query: { offset: number } } }).params
+          .query.offset,
+      ),
+    ).toEqual([0, 200, 400, 600, 800, 1000]);
+    expect(callOptions(apiMocks.POST, 0).body).toEqual({
+      selection: {
+        mode: "ids",
+        resourceIds: Array.from({ length: 1000 }, (_, index) => index + 1),
+      },
+    });
+    expect(callOptions(apiMocks.POST, 1).body).toEqual({
+      selection: { mode: "ids", resourceIds: [1001] },
+    });
+  });
+
+  it("sends ids and current-filter selections to Gmail batch routes", async () => {
+    const result = {
+      requested: 2,
+      affected: 2,
+      skipped: 0,
+      affectedResourceIds: [3, 5],
+      skippedResourceIds: [],
+      reasonCounts: [],
+    };
+    apiMocks.POST.mockResolvedValue({ data: result });
+
+    await expect(
+      batchAdminGmailResourcesByIds("delete", [5, 3, 5, 0]),
+    ).resolves.toEqual(result);
+    await expect(
+      batchAdminGmailResourcesByFilter("history", {
+        search: " owner ",
+        status: "normal",
+        forSale: false,
+        createdFrom: "2026-08-01T00:00:00Z",
+        createdTo: "2026-08-08T23:59:59Z",
+      }),
+    ).resolves.toEqual(result);
+
+    expect(apiMocks.POST.mock.calls[0]?.[0]).toBe(
+      "/v1/admin/gmail/resources/batch/delete",
+    );
+    expect(callOptions(apiMocks.POST, 0).body).toEqual({
+      selection: { mode: "ids", resourceIds: [5, 3] },
+    });
+    expect(apiMocks.POST.mock.calls[1]?.[0]).toBe(
+      "/v1/admin/gmail/resources/batch/history",
+    );
+    expect(callOptions(apiMocks.POST, 1).body).toEqual({
+      selection: {
+        mode: "filter",
+        filter: {
+          search: "owner",
+          status: "normal",
+          forSale: false,
+          createdFrom: "2026-08-01T00:00:00Z",
+          createdTo: "2026-08-08T23:59:59Z",
+        },
+      },
     });
   });
 });

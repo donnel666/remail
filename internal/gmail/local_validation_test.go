@@ -18,7 +18,12 @@ import (
 func TestLocalGmailValidationTransitionsHealth(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:gmail-local-validation?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&resourceRootModel{}, &localResourceModel{}, &governanceinfra.SystemLogModel{}))
+	require.NoError(t, db.AutoMigrate(
+		&resourceRootModel{}, &localResourceModel{}, &gmailMaintenanceRunModel{},
+		&governanceinfra.SystemLogModel{}, &gmailAdminTestUser{}, &gmailAdminTestGroup{},
+	))
+	require.NoError(t, db.Create(&gmailAdminTestGroup{ID: 1, Name: "Admins"}).Error)
+	require.NoError(t, db.Create(&gmailAdminTestUser{ID: 1, Email: "owner@example.com", Nickname: "Owner", Role: "admin", Status: "active", UserGroupID: 1}).Error)
 	root := resourceRootModel{Type: "gmail", OwnerUserID: 1}
 	require.NoError(t, db.Create(&root).Error)
 	require.NoError(t, db.Create(&localResourceModel{
@@ -54,6 +59,16 @@ func TestLocalGmailValidationTransitionsHealth(t *testing.T) {
 	require.Empty(t, stored.LastSafeError)
 	require.NotNil(t, stored.LastCheckedAt)
 	require.Equal(t, checkedAt, stored.LastCheckedAt.UTC())
+	var validationRun, historyRun gmailMaintenanceRunModel
+	require.NoError(t, db.Where("resource_id = ? AND kind = ?", root.ID, gmailMaintenanceValidation).
+		Order("id DESC").Take(&validationRun).Error)
+	require.Equal(t, gmailMaintenanceSucceeded, validationRun.Status)
+	require.NotNil(t, validationRun.StartedAt)
+	require.NotNil(t, validationRun.FinishedAt)
+	require.NoError(t, db.Where("resource_id = ? AND kind = ?", root.ID, gmailMaintenanceHistory).
+		Order("id DESC").Take(&historyRun).Error)
+	require.Equal(t, gmailMaintenanceQueued, historyRun.Status)
+	require.EqualValues(t, stored.CredentialRevision, historyRun.CredentialRevision)
 	require.NoError(t, db.Model(&localResourceModel{}).Where("id = ?", root.ID).
 		Update("status", localResourceRollbackNormal).Error)
 	list, err := service.ListLocalResources(context.Background(), LocalResourceListFilter{Status: LocalResourceNormal})
@@ -107,7 +122,9 @@ func TestLocalGmailValidationTransitionsHealth(t *testing.T) {
 func TestLocalGmailValidationResultCannotOverwriteAdminDisable(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:gmail-local-validation-fence?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&resourceRootModel{}, &localResourceModel{}, &governanceinfra.SystemLogModel{}))
+	require.NoError(t, db.AutoMigrate(
+		&resourceRootModel{}, &localResourceModel{}, &gmailMaintenanceRunModel{}, &governanceinfra.SystemLogModel{},
+	))
 	root := resourceRootModel{Type: "gmail", OwnerUserID: 1}
 	require.NoError(t, db.Create(&root).Error)
 	require.NoError(t, db.Create(&localResourceModel{
@@ -138,10 +155,34 @@ func TestDefinitiveLocalGmailAuthenticationFailure(t *testing.T) {
 	require.False(t, isDefinitiveLocalGmailAuthFailure(errors.New("network timeout")))
 }
 
+func TestEnsureGmailMaintenanceRunRejectsStaleResourceFence(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:gmail-maintenance-fence?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&resourceRootModel{}, &localResourceModel{}, &gmailMaintenanceRunModel{}))
+	require.NoError(t, db.Create(&resourceRootModel{ID: 1, Type: "gmail", OwnerUserID: 7, Version: 1}).Error)
+	require.NoError(t, db.Create(&localResourceModel{
+		ID: 1, ResourceType: "gmail", OwnerUserID: 7, Email: "maintenance-fence@gmail.com",
+		Identity: "maintenancefence@gmail.com", Status: LocalResourcePending,
+		CredentialRevision: 3, ValidationGeneration: 2,
+	}).Error)
+
+	service := NewService(db, nil)
+	current, err := service.ensureGmailMaintenanceRun(context.Background(), 1, 2, gmailMaintenanceValidation, 3, 0)
+	require.NoError(t, err)
+	_, err = service.ensureGmailMaintenanceRun(context.Background(), 1, 1, gmailMaintenanceValidation, 3, 0)
+	require.ErrorIs(t, err, ErrLocalValidationConflict)
+	require.NoError(t, db.First(current, current.ID).Error)
+	require.Equal(t, gmailMaintenanceQueued, current.Status)
+	require.NoError(t, service.finishGmailMaintenanceRun(context.Background(), current.ID, gmailMaintenanceSucceeded, ""))
+	next, err := service.ensureGmailMaintenanceRun(context.Background(), 1, 2, gmailMaintenanceValidation, 3, 0)
+	require.NoError(t, err)
+	require.NotEqual(t, current.ID, next.ID)
+}
+
 func TestLocalGmailValidationTaskFencesGenerationRevisionAndOwner(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:gmail-local-validation-task-fences?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&resourceRootModel{}, &localResourceModel{}))
+	require.NoError(t, db.AutoMigrate(&resourceRootModel{}, &localResourceModel{}, &gmailMaintenanceRunModel{}))
 	root := resourceRootModel{Type: "gmail", OwnerUserID: 7, Version: 1}
 	require.NoError(t, db.Create(&root).Error)
 	require.NoError(t, db.Create(&localResourceModel{
@@ -176,7 +217,7 @@ func TestLocalGmailValidationTaskFencesGenerationRevisionAndOwner(t *testing.T) 
 func TestLocalGmailValidationPersistsRotatedCredentialsBeforeHistoryEnqueue(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:gmail-local-validation-history-dependency?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&resourceRootModel{}, &localResourceModel{}))
+	require.NoError(t, db.AutoMigrate(&resourceRootModel{}, &localResourceModel{}, &gmailMaintenanceRunModel{}))
 	root := resourceRootModel{Type: "gmail", OwnerUserID: 7, Version: 1}
 	require.NoError(t, db.Create(&root).Error)
 	require.NoError(t, db.Create(&localResourceModel{
@@ -205,7 +246,9 @@ func TestLocalGmailValidationPersistsRotatedCredentialsBeforeHistoryEnqueue(t *t
 func TestLocalGmailValidationPersistsAuthoritativePartialRotationForRetry(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:gmail-local-validation-partial?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&resourceRootModel{}, &localResourceModel{}, &governanceinfra.SystemLogModel{}))
+	require.NoError(t, db.AutoMigrate(
+		&resourceRootModel{}, &localResourceModel{}, &gmailMaintenanceRunModel{}, &governanceinfra.SystemLogModel{},
+	))
 	root := resourceRootModel{Type: "gmail", OwnerUserID: 7, Version: 1}
 	require.NoError(t, db.Create(&root).Error)
 	require.NoError(t, db.Create(&localResourceModel{

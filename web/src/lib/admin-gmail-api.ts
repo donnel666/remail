@@ -8,6 +8,21 @@ export type AdminGmailResourceItem =
   components["schemas"]["AdminGmailResourceItem"];
 export type AdminGmailResourceList =
   components["schemas"]["AdminGmailResourceList"];
+export type AdminGmailOwner =
+  components["schemas"]["AdminGmailOwnerSummary"];
+export type AdminGmailResourceUpdateRequest =
+  components["schemas"]["AdminGmailResourceUpdateRequest"];
+export type AdminGmailCredentialsReplaceRequest =
+  components["schemas"]["AdminGmailCredentialsReplaceRequest"];
+export type AdminGmailMutationResponse =
+  components["schemas"]["AdminGmailMutationResponse"];
+export type AdminGmailBulkResponse =
+  components["schemas"]["AdminGmailBulkResult"];
+export type AdminGmailTask = components["schemas"]["AdminTaskView"];
+export type AdminGmailTaskListResponse =
+  components["schemas"]["AdminTaskListResponse"];
+export type AdminGmailAliasListResponse =
+  components["schemas"]["AdminGmailAliasListResponse"];
 type AdminGmailImportMultipart =
   operations["postAdminGmailResourceImport"]["requestBody"]["content"]["multipart/form-data"];
 type AdminUserListDTO = components["schemas"]["AdminUserListResponse"];
@@ -20,16 +35,27 @@ export interface AdminGmailImportRequest {
   ownerId: AdminGmailImportMultipart["ownerId"];
   errorStrategy: AdminGmailImportErrorStrategy;
 }
-export interface AdminGmailOwner {
-  id: number;
-  email: string;
-  nickname: string;
-  groupName: string;
-  role: "user" | "supplier" | "admin" | "super_admin";
-  enabled: boolean;
+export type AdminGmailBatchAction =
+  | "validate"
+  | "history"
+  | "disable"
+  | "publish"
+  | "unpublish"
+  | "delete";
+
+export interface AdminGmailResourceListFilter {
+  search?: string;
+  status?: AdminGmailResourceStatus;
+  forSale?: boolean;
+  createdFrom?: string;
+  createdTo?: string;
 }
 
+type AdminGmailSelection = components["schemas"]["AdminGmailBulkSelection"];
+
 const OWNER_PAGE_SIZE = 100;
+const ALL_MATCHING_PAGE_SIZE = 200;
+const COMMAND_CHUNK_SIZE = 1000;
 
 function commandHeaders() {
   return {
@@ -44,11 +70,102 @@ export async function listAdminGmailResources(options: {
   search?: string;
   signal?: AbortSignal;
   status?: AdminGmailResourceStatus;
+  forSale?: boolean;
+  createdFrom?: string;
+  createdTo?: string;
 }) {
   const { signal, ...query } = options;
   return unwrap<AdminGmailResourceList>(
     await client.GET("/v1/admin/gmail/resources", {
       params: { query },
+      signal,
+    }),
+  );
+}
+
+export async function getAdminGmailResource(
+  resourceId: number,
+  signal?: AbortSignal,
+): Promise<AdminGmailResourceItem> {
+  return unwrap(
+    await client.GET("/v1/admin/gmail/resources/{resourceId}", {
+      params: { path: { resourceId } },
+      signal,
+    }),
+  );
+}
+
+export async function listAdminGmailAliases(
+  resourceId: number,
+  offset = 0,
+  limit = 20,
+  signal?: AbortSignal,
+): Promise<AdminGmailAliasListResponse> {
+  return unwrap(
+    await client.GET("/v1/admin/gmail/resources/{resourceId}/aliases", {
+      params: {
+        path: { resourceId },
+        query: {
+          kind: "other",
+          offset: Math.max(0, Math.trunc(offset)),
+          limit: Math.max(1, Math.min(100, Math.trunc(limit))),
+        },
+      },
+      signal,
+    }),
+  );
+}
+
+export async function updateAdminGmailResource(
+  resourceId: number,
+  request: AdminGmailResourceUpdateRequest,
+  signal?: AbortSignal,
+): Promise<AdminGmailMutationResponse> {
+  return unwrap(
+    await client.PATCH("/v1/admin/gmail/resources/{resourceId}", {
+      body: request,
+      params: {
+        header: commandHeaders(),
+        path: { resourceId },
+      },
+      signal,
+    }),
+  );
+}
+
+export async function replaceAdminGmailCredentials(
+  resourceId: number,
+  request: AdminGmailCredentialsReplaceRequest,
+  signal?: AbortSignal,
+): Promise<AdminGmailMutationResponse> {
+  return unwrap(
+    await client.PUT("/v1/admin/gmail/resources/{resourceId}/credentials", {
+      body: request,
+      params: {
+        header: commandHeaders(),
+        path: { resourceId },
+      },
+      signal,
+    }),
+  );
+}
+
+export async function listAdminGmailTasks(
+  resourceId: number,
+  offset = 0,
+  limit = 20,
+  signal?: AbortSignal,
+): Promise<AdminGmailTaskListResponse> {
+  return unwrap(
+    await client.GET("/v1/admin/tasks", {
+      params: {
+        query: {
+          bizType: "gmail_resource",
+          bizId: resourceId,
+          offset,
+          limit,
+        },
+      },
       signal,
     }),
   );
@@ -182,6 +299,21 @@ export async function validateAdminGmailResource(resourceId: number) {
   );
 }
 
+export async function scanAdminGmailResourceHistory(
+  resourceId: number,
+  signal?: AbortSignal,
+): Promise<AdminGmailMutationResponse> {
+  return unwrap(
+    await client.POST("/v1/admin/gmail/resources/{resourceId}/history", {
+      params: {
+        header: commandHeaders(),
+        path: { resourceId },
+      },
+      signal,
+    }),
+  );
+}
+
 export async function setAdminGmailResourceForSale(
   resourceId: number,
   version: number,
@@ -205,6 +337,169 @@ export async function setAdminGmailResourceForSale(
       params,
     }),
   );
+}
+
+export async function deleteAdminGmailResource(
+  resourceId: number,
+  version: number,
+  signal?: AbortSignal,
+): Promise<AdminGmailMutationResponse> {
+  return unwrap(
+    await client.DELETE("/v1/admin/gmail/resources/{resourceId}", {
+      params: {
+        header: commandHeaders(),
+        path: { resourceId },
+        query: { version },
+      },
+      signal,
+    }),
+  );
+}
+
+export async function recoverAdminGmailResource(
+  resourceId: number,
+  version: number,
+  signal?: AbortSignal,
+): Promise<AdminGmailMutationResponse> {
+  return unwrap(
+    await client.POST("/v1/admin/gmail/resources/{resourceId}/recover", {
+      params: {
+        header: commandHeaders(),
+        path: { resourceId },
+        query: { version },
+      },
+      signal,
+    }),
+  );
+}
+
+export function batchAdminGmailResourcesByIds(
+  action: AdminGmailBatchAction,
+  resourceIds: number[],
+  signal?: AbortSignal,
+) {
+  return batchAdminGmailResources(action, idsSelection(resourceIds), signal);
+}
+
+export function batchAdminGmailResourcesByFilter(
+  action: AdminGmailBatchAction,
+  filter: AdminGmailResourceListFilter,
+  signal?: AbortSignal,
+) {
+  return batchAdminGmailResources(action, filterSelection(filter), signal);
+}
+
+export async function batchAllMatchingAdminGmailResources(
+  action: AdminGmailBatchAction,
+  filter: AdminGmailResourceListFilter,
+  signal?: AbortSignal,
+): Promise<AdminGmailBulkResponse> {
+  const resourceIds: number[] = [];
+  for (let offset = 0; ; offset += ALL_MATCHING_PAGE_SIZE) {
+    throwIfAborted(signal);
+    const page = await listAdminGmailResources({
+      ...filter,
+      limit: ALL_MATCHING_PAGE_SIZE,
+      offset,
+      signal,
+    });
+    resourceIds.push(...page.items.map((item) => item.id));
+    if (page.items.length < ALL_MATCHING_PAGE_SIZE) break;
+  }
+  const snapshotIds = Array.from(new Set(resourceIds));
+
+  const result: AdminGmailBulkResponse & {
+    affectedResourceIds: number[];
+    skippedResourceIds: number[];
+  } = {
+    requested: 0,
+    affected: 0,
+    skipped: 0,
+    affectedResourceIds: [],
+    skippedResourceIds: [],
+    reasonCounts: [],
+  };
+  const reasons = new Map<string, number>();
+  for (let index = 0; index < snapshotIds.length; index += COMMAND_CHUNK_SIZE) {
+    throwIfAborted(signal);
+    const chunk = await batchAdminGmailResourcesByIds(
+      action,
+      snapshotIds.slice(index, index + COMMAND_CHUNK_SIZE),
+      signal,
+    );
+    result.requested += chunk.requested;
+    result.affected += chunk.affected;
+    result.skipped += chunk.skipped;
+    result.affectedResourceIds.push(...(chunk.affectedResourceIds ?? []));
+    result.skippedResourceIds.push(...(chunk.skippedResourceIds ?? []));
+    for (const item of chunk.reasonCounts) {
+      reasons.set(item.reason, (reasons.get(item.reason) ?? 0) + item.count);
+    }
+  }
+  result.reasonCounts = Array.from(reasons, ([reason, count]) => ({
+    reason,
+    count,
+  })).sort((left, right) => left.reason.localeCompare(right.reason));
+  return result;
+}
+
+async function batchAdminGmailResources(
+  action: AdminGmailBatchAction,
+  selection: AdminGmailSelection,
+  signal?: AbortSignal,
+): Promise<AdminGmailBulkResponse> {
+  const options = {
+    body: { selection },
+    params: { header: commandHeaders() },
+    signal,
+  };
+  switch (action) {
+    case "validate":
+      return unwrap(
+        await client.POST("/v1/admin/gmail/resources/batch/validation", options),
+      );
+    case "history":
+      return unwrap(
+        await client.POST("/v1/admin/gmail/resources/batch/history", options),
+      );
+    case "disable":
+      return unwrap(
+        await client.POST("/v1/admin/gmail/resources/batch/disable", options),
+      );
+    case "publish":
+      return unwrap(
+        await client.POST("/v1/admin/gmail/resources/batch/publish", options),
+      );
+    case "unpublish":
+      return unwrap(
+        await client.POST("/v1/admin/gmail/resources/batch/unpublish", options),
+      );
+    case "delete":
+      return unwrap(
+        await client.POST("/v1/admin/gmail/resources/batch/delete", options),
+      );
+  }
+}
+
+function idsSelection(resourceIds: number[]): AdminGmailSelection {
+  return {
+    mode: "ids",
+    resourceIds: Array.from(new Set(resourceIds)).filter(
+      (id) => Number.isInteger(id) && id > 0,
+    ),
+  };
+}
+
+function filterSelection(
+  filter: AdminGmailResourceListFilter,
+): AdminGmailSelection {
+  return {
+    mode: "filter",
+    filter: {
+      ...filter,
+      search: filter.search?.trim() || undefined,
+    },
+  };
 }
 
 function throwIfAborted(signal?: AbortSignal) {

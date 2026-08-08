@@ -89,7 +89,12 @@ func newGmailImportHarness(t *testing.T) *gmailImportHarness {
 	databaseName := strings.NewReplacer("/", "-", " ", "-").Replace(t.Name())
 	db, err := gorm.Open(sqlite.Open("file:"+databaseName+"?mode=memory&cache=shared"), &gorm.Config{TranslateError: true})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&resourceRootModel{}, &localResourceModel{}, &governanceinfra.OperationLogModel{}))
+	require.NoError(t, db.AutoMigrate(
+		&resourceRootModel{}, &localResourceModel{}, &gmailMaintenanceRunModel{},
+		&governanceinfra.OperationLogModel{}, &gmailAdminTestUser{}, &gmailAdminTestGroup{},
+	))
+	require.NoError(t, db.Create(&gmailAdminTestGroup{ID: 1, Name: "Suppliers"}).Error)
+	require.NoError(t, db.Create(&gmailAdminTestUser{ID: 7, Email: "supplier@example.com", Nickname: "Supplier", Role: "supplier", Status: "active", UserGroupID: 1}).Error)
 	files := &gmailImportFileStore{files: make(map[string]governancedomain.PrivateFile)}
 	service := NewService(db, queue)
 	service.SetResourceImportDependencies(redisClient, files)

@@ -30,7 +30,9 @@ func TestLocalGmailValidationBatchUsesRedisCursorAndBumpsRootVersions(t *testing
 
 	db, err := gorm.Open(sqlite.Open("file:gmail-validation-batch?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&resourceRootModel{}, &localResourceModel{}, &governanceinfra.OperationLogModel{}))
+	require.NoError(t, db.AutoMigrate(
+		&resourceRootModel{}, &localResourceModel{}, &gmailMaintenanceRunModel{}, &governanceinfra.OperationLogModel{},
+	))
 	resourceIDs := make([]uint, localGmailValidationBatchPage+1)
 	for i := range resourceIDs {
 		root := resourceRootModel{Type: "gmail", OwnerUserID: 7, Version: 1}

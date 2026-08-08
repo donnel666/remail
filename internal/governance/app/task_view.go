@@ -17,6 +17,7 @@ const (
 
 	AdminTaskBizMicrosoftResource       = "microsoft_resource"
 	AdminTaskBizDomainResource          = "domain_resource"
+	AdminTaskBizGmailResource           = "gmail_resource"
 	AdminTaskBizICloudResource          = "icloud_resource"
 	AdminTaskBizMicrosoftResourceImport = "microsoft_resource_import"
 	AdminTaskBizICloudResourceImport    = "icloud_resource_import"
@@ -49,6 +50,8 @@ const (
 	AdminTaskSourceToken          = "token"
 	AdminTaskSourceFetch          = "fetch"
 	AdminTaskSourceBulk           = "bulk"
+	AdminTaskSourceGmailValidate  = "gmail_validation"
+	AdminTaskSourceGmailHistory   = "gmail_history"
 	AdminTaskSourceICloudImport   = "icloud_import"
 	AdminTaskSourceICloudValidate = "icloud_validation"
 )
@@ -104,6 +107,8 @@ func isAdminTaskSource(value string) bool {
 		AdminTaskSourceToken,
 		AdminTaskSourceFetch,
 		AdminTaskSourceBulk,
+		AdminTaskSourceGmailValidate,
+		AdminTaskSourceGmailHistory,
 		AdminTaskSourceICloudImport,
 		AdminTaskSourceICloudValidate:
 		return true
@@ -169,9 +174,11 @@ type AdminTaskListResult struct {
 type AdminTaskViewRepository interface {
 	MicrosoftResourceExists(ctx context.Context, resourceID uint) (bool, error)
 	DomainResourceExists(ctx context.Context, resourceID uint) (bool, error)
+	GmailResourceExists(ctx context.Context, resourceID uint) (bool, error)
 	ICloudResourceExists(ctx context.Context, resourceID uint) (bool, error)
 	ListForMicrosoftResource(ctx context.Context, filter AdminTaskListFilter) ([]AdminTaskView, int64, int64, error)
 	ListForDomainResource(ctx context.Context, filter AdminTaskListFilter) ([]AdminTaskView, int64, int64, error)
+	ListForGmailResource(ctx context.Context, filter AdminTaskListFilter) ([]AdminTaskView, int64, int64, error)
 	ListForICloudResource(ctx context.Context, filter AdminTaskListFilter) ([]AdminTaskView, int64, int64, error)
 	FindByRef(ctx context.Context, ref AdminTaskRef) (*AdminTaskView, error)
 }
@@ -200,6 +207,8 @@ func (s *AdminTaskQueryService) List(ctx context.Context, filter AdminTaskListFi
 		exists, err = s.repo.MicrosoftResourceExists(ctx, normalized.BizID)
 	case AdminTaskBizDomainResource:
 		exists, err = s.repo.DomainResourceExists(ctx, normalized.BizID)
+	case AdminTaskBizGmailResource:
+		exists, err = s.repo.GmailResourceExists(ctx, normalized.BizID)
 	case AdminTaskBizICloudResource:
 		exists, err = s.repo.ICloudResourceExists(ctx, normalized.BizID)
 	}
@@ -214,6 +223,8 @@ func (s *AdminTaskQueryService) List(ctx context.Context, filter AdminTaskListFi
 		items, total, succeeded, err = s.repo.ListForMicrosoftResource(ctx, normalized)
 	case AdminTaskBizDomainResource:
 		items, total, succeeded, err = s.repo.ListForDomainResource(ctx, normalized)
+	case AdminTaskBizGmailResource:
+		items, total, succeeded, err = s.repo.ListForGmailResource(ctx, normalized)
 	case AdminTaskBizICloudResource:
 		items, total, succeeded, err = s.repo.ListForICloudResource(ctx, normalized)
 	}
@@ -257,7 +268,7 @@ func normalizeAdminTaskListFilter(filter AdminTaskListFilter) (AdminTaskListFilt
 	filter.BizType = strings.TrimSpace(filter.BizType)
 	filter.Kind = strings.TrimSpace(filter.Kind)
 	filter.Status = strings.TrimSpace(filter.Status)
-	if (filter.BizType != AdminTaskBizMicrosoftResource && filter.BizType != AdminTaskBizDomainResource && filter.BizType != AdminTaskBizICloudResource) || filter.BizID == 0 || filter.Offset < 0 {
+	if (filter.BizType != AdminTaskBizMicrosoftResource && filter.BizType != AdminTaskBizDomainResource && filter.BizType != AdminTaskBizGmailResource && filter.BizType != AdminTaskBizICloudResource) || filter.BizID == 0 || filter.Offset < 0 {
 		return AdminTaskListFilter{}, ErrInvalidAdminTaskQuery
 	}
 	defaultLimit, maxLimit := AdminTaskLimits()

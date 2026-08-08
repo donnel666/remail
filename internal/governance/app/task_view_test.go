@@ -26,11 +26,27 @@ func (s *taskViewRepoStub) DomainResourceExists(context.Context, uint) (bool, er
 	return s.exists, s.err
 }
 
+func (s *taskViewRepoStub) GmailResourceExists(context.Context, uint) (bool, error) {
+	return s.exists, s.err
+}
+
+func (s *taskViewRepoStub) ICloudResourceExists(context.Context, uint) (bool, error) {
+	return s.exists, s.err
+}
+
 func (s *taskViewRepoStub) ListForMicrosoftResource(context.Context, AdminTaskListFilter) ([]AdminTaskView, int64, int64, error) {
 	return s.items, s.total, s.success, s.err
 }
 
 func (s *taskViewRepoStub) ListForDomainResource(context.Context, AdminTaskListFilter) ([]AdminTaskView, int64, int64, error) {
+	return s.items, s.total, s.success, s.err
+}
+
+func (s *taskViewRepoStub) ListForGmailResource(context.Context, AdminTaskListFilter) ([]AdminTaskView, int64, int64, error) {
+	return s.items, s.total, s.success, s.err
+}
+
+func (s *taskViewRepoStub) ListForICloudResource(context.Context, AdminTaskListFilter) ([]AdminTaskView, int64, int64, error) {
 	return s.items, s.total, s.success, s.err
 }
 
@@ -55,6 +71,34 @@ func TestParseAdminTaskRefRequiresQualifiedNumericSource(t *testing.T) {
 		_, err := ParseAdminTaskRef(value)
 		require.ErrorIs(t, err, ErrInvalidAdminTaskQuery, value)
 	}
+}
+
+func TestAdminTaskQueryServiceListsGmailResourceTasks(t *testing.T) {
+	repo := &taskViewRepoStub{exists: true, total: 1, items: []AdminTaskView{{
+		Ref: AdminTaskRef{Source: AdminTaskSourceGmailValidate, ID: 12}, BizType: AdminTaskBizGmailResource,
+		BizID: 12, Kind: AdminTaskKindValidation, Status: AdminTaskStatusRunning,
+	}}}
+
+	result, err := NewAdminTaskQueryService(repo).List(context.Background(), AdminTaskListFilter{
+		BizType: AdminTaskBizGmailResource, BizID: 12,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "gmail_validation:12", result.Items[0].TaskID())
+}
+
+func TestAdminTaskQueryServiceListsICloudResourceTasks(t *testing.T) {
+	repo := &taskViewRepoStub{exists: true, total: 1, items: []AdminTaskView{{
+		Ref: AdminTaskRef{Source: AdminTaskSourceICloudValidate, ID: 12}, BizType: AdminTaskBizICloudResource,
+		BizID: 12, Kind: AdminTaskKindValidation, Status: AdminTaskStatusRunning,
+	}}}
+
+	result, err := NewAdminTaskQueryService(repo).List(context.Background(), AdminTaskListFilter{
+		BizType: AdminTaskBizICloudResource, BizID: 12,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "icloud_validation:12", result.Items[0].TaskID())
 }
 
 func TestAdminTaskQueryServiceListUsesStableDefaults(t *testing.T) {
