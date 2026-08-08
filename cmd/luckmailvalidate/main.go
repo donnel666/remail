@@ -73,6 +73,7 @@ type config struct {
 	stage2Retries           int
 	stage1Timeout           time.Duration
 	stage2Timeout           time.Duration
+	retryAllErrors          bool
 }
 
 type checkpoint struct {
@@ -427,6 +428,7 @@ func parseFlags() config {
 	flag.IntVar(&cfg.stage2Retries, "stage2-retries", 3, "history-identification attempts per resource")
 	flag.DurationVar(&cfg.stage1Timeout, "stage1-timeout", 15*time.Minute, "timeout for one hard reauthorization attempt")
 	flag.DurationVar(&cfg.stage2Timeout, "stage2-timeout", 30*time.Minute, "timeout for one history-identification attempt")
+	flag.BoolVar(&cfg.retryAllErrors, "retry-all-errors", false, "on checkpoint resume, retry all error.txt entries instead of only 429.txt")
 	flag.Parse()
 	return cfg
 }
@@ -463,6 +465,7 @@ func run(ctx context.Context, cfg config) error {
 	}
 	var manifest []manifestRecord
 	var previousSuccess map[string]struct{}
+	var resumeSkippedErrors map[string]struct{}
 	if !found {
 		previousSuccess, err = loadEmailSet(filepath.Join(filepath.Dir(cfg.errorPath), "success.txt"))
 		if err != nil {
@@ -535,6 +538,21 @@ func run(ctx context.Context, cfg config) error {
 		if err != nil {
 			return err
 		}
+		previousErrors, err := loadEmailSet(cfg.errorPath)
+		if err != nil {
+			return err
+		}
+		previousRateLimited, err := loadEmailSet(filepath.Join(filepath.Dir(cfg.errorPath), "429.txt"))
+		if err != nil {
+			return err
+		}
+		resumeSkippedErrors = resumeErrorSkipSet(previousErrors, previousRateLimited, cfg.retryAllErrors)
+		retryableErrors := len(previousErrors) - len(resumeSkippedErrors)
+		mode := "429-only"
+		if cfg.retryAllErrors {
+			mode = "all-errors"
+		}
+		log.Printf("resume_failure_policy mode=%s skipped_error=%d retry_error=%d", mode, len(resumeSkippedErrors), retryableErrors)
 		if cfg.pendingCap < cfg.concurrency || cfg.pendingCap > 10000 {
 			return errors.New("checkpoint contains an invalid pending capacity")
 		}
@@ -573,12 +591,12 @@ func run(ctx context.Context, cfg config) error {
 		if err := writeAudit(ctx, conn, state, "started", state.Eligible); err != nil {
 			return err
 		}
-	} else if err := recoverAbandonedValidations(ctx, conn, manifest[:state.FreezeOffset], cfg.chunkSize); err != nil {
+	} else if err := recoverAbandonedValidations(ctx, conn, manifest[:state.FreezeOffset], cfg.chunkSize, resumeSkippedErrors); err != nil {
 		return err
 	}
 
 	result := newTracker(cfg.errorPath, previousSuccess)
-	stage1Jobs, stage2Jobs, err := classifyJobs(ctx, conn, manifest[:state.FreezeOffset], cfg.chunkSize, result)
+	stage1Jobs, stage2Jobs, err := classifyJobs(ctx, conn, manifest[:state.FreezeOffset], cfg.chunkSize, result, resumeSkippedErrors)
 	if err != nil {
 		return err
 	}
@@ -903,7 +921,7 @@ func processHistory(ctx context.Context, runtime *commandRuntime, state checkpoi
 	return firstError(lastErr, errors.New("old-project identification attempts exhausted"))
 }
 
-func classifyJobs(ctx context.Context, conn *sql.Conn, manifest []manifestRecord, chunkSize int, result *tracker) ([]manifestRecord, []manifestRecord, error) {
+func classifyJobs(ctx context.Context, conn *sql.Conn, manifest []manifestRecord, chunkSize int, result *tracker, skippedErrors map[string]struct{}) ([]manifestRecord, []manifestRecord, error) {
 	stage1 := make([]manifestRecord, 0, len(manifest))
 	stage2 := make([]manifestRecord, 0, len(manifest)/4)
 	for start := 0; start < len(manifest); start += chunkSize {
@@ -912,6 +930,9 @@ func classifyJobs(ctx context.Context, conn *sql.Conn, manifest []manifestRecord
 		ids := make([]uint64, 0, len(chunk))
 		for _, item := range chunk {
 			if item.Eligible && item.ResourceID != 0 {
+				if _, skipped := skippedErrors[item.Email]; skipped {
+					continue
+				}
 				ids = append(ids, uint64(item.ResourceID))
 			}
 		}
@@ -921,6 +942,10 @@ func classifyJobs(ctx context.Context, conn *sql.Conn, manifest []manifestRecord
 		}
 		for _, item := range chunk {
 			if !item.Eligible || item.ResourceID == 0 {
+				result.fail(item.Email)
+				continue
+			}
+			if _, skipped := skippedErrors[item.Email]; skipped {
 				result.fail(item.Email)
 				continue
 			}
@@ -947,12 +972,15 @@ func classifyJobs(ctx context.Context, conn *sql.Conn, manifest []manifestRecord
 	return stage1, stage2, nil
 }
 
-func recoverAbandonedValidations(ctx context.Context, conn *sql.Conn, manifest []manifestRecord, chunkSize int) error {
+func recoverAbandonedValidations(ctx context.Context, conn *sql.Conn, manifest []manifestRecord, chunkSize int, skippedErrors map[string]struct{}) error {
 	for start := 0; start < len(manifest); start += chunkSize {
 		end := min(start+chunkSize, len(manifest))
 		ids := make([]uint64, 0, end-start)
 		for _, item := range manifest[start:end] {
 			if item.Eligible && item.ResourceID != 0 {
+				if _, skipped := skippedErrors[item.Email]; skipped {
+					continue
+				}
 				ids = append(ids, uint64(item.ResourceID))
 			}
 		}
@@ -1097,6 +1125,19 @@ func excludeEmails(emails []string, excluded map[string]struct{}) ([]string, int
 		remaining = append(remaining, email)
 	}
 	return remaining, len(emails) - len(remaining)
+}
+
+func resumeErrorSkipSet(previousErrors, previousRateLimited map[string]struct{}, retryAll bool) map[string]struct{} {
+	if retryAll || len(previousErrors) == 0 {
+		return nil
+	}
+	skipped := make(map[string]struct{}, len(previousErrors))
+	for email := range previousErrors {
+		if _, retry := previousRateLimited[email]; !retry {
+			skipped[email] = struct{}{}
+		}
+	}
+	return skipped
 }
 
 func snapshotManifest(ctx context.Context, conn *sql.Conn, emails []string, chunkSize int) ([]manifestRecord, error) {

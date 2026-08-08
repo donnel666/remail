@@ -219,3 +219,21 @@ func TestTrackerWritesRateLimitedFailuresTo429File(t *testing.T) {
 		t.Fatal("invalid success ledger must stop the run")
 	}
 }
+
+func TestResumeErrorSkipSetDefaultsTo429Only(t *testing.T) {
+	previousErrors := map[string]struct{}{
+		"ordinary@example.com": {},
+		"limited@example.com":  {},
+	}
+	previousRateLimited := map[string]struct{}{
+		"limited@example.com": {},
+	}
+
+	skipped := resumeErrorSkipSet(previousErrors, previousRateLimited, false)
+	if !reflect.DeepEqual(skipped, map[string]struct{}{"ordinary@example.com": {}}) {
+		t.Fatalf("default skipped errors = %#v", skipped)
+	}
+	if retryAll := resumeErrorSkipSet(previousErrors, previousRateLimited, true); len(retryAll) != 0 {
+		t.Fatalf("retry-all skipped errors = %#v, want empty", retryAll)
+	}
+}
