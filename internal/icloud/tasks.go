@@ -56,7 +56,7 @@ func (s *Service) ScheduleICloudValidationDispatcher(ctx context.Context, delay 
 		delay = 0
 	}
 	options := []asynq.Option{
-		asynq.Queue(platform.QueueDefault), asynq.Unique(iCloudDispatcherTaskTimeout + delay),
+		asynq.Queue(platform.QueueBackgroundICloudValidation), asynq.Unique(iCloudDispatcherTaskTimeout + delay),
 		asynq.MaxRetry(0), asynq.Timeout(iCloudDispatcherTaskTimeout), asynq.Retention(0),
 	}
 	if delay > 0 {
@@ -81,7 +81,7 @@ func (s *Service) enqueueICloudValidation(ctx context.Context, task iCloudValida
 		return false, ErrICloudValidationTemp
 	}
 	_, err = s.queue.EnqueueContext(ctx, asynq.NewTask(typeICloudValidation, payload),
-		asynq.Queue(platform.QueueBackgroundValidation),
+		asynq.Queue(platform.QueueBackgroundICloudValidation),
 		asynq.Unique(iCloudValidationTaskTimeout+iCloudValidationActivationWait),
 		asynq.MaxRetry(platform.BackgroundTaskMaxRetryValue()), asynq.Timeout(iCloudValidationTaskTimeout),
 		asynq.ProcessIn(iCloudValidationActivationWait), asynq.Retention(0),
@@ -107,8 +107,8 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, service *Service) func(context.Co
 		return nil
 	})
 	mux.HandleFunc(typeICloudValidationDispatcher, func(ctx context.Context, _ *asynq.Task) error {
-		_ = service.DispatchICloudValidations(ctx, iCloudValidationBatchLimit)
-		return nil
+		queueName, _ := asynq.GetQueueName(ctx)
+		return handleICloudValidationDispatcher(ctx, service, queueName)
 	})
 	mux.HandleFunc(typeICloudImport, func(ctx context.Context, task *asynq.Task) error {
 		payload, err := decodeICloudImportTask(task)
@@ -137,24 +137,8 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, service *Service) func(context.Co
 		if err != nil {
 			return err
 		}
-		release, admitted := platform.AcquireBackgroundExecution(ctx, service.backgroundExecution)
-		if !admitted {
-			if platform.BackgroundTaskHasRetryHeadroom(ctx) {
-				return platform.ErrBackgroundExecutionDeferred
-			}
-			releaseICloudValidationTask(ctx, service, payload)
-			return nil
-		}
-		defer release()
-		if err := service.ProcessICloudValidation(ctx, payload); err != nil {
-			if platform.BackgroundTaskHasRetryHeadroom(ctx) {
-				return err
-			}
-			releaseICloudValidationTask(ctx, service, payload)
-			return nil
-		}
-		_ = service.ScheduleICloudValidationDispatcher(context.WithoutCancel(ctx), time.Second)
-		return nil
+		queueName, _ := asynq.GetQueueName(ctx)
+		return handleICloudValidationTask(ctx, service, payload, queueName)
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -187,6 +171,39 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, service *Service) func(context.Co
 		case <-shutdownCtx.Done():
 		}
 	}
+}
+
+func handleICloudValidationDispatcher(ctx context.Context, service *Service, sourceQueue string) error {
+	if sourceQueue != "" && sourceQueue != platform.QueueBackgroundICloudValidation {
+		return service.ScheduleICloudValidationDispatcher(context.WithoutCancel(ctx), 0)
+	}
+	_ = service.DispatchICloudValidations(ctx, iCloudValidationBatchLimit)
+	return nil
+}
+
+func handleICloudValidationTask(ctx context.Context, service *Service, payload iCloudValidationTask, sourceQueue string) error {
+	if sourceQueue != "" && sourceQueue != platform.QueueBackgroundICloudValidation {
+		_, err := service.enqueueICloudValidation(context.WithoutCancel(ctx), payload)
+		return err
+	}
+	release, admitted := platform.AcquireBackgroundExecution(ctx, service.backgroundExecution)
+	if !admitted {
+		if platform.BackgroundTaskHasRetryHeadroom(ctx) {
+			return platform.ErrBackgroundExecutionDeferred
+		}
+		releaseICloudValidationTask(ctx, service, payload)
+		return nil
+	}
+	defer release()
+	if err := service.ProcessICloudValidation(ctx, payload); err != nil {
+		if platform.BackgroundTaskHasRetryHeadroom(ctx) {
+			return err
+		}
+		releaseICloudValidationTask(ctx, service, payload)
+		return nil
+	}
+	_ = service.ScheduleICloudValidationDispatcher(context.WithoutCancel(ctx), time.Second)
+	return nil
 }
 
 func releaseICloudValidationTask(ctx context.Context, service *Service, task iCloudValidationTask) {

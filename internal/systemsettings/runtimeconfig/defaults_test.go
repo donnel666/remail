@@ -53,6 +53,7 @@ func TestDefaultSettingsAreValidAndIndependent(t *testing.T) {
 	require.Equal(t, "4", keys["asynq_queue_mailfetch_weight"])
 	require.Equal(t, "1", keys["asynq_queue_background_project_history_weight"])
 	require.Equal(t, "1", keys["asynq_queue_background_gmail_validation_weight"])
+	require.Equal(t, "1", keys["asynq_queue_background_icloud_validation_weight"])
 	require.Equal(t, "1", keys["asynq_queue_background_gmail_identification_weight"])
 	whitelistValue := ""
 	for _, setting := range defaults {

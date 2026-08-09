@@ -56,6 +56,7 @@ func backgroundQueueConfig() map[string]int {
 	return map[string]int{
 		QueueBackgroundValidation:          runtimeconfig.Int("asynq_queue_background_validation_weight", BackgroundMicrosoftValidationWeight, 1),
 		QueueBackgroundGmailValidation:     runtimeconfig.Int("asynq_queue_background_gmail_validation_weight", 1, 1),
+		QueueBackgroundICloudValidation:    runtimeconfig.Int("asynq_queue_background_icloud_validation_weight", 1, 1),
 		QueueBackgroundDomainValidation:    runtimeconfig.Int("asynq_queue_background_domain_validation_weight", BackgroundDomainValidationWeight, 1),
 		QueueBackgroundAlias:               runtimeconfig.Int("asynq_queue_background_alias_weight", 1, 1),
 		QueueBackgroundTokenRefresh:        runtimeconfig.Int("asynq_queue_background_token_refresh_weight", 1, 1),

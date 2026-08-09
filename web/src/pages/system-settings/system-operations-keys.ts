@@ -17,6 +17,7 @@ export const BACKGROUND_JOB_KEYS = [
   "asynq_queue_default_weight",
   "asynq_queue_background_validation_weight",
   "asynq_queue_background_gmail_validation_weight",
+  "asynq_queue_background_icloud_validation_weight",
   "asynq_queue_background_domain_validation_weight",
   "asynq_queue_background_alias_weight",
   "asynq_queue_background_token_refresh_weight",

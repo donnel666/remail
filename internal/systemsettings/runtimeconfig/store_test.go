@@ -232,7 +232,7 @@ func TestValidateSystemOperationsSettings(t *testing.T) {
 	}
 	for _, key := range []string{
 		"asynq_queue_mailfetch_weight", "asynq_queue_payment_reconcile_weight", "asynq_queue_mailtransport_weight", "asynq_queue_default_weight",
-		"asynq_queue_background_validation_weight", "asynq_queue_background_gmail_validation_weight", "asynq_queue_background_domain_validation_weight", "asynq_queue_background_alias_weight",
+		"asynq_queue_background_validation_weight", "asynq_queue_background_gmail_validation_weight", "asynq_queue_background_icloud_validation_weight", "asynq_queue_background_domain_validation_weight", "asynq_queue_background_alias_weight",
 		"asynq_queue_background_token_refresh_weight", "asynq_queue_resource_weight", "asynq_queue_background_project_history_weight", "asynq_queue_background_gmail_identification_weight", "asynq_queue_background_inventory_weight",
 	} {
 		require.NoError(t, Validate(key, "10000"))

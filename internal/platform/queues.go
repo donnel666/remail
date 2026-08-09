@@ -68,6 +68,8 @@ const (
 	QueueBackgroundValidation = "background_validation"
 	// QueueBackgroundGmailValidation carries Gmail validation dispatchers, batches, and workers.
 	QueueBackgroundGmailValidation = "background_gmail_validation"
+	// QueueBackgroundICloudValidation carries iCloud account validation and alias-recognition tasks.
+	QueueBackgroundICloudValidation = "background_icloud_validation"
 	// QueueBackgroundDomainValidation carries temporary domain DNS validation tasks.
 	QueueBackgroundDomainValidation = "background_domain_validation"
 	// QueueBackgroundAlias carries Microsoft explicit-alias creation.
@@ -93,6 +95,7 @@ var AllQueueNames = []string{
 	QueueDefault,
 	QueueBackgroundValidation,
 	QueueBackgroundGmailValidation,
+	QueueBackgroundICloudValidation,
 	QueueBackgroundDomainValidation,
 	QueueBackgroundAlias,
 	QueueBackgroundTokenRefresh,

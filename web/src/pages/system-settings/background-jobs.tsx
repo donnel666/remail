@@ -47,6 +47,7 @@ export default function BackgroundJobSection({ options, onBulkSave }: SectionPro
       {field("通用任务队列权重（default）", "asynq_queue_default_weight", 1, 10000)}
       {field("微软验证队列权重（background_validation）", "asynq_queue_background_validation_weight", 1, 10000)}
       {field("Gmail 验证队列权重（background_gmail_validation）", "asynq_queue_background_gmail_validation_weight", 1, 10000)}
+      {field("苹果邮箱验证队列权重（background_icloud_validation）", "asynq_queue_background_icloud_validation_weight", 1, 10000)}
       {field("域名验证队列权重（background_domain_validation）", "asynq_queue_background_domain_validation_weight", 1, 10000)}
       {field("别名维护队列权重（background_alias）", "asynq_queue_background_alias_weight", 1, 10000)}
       {field("Token 刷新队列权重（background_token_refresh）", "asynq_queue_background_token_refresh_weight", 1, 10000)}
