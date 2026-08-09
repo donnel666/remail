@@ -105,7 +105,7 @@ func (s *Service) enqueueValidatedLocalGmailHistory(ctx context.Context, task lo
 		localGmailHistoryMaxTimeout,
 	)
 	_, err = s.queue.EnqueueContext(ctx, asynq.NewTask(typeGmailValidatedHistoryScan, payload),
-		asynq.Queue(platform.QueueBackgroundProjectHistory),
+		asynq.Queue(platform.QueueBackgroundGmailIdentification),
 		asynq.ProcessIn(localGmailHistoryTaskSettleAfter),
 		asynq.Unique(timeout),
 		asynq.MaxRetry(localGmailHistoryTaskMaxRetry),

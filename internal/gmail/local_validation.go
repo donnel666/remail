@@ -190,7 +190,7 @@ func (s *Service) scheduleLocalResourceValidationDispatcher(ctx context.Context,
 		return ErrLocalValidationDependency
 	}
 	options := []asynq.Option{
-		asynq.Queue(platform.QueueDefault),
+		asynq.Queue(platform.QueueBackgroundGmailValidation),
 		asynq.Unique(localGmailValidationDispatchUnique),
 		asynq.MaxRetry(0),
 		asynq.Timeout(30 * time.Second),
@@ -213,7 +213,6 @@ func (s *Service) DispatchLocalResourceValidations(ctx context.Context, limit in
 	if limit <= 0 || limit > localGmailValidationBatchMax {
 		limit = localGmailValidationBatchMax
 	}
-	historyErr := s.dispatchIdentifyingLocalGmailHistory(ctx, limit)
 	window := min(limit, runtimeconfig.Int("validation_dispatch_maximum", 128, 1))
 	window = min(window, runtimeconfig.Int("gmail_validation_concurrency", gmailValidationConcurrency, 1))
 	if s.backgroundExecution != nil {
@@ -225,7 +224,7 @@ func (s *Service) DispatchLocalResourceValidations(ctx context.Context, limit in
 	}
 	capacity := min(limit, max(0, window-int(validating)))
 	if capacity <= 0 {
-		return historyErr
+		return nil
 	}
 	var tasks []localResourceValidationTask
 	if err := s.dbFor(ctx).Table("gmail_resources AS gr").
@@ -268,7 +267,7 @@ AND EXISTS (SELECT 1 FROM email_resources AS er WHERE er.id = gmail_resources.id
 			dispatchErr = errors.Join(dispatchErr, fmt.Errorf("activate local Gmail validation %d: %w", task.ResourceID, result.Error))
 		}
 	}
-	return errors.Join(historyErr, dispatchErr)
+	return dispatchErr
 }
 
 func (s *Service) dispatchIdentifyingLocalGmailHistory(ctx context.Context, limit int) error {
@@ -298,7 +297,7 @@ func (s *Service) enqueueLocalResourceValidation(ctx context.Context, task local
 		return fmt.Errorf("encode local Gmail validation task: %w", err)
 	}
 	_, err = s.queue.EnqueueContext(ctx, asynq.NewTask(typeGmailValidateLocal, payload),
-		asynq.Queue(platform.QueueBackgroundValidation),
+		asynq.Queue(platform.QueueBackgroundGmailValidation),
 		asynq.ProcessIn(localGmailValidationSettleAfter),
 		asynq.Unique(localGmailValidationTaskTTL),
 		asynq.MaxRetry(platform.BackgroundTaskMaxRetryValue()),
@@ -454,7 +453,7 @@ func (s *Service) processLocalResourceValidationWith(
 		enqueueErr := s.enqueueValidatedLocalGmailHistory(enqueueCtx, historyTask)
 		cancel()
 		if enqueueErr != nil {
-			_ = s.scheduleLocalResourceValidationDispatcher(context.WithoutCancel(ctx), time.Second)
+			_ = s.scheduleLocalGmailProjectHistoryDispatcher(context.WithoutCancel(ctx), time.Second)
 			return fmt.Errorf("create validated Gmail history task: %w", ErrLocalValidationDependency)
 		}
 	}

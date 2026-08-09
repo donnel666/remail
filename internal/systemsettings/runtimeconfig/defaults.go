@@ -3,7 +3,7 @@ package runtimeconfig
 import "github.com/donnel666/remail/internal/systemsettings/domain"
 
 const (
-	DefaultSettingsCount                  = 220
+	DefaultSettingsCount                  = 222
 	SMSBowerNoCodeRefundTimeoutMinutesKey = "smsbower_no_code_refund_timeout_minutes"
 )
 
@@ -199,11 +199,13 @@ var defaultSettings = []domain.Setting{
 	{Key: "asynq_queue_mailtransport_weight", Value: "4"},
 	{Key: "asynq_queue_default_weight", Value: "3"},
 	{Key: "asynq_queue_background_validation_weight", Value: "3"},
+	{Key: "asynq_queue_background_gmail_validation_weight", Value: "1"},
 	{Key: "asynq_queue_background_domain_validation_weight", Value: "1"},
 	{Key: "asynq_queue_background_alias_weight", Value: "1"},
 	{Key: "asynq_queue_background_token_refresh_weight", Value: "1"},
 	{Key: "asynq_queue_resource_weight", Value: "2"},
 	{Key: "asynq_queue_background_project_history_weight", Value: "1"},
+	{Key: "asynq_queue_background_gmail_identification_weight", Value: "1"},
 	{Key: "asynq_queue_background_inventory_weight", Value: "1"},
 	{Key: "asynq_shutdown_timeout_seconds", Value: "5"},
 	{Key: "validation_dispatch_maximum", Value: "128"},

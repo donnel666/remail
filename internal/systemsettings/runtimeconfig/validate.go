@@ -68,8 +68,8 @@ var integerRanges = map[string]integerRange{
 	"background_task_max_retry": {min: 0, max: 20}, "background_retry_delay_minimum_seconds": positive(3600), "background_retry_delay_jitter_seconds": {min: 0, max: 3600},
 	"asynq_worker_concurrency": positive(8096), "asynq_realtime_worker_concurrency": positive(8096), "asynq_background_worker_concurrency": positive(8096),
 	"asynq_queue_mailfetch_weight": positive(10000), "asynq_queue_payment_reconcile_weight": positive(10000), "asynq_queue_mailtransport_weight": positive(10000), "asynq_queue_default_weight": positive(10000),
-	"asynq_queue_background_validation_weight": positive(10000), "asynq_queue_background_domain_validation_weight": positive(10000), "asynq_queue_background_alias_weight": positive(10000),
-	"asynq_queue_background_token_refresh_weight": positive(10000), "asynq_queue_resource_weight": positive(10000), "asynq_queue_background_project_history_weight": positive(10000), "asynq_queue_background_inventory_weight": positive(10000),
+	"asynq_queue_background_validation_weight": positive(10000), "asynq_queue_background_gmail_validation_weight": positive(10000), "asynq_queue_background_domain_validation_weight": positive(10000), "asynq_queue_background_alias_weight": positive(10000),
+	"asynq_queue_background_token_refresh_weight": positive(10000), "asynq_queue_resource_weight": positive(10000), "asynq_queue_background_project_history_weight": positive(10000), "asynq_queue_background_gmail_identification_weight": positive(10000), "asynq_queue_background_inventory_weight": positive(10000),
 	"asynq_shutdown_timeout_seconds": positive(300), "validation_dispatch_maximum": positive(10000), "default_inbound_smtp_max_connections": positive(10000),
 
 	"admin_resource_bulk_max_ids": positive(1000), "admin_domain_bulk_max_ids": positive(1000), "admin_domain_bulk_max_filter": positive(10000),

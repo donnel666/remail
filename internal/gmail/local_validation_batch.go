@@ -261,7 +261,7 @@ func (s *Service) markLocalGmailBatchValidationPending(
 func (s *Service) enqueueLocalGmailValidationBatch(ctx context.Context, task localGmailValidationBatchTask, delay time.Duration) error {
 	payload, _ := json.Marshal(task)
 	options := []asynq.Option{
-		asynq.Queue(platform.QueueResource), asynq.Unique(time.Minute),
+		asynq.Queue(platform.QueueBackgroundGmailValidation), asynq.Unique(time.Minute),
 		asynq.MaxRetry(platform.BackgroundTaskMaxRetryValue()), asynq.Timeout(30 * time.Second), asynq.Retention(0),
 	}
 	if delay > 0 {

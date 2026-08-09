@@ -226,7 +226,7 @@ func (s *Service) CommitStandaloneValidatedCredentials(
 		err := s.enqueueValidatedLocalGmailHistory(enqueueCtx, historyTask)
 		cancel()
 		if err != nil {
-			_ = s.scheduleLocalResourceValidationDispatcher(context.WithoutCancel(ctx), time.Second)
+			_ = s.scheduleLocalGmailProjectHistoryDispatcher(context.WithoutCancel(ctx), time.Second)
 			return committed, fmt.Errorf("enqueue Gmail standalone history: %w", err)
 		}
 		committed.HistoryQueued = true

@@ -55,7 +55,7 @@ func TestLocalGmailValidationBatchUsesRedisCursorAndBumpsRootVersions(t *testing
 	require.Equal(t, "queued", accepted.Status)
 	require.Equal(t, len(resourceIDs), accepted.Requested)
 
-	pending, err := inspector.ListPendingTasks(platform.QueueResource)
+	pending, err := inspector.ListPendingTasks(platform.QueueBackgroundGmailValidation)
 	require.NoError(t, err)
 	require.Len(t, pending, 1)
 	var first localGmailValidationBatchTask
@@ -68,7 +68,7 @@ func TestLocalGmailValidationBatchUsesRedisCursorAndBumpsRootVersions(t *testing
 	require.Equal(t, localGmailValidationBatchPage, progress.Processed)
 	require.Equal(t, localGmailValidationBatchPage, progress.Queued)
 
-	scheduled, err := inspector.ListScheduledTasks(platform.QueueResource)
+	scheduled, err := inspector.ListScheduledTasks(platform.QueueBackgroundGmailValidation)
 	require.NoError(t, err)
 	require.Len(t, scheduled, 1)
 	var last localGmailValidationBatchTask

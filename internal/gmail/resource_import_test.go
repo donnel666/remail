@@ -264,12 +264,12 @@ func TestGmailResourceImportUsesRedisReferenceTaskAndSafeLineResults(t *testing.
 	require.Equal(t, "duplicate_email", items[2].Category)
 	require.Equal(t, "invalid_format", items[3].Category)
 
-	dispatchTasks, err := harness.inspector.ListPendingTasks(platform.QueueDefault)
+	dispatchTasks, err := harness.inspector.ListPendingTasks(platform.QueueBackgroundGmailValidation)
 	require.NoError(t, err)
 	require.Len(t, dispatchTasks, 1)
 	require.Equal(t, typeGmailValidationDispatcher, dispatchTasks[0].Type)
 	require.NoError(t, harness.service.DispatchLocalResourceValidations(ctx, localGmailValidationBatchMax))
-	validationTasks, err := harness.inspector.ListScheduledTasks(platform.QueueBackgroundValidation)
+	validationTasks, err := harness.inspector.ListScheduledTasks(platform.QueueBackgroundGmailValidation)
 	require.NoError(t, err)
 	require.Len(t, validationTasks, 1)
 	var validationTask localResourceValidationTask
@@ -486,7 +486,7 @@ func TestGmailResourceImportFinalizesPreparedRedisResultWithoutRecreatingResourc
 	var resourceCount int64
 	require.NoError(t, harness.db.Model(&localResourceModel{}).Count(&resourceCount).Error)
 	require.EqualValues(t, 1, resourceCount)
-	dispatchTasks, err := harness.inspector.ListPendingTasks(platform.QueueDefault)
+	dispatchTasks, err := harness.inspector.ListPendingTasks(platform.QueueBackgroundGmailValidation)
 	require.NoError(t, err)
 	require.Len(t, dispatchTasks, 1)
 	require.Equal(t, typeGmailValidationDispatcher, dispatchTasks[0].Type)

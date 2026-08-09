@@ -54,12 +54,14 @@ func foregroundQueueConfig() map[string]int {
 // realtime and foreground tiers.
 func backgroundQueueConfig() map[string]int {
 	return map[string]int{
-		QueueBackgroundValidation:       runtimeconfig.Int("asynq_queue_background_validation_weight", BackgroundMicrosoftValidationWeight, 1),
-		QueueBackgroundDomainValidation: runtimeconfig.Int("asynq_queue_background_domain_validation_weight", BackgroundDomainValidationWeight, 1),
-		QueueBackgroundAlias:            runtimeconfig.Int("asynq_queue_background_alias_weight", 1, 1),
-		QueueBackgroundTokenRefresh:     runtimeconfig.Int("asynq_queue_background_token_refresh_weight", 1, 1),
-		QueueBackgroundProjectHistory:   runtimeconfig.Int("asynq_queue_background_project_history_weight", 1, 1),
-		QueueBackgroundInventory:        runtimeconfig.Int("asynq_queue_background_inventory_weight", 1, 1),
+		QueueBackgroundValidation:          runtimeconfig.Int("asynq_queue_background_validation_weight", BackgroundMicrosoftValidationWeight, 1),
+		QueueBackgroundGmailValidation:     runtimeconfig.Int("asynq_queue_background_gmail_validation_weight", 1, 1),
+		QueueBackgroundDomainValidation:    runtimeconfig.Int("asynq_queue_background_domain_validation_weight", BackgroundDomainValidationWeight, 1),
+		QueueBackgroundAlias:               runtimeconfig.Int("asynq_queue_background_alias_weight", 1, 1),
+		QueueBackgroundTokenRefresh:        runtimeconfig.Int("asynq_queue_background_token_refresh_weight", 1, 1),
+		QueueBackgroundProjectHistory:      runtimeconfig.Int("asynq_queue_background_project_history_weight", 1, 1),
+		QueueBackgroundGmailIdentification: runtimeconfig.Int("asynq_queue_background_gmail_identification_weight", 1, 1),
+		QueueBackgroundInventory:           runtimeconfig.Int("asynq_queue_background_inventory_weight", 1, 1),
 		// Admin resource bulk operations (validate/publish/unpublish/delete) are
 		// enqueued to the resource queue; without it here no server consumes them
 		// and every bulk command sits queued forever.

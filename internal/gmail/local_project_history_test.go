@@ -70,7 +70,7 @@ func (h *localGmailProjectHistoryHarness) seedResource(t *testing.T) resourceRoo
 
 func (h *localGmailProjectHistoryHarness) continuationTask(t *testing.T) localGmailProjectHistoryTask {
 	t.Helper()
-	pending, err := h.inspector.ListPendingTasks(platform.QueueBackgroundProjectHistory)
+	pending, err := h.inspector.ListPendingTasks(platform.QueueBackgroundGmailIdentification)
 	require.NoError(t, err)
 	for _, item := range pending {
 		if item.Type != typeGmailProjectHistoryScan {

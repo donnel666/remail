@@ -146,7 +146,10 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, service *Service) func(context.Co
 		return nil
 	})
 	mux.HandleFunc(typeGmailProjectHistoryDispatcher, func(ctx context.Context, _ *asynq.Task) error {
-		return service.DispatchLocalGmailProjectHistory(ctx, localGmailProjectHistoryLimit)
+		return errors.Join(
+			service.DispatchLocalGmailProjectHistory(ctx, localGmailProjectHistoryLimit),
+			service.dispatchIdentifyingLocalGmailHistory(ctx, localGmailValidationBatchMax),
+		)
 	})
 	mux.HandleFunc(typeGmailProjectHistoryScan, func(ctx context.Context, task *asynq.Task) error {
 		var payload localGmailProjectHistoryTask

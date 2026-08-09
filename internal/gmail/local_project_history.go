@@ -338,7 +338,7 @@ func (s *Service) enqueueLocalGmailProjectHistory(ctx context.Context, task loca
 	}
 	timeout := min(runtimeconfig.Duration("project_history_timeout_minutes", localGmailProjectHistoryTimeout, time.Minute, 1), localGmailProjectHistoryMaxTimeout)
 	_, err = s.queue.EnqueueContext(ctx, asynq.NewTask(typeGmailProjectHistoryScan, payload),
-		asynq.Queue(platform.QueueBackgroundProjectHistory), asynq.Unique(timeout),
+		asynq.Queue(platform.QueueBackgroundGmailIdentification), asynq.Unique(timeout),
 		asynq.MaxRetry(platform.BackgroundTaskMaxRetryValue()), asynq.Timeout(timeout), asynq.Retention(0))
 	if errors.Is(err, asynq.ErrDuplicateTask) {
 		return false, nil
@@ -355,7 +355,7 @@ func (s *Service) scheduleLocalGmailProjectHistoryDispatcher(ctx context.Context
 	}
 	uniqueTTL := localGmailHistoryDispatchTimeout + delay
 	options := []asynq.Option{
-		asynq.Queue(platform.QueueBackgroundProjectHistory), asynq.Unique(uniqueTTL), asynq.MaxRetry(0),
+		asynq.Queue(platform.QueueBackgroundGmailIdentification), asynq.Unique(uniqueTTL), asynq.MaxRetry(0),
 		asynq.Timeout(localGmailHistoryDispatchTimeout), asynq.Retention(0),
 	}
 	if delay > 0 {

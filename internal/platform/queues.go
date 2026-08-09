@@ -66,6 +66,8 @@ const (
 	// Existing deployments use it for Microsoft validation, so the name remains
 	// stable while domain validation gets its own queue below.
 	QueueBackgroundValidation = "background_validation"
+	// QueueBackgroundGmailValidation carries Gmail validation dispatchers, batches, and workers.
+	QueueBackgroundGmailValidation = "background_gmail_validation"
 	// QueueBackgroundDomainValidation carries temporary domain DNS validation tasks.
 	QueueBackgroundDomainValidation = "background_domain_validation"
 	// QueueBackgroundAlias carries Microsoft explicit-alias creation.
@@ -74,8 +76,10 @@ const (
 	QueueBackgroundTokenRefresh = "background_token_refresh"
 	// QueueResource carries admin resource bulk operations (validate/publish/unpublish/delete).
 	QueueResource = "resource"
-	// QueueBackgroundProjectHistory pulls mailbox history for newly listed projects.
+	// QueueBackgroundProjectHistory carries Microsoft resource and project-history identification.
 	QueueBackgroundProjectHistory = "background_project_history"
+	// QueueBackgroundGmailIdentification carries Gmail validation-history and project-history identification.
+	QueueBackgroundGmailIdentification = "background_gmail_identification"
 	// QueueBackgroundInventory refreshes Redis read models such as inventory and dashboard rankings.
 	QueueBackgroundInventory = "background_inventory"
 )
@@ -88,10 +92,12 @@ var AllQueueNames = []string{
 	QueueMailtransport,
 	QueueDefault,
 	QueueBackgroundValidation,
+	QueueBackgroundGmailValidation,
 	QueueBackgroundDomainValidation,
 	QueueBackgroundAlias,
 	QueueBackgroundTokenRefresh,
 	QueueResource,
 	QueueBackgroundProjectHistory,
+	QueueBackgroundGmailIdentification,
 	QueueBackgroundInventory,
 }

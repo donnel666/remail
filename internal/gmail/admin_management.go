@@ -158,8 +158,8 @@ func (s *Service) ApplyAdminLocalResourceCommand(
 	if err != nil {
 		return nil, normalizeAdminLocalResourceCommandError(err)
 	}
-	if !replayed && commandQueuesAdminLocalResourceMaintenance(command) {
-		_ = s.scheduleLocalResourceValidationDispatcher(context.WithoutCancel(ctx), 0)
+	if !replayed {
+		_ = s.scheduleAdminLocalResourceMaintenance(context.WithoutCancel(ctx), command)
 	}
 	return result, nil
 }
@@ -245,8 +245,8 @@ func (s *Service) ApplyAdminLocalResourceBatch(
 	if err != nil {
 		return nil, normalizeAdminLocalResourceCommandError(err)
 	}
-	if !replayed && result.Affected > 0 && commandQueuesAdminLocalResourceMaintenance(command) {
-		_ = s.scheduleLocalResourceValidationDispatcher(context.WithoutCancel(ctx), 0)
+	if !replayed && result.Affected > 0 {
+		_ = s.scheduleAdminLocalResourceMaintenance(context.WithoutCancel(ctx), command)
 	}
 	return result, nil
 }
@@ -737,9 +737,15 @@ func validAdminLocalResourceBatchCommand(command AdminLocalResourceCommand) bool
 	}
 }
 
-func commandQueuesAdminLocalResourceMaintenance(command AdminLocalResourceCommand) bool {
-	return command == AdminLocalResourceValidate || command == AdminLocalResourceHistory ||
-		command == AdminLocalResourceEnable || command == AdminLocalResourceRecover
+func (s *Service) scheduleAdminLocalResourceMaintenance(ctx context.Context, command AdminLocalResourceCommand) error {
+	switch command {
+	case AdminLocalResourceHistory:
+		return s.scheduleLocalGmailProjectHistoryDispatcher(ctx, 0)
+	case AdminLocalResourceValidate, AdminLocalResourceEnable, AdminLocalResourceRecover:
+		return s.scheduleLocalResourceValidationDispatcher(ctx, 0)
+	default:
+		return nil
+	}
 }
 
 func uniqueAdminLocalResourceIDs(values []uint) []uint {
