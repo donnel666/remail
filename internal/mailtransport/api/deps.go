@@ -241,7 +241,7 @@ func NewMailTransportModule(
 
 	inboundUseCase := mailapp.NewInboundService(inboundRepo, inboundResolver, files, inboundQueue, systemLogs)
 	outboundDelivery := mailapp.NewAsyncDeliveryService(outboundQueue, outboundFrom)
-	validationAdapter := NewResourceValidationAdapter(proxies, bindingRepo)
+	validationAdapter := NewResourceValidationAdapter(proxies, bindingRepo, aliasStore)
 	aliasAdapter := NewMicrosoftAliasCreationAdapter(proxies)
 	aliasService := mailapp.NewMicrosoftAliasService(aliasStore, aliasQueue, aliasAdapter)
 	tokenRefreshService := mailapp.NewMicrosoftTokenRefreshService(tokenRefreshRepo, tokenRefreshQueue, validationAdapter)

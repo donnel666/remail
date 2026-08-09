@@ -164,7 +164,7 @@ func loginForExplicitAliasOTC(session *Session, email, proxy, bindingAddress str
 	// bindAuxiliaryEmail pattern (starts the watcher before SendOtt).
 	ctx, cancel := context.WithTimeout(session.context(), 100*time.Second)
 	defer cancel()
-	lease, err := claimCodeMailLease(ctx, firstNonEmpty(normalizeRecoveryMask(proofDisplay), recoveryMaskFromContext(ctx)))
+	lease, err := claimCodeMailLease(ctx, firstNonEmpty(normalizeRecoveryMask(proofDisplay), recoveryMaskFromContext(ctx)), bindingAddress)
 	if err != nil {
 		return "", "", err
 	}
@@ -478,7 +478,7 @@ func getOTCCredentialType(session *Session, email, ppft, uaid, opid, referer str
 		url.QueryEscape(otcLoginClientID),
 		url.QueryEscape(uaid),
 	)
-	resp, err := session.Post(endpoint, requestOptions{
+	data, err := postCredentialType(session, endpoint, requestOptions{
 		JSON: map[string]any{
 			"checkPhones":                    true,
 			"country":                        "",
@@ -508,11 +508,7 @@ func getOTCCredentialType(session *Session, email, ppft, uaid, opid, referer str
 			"hpgact":            "0",
 			"hpgid":             "33",
 		}),
-	})
-	if err != nil {
-		return nil, wrapAuthError(fmt.Sprintf("GetCredentialType 请求异常: %s", err), AuthStatusRequestError, err)
-	}
-	data, err := decodeCredentialTypeResponse(session, resp, "otc")
+	}, "otc")
 	if err != nil {
 		return nil, err
 	}

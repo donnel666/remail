@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -19,11 +18,12 @@ const (
 	addAliasClientID = "f6061517-4417-4749-a5b6-5bba57f9e6cc"
 	addAssocIDURL    = "https://account.live.com/AddAssocId?ru=&cru=&fl="
 
-	aliasCategoryAdded             = "added"
-	aliasCategoryRateLimited       = "rate_limited"
-	aliasCategoryExists            = "alias_exists"
-	aliasCategoryFailed            = "alias_failed"
-	aliasCategoryNeedsVerification = "needs_verification"
+	aliasCategoryAdded               = "added"
+	aliasCategoryRateLimited         = "rate_limited"
+	aliasCategoryRecoveryMailboxBusy = "recovery_mailbox_busy"
+	aliasCategoryExists              = "alias_exists"
+	aliasCategoryFailed              = "alias_failed"
+	aliasCategoryNeedsVerification   = "needs_verification"
 
 	explicitAliasStageLoginMissingPPFT        = "login_missing_ppft"
 	explicitAliasStageLoginMissingPostURL     = "login_missing_post_url"
@@ -479,7 +479,7 @@ func getExplicitAliasCredentialType(session *Session, email, ppft, uaid, opid, r
 		url.QueryEscape(addAliasClientID),
 		url.QueryEscape(uaid),
 	)
-	resp, err := session.Post(endpoint, requestOptions{
+	data, err := postCredentialType(session, endpoint, requestOptions{
 		JSON: map[string]any{
 			"checkPhones":                    true,
 			"country":                        "",
@@ -509,11 +509,7 @@ func getExplicitAliasCredentialType(session *Session, email, ppft, uaid, opid, r
 			"hpgact":            "0",
 			"hpgid":             "33",
 		}),
-	})
-	if err != nil {
-		return nil, wrapAuthError(fmt.Sprintf("GetCredentialType 请求异常: %s", err), AuthStatusRequestError, err)
-	}
-	data, err := decodeCredentialTypeResponse(session, resp, "explicit_alias")
+	}, "explicit_alias")
 	if err != nil {
 		return nil, err
 	}
@@ -561,16 +557,19 @@ func checkExplicitAliasPassword(session *Session, email, password, uaid, referer
 		return "", wrapAuthError(fmt.Sprintf("密码验证请求异常: %s", err), AuthStatusRequestError, err)
 	}
 	if resp.StatusCode == 429 {
-		retryAfter := 60
-		if parsed, err := strconv.Atoi(resp.Header.Get("retry-after")); err == nil && parsed > 0 {
-			retryAfter = parsed
-		}
+		retryAfter := credentialTypeRetryAfter(resp)
 		logWarning("Microsoft authorization rate limited: stage=web_checkpassword status=429 retry_after=%d", retryAfter)
-		return "", wrapAuthError(
+		cause := error(fmt.Errorf("microsoft web checkpassword HTTP 429"))
+		if session != nil && !session.retryCredentialTypeRateLimits {
+			cause = newSessionTransportError(cause, session.usesProxy)
+		}
+		err := wrapAuthError(
 			fmt.Sprintf("密码验证频率受限 (429), 请 %ds 后重试", retryAfter),
 			AuthStatusRateLimited,
-			newSessionTransportError(fmt.Errorf("microsoft web checkpassword HTTP 429"), session != nil && session.usesProxy),
+			cause,
 		)
+		err.RetryAfter = time.Duration(retryAfter) * time.Second
+		return "", err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", newAuthError(fmt.Sprintf("密码验证请求失败 (HTTP %d)", resp.StatusCode), AuthStatusRequestError)
@@ -1119,6 +1118,8 @@ func mapExplicitAliasError(err error) ExplicitAliasResult {
 		return failure("account_abnormal", "Microsoft account is restricted or requires recovery.", false)
 	case AuthStatusRateLimited:
 		return failure(aliasCategoryRateLimited, "Microsoft alias creation is rate limited.", IsProxyTransportError(err))
+	case AuthStatusRecoveryMailboxBusy:
+		return failure(aliasCategoryRecoveryMailboxBusy, "Microsoft recovery mailbox is already processing another verification code.", false)
 	case AuthStatusAlreadyBound:
 		display := ""
 		if authErr != nil {

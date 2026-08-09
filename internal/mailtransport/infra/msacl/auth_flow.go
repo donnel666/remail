@@ -3,8 +3,10 @@ package msacl
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
+	mathrand "math/rand"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -133,6 +135,12 @@ func submitUserCode(session *Session, userCode, ppft string) (string, string, st
 	return page, ppft2, postURL, uaid, opid, nil
 }
 
+const (
+	credentialTypeAttempts       = 2
+	credentialTypeRetryJitterMax = 3 * time.Second
+	credentialTypeRetryAfterMax  = 5 * time.Minute
+)
+
 // decodeCredentialTypeResponse keeps upstream throttling and challenge pages
 // out of the password decision path. Microsoft sometimes returns an HTML
 // throttle page with HTTP 200, so an invalid JSON body is conservatively
@@ -142,16 +150,19 @@ func decodeCredentialTypeResponse(session *Session, resp *HTTPResponse, stage st
 		return nil, newAuthError("GetCredentialType 未返回响应", AuthStatusRequestError)
 	}
 	if resp.StatusCode == 429 {
-		retryAfter := 60
-		if parsed, err := strconv.Atoi(resp.Header.Get("retry-after")); err == nil && parsed > 0 {
-			retryAfter = parsed
-		}
+		retryAfter := credentialTypeRetryAfter(resp)
 		logWarning("Microsoft authorization rate limited: stage=%s status=429 retry_after=%d", stage, retryAfter)
-		return nil, wrapAuthError(
+		cause := error(fmt.Errorf("microsoft %s GetCredentialType HTTP 429", stage))
+		if session != nil && !session.retryCredentialTypeRateLimits {
+			cause = newSessionTransportError(cause, session.usesProxy)
+		}
+		err := wrapAuthError(
 			fmt.Sprintf("GetCredentialType 频率受限 (429), 请 %ds 后重试", retryAfter),
 			AuthStatusRateLimited,
-			newSessionTransportError(fmt.Errorf("microsoft %s GetCredentialType HTTP 429", stage), session != nil && session.usesProxy),
+			cause,
 		)
+		err.RetryAfter = time.Duration(retryAfter) * time.Second
+		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, newAuthError(fmt.Sprintf("GetCredentialType 请求失败 (HTTP %d)", resp.StatusCode), AuthStatusRequestError)
@@ -159,19 +170,89 @@ func decodeCredentialTypeResponse(session *Session, resp *HTTPResponse, stage st
 	var data map[string]any
 	if err := resp.JSON(&data); err != nil {
 		logWarning("%s GetCredentialType 返回非 JSON: status=%d", stage, resp.StatusCode)
-		return nil, wrapAuthError(
+		cause := error(err)
+		if session != nil && !session.retryCredentialTypeRateLimits {
+			cause = newSessionTransportError(cause, session.usesProxy)
+		}
+		authErr := wrapAuthError(
 			"GetCredentialType 返回异常响应",
 			AuthStatusRateLimited,
-			newSessionTransportError(err, session != nil && session.usesProxy),
+			cause,
 		)
+		authErr.RetryAfter = time.Duration(credentialTypeRetryAfter(resp)) * time.Second
+		return nil, authErr
 	}
 	return data, nil
+}
+
+func credentialTypeRetryAfter(resp *HTTPResponse) int {
+	if resp != nil {
+		if parsed, err := strconv.Atoi(strings.TrimSpace(resp.Header.Get("retry-after"))); err == nil && parsed > 0 {
+			return min(parsed, int(credentialTypeRetryAfterMax/time.Second))
+		}
+	}
+	return 60
+}
+
+func isRateLimitedAuthError(err error) bool {
+	var authErr *AuthError
+	return errors.As(err, &authErr) && authErr != nil && strings.EqualFold(strings.TrimSpace(authErr.Status), AuthStatusRateLimited)
+}
+
+func authErrorRetryAfter(err error) time.Duration {
+	var authErr *AuthError
+	if !errors.As(err, &authErr) || authErr == nil || authErr.RetryAfter <= 0 {
+		return 0
+	}
+	return min(authErr.RetryAfter, credentialTypeRetryAfterMax)
+}
+
+// postCredentialType treats HTTP 429 as an upstream quota signal: wait in the
+// existing cookie/fingerprint session once, then return rate_limited. It never
+// turns an upstream response into a proxy transport failure.
+func postCredentialType(session *Session, endpoint string, opts requestOptions, stage string) (map[string]any, error) {
+	if session == nil {
+		return nil, newAuthError("Microsoft authorization session is unavailable.", AuthStatusRequestError)
+	}
+	attempts := 1
+	if session.retryCredentialTypeRateLimits {
+		attempts = credentialTypeAttempts
+	}
+	for attempt := 1; attempt <= attempts; attempt++ {
+		if err := waitForCredentialTypeRateLimiter(session); err != nil {
+			return nil, wrapAuthError(fmt.Sprintf("GetCredentialType 速率门等待取消: %s", err), AuthStatusRequestError, err)
+		}
+		resp, err := session.Post(endpoint, opts)
+		if err != nil {
+			return nil, wrapAuthError(fmt.Sprintf("GetCredentialType 请求异常: %s", err), AuthStatusRequestError, err)
+		}
+		data, decodeErr := decodeCredentialTypeResponse(session, resp, stage)
+		if decodeErr == nil || resp == nil || !isRateLimitedAuthError(decodeErr) || attempt == attempts {
+			return data, decodeErr
+		}
+		delay := authErrorRetryAfter(decodeErr)
+		if delay <= 0 {
+			delay = time.Duration(credentialTypeRetryAfter(resp)) * time.Second
+		}
+		delay += time.Duration(mathrand.Int63n(int64(credentialTypeRetryJitterMax)))
+		logWarning(
+			"Microsoft authorization rate limited: stage=%s retry_same_session=true attempt=%d/%d delay=%s",
+			stage,
+			attempt+1,
+			attempts,
+			delay.Round(time.Millisecond),
+		)
+		if err := session.sleep(delay); err != nil {
+			return nil, wrapAuthError(fmt.Sprintf("GetCredentialType 重试等待取消: %s", err), AuthStatusRequestError, err)
+		}
+	}
+	return nil, newAuthError("GetCredentialType 重试次数耗尽", AuthStatusRateLimited)
 }
 
 func getCredentialType(session *Session, email, ppft, uaid, opid string) ([]ProofData, error) {
 	logInfo("步骤4: 检查账号登录方式")
 	logDebug("步骤4: email=%s, uaid=%s, opid=%s", email, uaid, opid)
-	resp, err := session.Post(fmt.Sprintf("https://login.live.com/GetCredentialType.srf?opid=%s&id=293577&client_id=0000000040C8F39E&mkt=ZH-CN&lc=2052&uaid=%s", opid, uaid), requestOptions{
+	data, err := postCredentialType(session, fmt.Sprintf("https://login.live.com/GetCredentialType.srf?opid=%s&id=293577&client_id=0000000040C8F39E&mkt=ZH-CN&lc=2052&uaid=%s", opid, uaid), requestOptions{
 		JSON: map[string]any{
 			"checkPhones":                    true,
 			"country":                        "",
@@ -201,11 +282,7 @@ func getCredentialType(session *Session, email, ppft, uaid, opid string) ([]Proo
 			"hpgact":            "0",
 			"hpgid":             "33",
 		}),
-	})
-	if err != nil {
-		return nil, wrapAuthError(fmt.Sprintf("GetCredentialType 请求异常: %s", err), AuthStatusRequestError, err)
-	}
-	data, err := decodeCredentialTypeResponse(session, resp, "device")
+	}, "device")
 	if err != nil {
 		return nil, err
 	}
@@ -267,10 +344,7 @@ func checkPassword(session *Session, email, password, uaid string, maxRetries in
 			return "", wrapAuthError(fmt.Sprintf("checkpassword 请求异常: %s", err), AuthStatusRequestError, err)
 		}
 		if resp.StatusCode == 429 {
-			retryAfter := 60
-			if parsed, err := strconv.Atoi(resp.Header.Get("retry-after")); err == nil && parsed > 0 {
-				retryAfter = parsed
-			}
+			retryAfter := credentialTypeRetryAfter(resp)
 			logWarning("Microsoft authorization rate limited: stage=device_checkpassword status=429 retry_after=%d attempt=%d/%d", retryAfter, attempt, maxRetries)
 			if attempt < maxRetries {
 				if err := session.sleep(time.Duration(retryAfter) * time.Second); err != nil {
@@ -278,11 +352,17 @@ func checkPassword(session *Session, email, password, uaid string, maxRetries in
 				}
 				continue
 			}
-			return "", wrapAuthError(
+			cause := error(fmt.Errorf("microsoft device checkpassword HTTP 429"))
+			if !session.retryCredentialTypeRateLimits {
+				cause = newSessionTransportError(cause, session.usesProxy)
+			}
+			err := wrapAuthError(
 				fmt.Sprintf("密码验证频率受限 (429), 请 %ds 后重试", retryAfter),
 				AuthStatusRateLimited,
-				newSessionTransportError(fmt.Errorf("microsoft device checkpassword HTTP 429"), session != nil && session.usesProxy),
+				cause,
 			)
+			err.RetryAfter = time.Duration(retryAfter) * time.Second
+			return "", err
 		}
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			return "", newAuthError(fmt.Sprintf("密码验证请求失败 (HTTP %d)", resp.StatusCode), AuthStatusRequestError)
@@ -714,6 +794,7 @@ func pollForToken(session *Session, deviceCode, boundMailbox string) (map[string
 }
 
 func beginAccountAuthorization(ctx context.Context, email, password, proxy string, preferredBindingAddress string) (*pendingAccountAuthorization, error) {
+	ctx = withCredentialTypeRateLimitRetry(ctx)
 	session, err := newBrowserSession(ctx, proxy)
 	if err != nil {
 		return nil, wrapAuthError(fmt.Sprintf("创建微软会话失败: %s", err), AuthStatusRequestError, err)
@@ -725,6 +806,7 @@ func beginAccountAuthorizationWithSession(session *Session, email, password, pro
 	if session == nil {
 		return nil, newAuthError("Microsoft authorization session is unavailable.", AuthStatusRequestError)
 	}
+	session.retryCredentialTypeRateLimits = true
 	userCode, deviceCode, err := requestDeviceCode(session)
 	if err != nil {
 		return nil, err

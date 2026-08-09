@@ -100,6 +100,22 @@ func TestMapAuthErrorOnlyMarksProxiedTransportFailure(t *testing.T) {
 	plain := mapAuthError(newAuthError("request failed", AuthStatusRequestError))
 	assert.False(t, plain.ProxyFailure)
 
+	rateLimited := mapAuthError(wrapAuthError(
+		"rate limited",
+		AuthStatusRateLimited,
+		io.ErrUnexpectedEOF,
+	))
+	assert.Equal(t, "rate_limited", rateLimited.Category)
+	assert.False(t, rateLimited.ProxyFailure)
+
+	proxiedRateLimited := mapAuthError(wrapAuthError(
+		"rate limited through an unscoped caller",
+		AuthStatusRateLimited,
+		newSessionTransportError(io.ErrUnexpectedEOF, true),
+	))
+	assert.Equal(t, "rate_limited", proxiedRateLimited.Category)
+	assert.True(t, proxiedRateLimited.ProxyFailure)
+
 	proxied := mapAuthError(wrapAuthError(
 		"request failed",
 		AuthStatusRequestError,

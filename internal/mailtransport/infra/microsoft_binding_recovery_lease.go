@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/donnel666/remail/internal/mailtransport/infra/msacl"
 	"gorm.io/gorm"
 )
 
@@ -31,9 +32,9 @@ func NewMicrosoftBindingRecoveryLeaseStore(db *gorm.DB) *MicrosoftBindingRecover
 	return &MicrosoftBindingRecoveryLeaseStore{db: db}
 }
 
-func (s *MicrosoftBindingRecoveryLeaseStore) Claim(ctx context.Context, normalizedMask string, resourceID uint, leaseUntil time.Time) (string, bool, error) {
-	normalizedMask = normalizeBindingEmail(normalizedMask)
-	if s == nil || s.db == nil || !isMaskedMicrosoftBindingAddress(normalizedMask) || resourceID == 0 || !leaseUntil.After(time.Now().UTC()) {
+func (s *MicrosoftBindingRecoveryLeaseStore) Claim(ctx context.Context, normalizedKey string, resourceID uint, leaseUntil time.Time) (string, bool, error) {
+	normalizedKey = normalizeBindingEmail(normalizedKey)
+	if s == nil || s.db == nil || (!isConcreteMicrosoftBindingAddress(normalizedKey) && !isMaskedMicrosoftBindingAddress(normalizedKey)) || resourceID == 0 || !leaseUntil.After(time.Now().UTC()) {
 		return "", false, fmt.Errorf("claim microsoft binding recovery lease: invalid input")
 	}
 	claimToken, err := newMicrosoftAliasClaimToken()
@@ -44,12 +45,12 @@ func (s *MicrosoftBindingRecoveryLeaseStore) Claim(ctx context.Context, normaliz
 	// gap lock is therefore released before concurrent masks insert.
 	now := time.Now().UTC()
 	if err := s.db.WithContext(ctx).
-		Where("normalized_mask = ? AND lease_until <= ?", normalizedMask, now).
+		Where("normalized_mask = ? AND lease_until <= ?", normalizedKey, now).
 		Delete(&MicrosoftBindingRecoveryLeaseModel{}).Error; err != nil {
 		return "", false, fmt.Errorf("clear expired microsoft binding recovery lease: %w", err)
 	}
 	model := &MicrosoftBindingRecoveryLeaseModel{
-		NormalizedMask: normalizedMask,
+		NormalizedMask: normalizedKey,
 		ClaimToken:     claimToken,
 		LeaseUntil:     leaseUntil.UTC(),
 		ResourceID:     resourceID,
@@ -63,21 +64,21 @@ func (s *MicrosoftBindingRecoveryLeaseStore) Claim(ctx context.Context, normaliz
 	return claimToken, true, nil
 }
 
-func (s *MicrosoftBindingRecoveryLeaseStore) MarkSent(ctx context.Context, normalizedMask, claimToken string, sentAt time.Time) error {
+func (s *MicrosoftBindingRecoveryLeaseStore) MarkSent(ctx context.Context, normalizedKey, claimToken string, sentAt time.Time) error {
 	result := s.db.WithContext(ctx).Model(&MicrosoftBindingRecoveryLeaseModel{}).
-		Where("normalized_mask = ? AND claim_token = ? AND lease_until > ?", normalizeBindingEmail(normalizedMask), strings.TrimSpace(claimToken), time.Now().UTC()).
+		Where("normalized_mask = ? AND claim_token = ? AND lease_until > ?", normalizeBindingEmail(normalizedKey), strings.TrimSpace(claimToken), time.Now().UTC()).
 		Updates(map[string]any{"sent_at": sentAt.UTC(), "updated_at": time.Now().UTC()})
 	if result.Error != nil {
 		return fmt.Errorf("mark microsoft binding recovery lease sent: %w", result.Error)
 	}
 	if result.RowsAffected != 1 {
-		return fmt.Errorf("mark microsoft binding recovery lease sent: lease is no longer owned")
+		return fmt.Errorf("mark microsoft binding recovery lease sent: %w", msacl.ErrRecoveryLeaseOwnershipLost)
 	}
 	return nil
 }
 
-func (s *MicrosoftBindingRecoveryLeaseStore) Release(ctx context.Context, normalizedMask, claimToken string) error {
-	if err := s.db.WithContext(ctx).Where("normalized_mask = ? AND claim_token = ?", normalizeBindingEmail(normalizedMask), strings.TrimSpace(claimToken)).
+func (s *MicrosoftBindingRecoveryLeaseStore) Release(ctx context.Context, normalizedKey, claimToken string) error {
+	if err := s.db.WithContext(ctx).Where("normalized_mask = ? AND claim_token = ?", normalizeBindingEmail(normalizedKey), strings.TrimSpace(claimToken)).
 		Delete(&MicrosoftBindingRecoveryLeaseModel{}).Error; err != nil {
 		return fmt.Errorf("release microsoft binding recovery lease: %w", err)
 	}

@@ -193,7 +193,7 @@ func loginForExplicitAliasPassword(session *Session, email, password, proxy, bin
 	// 记录发码前基线 (发码前, 避免秒到的码被吞入 seen)
 	ctx, cancel := context.WithTimeout(session.context(), 120*time.Second)
 	defer cancel()
-	lease, err := claimCodeMailLease(ctx, firstNonEmpty(normalizeRecoveryMask(proofDisplay), recoveryMaskFromContext(ctx)))
+	lease, err := claimCodeMailLease(ctx, firstNonEmpty(normalizeRecoveryMask(proofDisplay), recoveryMaskFromContext(ctx)), bindingAddress)
 	if err != nil {
 		return "", "", err
 	}

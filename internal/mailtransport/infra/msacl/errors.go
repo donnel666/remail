@@ -1,21 +1,24 @@
 package msacl
 
+import "time"
+
 const (
-	AuthStatusSuccess           = "授权成功"
-	AuthStatusPasswordError     = "密码错误"
-	AuthStatusAccountAbnormal   = "账号异常"
-	AuthStatusUnknownMailbox    = "未知邮箱"
-	AuthStatusCodeTimeout       = "验证码超时"
-	AuthStatusVerifyCodeError   = "验证码错误"
-	AuthStatusAuthTimeout       = "授权超时"
-	AuthStatusAlreadyBound      = "已绑定辅助邮箱"
-	AuthStatusRequestError      = "请求异常"
-	AuthStatusUnknownError      = "未知错误"
-	AuthStatusMFARequired       = "需要两步验证"
-	AuthStatusPhoneVerification = "需要手机验证"
-	AuthStatusPasskeyRequired   = "需要通行密钥"
-	AuthStatusAccountLocked     = "账号已锁定"
-	AuthStatusRateLimited       = "频率受限"
+	AuthStatusSuccess             = "授权成功"
+	AuthStatusPasswordError       = "密码错误"
+	AuthStatusAccountAbnormal     = "账号异常"
+	AuthStatusUnknownMailbox      = "未知邮箱"
+	AuthStatusCodeTimeout         = "验证码超时"
+	AuthStatusVerifyCodeError     = "验证码错误"
+	AuthStatusAuthTimeout         = "授权超时"
+	AuthStatusAlreadyBound        = "已绑定辅助邮箱"
+	AuthStatusRequestError        = "请求异常"
+	AuthStatusUnknownError        = "未知错误"
+	AuthStatusMFARequired         = "需要两步验证"
+	AuthStatusPhoneVerification   = "需要手机验证"
+	AuthStatusPasskeyRequired     = "需要通行密钥"
+	AuthStatusAccountLocked       = "账号已锁定"
+	AuthStatusRateLimited         = "频率受限"
+	AuthStatusRecoveryMailboxBusy = "辅助邮箱忙"
 )
 
 type AuthError struct {
@@ -23,6 +26,7 @@ type AuthError struct {
 	Status       string
 	Stage        string
 	BoundMailbox string
+	RetryAfter   time.Duration
 	Cause        error
 }
 

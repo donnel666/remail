@@ -100,10 +100,11 @@ type MicrosoftValidationResult struct {
 	// RecoveredBinding is a complete, uniquely resolved, locally receivable
 	// recovery-mailbox fact. It intentionally contains no proof mask, token,
 	// code, or other Microsoft protocol material.
-	RecoveredBinding     *MicrosoftRecoveredBinding
-	BindingObservation   *MicrosoftBindingObservation
-	ConfirmedAliases     []string
-	ReleaseRecoveryLease func(context.Context) error
+	RecoveredBinding      *MicrosoftRecoveredBinding
+	BindingObservation    *MicrosoftBindingObservation
+	ConfirmedAliases      []string
+	AfterValidationCommit func(context.Context) error
+	ReleaseRecoveryLease  func(context.Context) error
 }
 
 // MicrosoftRecoveredBinding carries the optimistic binding snapshot captured
@@ -580,7 +581,11 @@ func (uc *ResourceValidationUseCase) processMicrosoft(ctx context.Context, task 
 			return ErrValidationTemporaryUnavailable
 		}
 	}
-	err = uc.validations.ApplyMicrosoftResult(ctx, task, result, validationSystemLog(task, result.Valid, result.Category, result.SafeMessage))
+	var systemLog *governancedomain.SystemLog
+	if !strings.EqualFold(strings.TrimSpace(result.Category), "recovery_mailbox_busy") {
+		systemLog = validationSystemLog(task, result.Valid, result.Category, result.SafeMessage)
+	}
+	err = uc.validations.ApplyMicrosoftResult(ctx, task, result, systemLog)
 	if errors.Is(err, ErrValidationResultStale) {
 		return nil
 	}
@@ -592,6 +597,19 @@ func (uc *ResourceValidationUseCase) processMicrosoft(ctx context.Context, task 
 	}
 	if !result.Valid {
 		return nil
+	}
+	// Same-session validation extras run only after the durable history task was
+	// created and the resource was committed as identifying. Their failure is
+	// deliberately non-fatal: history owns the final normal transition.
+	if result.AfterValidationCommit != nil {
+		if postErr := result.AfterValidationCommit(ctx); postErr != nil {
+			slog.Warn(
+				"microsoft post-validation action deferred",
+				"resource_id", task.ResourceID,
+				"request_id", task.RequestID,
+				"error", postErr,
+			)
+		}
 	}
 	// Alias scheduling is its own durable concern. A transient failure here
 	// must not turn an already-committed validation success back into a retry;

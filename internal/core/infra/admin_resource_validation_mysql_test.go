@@ -422,6 +422,36 @@ func TestResourceValidationRepoCountsOnlyBusinessFailuresMySQL(t *testing.T) {
 	}
 }
 
+func TestResourceValidationRepoDoesNotCountRecoveryMailboxBusyMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	repo := NewResourceRepo(db)
+	validations := NewResourceValidationRepo(db)
+	insertAdminValidationOwner(t, db)
+
+	root := &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1}
+	require.NoError(t, repo.CreateMicrosoft(context.Background(), root, &domain.MicrosoftResource{
+		EmailAddress: "mailbox-busy@outlook.com", Password: "secret", Status: domain.MicrosoftStatusPending,
+		QualityScore: 87, GraphAvailable: true,
+	}))
+	makeValidationAssignmentsReady(t, db)
+	tasks, err := validations.ClaimPendingValidations(context.Background(), 1)
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	require.True(t, mustActivateValidation(t, validations, tasks[0]))
+	require.NoError(t, validations.ApplyMicrosoftResult(context.Background(), tasks[0], coreapp.MicrosoftValidationResult{
+		Valid: false, Retryable: true, Category: "recovery_mailbox_busy",
+		SafeMessage: "Microsoft recovery mailbox is already processing another verification code.",
+	}, nil))
+
+	var stored MicrosoftResourceModel
+	require.NoError(t, db.First(&stored, root.ID).Error)
+	require.Equal(t, string(domain.MicrosoftStatusPending), stored.Status)
+	require.Zero(t, stored.ValidationFailures)
+	require.Equal(t, tasks[0].ValidationGeneration+1, stored.ValidationGeneration)
+	require.Equal(t, 87, stored.QualityScore)
+	require.True(t, stored.GraphAvailable)
+}
+
 func mustActivateValidation(t *testing.T, validations *ResourceValidationRepo, task coreapp.ResourceValidationTask) bool {
 	t.Helper()
 	activated, err := validations.MarkValidationDispatched(context.Background(), task)

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -83,7 +84,7 @@ func (a *ResourceValidationAdapter) validateMicrosoftHardReauthorize(
 			if attempt < maxAttempts {
 				continue
 			}
-			return hardReauthorizeFailure("request", "Microsoft proxy selection is temporarily unavailable."), nil
+			return coreapp.MicrosoftValidationResult{}, acquireErr
 		}
 		proxyURL, proxyID := microsoftProxyRoute(proxyConfig)
 		raw, authorizeErr := a.hardReauthorize(
@@ -97,18 +98,35 @@ func (a *ResourceValidationAdapter) validateMicrosoftHardReauthorize(
 		if cancelErr := microsoftRecoveryContextError(ctx, authorizeErr); cancelErr != nil {
 			return coreapp.MicrosoftValidationResult{}, cancelErr
 		}
-		if authorizeErr != nil && strings.TrimSpace(raw.Category) == "" {
+		if authorizeErr != nil {
 			raw.Valid = false
-			raw.Category = "request"
-			raw.SafeMessage = "Microsoft authorization request failed temporarily."
-			raw.ProxyFailure = msacl.IsProxyTransportError(authorizeErr)
+			if isMicrosoftRateLimitedError(authorizeErr) {
+				raw.Category = "rate_limited"
+				raw.SafeMessage = "Microsoft authorization is temporarily rate limited."
+				raw.ProxyFailure = false
+			} else if isMicrosoftRecoveryMailboxBusyError(authorizeErr) {
+				raw.Category = "recovery_mailbox_busy"
+				raw.SafeMessage = "Microsoft recovery mailbox is already processing another verification code."
+				raw.ProxyFailure = false
+			} else if strings.TrimSpace(raw.Category) == "" {
+				raw.Category = "request"
+				raw.SafeMessage = "Microsoft authorization request failed temporarily."
+				raw.ProxyFailure = msacl.IsProxyTransportError(authorizeErr)
+			}
 		}
-		aliasProxyFailure, aliasProxyMessage := hardReauthorizeAliasProxyFailure(raw.AliasResults)
-		proxyFailure := raw.ProxyFailure || aliasProxyFailure || msacl.IsProxyTransportError(authorizeErr)
-		sideEffectsStarted := raw.ConsentCleanup.Removed > 0 || len(raw.AliasResults) > 0 || raw.Valid
+		proxyFailure := raw.ProxyFailure || msacl.IsProxyTransportError(authorizeErr)
+		recoveryMailboxBusy := isMicrosoftRecoveryMailboxBusyCategory(raw.Category)
+		rateLimited := isMicrosoftRateLimitedCategory(raw.Category)
+		if rateLimited || recoveryMailboxBusy {
+			// A Microsoft quota response is not a broken proxy. Keep it neutral so
+			// the CMD can cool only its local lease. A local recovery-mailbox lease
+			// conflict is likewise unrelated to proxy health.
+			proxyFailure = false
+		}
+		sideEffectsStarted := raw.ConsentCleanup.Removed > 0 || raw.Valid
 		if proxyFailure && !sideEffectsStarted && !raw.ExternalBinding && attempt < maxAttempts {
 			avoidServerIDs = proxyapp.AppendAvoidProxyServerID(avoidServerIDs, proxyConfig)
-			_ = a.reportProxyFailure(ctx, proxyID, firstHardReauthorizeValue(raw.SafeMessage, aliasProxyMessage))
+			_ = a.reportProxyFailure(ctx, proxyID, raw.SafeMessage)
 			continue
 		}
 
@@ -122,13 +140,32 @@ func (a *ResourceValidationAdapter) validateMicrosoftHardReauthorize(
 		if finishErr != nil {
 			return coreapp.MicrosoftValidationResult{}, finishErr
 		}
+		if recoveryMailboxBusy {
+			result.Category = "recovery_mailbox_busy"
+			result.SafeMessage = "Microsoft recovery mailbox is already processing another verification code."
+			downstreamProxyFailure = false
+		}
 		proxyFailure = proxyFailure || downstreamProxyFailure
-		if proxyFailure {
+		if recoveryMailboxBusy {
+			proxyFailure = false
+		}
+		rateLimited = rateLimited || isMicrosoftRateLimitedCategory(result.Category)
+		if rateLimited {
+			proxyFailure = false
+			_ = a.reportProxyRateLimited(ctx, proxyID)
+		} else if recoveryMailboxBusy {
+			// A local mailbox lease conflict says nothing about proxy health.
+		} else if proxyFailure {
 			_ = a.reportProxyFailure(ctx, proxyID, result.SafeMessage)
 		} else {
 			_ = a.reportProxySuccess(ctx, proxyID)
 		}
-		result.ReleaseRecoveryLease = msacl.RecoveryLeaseReleaser(ctx)
+		// Sent-but-unconsumed OTP leases must survive failed validation until
+		// their TTL expires. Successful protocol paths release a consumed OTP
+		// immediately; this post-persistence hook is only a final success cleanup.
+		if result.Valid {
+			result.ReleaseRecoveryLease = msacl.RecoveryLeaseReleaser(ctx)
+		}
 		return result, nil
 	}
 	return hardReauthorizeFailure("request", "Microsoft proxy attempts were exhausted."), nil
@@ -186,18 +223,6 @@ func (a *ResourceValidationAdapter) finishMicrosoftHardReauthorize(
 		result.SafeMessage = "Microsoft account authorization cleanup did not complete."
 		return result, false, nil
 	}
-	if len(result.ConfirmedAliases) != len(candidates) {
-		result.Valid = false
-		if hardReauthorizeAliasRateLimited(raw.AliasResults) {
-			result.Category = "rate_limited"
-			result.SafeMessage = "Microsoft alias creation is rate limited."
-			return result, hardReauthorizeAliasProxyFailureOnly(raw.AliasResults), nil
-		}
-		result.Category = "alias_incomplete"
-		result.SafeMessage = "Microsoft explicit alias creation did not complete."
-		return result, hardReauthorizeAliasProxyFailureOnly(raw.AliasResults), nil
-	}
-
 	if oldClientID, oldRefreshToken := strings.TrimSpace(req.ClientID), strings.TrimSpace(req.RefreshToken); oldClientID != "" || oldRefreshToken != "" {
 		if oldClientID == "" || oldRefreshToken == "" {
 			result.Valid = false
@@ -215,10 +240,22 @@ func (a *ResourceValidationAdapter) finishMicrosoftHardReauthorize(
 			return coreapp.MicrosoftValidationResult{}, oldResult.ProxyFailure, cancelErr
 		}
 		if refreshErr != nil {
+			if isMicrosoftRateLimitedError(refreshErr) || isMicrosoftRateLimitedCategory(oldResult.Category) {
+				result.Valid = false
+				result.Category = "rate_limited"
+				result.SafeMessage = "Microsoft authorization is temporarily rate limited."
+				return result, false, nil
+			}
 			result.Valid = false
 			result.Category = "old_rt_unverified"
 			result.SafeMessage = "Previous Microsoft refresh-token revocation could not be verified."
 			return result, oldResult.ProxyFailure || msacl.IsProxyTransportError(refreshErr), nil
+		}
+		if isMicrosoftRateLimitedCategory(oldResult.Category) {
+			result.Valid = false
+			result.Category = "rate_limited"
+			result.SafeMessage = firstHardReauthorizeValue(oldResult.SafeMessage, "Microsoft authorization is temporarily rate limited.")
+			return result, false, nil
 		}
 		if oldResult.Valid {
 			result.Valid = false
@@ -249,14 +286,56 @@ func (a *ResourceValidationAdapter) finishMicrosoftHardReauthorize(
 	result.ConfirmedAliases = confirmedHardReauthorizeAliases(raw.AliasResults, candidates)
 	if !verified.Valid || !verified.GraphAvailable {
 		result.Valid = false
-		result.Category = "hard_reauthorize_graph"
-		result.SafeMessage = "Microsoft Graph verification did not complete after reauthorization."
+		if isMicrosoftRateLimitedCategory(verified.Category) {
+			result.Category = "rate_limited"
+			result.SafeMessage = firstHardReauthorizeValue(verified.SafeMessage, "Microsoft authorization is temporarily rate limited.")
+		} else {
+			result.Category = "hard_reauthorize_graph"
+			result.SafeMessage = "Microsoft Graph verification did not complete after reauthorization."
+		}
 		return result, proxyFailure, nil
 	}
 	result.Valid = true
 	result.Category = ""
 	result.SafeMessage = "Microsoft resource validation succeeded."
+	result.AfterValidationCommit = a.validationAliasContinuation(req.ResourceID, candidates, raw)
 	return result, proxyFailure, nil
+}
+
+func (a *ResourceValidationAdapter) validationAliasContinuation(
+	resourceID uint,
+	candidates []string,
+	raw msacl.ReauthorizeResult,
+) func(context.Context) error {
+	if raw.ContinueAliases == nil {
+		return nil
+	}
+	return func(ctx context.Context) error {
+		results := raw.ContinueAliases()
+		confirmed := confirmedHardReauthorizeAliases(results, candidates)
+		failedCategories := make([]string, 0, len(results))
+		for _, result := range results {
+			if len(result.Aliases) > 0 {
+				continue
+			}
+			category := strings.TrimSpace(result.Category)
+			if category == "" {
+				category = "alias_incomplete"
+			}
+			failedCategories = append(failedCategories, category)
+		}
+		if len(failedCategories) > 0 {
+			slog.Warn(
+				"microsoft validation explicit alias attempt deferred",
+				"resource_id", resourceID,
+				"categories", strings.Join(failedCategories, ","),
+			)
+		}
+		if len(confirmed) == 0 || a == nil || a.validationAliases == nil {
+			return nil
+		}
+		return a.validationAliases.BackfillExistingAliases(ctx, resourceID, confirmed)
+	}
 }
 
 func (a *ResourceValidationAdapter) finishExternalBindingRefresh(
@@ -281,11 +360,8 @@ func (a *ResourceValidationAdapter) finishExternalBindingRefresh(
 			RefreshToken: refreshToken,
 			ProxyURL:     proxyURL,
 		})
-		if refreshErr != nil && strings.TrimSpace(refreshed.Category) == "" {
-			refreshed.Valid = false
-			refreshed.Category = "request"
-			refreshed.SafeMessage = "Microsoft refresh-token exchange is temporarily unavailable."
-			refreshed.ProxyFailure = msacl.IsProxyTransportError(refreshErr)
+		if refreshErr != nil {
+			refreshed = normalizeMicrosoftOAuthErrorResult(refreshed, refreshErr, "Microsoft refresh-token exchange is temporarily unavailable.")
 		}
 		return refreshed, refreshErr
 	}
@@ -393,29 +469,6 @@ func confirmedHardReauthorizeAliases(results []msacl.ExplicitAliasResult, candid
 		}
 	}
 	return aliases
-}
-
-func hardReauthorizeAliasProxyFailure(results []msacl.ExplicitAliasResult) (bool, string) {
-	for _, result := range results {
-		if result.ProxyFailure {
-			return true, strings.TrimSpace(result.SafeMessage)
-		}
-	}
-	return false, ""
-}
-
-func hardReauthorizeAliasProxyFailureOnly(results []msacl.ExplicitAliasResult) bool {
-	failed, _ := hardReauthorizeAliasProxyFailure(results)
-	return failed
-}
-
-func hardReauthorizeAliasRateLimited(results []msacl.ExplicitAliasResult) bool {
-	for _, result := range results {
-		if strings.EqualFold(strings.TrimSpace(result.Category), "rate_limited") {
-			return true
-		}
-	}
-	return false
 }
 
 func hardReauthorizeOldRTRejected(category string) bool {

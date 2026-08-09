@@ -36,6 +36,51 @@ type Session struct {
 	dcInterval  int
 	dcExpiresIn int
 	usesProxy   bool
+	// retryCredentialTypeRateLimits is enabled by the account-validation
+	// authorization flow.  The independent weekly alias flow intentionally
+	// keeps its historical retry policy unless it opts in explicitly.
+	retryCredentialTypeRateLimits bool
+	sleepFn                       func(time.Duration) error
+}
+
+type credentialTypeRetryPolicyKey struct{}
+type credentialTypeRateLimiterKey struct{}
+
+// WithCredentialTypeRateLimiter scopes a shared GetCredentialType gate to the
+// caller's context. The validation CMD opts in; normal APP and weekly alias
+// workers keep their existing behavior.
+func WithCredentialTypeRateLimiter(ctx context.Context, wait func(context.Context) error) context.Context {
+	ctx = contextOrBackground(ctx)
+	if wait == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, credentialTypeRateLimiterKey{}, wait)
+}
+
+func waitForCredentialTypeRateLimiter(session *Session) error {
+	if session == nil {
+		return nil
+	}
+	wait, _ := session.context().Value(credentialTypeRateLimiterKey{}).(func(context.Context) error)
+	if wait == nil {
+		return nil
+	}
+	return wait(session.context())
+}
+
+func withCredentialTypeRateLimitRetry(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, credentialTypeRetryPolicyKey{}, true)
+}
+
+func credentialTypeRateLimitRetryEnabled(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	enabled, _ := ctx.Value(credentialTypeRetryPolicyKey{}).(bool)
+	return enabled
 }
 
 type sessionTransportError struct {
@@ -149,12 +194,13 @@ func newBrowserSession(ctx context.Context, proxy string) (*Session, error) {
 		return nil, newSessionTransportError(err, proxy != "")
 	}
 	return &Session{
-		client:      client,
-		ctx:         contextOrBackground(ctx),
-		navHeaders:  cloneStringMap(fp.HeadersNavigate),
-		corsHeaders: cloneStringMap(fp.HeadersCORS),
-		userAgent:   fp.UserAgent,
-		usesProxy:   proxy != "",
+		client:                        client,
+		ctx:                           contextOrBackground(ctx),
+		navHeaders:                    cloneStringMap(fp.HeadersNavigate),
+		corsHeaders:                   cloneStringMap(fp.HeadersCORS),
+		userAgent:                     fp.UserAgent,
+		usesProxy:                     proxy != "",
+		retryCredentialTypeRateLimits: credentialTypeRateLimitRetryEnabled(ctx),
 	}, nil
 }
 
@@ -169,10 +215,11 @@ func newPlainSession(ctx context.Context, proxy string, timeoutSeconds int) (*Se
 		return nil, newSessionTransportError(err, proxy != "")
 	}
 	return &Session{
-		client:    client,
-		ctx:       contextOrBackground(ctx),
-		userAgent: "Mozilla/5.0",
-		usesProxy: proxy != "",
+		client:                        client,
+		ctx:                           contextOrBackground(ctx),
+		userAgent:                     "Mozilla/5.0",
+		usesProxy:                     proxy != "",
+		retryCredentialTypeRateLimits: credentialTypeRateLimitRetryEnabled(ctx),
 	}, nil
 }
 
@@ -282,6 +329,9 @@ func sleepContext(ctx context.Context, d time.Duration) error {
 }
 
 func (s *Session) sleep(d time.Duration) error {
+	if s != nil && s.sleepFn != nil {
+		return s.sleepFn(d)
+	}
 	return sleepContext(s.context(), d)
 }
 

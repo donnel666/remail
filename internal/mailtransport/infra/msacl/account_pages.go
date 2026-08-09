@@ -361,7 +361,7 @@ func handleOTPVerification(session *Session, page, rawURL, email, proxy string, 
 		logInfo("OTP 验证: 已匹配真实邮箱")
 		logDebug("OTP 验证: real_mailbox=%s", realMailbox)
 	}
-	lease, err := claimCodeMailLease(session.context(), maskedEmail)
+	lease, err := claimCodeMailLease(session.context(), maskedEmail, realMailbox)
 	if err != nil {
 		return "", "", "", err
 	}
@@ -489,6 +489,7 @@ func handleOTPVerification(session *Session, page, rawURL, email, proxy string, 
 		logDebug("VerifyCode 失败响应 keys=%v", sortedAnyKeys(verifyResult))
 		return "", "", "", newAuthError(fmt.Sprintf("VerifyCode 失败: code=%s, message=%s", code, message), AuthStatusVerifyCodeError, verificationBinding)
 	}
+	releaseCompletedCodeMailLease(session.context(), lease)
 	route := asString(verifyResult["route"])
 	finalURL := returnURL
 	if route != "" {

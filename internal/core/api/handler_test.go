@@ -2536,19 +2536,33 @@ func TestResourceValidationUseCase_ProcessMicrosoftSuccessUpdatesResource(t *tes
 	validationRepo := newMockValidationRepo(resourceRepo)
 	trigger := &validationAliasTrigger{}
 	historyTrigger := &validationHistoryTrigger{}
+	root := &coredomain.EmailResource{Type: coredomain.ResourceTypeMicrosoft, OwnerUserID: 1}
+	resource := &coredomain.MicrosoftResource{EmailAddress: "success@example.com", Password: "secret", Status: coredomain.MicrosoftStatusPending, CredentialRevision: 1}
+	require.NoError(t, resourceRepo.CreateMicrosoft(context.Background(), root, resource))
+	postCommitCalled := false
+	postCommitHistoryTasks := 0
+	postCommitStatus := coredomain.MicrosoftStatusPending
 	uc := coreapp.NewResourceValidationUseCase(resourceRepo, validationRepo, &mockValidationQueue{}, mockResourceValidator{
-		msResult: coreapp.MicrosoftValidationResult{Valid: true, ClientID: "rotated-client", RefreshToken: "rotated-rt", GraphAvailable: true},
+		msResult: coreapp.MicrosoftValidationResult{
+			Valid: true, ClientID: "rotated-client", RefreshToken: "rotated-rt", GraphAvailable: true,
+			AfterValidationCommit: func(context.Context) error {
+				postCommitCalled = true
+				postCommitHistoryTasks = len(historyTrigger.tasks)
+				postCommitStatus = resourceRepo.microsoft[root.ID].Status
+				return errors.New("alias rate limited")
+			},
+		},
 	})
 	uc.SetMicrosoftAliasScheduleTrigger(trigger)
 	uc.SetMicrosoftHistoryScanTrigger(historyTrigger)
 
-	root := &coredomain.EmailResource{Type: coredomain.ResourceTypeMicrosoft, OwnerUserID: 1}
-	resource := &coredomain.MicrosoftResource{EmailAddress: "success@example.com", Password: "secret", Status: coredomain.MicrosoftStatusPending, CredentialRevision: 1}
-	require.NoError(t, resourceRepo.CreateMicrosoft(context.Background(), root, resource))
 	task := mockValidationTask(validationRepo, root.ID)
 	require.NoError(t, uc.Process(context.Background(), task, false))
 	require.Equal(t, coredomain.MicrosoftStatusIdentifying, resourceRepo.microsoft[root.ID].Status)
 	require.Equal(t, "rotated-rt", resourceRepo.microsoft[root.ID].RefreshToken)
+	require.True(t, postCommitCalled)
+	require.Equal(t, 1, postCommitHistoryTasks)
+	require.Equal(t, coredomain.MicrosoftStatusIdentifying, postCommitStatus)
 	require.Equal(t, []uint{root.ID}, trigger.resourceIDs)
 	require.Len(t, historyTrigger.tasks, 1)
 	require.Equal(t, root.ID, historyTrigger.tasks[0].resourceID)

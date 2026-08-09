@@ -67,6 +67,14 @@ type MicrosoftProxyProvider interface {
 	ReportFailure(ctx context.Context, proxyID uint, safeError string) error
 }
 
+// microsoftProxyRateLimitReporter is optional so the normal proxy use case
+// keeps its existing interface. A rate limit is deliberately neutral: the
+// validation CMD may cool its local lease without incrementing upstream proxy
+// failure counters or reporting a false success.
+type microsoftProxyRateLimitReporter interface {
+	ReportRateLimited(ctx context.Context, proxyID uint) error
+}
+
 type microsoftProxyProvider = MicrosoftProxyProvider
 
 type microsoftMailFetcher interface {
@@ -86,6 +94,10 @@ type microsoftValidationBindingStore interface {
 	FindByResourceIDs(ctx context.Context, resourceIDs []uint) (map[uint]maildomain.MicrosoftBindingMailbox, error)
 }
 
+type microsoftValidationAliasBackfiller interface {
+	BackfillExistingAliases(ctx context.Context, resourceID uint, aliases []string) error
+}
+
 func microsoftProxyAttemptLimit() int {
 	return runtimeconfig.Int("max_proxy_attempts", maxMicrosoftProxyAttempts, 1)
 }
@@ -99,6 +111,7 @@ type ResourceValidationAdapter struct {
 	probePasswordRecovery      func(context.Context, string, string, string) (msacl.PasswordRecoveryProbeResult, error)
 	evaluateBindingEligibility func(context.Context, msacl.PasswordRecoveryProbeResult) msacl.BindingRecoveryEligibility
 	hardReauthorize            microsoftHardReauthorizeProtocol
+	validationAliases          microsoftValidationAliasBackfiller
 }
 
 // RefreshMicrosoftToken is the MailTransport ACL used by the durable
@@ -138,14 +151,7 @@ func (a *ResourceValidationAdapter) RefreshMicrosoftToken(
 			if cancelErr := microsoftRecoveryContextError(ctx, refreshErr); cancelErr != nil {
 				return mailapp.MicrosoftTokenRefreshProtocolResult{}, cancelErr
 			}
-			raw.Valid = false
-			if !structuredResult {
-				raw = mailinfra.MicrosoftOAuthResult{
-					Category:     "request",
-					SafeMessage:  "Microsoft mail service is temporarily unavailable.",
-					ProxyFailure: msacl.IsProxyTransportError(refreshErr),
-				}
-			}
+			raw = normalizeMicrosoftOAuthErrorResult(raw, refreshErr, "Microsoft mail service is temporarily unavailable.")
 		}
 		if !raw.Valid {
 			if ctxErr := ctx.Err(); ctxErr != nil {
@@ -155,6 +161,10 @@ func (a *ResourceValidationAdapter) RefreshMicrosoftToken(
 		last = safeMicrosoftTokenRefreshProtocolResult(raw)
 		if raw.Valid {
 			_ = a.reportProxySuccess(ctx, proxyID)
+			return last, nil
+		}
+		if isMicrosoftRateLimitedCategory(raw.Category) {
+			_ = a.reportProxyRateLimited(ctx, proxyID)
 			return last, nil
 		}
 		if raw.ProxyFailure && proxyID != 0 {
@@ -239,6 +249,49 @@ func safeMicrosoftTokenRefreshProtocolResult(raw mailinfra.MicrosoftOAuthResult)
 	return result
 }
 
+func isMicrosoftRateLimitedCategory(category string) bool {
+	return strings.EqualFold(strings.TrimSpace(category), "rate_limited")
+}
+
+func isMicrosoftRecoveryMailboxBusyCategory(category string) bool {
+	return strings.EqualFold(strings.TrimSpace(category), "recovery_mailbox_busy")
+}
+
+func isMicrosoftRateLimitedError(err error) bool {
+	var authErr *msacl.AuthError
+	return errors.As(err, &authErr) && authErr != nil && strings.EqualFold(strings.TrimSpace(authErr.Status), msacl.AuthStatusRateLimited)
+}
+
+func isMicrosoftRecoveryMailboxBusyError(err error) bool {
+	var authErr *msacl.AuthError
+	return errors.As(err, &authErr) && authErr != nil && strings.EqualFold(strings.TrimSpace(authErr.Status), msacl.AuthStatusRecoveryMailboxBusy)
+}
+
+// normalizeMicrosoftOAuthErrorResult keeps a structured upstream rate-limit
+// status even when a protocol implementation returns it only as an error.
+// Rate limiting is an upstream quota signal, never proxy health evidence.
+func normalizeMicrosoftOAuthErrorResult(result mailinfra.MicrosoftOAuthResult, err error, fallbackMessage string) mailinfra.MicrosoftOAuthResult {
+	result.Valid = false
+	if isMicrosoftRateLimitedError(err) {
+		result.Category = "rate_limited"
+		result.SafeMessage = "Microsoft authorization is temporarily rate limited."
+		result.ProxyFailure = false
+		return result
+	}
+	if isMicrosoftRecoveryMailboxBusyError(err) {
+		result.Category = "recovery_mailbox_busy"
+		result.SafeMessage = "Microsoft recovery mailbox is already processing another verification code."
+		result.ProxyFailure = false
+		return result
+	}
+	if strings.TrimSpace(result.Category) == "" {
+		result.Category = "request"
+		result.SafeMessage = fallbackMessage
+		result.ProxyFailure = msacl.IsProxyTransportError(err)
+	}
+	return result
+}
+
 func unavailableMicrosoftTokenRefreshResult() mailapp.MicrosoftTokenRefreshProtocolResult {
 	return mailapp.MicrosoftTokenRefreshProtocolResult{
 		Category:    "request",
@@ -246,7 +299,7 @@ func unavailableMicrosoftTokenRefreshResult() mailapp.MicrosoftTokenRefreshProto
 	}
 }
 
-func NewResourceValidationAdapter(proxies *proxyapp.ProxyUseCase, bindings *mailinfra.MicrosoftBindingRepo) *ResourceValidationAdapter {
+func NewResourceValidationAdapter(proxies *proxyapp.ProxyUseCase, bindings *mailinfra.MicrosoftBindingRepo, aliases ...microsoftValidationAliasBackfiller) *ResourceValidationAdapter {
 	adapter := &ResourceValidationAdapter{
 		microsoft:                  mailinfra.NewMicrosoftOAuthClient(),
 		fetcher:                    mailinfra.NewMicrosoftMailFetchClient(),
@@ -256,14 +309,17 @@ func NewResourceValidationAdapter(proxies *proxyapp.ProxyUseCase, bindings *mail
 		evaluateBindingEligibility: msacl.EvaluateActiveBindingRecoveryEligibility,
 		hardReauthorize:            msacl.ReauthorizeWithAliases,
 	}
+	if len(aliases) > 0 {
+		adapter.validationAliases = aliases[0]
+	}
 	if proxies != nil {
 		adapter.proxies = proxies
 	}
 	return adapter
 }
 
-func NewResourceValidationAdapterWithProxyProvider(proxies MicrosoftProxyProvider, bindings *mailinfra.MicrosoftBindingRepo) *ResourceValidationAdapter {
-	adapter := NewResourceValidationAdapter(nil, bindings)
+func NewResourceValidationAdapterWithProxyProvider(proxies MicrosoftProxyProvider, bindings *mailinfra.MicrosoftBindingRepo, aliases ...microsoftValidationAliasBackfiller) *ResourceValidationAdapter {
+	adapter := NewResourceValidationAdapter(nil, bindings, aliases...)
 	if proxies != nil {
 		adapter.proxies = proxies
 	}
@@ -279,6 +335,7 @@ func (a *ResourceValidationAdapter) ValidateMicrosoft(ctx context.Context, req c
 		}, nil
 	}
 	ctx = msacl.WithRecoveryLeaseScope(ctx, req.ResourceID, "")
+	ctx = msacl.WithConcreteRecoveryLeaseKeys(ctx)
 	if a.hardReauthorize != nil {
 		return a.validateMicrosoftHardReauthorize(ctx, req)
 	}
@@ -322,6 +379,10 @@ func (a *ResourceValidationAdapter) ValidateMicrosoft(ctx context.Context, req c
 			proxyID = proxyConfig.ID
 		}
 		rawResult, recoveryAction, credentialsAuthoritative, err := a.runMicrosoftValidation(ctx, req, proxyURL, effectiveBindingAddress, bindingAddressTrusted)
+		if err != nil {
+			rawResult = normalizeMicrosoftOAuthErrorResult(rawResult, err, "Microsoft mail service is temporarily unavailable.")
+		}
+		rateLimitedDuringAttempt := isMicrosoftRateLimitedCategory(rawResult.Category)
 		proxyResultAuthoritative := err == nil || strings.TrimSpace(rawResult.Category) != ""
 		if err != nil && rawResult.MailFetch != nil {
 			proxyResultAuthoritative = strings.TrimSpace(rawResult.MailFetch.Category) != ""
@@ -334,12 +395,6 @@ func (a *ResourceValidationAdapter) ValidateMicrosoft(ctx context.Context, req c
 		if err != nil {
 			if cancelErr := microsoftRecoveryContextError(ctx, err); cancelErr != nil {
 				return coreapp.MicrosoftValidationResult{}, cancelErr
-			}
-			rawResult.Valid = false
-			if strings.TrimSpace(rawResult.Category) == "" {
-				rawResult.Category = "request"
-				rawResult.SafeMessage = "Microsoft mail service is temporarily unavailable."
-				rawResult.ProxyFailure = msacl.IsProxyTransportError(err)
 			}
 		}
 		if recoveryAction == microsoftBindingRecoveryNone &&
@@ -356,16 +411,22 @@ func (a *ResourceValidationAdapter) ValidateMicrosoft(ctx context.Context, req c
 		recoveryProbeUnavailable := false
 		if recoveryNeeded && !bindingAddressTrusted && !recoveryAttempted {
 			recoveryAttempted = true
-			recoveryCandidate, recoveryProbeUnavailable, err = a.recoverBindingForValidation(ctx, req, bindingSnapshot)
+			var recoveryProbeRateLimited bool
+			recoveryCandidate, recoveryProbeUnavailable, recoveryProbeRateLimited, err = a.recoverBindingForValidation(ctx, req, bindingSnapshot)
 			if err != nil {
 				return coreapp.MicrosoftValidationResult{}, err
 			}
+			rateLimitedDuringAttempt = rateLimitedDuringAttempt || recoveryProbeRateLimited
 			if recoveryCandidate != nil {
 				effectiveBindingAddress = recoveryCandidate.Address
 			}
 		}
 		if recoveryProbeUnavailable && !resourceUsable {
 			rawResult = unavailableMicrosoftBindingRecoveryResult(rawResult, effectiveBindingAddress)
+			if rateLimitedDuringAttempt {
+				rawResult.Category = "rate_limited"
+				rawResult.SafeMessage = "Microsoft authorization is temporarily rate limited."
+			}
 		}
 		if recoveryCandidate != nil {
 			var confirmed bool
@@ -391,6 +452,7 @@ func (a *ResourceValidationAdapter) ValidateMicrosoft(ctx context.Context, req c
 			if confirmed {
 				recoveredBinding = recoveryCandidate.confirmedFact()
 			}
+			rateLimitedDuringAttempt = rateLimitedDuringAttempt || isMicrosoftRateLimitedCategory(rawResult.Category)
 		}
 		if resourceUsable && !rawResult.Valid {
 			bindingResult := rawResult
@@ -449,7 +511,20 @@ func (a *ResourceValidationAdapter) ValidateMicrosoft(ctx context.Context, req c
 			last.ReleaseRecoveryLease = msacl.RecoveryLeaseReleaser(ctx)
 		}
 		if rawResult.Valid {
-			_ = a.reportProxySuccess(ctx, proxyID)
+			if rateLimitedDuringAttempt {
+				_ = a.reportProxyRateLimited(ctx, proxyID)
+			} else {
+				_ = a.reportProxySuccess(ctx, proxyID)
+			}
+			return last, nil
+		}
+		if rateLimitedDuringAttempt || isMicrosoftRateLimitedCategory(rawResult.Category) {
+			_ = a.reportProxyRateLimited(ctx, proxyID)
+			return last, nil
+		}
+		if isMicrosoftRecoveryMailboxBusyCategory(rawResult.Category) {
+			// A local mailbox lease conflict is neither a proxy failure nor a
+			// successful upstream request, so keep proxy health neutral.
 			return last, nil
 		}
 		if rawResult.ProxyFailure && proxyID != 0 {
@@ -684,9 +759,17 @@ func (a *ResourceValidationAdapter) acquireTokenWithBindingProxy(
 		if cancelErr := microsoftRecoveryContextError(ctx, acquireErr); cancelErr != nil {
 			return mailinfra.MicrosoftOAuthResult{}, cancelErr
 		}
-		if acquireErr != nil && strings.TrimSpace(result.Category) == "" {
-			result = unavailableMicrosoftBindingResult()
-			result.ProxyFailure = msacl.IsProxyTransportError(acquireErr)
+		if acquireErr != nil {
+			result = normalizeMicrosoftOAuthErrorResult(result, acquireErr, "Microsoft authorization request failed temporarily.")
+		}
+		if isMicrosoftRateLimitedCategory(result.Category) {
+			_ = a.reportProxyRateLimited(ctx, proxyID)
+			result.ProxyFailure = false
+			return result, nil
+		}
+		if isMicrosoftRecoveryMailboxBusyCategory(result.Category) {
+			result.ProxyFailure = false
+			return result, nil
 		}
 		if result.ProxyFailure {
 			avoidServerIDs = proxyapp.AppendAvoidProxyServerID(avoidServerIDs, proxyConfig)
@@ -748,9 +831,7 @@ func (a *ResourceValidationAdapter) fetchMicrosoftValidation(
 			result.SafeMessage = fetchResult.SafeMessage
 			result.ProxyFailure = fetchResult.ProxyFailure
 		} else {
-			result.Category = "request"
-			result.SafeMessage = "Microsoft mail service is temporarily unavailable."
-			result.ProxyFailure = msacl.IsProxyTransportError(err)
+			result = normalizeMicrosoftOAuthErrorResult(result, err, "Microsoft mail service is temporarily unavailable.")
 		}
 		return result, err
 	}
@@ -920,6 +1001,17 @@ func (a *ResourceValidationAdapter) reportProxyFailure(ctx context.Context, prox
 	return a.proxies.ReportFailure(ctx, proxyID, safeError)
 }
 
+func (a *ResourceValidationAdapter) reportProxyRateLimited(ctx context.Context, proxyID uint) error {
+	if a == nil || a.proxies == nil || proxyID == 0 || (ctx != nil && ctx.Err() != nil) {
+		return nil
+	}
+	reporter, ok := a.proxies.(microsoftProxyRateLimitReporter)
+	if !ok {
+		return nil
+	}
+	return reporter.ReportRateLimited(ctx, proxyID)
+}
+
 func toCoreMicrosoftResult(result mailinfra.MicrosoftOAuthResult) coreapp.MicrosoftValidationResult {
 	return coreapp.MicrosoftValidationResult{
 		Valid:              result.Valid,
@@ -1047,9 +1139,9 @@ func (a *ResourceValidationAdapter) recoverBindingForValidation(
 	ctx context.Context,
 	req coreapp.MicrosoftValidationRequest,
 	snapshot *maildomain.MicrosoftBindingMailbox,
-) (*microsoftBindingRecoveryCandidate, bool, error) {
+) (*microsoftBindingRecoveryCandidate, bool, bool, error) {
 	if a == nil || a.bindings == nil || !shouldProbeBindingRecovery(snapshot, req.EmailAddress) {
-		return nil, false, nil
+		return nil, false, false, nil
 	}
 	probe := a.probePasswordRecovery
 	if probe == nil {
@@ -1064,18 +1156,18 @@ func (a *ResourceValidationAdapter) recoverBindingForValidation(
 	var avoidServerIDs []uint
 	for attempt := 0; attempt <= maxProxyAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
-			return nil, false, err
+			return nil, false, false, err
 		}
 		proxyConfig, err := a.acquireBindingRecoveryProxy(ctx, req, attempt, avoidServerIDs)
 		if err != nil {
 			if cancelErr := microsoftRecoveryContextError(ctx, err); cancelErr != nil {
-				return nil, false, cancelErr
+				return nil, false, false, cancelErr
 			}
 			if attempt < maxProxyAttempts {
 				continue
 			}
 			logMicrosoftBindingRecoverySkip(req, "proxy_unavailable")
-			return nil, true, nil
+			return nil, true, false, nil
 		}
 
 		proxyURL := ""
@@ -1090,45 +1182,50 @@ func (a *ResourceValidationAdapter) recoverBindingForValidation(
 		result, err := probe(ctx, req.EmailAddress, proxyURL, "")
 		if err != nil {
 			if cancelErr := microsoftRecoveryContextError(ctx, err); cancelErr != nil {
-				return nil, false, cancelErr
+				return nil, false, false, cancelErr
+			}
+			if isMicrosoftRateLimitedError(err) {
+				_ = a.reportProxyRateLimited(ctx, proxyID)
+				logMicrosoftBindingRecoverySkip(req, "rate_limited")
+				return nil, true, true, nil
 			}
 			if !isTemporaryMicrosoftRecoveryProbeError(err) {
 				_ = a.reportProxySuccess(ctx, proxyID)
 				logMicrosoftBindingRecoverySkip(req, "probe_rejected")
-				return nil, false, nil
+				return nil, false, false, nil
 			}
 			avoidServerIDs = proxyapp.AppendAvoidProxyServerID(avoidServerIDs, proxyConfig)
 			if attempt < maxProxyAttempts {
 				continue
 			}
 			logMicrosoftBindingRecoverySkip(req, "probe_unavailable")
-			return nil, true, nil
+			return nil, true, false, nil
 		}
 
 		_ = a.reportProxySuccess(ctx, proxyID)
 		eligibility := evaluate(ctx, result)
 		if err := ctx.Err(); err != nil {
-			return nil, false, err
+			return nil, false, false, err
 		}
 		if !eligibility.Allowed {
 			logMicrosoftBindingRecoverySkip(req, string(eligibility.Reason))
-			return nil, false, nil
+			return nil, false, false, nil
 		}
 		recovered := &microsoftBindingRecoveryCandidate{
 			Address: strings.ToLower(strings.TrimSpace(result.BindingAddress)),
 		}
 		if !isCompleteMicrosoftBindingAddress(recovered.Address) {
 			logMicrosoftBindingRecoverySkip(req, "unresolved")
-			return nil, false, nil
+			return nil, false, false, nil
 		}
 		if snapshot != nil {
 			recovered.ExpectedBindingID = snapshot.ID
 			recovered.ExpectedBindingAddress = strings.ToLower(strings.TrimSpace(snapshot.BindingAddress))
 			recovered.ExpectedBindingUpdatedAt = snapshot.UpdatedAt
 		}
-		return recovered, false, nil
+		return recovered, false, false, nil
 	}
-	return nil, true, nil
+	return nil, true, false, nil
 }
 
 func microsoftRecoveryContextError(ctx context.Context, err error) error {

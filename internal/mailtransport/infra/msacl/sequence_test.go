@@ -323,29 +323,124 @@ func TestCredentialTypeRateLimitsNeverFallThroughToPasswordFlow(t *testing.T) {
 	}
 	for _, test := range calls {
 		t.Run(test.name, func(t *testing.T) {
-			session, client := newScriptedSession(t, func(req *http.Request, _ bool) (*http.Response, error) {
-				return scriptedResponse(req, http.StatusTooManyRequests, req.URL.String(), `<html>rate limited</html>`, map[string]string{"Retry-After": "7"}), nil
-			})
+			session, client := newScriptedSession(t,
+				func(req *http.Request, _ bool) (*http.Response, error) {
+					return scriptedResponse(req, http.StatusTooManyRequests, req.URL.String(), `<html>rate limited</html>`, map[string]string{"Retry-After": "7"}), nil
+				},
+				func(req *http.Request, _ bool) (*http.Response, error) {
+					return scriptedResponse(req, http.StatusTooManyRequests, req.URL.String(), `<html>rate limited</html>`, map[string]string{"Retry-After": "7"}), nil
+				},
+			)
 			session.usesProxy = true
+			session.retryCredentialTypeRateLimits = true
+			session.sleepFn = func(time.Duration) error { return nil }
 			err := test.call(session)
 			require.Error(t, err)
 			var authErr *AuthError
 			require.ErrorAs(t, err, &authErr)
 			require.Equal(t, AuthStatusRateLimited, authErr.Status)
-			require.True(t, IsProxyTransportError(err))
+			require.Equal(t, 7*time.Second, authErr.RetryAfter)
+			require.False(t, IsProxyTransportError(err))
 			client.requireDone()
 		})
 	}
 
-	session, client := newScriptedSession(t, func(req *http.Request, _ bool) (*http.Response, error) {
-		return scriptedResponse(req, http.StatusOK, req.URL.String(), `<html>throttle page</html>`, nil), nil
-	})
+	session, client := newScriptedSession(t,
+		func(req *http.Request, _ bool) (*http.Response, error) {
+			return scriptedResponse(req, http.StatusOK, req.URL.String(), `<html>throttle page</html>`, nil), nil
+		},
+		func(req *http.Request, _ bool) (*http.Response, error) {
+			return scriptedResponse(req, http.StatusOK, req.URL.String(), `<html>throttle page</html>`, nil), nil
+		},
+	)
 	session.usesProxy = true
+	session.retryCredentialTypeRateLimits = true
+	session.sleepFn = func(time.Duration) error { return nil }
 	_, err := getCredentialType(session, "owner@outlook.com", "flow", "uaid", "opid")
 	require.Error(t, err)
 	var authErr *AuthError
 	require.ErrorAs(t, err, &authErr)
 	require.Equal(t, AuthStatusRateLimited, authErr.Status)
+	require.False(t, IsProxyTransportError(err))
+	client.requireDone()
+}
+
+func TestCredentialType429RetriesSameSessionAfterRetryAfter(t *testing.T) {
+	validResponse := `{"IfExistsResult":0,"Credentials":{"OtcLoginEligibleProofs":[]}}`
+	session, client := newScriptedSession(t,
+		func(req *http.Request, _ bool) (*http.Response, error) {
+			return scriptedResponse(req, http.StatusTooManyRequests, req.URL.String(), `<html>rate limited</html>`, map[string]string{"Retry-After": "7"}), nil
+		},
+		func(req *http.Request, _ bool) (*http.Response, error) {
+			return scriptedResponse(req, http.StatusOK, req.URL.String(), validResponse, nil), nil
+		},
+	)
+	session.usesProxy = true
+	session.retryCredentialTypeRateLimits = true
+	var slept time.Duration
+	session.sleepFn = func(delay time.Duration) error {
+		slept = delay
+		return nil
+	}
+
+	proofs, err := getCredentialType(session, "owner@outlook.com", "flow", "uaid", "opid")
+
+	require.NoError(t, err)
+	require.Empty(t, proofs)
+	require.GreaterOrEqual(t, slept, 7*time.Second)
+	require.Less(t, slept, 10*time.Second)
+	require.False(t, IsProxyTransportError(err))
+	client.requireDone()
+}
+
+func TestCredentialTypeSharedRateLimiterGatesEveryAttempt(t *testing.T) {
+	validResponse := `{"IfExistsResult":0,"Credentials":{"OtcLoginEligibleProofs":[]}}`
+	session, client := newScriptedSession(t,
+		func(req *http.Request, _ bool) (*http.Response, error) {
+			return scriptedResponse(req, http.StatusTooManyRequests, req.URL.String(), "", map[string]string{"Retry-After": "1"}), nil
+		},
+		func(req *http.Request, _ bool) (*http.Response, error) {
+			return scriptedResponse(req, http.StatusOK, req.URL.String(), validResponse, nil), nil
+		},
+	)
+	session.retryCredentialTypeRateLimits = true
+	session.sleepFn = func(time.Duration) error { return nil }
+	var waits atomic.Int64
+	session.ctx = WithCredentialTypeRateLimiter(context.Background(), func(ctx context.Context) error {
+		waits.Add(1)
+		return ctx.Err()
+	})
+
+	proofs, err := getCredentialType(session, "owner@outlook.com", "flow", "uaid", "opid")
+
+	require.NoError(t, err)
+	require.Empty(t, proofs)
+	require.Equal(t, int64(2), waits.Load())
+	client.requireDone()
+}
+
+func TestCredentialTypeRetryAfterIsBounded(t *testing.T) {
+	response := &HTTPResponse{Header: http.Header{"Retry-After": []string{"999999999"}}}
+	require.Equal(t, credentialTypeRetryAfterMax, time.Duration(credentialTypeRetryAfter(response))*time.Second)
+	require.Equal(t, 60*time.Second, time.Duration(credentialTypeRetryAfter(&HTTPResponse{}))*time.Second)
+}
+
+func TestIndependentAliasCredentialTypeKeepsLegacySingleAttemptProxyClassification(t *testing.T) {
+	session, client := newScriptedSession(t, func(req *http.Request, _ bool) (*http.Response, error) {
+		return scriptedResponse(req, http.StatusTooManyRequests, req.URL.String(), `<html>rate limited</html>`, nil), nil
+	})
+	session.usesProxy = true
+
+	_, err := getExplicitAliasCredentialType(
+		session,
+		"owner@outlook.com",
+		"flow-token",
+		"uaid-value",
+		"opid-value",
+		"https://login.live.com/login.srf",
+	)
+
+	require.Error(t, err)
 	require.True(t, IsProxyTransportError(err))
 	client.requireDone()
 }
@@ -711,11 +806,12 @@ func TestPasswordChecksClassifyProxied429(t *testing.T) {
 				return scriptedResponse(req, http.StatusTooManyRequests, req.URL.String(), "", map[string]string{"Retry-After": "1"}), nil
 			})
 			session.usesProxy = true
+			session.retryCredentialTypeRateLimits = true
 
 			result := mapAuthError(test.run(session))
 
-			require.Equal(t, "request", result.Category)
-			require.True(t, result.ProxyFailure)
+			require.Equal(t, "rate_limited", result.Category)
+			require.False(t, result.ProxyFailure)
 			client.requireDone()
 		})
 	}

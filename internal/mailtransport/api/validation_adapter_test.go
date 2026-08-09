@@ -82,6 +82,7 @@ type microsoftProxyProviderStub struct {
 	requests       []proxyapp.AcquireProxyRequest
 	successes      []uint
 	failures       []uint
+	rateLimited    []uint
 	failureMessage []string
 }
 
@@ -101,6 +102,11 @@ func (s *microsoftProxyProviderStub) ReportSuccess(_ context.Context, proxyID ui
 func (s *microsoftProxyProviderStub) ReportFailure(_ context.Context, proxyID uint, safeError string) error {
 	s.failures = append(s.failures, proxyID)
 	s.failureMessage = append(s.failureMessage, safeError)
+	return nil
+}
+
+func (s *microsoftProxyProviderStub) ReportRateLimited(_ context.Context, proxyID uint) error {
+	s.rateLimited = append(s.rateLimited, proxyID)
 	return nil
 }
 
@@ -233,6 +239,53 @@ func TestMicrosoftTokenRefreshLeavesProxyNeutralForTaskError(t *testing.T) {
 	require.Empty(t, proxies.successes)
 }
 
+func TestMicrosoftTokenRefreshReportsRateLimitWhenOnlyErrorIsStructured(t *testing.T) {
+	proxies := purposeProxyStub()
+	adapter := &ResourceValidationAdapter{
+		proxies: proxies,
+		microsoft: &microsoftOAuthProtocolStub{err: &msacl.AuthError{
+			Message: "rate limited",
+			Status:  msacl.AuthStatusRateLimited,
+		}},
+	}
+
+	result, err := adapter.RefreshMicrosoftToken(context.Background(), mailapp.MicrosoftTokenRefreshProtocolRequest{
+		EmailAddress: "owner@example.test",
+		ClientID:     "client",
+		RefreshToken: "refresh",
+	})
+
+	require.NoError(t, err)
+	require.False(t, result.Valid)
+	require.Equal(t, "rate_limited", result.Category)
+	require.Empty(t, proxies.failures)
+	require.Empty(t, proxies.successes)
+	require.Equal(t, []uint{100}, proxies.rateLimited)
+}
+
+func TestAcquireTokenWithBindingProxyKeepsRecoveryMailboxBusyProxyNeutral(t *testing.T) {
+	proxies := purposeProxyStub()
+	adapter := &ResourceValidationAdapter{
+		proxies: proxies,
+		microsoft: &microsoftOAuthProtocolStub{acquireResult: mailinfra.MicrosoftOAuthResult{
+			Category:    "recovery_mailbox_busy",
+			SafeMessage: "Microsoft recovery mailbox is already processing another verification code.",
+		}},
+	}
+
+	result, err := adapter.acquireTokenWithBindingProxy(
+		context.Background(),
+		coreapp.MicrosoftValidationRequest{EmailAddress: "owner@example.test"},
+		"qalpha01@recovery.test",
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, "recovery_mailbox_busy", result.Category)
+	require.Empty(t, proxies.successes)
+	require.Empty(t, proxies.failures)
+	require.Empty(t, proxies.rateLimited)
+}
+
 func TestMicrosoftTokenRefreshLeavesProxyNeutralForCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -320,7 +373,7 @@ func TestRecoverBindingForValidationReturnsCandidateWithFenceOnlyWhenEligible(t 
 		UpdatedAt:      updatedAt,
 	}
 
-	candidate, unavailable, err := adapter.recoverBindingForValidation(context.Background(), coreapp.MicrosoftValidationRequest{
+	candidate, unavailable, rateLimited, err := adapter.recoverBindingForValidation(context.Background(), coreapp.MicrosoftValidationRequest{
 		ResourceID:   2,
 		EmailAddress: "owner@example.test",
 		RequestID:    "validation-2",
@@ -328,6 +381,7 @@ func TestRecoverBindingForValidationReturnsCandidateWithFenceOnlyWhenEligible(t 
 
 	require.NoError(t, err)
 	require.False(t, unavailable)
+	require.False(t, rateLimited)
 	require.NotNil(t, candidate)
 	require.Equal(t, "qalpha01@recovery.test", candidate.Address)
 	require.Equal(t, uint(23), candidate.ExpectedBindingID)
@@ -353,14 +407,44 @@ func TestRecoverBindingForValidationSkipsUnreceivableOrExternalProof(t *testing.
 		},
 	}
 
-	candidate, unavailable, err := adapter.recoverBindingForValidation(context.Background(), coreapp.MicrosoftValidationRequest{
+	candidate, unavailable, rateLimited, err := adapter.recoverBindingForValidation(context.Background(), coreapp.MicrosoftValidationRequest{
 		ResourceID:   7,
 		EmailAddress: "owner@example.test",
 	}, nil)
 	require.NoError(t, err)
 	require.False(t, unavailable)
+	require.False(t, rateLimited)
 	require.Nil(t, candidate)
 	require.Equal(t, 1, probeCalls)
+}
+
+func TestRecoverBindingForValidationPreservesRateLimitSignal(t *testing.T) {
+	proxies := &microsoftProxyProviderStub{acquireFn: func(proxyapp.AcquireProxyRequest) (*proxyapp.ProxyConfig, error) {
+		return &proxyapp.ProxyConfig{ID: 41, URL: "socks5://proxy.invalid:1080"}, nil
+	}}
+	adapter := &ResourceValidationAdapter{
+		bindings: &microsoftValidationBindingStoreStub{},
+		proxies:  proxies,
+		probePasswordRecovery: func(context.Context, string, string, string) (msacl.PasswordRecoveryProbeResult, error) {
+			return msacl.PasswordRecoveryProbeResult{}, &msacl.AuthError{
+				Message: "rate limited",
+				Status:  msacl.AuthStatusRateLimited,
+			}
+		},
+	}
+
+	candidate, unavailable, rateLimited, err := adapter.recoverBindingForValidation(context.Background(), coreapp.MicrosoftValidationRequest{
+		ResourceID:   9,
+		EmailAddress: "owner@example.test",
+	}, nil)
+
+	require.NoError(t, err)
+	require.Nil(t, candidate)
+	require.True(t, unavailable)
+	require.True(t, rateLimited)
+	require.Empty(t, proxies.failures)
+	require.Empty(t, proxies.successes)
+	require.Equal(t, []uint{41}, proxies.rateLimited)
 }
 
 func TestRecoverBindingForValidationSkipsCompleteVerifiedBindingWithoutProbe(t *testing.T) {
@@ -373,7 +457,7 @@ func TestRecoverBindingForValidationSkipsCompleteVerifiedBindingWithoutProbe(t *
 		},
 	}
 
-	candidate, unavailable, err := adapter.recoverBindingForValidation(context.Background(), coreapp.MicrosoftValidationRequest{
+	candidate, unavailable, rateLimited, err := adapter.recoverBindingForValidation(context.Background(), coreapp.MicrosoftValidationRequest{
 		ResourceID:   8,
 		EmailAddress: "owner@example.test",
 	}, &maildomain.MicrosoftBindingMailbox{
@@ -383,6 +467,7 @@ func TestRecoverBindingForValidationSkipsCompleteVerifiedBindingWithoutProbe(t *
 	})
 	require.NoError(t, err)
 	require.False(t, unavailable)
+	require.False(t, rateLimited)
 	require.Nil(t, candidate)
 	require.Zero(t, probeCalls)
 }
@@ -582,6 +667,35 @@ func TestValidateMicrosoftStructuredInvalidGrantFallsBackEvenWithDiagnosticError
 	require.Equal(t, "fallback-client", result.ClientID)
 	require.Equal(t, "fallback-refresh", result.RefreshToken)
 	require.Equal(t, 1, oauth.acquireCalls)
+}
+
+func TestValidateMicrosoftReportsRateLimitWhenOnlyErrorIsStructured(t *testing.T) {
+	proxies := purposeProxyStub()
+	oauth := &microsoftOAuthProtocolStub{err: &msacl.AuthError{
+		Message: "rate limited",
+		Status:  msacl.AuthStatusRateLimited,
+	}}
+	adapter := &ResourceValidationAdapter{
+		proxies:   proxies,
+		microsoft: oauth,
+		fetcher:   &microsoftMailFetcherStub{},
+		bindings:  &microsoftValidationBindingStoreStub{},
+	}
+
+	result, err := adapter.ValidateMicrosoft(context.Background(), coreapp.MicrosoftValidationRequest{
+		ResourceID:   1012,
+		EmailAddress: "owner@example.test",
+		ClientID:     "client",
+		RefreshToken: "refresh",
+	})
+
+	require.NoError(t, err)
+	require.False(t, result.Valid)
+	require.Equal(t, "rate_limited", result.Category)
+	require.Equal(t, 1, oauth.calls)
+	require.Empty(t, proxies.failures)
+	require.Empty(t, proxies.successes)
+	require.Equal(t, []uint{100}, proxies.rateLimited)
 }
 
 func TestValidateMicrosoftRTInvalidGrantPasswordFallbackFailureOverridesInvalidGrant(t *testing.T) {
@@ -1776,6 +1890,42 @@ func TestValidateMicrosoftExhaustedTemporaryRecoveryProbeReturnsRetryablePending
 	}, result.BindingObservation)
 	require.Equal(t, maxMicrosoftProxyAttempts+1, probeCalls)
 	require.Equal(t, 1, oauth.acquireCalls, "temporary proof lookup failure must not start confirmation")
+}
+
+func TestValidateMicrosoftRecoveryProbeRateLimitRemainsRetryableRateLimit(t *testing.T) {
+	proxies := purposeProxyStub()
+	oauth := &microsoftOAuthProtocolStub{acquireResult: mailinfra.MicrosoftOAuthResult{
+		Category:       "already_bound",
+		BindingAddress: "qa*****@recovery.test",
+		SafeMessage:    "Microsoft account is already bound to another recovery mailbox.",
+	}}
+	adapter := &ResourceValidationAdapter{
+		proxies:   proxies,
+		microsoft: oauth,
+		fetcher:   &microsoftMailFetcherStub{},
+		bindings:  &microsoftValidationBindingStoreStub{},
+		probePasswordRecovery: func(context.Context, string, string, string) (msacl.PasswordRecoveryProbeResult, error) {
+			return msacl.PasswordRecoveryProbeResult{}, &msacl.AuthError{
+				Message: "rate limited",
+				Status:  msacl.AuthStatusRateLimited,
+			}
+		},
+	}
+
+	result, err := adapter.ValidateMicrosoft(context.Background(), coreapp.MicrosoftValidationRequest{
+		ResourceID:   1212,
+		EmailAddress: "owner@example.test",
+		Password:     "private-password",
+	})
+
+	require.NoError(t, err)
+	require.False(t, result.Valid)
+	require.Equal(t, "rate_limited", result.Category)
+	require.Equal(t, "Microsoft authorization is temporarily rate limited.", result.SafeMessage)
+	require.Empty(t, proxies.failures)
+	require.Empty(t, proxies.successes)
+	require.Equal(t, []uint{202, 201}, proxies.rateLimited)
+	require.Equal(t, 1, oauth.acquireCalls)
 }
 
 func TestValidateMicrosoftPropagatesRecoveryProbeCancellationAfterNormalFlow(t *testing.T) {

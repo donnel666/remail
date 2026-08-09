@@ -5,15 +5,19 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 )
 
-// ReauthorizeResult reports a validation-only account-wide consent cleanup,
-// fresh OAuth grant, and same-session explicit-alias attempt.
+// ReauthorizeResult reports a validation-only account-wide consent cleanup
+// and fresh OAuth grant. ContinueAliases keeps the authenticated session alive
+// so Core can commit validation and schedule history before the best-effort
+// explicit-alias attempt starts.
 type ReauthorizeResult struct {
 	Result
 	CleanupAttempted bool
 	ConsentCleanup   ConsentCleanupResult
 	AliasResults     []ExplicitAliasResult
+	ContinueAliases  func() []ExplicitAliasResult
 	ExternalBinding  bool
 }
 
@@ -21,7 +25,7 @@ type reauthorizeAccountResult struct {
 	oauth            *AuthSuccess
 	cleanupAttempted bool
 	consentCleanup   ConsentCleanupResult
-	aliasResults     []ExplicitAliasResult
+	continueAliases  func() []ExplicitAliasResult
 }
 
 // ReauthorizeWithAliases is intentionally separate from Authorize. Ordinary
@@ -31,6 +35,7 @@ func ReauthorizeWithAliases(
 	email, password, proxy, preferredBindingAddress string,
 	aliasCandidates []string,
 ) (ReauthorizeResult, error) {
+	ctx = WithConcreteRecoveryLeaseKeys(ctx)
 	if err := ctx.Err(); err != nil {
 		return ReauthorizeResult{Result: aclFailure("request", "Microsoft mail service is temporarily unavailable.", false)}, err
 	}
@@ -39,7 +44,7 @@ func ReauthorizeWithAliases(
 	if result != nil {
 		public.CleanupAttempted = result.cleanupAttempted
 		public.ConsentCleanup = result.consentCleanup
-		public.AliasResults = result.aliasResults
+		public.ContinueAliases = result.continueAliases
 	}
 	if err != nil {
 		var authErr *AuthError
@@ -147,14 +152,28 @@ func reauthorizeAccountImpl(
 	result.oauth.BoundMailbox = firstNonEmpty(result.oauth.BoundMailbox, confirmedBindingAddress)
 	result.oauth.ObservedBindingAddress = firstNonEmpty(result.oauth.ObservedBindingAddress, observedBindingAddress)
 	bindingAddress := firstNonEmpty(result.oauth.BoundMailbox, preferredBindingAddress)
-	result.aliasResults = addExplicitAliasCandidatesWithSession(
-		aliasSession,
-		email,
-		proxy,
-		bindingAddress,
-		aliasCandidates,
+	result.continueAliases = explicitAliasContinuation(
+		aliasSession, email, proxy, bindingAddress, aliasCandidates,
 	)
 	return result, nil
+}
+
+func explicitAliasContinuation(
+	session *Session,
+	email, proxy, preferredBindingAddress string,
+	candidates []string,
+) func() []ExplicitAliasResult {
+	candidates = append([]string(nil), candidates...)
+	var once sync.Once
+	var results []ExplicitAliasResult
+	return func() []ExplicitAliasResult {
+		once.Do(func() {
+			results = addExplicitAliasCandidatesWithSession(
+				session, email, proxy, preferredBindingAddress, candidates,
+			)
+		})
+		return append([]ExplicitAliasResult(nil), results...)
+	}
 }
 
 func addExplicitAliasCandidatesWithSession(

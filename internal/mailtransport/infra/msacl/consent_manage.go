@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -55,7 +56,7 @@ func loginMicrosoftConsentManageWithBinding(session *Session, email, password, p
 	if err != nil {
 		return "", "", "", wrapAuthError(fmt.Sprintf("加载 Microsoft 授权管理登录页异常: %s", err), AuthStatusRequestError, err)
 	}
-	if err := microsoftConsentRateLimitError(session, resp.StatusCode, "manage_login"); err != nil {
+	if err := microsoftConsentRateLimitError(session, resp, "manage_login"); err != nil {
 		return "", "", "", err
 	}
 	page, currentURL := resp.Body, resp.URL
@@ -208,7 +209,7 @@ func getMicrosoftConsentCredentialType(session *Session, email, ppft, uaid, opid
 		microsoftConsentLoginID,
 		url.QueryEscape(uaid),
 	)
-	resp, err := session.Post(endpoint, requestOptions{
+	data, err := postCredentialType(session, endpoint, requestOptions{
 		JSON: map[string]any{
 			"checkPhones":                    true,
 			"country":                        "",
@@ -238,11 +239,7 @@ func getMicrosoftConsentCredentialType(session *Session, email, ppft, uaid, opid
 			"hpgact":            "0",
 			"hpgid":             "33",
 		}),
-	})
-	if err != nil {
-		return wrapAuthError(fmt.Sprintf("Microsoft 授权管理 GetCredentialType 异常: %s", err), AuthStatusRequestError, err)
-	}
-	data, err := decodeCredentialTypeResponse(session, resp, "consent")
+	}, "consent")
 	if err != nil {
 		return err
 	}
@@ -582,7 +579,7 @@ func listMicrosoftConsentClientIDs(session *Session) ([]string, error) {
 	if err != nil {
 		return nil, wrapAuthError(fmt.Sprintf("加载 Microsoft 授权列表异常: %s", err), AuthStatusRequestError, err)
 	}
-	if err := microsoftConsentRateLimitError(session, resp.StatusCode, "manage_list"); err != nil {
+	if err := microsoftConsentRateLimitError(session, resp, "manage_list"); err != nil {
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 || !isMicrosoftConsentManageURL(resp.URL) {
@@ -623,7 +620,7 @@ func removeMicrosoftConsent(session *Session, clientID string) error {
 	if err != nil {
 		return wrapAuthError(fmt.Sprintf("加载 Microsoft 授权项异常: %s", err), AuthStatusRequestError, err)
 	}
-	if err := microsoftConsentRateLimitError(session, resp.StatusCode, "edit_get"); err != nil {
+	if err := microsoftConsentRateLimitError(session, resp, "edit_get"); err != nil {
 		return err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 || !isMicrosoftConsentEditURL(resp.URL) {
@@ -655,7 +652,7 @@ func removeMicrosoftConsent(session *Session, clientID string) error {
 	if err != nil {
 		return wrapAuthError(fmt.Sprintf("删除 Microsoft 授权项异常: %s", err), AuthStatusRequestError, err)
 	}
-	if err := microsoftConsentRateLimitError(session, resp.StatusCode, "edit_post"); err != nil {
+	if err := microsoftConsentRateLimitError(session, resp, "edit_post"); err != nil {
 		return err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -664,17 +661,23 @@ func removeMicrosoftConsent(session *Session, clientID string) error {
 	return nil
 }
 
-func microsoftConsentRateLimitError(session *Session, statusCode int, stage string) error {
-	if statusCode != http.StatusTooManyRequests {
+func microsoftConsentRateLimitError(session *Session, resp *HTTPResponse, stage string) error {
+	if resp == nil || resp.StatusCode != http.StatusTooManyRequests {
 		return nil
 	}
-	logWarning("Microsoft authorization rate limited: stage=%s status=429", stage)
-	usesProxy := session != nil && session.usesProxy
-	return wrapAuthError(
+	retryAfter := credentialTypeRetryAfter(resp)
+	logWarning("Microsoft authorization rate limited: stage=%s status=429 retry_after=%d", stage, retryAfter)
+	cause := error(errors.New("microsoft consent HTTP 429"))
+	if session != nil && !session.retryCredentialTypeRateLimits {
+		cause = newSessionTransportError(cause, session.usesProxy)
+	}
+	err := wrapAuthError(
 		"Microsoft account authorization is temporarily rate limited.",
 		AuthStatusRateLimited,
-		newSessionTransportError(errors.New("microsoft consent HTTP 429"), usesProxy),
+		cause,
 	)
+	err.RetryAfter = time.Duration(retryAfter) * time.Second
+	return err
 }
 
 func parseMicrosoftConsentClientIDs(page string) []string {

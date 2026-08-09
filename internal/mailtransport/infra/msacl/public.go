@@ -85,7 +85,14 @@ func mapAuthError(err error) Result {
 	case AuthStatusAccountAbnormal:
 		return aclFailure("account_abnormal", "Microsoft account is restricted or requires recovery.", false)
 	case AuthStatusRateLimited:
-		return aclFailure("request", "Microsoft authorization is temporarily rate limited.", IsProxyTransportError(err))
+		return aclFailure("rate_limited", "Microsoft authorization is temporarily rate limited.", IsProxyTransportError(err))
+	case AuthStatusRecoveryMailboxBusy:
+		result := aclFailure("recovery_mailbox_busy", "Microsoft recovery mailbox is already processing another verification code.", false)
+		if mailbox := recoveryCodeMailLeaseKey(boundMailbox); mailbox != "" {
+			result.BindingAddress = mailbox
+			result.BindingStatus = string(maildomain.MicrosoftBindingPending)
+		}
+		return result
 	case AuthStatusAlreadyBound:
 		// Keep the public SafeMessage generic (no masked-address leak).  The
 		// structured binding address is authoritative and may be either the

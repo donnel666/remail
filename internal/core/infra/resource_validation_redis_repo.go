@@ -510,16 +510,26 @@ func (r *ResourceValidationRepo) ApplyMicrosoftResult(ctx context.Context, task 
 		nextStatus := string(domain.MicrosoftStatusAbnormal)
 		maxFailures := coreapp.ResourceValidationMaxFailuresValue()
 		nextFailures := min(ms.ValidationFailures+1, maxFailures)
+		recoveryMailboxBusy := !result.Valid && strings.EqualFold(strings.TrimSpace(result.Category), "recovery_mailbox_busy")
 		if result.Valid {
 			nextStatus = string(domain.MicrosoftStatusIdentifying)
 			nextFailures = 0
 			safeMessage = ""
+		} else if recoveryMailboxBusy {
+			// A competing recovery-mailbox lease is a local scheduling deferral,
+			// not a failed Microsoft validation attempt. Keep the resource fenced
+			// in pending without consuming its three business-failure attempts.
+			nextStatus = string(domain.MicrosoftStatusPending)
+			nextFailures = ms.ValidationFailures
 		} else if result.Retryable && nextFailures < maxFailures {
 			nextStatus = string(domain.MicrosoftStatusPending)
 		}
 		updates := map[string]any{
-			"status": nextStatus, "quality_score": validationQualityScore(result.Valid),
-			"graph_available": false, "validation_failures": nextFailures, "last_safe_error": safeMessage, "updated_at": now,
+			"status": nextStatus, "validation_failures": nextFailures, "last_safe_error": safeMessage, "updated_at": now,
+		}
+		if !recoveryMailboxBusy {
+			updates["quality_score"] = validationQualityScore(result.Valid)
+			updates["graph_available"] = false
 		}
 		if nextStatus == string(domain.MicrosoftStatusPending) {
 			updates["validation_generation"] = ms.ValidationGeneration + 1

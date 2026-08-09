@@ -340,7 +340,7 @@ func verifyPasswordRecoveryBindingWithSession(
 	if flow.apiCanary == "" || flow.recoveryToken == "" || flow.uaid == "" {
 		return result, newAuthError("Microsoft password recovery session is incomplete.", AuthStatusAuthTimeout)
 	}
-	lease, err := claimCodeMailLease(session.context(), proof.Name)
+	lease, err := claimCodeMailLease(session.context(), proof.Name, probe.BindingAddress)
 	if err != nil {
 		return result, err
 	}
@@ -403,6 +403,7 @@ func verifyPasswordRecoveryBindingWithSession(
 	if err := requireConfirmedPasswordRecoveryToken(verification.token); err != nil {
 		return result, err
 	}
+	releaseCompletedCodeMailLease(session.context(), lease)
 	result.token = verification.token
 	return result, nil
 }

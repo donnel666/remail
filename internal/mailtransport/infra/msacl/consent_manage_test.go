@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/url"
 	"testing"
+	"time"
 
 	http "github.com/bogdanfinn/fhttp"
 	"github.com/stretchr/testify/require"
@@ -287,20 +288,24 @@ func TestListMicrosoftConsentClientIDsRejectsUnrecognizedEmptyPage(t *testing.T)
 	client.requireDone()
 }
 
-func TestListMicrosoftConsentClientIDsClassifiesProxied429(t *testing.T) {
+func TestListMicrosoftConsentClientIDsDoesNotClassifyUpstream429AsProxyFailure(t *testing.T) {
 	session, client := newScriptedSession(t,
 		func(req *http.Request, _ bool) (*http.Response, error) {
 			return scriptedResponse(req, http.StatusTooManyRequests, microsoftConsentManageURL, `<html>rate limited</html>`, nil), nil
 		},
 	)
 	session.usesProxy = true
+	session.retryCredentialTypeRateLimits = true
 
 	_, err := listMicrosoftConsentClientIDs(session)
 	result := mapAuthError(err)
 
 	require.Error(t, err)
-	require.Equal(t, "request", result.Category)
-	require.True(t, result.ProxyFailure)
+	var authErr *AuthError
+	require.ErrorAs(t, err, &authErr)
+	require.Equal(t, 60*time.Second, authErr.RetryAfter)
+	require.Equal(t, "rate_limited", result.Category)
+	require.False(t, result.ProxyFailure)
 	client.requireDone()
 }
 
