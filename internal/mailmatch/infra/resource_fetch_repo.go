@@ -477,9 +477,10 @@ func validateResourceFetchScope(row *domain.ResourceFetchScope, expectedCredenti
 func resourceFetchStateToDomain(state FetchStateModel) domain.ResourceFetchJob {
 	kind := domain.ResourceFetchJobFetch
 	resourceType := domain.ResourceTypeMicrosoft
-	if state.OperationKind == "resource_history" {
+	switch state.OperationKind {
+	case "resource_history":
 		kind = domain.ResourceFetchJobHistory
-	} else if state.OperationKind == "icloud_resource_fetch" {
+	case "icloud_resource_fetch":
 		resourceType = domain.ResourceTypeICloud
 	}
 	operatorID := uint(0)

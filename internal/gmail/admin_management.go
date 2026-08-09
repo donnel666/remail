@@ -543,7 +543,7 @@ func (s *Service) mutateAdminLocalResourceTx(
 		if resource.Status == LocalResourceDisabled {
 			return nil, false, ErrLocalResourceState
 		}
-		queueAdminLocalResourceValidation(updates, resource, requestID, now)
+		queueAdminLocalResourceValidation(updates, resource, requestID)
 	case AdminLocalResourceHistory:
 		if resource.Status != LocalResourceNormal && resource.Status != LocalResourceIdentifying &&
 			resource.Status != localResourceRollbackNormal && resource.Status != localResourceRollbackLeased && resource.Status != localResourceRollbackSold {
@@ -559,7 +559,7 @@ func (s *Service) mutateAdminLocalResourceTx(
 		if resource.Status != LocalResourceDisabled {
 			return nil, false, ErrLocalResourceState
 		}
-		queueAdminLocalResourceValidation(updates, resource, requestID, now)
+		queueAdminLocalResourceValidation(updates, resource, requestID)
 	case AdminLocalResourceDisable:
 		if resource.Status == LocalResourceDeleted {
 			return nil, false, ErrLocalResourceMissing
@@ -603,7 +603,7 @@ func (s *Service) mutateAdminLocalResourceTx(
 		if resource.Status != LocalResourceDeleted {
 			return nil, false, ErrLocalResourceState
 		}
-		queueAdminLocalResourceValidation(updates, resource, requestID, now)
+		queueAdminLocalResourceValidation(updates, resource, requestID)
 		updates["for_sale"] = false
 	default:
 		return nil, false, ErrInvalidLocalResource
@@ -656,7 +656,7 @@ func (s *Service) mutateAdminLocalResourceTx(
 	return adminLocalResourceMutationResult(root, resource), true, nil
 }
 
-func queueAdminLocalResourceValidation(updates map[string]any, resource localResourceModel, requestID string, now time.Time) {
+func queueAdminLocalResourceValidation(updates map[string]any, resource localResourceModel, requestID string) {
 	updates["status"] = LocalResourcePending
 	updates["validation_generation"] = nextAdminLocalResourceGeneration(resource.ValidationGeneration)
 	updates["validation_failures"] = 0

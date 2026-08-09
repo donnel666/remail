@@ -58,7 +58,7 @@ function deferred<T>() {
 
 describe("admin Microsoft allocation page loader", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     window.localStorage.setItem("page-size", "10");
   });
 
@@ -82,7 +82,8 @@ describe("admin Microsoft allocation page loader", () => {
       55,
       0,
       10,
-      expect.any(AbortSignal)
+      expect.any(AbortSignal),
+      "microsoft"
     );
 
     act(() => result.current.setPage(2));

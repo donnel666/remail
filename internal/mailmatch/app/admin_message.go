@@ -145,11 +145,12 @@ func (uc *AdminMessageUseCase) Get(
 		return nil, domain.ErrInvalidRequest
 	}
 	resourceName := "microsoft_message"
-	if resourceType == domain.ResourceTypeDomain {
+	switch resourceType {
+	case domain.ResourceTypeDomain:
 		resourceName = "domain_message"
-	} else if resourceType == domain.ResourceTypeGmail {
+	case domain.ResourceTypeGmail:
 		resourceName = "gmail_message"
-	} else if resourceType == domain.ResourceTypeICloud {
+	case domain.ResourceTypeICloud:
 		resourceName = "icloud_message"
 	}
 	return uc.repo.FindAdminMessageDetailWithLog(ctx, resourceID, resourceType, messageID, &governancedomain.OperationLog{

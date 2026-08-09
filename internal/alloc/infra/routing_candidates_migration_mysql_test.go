@@ -46,7 +46,7 @@ func TestLegacyOrderAllocationIDMigrationResumesAfterManualDDLMySQL(t *testing.T
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	require.NoError(t, goose.SetDialect("mysql"))
-	require.NoError(t, db.Exec("DELETE FROM goose_db_version WHERE version_id = 86").Error)
+	require.NoError(t, db.Exec("DELETE FROM goose_db_version WHERE version_id >= 86").Error)
 
 	version, err := goose.GetDBVersion(sqlDB)
 	require.NoError(t, err)
