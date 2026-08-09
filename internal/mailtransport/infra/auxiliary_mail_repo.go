@@ -131,18 +131,19 @@ im.resource_id, im.resource_type, im.source_object_key, im.status,
 im.failure_reason, im.created_at, im.updated_at`).
 		Joins("JOIN email_resources AS er ON er.id = im.resource_id AND er.type = im.resource_type").
 		Where("im.id = ?", messageID)
-	if resourceType == domain.InboundResourceDomain {
+	switch resourceType {
+	case domain.InboundResourceDomain:
 		query = query.
 			Joins("JOIN domain_resources AS dr ON dr.id = ? AND dr.purpose = 'binding'", resourceID).
 			Where(`(
 (im.resource_type = ? AND im.resource_id = dr.id)
 OR (im.resource_type = ? AND LOWER(SUBSTRING_INDEX(im.recipient, '@', -1)) = LOWER(dr.domain))
 )`, string(domain.InboundResourceDomain), string(domain.InboundResourceMicrosoft))
-	} else if resourceType == domain.InboundResourceMicrosoft {
+	case domain.InboundResourceMicrosoft:
 		query = query.
 			Joins("JOIN microsoft_resources AS mr ON mr.id = er.id").
 			Where("im.resource_id = ? AND im.resource_type = ?", resourceID, string(domain.InboundResourceMicrosoft))
-	} else {
+	default:
 		return nil, nil
 	}
 	err := query.Take(&model).Error
