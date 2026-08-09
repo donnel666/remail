@@ -3448,6 +3448,42 @@ func (e GetAdminAllocationParamsType) Valid() bool {
 	}
 }
 
+// Defines values for GetAdminBindingsParamsType.
+const (
+	GetAdminBindingsParamsTypeDomain    GetAdminBindingsParamsType = "domain"
+	GetAdminBindingsParamsTypeMicrosoft GetAdminBindingsParamsType = "microsoft"
+)
+
+// Valid indicates whether the value is a known member of the GetAdminBindingsParamsType enum.
+func (e GetAdminBindingsParamsType) Valid() bool {
+	switch e {
+	case GetAdminBindingsParamsTypeDomain:
+		return true
+	case GetAdminBindingsParamsTypeMicrosoft:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetAdminBindingMessageParamsType.
+const (
+	GetAdminBindingMessageParamsTypeDomain    GetAdminBindingMessageParamsType = "domain"
+	GetAdminBindingMessageParamsTypeMicrosoft GetAdminBindingMessageParamsType = "microsoft"
+)
+
+// Valid indicates whether the value is a known member of the GetAdminBindingMessageParamsType enum.
+func (e GetAdminBindingMessageParamsType) Valid() bool {
+	switch e {
+	case GetAdminBindingMessageParamsTypeDomain:
+		return true
+	case GetAdminBindingMessageParamsTypeMicrosoft:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetAdminCardsParamsStatus.
 const (
 	GetAdminCardsParamsStatusDisabled GetAdminCardsParamsStatus = "disabled"
@@ -9183,9 +9219,12 @@ type GetAdminAllocationParamsType string
 
 // GetAdminBindingsParams defines parameters for GetAdminBindings.
 type GetAdminBindingsParams struct {
-	ResourceId int     `form:"resourceId" json:"resourceId"`
-	Search     *string `form:"search,omitempty" json:"search,omitempty"`
-	Offset     *int    `form:"offset,omitempty" json:"offset,omitempty"`
+	ResourceId int `form:"resourceId" json:"resourceId"`
+
+	// Type Query scope; defaults to one Microsoft resource. Use domain to query the complete mailbox of a purpose=binding domain resource.
+	Type   *GetAdminBindingsParamsType `form:"type,omitempty" json:"type,omitempty"`
+	Search *string                     `form:"search,omitempty" json:"search,omitempty"`
+	Offset *int                        `form:"offset,omitempty" json:"offset,omitempty"`
 
 	// BeforeReceivedAt Timestamp component of a stable continuation cursor. Must be supplied together with beforeId; offset must remain zero.
 	BeforeReceivedAt *time.Time `form:"beforeReceivedAt,omitempty" json:"beforeReceivedAt,omitempty"`
@@ -9198,10 +9237,19 @@ type GetAdminBindingsParams struct {
 	Limit        *int  `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// GetAdminBindingsParamsType defines parameters for GetAdminBindings.
+type GetAdminBindingsParamsType string
+
 // GetAdminBindingMessageParams defines parameters for GetAdminBindingMessage.
 type GetAdminBindingMessageParams struct {
 	ResourceId int `form:"resourceId" json:"resourceId"`
+
+	// Type Association scope; defaults to one Microsoft resource. Use domain when resourceId identifies a purpose=binding domain; both direct domain messages and matching Microsoft auxiliary messages are eligible.
+	Type *GetAdminBindingMessageParamsType `form:"type,omitempty" json:"type,omitempty"`
 }
+
+// GetAdminBindingMessageParamsType defines parameters for GetAdminBindingMessage.
+type GetAdminBindingMessageParamsType string
 
 // GetAdminCardsParams defines parameters for GetAdminCards.
 type GetAdminCardsParams struct {
@@ -12420,7 +12468,7 @@ type ServerInterface interface {
 	// Get one allocation record by table type and id
 	// (GET /v1/admin/allocations/{allocationId})
 	GetAdminAllocation(c *gin.Context, allocationId int, params GetAdminAllocationParams)
-	// Get a resource's current auxiliary binding and message summaries
+	// Get auxiliary binding message summaries by resource or binding domain
 	// (GET /v1/admin/bindings)
 	GetAdminBindings(c *gin.Context, params GetAdminBindingsParams)
 	// Get one auxiliary-mailbox message body and diagnostic
@@ -13498,6 +13546,14 @@ func (siw *ServerInterfaceWrapper) GetAdminBindings(c *gin.Context) {
 		return
 	}
 
+	// ------------- Optional query parameter "type" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "type", c.Request.URL.Query(), &params.Type, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter type: %w", err), http.StatusBadRequest)
+		return
+	}
+
 	// ------------- Optional query parameter "search" -------------
 
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", c.Request.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
@@ -13581,6 +13637,14 @@ func (siw *ServerInterfaceWrapper) GetAdminBindingMessage(c *gin.Context) {
 	err = runtime.BindQueryParameterWithOptions("form", true, true, "resourceId", c.Request.URL.Query(), &params.ResourceId, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
 	if err != nil {
 		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "type" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "type", c.Request.URL.Query(), &params.Type, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter type: %w", err), http.StatusBadRequest)
 		return
 	}
 

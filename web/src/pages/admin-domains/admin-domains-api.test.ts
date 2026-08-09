@@ -22,6 +22,7 @@ vi.mock("@/lib/idempotency", () => ({
 }));
 
 import {
+  getAdminDomainMessage,
   getAdminDomainDetail,
   listAdminDomainOwners,
   listAdminDomainMessages,
@@ -398,6 +399,66 @@ describe("admin domain API adapter", () => {
       },
       signal: undefined,
     });
+  });
+
+  it("uses the auxiliary-mail API for binding-purpose domain messages", async () => {
+    const summary = {
+      id: 5,
+      recipient: "proof@real.example.com",
+      sender: "security@microsoft.com",
+      subject: "Security code",
+      preview: "Code 123456",
+      status: "received" as const,
+      verificationCode: "123456",
+      orderNo: null,
+      receivedAt: "2026-07-15T00:00:00Z",
+    };
+    apiMocks.GET
+      .mockResolvedValueOnce({
+        data: {
+          binding: null,
+          items: [summary],
+          total: 1,
+          offset: 0,
+          limit: 20,
+          hasMore: false,
+        },
+      })
+      .mockResolvedValueOnce({ data: { ...summary, body: "Code 123456" } });
+
+    await expect(
+      listAdminDomainMessages(42, "", 20, undefined, undefined, true)
+    ).resolves.toMatchObject({ total: 1, items: [{ id: 5 }] });
+    expect(apiMocks.GET).toHaveBeenNthCalledWith(1, "/v1/admin/bindings", {
+      params: {
+        query: {
+          resourceId: 42,
+          type: "domain",
+          search: undefined,
+          offset: 0,
+          beforeReceivedAt: undefined,
+          beforeId: undefined,
+          includeTotal: true,
+          limit: 20,
+        },
+      },
+      signal: undefined,
+    });
+
+    await expect(
+      getAdminDomainMessage(42, 5, undefined, true)
+    ).resolves.toMatchObject({ id: 5, body: "Code 123456" });
+    expect(apiMocks.GET).toHaveBeenNthCalledWith(
+      2,
+      "/v1/admin/bindings/messages/{messageId}",
+      {
+        params: {
+          path: { messageId: 5 },
+          query: { resourceId: 42, type: "domain" },
+        },
+        signal: undefined,
+      }
+    );
   });
 
   it("sends all-matching purpose changes as one filter command", async () => {

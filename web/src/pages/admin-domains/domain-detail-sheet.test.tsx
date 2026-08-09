@@ -107,6 +107,41 @@ afterEach(() => {
 });
 
 describe("admin domain mailbox infinite list", () => {
+  it("uses the auxiliary scope for a binding-purpose domain", async () => {
+    apiMocks.listMessages.mockResolvedValueOnce({
+      items: [message(1)],
+      limit: 20,
+      offset: 0,
+      total: 1,
+      hasMore: false,
+    });
+    apiMocks.getMessage.mockResolvedValueOnce({
+      ...message(1),
+      body: "Auxiliary body",
+    });
+
+    render(<DomainMailsPanel auxiliary resourceId={42} t={t} />);
+
+    await waitFor(() =>
+      expect(apiMocks.listMessages).toHaveBeenCalledWith(
+        42,
+        "",
+        20,
+        undefined,
+        expect.any(AbortSignal),
+        true
+      )
+    );
+    await waitFor(() =>
+      expect(apiMocks.getMessage).toHaveBeenCalledWith(
+        42,
+        1,
+        expect.any(AbortSignal),
+        true
+      )
+    );
+  });
+
   it("uses the backend total and loads the next global-size page on scroll", async () => {
     const firstPage = Array.from({ length: 20 }, (_, index) => message(index + 1));
     apiMocks.getMessage.mockImplementation(async (id) => ({
@@ -147,7 +182,8 @@ describe("admin domain mailbox infinite list", () => {
         "",
         20,
         undefined,
-        expect.any(AbortSignal)
+        expect.any(AbortSignal),
+        false
       )
     );
     expect(await screen.findByText("Subject 20")).toBeInTheDocument();
@@ -171,7 +207,8 @@ describe("admin domain mailbox infinite list", () => {
           beforeReceivedAt: firstPage[19].receivedAt,
           beforeId: 20,
         },
-        expect.any(AbortSignal)
+        expect.any(AbortSignal),
+        false
       )
     );
     expect(await screen.findByText("Subject 21")).toBeInTheDocument();
@@ -186,7 +223,8 @@ describe("admin domain mailbox infinite list", () => {
         "new scope",
         20,
         undefined,
-        expect.any(AbortSignal)
+        expect.any(AbortSignal),
+        false
       )
     );
     expect(
@@ -227,7 +265,8 @@ describe("admin domain mailbox infinite list", () => {
         "needle",
         20,
         undefined,
-        expect.any(AbortSignal)
+        expect.any(AbortSignal),
+        false
       )
     );
     expect(await screen.findByText("Subject 9")).toBeInTheDocument();

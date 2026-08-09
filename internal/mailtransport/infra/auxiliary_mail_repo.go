@@ -20,25 +20,35 @@ func NewAuxiliaryMailRepo(db *gorm.DB) *AuxiliaryMailRepo {
 	return &AuxiliaryMailRepo{db: db}
 }
 
-// MicrosoftResourceExists is an explicitly bounded read-only scope check:
-// it validates visibility without importing or mutating a Core GORM model.
-func (r *AuxiliaryMailRepo) MicrosoftResourceExists(ctx context.Context, resourceID uint) (bool, error) {
+// ResourceExists is an explicitly bounded read-only scope check: it validates
+// visibility without importing or mutating a Core GORM model.
+func (r *AuxiliaryMailRepo) ResourceExists(ctx context.Context, resourceID uint, resourceType domain.InboundResourceType) (bool, error) {
 	if resourceID == 0 {
 		return false, nil
 	}
 	var count int64
-	err := r.dbFor(ctx).
+	query := r.dbFor(ctx).
 		Table("email_resources AS er").
-		Joins("JOIN microsoft_resources AS mr ON mr.id = er.id AND er.type = 'microsoft'").
-		Where("er.id = ?", resourceID).
-		Count(&count).Error
+		Where("er.id = ?", resourceID)
+	switch resourceType {
+	case domain.InboundResourceDomain:
+		query = query.Joins("JOIN domain_resources AS dr ON dr.id = er.id AND er.type = 'domain' AND dr.purpose = 'binding'")
+	case domain.InboundResourceMicrosoft:
+		query = query.Joins("JOIN microsoft_resources AS mr ON mr.id = er.id AND er.type = 'microsoft'")
+	default:
+		return false, nil
+	}
+	err := query.Count(&count).Error
 	if err != nil {
-		return false, fmt.Errorf("check microsoft resource for auxiliary mail: %w", err)
+		return false, fmt.Errorf("check resource for auxiliary mail: %w", err)
 	}
 	return count > 0, nil
 }
 
-func (r *AuxiliaryMailRepo) ListByMicrosoftResource(ctx context.Context, filter mailapp.AuxiliaryMailFilter) ([]domain.InboundMail, int64, bool, error) {
+func (r *AuxiliaryMailRepo) ListMessages(ctx context.Context, filter mailapp.AuxiliaryMailFilter) ([]domain.InboundMail, int64, bool, error) {
+	if filter.ResourceType == "" {
+		filter.ResourceType = domain.InboundResourceMicrosoft
+	}
 	total := int64(-1)
 	if !filter.SkipTotal {
 		countQuery := r.auxiliaryListQuery(ctx, filter, "inbound_mails")
@@ -50,7 +60,7 @@ func (r *AuxiliaryMailRepo) ListByMicrosoftResource(ctx context.Context, filter 
 	pageQuery := r.auxiliaryListQuery(ctx, filter, "inbound_mails")
 	if filter.BeforeReceivedAt != nil {
 		pageQuery = pageQuery.Where(
-			"(COALESCE(received_at, created_at) < ? OR (COALESCE(received_at, created_at) = ? AND id < ?))",
+			"(COALESCE(im.received_at, im.created_at) < ? OR (COALESCE(im.received_at, im.created_at) = ? AND im.id < ?))",
 			filter.BeforeReceivedAt.UTC(), filter.BeforeReceivedAt.UTC(), filter.BeforeID,
 		)
 	} else {
@@ -58,8 +68,8 @@ func (r *AuxiliaryMailRepo) ListByMicrosoftResource(ctx context.Context, filter 
 	}
 	var models []InboundMailModel
 	if err := pageQuery.
-		Select("id, header_from, recipient, subject, body_preview, verification_code, received_at, status, created_at").
-		Order("COALESCE(received_at, created_at) DESC, id DESC").
+		Select("im.id, im.header_from, im.recipient, im.subject, im.body_preview, im.verification_code, im.received_at, im.status, im.created_at").
+		Order("COALESCE(im.received_at, im.created_at) DESC, im.id DESC").
 		Limit(filter.Limit + 1).
 		Find(&models).Error; err != nil {
 		return nil, 0, false, fmt.Errorf("list auxiliary messages: %w", err)
@@ -80,37 +90,62 @@ func (r *AuxiliaryMailRepo) ListByMicrosoftResource(ctx context.Context, filter 
 }
 
 func (r *AuxiliaryMailRepo) auxiliaryListQuery(ctx context.Context, filter mailapp.AuxiliaryMailFilter, table string) *gorm.DB {
-	query := r.dbFor(ctx).
-		Table(table).
-		Where("resource_id = ? AND resource_type = ?", filter.ResourceID, string(domain.InboundResourceMicrosoft))
+	query := r.dbFor(ctx).Table(table + " AS im")
+	if filter.ResourceType == domain.InboundResourceDomain {
+		// ponytail: recipient-domain scan is enough for an admin detail tab; add an indexed recipient_domain only if this query becomes slow.
+		query = query.
+			Joins("JOIN domain_resources AS dr ON dr.id = ? AND dr.purpose = 'binding'", filter.ResourceID).
+			Where(`(
+(im.resource_type = ? AND im.resource_id = dr.id)
+OR (im.resource_type = ? AND LOWER(SUBSTRING_INDEX(im.recipient, '@', -1)) = LOWER(dr.domain))
+)`, string(domain.InboundResourceDomain), string(domain.InboundResourceMicrosoft))
+	} else {
+		query = query.Where("im.resource_id = ? AND im.resource_type = ?", filter.ResourceID, string(domain.InboundResourceMicrosoft))
+	}
 	if search := strings.TrimSpace(filter.Search); search != "" {
 		pattern := "%" + strings.ToLower(escapeAuxiliaryLike(search)) + "%"
 		query = query.Where(`(
-LOWER(recipient) LIKE ? ESCAPE '\\'
-OR LOWER(header_from) LIKE ? ESCAPE '\\'
-OR LOWER(subject) LIKE ? ESCAPE '\\'
-OR LOWER(body_preview) LIKE ? ESCAPE '\\'
-OR LOWER(verification_code) LIKE ? ESCAPE '\\'
+LOWER(im.recipient) LIKE ? ESCAPE '\\'
+OR LOWER(im.header_from) LIKE ? ESCAPE '\\'
+OR LOWER(im.subject) LIKE ? ESCAPE '\\'
+OR LOWER(im.body_preview) LIKE ? ESCAPE '\\'
+OR LOWER(im.verification_code) LIKE ? ESCAPE '\\'
 )`, pattern, pattern, pattern, pattern, pattern)
 	}
 	return query
 }
 
-func (r *AuxiliaryMailRepo) FindByMicrosoftResource(ctx context.Context, resourceID, messageID uint) (*domain.InboundMail, error) {
+func (r *AuxiliaryMailRepo) FindMessage(ctx context.Context, resourceID uint, resourceType domain.InboundResourceType, messageID uint) (*domain.InboundMail, error) {
 	if resourceID == 0 || messageID == 0 {
 		return nil, nil
 	}
+	if resourceType == "" {
+		resourceType = domain.InboundResourceMicrosoft
+	}
 	var model InboundMailModel
-	err := r.dbFor(ctx).
+	query := r.dbFor(ctx).
 		Table("inbound_mails AS im").
 		Select(`im.id, im.header_from, im.recipient, im.subject, im.body_preview,
 im.verification_code, im.message_id_header, im.received_at, im.parsed_at,
 im.resource_id, im.resource_type, im.source_object_key, im.status,
 im.failure_reason, im.created_at, im.updated_at`).
 		Joins("JOIN email_resources AS er ON er.id = im.resource_id AND er.type = im.resource_type").
-		Joins("JOIN microsoft_resources AS mr ON mr.id = er.id").
-		Where("im.id = ? AND im.resource_id = ? AND im.resource_type = ?", messageID, resourceID, string(domain.InboundResourceMicrosoft)).
-		Take(&model).Error
+		Where("im.id = ?", messageID)
+	if resourceType == domain.InboundResourceDomain {
+		query = query.
+			Joins("JOIN domain_resources AS dr ON dr.id = ? AND dr.purpose = 'binding'", resourceID).
+			Where(`(
+(im.resource_type = ? AND im.resource_id = dr.id)
+OR (im.resource_type = ? AND LOWER(SUBSTRING_INDEX(im.recipient, '@', -1)) = LOWER(dr.domain))
+)`, string(domain.InboundResourceDomain), string(domain.InboundResourceMicrosoft))
+	} else if resourceType == domain.InboundResourceMicrosoft {
+		query = query.
+			Joins("JOIN microsoft_resources AS mr ON mr.id = er.id").
+			Where("im.resource_id = ? AND im.resource_type = ?", resourceID, string(domain.InboundResourceMicrosoft))
+	} else {
+		return nil, nil
+	}
+	err := query.Take(&model).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}

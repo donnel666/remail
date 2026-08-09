@@ -23,20 +23,23 @@ type auxiliaryMailRepoStub struct {
 	filter  AuxiliaryMailFilter
 }
 
-func (r *auxiliaryMailRepoStub) MicrosoftResourceExists(context.Context, uint) (bool, error) {
+func (r *auxiliaryMailRepoStub) ResourceExists(_ context.Context, _ uint, resourceType domain.InboundResourceType) (bool, error) {
+	r.filter.ResourceType = resourceType
 	return r.exists, r.err
 }
 
-func (r *auxiliaryMailRepoStub) ListByMicrosoftResource(_ context.Context, filter AuxiliaryMailFilter) ([]domain.InboundMail, int64, bool, error) {
+func (r *auxiliaryMailRepoStub) ListMessages(_ context.Context, filter AuxiliaryMailFilter) ([]domain.InboundMail, int64, bool, error) {
 	r.filter = filter
 	return append([]domain.InboundMail(nil), r.items...), r.total, r.hasMore, r.err
 }
 
-func (r *auxiliaryMailRepoStub) FindByMicrosoftResource(_ context.Context, resourceID, messageID uint) (*domain.InboundMail, error) {
+func (r *auxiliaryMailRepoStub) FindMessage(_ context.Context, resourceID uint, resourceType domain.InboundResourceType, messageID uint) (*domain.InboundMail, error) {
+	r.filter.ResourceID = resourceID
+	r.filter.ResourceType = resourceType
 	if r.err != nil {
 		return nil, r.err
 	}
-	if r.detail == nil || r.detail.ResourceID != resourceID || r.detail.ID != messageID {
+	if r.detail == nil || r.detail.ID != messageID || (resourceType != domain.InboundResourceDomain && r.detail.ResourceID != resourceID) {
 		return nil, nil
 	}
 	clone := *r.detail
@@ -132,6 +135,36 @@ func TestAuxiliaryMailListReturnsConfiguredEmptyState(t *testing.T) {
 	assert.Nil(t, page.Binding)
 	assert.NotNil(t, page.Items)
 	assert.Empty(t, page.Items)
+}
+
+func TestAuxiliaryMailListSupportsBindingDomainScope(t *testing.T) {
+	repo := &auxiliaryMailRepoStub{
+		exists: true,
+		total:  1,
+		items: []domain.InboundMail{{
+			ID:         44,
+			Recipient:  "proof@binding.example",
+			ResourceID: 9,
+		}},
+	}
+	service := NewAuxiliaryMailQueryService(
+		repo,
+		bindingQueryRepoStub{err: errors.New("binding lookup must not run for a domain scope")},
+		newFileStoreStub(),
+		&auxiliaryOperationLogStub{},
+		nil,
+	)
+
+	page, err := service.List(context.Background(), AuxiliaryMailFilter{
+		ResourceID:   30,
+		ResourceType: domain.InboundResourceDomain,
+		Limit:        20,
+	})
+	require.NoError(t, err)
+	assert.Nil(t, page.Binding)
+	require.Len(t, page.Items, 1)
+	assert.Equal(t, "proof@binding.example", page.Items[0].Recipient)
+	assert.Equal(t, domain.InboundResourceDomain, repo.filter.ResourceType)
 }
 
 func TestAuxiliaryMailListReturnsStableContinuationWithoutRepeatedTotal(t *testing.T) {

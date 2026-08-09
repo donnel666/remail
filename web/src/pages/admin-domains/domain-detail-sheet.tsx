@@ -396,9 +396,11 @@ function mailStatusTag(status: AdminDomainMessage["status"], t: TFunction) {
 }
 
 export function DomainMailsPanel({
+  auxiliary = false,
   resourceId,
   t,
 }: {
+  auxiliary?: boolean;
   resourceId: number;
   t: TFunction;
 }) {
@@ -418,7 +420,7 @@ export function DomainMailsPanel({
     Record<number, AdminDomainMessage>
   >({});
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const listScope = `${resourceId}\u0000${debouncedSearch}\u0000${pageSize}`;
+  const listScope = `${resourceId}\u0000${auxiliary}\u0000${debouncedSearch}\u0000${pageSize}`;
   const listScopeRef = useRef(listScope);
 
   useEffect(() => {
@@ -430,7 +432,7 @@ export function DomainMailsPanel({
     setListError(null);
     setSelectedId(null);
     setLoadedMessages({});
-  }, [debouncedSearch, pageSize, resourceId]);
+  }, [auxiliary, debouncedSearch, pageSize, resourceId]);
 
   useEffect(() => {
     if (listScopeRef.current !== listScope) {
@@ -445,7 +447,8 @@ export function DomainMailsPanel({
       debouncedSearch,
       pageSize,
       cursor ?? undefined,
-      controller.signal
+      controller.signal,
+      auxiliary
     )
       .then((page) => {
         if (controller.signal.aborted) return;
@@ -481,7 +484,7 @@ export function DomainMailsPanel({
         if (!controller.signal.aborted) setListLoading(false);
       });
     return () => controller.abort();
-  }, [cursor, debouncedSearch, listScope, pageSize, resourceId, retryKey, t]);
+  }, [auxiliary, cursor, debouncedSearch, listScope, pageSize, resourceId, retryKey, t]);
 
   useEffect(() => {
     setSelectedId((current) =>
@@ -500,7 +503,12 @@ export function DomainMailsPanel({
   useEffect(() => {
     if (!selectedId || loadedMessages[selectedId]) return;
     const controller = new AbortController();
-    void getAdminDomainMessage(resourceId, selectedId, controller.signal)
+    void getAdminDomainMessage(
+      resourceId,
+      selectedId,
+      controller.signal,
+      auxiliary
+    )
       .then((message) => {
         if (!controller.signal.aborted) {
           setLoadedMessages((current) => ({
@@ -513,7 +521,7 @@ export function DomainMailsPanel({
         if (!controller.signal.aborted) Toast.error(t("Mail load failed."));
       });
     return () => controller.abort();
-  }, [loadedMessages, resourceId, selectedId, t]);
+  }, [auxiliary, loadedMessages, resourceId, selectedId, t]);
 
   const loadMore = useCallback(
     (element: HTMLDivElement) => {
@@ -587,7 +595,7 @@ export function DomainMailsPanel({
                     }}
                     type="button"
                   >
-                    {message.subject}
+                    {message.subject || message.recipient}
                   </button>
                   {message.verificationCode ? (
                     <span className="inline-flex min-w-0 max-w-[45%] shrink-0">
@@ -1132,7 +1140,11 @@ export function DomainDetailSheet({
               />
             ) : null}
             {activeTab === "mails" ? (
-              <DomainMailsPanel resourceId={detail.id} t={t} />
+              <DomainMailsPanel
+                auxiliary={detail.purpose === "binding"}
+                resourceId={detail.id}
+                t={t}
+              />
             ) : null}
           </div>
           <div className="sticky bottom-0 flex flex-wrap items-center justify-end gap-2 border-t border-[var(--semi-color-border)] bg-[var(--semi-color-bg-0)] px-5 py-3">

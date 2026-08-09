@@ -27,6 +27,11 @@ func (h *MailTransportHandler) GetAdminBindings(c *gin.Context) {
 		writeAdminMailBadRequest(c)
 		return
 	}
+	resourceType, ok := parseAdminAuxiliaryResourceType(c)
+	if !ok {
+		writeAdminMailBadRequest(c)
+		return
+	}
 	if rawLimit := strings.TrimSpace(c.Query("limit")); rawLimit != "" {
 		parsedLimit, err := strconv.Atoi(rawLimit)
 		if err == nil && parsedLimit > mailapp.AuxiliaryMailMaxLimit {
@@ -57,6 +62,7 @@ func (h *MailTransportHandler) GetAdminBindings(c *gin.Context) {
 	}
 	page, err := h.module.AuxiliaryMail.List(c.Request.Context(), mailapp.AuxiliaryMailFilter{
 		ResourceID:       resourceID,
+		ResourceType:     resourceType,
 		Search:           strings.TrimSpace(c.Query("search")),
 		Offset:           offset,
 		Limit:            limit,
@@ -107,6 +113,11 @@ func (h *MailTransportHandler) GetAdminBindingMessage(c *gin.Context) {
 		writeAdminMailBadRequest(c)
 		return
 	}
+	resourceType, ok := parseAdminAuxiliaryResourceType(c)
+	if !ok {
+		writeAdminMailBadRequest(c)
+		return
+	}
 	messageID, ok := parsePositiveAdminMailUint(c.Param("messageId"))
 	if !ok {
 		writeAdminMailBadRequest(c)
@@ -126,6 +137,7 @@ func (h *MailTransportHandler) GetAdminBindingMessage(c *gin.Context) {
 	}
 	detail, err := h.module.AuxiliaryMail.Get(c.Request.Context(), mailapp.AuxiliaryMailDetailRequest{
 		ResourceID:     resourceID,
+		ResourceType:   resourceType,
 		MessageID:      messageID,
 		OperatorUserID: operatorUserID,
 		RequestID:      middleware.GetRequestID(c),
@@ -162,6 +174,11 @@ func parsePositiveAdminMailUint(value string) (uint, bool) {
 		return 0, false
 	}
 	return uint(parsed), true
+}
+
+func parseAdminAuxiliaryResourceType(c *gin.Context) (domain.InboundResourceType, bool) {
+	value := domain.InboundResourceType(strings.ToLower(strings.TrimSpace(c.DefaultQuery("type", string(domain.InboundResourceMicrosoft)))))
+	return value, value == domain.InboundResourceMicrosoft || value == domain.InboundResourceDomain
 }
 
 func parseOptionalAdminMailBool(raw string, fallback bool) (bool, bool) {

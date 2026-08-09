@@ -3879,8 +3879,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get a resource's current auxiliary binding and message summaries
-         * @description Requires `mailtransport:binding/read`. Directly queries the current binding fact and returns its safe summary plus a server-paginated auxiliary-message summary list. A resource with no configured auxiliary mailbox is a successful empty state with `binding=null`; it is not represented as 404. Message bodies, raw envelopes, and private object keys are not returned.
+         * Get auxiliary binding message summaries by resource or binding domain
+         * @description Permission depends on scope. The default `type=microsoft` requires `mailtransport:binding/read`; `type=domain` requires `mailmatch:message/read`. With the default scope, the endpoint directly queries the current binding fact and returns its safe summary plus a server-paginated auxiliary-message summary list. With `type=domain`, `resourceId` identifies a purpose=binding domain and the response contains all SMTP inbound messages for that mailbox, including messages stored directly against the domain resource and Microsoft-resource auxiliary messages whose recipient domain matches; `binding` is null. A Microsoft resource with no configured auxiliary mailbox is a successful empty state; it is not represented as 404. Message bodies, raw envelopes, and private object keys are not returned.
          */
         get: operations["getAdminBindings"];
         put?: never;
@@ -3900,7 +3900,7 @@ export interface paths {
         };
         /**
          * Get one auxiliary-mailbox message body and diagnostic
-         * @description Requires `mailtransport:binding/read`. The server verifies the resource, current/historical binding scope, and message association together; unknown and cross-resource IDs return the same safe 404. The response may contain the authorized body, code, order number, and sanitized diagnostic, but never a raw RFC822 object key, original envelope, secret, or upstream error body.
+         * @description Permission depends on scope. The default `type=microsoft` requires `mailtransport:binding/read`; `type=domain` requires `mailmatch:message/read`. The server verifies the selected Microsoft resource or purpose=binding domain scope and message association together. A binding-domain association accepts both messages stored directly against the domain resource and Microsoft-resource auxiliary messages whose recipient domain matches. Unknown and cross-scope IDs return the same safe 404. The response may contain the authorized body, code, order number, and sanitized diagnostic, but never a raw RFC822 object key, original envelope, secret, or upstream error body.
          */
         get: operations["getAdminBindingMessage"];
         put?: never;
@@ -20768,6 +20768,8 @@ export interface operations {
         parameters: {
             query: {
                 resourceId: number;
+                /** @description Query scope; defaults to one Microsoft resource. Use domain to query the complete mailbox of a purpose=binding domain resource. */
+                type?: "microsoft" | "domain";
                 search?: string;
                 offset?: number;
                 /** @description Timestamp component of a stable continuation cursor. Must be supplied together with beforeId; offset must remain zero. */
@@ -20805,6 +20807,8 @@ export interface operations {
         parameters: {
             query: {
                 resourceId: number;
+                /** @description Association scope; defaults to one Microsoft resource. Use domain when resourceId identifies a purpose=binding domain; both direct domain messages and matching Microsoft auxiliary messages are eligible. */
+                type?: "microsoft" | "domain";
             };
             header?: never;
             path: {

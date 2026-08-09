@@ -164,8 +164,15 @@ type ServerDTO = components["schemas"]["AdminMailServerItem"];
 type MailboxDTO = components["schemas"]["MailboxItem"];
 type AllocationDTO = components["schemas"]["AdminAllocationItem"];
 type TaskDTO = components["schemas"]["AdminTaskView"];
-type MessageDTO = components["schemas"]["AdminMessageSummary"];
-type MessageDetailDTO = components["schemas"]["AdminMessageDetail"];
+type MessageDTO =
+  | components["schemas"]["AdminMessageSummary"]
+  | components["schemas"]["AdminAuxiliaryMessageSummary"];
+type MessageDetailDTO =
+  | components["schemas"]["AdminMessageDetail"]
+  | components["schemas"]["AdminAuxiliaryMessageDetail"];
+type MessagePageDTO =
+  | components["schemas"]["AdminMessageListResponse"]
+  | components["schemas"]["AdminBindingMessageListResponse"];
 
 const PAGE_SIZE = 100;
 
@@ -528,17 +535,31 @@ export async function getAdminDomainDetail(
 export async function getAdminDomainMessage(
   resourceId: number,
   messageId: number,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  auxiliary = false
 ): Promise<AdminDomainMessage> {
-  const item = await unwrap<MessageDetailDTO>(
-    await client.GET("/v1/admin/messages/{messageId}", {
-      params: {
-        path: { messageId },
-        query: { resourceId, type: "domain" },
-      },
-      signal,
-    })
-  );
+  let item: MessageDetailDTO;
+  if (auxiliary) {
+    item = await unwrap(
+      await client.GET("/v1/admin/bindings/messages/{messageId}", {
+        params: {
+          path: { messageId },
+          query: { resourceId, type: "domain" },
+        },
+        signal,
+      })
+    );
+  } else {
+    item = await unwrap(
+      await client.GET("/v1/admin/messages/{messageId}", {
+        params: {
+          path: { messageId },
+          query: { resourceId, type: "domain" },
+        },
+        signal,
+      })
+    );
+  }
   return adminDomainMessage(item, item.body);
 }
 
@@ -627,28 +648,38 @@ export async function listAdminDomainMessages(
   search = "",
   limit = 20,
   cursor?: AdminDomainMessageCursor,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  auxiliary = false
 ): Promise<AdminDomainMessagePage> {
   const normalizedLimit = Number.isFinite(limit)
     ? Math.max(1, Math.min(PAGE_SIZE, Math.trunc(limit)))
     : 20;
-  const page = await unwrap(
-    await client.GET("/v1/admin/messages", {
-      params: {
-        query: {
-          resourceId: id,
-          type: "domain",
-          search: search.trim() || undefined,
-          offset: cursor ? undefined : 0,
-          beforeReceivedAt: cursor?.beforeReceivedAt,
-          beforeId: cursor?.beforeId,
-          includeTotal: !cursor,
-          limit: normalizedLimit,
-        },
-      },
-      signal,
-    })
-  );
+  const query = {
+    resourceId: id,
+    type: "domain" as const,
+    search: search.trim() || undefined,
+    offset: cursor ? undefined : 0,
+    beforeReceivedAt: cursor?.beforeReceivedAt,
+    beforeId: cursor?.beforeId,
+    includeTotal: !cursor,
+    limit: normalizedLimit,
+  };
+  let page: MessagePageDTO;
+  if (auxiliary) {
+    page = await unwrap(
+      await client.GET("/v1/admin/bindings", {
+        params: { query },
+        signal,
+      })
+    );
+  } else {
+    page = await unwrap(
+      await client.GET("/v1/admin/messages", {
+        params: { query },
+        signal,
+      })
+    );
+  }
   return {
     ...page,
     items: page.items.map((item) => adminDomainMessage(item, "")),

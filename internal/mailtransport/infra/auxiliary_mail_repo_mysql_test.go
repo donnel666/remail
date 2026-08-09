@@ -115,14 +115,14 @@ WHERE table_schema = DATABASE()
   AND table_name = 'microsoft_binding_mailboxes'
   AND index_name = 'idx_microsoft_binding_active_domain'`).Scan(&activeDomainIndexCount).Error)
 	assert.EqualValues(t, 1, activeDomainIndexCount)
-	exists, err := repo.MicrosoftResourceExists(context.Background(), 9201)
+	exists, err := repo.ResourceExists(context.Background(), 9201, domain.InboundResourceMicrosoft)
 	require.NoError(t, err)
 	assert.True(t, exists)
-	exists, err = repo.MicrosoftResourceExists(context.Background(), 999999)
+	exists, err = repo.ResourceExists(context.Background(), 999999, domain.InboundResourceMicrosoft)
 	require.NoError(t, err)
 	assert.False(t, exists)
 
-	items, total, hasMore, err := repo.ListByMicrosoftResource(context.Background(), mailapp.AuxiliaryMailFilter{
+	items, total, hasMore, err := repo.ListMessages(context.Background(), mailapp.AuxiliaryMailFilter{
 		ResourceID: 9201,
 		Search:     "654321",
 		Limit:      20,
@@ -136,7 +136,7 @@ WHERE table_schema = DATABASE()
 	assert.Empty(t, items[0].EnvelopeFrom)
 
 	for _, wildcard := range []string{"%", "_", `\`} {
-		wildcardItems, wildcardTotal, wildcardHasMore, err := repo.ListByMicrosoftResource(context.Background(), mailapp.AuxiliaryMailFilter{
+		wildcardItems, wildcardTotal, wildcardHasMore, err := repo.ListMessages(context.Background(), mailapp.AuxiliaryMailFilter{
 			ResourceID: 9201,
 			Search:     wildcard,
 			Limit:      20,
@@ -148,7 +148,7 @@ WHERE table_schema = DATABASE()
 		assert.False(t, wildcardHasMore)
 	}
 
-	firstPage, firstTotal, firstHasMore, err := repo.ListByMicrosoftResource(context.Background(), mailapp.AuxiliaryMailFilter{
+	firstPage, firstTotal, firstHasMore, err := repo.ListMessages(context.Background(), mailapp.AuxiliaryMailFilter{
 		ResourceID: 9201,
 		Limit:      1,
 	})
@@ -156,7 +156,7 @@ WHERE table_schema = DATABASE()
 	assert.EqualValues(t, 2, firstTotal)
 	assert.True(t, firstHasMore)
 	require.Len(t, firstPage, 1)
-	secondPage, skippedTotal, secondHasMore, err := repo.ListByMicrosoftResource(context.Background(), mailapp.AuxiliaryMailFilter{
+	secondPage, skippedTotal, secondHasMore, err := repo.ListMessages(context.Background(), mailapp.AuxiliaryMailFilter{
 		ResourceID:       9201,
 		Limit:            1,
 		BeforeReceivedAt: firstPage[0].ReceivedAt,
@@ -169,19 +169,19 @@ WHERE table_schema = DATABASE()
 	require.Len(t, secondPage, 1)
 	assert.Equal(t, `Literal % _ \\ marker`, secondPage[0].Subject)
 
-	detail, err := repo.FindByMicrosoftResource(context.Background(), 9201, first.ID)
+	detail, err := repo.FindMessage(context.Background(), 9201, domain.InboundResourceMicrosoft, first.ID)
 	require.NoError(t, err)
 	require.NotNil(t, detail)
 	assert.Equal(t, "private/9201-secret.eml", detail.SourceObjectKey)
-	crossResource, err := repo.FindByMicrosoftResource(context.Background(), 9202, first.ID)
+	crossResource, err := repo.FindMessage(context.Background(), 9202, domain.InboundResourceMicrosoft, first.ID)
 	require.NoError(t, err)
 	assert.Nil(t, crossResource)
 
 	require.NoError(t, db.Exec("UPDATE microsoft_resources SET status = 'deleted' WHERE id = ?", 9201).Error)
-	exists, err = repo.MicrosoftResourceExists(context.Background(), 9201)
+	exists, err = repo.ResourceExists(context.Background(), 9201, domain.InboundResourceMicrosoft)
 	require.NoError(t, err)
 	assert.True(t, exists)
-	deletedItems, deletedTotal, deletedHasMore, err := repo.ListByMicrosoftResource(context.Background(), mailapp.AuxiliaryMailFilter{
+	deletedItems, deletedTotal, deletedHasMore, err := repo.ListMessages(context.Background(), mailapp.AuxiliaryMailFilter{
 		ResourceID: 9201,
 		Limit:      20,
 	})
@@ -189,7 +189,7 @@ WHERE table_schema = DATABASE()
 	assert.EqualValues(t, 2, deletedTotal)
 	assert.False(t, deletedHasMore)
 	require.Len(t, deletedItems, 2)
-	deletedDetail, err := repo.FindByMicrosoftResource(context.Background(), 9201, first.ID)
+	deletedDetail, err := repo.FindMessage(context.Background(), 9201, domain.InboundResourceMicrosoft, first.ID)
 	require.NoError(t, err)
 	require.NotNil(t, deletedDetail)
 	assert.Equal(t, "private/9201-secret.eml", deletedDetail.SourceObjectKey)
@@ -198,6 +198,86 @@ WHERE table_schema = DATABASE()
 	require.NoError(t, err)
 	require.Len(t, bindings, 1)
 	assert.Equal(t, "proof9201@example.com", bindings[9201].BindingAddress)
+}
+
+func TestAuxiliaryMailRepoListsCompleteBindingDomainMailboxMySQL(t *testing.T) {
+	db := newMailTransportMySQLTestDB(t)
+	createMicrosoftAliasTestResource(t, db, 9301, "normal")
+	createMicrosoftAliasTestResource(t, db, 9302, "normal")
+	createActiveBindingDomainForRecoveryTest(t, db, 9390, 9391, "binding-view.example")
+	createActiveBindingDomainForRecoveryTest(t, db, 9392, 9393, "other-binding.example")
+	now := time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC)
+	first := &InboundMailModel{
+		HeaderFrom:      "security@microsoft.com",
+		Recipient:       "first@binding-view.example",
+		Subject:         "First binding-domain message",
+		ReceivedAt:      &now,
+		ParsedAt:        &now,
+		ResourceID:      9301,
+		ResourceType:    "microsoft",
+		OwnerUserID:     9301,
+		SourceObjectKey: "private/binding-domain-first.eml",
+		Status:          string(domain.InboundStatusStored),
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	require.NoError(t, db.Create(first).Error)
+	domainReceivedAt := now.Add(-time.Minute)
+	direct := &InboundMailModel{
+		Recipient:       "fallback@binding-view.example",
+		ResourceID:      9391,
+		ResourceType:    "domain",
+		OwnerUserID:     9390,
+		SourceObjectKey: "private/binding-domain-direct.eml",
+		Status:          string(domain.InboundStatusStored),
+		CreatedAt:       domainReceivedAt,
+		UpdatedAt:       domainReceivedAt,
+	}
+	require.NoError(t, db.Create(direct).Error)
+	require.NoError(t, db.Create(&InboundMailModel{
+		HeaderFrom:      "security@microsoft.com",
+		Recipient:       "other@other-binding.example",
+		Subject:         "Other binding-domain message",
+		ReceivedAt:      &now,
+		ParsedAt:        &now,
+		ResourceID:      9302,
+		ResourceType:    "microsoft",
+		OwnerUserID:     9302,
+		SourceObjectKey: "private/binding-domain-other.eml",
+		Status:          string(domain.InboundStatusStored),
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}).Error)
+
+	repo := NewAuxiliaryMailRepo(db)
+	exists, err := repo.ResourceExists(context.Background(), 9391, domain.InboundResourceDomain)
+	require.NoError(t, err)
+	assert.True(t, exists)
+	items, total, hasMore, err := repo.ListMessages(context.Background(), mailapp.AuxiliaryMailFilter{
+		ResourceID:   9391,
+		ResourceType: domain.InboundResourceDomain,
+		Limit:        20,
+	})
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, total)
+	assert.False(t, hasMore)
+	require.Len(t, items, 2)
+	assert.ElementsMatch(t, []uint{first.ID, direct.ID}, []uint{items[0].ID, items[1].ID})
+
+	detail, err := repo.FindMessage(context.Background(), 9391, domain.InboundResourceDomain, first.ID)
+	require.NoError(t, err)
+	require.NotNil(t, detail)
+	assert.Equal(t, first.SourceObjectKey, detail.SourceObjectKey)
+	directDetail, err := repo.FindMessage(context.Background(), 9391, domain.InboundResourceDomain, direct.ID)
+	require.NoError(t, err)
+	require.NotNil(t, directDetail)
+	assert.Equal(t, direct.SourceObjectKey, directDetail.SourceObjectKey)
+	crossDomain, err := repo.FindMessage(context.Background(), 9393, domain.InboundResourceDomain, first.ID)
+	require.NoError(t, err)
+	assert.Nil(t, crossDomain)
+	crossDomain, err = repo.FindMessage(context.Background(), 9393, domain.InboundResourceDomain, direct.ID)
+	require.NoError(t, err)
+	assert.Nil(t, crossDomain)
 }
 
 func TestMicrosoftBindingRepoAdminInputSemanticsAndCallerTransactionMySQL(t *testing.T) {

@@ -42,10 +42,14 @@ func (auxiliarySessionFetcher) FetchSession(context.Context, string) (uint, iamd
 }
 
 type auxiliaryPermissionChecker struct {
-	allowed bool
+	allowed     bool
+	permissions map[string]bool
 }
 
-func (c auxiliaryPermissionChecker) Check(context.Context, uint, iamdomain.Role, string, string) (bool, error) {
+func (c auxiliaryPermissionChecker) Check(_ context.Context, _ uint, _ iamdomain.Role, resource, action string) (bool, error) {
+	if c.permissions != nil {
+		return c.permissions[resource+"/"+action], nil
+	}
 	return c.allowed, nil
 }
 
@@ -117,6 +121,21 @@ func TestAdminBindingsHandlerAcceptsStableCursorAndSkipsRepeatedTotal(t *testing
 	assert.Equal(t, float64(8), body["nextBeforeId"])
 }
 
+func TestAdminBindingHandlersPassDomainScope(t *testing.T) {
+	query := &auxiliaryQueryHandlerStub{page: &mailapp.AuxiliaryMailPage{
+		Items: []mailapp.AuxiliaryMessageSummary{},
+		Limit: 20,
+	}}
+	recorder := serveAuxiliaryAdminRoute(t, query, true, "/v1/admin/bindings?resourceId=9&type=domain")
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	assert.Equal(t, domain.InboundResourceDomain, query.listFilter.ResourceType)
+
+	query.detail = &mailapp.AuxiliaryMessageDetail{}
+	recorder = serveAuxiliaryAdminRoute(t, query, true, "/v1/admin/bindings/messages/8?resourceId=9&type=domain")
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	assert.Equal(t, domain.InboundResourceDomain, query.getRequest.ResourceType)
+}
+
 func TestAdminBindingMessageHandlerPassesAuditContextAndSafeDetail(t *testing.T) {
 	receivedAt := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
 	query := &auxiliaryQueryHandlerStub{detail: &mailapp.AuxiliaryMessageDetail{
@@ -154,6 +173,45 @@ func TestAdminBindingRoutesRequirePermission(t *testing.T) {
 	}
 }
 
+func TestAdminBindingRoutesSelectPermissionByScope(t *testing.T) {
+	routes := []struct {
+		name   string
+		target string
+	}{
+		{name: "list", target: "/v1/admin/bindings?resourceId=9"},
+		{name: "detail", target: "/v1/admin/bindings/messages/8?resourceId=9"},
+	}
+	cases := []struct {
+		name        string
+		suffix      string
+		permissions map[string]bool
+		wantStatus  int
+	}{
+		{name: "microsoft binding permission", permissions: map[string]bool{"mailtransport:binding/read": true}, wantStatus: http.StatusOK},
+		{name: "microsoft rejects message permission", permissions: map[string]bool{"mailmatch:message/read": true}, wantStatus: http.StatusForbidden},
+		{name: "domain message permission", suffix: "&type=domain", permissions: map[string]bool{"mailmatch:message/read": true}, wantStatus: http.StatusOK},
+		{name: "domain rejects binding permission", suffix: "&type=domain", permissions: map[string]bool{"mailtransport:binding/read": true}, wantStatus: http.StatusForbidden},
+	}
+	for _, route := range routes {
+		for _, testCase := range cases {
+			t.Run(route.name+"/"+testCase.name, func(t *testing.T) {
+				query := &auxiliaryQueryHandlerStub{
+					page:   &mailapp.AuxiliaryMailPage{Items: []mailapp.AuxiliaryMessageSummary{}, Limit: 20},
+					detail: &mailapp.AuxiliaryMessageDetail{},
+				}
+				recorder := serveAuxiliaryAdminRouteWithChecker(
+					t,
+					query,
+					auxiliaryPermissionChecker{permissions: testCase.permissions},
+					true,
+					route.target+testCase.suffix,
+				)
+				require.Equal(t, testCase.wantStatus, recorder.Code, recorder.Body.String())
+			})
+		}
+	}
+}
+
 func TestAdminBindingRoutesRequireSession(t *testing.T) {
 	for _, target := range []string{
 		"/v1/admin/bindings?resourceId=9",
@@ -179,6 +237,7 @@ func TestAdminBindingsRejectsInvalidCursor(t *testing.T) {
 		"/v1/admin/bindings?resourceId=9&beforeReceivedAt=invalid&beforeId=8",
 		"/v1/admin/bindings?resourceId=9&beforeReceivedAt=2026-07-12T12%3A00%3A00Z&beforeId=8&offset=1",
 		"/v1/admin/bindings?resourceId=9&includeTotal=invalid",
+		"/v1/admin/bindings?resourceId=9&type=gmail",
 	} {
 		recorder := serveAuxiliaryAdminRoute(t, query, true, target)
 		require.Equal(t, http.StatusBadRequest, recorder.Code, target)
@@ -197,12 +256,16 @@ func serveAuxiliaryAdminRoute(t *testing.T, query mailapp.AuxiliaryMailQueryPort
 }
 
 func serveAuxiliaryAdminRouteWithAuth(t *testing.T, query mailapp.AuxiliaryMailQueryPort, allowed, authenticated bool, target string) *httptest.ResponseRecorder {
+	return serveAuxiliaryAdminRouteWithChecker(t, query, auxiliaryPermissionChecker{allowed: allowed}, authenticated, target)
+}
+
+func serveAuxiliaryAdminRouteWithChecker(t *testing.T, query mailapp.AuxiliaryMailQueryPort, checker middleware.PermissionChecker, authenticated bool, target string) *httptest.ResponseRecorder {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.Use(middleware.RequestID())
 	v1 := router.Group("/v1")
-	RegisterMailTransportRoutes(v1, &MailTransportModule{AuxiliaryMail: query}, auxiliarySessionFetcher{}, auxiliaryPermissionChecker{allowed: allowed})
+	RegisterMailTransportRoutes(v1, &MailTransportModule{AuxiliaryMail: query}, auxiliarySessionFetcher{}, checker)
 
 	request := httptest.NewRequest(http.MethodGet, target, nil)
 	request.Header.Set("X-Request-ID", "test-request")

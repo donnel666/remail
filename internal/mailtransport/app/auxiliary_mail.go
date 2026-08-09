@@ -20,9 +20,9 @@ const (
 )
 
 type AuxiliaryMailRepository interface {
-	MicrosoftResourceExists(ctx context.Context, resourceID uint) (bool, error)
-	ListByMicrosoftResource(ctx context.Context, filter AuxiliaryMailFilter) ([]domain.InboundMail, int64, bool, error)
-	FindByMicrosoftResource(ctx context.Context, resourceID, messageID uint) (*domain.InboundMail, error)
+	ResourceExists(ctx context.Context, resourceID uint, resourceType domain.InboundResourceType) (bool, error)
+	ListMessages(ctx context.Context, filter AuxiliaryMailFilter) ([]domain.InboundMail, int64, bool, error)
+	FindMessage(ctx context.Context, resourceID uint, resourceType domain.InboundResourceType, messageID uint) (*domain.InboundMail, error)
 }
 
 type MicrosoftBindingQueryRepository interface {
@@ -36,6 +36,7 @@ type AuxiliaryMailQueryPort interface {
 
 type AuxiliaryMailFilter struct {
 	ResourceID       uint
+	ResourceType     domain.InboundResourceType
 	Search           string
 	Offset           int
 	Limit            int
@@ -91,6 +92,7 @@ type AuxiliaryMailPage struct {
 
 type AuxiliaryMailDetailRequest struct {
 	ResourceID     uint
+	ResourceType   domain.InboundResourceType
 	MessageID      uint
 	OperatorUserID uint
 	RequestID      string
@@ -125,6 +127,12 @@ func (s *AuxiliaryMailQueryService) List(ctx context.Context, filter AuxiliaryMa
 	if s == nil || s.repo == nil || s.bindings == nil || filter.ResourceID == 0 || filter.Offset < 0 || (filter.BeforeReceivedAt == nil) != (filter.BeforeID == 0) || (filter.BeforeReceivedAt != nil && filter.Offset != 0) {
 		return nil, domain.ErrInvalidAuxiliaryMailQuery
 	}
+	if filter.ResourceType == "" {
+		filter.ResourceType = domain.InboundResourceMicrosoft
+	}
+	if filter.ResourceType != domain.InboundResourceMicrosoft && filter.ResourceType != domain.InboundResourceDomain {
+		return nil, domain.ErrInvalidAuxiliaryMailQuery
+	}
 	filter.Search = strings.TrimSpace(filter.Search)
 	if utf8.RuneCountInString(filter.Search) > AuxiliaryMailMaxSearch {
 		return nil, domain.ErrInvalidAuxiliaryMailQuery
@@ -136,7 +144,7 @@ func (s *AuxiliaryMailQueryService) List(ctx context.Context, filter AuxiliaryMa
 		return nil, domain.ErrInvalidAuxiliaryMailQuery
 	}
 
-	exists, err := s.repo.MicrosoftResourceExists(ctx, filter.ResourceID)
+	exists, err := s.repo.ResourceExists(ctx, filter.ResourceID, filter.ResourceType)
 	if err != nil {
 		return nil, fmt.Errorf("%w: check auxiliary mail resource: %w", domain.ErrAuxiliaryMailUnavailable, err)
 	}
@@ -144,21 +152,23 @@ func (s *AuxiliaryMailQueryService) List(ctx context.Context, filter AuxiliaryMa
 		return nil, domain.ErrAuxiliaryResourceNotFound
 	}
 
-	bindings, err := s.bindings.FindByResourceIDs(ctx, []uint{filter.ResourceID})
-	if err != nil {
-		return nil, fmt.Errorf("%w: load auxiliary mailbox binding: %w", domain.ErrAuxiliaryMailUnavailable, err)
-	}
 	var binding *AuxiliaryBindingSummary
-	if current, ok := bindings[filter.ResourceID]; ok {
-		binding = &AuxiliaryBindingSummary{
-			ID:           current.ID,
-			EmailAddress: current.BindingAddress,
-			Status:       current.Status,
-			UpdatedAt:    current.UpdatedAt,
+	if filter.ResourceType == domain.InboundResourceMicrosoft {
+		bindings, err := s.bindings.FindByResourceIDs(ctx, []uint{filter.ResourceID})
+		if err != nil {
+			return nil, fmt.Errorf("%w: load auxiliary mailbox binding: %w", domain.ErrAuxiliaryMailUnavailable, err)
+		}
+		if current, ok := bindings[filter.ResourceID]; ok {
+			binding = &AuxiliaryBindingSummary{
+				ID:           current.ID,
+				EmailAddress: current.BindingAddress,
+				Status:       current.Status,
+				UpdatedAt:    current.UpdatedAt,
+			}
 		}
 	}
 
-	rows, total, hasMore, err := s.repo.ListByMicrosoftResource(ctx, filter)
+	rows, total, hasMore, err := s.repo.ListMessages(ctx, filter)
 	if err != nil {
 		return nil, fmt.Errorf("%w: list auxiliary mailbox messages: %w", domain.ErrAuxiliaryMailUnavailable, err)
 	}
@@ -189,7 +199,13 @@ func (s *AuxiliaryMailQueryService) Get(ctx context.Context, request AuxiliaryMa
 		request.ResourceID == 0 || request.MessageID == 0 || request.OperatorUserID == 0 {
 		return nil, domain.ErrInvalidAuxiliaryMailQuery
 	}
-	row, err := s.repo.FindByMicrosoftResource(ctx, request.ResourceID, request.MessageID)
+	if request.ResourceType == "" {
+		request.ResourceType = domain.InboundResourceMicrosoft
+	}
+	if request.ResourceType != domain.InboundResourceMicrosoft && request.ResourceType != domain.InboundResourceDomain {
+		return nil, domain.ErrInvalidAuxiliaryMailQuery
+	}
+	row, err := s.repo.FindMessage(ctx, request.ResourceID, request.ResourceType, request.MessageID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: find auxiliary mailbox message: %w", domain.ErrAuxiliaryMailUnavailable, err)
 	}
@@ -218,11 +234,15 @@ func (s *AuxiliaryMailQueryService) Get(ctx context.Context, request AuxiliaryMa
 
 	parsed := parseInboundMessage(stored.ContentBytes, auxiliaryReceivedAt(*row))
 	merged := mergeParsedAuxiliaryMessage(*row, parsed)
+	auditResourceID := fmt.Sprintf("%d:%d", request.ResourceID, request.MessageID)
+	if request.ResourceType == domain.InboundResourceDomain {
+		auditResourceID = fmt.Sprintf("domain:%d:%d", request.ResourceID, request.MessageID)
+	}
 	if err := s.operationLogs.Create(ctx, &governancedomain.OperationLog{
 		OperatorUserID: request.OperatorUserID,
 		OperationType:  "mailtransport.auxiliary_message.read",
 		ResourceType:   "auxiliary_message",
-		ResourceID:     fmt.Sprintf("%d:%d", request.ResourceID, request.MessageID),
+		ResourceID:     auditResourceID,
 		Path:           strings.TrimSpace(request.Path),
 		Result:         "success",
 		SafeSummary:    "Auxiliary mailbox message body read.",
