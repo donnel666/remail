@@ -430,6 +430,24 @@ func TestStage1DispatcherDelaysRecoveryMailboxBusyRetry(t *testing.T) {
 	}
 }
 
+func TestStage1WorkerStartupDelay(t *testing.T) {
+	tests := []struct {
+		worker   int
+		interval time.Duration
+		want     time.Duration
+	}{
+		{worker: 0, interval: 2 * time.Second, want: 0},
+		{worker: 1, interval: 2 * time.Second, want: 2 * time.Second},
+		{worker: 4, interval: 2 * time.Second, want: 8 * time.Second},
+		{worker: 4, interval: 0, want: 0},
+	}
+	for _, test := range tests {
+		if got := stage1WorkerStartupDelay(test.worker, test.interval); got != test.want {
+			t.Fatalf("worker %d startup delay = %s, want %s", test.worker, got, test.want)
+		}
+	}
+}
+
 func TestInputManifestAndPipeline(t *testing.T) {
 	dir := t.TempDir()
 	input := filepath.Join(dir, "input.txt")

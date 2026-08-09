@@ -96,6 +96,7 @@ type config struct {
 	stage2Retries           int
 	stage1Timeout           time.Duration
 	stage2Timeout           time.Duration
+	stage1StartupInterval   time.Duration
 	credentialTypeRPS       int
 	credentialTypeBurst     int
 	retryAllErrors          bool
@@ -975,6 +976,7 @@ func parseFlags() config {
 	flag.IntVar(&cfg.stage2Retries, "stage2-retries", 3, "history-identification attempts per resource")
 	flag.DurationVar(&cfg.stage1Timeout, "stage1-timeout", 15*time.Minute, "timeout for one hard reauthorization attempt")
 	flag.DurationVar(&cfg.stage2Timeout, "stage2-timeout", 30*time.Minute, "timeout for one history-identification attempt")
+	flag.DurationVar(&cfg.stage1StartupInterval, "stage1-startup-interval", 2*time.Second, "delay between enabling stage-one workers during cold start; zero disables the ramp")
 	flag.IntVar(&cfg.credentialTypeRPS, "credential-type-rps", 5, "CMD-wide GetCredentialType requests per second; zero disables the gate")
 	flag.IntVar(&cfg.credentialTypeBurst, "credential-type-burst", 1, "maximum immediate GetCredentialType burst")
 	flag.BoolVar(&cfg.retryAllErrors, "retry-all-errors", false, "on checkpoint resume, retry all error.txt entries instead of only 429.txt")
@@ -983,7 +985,7 @@ func parseFlags() config {
 }
 
 func run(ctx context.Context, cfg config) error {
-	if cfg.concurrency < 1 || cfg.concurrency > 500 || cfg.pendingCap < cfg.concurrency || cfg.pendingCap > 10000 || cfg.chunkSize < 1 || cfg.chunkSize > 5000 || cfg.offset < 0 || cfg.limit < 0 || cfg.stage1Retries < 1 || cfg.stage1Retries > 5 || cfg.stage2Retries < 1 || cfg.stage2Retries > 5 || cfg.stage1Timeout < time.Minute || cfg.stage2Timeout < time.Minute || cfg.credentialTypeRPS < 0 || cfg.credentialTypeRPS > 1000 || cfg.credentialTypeBurst < 1 || cfg.credentialTypeBurst > 100 {
+	if cfg.concurrency < 1 || cfg.concurrency > 500 || cfg.pendingCap < cfg.concurrency || cfg.pendingCap > 10000 || cfg.chunkSize < 1 || cfg.chunkSize > 5000 || cfg.offset < 0 || cfg.limit < 0 || cfg.stage1Retries < 1 || cfg.stage1Retries > 5 || cfg.stage2Retries < 1 || cfg.stage2Retries > 5 || cfg.stage1Timeout < time.Minute || cfg.stage2Timeout < time.Minute || cfg.stage1StartupInterval < 0 || cfg.stage1StartupInterval > time.Minute || cfg.credentialTypeRPS < 0 || cfg.credentialTypeRPS > 1000 || cfg.credentialTypeBurst < 1 || cfg.credentialTypeBurst > 100 {
 		return errors.New("invalid command limits")
 	}
 	if strings.TrimSpace(cfg.proxyFilePath) != "" && strings.TrimSpace(cfg.proxyURL) != "" {
@@ -1224,9 +1226,18 @@ func run(ctx context.Context, cfg config) error {
 	}()
 
 	stage1Workers.Add(cfg.concurrency)
+	if cfg.concurrency > 1 && cfg.stage1StartupInterval > 0 {
+		log.Printf("stage1_worker_startup_ramp workers=%d interval=%s full_concurrency_after=%s", cfg.concurrency, cfg.stage1StartupInterval, stage1WorkerStartupDelay(cfg.concurrency-1, cfg.stage1StartupInterval))
+	}
 	for worker := 0; worker < cfg.concurrency; worker++ {
+		workerID := worker
 		go func() {
 			defer stage1Workers.Done()
+			if delay := stage1WorkerStartupDelay(workerID, cfg.stage1StartupInterval); delay > 0 {
+				if err := sleepContext(workCtx, delay); err != nil {
+					return
+				}
+			}
 			for item := range stage1Ch {
 				if workCtx.Err() != nil {
 					<-stage1Slots
@@ -2856,6 +2867,13 @@ func uint64Args(values []uint64) []any {
 		result[index] = value
 	}
 	return result
+}
+
+func stage1WorkerStartupDelay(worker int, interval time.Duration) time.Duration {
+	if worker <= 0 || interval <= 0 {
+		return 0
+	}
+	return time.Duration(worker) * interval
 }
 
 func sleepContext(ctx context.Context, duration time.Duration) error {
