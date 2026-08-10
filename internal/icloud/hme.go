@@ -49,19 +49,19 @@ type hmeConfig struct {
 }
 
 type hmeAlias struct {
-	AnonymousID       string
-	Email             string
-	Label             string
-	Note              string
-	ForwardToEmail    string
-	Origin            string
-	ProviderDomain    string
-	RecipientMailID   string
-	RecipientProbeToken string
-	RecipientProbeStartedAt *time.Time
+	AnonymousID              string
+	Email                    string
+	Label                    string
+	Note                     string
+	ForwardToEmail           string
+	Origin                   string
+	ProviderDomain           string
+	RecipientMailID          string
+	RecipientProbeToken      string
+	RecipientProbeStartedAt  *time.Time
 	RecipientProbeLastSentAt *time.Time
-	Active            bool
-	ProviderCreatedAt *time.Time
+	Active                   bool
+	ProviderCreatedAt        *time.Time
 }
 
 type hmeListResult struct {
