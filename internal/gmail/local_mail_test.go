@@ -205,17 +205,15 @@ func TestLocalGmailTerminalCallbackRetriesBeforeAllocationRelease(t *testing.T) 
 }
 
 type localMailIngestSpy struct {
-	resourceIDs   []uint
-	resourceTypes []string
-	messageIDs    []string
-	recipients    []string
-	folders       []string
-	failAt        int
+	resourceIDs []uint
+	messageIDs  []string
+	recipients  []string
+	folders     []string
+	failAt      int
 }
 
 func (s *localMailIngestSpy) IngestGmailMail(_ context.Context, resourceID uint, recipient string, _ []byte, _ time.Time, messageID, folder string) error {
 	s.resourceIDs = append(s.resourceIDs, resourceID)
-	s.resourceTypes = append(s.resourceTypes, "gmail")
 	s.messageIDs = append(s.messageIDs, messageID)
 	s.recipients = append(s.recipients, recipient)
 	s.folders = append(s.folders, folder)
@@ -224,38 +222,6 @@ func (s *localMailIngestSpy) IngestGmailMail(_ context.Context, resourceID uint,
 	}
 	return nil
 }
-
-func (s *localMailIngestSpy) IngestICloudMail(_ context.Context, resourceID uint, recipient string, _ []byte, _ time.Time, messageID, folder string) error {
-	s.resourceIDs = append(s.resourceIDs, resourceID)
-	s.resourceTypes = append(s.resourceTypes, "icloud")
-	s.messageIDs = append(s.messageIDs, messageID)
-	s.recipients = append(s.recipients, recipient)
-	s.folders = append(s.folders, folder)
-	if s.failAt > 0 && len(s.messageIDs) == s.failAt {
-		return errors.New("mailmatch temporarily unavailable")
-	}
-	return nil
-}
-
-type localICloudMailResourceModel struct {
-	ID                 uint   `gorm:"column:id;primaryKey"`
-	GmailResourceID    uint   `gorm:"column:gmail_resource_id"`
-	ProviderCursor     uint64 `gorm:"column:provider_cursor"`
-	ProviderSpamCursor uint64 `gorm:"column:provider_spam_cursor"`
-}
-
-func (localICloudMailResourceModel) TableName() string { return "icloud_resources" }
-
-type localICloudMailAllocationModel struct {
-	ID         uint      `gorm:"column:id;primaryKey"`
-	OrderNo    string    `gorm:"column:order_no"`
-	ResourceID uint      `gorm:"column:resource_id"`
-	Email      string    `gorm:"column:email"`
-	Status     string    `gorm:"column:status"`
-	CreatedAt  time.Time `gorm:"column:created_at"`
-}
-
-func (localICloudMailAllocationModel) TableName() string { return "icloud_allocations" }
 
 func TestLocalGmailCursorAdvancesOnlyAfterWholeFetchIsIngested(t *testing.T) {
 	clock := time.Date(2026, 8, 3, 4, 0, 0, 0, time.UTC)
@@ -449,72 +415,6 @@ func TestFetchLocalPurchaseMailUsesTypedAllocationAndStableUIDs(t *testing.T) {
 	require.Error(t, service.FetchLocalPurchaseMail(context.Background(), allocation.OrderNo))
 	require.NoError(t, db.First(&allocation, allocation.ID).Error)
 	require.Equal(t, AllocationStatusAllocated, allocation.Status, "purchase mail errors must not release or refund the purchase")
-}
-
-func TestFetchICloudMailUsesSharedRootCursorsAndExactActiveAliases(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:icloud-local-mail?mode=memory&cache=shared"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&localResourceModel{}, &localICloudMailResourceModel{}, &localICloudMailAllocationModel{}))
-	require.NoError(t, db.Create(&localResourceModel{
-		ID: 11, ResourceType: "gmail", OwnerUserID: 1,
-		Email: "forward@gmail.com", Identity: "forward@gmail.com", Password: "password",
-		AppPassword: "icloud-app-password", Status: LocalResourceNormal,
-	}).Error)
-	initial := localGmailFolderCursors{Inbox: joinLocalGmailCursor(81, 20), Spam: joinLocalGmailCursor(82, 30)}
-	next := localGmailFolderCursors{Inbox: joinLocalGmailCursor(81, 24), Spam: joinLocalGmailCursor(82, 31)}
-	require.NoError(t, db.Create(&localICloudMailResourceModel{
-		ID: 41, GmailResourceID: 11, ProviderCursor: initial.Inbox, ProviderSpamCursor: initial.Spam,
-	}).Error)
-	startedAt := time.Date(2026, 8, 7, 8, 0, 0, 0, time.UTC)
-	require.NoError(t, db.Create(&[]localICloudMailAllocationModel{
-		{ID: 1, OrderNo: "ICLOUD-A", ResourceID: 41, Email: "alias-a@icloud.com", Status: AllocationStatusAllocated, CreatedAt: startedAt},
-		{ID: 2, OrderNo: "ICLOUD-B", ResourceID: 41, Email: "alias-b@icloud.com", Status: AllocationStatusAllocated, CreatedAt: startedAt.Add(time.Minute)},
-		{ID: 3, OrderNo: "ICLOUD-OLD", ResourceID: 41, Email: "old@icloud.com", Status: AllocationStatusReleased, CreatedAt: startedAt.Add(-time.Hour)},
-	}).Error)
-
-	service := NewService(db, nil)
-	mail := &localMailIngestSpy{failAt: 2}
-	service.SetMailIngest(mail)
-	var cursors []localGmailFolderCursors
-	service.fetch = func(_ context.Context, email, appPassword string, cursor localGmailFolderCursors, since time.Time, fullHistory bool) ([]localGmailFetchedMessage, localGmailFolderCursors, error) {
-		require.Equal(t, "forward@gmail.com", email)
-		require.Equal(t, "icloud-app-password", appPassword)
-		require.Equal(t, startedAt, since)
-		require.False(t, fullHistory)
-		cursors = append(cursors, cursor)
-		if cursor == next {
-			return nil, next, nil
-		}
-		return []localGmailFetchedMessage{
-			{Folder: localGmailInboxFolder, ProviderMessageID: "inbox:81:21", Raw: []byte("Delivered-To: forward@gmail.com\r\nX-Original-To: Alias-A@icloud.com\r\n\r\nfirst"), ReceivedAt: startedAt.Add(time.Minute)},
-			{Folder: localGmailInboxFolder, ProviderMessageID: "inbox:81:22", Raw: []byte("Delivered-To: forward@gmail.com\r\nOriginal-Recipient: rfc822; alias-b@icloud.com\r\n\r\nsecond"), ReceivedAt: startedAt.Add(2 * time.Minute)},
-			{Folder: localGmailInboxFolder, ProviderMessageID: "inbox:81:23", Raw: []byte("Delivered-To: forward@gmail.com\r\nTo: alias-a@icloud.com, alias-b@icloud.com\r\n\r\nambiguous"), ReceivedAt: startedAt.Add(3 * time.Minute)},
-			{Folder: localGmailSpamFolder, ProviderMessageID: "spam:82:31", Raw: []byte("Delivered-To: forward@gmail.com\r\nTo: old@icloud.com\r\n\r\nreleased"), ReceivedAt: startedAt.Add(4 * time.Minute)},
-		}, next, nil
-	}
-
-	require.Error(t, service.FetchICloudMail(context.Background(), "ICLOUD-A"))
-	var root localICloudMailResourceModel
-	require.NoError(t, db.First(&root, 41).Error)
-	require.Equal(t, initial.Inbox, root.ProviderCursor)
-	require.Equal(t, initial.Spam, root.ProviderSpamCursor)
-
-	mail.failAt = 0
-	mail.resourceIDs = nil
-	mail.resourceTypes = nil
-	mail.messageIDs = nil
-	mail.recipients = nil
-	mail.folders = nil
-	require.NoError(t, service.FetchICloudMail(context.Background(), "ICLOUD-A"))
-	require.NoError(t, service.FetchICloudMail(context.Background(), "ICLOUD-B"))
-	require.Equal(t, []localGmailFolderCursors{initial, initial, next}, cursors)
-	require.Equal(t, []uint{41, 41}, mail.resourceIDs)
-	require.Equal(t, []string{"icloud", "icloud"}, mail.resourceTypes)
-	require.Equal(t, []string{"gmail:11:inbox:81:21", "gmail:11:inbox:81:22"}, mail.messageIDs)
-	require.Equal(t, []string{"alias-a@icloud.com", "alias-b@icloud.com"}, mail.recipients)
-	require.NoError(t, db.First(&root, 41).Error)
-	require.Equal(t, next.Inbox, root.ProviderCursor)
-	require.Equal(t, next.Spam, root.ProviderSpamCursor)
 }
 
 func TestLocalGmailAuthenticationFailureDisablesSupplyAndRefunds(t *testing.T) {

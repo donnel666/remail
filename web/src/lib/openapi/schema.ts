@@ -3416,7 +3416,7 @@ export interface paths {
         put?: never;
         /**
          * Queue a resource-level mail fetch
-         * @description Requires `mailmatch:message/operate`, Session authentication, CSRF, and an idempotency key. `type=microsoft` uses the Microsoft resource transport; `type=icloud` reuses the active iCloud allocation and linked Gmail pickup pipeline. MailMatch updates the resource's current fetch generation before returning 202. Disabled resources may be diagnosed without being enabled; deleted resources return 409.
+         * @description Requires `mailmatch:message/operate`, Session authentication, CSRF, and an idempotency key. `type=microsoft` uses the Microsoft resource transport. `type=icloud` reads the persisted domain mailbox and recipient suffix of every active alias allocation, normalizes the real sender and HME recipient before MailMatch, and ingests unmatched candidates for administrator diagnostics. MailMatch updates the resource's current fetch generation before returning 202. Disabled resources may be diagnosed without being enabled; deleted resources return 409.
          */
         post: operations["postAdminMicrosoftResourceMessagesFetch"];
         delete?: never;
@@ -3473,7 +3473,7 @@ export interface paths {
         put?: never;
         /**
          * Import iCloud resources for a selected owner
-         * @description Cookie, DSID, client context, and the source object remain write-only.
+         * @description Each non-empty TXT line uses `primaryEmail----host----dsid----clientId----clientBuildNumber----clientMasteringNumber----Cookie`; any later `----` text remains part of Cookie. A browser-copied HME request may instead use `primaryEmail----curl ...`; the server extracts and validates the HTTPS maildomainws host, DSID, client context, Cookie, and optional request headers without executing shell syntax. The primary email remains explicit because Apple does not include it in the HME request. Apple forwarding mailboxes are selected and verified through system settings and are not an import field. Cookie, DSID, client context, cURL source, and the private source object remain write-only.
          */
         post: operations["postAdminICloudResourceImport"];
         delete?: never;
@@ -3840,7 +3840,7 @@ export interface paths {
         };
         /**
          * List primary-mailbox message summaries for a resource
-         * @description Requires `mailmatch:message/read`. Search is evaluated server-side across the authorized sender, recipient, subject, preview/body, and verification-code semantics, but list items never contain a body, full match diagnostic, private object key, or raw upstream message. Verification codes and order numbers are returned only as authorized safe display fields.
+         * @description Requires `mailmatch:message/read`. Search is evaluated server-side across the authorized sender, recipient, subject, preview/body, and verification-code semantics, but list items never contain a body, full match diagnostic, private object key, or raw upstream message. For `type=icloud`, sender is the decoded original sender and recipient is the HME alias; the Apple relay envelope, domain forwarding mailbox, and recipient routing ID are never returned. Verification codes and order numbers are returned only as authorized safe display fields.
          */
         get: operations["getAdminMessages"];
         put?: never;
@@ -3860,7 +3860,7 @@ export interface paths {
         };
         /**
          * Get one primary-mailbox message body and diagnostic
-         * @description Requires `mailmatch:message/read`. `resourceId` participates in the authorization and association lookup; an unknown message and a message belonging to another resource both return the same safe 404. This controlled read may return the body, verification code, order number, and sanitized match diagnostic, but never an object key, raw envelope, token, or upstream error body.
+         * @description Requires `mailmatch:message/read`. `resourceId` participates in the authorization and association lookup; an unknown message and a message belonging to another resource both return the same safe 404. This controlled read may return the body, verification code, order number, and sanitized match diagnostic, but never an object key, raw envelope, token, or upstream error body. For `type=icloud`, sender is the decoded original sender and recipient is the HME alias; the Apple relay envelope, domain forwarding mailbox, and recipient routing ID are never returned.
          */
         get: operations["getAdminMessage"];
         put?: never;
@@ -7085,8 +7085,7 @@ export interface components {
             /** Format: email */
             primaryEmail: string;
             suffix: string;
-            /** Format: email */
-            gmailEmail: string;
+            /** @description Current Apple-selected forwarding target. Allocated aliases continue using each alias item's persisted forwardToEmail and recipientMailId. */
             selectedForwardTo: string;
             owner: components["schemas"]["AdminICloudOwnerSummary"];
             status: components["schemas"]["AdminICloudResourceStatus"];
@@ -7188,9 +7187,14 @@ export interface components {
         AdminICloudAliasStatus: "normal" | "disabled" | "missing" | "deleted";
         AdminICloudAliasItem: {
             id: number;
+            /** @description Apple HME alias identifier used for alias maintenance. */
+            anonymousId: string;
             /** Format: email */
             email: string;
+            /** @description Persisted Apple relay recipient suffix that selects this alias before MailMatch normalization. */
+            recipientMailId: string;
             status: components["schemas"]["AdminICloudAliasStatus"];
+            /** @description Persisted domain mailbox for this alias. It remains authoritative for existing allocations independently of the current Apple session or resource forwarding selection. */
             forwardToEmail: string;
             origin: string;
             providerDomain: string;

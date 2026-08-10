@@ -267,6 +267,19 @@ func (r *ResourceFetchRepo) AssertResourceFetchFence(ctx context.Context, resour
 	})
 }
 
+func (r *ResourceFetchRepo) AssertICloudResourceFetchFence(ctx context.Context, resourceID uint, generation uint64) error {
+	return r.withTx(ctx, func(txCtx context.Context, tx *gorm.DB) error {
+		if err := r.lockResourceFetchState(tx, resourceID, generation); err != nil {
+			return err
+		}
+		scope, err := r.lockResourceFetchScope(txCtx, resourceID, domain.ResourceTypeICloud)
+		if err != nil {
+			return err
+		}
+		return validateResourceFetchScope(scope, 0)
+	})
+}
+
 func (r *ResourceFetchRepo) CompleteResourceFetch(ctx context.Context, resourceID uint, generation uint64, expectedCredentialRevision uint64, rotatedRefreshToken string, fetched int, stored int, matched int, now time.Time, log *governancedomain.SystemLog) error {
 	return r.withTx(ctx, func(txCtx context.Context, tx *gorm.DB) error {
 		if err := r.lockResourceFetchState(tx, resourceID, generation); err != nil {
@@ -298,6 +311,26 @@ func (r *ResourceFetchRepo) CompleteResourceFetchTask(ctx context.Context, resou
 		return r.finishResourceFetchState(txCtx, tx, resourceID, generation, map[string]any{
 			"status": string(domain.ResourceFetchJobSucceeded), "failures": 0,
 			"fetched_count": 0, "stored_count": 0, "matched_count": 0,
+			"last_safe_error": "", "finished_at": now,
+		}, log)
+	})
+}
+
+func (r *ResourceFetchRepo) CompleteICloudResourceFetch(ctx context.Context, resourceID uint, generation uint64, fetched int, stored int, matched int, now time.Time, log *governancedomain.SystemLog) error {
+	return r.withTx(ctx, func(txCtx context.Context, tx *gorm.DB) error {
+		if err := r.lockResourceFetchState(tx, resourceID, generation); err != nil {
+			return err
+		}
+		scope, err := r.lockResourceFetchScope(txCtx, resourceID, domain.ResourceTypeICloud)
+		if err != nil {
+			return err
+		}
+		if err := validateResourceFetchScope(scope, 0); err != nil {
+			return err
+		}
+		return r.finishResourceFetchState(txCtx, tx, resourceID, generation, map[string]any{
+			"status": string(domain.ResourceFetchJobSucceeded), "failures": 0,
+			"fetched_count": max(fetched, 0), "stored_count": max(stored, 0), "matched_count": max(matched, 0),
 			"last_safe_error": "", "finished_at": now,
 		}, log)
 	})
@@ -417,16 +450,6 @@ func (r *ResourceFetchRepo) lockICloudResourceFetchScope(ctx context.Context, re
 		return nil, fmt.Errorf("load iCloud resource fetch scope: %w", err)
 	}
 	scope.ResourceType = domain.ResourceTypeICloud
-	var allocation struct {
-		OrderNo string `gorm:"column:order_no"`
-	}
-	err = r.dbFor(ctx).Table("icloud_allocations").Select("order_no").
-		Where("resource_id = ? AND status = ?", resourceID, "allocated").
-		Order("created_at ASC, id ASC").Limit(1).Take(&allocation).Error
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, fmt.Errorf("load active iCloud resource allocation: %w", err)
-	}
-	scope.OrderNo = strings.TrimSpace(allocation.OrderNo)
 	return &scope, nil
 }
 
@@ -459,14 +482,14 @@ func validateResourceFetchScope(row *domain.ResourceFetchScope, expectedCredenti
 	if strings.EqualFold(strings.TrimSpace(row.Status), "deleted") {
 		return domain.ErrResourceFetchDeleted
 	}
-	if expectedCredentialRevision > 0 && row.CredentialRevision != expectedCredentialRevision {
-		return domain.ErrResourceFetchCredentialChanged
-	}
 	if row.ResourceType == domain.ResourceTypeICloud {
-		if strings.TrimSpace(row.EmailAddress) == "" || strings.TrimSpace(row.OrderNo) == "" {
+		if strings.TrimSpace(row.EmailAddress) == "" {
 			return domain.ErrResourceFetchJobConflict
 		}
 		return nil
+	}
+	if expectedCredentialRevision > 0 && row.CredentialRevision != expectedCredentialRevision {
+		return domain.ErrResourceFetchCredentialChanged
 	}
 	if strings.TrimSpace(row.EmailAddress) == "" || strings.TrimSpace(row.ClientID) == "" || strings.TrimSpace(row.RefreshToken) == "" {
 		return domain.ErrResourceFetchCredentialsMissing

@@ -28,7 +28,9 @@ func (MessageProjectionModel) TableName() string { return "mailmatch_message_pro
 
 // AppendMessages stores each message identity once and returns the persisted
 // facts in caller order. Duplicate identities never update the existing row.
-// Callers must not wrap the append phase in a parent database transaction.
+// Batch callers must not wrap the append phase in a parent database
+// transaction; the iCloud fenced path intentionally appends one message at a
+// time while holding its generation lock.
 func (r *Repo) AppendMessages(ctx context.Context, messages []domain.Message) (stored []domain.Message, inserted int, err error) {
 	defer func() { recordMailmatchAutocommitContention(ctx, err) }()
 	if len(messages) == 0 {

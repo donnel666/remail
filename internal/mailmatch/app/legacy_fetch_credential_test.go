@@ -94,9 +94,8 @@ type legacyFetchCredentialStub struct {
 }
 
 type gmailPurchaseFetchStub struct {
-	orderNos       []string
-	iCloudOrderNos []string
-	err            error
+	orderNos []string
+	err      error
 }
 
 func (s *gmailPurchaseFetchStub) FetchLocalPurchaseMail(_ context.Context, orderNo string) error {
@@ -104,8 +103,13 @@ func (s *gmailPurchaseFetchStub) FetchLocalPurchaseMail(_ context.Context, order
 	return s.err
 }
 
-func (s *gmailPurchaseFetchStub) FetchICloudMail(_ context.Context, orderNo string) error {
-	s.iCloudOrderNos = append(s.iCloudOrderNos, orderNo)
+type legacyICloudPurchaseFetchStub struct {
+	orderNos []string
+	err      error
+}
+
+func (s *legacyICloudPurchaseFetchStub) FetchICloudMail(_ context.Context, orderNo string) error {
+	s.orderNos = append(s.orderNos, orderNo)
 	return s.err
 }
 
@@ -198,10 +202,10 @@ func TestPickupRequestFetchRoutesCompletedICloudPurchaseAndReleasesLease(t *test
 		Recipient: "alias@icloud.com", ReceiveUntil: &past, AfterSaleUntil: &past,
 	}}
 	state := &pickupFetchStateStub{}
-	gmail := &gmailPurchaseFetchStub{}
+	icloud := &legacyICloudPurchaseFetchStub{}
 	uc := NewUseCase(repo, nil, nil, nil)
 	uc.SetPickupFetchStatePort(state)
-	uc.SetGmailPurchaseFetchPort(gmail)
+	uc.SetICloudPurchaseFetchPort(icloud)
 	uc.now = func() time.Time { return now }
 
 	err := uc.ProcessPickupRequestFetch(context.Background(), PickupRequestFetchTask{
@@ -212,7 +216,7 @@ func TestPickupRequestFetchRoutesCompletedICloudPurchaseAndReleasesLease(t *test
 	})
 
 	require.NoError(t, err)
-	require.Equal(t, []string{"ICLOUD-PURCHASE"}, gmail.iCloudOrderNos)
+	require.Equal(t, []string{"ICLOUD-PURCHASE"}, icloud.orderNos)
 	acquired, released := state.snapshot()
 	require.Equal(t, []uint{91}, acquired)
 	require.Equal(t, 1, released)

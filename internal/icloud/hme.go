@@ -57,12 +57,16 @@ type hmeAlias struct {
 	Origin            string
 	ProviderDomain    string
 	RecipientMailID   string
+	RecipientProbeToken string
+	RecipientProbeStartedAt *time.Time
+	RecipientProbeLastSentAt *time.Time
 	Active            bool
 	ProviderCreatedAt *time.Time
 }
 
 type hmeListResult struct {
 	SelectedForwardTo string
+	ForwardToEmails   []string
 	Aliases           []hmeAlias
 	UpdatedCookie     string
 	Complete          bool
@@ -146,6 +150,14 @@ func (c *HMEClient) list(ctx context.Context, config hmeConfig) (hmeListResult, 
 		}
 		if page == 0 {
 			result.SelectedForwardTo = selectedForwardTo
+			forwardToEmails, forwardErr := parseHMEForwardToEmails(payload.Result.ForwardToEmails)
+			if forwardErr != nil {
+				return hmeListResult{}, hmeResponseError("provider_response", "iCloud HME returned invalid forwarding mailboxes.", true, currentCookie)
+			}
+			result.ForwardToEmails = forwardToEmails
+			if len(forwardToEmails) > 0 && !containsICloudEmail(forwardToEmails, selectedForwardTo) {
+				return hmeListResult{}, hmeResponseError("provider_response", "iCloud HME returned an inconsistent forwarding target.", true, currentCookie)
+			}
 		} else if !strings.EqualFold(result.SelectedForwardTo, selectedForwardTo) {
 			return hmeListResult{}, hmeResponseError("provider_response", "iCloud HME returned inconsistent forwarding targets.", true, currentCookie)
 		}
@@ -295,6 +307,7 @@ type hmePayloadAlias struct {
 
 type hmePayloadResult struct {
 	SelectedForwardTo string             `json:"selectedForwardTo"`
+	ForwardToEmails   []string           `json:"forwardToEmails"`
 	HMEEmails         *[]hmePayloadAlias `json:"hmeEmails"`
 	HME               json.RawMessage    `json:"hme"`
 	Total             *int               `json:"total"`
@@ -302,6 +315,23 @@ type hmePayloadResult struct {
 	NextToken         string             `json:"nextToken"`
 	ContinuationToken string             `json:"continuationToken"`
 	NextPageToken     string             `json:"nextPageToken"`
+}
+
+func parseHMEForwardToEmails(values []string) ([]string, error) {
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if !validICloudHMEEmail(value) {
+			return nil, &hmeError{Category: "provider_response", SafeMessage: "iCloud HME returned invalid forwarding mailboxes."}
+		}
+		if _, exists := seen[value]; exists {
+			return nil, &hmeError{Category: "provider_response", SafeMessage: "iCloud HME returned duplicate forwarding mailboxes."}
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result, nil
 }
 
 type hmeSuccessPayload struct {

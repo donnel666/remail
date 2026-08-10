@@ -610,15 +610,9 @@ func (r *Repo) ListICloudSourceCandidates(ctx context.Context, projectID uint, b
 		"ir.alias_count = 750",
 		"ir.delivery_probe_verified_at IS NOT NULL",
 		"ia.status = 'normal'",
-		"ir.gmail_resource_id IS NOT NULL",
+		"ia.recipient_mail_id <> ''",
 		"ir.selected_forward_to <> ''",
 		"LOWER(TRIM(ia.forward_to_email)) = LOWER(TRIM(ir.selected_forward_to))",
-		`EXISTS (
-            SELECT 1 FROM gmail_resources gr
-		    WHERE gr.id = ir.gmail_resource_id
-              AND gr.status IN ('normal', 'available')
-              AND LOWER(TRIM(gr.email)) = LOWER(TRIM(ir.selected_forward_to))
-        )`,
 		`NOT EXISTS (
             SELECT 1 FROM icloud_allocations history
             WHERE history.alias_id = ia.id AND history.project_id = ?
@@ -880,16 +874,11 @@ func (r *Repo) LockICloudCandidate(ctx context.Context, resourceID uint, aliasID
 	}
 	where := []string{
 		"ia.id = ?", "ia.resource_id = ?", "ia.status = 'normal'",
+		"ia.recipient_mail_id <> ''",
 		"ir.status = 'normal'", "ir.session_status = 'valid'", "ir.expire_at >= ?",
 		"ir.alias_count = 750", "ir.delivery_probe_verified_at IS NOT NULL",
-		"ir.gmail_resource_id IS NOT NULL", "ir.selected_forward_to <> ''",
+		"ir.selected_forward_to <> ''",
 		"LOWER(TRIM(ia.forward_to_email)) = LOWER(TRIM(ir.selected_forward_to))",
-		`EXISTS (
-            SELECT 1 FROM gmail_resources gr
-		    WHERE gr.id = ir.gmail_resource_id
-              AND gr.status IN ('normal', 'available')
-              AND LOWER(TRIM(gr.email)) = LOWER(TRIM(ir.selected_forward_to))
-        )`,
 		`NOT EXISTS (
             SELECT 1 FROM icloud_allocations history
             WHERE history.alias_id = ia.id AND history.project_id = ?
@@ -2083,14 +2072,7 @@ WHERE ir.status = 'normal'
   AND ir.expire_at >= UTC_TIMESTAMP(3)
   AND ir.alias_count = 750
   AND ir.delivery_probe_verified_at IS NOT NULL
-  AND ir.gmail_resource_id IS NOT NULL
   AND ir.selected_forward_to <> ''
-  AND EXISTS (
-      SELECT 1 FROM gmail_resources gr
-      WHERE gr.id = ir.gmail_resource_id
-        AND gr.status IN ('normal', 'available')
-        AND LOWER(TRIM(gr.email)) = LOWER(TRIM(ir.selected_forward_to))
-  )
   AND ((ir.for_sale = TRUE AND u.status = 'active' AND u.role IN ('supplier', 'admin', 'super_admin'))
        OR ir.for_sale = FALSE)`); err != nil {
 			return nil, err
@@ -2102,20 +2084,14 @@ JOIN icloud_resources ir ON ir.id = ia.resource_id
 JOIN email_resources er ON er.id = ir.id AND er.type = 'icloud'
 JOIN users u ON u.id = er.owner_user_id
 WHERE ia.status = 'normal'
+  AND ia.recipient_mail_id <> ''
   AND ir.status = 'normal'
   AND ir.session_status = 'valid'
   AND ir.expire_at >= UTC_TIMESTAMP(3)
   AND ir.alias_count = 750
   AND ir.delivery_probe_verified_at IS NOT NULL
-  AND ir.gmail_resource_id IS NOT NULL
   AND ir.selected_forward_to <> ''
   AND LOWER(TRIM(ia.forward_to_email)) = LOWER(TRIM(ir.selected_forward_to))
-  AND EXISTS (
-      SELECT 1 FROM gmail_resources gr
-      WHERE gr.id = ir.gmail_resource_id
-        AND gr.status IN ('normal', 'available')
-        AND LOWER(TRIM(gr.email)) = LOWER(TRIM(ir.selected_forward_to))
-  )
   AND ((ir.for_sale = TRUE AND u.status = 'active' AND u.role IN ('supplier', 'admin', 'super_admin'))
        OR ir.for_sale = FALSE)
   AND NOT EXISTS (

@@ -10,7 +10,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestICloudResourceFetchScopeUsesOnlyActiveAllocation(t *testing.T) {
+func TestICloudResourceFetchScopeDoesNotCollapseAliasesIntoOneOrder(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:mailmatch-icloud-resource-fetch?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.Exec(`
@@ -39,10 +39,16 @@ INSERT INTO icloud_allocations(id, resource_id, order_no, status, created_at) VA
 	repo := NewResourceFetchRepo(db)
 	scope, err := repo.LoadResourceFetchScope(context.Background(), 10, 4, domain.ResourceTypeICloud)
 	require.NoError(t, err)
-	require.Equal(t, "active-order", scope.OrderNo)
+	require.Empty(t, scope.OrderNo)
 	require.Equal(t, domain.ResourceTypeICloud, scope.ResourceType)
+	scope, err = repo.LoadResourceFetchScope(context.Background(), 10, 999, domain.ResourceTypeICloud)
+	require.NoError(t, err, "domain mailbox fetch must not depend on Apple credential revisions")
 
 	require.NoError(t, db.Table("icloud_allocations").Where("id = ?", 2).Update("status", "released").Error)
+	scope, err = repo.LoadResourceFetchScope(context.Background(), 10, 4, domain.ResourceTypeICloud)
+	require.NoError(t, err)
+	require.Empty(t, scope.OrderNo)
+	require.NoError(t, db.Table("icloud_resources").Where("id = ?", 10).Update("status", "disabled").Error)
 	_, err = repo.LoadResourceFetchScope(context.Background(), 10, 4, domain.ResourceTypeICloud)
-	require.ErrorIs(t, err, domain.ErrResourceFetchJobConflict)
+	require.NoError(t, err, "disabled supply must not hide persisted alias mail from administrators")
 }

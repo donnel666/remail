@@ -11,7 +11,9 @@ import (
 	"testing"
 	"time"
 
+	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
+	"github.com/donnel666/remail/internal/mailbox"
 	mailtransportdomain "github.com/donnel666/remail/internal/mailtransport/domain"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -31,21 +33,18 @@ func TestICloudValidationStateMachineAndCookieRotation(t *testing.T) {
 			if err != nil {
 				t.Fatalf("open database: %v", err)
 			}
-			if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudGmailResourceModel{}, &iCloudAliasModel{}, &iCloudMaintenanceRunModel{}); err != nil {
+			if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudAliasModel{}, &iCloudMaintenanceRunModel{}); err != nil {
 				t.Fatalf("migrate database: %v", err)
 			}
 			now := time.Date(2026, 8, 6, 0, 0, 0, 0, time.UTC)
 			if err := db.Create(&iCloudRootModel{ID: 1, Type: "icloud", OwnerUserID: 7, Version: 1, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
 				t.Fatalf("create root: %v", err)
 			}
-			if err := db.Create(&iCloudGmailResourceModel{ID: 11, Email: "target@gmail.com", Status: "normal"}).Error; err != nil {
-				t.Fatalf("create Gmail: %v", err)
-			}
 			cookie := "X-APPLE-DS-WEB-SESSION-TOKEN=session; X-APPLE-WEBAUTH-USER=user; X-APPLE-WEBAUTH-TOKEN=token"
 			probeStartedAt := now.Add(-time.Minute)
 			if err := db.Create(&iCloudResourceModel{
 				ID: 1, ResourceType: "icloud", PrimaryEmail: "main@icloud.com", Host: "p119-maildomainws.icloud.com", DSID: "123",
-				ClientID: "client", ClientBuildNumber: "build", ClientMasteringNumber: "mastering", Cookie: cookie, GmailResourceID: 11,
+				ClientID: "client", ClientBuildNumber: "build", ClientMasteringNumber: "mastering", Cookie: cookie,
 				ExpireAt: now.Add(time.Hour), Status: iCloudResourceValidating, SessionStatus: iCloudSessionUnchecked,
 				CredentialRevision: 1, CredentialUpdatedAt: now, ValidationGeneration: 1, CreatedAt: now, UpdatedAt: now,
 				DeliveryProbeToken: "probe-token", DeliveryProbeAlias: "alias-000@icloud.com",
@@ -60,7 +59,7 @@ func TestICloudValidationStateMachineAndCookieRotation(t *testing.T) {
 				body := ""
 				headers := http.Header{}
 				if testCase.statusCode == http.StatusOK {
-					body = iCloudHMEListJSON(t, iCloudMaxAliases, "target@gmail.com")
+					body = iCloudHMEListJSON(t, iCloudMaxAliases, "icloud@aishop6.com")
 					headers.Set("Set-Cookie", "X-APPLE-WEBAUTH-TOKEN=rotated; Path=/")
 				}
 				return &http.Response{StatusCode: testCase.statusCode, Header: headers, Body: io.NopCloser(strings.NewReader(body))}, nil
@@ -99,11 +98,11 @@ func iCloudHMEListJSON(t *testing.T, count int, forwardTo string) string {
 	for index := range aliases {
 		aliases[index] = map[string]any{
 			"hme": fmt.Sprintf("alias-%03d@icloud.com", index), "anonymousId": fmt.Sprintf("anonymous-%03d", index),
-			"forwardToEmail": forwardTo, "isActive": true,
+			"forwardToEmail": forwardTo, "recipientMailId": fmt.Sprintf("recipient-%03d", index), "isActive": true,
 		}
 	}
 	body, err := json.Marshal(map[string]any{"success": true, "result": map[string]any{
-		"selectedForwardTo": forwardTo, "total": count, "hasMore": false, "hmeEmails": aliases,
+		"selectedForwardTo": forwardTo, "forwardToEmails": []string{forwardTo}, "total": count, "hasMore": false, "hmeEmails": aliases,
 	}})
 	if err != nil {
 		t.Fatalf("marshal HME list: %v", err)
@@ -116,18 +115,18 @@ func TestICloudAliasReadinessRequiresExactly750(t *testing.T) {
 	for index := range aliases {
 		aliases[index] = hmeAlias{
 			AnonymousID: fmt.Sprintf("id-%d", index), Email: fmt.Sprintf("alias-%d@icloud.com", index),
-			ForwardToEmail: "target@gmail.com", Active: true,
+			ForwardToEmail: "icloud@aishop6.com", RecipientMailID: fmt.Sprintf("recipient-%d", index), Active: true,
 		}
 	}
-	if iCloudAliasesReadyForGmail(nil, "target@gmail.com") ||
-		iCloudAliasesReadyForGmail(aliases[:iCloudMaxAliases-1], "target@gmail.com") ||
-		!iCloudAliasesReadyForGmail(aliases[:iCloudMaxAliases], "target@gmail.com") ||
-		iCloudAliasesReadyForGmail(aliases, "target@gmail.com") {
+	if iCloudAliasesReadyForForwarding(nil, "icloud@aishop6.com") ||
+		iCloudAliasesReadyForForwarding(aliases[:iCloudMaxAliases-1], "icloud@aishop6.com") ||
+		!iCloudAliasesReadyForForwarding(aliases[:iCloudMaxAliases], "icloud@aishop6.com") ||
+		iCloudAliasesReadyForForwarding(aliases, "icloud@aishop6.com") {
 		t.Fatal("iCloud alias readiness must accept only exactly 750 ready aliases")
 	}
-	aliases[0].ForwardToEmail = "other@gmail.com"
-	if iCloudAliasesReadyForGmail(aliases[:iCloudMaxAliases], "target@gmail.com") {
-		t.Fatal("per-alias Gmail mismatch must fail readiness")
+	aliases[0].ForwardToEmail = "other@aishop6.com"
+	if iCloudAliasesReadyForForwarding(aliases[:iCloudMaxAliases], "icloud@aishop6.com") {
+		t.Fatal("per-alias forwarding mismatch must fail readiness")
 	}
 }
 
@@ -148,8 +147,8 @@ func TestSyncICloudAliasesRestoresProviderAliasFromDeletedState(t *testing.T) {
 	}
 	err = db.Transaction(func(tx *gorm.DB) error {
 		return syncICloudAliasesTx(tx, 1, []hmeAlias{{
-			AnonymousID: "alias-id", Email: "restored@icloud.com", ForwardToEmail: "target@gmail.com", Active: true,
-		}}, "target@gmail.com", true, now)
+			AnonymousID: "alias-id", Email: "restored@icloud.com", ForwardToEmail: "icloud@aishop6.com", Active: true,
+		}}, "icloud@aishop6.com", true, now)
 	})
 	if err != nil {
 		t.Fatalf("sync aliases: %v", err)
@@ -163,12 +162,80 @@ func TestSyncICloudAliasesRestoresProviderAliasFromDeletedState(t *testing.T) {
 	}
 }
 
+func TestSyncICloudAliasesClearsRecipientIDWhenForwardingTargetChanges(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:icloud-alias-route-change?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	if err := db.AutoMigrate(&iCloudAliasModel{}, &iCloudAliasRouteModel{}); err != nil {
+		t.Fatalf("migrate aliases and routes: %v", err)
+	}
+	now := time.Date(2026, 8, 7, 1, 0, 0, 0, time.UTC)
+	if err := db.Create(&iCloudAliasModel{
+		ID: 21, ResourceID: 1, AnonymousID: "alias-id", Email: "alias@icloud.com",
+		ForwardToEmail: "old@aishop6.com", RecipientMailID: "old-recipient", Status: iCloudResourceNormal,
+		CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create alias: %v", err)
+	}
+	err = db.Transaction(func(tx *gorm.DB) error {
+		return syncICloudAliasesTx(tx, 1, []hmeAlias{{
+			AnonymousID: "alias-id", Email: "alias@icloud.com", ForwardToEmail: "new@aishop6.com", Active: true,
+		}}, "new@aishop6.com", true, now.Add(time.Minute))
+	})
+	if err != nil {
+		t.Fatalf("sync changed route: %v", err)
+	}
+	var alias iCloudAliasModel
+	if err := db.First(&alias, 21).Error; err != nil {
+		t.Fatalf("read alias: %v", err)
+	}
+	if alias.ForwardToEmail != "new@aishop6.com" || alias.RecipientMailID != "" || alias.RecipientProbeToken != "" {
+		t.Fatalf("changed forwarding target must clear current recipient facts: %#v", alias)
+	}
+	var route iCloudAliasRouteModel
+	if err := db.Where("forward_to_email = ? AND recipient_mail_id = ?", "old@aishop6.com", "old-recipient").First(&route).Error; err != nil {
+		t.Fatalf("old route was not preserved: %v", err)
+	}
+}
+
+func TestDiscoverICloudRecipientIDsDoesNotReuseOldForwardingRoute(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:icloud-recipient-route-change?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	if err := db.AutoMigrate(&iCloudAliasModel{}); err != nil {
+		t.Fatalf("migrate aliases: %v", err)
+	}
+	if err := db.Create(&iCloudAliasModel{
+		ID: 21, ResourceID: 1, AnonymousID: "alias-0", Email: "alias-0@icloud.com",
+		ForwardToEmail: "old@aishop6.com", RecipientMailID: "old-recipient", Status: iCloudResourceNormal,
+	}).Error; err != nil {
+		t.Fatalf("create old alias route: %v", err)
+	}
+	aliases := make([]hmeAlias, iCloudMaxAliases)
+	for i := range aliases {
+		aliases[i] = hmeAlias{
+			AnonymousID: fmt.Sprintf("alias-%d", i), Email: fmt.Sprintf("alias-%d@icloud.com", i),
+			ForwardToEmail: "new@aishop6.com", Active: true,
+		}
+	}
+	service := NewService(db, nil, nil)
+	ready, err := service.discoverICloudRecipientIDs(context.Background(), iCloudValidationTask{ResourceID: 1, OwnerUserID: 7, ValidationGeneration: 1, ExpectedCredentialRevision: 1}, "new@aishop6.com", aliases, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("discover recipient route: %v", err)
+	}
+	if ready || aliases[0].RecipientMailID != "" {
+		t.Fatalf("old forwarding route must not be reused: ready=%v alias=%#v", ready, aliases[0])
+	}
+}
+
 func TestICloudValidationProvisionsOneAliasAtATime(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:icloud-validation-provision?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open database: %v", err)
 	}
-	if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudGmailResourceModel{}, &iCloudAliasModel{}, &iCloudMaintenanceRunModel{}); err != nil {
+	if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudAliasModel{}, &iCloudMaintenanceRunModel{}); err != nil {
 		t.Fatalf("migrate database: %v", err)
 	}
 	now := time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC)
@@ -178,7 +245,7 @@ func TestICloudValidationProvisionsOneAliasAtATime(t *testing.T) {
 	service.now = func() time.Time { return now }
 	service.hme = NewHMEClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
 		calls = append(calls, request.URL.Path)
-		body := iCloudHMEListJSON(t, iCloudMaxAliases-1, "target@gmail.com")
+		body := iCloudHMEListJSON(t, iCloudMaxAliases-1, "icloud@aishop6.com")
 		if request.URL.Path == "/v1/hme/generate" {
 			body = `{"success":true,"result":{"hme":"candidate@icloud.com"}}`
 		}
@@ -208,7 +275,7 @@ func TestICloudProviderRateLimitUsesRetryAfter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open database: %v", err)
 	}
-	if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudGmailResourceModel{}, &iCloudAliasModel{}, &iCloudMaintenanceRunModel{}); err != nil {
+	if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudAliasModel{}, &iCloudMaintenanceRunModel{}); err != nil {
 		t.Fatalf("migrate database: %v", err)
 	}
 	now := time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC)
@@ -231,7 +298,7 @@ func TestICloudProviderRateLimitUsesRetryAfter(t *testing.T) {
 				Body:       io.NopCloser(strings.NewReader("")),
 			}, nil
 		}
-		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(iCloudHMEListJSON(t, iCloudMaxAliases-1, "target@gmail.com")))}, nil
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(iCloudHMEListJSON(t, iCloudMaxAliases-1, "icloud@aishop6.com")))}, nil
 	})})
 	task := iCloudValidationTask{ResourceID: 1, OwnerUserID: 7, ValidationGeneration: 1, ExpectedCredentialRevision: 1}
 	if err := service.ProcessICloudValidation(context.Background(), task); err != nil {
@@ -252,7 +319,7 @@ func TestICloudValidationDiscardsExplicitlyRejectedCandidate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open database: %v", err)
 	}
-	if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudGmailResourceModel{}, &iCloudAliasModel{}, &iCloudMaintenanceRunModel{}); err != nil {
+	if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudAliasModel{}, &iCloudMaintenanceRunModel{}); err != nil {
 		t.Fatalf("migrate database: %v", err)
 	}
 	now := time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC)
@@ -263,7 +330,7 @@ func TestICloudValidationDiscardsExplicitlyRejectedCandidate(t *testing.T) {
 	service := NewService(db, nil, nil)
 	service.now = func() time.Time { return now }
 	service.hme = NewHMEClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
-		body := iCloudHMEListJSON(t, iCloudMaxAliases-1, "target@gmail.com")
+		body := iCloudHMEListJSON(t, iCloudMaxAliases-1, "icloud@aishop6.com")
 		if request.URL.Path == "/v1/hme/reserve" {
 			body = `{"success":false,"errorCode":-41003}`
 		}
@@ -289,7 +356,7 @@ func TestICloudValidationRetriesReservedCandidateAfterReconcileMiss(t *testing.T
 	if err != nil {
 		t.Fatalf("open database: %v", err)
 	}
-	if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudGmailResourceModel{}, &iCloudAliasModel{}, &iCloudMaintenanceRunModel{}); err != nil {
+	if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudAliasModel{}, &iCloudMaintenanceRunModel{}); err != nil {
 		t.Fatalf("migrate database: %v", err)
 	}
 	now := time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC)
@@ -302,9 +369,9 @@ func TestICloudValidationRetriesReservedCandidateAfterReconcileMiss(t *testing.T
 	service.now = func() time.Time { return now }
 	service.hme = NewHMEClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
 		paths = append(paths, request.URL.Path)
-		body := iCloudHMEListJSON(t, iCloudMaxAliases-1, "target@gmail.com")
+		body := iCloudHMEListJSON(t, iCloudMaxAliases-1, "icloud@aishop6.com")
 		if request.URL.Path == "/v1/hme/reserve" {
-			body = `{"success":true,"result":{"hme":{"hme":"candidate@icloud.com","anonymousId":"candidate-id","forwardToEmail":"target@gmail.com","isActive":true}}}`
+			body = `{"success":true,"result":{"hme":{"hme":"candidate@icloud.com","anonymousId":"candidate-id","recipientMailId":"candidate-recipient","forwardToEmail":"icloud@aishop6.com","isActive":true}}}`
 		}
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
 	})})
@@ -318,6 +385,14 @@ func TestICloudValidationRetriesReservedCandidateAfterReconcileMiss(t *testing.T
 	}
 	if !resource.AliasProvisionReconcile || resource.AliasProvisionCandidate != "candidate@icloud.com" {
 		t.Fatalf("reserve must enter reconciliation: %#v", resource)
+	}
+	var reserved iCloudAliasModel
+	if err := db.Where("resource_id = ? AND email = ?", 1, "candidate@icloud.com").Take(&reserved).Error; err != nil {
+		t.Fatalf("read reserved alias: %v", err)
+	}
+	if reserved.AnonymousID != "candidate-id" || reserved.RecipientMailID != "candidate-recipient" ||
+		reserved.ForwardToEmail != "icloud@aishop6.com" {
+		t.Fatalf("reserve response routing facts were not persisted: %#v", reserved)
 	}
 	now = now.Add(iCloudAliasProvisionInterval)
 	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", 1).Updates(map[string]any{
@@ -345,13 +420,13 @@ func TestICloudValidationActivatesOneInactiveAliasWithoutCreatingAnother(t *test
 	if err != nil {
 		t.Fatalf("open database: %v", err)
 	}
-	if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudGmailResourceModel{}, &iCloudAliasModel{}, &iCloudMaintenanceRunModel{}); err != nil {
+	if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudAliasModel{}, &iCloudMaintenanceRunModel{}); err != nil {
 		t.Fatalf("migrate database: %v", err)
 	}
 	now := time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC)
 	createICloudValidationResource(t, db, now)
 	paths := make([]string, 0, 2)
-	listBody := strings.Replace(iCloudHMEListJSON(t, iCloudMaxAliases, "target@gmail.com"), `"isActive":true`, `"isActive":false`, 1)
+	listBody := strings.Replace(iCloudHMEListJSON(t, iCloudMaxAliases, "icloud@aishop6.com"), `"isActive":true`, `"isActive":false`, 1)
 	service := NewService(db, nil, nil)
 	service.now = func() time.Time { return now }
 	service.hme = NewHMEClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
@@ -383,7 +458,7 @@ func TestICloudValidationDefersTransportErrorsAndKeepsRotatedCookie(t *testing.T
 		if err != nil {
 			t.Fatalf("open database: %v", err)
 		}
-		if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudGmailResourceModel{}, &iCloudAliasModel{}, &iCloudMaintenanceRunModel{}); err != nil {
+		if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudAliasModel{}, &iCloudMaintenanceRunModel{}); err != nil {
 			t.Fatalf("migrate database: %v", err)
 		}
 		now := time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC)
@@ -412,7 +487,7 @@ func TestICloudValidationDefersTransportErrorsAndKeepsRotatedCookie(t *testing.T
 		if err != nil {
 			t.Fatalf("open database: %v", err)
 		}
-		if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudGmailResourceModel{}, &iCloudAliasModel{}, &iCloudMaintenanceRunModel{}); err != nil {
+		if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudAliasModel{}, &iCloudMaintenanceRunModel{}); err != nil {
 			t.Fatalf("migrate database: %v", err)
 		}
 		now := time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC)
@@ -426,7 +501,7 @@ func TestICloudValidationDefersTransportErrorsAndKeepsRotatedCookie(t *testing.T
 			return &http.Response{
 				StatusCode: http.StatusOK,
 				Header:     http.Header{"Set-Cookie": {"X-APPLE-WEBAUTH-TOKEN=rotated; Path=/"}},
-				Body:       io.NopCloser(strings.NewReader(iCloudHMEListJSON(t, iCloudMaxAliases-1, "target@gmail.com"))),
+				Body:       io.NopCloser(strings.NewReader(iCloudHMEListJSON(t, iCloudMaxAliases-1, "icloud@aishop6.com"))),
 			}, nil
 		})})
 		if err := service.ProcessICloudValidation(context.Background(), iCloudValidationTask{
@@ -451,7 +526,7 @@ func TestRequestAdminICloudValidationRestartsProbeAndRejectsInactiveResources(t 
 		t.Fatalf("open database: %v", err)
 	}
 	if err := db.AutoMigrate(
-		&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudGmailResourceModel{}, &iCloudAliasModel{},
+		&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudAliasModel{},
 		&iCloudMaintenanceRunModel{}, &governanceinfra.OperationLogModel{},
 	); err != nil {
 		t.Fatalf("migrate database: %v", err)
@@ -499,19 +574,23 @@ func TestRequestAdminICloudValidationRestartsProbeAndRejectsInactiveResources(t 
 	}
 }
 
-func TestICloudValidationSendsProbeOnceAndRequiresGmailReceipt(t *testing.T) {
+func TestICloudValidationSendsProbeOnceAndRequiresDomainMailboxReceipt(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:icloud-validation-delivery?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open database: %v", err)
 	}
-	if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudGmailResourceModel{}, &iCloudAliasModel{}, &iCloudMaintenanceRunModel{}); err != nil {
+	if err := db.AutoMigrate(
+		&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudAliasModel{}, &iCloudMaintenanceRunModel{},
+		&iCloudInboundMailTestModel{},
+	); err != nil {
 		t.Fatalf("migrate database: %v", err)
 	}
 	now := time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC)
 	createICloudValidationResource(t, db, now)
-	service := NewService(db, nil, nil)
+	files := &icloudImportFileStore{files: make(map[string]governancedomain.PrivateFile)}
+	service := NewService(db, nil, files)
 	service.now = func() time.Time { return now }
-	listBody := iCloudHMEListJSON(t, iCloudMaxAliases, "target@gmail.com")
+	listBody := iCloudHMEListJSON(t, iCloudMaxAliases, "icloud@aishop6.com")
 	service.hme = NewHMEClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(listBody))}, nil
 	})})
@@ -519,13 +598,6 @@ func TestICloudValidationSendsProbeOnceAndRequiresGmailReceipt(t *testing.T) {
 	service.SetDeliveryPort(iCloudDeliveryFunc(func(_ context.Context, message mailtransportdomain.OutboundMessage) error {
 		sent = append(sent, message)
 		return nil
-	}))
-	probeFound := false
-	service.SetGmailDeliveryProbe(iCloudProbeFunc(func(_ context.Context, resourceID uint, recipient, token string, _ time.Time) (bool, error) {
-		if resourceID != 11 || recipient != "alias-000@icloud.com" || !strings.Contains(token, "remail-icloud-probe-1-") {
-			t.Fatalf("unexpected probe input: resource=%d recipient=%q token=%q", resourceID, recipient, token)
-		}
-		return probeFound, nil
 	}))
 	if err := service.ProcessICloudValidation(context.Background(), iCloudValidationTask{
 		ResourceID: 1, OwnerUserID: 7, ValidationGeneration: 1, ExpectedCredentialRevision: 1,
@@ -540,7 +612,20 @@ func TestICloudValidationSendsProbeOnceAndRequiresGmailReceipt(t *testing.T) {
 		!strings.Contains(sent[0].TextBody, resource.DeliveryProbeToken) {
 		t.Fatalf("unexpected pending probe: resource=%#v sent=%#v", resource, sent)
 	}
-	probeFound = true
+	probeObjectKey := "icloud-probe.eml"
+	if _, err := files.SavePrivate(context.Background(), governancedomain.PrivateFile{
+		ObjectKey:    probeObjectKey,
+		ContentBytes: []byte("From: probe@remail.example\r\nSubject: delivery probe\r\n\r\n" + resource.DeliveryProbeToken),
+	}); err != nil {
+		t.Fatalf("store probe message: %v", err)
+	}
+	if err := db.Create(&iCloudInboundMailTestModel{
+		ID: 1, EnvelopeFrom: "probe_at_remail_example_recipient-000@icloud.com",
+		Recipient: "icloud@aishop6.com", MailboxKey: mailbox.Normalize("icloud@aishop6.com"), ResourceType: "domain", SourceObjectKey: probeObjectKey,
+		Status: "stored", CreatedAt: now.Add(30 * time.Second),
+	}).Error; err != nil {
+		t.Fatalf("create probe receipt: %v", err)
+	}
 	now = now.Add(time.Minute)
 	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", 1).Updates(map[string]any{
 		"status": iCloudResourceValidating, "updated_at": now,
@@ -556,7 +641,7 @@ func TestICloudValidationSendsProbeOnceAndRequiresGmailReceipt(t *testing.T) {
 		t.Fatalf("read verified probe: %v", err)
 	}
 	if len(sent) != 1 || resource.Status != iCloudResourceNormal || resource.DeliveryProbeVerifiedAt == nil {
-		t.Fatalf("Gmail receipt must be required before normal: resource=%#v sends=%d", resource, len(sent))
+		t.Fatalf("domain mailbox receipt must be required before normal: resource=%#v sends=%d", resource, len(sent))
 	}
 	firstToken := resource.DeliveryProbeToken
 	listBody = strings.Replace(listBody, "alias-000@icloud.com", "replacement@icloud.com", 1)
@@ -582,19 +667,68 @@ func TestICloudValidationSendsProbeOnceAndRequiresGmailReceipt(t *testing.T) {
 	}
 }
 
+func TestApplyForwardingMailboxSettingsPreservesAllocatedAliasRoute(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:icloud-forwarding-settings?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	if err := db.AutoMigrate(&iCloudResourceModel{}, &iCloudAliasModel{}, &iCloudImportAllocationTestModel{}); err != nil {
+		t.Fatalf("migrate database: %v", err)
+	}
+	now := time.Date(2026, 8, 9, 14, 0, 0, 0, time.UTC)
+	if err := db.Create(&iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "main@icloud.com", Host: "p119-maildomainws.icloud.com",
+		DSID: "123", ClientID: "client", ClientBuildNumber: "build", ClientMasteringNumber: "mastering",
+		SelectedForwardTo: "old@aishop6.com", ExpireAt: now.Add(time.Hour), ForSale: true,
+		Status: iCloudResourceNormal, SessionStatus: iCloudSessionValid, CredentialRevision: 1,
+		CredentialUpdatedAt: now, ValidationGeneration: 1, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create resource: %v", err)
+	}
+	if err := db.Create(&iCloudAliasModel{
+		ID: 21, ResourceID: 1, AnonymousID: "anonymous-21", Email: "assigned@icloud.com",
+		RecipientMailID: "recipient-21", ForwardToEmail: "old@aishop6.com", Status: iCloudResourceNormal,
+		CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create alias: %v", err)
+	}
+	if err := db.Create(&iCloudImportAllocationTestModel{ID: 31, ResourceID: 1, Status: "allocated"}).Error; err != nil {
+		t.Fatalf("create allocation: %v", err)
+	}
+
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now.Add(time.Minute) }
+	if err := service.ApplyForwardingMailboxSettings(context.Background(), []string{"new@aishop6.com"}); err != nil {
+		t.Fatalf("apply forwarding settings: %v", err)
+	}
+	var resource iCloudResourceModel
+	if err := db.First(&resource, 1).Error; err != nil {
+		t.Fatalf("read resource: %v", err)
+	}
+	if resource.Status != iCloudResourcePending || resource.ForSale || resource.ValidationGeneration != 2 {
+		t.Fatalf("resource was not fenced for future allocation: %#v", resource)
+	}
+	var alias iCloudAliasModel
+	if err := db.First(&alias, 21).Error; err != nil || alias.RecipientMailID != "recipient-21" ||
+		alias.ForwardToEmail != "old@aishop6.com" {
+		t.Fatalf("settings update changed the allocated alias route: alias=%#v err=%v", alias, err)
+	}
+	var allocation iCloudImportAllocationTestModel
+	if err := db.First(&allocation, 31).Error; err != nil || allocation.Status != "allocated" {
+		t.Fatalf("settings update changed the allocation: allocation=%#v err=%v", allocation, err)
+	}
+}
+
 func createICloudValidationResource(t *testing.T, db *gorm.DB, now time.Time) {
 	t.Helper()
 	if err := db.Create(&iCloudRootModel{ID: 1, Type: "icloud", OwnerUserID: 7, Version: 1, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
 		t.Fatalf("create root: %v", err)
 	}
-	if err := db.Create(&iCloudGmailResourceModel{ID: 11, Email: "target@gmail.com", Status: "normal"}).Error; err != nil {
-		t.Fatalf("create Gmail: %v", err)
-	}
 	if err := db.Create(&iCloudResourceModel{
 		ID: 1, ResourceType: "icloud", PrimaryEmail: "main@icloud.com", Host: "p119-maildomainws.icloud.com", DSID: "123",
 		ClientID: "client", ClientBuildNumber: "build", ClientMasteringNumber: "mastering",
-		Cookie:          "X-APPLE-DS-WEB-SESSION-TOKEN=session; X-APPLE-WEBAUTH-USER=user; X-APPLE-WEBAUTH-TOKEN=token",
-		GmailResourceID: 11, ExpireAt: now.Add(time.Hour), Status: iCloudResourceValidating,
+		Cookie:            "X-APPLE-DS-WEB-SESSION-TOKEN=session; X-APPLE-WEBAUTH-USER=user; X-APPLE-WEBAUTH-TOKEN=token",
+		SelectedForwardTo: "icloud@aishop6.com", ExpireAt: now.Add(time.Hour), Status: iCloudResourceValidating,
 		SessionStatus: iCloudSessionUnchecked, CredentialRevision: 1, CredentialUpdatedAt: now,
 		ValidationGeneration: 1, CreatedAt: now, UpdatedAt: now,
 	}).Error; err != nil {
@@ -606,12 +740,6 @@ type iCloudDeliveryFunc func(context.Context, mailtransportdomain.OutboundMessag
 
 func (send iCloudDeliveryFunc) Send(ctx context.Context, message mailtransportdomain.OutboundMessage) error {
 	return send(ctx, message)
-}
-
-type iCloudProbeFunc func(context.Context, uint, string, string, time.Time) (bool, error)
-
-func (probe iCloudProbeFunc) ProbeICloudDelivery(ctx context.Context, resourceID uint, recipient, token string, since time.Time) (bool, error) {
-	return probe(ctx, resourceID, recipient, token, since)
 }
 
 func TestICloudValidationDispatcherRecoversStaleLease(t *testing.T) {
@@ -626,7 +754,7 @@ func TestICloudValidationDispatcherRecoversStaleLease(t *testing.T) {
 	if err := db.Create(&iCloudResourceModel{
 		ID: 1, ResourceType: "icloud", PrimaryEmail: "stale@icloud.com", Host: "p119-maildomainws.icloud.com",
 		DSID: "123", ClientID: "client", ClientBuildNumber: "build", ClientMasteringNumber: "mastering",
-		Cookie: "cookie", GmailResourceID: 2, ExpireAt: now.Add(time.Hour), Status: iCloudResourceValidating,
+		Cookie: "cookie", ExpireAt: now.Add(time.Hour), Status: iCloudResourceValidating,
 		ValidationGeneration: 4, CredentialRevision: 1, UpdatedAt: now.Add(-iCloudValidationRunningLease - time.Second),
 	}).Error; err != nil {
 		t.Fatalf("create stale resource: %v", err)

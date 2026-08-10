@@ -91,6 +91,11 @@ type ResourceFetchRepository interface {
 	MarkResourceFetchFailure(ctx context.Context, resourceID uint, generation uint64, safeError string, retryable bool, now time.Time, log *governancedomain.SystemLog) (bool, error)
 }
 
+type iCloudResourceFetchRepository interface {
+	AssertICloudResourceFetchFence(ctx context.Context, resourceID uint, generation uint64) error
+	CompleteICloudResourceFetch(ctx context.Context, resourceID uint, generation uint64, fetched int, stored int, matched int, now time.Time, log *governancedomain.SystemLog) error
+}
+
 type ResourceFetchQueue interface {
 	EnqueueResourceFetch(ctx context.Context, task ResourceFetchTask) (bool, error)
 	EnqueueFetchDispatcher(ctx context.Context, delay time.Duration) error
@@ -214,7 +219,7 @@ func (uc *ResourceFetchUseCase) Process(ctx context.Context, task ResourceFetchT
 		return uc.processResourceHistory(ctx, *job)
 	}
 	if job.ResourceType == domain.ResourceTypeICloud {
-		return uc.processICloudResourceFetch(ctx, *job, *scope)
+		return uc.processICloudResourceFetch(ctx, *job)
 	}
 	if uc.transport == nil {
 		return uc.releaseResourceFetchInfrastructure(ctx, job.ResourceID, job.Generation, errors.New("microsoft mail transport is unavailable"))
@@ -299,19 +304,33 @@ func (uc *ResourceFetchUseCase) Process(ctx context.Context, task ResourceFetchT
 	return nil
 }
 
-func (uc *ResourceFetchUseCase) processICloudResourceFetch(ctx context.Context, job domain.ResourceFetchJob, scope domain.ResourceFetchScope) error {
-	if uc.messages == nil || uc.messages.gmailPurchase == nil {
+func (uc *ResourceFetchUseCase) processICloudResourceFetch(ctx context.Context, job domain.ResourceFetchJob) error {
+	if uc.messages == nil || uc.messages.iCloudPurchase == nil {
 		return uc.releaseResourceFetchInfrastructure(ctx, job.ResourceID, job.Generation, errors.New("iCloud mail fetch service is unavailable"))
 	}
-	if err := uc.messages.gmailPurchase.FetchICloudMail(ctx, scope.OrderNo); err != nil {
+	fetcher, hasFencedFetcher := uc.messages.iCloudPurchase.(ICloudResourceFetchPort)
+	repo, hasICloudFence := uc.repo.(iCloudResourceFetchRepository)
+	if !hasFencedFetcher || !hasICloudFence {
+		return uc.releaseResourceFetchInfrastructure(ctx, job.ResourceID, job.Generation, errors.New("fenced iCloud mail fetch infrastructure is unavailable"))
+	}
+	fetched, stored, matched, err := fetcher.FetchICloudResourceMailWithFence(ctx, job.ResourceID, func(txCtx context.Context) error {
+		return repo.AssertICloudResourceFetchFence(txCtx, job.ResourceID, job.Generation)
+	})
+	if err != nil {
+		if errors.Is(err, domain.ErrResourceFetchInvalidClaim) {
+			return nil
+		}
+		if errors.Is(err, domain.ErrResourceFetchDeleted) || errors.Is(err, domain.ErrResourceFetchNotFound) {
+			return uc.cancelResourceFetch(ctx, job, "iCloud resource changed while mail fetch was running.", "resource_unavailable")
+		}
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return uc.releaseResourceFetchInfrastructure(ctx, job.ResourceID, job.Generation, err)
 		}
 		return uc.retryResourceFetch(ctx, job, "iCloud mail service is temporarily unavailable.", "request", true, err)
 	}
 	now := uc.now()
-	err := uc.repo.CompleteResourceFetchTask(
-		ctx, job.ResourceID, job.Generation, now,
+	err = repo.CompleteICloudResourceFetch(
+		ctx, job.ResourceID, job.Generation, fetched, stored, matched, now,
 		resourceFetchSystemLog(job, "info", "resource_fetch_succeeded", "iCloud resource mail fetch completed.", ""),
 	)
 	if errors.Is(err, domain.ErrResourceFetchInvalidClaim) {

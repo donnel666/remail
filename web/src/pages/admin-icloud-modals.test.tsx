@@ -222,7 +222,6 @@ function resource(): AdminICloudResourceItem {
     deliveryProbeVerifiedAt: null,
     expireAt: "2026-09-08T00:00:00Z",
     forSale: true,
-    gmailEmail: "target@gmail.com",
     id: 41,
     lastAliasSyncAt: null,
     lastAllocatedAt: null,
@@ -233,7 +232,7 @@ function resource(): AdminICloudResourceItem {
     nextValidationAt: null,
     owner,
     primaryEmail: "main@icloud.com",
-    selectedForwardTo: "target@gmail.com",
+    selectedForwardTo: "icloud@aishop6.com",
     sessionStatus: "valid",
     status: "normal",
     suffix: "icloud.com",
@@ -393,7 +392,7 @@ describe("admin iCloud modal workflows", () => {
     fireEvent.click(fileButton);
     expect(fileButton).toHaveAttribute("aria-pressed", "true");
 
-    const content = "main@icloud.com----host----dsid----client----build----master----Cookie=value----target@gmail.com";
+    const content = "main@icloud.com----host----dsid----client----build----master----Cookie=value";
     const file = new File([content], "icloud.txt", { type: "text/plain" });
     Object.defineProperty(file, "text", { value: vi.fn().mockResolvedValue(content) });
     fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [file] } });
@@ -405,6 +404,34 @@ describe("admin iCloud modal workflows", () => {
       ownerId: 7,
     }));
     await waitFor(() => expect(onImported).toHaveBeenCalledTimes(1));
+  });
+
+  it("submits a copied HME cURL with the separately entered primary email", async () => {
+    render(
+      <ImportICloudModal
+        onCancel={vi.fn()}
+        onImported={vi.fn()}
+        owners={[owner]}
+        visible
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByLabelText("owner")).toHaveValue("7"));
+    fireEvent.click(screen.getByRole("button", { name: "cURL" }));
+    fireEvent.change(screen.getByPlaceholderText("name@icloud.com"), {
+      target: { value: "Main@icloud.com" },
+    });
+    const curl = "curl --url 'https://p217-maildomainws.icloud.com.cn/v2/hme/list?dsid=123' \\\n  -b 'X-APPLE-WEBAUTH-TOKEN=secret'";
+    fireEvent.change(screen.getByPlaceholderText(/curl --url/), {
+      target: { value: curl },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Import" }));
+
+    await waitFor(() => expect(mocks.importResources).toHaveBeenCalledWith({
+      content: `main@icloud.com----${curl}`,
+      errorStrategy: "skip",
+      ownerId: 7,
+    }));
   });
 
   it("blocks a primary-email change until the complete credentials are present", async () => {

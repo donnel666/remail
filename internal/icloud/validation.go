@@ -2,15 +2,18 @@ package icloud
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	mailtransportdomain "github.com/donnel666/remail/internal/mailtransport/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -23,6 +26,9 @@ const (
 	iCloudProvisionFailureInterval = 5 * time.Minute
 	iCloudRateLimitRetryInterval   = 30 * time.Minute
 	iCloudDeliveryProbeTimeout     = 10 * time.Minute
+	iCloudRecipientProbeBatchLimit = 16
+	iCloudRecipientProbeReadLimit  = 2000
+	iCloudRecipientProbeRetryAfter = 2 * time.Minute
 	iCloudValidationBatchLimit     = 128
 	iCloudValidationRunningLease   = 5 * time.Minute
 )
@@ -84,21 +90,6 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 		})
 	}
 
-	var gmail iCloudGmailResourceModel
-	if err := s.db.WithContext(ctx).First(&gmail, resource.GmailResourceID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return s.applyICloudValidationResult(ctx, task, iCloudValidationResult{
-				Category: "gmail_not_available", SafeMessage: "Linked Gmail resource is not available.",
-			})
-		}
-		return ErrICloudValidationTemp
-	}
-	if gmail.Status != "normal" && gmail.Status != "available" {
-		return s.applyICloudValidationResult(ctx, task, iCloudValidationResult{
-			Category: "gmail_not_available", SafeMessage: "Linked Gmail resource is not available.",
-		})
-	}
-
 	client := s.hme
 	if client == nil {
 		client = NewHMEClient(nil)
@@ -134,9 +125,13 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 	}
 	mutationConfig := resource.hmeConfig()
 	mutationConfig.Cookie = list.UpdatedCookie
-	if !strings.EqualFold(strings.TrimSpace(list.SelectedForwardTo), strings.TrimSpace(gmail.Email)) {
+	forwardingMailboxes := runtimeconfig.EmailList(
+		runtimeconfig.ICloudForwardingMailboxesKey,
+		runtimeconfig.DefaultICloudForwardingMailbox,
+	)
+	if !containsICloudEmail(forwardingMailboxes, list.SelectedForwardTo) {
 		resultBase.Category = "forward_target_mismatch"
-		resultBase.SafeMessage = "iCloud forwarding target does not match the linked Gmail resource."
+		resultBase.SafeMessage = "iCloud forwarding target is not configured as an Apple mailbox."
 		return s.applyICloudValidationResult(ctx, task, resultBase)
 	}
 	if len(list.Aliases) > iCloudMaxAliases {
@@ -147,9 +142,9 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 		return s.applyICloudValidationResult(ctx, task, resultBase)
 	}
 	for _, alias := range list.Aliases {
-		if !strings.EqualFold(strings.TrimSpace(alias.ForwardToEmail), strings.TrimSpace(gmail.Email)) {
+		if !strings.EqualFold(strings.TrimSpace(alias.ForwardToEmail), strings.TrimSpace(list.SelectedForwardTo)) {
 			resultBase.Category = "alias_forward_target_mismatch"
-			resultBase.SafeMessage = "An iCloud alias does not forward to the linked Gmail resource."
+			resultBase.SafeMessage = "An iCloud alias does not forward to the selected Apple mailbox."
 			return s.applyICloudValidationResult(ctx, task, resultBase)
 		}
 	}
@@ -194,7 +189,7 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 			if markErr != nil {
 				return ErrICloudValidationTemp
 			}
-			_, updatedCookie, reserveErr := client.reserve(ctx, mutationConfig, candidate, "ReMail", "")
+			reservedAlias, updatedCookie, reserveErr := client.reserve(ctx, mutationConfig, candidate, "ReMail", "")
 			if updatedCookie != "" {
 				resultBase.UpdatedCookie = updatedCookie
 			}
@@ -212,6 +207,14 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 				}
 				return s.applyICloudProviderError(ctx, task, resultBase, reserveErr, true)
 			}
+			// The reserve response is already an authoritative alias fact. Persist
+			// its anonymous and recipient IDs immediately, while retaining the
+			// reconciliation marker until the next list confirms visibility.
+			if strings.TrimSpace(reservedAlias.ForwardToEmail) == "" {
+				reservedAlias.ForwardToEmail = list.SelectedForwardTo
+			}
+			resultBase.Aliases = append(resultBase.Aliases, reservedAlias)
+			resultBase.AliasCount = len(resultBase.Aliases)
 			resultBase.Deferred = true
 			resultBase.Retryable = true
 			resultBase.Category = "alias_provisioning"
@@ -242,9 +245,35 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 		resultBase.NextValidationAt = iCloudTimePointer(now.Add(iCloudAliasProvisionInterval))
 		return s.applyICloudValidationResult(ctx, task, resultBase)
 	}
-	if !iCloudAliasesReadyForGmail(list.Aliases, gmail.Email) {
+	// Apple commonly omits recipientMailId from the HME list response.  Merge
+	// facts learned by an earlier validation before deciding whether the 750
+	// aliases are routable; otherwise a valid account can never leave pending.
+	if err := s.mergeICloudAliasFacts(ctx, resource.ID, list.Aliases); err != nil {
+		resultBase.Deferred, resultBase.Retryable = true, true
+		resultBase.Category = "alias_route_state_unavailable"
+		resultBase.SafeMessage = "iCloud alias routing state is temporarily unavailable."
+		resultBase.NextValidationAt = iCloudTimePointer(now.Add(iCloudValidationRetryInterval))
+		return s.applyICloudValidationResult(ctx, task, resultBase)
+	}
+	if ready, err := s.discoverICloudRecipientIDs(ctx, task, list.SelectedForwardTo, list.Aliases, now); err != nil {
+		if errors.Is(err, errICloudValidationStale) {
+			return nil
+		}
+		resultBase.Deferred, resultBase.Retryable = true, true
+		resultBase.Category = "recipient_probe_unavailable"
+		resultBase.SafeMessage = "Waiting for Apple relay routing identifiers."
+		resultBase.NextValidationAt = iCloudTimePointer(now.Add(iCloudValidationRetryInterval))
+		return s.applyICloudValidationResult(ctx, task, resultBase)
+	} else if !ready {
+		resultBase.Deferred, resultBase.Retryable = true, true
+		resultBase.Category = "recipient_probe_pending"
+		resultBase.SafeMessage = "Waiting for Apple relay routing identifiers."
+		resultBase.NextValidationAt = iCloudTimePointer(now.Add(iCloudValidationRetryInterval))
+		return s.applyICloudValidationResult(ctx, task, resultBase)
+	}
+	if !iCloudAliasesReadyForForwarding(list.Aliases, list.SelectedForwardTo) {
 		resultBase.Category = "alias_not_ready"
-		resultBase.SafeMessage = "Not every iCloud alias is active and forwarding to the linked Gmail resource."
+		resultBase.SafeMessage = "Not every iCloud alias is active, routable, and forwarding to the selected Apple mailbox."
 		return s.applyICloudValidationResult(ctx, task, resultBase)
 	}
 
@@ -256,17 +285,19 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 		resultBase.ProbeVerifiedAt = resource.DeliveryProbeVerifiedAt
 		return s.applyICloudValidationResult(ctx, task, resultBase)
 	}
-	if s.delivery == nil || s.gmailProbe == nil {
+	if s.delivery == nil || s.files == nil {
 		resultBase.Retryable = true
-		resultBase.Category = "gmail_probe_unavailable"
-		resultBase.SafeMessage = "Gmail delivery probe is unavailable."
+		resultBase.Category = "delivery_probe_unavailable"
+		resultBase.SafeMessage = "Apple mailbox delivery probe is unavailable."
 		return s.applyICloudValidationResult(ctx, task, resultBase)
 	}
 	probeAlias := strings.TrimSpace(resource.DeliveryProbeAlias)
 	probeToken := strings.TrimSpace(resource.DeliveryProbeToken)
 	probeStartedAt := resource.DeliveryProbeStartedAt
-	if probeAlias == "" || findICloudAlias(list.Aliases, probeAlias) == nil {
+	probeAliasItem := findICloudAlias(list.Aliases, probeAlias)
+	if probeAlias == "" || probeAliasItem == nil || strings.TrimSpace(probeAliasItem.RecipientMailID) == "" {
 		probeAlias = list.Aliases[0].Email
+		probeAliasItem = &list.Aliases[0]
 		probeToken = ""
 		probeStartedAt = nil
 		resultBase.ClearProbe = true
@@ -274,6 +305,9 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 	if probeToken == "" || probeStartedAt == nil {
 		probeToken = iCloudDeliveryProbeToken(resource.ID, task.ValidationGeneration, probeAlias)
 		probeStartedAt = iCloudTimePointer(now)
+		// Persist the random token in the result before the outbound side effect.
+		// If enqueueing fails, the next attempt reuses the same idempotency key.
+		resultBase.ProbeToken, resultBase.ProbeAlias, resultBase.ProbeStartedAt = probeToken, probeAlias, probeStartedAt
 		if err := s.delivery.Send(ctx, mailtransportdomain.OutboundMessage{
 			IdempotencyKey: "icloud-delivery-probe:" + probeToken,
 			Purpose:        mailtransportdomain.PurposeSystemNotice,
@@ -282,28 +316,33 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 			TextBody:       "ReMail iCloud delivery probe token: " + probeToken,
 		}); err != nil {
 			resultBase.Retryable = true
-			resultBase.Category = "gmail_probe_send_failed"
-			resultBase.SafeMessage = "Unable to send the Gmail delivery probe."
+			resultBase.Category = "delivery_probe_send_failed"
+			resultBase.SafeMessage = "Unable to send the Apple mailbox delivery probe."
 			return s.applyICloudValidationResult(ctx, task, resultBase)
 		}
-		resultBase.ProbeToken, resultBase.ProbeAlias, resultBase.ProbeStartedAt = probeToken, probeAlias, probeStartedAt
 		resultBase.Deferred, resultBase.Retryable = true, true
-		resultBase.Category = "gmail_probe_pending"
+		resultBase.Category = "delivery_probe_pending"
 		resultBase.SafeMessage = "Waiting for the iCloud alias delivery probe."
 		resultBase.NextValidationAt = iCloudTimePointer(now.Add(iCloudValidationRetryInterval))
 		return s.applyICloudValidationResult(ctx, task, resultBase)
 	}
-	foundDelivery, probeErr := s.gmailProbe.ProbeICloudDelivery(ctx, resource.GmailResourceID, probeAlias, probeToken, probeStartedAt.Add(-time.Minute))
+	foundDelivery, probeErr := s.findICloudDeliveryProbe(
+		ctx,
+		list.SelectedForwardTo,
+		probeAliasItem.RecipientMailID,
+		probeToken,
+		probeStartedAt.Add(-time.Minute),
+	)
 	if probeErr != nil {
 		resultBase.ProbeToken, resultBase.ProbeAlias, resultBase.ProbeStartedAt = probeToken, probeAlias, probeStartedAt
 		if !now.Before(probeStartedAt.Add(iCloudDeliveryProbeTimeout)) {
-			resultBase.Category = "gmail_probe_failed"
-			resultBase.SafeMessage = "Gmail delivery probe could not be completed."
+			resultBase.Category = "delivery_probe_failed"
+			resultBase.SafeMessage = "Apple mailbox delivery probe could not be completed."
 			return s.applyICloudValidationResult(ctx, task, resultBase)
 		}
 		resultBase.Deferred, resultBase.Retryable = true, true
-		resultBase.Category = "gmail_probe_unavailable"
-		resultBase.SafeMessage = "Gmail delivery probe is temporarily unavailable."
+		resultBase.Category = "delivery_probe_unavailable"
+		resultBase.SafeMessage = "Apple mailbox delivery probe is temporarily unavailable."
 		resultBase.NextValidationAt = iCloudTimePointer(now.Add(iCloudValidationRetryInterval))
 		return s.applyICloudValidationResult(ctx, task, resultBase)
 	}
@@ -316,14 +355,14 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 	if now.Before(probeStartedAt.Add(iCloudDeliveryProbeTimeout)) {
 		resultBase.ProbeToken, resultBase.ProbeAlias, resultBase.ProbeStartedAt = probeToken, probeAlias, probeStartedAt
 		resultBase.Deferred, resultBase.Retryable = true, true
-		resultBase.Category = "gmail_probe_pending"
+		resultBase.Category = "delivery_probe_pending"
 		resultBase.SafeMessage = "Waiting for the iCloud alias delivery probe."
 		resultBase.NextValidationAt = iCloudTimePointer(now.Add(iCloudValidationRetryInterval))
 		return s.applyICloudValidationResult(ctx, task, resultBase)
 	}
 	resultBase.ProbeToken, resultBase.ProbeAlias, resultBase.ProbeStartedAt = probeToken, probeAlias, probeStartedAt
-	resultBase.Category = "gmail_probe_timeout"
-	resultBase.SafeMessage = "Gmail did not receive the iCloud delivery probe in time."
+	resultBase.Category = "delivery_probe_timeout"
+	resultBase.SafeMessage = "The configured Apple mailbox did not receive the delivery probe in time."
 	return s.applyICloudValidationResult(ctx, task, resultBase)
 }
 
@@ -461,9 +500,272 @@ func (s *Service) markICloudAliasReserveAttempt(ctx context.Context, task iCloud
 }
 
 func iCloudDeliveryProbeToken(resourceID uint, generation uint64, alias string) string {
-	digest := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(alias))))
-	return "remail-icloud-probe-" + strconv.FormatUint(uint64(resourceID), 10) + "-" +
-		strconv.FormatUint(generation, 10) + "-" + hex.EncodeToString(digest[:8])
+	// The token is persisted before the outbound side effect is considered
+	// complete. Randomness prevents another message from guessing a probe by
+	// knowing a resource ID, validation generation, and alias address.
+	return newICloudProbeToken("remail-icloud-delivery")
+}
+
+func newICloudProbeToken(prefix string) string {
+	var value [18]byte
+	if _, err := rand.Read(value[:]); err != nil {
+		// crypto/rand failures are exceptionally rare. Keep the state machine
+		// usable while still avoiding the old predictable resource-derived token.
+		digest := sha256.Sum256([]byte(strconv.FormatInt(time.Now().UnixNano(), 10)))
+		return prefix + "-" + hex.EncodeToString(digest[:12])
+	}
+	return prefix + "-" + hex.EncodeToString(value[:])
+}
+
+// mergeICloudAliasFacts overlays durable routing/probe facts onto Apple's
+// latest snapshot. Apple may omit recipientMailId after the first observation.
+func (s *Service) mergeICloudAliasFacts(ctx context.Context, resourceID uint, aliases []hmeAlias) error {
+	if s == nil || s.db == nil || resourceID == 0 {
+		return ErrICloudValidationTemp
+	}
+	var rows []iCloudAliasModel
+	if err := s.db.WithContext(ctx).Where("resource_id = ?", resourceID).Find(&rows).Error; err != nil {
+		return err
+	}
+	byID := make(map[string]iCloudAliasModel, len(rows))
+	for _, row := range rows {
+		byID[strings.TrimSpace(row.AnonymousID)] = row
+	}
+	for i := range aliases {
+		row, ok := byID[strings.TrimSpace(aliases[i].AnonymousID)]
+		if !ok {
+			continue
+		}
+		forwardTo := strings.TrimSpace(aliases[i].ForwardToEmail)
+		if forwardTo == "" {
+			aliases[i].ForwardToEmail = strings.TrimSpace(row.ForwardToEmail)
+			forwardTo = strings.TrimSpace(aliases[i].ForwardToEmail)
+		}
+		sameRoute := forwardTo != "" && strings.EqualFold(forwardTo, strings.TrimSpace(row.ForwardToEmail))
+		if strings.TrimSpace(aliases[i].RecipientMailID) == "" && sameRoute {
+			aliases[i].RecipientMailID = strings.TrimSpace(row.RecipientMailID)
+		}
+		if sameRoute {
+			aliases[i].RecipientProbeToken = strings.TrimSpace(row.RecipientProbeToken)
+			aliases[i].RecipientProbeStartedAt = row.RecipientProbeStartedAt
+			aliases[i].RecipientProbeLastSentAt = row.RecipientProbeLastSentAt
+		} else {
+			// A forwarding mailbox change makes the old probe token and relay
+			// suffix unusable. The result sync clears the current route first;
+			// the next validation generation discovers the new suffix.
+			aliases[i].RecipientProbeToken = ""
+			aliases[i].RecipientProbeStartedAt = nil
+			aliases[i].RecipientProbeLastSentAt = nil
+		}
+	}
+	return nil
+}
+
+// discoverICloudRecipientIDs learns the opaque Apple relay suffix by sending a
+// token through each alias and inspecting the configured domain mailbox.
+func (s *Service) discoverICloudRecipientIDs(
+	ctx context.Context,
+	task iCloudValidationTask,
+	forwardTo string,
+	aliases []hmeAlias,
+	now time.Time,
+) (bool, error) {
+	if len(aliases) != iCloudMaxAliases {
+		return false, nil
+	}
+	allKnown := true
+	for _, alias := range aliases {
+		if strings.TrimSpace(alias.RecipientMailID) == "" ||
+			!strings.EqualFold(strings.TrimSpace(alias.ForwardToEmail), strings.TrimSpace(forwardTo)) {
+			allKnown = false
+			break
+		}
+	}
+	if allKnown {
+		return true, nil
+	}
+	rows := make(map[string]iCloudAliasModel, len(aliases))
+	var stored []iCloudAliasModel
+	if err := s.db.WithContext(ctx).Where("resource_id = ?", task.ResourceID).Find(&stored).Error; err != nil {
+		return false, err
+	}
+	for _, row := range stored {
+		rows[strings.TrimSpace(row.AnonymousID)] = row
+	}
+	missingRows := false
+	targetChanged := false
+	tokens := make(map[string]time.Time)
+	toSend := make([]int, 0, iCloudRecipientProbeBatchLimit)
+	for i := range aliases {
+		if strings.TrimSpace(aliases[i].RecipientMailID) != "" {
+			continue
+		}
+		row, ok := rows[strings.TrimSpace(aliases[i].AnonymousID)]
+		if !ok {
+			missingRows = true
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(row.ForwardToEmail), strings.TrimSpace(aliases[i].ForwardToEmail)) {
+			// Do not probe against a row that still belongs to the previous
+			// forwarding mailbox. The normal result transaction must first
+			// archive that pair and clear the current recipient ID.
+			targetChanged = true
+			continue
+		}
+		if strings.TrimSpace(row.RecipientMailID) != "" {
+			aliases[i].RecipientMailID = strings.TrimSpace(row.RecipientMailID)
+			continue
+		}
+		token := strings.TrimSpace(row.RecipientProbeToken)
+		startedAt := row.RecipientProbeStartedAt
+		if token == "" || startedAt == nil {
+			if len(tokens) >= iCloudRecipientProbeBatchLimit {
+				continue
+			}
+			token = newICloudProbeToken("remail-icloud-recipient")
+			started := now
+			if err := s.persistICloudRecipientProbe(ctx, task, row.ID, token, started); err != nil {
+				return false, err
+			}
+			startedAt = &started
+			aliases[i].RecipientProbeToken = token
+			aliases[i].RecipientProbeStartedAt = startedAt
+			aliases[i].RecipientProbeLastSentAt = nil
+			toSend = append(toSend, i)
+		}
+		aliases[i].RecipientProbeToken = token
+		aliases[i].RecipientProbeStartedAt = startedAt
+		if (row.RecipientProbeLastSentAt == nil || !now.Before(row.RecipientProbeLastSentAt.Add(iCloudRecipientProbeRetryAfter))) &&
+			!slices.Contains(toSend, i) {
+			if len(toSend) < iCloudRecipientProbeBatchLimit {
+				toSend = append(toSend, i)
+			}
+		}
+		if startedAt != nil {
+			tokens[token] = startedAt.UTC()
+		}
+	}
+	if missingRows || targetChanged {
+		// The first complete provider snapshot is persisted by the normal result
+		// transaction. Probe work starts on the following validation generation.
+		return false, nil
+	}
+	if len(toSend) > 0 {
+		if s.delivery == nil {
+			return false, ErrICloudMailUnavailable
+		}
+		for _, index := range toSend {
+			alias := aliases[index]
+			token := strings.TrimSpace(alias.RecipientProbeToken)
+			if err := s.delivery.Send(ctx, mailtransportdomain.OutboundMessage{
+				IdempotencyKey: "icloud-recipient-probe:" + token,
+				Purpose:        mailtransportdomain.PurposeSystemNotice,
+				To:             alias.Email,
+				Subject:        "ReMail iCloud recipient probe",
+				TextBody:       "ReMail iCloud recipient probe token: " + token,
+			}); err != nil {
+				return false, err
+			}
+			if err := s.markICloudRecipientProbeSent(ctx, task, rows[strings.TrimSpace(alias.AnonymousID)].ID, now); err != nil {
+				return false, err
+			}
+			sentAt := now
+			aliases[index].RecipientProbeLastSentAt = &sentAt
+		}
+	}
+	found := map[string]string{}
+	if len(tokens) > 0 {
+		var err error
+		found, err = s.findICloudRecipientProbes(ctx, forwardTo, tokens)
+		if err != nil {
+			return false, err
+		}
+	}
+	for i := range aliases {
+		if strings.TrimSpace(aliases[i].RecipientMailID) != "" {
+			continue
+		}
+		token := strings.TrimSpace(aliases[i].RecipientProbeToken)
+		recipientID := strings.TrimSpace(found[token])
+		if recipientID == "" {
+			continue
+		}
+		row, ok := rows[strings.TrimSpace(aliases[i].AnonymousID)]
+		if !ok {
+			continue
+		}
+		if err := s.persistICloudRecipientID(ctx, task, row.ID, recipientID); err != nil {
+			return false, err
+		}
+		aliases[i].RecipientMailID = recipientID
+		aliases[i].RecipientProbeToken = ""
+		aliases[i].RecipientProbeStartedAt = nil
+		aliases[i].RecipientProbeLastSentAt = nil
+	}
+	for _, alias := range aliases {
+		if strings.TrimSpace(alias.RecipientMailID) == "" {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func (s *Service) withICloudValidationFence(ctx context.Context, task iCloudValidationTask, fn func(*gorm.DB) error) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var resource iCloudResourceModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND status = ? AND validation_generation = ? AND credential_revision = ?",
+				task.ResourceID, iCloudResourceValidating, task.ValidationGeneration, task.ExpectedCredentialRevision).
+			First(&resource).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errICloudValidationStale
+			}
+			return err
+		}
+		return fn(tx)
+	})
+}
+
+func (s *Service) persistICloudRecipientProbe(ctx context.Context, task iCloudValidationTask, aliasID uint, token string, startedAt time.Time) error {
+	return s.withICloudValidationFence(ctx, task, func(tx *gorm.DB) error {
+		result := tx.Model(&iCloudAliasModel{}).Where("id = ? AND resource_id = ? AND recipient_mail_id = ''", aliasID, task.ResourceID).
+			Updates(map[string]any{"recipient_probe_token": token, "recipient_probe_started_at": startedAt, "recipient_probe_last_sent_at": nil, "updated_at": startedAt})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return errICloudValidationStale
+		}
+		return nil
+	})
+}
+
+func (s *Service) markICloudRecipientProbeSent(ctx context.Context, task iCloudValidationTask, aliasID uint, sentAt time.Time) error {
+	return s.withICloudValidationFence(ctx, task, func(tx *gorm.DB) error {
+		result := tx.Model(&iCloudAliasModel{}).Where("id = ? AND resource_id = ?", aliasID, task.ResourceID).
+			Updates(map[string]any{"recipient_probe_last_sent_at": sentAt, "updated_at": sentAt})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return errICloudValidationStale
+		}
+		return nil
+	})
+}
+
+func (s *Service) persistICloudRecipientID(ctx context.Context, task iCloudValidationTask, aliasID uint, recipientID string) error {
+	return s.withICloudValidationFence(ctx, task, func(tx *gorm.DB) error {
+		result := tx.Model(&iCloudAliasModel{}).Where("id = ? AND resource_id = ? AND recipient_mail_id = ''", aliasID, task.ResourceID).
+			Updates(map[string]any{"recipient_mail_id": recipientID, "recipient_probe_token": "", "recipient_probe_started_at": nil, "recipient_probe_last_sent_at": nil, "updated_at": s.now().UTC()})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return errICloudValidationStale
+		}
+		return nil
+	})
 }
 
 func findICloudAlias(aliases []hmeAlias, email string) *hmeAlias {
@@ -476,23 +778,90 @@ func findICloudAlias(aliases []hmeAlias, email string) *hmeAlias {
 	return nil
 }
 
-func iCloudAliasesReadyForGmail(aliases []hmeAlias, gmail string) bool {
-	gmail = strings.ToLower(strings.TrimSpace(gmail))
-	if len(aliases) != iCloudMaxAliases || gmail == "" {
+func iCloudAliasesReadyForForwarding(aliases []hmeAlias, forwardTo string) bool {
+	forwardTo = strings.ToLower(strings.TrimSpace(forwardTo))
+	if len(aliases) != iCloudMaxAliases || forwardTo == "" {
 		return false
 	}
 	seen := make(map[string]struct{}, len(aliases))
+	seenRecipientIDs := make(map[string]struct{}, len(aliases))
 	for _, alias := range aliases {
 		email := strings.ToLower(strings.TrimSpace(alias.Email))
-		if !alias.Active || email == "" || strings.ToLower(strings.TrimSpace(alias.ForwardToEmail)) != gmail {
+		recipientMailID := strings.ToLower(strings.TrimSpace(alias.RecipientMailID))
+		if !alias.Active || email == "" || recipientMailID == "" ||
+			strings.ToLower(strings.TrimSpace(alias.ForwardToEmail)) != forwardTo {
 			return false
 		}
 		if _, exists := seen[email]; exists {
 			return false
 		}
+		if _, exists := seenRecipientIDs[recipientMailID]; exists {
+			return false
+		}
 		seen[email] = struct{}{}
+		seenRecipientIDs[recipientMailID] = struct{}{}
 	}
 	return len(seen) == iCloudMaxAliases
+}
+
+func containsICloudEmail(values []string, target string) bool {
+	target = strings.ToLower(strings.TrimSpace(target))
+	for _, value := range values {
+		if strings.EqualFold(strings.TrimSpace(value), target) {
+			return true
+		}
+	}
+	return false
+}
+
+// ApplyForwardingMailboxSettings fences resources whose Apple-selected target
+// is no longer approved for new provisioning. Existing alias delivery facts
+// and allocations remain intact; only new allocation eligibility is removed.
+func (s *Service) ApplyForwardingMailboxSettings(ctx context.Context, mailboxes []string) error {
+	if s == nil || s.db == nil || len(mailboxes) == 0 {
+		return ErrICloudValidationTemp
+	}
+	allowed := make([]string, 0, len(mailboxes))
+	for _, mailbox := range mailboxes {
+		mailbox = strings.ToLower(strings.TrimSpace(mailbox))
+		if mailbox != "" {
+			allowed = append(allowed, mailbox)
+		}
+	}
+	if len(allowed) == 0 {
+		return ErrICloudValidationTemp
+	}
+	if s.validateForwardingMailbox != nil {
+		for _, mailbox := range allowed {
+			if err := s.validateForwardingMailbox(ctx, mailbox); err != nil {
+				return ErrICloudForwardingMailbox
+			}
+		}
+	}
+	now := s.now().UTC()
+	result := s.db.WithContext(ctx).Model(&iCloudResourceModel{}).
+		Where("status NOT IN ?", []string{iCloudResourceDisabled, iCloudResourceDeleted}).
+		Where("LOWER(TRIM(selected_forward_to)) NOT IN ?", allowed).
+		Updates(map[string]any{
+			"for_sale":                   false,
+			"status":                     iCloudResourcePending,
+			"validation_generation":      gorm.Expr("validation_generation + 1"),
+			"validation_failures":        0,
+			"next_validation_at":         now,
+			"delivery_probe_token":       "",
+			"delivery_probe_alias":       "",
+			"delivery_probe_started_at":  nil,
+			"delivery_probe_verified_at": nil,
+			"last_safe_error":            "Configured Apple mailbox changed.",
+			"updated_at":                 now,
+		})
+	if result.Error != nil {
+		return ErrICloudValidationTemp
+	}
+	if result.RowsAffected > 0 {
+		_ = s.ScheduleICloudValidationDispatcher(context.WithoutCancel(ctx), 0)
+	}
+	return nil
 }
 
 func (s *Service) iCloudValidationResource(ctx context.Context, task iCloudValidationTask) (*iCloudResourceModel, bool, error) {
@@ -1010,16 +1379,49 @@ func syncICloudAliasesTx(tx *gorm.DB, resourceID uint, aliases []hmeAlias, expec
 			status = iCloudResourceDisabled
 		}
 		if existing, found := currentByAnonymousID[alias.AnonymousID]; found {
-			updated := tx.Model(&iCloudAliasModel{}).Where("id = ? AND resource_id = ?", existing.ID, resourceID).Updates(map[string]any{
+			forwardChanged := !strings.EqualFold(strings.TrimSpace(alias.ForwardToEmail), strings.TrimSpace(existing.ForwardToEmail))
+			if err := persistICloudAliasRouteTx(tx, existing.ID, resourceID, existing.ForwardToEmail, existing.RecipientMailID, now); err != nil {
+				return err
+			}
+			updates := map[string]any{
 				"email": alias.Email, "label": alias.Label, "note": alias.Note, "forward_to_email": alias.ForwardToEmail,
-				"origin": alias.Origin, "provider_domain": alias.ProviderDomain, "recipient_mail_id": alias.RecipientMailID,
+				"origin": alias.Origin, "provider_domain": alias.ProviderDomain,
 				"status": status, "provider_created_at": alias.ProviderCreatedAt, "last_seen_at": now, "updated_at": now,
-			})
+			}
+			// Apple sometimes omits recipientMailId from later snapshots. Once
+			// learned, it remains the durable routing key until the forwarding
+			// mailbox changes.
+			if strings.TrimSpace(alias.RecipientMailID) != "" {
+				updates["recipient_mail_id"] = alias.RecipientMailID
+			} else if forwardChanged {
+				updates["recipient_mail_id"] = ""
+			}
+			if forwardChanged {
+				updates["recipient_probe_token"] = ""
+				updates["recipient_probe_started_at"] = nil
+				updates["recipient_probe_last_sent_at"] = nil
+			} else if strings.TrimSpace(alias.RecipientProbeToken) != "" {
+				updates["recipient_probe_token"] = alias.RecipientProbeToken
+				updates["recipient_probe_started_at"] = alias.RecipientProbeStartedAt
+				updates["recipient_probe_last_sent_at"] = alias.RecipientProbeLastSentAt
+			} else if strings.TrimSpace(alias.RecipientMailID) != "" {
+				updates["recipient_probe_token"] = ""
+				updates["recipient_probe_started_at"] = nil
+				updates["recipient_probe_last_sent_at"] = nil
+			}
+			updated := tx.Model(&iCloudAliasModel{}).Where("id = ? AND resource_id = ?", existing.ID, resourceID).Updates(updates)
 			if updated.Error != nil || updated.RowsAffected != 1 {
 				if updated.Error != nil {
 					return updated.Error
 				}
 				return errICloudAliasConflict
+			}
+			routeRecipient := strings.TrimSpace(alias.RecipientMailID)
+			if routeRecipient == "" && !forwardChanged {
+				routeRecipient = strings.TrimSpace(existing.RecipientMailID)
+			}
+			if err := persistICloudAliasRouteTx(tx, existing.ID, resourceID, alias.ForwardToEmail, routeRecipient, now); err != nil {
+				return err
 			}
 			continue
 		}
@@ -1035,6 +1437,9 @@ func syncICloudAliasesTx(tx *gorm.DB, resourceID uint, aliases []hmeAlias, expec
 			}
 			return err
 		}
+		if err := persistICloudAliasRouteTx(tx, item.ID, resourceID, item.ForwardToEmail, item.RecipientMailID, now); err != nil {
+			return err
+		}
 	}
 	if !complete {
 		return nil
@@ -1044,6 +1449,35 @@ func syncICloudAliasesTx(tx *gorm.DB, resourceID uint, aliases []hmeAlias, expec
 		missing = missing.Where("anonymous_id NOT IN ?", anonymousIDs)
 	}
 	if err := missing.Updates(map[string]any{"status": "missing", "updated_at": now}).Error; err != nil {
+		return err
+	}
+	return nil
+}
+
+func persistICloudAliasRouteTx(tx *gorm.DB, aliasID, resourceID uint, forwardToEmail, recipientMailID string, now time.Time) error {
+	forwardToEmail = strings.ToLower(strings.TrimSpace(forwardToEmail))
+	recipientMailID = strings.ToLower(strings.TrimSpace(recipientMailID))
+	if forwardToEmail == "" || recipientMailID == "" || tx == nil || !tx.Migrator().HasTable("icloud_alias_routes") {
+		return nil
+	}
+	var route iCloudAliasRouteModel
+	err := tx.Where("forward_to_email = ? AND recipient_mail_id = ?", forwardToEmail, recipientMailID).First(&route).Error
+	if err == nil {
+		if route.ResourceID != resourceID || route.AliasID != aliasID {
+			return errICloudAliasConflict
+		}
+		return tx.Model(&iCloudAliasRouteModel{}).Where("id = ?", route.ID).Updates(map[string]any{"last_seen_at": now}).Error
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	if err := tx.Create(&iCloudAliasRouteModel{
+		ResourceID: resourceID, AliasID: aliasID, ForwardToEmail: forwardToEmail,
+		RecipientMailID: recipientMailID, FirstSeenAt: now, LastSeenAt: now,
+	}).Error; err != nil {
+		if isICloudDuplicateError(err) {
+			return errICloudAliasConflict
+		}
 		return err
 	}
 	return nil

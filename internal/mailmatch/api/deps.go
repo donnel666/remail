@@ -67,6 +67,12 @@ func (m *Module) SetGmailPurchaseFetchPort(port mailmatchapp.GmailPurchaseFetchP
 	}
 }
 
+func (m *Module) SetICloudPurchaseFetchPort(port mailmatchapp.ICloudPurchaseFetchPort) {
+	if m != nil && m.UseCase != nil {
+		m.UseCase.SetICloudPurchaseFetchPort(port)
+	}
+}
+
 func (m *Module) SetBackgroundExecutionGate(gate BackgroundExecutionGate) {
 	if m != nil {
 		m.BackgroundExecution = gate

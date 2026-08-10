@@ -192,7 +192,17 @@ type MailTransportFetchPort interface {
 
 type GmailPurchaseFetchPort interface {
 	FetchLocalPurchaseMail(ctx context.Context, orderNo string) error
+}
+
+type ICloudPurchaseFetchPort interface {
 	FetchICloudMail(ctx context.Context, orderNo string) error
+}
+
+// ICloudResourceFetchPort is the administrator-only iCloud fetch contract.
+// Resource jobs must use it so every inbound message is guarded by the job
+// generation fence and reports real ingestion counts.
+type ICloudResourceFetchPort interface {
+	FetchICloudResourceMailWithFence(ctx context.Context, resourceID uint, fence func(context.Context) error) (fetched int, stored int, matched int, err error)
 }
 
 type Repository interface {
@@ -336,6 +346,7 @@ type UseCase struct {
 	matches        MatchResultPort
 	credentials    coreapp.MicrosoftCredentialPort
 	gmailPurchase  GmailPurchaseFetchPort
+	iCloudPurchase ICloudPurchaseFetchPort
 	pickupFetch    PickupFetchStatePort
 	pickupMessages PickupMessageCachePort
 	now            func() time.Time
@@ -372,6 +383,12 @@ func (uc *UseCase) SetMicrosoftCredentialPort(credentials coreapp.MicrosoftCrede
 func (uc *UseCase) SetGmailPurchaseFetchPort(fetch GmailPurchaseFetchPort) {
 	if uc != nil {
 		uc.gmailPurchase = fetch
+	}
+}
+
+func (uc *UseCase) SetICloudPurchaseFetchPort(fetch ICloudPurchaseFetchPort) {
+	if uc != nil {
+		uc.iCloudPurchase = fetch
 	}
 }
 
@@ -1072,12 +1089,15 @@ func (uc *UseCase) processFetch(ctx context.Context, task FetchTask, timing pick
 	if scope.EmailResourceID != task.EmailResourceID || !scopeFetchable(*scope, uc.now) {
 		return nil
 	}
-	if scope.AllocationType == domain.ResourceTypeGmail || scope.AllocationType == domain.ResourceTypeICloud {
-		if uc.gmailPurchase == nil {
+	if scope.AllocationType == domain.ResourceTypeICloud {
+		if uc.iCloudPurchase == nil {
 			return domain.ErrMailServiceUnavailable
 		}
-		if scope.AllocationType == domain.ResourceTypeICloud {
-			return uc.gmailPurchase.FetchICloudMail(ctx, scope.OrderNo)
+		return uc.iCloudPurchase.FetchICloudMail(ctx, scope.OrderNo)
+	}
+	if scope.AllocationType == domain.ResourceTypeGmail {
+		if uc.gmailPurchase == nil {
+			return domain.ErrMailServiceUnavailable
 		}
 		return uc.gmailPurchase.FetchLocalPurchaseMail(ctx, scope.OrderNo)
 	}
@@ -1306,20 +1326,25 @@ func pickupFetchTTL(requestedAt, now time.Time, timing pickupFetchTiming) time.D
 }
 
 func (uc *UseCase) IngestInboundMail(ctx context.Context, req InboundMailRequest) error {
+	_, _, err := uc.IngestInboundMailWithFence(ctx, req, nil)
+	return err
+}
+
+func (uc *UseCase) IngestInboundMailWithFence(ctx context.Context, req InboundMailRequest, fence func(context.Context) error) (int, int, error) {
 	if req.EmailResourceID == 0 || strings.TrimSpace(req.Recipient) == "" || len(req.Raw) == 0 {
-		return domain.ErrInvalidRequest
+		return 0, 0, domain.ErrInvalidRequest
 	}
 	if req.ResourceType != domain.ResourceTypeGmail && req.ResourceType != domain.ResourceTypeICloud {
-		return domain.ErrInvalidRequest
+		return 0, 0, domain.ErrInvalidRequest
 	}
-	_, _, _, err := uc.ingestFetchedMessagesForResourcesWithFence(
+	stored, matched, _, err := uc.ingestFetchedMessagesForResourcesWithFence(
 		ctx,
 		[]FetchedMessage{inboundFetchedMessage(req)},
 		req.ResourceType,
 		[]uint{req.EmailResourceID},
-		nil,
+		fence,
 	)
-	return err
+	return stored, matched, err
 }
 
 type mailIngestError struct {
@@ -1398,14 +1423,37 @@ func (uc *UseCase) ingestFetchedMessagesWithScopeAndFence(
 	legacyMatched := make(map[uint]struct{})
 	appendRepo, appendOnly := uc.repo.(MessageAppendRepository)
 	if appendOnly {
-		if fence != nil {
-			if err := fence(ctx); err != nil {
-				return 0, 0, lastReceivedAt, err
+		var storedMessages []domain.Message
+		inserted := 0
+		appendMessages := func(appendCtx context.Context) error {
+			var appendErr error
+			storedMessages, inserted, appendErr = appendRepo.AppendMessages(appendCtx, messages)
+			if appendErr != nil {
+				return &mailIngestError{safe: "Mail message storage failed.", err: appendErr}
 			}
+			return nil
 		}
-		storedMessages, inserted, err := appendRepo.AppendMessages(ctx, messages)
-		if err != nil {
-			return 0, 0, lastReceivedAt, &mailIngestError{safe: "Mail message storage failed.", err: err}
+		var appendErr error
+		if replayResourceType == domain.ResourceTypeICloud && fence != nil && len(messages) == 1 {
+			// iCloud administrator fetches ingest one message at a time. Keep the
+			// generation lock held through the append so a replacement job cannot
+			// become current between the fence check and durable fact insertion.
+			appendErr = uc.repo.WithTx(ctx, func(txCtx context.Context) error {
+				if err := fence(txCtx); err != nil {
+					return err
+				}
+				return appendMessages(txCtx)
+			})
+		} else {
+			if fence != nil {
+				if err := fence(ctx); err != nil {
+					return 0, 0, lastReceivedAt, err
+				}
+			}
+			appendErr = appendMessages(ctx)
+		}
+		if appendErr != nil {
+			return 0, 0, lastReceivedAt, appendErr
 		}
 		pendingMessages, err := listUnprojectedMessages(ctx, appendRepo, replayResourceType, replayResourceIDs)
 		if err != nil {
@@ -1905,6 +1953,11 @@ func inboundFetchedMessage(req InboundMailRequest) FetchedMessage {
 		receivedAt = time.Now().UTC()
 	}
 	body := string(req.Raw)
+	if req.ResourceType == domain.ResourceTypeICloud {
+		// A malformed forwarded message must not expose the domain inbox or
+		// Apple relay headers through user/admin message bodies.
+		body = ""
+	}
 	item := FetchedMessage{
 		EmailResourceID:   req.EmailResourceID,
 		ResourceType:      req.ResourceType,
@@ -1933,7 +1986,10 @@ func inboundFetchedMessage(req InboundMailRequest) FetchedMessage {
 	if subject := decodeMIMEHeader(decoder, msg.Header.Get("Subject")); subject != "" {
 		item.Subject = subject
 	}
-	if from := decodeMIMEHeader(decoder, msg.Header.Get("From")); from != "" {
+	// Apple relay envelopes encode the real sender. Its forwarded RFC822 From
+	// header is not authoritative for project sender rules.
+	if from := decodeMIMEHeader(decoder, msg.Header.Get("From")); from != "" &&
+		(req.ResourceType != domain.ResourceTypeICloud || strings.TrimSpace(req.EnvelopeFrom) == "") {
 		item.Sender = from
 	}
 	if (req.ResourceType != domain.ResourceTypeDomain && req.ResourceType != domain.ResourceTypeGmail && req.ResourceType != domain.ResourceTypeICloud) || recipient == "" {

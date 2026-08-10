@@ -24,7 +24,7 @@ import {
   IllustrationNoResult,
   IllustrationNoResultDark,
 } from "@douyinfe/semi-illustrations";
-import { AtSign, FileText, Layers, ShieldCheck, SlidersHorizontal, Upload } from "lucide-react";
+import { AtSign, Code2, FileText, Layers, ShieldCheck, SlidersHorizontal, Upload } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { CardPro } from "@/components/semi/card-pro";
@@ -119,7 +119,7 @@ type RowAction =
   | "publish"
   | "delete"
   | "recover";
-type ImportMode = "paste" | "file";
+type ImportMode = "paste" | "curl" | "file";
 type ICloudMaintenanceAction = "validate" | "alias";
 type ICloudMaintenanceTarget =
   | { item: AdminICloudResourceItem; mode: "row" }
@@ -311,6 +311,7 @@ export function ImportICloudModal({
   const { t } = useTranslation();
   const [mode, setMode] = useState<ImportMode>("paste");
   const [content, setContent] = useState("");
+  const [curlPrimaryEmail, setCurlPrimaryEmail] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [ownerId, setOwnerId] = useState<number | undefined>();
   const [errorStrategy, setErrorStrategy] =
@@ -318,10 +319,10 @@ export function ImportICloudModal({
   const [submitting, setSubmitting] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const previousVisible = useRef(false);
-  const lineCount = useMemo(
-    () => content.split(/\r?\n/).filter((line) => line.trim()).length,
-    [content],
-  );
+  const lineCount = useMemo(() => {
+    if (mode === "curl") return content.trim() ? 1 : 0;
+    return content.split(/\r?\n/).filter((line) => line.trim()).length;
+  }, [content, mode]);
 
   useEffect(() => {
     const opened = visible && !previousVisible.current;
@@ -329,6 +330,7 @@ export function ImportICloudModal({
     if (!opened) return;
     setMode("paste");
     setContent("");
+    setCurlPrimaryEmail("");
     setFile(null);
     if (fileRef.current) fileRef.current.value = "";
     setOwnerId(undefined);
@@ -357,6 +359,18 @@ export function ImportICloudModal({
         Toast.error(getIamErrorMessage(t, error, "iCloud import failed."));
         return;
       }
+    }
+    if (mode === "curl") {
+      const primaryEmail = curlPrimaryEmail.trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+$/.test(primaryEmail)) {
+        Toast.warning(t("A valid iCloud email address is required."));
+        return;
+      }
+      if (!/^curl(?:\s|\\|$)/i.test(content.trim())) {
+        Toast.warning(t("Please paste an iCloud HME cURL request."));
+        return;
+      }
+      sourceContent = `${primaryEmail}----${content.trim()}`;
     }
     const sourceLineCount = sourceContent
       .split(/\r?\n/)
@@ -424,12 +438,13 @@ export function ImportICloudModal({
           />
         </label>
 
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-3 gap-2">
           <button
             aria-pressed={mode === "paste"}
             className={switchButtonClass(mode === "paste")}
             onClick={() => {
               setMode("paste");
+              setContent("");
               setFile(null);
               if (fileRef.current) fileRef.current.value = "";
             }}
@@ -437,6 +452,20 @@ export function ImportICloudModal({
           >
             <FileText size={16} />
             {t("Manual input")}
+          </button>
+          <button
+            aria-pressed={mode === "curl"}
+            className={switchButtonClass(mode === "curl")}
+            onClick={() => {
+              setMode("curl");
+              setContent("");
+              setFile(null);
+              if (fileRef.current) fileRef.current.value = "";
+            }}
+            type="button"
+          >
+            <Code2 size={16} />
+            cURL
           </button>
           <button
             aria-pressed={mode === "file"}
@@ -483,12 +512,45 @@ export function ImportICloudModal({
               <TextArea
                 className="font-mono"
                 onChange={setContent}
-                placeholder="primary@icloud.com----host----dsid----clientId----clientBuildNumber----clientMasteringNumber----Cookie----gmail@gmail.com"
+                placeholder="primary@icloud.com----host----dsid----clientId----clientBuildNumber----clientMasteringNumber----Cookie"
                 rows={8}
                 style={{ height: IMPORT_ENTRY_AREA_HEIGHT, resize: "none" }}
                 value={content}
               />
             </label>
+          ) : mode === "curl" ? (
+            <div className="space-y-3">
+              <label className="block">
+                <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
+                  {t("Primary email")} *
+                </span>
+                <Input
+                  className="font-mono"
+                  onChange={(value) => setCurlPrimaryEmail(String(value))}
+                  placeholder="name@icloud.com"
+                  value={curlPrimaryEmail}
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1.5 flex items-center justify-between text-sm font-medium text-[var(--semi-color-text-0)]">
+                  <span>{t("HME cURL request")} *</span>
+                  <Text size="small" type="tertiary">
+                    {t("Parsed entries", { count: lineCount })}
+                  </Text>
+                </span>
+                <TextArea
+                  className="font-mono"
+                  onChange={setContent}
+                  placeholder="curl --url 'https://p217-maildomainws.icloud.com.cn/v2/hme/list?...' ..."
+                  rows={8}
+                  style={{ height: IMPORT_ENTRY_AREA_HEIGHT - 68, resize: "none" }}
+                  value={content}
+                />
+              </label>
+              <div className="text-xs leading-5 text-[var(--semi-color-text-2)]">
+                {t("The HME cURL does not contain the primary email. Enter it separately.")}
+              </div>
+            </div>
           ) : (
             <>
               <input
@@ -522,7 +584,9 @@ export function ImportICloudModal({
             {t("Supported format")}
           </div>
           <code className="block break-all whitespace-normal font-mono text-xs leading-relaxed text-[var(--semi-color-text-2)]">
-            primaryEmail----host----dsid----clientId----clientBuildNumber----clientMasteringNumber----Cookie----Gmail
+            {mode === "curl"
+              ? "primaryEmail----curl --url 'https://.../v2/hme/list?...' ..."
+              : "primaryEmail----host----dsid----clientId----clientBuildNumber----clientMasteringNumber----Cookie"}
           </code>
         </div>
 
@@ -681,10 +745,10 @@ export function EditICloudModal({
             </label>
             <div>
               <div className="mb-1.5 text-sm font-medium text-[var(--semi-color-text-0)]">
-                {t("Linked Gmail")}
+                {t("Current forwarding mailbox")}
               </div>
               <div className="flex h-8 items-center rounded-md bg-[var(--semi-color-fill-0)] px-3 font-mono text-sm text-[var(--semi-color-text-1)]">
-                {target.gmailEmail}
+                {target.selectedForwardTo || t("Not configured")}
               </div>
             </div>
           </div>
@@ -1251,6 +1315,28 @@ export function ICloudDetailSheet({
         ),
       },
       {
+        dataIndex: "anonymousId",
+        title: t("Alias ID"),
+        width: 220,
+        render: (value: unknown) =>
+          value ? (
+            <CopyableTableText copiedText={t("Copied")} text={String(value)} />
+          ) : (
+            "-"
+          ),
+      },
+      {
+        dataIndex: "recipientMailId",
+        title: t("Recipient ID"),
+        width: 240,
+        render: (value: unknown) =>
+          value ? (
+            <CopyableTableText copiedText={t("Copied")} text={String(value)} />
+          ) : (
+            "-"
+          ),
+      },
+      {
         dataIndex: "status",
         title: t("Status"),
         width: 110,
@@ -1366,13 +1452,7 @@ export function ICloudDetailSheet({
                   />
                   <InfoItem label={t("Suffix")} value={item.suffix || "-"} />
                   <InfoItem
-                    label={t("Linked Gmail")}
-                    value={
-                      <CopyableTableText copiedText={t("Copied")} text={item.gmailEmail} />
-                    }
-                  />
-                  <InfoItem
-                    label={t("Selected forwarding address")}
+                    label={t("Current forwarding mailbox")}
                     value={
                       item.selectedForwardTo ? (
                         <CopyableTableText
@@ -1436,7 +1516,7 @@ export function ICloudDetailSheet({
                     value={formatTime(item.deliveryProbeStartedAt)}
                   />
                   <InfoItem
-                    label={t("Gmail delivery verified at")}
+                    label={t("Delivery verified at")}
                     value={formatTime(item.deliveryProbeVerifiedAt)}
                   />
                 </div>
@@ -1473,7 +1553,7 @@ export function ICloudDetailSheet({
                       loading={aliasesLoading}
                       pagination={false}
                       rowKey="id"
-                      scroll={{ x: 1400, y: DRAWER_TABLE_SCROLL_Y }}
+                      scroll={{ x: 1860, y: DRAWER_TABLE_SCROLL_Y }}
                       size="small"
                     />
                   )}
@@ -2245,12 +2325,16 @@ export default function AdminICloudEmails() {
         ),
       },
       {
-        dataIndex: "gmailEmail",
-        key: "gmail",
-        title: t("Linked Gmail"),
+        dataIndex: "selectedForwardTo",
+        key: "forwardingMailbox",
+        title: t("Current forwarding mailbox"),
         width: 260,
         render: (value: unknown) => (
-          <CopyableTableText copiedText={t("Copied")} text={String(value)} />
+          value ? (
+            <CopyableTableText copiedText={t("Copied")} text={String(value)} />
+          ) : (
+            "-"
+          )
         ),
       },
       {
@@ -2581,7 +2665,7 @@ export default function AdminICloudEmails() {
             flushSearchKeyword();
             setActivePage(1);
           }}
-          placeholder={t("Search iCloud email, Gmail, owner or alias")}
+          placeholder={t("Search iCloud email, forwarding mailbox, owner, alias or recipient ID")}
           prefix={<IconSearch />}
           showClear
           size="small"

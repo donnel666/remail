@@ -29,11 +29,19 @@ type appendFenceRepoStub struct {
 	projections map[uint]domain.Message
 	nextID      uint
 	appended    int
+	appendInTx  bool
 	projected   int
 	replayTypes []domain.ResourceType
 }
 
-func (r *appendFenceRepoStub) AppendMessages(_ context.Context, messages []domain.Message) ([]domain.Message, int, error) {
+type appendFenceTransactionMarker struct{}
+
+func (r *appendFenceRepoStub) WithTx(ctx context.Context, fn func(context.Context) error) error {
+	return fn(context.WithValue(ctx, appendFenceTransactionMarker{}, true))
+}
+
+func (r *appendFenceRepoStub) AppendMessages(ctx context.Context, messages []domain.Message) ([]domain.Message, int, error) {
+	r.appendInTx = ctx.Value(appendFenceTransactionMarker{}) != nil
 	if r.facts == nil {
 		r.facts = make(map[string]domain.Message)
 	}
@@ -538,11 +546,11 @@ func TestICloudInboundUsesExactSelectedAliasAndReplaysItsResourceType(t *testing
 		ResourceType:      domain.ResourceTypeICloud,
 		Recipient:         "alias@icloud.com",
 		EnvelopeFrom:      "sender@example.net",
-		Raw:               []byte("From: sender@example.net\r\nTo: different@icloud.com\r\n\r\nwelcome"),
+		Raw:               []byte("From: forwarded-header@example.invalid\r\nTo: icloud@aishop6.com\r\n\r\nwelcome"),
 		ReceivedAt:        now,
-		ProviderMessageID: "inbox:91:101",
-		Protocol:          "imap",
-		Folder:            "Inbox",
+		ProviderMessageID: "inbound:101",
+		Protocol:          "smtp",
+		Folder:            "inbound",
 	})
 
 	require.NoError(t, err)
@@ -557,6 +565,38 @@ func TestICloudInboundUsesExactSelectedAliasAndReplaysItsResourceType(t *testing
 	require.Len(t, matches.results, 1)
 	require.Equal(t, domain.ResourceTypeICloud, matches.results[0].ResourceType)
 	require.Equal(t, "purchase", matches.results[0].ServiceMode)
+}
+
+func TestICloudFencedIngressAppendsInsideGenerationFenceTransaction(t *testing.T) {
+	now := time.Date(2026, 8, 7, 11, 0, 0, 0, time.UTC)
+	repo := &appendFenceRepoStub{matchingRepoStub: &matchingRepoStub{scopes: []OrderScope{{
+		OrderID: 62, OrderNo: "OR_ICLOUD_FENCE", AllocationType: domain.ResourceTypeICloud,
+		EmailResourceID: 18, Recipient: "alias@icloud.com", RecipientKind: "exact",
+		ServiceMode: "code", OrderStatus: "active", LooseMatch: true,
+		Rules: []MailRule{
+			{Type: MailRuleRecipient, Pattern: "exact", Enabled: true},
+			{Type: MailRuleSender, Pattern: `sender@example\.net`, Enabled: true},
+			{Type: MailRuleBody, Pattern: `code:\s*(\d{6})`, Enabled: true},
+		},
+	}}}}
+	matches := &matchResultStub{}
+	uc := NewUseCase(repo, nil, nil, matches)
+	fenceCalls := 0
+	_, _, err := uc.IngestInboundMailWithFence(context.Background(), InboundMailRequest{
+		EmailResourceID: 18, ResourceType: domain.ResourceTypeICloud, Recipient: "alias@icloud.com",
+		EnvelopeFrom: "sender@example.net", Raw: []byte("From: forwarded@example.invalid\r\n\r\ncode: 123456"),
+		ReceivedAt: now, ProviderMessageID: "inbound:fenced",
+	}, func(ctx context.Context) error {
+		fenceCalls++
+		if ctx.Value(appendFenceTransactionMarker{}) == nil {
+			t.Fatal("iCloud generation fence must run inside the append transaction")
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, 2, fenceCalls, "append and projection must each re-check the fence")
+	require.True(t, repo.appendInTx, "the iCloud fact append must be fenced atomically")
+	require.Equal(t, 1, repo.appended)
 }
 
 func TestGmailAppendOnlyReplaysAllMatchesForTheSessionInvariant(t *testing.T) {
@@ -1830,16 +1870,16 @@ func TestGmailMessageDedupeUsesIMAPUID(t *testing.T) {
 	require.Equal(t, messageDedupeKey(message), messageDedupeKey(message))
 }
 
-func TestICloudMessageDedupeUsesLinkedGmailIMAPUID(t *testing.T) {
+func TestICloudMessageDedupeUsesDomainInboundID(t *testing.T) {
 	message := FetchedMessage{
 		ResourceType: domain.ResourceTypeICloud, MessageIDHeader: "same@example.net",
-		ProviderMessageID: "gmail:11:inbox:91:101", Protocol: "imap", Folder: "Inbox",
+		ProviderMessageID: "inbound:101", Protocol: "smtp", Folder: "inbound",
 		Recipient: "alias@icloud.com", Body: "welcome", ReceivedAt: time.Now().UTC(),
 	}
-	otherGmail := message
-	otherGmail.ProviderMessageID = "gmail:25:inbox:91:101"
+	otherInbound := message
+	otherInbound.ProviderMessageID = "inbound:102"
 
-	require.NotEqual(t, messageDedupeKey(message), messageDedupeKey(otherGmail))
+	require.NotEqual(t, messageDedupeKey(message), messageDedupeKey(otherInbound))
 	require.Equal(t, messageDedupeKey(message), messageDedupeKey(message))
 }
 

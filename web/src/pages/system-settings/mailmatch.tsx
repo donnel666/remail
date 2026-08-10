@@ -47,6 +47,8 @@ export default function MailmatchSection({ options, onBulkSave }: SectionProps) 
       {field("时间偏差容忍（分钟）", "read_window_skew_minutes")}
       {field("验证码读取上限", "code_read_limit")}
       {field("购买邮件读取上限", "purchase_read_limit")}
+      {field("苹果邮箱单个收件箱扫描上限", "icloud_mailmatch_scan_limit", 10000)}
+      {field("苹果邮箱管理员读取上限", "icloud_admin_read_limit", 5000)}
       {field("接码预留有效期（分钟）", "pickup_fetch_reserve_ttl_minutes")}
       {field("接码租约有效期（分钟）", "pickup_fetch_lease_ttl_minutes")}
       {field("消息缓存有效期（秒）", "pickup_message_cache_ttl_seconds")}

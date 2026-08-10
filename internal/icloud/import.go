@@ -43,22 +43,19 @@ const (
 )
 
 type iCloudImportLine struct {
-	LineNumber              int
-	ExistingResourceID      uint
-	ExistingGmailResourceID uint
-	PrimaryEmail            string
-	Host                    string
-	DSID                    string
-	ClientID                string
-	ClientBuildNumber       string
-	ClientMasteringNumber   string
-	Cookie                  string
-	GmailEmail              string
-	GmailResourceID         uint
-	LangCode                string
-	Origin                  string
-	Referer                 string
-	UserAgent               string
+	LineNumber            int
+	ExistingResourceID    uint
+	PrimaryEmail          string
+	Host                  string
+	DSID                  string
+	ClientID              string
+	ClientBuildNumber     string
+	ClientMasteringNumber string
+	Cookie                string
+	LangCode              string
+	Origin                string
+	Referer               string
+	UserAgent             string
 }
 
 type iCloudImportFailure struct {
@@ -370,6 +367,9 @@ func parseICloudImport(content string, strategy coreDomain.ImportErrorStrategy) 
 		return nil, nil, &failure
 	}
 	strategy = normalizedStrategy
+	if looksLikeICloudCurlImport(content) {
+		return parseICloudCurlImport(content, strategy)
+	}
 	var lines []iCloudImportLine
 	var failures []iCloudImportFailure
 	for index, raw := range strings.Split(content, "\n") {
@@ -391,7 +391,7 @@ func parseICloudImport(content string, strategy coreDomain.ImportErrorStrategy) 
 }
 
 func parseICloudImportLine(lineNumber int, raw string) (*iCloudImportLine, *iCloudImportFailure) {
-	parts := make([]string, 0, 8)
+	parts := make([]string, 0, 7)
 	remaining := raw
 	for range 6 {
 		part, rest, found := strings.Cut(remaining, "----")
@@ -401,12 +401,8 @@ func parseICloudImportLine(lineNumber int, raw string) (*iCloudImportLine, *iClo
 		parts = append(parts, strings.TrimSpace(part))
 		remaining = rest
 	}
-	separator := strings.LastIndex(remaining, "----")
-	if separator < 0 {
-		return nil, invalidICloudImportFailure(lineNumber, raw)
-	}
-	parts = append(parts, strings.TrimSpace(remaining[:separator]), strings.TrimSpace(remaining[separator+len("----"):]))
-	if len(parts) != 8 {
+	parts = append(parts, strings.TrimSpace(remaining))
+	if len(parts) != 7 {
 		return nil, invalidICloudImportFailure(lineNumber, raw)
 	}
 	primaryEmail := strings.ToLower(parts[0])
@@ -416,13 +412,13 @@ func parseICloudImportLine(lineNumber int, raw string) (*iCloudImportLine, *iClo
 		!validICloudImportValue(parts[3], iCloudImportClientMaxLength) ||
 		!validICloudImportValue(parts[4], iCloudImportBuildMaxLength) ||
 		!validICloudImportValue(parts[5], iCloudImportBuildMaxLength) ||
-		!validICloudImportCookie(parts[6]) || !isICloudImportEmail(strings.ToLower(parts[7])) {
+		!validICloudImportCookie(parts[6]) {
 		return nil, invalidICloudImportFailure(lineNumber, raw)
 	}
 	langCode, origin, referer := defaultICloudHMEContext(host)
 	return &iCloudImportLine{
 		LineNumber: lineNumber, PrimaryEmail: primaryEmail, Host: host, DSID: parts[2], ClientID: parts[3],
-		ClientBuildNumber: parts[4], ClientMasteringNumber: parts[5], Cookie: parts[6], GmailEmail: strings.ToLower(parts[7]),
+		ClientBuildNumber: parts[4], ClientMasteringNumber: parts[5], Cookie: parts[6],
 		LangCode: langCode, Origin: origin, Referer: referer, UserAgent: defaultICloudHMEUserAgent,
 	}, nil
 }
@@ -541,14 +537,6 @@ func (s *Service) processICloudImportClaimed(ctx context.Context, record *iCloud
 	}
 	failures = append(failures, existingFailures...)
 
-	lines, gmailFailures, gmailFatal, err := s.resolveICloudImportGmails(ctx, lines, strategy)
-	if err != nil {
-		return err
-	}
-	if gmailFatal != nil {
-		return s.failICloudImport(ctx, record, *gmailFatal)
-	}
-	failures = append(failures, gmailFailures...)
 	if len(lines) == 0 && len(failures) == 0 && len(processedLines) == 0 {
 		return s.failICloudImport(ctx, record, iCloudImportFailure{
 			Category: "invalid_format", SafeMessage: "Invalid iCloud import format.",
@@ -683,42 +671,38 @@ func (s *Service) removeExistingICloudImportLines(ctx context.Context, ownerUser
 		dsids = append(dsids, line.DSID)
 	}
 	var existing []struct {
-		ID              uint   `gorm:"column:id"`
-		OwnerUserID     uint   `gorm:"column:owner_user_id"`
-		PrimaryEmail    string `gorm:"column:primary_email"`
-		DSID            string `gorm:"column:dsid"`
-		GmailResourceID uint   `gorm:"column:gmail_resource_id"`
-		Status          string `gorm:"column:status"`
-		SessionStatus   string `gorm:"column:session_status"`
+		ID            uint   `gorm:"column:id"`
+		OwnerUserID   uint   `gorm:"column:owner_user_id"`
+		PrimaryEmail  string `gorm:"column:primary_email"`
+		DSID          string `gorm:"column:dsid"`
+		Status        string `gorm:"column:status"`
+		SessionStatus string `gorm:"column:session_status"`
 	}
 	if err := s.db.WithContext(ctx).Table("icloud_resources AS ir").
-		Select("ir.id, er.owner_user_id, ir.primary_email, ir.dsid, ir.gmail_resource_id, ir.status, ir.session_status").
+		Select("ir.id, er.owner_user_id, ir.primary_email, ir.dsid, ir.status, ir.session_status").
 		Joins("JOIN email_resources AS er ON er.id = ir.id AND er.type = ?", "icloud").
 		Where("ir.primary_email IN ? OR ir.dsid IN ?", emails, dsids).Find(&existing).Error; err != nil {
 		return nil, nil, nil, ErrICloudImportTemporary
 	}
 	byEmail := make(map[string]struct {
-		ID              uint
-		OwnerUserID     uint
-		GmailResourceID uint
-		Status          string
-		SessionStatus   string
+		ID            uint
+		OwnerUserID   uint
+		Status        string
+		SessionStatus string
 	}, len(existing))
 	byDSID := make(map[string]struct {
-		ID              uint
-		OwnerUserID     uint
-		GmailResourceID uint
-		Status          string
-		SessionStatus   string
+		ID            uint
+		OwnerUserID   uint
+		Status        string
+		SessionStatus string
 	}, len(existing))
 	for _, item := range existing {
 		value := struct {
-			ID              uint
-			OwnerUserID     uint
-			GmailResourceID uint
-			Status          string
-			SessionStatus   string
-		}{item.ID, item.OwnerUserID, item.GmailResourceID, item.Status, item.SessionStatus}
+			ID            uint
+			OwnerUserID   uint
+			Status        string
+			SessionStatus string
+		}{item.ID, item.OwnerUserID, item.Status, item.SessionStatus}
 		byEmail[iCloudImportEmailKey(item.PrimaryEmail)] = value
 		byDSID[iCloudImportDSIDKey(item.DSID)] = value
 	}
@@ -752,7 +736,6 @@ func (s *Service) removeExistingICloudImportLines(ctx context.Context, ownerUser
 		// invalid. Every other existing resource remains immutable through import.
 		if match.ID != 0 && match.OwnerUserID == ownerUserID && match.SessionStatus == iCloudSessionInvalid {
 			line.ExistingResourceID = match.ID
-			line.ExistingGmailResourceID = match.GmailResourceID
 			result = append(result, line)
 			continue
 		}
@@ -770,77 +753,6 @@ func (s *Service) removeExistingICloudImportLines(ctx context.Context, ownerUser
 		failures = append(failures, failure)
 	}
 	return result, failures, nil, nil
-}
-
-func (s *Service) resolveICloudImportGmails(ctx context.Context, lines []iCloudImportLine, strategy coreDomain.ImportErrorStrategy) ([]iCloudImportLine, []iCloudImportFailure, *iCloudImportFailure, error) {
-	if len(lines) == 0 {
-		return lines, nil, nil, nil
-	}
-	emails := make([]string, 0, len(lines))
-	for _, line := range lines {
-		emails = append(emails, line.GmailEmail)
-	}
-	var gmailResources []iCloudGmailResourceModel
-	if err := s.db.WithContext(ctx).Select("id, email, status").Where("email IN ?", emails).Find(&gmailResources).Error; err != nil {
-		return nil, nil, nil, ErrICloudImportTemporary
-	}
-	byEmail := make(map[string]iCloudGmailResourceModel, len(gmailResources))
-	for _, resource := range gmailResources {
-		byEmail[iCloudImportEmailKey(resource.Email)] = resource
-	}
-	result := make([]iCloudImportLine, 0, len(lines))
-	var failures []iCloudImportFailure
-	for _, line := range lines {
-		gmail, found := byEmail[iCloudImportEmailKey(line.GmailEmail)]
-		if found && (gmail.Status == "normal" || gmail.Status == "available") {
-			line.GmailResourceID = gmail.ID
-			result = append(result, line)
-			continue
-		}
-		failure := iCloudImportFailure{
-			Line: line.LineNumber, Email: line.PrimaryEmail, Category: "gmail_not_available",
-			SafeMessage: "Linked Gmail resource is not available.",
-		}
-		if strategy == coreDomain.ImportErrorStrategyAbort {
-			return nil, nil, &failure, nil
-		}
-		failures = append(failures, failure)
-	}
-	changedResourceIDs := make([]uint, 0, len(result))
-	for _, line := range result {
-		if line.ExistingResourceID != 0 && line.ExistingGmailResourceID != line.GmailResourceID {
-			changedResourceIDs = append(changedResourceIDs, line.ExistingResourceID)
-		}
-	}
-	if len(changedResourceIDs) == 0 {
-		return result, failures, nil, nil
-	}
-	var activeResourceIDs []uint
-	if err := s.db.WithContext(ctx).Table("icloud_allocations").Distinct("resource_id").
-		Where("resource_id IN ? AND status = ?", changedResourceIDs, "allocated").
-		Pluck("resource_id", &activeResourceIDs).Error; err != nil {
-		return nil, nil, nil, ErrICloudImportTemporary
-	}
-	active := make(map[uint]struct{}, len(activeResourceIDs))
-	for _, resourceID := range activeResourceIDs {
-		active[resourceID] = struct{}{}
-	}
-	allowed := result[:0]
-	for _, line := range result {
-		if _, blocked := active[line.ExistingResourceID]; !blocked {
-			allowed = append(allowed, line)
-			continue
-		}
-		failure := iCloudImportFailure{
-			Line: line.LineNumber, Email: line.PrimaryEmail, Category: "active_gmail_binding",
-			SafeMessage: "Linked Gmail cannot be changed while the iCloud resource has active allocations.",
-		}
-		if strategy == coreDomain.ImportErrorStrategyAbort {
-			return nil, nil, &failure, nil
-		}
-		failures = append(failures, failure)
-	}
-	return allowed, failures, nil, nil
 }
 
 func (s *Service) createICloudResourcesAndMarkImportSucceeded(
@@ -902,15 +814,6 @@ func (s *Service) createICloudResourcesAndMarkImportSucceeded(
 					if existing.SessionStatus != iCloudSessionInvalid {
 						return ErrICloudImportClaim
 					}
-					if existing.GmailResourceID != line.GmailResourceID {
-						var activeAllocations int64
-						if err := tx.Table("icloud_allocations").Where("resource_id = ? AND status = ?", existing.ID, "allocated").Count(&activeAllocations).Error; err != nil {
-							return err
-						}
-						if activeAllocations > 0 {
-							return ErrICloudImportTemporary
-						}
-					}
 					credentialRevision := existing.CredentialRevision + 1
 					if credentialRevision == 1 {
 						credentialRevision = 2
@@ -922,20 +825,16 @@ func (s *Service) createICloudResourcesAndMarkImportSucceeded(
 					updates := map[string]any{
 						"host": line.Host, "dsid": line.DSID, "client_id": line.ClientID,
 						"client_build_number": line.ClientBuildNumber, "client_mastering_number": line.ClientMasteringNumber,
-						"cookie": line.Cookie, "gmail_resource_id": line.GmailResourceID,
+						"cookie":    line.Cookie,
 						"lang_code": line.LangCode, "origin": line.Origin, "referer": line.Referer, "user_agent": line.UserAgent,
-						"selected_forward_to": "",
-						"for_sale":            false, "status": iCloudResourcePending, "session_status": iCloudSessionUnchecked,
+						"for_sale": false, "status": iCloudResourcePending, "session_status": iCloudSessionUnchecked,
 						"session_failures": 0, "credential_revision": credentialRevision, "credential_updated_at": now,
 						"validation_generation": validationGeneration, "validation_failures": 0,
-						"alias_count": 0, "alias_provision_candidate": "", "alias_provision_reconcile": false, "next_validation_at": nil,
-						"delivery_probe_token": "", "delivery_probe_alias": "", "delivery_probe_started_at": nil, "delivery_probe_verified_at": nil,
-						"next_keepalive_at": nil, "last_checked_at": nil, "last_valid_at": nil, "last_alias_sync_at": nil,
+						"alias_provision_candidate": "", "alias_provision_reconcile": false, "next_validation_at": nil,
+						"delivery_probe_token": "", "delivery_probe_alias": "",
+						"delivery_probe_started_at": nil, "delivery_probe_verified_at": nil,
+						"next_keepalive_at": nil, "last_checked_at": nil, "last_valid_at": nil,
 						"last_safe_error": "", "updated_at": now,
-					}
-					if existing.GmailResourceID != line.GmailResourceID {
-						updates["provider_cursor"] = 0
-						updates["provider_spam_cursor"] = 0
 					}
 					resourceUpdated := tx.Model(&iCloudResourceModel{}).Where("id = ?", existing.ID).Updates(updates)
 					if resourceUpdated.Error != nil {
@@ -957,7 +856,7 @@ func (s *Service) createICloudResourcesAndMarkImportSucceeded(
 					resources = append(resources, iCloudResourceModel{
 						ID: resourceIDs[index], ResourceType: "icloud", PrimaryEmail: line.PrimaryEmail, Host: line.Host,
 						DSID: line.DSID, ClientID: line.ClientID, ClientBuildNumber: line.ClientBuildNumber,
-						ClientMasteringNumber: line.ClientMasteringNumber, Cookie: line.Cookie, GmailResourceID: line.GmailResourceID,
+						ClientMasteringNumber: line.ClientMasteringNumber, Cookie: line.Cookie,
 						LangCode: line.LangCode, Origin: line.Origin, Referer: line.Referer, UserAgent: line.UserAgent,
 						ExpireAt: expiresAt, ForSale: false, Status: iCloudResourcePending, SessionStatus: iCloudSessionUnchecked,
 						CredentialRevision: 1, CredentialUpdatedAt: now, ValidationGeneration: 1, CreatedAt: now, UpdatedAt: now,

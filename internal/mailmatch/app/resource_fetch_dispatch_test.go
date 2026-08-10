@@ -68,6 +68,10 @@ type resourceFetchProcessRepoStub struct {
 	job       domain.ResourceFetchJob
 	scope     domain.ResourceFetchScope
 	completed bool
+	fenced    int
+	fetched   int
+	stored    int
+	matched   int
 }
 
 func (*resourceFetchProcessRepoStub) MarkResourceFetchProcessing(context.Context, uint, uint64) (bool, error) {
@@ -88,6 +92,17 @@ func (*resourceFetchProcessRepoStub) MarkResourceFetchFailure(context.Context, u
 
 func (s *resourceFetchProcessRepoStub) CompleteResourceFetchTask(context.Context, uint, uint64, time.Time, *governancedomain.SystemLog) error {
 	s.completed = true
+	return nil
+}
+
+func (s *resourceFetchProcessRepoStub) AssertICloudResourceFetchFence(context.Context, uint, uint64) error {
+	s.fenced++
+	return nil
+}
+
+func (s *resourceFetchProcessRepoStub) CompleteICloudResourceFetch(_ context.Context, _ uint, _ uint64, fetched, stored, matched int, _ time.Time, _ *governancedomain.SystemLog) error {
+	s.completed = true
+	s.fetched, s.stored, s.matched = fetched, stored, matched
 	return nil
 }
 
@@ -120,13 +135,24 @@ func TestResourceFetchIgnoresLegacyLookbackForUnlimitedAdministratorChannel(t *t
 	require.Equal(t, untilAt, transport.request.UntilAt)
 }
 
-type iCloudPurchaseFetchStub struct{ orderNo string }
-
-func (*iCloudPurchaseFetchStub) FetchLocalPurchaseMail(context.Context, string) error { return nil }
+type iCloudPurchaseFetchStub struct {
+	orderNo    string
+	resourceID uint
+	fenceCalls int
+}
 
 func (s *iCloudPurchaseFetchStub) FetchICloudMail(_ context.Context, orderNo string) error {
 	s.orderNo = orderNo
 	return nil
+}
+
+func (s *iCloudPurchaseFetchStub) FetchICloudResourceMailWithFence(ctx context.Context, resourceID uint, fence func(context.Context) error) (int, int, int, error) {
+	s.resourceID = resourceID
+	s.fenceCalls++
+	if err := fence(ctx); err != nil {
+		return 0, 0, 0, err
+	}
+	return 3, 2, 1, nil
 }
 
 func TestResourceFetchUsesExistingICloudPickupFetcher(t *testing.T) {
@@ -142,12 +168,18 @@ func TestResourceFetchUsesExistingICloudPickupFetcher(t *testing.T) {
 	}
 	purchase := &iCloudPurchaseFetchStub{}
 	messages := NewUseCase(nil, nil, nil, nil)
-	messages.SetGmailPurchaseFetchPort(purchase)
+	messages.SetICloudPurchaseFetchPort(purchase)
 	uc := NewResourceFetchUseCase(repo, nil, nil, messages, nil)
 
 	require.NoError(t, uc.Process(context.Background(), ResourceFetchTask{ResourceID: 100, Generation: 2}))
-	require.Equal(t, "icloud-order", purchase.orderNo)
+	require.Equal(t, uint(100), purchase.resourceID)
+	require.Empty(t, purchase.orderNo)
+	require.Equal(t, 1, purchase.fenceCalls)
+	require.Equal(t, 1, repo.fenced)
 	require.True(t, repo.completed)
+	require.Equal(t, 3, repo.fetched)
+	require.Equal(t, 2, repo.stored)
+	require.Equal(t, 1, repo.matched)
 }
 
 type resourceFetchReleaseRepoStub struct {

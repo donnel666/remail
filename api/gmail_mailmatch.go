@@ -24,17 +24,6 @@ func (a gmailMailIngestAdapter) IngestGmailMail(
 	return a.ingest(ctx, mailmatchdomain.ResourceTypeGmail, resourceID, recipient, raw, receivedAt, providerMessageID, folder)
 }
 
-func (a gmailMailIngestAdapter) IngestICloudMail(
-	ctx context.Context,
-	resourceID uint,
-	recipient string,
-	raw []byte,
-	receivedAt time.Time,
-	providerMessageID, folder string,
-) error {
-	return a.ingest(ctx, mailmatchdomain.ResourceTypeICloud, resourceID, recipient, raw, receivedAt, providerMessageID, folder)
-}
-
 func (a gmailMailIngestAdapter) ingest(
 	ctx context.Context,
 	resourceType mailmatchdomain.ResourceType,

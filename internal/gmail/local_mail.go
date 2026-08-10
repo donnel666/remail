@@ -32,7 +32,6 @@ const (
 
 type MailIngestPort interface {
 	IngestGmailMail(ctx context.Context, resourceID uint, recipient string, raw []byte, receivedAt time.Time, providerMessageID, folder string) error
-	IngestICloudMail(ctx context.Context, resourceID uint, recipient string, raw []byte, receivedAt time.Time, providerMessageID, folder string) error
 }
 
 type localGmailFetchedMessage struct {
@@ -341,29 +340,6 @@ func localGmailOriginalRecipient(rootEmail string, raw []byte) string {
 	return ""
 }
 
-func localICloudOriginalRecipient(raw []byte, activeAliases map[string]struct{}) string {
-	message, err := stdmail.ReadMessage(bytes.NewReader(raw))
-	if err != nil || len(activeAliases) == 0 {
-		return ""
-	}
-	matches := make(map[string]struct{}, 1)
-	for _, header := range []string{"X-Original-To", "Envelope-To", "Original-Recipient", "X-Envelope-To", "To", "Cc"} {
-		for _, candidate := range localGmailHistoryAddressCandidates(message.Header.Get(header)) {
-			candidate = strings.ToLower(strings.TrimSpace(candidate))
-			if _, active := activeAliases[candidate]; active {
-				matches[candidate] = struct{}{}
-			}
-		}
-	}
-	if len(matches) != 1 {
-		return ""
-	}
-	for recipient := range matches {
-		return recipient
-	}
-	return ""
-}
-
 func localGmailRecipientBelongsTo(rootEmail, candidate string) bool {
 	_, _, rootDots, rootOK := localGmailHistoryAliasForms(rootEmail)
 	_, _, candidateDots, candidateOK := localGmailHistoryAliasForms(candidate)
@@ -551,86 +527,6 @@ func (s *Service) FetchLocalPurchaseMail(ctx context.Context, orderNo string) er
 	}
 	return s.dbFor(ctx).Model(&allocationModel{}).
 		Where("id = ? AND status = ?", resource.AllocationID, AllocationStatusAllocated).
-		Updates(map[string]any{"provider_cursor": cursors.Inbox, "provider_spam_cursor": cursors.Spam}).Error
-}
-
-func (s *Service) FetchICloudMail(ctx context.Context, orderNo string) error {
-	orderNo = strings.TrimSpace(orderNo)
-	if orderNo == "" {
-		return ErrLocalResourceMissing
-	}
-	if s.fetch == nil || s.mail == nil {
-		return errors.New("gmail: local mail fetch unavailable")
-	}
-	var resource struct {
-		ID                 uint   `gorm:"column:id"`
-		GmailResourceID    uint   `gorm:"column:gmail_resource_id"`
-		LoginEmail         string `gorm:"column:login_email"`
-		AppPassword        string `gorm:"column:app_password"`
-		ProviderCursor     uint64 `gorm:"column:provider_cursor"`
-		ProviderSpamCursor uint64 `gorm:"column:provider_spam_cursor"`
-	}
-	err := s.dbFor(ctx).Table("icloud_allocations AS requested").
-		Select("ir.id, ir.gmail_resource_id, gr.email AS login_email, gr.app_password, ir.provider_cursor, ir.provider_spam_cursor").
-		Joins("JOIN icloud_resources AS ir ON ir.id = requested.resource_id").
-		Joins("JOIN gmail_resources AS gr ON gr.id = ir.gmail_resource_id").
-		Where("requested.order_no = ? AND requested.status = ?", orderNo, AllocationStatusAllocated).
-		Where("gr.status IN ?", []string{LocalResourceNormal, localResourceRollbackNormal}).
-		Take(&resource).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return ErrLocalResourceMissing
-	}
-	if err != nil {
-		return fmt.Errorf("load iCloud Gmail mail resource: %w", err)
-	}
-	if resource.ID == 0 || resource.GmailResourceID == 0 || strings.TrimSpace(resource.LoginEmail) == "" || resource.AppPassword == "" {
-		return ErrLocalResourceMissing
-	}
-	var allocations []struct {
-		Email     string    `gorm:"column:email"`
-		CreatedAt time.Time `gorm:"column:created_at"`
-	}
-	if err := s.dbFor(ctx).Table("icloud_allocations").
-		Select("email, created_at").
-		Where("resource_id = ? AND status = ?", resource.ID, AllocationStatusAllocated).
-		Order("created_at ASC, id ASC").Find(&allocations).Error; err != nil {
-		return fmt.Errorf("load active iCloud aliases: %w", err)
-	}
-	if len(allocations) == 0 {
-		return ErrLocalResourceMissing
-	}
-	activeAliases := make(map[string]struct{}, len(allocations))
-	for _, allocation := range allocations {
-		if email := strings.ToLower(strings.TrimSpace(allocation.Email)); email != "" {
-			activeAliases[email] = struct{}{}
-		}
-	}
-	if len(activeAliases) == 0 {
-		return ErrLocalResourceMissing
-	}
-	messages, cursors, err := s.fetch(ctx, resource.LoginEmail, resource.AppPassword, localGmailFolderCursors{
-		Inbox: resource.ProviderCursor, Spam: resource.ProviderSpamCursor,
-	}, allocations[0].CreatedAt.UTC(), false)
-	if err != nil {
-		return fmt.Errorf("fetch iCloud Gmail mail: %w", err)
-	}
-	for _, message := range messages {
-		recipient := localICloudOriginalRecipient(message.Raw, activeAliases)
-		if recipient == "" {
-			continue
-		}
-		providerMessageID := strings.TrimSpace(message.ProviderMessageID)
-		if providerMessageID != "" {
-			providerMessageID = fmt.Sprintf("gmail:%d:%s", resource.GmailResourceID, providerMessageID)
-		}
-		if err := s.mail.IngestICloudMail(
-			ctx, resource.ID, recipient, message.Raw, message.ReceivedAt, providerMessageID, message.Folder,
-		); err != nil {
-			return fmt.Errorf("ingest iCloud Gmail mail: %w", err)
-		}
-	}
-	return s.dbFor(ctx).Table("icloud_resources").
-		Where("id = ? AND gmail_resource_id = ?", resource.ID, resource.GmailResourceID).
 		Updates(map[string]any{"provider_cursor": cursors.Inbox, "provider_spam_cursor": cursors.Spam}).Error
 }
 

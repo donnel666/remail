@@ -5252,17 +5252,24 @@ type AdminGmailValidationBatchRequest struct {
 
 // AdminICloudAliasItem defines model for AdminICloudAliasItem.
 type AdminICloudAliasItem struct {
-	CreatedAt         time.Time              `json:"createdAt"`
-	Email             openapi_types.Email    `json:"email"`
-	ForwardToEmail    string                 `json:"forwardToEmail"`
-	Id                int                    `json:"id"`
-	LastAllocatedAt   *time.Time             `json:"lastAllocatedAt"`
-	LastSeenAt        *time.Time             `json:"lastSeenAt"`
-	Origin            string                 `json:"origin"`
-	ProviderCreatedAt *time.Time             `json:"providerCreatedAt"`
-	ProviderDomain    string                 `json:"providerDomain"`
-	Status            AdminICloudAliasStatus `json:"status"`
-	UpdatedAt         time.Time              `json:"updatedAt"`
+	// AnonymousId Apple HME alias identifier used for alias maintenance.
+	AnonymousId string              `json:"anonymousId"`
+	CreatedAt   time.Time           `json:"createdAt"`
+	Email       openapi_types.Email `json:"email"`
+
+	// ForwardToEmail Persisted domain mailbox for this alias. It remains authoritative for existing allocations independently of the current Apple session or resource forwarding selection.
+	ForwardToEmail    string     `json:"forwardToEmail"`
+	Id                int        `json:"id"`
+	LastAllocatedAt   *time.Time `json:"lastAllocatedAt"`
+	LastSeenAt        *time.Time `json:"lastSeenAt"`
+	Origin            string     `json:"origin"`
+	ProviderCreatedAt *time.Time `json:"providerCreatedAt"`
+	ProviderDomain    string     `json:"providerDomain"`
+
+	// RecipientMailId Persisted Apple relay recipient suffix that selects this alias before MailMatch normalization.
+	RecipientMailId string                 `json:"recipientMailId"`
+	Status          AdminICloudAliasStatus `json:"status"`
+	UpdatedAt       time.Time              `json:"updatedAt"`
 }
 
 // AdminICloudAliasListResponse defines model for AdminICloudAliasListResponse.
@@ -5375,7 +5382,6 @@ type AdminICloudResourceDetail struct {
 	DeliveryProbeVerifiedAt *time.Time                          `json:"deliveryProbeVerifiedAt"`
 	ExpireAt                time.Time                           `json:"expireAt"`
 	ForSale                 bool                                `json:"forSale"`
-	GmailEmail              openapi_types.Email                 `json:"gmailEmail"`
 	Id                      int                                 `json:"id"`
 	LastAliasSyncAt         *time.Time                          `json:"lastAliasSyncAt"`
 	LastAllocatedAt         *time.Time                          `json:"lastAllocatedAt"`
@@ -5386,15 +5392,17 @@ type AdminICloudResourceDetail struct {
 	NextValidationAt        *time.Time                          `json:"nextValidationAt"`
 	Owner                   AdminICloudOwnerSummary             `json:"owner"`
 	PrimaryEmail            openapi_types.Email                 `json:"primaryEmail"`
-	SelectedForwardTo       string                              `json:"selectedForwardTo"`
-	SessionFailures         int                                 `json:"sessionFailures"`
-	SessionStatus           AdminICloudSessionStatus            `json:"sessionStatus"`
-	Status                  AdminICloudResourceStatus           `json:"status"`
-	Suffix                  string                              `json:"suffix"`
-	UpdatedAt               time.Time                           `json:"updatedAt"`
-	ValidationFailures      int                                 `json:"validationFailures"`
-	ValidationGeneration    int64                               `json:"validationGeneration"`
-	Version                 int                                 `json:"version"`
+
+	// SelectedForwardTo Current Apple-selected forwarding target. Allocated aliases continue using each alias item's persisted forwardToEmail and recipientMailId.
+	SelectedForwardTo    string                    `json:"selectedForwardTo"`
+	SessionFailures      int                       `json:"sessionFailures"`
+	SessionStatus        AdminICloudSessionStatus  `json:"sessionStatus"`
+	Status               AdminICloudResourceStatus `json:"status"`
+	Suffix               string                    `json:"suffix"`
+	UpdatedAt            time.Time                 `json:"updatedAt"`
+	ValidationFailures   int                       `json:"validationFailures"`
+	ValidationGeneration int64                     `json:"validationGeneration"`
+	Version              int                       `json:"version"`
 }
 
 // AdminICloudResourceDetailAliasLimit defines model for AdminICloudResourceDetail.AliasLimit.
@@ -5402,28 +5410,29 @@ type AdminICloudResourceDetailAliasLimit int
 
 // AdminICloudResourceItem Administrator-safe operational facts. Cookie, DSID, host, client context, and provider request payloads are never returned.
 type AdminICloudResourceItem struct {
-	AliasCount              int                       `json:"aliasCount"`
-	CreatedAt               time.Time                 `json:"createdAt"`
-	DeliveryProbeVerifiedAt *time.Time                `json:"deliveryProbeVerifiedAt"`
-	ExpireAt                time.Time                 `json:"expireAt"`
-	ForSale                 bool                      `json:"forSale"`
-	GmailEmail              openapi_types.Email       `json:"gmailEmail"`
-	Id                      int                       `json:"id"`
-	LastAliasSyncAt         *time.Time                `json:"lastAliasSyncAt"`
-	LastAllocatedAt         *time.Time                `json:"lastAllocatedAt"`
-	LastCheckedAt           *time.Time                `json:"lastCheckedAt"`
-	LastSafeError           *string                   `json:"lastSafeError"`
-	LastValidAt             *time.Time                `json:"lastValidAt"`
-	NextKeepaliveAt         *time.Time                `json:"nextKeepaliveAt"`
-	NextValidationAt        *time.Time                `json:"nextValidationAt"`
-	Owner                   AdminICloudOwnerSummary   `json:"owner"`
-	PrimaryEmail            openapi_types.Email       `json:"primaryEmail"`
-	SelectedForwardTo       string                    `json:"selectedForwardTo"`
-	SessionStatus           AdminICloudSessionStatus  `json:"sessionStatus"`
-	Status                  AdminICloudResourceStatus `json:"status"`
-	Suffix                  string                    `json:"suffix"`
-	UpdatedAt               time.Time                 `json:"updatedAt"`
-	Version                 int                       `json:"version"`
+	AliasCount              int                     `json:"aliasCount"`
+	CreatedAt               time.Time               `json:"createdAt"`
+	DeliveryProbeVerifiedAt *time.Time              `json:"deliveryProbeVerifiedAt"`
+	ExpireAt                time.Time               `json:"expireAt"`
+	ForSale                 bool                    `json:"forSale"`
+	Id                      int                     `json:"id"`
+	LastAliasSyncAt         *time.Time              `json:"lastAliasSyncAt"`
+	LastAllocatedAt         *time.Time              `json:"lastAllocatedAt"`
+	LastCheckedAt           *time.Time              `json:"lastCheckedAt"`
+	LastSafeError           *string                 `json:"lastSafeError"`
+	LastValidAt             *time.Time              `json:"lastValidAt"`
+	NextKeepaliveAt         *time.Time              `json:"nextKeepaliveAt"`
+	NextValidationAt        *time.Time              `json:"nextValidationAt"`
+	Owner                   AdminICloudOwnerSummary `json:"owner"`
+	PrimaryEmail            openapi_types.Email     `json:"primaryEmail"`
+
+	// SelectedForwardTo Current Apple-selected forwarding target. Allocated aliases continue using each alias item's persisted forwardToEmail and recipientMailId.
+	SelectedForwardTo string                    `json:"selectedForwardTo"`
+	SessionStatus     AdminICloudSessionStatus  `json:"sessionStatus"`
+	Status            AdminICloudResourceStatus `json:"status"`
+	Suffix            string                    `json:"suffix"`
+	UpdatedAt         time.Time                 `json:"updatedAt"`
+	Version           int                       `json:"version"`
 }
 
 // AdminICloudResourceListResponse defines model for AdminICloudResourceListResponse.

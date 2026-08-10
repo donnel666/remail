@@ -81,3 +81,9 @@ func (m *Module) SetRuntimeUpdateHook(hook func(context.Context, []settingsdomai
 		m.runtimeSync.SetRuntimeUpdateHook(hook)
 	}
 }
+
+func (m *Module) SetRuntimeValidationHook(hook func(context.Context, []settingsdomain.Setting) error) {
+	if m != nil && m.Settings != nil {
+		m.Settings.SetRuntimeValidationHook(hook)
+	}
+}

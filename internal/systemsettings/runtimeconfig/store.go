@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
 
 	"github.com/donnel666/remail/internal/systemsettings/domain"
 )
@@ -64,6 +65,36 @@ func String(key, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+// EmailList returns a normalized, de-duplicated comma/whitespace separated
+// mailbox list. Values are validated at the system-settings write boundary;
+// this helper only gives runtime consumers one canonical representation.
+func EmailList(key, fallback string) []string {
+	return splitEmailList(String(key, fallback))
+}
+
+func (values Values) EmailList(key, fallback string) []string {
+	return splitEmailList(values.String(key, fallback))
+}
+
+func splitEmailList(value string) []string {
+	items := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, candidate := range strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || r == '，' || r == ';' || r == '；' || unicode.IsSpace(r)
+	}) {
+		candidate = strings.ToLower(strings.TrimSpace(candidate))
+		if candidate == "" {
+			continue
+		}
+		if _, exists := seen[candidate]; exists {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		items = append(items, candidate)
+	}
+	return items
 }
 
 func Bool(key string, fallback bool) bool {

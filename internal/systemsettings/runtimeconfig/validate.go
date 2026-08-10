@@ -3,6 +3,7 @@ package runtimeconfig
 import (
 	"encoding/json"
 	"net"
+	stdmail "net/mail"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -43,7 +44,7 @@ var integerRanges = map[string]integerRange{
 	"resource_import_max_bytes": positive(512 << 20), "max_project_logo_bytes": positive(20 << 20), "project_name_max": positive(120), "project_description_max": positive(1000), "project_target_platform_max": positive(120),
 	"candidate_window_size": positive(100), "global_candidate_window": positive(100), "bucket_probe_count": positive(64), "alias_generation_window": positive(1000),
 	"candidate_retry_count": positive(20), "dot_alias_capacity_per_resource": positive(64), "inventory_refresh_interval_minutes": positive(1440), "inventory_cache_hard_ttl_hours": positive(8760),
-	"fetch_lookback_window_days": positive(3650), "read_window_skew_minutes": positive(1440), "code_read_limit": positive(100), "purchase_read_limit": positive(500),
+	"fetch_lookback_window_days": positive(3650), "read_window_skew_minutes": positive(1440), "code_read_limit": positive(100), "purchase_read_limit": positive(500), ICloudMailmatchScanLimitKey: positive(10000), ICloudAdminReadLimitKey: positive(5000),
 	"pickup_fetch_reserve_ttl_minutes": positive(30), "pickup_fetch_lease_ttl_minutes": positive(10), "pickup_message_cache_ttl_seconds": positive(300),
 	"pickup_message_cache_limit": positive(100), "pickup_fetch_heartbeat_seconds": positive(300), "mailmatch_fetch_timeout_minutes": positive(60), "pickup_request_fetch_timeout_minutes": positive(30),
 	"project_history_timeout_minutes": positive(120), "fetch_dispatcher_interval_seconds": positive(3600), "fetch_dispatcher_timeout_seconds": positive(3600), "resource_fetch_dispatch_limit": positive(10000), "project_history_concurrency": positive(8096), "gmail_validation_concurrency": positive(64), "gmail_history_concurrency": positive(8096), "project_history_dispatch_limit": positive(100),
@@ -180,6 +181,27 @@ func Validate(key, value string) error {
 			}
 		}
 		if count == 0 {
+			return domain.ErrInvalidValue
+		}
+	case ICloudForwardingMailboxesKey:
+		if value == "" || len(value) > 16<<10 {
+			return domain.ErrInvalidValue
+		}
+		seen := make(map[string]struct{})
+		for _, candidate := range strings.FieldsFunc(value, func(r rune) bool {
+			return r == ',' || r == '，' || r == ';' || r == '；' || unicode.IsSpace(r)
+		}) {
+			candidate = strings.ToLower(strings.TrimSpace(candidate))
+			parsed, err := stdmail.ParseAddress(candidate)
+			if err != nil || parsed.Address != candidate || len(candidate) > 320 || strings.ContainsAny(candidate, "\r\n\x00") {
+				return domain.ErrInvalidValue
+			}
+			if _, exists := seen[candidate]; exists {
+				return domain.ErrInvalidValue
+			}
+			seen[candidate] = struct{}{}
+		}
+		if len(seen) == 0 || len(seen) > 32 {
 			return domain.ErrInvalidValue
 		}
 	case "epay_version":

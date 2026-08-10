@@ -48,7 +48,6 @@ type AdminICloudResourceView struct {
 	Version                 uint64               `json:"version"`
 	PrimaryEmail            string               `json:"primaryEmail"`
 	Suffix                  string               `json:"suffix"`
-	GmailEmail              string               `json:"gmailEmail"`
 	SelectedForwardTo       string               `json:"selectedForwardTo"`
 	Owner                   AdminICloudOwnerView `json:"owner"`
 	Status                  string               `json:"status"`
@@ -85,7 +84,6 @@ type adminICloudResourceRow struct {
 	ID                      uint       `gorm:"column:id"`
 	Version                 uint64     `gorm:"column:version"`
 	PrimaryEmail            string     `gorm:"column:primary_email"`
-	GmailEmail              string     `gorm:"column:gmail_email"`
 	SelectedForwardTo       string     `gorm:"column:selected_forward_to"`
 	OwnerID                 uint       `gorm:"column:owner_id"`
 	OwnerEmail              string     `gorm:"column:owner_email"`
@@ -119,7 +117,7 @@ type adminICloudResourceRow struct {
 }
 
 const adminICloudResourceSelect = `
-	ir.id, er.version, ir.primary_email, gr.email AS gmail_email,
+	ir.id, er.version, ir.primary_email,
 	ir.selected_forward_to, er.owner_user_id AS owner_id,
 	u.email AS owner_email, u.nickname AS owner_nickname,
 	COALESCE(ug.name, '') AS owner_group_name, u.role AS owner_role,
@@ -178,7 +176,9 @@ type AdminICloudResourceList struct {
 
 type AdminICloudAliasView struct {
 	ID                uint       `json:"id"`
+	AnonymousID       string     `json:"anonymousId"`
 	Email             string     `json:"email"`
+	RecipientMailID   string     `json:"recipientMailId"`
 	Status            string     `json:"status"`
 	ForwardToEmail    string     `json:"forwardToEmail"`
 	Origin            string     `json:"origin"`
@@ -288,7 +288,7 @@ func adminICloudResourceView(row adminICloudResourceRow) AdminICloudResourceView
 	}
 	return AdminICloudResourceView{
 		ID: row.ID, Version: row.Version, PrimaryEmail: row.PrimaryEmail,
-		Suffix: iCloudEmailSuffix(row.PrimaryEmail), GmailEmail: row.GmailEmail,
+		Suffix:            iCloudEmailSuffix(row.PrimaryEmail),
 		SelectedForwardTo: row.SelectedForwardTo,
 		Owner: AdminICloudOwnerView{
 			ID: row.OwnerID, Email: row.OwnerEmail, Nickname: row.OwnerNickname,
@@ -358,7 +358,6 @@ func (s *Service) adminICloudResourceQuery(ctx context.Context) *gorm.DB {
 func adminICloudResourceQueryDB(ctx context.Context, db *gorm.DB) *gorm.DB {
 	return db.WithContext(ctx).Table("icloud_resources AS ir").
 		Joins("JOIN email_resources AS er ON er.id = ir.id AND er.type = ?", "icloud").
-		Joins("JOIN gmail_resources AS gr ON gr.id = ir.gmail_resource_id").
 		Joins("JOIN users AS u ON u.id = er.owner_user_id").
 		Joins("LEFT JOIN user_groups AS ug ON ug.id = u.user_group_id")
 }
@@ -394,7 +393,7 @@ func (s *Service) ListAdminICloudAliases(ctx context.Context, resourceID uint, o
 		return nil, ErrICloudResourceQueryTemporary
 	}
 	items := make([]AdminICloudAliasView, 0, limit)
-	if err := query.Select(`id, email, status, forward_to_email, origin, provider_domain,
+	if err := query.Select(`id, anonymous_id, email, recipient_mail_id, status, forward_to_email, origin, provider_domain,
 		provider_created_at, last_seen_at, last_allocated_at, created_at, updated_at`).
 		Order("id DESC").Offset(offset).Limit(limit).Scan(&items).Error; err != nil {
 		return nil, ErrICloudResourceQueryTemporary
@@ -410,14 +409,15 @@ func applyAdminICloudResourceFilterDB(query *gorm.DB, filter AdminICloudResource
 	if filter.Search != "" {
 		like := "%" + filter.Search + "%"
 		query = query.Where(`(
-			LOWER(ir.primary_email) LIKE ? OR LOWER(gr.email) LIKE ? OR
-			LOWER(ir.selected_forward_to) LIKE ? OR LOWER(u.email) LIKE ? OR
+			LOWER(ir.primary_email) LIKE ? OR LOWER(ir.selected_forward_to) LIKE ? OR LOWER(u.email) LIKE ? OR
 			LOWER(u.nickname) LIKE ? OR CAST(ir.id AS CHAR) LIKE ? OR
 			CAST(er.owner_user_id AS CHAR) LIKE ? OR EXISTS (
 				SELECT 1 FROM icloud_aliases AS ia
-				WHERE ia.resource_id = ir.id AND LOWER(ia.email) LIKE ?
+				WHERE ia.resource_id = ir.id AND (
+					LOWER(ia.email) LIKE ? OR LOWER(ia.anonymous_id) LIKE ? OR LOWER(ia.recipient_mail_id) LIKE ?
+				)
 			)
-		)`, like, like, like, like, like, like, like, like)
+		)`, like, like, like, like, like, like, like, like, like)
 	}
 	if !ignore.status {
 		if filter.Status == "" {

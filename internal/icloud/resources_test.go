@@ -36,7 +36,7 @@ func TestListAdminICloudResourcesReturnsOnlySafeOperationalFacts(t *testing.T) {
 	}
 	if err := db.AutoMigrate(
 		&iCloudAdminTestGroup{}, &iCloudAdminTestUser{}, &iCloudRootModel{},
-		&iCloudGmailResourceModel{}, &iCloudResourceModel{}, &iCloudAliasModel{},
+		&iCloudResourceModel{}, &iCloudAliasModel{},
 	); err != nil {
 		t.Fatalf("migrate database: %v", err)
 	}
@@ -46,14 +46,12 @@ func TestListAdminICloudResourcesReturnsOnlySafeOperationalFacts(t *testing.T) {
 	models := []any{
 		&iCloudAdminTestGroup{ID: 3, Name: "Suppliers"},
 		&iCloudAdminTestUser{ID: 7, Email: "owner@example.com", Nickname: "Owner", Status: "active", Role: "supplier", UserGroupID: 3},
-		&iCloudGmailResourceModel{ID: 11, Email: "target@gmail.com", Status: "normal"},
-		&iCloudGmailResourceModel{ID: 12, Email: "pending@gmail.com", Status: "normal"},
 		&iCloudRootModel{ID: 1, Type: "icloud", OwnerUserID: 7, Version: 4, CreatedAt: now.Add(-2 * time.Hour), UpdatedAt: now},
 		&iCloudRootModel{ID: 2, Type: "icloud", OwnerUserID: 7, Version: 2, CreatedAt: now.Add(-time.Hour), UpdatedAt: now},
 		&iCloudResourceModel{
 			ID: 1, ResourceType: "icloud", PrimaryEmail: "main@icloud.com", Host: "www.icloud.com",
 			DSID: "secret-dsid", ClientID: "secret-client", ClientBuildNumber: "build", ClientMasteringNumber: "master",
-			Cookie: "secret-cookie", GmailResourceID: 11, SelectedForwardTo: "target@gmail.com",
+			Cookie: "secret-cookie", SelectedForwardTo: "icloud@aishop6.com",
 			ExpireAt: now.Add(30 * 24 * time.Hour), Status: iCloudResourceNormal, SessionStatus: iCloudSessionValid,
 			AliasCount: iCloudMaxAliases - 1, AliasProvisionCandidate: "candidate@icloud.com",
 			CredentialRevision: 3, ValidationGeneration: 4, ValidationFailures: 2, SessionFailures: 1,
@@ -63,7 +61,7 @@ func TestListAdminICloudResourcesReturnsOnlySafeOperationalFacts(t *testing.T) {
 		&iCloudResourceModel{
 			ID: 2, ResourceType: "icloud", PrimaryEmail: "pending@me.com", Host: "www.icloud.com",
 			DSID: "secret-dsid-2", ClientID: "secret-client-2", ClientBuildNumber: "build", ClientMasteringNumber: "master",
-			Cookie: "secret-cookie-2", GmailResourceID: 12, ExpireAt: now.Add(30 * 24 * time.Hour),
+			Cookie: "secret-cookie-2", SelectedForwardTo: "icloud-backup@aishop6.com", ExpireAt: now.Add(30 * 24 * time.Hour),
 			ForSale: true, Status: iCloudResourcePending, SessionStatus: iCloudSessionUnchecked,
 			AliasCount: 12, CredentialRevision: 1, ValidationGeneration: 1,
 			CredentialUpdatedAt: now, CreatedAt: now.Add(-time.Hour), UpdatedAt: now,
@@ -88,7 +86,7 @@ func TestListAdminICloudResourcesReturnsOnlySafeOperationalFacts(t *testing.T) {
 		t.Fatalf("result size = total %d items %d", result.Total, len(result.Items))
 	}
 	item := result.Items[0]
-	if item.PrimaryEmail != "main@icloud.com" || item.GmailEmail != "target@gmail.com" || item.AliasCount != iCloudMaxAliases-1 {
+	if item.PrimaryEmail != "main@icloud.com" || item.SelectedForwardTo != "icloud@aishop6.com" || item.AliasCount != iCloudMaxAliases-1 {
 		t.Fatalf("unexpected safe item: %#v", item)
 	}
 	if item.Owner.ID != 7 || item.Owner.GroupName != "Suppliers" || !item.Owner.Enabled {
@@ -150,7 +148,7 @@ func TestListAdminICloudAliasesReturnsSafePagedFields(t *testing.T) {
 		t.Fatalf("create root: %v", err)
 	}
 	if err := db.Create(&iCloudAliasModel{
-		ResourceID: 1, AnonymousID: "anonymous", Email: "alias@icloud.com", ForwardToEmail: "target@gmail.com",
+		ResourceID: 1, AnonymousID: "anonymous", RecipientMailID: "recipient-mail-id", Email: "alias@icloud.com", ForwardToEmail: "icloud@aishop6.com",
 		Status: iCloudResourceNormal, Origin: "hme", ProviderDomain: "icloud.com", CreatedAt: now, UpdatedAt: now,
 	}).Error; err != nil {
 		t.Fatalf("create alias: %v", err)
@@ -160,14 +158,15 @@ func TestListAdminICloudAliasesReturnsSafePagedFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list aliases: %v", err)
 	}
-	if result.Total != 1 || len(result.Items) != 1 || result.Items[0].Email != "alias@icloud.com" {
+	if result.Total != 1 || len(result.Items) != 1 || result.Items[0].Email != "alias@icloud.com" ||
+		result.Items[0].AnonymousID != "anonymous" || result.Items[0].RecipientMailID != "recipient-mail-id" {
 		t.Fatalf("unexpected alias page: %#v", result)
 	}
 	payload, err := json.Marshal(result)
 	if err != nil {
 		t.Fatalf("marshal alias page: %v", err)
 	}
-	for _, secret := range []string{"anonymous", "cookie", "dsid", "clientBuildNumber"} {
+	for _, secret := range []string{"cookie", "dsid", "clientBuildNumber"} {
 		if bytes.Contains(payload, []byte(secret)) {
 			t.Fatalf("alias response exposed %q: %s", secret, payload)
 		}

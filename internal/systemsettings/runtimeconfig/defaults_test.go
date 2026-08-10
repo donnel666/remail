@@ -36,6 +36,8 @@ func TestDefaultSettingsAreValidAndIndependent(t *testing.T) {
 	require.Equal(t, "0.8", keys["first_order_rebate_ratio"])
 	require.Equal(t, "90", keys["rebate_expiry_days"])
 	require.Equal(t, "", keys["domain_custom_tlds"])
+	require.Equal(t, DefaultICloudForwardingMailbox, keys[ICloudForwardingMailboxesKey])
+	require.Equal(t, "1000", keys[ICloudMailmatchScanLimitKey])
 	require.Equal(t, "3", keys["domain_max_subdomains_per_registrable_domain"])
 	require.Equal(t, "3", keys["proxy_server_health_timeout_seconds"])
 	require.Equal(t, "60", keys["proxy_server_health_interval_seconds"])

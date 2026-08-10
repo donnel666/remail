@@ -59,12 +59,20 @@ describe("admin iCloud page layout", () => {
       '<Tabs.TabPane itemKey="tasks"',
       '<Tabs.TabPane itemKey="mails"',
       'resourceType="icloud"',
+      'dataIndex: "selectedForwardTo"',
+      'dataIndex: "anonymousId"',
+      'dataIndex: "recipientMailId"',
+      't("Current forwarding mailbox")',
+      't("Delivery verified at")',
     ]) {
       expect(icloudSource).toContain(fragment);
     }
 
     expect(icloudSource).not.toContain("onValidate");
     expect(icloudSource).not.toContain("overflow-x-auto");
+    expect(icloudSource).not.toContain("gmailEmail");
+    expect(icloudSource).not.toContain("----Gmail");
+    expect(icloudSource).not.toContain('t("Linked Gmail")');
 
     expect(appSource).toContain(
       'adminICloudEmails: () => import("./pages/AdminICloudEmails")',

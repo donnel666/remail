@@ -22,12 +22,13 @@ var settingKeyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,190}$`
 // SystemSettingsUseCase handles the small amount of normalization required at
 // the administrator API boundary before delegating persistence to the repo.
 type SystemSettingsUseCase struct {
-	repo          Repository
-	logs          governanceapp.OperationLogPort
-	publisher     RuntimeSettingsPublisher
-	announcements AnnouncementPublisher
-	runtimeHook   func(context.Context, []domain.Setting) error
-	mu            sync.Mutex
+	repo             Repository
+	logs             governanceapp.OperationLogPort
+	publisher        RuntimeSettingsPublisher
+	announcements    AnnouncementPublisher
+	runtimeValidator func(context.Context, []domain.Setting) error
+	runtimeHook      func(context.Context, []domain.Setting) error
+	mu               sync.Mutex
 }
 
 type MutationMeta struct {
@@ -55,6 +56,16 @@ func (uc *SystemSettingsUseCase) SetAnnouncementPublisher(publisher Announcement
 func (uc *SystemSettingsUseCase) SetRuntimeUpdateHook(hook func(context.Context, []domain.Setting) error) {
 	if uc != nil {
 		uc.runtimeHook = hook
+	}
+}
+
+// SetRuntimeValidationHook runs before persistence. It is intended for
+// bounded cross-module checks (for example, an iCloud forwarding mailbox must
+// resolve to a local inbound recipient) so a rejected setting is not left in
+// storage by the post-commit side-effect hook.
+func (uc *SystemSettingsUseCase) SetRuntimeValidationHook(hook func(context.Context, []domain.Setting) error) {
+	if uc != nil {
+		uc.runtimeValidator = hook
 	}
 }
 
@@ -89,6 +100,11 @@ func (uc *SystemSettingsUseCase) Upsert(ctx context.Context, key, value string, 
 		return nil, invalidValueField(key, err)
 	}
 	var setting *domain.Setting
+	if uc.runtimeValidator != nil {
+		if err := uc.runtimeValidator(ctx, []domain.Setting{update}); err != nil {
+			return nil, err
+		}
+	}
 	err = uc.mutate(ctx, &governancedomain.OperationLog{
 		OperatorUserID: meta.OperatorUserID,
 		OperationType:  "system_settings.upsert",
@@ -139,6 +155,11 @@ func (uc *SystemSettingsUseCase) BulkUpsert(ctx context.Context, settings []doma
 	if len(normalized) == 0 {
 		return []domain.Setting{}, nil
 	}
+	if uc.runtimeValidator != nil {
+		if err := uc.runtimeValidator(ctx, normalized); err != nil {
+			return nil, err
+		}
+	}
 	var saved []domain.Setting
 	err = uc.mutate(ctx, &governancedomain.OperationLog{
 		OperatorUserID: meta.OperatorUserID,
@@ -187,6 +208,11 @@ func (uc *SystemSettingsUseCase) MutateWithSettings(ctx context.Context, setting
 	}
 	if len(normalized) == 0 {
 		return nil, errors.New("system settings related mutation has no updates")
+	}
+	if uc.runtimeValidator != nil {
+		if err := uc.runtimeValidator(ctx, normalized); err != nil {
+			return nil, err
+		}
 	}
 	var saved []domain.Setting
 	err = uc.repo.WithTx(ctx, func(txCtx context.Context) error {
