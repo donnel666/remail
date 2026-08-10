@@ -33,6 +33,16 @@ ALTER TABLE icloud_aliases
     ALGORITHM=INPLACE,
     LOCK=NONE;
 
--- The removed Gmail binding and provider cursors cannot be reconstructed from
--- an iCloud-only schema. Keep rollback honest instead of adding a NOT NULL
--- foreign key that fails as soon as an iCloud row exists.
+ALTER TABLE icloud_resources
+    ADD COLUMN gmail_resource_id BIGINT UNSIGNED NOT NULL
+        COMMENT 'resolved from the imported local Gmail email'
+        AFTER cookie,
+    ADD COLUMN provider_cursor BIGINT UNSIGNED NOT NULL DEFAULT 0
+        AFTER gmail_resource_id,
+    ADD COLUMN provider_spam_cursor BIGINT UNSIGNED NOT NULL DEFAULT 0
+        AFTER provider_cursor,
+    ADD INDEX idx_icloud_resources_gmail
+        (gmail_resource_id, status, id),
+    ADD CONSTRAINT fk_icloud_resources_gmail
+        FOREIGN KEY (gmail_resource_id)
+        REFERENCES gmail_resources(id) ON DELETE RESTRICT;
