@@ -46,18 +46,45 @@ const cardBulkChunkSize = 5000
 func (r *BillingRepo) SetCardsStatus(ctx context.Context, cardKeys []string, status domain.CardKeyStatus) (int, error) {
 	var affected int64
 	chunkSize := min(runtimeconfig.Int("card_bulk_chunk_size", cardBulkChunkSize, 1), 10000)
-	for start := 0; start < len(cardKeys); start += chunkSize {
-		end := start + chunkSize
-		if end > len(cardKeys) {
-			end = len(cardKeys)
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for start := 0; start < len(cardKeys); start += chunkSize {
+			end := min(start+chunkSize, len(cardKeys))
+			result := tx.Model(&CardKeyModel{}).
+				Where("card_key IN ? AND status <> ?", cardKeys[start:end], string(status)).
+				Update("status", string(status))
+			if result.Error != nil {
+				return result.Error
+			}
+			affected += result.RowsAffected
 		}
-		result := r.db.WithContext(ctx).Model(&CardKeyModel{}).
-			Where("card_key IN ? AND status <> ?", cardKeys[start:end], string(status)).
-			Update("status", string(status))
-		if result.Error != nil {
-			return int(affected), fmt.Errorf("set card status: %w", result.Error)
+		return nil
+	})
+	if err != nil {
+		return 0, fmt.Errorf("set card status: %w", err)
+	}
+	return int(affected), nil
+}
+
+// SetCardsExpireAt updates only cards whose expiration would actually change.
+func (r *BillingRepo) SetCardsExpireAt(ctx context.Context, cardKeys []string, expireAt time.Time) (int, error) {
+	var affected int64
+	chunkSize := min(runtimeconfig.Int("card_bulk_chunk_size", cardBulkChunkSize, 1), 10000)
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for start := 0; start < len(cardKeys); start += chunkSize {
+			end := min(start+chunkSize, len(cardKeys))
+			result := tx.Model(&CardKeyModel{}).
+				Where("card_key IN ?", cardKeys[start:end]).
+				Where("expire_at IS NULL OR expire_at <> ?", expireAt).
+				Update("expire_at", expireAt)
+			if result.Error != nil {
+				return result.Error
+			}
+			affected += result.RowsAffected
 		}
-		affected += result.RowsAffected
+		return nil
+	})
+	if err != nil {
+		return 0, fmt.Errorf("set card expiration: %w", err)
 	}
 	return int(affected), nil
 }

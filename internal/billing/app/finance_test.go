@@ -14,6 +14,7 @@ type financeStubRepo struct {
 	WalletRepository
 	allCards    []domain.CardKey
 	setStatus   func(keys []string, status domain.CardKeyStatus) (int, error)
+	setExpireAt func(keys []string, expireAt time.Time) (int, error)
 	getTxn      *AdminTransaction
 	getTxnErr   error
 	reverse     func(ReverseTransactionCommand) (*ReverseTransactionResult, error)
@@ -27,6 +28,10 @@ func (s financeStubRepo) ListAllCards(context.Context, CardListFilter) ([]domain
 
 func (s financeStubRepo) SetCardsStatus(_ context.Context, keys []string, status domain.CardKeyStatus) (int, error) {
 	return s.setStatus(keys, status)
+}
+
+func (s financeStubRepo) SetCardsExpireAt(_ context.Context, keys []string, expireAt time.Time) (int, error) {
+	return s.setExpireAt(keys, expireAt)
 }
 
 func (s financeStubRepo) GetAdminTransaction(context.Context, uint) (*AdminTransaction, error) {
@@ -208,6 +213,64 @@ func TestBulkSetCardStatusFilterByOwnerRole(t *testing.T) {
 	// only card A (owner role supplier) matches
 	if res.Requested != 1 || res.Affected != 1 {
 		t.Fatalf("owner-role filter wrong: %+v", res)
+	}
+}
+
+func TestBulkSetCardExpireAtIDs(t *testing.T) {
+	var gotKeys []string
+	var gotExpireAt time.Time
+	repo := financeStubRepo{setExpireAt: func(keys []string, expireAt time.Time) (int, error) {
+		gotKeys = keys
+		gotExpireAt = expireAt
+		return 1, nil
+	}}
+	uc := NewWalletUseCase(repo)
+	expireAt := time.Date(2026, 8, 10, 18, 30, 0, 0, time.FixedZone("CST", 8*60*60))
+
+	res, err := uc.BulkSetCardExpireAt(context.Background(), CardBulkSelection{
+		Mode:     "ids",
+		CardKeys: []string{" A ", "B", "A"},
+	}, expireAt)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(gotKeys) != 2 || gotKeys[0] != "A" || gotKeys[1] != "B" {
+		t.Fatalf("repo got keys=%v", gotKeys)
+	}
+	if gotExpireAt.Location() != time.UTC || !gotExpireAt.Equal(expireAt) {
+		t.Fatalf("repo got expireAt=%v", gotExpireAt)
+	}
+	if res.Requested != 2 || res.Affected != 1 || res.Skipped != 1 {
+		t.Fatalf("bulk result wrong: %+v", res)
+	}
+}
+
+func TestBulkSetCardExpireAtFilter(t *testing.T) {
+	var gotKeys []string
+	repo := financeStubRepo{
+		allCards: []domain.CardKey{
+			{Key: "A", Status: domain.CardKeyStatusEnabled},
+			{Key: "B", Status: domain.CardKeyStatusDisabled},
+		},
+		setExpireAt: func(keys []string, _ time.Time) (int, error) {
+			gotKeys = keys
+			return len(keys), nil
+		},
+	}
+	uc := NewWalletUseCase(repo)
+
+	res, err := uc.BulkSetCardExpireAt(context.Background(), CardBulkSelection{
+		Mode:   "filter",
+		Filter: &CardBulkFilter{Status: domain.CardKeyStatusDisabled},
+	}, time.Date(2026, 8, 11, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(gotKeys) != 1 || gotKeys[0] != "B" {
+		t.Fatalf("repo got keys=%v", gotKeys)
+	}
+	if res.Requested != 1 || res.Affected != 1 || res.Skipped != 0 {
+		t.Fatalf("bulk result wrong: %+v", res)
 	}
 }
 

@@ -2,14 +2,51 @@ package infra
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	billingapp "github.com/donnel666/remail/internal/billing/app"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+func TestSetCardsExpireAtRollsBackFailedChunk(t *testing.T) {
+	db := newBillingMySQLTestDB(t)
+	runtimeconfig.Set("card_bulk_chunk_size", "1")
+	t.Cleanup(func() { runtimeconfig.Delete("card_bulk_chunk_size") })
+	require.NoError(t, db.Create(&[]CardKeyModel{
+		{Key: "EXP-TX-A", Amount: "1.000000", Status: "enabled", MaxRedemptions: 1},
+		{Key: "EXP-TX-B", Amount: "1.000000", Status: "enabled", MaxRedemptions: 1},
+	}).Error)
+
+	updates := 0
+	callbackName := "test:fail_second_card_expiration_chunk"
+	require.NoError(t, db.Callback().Update().Before("gorm:update").Register(callbackName, func(tx *gorm.DB) {
+		updates++
+		if updates == 2 {
+			tx.AddError(errors.New("forced second chunk failure"))
+		}
+	}))
+	t.Cleanup(func() { require.NoError(t, db.Callback().Update().Remove(callbackName)) })
+
+	affected, err := NewBillingRepo(db).SetCardsExpireAt(
+		context.Background(),
+		[]string{"EXP-TX-A", "EXP-TX-B"},
+		time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC),
+	)
+	require.ErrorContains(t, err, "forced second chunk failure")
+	require.Zero(t, affected)
+
+	var cards []CardKeyModel
+	require.NoError(t, db.Where("card_key IN ?", []string{"EXP-TX-A", "EXP-TX-B"}).Find(&cards).Error)
+	require.Len(t, cards, 2)
+	for _, card := range cards {
+		require.Nil(t, card.ExpireAt)
+	}
+}
 
 // TestFinanceSummaryBucketsMatchDBTimezoneMySQL guards the SQL↔Go bucketing
 // seam. The ledger SQL groups by DATE_FORMAT(created_at) in Asia/Shanghai while

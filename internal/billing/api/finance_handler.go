@@ -43,6 +43,36 @@ func (h *BillingHandler) PostAdminCardsDisable(c *gin.Context) {
 	h.postAdminCardsBulk(c, domain.CardKeyStatusDisabled)
 }
 
+// PATCH /v1/admin/cards/expiration
+func (h *BillingHandler) PatchAdminCardsExpiration(c *gin.Context) {
+	operatorUserID, ok := requireCurrentUserID(c)
+	if !ok {
+		return
+	}
+	var req CardExpirationBulkRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeInvalidBody(c, err)
+		return
+	}
+	if req.ExpireAt.IsZero() {
+		writeInvalidBody(c, errors.New("expireAt is required"))
+		return
+	}
+	selection, err := cardBulkSelection(req.Selection)
+	if err != nil {
+		writeBillingError(c, err)
+		return
+	}
+	result, err := h.module.WalletUseCase.BulkSetCardExpireAt(c.Request.Context(), selection, req.ExpireAt)
+	if err != nil {
+		_ = h.writeOperationLog(c, operatorUserID, "billing.card.bulk_expiration", "bulk", "failure", "Bulk card expiration update failed.")
+		writeBillingError(c, err)
+		return
+	}
+	_ = h.writeOperationLog(c, operatorUserID, "billing.card.bulk_expiration", "bulk", "success", "Bulk card expiration updated.")
+	c.JSON(http.StatusOK, AdminBulkResponse{Requested: result.Requested, Affected: result.Affected, Skipped: result.Skipped})
+}
+
 func (h *BillingHandler) postAdminCardsBulk(c *gin.Context, status domain.CardKeyStatus) {
 	operatorUserID, ok := requireCurrentUserID(c)
 	if !ok {
@@ -53,26 +83,10 @@ func (h *BillingHandler) postAdminCardsBulk(c *gin.Context, status domain.CardKe
 		writeInvalidBody(c, err)
 		return
 	}
-	selection := billingapp.CardBulkSelection{
-		Mode:     req.Selection.Mode,
-		CardKeys: req.Selection.CardKeys,
-	}
-	if req.Selection.Filter != nil {
-		f := req.Selection.Filter
-		filter := billingapp.CardBulkFilter{
-			Search:       f.Search,
-			OwnerRole:    strings.TrimSpace(f.OwnerRole),
-			OwnerGroupID: f.OwnerGroupID,
-		}
-		if f.Status != "" {
-			normalized, valid := domain.NormalizeCardStatus(f.Status)
-			if !valid {
-				writeBillingError(c, domain.ErrInvalidCardStatus)
-				return
-			}
-			filter.Status = normalized
-		}
-		selection.Filter = &filter
+	selection, err := cardBulkSelection(req.Selection)
+	if err != nil {
+		writeBillingError(c, err)
+		return
 	}
 	result, err := h.module.WalletUseCase.BulkSetCardStatus(c.Request.Context(), selection, status)
 	if err != nil {
@@ -82,6 +96,27 @@ func (h *BillingHandler) postAdminCardsBulk(c *gin.Context, status domain.CardKe
 	}
 	_ = h.writeOperationLog(c, operatorUserID, "billing.card.bulk_status", "bulk", "success", "Bulk card status updated.")
 	c.JSON(http.StatusOK, AdminBulkResponse{Requested: result.Requested, Affected: result.Affected, Skipped: result.Skipped})
+}
+
+func cardBulkSelection(req CardBulkSelectionRequest) (billingapp.CardBulkSelection, error) {
+	selection := billingapp.CardBulkSelection{Mode: req.Mode, CardKeys: req.CardKeys}
+	if req.Filter != nil {
+		f := req.Filter
+		filter := billingapp.CardBulkFilter{
+			Search:       f.Search,
+			OwnerRole:    strings.TrimSpace(f.OwnerRole),
+			OwnerGroupID: f.OwnerGroupID,
+		}
+		if f.Status != "" {
+			normalized, valid := domain.NormalizeCardStatus(f.Status)
+			if !valid {
+				return billingapp.CardBulkSelection{}, domain.ErrInvalidCardStatus
+			}
+			filter.Status = normalized
+		}
+		selection.Filter = &filter
+	}
+	return selection, nil
 }
 
 // GET /v1/admin/transactions

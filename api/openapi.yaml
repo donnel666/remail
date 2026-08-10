@@ -7334,6 +7334,48 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/admin/cards/expiration:
+    patch:
+      operationId: patchAdminCardsExpiration
+      summary: Set card key expiration in bulk
+      tags:
+        - Billing
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminCardExpirationBulkRequest"
+      responses:
+        "200":
+          description: Card key expiration updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminBulkResponse"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /v1/admin/cards/{cardKey}/redemptions:
     get:
       operationId: getAdminCardRedemptions
@@ -15451,6 +15493,20 @@ components:
       properties:
         selection:
           $ref: "#/components/schemas/CardBulkSelection"
+      additionalProperties: false
+
+    AdminCardExpirationBulkRequest:
+      type: object
+      required:
+        - selection
+        - expireAt
+      properties:
+        selection:
+          $ref: "#/components/schemas/CardBulkSelection"
+        expireAt:
+          type: string
+          format: date-time
+          description: RFC 3339 expiration timestamp assigned to every selected card key.
       additionalProperties: false
 
     CardRedemptionResponse:

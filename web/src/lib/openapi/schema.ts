@@ -2422,6 +2422,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/cards/expiration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Set card key expiration in bulk */
+        patch: operations["patchAdminCardsExpiration"];
+        trace?: never;
+    };
     "/v1/admin/cards/{cardKey}/redemptions": {
         parameters: {
             query?: never;
@@ -5588,6 +5605,14 @@ export interface components {
         };
         AdminCardBulkRequest: {
             selection: components["schemas"]["CardBulkSelection"];
+        };
+        AdminCardExpirationBulkRequest: {
+            selection: components["schemas"]["CardBulkSelection"];
+            /**
+             * Format: date-time
+             * @description RFC 3339 expiration timestamp assigned to every selected card key.
+             */
+            expireAt: string;
         };
         CardRedemptionResponse: {
             id: number;
@@ -17150,6 +17175,60 @@ export interface operations {
         };
         responses: {
             /** @description Card keys disabled */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminBulkResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    patchAdminCardsExpiration: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminCardExpirationBulkRequest"];
+            };
+        };
+        responses: {
+            /** @description Card key expiration updated */
             200: {
                 headers: {
                     [name: string]: unknown;

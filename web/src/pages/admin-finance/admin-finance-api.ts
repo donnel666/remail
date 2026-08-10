@@ -11,6 +11,7 @@
 //   POST   /v1/admin/cards                          -> createFinanceCardKeys
 //   PATCH  /v1/admin/cards/{cardKey}               -> updateFinanceCardKey / setFinanceCardKeyStatus
 //   POST   /v1/admin/cards/enable|disable          -> setFinanceCardKeysStatus* (ids / filter)
+//   PATCH  /v1/admin/cards/expiration              -> setFinanceCardKeysExpireAt* (ids / filter)
 //   GET    /v1/admin/cards/{cardKey}/redemptions   -> listFinanceCardKeyRedemptions
 //   GET    /v1/admin/transactions                   -> listFinanceTransactions
 //   POST   /v1/admin/transactions/{id}/reverse     -> reverseFinanceTransaction
@@ -696,6 +697,34 @@ export function setFinanceCardKeysStatusByFilter(
   status: FinanceCardKeyStatus
 ): Promise<FinanceBulkResult> {
   return cardBulk(status, cardFilterSelection(filter));
+}
+
+async function cardExpireBulk(
+  expireAt: string,
+  selection: CardBulkSelection
+): Promise<FinanceBulkResult> {
+  return toBulkResult(
+    await unwrap<AdminBulkResponse>(
+      await apiClient.PATCH("/v1/admin/cards/expiration", {
+        body: { expireAt, selection },
+        params: { header: csrfHeader() },
+      })
+    )
+  );
+}
+
+export function setFinanceCardKeysExpireAt(
+  keys: string[],
+  expireAt: string
+): Promise<FinanceBulkResult> {
+  return cardExpireBulk(expireAt, cardIdsSelection(keys));
+}
+
+export function setFinanceCardKeysExpireAtByFilter(
+  filter: FinanceCardKeyListFilter,
+  expireAt: string
+): Promise<FinanceBulkResult> {
+  return cardExpireBulk(expireAt, cardFilterSelection(filter));
 }
 
 export async function listFinanceCardKeyRedemptions(

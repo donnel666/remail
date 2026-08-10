@@ -54,6 +54,7 @@ func RegisterBillingRoutes(rg *gin.RouterGroup, mod *BillingModule, fetcher midd
 		admin.POST("/cards", middleware.PermissionRequired(checker, "billing:card", "write"), h.PostAdminCards)
 		admin.POST("/cards/enable", middleware.PermissionRequired(checker, "billing:card", "write"), h.PostAdminCardsEnable)
 		admin.POST("/cards/disable", middleware.PermissionRequired(checker, "billing:card", "write"), h.PostAdminCardsDisable)
+		admin.PATCH("/cards/expiration", middleware.PermissionRequired(checker, "billing:card", "write"), h.PatchAdminCardsExpiration)
 		admin.PATCH("/cards/:cardKey", middleware.PermissionRequired(checker, "billing:card", "write"), h.PatchAdminCard)
 		admin.GET("/cards/:cardKey/redemptions", middleware.PermissionRequired(checker, "billing:card", "read"), h.GetAdminCardRedemptions)
 	}

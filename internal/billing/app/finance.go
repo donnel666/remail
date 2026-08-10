@@ -254,6 +254,42 @@ func (uc *WalletUseCase) BulkSetCardStatus(ctx context.Context, selection CardBu
 	if !domain.IsValidCardStatus(status) {
 		return nil, domain.ErrInvalidCardStatus
 	}
+	keys, err := uc.resolveCardBulkKeys(ctx, selection)
+	if err != nil {
+		return nil, err
+	}
+	requested := len(keys)
+	if requested == 0 {
+		return &AdminBulkResult{}, nil
+	}
+	// SetCardsStatus flips only rows not already in the target status, so
+	// RowsAffected == number changed; the rest are skipped (already in state
+	// or nonexistent keys).
+	affected, err := uc.repo.SetCardsStatus(ctx, keys, status)
+	if err != nil {
+		return nil, err
+	}
+	return &AdminBulkResult{Requested: requested, Affected: affected, Skipped: requested - affected}, nil
+}
+
+func (uc *WalletUseCase) BulkSetCardExpireAt(ctx context.Context, selection CardBulkSelection, expireAt time.Time) (*AdminBulkResult, error) {
+	keys, err := uc.resolveCardBulkKeys(ctx, selection)
+	if err != nil {
+		return nil, err
+	}
+	requested := len(keys)
+	if requested == 0 {
+		return &AdminBulkResult{}, nil
+	}
+	expireAt = expireAt.UTC()
+	affected, err := uc.repo.SetCardsExpireAt(ctx, keys, expireAt)
+	if err != nil {
+		return nil, err
+	}
+	return &AdminBulkResult{Requested: requested, Affected: affected, Skipped: requested - affected}, nil
+}
+
+func (uc *WalletUseCase) resolveCardBulkKeys(ctx context.Context, selection CardBulkSelection) ([]string, error) {
 	var keys []string
 	switch selection.Mode {
 	case "ids":
@@ -277,18 +313,7 @@ func (uc *WalletUseCase) BulkSetCardStatus(ctx context.Context, selection CardBu
 	default:
 		return nil, domain.ErrInvalidFilter
 	}
-	requested := len(keys)
-	if requested == 0 {
-		return &AdminBulkResult{}, nil
-	}
-	// SetCardsStatus flips only rows not already in the target status, so
-	// RowsAffected == number changed; the rest are skipped (already in state
-	// or nonexistent keys).
-	affected, err := uc.repo.SetCardsStatus(ctx, keys, status)
-	if err != nil {
-		return nil, err
-	}
-	return &AdminBulkResult{Requested: requested, Affected: affected, Skipped: requested - affected}, nil
+	return keys, nil
 }
 
 func (uc *WalletUseCase) ListCardRedemptions(ctx context.Context, cardKey string) ([]AdminCardRedemption, error) {

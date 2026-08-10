@@ -1,6 +1,14 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   Button,
+  DatePicker,
   Dropdown,
   Input,
   Modal,
@@ -32,6 +40,8 @@ import {
   FINANCE_USER_ROLES,
   listFinanceCardKeys,
   setFinanceCardKeyStatus,
+  setFinanceCardKeysExpireAt,
+  setFinanceCardKeysExpireAtByFilter,
   setFinanceCardKeysStatus,
   setFinanceCardKeysStatusByFilter,
   type FinanceCardKey,
@@ -65,6 +75,7 @@ const CARD_KEY_ROLE_LABELS: Record<FinanceUserRole, string> = {
 
 export function CardKeysPanel({ tabsArea }: { tabsArea: ReactNode }) {
   const { t } = useTranslation();
+  const bulkExpireAtLabelId = useId();
   const { currentUser } = useAuth();
   const canWrite = hasPermission(currentUser, "billing:card", "write");
   const isMobile = useIsMobile();
@@ -88,7 +99,13 @@ export function CardKeysPanel({ tabsArea }: { tabsArea: ReactNode }) {
   const [detailTarget, setDetailTarget] = useState<FinanceCardKey | null>(null);
   const [rowBusyKey, setRowBusyKey] = useState<string | null>(null);
   const [bulkBusy, setBulkBusy] = useState<
-    "enable-all" | "disable-all" | "enable-sel" | "disable-sel" | null
+    | "enable-all"
+    | "disable-all"
+    | "enable-sel"
+    | "disable-sel"
+    | "expire-all"
+    | "expire-sel"
+    | null
   >(null);
   const [facets, setFacets] = useState<FinanceCardKeyFacets>({
     role: { all: 0, user: 0, supplier: 0, admin: 0, super_admin: 0 },
@@ -226,8 +243,87 @@ export function CardKeysPanel({ tabsArea }: { tabsArea: ReactNode }) {
     }
   };
 
+  const confirmExpire = (mode: "all" | "selected") => {
+    const count = mode === "all" ? total : selectedRowKeys.length;
+    if (!canWrite || count === 0) {
+      Toast.info(t("No card keys to update."));
+      return;
+    }
+    let expireAt: Date | null = null;
+    Modal.confirm({
+      cancelText: t("Cancel"),
+      content: (
+        <div className="space-y-3">
+          <div className="text-sm text-[var(--semi-color-text-2)]">
+            {t("Set card key expiration hint", { count })}
+          </div>
+          <label className="block">
+            <span
+              className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]"
+              id={bulkExpireAtLabelId}
+            >
+              {t("Expire at")} *
+            </span>
+            <DatePicker
+              aria-labelledby={bulkExpireAtLabelId}
+              aria-required
+              onChange={(value) => {
+                expireAt = value instanceof Date ? value : null;
+              }}
+              showClear={false}
+              style={{ width: "100%" }}
+              type="dateTime"
+            />
+          </label>
+        </div>
+      ),
+      okText: t("Save"),
+      onOk: async () => {
+        if (!expireAt || !Number.isFinite(expireAt.getTime())) {
+          Toast.warning(t("Expiration time is required."));
+          throw new Error("expiration time is required");
+        }
+        setBulkBusy(mode === "all" ? "expire-all" : "expire-sel");
+        try {
+          const value = expireAt.toISOString();
+          const result =
+            mode === "all"
+              ? await setFinanceCardKeysExpireAtByFilter(listFilter, value)
+              : await setFinanceCardKeysExpireAt(
+                  selectedRowKeys.map(String),
+                  value
+                );
+          Toast.success(
+            t("Card key expiration updated.", {
+              count: result.affected,
+              skipped: result.skipped,
+            })
+          );
+          setSelectedRowKeys([]);
+          void refresh();
+        } catch (error) {
+          Toast.error(getIamErrorMessage(t, error, "Operation failed."));
+          throw error;
+        } finally {
+          setBulkBusy(null);
+        }
+      },
+      title: t("Set card key expiration"),
+    });
+  };
+
   useSelectionNotification({
     extraActions: [
+      ...(canWrite
+        ? [
+            {
+              key: "expire",
+              labelKey: "Set expiration",
+              loading: bulkBusy === "expire-sel",
+              onClick: () => confirmExpire("selected"),
+            },
+          ]
+        : []),
       {
         key: "export",
         labelKey: "Export selected card keys",
@@ -406,6 +502,23 @@ export function CardKeysPanel({ tabsArea }: { tabsArea: ReactNode }) {
             type="tertiary"
           >
             {t("Disable")}
+          </Button>
+        </Tooltip>
+        <Tooltip
+          content={t("Set expiration for all")}
+          mouseEnterDelay={0}
+          mouseLeaveDelay={0.05}
+          position="top"
+        >
+          <Button
+            className="flex-1 md:flex-initial"
+            disabled={!canWrite}
+            loading={bulkBusy === "expire-all"}
+            onClick={() => confirmExpire("all")}
+            size="small"
+            type="tertiary"
+          >
+            {t("Set expiration")}
           </Button>
         </Tooltip>
         <CompactModeToggle

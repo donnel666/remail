@@ -4759,6 +4759,13 @@ type AdminCardBulkRequest struct {
 	Selection CardBulkSelection `json:"selection"`
 }
 
+// AdminCardExpirationBulkRequest defines model for AdminCardExpirationBulkRequest.
+type AdminCardExpirationBulkRequest struct {
+	// ExpireAt RFC 3339 expiration timestamp assigned to every selected card key.
+	ExpireAt  time.Time         `json:"expireAt"`
+	Selection CardBulkSelection `json:"selection"`
+}
+
 // AdminCardRedemptionsResponse defines model for AdminCardRedemptionsResponse.
 type AdminCardRedemptionsResponse struct {
 	Redemptions []CardRedemptionResponse `json:"redemptions"`
@@ -9297,6 +9304,12 @@ type PostAdminCardsEnableParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// PatchAdminCardsExpirationParams defines parameters for PatchAdminCardsExpiration.
+type PatchAdminCardsExpirationParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // PatchAdminCardParams defines parameters for PatchAdminCard.
 type PatchAdminCardParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
@@ -11373,6 +11386,9 @@ type PostAdminCardsDisableJSONRequestBody = AdminCardBulkRequest
 // PostAdminCardsEnableJSONRequestBody defines body for PostAdminCardsEnable for application/json ContentType.
 type PostAdminCardsEnableJSONRequestBody = AdminCardBulkRequest
 
+// PatchAdminCardsExpirationJSONRequestBody defines body for PatchAdminCardsExpiration for application/json ContentType.
+type PatchAdminCardsExpirationJSONRequestBody = AdminCardExpirationBulkRequest
+
 // PatchAdminCardJSONRequestBody defines body for PatchAdminCard for application/json ContentType.
 type PatchAdminCardJSONRequestBody = UpdateCardRequest
 
@@ -12495,6 +12511,9 @@ type ServerInterface interface {
 	// Enable card keys in bulk
 	// (POST /v1/admin/cards/enable)
 	PostAdminCardsEnable(c *gin.Context, params PostAdminCardsEnableParams)
+	// Set card key expiration in bulk
+	// (PATCH /v1/admin/cards/expiration)
+	PatchAdminCardsExpiration(c *gin.Context, params PatchAdminCardsExpirationParams)
 	// Enable or disable a card key
 	// (PATCH /v1/admin/cards/{cardKey})
 	PatchAdminCard(c *gin.Context, cardKey string, params PatchAdminCardParams)
@@ -13891,6 +13910,51 @@ func (siw *ServerInterfaceWrapper) PostAdminCardsEnable(c *gin.Context) {
 	}
 
 	siw.Handler.PostAdminCardsEnable(c, params)
+}
+
+// PatchAdminCardsExpiration operation middleware
+func (siw *ServerInterfaceWrapper) PatchAdminCardsExpiration(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PatchAdminCardsExpirationParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PatchAdminCardsExpiration(c, params)
 }
 
 // PatchAdminCard operation middleware
@@ -28919,6 +28983,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/cards", wrapper.PostAdminCards)
 	router.POST(options.BaseURL+"/v1/admin/cards/disable", wrapper.PostAdminCardsDisable)
 	router.POST(options.BaseURL+"/v1/admin/cards/enable", wrapper.PostAdminCardsEnable)
+	router.PATCH(options.BaseURL+"/v1/admin/cards/expiration", wrapper.PatchAdminCardsExpiration)
 	router.PATCH(options.BaseURL+"/v1/admin/cards/:cardKey", wrapper.PatchAdminCard)
 	router.GET(options.BaseURL+"/v1/admin/cards/:cardKey/redemptions", wrapper.GetAdminCardRedemptions)
 	router.GET(options.BaseURL+"/v1/admin/dashboard", wrapper.GetAdminDashboard)

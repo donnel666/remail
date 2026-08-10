@@ -293,6 +293,11 @@ type CardBulkRequest struct {
 	Selection CardBulkSelectionRequest `json:"selection" binding:"required"`
 }
 
+type CardExpirationBulkRequest struct {
+	Selection CardBulkSelectionRequest `json:"selection" binding:"required"`
+	ExpireAt  time.Time                `json:"expireAt" binding:"required"`
+}
+
 type AdminBulkResponse struct {
 	Requested int `json:"requested"`
 	Affected  int `json:"affected"`
