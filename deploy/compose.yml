@@ -51,6 +51,9 @@ services:
 
   server:
     image: ${APP_IMAGE}
+    dns:
+      - 1.1.1.1
+      - 1.0.0.1
     environment:
       TZ: Asia/Shanghai
       APP_ENV: "production"
