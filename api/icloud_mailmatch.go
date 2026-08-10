@@ -47,9 +47,9 @@ func (a iCloudMailIngestAdapter) IngestICloudMailWithFence(
 	receivedAt time.Time,
 	providerMessageID string,
 	fence func(context.Context) error,
-) (icloudapi.ICloudMailIngestResult, error) {
+) (icloudapi.MailIngestResult, error) {
 	if a.mailmatch == nil {
-		return icloudapi.ICloudMailIngestResult{}, nil
+		return icloudapi.MailIngestResult{}, nil
 	}
 	stored, matched, err := a.mailmatch.IngestInboundMailWithFence(ctx, mailmatchapp.InboundMailRequest{
 		EmailResourceID:   resourceID,
@@ -62,8 +62,8 @@ func (a iCloudMailIngestAdapter) IngestICloudMailWithFence(
 		Protocol:          "smtp",
 		Folder:            "inbound",
 	}, fence)
-	return icloudapi.ICloudMailIngestResult{Stored: stored, Matched: matched}, err
+	return icloudapi.MailIngestResult{Stored: stored, Matched: matched}, err
 }
 
-var _ icloudapi.ICloudMailIngestPort = iCloudMailIngestAdapter{}
-var _ icloudapi.ICloudMailIngestWithFencePort = iCloudMailIngestAdapter{}
+var _ icloudapi.MailIngestPort = iCloudMailIngestAdapter{}
+var _ icloudapi.MailIngestWithFencePort = iCloudMailIngestAdapter{}

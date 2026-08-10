@@ -41,7 +41,7 @@ INSERT INTO icloud_allocations(id, resource_id, order_no, status, created_at) VA
 	require.NoError(t, err)
 	require.Empty(t, scope.OrderNo)
 	require.Equal(t, domain.ResourceTypeICloud, scope.ResourceType)
-	scope, err = repo.LoadResourceFetchScope(context.Background(), 10, 999, domain.ResourceTypeICloud)
+	_, err = repo.LoadResourceFetchScope(context.Background(), 10, 999, domain.ResourceTypeICloud)
 	require.NoError(t, err, "domain mailbox fetch must not depend on Apple credential revisions")
 
 	require.NoError(t, db.Table("icloud_allocations").Where("id = ?", 2).Update("status", "released").Error)

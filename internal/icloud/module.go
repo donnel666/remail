@@ -52,28 +52,22 @@ type OutboundDelivery interface {
 	Send(context.Context, mailtransportdomain.OutboundMessage) error
 }
 
-// ICloudMailIngestPort publishes one SMTP-forwarded HME message into Mailmatch.
-type ICloudMailIngestPort interface {
+// MailIngestPort publishes one SMTP-forwarded HME message into Mailmatch.
+type MailIngestPort interface {
 	IngestICloudMail(context.Context, uint, string, string, []byte, time.Time, string) error
 }
 
-// ICloudMailIngestWithFencePort is implemented by the Mailmatch adapter used
+// MailIngestWithFencePort is implemented by the Mailmatch adapter used
 // for administrator fetches. The legacy method above remains available for
 // order-scoped pickup callers, which do not own a resource-fetch generation.
-type ICloudMailIngestWithFencePort interface {
+type MailIngestWithFencePort interface {
 	IngestICloudMailWithFence(
 		context.Context, uint, string, string, []byte, time.Time, string,
 		func(context.Context) error,
-	) (ICloudMailIngestResult, error)
+	) (MailIngestResult, error)
 }
 
-type ICloudMailIngestResult struct {
-	Stored  int
-	Matched int
-}
-
-type ICloudResourceMailFetchResult struct {
-	Fetched int
+type MailIngestResult struct {
 	Stored  int
 	Matched int
 }
@@ -103,7 +97,7 @@ type Service struct {
 	systemLogs                *governanceinfra.SystemLogRepo
 	hme                       *HMEClient
 	delivery                  OutboundDelivery
-	mailIngest                ICloudMailIngestPort
+	mailIngest                MailIngestPort
 	now                       func() time.Time
 	validateImportOwner       func(context.Context, uint) (bool, error)
 	backgroundExecution       BackgroundExecutionGate
@@ -140,7 +134,7 @@ func (s *Service) SetDeliveryPort(port OutboundDelivery) {
 	}
 }
 
-func (s *Service) SetMailIngest(port ICloudMailIngestPort) {
+func (s *Service) SetMailIngest(port MailIngestPort) {
 	if s != nil {
 		s.mailIngest = port
 	}

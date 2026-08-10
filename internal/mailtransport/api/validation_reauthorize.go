@@ -146,19 +146,15 @@ func (a *ResourceValidationAdapter) validateMicrosoftHardReauthorize(
 			downstreamProxyFailure = false
 		}
 		proxyFailure = proxyFailure || downstreamProxyFailure
-		if recoveryMailboxBusy {
-			proxyFailure = false
-		}
 		rateLimited = rateLimited || isMicrosoftRateLimitedCategory(result.Category)
 		if rateLimited {
-			proxyFailure = false
 			_ = a.reportProxyRateLimited(ctx, proxyID)
-		} else if recoveryMailboxBusy {
-			// A local mailbox lease conflict says nothing about proxy health.
-		} else if proxyFailure {
-			_ = a.reportProxyFailure(ctx, proxyID, result.SafeMessage)
-		} else {
-			_ = a.reportProxySuccess(ctx, proxyID)
+		} else if !recoveryMailboxBusy {
+			if proxyFailure {
+				_ = a.reportProxyFailure(ctx, proxyID, result.SafeMessage)
+			} else {
+				_ = a.reportProxySuccess(ctx, proxyID)
+			}
 		}
 		// Sent-but-unconsumed OTP leases must survive failed validation until
 		// their TTL expires. Successful protocol paths release a consumed OTP

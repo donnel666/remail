@@ -288,18 +288,18 @@ func maxICloudTime(first, second time.Time) time.Time {
 	return first
 }
 
-func (s *Service) ingestICloudMail(ctx context.Context, resourceID uint, recipient, sender string, raw []byte, receivedAt time.Time, providerMessageID string, fence func(context.Context) error) (ICloudMailIngestResult, error) {
+func (s *Service) ingestICloudMail(ctx context.Context, resourceID uint, recipient, sender string, raw []byte, receivedAt time.Time, providerMessageID string, fence func(context.Context) error) (MailIngestResult, error) {
 	if fence != nil {
-		fenced, ok := s.mailIngest.(ICloudMailIngestWithFencePort)
+		fenced, ok := s.mailIngest.(MailIngestWithFencePort)
 		if !ok {
-			return ICloudMailIngestResult{}, ErrICloudMailUnavailable
+			return MailIngestResult{}, ErrICloudMailUnavailable
 		}
 		return fenced.IngestICloudMailWithFence(ctx, resourceID, recipient, sender, raw, receivedAt, providerMessageID, fence)
 	}
 	if err := s.mailIngest.IngestICloudMail(ctx, resourceID, recipient, sender, raw, receivedAt, providerMessageID); err != nil {
-		return ICloudMailIngestResult{}, err
+		return MailIngestResult{}, err
 	}
-	return ICloudMailIngestResult{Stored: 1}, nil
+	return MailIngestResult{Stored: 1}, nil
 }
 
 func (s *Service) listICloudForwardedMailRows(

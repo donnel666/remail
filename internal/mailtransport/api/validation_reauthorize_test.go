@@ -245,7 +245,7 @@ func TestHardReauthorizeRateLimitBeforeRemovalDoesNotRotateProxy(t *testing.T) {
 	adapter := &ResourceValidationAdapter{
 		proxies: proxies,
 		fetcher: &microsoftMailFetcherStub{result: mailinfra.MicrosoftMailFetchResult{Valid: true, Protocol: "graph"}},
-		hardReauthorize: func(_ context.Context, _, _, _, _ string, aliases []string) (msacl.ReauthorizeResult, error) {
+		hardReauthorize: func(_ context.Context, _, _, _, _ string, _ []string) (msacl.ReauthorizeResult, error) {
 			return msacl.ReauthorizeResult{
 				Result:           msacl.Result{Category: "rate_limited", SafeMessage: "Microsoft authorization is temporarily rate limited."},
 				CleanupAttempted: true,
@@ -318,7 +318,7 @@ func TestHardReauthorizeProxyAcquireFailureRemainsInfrastructureError(t *testing
 func TestHardReauthorizeDownstreamRateLimitDoesNotReportProxySuccess(t *testing.T) {
 	runtimeconfig.Set("max_proxy_attempts", "1")
 	t.Cleanup(func() { runtimeconfig.Delete("max_proxy_attempts") })
-	proxies := &microsoftProxyProviderStub{acquireFn: func(request proxyapp.AcquireProxyRequest) (*proxyapp.ProxyConfig, error) {
+	proxies := &microsoftProxyProviderStub{acquireFn: func(_ proxyapp.AcquireProxyRequest) (*proxyapp.ProxyConfig, error) {
 		return &proxyapp.ProxyConfig{ID: 10, ProxyServerID: 1, URL: "socks5://server.invalid:1080"}, nil
 	}}
 	oauth := &microsoftOAuthProtocolStub{err: &msacl.AuthError{

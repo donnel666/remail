@@ -303,7 +303,7 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 		resultBase.ClearProbe = true
 	}
 	if probeToken == "" || probeStartedAt == nil {
-		probeToken = iCloudDeliveryProbeToken(resource.ID, task.ValidationGeneration, probeAlias)
+		probeToken = iCloudDeliveryProbeToken()
 		probeStartedAt = iCloudTimePointer(now)
 		// Persist the random token in the result before the outbound side effect.
 		// If enqueueing fails, the next attempt reuses the same idempotency key.
@@ -499,7 +499,7 @@ func (s *Service) markICloudAliasReserveAttempt(ctx context.Context, task iCloud
 	return nil
 }
 
-func iCloudDeliveryProbeToken(resourceID uint, generation uint64, alias string) string {
+func iCloudDeliveryProbeToken() string {
 	// The token is persisted before the outbound side effect is considered
 	// complete. Randomness prevents another message from guessing a probe by
 	// knowing a resource ID, validation generation, and alias address.
