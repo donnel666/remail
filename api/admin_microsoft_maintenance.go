@@ -14,7 +14,7 @@ import (
 type adminMicrosoftMaintenanceAdapter struct {
 	aliases *mailapp.MicrosoftAliasService
 	tokens  *mailapp.MicrosoftTokenRefreshService
-	history *mailmatchapp.ResourceFetchUseCase
+	history *mailmatchapp.ResourceHistoryUseCase
 }
 
 func (a adminMicrosoftMaintenanceAdapter) SubmitAdminResourceMaintenance(
@@ -35,8 +35,7 @@ func (a adminMicrosoftMaintenanceAdapter) SubmitAdminResourceMaintenance(
 		if a.history == nil {
 			return "", fmt.Errorf("microsoft project history service is unavailable")
 		}
-		_, err := a.history.Submit(ctx, mailmatchapp.ResourceFetchSubmitCommand{
-			Kind:       mailmatchdomain.ResourceFetchJobHistory,
+		_, err := a.history.Submit(ctx, mailmatchapp.ResourceHistorySubmitCommand{
 			ResourceID: command.ResourceID, OperatorUserID: command.OperatorUserID,
 			IdempotencyKey: command.IdempotencyKey, RequestID: command.RequestID, Path: command.Path,
 		})

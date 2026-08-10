@@ -36,7 +36,7 @@ INSERT INTO icloud_allocations(id, resource_id, order_no, status, created_at) VA
     (2, 10, 'active-order', 'allocated', '2026-08-02 00:00:00');
 `).Error)
 
-	repo := NewResourceFetchRepo(db)
+	repo := NewAdminResourceFetchRepo(db)
 	scope, err := repo.LoadResourceFetchScope(context.Background(), 10, 4, domain.ResourceTypeICloud)
 	require.NoError(t, err)
 	require.Empty(t, scope.OrderNo)

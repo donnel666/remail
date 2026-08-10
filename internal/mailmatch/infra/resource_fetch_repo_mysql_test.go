@@ -26,7 +26,7 @@ func (s *resourceFetchCredentialStub) ApplyMicrosoftFetchRefreshToken(_ context.
 	return nil
 }
 
-func TestResourceFetchRepoUsesCurrentResourceStateAndGenerationFenceMySQL(t *testing.T) {
+func TestAdminResourceFetchRepoUsesCurrentResourceStateAndGenerationFenceMySQL(t *testing.T) {
 	db := newMailmatchMySQLTestDB(t)
 	require.False(t, db.Migrator().HasTable("mailmatch_fetch_jobs"))
 	require.False(t, db.Migrator().HasTable("mailmatch_resource_fetch_jobs"))
@@ -37,7 +37,7 @@ func TestResourceFetchRepoUsesCurrentResourceStateAndGenerationFenceMySQL(t *tes
 		ResourceID: 100, Status: "normal", EmailAddress: "main@example.com",
 		ClientID: "client", RefreshToken: "rt", CredentialRevision: 7,
 	}}
-	repo := NewResourceFetchRepo(db)
+	repo := NewAdminResourceFetchRepo(db)
 	repo.SetMicrosoftCredentialPort(credentials)
 	ctx := context.Background()
 
@@ -70,6 +70,53 @@ func TestResourceFetchRepoUsesCurrentResourceStateAndGenerationFenceMySQL(t *tes
 	require.NoError(t, repo.AssertResourceFetchFence(ctx, 100, second.Generation, 7))
 }
 
+func TestAdminFetchAndResourceHistoryKeepIndependentStateMySQL(t *testing.T) {
+	db := newMailmatchMySQLTestDB(t)
+	seedMailmatchFetchResource(t, db)
+	credentials := &resourceFetchCredentialStub{scope: coreapp.MicrosoftCredentialScope{
+		ResourceID: 100, Status: "normal", EmailAddress: "main@example.com",
+		ClientID: "client", RefreshToken: "rt", CredentialRevision: 7,
+	}}
+	adminRepo := NewAdminResourceFetchRepo(db)
+	historyRepo := NewResourceHistoryRepo(db)
+	adminRepo.SetMicrosoftCredentialPort(credentials)
+	historyRepo.SetMicrosoftCredentialPort(credentials)
+	ctx := context.Background()
+
+	admin := resourceFetchStateRequest("admin-1")
+	history := resourceFetchStateRequest("history-1")
+	history.Kind = domain.ResourceFetchJobHistory
+	history.SinceAt = nil
+	history.UntilAt = nil
+	reused, err := adminRepo.CreateOrReuseResourceFetch(ctx, &admin, nil)
+	require.NoError(t, err)
+	require.False(t, reused)
+	reused, err = historyRepo.CreateOrReuseResourceFetch(ctx, &history, nil)
+	require.NoError(t, err)
+	require.False(t, reused)
+	require.Equal(t, uint64(1), admin.Generation)
+	require.Equal(t, uint64(1), history.Generation)
+
+	claimed, err := adminRepo.MarkResourceFetchProcessing(ctx, 100, admin.Generation)
+	require.NoError(t, err)
+	require.True(t, claimed)
+
+	var adminState, historyState FetchStateModel
+	require.NoError(t, db.Table("mailmatch_admin_resource_fetch_states").First(&adminState, "email_resource_id = ?", 100).Error)
+	require.NoError(t, db.Table("mailmatch_resource_fetch_states").First(&historyState, "email_resource_id = ?", 100).Error)
+	require.Equal(t, string(domain.ResourceFetchJobRunning), adminState.Status)
+	require.Equal(t, string(domain.ResourceFetchJobQueued), historyState.Status)
+	require.Equal(t, uint64(1), historyState.Generation)
+
+	adminReplacement := resourceFetchStateRequest("admin-2")
+	_, err = adminRepo.CreateOrReuseResourceFetch(ctx, &adminReplacement, nil)
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), adminReplacement.Generation)
+	require.NoError(t, db.Table("mailmatch_resource_fetch_states").First(&historyState, "email_resource_id = ?", 100).Error)
+	require.Equal(t, uint64(1), historyState.Generation)
+	require.Equal(t, string(domain.ResourceFetchJobQueued), historyState.Status)
+}
+
 func TestResourceFetchStateAcceptsICloudOperationKindMySQL(t *testing.T) {
 	db := newMailmatchMySQLTestDB(t)
 	require.NoError(t, db.Exec(`
@@ -79,7 +126,7 @@ VALUES (1, 'icloud-owner@test.local', 'hash', 'owner', 'active', 'supplier')`).E
 INSERT INTO email_resources(id, type, owner_user_id)
 VALUES (101, 'icloud', 1)`).Error)
 	require.NoError(t, db.Exec(`
-INSERT INTO mailmatch_resource_fetch_states(
+INSERT INTO mailmatch_admin_resource_fetch_states(
     email_resource_id, status, generation, operation_kind
 ) VALUES (101, 'pending', 1, 'icloud_resource_fetch')`).Error)
 }
@@ -87,14 +134,25 @@ INSERT INTO mailmatch_resource_fetch_states(
 func TestResourceFetchRepoBoundsInfrastructureFailuresMySQL(t *testing.T) {
 	db := newMailmatchMySQLTestDB(t)
 	seedMailmatchFetchResource(t, db)
-	repo := NewResourceFetchRepo(db)
-	repo.SetMicrosoftCredentialPort(&resourceFetchCredentialStub{scope: coreapp.MicrosoftCredentialScope{
+	credentials := &resourceFetchCredentialStub{scope: coreapp.MicrosoftCredentialScope{
 		ResourceID: 100, Status: "normal", EmailAddress: "main@example.com",
 		ClientID: "client", RefreshToken: "rt", CredentialRevision: 7,
-	}})
+	}}
 	ctx := context.Background()
 	for _, kind := range []domain.ResourceFetchJobKind{domain.ResourceFetchJobFetch, domain.ResourceFetchJobHistory} {
 		t.Run(string(kind), func(t *testing.T) {
+			var repo *ResourceFetchRepo
+			stateTable := "mailmatch_admin_resource_fetch_states"
+			if kind == domain.ResourceFetchJobHistory {
+				historyRepo := NewResourceHistoryRepo(db)
+				historyRepo.SetMicrosoftCredentialPort(credentials)
+				repo = historyRepo.ResourceFetchRepo
+				stateTable = "mailmatch_resource_fetch_states"
+			} else {
+				adminRepo := NewAdminResourceFetchRepo(db)
+				adminRepo.SetMicrosoftCredentialPort(credentials)
+				repo = adminRepo.ResourceFetchRepo
+			}
 			job := resourceFetchStateRequest("idem-failure-" + string(kind))
 			job.Kind = kind
 			_, err := repo.CreateOrReuseResourceFetch(ctx, &job, nil)
@@ -109,7 +167,7 @@ func TestResourceFetchRepoBoundsInfrastructureFailuresMySQL(t *testing.T) {
 				require.Equal(t, attempt < 3, retry)
 
 				var state FetchStateModel
-				require.NoError(t, db.First(&state, "email_resource_id = ?", 100).Error)
+				require.NoError(t, db.Table(stateTable).First(&state, "email_resource_id = ?", 100).Error)
 				require.Equal(t, attempt, state.Failures)
 				job.Generation = state.Generation
 			}
@@ -130,7 +188,7 @@ func TestResourceFetchRepoCompletesCurrentGenerationAndRotatesTokenMySQL(t *test
 		ResourceID: 100, Status: "normal", EmailAddress: "main@example.com",
 		ClientID: "client", RefreshToken: "rt", CredentialRevision: 7,
 	}}
-	repo := NewResourceFetchRepo(db)
+	repo := NewAdminResourceFetchRepo(db)
 	repo.SetMicrosoftCredentialPort(credentials)
 	ctx := context.Background()
 	job := resourceFetchStateRequest("idem-complete")

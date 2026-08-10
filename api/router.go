@@ -341,7 +341,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		coreMod.SetAdminResourceMaintenancePort(adminMicrosoftMaintenanceAdapter{
 			aliases: mailMod.MicrosoftAliases,
 			tokens:  mailMod.TokenRefresh,
-			history: mailmatchMod.ResourceFetch,
+			history: mailmatchMod.ResourceHistory,
 		})
 		coreMod.ProjectUseCase.SetHistoryScan(mailmatchMod.ProjectHistory.Schedule)
 		coreMod.ProjectUseCase.SetGmailHistoryScan(gmailMod.Service.ScheduleProjectHistory)

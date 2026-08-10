@@ -243,12 +243,9 @@ SELECT
     'fetch' AS source,
     state.email_resource_id AS source_id,
     state.email_resource_id AS resource_scope_id,
-    CASE
-        WHEN state.operation_kind = 'icloud_resource_fetch' THEN 'icloud_resource'
-        ELSE 'microsoft_resource'
-    END AS biz_type,
+    CASE WHEN state.operation_kind = 'icloud_resource_fetch' THEN 'icloud_resource' ELSE 'microsoft_resource' END AS biz_type,
     state.email_resource_id AS biz_id,
-    CASE WHEN state.operation_kind = 'resource_history' THEN 'history' ELSE 'fetch' END AS kind,
+    'fetch' AS kind,
     CASE state.status
         WHEN 'pending' THEN 'queued'
         WHEN 'processing' THEN 'running'
@@ -268,8 +265,38 @@ SELECT
     GREATEST(state.fetched_count - state.stored_count, 0) AS progress_skipped,
     0 AS progress_failed,
     NULL AS reason_buckets
+FROM mailmatch_admin_resource_fetch_states AS state
+WHERE state.operation_kind IN ('resource_fetch', 'icloud_resource_fetch')`
+
+const resourceHistoryTaskSelect = `
+SELECT
+    'resource_history' AS source,
+    state.email_resource_id AS source_id,
+    state.email_resource_id AS resource_scope_id,
+    'microsoft_resource' AS biz_type,
+    state.email_resource_id AS biz_id,
+    'history' AS kind,
+    CASE state.status
+        WHEN 'pending' THEN 'queued'
+        WHEN 'processing' THEN 'running'
+        WHEN 'abnormal' THEN 'failed'
+        ELSE 'succeeded'
+    END AS status,
+    state.failures AS attempts,
+    3 AS max_attempts,
+    state.expected_credential_revision AS credential_revision,
+    state.requested_at AS queued_at,
+    state.started_at AS started_at,
+    state.finished_at AS finished_at,
+    state.updated_at AS updated_at,
+    NULL AS progress_total,
+    NULL AS progress_processed,
+    NULL AS progress_succeeded,
+    NULL AS progress_skipped,
+    NULL AS progress_failed,
+    NULL AS reason_buckets
 FROM mailmatch_resource_fetch_states AS state
-WHERE state.operation_kind IN ('resource_fetch', 'resource_history', 'icloud_resource_fetch')`
+WHERE state.operation_kind = 'resource_history'`
 
 const gmailValidationTaskSelect = `
 SELECT
@@ -394,7 +421,9 @@ WHERE schedule.status IN ('queued', 'running', 'paused')
 UNION ALL
 ` + tokenTaskSelect + `
 UNION ALL
-` + fetchTaskSelect
+` + fetchTaskSelect + `
+UNION ALL
+` + resourceHistoryTaskSelect
 
 const domainResourceTaskUnion = emptyTaskSelect
 
@@ -805,6 +834,8 @@ func singleTaskSelect(source string) (string, error) {
 		return tokenTaskSelect, nil
 	case governanceapp.AdminTaskSourceFetch:
 		return fetchTaskSelect, nil
+	case governanceapp.AdminTaskSourceResourceHistory:
+		return resourceHistoryTaskSelect, nil
 	case governanceapp.AdminTaskSourceGmailValidate:
 		return gmailValidationTaskSelect, nil
 	case governanceapp.AdminTaskSourceGmailHistory:

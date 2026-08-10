@@ -22,11 +22,27 @@ type ResourceFetchRepo struct {
 	credentials   coreapp.MicrosoftCredentialPort
 	operationLogs *governanceinfra.OperationLogRepo
 	systemLogs    *governanceinfra.SystemLogRepo
+	stateTable    string
+	kind          domain.ResourceFetchJobKind
 }
 
-func NewResourceFetchRepo(db *gorm.DB) *ResourceFetchRepo {
+type AdminResourceFetchRepo struct{ *ResourceFetchRepo }
+
+type ResourceHistoryRepo struct{ *ResourceFetchRepo }
+
+func NewAdminResourceFetchRepo(db *gorm.DB) *AdminResourceFetchRepo {
+	return &AdminResourceFetchRepo{newResourceFetchRepo(db, "mailmatch_admin_resource_fetch_states", domain.ResourceFetchJobFetch)}
+}
+
+func NewResourceHistoryRepo(db *gorm.DB) *ResourceHistoryRepo {
+	return &ResourceHistoryRepo{newResourceFetchRepo(db, "mailmatch_resource_fetch_states", domain.ResourceFetchJobHistory)}
+
+}
+
+func newResourceFetchRepo(db *gorm.DB, stateTable string, kind domain.ResourceFetchJobKind) *ResourceFetchRepo {
 	return &ResourceFetchRepo{
 		db: db, operationLogs: governanceinfra.NewOperationLogRepo(db), systemLogs: governanceinfra.NewSystemLogRepo(db),
+		stateTable: stateTable, kind: kind,
 	}
 }
 
@@ -41,6 +57,17 @@ func (r *ResourceFetchRepo) dbFor(ctx context.Context) *gorm.DB {
 		return tx.WithContext(ctx)
 	}
 	return r.db.WithContext(ctx)
+}
+
+func (r *ResourceFetchRepo) states(db *gorm.DB) *gorm.DB {
+	return db.Table(r.stateTable)
+}
+
+func (r *ResourceFetchRepo) operationKinds() []string {
+	if r.kind == domain.ResourceFetchJobHistory {
+		return []string{"resource_history"}
+	}
+	return []string{"resource_fetch", "icloud_resource_fetch"}
 }
 
 func (r *ResourceFetchRepo) withTx(ctx context.Context, fn func(context.Context, *gorm.DB) error) error {
@@ -62,9 +89,9 @@ func (r *ResourceFetchRepo) CreateOrReuseResourceFetch(ctx context.Context, job 
 		return false, domain.ErrInvalidRequest
 	}
 	if job.Kind == "" {
-		job.Kind = domain.ResourceFetchJobFetch
+		job.Kind = r.kind
 	}
-	if !domain.IsValidResourceFetchJobKind(job.Kind) {
+	if !domain.IsValidResourceFetchJobKind(job.Kind) || job.Kind != r.kind {
 		return false, domain.ErrInvalidRequest
 	}
 	if job.ResourceType == "" {
@@ -85,7 +112,7 @@ func (r *ResourceFetchRepo) CreateOrReuseResourceFetch(ctx context.Context, job 
 		}
 
 		var state FetchStateModel
-		err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&state, "email_resource_id = ?", job.ResourceID).Error
+		err = r.states(tx).Clauses(clause.Locking{Strength: "UPDATE"}).First(&state, "email_resource_id = ?", job.ResourceID).Error
 		operationKind := resourceFetchOperationKind(job.Kind, job.ResourceType)
 		if err == nil && state.IdempotencyKey == job.IdempotencyKey {
 			if state.OperationKind != operationKind || state.OperatorUserID == nil || *state.OperatorUserID != job.OperatorUserID {
@@ -116,9 +143,13 @@ func (r *ResourceFetchRepo) CreateOrReuseResourceFetch(ctx context.Context, job 
 			RequestedAt: &now, CreatedAt: createdAt, UpdatedAt: now,
 		}
 		if err == nil {
-			result := tx.Model(&FetchStateModel{}).Where("email_resource_id = ?", job.ResourceID).Updates(map[string]any{
+			purpose := "manual_fetch"
+			if job.Kind == domain.ResourceFetchJobHistory {
+				purpose = "order_fetch"
+			}
+			result := r.states(tx).Model(&FetchStateModel{}).Where("email_resource_id = ?", job.ResourceID).Updates(map[string]any{
 				"status": string(domain.ResourceFetchJobQueued), "generation": generation, "failures": 0,
-				"operation_kind": operationKind, "order_no": scope.OrderNo, "purpose": "order_fetch",
+				"operation_kind": operationKind, "order_no": scope.OrderNo, "purpose": purpose,
 				"operator_user_id": job.OperatorUserID, "expected_credential_revision": scope.CredentialRevision,
 				"since_at": job.SinceAt, "until_at": job.UntilAt,
 				"fetched_count": 0, "stored_count": 0, "matched_count": 0,
@@ -128,8 +159,13 @@ func (r *ResourceFetchRepo) CreateOrReuseResourceFetch(ctx context.Context, job 
 			if result.Error != nil {
 				return fmt.Errorf("replace resource fetch state: %w", result.Error)
 			}
-		} else if err := tx.Create(&requested).Error; err != nil {
-			return fmt.Errorf("create resource fetch state: %w", err)
+		} else {
+			if job.Kind == domain.ResourceFetchJobFetch {
+				requested.Purpose = "manual_fetch"
+			}
+			if err := r.states(tx).Create(&requested).Error; err != nil {
+				return fmt.Errorf("create resource fetch state: %w", err)
+			}
 		}
 		*job = resourceFetchStateToDomain(requested)
 		job.Recipient = strings.ToLower(strings.TrimSpace(scope.EmailAddress))
@@ -144,15 +180,15 @@ func (r *ResourceFetchRepo) createResourceFetchOperationLog(ctx context.Context,
 		return nil
 	}
 	log.SafeSummary = fmt.Sprintf(
-		"%s resource %s accepted; task=fetch:%d:%d; reused=%t.",
-		resourceFetchResourceLabel(job.ResourceType), resourceFetchOperationLabel(job.Kind), job.ResourceID, job.Generation, reused,
+		"%s resource %s accepted; task=%s:%d:%d; reused=%t.",
+		resourceFetchResourceLabel(job.ResourceType), resourceFetchOperationLabel(job.Kind), resourceFetchTaskSource(job.Kind), job.ResourceID, job.Generation, reused,
 	)
 	return r.operationLogs.CreateInTx(ctx, tx, log)
 }
 
 func (r *ResourceFetchRepo) FindResourceFetch(ctx context.Context, resourceID uint, generation uint64) (*domain.ResourceFetchJob, error) {
 	var state FetchStateModel
-	err := r.dbFor(ctx).First(&state, "email_resource_id = ? AND generation = ? AND operation_kind IN ?", resourceID, generation, resourceFetchOperationKinds()).Error
+	err := r.states(r.dbFor(ctx)).First(&state, "email_resource_id = ? AND generation = ? AND operation_kind IN ?", resourceID, generation, r.operationKinds()).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
@@ -168,8 +204,8 @@ func (r *ResourceFetchRepo) ListPendingResourceFetches(ctx context.Context, limi
 		limit = app.ResourceFetchDefaultDispatchLimit
 	}
 	var states []FetchStateModel
-	err := r.dbFor(ctx).
-		Where("status = ? AND operation_kind IN ?", string(domain.ResourceFetchJobQueued), resourceFetchOperationKinds()).
+	err := r.states(r.dbFor(ctx)).
+		Where("status = ? AND operation_kind IN ?", string(domain.ResourceFetchJobQueued), r.operationKinds()).
 		Order("requested_at ASC, email_resource_id ASC").Limit(limit).Find(&states).Error
 	if err != nil {
 		return nil, fmt.Errorf("list pending resource fetches: %w", err)
@@ -183,8 +219,8 @@ func (r *ResourceFetchRepo) ListPendingResourceFetches(ctx context.Context, limi
 
 func (r *ResourceFetchRepo) MarkResourceFetchProcessing(ctx context.Context, resourceID uint, generation uint64) (bool, error) {
 	now := time.Now().UTC()
-	result := r.dbFor(ctx).Model(&FetchStateModel{}).
-		Where("email_resource_id = ? AND generation = ? AND status = ? AND operation_kind IN ?", resourceID, generation, string(domain.ResourceFetchJobQueued), resourceFetchOperationKinds()).
+	result := r.states(r.dbFor(ctx)).Model(&FetchStateModel{}).
+		Where("email_resource_id = ? AND generation = ? AND status = ? AND operation_kind IN ?", resourceID, generation, string(domain.ResourceFetchJobQueued), r.operationKinds()).
 		Updates(map[string]any{"status": string(domain.ResourceFetchJobRunning), "started_at": now, "finished_at": nil, "last_safe_error": ""})
 	if result.Error != nil {
 		return false, fmt.Errorf("mark resource fetch processing: %w", result.Error)
@@ -193,8 +229,8 @@ func (r *ResourceFetchRepo) MarkResourceFetchProcessing(ctx context.Context, res
 		return true, nil
 	}
 	var count int64
-	err := r.dbFor(ctx).Model(&FetchStateModel{}).
-		Where("email_resource_id = ? AND generation = ? AND status = ? AND operation_kind IN ?", resourceID, generation, string(domain.ResourceFetchJobRunning), resourceFetchOperationKinds()).
+	err := r.states(r.dbFor(ctx)).Model(&FetchStateModel{}).
+		Where("email_resource_id = ? AND generation = ? AND status = ? AND operation_kind IN ?", resourceID, generation, string(domain.ResourceFetchJobRunning), r.operationKinds()).
 		Count(&count).Error
 	return count == 1, err
 }
@@ -203,8 +239,8 @@ func (r *ResourceFetchRepo) ReleaseResourceFetchInfrastructureFailure(ctx contex
 	retryScheduled := false
 	err := r.withTx(ctx, func(txCtx context.Context, tx *gorm.DB) error {
 		var state FetchStateModel
-		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("email_resource_id = ? AND generation = ? AND status = ? AND operation_kind IN ?", resourceID, generation, string(domain.ResourceFetchJobRunning), resourceFetchOperationKinds()).
+		err := r.states(tx).Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("email_resource_id = ? AND generation = ? AND status = ? AND operation_kind IN ?", resourceID, generation, string(domain.ResourceFetchJobRunning), r.operationKinds()).
 			First(&state).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil
@@ -226,8 +262,8 @@ func (r *ResourceFetchRepo) ReleaseResourceFetchInfrastructureFailure(ctx contex
 			updates["generation"] = gorm.Expr("generation + 1")
 			updates["finished_at"] = nil
 		}
-		result := tx.Model(&FetchStateModel{}).
-			Where("email_resource_id = ? AND generation = ? AND status = ?", resourceID, generation, string(domain.ResourceFetchJobRunning)).
+		result := r.states(tx).Model(&FetchStateModel{}).
+			Where("email_resource_id = ? AND generation = ? AND status = ? AND operation_kind IN ?", resourceID, generation, string(domain.ResourceFetchJobRunning), r.operationKinds()).
 			Updates(updates)
 		if result.Error != nil {
 			return result.Error
@@ -348,8 +384,8 @@ func (r *ResourceFetchRepo) MarkResourceFetchFailure(ctx context.Context, resour
 	retryScheduled := false
 	err := r.withTx(ctx, func(txCtx context.Context, tx *gorm.DB) error {
 		var state FetchStateModel
-		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("email_resource_id = ? AND generation = ? AND status = ? AND operation_kind IN ?", resourceID, generation, string(domain.ResourceFetchJobRunning), resourceFetchOperationKinds()).
+		err := r.states(tx).Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("email_resource_id = ? AND generation = ? AND status = ? AND operation_kind IN ?", resourceID, generation, string(domain.ResourceFetchJobRunning), r.operationKinds()).
 			First(&state).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return domain.ErrResourceFetchInvalidClaim
@@ -368,8 +404,8 @@ func (r *ResourceFetchRepo) MarkResourceFetchFailure(ctx context.Context, resour
 			updates["status"] = string(domain.ResourceFetchJobQueued)
 			updates["finished_at"] = nil
 		}
-		result := tx.Model(&FetchStateModel{}).
-			Where("email_resource_id = ? AND generation = ? AND status = ?", resourceID, generation, string(domain.ResourceFetchJobRunning)).
+		result := r.states(tx).Model(&FetchStateModel{}).
+			Where("email_resource_id = ? AND generation = ? AND status = ? AND operation_kind IN ?", resourceID, generation, string(domain.ResourceFetchJobRunning), r.operationKinds()).
 			Updates(updates)
 		if result.Error != nil {
 			return result.Error
@@ -381,8 +417,13 @@ func (r *ResourceFetchRepo) MarkResourceFetchFailure(ctx context.Context, resour
 			return nil
 		}
 		if retryScheduled {
-			log.EventType = "resource_fetch_retry_scheduled"
-			log.Message = "Resource mail fetch retry scheduled."
+			if r.kind == domain.ResourceFetchJobHistory {
+				log.EventType = "resource_history_retry_scheduled"
+				log.Message = "Resource project history scan retry scheduled."
+			} else {
+				log.EventType = "resource_fetch_retry_scheduled"
+				log.Message = "Resource mail fetch retry scheduled."
+			}
 		}
 		return r.systemLogs.CreateInTx(txCtx, tx, log)
 	})
@@ -390,8 +431,8 @@ func (r *ResourceFetchRepo) MarkResourceFetchFailure(ctx context.Context, resour
 }
 
 func (r *ResourceFetchRepo) finishResourceFetchState(ctx context.Context, tx *gorm.DB, resourceID uint, generation uint64, updates map[string]any, log *governancedomain.SystemLog) error {
-	result := tx.Model(&FetchStateModel{}).
-		Where("email_resource_id = ? AND generation = ? AND status = ? AND operation_kind IN ?", resourceID, generation, string(domain.ResourceFetchJobRunning), resourceFetchOperationKinds()).
+	result := r.states(tx).Model(&FetchStateModel{}).
+		Where("email_resource_id = ? AND generation = ? AND status = ? AND operation_kind IN ?", resourceID, generation, string(domain.ResourceFetchJobRunning), r.operationKinds()).
 		Updates(updates)
 	if result.Error != nil {
 		return result.Error
@@ -407,8 +448,8 @@ func (r *ResourceFetchRepo) finishResourceFetchState(ctx context.Context, tx *go
 
 func (r *ResourceFetchRepo) lockResourceFetchState(tx *gorm.DB, resourceID uint, generation uint64) error {
 	var state FetchStateModel
-	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("email_resource_id = ? AND generation = ? AND status = ? AND operation_kind IN ?", resourceID, generation, string(domain.ResourceFetchJobRunning), resourceFetchOperationKinds()).
+	err := r.states(tx).Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("email_resource_id = ? AND generation = ? AND status = ? AND operation_kind IN ?", resourceID, generation, string(domain.ResourceFetchJobRunning), r.operationKinds()).
 		First(&state).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return domain.ErrResourceFetchInvalidClaim
@@ -538,15 +579,18 @@ func resourceFetchOperationKind(kind domain.ResourceFetchJobKind, resourceType d
 	return "resource_fetch"
 }
 
-func resourceFetchOperationKinds() []string {
-	return []string{"resource_fetch", "resource_history", "icloud_resource_fetch"}
-}
-
 func resourceFetchOperationLabel(kind domain.ResourceFetchJobKind) string {
 	if kind == domain.ResourceFetchJobHistory {
 		return "project history scan"
 	}
 	return "mail fetch"
+}
+
+func resourceFetchTaskSource(kind domain.ResourceFetchJobKind) string {
+	if kind == domain.ResourceFetchJobHistory {
+		return "resource_history"
+	}
+	return "fetch"
 }
 
 func resourceFetchResourceLabel(resourceType domain.ResourceType) string {
@@ -556,4 +600,5 @@ func resourceFetchResourceLabel(resourceType domain.ResourceType) string {
 	return "Microsoft"
 }
 
-var _ app.ResourceFetchRepository = (*ResourceFetchRepo)(nil)
+var _ app.AdminResourceFetchRepository = (*AdminResourceFetchRepo)(nil)
+var _ app.ResourceHistoryRepository = (*ResourceHistoryRepo)(nil)

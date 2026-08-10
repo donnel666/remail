@@ -66,6 +66,9 @@ func TestParseAdminTaskRefRequiresQualifiedNumericSource(t *testing.T) {
 	require.Equal(t, AdminTaskSourceToken, ref.Source)
 	require.Equal(t, uint64(42), ref.ID)
 	require.Equal(t, "token:42", ref.String())
+	historyRef, err := ParseAdminTaskRef("resource_history:42")
+	require.NoError(t, err)
+	require.Equal(t, AdminTaskSourceResourceHistory, historyRef.Source)
 
 	for _, value := range []string{"42", "validation:42", "token:", "unknown:1", "token:0", "token:1:2", "token:secret"} {
 		_, err := ParseAdminTaskRef(value)

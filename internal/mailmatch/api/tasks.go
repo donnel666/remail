@@ -29,30 +29,43 @@ const (
 var projectHistoryActive atomic.Int64
 
 func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) {
-	mux.HandleFunc(mailmatchinfra.TypeMailmatchFetchDispatcher, func(ctx context.Context, _ *asynq.Task) error {
-		if module == nil {
+	// These two dispatchers are intentionally separate. Administrator mail
+	// fetches are foreground work; project-history identification remains on
+	// the paused/background queue and never competes for the same dispatcher.
+	mux.HandleFunc(mailmatchinfra.TypeMailmatchAdminResourceFetchDispatcher, func(ctx context.Context, _ *asynq.Task) error {
+		if module == nil || module.AdminResourceFetch == nil {
 			return nil
 		}
-		var dispatchErrors []error
-		if module.ResourceFetch != nil {
-			result, err := module.ResourceFetch.DispatchPending(ctx, resourceFetchDispatchLimitValue())
-			if err != nil {
-				slog.Warn("mailmatch resource fetch dispatcher failed", "error", err)
-				dispatchErrors = append(dispatchErrors, err)
-			} else if result != nil && result.Attempted > 0 {
-				slog.Info(
-					"mailmatch resource fetch dispatcher finished",
-					"attempted", result.Attempted,
-					"queued", result.Queued,
-					"failed", result.Failed,
-				)
-			}
+		result, err := module.AdminResourceFetch.DispatchPending(ctx, resourceFetchDispatchLimitValue())
+		if err != nil {
+			slog.Warn("admin resource fetch dispatcher failed", "error", err)
+			return err
 		}
-		return errors.Join(dispatchErrors...)
+		if result != nil && result.Attempted > 0 {
+			slog.Info("admin resource fetch dispatcher finished", "attempted", result.Attempted, "queued", result.Queued, "failed", result.Failed)
+		}
+		return nil
 	})
-	if module != nil && (module.UseCase != nil || module.ResourceFetch != nil || module.ProjectHistory != nil) {
-		if module.UseCase != nil || module.ResourceFetch != nil {
-			scheduleMailmatchFetchDispatcher(context.Background(), module, 0)
+	mux.HandleFunc(mailmatchinfra.TypeMailmatchResourceHistoryDispatcher, func(ctx context.Context, _ *asynq.Task) error {
+		if module == nil || module.ResourceHistory == nil {
+			return nil
+		}
+		result, err := module.ResourceHistory.DispatchPending(ctx, resourceFetchDispatchLimitValue())
+		if err != nil {
+			slog.Warn("resource history dispatcher failed", "error", err)
+			return err
+		}
+		if result != nil && result.Attempted > 0 {
+			slog.Info("resource history dispatcher finished", "attempted", result.Attempted, "queued", result.Queued, "failed", result.Failed)
+		}
+		return nil
+	})
+	if module != nil && (module.UseCase != nil || module.AdminResourceFetch != nil || module.ResourceHistory != nil || module.ProjectHistory != nil) {
+		if module.AdminResourceFetch != nil {
+			module.AdminResourceFetch.ScheduleDispatcher(context.Background(), 0)
+		}
+		if module.ResourceHistory != nil {
+			module.ResourceHistory.ScheduleDispatcher(context.Background(), 0)
 		}
 		if module.ProjectHistory != nil {
 			module.ProjectHistory.ScheduleDispatcher(context.Background(), 0)
@@ -75,48 +88,56 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) {
 		slog.Info("mailmatch fetch task finished", "resource_id", payload.EmailResourceID, "order_no", payload.OrderNo)
 		return nil
 	}
-	// The legacy type is retained only so tasks queued by the previous release
-	// can be acknowledged without touching persistent resource fetch state.
 	mux.HandleFunc(mailmatchinfra.TypeMailmatchFetch, pickupFetchHandler)
 	mux.HandleFunc(mailmatchinfra.TypeMailmatchPickupFetch, pickupFetchHandler)
 	mux.HandleFunc(mailmatchinfra.TypeMailmatchPickupRequestFetch, func(ctx context.Context, task *asynq.Task) error {
 		return processPickupRequestFetchTask(ctx, task, module)
 	})
 
-	mux.HandleFunc(mailmatchinfra.TypeMailmatchResourceFetch, func(ctx context.Context, task *asynq.Task) error {
-		if module == nil || module.ResourceFetch == nil {
+	mux.HandleFunc(mailmatchinfra.TypeMailmatchAdminResourceFetch, func(ctx context.Context, task *asynq.Task) error {
+		if module == nil || module.AdminResourceFetch == nil {
 			return nil
 		}
-		var payload mailmatchapp.ResourceFetchTask
+		var payload mailmatchapp.AdminResourceFetchTask
 		if err := json.Unmarshal(task.Payload(), &payload); err != nil {
-			return fmt.Errorf("decode mailmatch resource fetch task: %w: %w", err, asynq.SkipRetry)
+			return fmt.Errorf("decode admin resource fetch task: %w: %w", err, asynq.SkipRetry)
+		}
+		if payload.ResourceID == 0 || payload.Generation == 0 {
+			return fmt.Errorf("decode admin resource fetch task: invalid payload: %w", asynq.SkipRetry)
+		}
+		if err := module.AdminResourceFetch.Process(ctx, payload); err != nil {
+			slog.Warn("admin resource fetch task failed", "resource_id", payload.ResourceID, "generation", payload.Generation, "request_id", payload.RequestID, "error", err)
+			return err
+		}
+		slog.Info("admin resource fetch task finished", "resource_id", payload.ResourceID, "generation", payload.Generation, "request_id", payload.RequestID)
+		return nil
+	})
+
+	mux.HandleFunc(mailmatchinfra.TypeMailmatchResourceHistory, func(ctx context.Context, task *asynq.Task) error {
+		if module == nil || module.ResourceHistory == nil {
+			return nil
+		}
+		var payload mailmatchapp.ResourceHistoryTask
+		if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+			return fmt.Errorf("decode resource history task: %w: %w", err, asynq.SkipRetry)
+		}
+		if payload.ResourceID == 0 || payload.Generation == 0 {
+			return fmt.Errorf("decode resource history task: invalid payload: %w", asynq.SkipRetry)
 		}
 		release, admitted := acquireBackgroundExecution(ctx, module)
 		if !admitted {
 			if !platform.BackgroundTaskHasRetryHeadroom(ctx) {
 				recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), backgroundReleaseTimeout)
 				defer cancel()
-				return module.ResourceFetch.ReleaseDispatch(recoveryCtx, payload)
+				return module.ResourceHistory.ReleaseDispatch(recoveryCtx, payload)
 			}
 			return platform.ErrBackgroundExecutionDeferred
 		}
 		defer release()
-		if err := module.ResourceFetch.Process(ctx, payload); err != nil {
-			slog.Warn(
-				"mailmatch resource fetch task failed",
-				"resource_id", payload.ResourceID,
-				"generation", payload.Generation,
-				"request_id", payload.RequestID,
-				"error", err,
-			)
+		if err := module.ResourceHistory.Process(ctx, payload); err != nil {
+			slog.Warn("resource history task failed", "resource_id", payload.ResourceID, "generation", payload.Generation, "request_id", payload.RequestID, "error", err)
 			return err
 		}
-		slog.Info(
-			"mailmatch resource fetch task finished",
-			"resource_id", payload.ResourceID,
-			"generation", payload.Generation,
-			"request_id", payload.RequestID,
-		)
 		return nil
 	})
 
@@ -281,7 +302,7 @@ func resourceFetchDispatchLimitValue() int {
 }
 
 func startFetchDispatcherSeeder(module *Module) {
-	if module == nil || (module.UseCase == nil && module.ResourceFetch == nil && module.ProjectHistory == nil) {
+	if module == nil || (module.UseCase == nil && module.AdminResourceFetch == nil && module.ResourceHistory == nil && module.ProjectHistory == nil) {
 		return
 	}
 	go func() {
@@ -294,7 +315,12 @@ func startFetchDispatcherSeeder(module *Module) {
 				continue
 			}
 			lastDispatch = now
-			scheduleMailmatchFetchDispatcher(context.Background(), module, 0)
+			if module.AdminResourceFetch != nil {
+				module.AdminResourceFetch.ScheduleDispatcher(context.Background(), 0)
+			}
+			if module.ResourceHistory != nil {
+				module.ResourceHistory.ScheduleDispatcher(context.Background(), 0)
+			}
 			if module.ProjectHistory != nil {
 				module.ProjectHistory.ScheduleDispatcher(context.Background(), 0)
 			}
@@ -328,11 +354,4 @@ func acquireBackgroundExecution(ctx context.Context, module *Module) (func(), bo
 		return func() {}, true
 	}
 	return platform.AcquireBackgroundExecution(ctx, module.BackgroundExecution)
-}
-
-func scheduleMailmatchFetchDispatcher(ctx context.Context, module *Module, delay time.Duration) {
-	if module == nil || module.ResourceFetch == nil {
-		return
-	}
-	module.ResourceFetch.ScheduleDispatcher(ctx, delay)
 }

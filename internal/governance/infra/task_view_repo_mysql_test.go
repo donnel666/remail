@@ -45,9 +45,9 @@ func TestAdminTaskViewRepoAggregatesSafeResourceTasksMySQL(t *testing.T) {
 		Limit:   20,
 	})
 	require.NoError(t, err)
-	require.Equal(t, int64(5), total)
-	require.Equal(t, int64(3), succeeded)
-	require.Len(t, items, 5)
+	require.Equal(t, int64(6), total)
+	require.Equal(t, int64(4), succeeded)
+	require.Len(t, items, 6)
 
 	byID := make(map[string]governanceapp.AdminTaskView, len(items))
 	for i := range items {
@@ -58,10 +58,12 @@ func TestAdminTaskViewRepoAggregatesSafeResourceTasksMySQL(t *testing.T) {
 	require.Contains(t, byID, "alias_schedule:6001")
 	require.Contains(t, byID, "token:6001")
 	require.Contains(t, byID, "fetch:6001")
+	require.Contains(t, byID, "resource_history:6001")
 	require.Equal(t, governanceapp.AdminTaskStatusUncertain, byID["alias:6301"].Status)
 	require.Equal(t, governanceapp.AdminTaskStatusUncertain, byID["alias_schedule:6001"].Status)
 	require.Equal(t, governanceapp.AdminTaskStatusSucceeded, byID["fetch:6001"].Status)
-	require.Equal(t, governanceapp.AdminTaskKindHistory, byID["fetch:6001"].Kind)
+	require.Equal(t, governanceapp.AdminTaskKindFetch, byID["fetch:6001"].Kind)
+	require.Equal(t, governanceapp.AdminTaskKindHistory, byID["resource_history:6001"].Kind)
 	require.NotNil(t, byID["import:6201"].Progress)
 	require.Equal(t, int64(3), byID["import:6201"].Progress.Total)
 	require.Equal(t, []governanceapp.AdminTaskReasonCount{
@@ -101,7 +103,8 @@ func TestAdminTaskViewRepoFindsDurableTaskFactsMySQL(t *testing.T) {
 		{ref: governanceapp.AdminTaskRef{Source: governanceapp.AdminTaskSourceAlias, ID: 6301}, kind: governanceapp.AdminTaskKindAlias, bizType: governanceapp.AdminTaskBizMicrosoftResource},
 		{ref: governanceapp.AdminTaskRef{Source: governanceapp.AdminTaskSourceAliasSchedule, ID: 6001}, kind: governanceapp.AdminTaskKindAlias, bizType: governanceapp.AdminTaskBizMicrosoftResource},
 		{ref: governanceapp.AdminTaskRef{Source: governanceapp.AdminTaskSourceToken, ID: 6001}, kind: governanceapp.AdminTaskKindToken, bizType: governanceapp.AdminTaskBizMicrosoftResource},
-		{ref: governanceapp.AdminTaskRef{Source: governanceapp.AdminTaskSourceFetch, ID: 6001}, kind: governanceapp.AdminTaskKindHistory, bizType: governanceapp.AdminTaskBizMicrosoftResource},
+		{ref: governanceapp.AdminTaskRef{Source: governanceapp.AdminTaskSourceFetch, ID: 6001}, kind: governanceapp.AdminTaskKindFetch, bizType: governanceapp.AdminTaskBizMicrosoftResource},
+		{ref: governanceapp.AdminTaskRef{Source: governanceapp.AdminTaskSourceResourceHistory, ID: 6001}, kind: governanceapp.AdminTaskKindHistory, bizType: governanceapp.AdminTaskBizMicrosoftResource},
 	} {
 		task, err := repo.FindByRef(context.Background(), testCase.ref)
 		require.NoError(t, err, testCase.ref.String())
@@ -191,5 +194,16 @@ INSERT INTO mailmatch_resource_fetch_states(
     5001, 4, 0, 0, 0,
     'governance-fetch-view', ?, ?, ?, ?
 )`, base.Add(6*time.Minute), base.Add(6*time.Minute), base.Add(6*time.Minute), base.Add(6*time.Minute)).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO mailmatch_admin_resource_fetch_states(
+    email_resource_id, status, generation, failures, operation_kind,
+    purpose, operator_user_id, expected_credential_revision,
+    fetched_count, stored_count, matched_count,
+    request_id, requested_at, finished_at, created_at, updated_at
+) VALUES (
+    6001, 'normal', 1, 0, 'resource_fetch',
+    'manual_fetch', 5001, 4, 5, 4, 3,
+    'governance-admin-fetch-view', ?, ?, ?, ?
+)`, base.Add(7*time.Minute), base.Add(7*time.Minute), base.Add(7*time.Minute), base.Add(7*time.Minute)).Error)
 
 }

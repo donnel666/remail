@@ -62,7 +62,9 @@ func (h *Handler) PostAdminMicrosoftResourceProjectScan(c *gin.Context) {
 }
 
 func (h *Handler) postAdminMicrosoftResourceFetch(c *gin.Context, kind domain.ResourceFetchJobKind) {
-	if h == nil || h.mod == nil || h.mod.ResourceFetch == nil {
+	if h == nil || h.mod == nil ||
+		(kind == domain.ResourceFetchJobFetch && h.mod.AdminResourceFetch == nil) ||
+		(kind == domain.ResourceFetchJobHistory && h.mod.ResourceHistory == nil) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"message":   "Mail service is temporarily unavailable.",
 			"requestId": middleware.GetRequestID(c),
@@ -104,15 +106,22 @@ func (h *Handler) postAdminMicrosoftResourceFetch(c *gin.Context, kind domain.Re
 		})
 		return
 	}
-	result, err := h.mod.ResourceFetch.Submit(c.Request.Context(), mailmatchapp.ResourceFetchSubmitCommand{
-		Kind:           kind,
-		ResourceType:   resourceType,
-		ResourceID:     uint(resourceID64),
-		OperatorUserID: operatorUserID,
-		IdempotencyKey: idempotencyKey,
-		RequestID:      middleware.GetRequestID(c),
-		Path:           c.FullPath(),
-	})
+	if kind == domain.ResourceFetchJobHistory && resourceType != domain.ResourceTypeMicrosoft {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request parameters.", "requestId": middleware.GetRequestID(c)})
+		return
+	}
+	var result *mailmatchapp.ResourceFetchSubmitResult
+	if kind == domain.ResourceFetchJobHistory {
+		result, err = h.mod.ResourceHistory.Submit(c.Request.Context(), mailmatchapp.ResourceHistorySubmitCommand{
+			ResourceID: uint(resourceID64), OperatorUserID: operatorUserID, IdempotencyKey: idempotencyKey,
+			RequestID: middleware.GetRequestID(c), Path: c.FullPath(),
+		})
+	} else {
+		result, err = h.mod.AdminResourceFetch.Submit(c.Request.Context(), mailmatchapp.AdminResourceFetchSubmitCommand{
+			ResourceType: resourceType, ResourceID: uint(resourceID64), OperatorUserID: operatorUserID,
+			IdempotencyKey: idempotencyKey, RequestID: middleware.GetRequestID(c), Path: c.FullPath(),
+		})
+	}
 	if err != nil {
 		writeAdminResourceFetchError(c, err)
 		return
@@ -134,8 +143,12 @@ func adminResourceFetchTaskResponse(job domain.ResourceFetchJob) adminResourceFe
 		remaining = 0
 	}
 	credentialRevision := job.ExpectedCredentialRevision
+	taskSource := "fetch"
+	if job.Kind == domain.ResourceFetchJobHistory {
+		taskSource = "resource_history"
+	}
 	return adminResourceFetchTaskView{
-		TaskID:             "fetch:" + strconv.FormatUint(uint64(job.ResourceID), 10),
+		TaskID:             taskSource + ":" + strconv.FormatUint(uint64(job.ResourceID), 10),
 		BizType:            resourceFetchBizType(job.ResourceType),
 		BizID:              job.ResourceID,
 		Kind:               string(job.Kind),

@@ -44,16 +44,17 @@ const (
 	AdminTaskStatusUncertain = "uncertain"
 	AdminTaskStatusCanceled  = "canceled"
 
-	AdminTaskSourceImport         = "import"
-	AdminTaskSourceAlias          = "alias"
-	AdminTaskSourceAliasSchedule  = "alias_schedule"
-	AdminTaskSourceToken          = "token"
-	AdminTaskSourceFetch          = "fetch"
-	AdminTaskSourceBulk           = "bulk"
-	AdminTaskSourceGmailValidate  = "gmail_validation"
-	AdminTaskSourceGmailHistory   = "gmail_history"
-	AdminTaskSourceICloudImport   = "icloud_import"
-	AdminTaskSourceICloudValidate = "icloud_validation"
+	AdminTaskSourceImport          = "import"
+	AdminTaskSourceAlias           = "alias"
+	AdminTaskSourceAliasSchedule   = "alias_schedule"
+	AdminTaskSourceToken           = "token"
+	AdminTaskSourceFetch           = "fetch"
+	AdminTaskSourceResourceHistory = "resource_history"
+	AdminTaskSourceBulk            = "bulk"
+	AdminTaskSourceGmailValidate   = "gmail_validation"
+	AdminTaskSourceGmailHistory    = "gmail_history"
+	AdminTaskSourceICloudImport    = "icloud_import"
+	AdminTaskSourceICloudValidate  = "icloud_validation"
 )
 
 func AdminTaskLimits() (int, int) {
@@ -106,6 +107,7 @@ func isAdminTaskSource(value string) bool {
 		AdminTaskSourceAliasSchedule,
 		AdminTaskSourceToken,
 		AdminTaskSourceFetch,
+		AdminTaskSourceResourceHistory,
 		AdminTaskSourceBulk,
 		AdminTaskSourceGmailValidate,
 		AdminTaskSourceGmailHistory,

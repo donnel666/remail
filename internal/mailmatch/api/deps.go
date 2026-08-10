@@ -21,14 +21,16 @@ type BackgroundExecutionGate interface {
 }
 
 type Module struct {
-	UseCase             *mailmatchapp.UseCase
-	ResourceFetch       *mailmatchapp.ResourceFetchUseCase
-	ProjectHistory      *mailmatchapp.ProjectHistoryScanUseCase
-	AdminMessages       *mailmatchapp.AdminMessageUseCase
-	BackgroundExecution BackgroundExecutionGate
-	resourceFetchRepo   *mailmatchinfra.ResourceFetchRepo
-	matchResults        *matchResultAdapter
-	CodeOnlyPickup      CodeOnlyPickupPort
+	UseCase                *mailmatchapp.UseCase
+	AdminResourceFetch     *mailmatchapp.AdminResourceFetchUseCase
+	ResourceHistory        *mailmatchapp.ResourceHistoryUseCase
+	ProjectHistory         *mailmatchapp.ProjectHistoryScanUseCase
+	AdminMessages          *mailmatchapp.AdminMessageUseCase
+	BackgroundExecution    BackgroundExecutionGate
+	adminResourceFetchRepo *mailmatchinfra.AdminResourceFetchRepo
+	resourceHistoryRepo    *mailmatchinfra.ResourceHistoryRepo
+	matchResults           *matchResultAdapter
+	CodeOnlyPickup         CodeOnlyPickupPort
 }
 
 type CodeOnlyPickupCode struct {
@@ -83,8 +85,11 @@ func (m *Module) SetMicrosoftCredentialPort(credentials coreapp.MicrosoftCredent
 	if m == nil {
 		return
 	}
-	if m.resourceFetchRepo != nil {
-		m.resourceFetchRepo.SetMicrosoftCredentialPort(credentials)
+	if m.adminResourceFetchRepo != nil {
+		m.adminResourceFetchRepo.SetMicrosoftCredentialPort(credentials)
+	}
+	if m.resourceHistoryRepo != nil {
+		m.resourceHistoryRepo.SetMicrosoftCredentialPort(credentials)
 	}
 	if m.UseCase != nil {
 		m.UseCase.SetMicrosoftCredentialPort(credentials)
@@ -96,7 +101,8 @@ func (m *Module) SetMicrosoftCredentialPort(credentials coreapp.MicrosoftCredent
 
 func NewModule(db *gorm.DB, files governanceapp.FilePort, redisClient redis.UniversalClient, asynqClient *asynq.Client, proxies *proxyapp.ProxyUseCase, trade *tradeapp.UseCase, validation *coreapp.ResourceValidationUseCase) *Module {
 	repo := mailmatchinfra.NewRepo(db, files)
-	resourceFetchRepo := mailmatchinfra.NewResourceFetchRepo(db)
+	adminResourceFetchRepo := mailmatchinfra.NewAdminResourceFetchRepo(db)
+	resourceHistoryRepo := mailmatchinfra.NewResourceHistoryRepo(db)
 	projectHistoryRepo := mailmatchinfra.NewProjectHistoryScanRepo(db)
 	adminMessageRepo := mailmatchinfra.NewAdminMessageRepo(db)
 	queue := mailmatchinfra.NewFetchQueue(asynqClient)
@@ -112,21 +118,24 @@ func NewModule(db *gorm.DB, files governanceapp.FilePort, redisClient redis.Univ
 	if trade != nil {
 		projectHistory.SetHistoricalMicrosoftUsagePort(historicalMicrosoftUsageAdapter{trade: trade})
 	}
-	resourceFetch := mailmatchapp.NewResourceFetchUseCase(
-		resourceFetchRepo,
+	systemLogs := governanceinfra.NewSystemLogRepo(db)
+	adminResourceFetch := mailmatchapp.NewAdminResourceFetchUseCase(
+		adminResourceFetchRepo,
 		queue,
 		transport,
 		useCase,
-		governanceinfra.NewSystemLogRepo(db),
+		systemLogs,
 	)
-	resourceFetch.SetProjectHistoryScan(projectHistory)
+	resourceHistory := mailmatchapp.NewResourceHistoryUseCase(resourceHistoryRepo, queue, projectHistory, systemLogs)
 	return &Module{
-		UseCase:           useCase,
-		ResourceFetch:     resourceFetch,
-		ProjectHistory:    projectHistory,
-		AdminMessages:     mailmatchapp.NewAdminMessageUseCase(adminMessageRepo),
-		resourceFetchRepo: resourceFetchRepo,
-		matchResults:      matchResults,
+		UseCase:                useCase,
+		AdminResourceFetch:     adminResourceFetch,
+		ResourceHistory:        resourceHistory,
+		ProjectHistory:         projectHistory,
+		AdminMessages:          mailmatchapp.NewAdminMessageUseCase(adminMessageRepo),
+		adminResourceFetchRepo: adminResourceFetchRepo,
+		resourceHistoryRepo:    resourceHistoryRepo,
+		matchResults:           matchResults,
 	}
 }
 

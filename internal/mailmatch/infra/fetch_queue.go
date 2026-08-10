@@ -14,14 +14,16 @@ import (
 )
 
 const (
-	TypeMailmatchFetch                = "mailmatch:fetch"
-	TypeMailmatchPickupFetch          = "mailmatch:pickup_fetch"
-	TypeMailmatchPickupRequestFetch   = "mailmatch:pickup_request_fetch_v2"
-	TypeMailmatchResourceFetch        = "mailmatch:resource_fetch"
-	TypeMailmatchFetchDispatcher      = "mailmatch:fetch_dispatcher"
-	TypeProjectHistoryScan            = "mailmatch:project_history_scan"
-	TypeValidatedMicrosoftHistoryScan = "mailmatch:validated_microsoft_history_scan"
-	TypeProjectHistoryDispatcher      = "mailmatch:project_history_dispatcher"
+	TypeMailmatchFetch                        = "mailmatch:fetch"
+	TypeMailmatchPickupFetch                  = "mailmatch:pickup_fetch"
+	TypeMailmatchPickupRequestFetch           = "mailmatch:pickup_request_fetch_v2"
+	TypeMailmatchAdminResourceFetch           = "mailmatch:admin_resource_fetch"
+	TypeMailmatchAdminResourceFetchDispatcher = "mailmatch:admin_resource_fetch_dispatcher"
+	TypeMailmatchResourceHistory              = "mailmatch:resource_history"
+	TypeMailmatchResourceHistoryDispatcher    = "mailmatch:resource_history_dispatcher"
+	TypeProjectHistoryScan                    = "mailmatch:project_history_scan"
+	TypeValidatedMicrosoftHistoryScan         = "mailmatch:validated_microsoft_history_scan"
+	TypeProjectHistoryDispatcher              = "mailmatch:project_history_dispatcher"
 
 	mailmatchQueueName            = platform.QueueMailfetch
 	pickupRequestFetchTaskTimeout = 2 * time.Minute
@@ -75,32 +77,50 @@ func (q *FetchQueue) EnqueuePickupRequest(ctx context.Context, task app.PickupRe
 	return true, nil
 }
 
-func (q *FetchQueue) EnqueueResourceFetch(ctx context.Context, task app.ResourceFetchTask) (bool, error) {
+func (q *FetchQueue) EnqueueAdminResourceFetch(ctx context.Context, task app.AdminResourceFetchTask) (bool, error) {
 	if q == nil || q.client == nil {
-		return false, fmt.Errorf("mailmatch resource fetch queue is unavailable")
+		return false, fmt.Errorf("admin resource fetch queue is unavailable")
 	}
 	payload, err := json.Marshal(task)
 	if err != nil {
-		return false, fmt.Errorf("marshal mailmatch resource fetch task: %w", err)
+		return false, fmt.Errorf("marshal admin resource fetch task: %w", err)
 	}
-	asynqTask := asynq.NewTask(TypeMailmatchResourceFetch, payload)
-	timeout := min(runtimeconfig.Duration("mailmatch_fetch_timeout_minutes", mailmatchFetchTaskTimeout, time.Minute, 1), maxMailmatchFetchTaskTimeout)
-	_, err = q.client.EnqueueContext(
-		ctx,
-		asynqTask,
-		asynq.Queue(platform.QueueBackgroundProjectHistory),
-		asynq.Unique(timeout),
-		asynq.MaxRetry(resourceFetchTaskMaxRetry),
-		asynq.Timeout(timeout),
-		asynq.Retention(0),
-	)
+	timeout := resourceFetchTaskTimeout()
+	_, err = q.client.EnqueueContext(ctx, asynq.NewTask(TypeMailmatchAdminResourceFetch, payload),
+		asynq.Queue(platform.QueueDefault), asynq.Unique(timeout),
+		asynq.MaxRetry(resourceFetchTaskMaxRetry), asynq.Timeout(timeout), asynq.Retention(0))
 	if err != nil {
 		if errors.Is(err, asynq.ErrDuplicateTask) {
 			return false, nil
 		}
-		return false, fmt.Errorf("enqueue mailmatch resource fetch task: %w", err)
+		return false, fmt.Errorf("enqueue admin resource fetch task: %w", err)
 	}
 	return true, nil
+}
+
+func (q *FetchQueue) EnqueueResourceHistory(ctx context.Context, task app.ResourceHistoryTask) (bool, error) {
+	if q == nil || q.client == nil {
+		return false, fmt.Errorf("resource history queue is unavailable")
+	}
+	payload, err := json.Marshal(task)
+	if err != nil {
+		return false, fmt.Errorf("marshal resource history task: %w", err)
+	}
+	timeout := resourceFetchTaskTimeout()
+	_, err = q.client.EnqueueContext(ctx, asynq.NewTask(TypeMailmatchResourceHistory, payload),
+		asynq.Queue(platform.QueueBackgroundProjectHistory), asynq.Unique(timeout),
+		asynq.MaxRetry(resourceFetchTaskMaxRetry), asynq.Timeout(timeout), asynq.Retention(0))
+	if errors.Is(err, asynq.ErrDuplicateTask) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("enqueue resource history task: %w", err)
+	}
+	return true, nil
+}
+
+func resourceFetchTaskTimeout() time.Duration {
+	return min(runtimeconfig.Duration("mailmatch_fetch_timeout_minutes", mailmatchFetchTaskTimeout, time.Minute, 1), maxMailmatchFetchTaskTimeout)
 }
 
 func (q *FetchQueue) EnqueueProjectHistoryScan(ctx context.Context, task app.ProjectHistoryScanTask) (bool, error) {
@@ -185,18 +205,29 @@ func (q *FetchQueue) EnqueueProjectHistoryDispatcher(ctx context.Context, delay 
 	return nil
 }
 
-func (q *FetchQueue) EnqueueFetchDispatcher(ctx context.Context, delay time.Duration) error {
+func (q *FetchQueue) EnqueueAdminResourceFetchDispatcher(ctx context.Context, delay time.Duration) error {
 	if q == nil || q.client == nil {
-		return fmt.Errorf("mailmatch fetch dispatcher queue is unavailable")
+		return fmt.Errorf("admin resource fetch dispatcher queue is unavailable")
 	}
-	task := asynq.NewTask(TypeMailmatchFetchDispatcher, nil)
+	return q.enqueueResourceDispatcher(ctx, TypeMailmatchAdminResourceFetchDispatcher, platform.QueueDefault, delay)
+}
+
+func (q *FetchQueue) EnqueueResourceHistoryDispatcher(ctx context.Context, delay time.Duration) error {
+	if q == nil || q.client == nil {
+		return fmt.Errorf("resource history dispatcher queue is unavailable")
+	}
+	return q.enqueueResourceDispatcher(ctx, TypeMailmatchResourceHistoryDispatcher, platform.QueueBackgroundProjectHistory, delay)
+}
+
+func (q *FetchQueue) enqueueResourceDispatcher(ctx context.Context, taskType, queue string, delay time.Duration) error {
+	task := asynq.NewTask(taskType, nil)
 	timeout := runtimeconfig.Duration("fetch_dispatcher_timeout_seconds", mailmatchDispatchTaskTimeout, time.Second, 1)
 	uniqueTTL := timeout
 	if delay > 0 {
 		uniqueTTL += delay
 	}
 	options := []asynq.Option{
-		asynq.Queue(platform.QueueBackgroundProjectHistory),
+		asynq.Queue(queue),
 		asynq.Unique(uniqueTTL),
 		asynq.MaxRetry(0),
 		asynq.Timeout(timeout),
@@ -210,7 +241,7 @@ func (q *FetchQueue) EnqueueFetchDispatcher(ctx context.Context, delay time.Dura
 		if errors.Is(err, asynq.ErrDuplicateTask) {
 			return nil
 		}
-		return fmt.Errorf("enqueue mailmatch fetch dispatcher task: %w", err)
+		return fmt.Errorf("enqueue %s task: %w", taskType, err)
 	}
 	return nil
 }

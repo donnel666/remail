@@ -14,7 +14,10 @@ import (
 	"github.com/donnel666/remail/internal/iam/domain"
 	mailmatchapp "github.com/donnel666/remail/internal/mailmatch/app"
 	mailmatchdomain "github.com/donnel666/remail/internal/mailmatch/domain"
+	mailmatchinfra "github.com/donnel666/remail/internal/mailmatch/infra"
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/gin-gonic/gin"
+	"github.com/hibiken/asynq"
 	"github.com/stretchr/testify/require"
 )
 
@@ -116,7 +119,7 @@ func TestAdminResourceFetchRouteAcceptsICloudType(t *testing.T) {
 	require.Equal(t, "icloud_resource", body["task"].(map[string]any)["bizType"])
 }
 
-func TestAdminResourceProjectScanReusesDurableFetchTaskState(t *testing.T) {
+func TestAdminResourceProjectScanUsesIndependentHistoryTaskIdentity(t *testing.T) {
 	router, repo, checker := newAdminResourceFetchTestRouter(true)
 	response := performAdminResourceHistoryRequest(router)
 	require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
@@ -129,14 +132,69 @@ func TestAdminResourceProjectScanReusesDurableFetchTaskState(t *testing.T) {
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
 	task := body["task"].(map[string]any)
 	require.Equal(t, "history", task["kind"])
-	require.Equal(t, "fetch:100", task["taskId"])
+	require.Equal(t, "resource_history:100", task["taskId"])
+}
+
+type resourceFetchBackgroundGateStub struct {
+	admitted bool
+	calls    int
+}
+
+func (g *resourceFetchBackgroundGateStub) TryAcquire() (func(), bool) {
+	g.calls++
+	return func() {}, g.admitted
+}
+
+func TestResourceFetchHandlersKeepForegroundAdminFetchOutOfBackgroundGate(t *testing.T) {
+	repo := &adminResourceFetchRepoStub{}
+	useCase := mailmatchapp.NewAdminResourceFetchUseCase(repo, adminResourceFetchQueueStub{}, nil, nil, nil)
+	gate := &resourceFetchBackgroundGateStub{admitted: false}
+	mux := asynq.NewServeMux()
+	RegisterTaskHandlers(mux, &Module{AdminResourceFetch: useCase, BackgroundExecution: gate})
+
+	payload, err := json.Marshal(mailmatchapp.AdminResourceFetchTask{ResourceID: 100, Generation: 1})
+	require.NoError(t, err)
+	err = mux.ProcessTask(context.Background(), asynq.NewTask(mailmatchinfra.TypeMailmatchAdminResourceFetch, payload))
+
+	require.NoError(t, err)
+	require.Zero(t, gate.calls)
+	require.Equal(t, 1, repo.markCalls)
+}
+
+func TestResourceHistoryHandlerUsesBackgroundGate(t *testing.T) {
+	repo := &adminResourceFetchRepoStub{}
+	useCase := mailmatchapp.NewResourceHistoryUseCase(repo, adminResourceFetchQueueStub{}, nil, nil)
+	gate := &resourceFetchBackgroundGateStub{admitted: false}
+	mux := asynq.NewServeMux()
+	RegisterTaskHandlers(mux, &Module{ResourceHistory: useCase, BackgroundExecution: gate})
+
+	payload, err := json.Marshal(mailmatchapp.ResourceHistoryTask{ResourceID: 100, Generation: 1})
+	require.NoError(t, err)
+	err = mux.ProcessTask(context.Background(), asynq.NewTask(mailmatchinfra.TypeMailmatchResourceHistory, payload))
+
+	require.ErrorIs(t, err, platform.ErrBackgroundExecutionDeferred)
+	require.Equal(t, 1, gate.calls)
+	require.Zero(t, repo.markCalls)
+}
+
+func TestAdminResourceFetchHandlerKeepsJSONDecodeError(t *testing.T) {
+	repo := &adminResourceFetchRepoStub{}
+	useCase := mailmatchapp.NewAdminResourceFetchUseCase(repo, adminResourceFetchQueueStub{}, nil, nil, nil)
+	mux := asynq.NewServeMux()
+	RegisterTaskHandlers(mux, &Module{AdminResourceFetch: useCase})
+
+	err := mux.ProcessTask(context.Background(), asynq.NewTask(mailmatchinfra.TypeMailmatchAdminResourceFetch, []byte("{")))
+
+	require.ErrorIs(t, err, asynq.SkipRetry)
+	require.Contains(t, err.Error(), "unexpected end of JSON input")
 }
 
 func newAdminResourceFetchTestRouter(allowed bool) (*gin.Engine, *adminResourceFetchRepoStub, *adminResourceFetchPermissionChecker) {
 	repo := &adminResourceFetchRepoStub{}
 	queue := &adminResourceFetchQueueStub{}
-	useCase := mailmatchapp.NewResourceFetchUseCase(repo, queue, nil, nil, adminResourceFetchSystemLogsStub{})
-	module := &Module{ResourceFetch: useCase}
+	adminFetch := mailmatchapp.NewAdminResourceFetchUseCase(repo, queue, nil, nil, adminResourceFetchSystemLogsStub{})
+	history := mailmatchapp.NewResourceHistoryUseCase(repo, queue, nil, adminResourceFetchSystemLogsStub{})
+	module := &Module{AdminResourceFetch: adminFetch, ResourceHistory: history}
 	checker := &adminResourceFetchPermissionChecker{allowed: allowed}
 	router := gin.New()
 	router.Use(middleware.RequestID())
@@ -203,6 +261,7 @@ func (c *adminResourceFetchPermissionChecker) Check(_ context.Context, _ uint, _
 
 type adminResourceFetchRepoStub struct {
 	operationLog *governancedomain.OperationLog
+	markCalls    int
 }
 
 func (r *adminResourceFetchRepoStub) CreateOrReuseResourceFetch(_ context.Context, job *mailmatchdomain.ResourceFetchJob, log *governancedomain.OperationLog) (bool, error) {
@@ -226,7 +285,8 @@ func (*adminResourceFetchRepoStub) ListPendingResourceFetches(context.Context, i
 	return nil, nil
 }
 
-func (*adminResourceFetchRepoStub) MarkResourceFetchProcessing(context.Context, uint, uint64) (bool, error) {
+func (r *adminResourceFetchRepoStub) MarkResourceFetchProcessing(context.Context, uint, uint64) (bool, error) {
+	r.markCalls++
 	return false, nil
 }
 
@@ -246,6 +306,14 @@ func (*adminResourceFetchRepoStub) CompleteResourceFetch(context.Context, uint, 
 	return nil
 }
 
+func (*adminResourceFetchRepoStub) AssertICloudResourceFetchFence(context.Context, uint, uint64) error {
+	return nil
+}
+
+func (*adminResourceFetchRepoStub) CompleteICloudResourceFetch(context.Context, uint, uint64, int, int, int, time.Time, *governancedomain.SystemLog) error {
+	return nil
+}
+
 func (*adminResourceFetchRepoStub) CompleteResourceFetchTask(context.Context, uint, uint64, time.Time, *governancedomain.SystemLog) error {
 	return nil
 }
@@ -260,11 +328,19 @@ func (*adminResourceFetchRepoStub) MarkResourceFetchFailure(context.Context, uin
 
 type adminResourceFetchQueueStub struct{}
 
-func (adminResourceFetchQueueStub) EnqueueResourceFetch(context.Context, mailmatchapp.ResourceFetchTask) (bool, error) {
+func (adminResourceFetchQueueStub) EnqueueAdminResourceFetch(context.Context, mailmatchapp.AdminResourceFetchTask) (bool, error) {
 	return true, nil
 }
 
-func (adminResourceFetchQueueStub) EnqueueFetchDispatcher(context.Context, time.Duration) error {
+func (adminResourceFetchQueueStub) EnqueueResourceHistory(context.Context, mailmatchapp.ResourceHistoryTask) (bool, error) {
+	return true, nil
+}
+
+func (adminResourceFetchQueueStub) EnqueueAdminResourceFetchDispatcher(context.Context, time.Duration) error {
+	return nil
+}
+
+func (adminResourceFetchQueueStub) EnqueueResourceHistoryDispatcher(context.Context, time.Duration) error {
 	return nil
 }
 

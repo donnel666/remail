@@ -78,7 +78,7 @@ const (
 	QueueBackgroundTokenRefresh = "background_token_refresh"
 	// QueueResource carries admin resource bulk operations (validate/publish/unpublish/delete).
 	QueueResource = "resource"
-	// QueueBackgroundProjectHistory carries Microsoft resource and project-history identification.
+	// QueueBackgroundProjectHistory carries only project-history identification work.
 	QueueBackgroundProjectHistory = "background_project_history"
 	// QueueBackgroundGmailIdentification carries Gmail validation-history and project-history identification.
 	QueueBackgroundGmailIdentification = "background_gmail_identification"

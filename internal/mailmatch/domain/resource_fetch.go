@@ -5,8 +5,8 @@ import (
 	"time"
 )
 
-// ResourceFetchJobStatus is the current lifecycle of an administrator-triggered
-// resource fetch stored on the resource fetch state row.
+// ResourceFetchJobStatus is the shared lifecycle vocabulary used by the
+// independently persisted administrator-fetch and resource-history tasks.
 type ResourceFetchJobStatus string
 
 type ResourceFetchJobKind string
@@ -24,8 +24,8 @@ const (
 	ResourceFetchDefaultMaxAttempts = 3
 )
 
-// ResourceFetchJob is the current resource fetch state. Credentials are read
-// from Core immediately before the external call and fenced by revision.
+// ResourceFetchJob is a task snapshot. Credentials are read from Core
+// immediately before the external call and fenced by revision.
 type ResourceFetchJob struct {
 	ID                         uint
 	Generation                 uint64
