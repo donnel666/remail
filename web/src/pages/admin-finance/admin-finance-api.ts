@@ -51,6 +51,14 @@ export type FinanceTransactionType =
   | "card_redeem"
   | "transfer";
 
+export type FinanceTransactionCategory =
+  | "all"
+  | "recharge"
+  | "spend"
+  | "refund"
+  | "referral_cashback"
+  | "activity";
+
 export type FinanceTransactionDirection = "in" | "out";
 export type FinanceTransactionBucket =
   | "consumer"
@@ -193,6 +201,7 @@ export interface FinanceCardKeyListFilter {
 export interface FinanceTransactionListFilter {
   search?: string;
   transactionType?: FinanceTransactionType;
+  category?: FinanceTransactionCategory;
   direction?: FinanceTransactionDirection;
   createdFrom?: string;
   createdTo?: string;
@@ -214,6 +223,15 @@ export interface FinanceCardKeyFacets {
   role: Record<FinanceOwnerRoleFilter, number>;
   group: { id: number; name: string; count: number }[];
   status: Record<FinanceCardKeyStatusFilter, number>;
+}
+
+export interface FinanceTransactionFacets {
+  all: number;
+  recharge: number;
+  spend: number;
+  refund: number;
+  referralCashback: number;
+  activity: number;
 }
 
 export interface FinancePagedResult<T, F = undefined> {
@@ -744,7 +762,7 @@ export async function listFinanceTransactions(
   filter: FinanceTransactionListFilter = {},
   offset = 0,
   limit = 20
-): Promise<FinancePagedResult<FinanceTransaction>> {
+): Promise<FinancePagedResult<FinanceTransaction, FinanceTransactionFacets>> {
   const response = await unwrap<
     components["schemas"]["AdminTransactionListResponse"]
   >(
@@ -753,6 +771,7 @@ export async function listFinanceTransactions(
         query: {
           search: filter.search,
           type: filter.transactionType,
+          category: filter.category,
           direction: filter.direction,
           createdFrom: filter.createdFrom,
           createdTo: filter.createdTo,
@@ -767,6 +786,7 @@ export async function listFinanceTransactions(
     total: response.total,
     offset: response.offset,
     limit: response.limit,
+    facets: response.facets,
   };
 }
 

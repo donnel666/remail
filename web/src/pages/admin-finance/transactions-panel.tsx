@@ -40,7 +40,9 @@ import {
   listFinanceTransactions,
   reverseFinanceTransaction,
   type FinanceTransaction,
+  type FinanceTransactionCategory,
   type FinanceTransactionDirection,
+  type FinanceTransactionFacets,
   type FinanceTransactionType,
 } from "./admin-finance-api";
 import {
@@ -54,17 +56,30 @@ import { emptyNode } from "./finance-shared";
 import { TransactionAccountCell } from "./transaction-meta";
 import { TransactionDetailSheet } from "./transaction-detail-sheet";
 
-const TRANSACTION_TYPES: FinanceTransactionType[] = [
-  "recharge",
-  "debit",
-  "refund",
-  "credit",
-  "card_redeem",
-  "manual_adjustment",
-  "transfer",
-  "freeze",
-  "withdrawal",
+const TRANSACTION_CATEGORIES: {
+  facet: keyof FinanceTransactionFacets;
+  label: string;
+  value: FinanceTransactionCategory;
+}[] = [
+  { facet: "recharge", label: "Recharge", value: "recharge" },
+  { facet: "spend", label: "Consume", value: "spend" },
+  { facet: "refund", label: "Refund", value: "refund" },
+  {
+    facet: "referralCashback",
+    label: "Invitation cashback",
+    value: "referral_cashback",
+  },
+  { facet: "activity", label: "Activity", value: "activity" },
 ];
+
+const EMPTY_TRANSACTION_FACETS: FinanceTransactionFacets = {
+  all: 0,
+  recharge: 0,
+  spend: 0,
+  refund: 0,
+  referralCashback: 0,
+  activity: 0,
+};
 
 function renderStateTag(record: FinanceTransaction, t: (key: string) => string) {
   if (record.reversalOfNo) {
@@ -99,12 +114,9 @@ export function TransactionsPanel({ tabsArea }: { tabsArea: ReactNode }) {
   useEffect(() => setActivePage(1), [pageSize]);
   const [searchKeyword, setSearchKeyword] = useState("");
   const [debouncedSearch, flushSearch] = useDebouncedValue(searchKeyword);
-  const [typeFilter, setTypeFilter] = useState<"all" | FinanceTransactionType>(
-    "all"
-  );
-  const [directionFilter, setDirectionFilter] = useState<
-    "all" | FinanceTransactionDirection
-  >("all");
+  const [categoryFilter, setCategoryFilter] =
+    useState<FinanceTransactionCategory>("all");
+  const [facets, setFacets] = useState(EMPTY_TRANSACTION_FACETS);
   const [createdAtRange, setCreatedAtRange] = useState<DateRangeValue>([]);
   const [compactMode, setCompactMode] = useState(false);
   const [detailTarget, setDetailTarget] = useState<FinanceTransaction | null>(
@@ -116,13 +128,14 @@ export function TransactionsPanel({ tabsArea }: { tabsArea: ReactNode }) {
   const listFilter = useMemo(
     () => ({
       search: debouncedSearch.trim() || undefined,
-      transactionType: typeFilter === "all" ? undefined : typeFilter,
-      direction: directionFilter === "all" ? undefined : directionFilter,
+      category: categoryFilter,
       createdFrom: createdFromISOString(createdAtRange),
       createdTo: createdToISOString(createdAtRange),
     }),
-    [createdAtRange, debouncedSearch, directionFilter, typeFilter]
+    [categoryFilter, createdAtRange, debouncedSearch]
   );
+
+  useEffect(() => setFacets(EMPTY_TRANSACTION_FACETS), [listFilter]);
 
   const loadBlock = useCallback(
     async (offset: number, limit: number) => {
@@ -131,18 +144,23 @@ export function TransactionsPanel({ tabsArea }: { tabsArea: ReactNode }) {
         offset,
         limit
       );
-      return { items: result.items, total: result.total };
+      return { items: result.items, meta: result.facets, total: result.total };
     },
     [listFilter]
   );
 
   const { pagedItems, total, loading, refresh } =
-    useBlockPagedList<FinanceTransaction>({
+    useBlockPagedList<FinanceTransaction, FinanceTransactionFacets>({
       activePage,
       filterKey: JSON.stringify(listFilter),
       loadBlock,
-      onError: (error) =>
-        Toast.error(getIamErrorMessage(t, error, "Operation failed.")),
+      onError: (error) => {
+        setFacets(EMPTY_TRANSACTION_FACETS);
+        Toast.error(getIamErrorMessage(t, error, "Operation failed."));
+      },
+      onLoaded: (response) => {
+        if (response.meta) setFacets(response.meta);
+      },
       pageSize,
     });
 
@@ -328,50 +346,26 @@ export function TransactionsPanel({ tabsArea }: { tabsArea: ReactNode }) {
               </div>
               <div className="mb-2 max-h-56 space-y-1 overflow-auto">
                 <StatisticFilterOption
-                  active={typeFilter === "all"}
-                  count={total}
+                  active={categoryFilter === "all"}
+                  count={facets.all}
                   label={t("All")}
                   onSelect={() => {
-                    setTypeFilter("all");
+                    setCategoryFilter("all");
                     setActivePage(1);
                   }}
                   value="all"
                 />
-                {TRANSACTION_TYPES.map((type) => (
+                {TRANSACTION_CATEGORIES.map((category) => (
                   <StatisticFilterOption
-                    active={typeFilter === type}
-                    count={0}
-                    key={type}
-                    label={t(type)}
+                    active={categoryFilter === category.value}
+                    count={facets[category.facet]}
+                    key={category.value}
+                    label={t(category.label)}
                     onSelect={() => {
-                      setTypeFilter(type);
+                      setCategoryFilter(category.value);
                       setActivePage(1);
                     }}
-                    value={type}
-                  />
-                ))}
-              </div>
-              <div className="px-2 pb-1 text-xs font-medium text-[var(--semi-color-text-2)]">
-                {t("Direction")}
-              </div>
-              <div className="space-y-1">
-                {(
-                  [
-                    ["all", t("All")],
-                    ["in", t("Inflow")],
-                    ["out", t("Outflow")],
-                  ] as const
-                ).map(([value, label]) => (
-                  <StatisticFilterOption
-                    active={directionFilter === value}
-                    count={0}
-                    key={value}
-                    label={label}
-                    onSelect={() => {
-                      setDirectionFilter(value);
-                      setActivePage(1);
-                    }}
-                    value={value}
+                    value={category.value}
                   />
                 ))}
               </div>

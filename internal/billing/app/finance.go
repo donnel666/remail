@@ -103,14 +103,35 @@ type AdminTransaction struct {
 	User         *UserDirectoryEntry
 }
 
+type AdminTransactionCategory string
+
+const (
+	AdminTransactionCategoryAll              AdminTransactionCategory = "all"
+	AdminTransactionCategoryRecharge         AdminTransactionCategory = "recharge"
+	AdminTransactionCategorySpend            AdminTransactionCategory = "spend"
+	AdminTransactionCategoryRefund           AdminTransactionCategory = "refund"
+	AdminTransactionCategoryReferralCashback AdminTransactionCategory = "referral_cashback"
+	AdminTransactionCategoryActivity         AdminTransactionCategory = "activity"
+)
+
 type AdminTransactionFilter struct {
 	Search        string
 	SearchUserIDs []uint
 	SearchUserID  uint
 	Type          domain.TransactionType
+	Category      AdminTransactionCategory
 	Direction     domain.TransactionDirection
 	CreatedFrom   *time.Time
 	CreatedTo     *time.Time
+}
+
+type AdminTransactionFacets struct {
+	All              int64
+	Recharge         int64
+	Spend            int64
+	Refund           int64
+	ReferralCashback int64
+	Activity         int64
 }
 
 type AdminTransactionListResult struct {
@@ -118,6 +139,7 @@ type AdminTransactionListResult struct {
 	Total  int64
 	Offset int
 	Limit  int
+	Facets AdminTransactionFacets
 }
 
 type ReverseTransactionRequest struct {
@@ -353,7 +375,7 @@ func (uc *WalletUseCase) ListAdminTransactions(ctx context.Context, filter Admin
 			}
 		}
 	}
-	items, total, err := uc.repo.ListAdminTransactions(ctx, filter, offset, limit)
+	items, total, facets, err := uc.repo.ListAdminTransactions(ctx, filter, offset, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -365,7 +387,7 @@ func (uc *WalletUseCase) ListAdminTransactions(ctx context.Context, filter Admin
 	for i := range items {
 		items[i].User = lookupEntry(dir, items[i].Transaction.UserID)
 	}
-	return &AdminTransactionListResult{Items: items, Total: total, Offset: offset, Limit: limit}, nil
+	return &AdminTransactionListResult{Items: items, Total: total, Offset: offset, Limit: limit, Facets: facets}, nil
 }
 
 func (uc *WalletUseCase) ReverseTransaction(ctx context.Context, req ReverseTransactionRequest) (*ReverseTransactionResult, error) {

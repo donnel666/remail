@@ -5218,6 +5218,15 @@ export interface components {
             total: number;
             offset: number;
             limit: number;
+            facets: components["schemas"]["AdminTransactionFacets"];
+        };
+        AdminTransactionFacets: {
+            all: number;
+            recharge: number;
+            spend: number;
+            refund: number;
+            referralCashback: number;
+            activity: number;
         };
         AdminReverseTransactionResponse: {
             original: components["schemas"]["AdminTransactionItem"];
@@ -17349,6 +17358,8 @@ export interface operations {
                 limit?: number;
                 search?: string;
                 type?: "recharge" | "debit" | "refund" | "freeze" | "credit" | "withdrawal" | "manual_adjustment" | "card_redeem" | "transfer";
+                /** @description Business category used by the admin finance filter. All is the union of the five categories; recharge includes Alipay and redemption-code credits; activity includes check-in, leaderboard, and registration rewards. */
+                category?: "all" | "recharge" | "spend" | "refund" | "referral_cashback" | "activity";
                 direction?: "in" | "out";
                 createdFrom?: string;
                 createdTo?: string;

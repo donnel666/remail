@@ -39,7 +39,7 @@ type WalletRepository interface {
 	SetCardsStatus(ctx context.Context, cardKeys []string, status domain.CardKeyStatus) (affected int, err error)
 	SetCardsExpireAt(ctx context.Context, cardKeys []string, expireAt time.Time) (affected int, err error)
 	ListCardRedemptions(ctx context.Context, cardKey string, limit int) ([]domain.CardRedemption, string, error)
-	ListAdminTransactions(ctx context.Context, filter AdminTransactionFilter, offset, limit int) ([]AdminTransaction, int64, error)
+	ListAdminTransactions(ctx context.Context, filter AdminTransactionFilter, offset, limit int) ([]AdminTransaction, int64, AdminTransactionFacets, error)
 	GetAdminTransaction(ctx context.Context, id uint) (*AdminTransaction, error)
 	ReverseTransaction(ctx context.Context, req ReverseTransactionCommand) (*ReverseTransactionResult, error)
 	WithdrawSupplier(ctx context.Context, req WithdrawSupplierCommand) (*AdjustBalanceResult, error)

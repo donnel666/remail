@@ -126,9 +126,48 @@ func (r *BillingRepo) ListCardRedemptions(ctx context.Context, cardKey string, l
 
 // ---- Transactions -------------------------------------------------------
 
+const (
+	adminTransactionRechargeCondition = "transaction_type IN ('recharge', 'card_redeem')"
+	adminTransactionSpendCondition    = "transaction_type = 'debit'"
+	adminTransactionRefundCondition   = "transaction_type = 'refund'"
+	adminTransactionReferralCondition = "transaction_type = 'credit' AND biz_type = 'referral_transfer'"
+	adminTransactionActivityCondition = "transaction_type = 'credit' AND biz_type IN ('daily_checkin', 'leaderboard_reward', 'registration_reward')"
+	adminTransactionAllCondition      = "((" + adminTransactionRechargeCondition + ") OR (" + adminTransactionSpendCondition + ") OR (" + adminTransactionRefundCondition + ") OR (" + adminTransactionReferralCondition + ") OR (" + adminTransactionActivityCondition + "))"
+	adminTransactionFacetSelect       = "COUNT(*) AS all_count, " +
+		"COALESCE(SUM(CASE WHEN " + adminTransactionRechargeCondition + " THEN 1 ELSE 0 END), 0) AS recharge, " +
+		"COALESCE(SUM(CASE WHEN " + adminTransactionSpendCondition + " THEN 1 ELSE 0 END), 0) AS spend, " +
+		"COALESCE(SUM(CASE WHEN " + adminTransactionRefundCondition + " THEN 1 ELSE 0 END), 0) AS refund, " +
+		"COALESCE(SUM(CASE WHEN " + adminTransactionReferralCondition + " THEN 1 ELSE 0 END), 0) AS referral_cashback, " +
+		"COALESCE(SUM(CASE WHEN " + adminTransactionActivityCondition + " THEN 1 ELSE 0 END), 0) AS activity"
+)
+
+func adminTransactionCategoryCondition(category billingapp.AdminTransactionCategory) string {
+	switch category {
+	case "":
+		return ""
+	case billingapp.AdminTransactionCategoryAll:
+		return adminTransactionAllCondition
+	case billingapp.AdminTransactionCategoryRecharge:
+		return adminTransactionRechargeCondition
+	case billingapp.AdminTransactionCategorySpend:
+		return adminTransactionSpendCondition
+	case billingapp.AdminTransactionCategoryRefund:
+		return adminTransactionRefundCondition
+	case billingapp.AdminTransactionCategoryReferralCashback:
+		return adminTransactionReferralCondition
+	case billingapp.AdminTransactionCategoryActivity:
+		return adminTransactionActivityCondition
+	default:
+		return "1 = 0"
+	}
+}
+
 func applyAdminTransactionFilter(query *gorm.DB, filter billingapp.AdminTransactionFilter) *gorm.DB {
 	if filter.Type != "" {
 		query = query.Where("transaction_type = ?", string(filter.Type))
+	}
+	if condition := adminTransactionCategoryCondition(filter.Category); condition != "" {
+		query = query.Where(condition)
 	}
 	if filter.Direction != "" {
 		query = query.Where("direction = ?", string(filter.Direction))
@@ -156,11 +195,47 @@ func applyAdminTransactionFilter(query *gorm.DB, filter billingapp.AdminTransact
 	return query
 }
 
-func (r *BillingRepo) ListAdminTransactions(ctx context.Context, filter billingapp.AdminTransactionFilter, offset, limit int) ([]billingapp.AdminTransaction, int64, error) {
-	var total int64
-	if err := applyAdminTransactionFilter(r.db.WithContext(ctx).Model(&WalletTransactionModel{}), filter).
-		Count(&total).Error; err != nil {
-		return nil, 0, fmt.Errorf("count admin transactions: %w", err)
+func (r *BillingRepo) ListAdminTransactions(ctx context.Context, filter billingapp.AdminTransactionFilter, offset, limit int) ([]billingapp.AdminTransaction, int64, billingapp.AdminTransactionFacets, error) {
+	facetFilter := filter
+	if facetFilter.Category != "" {
+		facetFilter.Category = billingapp.AdminTransactionCategoryAll
+	}
+	var facetRow struct {
+		All              int64 `gorm:"column:all_count"`
+		Recharge         int64 `gorm:"column:recharge"`
+		Spend            int64 `gorm:"column:spend"`
+		Refund           int64 `gorm:"column:refund"`
+		ReferralCashback int64 `gorm:"column:referral_cashback"`
+		Activity         int64 `gorm:"column:activity"`
+	}
+	if err := applyAdminTransactionFilter(r.db.WithContext(ctx).Model(&WalletTransactionModel{}), facetFilter).
+		Select(adminTransactionFacetSelect).
+		Scan(&facetRow).Error; err != nil {
+		return nil, 0, billingapp.AdminTransactionFacets{}, fmt.Errorf("count admin transaction facets: %w", err)
+	}
+	facets := billingapp.AdminTransactionFacets{
+		All:              facetRow.All,
+		Recharge:         facetRow.Recharge,
+		Spend:            facetRow.Spend,
+		Refund:           facetRow.Refund,
+		ReferralCashback: facetRow.ReferralCashback,
+		Activity:         facetRow.Activity,
+	}
+	total := facets.All
+	switch filter.Category {
+	case "", billingapp.AdminTransactionCategoryAll:
+	case billingapp.AdminTransactionCategoryRecharge:
+		total = facets.Recharge
+	case billingapp.AdminTransactionCategorySpend:
+		total = facets.Spend
+	case billingapp.AdminTransactionCategoryRefund:
+		total = facets.Refund
+	case billingapp.AdminTransactionCategoryReferralCashback:
+		total = facets.ReferralCashback
+	case billingapp.AdminTransactionCategoryActivity:
+		total = facets.Activity
+	default:
+		total = 0
 	}
 	var models []WalletTransactionModel
 	if err := applyAdminTransactionFilter(r.db.WithContext(ctx).Model(&WalletTransactionModel{}), filter).
@@ -168,7 +243,7 @@ func (r *BillingRepo) ListAdminTransactions(ctx context.Context, filter billinga
 		Offset(offset).
 		Limit(limit).
 		Find(&models).Error; err != nil {
-		return nil, 0, fmt.Errorf("list admin transactions: %w", err)
+		return nil, 0, billingapp.AdminTransactionFacets{}, fmt.Errorf("list admin transactions: %w", err)
 	}
 	nos := make([]string, len(models))
 	for i := range models {
@@ -176,13 +251,13 @@ func (r *BillingRepo) ListAdminTransactions(ctx context.Context, filter billinga
 	}
 	reversedBy, err := r.reversalsByOriginalNo(ctx, nos)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, billingapp.AdminTransactionFacets{}, err
 	}
 	items := make([]billingapp.AdminTransaction, len(models))
 	for i := range models {
 		items[i] = adminTransactionFromModel(models[i], reversedBy)
 	}
-	return items, total, nil
+	return items, total, facets, nil
 }
 
 func (r *BillingRepo) GetAdminTransaction(ctx context.Context, id uint) (*billingapp.AdminTransaction, error) {

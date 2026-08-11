@@ -7444,6 +7444,12 @@ paths:
           schema:
             type: string
             enum: [recharge, debit, refund, freeze, credit, withdrawal, manual_adjustment, card_redeem, transfer]
+        - name: category
+          in: query
+          description: Business category used by the admin finance filter. All is the union of the five categories; recharge includes Alipay and redemption-code credits; activity includes check-in, leaderboard, and registration rewards.
+          schema:
+            type: string
+            enum: [all, recharge, spend, refund, referral_cashback, activity]
         - name: direction
           in: query
           schema:
@@ -14469,6 +14475,7 @@ components:
         - total
         - offset
         - limit
+        - facets
       properties:
         items:
           type: array
@@ -14479,6 +14486,26 @@ components:
         offset:
           type: integer
         limit:
+          type: integer
+        facets:
+          $ref: "#/components/schemas/AdminTransactionFacets"
+      additionalProperties: false
+
+    AdminTransactionFacets:
+      type: object
+      required: [all, recharge, spend, refund, referralCashback, activity]
+      properties:
+        all:
+          type: integer
+        recharge:
+          type: integer
+        spend:
+          type: integer
+        refund:
+          type: integer
+        referralCashback:
+          type: integer
+        activity:
           type: integer
       additionalProperties: false
 

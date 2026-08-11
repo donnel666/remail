@@ -4051,6 +4051,36 @@ func (e GetAdminTransactionsParamsType) Valid() bool {
 	}
 }
 
+// Defines values for GetAdminTransactionsParamsCategory.
+const (
+	GetAdminTransactionsParamsCategoryActivity         GetAdminTransactionsParamsCategory = "activity"
+	GetAdminTransactionsParamsCategoryAll              GetAdminTransactionsParamsCategory = "all"
+	GetAdminTransactionsParamsCategoryRecharge         GetAdminTransactionsParamsCategory = "recharge"
+	GetAdminTransactionsParamsCategoryReferralCashback GetAdminTransactionsParamsCategory = "referral_cashback"
+	GetAdminTransactionsParamsCategoryRefund           GetAdminTransactionsParamsCategory = "refund"
+	GetAdminTransactionsParamsCategorySpend            GetAdminTransactionsParamsCategory = "spend"
+)
+
+// Valid indicates whether the value is a known member of the GetAdminTransactionsParamsCategory enum.
+func (e GetAdminTransactionsParamsCategory) Valid() bool {
+	switch e {
+	case GetAdminTransactionsParamsCategoryActivity:
+		return true
+	case GetAdminTransactionsParamsCategoryAll:
+		return true
+	case GetAdminTransactionsParamsCategoryRecharge:
+		return true
+	case GetAdminTransactionsParamsCategoryReferralCashback:
+		return true
+	case GetAdminTransactionsParamsCategoryRefund:
+		return true
+	case GetAdminTransactionsParamsCategorySpend:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetAdminTransactionsParamsDirection.
 const (
 	In  GetAdminTransactionsParamsDirection = "in"
@@ -4485,37 +4515,37 @@ func (e GetWalletTransactionsParamsScope) Valid() bool {
 
 // Defines values for GetWalletTransactionsParamsType.
 const (
-	GetWalletTransactionsParamsTypeCardRedeem       GetWalletTransactionsParamsType = "card_redeem"
-	GetWalletTransactionsParamsTypeCredit           GetWalletTransactionsParamsType = "credit"
-	GetWalletTransactionsParamsTypeDebit            GetWalletTransactionsParamsType = "debit"
-	GetWalletTransactionsParamsTypeFreeze           GetWalletTransactionsParamsType = "freeze"
-	GetWalletTransactionsParamsTypeManualAdjustment GetWalletTransactionsParamsType = "manual_adjustment"
-	GetWalletTransactionsParamsTypeRecharge         GetWalletTransactionsParamsType = "recharge"
-	GetWalletTransactionsParamsTypeRefund           GetWalletTransactionsParamsType = "refund"
-	GetWalletTransactionsParamsTypeTransfer         GetWalletTransactionsParamsType = "transfer"
-	GetWalletTransactionsParamsTypeWithdrawal       GetWalletTransactionsParamsType = "withdrawal"
+	CardRedeem       GetWalletTransactionsParamsType = "card_redeem"
+	Credit           GetWalletTransactionsParamsType = "credit"
+	Debit            GetWalletTransactionsParamsType = "debit"
+	Freeze           GetWalletTransactionsParamsType = "freeze"
+	ManualAdjustment GetWalletTransactionsParamsType = "manual_adjustment"
+	Recharge         GetWalletTransactionsParamsType = "recharge"
+	Refund           GetWalletTransactionsParamsType = "refund"
+	Transfer         GetWalletTransactionsParamsType = "transfer"
+	Withdrawal       GetWalletTransactionsParamsType = "withdrawal"
 )
 
 // Valid indicates whether the value is a known member of the GetWalletTransactionsParamsType enum.
 func (e GetWalletTransactionsParamsType) Valid() bool {
 	switch e {
-	case GetWalletTransactionsParamsTypeCardRedeem:
+	case CardRedeem:
 		return true
-	case GetWalletTransactionsParamsTypeCredit:
+	case Credit:
 		return true
-	case GetWalletTransactionsParamsTypeDebit:
+	case Debit:
 		return true
-	case GetWalletTransactionsParamsTypeFreeze:
+	case Freeze:
 		return true
-	case GetWalletTransactionsParamsTypeManualAdjustment:
+	case ManualAdjustment:
 		return true
-	case GetWalletTransactionsParamsTypeRecharge:
+	case Recharge:
 		return true
-	case GetWalletTransactionsParamsTypeRefund:
+	case Refund:
 		return true
-	case GetWalletTransactionsParamsTypeTransfer:
+	case Transfer:
 		return true
-	case GetWalletTransactionsParamsTypeWithdrawal:
+	case Withdrawal:
 		return true
 	default:
 		return false
@@ -6230,6 +6260,16 @@ type AdminTaskView struct {
 	UpdatedAt          time.Time          `json:"updatedAt"`
 }
 
+// AdminTransactionFacets defines model for AdminTransactionFacets.
+type AdminTransactionFacets struct {
+	Activity         int `json:"activity"`
+	All              int `json:"all"`
+	Recharge         int `json:"recharge"`
+	ReferralCashback int `json:"referralCashback"`
+	Refund           int `json:"refund"`
+	Spend            int `json:"spend"`
+}
+
 // AdminTransactionItem defines model for AdminTransactionItem.
 type AdminTransactionItem struct {
 	// Amount Signed point amount with up to 6 decimal places.
@@ -6269,6 +6309,7 @@ type AdminTransactionItemTransactionType string
 
 // AdminTransactionListResponse defines model for AdminTransactionListResponse.
 type AdminTransactionListResponse struct {
+	Facets AdminTransactionFacets `json:"facets"`
 	Items  []AdminTransactionItem `json:"items"`
 	Limit  int                    `json:"limit"`
 	Offset int                    `json:"offset"`
@@ -10679,10 +10720,13 @@ type PostAdminTicketRefundParams struct {
 
 // GetAdminTransactionsParams defines parameters for GetAdminTransactions.
 type GetAdminTransactionsParams struct {
-	Offset      *int                                 `form:"offset,omitempty" json:"offset,omitempty"`
-	Limit       *int                                 `form:"limit,omitempty" json:"limit,omitempty"`
-	Search      *string                              `form:"search,omitempty" json:"search,omitempty"`
-	Type        *GetAdminTransactionsParamsType      `form:"type,omitempty" json:"type,omitempty"`
+	Offset *int                            `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *int                            `form:"limit,omitempty" json:"limit,omitempty"`
+	Search *string                         `form:"search,omitempty" json:"search,omitempty"`
+	Type   *GetAdminTransactionsParamsType `form:"type,omitempty" json:"type,omitempty"`
+
+	// Category Business category used by the admin finance filter. All is the union of the five categories; recharge includes Alipay and redemption-code credits; activity includes check-in, leaderboard, and registration rewards.
+	Category    *GetAdminTransactionsParamsCategory  `form:"category,omitempty" json:"category,omitempty"`
 	Direction   *GetAdminTransactionsParamsDirection `form:"direction,omitempty" json:"direction,omitempty"`
 	CreatedFrom *time.Time                           `form:"createdFrom,omitempty" json:"createdFrom,omitempty"`
 	CreatedTo   *time.Time                           `form:"createdTo,omitempty" json:"createdTo,omitempty"`
@@ -10690,6 +10734,9 @@ type GetAdminTransactionsParams struct {
 
 // GetAdminTransactionsParamsType defines parameters for GetAdminTransactions.
 type GetAdminTransactionsParamsType string
+
+// GetAdminTransactionsParamsCategory defines parameters for GetAdminTransactions.
+type GetAdminTransactionsParamsCategory string
 
 // GetAdminTransactionsParamsDirection defines parameters for GetAdminTransactions.
 type GetAdminTransactionsParamsDirection string
@@ -23691,6 +23738,14 @@ func (siw *ServerInterfaceWrapper) GetAdminTransactions(c *gin.Context) {
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "type", c.Request.URL.Query(), &params.Type, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
 	if err != nil {
 		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter type: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "category" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "category", c.Request.URL.Query(), &params.Category, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter category: %w", err), http.StatusBadRequest)
 		return
 	}
 

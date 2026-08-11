@@ -138,6 +138,21 @@ func (h *BillingHandler) GetAdminTransactions(c *gin.Context) {
 		}
 		filter.Type = txType
 	}
+	if rawCategory := strings.TrimSpace(c.Query("category")); rawCategory != "" {
+		category := billingapp.AdminTransactionCategory(rawCategory)
+		switch category {
+		case billingapp.AdminTransactionCategoryAll,
+			billingapp.AdminTransactionCategoryRecharge,
+			billingapp.AdminTransactionCategorySpend,
+			billingapp.AdminTransactionCategoryRefund,
+			billingapp.AdminTransactionCategoryReferralCashback,
+			billingapp.AdminTransactionCategoryActivity:
+			filter.Category = category
+		default:
+			writeBillingError(c, domain.ErrInvalidFilter)
+			return
+		}
+	}
 	if rawDir := strings.TrimSpace(c.Query("direction")); rawDir != "" {
 		dir, valid := domain.NormalizeTransactionDirection(rawDir)
 		if !valid {
@@ -160,6 +175,14 @@ func (h *BillingHandler) GetAdminTransactions(c *gin.Context) {
 		Total:  result.Total,
 		Offset: result.Offset,
 		Limit:  result.Limit,
+		Facets: AdminTransactionFacetsResponse{
+			All:              result.Facets.All,
+			Recharge:         result.Facets.Recharge,
+			Spend:            result.Facets.Spend,
+			Refund:           result.Facets.Refund,
+			ReferralCashback: result.Facets.ReferralCashback,
+			Activity:         result.Facets.Activity,
+		},
 	})
 }
 

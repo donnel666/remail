@@ -342,11 +342,21 @@ type AdminTransactionItem struct {
 	ReversalOfNo    *string   `json:"reversalOfNo"`
 }
 
+type AdminTransactionFacetsResponse struct {
+	All              int64 `json:"all"`
+	Recharge         int64 `json:"recharge"`
+	Spend            int64 `json:"spend"`
+	Refund           int64 `json:"refund"`
+	ReferralCashback int64 `json:"referralCashback"`
+	Activity         int64 `json:"activity"`
+}
+
 type AdminTransactionListResponse struct {
-	Items  []AdminTransactionItem `json:"items"`
-	Total  int64                  `json:"total"`
-	Offset int                    `json:"offset"`
-	Limit  int                    `json:"limit"`
+	Items  []AdminTransactionItem         `json:"items"`
+	Total  int64                          `json:"total"`
+	Offset int                            `json:"offset"`
+	Limit  int                            `json:"limit"`
+	Facets AdminTransactionFacetsResponse `json:"facets"`
 }
 
 type ReverseTransactionResponse struct {
