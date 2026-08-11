@@ -27,7 +27,7 @@ func TestSetCardsExpireAtRollsBackFailedChunk(t *testing.T) {
 	require.NoError(t, db.Callback().Update().Before("gorm:update").Register(callbackName, func(tx *gorm.DB) {
 		updates++
 		if updates == 2 {
-			tx.AddError(errors.New("forced second chunk failure"))
+			_ = tx.AddError(errors.New("forced second chunk failure"))
 		}
 	}))
 	t.Cleanup(func() { require.NoError(t, db.Callback().Update().Remove(callbackName)) })

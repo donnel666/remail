@@ -14,6 +14,31 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func collectFunctionCalls(function *ast.FuncDecl, functions map[string]*ast.FuncDecl, seen, calls map[string]bool) {
+	if function == nil || function.Body == nil || seen[function.Name.Name] {
+		return
+	}
+	seen[function.Name.Name] = true
+	ast.Inspect(function.Body, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		var name string
+		switch callee := call.Fun.(type) {
+		case *ast.SelectorExpr:
+			name = callee.Sel.Name
+		case *ast.Ident:
+			name = callee.Name
+		default:
+			return true
+		}
+		calls[name] = true
+		collectFunctionCalls(functions[name], functions, seen, calls)
+		return true
+	})
+}
+
 func TestAsynqTasksUseBoundedUniquenessInsteadOfFixedTaskIDs(t *testing.T) {
 	_, currentFile, _, ok := runtime.Caller(0)
 	require.True(t, ok)
@@ -53,6 +78,12 @@ func TestAsynqTasksUseBoundedUniquenessInsteadOfFixedTaskIDs(t *testing.T) {
 		if err != nil {
 			return err
 		}
+		functions := map[string]*ast.FuncDecl{}
+		for _, declaration := range file.Decls {
+			if function, ok := declaration.(*ast.FuncDecl); ok && function.Body != nil {
+				functions[function.Name.Name] = function
+			}
+		}
 		ast.Inspect(file, func(node ast.Node) bool {
 			call, ok := node.(*ast.CallExpr)
 			if !ok {
@@ -84,17 +115,7 @@ func TestAsynqTasksUseBoundedUniquenessInsteadOfFixedTaskIDs(t *testing.T) {
 			}
 			dispatchers++
 			options := map[string]bool{}
-			ast.Inspect(function.Body, func(node ast.Node) bool {
-				call, ok := node.(*ast.CallExpr)
-				if !ok {
-					return true
-				}
-				selector, ok := call.Fun.(*ast.SelectorExpr)
-				if ok {
-					options[selector.Sel.Name] = true
-				}
-				return true
-			})
+			collectFunctionCalls(function, functions, map[string]bool{}, options)
 			for _, required := range []string{"Unique", "Timeout", "Retention"} {
 				if !options[required] {
 					t.Errorf("%s must configure asynq.%s: %s", function.Name.Name, required, fset.Position(function.Pos()))
