@@ -2,6 +2,7 @@ package domain
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -129,20 +130,21 @@ type OrderEvent struct {
 }
 
 var (
-	ErrInvalidOrderRequest    = errors.New("trade: invalid order request")
-	ErrOrderNotFound          = errors.New("trade: order not found")
-	ErrOrderForbidden         = errors.New("trade: order forbidden")
-	ErrOrderStateConflict     = errors.New("trade: order state conflict")
-	ErrIdempotencyRequired    = errors.New("trade: idempotency key required")
-	ErrIdempotencyConflict    = errors.New("trade: idempotency conflict")
-	ErrInsufficientInventory  = errors.New("trade: insufficient inventory")
-	ErrInsufficientBalance    = errors.New("trade: insufficient balance")
-	ErrUpstreamUnavailable    = errors.New("trade: upstream unavailable")
-	ErrUpstreamPriceProtected = errors.New("trade: upstream price protection blocked checkout")
-	ErrProjectUnavailable     = errors.New("trade: project is not available")
-	ErrOrderCompensationError = errors.New("trade: order compensation failed")
-	ErrCheckoutBusy           = errors.New("trade: checkout already queued for user")
-	ErrCheckoutOverloaded     = errors.New("trade: checkout queue is full")
+	ErrInvalidOrderRequest          = errors.New("trade: invalid order request")
+	ErrOrderNotFound                = errors.New("trade: order not found")
+	ErrOrderForbidden               = errors.New("trade: order forbidden")
+	ErrOrderStateConflict           = errors.New("trade: order state conflict")
+	ErrIdempotencyRequired          = errors.New("trade: idempotency key required")
+	ErrIdempotencyConflict          = errors.New("trade: idempotency conflict")
+	ErrInsufficientInventory        = errors.New("trade: insufficient inventory")
+	ErrDefinitiveInventoryExhausted = fmt.Errorf("trade: definitive inventory exhausted: %w", ErrInsufficientInventory)
+	ErrInsufficientBalance          = errors.New("trade: insufficient balance")
+	ErrUpstreamUnavailable          = errors.New("trade: upstream unavailable")
+	ErrUpstreamPriceProtected       = errors.New("trade: upstream price protection blocked checkout")
+	ErrProjectUnavailable           = errors.New("trade: project is not available")
+	ErrOrderCompensationError       = errors.New("trade: order compensation failed")
+	ErrCheckoutBusy                 = errors.New("trade: checkout already queued for user")
+	ErrCheckoutOverloaded           = errors.New("trade: checkout queue is full")
 )
 
 func NormalizeServiceMode(value string) (ServiceMode, bool) {

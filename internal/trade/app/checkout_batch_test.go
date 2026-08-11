@@ -392,6 +392,7 @@ type checkoutInventorySpy struct {
 	releasedOrderNo string
 	marks           int
 	marked          InventoryAvailabilityCommand
+	markResult      bool
 }
 
 type checkoutGmailSupplySpy struct {
@@ -467,7 +468,7 @@ func (s *checkoutGmailSupplySpy) FindLocalPurchase(context.Context, string) (*Gm
 func (s *checkoutInventorySpy) MarkInventoryUnavailable(_ context.Context, cmd InventoryAvailabilityCommand) (bool, error) {
 	s.marks++
 	s.marked = cmd
-	return true, nil
+	return s.markResult, nil
 }
 
 func (s *checkoutInventorySpy) HasAvailableInventory(context.Context, InventoryAvailabilityCommand) (bool, error) {
@@ -1134,7 +1135,7 @@ func TestCheckoutInventoryPrecheckFailsOpenAndSkipsIdempotentReplay(t *testing.T
 func TestCheckoutBatchMarksAllocatorExhaustionAndSkipsMatchingTail(t *testing.T) {
 	repo := &batchRepoSpy{orders: map[string]domain.Order{}}
 	wallet := &batchWalletSpy{}
-	inventory := &checkoutInventorySpy{available: true}
+	inventory := &checkoutInventorySpy{available: true, allocationErr: domain.ErrDefinitiveInventoryExhausted}
 	uc := NewUseCase(repo, &batchOrderingSpy{}, wallet, inventory, batchTokenSpy{})
 	requests := make([]CheckoutRequest, 100)
 	for i := range requests {
@@ -1157,6 +1158,29 @@ func TestCheckoutBatchMarksAllocatorExhaustionAndSkipsMatchingTail(t *testing.T)
 	require.Equal(t, uint(9), inventory.marked.ProductID)
 	require.Equal(t, 1, repo.topTx)
 	require.Zero(t, wallet.locks)
+}
+
+func TestCheckoutBatchDoesNotSkipBoundedAllocatorMiss(t *testing.T) {
+	repo := &batchRepoSpy{orders: map[string]domain.Order{}}
+	inventory := &checkoutInventorySpy{available: true, allocationErr: domain.ErrInsufficientInventory}
+	uc := NewUseCase(repo, &batchOrderingSpy{}, &batchWalletSpy{}, inventory, batchTokenSpy{})
+	requests := []CheckoutRequest{
+		batchRequest("bounded-miss-1", 2),
+		batchRequest("bounded-miss-2", 2),
+	}
+	for i := range requests {
+		requests[i].SupplyPolicy = string(domain.SupplyPolicyPublicOnly)
+	}
+
+	items, err := uc.CheckoutBatch(context.Background(), requests)
+
+	require.NoError(t, err)
+	require.Len(t, items, len(requests))
+	for _, item := range items {
+		require.ErrorIs(t, item.Err, domain.ErrInsufficientInventory)
+	}
+	require.Equal(t, len(requests), inventory.allocationCalls)
+	require.Equal(t, len(requests), inventory.marks)
 }
 
 func TestCheckoutBatchDoesNotSkipPrivateFirstTailFromSharedPublicCorrection(t *testing.T) {

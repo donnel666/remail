@@ -73,7 +73,7 @@ func reusableExplicitAliasCondition(projectID uint, emailSuffix string) (string,
 	filter := ""
 	args := make([]any, 0, 2)
 	if suffix := normalizeCandidateSuffix(emailSuffix); suffix != "" {
-		filter = " AND SUBSTRING_INDEX(LOWER(TRIM(ea.email)), '@', -1) = ?"
+		filter = " AND ea.email_domain = ?"
 		args = append(args, suffix)
 	}
 	args = append(args, projectID)
@@ -555,18 +555,145 @@ func gmailSourceCandidateQuery(db *gorm.DB, projectID uint, buyerUserID uint, sc
 }
 
 func (r *Repo) ListMicrosoftSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.MicrosoftMailbox, bucket *uint16, limit int, emailSuffix string) ([]allocapp.MicrosoftCandidate, error) {
+	suffix := normalizeCandidateSuffix(emailSuffix)
+	if mailbox == domain.MicrosoftMailboxMain {
+		type candidateRow struct {
+			ResourceID      uint       `gorm:"column:resource_id"`
+			EmailAddress    string     `gorm:"column:email_address"`
+			QualityScore    int        `gorm:"column:quality_score"`
+			LastAllocatedAt *time.Time `gorm:"column:last_allocated_at"`
+		}
+		base := func() ([]string, []any) {
+			where := []string{
+				"ms.status = 'normal'",
+				microsoftNotUnderBlockingMaintenanceCondition,
+				microsoftProjectUnmatchedCondition,
+			}
+			args := []any{projectID}
+			switch scope {
+			case domain.SupplyScopeOwned:
+				where = append(where, "ms.for_sale = FALSE", "er.owner_user_id = ?")
+				args = append(args, buyerUserID)
+			default:
+				where = append(where, "ms.for_sale = TRUE", "u.status = 'active'", "u.role IN ('supplier', 'admin', 'super_admin')")
+			}
+			return where, args
+		}
+		list := func(from string, distinct bool, where []string, args []any) ([]candidateRow, error) {
+			selectSQL := "SELECT "
+			if distinct {
+				selectSQL += "DISTINCT "
+			}
+			query := selectSQL + `ms.id AS resource_id,
+       ms.email_address AS email_address,
+       ms.quality_score AS quality_score,
+       ms.last_allocated_at AS last_allocated_at
+FROM ` + from + `
+JOIN email_resources er ON er.id = ms.id AND er.type = 'microsoft'
+JOIN users u ON u.id = er.owner_user_id
+WHERE ` + strings.Join(where, " AND ") + `
+ORDER BY ms.last_allocated_at ASC, ms.quality_score DESC, ms.id ASC
+LIMIT ?`
+			var rows []candidateRow
+			if err := r.dbFor(ctx).Raw(query, append(args, limit)...).Scan(&rows).Error; err != nil {
+				return nil, err
+			}
+			return rows, nil
+		}
+
+		mainWhere, mainArgs := base()
+		if suffix != "" {
+			mainWhere = append(mainWhere, "ms.email_domain = ?")
+			mainArgs = append(mainArgs, suffix)
+		}
+		mainWhere = append(mainWhere, microsoftUnusedMainCondition)
+		mainArgs = append(mainArgs, projectID)
+		if bucket != nil {
+			mainWhere = append(mainWhere, "ms.alloc_bucket = ?")
+			mainArgs = append(mainArgs, *bucket)
+		}
+		mainFrom := "microsoft_resources ms"
+		if suffix != "" && bucket != nil {
+			mainFrom += " FORCE INDEX (idx_microsoft_suffix_bucket)"
+		}
+		rows, err := list(mainFrom, false, mainWhere, mainArgs)
+		if err != nil {
+			return nil, fmt.Errorf("list microsoft main source allocation candidates: %w", err)
+		}
+
+		aliasWhere, aliasArgs := base()
+		aliasWhere = append(aliasWhere, "ea.status = 'normal'")
+		if suffix != "" {
+			aliasWhere = append(aliasWhere, "ea.email_domain = ?")
+			aliasArgs = append(aliasArgs, suffix)
+		}
+		aliasWhere = append(aliasWhere, `NOT EXISTS (
+            SELECT 1 FROM microsoft_allocations history_alias
+            WHERE history_alias.explicit_alias_id = ea.id
+              AND history_alias.project_id = ?
+              AND history_alias.mailbox = 'alias'
+        )`, `NOT EXISTS (
+            SELECT 1 FROM microsoft_allocations active_alias
+            WHERE active_alias.active_kind = 2
+              AND active_alias.active_project_id = 0
+              AND active_alias.active_entity_id = ea.id
+        )`)
+		aliasArgs = append(aliasArgs, projectID)
+		if bucket != nil {
+			if suffix != "" {
+				aliasWhere = append(aliasWhere, "ea.alloc_bucket = ?")
+			} else {
+				aliasWhere = append(aliasWhere, "ms.alloc_bucket = ?")
+			}
+			aliasArgs = append(aliasArgs, *bucket)
+		}
+		aliasFrom := "explicit_aliases ea"
+		if suffix != "" && bucket != nil {
+			aliasFrom += " FORCE INDEX (idx_explicit_aliases_suffix_bucket)"
+		}
+		aliasRows, err := list(aliasFrom+" JOIN microsoft_resources ms ON ms.id = ea.resource_id", true, aliasWhere, aliasArgs)
+		if err != nil {
+			return nil, fmt.Errorf("list microsoft explicit alias source allocation candidates: %w", err)
+		}
+
+		rows = append(rows, aliasRows...)
+		sort.Slice(rows, func(i, j int) bool {
+			left, right := rows[i], rows[j]
+			if (left.LastAllocatedAt == nil) != (right.LastAllocatedAt == nil) {
+				return left.LastAllocatedAt == nil
+			}
+			if left.LastAllocatedAt != nil && !left.LastAllocatedAt.Equal(*right.LastAllocatedAt) {
+				return left.LastAllocatedAt.Before(*right.LastAllocatedAt)
+			}
+			if left.QualityScore != right.QualityScore {
+				return left.QualityScore > right.QualityScore
+			}
+			return left.ResourceID < right.ResourceID
+		})
+		result := make([]allocapp.MicrosoftCandidate, 0, min(limit, len(rows)))
+		seen := make(map[uint]struct{}, len(rows))
+		for _, row := range rows {
+			if _, exists := seen[row.ResourceID]; exists {
+				continue
+			}
+			seen[row.ResourceID] = struct{}{}
+			result = append(result, allocapp.MicrosoftCandidate{
+				ResourceID: row.ResourceID, EmailAddress: row.EmailAddress, QualityScore: row.QualityScore,
+			})
+			if len(result) == limit {
+				break
+			}
+		}
+		return result, nil
+	}
+
 	args := []any{projectID}
 	where := []string{
 		"ms.status = 'normal'",
 		microsoftNotUnderBlockingMaintenanceCondition,
 		microsoftProjectUnmatchedCondition,
 	}
-	suffix := normalizeCandidateSuffix(emailSuffix)
-	if mailbox == domain.MicrosoftMailboxMain {
-		condition, conditionArgs := microsoftMainCandidateCondition(projectID, suffix)
-		where = append(where, condition)
-		args = append(args, conditionArgs...)
-	} else if suffix != "" {
+	if suffix != "" {
 		where = append(where, "ms.email_domain = ?")
 		args = append(args, suffix)
 	}
@@ -1119,7 +1246,7 @@ func (r *Repo) FindReusableExplicitAlias(ctx context.Context, projectID uint, re
 	suffixSQL := ""
 	args := []any{resourceID, projectID}
 	if suffix != "" {
-		suffixSQL = " AND SUBSTRING_INDEX(LOWER(TRIM(ea.email)), '@', -1) = ?"
+		suffixSQL = " AND ea.email_domain = ?"
 		args = append(args, suffix)
 	}
 	var candidate allocapp.AliasCandidate
@@ -2346,7 +2473,7 @@ GROUP BY ms.email_domain`, append(scopeArgs, projectID)...)
 			return nil, err
 		}
 		explicitAlias, err := r.microsoftSuffixCount(ctx, `
-SELECT SUBSTRING_INDEX(LOWER(TRIM(ea.email)), '@', -1) AS suffix, COUNT(*) AS count
+SELECT ea.email_domain AS suffix, COUNT(*) AS count
 FROM explicit_aliases ea
 JOIN microsoft_resources ms ON ms.id = ea.resource_id
 JOIN email_resources er ON er.id = ms.id AND er.type = 'microsoft'
@@ -2367,7 +2494,7 @@ WHERE ea.status = 'normal'
         AND active_alias.active_project_id = 0
         AND active_alias.active_entity_id = ea.id
   )
-GROUP BY SUBSTRING_INDEX(LOWER(TRIM(ea.email)), '@', -1)`, append(scopeArgs, projectID)...)
+GROUP BY ea.email_domain`, append(scopeArgs, projectID)...)
 		if err != nil {
 			return nil, err
 		}

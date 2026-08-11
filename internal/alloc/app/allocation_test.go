@@ -117,6 +117,7 @@ type allocationLockRepo struct {
 	rootUnavailable      map[uint]bool
 	candidateUnavailable map[uint]bool
 	emptyBuckets         map[uint16]bool
+	noCandidates         bool
 	explicitAlias        *AliasCandidate
 	writeConflict        bool
 	guardConflict        bool
@@ -235,6 +236,9 @@ func (r *allocationLockRepo) ListMicrosoftSourceCandidates(_ context.Context, _ 
 			return nil, nil
 		}
 	}
+	if r.noCandidates {
+		return nil, nil
+	}
 	if len(r.candidates) == 0 {
 		return []MicrosoftCandidate{{ResourceID: 1}, {ResourceID: 2}}, nil
 	}
@@ -261,6 +265,26 @@ func TestSpecifiedSuffixProbesEveryBucketBeforeGlobalFallback(t *testing.T) {
 	}
 	if !slices.Equal(repo.listedBuckets, wantBuckets) {
 		t.Fatalf("listed buckets = %v, want all configured probes then global %v", repo.listedBuckets, wantBuckets)
+	}
+}
+
+func TestMicrosoftEmptyGlobalFallbackIsDefinitive(t *testing.T) {
+	repo := &allocationLockRepo{
+		config: ProductAllocationConfig{
+			ProjectID: 4, ProductID: 5, ProductType: coredomain.ProductTypeMicrosoft, MainWeight: 1,
+		},
+		noCandidates: true,
+	}
+
+	result, err := NewUseCase(repo).Allocate(context.Background(), AllocateCommand{
+		OrderNo: "order-empty", BuyerUserID: 3, ProjectProductID: 5, EmailSuffix: "missing.example",
+	})
+
+	if result != nil || !errors.Is(err, domain.ErrDefinitiveInventoryExhausted) {
+		t.Fatalf("Allocate() result = %#v, error = %v; want definitive exhaustion", result, err)
+	}
+	if repo.lists != bucketProbeCount+1 {
+		t.Fatalf("candidate queries = %d, want %d bucket probes plus one global confirmation", repo.lists, bucketProbeCount+1)
 	}
 }
 
@@ -518,6 +542,9 @@ func TestAllocationReusesHeldRootAcrossBucketProbes(t *testing.T) {
 
 	if !errors.Is(err, domain.ErrInsufficientInventory) {
 		t.Fatalf("Allocate() error = %v, want insufficient inventory", err)
+	}
+	if errors.Is(err, domain.ErrDefinitiveInventoryExhausted) {
+		t.Fatalf("Allocate() error = %v, candidate recheck misses must stay bounded/non-definitive", err)
 	}
 	if repo.waiting != 1 || repo.skipping != 0 {
 		t.Fatalf("root lock calls wait/skip = %d/%d, want 1/0", repo.waiting, repo.skipping)

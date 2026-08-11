@@ -226,6 +226,7 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *d
 				}
 			}
 			sawResourceTypeBusy := false
+			allRoutesDefinitive := config.ProductType == coredomain.ProductTypeMicrosoft
 			for _, scope := range scopes {
 				attemptCmd := cmd
 				attemptCmd.SupplyScope = scope
@@ -258,10 +259,14 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *d
 					if !errors.Is(err, domain.ErrInsufficientInventory) {
 						return err
 					}
+					allRoutesDefinitive = allRoutesDefinitive && errors.Is(err, domain.ErrDefinitiveInventoryExhausted)
 				}
 			}
 			if sawResourceTypeBusy {
 				return errResourceTypeBusy
+			}
+			if allRoutesDefinitive {
+				return domain.ErrDefinitiveInventoryExhausted
 			}
 			return domain.ErrInsufficientInventory
 		})
@@ -273,7 +278,8 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *d
 				preferredRandomProductType = coredomain.ProductTypeMicrosoft
 			}
 		}
-		if err == nil || (!errors.Is(err, domain.ErrInsufficientInventory) && !errors.Is(err, domain.ErrAllocationConflict) && !errors.Is(err, errResourceTypeBusy)) {
+		if err == nil || errors.Is(err, domain.ErrDefinitiveInventoryExhausted) ||
+			(!errors.Is(err, domain.ErrInsufficientInventory) && !errors.Is(err, domain.ErrAllocationConflict) && !errors.Is(err, errResourceTypeBusy)) {
 			break
 		}
 		if attempt < attempts-1 {
@@ -966,9 +972,8 @@ func (uc *UseCase) MarkProductInventoryUnavailable(ctx context.Context, req Prod
 		return false, nil
 	}
 	req.EmailSuffix = normalizeEmailSuffix(req.EmailSuffix)
-	// The shared snapshot contains public supply only, so one project-level
-	// correction covers every buyer and both supply policies. Avoid repeating
-	// the expensive aggregate confirmation while that correction is live.
+	// Honor project-level markers written by older instances during a rolling
+	// deployment. New allocator misses only schedule the background read model.
 	req.PublicOnly = false
 	alreadyUnavailable, err := uc.inventoryCache.IsProductUnavailable(ctx, req)
 	if err != nil {
@@ -977,20 +982,15 @@ func (uc *UseCase) MarkProductInventoryUnavailable(ctx context.Context, req Prod
 	if alreadyUnavailable {
 		return true, nil
 	}
-	// Bounded allocator probes can be exhausted by stale/concurrently claimed
-	// candidates while later resources remain usable. Only publish a zero after
-	// the exact read model independently confirms that this scope is exhausted.
-	fresh, err := uc.repo.GetProductInventoryTotals(ctx, req.ProjectID)
-	if err != nil {
+	// An allocator miss must never synchronously rebuild the project's full
+	// suffix inventory. The scheduled read model can correct the snapshot later;
+	// the indexed allocator remains the authoritative request-time check.
+	if err := uc.inventoryCache.RequeueInventory(ctx, []InventoryCacheEntry{{
+		Kind: InventoryCacheProducts, ProjectID: req.ProjectID,
+	}}); err != nil {
 		return false, err
 	}
-	// The shared snapshot is entirely public. Correct both the total and public
-	// views together, regardless of which supply policy observed the miss.
-	available, known := productInventoryAvailable(fresh, req)
-	if !known || available {
-		return false, nil
-	}
-	return uc.inventoryCache.MarkProductUnavailable(ctx, req)
+	return false, uc.ScheduleInventoryRefresh(ctx)
 }
 
 func loadCachedInventory[T any](
@@ -1442,10 +1442,11 @@ func (uc *UseCase) allocateMicrosoftOnce(ctx context.Context, cmd AllocateComman
 	preferences := microsoftMailboxPreferences(cmd.OrderNo, config)
 	now := time.Now().UTC()
 	resourceBusy := false
+	definitiveExhausted := len(preferences) > 0
 	for _, mailbox := range preferences {
 		buckets := bucketProbeSequence(cmd.OrderNo, config.ProjectID, string(mailbox), MicrosoftBucketCount)
 		for _, bucket := range buckets {
-			result, busy, err := uc.tryMicrosoftBucket(ctx, cmd, config, mailbox, &bucket, now)
+			result, busy, _, err := uc.tryMicrosoftBucket(ctx, cmd, config, mailbox, &bucket, now)
 			if err != nil {
 				return nil, err
 			}
@@ -1454,11 +1455,14 @@ func (uc *UseCase) allocateMicrosoftOnce(ctx context.Context, cmd AllocateComman
 				return result, nil
 			}
 		}
+		// ponytail: bucket=nil preserves correctness but may scan a dense exhausted
+		// suffix; materialize project/scope/suffix availability only if that ceiling matters.
 		platform.RecordAllocationBucketFallback(string(domain.AllocationTypeMicrosoft), "probes_exhausted")
-		result, busy, err := uc.tryMicrosoftBucket(ctx, cmd, config, mailbox, nil, now)
+		result, busy, empty, err := uc.tryMicrosoftBucket(ctx, cmd, config, mailbox, nil, now)
 		if err != nil {
 			return nil, err
 		}
+		definitiveExhausted = definitiveExhausted && empty
 		resourceBusy = resourceBusy || busy
 		if result != nil {
 			return result, nil
@@ -1467,27 +1471,30 @@ func (uc *UseCase) allocateMicrosoftOnce(ctx context.Context, cmd AllocateComman
 	if resourceBusy {
 		return nil, errResourceTypeBusy
 	}
+	if definitiveExhausted {
+		return nil, domain.ErrDefinitiveInventoryExhausted
+	}
 	return nil, domain.ErrInsufficientInventory
 }
 
-func (uc *UseCase) tryMicrosoftBucket(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig, mailbox domain.MicrosoftMailbox, bucket *uint16, now time.Time) (*domain.UnifiedAllocation, bool, error) {
+func (uc *UseCase) tryMicrosoftBucket(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig, mailbox domain.MicrosoftMailbox, bucket *uint16, now time.Time) (*domain.UnifiedAllocation, bool, bool, error) {
 	limit := candidateWindowSizeValue()
 	if bucket == nil {
 		limit = globalCandidateWindowValue()
 	}
 	candidates, err := uc.repo.ListMicrosoftSourceCandidates(ctx, config.ProjectID, cmd.BuyerUserID, cmd.SupplyScope, mailbox, bucket, limit, cmd.EmailSuffix)
 	if err != nil {
-		return nil, false, err
+		return nil, false, false, err
 	}
 	if len(candidates) == 0 {
-		return nil, false, nil
+		return nil, false, true, nil
 	}
 	resourceBusy := false
 	for _, candidate := range candidates {
 		platform.AddAllocationCandidateAttempts(string(domain.AllocationTypeMicrosoft), 1)
 		result, err := uc.tryMicrosoftCandidate(ctx, cmd, config, mailbox, candidate, now)
 		if err == nil && result != nil {
-			return result, false, nil
+			return result, false, false, nil
 		}
 		if errors.Is(err, errResourceRootBusy) {
 			resourceBusy = true
@@ -1498,9 +1505,9 @@ func (uc *UseCase) tryMicrosoftBucket(ctx context.Context, cmd AllocateCommand, 
 		}
 		// A failed allocation INSERT retains index locks until this transaction
 		// rolls back, so conflicts must never advance to another candidate.
-		return nil, false, err
+		return nil, false, false, err
 	}
-	return nil, resourceBusy, nil
+	return nil, resourceBusy, false, nil
 }
 
 func (uc *UseCase) tryMicrosoftCandidate(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig, mailbox domain.MicrosoftMailbox, candidate MicrosoftCandidate, now time.Time) (*domain.UnifiedAllocation, error) {

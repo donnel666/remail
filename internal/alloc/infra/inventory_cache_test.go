@@ -219,22 +219,20 @@ func TestColdInventoryRemainsUnknownWhenImmediateRefreshEnqueueFails(t *testing.
 	}
 }
 
-func TestCachedInventoryPrecheckAndAllocatorZeroCorrection(t *testing.T) {
+func TestCachedInventoryAllocatorMissSchedulesRefreshWithoutAggregate(t *testing.T) {
 	server := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
 	t.Cleanup(func() { require.NoError(t, client.Close()) })
 	cache := NewInventoryCache(client)
 	repo := &inventoryCacheRepoStub{totals: allocapp.ProjectProductInventoryTotals{
-		ProjectID: 10, TotalAvailable: 5,
+		ProjectID: 10,
 		Items: []allocapp.ProductInventoryTotal{{
-			ProductID: 20, TotalAvailable: 5, PublicAvailable: 5,
-			Suffixes: []allocapp.ProductInventorySuffixTotal{
-				{Suffix: "outlook.com", TotalAvailable: 0, PublicAvailable: 0},
-				{Suffix: "hotmail.com", TotalAvailable: 5, PublicAvailable: 5},
-			},
+			ProductID: 20,
+			Suffixes:  []allocapp.ProductInventorySuffixTotal{{Suffix: "hotmail.com"}},
 		}},
 	}}
-	useCase := allocapp.NewUseCase(repo)
+	queue := &inventoryRefreshQueueStub{}
+	useCase := allocapp.NewUseCase(repo, queue)
 	useCase.SetInventoryCache(cache)
 
 	totals := &allocapp.ProjectProductInventoryTotals{
@@ -248,61 +246,27 @@ func TestCachedInventoryPrecheckAndAllocatorZeroCorrection(t *testing.T) {
 			},
 		}},
 	}
-	require.NoError(t, cache.SetProductInventoryTotals(context.Background(), 10, totals, 24*time.Hour))
+	require.NoError(t, cache.RefreshProductInventoryTotals(context.Background(), 10, totals, 24*time.Hour))
 
-	available, err := useCase.HasProductInventory(context.Background(), allocapp.ProductInventoryAvailabilityRequest{
+	marked, err := useCase.MarkProductInventoryUnavailable(context.Background(), allocapp.ProductInventoryAvailabilityRequest{
 		ProjectID: 10, ProductID: 20, EmailSuffix: "@OUTLOOK.COM", PublicOnly: true,
 	})
 	require.NoError(t, err)
-	require.True(t, available)
-
-	server.FastForward(time.Hour)
-	ttlBefore := server.TTL(inventoryCacheKey(allocapp.InventoryCacheProducts, 10))
-	marked, err := useCase.MarkProductInventoryUnavailable(context.Background(), allocapp.ProductInventoryAvailabilityRequest{
-		ProjectID: 10, ProductID: 20, EmailSuffix: "outlook.com", PublicOnly: true,
-	})
-	require.NoError(t, err)
-	require.True(t, marked)
-	require.Equal(t, ttlBefore, server.TTL(inventoryCacheKey(allocapp.InventoryCacheProducts, 10)))
-	require.Equal(t, allocapp.InventoryRefreshInterval, server.TTL(productUnavailableMarkerKey(
+	require.False(t, marked)
+	require.Zero(t, repo.productCalls, "allocator misses must not run aggregate SQL")
+	require.Equal(t, 1, queue.calls)
+	require.Zero(t, client.Exists(context.Background(), productUnavailableMarkerKey(
 		allocapp.ProductInventoryAvailabilityRequest{ProjectID: 10, ProductID: 20, EmailSuffix: "outlook.com"},
-	)))
-	marked, err = useCase.MarkProductInventoryUnavailable(context.Background(), allocapp.ProductInventoryAvailabilityRequest{
-		ProjectID: 10, ProductID: 20, EmailSuffix: "outlook.com",
-	})
+	)).Val())
+	result, err := useCase.RefreshInventoryCacheBefore(context.Background(), time.Now())
 	require.NoError(t, err)
-	require.True(t, marked)
-	require.Equal(t, 1, repo.productCalls, "a live global correction must suppress duplicate aggregate queries")
-
-	available, err = useCase.HasProductInventory(context.Background(), allocapp.ProductInventoryAvailabilityRequest{
-		ProjectID: 10, ProductID: 20, EmailSuffix: "outlook.com", PublicOnly: true,
-	})
-	require.NoError(t, err)
-	require.False(t, available)
-	available, err = useCase.HasProductInventory(context.Background(), allocapp.ProductInventoryAvailabilityRequest{
-		ProjectID: 10, ProductID: 20, EmailSuffix: "outlook.com",
-	})
-	require.NoError(t, err)
-	require.True(t, available, "the public cache must not reject private-first allocation")
+	require.Equal(t, 1, result.Updated)
+	require.Equal(t, 1, repo.productCalls, "the queued due entry must run the aggregate in the worker")
 
 	updated, err := cache.GetProductInventoryTotals(context.Background(), 10)
 	require.NoError(t, err)
-	require.EqualValues(t, 5, updated.TotalAvailable)
-	require.EqualValues(t, 5, updated.Items[0].TotalAvailable)
-	require.EqualValues(t, 5, updated.Items[0].PublicAvailable)
-	require.Zero(t, updated.Items[0].Suffixes[0].TotalAvailable)
-	require.Zero(t, updated.Items[0].Suffixes[0].PublicAvailable)
-
-	// A background calculation that started before allocator exhaustion must not
-	// overwrite the immediate zero correction while its 10-minute marker lives.
-	require.NoError(t, cache.RefreshProductInventoryTotals(context.Background(), 10, totals, 24*time.Hour))
-	updated, err = cache.GetProductInventoryTotals(context.Background(), 10)
-	require.NoError(t, err)
-	require.Zero(t, updated.Items[0].Suffixes[0].TotalAvailable)
-	server.FastForward(allocapp.InventoryRefreshInterval + time.Second)
-	updated, err = cache.GetProductInventoryTotals(context.Background(), 10)
-	require.NoError(t, err)
-	require.EqualValues(t, 7, updated.Items[0].Suffixes[0].TotalAvailable)
+	require.Zero(t, updated.TotalAvailable)
+	require.Equal(t, "hotmail.com", updated.Items[0].Suffixes[0].Suffix)
 }
 
 func TestCachedInventoryPrecheckTreatsColdSnapshotAsKnownZero(t *testing.T) {

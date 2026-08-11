@@ -39,6 +39,7 @@ import (
 	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 var (
@@ -736,6 +737,60 @@ func TestCheckoutAllocatorExhaustionWithoutCacheCreatesNoDebitMySQL(t *testing.T
 	summary, err := billinginfra.NewBillingRepo(db).GetOrCreateWalletSummary(context.Background(), 2)
 	require.NoError(t, err)
 	require.Equal(t, "10.00", summary.Wallet.ConsumerBalance)
+}
+
+type microsoftCandidateQueryLogger struct {
+	logger.Interface
+	calls int
+}
+
+func (l *microsoftCandidateQueryLogger) Trace(ctx context.Context, begin time.Time, fc func() (string, int64), err error) {
+	sql, rows := fc()
+	if strings.Contains(sql, "ORDER BY ms.last_allocated_at ASC, ms.quality_score DESC, ms.id ASC") {
+		l.calls++
+	}
+	l.Interface.Trace(ctx, begin, func() (string, int64) { return sql, rows }, err)
+}
+
+func TestCheckoutBatchDefinitiveMicrosoftMissRunsOneProbeSequenceMySQL(t *testing.T) {
+	db := newTradeMySQLTestDB(t)
+	seedTradeBase(t, db, "microsoft")
+	require.NoError(t, db.Table("project_products").Where("id = ?", 20).Update("code_price", "0.000000").Error)
+	queryLog := &microsoftCandidateQueryLogger{Interface: db.Logger}
+	db = db.Session(&gorm.Session{Logger: queryLog})
+
+	projects := coreapp.NewProjectUseCase(coreinfra.NewProjectRepo(db))
+	wallet := billingapp.NewWalletUseCase(billinginfra.NewBillingRepo(db))
+	allocation := allocapp.NewUseCase(allocinfra.NewRepo(db))
+	tokens := openapiapp.NewUseCase(openapiinfra.NewRepo(db))
+	uc := tradeapp.NewUseCase(
+		tradeinfra.NewRepo(db),
+		coreOrderingAdapter{projects: projects, db: db},
+		billingWalletAdapter{wallet: wallet},
+		allocationAdapter{alloc: allocation},
+		orderTokenAdapter{tokens: tokens},
+	)
+	requests := make([]tradeapp.CheckoutRequest, 100)
+	for i := range requests {
+		requests[i] = tradeapp.CheckoutRequest{
+			UserID: 2, ProjectID: 10, ProductID: 20, BatchQuantity: len(requests),
+			ServiceMode: "code", SupplyPolicy: "public_only", EmailSuffix: "missing.example",
+			ClientChannel:  tradedomain.ClientChannelConsole,
+			IdempotencyKey: fmt.Sprintf("missing-suffix-%03d", i), RequestID: fmt.Sprintf("req-missing-suffix-%03d", i),
+		}
+	}
+
+	items, err := uc.CheckoutBatch(context.Background(), requests)
+
+	require.NoError(t, err)
+	require.Len(t, items, len(requests))
+	for _, item := range items {
+		require.ErrorIs(t, item.Err, tradedomain.ErrInsufficientInventory)
+	}
+	require.Equal(t, 10, queryLog.calls, "four bucket probes plus one global confirmation execute main and alias SQL once")
+	var orders int64
+	require.NoError(t, db.Table("orders").Count(&orders).Error)
+	require.EqualValues(t, 1, orders, "the remaining 99 items must short-circuit before opening checkout transactions")
 }
 
 func TestCheckoutMarkFailedErrorPreservesPendingOrderForRetryMySQL(t *testing.T) {

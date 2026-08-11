@@ -1949,11 +1949,13 @@ func (uc *UseCase) checkoutBatch(ctx context.Context, prepared []checkoutPrepara
 		}
 		result, itemErr := uc.checkoutPrepared(ctx, prepared[index])
 		items[index] = CheckoutBatchItem{Result: result, Err: itemErr, attempted: true}
-		if errors.Is(itemErr, domain.ErrInsufficientInventory) && result != nil && result.Created &&
-			uc.markCheckoutInventoryUnavailable(ctx, prepared[index]) {
-			for tail := index + 1; tail < len(prepared); tail++ {
-				if sameCheckoutInventoryKey(prepared[index], prepared[tail]) && prepared[tail].existing == nil {
-					prepared[tail].prepareErr = domain.ErrInsufficientInventory
+		if errors.Is(itemErr, domain.ErrInsufficientInventory) && result != nil && result.Created {
+			marked := uc.markCheckoutInventoryUnavailable(ctx, prepared[index])
+			if marked || errors.Is(itemErr, domain.ErrDefinitiveInventoryExhausted) {
+				for tail := index + 1; tail < len(prepared); tail++ {
+					if sameCheckoutInventoryKey(prepared[index], prepared[tail]) && prepared[tail].existing == nil {
+						prepared[tail].prepareErr = domain.ErrInsufficientInventory
+					}
 				}
 			}
 		}
@@ -3309,7 +3311,7 @@ func (uc *UseCase) resumeCheckout(ctx context.Context, order domain.Order, quote
 						order = *failed
 						continue
 					}
-					return &CheckoutResult{Order: *failed}, checkoutErrorForFailedOrder(*failed)
+					return &CheckoutResult{Order: *failed}, checkoutInventoryError(*failed, err)
 				}
 				return nil, err
 			}
@@ -3383,7 +3385,7 @@ func (uc *UseCase) resumeCheckout(ctx context.Context, order domain.Order, quote
 						order = *failed
 						continue
 					}
-					return &CheckoutResult{Order: *failed}, checkoutErrorForFailedOrder(*failed)
+					return &CheckoutResult{Order: *failed}, checkoutInventoryError(*failed, err)
 				}
 			}
 			receiveStartedAt := uc.now()
@@ -3784,6 +3786,13 @@ func checkoutErrorForFailedOrder(order domain.Order) error {
 	default:
 		return domain.ErrInvalidOrderRequest
 	}
+}
+
+func checkoutInventoryError(order domain.Order, allocationErr error) error {
+	if errors.Is(allocationErr, domain.ErrDefinitiveInventoryExhausted) {
+		return domain.ErrDefinitiveInventoryExhausted
+	}
+	return checkoutErrorForFailedOrder(order)
 }
 
 func apiKeyFingerprint(apiKeyID *uint) uint {

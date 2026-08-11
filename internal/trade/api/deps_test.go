@@ -11,6 +11,9 @@ import (
 
 func TestMapAllocationInvalidRequest(t *testing.T) {
 	require.ErrorIs(t, mapAllocationError(allocdomain.ErrInvalidAllocationRequest), domain.ErrInvalidOrderRequest)
+	mapped := mapAllocationError(allocdomain.ErrDefinitiveInventoryExhausted)
+	require.ErrorIs(t, mapped, domain.ErrDefinitiveInventoryExhausted)
+	require.ErrorIs(t, mapped, domain.ErrInsufficientInventory)
 }
 
 func TestApplyOrderingDiscountUsesLedgerPrecision(t *testing.T) {

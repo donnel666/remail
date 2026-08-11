@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -17,8 +20,10 @@ import (
 	coredomain "github.com/donnel666/remail/internal/core/domain"
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/platform/testmysql"
+	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 var (
@@ -1145,6 +1150,129 @@ INSERT INTO explicit_aliases(resource_id, owner_user_id, email, status) VALUES
 	require.Equal(t, "second@outlook.com", allocation.Email)
 }
 
+func TestMicrosoftSplitCandidatesPreserveOrderingMySQL(t *testing.T) {
+	db := newAllocMySQLTestDB(t)
+	seedAllocBase(t, db, "microsoft", 1, 0, 0)
+	seedMicrosoftResources(t, db, 1, 1000, 2, true, "normal")
+	require.NoError(t, db.Exec(`
+UPDATE microsoft_resources
+SET email_address = CASE id
+        WHEN 1000 THEN 'low@hotmail.com'
+        ELSE 'primary@outlook.com'
+    END,
+    email_domain = CASE id
+        WHEN 1000 THEN 'hotmail.com'
+        ELSE 'outlook.com'
+    END,
+    quality_score = CASE id
+        WHEN 1000 THEN 10
+        ELSE 90
+    END
+WHERE id IN (1000, 1001)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO explicit_aliases(resource_id, owner_user_id, email, status)
+VALUES (1001, 1, 'high@hotmail.com', 'normal')`).Error)
+
+	candidates, err := NewRepo(db).ListMicrosoftSourceCandidates(
+		context.Background(), 10, 2, domain.SupplyScopePublic,
+		domain.MicrosoftMailboxMain, nil, 2, "hotmail.com",
+	)
+	require.NoError(t, err)
+	require.Len(t, candidates, 2)
+	require.Equal(t, []uint{1001, 1000}, []uint{candidates[0].ResourceID, candidates[1].ResourceID})
+}
+
+type candidateSQLCapture struct {
+	gormlogger.Interface
+	queries []string
+}
+
+func (l *candidateSQLCapture) Trace(ctx context.Context, begin time.Time, fc func() (string, int64), err error) {
+	sqlText, rows := fc()
+	if strings.Contains(sqlText, "ORDER BY ms.last_allocated_at ASC, ms.quality_score DESC, ms.id ASC") {
+		l.queries = append(l.queries, sqlText)
+	}
+	l.Interface.Trace(ctx, begin, func() (string, int64) { return sqlText, rows }, err)
+}
+
+func TestMicrosoftCandidateFullPlansShowBucketBoundAndGlobalSuffixScanMySQL(t *testing.T) {
+	db := newAllocMySQLTestDB(t)
+	seedAllocBase(t, db, "microsoft", 1, 0, 0)
+	const resources = 2048
+	seedMicrosoftResources(t, db, 1, 1000, resources, true, "normal")
+
+	type aliasSeed struct {
+		ResourceID  uint `gorm:"column:resource_id"`
+		OwnerUserID uint `gorm:"column:owner_user_id"`
+		Email       string
+		Status      string
+	}
+	type matchSeed struct {
+		ResourceID    uint      `gorm:"column:resource_id"`
+		ProjectID     uint      `gorm:"column:project_id"`
+		FirstMatched  time.Time `gorm:"column:first_matched_at"`
+		LastMatched   time.Time `gorm:"column:last_matched_at"`
+		EvidenceCount uint      `gorm:"column:evidence_count"`
+		LastScanned   time.Time `gorm:"column:last_scanned_at"`
+	}
+	now := time.Now().UTC()
+	aliases := make([]aliasSeed, resources)
+	matches := make([]matchSeed, resources)
+	for i := range resources {
+		resourceID := uint(1000 + i)
+		aliases[i] = aliasSeed{
+			ResourceID: resourceID, OwnerUserID: 1,
+			Email: fmt.Sprintf("alias%d@example.com", resourceID), Status: "normal",
+		}
+		matches[i] = matchSeed{
+			ResourceID: resourceID, ProjectID: 10, FirstMatched: now, LastMatched: now,
+			EvidenceCount: 1, LastScanned: now,
+		}
+	}
+	require.NoError(t, db.Table("explicit_aliases").CreateInBatches(aliases, 1000).Error)
+	require.NoError(t, db.Table("microsoft_resource_project_matches").CreateInBatches(matches, 1000).Error)
+	require.NoError(t, db.Exec("ANALYZE TABLE microsoft_resources, explicit_aliases, microsoft_resource_project_matches").Error)
+
+	capture := &candidateSQLCapture{Interface: db.Logger}
+	loggedDB := db.Session(&gorm.Session{Logger: capture})
+	repo := NewRepo(loggedDB)
+	bucket := coredomain.MicrosoftAllocationBucket(1000)
+	for _, selectedBucket := range []*uint16{&bucket, nil} {
+		candidates, err := repo.ListMicrosoftSourceCandidates(
+			context.Background(), 10, 2, domain.SupplyScopePublic,
+			domain.MicrosoftMailboxMain, selectedBucket, 8, "example.com",
+		)
+		require.NoError(t, err)
+		require.Empty(t, candidates)
+	}
+	require.Len(t, capture.queries, 4, "main and alias SQL must be captured for bucket and global fallback")
+
+	bucketMain, bucketAlias := capture.queries[0], capture.queries[1]
+	globalMain, globalAlias := capture.queries[2], capture.queries[3]
+	require.Contains(t, bucketMain, "FORCE INDEX (idx_microsoft_suffix_bucket)")
+	require.Contains(t, bucketMain, "ms.alloc_bucket =")
+	require.Contains(t, bucketAlias, "FORCE INDEX (idx_explicit_aliases_suffix_bucket)")
+	require.Contains(t, bucketAlias, "ea.alloc_bucket =")
+	require.NotContains(t, globalMain, "FORCE INDEX")
+	require.NotContains(t, globalMain, "ms.alloc_bucket =")
+	require.NotContains(t, globalAlias, "FORCE INDEX")
+	require.NotContains(t, globalAlias, "ea.alloc_bucket =")
+
+	requireExplainTargetUsesIndex(t, db, bucketMain, "ms", "idx_microsoft_suffix_bucket")
+	requireExplainTargetUsesIndex(t, db, bucketAlias, "ea", "idx_explicit_aliases_suffix_bucket")
+	requireExplainTargetUsesIndex(t, db, globalMain, "ms", "")
+	requireExplainTargetUsesIndex(t, db, globalAlias, "ea", "idx_explicit_aliases_suffix_bucket")
+
+	bucketMainWork := explainAnalyzeTargetWork(t, db, bucketMain, "ms")
+	bucketAliasWork := explainAnalyzeTargetWork(t, db, bucketAlias, "ea")
+	globalMainWork := explainAnalyzeTargetWork(t, db, globalMain, "ms")
+	globalAliasWork := explainAnalyzeTargetWork(t, db, globalAlias, "ea")
+	require.LessOrEqual(t, bucketMainWork, float64(2))
+	require.LessOrEqual(t, bucketAliasWork, float64(2))
+	require.GreaterOrEqual(t, globalMainWork, float64(resources))
+	require.GreaterOrEqual(t, globalAliasWork, float64(resources))
+}
+
 func TestDotInventoryCountsOnlyDistinctAllocatableVariantsMySQL(t *testing.T) {
 	db := newAllocMySQLTestDB(t)
 	seedAllocBase(t, db, "microsoft", 0, 1, 0)
@@ -1425,7 +1553,10 @@ VALUES ('ord-explain-domain-active', 10, 20, 2000, 'public', ?, 'a@d2000.example
 	require.NoError(t, db.Exec(`
 INSERT INTO allocation_daily_usages(usage_date, resource_type, resource_id, usage_kind, used_count)
 VALUES (CURRENT_DATE(), 'microsoft', 1000, 'plus', 1)`).Error)
-	require.NoError(t, db.Exec("ANALYZE TABLE domain_resources").Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO explicit_aliases(resource_id, owner_user_id, email, status)
+VALUES (1000, 1, 'indexed@example.com', 'normal')`).Error)
+	require.NoError(t, db.Exec("ANALYZE TABLE microsoft_resources, explicit_aliases, domain_resources").Error)
 
 	for _, item := range []struct {
 		table string
@@ -1434,6 +1565,7 @@ VALUES (CURRENT_DATE(), 'microsoft', 1000, 'plus', 1)`).Error)
 		{"microsoft_resources", "idx_microsoft_alloc_public"},
 		{"microsoft_resources", "idx_microsoft_alloc_owned"},
 		{"microsoft_resources", "idx_microsoft_inventory_public"},
+		{"microsoft_resources", "idx_microsoft_suffix_bucket"},
 		{"domain_resources", "idx_domain_alloc_public"},
 		{"domain_resources", "idx_domain_alloc_owned"},
 		{"domain_resources", "idx_domain_alloc_tld_public"},
@@ -1442,6 +1574,7 @@ VALUES (CURRENT_DATE(), 'microsoft', 1000, 'plus', 1)`).Error)
 		{"project_products", "idx_project_products_id_project"},
 		{"explicit_aliases", "idx_explicit_aliases_id_resource"},
 		{"explicit_aliases", "idx_explicit_aliases_alloc_reuse"},
+		{"explicit_aliases", "idx_explicit_aliases_suffix_bucket"},
 		{"dot_aliases", "idx_dot_aliases_id_resource"},
 		{"dot_aliases", "idx_dot_aliases_alloc_reuse"},
 		{"plus_aliases", "idx_plus_aliases_id_resource"},
@@ -1480,6 +1613,14 @@ VALUES (CURRENT_DATE(), 'microsoft', 1000, 'plus', 1)`).Error)
 	requireExplainUsesIndex(t, db,
 		"idx_microsoft_alloc_public",
 		"EXPLAIN SELECT id FROM microsoft_resources WHERE alloc_bucket = MOD(1000, 2048) AND for_sale = TRUE AND status = 'normal' ORDER BY last_allocated_at ASC, quality_score DESC, id ASC LIMIT 4",
+	)
+	requireExplainUsesIndex(t, db,
+		"idx_microsoft_suffix_bucket",
+		"EXPLAIN SELECT id FROM microsoft_resources FORCE INDEX (idx_microsoft_suffix_bucket) WHERE email_domain = 'example.com' AND alloc_bucket = MOD(1000, 2048) LIMIT 4",
+	)
+	requireExplainUsesIndex(t, db,
+		"idx_explicit_aliases_suffix_bucket",
+		"EXPLAIN SELECT resource_id FROM explicit_aliases FORCE INDEX (idx_explicit_aliases_suffix_bucket) WHERE email_domain = 'example.com' AND alloc_bucket = MOD(1000, 2048) AND status = 'normal' LIMIT 4",
 	)
 	requireExplainUsesIndex(t, db,
 		"idx_domain_alloc_public",
@@ -1544,6 +1685,25 @@ VALUES (CURRENT_DATE(), 'microsoft', 1000, 'plus', 1)`).Error)
 		"idx_domain_alloc_email_project",
 		"EXPLAIN SELECT 1 FROM domain_allocations FORCE INDEX (idx_domain_alloc_email_project) WHERE email = 'a@d2000.example.com' AND project_id = 10 LIMIT 1",
 	)
+
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, goose.SetDialect("mysql"))
+	require.NoError(t, goose.DownTo(sqlDB, allocMigrationsDir(t), 92))
+	requireIndexMissing(t, db, "microsoft_resources", "idx_microsoft_suffix_bucket")
+	requireIndexMissing(t, db, "explicit_aliases", "idx_explicit_aliases_suffix_bucket")
+	require.False(t, db.Migrator().HasColumn("explicit_aliases", "email_domain"))
+	require.False(t, db.Migrator().HasColumn("explicit_aliases", "alloc_bucket"))
+	require.NoError(t, goose.UpTo(sqlDB, allocMigrationsDir(t), 93))
+	requireIndexExists(t, db, "microsoft_resources", "idx_microsoft_suffix_bucket")
+	requireIndexMissing(t, db, "explicit_aliases", "idx_explicit_aliases_suffix_bucket")
+	require.False(t, db.Migrator().HasColumn("explicit_aliases", "email_domain"))
+	require.NoError(t, goose.UpTo(sqlDB, allocMigrationsDir(t), 94))
+	require.True(t, db.Migrator().HasColumn("explicit_aliases", "email_domain"))
+	require.True(t, db.Migrator().HasColumn("explicit_aliases", "alloc_bucket"))
+	requireIndexMissing(t, db, "explicit_aliases", "idx_explicit_aliases_suffix_bucket")
+	require.NoError(t, goose.UpTo(sqlDB, allocMigrationsDir(t), 95))
+	requireIndexExists(t, db, "explicit_aliases", "idx_explicit_aliases_suffix_bucket")
 }
 
 func seedAllocBase(t *testing.T, db *gorm.DB, productType string, mainWeight, dotWeight, plusWeight int) {
@@ -1687,6 +1847,63 @@ func requireExplainUsesIndex(t *testing.T, db *gorm.DB, expectedKey string, quer
 		}
 	}
 	require.True(t, usedExpectedKey, "expected query to use index %s, saw %v: %s", expectedKey, seenKeys, query)
+}
+
+func requireExplainTargetUsesIndex(t *testing.T, db *gorm.DB, query, targetTable, expectedKey string) {
+	t.Helper()
+	var rows []struct {
+		Table      sql.NullString `gorm:"column:table"`
+		Key        sql.NullString `gorm:"column:key"`
+		Rows       sql.NullInt64  `gorm:"column:rows"`
+		AccessType sql.NullString `gorm:"column:type"`
+		Extra      sql.NullString `gorm:"column:Extra"`
+	}
+	require.NoError(t, db.Raw("EXPLAIN "+query).Scan(&rows).Error)
+	for _, row := range rows {
+		if !row.Table.Valid || row.Table.String != targetTable {
+			continue
+		}
+		require.True(t, row.Key.Valid, "expected %s to use an index: %s", targetTable, query)
+		require.NotEqual(t, "ALL", row.AccessType.String, "unexpected full table scan on %s: %s", targetTable, query)
+		if expectedKey != "" {
+			require.Equal(t, expectedKey, row.Key.String, "unexpected index on %s: %s", targetTable, query)
+		}
+		t.Logf("EXPLAIN target=%s key=%s rows=%d extra=%s", targetTable, row.Key.String, row.Rows.Int64, row.Extra.String)
+		return
+	}
+	require.Failf(t, "target table missing from EXPLAIN", "target=%s query=%s", targetTable, query)
+}
+
+var explainActualRowsPattern = regexp.MustCompile(`actual time=[^)]* rows=([0-9.eE+-]+) loops=([0-9]+)`)
+
+func explainAnalyzeTargetWork(t *testing.T, db *gorm.DB, query, targetTable string) float64 {
+	t.Helper()
+	rows, err := db.Raw("EXPLAIN ANALYZE " + query).Rows()
+	require.NoError(t, err)
+	defer func() { require.NoError(t, rows.Close()) }()
+	work := float64(0)
+	plan := make([]string, 0)
+	for rows.Next() {
+		var line string
+		require.NoError(t, rows.Scan(&line))
+		plan = append(plan, line)
+		if !strings.Contains(line, " on "+targetTable) {
+			continue
+		}
+		match := explainActualRowsPattern.FindStringSubmatch(line)
+		if len(match) != 3 {
+			continue
+		}
+		actualRows, parseErr := strconv.ParseFloat(match[1], 64)
+		require.NoError(t, parseErr)
+		loops, parseErr := strconv.ParseFloat(match[2], 64)
+		require.NoError(t, parseErr)
+		work = max(work, actualRows*loops)
+	}
+	require.NoError(t, rows.Err())
+	require.Positive(t, work, "missing actual rows/loops for %s in plan:\n%s", targetTable, strings.Join(plan, "\n"))
+	t.Logf("EXPLAIN ANALYZE target=%s work=%.0f\n%s", targetTable, work, strings.Join(plan, "\n"))
+	return work
 }
 
 func seedDomainResources(t *testing.T, db *gorm.DB, ownerID, startID, count int) {
