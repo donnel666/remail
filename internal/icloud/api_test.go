@@ -140,6 +140,7 @@ func TestPatchAdminICloudResourceRequiresOperateOnlyForSensitiveFields(t *testin
 
 	for index, body := range []string{
 		`{"version":1,"forSale":false}`,
+		`{"version":1,"expireAt":"2026-09-08T11:00:00Z"}`,
 		`{"version":1,"credentials":{"host":"p119-maildomainws.icloud.com","dsid":"dsid","clientId":"client","clientBuildNumber":"build","clientMasteringNumber":"master","cookie":"secret"}}`,
 	} {
 		request = httptest.NewRequest(http.MethodPatch, "/v1/admin/icloud/resources/1", bytes.NewBufferString(body))
@@ -155,7 +156,7 @@ func TestPatchAdminICloudResourceRequiresOperateOnlyForSensitiveFields(t *testin
 			t.Fatalf("sensitive edit %d status=%d body=%s", index, recorder.Code, recorder.Body.String())
 		}
 	}
-	if operateChecks != 2 {
-		t.Fatalf("operate checks = %d, want 2", operateChecks)
+	if operateChecks != 3 {
+		t.Fatalf("operate checks = %d, want 3", operateChecks)
 	}
 }

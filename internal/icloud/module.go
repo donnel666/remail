@@ -47,6 +47,14 @@ var (
 
 const iCloudMaxAliases = 750
 
+func normalizeICloudResourceExpireAt(value time.Time) time.Time {
+	return value.UTC().Truncate(time.Millisecond)
+}
+
+func validICloudResourceExpireAt(value, now time.Time) bool {
+	return !value.IsZero() && value.After(now.UTC())
+}
+
 // OutboundDelivery sends HME validation probes through the outbound mail transport.
 type OutboundDelivery interface {
 	Send(context.Context, mailtransportdomain.OutboundMessage) error
@@ -262,6 +270,7 @@ type iCloudImportModel struct {
 	FailureObjectKey   string     `gorm:"column:failure_object_key"`
 	Status             string     `gorm:"column:status"`
 	ErrorStrategy      string     `gorm:"column:error_strategy"`
+	ResourceExpireAt   time.Time  `gorm:"column:resource_expire_at"`
 	ImportedCount      int        `gorm:"column:imported_count"`
 	AcceptedCount      int        `gorm:"column:accepted_count"`
 	SkippedCount       int        `gorm:"column:skipped_count"`

@@ -55,6 +55,7 @@ export interface AdminICloudImportRequest {
   content: string;
   ownerId: number;
   errorStrategy: AdminICloudImportErrorStrategy;
+  expireAt: string;
 }
 
 type AdminUserListDTO = components["schemas"]["AdminUserListResponse"];
@@ -179,6 +180,7 @@ export async function importAdminICloudResources(
   );
   formData.append("ownerId", String(request.ownerId));
   formData.append("errorStrategy", request.errorStrategy);
+  formData.append("expireAt", request.expireAt);
 
   const response = await unwrap<AdminICloudImportResponse>(
     await client.POST("/v1/admin/icloud/resources/imports", {
@@ -444,6 +446,44 @@ export function batchAdminICloudResourcesByFilter(
   signal?: AbortSignal,
 ) {
   return batchAdminICloudResources(action, filterSelection(filter), signal);
+}
+
+export function setAdminICloudResourcesExpirationByIds(
+  resourceIds: number[],
+  expireAt: string,
+  signal?: AbortSignal,
+) {
+  return setAdminICloudResourcesExpiration(
+    idsSelection(resourceIds),
+    expireAt,
+    signal,
+  );
+}
+
+export function setAdminICloudResourcesExpirationByFilter(
+  filter: AdminICloudResourceListFilter,
+  expireAt: string,
+  signal?: AbortSignal,
+) {
+  return setAdminICloudResourcesExpiration(
+    filterSelection(filter),
+    expireAt,
+    signal,
+  );
+}
+
+async function setAdminICloudResourcesExpiration(
+  selection: AdminICloudSelection,
+  expireAt: string,
+  signal?: AbortSignal,
+): Promise<AdminICloudBulkResponse> {
+  return unwrap(
+    await client.POST("/v1/admin/icloud/resources/batch/expiration", {
+      body: { selection, expireAt },
+      params: { header: commandHeaders() },
+      signal,
+    }),
+  );
 }
 
 async function batchAdminICloudResources(

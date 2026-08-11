@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
@@ -14,8 +14,11 @@ const mocks = vi.hoisted(() => ({
   alias: vi.fn(),
   batchByFilter: vi.fn(),
   batchByIds: vi.fn(),
+  expirationByFilter: vi.fn(),
+  expirationByIds: vi.fn(),
   importResources: vi.fn(),
   listResources: vi.fn(),
+  modalConfirm: vi.fn(),
   permissions: {} as Record<string, boolean>,
   selectionNotification: vi.fn(),
   tasks: vi.fn(),
@@ -38,6 +41,22 @@ vi.mock("@douyinfe/semi-ui", async () => {
   const Button = ({ children, disabled, onClick }: any) => (
     <button disabled={disabled} onClick={onClick} type="button">{children}</button>
   );
+  const dateInputValue = (value: unknown) =>
+    value instanceof Date && Number.isFinite(value.getTime())
+      ? value.toISOString().slice(0, 16)
+      : undefined;
+  const DatePicker = ({ "aria-label": ariaLabel, defaultValue, disabled, onChange, value }: any) => (
+    <input
+      aria-label={ariaLabel}
+      defaultValue={value === undefined ? dateInputValue(defaultValue) : undefined}
+      disabled={disabled}
+      onChange={(event) =>
+        onChange?.(event.target.value ? new Date(event.target.value) : null)
+      }
+      type="datetime-local"
+      value={dateInputValue(value)}
+    />
+  );
   const Input = ({ disabled, onChange, placeholder, value }: any) => (
     <input
       disabled={disabled}
@@ -55,6 +74,7 @@ vi.mock("@douyinfe/semi-ui", async () => {
         <button disabled={okButtonProps?.disabled} onClick={onOk} type="button">{okText}</button>
       </section>
     ) : null;
+  (Modal as any).confirm = mocks.modalConfirm;
   const Select = ({ onChange, optionList = [], value }: any) => (
     <select aria-label="owner" onChange={(event) => onChange?.(event.target.value)} value={value ?? ""}>
       {optionList.map((option: any) => (
@@ -95,7 +115,7 @@ vi.mock("@douyinfe/semi-ui", async () => {
   (Tabs as any).TabPane = TabPane;
   return {
     Button,
-    DatePicker: passthrough,
+    DatePicker,
     Dropdown: passthrough,
     Empty: passthrough,
     Input,
@@ -165,6 +185,8 @@ vi.mock("@/lib/admin-icloud-api", async (importOriginal) => ({
   listAdminICloudTasks: mocks.tasks,
   publishAdminICloudResource: vi.fn(),
   recoverAdminICloudResource: vi.fn(),
+  setAdminICloudResourcesExpirationByFilter: mocks.expirationByFilter,
+  setAdminICloudResourcesExpirationByIds: mocks.expirationByIds,
   unpublishAdminICloudResource: vi.fn(),
   updateAdminICloudResource: mocks.updateResource,
   validateAdminICloudResource: mocks.validate,
@@ -318,6 +340,7 @@ describe("admin iCloud modal workflows", () => {
         onMaintain={vi.fn()}
         onRecover={vi.fn()}
         onReplaceCredentials={vi.fn()}
+        onSetExpiration={vi.fn()}
         onToggleDisabled={vi.fn()}
         onTogglePublish={vi.fn()}
         refreshGeneration={0}
@@ -332,6 +355,39 @@ describe("admin iCloud modal workflows", () => {
     ]);
   });
 
+  it("exposes expiration as an operate-only resource action", () => {
+    const onSetExpiration = vi.fn();
+    render(
+      <ICloudDetailSheet
+        aliasLimit={750}
+        busyAction={null}
+        canFetchMessages={false}
+        canOperate
+        canReadMessages={false}
+        canReadOrders={false}
+        canReadTasks={false}
+        canWrite={false}
+        item={resourceDetail()}
+        loading={false}
+        onCancel={vi.fn()}
+        onDelete={vi.fn()}
+        onEdit={vi.fn()}
+        onMaintain={vi.fn()}
+        onRecover={vi.fn()}
+        onReplaceCredentials={vi.fn()}
+        onSetExpiration={onSetExpiration}
+        onToggleDisabled={vi.fn()}
+        onTogglePublish={vi.fn()}
+        refreshGeneration={0}
+        resourceId={41}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Set expiration" }));
+    expect(onSetExpiration).toHaveBeenCalledWith(expect.objectContaining({ id: 41 }));
+    expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+  });
+
   it("removes row selection without operate permission", async () => {
     mocks.permissions["core:resource/operate"] = false;
     render(<AdminICloudEmails />);
@@ -341,6 +397,39 @@ describe("admin iCloud modal workflows", () => {
     await waitFor(() => expect(mocks.selectionNotification).toHaveBeenCalled());
     const calls = mocks.selectionNotification.mock.calls;
     expect(calls[calls.length - 1]?.[0]).toMatchObject({ selectedCount: 0 });
+  });
+
+  it("exposes expiration for selected resources", async () => {
+    mocks.expirationByIds.mockResolvedValue({
+      affected: 1,
+      affectedResourceIds: [41],
+      reasonCounts: [],
+      requested: 1,
+      skipped: 0,
+      skippedResourceIds: [],
+    });
+    render(<AdminICloudEmails />);
+    fireEvent.click(await screen.findByRole("button", { name: "Select test row" }));
+
+    await waitFor(() => {
+      const calls = mocks.selectionNotification.mock.calls;
+      const options = calls[calls.length - 1]?.[0] as any;
+      expect(options.selectedCount).toBe(1);
+      expect(options.extraActions).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ key: "expiration", labelKey: "Set expiration" }),
+        ]),
+      );
+    });
+
+    const selectionCalls = mocks.selectionNotification.mock.calls;
+    const options = selectionCalls[selectionCalls.length - 1]?.[0] as any;
+    options.extraActions.find((action: any) => action.key === "expiration").onClick();
+    const confirmCalls = mocks.modalConfirm.mock.calls;
+    const confirmOptions = confirmCalls[confirmCalls.length - 1]?.[0] as any;
+    await act(async () => confirmOptions.onOk());
+
+    expect(mocks.expirationByIds).toHaveBeenCalledWith([41], expect.any(String));
   });
 
   it("shows an inline retry when task history fails", async () => {
@@ -398,11 +487,14 @@ describe("admin iCloud modal workflows", () => {
     fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [file] } });
     fireEvent.click(screen.getByRole("button", { name: "Import" }));
 
-    await waitFor(() => expect(mocks.importResources).toHaveBeenCalledWith({
-      content,
-      errorStrategy: "skip",
-      ownerId: 7,
-    }));
+    await waitFor(() => expect(mocks.importResources).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content,
+        errorStrategy: "skip",
+        expireAt: expect.any(String),
+        ownerId: 7,
+      }),
+    ));
     await waitFor(() => expect(onImported).toHaveBeenCalledTimes(1));
   });
 
@@ -427,11 +519,42 @@ describe("admin iCloud modal workflows", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Import" }));
 
-    await waitFor(() => expect(mocks.importResources).toHaveBeenCalledWith({
-      content: `main@icloud.com----${curl}`,
-      errorStrategy: "skip",
-      ownerId: 7,
-    }));
+    await waitFor(() => expect(mocks.importResources).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: `main@icloud.com----${curl}`,
+        errorStrategy: "skip",
+        expireAt: expect.any(String),
+        ownerId: 7,
+      }),
+    ));
+  });
+
+  it("updates a resource expiration from the edit modal", async () => {
+    const expireAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1_000);
+    render(
+      <EditICloudModal
+        canOperate
+        onCancel={vi.fn()}
+        onSaved={vi.fn()}
+        owners={[owner]}
+        target={resource()}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Resource expires at"), {
+      target: { value: expireAt.toISOString().slice(0, 16) },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(mocks.updateResource).toHaveBeenCalledWith(
+      41,
+      expect.objectContaining({
+        version: 3,
+        expireAt: expect.any(String),
+      }),
+    ));
+    const [, request] = mocks.updateResource.mock.calls[0] as [number, { expireAt: string }];
+    expect(new Date(request.expireAt).getTime()).toBeGreaterThan(Date.now());
   });
 
   it("blocks a primary-email change until the complete credentials are present", async () => {

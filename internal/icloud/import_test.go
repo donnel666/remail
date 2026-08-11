@@ -147,10 +147,13 @@ func TestICloudImportAcceptsAndPersistsPrivateSessionWithoutQueueSecrets(t *test
 	}
 	files := &icloudImportFileStore{}
 	service := NewService(db, queue, files)
+	now := time.Date(2026, 8, 7, 8, 0, 0, 0, time.UTC)
+	service.now = func() time.Time { return now }
 	service.SetImportOwnerValidator(func(context.Context, uint) (bool, error) { return true, nil })
 	secret := "X-APPLE-DS-WEB-SESSION-TOKEN=session; X-APPLE-WEBAUTH-USER=user; X-APPLE-WEBAUTH-TOKEN=token"
 	content := []byte("main@icloud.com----p119-maildomainws.icloud.com----123----client----build----mastering----" + secret)
-	accepted, reused, err := service.AcceptAdminICloudTXTFile(context.Background(), 9, 7, "icloud.txt", content, coreDomain.ImportErrorStrategySkip, "icloud-flow", "request-icloud", "/v1/admin/icloud/resources/imports")
+	expireAt := now.AddDate(0, 2, 0)
+	accepted, reused, err := service.AcceptAdminICloudTXTFile(context.Background(), 9, 7, "icloud.txt", content, coreDomain.ImportErrorStrategySkip, expireAt, "icloud-flow", "request-icloud", "/v1/admin/icloud/resources/imports")
 	if err != nil || reused || accepted == nil {
 		t.Fatalf("accept import: view=%#v reused=%v err=%v", accepted, reused, err)
 	}
@@ -172,12 +175,17 @@ func TestICloudImportAcceptsAndPersistsPrivateSessionWithoutQueueSecrets(t *test
 	if err := db.First(&resource).Error; err != nil {
 		t.Fatalf("read iCloud resource: %v", err)
 	}
-	if resource.Cookie != secret || resource.Status != iCloudResourcePending || !resource.ExpireAt.After(resource.CreatedAt) {
+	if resource.Cookie != secret || resource.Status != iCloudResourcePending || !resource.ExpireAt.Equal(expireAt) {
 		t.Fatalf("unexpected persisted resource: %#v", resource)
 	}
 	status, err := service.GetAdminICloudResourceImport(context.Background(), accepted.ImportID)
 	if err != nil || status.Status != iCloudImportImported || status.Imported != 1 || status.Accepted != 1 {
 		t.Fatalf("unexpected import status: %#v err=%v", status, err)
+	}
+	now = expireAt.Add(time.Hour)
+	replayed, reused, err := service.AcceptAdminICloudTXTFile(context.Background(), 9, 7, "icloud.txt", content, coreDomain.ImportErrorStrategySkip, expireAt, "icloud-flow", "request-icloud-retry", "/v1/admin/icloud/resources/imports")
+	if err != nil || !reused || replayed.ImportID != accepted.ImportID {
+		t.Fatalf("replay expired import: view=%#v reused=%v err=%v", replayed, reused, err)
 	}
 }
 

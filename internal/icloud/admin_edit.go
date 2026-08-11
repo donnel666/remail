@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"time"
 
 	coreapp "github.com/donnel666/remail/internal/core/app"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
@@ -32,6 +33,7 @@ type AdminICloudEditCommand struct {
 	PrimaryEmail   *string
 	OwnerUserID    *uint
 	ForSale        *bool
+	ExpireAt       *time.Time
 	Credentials    *AdminICloudCredentialsInput
 	OperatorUserID uint
 	IdempotencyKey string
@@ -41,7 +43,7 @@ type AdminICloudEditCommand struct {
 
 func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminICloudEditCommand) (*AdminICloudMutationResult, error) {
 	if s == nil || s.db == nil || s.operationLogs == nil || command.ResourceID == 0 || command.Version == 0 ||
-		command.OperatorUserID == 0 || (command.PrimaryEmail == nil && command.OwnerUserID == nil && command.ForSale == nil && command.Credentials == nil) {
+		command.OperatorUserID == 0 || (command.PrimaryEmail == nil && command.OwnerUserID == nil && command.ForSale == nil && command.ExpireAt == nil && command.Credentials == nil) {
 		return nil, ErrICloudResourceUpdate
 	}
 
@@ -70,6 +72,10 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 		}
 		command.Credentials = &credentials
 	}
+	if command.ExpireAt != nil {
+		value := normalizeICloudResourceExpireAt(*command.ExpireAt)
+		command.ExpireAt = &value
+	}
 	idempotencyKey, err := normalizeAdminICloudIdempotencyKey(command.IdempotencyKey)
 	if err != nil {
 		return nil, ErrICloudResourceUpdate
@@ -79,8 +85,9 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 		PrimaryEmail *string                      `json:"primaryEmail,omitempty"`
 		OwnerUserID  *uint                        `json:"ownerId,omitempty"`
 		ForSale      *bool                        `json:"forSale,omitempty"`
+		ExpireAt     *time.Time                   `json:"expireAt,omitempty"`
 		Credentials  *AdminICloudCredentialsInput `json:"credentials,omitempty"`
-	}{command.Version, command.PrimaryEmail, command.OwnerUserID, command.ForSale, command.Credentials})
+	}{command.Version, command.PrimaryEmail, command.OwnerUserID, command.ForSale, command.ExpireAt, command.Credentials})
 	if err != nil {
 		return nil, ErrICloudResourceQueryTemporary
 	}
@@ -101,6 +108,10 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 		if reserveErr != nil || wasReplayed {
 			replayed = wasReplayed
 			return reserveErr
+		}
+		now := s.now().UTC()
+		if command.ExpireAt != nil && !validICloudResourceExpireAt(*command.ExpireAt, now) {
+			return ErrICloudResourceUpdate
 		}
 
 		var root iCloudRootModel
@@ -127,6 +138,7 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 
 		emailChanged := command.PrimaryEmail != nil && *command.PrimaryEmail != resource.PrimaryEmail
 		ownerChanged := command.OwnerUserID != nil && *command.OwnerUserID != root.OwnerUserID
+		expireAtChanged := command.ExpireAt != nil && !command.ExpireAt.Equal(resource.ExpireAt)
 		credentialsChanged := command.Credentials != nil &&
 			(emailChanged || !sameAdminICloudCredentials(resource, *command.Credentials))
 		identityChanged := emailChanged || ownerChanged || credentialsChanged
@@ -166,7 +178,6 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 			}
 		}
 
-		now := s.now().UTC()
 		updates := make(map[string]any)
 		nextCredentialRevision := resource.CredentialRevision
 		if emailChanged {
@@ -174,6 +185,9 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 		}
 		if nextForSale != resource.ForSale {
 			updates["for_sale"] = nextForSale
+		}
+		if expireAtChanged {
+			updates["expire_at"] = *command.ExpireAt
 		}
 		if credentialsChanged {
 			credentials := *command.Credentials

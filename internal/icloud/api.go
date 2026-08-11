@@ -32,6 +32,7 @@ func RegisterRoutes(rg *gin.RouterGroup, module *Module, fetcher middleware.Sess
 	resources.POST("/batch/publish", middleware.PermissionRequired(checker, "core:resource", "operate"), h.batchResourceCommand(AdminICloudPublish))
 	resources.POST("/batch/unpublish", middleware.PermissionRequired(checker, "core:resource", "operate"), h.batchResourceCommand(AdminICloudUnpublish))
 	resources.POST("/batch/delete", middleware.PermissionRequired(checker, "core:resource", "operate"), h.batchResourceCommand(AdminICloudDelete))
+	resources.POST("/batch/expiration", middleware.PermissionRequired(checker, "core:resource", "operate"), h.batchResourceCommand(AdminICloudExpire))
 	resources.GET("/:resourceId", middleware.PermissionRequired(checker, "core:resource", "read"), h.getResource)
 	resources.GET("/:resourceId/aliases", middleware.PermissionRequired(checker, "core:resource", "read"), h.listAliases)
 	resources.POST("/:resourceId/aliases", middleware.PermissionRequired(checker, "core:resource", "operate"), h.resourceCommand(AdminICloudAlias))
@@ -177,6 +178,11 @@ func (h *handler) importResources(c *gin.Context) {
 		writeICloudError(c, ErrICloudImportInvalid)
 		return
 	}
+	expireAt, ok := parseICloudQueryTime(c.PostForm("expireAt"))
+	if !ok || expireAt == nil {
+		writeICloudError(c, ErrICloudImportInvalid)
+		return
+	}
 	content, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
 	if err != nil || int64(len(content)) > maxBytes {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid import file.", "requestId": middleware.GetRequestID(c)})
@@ -189,7 +195,7 @@ func (h *handler) importResources(c *gin.Context) {
 	}
 	result, reused, err := h.service.AcceptAdminICloudTXTFile(
 		c.Request.Context(), operatorUserID, uint(ownerID), header.Filename, content, strategy,
-		idempotencyKey, middleware.GetRequestID(c), c.FullPath(),
+		*expireAt, idempotencyKey, middleware.GetRequestID(c), c.FullPath(),
 	)
 	if err != nil {
 		writeICloudError(c, err)
@@ -253,6 +259,7 @@ type iCloudEditRequest struct {
 	PrimaryEmail *string                      `json:"primaryEmail"`
 	OwnerID      *uint                        `json:"ownerId"`
 	ForSale      *bool                        `json:"forSale"`
+	ExpireAt     *time.Time                   `json:"expireAt"`
 	Credentials  *AdminICloudCredentialsInput `json:"credentials"`
 }
 
@@ -267,11 +274,11 @@ func (h *handler) patchResource(c *gin.Context) {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 128<<10)
 	var request iCloudEditRequest
 	if err := c.ShouldBindJSON(&request); err != nil || request.Version == 0 ||
-		(request.PrimaryEmail == nil && request.OwnerID == nil && request.ForSale == nil && request.Credentials == nil) {
+		(request.PrimaryEmail == nil && request.OwnerID == nil && request.ForSale == nil && request.ExpireAt == nil && request.Credentials == nil) {
 		writeICloudError(c, ErrICloudResourceUpdate)
 		return
 	}
-	if (request.ForSale != nil || request.Credentials != nil) && !h.requirePermission(c, "core:resource", "operate") {
+	if (request.ForSale != nil || request.ExpireAt != nil || request.Credentials != nil) && !h.requirePermission(c, "core:resource", "operate") {
 		return
 	}
 	operatorUserID, ok := middleware.GetCurrentUserID(c)
@@ -281,7 +288,7 @@ func (h *handler) patchResource(c *gin.Context) {
 	}
 	result, err := h.service.EditAdminICloudResource(c.Request.Context(), AdminICloudEditCommand{
 		ResourceID: resourceID, Version: request.Version, PrimaryEmail: request.PrimaryEmail,
-		OwnerUserID: request.OwnerID, ForSale: request.ForSale, Credentials: request.Credentials,
+		OwnerUserID: request.OwnerID, ForSale: request.ForSale, ExpireAt: request.ExpireAt, Credentials: request.Credentials,
 		OperatorUserID: operatorUserID, IdempotencyKey: c.GetHeader("Idempotency-Key"),
 		RequestID: middleware.GetRequestID(c), Path: c.FullPath(),
 	})
@@ -354,6 +361,7 @@ func (h *handler) resourceCommand(command AdminICloudCommand) gin.HandlerFunc {
 
 type iCloudBatchCommandRequest struct {
 	Selection AdminICloudResourceSelection `json:"selection" binding:"required"`
+	ExpireAt  *time.Time                   `json:"expireAt"`
 }
 
 func (h *handler) batchResourceCommand(command AdminICloudCommand) gin.HandlerFunc {
@@ -373,7 +381,7 @@ func (h *handler) batchResourceCommand(command AdminICloudCommand) gin.HandlerFu
 			return
 		}
 		result, err := h.service.ApplyAdminICloudBatch(
-			c.Request.Context(), command, request.Selection, operatorUserID,
+			c.Request.Context(), command, request.Selection, request.ExpireAt, operatorUserID,
 			c.GetHeader("Idempotency-Key"), middleware.GetRequestID(c), c.FullPath(),
 		)
 		if err != nil {

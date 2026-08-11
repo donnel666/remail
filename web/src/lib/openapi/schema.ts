@@ -3490,7 +3490,7 @@ export interface paths {
         put?: never;
         /**
          * Import iCloud resources for a selected owner
-         * @description Each non-empty TXT line uses `primaryEmail----host----dsid----clientId----clientBuildNumber----clientMasteringNumber----Cookie`; any later `----` text remains part of Cookie. A browser-copied HME request may instead use `primaryEmail----curl ...`; the server extracts and validates the HTTPS maildomainws host, DSID, client context, Cookie, and optional request headers without executing shell syntax. The primary email remains explicit because Apple does not include it in the HME request. Apple forwarding mailboxes are selected and verified through system settings and are not an import field. Cookie, DSID, client context, cURL source, and the private source object remain write-only.
+         * @description Each non-empty TXT line uses `primaryEmail----host----dsid----clientId----clientBuildNumber----clientMasteringNumber----Cookie`; any later `----` text remains part of Cookie. A browser-copied HME request may instead use `primaryEmail----curl ...`; the server extracts and validates the HTTPS maildomainws host, DSID, client context, Cookie, and optional request headers without executing shell syntax. The primary email remains explicit because Apple does not include it in the HME request. The required future `expireAt` applies to newly created resources; credential recovery for an existing resource preserves its current lifetime. Apple forwarding mailboxes are selected and verified through system settings and are not an import field. Cookie, DSID, client context, cURL source, and the private source object remain write-only.
          */
         post: operations["postAdminICloudResourceImport"];
         delete?: never;
@@ -3618,6 +3618,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/icloud/resources/batch/expiration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set a future expiration time for selected iCloud resources
+         * @description Updates only the resource lifetime and version. It does not queue validation, alias maintenance, mailbox fetching, or project-history identification.
+         */
+        post: operations["postAdminICloudResourcesExpiration"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/icloud/resources/{resourceId}": {
         parameters: {
             query?: never;
@@ -3635,7 +3655,7 @@ export interface paths {
         head?: never;
         /**
          * Atomically edit an iCloud resource
-         * @description Base fields require `core:resource/write`. Supplying `forSale` or `credentials` additionally requires `core:resource/operate`. Session authentication, CSRF, and an idempotency key are required. Credentials are a complete write-only HME set and are never returned. Changing the primary email requires the complete credential set. Email, owner, or credential changes conflict with an active Allocation, advance the validation fence, force private supply, and immediately re-queue validation unless the resource is disabled.
+         * @description Base fields require `core:resource/write`. Supplying `forSale`, `expireAt`, or `credentials` additionally requires `core:resource/operate`. Session authentication, CSRF, and an idempotency key are required. Credentials are a complete write-only HME set and are never returned. Changing the primary email requires the complete credential set. Email, owner, or credential changes conflict with an active Allocation, advance the validation fence, force private supply, and immediately re-queue validation unless the resource is disabled. Changing `expireAt` only updates the resource lifetime and version.
          */
         patch: operations["patchAdminICloudResource"];
         trace?: never;
@@ -7258,6 +7278,8 @@ export interface components {
             primaryEmail?: string;
             ownerId?: number;
             forSale?: boolean;
+            /** Format: date-time */
+            expireAt?: string;
             credentials?: components["schemas"]["AdminICloudCredentialsInput"];
         };
         AdminICloudMutationResponse: {
@@ -7292,6 +7314,11 @@ export interface components {
         AdminICloudBulkSelection: components["schemas"]["AdminICloudIdsSelection"] | components["schemas"]["AdminICloudFilterSelection"];
         AdminICloudBulkCommandRequest: {
             selection: components["schemas"]["AdminICloudBulkSelection"];
+        };
+        AdminICloudBulkExpirationRequest: {
+            selection: components["schemas"]["AdminICloudBulkSelection"];
+            /** Format: date-time */
+            expireAt: string;
         };
         AdminICloudBulkResult: components["schemas"]["AdminMicrosoftBulkResult"];
         /** @enum {string} */
@@ -19944,6 +19971,8 @@ export interface operations {
                     ownerId: number;
                     /** @enum {string} */
                     errorStrategy: "skip" | "abort";
+                    /** Format: date-time */
+                    expireAt: string;
                 };
             };
         };
@@ -20181,6 +20210,41 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["AdminICloudBulkCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Synchronous bounded selection result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudBulkResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminICloudResourcesExpiration: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op. */
+                "Idempotency-Key": components["parameters"]["AdminStateCommandIdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminICloudBulkExpirationRequest"];
             };
         };
         responses: {

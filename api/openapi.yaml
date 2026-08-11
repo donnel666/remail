@@ -10148,7 +10148,7 @@ paths:
     post:
       operationId: postAdminICloudResourceImport
       summary: Import iCloud resources for a selected owner
-      description: Each non-empty TXT line uses `primaryEmail----host----dsid----clientId----clientBuildNumber----clientMasteringNumber----Cookie`; any later `----` text remains part of Cookie. A browser-copied HME request may instead use `primaryEmail----curl ...`; the server extracts and validates the HTTPS maildomainws host, DSID, client context, Cookie, and optional request headers without executing shell syntax. The primary email remains explicit because Apple does not include it in the HME request. Apple forwarding mailboxes are selected and verified through system settings and are not an import field. Cookie, DSID, client context, cURL source, and the private source object remain write-only.
+      description: Each non-empty TXT line uses `primaryEmail----host----dsid----clientId----clientBuildNumber----clientMasteringNumber----Cookie`; any later `----` text remains part of Cookie. A browser-copied HME request may instead use `primaryEmail----curl ...`; the server extracts and validates the HTTPS maildomainws host, DSID, client context, Cookie, and optional request headers without executing shell syntax. The primary email remains explicit because Apple does not include it in the HME request. The required future `expireAt` applies to newly created resources; credential recovery for an existing resource preserves its current lifetime. Apple forwarding mailboxes are selected and verified through system settings and are not an import field. Cookie, DSID, client context, cURL source, and the private source object remain write-only.
       tags: [Admin]
       security:
         - cookieAuth: []
@@ -10161,7 +10161,7 @@ paths:
           multipart/form-data:
             schema:
               type: object
-              required: [file, ownerId, errorStrategy]
+              required: [file, ownerId, errorStrategy, expireAt]
               properties:
                 file:
                   type: string
@@ -10172,6 +10172,9 @@ paths:
                 errorStrategy:
                   type: string
                   enum: [skip, abort]
+                expireAt:
+                  type: string
+                  format: date-time
               additionalProperties: false
       responses:
         "202":
@@ -10439,6 +10442,43 @@ paths:
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 
+  /v1/admin/icloud/resources/batch/expiration:
+    post:
+      operationId: postAdminICloudResourcesExpiration
+      summary: Set a future expiration time for selected iCloud resources
+      description: Updates only the resource lifetime and version. It does not queue validation, alias maintenance, mailbox fetching, or project-history identification.
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminStateCommandIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminICloudBulkExpirationRequest"
+      responses:
+        "200":
+          description: Synchronous bounded selection result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudBulkResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
   /v1/admin/icloud/resources/{resourceId}:
     get:
       operationId: getAdminICloudResource
@@ -10474,7 +10514,7 @@ paths:
       operationId: patchAdminICloudResource
       summary: Atomically edit an iCloud resource
       description: |
-        Base fields require `core:resource/write`. Supplying `forSale` or `credentials` additionally requires `core:resource/operate`. Session authentication, CSRF, and an idempotency key are required. Credentials are a complete write-only HME set and are never returned. Changing the primary email requires the complete credential set. Email, owner, or credential changes conflict with an active Allocation, advance the validation fence, force private supply, and immediately re-queue validation unless the resource is disabled.
+        Base fields require `core:resource/write`. Supplying `forSale`, `expireAt`, or `credentials` additionally requires `core:resource/operate`. Session authentication, CSRF, and an idempotency key are required. Credentials are a complete write-only HME set and are never returned. Changing the primary email requires the complete credential set. Email, owner, or credential changes conflict with an active Allocation, advance the validation fence, force private supply, and immediately re-queue validation unless the resource is disabled. Changing `expireAt` only updates the resource lifetime and version.
       tags: [Admin]
       security:
         - cookieAuth: []
@@ -19628,6 +19668,9 @@ components:
           minimum: 1
         forSale:
           type: boolean
+        expireAt:
+          type: string
+          format: date-time
         credentials:
           $ref: "#/components/schemas/AdminICloudCredentialsInput"
       additionalProperties: false
@@ -19707,6 +19750,16 @@ components:
       properties:
         selection:
           $ref: "#/components/schemas/AdminICloudBulkSelection"
+      additionalProperties: false
+    AdminICloudBulkExpirationRequest:
+      type: object
+      required: [selection, expireAt]
+      properties:
+        selection:
+          $ref: "#/components/schemas/AdminICloudBulkSelection"
+        expireAt:
+          type: string
+          format: date-time
       additionalProperties: false
     AdminICloudBulkResult:
       $ref: "#/components/schemas/AdminMicrosoftBulkResult"

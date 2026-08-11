@@ -62,6 +62,8 @@ import {
   listAdminICloudTasks,
   publishAdminICloudResource,
   recoverAdminICloudResource,
+  setAdminICloudResourcesExpirationByFilter,
+  setAdminICloudResourcesExpirationByIds,
   unpublishAdminICloudResource,
   updateAdminICloudResource,
   validateAdminICloudResource,
@@ -118,13 +120,17 @@ type RowAction =
   | "toggle"
   | "publish"
   | "delete"
-  | "recover";
+  | "recover"
+  | "expiration";
 type ImportMode = "paste" | "curl" | "file";
 type ICloudMaintenanceAction = "validate" | "alias";
 type ICloudMaintenanceTarget =
   | { item: AdminICloudResourceItem; mode: "row" }
   | { count: number; mode: "ids"; resourceIds: number[] }
   | { count: number; filter: AdminICloudResourceListFilter; mode: "filter" };
+type ICloudBulkBusyAction =
+  | Exclude<AdminICloudBatchAction, "validate" | "alias">
+  | "expiration";
 
 const EMPTY_FACETS: AdminICloudResourceFacets = {
   status: {
@@ -175,6 +181,12 @@ function bulkOutcome(response: AdminICloudBulkResponse) {
     skipped: response.skipped,
     reasonCounts: response.reasonCounts,
   };
+}
+
+function defaultICloudExpireAt() {
+  const value = new Date();
+  value.setMonth(value.getMonth() + 1);
+  return value;
 }
 
 function switchButtonClass(active: boolean) {
@@ -316,6 +328,9 @@ export function ImportICloudModal({
   const [ownerId, setOwnerId] = useState<number | undefined>();
   const [errorStrategy, setErrorStrategy] =
     useState<AdminICloudImportErrorStrategy>("skip");
+  const [expireAt, setExpireAt] = useState<Date | null>(() =>
+    defaultICloudExpireAt(),
+  );
   const [submitting, setSubmitting] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const previousVisible = useRef(false);
@@ -335,6 +350,7 @@ export function ImportICloudModal({
     if (fileRef.current) fileRef.current.value = "";
     setOwnerId(undefined);
     setErrorStrategy("skip");
+    setExpireAt(defaultICloudExpireAt());
   }, [visible]);
 
   useEffect(() => {
@@ -345,6 +361,10 @@ export function ImportICloudModal({
   const submit = async () => {
     if (!ownerId) {
       Toast.warning(t("Please select an owner."));
+      return;
+    }
+    if (!expireAt || !Number.isFinite(expireAt.getTime()) || expireAt.getTime() <= Date.now()) {
+      Toast.warning(t("Expiration must be in the future."));
       return;
     }
     let sourceContent = content;
@@ -384,6 +404,7 @@ export function ImportICloudModal({
       const result = await importAdminICloudResources({
         content: sourceContent,
         errorStrategy,
+        expireAt: expireAt.toISOString(),
         ownerId,
       });
       if (result.status === "failed") {
@@ -435,6 +456,21 @@ export function ImportICloudModal({
             owners={owners}
             t={t}
             value={ownerId}
+          />
+        </label>
+
+        <label className="block">
+          <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
+            {t("Resource expires at")} *
+          </span>
+          <DatePicker
+            aria-label={t("Resource expires at")}
+            format="yyyy-MM-dd HH:mm:ss"
+            onChange={(value) => setExpireAt(value instanceof Date ? value : null)}
+            showClear={false}
+            style={{ width: "100%" }}
+            type="dateTime"
+            value={expireAt ?? undefined}
           />
         </label>
 
@@ -619,6 +655,9 @@ export function EditICloudModal({
   const [primaryEmail, setPrimaryEmail] = useState("");
   const [ownerId, setOwnerId] = useState<number | undefined>();
   const [forSale, setForSale] = useState(false);
+  const [expireAt, setExpireAt] = useState<Date | null>(() =>
+    target ? new Date(target.expireAt) : null,
+  );
   const [host, setHost] = useState("");
   const [dsid, setDsid] = useState("");
   const [clientId, setClientId] = useState("");
@@ -633,6 +672,7 @@ export function EditICloudModal({
     setPrimaryEmail(target.primaryEmail);
     setOwnerId(target.owner.id);
     setForSale(target.forSale);
+    setExpireAt(new Date(target.expireAt));
     setHost("");
     setDsid("");
     setClientId("");
@@ -658,6 +698,17 @@ export function EditICloudModal({
     ].map((value) => value.trim());
     const wantsCredentialChange = credentialValues.some(Boolean);
     const emailChanged = !credentialsOnly && nextEmail !== target.primaryEmail;
+    const expireAtChanged =
+      !credentialsOnly &&
+      canOperate &&
+      expireAt?.getTime() !== new Date(target.expireAt).getTime();
+    if (
+      expireAtChanged &&
+      (!expireAt || !Number.isFinite(expireAt.getTime()) || expireAt.getTime() <= Date.now())
+    ) {
+      Toast.warning(t("Expiration must be in the future."));
+      return;
+    }
     const requiresCredentials = credentialsOnly || emailChanged;
     if (requiresCredentials && (!canOperate || !credentialValues.every(Boolean))) {
       Toast.warning(t("Changing the primary email or replacing credentials requires every iCloud credential field."));
@@ -673,6 +724,7 @@ export function EditICloudModal({
       if (emailChanged) request.primaryEmail = nextEmail;
       if (ownerId !== target.owner.id) request.ownerId = ownerId;
       if (canOperate && forSale !== target.forSale) request.forSale = forSale;
+      if (expireAtChanged && expireAt) request.expireAt = expireAt.toISOString();
     }
     if (requiresCredentials || wantsCredentialChange) {
       request.credentials = {
@@ -758,6 +810,22 @@ export function EditICloudModal({
               {t("Owner")}
             </span>
             <OwnerSelect onChange={setOwnerId} owners={owners} t={t} value={ownerId} />
+          </label>
+
+          <label className="block">
+            <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
+              {t("Resource expires at")} *
+            </span>
+            <DatePicker
+              aria-label={t("Resource expires at")}
+              disabled={!canOperate}
+              format="yyyy-MM-dd HH:mm:ss"
+              onChange={(value) => setExpireAt(value instanceof Date ? value : null)}
+              showClear={false}
+              style={{ width: "100%" }}
+              type="dateTime"
+              value={expireAt ?? undefined}
+            />
           </label>
 
           <div className="text-xs leading-5 text-[var(--semi-color-text-2)]">
@@ -1236,6 +1304,7 @@ export function ICloudDetailSheet({
   onMaintain,
   onReplaceCredentials,
   onRecover,
+  onSetExpiration,
   onToggleDisabled,
   onTogglePublish,
 }: {
@@ -1257,6 +1326,7 @@ export function ICloudDetailSheet({
   onMaintain: (item: AdminICloudResourceItem) => void;
   onReplaceCredentials: (item: AdminICloudResourceItem) => void;
   onRecover: (item: AdminICloudResourceItem) => void;
+  onSetExpiration: (item: AdminICloudResourceItem) => void;
   onToggleDisabled: (item: AdminICloudResourceItem) => void;
   onTogglePublish: (item: AdminICloudResourceItem) => void;
 }) {
@@ -1619,6 +1689,13 @@ export function ICloudDetailSheet({
                       </Button>
                       <Button
                         disabled={Boolean(busyAction)}
+                        onClick={() => onSetExpiration(item)}
+                        type="tertiary"
+                      >
+                        {t("Set expiration")}
+                      </Button>
+                      <Button
+                        disabled={Boolean(busyAction)}
                         loading={busyAction === "toggle"}
                         onClick={() => onToggleDisabled(item)}
                         type="tertiary"
@@ -1685,8 +1762,7 @@ export default function AdminICloudEmails() {
   const [rowBusy, setRowBusy] = useState<{ action: RowAction; id: number } | null>(
     null,
   );
-  const [bulkBusy, setBulkBusy] =
-    useState<Exclude<AdminICloudBatchAction, "validate" | "alias"> | null>(null);
+  const [bulkBusy, setBulkBusy] = useState<ICloudBulkBusyAction | null>(null);
   const [refreshGeneration, setRefreshGeneration] = useState(0);
   const listRequestRef = useRef<AbortController | null>(null);
   const statsRequestRef = useRef<AbortController | null>(null);
@@ -2057,6 +2133,94 @@ export default function AdminICloudEmails() {
     [t],
   );
 
+  const confirmExpiration = useCallback(
+    (allMatching: boolean, resourceId?: number) => {
+      const rowOperation = resourceId !== undefined;
+      const count = rowOperation ? 1 : allMatching ? total : selectedKeys.length;
+      if (count === 0) {
+        Toast.info(t("No resources to check."));
+        return;
+      }
+      if (allMatching && count > ADMIN_ICLOUD_BATCH_MAX) {
+        Toast.warning(
+          t("iCloud bulk selection limit exceeded.", {
+            limit: ADMIN_ICLOUD_BATCH_MAX,
+          }),
+        );
+        return;
+      }
+      let expireAt: Date | null = defaultICloudExpireAt();
+      Modal.confirm({
+        cancelText: t("Cancel"),
+        content: (
+          <div className="space-y-3">
+            <div className="text-sm text-[var(--semi-color-text-2)]">
+              {t("Set iCloud resource expiration hint", { count })}
+            </div>
+            <label className="block">
+              <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
+                {t("Resource expires at")} *
+              </span>
+              <DatePicker
+                aria-label={t("Resource expires at")}
+                defaultValue={expireAt}
+                format="yyyy-MM-dd HH:mm:ss"
+                onChange={(value) => {
+                  expireAt = value instanceof Date ? value : null;
+                }}
+                showClear={false}
+                style={{ width: "100%" }}
+                type="dateTime"
+              />
+            </label>
+          </div>
+        ),
+        okText: t("Save"),
+        onOk: async () => {
+          if (!expireAt || !Number.isFinite(expireAt.getTime()) || expireAt.getTime() <= Date.now()) {
+            Toast.warning(t("Expiration must be in the future."));
+            throw new Error("expiration must be in the future");
+          }
+          if (resourceId !== undefined) {
+            setRowBusy({ action: "expiration", id: resourceId });
+          } else {
+            setBulkBusy("expiration");
+          }
+          try {
+            const response = resourceId !== undefined
+              ? await setAdminICloudResourcesExpirationByIds(
+                  [resourceId],
+                  expireAt.toISOString(),
+                )
+              : allMatching
+                ? await setAdminICloudResourcesExpirationByFilter(
+                    filter,
+                    expireAt.toISOString(),
+                  )
+                : await setAdminICloudResourcesExpirationByIds(
+                    selectedKeys,
+                    expireAt.toISOString(),
+                  );
+            showBulkOutcome(response, "iCloud resource expiration updated.");
+            if (!rowOperation) setSelectedKeys([]);
+            refresh();
+          } catch (error) {
+            Toast.error(getIamErrorMessage(t, error, "iCloud resource operation failed."));
+            throw error;
+          } finally {
+            if (rowOperation) {
+              setRowBusy(null);
+            } else {
+              setBulkBusy(null);
+            }
+          }
+        },
+        title: t("Set expiration"),
+      });
+    },
+    [filter, refresh, selectedKeys, showBulkOutcome, t, total],
+  );
+
   const runBatch = useCallback(
     async (
       action: Exclude<AdminICloudBatchAction, "validate" | "alias">,
@@ -2186,6 +2350,13 @@ export default function AdminICloudEmails() {
         onClick: () => confirmBatch("unpublish", false),
         type: "tertiary",
       },
+      {
+        key: "expiration",
+        labelKey: "Set expiration",
+        loading: bulkBusy === "expiration",
+        onClick: () => confirmExpiration(false),
+        type: "tertiary",
+      },
     ],
     onCheck: () => openBulkMaintenance(false),
     onClear: () => setSelectedKeys([]),
@@ -2276,6 +2447,15 @@ export default function AdminICloudEmails() {
                 {item.forSale ? t("Convert to private") : t("Put on sale")}
               </Button>
               <Button
+                disabled={Boolean(rowBusy && busyAction !== "expiration")}
+                loading={busyAction === "expiration"}
+                onClick={() => confirmExpiration(false, item.id)}
+                size="small"
+                type="tertiary"
+              >
+                {t("Set expiration")}
+              </Button>
+              <Button
                 disabled={Boolean(rowBusy && busyAction !== "delete")}
                 loading={busyAction === "delete"}
                 onClick={() => confirmDelete(item)}
@@ -2296,6 +2476,7 @@ export default function AdminICloudEmails() {
       openDetail,
       recoverResource,
       rowBusy,
+      confirmExpiration,
       t,
       toggleDisabled,
       togglePublish,
@@ -2410,7 +2591,7 @@ export default function AdminICloudEmails() {
         fixed: "right" as const,
         key: "operate",
         title: t("Action"),
-        width: 500,
+        width: 620,
         render: (_: unknown, item: AdminICloudResourceItem) => renderRowActions(item),
       },
     ],
@@ -2557,6 +2738,22 @@ export default function AdminICloudEmails() {
                 type="danger"
               >
                 {t("Delete")}
+              </Button>
+            </Tooltip>
+            <Tooltip
+              content={t("Set expiration for all matching iCloud resources")}
+              mouseEnterDelay={0}
+              mouseLeaveDelay={0.05}
+              position="top"
+            >
+              <Button
+                className="flex-1 md:flex-initial"
+                loading={bulkBusy === "expiration"}
+                onClick={() => confirmExpiration(true)}
+                size="small"
+                type="tertiary"
+              >
+                {t("Set expiration")}
               </Button>
             </Tooltip>
           </>
@@ -2761,7 +2958,7 @@ export default function AdminICloudEmails() {
           pagination={false}
           rowKey="id"
           rowSelection={canOperate ? rowSelection : undefined}
-          scroll={{ x: "max(100%, 2010px)", y: DESKTOP_TABLE_SCROLL_Y }}
+          scroll={{ x: "max(100%, 2240px)", y: DESKTOP_TABLE_SCROLL_Y }}
           size="middle"
         />
       </CardPro>
@@ -2827,6 +3024,7 @@ export default function AdminICloudEmails() {
         onMaintain={(item) => setMaintenanceTarget({ item, mode: "row" })}
         onReplaceCredentials={setCredentialTarget}
         onRecover={recoverResource}
+        onSetExpiration={(item) => confirmExpiration(false, item.id)}
         onToggleDisabled={toggleDisabled}
         onTogglePublish={togglePublish}
       />

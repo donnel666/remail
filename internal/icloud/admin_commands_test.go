@@ -126,6 +126,7 @@ func TestEditAdminICloudResourceUpdatesSafeFieldsAndWriteOnlyCredentials(t *test
 	}
 
 	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
 	service.SetImportOwnerValidator(func(_ context.Context, ownerID uint) (bool, error) { return ownerID == 8, nil })
 	primaryEmail := " corrected@icloud.com "
 	ownerID := uint(8)
@@ -157,13 +158,48 @@ func TestEditAdminICloudResourceUpdatesSafeFieldsAndWriteOnlyCredentials(t *test
 		!strings.Contains(resource.Cookie, "X-APPLE-WEBAUTH-TOKEN=new") {
 		t.Fatalf("unexpected stored edit: root=%#v resource=%#v", root, resource)
 	}
+	validationGeneration := resource.ValidationGeneration
+	var maintenanceRunsBefore int64
+	if err := db.Model(&iCloudMaintenanceRunModel{}).Count(&maintenanceRunsBefore).Error; err != nil {
+		t.Fatalf("count maintenance runs before expiration edit: %v", err)
+	}
+	expireAt := now.Add(45 * 24 * time.Hour)
+	result, err = service.EditAdminICloudResource(context.Background(), AdminICloudEditCommand{
+		ResourceID: 1, Version: 2, ExpireAt: &expireAt, OperatorUserID: 99,
+		IdempotencyKey: "edit-expiration", RequestID: "request-expiration", Path: "/v1/admin/icloud/resources/:resourceId",
+	})
+	if err != nil {
+		t.Fatalf("edit resource expiration: %v", err)
+	}
+	if err := db.First(&root, 1).Error; err != nil {
+		t.Fatalf("reload root after expiration edit: %v", err)
+	}
+	if err := db.First(&resource, 1).Error; err != nil {
+		t.Fatalf("reload resource after expiration edit: %v", err)
+	}
+	var maintenanceRunsAfter int64
+	if err := db.Model(&iCloudMaintenanceRunModel{}).Count(&maintenanceRunsAfter).Error; err != nil {
+		t.Fatalf("count maintenance runs after expiration edit: %v", err)
+	}
+	if result.Version != 3 || root.Version != 3 || !resource.ExpireAt.Equal(expireAt) ||
+		resource.ValidationGeneration != validationGeneration || maintenanceRunsAfter != maintenanceRunsBefore {
+		t.Fatalf("expiration edit queued maintenance: result=%#v root=%#v resource=%#v runs=%d->%d", result, root, resource, maintenanceRunsBefore, maintenanceRunsAfter)
+	}
+	now = expireAt.Add(time.Hour)
+	replayed, err := service.EditAdminICloudResource(context.Background(), AdminICloudEditCommand{
+		ResourceID: 1, Version: 2, ExpireAt: &expireAt, OperatorUserID: 99,
+		IdempotencyKey: "edit-expiration", RequestID: "request-expiration-retry", Path: "/v1/admin/icloud/resources/:resourceId",
+	})
+	if err != nil || *replayed != *result {
+		t.Fatalf("replay expired edit: result=%#v err=%v", replayed, err)
+	}
 
 	if err := db.Create(&iCloudImportAllocationTestModel{ID: 1, ResourceID: 1, Status: "allocated"}).Error; err != nil {
 		t.Fatalf("create allocation: %v", err)
 	}
 	nextEmail := "blocked@icloud.com"
 	if _, err := service.EditAdminICloudResource(context.Background(), AdminICloudEditCommand{
-		ResourceID: 1, Version: 2, PrimaryEmail: &nextEmail, OperatorUserID: 99,
+		ResourceID: 1, Version: 3, PrimaryEmail: &nextEmail, OperatorUserID: 99,
 		IdempotencyKey: "edit-key-2", RequestID: "request-edit-2", Path: "/v1/admin/icloud/resources/:resourceId",
 	}); !errors.Is(err, ErrICloudResourceAllocation) {
 		t.Fatalf("active-allocation edit error = %v", err)
@@ -300,7 +336,7 @@ func TestApplyAdminICloudAliasUsesIndependentAdmissionAndAudit(t *testing.T) {
 
 	result, err := service.ApplyAdminICloudBatch(context.Background(), AdminICloudAlias,
 		AdminICloudResourceSelection{Mode: "ids", ResourceIDs: []uint{1, 2}},
-		99, "alias-batch", "alias-request", "/v1/admin/icloud/resources/batch/alias")
+		nil, 99, "alias-batch", "alias-request", "/v1/admin/icloud/resources/batch/alias")
 	if err != nil {
 		t.Fatalf("apply alias batch: %v", err)
 	}
@@ -375,7 +411,8 @@ func TestApplyAdminICloudBatchReportsSkippedReasons(t *testing.T) {
 		}
 	}
 	service := NewService(db, nil, nil)
-	result, err := service.ApplyAdminICloudBatch(context.Background(), AdminICloudDisable, AdminICloudResourceSelection{Mode: "ids", ResourceIDs: []uint{2, 1, 1}}, 99, "batch-key-1", "batch-1", "/batch/disable")
+	service.now = func() time.Time { return now }
+	result, err := service.ApplyAdminICloudBatch(context.Background(), AdminICloudDisable, AdminICloudResourceSelection{Mode: "ids", ResourceIDs: []uint{2, 1, 1}}, nil, 99, "batch-key-1", "batch-1", "/batch/disable")
 	if err != nil {
 		t.Fatalf("batch disable: %v", err)
 	}
@@ -384,6 +421,35 @@ func TestApplyAdminICloudBatchReportsSkippedReasons(t *testing.T) {
 	}
 	if len(result.ReasonCounts) != 1 || result.ReasonCounts[0].Reason != "not_found" || result.ReasonCounts[0].Count != 1 {
 		t.Fatalf("unexpected skip reasons: %#v", result.ReasonCounts)
+	}
+	expireAt := now.Add(48 * time.Hour)
+	result, err = service.ApplyAdminICloudBatch(context.Background(), AdminICloudExpire, AdminICloudResourceSelection{Mode: "ids", ResourceIDs: []uint{1, 2}}, &expireAt, 99, "batch-expire-1", "batch-expire-1", "/batch/expiration")
+	if err != nil || result.Affected != 1 || result.Skipped != 1 {
+		t.Fatalf("batch expiration result=%#v err=%v", result, err)
+	}
+	var resource iCloudResourceModel
+	var root iCloudRootModel
+	if err := db.First(&resource, 1).Error; err != nil {
+		t.Fatalf("load expiration-updated resource: %v", err)
+	}
+	if err := db.First(&root, 1).Error; err != nil {
+		t.Fatalf("load expiration-updated root: %v", err)
+	}
+	var maintenanceRuns int64
+	if err := db.Model(&iCloudMaintenanceRunModel{}).Count(&maintenanceRuns).Error; err != nil {
+		t.Fatalf("count maintenance runs: %v", err)
+	}
+	if !resource.ExpireAt.Equal(expireAt) || resource.Status != iCloudResourceDisabled || root.Version != 3 || maintenanceRuns != 0 {
+		t.Fatalf("expiration update did not advance resource version: root=%#v resource=%#v", root, resource)
+	}
+	now = expireAt.Add(time.Hour)
+	replayed, err := service.ApplyAdminICloudBatch(context.Background(), AdminICloudExpire, AdminICloudResourceSelection{Mode: "ids", ResourceIDs: []uint{1, 2}}, &expireAt, 99, "batch-expire-1", "batch-expire-retry", "/batch/expiration")
+	if err != nil || replayed.Affected != result.Affected || replayed.Skipped != result.Skipped {
+		t.Fatalf("replay expired batch: result=%#v err=%v", replayed, err)
+	}
+	past := now
+	if _, err := service.ApplyAdminICloudBatch(context.Background(), AdminICloudExpire, AdminICloudResourceSelection{Mode: "ids", ResourceIDs: []uint{1}}, &past, 99, "batch-expire-past", "batch-expire-past", "/batch/expiration"); !errors.Is(err, ErrICloudResourceUpdate) {
+		t.Fatalf("past expiration error = %v", err)
 	}
 }
 

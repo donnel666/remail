@@ -41,6 +41,7 @@ const (
 	AdminICloudUnpublish AdminICloudCommand = "unpublish"
 	AdminICloudDelete    AdminICloudCommand = "delete"
 	AdminICloudRecover   AdminICloudCommand = "recover"
+	AdminICloudExpire    AdminICloudCommand = "expire"
 )
 
 type AdminICloudMutationResult struct {
@@ -109,7 +110,7 @@ func (s *Service) ApplyAdminICloudCommand(
 			replayed = wasReplayed
 			return err
 		}
-		state, changed, err := mutateAdminICloudResourceTx(ctx, tx, command, resourceID, &version, s.now().UTC())
+		state, changed, err := mutateAdminICloudResourceTx(ctx, tx, command, resourceID, &version, nil, s.now().UTC())
 		if err != nil {
 			return err
 		}
@@ -146,6 +147,7 @@ func (s *Service) ApplyAdminICloudBatch(
 	ctx context.Context,
 	command AdminICloudCommand,
 	selection AdminICloudResourceSelection,
+	expireAt *time.Time,
 	operatorUserID uint,
 	idempotencyKey string,
 	requestID string,
@@ -162,7 +164,23 @@ func (s *Service) ApplyAdminICloudBatch(
 	if err != nil {
 		return nil, err
 	}
-	fingerprint, err := adminICloudCommandFingerprint(selection)
+	if command == AdminICloudExpire {
+		if expireAt == nil {
+			return nil, ErrICloudResourceUpdate
+		}
+		value := normalizeICloudResourceExpireAt(*expireAt)
+		expireAt = &value
+	} else if expireAt != nil {
+		return nil, ErrICloudResourceSelection
+	}
+	fingerprintValue := any(selection)
+	if expireAt != nil {
+		fingerprintValue = struct {
+			Selection AdminICloudResourceSelection `json:"selection"`
+			ExpireAt  time.Time                    `json:"expireAt"`
+		}{selection, *expireAt}
+	}
+	fingerprint, err := adminICloudCommandFingerprint(fingerprintValue)
 	if err != nil {
 		return nil, ErrICloudResourceQueryTemporary
 	}
@@ -181,13 +199,17 @@ func (s *Service) ApplyAdminICloudBatch(
 			replayed = wasReplayed
 			return err
 		}
+		now := s.now().UTC()
+		if expireAt != nil && !validICloudResourceExpireAt(*expireAt, now) {
+			return ErrICloudResourceUpdate
+		}
 		resourceIDs, err := resolveAdminICloudSelectionTx(ctx, tx, selection)
 		if err != nil {
 			return err
 		}
 		result.Requested = len(resourceIDs)
 		for _, resourceID := range resourceIDs {
-			_, changed, err := mutateAdminICloudResourceTx(ctx, tx, command, resourceID, nil, s.now().UTC())
+			_, changed, err := mutateAdminICloudResourceTx(ctx, tx, command, resourceID, nil, expireAt, now)
 			if err != nil {
 				reason := adminICloudSkipReason(err)
 				if reason == "" {
@@ -312,7 +334,7 @@ func validAdminICloudCommand(command AdminICloudCommand) bool {
 
 func validAdminICloudBatchCommand(command AdminICloudCommand) bool {
 	switch command {
-	case AdminICloudValidate, AdminICloudAlias, AdminICloudDisable, AdminICloudPublish, AdminICloudUnpublish, AdminICloudDelete:
+	case AdminICloudValidate, AdminICloudAlias, AdminICloudDisable, AdminICloudPublish, AdminICloudUnpublish, AdminICloudDelete, AdminICloudExpire:
 		return true
 	default:
 		return false
@@ -380,6 +402,7 @@ func mutateAdminICloudResourceTx(
 	command AdminICloudCommand,
 	resourceID uint,
 	expectedVersion *uint64,
+	expireAt *time.Time,
 	now time.Time,
 ) (*AdminICloudMutationResult, bool, error) {
 	var root iCloudRootModel
@@ -475,6 +498,17 @@ func mutateAdminICloudResourceTx(
 			return nil, false, ErrICloudResourceStatus
 		}
 		queuedGeneration = queueAdminICloudValidation(updates, resource, now, true)
+	case AdminICloudExpire:
+		if resource.Status == iCloudResourceDeleted {
+			return nil, false, ErrICloudResourceNotFound
+		}
+		if expireAt == nil {
+			return nil, false, ErrICloudResourceUpdate
+		}
+		if resource.ExpireAt.Equal(*expireAt) {
+			return adminICloudMutationResult(root, resource), false, nil
+		}
+		updates["expire_at"] = *expireAt
 	default:
 		return nil, false, ErrICloudResourceQuery
 	}

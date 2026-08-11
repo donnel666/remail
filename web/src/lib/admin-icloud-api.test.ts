@@ -30,6 +30,8 @@ import {
   listAdminICloudAliases,
   listAdminICloudResources,
   listAdminICloudTasks,
+  setAdminICloudResourcesExpirationByFilter,
+  setAdminICloudResourcesExpirationByIds,
   updateAdminICloudResource,
   validateAdminICloudResource,
   waitForAdminICloudResourceImport,
@@ -95,7 +97,7 @@ describe("admin iCloud API adapter", () => {
     idempotencyMock.mockReturnValue("icloud-command-1");
   });
 
-  it("uses the shared OpenAPI client for list and eight-field import", async () => {
+  it("uses the shared OpenAPI client for list and expiration-aware import", async () => {
     apiMocks.GET.mockResolvedValueOnce({ data: EMPTY_LIST });
     apiMocks.POST.mockResolvedValueOnce({ data: IMPORT_RESPONSE });
 
@@ -135,6 +137,7 @@ describe("admin iCloud API adapter", () => {
         content,
         ownerId: 101,
         errorStrategy: "skip",
+        expireAt: "2026-10-07T08:00:00Z",
       }),
     ).resolves.toEqual(IMPORT_RESPONSE);
 
@@ -145,6 +148,7 @@ describe("admin iCloud API adapter", () => {
     );
     expect(formData.get("ownerId")).toBe("101");
     expect(formData.get("errorStrategy")).toBe("skip");
+    expect(formData.get("expireAt")).toBe("2026-10-07T08:00:00Z");
     expect(formData.has("longLived")).toBe(false);
     expect((formData.get("file") as File).name).toBe("icloud-resources.txt");
     expect(await (formData.get("file") as File).text()).toBe(content);
@@ -187,6 +191,14 @@ describe("admin iCloud API adapter", () => {
       status: "normal",
       suffix: "@icloud.com",
     });
+    await setAdminICloudResourcesExpirationByIds(
+      [8, 7, 7, 0],
+      "2026-10-07T08:00:00Z",
+    );
+    await setAdminICloudResourcesExpirationByFilter(
+      { status: "normal", suffix: "@icloud.com" },
+      "2026-11-07T08:00:00Z",
+    );
     await deleteAdminICloudResource(7, 4);
 
     expect(apiMocks.GET).toHaveBeenCalledWith(
@@ -277,6 +289,32 @@ describe("admin iCloud API adapter", () => {
         },
       }),
     );
+    expect(apiMocks.POST).toHaveBeenNthCalledWith(
+      6,
+      "/v1/admin/icloud/resources/batch/expiration",
+      expect.objectContaining({
+        body: {
+          selection: { mode: "ids", resourceIds: [8, 7] },
+          expireAt: "2026-10-07T08:00:00Z",
+        },
+      }),
+    );
+    expect(apiMocks.POST).toHaveBeenNthCalledWith(
+      7,
+      "/v1/admin/icloud/resources/batch/expiration",
+      expect.objectContaining({
+        body: {
+          selection: {
+            mode: "filter",
+            filter: expect.objectContaining({
+              status: "normal",
+              suffix: "icloud.com",
+            }),
+          },
+          expireAt: "2026-11-07T08:00:00Z",
+        },
+      }),
+    );
     expect(apiMocks.DELETE).toHaveBeenCalledWith(
       "/v1/admin/icloud/resources/{resourceId}",
       expect.objectContaining({
@@ -300,6 +338,7 @@ describe("admin iCloud API adapter", () => {
     await updateAdminICloudResource(7, {
       version: 4,
       ownerId: 101,
+      expireAt: "2026-10-07T08:00:00Z",
       credentials: {
         host: "www.icloud.com",
         dsid: "dsid",
@@ -313,7 +352,11 @@ describe("admin iCloud API adapter", () => {
     expect(apiMocks.PATCH).toHaveBeenCalledWith(
       "/v1/admin/icloud/resources/{resourceId}",
       {
-        body: expect.objectContaining({ version: 4, ownerId: 101 }),
+        body: expect.objectContaining({
+          version: 4,
+          ownerId: 101,
+          expireAt: "2026-10-07T08:00:00Z",
+        }),
         params: {
           header: {
             "X-CSRF-Token": "admin-csrf",

@@ -70,6 +70,7 @@ type iCloudImportCreateInput struct {
 	OwnerUserID        uint
 	SourceObjectKey    string
 	ErrorStrategy      coreDomain.ImportErrorStrategy
+	ResourceExpireAt   time.Time
 	IdempotencyKey     string
 	RequestFingerprint string
 	RequestID          string
@@ -108,6 +109,7 @@ func (s *Service) AcceptAdminICloudTXTFile(
 	fileName string,
 	content []byte,
 	errorStrategy coreDomain.ImportErrorStrategy,
+	resourceExpireAt time.Time,
 	idempotencyKey string,
 	requestID string,
 	pathValue string,
@@ -135,8 +137,8 @@ func (s *Service) AcceptAdminICloudTXTFile(
 	if err := s.validateICloudImportOwner(ctx, ownerUserID); err != nil {
 		return nil, false, err
 	}
-
-	fingerprint := iCloudImportFingerprint(ownerUserID, strategy, content)
+	resourceExpireAt = normalizeICloudResourceExpireAt(resourceExpireAt)
+	fingerprint := iCloudImportFingerprint(ownerUserID, strategy, resourceExpireAt, content)
 	if existing, err := s.findICloudImportByIdempotency(ctx, operatorUserID, idempotencyKey); err != nil {
 		return nil, false, err
 	} else if existing != nil {
@@ -145,8 +147,11 @@ func (s *Service) AcceptAdminICloudTXTFile(
 		}
 		return existing.statusView(), true, nil
 	}
-
 	now := s.now().UTC()
+	if !validICloudResourceExpireAt(resourceExpireAt, now) {
+		return nil, false, ErrICloudImportInvalid
+	}
+
 	requestID = strings.TrimSpace(requestID)
 	if requestID == "" {
 		requestID = platform.NewUUIDV7String()
@@ -162,7 +167,8 @@ func (s *Service) AcceptAdminICloudTXTFile(
 
 	model, created, err := s.createICloudImport(ctx, iCloudImportCreateInput{
 		OperatorUserID: operatorUserID, OwnerUserID: ownerUserID, SourceObjectKey: stored.ObjectKey,
-		ErrorStrategy: strategy, IdempotencyKey: idempotencyKey, RequestFingerprint: fingerprint,
+		ErrorStrategy: strategy, ResourceExpireAt: resourceExpireAt,
+		IdempotencyKey: idempotencyKey, RequestFingerprint: fingerprint,
 		RequestID: requestID, Path: strings.TrimSpace(pathValue),
 	})
 	if err != nil {
@@ -231,7 +237,8 @@ func (s *Service) createICloudImport(ctx context.Context, input iCloudImportCrea
 		stored = iCloudImportModel{
 			OwnerUserID: input.OwnerUserID, OperatorUserID: input.OperatorUserID,
 			SourceObjectKey: input.SourceObjectKey, Status: iCloudImportProcessing,
-			ErrorStrategy: string(input.ErrorStrategy), RequestID: input.RequestID, Path: input.Path,
+			ErrorStrategy: string(input.ErrorStrategy), ResourceExpireAt: input.ResourceExpireAt,
+			RequestID: input.RequestID, Path: input.Path,
 			IdempotencyKey: input.IdempotencyKey, RequestFingerprint: input.RequestFingerprint,
 			DispatchStatus: "pending", Generation: 1, MaxAttempts: iCloudImportMaxAttempts,
 		}
@@ -775,9 +782,12 @@ func (s *Service) createICloudResourcesAndMarkImportSucceeded(
 			if err != nil {
 				return err
 			}
-			expiresAt := locked.CreatedAt.AddDate(0, 1, 0)
-			if locked.CreatedAt.IsZero() {
-				expiresAt = now.AddDate(0, 1, 0)
+			expiresAt := locked.ResourceExpireAt
+			if expiresAt.IsZero() {
+				expiresAt = locked.CreatedAt.AddDate(0, 1, 0)
+				if locked.CreatedAt.IsZero() {
+					expiresAt = now.AddDate(0, 1, 0)
+				}
 			}
 			newLineIndexes := make([]int, 0, len(chunk))
 			for index, line := range chunk {
@@ -1052,9 +1062,10 @@ func skippedICloudImportSummary(count int) string {
 	return fmt.Sprintf("Skipped %d import entries.", count)
 }
 
-func iCloudImportFingerprint(ownerUserID uint, strategy coreDomain.ImportErrorStrategy, content []byte) string {
+func iCloudImportFingerprint(ownerUserID uint, strategy coreDomain.ImportErrorStrategy, resourceExpireAt time.Time, content []byte) string {
 	contentSum := sha256.Sum256(content)
-	payload := fmt.Sprintf("icloud\x00%d\x00%s\x00%s", ownerUserID, strategy, hex.EncodeToString(contentSum[:]))
+	payload := fmt.Sprintf("icloud\x00%d\x00%s\x00%s\x00%s", ownerUserID, strategy,
+		resourceExpireAt.UTC().Format(time.RFC3339Nano), hex.EncodeToString(contentSum[:]))
 	sum := sha256.Sum256([]byte(payload))
 	return hex.EncodeToString(sum[:])
 }
