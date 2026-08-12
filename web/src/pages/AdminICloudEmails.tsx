@@ -2581,7 +2581,7 @@ export default function AdminICloudEmails() {
         fixed: "right" as const,
         key: "operate",
         title: t("Action"),
-        width: 620,
+        width: 360,
         render: (_: unknown, item: AdminICloudResourceItem) => renderRowActions(item),
       },
     ],
@@ -2948,7 +2948,7 @@ export default function AdminICloudEmails() {
           pagination={false}
           rowKey="id"
           rowSelection={canOperate ? rowSelection : undefined}
-          scroll={{ x: "max(100%, 2240px)", y: DESKTOP_TABLE_SCROLL_Y }}
+          scroll={{ x: "max(100%, 1980px)", y: DESKTOP_TABLE_SCROLL_Y }}
           size="middle"
         />
       </CardPro>
