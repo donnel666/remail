@@ -465,15 +465,6 @@ func (s *Service) findICloudRecipientProbes(
 	return found, nil
 }
 
-func iCloudRelaySuffix(recipientMailID string) (string, bool) {
-	recipientMailID = strings.ToLower(strings.TrimSpace(recipientMailID))
-	if !validICloudHMEText(recipientMailID, iCloudHMERecipientIDMaxLength, false) ||
-		strings.ContainsAny(recipientMailID, "@\r\n") {
-		return "", false
-	}
-	return "_" + recipientMailID + "@icloud.com", true
-}
-
 func decodeICloudRelaySender(envelopeFrom string, anonymousID string) (string, bool) {
 	parsed, err := stdmail.ParseAddress(strings.TrimSpace(envelopeFrom))
 	if err != nil {

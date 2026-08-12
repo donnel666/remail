@@ -505,50 +505,6 @@ func newICloudProbeToken(prefix string) string {
 	return prefix + "-" + hex.EncodeToString(value[:])
 }
 
-// mergeICloudAliasFacts overlays durable routing/probe facts onto Apple's
-// latest snapshot. Apple may omit recipientMailId after the first observation.
-func (s *Service) mergeICloudAliasFacts(ctx context.Context, resourceID uint, aliases []hmeAlias) error {
-	if s == nil || s.db == nil || resourceID == 0 {
-		return ErrICloudValidationTemp
-	}
-	var rows []iCloudAliasModel
-	if err := s.db.WithContext(ctx).Where("resource_id = ?", resourceID).Find(&rows).Error; err != nil {
-		return err
-	}
-	byID := make(map[string]iCloudAliasModel, len(rows))
-	for _, row := range rows {
-		byID[strings.TrimSpace(row.AnonymousID)] = row
-	}
-	for i := range aliases {
-		row, ok := byID[strings.TrimSpace(aliases[i].AnonymousID)]
-		if !ok {
-			continue
-		}
-		forwardTo := strings.TrimSpace(aliases[i].ForwardToEmail)
-		if forwardTo == "" {
-			aliases[i].ForwardToEmail = strings.TrimSpace(row.ForwardToEmail)
-			forwardTo = strings.TrimSpace(aliases[i].ForwardToEmail)
-		}
-		sameRoute := forwardTo != "" && strings.EqualFold(forwardTo, strings.TrimSpace(row.ForwardToEmail))
-		if strings.TrimSpace(aliases[i].RecipientMailID) == "" && sameRoute {
-			aliases[i].RecipientMailID = strings.TrimSpace(row.RecipientMailID)
-		}
-		if sameRoute {
-			aliases[i].RecipientProbeToken = strings.TrimSpace(row.RecipientProbeToken)
-			aliases[i].RecipientProbeStartedAt = row.RecipientProbeStartedAt
-			aliases[i].RecipientProbeLastSentAt = row.RecipientProbeLastSentAt
-		} else {
-			// A forwarding mailbox change makes the old probe token and relay
-			// suffix unusable. The result sync clears the current route first;
-			// the next validation generation discovers the new suffix.
-			aliases[i].RecipientProbeToken = ""
-			aliases[i].RecipientProbeStartedAt = nil
-			aliases[i].RecipientProbeLastSentAt = nil
-		}
-	}
-	return nil
-}
-
 // discoverICloudRecipientIDs learns the opaque Apple relay suffix by sending a
 // token through each alias and inspecting the configured domain mailbox.
 func (s *Service) discoverICloudRecipientIDs(
