@@ -200,6 +200,9 @@ function parseEmailTypes(value?: string) {
     if (normalized.includes("gmail")) {
       types.add("gmail");
     }
+    if (normalized.includes("icloud") || normalized.includes("苹果")) {
+      types.add("icloud");
+    }
   }
   return Array.from(types);
 }

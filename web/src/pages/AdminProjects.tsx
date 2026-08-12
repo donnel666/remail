@@ -88,7 +88,8 @@ const projectLogoGalleryStorageKey = "remail.project.logo.gallery.v1";
 
 type ProjectStatusFilter = "all" | "reviewing" | "listed" | "delisted";
 type BooleanFilter = "all" | "yes" | "no";
-type ProjectProductType = "microsoft" | "domain" | "gmail";
+const projectProductTypes = ["microsoft", "domain", "gmail", "icloud"] as const;
+type ProjectProductType = (typeof projectProductTypes)[number];
 type ProjectProductStatus = "enabled" | "disabled";
 type ProjectProductTypeFilter = "all" | ProjectProductType;
 type ProjectMailRuleType = "sender" | "recipient" | "subject" | "body";
@@ -130,13 +131,16 @@ type ProjectPriceDefaults = Record<
   Pick<ProductDraft, "codePrice" | "codeSupplierPrice" | "purchasePrice" | "purchaseSupplierPrice">
 >;
 
+const microsoftProjectPriceDefaults = {
+  codePrice: "8",
+  codeSupplierPrice: "5",
+  purchasePrice: "10",
+  purchaseSupplierPrice: "7",
+};
+
 const fallbackProjectPriceDefaults: ProjectPriceDefaults = {
-  microsoft: {
-    codePrice: "8",
-    codeSupplierPrice: "5",
-    purchasePrice: "10",
-    purchaseSupplierPrice: "7",
-  },
+  microsoft: microsoftProjectPriceDefaults,
+  icloud: microsoftProjectPriceDefaults,
   domain: {
     codePrice: "80",
     codeSupplierPrice: "40",
@@ -158,13 +162,15 @@ function projectPriceDefaultsFromValues(values: Record<string, string>): Project
       ? value
       : fallback;
   };
+  const microsoft = {
+    codePrice: read("default_project_microsoft_code_price", fallbackProjectPriceDefaults.microsoft.codePrice),
+    codeSupplierPrice: read("default_project_microsoft_code_supplier_price", fallbackProjectPriceDefaults.microsoft.codeSupplierPrice),
+    purchasePrice: read("default_project_microsoft_purchase_price", fallbackProjectPriceDefaults.microsoft.purchasePrice),
+    purchaseSupplierPrice: read("default_project_microsoft_purchase_supplier_price", fallbackProjectPriceDefaults.microsoft.purchaseSupplierPrice),
+  };
   return {
-    microsoft: {
-      codePrice: read("default_project_microsoft_code_price", fallbackProjectPriceDefaults.microsoft.codePrice),
-      codeSupplierPrice: read("default_project_microsoft_code_supplier_price", fallbackProjectPriceDefaults.microsoft.codeSupplierPrice),
-      purchasePrice: read("default_project_microsoft_purchase_price", fallbackProjectPriceDefaults.microsoft.purchasePrice),
-      purchaseSupplierPrice: read("default_project_microsoft_purchase_supplier_price", fallbackProjectPriceDefaults.microsoft.purchaseSupplierPrice),
-    },
+    microsoft,
+    icloud: microsoft,
     domain: {
       codePrice: read("default_project_domain_code_price", fallbackProjectPriceDefaults.domain.codePrice),
       codeSupplierPrice: read("default_project_domain_code_supplier_price", fallbackProjectPriceDefaults.domain.codeSupplierPrice),
@@ -215,9 +221,7 @@ function createDefaultProduct(
   type: ProjectProductType,
   priceDefaults: ProjectPriceDefaults = fallbackProjectPriceDefaults
 ): ProductDraft {
-  const isMicrosoft = type === "microsoft";
-  const isGmail = type === "gmail";
-  const usesMailboxWeights = isMicrosoft || isGmail;
+  const hasMailboxWeights = usesMailboxWeights(type);
   return {
     activationWindowMinutes: "60",
     codeEnabled: true,
@@ -225,15 +229,19 @@ function createDefaultProduct(
     codeSupplierPrice: priceDefaults[type].codeSupplierPrice,
     codeWindowMinutes: "10",
     dotWeight: "0",
-    mainWeight: usesMailboxWeights ? "1" : "0",
+    mainWeight: hasMailboxWeights ? "1" : "0",
     plusWeight: "0",
-    purchaseEnabled: isMicrosoft,
+    purchaseEnabled: type === "microsoft" || type === "icloud",
     purchasePrice: priceDefaults[type].purchasePrice,
     purchaseSupplierPrice: priceDefaults[type].purchaseSupplierPrice,
     status: "enabled",
     type,
-    warrantyMinutes: usesMailboxWeights ? "1440" : "60",
+    warrantyMinutes: hasMailboxWeights ? "1440" : "60",
   };
+}
+
+function usesMailboxWeights(type: ProjectProductType) {
+  return type !== "domain";
 }
 
 function initialDraft(priceDefaults: ProjectPriceDefaults = fallbackProjectPriceDefaults): ProjectDraft {
@@ -275,6 +283,7 @@ function productTypeLabel(type: string, t: (key: string) => string) {
   if (type === "microsoft") return t("Microsoft email");
   if (type === "domain") return t("Domain email");
   if (type === "gmail") return t("Gmail email");
+  if (type === "icloud") return t("iCloud email");
   return type;
 }
 
@@ -429,6 +438,7 @@ function productDraftToRequest(
   product: ProductDraft,
   t: (key: string) => string
 ): ProjectProductRequest | null {
+  const hasMailboxWeights = usesMailboxWeights(product.type);
   if (!product.codeEnabled && !product.purchaseEnabled) {
     Toast.error(t("Each product must enable at least one service."));
     return null;
@@ -446,7 +456,7 @@ function productDraftToRequest(
     return null;
   }
   if (
-    (product.type === "microsoft" || product.type === "gmail") &&
+    hasMailboxWeights &&
     toNonNegativeInt(product.mainWeight) +
       toNonNegativeInt(product.dotWeight) +
       toNonNegativeInt(product.plusWeight) <=
@@ -462,9 +472,9 @@ function productDraftToRequest(
     codePrice: normalizedMoney(product.codePrice),
     codeSupplierPrice: normalizedMoney(product.codeSupplierPrice),
     codeWindowMinutes: toNonNegativeInt(product.codeWindowMinutes),
-    dotWeight: product.type === "microsoft" || product.type === "gmail" ? toNonNegativeInt(product.dotWeight) : 0,
-    mainWeight: product.type === "microsoft" || product.type === "gmail" ? toNonNegativeInt(product.mainWeight) : 0,
-    plusWeight: product.type === "microsoft" || product.type === "gmail" ? toNonNegativeInt(product.plusWeight) : 0,
+    dotWeight: hasMailboxWeights ? toNonNegativeInt(product.dotWeight) : 0,
+    mainWeight: hasMailboxWeights ? toNonNegativeInt(product.mainWeight) : 0,
+    plusWeight: hasMailboxWeights ? toNonNegativeInt(product.plusWeight) : 0,
     purchaseEnabled: product.purchaseEnabled,
     purchasePrice: normalizedMoney(product.purchasePrice),
     purchaseSupplierPrice: normalizedMoney(product.purchaseSupplierPrice),
@@ -584,7 +594,7 @@ function ProductDraftCard({
   const { t } = useTranslation();
   const isMicrosoft = draft.type === "microsoft";
   const isGmail = draft.type === "gmail";
-  const usesMailboxWeights = isMicrosoft || isGmail;
+  const hasMailboxWeights = usesMailboxWeights(draft.type);
   const fields: Array<[keyof ProductDraft, string]> = [
     ["codePrice", `${t("Code price")}（${t("Points")}）`],
     ["codeSupplierPrice", `${t("Code supplier price")}（${t("Points")}）`],
@@ -650,7 +660,7 @@ function ProductDraftCard({
         ))}
       </div>
 
-      {usesMailboxWeights ? (
+      {hasMailboxWeights ? (
         <div className="mt-3 grid gap-3 sm:grid-cols-3">
           {[
             ["mainWeight", t("Main weight")],
@@ -1382,7 +1392,7 @@ function ProjectEditorSheet({
                 {t("Products")}
               </div>
               <Space wrap>
-                {(["microsoft", "domain", "gmail"] as ProjectProductType[]).map((type) => {
+                {projectProductTypes.map((type) => {
                   const product = draft.products.find((item) => item.type === type);
                   const active = product?.status === "enabled";
                   return (
@@ -1462,11 +1472,7 @@ function BulkProductModal({
 
   useEffect(() => {
     if (!visible) return;
-    setProducts([
-      createDefaultProduct("microsoft", priceDefaults),
-      createDefaultProduct("domain", priceDefaults),
-      createDefaultProduct("gmail", priceDefaults),
-    ]);
+    setProducts(projectProductTypes.map((type) => createDefaultProduct(type, priceDefaults)));
     setSelectedTypes([]);
   }, [priceDefaults, visible]);
 
@@ -1756,6 +1762,7 @@ export default function AdminProjects() {
         all: total,
         domain: 0,
         gmail: 0,
+        icloud: 0,
         microsoft: 0,
       },
       status: {
@@ -1783,6 +1790,7 @@ export default function AdminProjects() {
         all: facets.productType.all,
         domain: facets.productType.domain,
         gmail: facets.productType.gmail,
+        icloud: facets.productType.icloud,
         microsoft: facets.productType.microsoft,
       },
       status: {
@@ -2711,27 +2719,16 @@ export default function AdminProjects() {
                   onSelect={applyProductTypeFilter}
                   value="all"
                 />
-                <StatisticFilterOption
-                  active={productTypeFilter === "microsoft"}
-                  count={projectFilterStats.productType.microsoft}
-                  label={t("Microsoft email")}
-                  onSelect={applyProductTypeFilter}
-                  value="microsoft"
-                />
-                <StatisticFilterOption
-                  active={productTypeFilter === "domain"}
-                  count={projectFilterStats.productType.domain}
-                  label={t("Domain email")}
-                  onSelect={applyProductTypeFilter}
-                  value="domain"
-                />
-                <StatisticFilterOption
-                  active={productTypeFilter === "gmail"}
-                  count={projectFilterStats.productType.gmail}
-                  label={t("Gmail email")}
-                  onSelect={applyProductTypeFilter}
-                  value="gmail"
-                />
+                {projectProductTypes.map((type) => (
+                  <StatisticFilterOption
+                    active={productTypeFilter === type}
+                    count={projectFilterStats.productType[type]}
+                    key={type}
+                    label={productTypeLabel(type, t)}
+                    onSelect={applyProductTypeFilter}
+                    value={type}
+                  />
+                ))}
               </div>
             </div>
           }
