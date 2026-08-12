@@ -2447,15 +2447,6 @@ export default function AdminICloudEmails() {
                 {item.forSale ? t("Convert to private") : t("Put on sale")}
               </Button>
               <Button
-                disabled={Boolean(rowBusy && busyAction !== "expiration")}
-                loading={busyAction === "expiration"}
-                onClick={() => confirmExpiration(false, item.id)}
-                size="small"
-                type="tertiary"
-              >
-                {t("Set expiration")}
-              </Button>
-              <Button
                 disabled={Boolean(rowBusy && busyAction !== "delete")}
                 loading={busyAction === "delete"}
                 onClick={() => confirmDelete(item)}
@@ -2476,7 +2467,6 @@ export default function AdminICloudEmails() {
       openDetail,
       recoverResource,
       rowBusy,
-      confirmExpiration,
       t,
       toggleDisabled,
       togglePublish,

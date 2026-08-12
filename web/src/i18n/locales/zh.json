@@ -1922,7 +1922,7 @@
   "Card keys created and copied.": "已创建 {{count}} 个兑换码并复制到剪贴板。",
   "Copy all": "一键复制",
   "Export selected card keys": "导出选中 CDK",
-  "Set expiration": "批量设置到期时间",
+  "Set expiration": "延期",
   "Set expiration for all": "设置当前筛选全部兑换码的到期时间",
   "Set card key expiration": "批量设置兑换码到期时间",
   "Set card key expiration hint": "将为 {{count}} 个兑换码设置统一的到期时间。",
