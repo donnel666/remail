@@ -439,13 +439,28 @@ func mutateAdminICloudResourceTx(
 		if resource.Status == iCloudResourceDeleted {
 			return nil, false, ErrICloudResourceNotFound
 		}
-		if resource.Status == iCloudResourceDisabled {
+		if resource.Status != iCloudResourceNormal {
 			return nil, false, ErrICloudResourceStatus
 		}
 		if resource.AliasCount >= iCloudMaxAliases {
 			return adminICloudMutationResult(root, resource), false, nil
 		}
-		queuedGeneration = queueAdminICloudValidation(updates, resource, now, false)
+		var activeRun iCloudMaintenanceRunModel
+		active := tx.WithContext(ctx).
+			Where("resource_id = ? AND status IN ?", resourceID, []string{iCloudMaintenanceQueued, iCloudMaintenanceRunning}).
+			Order("id DESC").Limit(1).Find(&activeRun)
+		if active.Error != nil {
+			return nil, false, active.Error
+		}
+		if active.RowsAffected > 0 {
+			if activeRun.Kind == iCloudMaintenanceAlias {
+				return adminICloudMutationResult(root, resource), false, nil
+			}
+			return nil, false, ErrICloudResourceStatus
+		}
+		queuedGeneration = resource.ValidationGeneration + 1
+		updates["validation_generation"] = queuedGeneration
+		updates["next_validation_at"] = now
 	case AdminICloudEnable:
 		if resource.Status != iCloudResourceDisabled {
 			return nil, false, ErrICloudResourceStatus

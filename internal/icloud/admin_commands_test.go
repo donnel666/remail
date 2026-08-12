@@ -316,6 +316,7 @@ func TestApplyAdminICloudAliasUsesIndependentAdmissionAndAudit(t *testing.T) {
 		t.Fatalf("migrate database: %v", err)
 	}
 	now := time.Date(2026, 8, 8, 10, 0, 0, 0, time.UTC)
+	probeVerifiedAt := now.Add(-time.Minute)
 	if err := db.Create(&iCloudAdminTestUser{ID: 7, Email: "owner@example.com", Status: "active", Role: "supplier"}).Error; err != nil {
 		t.Fatalf("create owner: %v", err)
 	}
@@ -326,6 +327,8 @@ func TestApplyAdminICloudAliasUsesIndependentAdmissionAndAudit(t *testing.T) {
 		if err := db.Create(&iCloudResourceModel{
 			ID: id, ResourceType: "icloud", PrimaryEmail: "alias" + string(rune('0'+id)) + "@icloud.com",
 			Status: iCloudResourceNormal, SessionStatus: iCloudSessionValid, AliasCount: aliases,
+			DeliveryProbeToken: "probe-token", DeliveryProbeAlias: "alias@icloud.com",
+			DeliveryProbeStartedAt: &probeVerifiedAt, DeliveryProbeVerifiedAt: &probeVerifiedAt,
 			CredentialRevision: 1, ValidationGeneration: 1, ExpireAt: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now,
 		}).Error; err != nil {
 			t.Fatalf("create resource %d: %v", id, err)
@@ -348,8 +351,9 @@ func TestApplyAdminICloudAliasUsesIndependentAdmissionAndAudit(t *testing.T) {
 	if err := db.First(&resource, 1).Error; err != nil {
 		t.Fatalf("load queued alias resource: %v", err)
 	}
-	if resource.Status != iCloudResourcePending || resource.ValidationGeneration != 2 || resource.NextValidationAt == nil {
-		t.Fatalf("alias command did not queue fenced worker: %#v", resource)
+	if resource.Status != iCloudResourceNormal || resource.ValidationGeneration != 2 || resource.NextValidationAt == nil ||
+		resource.DeliveryProbeVerifiedAt == nil || resource.DeliveryProbeToken != "probe-token" {
+		t.Fatalf("alias command changed resource availability: %#v", resource)
 	}
 	var run iCloudMaintenanceRunModel
 	if err := db.Where("resource_id = ? AND validation_generation = ?", 1, 2).Take(&run).Error; err != nil {
@@ -357,6 +361,20 @@ func TestApplyAdminICloudAliasUsesIndependentAdmissionAndAudit(t *testing.T) {
 	}
 	if run.Kind != iCloudMaintenanceAlias || run.Status != iCloudMaintenanceQueued {
 		t.Fatalf("alias command queued the wrong maintenance task: %#v", run)
+	}
+	claimed, ok, err := service.markICloudValidationDispatched(context.Background(), iCloudValidationTask{
+		ResourceID: 1, OwnerUserID: 7, ValidationGeneration: 2, ExpectedCredentialRevision: 1,
+	})
+	if err != nil || !ok || claimed.MaintenanceKind != iCloudMaintenanceAlias {
+		t.Fatalf("claim alias maintenance: task=%#v claimed=%v err=%v", claimed, ok, err)
+	}
+	resource = iCloudResourceModel{}
+	if err := db.First(&resource, 1).Error; err != nil {
+		t.Fatalf("load claimed alias resource: %v", err)
+	}
+	if resource.Status != iCloudResourceNormal || resource.ValidationGeneration != 2 ||
+		resource.DeliveryProbeVerifiedAt == nil || resource.DeliveryProbeToken != "probe-token" {
+		t.Fatalf("alias maintenance claim changed resource availability: %#v", resource)
 	}
 	var log governanceinfra.OperationLogModel
 	if err := db.Order("id DESC").First(&log).Error; err != nil {

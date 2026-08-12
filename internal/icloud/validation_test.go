@@ -270,6 +270,66 @@ func TestICloudValidationProvisionsOneAliasAtATime(t *testing.T) {
 	}
 }
 
+func TestICloudValidationBecomesNormalAfterFirstReservedAlias(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:icloud-validation-first-reserve?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudAliasModel{}, &iCloudMaintenanceRunModel{}); err != nil {
+		t.Fatalf("migrate database: %v", err)
+	}
+	now := time.Date(2026, 8, 12, 0, 0, 0, 0, time.UTC)
+	createICloudValidationResource(t, db, now)
+	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", 1).Update("alias_provision_candidate", "candidate@icloud.com").Error; err != nil {
+		t.Fatalf("prepare candidate: %v", err)
+	}
+	if err := db.Create(&iCloudMaintenanceRunModel{
+		ResourceID: 1, ValidationGeneration: 1, Kind: iCloudMaintenanceValidation,
+		Status: iCloudMaintenanceRunning, Attempts: 1, MaxAttempts: 3, CredentialRevision: 1,
+		QueuedAt: now, StartedAt: &now, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create validation run: %v", err)
+	}
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	service.hme = NewHMEClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		body := iCloudHMEListJSON(t, 0, "icloud@aishop6.com")
+		if request.URL.Path == "/v1/hme/reserve" {
+			body = `{"success":true,"result":{"hme":{"hme":"candidate@icloud.com","anonymousId":"candidate-id","forwardToEmail":"icloud@aishop6.com","isActive":true}}}`
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
+	})})
+	task := iCloudValidationTask{
+		ResourceID: 1, OwnerUserID: 7, ValidationGeneration: 1, ExpectedCredentialRevision: 1,
+		MaintenanceRunID: 1, MaintenanceKind: iCloudMaintenanceValidation,
+	}
+	if err := service.ProcessICloudValidation(context.Background(), task); err != nil {
+		t.Fatalf("reserve first alias: %v", err)
+	}
+	var resource iCloudResourceModel
+	if err := db.First(&resource, 1).Error; err != nil {
+		t.Fatalf("read resource: %v", err)
+	}
+	if resource.Status != iCloudResourceNormal || resource.AliasCount != 1 || resource.NextValidationAt == nil ||
+		!resource.AliasProvisionReconcile || resource.DeliveryProbeVerifiedAt != nil {
+		t.Fatalf("first reserved alias must validate while background provisioning continues: %#v", resource)
+	}
+	var nextRun iCloudMaintenanceRunModel
+	if err := db.Where("resource_id = ? AND validation_generation = ?", 1, 2).Take(&nextRun).Error; err != nil {
+		t.Fatalf("read next alias run: %v", err)
+	}
+	if nextRun.Kind != iCloudMaintenanceAlias || nextRun.Status != iCloudMaintenanceQueued {
+		t.Fatalf("background alias run was not queued: %#v", nextRun)
+	}
+	now = now.Add(iCloudAliasProvisionInterval)
+	claimed, ok, err := service.markICloudValidationDispatched(context.Background(), iCloudValidationTask{
+		ResourceID: 1, OwnerUserID: 7, ValidationGeneration: 2, ExpectedCredentialRevision: 1,
+	})
+	if err != nil || !ok || claimed.MaintenanceKind != iCloudMaintenanceAlias {
+		t.Fatalf("claim background alias run: task=%#v claimed=%v err=%v", claimed, ok, err)
+	}
+}
+
 func TestICloudProviderRateLimitUsesRetryAfter(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:icloud-validation-provider-rate-limit?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
@@ -383,7 +443,7 @@ func TestICloudValidationRetriesReservedCandidateAfterReconcileMiss(t *testing.T
 	if err := db.First(&resource, 1).Error; err != nil {
 		t.Fatalf("read reserved candidate: %v", err)
 	}
-	if !resource.AliasProvisionReconcile || resource.AliasProvisionCandidate != "candidate@icloud.com" {
+	if resource.Status != iCloudResourceNormal || !resource.AliasProvisionReconcile || resource.AliasProvisionCandidate != "candidate@icloud.com" {
 		t.Fatalf("reserve must enter reconciliation: %#v", resource)
 	}
 	var reserved iCloudAliasModel
@@ -395,12 +455,13 @@ func TestICloudValidationRetriesReservedCandidateAfterReconcileMiss(t *testing.T
 		t.Fatalf("reserve response routing facts were not persisted: %#v", reserved)
 	}
 	now = now.Add(iCloudAliasProvisionInterval)
-	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", 1).Updates(map[string]any{
-		"status": iCloudResourceValidating, "updated_at": now,
-	}).Error; err != nil {
-		t.Fatalf("claim reconciliation: %v", err)
+	claimedTask, claimed, err := service.markICloudValidationDispatched(context.Background(), iCloudValidationTask{
+		ResourceID: 1, OwnerUserID: 7, ValidationGeneration: resource.ValidationGeneration + 1, ExpectedCredentialRevision: 1,
+	})
+	if err != nil || !claimed {
+		t.Fatalf("claim reconciliation: task=%#v claimed=%v err=%v", claimedTask, claimed, err)
 	}
-	task.ValidationGeneration++
+	task = claimedTask
 	if err := service.ProcessICloudValidation(context.Background(), task); err != nil {
 		t.Fatalf("reconcile candidate: %v", err)
 	}
@@ -447,7 +508,8 @@ func TestICloudValidationActivatesOneInactiveAliasWithoutCreatingAnother(t *test
 		t.Fatalf("read resource: %v", err)
 	}
 	if len(paths) != 2 || paths[0] != "/v2/hme/list" || paths[1] != "/v1/hme/activate" ||
-		resource.Status != iCloudResourcePending || resource.AliasCount != iCloudMaxAliases || resource.ValidationFailures != 0 {
+		resource.Status != iCloudResourceNormal || resource.AliasCount != iCloudMaxAliases || resource.ValidationFailures != 0 ||
+		resource.NextValidationAt == nil {
 		t.Fatalf("inactive alias must be activated without changing the alias count: paths=%#v resource=%#v", paths, resource)
 	}
 }
@@ -574,7 +636,7 @@ func TestRequestAdminICloudValidationRestartsProbeAndRejectsInactiveResources(t 
 	}
 }
 
-func TestICloudValidationSendsProbeOnceAndRequiresDomainMailboxReceipt(t *testing.T) {
+func TestICloudValidationVerifiesDomainMailboxReceiptInBackground(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:icloud-validation-delivery?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open database: %v", err)
@@ -606,11 +668,11 @@ func TestICloudValidationSendsProbeOnceAndRequiresDomainMailboxReceipt(t *testin
 	}
 	var resource iCloudResourceModel
 	if err := db.First(&resource, 1).Error; err != nil {
-		t.Fatalf("read pending probe: %v", err)
+		t.Fatalf("read background probe: %v", err)
 	}
-	if len(sent) != 1 || resource.Status != iCloudResourcePending || resource.DeliveryProbeStartedAt == nil ||
+	if len(sent) != 1 || resource.Status != iCloudResourceNormal || resource.DeliveryProbeStartedAt == nil ||
 		!strings.Contains(sent[0].TextBody, resource.DeliveryProbeToken) {
-		t.Fatalf("unexpected pending probe: resource=%#v sent=%#v", resource, sent)
+		t.Fatalf("unexpected background probe: resource=%#v sent=%#v", resource, sent)
 	}
 	probeObjectKey := "icloud-probe.eml"
 	if _, err := files.SavePrivate(context.Background(), governancedomain.PrivateFile{
@@ -627,40 +689,41 @@ func TestICloudValidationSendsProbeOnceAndRequiresDomainMailboxReceipt(t *testin
 		t.Fatalf("create probe receipt: %v", err)
 	}
 	now = now.Add(time.Minute)
-	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", 1).Updates(map[string]any{
-		"status": iCloudResourceValidating, "updated_at": now,
-	}).Error; err != nil {
-		t.Fatalf("claim second validation: %v", err)
+	claimedTask, claimed, err := service.markICloudValidationDispatched(context.Background(), iCloudValidationTask{
+		ResourceID: 1, OwnerUserID: 7, ValidationGeneration: resource.ValidationGeneration + 1, ExpectedCredentialRevision: 1,
+	})
+	if err != nil || !claimed {
+		t.Fatalf("claim second validation: task=%#v claimed=%v err=%v", claimedTask, claimed, err)
 	}
-	if err := service.ProcessICloudValidation(context.Background(), iCloudValidationTask{
-		ResourceID: 1, OwnerUserID: 7, ValidationGeneration: 2, ExpectedCredentialRevision: 1,
-	}); err != nil {
+	if err := service.ProcessICloudValidation(context.Background(), claimedTask); err != nil {
 		t.Fatalf("confirm delivery probe: %v", err)
 	}
 	if err := db.First(&resource, 1).Error; err != nil {
 		t.Fatalf("read verified probe: %v", err)
 	}
 	if len(sent) != 1 || resource.Status != iCloudResourceNormal || resource.DeliveryProbeVerifiedAt == nil {
-		t.Fatalf("domain mailbox receipt must be required before normal: resource=%#v sends=%d", resource, len(sent))
+		t.Fatalf("domain mailbox receipt must verify background delivery: resource=%#v sends=%d", resource, len(sent))
 	}
 	firstToken := resource.DeliveryProbeToken
 	listBody = strings.Replace(listBody, "alias-000@icloud.com", "replacement@icloud.com", 1)
 	now = now.Add(iCloudKeepaliveInterval)
-	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", 1).Updates(map[string]any{
-		"status": iCloudResourceValidating, "updated_at": now,
-	}).Error; err != nil {
-		t.Fatalf("claim replacement validation: %v", err)
+	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", 1).Update("next_validation_at", now).Error; err != nil {
+		t.Fatalf("schedule replacement validation: %v", err)
 	}
-	if err := service.ProcessICloudValidation(context.Background(), iCloudValidationTask{
-		ResourceID: 1, OwnerUserID: 7, ValidationGeneration: 2, ExpectedCredentialRevision: 1,
-	}); err != nil {
+	claimedTask, claimed, err = service.markICloudValidationDispatched(context.Background(), iCloudValidationTask{
+		ResourceID: 1, OwnerUserID: 7, ValidationGeneration: resource.ValidationGeneration + 1, ExpectedCredentialRevision: 1,
+	})
+	if err != nil || !claimed {
+		t.Fatalf("claim replacement validation: task=%#v claimed=%v err=%v", claimedTask, claimed, err)
+	}
+	if err := service.ProcessICloudValidation(context.Background(), claimedTask); err != nil {
 		t.Fatalf("replace delivery probe: %v", err)
 	}
 	resource = iCloudResourceModel{}
 	if err := db.First(&resource, 1).Error; err != nil {
 		t.Fatalf("read replacement probe: %v", err)
 	}
-	if len(sent) != 2 || sent[1].To != "replacement@icloud.com" || resource.Status != iCloudResourcePending ||
+	if len(sent) != 2 || sent[1].To != "replacement@icloud.com" || resource.Status != iCloudResourceNormal ||
 		resource.DeliveryProbeAlias != "replacement@icloud.com" || resource.DeliveryProbeVerifiedAt != nil ||
 		resource.DeliveryProbeToken == firstToken {
 		t.Fatalf("replacement alias must receive a fresh probe: resource=%#v sent=%#v", resource, sent)
@@ -719,6 +782,57 @@ func TestApplyForwardingMailboxSettingsPreservesAllocatedAliasRoute(t *testing.T
 	}
 }
 
+func TestICloudValidationCandidatesIgnoreSupersededAliasWork(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:icloud-validation-superseded-alias-lease?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudMaintenanceRunModel{}); err != nil {
+		t.Fatalf("migrate database: %v", err)
+	}
+	now := time.Date(2026, 8, 12, 4, 0, 0, 0, time.UTC)
+	if err := db.Create(&iCloudRootModel{ID: 1, Type: "icloud", OwnerUserID: 7, Version: 1, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatalf("create root: %v", err)
+	}
+	if err := db.Create(&iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "alias@icloud.com", Status: iCloudResourcePending,
+		SessionStatus: iCloudSessionValid, CredentialRevision: 1, ValidationGeneration: 3,
+		ExpireAt: now.Add(time.Hour), NextValidationAt: &now, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create resource: %v", err)
+	}
+	startedAt := now.Add(-time.Minute)
+	if err := db.Create(&iCloudMaintenanceRunModel{
+		ResourceID: 1, ValidationGeneration: 2, Kind: iCloudMaintenanceAlias, Status: iCloudMaintenanceRunning,
+		Attempts: 1, MaxAttempts: 3, CredentialRevision: 1, QueuedAt: startedAt, StartedAt: &startedAt,
+		CreatedAt: startedAt, UpdatedAt: startedAt,
+	}).Error; err != nil {
+		t.Fatalf("create superseded alias run: %v", err)
+	}
+	if err := db.Create(&iCloudRootModel{ID: 2, Type: "icloud", OwnerUserID: 7, Version: 1, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatalf("create second root: %v", err)
+	}
+	if err := db.Create(&iCloudResourceModel{
+		ID: 2, ResourceType: "icloud", PrimaryEmail: "queued@icloud.com", Status: iCloudResourcePending,
+		SessionStatus: iCloudSessionValid, CredentialRevision: 1, ValidationGeneration: 3,
+		ExpireAt: now.Add(time.Hour), NextValidationAt: &now, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create second resource: %v", err)
+	}
+	if err := db.Create(&iCloudMaintenanceRunModel{
+		ResourceID: 2, ValidationGeneration: 2, Kind: iCloudMaintenanceAlias, Status: iCloudMaintenanceQueued,
+		MaxAttempts: 3, CredentialRevision: 1, QueuedAt: now, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create superseded queued alias run: %v", err)
+	}
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	tasks, err := service.iCloudValidationCandidates(context.Background(), 2)
+	if err != nil || len(tasks) != 2 || tasks[0].ValidationGeneration != 3 || tasks[1].ValidationGeneration != 3 {
+		t.Fatalf("superseded alias lease blocked current validation: tasks=%#v err=%v", tasks, err)
+	}
+}
+
 func createICloudValidationResource(t *testing.T, db *gorm.DB, now time.Time) {
 	t.Helper()
 	if err := db.Create(&iCloudRootModel{ID: 1, Type: "icloud", OwnerUserID: 7, Version: 1, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
@@ -759,7 +873,24 @@ func TestICloudValidationDispatcherRecoversStaleLease(t *testing.T) {
 	}).Error; err != nil {
 		t.Fatalf("create stale resource: %v", err)
 	}
+	probeVerifiedAt := now.Add(-time.Hour)
+	if err := db.Create(&iCloudResourceModel{
+		ID: 2, ResourceType: "icloud", PrimaryEmail: "alias@icloud.com", ExpireAt: now.Add(time.Hour),
+		Status: iCloudResourceNormal, SessionStatus: iCloudSessionValid, ValidationGeneration: 2, CredentialRevision: 1,
+		DeliveryProbeToken: "probe-token", DeliveryProbeVerifiedAt: &probeVerifiedAt, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create stale alias resource: %v", err)
+	}
+	staleStartedAt := now.Add(-iCloudValidationRunningLease - time.Second)
+	if err := db.Create(&iCloudMaintenanceRunModel{
+		ResourceID: 2, ValidationGeneration: 2, Kind: iCloudMaintenanceAlias, Status: iCloudMaintenanceRunning,
+		Attempts: 1, MaxAttempts: 3, CredentialRevision: 1, QueuedAt: staleStartedAt, StartedAt: &staleStartedAt,
+		CreatedAt: staleStartedAt, UpdatedAt: staleStartedAt,
+	}).Error; err != nil {
+		t.Fatalf("create stale alias run: %v", err)
+	}
 	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
 	if err := service.recoverStaleICloudValidations(context.Background(), now); err != nil {
 		t.Fatalf("recover stale validation: %v", err)
 	}
@@ -769,6 +900,14 @@ func TestICloudValidationDispatcherRecoversStaleLease(t *testing.T) {
 	}
 	if resource.Status != iCloudResourcePending || resource.ValidationGeneration != 5 {
 		t.Fatalf("unexpected recovered state: %#v", resource)
+	}
+	resource = iCloudResourceModel{}
+	if err := db.First(&resource, 2).Error; err != nil {
+		t.Fatalf("read alias resource: %v", err)
+	}
+	if resource.Status != iCloudResourceNormal || resource.ValidationGeneration != 3 || resource.NextValidationAt == nil ||
+		resource.DeliveryProbeToken != "probe-token" || resource.DeliveryProbeVerifiedAt == nil {
+		t.Fatalf("stale alias recovery changed resource availability: %#v", resource)
 	}
 }
 
@@ -785,8 +924,8 @@ func TestICloudMaintenanceRunKeepsAliasIntentAcrossGenerations(t *testing.T) {
 		t.Fatalf("create root: %v", err)
 	}
 	if err := db.Create(&iCloudResourceModel{
-		ID: 1, ResourceType: "icloud", PrimaryEmail: "alias@icloud.com", Status: iCloudResourcePending,
-		CredentialRevision: 2, ValidationGeneration: 4, ExpireAt: now.Add(time.Hour),
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "alias@icloud.com", Status: iCloudResourceNormal,
+		SessionStatus: iCloudSessionValid, CredentialRevision: 2, ValidationGeneration: 4, ExpireAt: now.Add(time.Hour),
 		NextValidationAt: &now, CreatedAt: now, UpdatedAt: now,
 	}).Error; err != nil {
 		t.Fatalf("create resource: %v", err)
@@ -806,6 +945,13 @@ func TestICloudMaintenanceRunKeepsAliasIntentAcrossGenerations(t *testing.T) {
 	if err != nil || !claimed || task.MaintenanceKind != iCloudMaintenanceAlias {
 		t.Fatalf("claim alias maintenance: task=%#v claimed=%v err=%v", task, claimed, err)
 	}
+	var resource iCloudResourceModel
+	if err := db.First(&resource, 1).Error; err != nil {
+		t.Fatalf("read claimed resource: %v", err)
+	}
+	if resource.Status != iCloudResourceNormal || resource.ValidationGeneration != 4 || resource.NextValidationAt != nil {
+		t.Fatalf("alias claim changed resource availability: %#v", resource)
+	}
 	next := now.Add(time.Minute)
 	if err := service.applyICloudValidationResult(context.Background(), task, iCloudValidationResult{
 		Deferred: true, Retryable: true, SafeMessage: "Alias provisioning continues.", NextValidationAt: &next,
@@ -819,6 +965,158 @@ func TestICloudMaintenanceRunKeepsAliasIntentAcrossGenerations(t *testing.T) {
 	if len(runs) != 2 || runs[0].Kind != iCloudMaintenanceAlias || runs[0].Status != iCloudMaintenanceSucceeded ||
 		runs[1].ValidationGeneration != 5 || runs[1].Kind != iCloudMaintenanceAlias || runs[1].Status != iCloudMaintenanceQueued {
 		t.Fatalf("alias maintenance intent was not preserved: %#v", runs)
+	}
+	resource = iCloudResourceModel{}
+	if err := db.First(&resource, 1).Error; err != nil || resource.Status != iCloudResourceNormal || resource.ValidationGeneration != 5 {
+		t.Fatalf("deferred alias maintenance changed resource availability: resource=%#v err=%v", resource, err)
+	}
+}
+
+func TestICloudBackgroundAliasFailureKeepsResourceNormal(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:icloud-maintenance-alias-release?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	if err := db.AutoMigrate(&iCloudResourceModel{}, &iCloudMaintenanceRunModel{}); err != nil {
+		t.Fatalf("migrate database: %v", err)
+	}
+	now := time.Date(2026, 8, 12, 1, 0, 0, 0, time.UTC)
+	probeVerifiedAt := now.Add(-time.Minute)
+	if err := db.Create(&iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "alias@icloud.com", Status: iCloudResourceNormal,
+		SessionStatus: iCloudSessionValid, CredentialRevision: 1, ValidationGeneration: 2,
+		DeliveryProbeToken: "probe-token", DeliveryProbeVerifiedAt: &probeVerifiedAt,
+		ExpireAt: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create resource: %v", err)
+	}
+	if err := db.Create(&iCloudMaintenanceRunModel{
+		ID: 1, ResourceID: 1, ValidationGeneration: 2, Kind: iCloudMaintenanceAlias,
+		Status: iCloudMaintenanceRunning, Attempts: 3, MaxAttempts: 3, CredentialRevision: 1,
+		QueuedAt: now, StartedAt: &now, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create alias run: %v", err)
+	}
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	if err := service.releaseICloudValidation(context.Background(), iCloudValidationTask{
+		ResourceID: 1, ValidationGeneration: 2, ExpectedCredentialRevision: 1,
+		MaintenanceRunID: 1, MaintenanceKind: iCloudMaintenanceAlias,
+	}, "temporary failure"); err != nil {
+		t.Fatalf("release alias run: %v", err)
+	}
+	var resource iCloudResourceModel
+	if err := db.First(&resource, 1).Error; err != nil {
+		t.Fatalf("read resource: %v", err)
+	}
+	if resource.Status != iCloudResourceNormal || resource.ValidationGeneration != 3 || resource.NextValidationAt == nil ||
+		!resource.NextValidationAt.Equal(now.Add(iCloudProvisionFailureInterval)) || resource.ValidationFailures != 0 ||
+		resource.DeliveryProbeToken != "probe-token" || resource.DeliveryProbeVerifiedAt == nil {
+		t.Fatalf("background failure changed validation status: %#v", resource)
+	}
+	var nextRun iCloudMaintenanceRunModel
+	if err := db.Where("resource_id = ? AND validation_generation = ?", 1, 3).Take(&nextRun).Error; err != nil {
+		t.Fatalf("read retry run: %v", err)
+	}
+	if nextRun.Kind != iCloudMaintenanceAlias || nextRun.Status != iCloudMaintenanceQueued || nextRun.Attempts != 0 {
+		t.Fatalf("background alias retry was not queued: %#v", nextRun)
+	}
+}
+
+func TestICloudAliasMaintenanceInvalidSessionMakesResourceAbnormal(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:icloud-maintenance-alias-invalid-session?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudMaintenanceRunModel{}); err != nil {
+		t.Fatalf("migrate database: %v", err)
+	}
+	now := time.Date(2026, 8, 12, 2, 0, 0, 0, time.UTC)
+	if err := db.Create(&iCloudRootModel{ID: 1, Type: "icloud", OwnerUserID: 7, Version: 1, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatalf("create root: %v", err)
+	}
+	if err := db.Create(&iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "alias@icloud.com", Status: iCloudResourceNormal,
+		SessionStatus: iCloudSessionInvalid, CredentialRevision: 1, ValidationGeneration: 1,
+		ExpireAt: now.Add(time.Hour), NextValidationAt: &now, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create resource: %v", err)
+	}
+	if err := db.Create(&iCloudMaintenanceRunModel{
+		ID: 1, ResourceID: 1, ValidationGeneration: 2, Kind: iCloudMaintenanceAlias,
+		Status: iCloudMaintenanceQueued, MaxAttempts: 3, CredentialRevision: 1,
+		QueuedAt: now, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create alias run: %v", err)
+	}
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	task, claimed, err := service.markICloudValidationDispatched(context.Background(), iCloudValidationTask{
+		ResourceID: 1, OwnerUserID: 7, ValidationGeneration: 2, ExpectedCredentialRevision: 1,
+	})
+	if err != nil || !claimed || task.MaintenanceKind != iCloudMaintenanceAlias {
+		t.Fatalf("claim invalid alias resource: task=%#v claimed=%v err=%v", task, claimed, err)
+	}
+	var resource iCloudResourceModel
+	if err := db.First(&resource, 1).Error; err != nil || resource.Status != iCloudResourceValidating {
+		t.Fatalf("invalid session remained allocatable during validation: resource=%#v err=%v", resource, err)
+	}
+	if err := service.applyICloudValidationResult(context.Background(), task, iCloudValidationResult{
+		SessionKnown: true, SessionValid: false, Category: "session_invalid", SafeMessage: "iCloud session is invalid.",
+	}); err != nil {
+		t.Fatalf("apply invalid session: %v", err)
+	}
+	resource = iCloudResourceModel{}
+	if err := db.First(&resource, 1).Error; err != nil {
+		t.Fatalf("read resource: %v", err)
+	}
+	if resource.Status != iCloudResourceAbnormal || resource.SessionStatus != iCloudSessionInvalid || resource.NextValidationAt != nil {
+		t.Fatalf("invalid session did not remove resource availability: %#v", resource)
+	}
+}
+
+func TestICloudAliasMaintenanceConfirmedConfigurationErrorMakesResourceAbnormal(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:icloud-maintenance-alias-configuration-error?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudMaintenanceRunModel{}); err != nil {
+		t.Fatalf("migrate database: %v", err)
+	}
+	now := time.Date(2026, 8, 12, 3, 0, 0, 0, time.UTC)
+	if err := db.Create(&iCloudRootModel{ID: 1, Type: "icloud", OwnerUserID: 7, Version: 1, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatalf("create root: %v", err)
+	}
+	if err := db.Create(&iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "alias@icloud.com", Status: iCloudResourceNormal,
+		SessionStatus: iCloudSessionValid, CredentialRevision: 1, ValidationGeneration: 2,
+		ExpireAt: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create resource: %v", err)
+	}
+	if err := db.Create(&iCloudMaintenanceRunModel{
+		ID: 1, ResourceID: 1, ValidationGeneration: 2, Kind: iCloudMaintenanceAlias,
+		Status: iCloudMaintenanceRunning, Attempts: 1, MaxAttempts: 3, CredentialRevision: 1,
+		QueuedAt: now, StartedAt: &now, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create alias run: %v", err)
+	}
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	if err := service.applyICloudValidationResult(context.Background(), iCloudValidationTask{
+		ResourceID: 1, OwnerUserID: 7, ValidationGeneration: 2, ExpectedCredentialRevision: 1,
+		MaintenanceRunID: 1, MaintenanceKind: iCloudMaintenanceAlias,
+	}, iCloudValidationResult{
+		SessionKnown: true, SessionValid: true, Category: "forward_target_mismatch", SafeMessage: "Invalid forwarding target.",
+	}); err != nil {
+		t.Fatalf("apply configuration error: %v", err)
+	}
+	var resource iCloudResourceModel
+	if err := db.First(&resource, 1).Error; err != nil {
+		t.Fatalf("read resource: %v", err)
+	}
+	if resource.Status != iCloudResourceAbnormal || resource.SessionStatus != iCloudSessionValid {
+		t.Fatalf("confirmed configuration error remained allocatable: %#v", resource)
 	}
 }
 
