@@ -1030,6 +1030,116 @@ func TestInventoryStatsExcludePrivateMicrosoftFromSharedPoolMySQL(t *testing.T) 
 	require.Empty(t, productStats.Items[0].Suffixes)
 }
 
+func TestICloudInventoryUsesNormalUnexpiredAliasesWithoutFullAliasPoolMySQL(t *testing.T) {
+	db := newAllocMySQLTestDB(t)
+	seedAllocBase(t, db, "icloud", 1, 0, 0)
+	require.NoError(t, db.Exec(`
+INSERT INTO email_resources(id, type, owner_user_id) VALUES
+    (1000, 'icloud', 1),
+    (1001, 'icloud', 2)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO icloud_resources(
+    id, primary_email, host, dsid, client_id, client_build_number,
+    client_mastering_number, cookie, expire_at, for_sale, status,
+    session_status, alias_count
+) VALUES
+    (1000, 'public@icloud.com', 'https://icloud.com', 'dsid-public', 'client-public', '1', '1', 'cookie', DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 DAY), TRUE, 'normal', 'unchecked', 1),
+    (1001, 'owned@icloud.com', 'https://icloud.com', 'dsid-owned', 'client-owned', '1', '1', 'cookie', DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 DAY), TRUE, 'normal', 'invalid', 1)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO icloud_aliases(resource_id, anonymous_id, email, status) VALUES
+    (1000, 'anon-public', 'public-alias@icloud.com', 'normal'),
+    (1001, 'anon-owned', 'owned-alias@icloud.com', 'normal')`).Error)
+
+	repo := NewRepo(db)
+	stats, err := repo.GetInventoryStats(context.Background(), 10)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), stats.ICloud.EligibleResources)
+	require.Equal(t, int64(2), stats.ICloud.AliasAvailable)
+	require.Equal(t, int64(2), stats.ICloud.TotalAvailable)
+
+	totals, err := repo.GetProductInventoryTotals(context.Background(), 10)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), totals.TotalAvailable)
+	require.Equal(t, int64(2), totals.Items[0].PublicAvailable)
+
+	candidates, err := repo.ListICloudSourceCandidates(
+		context.Background(), 10, 2, domain.SupplyScopePublic, time.Now(), 10,
+	)
+	require.NoError(t, err)
+	require.Len(t, candidates, 2)
+	owned, err := repo.ListICloudSourceCandidates(
+		context.Background(), 10, 2, domain.SupplyScopeOwned, time.Now(), 10,
+	)
+	require.NoError(t, err)
+	require.Len(t, owned, 1)
+	require.Equal(t, uint(1001), owned[0].ResourceID)
+
+	var locked *allocapp.ICloudCandidate
+	require.NoError(t, repo.WithTx(context.Background(), func(ctx context.Context) error {
+		var lockErr error
+		locked, lockErr = repo.LockICloudCandidate(
+			ctx, candidates[0].ResourceID, candidates[0].AliasID, 10, 2,
+			domain.SupplyScopePublic, time.Now(),
+		)
+		return lockErr
+	}))
+	require.NotNil(t, locked)
+
+	require.NoError(t, db.Table("icloud_resources").Where("id = ?", 1001).Update("for_sale", false).Error)
+	ownedTotals, err := repo.ListUserICloudInventoryTotals(context.Background(), 10, 2)
+	require.NoError(t, err)
+	require.Equal(t, []allocapp.UserICloudInventoryTotal{{
+		ProductID: 20, OwnedAvailable: 1, OwnedPublicAvailable: 0,
+	}}, ownedTotals)
+	owned, err = repo.ListICloudSourceCandidates(
+		context.Background(), 10, 2, domain.SupplyScopeOwned, time.Now(), 10,
+	)
+	require.NoError(t, err)
+	require.Len(t, owned, 1)
+	require.Equal(t, uint(1001), owned[0].ResourceID)
+
+	userTotals, err := allocapp.NewUseCase(repo).GetProductInventoryTotals(context.Background(), 10, 2)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), userTotals.Items[0].TotalAvailable)
+	require.Equal(t, int64(1), userTotals.Items[0].PublicAvailable)
+}
+
+func TestUserICloudInventoryTotalsAreOwnerScopedMySQL(t *testing.T) {
+	db := newAllocMySQLTestDB(t)
+	seedAllocBase(t, db, "icloud", 1, 0, 0)
+	require.NoError(t, db.Exec(`
+INSERT INTO email_resources(id, type, owner_user_id) VALUES
+    (1000, 'icloud', 1),
+    (1001, 'icloud', 2),
+    (1002, 'icloud', 2)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO icloud_resources(
+    id, primary_email, host, dsid, client_id, client_build_number,
+    client_mastering_number, cookie, expire_at, for_sale, status
+) VALUES
+    (1000, 'other@icloud.com', 'https://icloud.com', 'dsid-0', 'client-0', '1', '1', 'cookie', DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 DAY), TRUE, 'normal'),
+    (1001, 'owned-public@icloud.com', 'https://icloud.com', 'dsid-1', 'client-1', '1', '1', 'cookie', DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 DAY), TRUE, 'normal'),
+    (1002, 'owned-private@icloud.com', 'https://icloud.com', 'dsid-2', 'client-2', '1', '1', 'cookie', DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 DAY), FALSE, 'normal')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO icloud_aliases(resource_id, anonymous_id, email, status) VALUES
+    (1000, 'anon-0', 'other-alias@icloud.com', 'normal'),
+    (1001, 'anon-1', 'owned-public-alias@icloud.com', 'normal'),
+    (1002, 'anon-2', 'owned-private-alias@icloud.com', 'normal')`).Error)
+
+	repo := NewRepo(db)
+	rows, err := repo.ListUserICloudInventoryTotals(context.Background(), 10, 2)
+	require.NoError(t, err)
+	require.Equal(t, []allocapp.UserICloudInventoryTotal{{
+		ProductID: 20, OwnedAvailable: 2, OwnedPublicAvailable: 1,
+	}}, rows)
+
+	totals, err := allocapp.NewUseCase(repo).GetProductInventoryTotals(context.Background(), 10, 2)
+	require.NoError(t, err)
+	require.EqualValues(t, 3, totals.TotalAvailable)
+	require.EqualValues(t, 3, totals.Items[0].TotalAvailable)
+	require.EqualValues(t, 2, totals.Items[0].PublicAvailable)
+}
+
 func TestInventoryStatsExcludeReleasedProjectMainAndAliasHistoryMySQL(t *testing.T) {
 	db := newAllocMySQLTestDB(t)
 	seedAllocBase(t, db, "microsoft", 1, 0, 0)

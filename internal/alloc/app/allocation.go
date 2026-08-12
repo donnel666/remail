@@ -28,6 +28,14 @@ const (
 	inventoryRefreshBatchSize = 5
 )
 
+func InventoryRefreshParametersValue() InventoryRefreshParameters {
+	return InventoryRefreshParameters{
+		RefreshInterval: InventoryRefreshIntervalValue(),
+		CacheHardTTL:    inventoryCacheHardTTLValue(),
+		BatchSize:       inventoryRefreshBatchSize,
+	}
+}
+
 var (
 	errCandidateUnavailable = errors.New("allocation candidate unavailable")
 	errResourceRootBusy     = errors.New("allocation resource root busy")
@@ -783,7 +791,63 @@ func (uc *UseCase) GetProductInventoryTotals(ctx context.Context, projectID uint
 	if err := uc.repo.AssertProjectInventoryAccess(ctx, projectID, viewerUserID); err != nil {
 		return nil, err
 	}
-	return uc.GetProductInventorySnapshot(ctx, projectID)
+	snapshot, err := uc.GetProductInventorySnapshot(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	userICloud, err := uc.repo.ListUserICloudInventoryTotals(ctx, projectID, viewerUserID)
+	if err != nil {
+		return nil, err
+	}
+	if len(userICloud) == 0 {
+		return snapshot, nil
+	}
+	result := cloneProductInventoryTotals(snapshot)
+	for _, inventory := range userICloud {
+		privateAvailable := inventory.OwnedAvailable - inventory.OwnedPublicAvailable
+		if privateAvailable <= 0 {
+			continue
+		}
+		itemIndex := -1
+		for i := range result.Items {
+			if result.Items[i].ProductID == inventory.ProductID {
+				itemIndex = i
+				break
+			}
+		}
+		if itemIndex < 0 {
+			result.Items = append(result.Items, ProductInventoryTotal{ProductID: inventory.ProductID})
+			itemIndex = len(result.Items) - 1
+		}
+		result.Items[itemIndex].TotalAvailable += privateAvailable
+		result.TotalAvailable += privateAvailable
+	}
+	return result, nil
+}
+
+func cloneProductInventoryTotals(source *ProjectProductInventoryTotals) *ProjectProductInventoryTotals {
+	result := *source
+	result.Items = append([]ProductInventoryTotal(nil), source.Items...)
+	for i := range result.Items {
+		result.Items[i].Suffixes = append([]ProductInventorySuffixTotal(nil), source.Items[i].Suffixes...)
+		if source.Items[i].CodeAvailable != nil {
+			value := *source.Items[i].CodeAvailable
+			result.Items[i].CodeAvailable = &value
+		}
+		if source.Items[i].CodePublicAvailable != nil {
+			value := *source.Items[i].CodePublicAvailable
+			result.Items[i].CodePublicAvailable = &value
+		}
+		if source.Items[i].PurchaseAvailable != nil {
+			value := *source.Items[i].PurchaseAvailable
+			result.Items[i].PurchaseAvailable = &value
+		}
+		if source.Items[i].PurchasePublicAvailable != nil {
+			value := *source.Items[i].PurchasePublicAvailable
+			result.Items[i].PurchasePublicAvailable = &value
+		}
+	}
+	return &result
 }
 
 // GetProductInventorySnapshot reads the shared project snapshot after the
@@ -1054,6 +1118,67 @@ func (uc *UseCase) EnsureInventoryRefreshSchedule(ctx context.Context) error {
 	return nil
 }
 
+func (uc *UseCase) ListInventoryRefreshes(ctx context.Context) ([]InventoryRefreshItem, error) {
+	if uc == nil || uc.repo == nil || uc.inventoryCache == nil {
+		return nil, errors.New("inventory refresh is unavailable")
+	}
+	projects, err := uc.repo.ListInventoryProjects(ctx)
+	if err != nil {
+		return nil, err
+	}
+	projectIDs := make([]uint, len(projects))
+	for i := range projects {
+		projectIDs[i] = projects[i].ID
+	}
+	states, err := uc.inventoryCache.ListInventoryRefreshStates(ctx, projectIDs)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]InventoryRefreshItem, len(projects))
+	for i, project := range projects {
+		state := states[project.ID]
+		state.ProjectID = project.ID
+		items[i] = InventoryRefreshItem{InventoryRefreshState: state, ProjectName: project.Name}
+	}
+	return items, nil
+}
+
+func (uc *UseCase) TriggerInventoryRefresh(ctx context.Context, projectID uint) ([]uint, error) {
+	if uc == nil || uc.repo == nil || uc.inventoryCache == nil {
+		return nil, errors.New("inventory refresh is unavailable")
+	}
+	projects, err := uc.repo.ListInventoryProjects(ctx)
+	if err != nil {
+		return nil, err
+	}
+	projectIDs := make([]uint, 0, len(projects))
+	for _, project := range projects {
+		if projectID == 0 || project.ID == projectID {
+			projectIDs = append(projectIDs, project.ID)
+		}
+	}
+	if projectID > 0 && len(projectIDs) == 0 {
+		return nil, domain.ErrProjectNotAllocatable
+	}
+	entries := make([]InventoryCacheEntry, 0, len(projectIDs)*2)
+	for _, id := range projectIDs {
+		entries = append(entries,
+			InventoryCacheEntry{Kind: InventoryCacheStats, ProjectID: id},
+			InventoryCacheEntry{Kind: InventoryCacheProducts, ProjectID: id},
+		)
+	}
+	if err := uc.inventoryCache.ClearInventoryRefreshFailures(ctx, entries); err != nil {
+		return nil, err
+	}
+	if err := uc.inventoryCache.RequeueInventory(ctx, entries); err != nil {
+		return nil, err
+	}
+	if err := uc.ScheduleInventoryRefreshContinuation(ctx); err != nil {
+		return nil, err
+	}
+	return projectIDs, nil
+}
+
 // RefreshInventoryCacheBefore refreshes entries whose backend schedule is due
 // before one task's fixed cutoff.
 func (uc *UseCase) RefreshInventoryCacheBefore(ctx context.Context, before time.Time) (*InventoryRefreshResult, error) {
@@ -1075,11 +1200,13 @@ func (uc *UseCase) RefreshInventoryCacheBefore(ctx context.Context, before time.
 		}
 		token, acquired, err := uc.inventoryCache.AcquireInventoryRefresh(ctx, entry, inventoryRefreshLockTTL)
 		if err != nil {
-			if requeueErr := requeueInventory(uc.inventoryCache, []InventoryCacheEntry{entry}); requeueErr != nil {
-				return result, errors.Join(err, requeueErr)
-			}
 			result.Failed++
-			result.LastError = err
+			recordErr := recordInventoryRefreshFailure(uc.inventoryCache, entry, err)
+			requeueErr := requeueInventory(uc.inventoryCache, []InventoryCacheEntry{entry})
+			result.LastError = errors.Join(err, recordErr, requeueErr)
+			if requeueErr != nil {
+				return result, result.LastError
+			}
 			continue
 		}
 		if !acquired {
@@ -1115,16 +1242,22 @@ func (uc *UseCase) RefreshInventoryCacheBefore(ctx context.Context, before time.
 		}
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		releaseErr := uc.inventoryCache.ReleaseInventoryRefresh(cleanupCtx, entry, token)
+		var clearErr error
+		if err == nil && releaseErr == nil {
+			clearErr = uc.inventoryCache.ClearInventoryRefreshFailure(cleanupCtx, entry)
+		}
 		cancel()
 		if err == nil {
-			err = releaseErr
+			err = errors.Join(releaseErr, clearErr)
 		}
 		if err != nil {
-			if requeueErr := requeueInventory(uc.inventoryCache, []InventoryCacheEntry{entry}); requeueErr != nil {
-				return result, errors.Join(err, requeueErr)
-			}
 			result.Failed++
-			result.LastError = err
+			recordErr := recordInventoryRefreshFailure(uc.inventoryCache, entry, err)
+			requeueErr := requeueInventory(uc.inventoryCache, []InventoryCacheEntry{entry})
+			result.LastError = errors.Join(err, recordErr, requeueErr)
+			if requeueErr != nil {
+				return result, result.LastError
+			}
 			continue
 		}
 		if removed {
@@ -1140,6 +1273,12 @@ func requeueInventory(cache InventoryCache, entries []InventoryCacheEntry) error
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	return cache.RequeueInventory(cleanupCtx, entries)
+}
+
+func recordInventoryRefreshFailure(cache InventoryCache, entry InventoryCacheEntry, refreshErr error) error {
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return cache.RecordInventoryRefreshFailure(cleanupCtx, entry, refreshErr)
 }
 
 func (uc *UseCase) ScheduleInventoryRefresh(ctx context.Context) error {

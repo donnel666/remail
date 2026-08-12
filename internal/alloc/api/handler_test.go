@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -10,11 +11,15 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/donnel666/remail/api/middleware"
+	allocapp "github.com/donnel666/remail/internal/alloc/app"
 	allocdomain "github.com/donnel666/remail/internal/alloc/domain"
+	allocinfra "github.com/donnel666/remail/internal/alloc/infra"
 	iamdomain "github.com/donnel666/remail/internal/iam/domain"
 	"github.com/donnel666/remail/internal/platform/testmysql"
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
@@ -30,6 +35,61 @@ func TestInventoryRefreshInProgressReturnsRetryableServiceUnavailable(t *testing
 
 	require.Equal(t, http.StatusServiceUnavailable, response.Code)
 	require.Equal(t, "1", response.Header().Get("Retry-After"))
+}
+
+type inventoryRefreshHandlerRepo struct{ allocapp.Repository }
+
+func (*inventoryRefreshHandlerRepo) ListInventoryProjects(context.Context) ([]allocapp.InventoryProject, error) {
+	return []allocapp.InventoryProject{{ID: 2, Name: "chatgpt"}}, nil
+}
+
+type inventoryRefreshHandlerQueue struct{ calls int }
+
+func (q *inventoryRefreshHandlerQueue) EnqueueInventoryRefresh(context.Context) error {
+	q.calls++
+	return nil
+}
+
+func (q *inventoryRefreshHandlerQueue) EnqueueInventoryRefreshContinuation(context.Context) error {
+	q.calls++
+	return nil
+}
+
+func TestInventoryRefreshAdminRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	queue := &inventoryRefreshHandlerQueue{}
+	useCase := allocapp.NewUseCase(&inventoryRefreshHandlerRepo{}, queue)
+	useCase.SetInventoryCache(allocinfra.NewInventoryCache(client))
+	module := &Module{UseCase: useCase}
+
+	denied := newAllocationAPITestRouter(module, fakeSessionFetcher{ok: true}, fakePermissionChecker{})
+	require.Equal(t, http.StatusForbidden, performAllocAPIRequest(denied, http.MethodGet, "/v1/admin/inventory/refreshes", true).Code)
+
+	router := newAllocationAPITestRouter(module, fakeSessionFetcher{ok: true}, fakePermissionChecker{allowed: true})
+	response := performAllocAPIRequest(router, http.MethodGet, "/v1/admin/inventory/refreshes", true)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var state InventoryRefreshResponse
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &state))
+	require.Len(t, state.Items, 1)
+	require.Equal(t, uint(2), state.Items[0].ProjectID)
+	require.Equal(t, "queued", state.Items[0].Status)
+	require.Nil(t, state.Items[0].LastAttemptAt)
+	require.Empty(t, state.Items[0].LastError)
+	require.Positive(t, state.Parameters.RefreshIntervalMinutes)
+
+	response = performAllocAPIJSONRequest(router, "/v1/admin/inventory/refreshes", `{"projectId":2}`)
+	require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
+	require.Equal(t, 1, queue.calls)
+	response = performAllocAPIJSONRequest(router, "/v1/admin/inventory/refreshes", `{}`)
+	require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
+	require.Equal(t, 2, queue.calls)
+	require.Equal(t, http.StatusBadRequest, performAllocAPIJSONRequest(router, "/v1/admin/inventory/refreshes", `{"projectId":0}`).Code)
+	require.Equal(t, http.StatusBadRequest, performAllocAPIJSONRequest(router, "/v1/admin/inventory/refreshes", `null`).Code)
+	require.Equal(t, http.StatusBadRequest, performAllocAPIJSONRequest(router, "/v1/admin/inventory/refreshes", `{} {}`).Code)
+	require.Equal(t, http.StatusUnprocessableEntity, performAllocAPIJSONRequest(router, "/v1/admin/inventory/refreshes", `{"projectId":999}`).Code)
 }
 
 func TestMain(m *testing.M) {
@@ -175,6 +235,17 @@ func performAllocAPIRequest(router *gin.Engine, method string, path string, auth
 		req.AddCookie(&http.Cookie{Name: middleware.CSRFCookieName, Value: "csrf"})
 		req.Header.Set(middleware.CSRFHeaderName, "csrf")
 	}
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	return resp
+}
+
+func performAllocAPIJSONRequest(router *gin.Engine, path string, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: middleware.SessionCookieName, Value: "valid"})
+	req.AddCookie(&http.Cookie{Name: middleware.CSRFCookieName, Value: "csrf"})
+	req.Header.Set(middleware.CSRFHeaderName, "csrf")
 	resp := httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
 	return resp

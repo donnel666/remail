@@ -204,10 +204,18 @@ type ProductInventorySuffixTotal struct {
 	PublicAvailable int64
 }
 
+type UserICloudInventoryTotal struct {
+	ProductID            uint
+	OwnedAvailable       int64
+	OwnedPublicAvailable int64
+}
+
 type ProjectProductInventoryTotals struct {
 	ProjectID      uint
 	TotalAvailable int64
 	Items          []ProductInventoryTotal
+	// RefreshedAt is internal cache metadata, not part of the public API.
+	RefreshedAt *time.Time `json:"refreshedAt,omitempty"`
 	// Cold marks a deliberately seeded zero snapshot whose aggregate refresh
 	// has not completed yet. It makes every product/suffix a known zero without
 	// requiring synchronous aggregate SQL on a cache miss.
@@ -239,6 +247,41 @@ type InventoryCacheEntry struct {
 	ProjectID uint
 }
 
+type InventoryProject struct {
+	ID   uint
+	Name string
+}
+
+type InventoryRefreshStatus string
+
+const (
+	InventoryRefreshQueued    InventoryRefreshStatus = "queued"
+	InventoryRefreshRunning   InventoryRefreshStatus = "running"
+	InventoryRefreshScheduled InventoryRefreshStatus = "scheduled"
+	InventoryRefreshFailed    InventoryRefreshStatus = "failed"
+)
+
+type InventoryRefreshState struct {
+	ProjectID       uint
+	Status          InventoryRefreshStatus
+	TotalAvailable  int64
+	LastRefreshedAt *time.Time
+	NextRefreshAt   *time.Time
+	LastAttemptAt   *time.Time
+	LastError       string
+}
+
+type InventoryRefreshItem struct {
+	InventoryRefreshState
+	ProjectName string
+}
+
+type InventoryRefreshParameters struct {
+	RefreshInterval time.Duration
+	CacheHardTTL    time.Duration
+	BatchSize       int
+}
+
 type InventoryCache interface {
 	GetInventoryStats(ctx context.Context, projectID uint) (*InventoryStats, error)
 	SetInventoryStats(ctx context.Context, projectID uint, stats *InventoryStats, ttl time.Duration) error
@@ -250,6 +293,10 @@ type InventoryCache interface {
 	RefreshProductInventoryTotals(ctx context.Context, projectID uint, totals *ProjectProductInventoryTotals, ttl time.Duration) error
 	IsProductUnavailable(ctx context.Context, req ProductInventoryAvailabilityRequest) (bool, error)
 	MarkProductUnavailable(ctx context.Context, req ProductInventoryAvailabilityRequest) (bool, error)
+	ListInventoryRefreshStates(ctx context.Context, projectIDs []uint) (map[uint]InventoryRefreshState, error)
+	RecordInventoryRefreshFailure(ctx context.Context, entry InventoryCacheEntry, err error) error
+	ClearInventoryRefreshFailure(ctx context.Context, entry InventoryCacheEntry) error
+	ClearInventoryRefreshFailures(ctx context.Context, entries []InventoryCacheEntry) error
 	ClaimDueInventory(ctx context.Context, before time.Time, limit int) ([]InventoryCacheEntry, error)
 	RequeueInventory(ctx context.Context, entries []InventoryCacheEntry) error
 	DeleteInventory(ctx context.Context, entry InventoryCacheEntry) error
@@ -419,7 +466,9 @@ type Repository interface {
 	ListActiveByRecipient(ctx context.Context, recipient string) ([]domain.UnifiedAllocation, error)
 
 	AssertProjectInventoryAccess(ctx context.Context, projectID uint, buyerUserID uint) error
+	ListInventoryProjects(ctx context.Context) ([]InventoryProject, error)
 	ListInventoryProjectIDs(ctx context.Context) ([]uint, error)
 	GetInventoryStats(ctx context.Context, projectID uint) (*InventoryStats, error)
 	GetProductInventoryTotals(ctx context.Context, projectID uint) (*ProjectProductInventoryTotals, error)
+	ListUserICloudInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint) ([]UserICloudInventoryTotal, error)
 }

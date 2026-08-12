@@ -4964,6 +4964,69 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+
+  /v1/admin/inventory/refreshes:
+    get:
+      operationId: getAdminInventoryRefreshes
+      summary: List project inventory refresh state
+      description: Requires `system:settings/read`. State is derived from the existing Redis inventory snapshots, refresh schedule, and refresh locks.
+      tags:
+        - Allocation
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Project inventory refresh state and runtime parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryRefreshResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          description: Inventory refresh state could not be loaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      operationId: postAdminInventoryRefresh
+      summary: Queue inventory refresh for one or all projects
+      description: Requires `system:settings/write`. Omit `projectId` to refresh every listed project with an enabled product.
+      tags:
+        - Allocation
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InventoryRefreshRequest"
+      responses:
+        "202":
+          description: Inventory refresh queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryRefreshAcceptedResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          description: Inventory refresh could not be queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   # --- OpenAPI Credentials ---
   /v1/apikeys/usage:
     get:
@@ -18414,6 +18477,92 @@ components:
           type: integer
         activeICloudAllocations:
           type: integer
+      additionalProperties: false
+
+    InventoryRefreshRequest:
+      type: object
+      properties:
+        projectId:
+          type: integer
+          minimum: 1
+      additionalProperties: false
+
+    InventoryRefreshResponse:
+      type: object
+      required:
+        - items
+        - parameters
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/InventoryRefreshItem"
+        parameters:
+          $ref: "#/components/schemas/InventoryRefreshParameters"
+      additionalProperties: false
+
+    InventoryRefreshItem:
+      type: object
+      required:
+        - projectId
+        - projectName
+        - status
+        - totalAvailable
+        - lastRefreshedAt
+        - nextRefreshAt
+        - lastAttemptAt
+        - lastError
+      properties:
+        projectId:
+          type: integer
+        projectName:
+          type: string
+        status:
+          type: string
+          enum: [queued, running, scheduled, failed]
+        totalAvailable:
+          type: integer
+          format: int64
+        lastRefreshedAt:
+          type: string
+          format: date-time
+          nullable: true
+        nextRefreshAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastAttemptAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastError:
+          type: string
+      additionalProperties: false
+
+    InventoryRefreshParameters:
+      type: object
+      required:
+        - refreshIntervalMinutes
+        - cacheHardTtlHours
+        - batchSize
+      properties:
+        refreshIntervalMinutes:
+          type: integer
+        cacheHardTtlHours:
+          type: integer
+        batchSize:
+          type: integer
+      additionalProperties: false
+
+    InventoryRefreshAcceptedResponse:
+      type: object
+      required:
+        - projectIds
+      properties:
+        projectIds:
+          type: array
+          items:
+            type: integer
       additionalProperties: false
 
     ProjectInventoryTotalResponse:

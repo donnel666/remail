@@ -96,6 +96,10 @@ func (*boundedInventoryTaskCache) ReleaseInventoryRefresh(context.Context, alloc
 	return nil
 }
 
+func (*boundedInventoryTaskCache) ClearInventoryRefreshFailure(context.Context, allocapp.InventoryCacheEntry) error {
+	return nil
+}
+
 func (*failingInventoryTaskCache) ClaimDueInventory(context.Context, time.Time, int) ([]allocapp.InventoryCacheEntry, error) {
 	return []allocapp.InventoryCacheEntry{{Kind: allocapp.InventoryCacheStats, ProjectID: 1}}, nil
 }
@@ -109,6 +113,10 @@ func (*failingInventoryTaskCache) ReleaseInventoryRefresh(context.Context, alloc
 }
 
 func (*failingInventoryTaskCache) RequeueInventory(context.Context, []allocapp.InventoryCacheEntry) error {
+	return nil
+}
+
+func (*failingInventoryTaskCache) RecordInventoryRefreshFailure(context.Context, allocapp.InventoryCacheEntry, error) error {
 	return nil
 }
 

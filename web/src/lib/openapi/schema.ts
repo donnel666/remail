@@ -1606,6 +1606,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/inventory/refreshes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List project inventory refresh state
+         * @description Requires `system:settings/read`. State is derived from the existing Redis inventory snapshots, refresh schedule, and refresh locks.
+         */
+        get: operations["getAdminInventoryRefreshes"];
+        put?: never;
+        /**
+         * Queue inventory refresh for one or all projects
+         * @description Requires `system:settings/write`. Omit `projectId` to refresh every listed project with an enabled product.
+         */
+        post: operations["postAdminInventoryRefresh"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/apikeys/usage": {
         parameters: {
             query?: never;
@@ -6742,6 +6766,36 @@ export interface components {
             activeDomainAllocations: number;
             activeGmailAllocations: number;
             activeICloudAllocations: number;
+        };
+        InventoryRefreshRequest: {
+            projectId?: number;
+        };
+        InventoryRefreshResponse: {
+            items: components["schemas"]["InventoryRefreshItem"][];
+            parameters: components["schemas"]["InventoryRefreshParameters"];
+        };
+        InventoryRefreshItem: {
+            projectId: number;
+            projectName: string;
+            /** @enum {string} */
+            status: "queued" | "running" | "scheduled" | "failed";
+            /** Format: int64 */
+            totalAvailable: number;
+            /** Format: date-time */
+            lastRefreshedAt: string | null;
+            /** Format: date-time */
+            nextRefreshAt: string | null;
+            /** Format: date-time */
+            lastAttemptAt: string | null;
+            lastError: string;
+        };
+        InventoryRefreshParameters: {
+            refreshIntervalMinutes: number;
+            cacheHardTtlHours: number;
+            batchSize: number;
+        };
+        InventoryRefreshAcceptedResponse: {
+            projectIds: number[];
         };
         ProjectInventoryTotalResponse: {
             projectId: number;
@@ -14450,6 +14504,77 @@ export interface operations {
             };
             /** @description Inventory cache is being prepared */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getAdminInventoryRefreshes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Project inventory refresh state and runtime parameters */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InventoryRefreshResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Inventory refresh state could not be loaded */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    postAdminInventoryRefresh: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["InventoryRefreshRequest"];
+            };
+        };
+        responses: {
+            /** @description Inventory refresh queued */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InventoryRefreshAcceptedResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
+            /** @description Inventory refresh could not be queued */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

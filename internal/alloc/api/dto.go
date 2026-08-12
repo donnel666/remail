@@ -88,6 +88,36 @@ type ProjectProductSuffixInventoryResponse struct {
 	PublicAvailable int64  `json:"publicAvailable"`
 }
 
+type InventoryRefreshRequest struct {
+	ProjectID *uint `json:"projectId"`
+}
+
+type InventoryRefreshResponse struct {
+	Items      []InventoryRefreshItemResponse `json:"items"`
+	Parameters InventoryRefreshParameters     `json:"parameters"`
+}
+
+type InventoryRefreshItemResponse struct {
+	ProjectID       uint       `json:"projectId"`
+	ProjectName     string     `json:"projectName"`
+	Status          string     `json:"status"`
+	TotalAvailable  int64      `json:"totalAvailable"`
+	LastRefreshedAt *time.Time `json:"lastRefreshedAt"`
+	NextRefreshAt   *time.Time `json:"nextRefreshAt"`
+	LastAttemptAt   *time.Time `json:"lastAttemptAt"`
+	LastError       string     `json:"lastError"`
+}
+
+type InventoryRefreshParameters struct {
+	RefreshIntervalMinutes int64 `json:"refreshIntervalMinutes"`
+	CacheHardTTLHours      int64 `json:"cacheHardTtlHours"`
+	BatchSize              int   `json:"batchSize"`
+}
+
+type InventoryRefreshAcceptedResponse struct {
+	ProjectIDs []uint `json:"projectIds"`
+}
+
 type MicrosoftInventoryResponse struct {
 	Enabled                bool  `json:"enabled"`
 	MainEnabled            bool  `json:"mainEnabled"`

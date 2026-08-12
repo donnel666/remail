@@ -14,7 +14,8 @@ import (
 )
 
 const (
-	inventoryCacheKeyPrefix = "alloc:inventory:v5:"
+	inventoryCacheKeyPrefix        = "alloc:inventory:v5:"
+	inventoryCacheFailureKeyPrefix = "alloc:inventory:v5:failure:"
 	// The Redis name is retained for compatibility; scores are backend-owned
 	// next-refresh times, not client activity times.
 	inventoryCacheScheduleKey = "alloc:inventory:v5:active"
@@ -137,11 +138,11 @@ func (c *InventoryCache) InitializeInventory(ctx context.Context, entries []allo
 }
 
 func (c *InventoryCache) SetProductInventoryTotals(ctx context.Context, projectID uint, totals *allocapp.ProjectProductInventoryTotals, ttl time.Duration) error {
-	return storeInventoryCache(ctx, c.redis, inventoryCacheKey(allocapp.InventoryCacheProducts, projectID), totals, ttl)
+	return storeInventoryCache(ctx, c.redis, inventoryCacheKey(allocapp.InventoryCacheProducts, projectID), cloneProductInventoryTotalsForCache(totals), ttl)
 }
 
 func (c *InventoryCache) RefreshProductInventoryTotals(ctx context.Context, projectID uint, totals *allocapp.ProjectProductInventoryTotals, ttl time.Duration) error {
-	return refreshInventoryCache(ctx, c.redis, inventoryCacheKey(allocapp.InventoryCacheProducts, projectID), totals, ttl)
+	return refreshInventoryCache(ctx, c.redis, inventoryCacheKey(allocapp.InventoryCacheProducts, projectID), cloneProductInventoryTotalsForCache(totals), ttl)
 }
 
 func (c *InventoryCache) IsProductUnavailable(ctx context.Context, req allocapp.ProductInventoryAvailabilityRequest) (bool, error) {
@@ -377,6 +378,159 @@ func (c *InventoryCache) RequeueInventory(ctx context.Context, entries []allocap
 	return nil
 }
 
+type inventoryRefreshFailure struct {
+	LastAttemptAt time.Time `json:"lastAttemptAt"`
+	LastError     string    `json:"lastError"`
+}
+
+func (c *InventoryCache) RecordInventoryRefreshFailure(ctx context.Context, entry allocapp.InventoryCacheEntry, refreshErr error) error {
+	if refreshErr == nil {
+		return nil
+	}
+	failure := inventoryRefreshFailure{LastAttemptAt: time.Now().UTC(), LastError: refreshErr.Error()}
+	payload, err := json.Marshal(failure)
+	if err != nil {
+		return fmt.Errorf("encode inventory refresh failure: %w", err)
+	}
+	if err := c.redis.Set(ctx, inventoryRefreshFailureKey(entry), payload, allocapp.InventoryRefreshParametersValue().CacheHardTTL).Err(); err != nil {
+		return fmt.Errorf("record inventory refresh failure: %w", err)
+	}
+	return nil
+}
+
+func (c *InventoryCache) ClearInventoryRefreshFailure(ctx context.Context, entry allocapp.InventoryCacheEntry) error {
+	if err := c.redis.Del(ctx, inventoryRefreshFailureKey(entry)).Err(); err != nil {
+		return fmt.Errorf("clear inventory refresh failure: %w", err)
+	}
+	return nil
+}
+
+func (c *InventoryCache) ClearInventoryRefreshFailures(ctx context.Context, entries []allocapp.InventoryCacheEntry) error {
+	if len(entries) == 0 {
+		return nil
+	}
+	keys := make([]string, len(entries))
+	for i, entry := range entries {
+		keys[i] = inventoryRefreshFailureKey(entry)
+	}
+	if err := c.redis.Del(ctx, keys...).Err(); err != nil {
+		return fmt.Errorf("clear inventory refresh failures: %w", err)
+	}
+	return nil
+}
+
+func (c *InventoryCache) ListInventoryRefreshStates(ctx context.Context, projectIDs []uint) (map[uint]allocapp.InventoryRefreshState, error) {
+	states := make(map[uint]allocapp.InventoryRefreshState, len(projectIDs))
+	if len(projectIDs) == 0 {
+		return states, nil
+	}
+	now := time.Now().UTC()
+	pipe := c.redis.Pipeline()
+	type commands struct {
+		statsScore, productsScore     *redis.FloatCmd
+		statsLock, productsLock       *redis.IntCmd
+		products                      *redis.StringCmd
+		statsFailure, productsFailure *redis.StringCmd
+	}
+	commandsByProject := make(map[uint]commands, len(projectIDs))
+	for _, projectID := range projectIDs {
+		stats := allocapp.InventoryCacheEntry{Kind: allocapp.InventoryCacheStats, ProjectID: projectID}
+		products := allocapp.InventoryCacheEntry{Kind: allocapp.InventoryCacheProducts, ProjectID: projectID}
+		productsKey := inventoryCacheKey(products.Kind, projectID)
+		commandsByProject[projectID] = commands{
+			statsScore:      pipe.ZScore(ctx, inventoryCacheScheduleKey, inventoryCacheKey(stats.Kind, projectID)),
+			productsScore:   pipe.ZScore(ctx, inventoryCacheScheduleKey, productsKey),
+			statsLock:       pipe.Exists(ctx, inventoryCacheLockKey(stats)),
+			productsLock:    pipe.Exists(ctx, inventoryCacheLockKey(products)),
+			products:        pipe.Get(ctx, productsKey),
+			statsFailure:    pipe.Get(ctx, inventoryRefreshFailureKey(stats)),
+			productsFailure: pipe.Get(ctx, inventoryRefreshFailureKey(products)),
+		}
+	}
+	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
+		return nil, fmt.Errorf("load inventory refresh states: %w", err)
+	}
+	for _, projectID := range projectIDs {
+		cmds := commandsByProject[projectID]
+		state := allocapp.InventoryRefreshState{ProjectID: projectID, Status: allocapp.InventoryRefreshScheduled}
+		payload, payloadErr := cmds.products.Bytes()
+		var totals allocapp.ProjectProductInventoryTotals
+		if payloadErr == nil {
+			if err := json.Unmarshal(payload, &totals); err != nil {
+				return nil, fmt.Errorf("decode inventory refresh state for project %d: %w", projectID, err)
+			}
+			state.TotalAvailable = totals.TotalAvailable
+			if !totals.Cold && totals.RefreshedAt != nil {
+				refreshedAt := totals.RefreshedAt.UTC()
+				state.LastRefreshedAt = &refreshedAt
+			}
+		} else if payloadErr != redis.Nil {
+			return nil, fmt.Errorf("load inventory refresh state for project %d: %w", projectID, payloadErr)
+		}
+
+		scores := make([]time.Time, 0, 2)
+		due := payloadErr == redis.Nil || totals.Cold
+		for _, scoreCmd := range []*redis.FloatCmd{cmds.statsScore, cmds.productsScore} {
+			score, err := scoreCmd.Result()
+			if err == redis.Nil {
+				due = true
+				continue
+			}
+			if err != nil {
+				return nil, fmt.Errorf("load inventory refresh schedule for project %d: %w", projectID, err)
+			}
+			scheduledAt := time.UnixMilli(int64(score))
+			if !scheduledAt.After(now) {
+				due = true
+			} else {
+				scores = append(scores, scheduledAt)
+			}
+		}
+		var latestFailure *inventoryRefreshFailure
+		for _, failureCmd := range []*redis.StringCmd{cmds.statsFailure, cmds.productsFailure} {
+			failurePayload, failureErr := failureCmd.Bytes()
+			if failureErr == redis.Nil {
+				continue
+			}
+			if failureErr != nil {
+				return nil, fmt.Errorf("load inventory refresh failure for project %d: %w", projectID, failureErr)
+			}
+			var failure inventoryRefreshFailure
+			if err := json.Unmarshal(failurePayload, &failure); err != nil {
+				return nil, fmt.Errorf("decode inventory refresh failure for project %d: %w", projectID, err)
+			}
+			if latestFailure == nil || failure.LastAttemptAt.After(latestFailure.LastAttemptAt) {
+				copy := failure
+				latestFailure = &copy
+			}
+		}
+		if latestFailure != nil {
+			state.LastAttemptAt = &latestFailure.LastAttemptAt
+			state.LastError = latestFailure.LastError
+		}
+		switch {
+		case cmds.statsLock.Val() > 0 || cmds.productsLock.Val() > 0:
+			state.Status = allocapp.InventoryRefreshRunning
+		case latestFailure != nil:
+			state.Status = allocapp.InventoryRefreshFailed
+		case due:
+			state.Status = allocapp.InventoryRefreshQueued
+		default:
+			if len(scores) > 0 {
+				next := scores[0]
+				for _, score := range scores[1:] {
+					if score.Before(next) {
+						next = score
+					}
+				}
+				state.NextRefreshAt = &next
+			}
+		}
+		states[projectID] = state
+	}
+	return states, nil
+}
+
 func (c *InventoryCache) DeleteInventory(ctx context.Context, entry allocapp.InventoryCacheEntry) error {
 	key := inventoryCacheKey(entry.Kind, entry.ProjectID)
 	_, err := c.redis.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
@@ -464,12 +618,26 @@ func refreshInventoryCache(ctx context.Context, client redis.UniversalClient, ke
 	return nil
 }
 
+func cloneProductInventoryTotalsForCache(source *allocapp.ProjectProductInventoryTotals) *allocapp.ProjectProductInventoryTotals {
+	if source == nil {
+		return nil
+	}
+	value := *source
+	now := time.Now().UTC()
+	value.RefreshedAt = &now
+	return &value
+}
+
 func inventoryCacheKey(kind allocapp.InventoryCacheKind, projectID uint) string {
 	return inventoryCacheKeyPrefix + string(kind) + ":" + strconv.FormatUint(uint64(projectID), 10)
 }
 
 func inventoryCacheLockKey(entry allocapp.InventoryCacheEntry) string {
 	return inventoryCacheKeyPrefix + "lock:" + string(entry.Kind) + ":" + strconv.FormatUint(uint64(entry.ProjectID), 10)
+}
+
+func inventoryRefreshFailureKey(entry allocapp.InventoryCacheEntry) string {
+	return inventoryCacheFailureKeyPrefix + string(entry.Kind) + ":" + strconv.FormatUint(uint64(entry.ProjectID), 10)
 }
 
 func parseInventoryCacheKey(key string) (allocapp.InventoryCacheEntry, bool) {

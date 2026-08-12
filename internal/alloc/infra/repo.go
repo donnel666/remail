@@ -732,13 +732,8 @@ func (r *Repo) ListICloudSourceCandidates(ctx context.Context, projectID uint, b
 	}
 	where := []string{
 		"ir.status = 'normal'",
-		"ir.session_status = 'valid'",
 		"ir.expire_at >= ?",
-		"ir.alias_count = 750",
-		"ir.delivery_probe_verified_at IS NOT NULL",
 		"ia.status = 'normal'",
-		"ir.selected_forward_to <> ''",
-		"LOWER(TRIM(ia.forward_to_email)) = LOWER(TRIM(ir.selected_forward_to))",
 		`NOT EXISTS (
             SELECT 1 FROM icloud_allocations history
             WHERE history.alias_id = ia.id AND history.project_id = ?
@@ -751,10 +746,10 @@ func (r *Repo) ListICloudSourceCandidates(ctx context.Context, projectID uint, b
 	args := []any{requiredUntil.UTC(), projectID}
 	switch scope {
 	case domain.SupplyScopeOwned:
-		where = append(where, "ir.for_sale = FALSE", "er.owner_user_id = ?")
+		where = append(where, "er.owner_user_id = ?")
 		args = append(args, buyerUserID)
 	default:
-		where = append(where, "ir.for_sale = TRUE", "u.status = 'active'", "u.role IN ('supplier', 'admin', 'super_admin')")
+		where = append(where, "ir.for_sale = TRUE")
 	}
 	args = append(args, limit)
 	var rows []allocapp.ICloudCandidate
@@ -763,7 +758,6 @@ SELECT ir.id AS resource_id, ia.id AS alias_id, ia.email AS email
 FROM icloud_aliases ia
 JOIN icloud_resources ir ON ir.id = ia.resource_id
 JOIN email_resources er ON er.id = ir.id AND er.type = 'icloud'
-JOIN users u ON u.id = er.owner_user_id
 WHERE ` + strings.Join(where, " AND ") + `
 ORDER BY ir.last_allocated_at ASC, ia.last_allocated_at ASC, ia.id ASC
 LIMIT ?`
@@ -1000,10 +994,7 @@ func (r *Repo) LockICloudCandidate(ctx context.Context, resourceID uint, aliasID
 	}
 	where := []string{
 		"ia.id = ?", "ia.resource_id = ?", "ia.status = 'normal'",
-		"ir.status = 'normal'", "ir.session_status = 'valid'", "ir.expire_at >= ?",
-		"ir.alias_count = 750", "ir.delivery_probe_verified_at IS NOT NULL",
-		"ir.selected_forward_to <> ''",
-		"LOWER(TRIM(ia.forward_to_email)) = LOWER(TRIM(ir.selected_forward_to))",
+		"ir.status = 'normal'", "ir.expire_at >= ?",
 		`NOT EXISTS (
             SELECT 1 FROM icloud_allocations history
             WHERE history.alias_id = ia.id AND history.project_id = ?
@@ -1016,10 +1007,10 @@ func (r *Repo) LockICloudCandidate(ctx context.Context, resourceID uint, aliasID
 	args := []any{aliasID, resourceID, requiredUntil.UTC(), projectID}
 	switch scope {
 	case domain.SupplyScopeOwned:
-		where = append(where, "ir.for_sale = FALSE", "er.owner_user_id = ?")
+		where = append(where, "er.owner_user_id = ?")
 		args = append(args, buyerUserID)
 	default:
-		where = append(where, "ir.for_sale = TRUE", "u.status = 'active'", "u.role IN ('supplier', 'admin', 'super_admin')")
+		where = append(where, "ir.for_sale = TRUE")
 	}
 	var row allocapp.ICloudCandidate
 	query := `
@@ -1027,7 +1018,6 @@ SELECT ir.id AS resource_id, ia.id AS alias_id, ia.email AS email
 FROM icloud_aliases ia
 JOIN icloud_resources ir ON ir.id = ia.resource_id
 JOIN email_resources er ON er.id = ir.id AND er.type = 'icloud'
-JOIN users u ON u.id = er.owner_user_id
 WHERE ` + strings.Join(where, " AND ") + `
 LIMIT 1
 FOR UPDATE SKIP LOCKED`
@@ -1861,16 +1851,29 @@ func (r *Repo) ListActiveByRecipient(ctx context.Context, recipient string) ([]d
 }
 
 func (r *Repo) ListInventoryProjectIDs(ctx context.Context) ([]uint, error) {
-	var projectIDs []uint
+	projects, err := r.ListInventoryProjects(ctx)
+	if err != nil {
+		return nil, err
+	}
+	projectIDs := make([]uint, len(projects))
+	for i := range projects {
+		projectIDs[i] = projects[i].ID
+	}
+	return projectIDs, nil
+}
+
+func (r *Repo) ListInventoryProjects(ctx context.Context) ([]allocapp.InventoryProject, error) {
+	var projects []allocapp.InventoryProject
 	if err := r.dbFor(ctx).
 		Table("projects AS p").
+		Select("p.id, p.name").
 		Where("p.status = 'listed'").
 		Where("EXISTS (SELECT 1 FROM project_products pp WHERE pp.project_id = p.id AND pp.status = 'enabled')").
 		Order("p.id ASC").
-		Pluck("p.id", &projectIDs).Error; err != nil {
+		Scan(&projects).Error; err != nil {
 		return nil, fmt.Errorf("list inventory projects: %w", err)
 	}
-	return projectIDs, nil
+	return projects, nil
 }
 
 func (r *Repo) GetInventoryStats(ctx context.Context, projectID uint) (*allocapp.InventoryStats, error) {
@@ -2191,15 +2194,9 @@ WHERE gr.status IN ('normal', 'available')
 SELECT COUNT(*)
 FROM icloud_resources ir
 JOIN email_resources er ON er.id = ir.id AND er.type = 'icloud'
-JOIN users u ON u.id = er.owner_user_id
 WHERE ir.status = 'normal'
-  AND ir.session_status = 'valid'
   AND ir.expire_at >= UTC_TIMESTAMP(3)
-  AND ir.alias_count = 750
-  AND ir.delivery_probe_verified_at IS NOT NULL
-  AND ir.selected_forward_to <> ''
-  AND ((ir.for_sale = TRUE AND u.status = 'active' AND u.role IN ('supplier', 'admin', 'super_admin'))
-       OR ir.for_sale = FALSE)`); err != nil {
+  AND ir.for_sale = TRUE`); err != nil {
 			return nil, err
 		}
 		if err := scan(&stats.ICloud.AliasAvailable, `
@@ -2207,17 +2204,10 @@ SELECT COUNT(*)
 FROM icloud_aliases ia
 JOIN icloud_resources ir ON ir.id = ia.resource_id
 JOIN email_resources er ON er.id = ir.id AND er.type = 'icloud'
-JOIN users u ON u.id = er.owner_user_id
 WHERE ia.status = 'normal'
   AND ir.status = 'normal'
-  AND ir.session_status = 'valid'
   AND ir.expire_at >= UTC_TIMESTAMP(3)
-  AND ir.alias_count = 750
-  AND ir.delivery_probe_verified_at IS NOT NULL
-  AND ir.selected_forward_to <> ''
-  AND LOWER(TRIM(ia.forward_to_email)) = LOWER(TRIM(ir.selected_forward_to))
-  AND ((ir.for_sale = TRUE AND u.status = 'active' AND u.role IN ('supplier', 'admin', 'super_admin'))
-       OR ir.for_sale = FALSE)
+  AND ir.for_sale = TRUE
   AND NOT EXISTS (
       SELECT 1 FROM icloud_allocations history
       WHERE history.alias_id = ia.id AND history.project_id = ?
@@ -2587,6 +2577,39 @@ func (r *Repo) domainProductInventorySuffixTotals(ctx context.Context) ([]alloca
 		return nil, err
 	}
 	return mergeSuffixInventory(total, total), nil
+}
+
+func (r *Repo) ListUserICloudInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint) ([]allocapp.UserICloudInventoryTotal, error) {
+	var rows []allocapp.UserICloudInventoryTotal
+	if err := r.dbFor(ctx).Raw(`
+SELECT
+    pp.id AS product_id,
+    COUNT(ia.id) AS owned_available,
+    COUNT(CASE WHEN ir.for_sale = TRUE THEN ia.id END) AS owned_public_available
+FROM project_products pp
+JOIN projects p ON p.id = pp.project_id AND p.status = 'listed'
+JOIN icloud_aliases ia ON ia.status = 'normal'
+JOIN icloud_resources ir ON ir.id = ia.resource_id
+JOIN email_resources er ON er.id = ir.id AND er.type = 'icloud'
+WHERE pp.project_id = ?
+  AND pp.type = 'icloud'
+  AND pp.status = 'enabled'
+  AND ir.status = 'normal'
+  AND ir.expire_at >= UTC_TIMESTAMP(3)
+  AND er.owner_user_id = ?
+  AND NOT EXISTS (
+      SELECT 1 FROM icloud_allocations history
+      WHERE history.alias_id = ia.id AND history.project_id = pp.project_id
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM icloud_allocations active
+      WHERE active.alias_id = ia.id AND active.status = 'allocated'
+  )
+GROUP BY pp.id
+ORDER BY pp.id`, projectID, buyerUserID).Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list user iCloud inventory totals: %w", err)
+	}
+	return rows, nil
 }
 
 func (r *Repo) domainSuffixInventoryByScope(ctx context.Context) (map[string]int64, error) {

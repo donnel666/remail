@@ -24,5 +24,7 @@ func RegisterRoutes(rg *gin.RouterGroup, mod *Module, fetcher middleware.Session
 		admin.GET("/allocations/:allocationId", middleware.PermissionRequired(checker, "alloc:allocation", "read"), h.GetAllocation)
 		admin.GET("/orders/:orderNo/allocations", middleware.PermissionRequired(checker, "alloc:allocation", "read"), h.GetOrderAllocation)
 		admin.GET("/projects/:projectId/inventory", middleware.PermissionRequired(checker, "alloc:allocation", "read"), h.GetProjectInventory)
+		admin.GET("/inventory/refreshes", middleware.PermissionRequired(checker, "system:settings", "read"), h.GetInventoryRefreshes)
+		admin.POST("/inventory/refreshes", middleware.PermissionRequired(checker, "system:settings", "write"), h.PostInventoryRefresh)
 	}
 }

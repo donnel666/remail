@@ -11,6 +11,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	allocapp "github.com/donnel666/remail/internal/alloc/app"
 	allocdomain "github.com/donnel666/remail/internal/alloc/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )
@@ -25,11 +26,20 @@ type inventoryCacheRepoStub struct {
 	accessErr    error
 	projectIDs   []uint
 	projectCalls int
+	userICloud   []allocapp.UserICloudInventoryTotal
 }
 
 func (r *inventoryCacheRepoStub) ListInventoryProjectIDs(context.Context) ([]uint, error) {
 	r.projectCalls++
 	return r.projectIDs, nil
+}
+
+func (r *inventoryCacheRepoStub) ListInventoryProjects(context.Context) ([]allocapp.InventoryProject, error) {
+	projects := make([]allocapp.InventoryProject, len(r.projectIDs))
+	for i, projectID := range r.projectIDs {
+		projects[i] = allocapp.InventoryProject{ID: projectID, Name: "project"}
+	}
+	return projects, nil
 }
 
 type inventoryRefreshQueueStub struct {
@@ -62,6 +72,10 @@ func (r *inventoryCacheRepoStub) GetProductInventoryTotals(context.Context, uint
 	r.productCalls++
 	result := r.totals
 	return &result, nil
+}
+
+func (r *inventoryCacheRepoStub) ListUserICloudInventoryTotals(context.Context, uint, uint) ([]allocapp.UserICloudInventoryTotal, error) {
+	return r.userICloud, nil
 }
 
 func TestInventoryCacheServesRedisAndRefreshesScheduledEntries(t *testing.T) {
@@ -529,6 +543,27 @@ func TestInventoryCacheSharesOneProjectSnapshotAcrossViewers(t *testing.T) {
 	require.False(t, server.Exists("alloc:inventory:v5:products:10:8"))
 }
 
+func TestColdProductInventoryIncludesOwnedPrivateICloud(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	repo := &inventoryCacheRepoStub{userICloud: []allocapp.UserICloudInventoryTotal{{
+		ProductID: 20, OwnedAvailable: 3,
+	}}}
+	cache := NewInventoryCache(client)
+	require.NoError(t, cache.InitializeInventory(context.Background(), []allocapp.InventoryCacheEntry{{
+		Kind: allocapp.InventoryCacheProducts, ProjectID: 10,
+	}}, time.Hour))
+	useCase := allocapp.NewUseCase(repo)
+	useCase.SetInventoryCache(cache)
+
+	totals, err := useCase.GetProductInventoryTotals(context.Background(), 10, 7)
+	require.NoError(t, err)
+	require.True(t, totals.Cold)
+	require.EqualValues(t, 3, totals.TotalAvailable)
+	require.Equal(t, []allocapp.ProductInventoryTotal{{ProductID: 20, TotalAvailable: 3}}, totals.Items)
+}
+
 type blockingInventoryRepoStub struct {
 	allocapp.Repository
 	calls   atomic.Int32
@@ -606,6 +641,15 @@ func TestInventoryRefreshContinuesAfterOneKeyFails(t *testing.T) {
 	stats, err := cache.GetInventoryStats(context.Background(), 2)
 	require.NoError(t, err)
 	require.EqualValues(t, 9, stats.TotalAvailable)
+	states, err := cache.ListInventoryRefreshStates(context.Background(), []uint{1, 2})
+	require.NoError(t, err)
+	require.Equal(t, allocapp.InventoryRefreshFailed, states[1].Status)
+	require.NotNil(t, states[1].LastAttemptAt)
+	require.Contains(t, states[1].LastError, "project one failed")
+	require.Nil(t, states[1].NextRefreshAt)
+	require.Equal(t, allocapp.InventoryRefreshQueued, states[2].Status)
+	require.Nil(t, states[2].NextRefreshAt)
+	require.Nil(t, states[2].LastAttemptAt)
 }
 
 func TestInventoryRefreshBatchIsBounded(t *testing.T) {
@@ -624,4 +668,73 @@ func TestInventoryRefreshBatchIsBounded(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 5, result.Attempted)
 	require.EqualValues(t, 101, client.ZCard(context.Background(), inventoryCacheScheduleKey).Val(), "refreshed entries must schedule their next backend refresh")
+}
+
+func TestManualInventoryRefreshQueuesSelectedProjectAndReportsState(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	cache := NewInventoryCache(client)
+	repo := &inventoryCacheRepoStub{projectIDs: []uint{2, 3}}
+	queue := &inventoryRefreshQueueStub{}
+	useCase := allocapp.NewUseCase(repo, queue)
+	useCase.SetInventoryCache(cache)
+	require.NoError(t, cache.RefreshProductInventoryTotals(context.Background(), 2, &allocapp.ProjectProductInventoryTotals{
+		ProjectID: 2, TotalAvailable: 26,
+	}, allocapp.InventoryRefreshParametersValue().CacheHardTTL))
+	require.NoError(t, cache.RecordInventoryRefreshFailure(context.Background(), allocapp.InventoryCacheEntry{
+		Kind: allocapp.InventoryCacheProducts, ProjectID: 2,
+	}, errors.New("previous refresh failed")))
+
+	projectIDs, err := useCase.TriggerInventoryRefresh(context.Background(), 2)
+	require.NoError(t, err)
+	require.Equal(t, []uint{2}, projectIDs)
+	require.Equal(t, 1, queue.calls)
+
+	items, err := useCase.ListInventoryRefreshes(context.Background())
+	require.NoError(t, err)
+	require.Len(t, items, 2)
+	require.Equal(t, allocapp.InventoryRefreshQueued, items[0].Status)
+	require.Equal(t, int64(26), items[0].TotalAvailable)
+	require.NotNil(t, items[0].LastRefreshedAt)
+	require.Nil(t, items[0].NextRefreshAt)
+	require.Nil(t, items[0].LastAttemptAt)
+	require.Empty(t, items[0].LastError)
+	require.Equal(t, allocapp.InventoryRefreshQueued, items[1].Status)
+}
+
+func TestInventoryRefreshStateKeepsStoredTimestampWhenRuntimeTTLChanges(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	cache := NewInventoryCache(client)
+	now := time.Now().UTC()
+	require.NoError(t, cache.RefreshProductInventoryTotals(context.Background(), 10, &allocapp.ProjectProductInventoryTotals{
+		ProjectID: 10, TotalAvailable: 4,
+	}, time.Hour))
+	runtimeconfig.Set("inventory_cache_hard_ttl_hours", "6")
+	t.Cleanup(func() { runtimeconfig.Delete("inventory_cache_hard_ttl_hours") })
+
+	states, err := cache.ListInventoryRefreshStates(context.Background(), []uint{10})
+	require.NoError(t, err)
+	require.WithinDuration(t, now, *states[10].LastRefreshedAt, 2*time.Second)
+}
+
+func TestInventoryRefreshRunningStateHasNoNextRefresh(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	cache := NewInventoryCache(client)
+	entry := allocapp.InventoryCacheEntry{Kind: allocapp.InventoryCacheProducts, ProjectID: 10}
+	require.NoError(t, cache.RefreshProductInventoryTotals(context.Background(), 10, &allocapp.ProjectProductInventoryTotals{
+		ProjectID: 10, TotalAvailable: 4,
+	}, time.Hour))
+	_, acquired, err := cache.AcquireInventoryRefresh(context.Background(), entry, time.Minute)
+	require.NoError(t, err)
+	require.True(t, acquired)
+
+	states, err := cache.ListInventoryRefreshStates(context.Background(), []uint{10})
+	require.NoError(t, err)
+	require.Equal(t, allocapp.InventoryRefreshRunning, states[10].Status)
+	require.Nil(t, states[10].NextRefreshAt)
 }

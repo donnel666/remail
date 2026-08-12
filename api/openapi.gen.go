@@ -1903,6 +1903,30 @@ func (e ImportStatusResponseStatus) Valid() bool {
 	}
 }
 
+// Defines values for InventoryRefreshItemStatus.
+const (
+	InventoryRefreshItemStatusFailed    InventoryRefreshItemStatus = "failed"
+	InventoryRefreshItemStatusQueued    InventoryRefreshItemStatus = "queued"
+	InventoryRefreshItemStatusRunning   InventoryRefreshItemStatus = "running"
+	InventoryRefreshItemStatusScheduled InventoryRefreshItemStatus = "scheduled"
+)
+
+// Valid indicates whether the value is a known member of the InventoryRefreshItemStatus enum.
+func (e InventoryRefreshItemStatus) Valid() bool {
+	switch e {
+	case InventoryRefreshItemStatusFailed:
+		return true
+	case InventoryRefreshItemStatusQueued:
+		return true
+	case InventoryRefreshItemStatusRunning:
+		return true
+	case InventoryRefreshItemStatusScheduled:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for InviteBulkFilterKind.
 const (
 	InviteBulkFilterKindAdmin    InviteBulkFilterKind = "admin"
@@ -7309,6 +7333,44 @@ type ImportStatusResponse struct {
 // ImportStatusResponseStatus defines model for ImportStatusResponse.Status.
 type ImportStatusResponseStatus string
 
+// InventoryRefreshAcceptedResponse defines model for InventoryRefreshAcceptedResponse.
+type InventoryRefreshAcceptedResponse struct {
+	ProjectIds []int `json:"projectIds"`
+}
+
+// InventoryRefreshItem defines model for InventoryRefreshItem.
+type InventoryRefreshItem struct {
+	LastAttemptAt   *time.Time                 `json:"lastAttemptAt"`
+	LastError       string                     `json:"lastError"`
+	LastRefreshedAt *time.Time                 `json:"lastRefreshedAt"`
+	NextRefreshAt   *time.Time                 `json:"nextRefreshAt"`
+	ProjectId       int                        `json:"projectId"`
+	ProjectName     string                     `json:"projectName"`
+	Status          InventoryRefreshItemStatus `json:"status"`
+	TotalAvailable  int64                      `json:"totalAvailable"`
+}
+
+// InventoryRefreshItemStatus defines model for InventoryRefreshItem.Status.
+type InventoryRefreshItemStatus string
+
+// InventoryRefreshParameters defines model for InventoryRefreshParameters.
+type InventoryRefreshParameters struct {
+	BatchSize              int `json:"batchSize"`
+	CacheHardTtlHours      int `json:"cacheHardTtlHours"`
+	RefreshIntervalMinutes int `json:"refreshIntervalMinutes"`
+}
+
+// InventoryRefreshRequest defines model for InventoryRefreshRequest.
+type InventoryRefreshRequest struct {
+	ProjectId *int `json:"projectId,omitempty"`
+}
+
+// InventoryRefreshResponse defines model for InventoryRefreshResponse.
+type InventoryRefreshResponse struct {
+	Items      []InventoryRefreshItem     `json:"items"`
+	Parameters InventoryRefreshParameters `json:"parameters"`
+}
+
 // InviteBulkFilter defines model for InviteBulkFilter.
 type InviteBulkFilter struct {
 	Enabled      *bool                      `json:"enabled,omitempty"`
@@ -9999,6 +10061,12 @@ type PostAdminICloudResourceValidateParams struct {
 	IdempotencyKey AdminStateCommandIdempotencyKey `json:"Idempotency-Key"`
 }
 
+// PostAdminInventoryRefreshParams defines parameters for PostAdminInventoryRefresh.
+type PostAdminInventoryRefreshParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // GetAdminInvitesParams defines parameters for GetAdminInvites.
 type GetAdminInvitesParams struct {
 	Search       *string                         `form:"search,omitempty" json:"search,omitempty"`
@@ -11537,6 +11605,9 @@ type PostAdminICloudResourceImportMultipartRequestBody PostAdminICloudResourceIm
 // PatchAdminICloudResourceJSONRequestBody defines body for PatchAdminICloudResource for application/json ContentType.
 type PatchAdminICloudResourceJSONRequestBody = AdminICloudUpdateRequest
 
+// PostAdminInventoryRefreshJSONRequestBody defines body for PostAdminInventoryRefresh for application/json ContentType.
+type PostAdminInventoryRefreshJSONRequestBody = InventoryRefreshRequest
+
 // PostAdminInviteJSONRequestBody defines body for PostAdminInvite for application/json ContentType.
 type PostAdminInviteJSONRequestBody = AdminCreateInviteRequest
 
@@ -12782,6 +12853,12 @@ type ServerInterface interface {
 	// Queue one iCloud resource for validation
 	// (POST /v1/admin/icloud/resources/{resourceId}/validation)
 	PostAdminICloudResourceValidate(c *gin.Context, resourceId int, params PostAdminICloudResourceValidateParams)
+	// List project inventory refresh state
+	// (GET /v1/admin/inventory/refreshes)
+	GetAdminInventoryRefreshes(c *gin.Context)
+	// Queue inventory refresh for one or all projects
+	// (POST /v1/admin/inventory/refreshes)
+	PostAdminInventoryRefresh(c *gin.Context, params PostAdminInventoryRefreshParams)
 	// List invites
 	// (GET /v1/admin/invites)
 	GetAdminInvites(c *gin.Context, params GetAdminInvitesParams)
@@ -18637,6 +18714,66 @@ func (siw *ServerInterfaceWrapper) PostAdminICloudResourceValidate(c *gin.Contex
 	}
 
 	siw.Handler.PostAdminICloudResourceValidate(c, resourceId, params)
+}
+
+// GetAdminInventoryRefreshes operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminInventoryRefreshes(c *gin.Context) {
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminInventoryRefreshes(c)
+}
+
+// PostAdminInventoryRefresh operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminInventoryRefresh(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminInventoryRefreshParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminInventoryRefresh(c, params)
 }
 
 // GetAdminInvites operation middleware
@@ -29196,6 +29333,8 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/recover", wrapper.PostAdminICloudResourceRecover)
 	router.POST(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/unpublish", wrapper.PostAdminICloudResourceUnpublish)
 	router.POST(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/validation", wrapper.PostAdminICloudResourceValidate)
+	router.GET(options.BaseURL+"/v1/admin/inventory/refreshes", wrapper.GetAdminInventoryRefreshes)
+	router.POST(options.BaseURL+"/v1/admin/inventory/refreshes", wrapper.PostAdminInventoryRefresh)
 	router.GET(options.BaseURL+"/v1/admin/invites", wrapper.GetAdminInvites)
 	router.POST(options.BaseURL+"/v1/admin/invites", wrapper.PostAdminInvite)
 	router.POST(options.BaseURL+"/v1/admin/invites/batch", wrapper.PostAdminInvitesBatch)

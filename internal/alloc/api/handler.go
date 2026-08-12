@@ -1,10 +1,13 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/donnel666/remail/api/middleware"
 	allocapp "github.com/donnel666/remail/internal/alloc/app"
@@ -171,6 +174,67 @@ func (h *Handler) GetUserProjectInventory(c *gin.Context) {
 		TotalAvailable: stats.TotalAvailable,
 		Products:       products,
 	})
+}
+
+func (h *Handler) GetInventoryRefreshes(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	items, err := h.module.UseCase.ListInventoryRefreshes(c.Request.Context())
+	if err != nil {
+		writeAllocError(c, err)
+		return
+	}
+	responseItems := make([]InventoryRefreshItemResponse, len(items))
+	for i, item := range items {
+		responseItems[i] = InventoryRefreshItemResponse{
+			ProjectID: item.ProjectID, ProjectName: item.ProjectName, Status: string(item.Status),
+			TotalAvailable: item.TotalAvailable, LastRefreshedAt: item.LastRefreshedAt, NextRefreshAt: item.NextRefreshAt,
+			LastAttemptAt: item.LastAttemptAt, LastError: item.LastError,
+		}
+	}
+	params := allocapp.InventoryRefreshParametersValue()
+	c.JSON(http.StatusOK, InventoryRefreshResponse{
+		Items: responseItems,
+		Parameters: InventoryRefreshParameters{
+			RefreshIntervalMinutes: int64(params.RefreshInterval / time.Minute),
+			CacheHardTTLHours:      int64(params.CacheHardTTL / time.Hour),
+			BatchSize:              params.BatchSize,
+		},
+	})
+}
+
+func (h *Handler) PostInventoryRefresh(c *gin.Context) {
+	request := &InventoryRefreshRequest{}
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		if !errors.Is(err, io.EOF) {
+			writeBadRequest(c)
+			return
+		}
+		request = &InventoryRefreshRequest{}
+	}
+	if request == nil {
+		writeBadRequest(c)
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		writeBadRequest(c)
+		return
+	}
+	projectID := uint(0)
+	if request.ProjectID != nil {
+		if *request.ProjectID == 0 {
+			writeBadRequest(c)
+			return
+		}
+		projectID = *request.ProjectID
+	}
+	projectIDs, err := h.module.UseCase.TriggerInventoryRefresh(c.Request.Context(), projectID)
+	if err != nil {
+		writeAllocError(c, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, InventoryRefreshAcceptedResponse{ProjectIDs: projectIDs})
 }
 
 func productSuffixInventoryResponse(items []allocapp.ProductInventorySuffixTotal) []ProjectProductSuffixInventoryResponse {
