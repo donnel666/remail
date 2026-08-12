@@ -19,18 +19,17 @@ import (
 const iCloudDeliveryProbeReadLimit = 100
 
 type iCloudPurchaseMailScope struct {
-	ResourceID      uint      `gorm:"column:resource_id"`
-	AliasID         uint      `gorm:"column:alias_id"`
-	AliasEmail      string    `gorm:"column:alias_email"`
-	RecipientMailID string    `gorm:"column:recipient_mail_id"`
-	ForwardToEmail  string    `gorm:"column:forward_to_email"`
-	AllocatedAt     time.Time `gorm:"column:allocated_at"`
+	ResourceID     uint      `gorm:"column:resource_id"`
+	AliasID        uint      `gorm:"column:alias_id"`
+	AliasEmail     string    `gorm:"column:alias_email"`
+	AnonymousID    string    `gorm:"column:anonymous_id"`
+	ForwardToEmail string    `gorm:"column:forward_to_email"`
+	AllocatedAt    time.Time `gorm:"column:allocated_at"`
 }
 
 type iCloudMailRoute struct {
-	ForwardToEmail  string
-	RecipientMailID string
-	Since           time.Time
+	ForwardToEmail string
+	Since          time.Time
 }
 
 type iCloudForwardedMailRow struct {
@@ -47,15 +46,13 @@ type iCloudMailCandidate struct {
 }
 
 type iCloudScopedMailRoute struct {
-	scope           iCloudPurchaseMailScope
-	recipientMailID string
-	since           time.Time
-	suffix          string
+	scope iCloudPurchaseMailScope
+	since time.Time
 }
 
 // FetchICloudMail reads one allocated alias from its persisted domain inbox.
-// The Apple relay recipient ID is authoritative; the encoded prefix is only
-// decoded after that suffix has selected the alias and resource.
+// Apple's relay tail contains the alias anonymous ID with extra characters
+// interleaved; that durable ID selects the alias without recipientMailId.
 func (s *Service) FetchICloudMail(ctx context.Context, orderNo string) error {
 	orderNo = strings.TrimSpace(orderNo)
 	if s == nil || s.db == nil || s.files == nil || s.mailIngest == nil || orderNo == "" {
@@ -87,7 +84,7 @@ func (s *Service) FetchICloudResourceMailWithFence(ctx context.Context, resource
 	var scopes []iCloudPurchaseMailScope
 	if err := s.db.WithContext(ctx).Table("icloud_aliases AS alias").
 		Select(`alias.resource_id, alias.id AS alias_id, alias.email AS alias_email,
-			alias.recipient_mail_id, alias.forward_to_email`).
+			alias.anonymous_id, alias.forward_to_email`).
 		Where("alias.resource_id = ? AND alias.status <> ?", resourceID, iCloudResourceDeleted).
 		Order("alias.id ASC").
 		Find(&scopes).Error; err != nil {
@@ -117,7 +114,7 @@ func (s *Service) fetchICloudMailScopes(ctx context.Context, scopes []iCloudPurc
 		if scope.ResourceID == 0 || strings.TrimSpace(scope.AliasEmail) == "" {
 			continue
 		}
-		routes, err := s.loadICloudAliasRoutes(ctx, scope.AliasID, scope.ForwardToEmail, scope.RecipientMailID, scope.AllocatedAt)
+		routes, err := s.loadICloudAliasRoutes(ctx, scope.AliasID, scope.ForwardToEmail, scope.AllocatedAt)
 		if err != nil {
 			return fetched, storedCount, matchedCount, err
 		}
@@ -126,8 +123,7 @@ func (s *Service) fetchICloudMailScopes(ctx context.Context, scopes []iCloudPurc
 		}
 		for _, route := range routes {
 			forwardToEmail := strings.ToLower(strings.TrimSpace(route.ForwardToEmail))
-			suffix, validSuffix := iCloudRelaySuffix(route.RecipientMailID)
-			if forwardToEmail == "" || !validSuffix {
+			if forwardToEmail == "" || !validICloudHMEText(strings.TrimSpace(scope.AnonymousID), iCloudHMEAnonymousIDMaxLength, false) {
 				continue
 			}
 			routeSince := route.Since
@@ -138,7 +134,7 @@ func (s *Service) fetchICloudMailScopes(ctx context.Context, scopes []iCloudPurc
 				mailboxes = append(mailboxes, forwardToEmail)
 			}
 			routesByMailbox[forwardToEmail] = append(routesByMailbox[forwardToEmail], iCloudScopedMailRoute{
-				scope: scope, recipientMailID: strings.ToLower(strings.TrimSpace(route.RecipientMailID)), since: routeSince, suffix: suffix,
+				scope: scope, since: routeSince,
 			})
 		}
 	}
@@ -147,11 +143,6 @@ func (s *Service) fetchICloudMailScopes(ctx context.Context, scopes []iCloudPurc
 	}
 	for _, forwardToEmail := range mailboxes {
 		routes := routesByMailbox[forwardToEmail]
-		// Prefer the longest recipient suffix when IDs overlap by an underscore.
-		// This keeps an exact Apple recipient ID from being captured by a shorter one.
-		sort.SliceStable(routes, func(i, j int) bool {
-			return len(routes[i].suffix) > len(routes[j].suffix)
-		})
 		var mailboxSince time.Time
 		unbounded := false
 		for _, route := range routes {
@@ -171,16 +162,24 @@ func (s *Service) fetchICloudMailScopes(ctx context.Context, scopes []iCloudPurc
 			if _, exists := seenRows[row.ID]; exists {
 				return true
 			}
+			var matched *iCloudMailCandidate
 			for _, route := range routes {
 				if !route.since.IsZero() && row.CreatedAt.Before(route.since) {
 					continue
 				}
-				sender, ok := decodeICloudRelaySender(row.EnvelopeFrom, route.recipientMailID)
+				sender, ok := decodeICloudRelaySender(row.EnvelopeFrom, route.scope.AnonymousID)
 				if !ok {
 					continue
 				}
+				candidate := iCloudMailCandidate{scope: route.scope, row: row, sender: sender}
+				if matched != nil {
+					return true
+				}
+				matched = &candidate
+			}
+			if matched != nil {
 				seenRows[row.ID] = struct{}{}
-				candidates = append(candidates, iCloudMailCandidate{scope: route.scope, row: row, sender: sender})
+				candidates = append(candidates, *matched)
 				matchedInMailbox++
 				return matchedInMailbox < readLimit
 			}
@@ -226,7 +225,7 @@ func (s *Service) loadICloudPurchaseMailScope(ctx context.Context, orderNo strin
 	err := s.db.WithContext(ctx).Table("icloud_allocations AS allocation").
 		Select(`allocation.resource_id, allocation.alias_id,
 			allocation.email AS alias_email,
-			alias.recipient_mail_id, alias.forward_to_email,
+			alias.anonymous_id, alias.forward_to_email,
 			allocation.created_at AS allocated_at`).
 		Joins("JOIN icloud_aliases AS alias ON alias.id = allocation.alias_id AND alias.resource_id = allocation.resource_id").
 		Where("allocation.order_no = ? AND allocation.status = ?", orderNo, "allocated").
@@ -243,8 +242,9 @@ func (s *Service) loadICloudPurchaseMailScope(ctx context.Context, orderNo strin
 	return &scope, nil
 }
 
-func (s *Service) loadICloudAliasRoutes(ctx context.Context, aliasID uint, currentForward, currentRecipient string, since time.Time) ([]iCloudMailRoute, error) {
+func (s *Service) loadICloudAliasRoutes(ctx context.Context, aliasID uint, currentForward string, since time.Time) ([]iCloudMailRoute, error) {
 	routes := make([]iCloudMailRoute, 0, 2)
+	byMailbox := make(map[string]int)
 	if s == nil || s.db == nil || aliasID == 0 {
 		return nil, ErrICloudMailUnavailable
 	}
@@ -254,28 +254,32 @@ func (s *Service) loadICloudAliasRoutes(ctx context.Context, aliasID uint, curre
 			return nil, fmt.Errorf("%w: load alias routes", ErrICloudMailUnavailable)
 		}
 		for _, route := range persisted {
-			if strings.TrimSpace(route.ForwardToEmail) == "" || strings.TrimSpace(route.RecipientMailID) == "" {
+			forwardToEmail := strings.ToLower(strings.TrimSpace(route.ForwardToEmail))
+			if forwardToEmail == "" {
 				continue
 			}
 			routeSince := since
 			if !since.IsZero() {
 				routeSince = maxICloudTime(route.FirstSeenAt, since)
 			}
-			routes = append(routes, iCloudMailRoute{ForwardToEmail: route.ForwardToEmail, RecipientMailID: route.RecipientMailID, Since: routeSince})
+			if index, exists := byMailbox[forwardToEmail]; exists {
+				if routeSince.IsZero() || (!routes[index].Since.IsZero() && routeSince.Before(routes[index].Since)) {
+					routes[index].Since = routeSince
+				}
+				continue
+			}
+			byMailbox[forwardToEmail] = len(routes)
+			routes = append(routes, iCloudMailRoute{ForwardToEmail: forwardToEmail, Since: routeSince})
 		}
 	}
 	currentForward = strings.ToLower(strings.TrimSpace(currentForward))
-	currentRecipient = strings.ToLower(strings.TrimSpace(currentRecipient))
-	if currentForward != "" && currentRecipient != "" {
-		seen := false
-		for _, route := range routes {
-			if strings.EqualFold(route.ForwardToEmail, currentForward) && strings.EqualFold(route.RecipientMailID, currentRecipient) {
-				seen = true
-				break
+	if currentForward != "" {
+		if index, exists := byMailbox[currentForward]; exists {
+			if since.IsZero() || (!routes[index].Since.IsZero() && since.Before(routes[index].Since)) {
+				routes[index].Since = since
 			}
-		}
-		if !seen {
-			routes = append(routes, iCloudMailRoute{ForwardToEmail: currentForward, RecipientMailID: currentRecipient, Since: since})
+		} else {
+			routes = append(routes, iCloudMailRoute{ForwardToEmail: currentForward, Since: since})
 		}
 	}
 	return routes, nil
@@ -305,17 +309,16 @@ func (s *Service) ingestICloudMail(ctx context.Context, resourceID uint, recipie
 func (s *Service) listICloudForwardedMailRows(
 	ctx context.Context,
 	forwardToEmail string,
-	recipientMailID string,
+	anonymousID string,
 	since time.Time,
 	limit int,
 ) ([]iCloudForwardedMailRow, error) {
-	suffix, ok := iCloudRelaySuffix(recipientMailID)
-	if s == nil || s.db == nil || !ok || limit <= 0 {
+	if s == nil || s.db == nil || !validICloudHMEText(strings.TrimSpace(anonymousID), iCloudHMEAnonymousIDMaxLength, false) || limit <= 0 {
 		return nil, ErrICloudMailUnavailable
 	}
 	rows := make([]iCloudForwardedMailRow, 0, limit)
 	err := s.scanICloudMailboxRows(ctx, forwardToEmail, since, limit, func(row iCloudForwardedMailRow) bool {
-		if strings.HasSuffix(strings.ToLower(strings.TrimSpace(row.EnvelopeFrom)), suffix) {
+		if _, ok := decodeICloudRelaySender(row.EnvelopeFrom, anonymousID); ok {
 			rows = append(rows, row)
 		}
 		return true
@@ -371,7 +374,7 @@ func (s *Service) scanICloudMailboxRows(
 func (s *Service) findICloudDeliveryProbe(
 	ctx context.Context,
 	forwardToEmail string,
-	recipientMailID string,
+	anonymousID string,
 	token string,
 	since time.Time,
 ) (bool, error) {
@@ -382,7 +385,7 @@ func (s *Service) findICloudDeliveryProbe(
 	rows, err := s.listICloudForwardedMailRows(
 		ctx,
 		forwardToEmail,
-		recipientMailID,
+		anonymousID,
 		since,
 		iCloudDeliveryProbeReadLimit,
 	)
@@ -471,7 +474,7 @@ func iCloudRelaySuffix(recipientMailID string) (string, bool) {
 	return "_" + recipientMailID + "@icloud.com", true
 }
 
-func decodeICloudRelaySender(envelopeFrom string, recipientMailID string) (string, bool) {
+func decodeICloudRelaySender(envelopeFrom string, anonymousID string) (string, bool) {
 	parsed, err := stdmail.ParseAddress(strings.TrimSpace(envelopeFrom))
 	if err != nil {
 		return "", false
@@ -481,11 +484,11 @@ func decodeICloudRelaySender(envelopeFrom string, recipientMailID string) (strin
 	if at <= 0 || address[at+1:] != "icloud.com" {
 		return "", false
 	}
-	suffix, ok := iCloudRelaySuffix(recipientMailID)
-	if !ok || !strings.HasSuffix(address, suffix) {
+	local := address[:at]
+	encodedSender, ok := splitICloudRelaySender(local, anonymousID)
+	if !ok {
 		return "", false
 	}
-	encodedSender := strings.TrimSuffix(address, suffix)
 	separator := strings.LastIndex(encodedSender, "_at_")
 	if separator <= 0 || separator+len("_at_") >= len(encodedSender) {
 		return "", false
@@ -498,6 +501,29 @@ func decodeICloudRelaySender(envelopeFrom string, recipientMailID string) (strin
 		return "", false
 	}
 	return restored, true
+}
+
+func splitICloudRelaySender(local, anonymousID string) (string, bool) {
+	for separator := strings.LastIndexByte(local, '_'); separator >= 0; separator = strings.LastIndexByte(local[:separator], '_') {
+		if iCloudAnonymousIDMatchesRelayTail(anonymousID, local[separator+1:]) {
+			return local[:separator], true
+		}
+	}
+	return "", false
+}
+
+func iCloudAnonymousIDMatchesRelayTail(anonymousID, relayTail string) bool {
+	anonymousID = strings.ToLower(strings.TrimSpace(anonymousID))
+	relayTail = strings.ToLower(strings.TrimSpace(relayTail))
+	if !validICloudHMEText(anonymousID, iCloudHMEAnonymousIDMaxLength, false) || relayTail == "" {
+		return false
+	}
+	for index := 0; index < len(relayTail); index++ {
+		if len(anonymousID) > 0 && relayTail[index] == anonymousID[0] {
+			anonymousID = anonymousID[1:]
+		}
+	}
+	return anonymousID == ""
 }
 
 // extractICloudRelayRecipientID recovers the Apple recipient suffix from a

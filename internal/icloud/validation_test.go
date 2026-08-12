@@ -115,7 +115,7 @@ func TestICloudAliasReadinessRequiresExactly750(t *testing.T) {
 	for index := range aliases {
 		aliases[index] = hmeAlias{
 			AnonymousID: fmt.Sprintf("id-%d", index), Email: fmt.Sprintf("alias-%d@icloud.com", index),
-			ForwardToEmail: "icloud@aishop6.com", RecipientMailID: fmt.Sprintf("recipient-%d", index), Active: true,
+			ForwardToEmail: "icloud@aishop6.com", Active: true,
 		}
 	}
 	if iCloudAliasesReadyForForwarding(nil, "icloud@aishop6.com") ||
@@ -620,7 +620,7 @@ func TestICloudValidationSendsProbeOnceAndRequiresDomainMailboxReceipt(t *testin
 		t.Fatalf("store probe message: %v", err)
 	}
 	if err := db.Create(&iCloudInboundMailTestModel{
-		ID: 1, EnvelopeFrom: "probe_at_remail_example_recipient-000@icloud.com",
+		ID: 1, EnvelopeFrom: "probe_at_remail_example_anonymous-extra-000@icloud.com",
 		Recipient: "icloud@aishop6.com", MailboxKey: mailbox.Normalize("icloud@aishop6.com"), ResourceType: "domain", SourceObjectKey: probeObjectKey,
 		Status: "stored", CreatedAt: now.Add(30 * time.Second),
 	}).Error; err != nil {

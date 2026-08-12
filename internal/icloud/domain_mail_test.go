@@ -17,6 +17,7 @@ import (
 type iCloudDomainAliasTestModel struct {
 	ID              uint   `gorm:"column:id;primaryKey"`
 	ResourceID      uint   `gorm:"column:resource_id"`
+	AnonymousID     string `gorm:"column:anonymous_id"`
 	Email           string `gorm:"column:email"`
 	RecipientMailID string `gorm:"column:recipient_mail_id"`
 	ForwardToEmail  string `gorm:"column:forward_to_email"`
@@ -79,19 +80,19 @@ func (s *iCloudMailIngestSpy) IngestICloudMail(
 	return nil
 }
 
-func TestDecodeICloudRelaySenderRequiresExactRecipientSuffix(t *testing.T) {
-	sender, ok := decodeICloudRelaySender(
-		"18005575_at_qq_com_zvzv72255gjx92_552k9812@icloud.com",
-		"zvzv72255gjx92_552k9812",
-	)
-	if !ok || sender != "18005575@qq.com" {
-		t.Fatalf("decoded sender = %q, %v", sender, ok)
+func TestDecodeICloudRelaySenderMatchesAnonymousID(t *testing.T) {
+	for _, test := range []struct{ envelope, anonymousID, sender string }{
+		{"18005575_at_qq_com_zvzv72255gjx92_552k9812@icloud.com", "zvzv5gjx2k9812", "18005575@qq.com"},
+		{"donnel.lu_at_foxmail_com_c38c2fr7h7q8pa_n2cs5734@icloud.com", "c82rhqpncs5734", "donnel.lu@foxmail.com"},
+		{"donnel.lu_at_foxmail_com_w8p7d2f9mz6zb9_478g0829@icloud.com", "w8p7mz6z8g0829", "donnel.lu@foxmail.com"},
+	} {
+		sender, ok := decodeICloudRelaySender(test.envelope, test.anonymousID)
+		if !ok || sender != test.sender {
+			t.Fatalf("decode %q with %q = %q, %v", test.envelope, test.anonymousID, sender, ok)
+		}
 	}
-	if _, ok := decodeICloudRelaySender(
-		"18005575_at_qq_com_zvzv72255gjx92_552k9812@icloud.com",
-		"other_552k9812",
-	); ok {
-		t.Fatal("a different recipient ID must not select the message")
+	if _, ok := decodeICloudRelaySender("18005575_at_qq_com_zvzv72255gjx92_552k9812@icloud.com", "other552k9812"); ok {
+		t.Fatal("a different anonymous ID must not select the message")
 	}
 }
 
@@ -104,7 +105,7 @@ func TestFetchICloudMailUsesPersistedAliasRouteAndNewestReadLimit(t *testing.T) 
 	allocatedAt := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
 	alias := iCloudDomainAliasTestModel{
 		ID: 5, ResourceID: 41, Email: "quietus-route3k@icloud.com",
-		RecipientMailID: "zvzv72255gjx92_552k9812", ForwardToEmail: "icloud@aishop6.com", Status: "normal",
+		AnonymousID: "zvzv5gjx2k9812", ForwardToEmail: "icloud@aishop6.com", Status: "normal",
 	}
 	if err := db.Create(&alias).Error; err != nil {
 		t.Fatalf("create alias: %v", err)
@@ -152,7 +153,7 @@ func TestFetchICloudMailUsesPersistedAliasRouteAndNewestReadLimit(t *testing.T) 
 		t.Fatalf("unexpected normalized calls: %#v", ingest.calls)
 	}
 	for _, call := range ingest.calls {
-		if call.ResourceID != alias.ResourceID || strings.Contains(call.ProviderMessageID, alias.RecipientMailID) ||
+		if call.ResourceID != alias.ResourceID || strings.Contains(call.ProviderMessageID, alias.AnonymousID) ||
 			strings.Contains(call.ProviderMessageID, alias.ForwardToEmail) {
 			t.Fatalf("internal routing fact reached Mailmatch fields: %#v", call)
 		}
@@ -164,9 +165,9 @@ func TestFetchICloudResourceMailReadsAllPersistedAliases(t *testing.T) {
 	setICloudDomainMailSetting(t, "purchase_read_limit", "30")
 	allocatedAt := time.Date(2026, 8, 9, 13, 0, 0, 0, time.UTC)
 	aliases := []iCloudDomainAliasTestModel{
-		{ID: 5, ResourceID: 41, Email: "first@icloud.com", RecipientMailID: "recipient_first", ForwardToEmail: "icloud@aishop6.com", Status: "normal"},
-		{ID: 6, ResourceID: 41, Email: "second@icloud.com", RecipientMailID: "recipient_second", ForwardToEmail: "archive@aishop6.com", Status: "normal"},
-		{ID: 7, ResourceID: 41, Email: "released@icloud.com", RecipientMailID: "recipient_released", ForwardToEmail: "icloud@aishop6.com", Status: "released"},
+		{ID: 5, ResourceID: 41, AnonymousID: "recipientfirst", Email: "first@icloud.com", ForwardToEmail: "icloud@aishop6.com", Status: "normal"},
+		{ID: 6, ResourceID: 41, AnonymousID: "recipientsecond", Email: "second@icloud.com", ForwardToEmail: "archive@aishop6.com", Status: "normal"},
+		{ID: 7, ResourceID: 41, AnonymousID: "recipientreleased", Email: "released@icloud.com", ForwardToEmail: "icloud@aishop6.com", Status: "released"},
 	}
 	if err := db.Create(&aliases).Error; err != nil {
 		t.Fatalf("create aliases: %v", err)
@@ -183,7 +184,7 @@ func TestFetchICloudResourceMailReadsAllPersistedAliases(t *testing.T) {
 	files := &icloudImportFileStore{files: make(map[string]governancedomain.PrivateFile)}
 	for index, alias := range aliases {
 		storeICloudInboundMail(t, db, files, iCloudInboundMailTestModel{
-			ID: uint(index + 1), EnvelopeFrom: fmt.Sprintf("sender%d_at_example_com_%s@icloud.com", index+1, alias.RecipientMailID),
+			ID: uint(index + 1), EnvelopeFrom: fmt.Sprintf("sender%d_at_example_com_recipient_%s@icloud.com", index+1, []string{"first", "second", "released"}[index]),
 			Recipient: alias.ForwardToEmail, ResourceType: "domain", SourceObjectKey: fmt.Sprintf("admin/%d.eml", index+1),
 			Status: "stored", CreatedAt: allocatedAt.Add(time.Duration(index+1) * time.Minute),
 		})
@@ -205,7 +206,7 @@ func TestFetchICloudResourceMailReadsHistoricalRoutesForAdministrator(t *testing
 	db := newICloudDomainMailTestDB(t, "icloud-domain-admin-history")
 	setICloudDomainMailSetting(t, runtimeconfig.ICloudAdminReadLimitKey, "10")
 	now := time.Date(2026, 8, 9, 15, 0, 0, 0, time.UTC)
-	alias := iCloudDomainAliasTestModel{ID: 5, ResourceID: 41, Email: "history@icloud.com", RecipientMailID: "new-recipient", ForwardToEmail: "new@aishop6.com", Status: "normal"}
+	alias := iCloudDomainAliasTestModel{ID: 5, ResourceID: 41, AnonymousID: "recipient", Email: "history@icloud.com", ForwardToEmail: "new@aishop6.com", Status: "normal"}
 	if err := db.Create(&alias).Error; err != nil {
 		t.Fatalf("create alias: %v", err)
 	}
@@ -241,8 +242,8 @@ func TestFetchICloudResourceMailAppliesReadLimitAfterGlobalNewestSort(t *testing
 	setICloudDomainMailSetting(t, runtimeconfig.ICloudAdminReadLimitKey, "2")
 	base := time.Date(2026, 8, 9, 16, 0, 0, 0, time.UTC)
 	aliases := []iCloudDomainAliasTestModel{
-		{ID: 5, ResourceID: 41, Email: "first@icloud.com", RecipientMailID: "recipient-first", ForwardToEmail: "icloud@aishop6.com", Status: "normal"},
-		{ID: 6, ResourceID: 41, Email: "second@icloud.com", RecipientMailID: "recipient-second", ForwardToEmail: "icloud@aishop6.com", Status: "normal"},
+		{ID: 5, ResourceID: 41, AnonymousID: "recipientfirst", Email: "first@icloud.com", ForwardToEmail: "icloud@aishop6.com", Status: "normal"},
+		{ID: 6, ResourceID: 41, AnonymousID: "recipientsecond", Email: "second@icloud.com", ForwardToEmail: "icloud@aishop6.com", Status: "normal"},
 	}
 	if err := db.Create(&aliases).Error; err != nil {
 		t.Fatalf("create aliases: %v", err)
@@ -268,11 +269,11 @@ func TestFetchICloudResourceMailAppliesReadLimitAfterGlobalNewestSort(t *testing
 	}
 }
 
-func TestFetchICloudResourceMailPrefersLongestRecipientID(t *testing.T) {
+func TestFetchICloudResourceMailRejectsAmbiguousAnonymousID(t *testing.T) {
 	db := newICloudDomainMailTestDB(t, "icloud-domain-recipient-id")
 	aliases := []iCloudDomainAliasTestModel{
-		{ID: 5, ResourceID: 41, Email: "short@icloud.com", RecipientMailID: "recipient", ForwardToEmail: "icloud@aishop6.com", Status: "normal"},
-		{ID: 6, ResourceID: 41, Email: "long@icloud.com", RecipientMailID: "long_recipient", ForwardToEmail: "icloud@aishop6.com", Status: "normal"},
+		{ID: 5, ResourceID: 41, AnonymousID: "recipient", Email: "short@icloud.com", ForwardToEmail: "icloud@aishop6.com", Status: "normal"},
+		{ID: 6, ResourceID: 41, AnonymousID: "longrecipient", Email: "long@icloud.com", ForwardToEmail: "icloud@aishop6.com", Status: "normal"},
 	}
 	if err := db.Create(&aliases).Error; err != nil {
 		t.Fatalf("create aliases: %v", err)
@@ -288,8 +289,8 @@ func TestFetchICloudResourceMailPrefersLongestRecipientID(t *testing.T) {
 	if err := service.FetchICloudResourceMail(context.Background(), 41); err != nil {
 		t.Fatalf("fetch administrator mail: %v", err)
 	}
-	if len(ingest.calls) != 1 || ingest.calls[0].Recipient != aliases[1].Email || ingest.calls[0].EnvelopeFrom != "sender@example.com" {
-		t.Fatalf("recipient ID suffix must select the exact longest ID: %#v", ingest.calls)
+	if len(ingest.calls) != 0 {
+		t.Fatalf("ambiguous anonymous IDs must not select an alias: %#v", ingest.calls)
 	}
 }
 
@@ -300,7 +301,7 @@ func TestFetchICloudMailStopsAtConfiguredRecentMailboxWindow(t *testing.T) {
 	setICloudDomainMailSetting(t, "purchase_read_limit", "2")
 	base := time.Date(2026, 8, 9, 17, 0, 0, 0, time.UTC)
 	alias := iCloudDomainAliasTestModel{
-		ID: 5, ResourceID: 41, Email: "scan@icloud.com", RecipientMailID: "recipient-scan", ForwardToEmail: "icloud@aishop6.com", Status: "normal",
+		ID: 5, ResourceID: 41, AnonymousID: "recipientscan", Email: "scan@icloud.com", ForwardToEmail: "icloud@aishop6.com", Status: "normal",
 	}
 	if err := db.Create(&alias).Error; err != nil {
 		t.Fatalf("create alias: %v", err)

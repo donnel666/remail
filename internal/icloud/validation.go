@@ -208,7 +208,7 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 				return s.applyICloudProviderError(ctx, task, resultBase, reserveErr, true)
 			}
 			// The reserve response is already an authoritative alias fact. Persist
-			// its anonymous and recipient IDs immediately, while retaining the
+			// its anonymous ID immediately, while retaining the
 			// reconciliation marker until the next list confirms visibility.
 			if strings.TrimSpace(reservedAlias.ForwardToEmail) == "" {
 				reservedAlias.ForwardToEmail = list.SelectedForwardTo
@@ -245,35 +245,9 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 		resultBase.NextValidationAt = iCloudTimePointer(now.Add(iCloudAliasProvisionInterval))
 		return s.applyICloudValidationResult(ctx, task, resultBase)
 	}
-	// Apple commonly omits recipientMailId from the HME list response.  Merge
-	// facts learned by an earlier validation before deciding whether the 750
-	// aliases are routable; otherwise a valid account can never leave pending.
-	if err := s.mergeICloudAliasFacts(ctx, resource.ID, list.Aliases); err != nil {
-		resultBase.Deferred, resultBase.Retryable = true, true
-		resultBase.Category = "alias_route_state_unavailable"
-		resultBase.SafeMessage = "iCloud alias routing state is temporarily unavailable."
-		resultBase.NextValidationAt = iCloudTimePointer(now.Add(iCloudValidationRetryInterval))
-		return s.applyICloudValidationResult(ctx, task, resultBase)
-	}
-	if ready, err := s.discoverICloudRecipientIDs(ctx, task, list.SelectedForwardTo, list.Aliases, now); err != nil {
-		if errors.Is(err, errICloudValidationStale) {
-			return nil
-		}
-		resultBase.Deferred, resultBase.Retryable = true, true
-		resultBase.Category = "recipient_probe_unavailable"
-		resultBase.SafeMessage = "Waiting for Apple relay routing identifiers."
-		resultBase.NextValidationAt = iCloudTimePointer(now.Add(iCloudValidationRetryInterval))
-		return s.applyICloudValidationResult(ctx, task, resultBase)
-	} else if !ready {
-		resultBase.Deferred, resultBase.Retryable = true, true
-		resultBase.Category = "recipient_probe_pending"
-		resultBase.SafeMessage = "Waiting for Apple relay routing identifiers."
-		resultBase.NextValidationAt = iCloudTimePointer(now.Add(iCloudValidationRetryInterval))
-		return s.applyICloudValidationResult(ctx, task, resultBase)
-	}
 	if !iCloudAliasesReadyForForwarding(list.Aliases, list.SelectedForwardTo) {
 		resultBase.Category = "alias_not_ready"
-		resultBase.SafeMessage = "Not every iCloud alias is active, routable, and forwarding to the selected Apple mailbox."
+		resultBase.SafeMessage = "Not every iCloud alias is active and forwarding to the selected Apple mailbox."
 		return s.applyICloudValidationResult(ctx, task, resultBase)
 	}
 
@@ -295,7 +269,7 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 	probeToken := strings.TrimSpace(resource.DeliveryProbeToken)
 	probeStartedAt := resource.DeliveryProbeStartedAt
 	probeAliasItem := findICloudAlias(list.Aliases, probeAlias)
-	if probeAlias == "" || probeAliasItem == nil || strings.TrimSpace(probeAliasItem.RecipientMailID) == "" {
+	if probeAlias == "" || probeAliasItem == nil {
 		probeAlias = list.Aliases[0].Email
 		probeAliasItem = &list.Aliases[0]
 		probeToken = ""
@@ -329,7 +303,7 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 	foundDelivery, probeErr := s.findICloudDeliveryProbe(
 		ctx,
 		list.SelectedForwardTo,
-		probeAliasItem.RecipientMailID,
+		probeAliasItem.AnonymousID,
 		probeToken,
 		probeStartedAt.Add(-time.Minute),
 	)
@@ -784,22 +758,22 @@ func iCloudAliasesReadyForForwarding(aliases []hmeAlias, forwardTo string) bool 
 		return false
 	}
 	seen := make(map[string]struct{}, len(aliases))
-	seenRecipientIDs := make(map[string]struct{}, len(aliases))
+	seenAnonymousIDs := make(map[string]struct{}, len(aliases))
 	for _, alias := range aliases {
 		email := strings.ToLower(strings.TrimSpace(alias.Email))
-		recipientMailID := strings.ToLower(strings.TrimSpace(alias.RecipientMailID))
-		if !alias.Active || email == "" || recipientMailID == "" ||
+		anonymousID := strings.ToLower(strings.TrimSpace(alias.AnonymousID))
+		if !alias.Active || email == "" || anonymousID == "" ||
 			strings.ToLower(strings.TrimSpace(alias.ForwardToEmail)) != forwardTo {
 			return false
 		}
 		if _, exists := seen[email]; exists {
 			return false
 		}
-		if _, exists := seenRecipientIDs[recipientMailID]; exists {
+		if _, exists := seenAnonymousIDs[anonymousID]; exists {
 			return false
 		}
 		seen[email] = struct{}{}
-		seenRecipientIDs[recipientMailID] = struct{}{}
+		seenAnonymousIDs[anonymousID] = struct{}{}
 	}
 	return len(seen) == iCloudMaxAliases
 }

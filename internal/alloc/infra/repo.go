@@ -737,7 +737,6 @@ func (r *Repo) ListICloudSourceCandidates(ctx context.Context, projectID uint, b
 		"ir.alias_count = 750",
 		"ir.delivery_probe_verified_at IS NOT NULL",
 		"ia.status = 'normal'",
-		"ia.recipient_mail_id <> ''",
 		"ir.selected_forward_to <> ''",
 		"LOWER(TRIM(ia.forward_to_email)) = LOWER(TRIM(ir.selected_forward_to))",
 		`NOT EXISTS (
@@ -1001,7 +1000,6 @@ func (r *Repo) LockICloudCandidate(ctx context.Context, resourceID uint, aliasID
 	}
 	where := []string{
 		"ia.id = ?", "ia.resource_id = ?", "ia.status = 'normal'",
-		"ia.recipient_mail_id <> ''",
 		"ir.status = 'normal'", "ir.session_status = 'valid'", "ir.expire_at >= ?",
 		"ir.alias_count = 750", "ir.delivery_probe_verified_at IS NOT NULL",
 		"ir.selected_forward_to <> ''",
@@ -2211,7 +2209,6 @@ JOIN icloud_resources ir ON ir.id = ia.resource_id
 JOIN email_resources er ON er.id = ir.id AND er.type = 'icloud'
 JOIN users u ON u.id = er.owner_user_id
 WHERE ia.status = 'normal'
-  AND ia.recipient_mail_id <> ''
   AND ir.status = 'normal'
   AND ir.session_status = 'valid'
   AND ir.expire_at >= UTC_TIMESTAMP(3)
