@@ -1149,6 +1149,9 @@ func TestCheckoutBatchMarksAllocatorExhaustionAndSkipsMatchingTail(t *testing.T)
 	require.Len(t, items, len(requests))
 	for _, item := range items {
 		require.ErrorIs(t, item.Err, domain.ErrInsufficientInventory)
+		require.NotNil(t, item.Result)
+		require.True(t, item.Result.Created)
+		require.Equal(t, domain.OrderStatusFailed, item.Result.Order.Status)
 		require.True(t, item.attempted)
 	}
 	require.Equal(t, 1, inventory.checks)
@@ -1156,7 +1159,8 @@ func TestCheckoutBatchMarksAllocatorExhaustionAndSkipsMatchingTail(t *testing.T)
 	require.Equal(t, 1, inventory.marks)
 	require.Equal(t, uint(8), inventory.marked.ProjectID)
 	require.Equal(t, uint(9), inventory.marked.ProductID)
-	require.Equal(t, 1, repo.topTx)
+	require.Len(t, repo.orders, len(requests))
+	require.Equal(t, len(requests), repo.topTx)
 	require.Zero(t, wallet.locks)
 }
 

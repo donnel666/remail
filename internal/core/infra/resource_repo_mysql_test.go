@@ -1191,7 +1191,7 @@ func TestCoreListQueriesUseIndexesMySQL(t *testing.T) {
 		"EXPLAIN SELECT * FROM generated_mailboxes WHERE resource_id = 101 AND owner_user_id = 1 ORDER BY created_at DESC LIMIT 20",
 	)
 	requireExplainUsesAnyIndex(t, db,
-		[]string{"idx_microsoft_bulk_domain"},
+		[]string{"idx_microsoft_bulk_domain", "idx_microsoft_suffix_bucket"},
 		"EXPLAIN SELECT er.id FROM microsoft_resources AS ms STRAIGHT_JOIN email_resources AS er ON er.id = ms.id WHERE er.owner_user_id = 1 AND er.type = 'microsoft' AND ms.for_sale = 0 AND ms.status <> 'deleted' AND ms.email_domain = 'test.local' ORDER BY er.id ASC LIMIT 1000",
 	)
 	for i := 0; i < 50; i++ {

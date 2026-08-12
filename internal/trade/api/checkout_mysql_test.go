@@ -790,7 +790,7 @@ func TestCheckoutBatchDefinitiveMicrosoftMissRunsOneProbeSequenceMySQL(t *testin
 	require.Equal(t, 10, queryLog.calls, "four bucket probes plus one global confirmation execute main and alias SQL once")
 	var orders int64
 	require.NoError(t, db.Table("orders").Count(&orders).Error)
-	require.EqualValues(t, 1, orders, "the remaining 99 items must short-circuit before opening checkout transactions")
+	require.EqualValues(t, len(requests), orders, "skipped allocator probes must still persist idempotent failed orders")
 }
 
 func TestCheckoutMarkFailedErrorPreservesPendingOrderForRetryMySQL(t *testing.T) {

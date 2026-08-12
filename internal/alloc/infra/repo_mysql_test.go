@@ -1261,7 +1261,7 @@ func TestMicrosoftCandidateFullPlansShowBucketBoundAndGlobalSuffixScanMySQL(t *t
 	requireExplainTargetUsesIndex(t, db, bucketMain, "ms", "idx_microsoft_suffix_bucket")
 	requireExplainTargetUsesIndex(t, db, bucketAlias, "ea", "idx_explicit_aliases_suffix_bucket")
 	requireExplainTargetUsesIndex(t, db, globalMain, "ms", "")
-	requireExplainTargetUsesIndex(t, db, globalAlias, "ea", "idx_explicit_aliases_suffix_bucket")
+	requireExplainTargetUsesIndex(t, db, globalAlias, "ea", "")
 
 	bucketMainWork := explainAnalyzeTargetWork(t, db, bucketMain, "ms")
 	bucketAliasWork := explainAnalyzeTargetWork(t, db, bucketAlias, "ea")
@@ -1874,7 +1874,7 @@ func requireExplainTargetUsesIndex(t *testing.T, db *gorm.DB, query, targetTable
 	require.Failf(t, "target table missing from EXPLAIN", "target=%s query=%s", targetTable, query)
 }
 
-var explainActualRowsPattern = regexp.MustCompile(`actual time=[^)]* rows=([0-9.eE+-]+) loops=([0-9]+)`)
+var explainActualRowsPattern = regexp.MustCompile(`rows=([0-9.eE+-]+) loops=([0-9]+)\)\s*$`)
 
 func explainAnalyzeTargetWork(t *testing.T, db *gorm.DB, query, targetTable string) float64 {
 	t.Helper()

@@ -837,20 +837,21 @@ type checkoutQuoteKey struct {
 }
 
 type checkoutPreparation struct {
-	request           CheckoutRequest
-	mode              domain.ServiceMode
-	policy            domain.SupplyPolicy
-	idempotencyKey    string
-	fingerprint       string
-	emailSuffix       string
-	requestID         string
-	existing          *domain.Order
-	quote             *OrderingQuote
-	gmailQuote        *GmailSupplyQuote
-	upstreamOffer     *upstream.Offer
-	upstreamOwned     bool
-	fallbackAttempted bool
-	prepareErr        error
+	request              CheckoutRequest
+	mode                 domain.ServiceMode
+	policy               domain.SupplyPolicy
+	idempotencyKey       string
+	fingerprint          string
+	emailSuffix          string
+	requestID            string
+	existing             *domain.Order
+	quote                *OrderingQuote
+	gmailQuote           *GmailSupplyQuote
+	upstreamOffer        *upstream.Offer
+	upstreamOwned        bool
+	fallbackAttempted    bool
+	inventoryUnavailable bool
+	prepareErr           error
 }
 
 func prepareCheckoutRequest(req CheckoutRequest) (checkoutPreparation, error) {
@@ -1105,6 +1106,23 @@ func (uc *UseCase) checkoutPrepared(ctx context.Context, prepared checkoutPrepar
 			return nil, quoteErr
 		}
 		orderQuote = *storedQuote
+	}
+	if created && prepared.inventoryUnavailable {
+		// ponytail: persist skipped tail failures one-by-one to preserve the
+		// existing idempotency contract; batch them only if 100 bounded writes matter.
+		failed, failErr := uc.failPendingCheckout(ctx, MarkFailedCommand{
+			OrderNo:     order.OrderNo,
+			FailureCode: domain.OrderFailureInsufficientInventory,
+			Reason:      "Allocation failed.",
+			Now:         uc.now(),
+		})
+		if failErr != nil {
+			return nil, failErr
+		}
+		if failed == nil {
+			return nil, errors.New("mark failed returned no order")
+		}
+		return &CheckoutResult{Order: *failed, Created: true}, domain.ErrInsufficientInventory
 	}
 	result, err := uc.resumeCheckout(ctx, *order, orderQuote, prepared.emailSuffix, prepared.requestID)
 	if result != nil {
@@ -1949,12 +1967,12 @@ func (uc *UseCase) checkoutBatch(ctx context.Context, prepared []checkoutPrepara
 		}
 		result, itemErr := uc.checkoutPrepared(ctx, prepared[index])
 		items[index] = CheckoutBatchItem{Result: result, Err: itemErr, attempted: true}
-		if errors.Is(itemErr, domain.ErrInsufficientInventory) && result != nil && result.Created {
+		if !prepared[index].inventoryUnavailable && errors.Is(itemErr, domain.ErrInsufficientInventory) && result != nil && result.Created {
 			marked := uc.markCheckoutInventoryUnavailable(ctx, prepared[index])
 			if marked || errors.Is(itemErr, domain.ErrDefinitiveInventoryExhausted) {
 				for tail := index + 1; tail < len(prepared); tail++ {
 					if sameCheckoutInventoryKey(prepared[index], prepared[tail]) && prepared[tail].existing == nil {
-						prepared[tail].prepareErr = domain.ErrInsufficientInventory
+						prepared[tail].inventoryUnavailable = true
 					}
 				}
 			}
