@@ -63,14 +63,16 @@ type testUserGroupModel struct {
 func (testUserGroupModel) TableName() string { return "user_groups" }
 
 type tradePortSpy struct {
-	activations   int
-	activation    upstream.Activation
-	activationErr error
-	completions   int
-	failures      int
-	failure       func()
-	receiveUntil  time.Time
-	receiveErr    error
+	activations       int
+	activation        upstream.Activation
+	activationErr     error
+	completions       int
+	completionReasons []string
+	failures          int
+	failureReasons    []string
+	failure           func()
+	receiveUntil      time.Time
+	receiveErr        error
 }
 
 func (s *tradePortSpy) ActivateUpstreamOrder(_ context.Context, activation upstream.Activation) error {
@@ -79,13 +81,15 @@ func (s *tradePortSpy) ActivateUpstreamOrder(_ context.Context, activation upstr
 	return s.activationErr
 }
 
-func (s *tradePortSpy) CompleteGmailOrder(context.Context, string, string) error {
+func (s *tradePortSpy) CompleteGmailOrder(_ context.Context, _, reason string) error {
 	s.completions++
+	s.completionReasons = append(s.completionReasons, reason)
 	return nil
 }
 
-func (s *tradePortSpy) FailGmailOrder(context.Context, string, string) error {
+func (s *tradePortSpy) FailGmailOrder(_ context.Context, _, reason string) error {
 	s.failures++
+	s.failureReasons = append(s.failureReasons, reason)
 	if s.failure != nil {
 		s.failure()
 	}
@@ -482,10 +486,28 @@ func TestProvisionExplicitFailureRefundsWithoutRetryingRemote(t *testing.T) {
 	require.NoError(t, service.Provision(context.Background(), order.ID))
 	require.Equal(t, "2", <-requestQuery)
 	require.Equal(t, 1, trade.failures)
+	require.Equal(t, []string{orderFailureReason}, trade.failureReasons)
 	var stored orderModel
 	require.NoError(t, db.First(&stored, order.ID).Error)
 	require.Equal(t, StatusFailed, stored.Status)
+	require.Equal(t, orderFailureReason, stored.LastSafeError)
 	require.Nil(t, stored.NextPollAt)
+}
+
+func TestProvisionDoesNotReplayLegacyProviderError(t *testing.T) {
+	service, db, now := newServiceHarness(t)
+	trade := &tradePortSpy{}
+	service.SetTrade(trade)
+	legacy := "SMSBower 加载失败: Response status code does not indicate success: 401 Unauthorized"
+	order := createPendingProviderOrder(t, db, "ORDER-LEGACY-FAILURE", now)
+	require.NoError(t, db.Model(&orderModel{}).Where("id = ?", order.ID).Updates(map[string]any{
+		"status": StatusFailed, "last_safe_error": legacy,
+	}).Error)
+
+	require.NoError(t, service.Provision(context.Background(), order.ID))
+	require.Equal(t, []string{orderFailureReason}, trade.failureReasons)
+	require.NotContains(t, trade.failureReasons[0], "SMSBower")
+	require.NotContains(t, trade.failureReasons[0], "401")
 }
 
 func TestProvisionUncertainResultHoldsForReviewWithoutRefund(t *testing.T) {
@@ -509,6 +531,7 @@ func TestProvisionUncertainResultHoldsForReviewWithoutRefund(t *testing.T) {
 	var stored orderModel
 	require.NoError(t, db.First(&stored, order.ID).Error)
 	require.Equal(t, StatusUnknown, stored.Status)
+	require.Equal(t, orderFailureReason, stored.LastSafeError)
 	require.NotNil(t, stored.NextPollAt)
 
 	notifier.err = nil
@@ -539,6 +562,7 @@ func TestProvisioningLeaseExpiryBecomesUnknownWithoutRemoteCall(t *testing.T) {
 	require.Equal(t, 1, notifier.alerts)
 	require.NoError(t, db.First(&order, order.ID).Error)
 	require.Equal(t, StatusUnknown, order.Status)
+	require.Equal(t, orderFailureReason, order.LastSafeError)
 }
 
 func TestCancelPendingOrderDoesNotCallRemote(t *testing.T) {
@@ -552,6 +576,7 @@ func TestCancelPendingOrderDoesNotCallRemote(t *testing.T) {
 	var stored orderModel
 	require.NoError(t, db.First(&stored, order.ID).Error)
 	require.Equal(t, StatusCancelled, stored.Status)
+	require.Empty(t, stored.LastSafeError)
 	require.Nil(t, stored.NextPollAt)
 }
 
@@ -636,6 +661,37 @@ func TestPollClaimUsesDurableOrderLease(t *testing.T) {
 	require.False(t, claimed)
 }
 
+func TestPollStoresOnlyCodeFailureForUpstreamUnauthorized(t *testing.T) {
+	service, db, now := newServiceHarness(t)
+	service.SetTrade(&tradePortSpy{})
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		require.Equal(t, "/api/mail/getCode", request.URL.Path)
+		writer.WriteHeader(http.StatusUnauthorized)
+		_, _ = writer.Write([]byte("No access: SMSBower returned 401 Unauthorized"))
+	}))
+	t.Cleanup(server.Close)
+	service.client = newTestClient(server.URL, server.Client())
+	mailID := uint64(44)
+	expiresAt := now.Add(lifetime)
+	nextPoll := now
+	order := orderModel{
+		OrderNo: "ORDER-CODE-UNAUTHORIZED", ProjectID: 1, ProductID: 2, ServiceCode: "svc",
+		RemoteMailID: &mailID, Email: "unauthorized@gmail.com", Status: StatusActive, CodesJSON: "[]",
+		UpstreamPriceSnapshot: "2", PointsPerUnitSnapshot: "1", CostPointsSnapshot: "2", MaxPriceSnapshot: "2",
+		NextPollAt: &nextPoll, StartedAt: &now, ExpiresAt: &expiresAt, Version: 1,
+	}
+	require.NoError(t, db.Create(&order).Error)
+
+	err := service.Poll(context.Background(), order.ID)
+	require.ErrorIs(t, err, ErrBadKey)
+	var stored orderModel
+	require.NoError(t, db.First(&stored, order.ID).Error)
+	require.Equal(t, codeFailureReason, stored.LastSafeError)
+	require.NotContains(t, stored.LastSafeError, "SMSBower")
+	require.NotContains(t, stored.LastSafeError, "401")
+	require.NotContains(t, strings.ToLower(stored.LastSafeError), "no access")
+}
+
 func TestPollUsesUpstreamTerminalStateAfterReceivingCode(t *testing.T) {
 	service, db, now := newServiceHarness(t)
 	trade := &tradePortSpy{}
@@ -673,6 +729,7 @@ func TestPollUsesUpstreamTerminalStateAfterReceivingCode(t *testing.T) {
 	require.Equal(t, int32(1), codeCalls.Load())
 	require.Zero(t, statusCalls.Load())
 	require.Equal(t, 1, trade.completions)
+	require.Equal(t, []string{"接码服务已结束，共接收 1 个验证码。"}, trade.completionReasons)
 	var stored orderModel
 	require.NoError(t, db.First(&stored, order.ID).Error)
 	require.Equal(t, StatusCompleted, stored.Status)
@@ -727,7 +784,7 @@ func TestPollHoldsUnconfirmedZeroCodeActivationForReview(t *testing.T) {
 			require.NoError(t, db.First(&stored, order.ID).Error)
 			require.Equal(t, StatusCancelling, stored.Status)
 			require.Equal(t, ActionCancel, stored.PendingRemoteAction)
-			require.Contains(t, stored.LastSafeError, "尚未退款")
+			require.Equal(t, codeFailureReason, stored.LastSafeError)
 			require.Nil(t, stored.NextPollAt)
 		})
 	}
@@ -772,6 +829,7 @@ func TestPollCancelsUpstreamAndRefundsAfterNoCodeTimeout(t *testing.T) {
 	require.Zero(t, codeCalls.Load())
 	require.Equal(t, int32(1), cancelCalls.Load())
 	require.Equal(t, 1, trade.failures)
+	require.Equal(t, []string{codeFailureReason}, trade.failureReasons)
 	var stored orderModel
 	require.NoError(t, db.First(&stored, order.ID).Error)
 	require.Equal(t, StatusCancelled, stored.Status)
@@ -823,7 +881,7 @@ func TestPollHoldsUnconfirmedUpstreamCancellationForReview(t *testing.T) {
 			require.NoError(t, db.First(&stored, order.ID).Error)
 			require.Equal(t, StatusCancelling, stored.Status)
 			require.Equal(t, ActionCancel, stored.PendingRemoteAction)
-			require.Contains(t, stored.LastSafeError, "尚未退款")
+			require.Equal(t, codeFailureReason, stored.LastSafeError)
 			require.Nil(t, stored.NextPollAt)
 		})
 	}

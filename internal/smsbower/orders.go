@@ -13,7 +13,10 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-const noCodeRefundReason = "Gmail 在等待时间内未收到验证码，订单已退款。"
+const (
+	orderFailureReason = "下单失败"
+	codeFailureReason  = "接码失败"
+)
 
 var ErrCancellationUnconfirmed = errors.New("smsbower: upstream cancellation is not confirmed")
 
@@ -71,7 +74,7 @@ func (s *Service) Provision(ctx context.Context, orderID uint) error {
 		if s.trade == nil {
 			return errors.New("smsbower: trade callback unavailable")
 		}
-		if err := s.trade.FailGmailOrder(ctx, order.OrderNo, order.LastSafeError); err != nil {
+		if err := s.trade.FailGmailOrder(ctx, order.OrderNo, orderFailureReason); err != nil {
 			return err
 		}
 		return s.clearNextPoll(ctx, order.ID, StatusFailed)
@@ -81,25 +84,25 @@ func (s *Service) Provision(ctx context.Context, orderID uint) error {
 		return nil
 	}
 	if !claimed {
-		return s.failProvision(ctx, *order, StatusUnknown, "采购请求状态不确定，系统已停止自动重试；请管理员核对上游后处理退款。", true)
+		return s.failProvision(ctx, *order, StatusUnknown, true)
 	}
 	var config configModel
 	if err := s.dbFor(ctx).First(&config, "id = 1").Error; err != nil {
-		return s.failProvision(ctx, *order, StatusFailed, "SMSBower 配置不可用，Gmail 采购失败并退款。", false)
+		return s.failProvision(ctx, *order, StatusFailed, false)
 	}
 	apiKey := strings.TrimSpace(config.APIKey)
 	maxPrice, err := money.Parse(order.MaxPriceSnapshot)
 	if apiKey == "" || err != nil {
-		return s.failProvision(ctx, *order, StatusFailed, "SMSBower 配置不可用，Gmail 采购失败并退款。", false)
+		return s.failProvision(ctx, *order, StatusFailed, false)
 	}
 	activation, err := s.client.Activate(ctx, apiKey, order.ServiceCode, maxPrice)
 	if err != nil {
 		explicit := errors.Is(err, ErrBadKey) || errors.Is(err, ErrNoMail) ||
 			errors.Is(err, ErrInsufficientBalance) || errors.Is(err, ErrPriceChanged)
 		if explicit {
-			return s.failProvision(ctx, *order, StatusFailed, safeRemoteError(err)+"，Gmail 采购失败并退款。", false)
+			return s.failProvision(ctx, *order, StatusFailed, false)
 		}
-		return s.failProvision(ctx, *order, StatusUnknown, "采购结果不确定，系统未重复采购或退款，请管理员人工核对上游。", true)
+		return s.failProvision(ctx, *order, StatusUnknown, true)
 	}
 	now := s.now()
 	expiresAt := now.Add(lifetime)
@@ -191,10 +194,10 @@ func (s *Service) claimProvision(ctx context.Context, orderID uint) (*orderModel
 	return &order, claimed, err
 }
 
-func (s *Service) failProvision(ctx context.Context, order orderModel, status, safeMessage string, uncertain bool) error {
+func (s *Service) failProvision(ctx context.Context, order orderModel, status string, uncertain bool) error {
 	now := s.now()
 	result := s.dbFor(ctx).Model(&orderModel{}).Where("id = ? AND status = ?", order.ID, StatusProvisioning).Updates(map[string]any{
-		"status": status, "last_safe_error": safeMessage, "completed_at": now, "next_poll_at": now,
+		"status": status, "last_safe_error": orderFailureReason, "completed_at": now, "next_poll_at": now,
 		"version": gorm.Expr("version + 1"),
 	})
 	if result.Error != nil {
@@ -204,7 +207,7 @@ func (s *Service) failProvision(ctx context.Context, order orderModel, status, s
 		return errors.New("smsbower: provision failure state conflict")
 	}
 	order.Status = status
-	order.LastSafeError = safeMessage
+	order.LastSafeError = orderFailureReason
 	order.CompletedAt = &now
 	order.NextPollAt = &now
 	if uncertain {
@@ -213,7 +216,7 @@ func (s *Service) failProvision(ctx context.Context, order orderModel, status, s
 	if s.trade == nil {
 		return errors.New("smsbower: trade callback unavailable")
 	}
-	if err := s.trade.FailGmailOrder(ctx, order.OrderNo, safeMessage); err != nil {
+	if err := s.trade.FailGmailOrder(ctx, order.OrderNo, orderFailureReason); err != nil {
 		return err
 	}
 	return s.clearNextPoll(ctx, order.ID, StatusFailed)
@@ -251,7 +254,7 @@ func (s *Service) CancelOrder(ctx context.Context, orderNo string) (bool, error)
 	confirm := false
 	uncertain := false
 	blocked := false
-	uncertainReason := "SMSBower 采购进行中收到取消请求，远端结果待人工核对，订单尚未退款。"
+	uncertainReason := orderFailureReason
 	err := s.dbFor(ctx).Transaction(func(tx *gorm.DB) error {
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("order_no = ?", orderNo).Take(&order).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -264,7 +267,7 @@ func (s *Service) CancelOrder(ctx context.Context, orderNo string) (bool, error)
 		case StatusPending:
 			return tx.Model(&orderModel{}).Where("id = ?", order.ID).Updates(map[string]any{
 				"status": StatusCancelled, "completed_at": now, "next_poll_at": nil,
-				"last_safe_error": "SMSBower 订单已在远端采购前取消。", "version": gorm.Expr("version + 1"),
+				"last_safe_error": "", "version": gorm.Expr("version + 1"),
 			}).Error
 		case StatusProvisioning:
 			uncertain = true
@@ -339,7 +342,7 @@ func (s *Service) Poll(ctx context.Context, orderID uint) error {
 		if s.trade == nil {
 			return errors.New("smsbower: trade callback unavailable")
 		}
-		if err := s.trade.FailGmailOrder(ctx, order.OrderNo, noCodeRefundReason); err != nil {
+		if err := s.trade.FailGmailOrder(ctx, order.OrderNo, codeFailureReason); err != nil {
 			return err
 		}
 		return s.clearNextPoll(ctx, order.ID, StatusCancelled)
@@ -380,11 +383,11 @@ func (s *Service) Poll(ctx context.Context, orderID uint) error {
 	}
 	var config configModel
 	if err := s.dbFor(ctx).First(&config, "id = 1").Error; err != nil || order.RemoteMailID == nil || *order.RemoteMailID == 0 || strings.TrimSpace(config.APIKey) == "" {
-		return s.deferPoll(ctx, order.ID, "SMSBower 激活信息不可用", ErrRemote)
+		return s.deferPoll(ctx, order.ID, ErrRemote)
 	}
 	code, err := s.client.Code(ctx, strings.TrimSpace(config.APIKey), *order.RemoteMailID)
 	if errors.Is(err, ErrCodeWaiting) {
-		return s.deferPoll(ctx, order.ID, "", nil)
+		return s.deferPoll(ctx, order.ID, nil)
 	}
 	if errors.Is(err, ErrActivationStatus) {
 		updated, prepareErr := s.prepareTerminalAction(ctx, order.ID)
@@ -404,7 +407,7 @@ func (s *Service) Poll(ctx context.Context, orderID uint) error {
 		return s.markActivationMissing(ctx, *order)
 	}
 	if err != nil {
-		return s.deferPoll(ctx, order.ID, safeRemoteError(err), err)
+		return s.deferPoll(ctx, order.ID, err)
 	}
 	updated, err := s.recordCode(ctx, order.ID, code)
 	if err != nil {
@@ -515,7 +518,7 @@ func nextCodeAction(count int) (action, status string) {
 func (s *Service) applyRemoteAction(ctx context.Context, order orderModel) error {
 	remoteErr := s.requestRemoteAction(ctx, order)
 	if remoteErr != nil && !remoteActionFinal(remoteErr) {
-		return s.deferPoll(ctx, order.ID, safeRemoteError(remoteErr), remoteErr)
+		return s.deferPoll(ctx, order.ID, remoteErr)
 	}
 	return s.finishRemoteAction(ctx, order, remoteErr)
 }
@@ -562,7 +565,7 @@ func (s *Service) finishRemoteAction(ctx context.Context, order orderModel, remo
 		if s.trade == nil {
 			return errors.New("smsbower: trade callback unavailable")
 		}
-		if err := s.trade.FailGmailOrder(ctx, order.OrderNo, noCodeRefundReason); err != nil {
+		if err := s.trade.FailGmailOrder(ctx, order.OrderNo, codeFailureReason); err != nil {
 			return err
 		}
 		return s.clearNextPoll(ctx, order.ID, StatusCancelled)
@@ -622,7 +625,7 @@ func (s *Service) confirmCancellation(ctx context.Context, orderID uint) error {
 	if remoteActionFinal(remoteErr) {
 		return cancellationUnconfirmed(s.holdCancellationForReview(ctx, order))
 	}
-	return cancellationUnconfirmed(s.deferPoll(ctx, order.ID, safeRemoteError(remoteErr), remoteErr))
+	return cancellationUnconfirmed(s.deferPoll(ctx, order.ID, remoteErr))
 }
 
 func cancellationUnconfirmed(err error) error {
@@ -633,11 +636,10 @@ func cancellationUnconfirmed(err error) error {
 }
 
 func (s *Service) holdCancellationForReview(ctx context.Context, order orderModel) error {
-	const reason = "SMSBower 上游取消结果未确认，订单尚未退款；请管理员确认上游退款后处理本地订单。"
 	result := s.dbFor(ctx).Model(&orderModel{}).
 		Where("id = ? AND status = ? AND pending_remote_action = ?", order.ID, StatusCancelling, ActionCancel).
 		Updates(map[string]any{
-			"last_safe_error": reason, "version": gorm.Expr("version + 1"),
+			"last_safe_error": codeFailureReason, "version": gorm.Expr("version + 1"),
 		})
 	if result.Error != nil {
 		return fmt.Errorf("hold SMSBower cancellation for review: %w", result.Error)
@@ -656,12 +658,11 @@ func (s *Service) holdCancellationForReview(ctx context.Context, order orderMode
 
 func (s *Service) markActivationMissing(ctx context.Context, order orderModel) error {
 	now := s.now()
-	reason := "SMSBower 无法查询该激活记录，订单尚未退款，请管理员核对上游。"
 	result := s.dbFor(ctx).Model(&orderModel{}).
 		Where("id = ? AND status = ? AND pending_remote_action = ''", order.ID, StatusActive).
 		Updates(map[string]any{
 			"status": StatusUnknown, "completed_at": now, "next_poll_at": now,
-			"last_safe_error": reason, "version": gorm.Expr("version + 1"),
+			"last_safe_error": codeFailureReason, "version": gorm.Expr("version + 1"),
 		})
 	if result.Error != nil {
 		return fmt.Errorf("mark missing SMSBower activation: %w", result.Error)
@@ -672,7 +673,7 @@ func (s *Service) markActivationMissing(ctx context.Context, order orderModel) e
 	order.Status = StatusUnknown
 	order.CompletedAt = &now
 	order.NextPollAt = &now
-	order.LastSafeError = reason
+	order.LastSafeError = codeFailureReason
 	return s.settleUnknown(ctx, order)
 }
 
@@ -680,13 +681,13 @@ func completionReason(order orderModel) string {
 	if order.ReceivedCount >= MaxCodes {
 		return "Gmail 已接收 3 个验证码，接码会话完成。"
 	}
-	return fmt.Sprintf("SMSBower 接码生命周期已结束，共接收 %d 个验证码。", order.ReceivedCount)
+	return fmt.Sprintf("接码服务已结束，共接收 %d 个验证码。", order.ReceivedCount)
 }
 
-func (s *Service) deferPoll(ctx context.Context, orderID uint, safeMessage string, cause error) error {
+func (s *Service) deferPoll(ctx context.Context, orderID uint, cause error) error {
 	updates := map[string]any{"next_poll_at": s.now().Add(pollInterval)}
-	if safeMessage != "" {
-		updates["last_safe_error"] = safeMessage
+	if cause != nil {
+		updates["last_safe_error"] = codeFailureReason
 	}
 	if err := s.dbFor(ctx).Model(&orderModel{}).Where("id = ?", orderID).Updates(updates).Error; err != nil {
 		return errors.Join(cause, err)
