@@ -36,6 +36,13 @@ export type ProjectInventoryTotalResponse =
 export type ProjectProductRequest =
   components["schemas"]["ProjectProductRequest"];
 
+const MAX_PROJECT_PAGE_SIZE = 100;
+
+function projectPageLimit(limit: number) {
+  if (!Number.isFinite(limit)) return 20;
+  return Math.max(1, Math.min(MAX_PROJECT_PAGE_SIZE, Math.trunc(limit)));
+}
+
 export interface ProjectListFilter {
   accessType?: "public" | "private";
   createdFrom?: string;
@@ -88,7 +95,7 @@ export async function listProjects(
         query: {
           ...filter,
           offset,
-          limit,
+          limit: projectPageLimit(limit),
         },
       },
     })

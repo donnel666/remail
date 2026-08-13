@@ -1190,6 +1190,7 @@ export default function Projects() {
     total,
   } = useBlockPagedList<ProjectItem>({
     activePage,
+    blockSize: 100,
     filterKey: JSON.stringify(listFilter),
     loadBlock: loadProjectBlock,
     onError: (error) => {

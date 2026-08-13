@@ -1738,6 +1738,7 @@ export default function AdminProjects() {
     total,
   } = useBlockPagedList<ProjectItem>({
     activePage,
+    blockSize: 100,
     filterKey: JSON.stringify(listFilter),
     loadBlock: loadProjectBlock,
     onError: (error) => {
