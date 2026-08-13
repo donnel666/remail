@@ -1317,13 +1317,17 @@ body[theme-mode="dark"] .semi-always-light,
 }
 
 .project-square-product-types {
+  display: flex;
   min-width: 0;
-  max-width: 132px;
-  overflow: hidden;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
   color: var(--semi-color-text-2);
   font-size: 12px;
   line-height: 1.5;
-  text-overflow: ellipsis;
+}
+
+.project-square-product-type {
   white-space: nowrap;
 }
 

@@ -152,7 +152,7 @@ export function ProductPickerPanel({
                       {product.label}
                     </OverflowTooltip>
                     <Tag color="grey" shape="circle" size="small">
-                      {productTypeLabel(product.productType, t)}
+                      {productTypeLabel(product.productType, t)}#{product.productId}
                     </Tag>
                   </span>
                   <OverflowTooltip

@@ -301,9 +301,6 @@ function ProductPricePreview({
       </div>
     );
   }
-  const productTypes = Array.from(
-    new Set(enabledProducts.map((product) => productTypeLabel(product.type, t)))
-  );
   const codePrice = minProductPrice(
     enabledProducts.filter((product) => product.codeEnabled),
     "codePrice"
@@ -323,7 +320,11 @@ function ProductPricePreview({
     >
       <div className="project-square-price-row">
         <span className="project-square-product-types">
-          {productTypes.join(" / ")}
+          {enabledProducts.map((product) => (
+            <span className="project-square-product-type" key={product.id}>
+              {productTypeLabel(product.type, t)}#{product.id}
+            </span>
+          ))}
         </span>
         <div className="project-square-price-values">
           {codePrice ? (
@@ -899,7 +900,7 @@ function ProductRows({ products }: { products: ProjectProduct[] }) {
         <div className="project-detail-product" key={product.id}>
           <div className="project-detail-product-heading">
             <Tag color={product.type === "microsoft" ? "amber" : "green"} shape="circle">
-              {productTypeLabel(product.type, t)}
+              {productTypeLabel(product.type, t)}#{product.id}
             </Tag>
             {product.status !== "enabled" ? (
               <Tag color="grey" shape="circle">
