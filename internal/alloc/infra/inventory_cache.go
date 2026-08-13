@@ -500,8 +500,8 @@ func (c *InventoryCache) ListInventoryRefreshStates(ctx context.Context, project
 				return nil, fmt.Errorf("decode inventory refresh failure for project %d: %w", projectID, err)
 			}
 			if latestFailure == nil || failure.LastAttemptAt.After(latestFailure.LastAttemptAt) {
-				copy := failure
-				latestFailure = &copy
+				latest := failure
+				latestFailure = &latest
 			}
 		}
 		if latestFailure != nil {

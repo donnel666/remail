@@ -53,7 +53,7 @@ describe("requireTurnstile", () => {
     );
     const challenge = screen.getByRole("button", { name: "challenge" });
     const cancel = screen.getByRole("button", { name: "Cancel" });
-    expect(challenge).toHaveFocus();
+    await waitFor(() => expect(challenge).toHaveFocus());
 
     fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
     expect(cancel).toHaveFocus();
