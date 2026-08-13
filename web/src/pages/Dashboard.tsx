@@ -56,7 +56,9 @@ import type {
   WorkbenchProject,
 } from "./workbench/types";
 import {
+  compareDomainSuffixes,
   compareProjectNames,
+  isPrivateDomainSelection,
   matchesProjectEmailSearch,
 } from "./workbench/utils";
 
@@ -82,11 +84,17 @@ function filterProducts(
   products: WorkbenchProduct[],
   search: string,
   serviceMode: ServiceMode,
+  inventoryScope: InventoryScope,
 ) {
   const q = search.trim().toLowerCase();
   return products
     .filter((product) =>
       serviceMode === "code" ? product.codeEnabled : product.purchaseEnabled,
+    )
+    .filter(
+      (product) =>
+        inventoryScope !== "public_only" ||
+        !isPrivateDomainSelection(product.productType, product.emailSuffix),
     )
     .filter((product) =>
       q
@@ -104,6 +112,43 @@ function filterProducts(
 }
 
 type ProductInventoryTotal = ProjectInventoryTotalResponse["products"][number];
+
+function toWorkbenchSuffixProducts(
+  baseProduct: WorkbenchProduct,
+  suffixes: ProductInventoryTotal["suffixes"],
+) {
+  const products = (suffixes ?? []).flatMap((suffix) => {
+    const rawSuffix = String(suffix.suffix ?? "").trim();
+    if (!rawSuffix) return [];
+    const privateDomain =
+      baseProduct.productType === "domain" &&
+      rawSuffix.includes("@") &&
+      !rawSuffix.startsWith("@");
+    const emailSuffix = privateDomain ? rawSuffix : rawSuffix.replace(/^@/, "");
+    if (!emailSuffix) return [];
+    return [
+      {
+        ...baseProduct,
+        codeInventory: suffix.totalAvailable ?? 0,
+        codePublicInventory: suffix.publicAvailable ?? 0,
+        emailSuffix,
+        id: `${baseProduct.productId}:${emailSuffix}`,
+        purchaseInventory: suffix.totalAvailable ?? 0,
+        purchasePublicInventory: suffix.publicAvailable ?? 0,
+        suffix:
+          baseProduct.productType === "domain" && privateDomain
+            ? rawSuffix
+            : `@${emailSuffix}`,
+      },
+    ];
+  });
+  if (baseProduct.productType === "domain") {
+    products.sort((left, right) =>
+      compareDomainSuffixes(left.suffix, right.suffix),
+    );
+  }
+  return products;
+}
 
 const maxCreateOrderQuantity = 100;
 const orderPageLimit = 100;
@@ -197,22 +242,10 @@ function toWorkbenchProducts(
   const suffixProducts =
     product.type === "random"
       ? []
-      : (inventory?.suffixes ?? product.suffixes ?? [])
-          .map((suffix) => ({
-            ...suffix,
-            suffix: String(suffix.suffix ?? "").replace(/^@/, ""),
-          }))
-          .filter((suffix) => suffix.suffix)
-          .map((suffix) => ({
-            ...baseProduct,
-            codeInventory: suffix.totalAvailable ?? 0,
-            codePublicInventory: suffix.publicAvailable ?? 0,
-            emailSuffix: suffix.suffix,
-            id: `${product.id}:${suffix.suffix}`,
-            purchaseInventory: suffix.totalAvailable ?? 0,
-            purchasePublicInventory: suffix.publicAvailable ?? 0,
-            suffix: `@${suffix.suffix}`,
-          }));
+      : toWorkbenchSuffixProducts(
+          baseProduct,
+          inventory?.suffixes ?? product.suffixes,
+        );
   return [baseProduct, ...suffixProducts];
 }
 
@@ -249,22 +282,7 @@ function mergeProjectInventory(
       const suffixProducts =
         product.productType === "random"
           ? []
-          : (inventoryItem.suffixes ?? [])
-              .map((suffix) => ({
-                ...suffix,
-                suffix: String(suffix.suffix ?? "").replace(/^@/, ""),
-              }))
-              .filter((suffix) => suffix.suffix)
-              .map((suffix) => ({
-                ...baseProduct,
-                codeInventory: suffix.totalAvailable ?? 0,
-                codePublicInventory: suffix.publicAvailable ?? 0,
-                emailSuffix: suffix.suffix,
-                id: `${product.productId}:${suffix.suffix}`,
-                purchaseInventory: suffix.totalAvailable ?? 0,
-                purchasePublicInventory: suffix.publicAvailable ?? 0,
-                suffix: `@${suffix.suffix}`,
-              }));
+          : toWorkbenchSuffixProducts(baseProduct, inventoryItem.suffixes);
       return [baseProduct, ...suffixProducts];
     }),
   };
@@ -478,8 +496,9 @@ export default function Dashboard() {
         selectedProject?.products ?? [],
         productSearch,
         serviceMode,
+        inventoryScope,
       ),
-    [productSearch, selectedProject?.products, serviceMode],
+    [inventoryScope, productSearch, selectedProject?.products, serviceMode],
   );
 
   useEffect(() => {
@@ -511,24 +530,33 @@ export default function Dashboard() {
       return;
     }
     setSelectedProductId(
-      filterProducts(selectedProject.products, productSearch, serviceMode)[0]
+      filterProducts(
+        selectedProject.products,
+        productSearch,
+        serviceMode,
+        inventoryScope,
+      )[0]
         ?.id ?? "",
     );
-  }, [productSearch, selectedProject, selectedProductId, serviceMode]);
+  }, [
+    inventoryScope,
+    productSearch,
+    selectedProject,
+    selectedProductId,
+    serviceMode,
+  ]);
 
   useEffect(() => {
     if (filteredProducts.some((product) => product.id === selectedProductId)) {
       return;
     }
-    setSelectedProductId(
-      filteredProducts[0]?.id ?? selectedProject?.products[0]?.id ?? "",
-    );
-  }, [filteredProducts, selectedProductId, selectedProject?.products]);
+    setSelectedProductId(filteredProducts[0]?.id ?? "");
+  }, [filteredProducts, selectedProductId]);
 
   const selectedProduct =
-    productsById.get(selectedProductId) ??
+    filteredProducts.find((product) => product.id === selectedProductId) ??
     filteredProducts[0] ??
-    selectedProject?.products[0];
+    undefined;
   const selectedInventory = getProductInventory(
     selectedProduct,
     serviceMode,
@@ -691,7 +719,8 @@ export default function Dashboard() {
     setSelectedProjectId(projectId);
     setProductSearch("");
     setSelectedProductId(
-      filterProducts(project?.products ?? [], "", serviceMode)[0]?.id ?? "",
+      filterProducts(project?.products ?? [], "", serviceMode, inventoryScope)[0]
+        ?.id ?? "",
     );
   }
 

@@ -141,6 +141,7 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *d
 
 	cmd.OrderNo = strings.TrimSpace(cmd.OrderNo)
 	scopes := normalizedSupplyScopes(cmd)
+	domainSelection := strings.ToLower(strings.TrimSpace(cmd.EmailSuffix))
 	cmd.EmailSuffix = normalizeEmailSuffix(cmd.EmailSuffix)
 	if cmd.OrderNo == "" || cmd.BuyerUserID == 0 || cmd.ProjectProductID == 0 {
 		return nil, domain.ErrInvalidAllocationRequest
@@ -179,10 +180,17 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *d
 			metricType = string(config.ProductType)
 			if config.ProductType == coredomain.ProductTypeRandom {
 				cmd.EmailSuffix = ""
-			} else if config.ProductType == coredomain.ProductTypeDomain && cmd.EmailSuffix != "" {
-				cmd.EmailSuffix, err = coredomain.NormalizeDomainTLD(cmd.EmailSuffix)
+			} else if config.ProductType == coredomain.ProductTypeDomain && domainSelection != "" {
+				var privateMailbox bool
+				cmd.EmailSuffix, privateMailbox, err = normalizeDomainSelection(domainSelection)
 				if err != nil {
 					return domain.ErrInvalidAllocationRequest
+				}
+				if privateMailbox {
+					if !containsSupplyScope(scopes, domain.SupplyScopeOwned) {
+						return domain.ErrInvalidAllocationRequest
+					}
+					scopes = []domain.SupplyScope{domain.SupplyScopeOwned}
 				}
 			}
 			// Create the guard only after a candidate is locked. Rolling back an
@@ -332,6 +340,15 @@ func normalizedSupplyScopes(cmd AllocateCommand) []domain.SupplyScope {
 		scopes[i] = domain.NormalizeSupplyScope(scope)
 	}
 	return scopes
+}
+
+func containsSupplyScope(scopes []domain.SupplyScope, want domain.SupplyScope) bool {
+	for _, scope := range scopes {
+		if scope == want {
+			return true
+		}
+	}
+	return false
 }
 
 func (uc *UseCase) ImportHistoricalMicrosoftAllocation(ctx context.Context, cmd HistoricalMicrosoftAllocationCommand) (*domain.UnifiedAllocation, error) {
@@ -795,14 +812,48 @@ func (uc *UseCase) GetProductInventoryTotals(ctx context.Context, projectID uint
 	if err != nil {
 		return nil, err
 	}
+	privateDomains, err := uc.repo.ListPrivateDomainInventoryTotals(ctx, projectID, viewerUserID)
+	if err != nil {
+		return nil, err
+	}
 	userICloud, err := uc.repo.ListUserICloudInventoryTotals(ctx, projectID, viewerUserID)
 	if err != nil {
 		return nil, err
 	}
-	if len(userICloud) == 0 {
+	if len(privateDomains) == 0 && len(userICloud) == 0 {
 		return snapshot, nil
 	}
 	result := cloneProductInventoryTotals(snapshot)
+	for _, privateDomain := range privateDomains {
+		if privateDomain.Available <= 0 {
+			continue
+		}
+		itemIndex := -1
+		for i := range result.Items {
+			if result.Items[i].ProductID == privateDomain.ProductID {
+				itemIndex = i
+				break
+			}
+		}
+		if itemIndex < 0 {
+			result.Items = append(result.Items, ProductInventoryTotal{ProductID: privateDomain.ProductID})
+			itemIndex = len(result.Items) - 1
+		}
+		item := &result.Items[itemIndex]
+		item.Suffixes = append(item.Suffixes, ProductInventorySuffixTotal{
+			Suffix: privateDomain.Email, TotalAvailable: privateDomain.Available,
+		})
+		item.TotalAvailable += privateDomain.Available
+		if item.CodeAvailable != nil {
+			codeAvailable := *item.CodeAvailable + privateDomain.Available
+			item.CodeAvailable = &codeAvailable
+		}
+		if item.PurchaseAvailable != nil {
+			purchaseAvailable := *item.PurchaseAvailable + privateDomain.Available
+			item.PurchaseAvailable = &purchaseAvailable
+		}
+		result.TotalAvailable += privateDomain.Available
+	}
 	for _, inventory := range userICloud {
 		privateAvailable := inventory.OwnedAvailable - inventory.OwnedPublicAvailable
 		if privateAvailable <= 0 {
@@ -1815,12 +1866,19 @@ func (uc *UseCase) allocateDomain(ctx context.Context, cmd AllocateCommand, conf
 
 func (uc *UseCase) allocateDomainOnce(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig) (*domain.UnifiedAllocation, error) {
 	resourceBusy := false
-	if cmd.EmailSuffix == "" {
+	privateMailbox := isPrivateDomainMailboxSelection(cmd.EmailSuffix)
+	if cmd.EmailSuffix == "" || privateMailbox {
 		result, busy, err := uc.tryReusableDomainMailboxes(ctx, cmd, config)
 		if err != nil || result != nil {
 			return result, err
 		}
 		resourceBusy = busy
+		if privateMailbox {
+			if resourceBusy {
+				return nil, errResourceTypeBusy
+			}
+			return nil, domain.ErrInsufficientInventory
+		}
 	}
 	result, err := uc.generateDomainMailboxOnce(ctx, cmd, config)
 	if errors.Is(err, domain.ErrInsufficientInventory) && resourceBusy {
@@ -1831,6 +1889,11 @@ func (uc *UseCase) allocateDomainOnce(ctx context.Context, cmd AllocateCommand, 
 
 func (uc *UseCase) tryReusableDomainMailboxes(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig) (*domain.UnifiedAllocation, bool, error) {
 	now := time.Now().UTC()
+	if isPrivateDomainMailboxSelection(cmd.EmailSuffix) {
+		bucket := coredomain.GeneratedMailboxBucket(cmd.EmailSuffix)
+		result, busy, _, err := uc.tryGeneratedMailboxBucket(ctx, cmd, config, &bucket, now)
+		return result, busy, err
+	}
 	resourceBusy := false
 	buckets := bucketProbeSequence(cmd.OrderNo, config.ProjectID, "generated-domain", GeneratedMailboxBucketCount)
 	for _, bucket := range buckets {
@@ -2044,8 +2107,12 @@ func (uc *UseCase) createDomainAllocation(ctx context.Context, cmd AllocateComma
 		return nil, domain.ErrAllocationTxRequired
 	}
 	if cmd.EmailSuffix != "" {
-		_, suffix, valid := splitEmail(email)
-		if !valid || normalizeEmailSuffix(coredomain.TLD(suffix)) != normalizeEmailSuffix(cmd.EmailSuffix) {
+		matches := strings.EqualFold(strings.TrimSpace(email), cmd.EmailSuffix)
+		if !isPrivateDomainMailboxSelection(cmd.EmailSuffix) {
+			_, suffix, valid := splitEmail(email)
+			matches = valid && normalizeEmailSuffix(coredomain.TLD(suffix)) == normalizeEmailSuffix(cmd.EmailSuffix)
+		}
+		if !matches {
 			return nil, errCandidateUnavailable
 		}
 	}
@@ -2192,6 +2259,23 @@ func normalizeEmailSuffix(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	value = strings.TrimPrefix(value, "@")
 	return strings.TrimPrefix(value, ".")
+}
+
+func normalizeDomainSelection(value string) (string, bool, error) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if strings.Contains(value, "@") && !strings.HasPrefix(value, "@") {
+		email, err := coredomain.NormalizeDomainMailbox(value)
+		return email, true, err
+	}
+	suffix, err := coredomain.NormalizeDomainTLD(value)
+	if err != nil {
+		return "", false, err
+	}
+	return suffix, false, nil
+}
+
+func isPrivateDomainMailboxSelection(value string) bool {
+	return strings.Contains(value, "@") && !strings.HasPrefix(value, "@")
 }
 
 func plusAliasVariants(email string, projectID uint, orderNo string) []string {

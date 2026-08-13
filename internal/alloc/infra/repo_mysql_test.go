@@ -1007,6 +1007,56 @@ func TestProjectInventoryAccessIsCheckedLiveMySQL(t *testing.T) {
 	require.ErrorIs(t, repo.AssertProjectInventoryAccess(context.Background(), 10, 2), domain.ErrProjectNotAllocatable)
 }
 
+func TestUserProductInventoryIncludesOnlyAvailableOwnedPrivateMailboxesMySQL(t *testing.T) {
+	db := newAllocMySQLTestDB(t)
+	seedAllocBase(t, db, "domain", 0, 0, 0)
+	seedDomainResources(t, db, 1, 1000, 1)
+	seedDomainResourcesWithPurpose(t, db, 2, 2000, 3, "not_sale")
+	seedDomainResourcesWithPurpose(t, db, 3, 3000, 1, "not_sale")
+	require.NoError(t, db.Exec("UPDATE domain_resources SET mailbox_daily_limit = 1 WHERE id IN (2000, 2001)").Error)
+	require.NoError(t, db.Exec("UPDATE domain_resources SET mailbox_daily_limit = 5 WHERE id = 2002").Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO generated_mailboxes(id, resource_id, owner_user_id, email, status, alloc_bucket) VALUES
+    (92000, 2000, 2, 'quota@d2000.example.com', 'normal', MOD(CRC32('quota@d2000.example.com'), 2048)),
+    (92001, 2001, 2, 'available-a@d2001.example.com', 'normal', MOD(CRC32('available-a@d2001.example.com'), 2048)),
+    (92002, 2001, 2, 'over-limit@d2001.example.com', 'normal', MOD(CRC32('over-limit@d2001.example.com'), 2048)),
+    (92003, 2002, 2, 'used@d2002.example.com', 'normal', MOD(CRC32('used@d2002.example.com'), 2048)),
+    (92004, 2002, 2, 'disabled@d2002.example.com', 'disabled', MOD(CRC32('disabled@d2002.example.com'), 2048)),
+    (92005, 2002, 2, 'available-b@d2002.example.com', 'normal', MOD(CRC32('available-b@d2002.example.com'), 2048)),
+    (93000, 3000, 3, 'other-owner@d3000.example.com', 'normal', MOD(CRC32('other-owner@d3000.example.com'), 2048))`).Error)
+	require.NoError(t, db.Exec("INSERT INTO allocation_order_guards(order_no, type) VALUES ('ord-private-inventory-used', 'domain')").Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO domain_allocations(order_no, project_id, product_id, resource_id, supply_scope, mailbox_id, email)
+VALUES ('ord-private-inventory-used', 10, 20, 2002, 'owned', 92003, 'used@d2002.example.com')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO allocation_daily_usages(usage_date, resource_type, resource_id, usage_kind, used_count)
+VALUES (UTC_DATE(), 'domain', 2000, 'domain_mailbox', 1)`).Error)
+
+	uc := allocapp.NewUseCase(NewRepo(db))
+	totals, err := uc.GetProductInventoryTotals(context.Background(), 10, 2)
+	require.NoError(t, err)
+	require.Len(t, totals.Items, 1)
+	require.Equal(t, int64(10002), totals.TotalAvailable)
+	require.Equal(t, int64(10002), totals.Items[0].TotalAvailable)
+	require.Equal(t, int64(10000), totals.Items[0].PublicAvailable)
+	require.Equal(t, []allocapp.ProductInventorySuffixTotal{
+		{Suffix: "com", TotalAvailable: 10000, PublicAvailable: 10000},
+		{Suffix: "available-a@d2001.example.com", TotalAvailable: 1},
+		{Suffix: "available-b@d2002.example.com", TotalAvailable: 1},
+	}, totals.Items[0].Suffixes)
+	for _, unavailable := range []string{
+		"quota@d2000.example.com",
+		"over-limit@d2001.example.com",
+		"used@d2002.example.com",
+		"disabled@d2002.example.com",
+		"other-owner@d3000.example.com",
+	} {
+		for _, suffix := range totals.Items[0].Suffixes {
+			require.NotEqual(t, unavailable, suffix.Suffix)
+		}
+	}
+}
+
 func TestInventoryStatsExcludePrivateMicrosoftFromSharedPoolMySQL(t *testing.T) {
 	db := newAllocMySQLTestDB(t)
 	seedAllocBase(t, db, "microsoft", 1, 0, 0)
@@ -1621,7 +1671,7 @@ func TestDomainDailyLimitConsumesPerResourceCounterMySQL(t *testing.T) {
 		BuyerUserID:      2,
 		ProjectProductID: 20,
 		SupplyScope:      domain.SupplyScopePublic,
-		EmailSuffix:      "@com",
+		EmailSuffix:      "com",
 	})
 	require.NoError(t, err)
 	require.Equal(t, domain.AllocationTypeDomain, first.Type)
@@ -1640,6 +1690,51 @@ SELECT used_count
 FROM allocation_daily_usages
 WHERE resource_type = 'domain' AND resource_id = 2000 AND usage_kind = 'domain_mailbox'`).Scan(&used).Error)
 	require.Equal(t, 1, used)
+}
+
+func TestOwnedDomainSelectionUsesExactMailboxMySQL(t *testing.T) {
+	db := newAllocMySQLTestDB(t)
+	seedAllocBase(t, db, "domain", 0, 0, 0)
+	seedDomainResourcesWithPurpose(t, db, 2, 2000, 2, "not_sale")
+	require.NoError(t, db.Exec(`
+INSERT INTO generated_mailboxes(resource_id, owner_user_id, email, status, alloc_bucket) VALUES
+    (2001, 2, 'other@d2001.example.com', 'normal', MOD(CRC32('other@d2001.example.com'), 2048)),
+    (2001, 2, 'chosen@d2001.example.com', 'normal', MOD(CRC32('chosen@d2001.example.com'), 2048))`).Error)
+
+	uc := allocapp.NewUseCase(NewRepo(db))
+	allocation, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo: "ord-domain-exact", BuyerUserID: 2, ProjectProductID: 20,
+		SupplyScopes: []domain.SupplyScope{domain.SupplyScopeOwned, domain.SupplyScopePublic},
+		EmailSuffix:  "chosen@d2001.example.com",
+	})
+	require.NoError(t, err)
+	require.Equal(t, uint(2001), allocation.ResourceID)
+	require.Equal(t, "chosen@d2001.example.com", allocation.Email)
+
+	var mailboxCount int64
+	require.NoError(t, db.Table("generated_mailboxes").Where("resource_id = ?", 2001).Count(&mailboxCount).Error)
+	_, err = uc.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo: "ord-domain-missing", BuyerUserID: 2, ProjectProductID: 20,
+		SupplyScopes: []domain.SupplyScope{domain.SupplyScopeOwned, domain.SupplyScopePublic},
+		EmailSuffix:  "missing@d2001.example.com",
+	})
+	require.ErrorIs(t, err, domain.ErrInsufficientInventory)
+	var mailboxCountAfter int64
+	require.NoError(t, db.Table("generated_mailboxes").Where("resource_id = ?", 2001).Count(&mailboxCountAfter).Error)
+	require.Equal(t, mailboxCount, mailboxCountAfter)
+
+	_, err = uc.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo: "ord-domain-other-owner", BuyerUserID: 3, ProjectProductID: 20,
+		SupplyScopes: []domain.SupplyScope{domain.SupplyScopeOwned, domain.SupplyScopePublic},
+		EmailSuffix:  "other@d2001.example.com",
+	})
+	require.ErrorIs(t, err, domain.ErrInsufficientInventory)
+
+	_, err = uc.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo: "ord-domain-public-private", BuyerUserID: 2, ProjectProductID: 20,
+		SupplyScope: domain.SupplyScopePublic, EmailSuffix: "other@d2001.example.com",
+	})
+	require.ErrorIs(t, err, domain.ErrInvalidAllocationRequest)
 }
 
 func TestAllocationMigrationIndexesAndExplainMySQL(t *testing.T) {

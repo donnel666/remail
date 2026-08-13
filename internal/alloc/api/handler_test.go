@@ -134,13 +134,17 @@ func TestAllocationAdminRoutesAuthAndContract(t *testing.T) {
 		require.Equal(t, http.StatusForbidden, resp.Code)
 	})
 
-	t.Run("user inventory exposes only total", func(t *testing.T) {
+	t.Run("user inventory exposes selectable domains without resource ids", func(t *testing.T) {
 		router := newAllocationAPITestRouter(NewModule(db, nil, nil), fakeSessionFetcher{ok: true, role: iamdomain.RoleUser}, fakePermissionChecker{allowed: false})
 		resp := performAllocAPIRequest(router, http.MethodGet, "/v1/projects/10/inventory", true)
 		require.Equal(t, http.StatusOK, resp.Code)
 		require.Contains(t, resp.Body.String(), `"totalAvailable"`)
 		require.Contains(t, resp.Body.String(), `"products"`)
 		require.Contains(t, resp.Body.String(), `"productId"`)
+		require.Contains(t, resp.Body.String(), `"suffix":"com"`)
+		require.Contains(t, resp.Body.String(), `"suffix":"private-user@alloc-private.example.com"`)
+		require.NotContains(t, resp.Body.String(), `"resourceId"`)
+		require.NotContains(t, resp.Body.String(), `"domainResourceId"`)
 		require.NotContains(t, resp.Body.String(), `"microsoft"`)
 		require.NotContains(t, resp.Body.String(), `"domain"`)
 	})
@@ -265,7 +269,26 @@ func seedAllocationAPITestProject(t *testing.T, db *gorm.DB) {
 	    code_price, purchase_price, code_supplier_price, purchase_supplier_price,
 	    code_window_minutes, activation_window_minutes, warranty_minutes,
 	    main_weight, dot_weight, plus_weight
-	) VALUES (20, 10, 'microsoft', 'enabled', TRUE, FALSE, 1, 0, 0.5, 0, 10, 60, 60, 1, 0, 0)`).Error)
+	) VALUES
+	    (20, 10, 'microsoft', 'enabled', TRUE, FALSE, 1, 0, 0.5, 0, 10, 60, 60, 1, 0, 0),
+	    (21, 10, 'domain', 'enabled', TRUE, FALSE, 1, 0, 0.5, 0, 10, 60, 60, 0, 0, 0)`).Error)
+	require.NoError(t, db.Exec(`
+	INSERT INTO mail_servers(id, owner_user_id, name, server_address, mx_record, status)
+	VALUES (900, 1, 'default', 'mx.alloc.test', 'mx.alloc.test', 'online')`).Error)
+	require.NoError(t, db.Exec(`
+	INSERT INTO email_resources(id, type, owner_user_id) VALUES
+	    (1100, 'domain', 1),
+	    (1101, 'domain', 1)`).Error)
+	require.NoError(t, db.Exec(`
+	INSERT INTO domain_resources(
+	    id, resource_type, owner_user_id, domain, domain_tld,
+	    mail_server_id, purpose, status, mailbox_daily_limit, alloc_bucket
+	) VALUES
+	    (1100, 'domain', 1, 'alloc-public.example.com', '.com', 900, 'sale', 'normal', 2, MOD(1100, 512)),
+	    (1101, 'domain', 1, 'alloc-private.example.com', '.com', 900, 'not_sale', 'normal', 3, MOD(1101, 512))`).Error)
+	require.NoError(t, db.Exec(`
+	INSERT INTO generated_mailboxes(resource_id, owner_user_id, email, status, alloc_bucket)
+	VALUES (1101, 1, 'private-user@alloc-private.example.com', 'normal', MOD(CRC32('private-user@alloc-private.example.com'), 2048))`).Error)
 }
 
 func seedAdminAllocationReadComposition(t *testing.T, db *gorm.DB) {

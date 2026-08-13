@@ -6747,7 +6747,7 @@ type CreateOrderBatchItemResponseStatus string
 
 // CreateOrderBatchRequest defines model for CreateOrderBatchRequest.
 type CreateOrderBatchRequest struct {
-	// EmailSuffix Optional allocation suffix. Microsoft products accept an exact email domain (for example outlook.com); Domain products accept only a public suffix (for example com, com.cn, or co.uk), which aggregates all concrete domains under that suffix.
+	// EmailSuffix Optional allocation selection. Microsoft products accept an exact email domain (for example outlook.com). Domain products keep the existing public suffix format without a leading @ (for example com or com.cn), and also accept a current-user private full email (for example alice@mydomain.com); private full emails require private_first supply.
 	EmailSuffix *string `json:"emailSuffix,omitempty"`
 	ProductId   int     `json:"productId"`
 	ProjectId   int     `json:"projectId"`
@@ -6761,7 +6761,7 @@ type CreateOrderBatchResponse = []CreateOrderBatchItemResponse
 
 // CreateOrderRequest defines model for CreateOrderRequest.
 type CreateOrderRequest struct {
-	// EmailSuffix Optional allocation suffix. Microsoft products accept an exact email domain (for example outlook.com); Domain products accept only a public suffix (for example com, com.cn, or co.uk), which aggregates all concrete domains under that suffix.
+	// EmailSuffix Optional allocation selection. Microsoft products accept an exact email domain (for example outlook.com). Domain products keep the existing public suffix format without a leading @ (for example com or com.cn), and also accept a current-user private full email (for example alice@mydomain.com); private full emails require private_first supply.
 	EmailSuffix *string `json:"emailSuffix,omitempty"`
 	ProductId   int     `json:"productId"`
 	ProjectId   int     `json:"projectId"`
@@ -8036,7 +8036,7 @@ type PositiveIntegerPointAmount = string
 type ProductSuffixInventory struct {
 	PublicAvailable int64 `json:"publicAvailable"`
 
-	// Suffix Suffix without leading @. Microsoft products expose exact email domains; Domain products expose aggregated public suffixes such as com, com.cn, or co.uk; Random products do not expose suffix entries.
+	// Suffix Selectable inventory value. Microsoft products expose exact email domains. Domain products keep public suffixes without a leading @ (for example com) and also expose current-user private full emails (for example alice@mydomain.com). Random products do not expose suffix entries.
 	Suffix         string `json:"suffix"`
 	TotalAvailable int64  `json:"totalAvailable"`
 }

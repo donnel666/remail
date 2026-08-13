@@ -657,7 +657,11 @@ func TestCheckoutOwnedMicrosoftStockCreatesZeroDebitMySQL(t *testing.T) {
 func TestCheckoutOwnedDomainStockCreatesZeroDebitMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	seedTradeBase(t, db, "domain")
-	seedTradeDomainResources(t, db, 2, 2000, 1, "not_sale")
+	seedTradeDomainResources(t, db, 2, 2000, 2, "not_sale")
+	require.NoError(t, db.Exec(`
+INSERT INTO generated_mailboxes(resource_id, owner_user_id, email, status, alloc_bucket) VALUES
+    (2001, 2, 'other@trade2001.example.com', 'normal', MOD(CRC32('other@trade2001.example.com'), 2048)),
+    (2001, 2, 'chosen@trade2001.example.com', 'normal', MOD(CRC32('chosen@trade2001.example.com'), 2048))`).Error)
 	creditBuyer(t, db, 2, "2.00")
 
 	uc := newTradeUseCase(db)
@@ -667,6 +671,7 @@ func TestCheckoutOwnedDomainStockCreatesZeroDebitMySQL(t *testing.T) {
 		ProductID:      20,
 		ServiceMode:    "purchase",
 		SupplyPolicy:   "private_first",
+		EmailSuffix:    "chosen@trade2001.example.com",
 		ClientChannel:  tradedomain.ClientChannelConsole,
 		IdempotencyKey: "order-idem-owned-domain",
 		RequestID:      "req-owned-domain",
@@ -676,7 +681,7 @@ func TestCheckoutOwnedDomainStockCreatesZeroDebitMySQL(t *testing.T) {
 	require.Equal(t, "0.00", result.Order.PayAmount)
 	require.NotNil(t, result.Order.DebitTxID)
 	require.NotZero(t, result.AllocationID)
-	require.Contains(t, result.Order.DeliveryEmail, "@trade2000.example.com")
+	require.Equal(t, "chosen@trade2001.example.com", result.Order.DeliveryEmail)
 
 	var tx struct {
 		Amount        string

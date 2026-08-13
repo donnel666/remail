@@ -92,6 +92,24 @@ export function productTypeLabel(type: ProductType, t: (key: string) => string) 
   return t("Random email");
 }
 
+export function compareDomainSuffixes(left: string, right: string) {
+  const leftPublic = left.startsWith("@");
+  const rightPublic = right.startsWith("@");
+  if (leftPublic !== rightPublic) return leftPublic ? 1 : -1;
+  return left.localeCompare(right);
+}
+
+export function isPrivateDomainSelection(
+  productType: ProductType,
+  emailSuffix: string,
+) {
+  return (
+    productType === "domain" &&
+    emailSuffix.includes("@") &&
+    !emailSuffix.startsWith("@")
+  );
+}
+
 export function compareProjectNames(left: string, right: string) {
   const leftIsChinese = /\p{Script=Han}/u.test(left);
   const rightIsChinese = /\p{Script=Han}/u.test(right);

@@ -686,14 +686,15 @@ func TestCheckoutRejectsZeroInventoryBeforeOpeningTransaction(t *testing.T) {
 	require.Zero(t, wallet.locks)
 }
 
-func TestCheckoutRejectsConcreteDomainBeforeInventoryPrecheck(t *testing.T) {
+func TestCheckoutRejectsPrivateMailboxForPublicOnlyBeforeInventoryPrecheck(t *testing.T) {
 	repo := &batchRepoSpy{orders: map[string]domain.Order{}}
 	wallet := &batchWalletSpy{}
 	inventory := &checkoutInventorySpy{available: true}
 	ordering := &batchOrderingSpy{productType: domain.ProductTypeDomain}
 	uc := NewUseCase(repo, ordering, wallet, inventory, batchTokenSpy{})
 	request := batchRequest("concrete-domain", 1)
-	request.EmailSuffix = "example.com"
+	request.EmailSuffix = "alice@example.com"
+	request.SupplyPolicy = string(domain.SupplyPolicyPublicOnly)
 
 	result, err := uc.Checkout(context.Background(), request)
 
@@ -703,6 +704,44 @@ func TestCheckoutRejectsConcreteDomainBeforeInventoryPrecheck(t *testing.T) {
 	require.Zero(t, inventory.checks)
 	require.Zero(t, wallet.balanceChecks)
 	require.Zero(t, repo.topTx)
+}
+
+func TestDomainCheckoutFingerprintDistinguishesPublicSuffixAndPrivateMailbox(t *testing.T) {
+	request := batchRequest("domain-selection", 1)
+	request.SupplyPolicy = string(domain.SupplyPolicyPrivateFirst)
+	request.EmailSuffix = "com"
+	publicSelection, err := prepareCheckoutRequest(request)
+	require.NoError(t, err)
+	require.NoError(t, finalizeCheckoutProduct(&publicSelection, domain.ProductTypeDomain))
+
+	request.EmailSuffix = "alice@example.com"
+	privateSelection, err := prepareCheckoutRequest(request)
+	require.NoError(t, err)
+	require.NoError(t, finalizeCheckoutProduct(&privateSelection, domain.ProductTypeDomain))
+
+	require.Equal(t, "com", publicSelection.emailSuffix)
+	require.Equal(t, "alice@example.com", privateSelection.emailSuffix)
+	require.NotEqual(t, publicSelection.fingerprint, privateSelection.fingerprint)
+}
+
+func TestDomainCheckoutKeepsLegacyPublicSuffixFormat(t *testing.T) {
+	request := batchRequest("legacy-domain-suffix", 1)
+	request.EmailSuffix = "com"
+
+	prepared, err := prepareCheckoutRequest(request)
+	require.NoError(t, err)
+	require.NoError(t, finalizeCheckoutProduct(&prepared, domain.ProductTypeDomain))
+
+	require.Equal(t, "com", prepared.emailSuffix)
+}
+
+func TestDomainCheckoutRejectsMalformedPrivateMailboxSelection(t *testing.T) {
+	request := batchRequest("malformed-domain-selection", 1)
+	request.EmailSuffix = "@alice@example.com"
+
+	prepared, err := prepareCheckoutRequest(request)
+	require.NoError(t, err)
+	require.ErrorIs(t, finalizeCheckoutProduct(&prepared, domain.ProductTypeDomain), domain.ErrInvalidOrderRequest)
 }
 
 func TestCheckoutIgnoresRandomEmailSuffixBeforeInventoryPrecheck(t *testing.T) {

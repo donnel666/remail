@@ -186,7 +186,7 @@ P1-I5 分配直接使用 SourceCandidate 查询 Core 源表，并在同一短事
 
 Microsoft 候选查询和行锁重校验必须读取既有 `microsoft_allocations` 历史：同一具体 `main/explicitAliasId/dotAliasId/plusAliasId` 已经分配给目标项目时不得再次选择，但同一主资源下未用于该项目的其他别名仍可分配。验证后的历史扫描把识别结果交给 BC-TRADE；已有 Allocation 的具体关系直接复用且不创建假订单，只有缺失关系才通过 BC-ALLOC 既有 alias、order guard 和 allocation repository 创建超级管理员 0 积分已过保订单对应的 `released` Allocation，BC-MAILMATCH 不直写本表。旧 `microsoft_resource_project_matches` 仅作为尚未重扫数据的保守兼容挡板，资源完成重扫后删除对应旧行。
 
-P1-I5 项目库存按项目商品启用的分配形态计算。管理员库存诊断可以看到来源明细；普通用户和下单页只看到项目商品库存、可选 Microsoft 精确后缀或 Domain 公共后缀库存（如 `com`、`com.cn`、`co.uk`），不返回具体供应商、资源 ID、别名或生成邮箱等来源 breakdown。兼容字段 `totalAvailable` 与 `publicAvailable` 都表示同一份项目公共库存；买家自有资源不进入该读模型。库存分两类：
+P1-I5 项目库存按项目商品启用的分配形态计算。管理员库存诊断可以看到来源明细；普通用户和下单页只看到项目商品库存、可选 Microsoft 精确后缀、Domain 公共后缀（保持原有的 `com`、`com.cn` 格式）以及当前用户私有完整邮箱（如 `alice@mydomain.com`），不返回具体供应商、资源 ID 或别名等来源 breakdown。私有完整邮箱只合并到当前用户响应，不进入共享库存缓存。库存分两类：
 
 | 类型 | 库存口径 |
 |------|----------|
@@ -236,7 +236,7 @@ MySQL 没有 partial unique index，P1-I5 使用 generated column 表达 active 
 |------|------|
 | 按订单查询 | 先查 `OrderGuard` 决定本地邮箱类型，再查对应 allocation 表。 |
 | 按收件人查询 | `email + status` 必须有索引，供 MailMatch 先按 recipient 定位 active 分配，禁止全项目扫描。主邮箱分配也必须冗余写入交付邮箱，提升匹配性能。 |
-| 用户商品库存 | `GET /v1/projects/{projectId}/inventory` 返回项目总库存、每个商品的 `totalAvailable/publicAvailable` 以及可选 Microsoft 精确后缀或 Domain 公共后缀库存；不返回供应商、资源 ID、别名或生成邮箱等来源 breakdown。 |
+| 用户商品库存 | `GET /v1/projects/{projectId}/inventory` 返回项目总库存、每个商品的 `totalAvailable/publicAvailable` 以及可选 Microsoft 精确后缀、Domain 公共后缀和当前用户私有完整邮箱；不返回供应商、资源 ID 或别名等来源 breakdown。 |
 | 库存诊断 | `GET /v1/admin/projects/{projectId}/inventory` 返回项目商品、四类本地邮箱可分配统计和 active 分配统计。 |
 | 资源使用详情 | `AdminAllocationQueryPort` 按 `resourceId` 分页返回资源维度订单/分配读模型；通过批量 Port 丰富，不得为每条 allocation 单独查询订单、项目、买家或邮件。 |
 
@@ -297,7 +297,7 @@ MySQL 没有 partial unique index，P1-I5 使用 generated column 表达 active 
 | `GET` | `/v1/admin/allocations/{allocationId}` | 分配详情，必须带 `type` 查询参数防止猜表。 |
 | `GET` | `/v1/admin/orders/{orderNo}/allocations` | 按订单查看分配。 |
 | `GET` | `/v1/admin/allocations?type=microsoft&resourceId={resourceId}` | 复用 Alloc 管理列表提供资源维度订单 Tab；基础设施只对当前页 orderNo 做有界只读丰富，不新增重复 nested API。 |
-| `GET` | `/v1/projects/{projectId}/inventory` | 普通用户/下单页读取项目商品库存、可选 Microsoft 精确后缀或 Domain 公共后缀库存；不返回来源 breakdown。 |
+| `GET` | `/v1/projects/{projectId}/inventory` | 普通用户/下单页读取项目商品库存、可选 Microsoft 精确后缀、Domain 公共后缀和当前用户私有完整邮箱；不返回来源 breakdown。 |
 | `GET` | `/v1/admin/projects/{projectId}/inventory` | 项目库存和可用性诊断。 |
 
 写接口成功返回 `200/202/204`，失败返回统一最小错误 JSON。

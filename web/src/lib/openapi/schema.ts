@@ -4785,13 +4785,13 @@ export interface components {
         CreateOrderRequest: {
             projectId: number;
             productId: number;
-            /** @description Optional allocation suffix. Microsoft products accept an exact email domain (for example outlook.com); Domain products accept only a public suffix (for example com, com.cn, or co.uk), which aggregates all concrete domains under that suffix. */
+            /** @description Optional allocation selection. Microsoft products accept an exact email domain (for example outlook.com). Domain products keep the existing public suffix format without a leading @ (for example com or com.cn), and also accept a current-user private full email (for example alice@mydomain.com); private full emails require private_first supply. */
             emailSuffix?: string;
         };
         CreateOrderBatchRequest: {
             projectId: number;
             productId: number;
-            /** @description Optional allocation suffix. Microsoft products accept an exact email domain (for example outlook.com); Domain products accept only a public suffix (for example com, com.cn, or co.uk), which aggregates all concrete domains under that suffix. */
+            /** @description Optional allocation selection. Microsoft products accept an exact email domain (for example outlook.com). Domain products keep the existing public suffix format without a leading @ (for example com or com.cn), and also accept a current-user private full email (for example alice@mydomain.com); private full emails require private_first supply. */
             emailSuffix?: string;
             /** @description Number of independent orders to create. */
             quantity: number;
@@ -6471,7 +6471,7 @@ export interface components {
             suffixes?: components["schemas"]["ProductSuffixInventory"][];
         };
         ProductSuffixInventory: {
-            /** @description Suffix without leading @. Microsoft products expose exact email domains; Domain products expose aggregated public suffixes such as com, com.cn, or co.uk; Random products do not expose suffix entries. */
+            /** @description Selectable inventory value. Microsoft products expose exact email domains. Domain products keep public suffixes without a leading @ (for example com) and also expose current-user private full emails (for example alice@mydomain.com). Random products do not expose suffix entries. */
             suffix: string;
             /** Format: int64 */
             totalAvailable: number;

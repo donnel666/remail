@@ -444,6 +444,18 @@ func TestNormalizeDomainNameRejectsInvalid(t *testing.T) {
 	}
 }
 
+func TestNormalizeDomainMailbox(t *testing.T) {
+	got, err := NormalizeDomainMailbox(" Alice@Private.Example.COM. ")
+	if err != nil || got != "alice@private.example.com" {
+		t.Fatalf("NormalizeDomainMailbox() = %q, %v; want alice@private.example.com, nil", got, err)
+	}
+	for _, input := range []string{"example.com", "@example.com", "a@@example.com", "a@localhost"} {
+		if got, err := NormalizeDomainMailbox(input); !errors.Is(err, ErrInvalidDomain) {
+			t.Fatalf("NormalizeDomainMailbox(%q) = %q, %v; want ErrInvalidDomain", input, got, err)
+		}
+	}
+}
+
 func TestTLD(t *testing.T) {
 	tests := []struct {
 		domain string

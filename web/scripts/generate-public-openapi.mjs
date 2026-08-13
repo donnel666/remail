@@ -202,7 +202,7 @@ const schemas = {
       suffix: {
         type: "string",
         example: "com.cn",
-        description: "Microsoft products expose exact email domains; Domain products expose aggregated public suffixes such as com, com.cn, or co.uk.",
+        description: "Microsoft products expose exact email domains. Domain products keep public suffixes without a leading @ and also expose current-user private full emails.",
       },
       totalAvailable: { type: "integer", example: 120 },
       publicAvailable: { type: "integer", example: 80 },
@@ -251,7 +251,7 @@ const schemas = {
       emailSuffix: {
         type: "string",
         example: "com.cn",
-        description: "Microsoft products accept an exact email domain; Domain products accept only a public suffix such as com, com.cn, or co.uk.",
+        description: "Microsoft products accept an exact email domain. Domain products keep the existing public suffix format without a leading @ and also accept a current-user private full email; private full emails require private_first supply.",
       },
     },
     required: ["projectId", "productId"],
@@ -264,7 +264,7 @@ const schemas = {
       emailSuffix: {
         type: "string",
         example: "com.cn",
-        description: "Microsoft products accept an exact email domain; Domain products accept only a public suffix such as com, com.cn, or co.uk.",
+        description: "Microsoft products accept an exact email domain. Domain products keep the existing public suffix format without a leading @ and also accept a current-user private full email; private full emails require private_first supply.",
       },
       quantity: { type: "integer", minimum: 2, maximum: 100, example: 5 },
     },

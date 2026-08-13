@@ -600,6 +600,21 @@ func NormalizeDomainName(value string) (string, error) {
 	return canonical, nil
 }
 
+// NormalizeDomainMailbox canonicalizes a selectable mailbox under a domain resource.
+func NormalizeDomainMailbox(value string) (string, error) {
+	canonical := strings.ToLower(strings.TrimSpace(value))
+	local, host, found := strings.Cut(canonical, "@")
+	if !found || local == "" || len(canonical) > 255 || strings.Contains(host, "@") ||
+		strings.IndexFunc(local, unicode.IsSpace) >= 0 {
+		return "", ErrInvalidDomain
+	}
+	normalizedHost, err := NormalizeDomainName(host)
+	if err != nil {
+		return "", err
+	}
+	return local + "@" + normalizedHost, nil
+}
+
 // NormalizeDomainSuffix returns a canonical suffix with a leading dot.
 func NormalizeDomainSuffix(value string) (string, error) {
 	suffix := normalizeDomainInput(strings.TrimPrefix(strings.TrimSpace(value), "."))

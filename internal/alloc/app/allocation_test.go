@@ -873,15 +873,16 @@ func TestDomainAllocationRejectsWrongDeliveryTLDBeforeUsage(t *testing.T) {
 	}
 }
 
-func TestDomainProductRejectsConcreteDomainSuffix(t *testing.T) {
+func TestDomainProductRejectsPrivateMailboxWithoutOwnedScope(t *testing.T) {
 	repo := &allocationLockRepo{config: ProductAllocationConfig{
 		ProjectID: 4, ProductID: 5, ProductType: coredomain.ProductTypeDomain,
 	}}
 	result, err := NewUseCase(repo).Allocate(context.Background(), AllocateCommand{
-		OrderNo: "order-1", BuyerUserID: 3, ProjectProductID: 5, EmailSuffix: "example.com",
+		OrderNo: "order-1", BuyerUserID: 3, ProjectProductID: 5,
+		SupplyScope: domain.SupplyScopePublic, EmailSuffix: "alice@example.com",
 	})
 	if !errors.Is(err, domain.ErrInvalidAllocationRequest) || result != nil {
-		t.Fatalf("Allocate() result = %#v, error = %v; want invalid concrete domain suffix", result, err)
+		t.Fatalf("Allocate() result = %#v, error = %v; want invalid private mailbox", result, err)
 	}
 }
 

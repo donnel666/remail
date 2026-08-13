@@ -885,7 +885,7 @@ func prepareCheckoutRequest(req CheckoutRequest) (checkoutPreparation, error) {
 		mode:           mode,
 		policy:         policy,
 		idempotencyKey: idempotencyKey,
-		emailSuffix:    normalizeEmailSuffix(req.EmailSuffix),
+		emailSuffix:    normalizeCheckoutEmailSelection(req.EmailSuffix),
 		requestID:      strings.TrimSpace(req.RequestID),
 	}
 	prepared.fingerprint = checkoutPreparationFingerprint(prepared, prepared.emailSuffix)
@@ -897,11 +897,19 @@ func finalizeCheckoutProduct(prepared *checkoutPreparation, productType domain.P
 	case domain.ProductTypeMicrosoft:
 	case domain.ProductTypeDomain:
 		if prepared.emailSuffix != "" {
-			normalized, err := coredomain.NormalizeDomainTLD(prepared.emailSuffix)
-			if err != nil {
-				return domain.ErrInvalidOrderRequest
+			if strings.Contains(prepared.emailSuffix, "@") {
+				normalized, err := coredomain.NormalizeDomainMailbox(prepared.emailSuffix)
+				if err != nil || prepared.policy == domain.SupplyPolicyPublicOnly {
+					return domain.ErrInvalidOrderRequest
+				}
+				prepared.emailSuffix = normalized
+			} else {
+				normalized, err := coredomain.NormalizeDomainTLD(prepared.emailSuffix)
+				if err != nil {
+					return domain.ErrInvalidOrderRequest
+				}
+				prepared.emailSuffix = normalized
 			}
-			prepared.emailSuffix = normalized
 		}
 	case domain.ProductTypeRandom, domain.ProductTypeGmail, domain.ProductTypeICloud:
 		prepared.emailSuffix = ""
@@ -3824,6 +3832,20 @@ func normalizeEmailSuffix(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	value = strings.TrimPrefix(value, "@")
 	return strings.TrimPrefix(value, ".")
+}
+
+func normalizeCheckoutEmailSelection(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if strings.Contains(value, "@") && !strings.HasPrefix(value, "@") {
+		if normalized, err := coredomain.NormalizeDomainMailbox(value); err == nil {
+			return normalized
+		}
+		return value
+	}
+	if strings.Count(value, "@") > 1 {
+		return value
+	}
+	return normalizeEmailSuffix(value)
 }
 
 func orderAllowsServiceToken(status domain.OrderStatus) bool {

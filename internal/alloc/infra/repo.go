@@ -780,9 +780,9 @@ func (r *Repo) ListDomainSourceCandidates(ctx context.Context, buyerUserID uint,
 	default:
 		where = append(where, "dr.purpose = 'sale'", "u.status = 'active'", "u.role IN ('supplier', 'admin', 'super_admin')")
 	}
-	if suffix := normalizeCandidateSuffix(emailSuffix); suffix != "" {
-		where = append(where, "dr.domain_tld = ?")
-		args = append(args, "."+suffix)
+	if condition, conditionArgs := domainResourceSelectionCondition(emailSuffix); condition != "" {
+		where = append(where, condition)
+		args = append(args, conditionArgs...)
 	}
 	if bucket != nil {
 		where = append(where, "dr.alloc_bucket = ?")
@@ -825,9 +825,9 @@ func (r *Repo) ListGeneratedMailboxCandidates(ctx context.Context, projectID uin
 	default:
 		where = append(where, "dr.purpose = 'sale'", "u.status = 'active'", "u.role IN ('supplier', 'admin', 'super_admin')")
 	}
-	if suffix := normalizeCandidateSuffix(emailSuffix); suffix != "" {
-		where = append(where, "dr.domain_tld = ?")
-		args = append(args, "."+suffix)
+	if condition, conditionArgs := generatedMailboxSelectionCondition(emailSuffix); condition != "" {
+		where = append(where, condition)
+		args = append(args, conditionArgs...)
 	}
 	if bucket != nil {
 		where = append(where, "gm.alloc_bucket = ?")
@@ -1060,9 +1060,9 @@ func (r *Repo) LockDomainCandidate(ctx context.Context, resourceID uint, buyerUs
 	  )`,
 		)
 	}
-	if suffix := normalizeCandidateSuffix(emailSuffix); suffix != "" {
-		where = append(where, "dr.domain_tld = ?")
-		args = append(args, "."+suffix)
+	if condition, conditionArgs := domainResourceSelectionCondition(emailSuffix); condition != "" {
+		where = append(where, condition)
+		args = append(args, conditionArgs...)
 	}
 	var row allocapp.DomainCandidate
 	query := `
@@ -2579,6 +2579,51 @@ func (r *Repo) domainProductInventorySuffixTotals(ctx context.Context) ([]alloca
 	return mergeSuffixInventory(total, total), nil
 }
 
+func (r *Repo) ListPrivateDomainInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint) ([]allocapp.PrivateDomainInventoryTotal, error) {
+	var rows []allocapp.PrivateDomainInventoryTotal
+	if err := r.dbFor(ctx).Raw(`
+WITH ranked_private_mailboxes AS (
+SELECT
+    pp.id AS product_id,
+    gm.email AS email,
+    ROW_NUMBER() OVER (
+      PARTITION BY pp.id, dr.id
+      ORDER BY gm.last_allocated_at ASC, gm.id ASC
+    ) AS mailbox_rank,
+    GREATEST(dr.mailbox_daily_limit - COALESCE(adu.used_count, 0), 0) AS remaining
+FROM project_products pp
+JOIN domain_resources dr ON dr.owner_user_id = ?
+JOIN email_resources er ON er.id = dr.id AND er.type = 'domain'
+JOIN mail_servers ms ON ms.id = dr.mail_server_id
+JOIN generated_mailboxes gm ON gm.resource_id = dr.id
+LEFT JOIN allocation_daily_usages adu
+  ON adu.usage_date = ?
+ AND adu.resource_type = 'domain'
+ AND adu.resource_id = dr.id
+ AND adu.usage_kind = 'domain_mailbox'
+WHERE pp.project_id = ?
+  AND pp.type = 'domain'
+  AND pp.status = 'enabled'
+  AND dr.purpose = 'not_sale'
+  AND dr.status = 'normal'
+  AND ms.status = 'online'
+  AND gm.status = 'normal'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM domain_allocations da
+      WHERE da.project_id = pp.project_id
+        AND da.email = gm.email
+  )
+)
+SELECT product_id, email, 1 AS available
+FROM ranked_private_mailboxes
+WHERE mailbox_rank <= remaining
+ORDER BY product_id ASC, email ASC`, buyerUserID, time.Now().UTC().Format("2006-01-02"), projectID).Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list private domain inventory totals: %w", err)
+	}
+	return rows, nil
+}
+
 func (r *Repo) ListUserICloudInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint) ([]allocapp.UserICloudInventoryTotal, error) {
 	var rows []allocapp.UserICloudInventoryTotal
 	if err := r.dbFor(ctx).Raw(`
@@ -2965,6 +3010,26 @@ func normalizeCandidateSuffix(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	value = strings.TrimPrefix(value, "@")
 	return strings.TrimPrefix(value, ".")
+}
+
+func domainResourceSelectionCondition(value string) (string, []any) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return "", nil
+	}
+	if strings.HasPrefix(value, "@") || !strings.Contains(value, "@") {
+		return "dr.domain_tld = ?", []any{"." + normalizeCandidateSuffix(value)}
+	}
+	_, host, _ := strings.Cut(value, "@")
+	return "dr.domain = ?", []any{host}
+}
+
+func generatedMailboxSelectionCondition(value string) (string, []any) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if strings.Contains(value, "@") && !strings.HasPrefix(value, "@") {
+		return "gm.email = ?", []any{value}
+	}
+	return domainResourceSelectionCondition(value)
 }
 
 func nonNegative(value int64) int64 {

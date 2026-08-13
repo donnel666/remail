@@ -74,6 +74,10 @@ func (r *inventoryCacheRepoStub) GetProductInventoryTotals(context.Context, uint
 	return &result, nil
 }
 
+func (r *inventoryCacheRepoStub) ListPrivateDomainInventoryTotals(context.Context, uint, uint) ([]allocapp.PrivateDomainInventoryTotal, error) {
+	return nil, nil
+}
+
 func (r *inventoryCacheRepoStub) ListUserICloudInventoryTotals(context.Context, uint, uint) ([]allocapp.UserICloudInventoryTotal, error) {
 	return r.userICloud, nil
 }

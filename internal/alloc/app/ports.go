@@ -204,6 +204,12 @@ type ProductInventorySuffixTotal struct {
 	PublicAvailable int64
 }
 
+type PrivateDomainInventoryTotal struct {
+	ProductID uint
+	Email     string
+	Available int64
+}
+
 type UserICloudInventoryTotal struct {
 	ProductID            uint
 	OwnedAvailable       int64
@@ -470,5 +476,6 @@ type Repository interface {
 	ListInventoryProjectIDs(ctx context.Context) ([]uint, error)
 	GetInventoryStats(ctx context.Context, projectID uint) (*InventoryStats, error)
 	GetProductInventoryTotals(ctx context.Context, projectID uint) (*ProjectProductInventoryTotals, error)
+	ListPrivateDomainInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint) ([]PrivateDomainInventoryTotal, error)
 	ListUserICloudInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint) ([]UserICloudInventoryTotal, error)
 }
