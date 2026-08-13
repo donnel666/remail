@@ -4395,25 +4395,25 @@ func (e GetRechargesParamsScope) Valid() bool {
 
 // Defines values for GetRechargesParamsStatus.
 const (
-	GetRechargesParamsStatusCallback   GetRechargesParamsStatus = "callback"
-	GetRechargesParamsStatusCredited   GetRechargesParamsStatus = "credited"
-	GetRechargesParamsStatusFailed     GetRechargesParamsStatus = "failed"
-	GetRechargesParamsStatusPaying     GetRechargesParamsStatus = "paying"
-	GetRechargesParamsStatusReconciled GetRechargesParamsStatus = "reconciled"
+	Callback   GetRechargesParamsStatus = "callback"
+	Credited   GetRechargesParamsStatus = "credited"
+	Failed     GetRechargesParamsStatus = "failed"
+	Paying     GetRechargesParamsStatus = "paying"
+	Reconciled GetRechargesParamsStatus = "reconciled"
 )
 
 // Valid indicates whether the value is a known member of the GetRechargesParamsStatus enum.
 func (e GetRechargesParamsStatus) Valid() bool {
 	switch e {
-	case GetRechargesParamsStatusCallback:
+	case Callback:
 		return true
-	case GetRechargesParamsStatusCredited:
+	case Credited:
 		return true
-	case GetRechargesParamsStatusFailed:
+	case Failed:
 		return true
-	case GetRechargesParamsStatusPaying:
+	case Paying:
 		return true
-	case GetRechargesParamsStatusReconciled:
+	case Reconciled:
 		return true
 	default:
 		return false
