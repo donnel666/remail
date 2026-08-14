@@ -12,6 +12,7 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/glebarez/sqlite"
 	"github.com/hibiken/asynq"
 	"gorm.io/gorm"
@@ -206,7 +207,7 @@ func TestICloudProvisionFallsBackFromRateLimitedNewChannelToLegacyReconcile(t *t
 	if err != nil {
 		t.Fatalf("open database: %v", err)
 	}
-	if err := db.AutoMigrate(&iCloudResourceModel{}, &iCloudResourceChannelModel{}, &iCloudAliasModel{}, &iCloudAliasRouteModel{}); err != nil {
+	if err := db.AutoMigrate(&iCloudResourceModel{}, &iCloudResourceChannelModel{}, &iCloudAliasModel{}, &iCloudAliasRouteModel{}, &iCloudMaintenanceRunModel{}); err != nil {
 		t.Fatalf("migrate database: %v", err)
 	}
 	now := time.Date(2026, 8, 14, 10, 0, 0, 0, time.UTC)
@@ -261,7 +262,7 @@ func TestICloudProvisionFallsBackFromRateLimitedNewChannelToLegacyReconcile(t *t
 		t.Fatalf("read first-round resource: %v", err)
 	}
 	if resource.Status != iCloudResourceNormal || resource.AliasProvisionCandidate != "candidate@icloud.com" ||
-		resource.NextProvisionAt == nil {
+		resource.SelectedForwardTo != "mailbox@relay.example" || resource.NextProvisionAt == nil {
 		t.Fatalf("new-channel limit blocked legacy generate: %#v", resource)
 	}
 	var newChannel iCloudResourceChannelModel
@@ -283,6 +284,9 @@ func TestICloudProvisionFallsBackFromRateLimitedNewChannelToLegacyReconcile(t *t
 	if resource.Status != iCloudResourceNormal || resource.AliasCount != 1 || resource.AliasProvisionCandidate != "" {
 		t.Fatalf("legacy reserve did not complete: %#v", resource)
 	}
+	if resource.SelectedForwardTo != "mailbox@relay.example" {
+		t.Fatalf("created alias did not refresh forwarding mailbox: %#v", resource)
+	}
 	var alias iCloudAliasModel
 	if err := db.Where("resource_id = ?", 1).First(&alias).Error; err != nil {
 		t.Fatalf("read created alias: %v", err)
@@ -290,6 +294,14 @@ func TestICloudProvisionFallsBackFromRateLimitedNewChannelToLegacyReconcile(t *t
 	if alias.Email != "candidate@icloud.com" || alias.AnonymousID != "candidate-id" ||
 		alias.ForwardToEmail != "mailbox@relay.example" || alias.RecipientMailID != "recipient-id" || alias.Status != iCloudResourceNormal {
 		t.Fatalf("unexpected created alias: %#v", alias)
+	}
+	var runs []iCloudMaintenanceRunModel
+	if err := db.Where("resource_id = ? AND kind = ?", 1, iCloudMaintenanceAlias).Order("id ASC").Find(&runs).Error; err != nil {
+		t.Fatalf("read provision task history: %v", err)
+	}
+	if len(runs) != 2 || runs[0].Status != iCloudMaintenanceSucceeded || runs[1].Status != iCloudMaintenanceSucceeded ||
+		runs[0].ValidationGeneration != 1 || runs[1].ValidationGeneration != 2 {
+		t.Fatalf("unexpected provision task history: %#v", runs)
 	}
 	wantPaths := []string{"/v2/hme/list", "/v1/hme/generate", "/v2/hme/list", "/v1/hme/reserve"}
 	if strings.Join(legacyPaths, ",") != strings.Join(wantPaths, ",") {
@@ -308,6 +320,116 @@ func TestICloudRetryAfterPreservesProviderDelay(t *testing.T) {
 	retryAt := now.Add(5 * time.Hour)
 	if got := iCloudRetryAfter(retryAt.Format(http.TimeFormat), now); got != 5*time.Hour {
 		t.Fatalf("date Retry-After = %v, want 5h", got)
+	}
+}
+
+func TestICloudCookieKeepaliveUsesRuntimeSettingForBothChannels(t *testing.T) {
+	previous, existed := runtimeconfig.Snapshot()[runtimeconfig.ICloudCookieKeepaliveMinutesKey]
+	runtimeconfig.Set(runtimeconfig.ICloudCookieKeepaliveMinutesKey, "7")
+	t.Cleanup(func() {
+		if existed {
+			runtimeconfig.Set(runtimeconfig.ICloudCookieKeepaliveMinutesKey, previous)
+		} else {
+			runtimeconfig.Delete(runtimeconfig.ICloudCookieKeepaliveMinutesKey)
+		}
+	})
+
+	now := time.Date(2026, 8, 14, 10, 35, 0, 0, time.UTC)
+	expiresAt := now.Add(15 * time.Minute)
+	if got := iCloudCookieKeepaliveInterval(); got != 7*time.Minute {
+		t.Fatalf("keepalive interval = %v, want 7m", got)
+	}
+	if got := appleAccountNextKeepalive(iCloudResourceChannelModel{ManageExpiresAt: &expiresAt}, now); got == nil || !got.Equal(now.Add(7*time.Minute)) {
+		t.Fatalf("Apple Account keepalive = %v, want %v", got, now.Add(7*time.Minute))
+	}
+}
+
+func TestICloudProvisionKeepsExpiredAndFullResourcesAliveWithoutCreating(t *testing.T) {
+	previous, existed := runtimeconfig.Snapshot()[runtimeconfig.ICloudCookieKeepaliveMinutesKey]
+	runtimeconfig.Set(runtimeconfig.ICloudCookieKeepaliveMinutesKey, "8")
+	t.Cleanup(func() {
+		if existed {
+			runtimeconfig.Set(runtimeconfig.ICloudCookieKeepaliveMinutesKey, previous)
+		} else {
+			runtimeconfig.Delete(runtimeconfig.ICloudCookieKeepaliveMinutesKey)
+		}
+	})
+
+	redisServer := miniredis.RunT(t)
+	queue := asynq.NewClient(asynq.RedisClientOpt{Addr: redisServer.Addr()})
+	inspector := asynq.NewInspector(asynq.RedisClientOpt{Addr: redisServer.Addr()})
+	t.Cleanup(func() {
+		_ = inspector.Close()
+		_ = queue.Close()
+	})
+	db, err := gorm.Open(sqlite.Open("file:icloud-provision-keepalive-only?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	if err := db.AutoMigrate(&iCloudResourceModel{}, &iCloudResourceChannelModel{}, &iCloudAliasModel{}, &iCloudMaintenanceRunModel{}); err != nil {
+		t.Fatalf("migrate database: %v", err)
+	}
+	now := time.Date(2026, 8, 14, 10, 45, 0, 0, time.UTC)
+	resources := []iCloudResourceModel{
+		{ID: 1, ResourceType: "icloud", PrimaryEmail: "expired@example.com", Status: iCloudResourceNormal, ExpireAt: now.Add(-time.Minute), CredentialRevision: 1, NextProvisionAt: &now, CreatedAt: now, UpdatedAt: now},
+		{ID: 2, ResourceType: "icloud", PrimaryEmail: "full@example.com", Status: iCloudResourceNormal, ExpireAt: now.Add(time.Hour), AliasCount: iCloudMaxAliases, CredentialRevision: 1, NextProvisionAt: &now, CreatedAt: now, UpdatedAt: now},
+	}
+	if err := db.Create(&resources).Error; err != nil {
+		t.Fatalf("create resources: %v", err)
+	}
+	channels := make([]iCloudResourceChannelModel, 0, len(resources))
+	for _, resource := range resources {
+		channels = append(channels, iCloudResourceChannelModel{
+			ResourceID: resource.ID, Kind: iCloudChannelWeb, Host: "p119-maildomainws.icloud.com",
+			Cookie: testICloudOldCookie, DSID: "123", ClientID: "client", ClientBuildNumber: "build", ClientMasteringNumber: "master",
+			SessionStatus: iCloudSessionValid, NextKeepaliveAt: &now, CreatedAt: now, UpdatedAt: now,
+		})
+	}
+	if err := db.Create(&channels).Error; err != nil {
+		t.Fatalf("create channels: %v", err)
+	}
+
+	paths := make([]string, 0, len(resources))
+	service := NewService(db, queue, nil)
+	service.now = func() time.Time { return now }
+	service.hme = NewHMEClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		paths = append(paths, request.URL.Path)
+		body := `{"success":true,"result":{"selectedForwardTo":"mailbox@relay.example","total":0,"hasMore":false,"hmeEmails":[]}}`
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
+	})})
+	if err := service.DispatchICloudProvisions(context.Background(), 10); err != nil {
+		t.Fatalf("dispatch keepalive-only resources: %v", err)
+	}
+	tasks, err := inspector.ListPendingTasks(platform.QueueBackgroundICloudValidation)
+	if err != nil || len(tasks) != len(resources) {
+		t.Fatalf("pending keepalive tasks=%d err=%v", len(tasks), err)
+	}
+	for _, pending := range tasks {
+		var task iCloudProvisionTask
+		if err := json.Unmarshal(pending.Payload, &task); err != nil {
+			t.Fatalf("decode provision task: %v", err)
+		}
+		if err := service.ProcessICloudProvision(context.Background(), task); err != nil {
+			t.Fatalf("process keepalive for resource %d: %v", task.ResourceID, err)
+		}
+	}
+	if len(paths) != len(resources) {
+		t.Fatalf("keepalive request paths = %#v", paths)
+	}
+	for _, path := range paths {
+		if path != "/v2/hme/list" {
+			t.Fatalf("keepalive unexpectedly created an alias via %q", path)
+		}
+	}
+	for _, expected := range resources {
+		var resource iCloudResourceModel
+		if err := db.First(&resource, expected.ID).Error; err != nil {
+			t.Fatalf("read resource %d: %v", expected.ID, err)
+		}
+		wantNext := now.Add(8 * time.Minute)
+		if resource.NextProvisionAt == nil || !resource.NextProvisionAt.Equal(wantNext) || resource.SelectedForwardTo != "mailbox@relay.example" {
+			t.Fatalf("keepalive-only resource %d = %#v, want next %v", resource.ID, resource, wantNext)
+		}
 	}
 }
 
@@ -439,11 +561,54 @@ func TestICloudProvisionFailedAppleRefreshKeepsStoredCredentials(t *testing.T) {
 		t.Fatalf("read channel: %v", err)
 	}
 	if stored.Cookie != channel.Cookie || stored.Scnt != channel.Scnt || stored.APIKey != channel.APIKey ||
-		stored.SessionFailures != 1 || stored.SessionStatus != iCloudSessionValid {
+		stored.SessionFailures != 0 || stored.SessionStatus != iCloudSessionValid {
 		t.Fatalf("failed refresh overwrote stored channel: %#v", stored)
 	}
 	if err := db.First(&resource, resource.ID).Error; err != nil || resource.Status != iCloudResourceNormal {
 		t.Fatalf("failed refresh changed resource health: resource=%#v err=%v", resource, err)
+	}
+}
+
+func TestICloudProvisionRequiresThreeSessionFailuresBeforeInvalidation(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:icloud-provision-session-failures?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	if err := db.AutoMigrate(&iCloudResourceModel{}, &iCloudResourceChannelModel{}); err != nil {
+		t.Fatalf("migrate database: %v", err)
+	}
+	now := time.Date(2026, 8, 14, 11, 20, 0, 0, time.UTC)
+	resource := iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "owner@example.com",
+		Status: iCloudResourceNormal, ExpireAt: now.Add(time.Hour), CredentialRevision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	channel := iCloudResourceChannelModel{
+		ID: 1, ResourceID: resource.ID, Kind: iCloudChannelWeb, Host: "p119-maildomainws.icloud.com",
+		Cookie: "secret", SessionStatus: iCloudSessionValid, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&resource).Error; err != nil {
+		t.Fatalf("create resource: %v", err)
+	}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	service := NewService(db, nil, nil)
+	sessionErr := &hmeError{Category: "session_invalid", SafeMessage: "iCloud session is invalid."}
+	for failure := 1; failure <= iCloudSessionFailureLimit; failure++ {
+		_ = service.applyICloudProvisionError(context.Background(), resource, channel, sessionErr, now)
+		if err := db.First(&channel, channel.ID).Error; err != nil {
+			t.Fatalf("read channel after failure %d: %v", failure, err)
+		}
+		wantStatus := iCloudSessionValid
+		if failure == iCloudSessionFailureLimit {
+			wantStatus = iCloudSessionInvalid
+		}
+		if channel.SessionFailures != uint8(failure) || channel.SessionStatus != wantStatus {
+			t.Fatalf("channel after failure %d = %#v", failure, channel)
+		}
+		if failure < iCloudSessionFailureLimit && (channel.CooldownUntil == nil || !channel.CooldownUntil.Equal(now.Add(iCloudValidationRetryInterval))) {
+			t.Fatalf("failure %d retry was not scheduled: %#v", failure, channel)
+		}
 	}
 }
 
@@ -459,7 +624,7 @@ func TestICloudProvisionDispatcherDrainsAllInvalidChannels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open database: %v", err)
 	}
-	if err := db.AutoMigrate(&iCloudResourceModel{}, &iCloudResourceChannelModel{}); err != nil {
+	if err := db.AutoMigrate(&iCloudResourceModel{}, &iCloudResourceChannelModel{}, &iCloudMaintenanceRunModel{}); err != nil {
 		t.Fatalf("migrate database: %v", err)
 	}
 	now := time.Date(2026, 8, 14, 11, 30, 0, 0, time.UTC)
@@ -495,5 +660,126 @@ func TestICloudProvisionDispatcherDrainsAllInvalidChannels(t *testing.T) {
 	var resource iCloudResourceModel
 	if err := db.First(&resource, 1).Error; err != nil || resource.NextProvisionAt != nil {
 		t.Fatalf("invalid channels left provisioning scheduled: resource=%#v err=%v", resource, err)
+	}
+	var run iCloudMaintenanceRunModel
+	if err := db.Where("resource_id = ? AND kind = ?", 1, iCloudMaintenanceAlias).Take(&run).Error; err != nil {
+		t.Fatalf("read invalid-channel run: %v", err)
+	}
+	if run.Status != iCloudMaintenanceCanceled || run.FinishedAt == nil || run.LastSafeError == "" {
+		t.Fatalf("invalid-channel run = %#v", run)
+	}
+}
+
+func TestICloudProvisionClaimRollsBackLeaseWhenRunCreationFails(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:icloud-provision-claim-rollback?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	if err := db.AutoMigrate(&iCloudResourceModel{}, &iCloudResourceChannelModel{}, &iCloudMaintenanceRunModel{}); err != nil {
+		t.Fatalf("migrate database: %v", err)
+	}
+	now := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
+	if err := db.Create(&iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "owner@example.com", Status: iCloudResourceNormal,
+		ExpireAt: now.Add(time.Hour), CredentialRevision: 1, NextProvisionAt: &now, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create resource: %v", err)
+	}
+	if err := db.Create(&iCloudResourceChannelModel{
+		ResourceID: 1, Kind: iCloudChannelWeb, SessionStatus: iCloudSessionInvalid, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	if err := db.Exec(`CREATE TRIGGER fail_icloud_alias_run BEFORE INSERT ON icloud_maintenance_runs
+		WHEN NEW.kind = 'alias' BEGIN SELECT RAISE(ABORT, 'forced run failure'); END`).Error; err != nil {
+		t.Fatalf("create failure trigger: %v", err)
+	}
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	if _, _, claimed, err := service.claimICloudProvision(context.Background(), 1); err == nil || claimed {
+		t.Fatalf("claim result: claimed=%v err=%v", claimed, err)
+	}
+	var resource iCloudResourceModel
+	if err := db.First(&resource, 1).Error; err != nil {
+		t.Fatalf("read resource: %v", err)
+	}
+	if resource.NextProvisionAt == nil || !resource.NextProvisionAt.Equal(now) {
+		t.Fatalf("failed run creation leaked lease: %#v", resource.NextProvisionAt)
+	}
+	var count int64
+	if err := db.Model(&iCloudMaintenanceRunModel{}).Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("maintenance runs=%d err=%v", count, err)
+	}
+}
+
+func TestICloudProvisionRecoversExpiredRunningRun(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:icloud-provision-run-recovery?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	if err := db.AutoMigrate(&iCloudMaintenanceRunModel{}); err != nil {
+		t.Fatalf("migrate database: %v", err)
+	}
+	now := time.Date(2026, 8, 14, 12, 30, 0, 0, time.UTC)
+	staleStarted := now.Add(-iCloudProvisionLease - time.Second)
+	freshStarted := now.Add(-iCloudProvisionLease + time.Second)
+	runs := []iCloudMaintenanceRunModel{
+		{ResourceID: 1, ValidationGeneration: 1, Kind: iCloudMaintenanceAlias, Status: iCloudMaintenanceRunning, Attempts: 1, MaxAttempts: 1, CredentialRevision: 1, QueuedAt: staleStarted, StartedAt: &staleStarted, CreatedAt: staleStarted, UpdatedAt: staleStarted},
+		{ResourceID: 2, ValidationGeneration: 1, Kind: iCloudMaintenanceAlias, Status: iCloudMaintenanceRunning, Attempts: 1, MaxAttempts: 1, CredentialRevision: 1, QueuedAt: freshStarted, StartedAt: &freshStarted, CreatedAt: freshStarted, UpdatedAt: freshStarted},
+	}
+	if err := db.Create(&runs).Error; err != nil {
+		t.Fatalf("create runs: %v", err)
+	}
+	service := NewService(db, nil, nil)
+	if err := service.recoverStaleICloudProvisionRuns(context.Background(), now); err != nil {
+		t.Fatalf("recover runs: %v", err)
+	}
+	if err := db.First(&runs[0], runs[0].ID).Error; err != nil {
+		t.Fatalf("read stale run: %v", err)
+	}
+	if runs[0].Status != iCloudMaintenanceFailed || runs[0].FinishedAt == nil || runs[0].LastSafeError == "" {
+		t.Fatalf("stale run = %#v", runs[0])
+	}
+	if err := db.First(&runs[1], runs[1].ID).Error; err != nil {
+		t.Fatalf("read fresh run: %v", err)
+	}
+	if runs[1].Status != iCloudMaintenanceRunning || runs[1].FinishedAt != nil {
+		t.Fatalf("fresh run = %#v", runs[1])
+	}
+}
+
+func TestICloudProvisionMarksAllAttemptFailuresFailed(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:icloud-provision-run-failed?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	if err := db.AutoMigrate(&iCloudResourceModel{}, &iCloudResourceChannelModel{}, &iCloudMaintenanceRunModel{}); err != nil {
+		t.Fatalf("migrate database: %v", err)
+	}
+	now := time.Date(2026, 8, 14, 13, 0, 0, 0, time.UTC)
+	if err := db.Create(&iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "owner@example.com", Status: iCloudResourceNormal,
+		ExpireAt: now.Add(time.Hour), CredentialRevision: 1, NextProvisionAt: &now, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create resource: %v", err)
+	}
+	if err := db.Create(&iCloudResourceChannelModel{
+		ResourceID: 1, Kind: iCloudChannelWeb, Host: "p119-maildomainws.icloud.com", Cookie: "invalid",
+		DSID: "123", ClientID: "client", ClientBuildNumber: "build", ClientMasteringNumber: "master",
+		SessionStatus: iCloudSessionUnchecked, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	if err := service.ProcessICloudProvision(context.Background(), iCloudProvisionTask{ResourceID: 1}); err != nil {
+		t.Fatalf("process failed provision: %v", err)
+	}
+	var run iCloudMaintenanceRunModel
+	if err := db.Where("resource_id = ? AND kind = ?", 1, iCloudMaintenanceAlias).Take(&run).Error; err != nil {
+		t.Fatalf("read run: %v", err)
+	}
+	if run.Status != iCloudMaintenanceFailed || run.FinishedAt == nil || run.LastSafeError == "" {
+		t.Fatalf("failed run = %#v", run)
 	}
 }

@@ -262,6 +262,7 @@ function resource(): AdminICloudResourceItem {
     oldSession: null,
     owner,
     primaryEmail: "main@icloud.com",
+    selectedForwardTo: "inbox@relay.example",
     status: "normal",
     updatedAt: now,
     version: 3,
@@ -339,6 +340,7 @@ describe("admin iCloud modal workflows", () => {
         onDelete={vi.fn()}
         onEdit={vi.fn()}
         onMaintain={vi.fn()}
+        onRefresh={vi.fn()}
         onRecover={vi.fn()}
         onReplaceCredentials={vi.fn()}
         onSetExpiration={vi.fn()}
@@ -374,6 +376,7 @@ describe("admin iCloud modal workflows", () => {
         onDelete={vi.fn()}
         onEdit={vi.fn()}
         onMaintain={vi.fn()}
+        onRefresh={vi.fn()}
         onRecover={vi.fn()}
         onReplaceCredentials={vi.fn()}
         onSetExpiration={onSetExpiration}
@@ -435,12 +438,36 @@ describe("admin iCloud modal workflows", () => {
 
   it("shows an inline retry when task history fails", async () => {
     mocks.tasks.mockRejectedValueOnce(new Error("offline"));
-    render(<ICloudTasksPanel refreshGeneration={0} resourceId={41} />);
+    render(
+      <ICloudTasksPanel
+        canOperate={false}
+        item={resourceDetail()}
+        onRefresh={vi.fn()}
+        refreshGeneration={0}
+      />,
+    );
 
     expect(await screen.findByText("iCloud task load failed.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
 
     await waitFor(() => expect(mocks.tasks).toHaveBeenCalledTimes(2));
+  });
+
+  it("submits alias provisioning from task details", async () => {
+    const onRefresh = vi.fn();
+    render(
+      <ICloudTasksPanel
+        canOperate
+        item={resourceDetail()}
+        onRefresh={onRefresh}
+        refreshGeneration={0}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Create alias" }));
+
+    await waitFor(() => expect(mocks.alias).toHaveBeenCalledWith(41, 3));
+    expect(onRefresh).toHaveBeenCalled();
   });
 
   it("does not report a full alias resource as submitted", async () => {

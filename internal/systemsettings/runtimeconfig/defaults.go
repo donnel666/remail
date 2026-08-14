@@ -3,13 +3,14 @@ package runtimeconfig
 import "github.com/donnel666/remail/internal/systemsettings/domain"
 
 const (
-	DefaultSettingsCount                  = 237
+	DefaultSettingsCount                  = 238
 	SMSBowerNoCodeRefundTimeoutMinutesKey = "smsbower_no_code_refund_timeout_minutes"
 	MicrosoftPriceMultiplierKey           = "product_price_multiplier_microsoft"
 	GmailPriceMultiplierKey               = "product_price_multiplier_gmail"
 	ICloudPriceMultiplierKey              = "product_price_multiplier_icloud"
 	DomainPriceMultiplierKey              = "product_price_multiplier_domain"
 	ICloudForwardingSuffixesKey           = "icloud_forwarding_suffixes"
+	ICloudCookieKeepaliveMinutesKey       = "icloud_cookie_keepalive_minutes"
 	ICloudMailmatchScanLimitKey           = "icloud_mailmatch_scan_limit"
 	ICloudAdminReadLimitKey               = "icloud_admin_read_limit"
 	DefaultICloudMailmatchScanLimit       = 1000
@@ -108,6 +109,7 @@ var defaultSettings = []domain.Setting{
 
 	{Key: "microsoft_domain_whitelist", Value: "outlook.com,hotmail.com,outlook.sa,outlook.com.ar,outlook.com.au,outlook.at,outlook.be,outlook.com.br,outlook.cl,outlook.cz,outlook.fr,outlook.de,outlook.com.gr,outlook.co.il,outlook.in,outlook.co.id,outlook.ie,outlook.it,outlook.hu,outlook.jp,outlook.kr,outlook.lv,outlook.my,outlook.co.nz,outlook.ph,outlook.pt,outlook.sg,outlook.sk,outlook.es,outlook.co.th,outlook.com.tr,outlook.com.vn"},
 	{Key: "icloud_forwarding_suffixes", Value: ""},
+	{Key: "icloud_cookie_keepalive_minutes", Value: "8"},
 	{Key: "domain_custom_tlds", Value: ""},
 	{Key: "domain_max_subdomains_per_registrable_domain", Value: "3"},
 	{Key: "default_plus_daily_limit", Value: "10000"},

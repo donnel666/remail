@@ -62,8 +62,10 @@ describe("admin iCloud page layout", () => {
       'dataIndex: "anonymousId"',
       'dataIndex: "newSession"',
       'dataIndex: "oldSession"',
+      'dataIndex: "selectedForwardTo"',
       't("New Cookie")',
       't("Old Cookie")',
+      't("Forwarding mailbox")',
     ]) {
       expect(icloudSource).toContain(fragment);
     }
@@ -73,7 +75,6 @@ describe("admin iCloud page layout", () => {
     expect(icloudSource).not.toContain("gmailEmail");
     expect(icloudSource).not.toContain("----Gmail");
     expect(icloudSource).not.toContain('t("Linked Gmail")');
-    expect(icloudSource).not.toContain("selectedForwardTo");
     expect(icloudSource).not.toContain("recipientMailId");
     expect(icloudSource).not.toContain("forwardToEmail");
     expect(icloudSource).not.toContain("deliveryProbe");

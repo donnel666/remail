@@ -317,8 +317,8 @@ type iCloudValidationTask struct {
 type iCloudMaintenanceRunModel struct {
 	ID                   uint64     `gorm:"column:id;primaryKey;autoIncrement"`
 	ResourceID           uint       `gorm:"column:resource_id;not null;uniqueIndex:uk_icloud_maintenance_resource_generation,priority:1"`
-	ValidationGeneration uint64     `gorm:"column:validation_generation;not null;uniqueIndex:uk_icloud_maintenance_resource_generation,priority:2"`
-	Kind                 string     `gorm:"column:kind;type:varchar(24);not null"`
+	ValidationGeneration uint64     `gorm:"column:validation_generation;not null;uniqueIndex:uk_icloud_maintenance_resource_generation,priority:3"`
+	Kind                 string     `gorm:"column:kind;type:varchar(24);not null;uniqueIndex:uk_icloud_maintenance_resource_generation,priority:2"`
 	Status               string     `gorm:"column:status;type:varchar(24);not null"`
 	Attempts             int        `gorm:"column:attempts;not null"`
 	MaxAttempts          int        `gorm:"column:max_attempts;not null"`

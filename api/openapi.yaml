@@ -19513,6 +19513,7 @@ components:
         - id
         - version
         - primaryEmail
+        - selectedForwardTo
         - owner
         - status
         - forSale
@@ -19539,6 +19540,9 @@ components:
         primaryEmail:
           type: string
           format: email
+        selectedForwardTo:
+          type: string
+          description: Last Apple HME forwarding mailbox observed during validation or provisioning.
         owner:
           $ref: "#/components/schemas/AdminICloudOwnerSummary"
         status:

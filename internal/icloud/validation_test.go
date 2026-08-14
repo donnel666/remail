@@ -453,6 +453,62 @@ func TestICloudValidationRetryReclaimsFinishedRun(t *testing.T) {
 	}
 }
 
+func TestICloudValidationRetryDoesNotReuseAliasRunForSameGeneration(t *testing.T) {
+	now := time.Date(2026, 8, 14, 10, 40, 0, 0, time.UTC)
+	db := openICloudValidationTestDB(t, "retry-kind")
+	if err := db.Create(&iCloudRootModel{ID: 1, Type: "icloud", OwnerUserID: 7, Version: 1, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatalf("create root: %v", err)
+	}
+	if err := db.Create(&iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "owner@example.com",
+		Status: iCloudResourcePending, ExpireAt: now.Add(time.Hour), CredentialRevision: 4,
+		ValidationGeneration: 5, NextValidationAt: &now, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create resource: %v", err)
+	}
+	finishedAt := now.Add(-time.Minute)
+	aliasRun := iCloudMaintenanceRunModel{
+		ResourceID: 1, ValidationGeneration: 5, Kind: iCloudMaintenanceAlias,
+		Status: iCloudMaintenanceQueued, Attempts: 0, MaxAttempts: 1,
+		CredentialRevision: 4, QueuedAt: now.Add(-time.Minute), CreatedAt: now.Add(-time.Minute), UpdatedAt: now.Add(-time.Minute),
+	}
+	validationRun := iCloudMaintenanceRunModel{
+		ResourceID: 1, ValidationGeneration: 5, Kind: iCloudMaintenanceValidation,
+		Status: iCloudMaintenanceFailed, Attempts: 1, MaxAttempts: iCloudValidationMaxFailures,
+		CredentialRevision: 4, QueuedAt: now.Add(-time.Minute), FinishedAt: &finishedAt,
+		LastSafeError: "temporary", CreatedAt: now.Add(-time.Minute), UpdatedAt: finishedAt,
+	}
+	if err := db.Create(&aliasRun).Error; err != nil {
+		t.Fatalf("create alias run: %v", err)
+	}
+	if err := db.Create(&validationRun).Error; err != nil {
+		t.Fatalf("create validation run: %v", err)
+	}
+
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	task, claimed, err := service.markICloudValidationDispatched(context.Background(), iCloudValidationTask{
+		ResourceID: 1, OwnerUserID: 7, ValidationGeneration: 5, ExpectedCredentialRevision: 4,
+	})
+	if err != nil || !claimed || task.MaintenanceRunID != validationRun.ID || task.MaintenanceKind != iCloudMaintenanceValidation {
+		t.Fatalf("validation claim = %#v, %t, %v; validation run id=%d", task, claimed, err, validationRun.ID)
+	}
+	var storedAliasRun iCloudMaintenanceRunModel
+	if err := db.First(&storedAliasRun, aliasRun.ID).Error; err != nil {
+		t.Fatalf("read alias run: %v", err)
+	}
+	if storedAliasRun.Status != iCloudMaintenanceQueued || storedAliasRun.Attempts != 0 {
+		t.Fatalf("alias run was modified by validation claim: %#v", storedAliasRun)
+	}
+	var storedValidationRun iCloudMaintenanceRunModel
+	if err := db.First(&storedValidationRun, validationRun.ID).Error; err != nil {
+		t.Fatalf("read validation run: %v", err)
+	}
+	if storedValidationRun.Status != iCloudMaintenanceRunning || storedValidationRun.Attempts != 2 || storedValidationRun.FinishedAt != nil {
+		t.Fatalf("validation run was not reclaimed: %#v", storedValidationRun)
+	}
+}
+
 func openICloudValidationTestDB(t *testing.T, name string) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:icloud-validation-%s?mode=memory&cache=shared", name)), &gorm.Config{})

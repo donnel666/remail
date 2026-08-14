@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 type roundTripperFunc func(*http.Request) (*http.Response, error)
@@ -230,6 +231,40 @@ func TestHMEListCarriesEarlierPageCookieAcrossTransportFailure(t *testing.T) {
 	providerErr, ok := err.(*hmeError)
 	if !ok || !strings.Contains(providerErr.UpdatedCookie, "X-APPLE-WEBAUTH-TOKEN=rotated") {
 		t.Fatalf("earlier page cookie must survive a later transport error: calls=%d err=%#v", calls, err)
+	}
+}
+
+func TestHMERateLimitUsesResponseBodyRetryAfter(t *testing.T) {
+	client := NewHMEClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"success":false,"code":-41015,"retryAfter":361.2}`)),
+		}, nil
+	})})
+	_, _, err := client.Generate(context.Background(), hmeConfig{
+		Host: "p119-maildomainws.icloud.com", DSID: "123", ClientID: "client", ClientBuildNumber: "build", ClientMasteringNumber: "mastering",
+		Cookie: "X-APPLE-DS-WEB-SESSION-TOKEN=session; X-APPLE-WEBAUTH-USER=user; X-APPLE-WEBAUTH-TOKEN=token",
+	})
+	providerErr, ok := err.(*hmeError)
+	if !ok || providerErr.Category != "rate_limited" || providerErr.RetryAfter != 362*time.Second {
+		t.Fatalf("rate-limit response = %#v, want retry after 362s", err)
+	}
+}
+
+func TestAppleAccountRateLimitUsesNestedResponseBodyRetryAfter(t *testing.T) {
+	now := time.Date(2026, 8, 14, 20, 0, 0, 0, time.UTC)
+	client := NewAppleAccountClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusTooManyRequests,
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"code":-41015,"retryAfter":"7200"}}`)),
+		}, nil
+	})})
+	_, err := client.refresh(context.Background(), iCloudResourceChannelModel{
+		Host: "appleid.apple.com", Cookie: "myacinfo=secret",
+	}, now)
+	var providerErr *appleAccountError
+	if !errors.As(err, &providerErr) || providerErr.Category != "rate_limited" || providerErr.RetryAfter != 2*time.Hour {
+		t.Fatalf("rate-limit response = %#v, want retry after 2h", err)
 	}
 }
 

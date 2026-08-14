@@ -86,6 +86,7 @@
   "Alias count": "Alias count",
   "Linked Gmail": "Linked Gmail",
   "Primary email": "Primary email",
+  "Forwarding mailbox": "Forwarding mailbox",
   "Resource expires at": "Resource expires at",
   "Expiration must be in the future.": "Expiration must be in the future.",
   "Set iCloud resource expiration hint": "Set one future expiration time for {{count}} iCloud resources. This only changes resource lifetime and does not queue maintenance.",

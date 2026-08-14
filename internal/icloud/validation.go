@@ -126,7 +126,9 @@ func ensureICloudValidationRunTx(ctx context.Context, tx *gorm.DB, resourceID ui
 		return nil, err
 	}
 	if run.ID == 0 {
-		if err := tx.WithContext(ctx).Where("resource_id = ? AND validation_generation = ?", resourceID, generation).Take(&run).Error; err != nil {
+		if err := tx.WithContext(ctx).
+			Where("resource_id = ? AND kind = ? AND validation_generation = ?", resourceID, iCloudMaintenanceValidation, generation).
+			Take(&run).Error; err != nil {
 			return nil, err
 		}
 	}
@@ -243,7 +245,7 @@ func (s *Service) markICloudValidationDispatched(ctx context.Context, task iClou
 			return err
 		}
 		runResult := tx.Model(&iCloudMaintenanceRunModel{}).
-			Where("id = ? AND validation_generation = ? AND credential_revision = ?", run.ID, task.ValidationGeneration, task.ExpectedCredentialRevision).
+			Where("id = ? AND kind = ? AND validation_generation = ? AND credential_revision = ?", run.ID, iCloudMaintenanceValidation, task.ValidationGeneration, task.ExpectedCredentialRevision).
 			Updates(map[string]any{
 				"status": iCloudMaintenanceRunning, "attempts": gorm.Expr("CASE WHEN attempts < max_attempts THEN attempts + 1 ELSE max_attempts END"),
 				"started_at": now, "finished_at": nil, "last_safe_error": "", "updated_at": now,
@@ -277,8 +279,13 @@ func (s *Service) releaseICloudValidation(ctx context.Context, task iCloudValida
 		if err := tx.Model(&iCloudResourceModel{}).Where("id = ? AND status = ? AND validation_generation = ? AND credential_revision = ?", task.ResourceID, iCloudResourceValidating, task.ValidationGeneration, task.ExpectedCredentialRevision).Updates(updates).Error; err != nil {
 			return err
 		}
-		if task.MaintenanceRunID > 0 {
-			return finishICloudMaintenanceRunTx(ctx, tx, task.MaintenanceRunID, iCloudMaintenanceFailed, safeError, now)
+		if task.MaintenanceRunID > 0 && task.MaintenanceKind == iCloudMaintenanceValidation {
+			return tx.Model(&iCloudMaintenanceRunModel{}).
+				Where("id = ? AND kind = ? AND status IN ?", task.MaintenanceRunID, iCloudMaintenanceValidation, []string{iCloudMaintenanceQueued, iCloudMaintenanceRunning}).
+				Updates(map[string]any{
+					"status": iCloudMaintenanceFailed, "last_safe_error": safeICloudImportMessage(safeError),
+					"finished_at": now, "updated_at": now,
+				}).Error
 		}
 		return nil
 	})

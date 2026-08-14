@@ -7215,6 +7215,8 @@ export interface components {
             version: number;
             /** Format: email */
             primaryEmail: string;
+            /** @description Last Apple HME forwarding mailbox observed during validation or provisioning. */
+            selectedForwardTo: string;
             owner: components["schemas"]["AdminICloudOwnerSummary"];
             status: components["schemas"]["AdminICloudResourceStatus"];
             forSale: boolean;

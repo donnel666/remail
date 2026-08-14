@@ -282,6 +282,8 @@ func TestValidateSystemOperationsSettings(t *testing.T) {
 	require.ErrorIs(t, Validate(ICloudMailmatchScanLimitKey, "10001"), domain.ErrInvalidValue)
 	require.NoError(t, Validate(ICloudAdminReadLimitKey, "5000"))
 	require.ErrorIs(t, Validate(ICloudAdminReadLimitKey, "5001"), domain.ErrInvalidValue)
+	require.NoError(t, Validate(ICloudCookieKeepaliveMinutesKey, "12"))
+	require.ErrorIs(t, Validate(ICloudCookieKeepaliveMinutesKey, "13"), domain.ErrInvalidValue)
 	require.ErrorIs(t, ValidatePersistedUpdates(DefaultSettings(), []domain.Setting{
 		{Key: "background_worker_minimum", Value: "32"},
 		{Key: "background_worker_initial", Value: "16"},

@@ -1,6 +1,7 @@
 export const EMAIL_RESOURCE_KEYS = [
   "microsoft_domain_whitelist",
   "icloud_forwarding_suffixes",
+  "icloud_cookie_keepalive_minutes",
   "domain_custom_tlds",
   "domain_max_subdomains_per_registrable_domain",
   "default_plus_daily_limit",

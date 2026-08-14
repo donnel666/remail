@@ -49,7 +49,8 @@ func TestListAdminICloudResourcesReturnsOnlySafeOperationalFacts(t *testing.T) {
 		&iCloudRootModel{ID: 2, Type: "icloud", OwnerUserID: 7, Version: 2, CreatedAt: now.Add(-time.Hour), UpdatedAt: now},
 		&iCloudResourceModel{
 			ID: 1, ResourceType: "icloud", PrimaryEmail: "main@icloud.com",
-			ExpireAt: now.Add(30 * 24 * time.Hour), Status: iCloudResourceNormal, AliasCount: iCloudMaxAliases - 1,
+			SelectedForwardTo: "inbox@relay.example",
+			ExpireAt:          now.Add(30 * 24 * time.Hour), Status: iCloudResourceNormal, AliasCount: iCloudMaxAliases - 1,
 			AliasProvisionCandidate: "candidate@icloud.com", NextProvisionAt: &nextProvisionAt,
 			CredentialRevision: 3, ValidationGeneration: 4, ValidationFailures: 2,
 			CredentialUpdatedAt: now, CreatedAt: now.Add(-2 * time.Hour), UpdatedAt: now,
@@ -82,7 +83,7 @@ func TestListAdminICloudResourcesReturnsOnlySafeOperationalFacts(t *testing.T) {
 		t.Fatalf("result size = total %d items %d", result.Total, len(result.Items))
 	}
 	item := result.Items[0]
-	if item.PrimaryEmail != "main@icloud.com" || item.AliasCount != iCloudMaxAliases-1 ||
+	if item.PrimaryEmail != "main@icloud.com" || item.SelectedForwardTo != "inbox@relay.example" || item.AliasCount != iCloudMaxAliases-1 ||
 		item.NewSession == nil || item.NewSession.Status != iCloudSessionInvalid ||
 		item.OldSession == nil || item.OldSession.Status != iCloudSessionValid {
 		t.Fatalf("unexpected safe item: %#v", item)

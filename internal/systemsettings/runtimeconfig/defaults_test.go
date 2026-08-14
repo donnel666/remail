@@ -38,6 +38,7 @@ func TestDefaultSettingsAreValidAndIndependent(t *testing.T) {
 	require.Equal(t, "90", keys["rebate_expiry_days"])
 	require.Equal(t, "", keys["domain_custom_tlds"])
 	require.Equal(t, "", keys[ICloudForwardingSuffixesKey])
+	require.Equal(t, "8", keys[ICloudCookieKeepaliveMinutesKey])
 	require.Equal(t, "1000", keys[ICloudMailmatchScanLimitKey])
 	require.Equal(t, "5000", keys[ICloudAdminReadLimitKey])
 	require.Equal(t, "3", keys["domain_max_subdomains_per_registrable_domain"])

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -353,14 +354,17 @@ func hmeProviderErrorResponse(body []byte, updatedCookie string) *hmeError {
 		return nil
 	}
 	code := hmeProviderErrorCode(payload.ErrorCode, payload.Code, payload.Error.ErrorCode, payload.Error.Code)
+	var providerErr *hmeError
 	switch code {
 	case "-41003":
-		return hmeResponseError("invalid_candidate", "iCloud rejected the generated alias candidate.", true, updatedCookie)
+		providerErr = hmeResponseError("invalid_candidate", "iCloud rejected the generated alias candidate.", true, updatedCookie)
 	case "-41015":
-		return hmeResponseError("rate_limited", "iCloud alias creation is temporarily rate limited.", true, updatedCookie)
+		providerErr = hmeResponseError("rate_limited", "iCloud alias creation is temporarily rate limited.", true, updatedCookie)
 	default:
 		return nil
 	}
+	providerErr.RetryAfter = iCloudResponseRetryAfter("", body, time.Time{})
+	return providerErr
 }
 
 func hmeProviderErrorCode(values ...json.RawMessage) string {
@@ -498,7 +502,7 @@ func (c *HMEClient) request(ctx context.Context, config hmeConfig, method, reque
 	}
 	if response.StatusCode == http.StatusTooManyRequests {
 		providerErr := hmeResponseError("rate_limited", "iCloud alias creation is temporarily rate limited.", true, updatedCookie)
-		providerErr.RetryAfter = iCloudRetryAfter(response.Header.Get("Retry-After"), time.Now().UTC())
+		providerErr.RetryAfter = iCloudResponseRetryAfter(response.Header.Get("Retry-After"), responseBody, time.Now().UTC())
 		return nil, "", providerErr
 	}
 	if response.StatusCode == http.StatusRequestTimeout || response.StatusCode >= 500 {
@@ -506,7 +510,7 @@ func (c *HMEClient) request(ctx context.Context, config hmeConfig, method, reque
 	}
 	if response.StatusCode >= 400 {
 		if providerErr := hmeProviderErrorResponse(responseBody, updatedCookie); providerErr != nil {
-			providerErr.RetryAfter = iCloudRetryAfter(response.Header.Get("Retry-After"), time.Now().UTC())
+			providerErr.RetryAfter = iCloudResponseRetryAfter(response.Header.Get("Retry-After"), responseBody, time.Now().UTC())
 			return nil, "", providerErr
 		}
 		return nil, "", &hmeError{Category: "provider_rejected", SafeMessage: "iCloud HME request was rejected.", UpdatedCookie: updatedCookie}
@@ -525,6 +529,48 @@ func iCloudRetryAfter(value string, now time.Time) time.Duration {
 	}
 	if retryAt, err := http.ParseTime(value); err == nil && retryAt.After(now) {
 		return retryAt.Sub(now)
+	}
+	return 0
+}
+
+func iCloudResponseRetryAfter(header string, body []byte, now time.Time) time.Duration {
+	if delay := iCloudRetryAfter(header, now); delay > 0 {
+		return delay
+	}
+	var payload struct {
+		RetryAfter json.RawMessage `json:"retryAfter"`
+		Error      struct {
+			RetryAfter json.RawMessage `json:"retryAfter"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &payload) != nil {
+		return 0
+	}
+	return iCloudRetryAfterBody(payload.RetryAfter, payload.Error.RetryAfter)
+}
+
+func iCloudRetryAfterBody(values ...json.RawMessage) time.Duration {
+	for _, raw := range values {
+		value := strings.TrimSpace(string(raw))
+		if value == "" || value == "null" {
+			continue
+		}
+		if strings.HasPrefix(value, `"`) {
+			var text string
+			if json.Unmarshal(raw, &text) != nil {
+				continue
+			}
+			value = strings.TrimSpace(text)
+		}
+		seconds, err := strconv.ParseFloat(value, 64)
+		if err != nil || seconds <= 0 || math.IsInf(seconds, 0) || math.IsNaN(seconds) {
+			continue
+		}
+		const maxDuration = time.Duration(1<<63 - 1)
+		if seconds >= float64(maxDuration/time.Second) {
+			return maxDuration
+		}
+		return time.Duration(math.Ceil(seconds)) * time.Second
 	}
 	return 0
 }

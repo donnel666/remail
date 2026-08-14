@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -14,7 +15,9 @@ const (
 	iCloudProvisionBatchLimit = 128
 	iCloudProvisionLease      = 5 * time.Minute
 	iCloudProvisionRetry      = 5 * time.Minute
-	iCloudWebKeepalive        = 10 * time.Minute
+	iCloudCookieKeepalive     = 8 * time.Minute
+	iCloudCookieKeepaliveMax  = 12 * time.Minute
+	iCloudSessionFailureLimit = 3
 )
 
 type iCloudProvisionTask struct {
@@ -34,10 +37,13 @@ func (s *Service) DispatchICloudProvisions(ctx context.Context, limit int) error
 		limit = iCloudProvisionBatchLimit
 	}
 	now := s.now().UTC()
+	if err := s.recoverStaleICloudProvisionRuns(ctx, now); err != nil {
+		return err
+	}
 	var resourceIDs []uint
 	err := s.db.WithContext(ctx).Table("icloud_resources AS ir").Distinct("ir.id").
 		Joins("JOIN icloud_resource_channels AS ch ON ch.resource_id = ir.id").
-		Where("ir.status = ? AND ir.expire_at > ? AND ir.alias_count < ? AND ir.next_provision_at IS NOT NULL AND ir.next_provision_at <= ?", iCloudResourceNormal, now, iCloudMaxAliases, now).
+		Where("ir.status = ? AND ir.next_provision_at IS NOT NULL AND ir.next_provision_at <= ?", iCloudResourceNormal, now).
 		Order("ir.id ASC").Limit(limit).Pluck("ir.id", &resourceIDs).Error
 	if err != nil {
 		return ErrICloudValidationTemp
@@ -51,22 +57,32 @@ func (s *Service) DispatchICloudProvisions(ctx context.Context, limit int) error
 	return joined
 }
 
-func (s *Service) ProcessICloudProvision(ctx context.Context, task iCloudProvisionTask) error {
+func (s *Service) ProcessICloudProvision(ctx context.Context, task iCloudProvisionTask) (resultErr error) {
 	if s == nil || s.db == nil || task.ResourceID == 0 {
 		return ErrICloudValidationTemp
 	}
-	scope, claimed, err := s.claimICloudProvision(ctx, task.ResourceID)
+	scope, run, claimed, err := s.claimICloudProvision(ctx, task.ResourceID)
 	if err != nil || !claimed {
 		return err
 	}
 	now := s.now().UTC()
+	runStatus := iCloudMaintenanceCanceled
+	runSafeError := "No alias creation was due."
+	defer func() {
+		if resultErr != nil {
+			runStatus = iCloudMaintenanceFailed
+			runSafeError = "Provision task did not finish."
+		}
+		if err := s.finishICloudProvisionRun(ctx, run.ID, runStatus, runSafeError, s.now().UTC()); resultErr == nil && err != nil {
+			resultErr = err
+		}
+	}()
 	aliasCount := scope.Resource.AliasCount
 	nextAt := time.Time{}
 	pendingWebCandidate := strings.TrimSpace(scope.Resource.AliasProvisionCandidate) != ""
+	attemptCount, failureCount := 0, 0
+	createAttempted, creationProgress := false, false
 	for _, kind := range []string{iCloudChannelAppleAccount, iCloudChannelWeb} {
-		if aliasCount >= iCloudMaxAliases {
-			break
-		}
 		channel := findICloudProvisionChannel(scope.Channels, kind)
 		if channel == nil || channel.SessionStatus == iCloudSessionInvalid {
 			continue
@@ -75,8 +91,10 @@ func (s *Service) ProcessICloudProvision(ctx context.Context, task iCloudProvisi
 			nextAt = earlierICloudProvisionAt(nextAt, *channel.CooldownUntil)
 			continue
 		}
+		resourceCanCreate := scope.Resource.ExpireAt.After(now) && aliasCount < iCloudMaxAliases
 		createAt, createAllowed := iCloudChannelWindow(*channel, now)
-		if kind == iCloudChannelWeb && pendingWebCandidate {
+		createAllowed = createAllowed && resourceCanCreate
+		if kind == iCloudChannelWeb && pendingWebCandidate && resourceCanCreate {
 			createAllowed = true
 			createAt = time.Time{}
 		}
@@ -86,7 +104,9 @@ func (s *Service) ProcessICloudProvision(ctx context.Context, task iCloudProvisi
 		}
 		keepaliveDue := !keepaliveAt.After(now)
 		if !createAllowed && !keepaliveDue {
-			nextAt = earlierICloudProvisionAt(nextAt, createAt)
+			if resourceCanCreate {
+				nextAt = earlierICloudProvisionAt(nextAt, createAt)
+			}
 			nextAt = earlierICloudProvisionAt(nextAt, keepaliveAt)
 			continue
 		}
@@ -94,6 +114,10 @@ func (s *Service) ProcessICloudProvision(ctx context.Context, task iCloudProvisi
 		var alias *hmeAlias
 		var immediate bool
 		var attemptErr error
+		attemptCount++
+		if createAllowed {
+			createAttempted = true
+		}
 		switch channel.Kind {
 		case iCloudChannelAppleAccount:
 			alias, attemptErr = s.provisionICloudAppleAccount(ctx, scope.Resource, *channel, createAllowed, now)
@@ -101,7 +125,14 @@ func (s *Service) ProcessICloudProvision(ctx context.Context, task iCloudProvisi
 			alias, immediate, attemptErr = s.provisionICloudWeb(ctx, scope.Resource, *channel, createAllowed, now)
 		}
 		if errors.Is(attemptErr, errICloudValidationStale) {
+			runStatus = iCloudMaintenanceCanceled
+			runSafeError = "Resource changed while provisioning was running."
 			return nil
+		}
+		if attemptErr != nil {
+			failureCount++
+		} else if createAllowed {
+			creationProgress = true
 		}
 		if alias != nil {
 			aliasCount++
@@ -109,6 +140,7 @@ func (s *Service) ProcessICloudProvision(ctx context.Context, task iCloudProvisi
 				pendingWebCandidate = false
 			}
 		}
+		resourceCanCreate = scope.Resource.ExpireAt.After(now) && aliasCount < iCloudMaxAliases
 		if immediate {
 			pendingWebCandidate = true
 			nextAt = earlierICloudProvisionAt(nextAt, now.Add(time.Second))
@@ -137,25 +169,37 @@ func (s *Service) ProcessICloudProvision(ctx context.Context, task iCloudProvisi
 			nextAt = earlierICloudProvisionAt(nextAt, *updated.CooldownUntil)
 			continue
 		}
-		if updated.Kind == iCloudChannelWeb && pendingWebCandidate {
-			nextAt = earlierICloudProvisionAt(nextAt, now.Add(time.Second))
-		} else if ready, allowed := iCloudChannelWindow(updated, now); allowed {
-			nextAt = earlierICloudProvisionAt(nextAt, now)
-		} else {
-			nextAt = earlierICloudProvisionAt(nextAt, ready)
+		if resourceCanCreate {
+			if updated.Kind == iCloudChannelWeb && pendingWebCandidate {
+				nextAt = earlierICloudProvisionAt(nextAt, now.Add(time.Second))
+			} else if ready, allowed := iCloudChannelWindow(updated, now); allowed {
+				nextAt = earlierICloudProvisionAt(nextAt, now)
+			} else {
+				nextAt = earlierICloudProvisionAt(nextAt, ready)
+			}
 		}
 		if updated.NextKeepaliveAt != nil {
 			nextAt = earlierICloudProvisionAt(nextAt, *updated.NextKeepaliveAt)
 		}
 	}
-	if aliasCount >= iCloudMaxAliases || !scope.Resource.ExpireAt.After(now) {
-		nextAt = time.Time{}
+	switch {
+	case creationProgress:
+		runStatus, runSafeError = iCloudMaintenanceSucceeded, ""
+	case createAttempted:
+		runStatus, runSafeError = iCloudMaintenanceFailed, "No channel completed alias creation."
+	case attemptCount > 0 && failureCount == attemptCount:
+		runStatus, runSafeError = iCloudMaintenanceFailed, "All channel maintenance attempts failed."
+	case attemptCount > 0:
+		runStatus, runSafeError = iCloudMaintenanceCanceled, "Channel maintenance completed without alias creation."
+	default:
+		runStatus, runSafeError = iCloudMaintenanceCanceled, "No eligible provisioning channel was available."
 	}
 	return s.finishICloudProvision(ctx, scope.Resource, nextAt, now)
 }
 
-func (s *Service) claimICloudProvision(ctx context.Context, resourceID uint) (*iCloudProvisionScope, bool, error) {
+func (s *Service) claimICloudProvision(ctx context.Context, resourceID uint) (*iCloudProvisionScope, *iCloudMaintenanceRunModel, bool, error) {
 	var scope iCloudProvisionScope
+	var run *iCloudMaintenanceRunModel
 	claimed := false
 	now := s.now().UTC()
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -165,8 +209,7 @@ func (s *Service) claimICloudProvision(ctx context.Context, resourceID uint) (*i
 			}
 			return err
 		}
-		if scope.Resource.Status != iCloudResourceNormal || !scope.Resource.ExpireAt.After(now) ||
-			scope.Resource.AliasCount >= iCloudMaxAliases || scope.Resource.NextProvisionAt == nil || scope.Resource.NextProvisionAt.After(now) {
+		if scope.Resource.Status != iCloudResourceNormal || scope.Resource.NextProvisionAt == nil || scope.Resource.NextProvisionAt.After(now) {
 			return nil
 		}
 		if err := tx.Order("CASE kind WHEN 'apple_account' THEN 0 ELSE 1 END").
@@ -176,18 +219,30 @@ func (s *Service) claimICloudProvision(ctx context.Context, resourceID uint) (*i
 		if len(scope.Channels) == 0 {
 			return nil
 		}
-		leaseUntil := now.Add(iCloudProvisionLease)
-		if err := tx.Model(&iCloudResourceModel{}).Where("id = ?", resourceID).
-			Updates(map[string]any{"next_provision_at": leaseUntil, "updated_at": now}).Error; err != nil {
+		if err := recoverStaleICloudProvisionRunsTx(ctx, tx, resourceID, now); err != nil {
 			return err
 		}
+		createdRun, err := startICloudProvisionRunTx(ctx, tx, scope.Resource, now)
+		if err != nil {
+			return err
+		}
+		leaseUntil := now.Add(iCloudProvisionLease)
+		result := tx.Model(&iCloudResourceModel{}).Where("id = ?", resourceID).
+			Updates(map[string]any{"next_provision_at": leaseUntil, "updated_at": now})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return errICloudValidationStale
+		}
+		run = createdRun
 		claimed = true
 		return nil
 	})
 	if err != nil {
-		return nil, false, ErrICloudValidationTemp
+		return nil, nil, false, ErrICloudValidationTemp
 	}
-	return &scope, claimed, nil
+	return &scope, run, claimed, nil
 }
 
 func (s *Service) provisionICloudAppleAccount(ctx context.Context, resource iCloudResourceModel, channel iCloudResourceChannelModel, createAllowed bool, now time.Time) (*hmeAlias, error) {
@@ -228,7 +283,7 @@ func (s *Service) provisionICloudWeb(ctx context.Context, resource iCloudResourc
 		return nil, false, s.applyICloudProvisionError(ctx, resource, channel, err, now)
 	}
 	channel.Cookie = list.UpdatedCookie
-	channel.NextKeepaliveAt = iCloudTimePointer(now.Add(iCloudWebKeepalive))
+	channel.NextKeepaliveAt = iCloudTimePointer(now.Add(iCloudCookieKeepaliveInterval()))
 	if err := s.persistICloudWebSnapshot(ctx, resource, channel, list, now); err != nil {
 		return nil, false, err
 	}
@@ -280,9 +335,11 @@ func (s *Service) persistICloudWebSnapshot(ctx context.Context, resource iCloudR
 		if err := syncICloudAliasesTx(tx, locked.ID, list.Aliases, true, now); err != nil {
 			return err
 		}
-		if err := tx.Model(&iCloudResourceModel{}).Where("id = ?", locked.ID).Updates(map[string]any{
-			"alias_count": len(list.Aliases), "last_alias_sync_at": now, "updated_at": now,
-		}).Error; err != nil {
+		updates := map[string]any{"alias_count": len(list.Aliases), "last_alias_sync_at": now, "updated_at": now}
+		if selectedForwardTo := strings.ToLower(strings.TrimSpace(list.SelectedForwardTo)); selectedForwardTo != "" {
+			updates["selected_forward_to"] = selectedForwardTo
+		}
+		if err := tx.Model(&iCloudResourceModel{}).Where("id = ?", locked.ID).Updates(updates).Error; err != nil {
 			return err
 		}
 		return updateICloudProvisionChannelTx(tx, channel, true, false, now)
@@ -306,6 +363,9 @@ func (s *Service) persistICloudCreatedAlias(ctx context.Context, resource iCloud
 			return err
 		}
 		resourceUpdates := map[string]any{"alias_count": aliasCount, "updated_at": now}
+		if forwardToEmail := strings.ToLower(strings.TrimSpace(alias.ForwardToEmail)); forwardToEmail != "" {
+			resourceUpdates["selected_forward_to"] = forwardToEmail
+		}
 		if channel.Kind == iCloudChannelWeb {
 			resourceUpdates["alias_provision_candidate"] = ""
 			resourceUpdates["alias_provision_reconcile"] = false
@@ -384,23 +444,29 @@ func (s *Service) applyICloudProvisionError(ctx context.Context, resource iCloud
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&locked, channel.ID).Error; err != nil {
 			return errICloudValidationStale
 		}
-		failures := locked.SessionFailures
-		if failures < 255 {
-			failures++
-		}
 		updates := map[string]any{
-			"cookie": channel.Cookie, "session_failures": failures, "last_checked_at": now, "updated_at": now,
+			"cookie": channel.Cookie, "last_checked_at": now, "updated_at": now,
 		}
 		switch category {
 		case "session_invalid":
-			updates["session_status"] = iCloudSessionInvalid
-			updates["cooldown_until"] = nil
+			failures := locked.SessionFailures
+			if failures < 255 {
+				failures++
+			}
+			updates["session_failures"] = failures
+			if failures >= iCloudSessionFailureLimit {
+				updates["session_status"] = iCloudSessionInvalid
+				updates["cooldown_until"] = nil
+			} else {
+				updates["cooldown_until"] = now.Add(iCloudValidationRetryInterval)
+			}
 		case "rate_limited":
 			delay := retryAfter
 			if delay <= 0 {
 				delay = iCloudRateLimitDelay(locked.CooldownStage)
 			}
 			updates["session_status"] = iCloudSessionValid
+			updates["session_failures"] = 0
 			updates["cooldown_until"] = now.Add(delay)
 			updates["cooldown_stage"] = min(locked.CooldownStage+1, uint8(3))
 		}
@@ -441,7 +507,7 @@ func (s *Service) finishICloudProvision(ctx context.Context, resource iCloudReso
 		if err != nil {
 			return err
 		}
-		if locked.Status != iCloudResourceNormal || !locked.ExpireAt.After(now) || locked.AliasCount >= iCloudMaxAliases {
+		if locked.Status != iCloudResourceNormal {
 			nextAt = time.Time{}
 		}
 		updates := map[string]any{"next_provision_at": nil, "updated_at": now}
@@ -535,7 +601,7 @@ func iCloudRateLimitDelay(stage uint8) time.Duration {
 }
 
 func appleAccountNextKeepalive(channel iCloudResourceChannelModel, now time.Time) *time.Time {
-	next := now.Add(4 * time.Minute)
+	next := now.Add(iCloudCookieKeepaliveInterval())
 	if channel.ManageExpiresAt != nil && channel.ManageExpiresAt.After(now) {
 		ttl := channel.ManageExpiresAt.Sub(now)
 		skew := ttl / 10
@@ -545,9 +611,18 @@ func appleAccountNextKeepalive(channel iCloudResourceChannelModel, now time.Time
 		if skew > 2*time.Minute {
 			skew = 2 * time.Minute
 		}
-		next = channel.ManageExpiresAt.Add(-skew)
+		if expiresAt := channel.ManageExpiresAt.Add(-skew); expiresAt.Before(next) {
+			next = expiresAt
+		}
 	}
 	return &next
+}
+
+func iCloudCookieKeepaliveInterval() time.Duration {
+	return min(
+		runtimeconfig.Duration(runtimeconfig.ICloudCookieKeepaliveMinutesKey, iCloudCookieKeepalive, time.Minute, 1),
+		iCloudCookieKeepaliveMax,
+	)
 }
 
 func earlierICloudProvisionAt(current, candidate time.Time) time.Time {

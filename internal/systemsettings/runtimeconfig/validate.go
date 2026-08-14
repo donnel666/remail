@@ -39,7 +39,7 @@ var integerRanges = map[string]integerRange{
 	"async_check_request_timeout_seconds": {min: 1, max: 30},
 	SMSBowerNoCodeRefundTimeoutMinutesKey: positive(25),
 
-	"domain_max_subdomains_per_registrable_domain": positive(1000), "default_plus_daily_limit": positive(2_147_483_647), "default_mailbox_daily_limit": positive(2_147_483_647), "resource_validation_max_failures": positive(100),
+	"domain_max_subdomains_per_registrable_domain": positive(1000), "default_plus_daily_limit": positive(2_147_483_647), "default_mailbox_daily_limit": positive(2_147_483_647), "resource_validation_max_failures": positive(100), ICloudCookieKeepaliveMinutesKey: {min: 1, max: 12},
 	"resource_import_max_bytes": positive(512 << 20), "max_project_logo_bytes": positive(20 << 20), "project_name_max": positive(120), "project_description_max": positive(1000), "project_target_platform_max": positive(120),
 	"candidate_window_size": positive(100), "global_candidate_window": positive(100), "bucket_probe_count": positive(64), "alias_generation_window": positive(1000),
 	"candidate_retry_count": positive(20), "dot_alias_capacity_per_resource": positive(64), "inventory_refresh_interval_minutes": positive(1440), "inventory_cache_hard_ttl_hours": positive(8760),

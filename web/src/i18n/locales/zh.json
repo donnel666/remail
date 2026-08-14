@@ -86,6 +86,7 @@
   "Alias count": "别名数量",
   "Linked Gmail": "关联 Gmail",
   "Primary email": "主邮箱",
+  "Forwarding mailbox": "转发收件邮箱",
   "Resource expires at": "资源过期时间",
   "Expiration must be in the future.": "有效期必须晚于当前时间。",
   "Set iCloud resource expiration hint": "将为 {{count}} 个 iCloud 资源设置统一过期时间。此操作只修改资源有效期，不会提交维护任务。",

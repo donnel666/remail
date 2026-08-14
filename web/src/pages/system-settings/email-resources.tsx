@@ -90,6 +90,14 @@ export default function EmailResourceSection({ options, onBulkSave }: SectionPro
         <TagInput aria-label={t("自定义 TLD")} value={customTLDs} separator={[",", "，", " ", "\n"]} allowDuplicates={false} addOnBlur showClear placeholder={t("输入 TLD 后回车")} onChange={(values) => update("domain_custom_tlds", values.map((value) => value.trim()).filter(Boolean).join(","))} style={{ width: "100%" }} />
         <p className="text-xs text-[var(--semi-color-text-2)]">{t("系统默认使用 Public Suffix List；这里仅填写需要人工补充的公共后缀，例如 edu.kg")}</p>
       </FormItem>
+      <SettingsNumberField
+        label={t("iCloud Cookie 保活间隔（分钟）")}
+        description={t("Apple 会话通常约 15 分钟失效，建议保持为 8 分钟")}
+        value={number(form.icloud_cookie_keepalive_minutes)}
+        onChange={(value) => update("icloud_cookie_keepalive_minutes", value)}
+        min={1}
+        max={12}
+      />
       <SettingsNumberField label={t("每个可注册域名最多子域名数")} description={t("根域名本身不计入限额")} value={number(form.domain_max_subdomains_per_registrable_domain)} onChange={(value) => update("domain_max_subdomains_per_registrable_domain", value)} min={1} max={1000} />
       <SettingsNumberField label={t("子地址默认日配额")} value={number(form.default_plus_daily_limit)} onChange={(value) => update("default_plus_daily_limit", value)} min={1} />
       <SettingsNumberField label={t("邮箱默认日配额")} value={number(form.default_mailbox_daily_limit)} onChange={(value) => update("default_mailbox_daily_limit", value)} min={1} />

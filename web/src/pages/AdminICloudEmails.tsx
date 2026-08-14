@@ -934,16 +934,22 @@ export function ICloudMaintenanceModal({
 }
 
 export function ICloudTasksPanel({
+  canOperate,
+  item,
+  onRefresh,
   refreshGeneration,
-  resourceId,
 }: {
+  canOperate: boolean;
+  item: AdminICloudResourceDetail;
+  onRefresh: () => void | Promise<void>;
   refreshGeneration: number;
-  resourceId: number;
 }) {
   const { t } = useTranslation();
   const [pageSize, setPageSize] = useSharedPageSize();
   const [page, setPage] = useState(1);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [busy, setBusy] = useState<ICloudMaintenanceAction | null>(null);
+  const [submittedVersion, setSubmittedVersion] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [response, setResponse] = useState<AdminICloudTaskList>({
@@ -954,14 +960,19 @@ export function ICloudTasksPanel({
     total: 0,
   });
 
-  useEffect(() => setPage(1), [pageSize, resourceId]);
+  useEffect(() => setPage(1), [item.id, pageSize]);
+  useEffect(() => {
+    if (submittedVersion !== null && item.version >= submittedVersion) {
+      setSubmittedVersion(null);
+    }
+  }, [item.version, submittedVersion]);
   useEffect(() => {
     const controller = new AbortController();
     let pollTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
     setLoading(true);
     setErrorMessage(null);
     void listAdminICloudTasks(
-      resourceId,
+      item.id,
       (page - 1) * pageSize,
       pageSize,
       controller.signal,
@@ -974,12 +985,13 @@ export function ICloudTasksPanel({
           return;
         }
         setResponse(next);
-        if (next.items.some((task) => task.status === "queued" || task.status === "running")) {
-          pollTimer = globalThis.setTimeout(
-            () => setRefreshKey((value) => value + 1),
-            1500,
-          );
-        }
+        const pollDelay = next.items.some((task) => task.status === "queued" || task.status === "running")
+          ? 1500
+          : 5000;
+        pollTimer = globalThis.setTimeout(
+          () => setRefreshKey((value) => value + 1),
+          pollDelay,
+        );
       })
       .catch((error) => {
         if (!controller.signal.aborted) {
@@ -995,7 +1007,34 @@ export function ICloudTasksPanel({
       controller.abort();
       if (pollTimer) globalThis.clearTimeout(pollTimer);
     };
-  }, [page, pageSize, refreshGeneration, refreshKey, resourceId, t]);
+  }, [item.id, page, pageSize, refreshGeneration, refreshKey, t]);
+
+  const runAction = async (action: ICloudMaintenanceAction) => {
+    setBusy(action);
+    try {
+      if (action === "alias") {
+        const result = await createAdminICloudAliases(item.id, item.version);
+        setSubmittedVersion(result.version);
+        if (!result.changed) {
+          Toast.info(t("Alias target already reached."));
+        } else {
+          Toast.success(t("Alias creation batch submitted.", { count: 1 }));
+        }
+      } else {
+        const result = await validateAdminICloudResource(item.id, item.version);
+        setSubmittedVersion(result.version);
+        Toast.success(t("Resource validation submitted."));
+      }
+      setPage(1);
+      setRefreshKey((value) => value + 1);
+      await onRefresh();
+    } catch (error) {
+      Toast.error(getIamErrorMessage(t, error, "iCloud resource operation failed."));
+    } finally {
+      setSubmittedVersion(null);
+      setBusy(null);
+    }
+  };
 
   const columns = useMemo(
     () => [
@@ -1047,6 +1086,7 @@ export function ICloudTasksPanel({
   const successRate = response.total > 0
     ? Math.round((response.succeeded / response.total) * 100)
     : 0;
+  const awaitingVersionRefresh = submittedVersion !== null && item.version < submittedVersion;
 
   return (
     <div>
@@ -1055,6 +1095,28 @@ export function ICloudTasksPanel({
         <InfoItem label={t("Succeeded tasks")} value={<span className="font-mono tabular-nums">{response.succeeded}</span>} />
         <InfoItem label={t("Success rate")} value={<span className="font-mono tabular-nums">{successRate}%</span>} />
       </div>
+      {canOperate ? (
+        <div className="mb-4 flex flex-wrap gap-2">
+          <Button
+            disabled={item.status === "deleted" || item.status === "disabled" || busy !== null || awaitingVersionRefresh}
+            loading={busy === "validate"}
+            onClick={() => void runAction("validate")}
+            size="small"
+            type="tertiary"
+          >
+            {t("Validate")}
+          </Button>
+          <Button
+            disabled={item.status === "deleted" || item.status === "disabled" || item.aliasCount >= item.aliasLimit || busy !== null || awaitingVersionRefresh}
+            loading={busy === "alias"}
+            onClick={() => void runAction("alias")}
+            size="small"
+            type="tertiary"
+          >
+            {t("Create alias")}
+          </Button>
+        </div>
+      ) : null}
       {errorMessage ? (
         <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-[var(--semi-color-danger-light-active)] bg-[var(--semi-color-danger-light-default)] px-3 py-2 text-sm text-[var(--semi-color-text-0)]">
           <span>{errorMessage}</span>
@@ -1102,6 +1164,7 @@ export function ICloudDetailSheet({
   onDelete,
   onEdit,
   onMaintain,
+  onRefresh,
   onReplaceCredentials,
   onRecover,
   onSetExpiration,
@@ -1124,6 +1187,7 @@ export function ICloudDetailSheet({
   onDelete: (item: AdminICloudResourceItem) => void;
   onEdit: (item: AdminICloudResourceItem) => void;
   onMaintain: (item: AdminICloudResourceItem) => void;
+  onRefresh: () => void | Promise<void>;
   onReplaceCredentials: (item: AdminICloudResourceItem) => void;
   onRecover: (item: AdminICloudResourceItem) => void;
   onSetExpiration: (item: AdminICloudResourceItem) => void;
@@ -1298,6 +1362,16 @@ export function ICloudDetailSheet({
                     }
                   />
                   <InfoItem
+                    label={t("Forwarding mailbox")}
+                    value={
+                      item.selectedForwardTo ? (
+                        <CopyableTableText copiedText={t("Copied")} text={item.selectedForwardTo} />
+                      ) : (
+                        "-"
+                      )
+                    }
+                  />
+                  <InfoItem
                     label={t("Owner")}
                     value={<OwnerIdentity owner={item.owner} t={t} />}
                   />
@@ -1400,8 +1474,10 @@ export function ICloudDetailSheet({
 
             {activeTab === "tasks" && canReadTasks ? (
               <ICloudTasksPanel
+                canOperate={canOperate}
+                item={item}
+                onRefresh={onRefresh}
                 refreshGeneration={refreshGeneration}
-                resourceId={item.id}
               />
             ) : null}
 
@@ -1592,10 +1668,6 @@ export default function AdminICloudEmails() {
     statusFilter,
   ]);
 
-  const refresh = useCallback(() => {
-    setRefreshGeneration((value) => value + 1);
-  }, []);
-
   const loadDetail = useCallback(async (resourceId: number, silent = false) => {
     if (detailIdRef.current !== resourceId) return true;
     detailRequestRef.current?.abort();
@@ -1622,6 +1694,12 @@ export default function AdminICloudEmails() {
     }
   }, [t]);
 
+  const refresh = useCallback(async () => {
+    const resourceId = detailIdRef.current;
+    if (resourceId !== null) await loadDetail(resourceId, true);
+    setRefreshGeneration((value) => value + 1);
+  }, [loadDetail]);
+
   const openDetail = useCallback((resourceId: number) => {
     detailIdRef.current = resourceId;
     setDetailId(resourceId);
@@ -1642,12 +1720,6 @@ export default function AdminICloudEmails() {
     setDetail(null);
     setDetailLoading(false);
   }, []);
-
-  useEffect(() => {
-    const resourceId = detailIdRef.current;
-    if (resourceId === null) return;
-    void loadDetail(resourceId, true);
-  }, [loadDetail, refreshGeneration]);
 
   useEffect(() => {
     if (detailId === null || (detail?.status !== "pending" && detail?.status !== "validating")) {
@@ -1744,6 +1816,9 @@ export default function AdminICloudEmails() {
           candidate.id === item.id ? { ...candidate, ...patch } : candidate,
         ),
       );
+      setDetail((current) =>
+        current?.id === item.id ? { ...current, ...patch } : current,
+      );
     },
     [],
   );
@@ -1760,7 +1835,7 @@ export default function AdminICloudEmails() {
         const result = await operation();
         applyMutation(item, action, result);
         Toast.success(t(successKey));
-        refresh();
+        await refresh();
       } catch (error) {
         Toast.error(getIamErrorMessage(t, error, "iCloud resource operation failed."));
         if (detailIdRef.current === item.id) await loadDetail(item.id, true);
@@ -1941,7 +2016,7 @@ export default function AdminICloudEmails() {
                   );
             showBulkOutcome(response, "iCloud resource expiration updated.");
             if (!rowOperation) setSelectedKeys([]);
-            refresh();
+            await refresh();
           } catch (error) {
             Toast.error(getIamErrorMessage(t, error, "iCloud resource operation failed."));
             throw error;
@@ -1991,7 +2066,7 @@ export default function AdminICloudEmails() {
         showBulkOutcome(response, successKey);
         setSelectedKeys([]);
         if (action === "delete") setActivePage(1);
-        refresh();
+        await refresh();
       } catch (error) {
         Toast.error(getIamErrorMessage(t, error, "iCloud resource operation failed."));
       } finally {
@@ -2223,6 +2298,18 @@ export default function AdminICloudEmails() {
         ),
       },
       {
+        dataIndex: "selectedForwardTo",
+        key: "selectedForwardTo",
+        title: t("Forwarding mailbox"),
+        width: 260,
+        render: (value: unknown) =>
+          value ? (
+            <CopyableTableText copiedText={t("Copied")} text={String(value)} />
+          ) : (
+            "-"
+          ),
+      },
+      {
         dataIndex: "owner",
         key: "owner",
         title: t("Owner"),
@@ -2341,7 +2428,7 @@ export default function AdminICloudEmails() {
         <Button
           className="remail-toolbar-fixed-button flex-1 md:flex-none"
           loading={loading}
-          onClick={refresh}
+          onClick={() => void refresh()}
           size="small"
           type="tertiary"
         >
@@ -2609,7 +2696,7 @@ export default function AdminICloudEmails() {
           pagination={false}
           rowKey="id"
           rowSelection={canOperate ? rowSelection : undefined}
-          scroll={{ x: "max(100%, 1750px)", y: DESKTOP_TABLE_SCROLL_Y }}
+          scroll={{ x: "max(100%, 2010px)", y: DESKTOP_TABLE_SCROLL_Y }}
           size="middle"
         />
       </CardPro>
@@ -2619,7 +2706,7 @@ export default function AdminICloudEmails() {
         onImported={async () => {
           setActivePage(1);
           setSelectedKeys([]);
-          refresh();
+          await refresh();
         }}
         owners={owners}
         visible={importOpen && canWrite}
@@ -2628,8 +2715,8 @@ export default function AdminICloudEmails() {
       <EditICloudModal
         canOperate={canOperate}
         onCancel={() => setEditTarget(null)}
-        onSaved={() => {
-          refresh();
+        onSaved={async () => {
+          await refresh();
         }}
         owners={owners}
         target={editTarget}
@@ -2639,8 +2726,8 @@ export default function AdminICloudEmails() {
         canOperate
         credentialsOnly
         onCancel={() => setCredentialTarget(null)}
-        onSaved={() => {
-          refresh();
+        onSaved={async () => {
+          await refresh();
         }}
         owners={owners}
         target={credentialTarget}
@@ -2649,9 +2736,9 @@ export default function AdminICloudEmails() {
       <ICloudMaintenanceModal
         aliasLimit={aliasLimit}
         onCancel={() => setMaintenanceTarget(null)}
-        onCompleted={() => {
+        onCompleted={async () => {
           setSelectedKeys([]);
-          refresh();
+          await refresh();
         }}
         target={canOperate ? maintenanceTarget : null}
       />
@@ -2673,6 +2760,7 @@ export default function AdminICloudEmails() {
         onDelete={confirmDelete}
         onEdit={setEditTarget}
         onMaintain={(item) => setMaintenanceTarget({ item, mode: "row" })}
+        onRefresh={refresh}
         onReplaceCredentials={setCredentialTarget}
         onRecover={recoverResource}
         onSetExpiration={(item) => confirmExpiration(false, item.id)}

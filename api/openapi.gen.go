@@ -5426,32 +5426,35 @@ type AdminICloudOwnerSummaryRole string
 
 // AdminICloudResourceDetail defines model for AdminICloudResourceDetail.
 type AdminICloudResourceDetail struct {
-	AliasCount           int                                 `json:"aliasCount"`
-	AliasLimit           AdminICloudResourceDetailAliasLimit `json:"aliasLimit"`
-	AliasProvisioning    bool                                `json:"aliasProvisioning"`
-	AliasRemaining       int                                 `json:"aliasRemaining"`
-	CreatedAt            time.Time                           `json:"createdAt"`
-	CredentialRevision   int64                               `json:"credentialRevision"`
-	CredentialUpdatedAt  time.Time                           `json:"credentialUpdatedAt"`
-	ExpireAt             time.Time                           `json:"expireAt"`
-	ForSale              bool                                `json:"forSale"`
-	Id                   int                                 `json:"id"`
-	LastAliasSyncAt      *time.Time                          `json:"lastAliasSyncAt"`
-	LastAllocatedAt      *time.Time                          `json:"lastAllocatedAt"`
-	LastCheckedAt        *time.Time                          `json:"lastCheckedAt"`
-	LastSafeError        *string                             `json:"lastSafeError"`
-	LastValidAt          *time.Time                          `json:"lastValidAt"`
-	NewSession           *AdminICloudSessionView             `json:"newSession"`
-	NextProvisionAt      *time.Time                          `json:"nextProvisionAt"`
-	NextValidationAt     *time.Time                          `json:"nextValidationAt"`
-	OldSession           *AdminICloudSessionView             `json:"oldSession"`
-	Owner                AdminICloudOwnerSummary             `json:"owner"`
-	PrimaryEmail         openapi_types.Email                 `json:"primaryEmail"`
-	Status               AdminICloudResourceStatus           `json:"status"`
-	UpdatedAt            time.Time                           `json:"updatedAt"`
-	ValidationFailures   int                                 `json:"validationFailures"`
-	ValidationGeneration int64                               `json:"validationGeneration"`
-	Version              int                                 `json:"version"`
+	AliasCount          int                                 `json:"aliasCount"`
+	AliasLimit          AdminICloudResourceDetailAliasLimit `json:"aliasLimit"`
+	AliasProvisioning   bool                                `json:"aliasProvisioning"`
+	AliasRemaining      int                                 `json:"aliasRemaining"`
+	CreatedAt           time.Time                           `json:"createdAt"`
+	CredentialRevision  int64                               `json:"credentialRevision"`
+	CredentialUpdatedAt time.Time                           `json:"credentialUpdatedAt"`
+	ExpireAt            time.Time                           `json:"expireAt"`
+	ForSale             bool                                `json:"forSale"`
+	Id                  int                                 `json:"id"`
+	LastAliasSyncAt     *time.Time                          `json:"lastAliasSyncAt"`
+	LastAllocatedAt     *time.Time                          `json:"lastAllocatedAt"`
+	LastCheckedAt       *time.Time                          `json:"lastCheckedAt"`
+	LastSafeError       *string                             `json:"lastSafeError"`
+	LastValidAt         *time.Time                          `json:"lastValidAt"`
+	NewSession          *AdminICloudSessionView             `json:"newSession"`
+	NextProvisionAt     *time.Time                          `json:"nextProvisionAt"`
+	NextValidationAt    *time.Time                          `json:"nextValidationAt"`
+	OldSession          *AdminICloudSessionView             `json:"oldSession"`
+	Owner               AdminICloudOwnerSummary             `json:"owner"`
+	PrimaryEmail        openapi_types.Email                 `json:"primaryEmail"`
+
+	// SelectedForwardTo Last Apple HME forwarding mailbox observed during validation or provisioning.
+	SelectedForwardTo    string                    `json:"selectedForwardTo"`
+	Status               AdminICloudResourceStatus `json:"status"`
+	UpdatedAt            time.Time                 `json:"updatedAt"`
+	ValidationFailures   int                       `json:"validationFailures"`
+	ValidationGeneration int64                     `json:"validationGeneration"`
+	Version              int                       `json:"version"`
 }
 
 // AdminICloudResourceDetailAliasLimit defines model for AdminICloudResourceDetail.AliasLimit.
@@ -5459,25 +5462,28 @@ type AdminICloudResourceDetailAliasLimit int
 
 // AdminICloudResourceItem Administrator-safe operational facts. Cookies, DSID, host, client context, and provider request payloads are never returned.
 type AdminICloudResourceItem struct {
-	AliasCount       int                       `json:"aliasCount"`
-	CreatedAt        time.Time                 `json:"createdAt"`
-	ExpireAt         time.Time                 `json:"expireAt"`
-	ForSale          bool                      `json:"forSale"`
-	Id               int                       `json:"id"`
-	LastAliasSyncAt  *time.Time                `json:"lastAliasSyncAt"`
-	LastAllocatedAt  *time.Time                `json:"lastAllocatedAt"`
-	LastCheckedAt    *time.Time                `json:"lastCheckedAt"`
-	LastSafeError    *string                   `json:"lastSafeError"`
-	LastValidAt      *time.Time                `json:"lastValidAt"`
-	NewSession       *AdminICloudSessionView   `json:"newSession"`
-	NextProvisionAt  *time.Time                `json:"nextProvisionAt"`
-	NextValidationAt *time.Time                `json:"nextValidationAt"`
-	OldSession       *AdminICloudSessionView   `json:"oldSession"`
-	Owner            AdminICloudOwnerSummary   `json:"owner"`
-	PrimaryEmail     openapi_types.Email       `json:"primaryEmail"`
-	Status           AdminICloudResourceStatus `json:"status"`
-	UpdatedAt        time.Time                 `json:"updatedAt"`
-	Version          int                       `json:"version"`
+	AliasCount       int                     `json:"aliasCount"`
+	CreatedAt        time.Time               `json:"createdAt"`
+	ExpireAt         time.Time               `json:"expireAt"`
+	ForSale          bool                    `json:"forSale"`
+	Id               int                     `json:"id"`
+	LastAliasSyncAt  *time.Time              `json:"lastAliasSyncAt"`
+	LastAllocatedAt  *time.Time              `json:"lastAllocatedAt"`
+	LastCheckedAt    *time.Time              `json:"lastCheckedAt"`
+	LastSafeError    *string                 `json:"lastSafeError"`
+	LastValidAt      *time.Time              `json:"lastValidAt"`
+	NewSession       *AdminICloudSessionView `json:"newSession"`
+	NextProvisionAt  *time.Time              `json:"nextProvisionAt"`
+	NextValidationAt *time.Time              `json:"nextValidationAt"`
+	OldSession       *AdminICloudSessionView `json:"oldSession"`
+	Owner            AdminICloudOwnerSummary `json:"owner"`
+	PrimaryEmail     openapi_types.Email     `json:"primaryEmail"`
+
+	// SelectedForwardTo Last Apple HME forwarding mailbox observed during validation or provisioning.
+	SelectedForwardTo string                    `json:"selectedForwardTo"`
+	Status            AdminICloudResourceStatus `json:"status"`
+	UpdatedAt         time.Time                 `json:"updatedAt"`
+	Version           int                       `json:"version"`
 }
 
 // AdminICloudResourceListResponse defines model for AdminICloudResourceListResponse.

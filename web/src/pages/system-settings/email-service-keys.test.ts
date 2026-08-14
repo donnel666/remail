@@ -84,5 +84,6 @@ describe("system setting keys", () => {
     expect(emailResourcesSource).toContain('Toast.error(getIamErrorMessage');
     expect(emailResourcesSource).toContain('multiple');
     expect(emailResourcesSource).toContain('update("icloud_forwarding_suffixes"');
+    expect(emailResourcesSource).toContain('update("icloud_cookie_keepalive_minutes"');
   });
 });

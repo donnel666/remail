@@ -250,7 +250,7 @@ func (c *AppleAccountClient) request(
 	if response.StatusCode == http.StatusTooManyRequests || appleAccountBodyRateLimited(data) {
 		return &appleAccountError{
 			Category: "rate_limited", SafeMessage: "Apple Account alias creation is temporarily rate limited.",
-			RetryAfter: iCloudRetryAfter(response.Header.Get("Retry-After"), now),
+			RetryAfter: iCloudResponseRetryAfter(response.Header.Get("Retry-After"), data, now),
 		}
 	}
 	if response.StatusCode == http.StatusRequestTimeout || response.StatusCode >= 500 {
@@ -346,7 +346,7 @@ func (c *AppleAccountClient) portalRequest(ctx context.Context, channel *iCloudR
 	if response.StatusCode == http.StatusTooManyRequests || appleAccountBodyRateLimited(data) {
 		return &appleAccountError{
 			Category: "rate_limited", SafeMessage: "Apple Account alias creation is temporarily rate limited.",
-			RetryAfter: iCloudRetryAfter(response.Header.Get("Retry-After"), now),
+			RetryAfter: iCloudResponseRetryAfter(response.Header.Get("Retry-After"), data, now),
 		}
 	}
 	if response.StatusCode == http.StatusRequestTimeout || response.StatusCode >= 500 {

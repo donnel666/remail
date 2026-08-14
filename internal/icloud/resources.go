@@ -51,25 +51,26 @@ type AdminICloudSessionView struct {
 }
 
 type AdminICloudResourceView struct {
-	ID               uint                    `json:"id"`
-	Version          uint64                  `json:"version"`
-	PrimaryEmail     string                  `json:"primaryEmail"`
-	Owner            AdminICloudOwnerView    `json:"owner"`
-	Status           string                  `json:"status"`
-	ForSale          bool                    `json:"forSale"`
-	NewSession       *AdminICloudSessionView `json:"newSession"`
-	OldSession       *AdminICloudSessionView `json:"oldSession"`
-	AliasCount       uint                    `json:"aliasCount"`
-	ExpireAt         time.Time               `json:"expireAt"`
-	NextValidationAt *time.Time              `json:"nextValidationAt"`
-	NextProvisionAt  *time.Time              `json:"nextProvisionAt"`
-	LastCheckedAt    *time.Time              `json:"lastCheckedAt"`
-	LastValidAt      *time.Time              `json:"lastValidAt"`
-	LastAliasSyncAt  *time.Time              `json:"lastAliasSyncAt"`
-	LastAllocatedAt  *time.Time              `json:"lastAllocatedAt"`
-	LastSafeError    *string                 `json:"lastSafeError"`
-	CreatedAt        time.Time               `json:"createdAt"`
-	UpdatedAt        time.Time               `json:"updatedAt"`
+	ID                uint                    `json:"id"`
+	Version           uint64                  `json:"version"`
+	PrimaryEmail      string                  `json:"primaryEmail"`
+	SelectedForwardTo string                  `json:"selectedForwardTo"`
+	Owner             AdminICloudOwnerView    `json:"owner"`
+	Status            string                  `json:"status"`
+	ForSale           bool                    `json:"forSale"`
+	NewSession        *AdminICloudSessionView `json:"newSession"`
+	OldSession        *AdminICloudSessionView `json:"oldSession"`
+	AliasCount        uint                    `json:"aliasCount"`
+	ExpireAt          time.Time               `json:"expireAt"`
+	NextValidationAt  *time.Time              `json:"nextValidationAt"`
+	NextProvisionAt   *time.Time              `json:"nextProvisionAt"`
+	LastCheckedAt     *time.Time              `json:"lastCheckedAt"`
+	LastValidAt       *time.Time              `json:"lastValidAt"`
+	LastAliasSyncAt   *time.Time              `json:"lastAliasSyncAt"`
+	LastAllocatedAt   *time.Time              `json:"lastAllocatedAt"`
+	LastSafeError     *string                 `json:"lastSafeError"`
+	CreatedAt         time.Time               `json:"createdAt"`
+	UpdatedAt         time.Time               `json:"updatedAt"`
 }
 
 type AdminICloudResourceDetail struct {
@@ -87,6 +88,7 @@ type adminICloudResourceRow struct {
 	ID                      uint       `gorm:"column:id"`
 	Version                 uint64     `gorm:"column:version"`
 	PrimaryEmail            string     `gorm:"column:primary_email"`
+	SelectedForwardTo       string     `gorm:"column:selected_forward_to"`
 	OwnerID                 uint       `gorm:"column:owner_id"`
 	OwnerEmail              string     `gorm:"column:owner_email"`
 	OwnerNickname           string     `gorm:"column:owner_nickname"`
@@ -129,7 +131,7 @@ type adminICloudResourceRow struct {
 }
 
 const adminICloudResourceSelect = `
-	ir.id, er.version, ir.primary_email, er.owner_user_id AS owner_id,
+	ir.id, er.version, ir.primary_email, ir.selected_forward_to, er.owner_user_id AS owner_id,
 	u.email AS owner_email, u.nickname AS owner_nickname,
 	COALESCE(ug.name, '') AS owner_group_name, u.role AS owner_role,
 	u.status AS owner_status, ir.status, ir.for_sale,
@@ -272,7 +274,7 @@ func adminICloudResourceView(row adminICloudResourceRow) AdminICloudResourceView
 		safeError = &value
 	}
 	return AdminICloudResourceView{
-		ID: row.ID, Version: row.Version, PrimaryEmail: row.PrimaryEmail,
+		ID: row.ID, Version: row.Version, PrimaryEmail: row.PrimaryEmail, SelectedForwardTo: row.SelectedForwardTo,
 		Owner:  AdminICloudOwnerView{ID: row.OwnerID, Email: row.OwnerEmail, Nickname: row.OwnerNickname, GroupName: row.OwnerGroupName, Role: row.OwnerRole, Enabled: row.OwnerStatus == "active"},
 		Status: row.Status, ForSale: row.ForSale,
 		NewSession: adminICloudSessionView(row.NewChannelID, row.NewSessionStatus, row.NewSessionFailures, row.NewCooldownUntil, row.NewNextKeepaliveAt, row.NewLastCheckedAt, row.NewLastValidAt),
