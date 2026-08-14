@@ -140,6 +140,9 @@ func (s *Service) ApplyAdminICloudCommand(
 	if !replayed && result.Changed && commandQueuesICloudValidation(command) {
 		_ = s.ScheduleICloudValidationDispatcher(context.WithoutCancel(ctx), 0)
 	}
+	if !replayed && result.Changed && (command == AdminICloudAlias || command == AdminICloudExpire) {
+		_ = s.ScheduleICloudProvisionDispatcher(context.WithoutCancel(ctx), 0)
+	}
 	return result, nil
 }
 
@@ -169,6 +172,9 @@ func (s *Service) ApplyAdminICloudBatch(
 			return nil, ErrICloudResourceUpdate
 		}
 		value := normalizeICloudResourceExpireAt(*expireAt)
+		if !validICloudResourceExpireAt(value, s.now().UTC()) {
+			return nil, ErrICloudResourceUpdate
+		}
 		expireAt = &value
 	} else if expireAt != nil {
 		return nil, ErrICloudResourceSelection
@@ -200,9 +206,6 @@ func (s *Service) ApplyAdminICloudBatch(
 			return err
 		}
 		now := s.now().UTC()
-		if expireAt != nil && !validICloudResourceExpireAt(*expireAt, now) {
-			return ErrICloudResourceUpdate
-		}
 		resourceIDs, err := resolveAdminICloudSelectionTx(ctx, tx, selection)
 		if err != nil {
 			return err
@@ -249,6 +252,9 @@ func (s *Service) ApplyAdminICloudBatch(
 	}
 	if !replayed && result.Affected > 0 && commandQueuesICloudValidation(command) {
 		_ = s.ScheduleICloudValidationDispatcher(context.WithoutCancel(ctx), 0)
+	}
+	if !replayed && result.Affected > 0 && (command == AdminICloudAlias || command == AdminICloudExpire) {
+		_ = s.ScheduleICloudProvisionDispatcher(context.WithoutCancel(ctx), 0)
 	}
 	return result, nil
 }
@@ -342,7 +348,7 @@ func validAdminICloudBatchCommand(command AdminICloudCommand) bool {
 }
 
 func commandQueuesICloudValidation(command AdminICloudCommand) bool {
-	return command == AdminICloudValidate || command == AdminICloudAlias || command == AdminICloudEnable || command == AdminICloudRecover
+	return command == AdminICloudValidate || command == AdminICloudEnable || command == AdminICloudRecover
 }
 
 func resolveAdminICloudSelectionTx(ctx context.Context, tx *gorm.DB, selection AdminICloudResourceSelection) ([]uint, error) {
@@ -434,7 +440,7 @@ func mutateAdminICloudResourceTx(
 		if resource.Status == iCloudResourceDisabled {
 			return nil, false, ErrICloudResourceStatus
 		}
-		queuedGeneration = queueAdminICloudValidation(updates, resource, now, false)
+		queuedGeneration = queueAdminICloudValidation(updates, resource, now)
 	case AdminICloudAlias:
 		if resource.Status == iCloudResourceDeleted {
 			return nil, false, ErrICloudResourceNotFound
@@ -445,27 +451,24 @@ func mutateAdminICloudResourceTx(
 		if resource.AliasCount >= iCloudMaxAliases {
 			return adminICloudMutationResult(root, resource), false, nil
 		}
-		var activeRun iCloudMaintenanceRunModel
-		active := tx.WithContext(ctx).
-			Where("resource_id = ? AND status IN ?", resourceID, []string{iCloudMaintenanceQueued, iCloudMaintenanceRunning}).
-			Order("id DESC").Limit(1).Find(&activeRun)
-		if active.Error != nil {
-			return nil, false, active.Error
+		if !resource.ExpireAt.After(now) {
+			return adminICloudMutationResult(root, resource), false, nil
 		}
-		if active.RowsAffected > 0 {
-			if activeRun.Kind == iCloudMaintenanceAlias {
-				return adminICloudMutationResult(root, resource), false, nil
-			}
-			return nil, false, ErrICloudResourceStatus
+		var usableChannels int64
+		if err := tx.WithContext(ctx).Model(&iCloudResourceChannelModel{}).
+			Where("resource_id = ? AND session_status <> ?", resourceID, iCloudSessionInvalid).
+			Count(&usableChannels).Error; err != nil {
+			return nil, false, err
 		}
-		queuedGeneration = resource.ValidationGeneration + 1
-		updates["validation_generation"] = queuedGeneration
-		updates["next_validation_at"] = now
+		if usableChannels == 0 {
+			return adminICloudMutationResult(root, resource), false, nil
+		}
+		updates["next_provision_at"] = now
 	case AdminICloudEnable:
 		if resource.Status != iCloudResourceDisabled {
 			return nil, false, ErrICloudResourceStatus
 		}
-		queuedGeneration = queueAdminICloudValidation(updates, resource, now, true)
+		queuedGeneration = queueAdminICloudValidation(updates, resource, now)
 	case AdminICloudDisable:
 		if resource.Status == iCloudResourceDeleted {
 			return nil, false, ErrICloudResourceNotFound
@@ -475,7 +478,7 @@ func mutateAdminICloudResourceTx(
 		}
 		updates["status"] = iCloudResourceDisabled
 		updates["next_validation_at"] = nil
-		updates["next_keepalive_at"] = nil
+		updates["next_provision_at"] = nil
 	case AdminICloudPublish:
 		if resource.Status == iCloudResourceDeleted {
 			return nil, false, ErrICloudResourceNotFound
@@ -505,14 +508,14 @@ func mutateAdminICloudResourceTx(
 		updates["status"] = iCloudResourceDeleted
 		updates["for_sale"] = false
 		updates["next_validation_at"] = nil
-		updates["next_keepalive_at"] = nil
+		updates["next_provision_at"] = nil
 		updates["last_allocated_at"] = nil
 		updates["last_safe_error"] = ""
 	case AdminICloudRecover:
 		if resource.Status != iCloudResourceDeleted {
 			return nil, false, ErrICloudResourceStatus
 		}
-		queuedGeneration = queueAdminICloudValidation(updates, resource, now, true)
+		queuedGeneration = queueAdminICloudValidation(updates, resource, now)
 	case AdminICloudExpire:
 		if resource.Status == iCloudResourceDeleted {
 			return nil, false, ErrICloudResourceNotFound
@@ -524,6 +527,11 @@ func mutateAdminICloudResourceTx(
 			return adminICloudMutationResult(root, resource), false, nil
 		}
 		updates["expire_at"] = *expireAt
+		if resource.Status == iCloudResourceNormal && expireAt.After(now) && resource.AliasCount < iCloudMaxAliases {
+			updates["next_provision_at"] = now
+		} else {
+			updates["next_provision_at"] = nil
+		}
 	default:
 		return nil, false, ErrICloudResourceQuery
 	}
@@ -534,7 +542,7 @@ func mutateAdminICloudResourceTx(
 	}
 	if queuedGeneration > 0 {
 		if _, err := ensureICloudMaintenanceRunTx(
-			ctx, tx, resourceID, queuedGeneration, iCloudMaintenanceKindForCommand(command),
+			ctx, tx, resourceID, queuedGeneration, iCloudMaintenanceValidation,
 			resource.CredentialRevision, 0, now,
 		); err != nil {
 			return nil, false, err
@@ -568,7 +576,7 @@ func mutateAdminICloudResourceTx(
 	return adminICloudMutationResult(root, resource), true, nil
 }
 
-func queueAdminICloudValidation(updates map[string]any, resource iCloudResourceModel, now time.Time, resetSession bool) uint64 {
+func queueAdminICloudValidation(updates map[string]any, resource iCloudResourceModel, now time.Time) uint64 {
 	generation := resource.ValidationGeneration
 	if generation == 0 {
 		generation = 1
@@ -579,18 +587,8 @@ func queueAdminICloudValidation(updates map[string]any, resource iCloudResourceM
 	updates["validation_generation"] = generation
 	updates["validation_failures"] = 0
 	updates["next_validation_at"] = now
+	updates["next_provision_at"] = nil
 	updates["last_safe_error"] = ""
-	updates["delivery_probe_token"] = ""
-	updates["delivery_probe_alias"] = ""
-	updates["delivery_probe_started_at"] = nil
-	updates["delivery_probe_verified_at"] = nil
-	if resetSession {
-		updates["for_sale"] = false
-		updates["session_status"] = iCloudSessionUnchecked
-		updates["session_failures"] = 0
-		updates["next_keepalive_at"] = nil
-		updates["last_valid_at"] = nil
-	}
 	return generation
 }
 

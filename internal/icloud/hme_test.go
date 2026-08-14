@@ -32,7 +32,7 @@ func TestHMEListBuildsSafeRequestAndMergesSetCookie(t *testing.T) {
 	if seen == nil || seen.URL.Path != "/v2/hme/list" || seen.URL.Query().Get("dsid") != "123" || seen.Header.Get("Cookie") != cookie {
 		t.Fatalf("unexpected HME request: %#v", seen)
 	}
-	if len(result.Aliases) != 1 || result.Aliases[0].Email != "abc@icloud.com" || result.SelectedForwardTo != "icloud@aishop6.com" {
+	if len(result.Aliases) != 1 || result.Aliases[0].Email != "abc@icloud.com" || !result.Aliases[0].Active {
 		t.Fatalf("unexpected HME result: %#v", result)
 	}
 	if !strings.Contains(result.UpdatedCookie, "X-APPLE-WEBAUTH-TOKEN=rotated") {
@@ -174,8 +174,8 @@ func TestHMEListFollowsContinuationAndRequiresCompleteTotal(t *testing.T) {
 	if err != nil || !result.Complete || len(result.Aliases) != 2 || calls != 2 {
 		t.Fatalf("paged list: result=%#v calls=%d err=%v", result, calls, err)
 	}
-	if result.Aliases[1].ForwardToEmail != "icloud@aishop6.com" {
-		t.Fatalf("account forwarding target was not inherited: %#v", result.Aliases[1])
+	if result.Aliases[1].Email != "two@icloud.com" {
+		t.Fatalf("unexpected second page alias: %#v", result.Aliases[1])
 	}
 
 	incomplete := NewHMEClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
@@ -233,9 +233,9 @@ func TestHMEListCarriesEarlierPageCookieAcrossTransportFailure(t *testing.T) {
 	}
 }
 
-func TestHMEGenerateReserveAndActivateUseTheImportedRequestContext(t *testing.T) {
+func TestHMEGenerateAndReserveUseTheImportedRequestContext(t *testing.T) {
 	const cookie = "X-APPLE-DS-WEB-SESSION-TOKEN=session; X-APPLE-WEBAUTH-USER=user; X-APPLE-WEBAUTH-TOKEN=token"
-	paths := make([]string, 0, 3)
+	paths := make([]string, 0, 2)
 	client := NewHMEClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
 		paths = append(paths, request.URL.Path)
 		if request.Method != http.MethodPost || request.URL.Query().Get("dsid") != "123" || request.Header.Get("Cookie") != cookie {
@@ -245,8 +245,6 @@ func TestHMEGenerateReserveAndActivateUseTheImportedRequestContext(t *testing.T)
 		switch request.URL.Path {
 		case "/v1/hme/reserve":
 			body = `{"success":true,"result":{"hme":{"hme":"candidate@icloud.com","anonymousId":"candidate-id","recipientMailId":"candidate-recipient","forwardToEmail":"icloud@aishop6.com","isActive":true}}}`
-		case "/v1/hme/activate":
-			body = `{"success":true}`
 		}
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
 	})})
@@ -256,13 +254,10 @@ func TestHMEGenerateReserveAndActivateUseTheImportedRequestContext(t *testing.T)
 		t.Fatalf("generate: candidate=%q cookie=%q err=%v", candidate, updatedCookie, err)
 	}
 	alias, _, err := client.reserve(context.Background(), config, candidate, "ReMail", "")
-	if err != nil || alias.Email != candidate || alias.AnonymousID != "candidate-id" || alias.RecipientMailID != "candidate-recipient" {
+	if err != nil || alias.Email != candidate || alias.AnonymousID != "candidate-id" || !alias.Active {
 		t.Fatalf("reserve: alias=%#v err=%v", alias, err)
 	}
-	if _, err := client.Activate(context.Background(), config, alias.AnonymousID); err != nil {
-		t.Fatalf("activate: %v", err)
-	}
-	if len(paths) != 3 || paths[0] != "/v1/hme/generate" || paths[1] != "/v1/hme/reserve" || paths[2] != "/v1/hme/activate" {
+	if len(paths) != 2 || paths[0] != "/v1/hme/generate" || paths[1] != "/v1/hme/reserve" {
 		t.Fatalf("unexpected mutation sequence: %#v", paths)
 	}
 }

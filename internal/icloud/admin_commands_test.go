@@ -13,461 +13,204 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestApplyAdminICloudCommandFencesLifecycleAndProtectsActiveAllocation(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:icloud-admin-commands?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open database: %v", err)
-	}
-	if err := db.AutoMigrate(
-		&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudAdminTestUser{},
-		&iCloudMaintenanceRunModel{},
-		&governanceinfra.OperationLogModel{},
-		&coreinfra.AdminResourceCommandReceiptModel{},
-	); err != nil {
-		t.Fatalf("migrate database: %v", err)
-	}
-	now := time.Date(2026, 8, 7, 8, 0, 0, 0, time.UTC)
-	if err := db.Create(&iCloudAdminTestUser{ID: 7, Email: "owner@example.com", Status: "active", Role: "supplier"}).Error; err != nil {
-		t.Fatalf("create owner: %v", err)
-	}
-	if err := db.Create(&iCloudRootModel{ID: 1, Type: "icloud", OwnerUserID: 7, Version: 1, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
-		t.Fatalf("create root: %v", err)
-	}
-	if err := db.Create(&iCloudResourceModel{
-		ID: 1, ResourceType: "icloud", PrimaryEmail: "main@icloud.com", Status: iCloudResourceNormal,
-		SessionStatus: iCloudSessionValid, CredentialRevision: 1, ValidationGeneration: 1,
-		ExpireAt: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now,
+func TestApplyAdminICloudValidationResetsOnlyHealthScheduling(t *testing.T) {
+	db := newAdminICloudCommandTestDB(t, "icloud-admin-validate")
+	now := time.Date(2026, 8, 14, 8, 0, 0, 0, time.UTC)
+	nextProvisionAt := now.Add(time.Minute)
+	createAdminICloudCommandResource(t, db, now, iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "owner@icloud.com", IMAPAppPassword: "app-password",
+		Status: iCloudResourceNormal, ExpireAt: now.Add(time.Hour), CredentialRevision: 2,
+		ValidationGeneration: 3, NextProvisionAt: &nextProvisionAt,
+	})
+	if err := db.Create(&iCloudResourceChannelModel{
+		ResourceID: 1, Kind: iCloudChannelWeb, Host: "p119-maildomainws.icloud.com", Cookie: "secret",
+		SessionStatus: iCloudSessionInvalid, SessionFailures: 4, CreatedAt: now, UpdatedAt: now,
 	}).Error; err != nil {
-		t.Fatalf("create resource: %v", err)
-	}
-	service := NewService(db, nil, nil)
-	ctx := context.Background()
-
-	disabled, err := service.ApplyAdminICloudCommand(ctx, AdminICloudDisable, 1, 1, 99, "key-1", "request-1", "/disable")
-	if err != nil || disabled.Status != iCloudResourceDisabled || disabled.Version != 2 {
-		t.Fatalf("disable result = %#v err=%v", disabled, err)
-	}
-	replayed, err := service.ApplyAdminICloudCommand(ctx, AdminICloudDisable, 1, 1, 99, "key-1", "request-retry", "/disable")
-	if err != nil || *replayed != *disabled {
-		t.Fatalf("disable replay = %#v err=%v", replayed, err)
-	}
-	enabled, err := service.ApplyAdminICloudCommand(ctx, AdminICloudEnable, 1, 2, 99, "key-2", "request-2", "/enable")
-	if err != nil || enabled.Status != iCloudResourcePending || enabled.ForSale || enabled.Version != 3 {
-		t.Fatalf("enable result = %#v err=%v", enabled, err)
-	}
-	var validationRun iCloudMaintenanceRunModel
-	if err := db.Where("resource_id = ? AND validation_generation = ?", 1, 2).Take(&validationRun).Error; err != nil {
-		t.Fatalf("load validation maintenance run: %v", err)
-	}
-	if validationRun.Kind != iCloudMaintenanceValidation {
-		t.Fatalf("enable queued maintenance kind %q", validationRun.Kind)
-	}
-	if _, err := service.ApplyAdminICloudCommand(ctx, AdminICloudValidate, 1, 2, 99, "key-stale", "stale", "/validation"); !errors.Is(err, ErrICloudResourceVersion) {
-		t.Fatalf("stale command error = %v", err)
-	}
-
-	published, err := service.ApplyAdminICloudCommand(ctx, AdminICloudPublish, 1, 3, 99, "key-3", "request-3", "/publish")
-	if err != nil || !published.ForSale || published.Version != 4 {
-		t.Fatalf("publish result = %#v err=%v", published, err)
-	}
-	private, err := service.ApplyAdminICloudCommand(ctx, AdminICloudUnpublish, 1, 4, 99, "key-4", "request-4", "/unpublish")
-	if err != nil || private.ForSale || private.Version != 5 {
-		t.Fatalf("unpublish result = %#v err=%v", private, err)
-	}
-	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", 1).Update("status", iCloudResourceDeleted).Error; err != nil {
-		t.Fatalf("mark resource deleted for recovery test: %v", err)
-	}
-	recovered, err := service.ApplyAdminICloudCommand(ctx, AdminICloudRecover, 1, 5, 99, "key-5", "request-5", "/recover")
-	if err != nil || recovered.Status != iCloudResourcePending || recovered.ForSale || recovered.Version != 6 {
-		t.Fatalf("recover result = %#v err=%v", recovered, err)
-	}
-	var logs int64
-	if err := db.Model(&governanceinfra.OperationLogModel{}).Count(&logs).Error; err != nil {
-		t.Fatalf("count operation logs: %v", err)
-	}
-	if logs != 5 {
-		t.Fatalf("operation log count = %d, want 5 successful commands", logs)
-	}
-}
-
-func TestEditAdminICloudResourceUpdatesSafeFieldsAndWriteOnlyCredentials(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:icloud-admin-edit?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open database: %v", err)
-	}
-	if err := db.AutoMigrate(
-		&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudAdminTestUser{},
-		&iCloudImportAllocationTestModel{}, &governanceinfra.OperationLogModel{},
-		&iCloudMaintenanceRunModel{},
-		&coreinfra.AdminResourceCommandReceiptModel{},
-	); err != nil {
-		t.Fatalf("migrate database: %v", err)
-	}
-	now := time.Date(2026, 8, 8, 8, 0, 0, 0, time.UTC)
-	for _, owner := range []iCloudAdminTestUser{
-		{ID: 7, Email: "old-owner@example.com", Status: "active", Role: "supplier"},
-		{ID: 8, Email: "new-owner@example.com", Status: "active", Role: "supplier"},
-	} {
-		if err := db.Create(&owner).Error; err != nil {
-			t.Fatalf("create owner: %v", err)
-		}
-	}
-	if err := db.Create(&iCloudRootModel{ID: 1, Type: "icloud", OwnerUserID: 7, Version: 1, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
-		t.Fatalf("create root: %v", err)
-	}
-	if err := db.Create(&iCloudResourceModel{
-		ID: 1, ResourceType: "icloud", PrimaryEmail: "old@icloud.com", Host: "p119-maildomainws.icloud.com",
-		DSID: "old-dsid", ClientID: "old-client", ClientBuildNumber: "old-build", ClientMasteringNumber: "old-master",
-		Cookie:  "X-APPLE-DS-WEB-SESSION-TOKEN=old; X-APPLE-WEBAUTH-USER=old; X-APPLE-WEBAUTH-TOKEN=old",
-		ForSale: true, Status: iCloudResourceNormal, SessionStatus: iCloudSessionValid,
-		CredentialRevision: 1, ValidationGeneration: 1, ExpireAt: now.Add(30 * 24 * time.Hour), CreatedAt: now, UpdatedAt: now,
-	}).Error; err != nil {
-		t.Fatalf("create resource: %v", err)
+		t.Fatalf("create channel: %v", err)
 	}
 
 	service := NewService(db, nil, nil)
 	service.now = func() time.Time { return now }
-	service.SetImportOwnerValidator(func(_ context.Context, ownerID uint) (bool, error) { return ownerID == 8, nil })
-	primaryEmail := " corrected@icloud.com "
-	ownerID := uint(8)
+	result, err := service.ApplyAdminICloudCommand(
+		context.Background(), AdminICloudValidate, 1, 1, 99,
+		"validate-1", "request-1", "/v1/admin/icloud/resources/1/validation",
+	)
+	if err != nil {
+		t.Fatalf("validate command: %v", err)
+	}
+	if !result.Changed || result.Status != iCloudResourcePending || result.Version != 2 {
+		t.Fatalf("unexpected mutation result: %#v", result)
+	}
+	var resource iCloudResourceModel
+	if err := db.First(&resource, 1).Error; err != nil {
+		t.Fatalf("read resource: %v", err)
+	}
+	if resource.Status != iCloudResourcePending || resource.ValidationGeneration != 4 ||
+		resource.NextValidationAt == nil || resource.NextProvisionAt != nil {
+		t.Fatalf("unexpected validation state: %#v", resource)
+	}
+	var channel iCloudResourceChannelModel
+	if err := db.Where("resource_id = ?", 1).First(&channel).Error; err != nil {
+		t.Fatalf("read channel: %v", err)
+	}
+	if channel.SessionStatus != iCloudSessionInvalid || channel.SessionFailures != 4 || channel.Cookie != "secret" {
+		t.Fatalf("validation changed provisioning channel: %#v", channel)
+	}
+}
+
+func TestEditAdminICloudResourceUsesCompleteImportLine(t *testing.T) {
+	db := newAdminICloudCommandTestDB(t, "icloud-admin-edit")
+	now := time.Date(2026, 8, 14, 9, 0, 0, 0, time.UTC)
+	createAdminICloudCommandResource(t, db, now, iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "owner@icloud.com", IMAPAppPassword: "old-app-password",
+		Status: iCloudResourceNormal, ExpireAt: now.Add(time.Hour), CredentialRevision: 1, ValidationGeneration: 1,
+	})
+	if err := db.Create(&iCloudResourceChannelModel{
+		ResourceID: 1, Kind: iCloudChannelWeb, Host: "p119-maildomainws.icloud.com", Cookie: "old-secret",
+		SessionStatus: iCloudSessionInvalid, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create old channel: %v", err)
+	}
+
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	line := "owner@icloud.com----new-app-password----" + testICloudNewCurl + "----" + testICloudOldCurl
+	expireAt := now.Add(48 * time.Hour)
 	result, err := service.EditAdminICloudResource(context.Background(), AdminICloudEditCommand{
-		ResourceID: 1, Version: 1, PrimaryEmail: &primaryEmail, OwnerUserID: &ownerID,
-		Credentials: &AdminICloudCredentialsInput{
-			Host: "p120-maildomainws.icloud.com", DSID: "new-dsid", ClientID: "new-client",
-			ClientBuildNumber: "new-build", ClientMasteringNumber: "new-master",
-			Cookie: "X-APPLE-DS-WEB-SESSION-TOKEN=new; X-APPLE-WEBAUTH-USER=new; X-APPLE-WEBAUTH-TOKEN=new",
-		},
-		OperatorUserID: 99, IdempotencyKey: "edit-key-1", RequestID: "request-edit-1", Path: "/v1/admin/icloud/resources/:resourceId",
+		ResourceID: 1, Version: 1, ImportLine: &line, ExpireAt: &expireAt,
+		OperatorUserID: 99, IdempotencyKey: "edit-1", RequestID: "request-1", Path: "/v1/admin/icloud/resources/1",
 	})
 	if err != nil {
-		t.Fatalf("edit resource: %v", err)
+		t.Fatalf("edit credentials: %v", err)
 	}
-	if result.Version != 2 || result.Status != iCloudResourcePending || result.ForSale {
+	if !result.Changed || result.Version != 2 || result.Status != iCloudResourcePending {
 		t.Fatalf("unexpected edit result: %#v", result)
 	}
-	var root iCloudRootModel
 	var resource iCloudResourceModel
-	if err := db.First(&root, 1).Error; err != nil {
-		t.Fatalf("load root: %v", err)
-	}
 	if err := db.First(&resource, 1).Error; err != nil {
-		t.Fatalf("load resource: %v", err)
+		t.Fatalf("read resource: %v", err)
 	}
-	if root.OwnerUserID != 8 || root.Version != 2 || resource.PrimaryEmail != "corrected@icloud.com" ||
-		resource.DSID != "new-dsid" || resource.CredentialRevision != 2 || resource.SessionStatus != iCloudSessionUnchecked ||
-		!strings.Contains(resource.Cookie, "X-APPLE-WEBAUTH-TOKEN=new") {
-		t.Fatalf("unexpected stored edit: root=%#v resource=%#v", root, resource)
+	if resource.IMAPAppPassword != "new-app-password" || resource.CredentialRevision != 2 ||
+		resource.ValidationGeneration != 2 || resource.Status != iCloudResourcePending ||
+		resource.NextValidationAt == nil || resource.NextProvisionAt != nil || !resource.ExpireAt.Equal(expireAt) {
+		t.Fatalf("unexpected edited resource: %#v", resource)
 	}
-	validationGeneration := resource.ValidationGeneration
-	var maintenanceRunsBefore int64
-	if err := db.Model(&iCloudMaintenanceRunModel{}).Count(&maintenanceRunsBefore).Error; err != nil {
-		t.Fatalf("count maintenance runs before expiration edit: %v", err)
+	var channels []iCloudResourceChannelModel
+	if err := db.Where("resource_id = ?", 1).Order("kind").Find(&channels).Error; err != nil {
+		t.Fatalf("read channels: %v", err)
 	}
-	expireAt := now.Add(45 * 24 * time.Hour)
-	result, err = service.EditAdminICloudResource(context.Background(), AdminICloudEditCommand{
-		ResourceID: 1, Version: 2, ExpireAt: &expireAt, OperatorUserID: 99,
-		IdempotencyKey: "edit-expiration", RequestID: "request-expiration", Path: "/v1/admin/icloud/resources/:resourceId",
-	})
-	if err != nil {
-		t.Fatalf("edit resource expiration: %v", err)
+	if len(channels) != 2 || channels[0].Kind != iCloudChannelAppleAccount || channels[1].Kind != iCloudChannelWeb {
+		t.Fatalf("unexpected edited channels: %#v", channels)
 	}
-	if err := db.First(&root, 1).Error; err != nil {
-		t.Fatalf("reload root after expiration edit: %v", err)
-	}
-	if err := db.First(&resource, 1).Error; err != nil {
-		t.Fatalf("reload resource after expiration edit: %v", err)
-	}
-	var maintenanceRunsAfter int64
-	if err := db.Model(&iCloudMaintenanceRunModel{}).Count(&maintenanceRunsAfter).Error; err != nil {
-		t.Fatalf("count maintenance runs after expiration edit: %v", err)
-	}
-	if result.Version != 3 || root.Version != 3 || !resource.ExpireAt.Equal(expireAt) ||
-		resource.ValidationGeneration != validationGeneration || maintenanceRunsAfter != maintenanceRunsBefore {
-		t.Fatalf("expiration edit queued maintenance: result=%#v root=%#v resource=%#v runs=%d->%d", result, root, resource, maintenanceRunsBefore, maintenanceRunsAfter)
-	}
-	now = expireAt.Add(time.Hour)
-	replayed, err := service.EditAdminICloudResource(context.Background(), AdminICloudEditCommand{
-		ResourceID: 1, Version: 2, ExpireAt: &expireAt, OperatorUserID: 99,
-		IdempotencyKey: "edit-expiration", RequestID: "request-expiration-retry", Path: "/v1/admin/icloud/resources/:resourceId",
-	})
-	if err != nil || *replayed != *result {
-		t.Fatalf("replay expired edit: result=%#v err=%v", replayed, err)
-	}
-
-	if err := db.Create(&iCloudImportAllocationTestModel{ID: 1, ResourceID: 1, Status: "allocated"}).Error; err != nil {
-		t.Fatalf("create allocation: %v", err)
-	}
-	nextEmail := "blocked@icloud.com"
-	if _, err := service.EditAdminICloudResource(context.Background(), AdminICloudEditCommand{
-		ResourceID: 1, Version: 3, PrimaryEmail: &nextEmail, OperatorUserID: 99,
-		IdempotencyKey: "edit-key-2", RequestID: "request-edit-2", Path: "/v1/admin/icloud/resources/:resourceId",
-	}); !errors.Is(err, ErrICloudResourceAllocation) {
-		t.Fatalf("active-allocation edit error = %v", err)
-	}
-}
-
-func TestEditAdminICloudResourceFencesIdentityChanges(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:icloud-admin-identity-edit?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open database: %v", err)
-	}
-	if err := db.AutoMigrate(
-		&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudAdminTestUser{},
-		&iCloudImportAllocationTestModel{}, &governanceinfra.OperationLogModel{},
-		&iCloudMaintenanceRunModel{},
-		&coreinfra.AdminResourceCommandReceiptModel{},
-	); err != nil {
-		t.Fatalf("migrate database: %v", err)
-	}
-	now := time.Date(2026, 8, 8, 9, 0, 0, 0, time.UTC)
-	for _, owner := range []iCloudAdminTestUser{
-		{ID: 7, Email: "old-owner@example.com", Status: "active", Role: "supplier"},
-		{ID: 8, Email: "new-owner@example.com", Status: "active", Role: "supplier"},
-	} {
-		if err := db.Create(&owner).Error; err != nil {
-			t.Fatalf("create owner: %v", err)
+	for _, channel := range channels {
+		if channel.SessionStatus != iCloudSessionUnchecked {
+			t.Fatalf("edited channel was not reset: %#v", channel)
 		}
-	}
-	if err := db.Create(&iCloudRootModel{ID: 1, Type: "icloud", OwnerUserID: 7, Version: 1, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
-		t.Fatalf("create root: %v", err)
-	}
-	credentials := AdminICloudCredentialsInput{
-		Host: "p119-maildomainws.icloud.com", DSID: "same-dsid", ClientID: "same-client",
-		ClientBuildNumber: "same-build", ClientMasteringNumber: "same-master",
-		Cookie: "X-APPLE-DS-WEB-SESSION-TOKEN=same; X-APPLE-WEBAUTH-USER=same; X-APPLE-WEBAUTH-TOKEN=same",
-	}
-	if err := db.Create(&iCloudResourceModel{
-		ID: 1, ResourceType: "icloud", PrimaryEmail: "old@icloud.com", Host: credentials.Host,
-		DSID: credentials.DSID, ClientID: credentials.ClientID, ClientBuildNumber: credentials.ClientBuildNumber,
-		ClientMasteringNumber: credentials.ClientMasteringNumber, Cookie: credentials.Cookie,
-		ForSale: true, Status: iCloudResourceNormal, SessionStatus: iCloudSessionValid,
-		CredentialRevision: 3, CredentialUpdatedAt: now.Add(-time.Hour), ValidationGeneration: 4,
-		ExpireAt: now.Add(30 * 24 * time.Hour), CreatedAt: now, UpdatedAt: now,
-	}).Error; err != nil {
-		t.Fatalf("create resource: %v", err)
-	}
-	service := NewService(db, nil, nil)
-	service.now = func() time.Time { return now }
-	service.SetImportOwnerValidator(func(_ context.Context, ownerID uint) (bool, error) {
-		return ownerID == 7 || ownerID == 8, nil
-	})
-
-	nextEmail := "new@icloud.com"
-	if _, err := service.EditAdminICloudResource(context.Background(), AdminICloudEditCommand{
-		ResourceID: 1, Version: 1, PrimaryEmail: &nextEmail, OperatorUserID: 99,
-		IdempotencyKey: "identity-email-without-credentials", RequestID: "identity-1", Path: "/edit",
-	}); !errors.Is(err, ErrICloudResourceUpdate) {
-		t.Fatalf("email-only edit error = %v", err)
-	}
-
-	result, err := service.EditAdminICloudResource(context.Background(), AdminICloudEditCommand{
-		ResourceID: 1, Version: 1, PrimaryEmail: &nextEmail, Credentials: &credentials,
-		OperatorUserID: 99, IdempotencyKey: "identity-email-with-credentials", RequestID: "identity-2", Path: "/edit",
-	})
-	if err != nil {
-		t.Fatalf("email and credential edit: %v", err)
-	}
-	var resource iCloudResourceModel
-	if err := db.First(&resource, 1).Error; err != nil {
-		t.Fatalf("load edited resource: %v", err)
-	}
-	if result.Version != 2 || result.Status != iCloudResourcePending || result.ForSale ||
-		resource.PrimaryEmail != nextEmail || resource.CredentialRevision != 4 ||
-		resource.ValidationGeneration != 5 || resource.SessionStatus != iCloudSessionUnchecked ||
-		resource.NextValidationAt == nil || !resource.NextValidationAt.Equal(now) {
-		t.Fatalf("email identity was not fenced: result=%#v resource=%#v", result, resource)
 	}
 
 	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", 1).
-		Updates(map[string]any{"status": iCloudResourceValidating, "for_sale": true}).Error; err != nil {
-		t.Fatalf("prepare validating owner edit: %v", err)
+		Updates(map[string]any{"status": iCloudResourceNormal, "next_validation_at": nil}).Error; err != nil {
+		t.Fatalf("mark IMAP healthy: %v", err)
 	}
-	ownerID := uint(8)
+	now = now.Add(time.Minute)
+	rotated := strings.Replace(testICloudNewCurl, "myacinfo=secret", "myacinfo=rotated", 1)
+	line = "owner@icloud.com----new-app-password----" + rotated
 	result, err = service.EditAdminICloudResource(context.Background(), AdminICloudEditCommand{
-		ResourceID: 1, Version: 2, OwnerUserID: &ownerID, OperatorUserID: 99,
-		IdempotencyKey: "identity-owner", RequestID: "identity-3", Path: "/edit",
+		ResourceID: 1, Version: 2, ImportLine: &line,
+		OperatorUserID: 99, IdempotencyKey: "edit-2", RequestID: "request-2", Path: "/v1/admin/icloud/resources/1",
 	})
 	if err != nil {
-		t.Fatalf("owner edit: %v", err)
+		t.Fatalf("edit channel only: %v", err)
 	}
-	var root iCloudRootModel
-	if err := db.First(&root, 1).Error; err != nil {
-		t.Fatalf("load edited root: %v", err)
+	if result.Status != iCloudResourceNormal {
+		t.Fatalf("cookie edit changed resource health: %#v", result)
 	}
-	if err := db.First(&resource, 1).Error; err != nil {
-		t.Fatalf("reload owner-edited resource: %v", err)
+	var channelOnlyResource iCloudResourceModel
+	if err := db.First(&channelOnlyResource, 1).Error; err != nil {
+		t.Fatalf("read channel-only edit: %v", err)
 	}
-	if result.Version != 3 || result.Status != iCloudResourcePending || result.ForSale ||
-		root.OwnerUserID != 8 || resource.ValidationGeneration != 6 || resource.NextValidationAt == nil {
-		t.Fatalf("owner identity was not immediately fenced: root=%#v result=%#v resource=%#v", root, result, resource)
+	if channelOnlyResource.Status != iCloudResourceNormal || channelOnlyResource.ValidationGeneration != 2 ||
+		channelOnlyResource.NextValidationAt != nil || channelOnlyResource.NextProvisionAt == nil {
+		t.Fatalf("channel-only edit changed IMAP state: %#v", channelOnlyResource)
+	}
+	channels = nil
+	if err := db.Where("resource_id = ?", 1).Find(&channels).Error; err != nil {
+		t.Fatalf("read replacement channel: %v", err)
+	}
+	if len(channels) != 1 || channels[0].Kind != iCloudChannelAppleAccount || !strings.Contains(channels[0].Cookie, "rotated") {
+		t.Fatalf("import line did not atomically replace channels: %#v", channels)
 	}
 }
 
-func TestApplyAdminICloudAliasUsesIndependentAdmissionAndAudit(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:icloud-admin-alias-command?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open database: %v", err)
-	}
-	if err := db.AutoMigrate(
-		&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudAdminTestUser{},
-		&iCloudMaintenanceRunModel{},
-		&governanceinfra.OperationLogModel{}, &coreinfra.AdminResourceCommandReceiptModel{},
-	); err != nil {
-		t.Fatalf("migrate database: %v", err)
-	}
-	now := time.Date(2026, 8, 8, 10, 0, 0, 0, time.UTC)
-	probeVerifiedAt := now.Add(-time.Minute)
-	if err := db.Create(&iCloudAdminTestUser{ID: 7, Email: "owner@example.com", Status: "active", Role: "supplier"}).Error; err != nil {
-		t.Fatalf("create owner: %v", err)
-	}
-	for id, aliases := range map[uint]uint{1: 12, 2: iCloudMaxAliases} {
-		if err := db.Create(&iCloudRootModel{ID: id, Type: "icloud", OwnerUserID: 7, Version: 1, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
-			t.Fatalf("create root %d: %v", id, err)
-		}
-		if err := db.Create(&iCloudResourceModel{
-			ID: id, ResourceType: "icloud", PrimaryEmail: "alias" + string(rune('0'+id)) + "@icloud.com",
-			Status: iCloudResourceNormal, SessionStatus: iCloudSessionValid, AliasCount: aliases,
-			DeliveryProbeToken: "probe-token", DeliveryProbeAlias: "alias@icloud.com",
-			DeliveryProbeStartedAt: &probeVerifiedAt, DeliveryProbeVerifiedAt: &probeVerifiedAt,
-			CredentialRevision: 1, ValidationGeneration: 1, ExpireAt: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now,
-		}).Error; err != nil {
-			t.Fatalf("create resource %d: %v", id, err)
-		}
-	}
-	service := NewService(db, nil, nil)
-	service.now = func() time.Time { return now }
-
-	result, err := service.ApplyAdminICloudBatch(context.Background(), AdminICloudAlias,
-		AdminICloudResourceSelection{Mode: "ids", ResourceIDs: []uint{1, 2}},
-		nil, 99, "alias-batch", "alias-request", "/v1/admin/icloud/resources/batch/alias")
-	if err != nil {
-		t.Fatalf("apply alias batch: %v", err)
-	}
-	if result.Affected != 1 || result.Skipped != 1 || len(result.AffectedResourceIDs) != 1 || result.AffectedResourceIDs[0] != 1 ||
-		len(result.ReasonCounts) != 1 || result.ReasonCounts[0].Reason != "already_target" {
-		t.Fatalf("unexpected alias admission result: %#v", result)
-	}
-	var resource iCloudResourceModel
-	if err := db.First(&resource, 1).Error; err != nil {
-		t.Fatalf("load queued alias resource: %v", err)
-	}
-	if resource.Status != iCloudResourceNormal || resource.ValidationGeneration != 2 || resource.NextValidationAt == nil ||
-		resource.DeliveryProbeVerifiedAt == nil || resource.DeliveryProbeToken != "probe-token" {
-		t.Fatalf("alias command changed resource availability: %#v", resource)
-	}
-	var run iCloudMaintenanceRunModel
-	if err := db.Where("resource_id = ? AND validation_generation = ?", 1, 2).Take(&run).Error; err != nil {
-		t.Fatalf("load alias maintenance run: %v", err)
-	}
-	if run.Kind != iCloudMaintenanceAlias || run.Status != iCloudMaintenanceQueued {
-		t.Fatalf("alias command queued the wrong maintenance task: %#v", run)
-	}
-	claimed, ok, err := service.markICloudValidationDispatched(context.Background(), iCloudValidationTask{
-		ResourceID: 1, OwnerUserID: 7, ValidationGeneration: 2, ExpectedCredentialRevision: 1,
+func TestAdminICloudExpirationStopsProvisioningWithoutChangingHealth(t *testing.T) {
+	db := newAdminICloudCommandTestDB(t, "icloud-admin-expire")
+	now := time.Date(2026, 8, 14, 10, 0, 0, 0, time.UTC)
+	createAdminICloudCommandResource(t, db, now, iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "owner@icloud.com", IMAPAppPassword: "app-password",
+		Status: iCloudResourceNormal, ExpireAt: now.Add(-time.Minute), CredentialRevision: 1,
+		ValidationGeneration: 1,
 	})
-	if err != nil || !ok || claimed.MaintenanceKind != iCloudMaintenanceAlias {
-		t.Fatalf("claim alias maintenance: task=%#v claimed=%v err=%v", claimed, ok, err)
-	}
-	resource = iCloudResourceModel{}
-	if err := db.First(&resource, 1).Error; err != nil {
-		t.Fatalf("load claimed alias resource: %v", err)
-	}
-	if resource.Status != iCloudResourceNormal || resource.ValidationGeneration != 2 ||
-		resource.DeliveryProbeVerifiedAt == nil || resource.DeliveryProbeToken != "probe-token" {
-		t.Fatalf("alias maintenance claim changed resource availability: %#v", resource)
-	}
-	var log governanceinfra.OperationLogModel
-	if err := db.Order("id DESC").First(&log).Error; err != nil {
-		t.Fatalf("load alias audit log: %v", err)
-	}
-	if log.OperationType != "icloud.admin_resource.alias_batch" {
-		t.Fatalf("alias operation log = %q", log.OperationType)
-	}
-
-	full, err := service.ApplyAdminICloudCommand(context.Background(), AdminICloudAlias,
-		2, 1, 99, "alias-full", "alias-full-request", "/v1/admin/icloud/resources/2/aliases")
-	if err != nil {
-		t.Fatalf("apply full alias command: %v", err)
-	}
-	var fullRoot iCloudRootModel
-	var fullResource iCloudResourceModel
-	if err := db.First(&fullRoot, 2).Error; err != nil {
-		t.Fatalf("load full alias root: %v", err)
-	}
-	if err := db.First(&fullResource, 2).Error; err != nil {
-		t.Fatalf("load full alias resource: %v", err)
-	}
-	if full.Changed || full.Version != 1 || fullRoot.Version != 1 ||
-		fullResource.Status != iCloudResourceNormal || fullResource.ValidationGeneration != 1 || fullResource.NextValidationAt != nil {
-		t.Fatalf("full alias resource must remain unchanged: result=%#v root=%#v resource=%#v", full, fullRoot, fullResource)
-	}
-}
-
-func TestApplyAdminICloudBatchReportsSkippedReasons(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:icloud-admin-batch?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open database: %v", err)
-	}
-	if err := db.AutoMigrate(
-		&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudAdminTestUser{},
-		&iCloudMaintenanceRunModel{},
-		&governanceinfra.OperationLogModel{},
-		&coreinfra.AdminResourceCommandReceiptModel{},
-	); err != nil {
-		t.Fatalf("migrate database: %v", err)
-	}
-	now := time.Date(2026, 8, 7, 8, 0, 0, 0, time.UTC)
-	if err := db.Create(&iCloudAdminTestUser{ID: 7, Email: "owner@example.com", Status: "active", Role: "supplier"}).Error; err != nil {
-		t.Fatalf("create owner: %v", err)
-	}
-	for id, status := range map[uint]string{1: iCloudResourceNormal, 2: iCloudResourceDeleted} {
-		if err := db.Create(&iCloudRootModel{ID: id, Type: "icloud", OwnerUserID: 7, Version: 1, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
-			t.Fatalf("create root %d: %v", id, err)
-		}
-		if err := db.Create(&iCloudResourceModel{ID: id, ResourceType: "icloud", PrimaryEmail: "main" + string(rune('0'+id)) + "@icloud.com", Status: status, CredentialRevision: 1, ValidationGeneration: 1, ExpireAt: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now}).Error; err != nil {
-			t.Fatalf("create resource %d: %v", id, err)
-		}
-	}
 	service := NewService(db, nil, nil)
 	service.now = func() time.Time { return now }
-	result, err := service.ApplyAdminICloudBatch(context.Background(), AdminICloudDisable, AdminICloudResourceSelection{Mode: "ids", ResourceIDs: []uint{2, 1, 1}}, nil, 99, "batch-key-1", "batch-1", "/batch/disable")
+	result, err := service.ApplyAdminICloudCommand(
+		context.Background(), AdminICloudAlias, 1, 1, 99,
+		"alias-expired-1", "request-1", "/v1/admin/icloud/resources/1/aliases",
+	)
 	if err != nil {
-		t.Fatalf("batch disable: %v", err)
+		t.Fatalf("request alias on expired resource: %v", err)
 	}
-	if result.Requested != 2 || result.Affected != 1 || result.Skipped != 1 || len(result.AffectedResourceIDs) != 1 || len(result.SkippedResourceIDs) != 1 {
-		t.Fatalf("unexpected batch result: %#v", result)
-	}
-	if len(result.ReasonCounts) != 1 || result.ReasonCounts[0].Reason != "not_found" || result.ReasonCounts[0].Count != 1 {
-		t.Fatalf("unexpected skip reasons: %#v", result.ReasonCounts)
-	}
-	expireAt := now.Add(48 * time.Hour)
-	result, err = service.ApplyAdminICloudBatch(context.Background(), AdminICloudExpire, AdminICloudResourceSelection{Mode: "ids", ResourceIDs: []uint{1, 2}}, &expireAt, 99, "batch-expire-1", "batch-expire-1", "/batch/expiration")
-	if err != nil || result.Affected != 1 || result.Skipped != 1 {
-		t.Fatalf("batch expiration result=%#v err=%v", result, err)
+	if result.Changed || result.Status != iCloudResourceNormal {
+		t.Fatalf("unexpected expired alias result: %#v", result)
 	}
 	var resource iCloudResourceModel
-	var root iCloudRootModel
 	if err := db.First(&resource, 1).Error; err != nil {
-		t.Fatalf("load expiration-updated resource: %v", err)
+		t.Fatalf("read expired resource: %v", err)
 	}
-	if err := db.First(&root, 1).Error; err != nil {
-		t.Fatalf("load expiration-updated root: %v", err)
+	if resource.Status != iCloudResourceNormal || resource.NextProvisionAt != nil {
+		t.Fatalf("expiration changed resource health: %#v", resource)
 	}
-	var maintenanceRuns int64
-	if err := db.Model(&iCloudMaintenanceRunModel{}).Count(&maintenanceRuns).Error; err != nil {
-		t.Fatalf("count maintenance runs: %v", err)
-	}
-	if !resource.ExpireAt.Equal(expireAt) || resource.Status != iCloudResourceDisabled || root.Version != 3 || maintenanceRuns != 0 {
-		t.Fatalf("expiration update did not advance resource version: root=%#v resource=%#v", root, resource)
-	}
-	now = expireAt.Add(time.Hour)
-	replayed, err := service.ApplyAdminICloudBatch(context.Background(), AdminICloudExpire, AdminICloudResourceSelection{Mode: "ids", ResourceIDs: []uint{1, 2}}, &expireAt, 99, "batch-expire-1", "batch-expire-retry", "/batch/expiration")
-	if err != nil || replayed.Affected != result.Affected || replayed.Skipped != result.Skipped {
-		t.Fatalf("replay expired batch: result=%#v err=%v", replayed, err)
-	}
-	past := now
-	if _, err := service.ApplyAdminICloudBatch(context.Background(), AdminICloudExpire, AdminICloudResourceSelection{Mode: "ids", ResourceIDs: []uint{1}}, &past, 99, "batch-expire-past", "batch-expire-past", "/batch/expiration"); !errors.Is(err, ErrICloudResourceUpdate) {
+	past := now.Add(-time.Hour)
+	if _, err := service.EditAdminICloudResource(context.Background(), AdminICloudEditCommand{
+		ResourceID: 1, Version: 1, ExpireAt: &past, OperatorUserID: 99, IdempotencyKey: "past-expire",
+	}); !errors.Is(err, ErrICloudResourceUpdate) {
 		t.Fatalf("past expiration error = %v", err)
+	}
+	if _, err := service.ApplyAdminICloudBatch(
+		context.Background(), AdminICloudExpire, AdminICloudResourceSelection{Mode: "ids", ResourceIDs: []uint{1}},
+		&past, 99, "past-expire-batch", "request-2", "/v1/admin/icloud/resources/expiration",
+	); !errors.Is(err, ErrICloudResourceUpdate) {
+		t.Fatalf("past batch expiration error = %v", err)
+	}
+}
+
+func TestAdminICloudAliasRequiresUsableChannel(t *testing.T) {
+	db := newAdminICloudCommandTestDB(t, "icloud-admin-alias-invalid-channel")
+	now := time.Date(2026, 8, 14, 10, 30, 0, 0, time.UTC)
+	createAdminICloudCommandResource(t, db, now, iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "owner@icloud.com", IMAPAppPassword: "app-password",
+		Status: iCloudResourceNormal, ExpireAt: now.Add(time.Hour), CredentialRevision: 1, ValidationGeneration: 1,
+	})
+	if err := db.Create(&iCloudResourceChannelModel{
+		ResourceID: 1, Kind: iCloudChannelWeb, Host: "p119-maildomainws.icloud.com", Cookie: "expired",
+		SessionStatus: iCloudSessionInvalid, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create invalid channel: %v", err)
+	}
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	result, err := service.ApplyAdminICloudCommand(
+		context.Background(), AdminICloudAlias, 1, 1, 99,
+		"alias-invalid-channel", "request-1", "/v1/admin/icloud/resources/1/aliases",
+	)
+	if err != nil {
+		t.Fatalf("request alias: %v", err)
+	}
+	if result.Changed {
+		t.Fatalf("invalid channel queued provisioning: %#v", result)
+	}
+	var resource iCloudResourceModel
+	if err := db.First(&resource, 1).Error; err != nil || resource.NextProvisionAt != nil {
+		t.Fatalf("invalid channel left provisioning scheduled: resource=%#v err=%v", resource, err)
 	}
 }
 
@@ -481,5 +224,33 @@ func TestNormalizeAdminICloudSelectionRejectsContradictoryFields(t *testing.T) {
 		if _, err := normalizeAdminICloudSelection(selection); !errors.Is(err, ErrICloudResourceSelection) {
 			t.Fatalf("selection %#v error = %v", selection, err)
 		}
+	}
+}
+
+func newAdminICloudCommandTestDB(t *testing.T, name string) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open("file:"+name+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	if err := db.AutoMigrate(
+		&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudResourceChannelModel{}, &iCloudMaintenanceRunModel{},
+		&governanceinfra.OperationLogModel{}, &coreinfra.AdminResourceCommandReceiptModel{},
+	); err != nil {
+		t.Fatalf("migrate database: %v", err)
+	}
+	return db
+}
+
+func createAdminICloudCommandResource(t *testing.T, db *gorm.DB, now time.Time, resource iCloudResourceModel) {
+	t.Helper()
+	if err := db.Create(&iCloudRootModel{ID: resource.ID, Type: "icloud", OwnerUserID: 7, Version: 1, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatalf("create root: %v", err)
+	}
+	resource.CreatedAt = now
+	resource.UpdatedAt = now
+	resource.CredentialUpdatedAt = now
+	if err := db.Create(&resource).Error; err != nil {
+		t.Fatalf("create resource: %v", err)
 	}
 }

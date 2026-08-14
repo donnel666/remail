@@ -306,11 +306,11 @@ func (*adminResourceFetchRepoStub) CompleteResourceFetch(context.Context, uint, 
 	return nil
 }
 
-func (*adminResourceFetchRepoStub) AssertICloudResourceFetchFence(context.Context, uint, uint64) error {
+func (*adminResourceFetchRepoStub) AssertICloudResourceFetchFence(context.Context, uint, uint64, uint64) error {
 	return nil
 }
 
-func (*adminResourceFetchRepoStub) CompleteICloudResourceFetch(context.Context, uint, uint64, int, int, int, time.Time, *governancedomain.SystemLog) error {
+func (*adminResourceFetchRepoStub) CompleteICloudResourceFetch(context.Context, uint, uint64, uint64, int, int, int, time.Time, *governancedomain.SystemLog) error {
 	return nil
 }
 

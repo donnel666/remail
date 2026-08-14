@@ -10050,7 +10050,7 @@ paths:
     post:
       operationId: postAdminMicrosoftResourceMessagesFetch
       summary: Queue a resource-level mail fetch
-      description: Requires `mailmatch:message/operate`, Session authentication, CSRF, and an idempotency key. `type=microsoft` uses the Microsoft resource transport. `type=icloud` reads the persisted domain mailbox and recipient suffix of every active alias allocation, normalizes the real sender and HME recipient before MailMatch, and ingests unmatched candidates for administrator diagnostics. MailMatch updates the resource's current fetch generation before returning 202. Disabled resources may be diagnosed without being enabled; deleted resources return 409.
+      description: Requires `mailmatch:message/operate`, Session authentication, CSRF, and an idempotency key. `type=microsoft` uses the Microsoft resource transport. `type=icloud` reads the account INBOX through `imap.mail.me.com` with the stored app-specific password, matches message recipient headers against the resource's local HME alias inventory, and sends the resulting messages through the same MailMatch ingestion and matching flow. Normal iCloud mail reads never call Apple's HME list API. MailMatch updates the resource's current fetch generation before returning 202. Disabled resources may be diagnosed without being enabled; deleted resources return 409.
       tags:
         - Admin
       security:
@@ -10145,11 +10145,6 @@ paths:
           schema:
             type: string
             maxLength: 320
-        - name: suffix
-          in: query
-          schema:
-            type: string
-            maxLength: 255
         - name: status
           in: query
           schema:
@@ -10158,10 +10153,6 @@ paths:
           in: query
           schema:
             type: boolean
-        - name: sessionStatus
-          in: query
-          schema:
-            $ref: "#/components/schemas/AdminICloudSessionStatus"
         - name: createdFrom
           in: query
           schema:
@@ -10217,7 +10208,8 @@ paths:
     post:
       operationId: postAdminICloudResourceImport
       summary: Import iCloud resources for a selected owner
-      description: Each non-empty TXT line uses `primaryEmail----host----dsid----clientId----clientBuildNumber----clientMasteringNumber----Cookie`; any later `----` text remains part of Cookie. A browser-copied HME request may instead use `primaryEmail----curl ...`; the server extracts and validates the HTTPS maildomainws host, DSID, client context, Cookie, and optional request headers without executing shell syntax. The primary email remains explicit because Apple does not include it in the HME request. The required future `expireAt` applies to newly created resources; credential recovery for an existing resource preserves its current lifetime. Apple forwarding mailboxes are selected and verified through system settings and are not an import field. Cookie, DSID, client context, cURL source, and the private source object remain write-only.
+      description: |
+        Each non-empty TXT line is one complete credential set in one of three forms: `email----appPassword----oldCurl`, `email----appPassword----newCurl`, or `email----appPassword----newCurl----oldCurl`. The server classifies each cURL by its Apple host and path, parses it without executing shell syntax, rejects duplicate channels, and stores the app-specific password for IMAP receiving. The required `expireAt` controls only future alias creation; it does not stop allocation or receiving and does not change resource health. App passwords, cookies, cURL source, and parsed provider context remain write-only.
       tags: [Admin]
       security:
         - cookieAuth: []
@@ -10514,8 +10506,8 @@ paths:
   /v1/admin/icloud/resources/batch/expiration:
     post:
       operationId: postAdminICloudResourcesExpiration
-      summary: Set a future expiration time for selected iCloud resources
-      description: Updates only the resource lifetime and version. It does not queue validation, alias maintenance, mailbox fetching, or project-history identification.
+      summary: Set the alias-creation expiration time for selected iCloud resources
+      description: Updates only alias-creation eligibility and the resource version. Extending an eligible normal resource may wake the provisioning dispatcher. Expiration never changes health, allocation eligibility, existing alias receiving, mailbox fetching, or project-history identification.
       tags: [Admin]
       security:
         - cookieAuth: []
@@ -10583,7 +10575,7 @@ paths:
       operationId: patchAdminICloudResource
       summary: Atomically edit an iCloud resource
       description: |
-        Base fields require `core:resource/write`. Supplying `forSale`, `expireAt`, or `credentials` additionally requires `core:resource/operate`. Session authentication, CSRF, and an idempotency key are required. Credentials are a complete write-only HME set and are never returned. Changing the primary email requires the complete credential set. Email, owner, or credential changes conflict with an active Allocation, advance the validation fence, force private supply, and immediately re-queue validation unless the resource is disabled. Changing `expireAt` only updates the resource lifetime and version.
+        Base fields require `core:resource/write`. Supplying `forSale`, `expireAt`, or `importLine` additionally requires `core:resource/operate`. Session authentication, CSRF, and an idempotency key are required. `importLine` is the same complete write-only line accepted by import: `email----appPassword----oldCurl`, `email----appPassword----newCurl`, or `email----appPassword----newCurl----oldCurl`. Changing the email or app password re-queues IMAP validation; changing only cURL sessions updates provisioning ability without changing resource health. Changing the email or owner conflicts with an active allocation. Changing `expireAt` only changes future alias creation eligibility.
       tags: [Admin]
       security:
         - cookieAuth: []
@@ -10604,7 +10596,7 @@ paths:
               $ref: "#/components/schemas/AdminICloudUpdateRequest"
       responses:
         "200":
-          description: Atomic edit committed; credential changes that require validation leave the resource pending
+          description: Atomic edit committed; email or app-password changes that require validation leave the resource pending
           content:
             application/json:
               schema:
@@ -10727,7 +10719,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/AdminICloudMutationResponse"
         "202":
-          description: Alias provisioning queued through the fenced iCloud maintenance worker
+          description: Alias provisioning queued through the independent dual-channel provisioning dispatcher
           content:
             application/json:
               schema:
@@ -11250,7 +11242,7 @@ paths:
     get:
       operationId: getAdminMessages
       summary: List primary-mailbox message summaries for a resource
-      description: Requires `mailmatch:message/read`. Search is evaluated server-side across the authorized sender, recipient, subject, preview/body, and verification-code semantics, but list items never contain a body, full match diagnostic, private object key, or raw upstream message. For `type=icloud`, sender is the decoded original sender and recipient is the HME alias; the Apple relay envelope, domain forwarding mailbox, and recipient routing ID are never returned. Verification codes and order numbers are returned only as authorized safe display fields.
+      description: Requires `mailmatch:message/read`. Search is evaluated server-side across the authorized sender, recipient, subject, preview/body, and verification-code semantics, but list items never contain a body, full match diagnostic, private object key, or raw upstream message. For `type=icloud`, messages come from the account's IMAP INBOX and recipient is the locally matched HME alias. Verification codes and order numbers are returned only as authorized safe display fields.
       tags:
         - Admin
       security:
@@ -11328,7 +11320,7 @@ paths:
     get:
       operationId: getAdminMessage
       summary: Get one primary-mailbox message body and diagnostic
-      description: Requires `mailmatch:message/read`. `resourceId` participates in the authorization and association lookup; an unknown message and a message belonging to another resource both return the same safe 404. This controlled read may return the body, verification code, order number, and sanitized match diagnostic, but never an object key, raw envelope, token, or upstream error body. For `type=icloud`, sender is the decoded original sender and recipient is the HME alias; the Apple relay envelope, domain forwarding mailbox, and recipient routing ID are never returned.
+      description: Requires `mailmatch:message/read`. `resourceId` participates in the authorization and association lookup; an unknown message and a message belonging to another resource both return the same safe 404. This controlled read may return the body, verification code, order number, and sanitized match diagnostic, but never an object key, raw credential, token, or upstream error body. For `type=icloud`, messages come from the account's IMAP INBOX and recipient is the locally matched HME alias.
       tags:
         - Admin
       security:
@@ -19495,25 +19487,24 @@ components:
       additionalProperties: false
     AdminICloudResourceItem:
       type: object
-      description: Administrator-safe operational facts. Cookie, DSID, host, client context, and provider request payloads are never returned.
+      description: Administrator-safe operational facts. IMAP app passwords, cookies, DSID, host, client context, and provider request payloads are never returned.
       required:
         - id
         - version
         - primaryEmail
-        - suffix
-        - selectedForwardTo
         - owner
         - status
         - forSale
-        - sessionStatus
+        - newSession
+        - oldSession
         - aliasCount
         - expireAt
         - nextValidationAt
-        - nextKeepaliveAt
+        - nextProvisionAt
         - lastCheckedAt
         - lastValidAt
+        - lastMailSyncAt
         - lastAliasSyncAt
-        - deliveryProbeVerifiedAt
         - lastAllocatedAt
         - lastSafeError
         - createdAt
@@ -19528,19 +19519,20 @@ components:
         primaryEmail:
           type: string
           format: email
-        suffix:
-          type: string
-        selectedForwardTo:
-          type: string
-          description: Current Apple-selected forwarding target. Allocated aliases continue using each alias item's persisted forwardToEmail and recipientMailId.
         owner:
           $ref: "#/components/schemas/AdminICloudOwnerSummary"
         status:
           $ref: "#/components/schemas/AdminICloudResourceStatus"
         forSale:
           type: boolean
-        sessionStatus:
-          $ref: "#/components/schemas/AdminICloudSessionStatus"
+        newSession:
+          allOf:
+            - $ref: "#/components/schemas/AdminICloudSessionView"
+          nullable: true
+        oldSession:
+          allOf:
+            - $ref: "#/components/schemas/AdminICloudSessionView"
+          nullable: true
         aliasCount:
           type: integer
           minimum: 0
@@ -19551,7 +19543,7 @@ components:
           type: string
           format: date-time
           nullable: true
-        nextKeepaliveAt:
+        nextProvisionAt:
           type: string
           format: date-time
           nullable: true
@@ -19563,11 +19555,11 @@ components:
           type: string
           format: date-time
           nullable: true
-        lastAliasSyncAt:
+        lastMailSyncAt:
           type: string
           format: date-time
           nullable: true
-        deliveryProbeVerifiedAt:
+        lastAliasSyncAt:
           type: string
           format: date-time
           nullable: true
@@ -19586,7 +19578,7 @@ components:
           format: date-time
       additionalProperties: false
     AdminICloudResourceDetail:
-      description: Administrator-safe iCloud resource detail with maintenance diagnostics. HME credentials, cookies, DSID, and request context are never returned.
+      description: Administrator-safe iCloud resource detail with IMAP and provisioning diagnostics. IMAP app passwords, HME cookies, DSID, and request context are never returned.
       allOf:
         - $ref: "#/components/schemas/AdminICloudResourceItem"
         - type: object
@@ -19598,8 +19590,6 @@ components:
             - credentialUpdatedAt
             - validationGeneration
             - validationFailures
-            - sessionFailures
-            - deliveryProbeStartedAt
           properties:
             aliasLimit:
               type: integer
@@ -19625,13 +19615,6 @@ components:
             validationFailures:
               type: integer
               minimum: 0
-            sessionFailures:
-              type: integer
-              minimum: 0
-            deliveryProbeStartedAt:
-              type: string
-              format: date-time
-              nullable: true
     AdminICloudStatusFacet:
       type: object
       required: [all, pending, validating, normal, abnormal, disabled, deleted]
@@ -19644,40 +19627,41 @@ components:
         disabled: { type: integer, format: int64, minimum: 0 }
         deleted: { type: integer, format: int64, minimum: 0 }
       additionalProperties: false
-    AdminICloudSessionFacet:
+    AdminICloudSessionView:
       type: object
-      required: [all, unchecked, valid, invalid]
+      description: One provisioning channel. Its status controls only alias creation, never account health or receiving.
+      required: [status, failures, cooldownUntil, nextKeepaliveAt, lastCheckedAt, lastValidAt]
       properties:
-        all: { type: integer, format: int64, minimum: 0 }
-        unchecked: { type: integer, format: int64, minimum: 0 }
-        valid: { type: integer, format: int64, minimum: 0 }
-        invalid: { type: integer, format: int64, minimum: 0 }
-      additionalProperties: false
-    AdminICloudSuffixFacet:
-      type: object
-      required: [key, count]
-      properties:
-        key:
-          type: string
-        count:
+        status:
+          $ref: "#/components/schemas/AdminICloudSessionStatus"
+        failures:
           type: integer
-          format: int64
           minimum: 0
+        cooldownUntil:
+          type: string
+          format: date-time
+          nullable: true
+        nextKeepaliveAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastCheckedAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastValidAt:
+          type: string
+          format: date-time
+          nullable: true
       additionalProperties: false
     AdminICloudFacets:
       type: object
-      required: [status, forSale, sessionStatus, suffixes]
+      required: [status, forSale]
       properties:
         status:
           $ref: "#/components/schemas/AdminICloudStatusFacet"
         forSale:
           $ref: "#/components/schemas/AdminMicrosoftBooleanFacet"
-        sessionStatus:
-          $ref: "#/components/schemas/AdminICloudSessionFacet"
-        suffixes:
-          type: array
-          items:
-            $ref: "#/components/schemas/AdminICloudSuffixFacet"
       additionalProperties: false
     AdminICloudResourceListResponse:
       type: object
@@ -19719,11 +19703,8 @@ components:
         - id
         - anonymousId
         - email
-        - recipientMailId
         - status
-        - forwardToEmail
         - origin
-        - providerDomain
         - providerCreatedAt
         - lastSeenAt
         - lastAllocatedAt
@@ -19739,17 +19720,9 @@ components:
         email:
           type: string
           format: email
-        recipientMailId:
-          type: string
-          description: Persisted Apple relay recipient suffix that selects this alias before MailMatch normalization.
         status:
           $ref: "#/components/schemas/AdminICloudAliasStatus"
-        forwardToEmail:
-          type: string
-          description: Persisted domain mailbox for this alias. It remains authoritative for existing allocations independently of the current Apple session or resource forwarding selection.
         origin:
-          type: string
-        providerDomain:
           type: string
         providerCreatedAt:
           type: string
@@ -19790,43 +19763,6 @@ components:
           minimum: 1
           maximum: 100
       additionalProperties: false
-    AdminICloudCredentialsInput:
-      type: object
-      description: Complete write-only HME credential and request-context set. Omission from PATCH preserves the current credential revision.
-      required: [host, dsid, clientId, clientBuildNumber, clientMasteringNumber, cookie]
-      properties:
-        host:
-          type: string
-          minLength: 1
-          maxLength: 255
-          writeOnly: true
-        dsid:
-          type: string
-          minLength: 1
-          maxLength: 191
-          writeOnly: true
-        clientId:
-          type: string
-          minLength: 1
-          maxLength: 191
-          writeOnly: true
-        clientBuildNumber:
-          type: string
-          minLength: 1
-          maxLength: 64
-          writeOnly: true
-        clientMasteringNumber:
-          type: string
-          minLength: 1
-          maxLength: 64
-          writeOnly: true
-        cookie:
-          type: string
-          format: password
-          minLength: 1
-          maxLength: 65535
-          writeOnly: true
-      additionalProperties: false
     AdminICloudUpdateRequest:
       type: object
       required: [version]
@@ -19836,9 +19772,12 @@ components:
           type: integer
           minimum: 1
           description: Last observed resource version; stale writes return 409.
-        primaryEmail:
+        importLine:
           type: string
-          format: email
+          minLength: 1
+          maxLength: 131072
+          writeOnly: true
+          description: Complete `email----appPassword----curl` credential line. It accepts one old cURL, one new cURL, or new then old cURLs.
         ownerId:
           type: integer
           minimum: 1
@@ -19847,8 +19786,6 @@ components:
         expireAt:
           type: string
           format: date-time
-        credentials:
-          $ref: "#/components/schemas/AdminICloudCredentialsInput"
       additionalProperties: false
     AdminICloudMutationResponse:
       type: object
@@ -19874,15 +19811,10 @@ components:
         search:
           type: string
           maxLength: 320
-        suffix:
-          type: string
-          maxLength: 255
         status:
           $ref: "#/components/schemas/AdminICloudResourceStatus"
         forSale:
           type: boolean
-        sessionStatus:
-          $ref: "#/components/schemas/AdminICloudSessionStatus"
         createdFrom:
           type: string
           format: date-time

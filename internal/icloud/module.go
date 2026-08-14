@@ -7,7 +7,6 @@ import (
 
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
-	mailtransportdomain "github.com/donnel666/remail/internal/mailtransport/domain"
 	"github.com/hibiken/asynq"
 	"gorm.io/gorm"
 )
@@ -24,6 +23,9 @@ const (
 	iCloudSessionValid     = "valid"
 	iCloudSessionInvalid   = "invalid"
 
+	iCloudChannelWeb          = "icloud_web"
+	iCloudChannelAppleAccount = "apple_account"
+
 	iCloudImportProcessing = "processing"
 	iCloudImportImported   = "imported"
 	iCloudImportFailed     = "failed"
@@ -39,8 +41,7 @@ var (
 	ErrICloudImportTemporary    = errors.New("icloud: import temporarily unavailable")
 	ErrICloudImportClaim        = errors.New("icloud: import claim is no longer valid")
 	ErrICloudValidationTemp     = errors.New("icloud: validation temporarily unavailable")
-	ErrICloudMailUnavailable    = errors.New("icloud: domain mailbox temporarily unavailable")
-	ErrICloudForwardingMailbox  = errors.New("icloud: forwarding mailbox is not locally readable")
+	ErrICloudMailUnavailable    = errors.New("icloud: IMAP mail temporarily unavailable")
 	ErrICloudResourceNotFound   = errors.New("icloud: resource not found")
 	ErrICloudResourceStatus     = errors.New("icloud: invalid resource status")
 )
@@ -53,31 +54,6 @@ func normalizeICloudResourceExpireAt(value time.Time) time.Time {
 
 func validICloudResourceExpireAt(value, now time.Time) bool {
 	return !value.IsZero() && value.After(now.UTC())
-}
-
-// OutboundDelivery sends HME validation probes through the outbound mail transport.
-type OutboundDelivery interface {
-	Send(context.Context, mailtransportdomain.OutboundMessage) error
-}
-
-// MailIngestPort publishes one SMTP-forwarded HME message into Mailmatch.
-type MailIngestPort interface {
-	IngestICloudMail(context.Context, uint, string, string, []byte, time.Time, string) error
-}
-
-// MailIngestWithFencePort is implemented by the Mailmatch adapter used
-// for administrator fetches. The legacy method above remains available for
-// order-scoped pickup callers, which do not own a resource-fetch generation.
-type MailIngestWithFencePort interface {
-	IngestICloudMailWithFence(
-		context.Context, uint, string, string, []byte, time.Time, string,
-		func(context.Context) error,
-	) (MailIngestResult, error)
-}
-
-type MailIngestResult struct {
-	Stored  int
-	Matched int
 }
 
 // BackgroundExecutionGate is the shared admission-control contract used by
@@ -96,20 +72,19 @@ func NewModule(db *gorm.DB, queue *asynq.Client, files governanceapp.FilePort) *
 	return &Module{Service: NewService(db, queue, files)}
 }
 
-// Service owns the iCloud-only durable import and HME validation state.
+// Service owns iCloud import, IMAP health, mail pickup, and alias provisioning.
 type Service struct {
-	db                        *gorm.DB
-	queue                     *asynq.Client
-	files                     governanceapp.FilePort
-	operationLogs             *governanceinfra.OperationLogRepo
-	systemLogs                *governanceinfra.SystemLogRepo
-	hme                       *HMEClient
-	delivery                  OutboundDelivery
-	mailIngest                MailIngestPort
-	now                       func() time.Time
-	validateImportOwner       func(context.Context, uint) (bool, error)
-	backgroundExecution       BackgroundExecutionGate
-	validateForwardingMailbox func(context.Context, string) error
+	db                  *gorm.DB
+	queue               *asynq.Client
+	files               governanceapp.FilePort
+	operationLogs       *governanceinfra.OperationLogRepo
+	systemLogs          *governanceinfra.SystemLogRepo
+	hme                 *HMEClient
+	apple               *AppleAccountClient
+	imap                *iCloudIMAPClient
+	now                 func() time.Time
+	validateImportOwner func(context.Context, uint) (bool, error)
+	backgroundExecution BackgroundExecutionGate
 }
 
 func NewService(db *gorm.DB, queue *asynq.Client, files governanceapp.FilePort) *Service {
@@ -120,6 +95,8 @@ func NewService(db *gorm.DB, queue *asynq.Client, files governanceapp.FilePort) 
 		operationLogs: governanceinfra.NewOperationLogRepo(db),
 		systemLogs:    governanceinfra.NewSystemLogRepo(db),
 		hme:           NewHMEClient(nil),
+		apple:         NewAppleAccountClient(nil),
+		imap:          &iCloudIMAPClient{},
 		now:           time.Now,
 	}
 }
@@ -136,28 +113,6 @@ func (s *Service) SetBackgroundExecutionGate(gate BackgroundExecutionGate) {
 	}
 }
 
-func (s *Service) SetDeliveryPort(port OutboundDelivery) {
-	if s != nil {
-		s.delivery = port
-	}
-}
-
-func (s *Service) SetMailIngest(port MailIngestPort) {
-	if s != nil {
-		s.mailIngest = port
-	}
-}
-
-// SetForwardingMailboxValidator lets the composition root connect the iCloud
-// settings to the same local inbound-recipient resolver used by SMTP. Tests
-// and small in-memory service users may omit it; production wires it after the
-// initial default settings are applied and before accepting updates.
-func (s *Service) SetForwardingMailboxValidator(validate func(context.Context, string) error) {
-	if s != nil {
-		s.validateForwardingMailbox = validate
-	}
-}
-
 type iCloudRootModel struct {
 	ID          uint      `gorm:"column:id;primaryKey;autoIncrement"`
 	Type        string    `gorm:"column:type"`
@@ -169,28 +124,19 @@ type iCloudRootModel struct {
 
 func (iCloudRootModel) TableName() string { return "email_resources" }
 
-// iCloudResourceModel includes write-only session fields.  No API response in
-// this package is built from this model directly.
+// iCloudResourceModel holds only account state. Provider sessions belong to
+// iCloudResourceChannelModel and are never exposed through an API.
 type iCloudResourceModel struct {
 	ID                      uint       `gorm:"column:id;primaryKey"`
 	ResourceType            string     `gorm:"column:resource_type"`
 	PrimaryEmail            string     `gorm:"column:primary_email"`
-	Host                    string     `gorm:"column:host"`
-	DSID                    string     `gorm:"column:dsid"`
-	ClientID                string     `gorm:"column:client_id"`
-	ClientBuildNumber       string     `gorm:"column:client_build_number"`
-	ClientMasteringNumber   string     `gorm:"column:client_mastering_number"`
-	Cookie                  string     `gorm:"column:cookie"`
-	LangCode                string     `gorm:"column:lang_code"`
-	Origin                  string     `gorm:"column:origin"`
-	Referer                 string     `gorm:"column:referer"`
-	UserAgent               string     `gorm:"column:user_agent"`
-	SelectedForwardTo       string     `gorm:"column:selected_forward_to"`
+	IMAPAppPassword         string     `gorm:"column:imap_app_password"`
+	IMAPUIDValidity         string     `gorm:"column:imap_uid_validity"`
+	IMAPLastUID             uint64     `gorm:"column:imap_last_uid"`
+	IMAPLastSyncAt          *time.Time `gorm:"column:imap_last_sync_at"`
 	ExpireAt                time.Time  `gorm:"column:expire_at"`
 	ForSale                 bool       `gorm:"column:for_sale"`
 	Status                  string     `gorm:"column:status"`
-	SessionStatus           string     `gorm:"column:session_status"`
-	SessionFailures         uint8      `gorm:"column:session_failures"`
 	CredentialRevision      uint64     `gorm:"column:credential_revision"`
 	CredentialUpdatedAt     time.Time  `gorm:"column:credential_updated_at"`
 	ValidationGeneration    uint64     `gorm:"column:validation_generation"`
@@ -199,11 +145,7 @@ type iCloudResourceModel struct {
 	AliasProvisionCandidate string     `gorm:"column:alias_provision_candidate"`
 	AliasProvisionReconcile bool       `gorm:"column:alias_provision_reconcile"`
 	NextValidationAt        *time.Time `gorm:"column:next_validation_at"`
-	DeliveryProbeToken      string     `gorm:"column:delivery_probe_token"`
-	DeliveryProbeAlias      string     `gorm:"column:delivery_probe_alias"`
-	DeliveryProbeStartedAt  *time.Time `gorm:"column:delivery_probe_started_at"`
-	DeliveryProbeVerifiedAt *time.Time `gorm:"column:delivery_probe_verified_at"`
-	NextKeepaliveAt         *time.Time `gorm:"column:next_keepalive_at"`
+	NextProvisionAt         *time.Time `gorm:"column:next_provision_at"`
 	LastCheckedAt           *time.Time `gorm:"column:last_checked_at"`
 	LastValidAt             *time.Time `gorm:"column:last_valid_at"`
 	LastAliasSyncAt         *time.Time `gorm:"column:last_alias_sync_at"`
@@ -215,52 +157,64 @@ type iCloudResourceModel struct {
 
 func (iCloudResourceModel) TableName() string { return "icloud_resources" }
 
-func (m iCloudResourceModel) hmeConfig() hmeConfig {
+type iCloudResourceChannelModel struct {
+	ID                    uint       `gorm:"column:id;primaryKey;autoIncrement"`
+	ResourceID            uint       `gorm:"column:resource_id"`
+	Kind                  string     `gorm:"column:kind"`
+	Host                  string     `gorm:"column:host"`
+	Cookie                string     `gorm:"column:cookie"`
+	Origin                string     `gorm:"column:origin"`
+	Referer               string     `gorm:"column:referer"`
+	UserAgent             string     `gorm:"column:user_agent"`
+	DSID                  string     `gorm:"column:dsid"`
+	ClientID              string     `gorm:"column:client_id"`
+	ClientBuildNumber     string     `gorm:"column:client_build_number"`
+	ClientMasteringNumber string     `gorm:"column:client_mastering_number"`
+	Scnt                  string     `gorm:"column:scnt"`
+	SessionID             string     `gorm:"column:session_id"`
+	APIKey                string     `gorm:"column:api_key"`
+	DataAccessToken       string     `gorm:"column:data_access_token"`
+	ManageExpiresAt       *time.Time `gorm:"column:manage_expires_at"`
+	SessionStatus         string     `gorm:"column:session_status"`
+	SessionFailures       uint8      `gorm:"column:session_failures"`
+	CooldownUntil         *time.Time `gorm:"column:cooldown_until"`
+	CooldownStage         uint8      `gorm:"column:cooldown_stage"`
+	NextKeepaliveAt       *time.Time `gorm:"column:next_keepalive_at"`
+	LastCheckedAt         *time.Time `gorm:"column:last_checked_at"`
+	LastValidAt           *time.Time `gorm:"column:last_valid_at"`
+	ProvisionWindowAt     *time.Time `gorm:"column:provision_window_at"`
+	ProvisionWindowCount  uint8      `gorm:"column:provision_window_count"`
+	CreatedAt             time.Time  `gorm:"column:created_at"`
+	UpdatedAt             time.Time  `gorm:"column:updated_at"`
+}
+
+func (iCloudResourceChannelModel) TableName() string { return "icloud_resource_channels" }
+
+func (m iCloudResourceChannelModel) hmeConfig() hmeConfig {
 	return hmeConfig{
 		Host: m.Host, DSID: m.DSID, ClientID: m.ClientID,
 		ClientBuildNumber: m.ClientBuildNumber, ClientMasteringNumber: m.ClientMasteringNumber,
-		Cookie: m.Cookie, LangCode: m.LangCode, Origin: m.Origin, Referer: m.Referer, UserAgent: m.UserAgent,
+		Cookie: m.Cookie, Origin: m.Origin, Referer: m.Referer, UserAgent: m.UserAgent,
 	}
 }
 
 type iCloudAliasModel struct {
-	ID                       uint       `gorm:"column:id;primaryKey;autoIncrement"`
-	ResourceID               uint       `gorm:"column:resource_id"`
-	AnonymousID              string     `gorm:"column:anonymous_id"`
-	Email                    string     `gorm:"column:email"`
-	Label                    string     `gorm:"column:label"`
-	Note                     string     `gorm:"column:note"`
-	ForwardToEmail           string     `gorm:"column:forward_to_email"`
-	Origin                   string     `gorm:"column:origin"`
-	ProviderDomain           string     `gorm:"column:provider_domain"`
-	RecipientMailID          string     `gorm:"column:recipient_mail_id"`
-	RecipientProbeToken      string     `gorm:"column:recipient_probe_token"`
-	RecipientProbeStartedAt  *time.Time `gorm:"column:recipient_probe_started_at"`
-	RecipientProbeLastSentAt *time.Time `gorm:"column:recipient_probe_last_sent_at"`
-	Status                   string     `gorm:"column:status"`
-	ProviderCreatedAt        *time.Time `gorm:"column:provider_created_at"`
-	LastSeenAt               *time.Time `gorm:"column:last_seen_at"`
-	LastAllocatedAt          *time.Time `gorm:"column:last_allocated_at"`
-	CreatedAt                time.Time  `gorm:"column:created_at"`
-	UpdatedAt                time.Time  `gorm:"column:updated_at"`
+	ID                uint       `gorm:"column:id;primaryKey;autoIncrement"`
+	ResourceID        uint       `gorm:"column:resource_id"`
+	AnonymousID       string     `gorm:"column:anonymous_id"`
+	Email             string     `gorm:"column:email"`
+	Label             string     `gorm:"column:label"`
+	Note              string     `gorm:"column:note"`
+	Origin            string     `gorm:"column:origin"`
+	Status            string     `gorm:"column:status"`
+	ProviderCreatedAt *time.Time `gorm:"column:provider_created_at"`
+	LastSeenAt        *time.Time `gorm:"column:last_seen_at"`
+	LastAllocatedAt   *time.Time `gorm:"column:last_allocated_at"`
+	CreatedAt         time.Time  `gorm:"column:created_at"`
+	UpdatedAt         time.Time  `gorm:"column:updated_at"`
 }
 
 func (iCloudAliasModel) TableName() string { return "icloud_aliases" }
-
-// iCloudAliasRouteModel is an append-only observation of the Apple relay
-// routing pair. Apple may change the selected forwarding mailbox later; old
-// rows keep already-received messages addressable for the alias/allocation.
-type iCloudAliasRouteModel struct {
-	ID              uint      `gorm:"column:id;primaryKey;autoIncrement"`
-	ResourceID      uint      `gorm:"column:resource_id;not null"`
-	AliasID         uint      `gorm:"column:alias_id;not null"`
-	ForwardToEmail  string    `gorm:"column:forward_to_email;not null"`
-	RecipientMailID string    `gorm:"column:recipient_mail_id;not null"`
-	FirstSeenAt     time.Time `gorm:"column:first_seen_at;not null"`
-	LastSeenAt      time.Time `gorm:"column:last_seen_at;not null"`
-}
-
-func (iCloudAliasRouteModel) TableName() string { return "icloud_alias_routes" }
 
 type iCloudImportModel struct {
 	ID                 uint       `gorm:"column:id;primaryKey;autoIncrement"`

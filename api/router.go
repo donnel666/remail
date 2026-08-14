@@ -33,7 +33,6 @@ import (
 	"github.com/donnel666/remail/internal/smsbower"
 	systemsettingsapi "github.com/donnel666/remail/internal/systemsettings/api"
 	settingsdomain "github.com/donnel666/remail/internal/systemsettings/domain"
-	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	tradeapi "github.com/donnel666/remail/internal/trade/api"
 	"github.com/donnel666/remail/internal/upstream"
 	"github.com/gin-gonic/gin"
@@ -184,16 +183,10 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		allocMod := allocapi.NewModule(p.DB, p.Redis, p.Asynq)
 		systemSettingsMod.SetRuntimeUpdateHook(func(ctx context.Context, settings []settingsdomain.Setting) error {
 			domainTLDChanged := false
-			var iCloudForwardingMailboxes []string
 			for _, setting := range settings {
 				key := strings.ToLower(strings.TrimSpace(setting.Key))
 				if key == "domain_custom_tlds" {
 					domainTLDChanged = true
-				}
-				if key == "icloud_forwarding_mailboxes" {
-					iCloudForwardingMailboxes = runtimeconfig.Values{
-						"icloud_forwarding_mailboxes": setting.Value,
-					}.EmailList("icloud_forwarding_mailboxes", "")
 				}
 			}
 			if domainTLDChanged {
@@ -201,11 +194,6 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 					return err
 				}
 				if err := allocMod.UseCase.ScheduleInventoryRefresh(ctx); err != nil {
-					return err
-				}
-			}
-			if len(iCloudForwardingMailboxes) > 0 && icloudMod != nil {
-				if err := icloudMod.Service.ApplyForwardingMailboxSettings(ctx, iCloudForwardingMailboxes); err != nil {
 					return err
 				}
 			}
@@ -263,33 +251,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		cleanupFuncs = append(cleanupFuncs, gmailapi.RegisterTaskHandlers(taskMux, gmailMod.Service))
 		icloudMod = icloudapi.NewModule(p.DB, p.Asynq, fileStore)
 		icloudMod.Service.SetBackgroundExecutionGate(p.BackgroundLoad)
-		icloudMod.Service.SetDeliveryPort(mailMod.DeliveryUseCase)
-		systemSettingsMod.SetRuntimeValidationHook(func(ctx context.Context, settings []settingsdomain.Setting) error {
-			for _, setting := range settings {
-				if strings.ToLower(strings.TrimSpace(setting.Key)) != runtimeconfig.ICloudForwardingMailboxesKey {
-					continue
-				}
-				for _, mailbox := range (runtimeconfig.Values{runtimeconfig.ICloudForwardingMailboxesKey: setting.Value}).EmailList(runtimeconfig.ICloudForwardingMailboxesKey, "") {
-					if _, err := mailMod.InboundUseCase.ResolveRecipient(ctx, mailbox); err != nil {
-						return settingsdomain.ErrInvalidValue
-					}
-				}
-			}
-			return nil
-		})
-		if err := icloudMod.Service.ApplyForwardingMailboxSettings(
-			context.Background(),
-			runtimeconfig.EmailList(runtimeconfig.ICloudForwardingMailboxesKey, runtimeconfig.DefaultICloudForwardingMailbox),
-		); err != nil {
-			return nil, cleanup, err
-		}
-		icloudMod.Service.SetForwardingMailboxValidator(func(ctx context.Context, email string) error {
-			if mailMod == nil || mailMod.InboundUseCase == nil {
-				return icloudapi.ErrICloudForwardingMailbox
-			}
-			_, err := mailMod.InboundUseCase.ResolveRecipient(ctx, email)
-			return err
-		})
+		icloudMod.Service.SetPickupProxyProvider(proxyMod.ProxyUseCase)
 		icloudMod.Service.SetImportOwnerValidator(func(ctx context.Context, ownerID uint) (bool, error) {
 			owner, err := iamMod.AdminResourceOwners.ValidateTargetOwner(ctx, ownerID)
 			return owner != nil && owner.ID != 0 && owner.Enabled, err
@@ -333,9 +295,8 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		mailmatchMod.SetCodeOnlyPickup(gmailPickupAdapter{service: gmailMod.Service, upstreams: upstreamRouter, tokens: openapiMod.UseCase})
 		mailmatchMod.SetGmailMatchPort(gmailMod.Service)
 		mailmatchMod.SetGmailPurchaseFetchPort(gmailMod.Service)
-		mailmatchMod.SetICloudPurchaseFetchPort(icloudMod.Service)
+		mailmatchMod.SetICloudMailFetchPort(iCloudMailFetchAdapter{service: icloudMod.Service})
 		gmailMod.Service.SetMailIngest(gmailMailIngestAdapter{mailmatch: mailmatchMod.UseCase})
-		icloudMod.Service.SetMailIngest(iCloudMailIngestAdapter{mailmatch: mailmatchMod.UseCase})
 		mailmatchMod.SetMicrosoftCredentialPort(coreMod.MicrosoftCredentials)
 		mailmatchMod.SetBackgroundExecutionGate(p.BackgroundLoad)
 		coreMod.SetAdminResourceMaintenancePort(adminMicrosoftMaintenanceAdapter{

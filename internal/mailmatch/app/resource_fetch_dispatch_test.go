@@ -36,11 +36,11 @@ func (*resourceFetchDispatchRepoStub) CompleteResourceFetch(context.Context, uin
 	return nil
 }
 
-func (*resourceFetchDispatchRepoStub) AssertICloudResourceFetchFence(context.Context, uint, uint64) error {
+func (*resourceFetchDispatchRepoStub) AssertICloudResourceFetchFence(context.Context, uint, uint64, uint64) error {
 	return nil
 }
 
-func (*resourceFetchDispatchRepoStub) CompleteICloudResourceFetch(context.Context, uint, uint64, int, int, int, time.Time, *governancedomain.SystemLog) error {
+func (*resourceFetchDispatchRepoStub) CompleteICloudResourceFetch(context.Context, uint, uint64, uint64, int, int, int, time.Time, *governancedomain.SystemLog) error {
 	return nil
 }
 
@@ -134,6 +134,7 @@ type resourceFetchProcessRepoStub struct {
 	fetched   int
 	stored    int
 	matched   int
+	revision  uint64
 }
 
 func (*resourceFetchProcessRepoStub) MarkResourceFetchProcessing(context.Context, uint, uint64) (bool, error) {
@@ -157,13 +158,15 @@ func (s *resourceFetchProcessRepoStub) CompleteResourceFetchTask(context.Context
 	return nil
 }
 
-func (s *resourceFetchProcessRepoStub) AssertICloudResourceFetchFence(context.Context, uint, uint64) error {
+func (s *resourceFetchProcessRepoStub) AssertICloudResourceFetchFence(_ context.Context, _ uint, _ uint64, expectedCredentialRevision uint64) error {
 	s.fenced++
+	s.revision = expectedCredentialRevision
 	return nil
 }
 
-func (s *resourceFetchProcessRepoStub) CompleteICloudResourceFetch(_ context.Context, _ uint, _ uint64, fetched, stored, matched int, _ time.Time, _ *governancedomain.SystemLog) error {
+func (s *resourceFetchProcessRepoStub) CompleteICloudResourceFetch(_ context.Context, _ uint, _ uint64, expectedCredentialRevision uint64, fetched, stored, matched int, _ time.Time, _ *governancedomain.SystemLog) error {
 	s.completed = true
+	s.revision = expectedCredentialRevision
 	s.fetched, s.stored, s.matched = fetched, stored, matched
 	return nil
 }
@@ -198,23 +201,12 @@ func TestResourceFetchIgnoresLegacyLookbackForUnlimitedAdministratorChannel(t *t
 }
 
 type iCloudPurchaseFetchStub struct {
-	orderNo    string
-	resourceID uint
-	fenceCalls int
+	request FetchMessagesRequest
 }
 
-func (s *iCloudPurchaseFetchStub) FetchICloudMail(_ context.Context, orderNo string) error {
-	s.orderNo = orderNo
-	return nil
-}
-
-func (s *iCloudPurchaseFetchStub) FetchICloudResourceMailWithFence(ctx context.Context, resourceID uint, fence func(context.Context) error) (int, int, int, error) {
-	s.resourceID = resourceID
-	s.fenceCalls++
-	if err := fence(ctx); err != nil {
-		return 0, 0, 0, err
-	}
-	return 3, 2, 1, nil
+func (s *iCloudPurchaseFetchStub) FetchICloudMessages(_ context.Context, request FetchMessagesRequest) (*FetchMessagesResult, error) {
+	s.request = request
+	return &FetchMessagesResult{}, nil
 }
 
 func TestResourceFetchUsesExistingICloudPickupFetcher(t *testing.T) {
@@ -229,19 +221,19 @@ func TestResourceFetchUsesExistingICloudPickupFetcher(t *testing.T) {
 		},
 	}
 	purchase := &iCloudPurchaseFetchStub{}
-	messages := NewUseCase(nil, nil, nil, nil)
-	messages.SetICloudPurchaseFetchPort(purchase)
+	messages := NewUseCase(&legacyFetchRepoStub{}, nil, nil, nil)
+	messages.SetICloudMailFetchPort(purchase)
 	uc := NewAdminResourceFetchUseCase(repo, nil, nil, messages, nil)
 
 	require.NoError(t, uc.Process(context.Background(), AdminResourceFetchTask{ResourceID: 100, Generation: 2}))
-	require.Equal(t, uint(100), purchase.resourceID)
-	require.Empty(t, purchase.orderNo)
-	require.Equal(t, 1, purchase.fenceCalls)
+	require.Equal(t, uint(100), purchase.request.Scope.EmailResourceID)
+	require.True(t, purchase.request.FullHistory)
 	require.Equal(t, 1, repo.fenced)
+	require.Equal(t, uint64(3), repo.revision)
 	require.True(t, repo.completed)
-	require.Equal(t, 3, repo.fetched)
-	require.Equal(t, 2, repo.stored)
-	require.Equal(t, 1, repo.matched)
+	require.Zero(t, repo.fetched)
+	require.Zero(t, repo.stored)
+	require.Zero(t, repo.matched)
 }
 
 type resourceFetchReleaseRepoStub struct {

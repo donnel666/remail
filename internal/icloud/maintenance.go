@@ -10,7 +10,6 @@ import (
 
 const (
 	iCloudMaintenanceValidation = "validation"
-	iCloudMaintenanceAlias      = "alias"
 
 	iCloudMaintenanceQueued    = "queued"
 	iCloudMaintenanceRunning   = "running"
@@ -18,13 +17,6 @@ const (
 	iCloudMaintenanceFailed    = "failed"
 	iCloudMaintenanceCanceled  = "canceled"
 )
-
-func iCloudMaintenanceKindForCommand(command AdminICloudCommand) string {
-	if command == AdminICloudAlias {
-		return iCloudMaintenanceAlias
-	}
-	return iCloudMaintenanceValidation
-}
 
 func ensureICloudMaintenanceRunTx(
 	ctx context.Context,
@@ -39,9 +31,7 @@ func ensureICloudMaintenanceRunTx(
 	if tx == nil || resourceID == 0 || generation == 0 || credentialRevision == 0 {
 		return nil, ErrICloudValidationTemp
 	}
-	if kind != iCloudMaintenanceAlias {
-		kind = iCloudMaintenanceValidation
-	}
+	kind = iCloudMaintenanceValidation
 	if attempts < 0 {
 		attempts = 0
 	}

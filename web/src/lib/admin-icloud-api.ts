@@ -13,6 +13,8 @@ export type AdminICloudResourceItem =
   components["schemas"]["AdminICloudResourceItem"];
 export type AdminICloudResourceDetail =
   components["schemas"]["AdminICloudResourceDetail"];
+export type AdminICloudSessionView =
+  components["schemas"]["AdminICloudSessionView"];
 export type AdminICloudResourceList =
   components["schemas"]["AdminICloudResourceListResponse"];
 export type AdminICloudResourceFacets =
@@ -43,10 +45,8 @@ export type AdminICloudBatchAction =
 
 export interface AdminICloudResourceListFilter {
   search?: string;
-  suffix?: string;
   status?: AdminICloudResourceStatus;
   forSale?: boolean;
-  sessionStatus?: AdminICloudSessionStatus;
   createdFrom?: string;
   createdTo?: string;
 }
@@ -78,13 +78,10 @@ function pageLimit(limit: number) {
 }
 
 function normalizeFilter(filter: AdminICloudResourceListFilter) {
-  const suffix = filter.suffix?.trim();
   return {
     search: filter.search?.trim() || undefined,
-    suffix: suffix?.startsWith("@") ? suffix.slice(1) : suffix || undefined,
     status: filter.status,
     forSale: filter.forSale,
-    sessionStatus: filter.sessionStatus,
     createdFrom: filter.createdFrom,
     createdTo: filter.createdTo,
   };

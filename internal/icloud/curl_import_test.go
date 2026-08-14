@@ -7,63 +7,71 @@ import (
 	coreDomain "github.com/donnel666/remail/internal/core/domain"
 )
 
-func TestParseICloudImportCurlExtractsRuntimeContext(t *testing.T) {
-	const cookie = `X-APPLE-WEBAUTH-USER="v=1:s=0:d=16583180622"; X-APPLE-WEBAUTH-TOKEN="token"; X-APPLE-DS-WEB-SESSION-TOKEN="session----inside"`
-	content := "main@icloud.com----curl --url 'https://p217-maildomainws.icloud.com.cn/v2/hme/list?clientBuildNumber=2628Build19&clientMasteringNumber=2628Build19&clientId=client-1&dsid=16583180622' \\\n  -H 'Origin: https://www.icloud.com.cn' \\\n  -H 'Referer: https://www.icloud.com.cn/' \\\n  -H 'User-Agent: Mozilla/5.0 Test Browser' \\\n  -b '" + cookie + "'"
+const (
+	testICloudOldCookie = "X-APPLE-WEBAUTH-USER=user; X-APPLE-WEBAUTH-TOKEN=token; X-APPLE-DS-WEB-SESSION-TOKEN=session"
+	testICloudOldCurl   = `curl 'https://p119-maildomainws.icloud.com/v2/hme/list?clientBuildNumber=build&clientMasteringNumber=master&clientId=client&dsid=123' -H 'Cookie: ` + testICloudOldCookie + `'`
+	testICloudNewCurl   = `curl 'https://appleid.apple.com/account/manage/' -H 'Cookie: myacinfo=secret' -H 'scnt: scnt-value'`
+)
 
-	lines, failures, fatal := parseICloudImport(content, coreDomain.ImportErrorStrategyAbort)
-	if fatal != nil || len(failures) != 0 || len(lines) != 1 {
-		t.Fatalf("unexpected cURL parse result: lines=%#v failures=%#v fatal=%#v", lines, failures, fatal)
+func TestParseICloudImportSupportsCompleteCredentialLines(t *testing.T) {
+	tests := []struct {
+		name      string
+		line      string
+		wantKinds []string
+	}{
+		{name: "old channel", line: "owner@icloud.com----app-password----" + testICloudOldCurl, wantKinds: []string{iCloudChannelWeb}},
+		{name: "new channel", line: "owner@icloud.com----app-password----" + testICloudNewCurl, wantKinds: []string{iCloudChannelAppleAccount}},
+		{name: "both channels", line: "owner@icloud.com----app-password----" + testICloudNewCurl + "----" + testICloudOldCurl, wantKinds: []string{iCloudChannelAppleAccount, iCloudChannelWeb}},
 	}
-	line := lines[0]
-	if line.PrimaryEmail != "main@icloud.com" || line.Host != "p217-maildomainws.icloud.com.cn" ||
-		line.DSID != "16583180622" || line.ClientID != "client-1" || line.ClientBuildNumber != "2628Build19" ||
-		line.ClientMasteringNumber != "2628Build19" || line.Cookie != cookie {
-		t.Fatalf("unexpected parsed credentials: %#v", line)
-	}
-	if line.LangCode != "zh-cn" || line.Origin != "https://www.icloud.com.cn" || line.Referer != "https://www.icloud.com.cn/" || line.UserAgent != "Mozilla/5.0 Test Browser" {
-		t.Fatalf("unexpected parsed request context: %#v", line)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			lines, failures, fatal := parseICloudImport(test.line, coreDomain.ImportErrorStrategyAbort)
+			if fatal != nil || len(failures) != 0 || len(lines) != 1 {
+				t.Fatalf("unexpected parse result: lines=%#v failures=%#v fatal=%#v", lines, failures, fatal)
+			}
+			line := lines[0]
+			if line.PrimaryEmail != "owner@icloud.com" || line.AppPassword != "app-password" || len(line.Channels) != len(test.wantKinds) {
+				t.Fatalf("unexpected credentials: %#v", line)
+			}
+			for index, kind := range test.wantKinds {
+				if line.Channels[index].Kind != kind {
+					t.Fatalf("channel %d kind = %q, want %q", index, line.Channels[index].Kind, kind)
+				}
+			}
+		})
 	}
 }
 
-func TestParseICloudImportCurlSupportsHeaderCookieAndBareURL(t *testing.T) {
-	content := `main@icloud.com----curl https://p119-maildomainws.icloud.com/v2/hme/list?clientBuildNumber=build&clientMasteringNumber=master&clientId=client&dsid=123 -H "Cookie: X-APPLE-WEBAUTH-USER=user; X-APPLE-WEBAUTH-TOKEN=token; X-APPLE-DS-WEB-SESSION-TOKEN=session"`
-	lines, failures, fatal := parseICloudImport(content, coreDomain.ImportErrorStrategyAbort)
-	if fatal != nil || len(failures) != 0 || len(lines) != 1 {
-		t.Fatalf("unexpected header-cookie parse result: lines=%#v failures=%#v fatal=%#v", lines, failures, fatal)
+func TestParseICloudImportRejectsDuplicateOrUnsafeChannels(t *testing.T) {
+	tests := []string{
+		"owner@icloud.com----app-password----" + testICloudOldCurl + "----" + testICloudOldCurl,
+		"owner@icloud.com----app-password----curl 'https://p119-maildomainws.icloud.com.evil.example/v2/hme/list?clientBuildNumber=build&clientMasteringNumber=master&clientId=client&dsid=123' -H 'Cookie: " + testICloudOldCookie + "'",
+		"owner@icloud.com----app-password",
 	}
-	if lines[0].Host != "p119-maildomainws.icloud.com" || lines[0].Cookie != "X-APPLE-WEBAUTH-USER=user; X-APPLE-WEBAUTH-TOKEN=token; X-APPLE-DS-WEB-SESSION-TOKEN=session" {
-		t.Fatalf("unexpected parsed header-cookie context: %#v", lines[0])
-	}
-}
-
-func TestICloudCurlDetectionDoesNotCaptureOrdinaryEmailStartingWithCurl(t *testing.T) {
-	content := "curl-user@icloud.com----p119-maildomainws.icloud.com----123----client----build----master----X-APPLE-WEBAUTH-USER=user; X-APPLE-WEBAUTH-TOKEN=token; X-APPLE-DS-WEB-SESSION-TOKEN=session"
-	lines, failures, fatal := parseICloudImport(content, coreDomain.ImportErrorStrategyAbort)
-	if fatal != nil || len(failures) != 0 || len(lines) != 1 || lines[0].PrimaryEmail != "curl-user@icloud.com" {
-		t.Fatalf("ordinary import was misclassified as cURL: lines=%#v failures=%#v fatal=%#v", lines, failures, fatal)
+	for _, content := range tests {
+		lines, failures, fatal := parseICloudImport(content, coreDomain.ImportErrorStrategySkip)
+		if fatal != nil || len(lines) != 0 || len(failures) != 1 || failures[0].Category != "invalid_format" {
+			t.Fatalf("unexpected invalid result: lines=%#v failures=%#v fatal=%#v", lines, failures, fatal)
+		}
+		if strings.Contains(failures[0].SafeMessage, "evil.example") || strings.Contains(failures[0].SafeMessage, "secret") {
+			t.Fatalf("credential leaked into safe error: %q", failures[0].SafeMessage)
+		}
 	}
 }
 
-func TestParseICloudImportCurlRequiresPrimaryEmailAndSafeHMEURL(t *testing.T) {
-	unsafe := `curl 'https://p119-maildomainws.icloud.com.evil.example/v2/hme/list?clientBuildNumber=build&clientMasteringNumber=master&clientId=client&dsid=123' -b 'X-APPLE-WEBAUTH-USER=user; X-APPLE-WEBAUTH-TOKEN=token; X-APPLE-DS-WEB-SESSION-TOKEN=session'`
-	_, failures, fatal := parseICloudImport(unsafe, coreDomain.ImportErrorStrategySkip)
-	if fatal != nil || len(failures) != 1 || failures[0].Category != "missing_primary_email" {
-		t.Fatalf("unexpected bare/unsafe cURL result: failures=%#v fatal=%#v", failures, fatal)
+func TestParseICloudImportKeepsSeparatorsInsideCookie(t *testing.T) {
+	content := strings.Replace(testICloudOldCurl, "session", "session----inside", 1)
+	line, failure := parseICloudImportLine(7, "Owner@icloud.com----app-password----"+content)
+	if failure != nil {
+		t.Fatalf("parse failure: %#v", failure)
 	}
-
-	wrapped := "main@icloud.com----" + unsafe
-	_, failures, fatal = parseICloudImport(wrapped, coreDomain.ImportErrorStrategySkip)
-	if fatal != nil || len(failures) != 1 || failures[0].Category != "invalid_format" {
-		t.Fatalf("unexpected unsafe URL result: failures=%#v fatal=%#v", failures, fatal)
-	}
-	if strings.Contains(failures[0].SafeMessage, "evil.example") {
-		t.Fatalf("unsafe URL leaked into safe error: %q", failures[0].SafeMessage)
+	if line.PrimaryEmail != "owner@icloud.com" || line.Channels[0].Cookie != strings.Replace(testICloudOldCookie, "session", "session----inside", 1) {
+		t.Fatalf("unexpected parsed line: %#v", line)
 	}
 }
 
 func TestTokenizeICloudCurlDoesNotExecuteShellSyntax(t *testing.T) {
-	tokens, err := tokenizeICloudCurl(`curl --url 'https://p119-maildomainws.icloud.com/v2/hme/list?a=1' -H 'X-Test: $(touch /tmp/should-not-exist)' \` + "\n" + `  -b 'a=b'`)
+	tokens, err := tokenizeICloudCurl(`curl --url 'https://appleid.apple.com/account/manage/' -H 'X-Test: $(touch /tmp/should-not-exist)' -b 'a=b'`)
 	if err != nil {
 		t.Fatalf("tokenize cURL: %v", err)
 	}

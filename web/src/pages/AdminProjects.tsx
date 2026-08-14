@@ -170,7 +170,12 @@ function projectPriceDefaultsFromValues(values: Record<string, string>): Project
   };
   return {
     microsoft,
-    icloud: microsoft,
+    icloud: {
+      codePrice: read("default_project_icloud_code_price", fallbackProjectPriceDefaults.icloud.codePrice),
+      codeSupplierPrice: read("default_project_icloud_code_supplier_price", fallbackProjectPriceDefaults.icloud.codeSupplierPrice),
+      purchasePrice: read("default_project_icloud_purchase_price", fallbackProjectPriceDefaults.icloud.purchasePrice),
+      purchaseSupplierPrice: read("default_project_icloud_purchase_supplier_price", fallbackProjectPriceDefaults.icloud.purchaseSupplierPrice),
+    },
     domain: {
       codePrice: read("default_project_domain_code_price", fallbackProjectPriceDefaults.domain.codePrice),
       codeSupplierPrice: read("default_project_domain_code_supplier_price", fallbackProjectPriceDefaults.domain.codeSupplierPrice),

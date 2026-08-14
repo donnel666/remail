@@ -726,13 +726,12 @@ LIMIT ?`
 	return rows, nil
 }
 
-func (r *Repo) ListICloudSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, requiredUntil time.Time, limit int) ([]allocapp.ICloudCandidate, error) {
+func (r *Repo) ListICloudSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, _ time.Time, limit int) ([]allocapp.ICloudCandidate, error) {
 	if projectID == 0 || limit <= 0 {
 		return nil, domain.ErrInvalidAllocationRequest
 	}
 	where := []string{
 		"ir.status = 'normal'",
-		"ir.expire_at >= ?",
 		"ia.status = 'normal'",
 		`NOT EXISTS (
             SELECT 1 FROM icloud_allocations history
@@ -743,7 +742,7 @@ func (r *Repo) ListICloudSourceCandidates(ctx context.Context, projectID uint, b
             WHERE active.alias_id = ia.id AND active.status = 'allocated'
         )`,
 	}
-	args := []any{requiredUntil.UTC(), projectID}
+	args := []any{projectID}
 	switch scope {
 	case domain.SupplyScopeOwned:
 		where = append(where, "er.owner_user_id = ?")
@@ -988,13 +987,13 @@ func (r *Repo) LockGmailCandidate(ctx context.Context, resourceID uint, projectI
 	return &row, nil
 }
 
-func (r *Repo) LockICloudCandidate(ctx context.Context, resourceID uint, aliasID uint, projectID uint, buyerUserID uint, scope domain.SupplyScope, requiredUntil time.Time) (*allocapp.ICloudCandidate, error) {
+func (r *Repo) LockICloudCandidate(ctx context.Context, resourceID uint, aliasID uint, projectID uint, buyerUserID uint, scope domain.SupplyScope, _ time.Time) (*allocapp.ICloudCandidate, error) {
 	if resourceID == 0 || aliasID == 0 || projectID == 0 {
 		return nil, domain.ErrInvalidAllocationRequest
 	}
 	where := []string{
 		"ia.id = ?", "ia.resource_id = ?", "ia.status = 'normal'",
-		"ir.status = 'normal'", "ir.expire_at >= ?",
+		"ir.status = 'normal'",
 		`NOT EXISTS (
             SELECT 1 FROM icloud_allocations history
             WHERE history.alias_id = ia.id AND history.project_id = ?
@@ -1004,7 +1003,7 @@ func (r *Repo) LockICloudCandidate(ctx context.Context, resourceID uint, aliasID
             WHERE active.alias_id = ia.id AND active.status = 'allocated'
         )`,
 	}
-	args := []any{aliasID, resourceID, requiredUntil.UTC(), projectID}
+	args := []any{aliasID, resourceID, projectID}
 	switch scope {
 	case domain.SupplyScopeOwned:
 		where = append(where, "er.owner_user_id = ?")
@@ -2195,7 +2194,6 @@ SELECT COUNT(*)
 FROM icloud_resources ir
 JOIN email_resources er ON er.id = ir.id AND er.type = 'icloud'
 WHERE ir.status = 'normal'
-  AND ir.expire_at >= UTC_TIMESTAMP(3)
   AND ir.for_sale = TRUE`); err != nil {
 			return nil, err
 		}
@@ -2206,7 +2204,6 @@ JOIN icloud_resources ir ON ir.id = ia.resource_id
 JOIN email_resources er ON er.id = ir.id AND er.type = 'icloud'
 WHERE ia.status = 'normal'
   AND ir.status = 'normal'
-  AND ir.expire_at >= UTC_TIMESTAMP(3)
   AND ir.for_sale = TRUE
   AND NOT EXISTS (
       SELECT 1 FROM icloud_allocations history

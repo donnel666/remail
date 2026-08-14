@@ -1,559 +1,200 @@
 package icloud
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	stdmail "net/mail"
-	"slices"
-	"sort"
 	"strings"
 	"time"
 
-	"github.com/donnel666/remail/internal/mailbox"
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"gorm.io/gorm"
 )
 
-const iCloudDeliveryProbeReadLimit = 100
-
-type iCloudPurchaseMailScope struct {
-	ResourceID     uint      `gorm:"column:resource_id"`
-	AliasID        uint      `gorm:"column:alias_id"`
-	AliasEmail     string    `gorm:"column:alias_email"`
-	AnonymousID    string    `gorm:"column:anonymous_id"`
-	ForwardToEmail string    `gorm:"column:forward_to_email"`
-	AllocatedAt    time.Time `gorm:"column:allocated_at"`
+type iCloudIMAPResourceScope struct {
+	ID                 uint       `gorm:"column:id"`
+	PrimaryEmail       string     `gorm:"column:primary_email"`
+	AppPassword        string     `gorm:"column:imap_app_password"`
+	UIDValidity        string     `gorm:"column:imap_uid_validity"`
+	LastUID            uint64     `gorm:"column:imap_last_uid"`
+	LastSyncAt         *time.Time `gorm:"column:imap_last_sync_at"`
+	CredentialRevision uint64     `gorm:"column:credential_revision"`
 }
 
-type iCloudMailRoute struct {
-	ForwardToEmail string
-	Since          time.Time
+type MailFetchRequest struct {
+	ResourceID  uint
+	SinceAt     time.Time
+	UntilAt     time.Time
+	MaxMessages int
+	FullHistory bool
 }
 
-type iCloudForwardedMailRow struct {
-	ID              uint      `gorm:"column:id"`
-	EnvelopeFrom    string    `gorm:"column:envelope_from"`
-	SourceObjectKey string    `gorm:"column:source_object_key"`
-	CreatedAt       time.Time `gorm:"column:created_at"`
+type MailFetchCursor struct {
+	ResourceID                 uint
+	ExpectedCredentialRevision uint64
+	ExpectedUIDValidity        string
+	ExpectedLastUID            uint64
+	UIDValidity                string
+	LastUID                    uint64
 }
 
-type iCloudMailCandidate struct {
-	scope  iCloudPurchaseMailScope
-	row    iCloudForwardedMailRow
-	sender string
+type MailFetchResult struct {
+	Messages []iCloudIMAPMessage
+	Cursor   *MailFetchCursor
 }
 
-type iCloudScopedMailRoute struct {
-	scope iCloudPurchaseMailScope
-	since time.Time
-}
-
-// FetchICloudMail reads one allocated alias from its persisted domain inbox.
-// Apple's relay tail contains the alias anonymous ID with extra characters
-// interleaved; that durable ID selects the alias without recipientMailId.
-func (s *Service) FetchICloudMail(ctx context.Context, orderNo string) error {
-	orderNo = strings.TrimSpace(orderNo)
-	if s == nil || s.db == nil || s.files == nil || s.mailIngest == nil || orderNo == "" {
-		return ErrICloudMailUnavailable
-	}
-	scope, err := s.loadICloudPurchaseMailScope(ctx, orderNo)
-	if err != nil {
-		return err
-	}
-	_, _, _, err = s.fetchICloudMailScopes(ctx, []iCloudPurchaseMailScope{*scope}, runtimeconfig.Int("purchase_read_limit", 30, 1), nil)
-	return err
-}
-
-// FetchICloudResourceMail is retained for order/API callers that do not own a
-// resource-fetch generation. The administrator worker uses the fenced variant.
-func (s *Service) FetchICloudResourceMail(ctx context.Context, resourceID uint) error {
-	_, _, _, err := s.FetchICloudResourceMailWithFence(ctx, resourceID, nil)
-	return err
-}
-
-// FetchICloudResourceMailWithFence reads every persisted alias route, including
-// released and never-allocated aliases. The read budget is deliberately
-// separate from purchase_read_limit so an administrator scan cannot starve or
-// silently truncate customer pickup behavior.
-func (s *Service) FetchICloudResourceMailWithFence(ctx context.Context, resourceID uint, fence func(context.Context) error) (int, int, int, error) {
-	if s == nil || s.db == nil || s.files == nil || s.mailIngest == nil || resourceID == 0 {
-		return 0, 0, 0, ErrICloudMailUnavailable
-	}
-	var scopes []iCloudPurchaseMailScope
-	if err := s.db.WithContext(ctx).Table("icloud_aliases AS alias").
-		Select(`alias.resource_id, alias.id AS alias_id, alias.email AS alias_email,
-			alias.anonymous_id, alias.forward_to_email`).
-		Where("alias.resource_id = ? AND alias.status <> ?", resourceID, iCloudResourceDeleted).
-		Order("alias.id ASC").
-		Find(&scopes).Error; err != nil {
-		return 0, 0, 0, fmt.Errorf("%w: load aliases", ErrICloudMailUnavailable)
-	}
-	if len(scopes) == 0 {
-		return 0, 0, 0, fmt.Errorf("%w: no persisted iCloud aliases", ErrICloudMailUnavailable)
-	}
-	return s.fetchICloudMailScopes(ctx, scopes, runtimeconfig.Int(runtimeconfig.ICloudAdminReadLimitKey, 5000, 1), fence)
-}
-
-func (s *Service) fetchICloudMailScopes(ctx context.Context, scopes []iCloudPurchaseMailScope, readLimit int, fence func(context.Context) error) (int, int, int, error) {
-	if s == nil || s.files == nil || s.mailIngest == nil {
-		return 0, 0, 0, ErrICloudMailUnavailable
-	}
-	readSkew := runtimeconfig.Duration("read_window_skew_minutes", 2*time.Minute, time.Minute, 0)
-	scanLimit := runtimeconfig.Int(runtimeconfig.ICloudMailmatchScanLimitKey, runtimeconfig.DefaultICloudMailmatchScanLimit, 1)
-	if readLimit <= 0 {
-		return 0, 0, 0, ErrICloudMailUnavailable
-	}
-	fetched, storedCount, matchedCount := 0, 0, 0
-	seenRows := make(map[uint]struct{})
-	candidates := make([]iCloudMailCandidate, 0, readLimit)
-	routesByMailbox := make(map[string][]iCloudScopedMailRoute)
-	mailboxes := make([]string, 0, len(scopes))
-	for _, scope := range scopes {
-		if scope.ResourceID == 0 || strings.TrimSpace(scope.AliasEmail) == "" {
-			continue
-		}
-		routes, err := s.loadICloudAliasRoutes(ctx, scope.AliasID, scope.ForwardToEmail, scope.AllocatedAt)
-		if err != nil {
-			return fetched, storedCount, matchedCount, err
-		}
-		if len(routes) == 0 {
-			continue
-		}
-		for _, route := range routes {
-			forwardToEmail := strings.ToLower(strings.TrimSpace(route.ForwardToEmail))
-			if forwardToEmail == "" || !validICloudHMEText(strings.TrimSpace(scope.AnonymousID), iCloudHMEAnonymousIDMaxLength, false) {
-				continue
-			}
-			routeSince := route.Since
-			if !routeSince.IsZero() {
-				routeSince = routeSince.Add(-readSkew)
-			}
-			if _, exists := routesByMailbox[forwardToEmail]; !exists {
-				mailboxes = append(mailboxes, forwardToEmail)
-			}
-			routesByMailbox[forwardToEmail] = append(routesByMailbox[forwardToEmail], iCloudScopedMailRoute{
-				scope: scope, since: routeSince,
-			})
-		}
-	}
-	if len(mailboxes) == 0 {
-		return fetched, storedCount, matchedCount, fmt.Errorf("%w: no readable iCloud alias route", ErrICloudMailUnavailable)
-	}
-	for _, forwardToEmail := range mailboxes {
-		routes := routesByMailbox[forwardToEmail]
-		var mailboxSince time.Time
-		unbounded := false
-		for _, route := range routes {
-			if route.since.IsZero() {
-				unbounded = true
-				break
-			}
-			if mailboxSince.IsZero() || route.since.Before(mailboxSince) {
-				mailboxSince = route.since
-			}
-		}
-		if unbounded {
-			mailboxSince = time.Time{}
-		}
-		matchedInMailbox := 0
-		scanErr := s.scanICloudMailboxRows(ctx, forwardToEmail, mailboxSince, scanLimit, func(row iCloudForwardedMailRow) bool {
-			if _, exists := seenRows[row.ID]; exists {
-				return true
-			}
-			var matched *iCloudMailCandidate
-			for _, route := range routes {
-				if !route.since.IsZero() && row.CreatedAt.Before(route.since) {
-					continue
-				}
-				sender, ok := decodeICloudRelaySender(row.EnvelopeFrom, route.scope.AnonymousID)
-				if !ok {
-					continue
-				}
-				candidate := iCloudMailCandidate{scope: route.scope, row: row, sender: sender}
-				if matched != nil {
-					return true
-				}
-				matched = &candidate
-			}
-			if matched != nil {
-				seenRows[row.ID] = struct{}{}
-				candidates = append(candidates, *matched)
-				matchedInMailbox++
-				return matchedInMailbox < readLimit
-			}
-			return true
-		})
-		if scanErr != nil {
-			return fetched, storedCount, matchedCount, scanErr
-		}
-	}
-	sort.Slice(candidates, func(i, j int) bool {
-		if !candidates[i].row.CreatedAt.Equal(candidates[j].row.CreatedAt) {
-			return candidates[i].row.CreatedAt.After(candidates[j].row.CreatedAt)
-		}
-		return candidates[i].row.ID > candidates[j].row.ID
-	})
-	if len(candidates) > readLimit {
-		candidates = candidates[:readLimit]
-	}
-	// The query bounds newest-first; ingestion remains chronological so an
-	// older matching code cannot overwrite a newer delivery decision.
-	slices.Reverse(candidates)
-	for _, candidate := range candidates {
-		object, readErr := s.files.ReadPrivate(ctx, candidate.row.SourceObjectKey)
-		if readErr != nil || object == nil {
-			if readErr == nil {
-				readErr = errors.New("empty inbound object")
-			}
-			return fetched, storedCount, matchedCount, fmt.Errorf("%w: read inbound message %d: %v", ErrICloudMailUnavailable, candidate.row.ID, readErr)
-		}
-		fetched++
-		result, ingestErr := s.ingestICloudMail(ctx, candidate.scope.ResourceID, strings.ToLower(strings.TrimSpace(candidate.scope.AliasEmail)), candidate.sender, object.ContentBytes, candidate.row.CreatedAt.UTC(), fmt.Sprintf("inbound:%d", candidate.row.ID), fence)
-		if ingestErr != nil {
-			return fetched, storedCount, matchedCount, fmt.Errorf("%w: ingest inbound message: %w", ErrICloudMailUnavailable, ingestErr)
-		}
-		storedCount += result.Stored
-		matchedCount += result.Matched
-	}
-	return fetched, storedCount, matchedCount, nil
-}
-
-func (s *Service) loadICloudPurchaseMailScope(ctx context.Context, orderNo string) (*iCloudPurchaseMailScope, error) {
-	var scope iCloudPurchaseMailScope
-	err := s.db.WithContext(ctx).Table("icloud_allocations AS allocation").
-		Select(`allocation.resource_id, allocation.alias_id,
-			allocation.email AS alias_email,
-			alias.anonymous_id, alias.forward_to_email,
-			allocation.created_at AS allocated_at`).
-		Joins("JOIN icloud_aliases AS alias ON alias.id = allocation.alias_id AND alias.resource_id = allocation.resource_id").
-		Where("allocation.order_no = ? AND allocation.status = ?", orderNo, "allocated").
-		Take(&scope).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+// FetchMail performs one account-level IMAP read. The alias list is loaded
+// once from local inventory; receiving mail never calls Apple's HME list API.
+func (s *Service) FetchMail(ctx context.Context, request MailFetchRequest) (*MailFetchResult, error) {
+	if s == nil || s.db == nil || request.ResourceID == 0 {
 		return nil, ErrICloudMailUnavailable
 	}
-	if err != nil {
-		return nil, fmt.Errorf("%w: load allocation", ErrICloudMailUnavailable)
-	}
-	if scope.ResourceID == 0 || scope.AliasID == 0 || strings.TrimSpace(scope.AliasEmail) == "" || scope.AllocatedAt.IsZero() {
-		return nil, ErrICloudMailUnavailable
-	}
-	return &scope, nil
-}
-
-func (s *Service) loadICloudAliasRoutes(ctx context.Context, aliasID uint, currentForward string, since time.Time) ([]iCloudMailRoute, error) {
-	routes := make([]iCloudMailRoute, 0, 2)
-	byMailbox := make(map[string]int)
-	if s == nil || s.db == nil || aliasID == 0 {
-		return nil, ErrICloudMailUnavailable
-	}
-	if s.db.Migrator().HasTable("icloud_alias_routes") {
-		var persisted []iCloudAliasRouteModel
-		if err := s.db.WithContext(ctx).Where("alias_id = ?", aliasID).Order("first_seen_at ASC, id ASC").Find(&persisted).Error; err != nil {
-			return nil, fmt.Errorf("%w: load alias routes", ErrICloudMailUnavailable)
-		}
-		for _, route := range persisted {
-			forwardToEmail := strings.ToLower(strings.TrimSpace(route.ForwardToEmail))
-			if forwardToEmail == "" {
-				continue
-			}
-			routeSince := since
-			if !since.IsZero() {
-				routeSince = maxICloudTime(route.FirstSeenAt, since)
-			}
-			if index, exists := byMailbox[forwardToEmail]; exists {
-				if routeSince.IsZero() || (!routes[index].Since.IsZero() && routeSince.Before(routes[index].Since)) {
-					routes[index].Since = routeSince
-				}
-				continue
-			}
-			byMailbox[forwardToEmail] = len(routes)
-			routes = append(routes, iCloudMailRoute{ForwardToEmail: forwardToEmail, Since: routeSince})
-		}
-	}
-	currentForward = strings.ToLower(strings.TrimSpace(currentForward))
-	if currentForward != "" {
-		if index, exists := byMailbox[currentForward]; exists {
-			if since.IsZero() || (!routes[index].Since.IsZero() && since.Before(routes[index].Since)) {
-				routes[index].Since = since
-			}
-		} else {
-			routes = append(routes, iCloudMailRoute{ForwardToEmail: currentForward, Since: since})
-		}
-	}
-	return routes, nil
-}
-
-func maxICloudTime(first, second time.Time) time.Time {
-	if first.IsZero() || second.After(first) {
-		return second
-	}
-	return first
-}
-
-func (s *Service) ingestICloudMail(ctx context.Context, resourceID uint, recipient, sender string, raw []byte, receivedAt time.Time, providerMessageID string, fence func(context.Context) error) (MailIngestResult, error) {
-	if fence != nil {
-		fenced, ok := s.mailIngest.(MailIngestWithFencePort)
-		if !ok {
-			return MailIngestResult{}, ErrICloudMailUnavailable
-		}
-		return fenced.IngestICloudMailWithFence(ctx, resourceID, recipient, sender, raw, receivedAt, providerMessageID, fence)
-	}
-	if err := s.mailIngest.IngestICloudMail(ctx, resourceID, recipient, sender, raw, receivedAt, providerMessageID); err != nil {
-		return MailIngestResult{}, err
-	}
-	return MailIngestResult{Stored: 1}, nil
-}
-
-func (s *Service) listICloudForwardedMailRows(
-	ctx context.Context,
-	forwardToEmail string,
-	anonymousID string,
-	since time.Time,
-	limit int,
-) ([]iCloudForwardedMailRow, error) {
-	if s == nil || s.db == nil || !validICloudHMEText(strings.TrimSpace(anonymousID), iCloudHMEAnonymousIDMaxLength, false) || limit <= 0 {
-		return nil, ErrICloudMailUnavailable
-	}
-	rows := make([]iCloudForwardedMailRow, 0, limit)
-	err := s.scanICloudMailboxRows(ctx, forwardToEmail, since, limit, func(row iCloudForwardedMailRow) bool {
-		if _, ok := decodeICloudRelaySender(row.EnvelopeFrom, anonymousID); ok {
-			rows = append(rows, row)
-		}
-		return true
-	})
+	scope, aliases, err := s.loadICloudIMAPScope(ctx, request.ResourceID)
 	if err != nil {
 		return nil, err
 	}
-	return rows, nil
+	if len(aliases) == 0 {
+		return &MailFetchResult{}, nil
+	}
+	client := s.imap
+	if client == nil {
+		client = &iCloudIMAPClient{}
+	}
+	sinceAt, untilAt := request.SinceAt, request.UntilAt
+	if !request.FullHistory {
+		// The cursor belongs to the whole iCloud account, not to the order that
+		// triggered this read. Order windows are applied later by MailMatch.
+		sinceAt = s.now().UTC().Add(-runtimeconfig.Duration("fetch_lookback_window_days", 90*24*time.Hour, 24*time.Hour, 1))
+		untilAt = time.Time{}
+	}
+	messages, uidValidity, lastUID, err := client.Fetch(ctx, iCloudIMAPFetchRequest{
+		Email: scope.PrimaryEmail, AppPassword: scope.AppPassword,
+		UIDValidity: scope.UIDValidity, LastUID: scope.LastUID, Aliases: aliases,
+		SinceAt: sinceAt, UntilAt: untilAt,
+		MaxMessages: request.MaxMessages,
+		FullHistory: request.FullHistory,
+	})
+	if err != nil {
+		if errors.Is(err, errICloudIMAPAuthentication) {
+			failureCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			_ = s.markICloudIMAPAuthenticationFailure(failureCtx, *scope)
+		}
+		return nil, fmt.Errorf("%w: IMAP fetch", ErrICloudMailUnavailable)
+	}
+	result := &MailFetchResult{Messages: messages}
+	if !request.FullHistory {
+		result.Cursor = &MailFetchCursor{
+			ResourceID: scope.ID, ExpectedCredentialRevision: scope.CredentialRevision,
+			ExpectedUIDValidity: scope.UIDValidity, ExpectedLastUID: scope.LastUID,
+			UIDValidity: uidValidity, LastUID: lastUID,
+		}
+	}
+	return result, nil
 }
 
-// scanICloudMailboxRows bounds the raw mailbox read before relay-suffix
-// matching. The callback may stop the scan once the caller has enough matches.
-func (s *Service) scanICloudMailboxRows(
-	ctx context.Context,
-	forwardToEmail string,
-	since time.Time,
-	limit int,
-	visit func(iCloudForwardedMailRow) bool,
-) error {
-	forwardToEmail = strings.ToLower(strings.TrimSpace(forwardToEmail))
-	mailboxKey := mailbox.Normalize(forwardToEmail)
-	if s == nil || s.db == nil || mailboxKey == "" || limit <= 0 || visit == nil {
+// CommitMailCursor advances the incremental IMAP cursor only after MailMatch
+// has durably ingested the fetched batch and its task fence is still current.
+func (s *Service) CommitMailCursor(ctx context.Context, cursor MailFetchCursor, fence func(context.Context) error) error {
+	if s == nil || s.db == nil || cursor.ResourceID == 0 || cursor.ExpectedCredentialRevision == 0 {
 		return ErrICloudMailUnavailable
 	}
-	query := s.db.WithContext(ctx).Table("inbound_mails").
-		Select("id, envelope_from, source_object_key, created_at").
-		Where("resource_type = ? AND mailbox_key = ? AND status = ?", "domain", mailboxKey, "stored").
-		Order("created_at DESC, id DESC").
-		Limit(limit)
-	if !since.IsZero() {
-		query = query.Where("created_at >= ?", since.UTC())
-	}
-	rows, err := query.Rows()
+	now := s.now().UTC()
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		txCtx := platform.WithGormTx(ctx, tx)
+		if fence != nil {
+			if err := fence(txCtx); err != nil {
+				return err
+			}
+		}
+		result := tx.WithContext(txCtx).Model(&iCloudResourceModel{}).
+			Where("id = ? AND credential_revision = ? AND imap_uid_validity = ? AND imap_last_uid = ?",
+				cursor.ResourceID, cursor.ExpectedCredentialRevision,
+				strings.TrimSpace(cursor.ExpectedUIDValidity), cursor.ExpectedLastUID).
+			Updates(map[string]any{
+				"imap_uid_validity": strings.TrimSpace(cursor.UIDValidity),
+				"imap_last_uid":     cursor.LastUID,
+				"imap_last_sync_at": now,
+				"updated_at":        now,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		// Another current scan may already have advanced the cursor. Never move it
+		// backwards; MailMatch deduplication makes the stale batch harmless.
+		return nil
+	})
 	if err != nil {
-		return fmt.Errorf("%w: list domain inbox", ErrICloudMailUnavailable)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var row iCloudForwardedMailRow
-		if err := query.ScanRows(rows, &row); err != nil {
-			return fmt.Errorf("%w: scan domain inbox", ErrICloudMailUnavailable)
-		}
-		if !visit(row) {
-			break
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("%w: iterate domain inbox", ErrICloudMailUnavailable)
+		return err
 	}
 	return nil
 }
 
-func (s *Service) findICloudDeliveryProbe(
-	ctx context.Context,
-	forwardToEmail string,
-	anonymousID string,
-	token string,
-	since time.Time,
-) (bool, error) {
-	token = strings.TrimSpace(token)
-	if s == nil || s.files == nil || token == "" {
-		return false, ErrICloudMailUnavailable
+func (s *Service) loadICloudIMAPScope(ctx context.Context, resourceID uint) (*iCloudIMAPResourceScope, []string, error) {
+	var scope iCloudIMAPResourceScope
+	err := s.db.WithContext(ctx).Table("icloud_resources").
+		Select("id, primary_email, imap_app_password, imap_uid_validity, imap_last_uid, imap_last_sync_at, credential_revision").
+		Where("id = ? AND status NOT IN ?", resourceID, []string{iCloudResourceDisabled, iCloudResourceDeleted}).
+		Take(&scope).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil, ErrICloudResourceNotFound
 	}
-	rows, err := s.listICloudForwardedMailRows(
-		ctx,
-		forwardToEmail,
-		anonymousID,
-		since,
-		iCloudDeliveryProbeReadLimit,
-	)
 	if err != nil {
-		return false, err
+		return nil, nil, fmt.Errorf("%w: load resource", ErrICloudMailUnavailable)
 	}
+	if strings.TrimSpace(scope.PrimaryEmail) == "" || strings.TrimSpace(scope.AppPassword) == "" {
+		return nil, nil, fmt.Errorf("%w: IMAP credentials missing", ErrICloudMailUnavailable)
+	}
+	var rows []struct {
+		Email string `gorm:"column:email"`
+	}
+	if err := s.db.WithContext(ctx).Table("icloud_aliases").
+		Select("email").Where("resource_id = ? AND status = ?", resourceID, iCloudResourceNormal).
+		Find(&rows).Error; err != nil {
+		return nil, nil, fmt.Errorf("%w: load aliases", ErrICloudMailUnavailable)
+	}
+	aliases := make([]string, 0, len(rows))
 	for _, row := range rows {
-		stored, readErr := s.files.ReadPrivate(ctx, row.SourceObjectKey)
-		if readErr != nil || stored == nil {
-			return false, ErrICloudMailUnavailable
-		}
-		if bytes.Contains(stored.ContentBytes, []byte(token)) {
-			return true, nil
+		if value := strings.ToLower(strings.TrimSpace(row.Email)); value != "" {
+			aliases = append(aliases, value)
 		}
 	}
-	return false, nil
+	return &scope, aliases, nil
 }
 
-// findICloudRecipientProbes scans the configured domain mailbox only while an
-// alias lacks its Apple recipientMailId. The probe token maps an otherwise
-// opaque relay envelope back to the exact alias that received the message.
-func (s *Service) findICloudRecipientProbes(
-	ctx context.Context,
-	forwardToEmail string,
-	tokens map[string]time.Time,
-) (map[string]string, error) {
-	if s == nil || s.db == nil || s.files == nil || len(tokens) == 0 {
-		return nil, ErrICloudMailUnavailable
+func (s *Service) markICloudIMAPAuthenticationFailure(ctx context.Context, scope iCloudIMAPResourceScope) error {
+	if s == nil || s.db == nil || scope.ID == 0 || scope.CredentialRevision == 0 {
+		return ErrICloudMailUnavailable
 	}
-	forwardToEmail = strings.ToLower(strings.TrimSpace(forwardToEmail))
-	mailboxKey := mailbox.Normalize(forwardToEmail)
-	if mailboxKey == "" {
-		return nil, ErrICloudMailUnavailable
-	}
-	var since time.Time
-	for _, startedAt := range tokens {
-		if startedAt.IsZero() {
-			continue
+	now := s.now().UTC()
+	retryAt := now.Add(iCloudValidationRetryInterval)
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		updated := tx.Model(&iCloudResourceModel{}).
+			Where("id = ? AND credential_revision = ? AND status IN ?", scope.ID, scope.CredentialRevision,
+				[]string{iCloudResourcePending, iCloudResourceNormal, iCloudResourceAbnormal}).
+			Updates(map[string]any{
+				"status": iCloudResourceAbnormal, "validation_failures": iCloudValidationMaxFailures,
+				"last_safe_error": "iCloud IMAP app password cannot receive mail.",
+				"last_checked_at": now, "next_validation_at": retryAt, "next_provision_at": nil,
+				"updated_at": now,
+			})
+		if updated.Error != nil || updated.RowsAffected == 0 {
+			return updated.Error
 		}
-		if since.IsZero() || startedAt.Before(since) {
-			since = startedAt
+		rootUpdated := tx.Model(&iCloudRootModel{}).Where("id = ? AND type = ?", scope.ID, "icloud").
+			Updates(map[string]any{"version": gorm.Expr("version + 1"), "updated_at": now})
+		if rootUpdated.Error != nil {
+			return rootUpdated.Error
 		}
-	}
-	if since.IsZero() {
-		return map[string]string{}, nil
-	}
-	var rows []iCloudForwardedMailRow
-	if err := s.db.WithContext(ctx).Table("inbound_mails").
-		Select("id, envelope_from, source_object_key, created_at").
-		Where("resource_type = ? AND mailbox_key = ? AND status = ?", "domain", mailboxKey, "stored").
-		Where("created_at >= ?", since.Add(-time.Minute).UTC()).
-		Order("created_at DESC, id DESC").
-		Limit(iCloudRecipientProbeReadLimit).
-		Scan(&rows).Error; err != nil {
-		return nil, fmt.Errorf("%w: list recipient discovery probes", ErrICloudMailUnavailable)
-	}
-	found := make(map[string]string)
-	for _, row := range rows {
-		stored, readErr := s.files.ReadPrivate(ctx, row.SourceObjectKey)
-		if readErr != nil || stored == nil {
-			return nil, ErrICloudMailUnavailable
+		if rootUpdated.RowsAffected != 1 {
+			return errICloudValidationStale
 		}
-		for token, startedAt := range tokens {
-			if _, exists := found[token]; exists || row.CreatedAt.Before(startedAt.Add(-time.Minute)) ||
-				!bytes.Contains(stored.ContentBytes, []byte(token)) {
-				continue
-			}
-			recipientMailID, ok := extractICloudRelayRecipientID(row.EnvelopeFrom, stored.ContentBytes)
-			if ok {
-				found[token] = recipientMailID
-			}
-		}
-		if len(found) == len(tokens) {
-			break
-		}
-	}
-	return found, nil
-}
-
-func decodeICloudRelaySender(envelopeFrom string, anonymousID string) (string, bool) {
-	parsed, err := stdmail.ParseAddress(strings.TrimSpace(envelopeFrom))
+		return nil
+	})
 	if err != nil {
-		return "", false
+		return ErrICloudMailUnavailable
 	}
-	address := strings.ToLower(strings.TrimSpace(parsed.Address))
-	at := strings.LastIndexByte(address, '@')
-	if at <= 0 || address[at+1:] != "icloud.com" {
-		return "", false
-	}
-	local := address[:at]
-	encodedSender, ok := splitICloudRelaySender(local, anonymousID)
-	if !ok {
-		return "", false
-	}
-	separator := strings.LastIndex(encodedSender, "_at_")
-	if separator <= 0 || separator+len("_at_") >= len(encodedSender) {
-		return "", false
-	}
-	localPart := strings.ReplaceAll(encodedSender[:separator], "_", ".")
-	domainPart := strings.ReplaceAll(encodedSender[separator+len("_at_"):], "_", ".")
-	restored := localPart + "@" + domainPart
-	restoredAddress, err := stdmail.ParseAddress(restored)
-	if err != nil || !strings.EqualFold(strings.TrimSpace(restoredAddress.Address), restored) {
-		return "", false
-	}
-	return restored, true
-}
-
-func splitICloudRelaySender(local, anonymousID string) (string, bool) {
-	for separator := strings.LastIndexByte(local, '_'); separator >= 0; separator = strings.LastIndexByte(local[:separator], '_') {
-		if iCloudAnonymousIDMatchesRelayTail(anonymousID, local[separator+1:]) {
-			return local[:separator], true
-		}
-	}
-	return "", false
-}
-
-func iCloudAnonymousIDMatchesRelayTail(anonymousID, relayTail string) bool {
-	anonymousID = strings.ToLower(strings.TrimSpace(anonymousID))
-	relayTail = strings.ToLower(strings.TrimSpace(relayTail))
-	if !validICloudHMEText(anonymousID, iCloudHMEAnonymousIDMaxLength, false) || relayTail == "" {
-		return false
-	}
-	for index := 0; index < len(relayTail); index++ {
-		if len(anonymousID) > 0 && relayTail[index] == anonymousID[0] {
-			anonymousID = anonymousID[1:]
-		}
-	}
-	return anonymousID == ""
-}
-
-// extractICloudRelayRecipientID recovers the Apple recipient suffix from a
-// probe message before the alias has a recipientMailId. The forwarded RFC822
-// From header gives us the exact encoded sender prefix; taking an arbitrary
-// suffix from MAIL FROM would be ambiguous because both sender domains and
-// Apple IDs may contain underscores.
-func extractICloudRelayRecipientID(envelopeFrom string, raw []byte) (string, bool) {
-	parsedEnvelope, err := stdmail.ParseAddress(strings.TrimSpace(envelopeFrom))
-	if err != nil {
-		return "", false
-	}
-	address := strings.ToLower(strings.TrimSpace(parsedEnvelope.Address))
-	at := strings.LastIndexByte(address, '@')
-	if at <= 0 || address[at+1:] != "icloud.com" {
-		return "", false
-	}
-	message, err := stdmail.ReadMessage(bytes.NewReader(raw))
-	if err != nil {
-		return "", false
-	}
-	from, err := stdmail.ParseAddress(strings.TrimSpace(message.Header.Get("From")))
-	if err != nil {
-		return "", false
-	}
-	sender := strings.ToLower(strings.TrimSpace(from.Address))
-	senderAt := strings.LastIndexByte(sender, '@')
-	if senderAt <= 0 || senderAt == len(sender)-1 {
-		return "", false
-	}
-	encodedSender := strings.ReplaceAll(sender[:senderAt], ".", "_") + "_at_" +
-		strings.ReplaceAll(sender[senderAt+1:], ".", "_")
-	prefix := encodedSender + "_"
-	if !strings.HasPrefix(address[:at], prefix) {
-		return "", false
-	}
-	candidate := strings.TrimSpace(address[len(prefix):at])
-	if !validICloudHMEText(candidate, iCloudHMERecipientIDMaxLength, false) || strings.ContainsAny(candidate, "@\r\n") {
-		return "", false
-	}
-	return candidate, true
+	_ = s.ScheduleICloudValidationDispatcher(context.WithoutCancel(ctx), 0)
+	return nil
 }

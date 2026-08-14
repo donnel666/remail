@@ -40,6 +40,10 @@ export const PROJECT_PRICE_KEYS = [
   "default_project_gmail_code_supplier_price",
   "default_project_gmail_purchase_price",
   "default_project_gmail_purchase_supplier_price",
+  "default_project_icloud_code_price",
+  "default_project_icloud_code_supplier_price",
+  "default_project_icloud_purchase_price",
+  "default_project_icloud_purchase_supplier_price",
 ] as const;
 
 export const PAYMENT_BILLING_KEYS = [

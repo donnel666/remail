@@ -69,7 +69,7 @@ func TestCreateAdminICloudAliasesReturnsOKWhenTargetAlreadyReached(t *testing.T)
 	}
 	if err := db.Create(&iCloudResourceModel{
 		ID: 1, ResourceType: "icloud", PrimaryEmail: "full@icloud.com", Status: iCloudResourceNormal,
-		SessionStatus: iCloudSessionValid, AliasCount: iCloudMaxAliases, CredentialRevision: 1,
+		AliasCount: iCloudMaxAliases, CredentialRevision: 1,
 		ValidationGeneration: 1, ExpireAt: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now,
 	}).Error; err != nil {
 		t.Fatalf("create resource: %v", err)
@@ -123,9 +123,11 @@ func TestPatchAdminICloudResourceRequiresOperateOnlyForSensitiveFields(t *testin
 		}
 		return false, nil
 	})
-	h := &handler{service: NewService(db, nil, nil), checker: checker}
+	service := NewService(db, nil, nil)
+	service.SetImportOwnerValidator(func(context.Context, uint) (bool, error) { return true, nil })
+	h := &handler{service: service, checker: checker}
 
-	request := httptest.NewRequest(http.MethodPatch, "/v1/admin/icloud/resources/1", bytes.NewBufferString(`{"version":1,"primaryEmail":"main@icloud.com"}`))
+	request := httptest.NewRequest(http.MethodPatch, "/v1/admin/icloud/resources/1", bytes.NewBufferString(`{"version":1,"ownerId":7}`))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Idempotency-Key", "safe-edit")
 	recorder := httptest.NewRecorder()
@@ -141,7 +143,7 @@ func TestPatchAdminICloudResourceRequiresOperateOnlyForSensitiveFields(t *testin
 	for index, body := range []string{
 		`{"version":1,"forSale":false}`,
 		`{"version":1,"expireAt":"2026-09-08T11:00:00Z"}`,
-		`{"version":1,"credentials":{"host":"p119-maildomainws.icloud.com","dsid":"dsid","clientId":"client","clientBuildNumber":"build","clientMasteringNumber":"master","cookie":"secret"}}`,
+		`{"version":1,"importLine":"main@icloud.com----app-password----curl 'https://appleid.apple.com/account/manage/' -H 'Cookie: secret' -H 'scnt: value'"}`,
 	} {
 		request = httptest.NewRequest(http.MethodPatch, "/v1/admin/icloud/resources/1", bytes.NewBufferString(body))
 		request.Header.Set("Content-Type", "application/json")

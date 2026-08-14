@@ -5314,23 +5314,16 @@ type AdminGmailValidationBatchRequest struct {
 // AdminICloudAliasItem defines model for AdminICloudAliasItem.
 type AdminICloudAliasItem struct {
 	// AnonymousId Apple HME alias identifier used for alias maintenance.
-	AnonymousId string              `json:"anonymousId"`
-	CreatedAt   time.Time           `json:"createdAt"`
-	Email       openapi_types.Email `json:"email"`
-
-	// ForwardToEmail Persisted domain mailbox for this alias. It remains authoritative for existing allocations independently of the current Apple session or resource forwarding selection.
-	ForwardToEmail    string     `json:"forwardToEmail"`
-	Id                int        `json:"id"`
-	LastAllocatedAt   *time.Time `json:"lastAllocatedAt"`
-	LastSeenAt        *time.Time `json:"lastSeenAt"`
-	Origin            string     `json:"origin"`
-	ProviderCreatedAt *time.Time `json:"providerCreatedAt"`
-	ProviderDomain    string     `json:"providerDomain"`
-
-	// RecipientMailId Persisted Apple relay recipient suffix that selects this alias before MailMatch normalization.
-	RecipientMailId string                 `json:"recipientMailId"`
-	Status          AdminICloudAliasStatus `json:"status"`
-	UpdatedAt       time.Time              `json:"updatedAt"`
+	AnonymousId       string                 `json:"anonymousId"`
+	CreatedAt         time.Time              `json:"createdAt"`
+	Email             openapi_types.Email    `json:"email"`
+	Id                int                    `json:"id"`
+	LastAllocatedAt   *time.Time             `json:"lastAllocatedAt"`
+	LastSeenAt        *time.Time             `json:"lastSeenAt"`
+	Origin            string                 `json:"origin"`
+	ProviderCreatedAt *time.Time             `json:"providerCreatedAt"`
+	Status            AdminICloudAliasStatus `json:"status"`
+	UpdatedAt         time.Time              `json:"updatedAt"`
 }
 
 // AdminICloudAliasListResponse defines model for AdminICloudAliasListResponse.
@@ -5357,13 +5350,11 @@ type AdminICloudBulkExpirationRequest struct {
 
 // AdminICloudBulkFilter defines model for AdminICloudBulkFilter.
 type AdminICloudBulkFilter struct {
-	CreatedFrom   *time.Time                 `json:"createdFrom,omitempty"`
-	CreatedTo     *time.Time                 `json:"createdTo,omitempty"`
-	ForSale       *bool                      `json:"forSale,omitempty"`
-	Search        *string                    `json:"search,omitempty"`
-	SessionStatus *AdminICloudSessionStatus  `json:"sessionStatus,omitempty"`
-	Status        *AdminICloudResourceStatus `json:"status,omitempty"`
-	Suffix        *string                    `json:"suffix,omitempty"`
+	CreatedFrom *time.Time                 `json:"createdFrom,omitempty"`
+	CreatedTo   *time.Time                 `json:"createdTo,omitempty"`
+	ForSale     *bool                      `json:"forSale,omitempty"`
+	Search      *string                    `json:"search,omitempty"`
+	Status      *AdminICloudResourceStatus `json:"status,omitempty"`
 }
 
 // AdminICloudBulkResult defines model for AdminICloudBulkResult.
@@ -5374,22 +5365,10 @@ type AdminICloudBulkSelection struct {
 	union json.RawMessage
 }
 
-// AdminICloudCredentialsInput Complete write-only HME credential and request-context set. Omission from PATCH preserves the current credential revision.
-type AdminICloudCredentialsInput struct {
-	ClientBuildNumber     *string `json:"clientBuildNumber,omitempty"`
-	ClientId              *string `json:"clientId,omitempty"`
-	ClientMasteringNumber *string `json:"clientMasteringNumber,omitempty"`
-	Cookie                *string `json:"cookie,omitempty"`
-	Dsid                  *string `json:"dsid,omitempty"`
-	Host                  *string `json:"host,omitempty"`
-}
-
 // AdminICloudFacets defines model for AdminICloudFacets.
 type AdminICloudFacets struct {
-	ForSale       AdminMicrosoftBooleanFacet `json:"forSale"`
-	SessionStatus AdminICloudSessionFacet    `json:"sessionStatus"`
-	Status        AdminICloudStatusFacet     `json:"status"`
-	Suffixes      []AdminICloudSuffixFacet   `json:"suffixes"`
+	ForSale AdminMicrosoftBooleanFacet `json:"forSale"`
+	Status  AdminICloudStatusFacet     `json:"status"`
 }
 
 // AdminICloudFilterSelection defines model for AdminICloudFilterSelection.
@@ -5438,68 +5417,60 @@ type AdminICloudOwnerSummaryRole string
 
 // AdminICloudResourceDetail defines model for AdminICloudResourceDetail.
 type AdminICloudResourceDetail struct {
-	AliasCount              int                                 `json:"aliasCount"`
-	AliasLimit              AdminICloudResourceDetailAliasLimit `json:"aliasLimit"`
-	AliasProvisioning       bool                                `json:"aliasProvisioning"`
-	AliasRemaining          int                                 `json:"aliasRemaining"`
-	CreatedAt               time.Time                           `json:"createdAt"`
-	CredentialRevision      int64                               `json:"credentialRevision"`
-	CredentialUpdatedAt     time.Time                           `json:"credentialUpdatedAt"`
-	DeliveryProbeStartedAt  *time.Time                          `json:"deliveryProbeStartedAt"`
-	DeliveryProbeVerifiedAt *time.Time                          `json:"deliveryProbeVerifiedAt"`
-	ExpireAt                time.Time                           `json:"expireAt"`
-	ForSale                 bool                                `json:"forSale"`
-	Id                      int                                 `json:"id"`
-	LastAliasSyncAt         *time.Time                          `json:"lastAliasSyncAt"`
-	LastAllocatedAt         *time.Time                          `json:"lastAllocatedAt"`
-	LastCheckedAt           *time.Time                          `json:"lastCheckedAt"`
-	LastSafeError           *string                             `json:"lastSafeError"`
-	LastValidAt             *time.Time                          `json:"lastValidAt"`
-	NextKeepaliveAt         *time.Time                          `json:"nextKeepaliveAt"`
-	NextValidationAt        *time.Time                          `json:"nextValidationAt"`
-	Owner                   AdminICloudOwnerSummary             `json:"owner"`
-	PrimaryEmail            openapi_types.Email                 `json:"primaryEmail"`
-
-	// SelectedForwardTo Current Apple-selected forwarding target. Allocated aliases continue using each alias item's persisted forwardToEmail and recipientMailId.
-	SelectedForwardTo    string                    `json:"selectedForwardTo"`
-	SessionFailures      int                       `json:"sessionFailures"`
-	SessionStatus        AdminICloudSessionStatus  `json:"sessionStatus"`
-	Status               AdminICloudResourceStatus `json:"status"`
-	Suffix               string                    `json:"suffix"`
-	UpdatedAt            time.Time                 `json:"updatedAt"`
-	ValidationFailures   int                       `json:"validationFailures"`
-	ValidationGeneration int64                     `json:"validationGeneration"`
-	Version              int                       `json:"version"`
+	AliasCount           int                                 `json:"aliasCount"`
+	AliasLimit           AdminICloudResourceDetailAliasLimit `json:"aliasLimit"`
+	AliasProvisioning    bool                                `json:"aliasProvisioning"`
+	AliasRemaining       int                                 `json:"aliasRemaining"`
+	CreatedAt            time.Time                           `json:"createdAt"`
+	CredentialRevision   int64                               `json:"credentialRevision"`
+	CredentialUpdatedAt  time.Time                           `json:"credentialUpdatedAt"`
+	ExpireAt             time.Time                           `json:"expireAt"`
+	ForSale              bool                                `json:"forSale"`
+	Id                   int                                 `json:"id"`
+	LastAliasSyncAt      *time.Time                          `json:"lastAliasSyncAt"`
+	LastAllocatedAt      *time.Time                          `json:"lastAllocatedAt"`
+	LastCheckedAt        *time.Time                          `json:"lastCheckedAt"`
+	LastMailSyncAt       *time.Time                          `json:"lastMailSyncAt"`
+	LastSafeError        *string                             `json:"lastSafeError"`
+	LastValidAt          *time.Time                          `json:"lastValidAt"`
+	NewSession           *AdminICloudSessionView             `json:"newSession"`
+	NextProvisionAt      *time.Time                          `json:"nextProvisionAt"`
+	NextValidationAt     *time.Time                          `json:"nextValidationAt"`
+	OldSession           *AdminICloudSessionView             `json:"oldSession"`
+	Owner                AdminICloudOwnerSummary             `json:"owner"`
+	PrimaryEmail         openapi_types.Email                 `json:"primaryEmail"`
+	Status               AdminICloudResourceStatus           `json:"status"`
+	UpdatedAt            time.Time                           `json:"updatedAt"`
+	ValidationFailures   int                                 `json:"validationFailures"`
+	ValidationGeneration int64                               `json:"validationGeneration"`
+	Version              int                                 `json:"version"`
 }
 
 // AdminICloudResourceDetailAliasLimit defines model for AdminICloudResourceDetail.AliasLimit.
 type AdminICloudResourceDetailAliasLimit int
 
-// AdminICloudResourceItem Administrator-safe operational facts. Cookie, DSID, host, client context, and provider request payloads are never returned.
+// AdminICloudResourceItem Administrator-safe operational facts. IMAP app passwords, cookies, DSID, host, client context, and provider request payloads are never returned.
 type AdminICloudResourceItem struct {
-	AliasCount              int                     `json:"aliasCount"`
-	CreatedAt               time.Time               `json:"createdAt"`
-	DeliveryProbeVerifiedAt *time.Time              `json:"deliveryProbeVerifiedAt"`
-	ExpireAt                time.Time               `json:"expireAt"`
-	ForSale                 bool                    `json:"forSale"`
-	Id                      int                     `json:"id"`
-	LastAliasSyncAt         *time.Time              `json:"lastAliasSyncAt"`
-	LastAllocatedAt         *time.Time              `json:"lastAllocatedAt"`
-	LastCheckedAt           *time.Time              `json:"lastCheckedAt"`
-	LastSafeError           *string                 `json:"lastSafeError"`
-	LastValidAt             *time.Time              `json:"lastValidAt"`
-	NextKeepaliveAt         *time.Time              `json:"nextKeepaliveAt"`
-	NextValidationAt        *time.Time              `json:"nextValidationAt"`
-	Owner                   AdminICloudOwnerSummary `json:"owner"`
-	PrimaryEmail            openapi_types.Email     `json:"primaryEmail"`
-
-	// SelectedForwardTo Current Apple-selected forwarding target. Allocated aliases continue using each alias item's persisted forwardToEmail and recipientMailId.
-	SelectedForwardTo string                    `json:"selectedForwardTo"`
-	SessionStatus     AdminICloudSessionStatus  `json:"sessionStatus"`
-	Status            AdminICloudResourceStatus `json:"status"`
-	Suffix            string                    `json:"suffix"`
-	UpdatedAt         time.Time                 `json:"updatedAt"`
-	Version           int                       `json:"version"`
+	AliasCount       int                       `json:"aliasCount"`
+	CreatedAt        time.Time                 `json:"createdAt"`
+	ExpireAt         time.Time                 `json:"expireAt"`
+	ForSale          bool                      `json:"forSale"`
+	Id               int                       `json:"id"`
+	LastAliasSyncAt  *time.Time                `json:"lastAliasSyncAt"`
+	LastAllocatedAt  *time.Time                `json:"lastAllocatedAt"`
+	LastCheckedAt    *time.Time                `json:"lastCheckedAt"`
+	LastMailSyncAt   *time.Time                `json:"lastMailSyncAt"`
+	LastSafeError    *string                   `json:"lastSafeError"`
+	LastValidAt      *time.Time                `json:"lastValidAt"`
+	NewSession       *AdminICloudSessionView   `json:"newSession"`
+	NextProvisionAt  *time.Time                `json:"nextProvisionAt"`
+	NextValidationAt *time.Time                `json:"nextValidationAt"`
+	OldSession       *AdminICloudSessionView   `json:"oldSession"`
+	Owner            AdminICloudOwnerSummary   `json:"owner"`
+	PrimaryEmail     openapi_types.Email       `json:"primaryEmail"`
+	Status           AdminICloudResourceStatus `json:"status"`
+	UpdatedAt        time.Time                 `json:"updatedAt"`
+	Version          int                       `json:"version"`
 }
 
 // AdminICloudResourceListResponse defines model for AdminICloudResourceListResponse.
@@ -5522,16 +5493,18 @@ type AdminICloudResourceListResponseAliasLimit int
 // AdminICloudResourceStatus defines model for AdminICloudResourceStatus.
 type AdminICloudResourceStatus string
 
-// AdminICloudSessionFacet defines model for AdminICloudSessionFacet.
-type AdminICloudSessionFacet struct {
-	All       int64 `json:"all"`
-	Invalid   int64 `json:"invalid"`
-	Unchecked int64 `json:"unchecked"`
-	Valid     int64 `json:"valid"`
-}
-
 // AdminICloudSessionStatus defines model for AdminICloudSessionStatus.
 type AdminICloudSessionStatus string
+
+// AdminICloudSessionView One provisioning channel. Its status controls only alias creation, never account health or receiving.
+type AdminICloudSessionView struct {
+	CooldownUntil   *time.Time               `json:"cooldownUntil"`
+	Failures        int                      `json:"failures"`
+	LastCheckedAt   *time.Time               `json:"lastCheckedAt"`
+	LastValidAt     *time.Time               `json:"lastValidAt"`
+	NextKeepaliveAt *time.Time               `json:"nextKeepaliveAt"`
+	Status          AdminICloudSessionStatus `json:"status"`
+}
 
 // AdminICloudStatusFacet defines model for AdminICloudStatusFacet.
 type AdminICloudStatusFacet struct {
@@ -5544,20 +5517,14 @@ type AdminICloudStatusFacet struct {
 	Validating int64 `json:"validating"`
 }
 
-// AdminICloudSuffixFacet defines model for AdminICloudSuffixFacet.
-type AdminICloudSuffixFacet struct {
-	Count int64  `json:"count"`
-	Key   string `json:"key"`
-}
-
 // AdminICloudUpdateRequest defines model for AdminICloudUpdateRequest.
 type AdminICloudUpdateRequest struct {
-	// Credentials Complete write-only HME credential and request-context set. Omission from PATCH preserves the current credential revision.
-	Credentials  *AdminICloudCredentialsInput `json:"credentials,omitempty"`
-	ExpireAt     *time.Time                   `json:"expireAt,omitempty"`
-	ForSale      *bool                        `json:"forSale,omitempty"`
-	OwnerId      *int                         `json:"ownerId,omitempty"`
-	PrimaryEmail *openapi_types.Email         `json:"primaryEmail,omitempty"`
+	ExpireAt *time.Time `json:"expireAt,omitempty"`
+	ForSale  *bool      `json:"forSale,omitempty"`
+
+	// ImportLine Complete `email----appPassword----curl` credential line. It accepts one old cURL, one new cURL, or new then old cURLs.
+	ImportLine *string `json:"importLine,omitempty"`
+	OwnerId    *int    `json:"ownerId,omitempty"`
 
 	// Version Last observed resource version; stale writes return 409.
 	Version int `json:"version"`
@@ -9850,13 +9817,11 @@ type PostAdminGmailResourceValidateParams struct {
 
 // GetAdminICloudResourcesParams defines parameters for GetAdminICloudResources.
 type GetAdminICloudResourcesParams struct {
-	Search        *string                    `form:"search,omitempty" json:"search,omitempty"`
-	Suffix        *string                    `form:"suffix,omitempty" json:"suffix,omitempty"`
-	Status        *AdminICloudResourceStatus `form:"status,omitempty" json:"status,omitempty"`
-	ForSale       *bool                      `form:"forSale,omitempty" json:"forSale,omitempty"`
-	SessionStatus *AdminICloudSessionStatus  `form:"sessionStatus,omitempty" json:"sessionStatus,omitempty"`
-	CreatedFrom   *time.Time                 `form:"createdFrom,omitempty" json:"createdFrom,omitempty"`
-	CreatedTo     *time.Time                 `form:"createdTo,omitempty" json:"createdTo,omitempty"`
+	Search      *string                    `form:"search,omitempty" json:"search,omitempty"`
+	Status      *AdminICloudResourceStatus `form:"status,omitempty" json:"status,omitempty"`
+	ForSale     *bool                      `form:"forSale,omitempty" json:"forSale,omitempty"`
+	CreatedFrom *time.Time                 `form:"createdFrom,omitempty" json:"createdFrom,omitempty"`
+	CreatedTo   *time.Time                 `form:"createdTo,omitempty" json:"createdTo,omitempty"`
 
 	// IncludeFacets Set false for page-only requests to skip facet aggregation.
 	IncludeFacets *bool `form:"includeFacets,omitempty" json:"includeFacets,omitempty"`
@@ -12802,7 +12767,7 @@ type ServerInterface interface {
 	// Disable selected iCloud resources
 	// (POST /v1/admin/icloud/resources/batch/disable)
 	PostAdminICloudResourcesDisable(c *gin.Context, params PostAdminICloudResourcesDisableParams)
-	// Set a future expiration time for selected iCloud resources
+	// Set the alias-creation expiration time for selected iCloud resources
 	// (POST /v1/admin/icloud/resources/batch/expiration)
 	PostAdminICloudResourcesExpiration(c *gin.Context, params PostAdminICloudResourcesExpirationParams)
 	// Publish selected iCloud resources
@@ -17242,14 +17207,6 @@ func (siw *ServerInterfaceWrapper) GetAdminICloudResources(c *gin.Context) {
 		return
 	}
 
-	// ------------- Optional query parameter "suffix" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "suffix", c.Request.URL.Query(), &params.Suffix, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter suffix: %w", err), http.StatusBadRequest)
-		return
-	}
-
 	// ------------- Optional query parameter "status" -------------
 
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", c.Request.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
@@ -17263,14 +17220,6 @@ func (siw *ServerInterfaceWrapper) GetAdminICloudResources(c *gin.Context) {
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "forSale", c.Request.URL.Query(), &params.ForSale, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
 	if err != nil {
 		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter forSale: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	// ------------- Optional query parameter "sessionStatus" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "sessionStatus", c.Request.URL.Query(), &params.SessionStatus, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter sessionStatus: %w", err), http.StatusBadRequest)
 		return
 	}
 

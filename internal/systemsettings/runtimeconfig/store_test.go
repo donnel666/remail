@@ -36,14 +36,6 @@ func TestDurationPreservesNonIntegralFallback(t *testing.T) {
 	require.Equal(t, 1500*time.Millisecond, Duration("missing_duration", 1500*time.Millisecond, 0, 1))
 }
 
-func TestEmailListNormalizesMultipleMailboxSeparators(t *testing.T) {
-	Replace(nil)
-	Set(ICloudForwardingMailboxesKey, "ICLOUD@AISHOP6.COM； backup@aishop6.com\nicloud@aishop6.com")
-	t.Cleanup(func() { Replace(nil) })
-
-	require.Equal(t, []string{"icloud@aishop6.com", "backup@aishop6.com"}, EmailList(ICloudForwardingMailboxesKey, ""))
-}
-
 func TestValidateEmailServiceSettings(t *testing.T) {
 	require.NoError(t, Validate(SMSBowerNoCodeRefundTimeoutMinutesKey, "25"))
 	require.ErrorIs(t, Validate(SMSBowerNoCodeRefundTimeoutMinutesKey, "26"), domain.ErrInvalidValue)
@@ -62,13 +54,6 @@ func TestValidateEmailServiceSettings(t *testing.T) {
 	require.ErrorIs(t, Validate("microsoft_domain_whitelist", "a.-invalid.com"), domain.ErrInvalidValue)
 	require.NoError(t, Validate("domain_custom_tlds", "edu.kg,edu.invalid"))
 	require.ErrorIs(t, Validate("domain_custom_tlds", "kg"), domain.ErrInvalidValue)
-	require.NoError(t, Validate(ICloudForwardingMailboxesKey, "icloud@aishop6.com,icloud-backup@example.com"))
-	require.NoError(t, Validate(ICloudForwardingMailboxesKey, "icloud@aishop6.com；icloud-backup@example.com"))
-	require.ErrorIs(t, Validate(ICloudForwardingMailboxesKey, ""), domain.ErrInvalidValue)
-	require.ErrorIs(t, Validate(ICloudForwardingMailboxesKey, "icloud@aishop6.com,ICLOUD@AISHOP6.COM"), domain.ErrInvalidValue)
-	require.ErrorIs(t, Validate(ICloudForwardingMailboxesKey, "not-an-email"), domain.ErrInvalidValue)
-	require.NoError(t, Validate(ICloudMailmatchScanLimitKey, "1000"))
-	require.ErrorIs(t, Validate(ICloudMailmatchScanLimitKey, "10001"), domain.ErrInvalidValue)
 	require.NoError(t, Validate("domain_max_subdomains_per_registrable_domain", "3"))
 	require.ErrorIs(t, Validate("domain_max_subdomains_per_registrable_domain", "0"), domain.ErrInvalidValue)
 	require.ErrorIs(t, Validate("smtp_outbound_payload_ttl_minutes", "0"), domain.ErrInvalidValue)
@@ -264,6 +249,7 @@ func TestValidateSystemOperationsSettings(t *testing.T) {
 		"admin_resource_list_max_limit", "admin_log_max_limit", "admin_task_max_limit", "admin_message_max_limit",
 		"api_key_meta_ttl_seconds", "api_key_cache_flush_interval_seconds",
 		"inventory_cache_activity_ttl_minutes", "message_scan_limit", "projection_replay_limit",
+		"icloud_forwarding_mailboxes", "icloud_mailmatch_scan_limit", "icloud_admin_read_limit",
 	} {
 		require.ErrorIs(t, Validate(key, "100"), domain.ErrInvalidKey)
 	}

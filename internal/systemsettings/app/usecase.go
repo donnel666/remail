@@ -60,9 +60,8 @@ func (uc *SystemSettingsUseCase) SetRuntimeUpdateHook(hook func(context.Context,
 }
 
 // SetRuntimeValidationHook runs before persistence. It is intended for
-// bounded cross-module checks (for example, an iCloud forwarding mailbox must
-// resolve to a local inbound recipient) so a rejected setting is not left in
-// storage by the post-commit side-effect hook.
+// bounded cross-module checks so a rejected setting is not left in storage by
+// the post-commit side-effect hook.
 func (uc *SystemSettingsUseCase) SetRuntimeValidationHook(hook func(context.Context, []domain.Setting) error) {
 	if uc != nil {
 		uc.runtimeValidator = hook

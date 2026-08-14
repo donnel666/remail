@@ -22,6 +22,10 @@ const DEFAULTS = {
   default_project_gmail_code_supplier_price: 0,
   default_project_gmail_purchase_price: 0,
   default_project_gmail_purchase_supplier_price: 0,
+  default_project_icloud_code_price: 8,
+  default_project_icloud_code_supplier_price: 5,
+  default_project_icloud_purchase_price: 10,
+  default_project_icloud_purchase_supplier_price: 7,
 };
 
 export default function ProjectPricingSection({ options, onBulkSave }: SectionProps) {
@@ -62,6 +66,13 @@ export default function ProjectPricingSection({ options, onBulkSave }: SectionPr
       {field("接码结算价", "default_project_gmail_code_supplier_price")}
       {field("购买价", "default_project_gmail_purchase_price")}
       {field("购买结算价", "default_project_gmail_purchase_supplier_price")}
+    </SettingsFormGrid>
+    <div className="mt-5 text-sm font-medium text-[var(--semi-color-text-0)]">iCloud</div>
+    <SettingsFormGrid className="mt-3">
+      {field("接码价", "default_project_icloud_code_price")}
+      {field("接码结算价", "default_project_icloud_code_supplier_price")}
+      {field("购买价", "default_project_icloud_purchase_price")}
+      {field("购买结算价", "default_project_icloud_purchase_supplier_price")}
     </SettingsFormGrid>
     <Button className="mt-5" icon={<Save size={14} />} loading={saving} onClick={() => void save().catch(() => undefined)} theme="solid" type="primary">{t("保存设置")}</Button>
   </SettingsSection>;

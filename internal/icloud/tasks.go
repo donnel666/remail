@@ -17,11 +17,14 @@ const (
 	typeICloudImportDispatcher     = "icloud:resource_import_dispatcher"
 	typeICloudValidation           = "icloud:resource_validation"
 	typeICloudValidationDispatcher = "icloud:resource_validation_dispatcher"
+	typeICloudProvision            = "icloud:resource_provision"
+	typeICloudProvisionDispatcher  = "icloud:resource_provision_dispatcher"
 
 	iCloudDispatcherPeriod         = 30 * time.Second
 	iCloudDispatcherTaskTimeout    = 30 * time.Second
 	iCloudValidationTaskTimeout    = 3 * time.Minute
 	iCloudValidationActivationWait = time.Second
+	iCloudProvisionTaskTimeout     = 3 * time.Minute
 )
 
 func (s *Service) ScheduleICloudImportDispatcher(ctx context.Context, delay time.Duration) error {
@@ -72,6 +75,55 @@ func (s *Service) ScheduleICloudValidationDispatcher(ctx context.Context, delay 
 	return nil
 }
 
+func (s *Service) ScheduleICloudProvisionDispatcher(ctx context.Context, delay time.Duration) error {
+	if s == nil || s.queue == nil {
+		return ErrICloudValidationTemp
+	}
+	if delay < 0 {
+		delay = 0
+	}
+	options := []asynq.Option{
+		asynq.Queue(platform.QueueBackgroundICloudValidation), asynq.Unique(iCloudDispatcherTaskTimeout + delay),
+		asynq.MaxRetry(0), asynq.Timeout(iCloudDispatcherTaskTimeout), asynq.Retention(0),
+	}
+	if delay > 0 {
+		options = append(options, asynq.ProcessIn(delay))
+	}
+	_, err := s.queue.EnqueueContext(ctx, asynq.NewTask(typeICloudProvisionDispatcher, nil), options...)
+	if errors.Is(err, asynq.ErrDuplicateTask) {
+		return nil
+	}
+	if err != nil {
+		return ErrICloudValidationTemp
+	}
+	return nil
+}
+
+func (s *Service) ScheduleICloudProvision(ctx context.Context, resourceID uint, delay time.Duration) error {
+	if s == nil || s.queue == nil || resourceID == 0 {
+		return ErrICloudValidationTemp
+	}
+	payload, err := json.Marshal(iCloudProvisionTask{ResourceID: resourceID})
+	if err != nil {
+		return ErrICloudValidationTemp
+	}
+	options := []asynq.Option{
+		asynq.Queue(platform.QueueBackgroundICloudValidation), asynq.Unique(iCloudProvisionTaskTimeout + delay),
+		asynq.MaxRetry(platform.BackgroundTaskMaxRetryValue()), asynq.Timeout(iCloudProvisionTaskTimeout), asynq.Retention(0),
+	}
+	if delay > 0 {
+		options = append(options, asynq.ProcessIn(delay))
+	}
+	_, err = s.queue.EnqueueContext(ctx, asynq.NewTask(typeICloudProvision, payload), options...)
+	if errors.Is(err, asynq.ErrDuplicateTask) {
+		return nil
+	}
+	if err != nil {
+		return ErrICloudValidationTemp
+	}
+	return nil
+}
+
 func (s *Service) enqueueICloudValidation(ctx context.Context, task iCloudValidationTask) (bool, error) {
 	if s == nil || s.queue == nil || task.ResourceID == 0 || task.OwnerUserID == 0 || task.ValidationGeneration == 0 || task.ExpectedCredentialRevision == 0 {
 		return false, ErrICloudValidationTemp
@@ -109,6 +161,31 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, service *Service) func(context.Co
 	mux.HandleFunc(typeICloudValidationDispatcher, func(ctx context.Context, _ *asynq.Task) error {
 		queueName, _ := asynq.GetQueueName(ctx)
 		return handleICloudValidationDispatcher(ctx, service, queueName)
+	})
+	mux.HandleFunc(typeICloudProvisionDispatcher, func(ctx context.Context, _ *asynq.Task) error {
+		return service.DispatchICloudProvisions(ctx, iCloudProvisionBatchLimit)
+	})
+	mux.HandleFunc(typeICloudProvision, func(ctx context.Context, task *asynq.Task) error {
+		var payload iCloudProvisionTask
+		if task == nil || json.Unmarshal(task.Payload(), &payload) != nil || payload.ResourceID == 0 {
+			return fmt.Errorf("decode iCloud provision task: %w", asynq.SkipRetry)
+		}
+		release, admitted := platform.AcquireBackgroundExecution(ctx, service.backgroundExecution)
+		if !admitted {
+			if platform.BackgroundTaskHasRetryHeadroom(ctx) {
+				return platform.ErrBackgroundExecutionDeferred
+			}
+			return nil
+		}
+		defer release()
+		if err := service.ProcessICloudProvision(ctx, payload); err != nil {
+			if platform.BackgroundTaskHasRetryHeadroom(ctx) {
+				return err
+			}
+			_ = service.ScheduleICloudProvisionDispatcher(context.WithoutCancel(ctx), time.Second)
+			return nil
+		}
+		return service.ScheduleICloudProvisionDispatcher(context.WithoutCancel(ctx), time.Second)
 	})
 	mux.HandleFunc(typeICloudImport, func(ctx context.Context, task *asynq.Task) error {
 		payload, err := decodeICloudImportTask(task)
@@ -148,6 +225,7 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, service *Service) func(context.Co
 		defer callCancel()
 		_ = service.ScheduleICloudImportDispatcher(callCtx, 0)
 		_ = service.ScheduleICloudValidationDispatcher(callCtx, 0)
+		_ = service.ScheduleICloudProvisionDispatcher(callCtx, 0)
 	}
 	go func() {
 		defer close(done)

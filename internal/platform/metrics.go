@@ -390,7 +390,7 @@ func RecordAllocationBucketFallback(allocationType, reason string) {
 
 func normalizeAllocationType(value string) string {
 	switch value {
-	case "microsoft", "domain", "random", "gmail":
+	case "microsoft", "domain", "random", "gmail", "icloud":
 		return value
 	default:
 		return "unknown"

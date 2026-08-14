@@ -24,7 +24,7 @@ import {
   IllustrationNoResult,
   IllustrationNoResultDark,
 } from "@douyinfe/semi-illustrations";
-import { AtSign, Code2, FileText, Layers, ShieldCheck, SlidersHorizontal, Upload } from "lucide-react";
+import { AtSign, FileText, ShieldCheck, SlidersHorizontal, Upload } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { CardPro } from "@/components/semi/card-pro";
@@ -78,6 +78,7 @@ import {
   type AdminICloudResourceFacets,
   type AdminICloudResourceListFilter,
   type AdminICloudResourceStatus,
+  type AdminICloudSessionView,
   type AdminICloudSessionStatus,
   type AdminICloudTask,
   type AdminICloudTaskList,
@@ -114,7 +115,6 @@ const { Text } = Typography;
 const IMPORT_ENTRY_AREA_HEIGHT = 208;
 const ADMIN_ICLOUD_BATCH_MAX = 1000;
 type StatusFilter = "all" | AdminICloudResourceStatus;
-type SessionFilter = "all" | AdminICloudSessionStatus;
 type BooleanFilter = "all" | "yes" | "no";
 type RowAction =
   | "toggle"
@@ -122,7 +122,7 @@ type RowAction =
   | "delete"
   | "recover"
   | "expiration";
-type ImportMode = "paste" | "curl" | "file";
+type ImportMode = "paste" | "file";
 type ICloudMaintenanceAction = "validate" | "alias";
 type ICloudMaintenanceTarget =
   | { item: AdminICloudResourceItem; mode: "row" }
@@ -143,8 +143,6 @@ const EMPTY_FACETS: AdminICloudResourceFacets = {
     deleted: 0,
   },
   forSale: { all: 0, yes: 0, no: 0 },
-  sessionStatus: { all: 0, unchecked: 0, valid: 0, invalid: 0 },
-  suffixes: [],
 };
 
 const statusMeta: Record<
@@ -213,14 +211,29 @@ function ResourceStatusTag({ item }: { item: AdminICloudResourceItem }) {
   );
 }
 
-function SessionStatusTag({ status }: { status: AdminICloudSessionStatus }) {
+function SessionStatusTag({ session }: { session: AdminICloudSessionView | null }) {
   const { t } = useTranslation();
-  const meta = sessionMeta[status];
-  return (
+  if (!session) {
+    return (
+      <Tag color="grey" shape="circle" size="small">
+        {t("Not configured")}
+      </Tag>
+    );
+  }
+  const meta = sessionMeta[session.status];
+  const tag = (
     <Tag color={meta.color} shape="circle" size="small">
       {t(meta.label)}
     </Tag>
   );
+  const diagnostic = [
+    session.failures ? `${t("Failures")}: ${session.failures}` : "",
+    session.cooldownUntil ? `${t("Cooldown until")}: ${formatTime(session.cooldownUntil)}` : "",
+    session.lastValidAt ? `${t("Last valid")}: ${formatTime(session.lastValidAt)}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return diagnostic ? <Tooltip content={diagnostic}>{tag}</Tooltip> : tag;
 }
 
 function AliasCountTag({ count, limit }: { count: number; limit: number }) {
@@ -323,7 +336,6 @@ export function ImportICloudModal({
   const { t } = useTranslation();
   const [mode, setMode] = useState<ImportMode>("paste");
   const [content, setContent] = useState("");
-  const [curlPrimaryEmail, setCurlPrimaryEmail] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [ownerId, setOwnerId] = useState<number | undefined>();
   const [errorStrategy, setErrorStrategy] =
@@ -334,10 +346,10 @@ export function ImportICloudModal({
   const [submitting, setSubmitting] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const previousVisible = useRef(false);
-  const lineCount = useMemo(() => {
-    if (mode === "curl") return content.trim() ? 1 : 0;
-    return content.split(/\r?\n/).filter((line) => line.trim()).length;
-  }, [content, mode]);
+  const lineCount = useMemo(
+    () => content.split(/\r?\n/).filter((line) => line.trim()).length,
+    [content],
+  );
 
   useEffect(() => {
     const opened = visible && !previousVisible.current;
@@ -345,7 +357,6 @@ export function ImportICloudModal({
     if (!opened) return;
     setMode("paste");
     setContent("");
-    setCurlPrimaryEmail("");
     setFile(null);
     if (fileRef.current) fileRef.current.value = "";
     setOwnerId(undefined);
@@ -379,18 +390,6 @@ export function ImportICloudModal({
         Toast.error(getIamErrorMessage(t, error, "iCloud import failed."));
         return;
       }
-    }
-    if (mode === "curl") {
-      const primaryEmail = curlPrimaryEmail.trim().toLowerCase();
-      if (!/^[^\s@]+@[^\s@]+$/.test(primaryEmail)) {
-        Toast.warning(t("A valid iCloud email address is required."));
-        return;
-      }
-      if (!/^curl(?:\s|\\|$)/i.test(content.trim())) {
-        Toast.warning(t("Please paste an iCloud HME cURL request."));
-        return;
-      }
-      sourceContent = `${primaryEmail}----${content.trim()}`;
     }
     const sourceLineCount = sourceContent
       .split(/\r?\n/)
@@ -474,7 +473,7 @@ export function ImportICloudModal({
           />
         </label>
 
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 gap-2">
           <button
             aria-pressed={mode === "paste"}
             className={switchButtonClass(mode === "paste")}
@@ -488,20 +487,6 @@ export function ImportICloudModal({
           >
             <FileText size={16} />
             {t("Manual input")}
-          </button>
-          <button
-            aria-pressed={mode === "curl"}
-            className={switchButtonClass(mode === "curl")}
-            onClick={() => {
-              setMode("curl");
-              setContent("");
-              setFile(null);
-              if (fileRef.current) fileRef.current.value = "";
-            }}
-            type="button"
-          >
-            <Code2 size={16} />
-            cURL
           </button>
           <button
             aria-pressed={mode === "file"}
@@ -548,45 +533,12 @@ export function ImportICloudModal({
               <TextArea
                 className="font-mono"
                 onChange={setContent}
-                placeholder="primary@icloud.com----host----dsid----clientId----clientBuildNumber----clientMasteringNumber----Cookie"
+                placeholder="primary@icloud.com----app-password----curl ..."
                 rows={8}
                 style={{ height: IMPORT_ENTRY_AREA_HEIGHT, resize: "none" }}
                 value={content}
               />
             </label>
-          ) : mode === "curl" ? (
-            <div className="space-y-3">
-              <label className="block">
-                <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
-                  {t("Primary email")} *
-                </span>
-                <Input
-                  className="font-mono"
-                  onChange={(value) => setCurlPrimaryEmail(String(value))}
-                  placeholder="name@icloud.com"
-                  value={curlPrimaryEmail}
-                />
-              </label>
-              <label className="block">
-                <span className="mb-1.5 flex items-center justify-between text-sm font-medium text-[var(--semi-color-text-0)]">
-                  <span>{t("HME cURL request")} *</span>
-                  <Text size="small" type="tertiary">
-                    {t("Parsed entries", { count: lineCount })}
-                  </Text>
-                </span>
-                <TextArea
-                  className="font-mono"
-                  onChange={setContent}
-                  placeholder="curl --url 'https://p217-maildomainws.icloud.com.cn/v2/hme/list?...' ..."
-                  rows={8}
-                  style={{ height: IMPORT_ENTRY_AREA_HEIGHT - 68, resize: "none" }}
-                  value={content}
-                />
-              </label>
-              <div className="text-xs leading-5 text-[var(--semi-color-text-2)]">
-                {t("The HME cURL does not contain the primary email. Enter it separately.")}
-              </div>
-            </div>
           ) : (
             <>
               <input
@@ -619,16 +571,14 @@ export function ImportICloudModal({
           <div className="mb-1 text-xs font-medium text-[var(--semi-color-text-0)]">
             {t("Supported format")}
           </div>
-          <code className="block break-all whitespace-normal font-mono text-xs leading-relaxed text-[var(--semi-color-text-2)]">
-            {mode === "curl"
-              ? "primaryEmail----curl --url 'https://.../v2/hme/list?...' ..."
-              : "primaryEmail----host----dsid----clientId----clientBuildNumber----clientMasteringNumber----Cookie"}
+          <code className="block whitespace-pre-wrap break-all font-mono text-xs leading-relaxed text-[var(--semi-color-text-2)]">
+            {"email----appPassword----oldCurl\nemail----appPassword----newCurl\nemail----appPassword----newCurl----oldCurl"}
           </code>
         </div>
 
         <div className="rounded-lg border border-[var(--semi-color-border)] bg-[var(--semi-color-fill-0)] px-3 py-2 text-xs leading-5 text-[var(--semi-color-text-2)]">
           {t(
-            "iCloud Cookie and HME request context are write-only and never returned by the resource API.",
+            "iCloud app passwords, cookies and cURL context are write-only and never returned by the resource API.",
           )}
         </div>
       </div>
@@ -652,54 +602,30 @@ export function EditICloudModal({
   target: AdminICloudResourceItem | null;
 }) {
   const { t } = useTranslation();
-  const [primaryEmail, setPrimaryEmail] = useState("");
   const [ownerId, setOwnerId] = useState<number | undefined>();
   const [forSale, setForSale] = useState(false);
   const [expireAt, setExpireAt] = useState<Date | null>(() =>
     target ? new Date(target.expireAt) : null,
   );
-  const [host, setHost] = useState("");
-  const [dsid, setDsid] = useState("");
-  const [clientId, setClientId] = useState("");
-  const [clientBuildNumber, setClientBuildNumber] = useState("");
-  const [clientMasteringNumber, setClientMasteringNumber] = useState("");
-  const [cookie, setCookie] = useState("");
+  const [importLine, setImportLine] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const credentialPlaceholder = t(credentialsOnly ? "Required" : "Leave blank to keep current");
 
   useEffect(() => {
     if (!target) return;
-    setPrimaryEmail(target.primaryEmail);
     setOwnerId(target.owner.id);
     setForSale(target.forSale);
     setExpireAt(new Date(target.expireAt));
-    setHost("");
-    setDsid("");
-    setClientId("");
-    setClientBuildNumber("");
-    setClientMasteringNumber("");
-    setCookie("");
+    setImportLine("");
   }, [target]);
 
   const submit = async () => {
     if (!target || (!credentialsOnly && !ownerId)) return;
-    const nextEmail = primaryEmail.trim().toLowerCase();
-    if (!credentialsOnly && !nextEmail) {
-      Toast.warning(t("A valid iCloud email address is required."));
+    const nextImportLine = importLine.trim();
+    if (credentialsOnly && !nextImportLine) {
+      Toast.warning(t("Complete iCloud credential line is required."));
       return;
     }
-    const credentialValues = [
-      host,
-      dsid,
-      clientId,
-      clientBuildNumber,
-      clientMasteringNumber,
-      cookie,
-    ].map((value) => value.trim());
-    const wantsCredentialChange = credentialValues.some(Boolean);
-    const emailChanged = !credentialsOnly && nextEmail !== target.primaryEmail;
     const expireAtChanged =
-      !credentialsOnly &&
       canOperate &&
       expireAt?.getTime() !== new Date(target.expireAt).getTime();
     if (
@@ -709,33 +635,18 @@ export function EditICloudModal({
       Toast.warning(t("Expiration must be in the future."));
       return;
     }
-    const requiresCredentials = credentialsOnly || emailChanged;
-    if (requiresCredentials && (!canOperate || !credentialValues.every(Boolean))) {
-      Toast.warning(t("Changing the primary email or replacing credentials requires every iCloud credential field."));
-      return;
-    }
-    if (wantsCredentialChange && (!canOperate || !credentialValues.every(Boolean))) {
-      Toast.warning(t("Complete every iCloud credential field or leave all of them blank."));
+    if (nextImportLine && !canOperate) {
+      Toast.warning(t("Permission denied"));
       return;
     }
 
     const request: AdminICloudUpdateRequest = { version: target.version };
     if (!credentialsOnly) {
-      if (emailChanged) request.primaryEmail = nextEmail;
       if (ownerId !== target.owner.id) request.ownerId = ownerId;
       if (canOperate && forSale !== target.forSale) request.forSale = forSale;
-      if (expireAtChanged && expireAt) request.expireAt = expireAt.toISOString();
     }
-    if (requiresCredentials || wantsCredentialChange) {
-      request.credentials = {
-        host: credentialValues[0],
-        dsid: credentialValues[1],
-        clientId: credentialValues[2],
-        clientBuildNumber: credentialValues[3],
-        clientMasteringNumber: credentialValues[4],
-        cookie: credentialValues[5],
-      };
-    }
+    if (expireAtChanged && expireAt) request.expireAt = expireAt.toISOString();
+    if (nextImportLine) request.importLine = nextImportLine;
     if (Object.keys(request).length === 1) {
       Toast.info(t("No changes to save."));
       return;
@@ -745,7 +656,7 @@ export function EditICloudModal({
     try {
       await updateAdminICloudResource(target.id, request);
       Toast.success(t(credentialsOnly
-        ? "Credentials replaced and validation queued."
+        ? "Credentials replaced."
         : "iCloud resource updated."));
       await onSaved(target.id);
       onCancel();
@@ -773,7 +684,7 @@ export function EditICloudModal({
           {credentialsOnly ? (
             <>
               <div className="rounded-lg border border-[var(--semi-color-warning-light-active)] bg-[var(--semi-color-warning-light-default)] px-3 py-2 text-sm text-[var(--semi-color-text-0)]">
-                {t("All credential fields are write-only. Existing values are never displayed, and submitting replaces the complete credential set.")}
+                {t("The complete credential line is write-only. Existing values are never displayed, and submitting replaces the app password and configured cURL channels.")}
               </div>
               <InfoItem
                 label={t("Primary email")}
@@ -782,35 +693,38 @@ export function EditICloudModal({
             </>
           ) : (
             <>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="block">
-              <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
-                {t("Primary email")} *
-              </span>
-              <Input
-                className="font-mono"
-                disabled={!canOperate}
-                onChange={(value) => setPrimaryEmail(String(value))}
-                placeholder="name@icloud.com"
-                value={primaryEmail}
+              <InfoItem
+                label={t("Primary email")}
+                value={<span className="font-mono">{target.primaryEmail}</span>}
               />
-            </label>
-            <div>
-              <div className="mb-1.5 text-sm font-medium text-[var(--semi-color-text-0)]">
-                {t("Current forwarding mailbox")}
-              </div>
-              <div className="flex h-8 items-center rounded-md bg-[var(--semi-color-fill-0)] px-3 font-mono text-sm text-[var(--semi-color-text-1)]">
-                {target.selectedForwardTo || t("Not configured")}
-              </div>
-            </div>
-          </div>
 
-          <label className="block">
-            <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
-              {t("Owner")}
-            </span>
-            <OwnerSelect onChange={setOwnerId} owners={owners} t={t} value={ownerId} />
-          </label>
+              <label className="block">
+                <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
+                  {t("Owner")}
+                </span>
+                <OwnerSelect onChange={setOwnerId} owners={owners} t={t} value={ownerId} />
+              </label>
+
+              {canOperate ? (
+                <div className="flex items-center justify-between rounded-lg bg-[var(--semi-color-fill-0)] px-3 py-2.5">
+                  <div>
+                    <div className="text-sm font-medium text-[var(--semi-color-text-0)]">
+                      {t("Public sale")}
+                    </div>
+                    <div className="text-xs text-[var(--semi-color-text-2)]">
+                      {t("This setting is independent from IMAP health and Cookie validity.")}
+                    </div>
+                  </div>
+                  <Switch
+                    aria-label={t("Public sale")}
+                    checked={forSale}
+                    onChange={setForSale}
+                    size="small"
+                  />
+                </div>
+              ) : null}
+            </>
+          )}
 
           <label className="block">
             <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
@@ -828,31 +742,6 @@ export function EditICloudModal({
             />
           </label>
 
-          <div className="text-xs leading-5 text-[var(--semi-color-text-2)]">
-            {t("Changing the primary email requires the complete write-only credential set and re-queues validation.")}
-          </div>
-
-          {canOperate ? (
-            <div className="flex items-center justify-between rounded-lg bg-[var(--semi-color-fill-0)] px-3 py-2.5">
-              <div>
-                <div className="text-sm font-medium text-[var(--semi-color-text-0)]">
-                  {t("Public sale")}
-                </div>
-                <div className="text-xs text-[var(--semi-color-text-2)]">
-                  {t("Credential replacement automatically converts the resource to private supply.")}
-                </div>
-              </div>
-              <Switch
-                aria-label={t("Public sale")}
-                checked={forSale}
-                onChange={setForSale}
-                size="small"
-              />
-            </div>
-          ) : null}
-            </>
-          )}
-
           {canOperate ? (
             <div className="rounded-lg border border-[var(--semi-color-border)] p-3">
               <div className="mb-1 text-sm font-medium text-[var(--semi-color-text-0)]">
@@ -860,81 +749,20 @@ export function EditICloudModal({
               </div>
               <div className="mb-3 text-xs leading-5 text-[var(--semi-color-text-2)]">
                 {t(credentialsOnly
-                  ? "All credential fields are required and replace the complete HME credential set."
-                  : "Write-only. Leave every field blank to keep the current values; complete all fields to replace the HME credential set and re-queue validation.")}
+                  ? "Enter the same complete line accepted by import."
+                  : "Write-only. Leave blank to keep the current app password and cURL channels.")}
               </div>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <label className="block sm:col-span-2">
-                  <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
-                    {t("Host")}
-                  </span>
-                  <Input
-                    className="font-mono"
-                    onChange={(value) => setHost(String(value))}
-                    placeholder="p119-maildomainws.icloud.com"
-                    value={host}
-                  />
-                </label>
-                <label className="block">
-                  <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
-                    {t("DSID")}
-                  </span>
-                  <Input
-                    autoComplete="off"
-                    mode="password"
-                    onChange={(value) => setDsid(String(value))}
-                    placeholder={credentialPlaceholder}
-                    value={dsid}
-                  />
-                </label>
-                <label className="block">
-                  <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
-                    {t("Client ID")}
-                  </span>
-                  <Input
-                    autoComplete="off"
-                    mode="password"
-                    onChange={(value) => setClientId(String(value))}
-                    placeholder={credentialPlaceholder}
-                    value={clientId}
-                  />
-                </label>
-                <label className="block">
-                  <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
-                    {t("Client build number")}
-                  </span>
-                  <Input
-                    className="font-mono"
-                    onChange={(value) => setClientBuildNumber(String(value))}
-                    placeholder={credentialPlaceholder}
-                    value={clientBuildNumber}
-                  />
-                </label>
-                <label className="block">
-                  <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
-                    {t("Client mastering number")}
-                  </span>
-                  <Input
-                    className="font-mono"
-                    onChange={(value) => setClientMasteringNumber(String(value))}
-                    placeholder={credentialPlaceholder}
-                    value={clientMasteringNumber}
-                  />
-                </label>
-                <label className="block sm:col-span-2">
-                  <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
-                    {t("Cookie")}
-                  </span>
-                  <TextArea
-                    className="font-mono"
-                    onChange={setCookie}
-                    placeholder={credentialPlaceholder}
-                    rows={4}
-                    style={{ resize: "none" }}
-                    value={cookie}
-                  />
-                </label>
-              </div>
+              <TextArea
+                className="font-mono"
+                onChange={setImportLine}
+                placeholder="email----appPassword----newCurl----oldCurl"
+                rows={7}
+                style={{ resize: "none" }}
+                value={importLine}
+              />
+              <code className="mt-2 block whitespace-pre-wrap break-all font-mono text-xs leading-5 text-[var(--semi-color-text-2)]">
+                {"email----appPassword----oldCurl\nemail----appPassword----newCurl\nemail----appPassword----newCurl----oldCurl"}
+              </code>
             </div>
           ) : null}
         </div>
@@ -968,14 +796,14 @@ export function ICloudMaintenanceModal({
     (target.item.status === "disabled" || target.item.status === "deleted");
   const actions = [
     {
-      description: "Run the complete iCloud health check, session refresh, alias sync and delivery verification.",
+      description: "Check whether the app-specific password can log in to IMAP.",
       disabled: rowDisabled,
       icon: ShieldCheck,
       key: "validate" as const,
       label: "Validate resource",
     },
     {
-      description: "Queue the fenced iCloud maintenance flow to create and activate missing HME aliases.",
+      description: "Queue dual-channel alias provisioning. Cookie state controls creation only.",
       disabled: rowDisabled || (target.mode === "row" && target.item.aliasCount >= aliasLimit),
       icon: AtSign,
       key: "alias" as const,
@@ -984,18 +812,10 @@ export function ICloudMaintenanceModal({
   ];
   const selectedAction = actions.find((item) => item.key === selected) ?? actions[0];
   const rowItem = target.mode === "row" ? target.item : null;
-  const maintenanceState = rowItem?.status === "validating"
-    ? "Running"
-    : rowItem?.status === "pending"
-      ? "Queued"
-      : "Idle";
-
   const submit = async () => {
     if (!selectedAction || selectedAction.disabled) return;
     setSubmitting(true);
     try {
-      // iCloud validation already owns session refresh, alias synchronization,
-      // missing-alias provisioning, and delivery verification as one fenced task.
       let count = 1;
       if (target.mode === "row") {
         if (selected === "alias") {
@@ -1067,23 +887,15 @@ export function ICloudMaintenanceModal({
         {rowItem ? (
           <div className="grid gap-3 rounded-lg border border-[var(--semi-color-border)] p-3 sm:grid-cols-2">
             <InfoItem
-              label={t("Maintenance status")}
-              value={
-                <Tag
-                  color={maintenanceState === "Running" ? "orange" : maintenanceState === "Queued" ? "blue" : "grey"}
-                  shape="circle"
-                  size="small"
-                >
-                  {t(maintenanceState)}
-                </Tag>
-              }
+              label={t("IMAP health")}
+              value={<ResourceStatusTag item={rowItem} />}
             />
             <InfoItem
               label={t("Alias count")}
               value={<AliasCountTag count={rowItem.aliasCount} limit={aliasLimit} />}
             />
-            <InfoItem label={t("Last checked")} value={formatTime(rowItem.lastCheckedAt)} />
-            <InfoItem label={t("Next run at")} value={formatTime(rowItem.nextValidationAt)} />
+            <InfoItem label={t("Next validation")} value={formatTime(rowItem.nextValidationAt)} />
+            <InfoItem label={t("Next provisioning")} value={formatTime(rowItem.nextProvisionAt)} />
             {rowItem.lastSafeError ? (
               <div className="sm:col-span-2 rounded-lg bg-[var(--semi-color-warning-light-default)] px-3 py-2 text-sm text-[var(--semi-color-text-0)]">
                 {rowItem.lastSafeError}
@@ -1396,17 +1208,6 @@ export function ICloudDetailSheet({
           ),
       },
       {
-        dataIndex: "recipientMailId",
-        title: t("Recipient ID"),
-        width: 240,
-        render: (value: unknown) =>
-          value ? (
-            <CopyableTableText copiedText={t("Copied")} text={String(value)} />
-          ) : (
-            "-"
-          ),
-      },
-      {
         dataIndex: "status",
         title: t("Status"),
         width: 110,
@@ -1420,22 +1221,10 @@ export function ICloudDetailSheet({
         },
       },
       {
-        dataIndex: "forwardToEmail",
-        title: t("Forwarding address"),
-        width: 240,
-        render: (value: unknown) =>
-          value ? (
-            <CopyableTableText copiedText={t("Copied")} text={String(value)} />
-          ) : (
-            "-"
-          ),
-      },
-      {
-        dataIndex: "providerDomain",
-        title: t("Provider domain"),
-        width: 180,
-        render: (value: unknown, alias: AdminICloudAliasItem) =>
-          [alias.origin, String(value || "")].filter(Boolean).join(" · ") || "-",
+        dataIndex: "origin",
+        title: t("Origin"),
+        width: 140,
+        render: (value: unknown) => String(value || "-"),
       },
       {
         dataIndex: "providerCreatedAt",
@@ -1520,20 +1309,6 @@ export function ICloudDetailSheet({
                       <CopyableTableText copiedText={t("Copied")} text={item.primaryEmail} />
                     }
                   />
-                  <InfoItem label={t("Suffix")} value={item.suffix || "-"} />
-                  <InfoItem
-                    label={t("Current forwarding mailbox")}
-                    value={
-                      item.selectedForwardTo ? (
-                        <CopyableTableText
-                          copiedText={t("Copied")}
-                          text={item.selectedForwardTo}
-                        />
-                      ) : (
-                        t("Not configured")
-                      )
-                    }
-                  />
                   <InfoItem
                     label={t("Owner")}
                     value={<OwnerIdentity owner={item.owner} t={t} />}
@@ -1558,8 +1333,16 @@ export function ICloudDetailSheet({
               <div className="space-y-5">
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   <InfoItem
-                    label={t("iCloud session")}
-                    value={<SessionStatusTag status={item.sessionStatus} />}
+                    label={t("IMAP health")}
+                    value={<ResourceStatusTag item={item} />}
+                  />
+                  <InfoItem
+                    label={t("New Cookie")}
+                    value={<SessionStatusTag session={item.newSession} />}
+                  />
+                  <InfoItem
+                    label={t("Old Cookie")}
+                    value={<SessionStatusTag session={item.oldSession} />}
                   />
                   <InfoItem
                     label={t("Alias count")}
@@ -1574,21 +1357,13 @@ export function ICloudDetailSheet({
                   <InfoItem label={t("Credential updated at")} value={formatTime(item.credentialUpdatedAt)} />
                   <InfoItem label={t("Validation generation")} value={item.validationGeneration} />
                   <InfoItem label={t("Validation failures")} value={item.validationFailures} />
-                  <InfoItem label={t("Session failures")} value={item.sessionFailures} />
                   <InfoItem label={t("Resource expires at")} value={formatTime(item.expireAt)} />
                   <InfoItem label={t("Next validation")} value={formatTime(item.nextValidationAt)} />
-                  <InfoItem label={t("Next keepalive")} value={formatTime(item.nextKeepaliveAt)} />
+                  <InfoItem label={t("Next provisioning")} value={formatTime(item.nextProvisionAt)} />
+                  <InfoItem label={t("Last IMAP sync")} value={formatTime(item.lastMailSyncAt)} />
                   <InfoItem label={t("Last checked")} value={formatTime(item.lastCheckedAt)} />
                   <InfoItem label={t("Last valid")} value={formatTime(item.lastValidAt)} />
                   <InfoItem label={t("Last alias sync")} value={formatTime(item.lastAliasSyncAt)} />
-                  <InfoItem
-                    label={t("Delivery probe started at")}
-                    value={formatTime(item.deliveryProbeStartedAt)}
-                  />
-                  <InfoItem
-                    label={t("Delivery verified at")}
-                    value={formatTime(item.deliveryProbeVerifiedAt)}
-                  />
                 </div>
                 {item.lastSafeError ? (
                   <div className="rounded-lg border border-[var(--semi-color-warning-light-active)] bg-[var(--semi-color-warning-light-default)] px-3 py-2 text-sm text-[var(--semi-color-text-0)]">
@@ -1623,7 +1398,7 @@ export function ICloudDetailSheet({
                       loading={aliasesLoading}
                       pagination={false}
                       rowKey="id"
-                      scroll={{ x: 1860, y: DRAWER_TABLE_SCROLL_Y }}
+                      scroll={{ x: 1390, y: DRAWER_TABLE_SCROLL_Y }}
                       size="small"
                     />
                   )}
@@ -1736,12 +1511,10 @@ export default function AdminICloudEmails() {
   const isMobile = useIsMobile();
   const [pageSize, setPageSize] = useSharedPageSize();
   const [activePage, setActivePage] = useState(1);
-  const [activeSuffix, setActiveSuffix] = useState("all");
   const [searchKeyword, setSearchKeyword] = useState("");
   const [createdAtRange, setCreatedAtRange] = useState<DateRangeValue>([]);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [privateFilter, setPrivateFilter] = useState<BooleanFilter>("all");
-  const [sessionFilter, setSessionFilter] = useState<SessionFilter>("all");
   const [compactMode, setCompactMode] = useState(false);
   const [items, setItems] = useState<AdminICloudResourceItem[]>([]);
   const [facets, setFacets] = useState<AdminICloudResourceFacets>(EMPTY_FACETS);
@@ -1820,19 +1593,15 @@ export default function AdminICloudEmails() {
     const createdFrom = createdFromISOString(createdAtRange);
     const createdTo = createdToISOString(createdAtRange);
     if (search) next.search = search;
-    if (activeSuffix !== "all") next.suffix = activeSuffix;
     if (statusFilter !== "all") next.status = statusFilter;
     if (privateFilter !== "all") next.forSale = privateFilter === "no";
-    if (sessionFilter !== "all") next.sessionStatus = sessionFilter;
     if (createdFrom) next.createdFrom = createdFrom;
     if (createdTo) next.createdTo = createdTo;
     return next;
   }, [
-    activeSuffix,
     createdAtRange,
     debouncedSearchKeyword,
     privateFilter,
-    sessionFilter,
     statusFilter,
   ]);
 
@@ -1971,17 +1740,6 @@ export default function AdminICloudEmails() {
     setSelectedKeys([]);
   }, [filter, pageSize]);
 
-  const suffixCounts = facets.suffixes;
-  const suffixSet = useMemo(
-    () => new Set(suffixCounts.map((item) => item.key)),
-    [suffixCounts],
-  );
-  useEffect(() => {
-    if (activeSuffix !== "all" && !suffixSet.has(activeSuffix)) {
-      setActiveSuffix("all");
-    }
-  }, [activeSuffix, suffixSet]);
-
   const applyMutation = useCallback(
     (
       item: AdminICloudResourceItem,
@@ -1994,9 +1752,6 @@ export default function AdminICloudEmails() {
         version: result.version,
       };
       if (result.status === "pending") patch.lastSafeError = null;
-      if (action === "recover" || (action === "toggle" && item.status === "disabled")) {
-        patch.sessionStatus = "unchecked";
-      }
       setItems((current) =>
         current.map((candidate) =>
           candidate.id === item.id ? { ...candidate, ...patch } : candidate,
@@ -2100,8 +1855,6 @@ export default function AdminICloudEmails() {
     setCreatedAtRange([]);
     setStatusFilter("all");
     setPrivateFilter("all");
-    setSessionFilter("all");
-    setActiveSuffix("all");
     setActivePage(1);
     setSelectedKeys([]);
   };
@@ -2111,11 +1864,9 @@ export default function AdminICloudEmails() {
   useEffect(() => {
     if (safePage !== activePage) setActivePage(safePage);
   }, [activePage, safePage]);
-  const allTabCount = suffixCounts.reduce((sum, item) => sum + item.count, 0);
   const activeFilterCount =
     Number(statusFilter !== "all") +
-    Number(privateFilter !== "all") +
-    Number(sessionFilter !== "all");
+    Number(privateFilter !== "all");
 
   const showBulkOutcome = useCallback(
     (response: AdminICloudBulkResponse, successKey: string) => {
@@ -2476,36 +2227,12 @@ export default function AdminICloudEmails() {
   const columns = useMemo(
     () => [
       {
-        dataIndex: "suffix",
-        key: "suffix",
-        title: t("Suffix"),
-        width: 120,
-        render: (value: unknown) => (
-          <Tag color="white" shape="circle">
-            {String(value || "-")}
-          </Tag>
-        ),
-      },
-      {
         dataIndex: "primaryEmail",
         key: "email",
         title: t("Primary email"),
         width: 280,
         render: (value: unknown) => (
           <CopyableTableText copiedText={t("Copied")} text={String(value)} />
-        ),
-      },
-      {
-        dataIndex: "selectedForwardTo",
-        key: "forwardingMailbox",
-        title: t("Current forwarding mailbox"),
-        width: 260,
-        render: (value: unknown) => (
-          value ? (
-            <CopyableTableText copiedText={t("Copied")} text={String(value)} />
-          ) : (
-            "-"
-          )
         ),
       },
       {
@@ -2538,12 +2265,21 @@ export default function AdminICloudEmails() {
         ),
       },
       {
-        dataIndex: "sessionStatus",
-        key: "session",
-        title: t("iCloud session"),
+        dataIndex: "newSession",
+        key: "newSession",
+        title: t("New Cookie"),
         width: 130,
-        render: (value: unknown) => (
-          <SessionStatusTag status={value as AdminICloudSessionStatus} />
+        render: (_: unknown, item: AdminICloudResourceItem) => (
+          <SessionStatusTag session={item.newSession} />
+        ),
+      },
+      {
+        dataIndex: "oldSession",
+        key: "oldSession",
+        title: t("Old Cookie"),
+        width: 130,
+        render: (_: unknown, item: AdminICloudResourceItem) => (
+          <SessionStatusTag session={item.oldSession} />
         ),
       },
       {
@@ -2602,47 +2338,6 @@ export default function AdminICloudEmails() {
       setSelectedKeys(keys.map((key) => Number(key)));
     },
   };
-
-  const tabsArea = (
-    <Tabs
-      activeKey={activeSuffix}
-      className="mb-2"
-      collapsible
-      onChange={(key) => {
-        setActiveSuffix(String(key));
-        setActivePage(1);
-        setSelectedKeys([]);
-      }}
-      type="card"
-    >
-      <Tabs.TabPane
-        itemKey="all"
-        tab={
-          <span className="flex items-center gap-2">
-            {t("All")}
-            <Tag color={activeSuffix === "all" ? "red" : "grey"} shape="circle">
-              {allTabCount}
-            </Tag>
-          </span>
-        }
-      />
-      {suffixCounts.map((item) => (
-        <Tabs.TabPane
-          itemKey={item.key}
-          key={item.key}
-          tab={
-            <span className="flex items-center gap-2">
-              <Layers size={14} />
-              {item.key}
-              <Tag color={activeSuffix === item.key ? "red" : "grey"} shape="circle">
-                {item.count}
-              </Tag>
-            </span>
-          }
-        />
-      ))}
-    </Tabs>
-  );
 
   const actionsArea = (
     <div className="flex w-full flex-col items-center justify-between gap-2 md:flex-row">
@@ -2806,26 +2501,6 @@ export default function AdminICloudEmails() {
                 ))}
               </div>
 
-              <div className="px-2 pb-1 text-xs font-medium text-[var(--semi-color-text-2)]">
-                {t("iCloud session")}
-              </div>
-              <div className="space-y-1">
-                {(["all", ...Object.keys(sessionMeta)] as SessionFilter[]).map(
-                  (value) => (
-                    <StatisticFilterOption
-                      active={sessionFilter === value}
-                      count={facets.sessionStatus[value]}
-                      key={value}
-                      label={t(value === "all" ? "All" : sessionMeta[value].label)}
-                      onSelect={(next) => {
-                        setSessionFilter(next);
-                        setActivePage(1);
-                      }}
-                      value={value}
-                    />
-                  ),
-                )}
-              </div>
             </div>
           }
           trigger="click"
@@ -2852,7 +2527,7 @@ export default function AdminICloudEmails() {
             flushSearchKeyword();
             setActivePage(1);
           }}
-          placeholder={t("Search iCloud email, forwarding mailbox, owner, alias or recipient ID")}
+          placeholder={t("Search iCloud email, owner or alias")}
           prefix={<IconSearch />}
           showClear
           size="small"
@@ -2926,7 +2601,6 @@ export default function AdminICloudEmails() {
         actionsArea={actionsArea}
         paginationArea={paginationArea}
         t={t}
-        tabsArea={tabsArea}
         type="type3"
       >
         <CardTable
@@ -2948,7 +2622,7 @@ export default function AdminICloudEmails() {
           pagination={false}
           rowKey="id"
           rowSelection={canOperate ? rowSelection : undefined}
-          scroll={{ x: "max(100%, 1980px)", y: DESKTOP_TABLE_SCROLL_Y }}
+          scroll={{ x: "max(100%, 1750px)", y: DESKTOP_TABLE_SCROLL_Y }}
           size="middle"
         />
       </CardPro>

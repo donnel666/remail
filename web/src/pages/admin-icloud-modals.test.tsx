@@ -241,23 +241,29 @@ function resource(): AdminICloudResourceItem {
   return {
     aliasCount: 12,
     createdAt: now,
-    deliveryProbeVerifiedAt: null,
     expireAt: "2026-09-08T00:00:00Z",
     forSale: true,
     id: 41,
     lastAliasSyncAt: null,
     lastAllocatedAt: null,
     lastCheckedAt: now,
+    lastMailSyncAt: null,
     lastSafeError: null,
     lastValidAt: now,
-    nextKeepaliveAt: null,
+    newSession: {
+      cooldownUntil: null,
+      failures: 0,
+      lastCheckedAt: now,
+      lastValidAt: now,
+      nextKeepaliveAt: null,
+      status: "valid",
+    },
     nextValidationAt: null,
+    nextProvisionAt: null,
+    oldSession: null,
     owner,
     primaryEmail: "main@icloud.com",
-    selectedForwardTo: "icloud@aishop6.com",
-    sessionStatus: "valid",
     status: "normal",
-    suffix: "icloud.com",
     updatedAt: now,
     version: 3,
   };
@@ -271,8 +277,6 @@ function resourceDetail(): AdminICloudResourceDetail {
     aliasRemaining: 738,
     credentialRevision: 2,
     credentialUpdatedAt: "2026-08-08T00:00:00Z",
-    deliveryProbeStartedAt: null,
-    sessionFailures: 0,
     validationFailures: 0,
     validationGeneration: 3,
   } as AdminICloudResourceDetail;
@@ -290,9 +294,7 @@ describe("admin iCloud modal workflows", () => {
       aliasLimit: 750,
       facets: {
         forSale: { all: 0, no: 0, yes: 0 },
-        sessionStatus: { all: 0, invalid: 0, unchecked: 0, valid: 0 },
         status: { abnormal: 0, all: 0, deleted: 0, disabled: 0, normal: 0, pending: 0, validating: 0 },
-        suffixes: [],
       },
       items: [],
       limit: 20,
@@ -481,7 +483,7 @@ describe("admin iCloud modal workflows", () => {
     fireEvent.click(fileButton);
     expect(fileButton).toHaveAttribute("aria-pressed", "true");
 
-    const content = "main@icloud.com----host----dsid----client----build----master----Cookie=value";
+    const content = "main@icloud.com----app-password----curl --url 'https://p217-maildomainws.icloud.com.cn/v2/hme/list?dsid=123' -H 'scnt: scnt-value' -b 'X-APPLE-WEBAUTH-TOKEN=secret'";
     const file = new File([content], "icloud.txt", { type: "text/plain" });
     Object.defineProperty(file, "text", { value: vi.fn().mockResolvedValue(content) });
     fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [file] } });
@@ -498,7 +500,7 @@ describe("admin iCloud modal workflows", () => {
     await waitFor(() => expect(onImported).toHaveBeenCalledTimes(1));
   });
 
-  it("submits a copied HME cURL with the separately entered primary email", async () => {
+  it("submits a complete credential line from manual input", async () => {
     render(
       <ImportICloudModal
         onCancel={vi.fn()}
@@ -509,19 +511,15 @@ describe("admin iCloud modal workflows", () => {
     );
 
     await waitFor(() => expect(screen.getByLabelText("owner")).toHaveValue("7"));
-    fireEvent.click(screen.getByRole("button", { name: "cURL" }));
-    fireEvent.change(screen.getByPlaceholderText("name@icloud.com"), {
-      target: { value: "Main@icloud.com" },
-    });
-    const curl = "curl --url 'https://p217-maildomainws.icloud.com.cn/v2/hme/list?dsid=123' \\\n  -b 'X-APPLE-WEBAUTH-TOKEN=secret'";
-    fireEvent.change(screen.getByPlaceholderText(/curl --url/), {
-      target: { value: curl },
+    const content = "main@icloud.com----app-password----curl --url 'https://p217-maildomainws.icloud.com.cn/v2/hme/list?dsid=123' -H 'scnt: scnt-value' -b 'X-APPLE-WEBAUTH-TOKEN=secret'";
+    fireEvent.change(screen.getByPlaceholderText("primary@icloud.com----app-password----curl ..."), {
+      target: { value: content },
     });
     fireEvent.click(screen.getByRole("button", { name: "Import" }));
 
     await waitFor(() => expect(mocks.importResources).toHaveBeenCalledWith(
       expect.objectContaining({
-        content: `main@icloud.com----${curl}`,
+        content,
         errorStrategy: "skip",
         expireAt: expect.any(String),
         ownerId: 7,
@@ -557,10 +555,11 @@ describe("admin iCloud modal workflows", () => {
     expect(new Date(request.expireAt).getTime()).toBeGreaterThan(Date.now());
   });
 
-  it("blocks a primary-email change until the complete credentials are present", async () => {
+  it("requires a complete credential line when replacing credentials", async () => {
     render(
       <EditICloudModal
         canOperate
+        credentialsOnly
         onCancel={vi.fn()}
         onSaved={vi.fn()}
         owners={[owner]}
@@ -568,14 +567,11 @@ describe("admin iCloud modal workflows", () => {
       />,
     );
 
-    fireEvent.change(screen.getByPlaceholderText("name@icloud.com"), {
-      target: { value: "other@icloud.com" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Replace credentials" }));
 
     expect(mocks.updateResource).not.toHaveBeenCalled();
     expect(mocks.toastWarning).toHaveBeenCalledWith(
-      "Changing the primary email or replacing credentials requires every iCloud credential field.",
+      "Complete iCloud credential line is required.",
     );
   });
 });

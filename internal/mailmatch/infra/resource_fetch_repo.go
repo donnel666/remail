@@ -303,7 +303,7 @@ func (r *ResourceFetchRepo) AssertResourceFetchFence(ctx context.Context, resour
 	})
 }
 
-func (r *ResourceFetchRepo) AssertICloudResourceFetchFence(ctx context.Context, resourceID uint, generation uint64) error {
+func (r *ResourceFetchRepo) AssertICloudResourceFetchFence(ctx context.Context, resourceID uint, generation uint64, expectedCredentialRevision uint64) error {
 	return r.withTx(ctx, func(txCtx context.Context, tx *gorm.DB) error {
 		if err := r.lockResourceFetchState(tx, resourceID, generation); err != nil {
 			return err
@@ -312,7 +312,7 @@ func (r *ResourceFetchRepo) AssertICloudResourceFetchFence(ctx context.Context, 
 		if err != nil {
 			return err
 		}
-		return validateResourceFetchScope(scope, 0)
+		return validateResourceFetchScope(scope, expectedCredentialRevision)
 	})
 }
 
@@ -352,7 +352,7 @@ func (r *ResourceFetchRepo) CompleteResourceFetchTask(ctx context.Context, resou
 	})
 }
 
-func (r *ResourceFetchRepo) CompleteICloudResourceFetch(ctx context.Context, resourceID uint, generation uint64, fetched int, stored int, matched int, now time.Time, log *governancedomain.SystemLog) error {
+func (r *ResourceFetchRepo) CompleteICloudResourceFetch(ctx context.Context, resourceID uint, generation uint64, expectedCredentialRevision uint64, fetched int, stored int, matched int, now time.Time, log *governancedomain.SystemLog) error {
 	return r.withTx(ctx, func(txCtx context.Context, tx *gorm.DB) error {
 		if err := r.lockResourceFetchState(tx, resourceID, generation); err != nil {
 			return err
@@ -361,7 +361,7 @@ func (r *ResourceFetchRepo) CompleteICloudResourceFetch(ctx context.Context, res
 		if err != nil {
 			return err
 		}
-		if err := validateResourceFetchScope(scope, 0); err != nil {
+		if err := validateResourceFetchScope(scope, expectedCredentialRevision); err != nil {
 			return err
 		}
 		return r.finishResourceFetchState(txCtx, tx, resourceID, generation, map[string]any{
@@ -523,14 +523,14 @@ func validateResourceFetchScope(row *domain.ResourceFetchScope, expectedCredenti
 	if strings.EqualFold(strings.TrimSpace(row.Status), "deleted") {
 		return domain.ErrResourceFetchDeleted
 	}
+	if expectedCredentialRevision > 0 && row.CredentialRevision != expectedCredentialRevision {
+		return domain.ErrResourceFetchCredentialChanged
+	}
 	if row.ResourceType == domain.ResourceTypeICloud {
 		if strings.TrimSpace(row.EmailAddress) == "" {
 			return domain.ErrResourceFetchJobConflict
 		}
 		return nil
-	}
-	if expectedCredentialRevision > 0 && row.CredentialRevision != expectedCredentialRevision {
-		return domain.ErrResourceFetchCredentialChanged
 	}
 	if strings.TrimSpace(row.EmailAddress) == "" || strings.TrimSpace(row.ClientID) == "" || strings.TrimSpace(row.RefreshToken) == "" {
 		return domain.ErrResourceFetchCredentialsMissing

@@ -2,68 +2,51 @@ package api
 
 import (
 	"context"
-	"time"
 
 	icloudapi "github.com/donnel666/remail/internal/icloud"
 	mailmatchapp "github.com/donnel666/remail/internal/mailmatch/app"
 	mailmatchdomain "github.com/donnel666/remail/internal/mailmatch/domain"
 )
 
-type iCloudMailIngestAdapter struct {
-	mailmatch *mailmatchapp.UseCase
+type iCloudMailFetchAdapter struct {
+	service *icloudapi.Service
 }
 
-func (a iCloudMailIngestAdapter) IngestICloudMail(
-	ctx context.Context,
-	resourceID uint,
-	recipient string,
-	envelopeFrom string,
-	raw []byte,
-	receivedAt time.Time,
-	providerMessageID string,
-) error {
-	if a.mailmatch == nil {
-		return nil
+func (a iCloudMailFetchAdapter) FetchICloudMessages(ctx context.Context, req mailmatchapp.FetchMessagesRequest) (*mailmatchapp.FetchMessagesResult, error) {
+	if a.service == nil {
+		return nil, mailmatchdomain.ErrMailServiceUnavailable
 	}
-	return a.mailmatch.IngestInboundMail(ctx, mailmatchapp.InboundMailRequest{
-		EmailResourceID:   resourceID,
-		ResourceType:      mailmatchdomain.ResourceTypeICloud,
-		Recipient:         recipient,
-		EnvelopeFrom:      envelopeFrom,
-		Raw:               raw,
-		ReceivedAt:        receivedAt,
-		ProviderMessageID: providerMessageID,
-		Protocol:          "smtp",
-		Folder:            "inbound",
+	result, err := a.service.FetchMail(ctx, icloudapi.MailFetchRequest{
+		ResourceID:  req.Scope.EmailResourceID,
+		SinceAt:     req.SinceAt,
+		UntilAt:     req.UntilAt,
+		MaxMessages: req.MaxMessages,
+		FullHistory: req.FullHistory,
 	})
-}
-
-func (a iCloudMailIngestAdapter) IngestICloudMailWithFence(
-	ctx context.Context,
-	resourceID uint,
-	recipient string,
-	envelopeFrom string,
-	raw []byte,
-	receivedAt time.Time,
-	providerMessageID string,
-	fence func(context.Context) error,
-) (icloudapi.MailIngestResult, error) {
-	if a.mailmatch == nil {
-		return icloudapi.MailIngestResult{}, nil
+	if err != nil {
+		return nil, err
 	}
-	stored, matched, err := a.mailmatch.IngestInboundMailWithFence(ctx, mailmatchapp.InboundMailRequest{
-		EmailResourceID:   resourceID,
-		ResourceType:      mailmatchdomain.ResourceTypeICloud,
-		Recipient:         recipient,
-		EnvelopeFrom:      envelopeFrom,
-		Raw:               raw,
-		ReceivedAt:        receivedAt,
-		ProviderMessageID: providerMessageID,
-		Protocol:          "smtp",
-		Folder:            "inbound",
-	}, fence)
-	return icloudapi.MailIngestResult{Stored: stored, Matched: matched}, err
+	out := &mailmatchapp.FetchMessagesResult{Messages: make([]mailmatchapp.FetchedMessage, 0, len(result.Messages))}
+	for _, message := range result.Messages {
+		out.Messages = append(out.Messages, mailmatchapp.ParseInboundFetchedMessage(mailmatchapp.InboundMailRequest{
+			EmailResourceID:   req.Scope.EmailResourceID,
+			ResourceType:      mailmatchdomain.ResourceTypeICloud,
+			Recipient:         message.Recipient,
+			EnvelopeFrom:      message.Sender,
+			Raw:               message.Raw,
+			ReceivedAt:        message.ReceivedAt,
+			ProviderMessageID: message.ProviderMessageID,
+			Protocol:          "imap",
+			Folder:            "INBOX",
+		}))
+	}
+	if result.Cursor != nil {
+		cursor := *result.Cursor
+		out.CommitCursor = func(commitCtx context.Context, fence func(context.Context) error) error {
+			return a.service.CommitMailCursor(commitCtx, cursor, fence)
+		}
+	}
+	return out, nil
 }
 
-var _ icloudapi.MailIngestPort = iCloudMailIngestAdapter{}
-var _ icloudapi.MailIngestWithFencePort = iCloudMailIngestAdapter{}
+var _ mailmatchapp.ICloudMailFetchPort = iCloudMailFetchAdapter{}

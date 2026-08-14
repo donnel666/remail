@@ -23,6 +23,7 @@ func TestDefaultSettingsAreValidAndIndependent(t *testing.T) {
 		"api_key_meta_ttl_seconds", "api_key_cache_flush_interval_seconds",
 		"bucket_count", "inventory_cache_activity_ttl_minutes", "msacl_content_search_window_minutes", "outbound_mail_claim_timeout_minutes",
 		"message_scan_limit", "projection_replay_limit",
+		"icloud_forwarding_mailboxes", "icloud_mailmatch_scan_limit", "icloud_admin_read_limit",
 		"smsbower_enabled", "smsbower_code_enabled", "smsbower_purchase_enabled", "smsbower_api_key",
 		"smsbower_sync_interval_minutes", "smsbower_balance_warning_threshold", "smsbower_points_per_unit", "smsbower_min_margin_rate",
 	} {
@@ -36,8 +37,6 @@ func TestDefaultSettingsAreValidAndIndependent(t *testing.T) {
 	require.Equal(t, "0.8", keys["first_order_rebate_ratio"])
 	require.Equal(t, "90", keys["rebate_expiry_days"])
 	require.Equal(t, "", keys["domain_custom_tlds"])
-	require.Equal(t, DefaultICloudForwardingMailbox, keys[ICloudForwardingMailboxesKey])
-	require.Equal(t, "1000", keys[ICloudMailmatchScanLimitKey])
 	require.Equal(t, "3", keys["domain_max_subdomains_per_registrable_domain"])
 	require.Equal(t, "3", keys["proxy_server_health_timeout_seconds"])
 	require.Equal(t, "60", keys["proxy_server_health_interval_seconds"])
@@ -46,6 +45,10 @@ func TestDefaultSettingsAreValidAndIndependent(t *testing.T) {
 	require.Equal(t, "80", keys["proxy_server_inventory_threshold_percent"])
 	require.Equal(t, `["(?:^|[^\\d])(\\d{6,8})(?:[^\\d]|$)"]`, keys["verification_code_pattern"])
 	require.Equal(t, "8", keys["default_project_gmail_code_price"])
+	require.Equal(t, "8", keys["default_project_icloud_code_price"])
+	require.Equal(t, "5", keys["default_project_icloud_code_supplier_price"])
+	require.Equal(t, "10", keys["default_project_icloud_purchase_price"])
+	require.Equal(t, "7", keys["default_project_icloud_purchase_supplier_price"])
 	require.Equal(t, "10", keys[SMSBowerNoCodeRefundTimeoutMinutesKey])
 	require.Equal(t, "3", keys["gmail_code_retain_days"])
 	require.Equal(t, "300", keys["fetch_dispatcher_timeout_seconds"])

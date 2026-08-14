@@ -108,9 +108,9 @@ type legacyICloudPurchaseFetchStub struct {
 	err      error
 }
 
-func (s *legacyICloudPurchaseFetchStub) FetchICloudMail(_ context.Context, orderNo string) error {
-	s.orderNos = append(s.orderNos, orderNo)
-	return s.err
+func (s *legacyICloudPurchaseFetchStub) FetchICloudMessages(_ context.Context, req FetchMessagesRequest) (*FetchMessagesResult, error) {
+	s.orderNos = append(s.orderNos, req.Scope.OrderNo)
+	return &FetchMessagesResult{}, s.err
 }
 
 type pickupFetchLeaseSequenceStub struct {
@@ -205,7 +205,7 @@ func TestPickupRequestFetchRoutesCompletedICloudPurchaseAndReleasesLease(t *test
 	icloud := &legacyICloudPurchaseFetchStub{}
 	uc := NewUseCase(repo, nil, nil, nil)
 	uc.SetPickupFetchStatePort(state)
-	uc.SetICloudPurchaseFetchPort(icloud)
+	uc.SetICloudMailFetchPort(icloud)
 	uc.now = func() time.Time { return now }
 
 	err := uc.ProcessPickupRequestFetch(context.Background(), PickupRequestFetchTask{

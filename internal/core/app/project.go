@@ -39,6 +39,10 @@ var projectPriceFallbacks = map[string]string{
 	"default_project_gmail_code_supplier_price":         "0",
 	"default_project_gmail_purchase_price":              "0",
 	"default_project_gmail_purchase_supplier_price":     "0",
+	"default_project_icloud_code_price":                 "8",
+	"default_project_icloud_code_supplier_price":        "5",
+	"default_project_icloud_purchase_price":             "10",
+	"default_project_icloud_purchase_supplier_price":    "7",
 }
 
 func projectNameMaxValue() int {

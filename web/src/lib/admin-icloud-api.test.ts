@@ -56,8 +56,6 @@ const EMPTY_LIST = {
       deleted: 0,
     },
     forSale: { all: 0, yes: 0, no: 0 },
-    sessionStatus: { all: 0, unchecked: 0, valid: 0, invalid: 0 },
-    suffixes: [],
   },
 } satisfies AdminICloudResourceList;
 
@@ -104,10 +102,8 @@ describe("admin iCloud API adapter", () => {
     await listAdminICloudResources(
       {
         search: " owner ",
-        suffix: "@icloud.com",
         status: "normal",
         forSale: false,
-        sessionStatus: "valid",
       },
       0,
       20,
@@ -119,10 +115,8 @@ describe("admin iCloud API adapter", () => {
         params: {
           query: expect.objectContaining({
             search: "owner",
-            suffix: "icloud.com",
             status: "normal",
             forSale: false,
-            sessionStatus: "valid",
             includeFacets: false,
             includeTotal: false,
           }),
@@ -131,7 +125,7 @@ describe("admin iCloud API adapter", () => {
     );
 
     const content =
-      "primary@icloud.com----www.icloud.com----dsid----client----build----master----Cookie=value----target@gmail.com";
+      "primary@icloud.com----app-password----curl --url 'https://p217-maildomainws.icloud.com.cn/v2/hme/list?dsid=123' -H 'scnt: scnt-value' -b 'X-APPLE-WEBAUTH-TOKEN=secret'";
     await expect(
       importAdminICloudResources({
         content,
@@ -189,14 +183,13 @@ describe("admin iCloud API adapter", () => {
     await batchAdminICloudResourcesByIds("disable", [8, 7, 7, 0]);
     await batchAdminICloudResourcesByFilter("publish", {
       status: "normal",
-      suffix: "@icloud.com",
     });
     await setAdminICloudResourcesExpirationByIds(
       [8, 7, 7, 0],
       "2026-10-07T08:00:00Z",
     );
     await setAdminICloudResourcesExpirationByFilter(
-      { status: "normal", suffix: "@icloud.com" },
+      { status: "normal" },
       "2026-11-07T08:00:00Z",
     );
     await deleteAdminICloudResource(7, 4);
@@ -277,7 +270,6 @@ describe("admin iCloud API adapter", () => {
             mode: "filter",
             filter: expect.objectContaining({
               status: "normal",
-              suffix: "icloud.com",
             }),
           },
         },
@@ -308,7 +300,6 @@ describe("admin iCloud API adapter", () => {
             mode: "filter",
             filter: expect.objectContaining({
               status: "normal",
-              suffix: "icloud.com",
             }),
           },
           expireAt: "2026-11-07T08:00:00Z",
@@ -330,7 +321,7 @@ describe("admin iCloud API adapter", () => {
     );
   });
 
-  it("patches safe fields and complete write-only credentials with command headers", async () => {
+  it("patches safe fields and a complete write-only credential line with command headers", async () => {
     apiMocks.PATCH.mockResolvedValueOnce({
       data: { resourceId: 7, version: 5, status: "pending", forSale: false },
     });
@@ -339,14 +330,8 @@ describe("admin iCloud API adapter", () => {
       version: 4,
       ownerId: 101,
       expireAt: "2026-10-07T08:00:00Z",
-      credentials: {
-        host: "www.icloud.com",
-        dsid: "dsid",
-        clientId: "client",
-        clientBuildNumber: "build",
-        clientMasteringNumber: "master",
-        cookie: "X-APPLE-WEBAUTH-TOKEN=value; X-APPLE-WEBAUTH-USER=value",
-      },
+      importLine:
+        "primary@icloud.com----app-password----curl --url 'https://p217-maildomainws.icloud.com.cn/v2/hme/list?dsid=123' -H 'scnt: scnt-value' -b 'X-APPLE-WEBAUTH-TOKEN=secret'",
     });
 
     expect(apiMocks.PATCH).toHaveBeenCalledWith(
@@ -356,6 +341,7 @@ describe("admin iCloud API adapter", () => {
           version: 4,
           ownerId: 101,
           expireAt: "2026-10-07T08:00:00Z",
+          importLine: expect.stringContaining("primary@icloud.com----app-password----curl"),
         }),
         params: {
           header: {

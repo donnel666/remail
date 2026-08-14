@@ -172,6 +172,7 @@ type FetchMessagesRequest struct {
 type FetchMessagesResult struct {
 	Messages     []FetchedMessage
 	RefreshToken string
+	CommitCursor func(context.Context, func(context.Context) error) error
 }
 
 type InboundMailRequest struct {
@@ -194,15 +195,8 @@ type GmailPurchaseFetchPort interface {
 	FetchLocalPurchaseMail(ctx context.Context, orderNo string) error
 }
 
-type ICloudPurchaseFetchPort interface {
-	FetchICloudMail(ctx context.Context, orderNo string) error
-}
-
-// ICloudResourceFetchPort is the administrator-only iCloud fetch contract.
-// Resource jobs must use it so every inbound message is guarded by the job
-// generation fence and reports real ingestion counts.
-type ICloudResourceFetchPort interface {
-	FetchICloudResourceMailWithFence(ctx context.Context, resourceID uint, fence func(context.Context) error) (fetched int, stored int, matched int, err error)
+type ICloudMailFetchPort interface {
+	FetchICloudMessages(context.Context, FetchMessagesRequest) (*FetchMessagesResult, error)
 }
 
 type Repository interface {
@@ -346,7 +340,7 @@ type UseCase struct {
 	matches        MatchResultPort
 	credentials    coreapp.MicrosoftCredentialPort
 	gmailPurchase  GmailPurchaseFetchPort
-	iCloudPurchase ICloudPurchaseFetchPort
+	iCloudFetch    ICloudMailFetchPort
 	pickupFetch    PickupFetchStatePort
 	pickupMessages PickupMessageCachePort
 	now            func() time.Time
@@ -386,9 +380,9 @@ func (uc *UseCase) SetGmailPurchaseFetchPort(fetch GmailPurchaseFetchPort) {
 	}
 }
 
-func (uc *UseCase) SetICloudPurchaseFetchPort(fetch ICloudPurchaseFetchPort) {
+func (uc *UseCase) SetICloudMailFetchPort(fetch ICloudMailFetchPort) {
 	if uc != nil {
-		uc.iCloudPurchase = fetch
+		uc.iCloudFetch = fetch
 	}
 }
 
@@ -1089,12 +1083,6 @@ func (uc *UseCase) processFetch(ctx context.Context, task FetchTask, timing pick
 	if scope.EmailResourceID != task.EmailResourceID || !scopeFetchable(*scope, uc.now) {
 		return nil
 	}
-	if scope.AllocationType == domain.ResourceTypeICloud {
-		if uc.iCloudPurchase == nil {
-			return domain.ErrMailServiceUnavailable
-		}
-		return uc.iCloudPurchase.FetchICloudMail(ctx, scope.OrderNo)
-	}
 	if scope.AllocationType == domain.ResourceTypeGmail {
 		if uc.gmailPurchase == nil {
 			return domain.ErrMailServiceUnavailable
@@ -1107,7 +1095,7 @@ func (uc *UseCase) processFetch(ctx context.Context, task FetchTask, timing pick
 		if cacheErr != nil {
 			slog.Warn("pickup message cache read failed", "resource_id", task.EmailResourceID, "error", cacheErr)
 		} else if found {
-			cachedMessages = pickupMessagesForResource(messages, task.EmailResourceID)
+			cachedMessages = pickupMessagesForResource(messages, task.EmailResourceID, scope.AllocationType)
 		}
 	}
 	job := domain.FetchJob{SinceAt: &task.SinceAt, UntilAt: &task.UntilAt}
@@ -1172,21 +1160,26 @@ func (uc *UseCase) processFetch(ctx context.Context, task FetchTask, timing pick
 		}
 	}
 	var lastReceivedAt *time.Time
+	fetchFence := func(txCtx context.Context) error {
+		current, err := uc.pickupFetch.Owns(txCtx, task.EmailResourceID, task.LeaseToken)
+		if err != nil {
+			return err
+		}
+		if !current {
+			return domain.ErrFetchJobConflict
+		}
+		return nil
+	}
 	stored, matched, lastReceivedAt, err = uc.ingestFetchedMessagesForResourcesWithFence(
-		ctx, messagesToIngest, domain.ResourceTypeMicrosoft, []uint{task.EmailResourceID},
-		func(txCtx context.Context) error {
-			current, err := uc.pickupFetch.Owns(txCtx, task.EmailResourceID, task.LeaseToken)
-			if err != nil {
-				return err
-			}
-			if !current {
-				return domain.ErrFetchJobConflict
-			}
-			return nil
-		},
+		ctx, messagesToIngest, scope.AllocationType, []uint{task.EmailResourceID}, fetchFence,
 	)
 	if err != nil {
 		return err
+	}
+	if fetched.CommitCursor != nil {
+		if err := fetched.CommitCursor(ctx, fetchFence); err != nil {
+			return err
+		}
 	}
 	_ = lastReceivedAt
 	platform.AddWorkUnits("mailmatch_fetch", "all", "fetched", len(fetched.Messages))
@@ -1195,10 +1188,10 @@ func (uc *UseCase) processFetch(ctx context.Context, task FetchTask, timing pick
 	return nil
 }
 
-func pickupMessagesForResource(messages []FetchedMessage, emailResourceID uint) []FetchedMessage {
+func pickupMessagesForResource(messages []FetchedMessage, emailResourceID uint, resourceType domain.ResourceType) []FetchedMessage {
 	filtered := make([]FetchedMessage, 0, len(messages))
 	for _, message := range messages {
-		if message.EmailResourceID == emailResourceID && message.ResourceType == domain.ResourceTypeMicrosoft {
+		if message.EmailResourceID == emailResourceID && message.ResourceType == resourceType {
 			filtered = append(filtered, message)
 		}
 	}
@@ -1733,6 +1726,14 @@ func (uc *UseCase) fetchMessages(ctx context.Context, scope OrderScope, job doma
 		return uc.transport.FetchMicrosoftMessages(ctx, FetchMessagesRequest{
 			Scope: scope, SinceAt: sinceAt, UntilAt: untilAt, Realtime: true, MaxMessages: OrderReadLimit(scope), KnownMessageIDs: knownMessageIDs,
 		})
+	case domain.ResourceTypeICloud:
+		if uc.iCloudFetch == nil {
+			return nil, domain.ErrMailServiceUnavailable
+		}
+		return uc.iCloudFetch.FetchICloudMessages(ctx, FetchMessagesRequest{
+			Scope: scope, SinceAt: sinceAt, UntilAt: untilAt, Realtime: true,
+			MaxMessages: OrderReadLimit(scope), KnownMessageIDs: knownMessageIDs,
+		})
 	case domain.ResourceTypeDomain:
 		return &FetchMessagesResult{Messages: nil}, nil
 	default:
@@ -1953,11 +1954,6 @@ func inboundFetchedMessage(req InboundMailRequest) FetchedMessage {
 		receivedAt = time.Now().UTC()
 	}
 	body := string(req.Raw)
-	if req.ResourceType == domain.ResourceTypeICloud {
-		// A malformed forwarded message must not expose the domain inbox or
-		// Apple relay headers through user/admin message bodies.
-		body = ""
-	}
 	item := FetchedMessage{
 		EmailResourceID:   req.EmailResourceID,
 		ResourceType:      req.ResourceType,
@@ -1986,10 +1982,7 @@ func inboundFetchedMessage(req InboundMailRequest) FetchedMessage {
 	if subject := decodeMIMEHeader(decoder, msg.Header.Get("Subject")); subject != "" {
 		item.Subject = subject
 	}
-	// Apple relay envelopes encode the real sender. Its forwarded RFC822 From
-	// header is not authoritative for project sender rules.
-	if from := decodeMIMEHeader(decoder, msg.Header.Get("From")); from != "" &&
-		(req.ResourceType != domain.ResourceTypeICloud || strings.TrimSpace(req.EnvelopeFrom) == "") {
+	if from := decodeMIMEHeader(decoder, msg.Header.Get("From")); from != "" {
 		item.Sender = from
 	}
 	if (req.ResourceType != domain.ResourceTypeDomain && req.ResourceType != domain.ResourceTypeGmail && req.ResourceType != domain.ResourceTypeICloud) || recipient == "" {

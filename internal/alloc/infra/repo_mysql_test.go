@@ -1080,7 +1080,7 @@ func TestInventoryStatsExcludePrivateMicrosoftFromSharedPoolMySQL(t *testing.T) 
 	require.Empty(t, productStats.Items[0].Suffixes)
 }
 
-func TestICloudInventoryUsesNormalUnexpiredAliasesWithoutFullAliasPoolMySQL(t *testing.T) {
+func TestICloudInventoryIgnoresExpirationAndCookieStateMySQL(t *testing.T) {
 	db := newAllocMySQLTestDB(t)
 	seedAllocBase(t, db, "icloud", 1, 0, 0)
 	require.NoError(t, db.Exec(`
@@ -1089,12 +1089,14 @@ INSERT INTO email_resources(id, type, owner_user_id) VALUES
     (1001, 'icloud', 2)`).Error)
 	require.NoError(t, db.Exec(`
 INSERT INTO icloud_resources(
-    id, primary_email, host, dsid, client_id, client_build_number,
-    client_mastering_number, cookie, expire_at, for_sale, status,
-    session_status, alias_count
+	    id, primary_email, imap_app_password, expire_at, for_sale, status, alias_count
 ) VALUES
-    (1000, 'public@icloud.com', 'https://icloud.com', 'dsid-public', 'client-public', '1', '1', 'cookie', DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 DAY), TRUE, 'normal', 'unchecked', 1),
-    (1001, 'owned@icloud.com', 'https://icloud.com', 'dsid-owned', 'client-owned', '1', '1', 'cookie', DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 DAY), TRUE, 'normal', 'invalid', 1)`).Error)
+	    (1000, 'public@icloud.com', 'app-password', DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 DAY), TRUE, 'normal', 1),
+	    (1001, 'owned@icloud.com', 'app-password', DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 DAY), TRUE, 'normal', 1)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO icloud_resource_channels(resource_id, kind, host, cookie, session_status) VALUES
+	    (1000, 'apple_account', 'appleid.apple.com', 'cookie', 'valid'),
+	    (1001, 'icloud_web', 'p119-maildomainws.icloud.com', 'cookie', 'invalid')`).Error)
 	require.NoError(t, db.Exec(`
 INSERT INTO icloud_aliases(resource_id, anonymous_id, email, status) VALUES
     (1000, 'anon-public', 'public-alias@icloud.com', 'normal'),
@@ -1164,12 +1166,11 @@ INSERT INTO email_resources(id, type, owner_user_id) VALUES
     (1002, 'icloud', 2)`).Error)
 	require.NoError(t, db.Exec(`
 INSERT INTO icloud_resources(
-    id, primary_email, host, dsid, client_id, client_build_number,
-    client_mastering_number, cookie, expire_at, for_sale, status
+	    id, primary_email, imap_app_password, expire_at, for_sale, status
 ) VALUES
-    (1000, 'other@icloud.com', 'https://icloud.com', 'dsid-0', 'client-0', '1', '1', 'cookie', DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 DAY), TRUE, 'normal'),
-    (1001, 'owned-public@icloud.com', 'https://icloud.com', 'dsid-1', 'client-1', '1', '1', 'cookie', DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 DAY), TRUE, 'normal'),
-    (1002, 'owned-private@icloud.com', 'https://icloud.com', 'dsid-2', 'client-2', '1', '1', 'cookie', DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 DAY), FALSE, 'normal')`).Error)
+	    (1000, 'other@icloud.com', 'app-password', DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 DAY), TRUE, 'normal'),
+	    (1001, 'owned-public@icloud.com', 'app-password', DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 DAY), TRUE, 'normal'),
+	    (1002, 'owned-private@icloud.com', 'app-password', DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 DAY), FALSE, 'normal')`).Error)
 	require.NoError(t, db.Exec(`
 INSERT INTO icloud_aliases(resource_id, anonymous_id, email, status) VALUES
     (1000, 'anon-0', 'other-alias@icloud.com', 'normal'),

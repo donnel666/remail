@@ -9,7 +9,7 @@ import type { SectionProps } from "./index";
 import { FormItem, FormLabel, SettingsCardHeader, SettingsFormGrid, SettingsInvalidValuesNotice, SettingsNumberField, SettingsSection } from "./settings-layout";
 import { EMAIL_RESOURCE_KEYS } from "./email-service-keys";
 const BYTES_PER_MB = 1024 * 1024;
-const NUMERIC_KEYS = EMAIL_RESOURCE_KEYS.filter((key) => key !== "microsoft_domain_whitelist" && key !== "icloud_forwarding_mailboxes" && key !== "domain_custom_tlds");
+const NUMERIC_KEYS = EMAIL_RESOURCE_KEYS.filter((key) => key !== "microsoft_domain_whitelist" && key !== "domain_custom_tlds");
 
 export default function EmailResourceSection({ options, onBulkSave }: SectionProps) {
   const { t } = useTranslation();
@@ -25,7 +25,6 @@ export default function EmailResourceSection({ options, onBulkSave }: SectionPro
     ? String(form[key]).split(/[\s,，;；]+/).map((value) => value.trim()).filter(Boolean)
     : [];
   const domains = tags("microsoft_domain_whitelist");
-  const iCloudForwardingMailboxes = tags("icloud_forwarding_mailboxes");
   const customTLDs = tags("domain_custom_tlds");
   const invalidKeys = invalidNumericKeys(form, NUMERIC_KEYS);
   const save = async () => {
@@ -36,17 +35,12 @@ export default function EmailResourceSection({ options, onBulkSave }: SectionPro
     finally { setSaving(false); }
   };
 
-  return <SettingsSection title={<SettingsCardHeader icon={<Database size={16} />} title={t("邮箱资源与域名")} description={t("配置微软邮箱域名、苹果转发收件邮箱、默认配额和资源验证")} />}>
+  return <SettingsSection title={<SettingsCardHeader icon={<Database size={16} />} title={t("邮箱资源与域名")} description={t("配置微软邮箱域名、默认配额和资源验证")} />}>
     <SettingsFormGrid className="mt-4">
       <FormItem spanFull>
         <FormLabel>{t("微软邮箱域名白名单")}</FormLabel>
         <TagInput aria-label={t("微软邮箱域名白名单")} value={domains} separator={[",", "，", " ", "\n"]} allowDuplicates={false} addOnBlur showClear placeholder={t("输入邮箱域名后回车")} onChange={(values) => update("microsoft_domain_whitelist", values.map((value) => value.trim()).filter(Boolean).join(","))} style={{ width: "100%" }} />
         <p className="text-xs text-[var(--semi-color-text-2)]">{t("每个允许导入的微软邮箱域名单独显示；留空使用系统内置白名单")}</p>
-      </FormItem>
-      <FormItem spanFull>
-        <FormLabel>{t("苹果邮箱转发收件邮箱")}</FormLabel>
-        <TagInput aria-label={t("苹果邮箱转发收件邮箱")} value={iCloudForwardingMailboxes} separator={[",", "，", ";", "；", " ", "\n"]} allowDuplicates={false} addOnBlur showClear placeholder={t("输入域名邮箱后回车")} onChange={(values) => update("icloud_forwarding_mailboxes", values.map((value) => value.trim().toLowerCase()).filter(Boolean).join(","))} style={{ width: "100%" }} />
-        <p className="text-xs text-[var(--semi-color-text-2)]">{t("苹果 HME 别名必须转发到列表中的任一邮箱；默认使用 icloud@aishop6.com，可配置多个邮箱。")}</p>
       </FormItem>
       <FormItem spanFull>
         <FormLabel>{t("自定义 TLD")}</FormLabel>

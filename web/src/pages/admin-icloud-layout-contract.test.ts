@@ -53,17 +53,18 @@ describe("admin iCloud page layout", () => {
       'label: "Create alias"',
       'accept=".txt,text/plain"',
       "await file.text()",
-      "break-all whitespace-normal",
+      "whitespace-pre-wrap break-all",
       '<Tabs.TabPane itemKey="aliases"',
       '<Tabs.TabPane itemKey="orders"',
       '<Tabs.TabPane itemKey="tasks"',
       '<Tabs.TabPane itemKey="mails"',
       'resourceType="icloud"',
-      'dataIndex: "selectedForwardTo"',
       'dataIndex: "anonymousId"',
-      'dataIndex: "recipientMailId"',
-      't("Current forwarding mailbox")',
-      't("Delivery verified at")',
+      'dataIndex: "newSession"',
+      'dataIndex: "oldSession"',
+      't("New Cookie")',
+      't("Old Cookie")',
+      't("Last IMAP sync")',
     ]) {
       expect(icloudSource).toContain(fragment);
     }
@@ -73,6 +74,10 @@ describe("admin iCloud page layout", () => {
     expect(icloudSource).not.toContain("gmailEmail");
     expect(icloudSource).not.toContain("----Gmail");
     expect(icloudSource).not.toContain('t("Linked Gmail")');
+    expect(icloudSource).not.toContain("selectedForwardTo");
+    expect(icloudSource).not.toContain("recipientMailId");
+    expect(icloudSource).not.toContain("forwardToEmail");
+    expect(icloudSource).not.toContain("deliveryProbe");
 
     expect(appSource).toContain(
       'adminICloudEmails: () => import("./pages/AdminICloudEmails")',

@@ -1,6 +1,5 @@
 export const EMAIL_RESOURCE_KEYS = [
   "microsoft_domain_whitelist",
-  "icloud_forwarding_mailboxes",
   "domain_custom_tlds",
   "domain_max_subdomains_per_registrable_domain",
   "default_plus_daily_limit",
@@ -29,8 +28,6 @@ export const MAILMATCH_KEYS = [
   "read_window_skew_minutes",
   "code_read_limit",
   "purchase_read_limit",
-  "icloud_mailmatch_scan_limit",
-  "icloud_admin_read_limit",
   "pickup_fetch_reserve_ttl_minutes",
   "pickup_fetch_lease_ttl_minutes",
   "pickup_message_cache_ttl_seconds",

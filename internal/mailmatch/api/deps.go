@@ -69,9 +69,9 @@ func (m *Module) SetGmailPurchaseFetchPort(port mailmatchapp.GmailPurchaseFetchP
 	}
 }
 
-func (m *Module) SetICloudPurchaseFetchPort(port mailmatchapp.ICloudPurchaseFetchPort) {
+func (m *Module) SetICloudMailFetchPort(port mailmatchapp.ICloudMailFetchPort) {
 	if m != nil && m.UseCase != nil {
-		m.UseCase.SetICloudPurchaseFetchPort(port)
+		m.UseCase.SetICloudMailFetchPort(port)
 	}
 }
 

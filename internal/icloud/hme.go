@@ -16,15 +16,12 @@ import (
 const defaultICloudHMEUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
 
 const (
-	iCloudHMEEmailMaxLength          = 320
-	iCloudHMEAnonymousIDMaxLength    = 191
-	iCloudHMELabelMaxLength          = 500
-	iCloudHMENoteMaxLength           = 2000
-	iCloudHMEOriginMaxLength         = 64
-	iCloudHMEDomainMaxLength         = 255
-	iCloudHMERecipientIDMaxLength    = 191
-	iCloudHMESelectedTargetMaxLength = 320
-	iCloudHMEResponseMaxBytes        = 10 << 20
+	iCloudHMEEmailMaxLength       = 320
+	iCloudHMEAnonymousIDMaxLength = 191
+	iCloudHMELabelMaxLength       = 500
+	iCloudHMENoteMaxLength        = 2000
+	iCloudHMEOriginMaxLength      = 64
+	iCloudHMEResponseMaxBytes     = 10 << 20
 )
 
 var iCloudHMEHostPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?-maildomainws\.icloud\.com(?:\.cn)?$`)
@@ -49,27 +46,19 @@ type hmeConfig struct {
 }
 
 type hmeAlias struct {
-	AnonymousID              string
-	Email                    string
-	Label                    string
-	Note                     string
-	ForwardToEmail           string
-	Origin                   string
-	ProviderDomain           string
-	RecipientMailID          string
-	RecipientProbeToken      string
-	RecipientProbeStartedAt  *time.Time
-	RecipientProbeLastSentAt *time.Time
-	Active                   bool
-	ProviderCreatedAt        *time.Time
+	AnonymousID       string
+	Email             string
+	Label             string
+	Note              string
+	Origin            string
+	Active            bool
+	ProviderCreatedAt *time.Time
 }
 
 type hmeListResult struct {
-	SelectedForwardTo string
-	ForwardToEmails   []string
-	Aliases           []hmeAlias
-	UpdatedCookie     string
-	Complete          bool
+	Aliases       []hmeAlias
+	UpdatedCookie string
+	Complete      bool
 }
 
 // hmeError is intentionally limited to a provider-safe category and message.
@@ -91,8 +80,8 @@ func (e *hmeError) Error() string {
 	return e.SafeMessage
 }
 
-// HMEClient owns the small HME surface used by validation: list, generate and
-// reserve.  It keeps Apple session material inside the request/response path.
+// HMEClient owns the legacy provisioning surface: list, generate and reserve.
+// It keeps Apple session material inside the request/response path.
 type HMEClient struct {
 	httpClient *http.Client
 }
@@ -141,26 +130,6 @@ func (c *HMEClient) list(ctx context.Context, config hmeConfig) (hmeListResult, 
 		if err != nil {
 			return hmeListResult{}, err
 		}
-		selectedForwardTo := strings.TrimSpace(payload.Result.SelectedForwardTo)
-		if page > 0 && selectedForwardTo == "" {
-			selectedForwardTo = result.SelectedForwardTo
-		}
-		if !validICloudHMEText(selectedForwardTo, iCloudHMESelectedTargetMaxLength, true) {
-			return hmeListResult{}, hmeResponseError("provider_response", "iCloud HME returned an invalid forwarding target.", true, currentCookie)
-		}
-		if page == 0 {
-			result.SelectedForwardTo = selectedForwardTo
-			forwardToEmails, forwardErr := parseHMEForwardToEmails(payload.Result.ForwardToEmails)
-			if forwardErr != nil {
-				return hmeListResult{}, hmeResponseError("provider_response", "iCloud HME returned invalid forwarding mailboxes.", true, currentCookie)
-			}
-			result.ForwardToEmails = forwardToEmails
-			if len(forwardToEmails) > 0 && !containsICloudEmail(forwardToEmails, selectedForwardTo) {
-				return hmeListResult{}, hmeResponseError("provider_response", "iCloud HME returned an inconsistent forwarding target.", true, currentCookie)
-			}
-		} else if !strings.EqualFold(result.SelectedForwardTo, selectedForwardTo) {
-			return hmeListResult{}, hmeResponseError("provider_response", "iCloud HME returned inconsistent forwarding targets.", true, currentCookie)
-		}
 		if payload.Result.HMEEmails == nil {
 			return hmeListResult{}, hmeResponseError("snapshot_incomplete", "iCloud HME alias snapshot is incomplete.", true, currentCookie)
 		}
@@ -168,11 +137,6 @@ func (c *HMEClient) list(ctx context.Context, config hmeConfig) (hmeListResult, 
 			alias, aliasErr := parseHMEAlias(item)
 			if aliasErr != nil {
 				return hmeListResult{}, hmeResponseError("provider_response", "iCloud HME returned an invalid alias response.", true, currentCookie)
-			}
-			// Apple omits forwardToEmail on some list responses; the account
-			// selectedForwardTo is the inherited target in that response shape.
-			if alias.ForwardToEmail == "" {
-				alias.ForwardToEmail = selectedForwardTo
 			}
 			if _, exists := seenAnonymousIDs[alias.AnonymousID]; exists {
 				return hmeListResult{}, hmeResponseError("provider_response", "iCloud HME returned duplicate aliases.", true, currentCookie)
@@ -263,21 +227,6 @@ func (c *HMEClient) reserve(ctx context.Context, config hmeConfig, candidate, la
 	return alias, updatedCookie, nil
 }
 
-func (c *HMEClient) Activate(ctx context.Context, config hmeConfig, anonymousID string) (string, error) {
-	anonymousID = strings.TrimSpace(anonymousID)
-	if !validICloudHMEText(anonymousID, iCloudHMEAnonymousIDMaxLength, false) {
-		return "", &hmeError{Category: "invalid_context", SafeMessage: "Invalid iCloud HME request context."}
-	}
-	body, updatedCookie, err := c.request(ctx, config, http.MethodPost, "/v1/hme/activate", map[string]string{"anonymousId": anonymousID}, nil)
-	if err != nil {
-		return "", err
-	}
-	if _, err := parseHMEAcknowledgement(body, updatedCookie); err != nil {
-		return "", err
-	}
-	return updatedCookie, nil
-}
-
 func parseHMEAcknowledgement(body []byte, updatedCookie string) (*hmeSuccessPayload, error) {
 	var payload hmeSuccessPayload
 	if json.Unmarshal(body, &payload) != nil || payload.Success == nil {
@@ -296,18 +245,13 @@ type hmePayloadAlias struct {
 	HME             string `json:"hme"`
 	Label           string `json:"label"`
 	Note            string `json:"note"`
-	ForwardToEmail  string `json:"forwardToEmail"`
 	Origin          string `json:"origin"`
-	Domain          string `json:"domain"`
-	RecipientMailID string `json:"recipientMailId"`
 	IsActive        bool   `json:"isActive"`
 	CreateTimestamp int64  `json:"createTimestamp"`
 	AnonymousID     string `json:"anonymousId"`
 }
 
 type hmePayloadResult struct {
-	SelectedForwardTo string             `json:"selectedForwardTo"`
-	ForwardToEmails   []string           `json:"forwardToEmails"`
 	HMEEmails         *[]hmePayloadAlias `json:"hmeEmails"`
 	HME               json.RawMessage    `json:"hme"`
 	Total             *int               `json:"total"`
@@ -315,23 +259,6 @@ type hmePayloadResult struct {
 	NextToken         string             `json:"nextToken"`
 	ContinuationToken string             `json:"continuationToken"`
 	NextPageToken     string             `json:"nextPageToken"`
-}
-
-func parseHMEForwardToEmails(values []string) ([]string, error) {
-	result := make([]string, 0, len(values))
-	seen := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		value = strings.ToLower(strings.TrimSpace(value))
-		if !validICloudHMEEmail(value) {
-			return nil, &hmeError{Category: "provider_response", SafeMessage: "iCloud HME returned invalid forwarding mailboxes."}
-		}
-		if _, exists := seen[value]; exists {
-			return nil, &hmeError{Category: "provider_response", SafeMessage: "iCloud HME returned duplicate forwarding mailboxes."}
-		}
-		seen[value] = struct{}{}
-		result = append(result, value)
-	}
-	return result, nil
 }
 
 type hmeSuccessPayload struct {
@@ -401,18 +328,12 @@ func parseHMEAlias(item hmePayloadAlias) (hmeAlias, error) {
 	email := strings.ToLower(strings.TrimSpace(item.HME))
 	label := strings.TrimSpace(item.Label)
 	note := strings.TrimSpace(item.Note)
-	forwardToEmail := strings.ToLower(strings.TrimSpace(item.ForwardToEmail))
 	origin := strings.TrimSpace(item.Origin)
-	providerDomain := strings.TrimSpace(item.Domain)
-	recipientMailID := strings.TrimSpace(item.RecipientMailID)
 	if !validICloudHMEText(anonymousID, iCloudHMEAnonymousIDMaxLength, false) ||
 		!validICloudHMEEmail(email) ||
 		!validICloudHMEText(label, iCloudHMELabelMaxLength, true) ||
 		!validICloudHMEText(note, iCloudHMENoteMaxLength, true) ||
-		!validICloudHMEEmailOrEmpty(forwardToEmail) ||
-		!validICloudHMEText(origin, iCloudHMEOriginMaxLength, true) ||
-		!validICloudHMEText(providerDomain, iCloudHMEDomainMaxLength, true) ||
-		!validICloudHMEText(recipientMailID, iCloudHMERecipientIDMaxLength, true) {
+		!validICloudHMEText(origin, iCloudHMEOriginMaxLength, true) {
 		return hmeAlias{}, &hmeError{Category: "provider_response", SafeMessage: "iCloud HME returned an invalid alias response."}
 	}
 	var createdAt *time.Time
@@ -422,8 +343,7 @@ func parseHMEAlias(item hmePayloadAlias) (hmeAlias, error) {
 	}
 	return hmeAlias{
 		AnonymousID: anonymousID, Email: email, Label: label, Note: note,
-		ForwardToEmail: forwardToEmail, Origin: origin, ProviderDomain: providerDomain,
-		RecipientMailID: recipientMailID, Active: item.IsActive, ProviderCreatedAt: createdAt,
+		Origin: origin, Active: item.IsActive, ProviderCreatedAt: createdAt,
 	}, nil
 }
 
@@ -550,10 +470,6 @@ func validICloudHMEText(value string, maxLength int, allowEmpty bool) bool {
 
 func validICloudHMEEmail(value string) bool {
 	return validICloudHMEText(value, iCloudHMEEmailMaxLength, false) && isICloudImportEmail(value)
-}
-
-func validICloudHMEEmailOrEmpty(value string) bool {
-	return value == "" || validICloudHMEEmail(value)
 }
 
 func normalizeHMEConfig(config hmeConfig) hmeConfig {

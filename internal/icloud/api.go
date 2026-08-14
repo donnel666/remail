@@ -88,8 +88,7 @@ func (h *handler) listResources(c *gin.Context) {
 		return
 	}
 	result, err := h.service.ListAdminICloudResources(c.Request.Context(), AdminICloudResourceListFilter{
-		Search: c.Query("search"), Suffix: c.Query("suffix"), Status: c.Query("status"),
-		ForSale: forSale, SessionStatus: c.Query("sessionStatus"), CreatedFrom: createdFrom,
+		Search: c.Query("search"), Status: c.Query("status"), ForSale: forSale, CreatedFrom: createdFrom,
 		CreatedTo: createdTo, Offset: offset, Limit: limit,
 		IncludeFacets: &includeFacets, IncludeTotal: &includeTotal,
 	})
@@ -255,12 +254,11 @@ func (h *handler) getResource(c *gin.Context) {
 }
 
 type iCloudEditRequest struct {
-	Version      uint64                       `json:"version"`
-	PrimaryEmail *string                      `json:"primaryEmail"`
-	OwnerID      *uint                        `json:"ownerId"`
-	ForSale      *bool                        `json:"forSale"`
-	ExpireAt     *time.Time                   `json:"expireAt"`
-	Credentials  *AdminICloudCredentialsInput `json:"credentials"`
+	Version    uint64     `json:"version"`
+	ImportLine *string    `json:"importLine"`
+	OwnerID    *uint      `json:"ownerId"`
+	ForSale    *bool      `json:"forSale"`
+	ExpireAt   *time.Time `json:"expireAt"`
 }
 
 func (h *handler) patchResource(c *gin.Context) {
@@ -274,11 +272,11 @@ func (h *handler) patchResource(c *gin.Context) {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 128<<10)
 	var request iCloudEditRequest
 	if err := c.ShouldBindJSON(&request); err != nil || request.Version == 0 ||
-		(request.PrimaryEmail == nil && request.OwnerID == nil && request.ForSale == nil && request.ExpireAt == nil && request.Credentials == nil) {
+		(request.ImportLine == nil && request.OwnerID == nil && request.ForSale == nil && request.ExpireAt == nil) {
 		writeICloudError(c, ErrICloudResourceUpdate)
 		return
 	}
-	if (request.ForSale != nil || request.ExpireAt != nil || request.Credentials != nil) && !h.requirePermission(c, "core:resource", "operate") {
+	if (request.ForSale != nil || request.ExpireAt != nil || request.ImportLine != nil) && !h.requirePermission(c, "core:resource", "operate") {
 		return
 	}
 	operatorUserID, ok := middleware.GetCurrentUserID(c)
@@ -287,8 +285,8 @@ func (h *handler) patchResource(c *gin.Context) {
 		return
 	}
 	result, err := h.service.EditAdminICloudResource(c.Request.Context(), AdminICloudEditCommand{
-		ResourceID: resourceID, Version: request.Version, PrimaryEmail: request.PrimaryEmail,
-		OwnerUserID: request.OwnerID, ForSale: request.ForSale, ExpireAt: request.ExpireAt, Credentials: request.Credentials,
+		ResourceID: resourceID, Version: request.Version, ImportLine: request.ImportLine,
+		OwnerUserID: request.OwnerID, ForSale: request.ForSale, ExpireAt: request.ExpireAt,
 		OperatorUserID: operatorUserID, IdempotencyKey: c.GetHeader("Idempotency-Key"),
 		RequestID: middleware.GetRequestID(c), Path: c.FullPath(),
 	})
