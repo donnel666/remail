@@ -59,6 +59,7 @@ import {
   compareDomainSuffixes,
   compareProjectNames,
   matchesProjectEmailSearch,
+  normalizeInventorySuffix,
 } from "./workbench/utils";
 
 function filterProjects(projects: WorkbenchProject[], search: string) {
@@ -112,10 +113,8 @@ function toWorkbenchSuffixProducts(
   suffixes: ProductInventoryTotal["suffixes"],
 ) {
   const products = (suffixes ?? []).flatMap((suffix) => {
-    const rawSuffix = String(suffix.suffix ?? "").trim();
-    if (!rawSuffix) return [];
-    const emailSuffix = rawSuffix.replace(/^@/, "");
-    if (!emailSuffix || emailSuffix.includes("@")) return [];
+    const emailSuffix = normalizeInventorySuffix(suffix.suffix);
+    if (!emailSuffix) return [];
     return [
       {
         ...baseProduct,

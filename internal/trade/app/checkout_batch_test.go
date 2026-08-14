@@ -284,6 +284,10 @@ func (s *batchOrderingSpy) GetOrderingQuote(ctx context.Context, projectID uint,
 	return quote, nil
 }
 
+func (s *batchOrderingSpy) GetOrderingQuoteByType(ctx context.Context, projectID uint, _ domain.ProductType, buyerUserID uint, serviceMode domain.ServiceMode) (*OrderingQuote, error) {
+	return s.GetOrderingQuote(ctx, projectID, 9, buyerUserID, serviceMode)
+}
+
 type batchPreloadRepoSpy struct {
 	*batchRepoSpy
 	batchFinds     int
@@ -542,16 +546,47 @@ func TestCheckoutProductTypeForSuffix(t *testing.T) {
 		{suffix: "hotmail.com", want: domain.ProductTypeMicrosoft},
 		{suffix: "com", want: domain.ProductTypeDomain},
 		{suffix: "com.cn", want: domain.ProductTypeDomain},
+		{suffix: "example.com", want: domain.ProductTypeDomain},
 	} {
 		got, err := checkoutProductTypeForSuffix(test.suffix)
 		require.NoError(t, err, test.suffix)
 		require.Equal(t, test.want, got, test.suffix)
 	}
 
-	for _, suffix := range []string{"example.com", "mail@example.com", "bad suffix"} {
+	for _, suffix := range []string{"mail@example.com", "bad suffix"} {
 		_, err := checkoutProductTypeForSuffix(suffix)
 		require.ErrorIs(t, err, domain.ErrInvalidOrderRequest, suffix)
 	}
+}
+
+func TestDomainSuffixCheckoutRejectsPrivateDomainForPublicOnly(t *testing.T) {
+	prepared := checkoutPreparation{
+		selectedBySuffix: true,
+		selectorSuffix:   "private.example.com",
+		policy:           domain.SupplyPolicyPublicOnly,
+	}
+
+	require.ErrorIs(t, finalizeCheckoutProduct(&prepared, domain.ProductTypeDomain), domain.ErrInvalidOrderRequest)
+}
+
+func TestCheckoutSelectsOwnedPrivateDomainWithoutProductID(t *testing.T) {
+	repo := &batchRepoSpy{orders: map[string]domain.Order{}}
+	ordering := &batchOrderingSpy{productType: domain.ProductTypeDomain}
+	allocation := &checkoutInventorySpy{available: true, allocation: &AllocationResult{
+		Type: domain.AllocationTypeDomain, ID: 1, Email: "generated@private.example.com", SupplyScope: SupplyScopeOwned,
+	}}
+	tokens := &issuedOrderTokenSpy{tokens: map[string]*OrderToken{}}
+	uc := NewUseCase(repo, ordering, &batchWalletSpy{}, allocation, tokens)
+	request := batchRequest("private-domain-suffix", 1)
+	request.ProductID = 0
+	request.EmailSuffix = "private.example.com"
+
+	result, err := uc.Checkout(context.Background(), request)
+
+	require.NoError(t, err)
+	require.Equal(t, domain.OrderStatusActive, result.Order.Status)
+	require.Equal(t, uint(9), result.Order.ProjectProductID)
+	require.Equal(t, "private.example.com", allocation.lastAllocation.EmailSuffix)
 }
 
 func TestPrepareCheckoutRequestNormalizesSuffixAndKeepsLegacyIDPriority(t *testing.T) {

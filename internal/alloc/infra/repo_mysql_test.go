@@ -1041,9 +1041,12 @@ VALUES (UTC_DATE(), 'domain', 2000, 'domain_mailbox', 1)`).Error)
 	require.Equal(t, int64(10008), totals.TotalAvailable)
 	require.Equal(t, int64(10008), totals.Items[0].TotalAvailable)
 	require.Equal(t, int64(10000), totals.Items[0].PublicAvailable)
-	require.Equal(t, []allocapp.ProductInventorySuffixTotal{{
-		Suffix: "com", TotalAvailable: 10008, PublicAvailable: 10000,
-	}}, totals.Items[0].Suffixes)
+	require.Equal(t, []allocapp.ProductInventorySuffixTotal{
+		{Suffix: "com", TotalAvailable: 10000, PublicAvailable: 10000},
+		{Suffix: "d2001.example.com", TotalAvailable: 1},
+		{Suffix: "d2002.example.com", TotalAvailable: 5},
+		{Suffix: "d4000.example.com", TotalAvailable: 2},
+	}, totals.Items[0].Suffixes)
 	for _, unavailable := range []string{
 		"quota@d2000.example.com",
 		"over-limit@d2001.example.com",
@@ -1055,6 +1058,15 @@ VALUES (UTC_DATE(), 'domain', 2000, 'domain_mailbox', 1)`).Error)
 			require.NotEqual(t, unavailable, suffix.Suffix)
 		}
 	}
+
+	allocation, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo: "ord-private-domain", BuyerUserID: 2, ProjectProductID: 20,
+		SupplyScopes: []domain.SupplyScope{domain.SupplyScopeOwned, domain.SupplyScopePublic},
+		EmailSuffix:  "d4000.example.com",
+	})
+	require.NoError(t, err)
+	require.Equal(t, uint(4000), allocation.ResourceID)
+	require.True(t, strings.HasSuffix(allocation.Email, "@d4000.example.com"))
 }
 
 func TestInventoryStatsExcludePrivateMicrosoftFromSharedPoolMySQL(t *testing.T) {

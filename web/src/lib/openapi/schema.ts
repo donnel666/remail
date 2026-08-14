@@ -4784,12 +4784,12 @@ export interface components {
         };
         CreateOrderRequest: {
             projectId: number;
-            /** @description Product selector. gmail.com selects Gmail, icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects Microsoft, and any other supported public suffix such as com or com.cn selects domain email. */
+            /** @description Product selector. gmail.com selects Gmail, icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects Microsoft, and a public suffix such as com or com.cn selects domain email. With private_first, an owned full domain such as mydomain.com selects only that private domain. Full mailbox addresses are not accepted. */
             emailSuffix: string;
         };
         CreateOrderBatchRequest: {
             projectId: number;
-            /** @description Product selector. gmail.com selects Gmail, icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects Microsoft, and any other supported public suffix such as com or com.cn selects domain email. */
+            /** @description Product selector. gmail.com selects Gmail, icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects Microsoft, and a public suffix such as com or com.cn selects domain email. With private_first, an owned full domain such as mydomain.com selects only that private domain. Full mailbox addresses are not accepted. */
             emailSuffix: string;
             /** @description Number of independent orders to create. */
             quantity: number;
@@ -6471,7 +6471,7 @@ export interface components {
             suffixes?: components["schemas"]["ProductSuffixInventory"][];
         };
         ProductSuffixInventory: {
-            /** @description Selectable inventory value. Microsoft products expose exact email domains. Domain products expose public suffixes without a leading @ (for example com or com.cn); owned inventory is aggregated into the same suffix. */
+            /** @description Selectable inventory value. Microsoft products expose exact email domains. Domain products expose public suffixes without a leading @ (for example com or com.cn) and each owned private domain as a full domain (for example mydomain.com). Full mailbox addresses are never returned. */
             suffix: string;
             /** Format: int64 */
             totalAvailable: number;

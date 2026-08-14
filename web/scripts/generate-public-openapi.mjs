@@ -14,6 +14,7 @@ const json = (schema) => ({
 });
 
 const ref = (name) => ({ $ref: `#/components/schemas/${name}` });
+const emailSuffixDescription = "商品选择后缀。gmail.com 选择谷歌邮箱，icloud.com 选择苹果邮箱，配置在微软白名单中的后缀选择微软邮箱，com、com.cn 等公共后缀选择域名邮箱；private_first 下也可指定当前用户自有的完整域名，例如 mydomain.com。不接受完整邮箱地址。";
 const listOf = (name) => ({ type: "array", items: ref(name) });
 const nullable = (type) => ({ type: [type, "null"] });
 const stringEnum = (values) => ({ type: "string", enum: values });
@@ -202,7 +203,7 @@ const schemas = {
       suffix: {
         type: "string",
         example: "com.cn",
-        description: "Microsoft products expose exact email domains. Domain products expose public suffixes without a leading @; owned inventory is aggregated into the same suffix.",
+        description: "Selectable inventory value. Microsoft products expose exact email domains. Domain products expose public suffixes without a leading @ (for example com or com.cn) and each owned private domain as a full domain (for example mydomain.com). Full mailbox addresses are never returned.",
       },
       totalAvailable: { type: "integer", example: 120 },
       publicAvailable: { type: "integer", example: 80 },
@@ -250,7 +251,7 @@ const schemas = {
       emailSuffix: {
         type: "string",
         example: "outlook.com",
-        description: "商品选择后缀。gmail.com 选择谷歌邮箱，icloud.com 选择苹果邮箱，配置在微软白名单中的后缀选择微软邮箱，其他受支持的公共后缀选择域名邮箱。",
+        description: emailSuffixDescription,
       },
     },
     required: ["projectId", "emailSuffix"],
@@ -263,7 +264,7 @@ const schemas = {
       emailSuffix: {
         type: "string",
         example: "outlook.com",
-        description: "商品选择后缀。gmail.com 选择谷歌邮箱，icloud.com 选择苹果邮箱，配置在微软白名单中的后缀选择微软邮箱，其他受支持的公共后缀选择域名邮箱。",
+        description: emailSuffixDescription,
       },
       quantity: { type: "integer", minimum: 2, maximum: 100, example: 5 },
     },

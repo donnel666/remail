@@ -6722,7 +6722,7 @@ type CreateOrderBatchItemResponseStatus string
 
 // CreateOrderBatchRequest defines model for CreateOrderBatchRequest.
 type CreateOrderBatchRequest struct {
-	// EmailSuffix Product selector. gmail.com selects Gmail, icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects Microsoft, and any other supported public suffix such as com or com.cn selects domain email.
+	// EmailSuffix Product selector. gmail.com selects Gmail, icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects Microsoft, and a public suffix such as com or com.cn selects domain email. With private_first, an owned full domain such as mydomain.com selects only that private domain. Full mailbox addresses are not accepted.
 	EmailSuffix string `json:"emailSuffix"`
 	ProjectId   int    `json:"projectId"`
 
@@ -6735,7 +6735,7 @@ type CreateOrderBatchResponse = []CreateOrderBatchItemResponse
 
 // CreateOrderRequest defines model for CreateOrderRequest.
 type CreateOrderRequest struct {
-	// EmailSuffix Product selector. gmail.com selects Gmail, icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects Microsoft, and any other supported public suffix such as com or com.cn selects domain email.
+	// EmailSuffix Product selector. gmail.com selects Gmail, icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects Microsoft, and a public suffix such as com or com.cn selects domain email. With private_first, an owned full domain such as mydomain.com selects only that private domain. Full mailbox addresses are not accepted.
 	EmailSuffix string `json:"emailSuffix"`
 	ProjectId   int    `json:"projectId"`
 }
@@ -8010,7 +8010,7 @@ type PositiveIntegerPointAmount = string
 type ProductSuffixInventory struct {
 	PublicAvailable int64 `json:"publicAvailable"`
 
-	// Suffix Selectable inventory value. Microsoft products expose exact email domains. Domain products expose public suffixes without a leading @ (for example com or com.cn); owned inventory is aggregated into the same suffix.
+	// Suffix Selectable inventory value. Microsoft products expose exact email domains. Domain products expose public suffixes without a leading @ (for example com or com.cn) and each owned private domain as a full domain (for example mydomain.com). Full mailbox addresses are never returned.
 	Suffix         string `json:"suffix"`
 	TotalAvailable int64  `json:"totalAvailable"`
 }

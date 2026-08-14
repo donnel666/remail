@@ -177,12 +177,12 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *d
 			}
 			metricType = string(config.ProductType)
 			if config.ProductType == coredomain.ProductTypeDomain && domainSelection != "" {
-				var privateMailbox bool
-				cmd.EmailSuffix, privateMailbox, err = normalizeDomainSelection(domainSelection)
+				var privateSelection bool
+				cmd.EmailSuffix, privateSelection, err = normalizeDomainSelection(domainSelection)
 				if err != nil {
 					return domain.ErrInvalidAllocationRequest
 				}
-				if privateMailbox {
+				if privateSelection {
 					if !containsSupplyScope(scopes, domain.SupplyScopeOwned) {
 						return domain.ErrInvalidAllocationRequest
 					}
@@ -1861,7 +1861,7 @@ func (uc *UseCase) allocateDomain(ctx context.Context, cmd AllocateCommand, conf
 func (uc *UseCase) allocateDomainOnce(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig) (*domain.UnifiedAllocation, error) {
 	resourceBusy := false
 	privateMailbox := isPrivateDomainMailboxSelection(cmd.EmailSuffix)
-	if cmd.EmailSuffix == "" || privateMailbox {
+	if cmd.EmailSuffix == "" || isPrivateDomainSelection(cmd.EmailSuffix) {
 		result, busy, err := uc.tryReusableDomainMailboxes(ctx, cmd, config)
 		if err != nil || result != nil {
 			return result, err
@@ -2101,10 +2101,14 @@ func (uc *UseCase) createDomainAllocation(ctx context.Context, cmd AllocateComma
 		return nil, domain.ErrAllocationTxRequired
 	}
 	if cmd.EmailSuffix != "" {
-		matches := strings.EqualFold(strings.TrimSpace(email), cmd.EmailSuffix)
-		if !isPrivateDomainMailboxSelection(cmd.EmailSuffix) {
+		selection := strings.TrimSpace(cmd.EmailSuffix)
+		matches := strings.EqualFold(strings.TrimSpace(email), selection)
+		if isConcreteDomainSelection(selection) {
+			_, host, valid := splitEmail(email)
+			matches = valid && strings.EqualFold(host, selection)
+		} else if !isPrivateDomainMailboxSelection(selection) {
 			_, suffix, valid := splitEmail(email)
-			matches = valid && normalizeEmailSuffix(coredomain.TLD(suffix)) == normalizeEmailSuffix(cmd.EmailSuffix)
+			matches = valid && normalizeEmailSuffix(coredomain.TLD(suffix)) == normalizeEmailSuffix(selection)
 		}
 		if !matches {
 			return nil, errCandidateUnavailable
@@ -2254,15 +2258,27 @@ func normalizeDomainSelection(value string) (string, bool, error) {
 		email, err := coredomain.NormalizeDomainMailbox(value)
 		return email, true, err
 	}
-	suffix, err := coredomain.NormalizeDomainTLD(value)
-	if err != nil {
-		return "", false, err
+	if suffix, err := coredomain.NormalizeDomainTLD(value); err == nil {
+		return suffix, false, nil
 	}
-	return suffix, false, nil
+	host, err := coredomain.NormalizeDomainName(value)
+	return host, true, err
 }
 
 func isPrivateDomainMailboxSelection(value string) bool {
 	return strings.Contains(value, "@") && !strings.HasPrefix(value, "@")
+}
+
+func isConcreteDomainSelection(value string) bool {
+	if value == "" || isPrivateDomainMailboxSelection(value) {
+		return false
+	}
+	_, err := coredomain.NormalizeDomainTLD(value)
+	return err != nil
+}
+
+func isPrivateDomainSelection(value string) bool {
+	return isPrivateDomainMailboxSelection(value) || isConcreteDomainSelection(value)
 }
 
 func plusAliasVariants(email string, projectID uint, orderNo string) []string {

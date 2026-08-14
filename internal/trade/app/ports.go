@@ -913,8 +913,14 @@ func finalizeCheckoutProduct(prepared *checkoutPreparation, productType domain.P
 			return domain.ErrInvalidOrderRequest
 		}
 		switch productType {
-		case domain.ProductTypeMicrosoft, domain.ProductTypeDomain:
+		case domain.ProductTypeMicrosoft:
 			prepared.emailSuffix = prepared.selectorSuffix
+		case domain.ProductTypeDomain:
+			normalized, privateDomain, err := normalizeCheckoutDomainSelection(prepared.selectorSuffix)
+			if err != nil || privateDomain && prepared.policy == domain.SupplyPolicyPublicOnly {
+				return domain.ErrInvalidOrderRequest
+			}
+			prepared.emailSuffix = normalized
 		case domain.ProductTypeGmail:
 			if prepared.selectorSuffix != "gmail.com" {
 				return domain.ErrInvalidOrderRequest
@@ -943,8 +949,8 @@ func finalizeCheckoutProduct(prepared *checkoutPreparation, productType domain.P
 				}
 				prepared.emailSuffix = normalized
 			} else {
-				normalized, err := coredomain.NormalizeDomainTLD(prepared.emailSuffix)
-				if err != nil {
+				normalized, privateDomain, err := normalizeCheckoutDomainSelection(prepared.emailSuffix)
+				if err != nil || privateDomain && prepared.policy == domain.SupplyPolicyPublicOnly {
 					return domain.ErrInvalidOrderRequest
 				}
 				prepared.emailSuffix = normalized
@@ -3943,6 +3949,17 @@ func normalizeCheckoutProductSuffix(value string) (string, error) {
 	return strings.TrimPrefix(normalized, "."), nil
 }
 
+func normalizeCheckoutDomainSelection(value string) (string, bool, error) {
+	if normalized, err := coredomain.NormalizeDomainTLD(value); err == nil {
+		return normalized, false, nil
+	}
+	normalized, err := coredomain.NormalizeDomainName(value)
+	if err != nil {
+		return "", false, domain.ErrInvalidOrderRequest
+	}
+	return normalized, true, nil
+}
+
 func checkoutProductTypeForSuffix(suffix string) (domain.ProductType, error) {
 	switch suffix {
 	case "gmail.com":
@@ -3953,7 +3970,7 @@ func checkoutProductTypeForSuffix(suffix string) (domain.ProductType, error) {
 	if coredomain.IsMicrosoftEmailDomain("selector@" + suffix) {
 		return domain.ProductTypeMicrosoft, nil
 	}
-	if normalized, err := coredomain.NormalizeDomainTLD(suffix); err == nil && normalized == suffix {
+	if normalized, _, err := normalizeCheckoutDomainSelection(suffix); err == nil && normalized == suffix {
 		return domain.ProductTypeDomain, nil
 	}
 	return "", domain.ErrInvalidOrderRequest

@@ -14,6 +14,10 @@ const orderPanelSource = readFileSync(
   "utf8"
 );
 const homeSource = readFileSync(new URL("./Home.tsx", import.meta.url), "utf8");
+const publicOpenApiSource = readFileSync(
+  new URL("../../public/openapi.json", import.meta.url),
+  "utf8"
+);
 const styles = readFileSync(new URL("../index.css", import.meta.url), "utf8");
 
 function cssRule(selector: string) {
@@ -31,6 +35,11 @@ describe("internal project product IDs", () => {
     expect(dashboardSource).not.toMatch(/\bproductId\s*:/);
     expect(homeSource).toContain('{"projectId":1,"emailSuffix":"outlook.com"}');
     expect(homeSource).not.toMatch(/\bproductId\b/);
+  });
+
+  it("documents owned full-domain ordering in the public contract", () => {
+    expect(publicOpenApiSource).toContain("mydomain.com");
+    expect(publicOpenApiSource).not.toContain("其他受支持的公共后缀选择域名邮箱");
   });
 
   it("restores personalized inventory on focus and labels orders from their snapshot", () => {

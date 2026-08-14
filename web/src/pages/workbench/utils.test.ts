@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { compareDomainSuffixes, compareProjectNames } from "./utils";
+import {
+  compareDomainSuffixes,
+  compareProjectNames,
+  normalizeInventorySuffix,
+} from "./utils";
 
 describe("compareProjectNames", () => {
   it("places names containing Chinese characters after non-Chinese names", () => {
@@ -18,5 +22,11 @@ describe("domain suffix selections", () => {
       "@com.cn",
       "@net",
     ]);
+  });
+
+  it("keeps private domains and rejects full mailboxes", () => {
+    expect(normalizeInventorySuffix("mydomain.com")).toBe("mydomain.com");
+    expect(normalizeInventorySuffix("@com.cn")).toBe("com.cn");
+    expect(normalizeInventorySuffix("alice@mydomain.com")).toBe("");
   });
 });

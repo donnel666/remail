@@ -96,6 +96,11 @@ export function compareDomainSuffixes(left: string, right: string) {
   return left.localeCompare(right);
 }
 
+export function normalizeInventorySuffix(value?: string) {
+  const suffix = (value ?? "").trim().replace(/^@/, "");
+  return suffix && !suffix.includes("@") ? suffix : "";
+}
+
 export function compareProjectNames(left: string, right: string) {
   const leftIsChinese = /\p{Script=Han}/u.test(left);
   const rightIsChinese = /\p{Script=Han}/u.test(right);
