@@ -73,6 +73,9 @@ func (c *AppleAccountClient) refresh(ctx context.Context, channel iCloudResource
 		return next, err
 	}
 	if apiKey := strings.TrimSpace(manage.APIKey); apiKey != "" {
+		if !validICloudImportValue(apiKey, iCloudAppleAccountValueMaxLength) {
+			return next, &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned an invalid API key."}
+		}
 		next.APIKey = apiKey
 	}
 	if strings.TrimSpace(next.APIKey) == "" {
@@ -143,7 +146,9 @@ func (c *AppleAccountClient) request(
 	}
 	scnt := strings.TrimSpace(channel.Scnt)
 	if (channel.Host != "appleid.apple.com" && channel.Host != "appleid.apple.com.cn") ||
-		!validAppleAccountCookie(channel.Cookie) || (requestPath != appleAccountTokenPath && scnt == "") {
+		!validAppleAccountCookie(channel.Cookie) ||
+		(scnt != "" && !validICloudImportValue(scnt, iCloudAppleAccountValueMaxLength)) ||
+		(requestPath != appleAccountTokenPath && scnt == "") {
 		return &appleAccountError{Category: "invalid_context", SafeMessage: "Invalid Apple Account request context."}
 	}
 	endpoint := url.URL{Scheme: "https", Host: channel.Host, Path: requestPath}
@@ -200,8 +205,11 @@ func (c *AppleAccountClient) request(
 		return &appleAccountError{Category: "provider_unavailable", SafeMessage: "Apple Account returned an unreadable response."}
 	}
 	responseScnt := strings.TrimSpace(response.Header.Get("scnt"))
+	if responseScnt != "" && !validICloudImportValue(responseScnt, iCloudAppleAccountValueMaxLength) {
+		return &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned an invalid session context."}
+	}
 	challengeBootstrap := requestPath == appleAccountTokenPath && scnt == "" &&
-		validICloudImportValue(responseScnt, iCloudImportClientMaxLength) &&
+		responseScnt != "" &&
 		(response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden || response.StatusCode == 419)
 	if challengeBootstrap {
 		channel.Scnt = responseScnt
@@ -227,13 +235,19 @@ func (c *AppleAccountClient) request(
 		return &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned an invalid session cookie."}
 	}
 	channel.Cookie = updatedCookie
-	if validICloudImportValue(responseScnt, iCloudImportClientMaxLength) {
+	if responseScnt != "" {
 		channel.Scnt = responseScnt
 	}
 	if value := strings.TrimSpace(response.Header.Get("X-Apple-ID-Session-Id")); value != "" {
+		if !validICloudImportValue(value, iCloudAppleAccountValueMaxLength) {
+			return &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned an invalid session identifier."}
+		}
 		channel.SessionID = value
 	}
 	if value := strings.TrimSpace(response.Header.Get("X-Apple-I-DA-Token")); value != "" {
+		if !validICloudImportValue(value, iCloudAppleAccountValueMaxLength) {
+			return &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned an invalid data access token."}
+		}
 		channel.DataAccessToken = value
 	}
 	if result != nil && len(bytes.TrimSpace(data)) > 0 && json.Unmarshal(data, result) != nil {

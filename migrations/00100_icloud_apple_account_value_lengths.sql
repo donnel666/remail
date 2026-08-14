@@ -1,0 +1,15 @@
+-- +goose Up
+
+ALTER TABLE icloud_resource_channels
+    MODIFY COLUMN scnt VARCHAR(1000) NOT NULL DEFAULT '',
+    MODIFY COLUMN session_id VARCHAR(1000) NOT NULL DEFAULT '',
+    MODIFY COLUMN api_key VARCHAR(1000) NOT NULL DEFAULT '',
+    MODIFY COLUMN data_access_token VARCHAR(1000) NOT NULL DEFAULT '';
+
+-- +goose Down
+
+ALTER TABLE icloud_resource_channels
+    MODIFY COLUMN scnt VARCHAR(191) NOT NULL DEFAULT '',
+    MODIFY COLUMN session_id VARCHAR(191) NOT NULL DEFAULT '',
+    MODIFY COLUMN api_key VARCHAR(191) NOT NULL DEFAULT '',
+    MODIFY COLUMN data_access_token VARCHAR(191) NOT NULL DEFAULT '';

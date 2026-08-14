@@ -150,7 +150,7 @@ func parseICloudCurlChannel(command string) (*iCloudImportChannel, error) {
 		if channel.Scnt == "" {
 			channel.Scnt = strings.TrimSpace(headers["x-apple-scnt"])
 		}
-		if channel.Scnt != "" && !validICloudImportValue(channel.Scnt, iCloudImportClientMaxLength) {
+		if channel.Scnt != "" && !validICloudImportValue(channel.Scnt, iCloudAppleAccountValueMaxLength) {
 			return nil, errors.New("invalid scnt")
 		}
 		if channel.Origin == "" {
@@ -261,10 +261,25 @@ func extractICloudCurlArguments(tokens []string) (requestURL, cookie string, hea
 		value, matched, consumedNext = iCloudCurlOptionValue(tokens, index, token, "--header", "-H")
 		if matched {
 			name, headerValue, found := strings.Cut(value, ":")
-			if found && validICloudCurlHeader(headerValue) {
-				headers[strings.ToLower(strings.TrimSpace(name))] = strings.TrimSpace(headerValue)
-			} else {
+			name = strings.ToLower(strings.TrimSpace(name))
+			headerValue = strings.TrimSpace(headerValue)
+			if !found || name == "" {
 				invalidHeader = true
+			} else {
+				switch name {
+				case "cookie":
+					if validAppleAccountCookie(headerValue) {
+						headers[name] = headerValue
+					} else {
+						invalidHeader = true
+					}
+				case "origin", "referer", "user-agent", "x-apple-i-fd-client-info", "scnt", "x-apple-scnt":
+					if validICloudCurlHeader(headerValue) {
+						headers[name] = headerValue
+					} else {
+						invalidHeader = true
+					}
+				}
 			}
 			if consumedNext {
 				index++

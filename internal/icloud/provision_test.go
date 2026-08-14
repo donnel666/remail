@@ -19,6 +19,11 @@ import (
 
 func TestAppleAccountRefreshBootstrapsScntFromTokenResponse(t *testing.T) {
 	now := time.Date(2026, 8, 14, 9, 0, 0, 0, time.UTC)
+	tokenScnt := strings.Repeat("t", iCloudAppleAccountValueMaxLength)
+	manageScnt := strings.Repeat("m", iCloudAppleAccountValueMaxLength)
+	apiKey := strings.Repeat("k", iCloudAppleAccountValueMaxLength)
+	sessionID := strings.Repeat("i", iCloudAppleAccountValueMaxLength)
+	dataAccessToken := strings.Repeat("d", iCloudAppleAccountValueMaxLength)
 	client := NewAppleAccountClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
 		if got := request.Header.Get("X-Apple-I-FD-Client-Info"); got != testICloudFDClientInfo {
 			t.Fatalf("FD client info = %q, want imported value", got)
@@ -29,14 +34,16 @@ func TestAppleAccountRefreshBootstrapsScntFromTokenResponse(t *testing.T) {
 			if scnt := request.Header.Get("scnt"); scnt != "" {
 				t.Fatalf("initial token scnt = %q, want empty", scnt)
 			}
-			header.Set("scnt", "token-scnt")
+			header.Set("scnt", tokenScnt)
 			return &http.Response{StatusCode: http.StatusOK, Header: header, Body: io.NopCloser(strings.NewReader(`{"timeOutInterval":15}`))}, nil
 		case "/account/manage":
-			if scnt := request.Header.Get("scnt"); scnt != "token-scnt" {
-				t.Fatalf("manage scnt = %q, want token-scnt", scnt)
+			if scnt := request.Header.Get("scnt"); scnt != tokenScnt {
+				t.Fatal("manage request did not preserve the token scnt")
 			}
-			header.Set("scnt", "manage-scnt")
-			return &http.Response{StatusCode: http.StatusOK, Header: header, Body: io.NopCloser(strings.NewReader(`{"apiKey":"api-key"}`))}, nil
+			header.Set("scnt", manageScnt)
+			header.Set("X-Apple-ID-Session-Id", sessionID)
+			header.Set("X-Apple-I-DA-Token", dataAccessToken)
+			return &http.Response{StatusCode: http.StatusOK, Header: header, Body: io.NopCloser(strings.NewReader(`{"apiKey":"` + apiKey + `"}`))}, nil
 		default:
 			t.Fatalf("unexpected Apple Account path %q", request.URL.Path)
 			return nil, nil
@@ -49,9 +56,10 @@ func TestAppleAccountRefreshBootstrapsScntFromTokenResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("refresh Apple Account state: %v", err)
 	}
-	if refreshed.Scnt != "manage-scnt" || refreshed.APIKey != "api-key" || refreshed.ManageExpiresAt == nil ||
+	if refreshed.Scnt != manageScnt || refreshed.APIKey != apiKey || refreshed.SessionID != sessionID ||
+		refreshed.DataAccessToken != dataAccessToken || refreshed.ManageExpiresAt == nil ||
 		!refreshed.ManageExpiresAt.Equal(now.Add(15*time.Minute)) {
-		t.Fatalf("unexpected refreshed Apple Account state: %#v", refreshed)
+		t.Fatal("Apple Account refresh did not preserve opaque values up to 1000 characters")
 	}
 }
 

@@ -11,7 +11,11 @@ const (
 	testICloudOldCookie    = "X-APPLE-WEBAUTH-USER=user; X-APPLE-WEBAUTH-TOKEN=token; X-APPLE-DS-WEB-SESSION-TOKEN=session"
 	testICloudFDClientInfo = `{"F":"test-fingerprint"}`
 	testICloudOldCurl      = `curl --url 'https://p119-maildomainws.icloud.com.cn/v2/hme/list?clientBuildNumber=build&clientMasteringNumber=master&clientId=client&dsid=123' -b '` + testICloudOldCookie + `'`
-	testICloudNewCurl      = `curl --url 'https://appleid.apple.com/account/manage/gs/ws/token' -b 'myacinfo=secret' -H 'X-Apple-I-FD-Client-Info: ` + testICloudFDClientInfo + `'`
+)
+
+var (
+	testICloudLongScnt = strings.Repeat("s", 400)
+	testICloudNewCurl  = `curl --url 'https://appleid.apple.com/account/manage/gs/ws/token' -b 'myacinfo=secret' -H 'X-Apple-I-FD-Client-Info: ` + testICloudFDClientInfo + `' -H 'scnt: ` + testICloudLongScnt + `'`
 )
 
 func TestParseICloudImportSupportsCompleteCredentialLines(t *testing.T) {
@@ -39,11 +43,33 @@ func TestParseICloudImportSupportsCompleteCredentialLines(t *testing.T) {
 				if line.Channels[index].Kind != kind {
 					t.Fatalf("channel %d kind = %q, want %q", index, line.Channels[index].Kind, kind)
 				}
-				if kind == iCloudChannelAppleAccount && line.Channels[index].FDClientInfo != testICloudFDClientInfo {
-					t.Fatalf("Apple Account FD client info = %q", line.Channels[index].FDClientInfo)
+				if kind == iCloudChannelAppleAccount &&
+					(line.Channels[index].FDClientInfo != testICloudFDClientInfo || line.Channels[index].Scnt != testICloudLongScnt) {
+					t.Fatalf("unexpected Apple Account request context")
 				}
 			}
 		})
+	}
+}
+
+func TestParseICloudImportAcceptsBrowserCopiedOpaqueValues(t *testing.T) {
+	scnt := strings.Repeat("s", iCloudAppleAccountValueMaxLength)
+	cookie := "POD=cn~zh; myacinfo=" + strings.Repeat("a", 4096)
+	command := `curl --url 'https://appleid.apple.com/account/manage/gs/ws/token' ` +
+		`-H 'Accept: application/json, text/plain, */*' ` +
+		`-H 'X-Ignored-Browser-Context: ` + strings.Repeat("x", 4096) + `' ` +
+		`-H 'Cookie: ` + cookie + `' ` +
+		`-H 'Origin: https://account.apple.com' ` +
+		`-H 'X-Apple-I-FD-Client-Info: {"U":"browser","F":"fingerprint"}' ` +
+		`-H 'scnt: ` + scnt + `'`
+	line, failure := parseICloudImportLine(1, "owner@example.com----app-password----"+command)
+	if failure != nil || len(line.Channels) != 1 || line.Channels[0].Cookie != cookie || line.Channels[0].Scnt != scnt {
+		t.Fatalf("browser cURL parse failed: failure=%#v", failure)
+	}
+
+	tooLong := strings.Replace(command, scnt, scnt+"x", 1)
+	if _, failure = parseICloudImportLine(1, "owner@example.com----app-password----"+tooLong); failure == nil {
+		t.Fatal("Apple Account value above 1000 characters must be rejected")
 	}
 }
 

@@ -38,6 +38,7 @@ const (
 	iCloudImportHostMaxLength              = 255
 	iCloudImportDSIDMaxLength              = 191
 	iCloudImportClientMaxLength            = 191
+	iCloudAppleAccountValueMaxLength       = 1000
 	iCloudImportBuildMaxLength             = 64
 	iCloudImportCookieMaxBytes             = 65_535
 	iCloudImportAppPasswordMaxLength       = 128
