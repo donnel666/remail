@@ -120,11 +120,14 @@ func TestProcessICloudValidationTriesEveryChannelAndAcceptsAnyAuthorizedForward(
 		t.Fatalf("read channels: %v", err)
 	}
 	statuses := map[string]string{}
+	failures := map[string]uint8{}
 	for _, channel := range storedChannels {
 		statuses[channel.Kind] = channel.SessionStatus
+		failures[channel.Kind] = channel.SessionFailures
 	}
-	if statuses[iCloudChannelAppleAccount] != iCloudSessionValid || statuses[iCloudChannelWeb] != iCloudSessionInvalid {
-		t.Fatalf("unexpected channel statuses: %#v", statuses)
+	if statuses[iCloudChannelAppleAccount] != iCloudSessionValid || statuses[iCloudChannelWeb] != iCloudSessionUnchecked ||
+		failures[iCloudChannelWeb] != 1 {
+		t.Fatalf("unexpected channel results: statuses=%#v failures=%#v", statuses, failures)
 	}
 }
 
