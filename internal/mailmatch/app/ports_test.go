@@ -545,12 +545,12 @@ func TestICloudInboundUsesExactSelectedAliasAndReplaysItsResourceType(t *testing
 		EmailResourceID:   17,
 		ResourceType:      domain.ResourceTypeICloud,
 		Recipient:         "alias@icloud.com",
-		EnvelopeFrom:      "sender@example.net",
-		Raw:               []byte("From: forwarded-header@example.invalid\r\nTo: icloud@aishop6.com\r\n\r\nwelcome"),
+		EnvelopeFrom:      "relay-envelope@example.invalid",
+		Raw:               []byte("From: Sender <sender@example.net>\r\nTo: alias@icloud.com\r\n\r\nwelcome"),
 		ReceivedAt:        now,
 		ProviderMessageID: "inbound:101",
-		Protocol:          "smtp",
-		Folder:            "inbound",
+		Protocol:          "imap",
+		Folder:            "INBOX",
 	})
 
 	require.NoError(t, err)
@@ -584,8 +584,8 @@ func TestICloudFencedIngressAppendsInsideGenerationFenceTransaction(t *testing.T
 	fenceCalls := 0
 	_, _, err := uc.IngestInboundMailWithFence(context.Background(), InboundMailRequest{
 		EmailResourceID: 18, ResourceType: domain.ResourceTypeICloud, Recipient: "alias@icloud.com",
-		EnvelopeFrom: "sender@example.net", Raw: []byte("From: forwarded@example.invalid\r\n\r\ncode: 123456"),
-		ReceivedAt: now, ProviderMessageID: "inbound:fenced",
+		EnvelopeFrom: "relay-envelope@example.invalid", Raw: []byte("From: Sender <sender@example.net>\r\nTo: alias@icloud.com\r\n\r\ncode: 123456"),
+		ReceivedAt: now, ProviderMessageID: "inbound:fenced", Protocol: "imap", Folder: "INBOX",
 	}, func(ctx context.Context) error {
 		fenceCalls++
 		if ctx.Value(appendFenceTransactionMarker{}) == nil {
