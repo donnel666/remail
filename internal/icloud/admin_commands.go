@@ -542,8 +542,7 @@ func mutateAdminICloudResourceTx(
 	}
 	if queuedGeneration > 0 {
 		if _, err := ensureICloudMaintenanceRunTx(
-			ctx, tx, resourceID, queuedGeneration, iCloudMaintenanceValidation,
-			resource.CredentialRevision, 0, now,
+			ctx, tx, resourceID, queuedGeneration, resource.CredentialRevision, 0, now,
 		); err != nil {
 			return nil, false, err
 		}

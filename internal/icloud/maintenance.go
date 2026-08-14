@@ -23,7 +23,6 @@ func ensureICloudMaintenanceRunTx(
 	tx *gorm.DB,
 	resourceID uint,
 	generation uint64,
-	kind string,
 	credentialRevision uint64,
 	attempts int,
 	now time.Time,
@@ -31,7 +30,6 @@ func ensureICloudMaintenanceRunTx(
 	if tx == nil || resourceID == 0 || generation == 0 || credentialRevision == 0 {
 		return nil, ErrICloudValidationTemp
 	}
-	kind = iCloudMaintenanceValidation
 	if attempts < 0 {
 		attempts = 0
 	}
@@ -42,7 +40,7 @@ func ensureICloudMaintenanceRunTx(
 		return nil, err
 	}
 	run := iCloudMaintenanceRunModel{
-		ResourceID: resourceID, ValidationGeneration: generation, Kind: kind,
+		ResourceID: resourceID, ValidationGeneration: generation, Kind: iCloudMaintenanceValidation,
 		Status: iCloudMaintenanceQueued, Attempts: attempts, MaxAttempts: iCloudValidationMaxFailures,
 		CredentialRevision: credentialRevision, QueuedAt: now, CreatedAt: now, UpdatedAt: now,
 	}

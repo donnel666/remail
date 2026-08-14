@@ -194,18 +194,6 @@ func parseICloudCurlChannel(command string) (*iCloudImportChannel, error) {
 	return channel, nil
 }
 
-func classifyICloudCurlChannel(host, path string) string {
-	host = strings.ToLower(strings.TrimSpace(host))
-	path = strings.TrimSpace(path)
-	if (host == "appleid.apple.com" || host == "appleid.apple.com.cn") && strings.HasPrefix(path, "/account/manage/") {
-		return iCloudChannelAppleAccount
-	}
-	if validICloudHMEHost(host) && (strings.HasPrefix(path, "/v2/hme/list") || strings.HasPrefix(path, "/v1/hme/")) {
-		return iCloudChannelWeb
-	}
-	return ""
-}
-
 func defaultAppleAccountOrigin(host string) string {
 	if strings.HasSuffix(strings.ToLower(strings.TrimSpace(host)), ".cn") {
 		return "https://account.apple.com.cn"

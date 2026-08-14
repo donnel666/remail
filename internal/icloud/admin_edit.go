@@ -236,7 +236,7 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 			}
 		}
 		if queuedValidation {
-			if _, err := ensureICloudMaintenanceRunTx(ctx, tx, command.ResourceID, queuedGeneration, iCloudMaintenanceValidation, nextCredentialRevision, 0, now); err != nil {
+			if _, err := ensureICloudMaintenanceRunTx(ctx, tx, command.ResourceID, queuedGeneration, nextCredentialRevision, 0, now); err != nil {
 				return err
 			}
 		}

@@ -287,13 +287,6 @@ func (s *Service) releaseICloudValidation(ctx context.Context, task iCloudValida
 	return nil
 }
 
-func iCloudValidationFenceMatches(resource iCloudResourceModel, run *iCloudMaintenanceRunModel, task iCloudValidationTask) bool {
-	if resource.ID != task.ResourceID || resource.ValidationGeneration != task.ValidationGeneration || resource.CredentialRevision != task.ExpectedCredentialRevision {
-		return false
-	}
-	return run == nil || run.ResourceID == task.ResourceID
-}
-
 func syncICloudAliasesTx(tx *gorm.DB, resourceID uint, aliases []hmeAlias, _ string, complete bool, now time.Time) error {
 	if tx == nil || resourceID == 0 {
 		return errICloudAliasConflict
@@ -358,12 +351,6 @@ func findICloudAlias(aliases []hmeAlias, email string) *hmeAlias {
 
 func iCloudTimePointer(value time.Time) *time.Time { return &value }
 
-func minICloudValidationFailures(value uint8) uint8 {
-	if value > iCloudValidationMaxFailures {
-		return iCloudValidationMaxFailures
-	}
-	return value
-}
 func safeICloudValidationMessage(value string) string {
 	if value = safeICloudImportMessage(value); value != "" {
 		return value

@@ -35,9 +35,9 @@ func NewAppleAccountClient(client *http.Client) *AppleAccountClient {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
 	if client.CheckRedirect == nil {
-		copy := *client
-		copy.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
-		client = &copy
+		clientCopy := *client
+		clientCopy.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
+		client = &clientCopy
 	}
 	return &AppleAccountClient{httpClient: client}
 }

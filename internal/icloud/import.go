@@ -391,14 +391,6 @@ func parseICloudImportLine(lineNumber int, raw string) (*iCloudImportLine, *iClo
 	return parseICloudCurlImportLine(lineNumber, raw)
 }
 
-func invalidICloudImportFailure(lineNumber int, raw string) *iCloudImportFailure {
-	email := ""
-	if first, _, found := strings.Cut(raw, "----"); found {
-		email = strings.ToLower(strings.TrimSpace(first))
-	}
-	return &iCloudImportFailure{Line: lineNumber, Email: email, Category: "invalid_format", SafeMessage: "Invalid iCloud import format."}
-}
-
 func isICloudImportEmail(value string) bool {
 	if value == "" || utf8.RuneCountInString(value) > iCloudImportEmailMaxLength || strings.Count(value, "@") != 1 {
 		return false
@@ -1029,8 +1021,6 @@ func safeICloudImportObjectSegment(value string) string {
 }
 
 func iCloudImportEmailKey(value string) string { return strings.ToLower(strings.TrimSpace(value)) }
-
-func iCloudImportDSIDKey(value string) string { return strings.ToLower(strings.TrimSpace(value)) }
 
 func safeICloudImportMessage(value string) string {
 	value = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(value, "\r", " "), "\n", " "))
