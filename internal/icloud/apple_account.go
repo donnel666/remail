@@ -11,7 +11,10 @@ import (
 	"time"
 )
 
-const appleAccountResponseMaxBytes = 4 << 20
+const (
+	appleAccountResponseMaxBytes = 4 << 20
+	appleAccountTokenPath        = "/account/manage/gs/ws/token"
+)
 
 type appleAccountError struct {
 	Category    string
@@ -47,8 +50,21 @@ func (c *AppleAccountClient) refresh(ctx context.Context, channel iCloudResource
 	var token struct {
 		TimeOutInterval int `json:"timeOutInterval"`
 	}
-	if err := c.request(ctx, &next, "", http.MethodGet, "/account/manage/gs/ws/token", nil, &token, now); err != nil {
+	if err := c.request(ctx, &next, "", http.MethodGet, appleAccountTokenPath, nil, &token, now); err != nil {
 		return channel, err
+	}
+	if strings.TrimSpace(next.Scnt) == "" {
+		if err := c.warmPortal(ctx, &next, now); err != nil {
+			return channel, err
+		}
+		token.TimeOutInterval = 0
+		next.Scnt = ""
+		if err := c.request(ctx, &next, "", http.MethodGet, appleAccountTokenPath, nil, &token, now); err != nil {
+			return channel, err
+		}
+		if strings.TrimSpace(next.Scnt) == "" {
+			return channel, &appleAccountError{Category: "session_invalid", SafeMessage: "Apple Account session is invalid."}
+		}
 	}
 	var manage struct {
 		APIKey string `json:"apiKey"`
@@ -122,8 +138,12 @@ func (c *AppleAccountClient) request(
 	body, result any,
 	now time.Time,
 ) error {
-	if channel == nil || (channel.Host != "appleid.apple.com" && channel.Host != "appleid.apple.com.cn") ||
-		!validAppleAccountCookie(channel.Cookie) || strings.TrimSpace(channel.Scnt) == "" {
+	if channel == nil {
+		return &appleAccountError{Category: "invalid_context", SafeMessage: "Invalid Apple Account request context."}
+	}
+	scnt := strings.TrimSpace(channel.Scnt)
+	if (channel.Host != "appleid.apple.com" && channel.Host != "appleid.apple.com.cn") ||
+		!validAppleAccountCookie(channel.Cookie) || (requestPath != appleAccountTokenPath && scnt == "") {
 		return &appleAccountError{Category: "invalid_context", SafeMessage: "Invalid Apple Account request context."}
 	}
 	endpoint := url.URL{Scheme: "https", Host: channel.Host, Path: requestPath}
@@ -154,15 +174,115 @@ func (c *AppleAccountClient) request(
 	request.Header.Set("User-Agent", userAgent)
 	request.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
 	request.Header.Set("Cookie", channel.Cookie)
-	request.Header.Set("scnt", channel.Scnt)
+	if scnt != "" {
+		request.Header.Set("scnt", scnt)
+	}
 	request.Header.Set("X-Apple-I-Request-Context", "ca")
 	request.Header.Set("X-Apple-I-TimeZone", "Asia/Shanghai")
-	request.Header.Set("X-Apple-I-FD-Client-Info", appleAccountFDClientInfo(userAgent))
+	request.Header.Set("X-Apple-I-FD-Client-Info", appleAccountRequestFDClientInfo(*channel, userAgent))
 	request.Header.Set("Sec-Fetch-Site", "same-site")
 	request.Header.Set("Sec-Fetch-Mode", "cors")
 	request.Header.Set("Sec-Fetch-Dest", "empty")
 	if apiKey = strings.TrimSpace(apiKey); apiKey != "" {
 		request.Header.Set("X-Apple-Api-Key", apiKey)
+	}
+	client := c
+	if client == nil || client.httpClient == nil {
+		client = NewAppleAccountClient(nil)
+	}
+	response, err := client.httpClient.Do(request)
+	if err != nil || response == nil || response.Body == nil {
+		return &appleAccountError{Category: "provider_unavailable", SafeMessage: "Apple Account is temporarily unavailable."}
+	}
+	defer response.Body.Close()
+	data, readErr := io.ReadAll(io.LimitReader(response.Body, appleAccountResponseMaxBytes+1))
+	if readErr != nil || len(data) > appleAccountResponseMaxBytes {
+		return &appleAccountError{Category: "provider_unavailable", SafeMessage: "Apple Account returned an unreadable response."}
+	}
+	responseScnt := strings.TrimSpace(response.Header.Get("scnt"))
+	challengeBootstrap := requestPath == appleAccountTokenPath && scnt == "" &&
+		validICloudImportValue(responseScnt, iCloudImportClientMaxLength) &&
+		(response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden || response.StatusCode == 419)
+	if challengeBootstrap {
+		channel.Scnt = responseScnt
+		return nil
+	}
+	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden || response.StatusCode == 419 {
+		return &appleAccountError{Category: "session_invalid", SafeMessage: "Apple Account session is invalid."}
+	}
+	if response.StatusCode == http.StatusTooManyRequests || appleAccountBodyRateLimited(data) {
+		return &appleAccountError{
+			Category: "rate_limited", SafeMessage: "Apple Account alias creation is temporarily rate limited.",
+			RetryAfter: iCloudRetryAfter(response.Header.Get("Retry-After"), now),
+		}
+	}
+	if response.StatusCode == http.StatusRequestTimeout || response.StatusCode >= 500 {
+		return &appleAccountError{Category: "provider_unavailable", SafeMessage: "Apple Account is temporarily unavailable."}
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return &appleAccountError{Category: "provider_rejected", SafeMessage: "Apple Account rejected the request."}
+	}
+	updatedCookie := mergeICloudCookies(channel.Cookie, response.Cookies())
+	if !validAppleAccountCookie(updatedCookie) {
+		return &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned an invalid session cookie."}
+	}
+	channel.Cookie = updatedCookie
+	if validICloudImportValue(responseScnt, iCloudImportClientMaxLength) {
+		channel.Scnt = responseScnt
+	}
+	if value := strings.TrimSpace(response.Header.Get("X-Apple-ID-Session-Id")); value != "" {
+		channel.SessionID = value
+	}
+	if value := strings.TrimSpace(response.Header.Get("X-Apple-I-DA-Token")); value != "" {
+		channel.DataAccessToken = value
+	}
+	if result != nil && len(bytes.TrimSpace(data)) > 0 && json.Unmarshal(data, result) != nil {
+		return &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned an invalid response."}
+	}
+	return nil
+}
+
+func (c *AppleAccountClient) warmPortal(ctx context.Context, channel *iCloudResourceChannelModel, now time.Time) error {
+	if err := c.portalRequest(ctx, channel, "/account/manage/section/privacy", false, now); err != nil {
+		return err
+	}
+	return c.portalRequest(ctx, channel, "/bootstrap/portal", true, now)
+}
+
+func (c *AppleAccountClient) portalRequest(ctx context.Context, channel *iCloudResourceChannelModel, requestPath string, jsonContent bool, now time.Time) error {
+	if channel == nil || (channel.Host != "appleid.apple.com" && channel.Host != "appleid.apple.com.cn") || !validAppleAccountCookie(channel.Cookie) {
+		return &appleAccountError{Category: "invalid_context", SafeMessage: "Invalid Apple Account request context."}
+	}
+	portalBase, err := url.Parse(defaultAppleAccountOrigin(channel.Host))
+	if err != nil {
+		return &appleAccountError{Category: "invalid_context", SafeMessage: "Invalid Apple Account request context."}
+	}
+	endpoint := url.URL{Scheme: portalBase.Scheme, Host: portalBase.Host, Path: requestPath}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
+	if err != nil {
+		return &appleAccountError{Category: "invalid_context", SafeMessage: "Invalid Apple Account request context."}
+	}
+	userAgent := strings.TrimSpace(channel.UserAgent)
+	if userAgent == "" {
+		userAgent = defaultICloudHMEUserAgent
+	}
+	request.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	request.Header.Set("Referer", portalBase.String()+"/")
+	request.Header.Set("User-Agent", userAgent)
+	request.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	request.Header.Set("Cookie", channel.Cookie)
+	request.Header.Set("Sec-Fetch-Site", "same-origin")
+	request.Header.Set("Sec-Fetch-Mode", "navigate")
+	request.Header.Set("Sec-Fetch-Dest", "document")
+	if jsonContent {
+		request.Header.Set("Accept", "application/json, text/plain, */*")
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Origin", portalBase.String())
+		request.Header.Set("Sec-Fetch-Mode", "cors")
+		request.Header.Set("Sec-Fetch-Dest", "empty")
+		request.Header.Set("X-Apple-I-Request-Context", "ca")
+		request.Header.Set("X-Apple-I-TimeZone", "Asia/Shanghai")
+		request.Header.Set("X-Apple-I-FD-Client-Info", appleAccountRequestFDClientInfo(*channel, userAgent))
 	}
 	client := c
 	if client == nil || client.httpClient == nil {
@@ -197,18 +317,6 @@ func (c *AppleAccountClient) request(
 		return &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned an invalid session cookie."}
 	}
 	channel.Cookie = updatedCookie
-	if value := strings.TrimSpace(response.Header.Get("scnt")); value != "" {
-		channel.Scnt = value
-	}
-	if value := strings.TrimSpace(response.Header.Get("X-Apple-ID-Session-Id")); value != "" {
-		channel.SessionID = value
-	}
-	if value := strings.TrimSpace(response.Header.Get("X-Apple-I-DA-Token")); value != "" {
-		channel.DataAccessToken = value
-	}
-	if result != nil && len(bytes.TrimSpace(data)) > 0 && json.Unmarshal(data, result) != nil {
-		return &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned an invalid response."}
-	}
 	return nil
 }
 
@@ -227,4 +335,11 @@ func appleAccountFDClientInfo(userAgent string) string {
 		"F": "",
 	})
 	return string(encoded)
+}
+
+func appleAccountRequestFDClientInfo(channel iCloudResourceChannelModel, userAgent string) string {
+	if value := strings.TrimSpace(channel.FDClientInfo); value != "" && validICloudCurlHeader(value) {
+		return value
+	}
+	return appleAccountFDClientInfo(userAgent)
 }

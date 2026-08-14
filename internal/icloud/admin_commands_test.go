@@ -99,7 +99,8 @@ func TestEditAdminICloudResourceUsesCompleteImportLine(t *testing.T) {
 	if err := db.Where("resource_id = ?", 1).Order("kind").Find(&channels).Error; err != nil {
 		t.Fatalf("read channels: %v", err)
 	}
-	if len(channels) != 2 || channels[0].Kind != iCloudChannelAppleAccount || channels[1].Kind != iCloudChannelWeb {
+	if len(channels) != 2 || channels[0].Kind != iCloudChannelAppleAccount || channels[1].Kind != iCloudChannelWeb ||
+		channels[0].FDClientInfo != testICloudFDClientInfo {
 		t.Fatalf("unexpected edited channels: %#v", channels)
 	}
 	for _, channel := range channels {

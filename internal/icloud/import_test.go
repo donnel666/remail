@@ -147,7 +147,7 @@ func TestICloudImportPersistsIMAPAndBothChannelsWithoutQueueSecrets(t *testing.T
 	if err != nil || len(tasks) != 1 {
 		t.Fatalf("scheduled import task: tasks=%d err=%v", len(tasks), err)
 	}
-	for _, secret := range []string{appPassword, "myacinfo=secret", testICloudOldCookie, "icloud.txt"} {
+	for _, secret := range []string{appPassword, "myacinfo=secret", testICloudOldCookie, testICloudFDClientInfo, "icloud.txt"} {
 		if strings.Contains(string(tasks[0].Payload), secret) {
 			t.Fatalf("private credential entered task payload: %s", tasks[0].Payload)
 		}
@@ -172,7 +172,8 @@ func TestICloudImportPersistsIMAPAndBothChannelsWithoutQueueSecrets(t *testing.T
 		t.Fatalf("read channels: %v", err)
 	}
 	if len(channels) != 2 || channels[0].Kind != iCloudChannelAppleAccount || channels[1].Kind != iCloudChannelWeb ||
-		channels[0].SessionStatus != iCloudSessionUnchecked || channels[1].SessionStatus != iCloudSessionUnchecked {
+		channels[0].FDClientInfo != testICloudFDClientInfo || channels[0].SessionStatus != iCloudSessionUnchecked ||
+		channels[1].SessionStatus != iCloudSessionUnchecked {
 		t.Fatalf("unexpected channels: %#v", channels)
 	}
 	status, err := service.GetAdminICloudResourceImport(context.Background(), accepted.ImportID)

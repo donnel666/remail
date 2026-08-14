@@ -166,6 +166,7 @@ type iCloudResourceChannelModel struct {
 	Origin                string     `gorm:"column:origin"`
 	Referer               string     `gorm:"column:referer"`
 	UserAgent             string     `gorm:"column:user_agent"`
+	FDClientInfo          string     `gorm:"column:fd_client_info"`
 	DSID                  string     `gorm:"column:dsid"`
 	ClientID              string     `gorm:"column:client_id"`
 	ClientBuildNumber     string     `gorm:"column:client_build_number"`

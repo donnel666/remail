@@ -3,6 +3,7 @@ package icloud
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -15,6 +16,143 @@ import (
 	"github.com/hibiken/asynq"
 	"gorm.io/gorm"
 )
+
+func TestAppleAccountRefreshBootstrapsScntFromTokenResponse(t *testing.T) {
+	now := time.Date(2026, 8, 14, 9, 0, 0, 0, time.UTC)
+	client := NewAppleAccountClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		if got := request.Header.Get("X-Apple-I-FD-Client-Info"); got != testICloudFDClientInfo {
+			t.Fatalf("FD client info = %q, want imported value", got)
+		}
+		header := make(http.Header)
+		switch request.URL.Path {
+		case "/account/manage/gs/ws/token":
+			if scnt := request.Header.Get("scnt"); scnt != "" {
+				t.Fatalf("initial token scnt = %q, want empty", scnt)
+			}
+			header.Set("scnt", "token-scnt")
+			return &http.Response{StatusCode: http.StatusOK, Header: header, Body: io.NopCloser(strings.NewReader(`{"timeOutInterval":15}`))}, nil
+		case "/account/manage":
+			if scnt := request.Header.Get("scnt"); scnt != "token-scnt" {
+				t.Fatalf("manage scnt = %q, want token-scnt", scnt)
+			}
+			header.Set("scnt", "manage-scnt")
+			return &http.Response{StatusCode: http.StatusOK, Header: header, Body: io.NopCloser(strings.NewReader(`{"apiKey":"api-key"}`))}, nil
+		default:
+			t.Fatalf("unexpected Apple Account path %q", request.URL.Path)
+			return nil, nil
+		}
+	})})
+
+	refreshed, err := client.refresh(context.Background(), iCloudResourceChannelModel{
+		Host: "appleid.apple.com", Cookie: "myacinfo=secret", FDClientInfo: testICloudFDClientInfo,
+	}, now)
+	if err != nil {
+		t.Fatalf("refresh Apple Account state: %v", err)
+	}
+	if refreshed.Scnt != "manage-scnt" || refreshed.APIKey != "api-key" || refreshed.ManageExpiresAt == nil ||
+		!refreshed.ManageExpiresAt.Equal(now.Add(15*time.Minute)) {
+		t.Fatalf("unexpected refreshed Apple Account state: %#v", refreshed)
+	}
+}
+
+func TestAppleAccountRefreshAcceptsTokenChallengeScnt(t *testing.T) {
+	now := time.Date(2026, 8, 14, 9, 5, 0, 0, time.UTC)
+	client := NewAppleAccountClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		header := make(http.Header)
+		switch request.URL.Path {
+		case appleAccountTokenPath:
+			header.Set("scnt", "challenge-scnt")
+			return &http.Response{StatusCode: http.StatusUnauthorized, Header: header, Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+		case "/account/manage":
+			if got := request.Header.Get("scnt"); got != "challenge-scnt" {
+				t.Fatalf("manage scnt = %q, want challenge-scnt", got)
+			}
+			return &http.Response{StatusCode: http.StatusOK, Header: header, Body: io.NopCloser(strings.NewReader(`{"apiKey":"api-key"}`))}, nil
+		default:
+			t.Fatalf("unexpected Apple Account path %q", request.URL.Path)
+			return nil, nil
+		}
+	})})
+
+	refreshed, err := client.refresh(context.Background(), iCloudResourceChannelModel{
+		Host: "appleid.apple.com", Cookie: "myacinfo=secret",
+	}, now)
+	if err != nil || refreshed.Scnt != "challenge-scnt" || refreshed.APIKey != "api-key" {
+		t.Fatalf("challenge refresh: state=%#v err=%v", refreshed, err)
+	}
+}
+
+func TestAppleAccountRefreshWarmsPortalBeforeRetryingMissingScnt(t *testing.T) {
+	now := time.Date(2026, 8, 14, 9, 10, 0, 0, time.UTC)
+	paths := make([]string, 0, 5)
+	tokenCalls := 0
+	client := NewAppleAccountClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		paths = append(paths, request.URL.Host+request.URL.Path)
+		header := make(http.Header)
+		switch request.URL.Path {
+		case appleAccountTokenPath:
+			tokenCalls++
+			if got := request.Header.Get("scnt"); got != "" {
+				t.Fatalf("bootstrap token scnt = %q, want empty", got)
+			}
+			if tokenCalls == 2 {
+				header.Set("scnt", "retry-scnt")
+			}
+			return &http.Response{StatusCode: http.StatusOK, Header: header, Body: io.NopCloser(strings.NewReader(`{"timeOutInterval":15}`))}, nil
+		case "/account/manage/section/privacy":
+			return &http.Response{StatusCode: http.StatusOK, Header: header, Body: io.NopCloser(strings.NewReader(`<html></html>`))}, nil
+		case "/bootstrap/portal":
+			if got := request.Header.Get("X-Apple-I-FD-Client-Info"); got != testICloudFDClientInfo {
+				t.Fatalf("bootstrap FD client info = %q", got)
+			}
+			return &http.Response{StatusCode: http.StatusOK, Header: header, Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+		case "/account/manage":
+			return &http.Response{StatusCode: http.StatusOK, Header: header, Body: io.NopCloser(strings.NewReader(`{"apiKey":"api-key"}`))}, nil
+		default:
+			t.Fatalf("unexpected Apple Account path %q", request.URL.Path)
+			return nil, nil
+		}
+	})})
+
+	refreshed, err := client.refresh(context.Background(), iCloudResourceChannelModel{
+		Host: "appleid.apple.com.cn", Cookie: "myacinfo=secret", FDClientInfo: testICloudFDClientInfo,
+	}, now)
+	if err != nil || refreshed.Scnt != "retry-scnt" || refreshed.APIKey != "api-key" {
+		t.Fatalf("portal bootstrap refresh: state=%#v err=%v", refreshed, err)
+	}
+	want := []string{
+		"appleid.apple.com.cn" + appleAccountTokenPath,
+		"account.apple.com.cn/account/manage/section/privacy",
+		"account.apple.com.cn/bootstrap/portal",
+		"appleid.apple.com.cn" + appleAccountTokenPath,
+		"appleid.apple.com.cn/account/manage",
+	}
+	if strings.Join(paths, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("bootstrap paths = %#v, want %#v", paths, want)
+	}
+}
+
+func TestAppleAccountRefreshRejectsBootstrapWithoutScnt(t *testing.T) {
+	now := time.Date(2026, 8, 14, 9, 15, 0, 0, time.UTC)
+	client := NewAppleAccountClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Path == "/account/manage" {
+			t.Fatal("manage must not run without scnt")
+		}
+		body := `{}`
+		if request.URL.Path == "/account/manage/section/privacy" {
+			body = `<html></html>`
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+	})})
+
+	_, err := client.refresh(context.Background(), iCloudResourceChannelModel{
+		Host: "appleid.apple.com", Cookie: "myacinfo=secret",
+	}, now)
+	var appleErr *appleAccountError
+	if !errors.As(err, &appleErr) || appleErr.Category != "session_invalid" {
+		t.Fatalf("missing scnt error = %#v, want session_invalid", err)
+	}
+}
 
 func TestICloudProvisionFallsBackFromRateLimitedNewChannelToLegacyReconcile(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:icloud-provision-fallback?mode=memory&cache=shared"), &gorm.Config{})

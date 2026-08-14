@@ -17,6 +17,7 @@ type iCloudImportChannel struct {
 	Origin                string
 	Referer               string
 	UserAgent             string
+	FDClientInfo          string
 	DSID                  string
 	ClientID              string
 	ClientBuildNumber     string
@@ -116,7 +117,10 @@ func parseICloudCurlChannel(command string) (*iCloudImportChannel, error) {
 	if err != nil || len(tokens) == 0 || !strings.EqualFold(tokens[0], "curl") {
 		return nil, errors.New("invalid cURL")
 	}
-	requestURL, cookie, headers := extractICloudCurlArguments(tokens)
+	requestURL, cookie, headers, invalidHeader := extractICloudCurlArguments(tokens)
+	if invalidHeader {
+		return nil, errors.New("invalid header")
+	}
 	parsed, err := url.Parse(strings.TrimSpace(requestURL))
 	if err != nil || parsed.Scheme == "" || !strings.EqualFold(parsed.Scheme, "https") || parsed.User != nil || parsed.Hostname() == "" {
 		return nil, errors.New("invalid URL")
@@ -130,6 +134,7 @@ func parseICloudCurlChannel(command string) (*iCloudImportChannel, error) {
 	channel.Origin = strings.TrimSpace(headers["origin"])
 	channel.Referer = strings.TrimSpace(headers["referer"])
 	channel.UserAgent = strings.TrimSpace(headers["user-agent"])
+	channel.FDClientInfo = strings.TrimSpace(headers["x-apple-i-fd-client-info"])
 	if channel.Cookie == "" {
 		return nil, errors.New("missing cookie")
 	}
@@ -145,8 +150,8 @@ func parseICloudCurlChannel(command string) (*iCloudImportChannel, error) {
 		if channel.Scnt == "" {
 			channel.Scnt = strings.TrimSpace(headers["x-apple-scnt"])
 		}
-		if channel.Scnt == "" || !validICloudImportValue(channel.Scnt, iCloudImportClientMaxLength) {
-			return nil, errors.New("missing scnt")
+		if channel.Scnt != "" && !validICloudImportValue(channel.Scnt, iCloudImportClientMaxLength) {
+			return nil, errors.New("invalid scnt")
 		}
 		if channel.Origin == "" {
 			channel.Origin = defaultAppleAccountOrigin(host)
@@ -229,7 +234,7 @@ func validICloudCurlHeader(value string) bool {
 	return utf8.ValidString(value) && len(value) <= 2048 && !strings.ContainsAny(value, "\r\n")
 }
 
-func extractICloudCurlArguments(tokens []string) (requestURL, cookie string, headers map[string]string) {
+func extractICloudCurlArguments(tokens []string) (requestURL, cookie string, headers map[string]string, invalidHeader bool) {
 	headers = make(map[string]string)
 	for index := 1; index < len(tokens); index++ {
 		token := tokens[index]
@@ -258,6 +263,8 @@ func extractICloudCurlArguments(tokens []string) (requestURL, cookie string, hea
 			name, headerValue, found := strings.Cut(value, ":")
 			if found && validICloudCurlHeader(headerValue) {
 				headers[strings.ToLower(strings.TrimSpace(name))] = strings.TrimSpace(headerValue)
+			} else {
+				invalidHeader = true
 			}
 			if consumedNext {
 				index++
@@ -271,7 +278,7 @@ func extractICloudCurlArguments(tokens []string) (requestURL, cookie string, hea
 	if cookie == "" {
 		cookie = headers["cookie"]
 	}
-	return requestURL, cookie, headers
+	return requestURL, cookie, headers, invalidHeader
 }
 
 func iCloudCurlOptionValue(tokens []string, index int, token, longName, shortName string) (value string, matched, consumedNext bool) {

@@ -1059,7 +1059,8 @@ func upsertICloudImportChannelsTx(tx *gorm.DB, resourceID uint, channels []iClou
 		row := iCloudResourceChannelModel{
 			ResourceID: resourceID, Kind: kind, Host: strings.TrimSpace(channel.Host), Cookie: strings.TrimSpace(channel.Cookie),
 			Origin: strings.TrimSpace(channel.Origin), Referer: strings.TrimSpace(channel.Referer), UserAgent: strings.TrimSpace(channel.UserAgent),
-			DSID: strings.TrimSpace(channel.DSID), ClientID: strings.TrimSpace(channel.ClientID),
+			FDClientInfo: strings.TrimSpace(channel.FDClientInfo),
+			DSID:         strings.TrimSpace(channel.DSID), ClientID: strings.TrimSpace(channel.ClientID),
 			ClientBuildNumber: strings.TrimSpace(channel.ClientBuildNumber), ClientMasteringNumber: strings.TrimSpace(channel.ClientMasteringNumber),
 			Scnt: strings.TrimSpace(channel.Scnt), SessionStatus: iCloudSessionUnchecked, CreatedAt: now, UpdatedAt: now,
 		}
@@ -1076,7 +1077,8 @@ func upsertICloudImportChannelsTx(tx *gorm.DB, resourceID uint, channels []iClou
 		}
 		updates := map[string]any{
 			"host": row.Host, "cookie": row.Cookie, "origin": row.Origin, "referer": row.Referer, "user_agent": row.UserAgent,
-			"dsid": row.DSID, "client_id": row.ClientID, "client_build_number": row.ClientBuildNumber,
+			"fd_client_info": row.FDClientInfo,
+			"dsid":           row.DSID, "client_id": row.ClientID, "client_build_number": row.ClientBuildNumber,
 			"client_mastering_number": row.ClientMasteringNumber, "scnt": row.Scnt,
 			"session_status": iCloudSessionUnchecked, "session_failures": 0, "cooldown_until": nil, "cooldown_stage": 0,
 			"next_keepalive_at": nil, "last_checked_at": nil, "last_valid_at": nil, "updated_at": now,

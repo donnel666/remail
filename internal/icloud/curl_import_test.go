@@ -8,9 +8,10 @@ import (
 )
 
 const (
-	testICloudOldCookie = "X-APPLE-WEBAUTH-USER=user; X-APPLE-WEBAUTH-TOKEN=token; X-APPLE-DS-WEB-SESSION-TOKEN=session"
-	testICloudOldCurl   = `curl 'https://p119-maildomainws.icloud.com/v2/hme/list?clientBuildNumber=build&clientMasteringNumber=master&clientId=client&dsid=123' -H 'Cookie: ` + testICloudOldCookie + `'`
-	testICloudNewCurl   = `curl 'https://appleid.apple.com/account/manage/' -H 'Cookie: myacinfo=secret' -H 'scnt: scnt-value'`
+	testICloudOldCookie    = "X-APPLE-WEBAUTH-USER=user; X-APPLE-WEBAUTH-TOKEN=token; X-APPLE-DS-WEB-SESSION-TOKEN=session"
+	testICloudFDClientInfo = `{"F":"test-fingerprint"}`
+	testICloudOldCurl      = `curl --url 'https://p119-maildomainws.icloud.com.cn/v2/hme/list?clientBuildNumber=build&clientMasteringNumber=master&clientId=client&dsid=123' -b '` + testICloudOldCookie + `'`
+	testICloudNewCurl      = `curl --url 'https://appleid.apple.com/account/manage/gs/ws/token' -b 'myacinfo=secret' -H 'X-Apple-I-FD-Client-Info: ` + testICloudFDClientInfo + `'`
 )
 
 func TestParseICloudImportSupportsCompleteCredentialLines(t *testing.T) {
@@ -22,6 +23,7 @@ func TestParseICloudImportSupportsCompleteCredentialLines(t *testing.T) {
 		{name: "old channel", line: "owner@icloud.com----app-password----" + testICloudOldCurl, wantKinds: []string{iCloudChannelWeb}},
 		{name: "new channel", line: "owner@icloud.com----app-password----" + testICloudNewCurl, wantKinds: []string{iCloudChannelAppleAccount}},
 		{name: "both channels", line: "owner@icloud.com----app-password----" + testICloudNewCurl + "----" + testICloudOldCurl, wantKinds: []string{iCloudChannelAppleAccount, iCloudChannelWeb}},
+		{name: "both channels reversed", line: "owner@icloud.com----app-password----" + testICloudOldCurl + "----" + testICloudNewCurl, wantKinds: []string{iCloudChannelWeb, iCloudChannelAppleAccount}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -37,6 +39,9 @@ func TestParseICloudImportSupportsCompleteCredentialLines(t *testing.T) {
 				if line.Channels[index].Kind != kind {
 					t.Fatalf("channel %d kind = %q, want %q", index, line.Channels[index].Kind, kind)
 				}
+				if kind == iCloudChannelAppleAccount && line.Channels[index].FDClientInfo != testICloudFDClientInfo {
+					t.Fatalf("Apple Account FD client info = %q", line.Channels[index].FDClientInfo)
+				}
 			}
 		})
 	}
@@ -46,6 +51,7 @@ func TestParseICloudImportRejectsDuplicateOrUnsafeChannels(t *testing.T) {
 	tests := []string{
 		"owner@icloud.com----app-password----" + testICloudOldCurl + "----" + testICloudOldCurl,
 		"owner@icloud.com----app-password----curl 'https://p119-maildomainws.icloud.com.evil.example/v2/hme/list?clientBuildNumber=build&clientMasteringNumber=master&clientId=client&dsid=123' -H 'Cookie: " + testICloudOldCookie + "'",
+		"owner@icloud.com----app-password----" + strings.Replace(testICloudNewCurl, testICloudFDClientInfo, strings.Repeat("x", 2049), 1),
 		"owner@icloud.com----app-password",
 	}
 	for _, content := range tests {

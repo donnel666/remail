@@ -330,7 +330,7 @@ func updateICloudProvisionChannelTx(tx *gorm.DB, channel iCloudResourceChannelMo
 		}
 	}
 	updates := map[string]any{
-		"cookie": channel.Cookie, "scnt": channel.Scnt, "session_id": channel.SessionID,
+		"cookie": channel.Cookie, "fd_client_info": channel.FDClientInfo, "scnt": channel.Scnt, "session_id": channel.SessionID,
 		"api_key": channel.APIKey, "data_access_token": channel.DataAccessToken,
 		"manage_expires_at": channel.ManageExpiresAt, "next_keepalive_at": channel.NextKeepaliveAt,
 		"last_checked_at": now, "updated_at": now, "provision_window_at": windowAt,

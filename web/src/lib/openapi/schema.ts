@@ -3514,7 +3514,7 @@ export interface paths {
         put?: never;
         /**
          * Import iCloud resources for a selected owner
-         * @description Each non-empty TXT line is one complete credential set in one of three forms: `email----appPassword----oldCurl`, `email----appPassword----newCurl`, or `email----appPassword----newCurl----oldCurl`. The server classifies each cURL by its Apple host and path, parses it without executing shell syntax, rejects duplicate channels, and stores the app-specific password for IMAP receiving. The required `expireAt` controls only future alias creation; it does not stop allocation or receiving and does not change resource health. App passwords, cookies, cURL source, and parsed provider context remain write-only.
+         * @description Each non-empty TXT line is one complete credential set containing one old cURL, one new cURL, or both cURLs in either order: `email----appPassword----curl[----curl]`. The server classifies each cURL by its Apple host and path, parses it without executing shell syntax, rejects duplicate channels, and stores the app-specific password for IMAP receiving. The required `expireAt` controls only future alias creation; it does not stop allocation or receiving and does not change resource health. App passwords, cookies, cURL source, and parsed provider context remain write-only.
          */
         post: operations["postAdminICloudResourceImport"];
         delete?: never;
@@ -3679,7 +3679,7 @@ export interface paths {
         head?: never;
         /**
          * Atomically edit an iCloud resource
-         * @description Base fields require `core:resource/write`. Supplying `forSale`, `expireAt`, or `importLine` additionally requires `core:resource/operate`. Session authentication, CSRF, and an idempotency key are required. `importLine` is the same complete write-only line accepted by import: `email----appPassword----oldCurl`, `email----appPassword----newCurl`, or `email----appPassword----newCurl----oldCurl`. Changing the email or app password re-queues IMAP validation; changing only cURL sessions updates provisioning ability without changing resource health. Changing the email or owner conflicts with an active allocation. Changing `expireAt` only changes future alias creation eligibility.
+         * @description Base fields require `core:resource/write`. Supplying `forSale`, `expireAt`, or `importLine` additionally requires `core:resource/operate`. Session authentication, CSRF, and an idempotency key are required. `importLine` is the same complete write-only line accepted by import: `email----appPassword----curl[----curl]`, with one old cURL, one new cURL, or both cURLs in either order. Changing the email or app password re-queues IMAP validation; changing only cURL sessions updates provisioning ability without changing resource health. Changing the email or owner conflicts with an active allocation. Changing `expireAt` only changes future alias creation eligibility.
          */
         patch: operations["patchAdminICloudResource"];
         trace?: never;
@@ -7314,7 +7314,7 @@ export interface components {
         AdminICloudUpdateRequest: {
             /** @description Last observed resource version; stale writes return 409. */
             version: number;
-            /** @description Complete `email----appPassword----curl` credential line. It accepts one old cURL, one new cURL, or new then old cURLs. */
+            /** @description Complete `email----appPassword----curl[----curl]` credential line. It accepts one old cURL, one new cURL, or both cURLs in either order. */
             importLine?: string;
             ownerId?: number;
             forSale?: boolean;

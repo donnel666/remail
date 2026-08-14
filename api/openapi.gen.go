@@ -5531,7 +5531,7 @@ type AdminICloudUpdateRequest struct {
 	ExpireAt *time.Time `json:"expireAt,omitempty"`
 	ForSale  *bool      `json:"forSale,omitempty"`
 
-	// ImportLine Complete `email----appPassword----curl` credential line. It accepts one old cURL, one new cURL, or new then old cURLs.
+	// ImportLine Complete `email----appPassword----curl[----curl]` credential line. It accepts one old cURL, one new cURL, or both cURLs in either order.
 	ImportLine *string `json:"importLine,omitempty"`
 	OwnerId    *int    `json:"ownerId,omitempty"`
 

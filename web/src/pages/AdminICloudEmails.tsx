@@ -554,7 +554,7 @@ export function ImportICloudModal({
             {t("Supported format")}
           </div>
           <code className="block whitespace-pre-wrap break-all font-mono text-xs leading-relaxed text-[var(--semi-color-text-2)]">
-            {"email----appPassword----oldCurl\nemail----appPassword----newCurl\nemail----appPassword----newCurl----oldCurl"}
+            {"email----appPassword----oldCurl\nemail----appPassword----newCurl\nemail----appPassword----newCurl----oldCurl\nemail----appPassword----oldCurl----newCurl"}
           </code>
         </div>
 
@@ -743,13 +743,13 @@ export function EditICloudModal({
               <TextArea
                 className="font-mono"
                 onChange={setImportLine}
-                placeholder="email----appPassword----newCurl----oldCurl"
+                placeholder="email----appPassword----curl[----curl]"
                 rows={7}
                 style={{ resize: "none" }}
                 value={importLine}
               />
               <code className="mt-2 block whitespace-pre-wrap break-all font-mono text-xs leading-5 text-[var(--semi-color-text-2)]">
-                {"email----appPassword----oldCurl\nemail----appPassword----newCurl\nemail----appPassword----newCurl----oldCurl"}
+                {"email----appPassword----oldCurl\nemail----appPassword----newCurl\nemail----appPassword----newCurl----oldCurl\nemail----appPassword----oldCurl----newCurl"}
               </code>
             </div>
           ) : null}

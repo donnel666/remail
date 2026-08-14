@@ -305,7 +305,8 @@ func sameICloudChannels(existing []iCloudResourceChannelModel, imported []iCloud
 		current, ok := byKind[channel.Kind]
 		if !ok || current.Host != strings.TrimSpace(channel.Host) || current.Cookie != strings.TrimSpace(channel.Cookie) ||
 			current.Origin != strings.TrimSpace(channel.Origin) || current.Referer != strings.TrimSpace(channel.Referer) ||
-			current.UserAgent != strings.TrimSpace(channel.UserAgent) || current.DSID != strings.TrimSpace(channel.DSID) ||
+			current.UserAgent != strings.TrimSpace(channel.UserAgent) || current.FDClientInfo != strings.TrimSpace(channel.FDClientInfo) ||
+			current.DSID != strings.TrimSpace(channel.DSID) ||
 			current.ClientID != strings.TrimSpace(channel.ClientID) || current.ClientBuildNumber != strings.TrimSpace(channel.ClientBuildNumber) ||
 			current.ClientMasteringNumber != strings.TrimSpace(channel.ClientMasteringNumber) || current.Scnt != strings.TrimSpace(channel.Scnt) {
 			return false

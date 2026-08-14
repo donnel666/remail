@@ -595,7 +595,7 @@ describe("admin iCloud modal workflows", () => {
 
     const content =
       "main@icloud.com----app-password----curl 'https://appleid.apple.com/account/manage/gs/ws/token' \\\n  -H 'cookie: myacinfo=secret' \\\n  -H 'scnt: scnt-value'";
-    fireEvent.change(screen.getByPlaceholderText("email----appPassword----newCurl----oldCurl"), {
+    fireEvent.change(screen.getByPlaceholderText("email----appPassword----curl[----curl]"), {
       target: { value: content },
     });
     fireEvent.click(screen.getByRole("button", { name: "Replace credentials" }));
