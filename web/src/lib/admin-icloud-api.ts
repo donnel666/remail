@@ -63,6 +63,10 @@ type AdminICloudSelection = components["schemas"]["AdminICloudBulkSelection"];
 
 const OWNER_PAGE_SIZE = 100;
 
+export function normalizeICloudImportContent(content: string) {
+  return content.replace(/[ \t]*\\[ \t]*\r?\n[ \t]*/g, " ");
+}
+
 function commandHeaders() {
   return {
     ...csrfHeader(),
@@ -170,10 +174,11 @@ export async function importAdminICloudResources(
   request: AdminICloudImportRequest,
   signal?: AbortSignal,
 ): Promise<AdminICloudImportResponse> {
+  const content = normalizeICloudImportContent(request.content);
   const formData = new FormData();
   formData.append(
     "file",
-    new File([request.content], "icloud-resources.txt", { type: "text/plain" }),
+    new File([content], "icloud-resources.txt", { type: "text/plain" }),
   );
   formData.append("ownerId", String(request.ownerId));
   formData.append("errorStrategy", request.errorStrategy);
@@ -281,9 +286,16 @@ export async function updateAdminICloudResource(
   request: AdminICloudUpdateRequest,
   signal?: AbortSignal,
 ): Promise<AdminICloudMutationResponse> {
+  const body =
+    request.importLine === undefined
+      ? request
+      : {
+          ...request,
+          importLine: normalizeICloudImportContent(request.importLine),
+        };
   return unwrap(
     await client.PATCH("/v1/admin/icloud/resources/{resourceId}", {
-      body: request,
+      body,
       params: {
         header: commandHeaders(),
         path: { resourceId },

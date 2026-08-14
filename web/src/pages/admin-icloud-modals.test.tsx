@@ -483,7 +483,10 @@ describe("admin iCloud modal workflows", () => {
     fireEvent.click(fileButton);
     expect(fileButton).toHaveAttribute("aria-pressed", "true");
 
-    const content = "main@icloud.com----app-password----curl --url 'https://p217-maildomainws.icloud.com.cn/v2/hme/list?dsid=123' -H 'scnt: scnt-value' -b 'X-APPLE-WEBAUTH-TOKEN=secret'";
+    const content =
+      "main@icloud.com----app-password----curl --url 'https://p217-maildomainws.icloud.com.cn/v2/hme/list?dsid=123' \\\r\n  -H 'scnt: scnt-value' \\\r\n  -b 'X-APPLE-WEBAUTH-TOKEN=secret'";
+    const normalizedContent =
+      "main@icloud.com----app-password----curl --url 'https://p217-maildomainws.icloud.com.cn/v2/hme/list?dsid=123' -H 'scnt: scnt-value' -b 'X-APPLE-WEBAUTH-TOKEN=secret'";
     const file = new File([content], "icloud.txt", { type: "text/plain" });
     Object.defineProperty(file, "text", { value: vi.fn().mockResolvedValue(content) });
     fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [file] } });
@@ -491,7 +494,7 @@ describe("admin iCloud modal workflows", () => {
 
     await waitFor(() => expect(mocks.importResources).toHaveBeenCalledWith(
       expect.objectContaining({
-        content,
+        content: normalizedContent,
         errorStrategy: "skip",
         expireAt: expect.any(String),
         ownerId: 7,
@@ -511,7 +514,10 @@ describe("admin iCloud modal workflows", () => {
     );
 
     await waitFor(() => expect(screen.getByLabelText("owner")).toHaveValue("7"));
-    const content = "main@icloud.com----app-password----curl --url 'https://p217-maildomainws.icloud.com.cn/v2/hme/list?dsid=123' -H 'scnt: scnt-value' -b 'X-APPLE-WEBAUTH-TOKEN=secret'";
+    const content =
+      "main@icloud.com----app-password----curl --url 'https://p217-maildomainws.icloud.com.cn/v2/hme/list?dsid=123' \\\n  -H 'scnt: scnt-value' \\\n  -b 'X-APPLE-WEBAUTH-TOKEN=secret'";
+    const normalizedContent =
+      "main@icloud.com----app-password----curl --url 'https://p217-maildomainws.icloud.com.cn/v2/hme/list?dsid=123' -H 'scnt: scnt-value' -b 'X-APPLE-WEBAUTH-TOKEN=secret'";
     fireEvent.change(screen.getByPlaceholderText("primary@icloud.com----app-password----curl ..."), {
       target: { value: content },
     });
@@ -519,7 +525,7 @@ describe("admin iCloud modal workflows", () => {
 
     await waitFor(() => expect(mocks.importResources).toHaveBeenCalledWith(
       expect.objectContaining({
-        content,
+        content: normalizedContent,
         errorStrategy: "skip",
         expireAt: expect.any(String),
         ownerId: 7,
@@ -572,6 +578,36 @@ describe("admin iCloud modal workflows", () => {
     expect(mocks.updateResource).not.toHaveBeenCalled();
     expect(mocks.toastWarning).toHaveBeenCalledWith(
       "Complete iCloud credential line is required.",
+    );
+  });
+
+  it("normalizes Bash cURL continuations when replacing credentials", async () => {
+    render(
+      <EditICloudModal
+        canOperate
+        credentialsOnly
+        onCancel={vi.fn()}
+        onSaved={vi.fn()}
+        owners={[owner]}
+        target={resource()}
+      />,
+    );
+
+    const content =
+      "main@icloud.com----app-password----curl 'https://appleid.apple.com/account/manage/gs/ws/token' \\\n  -H 'cookie: myacinfo=secret' \\\n  -H 'scnt: scnt-value'";
+    fireEvent.change(screen.getByPlaceholderText("email----appPassword----newCurl----oldCurl"), {
+      target: { value: content },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Replace credentials" }));
+
+    await waitFor(() =>
+      expect(mocks.updateResource).toHaveBeenCalledWith(
+        41,
+        expect.objectContaining({
+          importLine:
+            "main@icloud.com----app-password----curl 'https://appleid.apple.com/account/manage/gs/ws/token' -H 'cookie: myacinfo=secret' -H 'scnt: scnt-value'",
+        }),
+      ),
     );
   });
 });

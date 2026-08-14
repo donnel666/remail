@@ -30,6 +30,7 @@ import {
   listAdminICloudAliases,
   listAdminICloudResources,
   listAdminICloudTasks,
+  normalizeICloudImportContent,
   setAdminICloudResourcesExpirationByFilter,
   setAdminICloudResourcesExpirationByIds,
   updateAdminICloudResource,
@@ -95,6 +96,16 @@ describe("admin iCloud API adapter", () => {
     idempotencyMock.mockReturnValue("icloud-command-1");
   });
 
+  it("normalizes Bash cURL continuations without merging resource lines", () => {
+    expect(
+      normalizeICloudImportContent(
+        "first@icloud.com----password----curl 'https://example.com' \\\n  -H 'x-test: one'\nsecond@icloud.com----password----curl 'https://example.com'",
+      ),
+    ).toBe(
+      "first@icloud.com----password----curl 'https://example.com' -H 'x-test: one'\nsecond@icloud.com----password----curl 'https://example.com'",
+    );
+  });
+
   it("uses the shared OpenAPI client for list and expiration-aware import", async () => {
     apiMocks.GET.mockResolvedValueOnce({ data: EMPTY_LIST });
     apiMocks.POST.mockResolvedValueOnce({ data: IMPORT_RESPONSE });
@@ -125,6 +136,8 @@ describe("admin iCloud API adapter", () => {
     );
 
     const content =
+      "primary@icloud.com----app-password----curl --url 'https://p217-maildomainws.icloud.com.cn/v2/hme/list?dsid=123' \\\r\n  -H 'scnt: scnt-value' \\\r\n  -b 'X-APPLE-WEBAUTH-TOKEN=secret'";
+    const normalizedContent =
       "primary@icloud.com----app-password----curl --url 'https://p217-maildomainws.icloud.com.cn/v2/hme/list?dsid=123' -H 'scnt: scnt-value' -b 'X-APPLE-WEBAUTH-TOKEN=secret'";
     await expect(
       importAdminICloudResources({
@@ -145,7 +158,7 @@ describe("admin iCloud API adapter", () => {
     expect(formData.get("expireAt")).toBe("2026-10-07T08:00:00Z");
     expect(formData.has("longLived")).toBe(false);
     expect((formData.get("file") as File).name).toBe("icloud-resources.txt");
-    expect(await (formData.get("file") as File).text()).toBe(content);
+    expect(await (formData.get("file") as File).text()).toBe(normalizedContent);
     expect(request.params.header).toEqual({
       "X-CSRF-Token": "admin-csrf",
       "Idempotency-Key": "icloud-command-1",
@@ -331,7 +344,7 @@ describe("admin iCloud API adapter", () => {
       ownerId: 101,
       expireAt: "2026-10-07T08:00:00Z",
       importLine:
-        "primary@icloud.com----app-password----curl --url 'https://p217-maildomainws.icloud.com.cn/v2/hme/list?dsid=123' -H 'scnt: scnt-value' -b 'X-APPLE-WEBAUTH-TOKEN=secret'",
+        "primary@icloud.com----app-password----curl --url 'https://p217-maildomainws.icloud.com.cn/v2/hme/list?dsid=123' \\\n  -H 'scnt: scnt-value' \\\n  -b 'X-APPLE-WEBAUTH-TOKEN=secret'",
     });
 
     expect(apiMocks.PATCH).toHaveBeenCalledWith(
@@ -341,7 +354,8 @@ describe("admin iCloud API adapter", () => {
           version: 4,
           ownerId: 101,
           expireAt: "2026-10-07T08:00:00Z",
-          importLine: expect.stringContaining("primary@icloud.com----app-password----curl"),
+          importLine:
+            "primary@icloud.com----app-password----curl --url 'https://p217-maildomainws.icloud.com.cn/v2/hme/list?dsid=123' -H 'scnt: scnt-value' -b 'X-APPLE-WEBAUTH-TOKEN=secret'",
         }),
         params: {
           header: {

@@ -60,6 +60,7 @@ import {
   listAdminICloudOwners,
   listAdminICloudResources,
   listAdminICloudTasks,
+  normalizeICloudImportContent,
   publishAdminICloudResource,
   recoverAdminICloudResource,
   setAdminICloudResourcesExpirationByFilter,
@@ -347,7 +348,10 @@ export function ImportICloudModal({
   const fileRef = useRef<HTMLInputElement>(null);
   const previousVisible = useRef(false);
   const lineCount = useMemo(
-    () => content.split(/\r?\n/).filter((line) => line.trim()).length,
+    () =>
+      normalizeICloudImportContent(content)
+        .split(/\r?\n/)
+        .filter((line) => line.trim()).length,
     [content],
   );
 
@@ -391,6 +395,7 @@ export function ImportICloudModal({
         return;
       }
     }
+    sourceContent = normalizeICloudImportContent(sourceContent);
     const sourceLineCount = sourceContent
       .split(/\r?\n/)
       .filter((line) => line.trim()).length;
@@ -620,7 +625,7 @@ export function EditICloudModal({
 
   const submit = async () => {
     if (!target || (!credentialsOnly && !ownerId)) return;
-    const nextImportLine = importLine.trim();
+    const nextImportLine = normalizeICloudImportContent(importLine).trim();
     if (credentialsOnly && !nextImportLine) {
       Toast.warning(t("Complete iCloud credential line is required."));
       return;
