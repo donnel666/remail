@@ -30,11 +30,12 @@ import {
 } from "@/components/semi/card-table";
 import { CompactModeToggle } from "@/components/semi/compact-mode-toggle";
 import { StatisticFilterOption } from "@/components/semi/statistic-filter-option";
-import { useBlockPagedList } from "@/hooks/use-block-paged-list";
 import {
-  SHARED_SEARCH_DEBOUNCE_MS,
-  useDebouncedValue,
-} from "@/hooks/use-debounced-value";
+  AdminUserSelect,
+  type AdminUserSelectOption,
+} from "@/components/semi/admin-user-select";
+import { useBlockPagedList } from "@/hooks/use-block-paged-list";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import {
@@ -422,8 +423,18 @@ function normalizeAccessUserIDs(userIDs: number[]) {
 }
 
 function accessUserLabel(user: ProjectAccessUser) {
-  if (user.email && user.nickname) return `${user.email} · ${user.nickname}`;
-  return user.email || user.nickname || `#${user.id}`;
+  const identity = [user.email, user.nickname].filter(Boolean).join(" · ");
+  return identity ? `${identity} · #${user.id}` : `#${user.id}`;
+}
+
+function accessUserOption(
+  user: ProjectAccessUser
+): AdminUserSelectOption<ProjectAccessUser> {
+  return {
+    data: user,
+    label: accessUserLabel(user),
+    value: user.id,
+  };
 }
 
 function withProjectAccessUserIDs(
@@ -1050,14 +1061,11 @@ function ProjectEditorSheet({
   const isMobile = useIsMobile();
   const [draft, setDraft] = useState<ProjectDraft>(initialDraft);
   const [accessUsers, setAccessUsers] = useState<ProjectAccessUser[]>([]);
-  const [accessSearchUsers, setAccessSearchUsers] = useState<ProjectAccessUser[]>([]);
-  const [accessSearchLoading, setAccessSearchLoading] = useState(false);
-  const [selectedAccessUserID, setSelectedAccessUserID] = useState<number | undefined>();
+  const [selectedAccessUser, setSelectedAccessUser] =
+    useState<ProjectAccessUser>();
   const [logoGallery, setLogoGallery] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const accessHydrateSeqRef = useRef(0);
-  const accessSearchDebounceRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null);
-  const accessSearchSeqRef = useRef(0);
 
   const hydrateAccessUsers = useCallback(async (userIDs: number[]) => {
     const ids = normalizeAccessUserIDs(userIDs);
@@ -1098,8 +1106,7 @@ function ProjectEditorSheet({
     const accessUserIDs = mode === "create" ? [] : projectAccessUserIDs(detail);
     setDraft(nextDraft);
     setAccessUsers(mode === "create" ? [] : projectAccessUsers(detail));
-    setAccessSearchUsers([]);
-    setSelectedAccessUserID(undefined);
+    setSelectedAccessUser(undefined);
     setLogoGallery(
       Array.from(
         new Set(
@@ -1114,11 +1121,7 @@ function ProjectEditorSheet({
 
   useEffect(() => {
     return () => {
-      if (accessSearchDebounceRef.current) {
-        globalThis.clearTimeout(accessSearchDebounceRef.current);
-      }
       accessHydrateSeqRef.current += 1;
-      accessSearchSeqRef.current += 1;
     };
   }, []);
 
@@ -1141,62 +1144,32 @@ function ProjectEditorSheet({
     });
   };
 
-  const searchAccessUsers = useCallback(async (keyword: string) => {
-    const seq = accessSearchSeqRef.current + 1;
-    accessSearchSeqRef.current = seq;
-    setAccessSearchLoading(true);
-    try {
-      const response = await listAdminUsers({
-        limit: 20,
-        offset: 0,
-        search: keyword.trim(),
-      });
-      if (accessSearchSeqRef.current !== seq) return;
-      setAccessSearchUsers(
-        response.users.map((user) => ({
-          email: user.email,
-          id: user.id,
-          nickname: user.nickname,
-        }))
-      );
-    } catch (error) {
-      if (accessSearchSeqRef.current === seq) {
-        Toast.error(getIamErrorMessage(t, error, "Users load failed."));
-      }
-    } finally {
-      if (accessSearchSeqRef.current === seq) {
-        setAccessSearchLoading(false);
-      }
-    }
-  }, [t]);
-
-  const debouncedSearchAccessUsers = useCallback((keyword: string) => {
-    if (accessSearchDebounceRef.current) {
-      globalThis.clearTimeout(accessSearchDebounceRef.current);
-    }
-    accessSearchDebounceRef.current = globalThis.setTimeout(() => {
-      void searchAccessUsers(keyword);
-    }, SHARED_SEARCH_DEBOUNCE_MS);
-  }, [searchAccessUsers]);
+  const loadAccessUserOptions = useCallback(async (keyword: string) => {
+    const response = await listAdminUsers({
+      limit: 20,
+      offset: 0,
+      search: keyword.trim(),
+    });
+    return response.users.map((user) =>
+      accessUserOption({
+        email: user.email,
+        id: user.id,
+        nickname: user.nickname,
+      })
+    );
+  }, []);
 
   const addAccessUser = () => {
-    if (!selectedAccessUserID) {
+    if (!selectedAccessUser) {
       Toast.error(t("Please select a user."));
       return;
     }
-    if (accessUsers.some((user) => user.id === selectedAccessUserID)) {
+    if (accessUsers.some((user) => user.id === selectedAccessUser.id)) {
       Toast.info(t("User is already authorized."));
       return;
     }
-    const selectedUser =
-      accessSearchUsers.find((user) => user.id === selectedAccessUserID) ??
-      ({
-        email: "",
-        id: selectedAccessUserID,
-        nickname: "",
-      } satisfies ProjectAccessUser);
-    setAccessUsers((previous) => [selectedUser, ...previous]);
-    setSelectedAccessUserID(undefined);
+    setAccessUsers((previous) => [selectedAccessUser, ...previous]);
+    setSelectedAccessUser(undefined);
   };
 
   const removeAccessUser = (userID: number) => {
@@ -1316,46 +1289,22 @@ function ProjectEditorSheet({
                 {t("Authorized users")}
               </div>
               <div className="mb-3 flex flex-col gap-2 sm:flex-row">
-                <Select
+                <AdminUserSelect<ProjectAccessUser>
                   emptyContent={t("No users found")}
-                  filter
-                  loading={accessSearchLoading}
-                  onChange={(value) => {
-                    const userID = Number(value);
-                    setSelectedAccessUserID(
-                      Number.isInteger(userID) && userID > 0 ? userID : undefined
+                  loadOptions={loadAccessUserOptions}
+                  onChange={(_userID, option) => {
+                    setSelectedAccessUser(option?.data);
+                  }}
+                  onLoadError={(error) => {
+                    Toast.error(
+                      getIamErrorMessage(t, error, "Users load failed.")
                     );
                   }}
-                  onDropdownVisibleChange={(visible) => {
-                    if (visible && accessSearchUsers.length === 0) {
-                      void searchAccessUsers("");
-                    }
-                  }}
-                  onSearch={debouncedSearchAccessUsers}
                   placeholder={t("Search user by email, nickname or ID")}
-                  remote
-                  searchPosition="dropdown"
                   showClear
                   style={{ flex: 1, width: "100%" }}
-                  value={selectedAccessUserID}
-                >
-                  {accessSearchUsers.map((user) => (
-                    <Select.Option
-                      key={user.id}
-                      label={accessUserLabel(user)}
-                      value={user.id}
-                    >
-                      <div className="min-w-0">
-                        <div className="truncate text-sm text-[var(--semi-color-text-0)]">
-                          {user.email || `#${user.id}`}
-                        </div>
-                        <div className="truncate text-xs text-[var(--semi-color-text-2)]">
-                          {user.nickname ? `${user.nickname} · #${user.id}` : `#${user.id}`}
-                        </div>
-                      </div>
-                    </Select.Option>
-                  ))}
-                </Select>
+                  value={selectedAccessUser?.id}
+                />
                 <Button onClick={addAccessUser} type="primary">
                   {t("Grant access")}
                 </Button>

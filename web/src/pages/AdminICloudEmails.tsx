@@ -6,7 +6,6 @@ import {
   Empty,
   Input,
   Modal,
-  Select,
   SideSheet,
   Space,
   Spin,
@@ -37,14 +36,15 @@ import { CompactModeToggle } from "@/components/semi/compact-mode-toggle";
 import { CopyableTableText } from "@/components/semi/copyable-table-text";
 import { StatisticFilterOption } from "@/components/semi/statistic-filter-option";
 import {
+  AdminUserSelect,
+  type AdminUserSelectOption,
+} from "@/components/semi/admin-user-select";
+import {
   hasPermissionKey,
   permissionKey,
   useAuth,
 } from "@/context/auth-provider";
-import {
-  SHARED_SEARCH_DEBOUNCE_MS,
-  useDebouncedValue,
-} from "@/hooks/use-debounced-value";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import {
@@ -246,77 +246,54 @@ function AliasCountTag({ count, limit }: { count: number; limit: number }) {
   );
 }
 
+function ownerOption(
+  owner: AdminICloudOwner,
+  t: ReturnType<typeof useTranslation>["t"],
+): AdminUserSelectOption<AdminICloudOwner> {
+  return {
+    data: owner,
+    disabled: !owner.enabled,
+    label: `${owner.email} · ${owner.nickname} · ${t(ownerRoleLabel(owner.role))} · ${owner.groupName}`,
+    value: owner.id,
+  };
+}
+
 function OwnerSelect({
   onChange,
   owners,
+  selectedOwner,
   t,
   value,
 }: {
   onChange: (ownerId: number) => void;
   owners: AdminICloudOwner[];
+  selectedOwner?: AdminICloudOwner;
   t: ReturnType<typeof useTranslation>["t"];
   value?: number;
 }) {
-  const [options, setOptions] = useState(owners);
-  const [loading, setLoading] = useState(false);
-  const requestSequence = useRef(0);
-  const searchDebounce = useRef<ReturnType<typeof globalThis.setTimeout> | null>(
-    null,
+  const options = useMemo(
+    () => owners.map((owner) => ownerOption(owner, t)),
+    [owners, t],
   );
-
-  useEffect(() => setOptions(owners), [owners]);
-  useEffect(
-    () => () => {
-      if (searchDebounce.current) globalThis.clearTimeout(searchDebounce.current);
-    },
-    [],
+  const selectedOption = useMemo(
+    () => (selectedOwner ? ownerOption(selectedOwner, t) : undefined),
+    [selectedOwner, t],
   );
-
-  const searchOwners = async (keyword: string) => {
-    const sequence = ++requestSequence.current;
-    setLoading(true);
-    try {
-      const result = await listAdminICloudOwners(keyword);
-      if (requestSequence.current === sequence) {
-        const selected = owners.find((owner) => owner.id === value);
-        setOptions(
-          selected && !result.some((owner) => owner.id === selected.id)
-            ? [selected, ...result]
-            : result,
-        );
-      }
-    } catch {
-      // Keep the previous bounded result; the next search retries IAM.
-    } finally {
-      if (requestSequence.current === sequence) setLoading(false);
-    }
-  };
-
-  const queueOwnerSearch = (keyword: string) => {
-    if (searchDebounce.current) globalThis.clearTimeout(searchDebounce.current);
-    searchDebounce.current = globalThis.setTimeout(() => {
-      void searchOwners(keyword);
-    }, SHARED_SEARCH_DEBOUNCE_MS);
-  };
 
   return (
-    <Select
+    <AdminUserSelect
       emptyContent={t("No users found")}
-      filter
-      loading={loading}
-      onChange={(next) => onChange(Number(next))}
-      onDropdownVisibleChange={(visible) => {
-        if (visible && options.length === 0) void searchOwners("");
+      loadOptions={async (keyword) =>
+        (await listAdminICloudOwners(keyword)).map((owner) =>
+          ownerOption(owner, t)
+        )
+      }
+      onChange={(ownerID) => {
+        if (ownerID) onChange(ownerID);
       }}
-      onSearch={queueOwnerSearch}
-      optionList={options.map((owner) => ({
-        disabled: !owner.enabled,
-        label: `${owner.email} · ${owner.nickname} · ${t(ownerRoleLabel(owner.role))} · ${owner.groupName}`,
-        value: owner.id,
-      }))}
+      options={options}
       placeholder={t("Search user by email, nickname or ID")}
-      remote
-      searchPosition="dropdown"
+      selectedOption={selectedOption}
       style={{ width: "100%" }}
       value={value}
     />
@@ -707,7 +684,13 @@ export function EditICloudModal({
                 <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
                   {t("Owner")}
                 </span>
-                <OwnerSelect onChange={setOwnerId} owners={owners} t={t} value={ownerId} />
+                <OwnerSelect
+                  onChange={setOwnerId}
+                  owners={owners}
+                  selectedOwner={target.owner}
+                  t={t}
+                  value={ownerId}
+                />
               </label>
 
               {canOperate ? (

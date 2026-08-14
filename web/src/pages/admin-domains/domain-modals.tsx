@@ -209,6 +209,19 @@ export function DomainFormModal({
               value: owner.id,
             }))}
             placeholder={t("Search user by email, nickname or ID")}
+            renderSelectedItem={(
+              option: { label?: string | number; value?: unknown }
+            ) => {
+              const owner = owners.find(
+                (item) => item.id === Number(option.value)
+              );
+              if (owner) {
+                return `${owner.email} · ${owner.nickname} · #${owner.id}`;
+              }
+              return target?.ownerId === Number(option.value)
+                ? `${target.ownerEmail} · ${target.ownerNickname} · #${target.ownerId}`
+                : option.label;
+            }}
             style={{ width: "100%" }}
             value={draft.ownerId}
           />

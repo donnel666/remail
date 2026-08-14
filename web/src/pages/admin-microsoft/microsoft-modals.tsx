@@ -3,7 +3,6 @@ import {
   Input,
   InputNumber,
   Modal,
-  Select,
   Switch,
   TextArea,
   Toast,
@@ -11,7 +10,10 @@ import {
 } from "@douyinfe/semi-ui";
 import { useTranslation } from "react-i18next";
 
-import { SHARED_SEARCH_DEBOUNCE_MS } from "@/hooks/use-debounced-value";
+import {
+  AdminUserSelect,
+  type AdminUserSelectOption,
+} from "@/components/semi/admin-user-select";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import {
   importAdminMicrosoftResources,
@@ -44,75 +46,54 @@ function switchButtonClass(active: boolean) {
   ].join(" ");
 }
 
+function ownerOption(
+  owner: AdminMicrosoftOwner,
+  t: ReturnType<typeof useTranslation>["t"]
+): AdminUserSelectOption<AdminMicrosoftOwner> {
+  return {
+    data: owner,
+    disabled: !owner.enabled,
+    label: `${owner.email} · ${owner.nickname} · ${t(ownerRoleLabel(owner.role))} · ${owner.groupName}`,
+    value: owner.id,
+  };
+}
+
 function OwnerSelect({
   onChange,
   owners,
+  selectedOwner,
   t,
   value,
 }: {
   onChange: (ownerId: number) => void;
   owners: AdminMicrosoftOwner[];
+  selectedOwner?: AdminMicrosoftOwner;
   t: ReturnType<typeof useTranslation>["t"];
   value?: number;
 }) {
-  const [options, setOptions] = useState(owners);
-  const [loading, setLoading] = useState(false);
-  const requestSequence = useRef(0);
-  const searchDebounce = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null);
-
-  useEffect(() => setOptions(owners), [owners]);
-  useEffect(
-    () => () => {
-      if (searchDebounce.current) globalThis.clearTimeout(searchDebounce.current);
-    },
-    []
+  const options = useMemo(
+    () => owners.map((owner) => ownerOption(owner, t)),
+    [owners, t]
+  );
+  const selectedOption = useMemo(
+    () => (selectedOwner ? ownerOption(selectedOwner, t) : undefined),
+    [selectedOwner, t]
   );
 
-  const searchOwners = async (keyword: string) => {
-    const sequence = ++requestSequence.current;
-    setLoading(true);
-    try {
-      const result = await listAdminMicrosoftOwners(keyword);
-      if (requestSequence.current === sequence) {
-        const selected = owners.find((owner) => owner.id === value);
-        setOptions(
-          selected && !result.some((owner) => owner.id === selected.id)
-            ? [selected, ...result]
-            : result
-        );
-      }
-    } catch {
-      // Keep the previous bounded result; the next search retries IAM.
-    } finally {
-      if (requestSequence.current === sequence) setLoading(false);
-    }
-  };
-
-  const queueOwnerSearch = (keyword: string) => {
-    if (searchDebounce.current) globalThis.clearTimeout(searchDebounce.current);
-    searchDebounce.current = globalThis.setTimeout(() => {
-      void searchOwners(keyword);
-    }, SHARED_SEARCH_DEBOUNCE_MS);
-  };
-
   return (
-    <Select
+    <AdminUserSelect
       emptyContent={t("No users found")}
-      filter
-      loading={loading}
-      onChange={(next) => onChange(Number(next))}
-      onDropdownVisibleChange={(visible) => {
-        if (visible && options.length === 0) void searchOwners("");
+      loadOptions={async (keyword) =>
+        (await listAdminMicrosoftOwners(keyword)).map((owner) =>
+          ownerOption(owner, t)
+        )
+      }
+      onChange={(ownerID) => {
+        if (ownerID) onChange(ownerID);
       }}
-      onSearch={queueOwnerSearch}
-      optionList={options.map((owner) => ({
-        disabled: !owner.enabled,
-        label: `${owner.email} · ${owner.nickname} · ${t(ownerRoleLabel(owner.role))} · ${owner.groupName}`,
-        value: owner.id,
-      }))}
+      options={options}
       placeholder={t("Search user by email, nickname or ID")}
-      remote
-      searchPosition="dropdown"
+      selectedOption={selectedOption}
       style={{ width: "100%" }}
       value={value}
     />
@@ -440,7 +421,13 @@ export function EditMicrosoftModal({
             <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
               {t("Owner")}
             </span>
-            <OwnerSelect onChange={setOwnerId} owners={owners} t={t} value={ownerId} />
+            <OwnerSelect
+              onChange={setOwnerId}
+              owners={owners}
+              selectedOwner={target.owner}
+              t={t}
+              value={ownerId}
+            />
           </label>
           <label className="block">
             <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
