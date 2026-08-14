@@ -20,6 +20,7 @@ import (
 	coredomain "github.com/donnel666/remail/internal/core/domain"
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/platform/testmysql"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -1113,24 +1114,28 @@ func TestInventoryStatsExcludePrivateMicrosoftFromSharedPoolMySQL(t *testing.T) 
 func TestICloudInventoryIgnoresExpirationAndCookieStateMySQL(t *testing.T) {
 	db := newAllocMySQLTestDB(t)
 	seedAllocBase(t, db, "icloud", 1, 0, 0)
+	seedDomainResourcesWithPurpose(t, db, 1, 2000, 1, "binding")
+	previousSuffixes := runtimeconfig.String(runtimeconfig.ICloudForwardingSuffixesKey, "")
+	runtimeconfig.Set(runtimeconfig.ICloudForwardingSuffixesKey, "d2000.example.com")
+	t.Cleanup(func() { runtimeconfig.Set(runtimeconfig.ICloudForwardingSuffixesKey, previousSuffixes) })
 	require.NoError(t, db.Exec(`
 INSERT INTO email_resources(id, type, owner_user_id) VALUES
     (1000, 'icloud', 1),
     (1001, 'icloud', 2)`).Error)
 	require.NoError(t, db.Exec(`
-INSERT INTO icloud_resources(
-	    id, primary_email, imap_app_password, expire_at, for_sale, status, alias_count
-) VALUES
-	    (1000, 'public@icloud.com', 'app-password', DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 DAY), TRUE, 'normal', 1),
-	    (1001, 'owned@icloud.com', 'app-password', DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 DAY), TRUE, 'normal', 1)`).Error)
+	INSERT INTO icloud_resources(
+		    id, primary_email, expire_at, for_sale, status, alias_count
+	) VALUES
+		    (1000, 'public@icloud.com', DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 DAY), TRUE, 'normal', 1),
+		    (1001, 'owned@icloud.com', DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 DAY), TRUE, 'normal', 1)`).Error)
 	require.NoError(t, db.Exec(`
 INSERT INTO icloud_resource_channels(resource_id, kind, host, cookie, session_status) VALUES
 	    (1000, 'apple_account', 'appleid.apple.com', 'cookie', 'valid'),
 	    (1001, 'icloud_web', 'p119-maildomainws.icloud.com', 'cookie', 'invalid')`).Error)
 	require.NoError(t, db.Exec(`
-INSERT INTO icloud_aliases(resource_id, anonymous_id, email, status) VALUES
-    (1000, 'anon-public', 'public-alias@icloud.com', 'normal'),
-    (1001, 'anon-owned', 'owned-alias@icloud.com', 'normal')`).Error)
+	INSERT INTO icloud_aliases(resource_id, anonymous_id, email, forward_to_email, status) VALUES
+	    (1000, 'anon-public', 'public-alias@icloud.com', 'mailbox@d2000.example.com', 'normal'),
+	    (1001, 'anon-owned', 'owned-alias@icloud.com', 'mailbox@d2000.example.com', 'normal')`).Error)
 
 	repo := NewRepo(db)
 	stats, err := repo.GetInventoryStats(context.Background(), 10)
@@ -1189,23 +1194,27 @@ INSERT INTO icloud_aliases(resource_id, anonymous_id, email, status) VALUES
 func TestUserICloudInventoryTotalsAreOwnerScopedMySQL(t *testing.T) {
 	db := newAllocMySQLTestDB(t)
 	seedAllocBase(t, db, "icloud", 1, 0, 0)
+	seedDomainResourcesWithPurpose(t, db, 1, 2000, 1, "binding")
+	previousSuffixes := runtimeconfig.String(runtimeconfig.ICloudForwardingSuffixesKey, "")
+	runtimeconfig.Set(runtimeconfig.ICloudForwardingSuffixesKey, "d2000.example.com")
+	t.Cleanup(func() { runtimeconfig.Set(runtimeconfig.ICloudForwardingSuffixesKey, previousSuffixes) })
 	require.NoError(t, db.Exec(`
 INSERT INTO email_resources(id, type, owner_user_id) VALUES
     (1000, 'icloud', 1),
     (1001, 'icloud', 2),
     (1002, 'icloud', 2)`).Error)
 	require.NoError(t, db.Exec(`
-INSERT INTO icloud_resources(
-	    id, primary_email, imap_app_password, expire_at, for_sale, status
-) VALUES
-	    (1000, 'other@icloud.com', 'app-password', DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 DAY), TRUE, 'normal'),
-	    (1001, 'owned-public@icloud.com', 'app-password', DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 DAY), TRUE, 'normal'),
-	    (1002, 'owned-private@icloud.com', 'app-password', DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 DAY), FALSE, 'normal')`).Error)
+	INSERT INTO icloud_resources(
+		    id, primary_email, expire_at, for_sale, status
+	) VALUES
+		    (1000, 'other@icloud.com', DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 DAY), TRUE, 'normal'),
+		    (1001, 'owned-public@icloud.com', DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 DAY), TRUE, 'normal'),
+		    (1002, 'owned-private@icloud.com', DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 DAY), FALSE, 'normal')`).Error)
 	require.NoError(t, db.Exec(`
-INSERT INTO icloud_aliases(resource_id, anonymous_id, email, status) VALUES
-    (1000, 'anon-0', 'other-alias@icloud.com', 'normal'),
-    (1001, 'anon-1', 'owned-public-alias@icloud.com', 'normal'),
-    (1002, 'anon-2', 'owned-private-alias@icloud.com', 'normal')`).Error)
+	INSERT INTO icloud_aliases(resource_id, anonymous_id, email, forward_to_email, status) VALUES
+	    (1000, 'anon-0', 'other-alias@icloud.com', 'mailbox@d2000.example.com', 'normal'),
+	    (1001, 'anon-1', 'owned-public-alias@icloud.com', 'mailbox@d2000.example.com', 'normal'),
+	    (1002, 'anon-2', 'owned-private-alias@icloud.com', 'mailbox@d2000.example.com', 'normal')`).Error)
 
 	repo := NewRepo(db)
 	rows, err := repo.ListUserICloudInventoryTotals(context.Background(), 10, 2)
