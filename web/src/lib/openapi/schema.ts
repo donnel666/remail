@@ -89,6 +89,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/customer-service": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get public customer service links */
+        get: operations["getCustomerService"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/activation": {
         parameters: {
             query?: never;
@@ -5925,6 +5942,11 @@ export interface components {
             enabled: boolean;
             items: components["schemas"]["SystemFAQ"][];
         };
+        CustomerServiceResponse: {
+            qqGroupNumber: string;
+            qqGroupUrl: string;
+            telegramGroupUrl: string;
+        };
         AdminSystemSettingsResponse: {
             options: components["schemas"]["AdminSystemSetting"][];
         };
@@ -8614,6 +8636,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SystemFAQsResponse"];
+                };
+            };
+        };
+    };
+    getCustomerService: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Public customer service configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerServiceResponse"];
                 };
             };
         };

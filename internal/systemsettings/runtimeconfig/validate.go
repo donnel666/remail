@@ -127,6 +127,17 @@ func Validate(key, value string) error {
 		return validateAnnouncements(rawValue)
 	case "faq_list":
 		return validateFAQs(rawValue)
+	case "customer_service_qq_group_number":
+		if value != "" {
+			if len(value) < 5 || len(value) > 20 {
+				return domain.ErrInvalidValue
+			}
+			for _, char := range value {
+				if char < '0' || char > '9' {
+					return domain.ErrInvalidValue
+				}
+			}
+		}
 	case "global_notice":
 		if len(rawValue) > maxSystemNoticeBytes {
 			return domain.ErrInvalidValue
@@ -189,7 +200,8 @@ func Validate(key, value string) error {
 		if value != "v1" && value != "v2" {
 			return domain.ErrInvalidValue
 		}
-	case "epay_gateway_url", "epay_notify_url", "epay_return_url", "redemption_code_purchase_url":
+	case "epay_gateway_url", "epay_notify_url", "epay_return_url", "redemption_code_purchase_url",
+		"customer_service_qq_group_url", "customer_service_telegram_group_url":
 		if value == "" {
 			return nil
 		}

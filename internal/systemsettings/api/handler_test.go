@@ -198,6 +198,23 @@ func TestSystemFAQsArePublic(t *testing.T) {
 	require.JSONEq(t, `{"enabled":true,"items":[{"id":1,"question":"Question","answer":"Answer","weight":2}]}`, response.Body.String())
 }
 
+func TestCustomerServiceSettingsArePublic(t *testing.T) {
+	runtimeconfig.Replace([]settingsdomain.Setting{
+		{Key: "customer_service_qq_group_number", Value: " 123456789 "},
+		{Key: "customer_service_qq_group_url", Value: "https://qm.qq.com/q/example"},
+		{Key: "customer_service_telegram_group_url", Value: "https://t.me/example"},
+	})
+	t.Cleanup(func() { runtimeconfig.Replace(nil) })
+	r := testRouter(&fakeRepository{items: map[string]settingsdomain.Setting{}})
+
+	response := httptest.NewRecorder()
+	r.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/customer-service", nil))
+
+	require.Equal(t, http.StatusOK, response.Code)
+	require.Equal(t, "no-store", response.Header().Get("Cache-Control"))
+	require.JSONEq(t, `{"qqGroupNumber":"123456789","qqGroupUrl":"https://qm.qq.com/q/example","telegramGroupUrl":"https://t.me/example"}`, response.Body.String())
+}
+
 func TestSettingDTOCanonicalizesLegacyKeyCase(t *testing.T) {
 	dto := toDTO(settingsdomain.Setting{Key: "SMTP_TASK_RETRY_COUNT", Value: "3"})
 	require.Equal(t, "smtp_task_retry_count", dto.Key)

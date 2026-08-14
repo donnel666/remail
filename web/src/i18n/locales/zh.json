@@ -2434,5 +2434,19 @@
   "Microsoft mail detail load failed.": "Microsoft 邮件详情加载失败。",
   "Microsoft mail load failed.": "Microsoft 邮件加载失败。",
   "Microsoft task load failed.": "Microsoft 任务加载失败。",
-  "Related orders load failed.": "关联订单加载失败。"
+  "Related orders load failed.": "关联订单加载失败。",
+  "客服悬浮框": "客服悬浮框",
+  "QQ群号": "QQ群号",
+  "QQ群链接": "QQ群链接",
+  "TG 群链接": "TG 群链接",
+  "例如：123456789": "例如：123456789",
+  "例如：https://qm.qq.com/q/example": "例如：https://qm.qq.com/q/example",
+  "例如：https://t.me/example": "例如：https://t.me/example",
+  "联系客服": "联系客服",
+  "QQ群": "QQ群",
+  "Telegram 群": "Telegram 群",
+  "加入群聊": "加入群聊",
+  "复制QQ群号": "复制QQ群号",
+  "打开QQ群": "打开QQ群",
+  "打开 Telegram 群": "打开 Telegram 群"
 }

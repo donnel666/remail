@@ -52,6 +52,9 @@ vi.mock("./settings-layout", () => ({
   SettingsSwitchField: ({ checked, label, onChange }: any) => (
     <button aria-checked={checked} aria-label={label} onClick={() => onChange(!checked)} role="switch" type="button" />
   ),
+  SettingsTextField: ({ label, onChange, value }: any) => (
+    <input aria-label={label} onChange={(event) => onChange(event.target.value)} value={value} />
+  ),
   SettingsTextareaField: ({ label, onChange, value }: any) => (
     <textarea aria-label={label} onChange={(event) => onChange(event.target.value)} value={value} />
   ),
@@ -72,8 +75,29 @@ const baseProps = {
   ],
 };
 
-describe("SiteContentSection save failures", () => {
+describe("SiteContentSection saves", () => {
   afterEach(() => cleanup());
+
+  it("refreshes the global customer service widget after saving", async () => {
+    const onBulkSave = vi.fn().mockResolvedValue(undefined);
+    const onUpdated = vi.fn();
+    window.addEventListener("customer-service-updated", onUpdated);
+    render(<SiteContentSection {...baseProps} onBulkSave={onBulkSave} />);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "QQ群号" }), {
+      target: { value: " 123456789 " },
+    });
+    const section = screen.getByText("客服悬浮框").closest("section");
+    fireEvent.click(within(section as HTMLElement).getByRole("button", { name: "保存设置" }));
+
+    await waitFor(() => expect(onBulkSave).toHaveBeenCalledWith([
+      { key: "customer_service_qq_group_number", value: "123456789" },
+      { key: "customer_service_qq_group_url", value: "" },
+      { key: "customer_service_telegram_group_url", value: "" },
+    ]));
+    await waitFor(() => expect(onUpdated).toHaveBeenCalledOnce());
+    window.removeEventListener("customer-service-updated", onUpdated);
+  });
 
   it("keeps FAQ changes dirty and rolls back an announcement switch when saving fails", async () => {
     const onBulkSave = vi.fn().mockRejectedValue(new Error("save failed"));

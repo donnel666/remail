@@ -8,6 +8,8 @@ export interface SystemOption {
 
 export type SystemAnnouncement = components["schemas"]["SystemAnnouncement"];
 export type SystemFAQ = components["schemas"]["SystemFAQ"];
+export type CustomerServiceConfig = components["schemas"]["CustomerServiceResponse"];
+export const CUSTOMER_SERVICE_UPDATED_EVENT = "customer-service-updated";
 export const MAX_ANNOUNCEMENT_CONTENT_BYTES = 1 << 20;
 export const MAX_SYSTEM_NOTICE_BYTES = 1 << 20;
 export const utf8ByteLength = (value: string) => new TextEncoder().encode(value).byteLength;
@@ -29,6 +31,12 @@ export async function getSystemNotice(signal?: AbortSignal): Promise<string> {
 export async function getSystemFAQs(signal?: AbortSignal): Promise<components["schemas"]["SystemFAQsResponse"]> {
   return unwrap<components["schemas"]["SystemFAQsResponse"]>(
     await apiClient.GET("/v1/faqs", { signal }),
+  );
+}
+
+export async function getCustomerService(signal?: AbortSignal): Promise<CustomerServiceConfig> {
+  return unwrap<CustomerServiceConfig>(
+    await apiClient.GET("/v1/customer-service", { signal }),
   );
 }
 

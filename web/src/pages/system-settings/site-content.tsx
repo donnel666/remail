@@ -32,6 +32,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import {
+  CUSTOMER_SERVICE_UPDATED_EVENT,
   MAX_ANNOUNCEMENT_CONTENT_BYTES,
   MAX_SYSTEM_NOTICE_BYTES,
   parseOption,
@@ -45,6 +46,7 @@ import {
   SettingsFormGrid,
   SettingsSection,
   SettingsSwitchField,
+  SettingsTextField,
   SettingsTextareaField,
 } from "./settings-layout";
 
@@ -68,6 +70,9 @@ const D = {
   announcement_enabled: true,
   faq_enabled: true,
   faq_list: "[]",
+  customer_service_qq_group_number: "",
+  customer_service_qq_group_url: "",
+  customer_service_telegram_group_url: "",
 };
 
 function emptyAnnouncement(): Announcement {
@@ -107,6 +112,7 @@ export default function SiteContentSection({ options, loading, onBulkSave }: Sec
   const [noticeDirty, setNoticeDirty] = useState(false);
   const [selectedAnnouncementIds, setSelectedAnnouncementIds] = useState<number[]>([]);
   const [faqDirty, setFaqDirty] = useState(false);
+  const [customerServiceDirty, setCustomerServiceDirty] = useState(false);
   const [selectedFaqIds, setSelectedFaqIds] = useState<number[]>([]);
   const update = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) =>
     setForm((current) => ({ ...current, [key]: value }));
@@ -127,6 +133,18 @@ export default function SiteContentSection({ options, loading, onBulkSave }: Sec
     };
     await onBulkSave(Object.entries(values).map(([key, value]) => ({ key, value: String(value) })));
     setNoticeDirty(false);
+  };
+
+  const saveCustomerService = async () => {
+    const values = {
+      customer_service_qq_group_number: form.customer_service_qq_group_number.trim(),
+      customer_service_qq_group_url: form.customer_service_qq_group_url.trim(),
+      customer_service_telegram_group_url: form.customer_service_telegram_group_url.trim(),
+    };
+    await onBulkSave(Object.entries(values).map(([key, value]) => ({ key, value })));
+    setForm((current) => ({ ...current, ...values }));
+    setCustomerServiceDirty(false);
+    window.dispatchEvent(new Event(CUSTOMER_SERVICE_UPDATED_EVENT));
   };
 
   const saveAnnouncement = () => {
@@ -371,6 +389,15 @@ export default function SiteContentSection({ options, loading, onBulkSave }: Sec
         <SettingsTextareaField label={t("维护模式允许的 IP")} value={form.maintenance_allow_ips} onChange={(value) => { update("maintenance_allow_ips", value); setNoticeDirty(true); }} rows={6} placeholder={t("每行一个 IP，维护期间仍可正常访问")} />
       </SettingsFormGrid>
       <Button icon={<Save size={14} />} loading={loading} disabled={!noticeDirty} onClick={() => void saveNotice().catch(() => undefined)} theme="solid" type="primary" className="mt-4">{t("保存全部")}</Button>
+    </SettingsSection>
+
+    <SettingsSection title={t("客服悬浮框")}>
+      <SettingsFormGrid>
+        <SettingsTextField label={t("QQ群号")} value={form.customer_service_qq_group_number} onChange={(value) => { update("customer_service_qq_group_number", value); setCustomerServiceDirty(true); }} placeholder={t("例如：123456789")} />
+        <SettingsTextField label={t("QQ群链接")} value={form.customer_service_qq_group_url} onChange={(value) => { update("customer_service_qq_group_url", value); setCustomerServiceDirty(true); }} placeholder={t("例如：https://qm.qq.com/q/example")} type="url" />
+        <SettingsTextField label={t("TG 群链接")} value={form.customer_service_telegram_group_url} onChange={(value) => { update("customer_service_telegram_group_url", value); setCustomerServiceDirty(true); }} placeholder={t("例如：https://t.me/example")} type="url" />
+      </SettingsFormGrid>
+      <Button icon={<Save size={14} />} loading={loading} disabled={!customerServiceDirty} onClick={() => void saveCustomerService().catch(() => undefined)} theme="solid" type="primary" className="mt-4">{t("保存设置")}</Button>
     </SettingsSection>
 
     <SettingsSection title={faqHeader}>

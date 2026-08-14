@@ -39,6 +39,7 @@ vi.mock("@/context/auth-provider", () => ({
 vi.mock("@/hooks/use-is-mobile", () => ({ useIsMobile: () => mocks.mobile }));
 
 vi.mock("@/components/language-menu", () => ({ LanguageMenu: () => null }));
+vi.mock("@/components/customer-service-float", () => ({ CustomerServiceFloat: () => null }));
 vi.mock("@/components/notification-popover", () => ({ NotificationPopover: () => null }));
 vi.mock("@/components/theme-switch", () => ({ ThemeSwitch: () => null }));
 vi.mock("@/components/user-menu", () => ({ UserMenu: () => null }));

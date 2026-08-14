@@ -3,7 +3,7 @@ package runtimeconfig
 import "github.com/donnel666/remail/internal/systemsettings/domain"
 
 const (
-	DefaultSettingsCount                  = 231
+	DefaultSettingsCount                  = 234
 	SMSBowerNoCodeRefundTimeoutMinutesKey = "smsbower_no_code_refund_timeout_minutes"
 	MicrosoftPriceMultiplierKey           = "product_price_multiplier_microsoft"
 	GmailPriceMultiplierKey               = "product_price_multiplier_gmail"
@@ -49,6 +49,9 @@ var defaultSettings = []domain.Setting{
 	{Key: "global_notice", Value: ""},
 	{Key: "faq_enabled", Value: "true"},
 	{Key: "faq_list", Value: "[]"},
+	{Key: "customer_service_qq_group_number", Value: ""},
+	{Key: "customer_service_qq_group_url", Value: ""},
+	{Key: "customer_service_telegram_group_url", Value: ""},
 	{Key: "first_order_rebate_ratio", Value: "0.8"},
 	{Key: "single_rebate_cap", Value: "0"},
 	{Key: "cumulative_rebate_cap", Value: "0"},

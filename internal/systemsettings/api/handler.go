@@ -41,6 +41,15 @@ func (h *Handler) GetFAQs(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"enabled": enabled, "items": items})
 }
 
+func (h *Handler) GetCustomerService(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, gin.H{
+		"qqGroupNumber":    strings.TrimSpace(runtimeconfig.String("customer_service_qq_group_number", "")),
+		"qqGroupUrl":       strings.TrimSpace(runtimeconfig.String("customer_service_qq_group_url", "")),
+		"telegramGroupUrl": strings.TrimSpace(runtimeconfig.String("customer_service_telegram_group_url", "")),
+	})
+}
+
 type settingDTO struct {
 	Key       string `json:"key"`
 	Value     string `json:"value"`

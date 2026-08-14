@@ -13,6 +13,7 @@ func RegisterRoutes(rg *gin.RouterGroup, module *Module, fetcher middleware.Sess
 	rg.GET("/announcements", h.GetAnnouncements)
 	rg.GET("/notice", h.GetNotice)
 	rg.GET("/faqs", h.GetFAQs)
+	rg.GET("/customer-service", h.GetCustomerService)
 	admin := rg.Group("/admin")
 	admin.Use(func(c *gin.Context) {
 		c.Header("Cache-Control", "no-store")

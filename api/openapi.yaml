@@ -90,6 +90,20 @@ paths:
               schema:
                 $ref: "#/components/schemas/SystemFAQsResponse"
 
+  /v1/customer-service:
+    get:
+      operationId: getCustomerService
+      summary: Get public customer service links
+      tags:
+        - System
+      responses:
+        "200":
+          description: Public customer service configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerServiceResponse"
+
   # --- Activation ---
   /v1/activation:
     get:
@@ -16319,6 +16333,21 @@ components:
           maxItems: 20
           items:
             $ref: "#/components/schemas/SystemFAQ"
+      additionalProperties: false
+
+    CustomerServiceResponse:
+      type: object
+      required:
+        - qqGroupNumber
+        - qqGroupUrl
+        - telegramGroupUrl
+      properties:
+        qqGroupNumber:
+          type: string
+        qqGroupUrl:
+          type: string
+        telegramGroupUrl:
+          type: string
       additionalProperties: false
 
     AdminSystemSettingsResponse:

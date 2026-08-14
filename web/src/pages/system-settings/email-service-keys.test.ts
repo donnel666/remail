@@ -44,7 +44,16 @@ const emailServiceGroups = [
   MAIL_DELIVERY_KEYS,
 ];
 const frontendGroups = [
-  ["announcement_enabled", "announcements", "global_notice", "faq_enabled", "faq_list"],
+  [
+    "announcement_enabled",
+    "announcements",
+    "global_notice",
+    "faq_enabled",
+    "faq_list",
+    "customer_service_qq_group_number",
+    "customer_service_qq_group_url",
+    "customer_service_telegram_group_url",
+  ],
   AUTH_SECURITY_KEYS,
   PAYMENT_BILLING_KEYS,
   RECHARGE_REBATE_KEYS,

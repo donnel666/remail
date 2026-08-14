@@ -2434,5 +2434,19 @@
   "Microsoft mail detail load failed.": "Failed to load the Microsoft message.",
   "Microsoft mail load failed.": "Failed to load Microsoft mail.",
   "Microsoft task load failed.": "Failed to load the Microsoft task.",
-  "Related orders load failed.": "Failed to load related orders."
+  "Related orders load failed.": "Failed to load related orders.",
+  "客服悬浮框": "Customer service widget",
+  "QQ群号": "QQ group number",
+  "QQ群链接": "QQ group URL",
+  "TG 群链接": "Telegram group URL",
+  "例如：123456789": "For example: 123456789",
+  "例如：https://qm.qq.com/q/example": "For example: https://qm.qq.com/q/example",
+  "例如：https://t.me/example": "For example: https://t.me/example",
+  "联系客服": "Contact support",
+  "QQ群": "QQ group",
+  "Telegram 群": "Telegram group",
+  "加入群聊": "Join group",
+  "复制QQ群号": "Copy QQ group number",
+  "打开QQ群": "Open QQ group",
+  "打开 Telegram 群": "Open Telegram group"
 }

@@ -6806,6 +6806,13 @@ type CurrentInviteResponse struct {
 	InviteCode string `json:"inviteCode"`
 }
 
+// CustomerServiceResponse defines model for CustomerServiceResponse.
+type CustomerServiceResponse struct {
+	QqGroupNumber    string `json:"qqGroupNumber"`
+	QqGroupUrl       string `json:"qqGroupUrl"`
+	TelegramGroupUrl string `json:"telegramGroupUrl"`
+}
+
 // DailyCheckinResponse defines model for DailyCheckinResponse.
 type DailyCheckinResponse struct {
 	// BusinessDate Server-calculated Asia/Shanghai business date.
@@ -13254,6 +13261,9 @@ type ServerInterface interface {
 	// Redeem a card key into consumer balance
 	// (POST /v1/cards/redeem)
 	PostCardRedeem(c *gin.Context, params PostCardRedeemParams)
+	// Get public customer service links
+	// (GET /v1/customer-service)
+	GetCustomerService(c *gin.Context)
 	// Current user's console data dashboard
 	// (GET /v1/dashboard)
 	GetDashboard(c *gin.Context, params GetDashboardParams)
@@ -26065,6 +26075,19 @@ func (siw *ServerInterfaceWrapper) PostCardRedeem(c *gin.Context) {
 	siw.Handler.PostCardRedeem(c, params)
 }
 
+// GetCustomerService operation middleware
+func (siw *ServerInterfaceWrapper) GetCustomerService(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetCustomerService(c)
+}
+
 // GetDashboard operation middleware
 func (siw *ServerInterfaceWrapper) GetDashboard(c *gin.Context) {
 
@@ -29436,6 +29459,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/apikeys/:keyId", wrapper.GetApiKey)
 	router.PATCH(options.BaseURL+"/v1/apikeys/:keyId", wrapper.PatchApiKey)
 	router.POST(options.BaseURL+"/v1/cards/redeem", wrapper.PostCardRedeem)
+	router.GET(options.BaseURL+"/v1/customer-service", wrapper.GetCustomerService)
 	router.GET(options.BaseURL+"/v1/dashboard", wrapper.GetDashboard)
 	router.POST(options.BaseURL+"/v1/domains", wrapper.PostDomain)
 	router.GET(options.BaseURL+"/v1/domains/:domainId/mailboxes", wrapper.GetDomainMailboxes)

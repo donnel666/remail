@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocation } from "@tanstack/react-router";
+import { CustomerServiceFloat } from "@/components/customer-service-float";
 import { AppHeader } from "./components/app-header";
 import { Sidebar } from "./components/sidebar";
 import { CHROMELESS_ROUTES, ROUTES_WITH_SIDEBAR } from "./config/navigation";
@@ -40,6 +41,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         )}
         <main className="min-w-0 flex-1 overflow-y-auto">{children}</main>
       </div>
+      <CustomerServiceFloat />
     </div>
   );
 }
