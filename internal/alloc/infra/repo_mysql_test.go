@@ -737,8 +737,16 @@ func TestOwnedDomainAllocationUsesOnlyBuyerPrivateResourceMySQL(t *testing.T) {
 	seedDomainResourcesWithPurpose(t, db, 2, 2000, 1, "not_sale")
 	seedDomainResourcesWithPurpose(t, db, 3, 3000, 1, "not_sale")
 
-	uc := allocapp.NewUseCase(NewRepo(db))
-	_, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
+	repo := NewRepo(db)
+	suffixInventory, err := repo.ListProductSuffixInventory(context.Background(), allocapp.ProductAllocationConfig{
+		ProjectID: 10, ProductID: 20, ProductType: coredomain.ProductTypeDomain,
+	}, 2, domain.SupplyScopeOwned)
+	require.NoError(t, err)
+	require.Len(t, suffixInventory, 1)
+	require.Positive(t, suffixInventory["com"])
+
+	uc := allocapp.NewUseCase(repo)
+	_, err = uc.Allocate(context.Background(), allocapp.AllocateCommand{
 		OrderNo:          "ord-domain-public-private",
 		BuyerUserID:      2,
 		ProjectProductID: 20,
@@ -1301,6 +1309,11 @@ INSERT INTO explicit_aliases(resource_id, owner_user_id, email, status) VALUES
 		{Suffix: "hotmail.com", TotalAvailable: 1, PublicAvailable: 1},
 		{Suffix: "outlook.com", TotalAvailable: 1, PublicAvailable: 1},
 	}, totals.Items[0].Suffixes)
+	suffixInventory, err := repo.ListProductSuffixInventory(context.Background(), allocapp.ProductAllocationConfig{
+		ProjectID: 10, ProductID: 20, ProductType: coredomain.ProductTypeMicrosoft, MainWeight: 1,
+	}, 2, domain.SupplyScopePublic)
+	require.NoError(t, err)
+	require.Equal(t, map[string]int64{"hotmail.com": 1, "outlook.com": 1}, suffixInventory)
 
 	hotmailAllocation, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
 		OrderNo: "ord-cross-suffix-hotmail-alias", BuyerUserID: 2, ProjectProductID: 20,

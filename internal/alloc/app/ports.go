@@ -242,6 +242,15 @@ type ProductInventoryAvailabilityRequest struct {
 	PublicOnly  bool
 }
 
+type ProductSuffixSelectionRequest struct {
+	ProjectID            uint
+	ProductID            uint
+	BuyerUserID          uint
+	SupplyScopes         []domain.SupplyScope
+	Selector             string
+	FulfillExistingOrder bool
+}
+
 type InventoryCacheKind string
 
 const (
@@ -426,6 +435,7 @@ type Repository interface {
 	FindExistingAllocation(ctx context.Context, orderNo string) (*domain.UnifiedAllocation, error)
 	CreateOrderGuard(ctx context.Context, orderNo string, allocationType domain.AllocationType) error
 	LoadProductConfig(ctx context.Context, productID uint, buyerUserID uint, fulfillExistingOrder bool) (*ProductAllocationConfig, error)
+	ListProductSuffixInventory(ctx context.Context, config ProductAllocationConfig, buyerUserID uint, scope domain.SupplyScope) (map[string]int64, error)
 
 	ListMicrosoftSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.MicrosoftMailbox, bucket *uint16, limit int, emailSuffix string) ([]MicrosoftCandidate, error)
 	ListGmailSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.GmailMailbox, bucket *uint16, limit int) ([]GmailCandidate, error)

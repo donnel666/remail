@@ -4784,12 +4784,12 @@ export interface components {
         };
         CreateOrderRequest: {
             projectId: number;
-            /** @description Product selector. gmail.com selects Gmail, icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects Microsoft, and a public suffix such as com or com.cn selects domain email. With private_first, an owned full domain such as mydomain.com selects only that private domain. Full mailbox addresses are not accepted. */
+            /** @description Product selector. gmail.com selects Gmail, icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; both choices are weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock; an owned full domain such as mydomain.com selects only that private domain. Full mailbox addresses are not accepted. */
             emailSuffix: string;
         };
         CreateOrderBatchRequest: {
             projectId: number;
-            /** @description Product selector. gmail.com selects Gmail, icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects Microsoft, and a public suffix such as com or com.cn selects domain email. With private_first, an owned full domain such as mydomain.com selects only that private domain. Full mailbox addresses are not accepted. */
+            /** @description Product selector. gmail.com selects Gmail, icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; both choices are weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock. A batch resolves the special value once, uses that suffix for every item, and does not select another suffix after that inventory is exhausted. An owned full domain such as mydomain.com selects only that private domain. Full mailbox addresses are not accepted. */
             emailSuffix: string;
             /** @description Number of independent orders to create. */
             quantity: number;

@@ -42,6 +42,11 @@ const (
 	ProductTypeICloud    ProductType = "icloud"
 )
 
+const (
+	RandomMicrosoftSuffixSelector = "outlook"
+	RandomDomainSuffixSelector    = "domain"
+)
+
 // MailRuleType identifies which part of a message a rule matches.
 type MailRuleType string
 

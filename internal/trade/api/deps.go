@@ -422,6 +422,21 @@ type allocationAdapter struct {
 	alloc *allocapp.UseCase
 }
 
+func (a allocationAdapter) SelectRandomSuffix(ctx context.Context, cmd tradeapp.RandomSuffixSelectionCommand) (string, error) {
+	suffix, err := a.alloc.SelectRandomInventorySuffix(ctx, allocapp.ProductSuffixSelectionRequest{
+		ProjectID:            cmd.ProjectID,
+		ProductID:            cmd.ProductID,
+		BuyerUserID:          cmd.BuyerUserID,
+		SupplyScopes:         allocationSupplyScopes(cmd.SupplyScopes),
+		Selector:             cmd.Selector,
+		FulfillExistingOrder: cmd.FulfillExistingOrder,
+	})
+	if err != nil {
+		return "", mapAllocationError(err)
+	}
+	return suffix, nil
+}
+
 func (a allocationAdapter) HasAvailableInventory(ctx context.Context, cmd tradeapp.InventoryAvailabilityCommand) (bool, error) {
 	return a.alloc.HasProductInventory(ctx, allocapp.ProductInventoryAvailabilityRequest{
 		ProjectID: cmd.ProjectID, ProductID: cmd.ProductID, EmailSuffix: cmd.EmailSuffix,
@@ -441,13 +456,7 @@ func (a allocationAdapter) Allocate(ctx context.Context, cmd tradeapp.Allocation
 	if cmd.SupplyScope == tradeapp.SupplyScopeOwned {
 		scope = allocdomain.SupplyScopeOwned
 	}
-	scopes := make([]allocdomain.SupplyScope, len(cmd.SupplyScopes))
-	for i, item := range cmd.SupplyScopes {
-		scopes[i] = allocdomain.SupplyScopePublic
-		if item == tradeapp.SupplyScopeOwned {
-			scopes[i] = allocdomain.SupplyScopeOwned
-		}
-	}
+	scopes := allocationSupplyScopes(cmd.SupplyScopes)
 	result, err := a.alloc.Allocate(ctx, allocapp.AllocateCommand{
 		OrderNo:              cmd.OrderNo,
 		BuyerUserID:          cmd.BuyerUserID,
@@ -469,6 +478,17 @@ func (a allocationAdapter) Allocate(ctx context.Context, cmd tradeapp.Allocation
 		Email:       result.Email,
 		SupplyScope: tradeSupplyScope(result.SupplyScope),
 	}, nil
+}
+
+func allocationSupplyScopes(scopes []tradeapp.SupplyScope) []allocdomain.SupplyScope {
+	result := make([]allocdomain.SupplyScope, len(scopes))
+	for i, item := range scopes {
+		result[i] = allocdomain.SupplyScopePublic
+		if item == tradeapp.SupplyScopeOwned {
+			result[i] = allocdomain.SupplyScopeOwned
+		}
+	}
+	return result
 }
 
 func (a allocationAdapter) FindAllocationsByOrders(ctx context.Context, orderNos []string) (map[string]tradeapp.AllocationResult, error) {

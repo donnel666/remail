@@ -2268,6 +2268,29 @@ type productInventoryRow struct {
 	PlusWeight      int
 }
 
+func (r *Repo) ListProductSuffixInventory(ctx context.Context, config allocapp.ProductAllocationConfig, buyerUserID uint, supplyScope domain.SupplyScope) (map[string]int64, error) {
+	switch config.ProductType {
+	case coredomain.ProductTypeMicrosoft:
+		row := productInventoryRow{
+			ProductID: config.ProductID, Type: string(config.ProductType),
+			MainWeight: config.MainWeight, DotWeight: config.DotWeight, PlusWeight: config.PlusWeight,
+		}
+		scope, args := microsoftProjectInventoryScopeSQL(config.ProjectID)
+		if supplyScope == domain.SupplyScopeOwned {
+			scope, args = microsoftPrivateProjectInventoryScopeSQL(config.ProjectID, buyerUserID)
+		}
+		return r.microsoftSuffixInventory(ctx, config.ProjectID, row, scope, args)
+	case coredomain.ProductTypeDomain:
+		scope, args := domainInventoryScopeSQL()
+		if supplyScope == domain.SupplyScopeOwned {
+			scope, args = domainPrivateInventoryScopeSQL(buyerUserID)
+		}
+		return r.domainInventoryByScope(ctx, scope, args, "dr.domain_tld")
+	default:
+		return nil, domain.ErrInvalidAllocationRequest
+	}
+}
+
 func (r *Repo) GetProductInventoryTotals(ctx context.Context, projectID uint) (*allocapp.ProjectProductInventoryTotals, error) {
 	var productRows []productInventoryRow
 	if err := r.dbFor(ctx).Raw(`

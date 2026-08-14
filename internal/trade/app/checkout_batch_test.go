@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	coredomain "github.com/donnel666/remail/internal/core/domain"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/donnel666/remail/internal/trade/domain"
 	"github.com/stretchr/testify/require"
@@ -394,6 +395,15 @@ type checkoutInventorySpy struct {
 	markResult      bool
 }
 
+type randomSuffixBatchInventorySpy struct {
+	checkoutInventorySpy
+	selectedSuffix     string
+	successful         int
+	selectionCalls     int
+	lastSelection      RandomSuffixSelectionCommand
+	allocationSuffixes []string
+}
+
 type checkoutGmailSupplySpy struct {
 	checks      int
 	creates     int
@@ -491,6 +501,25 @@ func (s *checkoutInventorySpy) Allocate(ctx context.Context, cmd AllocationComma
 	return nil, domain.ErrInsufficientInventory
 }
 
+func (s *randomSuffixBatchInventorySpy) SelectRandomSuffix(_ context.Context, cmd RandomSuffixSelectionCommand) (string, error) {
+	s.selectionCalls++
+	s.lastSelection = cmd
+	return s.selectedSuffix, nil
+}
+
+func (s *randomSuffixBatchInventorySpy) Allocate(_ context.Context, cmd AllocationCommand) (*AllocationResult, error) {
+	s.allocationCalls++
+	s.lastAllocation = cmd
+	s.allocationSuffixes = append(s.allocationSuffixes, cmd.EmailSuffix)
+	if s.allocationCalls > s.successful {
+		return nil, domain.ErrDefinitiveInventoryExhausted
+	}
+	return &AllocationResult{
+		OrderNo: cmd.OrderNo, Type: domain.AllocationTypeMicrosoft, ID: uint(s.allocationCalls),
+		Email: fmt.Sprintf("batch-%d@%s", s.allocationCalls, cmd.EmailSuffix), SupplyScope: SupplyScopePublic,
+	}, nil
+}
+
 func newCheckoutGmailInventorySpy() *checkoutInventorySpy {
 	return &checkoutInventorySpy{allocation: &AllocationResult{
 		Type: domain.AllocationTypeGmail, ID: 61, Email: "buyer@gmail.com", SupplyScope: SupplyScopePublic,
@@ -544,6 +573,8 @@ func TestCheckoutProductTypeForSuffix(t *testing.T) {
 		{suffix: "icloud.com", want: domain.ProductTypeICloud},
 		{suffix: "outlook.com", want: domain.ProductTypeMicrosoft},
 		{suffix: "hotmail.com", want: domain.ProductTypeMicrosoft},
+		{suffix: coredomain.RandomMicrosoftSuffixSelector, want: domain.ProductTypeMicrosoft},
+		{suffix: coredomain.RandomDomainSuffixSelector, want: domain.ProductTypeDomain},
 		{suffix: "com", want: domain.ProductTypeDomain},
 		{suffix: "com.cn", want: domain.ProductTypeDomain},
 		{suffix: "example.com", want: domain.ProductTypeDomain},
@@ -556,6 +587,24 @@ func TestCheckoutProductTypeForSuffix(t *testing.T) {
 	for _, suffix := range []string{"mail@example.com", "bad suffix"} {
 		_, err := checkoutProductTypeForSuffix(suffix)
 		require.ErrorIs(t, err, domain.ErrInvalidOrderRequest, suffix)
+	}
+}
+
+func TestFinalizeCheckoutProductKeepsRandomSuffixSelectors(t *testing.T) {
+	for _, test := range []struct {
+		selector    string
+		productType domain.ProductType
+	}{
+		{selector: coredomain.RandomMicrosoftSuffixSelector, productType: domain.ProductTypeMicrosoft},
+		{selector: coredomain.RandomDomainSuffixSelector, productType: domain.ProductTypeDomain},
+	} {
+		prepared := checkoutPreparation{
+			selectedBySuffix: true,
+			selectorSuffix:   test.selector,
+			policy:           domain.SupplyPolicyPublicOnly,
+		}
+		require.NoError(t, finalizeCheckoutProduct(&prepared, test.productType))
+		require.Equal(t, test.selector, prepared.emailSuffix)
 	}
 }
 
@@ -1293,6 +1342,36 @@ func TestCheckoutBatchMarksAllocatorExhaustionAndSkipsMatchingTail(t *testing.T)
 	require.Len(t, repo.orders, len(requests))
 	require.Equal(t, len(requests), repo.topTx)
 	require.Zero(t, wallet.locks)
+}
+
+func TestCheckoutBatchResolvesRandomSuffixOnceAndKeepsPartialSuccess(t *testing.T) {
+	repo := &batchRepoSpy{orders: map[string]domain.Order{}}
+	inventory := &randomSuffixBatchInventorySpy{
+		checkoutInventorySpy: checkoutInventorySpy{available: true},
+		selectedSuffix:       "hotmail.com",
+		successful:           2,
+	}
+	uc := NewUseCase(repo, &batchOrderingSpy{}, &batchWalletSpy{}, inventory, &issuedOrderTokenSpy{tokens: map[string]*OrderToken{}})
+	requests := make([]CheckoutRequest, 4)
+	for i := range requests {
+		requests[i] = batchRequest(fmt.Sprintf("random-suffix-%d", i), len(requests))
+		requests[i].EmailSuffix = coredomain.RandomMicrosoftSuffixSelector
+		requests[i].SupplyPolicy = string(domain.SupplyPolicyPublicOnly)
+	}
+
+	items, err := uc.CheckoutBatch(context.Background(), requests)
+
+	require.NoError(t, err)
+	require.Len(t, items, len(requests))
+	require.NoError(t, items[0].Err)
+	require.NoError(t, items[1].Err)
+	require.ErrorIs(t, items[2].Err, domain.ErrInsufficientInventory)
+	require.ErrorIs(t, items[3].Err, domain.ErrInsufficientInventory)
+	require.Equal(t, 1, inventory.selectionCalls)
+	require.Equal(t, coredomain.RandomMicrosoftSuffixSelector, inventory.lastSelection.Selector)
+	require.Equal(t, []SupplyScope{SupplyScopePublic}, inventory.lastSelection.SupplyScopes)
+	require.Equal(t, 3, inventory.allocationCalls)
+	require.Equal(t, []string{"hotmail.com", "hotmail.com", "hotmail.com"}, inventory.allocationSuffixes)
 }
 
 func TestCheckoutBatchDoesNotSkipBoundedAllocatorMiss(t *testing.T) {

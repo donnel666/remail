@@ -141,13 +141,46 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *d
 
 	cmd.OrderNo = strings.TrimSpace(cmd.OrderNo)
 	scopes := normalizedSupplyScopes(cmd)
-	domainSelection := strings.ToLower(strings.TrimSpace(cmd.EmailSuffix))
 	cmd.EmailSuffix = normalizeEmailSuffix(cmd.EmailSuffix)
+	requestedSuffix := cmd.EmailSuffix
+	domainSelection := requestedSuffix
 	if cmd.OrderNo == "" || cmd.BuyerUserID == 0 || cmd.ProjectProductID == 0 {
 		return nil, domain.ErrInvalidAllocationRequest
 	}
 
 	var err error
+	if isRandomSuffixSelector(requestedSuffix) {
+		existing, findErr := uc.repo.FindExistingAllocation(ctx, cmd.OrderNo)
+		if findErr != nil {
+			return nil, findErr
+		}
+		if existing != nil {
+			result = existing
+			existingHit = true
+			return result, nil
+		}
+		requestedSuffix, err = uc.SelectRandomInventorySuffix(ctx, ProductSuffixSelectionRequest{
+			ProductID:            cmd.ProjectProductID,
+			BuyerUserID:          cmd.BuyerUserID,
+			SupplyScopes:         scopes,
+			Selector:             cmd.EmailSuffix,
+			FulfillExistingOrder: cmd.FulfillExistingOrder,
+		})
+		if err != nil {
+			existing, findErr = uc.repo.FindExistingAllocation(ctx, cmd.OrderNo)
+			if findErr != nil {
+				return nil, findErr
+			}
+			if existing != nil {
+				result = existing
+				existingHit = true
+				return result, nil
+			}
+			return nil, err
+		}
+		cmd.EmailSuffix = requestedSuffix
+		domainSelection = requestedSuffix
+	}
 	attempts := candidateRetryCountValue()
 	if uc.repo.HasParentTx(ctx) {
 		// A nested retry would keep the parent wallet/resource locks and sleep in
@@ -158,6 +191,7 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *d
 		result = nil
 		existingHit = false
 		err = uc.repo.WithTx(ctx, func(txCtx context.Context) error {
+			cmd.EmailSuffix = requestedSuffix
 			existing, err := uc.repo.FindExistingAllocation(txCtx, cmd.OrderNo)
 			if err != nil {
 				return err
@@ -320,6 +354,128 @@ func containsSupplyScope(scopes []domain.SupplyScope, want domain.SupplyScope) b
 		}
 	}
 	return false
+}
+
+func isRandomSuffixSelector(value string) bool {
+	return value == coredomain.RandomMicrosoftSuffixSelector || value == coredomain.RandomDomainSuffixSelector
+}
+
+func randomSuffixMatchesProduct(selector string, productType coredomain.ProductType, suffix string) bool {
+	switch selector {
+	case coredomain.RandomMicrosoftSuffixSelector:
+		return productType == coredomain.ProductTypeMicrosoft && coredomain.IsMicrosoftEmailDomain("selector@"+suffix)
+	case coredomain.RandomDomainSuffixSelector:
+		return productType == coredomain.ProductTypeDomain && suffix != ""
+	default:
+		return false
+	}
+}
+
+func chooseWeightedInventorySuffix(inventory map[string]int64, allowed func(string) bool, randomInt64N func(int64) int64) (string, bool) {
+	weights := make(map[string]int64, len(inventory))
+	total := int64(0)
+	for suffix, available := range inventory {
+		suffix = normalizeEmailSuffix(suffix)
+		if available <= 0 || !allowed(suffix) {
+			continue
+		}
+		weights[suffix] += available
+		total += available
+	}
+	if total <= 0 {
+		return "", false
+	}
+	suffixes := make([]string, 0, len(weights))
+	for suffix := range weights {
+		suffixes = append(suffixes, suffix)
+	}
+	sort.Strings(suffixes)
+	ticket := randomInt64N(total)
+	for _, suffix := range suffixes {
+		ticket -= weights[suffix]
+		if ticket < 0 {
+			return suffix, true
+		}
+	}
+	return "", false
+}
+
+func (uc *UseCase) SelectRandomInventorySuffix(ctx context.Context, req ProductSuffixSelectionRequest) (string, error) {
+	req.Selector = normalizeEmailSuffix(req.Selector)
+	if req.ProductID == 0 || req.BuyerUserID == 0 || !isRandomSuffixSelector(req.Selector) {
+		return "", domain.ErrInvalidAllocationRequest
+	}
+	config, err := uc.repo.LoadProductConfig(ctx, req.ProductID, req.BuyerUserID, req.FulfillExistingOrder)
+	if err != nil {
+		return "", err
+	}
+	if config == nil {
+		return "", domain.ErrProjectNotAllocatable
+	}
+	if req.ProjectID != 0 && req.ProjectID != config.ProjectID {
+		return "", domain.ErrInvalidAllocationRequest
+	}
+	scopes := req.SupplyScopes
+	if len(scopes) == 0 {
+		scopes = []domain.SupplyScope{domain.SupplyScopePublic}
+	}
+	for i := range scopes {
+		scopes[i] = domain.NormalizeSupplyScope(scopes[i])
+	}
+	return uc.selectRandomInventorySuffix(ctx, *config, req.BuyerUserID, scopes, req.Selector)
+}
+
+func (uc *UseCase) selectRandomInventorySuffix(ctx context.Context, config ProductAllocationConfig, buyerUserID uint, scopes []domain.SupplyScope, selector string) (string, error) {
+	wantType := coredomain.ProductTypeMicrosoft
+	if selector == coredomain.RandomDomainSuffixSelector {
+		wantType = coredomain.ProductTypeDomain
+	} else if selector != coredomain.RandomMicrosoftSuffixSelector {
+		return "", domain.ErrInvalidAllocationRequest
+	}
+	if config.ProductType != wantType {
+		return "", domain.ErrInvalidAllocationRequest
+	}
+	for _, scope := range scopes {
+		inventory, err := uc.productSuffixInventoryForSelection(ctx, config, buyerUserID, scope)
+		if err != nil {
+			return "", err
+		}
+		if suffix, ok := chooseWeightedInventorySuffix(inventory, func(suffix string) bool {
+			return randomSuffixMatchesProduct(selector, config.ProductType, suffix)
+		}, rand.Int64N); ok {
+			return suffix, nil
+		}
+	}
+	return "", domain.ErrInsufficientInventory
+}
+
+func (uc *UseCase) productSuffixInventoryForSelection(ctx context.Context, config ProductAllocationConfig, buyerUserID uint, scope domain.SupplyScope) (map[string]int64, error) {
+	if scope != domain.SupplyScopePublic || uc.inventoryCache == nil {
+		return uc.repo.ListProductSuffixInventory(ctx, config, buyerUserID, scope)
+	}
+	totals, err := uc.GetProductInventorySnapshot(ctx, config.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	if totals.Cold {
+		return map[string]int64{}, nil
+	}
+	for _, item := range totals.Items {
+		if item.ProductID != config.ProductID {
+			continue
+		}
+		if item.ProductType != config.ProductType {
+			return nil, domain.ErrInvalidAllocationRequest
+		}
+		inventory := make(map[string]int64, len(item.Suffixes))
+		for _, suffix := range item.Suffixes {
+			inventory[suffix.Suffix] += suffix.PublicAvailable
+		}
+		return inventory, nil
+	}
+	// A newly enabled or previously disabled product may not be present in the
+	// current shared snapshot yet. Keep that rare path authoritative.
+	return uc.repo.ListProductSuffixInventory(ctx, config, buyerUserID, scope)
 }
 
 func (uc *UseCase) ImportHistoricalMicrosoftAllocation(ctx context.Context, cmd HistoricalMicrosoftAllocationCommand) (*domain.UnifiedAllocation, error) {
@@ -1058,6 +1214,17 @@ func productInventoryAvailable(totals *ProjectProductInventoryTotals, req Produc
 				return item.PublicAvailable > 0, true
 			}
 			return item.TotalAvailable > 0, true
+		}
+		if isRandomSuffixSelector(req.EmailSuffix) {
+			for _, suffix := range item.Suffixes {
+				if !randomSuffixMatchesProduct(req.EmailSuffix, item.ProductType, normalizeEmailSuffix(suffix.Suffix)) {
+					continue
+				}
+				if req.PublicOnly && suffix.PublicAvailable > 0 || !req.PublicOnly && suffix.TotalAvailable > 0 {
+					return true, true
+				}
+			}
+			return false, true
 		}
 		for _, suffix := range item.Suffixes {
 			if normalizeEmailSuffix(suffix.Suffix) != req.EmailSuffix {

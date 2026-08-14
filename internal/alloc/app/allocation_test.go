@@ -113,6 +113,7 @@ type generatedMailboxRetryRepo struct {
 type allocationLockRepo struct {
 	Repository
 	config               ProductAllocationConfig
+	suffixInventory      map[string]int64
 	candidates           []MicrosoftCandidate
 	rootUnavailable      map[uint]bool
 	candidateUnavailable map[uint]bool
@@ -124,14 +125,20 @@ type allocationLockRepo struct {
 	finds                int
 	lists                int
 	listedBuckets        []int
+	listedSuffixes       []string
 	waiting              int
 	skipping             int
 	creates              int
 	createdResource      uint
 	createdMailbox       domain.MicrosoftMailbox
+	txActive             bool
+	suffixInventoryInTx  bool
+	suffixInventoryCalls int
 }
 
-func (*allocationLockRepo) WithTx(ctx context.Context, fn func(context.Context) error) error {
+func (r *allocationLockRepo) WithTx(ctx context.Context, fn func(context.Context) error) error {
+	r.txActive = true
+	defer func() { r.txActive = false }()
 	return fn(ctx)
 }
 
@@ -149,8 +156,15 @@ func (r *allocationLockRepo) LoadProductConfig(context.Context, uint, uint, bool
 	return &r.config, nil
 }
 
-func (r *allocationLockRepo) ListMicrosoftSourceCandidates(_ context.Context, _ uint, _ uint, _ domain.SupplyScope, _ domain.MicrosoftMailbox, bucket *uint16, _ int, _ string) ([]MicrosoftCandidate, error) {
+func (r *allocationLockRepo) ListProductSuffixInventory(context.Context, ProductAllocationConfig, uint, domain.SupplyScope) (map[string]int64, error) {
+	r.suffixInventoryCalls++
+	r.suffixInventoryInTx = r.suffixInventoryInTx || r.txActive
+	return r.suffixInventory, nil
+}
+
+func (r *allocationLockRepo) ListMicrosoftSourceCandidates(_ context.Context, _ uint, _ uint, _ domain.SupplyScope, _ domain.MicrosoftMailbox, bucket *uint16, _ int, emailSuffix string) ([]MicrosoftCandidate, error) {
 	r.lists++
+	r.listedSuffixes = append(r.listedSuffixes, emailSuffix)
 	if bucket == nil {
 		r.listedBuckets = append(r.listedBuckets, -1)
 	} else {
@@ -166,6 +180,134 @@ func (r *allocationLockRepo) ListMicrosoftSourceCandidates(_ context.Context, _ 
 		return []MicrosoftCandidate{{ResourceID: 1}, {ResourceID: 2}}, nil
 	}
 	return r.candidates, nil
+}
+
+func TestChooseWeightedInventorySuffixUsesAvailableCounts(t *testing.T) {
+	inventory := map[string]int64{"outlook.com": 1, "outlook.fr": 3, "ignored.example": 100}
+	for _, test := range []struct {
+		ticket int64
+		want   string
+	}{
+		{ticket: 0, want: "outlook.com"},
+		{ticket: 1, want: "outlook.fr"},
+		{ticket: 3, want: "outlook.fr"},
+	} {
+		got, ok := chooseWeightedInventorySuffix(inventory, func(suffix string) bool {
+			return suffix != "ignored.example"
+		}, func(total int64) int64 {
+			if total != 4 {
+				t.Fatalf("total weight = %d, want 4", total)
+			}
+			return test.ticket
+		})
+		if !ok || got != test.want {
+			t.Fatalf("ticket %d selected %q, %t; want %q", test.ticket, got, ok, test.want)
+		}
+	}
+}
+
+func TestOutlookSelectorChoosesInStockWhitelistedSuffix(t *testing.T) {
+	previous, existed := runtimeconfig.Snapshot()["microsoft_domain_whitelist"]
+	runtimeconfig.Set("microsoft_domain_whitelist", "outlook.com,hotmail.com")
+	t.Cleanup(func() {
+		if existed {
+			runtimeconfig.Set("microsoft_domain_whitelist", previous)
+		} else {
+			runtimeconfig.Delete("microsoft_domain_whitelist")
+		}
+	})
+
+	repo := &allocationLockRepo{
+		config: ProductAllocationConfig{
+			ProjectID: 4, ProductID: 5, ProductType: coredomain.ProductTypeMicrosoft, MainWeight: 1,
+		},
+		suffixInventory: map[string]int64{"not-microsoft.example": 100, "hotmail.com": 1},
+		candidates:      []MicrosoftCandidate{{ResourceID: 2, EmailAddress: "available@hotmail.com"}},
+	}
+	result, err := NewUseCase(repo).Allocate(context.Background(), AllocateCommand{
+		OrderNo: "order-random-outlook", BuyerUserID: 3, ProjectProductID: 5,
+		SupplyScope: domain.SupplyScopePublic, EmailSuffix: coredomain.RandomMicrosoftSuffixSelector,
+	})
+	if err != nil || result == nil || result.Email != "available@hotmail.com" {
+		t.Fatalf("Allocate() result = %#v, error = %v; want hotmail allocation", result, err)
+	}
+	for _, suffix := range repo.listedSuffixes {
+		if suffix != "hotmail.com" {
+			t.Fatalf("candidate suffix = %q, want hotmail.com", suffix)
+		}
+	}
+	if repo.suffixInventoryCalls != 1 || repo.suffixInventoryInTx {
+		t.Fatalf("suffix inventory calls/in transaction = %d/%t, want 1/false", repo.suffixInventoryCalls, repo.suffixInventoryInTx)
+	}
+}
+
+func TestRandomPublicSuffixSelectionUsesInventorySnapshot(t *testing.T) {
+	repo := &allocationLockRepo{config: ProductAllocationConfig{
+		ProjectID: 4, ProductID: 5, ProductType: coredomain.ProductTypeMicrosoft, MainWeight: 1,
+	}}
+	cache := &warmOnInitializeInventoryCache{
+		initialized: true,
+		totals: &ProjectProductInventoryTotals{ProjectID: 4, Items: []ProductInventoryTotal{{
+			ProductID: 5, ProductType: coredomain.ProductTypeMicrosoft,
+			Suffixes: []ProductInventorySuffixTotal{{Suffix: "outlook.com", PublicAvailable: 7}},
+		}}},
+	}
+	useCase := NewUseCase(repo)
+	useCase.SetInventoryCache(cache)
+
+	suffix, err := useCase.SelectRandomInventorySuffix(context.Background(), ProductSuffixSelectionRequest{
+		ProjectID: 4, ProductID: 5, BuyerUserID: 3,
+		SupplyScopes: []domain.SupplyScope{domain.SupplyScopePublic},
+		Selector:     coredomain.RandomMicrosoftSuffixSelector,
+	})
+
+	if err != nil || suffix != "outlook.com" {
+		t.Fatalf("selected suffix = %q, error = %v; want outlook.com", suffix, err)
+	}
+	if repo.suffixInventoryCalls != 0 {
+		t.Fatalf("authoritative suffix inventory calls = %d, want cached public snapshot", repo.suffixInventoryCalls)
+	}
+}
+
+func TestDomainSelectorChoosesInStockSuffix(t *testing.T) {
+	repo := &allocationLockRepo{suffixInventory: map[string]int64{"com.cn": 2}}
+	suffix, err := NewUseCase(repo).selectRandomInventorySuffix(
+		context.Background(),
+		ProductAllocationConfig{ProjectID: 4, ProductID: 5, ProductType: coredomain.ProductTypeDomain},
+		3,
+		[]domain.SupplyScope{domain.SupplyScopePublic},
+		coredomain.RandomDomainSuffixSelector,
+	)
+	if err != nil || suffix != "com.cn" {
+		t.Fatalf("selected suffix = %q, error = %v; want com.cn", suffix, err)
+	}
+}
+
+func TestRandomSuffixInventoryPrecheckUsesMatchingProductSuffixes(t *testing.T) {
+	totals := &ProjectProductInventoryTotals{Items: []ProductInventoryTotal{
+		{
+			ProductID: 1, ProductType: coredomain.ProductTypeMicrosoft,
+			Suffixes: []ProductInventorySuffixTotal{{Suffix: "outlook.com", PublicAvailable: 2}},
+		},
+		{
+			ProductID: 2, ProductType: coredomain.ProductTypeDomain,
+			Suffixes: []ProductInventorySuffixTotal{{Suffix: "com", PublicAvailable: 3}},
+		},
+	}}
+	for _, test := range []struct {
+		productID uint
+		selector  string
+	}{
+		{productID: 1, selector: coredomain.RandomMicrosoftSuffixSelector},
+		{productID: 2, selector: coredomain.RandomDomainSuffixSelector},
+	} {
+		available, known := productInventoryAvailable(totals, ProductInventoryAvailabilityRequest{
+			ProductID: test.productID, EmailSuffix: test.selector, PublicOnly: true,
+		})
+		if !known || !available {
+			t.Fatalf("product %d selector %q availability = %t, %t; want true, true", test.productID, test.selector, available, known)
+		}
+	}
 }
 
 func TestSpecifiedSuffixProbesEveryBucketBeforeGlobalFallback(t *testing.T) {

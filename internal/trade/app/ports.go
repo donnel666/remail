@@ -110,6 +110,19 @@ type InventoryUnavailablePort interface {
 	MarkInventoryUnavailable(ctx context.Context, cmd InventoryAvailabilityCommand) (bool, error)
 }
 
+type RandomSuffixSelectionCommand struct {
+	ProjectID            uint
+	ProductID            uint
+	BuyerUserID          uint
+	SupplyScopes         []SupplyScope
+	Selector             string
+	FulfillExistingOrder bool
+}
+
+type RandomSuffixSelectionPort interface {
+	SelectRandomSuffix(ctx context.Context, cmd RandomSuffixSelectionCommand) (string, error)
+}
+
 type HistoricalMicrosoftAllocationCommand struct {
 	AliasOwnerID uint
 	ProjectID    uint
@@ -801,6 +814,9 @@ func (uc *UseCase) Checkout(ctx context.Context, req CheckoutRequest) (result *C
 	}
 	preparedItems := []checkoutPreparation{prepared}
 	uc.precheckCheckoutBalance(ctx, preparedItems)
+	if err := uc.resolveRandomCheckoutSuffixes(ctx, preparedItems); err != nil {
+		return nil, err
+	}
 	uc.precheckCheckoutInventory(ctx, preparedItems)
 	result, runErr = uc.checkoutPrepared(ctx, preparedItems[0])
 	if result != nil {
@@ -914,8 +930,18 @@ func finalizeCheckoutProduct(prepared *checkoutPreparation, productType domain.P
 		}
 		switch productType {
 		case domain.ProductTypeMicrosoft:
+			if prepared.selectorSuffix == coredomain.RandomDomainSuffixSelector {
+				return domain.ErrInvalidOrderRequest
+			}
 			prepared.emailSuffix = prepared.selectorSuffix
 		case domain.ProductTypeDomain:
+			if prepared.selectorSuffix == coredomain.RandomDomainSuffixSelector {
+				prepared.emailSuffix = prepared.selectorSuffix
+				break
+			}
+			if prepared.selectorSuffix == coredomain.RandomMicrosoftSuffixSelector {
+				return domain.ErrInvalidOrderRequest
+			}
 			normalized, privateDomain, err := normalizeCheckoutDomainSelection(prepared.selectorSuffix)
 			if err != nil || privateDomain && prepared.policy == domain.SupplyPolicyPublicOnly {
 				return domain.ErrInvalidOrderRequest
@@ -940,8 +966,17 @@ func finalizeCheckoutProduct(prepared *checkoutPreparation, productType domain.P
 
 	switch productType {
 	case domain.ProductTypeMicrosoft:
+		if prepared.emailSuffix == coredomain.RandomDomainSuffixSelector {
+			return domain.ErrInvalidOrderRequest
+		}
 	case domain.ProductTypeDomain:
 		if prepared.emailSuffix != "" {
+			if prepared.emailSuffix == coredomain.RandomDomainSuffixSelector {
+				break
+			}
+			if prepared.emailSuffix == coredomain.RandomMicrosoftSuffixSelector {
+				return domain.ErrInvalidOrderRequest
+			}
 			if strings.Contains(prepared.emailSuffix, "@") {
 				normalized, err := coredomain.NormalizeDomainMailbox(prepared.emailSuffix)
 				if err != nil || prepared.policy == domain.SupplyPolicyPublicOnly {
@@ -1927,6 +1962,15 @@ func (uc *UseCase) CheckoutBatch(ctx context.Context, requests []CheckoutRequest
 		return items, nil
 	}
 	uc.precheckCheckoutBalance(ctx, prepared)
+	if resolveErr := uc.resolveRandomCheckoutSuffixes(ctx, prepared); resolveErr != nil {
+		if errors.Is(resolveErr, context.Canceled) || errors.Is(resolveErr, context.DeadlineExceeded) ||
+			errors.Is(resolveErr, domain.ErrIdempotencyConflict) || errors.Is(resolveErr, domain.ErrIdempotencyRequired) ||
+			errors.Is(resolveErr, domain.ErrInvalidOrderRequest) {
+			return nil, resolveErr
+		}
+		items = checkoutBatchFailedItems(len(requests), resolveErr)
+		return items, nil
+	}
 	uc.precheckCheckoutInventory(ctx, prepared)
 	items, runErr = uc.checkoutBatch(ctx, prepared)
 	if runErr == nil {
@@ -2179,6 +2223,62 @@ func (uc *UseCase) prepareCheckoutBatch(ctx context.Context, requests []Checkout
 		}
 	}
 	return prepared, nil
+}
+
+func (uc *UseCase) resolveRandomCheckoutSuffixes(ctx context.Context, prepared []checkoutPreparation) error {
+	resolver, ok := uc.allocation.(RandomSuffixSelectionPort)
+	if !ok || resolver == nil {
+		return nil
+	}
+	type selectionKey struct {
+		projectID uint
+		productID uint
+		buyerID   uint
+		selector  string
+		policy    domain.SupplyPolicy
+	}
+	type selectionResult struct {
+		suffix string
+		err    error
+	}
+	selections := make(map[selectionKey]selectionResult)
+	for i := range prepared {
+		item := &prepared[i]
+		if item.prepareErr != nil || item.existing != nil || item.quote == nil ||
+			(item.emailSuffix != coredomain.RandomMicrosoftSuffixSelector && item.emailSuffix != coredomain.RandomDomainSuffixSelector) {
+			continue
+		}
+		key := selectionKey{
+			projectID: item.quote.ProjectID,
+			productID: item.quote.ProductID,
+			buyerID:   item.request.UserID,
+			selector:  item.emailSuffix,
+			policy:    item.policy,
+		}
+		selection, exists := selections[key]
+		if !exists {
+			selection.suffix, selection.err = resolver.SelectRandomSuffix(ctx, RandomSuffixSelectionCommand{
+				ProjectID:    key.projectID,
+				ProductID:    key.productID,
+				BuyerUserID:  key.buyerID,
+				SupplyScopes: checkoutSupplyScopes(key.policy),
+				Selector:     key.selector,
+			})
+			selections[key] = selection
+		}
+		if selection.err != nil {
+			if errors.Is(selection.err, domain.ErrInsufficientInventory) {
+				item.prepareErr = selection.err
+				continue
+			}
+			return selection.err
+		}
+		if selection.suffix == "" {
+			return domain.ErrInvalidOrderRequest
+		}
+		item.emailSuffix = selection.suffix
+	}
+	return nil
 }
 
 func (uc *UseCase) preloadCheckoutBatch(ctx context.Context, prepared []checkoutPreparation) error {
@@ -3708,10 +3808,7 @@ func (uc *UseCase) compensatePaidCheckout(ctx context.Context, order domain.Orde
 }
 
 func (uc *UseCase) allocate(ctx context.Context, order domain.Order, emailSuffix string) (*AllocationResult, error) {
-	scopes := []SupplyScope{SupplyScopePublic}
-	if order.SupplyPolicy == domain.SupplyPolicyPrivateFirst {
-		scopes = []SupplyScope{SupplyScopeOwned, SupplyScopePublic}
-	}
+	scopes := checkoutSupplyScopes(order.SupplyPolicy)
 	result, err := uc.allocation.Allocate(ctx, AllocationCommand{
 		OrderNo:              order.OrderNo,
 		BuyerUserID:          order.UserID,
@@ -3726,6 +3823,13 @@ func (uc *UseCase) allocate(ctx context.Context, order domain.Order, emailSuffix
 		return nil, domain.ErrInsufficientInventory
 	}
 	return result, err
+}
+
+func checkoutSupplyScopes(policy domain.SupplyPolicy) []SupplyScope {
+	if policy == domain.SupplyPolicyPrivateFirst {
+		return []SupplyScope{SupplyScopeOwned, SupplyScopePublic}
+	}
+	return []SupplyScope{SupplyScopePublic}
 }
 
 func allocationRequiredUntil(order domain.Order) time.Time {
@@ -3966,6 +4070,10 @@ func checkoutProductTypeForSuffix(suffix string) (domain.ProductType, error) {
 		return domain.ProductTypeGmail, nil
 	case "icloud.com":
 		return domain.ProductTypeICloud, nil
+	case coredomain.RandomMicrosoftSuffixSelector:
+		return domain.ProductTypeMicrosoft, nil
+	case coredomain.RandomDomainSuffixSelector:
+		return domain.ProductTypeDomain, nil
 	}
 	if coredomain.IsMicrosoftEmailDomain("selector@" + suffix) {
 		return domain.ProductTypeMicrosoft, nil
