@@ -10,7 +10,8 @@ export type OrderStatus =
   | "refunded"
   | "failed"
   | "closed";
-export type ProductType = "microsoft" | "domain" | "random" | "gmail" | "icloud";
+export type ProductType = "microsoft" | "domain" | "gmail" | "icloud";
+export type OrderProductType = ProductType | "random";
 export type ServiceMode = "purchase" | "code";
 export type ServiceState =
   | "waiting_mail"
@@ -45,8 +46,8 @@ export interface WorkbenchProduct {
   emailSuffix: string;
   id: string;
   label: string;
-  productId: string;
   productType: ProductType;
+  priceMultiplier?: number;
   projectId: string;
   purchaseEnabled: boolean;
   purchaseInventory: number;
@@ -91,8 +92,7 @@ export interface WorkbenchOrder {
   messages: WorkbenchMessage[];
   orderNo: string;
   payAmount: number;
-  productType: ProductType;
-  productId: string;
+  productType: OrderProductType;
   projectId: string;
   quantity: number;
   maxCodes?: number;

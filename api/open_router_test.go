@@ -96,6 +96,35 @@ func TestPublicOpenAPISchemaUsesBackendEnums(t *testing.T) {
 	})
 }
 
+func TestPublicOpenAPIDoesNotExposeInternalProductIDs(t *testing.T) {
+	spec := publicOpenAPISpec(t)
+	components := spec["components"].(map[string]any)
+	schemas := components["schemas"].(map[string]any)
+
+	for _, schemaName := range []string{"CreateOrderRequest", "CreateOrderBatchRequest"} {
+		schema := schemas[schemaName].(map[string]any)
+		properties := schema["properties"].(map[string]any)
+		if _, ok := properties["emailSuffix"]; !ok {
+			t.Fatalf("public openapi schema %s is missing emailSuffix", schemaName)
+		}
+		if _, ok := properties["productId"]; ok {
+			t.Fatalf("public openapi schema %s exposes productId", schemaName)
+		}
+	}
+
+	productSummary := schemas["ProjectProductSummary"].(map[string]any)
+	properties := productSummary["properties"].(map[string]any)
+	if _, ok := properties["id"]; ok {
+		t.Fatal("public openapi schema ProjectProductSummary exposes its internal id")
+	}
+
+	order := schemas["Order"].(map[string]any)
+	orderProperties := order["properties"].(map[string]any)
+	if _, ok := orderProperties["projectProductId"]; ok {
+		t.Fatal("public openapi schema Order exposes projectProductId")
+	}
+}
+
 func publicOpenAPISpec(t *testing.T) map[string]any {
 	t.Helper()
 

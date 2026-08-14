@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  compareDomainSuffixes,
-  compareProjectNames,
-  isPrivateDomainSelection,
-} from "./utils";
+import { compareDomainSuffixes, compareProjectNames } from "./utils";
 
 describe("compareProjectNames", () => {
   it("places names containing Chinese characters after non-Chinese names", () => {
@@ -15,24 +11,12 @@ describe("compareProjectNames", () => {
 });
 
 describe("domain suffix selections", () => {
-  it("places private full emails before displayed public suffixes", () => {
-    const values = [
-      "@net",
-      "z@example.com",
-      "a@example.com",
-      "@com",
-    ];
+  it("sorts displayed public suffixes", () => {
+    const values = ["@net", "@com.cn", "@com"];
     expect(values.sort(compareDomainSuffixes)).toEqual([
-      "a@example.com",
-      "z@example.com",
       "@com",
+      "@com.cn",
       "@net",
     ]);
-  });
-
-  it("recognizes only full Domain emails as private", () => {
-    expect(isPrivateDomainSelection("domain", "mail@example.com")).toBe(true);
-    expect(isPrivateDomainSelection("domain", "com")).toBe(false);
-    expect(isPrivateDomainSelection("microsoft", "outlook.com")).toBe(false);
   });
 });

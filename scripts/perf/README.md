@@ -44,7 +44,7 @@ k6 run \
   -e BASE_URL=http://127.0.0.1:8080 \
   -e API_KEYS="$API_KEY_1,$API_KEY_2,$API_KEY_3" \
   -e PROJECT_ID=1 \
-  -e PRODUCT_ID=1 \
+  -e EMAIL_SUFFIX=outlook.com \
   -e PICKUP_FIXTURES=scripts/perf/pickup-fixtures.json \
   scripts/perf/k6.js
 ```
@@ -56,7 +56,7 @@ k6 run -e MULTIPLIER=2 -e DURATION=5m \
   -e BASE_URL=http://127.0.0.1:8080 \
   -e API_KEYS="$API_KEY_1,$API_KEY_2,$API_KEY_3,$API_KEY_4,$API_KEY_5,$API_KEY_6" \
   -e PROJECT_ID=1 \
-  -e PRODUCT_ID=1 \
+  -e EMAIL_SUFFIX=outlook.com \
   -e PICKUP_FIXTURES=scripts/perf/pickup-fixtures.json \
   scripts/perf/k6.js
 ```

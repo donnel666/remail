@@ -34,8 +34,8 @@ func (r *Repo) listHistoricalProjectScopes(ctx context.Context, projectID uint) 
 	query := r.dbFor(ctx).
 		Table("projects AS p").
 		Select("p.id AS project_id, pp.id AS product_id, pp.code_window_minutes, pp.activation_window_minutes, pp.warranty_minutes, p.loose_match, pmr.rule_type, pmr.pattern, pmr.enabled").
-		Joins(`JOIN project_products AS pp ON pp.project_id = p.id AND pp.type IN ('microsoft', 'random')
-			AND pp.id = (SELECT MIN(candidate.id) FROM project_products AS candidate WHERE candidate.project_id = p.id AND candidate.type IN ('microsoft', 'random'))`).
+		Joins(`JOIN project_products AS pp ON pp.project_id = p.id AND pp.type = 'microsoft'
+			AND pp.id = (SELECT MIN(candidate.id) FROM project_products AS candidate WHERE candidate.project_id = p.id AND candidate.type = 'microsoft')`).
 		Joins("JOIN project_mail_rules AS pmr ON pmr.project_id = p.id AND pmr.enabled = 1").
 		Where("p.status IN ?", []string{"listed", "delisted"})
 	if projectID > 0 {

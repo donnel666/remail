@@ -19,7 +19,6 @@ function order(overrides: Partial<WorkbenchOrder> = {}): WorkbenchOrder {
     messages: [],
     orderNo: "OR1",
     payAmount: 1,
-    productId: "1",
     productType: "microsoft",
     projectId: "1",
     quantity: 1,

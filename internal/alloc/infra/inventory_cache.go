@@ -14,11 +14,11 @@ import (
 )
 
 const (
-	inventoryCacheKeyPrefix        = "alloc:inventory:v5:"
-	inventoryCacheFailureKeyPrefix = "alloc:inventory:v5:failure:"
+	inventoryCacheKeyPrefix        = "alloc:inventory:v6:"
+	inventoryCacheFailureKeyPrefix = "alloc:inventory:v6:failure:"
 	// The Redis name is retained for compatibility; scores are backend-owned
 	// next-refresh times, not client activity times.
-	inventoryCacheScheduleKey = "alloc:inventory:v5:active"
+	inventoryCacheScheduleKey = "alloc:inventory:v6:active"
 )
 
 type InventoryCache struct {

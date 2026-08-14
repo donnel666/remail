@@ -46,11 +46,19 @@ export const PROJECT_PRICE_KEYS = [
   "default_project_icloud_purchase_supplier_price",
 ] as const;
 
+export const PRODUCT_PRICE_MULTIPLIER_KEYS = [
+  "product_price_multiplier_microsoft",
+  "product_price_multiplier_gmail",
+  "product_price_multiplier_icloud",
+  "product_price_multiplier_domain",
+] as const;
+
 export const PAYMENT_BILLING_KEYS = [
   ...EPAY_GATEWAY_KEYS,
   ...TOPUP_KEYS,
   ...RECHARGE_CHECK_KEYS,
   ...PROJECT_PRICE_KEYS,
+  ...PRODUCT_PRICE_MULTIPLIER_KEYS,
 ] as const;
 
 export function applyEPayURLDefaults(form: Record<string, unknown>, origin: string): Record<string, unknown> {

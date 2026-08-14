@@ -7,11 +7,22 @@ import (
 	"time"
 
 	"github.com/donnel666/remail/internal/platform"
+	tradeapp "github.com/donnel666/remail/internal/trade/app"
 	"github.com/donnel666/remail/internal/trade/domain"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+func TestLoadOrCreatePendingOrderRejectsLegacyRandom(t *testing.T) {
+	order, created, err := NewRepo(nil).LoadOrCreatePendingOrder(context.Background(), tradeapp.CreatePendingOrderCommand{
+		ProductType: domain.ProductTypeLegacyRandom,
+	})
+
+	require.ErrorIs(t, err, domain.ErrInvalidOrderRequest)
+	require.Nil(t, order)
+	require.False(t, created)
+}
 
 func TestWithTxRunsRegisteredRollbackOnlyOnFailure(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:trade-rollback-callback?mode=memory&cache=shared"), &gorm.Config{})

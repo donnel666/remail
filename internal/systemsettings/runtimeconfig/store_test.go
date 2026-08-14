@@ -21,6 +21,19 @@ func TestRuntimeSettingsUpdateImmediately(t *testing.T) {
 	require.Equal(t, 5*time.Minute, Duration("smtp_outbound_payload_ttl_minutes", 5*time.Minute, time.Minute, 1))
 }
 
+func TestProductPriceMultiplier(t *testing.T) {
+	Replace([]domain.Setting{
+		{Key: MicrosoftPriceMultiplierKey, Value: " 0.8 "},
+		{Key: GmailPriceMultiplierKey, Value: "0.7"},
+	})
+	t.Cleanup(func() { Replace(nil) })
+
+	require.Equal(t, "0.8", ProductPriceMultiplier("MICROSOFT"))
+	require.Equal(t, "0.7", ProductPriceMultiplier("gmail"))
+	require.Equal(t, "1", ProductPriceMultiplier("retired"))
+	require.Equal(t, "1", ProductPriceMultiplier("icloud"))
+}
+
 func TestSnapshotKeepsRelatedValuesFromOneVersion(t *testing.T) {
 	Replace([]domain.Setting{{Key: "smtp_task_retry_count", Value: "1"}})
 	t.Cleanup(func() { Replace(nil) })
@@ -121,10 +134,14 @@ func TestValidateAuthSecuritySettings(t *testing.T) {
 
 func TestValidateRechargeRebateSettings(t *testing.T) {
 	require.NoError(t, Validate("first_order_rebate_ratio", "0.8"))
+	require.NoError(t, Validate(MicrosoftPriceMultiplierKey, "0.8"))
+	require.NoError(t, Validate(GmailPriceMultiplierKey, "0"))
 	require.NoError(t, Validate("single_rebate_cap", "100.50"))
 	require.NoError(t, Validate("cumulative_rebate_cap", "0"))
 	require.NoError(t, Validate("rebate_expiry_days", "0"))
 	require.ErrorIs(t, Validate("first_order_rebate_ratio", "1.000001"), domain.ErrInvalidValue)
+	require.ErrorIs(t, Validate(ICloudPriceMultiplierKey, "1.000001"), domain.ErrInvalidValue)
+	require.ErrorIs(t, Validate(DomainPriceMultiplierKey, "-0.01"), domain.ErrInvalidValue)
 	require.ErrorIs(t, Validate("single_rebate_cap", "-0.01"), domain.ErrInvalidValue)
 	require.ErrorIs(t, Validate("rebate_expiry_days", "36501"), domain.ErrInvalidValue)
 }

@@ -262,7 +262,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		cleanupFuncs = append(cleanupFuncs, smsbower.RegisterTaskHandlers(taskMux, smsbowerMod.Service))
 
 		// Trade module (unified console/API Key checkout and order query).
-		tradeMod := tradeapi.NewModule(p.DB, coreMod.ProjectUseCase, billingMod.WalletUseCase, allocMod.UseCase, openapiMod.UseCase)
+		tradeMod := tradeapi.NewModule(p.DB, coreMod.ProjectUseCase, billingMod.WalletUseCase, allocMod.UseCase, openapiMod.UseCase, p.Redis)
 		tradeMod.UseCase.SetGmailPorts(gmailMod.Service, gmailDeliveryComposite{gmail: gmailMod.Service, smsbower: smsbowerMod.Service})
 		tradeMod.UseCase.SetUpstreams(upstreamRouter)
 		gmailMod.Service.SetTrade(tradeMod.UseCase)

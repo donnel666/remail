@@ -601,33 +601,6 @@ func (r *ProjectRepo) BulkUpsertProductsWithLog(ctx context.Context, filter core
 			}).Create(&models).Error; err != nil {
 				return fmt.Errorf("bulk upsert project products: %w", err)
 			}
-			var finalModels []ProjectProductModel
-			if err := tx.WithContext(ctx).Where("project_id IN ?", projectIDs).Order("project_id ASC, id ASC").Find(&finalModels).Error; err != nil {
-				return fmt.Errorf("list bulk updated project products: %w", err)
-			}
-			finalProductsByProject := make(map[uint][]domain.Product, len(projectIDs))
-			for i := range finalModels {
-				product := finalModels[i].toDomain()
-				finalProductsByProject[product.ProjectID] = append(finalProductsByProject[product.ProjectID], product)
-			}
-			for _, projectID := range projectIDs {
-				finalProducts := finalProductsByProject[projectID]
-				if !domain.ApplyRandomProductPrices(finalProducts) {
-					return domain.ErrInvalidProduct
-				}
-				for i := range finalProducts {
-					if finalProducts[i].Type != domain.ProductTypeRandom {
-						continue
-					}
-					if err := tx.WithContext(ctx).Model(&ProjectProductModel{}).Where("id = ?", finalProducts[i].ID).Updates(map[string]any{
-						"code_price":     finalProducts[i].CodePrice,
-						"purchase_price": finalProducts[i].PurchasePrice,
-						"updated_at":     time.Now(),
-					}).Error; err != nil {
-						return fmt.Errorf("sync random product prices: %w", err)
-					}
-				}
-			}
 			if err := tx.WithContext(ctx).Model(&ProjectModel{}).Where("id IN ?", projectIDs).Update("updated_at", time.Now()).Error; err != nil {
 				return fmt.Errorf("touch bulk updated projects: %w", err)
 			}
@@ -752,8 +725,6 @@ func (r *ProjectRepo) Facets(ctx context.Context, filter coreapp.ProjectListFilt
 			facets.ProductType.Microsoft = row.Count
 		case domain.ProductTypeDomain:
 			facets.ProductType.Domain = row.Count
-		case domain.ProductTypeRandom:
-			facets.ProductType.Random = row.Count
 		case domain.ProductTypeGmail:
 			facets.ProductType.Gmail = row.Count
 		case domain.ProductTypeICloud:
@@ -796,6 +767,7 @@ func (r *ProjectRepo) projectProductTypeFacet(ctx context.Context, filter coreap
 	err := r.projectListQuery(ctx, filter).
 		Joins("JOIN project_products ON project_products.project_id = projects.id").
 		Where("project_products.status = ?", string(domain.ProductStatusEnabled)).
+		Where("project_products.type IN ?", activeProjectProductTypes()).
 		Select("project_products.type AS value, COUNT(DISTINCT projects.id) AS count").
 		Group("project_products.type").
 		Scan(&rows).Error
@@ -1099,7 +1071,9 @@ func (r *ProjectRepo) replaceProductsAndRules(ctx context.Context, tx *gorm.DB, 
 				return fmt.Errorf("disable removed project product: %w", err)
 			}
 		}
-		detail.Products = append(detail.Products, existing.toDomain())
+		if domain.IsValidProductType(domain.ProductType(existing.Type)) {
+			detail.Products = append(detail.Products, existing.toDomain())
+		}
 	}
 
 	if err := tx.WithContext(ctx).Where("project_id = ?", projectID).Delete(&ProjectMailRuleModel{}).Error; err != nil {
@@ -1188,7 +1162,8 @@ func (r *ProjectRepo) applyListableProjectConditions(q *gorm.DB) *gorm.DB {
 			SELECT 1 FROM project_products
 			WHERE project_products.project_id = projects.id
 			AND project_products.status = ?
-		)`, string(domain.ProductStatusEnabled)).
+			AND project_products.type IN ?
+		)`, string(domain.ProductStatusEnabled), activeProjectProductTypes()).
 		Where(`EXISTS (
 			SELECT 1 FROM project_mail_rules
 			WHERE project_mail_rules.project_id = projects.id
@@ -1240,6 +1215,7 @@ func (r *ProjectRepo) listProducts(ctx context.Context, projectID uint) ([]domai
 	var models []ProjectProductModel
 	if err := r.db.WithContext(ctx).
 		Where("project_id = ?", projectID).
+		Where("type IN ?", activeProjectProductTypes()).
 		Order("id ASC").
 		Find(&models).Error; err != nil {
 		return nil, fmt.Errorf("list project products: %w", err)
@@ -1261,6 +1237,7 @@ func (r *ProjectRepo) listProductsByProjectIDs(ctx context.Context, projectIDs [
 	if err := r.db.WithContext(ctx).
 		Where("project_id IN ?", projectIDs).
 		Where("status = ?", string(domain.ProductStatusEnabled)).
+		Where("type IN ?", activeProjectProductTypes()).
 		Order("project_id ASC, id ASC").
 		Find(&models).Error; err != nil {
 		return nil, fmt.Errorf("list project summary products: %w", err)
@@ -1270,6 +1247,15 @@ func (r *ProjectRepo) listProductsByProjectIDs(ctx context.Context, projectIDs [
 		result[product.ProjectID] = append(result[product.ProjectID], product)
 	}
 	return result, nil
+}
+
+func activeProjectProductTypes() []string {
+	return []string{
+		string(domain.ProductTypeMicrosoft),
+		string(domain.ProductTypeDomain),
+		string(domain.ProductTypeGmail),
+		string(domain.ProductTypeICloud),
+	}
 }
 
 func (r *ProjectRepo) summarizeMailRulesByProjectIDs(ctx context.Context, projectIDs []uint) (map[uint]projectMailRuleSummary, error) {

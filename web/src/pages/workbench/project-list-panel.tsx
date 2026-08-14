@@ -68,7 +68,7 @@ export function ProjectListPanel({
             const inventory = project.products.reduce((sum, product) => {
               // Suffix rows split the parent product inventory by domain. Counting
               // them here would report the same stock more than once.
-              if (product.id !== product.productId) return sum;
+              if (product.id !== product.productType) return sum;
 
               return (
                 sum +

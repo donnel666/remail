@@ -36,7 +36,7 @@
 |------|------|
 | `orderNo` | 订单号，业务主键 |
 | `userId` | 下单用户 |
-| `projectProductId` | 商品 ID |
+| `projectProductId` | 内部项目商品关联 ID，不属于公开下单参数或响应字段 |
 | `serviceMode` | `code/purchase` |
 | `status` | `pending_payment/paid/active/completed/refunded/failed/closed` |
 | `payAmount/refundAmount` | 订单实际支付/退款金额；私有库存订单 `payAmount=0.00` |

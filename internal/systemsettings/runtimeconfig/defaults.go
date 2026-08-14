@@ -3,8 +3,12 @@ package runtimeconfig
 import "github.com/donnel666/remail/internal/systemsettings/domain"
 
 const (
-	DefaultSettingsCount                  = 227
+	DefaultSettingsCount                  = 231
 	SMSBowerNoCodeRefundTimeoutMinutesKey = "smsbower_no_code_refund_timeout_minutes"
+	MicrosoftPriceMultiplierKey           = "product_price_multiplier_microsoft"
+	GmailPriceMultiplierKey               = "product_price_multiplier_gmail"
+	ICloudPriceMultiplierKey              = "product_price_multiplier_icloud"
+	DomainPriceMultiplierKey              = "product_price_multiplier_domain"
 )
 
 // DefaultSettings is the single source of initial values for runtime-managed
@@ -89,6 +93,10 @@ var defaultSettings = []domain.Setting{
 	{Key: "default_project_icloud_code_supplier_price", Value: "5"},
 	{Key: "default_project_icloud_purchase_price", Value: "10"},
 	{Key: "default_project_icloud_purchase_supplier_price", Value: "7"},
+	{Key: "product_price_multiplier_microsoft", Value: "1"},
+	{Key: "product_price_multiplier_gmail", Value: "1"},
+	{Key: "product_price_multiplier_icloud", Value: "1"},
+	{Key: "product_price_multiplier_domain", Value: "1"},
 
 	{Key: "microsoft_domain_whitelist", Value: "outlook.com,hotmail.com,outlook.sa,outlook.com.ar,outlook.com.au,outlook.at,outlook.be,outlook.com.br,outlook.cl,outlook.cz,outlook.fr,outlook.de,outlook.com.gr,outlook.co.il,outlook.in,outlook.co.id,outlook.ie,outlook.it,outlook.hu,outlook.jp,outlook.kr,outlook.lv,outlook.my,outlook.co.nz,outlook.ph,outlook.pt,outlook.sg,outlook.sk,outlook.es,outlook.co.th,outlook.com.tr,outlook.com.vn"},
 	{Key: "domain_custom_tlds", Value: ""},

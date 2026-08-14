@@ -4,6 +4,7 @@ import { ShoppingCart, Zap } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { OverflowTooltip } from "@/components/semi/overflow-tooltip";
+import { effectivePriceMultiplier } from "@/lib/membership";
 import { cn } from "@/lib/utils";
 
 import { calculateDiscountedLedgerTotal } from "./money";
@@ -59,7 +60,7 @@ export function ProductPickerPanel({
   inventoryScope: InventoryScope;
   onInventoryScopeChange: (value: InventoryScope) => void;
   onProductSearchChange: (value: string) => void;
-  onSelectProduct: (productId: string) => void;
+  onSelectProduct: (productKey: string) => void;
   onServiceModeChange: (value: ServiceMode) => void;
   priceMultiplier: number;
   productSearch: string;
@@ -133,7 +134,7 @@ export function ProductPickerPanel({
             const originalPrice = getPrice(product, serviceMode);
             const discountedPrice = calculateDiscountedLedgerTotal(
               originalPrice,
-              priceMultiplier,
+              effectivePriceMultiplier(priceMultiplier, product.priceMultiplier),
             );
             const hasDiscount = discountedPrice < originalPrice;
             const priceLabel = hasDiscount
@@ -156,7 +157,7 @@ export function ProductPickerPanel({
                       {product.label}
                     </OverflowTooltip>
                     <Tag color="grey" shape="circle" size="small">
-                      {productTypeLabel(product.productType, t)}#{product.productId}
+                      {productTypeLabel(product.productType, t)}
                     </Tag>
                   </span>
                   <OverflowTooltip

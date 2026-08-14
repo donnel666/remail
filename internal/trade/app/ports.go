@@ -21,19 +21,23 @@ import (
 )
 
 type OrderingQuote struct {
-	ProjectID               uint
-	ProductID               uint
-	ProductType             domain.ProductType
-	PayAmount               string
-	MicrosoftPayAmount      string
-	DomainPayAmount         string
-	CodeWindowMinutes       int
-	ActivationWindowMinutes int
-	WarrantyMinutes         int
+	ProjectID                uint
+	ProductID                uint
+	ProductType              domain.ProductType
+	PayAmount                string
+	LegacyMicrosoftPayAmount string
+	LegacyDomainPayAmount    string
+	CodeWindowMinutes        int
+	ActivationWindowMinutes  int
+	WarrantyMinutes          int
 }
 
 type OrderingPort interface {
 	GetOrderingQuote(ctx context.Context, projectID uint, productID uint, buyerUserID uint, serviceMode domain.ServiceMode) (*OrderingQuote, error)
+}
+
+type OrderingByTypePort interface {
+	GetOrderingQuoteByType(ctx context.Context, projectID uint, productType domain.ProductType, buyerUserID uint, serviceMode domain.ServiceMode) (*OrderingQuote, error)
 }
 
 type WalletCommand struct {
@@ -302,24 +306,22 @@ type HistoricalGmailOrderRepository interface {
 }
 
 type CreatePendingOrderCommand struct {
-	OrderNo                  string
-	UserID                   uint
-	ProjectID                uint
-	ProjectProductID         uint
-	ProductType              domain.ProductType
-	ServiceMode              domain.ServiceMode
-	SupplyPolicy             domain.SupplyPolicy
-	PayAmount                string
-	RandomMicrosoftPayAmount string
-	RandomDomainPayAmount    string
-	CodeWindowMinutes        int
-	ActivationWindowMinutes  int
-	WarrantyMinutes          int
-	ClientChannel            domain.ClientChannel
-	APIKeyID                 *uint
-	IdempotencyKey           string
-	RequestFingerprint       string
-	Now                      time.Time
+	OrderNo                 string
+	UserID                  uint
+	ProjectID               uint
+	ProjectProductID        uint
+	ProductType             domain.ProductType
+	ServiceMode             domain.ServiceMode
+	SupplyPolicy            domain.SupplyPolicy
+	PayAmount               string
+	CodeWindowMinutes       int
+	ActivationWindowMinutes int
+	WarrantyMinutes         int
+	ClientChannel           domain.ClientChannel
+	APIKeyID                *uint
+	IdempotencyKey          string
+	RequestFingerprint      string
+	Now                     time.Time
 }
 
 type MarkActiveCommand struct {
@@ -831,9 +833,10 @@ func checkoutServiceOutcome(err error) string {
 }
 
 type checkoutQuoteKey struct {
-	projectID uint
-	productID uint
-	mode      domain.ServiceMode
+	projectID   uint
+	productID   uint
+	productType domain.ProductType
+	mode        domain.ServiceMode
 }
 
 type checkoutPreparation struct {
@@ -842,6 +845,9 @@ type checkoutPreparation struct {
 	policy               domain.SupplyPolicy
 	idempotencyKey       string
 	fingerprint          string
+	selectorSuffix       string
+	selectorProductType  domain.ProductType
+	selectedBySuffix     bool
 	emailSuffix          string
 	requestID            string
 	existing             *domain.Order
@@ -863,7 +869,7 @@ func prepareCheckoutRequest(req CheckoutRequest) (checkoutPreparation, error) {
 	if !ok {
 		return checkoutPreparation{}, domain.ErrInvalidOrderRequest
 	}
-	if req.UserID == 0 || req.ProjectID == 0 || req.ProductID == 0 {
+	if req.UserID == 0 || req.ProjectID == 0 {
 		return checkoutPreparation{}, domain.ErrInvalidOrderRequest
 	}
 	idempotencyKey := strings.TrimSpace(req.IdempotencyKey)
@@ -885,14 +891,47 @@ func prepareCheckoutRequest(req CheckoutRequest) (checkoutPreparation, error) {
 		mode:           mode,
 		policy:         policy,
 		idempotencyKey: idempotencyKey,
-		emailSuffix:    normalizeCheckoutEmailSelection(req.EmailSuffix),
 		requestID:      strings.TrimSpace(req.RequestID),
+	}
+	if req.ProductID > 0 {
+		prepared.emailSuffix = normalizeCheckoutEmailSelection(req.EmailSuffix)
+	} else {
+		selectorSuffix, err := normalizeCheckoutProductSuffix(req.EmailSuffix)
+		if err != nil {
+			return checkoutPreparation{}, err
+		}
+		prepared.selectorSuffix = selectorSuffix
+		prepared.selectedBySuffix = true
 	}
 	prepared.fingerprint = checkoutPreparationFingerprint(prepared, prepared.emailSuffix)
 	return prepared, nil
 }
 
 func finalizeCheckoutProduct(prepared *checkoutPreparation, productType domain.ProductType) error {
+	if prepared.selectedBySuffix {
+		if prepared.selectorProductType != "" && prepared.selectorProductType != productType {
+			return domain.ErrInvalidOrderRequest
+		}
+		switch productType {
+		case domain.ProductTypeMicrosoft, domain.ProductTypeDomain:
+			prepared.emailSuffix = prepared.selectorSuffix
+		case domain.ProductTypeGmail:
+			if prepared.selectorSuffix != "gmail.com" {
+				return domain.ErrInvalidOrderRequest
+			}
+			prepared.emailSuffix = ""
+		case domain.ProductTypeICloud:
+			if prepared.selectorSuffix != "icloud.com" {
+				return domain.ErrInvalidOrderRequest
+			}
+			prepared.emailSuffix = ""
+		default:
+			return domain.ErrInvalidOrderRequest
+		}
+		prepared.fingerprint = checkoutPreparationFingerprint(*prepared, prepared.emailSuffix)
+		return nil
+	}
+
 	switch productType {
 	case domain.ProductTypeMicrosoft:
 	case domain.ProductTypeDomain:
@@ -911,7 +950,7 @@ func finalizeCheckoutProduct(prepared *checkoutPreparation, productType domain.P
 				prepared.emailSuffix = normalized
 			}
 		}
-	case domain.ProductTypeRandom, domain.ProductTypeGmail, domain.ProductTypeICloud:
+	case domain.ProductTypeLegacyRandom, domain.ProductTypeGmail, domain.ProductTypeICloud:
 		prepared.emailSuffix = ""
 	default:
 		return domain.ErrInvalidOrderRequest
@@ -921,6 +960,23 @@ func finalizeCheckoutProduct(prepared *checkoutPreparation, productType domain.P
 }
 
 func checkoutPreparationFingerprint(prepared checkoutPreparation, emailSuffix string) string {
+	if prepared.selectedBySuffix {
+		parts := []any{
+			prepared.request.UserID,
+			prepared.request.ProjectID,
+			"suffix",
+			prepared.selectorSuffix,
+			prepared.mode,
+			prepared.policy,
+			prepared.request.ClientChannel,
+			apiKeyFingerprint(prepared.request.APIKeyID),
+		}
+		if prepared.request.BatchQuantity > 1 {
+			parts = append(parts, prepared.request.BatchQuantity)
+		}
+		return checkoutFingerprint(parts...)
+	}
+
 	parts := []any{
 		prepared.request.UserID,
 		prepared.request.ProjectID,
@@ -938,10 +994,18 @@ func checkoutPreparationFingerprint(prepared checkoutPreparation, emailSuffix st
 }
 
 func (uc *UseCase) prepareCheckoutQuote(ctx context.Context, prepared *checkoutPreparation, quotes map[checkoutQuoteKey]*OrderingQuote) error {
+	if prepared.selectedBySuffix && prepared.selectorProductType == "" {
+		productType, err := checkoutProductTypeForSuffix(prepared.selectorSuffix)
+		if err != nil {
+			return err
+		}
+		prepared.selectorProductType = productType
+	}
 	key := checkoutQuoteKey{
-		projectID: prepared.request.ProjectID,
-		productID: prepared.request.ProductID,
-		mode:      prepared.mode,
+		projectID:   prepared.request.ProjectID,
+		productID:   prepared.request.ProductID,
+		productType: prepared.selectorProductType,
+		mode:        prepared.mode,
 	}
 	// This is the only path that evaluates current product sale status. Once an
 	// order has been persisted, subsequent fulfilment must use that order's
@@ -949,13 +1013,27 @@ func (uc *UseCase) prepareCheckoutQuote(ctx context.Context, prepared *checkoutP
 	quote := quotes[key]
 	if quote == nil {
 		var err error
-		quote, err = uc.ordering.GetOrderingQuote(
-			ctx,
-			prepared.request.ProjectID,
-			prepared.request.ProductID,
-			prepared.request.UserID,
-			prepared.mode,
-		)
+		if prepared.selectedBySuffix {
+			ordering, ok := uc.ordering.(OrderingByTypePort)
+			if !ok {
+				return domain.ErrInvalidOrderRequest
+			}
+			quote, err = ordering.GetOrderingQuoteByType(
+				ctx,
+				prepared.request.ProjectID,
+				prepared.selectorProductType,
+				prepared.request.UserID,
+				prepared.mode,
+			)
+		} else {
+			quote, err = uc.ordering.GetOrderingQuote(
+				ctx,
+				prepared.request.ProjectID,
+				prepared.request.ProductID,
+				prepared.request.UserID,
+				prepared.mode,
+			)
+		}
 		if err != nil {
 			return err
 		}
@@ -963,11 +1041,11 @@ func (uc *UseCase) prepareCheckoutQuote(ctx context.Context, prepared *checkoutP
 			quotes[key] = quote
 		}
 	}
+	if quote.ProductType == domain.ProductTypeLegacyRandom {
+		return domain.ErrProjectUnavailable
+	}
 	if err := finalizeCheckoutProduct(prepared, quote.ProductType); err != nil {
 		return err
-	}
-	if quote.ProductType == domain.ProductTypeRandom && (quote.MicrosoftPayAmount == "" || quote.DomainPayAmount == "") {
-		return domain.ErrInvalidOrderRequest
 	}
 	if quote.ProductType == domain.ProductTypeGmail {
 		if uc.gmailSupply == nil {
@@ -1085,24 +1163,22 @@ func (uc *UseCase) checkoutPrepared(ctx context.Context, prepared checkoutPrepar
 		return uc.checkoutGmailPrepared(ctx, prepared)
 	}
 	order, created, err := uc.repo.LoadOrCreatePendingOrder(ctx, CreatePendingOrderCommand{
-		OrderNo:                  nextOrderNo(),
-		UserID:                   prepared.request.UserID,
-		ProjectID:                prepared.quote.ProjectID,
-		ProjectProductID:         prepared.quote.ProductID,
-		ProductType:              prepared.quote.ProductType,
-		ServiceMode:              prepared.mode,
-		SupplyPolicy:             prepared.policy,
-		PayAmount:                prepared.quote.PayAmount,
-		RandomMicrosoftPayAmount: prepared.quote.MicrosoftPayAmount,
-		RandomDomainPayAmount:    prepared.quote.DomainPayAmount,
-		CodeWindowMinutes:        prepared.quote.CodeWindowMinutes,
-		ActivationWindowMinutes:  prepared.quote.ActivationWindowMinutes,
-		WarrantyMinutes:          prepared.quote.WarrantyMinutes,
-		ClientChannel:            prepared.request.ClientChannel,
-		APIKeyID:                 prepared.request.APIKeyID,
-		IdempotencyKey:           prepared.idempotencyKey,
-		RequestFingerprint:       prepared.fingerprint,
-		Now:                      uc.now(),
+		OrderNo:                 nextOrderNo(),
+		UserID:                  prepared.request.UserID,
+		ProjectID:               prepared.quote.ProjectID,
+		ProjectProductID:        prepared.quote.ProductID,
+		ProductType:             prepared.quote.ProductType,
+		ServiceMode:             prepared.mode,
+		SupplyPolicy:            prepared.policy,
+		PayAmount:               prepared.quote.PayAmount,
+		CodeWindowMinutes:       prepared.quote.CodeWindowMinutes,
+		ActivationWindowMinutes: prepared.quote.ActivationWindowMinutes,
+		WarrantyMinutes:         prepared.quote.WarrantyMinutes,
+		ClientChannel:           prepared.request.ClientChannel,
+		APIKeyID:                prepared.request.APIKeyID,
+		IdempotencyKey:          prepared.idempotencyKey,
+		RequestFingerprint:      prepared.fingerprint,
+		Now:                     uc.now(),
 	})
 	if err != nil {
 		return nil, err
@@ -3630,7 +3706,7 @@ func (uc *UseCase) allocate(ctx context.Context, order domain.Order, emailSuffix
 	if order.SupplyPolicy == domain.SupplyPolicyPrivateFirst {
 		scopes = []SupplyScope{SupplyScopeOwned, SupplyScopePublic}
 	}
-	return uc.allocation.Allocate(ctx, AllocationCommand{
+	result, err := uc.allocation.Allocate(ctx, AllocationCommand{
 		OrderNo:              order.OrderNo,
 		BuyerUserID:          order.UserID,
 		ProjectProductID:     order.ProjectProductID,
@@ -3640,6 +3716,10 @@ func (uc *UseCase) allocate(ctx context.Context, order domain.Order, emailSuffix
 		RequiredUntil:        allocationRequiredUntil(order),
 		FulfillExistingOrder: true,
 	})
+	if order.ProductType == domain.ProductTypeLegacyRandom && errors.Is(err, domain.ErrProjectUnavailable) {
+		return nil, domain.ErrInsufficientInventory
+	}
+	return result, err
 }
 
 func allocationRequiredUntil(order domain.Order) time.Time {
@@ -3662,12 +3742,12 @@ func checkoutPayAmount(listedAmount string, scope SupplyScope) string {
 
 func allocatedCheckoutPayAmount(order domain.Order, quote OrderingQuote, allocation AllocationResult) (string, error) {
 	listedAmount := order.PayAmount
-	if order.ProductType == domain.ProductTypeRandom {
+	if order.ProductType == domain.ProductTypeLegacyRandom {
 		switch allocation.Type {
 		case domain.AllocationTypeMicrosoft:
-			listedAmount = quote.MicrosoftPayAmount
+			listedAmount = quote.LegacyMicrosoftPayAmount
 		case domain.AllocationTypeDomain:
-			listedAmount = quote.DomainPayAmount
+			listedAmount = quote.LegacyDomainPayAmount
 		case domain.AllocationTypeICloud:
 			listedAmount = quote.PayAmount
 		default:
@@ -3748,12 +3828,12 @@ func orderingQuoteFromOrder(order domain.Order) (*OrderingQuote, error) {
 		ActivationWindowMinutes: order.ActivationWindowMinutes,
 		WarrantyMinutes:         order.WarrantyMinutes,
 	}
-	if order.ProductType == domain.ProductTypeRandom {
-		if order.RandomMicrosoftPayAmount == "" || order.RandomDomainPayAmount == "" {
+	if order.ProductType == domain.ProductTypeLegacyRandom {
+		if order.LegacyRandomMicrosoftPayAmount == "" || order.LegacyRandomDomainPayAmount == "" {
 			return nil, domain.ErrInvalidOrderRequest
 		}
-		quote.MicrosoftPayAmount = order.RandomMicrosoftPayAmount
-		quote.DomainPayAmount = order.RandomDomainPayAmount
+		quote.LegacyMicrosoftPayAmount = order.LegacyRandomMicrosoftPayAmount
+		quote.LegacyDomainPayAmount = order.LegacyRandomDomainPayAmount
 	}
 	if quote.ProjectID == 0 || quote.ProductID == 0 || quote.ProductType == "" {
 		return nil, domain.ErrInvalidOrderRequest
@@ -3846,6 +3926,37 @@ func normalizeCheckoutEmailSelection(value string) string {
 		return value
 	}
 	return normalizeEmailSuffix(value)
+}
+
+func normalizeCheckoutProductSuffix(value string) (string, error) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if strings.HasPrefix(value, "@") || strings.HasPrefix(value, ".") {
+		value = value[1:]
+	}
+	if value == "" || strings.Contains(value, "@") || strings.HasPrefix(value, ".") {
+		return "", domain.ErrInvalidOrderRequest
+	}
+	normalized, err := coredomain.NormalizeDomainSuffix(value)
+	if err != nil {
+		return "", domain.ErrInvalidOrderRequest
+	}
+	return strings.TrimPrefix(normalized, "."), nil
+}
+
+func checkoutProductTypeForSuffix(suffix string) (domain.ProductType, error) {
+	switch suffix {
+	case "gmail.com":
+		return domain.ProductTypeGmail, nil
+	case "icloud.com":
+		return domain.ProductTypeICloud, nil
+	}
+	if coredomain.IsMicrosoftEmailDomain("selector@" + suffix) {
+		return domain.ProductTypeMicrosoft, nil
+	}
+	if normalized, err := coredomain.NormalizeDomainTLD(suffix); err == nil && normalized == suffix {
+		return domain.ProductTypeDomain, nil
+	}
+	return "", domain.ErrInvalidOrderRequest
 }
 
 func orderAllowsServiceToken(status domain.OrderStatus) bool {

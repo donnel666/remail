@@ -1440,7 +1440,7 @@ func openRuntime(ctx context.Context, proxyFilePath, proxyURL string, proxyBatch
 	billing := billingapi.NewBillingModule(p.DB, p.Asynq)
 	allocation := allocapi.NewModule(p.DB, p.Redis, p.Asynq)
 	projects := coreapp.NewProjectUseCase(coreinfra.NewProjectRepo(p.DB))
-	trade := tradeapi.NewModule(p.DB, projects, billing.WalletUseCase, allocation.UseCase, openapiapi.NewModule(p.DB, p.Redis).UseCase)
+	trade := tradeapi.NewModule(p.DB, projects, billing.WalletUseCase, allocation.UseCase, openapiapi.NewModule(p.DB, p.Redis).UseCase, p.Redis)
 	mailmatch := mailmatchapi.NewModule(p.DB, files, p.Redis, p.Asynq, proxyModule.ProxyUseCase, trade.UseCase, validation)
 	mailmatch.SetMicrosoftCredentialPort(credentials)
 	return &commandRuntime{

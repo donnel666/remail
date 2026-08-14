@@ -148,7 +148,6 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *d
 	}
 
 	var err error
-	preferredRandomProductType := coredomain.ProductType("")
 	attempts := candidateRetryCountValue()
 	if uc.repo.HasParentTx(ctx) {
 		// A nested retry would keep the parent wallet/resource locks and sleep in
@@ -158,7 +157,6 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *d
 	for attempt := 0; attempt < attempts; attempt++ {
 		result = nil
 		existingHit = false
-		conflictedRandomProductType := coredomain.ProductType("")
 		err = uc.repo.WithTx(ctx, func(txCtx context.Context) error {
 			existing, err := uc.repo.FindExistingAllocation(txCtx, cmd.OrderNo)
 			if err != nil {
@@ -178,9 +176,7 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *d
 				return domain.ErrProjectNotAllocatable
 			}
 			metricType = string(config.ProductType)
-			if config.ProductType == coredomain.ProductTypeRandom {
-				cmd.EmailSuffix = ""
-			} else if config.ProductType == coredomain.ProductTypeDomain && domainSelection != "" {
+			if config.ProductType == coredomain.ProductTypeDomain && domainSelection != "" {
 				var privateMailbox bool
 				cmd.EmailSuffix, privateMailbox, err = normalizeDomainSelection(domainSelection)
 				if err != nil {
@@ -235,13 +231,6 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *d
 				return locked, err
 			}
 			productTypes := []coredomain.ProductType{config.ProductType}
-			if config.ProductType == coredomain.ProductTypeRandom {
-				productTypes = randomProductTypes(cmd.OrderNo, config.ProductID)
-				if preferredRandomProductType != "" && productTypes[0] != preferredRandomProductType {
-					productTypes[0], productTypes[1] = productTypes[1], productTypes[0]
-				}
-			}
-			sawResourceTypeBusy := false
 			allRoutesDefinitive := config.ProductType == coredomain.ProductTypeMicrosoft
 			for _, scope := range scopes {
 				attemptCmd := cmd
@@ -263,14 +252,7 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *d
 						return nil
 					}
 					if errors.Is(err, errResourceTypeBusy) {
-						if config.ProductType == coredomain.ProductTypeRandom {
-							sawResourceTypeBusy = true
-							continue
-						}
 						return domain.ErrAllocationConflict
-					}
-					if config.ProductType == coredomain.ProductTypeRandom && errors.Is(err, domain.ErrAllocationConflict) {
-						conflictedRandomProductType = productType
 					}
 					if !errors.Is(err, domain.ErrInsufficientInventory) {
 						return err
@@ -278,22 +260,11 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *d
 					allRoutesDefinitive = allRoutesDefinitive && errors.Is(err, domain.ErrDefinitiveInventoryExhausted)
 				}
 			}
-			if sawResourceTypeBusy {
-				return errResourceTypeBusy
-			}
 			if allRoutesDefinitive {
 				return domain.ErrDefinitiveInventoryExhausted
 			}
 			return domain.ErrInsufficientInventory
 		})
-		if errors.Is(err, domain.ErrAllocationConflict) {
-			switch conflictedRandomProductType {
-			case coredomain.ProductTypeMicrosoft:
-				preferredRandomProductType = coredomain.ProductTypeDomain
-			case coredomain.ProductTypeDomain:
-				preferredRandomProductType = coredomain.ProductTypeMicrosoft
-			}
-		}
 		if err == nil || errors.Is(err, domain.ErrDefinitiveInventoryExhausted) ||
 			(!errors.Is(err, domain.ErrInsufficientInventory) && !errors.Is(err, domain.ErrAllocationConflict) && !errors.Is(err, errResourceTypeBusy)) {
 			break
@@ -791,7 +762,7 @@ func (uc *UseCase) GetInventoryStats(ctx context.Context, projectID uint) (*Inve
 		if stats.Cold {
 			return nil, domain.ErrInventoryRefreshInProgress
 		}
-		// Legacy v5 placeholders predate Cold and have neither source enabled;
+		// Legacy placeholders predate Cold and have neither source enabled;
 		// authoritative stats always enable at least one configured product type.
 		if !stats.Microsoft.Enabled && !stats.Domain.Enabled && !stats.Gmail.Enabled && !stats.ICloud.Enabled {
 			_ = uc.ScheduleInventoryRefresh(ctx)
@@ -812,6 +783,10 @@ func (uc *UseCase) GetProductInventoryTotals(ctx context.Context, projectID uint
 	if err != nil {
 		return nil, err
 	}
+	privateMicrosoft, err := uc.repo.ListPrivateMicrosoftInventoryTotals(ctx, projectID, viewerUserID)
+	if err != nil {
+		return nil, err
+	}
 	privateDomains, err := uc.repo.ListPrivateDomainInventoryTotals(ctx, projectID, viewerUserID)
 	if err != nil {
 		return nil, err
@@ -820,39 +795,16 @@ func (uc *UseCase) GetProductInventoryTotals(ctx context.Context, projectID uint
 	if err != nil {
 		return nil, err
 	}
-	if len(privateDomains) == 0 && len(userICloud) == 0 {
+	if len(privateMicrosoft) == 0 && len(privateDomains) == 0 && len(userICloud) == 0 {
 		return snapshot, nil
 	}
 	result := cloneProductInventoryTotals(snapshot)
-	for _, privateDomain := range privateDomains {
-		if privateDomain.Available <= 0 {
-			continue
-		}
-		itemIndex := -1
-		for i := range result.Items {
-			if result.Items[i].ProductID == privateDomain.ProductID {
-				itemIndex = i
-				break
-			}
-		}
-		if itemIndex < 0 {
-			result.Items = append(result.Items, ProductInventoryTotal{ProductID: privateDomain.ProductID})
-			itemIndex = len(result.Items) - 1
-		}
-		item := &result.Items[itemIndex]
-		item.Suffixes = append(item.Suffixes, ProductInventorySuffixTotal{
-			Suffix: privateDomain.Email, TotalAvailable: privateDomain.Available,
+	mergePrivateProductInventory(result, privateMicrosoft, coredomain.ProductTypeMicrosoft)
+	mergePrivateProductInventory(result, privateDomains, coredomain.ProductTypeDomain)
+	for i := range result.Items {
+		sort.Slice(result.Items[i].Suffixes, func(left, right int) bool {
+			return result.Items[i].Suffixes[left].Suffix < result.Items[i].Suffixes[right].Suffix
 		})
-		item.TotalAvailable += privateDomain.Available
-		if item.CodeAvailable != nil {
-			codeAvailable := *item.CodeAvailable + privateDomain.Available
-			item.CodeAvailable = &codeAvailable
-		}
-		if item.PurchaseAvailable != nil {
-			purchaseAvailable := *item.PurchaseAvailable + privateDomain.Available
-			item.PurchaseAvailable = &purchaseAvailable
-		}
-		result.TotalAvailable += privateDomain.Available
 	}
 	for _, inventory := range userICloud {
 		privateAvailable := inventory.OwnedAvailable - inventory.OwnedPublicAvailable
@@ -867,13 +819,55 @@ func (uc *UseCase) GetProductInventoryTotals(ctx context.Context, projectID uint
 			}
 		}
 		if itemIndex < 0 {
-			result.Items = append(result.Items, ProductInventoryTotal{ProductID: inventory.ProductID})
+			result.Items = append(result.Items, ProductInventoryTotal{ProductID: inventory.ProductID, ProductType: coredomain.ProductTypeICloud})
 			itemIndex = len(result.Items) - 1
 		}
 		result.Items[itemIndex].TotalAvailable += privateAvailable
 		result.TotalAvailable += privateAvailable
 	}
 	return result, nil
+}
+
+func mergePrivateProductInventory(result *ProjectProductInventoryTotals, inventory []PrivateProductInventoryTotal, productType coredomain.ProductType) {
+	for _, private := range inventory {
+		if private.Available <= 0 || private.Suffix == "" {
+			continue
+		}
+		itemIndex := -1
+		for i := range result.Items {
+			if result.Items[i].ProductID == private.ProductID {
+				itemIndex = i
+				break
+			}
+		}
+		if itemIndex < 0 {
+			result.Items = append(result.Items, ProductInventoryTotal{ProductID: private.ProductID, ProductType: productType})
+			itemIndex = len(result.Items) - 1
+		}
+		item := &result.Items[itemIndex]
+		suffixIndex := -1
+		for i := range item.Suffixes {
+			if item.Suffixes[i].Suffix == private.Suffix {
+				suffixIndex = i
+				break
+			}
+		}
+		if suffixIndex < 0 {
+			item.Suffixes = append(item.Suffixes, ProductInventorySuffixTotal{Suffix: private.Suffix})
+			suffixIndex = len(item.Suffixes) - 1
+		}
+		item.Suffixes[suffixIndex].TotalAvailable += private.Available
+		item.TotalAvailable += private.Available
+		if item.CodeAvailable != nil {
+			codeAvailable := *item.CodeAvailable + private.Available
+			item.CodeAvailable = &codeAvailable
+		}
+		if item.PurchaseAvailable != nil {
+			purchaseAvailable := *item.PurchaseAvailable + private.Available
+			item.PurchaseAvailable = &purchaseAvailable
+		}
+		result.TotalAvailable += private.Available
+	}
 }
 
 func cloneProductInventoryTotals(source *ProjectProductInventoryTotals) *ProjectProductInventoryTotals {
@@ -2207,13 +2201,6 @@ func gmailMailboxPreferences(orderNo string, config ProductAllocationConfig) []d
 		result = append(result, domain.GmailMailbox(mailbox))
 	}
 	return result
-}
-
-func randomProductTypes(orderNo string, productID uint) []coredomain.ProductType {
-	if hash64(orderNo+"|"+strconv.Itoa(int(productID))+"|type")%2 == 0 {
-		return []coredomain.ProductType{coredomain.ProductTypeMicrosoft, coredomain.ProductTypeDomain}
-	}
-	return []coredomain.ProductType{coredomain.ProductTypeDomain, coredomain.ProductTypeMicrosoft}
 }
 
 func bucketProbeSequence(orderNo string, projectID uint, kind string, bucketCount uint16) []uint16 {

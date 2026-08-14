@@ -7,7 +7,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode"
 
 	"github.com/donnel666/remail/internal/systemsettings/domain"
 )
@@ -67,34 +66,21 @@ func String(key, fallback string) string {
 	return value
 }
 
-// EmailList returns a normalized, de-duplicated comma/whitespace separated
-// mailbox list. Values are validated at the system-settings write boundary;
-// this helper only gives runtime consumers one canonical representation.
-func EmailList(key, fallback string) []string {
-	return splitEmailList(String(key, fallback))
-}
-
-func (values Values) EmailList(key, fallback string) []string {
-	return splitEmailList(values.String(key, fallback))
-}
-
-func splitEmailList(value string) []string {
-	items := make([]string, 0)
-	seen := make(map[string]struct{})
-	for _, candidate := range strings.FieldsFunc(value, func(r rune) bool {
-		return r == ',' || r == '，' || r == ';' || r == '；' || unicode.IsSpace(r)
-	}) {
-		candidate = strings.ToLower(strings.TrimSpace(candidate))
-		if candidate == "" {
-			continue
-		}
-		if _, exists := seen[candidate]; exists {
-			continue
-		}
-		seen[candidate] = struct{}{}
-		items = append(items, candidate)
+func ProductPriceMultiplier(productType string) string {
+	var key string
+	switch canonicalKey(productType) {
+	case "microsoft":
+		key = MicrosoftPriceMultiplierKey
+	case "gmail":
+		key = GmailPriceMultiplierKey
+	case "icloud":
+		key = ICloudPriceMultiplierKey
+	case "domain":
+		key = DomainPriceMultiplierKey
+	default:
+		return "1"
 	}
-	return items
+	return strings.TrimSpace(String(key, "1"))
 }
 
 func Bool(key string, fallback bool) bool {

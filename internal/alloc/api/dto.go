@@ -7,7 +7,6 @@ type AllocationItemResponse struct {
 	ID          uint       `json:"id"`
 	OrderNo     string     `json:"orderNo"`
 	ProjectID   uint       `json:"projectId"`
-	ProductID   uint       `json:"productId"`
 	ResourceID  uint       `json:"resourceId"`
 	SupplyScope string     `json:"supplyScope"`
 	Mailbox     string     `json:"mailbox"`
@@ -72,7 +71,7 @@ type ProjectInventoryTotalResponse struct {
 }
 
 type ProjectProductInventoryTotalResponse struct {
-	ProductID               uint                                    `json:"productId"`
+	ProductType             string                                  `json:"productType"`
 	TotalAvailable          int64                                   `json:"totalAvailable"`
 	PublicAvailable         int64                                   `json:"publicAvailable"`
 	CodeAvailable           *int64                                  `json:"codeAvailable,omitempty"`

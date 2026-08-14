@@ -1007,14 +1007,16 @@ func TestProjectInventoryAccessIsCheckedLiveMySQL(t *testing.T) {
 	require.ErrorIs(t, repo.AssertProjectInventoryAccess(context.Background(), 10, 2), domain.ErrProjectNotAllocatable)
 }
 
-func TestUserProductInventoryIncludesOnlyAvailableOwnedPrivateMailboxesMySQL(t *testing.T) {
+func TestUserProductInventoryIncludesOwnedPrivateDomainCapacityMySQL(t *testing.T) {
 	db := newAllocMySQLTestDB(t)
 	seedAllocBase(t, db, "domain", 0, 0, 0)
 	seedDomainResources(t, db, 1, 1000, 1)
 	seedDomainResourcesWithPurpose(t, db, 2, 2000, 3, "not_sale")
+	seedDomainResourcesWithPurpose(t, db, 2, 4000, 1, "not_sale")
 	seedDomainResourcesWithPurpose(t, db, 3, 3000, 1, "not_sale")
 	require.NoError(t, db.Exec("UPDATE domain_resources SET mailbox_daily_limit = 1 WHERE id IN (2000, 2001)").Error)
 	require.NoError(t, db.Exec("UPDATE domain_resources SET mailbox_daily_limit = 5 WHERE id = 2002").Error)
+	require.NoError(t, db.Exec("UPDATE domain_resources SET mailbox_daily_limit = 2 WHERE id = 4000").Error)
 	require.NoError(t, db.Exec(`
 INSERT INTO generated_mailboxes(id, resource_id, owner_user_id, email, status, alloc_bucket) VALUES
     (92000, 2000, 2, 'quota@d2000.example.com', 'normal', MOD(CRC32('quota@d2000.example.com'), 2048)),
@@ -1036,14 +1038,12 @@ VALUES (UTC_DATE(), 'domain', 2000, 'domain_mailbox', 1)`).Error)
 	totals, err := uc.GetProductInventoryTotals(context.Background(), 10, 2)
 	require.NoError(t, err)
 	require.Len(t, totals.Items, 1)
-	require.Equal(t, int64(10002), totals.TotalAvailable)
-	require.Equal(t, int64(10002), totals.Items[0].TotalAvailable)
+	require.Equal(t, int64(10008), totals.TotalAvailable)
+	require.Equal(t, int64(10008), totals.Items[0].TotalAvailable)
 	require.Equal(t, int64(10000), totals.Items[0].PublicAvailable)
-	require.Equal(t, []allocapp.ProductInventorySuffixTotal{
-		{Suffix: "com", TotalAvailable: 10000, PublicAvailable: 10000},
-		{Suffix: "available-a@d2001.example.com", TotalAvailable: 1},
-		{Suffix: "available-b@d2002.example.com", TotalAvailable: 1},
-	}, totals.Items[0].Suffixes)
+	require.Equal(t, []allocapp.ProductInventorySuffixTotal{{
+		Suffix: "com", TotalAvailable: 10008, PublicAvailable: 10000,
+	}}, totals.Items[0].Suffixes)
 	for _, unavailable := range []string{
 		"quota@d2000.example.com",
 		"over-limit@d2001.example.com",
@@ -1078,6 +1078,16 @@ func TestInventoryStatsExcludePrivateMicrosoftFromSharedPoolMySQL(t *testing.T) 
 	require.Zero(t, productStats.Items[0].TotalAvailable)
 	require.Zero(t, productStats.Items[0].PublicAvailable)
 	require.Empty(t, productStats.Items[0].Suffixes)
+
+	userStats, err := allocapp.NewUseCase(repo).GetProductInventoryTotals(context.Background(), 10, 2)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), userStats.TotalAvailable)
+	require.Len(t, userStats.Items, 1)
+	require.Equal(t, int64(1), userStats.Items[0].TotalAvailable)
+	require.Zero(t, userStats.Items[0].PublicAvailable)
+	require.Equal(t, []allocapp.ProductInventorySuffixTotal{{
+		Suffix: "example.com", TotalAvailable: 1,
+	}}, userStats.Items[0].Suffixes)
 }
 
 func TestICloudInventoryIgnoresExpirationAndCookieStateMySQL(t *testing.T) {

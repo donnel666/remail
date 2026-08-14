@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	allocapp "github.com/donnel666/remail/internal/alloc/app"
+	coredomain "github.com/donnel666/remail/internal/core/domain"
 	"github.com/donnel666/remail/internal/gmail"
 	iamdomain "github.com/donnel666/remail/internal/iam/domain"
 	mailmatchapi "github.com/donnel666/remail/internal/mailmatch/api"
@@ -54,6 +55,7 @@ func overlaySMSBowerInventory(snapshots map[uint]*allocapp.ProjectProductInvento
 			if snapshot.Items[i].ProductID != upstreamItem.ProductID {
 				continue
 			}
+			snapshot.Items[i].ProductType = coredomain.ProductTypeGmail
 			previous := snapshot.Items[i].TotalAvailable
 			addSMSBowerInventory(&snapshot.Items[i], upstreamItem.CodeAvailable)
 			snapshot.TotalAvailable = max(0, snapshot.TotalAvailable+snapshot.Items[i].TotalAvailable-previous)
@@ -61,7 +63,9 @@ func overlaySMSBowerInventory(snapshots map[uint]*allocapp.ProjectProductInvento
 			break
 		}
 		if !found {
-			item := allocapp.ProductInventoryTotal{ProductID: upstreamItem.ProductID}
+			item := allocapp.ProductInventoryTotal{
+				ProductID: upstreamItem.ProductID, ProductType: coredomain.ProductTypeGmail,
+			}
 			addSMSBowerInventory(&item, upstreamItem.CodeAvailable)
 			snapshot.Items = append(snapshot.Items, item)
 			snapshot.TotalAvailable += item.TotalAvailable

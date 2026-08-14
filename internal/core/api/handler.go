@@ -1612,7 +1612,6 @@ func toProjectListFacetsResponse(facets *coreapp.ProjectListFacets) *ProjectList
 			All:       facets.ProductType.All,
 			Microsoft: facets.ProductType.Microsoft,
 			Domain:    facets.ProductType.Domain,
-			Random:    facets.ProductType.Random,
 			Gmail:     facets.ProductType.Gmail,
 			ICloud:    facets.ProductType.ICloud,
 		},
@@ -1628,13 +1627,13 @@ func toProjectProductSummaryResponses(products []coredomain.Product, inventoryBy
 		product := products[i]
 		inventory := inventoryByProductID[product.ID]
 		items[i] = ProjectProductSummaryResponse{
-			ID:                      product.ID,
 			Type:                    string(product.Type),
 			Status:                  string(product.Status),
 			CodeEnabled:             product.CodeEnabled,
 			PurchaseEnabled:         product.PurchaseEnabled,
 			CodePrice:               product.CodePrice,
 			PurchasePrice:           product.PurchasePrice,
+			PriceMultiplier:         runtimeconfig.ProductPriceMultiplier(string(product.Type)),
 			CodeWindowMinutes:       product.CodeWindowMinutes,
 			ActivationWindowMinutes: product.ActivationWindowMinutes,
 			WarrantyMinutes:         product.WarrantyMinutes,
@@ -1676,7 +1675,6 @@ func toProjectDetailResponseWithInventory(detail *coredomain.ProjectDetail, incl
 		product := detail.Products[i]
 		inventory := inventoryByProductID[product.ID]
 		products[i] = ProjectProductResponse{
-			ID:                      product.ID,
 			ProjectID:               product.ProjectID,
 			Type:                    string(product.Type),
 			Status:                  string(product.Status),
@@ -1684,6 +1682,7 @@ func toProjectDetailResponseWithInventory(detail *coredomain.ProjectDetail, incl
 			PurchaseEnabled:         product.PurchaseEnabled,
 			CodePrice:               product.CodePrice,
 			PurchasePrice:           product.PurchasePrice,
+			PriceMultiplier:         runtimeconfig.ProductPriceMultiplier(string(product.Type)),
 			CodeWindowMinutes:       product.CodeWindowMinutes,
 			ActivationWindowMinutes: product.ActivationWindowMinutes,
 			WarrantyMinutes:         product.WarrantyMinutes,

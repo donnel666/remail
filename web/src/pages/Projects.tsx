@@ -321,8 +321,8 @@ function ProductPricePreview({
       <div className="project-square-price-row">
         <span className="project-square-product-types">
           {enabledProducts.map((product) => (
-            <span className="project-square-product-type" key={product.id}>
-              {productTypeLabel(product.type, t)}#{product.id}
+            <span className="project-square-product-type" key={product.type}>
+              {productTypeLabel(product.type, t)}
             </span>
           ))}
         </span>
@@ -786,7 +786,6 @@ function ProjectSquareSidebar({
             value: "microsoft",
           },
           { count: productTypeCounts.domain, label: t("Domain email"), value: "domain" },
-          { count: productTypeCounts.random, label: t("Random email"), value: "random" },
           { count: productTypeCounts.gmail, label: t("Gmail email"), value: "gmail" },
           { count: productTypeCounts.icloud, label: t("iCloud email"), value: "icloud" },
         ]}
@@ -897,10 +896,10 @@ function ProductRows({ products }: { products: ProjectProduct[] }) {
   return (
     <div className="project-detail-products">
       {products.map((product) => (
-        <div className="project-detail-product" key={product.id}>
+        <div className="project-detail-product" key={product.type}>
           <div className="project-detail-product-heading">
             <Tag color={product.type === "microsoft" ? "amber" : "green"} shape="circle">
-              {productTypeLabel(product.type, t)}#{product.id}
+              {productTypeLabel(product.type, t)}
             </Tag>
             {product.status !== "enabled" ? (
               <Tag color="grey" shape="circle">
@@ -1125,7 +1124,6 @@ export default function Projects() {
     gmail: 0,
     icloud: 0,
     microsoft: 0,
-    random: 0,
   });
   const [statusCounts, setStatusCounts] = useState<Record<StatusFilter, number>>({
     all: 0,
@@ -1176,7 +1174,6 @@ export default function Projects() {
         gmail: facets?.productType.gmail ?? 0,
         icloud: facets?.productType.icloud ?? 0,
         microsoft: facets?.productType.microsoft ?? 0,
-        random: facets?.productType.random ?? 0,
       });
       return { items: listResponse.items, total: listResponse.total };
     },

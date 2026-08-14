@@ -4784,15 +4784,13 @@ export interface components {
         };
         CreateOrderRequest: {
             projectId: number;
-            productId: number;
-            /** @description Optional allocation selection. Microsoft products accept an exact email domain (for example outlook.com). Domain products keep the existing public suffix format without a leading @ (for example com or com.cn), and also accept a current-user private full email (for example alice@mydomain.com); private full emails require private_first supply. */
-            emailSuffix?: string;
+            /** @description Product selector. gmail.com selects Gmail, icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects Microsoft, and any other supported public suffix such as com or com.cn selects domain email. */
+            emailSuffix: string;
         };
         CreateOrderBatchRequest: {
             projectId: number;
-            productId: number;
-            /** @description Optional allocation selection. Microsoft products accept an exact email domain (for example outlook.com). Domain products keep the existing public suffix format without a leading @ (for example com or com.cn), and also accept a current-user private full email (for example alice@mydomain.com); private full emails require private_first supply. */
-            emailSuffix?: string;
+            /** @description Product selector. gmail.com selects Gmail, icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects Microsoft, and any other supported public suffix such as com or com.cn selects domain email. */
+            emailSuffix: string;
             /** @description Number of independent orders to create. */
             quantity: number;
         };
@@ -4850,8 +4848,10 @@ export interface components {
             projectName?: string;
             /** @description Current display logo URL of the ordered project; omitted when the project no longer exists or has no logo. */
             projectLogoUrl?: string;
-            projectProductId: number;
-            /** @enum {string} */
+            /**
+             * @description Product type snapshot. `random` is returned only for historical orders created before that product was retired.
+             * @enum {string}
+             */
             productType: "microsoft" | "domain" | "random" | "gmail" | "icloud";
             /** @enum {string} */
             serviceMode: "code" | "purchase";
@@ -6305,7 +6305,7 @@ export interface components {
             accessType?: "public" | "private";
             looseMatch?: boolean;
             /** @enum {string} */
-            productType?: "microsoft" | "domain" | "random" | "gmail" | "icloud";
+            productType?: "microsoft" | "domain" | "gmail" | "icloud";
             search?: string;
             targetPlatform?: string;
             /** Format: date-time */
@@ -6346,7 +6346,7 @@ export interface components {
         };
         ProjectProductRequest: {
             /** @enum {string} */
-            type: "microsoft" | "domain" | "random" | "gmail" | "icloud";
+            type: "microsoft" | "domain" | "gmail" | "icloud";
             /**
              * @default enabled
              * @enum {string}
@@ -6406,7 +6406,6 @@ export interface components {
             all: number;
             microsoft: number;
             domain: number;
-            random: number;
             gmail: number;
             icloud: number;
         };
@@ -6438,15 +6437,16 @@ export interface components {
             updatedAt: string;
         };
         ProjectProductSummary: {
-            id: number;
             /** @enum {string} */
-            type: "microsoft" | "domain" | "random" | "gmail" | "icloud";
+            type: "microsoft" | "domain" | "gmail" | "icloud";
             /** @enum {string} */
             status: "enabled" | "disabled";
             codeEnabled: boolean;
             purchaseEnabled: boolean;
             codePrice: components["schemas"]["NonNegativeLedgerAmount"];
             purchasePrice: components["schemas"]["NonNegativeLedgerAmount"];
+            /** @description Global multiplier for this product type. Clients apply the lower of this value and the current user's group multiplier. */
+            priceMultiplier: components["schemas"]["UserGroupDiscountRatio"];
             codeWindowMinutes: number;
             activationWindowMinutes: number;
             warrantyMinutes: number;
@@ -6471,7 +6471,7 @@ export interface components {
             suffixes?: components["schemas"]["ProductSuffixInventory"][];
         };
         ProductSuffixInventory: {
-            /** @description Selectable inventory value. Microsoft products expose exact email domains. Domain products keep public suffixes without a leading @ (for example com) and also expose current-user private full emails (for example alice@mydomain.com). Random products do not expose suffix entries. */
+            /** @description Selectable inventory value. Microsoft products expose exact email domains. Domain products expose public suffixes without a leading @ (for example com or com.cn); owned inventory is aggregated into the same suffix. */
             suffix: string;
             /** Format: int64 */
             totalAvailable: number;
@@ -6479,16 +6479,17 @@ export interface components {
             publicAvailable: number;
         };
         ProjectProduct: {
-            id: number;
             projectId: number;
             /** @enum {string} */
-            type: "microsoft" | "domain" | "random" | "gmail" | "icloud";
+            type: "microsoft" | "domain" | "gmail" | "icloud";
             /** @enum {string} */
             status: "enabled" | "disabled";
             codeEnabled: boolean;
             purchaseEnabled: boolean;
             codePrice: components["schemas"]["NonNegativeLedgerAmount"];
             purchasePrice: components["schemas"]["NonNegativeLedgerAmount"];
+            /** @description Global multiplier for this product type. Clients apply the lower of this value and the current user's group multiplier. */
+            priceMultiplier: components["schemas"]["UserGroupDiscountRatio"];
             codeSupplierPrice?: components["schemas"]["NonNegativeLedgerAmount"];
             purchaseSupplierPrice?: components["schemas"]["NonNegativeLedgerAmount"];
             codeWindowMinutes: number;
@@ -6735,7 +6736,6 @@ export interface components {
             id: number;
             orderNo: string;
             projectId: number;
-            productId: number;
             resourceId: number;
             /** @enum {string} */
             supplyScope: "owned" | "public";
@@ -6803,7 +6803,8 @@ export interface components {
             products: components["schemas"]["ProjectProductInventoryTotal"][];
         };
         ProjectProductInventoryTotal: {
-            productId: number;
+            /** @enum {string} */
+            productType: "microsoft" | "domain" | "gmail" | "icloud";
             totalAvailable: number;
             publicAvailable: number;
             /** Format: int64 */
@@ -11790,7 +11791,7 @@ export interface operations {
                 status?: "reviewing" | "listed" | "delisted";
                 accessType?: "public" | "private";
                 looseMatch?: boolean;
-                productType?: "microsoft" | "domain" | "random" | "gmail" | "icloud";
+                productType?: "microsoft" | "domain" | "gmail" | "icloud";
                 search?: string;
                 targetPlatform?: string;
                 createdFrom?: string;

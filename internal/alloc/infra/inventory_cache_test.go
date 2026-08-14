@@ -11,6 +11,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	allocapp "github.com/donnel666/remail/internal/alloc/app"
 	allocdomain "github.com/donnel666/remail/internal/alloc/domain"
+	coredomain "github.com/donnel666/remail/internal/core/domain"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
@@ -74,7 +75,11 @@ func (r *inventoryCacheRepoStub) GetProductInventoryTotals(context.Context, uint
 	return &result, nil
 }
 
-func (r *inventoryCacheRepoStub) ListPrivateDomainInventoryTotals(context.Context, uint, uint) ([]allocapp.PrivateDomainInventoryTotal, error) {
+func (r *inventoryCacheRepoStub) ListPrivateMicrosoftInventoryTotals(context.Context, uint, uint) ([]allocapp.PrivateProductInventoryTotal, error) {
+	return nil, nil
+}
+
+func (r *inventoryCacheRepoStub) ListPrivateDomainInventoryTotals(context.Context, uint, uint) ([]allocapp.PrivateProductInventoryTotal, error) {
 	return nil, nil
 }
 
@@ -425,7 +430,7 @@ func TestInventoryRefreshDiscoversAndRestoresBackendSchedule(t *testing.T) {
 	require.Equal(t, 2, repo.projectCalls)
 }
 
-func TestInventoryCacheV5DoesNotServeV4InventorySemantics(t *testing.T) {
+func TestInventoryCacheV6DoesNotServeV4InventorySemantics(t *testing.T) {
 	server := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
 	t.Cleanup(func() { require.NoError(t, client.Close()) })
@@ -483,21 +488,21 @@ func TestInventoryCacheAcceptsGmailOnlyStats(t *testing.T) {
 	require.Zero(t, queue.calls)
 }
 
-func TestInventoryCacheV5KeysAreProjectScoped(t *testing.T) {
+func TestInventoryCacheV6KeysAreProjectScoped(t *testing.T) {
 	entry := allocapp.InventoryCacheEntry{Kind: allocapp.InventoryCacheStats, ProjectID: 10}
-	require.Equal(t, "alloc:inventory:v5:stats:10", inventoryCacheKey(entry.Kind, entry.ProjectID))
-	require.Equal(t, "alloc:inventory:v5:lock:stats:10", inventoryCacheLockKey(entry))
-	require.Equal(t, "alloc:inventory:v5:active", inventoryCacheScheduleKey)
-	require.Equal(t, "alloc:inventory:v5:unavailable:10:20:public:outlook.com", productUnavailableMarkerKey(
+	require.Equal(t, "alloc:inventory:v6:stats:10", inventoryCacheKey(entry.Kind, entry.ProjectID))
+	require.Equal(t, "alloc:inventory:v6:lock:stats:10", inventoryCacheLockKey(entry))
+	require.Equal(t, "alloc:inventory:v6:active", inventoryCacheScheduleKey)
+	require.Equal(t, "alloc:inventory:v6:unavailable:10:20:public:outlook.com", productUnavailableMarkerKey(
 		allocapp.ProductInventoryAvailabilityRequest{
 			ProjectID: 10, ProductID: 20, EmailSuffix: "@OUTLOOK.COM", PublicOnly: true,
 		},
 	))
 
-	parsed, ok := parseInventoryCacheKey("alloc:inventory:v5:stats:10")
+	parsed, ok := parseInventoryCacheKey("alloc:inventory:v6:stats:10")
 	require.True(t, ok)
 	require.Equal(t, entry, parsed)
-	_, ok = parseInventoryCacheKey("alloc:inventory:v5:stats:10:7")
+	_, ok = parseInventoryCacheKey("alloc:inventory:v6:stats:10:7")
 	require.False(t, ok)
 }
 
@@ -543,8 +548,8 @@ func TestInventoryCacheSharesOneProjectSnapshotAcrossViewers(t *testing.T) {
 	require.Equal(t, 1, repo.productCalls, "the shared aggregate must run only once")
 	require.Equal(t, 2, repo.accessCalls, "each viewer must still be authorized")
 	require.True(t, server.Exists(inventoryCacheKey(allocapp.InventoryCacheProducts, 10)))
-	require.False(t, server.Exists("alloc:inventory:v5:products:10:7"))
-	require.False(t, server.Exists("alloc:inventory:v5:products:10:8"))
+	require.False(t, server.Exists("alloc:inventory:v6:products:10:7"))
+	require.False(t, server.Exists("alloc:inventory:v6:products:10:8"))
 }
 
 func TestColdProductInventoryIncludesOwnedPrivateICloud(t *testing.T) {
@@ -565,7 +570,9 @@ func TestColdProductInventoryIncludesOwnedPrivateICloud(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, totals.Cold)
 	require.EqualValues(t, 3, totals.TotalAvailable)
-	require.Equal(t, []allocapp.ProductInventoryTotal{{ProductID: 20, TotalAvailable: 3}}, totals.Items)
+	require.Equal(t, []allocapp.ProductInventoryTotal{{
+		ProductID: 20, ProductType: coredomain.ProductTypeICloud, TotalAvailable: 3,
+	}}, totals.Items)
 }
 
 type blockingInventoryRepoStub struct {

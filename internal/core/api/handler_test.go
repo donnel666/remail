@@ -3722,6 +3722,9 @@ func TestCoreHandler_GetProjectDetailHidesInternalProductFieldsForNormalUser(t *
 	require.Equal(t, false, project["supportsPlusAlias"])
 	products := body["products"].([]any)
 	product := products[0].(map[string]any)
+	require.NotContains(t, product, "id")
+	require.NotContains(t, product, "productId")
+	require.NotContains(t, product, "projectProductId")
 	require.Equal(t, float64(12), product["totalAvailable"])
 	require.Equal(t, float64(12), product["publicAvailable"])
 	suffixes := product["suffixes"].([]any)
@@ -3790,6 +3793,16 @@ func TestCoreHandler_GetProjectsScopeAllRequiresProjectReadPermission(t *testing
 
 func TestCoreHandler_GetProjectsIncludesProductSummaries(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	previous := runtimeconfig.Snapshot()
+	previousValue, existed := previous[runtimeconfig.MicrosoftPriceMultiplierKey]
+	runtimeconfig.Set(runtimeconfig.MicrosoftPriceMultiplierKey, "0.8")
+	t.Cleanup(func() {
+		if existed {
+			runtimeconfig.Set(runtimeconfig.MicrosoftPriceMultiplierKey, previousValue)
+		} else {
+			runtimeconfig.Delete(runtimeconfig.MicrosoftPriceMultiplierKey)
+		}
+	})
 
 	repo := newMockProjectRepo()
 	detail := projectDetailForAPITest()
@@ -3833,9 +3846,13 @@ func TestCoreHandler_GetProjectsIncludesProductSummaries(t *testing.T) {
 	products := item["products"].([]any)
 	require.Len(t, products, 1)
 	product := products[0].(map[string]any)
+	require.NotContains(t, product, "id")
+	require.NotContains(t, product, "productId")
+	require.NotContains(t, product, "projectProductId")
 	require.Equal(t, "microsoft", product["type"])
 	require.Equal(t, "0.100000", product["codePrice"])
 	require.Equal(t, "0.000000", product["purchasePrice"])
+	require.Equal(t, "0.8", product["priceMultiplier"])
 	require.Equal(t, float64(12), product["totalAvailable"])
 	require.Equal(t, float64(12), product["publicAvailable"])
 	suffixes := product["suffixes"].([]any)
@@ -4245,7 +4262,7 @@ func TestCoreHandler_AdminProjectBulkSelectionShapeValidation(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
 }
 
-func TestCoreHandler_AdminProjectsProductsCreatesMissingProduct(t *testing.T) {
+func TestCoreHandler_AdminProjectsProductsAcceptsAllActiveProductTypes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	repo := newMockProjectRepo()
@@ -4256,11 +4273,27 @@ func TestCoreHandler_AdminProjectsProductsCreatesMissingProduct(t *testing.T) {
 	h := NewCoreHandler(&CoreModule{ProjectUseCase: coreapp.NewProjectUseCase(repo)})
 	body := `{
 		"projectIds":[10],
-		"products":[{
+		"products":[
+		{
+			"type":"microsoft","status":"enabled","codeEnabled":false,"purchaseEnabled":true,
+			"purchasePrice":"0.02","purchaseSupplierPrice":"0.01",
+			"activationWindowMinutes":60,"warrantyMinutes":60,"mainWeight":1,"dotWeight":0,"plusWeight":0
+		},
+		{
 			"type":"domain","status":"enabled","codeEnabled":true,"purchaseEnabled":true,
 			"codePrice":"0.01","codeSupplierPrice":"0.005","purchasePrice":"0.02","purchaseSupplierPrice":"0.01",
 			"codeWindowMinutes":10,"activationWindowMinutes":60,"warrantyMinutes":60,
 			"mainWeight":0,"dotWeight":0,"plusWeight":0
+		},
+		{
+			"type":"gmail","status":"enabled","codeEnabled":false,"purchaseEnabled":true,
+			"purchasePrice":"0.02","purchaseSupplierPrice":"0.01",
+			"activationWindowMinutes":60,"warrantyMinutes":60,"mainWeight":1,"dotWeight":0,"plusWeight":0
+		},
+		{
+			"type":"icloud","status":"enabled","codeEnabled":false,"purchaseEnabled":true,
+			"purchasePrice":"0.02","purchaseSupplierPrice":"0.01",
+			"activationWindowMinutes":60,"warrantyMinutes":60,"mainWeight":1,"dotWeight":0,"plusWeight":0
 		}]
 	}`
 	w := httptest.NewRecorder()
@@ -4272,7 +4305,7 @@ func TestCoreHandler_AdminProjectsProductsCreatesMissingProduct(t *testing.T) {
 	h.PostAdminProjectsProducts(c)
 
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	require.Len(t, repo.details[10].Products, 2)
+	require.Len(t, repo.details[10].Products, 4)
 	product := repo.details[10].Products[1]
 	require.Equal(t, coredomain.ProductTypeDomain, product.Type)
 	require.True(t, product.PurchaseEnabled)

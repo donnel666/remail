@@ -117,7 +117,7 @@ type ProjectBulkCommandRequest struct {
 // ProjectBulkUpdateProductsRequest replaces complete product configurations for selected projects.
 type ProjectBulkUpdateProductsRequest struct {
 	ProjectIDs []uint                  `json:"projectIds" binding:"required,min=1,max=1000,dive,gt=0"`
-	Products   []ProjectProductRequest `json:"products" binding:"required,min=1,max=3"`
+	Products   []ProjectProductRequest `json:"products" binding:"required,min=1,max=4"`
 }
 
 // ProjectPriceDefaultsResponse returns the non-sensitive project price defaults.
@@ -385,14 +385,12 @@ type ProjectProductTypeFacetsResponse struct {
 	All       int64 `json:"all"`
 	Microsoft int64 `json:"microsoft"`
 	Domain    int64 `json:"domain"`
-	Random    int64 `json:"random"`
 	Gmail     int64 `json:"gmail"`
 	ICloud    int64 `json:"icloud"`
 }
 
 // ProjectProductResponse is a product view under a project.
 type ProjectProductResponse struct {
-	ID                      uint                                    `json:"id"`
 	ProjectID               uint                                    `json:"projectId"`
 	Type                    string                                  `json:"type"`
 	Status                  string                                  `json:"status"`
@@ -400,6 +398,7 @@ type ProjectProductResponse struct {
 	PurchaseEnabled         bool                                    `json:"purchaseEnabled"`
 	CodePrice               string                                  `json:"codePrice"`
 	PurchasePrice           string                                  `json:"purchasePrice"`
+	PriceMultiplier         string                                  `json:"priceMultiplier"`
 	CodeSupplierPrice       string                                  `json:"codeSupplierPrice,omitempty"`
 	PurchaseSupplierPrice   string                                  `json:"purchaseSupplierPrice,omitempty"`
 	CodeWindowMinutes       int                                     `json:"codeWindowMinutes"`
@@ -421,13 +420,13 @@ type ProjectProductResponse struct {
 
 // ProjectProductSummaryResponse is a safe product summary embedded in project lists.
 type ProjectProductSummaryResponse struct {
-	ID                      uint                                    `json:"id"`
 	Type                    string                                  `json:"type"`
 	Status                  string                                  `json:"status"`
 	CodeEnabled             bool                                    `json:"codeEnabled"`
 	PurchaseEnabled         bool                                    `json:"purchaseEnabled"`
 	CodePrice               string                                  `json:"codePrice"`
 	PurchasePrice           string                                  `json:"purchasePrice"`
+	PriceMultiplier         string                                  `json:"priceMultiplier"`
 	CodeWindowMinutes       int                                     `json:"codeWindowMinutes"`
 	ActivationWindowMinutes int                                     `json:"activationWindowMinutes"`
 	WarrantyMinutes         int                                     `json:"warrantyMinutes"`

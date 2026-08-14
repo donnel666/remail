@@ -159,7 +159,7 @@ func (h *Handler) GetUserProjectInventory(c *gin.Context) {
 	products := make([]ProjectProductInventoryTotalResponse, len(stats.Items))
 	for i := range stats.Items {
 		products[i] = ProjectProductInventoryTotalResponse{
-			ProductID:               stats.Items[i].ProductID,
+			ProductType:             string(stats.Items[i].ProductType),
 			TotalAvailable:          stats.Items[i].TotalAvailable,
 			PublicAvailable:         stats.Items[i].PublicAvailable,
 			CodeAvailable:           stats.Items[i].CodeAvailable,
@@ -258,7 +258,6 @@ func allocationResponse(item domain.UnifiedAllocation) AllocationItemResponse {
 		ID:          item.ID,
 		OrderNo:     item.OrderNo,
 		ProjectID:   item.ProjectID,
-		ProductID:   item.ProductID,
 		ResourceID:  item.ResourceID,
 		SupplyScope: string(item.SupplyScope),
 		Mailbox:     item.Mailbox,

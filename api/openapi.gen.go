@@ -2485,7 +2485,6 @@ const (
 	ProjectBulkFilterProductTypeGmail     ProjectBulkFilterProductType = "gmail"
 	ProjectBulkFilterProductTypeIcloud    ProjectBulkFilterProductType = "icloud"
 	ProjectBulkFilterProductTypeMicrosoft ProjectBulkFilterProductType = "microsoft"
-	ProjectBulkFilterProductTypeRandom    ProjectBulkFilterProductType = "random"
 )
 
 // Valid indicates whether the value is a known member of the ProjectBulkFilterProductType enum.
@@ -2498,8 +2497,6 @@ func (e ProjectBulkFilterProductType) Valid() bool {
 	case ProjectBulkFilterProductTypeIcloud:
 		return true
 	case ProjectBulkFilterProductTypeMicrosoft:
-		return true
-	case ProjectBulkFilterProductTypeRandom:
 		return true
 	default:
 		return false
@@ -2656,7 +2653,6 @@ const (
 	ProjectProductTypeGmail     ProjectProductType = "gmail"
 	ProjectProductTypeIcloud    ProjectProductType = "icloud"
 	ProjectProductTypeMicrosoft ProjectProductType = "microsoft"
-	ProjectProductTypeRandom    ProjectProductType = "random"
 )
 
 // Valid indicates whether the value is a known member of the ProjectProductType enum.
@@ -2670,7 +2666,29 @@ func (e ProjectProductType) Valid() bool {
 		return true
 	case ProjectProductTypeMicrosoft:
 		return true
-	case ProjectProductTypeRandom:
+	default:
+		return false
+	}
+}
+
+// Defines values for ProjectProductInventoryTotalProductType.
+const (
+	ProjectProductInventoryTotalProductTypeDomain    ProjectProductInventoryTotalProductType = "domain"
+	ProjectProductInventoryTotalProductTypeGmail     ProjectProductInventoryTotalProductType = "gmail"
+	ProjectProductInventoryTotalProductTypeIcloud    ProjectProductInventoryTotalProductType = "icloud"
+	ProjectProductInventoryTotalProductTypeMicrosoft ProjectProductInventoryTotalProductType = "microsoft"
+)
+
+// Valid indicates whether the value is a known member of the ProjectProductInventoryTotalProductType enum.
+func (e ProjectProductInventoryTotalProductType) Valid() bool {
+	switch e {
+	case ProjectProductInventoryTotalProductTypeDomain:
+		return true
+	case ProjectProductInventoryTotalProductTypeGmail:
+		return true
+	case ProjectProductInventoryTotalProductTypeIcloud:
+		return true
+	case ProjectProductInventoryTotalProductTypeMicrosoft:
 		return true
 	default:
 		return false
@@ -2701,7 +2719,6 @@ const (
 	ProjectProductRequestTypeGmail     ProjectProductRequestType = "gmail"
 	ProjectProductRequestTypeIcloud    ProjectProductRequestType = "icloud"
 	ProjectProductRequestTypeMicrosoft ProjectProductRequestType = "microsoft"
-	ProjectProductRequestTypeRandom    ProjectProductRequestType = "random"
 )
 
 // Valid indicates whether the value is a known member of the ProjectProductRequestType enum.
@@ -2714,8 +2731,6 @@ func (e ProjectProductRequestType) Valid() bool {
 	case ProjectProductRequestTypeIcloud:
 		return true
 	case ProjectProductRequestTypeMicrosoft:
-		return true
-	case ProjectProductRequestTypeRandom:
 		return true
 	default:
 		return false
@@ -2746,7 +2761,6 @@ const (
 	ProjectProductSummaryTypeGmail     ProjectProductSummaryType = "gmail"
 	ProjectProductSummaryTypeIcloud    ProjectProductSummaryType = "icloud"
 	ProjectProductSummaryTypeMicrosoft ProjectProductSummaryType = "microsoft"
-	ProjectProductSummaryTypeRandom    ProjectProductSummaryType = "random"
 )
 
 // Valid indicates whether the value is a known member of the ProjectProductSummaryType enum.
@@ -2759,8 +2773,6 @@ func (e ProjectProductSummaryType) Valid() bool {
 	case ProjectProductSummaryTypeIcloud:
 		return true
 	case ProjectProductSummaryTypeMicrosoft:
-		return true
-	case ProjectProductSummaryTypeRandom:
 		return true
 	default:
 		return false
@@ -4354,7 +4366,6 @@ const (
 	GetProjectsParamsProductTypeGmail     GetProjectsParamsProductType = "gmail"
 	GetProjectsParamsProductTypeIcloud    GetProjectsParamsProductType = "icloud"
 	GetProjectsParamsProductTypeMicrosoft GetProjectsParamsProductType = "microsoft"
-	GetProjectsParamsProductTypeRandom    GetProjectsParamsProductType = "random"
 )
 
 // Valid indicates whether the value is a known member of the GetProjectsParamsProductType enum.
@@ -4367,8 +4378,6 @@ func (e GetProjectsParamsProductType) Valid() bool {
 	case GetProjectsParamsProductTypeIcloud:
 		return true
 	case GetProjectsParamsProductTypeMicrosoft:
-		return true
-	case GetProjectsParamsProductTypeRandom:
 		return true
 	default:
 		return false
@@ -4521,16 +4530,16 @@ func (e GetTicketsParamsStatus) Valid() bool {
 
 // Defines values for GetWalletTransactionsParamsScope.
 const (
-	All  GetWalletTransactionsParamsScope = "all"
-	Mine GetWalletTransactionsParamsScope = "mine"
+	GetWalletTransactionsParamsScopeAll  GetWalletTransactionsParamsScope = "all"
+	GetWalletTransactionsParamsScopeMine GetWalletTransactionsParamsScope = "mine"
 )
 
 // Valid indicates whether the value is a known member of the GetWalletTransactionsParamsScope enum.
 func (e GetWalletTransactionsParamsScope) Valid() bool {
 	switch e {
-	case All:
+	case GetWalletTransactionsParamsScopeAll:
 		return true
-	case Mine:
+	case GetWalletTransactionsParamsScopeMine:
 		return true
 	default:
 		return false
@@ -6484,7 +6493,6 @@ type AllocationItem struct {
 	Id          int                       `json:"id"`
 	Mailbox     AllocationItemMailbox     `json:"mailbox"`
 	OrderNo     string                    `json:"orderNo"`
-	ProductId   int                       `json:"productId"`
 	ProjectId   int                       `json:"projectId"`
 	ReleasedAt  *time.Time                `json:"releasedAt,omitempty"`
 	ResourceId  int                       `json:"resourceId"`
@@ -6714,10 +6722,9 @@ type CreateOrderBatchItemResponseStatus string
 
 // CreateOrderBatchRequest defines model for CreateOrderBatchRequest.
 type CreateOrderBatchRequest struct {
-	// EmailSuffix Optional allocation selection. Microsoft products accept an exact email domain (for example outlook.com). Domain products keep the existing public suffix format without a leading @ (for example com or com.cn), and also accept a current-user private full email (for example alice@mydomain.com); private full emails require private_first supply.
-	EmailSuffix *string `json:"emailSuffix,omitempty"`
-	ProductId   int     `json:"productId"`
-	ProjectId   int     `json:"projectId"`
+	// EmailSuffix Product selector. gmail.com selects Gmail, icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects Microsoft, and any other supported public suffix such as com or com.cn selects domain email.
+	EmailSuffix string `json:"emailSuffix"`
+	ProjectId   int    `json:"projectId"`
 
 	// Quantity Number of independent orders to create.
 	Quantity int `json:"quantity"`
@@ -6728,10 +6735,9 @@ type CreateOrderBatchResponse = []CreateOrderBatchItemResponse
 
 // CreateOrderRequest defines model for CreateOrderRequest.
 type CreateOrderRequest struct {
-	// EmailSuffix Optional allocation selection. Microsoft products accept an exact email domain (for example outlook.com). Domain products keep the existing public suffix format without a leading @ (for example com or com.cn), and also accept a current-user private full email (for example alice@mydomain.com); private full emails require private_first supply.
-	EmailSuffix *string `json:"emailSuffix,omitempty"`
-	ProductId   int     `json:"productId"`
-	ProjectId   int     `json:"projectId"`
+	// EmailSuffix Product selector. gmail.com selects Gmail, icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects Microsoft, and any other supported public suffix such as com or com.cn selects domain email.
+	EmailSuffix string `json:"emailSuffix"`
+	ProjectId   int    `json:"projectId"`
 }
 
 // CreateProjectApplicationRequest defines model for CreateProjectApplicationRequest.
@@ -7825,16 +7831,17 @@ type OrderResponse struct {
 	Owner *OrderOwnerSummary `json:"owner,omitempty"`
 
 	// PayAmount Non-negative point amount with up to 6 decimal places.
-	PayAmount   NonNegativeLedgerAmountResponse `json:"payAmount"`
-	ProductType OrderResponseProductType        `json:"productType"`
-	ProjectId   int                             `json:"projectId"`
+	PayAmount NonNegativeLedgerAmountResponse `json:"payAmount"`
+
+	// ProductType Product type snapshot. `random` is returned only for historical orders created before that product was retired.
+	ProductType OrderResponseProductType `json:"productType"`
+	ProjectId   int                      `json:"projectId"`
 
 	// ProjectLogoUrl Current display logo URL of the ordered project; omitted when the project no longer exists or has no logo.
 	ProjectLogoUrl *string `json:"projectLogoUrl,omitempty"`
 
 	// ProjectName Display name of the ordered project; omitted when the project no longer exists.
 	ProjectName      *string    `json:"projectName,omitempty"`
-	ProjectProductId int        `json:"projectProductId"`
 	ReceiveStartedAt *time.Time `json:"receiveStartedAt,omitempty"`
 	ReceiveUntil     *time.Time `json:"receiveUntil,omitempty"`
 	ReceivedCount    *int       `json:"receivedCount,omitempty"`
@@ -7867,7 +7874,7 @@ type OrderResponseContentMode string
 // OrderResponseFailureCode defines model for OrderResponse.FailureCode.
 type OrderResponseFailureCode string
 
-// OrderResponseProductType defines model for OrderResponse.ProductType.
+// OrderResponseProductType Product type snapshot. `random` is returned only for historical orders created before that product was retired.
 type OrderResponseProductType string
 
 // OrderResponseServiceMode defines model for OrderResponse.ServiceMode.
@@ -8003,7 +8010,7 @@ type PositiveIntegerPointAmount = string
 type ProductSuffixInventory struct {
 	PublicAvailable int64 `json:"publicAvailable"`
 
-	// Suffix Selectable inventory value. Microsoft products expose exact email domains. Domain products keep public suffixes without a leading @ (for example com) and also expose current-user private full emails (for example alice@mydomain.com). Random products do not expose suffix entries.
+	// Suffix Selectable inventory value. Microsoft products expose exact email domains. Domain products expose public suffixes without a leading @ (for example com or com.cn); owned inventory is aggregated into the same suffix.
 	Suffix         string `json:"suffix"`
 	TotalAvailable int64  `json:"totalAvailable"`
 }
@@ -8225,17 +8232,19 @@ type ProjectProduct struct {
 
 	// DotWeight Internal allocation weight; only returned to project admins.
 	DotWeight *int `json:"dotWeight,omitempty"`
-	Id        int  `json:"id"`
 
 	// MainWeight Internal allocation weight; only returned to project admins.
 	MainWeight *int `json:"mainWeight,omitempty"`
 
 	// PlusWeight Internal allocation weight; only returned to project admins.
-	PlusWeight        *int   `json:"plusWeight,omitempty"`
-	ProjectId         int    `json:"projectId"`
-	PublicAvailable   *int64 `json:"publicAvailable,omitempty"`
-	PurchaseAvailable *int64 `json:"purchaseAvailable,omitempty"`
-	PurchaseEnabled   bool   `json:"purchaseEnabled"`
+	PlusWeight *int `json:"plusWeight,omitempty"`
+
+	// PriceMultiplier Exact decimal discount ratio from 0 through 1, with up to 6 decimal places.
+	PriceMultiplier   UserGroupDiscountRatio `json:"priceMultiplier"`
+	ProjectId         int                    `json:"projectId"`
+	PublicAvailable   *int64                 `json:"publicAvailable,omitempty"`
+	PurchaseAvailable *int64                 `json:"purchaseAvailable,omitempty"`
+	PurchaseEnabled   bool                   `json:"purchaseEnabled"`
 
 	// PurchasePrice Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	PurchasePrice           NonNegativeLedgerAmount `json:"purchasePrice"`
@@ -8259,15 +8268,18 @@ type ProjectProductType string
 
 // ProjectProductInventoryTotal defines model for ProjectProductInventoryTotal.
 type ProjectProductInventoryTotal struct {
-	CodeAvailable           *int64                    `json:"codeAvailable,omitempty"`
-	CodePublicAvailable     *int64                    `json:"codePublicAvailable,omitempty"`
-	ProductId               int                       `json:"productId"`
-	PublicAvailable         int                       `json:"publicAvailable"`
-	PurchaseAvailable       *int64                    `json:"purchaseAvailable,omitempty"`
-	PurchasePublicAvailable *int64                    `json:"purchasePublicAvailable,omitempty"`
-	Suffixes                *[]ProductSuffixInventory `json:"suffixes,omitempty"`
-	TotalAvailable          int                       `json:"totalAvailable"`
+	CodeAvailable           *int64                                  `json:"codeAvailable,omitempty"`
+	CodePublicAvailable     *int64                                  `json:"codePublicAvailable,omitempty"`
+	ProductType             ProjectProductInventoryTotalProductType `json:"productType"`
+	PublicAvailable         int                                     `json:"publicAvailable"`
+	PurchaseAvailable       *int64                                  `json:"purchaseAvailable,omitempty"`
+	PurchasePublicAvailable *int64                                  `json:"purchasePublicAvailable,omitempty"`
+	Suffixes                *[]ProductSuffixInventory               `json:"suffixes,omitempty"`
+	TotalAvailable          int                                     `json:"totalAvailable"`
 }
+
+// ProjectProductInventoryTotalProductType defines model for ProjectProductInventoryTotal.ProductType.
+type ProjectProductInventoryTotalProductType string
 
 // ProjectProductRequest defines model for ProjectProductRequest.
 type ProjectProductRequest struct {
@@ -8311,7 +8323,9 @@ type ProjectProductSummary struct {
 	CodePrice           NonNegativeLedgerAmount `json:"codePrice"`
 	CodePublicAvailable *int64                  `json:"codePublicAvailable,omitempty"`
 	CodeWindowMinutes   int                     `json:"codeWindowMinutes"`
-	Id                  int                     `json:"id"`
+
+	// PriceMultiplier Exact decimal discount ratio from 0 through 1, with up to 6 decimal places.
+	PriceMultiplier UserGroupDiscountRatio `json:"priceMultiplier"`
 
 	// PublicAvailable User-safe public inventory currently available for this product summary.
 	PublicAvailable   int64  `json:"publicAvailable"`
@@ -8343,7 +8357,6 @@ type ProjectProductTypeFacets struct {
 	Gmail     int `json:"gmail"`
 	Icloud    int `json:"icloud"`
 	Microsoft int `json:"microsoft"`
-	Random    int `json:"random"`
 }
 
 // ProjectStatusFacets defines model for ProjectStatusFacets.

@@ -26,9 +26,11 @@ type ProductType string
 const (
 	ProductTypeMicrosoft ProductType = "microsoft"
 	ProductTypeDomain    ProductType = "domain"
-	ProductTypeRandom    ProductType = "random"
 	ProductTypeGmail     ProductType = "gmail"
 	ProductTypeICloud    ProductType = "icloud"
+
+	// ProductTypeLegacyRandom is read only. New checkout quotes reject it.
+	ProductTypeLegacyRandom ProductType = "random"
 )
 
 type OrderStatus string
@@ -80,40 +82,40 @@ const (
 )
 
 type Order struct {
-	ID                       uint
-	OrderNo                  string
-	UserID                   uint
-	ProjectID                uint
-	ProjectProductID         uint
-	ProductType              ProductType
-	ServiceMode              ServiceMode
-	SupplyPolicy             SupplyPolicy
-	Status                   OrderStatus
-	FailureCode              OrderFailureCode
-	PayAmount                string
-	RandomMicrosoftPayAmount string
-	RandomDomainPayAmount    string
-	RefundAmount             string
-	CodeWindowMinutes        int
-	ActivationWindowMinutes  int
-	WarrantyMinutes          int
-	DebitTxID                *uint
-	RefundTxID               *uint
-	AllocationType           *AllocationType
-	DeliveryEmail            string
-	ReceiveStartedAt         *time.Time
-	ReceiveUntil             *time.Time
-	ActivatedAt              *time.Time
-	AfterSaleUntil           *time.Time
-	ClientChannel            ClientChannel
-	APIKeyID                 *uint
-	IdempotencyKey           string
-	RequestFingerprint       string
-	ServiceCleanupStatus     string
-	ArchivedAt               *time.Time
-	CreatedAt                time.Time
-	UpdatedAt                time.Time
-	Version                  int
+	ID                             uint
+	OrderNo                        string
+	UserID                         uint
+	ProjectID                      uint
+	ProjectProductID               uint
+	ProductType                    ProductType
+	ServiceMode                    ServiceMode
+	SupplyPolicy                   SupplyPolicy
+	Status                         OrderStatus
+	FailureCode                    OrderFailureCode
+	PayAmount                      string
+	LegacyRandomMicrosoftPayAmount string
+	LegacyRandomDomainPayAmount    string
+	RefundAmount                   string
+	CodeWindowMinutes              int
+	ActivationWindowMinutes        int
+	WarrantyMinutes                int
+	DebitTxID                      *uint
+	RefundTxID                     *uint
+	AllocationType                 *AllocationType
+	DeliveryEmail                  string
+	ReceiveStartedAt               *time.Time
+	ReceiveUntil                   *time.Time
+	ActivatedAt                    *time.Time
+	AfterSaleUntil                 *time.Time
+	ClientChannel                  ClientChannel
+	APIKeyID                       *uint
+	IdempotencyKey                 string
+	RequestFingerprint             string
+	ServiceCleanupStatus           string
+	ArchivedAt                     *time.Time
+	CreatedAt                      time.Time
+	UpdatedAt                      time.Time
+	Version                        int
 }
 
 type OrderEvent struct {

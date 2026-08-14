@@ -158,7 +158,7 @@ func Validate(key, value string) error {
 		if err != nil || rate.IsNegative() || rate.GreaterThan(decimal.NewFromInt(100)) {
 			return domain.ErrInvalidValue
 		}
-	case "first_order_rebate_ratio":
+	case "first_order_rebate_ratio", MicrosoftPriceMultiplierKey, GmailPriceMultiplierKey, ICloudPriceMultiplierKey, DomainPriceMultiplierKey:
 		ratio, err := money.Parse(value)
 		if err != nil || ratio.IsNegative() || ratio.GreaterThan(decimal.NewFromInt(1)) {
 			return domain.ErrInvalidValue

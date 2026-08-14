@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,9 +19,11 @@ import (
 	moneyfmt "github.com/donnel666/remail/internal/money"
 	openapiapp "github.com/donnel666/remail/internal/openapi/app"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	tradeapp "github.com/donnel666/remail/internal/trade/app"
 	"github.com/donnel666/remail/internal/trade/domain"
 	"github.com/donnel666/remail/internal/trade/infra"
+	"github.com/redis/go-redis/v9"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
@@ -30,13 +33,17 @@ type Module struct {
 	OperationLogs governanceapp.OperationLogPort
 }
 
-func NewModule(db *gorm.DB, coreProjects *coreapp.ProjectUseCase, billingWallet *billingapp.WalletUseCase, alloc *allocapp.UseCase, tokens *openapiapp.UseCase) *Module {
+func NewModule(db *gorm.DB, coreProjects *coreapp.ProjectUseCase, billingWallet *billingapp.WalletUseCase, alloc *allocapp.UseCase, tokens *openapiapp.UseCase, redisClients ...redis.UniversalClient) *Module {
+	var redisClient redis.UniversalClient
+	if len(redisClients) > 0 {
+		redisClient = redisClients[0]
+	}
 	repo := infra.NewRepo(db)
 	systemLogs := governanceinfra.NewSystemLogRepo(db)
 	operationLogs := governanceinfra.NewOperationLogRepo(db)
 	uc := tradeapp.NewUseCase(
 		repo,
-		coreOrderingAdapter{projects: coreProjects, db: db},
+		coreOrderingAdapter{projects: coreProjects, db: db, redis: redisClient},
 		billingWalletAdapter{wallet: billingWallet},
 		allocationAdapter{alloc: alloc},
 		orderTokenAdapter{tokens: tokens},
@@ -180,6 +187,7 @@ func (a orderDeliveryAdapter) ListPendingNotifications(ctx context.Context, afte
 type coreOrderingAdapter struct {
 	projects *coreapp.ProjectUseCase
 	db       *gorm.DB
+	redis    redis.UniversalClient
 }
 
 func (a coreOrderingAdapter) GetOrderingQuote(ctx context.Context, projectID uint, productID uint, buyerUserID uint, serviceMode domain.ServiceMode) (*tradeapp.OrderingQuote, error) {
@@ -192,8 +200,6 @@ func (a coreOrderingAdapter) GetOrderingQuote(ctx context.Context, projectID uin
 		ProductID:               quote.ProductID,
 		ProductType:             domain.ProductType(quote.ProductType),
 		PayAmount:               quote.PayAmount,
-		MicrosoftPayAmount:      quote.MicrosoftPayAmount,
-		DomainPayAmount:         quote.DomainPayAmount,
 		CodeWindowMinutes:       quote.CodeWindowMinutes,
 		ActivationWindowMinutes: quote.ActivationWindowMinutes,
 		WarrantyMinutes:         quote.WarrantyMinutes,
@@ -206,6 +212,113 @@ func (a coreOrderingAdapter) GetOrderingQuote(ctx context.Context, projectID uin
 		return nil, err
 	}
 	return result, nil
+}
+
+func (a coreOrderingAdapter) GetOrderingQuoteByType(ctx context.Context, projectID uint, productType domain.ProductType, buyerUserID uint, serviceMode domain.ServiceMode) (*tradeapp.OrderingQuote, error) {
+	productID, cached, err := a.projectProductID(ctx, projectID, productType)
+	if err != nil {
+		return nil, err
+	}
+	if productID == 0 {
+		return nil, domain.ErrProjectUnavailable
+	}
+	quote, err := a.GetOrderingQuote(ctx, projectID, productID, buyerUserID, serviceMode)
+	if err == nil && quote.ProductType == productType {
+		return quote, nil
+	}
+	if !cached {
+		if err == nil {
+			return nil, domain.ErrProjectUnavailable
+		}
+		return nil, err
+	}
+	if err != nil && !errors.Is(err, domain.ErrProjectUnavailable) {
+		return nil, err
+	}
+
+	databaseProductID, dbErr := a.projectProductIDFromDB(ctx, projectID, productType)
+	if dbErr != nil {
+		return nil, dbErr
+	}
+	if databaseProductID == 0 {
+		_ = a.redis.HDel(ctx, projectProductRedisKey(projectID), string(productType)).Err()
+		return nil, domain.ErrProjectUnavailable
+	}
+	if databaseProductID == productID {
+		if err != nil {
+			return nil, err
+		}
+		return nil, domain.ErrProjectUnavailable
+	}
+	quote, retryErr := a.GetOrderingQuote(ctx, projectID, databaseProductID, buyerUserID, serviceMode)
+	if retryErr != nil {
+		return nil, retryErr
+	}
+	if quote.ProductType != productType {
+		return nil, domain.ErrProjectUnavailable
+	}
+	return quote, nil
+}
+
+func (a coreOrderingAdapter) projectProductID(ctx context.Context, projectID uint, productType domain.ProductType) (uint, bool, error) {
+	if projectID == 0 || !isCheckoutProductType(productType) {
+		return 0, false, nil
+	}
+	if a.redis != nil {
+		value, err := a.redis.HGet(ctx, projectProductRedisKey(projectID), string(productType)).Result()
+		if err == nil {
+			if id, parseErr := strconv.ParseUint(value, 10, 64); parseErr == nil && id > 0 {
+				return uint(id), true, nil
+			}
+			_ = a.redis.HDel(ctx, projectProductRedisKey(projectID), string(productType)).Err()
+		}
+	}
+	productID, err := a.projectProductIDFromDB(ctx, projectID, productType)
+	return productID, false, err
+}
+
+func (a coreOrderingAdapter) projectProductIDFromDB(ctx context.Context, projectID uint, productType domain.ProductType) (uint, error) {
+	if projectID == 0 || !isCheckoutProductType(productType) {
+		return 0, nil
+	}
+	var row struct {
+		ID uint `gorm:"column:id"`
+	}
+	db := a.db
+	if tx, ok := platform.GormTxFromContext(ctx); ok {
+		db = tx
+	}
+	err := db.WithContext(ctx).
+		Table("project_products").
+		Select("id").
+		Where("project_id = ? AND type = ?", projectID, string(productType)).
+		Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("load project product ID: %w", err)
+	}
+	if row.ID == 0 {
+		return 0, nil
+	}
+	if a.redis != nil {
+		_ = a.redis.HSet(ctx, projectProductRedisKey(projectID), string(productType), row.ID).Err()
+	}
+	return row.ID, nil
+}
+
+func isCheckoutProductType(productType domain.ProductType) bool {
+	switch productType {
+	case domain.ProductTypeMicrosoft, domain.ProductTypeDomain, domain.ProductTypeGmail, domain.ProductTypeICloud:
+		return true
+	default:
+		return false
+	}
+}
+
+func projectProductRedisKey(projectID uint) string {
+	return "trade:project-products:v1:" + strconv.FormatUint(uint64(projectID), 10)
 }
 
 func (a coreOrderingAdapter) userPriceDiscountRatio(ctx context.Context, userID uint) (string, error) {
@@ -227,21 +340,22 @@ func (a coreOrderingAdapter) userPriceDiscountRatio(ctx context.Context, userID 
 	return row.PriceDiscountRatio, nil
 }
 
-func applyOrderingDiscount(quote *tradeapp.OrderingQuote, ratioValue string) error {
-	ratio, err := moneyfmt.Parse(ratioValue)
-	if err != nil || ratio.IsNegative() || ratio.GreaterThan(decimal.NewFromInt(1)) {
-		return fmt.Errorf("invalid user price discount ratio")
-	}
-	for _, amount := range []*string{&quote.PayAmount, &quote.MicrosoftPayAmount, &quote.DomainPayAmount} {
-		if *amount == "" {
-			continue
+func applyOrderingDiscount(quote *tradeapp.OrderingQuote, groupRatio string) error {
+	ratio := decimal.NewFromInt(1)
+	for _, ratioValue := range []string{groupRatio, runtimeconfig.ProductPriceMultiplier(string(quote.ProductType))} {
+		candidate, err := moneyfmt.Parse(ratioValue)
+		if err != nil || candidate.IsNegative() || candidate.GreaterThan(decimal.NewFromInt(1)) {
+			return fmt.Errorf("invalid price discount ratio")
 		}
-		value, err := moneyfmt.Parse(*amount)
-		if err != nil {
-			return fmt.Errorf("discount order amount: %w", err)
+		if candidate.LessThan(ratio) {
+			ratio = candidate
 		}
-		*amount = moneyfmt.Format(value.Mul(ratio))
 	}
+	value, err := moneyfmt.Parse(quote.PayAmount)
+	if err != nil {
+		return fmt.Errorf("discount order amount: %w", err)
+	}
+	quote.PayAmount = moneyfmt.Format(value.Mul(ratio))
 	return nil
 }
 

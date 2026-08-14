@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   calculateMembershipProgress,
+  effectivePriceMultiplier,
   formatPriceMultiplier,
   normalizePriceMultiplier,
   priceMultiplier,
@@ -39,6 +40,11 @@ describe("membership price multiplier", () => {
       expect(formatPriceMultiplier(value)).toBe("1×");
     },
   );
+
+  it("uses the lower product or group multiplier", () => {
+    expect(effectivePriceMultiplier("0.9", "0.8")).toBe(0.8);
+    expect(effectivePriceMultiplier("0.7", "0.8")).toBe(0.7);
+  });
 });
 
 describe("membership progress", () => {

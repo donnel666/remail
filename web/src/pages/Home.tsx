@@ -28,7 +28,7 @@ const FEATURES = [
 ];
 
 const endpoint = "/v1/open/orders?serviceMode=code&supply=public_only";
-const examplePayload = '{"projectId":1,"productId":1,"emailSuffix":"outlook.com"}';
+const examplePayload = '{"projectId":1,"emailSuffix":"outlook.com"}';
 const curlRaw = `curl -X POST "${endpoint}" -H "Authorization: Bearer <YOUR_KEY>" -H "Idempotency-Key: <UNIQUE_KEY>" -H "Content-Type: application/json" -d '${examplePayload}'`;
 const titleBrandGradient =
   "bg-gradient-to-r from-[#8a4a34] via-[#c6533c] to-[#f4513b] bg-clip-text text-transparent dark:from-[#ffd0a3] dark:via-[#ff8a5c] dark:to-[#ff5a82]";

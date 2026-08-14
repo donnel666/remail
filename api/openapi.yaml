@@ -2685,7 +2685,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [microsoft, domain, random, gmail, icloud]
+            enum: [microsoft, domain, gmail, icloud]
         - name: search
           in: query
           schema:
@@ -13357,31 +13357,27 @@ components:
       type: object
       required:
         - projectId
-        - productId
+        - emailSuffix
       properties:
         projectId:
           type: integer
-        productId:
-          type: integer
         emailSuffix:
           type: string
-          description: Optional allocation selection. Microsoft products accept an exact email domain (for example outlook.com). Domain products keep the existing public suffix format without a leading @ (for example com or com.cn), and also accept a current-user private full email (for example alice@mydomain.com); private full emails require private_first supply.
+          description: Product selector. gmail.com selects Gmail, icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects Microsoft, and any other supported public suffix such as com or com.cn selects domain email.
       additionalProperties: false
 
     CreateOrderBatchRequest:
       type: object
       required:
         - projectId
-        - productId
+        - emailSuffix
         - quantity
       properties:
         projectId:
           type: integer
-        productId:
-          type: integer
         emailSuffix:
           type: string
-          description: Optional allocation selection. Microsoft products accept an exact email domain (for example outlook.com). Domain products keep the existing public suffix format without a leading @ (for example com or com.cn), and also accept a current-user private full email (for example alice@mydomain.com); private full emails require private_first supply.
+          description: Product selector. gmail.com selects Gmail, icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects Microsoft, and any other supported public suffix such as com or com.cn selects domain email.
         quantity:
           type: integer
           minimum: 2
@@ -13517,7 +13513,6 @@ components:
         - orderNo
         - userId
         - projectId
-        - projectProductId
         - productType
         - serviceMode
         - supplyPolicy
@@ -13547,11 +13542,10 @@ components:
         projectLogoUrl:
           type: string
           description: Current display logo URL of the ordered project; omitted when the project no longer exists or has no logo.
-        projectProductId:
-          type: integer
         productType:
           type: string
           enum: [microsoft, domain, random, gmail, icloud]
+          description: Product type snapshot. `random` is returned only for historical orders created before that product was retired.
         serviceMode:
           type: string
           enum: [code, purchase]
@@ -17335,7 +17329,7 @@ components:
           type: boolean
         productType:
           type: string
-          enum: [microsoft, domain, random, gmail, icloud]
+          enum: [microsoft, domain, gmail, icloud]
         search:
           type: string
         targetPlatform:
@@ -17427,7 +17421,7 @@ components:
         products:
           type: array
           minItems: 1
-          maxItems: 3
+          maxItems: 4
           items:
             $ref: "#/components/schemas/ProjectProductRequest"
       additionalProperties: false
@@ -17461,7 +17455,7 @@ components:
       properties:
         type:
           type: string
-          enum: [microsoft, domain, random, gmail, icloud]
+          enum: [microsoft, domain, gmail, icloud]
         status:
           type: string
           enum: [enabled, disabled]
@@ -17596,15 +17590,13 @@ components:
 
     ProjectProductTypeFacets:
       type: object
-      required: [all, microsoft, domain, random, gmail, icloud]
+      required: [all, microsoft, domain, gmail, icloud]
       properties:
         all:
           type: integer
         microsoft:
           type: integer
         domain:
-          type: integer
-        random:
           type: integer
         gmail:
           type: integer
@@ -17678,24 +17670,22 @@ components:
     ProjectProductSummary:
       type: object
       required:
-        - id
         - type
         - status
         - codeEnabled
         - purchaseEnabled
         - codePrice
         - purchasePrice
+        - priceMultiplier
         - codeWindowMinutes
         - activationWindowMinutes
         - warrantyMinutes
         - totalAvailable
         - publicAvailable
       properties:
-        id:
-          type: integer
         type:
           type: string
-          enum: [microsoft, domain, random, gmail, icloud]
+          enum: [microsoft, domain, gmail, icloud]
         status:
           type: string
           enum: [enabled, disabled]
@@ -17707,6 +17697,9 @@ components:
           $ref: "#/components/schemas/NonNegativeLedgerAmount"
         purchasePrice:
           $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        priceMultiplier:
+          $ref: "#/components/schemas/UserGroupDiscountRatio"
+          description: Global multiplier for this product type. Clients apply the lower of this value and the current user's group multiplier.
         codeWindowMinutes:
           type: integer
         activationWindowMinutes:
@@ -17748,7 +17741,7 @@ components:
       properties:
         suffix:
           type: string
-          description: Selectable inventory value. Microsoft products expose exact email domains. Domain products keep public suffixes without a leading @ (for example com) and also expose current-user private full emails (for example alice@mydomain.com). Random products do not expose suffix entries.
+          description: Selectable inventory value. Microsoft products expose exact email domains. Domain products expose public suffixes without a leading @ (for example com or com.cn); owned inventory is aggregated into the same suffix.
         totalAvailable:
           type: integer
           format: int64
@@ -17760,7 +17753,6 @@ components:
     ProjectProduct:
       type: object
       required:
-        - id
         - projectId
         - type
         - status
@@ -17768,19 +17760,18 @@ components:
         - purchaseEnabled
         - codePrice
         - purchasePrice
+        - priceMultiplier
         - codeWindowMinutes
         - activationWindowMinutes
         - warrantyMinutes
         - createdAt
         - updatedAt
       properties:
-        id:
-          type: integer
         projectId:
           type: integer
         type:
           type: string
-          enum: [microsoft, domain, random, gmail, icloud]
+          enum: [microsoft, domain, gmail, icloud]
         status:
           type: string
           enum: [enabled, disabled]
@@ -17792,6 +17783,9 @@ components:
           $ref: "#/components/schemas/NonNegativeLedgerAmount"
         purchasePrice:
           $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        priceMultiplier:
+          $ref: "#/components/schemas/UserGroupDiscountRatio"
+          description: Global multiplier for this product type. Clients apply the lower of this value and the current user's group multiplier.
         codeSupplierPrice:
           $ref: "#/components/schemas/NonNegativeLedgerAmount"
         purchaseSupplierPrice:
@@ -18374,7 +18368,6 @@ components:
         - id
         - orderNo
         - projectId
-        - productId
         - resourceId
         - supplyScope
         - mailbox
@@ -18390,8 +18383,6 @@ components:
         orderNo:
           type: string
         projectId:
-          type: integer
-        productId:
           type: integer
         resourceId:
           type: integer
@@ -18577,12 +18568,13 @@ components:
     ProjectProductInventoryTotal:
       type: object
       required:
-        - productId
+        - productType
         - totalAvailable
         - publicAvailable
       properties:
-        productId:
-          type: integer
+        productType:
+          type: string
+          enum: [microsoft, domain, gmail, icloud]
         totalAvailable:
           type: integer
         publicAvailable:

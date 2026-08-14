@@ -60,10 +60,10 @@ func TestNormalizeAllocationResultPreservesExistingHit(t *testing.T) {
 	require.Equal(t, "system_failed", normalizeAllocationResult("unexpected"))
 }
 
-func TestNormalizeAllocationTypeKeepsRandomFailuresVisible(t *testing.T) {
-	require.Equal(t, "random", normalizeAllocationType("random"))
+func TestNormalizeAllocationTypeKeepsSupportedTypesVisible(t *testing.T) {
 	require.Equal(t, "gmail", normalizeAllocationType("gmail"))
 	require.Equal(t, "icloud", normalizeAllocationType("icloud"))
+	require.Equal(t, "unknown", normalizeAllocationType("retired"))
 }
 
 func TestHTTPMetricsMiddlewareRecordsStatusClassAndLongDurationBuckets(t *testing.T) {

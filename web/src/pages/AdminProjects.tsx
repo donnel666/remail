@@ -1596,7 +1596,7 @@ function ProjectDetailSheet({
               {detail.products.map((product) => (
                 <div
                   className="rounded-lg border border-[var(--semi-color-border)] p-3"
-                  key={product.id}
+                  key={product.type}
                 >
                   <div className="mb-2 flex flex-wrap items-center gap-2">
                     <Tag color={product.type === "microsoft" ? "blue" : product.type === "gmail" ? "purple" : "green"} shape="circle">

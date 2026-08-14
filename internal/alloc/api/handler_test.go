@@ -37,6 +37,22 @@ func TestInventoryRefreshInProgressReturnsRetryableServiceUnavailable(t *testing
 	require.Equal(t, "1", response.Header().Get("Retry-After"))
 }
 
+func TestPublicAllocationResponsesDoNotExposeInternalProductID(t *testing.T) {
+	allocationPayload, err := json.Marshal(allocationResponse(allocdomain.UnifiedAllocation{
+		ProjectID: 10, ProductID: 20,
+	}))
+	require.NoError(t, err)
+	require.NotContains(t, string(allocationPayload), "productId")
+	require.NotContains(t, string(allocationPayload), "projectProductId")
+
+	inventoryPayload, err := json.Marshal(ProjectInventoryTotalResponse{Products: []ProjectProductInventoryTotalResponse{{
+		ProductType: "gmail",
+	}}})
+	require.NoError(t, err)
+	require.Contains(t, string(inventoryPayload), `"productType":"gmail"`)
+	require.NotContains(t, string(inventoryPayload), "productId")
+}
+
 type inventoryRefreshHandlerRepo struct{ allocapp.Repository }
 
 func (*inventoryRefreshHandlerRepo) ListInventoryProjects(context.Context) ([]allocapp.InventoryProject, error) {
@@ -140,13 +156,14 @@ func TestAllocationAdminRoutesAuthAndContract(t *testing.T) {
 		require.Equal(t, http.StatusOK, resp.Code)
 		require.Contains(t, resp.Body.String(), `"totalAvailable"`)
 		require.Contains(t, resp.Body.String(), `"products"`)
-		require.Contains(t, resp.Body.String(), `"productId"`)
+		require.Contains(t, resp.Body.String(), `"productType":"domain"`)
+		require.NotContains(t, resp.Body.String(), `"productId"`)
 		require.Contains(t, resp.Body.String(), `"suffix":"com"`)
-		require.Contains(t, resp.Body.String(), `"suffix":"private-user@alloc-private.example.com"`)
+		require.NotContains(t, resp.Body.String(), `"private-user@alloc-private.example.com"`)
 		require.NotContains(t, resp.Body.String(), `"resourceId"`)
 		require.NotContains(t, resp.Body.String(), `"domainResourceId"`)
-		require.NotContains(t, resp.Body.String(), `"microsoft"`)
-		require.NotContains(t, resp.Body.String(), `"domain"`)
+		require.NotContains(t, resp.Body.String(), `"microsoft":`)
+		require.NotContains(t, resp.Body.String(), `"domain":`)
 	})
 
 	t.Run("invalid filter", func(t *testing.T) {

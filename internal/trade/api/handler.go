@@ -669,7 +669,6 @@ func orderResponse(result tradeapp.CheckoutResult) OrderResponse {
 		ProjectID:            order.ProjectID,
 		ProjectName:          result.ProjectName,
 		ProjectLogoURL:       projectLogoURL,
-		ProjectProductID:     order.ProjectProductID,
 		ProductType:          string(order.ProductType),
 		ServiceMode:          string(order.ServiceMode),
 		SupplyPolicy:         string(order.SupplyPolicy),

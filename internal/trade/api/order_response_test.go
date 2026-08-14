@@ -60,3 +60,12 @@ func TestOrderResponseUsesUnifiedICloudAllocationID(t *testing.T) {
 	require.Equal(t, "icloud", resp.AllocationType)
 	require.EqualValues(t, 88, resp.AllocationID)
 }
+
+func TestOrderResponseDoesNotExposeInternalProductID(t *testing.T) {
+	payload, err := json.Marshal(orderResponse(tradeapp.CheckoutResult{Order: domain.Order{
+		ProjectProductID: 99,
+	}}))
+	require.NoError(t, err)
+	require.NotContains(t, string(payload), "productId")
+	require.NotContains(t, string(payload), "projectProductId")
+}

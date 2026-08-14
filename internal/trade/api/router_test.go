@@ -57,6 +57,25 @@ func TestSingleOrderBodyRejectsBatchQuantityField(t *testing.T) {
 	}
 }
 
+func TestOrderBodyAcceptsLegacyProductID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	response := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(response)
+	ctx.Request = httptest.NewRequest(
+		http.MethodPost,
+		"/v1/orders",
+		strings.NewReader(`{"projectId":10,"productId":20}`),
+	)
+	var request CreateOrderRequest
+
+	if err := bindOrderJSON(ctx, &request); err != nil {
+		t.Fatalf("expected legacy product ID body to decode, got %v", err)
+	}
+	if request.ProjectID != 10 || request.ProductID != 20 || request.EmailSuffix != "" {
+		t.Fatalf("unexpected decoded legacy request: %#v", request)
+	}
+}
+
 func TestBatchOrderIdempotencyKeysNormalizeHeaderWhitespace(t *testing.T) {
 	for index := 0; index < 3; index++ {
 		plain := batchOrderIdempotencyKey("batch-key", index)

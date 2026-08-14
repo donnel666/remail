@@ -35,6 +35,10 @@ export function priceMultiplier(value: string | number | undefined) {
   return Number(normalizePriceMultiplier(value));
 }
 
+export function effectivePriceMultiplier(...values: Array<string | number | undefined>) {
+  return values.reduce<number>((lowest, value) => Math.min(lowest, priceMultiplier(value)), 1);
+}
+
 export function formatPriceMultiplier(value: string | number | undefined) {
   return `${priceMultiplier(value).toFixed(6).replace(/\.?0+$/, "")}×`;
 }

@@ -17,6 +17,7 @@ import {
   mailExtractionLabelKey,
 } from "@/components/semi/copyable-ellipsis-text";
 import { OverflowTooltip } from "@/components/semi/overflow-tooltip";
+import { effectivePriceMultiplier } from "@/lib/membership";
 import { cn } from "@/lib/utils";
 
 import { FetchControl } from "./fetch-control";
@@ -68,7 +69,6 @@ function OrderAccordionItem({
   onOpenMailbox,
   onToggle,
   order,
-  product,
   project,
 }: {
   expanded: boolean;
@@ -83,7 +83,6 @@ function OrderAccordionItem({
   }) => void;
   onToggle: () => void;
   order: WorkbenchOrder;
-  product?: WorkbenchProduct;
   project?: WorkbenchProject;
 }) {
   const { t } = useTranslation();
@@ -133,11 +132,9 @@ function OrderAccordionItem({
               <Tag color={state.color} shape="circle" size="small">
                 {state.label}
               </Tag>
-              {product ? (
-                <Tag color="grey" shape="circle" size="small">
-                  {productTypeLabel(product.productType, t)}
-                </Tag>
-              ) : null}
+              <Tag color="grey" shape="circle" size="small">
+                {productTypeLabel(order.productType, t)}
+              </Tag>
             </span>
             <span className="workbench-order-summary-subtitle">
               <OverflowTooltip
@@ -314,7 +311,6 @@ export function OrderPanel({
   orders,
   orderSearch,
   priceMultiplier,
-  productsById,
   projectsById,
   quantity,
   selectedOrder,
@@ -345,7 +341,6 @@ export function OrderPanel({
   orders: WorkbenchOrder[];
   orderSearch: string;
   priceMultiplier: number;
-  productsById: Map<string, WorkbenchProduct>;
   projectsById: Map<string, WorkbenchProject>;
   quantity: number;
   selectedOrder?: WorkbenchOrder;
@@ -366,7 +361,7 @@ export function OrderPanel({
   const originalTotalPrice = unitPrice * priceQuantity;
   const totalPrice = calculateDiscountedLedgerTotal(
     unitPrice,
-    priceMultiplier,
+    effectivePriceMultiplier(priceMultiplier, selectedProduct?.priceMultiplier),
     priceQuantity,
   );
   const hasDiscount = totalPrice < originalTotalPrice;
@@ -508,7 +503,6 @@ export function OrderPanel({
                   onOpenMailbox={onOpenMailbox}
                   onToggle={() => onSelectOrder(order.orderNo)}
                   order={order}
-                  product={productsById.get(order.productId)}
                   project={projectsById.get(order.projectId)}
                 />
               ))

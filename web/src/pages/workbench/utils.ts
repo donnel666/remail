@@ -2,7 +2,7 @@ import i18n from "@/i18n/config";
 
 import type {
   InventoryScope,
-  ProductType,
+  OrderProductType,
   ServiceMode,
   ServiceState,
   WorkbenchOrder,
@@ -84,7 +84,7 @@ export function inventoryScopeLabel(
   return scope === "private_first" ? t("Private first") : t("Public only");
 }
 
-export function productTypeLabel(type: ProductType, t: (key: string) => string) {
+export function productTypeLabel(type: OrderProductType, t: (key: string) => string) {
   if (type === "microsoft") return t("Microsoft email");
   if (type === "domain") return t("Domain email");
   if (type === "gmail") return t("Gmail email");
@@ -93,21 +93,7 @@ export function productTypeLabel(type: ProductType, t: (key: string) => string) 
 }
 
 export function compareDomainSuffixes(left: string, right: string) {
-  const leftPublic = left.startsWith("@");
-  const rightPublic = right.startsWith("@");
-  if (leftPublic !== rightPublic) return leftPublic ? 1 : -1;
   return left.localeCompare(right);
-}
-
-export function isPrivateDomainSelection(
-  productType: ProductType,
-  emailSuffix: string,
-) {
-  return (
-    productType === "domain" &&
-    emailSuffix.includes("@") &&
-    !emailSuffix.startsWith("@")
-  );
 }
 
 export function compareProjectNames(left: string, right: string) {

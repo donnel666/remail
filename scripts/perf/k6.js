@@ -13,7 +13,7 @@ const apiKeys = (__ENV.API_KEYS || __ENV.API_KEY || "")
   .map((value) => value.trim())
   .filter(Boolean);
 const projectId = Number(__ENV.PROJECT_ID || "0");
-const productId = Number(__ENV.PRODUCT_ID || "0");
+const emailSuffix = (__ENV.EMAIL_SUFFIX || "").trim();
 const pickupFixturePath = __ENV.PICKUP_FIXTURES || "./pickup-fixtures.json";
 
 const pickupFixtures = new SharedArray("pickup fixtures", () => {
@@ -24,8 +24,8 @@ const pickupFixtures = new SharedArray("pickup fixtures", () => {
   }
 });
 
-if (apiKeys.length === 0 || projectId <= 0 || productId <= 0) {
-  throw new Error("API_KEYS (or API_KEY), PROJECT_ID, and PRODUCT_ID are required");
+if (apiKeys.length === 0 || projectId <= 0 || emailSuffix === "") {
+  throw new Error("API_KEYS (or API_KEY), PROJECT_ID, and EMAIL_SUFFIX are required");
 }
 if (pickupFixtures.length === 0) {
   throw new Error("PICKUP_FIXTURES must contain at least one email/token pair");
@@ -75,7 +75,7 @@ export function checkout() {
   const idempotencyKey = `k6-${__VU}-${__ITER}-${Date.now()}`;
   const response = http.post(
     `${baseURL}/v1/open/orders?serviceMode=code&supply=public_only`,
-    JSON.stringify({ projectId, productId }),
+    JSON.stringify({ projectId, emailSuffix }),
     {
       headers: {
         Authorization: `Bearer ${apiKey}`,

@@ -58,7 +58,6 @@ import type {
 import {
   compareDomainSuffixes,
   compareProjectNames,
-  isPrivateDomainSelection,
   matchesProjectEmailSearch,
 } from "./workbench/utils";
 
@@ -84,18 +83,13 @@ function filterProducts(
   products: WorkbenchProduct[],
   search: string,
   serviceMode: ServiceMode,
-  inventoryScope: InventoryScope,
 ) {
   const q = search.trim().toLowerCase();
   return products
     .filter((product) =>
       serviceMode === "code" ? product.codeEnabled : product.purchaseEnabled,
     )
-    .filter(
-      (product) =>
-        inventoryScope !== "public_only" ||
-        !isPrivateDomainSelection(product.productType, product.emailSuffix),
-    )
+    .filter((product) => product.emailSuffix)
     .filter((product) =>
       q
         ? [
@@ -120,25 +114,18 @@ function toWorkbenchSuffixProducts(
   const products = (suffixes ?? []).flatMap((suffix) => {
     const rawSuffix = String(suffix.suffix ?? "").trim();
     if (!rawSuffix) return [];
-    const privateDomain =
-      baseProduct.productType === "domain" &&
-      rawSuffix.includes("@") &&
-      !rawSuffix.startsWith("@");
-    const emailSuffix = privateDomain ? rawSuffix : rawSuffix.replace(/^@/, "");
-    if (!emailSuffix) return [];
+    const emailSuffix = rawSuffix.replace(/^@/, "");
+    if (!emailSuffix || emailSuffix.includes("@")) return [];
     return [
       {
         ...baseProduct,
         codeInventory: suffix.totalAvailable ?? 0,
         codePublicInventory: suffix.publicAvailable ?? 0,
         emailSuffix,
-        id: `${baseProduct.productId}:${emailSuffix}`,
+        id: `${baseProduct.productType}:${emailSuffix}`,
         purchaseInventory: suffix.totalAvailable ?? 0,
         purchasePublicInventory: suffix.publicAvailable ?? 0,
-        suffix:
-          baseProduct.productType === "domain" && privateDomain
-            ? rawSuffix
-            : `@${emailSuffix}`,
+        suffix: `@${emailSuffix}`,
       },
     ];
   });
@@ -165,8 +152,8 @@ function toWorkbenchProject(
   project: ProjectItem,
   inventory?: ProjectInventoryTotalResponse,
 ): WorkbenchProject {
-  const inventoryByProductId = new Map(
-    (inventory?.products ?? []).map((item) => [String(item.productId), item]),
+  const inventoryByProductType = new Map(
+    (inventory?.products ?? []).map((item) => [item.productType, item]),
   );
   return {
     description: project.description ?? "",
@@ -178,7 +165,7 @@ function toWorkbenchProject(
       toWorkbenchProducts(
         project.id,
         product,
-        inventoryByProductId.get(String(product.id)),
+        inventoryByProductType.get(product.type),
       ),
     ),
     projectUrl: project.targetPlatform,
@@ -198,9 +185,7 @@ function toWorkbenchProducts(
         ? "Domain"
         : product.type === "gmail"
           ? "Gmail"
-          : product.type === "icloud"
-            ? "iCloud"
-            : "Random";
+          : "iCloud";
   const totalAvailable =
     inventory?.totalAvailable ?? product.totalAvailable ?? 0;
   const publicAvailable =
@@ -219,6 +204,12 @@ function toWorkbenchProducts(
     inventory?.purchasePublicAvailable ??
     product.purchasePublicAvailable ??
     publicAvailable;
+  const fixedSuffix =
+    product.type === "gmail"
+      ? "gmail.com"
+      : product.type === "icloud"
+        ? "icloud.com"
+        : "";
   const baseProduct: WorkbenchProduct = {
     activationWindowMinutes: product.activationWindowMinutes,
     codeEnabled: product.codeEnabled,
@@ -226,26 +217,26 @@ function toWorkbenchProducts(
     codePublicInventory: codePublicAvailable,
     codePrice: moneyToNumber(product.codePrice),
     codeWindowMinutes: product.codeWindowMinutes,
-    emailSuffix: "",
-    id: String(product.id),
+    emailSuffix: fixedSuffix,
+    id: product.type,
     label,
-    productId: String(product.id),
     productType: product.type,
+    priceMultiplier: membershipPriceMultiplier(product.priceMultiplier),
     projectId: String(projectId),
     purchaseEnabled: product.purchaseEnabled,
     purchaseInventory: purchaseAvailable,
     purchasePublicInventory: purchasePublicAvailable,
     purchasePrice: moneyToNumber(product.purchasePrice),
-    suffix: label,
+    suffix: fixedSuffix ? `@${fixedSuffix}` : label,
     warrantyHours: Math.max(1, Math.ceil(product.warrantyMinutes / 60)),
   };
   const suffixProducts =
-    product.type === "random"
-      ? []
-      : toWorkbenchSuffixProducts(
+    product.type === "microsoft" || product.type === "domain"
+      ? toWorkbenchSuffixProducts(
           baseProduct,
           inventory?.suffixes ?? product.suffixes,
-        );
+        )
+      : [];
   return [baseProduct, ...suffixProducts];
 }
 
@@ -253,17 +244,17 @@ function mergeProjectInventory(
   project: WorkbenchProject,
   inventory: ProjectInventoryTotalResponse,
 ): WorkbenchProject {
-  const inventoryByProductId = new Map(
-    (inventory.products ?? []).map((item) => [String(item.productId), item]),
+  const inventoryByProductType = new Map(
+    (inventory.products ?? []).map((item) => [item.productType, item]),
   );
   const baseProducts = project.products.filter(
-    (product) => product.id === product.productId,
+    (product) => product.id === product.productType,
   );
   return {
     ...project,
     inventoryLoaded: true,
     products: baseProducts.flatMap((product) => {
-      const inventoryItem = inventoryByProductId.get(product.productId);
+      const inventoryItem = inventoryByProductType.get(product.productType);
       if (!inventoryItem) return [product];
       const totalAvailable = inventoryItem.totalAvailable ?? 0;
       const publicAvailable = inventoryItem.publicAvailable ?? 0;
@@ -272,17 +263,16 @@ function mergeProjectInventory(
         codeInventory: inventoryItem.codeAvailable ?? totalAvailable,
         codePublicInventory:
           inventoryItem.codePublicAvailable ?? publicAvailable,
-        emailSuffix: "",
-        id: product.productId,
+        id: product.productType,
         purchaseInventory: inventoryItem.purchaseAvailable ?? totalAvailable,
         purchasePublicInventory:
           inventoryItem.purchasePublicAvailable ?? publicAvailable,
-        suffix: product.label,
+        suffix: product.emailSuffix ? `@${product.emailSuffix}` : product.label,
       };
       const suffixProducts =
-        product.productType === "random"
-          ? []
-          : toWorkbenchSuffixProducts(baseProduct, inventoryItem.suffixes);
+        product.productType === "microsoft" || product.productType === "domain"
+          ? toWorkbenchSuffixProducts(baseProduct, inventoryItem.suffixes)
+          : [];
       return [baseProduct, ...suffixProducts];
     }),
   };
@@ -311,7 +301,6 @@ function toWorkbenchOrder(order: OrderResponse): WorkbenchOrder {
     orderNo: order.orderNo,
     payAmount: moneyToNumber(order.payAmount),
     productType: order.productType,
-    productId: String(order.projectProductId),
     projectId: String(order.projectId),
     quantity: 1,
     maxCodes: order.maxCodes ?? 0,
@@ -418,7 +407,6 @@ function clampQuantity(value: number, inventory: number) {
 
 function checkoutBatchSignature(input: {
   inventoryScope: InventoryScope;
-  productId: string;
   projectId: string;
   quantity: number;
   serviceMode: ServiceMode;
@@ -428,7 +416,6 @@ function checkoutBatchSignature(input: {
     input.serviceMode,
     input.inventoryScope,
     input.projectId,
-    input.productId,
     input.suffix,
     input.quantity,
   ].join("|");
@@ -464,6 +451,7 @@ export default function Dashboard() {
   const [selectedProductId, setSelectedProductId] = useState("");
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [serviceMode, setServiceMode] = useState<ServiceMode>("purchase");
+  const selectedProjectIdRef = useRef("");
   const fetchInFlightRef = useRef(new Map<string, Promise<number | void>>());
   const fetchSeqRef = useRef(new Map<string, number>());
   const refreshOrdersSeqRef = useRef(new Map<ServiceMode, number>());
@@ -472,14 +460,6 @@ export default function Dashboard() {
 
   const projectsById = useMemo(() => {
     return new Map(projects.map((project) => [project.id, project]));
-  }, [projects]);
-
-  const productsById = useMemo(() => {
-    return new Map(
-      projects.flatMap((project) =>
-        project.products.map((product) => [product.id, product] as const),
-      ),
-    );
   }, [projects]);
 
   const filteredProjects = useMemo(
@@ -496,14 +476,26 @@ export default function Dashboard() {
         selectedProject?.products ?? [],
         productSearch,
         serviceMode,
-        inventoryScope,
       ),
-    [inventoryScope, productSearch, selectedProject?.products, serviceMode],
+    [productSearch, selectedProject?.products, serviceMode],
   );
 
   useEffect(() => {
     void loadWorkbenchProjects();
+
+    const refreshProjects = async () => {
+      await loadWorkbenchProjects();
+      await loadProjectInventory(selectedProjectIdRef.current, {
+        silent: true,
+      });
+    };
+    window.addEventListener("focus", refreshProjects);
+    return () => window.removeEventListener("focus", refreshProjects);
   }, []);
+
+  useEffect(() => {
+    selectedProjectIdRef.current = selectedProjectId;
+  }, [selectedProjectId]);
 
   useEffect(() => {
     void refreshOrders(serviceMode);
@@ -534,12 +526,10 @@ export default function Dashboard() {
         selectedProject.products,
         productSearch,
         serviceMode,
-        inventoryScope,
       )[0]
         ?.id ?? "",
     );
   }, [
-    inventoryScope,
     productSearch,
     selectedProject,
     selectedProductId,
@@ -719,7 +709,7 @@ export default function Dashboard() {
     setSelectedProjectId(projectId);
     setProductSearch("");
     setSelectedProductId(
-      filterProducts(project?.products ?? [], "", serviceMode, inventoryScope)[0]
+      filterProducts(project?.products ?? [], "", serviceMode)[0]
         ?.id ?? "",
     );
   }
@@ -731,7 +721,6 @@ export default function Dashboard() {
     setCreating(true);
     const signature = checkoutBatchSignature({
       inventoryScope,
-      productId: selectedProduct.id,
       projectId: selectedProject.id,
       quantity: requestedQuantity,
       serviceMode,
@@ -745,8 +734,7 @@ export default function Dashboard() {
     saveCheckoutAttempt(attempt);
     try {
       const payload = {
-        emailSuffix: selectedProduct.emailSuffix || undefined,
-        productId: Number(selectedProduct.productId),
+        emailSuffix: selectedProduct.emailSuffix,
         projectId: Number(selectedProject.id),
       };
       const options = {
@@ -1063,7 +1051,6 @@ export default function Dashboard() {
             orderSearch={orderSearch}
             orders={visibleOrders}
             priceMultiplier={displayPriceMultiplier}
-            productsById={productsById}
             projectsById={projectsById}
             quantity={quantity}
             maxQuantity={Math.min(selectedInventory, maxCreateOrderQuantity)}

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/donnel666/remail/internal/trade/domain"
 	"github.com/stretchr/testify/require"
 )
@@ -95,7 +96,6 @@ func (r *batchRepoSpy) LoadOrCreatePendingOrder(_ context.Context, cmd CreatePen
 		ProjectID: cmd.ProjectID, ProjectProductID: cmd.ProjectProductID,
 		ProductType: cmd.ProductType, ServiceMode: cmd.ServiceMode, SupplyPolicy: cmd.SupplyPolicy,
 		Status: domain.OrderStatusPendingPayment, PayAmount: cmd.PayAmount,
-		RandomMicrosoftPayAmount: cmd.RandomMicrosoftPayAmount, RandomDomainPayAmount: cmd.RandomDomainPayAmount,
 		CodeWindowMinutes: cmd.CodeWindowMinutes, ActivationWindowMinutes: cmd.ActivationWindowMinutes,
 		WarrantyMinutes: cmd.WarrantyMinutes, ClientChannel: cmd.ClientChannel,
 		APIKeyID: cmd.APIKeyID, IdempotencyKey: cmd.IdempotencyKey,
@@ -280,11 +280,6 @@ func (s *batchOrderingSpy) GetOrderingQuote(ctx context.Context, projectID uint,
 	quote := &OrderingQuote{
 		ProjectID: projectID, ProductID: productID, ProductType: productType,
 		PayAmount: "1.00", CodeWindowMinutes: 10, ActivationWindowMinutes: 10, WarrantyMinutes: 10,
-	}
-	if productType == domain.ProductTypeRandom {
-		quote.PayAmount = "0.80"
-		quote.MicrosoftPayAmount = "1.20"
-		quote.DomainPayAmount = "0.80"
 	}
 	return quote, nil
 }
@@ -526,11 +521,74 @@ func batchRequest(key string, quantity int) CheckoutRequest {
 	}
 }
 
-func TestRandomCheckoutAmountUsesAllocatedProductPrice(t *testing.T) {
+func TestCheckoutProductTypeForSuffix(t *testing.T) {
+	previous, existed := runtimeconfig.Snapshot()["microsoft_domain_whitelist"]
+	runtimeconfig.Set("microsoft_domain_whitelist", "outlook.com,hotmail.com")
+	t.Cleanup(func() {
+		if existed {
+			runtimeconfig.Set("microsoft_domain_whitelist", previous)
+		} else {
+			runtimeconfig.Delete("microsoft_domain_whitelist")
+		}
+	})
+
+	for _, test := range []struct {
+		suffix string
+		want   domain.ProductType
+	}{
+		{suffix: "gmail.com", want: domain.ProductTypeGmail},
+		{suffix: "icloud.com", want: domain.ProductTypeICloud},
+		{suffix: "outlook.com", want: domain.ProductTypeMicrosoft},
+		{suffix: "hotmail.com", want: domain.ProductTypeMicrosoft},
+		{suffix: "com", want: domain.ProductTypeDomain},
+		{suffix: "com.cn", want: domain.ProductTypeDomain},
+	} {
+		got, err := checkoutProductTypeForSuffix(test.suffix)
+		require.NoError(t, err, test.suffix)
+		require.Equal(t, test.want, got, test.suffix)
+	}
+
+	for _, suffix := range []string{"example.com", "mail@example.com", "bad suffix"} {
+		_, err := checkoutProductTypeForSuffix(suffix)
+		require.ErrorIs(t, err, domain.ErrInvalidOrderRequest, suffix)
+	}
+}
+
+func TestPrepareCheckoutRequestNormalizesSuffixAndKeepsLegacyIDPriority(t *testing.T) {
+	request := batchRequest("suffix-order", 1)
+	request.ProductID = 0
+	request.EmailSuffix = " @OUTLOOK.COM "
+	prepared, err := prepareCheckoutRequest(request)
+	require.NoError(t, err)
+	require.True(t, prepared.selectedBySuffix)
+	require.Equal(t, "outlook.com", prepared.selectorSuffix)
+
+	legacy := batchRequest("legacy-order", 1)
+	legacy.EmailSuffix = "gmail.com"
+	prepared, err = prepareCheckoutRequest(legacy)
+	require.NoError(t, err)
+	require.False(t, prepared.selectedBySuffix)
+	require.Equal(t, uint(9), prepared.request.ProductID)
+	legacyFingerprint := prepared.fingerprint
+	prepared.request.ProductID++
+	require.NotEqual(t, legacyFingerprint, checkoutPreparationFingerprint(prepared, prepared.emailSuffix))
+}
+
+func TestPrepareCheckoutRequestRejectsInvalidSuffixSelection(t *testing.T) {
+	for _, suffix := range []string{"", "alice@example.com", "@@outlook.com", "@.outlook.com", "..com", "bad suffix"} {
+		request := batchRequest("invalid-suffix", 1)
+		request.ProductID = 0
+		request.EmailSuffix = suffix
+		_, err := prepareCheckoutRequest(request)
+		require.ErrorIs(t, err, domain.ErrInvalidOrderRequest, suffix)
+	}
+}
+
+func TestLegacyRandomCheckoutAmountUsesAllocatedProductPrice(t *testing.T) {
 	order := domain.Order{
-		ProjectID: 8, ProjectProductID: 9, ProductType: domain.ProductTypeRandom,
+		ProjectID: 8, ProjectProductID: 9, ProductType: domain.ProductTypeLegacyRandom,
 		ServiceMode: domain.ServiceModePurchase, PayAmount: "0.08",
-		RandomMicrosoftPayAmount: "0.12", RandomDomainPayAmount: "0.08",
+		LegacyRandomMicrosoftPayAmount: "0.12", LegacyRandomDomainPayAmount: "0.08",
 		ActivationWindowMinutes: 10, WarrantyMinutes: 10,
 	}
 	quote, err := orderingQuoteFromOrder(order)
@@ -554,7 +612,7 @@ func TestRandomCheckoutAmountUsesAllocatedProductPrice(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "0.00", ownedAmount)
 
-	order.RandomMicrosoftPayAmount = ""
+	order.LegacyRandomMicrosoftPayAmount = ""
 	_, err = orderingQuoteFromOrder(order)
 	require.ErrorIs(t, err, domain.ErrInvalidOrderRequest)
 }
@@ -562,7 +620,7 @@ func TestRandomCheckoutAmountUsesAllocatedProductPrice(t *testing.T) {
 func TestCheckoutFingerprintIgnoresSuffixForProductsWithoutSuffixSelection(t *testing.T) {
 	withSuffixRequest := batchRequest("same-key", 1)
 	withSuffixRequest.EmailSuffix = "example.com"
-	for _, productType := range []domain.ProductType{domain.ProductTypeRandom, domain.ProductTypeGmail} {
+	for _, productType := range []domain.ProductType{domain.ProductTypeLegacyRandom, domain.ProductTypeGmail} {
 		withSuffix, err := prepareCheckoutRequest(withSuffixRequest)
 		require.NoError(t, err)
 		withoutSuffix, err := prepareCheckoutRequest(batchRequest("same-key", 1))
@@ -744,8 +802,8 @@ func TestDomainCheckoutRejectsMalformedPrivateMailboxSelection(t *testing.T) {
 	require.ErrorIs(t, finalizeCheckoutProduct(&prepared, domain.ProductTypeDomain), domain.ErrInvalidOrderRequest)
 }
 
-func TestCheckoutIgnoresRandomEmailSuffixBeforeInventoryPrecheck(t *testing.T) {
-	ordering := &batchOrderingSpy{productType: domain.ProductTypeRandom}
+func TestCheckoutRejectsLegacyRandomQuote(t *testing.T) {
+	ordering := &batchOrderingSpy{productType: domain.ProductTypeLegacyRandom}
 	uc := NewUseCase(&batchRepoSpy{}, ordering, &batchWalletSpy{}, &checkoutInventorySpy{}, batchTokenSpy{})
 	prepared := checkoutPreparation{
 		request:     CheckoutRequest{UserID: 7, ProjectID: 8, ProductID: 9},
@@ -755,8 +813,7 @@ func TestCheckoutIgnoresRandomEmailSuffixBeforeInventoryPrecheck(t *testing.T) {
 
 	err := uc.prepareCheckoutQuote(context.Background(), &prepared, nil)
 
-	require.NoError(t, err)
-	require.Empty(t, prepared.emailSuffix)
+	require.ErrorIs(t, err, domain.ErrProjectUnavailable)
 }
 
 func TestGmailCodeCheckoutUsesLocalGmailAllocation(t *testing.T) {
