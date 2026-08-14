@@ -292,8 +292,11 @@ func (s *Service) provisionICloudWeb(ctx context.Context, resource iCloudResourc
 	}
 	candidate := strings.TrimSpace(resource.AliasProvisionCandidate)
 	if candidate != "" {
-		if findICloudAlias(list.Aliases, candidate) != nil {
-			return nil, false, s.persistICloudProvisionCandidate(ctx, resource, "", false, now)
+		if reconciled := findICloudAlias(list.Aliases, candidate); reconciled != nil {
+			if err := s.persistICloudProvisionCandidate(ctx, resource, "", false, now); err != nil {
+				return nil, false, err
+			}
+			return reconciled, false, nil
 		}
 		if err := s.persistICloudProvisionCandidate(ctx, resource, candidate, true, now); err != nil {
 			return nil, false, err

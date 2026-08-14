@@ -50,7 +50,12 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 	for _, original := range channels {
 		currentResource, currentChannel, loadErr := s.loadICloudValidationProvisionScope(ctx, *resource, original.ID)
 		if loadErr != nil {
-			countFailure = true
+			if errors.Is(loadErr, errICloudValidationStale) {
+				return nil
+			}
+			retryValidation = true
+			transientValidation = true
+			nextValidationAt = earlierICloudProvisionAt(nextValidationAt, now.Add(iCloudValidationRetryInterval))
 			failures = append(failures, loadErr)
 			continue
 		}
@@ -100,6 +105,9 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 			retryValidation = true
 			loadErr = fmt.Errorf("unsupported iCloud channel")
 		}
+		if errors.Is(loadErr, errICloudValidationStale) {
+			return nil
+		}
 		if loadErr != nil {
 			definiteFailure := definiteAttemptFailure || iCloudValidationErrorCountsFailure(loadErr)
 			if definiteFailure {
@@ -135,11 +143,15 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 			}
 			continue
 		}
-		if !iCloudForwardingDomainAllowed(alias.ForwardToEmail, allowedDomains) {
+		if !alias.Active || !iCloudForwardingDomainAllowed(alias.ForwardToEmail, allowedDomains) {
 			countFailure = true
 			retryValidation = true
-			_ = s.disableICloudAlias(ctx, resource.ID, alias.AnonymousID, now)
-			failures = append(failures, fmt.Errorf("iCloud forwarding domain is not authorized"))
+			if alias.Active {
+				_ = s.disableICloudAlias(ctx, resource.ID, alias.AnonymousID, now)
+				failures = append(failures, fmt.Errorf("iCloud forwarding domain is not authorized"))
+			} else {
+				failures = append(failures, fmt.Errorf("iCloud alias is inactive"))
+			}
 			if refreshedResource, refreshedChannel, refreshErr := s.loadICloudValidationProvisionScope(ctx, *resource, original.ID); refreshErr == nil {
 				nextValidationAt = earlierICloudProvisionAt(nextValidationAt, iCloudValidationChannelRetryAt(refreshedResource, refreshedChannel, now))
 			}
@@ -191,12 +203,20 @@ func iCloudValidationChannelRetryAt(resource iCloudResourceModel, channel iCloud
 
 func (s *Service) loadICloudValidationProvisionScope(ctx context.Context, expected iCloudResourceModel, channelID uint) (iCloudResourceModel, iCloudResourceChannelModel, error) {
 	var resource iCloudResourceModel
-	if err := s.db.WithContext(ctx).First(&resource, expected.ID).Error; err != nil ||
-		resource.CredentialRevision != expected.CredentialRevision || resource.Status != iCloudResourceValidating {
+	if err := s.db.WithContext(ctx).First(&resource, expected.ID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return iCloudResourceModel{}, iCloudResourceChannelModel{}, errICloudValidationStale
+		}
+		return iCloudResourceModel{}, iCloudResourceChannelModel{}, err
+	}
+	if resource.CredentialRevision != expected.CredentialRevision || resource.Status != iCloudResourceValidating {
 		return iCloudResourceModel{}, iCloudResourceChannelModel{}, errICloudValidationStale
 	}
 	var channel iCloudResourceChannelModel
 	if err := s.db.WithContext(ctx).Where("id = ? AND resource_id = ?", channelID, expected.ID).First(&channel).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return iCloudResourceModel{}, iCloudResourceChannelModel{}, errICloudValidationStale
+		}
 		return iCloudResourceModel{}, iCloudResourceChannelModel{}, err
 	}
 	return resource, channel, nil
@@ -240,6 +260,9 @@ func (s *Service) applyICloudChannelValidationResult(ctx context.Context, task i
 		status := iCloudResourceNormal
 		failures := uint8(0)
 		storedSelectedForwardTo := selectedForwardTo
+		if storedSelectedForwardTo == "" && iCloudForwardingDomainAllowed(resource.SelectedForwardTo, allowedDomains) {
+			storedSelectedForwardTo = strings.ToLower(strings.TrimSpace(resource.SelectedForwardTo))
+		}
 		var nextValidationAt *time.Time
 		if selectedForwardTo == "" {
 			status = iCloudResourcePending
@@ -302,6 +325,9 @@ func (s *Service) applyICloudChannelValidationResult(ctx context.Context, task i
 			runStatus := iCloudMaintenanceSucceeded
 			if status != iCloudResourceNormal {
 				runStatus = iCloudMaintenanceFailed
+				if status == iCloudResourcePending && nextValidationAt != nil {
+					runStatus = iCloudMaintenanceQueued
+				}
 			}
 			return finishICloudMaintenanceRunTx(ctx, tx, run.ID, runStatus, message, now)
 		}

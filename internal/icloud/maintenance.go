@@ -156,11 +156,16 @@ func finishICloudMaintenanceRunTx(ctx context.Context, tx *gorm.DB, runID uint64
 	if runID == 0 {
 		return nil
 	}
+	updates := map[string]any{
+		"status": status, "last_safe_error": safeICloudImportMessage(safeError), "updated_at": now,
+	}
+	if status == iCloudMaintenanceQueued {
+		updates["finished_at"] = nil
+	} else {
+		updates["finished_at"] = now
+	}
 	result := tx.WithContext(ctx).Model(&iCloudMaintenanceRunModel{}).
 		Where("id = ? AND status IN ?", runID, []string{iCloudMaintenanceQueued, iCloudMaintenanceRunning}).
-		Updates(map[string]any{
-			"status": status, "last_safe_error": safeICloudImportMessage(safeError),
-			"finished_at": now, "updated_at": now,
-		})
+		Updates(updates)
 	return result.Error
 }

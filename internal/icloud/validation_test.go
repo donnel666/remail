@@ -183,6 +183,16 @@ func TestProcessICloudValidationRateLimitUsesRetryAfterWithoutHealthFailure(t *t
 	now := time.Date(2026, 8, 14, 9, 35, 0, 0, time.UTC)
 	db := openICloudValidationTestDB(t, "rate-limit")
 	task := createICloudValidationTestResource(t, db, now, now.Add(6*time.Hour))
+	run := iCloudMaintenanceRunModel{
+		ResourceID: 1, ValidationGeneration: task.ValidationGeneration, Kind: iCloudMaintenanceValidation,
+		Status: iCloudMaintenanceRunning, Attempts: 1, MaxAttempts: iCloudValidationMaxFailures,
+		CredentialRevision: task.ExpectedCredentialRevision, QueuedAt: now.Add(-time.Minute), StartedAt: &now,
+		CreatedAt: now.Add(-time.Minute), UpdatedAt: now,
+	}
+	if err := db.Create(&run).Error; err != nil {
+		t.Fatalf("create maintenance run: %v", err)
+	}
+	task.MaintenanceRunID, task.MaintenanceKind = run.ID, iCloudMaintenanceValidation
 	setICloudForwardingSuffixes(t, "relay.example")
 	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", 1).
 		Update("validation_failures", 2).Error; err != nil {
@@ -229,6 +239,14 @@ func TestProcessICloudValidationRateLimitUsesRetryAfterWithoutHealthFailure(t *t
 	}
 	if channel.CooldownStage != 2 || channel.CooldownUntil == nil || !channel.CooldownUntil.Equal(now.Add(3*time.Hour)) {
 		t.Fatalf("unexpected rate-limit channel: %#v", channel)
+	}
+	var storedRun iCloudMaintenanceRunModel
+	if err := db.First(&storedRun, run.ID).Error; err != nil {
+		t.Fatalf("read maintenance run: %v", err)
+	}
+	if storedRun.Status != iCloudMaintenanceQueued || storedRun.Attempts != 1 || storedRun.StartedAt == nil ||
+		!storedRun.StartedAt.Equal(now) || storedRun.FinishedAt != nil || !storedRun.QueuedAt.Equal(now.Add(-time.Minute)) {
+		t.Fatalf("transient validation was not requeued: %#v", storedRun)
 	}
 }
 
@@ -368,6 +386,223 @@ func TestProcessICloudValidationCompletesLegacyGenerateReserveInOneRun(t *testin
 	}
 	if route.ForwardToEmail != alias.ForwardToEmail || route.RecipientMailID != alias.RecipientMailID {
 		t.Fatalf("unexpected alias route: %#v", route)
+	}
+}
+
+func TestProcessICloudValidationAcceptsReconciledLegacyAlias(t *testing.T) {
+	now := time.Date(2026, 8, 14, 9, 45, 0, 0, time.UTC)
+	db := openICloudValidationTestDB(t, "legacy-reconcile")
+	task := createICloudValidationTestResource(t, db, now, now.Add(time.Hour))
+	run := iCloudMaintenanceRunModel{
+		ResourceID: 1, ValidationGeneration: task.ValidationGeneration, Kind: iCloudMaintenanceValidation,
+		Status: iCloudMaintenanceRunning, Attempts: 1, MaxAttempts: iCloudValidationMaxFailures,
+		CredentialRevision: task.ExpectedCredentialRevision, QueuedAt: now, StartedAt: &now,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&run).Error; err != nil {
+		t.Fatalf("create maintenance run: %v", err)
+	}
+	task.MaintenanceRunID, task.MaintenanceKind = run.ID, iCloudMaintenanceValidation
+	setICloudForwardingSuffixes(t, "relay.example")
+	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", 1).
+		Update("alias_provision_candidate", "reconciled@icloud.com").Error; err != nil {
+		t.Fatalf("seed candidate: %v", err)
+	}
+	channels := []iCloudResourceChannelModel{
+		{
+			ResourceID: 1, Kind: iCloudChannelAppleAccount, Host: "appleid.apple.com",
+			Cookie: "myacinfo=expired", Scnt: "expired", SessionStatus: iCloudSessionInvalid,
+			SessionFailures: iCloudSessionFailureLimit, CreatedAt: now, UpdatedAt: now,
+		},
+		{
+			ResourceID: 1, Kind: iCloudChannelWeb, Host: "p119-maildomainws.icloud.com",
+			Cookie: testICloudOldCookie, DSID: "123", ClientID: "client",
+			ClientBuildNumber: "build", ClientMasteringNumber: "master",
+			SessionStatus: iCloudSessionValid, CreatedAt: now, UpdatedAt: now,
+		},
+	}
+	if err := db.Create(&channels).Error; err != nil {
+		t.Fatalf("create channels: %v", err)
+	}
+
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	service.hme = NewHMEClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Path != "/v2/hme/list" {
+			t.Fatalf("unexpected legacy validation path %q", request.URL.Path)
+		}
+		body := `{"success":true,"result":{"selectedForwardTo":"dropbox@relay.example","forwardToEmails":["dropbox@relay.example"],"total":1,"hasMore":false,"hmeEmails":[{"hme":"reconciled@icloud.com","anonymousId":"reconciled-id","forwardToEmail":"dropbox@relay.example","recipientMailId":"relay-recipient-id","domain":"icloud.com","isActive":true}]}}`
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
+	})})
+
+	if err := service.ProcessICloudValidation(context.Background(), task); err != nil {
+		t.Fatalf("process validation: %v", err)
+	}
+	var resource iCloudResourceModel
+	if err := db.First(&resource, 1).Error; err != nil {
+		t.Fatalf("read resource: %v", err)
+	}
+	if resource.Status != iCloudResourceNormal || resource.SelectedForwardTo != "dropbox@relay.example" ||
+		resource.AliasProvisionCandidate != "" || resource.LastValidAt == nil {
+		t.Fatalf("unexpected reconciled resource: %#v", resource)
+	}
+	var storedRun iCloudMaintenanceRunModel
+	if err := db.First(&storedRun, run.ID).Error; err != nil {
+		t.Fatalf("read maintenance run: %v", err)
+	}
+	if storedRun.Status != iCloudMaintenanceSucceeded || storedRun.FinishedAt == nil {
+		t.Fatalf("successful legacy validation was not recorded: %#v", storedRun)
+	}
+}
+
+func TestProcessICloudValidationRejectsInactiveReconciledLegacyAlias(t *testing.T) {
+	now := time.Date(2026, 8, 14, 9, 50, 0, 0, time.UTC)
+	db := openICloudValidationTestDB(t, "inactive-legacy-reconcile")
+	task := createICloudValidationTestResource(t, db, now, now.Add(time.Hour))
+	setICloudForwardingSuffixes(t, "relay.example")
+	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", 1).
+		Update("alias_provision_candidate", "inactive@icloud.com").Error; err != nil {
+		t.Fatalf("seed candidate: %v", err)
+	}
+	if err := db.Create(&iCloudResourceChannelModel{
+		ResourceID: 1, Kind: iCloudChannelWeb, Host: "p119-maildomainws.icloud.com",
+		Cookie: testICloudOldCookie, DSID: "123", ClientID: "client",
+		ClientBuildNumber: "build", ClientMasteringNumber: "master",
+		SessionStatus: iCloudSessionValid, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	service.hme = NewHMEClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		body := `{"success":true,"result":{"selectedForwardTo":"dropbox@relay.example","total":1,"hasMore":false,"hmeEmails":[{"hme":"inactive@icloud.com","anonymousId":"inactive-id","forwardToEmail":"dropbox@relay.example","recipientMailId":"relay-recipient-id","isActive":false}]}}`
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
+	})})
+
+	if err := service.ProcessICloudValidation(context.Background(), task); err != nil {
+		t.Fatalf("process validation: %v", err)
+	}
+	var resource iCloudResourceModel
+	if err := db.First(&resource, 1).Error; err != nil {
+		t.Fatalf("read resource: %v", err)
+	}
+	if resource.Status != iCloudResourcePending || resource.ValidationFailures != 1 ||
+		resource.NextValidationAt == nil || resource.LastValidAt != nil {
+		t.Fatalf("inactive alias validated resource: %#v", resource)
+	}
+	var alias iCloudAliasModel
+	if err := db.Where("resource_id = ? AND anonymous_id = ?", 1, "inactive-id").Take(&alias).Error; err != nil {
+		t.Fatalf("read inactive alias: %v", err)
+	}
+	if alias.Status != iCloudResourceDisabled {
+		t.Fatalf("inactive alias status = %q, want %q", alias.Status, iCloudResourceDisabled)
+	}
+}
+
+func TestProcessICloudValidationRetriesTemporaryScopeReadFailure(t *testing.T) {
+	now := time.Date(2026, 8, 14, 9, 55, 0, 0, time.UTC)
+	db := openICloudValidationTestDB(t, "temporary-scope-read")
+	task := createICloudValidationTestResource(t, db, now, now.Add(time.Hour))
+	setICloudForwardingSuffixes(t, "relay.example")
+	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", 1).Updates(map[string]any{
+		"validation_failures": 2, "selected_forward_to": "dropbox@relay.example",
+	}).Error; err != nil {
+		t.Fatalf("seed resource: %v", err)
+	}
+	if err := db.Create(&iCloudResourceChannelModel{
+		ResourceID: 1, Kind: iCloudChannelAppleAccount, Host: "appleid.apple.com",
+		Cookie: "myacinfo=secret", Scnt: "scnt", SessionStatus: iCloudSessionValid,
+		CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+
+	resourceReads := 0
+	callbackName := "test:fail_icloud_validation_scope_read"
+	if err := db.Callback().Query().Before("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Schema == nil || tx.Statement.Schema.Table != "icloud_resources" {
+			return
+		}
+		resourceReads++
+		if resourceReads == 2 {
+			_ = tx.AddError(fmt.Errorf("temporary scope read failure"))
+		}
+	}); err != nil {
+		t.Fatalf("register query callback: %v", err)
+	}
+
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	service.apple = NewAppleAccountClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		t.Fatal("provider must not be called after a scope read failure")
+		return nil, nil
+	})})
+	processErr := service.ProcessICloudValidation(context.Background(), task)
+	_ = db.Callback().Query().Remove(callbackName)
+	if processErr != nil {
+		t.Fatalf("process validation: %v", processErr)
+	}
+	var resource iCloudResourceModel
+	if err := db.First(&resource, 1).Error; err != nil {
+		t.Fatalf("read resource: %v", err)
+	}
+	if resource.Status != iCloudResourcePending || resource.ValidationFailures != 2 ||
+		resource.NextValidationAt == nil || !resource.NextValidationAt.Equal(now.Add(iCloudValidationRetryInterval)) ||
+		resource.SelectedForwardTo != "dropbox@relay.example" {
+		t.Fatalf("temporary scope error changed resource health: %#v", resource)
+	}
+}
+
+func TestProcessICloudValidationIgnoresStaleScope(t *testing.T) {
+	now := time.Date(2026, 8, 14, 9, 57, 0, 0, time.UTC)
+	db := openICloudValidationTestDB(t, "stale-scope")
+	task := createICloudValidationTestResource(t, db, now, now.Add(time.Hour))
+	setICloudForwardingSuffixes(t, "relay.example")
+	if err := db.Create(&iCloudResourceChannelModel{
+		ResourceID: 1, Kind: iCloudChannelAppleAccount, Host: "appleid.apple.com",
+		Cookie: "myacinfo=secret", Scnt: "scnt", SessionStatus: iCloudSessionValid,
+		CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+
+	resourceReads := 0
+	var callbackErr error
+	callbackName := "test:stale_icloud_validation_scope"
+	if err := db.Callback().Query().Before("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Schema == nil || tx.Statement.Schema.Table != "icloud_resources" {
+			return
+		}
+		resourceReads++
+		if resourceReads == 2 {
+			_, callbackErr = tx.Statement.ConnPool.ExecContext(tx.Statement.Context,
+				`UPDATE icloud_resources SET status = 'normal', credential_revision = 5, selected_forward_to = 'new@relay.example', last_safe_error = 'new credentials' WHERE id = 1`)
+			if callbackErr != nil {
+				_ = tx.AddError(callbackErr)
+			}
+		}
+	}); err != nil {
+		t.Fatalf("register query callback: %v", err)
+	}
+
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	processErr := service.ProcessICloudValidation(context.Background(), task)
+	_ = db.Callback().Query().Remove(callbackName)
+	if callbackErr != nil {
+		t.Fatalf("make validation stale: %v", callbackErr)
+	}
+	if processErr != nil {
+		t.Fatalf("process validation: %v", processErr)
+	}
+	var resource iCloudResourceModel
+	if err := db.First(&resource, 1).Error; err != nil {
+		t.Fatalf("read resource: %v", err)
+	}
+	if resource.Status != iCloudResourceNormal || resource.CredentialRevision != 5 ||
+		resource.SelectedForwardTo != "new@relay.example" || resource.LastSafeError != "new credentials" {
+		t.Fatalf("stale validation overwrote new state: %#v", resource)
 	}
 }
 
