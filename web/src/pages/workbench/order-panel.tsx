@@ -24,6 +24,7 @@ import {
   shouldAutoFetchOrderMail,
   shouldShowQuickFetchControl,
 } from "./order-runtime";
+import { calculateDiscountedLedgerTotal } from "./money";
 import { ProjectIcon } from "./project-icon";
 import type {
   FetchResult,
@@ -358,10 +359,16 @@ export function OrderPanel({
     maxQuantity > 0
       ? Math.min(Math.max(1, quantity), maxQuantity)
       : 0;
-  const originalTotalPrice = selectedProduct
-    ? getPrice(selectedProduct, serviceMode, safeQuantity)
+  const priceQuantity = Math.max(1, safeQuantity);
+  const unitPrice = selectedProduct
+    ? getPrice(selectedProduct, serviceMode, 1)
     : 0;
-  const totalPrice = originalTotalPrice * priceMultiplier;
+  const originalTotalPrice = unitPrice * priceQuantity;
+  const totalPrice = calculateDiscountedLedgerTotal(
+    unitPrice,
+    priceMultiplier,
+    priceQuantity,
+  );
   const hasDiscount = totalPrice < originalTotalPrice;
   const originalTotalPriceText = formatMoney(originalTotalPrice);
   const originalTotalPriceExactText = formatMoneyExact(originalTotalPrice);

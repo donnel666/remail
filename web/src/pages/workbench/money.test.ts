@@ -1,10 +1,18 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  calculateDiscountedLedgerTotal,
   formatCompactNumber,
   formatMoney,
   formatMoneyExact,
 } from "./money";
+
+describe("calculateDiscountedLedgerTotal", () => {
+  it("rounds each discounted order to ledger precision before totaling a batch", () => {
+    expect(calculateDiscountedLedgerTotal(0.000003, 0.5, 2)).toBe(0.000004);
+    expect(calculateDiscountedLedgerTotal(0.000005, 0.5, 2)).toBe(0.000004);
+  });
+});
 
 describe("formatCompactNumber", () => {
   it.each<[number, string]>([

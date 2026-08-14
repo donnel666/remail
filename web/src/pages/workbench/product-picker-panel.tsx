@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { OverflowTooltip } from "@/components/semi/overflow-tooltip";
 import { cn } from "@/lib/utils";
 
+import { calculateDiscountedLedgerTotal } from "./money";
 import type {
   InventoryScope,
   ServiceMode,
@@ -130,7 +131,10 @@ export function ProductPickerPanel({
             const selected = selectedProductId === product.id;
             const inventory = getScopedInventory(product, serviceMode, inventoryScope);
             const originalPrice = getPrice(product, serviceMode);
-            const discountedPrice = originalPrice * priceMultiplier;
+            const discountedPrice = calculateDiscountedLedgerTotal(
+              originalPrice,
+              priceMultiplier,
+            );
             const hasDiscount = discountedPrice < originalPrice;
             const priceLabel = hasDiscount
               ? `${t("Original price")} ${formatMoneyExact(originalPrice)}, ${t("Discounted price")} ${formatMoneyExact(discountedPrice)}`
