@@ -2,8 +2,9 @@ import { Card } from "@douyinfe/semi-ui";
 import { Package, ShoppingBag } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { formatPoints } from "@/lib/points";
+
 import type { FinanceHotItem } from "./admin-finance-api";
-import { formatMoney } from "./finance-meta";
 
 const MEDALS = ["🥇", "🥈", "🥉"] as const;
 
@@ -32,7 +33,7 @@ function RankingColumn({ items, offset }: { items: FinanceHotItem[]; offset: num
         </div>
         <div className="truncate font-medium text-[var(--semi-color-text-1)]">{item.name}</div>
         <div className="whitespace-nowrap text-sm text-[var(--semi-color-text-2)]">
-          {formatMoney(item.amount)}
+          {formatPoints(item.amount)}
         </div>
         <div />
       </div>

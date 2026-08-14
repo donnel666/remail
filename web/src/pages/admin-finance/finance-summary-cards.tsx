@@ -10,8 +10,9 @@ import { Avatar, Card, Skeleton } from "@douyinfe/semi-ui";
 import { CircleDollarSign, Wallet } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { formatPoints } from "@/lib/points";
+
 import type { FinanceSummary } from "./admin-finance-api";
-import { formatMoney } from "./finance-meta";
 
 type MetricTone = "blue" | "cyan" | "green" | "orange" | "pink" | "purple";
 
@@ -91,7 +92,7 @@ export function FinanceSummaryCards({
           title: t("Recharge amount"),
           trendColor: "#3b82f6",
           trendData: trend.map((point) => point.recharge),
-          value: formatMoney(summary?.rechargeAmount),
+          value: formatPoints(summary?.rechargeAmount),
         },
         {
           avatarColor: "purple",
@@ -99,7 +100,7 @@ export function FinanceSummaryCards({
           title: t("Spend amount"),
           trendColor: "#8b5cf6",
           trendData: trend.map((point) => point.spend),
-          value: formatMoney(summary?.spendAmount),
+          value: formatPoints(summary?.spendAmount),
         },
         {
           avatarColor: "cyan",
@@ -107,7 +108,7 @@ export function FinanceSummaryCards({
           title: t("Withdraw amount"),
           trendColor: "#06b6d4",
           trendData: trend.map((point) => point.withdraw),
-          value: formatMoney(summary?.withdrawAmount),
+          value: formatPoints(summary?.withdrawAmount),
         },
       ],
     },
@@ -121,7 +122,7 @@ export function FinanceSummaryCards({
           title: t("Platform revenue"),
           trendColor: "#22a06b",
           trendData: trend.map((point) => point.platformRevenue),
-          value: formatMoney(summary?.platformRevenue),
+          value: formatPoints(summary?.platformRevenue),
         },
         {
           avatarColor: "purple",
@@ -129,7 +130,7 @@ export function FinanceSummaryCards({
           title: t("Account revenue"),
           trendColor: "#8b5cf6",
           trendData: trend.map((point) => point.accountRevenue),
-          value: formatMoney(summary?.accountRevenue),
+          value: formatPoints(summary?.accountRevenue),
         },
         {
           avatarColor: "orange",
@@ -137,7 +138,7 @@ export function FinanceSummaryCards({
           title: t("Refund amount"),
           trendColor: "#f59e0b",
           trendData: trend.map((point) => point.refund),
-          value: formatMoney(summary?.refundAmount),
+          value: formatPoints(summary?.refundAmount),
         },
       ],
     },

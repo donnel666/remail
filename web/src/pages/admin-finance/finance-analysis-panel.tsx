@@ -6,8 +6,9 @@ import { semiDesignDark, semiDesignLight } from "@visactor/vchart-semi-theme";
 import { PieChart } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { formatPoints } from "@/lib/points";
+
 import type { FinanceSummary } from "./admin-finance-api";
-import { formatMoney } from "./finance-meta";
 
 export type FinanceAnalysisView = "cashflow" | "structure";
 
@@ -80,6 +81,7 @@ function useFinanceSpec(summary: FinanceSummary | null, view: FinanceAnalysisVie
       ]);
 
       return asChartSpec({
+        axes: [{ label: { formatMethod: formatPoints }, orient: "left" }],
         color: {
           specified: {
             [labels.recharge]: "#3b82f6",
@@ -95,7 +97,7 @@ function useFinanceSpec(summary: FinanceSummary | null, view: FinanceAnalysisVie
         seriesField: "Metric",
         title: chartTitle(
           t("Cashflow trend"),
-          `${labels.recharge}：${formatMoney(summary?.rechargeAmount)} / ${labels.spend}：${formatMoney(summary?.spendAmount)}`,
+          `${labels.recharge}：${formatPoints(summary?.rechargeAmount)} / ${labels.spend}：${formatPoints(summary?.spendAmount)}`,
         ),
         type: "line",
         xField: "Time",
@@ -124,7 +126,7 @@ function useFinanceSpec(summary: FinanceSummary | null, view: FinanceAnalysisVie
       },
       data: [{ id: "financeRevenueStructureData", values }],
       innerRadius: 0.5,
-      label: { visible: true },
+      label: { formatMethod: formatPoints, visible: true },
       legends: { orient: "left", visible: true },
       outerRadius: 0.8,
       padAngle: 0.6,
@@ -137,7 +139,7 @@ function useFinanceSpec(summary: FinanceSummary | null, view: FinanceAnalysisVie
       },
       title: chartTitle(
         t("Revenue structure"),
-        `${t("Platform revenue")}：${formatMoney(summary?.platformRevenue)}`,
+        `${t("Platform revenue")}：${formatPoints(summary?.platformRevenue)}`,
       ),
       type: "pie",
       valueField: "Value",
