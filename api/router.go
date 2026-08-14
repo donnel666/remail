@@ -84,6 +84,9 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		if err != nil {
 			return nil, cleanup, err
 		}
+		systemSettingsMod.SetRuntimeValidationHook(func(ctx context.Context, settings []settingsdomain.Setting) error {
+			return validateICloudForwardingSuffixes(ctx, p.DB, settings)
+		})
 		p.InitWorkers()
 		// IAM module (activation, auth, users)
 		fileStore := governanceinfra.NewMinIOFileStore(p.MinIO, p.MinIOBucket)
@@ -183,19 +186,28 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		allocMod := allocapi.NewModule(p.DB, p.Redis, p.Asynq)
 		systemSettingsMod.SetRuntimeUpdateHook(func(ctx context.Context, settings []settingsdomain.Setting) error {
 			domainTLDChanged := false
+			iCloudForwardingChanged := false
 			for _, setting := range settings {
 				key := strings.ToLower(strings.TrimSpace(setting.Key))
 				if key == "domain_custom_tlds" {
 					domainTLDChanged = true
+				}
+				if key == "icloud_forwarding_suffixes" {
+					iCloudForwardingChanged = true
 				}
 			}
 			if domainTLDChanged {
 				if err := coreMod.ReindexDomainTLDs(ctx); err != nil {
 					return err
 				}
-				if err := allocMod.UseCase.ScheduleInventoryRefresh(ctx); err != nil {
+			}
+			if iCloudForwardingChanged {
+				if err := applyICloudForwardingSuffixesUpdate(ctx, p.DB, settings); err != nil {
 					return err
 				}
+			}
+			if domainTLDChanged || iCloudForwardingChanged {
+				return allocMod.UseCase.ScheduleInventoryRefresh(ctx)
 			}
 			return nil
 		})
@@ -251,7 +263,6 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		cleanupFuncs = append(cleanupFuncs, gmailapi.RegisterTaskHandlers(taskMux, gmailMod.Service))
 		icloudMod = icloudapi.NewModule(p.DB, p.Asynq, fileStore)
 		icloudMod.Service.SetBackgroundExecutionGate(p.BackgroundLoad)
-		icloudMod.Service.SetPickupProxyProvider(proxyMod.ProxyUseCase)
 		icloudMod.Service.SetImportOwnerValidator(func(ctx context.Context, ownerID uint) (bool, error) {
 			owner, err := iamMod.AdminResourceOwners.ValidateTargetOwner(ctx, ownerID)
 			return owner != nil && owner.ID != 0 && owner.Enabled, err

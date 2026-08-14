@@ -1982,7 +1982,7 @@ func inboundFetchedMessage(req InboundMailRequest) FetchedMessage {
 	if subject := decodeMIMEHeader(decoder, msg.Header.Get("Subject")); subject != "" {
 		item.Subject = subject
 	}
-	if from := decodeMIMEHeader(decoder, msg.Header.Get("From")); from != "" {
+	if from := decodeMIMEHeader(decoder, msg.Header.Get("From")); from != "" && req.ResourceType != domain.ResourceTypeICloud {
 		item.Sender = from
 	}
 	if (req.ResourceType != domain.ResourceTypeDomain && req.ResourceType != domain.ResourceTypeGmail && req.ResourceType != domain.ResourceTypeICloud) || recipient == "" {

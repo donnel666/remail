@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/mail"
 	"path"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -41,14 +42,14 @@ const (
 	iCloudAppleAccountValueMaxLength       = 1000
 	iCloudImportBuildMaxLength             = 64
 	iCloudImportCookieMaxBytes             = 65_535
-	iCloudImportAppPasswordMaxLength       = 128
 )
+
+var iCloudCurlContinuationPattern = regexp.MustCompile(`[ \t]*\\[ \t]*\r?\n[ \t]*`)
 
 type iCloudImportLine struct {
 	LineNumber         int
 	ExistingResourceID uint
 	PrimaryEmail       string
-	AppPassword        string
 	Channels           []iCloudImportChannel
 }
 
@@ -370,6 +371,7 @@ func parseICloudImport(content string, strategy coreDomain.ImportErrorStrategy) 
 	strategy = normalizedStrategy
 	var lines []iCloudImportLine
 	var failures []iCloudImportFailure
+	content = iCloudCurlContinuationPattern.ReplaceAllString(content, " ")
 	for index, raw := range strings.Split(content, "\n") {
 		raw = strings.TrimSuffix(raw, "\r")
 		if strings.TrimSpace(raw) == "" {
@@ -408,11 +410,6 @@ func validICloudImportValue(value string, maxLength int) bool {
 func validICloudImportCookie(value string) bool {
 	value = strings.TrimSpace(value)
 	return value != "" && utf8.ValidString(value) && len(value) <= iCloudImportCookieMaxBytes && !strings.ContainsAny(value, "\r\n") && hasRequiredICloudCookies(value)
-}
-
-func validICloudImportAppPassword(value string) bool {
-	value = strings.TrimSpace(value)
-	return value != "" && utf8.ValidString(value) && utf8.RuneCountInString(value) <= iCloudImportAppPasswordMaxLength && !strings.ContainsAny(value, "\r\n")
 }
 
 // ProcessICloudImport executes one fenced durable import generation. The task
@@ -666,7 +663,7 @@ func (s *Service) removeExistingICloudImportLines(ctx context.Context, ownerUser
 		match := emailMatch
 		// Credentials are deliberately replaceable. Cookie health is a channel
 		// concern and must never make the account itself abnormal.
-		if match.ID != 0 && match.OwnerUserID == ownerUserID && match.Status != iCloudResourceDeleted {
+		if match.ID != 0 && match.OwnerUserID == ownerUserID {
 			line.ExistingResourceID = match.ID
 			result = append(result, line)
 			continue
@@ -752,9 +749,10 @@ func (s *Service) createICloudResourcesAndMarkImportSucceeded(
 						validationGeneration = 2
 					}
 					updates := map[string]any{
-						"primary_email": line.PrimaryEmail, "imap_app_password": line.AppPassword,
-						"expire_at": expiresAt, "credential_revision": credentialRevision, "credential_updated_at": now,
+						"primary_email": line.PrimaryEmail,
+						"expire_at":     expiresAt, "credential_revision": credentialRevision, "credential_updated_at": now,
 						"validation_generation": validationGeneration, "validation_failures": 0,
+						"selected_forward_to": "", "alias_count": 0, "last_alias_sync_at": nil,
 						"alias_provision_candidate": "", "alias_provision_reconcile": false,
 						"next_provision_at": nil, "last_safe_error": "", "updated_at": now,
 					}
@@ -771,6 +769,11 @@ func (s *Service) createICloudResourcesAndMarkImportSucceeded(
 					if resourceUpdated.RowsAffected != 1 {
 						return ErrICloudImportClaim
 					}
+					if err := tx.Model(&iCloudAliasModel{}).
+						Where("resource_id = ? AND status <> ?", existing.ID, iCloudResourceDeleted).
+						Updates(map[string]any{"status": "missing", "updated_at": now}).Error; err != nil {
+						return err
+					}
 					rootUpdated := tx.Model(&iCloudRootModel{}).Where("id = ? AND version = ?", root.ID, root.Version).
 						Updates(map[string]any{"version": gorm.Expr("version + 1"), "updated_at": now})
 					if rootUpdated.Error != nil {
@@ -785,7 +788,7 @@ func (s *Service) createICloudResourcesAndMarkImportSucceeded(
 					resourceIDs[index] = existing.ID
 				} else {
 					resources = append(resources, iCloudResourceModel{
-						ID: resourceIDs[index], ResourceType: "icloud", PrimaryEmail: line.PrimaryEmail, IMAPAppPassword: line.AppPassword,
+						ID: resourceIDs[index], ResourceType: "icloud", PrimaryEmail: line.PrimaryEmail,
 						ExpireAt: expiresAt, ForSale: false, Status: iCloudResourcePending,
 						CredentialRevision: 1, CredentialUpdatedAt: now, ValidationGeneration: 1, NextValidationAt: iCloudTimePointer(now), CreatedAt: now, UpdatedAt: now,
 					})
@@ -1046,9 +1049,6 @@ func isICloudDuplicateError(err error) bool {
 func upsertICloudImportChannelsTx(tx *gorm.DB, resourceID uint, channels []iCloudImportChannel, now time.Time) error {
 	if tx == nil || resourceID == 0 {
 		return ErrICloudImportClaim
-	}
-	if !tx.Migrator().HasTable("icloud_resource_channels") {
-		return nil
 	}
 	seen := make(map[string]struct{}, len(channels))
 	for _, channel := range channels {

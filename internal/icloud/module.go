@@ -41,7 +41,7 @@ var (
 	ErrICloudImportTemporary    = errors.New("icloud: import temporarily unavailable")
 	ErrICloudImportClaim        = errors.New("icloud: import claim is no longer valid")
 	ErrICloudValidationTemp     = errors.New("icloud: validation temporarily unavailable")
-	ErrICloudMailUnavailable    = errors.New("icloud: IMAP mail temporarily unavailable")
+	ErrICloudMailUnavailable    = errors.New("icloud: forwarded mail temporarily unavailable")
 	ErrICloudResourceNotFound   = errors.New("icloud: resource not found")
 	ErrICloudResourceStatus     = errors.New("icloud: invalid resource status")
 )
@@ -72,7 +72,7 @@ func NewModule(db *gorm.DB, queue *asynq.Client, files governanceapp.FilePort) *
 	return &Module{Service: NewService(db, queue, files)}
 }
 
-// Service owns iCloud import, IMAP health, mail pickup, and alias provisioning.
+// Service owns iCloud import, forwarded-mail pickup, and alias provisioning.
 type Service struct {
 	db                  *gorm.DB
 	queue               *asynq.Client
@@ -81,7 +81,6 @@ type Service struct {
 	systemLogs          *governanceinfra.SystemLogRepo
 	hme                 *HMEClient
 	apple               *AppleAccountClient
-	imap                *iCloudIMAPClient
 	now                 func() time.Time
 	validateImportOwner func(context.Context, uint) (bool, error)
 	backgroundExecution BackgroundExecutionGate
@@ -96,7 +95,6 @@ func NewService(db *gorm.DB, queue *asynq.Client, files governanceapp.FilePort) 
 		systemLogs:    governanceinfra.NewSystemLogRepo(db),
 		hme:           NewHMEClient(nil),
 		apple:         NewAppleAccountClient(nil),
-		imap:          &iCloudIMAPClient{},
 		now:           time.Now,
 	}
 }
@@ -130,10 +128,7 @@ type iCloudResourceModel struct {
 	ID                      uint       `gorm:"column:id;primaryKey"`
 	ResourceType            string     `gorm:"column:resource_type"`
 	PrimaryEmail            string     `gorm:"column:primary_email"`
-	IMAPAppPassword         string     `gorm:"column:imap_app_password"`
-	IMAPUIDValidity         string     `gorm:"column:imap_uid_validity"`
-	IMAPLastUID             uint64     `gorm:"column:imap_last_uid"`
-	IMAPLastSyncAt          *time.Time `gorm:"column:imap_last_sync_at"`
+	SelectedForwardTo       string     `gorm:"column:selected_forward_to"`
 	ExpireAt                time.Time  `gorm:"column:expire_at"`
 	ForSale                 bool       `gorm:"column:for_sale"`
 	Status                  string     `gorm:"column:status"`
@@ -206,7 +201,10 @@ type iCloudAliasModel struct {
 	Email             string     `gorm:"column:email"`
 	Label             string     `gorm:"column:label"`
 	Note              string     `gorm:"column:note"`
+	ForwardToEmail    string     `gorm:"column:forward_to_email"`
 	Origin            string     `gorm:"column:origin"`
+	ProviderDomain    string     `gorm:"column:provider_domain"`
+	RecipientMailID   string     `gorm:"column:recipient_mail_id"`
 	Status            string     `gorm:"column:status"`
 	ProviderCreatedAt *time.Time `gorm:"column:provider_created_at"`
 	LastSeenAt        *time.Time `gorm:"column:last_seen_at"`
@@ -216,6 +214,20 @@ type iCloudAliasModel struct {
 }
 
 func (iCloudAliasModel) TableName() string { return "icloud_aliases" }
+
+// iCloudAliasRouteModel keeps old Apple relay route pairs addressable when
+// Apple changes the selected forwarding mailbox for an existing alias.
+type iCloudAliasRouteModel struct {
+	ID              uint      `gorm:"column:id;primaryKey;autoIncrement"`
+	ResourceID      uint      `gorm:"column:resource_id;not null"`
+	AliasID         uint      `gorm:"column:alias_id;not null"`
+	ForwardToEmail  string    `gorm:"column:forward_to_email;not null"`
+	RecipientMailID string    `gorm:"column:recipient_mail_id;not null"`
+	FirstSeenAt     time.Time `gorm:"column:first_seen_at;not null"`
+	LastSeenAt      time.Time `gorm:"column:last_seen_at;not null"`
+}
+
+func (iCloudAliasRouteModel) TableName() string { return "icloud_alias_routes" }
 
 type iCloudImportModel struct {
 	ID                 uint       `gorm:"column:id;primaryKey;autoIncrement"`

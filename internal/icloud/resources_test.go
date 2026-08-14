@@ -48,14 +48,14 @@ func TestListAdminICloudResourcesReturnsOnlySafeOperationalFacts(t *testing.T) {
 		&iCloudRootModel{ID: 1, Type: "icloud", OwnerUserID: 7, Version: 4, CreatedAt: now.Add(-2 * time.Hour), UpdatedAt: now},
 		&iCloudRootModel{ID: 2, Type: "icloud", OwnerUserID: 7, Version: 2, CreatedAt: now.Add(-time.Hour), UpdatedAt: now},
 		&iCloudResourceModel{
-			ID: 1, ResourceType: "icloud", PrimaryEmail: "main@icloud.com", IMAPAppPassword: "secret-app-password",
+			ID: 1, ResourceType: "icloud", PrimaryEmail: "main@icloud.com",
 			ExpireAt: now.Add(30 * 24 * time.Hour), Status: iCloudResourceNormal, AliasCount: iCloudMaxAliases - 1,
 			AliasProvisionCandidate: "candidate@icloud.com", NextProvisionAt: &nextProvisionAt,
 			CredentialRevision: 3, ValidationGeneration: 4, ValidationFailures: 2,
 			CredentialUpdatedAt: now, CreatedAt: now.Add(-2 * time.Hour), UpdatedAt: now,
 		},
 		&iCloudResourceModel{
-			ID: 2, ResourceType: "icloud", PrimaryEmail: "pending@me.com", IMAPAppPassword: "secret-app-password-2",
+			ID: 2, ResourceType: "icloud", PrimaryEmail: "pending@me.com",
 			ExpireAt: now.Add(30 * 24 * time.Hour), ForSale: true, Status: iCloudResourcePending,
 			AliasCount: 12, CredentialRevision: 1, ValidationGeneration: 1,
 			CredentialUpdatedAt: now, CreatedAt: now.Add(-time.Hour), UpdatedAt: now,
@@ -97,7 +97,7 @@ func TestListAdminICloudResourcesReturnsOnlySafeOperationalFacts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal safe response: %v", err)
 	}
-	for _, secret := range []string{"secret-app-password", "secret-new-cookie", "secret-old-cookie", "secret-dsid", "secret-scnt"} {
+	for _, secret := range []string{"secret-new-cookie", "secret-old-cookie", "secret-dsid", "secret-scnt"} {
 		if bytes.Contains(payload, []byte(secret)) {
 			t.Fatalf("safe response exposed %q: %s", secret, payload)
 		}

@@ -17,11 +17,13 @@ func (a iCloudMailFetchAdapter) FetchICloudMessages(ctx context.Context, req mai
 		return nil, mailmatchdomain.ErrMailServiceUnavailable
 	}
 	result, err := a.service.FetchMail(ctx, icloudapi.MailFetchRequest{
-		ResourceID:  req.Scope.EmailResourceID,
-		SinceAt:     req.SinceAt,
-		UntilAt:     req.UntilAt,
-		MaxMessages: req.MaxMessages,
-		FullHistory: req.FullHistory,
+		ResourceID:      req.Scope.EmailResourceID,
+		Recipient:       req.Scope.Recipient,
+		SinceAt:         req.SinceAt,
+		UntilAt:         req.UntilAt,
+		MaxMessages:     req.MaxMessages,
+		FullHistory:     req.FullHistory,
+		KnownMessageIDs: req.KnownMessageIDs,
 	})
 	if err != nil {
 		return nil, err
@@ -36,15 +38,9 @@ func (a iCloudMailFetchAdapter) FetchICloudMessages(ctx context.Context, req mai
 			Raw:               message.Raw,
 			ReceivedAt:        message.ReceivedAt,
 			ProviderMessageID: message.ProviderMessageID,
-			Protocol:          "imap",
-			Folder:            "INBOX",
+			Protocol:          "smtp",
+			Folder:            "inbound",
 		}))
-	}
-	if result.Cursor != nil {
-		cursor := *result.Cursor
-		out.CommitCursor = func(commitCtx context.Context, fence func(context.Context) error) error {
-			return a.service.CommitMailCursor(commitCtx, cursor, fence)
-		}
 	}
 	return out, nil
 }

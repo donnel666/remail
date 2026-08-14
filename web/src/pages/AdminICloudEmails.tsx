@@ -515,7 +515,7 @@ export function ImportICloudModal({
               <TextArea
                 className="font-mono"
                 onChange={setContent}
-                placeholder="primary@icloud.com----app-password----curl ..."
+                placeholder="apple-id@example.com----curl ..."
                 rows={8}
                 style={{ height: IMPORT_ENTRY_AREA_HEIGHT, resize: "none" }}
                 value={content}
@@ -554,13 +554,13 @@ export function ImportICloudModal({
             {t("Supported format")}
           </div>
           <code className="block whitespace-pre-wrap break-all font-mono text-xs leading-relaxed text-[var(--semi-color-text-2)]">
-            {"email----appPassword----oldCurl\nemail----appPassword----newCurl\nemail----appPassword----newCurl----oldCurl\nemail----appPassword----oldCurl----newCurl"}
+            {"email----oldCurl\nemail----newCurl\nemail----newCurl----oldCurl\nemail----oldCurl----newCurl"}
           </code>
         </div>
 
         <div className="rounded-lg border border-[var(--semi-color-border)] bg-[var(--semi-color-fill-0)] px-3 py-2 text-xs leading-5 text-[var(--semi-color-text-2)]">
           {t(
-            "iCloud app passwords, cookies and cURL context are write-only and never returned by the resource API.",
+            "iCloud cookies and cURL context are write-only and never returned by the resource API.",
           )}
         </div>
       </div>
@@ -666,7 +666,7 @@ export function EditICloudModal({
           {credentialsOnly ? (
             <>
               <div className="rounded-lg border border-[var(--semi-color-warning-light-active)] bg-[var(--semi-color-warning-light-default)] px-3 py-2 text-sm text-[var(--semi-color-text-0)]">
-                {t("The complete credential line is write-only. Existing values are never displayed, and submitting replaces the app password and configured cURL channels.")}
+                {t("The complete credential line is write-only. Existing values are never displayed, and submitting replaces the configured cURL channels.")}
               </div>
               <InfoItem
                 label={t("Primary email")}
@@ -700,7 +700,7 @@ export function EditICloudModal({
                       {t("Public sale")}
                     </div>
                     <div className="text-xs text-[var(--semi-color-text-2)]">
-                      {t("This setting is independent from IMAP health and Cookie validity.")}
+                      {t("This setting is independent from Cookie validity.")}
                     </div>
                   </div>
                   <Switch
@@ -738,18 +738,18 @@ export function EditICloudModal({
               <div className="mb-3 text-xs leading-5 text-[var(--semi-color-text-2)]">
                 {t(credentialsOnly
                   ? "Enter the same complete line accepted by import."
-                  : "Write-only. Leave blank to keep the current app password and cURL channels.")}
+                  : "Write-only. Leave blank to keep the current cURL channels.")}
               </div>
               <TextArea
                 className="font-mono"
                 onChange={setImportLine}
-                placeholder="email----appPassword----curl[----curl]"
+                placeholder="email----curl[----curl]"
                 rows={7}
                 style={{ resize: "none" }}
                 value={importLine}
               />
               <code className="mt-2 block whitespace-pre-wrap break-all font-mono text-xs leading-5 text-[var(--semi-color-text-2)]">
-                {"email----appPassword----oldCurl\nemail----appPassword----newCurl\nemail----appPassword----newCurl----oldCurl\nemail----appPassword----oldCurl----newCurl"}
+                {"email----oldCurl\nemail----newCurl\nemail----newCurl----oldCurl\nemail----oldCurl----newCurl"}
               </code>
             </div>
           ) : null}
@@ -784,7 +784,7 @@ export function ICloudMaintenanceModal({
     (target.item.status === "disabled" || target.item.status === "deleted");
   const actions = [
     {
-      description: "Check whether the app-specific password can log in to IMAP.",
+      description: "Check whether each configured Cookie can create an alias.",
       disabled: rowDisabled,
       icon: ShieldCheck,
       key: "validate" as const,
@@ -875,7 +875,7 @@ export function ICloudMaintenanceModal({
         {rowItem ? (
           <div className="grid gap-3 rounded-lg border border-[var(--semi-color-border)] p-3 sm:grid-cols-2">
             <InfoItem
-              label={t("IMAP health")}
+              label={t("Resource status")}
               value={<ResourceStatusTag item={rowItem} />}
             />
             <InfoItem
@@ -1321,7 +1321,7 @@ export function ICloudDetailSheet({
               <div className="space-y-5">
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   <InfoItem
-                    label={t("IMAP health")}
+                    label={t("Resource status")}
                     value={<ResourceStatusTag item={item} />}
                   />
                   <InfoItem
@@ -1348,7 +1348,6 @@ export function ICloudDetailSheet({
                   <InfoItem label={t("Resource expires at")} value={formatTime(item.expireAt)} />
                   <InfoItem label={t("Next validation")} value={formatTime(item.nextValidationAt)} />
                   <InfoItem label={t("Next provisioning")} value={formatTime(item.nextProvisionAt)} />
-                  <InfoItem label={t("Last IMAP sync")} value={formatTime(item.lastMailSyncAt)} />
                   <InfoItem label={t("Last checked")} value={formatTime(item.lastCheckedAt)} />
                   <InfoItem label={t("Last valid")} value={formatTime(item.lastValidAt)} />
                   <InfoItem label={t("Last alias sync")} value={formatTime(item.lastAliasSyncAt)} />

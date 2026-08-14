@@ -108,6 +108,7 @@ func (c *AppleAccountClient) create(ctx context.Context, channel iCloudResourceC
 		Label        string `json:"label"`
 		Note         string `json:"note"`
 		ID           string `json:"id"`
+		Active       bool   `json:"active"`
 	}
 	if err := c.request(ctx, &next, next.APIKey, http.MethodPut, "/account/manage/email/private/add/complete", map[string]string{
 		"emailAddress": generated.EmailAddress,
@@ -126,10 +127,38 @@ func (c *AppleAccountClient) create(ctx context.Context, channel iCloudResourceC
 		Label:       strings.TrimSpace(completed.Label),
 		Note:        strings.TrimSpace(completed.Note),
 		Origin:      "APPLE_ACCOUNT",
-		Active:      true,
+		Active:      completed.Active,
 	}
-	if alias.AnonymousID != "" && !validICloudHMEText(alias.AnonymousID, iCloudHMEAnonymousIDMaxLength, false) || !validICloudHMEEmail(alias.Email) {
+	if !validICloudHMEText(alias.AnonymousID, iCloudHMEAnonymousIDMaxLength, false) || !validICloudHMEEmail(alias.Email) {
 		return hmeAlias{}, next, &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned an invalid created alias."}
+	}
+	var detail struct {
+		EmailAddress   string `json:"emailAddress"`
+		Label          string `json:"label"`
+		Note           string `json:"note"`
+		ID             string `json:"id"`
+		ForwardToEmail string `json:"forwardToEmail"`
+		Active         *bool  `json:"active"`
+	}
+	detailPath := "/account/manage/email/private/" + url.PathEscape(alias.AnonymousID) + ".em"
+	if err := c.request(ctx, &next, next.APIKey, http.MethodGet, detailPath, nil, &detail, now); err != nil {
+		return hmeAlias{}, next, err
+	}
+	if value := strings.ToLower(strings.TrimSpace(detail.EmailAddress)); value != "" {
+		alias.Email = value
+	}
+	if value := strings.TrimSpace(detail.Label); value != "" {
+		alias.Label = value
+	}
+	if value := strings.TrimSpace(detail.Note); value != "" {
+		alias.Note = value
+	}
+	alias.ForwardToEmail = strings.ToLower(strings.TrimSpace(detail.ForwardToEmail))
+	if detail.Active != nil {
+		alias.Active = *detail.Active
+	}
+	if !validICloudHMEEmail(alias.Email) || !validICloudHMEEmail(alias.ForwardToEmail) {
+		return hmeAlias{}, next, &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned an invalid forwarding target."}
 	}
 	return alias, next, nil
 }

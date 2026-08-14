@@ -27,6 +27,7 @@ const defaultsSource = readFileSync(
   new URL("../../../../internal/systemsettings/runtimeconfig/defaults.go", import.meta.url),
   "utf8",
 );
+const emailResourcesSource = readFileSync(new URL("./email-resources.tsx", import.meta.url), "utf8");
 const backendKeys = [...defaultsSource.matchAll(/\{Key: "([^\"]+)"/g)].map((match) => match[1]);
 const nonUIRuntimeKeys = new Set([
   "admin_resource_list_default_limit",
@@ -74,5 +75,14 @@ describe("system setting keys", () => {
     expect(new Set(frontendKeys).size).toBe(frontendKeys.length);
     expect(new Set(frontendKeys)).toEqual(new Set(visibleBackendKeys));
     expect(EMAIL_SERVICE_KEYS).toEqual(emailServiceKeys);
+  });
+
+  it("limits iCloud forwarding suffixes to active auxiliary domains", () => {
+    expect(emailResourcesSource).toContain('listAdminDomains({ purpose: "binding" }');
+    expect(emailResourcesSource).toContain('item.status !== "disabled"');
+    expect(emailResourcesSource).toContain('item.status !== "deleted"');
+    expect(emailResourcesSource).toContain('Toast.error(getIamErrorMessage');
+    expect(emailResourcesSource).toContain('multiple');
+    expect(emailResourcesSource).toContain('update("icloud_forwarding_suffixes"');
   });
 });

@@ -27,73 +27,58 @@ type iCloudImportChannel struct {
 
 // splitICloudImportLineParts accepts exactly:
 //
-//	email----app-password----curl [----curl]
+//	email----curl [----curl]
 //
 // A cURL can contain the separator in a quoted Cookie value.  A separator is
 // therefore considered a channel boundary only when the following token is a
 // new cURL command.
-func splitICloudImportLineParts(raw string) (email, appPassword string, curls []string, ok bool) {
+func splitICloudImportLineParts(raw string) (email string, curls []string, ok bool) {
 	raw = strings.TrimSpace(raw)
 	first := strings.Index(raw, "----")
 	if first <= 0 {
-		return "", "", nil, false
+		return "", nil, false
 	}
-	secondRelative := strings.Index(raw[first+4:], "----")
-	if secondRelative < 0 {
-		return "", "", nil, false
-	}
-	second := first + 4 + secondRelative
 	email = strings.TrimSpace(raw[:first])
-	appPassword = strings.TrimSpace(raw[first+4 : second])
-	rest := strings.TrimSpace(raw[second+4:])
-	if email == "" || appPassword == "" || rest == "" {
-		return "", "", nil, false
+	rest := strings.TrimSpace(raw[first+4:])
+	if email == "" || rest == "" {
+		return "", nil, false
 	}
 
-	boundaries := make([]int, 0, 1)
-	for index := 0; index+4 <= len(rest); index++ {
-		if rest[index:index+4] != "----" {
-			continue
-		}
-		candidate := strings.TrimSpace(rest[index+4:])
-		if strings.EqualFold(firstICloudCurlToken(candidate), "curl") {
-			boundaries = append(boundaries, index)
-		}
-	}
+	boundaries := iCloudCurlChannelBoundaries(rest)
 	if len(boundaries) > 1 {
-		return "", "", nil, false
+		return "", nil, false
 	}
 	if len(boundaries) == 1 {
 		left := strings.TrimSpace(rest[:boundaries[0]])
 		right := strings.TrimSpace(rest[boundaries[0]+4:])
 		if left == "" || right == "" {
-			return "", "", nil, false
+			return "", nil, false
 		}
 		curls = []string{left, right}
 	} else {
 		curls = []string{rest}
 	}
 	if len(curls) < 1 || len(curls) > 2 {
-		return "", "", nil, false
+		return "", nil, false
 	}
 	for _, command := range curls {
 		if !strings.EqualFold(firstICloudCurlToken(command), "curl") {
-			return "", "", nil, false
+			return "", nil, false
 		}
 	}
-	return email, appPassword, curls, true
+	return email, curls, true
 }
 
 func parseICloudCurlImportLine(lineNumber int, raw string) (*iCloudImportLine, *iCloudImportFailure) {
-	email, appPassword, curls, ok := splitICloudImportLineParts(raw)
+	email, curls, ok := splitICloudImportLineParts(raw)
 	email = strings.ToLower(strings.TrimSpace(email))
 	failure := func(message string) (*iCloudImportLine, *iCloudImportFailure) {
 		return nil, &iCloudImportFailure{Line: lineNumber, Email: email, Category: "invalid_format", SafeMessage: message}
 	}
-	if !ok || !isICloudImportEmail(email) || !validICloudImportAppPassword(appPassword) {
+	if !ok || !isICloudImportEmail(email) {
 		return failure("Invalid iCloud import format.")
 	}
-	line := &iCloudImportLine{LineNumber: lineNumber, PrimaryEmail: email, AppPassword: strings.TrimSpace(appPassword)}
+	line := &iCloudImportLine{LineNumber: lineNumber, PrimaryEmail: email}
 	seen := make(map[string]struct{}, len(curls))
 	for _, command := range curls {
 		channel, err := parseICloudCurlChannel(command)
@@ -110,6 +95,39 @@ func parseICloudCurlImportLine(lineNumber int, raw string) (*iCloudImportLine, *
 		return failure("Invalid iCloud cURL channel count.")
 	}
 	return line, nil
+}
+
+func iCloudCurlChannelBoundaries(value string) []int {
+	boundaries := make([]int, 0, 1)
+	var quote byte
+	escaped := false
+	for index := 0; index < len(value); index++ {
+		current := value[index]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if current == '\\' && quote != '\'' {
+			escaped = true
+			continue
+		}
+		if quote != 0 {
+			if current == quote {
+				quote = 0
+			}
+			continue
+		}
+		if current == '\'' || current == '"' {
+			quote = current
+			continue
+		}
+		if index+4 <= len(value) && value[index:index+4] == "----" &&
+			strings.EqualFold(firstICloudCurlToken(strings.TrimSpace(value[index+4:])), "curl") {
+			boundaries = append(boundaries, index)
+			index += 3
+		}
+	}
+	return boundaries
 }
 
 func parseICloudCurlChannel(command string) (*iCloudImportChannel, error) {

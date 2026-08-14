@@ -24,10 +24,10 @@ func TestParseICloudImportSupportsCompleteCredentialLines(t *testing.T) {
 		line      string
 		wantKinds []string
 	}{
-		{name: "old channel", line: "owner@icloud.com----app-password----" + testICloudOldCurl, wantKinds: []string{iCloudChannelWeb}},
-		{name: "new channel", line: "owner@icloud.com----app-password----" + testICloudNewCurl, wantKinds: []string{iCloudChannelAppleAccount}},
-		{name: "both channels", line: "owner@icloud.com----app-password----" + testICloudNewCurl + "----" + testICloudOldCurl, wantKinds: []string{iCloudChannelAppleAccount, iCloudChannelWeb}},
-		{name: "both channels reversed", line: "owner@icloud.com----app-password----" + testICloudOldCurl + "----" + testICloudNewCurl, wantKinds: []string{iCloudChannelWeb, iCloudChannelAppleAccount}},
+		{name: "old channel", line: "owner@icloud.com----" + testICloudOldCurl, wantKinds: []string{iCloudChannelWeb}},
+		{name: "new channel", line: "owner@icloud.com----" + testICloudNewCurl, wantKinds: []string{iCloudChannelAppleAccount}},
+		{name: "both channels", line: "owner@icloud.com----" + testICloudNewCurl + "----" + testICloudOldCurl, wantKinds: []string{iCloudChannelAppleAccount, iCloudChannelWeb}},
+		{name: "both channels reversed", line: "owner@icloud.com----" + testICloudOldCurl + "----" + testICloudNewCurl, wantKinds: []string{iCloudChannelWeb, iCloudChannelAppleAccount}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -36,7 +36,7 @@ func TestParseICloudImportSupportsCompleteCredentialLines(t *testing.T) {
 				t.Fatalf("unexpected parse result: lines=%#v failures=%#v fatal=%#v", lines, failures, fatal)
 			}
 			line := lines[0]
-			if line.PrimaryEmail != "owner@icloud.com" || line.AppPassword != "app-password" || len(line.Channels) != len(test.wantKinds) {
+			if line.PrimaryEmail != "owner@icloud.com" || len(line.Channels) != len(test.wantKinds) {
 				t.Fatalf("unexpected credentials: %#v", line)
 			}
 			for index, kind := range test.wantKinds {
@@ -62,23 +62,23 @@ func TestParseICloudImportAcceptsBrowserCopiedOpaqueValues(t *testing.T) {
 		`-H 'Origin: https://account.apple.com' ` +
 		`-H 'X-Apple-I-FD-Client-Info: {"U":"browser","F":"fingerprint"}' ` +
 		`-H 'scnt: ` + scnt + `'`
-	line, failure := parseICloudImportLine(1, "owner@example.com----app-password----"+command)
+	line, failure := parseICloudImportLine(1, "owner@example.com----"+command)
 	if failure != nil || len(line.Channels) != 1 || line.Channels[0].Cookie != cookie || line.Channels[0].Scnt != scnt {
 		t.Fatalf("browser cURL parse failed: failure=%#v", failure)
 	}
 
 	tooLong := strings.Replace(command, scnt, scnt+"x", 1)
-	if _, failure = parseICloudImportLine(1, "owner@example.com----app-password----"+tooLong); failure == nil {
+	if _, failure = parseICloudImportLine(1, "owner@example.com----"+tooLong); failure == nil {
 		t.Fatal("Apple Account value above 1000 characters must be rejected")
 	}
 }
 
 func TestParseICloudImportRejectsDuplicateOrUnsafeChannels(t *testing.T) {
 	tests := []string{
-		"owner@icloud.com----app-password----" + testICloudOldCurl + "----" + testICloudOldCurl,
-		"owner@icloud.com----app-password----curl 'https://p119-maildomainws.icloud.com.evil.example/v2/hme/list?clientBuildNumber=build&clientMasteringNumber=master&clientId=client&dsid=123' -H 'Cookie: " + testICloudOldCookie + "'",
-		"owner@icloud.com----app-password----" + strings.Replace(testICloudNewCurl, testICloudFDClientInfo, strings.Repeat("x", 2049), 1),
-		"owner@icloud.com----app-password",
+		"owner@icloud.com----" + testICloudOldCurl + "----" + testICloudOldCurl,
+		"owner@icloud.com----curl 'https://p119-maildomainws.icloud.com.evil.example/v2/hme/list?clientBuildNumber=build&clientMasteringNumber=master&clientId=client&dsid=123' -H 'Cookie: " + testICloudOldCookie + "'",
+		"owner@icloud.com----" + strings.Replace(testICloudNewCurl, testICloudFDClientInfo, strings.Repeat("x", 2049), 1),
+		"owner@icloud.com",
 	}
 	for _, content := range tests {
 		lines, failures, fatal := parseICloudImport(content, coreDomain.ImportErrorStrategySkip)
@@ -92,13 +92,23 @@ func TestParseICloudImportRejectsDuplicateOrUnsafeChannels(t *testing.T) {
 }
 
 func TestParseICloudImportKeepsSeparatorsInsideCookie(t *testing.T) {
-	content := strings.Replace(testICloudOldCurl, "session", "session----inside", 1)
-	line, failure := parseICloudImportLine(7, "Owner@icloud.com----app-password----"+content)
+	content := strings.Replace(testICloudOldCurl, "session", "session----curl-inside", 1)
+	line, failure := parseICloudImportLine(7, "Owner@icloud.com----"+content)
 	if failure != nil {
 		t.Fatalf("parse failure: %#v", failure)
 	}
-	if line.PrimaryEmail != "owner@icloud.com" || line.Channels[0].Cookie != strings.Replace(testICloudOldCookie, "session", "session----inside", 1) {
+	if line.PrimaryEmail != "owner@icloud.com" || line.Channels[0].Cookie != strings.Replace(testICloudOldCookie, "session", "session----curl-inside", 1) {
 		t.Fatalf("unexpected parsed line: %#v", line)
+	}
+}
+
+func TestParseICloudImportJoinsBrowserCurlContinuations(t *testing.T) {
+	content := "owner@icloud.com----curl --url 'https://appleid.apple.com/account/manage/gs/ws/token' \\\r\n" +
+		"  -b 'myacinfo=secret' \\\r\n" +
+		"  -H 'scnt: value'\nsecond@icloud.com----" + testICloudOldCurl
+	lines, failures, fatal := parseICloudImport(content, coreDomain.ImportErrorStrategyAbort)
+	if fatal != nil || len(failures) != 0 || len(lines) != 2 || lines[0].LineNumber != 1 || lines[1].LineNumber != 2 {
+		t.Fatalf("unexpected multiline parse: lines=%#v failures=%#v fatal=%#v", lines, failures, fatal)
 	}
 }
 

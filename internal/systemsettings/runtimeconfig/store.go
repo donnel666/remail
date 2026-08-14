@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
 
 	"github.com/donnel666/remail/internal/systemsettings/domain"
 )
@@ -28,8 +29,9 @@ func Replace(settings []domain.Setting) {
 	values := make(map[string]string, len(settings))
 	for _, setting := range settings {
 		key := canonicalKey(setting.Key)
-		if Validate(key, setting.Value) == nil {
-			values[key] = setting.Value
+		value := NormalizeValue(key, setting.Value)
+		if Validate(key, value) == nil {
+			values[key] = value
 		}
 	}
 	sanitizeRelationships(values)
@@ -45,7 +47,8 @@ func SetMany(settings []domain.Setting) {
 	defer updateMu.Unlock()
 	values := clone()
 	for _, setting := range settings {
-		values[canonicalKey(setting.Key)] = setting.Value
+		key := canonicalKey(setting.Key)
+		values[key] = NormalizeValue(key, setting.Value)
 	}
 	current.Store(values)
 }
@@ -152,4 +155,34 @@ func clone() map[string]string {
 
 func canonicalKey(key string) string {
 	return strings.ToLower(strings.TrimSpace(key))
+}
+
+func NormalizeValue(key, value string) string {
+	if canonicalKey(key) != ICloudForwardingSuffixesKey {
+		return value
+	}
+	seen := make(map[string]struct{})
+	domains := make([]string, 0)
+	for _, candidate := range strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || r == '，' || unicode.IsSpace(r)
+	}) {
+		domain := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(candidate)), ".")
+		if domain == "" {
+			continue
+		}
+		if _, exists := seen[domain]; exists {
+			continue
+		}
+		seen[domain] = struct{}{}
+		domains = append(domains, domain)
+	}
+	return strings.Join(domains, ",")
+}
+
+func ICloudForwardingSuffixes(value string) []string {
+	value = NormalizeValue(ICloudForwardingSuffixesKey, value)
+	if value == "" {
+		return nil
+	}
+	return strings.Split(value, ",")
 }

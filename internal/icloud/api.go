@@ -269,7 +269,7 @@ func (h *handler) patchResource(c *gin.Context) {
 	if !ok {
 		return
 	}
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 128<<10)
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 256<<10)
 	var request iCloudEditRequest
 	if err := c.ShouldBindJSON(&request); err != nil || request.Version == 0 ||
 		(request.ImportLine == nil && request.OwnerID == nil && request.ForSale == nil && request.ExpireAt == nil) {

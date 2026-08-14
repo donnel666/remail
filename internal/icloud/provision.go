@@ -91,19 +91,19 @@ func (s *Service) ProcessICloudProvision(ctx context.Context, task iCloudProvisi
 			continue
 		}
 
-		var created bool
+		var alias *hmeAlias
 		var immediate bool
 		var attemptErr error
 		switch channel.Kind {
 		case iCloudChannelAppleAccount:
-			created, attemptErr = s.provisionICloudAppleAccount(ctx, scope.Resource, *channel, createAllowed, now)
+			alias, attemptErr = s.provisionICloudAppleAccount(ctx, scope.Resource, *channel, createAllowed, now)
 		case iCloudChannelWeb:
-			created, immediate, attemptErr = s.provisionICloudWeb(ctx, scope.Resource, *channel, createAllowed, now)
+			alias, immediate, attemptErr = s.provisionICloudWeb(ctx, scope.Resource, *channel, createAllowed, now)
 		}
 		if errors.Is(attemptErr, errICloudValidationStale) {
 			return nil
 		}
-		if created {
+		if alias != nil {
 			aliasCount++
 			if kind == iCloudChannelWeb {
 				pendingWebCandidate = false
@@ -190,55 +190,58 @@ func (s *Service) claimICloudProvision(ctx context.Context, resourceID uint) (*i
 	return &scope, claimed, nil
 }
 
-func (s *Service) provisionICloudAppleAccount(ctx context.Context, resource iCloudResourceModel, channel iCloudResourceChannelModel, createAllowed bool, now time.Time) (bool, error) {
+func (s *Service) provisionICloudAppleAccount(ctx context.Context, resource iCloudResourceModel, channel iCloudResourceChannelModel, createAllowed bool, now time.Time) (*hmeAlias, error) {
 	client := s.apple
 	if client == nil {
 		client = NewAppleAccountClient(nil)
 	}
 	refreshed, err := client.refresh(ctx, channel, now)
 	if err != nil {
-		return false, s.applyICloudProvisionError(ctx, resource, channel, err, now)
+		return nil, s.applyICloudProvisionError(ctx, resource, channel, err, now)
 	}
 	refreshed.NextKeepaliveAt = appleAccountNextKeepalive(refreshed, now)
 	if err := s.persistICloudProvisionChannel(ctx, resource, refreshed, true, false, now); err != nil {
-		return false, err
+		return nil, err
 	}
 	if !createAllowed {
-		return false, nil
+		return nil, nil
 	}
 	alias, updated, err := client.create(ctx, refreshed, now)
 	if err != nil {
 		_ = s.persistICloudProvisionChannel(ctx, resource, updated, true, false, now)
-		return false, s.applyICloudProvisionError(ctx, resource, updated, err, now)
+		return nil, s.applyICloudProvisionError(ctx, resource, updated, err, now)
 	}
 	updated.NextKeepaliveAt = appleAccountNextKeepalive(updated, now)
-	return true, s.persistICloudCreatedAlias(ctx, resource, updated, alias, true, now)
+	if err := s.persistICloudCreatedAlias(ctx, resource, updated, alias, true, now); err != nil {
+		return nil, err
+	}
+	return &alias, nil
 }
 
-func (s *Service) provisionICloudWeb(ctx context.Context, resource iCloudResourceModel, channel iCloudResourceChannelModel, createAllowed bool, now time.Time) (bool, bool, error) {
+func (s *Service) provisionICloudWeb(ctx context.Context, resource iCloudResourceModel, channel iCloudResourceChannelModel, createAllowed bool, now time.Time) (*hmeAlias, bool, error) {
 	client := s.hme
 	if client == nil {
 		client = NewHMEClient(nil)
 	}
 	list, err := client.list(ctx, channel.hmeConfig())
 	if err != nil {
-		return false, false, s.applyICloudProvisionError(ctx, resource, channel, err, now)
+		return nil, false, s.applyICloudProvisionError(ctx, resource, channel, err, now)
 	}
 	channel.Cookie = list.UpdatedCookie
 	channel.NextKeepaliveAt = iCloudTimePointer(now.Add(iCloudWebKeepalive))
 	if err := s.persistICloudWebSnapshot(ctx, resource, channel, list, now); err != nil {
-		return false, false, err
+		return nil, false, err
 	}
 	if !createAllowed || len(list.Aliases) >= iCloudMaxAliases {
-		return false, false, nil
+		return nil, false, nil
 	}
 	candidate := strings.TrimSpace(resource.AliasProvisionCandidate)
 	if candidate != "" {
 		if findICloudAlias(list.Aliases, candidate) != nil {
-			return false, false, s.persistICloudProvisionCandidate(ctx, resource, "", false, now)
+			return nil, false, s.persistICloudProvisionCandidate(ctx, resource, "", false, now)
 		}
 		if err := s.persistICloudProvisionCandidate(ctx, resource, candidate, true, now); err != nil {
-			return false, false, err
+			return nil, false, err
 		}
 		alias, updatedCookie, reserveErr := client.reserve(ctx, channel.hmeConfig(), candidate, "ReMail", "")
 		if updatedCookie != "" {
@@ -248,21 +251,24 @@ func (s *Service) provisionICloudWeb(ctx context.Context, resource iCloudResourc
 			if providerErr, ok := reserveErr.(*hmeError); ok && providerErr.Category == "invalid_candidate" {
 				_ = s.persistICloudProvisionCandidate(ctx, resource, "", false, now)
 			}
-			return false, false, s.applyICloudProvisionError(ctx, resource, channel, reserveErr, now)
+			return nil, false, s.applyICloudProvisionError(ctx, resource, channel, reserveErr, now)
 		}
-		return true, false, s.persistICloudCreatedAlias(ctx, resource, channel, alias, false, now)
+		if err := s.persistICloudCreatedAlias(ctx, resource, channel, alias, false, now); err != nil {
+			return nil, false, err
+		}
+		return &alias, false, nil
 	}
 	candidate, updatedCookie, err := client.Generate(ctx, channel.hmeConfig())
 	if updatedCookie != "" {
 		channel.Cookie = updatedCookie
 	}
 	if err != nil {
-		return false, false, s.applyICloudProvisionError(ctx, resource, channel, err, now)
+		return nil, false, s.applyICloudProvisionError(ctx, resource, channel, err, now)
 	}
 	if err := s.persistICloudProvisionChannel(ctx, resource, channel, true, true, now); err != nil {
-		return false, false, err
+		return nil, false, err
 	}
-	return false, true, s.persistICloudProvisionCandidate(ctx, resource, candidate, false, now)
+	return nil, true, s.persistICloudProvisionCandidate(ctx, resource, candidate, false, now)
 }
 
 func (s *Service) persistICloudWebSnapshot(ctx context.Context, resource iCloudResourceModel, channel iCloudResourceChannelModel, list hmeListResult, now time.Time) error {
@@ -271,7 +277,7 @@ func (s *Service) persistICloudWebSnapshot(ctx context.Context, resource iCloudR
 		if err != nil {
 			return err
 		}
-		if err := syncICloudAliasesTx(tx, locked.ID, list.Aliases, "", true, now); err != nil {
+		if err := syncICloudAliasesTx(tx, locked.ID, list.Aliases, true, now); err != nil {
 			return err
 		}
 		if err := tx.Model(&iCloudResourceModel{}).Where("id = ?", locked.ID).Updates(map[string]any{
@@ -289,7 +295,10 @@ func (s *Service) persistICloudCreatedAlias(ctx context.Context, resource iCloud
 		if err != nil {
 			return err
 		}
-		if err := syncICloudAliasesTx(tx, locked.ID, []hmeAlias{alias}, "", false, now); err != nil {
+		if !locked.ExpireAt.After(now) || locked.AliasCount >= iCloudMaxAliases {
+			return errICloudValidationStale
+		}
+		if err := syncICloudAliasesTx(tx, locked.ID, []hmeAlias{alias}, false, now); err != nil {
 			return err
 		}
 		var aliasCount int64
@@ -305,7 +314,11 @@ func (s *Service) persistICloudCreatedAlias(ctx context.Context, resource iCloud
 			Updates(resourceUpdates).Error; err != nil {
 			return err
 		}
-		return updateICloudProvisionChannelTx(tx, channel, true, consumeSlot, now)
+		if err := updateICloudProvisionChannelTx(tx, channel, true, consumeSlot, now); err != nil {
+			return err
+		}
+		return tx.Model(&iCloudResourceChannelModel{}).Where("id = ? AND resource_id = ?", channel.ID, channel.ResourceID).
+			Updates(map[string]any{"cooldown_until": nil, "cooldown_stage": 0}).Error
 	})
 }
 
@@ -340,8 +353,6 @@ func updateICloudProvisionChannelTx(tx *gorm.DB, channel iCloudResourceChannelMo
 		updates["session_status"] = iCloudSessionValid
 		updates["session_failures"] = 0
 		updates["last_valid_at"] = now
-		updates["cooldown_until"] = nil
-		updates["cooldown_stage"] = 0
 	}
 	result := tx.Model(&iCloudResourceChannelModel{}).Where("id = ? AND resource_id = ?", channel.ID, channel.ResourceID).Updates(updates)
 	if result.Error != nil {
@@ -402,16 +413,26 @@ func (s *Service) applyICloudProvisionError(ctx context.Context, resource iCloud
 }
 
 func (s *Service) persistICloudProvisionCandidate(ctx context.Context, resource iCloudResourceModel, candidate string, reconcile bool, now time.Time) error {
-	result := s.db.WithContext(ctx).Model(&iCloudResourceModel{}).
-		Where("id = ? AND credential_revision = ?", resource.ID, resource.CredentialRevision).
-		Updates(map[string]any{"alias_provision_candidate": strings.TrimSpace(candidate), "alias_provision_reconcile": reconcile, "updated_at": now})
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected != 1 {
-		return errICloudValidationStale
-	}
-	return nil
+	candidate = strings.TrimSpace(candidate)
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		locked, err := lockICloudProvisionResourceTx(ctx, tx, resource)
+		if err != nil {
+			return err
+		}
+		if candidate != "" && (!locked.ExpireAt.After(now) || locked.AliasCount >= iCloudMaxAliases) {
+			return errICloudValidationStale
+		}
+		result := tx.Model(&iCloudResourceModel{}).
+			Where("id = ? AND credential_revision = ?", locked.ID, resource.CredentialRevision).
+			Updates(map[string]any{"alias_provision_candidate": candidate, "alias_provision_reconcile": reconcile, "updated_at": now})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return errICloudValidationStale
+		}
+		return nil
+	})
 }
 
 func (s *Service) finishICloudProvision(ctx context.Context, resource iCloudResourceModel, nextAt, now time.Time) error {
@@ -452,7 +473,8 @@ func lockICloudProvisionResourceTx(ctx context.Context, tx *gorm.DB, expected iC
 	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).First(&resource, expected.ID).Error; err != nil {
 		return nil, errICloudValidationStale
 	}
-	if resource.CredentialRevision != expected.CredentialRevision || resource.Status == iCloudResourceDeleted || resource.Status == iCloudResourceDisabled {
+	if resource.CredentialRevision != expected.CredentialRevision || resource.Status != expected.Status ||
+		resource.Status == iCloudResourceDeleted || resource.Status == iCloudResourceDisabled {
 		return nil, errICloudValidationStale
 	}
 	return &resource, nil

@@ -272,10 +272,16 @@ func TestValidateSystemOperationsSettings(t *testing.T) {
 		"admin_resource_list_max_limit", "admin_log_max_limit", "admin_task_max_limit", "admin_message_max_limit",
 		"api_key_meta_ttl_seconds", "api_key_cache_flush_interval_seconds",
 		"inventory_cache_activity_ttl_minutes", "message_scan_limit", "projection_replay_limit",
-		"icloud_forwarding_mailboxes", "icloud_mailmatch_scan_limit", "icloud_admin_read_limit",
+		"icloud_forwarding_mailboxes",
 	} {
 		require.ErrorIs(t, Validate(key, "100"), domain.ErrInvalidKey)
 	}
+	require.NoError(t, Validate(ICloudForwardingSuffixesKey, "mail.example.com,relay.example.net"))
+	require.ErrorIs(t, Validate(ICloudForwardingSuffixesKey, "user@example.com"), domain.ErrInvalidValue)
+	require.NoError(t, Validate(ICloudMailmatchScanLimitKey, "10000"))
+	require.ErrorIs(t, Validate(ICloudMailmatchScanLimitKey, "10001"), domain.ErrInvalidValue)
+	require.NoError(t, Validate(ICloudAdminReadLimitKey, "5000"))
+	require.ErrorIs(t, Validate(ICloudAdminReadLimitKey, "5001"), domain.ErrInvalidValue)
 	require.ErrorIs(t, ValidatePersistedUpdates(DefaultSettings(), []domain.Setting{
 		{Key: "background_worker_minimum", Value: "32"},
 		{Key: "background_worker_initial", Value: "16"},
@@ -311,6 +317,15 @@ func TestRuntimeDefaultSettingsCannotBeDeleted(t *testing.T) {
 	require.ErrorIs(t, ValidateDelete("SMTP_TASK_RETRY_COUNT"), domain.ErrInvalidValue)
 	require.ErrorIs(t, ValidateDelete("points_unit_migration_v1"), domain.ErrInvalidValue)
 	require.NoError(t, ValidateDelete("custom.setting"))
+}
+
+func TestICloudForwardingSuffixesAreCanonical(t *testing.T) {
+	require.Equal(t, "relay.example,mail.example", NormalizeValue(
+		ICloudForwardingSuffixesKey, " RELAY.EXAMPLE.，mail.example relay.example ",
+	))
+	require.Equal(t, []string{"relay.example", "mail.example"}, ICloudForwardingSuffixes(
+		" RELAY.EXAMPLE.，mail.example relay.example ",
+	))
 }
 
 func TestReplaceFallsBackFromConflictingPersistedValues(t *testing.T) {

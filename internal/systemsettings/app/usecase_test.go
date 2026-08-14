@@ -115,6 +115,18 @@ func TestRuntimeUpdateHookFailureIsReturnedBeforeLocalRuntimeChanges(t *testing.
 	require.Equal(t, "edu.kg", runtimeconfig.String("domain_custom_tlds", ""))
 }
 
+func TestUpsertNormalizesICloudForwardingSuffixesBeforePersistence(t *testing.T) {
+	repo := &fakeRepository{}
+	uc := NewSystemSettingsUseCase(repo, &fakeOperationLogs{})
+	t.Cleanup(func() { runtimeconfig.Delete(runtimeconfig.ICloudForwardingSuffixesKey) })
+
+	saved, err := uc.Upsert(context.Background(), runtimeconfig.ICloudForwardingSuffixesKey, " RELAY.EXAMPLE.，mail.example relay.example ", MutationMeta{})
+	require.NoError(t, err)
+	require.Equal(t, "relay.example,mail.example", saved.Value)
+	require.Equal(t, saved.Value, repo.upsertValue)
+	require.Equal(t, saved.Value, runtimeconfig.String(runtimeconfig.ICloudForwardingSuffixesKey, ""))
+}
+
 func TestNewlyPublishedAnnouncementsOnlyReturnsNewlyEnabledItems(t *testing.T) {
 	before := []domain.Setting{{Key: "announcements", Value: `[
 		{"id":1,"title":"old","content":"old","type":"default","startTime":"","endTime":"","enabled":true},

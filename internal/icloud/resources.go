@@ -65,7 +65,6 @@ type AdminICloudResourceView struct {
 	NextProvisionAt  *time.Time              `json:"nextProvisionAt"`
 	LastCheckedAt    *time.Time              `json:"lastCheckedAt"`
 	LastValidAt      *time.Time              `json:"lastValidAt"`
-	LastMailSyncAt   *time.Time              `json:"lastMailSyncAt"`
 	LastAliasSyncAt  *time.Time              `json:"lastAliasSyncAt"`
 	LastAllocatedAt  *time.Time              `json:"lastAllocatedAt"`
 	LastSafeError    *string                 `json:"lastSafeError"`
@@ -122,7 +121,6 @@ type adminICloudResourceRow struct {
 	NextProvisionAt         *time.Time `gorm:"column:next_provision_at"`
 	LastCheckedAt           *time.Time `gorm:"column:last_checked_at"`
 	LastValidAt             *time.Time `gorm:"column:last_valid_at"`
-	LastMailSyncAt          *time.Time `gorm:"column:last_mail_sync_at"`
 	LastAliasSyncAt         *time.Time `gorm:"column:last_alias_sync_at"`
 	LastAllocatedAt         *time.Time `gorm:"column:last_allocated_at"`
 	LastSafeError           string     `gorm:"column:last_safe_error"`
@@ -147,7 +145,7 @@ const adminICloudResourceSelect = `
 	ir.validation_generation, ir.validation_failures, ir.alias_count,
 	ir.alias_provision_candidate, ir.alias_provision_reconcile, ir.expire_at,
 	ir.next_validation_at, ir.next_provision_at, ir.last_checked_at,
-	ir.last_valid_at, ir.imap_last_sync_at AS last_mail_sync_at,
+	ir.last_valid_at,
 	ir.last_alias_sync_at, ir.last_allocated_at, ir.last_safe_error,
 	ir.created_at, ir.updated_at`
 
@@ -281,7 +279,7 @@ func adminICloudResourceView(row adminICloudResourceRow) AdminICloudResourceView
 		OldSession: adminICloudSessionView(row.OldChannelID, row.OldSessionStatus, row.OldSessionFailures, row.OldCooldownUntil, row.OldNextKeepaliveAt, row.OldLastCheckedAt, row.OldLastValidAt),
 		AliasCount: row.AliasCount, ExpireAt: row.ExpireAt, NextValidationAt: row.NextValidationAt,
 		NextProvisionAt: row.NextProvisionAt, LastCheckedAt: row.LastCheckedAt, LastValidAt: row.LastValidAt,
-		LastMailSyncAt: row.LastMailSyncAt, LastAliasSyncAt: row.LastAliasSyncAt,
+		LastAliasSyncAt: row.LastAliasSyncAt,
 		LastAllocatedAt: row.LastAllocatedAt, LastSafeError: safeError,
 		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 	}
@@ -292,6 +290,14 @@ func adminICloudSessionView(id *uint, status string, failures uint8, cooldown, k
 		return nil
 	}
 	return &AdminICloudSessionView{Status: normalizeICloudChannelStatus(status), Failures: failures, CooldownUntil: cooldown, NextKeepaliveAt: keepalive, LastCheckedAt: checked, LastValidAt: valid}
+}
+
+func normalizeICloudChannelStatus(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value != iCloudSessionValid && value != iCloudSessionInvalid {
+		return iCloudSessionUnchecked
+	}
+	return value
 }
 
 func includeAdminICloudListSection(value *bool) bool { return value == nil || *value }

@@ -23,7 +23,7 @@ func TestDefaultSettingsAreValidAndIndependent(t *testing.T) {
 		"api_key_meta_ttl_seconds", "api_key_cache_flush_interval_seconds",
 		"bucket_count", "inventory_cache_activity_ttl_minutes", "msacl_content_search_window_minutes", "outbound_mail_claim_timeout_minutes",
 		"message_scan_limit", "projection_replay_limit",
-		"icloud_forwarding_mailboxes", "icloud_mailmatch_scan_limit", "icloud_admin_read_limit",
+		"icloud_forwarding_mailboxes",
 		"smsbower_enabled", "smsbower_code_enabled", "smsbower_purchase_enabled", "smsbower_api_key",
 		"smsbower_sync_interval_minutes", "smsbower_balance_warning_threshold", "smsbower_points_per_unit", "smsbower_min_margin_rate",
 	} {
@@ -37,6 +37,9 @@ func TestDefaultSettingsAreValidAndIndependent(t *testing.T) {
 	require.Equal(t, "0.8", keys["first_order_rebate_ratio"])
 	require.Equal(t, "90", keys["rebate_expiry_days"])
 	require.Equal(t, "", keys["domain_custom_tlds"])
+	require.Equal(t, "", keys[ICloudForwardingSuffixesKey])
+	require.Equal(t, "1000", keys[ICloudMailmatchScanLimitKey])
+	require.Equal(t, "5000", keys[ICloudAdminReadLimitKey])
 	require.Equal(t, "3", keys["domain_max_subdomains_per_registrable_domain"])
 	require.Equal(t, "3", keys["proxy_server_health_timeout_seconds"])
 	require.Equal(t, "60", keys["proxy_server_health_interval_seconds"])

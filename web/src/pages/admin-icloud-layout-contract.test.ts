@@ -64,7 +64,6 @@ describe("admin iCloud page layout", () => {
       'dataIndex: "oldSession"',
       't("New Cookie")',
       't("Old Cookie")',
-      't("Last IMAP sync")',
     ]) {
       expect(icloudSource).toContain(fragment);
     }
@@ -78,6 +77,9 @@ describe("admin iCloud page layout", () => {
     expect(icloudSource).not.toContain("recipientMailId");
     expect(icloudSource).not.toContain("forwardToEmail");
     expect(icloudSource).not.toContain("deliveryProbe");
+    expect(icloudSource).not.toContain("appPassword");
+    expect(icloudSource).not.toContain("IMAP health");
+    expect(icloudSource).not.toContain("Last IMAP sync");
 
     expect(appSource).toContain(
       'adminICloudEmails: () => import("./pages/AdminICloudEmails")',

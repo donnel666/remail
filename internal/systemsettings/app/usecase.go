@@ -94,6 +94,7 @@ func (uc *SystemSettingsUseCase) Upsert(ctx context.Context, key, value string, 
 	if err != nil {
 		return nil, err
 	}
+	value = runtimeconfig.NormalizeValue(key, value)
 	update := domain.Setting{Key: key, Value: value}
 	if err := runtimeconfig.Validate(key, value); err != nil {
 		return nil, invalidValueField(key, err)
@@ -246,7 +247,8 @@ func (uc *SystemSettingsUseCase) normalizeBulkUpdates(ctx context.Context, setti
 		if err != nil {
 			return nil, err
 		}
-		if err := runtimeconfig.Validate(key, setting.Value); err != nil {
+		value := runtimeconfig.NormalizeValue(key, setting.Value)
+		if err := runtimeconfig.Validate(key, value); err != nil {
 			// Keep an invalid legacy value from blocking unrelated fields in the
 			// same form. It is skipped only when the client sent the exact value
 			// already stored; changing it still requires a valid replacement.
@@ -254,12 +256,12 @@ func (uc *SystemSettingsUseCase) normalizeBulkUpdates(ctx context.Context, setti
 				return nil, err
 			}
 			existing, getErr := uc.repo.Get(ctx, key)
-			if getErr != nil || existing == nil || existing.Value != setting.Value {
+			if getErr != nil || existing == nil || existing.Value != value {
 				return nil, invalidValueField(key, err)
 			}
 			continue
 		}
-		normalized = append(normalized, domain.Setting{Key: key, Value: setting.Value})
+		normalized = append(normalized, domain.Setting{Key: key, Value: value})
 	}
 	return normalized, nil
 }

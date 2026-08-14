@@ -3,12 +3,17 @@ package runtimeconfig
 import "github.com/donnel666/remail/internal/systemsettings/domain"
 
 const (
-	DefaultSettingsCount                  = 234
+	DefaultSettingsCount                  = 237
 	SMSBowerNoCodeRefundTimeoutMinutesKey = "smsbower_no_code_refund_timeout_minutes"
 	MicrosoftPriceMultiplierKey           = "product_price_multiplier_microsoft"
 	GmailPriceMultiplierKey               = "product_price_multiplier_gmail"
 	ICloudPriceMultiplierKey              = "product_price_multiplier_icloud"
 	DomainPriceMultiplierKey              = "product_price_multiplier_domain"
+	ICloudForwardingSuffixesKey           = "icloud_forwarding_suffixes"
+	ICloudMailmatchScanLimitKey           = "icloud_mailmatch_scan_limit"
+	ICloudAdminReadLimitKey               = "icloud_admin_read_limit"
+	DefaultICloudMailmatchScanLimit       = 1000
+	DefaultICloudAdminReadLimit           = 5000
 )
 
 // DefaultSettings is the single source of initial values for runtime-managed
@@ -102,6 +107,7 @@ var defaultSettings = []domain.Setting{
 	{Key: "product_price_multiplier_domain", Value: "1"},
 
 	{Key: "microsoft_domain_whitelist", Value: "outlook.com,hotmail.com,outlook.sa,outlook.com.ar,outlook.com.au,outlook.at,outlook.be,outlook.com.br,outlook.cl,outlook.cz,outlook.fr,outlook.de,outlook.com.gr,outlook.co.il,outlook.in,outlook.co.id,outlook.ie,outlook.it,outlook.hu,outlook.jp,outlook.kr,outlook.lv,outlook.my,outlook.co.nz,outlook.ph,outlook.pt,outlook.sg,outlook.sk,outlook.es,outlook.co.th,outlook.com.tr,outlook.com.vn"},
+	{Key: "icloud_forwarding_suffixes", Value: ""},
 	{Key: "domain_custom_tlds", Value: ""},
 	{Key: "domain_max_subdomains_per_registrable_domain", Value: "3"},
 	{Key: "default_plus_daily_limit", Value: "10000"},
@@ -126,6 +132,8 @@ var defaultSettings = []domain.Setting{
 	{Key: "read_window_skew_minutes", Value: "2"},
 	{Key: "code_read_limit", Value: "1"},
 	{Key: "purchase_read_limit", Value: "30"},
+	{Key: "icloud_mailmatch_scan_limit", Value: "1000"},
+	{Key: "icloud_admin_read_limit", Value: "5000"},
 	{Key: "pickup_fetch_reserve_ttl_minutes", Value: "2"},
 	{Key: "pickup_fetch_lease_ttl_minutes", Value: "2"},
 	{Key: "pickup_message_cache_ttl_seconds", Value: "10"},

@@ -247,7 +247,6 @@ function resource(): AdminICloudResourceItem {
     lastAliasSyncAt: null,
     lastAllocatedAt: null,
     lastCheckedAt: now,
-    lastMailSyncAt: null,
     lastSafeError: null,
     lastValidAt: now,
     newSession: {
@@ -484,9 +483,9 @@ describe("admin iCloud modal workflows", () => {
     expect(fileButton).toHaveAttribute("aria-pressed", "true");
 
     const content =
-      "main@icloud.com----app-password----curl --url 'https://p217-maildomainws.icloud.com.cn/v2/hme/list?dsid=123' \\\r\n  -H 'scnt: scnt-value' \\\r\n  -b 'X-APPLE-WEBAUTH-TOKEN=secret'";
+      "main@icloud.com----curl --url 'https://p217-maildomainws.icloud.com.cn/v2/hme/list?dsid=123' \\\r\n  -H 'scnt: scnt-value' \\\r\n  -b 'X-APPLE-WEBAUTH-TOKEN=secret'";
     const normalizedContent =
-      "main@icloud.com----app-password----curl --url 'https://p217-maildomainws.icloud.com.cn/v2/hme/list?dsid=123' -H 'scnt: scnt-value' -b 'X-APPLE-WEBAUTH-TOKEN=secret'";
+      "main@icloud.com----curl --url 'https://p217-maildomainws.icloud.com.cn/v2/hme/list?dsid=123' -H 'scnt: scnt-value' -b 'X-APPLE-WEBAUTH-TOKEN=secret'";
     const file = new File([content], "icloud.txt", { type: "text/plain" });
     Object.defineProperty(file, "text", { value: vi.fn().mockResolvedValue(content) });
     fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [file] } });
@@ -515,10 +514,10 @@ describe("admin iCloud modal workflows", () => {
 
     await waitFor(() => expect(screen.getByLabelText("owner")).toHaveValue("7"));
     const content =
-      "main@icloud.com----app-password----curl --url 'https://p217-maildomainws.icloud.com.cn/v2/hme/list?dsid=123' \\\n  -H 'scnt: scnt-value' \\\n  -b 'X-APPLE-WEBAUTH-TOKEN=secret'";
+      "main@icloud.com----curl --url 'https://p217-maildomainws.icloud.com.cn/v2/hme/list?dsid=123' \\\n  -H 'scnt: scnt-value' \\\n  -b 'X-APPLE-WEBAUTH-TOKEN=secret'";
     const normalizedContent =
-      "main@icloud.com----app-password----curl --url 'https://p217-maildomainws.icloud.com.cn/v2/hme/list?dsid=123' -H 'scnt: scnt-value' -b 'X-APPLE-WEBAUTH-TOKEN=secret'";
-    fireEvent.change(screen.getByPlaceholderText("primary@icloud.com----app-password----curl ..."), {
+      "main@icloud.com----curl --url 'https://p217-maildomainws.icloud.com.cn/v2/hme/list?dsid=123' -H 'scnt: scnt-value' -b 'X-APPLE-WEBAUTH-TOKEN=secret'";
+    fireEvent.change(screen.getByPlaceholderText("apple-id@example.com----curl ..."), {
       target: { value: content },
     });
     fireEvent.click(screen.getByRole("button", { name: "Import" }));
@@ -594,8 +593,8 @@ describe("admin iCloud modal workflows", () => {
     );
 
     const content =
-      "main@icloud.com----app-password----curl 'https://appleid.apple.com/account/manage/gs/ws/token' \\\n  -H 'cookie: myacinfo=secret' \\\n  -H 'scnt: scnt-value'";
-    fireEvent.change(screen.getByPlaceholderText("email----appPassword----curl[----curl]"), {
+      "main@icloud.com----curl 'https://appleid.apple.com/account/manage/gs/ws/token' \\\n  -H 'cookie: myacinfo=secret' \\\n  -H 'scnt: scnt-value'";
+    fireEvent.change(screen.getByPlaceholderText("email----curl[----curl]"), {
       target: { value: content },
     });
     fireEvent.click(screen.getByRole("button", { name: "Replace credentials" }));
@@ -605,7 +604,7 @@ describe("admin iCloud modal workflows", () => {
         41,
         expect.objectContaining({
           importLine:
-            "main@icloud.com----app-password----curl 'https://appleid.apple.com/account/manage/gs/ws/token' -H 'cookie: myacinfo=secret' -H 'scnt: scnt-value'",
+            "main@icloud.com----curl 'https://appleid.apple.com/account/manage/gs/ws/token' -H 'cookie: myacinfo=secret' -H 'scnt: scnt-value'",
         }),
       ),
     );

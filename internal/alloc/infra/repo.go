@@ -14,6 +14,7 @@ import (
 	"github.com/donnel666/remail/internal/alloc/domain"
 	coredomain "github.com/donnel666/remail/internal/core/domain"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -743,6 +744,9 @@ func (r *Repo) ListICloudSourceCandidates(ctx context.Context, projectID uint, b
         )`,
 	}
 	args := []any{projectID}
+	forwardingCondition, forwardingArgs := iCloudForwardingDomainCondition("ia.forward_to_email")
+	where = append(where, forwardingCondition)
+	args = append(args, forwardingArgs...)
 	switch scope {
 	case domain.SupplyScopeOwned:
 		where = append(where, "er.owner_user_id = ?")
@@ -1004,6 +1008,9 @@ func (r *Repo) LockICloudCandidate(ctx context.Context, resourceID uint, aliasID
         )`,
 	}
 	args := []any{aliasID, resourceID, projectID}
+	forwardingCondition, forwardingArgs := iCloudForwardingDomainCondition("ia.forward_to_email")
+	where = append(where, forwardingCondition)
+	args = append(args, forwardingArgs...)
 	switch scope {
 	case domain.SupplyScopeOwned:
 		where = append(where, "er.owner_user_id = ?")
@@ -1027,6 +1034,20 @@ FOR UPDATE SKIP LOCKED`
 		return nil, nil
 	}
 	return &row, nil
+}
+
+func iCloudForwardingDomainCondition(aliasColumn string) (string, []any) {
+	domains := runtimeconfig.ICloudForwardingSuffixes(runtimeconfig.String(runtimeconfig.ICloudForwardingSuffixesKey, ""))
+	if len(domains) == 0 {
+		return "1 = 0", nil
+	}
+	aliasDomain := "LOWER(SUBSTR(" + aliasColumn + ", INSTR(" + aliasColumn + ", '@') + 1))"
+	return aliasDomain + ` IN ? AND EXISTS (
+		SELECT 1 FROM domain_resources icloud_forwarding_domain
+		WHERE icloud_forwarding_domain.purpose = 'binding'
+		  AND icloud_forwarding_domain.status NOT IN ('disabled', 'deleted')
+		  AND LOWER(icloud_forwarding_domain.domain) = ` + aliasDomain +
+		`)`, []any{domains}
 }
 
 func (r *Repo) LockDomainCandidate(ctx context.Context, resourceID uint, buyerUserID uint, scope domain.SupplyScope, emailSuffix string) (*allocapp.DomainCandidate, error) {

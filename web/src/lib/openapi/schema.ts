@@ -3474,7 +3474,7 @@ export interface paths {
         put?: never;
         /**
          * Queue a resource-level mail fetch
-         * @description Requires `mailmatch:message/operate`, Session authentication, CSRF, and an idempotency key. `type=microsoft` uses the Microsoft resource transport. `type=icloud` reads the account INBOX through `imap.mail.me.com` with the stored app-specific password, matches message recipient headers against the resource's local HME alias inventory, and sends the resulting messages through the same MailMatch ingestion and matching flow. Normal iCloud mail reads never call Apple's HME list API. MailMatch updates the resource's current fetch generation before returning 202. Disabled resources may be diagnosed without being enabled; deleted resources return 409.
+         * @description Requires `mailmatch:message/operate`, Session authentication, CSRF, and an idempotency key. `type=microsoft` uses the Microsoft resource transport. `type=icloud` scans Apple-forwarded SMTP mail in the authorized auxiliary-domain inbox, resolves the exact HME alias from its persisted forwarding route and Apple alias ID before reading the raw message, and sends it through the same MailMatch ingestion and matching flow. MailMatch updates the resource's current fetch generation before returning 202. Disabled resources may be diagnosed without being enabled; deleted resources return 409.
          */
         post: operations["postAdminMicrosoftResourceMessagesFetch"];
         delete?: never;
@@ -3531,7 +3531,7 @@ export interface paths {
         put?: never;
         /**
          * Import iCloud resources for a selected owner
-         * @description Each non-empty TXT line is one complete credential set containing one old cURL, one new cURL, or both cURLs in either order: `email----appPassword----curl[----curl]`. The server classifies each cURL by its Apple host and path, parses it without executing shell syntax, rejects duplicate channels, and stores the app-specific password for IMAP receiving. The required `expireAt` controls only future alias creation; it does not stop allocation or receiving and does not change resource health. App passwords, cookies, cURL source, and parsed provider context remain write-only.
+         * @description Each non-empty TXT entry is one complete credential set containing one old cURL, one new cURL, or both cURLs in either order: `email----curl[----curl]`. Browser-copied cURL commands may use backslash line continuations. The server classifies each cURL by its Apple host and path, parses it without executing shell syntax, and rejects duplicate channels. The required `expireAt` controls only future alias creation; it does not stop allocation or receiving. Cookies, cURL source, and parsed provider context remain write-only.
          */
         post: operations["postAdminICloudResourceImport"];
         delete?: never;
@@ -3696,7 +3696,7 @@ export interface paths {
         head?: never;
         /**
          * Atomically edit an iCloud resource
-         * @description Base fields require `core:resource/write`. Supplying `forSale`, `expireAt`, or `importLine` additionally requires `core:resource/operate`. Session authentication, CSRF, and an idempotency key are required. `importLine` is the same complete write-only line accepted by import: `email----appPassword----curl[----curl]`, with one old cURL, one new cURL, or both cURLs in either order. Changing the email or app password re-queues IMAP validation; changing only cURL sessions updates provisioning ability without changing resource health. Changing the email or owner conflicts with an active allocation. Changing `expireAt` only changes future alias creation eligibility.
+         * @description Base fields require `core:resource/write`. Supplying `forSale`, `expireAt`, or `importLine` additionally requires `core:resource/operate`. Session authentication, CSRF, and an idempotency key are required. `importLine` is the same complete write-only line accepted by import: `email----curl[----curl]`, with one old cURL, one new cURL, or both cURLs in either order. Changing the email or either cURL channel re-queues validation. Changing the email or owner conflicts with an active allocation. Changing `expireAt` only changes future alias creation eligibility.
          */
         patch: operations["patchAdminICloudResource"];
         trace?: never;
@@ -3918,7 +3918,7 @@ export interface paths {
         };
         /**
          * List primary-mailbox message summaries for a resource
-         * @description Requires `mailmatch:message/read`. Search is evaluated server-side across the authorized sender, recipient, subject, preview/body, and verification-code semantics, but list items never contain a body, full match diagnostic, private object key, or raw upstream message. For `type=icloud`, messages come from the account's IMAP INBOX and recipient is the locally matched HME alias. Verification codes and order numbers are returned only as authorized safe display fields.
+         * @description Requires `mailmatch:message/read`. Search is evaluated server-side across the authorized sender, recipient, subject, preview/body, and verification-code semantics, but list items never contain a body, full match diagnostic, private object key, or raw upstream message. For `type=icloud`, messages come from Apple-forwarded SMTP mail and recipient is the alias restored from its persisted Apple alias ID. Verification codes and order numbers are returned only as authorized safe display fields.
          */
         get: operations["getAdminMessages"];
         put?: never;
@@ -3938,7 +3938,7 @@ export interface paths {
         };
         /**
          * Get one primary-mailbox message body and diagnostic
-         * @description Requires `mailmatch:message/read`. `resourceId` participates in the authorization and association lookup; an unknown message and a message belonging to another resource both return the same safe 404. This controlled read may return the body, verification code, order number, and sanitized match diagnostic, but never an object key, raw credential, token, or upstream error body. For `type=icloud`, messages come from the account's IMAP INBOX and recipient is the locally matched HME alias.
+         * @description Requires `mailmatch:message/read`. `resourceId` participates in the authorization and association lookup; an unknown message and a message belonging to another resource both return the same safe 404. This controlled read may return the body, verification code, order number, and sanitized match diagnostic, but never an object key, raw credential, token, or upstream error body. For `type=icloud`, messages come from Apple-forwarded SMTP mail and recipient is the alias restored from its persisted Apple alias ID.
          */
         get: operations["getAdminMessage"];
         put?: never;
@@ -7209,7 +7209,7 @@ export interface components {
             role: "user" | "supplier" | "admin" | "super_admin";
             enabled: boolean;
         };
-        /** @description Administrator-safe operational facts. IMAP app passwords, cookies, DSID, host, client context, and provider request payloads are never returned. */
+        /** @description Administrator-safe operational facts. Cookies, DSID, host, client context, and provider request payloads are never returned. */
         AdminICloudResourceItem: {
             id: number;
             version: number;
@@ -7232,8 +7232,6 @@ export interface components {
             /** Format: date-time */
             lastValidAt: string | null;
             /** Format: date-time */
-            lastMailSyncAt: string | null;
-            /** Format: date-time */
             lastAliasSyncAt: string | null;
             /** Format: date-time */
             lastAllocatedAt: string | null;
@@ -7243,7 +7241,7 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
         };
-        /** @description Administrator-safe iCloud resource detail with IMAP and provisioning diagnostics. IMAP app passwords, HME cookies, DSID, and request context are never returned. */
+        /** @description Administrator-safe iCloud resource detail with validation and provisioning diagnostics. HME cookies, DSID, and request context are never returned. */
         AdminICloudResourceDetail: components["schemas"]["AdminICloudResourceItem"] & {
             /** @enum {integer} */
             aliasLimit: 750;
@@ -7336,7 +7334,7 @@ export interface components {
         AdminICloudUpdateRequest: {
             /** @description Last observed resource version; stale writes return 409. */
             version: number;
-            /** @description Complete `email----appPassword----curl[----curl]` credential line. It accepts one old cURL, one new cURL, or both cURLs in either order. */
+            /** @description Complete `email----curl[----curl]` credential line. It accepts one old cURL, one new cURL, or both cURLs in either order, including browser-copied backslash line continuations. */
             importLine?: string;
             ownerId?: number;
             forSale?: boolean;
@@ -20498,7 +20496,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Atomic edit committed; email or app-password changes that require validation leave the resource pending */
+            /** @description Atomic edit committed; email or cURL channel changes that require validation leave the resource pending */
             200: {
                 headers: {
                     [name: string]: unknown;

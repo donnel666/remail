@@ -143,7 +143,7 @@ func TestPatchAdminICloudResourceRequiresOperateOnlyForSensitiveFields(t *testin
 	for index, body := range []string{
 		`{"version":1,"forSale":false}`,
 		`{"version":1,"expireAt":"2026-09-08T11:00:00Z"}`,
-		`{"version":1,"importLine":"main@icloud.com----app-password----curl 'https://appleid.apple.com/account/manage/' -H 'Cookie: secret' -H 'scnt: value'"}`,
+		`{"version":1,"importLine":"main@icloud.com----curl 'https://appleid.apple.com/account/manage/' -H 'Cookie: secret' -H 'scnt: value'"}`,
 	} {
 		request = httptest.NewRequest(http.MethodPatch, "/v1/admin/icloud/resources/1", bytes.NewBufferString(body))
 		request.Header.Set("Content-Type", "application/json")

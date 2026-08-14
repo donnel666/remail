@@ -5439,7 +5439,6 @@ type AdminICloudResourceDetail struct {
 	LastAliasSyncAt      *time.Time                          `json:"lastAliasSyncAt"`
 	LastAllocatedAt      *time.Time                          `json:"lastAllocatedAt"`
 	LastCheckedAt        *time.Time                          `json:"lastCheckedAt"`
-	LastMailSyncAt       *time.Time                          `json:"lastMailSyncAt"`
 	LastSafeError        *string                             `json:"lastSafeError"`
 	LastValidAt          *time.Time                          `json:"lastValidAt"`
 	NewSession           *AdminICloudSessionView             `json:"newSession"`
@@ -5458,7 +5457,7 @@ type AdminICloudResourceDetail struct {
 // AdminICloudResourceDetailAliasLimit defines model for AdminICloudResourceDetail.AliasLimit.
 type AdminICloudResourceDetailAliasLimit int
 
-// AdminICloudResourceItem Administrator-safe operational facts. IMAP app passwords, cookies, DSID, host, client context, and provider request payloads are never returned.
+// AdminICloudResourceItem Administrator-safe operational facts. Cookies, DSID, host, client context, and provider request payloads are never returned.
 type AdminICloudResourceItem struct {
 	AliasCount       int                       `json:"aliasCount"`
 	CreatedAt        time.Time                 `json:"createdAt"`
@@ -5468,7 +5467,6 @@ type AdminICloudResourceItem struct {
 	LastAliasSyncAt  *time.Time                `json:"lastAliasSyncAt"`
 	LastAllocatedAt  *time.Time                `json:"lastAllocatedAt"`
 	LastCheckedAt    *time.Time                `json:"lastCheckedAt"`
-	LastMailSyncAt   *time.Time                `json:"lastMailSyncAt"`
 	LastSafeError    *string                   `json:"lastSafeError"`
 	LastValidAt      *time.Time                `json:"lastValidAt"`
 	NewSession       *AdminICloudSessionView   `json:"newSession"`
@@ -5531,7 +5529,7 @@ type AdminICloudUpdateRequest struct {
 	ExpireAt *time.Time `json:"expireAt,omitempty"`
 	ForSale  *bool      `json:"forSale,omitempty"`
 
-	// ImportLine Complete `email----appPassword----curl[----curl]` credential line. It accepts one old cURL, one new cURL, or both cURLs in either order.
+	// ImportLine Complete `email----curl[----curl]` credential line. It accepts one old cURL, one new cURL, or both cURLs in either order, including browser-copied backslash line continuations.
 	ImportLine *string `json:"importLine,omitempty"`
 	OwnerId    *int    `json:"ownerId,omitempty"`
 

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -24,8 +25,8 @@ var (
 	errICloudAliasConflict   = errors.New("icloud: alias belongs to another resource")
 )
 
-// RequestAdminICloudValidation only queues an IMAP health check. Cookie state
-// and provisioning are deliberately independent dimensions.
+// RequestAdminICloudValidation queues one create check for every imported
+// Apple session channel.
 func (s *Service) RequestAdminICloudValidation(ctx context.Context, operatorUserID, resourceID uint, requestID, path string) error {
 	if s == nil || s.db == nil || s.operationLogs == nil || operatorUserID == 0 || resourceID == 0 {
 		return ErrICloudValidationTemp
@@ -75,7 +76,7 @@ func (s *Service) RequestAdminICloudValidation(ctx context.Context, operatorUser
 			OperatorUserID: operatorUserID, OperationType: "icloud.admin_resource.validate",
 			ResourceType: "icloud_resource", ResourceID: strconv.FormatUint(uint64(resourceID), 10),
 			Path: strings.TrimSpace(path), Result: "success",
-			SafeSummary: "iCloud IMAP validation queued.", RequestID: strings.TrimSpace(requestID),
+			SafeSummary: "iCloud session validation queued.", RequestID: strings.TrimSpace(requestID),
 		})
 	})
 	if errors.Is(err, ErrICloudResourceNotFound) || errors.Is(err, ErrICloudResourceStatus) {
@@ -175,7 +176,7 @@ func (s *Service) recoverStaleICloudValidations(ctx context.Context, now time.Ti
 	for _, row := range rows {
 		if err := s.db.WithContext(ctx).Model(&iCloudResourceModel{}).Where("id = ? AND status = ?", row.ID, iCloudResourceValidating).Updates(map[string]any{
 			"status": iCloudResourcePending, "next_validation_at": now, "next_provision_at": nil,
-			"updated_at": now, "last_safe_error": "Validation lease expired; retrying IMAP check.",
+			"updated_at": now, "last_safe_error": "Validation lease expired; retrying session checks.",
 		}).Error; err != nil {
 			return ErrICloudValidationTemp
 		}
@@ -191,7 +192,7 @@ func (s *Service) iCloudValidationCandidates(ctx context.Context, limit int) ([]
 		CredentialRevision   uint64 `gorm:"column:credential_revision"`
 		ValidationGeneration uint64 `gorm:"column:validation_generation"`
 	}
-	if err := s.db.WithContext(ctx).Table("icloud_resources AS ir").Select("ir.id, er.owner_user_id, ir.credential_revision, ir.validation_generation").Joins("JOIN email_resources AS er ON er.id = ir.id AND er.type = ?", "icloud").Where("ir.status IN ? AND ir.next_validation_at IS NOT NULL AND ir.next_validation_at <= ?", []string{iCloudResourcePending, iCloudResourceNormal, iCloudResourceAbnormal}, now).Order("ir.id ASC").Limit(limit).Scan(&rows).Error; err != nil {
+	if err := s.db.WithContext(ctx).Table("icloud_resources AS ir").Select("ir.id, er.owner_user_id, ir.credential_revision, ir.validation_generation").Joins("JOIN email_resources AS er ON er.id = ir.id AND er.type = ?", "icloud").Where("ir.status = ? AND ir.next_validation_at IS NOT NULL AND ir.next_validation_at <= ?", iCloudResourcePending, now).Order("ir.id ASC").Limit(limit).Scan(&rows).Error; err != nil {
 		return nil, ErrICloudValidationTemp
 	}
 	tasks := make([]iCloudValidationTask, 0, len(rows))
@@ -227,7 +228,7 @@ func (s *Service) markICloudValidationDispatched(ctx context.Context, task iClou
 		if resource.CredentialRevision != task.ExpectedCredentialRevision || resource.ValidationGeneration != task.ValidationGeneration || resource.Status == iCloudResourceDisabled || resource.Status == iCloudResourceDeleted || resource.NextValidationAt == nil || resource.NextValidationAt.After(now) {
 			return nil
 		}
-		result := tx.Model(&iCloudResourceModel{}).Where("id = ? AND status IN ? AND validation_generation = ? AND credential_revision = ?", task.ResourceID, []string{iCloudResourcePending, iCloudResourceNormal, iCloudResourceAbnormal}, task.ValidationGeneration, task.ExpectedCredentialRevision).Updates(map[string]any{
+		result := tx.Model(&iCloudResourceModel{}).Where("id = ? AND status = ? AND validation_generation = ? AND credential_revision = ?", task.ResourceID, iCloudResourcePending, task.ValidationGeneration, task.ExpectedCredentialRevision).Updates(map[string]any{
 			"status": iCloudResourceValidating, "next_provision_at": nil,
 			"last_safe_error": "", "updated_at": now,
 		})
@@ -251,7 +252,7 @@ func (s *Service) markICloudValidationDispatched(ctx context.Context, task iClou
 			return runResult.Error
 		}
 		if runResult.RowsAffected != 1 {
-			return nil
+			return errICloudValidationStale
 		}
 		task.MaintenanceRunID, task.MaintenanceKind = run.ID, iCloudMaintenanceValidation
 		claimed = true
@@ -287,57 +288,142 @@ func (s *Service) releaseICloudValidation(ctx context.Context, task iCloudValida
 	return nil
 }
 
-func syncICloudAliasesTx(tx *gorm.DB, resourceID uint, aliases []hmeAlias, _ string, complete bool, now time.Time) error {
+func syncICloudAliasesTx(tx *gorm.DB, resourceID uint, aliases []hmeAlias, complete bool, now time.Time) error {
 	if tx == nil || resourceID == 0 {
 		return errICloudAliasConflict
 	}
+	allowedDomains := iCloudForwardingDomains(runtimeconfig.String(runtimeconfig.ICloudForwardingSuffixesKey, ""))
 	seenIDs, seenEmails := make(map[string]struct{}, len(aliases)), make(map[string]struct{}, len(aliases))
 	for _, alias := range aliases {
-		id, email := strings.TrimSpace(alias.AnonymousID), strings.ToLower(strings.TrimSpace(alias.Email))
-		if email == "" {
+		id := strings.TrimSpace(alias.AnonymousID)
+		email := strings.ToLower(strings.TrimSpace(alias.Email))
+		forwardToEmail := strings.ToLower(strings.TrimSpace(alias.ForwardToEmail))
+		if id == "" || email == "" || forwardToEmail == "" {
 			return errICloudAliasConflict
 		}
-		if id != "" {
-			if _, ok := seenIDs[id]; ok {
-				return errICloudAliasConflict
-			}
-			seenIDs[id] = struct{}{}
+		if _, ok := seenIDs[id]; ok {
+			return errICloudAliasConflict
 		}
+		seenIDs[id] = struct{}{}
 		if _, ok := seenEmails[email]; ok {
 			return errICloudAliasConflict
 		}
 		seenEmails[email] = struct{}{}
-		var current iCloudAliasModel
-		err := tx.Where("resource_id = ? AND email = ?", resourceID, email).Take(&current).Error
-		values := map[string]any{"label": strings.TrimSpace(alias.Label), "note": strings.TrimSpace(alias.Note), "origin": strings.TrimSpace(alias.Origin), "status": map[bool]string{true: "normal", false: "disabled"}[alias.Active], "provider_created_at": alias.ProviderCreatedAt, "last_seen_at": now, "updated_at": now}
-		if id != "" {
-			values["anonymous_id"] = id
+		status := "normal"
+		if !alias.Active || !iCloudForwardingDomainAllowed(forwardToEmail, allowedDomains) {
+			status = "disabled"
 		}
+		var current iCloudAliasModel
+		err := tx.Where("resource_id = ? AND anonymous_id = ?", resourceID, id).Take(&current).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			item := iCloudAliasModel{ResourceID: resourceID, AnonymousID: id, Email: email, Label: strings.TrimSpace(alias.Label), Note: strings.TrimSpace(alias.Note), Origin: strings.TrimSpace(alias.Origin), Status: values["status"].(string), ProviderCreatedAt: alias.ProviderCreatedAt, LastSeenAt: &now, CreatedAt: now, UpdatedAt: now}
-			if err := tx.Create(&item).Error; err != nil {
+			var byEmail iCloudAliasModel
+			if emailErr := tx.Where("email = ?", email).Take(&byEmail).Error; emailErr == nil || !errors.Is(emailErr, gorm.ErrRecordNotFound) {
+				return errICloudAliasConflict
+			}
+			current = iCloudAliasModel{
+				ResourceID: resourceID, AnonymousID: id, Email: email,
+				Label: strings.TrimSpace(alias.Label), Note: strings.TrimSpace(alias.Note),
+				ForwardToEmail: forwardToEmail, Origin: strings.TrimSpace(alias.Origin),
+				ProviderDomain: strings.TrimSpace(alias.ProviderDomain), RecipientMailID: strings.TrimSpace(alias.RecipientMailID),
+				Status: status, ProviderCreatedAt: alias.ProviderCreatedAt, LastSeenAt: &now,
+				CreatedAt: now, UpdatedAt: now,
+			}
+			if err := tx.Create(&current).Error; err != nil {
 				return errICloudAliasConflict
 			}
 		} else if err != nil {
 			return err
-		} else if err := tx.Model(&iCloudAliasModel{}).Where("id = ?", current.ID).Updates(values).Error; err != nil {
+		} else {
+			if !strings.EqualFold(current.Email, email) {
+				var count int64
+				if err := tx.Model(&iCloudAliasModel{}).Where("email = ? AND id <> ?", email, current.ID).Count(&count).Error; err != nil || count > 0 {
+					return errICloudAliasConflict
+				}
+			}
+			if err := persistICloudAliasRouteTx(tx, current.ID, resourceID, current.ForwardToEmail, current.RecipientMailID, now); err != nil {
+				return err
+			}
+			updates := map[string]any{
+				"email": email, "label": strings.TrimSpace(alias.Label), "note": strings.TrimSpace(alias.Note),
+				"forward_to_email": forwardToEmail, "origin": strings.TrimSpace(alias.Origin),
+				"provider_domain": strings.TrimSpace(alias.ProviderDomain), "status": status,
+				"provider_created_at": alias.ProviderCreatedAt, "last_seen_at": now, "updated_at": now,
+			}
+			if value := strings.TrimSpace(alias.RecipientMailID); value != "" {
+				updates["recipient_mail_id"] = value
+				current.RecipientMailID = value
+			} else if !strings.EqualFold(current.ForwardToEmail, forwardToEmail) {
+				updates["recipient_mail_id"] = ""
+				current.RecipientMailID = ""
+			}
+			if err := tx.Model(&iCloudAliasModel{}).Where("id = ? AND resource_id = ?", current.ID, resourceID).Updates(updates).Error; err != nil {
+				return err
+			}
+		}
+		if err := persistICloudAliasRouteTx(tx, current.ID, resourceID, forwardToEmail, current.RecipientMailID, now); err != nil {
 			return err
 		}
 	}
 	if complete {
 		query := tx.Model(&iCloudAliasModel{}).Where("resource_id = ? AND status <> ?", resourceID, iCloudResourceDeleted)
-		if len(seenEmails) > 0 {
-			emails := make([]string, 0, len(seenEmails))
-			for email := range seenEmails {
-				emails = append(emails, email)
+		if len(seenIDs) > 0 {
+			ids := make([]string, 0, len(seenIDs))
+			for id := range seenIDs {
+				ids = append(ids, id)
 			}
-			query = query.Where("email NOT IN ?", emails)
+			query = query.Where("anonymous_id NOT IN ?", ids)
 		}
 		if err := query.Updates(map[string]any{"status": "missing", "updated_at": now}).Error; err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func disableUnauthorizedICloudAliasesTx(tx *gorm.DB, resourceID uint, allowedDomains map[string]struct{}, now time.Time) error {
+	var aliases []struct {
+		ID             uint   `gorm:"column:id"`
+		ForwardToEmail string `gorm:"column:forward_to_email"`
+	}
+	if err := tx.Model(&iCloudAliasModel{}).Select("id, forward_to_email").
+		Where("resource_id = ? AND status NOT IN ?", resourceID, []string{"missing", iCloudResourceDeleted}).
+		Find(&aliases).Error; err != nil {
+		return err
+	}
+	unauthorized := make([]uint, 0)
+	for _, alias := range aliases {
+		if !iCloudForwardingDomainAllowed(alias.ForwardToEmail, allowedDomains) {
+			unauthorized = append(unauthorized, alias.ID)
+		}
+	}
+	if len(unauthorized) == 0 {
+		return nil
+	}
+	return tx.Model(&iCloudAliasModel{}).Where("id IN ?", unauthorized).
+		Updates(map[string]any{"status": iCloudResourceDisabled, "updated_at": now}).Error
+}
+
+func persistICloudAliasRouteTx(tx *gorm.DB, aliasID, resourceID uint, forwardToEmail, recipientMailID string, now time.Time) error {
+	forwardToEmail = strings.ToLower(strings.TrimSpace(forwardToEmail))
+	recipientMailID = strings.ToLower(strings.TrimSpace(recipientMailID))
+	if tx == nil || aliasID == 0 || resourceID == 0 || forwardToEmail == "" || recipientMailID == "" {
+		return nil
+	}
+	var route iCloudAliasRouteModel
+	err := tx.Where("forward_to_email = ? AND recipient_mail_id = ?", forwardToEmail, recipientMailID).Take(&route).Error
+	if err == nil {
+		if route.ResourceID != resourceID || route.AliasID != aliasID {
+			return errICloudAliasConflict
+		}
+		return tx.Model(&iCloudAliasRouteModel{}).Where("id = ?", route.ID).Update("last_seen_at", now).Error
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	return tx.Create(&iCloudAliasRouteModel{
+		ResourceID: resourceID, AliasID: aliasID, ForwardToEmail: forwardToEmail,
+		RecipientMailID: recipientMailID, FirstSeenAt: now, LastSeenAt: now,
+	}).Error
 }
 
 func findICloudAlias(aliases []hmeAlias, email string) *hmeAlias {

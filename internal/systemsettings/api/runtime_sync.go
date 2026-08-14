@@ -147,6 +147,7 @@ func changedRuntimeSettings(settings []domain.Setting) []domain.Setting {
 			continue
 		}
 		key := strings.ToLower(strings.TrimSpace(setting.Key))
+		setting.Value = runtimeconfig.NormalizeValue(key, setting.Value)
 		value, exists := current[key]
 		if !exists || value != setting.Value {
 			changed = append(changed, setting)

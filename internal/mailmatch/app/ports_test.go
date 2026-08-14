@@ -545,12 +545,12 @@ func TestICloudInboundUsesExactSelectedAliasAndReplaysItsResourceType(t *testing
 		EmailResourceID:   17,
 		ResourceType:      domain.ResourceTypeICloud,
 		Recipient:         "alias@icloud.com",
-		EnvelopeFrom:      "relay-envelope@example.invalid",
-		Raw:               []byte("From: Sender <sender@example.net>\r\nTo: alias@icloud.com\r\n\r\nwelcome"),
+		EnvelopeFrom:      "sender@example.net",
+		Raw:               []byte("From: Spoofed <spoofed@example.invalid>\r\nTo: alias@icloud.com\r\n\r\nwelcome"),
 		ReceivedAt:        now,
 		ProviderMessageID: "inbound:101",
-		Protocol:          "imap",
-		Folder:            "INBOX",
+		Protocol:          "smtp",
+		Folder:            "inbound",
 	})
 
 	require.NoError(t, err)
@@ -562,6 +562,7 @@ func TestICloudInboundUsesExactSelectedAliasAndReplaysItsResourceType(t *testing
 	require.NotNil(t, repo.purchaseDelivery)
 	require.Equal(t, "alias@icloud.com", repo.purchaseDelivery.Recipient)
 	require.Equal(t, []string{"alias@icloud.com"}, repo.purchaseDelivery.Recipients)
+	require.Equal(t, "sender@example.net", repo.purchaseDelivery.Sender)
 	require.Len(t, matches.results, 1)
 	require.Equal(t, domain.ResourceTypeICloud, matches.results[0].ResourceType)
 	require.Equal(t, "purchase", matches.results[0].ServiceMode)
@@ -584,8 +585,8 @@ func TestICloudFencedIngressAppendsInsideGenerationFenceTransaction(t *testing.T
 	fenceCalls := 0
 	_, _, err := uc.IngestInboundMailWithFence(context.Background(), InboundMailRequest{
 		EmailResourceID: 18, ResourceType: domain.ResourceTypeICloud, Recipient: "alias@icloud.com",
-		EnvelopeFrom: "relay-envelope@example.invalid", Raw: []byte("From: Sender <sender@example.net>\r\nTo: alias@icloud.com\r\n\r\ncode: 123456"),
-		ReceivedAt: now, ProviderMessageID: "inbound:fenced", Protocol: "imap", Folder: "INBOX",
+		EnvelopeFrom: "sender@example.net", Raw: []byte("From: Spoofed <spoofed@example.invalid>\r\nTo: alias@icloud.com\r\n\r\ncode: 123456"),
+		ReceivedAt: now, ProviderMessageID: "inbound:fenced", Protocol: "smtp", Folder: "inbound",
 	}, func(ctx context.Context) error {
 		fenceCalls++
 		if ctx.Value(appendFenceTransactionMarker{}) == nil {
