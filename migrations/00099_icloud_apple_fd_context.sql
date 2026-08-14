@@ -8,7 +8,7 @@ SET fd_client_info = ''
 WHERE fd_client_info IS NULL;
 
 ALTER TABLE icloud_resource_channels
-    MODIFY COLUMN fd_client_info TEXT NOT NULL;
+    MODIFY COLUMN fd_client_info TEXT NOT NULL DEFAULT ('');
 
 -- +goose Down
 
