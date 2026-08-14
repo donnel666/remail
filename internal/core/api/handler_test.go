@@ -4337,7 +4337,11 @@ func TestCoreHandler_AdminProjectPriceDefaults(t *testing.T) {
 	require.Equal(t, "0.123456", response.Defaults[key])
 	require.Equal(t, "8", response.Defaults["default_project_gmail_code_price"])
 	require.Equal(t, "0", response.Defaults["default_project_gmail_purchase_price"])
-	require.Len(t, response.Defaults, 12)
+	require.Equal(t, "8", response.Defaults["default_project_icloud_code_price"])
+	require.Equal(t, "5", response.Defaults["default_project_icloud_code_supplier_price"])
+	require.Equal(t, "10", response.Defaults["default_project_icloud_purchase_price"])
+	require.Equal(t, "7", response.Defaults["default_project_icloud_purchase_supplier_price"])
+	require.Len(t, response.Defaults, 16)
 }
 
 func TestCoreHandler_AdminProjectsProductsLimitsRequestBody(t *testing.T) {
