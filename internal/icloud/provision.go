@@ -18,6 +18,7 @@ const (
 	iCloudCookieKeepalive     = 8 * time.Minute
 	iCloudCookieKeepaliveMax  = 12 * time.Minute
 	iCloudSessionFailureLimit = 3
+	iCloudSessionRetryBase    = 2 * time.Minute
 )
 
 type iCloudProvisionTask struct {
@@ -82,6 +83,7 @@ func (s *Service) ProcessICloudProvision(ctx context.Context, task iCloudProvisi
 	pendingWebCandidate := strings.TrimSpace(scope.Resource.AliasProvisionCandidate) != ""
 	attemptCount, failureCount := 0, 0
 	createAttempted, creationProgress := false, false
+	lastAttemptSafeError := ""
 	for _, kind := range []string{iCloudChannelAppleAccount, iCloudChannelWeb} {
 		channel := findICloudProvisionChannel(scope.Channels, kind)
 		if channel == nil || channel.SessionStatus == iCloudSessionInvalid {
@@ -131,6 +133,7 @@ func (s *Service) ProcessICloudProvision(ctx context.Context, task iCloudProvisi
 		}
 		if attemptErr != nil {
 			failureCount++
+			lastAttemptSafeError = safeICloudProvisionRequestError(attemptErr)
 		} else if createAllowed {
 			creationProgress = true
 		}
@@ -186,9 +189,9 @@ func (s *Service) ProcessICloudProvision(ctx context.Context, task iCloudProvisi
 	case creationProgress:
 		runStatus, runSafeError = iCloudMaintenanceSucceeded, ""
 	case createAttempted:
-		runStatus, runSafeError = iCloudMaintenanceFailed, "No channel completed alias creation."
+		runStatus, runSafeError = iCloudMaintenanceFailed, firstNonEmptyICloudSafeError(lastAttemptSafeError, "No channel completed alias creation.")
 	case attemptCount > 0 && failureCount == attemptCount:
-		runStatus, runSafeError = iCloudMaintenanceFailed, "All channel maintenance attempts failed."
+		runStatus, runSafeError = iCloudMaintenanceFailed, firstNonEmptyICloudSafeError(lastAttemptSafeError, "All channel maintenance attempts failed.")
 	case attemptCount > 0:
 		runStatus, runSafeError = iCloudMaintenanceCanceled, "Channel maintenance completed without alias creation."
 	default:
@@ -278,12 +281,32 @@ func (s *Service) provisionICloudWeb(ctx context.Context, resource iCloudResourc
 	if client == nil {
 		client = NewHMEClient(nil)
 	}
+	var err error
+	if channel.NextKeepaliveAt != nil && !channel.NextKeepaliveAt.After(now) {
+		channel, err = s.refreshICloudWebChannel(ctx, resource, channel, client, now)
+		if err != nil {
+			return nil, false, err
+		}
+	}
 	list, err := client.list(ctx, channel.hmeConfig())
+	if isICloudHMEHTTPStatus(err, 421) {
+		var movedErr *hmeError
+		if errors.As(err, &movedErr) && movedErr.UpdatedCookie != "" {
+			channel.Cookie = movedErr.UpdatedCookie
+		}
+		channel, err = s.refreshICloudWebChannel(ctx, resource, channel, client, now)
+		if err != nil {
+			return nil, false, err
+		}
+		list, err = client.list(ctx, channel.hmeConfig())
+	}
 	if err != nil {
 		return nil, false, s.applyICloudProvisionError(ctx, resource, channel, err, now)
 	}
 	channel.Cookie = list.UpdatedCookie
-	channel.NextKeepaliveAt = iCloudTimePointer(now.Add(iCloudCookieKeepaliveInterval()))
+	if channel.NextKeepaliveAt == nil {
+		channel.NextKeepaliveAt = iCloudTimePointer(now.Add(iCloudCookieKeepaliveInterval()))
+	}
 	if err := s.persistICloudWebSnapshot(ctx, resource, channel, list, now); err != nil {
 		return nil, false, err
 	}
@@ -327,6 +350,47 @@ func (s *Service) provisionICloudWeb(ctx context.Context, resource iCloudResourc
 		return nil, false, err
 	}
 	return nil, true, s.persistICloudProvisionCandidate(ctx, resource, candidate, false, now)
+}
+
+func (s *Service) refreshICloudWebChannel(ctx context.Context, resource iCloudResourceModel, channel iCloudResourceChannelModel, client *HMEClient, now time.Time) (iCloudResourceChannelModel, error) {
+	refreshed, err := client.refreshSession(ctx, channel.hmeConfig())
+	if err != nil {
+		return channel, s.applyICloudProvisionError(ctx, resource, channel, err, now)
+	}
+	channel.Host = refreshed.Host
+	channel.Cookie = refreshed.Cookie
+	channel.SetupCookie = refreshed.SetupCookie
+	channel.NextKeepaliveAt = iCloudTimePointer(now.Add(iCloudCookieKeepaliveInterval()))
+	if err := s.persistICloudProvisionChannel(ctx, resource, channel, false, false, now); err != nil {
+		return channel, err
+	}
+	return channel, nil
+}
+
+func isICloudHMEHTTPStatus(err error, status int) bool {
+	var providerErr *hmeError
+	return errors.As(err, &providerErr) && providerErr.HTTPStatus == status
+}
+
+func safeICloudProvisionRequestError(err error) string {
+	var hmeErr *hmeError
+	if errors.As(err, &hmeErr) {
+		return hmeErr.Error()
+	}
+	var appleErr *appleAccountError
+	if errors.As(err, &appleErr) {
+		return appleErr.Error()
+	}
+	return ""
+}
+
+func firstNonEmptyICloudSafeError(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (s *Service) persistICloudWebSnapshot(ctx context.Context, resource iCloudResourceModel, channel iCloudResourceChannelModel, list hmeListResult, now time.Time) error {
@@ -406,7 +470,8 @@ func updateICloudProvisionChannelTx(tx *gorm.DB, channel iCloudResourceChannelMo
 		}
 	}
 	updates := map[string]any{
-		"cookie": channel.Cookie, "fd_client_info": channel.FDClientInfo, "scnt": channel.Scnt, "session_id": channel.SessionID,
+		"host": channel.Host, "cookie": channel.Cookie, "setup_cookie": channel.SetupCookie,
+		"fd_client_info": channel.FDClientInfo, "scnt": channel.Scnt, "session_id": channel.SessionID,
 		"api_key": channel.APIKey, "data_access_token": channel.DataAccessToken,
 		"manage_expires_at": channel.ManageExpiresAt, "next_keepalive_at": channel.NextKeepaliveAt,
 		"last_checked_at": now, "updated_at": now, "provision_window_at": windowAt,
@@ -421,8 +486,13 @@ func updateICloudProvisionChannelTx(tx *gorm.DB, channel iCloudResourceChannelMo
 	if result.Error != nil {
 		return result.Error
 	}
-	if result.RowsAffected != 1 {
-		return errICloudValidationStale
+	if result.RowsAffected == 0 {
+		var existing iCloudResourceChannelModel
+		err := tx.Select("id").Where("id = ? AND resource_id = ?", channel.ID, channel.ResourceID).Take(&existing).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return errICloudValidationStale
+		}
+		return err
 	}
 	return nil
 }
@@ -436,6 +506,9 @@ func (s *Service) applyICloudProvisionError(ctx context.Context, resource iCloud
 		if hmeErr.UpdatedCookie != "" {
 			channel.Cookie = hmeErr.UpdatedCookie
 		}
+		if hmeErr.UpdatedSetupCookie != "" {
+			channel.SetupCookie = hmeErr.UpdatedSetupCookie
+		}
 	} else if errors.As(requestErr, &appleErr) {
 		category, retryAfter = appleErr.Category, appleErr.RetryAfter
 	}
@@ -448,7 +521,8 @@ func (s *Service) applyICloudProvisionError(ctx context.Context, resource iCloud
 			return errICloudValidationStale
 		}
 		updates := map[string]any{
-			"cookie": channel.Cookie, "last_checked_at": now, "updated_at": now,
+			"host": channel.Host, "cookie": channel.Cookie, "setup_cookie": channel.SetupCookie,
+			"last_checked_at": now, "updated_at": now,
 		}
 		switch category {
 		case "session_invalid":
@@ -461,7 +535,7 @@ func (s *Service) applyICloudProvisionError(ctx context.Context, resource iCloud
 				updates["session_status"] = iCloudSessionInvalid
 				updates["cooldown_until"] = nil
 			} else {
-				updates["cooldown_until"] = now.Add(iCloudValidationRetryInterval)
+				updates["cooldown_until"] = now.Add(iCloudSessionRetryDelay(failures))
 			}
 		case "rate_limited":
 			delay := retryAfter
@@ -601,6 +675,13 @@ func iCloudRateLimitDelay(stage uint8) time.Duration {
 	default:
 		return 2 * time.Hour
 	}
+}
+
+func iCloudSessionRetryDelay(failures uint8) time.Duration {
+	if failures <= 1 {
+		return iCloudSessionRetryBase
+	}
+	return 2 * iCloudSessionRetryBase
 }
 
 func appleAccountNextKeepalive(channel iCloudResourceChannelModel, now time.Time) *time.Time {

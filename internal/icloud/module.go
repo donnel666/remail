@@ -158,6 +158,7 @@ type iCloudResourceChannelModel struct {
 	Kind                  string     `gorm:"column:kind"`
 	Host                  string     `gorm:"column:host"`
 	Cookie                string     `gorm:"column:cookie"`
+	SetupCookie           string     `gorm:"column:setup_cookie"`
 	Origin                string     `gorm:"column:origin"`
 	Referer               string     `gorm:"column:referer"`
 	UserAgent             string     `gorm:"column:user_agent"`
@@ -190,7 +191,7 @@ func (m iCloudResourceChannelModel) hmeConfig() hmeConfig {
 	return hmeConfig{
 		Host: m.Host, DSID: m.DSID, ClientID: m.ClientID,
 		ClientBuildNumber: m.ClientBuildNumber, ClientMasteringNumber: m.ClientMasteringNumber,
-		Cookie: m.Cookie, Origin: m.Origin, Referer: m.Referer, UserAgent: m.UserAgent,
+		Cookie: m.Cookie, SetupCookie: m.SetupCookie, Origin: m.Origin, Referer: m.Referer, UserAgent: m.UserAgent,
 	}
 }
 

@@ -41,6 +41,66 @@ func TestHMEListBuildsSafeRequestAndMergesSetCookie(t *testing.T) {
 	}
 }
 
+func TestHMERefreshSessionRotatesCookiesAndDiscoversCurrentPod(t *testing.T) {
+	const cookie = "X-APPLE-DS-WEB-SESSION-TOKEN=session; X-APPLE-WEBAUTH-USER=user; X-APPLE-WEBAUTH-TOKEN=token"
+	client := NewHMEClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		if request.Method != http.MethodPost || request.URL.Host != "setup.icloud.com.cn" || request.URL.Path != "/setup/ws/1/validate" {
+			t.Fatalf("unexpected refresh endpoint: %s %s", request.Method, request.URL.String())
+		}
+		query := request.URL.Query()
+		if query.Get("clientId") != "client" || query.Get("clientBuildNumber") != "build" ||
+			query.Get("clientMasteringNumber") != "mastering" || query.Get("requestId") == "" || query.Get("dsid") != "" {
+			t.Fatalf("unexpected refresh query: %v", query)
+		}
+		if request.Header.Get("Cookie") != cookie || request.Header.Get("Origin") != "https://www.icloud.com.cn" {
+			t.Fatalf("unexpected refresh headers: %#v", request.Header)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header: http.Header{"Set-Cookie": {
+				"X-APPLE-WEBAUTH-TOKEN=rotated; Domain=.icloud.com.cn; Path=/",
+				"setup-only=value; Path=/setup",
+			}},
+			Body: io.NopCloser(strings.NewReader(
+				`{"dsInfo":{"dsid":123},"webservices":{"premiummailsettings":{"url":"https://p216-maildomainws.icloud.com.cn/"}}}`,
+			)),
+		}, nil
+	})})
+	refreshed, err := client.refreshSession(context.Background(), hmeConfig{
+		Host: "p119-maildomainws.icloud.com.cn", DSID: "123", ClientID: "client",
+		ClientBuildNumber: "build", ClientMasteringNumber: "mastering", Cookie: cookie, SetupCookie: cookie,
+	})
+	if err != nil {
+		t.Fatalf("refresh session: %v", err)
+	}
+	if refreshed.Host != "p216-maildomainws.icloud.com.cn" || !strings.Contains(refreshed.Cookie, "X-APPLE-WEBAUTH-TOKEN=rotated") ||
+		strings.Contains(refreshed.Cookie, "setup-only=value") || !strings.Contains(refreshed.SetupCookie, "setup-only=value") {
+		t.Fatalf("unexpected refreshed session: %#v", refreshed)
+	}
+}
+
+func TestHMERefreshSessionRejectsAnotherAccountWithoutReturningRotatedCookies(t *testing.T) {
+	const cookie = "X-APPLE-DS-WEB-SESSION-TOKEN=session; X-APPLE-WEBAUTH-USER=user; X-APPLE-WEBAUTH-TOKEN=token"
+	client := NewHMEClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Set-Cookie": {"X-APPLE-WEBAUTH-TOKEN=wrong-account; Domain=.icloud.com; Path=/"}},
+			Body: io.NopCloser(strings.NewReader(
+				`{"dsInfo":{"dsid":"456"},"webservices":{"premiummailsettings":{"url":"https://p216-maildomainws.icloud.com"}}}`,
+			)),
+		}, nil
+	})})
+	_, err := client.refreshSession(context.Background(), hmeConfig{
+		Host: "p119-maildomainws.icloud.com", DSID: "123", ClientID: "client",
+		ClientBuildNumber: "build", ClientMasteringNumber: "mastering", Cookie: cookie, SetupCookie: cookie,
+	})
+	providerErr, ok := err.(*hmeError)
+	if !ok || providerErr.Category != "session_invalid" || providerErr.Stage != "validate" ||
+		providerErr.UpdatedCookie != "" || providerErr.UpdatedSetupCookie != "" {
+		t.Fatalf("mismatched account error = %#v", err)
+	}
+}
+
 func TestMergeICloudCookiesKeepsOneEntryAfterDeleteAndReplace(t *testing.T) {
 	got := mergeICloudCookies("session=old; other=value", []*http.Cookie{
 		{Name: "session", MaxAge: -1},
@@ -62,6 +122,10 @@ func TestHMEListDoesNotExposeSessionMaterialOnUnauthorized(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("List() error = nil, want unauthorized error")
+	}
+	var providerErr *hmeError
+	if !errors.As(err, &providerErr) || providerErr.Stage != "list" || providerErr.HTTPStatus != http.StatusUnauthorized {
+		t.Fatalf("missing safe request diagnostics: %#v", err)
 	}
 	message := err.Error()
 	if strings.Contains(message, secret) || strings.Contains(message, "icloud.com") || strings.Contains(message, "token") {

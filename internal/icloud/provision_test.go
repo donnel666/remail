@@ -211,6 +211,7 @@ func TestICloudProvisionFallsBackFromRateLimitedNewChannelToLegacyReconcile(t *t
 		t.Fatalf("migrate database: %v", err)
 	}
 	now := time.Date(2026, 8, 14, 10, 0, 0, 0, time.UTC)
+	firstRoundAt := now
 	setICloudForwardingSuffixes(t, "relay.example")
 	if err := db.Create(&iCloudResourceModel{
 		ID: 1, ResourceType: "icloud", PrimaryEmail: "owner@example.com",
@@ -307,6 +308,11 @@ func TestICloudProvisionFallsBackFromRateLimitedNewChannelToLegacyReconcile(t *t
 	if strings.Join(legacyPaths, ",") != strings.Join(wantPaths, ",") {
 		t.Fatalf("legacy provision sequence = %#v, want %#v", legacyPaths, wantPaths)
 	}
+	var oldChannel iCloudResourceChannelModel
+	if err := db.Where("resource_id = ? AND kind = ?", 1, iCloudChannelWeb).Take(&oldChannel).Error; err != nil ||
+		oldChannel.NextKeepaliveAt == nil || !oldChannel.NextKeepaliveAt.Equal(firstRoundAt.Add(iCloudCookieKeepaliveInterval())) {
+		t.Fatalf("ordinary list delayed the real session refresh: channel=%#v err=%v", oldChannel, err)
+	}
 	if iCloudChannelHourlyLimit(iCloudChannelAppleAccount) != 20 || iCloudChannelHourlyLimit(iCloudChannelWeb) != 5 {
 		t.Fatalf("unexpected hourly limits: new=%d old=%d", iCloudChannelHourlyLimit(iCloudChannelAppleAccount), iCloudChannelHourlyLimit(iCloudChannelWeb))
 	}
@@ -381,7 +387,7 @@ func TestICloudProvisionKeepsExpiredAndFullResourcesAliveWithoutCreating(t *test
 	for _, resource := range resources {
 		channels = append(channels, iCloudResourceChannelModel{
 			ResourceID: resource.ID, Kind: iCloudChannelWeb, Host: "p119-maildomainws.icloud.com",
-			Cookie: testICloudOldCookie, DSID: "123", ClientID: "client", ClientBuildNumber: "build", ClientMasteringNumber: "master",
+			Cookie: testICloudOldCookie, SetupCookie: testICloudOldCookie, DSID: "123", ClientID: "client", ClientBuildNumber: "build", ClientMasteringNumber: "master",
 			SessionStatus: iCloudSessionValid, NextKeepaliveAt: &now, CreatedAt: now, UpdatedAt: now,
 		})
 	}
@@ -394,6 +400,11 @@ func TestICloudProvisionKeepsExpiredAndFullResourcesAliveWithoutCreating(t *test
 	service.now = func() time.Time { return now }
 	service.hme = NewHMEClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
 		paths = append(paths, request.URL.Path)
+		if request.URL.Path == "/setup/ws/1/validate" {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(
+				`{"dsInfo":{"dsid":"123"},"webservices":{"premiummailsettings":{"url":"https://p119-maildomainws.icloud.com"}}}`,
+			))}, nil
+		}
 		body := `{"success":true,"result":{"selectedForwardTo":"mailbox@relay.example","total":0,"hasMore":false,"hmeEmails":[]}}`
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
 	})})
@@ -413,12 +424,12 @@ func TestICloudProvisionKeepsExpiredAndFullResourcesAliveWithoutCreating(t *test
 			t.Fatalf("process keepalive for resource %d: %v", task.ResourceID, err)
 		}
 	}
-	if len(paths) != len(resources) {
+	if len(paths) != 2*len(resources) {
 		t.Fatalf("keepalive request paths = %#v", paths)
 	}
-	for _, path := range paths {
-		if path != "/v2/hme/list" {
-			t.Fatalf("keepalive unexpectedly created an alias via %q", path)
+	for index := 0; index < len(paths); index += 2 {
+		if paths[index] != "/setup/ws/1/validate" || paths[index+1] != "/v2/hme/list" {
+			t.Fatalf("keepalive sequence = %#v", paths)
 		}
 	}
 	for _, expected := range resources {
@@ -430,6 +441,77 @@ func TestICloudProvisionKeepsExpiredAndFullResourcesAliveWithoutCreating(t *test
 		if resource.NextProvisionAt == nil || !resource.NextProvisionAt.Equal(wantNext) || resource.SelectedForwardTo != "mailbox@relay.example" {
 			t.Fatalf("keepalive-only resource %d = %#v, want next %v", resource.ID, resource, wantNext)
 		}
+	}
+}
+
+func TestICloudProvisionRecoversMovedPodAndPersistsRefreshBeforeListFailure(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:icloud-provision-moved-pod?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	if err := db.AutoMigrate(&iCloudResourceModel{}, &iCloudResourceChannelModel{}); err != nil {
+		t.Fatalf("migrate database: %v", err)
+	}
+	now := time.Date(2026, 8, 15, 8, 0, 0, 0, time.UTC)
+	resource := iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "owner@example.com", Status: iCloudResourceNormal,
+		ExpireAt: now.Add(time.Hour), CredentialRevision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	nextKeepalive := now.Add(time.Minute)
+	channel := iCloudResourceChannelModel{
+		ResourceID: 1, Kind: iCloudChannelWeb, Host: "p119-maildomainws.icloud.com",
+		Cookie: testICloudOldCookie, SetupCookie: testICloudOldCookie, DSID: "123", ClientID: "client",
+		ClientBuildNumber: "build", ClientMasteringNumber: "master", SessionStatus: iCloudSessionValid, SessionFailures: 1,
+		NextKeepaliveAt: &nextKeepalive, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&resource).Error; err != nil {
+		t.Fatalf("create resource: %v", err)
+	}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	requests := make([]string, 0, 3)
+	service := NewService(db, nil, nil)
+	service.hme = NewHMEClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		requests = append(requests, request.URL.Host+request.URL.Path)
+		switch request.URL.Path {
+		case "/setup/ws/1/validate":
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Set-Cookie": {"X-APPLE-WEBAUTH-TOKEN=rotated; Domain=.icloud.com; Path=/"}},
+				Body: io.NopCloser(strings.NewReader(
+					`{"dsInfo":{"dsid":"123"},"webservices":{"premiummailsettings":{"url":"https://p216-maildomainws.icloud.com"}}}`,
+				)),
+			}, nil
+		case "/v2/hme/list":
+			if request.URL.Host == "p119-maildomainws.icloud.com" {
+				return &http.Response{StatusCode: 421, Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+			}
+			return &http.Response{StatusCode: http.StatusInternalServerError, Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+		default:
+			t.Fatalf("unexpected request %s", request.URL.String())
+			return nil, nil
+		}
+	})})
+	if _, _, err := service.provisionICloudWeb(context.Background(), resource, channel, false, now); err == nil {
+		t.Fatal("list after moved-pod refresh unexpectedly succeeded")
+	}
+	wantRequests := []string{
+		"p119-maildomainws.icloud.com/v2/hme/list",
+		"setup.icloud.com/setup/ws/1/validate",
+		"p216-maildomainws.icloud.com/v2/hme/list",
+	}
+	if strings.Join(requests, "\n") != strings.Join(wantRequests, "\n") {
+		t.Fatalf("moved-pod requests = %#v, want %#v", requests, wantRequests)
+	}
+	var stored iCloudResourceChannelModel
+	if err := db.First(&stored, channel.ID).Error; err != nil {
+		t.Fatalf("read refreshed channel: %v", err)
+	}
+	if stored.Host != "p216-maildomainws.icloud.com" || !strings.Contains(stored.Cookie, "X-APPLE-WEBAUTH-TOKEN=rotated") ||
+		!strings.Contains(stored.SetupCookie, "X-APPLE-WEBAUTH-TOKEN=rotated") || stored.NextKeepaliveAt == nil ||
+		!stored.NextKeepaliveAt.Equal(now.Add(iCloudCookieKeepaliveInterval())) || stored.SessionStatus != iCloudSessionValid || stored.SessionFailures != 1 {
+		t.Fatalf("refresh was not persisted before list failure: %#v", stored)
 	}
 }
 
@@ -473,6 +555,39 @@ func TestICloudProvisionRefreshKeepsCooldownStageAndProviderDelayWins(t *testing
 	}
 	if stored.CooldownStage != 2 || stored.CooldownUntil == nil || !stored.CooldownUntil.Equal(now.Add(3*time.Hour)) {
 		t.Fatalf("unexpected persisted provider cooldown: %#v", stored)
+	}
+}
+
+func TestICloudProvisionChannelAcceptsMatchedNoopUpdate(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:icloud-provision-noop-update?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	if err := db.AutoMigrate(&iCloudResourceChannelModel{}); err != nil {
+		t.Fatalf("migrate database: %v", err)
+	}
+	now := time.Date(2026, 8, 15, 8, 0, 0, 0, time.UTC)
+	channel := iCloudResourceChannelModel{
+		ResourceID: 1, Kind: iCloudChannelWeb, Host: "p119-maildomainws.icloud.com",
+		Cookie: testICloudOldCookie, SessionStatus: iCloudSessionValid,
+		LastCheckedAt: &now, LastValidAt: &now, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	if err := db.Callback().Update().After("gorm:update").Register("icloud:test-zero-affected", func(tx *gorm.DB) {
+		tx.RowsAffected = 0
+	}); err != nil {
+		t.Fatalf("register update callback: %v", err)
+	}
+	if err := updateICloudProvisionChannelTx(db, channel, true, false, now); err != nil {
+		t.Fatalf("persist matched no-op update: %v", err)
+	}
+	if err := db.Delete(&channel).Error; err != nil {
+		t.Fatalf("delete channel: %v", err)
+	}
+	if err := updateICloudProvisionChannelTx(db, channel, true, false, now); !errors.Is(err, errICloudValidationStale) {
+		t.Fatalf("persist missing channel error = %v, want stale", err)
 	}
 }
 
@@ -606,7 +721,7 @@ func TestICloudProvisionRequiresThreeSessionFailuresBeforeInvalidation(t *testin
 		if channel.SessionFailures != uint8(failure) || channel.SessionStatus != wantStatus {
 			t.Fatalf("channel after failure %d = %#v", failure, channel)
 		}
-		if failure < iCloudSessionFailureLimit && (channel.CooldownUntil == nil || !channel.CooldownUntil.Equal(now.Add(iCloudValidationRetryInterval))) {
+		if failure < iCloudSessionFailureLimit && (channel.CooldownUntil == nil || !channel.CooldownUntil.Equal(now.Add(iCloudSessionRetryDelay(uint8(failure))))) {
 			t.Fatalf("failure %d retry was not scheduled: %#v", failure, channel)
 		}
 	}
@@ -779,7 +894,7 @@ func TestICloudProvisionMarksAllAttemptFailuresFailed(t *testing.T) {
 	if err := db.Where("resource_id = ? AND kind = ?", 1, iCloudMaintenanceAlias).Take(&run).Error; err != nil {
 		t.Fatalf("read run: %v", err)
 	}
-	if run.Status != iCloudMaintenanceFailed || run.FinishedAt == nil || run.LastSafeError == "" {
+	if run.Status != iCloudMaintenanceFailed || run.FinishedAt == nil || !strings.Contains(run.LastSafeError, "stage=list") {
 		t.Fatalf("failed run = %#v", run)
 	}
 }

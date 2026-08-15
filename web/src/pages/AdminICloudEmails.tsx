@@ -584,29 +584,44 @@ export function EditICloudModal({
   target: AdminICloudResourceItem | null;
 }) {
   const { t } = useTranslation();
+  const [primaryEmail, setPrimaryEmail] = useState("");
   const [ownerId, setOwnerId] = useState<number | undefined>();
   const [forSale, setForSale] = useState(false);
   const [expireAt, setExpireAt] = useState<Date | null>(() =>
     target ? new Date(target.expireAt) : null,
   );
-  const [importLine, setImportLine] = useState("");
+  const [newCurl, setNewCurl] = useState("");
+  const [oldCurl, setOldCurl] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (!target) return;
+    setPrimaryEmail(target.primaryEmail);
     setOwnerId(target.owner.id);
     setForSale(target.forSale);
     setExpireAt(new Date(target.expireAt));
-    setImportLine("");
+    setNewCurl("");
+    setOldCurl("");
   }, [target]);
 
   const submit = async () => {
     if (!target || (!credentialsOnly && !ownerId)) return;
-    const nextImportLine = normalizeICloudImportContent(importLine).trim();
-    if (credentialsOnly && !nextImportLine) {
-      Toast.warning(t("Complete iCloud credential line is required."));
+    const nextEmail = primaryEmail.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+$/.test(nextEmail)) {
+      Toast.warning(t("A valid iCloud email address is required."));
       return;
     }
+    const normalizedNewCurl = normalizeICloudImportContent(newCurl).trim();
+    const normalizedOldCurl = normalizeICloudImportContent(oldCurl).trim();
+    const curls = [normalizedNewCurl, normalizedOldCurl].filter(Boolean);
+    const emailChanged = nextEmail !== target.primaryEmail.trim().toLowerCase();
+    if ((credentialsOnly || emailChanged) && curls.length === 0) {
+      Toast.warning(t("At least one iCloud cURL is required."));
+      return;
+    }
+    const nextImportLine = curls.length > 0
+      ? [nextEmail, ...curls].join("----")
+      : "";
     const expireAtChanged =
       canOperate &&
       expireAt?.getTime() !== new Date(target.expireAt).getTime();
@@ -664,22 +679,26 @@ export function EditICloudModal({
       {target ? (
         <div className="space-y-4 py-1">
           {credentialsOnly ? (
-            <>
-              <div className="rounded-lg border border-[var(--semi-color-warning-light-active)] bg-[var(--semi-color-warning-light-default)] px-3 py-2 text-sm text-[var(--semi-color-text-0)]">
-                {t("The complete credential line is write-only. Existing values are never displayed, and submitting replaces the configured cURL channels.")}
-              </div>
-              <InfoItem
-                label={t("Primary email")}
-                value={<span className="font-mono">{target.primaryEmail}</span>}
-              />
-            </>
-          ) : (
-            <>
-              <InfoItem
-                label={t("Primary email")}
-                value={<span className="font-mono">{target.primaryEmail}</span>}
-              />
+            <div className="rounded-lg border border-[var(--semi-color-warning-light-active)] bg-[var(--semi-color-warning-light-default)] px-3 py-2 text-sm text-[var(--semi-color-text-0)]">
+              {t("Existing cURLs are write-only. Enter at least one replacement; an omitted channel is removed.")}
+            </div>
+          ) : null}
 
+          <label className="block">
+            <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
+              {t("Primary email")} *
+            </span>
+            <Input
+              className="font-mono"
+              disabled={!canOperate}
+              onChange={(value) => setPrimaryEmail(String(value))}
+              placeholder="name@example.com"
+              value={primaryEmail}
+            />
+          </label>
+
+          {!credentialsOnly ? (
+            <>
               <label className="block">
                 <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
                   {t("Owner")}
@@ -712,7 +731,7 @@ export function EditICloudModal({
                 </div>
               ) : null}
             </>
-          )}
+          ) : null}
 
           <label className="block">
             <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
@@ -736,21 +755,36 @@ export function EditICloudModal({
                 {t("Credentials")}
               </div>
               <div className="mb-3 text-xs leading-5 text-[var(--semi-color-text-2)]">
-                {t(credentialsOnly
-                  ? "Enter the same complete line accepted by import."
-                  : "Write-only. Leave blank to keep the current cURL channels.")}
+                {t("iCloud cURLs are write-only. Leave both blank to keep current channels; entering either replaces the complete set, and the server identifies channels from their URLs.")}
               </div>
-              <TextArea
-                className="font-mono"
-                onChange={setImportLine}
-                placeholder="email----curl[----curl]"
-                rows={7}
-                style={{ resize: "none" }}
-                value={importLine}
-              />
-              <code className="mt-2 block whitespace-pre-wrap break-all font-mono text-xs leading-5 text-[var(--semi-color-text-2)]">
-                {"email----oldCurl\nemail----newCurl\nemail----newCurl----oldCurl\nemail----oldCurl----newCurl"}
-              </code>
+              <div className="space-y-3">
+                <label className="block">
+                  <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
+                    {t("New Cookie cURL")}
+                  </span>
+                  <TextArea
+                    className="font-mono"
+                    onChange={setNewCurl}
+                    placeholder="curl --url 'https://appleid.apple.com/account/manage/...'"
+                    rows={4}
+                    style={{ resize: "none" }}
+                    value={newCurl}
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
+                    {t("Old Cookie cURL")}
+                  </span>
+                  <TextArea
+                    className="font-mono"
+                    onChange={setOldCurl}
+                    placeholder="curl --url 'https://*-maildomainws.icloud.com/v2/hme/list?...'"
+                    rows={4}
+                    style={{ resize: "none" }}
+                    value={oldCurl}
+                  />
+                </label>
+              </div>
             </div>
           ) : null}
         </div>

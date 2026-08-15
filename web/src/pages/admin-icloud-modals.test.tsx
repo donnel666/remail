@@ -587,7 +587,7 @@ describe("admin iCloud modal workflows", () => {
     expect(new Date(request.expireAt).getTime()).toBeGreaterThan(Date.now());
   });
 
-  it("requires a complete credential line when replacing credentials", async () => {
+  it("requires at least one cURL when replacing credentials", async () => {
     render(
       <EditICloudModal
         canOperate
@@ -603,15 +603,14 @@ describe("admin iCloud modal workflows", () => {
 
     expect(mocks.updateResource).not.toHaveBeenCalled();
     expect(mocks.toastWarning).toHaveBeenCalledWith(
-      "Complete iCloud credential line is required.",
+      "At least one iCloud cURL is required.",
     );
   });
 
-  it("normalizes Bash cURL continuations when replacing credentials", async () => {
+  it("builds one normalized import line from the separate email and cURL fields", async () => {
     render(
       <EditICloudModal
         canOperate
-        credentialsOnly
         onCancel={vi.fn()}
         onSaved={vi.fn()}
         owners={[owner]}
@@ -619,19 +618,27 @@ describe("admin iCloud modal workflows", () => {
       />,
     );
 
-    const content =
-      "main@icloud.com----curl 'https://appleid.apple.com/account/manage/gs/ws/token' \\\n  -H 'cookie: myacinfo=secret' \\\n  -H 'scnt: scnt-value'";
-    fireEvent.change(screen.getByPlaceholderText("email----curl[----curl]"), {
-      target: { value: content },
+    const newCurl =
+      "curl 'https://appleid.apple.com/account/manage/gs/ws/token' \\\n  -H 'cookie: myacinfo=secret' \\\n  -H 'scnt: scnt-value'";
+    const oldCurl =
+      "curl --url 'https://p217-maildomainws.icloud.com.cn/v2/hme/list?dsid=123' \\\n  -b 'X-APPLE-WEBAUTH-TOKEN=secret'";
+    fireEvent.change(screen.getByLabelText(/Primary email/), {
+      target: { value: "replacement@example.com" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Replace credentials" }));
+    fireEvent.change(screen.getByLabelText("New Cookie cURL"), {
+      target: { value: newCurl },
+    });
+    fireEvent.change(screen.getByLabelText("Old Cookie cURL"), {
+      target: { value: oldCurl },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() =>
       expect(mocks.updateResource).toHaveBeenCalledWith(
         41,
         expect.objectContaining({
           importLine:
-            "main@icloud.com----curl 'https://appleid.apple.com/account/manage/gs/ws/token' -H 'cookie: myacinfo=secret' -H 'scnt: scnt-value'",
+            "replacement@example.com----curl 'https://appleid.apple.com/account/manage/gs/ws/token' -H 'cookie: myacinfo=secret' -H 'scnt: scnt-value'----curl --url 'https://p217-maildomainws.icloud.com.cn/v2/hme/list?dsid=123' -b 'X-APPLE-WEBAUTH-TOKEN=secret'",
         }),
       ),
     );

@@ -117,15 +117,9 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 			return ErrICloudResourceNotFound
 		}
 
-		var existingChannels []iCloudResourceChannelModel
-		if imported != nil {
-			if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
-				Where("resource_id = ?", command.ResourceID).Find(&existingChannels).Error; err != nil {
-				return err
-			}
-		}
 		emailChanged := imported != nil && imported.PrimaryEmail != resource.PrimaryEmail
-		channelsChanged := imported != nil && !sameICloudChannels(existingChannels, imported.Channels)
+		credentialsSubmitted := imported != nil
+		accountIdentityChanged := emailChanged
 		ownerChanged := command.OwnerUserID != nil && *command.OwnerUserID != root.OwnerUserID
 		expireAtChanged := command.ExpireAt != nil && !command.ExpireAt.Equal(resource.ExpireAt)
 		if (emailChanged || ownerChanged) && assertNoActiveAdminICloudAllocationTx(ctx, tx, command.ResourceID) != nil {
@@ -152,9 +146,8 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 		}
 
 		updates := make(map[string]any)
-		credentialChanged := emailChanged || channelsChanged
 		nextCredentialRevision := resource.CredentialRevision
-		if credentialChanged {
+		if credentialsSubmitted {
 			nextCredentialRevision++
 			if nextCredentialRevision == 0 {
 				nextCredentialRevision = 1
@@ -163,13 +156,13 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 			updates["credential_updated_at"] = now
 		}
 		if imported != nil {
-			if credentialChanged {
+			if accountIdentityChanged {
 				updates["selected_forward_to"] = ""
 				updates["alias_count"] = 0
-				updates["alias_provision_candidate"] = ""
-				updates["alias_provision_reconcile"] = false
 				updates["last_alias_sync_at"] = nil
 			}
+			updates["alias_provision_candidate"] = ""
+			updates["alias_provision_reconcile"] = false
 			if emailChanged {
 				updates["primary_email"] = imported.PrimaryEmail
 			}
@@ -182,7 +175,7 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 		}
 
 		queuedGeneration := uint64(0)
-		if credentialChanged {
+		if credentialsSubmitted {
 			if resource.Status != iCloudResourceDisabled {
 				queuedGeneration = queueAdminICloudValidation(updates, resource, now)
 				queuedValidation = true
@@ -194,8 +187,8 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 		if command.ExpireAt != nil {
 			provisionExpireAt = *command.ExpireAt
 		}
-		if channelsChanged || expireAtChanged {
-			if !credentialChanged && resource.Status == iCloudResourceNormal && provisionExpireAt.After(now) && resource.AliasCount < iCloudMaxAliases {
+		if credentialsSubmitted || expireAtChanged {
+			if !credentialsSubmitted && resource.Status == iCloudResourceNormal && provisionExpireAt.After(now) && resource.AliasCount < iCloudMaxAliases {
 				updates["next_provision_at"] = now
 				queuedProvision = true
 			} else if !provisionExpireAt.After(now) || resource.AliasCount >= iCloudMaxAliases {
@@ -203,7 +196,7 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 			}
 		}
 
-		changed := len(updates) > 0 || ownerChanged || channelsChanged
+		changed := len(updates) > 0 || ownerChanged
 		if len(updates) > 0 {
 			updates["updated_at"] = now
 			updated := tx.WithContext(ctx).Model(&iCloudResourceModel{}).Where("id = ?", command.ResourceID).Updates(updates)
@@ -214,14 +207,14 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 				return updated.Error
 			}
 		}
-		if credentialChanged {
+		if accountIdentityChanged {
 			if err := tx.WithContext(ctx).Model(&iCloudAliasModel{}).
 				Where("resource_id = ? AND status <> ?", command.ResourceID, iCloudResourceDeleted).
 				Updates(map[string]any{"status": "missing", "updated_at": now}).Error; err != nil {
 				return err
 			}
 		}
-		if channelsChanged {
+		if credentialsSubmitted {
 			if err := upsertICloudImportChannelsTx(tx, command.ResourceID, imported.Channels, now); err != nil {
 				return err
 			}
@@ -282,28 +275,6 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 		_ = s.ScheduleICloudProvisionDispatcher(context.WithoutCancel(ctx), 0)
 	}
 	return result, nil
-}
-
-func sameICloudChannels(existing []iCloudResourceChannelModel, imported []iCloudImportChannel) bool {
-	if len(existing) != len(imported) {
-		return false
-	}
-	byKind := make(map[string]iCloudResourceChannelModel, len(existing))
-	for _, channel := range existing {
-		byKind[channel.Kind] = channel
-	}
-	for _, channel := range imported {
-		current, ok := byKind[channel.Kind]
-		if !ok || current.Host != strings.TrimSpace(channel.Host) || current.Cookie != strings.TrimSpace(channel.Cookie) ||
-			current.Origin != strings.TrimSpace(channel.Origin) || current.Referer != strings.TrimSpace(channel.Referer) ||
-			current.UserAgent != strings.TrimSpace(channel.UserAgent) || current.FDClientInfo != strings.TrimSpace(channel.FDClientInfo) ||
-			current.DSID != strings.TrimSpace(channel.DSID) ||
-			current.ClientID != strings.TrimSpace(channel.ClientID) || current.ClientBuildNumber != strings.TrimSpace(channel.ClientBuildNumber) ||
-			current.ClientMasteringNumber != strings.TrimSpace(channel.ClientMasteringNumber) || current.Scnt != strings.TrimSpace(channel.Scnt) {
-			return false
-		}
-	}
-	return true
 }
 
 func assertUniqueAdminICloudEmailTx(ctx context.Context, tx *gorm.DB, resourceID uint, primaryEmail string) error {

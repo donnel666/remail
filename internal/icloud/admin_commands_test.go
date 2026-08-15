@@ -143,12 +143,12 @@ func TestEditAdminICloudResourceUsesCompleteImportLine(t *testing.T) {
 	}
 	if channelOnlyResource.Status != iCloudResourcePending || channelOnlyResource.ValidationGeneration != 3 ||
 		channelOnlyResource.NextValidationAt == nil || channelOnlyResource.NextProvisionAt != nil ||
-		channelOnlyResource.SelectedForwardTo != "" || channelOnlyResource.AliasCount != 0 || channelOnlyResource.LastAliasSyncAt != nil {
+		channelOnlyResource.SelectedForwardTo != "old@relay.example" || channelOnlyResource.AliasCount != 1 || channelOnlyResource.LastAliasSyncAt == nil {
 		t.Fatalf("channel-only edit did not requeue validation: %#v", channelOnlyResource)
 	}
 	var retiredAlias iCloudAliasModel
-	if err := db.Where("resource_id = ? AND anonymous_id = ?", 1, "existing-alias").Take(&retiredAlias).Error; err != nil || retiredAlias.Status != "missing" {
-		t.Fatalf("channel-only edit retained allocatable alias: alias=%#v err=%v", retiredAlias, err)
+	if err := db.Where("resource_id = ? AND anonymous_id = ?", 1, "existing-alias").Take(&retiredAlias).Error; err != nil || retiredAlias.Status != iCloudResourceNormal {
+		t.Fatalf("same-account channel edit hid existing alias: alias=%#v err=%v", retiredAlias, err)
 	}
 	channels = nil
 	if err := db.Where("resource_id = ?", 1).Find(&channels).Error; err != nil {
@@ -190,6 +190,78 @@ func TestEditAdminICloudResourceUsesCompleteImportLine(t *testing.T) {
 	var oldAlias iCloudAliasModel
 	if err := db.Where("resource_id = ?", 1).First(&oldAlias).Error; err != nil || oldAlias.Status != "missing" {
 		t.Fatalf("old alias was not retired: alias=%#v err=%v", oldAlias, err)
+	}
+}
+
+func TestEditAdminICloudResourceAlwaysReplacesSubmittedCredentials(t *testing.T) {
+	db := newAdminICloudCommandTestDB(t, "icloud-admin-edit-same-credentials")
+	now := time.Date(2026, 8, 15, 9, 0, 0, 0, time.UTC)
+	createAdminICloudCommandResource(t, db, now, iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "owner@icloud.com",
+		Status: iCloudResourceAbnormal, ExpireAt: now.Add(time.Hour), CredentialRevision: 1, ValidationGeneration: 1,
+		SelectedForwardTo: "mailbox@relay.example", AliasCount: 1, LastAliasSyncAt: &now,
+	})
+	if err := db.Create(&iCloudAliasModel{
+		ResourceID: 1, AnonymousID: "alias-id", Email: "alias@icloud.com", ForwardToEmail: "mailbox@relay.example",
+		Status: iCloudResourceNormal, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create existing alias: %v", err)
+	}
+	line := "owner@icloud.com----" + testICloudNewCurl
+	parsed, failure := parseICloudCurlImportLine(1, line)
+	if failure != nil || parsed == nil || len(parsed.Channels) != 1 {
+		t.Fatalf("parse fixture credentials: line=%#v failure=%#v", parsed, failure)
+	}
+	input := parsed.Channels[0]
+	manageExpiresAt := now.Add(15 * time.Minute)
+	cooldownUntil := now.Add(time.Hour)
+	channel := iCloudResourceChannelModel{
+		ResourceID: 1, Kind: input.Kind, Host: input.Host, Cookie: input.Cookie,
+		Origin: input.Origin, Referer: input.Referer, UserAgent: input.UserAgent,
+		FDClientInfo: input.FDClientInfo, Scnt: input.Scnt,
+		SessionID: "stale-session", APIKey: "stale-api-key", DataAccessToken: "stale-token",
+		ManageExpiresAt: &manageExpiresAt, SessionStatus: iCloudSessionInvalid, SessionFailures: 3,
+		CooldownUntil: &cooldownUntil, CooldownStage: 2, NextKeepaliveAt: &cooldownUntil,
+		LastCheckedAt: &now, LastValidAt: &now, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("create existing channel: %v", err)
+	}
+
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	result, err := service.EditAdminICloudResource(context.Background(), AdminICloudEditCommand{
+		ResourceID: 1, Version: 1, ImportLine: &line,
+		OperatorUserID: 99, IdempotencyKey: "edit-same-credentials", RequestID: "request-same", Path: "/v1/admin/icloud/resources/1",
+	})
+	if err != nil {
+		t.Fatalf("replace matching credentials: %v", err)
+	}
+	if !result.Changed || result.Status != iCloudResourcePending {
+		t.Fatalf("matching credential replacement result: %#v", result)
+	}
+	var resource iCloudResourceModel
+	if err := db.First(&resource, 1).Error; err != nil {
+		t.Fatalf("read replaced resource: %v", err)
+	}
+	if resource.CredentialRevision != 2 || resource.ValidationGeneration != 2 || resource.NextValidationAt == nil {
+		t.Fatalf("matching credentials did not queue a fresh validation: %#v", resource)
+	}
+	var stored iCloudResourceChannelModel
+	if err := db.Where("resource_id = ? AND kind = ?", 1, input.Kind).Take(&stored).Error; err != nil {
+		t.Fatalf("read replaced channel: %v", err)
+	}
+	if resource.SelectedForwardTo != "mailbox@relay.example" || resource.AliasCount != 1 || resource.LastAliasSyncAt == nil {
+		t.Fatalf("same-account edit reset alias state: %#v", resource)
+	}
+	if stored.SessionStatus != iCloudSessionUnchecked || stored.SessionFailures != 0 || stored.CooldownUntil != nil ||
+		stored.CooldownStage != 0 || stored.NextKeepaliveAt != nil || stored.SessionID != "" || stored.APIKey != "" ||
+		stored.DataAccessToken != "" || stored.ManageExpiresAt != nil || stored.LastCheckedAt != nil || stored.LastValidAt != nil {
+		t.Fatalf("submitted credentials did not reset channel runtime state: %#v", stored)
+	}
+	var alias iCloudAliasModel
+	if err := db.Where("resource_id = ?", 1).Take(&alias).Error; err != nil || alias.Status != iCloudResourceNormal {
+		t.Fatalf("same-account edit hid existing alias: alias=%#v err=%v", alias, err)
 	}
 }
 

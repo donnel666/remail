@@ -3,6 +3,7 @@ package icloud
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -12,6 +13,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/donnel666/remail/internal/platform"
 )
 
 const defaultICloudHMEUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
@@ -42,6 +45,7 @@ type hmeConfig struct {
 	ClientBuildNumber     string
 	ClientMasteringNumber string
 	Cookie                string
+	SetupCookie           string
 	LangCode              string
 	Origin                string
 	Referer               string
@@ -72,20 +76,33 @@ type hmeListResult struct {
 // hmeError is intentionally limited to a provider-safe category and message.
 // It never carries an HTTP URL, response body, or Cookie value.
 type hmeError struct {
-	Category      string
-	SafeMessage   string
-	Retryable     bool
-	RetryAfter    time.Duration
-	SessionKnown  bool
-	SessionValid  bool
-	UpdatedCookie string
+	Category           string
+	SafeMessage        string
+	Retryable          bool
+	RetryAfter         time.Duration
+	SessionKnown       bool
+	SessionValid       bool
+	UpdatedCookie      string
+	UpdatedSetupCookie string
+	Stage              string
+	HTTPStatus         int
 }
 
 func (e *hmeError) Error() string {
-	if e == nil || e.SafeMessage == "" {
+	if e == nil {
 		return "iCloud HME request failed."
 	}
-	return e.SafeMessage
+	message := strings.TrimSpace(e.SafeMessage)
+	if message == "" {
+		message = "iCloud HME request failed."
+	}
+	if e.Stage != "" && e.HTTPStatus > 0 {
+		return fmt.Sprintf("%s (stage=%s, HTTP %d)", message, e.Stage, e.HTTPStatus)
+	}
+	if e.Stage != "" {
+		return fmt.Sprintf("%s (stage=%s)", message, e.Stage)
+	}
+	return message
 }
 
 // HMEClient owns the legacy provisioning surface: list, generate and reserve.
@@ -106,6 +123,157 @@ func NewHMEClient(client *http.Client) *HMEClient {
 		client = &clientCopy
 	}
 	return &HMEClient{httpClient: client}
+}
+
+func (c *HMEClient) refreshSession(ctx context.Context, config hmeConfig) (hmeConfig, error) {
+	config = normalizeHMEConfig(config)
+	if !validICloudHMEHost(config.Host) || config.DSID == "" || config.ClientID == "" ||
+		config.ClientBuildNumber == "" || config.ClientMasteringNumber == "" {
+		return config, &hmeError{Category: "invalid_context", SafeMessage: "Invalid iCloud session refresh context.", Stage: "validate"}
+	}
+	if !validICloudImportCookie(config.SetupCookie) {
+		return config, &hmeError{Category: "session_invalid", SafeMessage: "iCloud session is invalid.", SessionKnown: true, SessionValid: false, Stage: "validate"}
+	}
+	setupHost := "setup.icloud.com"
+	if strings.HasSuffix(config.Host, ".icloud.com.cn") {
+		setupHost = "setup.icloud.com.cn"
+	}
+	endpoint := url.URL{Scheme: "https", Host: setupHost, Path: "/setup/ws/1/validate"}
+	query := endpoint.Query()
+	query.Set("clientBuildNumber", config.ClientBuildNumber)
+	query.Set("clientMasteringNumber", config.ClientMasteringNumber)
+	query.Set("clientId", config.ClientID)
+	query.Set("requestId", platform.NewUUIDV7String())
+	endpoint.RawQuery = query.Encode()
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), nil)
+	if err != nil {
+		return config, &hmeError{Category: "invalid_context", SafeMessage: "Invalid iCloud session refresh context.", Stage: "validate"}
+	}
+	request.Header.Set("Accept", "*/*")
+	request.Header.Set("Accept-Language", iCloudAcceptLanguage(config.LangCode))
+	request.Header.Set("Content-Type", "text/plain;charset=UTF-8")
+	request.Header.Set("Origin", config.Origin)
+	request.Header.Set("Referer", config.Referer)
+	request.Header.Set("User-Agent", config.UserAgent)
+	request.Header.Set("Sec-Fetch-Dest", "empty")
+	request.Header.Set("Sec-Fetch-Mode", "cors")
+	request.Header.Set("Sec-Fetch-Site", "same-site")
+	request.Header.Set("Cookie", config.SetupCookie)
+	client := c
+	if client == nil || client.httpClient == nil {
+		client = NewHMEClient(nil)
+	}
+	response, err := client.httpClient.Do(request)
+	if err != nil || response == nil || response.Body == nil {
+		return config, &hmeError{Category: "provider_unavailable", SafeMessage: "iCloud session refresh is temporarily unavailable.", Retryable: true, Stage: "validate"}
+	}
+	defer response.Body.Close()
+	responseCookies := response.Cookies()
+	updatedSetupCookie := mergeICloudCookies(config.SetupCookie, responseCookies)
+	updatedCookie := mergeICloudCookies(config.Cookie, iCloudCookiesForHost(responseCookies, config.Host, "/v2/hme/list"))
+	if !validICloudImportCookie(updatedSetupCookie) || !validICloudImportCookie(updatedCookie) {
+		return config, &hmeError{
+			Category: "session_invalid", SafeMessage: "iCloud session is invalid.", SessionKnown: true, SessionValid: false,
+			Stage: "validate", HTTPStatus: response.StatusCode,
+		}
+	}
+	responseBody, err := io.ReadAll(io.LimitReader(response.Body, iCloudHMEResponseMaxBytes+1))
+	if err != nil {
+		return config, hmeRefreshError("provider_unavailable", "iCloud session refresh is temporarily unavailable.", true, response.StatusCode)
+	}
+	if len(responseBody) > iCloudHMEResponseMaxBytes {
+		return config, hmeRefreshError("provider_response", "iCloud session refresh returned an oversized response.", true, response.StatusCode)
+	}
+	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden || response.StatusCode == 421 {
+		return config, &hmeError{
+			Category: "session_invalid", SafeMessage: "iCloud session is invalid.", SessionKnown: true, SessionValid: false,
+			Stage: "validate", HTTPStatus: response.StatusCode,
+		}
+	}
+	if response.StatusCode == http.StatusTooManyRequests {
+		providerErr := hmeRefreshError("rate_limited", "iCloud session refresh is temporarily rate limited.", true, response.StatusCode)
+		providerErr.RetryAfter = iCloudResponseRetryAfter(response.Header.Get("Retry-After"), responseBody, time.Now().UTC())
+		return config, providerErr
+	}
+	if response.StatusCode == http.StatusRequestTimeout || response.StatusCode >= 500 {
+		return config, hmeRefreshError("provider_unavailable", "iCloud session refresh is temporarily unavailable.", true, response.StatusCode)
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return config, hmeRefreshError("provider_rejected", "iCloud session refresh was rejected.", false, response.StatusCode)
+	}
+	var payload struct {
+		DSInfo struct {
+			DSID json.RawMessage `json:"dsid"`
+		} `json:"dsInfo"`
+		Webservices map[string]struct {
+			URL string `json:"url"`
+		} `json:"webservices"`
+	}
+	if json.Unmarshal(responseBody, &payload) != nil || parseICloudValidateDSID(payload.DSInfo.DSID) != config.DSID {
+		return config, &hmeError{
+			Category: "session_invalid", SafeMessage: "iCloud session does not match the configured account.",
+			SessionKnown: true, SessionValid: false, Stage: "validate", HTTPStatus: response.StatusCode,
+		}
+	}
+	host, err := iCloudPremiumMailHost(payload.Webservices["premiummailsettings"].URL)
+	if err != nil {
+		return config, &hmeError{
+			Category: "provider_response", SafeMessage: "iCloud session refresh returned an invalid service address.",
+			Retryable: true, SessionKnown: true, SessionValid: true, Stage: "validate", HTTPStatus: response.StatusCode,
+		}
+	}
+	config.Host = host
+	config.Cookie = updatedCookie
+	config.SetupCookie = updatedSetupCookie
+	return config, nil
+}
+
+func hmeRefreshError(category, message string, retryable bool, status int) *hmeError {
+	return &hmeError{
+		Category: category, SafeMessage: message, Retryable: retryable, SessionKnown: true, SessionValid: category != "session_invalid",
+		Stage: "validate", HTTPStatus: status,
+	}
+}
+
+func parseICloudValidateDSID(raw json.RawMessage) string {
+	var value string
+	if json.Unmarshal(raw, &value) == nil {
+		return strings.TrimSpace(value)
+	}
+	var number json.Number
+	if json.Unmarshal(raw, &number) == nil {
+		return number.String()
+	}
+	return ""
+}
+
+func iCloudPremiumMailHost(value string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || !strings.EqualFold(parsed.Scheme, "https") || parsed.User != nil || parsed.Hostname() == "" ||
+		(parsed.Port() != "" && parsed.Port() != "443") || !validICloudHMEHost(parsed.Hostname()) {
+		return "", fmt.Errorf("invalid iCloud premium mail service URL")
+	}
+	return strings.ToLower(parsed.Hostname()), nil
+}
+
+func iCloudCookiesForHost(cookies []*http.Cookie, host, requestPath string) []*http.Cookie {
+	host = strings.ToLower(strings.TrimSpace(host))
+	result := make([]*http.Cookie, 0, len(cookies))
+	for _, cookie := range cookies {
+		if cookie == nil {
+			continue
+		}
+		domain := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(cookie.Domain)), ".")
+		if domain == "" || (host != domain && !strings.HasSuffix(host, "."+domain)) {
+			continue
+		}
+		cookiePath := strings.TrimSpace(cookie.Path)
+		if cookiePath == "" || (cookiePath != "/" && !strings.HasPrefix(requestPath, cookiePath)) {
+			continue
+		}
+		result = append(result, cookie)
+	}
+	return result
 }
 
 func (c *HMEClient) list(ctx context.Context, config hmeConfig) (hmeListResult, error) {
@@ -437,11 +605,15 @@ func hmeNextToken(result *hmePayloadResult) (string, string) {
 
 func (c *HMEClient) request(ctx context.Context, config hmeConfig, method, requestPath string, payload any, extra url.Values) ([]byte, string, error) {
 	config = normalizeHMEConfig(config)
+	stage := strings.TrimPrefix(requestPath, "/v1/hme/")
+	if requestPath == "/v2/hme/list" {
+		stage = "list"
+	}
 	if !validICloudHMEHost(config.Host) || config.DSID == "" || config.ClientID == "" || config.ClientBuildNumber == "" || config.ClientMasteringNumber == "" {
-		return nil, "", &hmeError{Category: "invalid_context", SafeMessage: "Invalid iCloud HME request context."}
+		return nil, "", &hmeError{Category: "invalid_context", SafeMessage: "Invalid iCloud HME request context.", Stage: stage}
 	}
 	if !validICloudImportCookie(config.Cookie) {
-		return nil, "", &hmeError{Category: "session_invalid", SafeMessage: "iCloud session is invalid.", SessionKnown: true, SessionValid: false}
+		return nil, "", &hmeError{Category: "session_invalid", SafeMessage: "iCloud session is invalid.", SessionKnown: true, SessionValid: false, Stage: stage}
 	}
 	endpoint := url.URL{Scheme: "https", Host: config.Host, Path: requestPath}
 	query := url.Values{}
@@ -480,40 +652,42 @@ func (c *HMEClient) request(ctx context.Context, config hmeConfig, method, reque
 	}
 	response, err := client.httpClient.Do(request)
 	if err != nil || response == nil || response.Body == nil {
-		return nil, "", &hmeError{Category: "provider_unavailable", SafeMessage: "iCloud HME service is temporarily unavailable.", Retryable: true}
+		return nil, "", &hmeError{Category: "provider_unavailable", SafeMessage: "iCloud HME service is temporarily unavailable.", Retryable: true, Stage: stage}
 	}
 	defer response.Body.Close()
 	updatedCookie := mergeICloudCookies(config.Cookie, response.Cookies())
 	if len(updatedCookie) > iCloudImportCookieMaxBytes {
-		return nil, "", &hmeError{Category: "provider_response", SafeMessage: "iCloud HME returned an oversized session cookie.", SessionKnown: true, SessionValid: response.StatusCode < 400}
+		return nil, "", &hmeError{Category: "provider_response", SafeMessage: "iCloud HME returned an oversized session cookie.", SessionKnown: true, SessionValid: response.StatusCode < 400, Stage: stage, HTTPStatus: response.StatusCode}
 	}
 	if !validICloudImportCookie(updatedCookie) {
-		return nil, "", &hmeError{Category: "session_invalid", SafeMessage: "iCloud session is invalid.", SessionKnown: true, SessionValid: false}
+		return nil, "", &hmeError{Category: "session_invalid", SafeMessage: "iCloud session is invalid.", SessionKnown: true, SessionValid: false, Stage: stage, HTTPStatus: response.StatusCode}
 	}
 	responseBody, err := io.ReadAll(io.LimitReader(response.Body, iCloudHMEResponseMaxBytes+1))
 	if err != nil {
-		return nil, "", hmeResponseError("provider_unavailable", "iCloud HME service is temporarily unavailable.", true, updatedCookie)
+		return nil, "", withHMEErrorContext(hmeResponseError("provider_unavailable", "iCloud HME service is temporarily unavailable.", true, updatedCookie), stage, response.StatusCode)
 	}
 	if len(responseBody) > iCloudHMEResponseMaxBytes {
-		return nil, "", hmeResponseError("provider_response", "iCloud HME returned an oversized response.", true, updatedCookie)
+		return nil, "", withHMEErrorContext(hmeResponseError("provider_response", "iCloud HME returned an oversized response.", true, updatedCookie), stage, response.StatusCode)
 	}
 	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden || response.StatusCode == 421 {
-		return nil, "", &hmeError{Category: "session_invalid", SafeMessage: "iCloud session is invalid.", SessionKnown: true, SessionValid: false, UpdatedCookie: updatedCookie}
+		return nil, "", &hmeError{Category: "session_invalid", SafeMessage: "iCloud session is invalid.", SessionKnown: true, SessionValid: false, UpdatedCookie: updatedCookie, Stage: stage, HTTPStatus: response.StatusCode}
 	}
 	if response.StatusCode == http.StatusTooManyRequests {
 		providerErr := hmeResponseError("rate_limited", "iCloud alias creation is temporarily rate limited.", true, updatedCookie)
 		providerErr.RetryAfter = iCloudResponseRetryAfter(response.Header.Get("Retry-After"), responseBody, time.Now().UTC())
+		providerErr = withHMEErrorContext(providerErr, stage, response.StatusCode)
 		return nil, "", providerErr
 	}
 	if response.StatusCode == http.StatusRequestTimeout || response.StatusCode >= 500 {
-		return nil, "", hmeResponseError("provider_unavailable", "iCloud HME service is temporarily unavailable.", true, updatedCookie)
+		return nil, "", withHMEErrorContext(hmeResponseError("provider_unavailable", "iCloud HME service is temporarily unavailable.", true, updatedCookie), stage, response.StatusCode)
 	}
 	if response.StatusCode >= 400 {
 		if providerErr := hmeProviderErrorResponse(responseBody, updatedCookie); providerErr != nil {
 			providerErr.RetryAfter = iCloudResponseRetryAfter(response.Header.Get("Retry-After"), responseBody, time.Now().UTC())
+			providerErr = withHMEErrorContext(providerErr, stage, response.StatusCode)
 			return nil, "", providerErr
 		}
-		return nil, "", &hmeError{Category: "provider_rejected", SafeMessage: "iCloud HME request was rejected.", UpdatedCookie: updatedCookie}
+		return nil, "", &hmeError{Category: "provider_rejected", SafeMessage: "iCloud HME request was rejected.", UpdatedCookie: updatedCookie, Stage: stage, HTTPStatus: response.StatusCode}
 	}
 	return responseBody, updatedCookie, nil
 }
@@ -579,6 +753,14 @@ func hmeResponseError(category, message string, retryable bool, updatedCookie st
 	return &hmeError{Category: category, SafeMessage: message, Retryable: retryable, SessionKnown: true, SessionValid: true, UpdatedCookie: updatedCookie}
 }
 
+func withHMEErrorContext(providerErr *hmeError, stage string, status int) *hmeError {
+	if providerErr != nil {
+		providerErr.Stage = stage
+		providerErr.HTTPStatus = status
+	}
+	return providerErr
+}
+
 func validICloudHMEText(value string, maxLength int, allowEmpty bool) bool {
 	if !allowEmpty && value == "" {
 		return false
@@ -597,6 +779,10 @@ func normalizeHMEConfig(config hmeConfig) hmeConfig {
 	config.ClientBuildNumber = strings.TrimSpace(config.ClientBuildNumber)
 	config.ClientMasteringNumber = strings.TrimSpace(config.ClientMasteringNumber)
 	config.Cookie = strings.TrimSpace(config.Cookie)
+	config.SetupCookie = strings.TrimSpace(config.SetupCookie)
+	if config.SetupCookie == "" {
+		config.SetupCookie = config.Cookie
+	}
 	config.LangCode = strings.TrimSpace(config.LangCode)
 	config.Origin = strings.TrimSpace(config.Origin)
 	config.Referer = strings.TrimSpace(config.Referer)

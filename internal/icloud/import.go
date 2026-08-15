@@ -1065,6 +1065,9 @@ func upsertICloudImportChannelsTx(tx *gorm.DB, resourceID uint, channels []iClou
 			ClientBuildNumber: strings.TrimSpace(channel.ClientBuildNumber), ClientMasteringNumber: strings.TrimSpace(channel.ClientMasteringNumber),
 			Scnt: strings.TrimSpace(channel.Scnt), SessionStatus: iCloudSessionUnchecked, CreatedAt: now, UpdatedAt: now,
 		}
+		if kind == iCloudChannelWeb {
+			row.SetupCookie = row.Cookie
+		}
 		var current iCloudResourceChannelModel
 		result := tx.Where("resource_id = ? AND kind = ?", resourceID, kind).First(&current)
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
@@ -1077,10 +1080,12 @@ func upsertICloudImportChannelsTx(tx *gorm.DB, resourceID uint, channels []iClou
 			return result.Error
 		}
 		updates := map[string]any{
-			"host": row.Host, "cookie": row.Cookie, "origin": row.Origin, "referer": row.Referer, "user_agent": row.UserAgent,
+			"host": row.Host, "cookie": row.Cookie, "setup_cookie": row.SetupCookie,
+			"origin": row.Origin, "referer": row.Referer, "user_agent": row.UserAgent,
 			"fd_client_info": row.FDClientInfo,
 			"dsid":           row.DSID, "client_id": row.ClientID, "client_build_number": row.ClientBuildNumber,
 			"client_mastering_number": row.ClientMasteringNumber, "scnt": row.Scnt,
+			"session_id": "", "api_key": "", "data_access_token": "", "manage_expires_at": nil,
 			"session_status": iCloudSessionUnchecked, "session_failures": 0, "cooldown_until": nil, "cooldown_stage": 0,
 			"next_keepalive_at": nil, "last_checked_at": nil, "last_valid_at": nil, "updated_at": now,
 		}
