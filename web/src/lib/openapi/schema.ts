@@ -7301,6 +7301,8 @@ export interface components {
             limit: number;
             /** @enum {integer} */
             aliasLimit: 750;
+            /** @description Authorized forwarding domain suffixes accepted during iCloud validation. */
+            forwardingSuffixes: string[];
             /** @description Zero-valued when includeFacets=false. */
             facets: components["schemas"]["AdminICloudFacets"];
         };

@@ -46,6 +46,7 @@ const EMPTY_LIST = {
   offset: 0,
   limit: 20,
   aliasLimit: 750,
+  forwardingSuffixes: ["relay.example"],
   facets: {
     status: {
       all: 0,

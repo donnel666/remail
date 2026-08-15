@@ -19685,7 +19685,7 @@ components:
       additionalProperties: false
     AdminICloudResourceListResponse:
       type: object
-      required: [items, total, offset, limit, aliasLimit, facets]
+      required: [items, total, offset, limit, aliasLimit, forwardingSuffixes, facets]
       properties:
         items:
           type: array
@@ -19707,6 +19707,12 @@ components:
           type: integer
           minimum: 1
           enum: [750]
+        forwardingSuffixes:
+          type: array
+          description: Authorized forwarding domain suffixes accepted during iCloud validation.
+          items:
+            type: string
+          uniqueItems: true
         facets:
           description: Zero-valued when includeFacets=false.
           allOf:

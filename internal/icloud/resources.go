@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"gorm.io/gorm"
 )
 
@@ -173,12 +174,13 @@ type AdminICloudResourceFacets struct {
 }
 
 type AdminICloudResourceList struct {
-	Items      []AdminICloudResourceView `json:"items"`
-	Total      int64                     `json:"total"`
-	Offset     int                       `json:"offset"`
-	Limit      int                       `json:"limit"`
-	AliasLimit int                       `json:"aliasLimit"`
-	Facets     AdminICloudResourceFacets `json:"facets"`
+	Items              []AdminICloudResourceView `json:"items"`
+	Total              int64                     `json:"total"`
+	Offset             int                       `json:"offset"`
+	Limit              int                       `json:"limit"`
+	AliasLimit         int                       `json:"aliasLimit"`
+	ForwardingSuffixes []string                  `json:"forwardingSuffixes"`
+	Facets             AdminICloudResourceFacets `json:"facets"`
 }
 
 type AdminICloudAliasView struct {
@@ -237,7 +239,13 @@ func (s *Service) ListAdminICloudResources(ctx context.Context, filter AdminIClo
 			return nil, err
 		}
 	}
-	return &AdminICloudResourceList{Items: items, Total: total, Offset: filter.Offset, Limit: filter.Limit, AliasLimit: iCloudMaxAliases, Facets: facets}, nil
+	forwardingSuffixes := append([]string{}, runtimeconfig.ICloudForwardingSuffixes(
+		runtimeconfig.String(runtimeconfig.ICloudForwardingSuffixesKey, ""),
+	)...)
+	return &AdminICloudResourceList{
+		Items: items, Total: total, Offset: filter.Offset, Limit: filter.Limit,
+		AliasLimit: iCloudMaxAliases, ForwardingSuffixes: forwardingSuffixes, Facets: facets,
+	}, nil
 }
 
 func (s *Service) GetAdminICloudResource(ctx context.Context, resourceID uint) (*AdminICloudResourceDetail, error) {

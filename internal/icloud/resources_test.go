@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
@@ -30,6 +31,10 @@ type iCloudAdminTestGroup struct {
 func (iCloudAdminTestGroup) TableName() string { return "user_groups" }
 
 func TestListAdminICloudResourcesReturnsOnlySafeOperationalFacts(t *testing.T) {
+	previousSuffixes := runtimeconfig.String(runtimeconfig.ICloudForwardingSuffixesKey, "")
+	runtimeconfig.Set(runtimeconfig.ICloudForwardingSuffixesKey, "RELAY.EXAMPLE.,mail.example")
+	t.Cleanup(func() { runtimeconfig.Set(runtimeconfig.ICloudForwardingSuffixesKey, previousSuffixes) })
+
 	db, err := gorm.Open(sqlite.Open("file:icloud-admin-resources?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open database: %v", err)
@@ -91,7 +96,9 @@ func TestListAdminICloudResourcesReturnsOnlySafeOperationalFacts(t *testing.T) {
 	if item.Owner.ID != 7 || item.Owner.GroupName != "Suppliers" || !item.Owner.Enabled {
 		t.Fatalf("unexpected owner: %#v", item.Owner)
 	}
-	if result.AliasLimit != iCloudMaxAliases || result.Facets.Status.Normal != 1 || result.Facets.ForSale.No != 1 {
+	if result.AliasLimit != iCloudMaxAliases || len(result.ForwardingSuffixes) != 2 ||
+		result.ForwardingSuffixes[0] != "relay.example" || result.ForwardingSuffixes[1] != "mail.example" ||
+		result.Facets.Status.Normal != 1 || result.Facets.ForSale.No != 1 {
 		t.Fatalf("unexpected list metadata: %#v", result)
 	}
 	payload, err := json.Marshal(result)

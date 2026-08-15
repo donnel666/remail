@@ -292,6 +292,7 @@ describe("admin iCloud modal workflows", () => {
     mocks.tasks.mockResolvedValue({ items: [], limit: 20, offset: 0, succeeded: 0, total: 0 });
     mocks.listResources.mockResolvedValue({
       aliasLimit: 750,
+      forwardingSuffixes: ["relay.example"],
       facets: {
         forSale: { all: 0, no: 0, yes: 0 },
         status: { abnormal: 0, all: 0, deleted: 0, disabled: 0, normal: 0, pending: 0, validating: 0 },
@@ -527,6 +528,79 @@ describe("admin iCloud modal workflows", () => {
       }),
     ));
     await waitFor(() => expect(onImported).toHaveBeenCalledTimes(1));
+  });
+
+  it("shows complete cURL and forwarding preparation guidance", () => {
+    const { rerender } = render(
+      <ImportICloudModal
+        forwardingSuffixes={["relay.example", "mail.example"]}
+        onCancel={vi.fn()}
+        onImported={vi.fn()}
+        owners={[owner]}
+        visible
+      />,
+    );
+
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent("@relay.example");
+    expect(dialog).toHaveTextContent("@mail.example");
+    const exampleAddress = screen.getByText(/^[a-z0-9]{6}@relay\.example$/).textContent!;
+    expect(screen.getByText("https://appleid.apple.com/account/manage/gs/ws/token")).toBeInTheDocument();
+    expect(screen.getByText("https://appleid.apple.com.cn/account/manage/gs/ws/token")).toBeInTheDocument();
+    expect(screen.getByText("https://<pod>-maildomainws.icloud.com/v2/hme/list")).toBeInTheDocument();
+    expect(screen.getByText("https://<pod>-maildomainws.icloud.com.cn/v2/hme/list")).toBeInTheDocument();
+    expect(screen.getByText(/either order is accepted/)).toBeInTheDocument();
+    expect(screen.getByText(/at least one Cookie is valid and can create an alias/)).toBeInTheDocument();
+
+    rerender(
+      <ImportICloudModal
+        forwardingSuffixes={["relay.example", "mail.example"]}
+        onCancel={vi.fn()}
+        onImported={vi.fn()}
+        owners={[owner]}
+        visible
+      />,
+    );
+    expect(screen.getByText(exampleAddress)).toBeInTheDocument();
+  });
+
+  it("warns when no authorized forwarding domain is configured", () => {
+    render(
+      <ImportICloudModal
+        forwardingSuffixes={[]}
+        onCancel={vi.fn()}
+        onImported={vi.fn()}
+        owners={[owner]}
+        visible
+      />,
+    );
+
+    expect(screen.getByText(/No authorized iCloud forwarding domain is configured/)).toBeInTheDocument();
+  });
+
+  it("distinguishes forwarding-domain loading and load failure from an empty configuration", () => {
+    const { rerender } = render(
+      <ImportICloudModal
+        onCancel={vi.fn()}
+        onImported={vi.fn()}
+        owners={[owner]}
+        visible
+      />,
+    );
+
+    expect(screen.getByText("Loading authorized iCloud forwarding domains...")).toBeInTheDocument();
+    expect(screen.queryByText(/No authorized iCloud forwarding domain is configured/)).not.toBeInTheDocument();
+
+    rerender(
+      <ImportICloudModal
+        forwardingSuffixes={null}
+        onCancel={vi.fn()}
+        onImported={vi.fn()}
+        owners={[owner]}
+        visible
+      />,
+    );
+    expect(screen.getByText(/Authorized iCloud forwarding domains could not be loaded/)).toBeInTheDocument();
   });
 
   it("submits a complete credential line from manual input", async () => {

@@ -188,6 +188,10 @@ function defaultICloudExpireAt() {
   return value;
 }
 
+function randomICloudForwardingPrefix() {
+  return Math.random().toString(36).slice(2, 8).padEnd(6, "x");
+}
+
 function switchButtonClass(active: boolean) {
   return [
     "flex h-12 w-full items-center justify-center gap-2 rounded-lg border-2 px-4 text-sm font-semibold transition-all",
@@ -301,11 +305,13 @@ function OwnerSelect({
 }
 
 export function ImportICloudModal({
+  forwardingSuffixes,
   onCancel,
   onImported,
   owners,
   visible,
 }: {
+  forwardingSuffixes?: string[] | null;
   onCancel: () => void;
   onImported: () => void | Promise<void>;
   owners: AdminICloudOwner[];
@@ -320,6 +326,10 @@ export function ImportICloudModal({
     useState<AdminICloudImportErrorStrategy>("skip");
   const [expireAt, setExpireAt] = useState<Date | null>(() =>
     defaultICloudExpireAt(),
+  );
+  const forwardingExamplePrefix = useMemo(
+    randomICloudForwardingPrefix,
+    [visible],
   );
   const [submitting, setSubmitting] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -425,9 +435,109 @@ export function ImportICloudModal({
       okText={t("Import")}
       title={t("Import iCloud Emails")}
       visible={visible}
-      width="min(666px, calc(100vw - 32px))"
+      width="min(720px, calc(100vw - 32px))"
     >
       <div className="space-y-4 py-1">
+        <div className="border-y border-[var(--semi-color-border)] py-3">
+          <div className="mb-3 text-sm font-medium text-[var(--semi-color-text-0)]">
+            {t("Before importing")}
+          </div>
+          <ol className="space-y-3">
+            <li className="grid grid-cols-[20px_minmax(0,1fr)] gap-2">
+              <span className="flex size-5 items-center justify-center rounded-full bg-[var(--semi-color-fill-1)] text-xs font-medium text-[var(--semi-color-text-1)]">1</span>
+              <div className="min-w-0">
+                <div className="text-sm font-medium text-[var(--semi-color-text-0)]">
+                  {t("Configure the forwarding address")}
+                </div>
+                {forwardingSuffixes === undefined ? (
+                  <div className="mt-1.5 flex items-center gap-2 text-xs leading-5 text-[var(--semi-color-text-2)]">
+                    <Spin size="small" />
+                    {t("Loading authorized iCloud forwarding domains...")}
+                  </div>
+                ) : forwardingSuffixes === null ? (
+                  <div className="mt-1.5 rounded-lg border border-[var(--semi-color-warning-light-active)] bg-[var(--semi-color-warning-light-default)] px-3 py-2 text-xs leading-5 text-[var(--semi-color-text-0)]">
+                    {t("Authorized iCloud forwarding domains could not be loaded. Refresh the resource list and try again.")}
+                  </div>
+                ) : forwardingSuffixes.length > 0 ? (
+                  <>
+                    <p className="mt-1 text-xs leading-5 text-[var(--semi-color-text-2)]">
+                      {t("In iCloud Hide My Email, set Forward To to an address under one of these domains. The part before @ can be anything.")}
+                    </p>
+                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                      {forwardingSuffixes.map((suffix) => (
+                        <Tag key={suffix} size="small">@{suffix}</Tag>
+                      ))}
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                      <span className="text-[var(--semi-color-text-2)]">
+                        {t("Copy this example forwarding address into iCloud:")}
+                      </span>
+                      <CopyableTableText
+                        copiedText={t("Copied")}
+                        text={`${forwardingExamplePrefix}@${forwardingSuffixes[0]}`}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <div className="mt-1.5 rounded-lg border border-[var(--semi-color-warning-light-active)] bg-[var(--semi-color-warning-light-default)] px-3 py-2 text-xs leading-5 text-[var(--semi-color-text-0)]">
+                    {t("No authorized iCloud forwarding domain is configured. Configure one in System Settings > Email Service > Email Resources & Domains before importing.")}
+                  </div>
+                )}
+              </div>
+            </li>
+            <li className="grid grid-cols-[20px_minmax(0,1fr)] gap-2">
+              <span className="flex size-5 items-center justify-center rounded-full bg-[var(--semi-color-fill-1)] text-xs font-medium text-[var(--semi-color-text-1)]">2</span>
+              <div className="min-w-0">
+                <div className="text-sm font-medium text-[var(--semi-color-text-0)]">
+                  {t("Copy the new-session cURL")}
+                </div>
+                <p className="mt-1 text-xs leading-5 text-[var(--semi-color-text-2)]">
+                  {t("Open account.apple.com, use Developer Tools > Network, select the request below, then choose Copy as cURL (bash).")}
+                </p>
+                <div className="mt-1 space-y-0.5">
+                  <code className="block break-all font-mono text-xs text-[var(--semi-color-primary)]">
+                    https://appleid.apple.com/account/manage/gs/ws/token
+                  </code>
+                  <code className="block break-all font-mono text-xs text-[var(--semi-color-primary)]">
+                    https://appleid.apple.com.cn/account/manage/gs/ws/token
+                  </code>
+                </div>
+              </div>
+            </li>
+            <li className="grid grid-cols-[20px_minmax(0,1fr)] gap-2">
+              <span className="flex size-5 items-center justify-center rounded-full bg-[var(--semi-color-fill-1)] text-xs font-medium text-[var(--semi-color-text-1)]">3</span>
+              <div className="min-w-0">
+                <div className="text-sm font-medium text-[var(--semi-color-text-0)]">
+                  {t("Copy the old-session cURL")}
+                </div>
+                <p className="mt-1 text-xs leading-5 text-[var(--semi-color-text-2)]">
+                  {t("Open Hide My Email on icloud.com, use Developer Tools > Network, select the request below, then choose Copy as cURL (bash).")}
+                </p>
+                <div className="mt-1 space-y-0.5">
+                  <code className="block break-all font-mono text-xs text-[var(--semi-color-primary)]">
+                    {"https://<pod>-maildomainws.icloud.com/v2/hme/list"}
+                  </code>
+                  <code className="block break-all font-mono text-xs text-[var(--semi-color-primary)]">
+                    {"https://<pod>-maildomainws.icloud.com.cn/v2/hme/list"}
+                  </code>
+                </div>
+                <p className="mt-1 text-xs leading-5 text-[var(--semi-color-text-2)]">
+                  {t("The pod prefix and query parameters vary by account; filter Network by /v2/hme/list.")}
+                </p>
+              </div>
+            </li>
+          </ol>
+          <p className="mt-3 text-xs leading-5 text-[var(--semi-color-text-2)]">
+            {t("At least one cURL is required. When both are provided, either order is accepted and the system identifies each session by its request URL.")}
+          </p>
+          <div className="mt-3 flex gap-2 rounded-lg bg-[var(--semi-color-success-light-default)] px-3 py-2 text-xs leading-5 text-[var(--semi-color-text-0)]">
+            <ShieldCheck className="mt-0.5 size-4 shrink-0 text-[var(--semi-color-success)]" />
+            <span>
+              {t("Validation succeeds when the forwarding domain matches an authorized domain and at least one Cookie is valid and can create an alias. If two Cookies are provided, both do not need to succeed.")}
+            </span>
+          </div>
+        </div>
+
         <label className="block">
           <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
             {t("Owner")} *
@@ -1617,6 +1727,9 @@ export default function AdminICloudEmails() {
   const [facets, setFacets] = useState<AdminICloudResourceFacets>(EMPTY_FACETS);
   const [total, setTotal] = useState(0);
   const [aliasLimit, setAliasLimit] = useState(750);
+  const [forwardingSuffixes, setForwardingSuffixes] = useState<
+    string[] | null | undefined
+  >(undefined);
   const [owners, setOwners] = useState<AdminICloudOwner[]>([]);
   const [loading, setLoading] = useState(true);
   const [importOpen, setImportOpen] = useState(false);
@@ -1789,9 +1902,17 @@ export default function AdminICloudEmails() {
         if (controller.signal.aborted) return;
         setItems(response.items);
         setAliasLimit(response.aliasLimit);
+        setForwardingSuffixes(
+          Array.isArray(response.forwardingSuffixes)
+            ? response.forwardingSuffixes
+            : null,
+        );
       })
       .catch((error) => {
         if (!controller.signal.aborted) {
+          setForwardingSuffixes((current) =>
+            current === undefined ? null : current,
+          );
           Toast.error(getIamErrorMessage(t, error, "iCloud resources load failed."));
         }
       })
@@ -2736,6 +2857,7 @@ export default function AdminICloudEmails() {
       </CardPro>
 
       <ImportICloudModal
+        forwardingSuffixes={forwardingSuffixes}
         onCancel={() => setImportOpen(false)}
         onImported={async () => {
           setActivePage(1);
