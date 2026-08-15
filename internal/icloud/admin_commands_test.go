@@ -111,7 +111,7 @@ func TestEditAdminICloudResourcePatchesSubmittedChannels(t *testing.T) {
 		t.Fatalf("read channels: %v", err)
 	}
 	if len(channels) != 2 || channels[0].Kind != iCloudChannelAppleAccount || channels[1].Kind != iCloudChannelWeb ||
-		channels[0].FDClientInfo != testICloudFDClientInfo {
+		channels[0].FDClientInfo != testICloudFDClientInfo || channels[0].Scnt != testICloudLongScnt || channels[0].APIKey != "api-key" {
 		t.Fatalf("unexpected edited channels: %#v", channels)
 	}
 	for _, channel := range channels {
@@ -162,7 +162,7 @@ func TestEditAdminICloudResourcePatchesSubmittedChannels(t *testing.T) {
 	if len(channels) != 2 || channels[0].Kind != iCloudChannelAppleAccount || channels[1].Kind != iCloudChannelWeb {
 		t.Fatalf("partial edit did not preserve both channels: %#v", channels)
 	}
-	if channels[0].Cookie != "myacinfo=secret" || channels[0].SessionStatus != iCloudSessionValid || channels[0].APIKey != "preserved-api-key" {
+	if channels[0].Cookie != testICloudNewCookie || channels[0].SessionStatus != iCloudSessionValid || channels[0].APIKey != "preserved-api-key" {
 		t.Fatalf("partial edit changed omitted new channel: %#v", channels[0])
 	}
 	if !strings.Contains(channels[1].Cookie, "X-APPLE-WEBAUTH-TOKEN=rotated") || channels[1].SessionStatus != iCloudSessionUnchecked {
@@ -369,7 +369,7 @@ func TestEditAdminICloudResourceAlwaysReplacesSubmittedCredentials(t *testing.T)
 		t.Fatalf("same-account edit reset alias state: %#v", resource)
 	}
 	if stored.SessionStatus != iCloudSessionUnchecked || stored.SessionFailures != 0 || stored.CooldownUntil != nil ||
-		stored.CooldownStage != 0 || stored.NextKeepaliveAt != nil || stored.SessionID != "" || stored.APIKey != "" ||
+		stored.CooldownStage != 0 || stored.NextKeepaliveAt != nil || stored.SessionID != "" || stored.APIKey != input.APIKey ||
 		stored.DataAccessToken != "" || stored.ManageExpiresAt != nil || stored.LastCheckedAt != nil || stored.LastValidAt != nil {
 		t.Fatalf("submitted credentials did not reset channel runtime state: %#v", stored)
 	}

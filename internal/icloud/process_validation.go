@@ -48,6 +48,7 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 	retryValidation := len(channels) == 0
 	transientValidation := false
 	var failures []error
+	lastRequestSafeError := ""
 	for _, original := range channels {
 		currentResource, currentChannel, loadErr := s.loadICloudValidationProvisionScope(ctx, *resource, original.ID)
 		if loadErr != nil {
@@ -129,6 +130,9 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 			return nil
 		}
 		if loadErr != nil {
+			if safeError := safeICloudProvisionRequestError(loadErr); safeError != "" {
+				lastRequestSafeError = safeError
+			}
 			definiteFailure := definiteAttemptFailure || iCloudValidationErrorCountsFailure(loadErr)
 			if definiteFailure {
 				countFailure = true
@@ -194,13 +198,14 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 	}
 	message := ""
 	if selectedForwardTo == "" {
-		message = "No iCloud session created an alias for an authorized forwarding domain."
+		fallback := "No iCloud session created an alias for an authorized forwarding domain."
 		if expectedForwardTo != "" {
-			message = "No iCloud session created an alias for the prepared forwarding mailbox."
+			fallback = "No iCloud session created an alias for the prepared forwarding mailbox."
 		}
 		if len(failures) == 0 {
-			message = "No usable iCloud session is configured."
+			fallback = "No usable iCloud session is configured."
 		}
+		message = firstNonEmptyICloudSafeError(lastRequestSafeError, fallback)
 	}
 	if transientValidation {
 		countFailure = false

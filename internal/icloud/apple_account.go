@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -30,13 +31,25 @@ type appleAccountError struct {
 	Category    string
 	SafeMessage string
 	RetryAfter  time.Duration
+	Stage       string
+	HTTPStatus  int
 }
 
 func (e *appleAccountError) Error() string {
-	if e == nil || strings.TrimSpace(e.SafeMessage) == "" {
+	if e == nil {
 		return "Apple Account request failed."
 	}
-	return e.SafeMessage
+	message := strings.TrimSpace(e.SafeMessage)
+	if message == "" {
+		message = "Apple Account request failed."
+	}
+	if e.Stage != "" && e.HTTPStatus > 0 {
+		return fmt.Sprintf("%s (stage=%s, HTTP %d)", message, e.Stage, e.HTTPStatus)
+	}
+	if e.Stage != "" {
+		return fmt.Sprintf("%s (stage=%s)", message, e.Stage)
+	}
+	return message
 }
 
 type AppleAccountClient struct {
@@ -60,7 +73,8 @@ func (c *AppleAccountClient) refresh(ctx context.Context, channel iCloudResource
 	var token struct {
 		TimeOutInterval int `json:"timeOutInterval"`
 	}
-	if err := c.request(ctx, &next, "", http.MethodGet, appleAccountTokenPath, nil, &token, now); err != nil {
+	_, err := c.request(ctx, &next, "", http.MethodGet, appleAccountTokenPath, nil, &token, now)
+	if err != nil {
 		return channel, err
 	}
 	if strings.TrimSpace(next.Scnt) == "" {
@@ -69,27 +83,29 @@ func (c *AppleAccountClient) refresh(ctx context.Context, channel iCloudResource
 		}
 		token.TimeOutInterval = 0
 		next.Scnt = ""
-		if err := c.request(ctx, &next, "", http.MethodGet, appleAccountTokenPath, nil, &token, now); err != nil {
+		tokenStatus, err := c.request(ctx, &next, "", http.MethodGet, appleAccountTokenPath, nil, &token, now)
+		if err != nil {
 			return channel, err
 		}
 		if strings.TrimSpace(next.Scnt) == "" {
-			return channel, &appleAccountError{Category: "session_invalid", SafeMessage: "Apple Account session is invalid."}
+			return channel, appleAccountResponseError("session_invalid", "Apple Account session is invalid.", "token", tokenStatus)
 		}
 	}
 	var manage struct {
 		APIKey string `json:"apiKey"`
 	}
-	if err := c.request(ctx, &next, "", http.MethodGet, "/account/manage", nil, &manage, now); err != nil {
+	manageStatus, err := c.request(ctx, &next, "", http.MethodGet, "/account/manage", nil, &manage, now)
+	if err != nil {
 		return next, err
 	}
 	if apiKey := strings.TrimSpace(manage.APIKey); apiKey != "" {
 		if !validICloudImportValue(apiKey, iCloudAppleAccountValueMaxLength) {
-			return next, &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned an invalid API key."}
+			return next, appleAccountResponseError("provider_response", "Apple Account returned an invalid API key.", "manage", manageStatus)
 		}
 		next.APIKey = apiKey
 	}
 	if strings.TrimSpace(next.APIKey) == "" {
-		return next, &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account did not return an API key."}
+		return next, appleAccountResponseError("provider_response", "Apple Account did not return an API key.", "manage", manageStatus)
 	}
 	if token.TimeOutInterval > 0 {
 		expiresAt := now.Add(time.Duration(token.TimeOutInterval) * time.Minute)
@@ -109,15 +125,16 @@ func (c *AppleAccountClient) list(ctx context.Context, channel iCloudResourceCha
 		ForwardToEmailAddress    string                      `json:"forwardToEmailAddress"`
 		MaxLimitReached          bool                        `json:"maxLimitReached"`
 	}
-	if err := c.request(ctx, &next, next.APIKey, http.MethodGet, appleAccountPrivateEmailPath, nil, &payload, now); err != nil {
+	status, err := c.request(ctx, &next, next.APIKey, http.MethodGet, appleAccountPrivateEmailPath, nil, &payload, now)
+	if err != nil {
 		return hmeListResult{}, next, err
 	}
 	if payload.PrivateEmailList == nil {
-		return hmeListResult{}, next, &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned an incomplete alias snapshot."}
+		return hmeListResult{}, next, appleAccountResponseError("provider_response", "Apple Account returned an incomplete alias snapshot.", "list", status)
 	}
 	forwardTo := strings.ToLower(strings.TrimSpace(payload.ForwardToEmailAddress))
 	if forwardTo != "" && !validICloudHMEEmail(forwardTo) {
-		return hmeListResult{}, next, &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned an invalid forwarding target."}
+		return hmeListResult{}, next, appleAccountResponseError("provider_response", "Apple Account returned an invalid forwarding target.", "list", status)
 	}
 	result := hmeListResult{
 		SelectedForwardTo: forwardTo,
@@ -153,13 +170,13 @@ func (c *AppleAccountClient) list(ctx context.Context, channel iCloudResourceCha
 				!validICloudHMEText(alias.Label, iCloudHMELabelMaxLength, true) ||
 				!validICloudHMEText(alias.Note, iCloudHMENoteMaxLength, true) ||
 				!validICloudHMEEmail(alias.ForwardToEmail) {
-				return &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned an invalid alias response."}
+				return appleAccountResponseError("provider_response", "Apple Account returned an invalid alias response.", "list", status)
 			}
 			if _, exists := seenIDs[alias.AnonymousID]; exists {
-				return &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned duplicate aliases."}
+				return appleAccountResponseError("provider_response", "Apple Account returned duplicate aliases.", "list", status)
 			}
 			if _, exists := seenEmails[alias.Email]; exists {
-				return &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned duplicate aliases."}
+				return appleAccountResponseError("provider_response", "Apple Account returned duplicate aliases.", "list", status)
 			}
 			seenIDs[alias.AnonymousID] = struct{}{}
 			seenEmails[alias.Email] = struct{}{}
@@ -184,12 +201,13 @@ func (c *AppleAccountClient) create(ctx context.Context, channel iCloudResourceC
 	var generated struct {
 		EmailAddress string `json:"emailAddress"`
 	}
-	if err := c.request(ctx, &next, next.APIKey, http.MethodPost, "/account/manage/email/private/add", map[string]any{}, &generated, now); err != nil {
+	generatedStatus, err := c.request(ctx, &next, next.APIKey, http.MethodPost, "/account/manage/email/private/add", map[string]any{}, &generated, now)
+	if err != nil {
 		return hmeAlias{}, next, err
 	}
 	generated.EmailAddress = strings.ToLower(strings.TrimSpace(generated.EmailAddress))
 	if !validICloudHMEEmail(generated.EmailAddress) {
-		return hmeAlias{}, next, &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned an invalid alias candidate."}
+		return hmeAlias{}, next, appleAccountResponseError("provider_response", "Apple Account returned an invalid alias candidate.", "create", generatedStatus)
 	}
 	var completed struct {
 		EmailAddress string `json:"emailAddress"`
@@ -198,11 +216,12 @@ func (c *AppleAccountClient) create(ctx context.Context, channel iCloudResourceC
 		ID           string `json:"id"`
 		Active       bool   `json:"active"`
 	}
-	if err := c.request(ctx, &next, next.APIKey, http.MethodPut, "/account/manage/email/private/add/complete", map[string]string{
+	completedStatus, err := c.request(ctx, &next, next.APIKey, http.MethodPut, "/account/manage/email/private/add/complete", map[string]string{
 		"emailAddress": generated.EmailAddress,
 		"label":        "ReMail",
 		"note":         "",
-	}, &completed, now); err != nil {
+	}, &completed, now)
+	if err != nil {
 		return hmeAlias{}, next, err
 	}
 	email := strings.ToLower(strings.TrimSpace(completed.EmailAddress))
@@ -218,7 +237,7 @@ func (c *AppleAccountClient) create(ctx context.Context, channel iCloudResourceC
 		Active:      completed.Active,
 	}
 	if !validICloudHMEText(alias.AnonymousID, iCloudHMEAnonymousIDMaxLength, false) || !validICloudHMEEmail(alias.Email) {
-		return hmeAlias{}, next, &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned an invalid created alias."}
+		return hmeAlias{}, next, appleAccountResponseError("provider_response", "Apple Account returned an invalid created alias.", "create", completedStatus)
 	}
 	var detail struct {
 		EmailAddress   string `json:"emailAddress"`
@@ -229,7 +248,8 @@ func (c *AppleAccountClient) create(ctx context.Context, channel iCloudResourceC
 		Active         *bool  `json:"active"`
 	}
 	detailPath := "/account/manage/email/private/" + url.PathEscape(alias.AnonymousID) + ".em"
-	if err := c.request(ctx, &next, next.APIKey, http.MethodGet, detailPath, nil, &detail, now); err != nil {
+	detailStatus, err := c.request(ctx, &next, next.APIKey, http.MethodGet, detailPath, nil, &detail, now)
+	if err != nil {
 		return hmeAlias{}, next, err
 	}
 	if value := strings.ToLower(strings.TrimSpace(detail.EmailAddress)); value != "" {
@@ -246,7 +266,7 @@ func (c *AppleAccountClient) create(ctx context.Context, channel iCloudResourceC
 		alias.Active = *detail.Active
 	}
 	if !validICloudHMEEmail(alias.Email) || !validICloudHMEEmail(alias.ForwardToEmail) {
-		return hmeAlias{}, next, &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned an invalid forwarding target."}
+		return hmeAlias{}, next, appleAccountResponseError("provider_response", "Apple Account returned an invalid forwarding target.", "detail", detailStatus)
 	}
 	return alias, next, nil
 }
@@ -257,29 +277,30 @@ func (c *AppleAccountClient) request(
 	apiKey, method, requestPath string,
 	body, result any,
 	now time.Time,
-) error {
+) (int, error) {
+	stage := appleAccountRequestStage(requestPath)
 	if channel == nil {
-		return &appleAccountError{Category: "invalid_context", SafeMessage: "Invalid Apple Account request context."}
+		return 0, &appleAccountError{Category: "invalid_context", SafeMessage: "Invalid Apple Account request context."}
 	}
 	scnt := strings.TrimSpace(channel.Scnt)
 	if (channel.Host != "appleid.apple.com" && channel.Host != "appleid.apple.com.cn") ||
 		!validAppleAccountCookie(channel.Cookie) ||
 		(scnt != "" && !validICloudImportValue(scnt, iCloudAppleAccountValueMaxLength)) ||
 		(requestPath != appleAccountTokenPath && scnt == "") {
-		return &appleAccountError{Category: "invalid_context", SafeMessage: "Invalid Apple Account request context."}
+		return 0, &appleAccountError{Category: "invalid_context", SafeMessage: "Invalid Apple Account request context."}
 	}
 	endpoint := url.URL{Scheme: "https", Host: channel.Host, Path: requestPath}
 	var reader io.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
 		if err != nil {
-			return &appleAccountError{Category: "invalid_context", SafeMessage: "Invalid Apple Account request context."}
+			return 0, &appleAccountError{Category: "invalid_context", SafeMessage: "Invalid Apple Account request context."}
 		}
 		reader = bytes.NewReader(encoded)
 	}
 	request, err := http.NewRequestWithContext(ctx, method, endpoint.String(), reader)
 	if err != nil {
-		return &appleAccountError{Category: "invalid_context", SafeMessage: "Invalid Apple Account request context."}
+		return 0, &appleAccountError{Category: "invalid_context", SafeMessage: "Invalid Apple Account request context."}
 	}
 	origin := strings.TrimRight(strings.TrimSpace(channel.Origin), "/")
 	if origin == "" {
@@ -314,42 +335,42 @@ func (c *AppleAccountClient) request(
 	}
 	response, err := client.httpClient.Do(request)
 	if err != nil || response == nil || response.Body == nil {
-		return &appleAccountError{Category: "provider_unavailable", SafeMessage: "Apple Account is temporarily unavailable."}
+		return 0, &appleAccountError{Category: "provider_unavailable", SafeMessage: "Apple Account is temporarily unavailable.", Stage: stage}
 	}
 	defer response.Body.Close()
 	data, readErr := io.ReadAll(io.LimitReader(response.Body, appleAccountResponseMaxBytes+1))
 	if readErr != nil || len(data) > appleAccountResponseMaxBytes {
-		return &appleAccountError{Category: "provider_unavailable", SafeMessage: "Apple Account returned an unreadable response."}
+		return response.StatusCode, &appleAccountError{Category: "provider_unavailable", SafeMessage: "Apple Account returned an unreadable response.", Stage: stage, HTTPStatus: response.StatusCode}
 	}
 	responseScnt := strings.TrimSpace(response.Header.Get("scnt"))
 	if responseScnt != "" && !validICloudImportValue(responseScnt, iCloudAppleAccountValueMaxLength) {
-		return &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned an invalid session context."}
+		return response.StatusCode, &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned an invalid session context.", Stage: stage, HTTPStatus: response.StatusCode}
 	}
 	challengeBootstrap := requestPath == appleAccountTokenPath && scnt == "" &&
 		responseScnt != "" &&
 		(response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden || response.StatusCode == 419)
 	if challengeBootstrap {
 		channel.Scnt = responseScnt
-		return nil
+		return response.StatusCode, nil
 	}
 	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden || response.StatusCode == 419 {
-		return &appleAccountError{Category: "session_invalid", SafeMessage: "Apple Account session is invalid."}
+		return response.StatusCode, &appleAccountError{Category: "session_invalid", SafeMessage: "Apple Account session is invalid.", Stage: stage, HTTPStatus: response.StatusCode}
 	}
 	if response.StatusCode == http.StatusTooManyRequests || appleAccountBodyRateLimited(data) {
-		return &appleAccountError{
+		return response.StatusCode, &appleAccountError{
 			Category: "rate_limited", SafeMessage: "Apple Account alias creation is temporarily rate limited.",
-			RetryAfter: iCloudResponseRetryAfter(response.Header.Get("Retry-After"), data, now),
+			RetryAfter: iCloudResponseRetryAfter(response.Header.Get("Retry-After"), data, now), Stage: stage, HTTPStatus: response.StatusCode,
 		}
 	}
 	if response.StatusCode == http.StatusRequestTimeout || response.StatusCode >= 500 {
-		return &appleAccountError{Category: "provider_unavailable", SafeMessage: "Apple Account is temporarily unavailable."}
+		return response.StatusCode, &appleAccountError{Category: "provider_unavailable", SafeMessage: "Apple Account is temporarily unavailable.", Stage: stage, HTTPStatus: response.StatusCode}
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return &appleAccountError{Category: "provider_rejected", SafeMessage: "Apple Account rejected the request."}
+		return response.StatusCode, &appleAccountError{Category: "provider_rejected", SafeMessage: "Apple Account rejected the request.", Stage: stage, HTTPStatus: response.StatusCode}
 	}
 	updatedCookie := mergeICloudCookies(channel.Cookie, response.Cookies())
 	if !validAppleAccountCookie(updatedCookie) {
-		return &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned an invalid session cookie."}
+		return response.StatusCode, &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned an invalid session cookie.", Stage: stage, HTTPStatus: response.StatusCode}
 	}
 	channel.Cookie = updatedCookie
 	if responseScnt != "" {
@@ -357,20 +378,42 @@ func (c *AppleAccountClient) request(
 	}
 	if value := strings.TrimSpace(response.Header.Get("X-Apple-ID-Session-Id")); value != "" {
 		if !validICloudImportValue(value, iCloudAppleAccountValueMaxLength) {
-			return &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned an invalid session identifier."}
+			return response.StatusCode, &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned an invalid session identifier.", Stage: stage, HTTPStatus: response.StatusCode}
 		}
 		channel.SessionID = value
 	}
 	if value := strings.TrimSpace(response.Header.Get("X-Apple-I-DA-Token")); value != "" {
 		if !validICloudImportValue(value, iCloudAppleAccountValueMaxLength) {
-			return &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned an invalid data access token."}
+			return response.StatusCode, &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned an invalid data access token.", Stage: stage, HTTPStatus: response.StatusCode}
 		}
 		channel.DataAccessToken = value
 	}
 	if result != nil && len(bytes.TrimSpace(data)) > 0 && json.Unmarshal(data, result) != nil {
-		return &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned an invalid response."}
+		return response.StatusCode, &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned an invalid response.", Stage: stage, HTTPStatus: response.StatusCode}
 	}
-	return nil
+	return response.StatusCode, nil
+}
+
+func appleAccountResponseError(category, message, stage string, status int) *appleAccountError {
+	return &appleAccountError{Category: category, SafeMessage: message, Stage: stage, HTTPStatus: status}
+}
+
+func appleAccountRequestStage(requestPath string) string {
+	switch requestPath {
+	case appleAccountTokenPath:
+		return "token"
+	case "/account/manage":
+		return "manage"
+	case appleAccountPrivateEmailPath:
+		return "list"
+	case "/account/manage/email/private/add", "/account/manage/email/private/add/complete":
+		return "create"
+	default:
+		if strings.HasPrefix(requestPath, appleAccountPrivateEmailPath+"/") {
+			return "detail"
+		}
+		return "request"
+	}
 }
 
 func (c *AppleAccountClient) warmPortal(ctx context.Context, channel *iCloudResourceChannelModel, now time.Time) error {
@@ -421,31 +464,31 @@ func (c *AppleAccountClient) portalRequest(ctx context.Context, channel *iCloudR
 	}
 	response, err := client.httpClient.Do(request)
 	if err != nil || response == nil || response.Body == nil {
-		return &appleAccountError{Category: "provider_unavailable", SafeMessage: "Apple Account is temporarily unavailable."}
+		return &appleAccountError{Category: "provider_unavailable", SafeMessage: "Apple Account is temporarily unavailable.", Stage: "portal"}
 	}
 	defer response.Body.Close()
 	data, readErr := io.ReadAll(io.LimitReader(response.Body, appleAccountResponseMaxBytes+1))
 	if readErr != nil || len(data) > appleAccountResponseMaxBytes {
-		return &appleAccountError{Category: "provider_unavailable", SafeMessage: "Apple Account returned an unreadable response."}
+		return &appleAccountError{Category: "provider_unavailable", SafeMessage: "Apple Account returned an unreadable response.", Stage: "portal", HTTPStatus: response.StatusCode}
 	}
 	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden || response.StatusCode == 419 {
-		return &appleAccountError{Category: "session_invalid", SafeMessage: "Apple Account session is invalid."}
+		return &appleAccountError{Category: "session_invalid", SafeMessage: "Apple Account session is invalid.", Stage: "portal", HTTPStatus: response.StatusCode}
 	}
 	if response.StatusCode == http.StatusTooManyRequests || appleAccountBodyRateLimited(data) {
 		return &appleAccountError{
 			Category: "rate_limited", SafeMessage: "Apple Account alias creation is temporarily rate limited.",
-			RetryAfter: iCloudResponseRetryAfter(response.Header.Get("Retry-After"), data, now),
+			RetryAfter: iCloudResponseRetryAfter(response.Header.Get("Retry-After"), data, now), Stage: "portal", HTTPStatus: response.StatusCode,
 		}
 	}
 	if response.StatusCode == http.StatusRequestTimeout || response.StatusCode >= 500 {
-		return &appleAccountError{Category: "provider_unavailable", SafeMessage: "Apple Account is temporarily unavailable."}
+		return &appleAccountError{Category: "provider_unavailable", SafeMessage: "Apple Account is temporarily unavailable.", Stage: "portal", HTTPStatus: response.StatusCode}
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return &appleAccountError{Category: "provider_rejected", SafeMessage: "Apple Account rejected the request."}
+		return &appleAccountError{Category: "provider_rejected", SafeMessage: "Apple Account rejected the request.", Stage: "portal", HTTPStatus: response.StatusCode}
 	}
 	updatedCookie := mergeICloudCookies(channel.Cookie, response.Cookies())
 	if !validAppleAccountCookie(updatedCookie) {
-		return &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned an invalid session cookie."}
+		return &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned an invalid session cookie.", Stage: "portal", HTTPStatus: response.StatusCode}
 	}
 	channel.Cookie = updatedCookie
 	return nil

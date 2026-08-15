@@ -8,6 +8,8 @@ import (
 	"unicode/utf8"
 )
 
+var errICloudAppleAccountListCurl = errors.New("icloud: Apple Account private email list cURL required")
+
 // iCloudImportChannel is the parsed, provider-specific part of one import
 // line.  The raw cURL is never put on a task payload or returned by an API.
 type iCloudImportChannel struct {
@@ -18,6 +20,7 @@ type iCloudImportChannel struct {
 	Referer               string
 	UserAgent             string
 	FDClientInfo          string
+	APIKey                string
 	DSID                  string
 	ClientID              string
 	ClientBuildNumber     string
@@ -83,6 +86,9 @@ func parseICloudCurlImportLine(lineNumber int, raw string) (*iCloudImportLine, *
 	for _, command := range curls {
 		channel, err := parseICloudCurlChannel(command)
 		if err != nil {
+			if errors.Is(err, errICloudAppleAccountListCurl) {
+				return failure("Copy the Apple Account private email list request as cURL.")
+			}
 			return failure("Invalid iCloud cURL import format.")
 		}
 		if _, exists := seen[channel.Kind]; exists {
@@ -160,16 +166,18 @@ func parseICloudCurlChannel(command string) (*iCloudImportChannel, error) {
 		return nil, errors.New("invalid cookie")
 	}
 	if strings.EqualFold(host, "appleid.apple.com") || strings.EqualFold(host, "appleid.apple.com.cn") {
-		if !strings.HasPrefix(path, "/account/manage/") {
-			return nil, errors.New("invalid Apple Account path")
+		if path != appleAccountPrivateEmailPath {
+			return nil, errICloudAppleAccountListCurl
 		}
 		channel.Kind = iCloudChannelAppleAccount
 		channel.Scnt = strings.TrimSpace(headers["scnt"])
 		if channel.Scnt == "" {
 			channel.Scnt = strings.TrimSpace(headers["x-apple-scnt"])
 		}
-		if channel.Scnt != "" && !validICloudImportValue(channel.Scnt, iCloudAppleAccountValueMaxLength) {
-			return nil, errors.New("invalid scnt")
+		channel.APIKey = strings.TrimSpace(headers["x-apple-api-key"])
+		if !validICloudImportValue(channel.Scnt, iCloudAppleAccountValueMaxLength) ||
+			!validICloudImportValue(channel.APIKey, iCloudAppleAccountValueMaxLength) {
+			return nil, errICloudAppleAccountListCurl
 		}
 		if channel.Origin == "" {
 			channel.Origin = defaultAppleAccountOrigin(host)
@@ -291,7 +299,7 @@ func extractICloudCurlArguments(tokens []string) (requestURL, cookie string, hea
 					} else {
 						invalidHeader = true
 					}
-				case "origin", "referer", "user-agent", "x-apple-i-fd-client-info", "scnt", "x-apple-scnt":
+				case "origin", "referer", "user-agent", "x-apple-api-key", "x-apple-i-fd-client-info", "scnt", "x-apple-scnt":
 					if validICloudCurlHeader(headerValue) {
 						headers[name] = headerValue
 					} else {

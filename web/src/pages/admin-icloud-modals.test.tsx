@@ -689,8 +689,8 @@ describe("admin iCloud modal workflows", () => {
     expect(await screen.findByText("icloud_test@relay.example")).toBeInTheDocument();
     expect(dialog).toHaveTextContent("088556");
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    expect(screen.getByText("https://appleid.apple.com/account/manage/gs/ws/token")).toBeInTheDocument();
-    expect(screen.getByText("https://appleid.apple.com.cn/account/manage/gs/ws/token")).toBeInTheDocument();
+    expect(screen.getByText("https://appleid.apple.com/account/manage/email/private")).toBeInTheDocument();
+    expect(screen.getByText("https://appleid.apple.com.cn/account/manage/email/private")).toBeInTheDocument();
     expect(screen.getByText("https://<pod>-maildomainws.icloud.com/v2/hme/list")).toBeInTheDocument();
     expect(screen.getByText("https://<pod>-maildomainws.icloud.com.cn/v2/hme/list")).toBeInTheDocument();
     expect(screen.getByText(/either order is accepted/)).toBeInTheDocument();
@@ -914,7 +914,7 @@ describe("admin iCloud modal workflows", () => {
     );
 
     const newCurl =
-      "curl 'https://appleid.apple.com/account/manage/gs/ws/token' \\\n  -H 'cookie: myacinfo=secret' \\\n  -H 'scnt: scnt-value'";
+      "curl 'https://appleid.apple.com/account/manage/email/private' \\\n  -H 'cookie: myacinfo=secret' \\\n  -H 'X-Apple-Api-Key: api-key' \\\n  -H 'scnt: scnt-value'";
     const oldCurl =
       "curl --url 'https://p217-maildomainws.icloud.com.cn/v2/hme/list?dsid=123' \\\n  -b 'X-APPLE-WEBAUTH-TOKEN=secret'";
     fireEvent.change(screen.getByLabelText(/Primary email/), {
@@ -933,7 +933,7 @@ describe("admin iCloud modal workflows", () => {
         41,
         expect.objectContaining({
           importLine:
-            "replacement@example.com----curl 'https://appleid.apple.com/account/manage/gs/ws/token' -H 'cookie: myacinfo=secret' -H 'scnt: scnt-value'----curl --url 'https://p217-maildomainws.icloud.com.cn/v2/hme/list?dsid=123' -b 'X-APPLE-WEBAUTH-TOKEN=secret'",
+            "replacement@example.com----curl 'https://appleid.apple.com/account/manage/email/private' -H 'cookie: myacinfo=secret' -H 'X-Apple-Api-Key: api-key' -H 'scnt: scnt-value'----curl --url 'https://p217-maildomainws.icloud.com.cn/v2/hme/list?dsid=123' -b 'X-APPLE-WEBAUTH-TOKEN=secret'",
         }),
       ),
     );

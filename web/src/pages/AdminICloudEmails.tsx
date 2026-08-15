@@ -650,10 +650,10 @@ export function ImportICloudModal({
                   </p>
                   <div className="mt-1 space-y-0.5">
                     <code className="block break-all font-mono text-xs text-[var(--semi-color-primary)]">
-                      https://appleid.apple.com/account/manage/gs/ws/token
+                      https://appleid.apple.com/account/manage/email/private
                     </code>
                     <code className="block break-all font-mono text-xs text-[var(--semi-color-primary)]">
-                      https://appleid.apple.com.cn/account/manage/gs/ws/token
+                      https://appleid.apple.com.cn/account/manage/email/private
                     </code>
                   </div>
                 </div>

@@ -252,6 +252,40 @@ func TestProcessICloudValidationRateLimitUsesRetryAfterWithoutHealthFailure(t *t
 	}
 }
 
+func TestProcessICloudValidationRecordsAppleHTTPFailure(t *testing.T) {
+	now := time.Date(2026, 8, 14, 9, 38, 0, 0, time.UTC)
+	db := openICloudValidationTestDB(t, "apple-http-failure")
+	task := createICloudValidationTestResource(t, db, now, now.Add(time.Hour))
+	setICloudForwardingSuffixes(t, "relay.example")
+	if err := db.Create(&iCloudResourceChannelModel{
+		ResourceID: 1, Kind: iCloudChannelAppleAccount, Host: "appleid.apple.com",
+		Cookie: "opaque=secret", Scnt: "scnt", APIKey: "api-key", SessionStatus: iCloudSessionUnchecked,
+		CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	service.apple = NewAppleAccountClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Path != appleAccountPrivateEmailPath {
+			t.Fatalf("unexpected Apple Account path %q", request.URL.Path)
+		}
+		return &http.Response{StatusCode: http.StatusUnauthorized, Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+	})})
+
+	if err := service.ProcessICloudValidation(context.Background(), task); err != nil {
+		t.Fatalf("process validation: %v", err)
+	}
+	var resource iCloudResourceModel
+	if err := db.First(&resource, 1).Error; err != nil {
+		t.Fatalf("read resource: %v", err)
+	}
+	if resource.Status != iCloudResourcePending || resource.ValidationFailures != 1 ||
+		resource.LastSafeError != "Apple Account session is invalid. (stage=list, HTTP 401)" {
+		t.Fatalf("Apple HTTP failure was not recorded safely: %#v", resource)
+	}
+}
+
 func TestProcessICloudValidationStopsAfterMaximumFailuresForInvalidSession(t *testing.T) {
 	now := time.Date(2026, 8, 14, 9, 40, 0, 0, time.UTC)
 	db := openICloudValidationTestDB(t, "max-failures")

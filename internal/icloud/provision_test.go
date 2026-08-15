@@ -242,7 +242,8 @@ func TestAppleAccountListParsesActiveInactiveAndForwardingTarget(t *testing.T) {
 		Host: "appleid.apple.com", Cookie: "myacinfo=secret", Scnt: "scnt", APIKey: "api-key",
 	}, now)
 	var appleErr *appleAccountError
-	if !errors.As(err, &appleErr) || appleErr.Category != "provider_response" {
+	if !errors.As(err, &appleErr) || appleErr.Category != "provider_response" || appleErr.Stage != "list" ||
+		appleErr.HTTPStatus != http.StatusOK || !strings.Contains(err.Error(), "stage=list, HTTP 200") {
 		t.Fatalf("incomplete Apple Account snapshot error = %#v", err)
 	}
 }
@@ -336,7 +337,7 @@ func TestICloudAppleListSessionFailureReachesInvalidThreshold(t *testing.T) {
 	}
 	channel := iCloudResourceChannelModel{
 		ResourceID: 1, Kind: iCloudChannelAppleAccount, Host: "appleid.apple.com",
-		Cookie: "myacinfo=secret", Scnt: "scnt", SessionStatus: iCloudSessionValid,
+		Cookie: "myacinfo=secret", Scnt: "scnt", APIKey: "api-key", SessionStatus: iCloudSessionValid,
 		SessionFailures: iCloudSessionFailureLimit - 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := db.Create(&channel).Error; err != nil {
@@ -344,24 +345,16 @@ func TestICloudAppleListSessionFailureReachesInvalidThreshold(t *testing.T) {
 	}
 	service := NewService(db, nil, nil)
 	service.apple = NewAppleAccountClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
-		body := `{"timeOutInterval":15}`
-		status := http.StatusOK
-		switch request.URL.Path {
-		case appleAccountTokenPath:
-		case "/account/manage":
-			body = `{"apiKey":"api-key"}`
-		case appleAccountPrivateEmailPath:
-			status = http.StatusUnauthorized
-			body = `{}`
-		default:
-			t.Fatalf("unexpected Apple Account path %q", request.URL.Path)
+		if request.URL.Path != appleAccountPrivateEmailPath {
+			t.Fatalf("imported API key should list directly, got %q", request.URL.Path)
 		}
-		return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+		return &http.Response{StatusCode: http.StatusUnauthorized, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{}`))}, nil
 	})})
 
 	_, _, syncErr := service.syncICloudAppleAccount(context.Background(), resource, channel, now)
 	var appleErr *appleAccountError
-	if !errors.As(syncErr, &appleErr) || appleErr.Category != "session_invalid" {
+	if !errors.As(syncErr, &appleErr) || appleErr.Category != "session_invalid" || appleErr.Stage != "list" ||
+		appleErr.HTTPStatus != http.StatusUnauthorized || !strings.Contains(syncErr.Error(), "stage=list, HTTP 401") {
 		t.Fatalf("Apple Account list error = %#v", syncErr)
 	}
 	if err := db.First(&channel, channel.ID).Error; err != nil {
@@ -511,6 +504,89 @@ func TestICloudRetryAfterPreservesProviderDelay(t *testing.T) {
 	retryAt := now.Add(5 * time.Hour)
 	if got := iCloudRetryAfter(retryAt.Format(http.TimeFormat), now); got != 5*time.Hour {
 		t.Fatalf("date Retry-After = %v, want 5h", got)
+	}
+}
+
+func TestICloudProvisionDoesNotCatchUpMissedCreationSlots(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:icloud-provision-no-catch-up?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(
+		&iCloudResourceModel{}, &iCloudResourceChannelModel{}, &iCloudAliasModel{},
+		&iCloudAliasRouteModel{}, &iCloudMaintenanceRunModel{},
+	); err != nil {
+		t.Fatalf("migrate database: %v", err)
+	}
+	firstCreatedAt := time.Date(2026, 8, 15, 17, 25, 0, 0, time.UTC)
+	now := firstCreatedAt
+	windowAt := firstCreatedAt.Add(-30 * time.Minute)
+	if err := db.Create(&iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "owner@example.com", Status: iCloudResourceNormal,
+		ExpireAt: firstCreatedAt.Add(time.Hour), CredentialRevision: 1, NextProvisionAt: &firstCreatedAt,
+		CreatedAt: firstCreatedAt, UpdatedAt: firstCreatedAt,
+	}).Error; err != nil {
+		t.Fatalf("create resource: %v", err)
+	}
+	if err := db.Create(&iCloudResourceChannelModel{
+		ResourceID: 1, Kind: iCloudChannelAppleAccount, Host: "appleid.apple.com",
+		Cookie: "opaque=secret", Scnt: "scnt", APIKey: "api-key", SessionStatus: iCloudSessionValid,
+		ProvisionWindowAt: &windowAt, ProvisionWindowCount: 2, CreatedAt: firstCreatedAt, UpdatedAt: firstCreatedAt,
+	}).Error; err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	paths := make([]string, 0, 4)
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	service.apple = NewAppleAccountClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		paths = append(paths, request.URL.Path)
+		body := `{}`
+		switch request.URL.Path {
+		case appleAccountPrivateEmailPath:
+			body = `{"privateEmailList":[],"inactivePrivateEmailList":[],"forwardToEmailAddress":"mailbox@relay.example","maxLimitReached":false}`
+		case "/account/manage/email/private/add":
+			body = `{"emailAddress":"created@icloud.com"}`
+		case "/account/manage/email/private/add/complete":
+			body = `{"emailAddress":"created@icloud.com","id":"created-id","active":true}`
+		case "/account/manage/email/private/created-id.em":
+			body = `{"emailAddress":"created@icloud.com","forwardToEmail":"mailbox@relay.example","active":true}`
+		default:
+			t.Fatalf("unexpected Apple Account path %q", request.URL.Path)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
+	})})
+
+	if err := service.ProcessICloudProvision(context.Background(), iCloudProvisionTask{ResourceID: 1}); err != nil {
+		t.Fatalf("first delayed provision: %v", err)
+	}
+	now = firstCreatedAt.Add(time.Second)
+	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", 1).Update("next_provision_at", now).Error; err != nil {
+		t.Fatalf("force second wake-up: %v", err)
+	}
+	if err := service.ProcessICloudProvision(context.Background(), iCloudProvisionTask{ResourceID: 1}); err != nil {
+		t.Fatalf("second delayed provision: %v", err)
+	}
+	wantPaths := []string{
+		appleAccountPrivateEmailPath,
+		"/account/manage/email/private/add",
+		"/account/manage/email/private/add/complete",
+		"/account/manage/email/private/created-id.em",
+	}
+	if strings.Join(paths, "\n") != strings.Join(wantPaths, "\n") {
+		t.Fatalf("missed slots triggered another provider request: paths=%#v", paths)
+	}
+	var resource iCloudResourceModel
+	if err := db.First(&resource, 1).Error; err != nil {
+		t.Fatalf("read resource: %v", err)
+	}
+	var stored iCloudResourceChannelModel
+	if err := db.Where("resource_id = ? AND kind = ?", 1, iCloudChannelAppleAccount).Take(&stored).Error; err != nil {
+		t.Fatalf("read channel: %v", err)
+	}
+	wantNext := firstCreatedAt.Add(iCloudChannelInterval(iCloudChannelAppleAccount))
+	if resource.AliasCount != 1 || resource.NextProvisionAt == nil || !resource.NextProvisionAt.Equal(wantNext) ||
+		stored.ProvisionWindowAt == nil || !stored.ProvisionWindowAt.Equal(firstCreatedAt) || stored.ProvisionWindowCount != 1 {
+		t.Fatalf("missed slots were not rebased: resource=%#v channel=%#v", resource, stored)
 	}
 }
 

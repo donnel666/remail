@@ -9,13 +9,14 @@ import (
 
 const (
 	testICloudOldCookie    = "X-APPLE-WEBAUTH-USER=user; X-APPLE-WEBAUTH-TOKEN=token; X-APPLE-DS-WEB-SESSION-TOKEN=session"
+	testICloudNewCookie    = "myacinfo=secret"
 	testICloudFDClientInfo = `{"F":"test-fingerprint"}`
 	testICloudOldCurl      = `curl --url 'https://p119-maildomainws.icloud.com.cn/v2/hme/list?clientBuildNumber=build&clientMasteringNumber=master&clientId=client&dsid=123' -b '` + testICloudOldCookie + `'`
 )
 
 var (
 	testICloudLongScnt = strings.Repeat("s", 400)
-	testICloudNewCurl  = `curl --url 'https://appleid.apple.com/account/manage/gs/ws/token' -b 'myacinfo=secret' -H 'X-Apple-I-FD-Client-Info: ` + testICloudFDClientInfo + `' -H 'scnt: ` + testICloudLongScnt + `'`
+	testICloudNewCurl  = `curl --url 'https://appleid.apple.com/account/manage/email/private' -b '` + testICloudNewCookie + `' -H 'X-Apple-Api-Key: api-key' -H 'X-Apple-I-FD-Client-Info: ` + testICloudFDClientInfo + `' -H 'scnt: ` + testICloudLongScnt + `'`
 )
 
 func TestParseICloudImportSupportsCompleteCredentialLines(t *testing.T) {
@@ -44,7 +45,7 @@ func TestParseICloudImportSupportsCompleteCredentialLines(t *testing.T) {
 					t.Fatalf("channel %d kind = %q, want %q", index, line.Channels[index].Kind, kind)
 				}
 				if kind == iCloudChannelAppleAccount &&
-					(line.Channels[index].FDClientInfo != testICloudFDClientInfo || line.Channels[index].Scnt != testICloudLongScnt) {
+					(line.Channels[index].APIKey != "api-key" || line.Channels[index].FDClientInfo != testICloudFDClientInfo || line.Channels[index].Scnt != testICloudLongScnt) {
 					t.Fatalf("unexpected Apple Account request context")
 				}
 			}
@@ -54,12 +55,13 @@ func TestParseICloudImportSupportsCompleteCredentialLines(t *testing.T) {
 
 func TestParseICloudImportAcceptsBrowserCopiedOpaqueValues(t *testing.T) {
 	scnt := strings.Repeat("s", iCloudAppleAccountValueMaxLength)
-	cookie := "POD=cn~zh; myacinfo=" + strings.Repeat("a", 4096)
-	command := `curl --url 'https://appleid.apple.com/account/manage/gs/ws/token' ` +
+	cookie := "opaque_a=1; opaque_b=" + strings.Repeat("a", 4096)
+	command := `curl --url 'https://appleid.apple.com/account/manage/email/private' ` +
 		`-H 'Accept: application/json, text/plain, */*' ` +
 		`-H 'X-Ignored-Browser-Context: ` + strings.Repeat("x", 4096) + `' ` +
 		`-H 'Cookie: ` + cookie + `' ` +
 		`-H 'Origin: https://account.apple.com' ` +
+		`-H 'X-Apple-Api-Key: api-key' ` +
 		`-H 'X-Apple-I-FD-Client-Info: {"U":"browser","F":"fingerprint"}' ` +
 		`-H 'scnt: ` + scnt + `'`
 	line, failure := parseICloudImportLine(1, "owner@example.com----"+command)
@@ -70,6 +72,20 @@ func TestParseICloudImportAcceptsBrowserCopiedOpaqueValues(t *testing.T) {
 	tooLong := strings.Replace(command, scnt, scnt+"x", 1)
 	if _, failure = parseICloudImportLine(1, "owner@example.com----"+tooLong); failure == nil {
 		t.Fatal("Apple Account value above 1000 characters must be rejected")
+	}
+}
+
+func TestParseICloudImportRequiresAppleAccountPrivateEmailListCurl(t *testing.T) {
+	commands := []string{
+		`curl --url 'https://appleid.apple.com/account/manage/gs/ws/token' -b 'myacinfo=secret' -H 'X-Apple-Api-Key: api-key' -H 'scnt: value'`,
+		`curl --url 'https://appleid.apple.com/account/manage/email/private' -b 'myacinfo=secret' -H 'X-Apple-Api-Key: api-key'`,
+		`curl --url 'https://appleid.apple.com/account/manage/email/private' -b 'myacinfo=secret' -H 'scnt: value'`,
+	}
+	for _, command := range commands {
+		line, failure := parseICloudImportLine(1, "owner@example.com----"+command)
+		if line != nil || failure == nil || failure.SafeMessage != "Copy the Apple Account private email list request as cURL." {
+			t.Fatalf("incomplete Apple Account request accepted: line=%#v failure=%#v", line, failure)
+		}
 	}
 }
 
@@ -103,8 +119,9 @@ func TestParseICloudImportKeepsSeparatorsInsideCookie(t *testing.T) {
 }
 
 func TestParseICloudImportJoinsBrowserCurlContinuations(t *testing.T) {
-	content := "owner@icloud.com----curl --url 'https://appleid.apple.com/account/manage/gs/ws/token' \\\r\n" +
-		"  -b 'myacinfo=secret' \\\r\n" +
+	content := "owner@icloud.com----curl --url 'https://appleid.apple.com/account/manage/email/private' \\\r\n" +
+		"  -b '" + testICloudNewCookie + "' \\\r\n" +
+		"  -H 'X-Apple-Api-Key: api-key' \\\r\n" +
 		"  -H 'scnt: value'\nsecond@icloud.com----" + testICloudOldCurl
 	lines, failures, fatal := parseICloudImport(content, coreDomain.ImportErrorStrategyAbort)
 	if fatal != nil || len(failures) != 0 || len(lines) != 2 || lines[0].LineNumber != 1 || lines[1].LineNumber != 2 {

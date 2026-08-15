@@ -274,11 +274,15 @@ func (s *Service) syncICloudAppleAccount(ctx context.Context, resource iCloudRes
 	if client == nil {
 		client = NewAppleAccountClient(nil)
 	}
-	refreshed, err := client.refresh(ctx, channel, now)
-	if err != nil {
-		return hmeListResult{}, channel, s.applyICloudProvisionError(ctx, resource, channel, err, now)
+	current := channel
+	if strings.TrimSpace(current.APIKey) == "" || (current.ManageExpiresAt != nil && !current.ManageExpiresAt.After(now)) {
+		refreshed, err := client.refresh(ctx, current, now)
+		if err != nil {
+			return hmeListResult{}, current, s.applyICloudProvisionError(ctx, resource, current, err, now)
+		}
+		current = refreshed
 	}
-	list, updated, err := client.list(ctx, refreshed, now)
+	list, updated, err := client.list(ctx, current, now)
 	updated.NextKeepaliveAt = appleAccountNextKeepalive(updated, now)
 	if err != nil {
 		_ = s.persistICloudProvisionChannel(ctx, resource, updated, false, false, now)
@@ -494,7 +498,8 @@ func (s *Service) persistICloudProvisionChannel(ctx context.Context, resource iC
 func updateICloudProvisionChannelTx(tx *gorm.DB, channel iCloudResourceChannelModel, valid, consumeSlot bool, now time.Time) error {
 	windowAt, windowCount := channel.ProvisionWindowAt, channel.ProvisionWindowCount
 	if consumeSlot {
-		if windowAt == nil || !now.Before(windowAt.Add(time.Hour)) {
+		if windowAt == nil || !now.Before(windowAt.Add(time.Hour)) ||
+			windowAt.Add(time.Duration(windowCount)*iCloudChannelInterval(channel.Kind)).Before(now) {
 			value := now
 			windowAt, windowCount = &value, 0
 		}
