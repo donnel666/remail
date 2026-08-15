@@ -28,7 +28,7 @@ const (
 
 var bootArgsPattern = regexp.MustCompile(`(?s)<script type="application/json" class="boot_args">\s*(.*?)</script>`)
 
-var errPasswordRejected = errors.New("Apple Account password was rejected")
+var errPasswordRejected = errors.New("apple account password was rejected")
 
 type passwordRejectedError struct {
 	error
@@ -273,7 +273,7 @@ func processAppleAccountOnce(ctx context.Context, proxyURL string, account accou
 			attribute = valueString(options["repairAttribute"])
 		}
 		if attribute != "" && attribute != "complete" {
-			return accountOutput{}, fmt.Errorf("Apple Account still requires repair: %s", attribute)
+			return accountOutput{}, fmt.Errorf("apple account still requires repair: %s", attribute)
 		}
 		if _, err := flow.postObject(flow.serviceURL+"/auth/repair/complete", map[string]any{}, "repair/complete", false, false); err != nil {
 			return accountOutput{}, err

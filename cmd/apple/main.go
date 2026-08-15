@@ -32,7 +32,7 @@ import (
 
 const outputSeparator = "----"
 
-var errTwoFactorEnabled = errors.New("Apple Account has two-factor authentication enabled")
+var errTwoFactorEnabled = errors.New("apple account has two-factor authentication enabled")
 
 type commandConfig struct {
 	inputPaths  []string

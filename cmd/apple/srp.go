@@ -282,7 +282,7 @@ func encodeAppleCollector(raw string) (string, error) {
 	for _, char := range []byte(replaced) {
 		entry, ok := appleHuffmanTable[char]
 		if !ok {
-			return "", fmt.Errorf("Apple fingerprint contains unsupported byte %d", char)
+			return "", fmt.Errorf("apple fingerprint contains unsupported byte %d", char)
 		}
 		put(entry.size, entry.value)
 	}
