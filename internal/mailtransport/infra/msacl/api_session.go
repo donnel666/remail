@@ -6,6 +6,17 @@ func NewAPISession(ctx context.Context, proxy string, timeoutSeconds int) (*Sess
 	return newPlainSession(ctx, proxy, timeoutSeconds)
 }
 
+// Request exposes the shared TLS client for protocol clients that need custom
+// headers, JSON bodies, or redirect handling.
+func (s *Session) Request(method, rawURL string, headers map[string]string, jsonBody any, followRedirects bool) (*HTTPResponse, error) {
+	return s.do(method, rawURL, requestOptions{
+		Headers:           headers,
+		JSON:              jsonBody,
+		AllowRedirects:    followRedirects,
+		HasAllowRedirects: true,
+	})
+}
+
 func (s *Session) GetJSON(rawURL string, headers map[string]string, out any) (*HTTPResponse, error) {
 	resp, err := s.Get(rawURL, requestOptions{Headers: headers})
 	if err != nil {

@@ -17,6 +17,7 @@ COPY . .
 COPY --from=frontend /app/web/dist ./cmd/server/webdist
 RUN CGO_ENABLED=0 go build -o /server ./cmd/server
 RUN CGO_ENABLED=0 go build -o /msrecovery ./cmd/msrecovery
+RUN CGO_ENABLED=0 go build -o /apple ./cmd/apple
 
 # Stage 3: Runtime
 FROM alpine:3.21
@@ -25,6 +26,7 @@ RUN apk add --no-cache ca-certificates tzdata chromium
 ENV TZ=Asia/Shanghai
 COPY --from=backend /server /server
 COPY --from=backend /msrecovery /usr/local/bin/msrecovery
+COPY --from=backend /apple /usr/local/bin/apple
 COPY --from=backend /app/migrations /app/migrations
 ENV MIGRATIONS_DIR=/app/migrations
 EXPOSE 8080 2525

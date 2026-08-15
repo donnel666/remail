@@ -391,6 +391,7 @@ jobs:
           mkdir -p dist/remail
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/remail/remail-server ./cmd/server
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/remail/remail-msrecovery ./cmd/msrecovery
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/remail/remail-apple ./cmd/apple
           cp -r migrations dist/remail/migrations
           cp deploy/compose.yml dist/remail/
           tar -czf "dist/remail-${GITHUB_REF_NAME}-linux-amd64.tar.gz" -C dist remail
