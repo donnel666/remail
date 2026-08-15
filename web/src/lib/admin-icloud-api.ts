@@ -25,6 +25,8 @@ export type AdminICloudAliasList =
   components["schemas"]["AdminICloudAliasListResponse"];
 export type AdminICloudImportResponse =
   components["schemas"]["AdminICloudImportResponse"];
+export type AdminICloudImportPreparation =
+  components["schemas"]["AdminICloudImportPreparation"];
 export type AdminICloudMutationResponse =
   components["schemas"]["AdminICloudMutationResponse"];
 export type AdminICloudTask = components["schemas"]["AdminTaskView"];
@@ -54,8 +56,35 @@ export interface AdminICloudResourceListFilter {
 export interface AdminICloudImportRequest {
   content: string;
   ownerId: number;
+  preparationId: number;
   errorStrategy: AdminICloudImportErrorStrategy;
   expireAt: string;
+}
+
+export async function createAdminICloudImportPreparation(
+  signal?: AbortSignal,
+): Promise<AdminICloudImportPreparation> {
+  return unwrap(
+    await client.POST("/v1/admin/icloud/resources/import-preparations", {
+      params: { header: csrfHeader() },
+      signal,
+    }),
+  );
+}
+
+export async function getAdminICloudImportPreparation(
+  preparationId: number,
+  signal?: AbortSignal,
+): Promise<AdminICloudImportPreparation> {
+  return unwrap(
+    await client.GET(
+      "/v1/admin/icloud/resources/import-preparations/{preparationId}",
+      {
+        params: { path: { preparationId } },
+        signal,
+      },
+    ),
+  );
 }
 
 type AdminUserListDTO = components["schemas"]["AdminUserListResponse"];
@@ -181,6 +210,7 @@ export async function importAdminICloudResources(
     new File([content], "icloud-resources.txt", { type: "text/plain" }),
   );
   formData.append("ownerId", String(request.ownerId));
+  formData.append("preparationId", String(request.preparationId));
   formData.append("errorStrategy", request.errorStrategy);
   formData.append("expireAt", request.expireAt);
 

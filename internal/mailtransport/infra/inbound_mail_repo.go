@@ -208,7 +208,7 @@ func (r *InboundMailRepo) SaveParsedSummary(ctx context.Context, id uint, genera
 		receivedAt = summary.ParsedAt.UTC()
 	}
 	result := r.db.WithContext(ctx).Model(&InboundMailModel{}).
-		Where("id = ? AND status = ? AND process_generation = ?", id, string(domain.InboundStatusProcessing), generation).
+		Where("id = ? AND status IN ? AND process_generation = ?", id, []string{string(domain.InboundStatusPending), string(domain.InboundStatusProcessing)}, generation).
 		Updates(map[string]any{
 			"header_from":       summary.HeaderFrom,
 			"subject":           summary.Subject,

@@ -125,7 +125,7 @@ func (r *inboundRepoStub) SaveParsedSummary(_ context.Context, id uint, generati
 	if !ok {
 		return false, errors.New("not found")
 	}
-	if mail.Status != domain.InboundStatusProcessing || mail.ProcessGeneration != generation {
+	if (mail.Status != domain.InboundStatusPending && mail.Status != domain.InboundStatusProcessing) || mail.ProcessGeneration != generation {
 		return false, nil
 	}
 	mail.HeaderFrom = summary.HeaderFrom
@@ -308,13 +308,15 @@ func TestInboundServiceAcceptStoresDomainMailWithoutProcessingTasks(t *testing.T
 	service := NewInboundService(repo, inboundResolverStub{}, files, queue, nil)
 	service.now = fixedClock(time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC))
 
+	raw := "From: Apple <noreply@apple.com>\r\nSubject: Apple verification\r\nDate: Fri, 03 Jul 2026 11:59:00 +0000\r\n\r\nCode 088556"
 	mails, err := service.Accept(context.Background(), InboundRawMessage{
 		EnvelopeFrom: "Sender@Example.COM",
 		Recipients: []domain.InboundRecipient{
 			{Email: "a@test.com", ResourceID: 10, ResourceType: domain.InboundResourceDomain, OwnerUserID: 1},
 			{Email: "b@test.com", ResourceID: 10, ResourceType: domain.InboundResourceDomain, OwnerUserID: 1},
 		},
-		ContentBytes: []byte("Subject: hi\r\n\r\nbody"),
+		Content:     strings.NewReader(raw),
+		ContentSize: int64(len(raw)),
 	})
 	require.NoError(t, err)
 	require.Len(t, mails, 2)
@@ -323,6 +325,12 @@ func TestInboundServiceAcceptStoresDomainMailWithoutProcessingTasks(t *testing.T
 	require.NoError(t, err)
 	require.NotNil(t, first)
 	assert.Equal(t, domain.InboundStatusStored, first.Status)
+	assert.Equal(t, "noreply@apple.com", first.HeaderFrom)
+	assert.Equal(t, "Apple verification", first.Subject)
+	assert.Equal(t, "088556", first.VerificationCode)
+	require.NotNil(t, first.ReceivedAt)
+	assert.Equal(t, time.Date(2026, 7, 3, 11, 59, 0, 0, time.UTC), *first.ReceivedAt)
+	require.NotNil(t, first.ParsedAt)
 	assert.Equal(t, "sender@example.com", mails[0].EnvelopeFrom)
 	assert.Equal(t, mails[0].SourceObjectKey, mails[1].SourceObjectKey)
 	assert.Contains(t, mails[0].SourceObjectKey, "mailtransport/inbound/2026/07/03/")
@@ -499,12 +507,14 @@ func TestInboundServiceAcceptRejectsInvalidResolvedRecipient(t *testing.T) {
 		nil,
 	)
 
-	_, err := service.Accept(context.Background(), InboundRawMessage{
-		EnvelopeFrom: "sender@example.com",
-		Recipients:   []domain.InboundRecipient{{Email: "a@test.com", ResourceID: 10, OwnerUserID: 1}},
-		ContentBytes: []byte("Subject: hi\r\n\r\nbody"),
-	})
-	require.ErrorIs(t, err, domain.ErrInboundRecipientRejected)
+	for _, resourceType := range []domain.InboundResourceType{"", domain.InboundResourceICloud} {
+		_, err := service.Accept(context.Background(), InboundRawMessage{
+			EnvelopeFrom: "sender@example.com",
+			Recipients:   []domain.InboundRecipient{{Email: "a@test.com", ResourceID: 10, ResourceType: resourceType, OwnerUserID: 1}},
+			ContentBytes: []byte("Subject: hi\r\n\r\nbody"),
+		})
+		require.ErrorIs(t, err, domain.ErrInboundRecipientRejected)
+	}
 }
 
 func TestInboundServiceAcceptKeepsPendingAndLogsWhenQueueUnavailable(t *testing.T) {

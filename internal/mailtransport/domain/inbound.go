@@ -30,6 +30,9 @@ type InboundResourceType string
 const (
 	InboundResourceMicrosoft InboundResourceType = "microsoft"
 	InboundResourceDomain    InboundResourceType = "domain"
+	// InboundResourceICloud is an auxiliary-mail query scope. Messages sent to
+	// an iCloud forwarding address remain stored against their domain resource.
+	InboundResourceICloud InboundResourceType = "icloud"
 )
 
 func IsValidInboundResourceType(value InboundResourceType) bool {

@@ -1050,7 +1050,8 @@ export function ResourceMailsPanel({
           debouncedSearch,
           pageSize,
           cursor ?? undefined,
-          controller.signal
+          controller.signal,
+          resourceType === "icloud" ? "icloud" : "microsoft"
         )
       : listAdminMicrosoftMessages(
           resourceId,
@@ -1140,7 +1141,12 @@ export function ResourceMailsPanel({
     setSelectedDetail(null);
     setDetailLoading(true);
     const request = auxiliary
-      ? getAdminMicrosoftBindingMessage(resourceId, selectedId, controller.signal)
+      ? getAdminMicrosoftBindingMessage(
+          resourceId,
+          selectedId,
+          controller.signal,
+          resourceType === "icloud" ? "icloud" : "microsoft"
+        )
       : getAdminMicrosoftMessage(
           resourceId,
           selectedId,

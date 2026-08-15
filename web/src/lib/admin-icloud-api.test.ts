@@ -24,7 +24,9 @@ import {
   batchAdminICloudResourcesByFilter,
   batchAdminICloudResourcesByIds,
   createAdminICloudAliases,
+  createAdminICloudImportPreparation,
   deleteAdminICloudResource,
+  getAdminICloudImportPreparation,
   getAdminICloudResourceDetail,
   importAdminICloudResources,
   listAdminICloudAliases,
@@ -37,6 +39,7 @@ import {
   validateAdminICloudResource,
   waitForAdminICloudResourceImport,
   type AdminICloudImportResponse,
+  type AdminICloudImportPreparation,
   type AdminICloudResourceList,
 } from "./admin-icloud-api";
 
@@ -91,6 +94,15 @@ const IMPORT_RESPONSE = {
   updatedAt: "2026-08-07T08:00:02Z",
 } satisfies AdminICloudImportResponse;
 
+const IMPORT_PREPARATION = {
+  id: 13,
+  forwardToEmail: "icloud_test@relay.example",
+  status: "code_received",
+  verificationCode: "088556",
+  expiresAt: "2026-08-15T08:30:00Z",
+  createdAt: "2026-08-15T08:00:00Z",
+} satisfies AdminICloudImportPreparation;
+
 describe("admin iCloud API adapter", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -104,6 +116,34 @@ describe("admin iCloud API adapter", () => {
       ),
     ).toBe(
       "first@icloud.com----curl 'https://example.com' -H 'x-test: one'\nsecond@icloud.com----curl 'https://example.com'",
+    );
+  });
+
+  it("creates and polls a forwarding-address preparation", async () => {
+    apiMocks.POST.mockResolvedValueOnce({ data: IMPORT_PREPARATION });
+    apiMocks.GET.mockResolvedValueOnce({ data: IMPORT_PREPARATION });
+    const controller = new AbortController();
+
+    await expect(
+      createAdminICloudImportPreparation(controller.signal),
+    ).resolves.toEqual(IMPORT_PREPARATION);
+    await expect(
+      getAdminICloudImportPreparation(13, controller.signal),
+    ).resolves.toEqual(IMPORT_PREPARATION);
+
+    expect(apiMocks.POST).toHaveBeenCalledWith(
+      "/v1/admin/icloud/resources/import-preparations",
+      {
+        params: { header: { "X-CSRF-Token": "admin-csrf" } },
+        signal: controller.signal,
+      },
+    );
+    expect(apiMocks.GET).toHaveBeenCalledWith(
+      "/v1/admin/icloud/resources/import-preparations/{preparationId}",
+      {
+        params: { path: { preparationId: 13 } },
+        signal: controller.signal,
+      },
     );
   });
 
@@ -144,6 +184,7 @@ describe("admin iCloud API adapter", () => {
       importAdminICloudResources({
         content,
         ownerId: 101,
+        preparationId: 13,
         errorStrategy: "skip",
         expireAt: "2026-10-07T08:00:00Z",
       }),
@@ -155,6 +196,7 @@ describe("admin iCloud API adapter", () => {
       "/v1/admin/icloud/resources/imports",
     );
     expect(formData.get("ownerId")).toBe("101");
+    expect(formData.get("preparationId")).toBe("13");
     expect(formData.get("errorStrategy")).toBe("skip");
     expect(formData.get("expireAt")).toBe("2026-10-07T08:00:00Z");
     expect(formData.has("longLived")).toBe(false);

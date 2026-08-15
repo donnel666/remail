@@ -168,6 +168,7 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 		if imported != nil {
 			if accountIdentityChanged {
 				updates["selected_forward_to"] = ""
+				updates["required_forward_to"] = ""
 				updates["alias_count"] = 0
 				updates["last_alias_sync_at"] = nil
 			}

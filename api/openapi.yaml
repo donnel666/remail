@@ -10218,12 +10218,69 @@ paths:
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 
+  /v1/admin/icloud/resources/import-preparations:
+    post:
+      operationId: postAdminICloudImportPreparation
+      summary: Create a temporary iCloud forwarding mailbox
+      description: Selects one authorized auxiliary domain that allows new mailboxes, generates a random address, and reserves it for the current administrator for 30 minutes. The address must be verified with Apple before it can be consumed by an import.
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "201":
+          description: Temporary forwarding mailbox created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudImportPreparation"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/admin/icloud/resources/import-preparations/{preparationId}:
+    get:
+      operationId: getAdminICloudImportPreparation
+      summary: Poll an iCloud forwarding mailbox for the Apple verification code
+      description: Checks mail sent to the exact reserved address after its creation. Only a message whose parsed sender is `noreply@apple.com` can supply the verification code. Code extraction uses the system `verification_code_pattern` setting.
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: preparationId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Current preparation status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudImportPreparation"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
   /v1/admin/icloud/resources/imports:
     post:
       operationId: postAdminICloudResourceImport
       summary: Import iCloud resources for a selected owner
       description: |
-        Each non-empty TXT entry is one complete credential set containing one old cURL, one new cURL, or both cURLs in either order: `email----curl[----curl]`. Browser-copied cURL commands may use backslash line continuations. The server classifies each cURL by its Apple host and path, parses it without executing shell syntax, and rejects duplicate channels. The required `expireAt` controls only future alias creation; it does not stop allocation or receiving. Cookies, cURL source, and parsed provider context remain write-only.
+        Consumes one verified import preparation and one complete credential entry containing one old cURL, one new cURL, or both cURLs in either order: `email----curl[----curl]`. Browser-copied cURL commands may use backslash line continuations. The server classifies each cURL by its Apple host and path, parses it without executing shell syntax, and rejects multiple resource entries. The prepared forwarding address is persisted on the iCloud resource and validation requires an exact Apple forwarding-address match. The required `expireAt` controls only future alias creation; it does not stop allocation or receiving. Cookies, cURL source, and parsed provider context remain write-only.
       tags: [Admin]
       security:
         - cookieAuth: []
@@ -10236,12 +10293,15 @@ paths:
           multipart/form-data:
             schema:
               type: object
-              required: [file, ownerId, errorStrategy, expireAt]
+              required: [file, ownerId, preparationId, errorStrategy, expireAt]
               properties:
                 file:
                   type: string
                   format: binary
                 ownerId:
+                  type: integer
+                  minimum: 1
+                preparationId:
                   type: integer
                   minimum: 1
                 errorStrategy:
@@ -11396,10 +11456,10 @@ paths:
             minimum: 1
         - name: type
           in: query
-          description: Query scope; defaults to one Microsoft resource. Use domain to query the complete mailbox of a purpose=binding domain resource.
+          description: Query scope; defaults to one Microsoft resource. Use domain to query a purpose=binding domain resource, or icloud to query the exact current forwarding mailbox of one iCloud resource.
           schema:
             type: string
-            enum: [microsoft, domain]
+            enum: [microsoft, icloud, domain]
             default: microsoft
         - name: search
           in: query
@@ -11480,10 +11540,10 @@ paths:
             minimum: 1
         - name: type
           in: query
-          description: Association scope; defaults to one Microsoft resource. Use domain when resourceId identifies a purpose=binding domain; both direct domain messages and matching Microsoft auxiliary messages are eligible.
+          description: Association scope; defaults to one Microsoft resource. Use domain for a purpose=binding domain, or icloud for the exact current forwarding mailbox of one iCloud resource.
           schema:
             type: string
-            enum: [microsoft, domain]
+            enum: [microsoft, icloud, domain]
             default: microsoft
       responses:
         "200":
@@ -19486,6 +19546,7 @@ components:
     AdminICloudSessionStatus:
       type: string
       enum: [unchecked, valid, invalid]
+      x-enum-varnames: [AdminICloudSessionStatusUnchecked, AdminICloudSessionStatusValid, AdminICloudSessionStatusInvalid]
     AdminICloudOwnerSummary:
       type: object
       required: [id, email, nickname, groupName, role, enabled]
@@ -19720,6 +19781,29 @@ components:
       additionalProperties: false
     AdminICloudImportResponse:
       $ref: "#/components/schemas/AdminMicrosoftImportResponse"
+    AdminICloudImportPreparation:
+      type: object
+      required: [id, forwardToEmail, status, verificationCode, expiresAt, createdAt]
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        forwardToEmail:
+          type: string
+          format: email
+        status:
+          type: string
+          enum: [waiting, code_received, expired, consumed]
+        verificationCode:
+          type: string
+          nullable: true
+        expiresAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+      additionalProperties: false
     AdminICloudAliasStatus:
       type: string
       enum: [normal, disabled, missing, deleted]

@@ -121,19 +121,21 @@ func TestAdminBindingsHandlerAcceptsStableCursorAndSkipsRepeatedTotal(t *testing
 	assert.Equal(t, float64(8), body["nextBeforeId"])
 }
 
-func TestAdminBindingHandlersPassDomainScope(t *testing.T) {
+func TestAdminBindingHandlersPassNonMicrosoftScopes(t *testing.T) {
 	query := &auxiliaryQueryHandlerStub{page: &mailapp.AuxiliaryMailPage{
 		Items: []mailapp.AuxiliaryMessageSummary{},
 		Limit: 20,
 	}}
-	recorder := serveAuxiliaryAdminRoute(t, query, true, "/v1/admin/bindings?resourceId=9&type=domain")
-	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
-	assert.Equal(t, domain.InboundResourceDomain, query.listFilter.ResourceType)
+	for _, resourceType := range []domain.InboundResourceType{domain.InboundResourceDomain, domain.InboundResourceICloud} {
+		recorder := serveAuxiliaryAdminRoute(t, query, true, "/v1/admin/bindings?resourceId=9&type="+string(resourceType))
+		require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+		assert.Equal(t, resourceType, query.listFilter.ResourceType)
 
-	query.detail = &mailapp.AuxiliaryMessageDetail{}
-	recorder = serveAuxiliaryAdminRoute(t, query, true, "/v1/admin/bindings/messages/8?resourceId=9&type=domain")
-	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
-	assert.Equal(t, domain.InboundResourceDomain, query.getRequest.ResourceType)
+		query.detail = &mailapp.AuxiliaryMessageDetail{}
+		recorder = serveAuxiliaryAdminRoute(t, query, true, "/v1/admin/bindings/messages/8?resourceId=9&type="+string(resourceType))
+		require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+		assert.Equal(t, resourceType, query.getRequest.ResourceType)
+	}
 }
 
 func TestAdminBindingMessageHandlerPassesAuditContextAndSafeDetail(t *testing.T) {
@@ -191,6 +193,8 @@ func TestAdminBindingRoutesSelectPermissionByScope(t *testing.T) {
 		{name: "microsoft rejects message permission", permissions: map[string]bool{"mailmatch:message/read": true}, wantStatus: http.StatusForbidden},
 		{name: "domain message permission", suffix: "&type=domain", permissions: map[string]bool{"mailmatch:message/read": true}, wantStatus: http.StatusOK},
 		{name: "domain rejects binding permission", suffix: "&type=domain", permissions: map[string]bool{"mailtransport:binding/read": true}, wantStatus: http.StatusForbidden},
+		{name: "icloud message permission", suffix: "&type=icloud", permissions: map[string]bool{"mailmatch:message/read": true}, wantStatus: http.StatusOK},
+		{name: "icloud rejects binding permission", suffix: "&type=icloud", permissions: map[string]bool{"mailtransport:binding/read": true}, wantStatus: http.StatusForbidden},
 	}
 	for _, route := range routes {
 		for _, testCase := range cases {

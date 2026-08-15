@@ -32,18 +32,21 @@ const (
 )
 
 var (
-	ErrICloudImportInvalid      = errors.New("icloud: invalid import command")
-	ErrICloudImportInvalidOwner = errors.New("icloud: invalid resource import owner")
-	ErrICloudImportConflict     = errors.New("icloud: import idempotency conflict")
-	ErrICloudImportNotFound     = errors.New("icloud: import not found")
-	ErrICloudImportDependency   = errors.New("icloud: import dependency unavailable")
-	ErrICloudImportStorage      = errors.New("icloud: import storage unavailable")
-	ErrICloudImportTemporary    = errors.New("icloud: import temporarily unavailable")
-	ErrICloudImportClaim        = errors.New("icloud: import claim is no longer valid")
-	ErrICloudValidationTemp     = errors.New("icloud: validation temporarily unavailable")
-	ErrICloudMailUnavailable    = errors.New("icloud: forwarded mail temporarily unavailable")
-	ErrICloudResourceNotFound   = errors.New("icloud: resource not found")
-	ErrICloudResourceStatus     = errors.New("icloud: invalid resource status")
+	ErrICloudImportInvalid             = errors.New("icloud: invalid import command")
+	ErrICloudImportInvalidOwner        = errors.New("icloud: invalid resource import owner")
+	ErrICloudImportConflict            = errors.New("icloud: import idempotency conflict")
+	ErrICloudImportNotFound            = errors.New("icloud: import not found")
+	ErrICloudImportDependency          = errors.New("icloud: import dependency unavailable")
+	ErrICloudImportStorage             = errors.New("icloud: import storage unavailable")
+	ErrICloudImportTemporary           = errors.New("icloud: import temporarily unavailable")
+	ErrICloudImportClaim               = errors.New("icloud: import claim is no longer valid")
+	ErrICloudImportPreparationNotFound = errors.New("icloud: import preparation not found")
+	ErrICloudImportPreparationConflict = errors.New("icloud: import preparation is no longer usable")
+	ErrICloudForwardingUnavailable     = errors.New("icloud: no forwarding mailbox domain is available")
+	ErrICloudValidationTemp            = errors.New("icloud: validation temporarily unavailable")
+	ErrICloudMailUnavailable           = errors.New("icloud: forwarded mail temporarily unavailable")
+	ErrICloudResourceNotFound          = errors.New("icloud: resource not found")
+	ErrICloudResourceStatus            = errors.New("icloud: invalid resource status")
 )
 
 const iCloudMaxAliases = 750
@@ -129,6 +132,7 @@ type iCloudResourceModel struct {
 	ResourceType            string     `gorm:"column:resource_type"`
 	PrimaryEmail            string     `gorm:"column:primary_email"`
 	SelectedForwardTo       string     `gorm:"column:selected_forward_to"`
+	RequiredForwardTo       string     `gorm:"column:required_forward_to"`
 	ExpireAt                time.Time  `gorm:"column:expire_at"`
 	ForSale                 bool       `gorm:"column:for_sale"`
 	Status                  string     `gorm:"column:status"`
@@ -239,6 +243,8 @@ type iCloudImportModel struct {
 	Status             string     `gorm:"column:status"`
 	ErrorStrategy      string     `gorm:"column:error_strategy"`
 	ResourceExpireAt   time.Time  `gorm:"column:resource_expire_at"`
+	PreparationID      *uint      `gorm:"column:preparation_id"`
+	ForwardToEmail     string     `gorm:"column:forward_to_email"`
 	ImportedCount      int        `gorm:"column:imported_count"`
 	AcceptedCount      int        `gorm:"column:accepted_count"`
 	SkippedCount       int        `gorm:"column:skipped_count"`
@@ -259,6 +265,33 @@ type iCloudImportModel struct {
 }
 
 func (iCloudImportModel) TableName() string { return "icloud_resource_imports" }
+
+type iCloudImportPreparationModel struct {
+	ID                    uint       `gorm:"column:id;primaryKey;autoIncrement"`
+	OperatorUserID        uint       `gorm:"column:operator_user_id"`
+	DomainResourceID      uint       `gorm:"column:domain_resource_id"`
+	ForwardToEmail        string     `gorm:"column:forward_to_email"`
+	VerificationMessageID *uint      `gorm:"column:verification_message_id"`
+	VerificationCode      string     `gorm:"column:verification_code"`
+	VerifiedAt            *time.Time `gorm:"column:verified_at"`
+	ExpiresAt             time.Time  `gorm:"column:expires_at"`
+	ConsumedAt            *time.Time `gorm:"column:consumed_at"`
+	CreatedAt             time.Time  `gorm:"column:created_at"`
+	UpdatedAt             time.Time  `gorm:"column:updated_at"`
+}
+
+func (iCloudImportPreparationModel) TableName() string {
+	return "icloud_import_preparations"
+}
+
+type ICloudImportPreparationView struct {
+	ID               uint
+	ForwardToEmail   string
+	Status           string
+	VerificationCode string
+	ExpiresAt        time.Time
+	CreatedAt        time.Time
+}
 
 type iCloudImportItemModel struct {
 	ID            uint64    `gorm:"column:id;primaryKey;autoIncrement"`

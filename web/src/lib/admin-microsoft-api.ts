@@ -557,13 +557,15 @@ export async function listAdminMicrosoftBindingMessages(
   search = "",
   limit = 100,
   cursor?: AdminMicrosoftMessageCursor,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  resourceType: "microsoft" | "icloud" = "microsoft"
 ): Promise<AdminMicrosoftBindingMessageListResponse> {
   return unwrap(
     await client.GET("/v1/admin/bindings", {
       params: {
         query: {
           resourceId,
+          type: resourceType,
           search: search.trim() || undefined,
           offset: cursor ? undefined : 0,
           beforeReceivedAt: cursor?.beforeReceivedAt,
@@ -580,11 +582,12 @@ export async function listAdminMicrosoftBindingMessages(
 export async function getAdminMicrosoftBindingMessage(
   resourceId: number,
   messageId: number,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  resourceType: "microsoft" | "icloud" = "microsoft"
 ): Promise<AdminMicrosoftAuxiliaryMessageDetail> {
   return unwrap(
     await client.GET("/v1/admin/bindings/messages/{messageId}", {
-      params: { path: { messageId }, query: { resourceId } },
+      params: { path: { messageId }, query: { resourceId, type: resourceType } },
       signal,
     })
   );

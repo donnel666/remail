@@ -651,6 +651,49 @@ func TestProcessICloudValidationRejectsUnapprovedForwardingDomain(t *testing.T) 
 	}
 }
 
+func TestProcessICloudValidationKeepsPreparedForwardingAddressOnMismatch(t *testing.T) {
+	now := time.Date(2026, 8, 14, 10, 15, 0, 0, time.UTC)
+	db := openICloudValidationTestDB(t, "prepared-forward-mismatch")
+	task := createICloudValidationTestResource(t, db, now, now.Add(time.Hour))
+	setICloudForwardingSuffixes(t, "relay.example")
+	required := "prepared@relay.example"
+	requireUpdate := db.Model(&iCloudResourceModel{}).Where("id = ?", 1).Updates(map[string]any{
+		"selected_forward_to": required,
+		"required_forward_to": required,
+	})
+	if requireUpdate.Error != nil {
+		t.Fatalf("set prepared forwarding address: %v", requireUpdate.Error)
+	}
+	if err := db.Create(&iCloudResourceChannelModel{
+		ResourceID: 1, Kind: iCloudChannelAppleAccount, Host: "appleid.apple.com",
+		Cookie: "myacinfo=secret", Scnt: "scnt", SessionStatus: iCloudSessionUnchecked,
+		CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	service.apple = newICloudValidationAppleClient(t, "alias-id", "wrong@relay.example")
+	if err := service.ProcessICloudValidation(context.Background(), task); err != nil {
+		t.Fatalf("process validation: %v", err)
+	}
+	var resource iCloudResourceModel
+	if err := db.First(&resource, 1).Error; err != nil {
+		t.Fatalf("read resource: %v", err)
+	}
+	if resource.Status != iCloudResourcePending || resource.SelectedForwardTo != required || resource.ValidationFailures != 1 {
+		t.Fatalf("mismatched forwarding address polluted resource: %#v", resource)
+	}
+	var alias iCloudAliasModel
+	if err := db.Where("anonymous_id = ?", "alias-id").Take(&alias).Error; err != nil {
+		t.Fatalf("read mismatched alias: %v", err)
+	}
+	if alias.Status != iCloudResourceDisabled {
+		t.Fatalf("mismatched alias status = %q, want disabled", alias.Status)
+	}
+}
+
 func TestICloudValidationRetryReclaimsFinishedRun(t *testing.T) {
 	now := time.Date(2026, 8, 14, 10, 30, 0, 0, time.UTC)
 	db := openICloudValidationTestDB(t, "retry")

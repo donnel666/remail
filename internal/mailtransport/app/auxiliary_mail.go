@@ -130,7 +130,7 @@ func (s *AuxiliaryMailQueryService) List(ctx context.Context, filter AuxiliaryMa
 	if filter.ResourceType == "" {
 		filter.ResourceType = domain.InboundResourceMicrosoft
 	}
-	if filter.ResourceType != domain.InboundResourceMicrosoft && filter.ResourceType != domain.InboundResourceDomain {
+	if filter.ResourceType != domain.InboundResourceMicrosoft && filter.ResourceType != domain.InboundResourceDomain && filter.ResourceType != domain.InboundResourceICloud {
 		return nil, domain.ErrInvalidAuxiliaryMailQuery
 	}
 	filter.Search = strings.TrimSpace(filter.Search)
@@ -202,7 +202,7 @@ func (s *AuxiliaryMailQueryService) Get(ctx context.Context, request AuxiliaryMa
 	if request.ResourceType == "" {
 		request.ResourceType = domain.InboundResourceMicrosoft
 	}
-	if request.ResourceType != domain.InboundResourceMicrosoft && request.ResourceType != domain.InboundResourceDomain {
+	if request.ResourceType != domain.InboundResourceMicrosoft && request.ResourceType != domain.InboundResourceDomain && request.ResourceType != domain.InboundResourceICloud {
 		return nil, domain.ErrInvalidAuxiliaryMailQuery
 	}
 	row, err := s.repo.FindMessage(ctx, request.ResourceID, request.ResourceType, request.MessageID)
@@ -237,6 +237,8 @@ func (s *AuxiliaryMailQueryService) Get(ctx context.Context, request AuxiliaryMa
 	auditResourceID := fmt.Sprintf("%d:%d", request.ResourceID, request.MessageID)
 	if request.ResourceType == domain.InboundResourceDomain {
 		auditResourceID = fmt.Sprintf("domain:%d:%d", request.ResourceID, request.MessageID)
+	} else if request.ResourceType == domain.InboundResourceICloud {
+		auditResourceID = fmt.Sprintf("icloud:%d:%d", request.ResourceID, request.MessageID)
 	}
 	if err := s.operationLogs.Create(ctx, &governancedomain.OperationLog{
 		OperatorUserID: request.OperatorUserID,

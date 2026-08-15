@@ -46,6 +46,10 @@ describe("admin iCloud page layout", () => {
       "recoverAdminICloudResource",
       "deleteAdminICloudResource",
       "updateAdminICloudResource",
+      "createAdminICloudImportPreparation",
+      "getAdminICloudImportPreparation",
+      "preparationId",
+      "forwardToEmail",
       "<EditICloudModal",
       "<ICloudMaintenanceModal",
       "setMaintenanceTarget",
@@ -76,7 +80,6 @@ describe("admin iCloud page layout", () => {
     expect(icloudSource).not.toContain("----Gmail");
     expect(icloudSource).not.toContain('t("Linked Gmail")');
     expect(icloudSource).not.toContain("recipientMailId");
-    expect(icloudSource).not.toContain("forwardToEmail");
     expect(icloudSource).not.toContain("deliveryProbe");
     expect(icloudSource).not.toContain("appPassword");
     expect(icloudSource).not.toContain("IMAP health");

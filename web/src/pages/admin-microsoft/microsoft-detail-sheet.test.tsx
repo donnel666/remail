@@ -374,7 +374,8 @@ describe("admin Microsoft detail sheet runtime", () => {
         "",
         20,
         undefined,
-        expect.any(AbortSignal)
+        expect.any(AbortSignal),
+        "microsoft"
       )
     );
   });

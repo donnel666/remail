@@ -2474,5 +2474,21 @@
   "加入群聊": "Join group",
   "复制QQ群号": "Copy QQ group number",
   "打开QQ群": "Open QQ group",
-  "打开 Telegram 群": "Open Telegram group"
+  "打开 Telegram 群": "Open Telegram group",
+  "iCloud forwarding mailbox preparation failed.": "Failed to prepare the iCloud forwarding mailbox.",
+  "iCloud verification mail check failed.": "Failed to check the iCloud verification mailbox.",
+  "Verify the Apple forwarding address before importing.": "Verify the Apple forwarding address before importing.",
+  "Each forwarding address can import only one iCloud resource.": "Each forwarding address can import only one iCloud resource.",
+  "Verify forwarding address": "Verify forwarding address",
+  "Generating forwarding address...": "Generating forwarding address...",
+  "Forwarding address": "Forwarding address",
+  "Add this address as an additional email address in your Apple Account, then request the verification email.": "Add this address as an additional email address in your Apple Account, then request the verification email.",
+  "Apple verification code": "Apple verification code",
+  "This forwarding address is no longer available.": "This forwarding address is no longer available.",
+  "Generate another": "Generate another",
+  "Waiting for mail from noreply@apple.com; checking every 5 seconds.": "Waiting for mail from noreply@apple.com; checking every 5 seconds.",
+  "After entering the code on the Apple verification page, click Next to import the account credentials.": "After entering the code on the Apple verification page, click Next to import the account credentials.",
+  "Import account credentials": "Import account credentials",
+  "Verified forwarding address": "Verified forwarding address",
+  "Validation requires the exact verified forwarding address and at least one Cookie that can create an alias.": "Validation requires the exact verified forwarding address and at least one Cookie that can create an alias."
 }

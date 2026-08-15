@@ -403,7 +403,8 @@ func (s *Service) persistICloudWebSnapshot(ctx context.Context, resource iCloudR
 			return err
 		}
 		updates := map[string]any{"alias_count": len(list.Aliases), "last_alias_sync_at": now, "updated_at": now}
-		if selectedForwardTo := strings.ToLower(strings.TrimSpace(list.SelectedForwardTo)); selectedForwardTo != "" {
+		if selectedForwardTo := strings.ToLower(strings.TrimSpace(list.SelectedForwardTo)); selectedForwardTo != "" &&
+			(strings.TrimSpace(locked.RequiredForwardTo) == "" || strings.EqualFold(selectedForwardTo, strings.TrimSpace(locked.RequiredForwardTo))) {
 			updates["selected_forward_to"] = selectedForwardTo
 		}
 		if err := tx.Model(&iCloudResourceModel{}).Where("id = ?", locked.ID).Updates(updates).Error; err != nil {
@@ -430,7 +431,8 @@ func (s *Service) persistICloudCreatedAlias(ctx context.Context, resource iCloud
 			return err
 		}
 		resourceUpdates := map[string]any{"alias_count": aliasCount, "updated_at": now}
-		if forwardToEmail := strings.ToLower(strings.TrimSpace(alias.ForwardToEmail)); forwardToEmail != "" {
+		if forwardToEmail := strings.ToLower(strings.TrimSpace(alias.ForwardToEmail)); forwardToEmail != "" &&
+			(strings.TrimSpace(locked.RequiredForwardTo) == "" || strings.EqualFold(forwardToEmail, strings.TrimSpace(locked.RequiredForwardTo))) {
 			resourceUpdates["selected_forward_to"] = forwardToEmail
 		}
 		if channel.Kind == iCloudChannelWeb {

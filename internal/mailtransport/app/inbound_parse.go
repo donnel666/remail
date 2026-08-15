@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"html"
 	"io"
 	"mime"
@@ -87,6 +88,12 @@ func parseInboundMessage(raw []byte, fallbackReceivedAt time.Time) parsedInbound
 		64,
 	)
 	return result
+}
+
+// ParseInboundMessageSummary exposes the bounded parser to workflows that
+// already own access to the private RFC822 object.
+func ParseInboundMessageSummary(raw []byte, fallbackReceivedAt time.Time) domain.InboundMailSummary {
+	return parseInboundMessage(raw, fallbackReceivedAt).Summary
 }
 
 func decodeInboundMIMEHeader(decoder *mime.WordDecoder, value string) string {
@@ -236,25 +243,47 @@ func stripInboundHTML(value string) string {
 	return strings.Join(strings.Fields(html.UnescapeString(value)), " ")
 }
 
-const inboundCodeKeywords = `安全代码|一次性代码|验证码|驗證碼|安全碼|verification code|security code|one-time code|single-use code|セキュリティ\s*コード|確認コード|보안\s*코드|확인\s*코드|Sicherheitscode|Bestätigungscode|code de sécurité|code de vérification|código de seguridad|código de segurança|код безопасности|код подтверждения|رمز الأمان|رمز التحقق|codice di sicurezza|beveiligingscode|güvenlik kodu|kod bezpieczeństwa|รหัสความปลอดภัย|mã bảo mật|kode keamanan`
-
-var (
-	inboundCodeContextRe = regexp.MustCompile(`(?is)(?:` + inboundCodeKeywords + `)[^\d]{0,30}(\d{4,8})`)
-	inboundCodeKeywordRe = regexp.MustCompile(`(?is)` + inboundCodeKeywords)
-	inboundSixDigitRe    = regexp.MustCompile(`(^|[^\d])(\d{6})([^\d]|$)`)
-)
+const inboundVerificationCodePattern = `(?:^|[^\d])(\d{6,8})(?:[^\d]|$)`
 
 func extractInboundVerificationCode(value string) string {
-	if match := inboundCodeContextRe.FindStringSubmatch(value); len(match) > 1 {
-		return match[1]
-	}
-	if !inboundCodeKeywordRe.MatchString(value) {
-		return ""
-	}
-	if match := inboundSixDigitRe.FindStringSubmatch(value); len(match) > 2 {
-		return match[2]
+	for _, pattern := range inboundVerificationPatterns() {
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			continue
+		}
+		matches := re.FindStringSubmatch(value)
+		if len(matches) == 0 {
+			continue
+		}
+		if len(matches) == 1 {
+			return strings.TrimSpace(matches[0])
+		}
+		for _, match := range matches[1:] {
+			if match = strings.TrimSpace(match); match != "" {
+				return match
+			}
+		}
 	}
 	return ""
+}
+
+func inboundVerificationPatterns() []string {
+	raw := strings.TrimSpace(runtimeconfig.String("verification_code_pattern", inboundVerificationCodePattern))
+	var patterns []string
+	if json.Unmarshal([]byte(raw), &patterns) != nil {
+		patterns = []string{raw}
+	}
+	if len(patterns) == 0 {
+		return []string{inboundVerificationCodePattern}
+	}
+	for index, pattern := range patterns {
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" {
+			return []string{inboundVerificationCodePattern}
+		}
+		patterns[index] = pattern
+	}
+	return patterns
 }
 
 func truncateInboundRunes(value string, limit int) string {

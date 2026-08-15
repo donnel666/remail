@@ -35,6 +35,8 @@ func (r *AuxiliaryMailRepo) ResourceExists(ctx context.Context, resourceID uint,
 		query = query.Joins("JOIN domain_resources AS dr ON dr.id = er.id AND er.type = 'domain' AND dr.purpose = 'binding'")
 	case domain.InboundResourceMicrosoft:
 		query = query.Joins("JOIN microsoft_resources AS mr ON mr.id = er.id AND er.type = 'microsoft'")
+	case domain.InboundResourceICloud:
+		query = query.Joins("JOIN icloud_resources AS ir ON ir.id = er.id AND er.type = 'icloud' AND COALESCE(NULLIF(ir.required_forward_to, ''), ir.selected_forward_to) <> ''")
 	default:
 		return false, nil
 	}
@@ -81,8 +83,6 @@ func (r *AuxiliaryMailRepo) ListMessages(ctx context.Context, filter mailapp.Aux
 	items := make([]domain.InboundMail, len(models))
 	for i := range models {
 		items[i] = *models[i].toDomain()
-		// Q11 is a DB-only safe summary. Keeping this field empty makes an
-		// accidental object-store read in the application layer impossible.
 		items[i].SourceObjectKey = ""
 		items[i].EnvelopeFrom = ""
 	}
@@ -99,6 +99,10 @@ func (r *AuxiliaryMailRepo) auxiliaryListQuery(ctx context.Context, filter maila
 (im.resource_type = ? AND im.resource_id = dr.id)
 OR (im.resource_type = ? AND LOWER(SUBSTRING_INDEX(im.recipient, '@', -1)) = LOWER(dr.domain))
 )`, string(domain.InboundResourceDomain), string(domain.InboundResourceMicrosoft))
+	} else if filter.ResourceType == domain.InboundResourceICloud {
+		query = query.
+			Joins("JOIN icloud_resources AS ir ON ir.id = ? AND COALESCE(NULLIF(ir.required_forward_to, ''), ir.selected_forward_to) <> ''", filter.ResourceID).
+			Where("LOWER(im.recipient) = LOWER(COALESCE(NULLIF(ir.required_forward_to, ''), ir.selected_forward_to))")
 	} else {
 		query = query.Where("im.resource_id = ? AND im.resource_type = ?", filter.ResourceID, string(domain.InboundResourceMicrosoft))
 	}
@@ -143,6 +147,10 @@ OR (im.resource_type = ? AND LOWER(SUBSTRING_INDEX(im.recipient, '@', -1)) = LOW
 		query = query.
 			Joins("JOIN microsoft_resources AS mr ON mr.id = er.id").
 			Where("im.resource_id = ? AND im.resource_type = ?", resourceID, string(domain.InboundResourceMicrosoft))
+	case domain.InboundResourceICloud:
+		query = query.
+			Joins("JOIN icloud_resources AS ir ON ir.id = ? AND COALESCE(NULLIF(ir.required_forward_to, ''), ir.selected_forward_to) <> ''", resourceID).
+			Where("LOWER(im.recipient) = LOWER(COALESCE(NULLIF(ir.required_forward_to, ''), ir.selected_forward_to))")
 	default:
 		return nil, nil
 	}

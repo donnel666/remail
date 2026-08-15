@@ -3520,6 +3520,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/icloud/resources/import-preparations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a temporary iCloud forwarding mailbox
+         * @description Selects one authorized auxiliary domain that allows new mailboxes, generates a random address, and reserves it for the current administrator for 30 minutes. The address must be verified with Apple before it can be consumed by an import.
+         */
+        post: operations["postAdminICloudImportPreparation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/icloud/resources/import-preparations/{preparationId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Poll an iCloud forwarding mailbox for the Apple verification code
+         * @description Checks mail sent to the exact reserved address after its creation. Only a message whose parsed sender is `noreply@apple.com` can supply the verification code. Code extraction uses the system `verification_code_pattern` setting.
+         */
+        get: operations["getAdminICloudImportPreparation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/icloud/resources/imports": {
         parameters: {
             query?: never;
@@ -3531,7 +3571,7 @@ export interface paths {
         put?: never;
         /**
          * Import iCloud resources for a selected owner
-         * @description Each non-empty TXT entry is one complete credential set containing one old cURL, one new cURL, or both cURLs in either order: `email----curl[----curl]`. Browser-copied cURL commands may use backslash line continuations. The server classifies each cURL by its Apple host and path, parses it without executing shell syntax, and rejects duplicate channels. The required `expireAt` controls only future alias creation; it does not stop allocation or receiving. Cookies, cURL source, and parsed provider context remain write-only.
+         * @description Consumes one verified import preparation and one complete credential entry containing one old cURL, one new cURL, or both cURLs in either order: `email----curl[----curl]`. Browser-copied cURL commands may use backslash line continuations. The server classifies each cURL by its Apple host and path, parses it without executing shell syntax, and rejects multiple resource entries. The prepared forwarding address is persisted on the iCloud resource and validation requires an exact Apple forwarding-address match. The required `expireAt` controls only future alias creation; it does not stop allocation or receiving. Cookies, cURL source, and parsed provider context remain write-only.
          */
         post: operations["postAdminICloudResourceImport"];
         delete?: never;
@@ -7307,6 +7347,18 @@ export interface components {
             facets: components["schemas"]["AdminICloudFacets"];
         };
         AdminICloudImportResponse: components["schemas"]["AdminMicrosoftImportResponse"];
+        AdminICloudImportPreparation: {
+            id: number;
+            /** Format: email */
+            forwardToEmail: string;
+            /** @enum {string} */
+            status: "waiting" | "code_received" | "expired" | "consumed";
+            verificationCode: string | null;
+            /** Format: date-time */
+            expiresAt: string;
+            /** Format: date-time */
+            createdAt: string;
+        };
         /** @enum {string} */
         AdminICloudAliasStatus: "normal" | "disabled" | "missing" | "deleted";
         AdminICloudAliasItem: {
@@ -20103,6 +20155,59 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    postAdminICloudImportPreparation: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Temporary forwarding mailbox created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudImportPreparation"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getAdminICloudImportPreparation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                preparationId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current preparation status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudImportPreparation"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     postAdminICloudResourceImport: {
         parameters: {
             query?: never;
@@ -20121,6 +20226,7 @@ export interface operations {
                     /** Format: binary */
                     file: string;
                     ownerId: number;
+                    preparationId: number;
                     /** @enum {string} */
                     errorStrategy: "skip" | "abort";
                     /** Format: date-time */
@@ -21067,8 +21173,8 @@ export interface operations {
         parameters: {
             query: {
                 resourceId: number;
-                /** @description Query scope; defaults to one Microsoft resource. Use domain to query the complete mailbox of a purpose=binding domain resource. */
-                type?: "microsoft" | "domain";
+                /** @description Query scope; defaults to one Microsoft resource. Use domain to query a purpose=binding domain resource, or icloud to query the exact current forwarding mailbox of one iCloud resource. */
+                type?: "microsoft" | "icloud" | "domain";
                 search?: string;
                 offset?: number;
                 /** @description Timestamp component of a stable continuation cursor. Must be supplied together with beforeId; offset must remain zero. */
@@ -21106,8 +21212,8 @@ export interface operations {
         parameters: {
             query: {
                 resourceId: number;
-                /** @description Association scope; defaults to one Microsoft resource. Use domain when resourceId identifies a purpose=binding domain; both direct domain messages and matching Microsoft auxiliary messages are eligible. */
-                type?: "microsoft" | "domain";
+                /** @description Association scope; defaults to one Microsoft resource. Use domain for a purpose=binding domain, or icloud for the exact current forwarding mailbox of one iCloud resource. */
+                type?: "microsoft" | "icloud" | "domain";
             };
             header?: never;
             path: {

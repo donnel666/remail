@@ -25,7 +25,7 @@ func auxiliaryMailReadPermission(checker middleware.PermissionChecker) gin.Handl
 	messageRead := middleware.PermissionRequired(checker, "mailmatch:message", "read")
 	return func(c *gin.Context) {
 		resourceType, valid := parseAdminAuxiliaryResourceType(c)
-		if valid && resourceType == domain.InboundResourceDomain {
+		if valid && (resourceType == domain.InboundResourceDomain || resourceType == domain.InboundResourceICloud) {
 			messageRead(c)
 			return
 		}

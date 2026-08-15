@@ -178,7 +178,7 @@ func parsePositiveAdminMailUint(value string) (uint, bool) {
 
 func parseAdminAuxiliaryResourceType(c *gin.Context) (domain.InboundResourceType, bool) {
 	value := domain.InboundResourceType(strings.ToLower(strings.TrimSpace(c.DefaultQuery("type", string(domain.InboundResourceMicrosoft)))))
-	return value, value == domain.InboundResourceMicrosoft || value == domain.InboundResourceDomain
+	return value, value == domain.InboundResourceMicrosoft || value == domain.InboundResourceDomain || value == domain.InboundResourceICloud
 }
 
 func parseOptionalAdminMailBool(raw string, fallback bool) (bool, bool) {

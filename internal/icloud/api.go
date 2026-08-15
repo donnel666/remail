@@ -24,6 +24,8 @@ func RegisterRoutes(rg *gin.RouterGroup, module *Module, fetcher middleware.Sess
 	resources := rg.Group("/admin/icloud/resources")
 	resources.Use(middleware.LoadSession(fetcher), middleware.AuthRequired(), middleware.CSRFRequired())
 	resources.GET("", middleware.PermissionRequired(checker, "core:resource", "read"), h.listResources)
+	resources.POST("/import-preparations", middleware.PermissionRequired(checker, "core:resource", "write"), h.createImportPreparation)
+	resources.GET("/import-preparations/:preparationId", middleware.PermissionRequired(checker, "core:resource", "write"), h.importPreparation)
 	resources.POST("/imports", middleware.PermissionRequired(checker, "core:resource", "write"), h.importResources)
 	resources.GET("/imports/:importId", middleware.PermissionRequired(checker, "core:resource", "read"), h.resourceImport)
 	resources.POST("/batch/validation", middleware.PermissionRequired(checker, "core:resource", "operate"), h.batchResourceCommand(AdminICloudValidate))
@@ -154,6 +156,50 @@ type iCloudImportResponse struct {
 	UpdatedAt     time.Time                `json:"updatedAt"`
 }
 
+type iCloudImportPreparationResponse struct {
+	ID               uint      `json:"id"`
+	ForwardToEmail   string    `json:"forwardToEmail"`
+	Status           string    `json:"status"`
+	VerificationCode *string   `json:"verificationCode"`
+	ExpiresAt        time.Time `json:"expiresAt"`
+	CreatedAt        time.Time `json:"createdAt"`
+}
+
+func (h *handler) createImportPreparation(c *gin.Context) {
+	operatorUserID, ok := middleware.GetCurrentUserID(c)
+	if !ok {
+		c.Status(http.StatusUnauthorized)
+		return
+	}
+	result, err := h.service.CreateAdminICloudImportPreparation(c.Request.Context(), operatorUserID)
+	if err != nil {
+		writeICloudError(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusCreated, toICloudImportPreparationResponse(result))
+}
+
+func (h *handler) importPreparation(c *gin.Context) {
+	preparationID, err := strconv.ParseUint(strings.TrimSpace(c.Param("preparationId")), 10, 64)
+	if err != nil || preparationID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid preparation ID.", "requestId": middleware.GetRequestID(c)})
+		return
+	}
+	operatorUserID, ok := middleware.GetCurrentUserID(c)
+	if !ok {
+		c.Status(http.StatusUnauthorized)
+		return
+	}
+	result, err := h.service.GetAdminICloudImportPreparation(c.Request.Context(), operatorUserID, uint(preparationID))
+	if err != nil {
+		writeICloudError(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, toICloudImportPreparationResponse(result))
+}
+
 func (h *handler) importResources(c *gin.Context) {
 	if !requireICloudIdempotencyKey(c) {
 		return
@@ -170,6 +216,11 @@ func (h *handler) importResources(c *gin.Context) {
 	ownerID, err := strconv.ParseUint(strings.TrimSpace(c.PostForm("ownerId")), 10, 64)
 	if err != nil || ownerID == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid ownerId value.", "requestId": middleware.GetRequestID(c)})
+		return
+	}
+	preparationID, err := strconv.ParseUint(strings.TrimSpace(c.PostForm("preparationId")), 10, 64)
+	if err != nil || preparationID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid preparationId value.", "requestId": middleware.GetRequestID(c)})
 		return
 	}
 	strategy, ok := coreDomain.NormalizeImportErrorStrategy(c.PostForm("errorStrategy"))
@@ -192,8 +243,8 @@ func (h *handler) importResources(c *gin.Context) {
 		c.Status(http.StatusUnauthorized)
 		return
 	}
-	result, reused, err := h.service.AcceptAdminICloudTXTFile(
-		c.Request.Context(), operatorUserID, uint(ownerID), header.Filename, content, strategy,
+	result, reused, err := h.service.AcceptAdminICloudPreparedTXTFile(
+		c.Request.Context(), operatorUserID, uint(ownerID), uint(preparationID), header.Filename, content, strategy,
 		*expireAt, idempotencyKey, middleware.GetRequestID(c), c.FullPath(),
 	)
 	if err != nil {
@@ -435,6 +486,17 @@ func toICloudImportResponse(item *ImportStatusView, reused bool) iCloudImportRes
 	}
 }
 
+func toICloudImportPreparationResponse(item *ICloudImportPreparationView) iCloudImportPreparationResponse {
+	var code *string
+	if value := strings.TrimSpace(item.VerificationCode); value != "" {
+		code = &value
+	}
+	return iCloudImportPreparationResponse{
+		ID: item.ID, ForwardToEmail: item.ForwardToEmail, Status: item.Status,
+		VerificationCode: code, ExpiresAt: item.ExpiresAt, CreatedAt: item.CreatedAt,
+	}
+}
+
 func writeICloudError(c *gin.Context, err error) {
 	requestID := middleware.GetRequestID(c)
 	switch {
@@ -448,6 +510,12 @@ func writeICloudError(c *gin.Context, err error) {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Invalid iCloud resource command.", "requestId": requestID})
 	case errors.Is(err, ErrICloudImportConflict):
 		c.JSON(http.StatusConflict, gin.H{"message": "Idempotency key was already used for a different command.", "requestId": requestID})
+	case errors.Is(err, ErrICloudImportPreparationConflict):
+		c.JSON(http.StatusConflict, gin.H{"message": "iCloud forwarding preparation is not verified, expired, or already used.", "requestId": requestID})
+	case errors.Is(err, ErrICloudImportPreparationNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"message": "iCloud forwarding preparation not found.", "requestId": requestID})
+	case errors.Is(err, ErrICloudForwardingUnavailable):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "No authorized auxiliary mailbox domain is available for iCloud import.", "requestId": requestID})
 	case errors.Is(err, ErrICloudImportNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"message": "Resource import not found.", "requestId": requestID})
 	case errors.Is(err, ErrICloudResourceNotFound):

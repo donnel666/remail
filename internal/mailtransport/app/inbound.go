@@ -140,6 +140,42 @@ func (s *InboundService) Accept(ctx context.Context, message InboundRawMessage) 
 			domainIDs = append(domainIDs, mail.ID)
 		}
 	}
+	if len(domainIDs) > 0 {
+		raw := message.ContentBytes
+		if len(raw) == 0 {
+			file, readErr := s.files.ReadPrivate(ctx, objectKey)
+			if readErr != nil || file == nil || len(file.ContentBytes) == 0 {
+				reason := "Inbound mail summary could not be loaded."
+				cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				defer cancel()
+				for _, id := range domainIDs {
+					_ = s.repo.MarkFailed(cleanupCtx, id, reason)
+				}
+				return nil, fmt.Errorf("%w: %s", domain.ErrInboundStorageUnavailable, reason)
+			}
+			raw = file.ContentBytes
+		}
+		summary := parseInboundMessage(raw, now).Summary
+		for _, mail := range mails {
+			if mail.ResourceType != domain.InboundResourceDomain {
+				continue
+			}
+			applied, summaryErr := s.repo.SaveParsedSummary(ctx, mail.ID, mail.ProcessGeneration, summary)
+			if summaryErr == nil && applied {
+				continue
+			}
+			reason := "Inbound mail summary could not be stored."
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			for _, domainID := range domainIDs {
+				_ = s.repo.MarkFailed(cleanupCtx, domainID, reason)
+			}
+			if summaryErr == nil {
+				summaryErr = fmt.Errorf("summary update was not applied")
+			}
+			return nil, fmt.Errorf("%w: %s", domain.ErrInboundStorageUnavailable, safeDiagnostic(summaryErr.Error()))
+		}
+	}
 	if err := s.repo.MarkAcceptedStored(ctx, domainIDs); err != nil {
 		return nil, fmt.Errorf("%w: %s", domain.ErrInboundStorageUnavailable, safeDiagnostic(err.Error()))
 	}

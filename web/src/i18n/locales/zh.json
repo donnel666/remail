@@ -2474,5 +2474,21 @@
   "加入群聊": "加入群聊",
   "复制QQ群号": "复制QQ群号",
   "打开QQ群": "打开QQ群",
-  "打开 Telegram 群": "打开 Telegram 群"
+  "打开 Telegram 群": "打开 Telegram 群",
+  "iCloud forwarding mailbox preparation failed.": "iCloud 转发邮箱准备失败。",
+  "iCloud verification mail check failed.": "iCloud 验证邮件检查失败。",
+  "Verify the Apple forwarding address before importing.": "请先完成 Apple 转发地址验证。",
+  "Each forwarding address can import only one iCloud resource.": "每个转发地址只能导入一个 iCloud 资源。",
+  "Verify forwarding address": "验证转发地址",
+  "Generating forwarding address...": "正在生成转发地址...",
+  "Forwarding address": "转发地址",
+  "Add this address as an additional email address in your Apple Account, then request the verification email.": "在 Apple 账户中将此地址添加为额外电子邮件地址，然后请求发送验证邮件。",
+  "Apple verification code": "Apple 验证码",
+  "This forwarding address is no longer available.": "此转发地址已无法继续使用。",
+  "Generate another": "重新生成",
+  "Waiting for mail from noreply@apple.com; checking every 5 seconds.": "正在等待 noreply@apple.com 的邮件，每 5 秒检查一次。",
+  "After entering the code on the Apple verification page, click Next to import the account credentials.": "在 Apple 验证页面输入验证码并完成绑定后，点击下一步导入账号凭据。",
+  "Import account credentials": "导入账号凭据",
+  "Verified forwarding address": "已验证转发地址",
+  "Validation requires the exact verified forwarding address and at least one Cookie that can create an alias.": "验证要求 Apple 返回的转发地址与已验证地址完全一致，并且至少一个 Cookie 可以创建别名。"
 }

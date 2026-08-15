@@ -63,6 +63,7 @@ type iCloudImportFailure struct {
 type iCloudImportCreateInput struct {
 	OperatorUserID     uint
 	OwnerUserID        uint
+	PreparationID      uint
 	SourceObjectKey    string
 	ErrorStrategy      coreDomain.ImportErrorStrategy
 	ResourceExpireAt   time.Time
@@ -94,13 +95,32 @@ func (s *Service) validateICloudImportOwner(ctx context.Context, ownerUserID uin
 	return nil
 }
 
-// AcceptAdminICloudTXTFile mirrors the Microsoft acceptance boundary: source
-// material is private, idempotency is durable, and queue failure never turns
-// an accepted import into a terminal failure.
 func (s *Service) AcceptAdminICloudTXTFile(
 	ctx context.Context,
 	operatorUserID uint,
 	ownerUserID uint,
+	fileName string,
+	content []byte,
+	errorStrategy coreDomain.ImportErrorStrategy,
+	resourceExpireAt time.Time,
+	idempotencyKey string,
+	requestID string,
+	pathValue string,
+) (*ImportStatusView, bool, error) {
+	return s.AcceptAdminICloudPreparedTXTFile(
+		ctx, operatorUserID, ownerUserID, 0, fileName, content, errorStrategy,
+		resourceExpireAt, idempotencyKey, requestID, pathValue,
+	)
+}
+
+// AcceptAdminICloudPreparedTXTFile mirrors the Microsoft acceptance boundary:
+// source material is private, idempotency is durable, and queue failure never
+// turns an accepted import into a terminal failure.
+func (s *Service) AcceptAdminICloudPreparedTXTFile(
+	ctx context.Context,
+	operatorUserID uint,
+	ownerUserID uint,
+	preparationID uint,
 	fileName string,
 	content []byte,
 	errorStrategy coreDomain.ImportErrorStrategy,
@@ -132,8 +152,14 @@ func (s *Service) AcceptAdminICloudTXTFile(
 	if err := s.validateICloudImportOwner(ctx, ownerUserID); err != nil {
 		return nil, false, err
 	}
+	if preparationID != 0 {
+		lines, failures, fatal := parseICloudImport(string(content), strategy)
+		if fatal != nil || len(failures) != 0 || len(lines) != 1 {
+			return nil, false, ErrICloudImportInvalid
+		}
+	}
 	resourceExpireAt = normalizeICloudResourceExpireAt(resourceExpireAt)
-	fingerprint := iCloudImportFingerprint(ownerUserID, strategy, resourceExpireAt, content)
+	fingerprint := iCloudImportFingerprint(ownerUserID, preparationID, strategy, resourceExpireAt, content)
 	if existing, err := s.findICloudImportByIdempotency(ctx, operatorUserID, idempotencyKey); err != nil {
 		return nil, false, err
 	} else if existing != nil {
@@ -141,6 +167,19 @@ func (s *Service) AcceptAdminICloudTXTFile(
 			return nil, false, ErrICloudImportConflict
 		}
 		return existing.statusView(), true, nil
+	}
+	if preparationID != 0 {
+		if existing, err := s.findICloudImportByPreparation(ctx, operatorUserID, preparationID); err != nil {
+			return nil, false, err
+		} else if existing != nil {
+			if existing.RequestFingerprint != fingerprint {
+				return nil, false, ErrICloudImportConflict
+			}
+			return existing.statusView(), true, nil
+		}
+		if _, err := s.usableICloudImportPreparation(ctx, operatorUserID, preparationID, s.now().UTC()); err != nil {
+			return nil, false, err
+		}
 	}
 	now := s.now().UTC()
 	if !validICloudResourceExpireAt(resourceExpireAt, now) {
@@ -161,7 +200,7 @@ func (s *Service) AcceptAdminICloudTXTFile(
 	}
 
 	model, created, err := s.createICloudImport(ctx, iCloudImportCreateInput{
-		OperatorUserID: operatorUserID, OwnerUserID: ownerUserID, SourceObjectKey: stored.ObjectKey,
+		OperatorUserID: operatorUserID, OwnerUserID: ownerUserID, PreparationID: preparationID, SourceObjectKey: stored.ObjectKey,
 		ErrorStrategy: strategy, ResourceExpireAt: resourceExpireAt,
 		IdempotencyKey: idempotencyKey, RequestFingerprint: fingerprint,
 		RequestID: requestID, Path: strings.TrimSpace(pathValue),
@@ -211,6 +250,20 @@ func (s *Service) findICloudImportByIdempotency(ctx context.Context, operatorUse
 	return &model, nil
 }
 
+func (s *Service) findICloudImportByPreparation(ctx context.Context, operatorUserID, preparationID uint) (*iCloudImportModel, error) {
+	var model iCloudImportModel
+	err := s.db.WithContext(ctx).
+		Where("operator_user_id = ? AND preparation_id = ?", operatorUserID, preparationID).
+		First(&model).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, ErrICloudImportTemporary
+	}
+	return &model, nil
+}
+
 func (s *Service) createICloudImport(ctx context.Context, input iCloudImportCreateInput) (*iCloudImportModel, bool, error) {
 	var stored iCloudImportModel
 	created := false
@@ -229,10 +282,64 @@ func (s *Service) createICloudImport(ctx context.Context, input iCloudImportCrea
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return ErrICloudImportTemporary
 		}
+		var preparation *iCloudImportPreparationModel
+		var preparationID *uint
+		forwardToEmail := ""
+		now := s.now().UTC()
+		if input.PreparationID != 0 {
+			var current iCloudImportPreparationModel
+			err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Where("id = ? AND operator_user_id = ?", input.PreparationID, input.OperatorUserID).
+				First(&current).Error
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrICloudImportPreparationConflict
+			}
+			if err != nil {
+				return ErrICloudImportTemporary
+			}
+			if current.ConsumedAt != nil {
+				err = tx.Where("operator_user_id = ? AND preparation_id = ?", input.OperatorUserID, input.PreparationID).
+					First(&existing).Error
+				if err == nil && existing.RequestFingerprint == input.RequestFingerprint {
+					stored = existing
+					return nil
+				}
+				return ErrICloudImportPreparationConflict
+			}
+			if !current.ExpiresAt.After(now) || current.VerifiedAt == nil || strings.TrimSpace(current.VerificationCode) == "" {
+				return ErrICloudImportPreparationConflict
+			}
+			var forwardingDomain struct {
+				ID               uint   `gorm:"column:id"`
+				Domain           string `gorm:"column:domain"`
+				Purpose          string `gorm:"column:purpose"`
+				Status           string `gorm:"column:status"`
+				AllowNewBindings bool   `gorm:"column:allow_new_bindings"`
+			}
+			err = tx.Table("domain_resources").Clauses(clause.Locking{Strength: "UPDATE"}).
+				Where("id = ?", current.DomainResourceID).Take(&forwardingDomain).Error
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrICloudImportPreparationConflict
+			}
+			if err != nil {
+				return ErrICloudImportTemporary
+			}
+			allowedDomains := iCloudForwardingDomains(runtimeconfig.String(runtimeconfig.ICloudForwardingSuffixesKey, ""))
+			forwardingDomainName := strings.ToLower(strings.TrimSpace(forwardingDomain.Domain))
+			_, domainAllowed := allowedDomains[forwardingDomainName]
+			if forwardingDomain.Purpose != "binding" || forwardingDomain.Status != "normal" || !forwardingDomain.AllowNewBindings ||
+				!domainAllowed || iCloudEmailDomain(current.ForwardToEmail) != forwardingDomainName {
+				return ErrICloudImportPreparationConflict
+			}
+			preparation = &current
+			preparationID = &current.ID
+			forwardToEmail = strings.ToLower(strings.TrimSpace(current.ForwardToEmail))
+		}
 		stored = iCloudImportModel{
 			OwnerUserID: input.OwnerUserID, OperatorUserID: input.OperatorUserID,
 			SourceObjectKey: input.SourceObjectKey, Status: iCloudImportProcessing,
 			ErrorStrategy: string(input.ErrorStrategy), ResourceExpireAt: input.ResourceExpireAt,
+			PreparationID: preparationID, ForwardToEmail: forwardToEmail,
 			RequestID: input.RequestID, Path: input.Path,
 			IdempotencyKey: input.IdempotencyKey, RequestFingerprint: input.RequestFingerprint,
 			DispatchStatus: "pending", Generation: 1, MaxAttempts: iCloudImportMaxAttempts,
@@ -242,6 +349,14 @@ func (s *Service) createICloudImport(ctx context.Context, input iCloudImportCrea
 				return ErrICloudImportConflict
 			}
 			return ErrICloudImportTemporary
+		}
+		if preparation != nil {
+			consumed := tx.Model(&iCloudImportPreparationModel{}).
+				Where("id = ? AND consumed_at IS NULL", preparation.ID).
+				Updates(map[string]any{"consumed_at": now, "updated_at": now})
+			if consumed.Error != nil || consumed.RowsAffected != 1 {
+				return ErrICloudImportPreparationConflict
+			}
 		}
 		if s.operationLogs == nil {
 			return ErrICloudImportDependency
@@ -470,6 +585,11 @@ func (s *Service) processICloudImportClaimed(ctx context.Context, record *iCloud
 	lines, failures, fatal := parseICloudImport(string(source.ContentBytes), strategy)
 	if fatal != nil {
 		return s.failICloudImport(ctx, record, *fatal)
+	}
+	if record.PreparationID != nil && (len(lines) != 1 || len(failures) != 0) {
+		return s.failICloudImport(ctx, record, iCloudImportFailure{
+			Category: "invalid_format", SafeMessage: "A prepared iCloud import must contain exactly one resource.",
+		})
 	}
 
 	lines, duplicateFailures, duplicateFatal := deduplicateICloudImportLines(lines, strategy)
@@ -752,7 +872,8 @@ func (s *Service) createICloudResourcesAndMarkImportSucceeded(
 						"primary_email": line.PrimaryEmail,
 						"expire_at":     expiresAt, "credential_revision": credentialRevision, "credential_updated_at": now,
 						"validation_generation": validationGeneration, "validation_failures": 0,
-						"selected_forward_to": "", "alias_count": 0, "last_alias_sync_at": nil,
+						"selected_forward_to": locked.ForwardToEmail, "required_forward_to": locked.ForwardToEmail,
+						"alias_count": 0, "last_alias_sync_at": nil,
 						"alias_provision_candidate": "", "alias_provision_reconcile": false,
 						"next_provision_at": nil, "last_safe_error": "", "updated_at": now,
 					}
@@ -789,6 +910,7 @@ func (s *Service) createICloudResourcesAndMarkImportSucceeded(
 				} else {
 					resources = append(resources, iCloudResourceModel{
 						ID: resourceIDs[index], ResourceType: "icloud", PrimaryEmail: line.PrimaryEmail,
+						SelectedForwardTo: locked.ForwardToEmail, RequiredForwardTo: locked.ForwardToEmail,
 						ExpireAt: expiresAt, ForSale: false, Status: iCloudResourcePending,
 						CredentialRevision: 1, CredentialUpdatedAt: now, ValidationGeneration: 1, NextValidationAt: iCloudTimePointer(now), CreatedAt: now, UpdatedAt: now,
 					})
@@ -991,9 +1113,9 @@ func skippedICloudImportSummary(count int) string {
 	return fmt.Sprintf("Skipped %d import entries.", count)
 }
 
-func iCloudImportFingerprint(ownerUserID uint, strategy coreDomain.ImportErrorStrategy, resourceExpireAt time.Time, content []byte) string {
+func iCloudImportFingerprint(ownerUserID, preparationID uint, strategy coreDomain.ImportErrorStrategy, resourceExpireAt time.Time, content []byte) string {
 	contentSum := sha256.Sum256(content)
-	payload := fmt.Sprintf("icloud\x00%d\x00%s\x00%s\x00%s", ownerUserID, strategy,
+	payload := fmt.Sprintf("icloud\x00%d\x00%d\x00%s\x00%s\x00%s", ownerUserID, preparationID, strategy,
 		resourceExpireAt.UTC().Format(time.RFC3339Nano), hex.EncodeToString(contentSum[:]))
 	sum := sha256.Sum256([]byte(payload))
 	return hex.EncodeToString(sum[:])

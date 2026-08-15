@@ -42,6 +42,7 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 		return ErrICloudValidationTemp
 	}
 	selectedForwardTo := ""
+	expectedForwardTo := strings.ToLower(strings.TrimSpace(resource.RequiredForwardTo))
 	nextValidationAt := time.Time{}
 	countFailure := len(channels) == 0
 	retryValidation := len(channels) == 0
@@ -157,13 +158,27 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 			}
 			continue
 		}
+		actualForwardTo := strings.ToLower(strings.TrimSpace(alias.ForwardToEmail))
+		if expectedForwardTo != "" && actualForwardTo != expectedForwardTo {
+			countFailure = true
+			retryValidation = true
+			_ = s.disableICloudAlias(ctx, resource.ID, alias.AnonymousID, now)
+			failures = append(failures, fmt.Errorf("iCloud forwarding mailbox does not match the prepared address"))
+			if refreshedResource, refreshedChannel, refreshErr := s.loadICloudValidationProvisionScope(ctx, *resource, original.ID); refreshErr == nil {
+				nextValidationAt = earlierICloudProvisionAt(nextValidationAt, iCloudValidationChannelRetryAt(refreshedResource, refreshedChannel, now))
+			}
+			continue
+		}
 		if selectedForwardTo == "" {
-			selectedForwardTo = strings.ToLower(strings.TrimSpace(alias.ForwardToEmail))
+			selectedForwardTo = actualForwardTo
 		}
 	}
 	message := ""
 	if selectedForwardTo == "" {
 		message = "No iCloud session created an alias for an authorized forwarding domain."
+		if expectedForwardTo != "" {
+			message = "No iCloud session created an alias for the prepared forwarding mailbox."
+		}
 		if len(failures) == 0 {
 			message = "No usable iCloud session is configured."
 		}
@@ -260,7 +275,10 @@ func (s *Service) applyICloudChannelValidationResult(ctx context.Context, task i
 		status := iCloudResourceNormal
 		failures := uint8(0)
 		storedSelectedForwardTo := selectedForwardTo
-		if storedSelectedForwardTo == "" && iCloudForwardingDomainAllowed(resource.SelectedForwardTo, allowedDomains) {
+		requiredForwardTo := strings.ToLower(strings.TrimSpace(resource.RequiredForwardTo))
+		if storedSelectedForwardTo == "" && requiredForwardTo != "" && iCloudForwardingDomainAllowed(requiredForwardTo, allowedDomains) {
+			storedSelectedForwardTo = requiredForwardTo
+		} else if storedSelectedForwardTo == "" && iCloudForwardingDomainAllowed(resource.SelectedForwardTo, allowedDomains) {
 			storedSelectedForwardTo = strings.ToLower(strings.TrimSpace(resource.SelectedForwardTo))
 		}
 		var nextValidationAt *time.Time

@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
+  AdminICloudImportPreparation,
   AdminICloudOwner,
   AdminICloudResourceDetail,
   AdminICloudResourceItem,
@@ -16,10 +17,13 @@ const mocks = vi.hoisted(() => ({
   batchByIds: vi.fn(),
   expirationByFilter: vi.fn(),
   expirationByIds: vi.fn(),
+  createPreparation: vi.fn(),
+  getPreparation: vi.fn(),
   importResources: vi.fn(),
   listResources: vi.fn(),
   modalConfirm: vi.fn(),
   permissions: {} as Record<string, boolean>,
+  resourceMailsPanel: vi.fn(),
   selectionNotification: vi.fn(),
   tasks: vi.fn(),
   translate: (key: string) => key,
@@ -174,10 +178,12 @@ vi.mock("@/lib/admin-icloud-api", async (importOriginal) => ({
   batchAdminICloudResourcesByFilter: mocks.batchByFilter,
   batchAdminICloudResourcesByIds: mocks.batchByIds,
   createAdminICloudAliases: mocks.alias,
+  createAdminICloudImportPreparation: mocks.createPreparation,
   deleteAdminICloudResource: vi.fn(),
   disableAdminICloudResource: vi.fn(),
   enableAdminICloudResource: vi.fn(),
   getAdminICloudResourceDetail: vi.fn(),
+  getAdminICloudImportPreparation: mocks.getPreparation,
   importAdminICloudResources: mocks.importResources,
   listAdminICloudAliases: vi.fn(),
   listAdminICloudOwners: vi.fn().mockResolvedValue([]),
@@ -204,7 +210,10 @@ vi.mock("./admin-microsoft/microsoft-meta", () => ({
 }));
 vi.mock("./admin-microsoft/microsoft-detail-sheet", () => ({
   RelatedOrdersTable: () => <div>Orders panel</div>,
-  ResourceMailsPanel: () => <div>Mailbox panel</div>,
+  ResourceMailsPanel: (props: any) => {
+    mocks.resourceMailsPanel(props);
+    return <div>Mailbox panel</div>;
+  },
   ServerPaginatedDrawerTable: () => <div>Tasks table</div>,
 }));
 vi.mock("./resources/date-range-filter", () => ({
@@ -282,11 +291,27 @@ function resourceDetail(): AdminICloudResourceDetail {
   } as AdminICloudResourceDetail;
 }
 
+function importPreparation(
+  overrides: Partial<AdminICloudImportPreparation> = {},
+): AdminICloudImportPreparation {
+  return {
+    id: 31,
+    forwardToEmail: "icloud_test@relay.example",
+    status: "code_received",
+    verificationCode: "088556",
+    expiresAt: "2026-08-15T08:30:00Z",
+    createdAt: "2026-08-15T08:00:00Z",
+    ...overrides,
+  };
+}
+
 describe("admin iCloud modal workflows", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.permissions = {};
     mocks.alias.mockResolvedValue({ changed: true });
+    mocks.createPreparation.mockResolvedValue(importPreparation());
+    mocks.getPreparation.mockResolvedValue(importPreparation());
     mocks.importResources.mockResolvedValue({ imported: 1, skipped: 0, status: "imported" });
     mocks.updateResource.mockResolvedValue({});
     mocks.tasks.mockResolvedValue({ items: [], limit: 20, offset: 0, succeeded: 0, total: 0 });
@@ -360,6 +385,47 @@ describe("admin iCloud modal workflows", () => {
       "Validation",
       "Aliases",
     ]);
+  });
+
+  it("opens the exact iCloud auxiliary mailbox from resource details", async () => {
+    render(
+      <ICloudDetailSheet
+        aliasLimit={750}
+        busyAction={null}
+        canFetchMessages={false}
+        canOperate={false}
+        canReadMessages
+        canReadOrders={false}
+        canReadTasks={false}
+        canWrite={false}
+        item={resourceDetail()}
+        loading={false}
+        onCancel={vi.fn()}
+        onDelete={vi.fn()}
+        onEdit={vi.fn()}
+        onMaintain={vi.fn()}
+        onRefresh={vi.fn()}
+        onRecover={vi.fn()}
+        onReplaceCredentials={vi.fn()}
+        onSetExpiration={vi.fn()}
+        onToggleDisabled={vi.fn()}
+        onTogglePublish={vi.fn()}
+        refreshGeneration={0}
+        resourceId={41}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Auxiliary mailbox" }));
+    await waitFor(() =>
+      expect(mocks.resourceMailsPanel).toHaveBeenCalledWith(
+        expect.objectContaining({
+          auxiliary: true,
+          resourceId: 41,
+          resourceType: "icloud",
+        }),
+      ),
+    );
+    expect(screen.getByText("inbox@relay.example")).toBeInTheDocument();
   });
 
   it("exposes expiration as an operate-only resource action", () => {
@@ -580,6 +646,8 @@ describe("admin iCloud modal workflows", () => {
       />,
     );
 
+    await screen.findByText("088556");
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
     await waitFor(() => expect(screen.getByLabelText("owner")).toHaveValue("7"));
     const fileButton = screen.getByRole("button", { name: "TXT file" });
     expect(fileButton).toHaveAttribute("aria-pressed", "false");
@@ -601,15 +669,15 @@ describe("admin iCloud modal workflows", () => {
         errorStrategy: "skip",
         expireAt: expect.any(String),
         ownerId: 7,
+        preparationId: 31,
       }),
     ));
     await waitFor(() => expect(onImported).toHaveBeenCalledTimes(1));
   });
 
-  it("shows complete cURL and forwarding preparation guidance", () => {
-    const { rerender } = render(
+  it("shows the prepared address and complete cURL guidance", async () => {
+    render(
       <ImportICloudModal
-        forwardingSuffixes={["relay.example", "mail.example"]}
         onCancel={vi.fn()}
         onImported={vi.fn()}
         owners={[owner]}
@@ -618,32 +686,23 @@ describe("admin iCloud modal workflows", () => {
     );
 
     const dialog = screen.getByRole("dialog");
-    expect(dialog).toHaveTextContent("@relay.example");
-    expect(dialog).toHaveTextContent("@mail.example");
-    const exampleAddress = screen.getByText(/^[a-z0-9]{6}@relay\.example$/).textContent!;
+    expect(await screen.findByText("icloud_test@relay.example")).toBeInTheDocument();
+    expect(dialog).toHaveTextContent("088556");
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
     expect(screen.getByText("https://appleid.apple.com/account/manage/gs/ws/token")).toBeInTheDocument();
     expect(screen.getByText("https://appleid.apple.com.cn/account/manage/gs/ws/token")).toBeInTheDocument();
     expect(screen.getByText("https://<pod>-maildomainws.icloud.com/v2/hme/list")).toBeInTheDocument();
     expect(screen.getByText("https://<pod>-maildomainws.icloud.com.cn/v2/hme/list")).toBeInTheDocument();
     expect(screen.getByText(/either order is accepted/)).toBeInTheDocument();
-    expect(screen.getByText(/at least one Cookie is valid and can create an alias/)).toBeInTheDocument();
-
-    rerender(
-      <ImportICloudModal
-        forwardingSuffixes={["relay.example", "mail.example"]}
-        onCancel={vi.fn()}
-        onImported={vi.fn()}
-        owners={[owner]}
-        visible
-      />,
-    );
-    expect(screen.getByText(exampleAddress)).toBeInTheDocument();
+    expect(screen.getByText(/exact verified forwarding address/)).toBeInTheDocument();
   });
 
-  it("warns when no authorized forwarding domain is configured", () => {
+  it("retries when forwarding-address preparation fails", async () => {
+    mocks.createPreparation
+      .mockRejectedValueOnce(new Error("unavailable"))
+      .mockResolvedValueOnce(importPreparation());
     render(
       <ImportICloudModal
-        forwardingSuffixes={[]}
         onCancel={vi.fn()}
         onImported={vi.fn()}
         owners={[owner]}
@@ -651,10 +710,19 @@ describe("admin iCloud modal workflows", () => {
       />,
     );
 
-    expect(screen.getByText(/No authorized iCloud forwarding domain is configured/)).toBeInTheDocument();
+    expect(await screen.findByText("iCloud forwarding mailbox preparation failed.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("icloud_test@relay.example")).toBeInTheDocument();
+    expect(mocks.createPreparation).toHaveBeenCalledTimes(2);
   });
 
-  it("distinguishes forwarding-domain loading and load failure from an empty configuration", () => {
+  it("polls every five seconds and stops after receiving the Apple code", async () => {
+    vi.useFakeTimers();
+    mocks.createPreparation.mockResolvedValueOnce(importPreparation({
+      status: "waiting",
+      verificationCode: null,
+    }));
+    mocks.getPreparation.mockResolvedValueOnce(importPreparation());
     const { rerender } = render(
       <ImportICloudModal
         onCancel={vi.fn()}
@@ -664,19 +732,67 @@ describe("admin iCloud modal workflows", () => {
       />,
     );
 
-    expect(screen.getByText("Loading authorized iCloud forwarding domains...")).toBeInTheDocument();
-    expect(screen.queryByText(/No authorized iCloud forwarding domain is configured/)).not.toBeInTheDocument();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
+    expect(mocks.getPreparation).not.toHaveBeenCalled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4_999);
+    });
+    expect(mocks.getPreparation).not.toHaveBeenCalled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(mocks.getPreparation).toHaveBeenCalledWith(31, expect.any(AbortSignal));
+    expect(screen.getByText("088556")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Next" })).toBeEnabled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(mocks.getPreparation).toHaveBeenCalledTimes(1);
 
     rerender(
       <ImportICloudModal
-        forwardingSuffixes={null}
+        onCancel={vi.fn()}
+        onImported={vi.fn()}
+        owners={[owner]}
+        visible={false}
+      />,
+    );
+  });
+
+  it("stops preparation polling when the import dialog closes", async () => {
+    vi.useFakeTimers();
+    mocks.createPreparation.mockResolvedValueOnce(importPreparation({
+      status: "waiting",
+      verificationCode: null,
+    }));
+    const { rerender } = render(
+      <ImportICloudModal
         onCancel={vi.fn()}
         onImported={vi.fn()}
         owners={[owner]}
         visible
       />,
     );
-    expect(screen.getByText(/Authorized iCloud forwarding domains could not be loaded/)).toBeInTheDocument();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    rerender(
+      <ImportICloudModal
+        onCancel={vi.fn()}
+        onImported={vi.fn()}
+        owners={[owner]}
+        visible={false}
+      />,
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(mocks.getPreparation).not.toHaveBeenCalled();
   });
 
   it("submits a complete credential line from manual input", async () => {
@@ -689,6 +805,8 @@ describe("admin iCloud modal workflows", () => {
       />,
     );
 
+    await screen.findByText("088556");
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
     await waitFor(() => expect(screen.getByLabelText("owner")).toHaveValue("7"));
     const content =
       "main@icloud.com----curl --url 'https://p217-maildomainws.icloud.com.cn/v2/hme/list?dsid=123' \\\n  -H 'scnt: scnt-value' \\\n  -b 'X-APPLE-WEBAUTH-TOKEN=secret'";
@@ -705,6 +823,7 @@ describe("admin iCloud modal workflows", () => {
         errorStrategy: "skip",
         expireAt: expect.any(String),
         ownerId: 7,
+        preparationId: 31,
       }),
     ));
   });

@@ -628,6 +628,30 @@ func (e AdminICloudIdsSelectionMode) Valid() bool {
 	}
 }
 
+// Defines values for AdminICloudImportPreparationStatus.
+const (
+	AdminICloudImportPreparationStatusCodeReceived AdminICloudImportPreparationStatus = "code_received"
+	AdminICloudImportPreparationStatusConsumed     AdminICloudImportPreparationStatus = "consumed"
+	AdminICloudImportPreparationStatusExpired      AdminICloudImportPreparationStatus = "expired"
+	AdminICloudImportPreparationStatusWaiting      AdminICloudImportPreparationStatus = "waiting"
+)
+
+// Valid indicates whether the value is a known member of the AdminICloudImportPreparationStatus enum.
+func (e AdminICloudImportPreparationStatus) Valid() bool {
+	switch e {
+	case AdminICloudImportPreparationStatusCodeReceived:
+		return true
+	case AdminICloudImportPreparationStatusConsumed:
+		return true
+	case AdminICloudImportPreparationStatusExpired:
+		return true
+	case AdminICloudImportPreparationStatusWaiting:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AdminICloudOwnerSummaryRole.
 const (
 	AdminICloudOwnerSummaryRoleAdmin      AdminICloudOwnerSummaryRole = "admin"
@@ -3487,6 +3511,7 @@ func (e GetAdminAllocationParamsType) Valid() bool {
 // Defines values for GetAdminBindingsParamsType.
 const (
 	GetAdminBindingsParamsTypeDomain    GetAdminBindingsParamsType = "domain"
+	GetAdminBindingsParamsTypeIcloud    GetAdminBindingsParamsType = "icloud"
 	GetAdminBindingsParamsTypeMicrosoft GetAdminBindingsParamsType = "microsoft"
 )
 
@@ -3494,6 +3519,8 @@ const (
 func (e GetAdminBindingsParamsType) Valid() bool {
 	switch e {
 	case GetAdminBindingsParamsTypeDomain:
+		return true
+	case GetAdminBindingsParamsTypeIcloud:
 		return true
 	case GetAdminBindingsParamsTypeMicrosoft:
 		return true
@@ -3505,6 +3532,7 @@ func (e GetAdminBindingsParamsType) Valid() bool {
 // Defines values for GetAdminBindingMessageParamsType.
 const (
 	GetAdminBindingMessageParamsTypeDomain    GetAdminBindingMessageParamsType = "domain"
+	GetAdminBindingMessageParamsTypeIcloud    GetAdminBindingMessageParamsType = "icloud"
 	GetAdminBindingMessageParamsTypeMicrosoft GetAdminBindingMessageParamsType = "microsoft"
 )
 
@@ -3512,6 +3540,8 @@ const (
 func (e GetAdminBindingMessageParamsType) Valid() bool {
 	switch e {
 	case GetAdminBindingMessageParamsTypeDomain:
+		return true
+	case GetAdminBindingMessageParamsTypeIcloud:
 		return true
 	case GetAdminBindingMessageParamsTypeMicrosoft:
 		return true
@@ -5397,6 +5427,19 @@ type AdminICloudIdsSelection struct {
 
 // AdminICloudIdsSelectionMode defines model for AdminICloudIdsSelection.Mode.
 type AdminICloudIdsSelectionMode string
+
+// AdminICloudImportPreparation defines model for AdminICloudImportPreparation.
+type AdminICloudImportPreparation struct {
+	CreatedAt        time.Time                          `json:"createdAt"`
+	ExpiresAt        time.Time                          `json:"expiresAt"`
+	ForwardToEmail   openapi_types.Email                `json:"forwardToEmail"`
+	Id               int                                `json:"id"`
+	Status           AdminICloudImportPreparationStatus `json:"status"`
+	VerificationCode *string                            `json:"verificationCode"`
+}
+
+// AdminICloudImportPreparationStatus defines model for AdminICloudImportPreparation.Status.
+type AdminICloudImportPreparationStatus string
 
 // AdminICloudImportResponse defines model for AdminICloudImportResponse.
 type AdminICloudImportResponse = AdminMicrosoftImportResponse
@@ -9341,7 +9384,7 @@ type GetAdminAllocationParamsType string
 type GetAdminBindingsParams struct {
 	ResourceId int `form:"resourceId" json:"resourceId"`
 
-	// Type Query scope; defaults to one Microsoft resource. Use domain to query the complete mailbox of a purpose=binding domain resource.
+	// Type Query scope; defaults to one Microsoft resource. Use domain to query a purpose=binding domain resource, or icloud to query the exact current forwarding mailbox of one iCloud resource.
 	Type   *GetAdminBindingsParamsType `form:"type,omitempty" json:"type,omitempty"`
 	Search *string                     `form:"search,omitempty" json:"search,omitempty"`
 	Offset *int                        `form:"offset,omitempty" json:"offset,omitempty"`
@@ -9364,7 +9407,7 @@ type GetAdminBindingsParamsType string
 type GetAdminBindingMessageParams struct {
 	ResourceId int `form:"resourceId" json:"resourceId"`
 
-	// Type Association scope; defaults to one Microsoft resource. Use domain when resourceId identifies a purpose=binding domain; both direct domain messages and matching Microsoft auxiliary messages are eligible.
+	// Type Association scope; defaults to one Microsoft resource. Use domain for a purpose=binding domain, or icloud for the exact current forwarding mailbox of one iCloud resource.
 	Type *GetAdminBindingMessageParamsType `form:"type,omitempty" json:"type,omitempty"`
 }
 
@@ -9922,12 +9965,19 @@ type PostAdminICloudResourcesValidateParams struct {
 	IdempotencyKey AdminStateCommandIdempotencyKey `json:"Idempotency-Key"`
 }
 
+// PostAdminICloudImportPreparationParams defines parameters for PostAdminICloudImportPreparation.
+type PostAdminICloudImportPreparationParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // PostAdminICloudResourceImportMultipartBody defines parameters for PostAdminICloudResourceImport.
 type PostAdminICloudResourceImportMultipartBody struct {
 	ErrorStrategy PostAdminICloudResourceImportMultipartBodyErrorStrategy `json:"errorStrategy"`
 	ExpireAt      time.Time                                               `json:"expireAt"`
 	File          openapi_types.File                                      `json:"file"`
 	OwnerId       int                                                     `json:"ownerId"`
+	PreparationId int                                                     `json:"preparationId"`
 }
 
 // PostAdminICloudResourceImportParams defines parameters for PostAdminICloudResourceImport.
@@ -12806,6 +12856,12 @@ type ServerInterface interface {
 	// Queue validation for selected iCloud resources
 	// (POST /v1/admin/icloud/resources/batch/validation)
 	PostAdminICloudResourcesValidate(c *gin.Context, params PostAdminICloudResourcesValidateParams)
+	// Create a temporary iCloud forwarding mailbox
+	// (POST /v1/admin/icloud/resources/import-preparations)
+	PostAdminICloudImportPreparation(c *gin.Context, params PostAdminICloudImportPreparationParams)
+	// Poll an iCloud forwarding mailbox for the Apple verification code
+	// (GET /v1/admin/icloud/resources/import-preparations/{preparationId})
+	GetAdminICloudImportPreparation(c *gin.Context, preparationId int)
 	// Import iCloud resources for a selected owner
 	// (POST /v1/admin/icloud/resources/imports)
 	PostAdminICloudResourceImport(c *gin.Context, params PostAdminICloudResourceImportParams)
@@ -17778,6 +17834,78 @@ func (siw *ServerInterfaceWrapper) PostAdminICloudResourcesValidate(c *gin.Conte
 	}
 
 	siw.Handler.PostAdminICloudResourcesValidate(c, params)
+}
+
+// PostAdminICloudImportPreparation operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminICloudImportPreparation(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminICloudImportPreparationParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminICloudImportPreparation(c, params)
+}
+
+// GetAdminICloudImportPreparation operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminICloudImportPreparation(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "preparationId" -------------
+	var preparationId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "preparationId", c.Param("preparationId"), &preparationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter preparationId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminICloudImportPreparation(c, preparationId)
 }
 
 // PostAdminICloudResourceImport operation middleware
@@ -29312,6 +29440,8 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/icloud/resources/batch/publish", wrapper.PostAdminICloudResourcesPublish)
 	router.POST(options.BaseURL+"/v1/admin/icloud/resources/batch/unpublish", wrapper.PostAdminICloudResourcesUnpublish)
 	router.POST(options.BaseURL+"/v1/admin/icloud/resources/batch/validation", wrapper.PostAdminICloudResourcesValidate)
+	router.POST(options.BaseURL+"/v1/admin/icloud/resources/import-preparations", wrapper.PostAdminICloudImportPreparation)
+	router.GET(options.BaseURL+"/v1/admin/icloud/resources/import-preparations/:preparationId", wrapper.GetAdminICloudImportPreparation)
 	router.POST(options.BaseURL+"/v1/admin/icloud/resources/imports", wrapper.PostAdminICloudResourceImport)
 	router.GET(options.BaseURL+"/v1/admin/icloud/resources/imports/:importId", wrapper.GetAdminICloudResourceImport)
 	router.DELETE(options.BaseURL+"/v1/admin/icloud/resources/:resourceId", wrapper.DeleteAdminICloudResource)
