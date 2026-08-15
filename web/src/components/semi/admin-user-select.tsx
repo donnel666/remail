@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { Select } from "@douyinfe/semi-ui";
 
+import type { CurrentUser } from "@/context/auth-provider";
 import { SHARED_SEARCH_DEBOUNCE_MS } from "@/hooks/use-debounced-value";
 
 export interface AdminUserSelectOption<T = unknown> {
@@ -9,6 +10,40 @@ export interface AdminUserSelectOption<T = unknown> {
   disabled?: boolean;
   label: string;
   value: number;
+}
+
+interface AdminResourceOwner {
+  email: string;
+  enabled: boolean;
+  groupName: string;
+  id: number;
+  nickname: string;
+  role: CurrentUser["role"];
+}
+
+type CurrentOwnerUser = Pick<
+  CurrentUser,
+  "email" | "enabled" | "id" | "nickname" | "role"
+> & {
+  userGroup: Pick<CurrentUser["userGroup"], "name">;
+};
+
+export function ownersWithCurrentUserFirst(
+  owners: AdminResourceOwner[],
+  currentUser: CurrentOwnerUser | null
+): AdminResourceOwner[] {
+  if (!currentUser) return owners;
+  return [
+    {
+      email: currentUser.email,
+      enabled: currentUser.enabled,
+      groupName: currentUser.userGroup.name,
+      id: currentUser.id,
+      nickname: currentUser.nickname,
+      role: currentUser.role,
+    },
+    ...owners.filter((owner) => owner.id !== currentUser.id),
+  ];
 }
 
 const EMPTY_OPTIONS: AdminUserSelectOption<never>[] = [];

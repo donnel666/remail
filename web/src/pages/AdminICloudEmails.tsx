@@ -37,6 +37,7 @@ import { CopyableTableText } from "@/components/semi/copyable-table-text";
 import { StatisticFilterOption } from "@/components/semi/statistic-filter-option";
 import {
   AdminUserSelect,
+  ownersWithCurrentUserFirst,
   type AdminUserSelectOption,
 } from "@/components/semi/admin-user-select";
 import {
@@ -1918,6 +1919,10 @@ export default function AdminICloudEmails() {
   const [total, setTotal] = useState(0);
   const [aliasLimit, setAliasLimit] = useState(750);
   const [owners, setOwners] = useState<AdminICloudOwner[]>([]);
+  const importOwners = useMemo(
+    () => ownersWithCurrentUserFirst(owners, currentUser),
+    [currentUser, owners],
+  );
   const [loading, setLoading] = useState(true);
   const [importOpen, setImportOpen] = useState(false);
   const [detailId, setDetailId] = useState<number | null>(null);
@@ -3050,7 +3055,7 @@ export default function AdminICloudEmails() {
           setSelectedKeys([]);
           await refresh();
         }}
-        owners={owners}
+        owners={importOwners}
         visible={importOpen && canWrite}
       />
 

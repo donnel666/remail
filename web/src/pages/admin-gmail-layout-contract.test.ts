@@ -12,6 +12,10 @@ const microsoftSource = readFileSync(
   new URL("./AdminMicrosoftEmails.tsx", import.meta.url),
   "utf8"
 );
+const icloudSource = readFileSync(
+  new URL("./AdminICloudEmails.tsx", import.meta.url),
+  "utf8"
+);
 
 describe("admin Gmail page layout", () => {
   it("reuses the Microsoft resource page shell", () => {
@@ -73,5 +77,16 @@ describe("admin Gmail page layout", () => {
     expect(gmailSource).not.toContain("request.credentials");
     expect(gmailSource).not.toContain('type="type1"');
     expect(gmailSource).not.toContain("descriptionArea=");
+  });
+});
+
+describe("admin resource import ownership wiring", () => {
+  it("uses the current-user-first owner list on every import modal", () => {
+    for (const source of [microsoftSource, gmailSource, icloudSource]) {
+      expect(source).toContain(
+        "ownersWithCurrentUserFirst(owners, currentUser)"
+      );
+      expect(source).toContain("owners={importOwners}");
+    }
   });
 });

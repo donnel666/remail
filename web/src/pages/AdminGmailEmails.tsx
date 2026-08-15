@@ -35,6 +35,7 @@ import { CopyableTableText } from "@/components/semi/copyable-table-text";
 import { StatisticFilterOption } from "@/components/semi/statistic-filter-option";
 import {
   AdminUserSelect,
+  ownersWithCurrentUserFirst,
   type AdminUserSelectOption,
 } from "@/components/semi/admin-user-select";
 import {
@@ -1505,6 +1506,10 @@ export default function AdminGmailEmails() {
   const [compactMode, setCompactMode] = useState(false);
   const [response, setResponse] = useState<AdminGmailResourceList | null>(null);
   const [owners, setOwners] = useState<AdminGmailOwner[]>([]);
+  const importOwners = useMemo(
+    () => ownersWithCurrentUserFirst(owners, currentUser),
+    [currentUser, owners],
+  );
   const [loading, setLoading] = useState(true);
   const [importVisible, setImportVisible] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<number[]>([]);
@@ -2421,7 +2426,7 @@ export default function AdminGmailEmails() {
           }
           setActivePage(1);
         }}
-        owners={owners}
+        owners={importOwners}
         visible={importVisible && canWrite}
       />
 

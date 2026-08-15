@@ -29,6 +29,8 @@ import {
 import { CompactModeToggle } from "@/components/semi/compact-mode-toggle";
 import { CopyableTableText } from "@/components/semi/copyable-table-text";
 import { StatisticFilterOption } from "@/components/semi/statistic-filter-option";
+import { ownersWithCurrentUserFirst } from "@/components/semi/admin-user-select";
+import { useAuth } from "@/context/auth-provider";
 import { useBlockPagedList } from "@/hooks/use-block-paged-list";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useIsMobile } from "@/hooks/use-is-mobile";
@@ -110,6 +112,7 @@ function bulkOutcome(response: AdminMicrosoftBulkCommandResponse) {
 
 export default function AdminMicrosoftEmails() {
   const { t } = useTranslation();
+  const { currentUser } = useAuth();
   const isMobile = useIsMobile();
 
   const [activeSuffix, setActiveSuffix] = useState("all");
@@ -130,6 +133,10 @@ export default function AdminMicrosoftEmails() {
   useEffect(() => setActivePage(1), [pageSize]);
   const [facets, setFacets] = useState<AdminMicrosoftFacets | null>(null);
   const [owners, setOwners] = useState<AdminMicrosoftOwner[]>([]);
+  const importOwners = useMemo(
+    () => ownersWithCurrentUserFirst(owners, currentUser),
+    [currentUser, owners]
+  );
 
   const [importOpen, setImportOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<AdminMicrosoftResourceItem | null>(null);
@@ -1316,7 +1323,7 @@ export default function AdminMicrosoftEmails() {
           setSelectedKeys([]);
           await refreshAfterMutation();
         }}
-        owners={owners}
+        owners={importOwners}
         visible={importOpen}
       />
 

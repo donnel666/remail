@@ -113,6 +113,7 @@ vi.mock("./microsoft-meta", () => ({
   ownerRoleLabel: (role: string) => role,
 }));
 
+import { ownersWithCurrentUserFirst } from "@/components/semi/admin-user-select";
 import {
   EditMicrosoftModal,
   ImportMicrosoftModal,
@@ -173,15 +174,29 @@ describe("admin Microsoft modal workflows", () => {
     });
     const onCancel = vi.fn();
     const onImported = vi.fn().mockResolvedValue(undefined);
+    const otherOwner = {
+      ...owner,
+      email: "other@example.com",
+      id: 8,
+      nickname: "Other",
+    };
     render(
       <ImportMicrosoftModal
         onCancel={onCancel}
         onImported={onImported}
-        owners={[owner]}
+        owners={ownersWithCurrentUserFirst([otherOwner, owner], {
+          email: "admin@example.com",
+          enabled: true,
+          id: owner.id,
+          nickname: "Admin",
+          role: "admin",
+          userGroup: { name: "Administrators" },
+        })}
         visible
       />
     );
 
+    await waitFor(() => expect(screen.getByLabelText("owner")).toHaveValue("7"));
     fireEvent.change(screen.getByPlaceholderText("email----password"), {
       target: { value: "one@outlook.com----write-only-password" },
     });
