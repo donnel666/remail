@@ -71,6 +71,7 @@ type hmeListResult struct {
 	Aliases           []hmeAlias
 	UpdatedCookie     string
 	Complete          bool
+	MaxLimitReached   bool
 }
 
 // hmeError is intentionally limited to a provider-safe category and message.

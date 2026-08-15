@@ -81,6 +81,7 @@ func (s *Service) ProcessICloudProvision(ctx context.Context, task iCloudProvisi
 	aliasCount := scope.Resource.AliasCount
 	nextAt := time.Time{}
 	pendingWebCandidate := strings.TrimSpace(scope.Resource.AliasProvisionCandidate) != ""
+	providerLimitReached := false
 	attemptCount, failureCount := 0, 0
 	createAttempted, creationProgress := false, false
 	lastAttemptSafeError := ""
@@ -93,7 +94,7 @@ func (s *Service) ProcessICloudProvision(ctx context.Context, task iCloudProvisi
 			nextAt = earlierICloudProvisionAt(nextAt, *channel.CooldownUntil)
 			continue
 		}
-		resourceCanCreate := scope.Resource.ExpireAt.After(now) && aliasCount < iCloudMaxAliases
+		resourceCanCreate := scope.Resource.ExpireAt.After(now) && aliasCount < iCloudMaxAliases && !providerLimitReached
 		createAt, createAllowed := iCloudChannelWindow(*channel, now)
 		createAllowed = createAllowed && resourceCanCreate
 		if kind == iCloudChannelWeb && pendingWebCandidate && resourceCanCreate {
@@ -116,15 +117,23 @@ func (s *Service) ProcessICloudProvision(ctx context.Context, task iCloudProvisi
 		var alias *hmeAlias
 		var immediate bool
 		var attemptErr error
+		attemptedCreate := createAllowed
+		madeCreationProgress := createAllowed
 		attemptCount++
-		if createAllowed {
-			createAttempted = true
-		}
 		switch channel.Kind {
 		case iCloudChannelAppleAccount:
-			alias, attemptErr = s.provisionICloudAppleAccount(ctx, scope.Resource, *channel, createAllowed, now)
+			var list hmeListResult
+			alias, list, attemptedCreate, attemptErr = s.provisionICloudAppleAccount(ctx, scope.Resource, *channel, createAllowed, now)
+			madeCreationProgress = alias != nil
+			if list.Complete {
+				aliasCount = uint(len(list.Aliases))
+				providerLimitReached = providerLimitReached || list.MaxLimitReached
+			}
 		case iCloudChannelWeb:
 			alias, immediate, attemptErr = s.provisionICloudWeb(ctx, scope.Resource, *channel, createAllowed, now)
+		}
+		if attemptedCreate {
+			createAttempted = true
 		}
 		if errors.Is(attemptErr, errICloudValidationStale) {
 			runStatus = iCloudMaintenanceCanceled
@@ -134,7 +143,7 @@ func (s *Service) ProcessICloudProvision(ctx context.Context, task iCloudProvisi
 		if attemptErr != nil {
 			failureCount++
 			lastAttemptSafeError = safeICloudProvisionRequestError(attemptErr)
-		} else if createAllowed {
+		} else if madeCreationProgress {
 			creationProgress = true
 		}
 		if alias != nil {
@@ -143,7 +152,7 @@ func (s *Service) ProcessICloudProvision(ctx context.Context, task iCloudProvisi
 				pendingWebCandidate = false
 			}
 		}
-		resourceCanCreate = scope.Resource.ExpireAt.After(now) && aliasCount < iCloudMaxAliases
+		resourceCanCreate = scope.Resource.ExpireAt.After(now) && aliasCount < iCloudMaxAliases && !providerLimitReached
 		if immediate {
 			pendingWebCandidate = true
 			nextAt = earlierICloudProvisionAt(nextAt, now.Add(time.Second))
@@ -248,25 +257,47 @@ func (s *Service) claimICloudProvision(ctx context.Context, resourceID uint) (*i
 	return &scope, run, claimed, nil
 }
 
-func (s *Service) provisionICloudAppleAccount(ctx context.Context, resource iCloudResourceModel, channel iCloudResourceChannelModel, createAllowed bool, now time.Time) (*hmeAlias, error) {
+func (s *Service) provisionICloudAppleAccount(ctx context.Context, resource iCloudResourceModel, channel iCloudResourceChannelModel, createAllowed bool, now time.Time) (*hmeAlias, hmeListResult, bool, error) {
+	list, refreshed, err := s.syncICloudAppleAccount(ctx, resource, channel, now)
+	if err != nil {
+		return nil, hmeListResult{}, false, err
+	}
+	if !createAllowed || list.MaxLimitReached || len(list.Aliases) >= iCloudMaxAliases {
+		return nil, list, false, nil
+	}
+	alias, err := s.createICloudAppleAccountAlias(ctx, resource, refreshed, now)
+	return alias, list, true, err
+}
+
+func (s *Service) syncICloudAppleAccount(ctx context.Context, resource iCloudResourceModel, channel iCloudResourceChannelModel, now time.Time) (hmeListResult, iCloudResourceChannelModel, error) {
 	client := s.apple
 	if client == nil {
 		client = NewAppleAccountClient(nil)
 	}
 	refreshed, err := client.refresh(ctx, channel, now)
 	if err != nil {
-		return nil, s.applyICloudProvisionError(ctx, resource, channel, err, now)
+		return hmeListResult{}, channel, s.applyICloudProvisionError(ctx, resource, channel, err, now)
 	}
-	refreshed.NextKeepaliveAt = appleAccountNextKeepalive(refreshed, now)
-	if err := s.persistICloudProvisionChannel(ctx, resource, refreshed, true, false, now); err != nil {
-		return nil, err
-	}
-	if !createAllowed {
-		return nil, nil
-	}
-	alias, updated, err := client.create(ctx, refreshed, now)
+	list, updated, err := client.list(ctx, refreshed, now)
+	updated.NextKeepaliveAt = appleAccountNextKeepalive(updated, now)
 	if err != nil {
-		_ = s.persistICloudProvisionChannel(ctx, resource, updated, true, false, now)
+		_ = s.persistICloudProvisionChannel(ctx, resource, updated, false, false, now)
+		return hmeListResult{}, updated, s.applyICloudProvisionError(ctx, resource, updated, err, now)
+	}
+	if err := s.persistICloudProvisionSnapshot(ctx, resource, updated, list, now); err != nil {
+		return hmeListResult{}, updated, err
+	}
+	return list, updated, nil
+}
+
+func (s *Service) createICloudAppleAccountAlias(ctx context.Context, resource iCloudResourceModel, channel iCloudResourceChannelModel, now time.Time) (*hmeAlias, error) {
+	client := s.apple
+	if client == nil {
+		client = NewAppleAccountClient(nil)
+	}
+	alias, updated, err := client.create(ctx, channel, now)
+	if err != nil {
+		_ = s.persistICloudProvisionChannel(ctx, resource, updated, false, false, now)
 		return nil, s.applyICloudProvisionError(ctx, resource, updated, err, now)
 	}
 	updated.NextKeepaliveAt = appleAccountNextKeepalive(updated, now)
@@ -307,7 +338,7 @@ func (s *Service) provisionICloudWeb(ctx context.Context, resource iCloudResourc
 	if channel.NextKeepaliveAt == nil {
 		channel.NextKeepaliveAt = iCloudTimePointer(now.Add(iCloudCookieKeepaliveInterval()))
 	}
-	if err := s.persistICloudWebSnapshot(ctx, resource, channel, list, now); err != nil {
+	if err := s.persistICloudProvisionSnapshot(ctx, resource, channel, list, now); err != nil {
 		return nil, false, err
 	}
 	if !createAllowed || len(list.Aliases) >= iCloudMaxAliases {
@@ -393,13 +424,13 @@ func firstNonEmptyICloudSafeError(values ...string) string {
 	return ""
 }
 
-func (s *Service) persistICloudWebSnapshot(ctx context.Context, resource iCloudResourceModel, channel iCloudResourceChannelModel, list hmeListResult, now time.Time) error {
+func (s *Service) persistICloudProvisionSnapshot(ctx context.Context, resource iCloudResourceModel, channel iCloudResourceChannelModel, list hmeListResult, now time.Time) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		locked, err := lockICloudProvisionResourceTx(ctx, tx, resource)
 		if err != nil {
 			return err
 		}
-		if err := syncICloudAliasesTx(tx, locked.ID, list.Aliases, true, now); err != nil {
+		if err := syncICloudAliasesTx(tx, locked.ID, list.Aliases, list.Complete, now); err != nil {
 			return err
 		}
 		updates := map[string]any{"alias_count": len(list.Aliases), "last_alias_sync_at": now, "updated_at": now}
@@ -528,7 +559,7 @@ func (s *Service) applyICloudProvisionError(ctx context.Context, resource iCloud
 		}
 		switch category {
 		case "session_invalid":
-			failures := locked.SessionFailures
+			failures := max(locked.SessionFailures, channel.SessionFailures)
 			if failures < 255 {
 				failures++
 			}

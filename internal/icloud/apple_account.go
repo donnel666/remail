@@ -14,7 +14,17 @@ import (
 const (
 	appleAccountResponseMaxBytes = 4 << 20
 	appleAccountTokenPath        = "/account/manage/gs/ws/token"
+	appleAccountPrivateEmailPath = "/account/manage/email/private"
 )
+
+type appleAccountPrivateEmail struct {
+	EmailAddress   string `json:"emailAddress"`
+	Label          string `json:"label"`
+	Note           string `json:"note"`
+	ForwardToEmail string `json:"forwardToEmail"`
+	ID             string `json:"id"`
+	Active         *bool  `json:"active"`
+}
 
 type appleAccountError struct {
 	Category    string
@@ -86,6 +96,84 @@ func (c *AppleAccountClient) refresh(ctx context.Context, channel iCloudResource
 		next.ManageExpiresAt = &expiresAt
 	}
 	return next, nil
+}
+
+func (c *AppleAccountClient) list(ctx context.Context, channel iCloudResourceChannelModel, now time.Time) (hmeListResult, iCloudResourceChannelModel, error) {
+	if strings.TrimSpace(channel.APIKey) == "" {
+		return hmeListResult{}, channel, &appleAccountError{Category: "invalid_context", SafeMessage: "Apple Account API key is missing."}
+	}
+	next := channel
+	var payload struct {
+		PrivateEmailList         *[]appleAccountPrivateEmail `json:"privateEmailList"`
+		InactivePrivateEmailList []appleAccountPrivateEmail  `json:"inactivePrivateEmailList"`
+		ForwardToEmailAddress    string                      `json:"forwardToEmailAddress"`
+		MaxLimitReached          bool                        `json:"maxLimitReached"`
+	}
+	if err := c.request(ctx, &next, next.APIKey, http.MethodGet, appleAccountPrivateEmailPath, nil, &payload, now); err != nil {
+		return hmeListResult{}, next, err
+	}
+	if payload.PrivateEmailList == nil {
+		return hmeListResult{}, next, &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned an incomplete alias snapshot."}
+	}
+	forwardTo := strings.ToLower(strings.TrimSpace(payload.ForwardToEmailAddress))
+	if forwardTo != "" && !validICloudHMEEmail(forwardTo) {
+		return hmeListResult{}, next, &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned an invalid forwarding target."}
+	}
+	result := hmeListResult{
+		SelectedForwardTo: forwardTo,
+		Aliases:           make([]hmeAlias, 0, len(*payload.PrivateEmailList)+len(payload.InactivePrivateEmailList)),
+		Complete:          true,
+		MaxLimitReached:   payload.MaxLimitReached,
+	}
+	if forwardTo != "" {
+		result.ForwardToEmails = []string{forwardTo}
+	}
+	seenIDs := make(map[string]struct{}, cap(result.Aliases))
+	seenEmails := make(map[string]struct{}, cap(result.Aliases))
+	appendAliases := func(items []appleAccountPrivateEmail, defaultActive bool) error {
+		for _, item := range items {
+			active := defaultActive
+			if item.Active != nil {
+				active = *item.Active
+			}
+			alias := hmeAlias{
+				AnonymousID:    strings.TrimSpace(item.ID),
+				Email:          strings.ToLower(strings.TrimSpace(item.EmailAddress)),
+				Label:          strings.TrimSpace(item.Label),
+				Note:           strings.TrimSpace(item.Note),
+				ForwardToEmail: strings.ToLower(strings.TrimSpace(item.ForwardToEmail)),
+				Origin:         "APPLE_ACCOUNT",
+				Active:         active,
+			}
+			if alias.ForwardToEmail == "" {
+				alias.ForwardToEmail = forwardTo
+			}
+			if !validICloudHMEText(alias.AnonymousID, iCloudHMEAnonymousIDMaxLength, false) ||
+				!validICloudHMEEmail(alias.Email) ||
+				!validICloudHMEText(alias.Label, iCloudHMELabelMaxLength, true) ||
+				!validICloudHMEText(alias.Note, iCloudHMENoteMaxLength, true) ||
+				!validICloudHMEEmail(alias.ForwardToEmail) {
+				return &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned an invalid alias response."}
+			}
+			if _, exists := seenIDs[alias.AnonymousID]; exists {
+				return &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned duplicate aliases."}
+			}
+			if _, exists := seenEmails[alias.Email]; exists {
+				return &appleAccountError{Category: "provider_response", SafeMessage: "Apple Account returned duplicate aliases."}
+			}
+			seenIDs[alias.AnonymousID] = struct{}{}
+			seenEmails[alias.Email] = struct{}{}
+			result.Aliases = append(result.Aliases, alias)
+		}
+		return nil
+	}
+	if err := appendAliases(*payload.PrivateEmailList, true); err != nil {
+		return hmeListResult{}, next, err
+	}
+	if err := appendAliases(payload.InactivePrivateEmailList, false); err != nil {
+		return hmeListResult{}, next, err
+	}
+	return result, next, nil
 }
 
 func (c *AppleAccountClient) create(ctx context.Context, channel iCloudResourceChannelModel, now time.Time) (hmeAlias, iCloudResourceChannelModel, error) {

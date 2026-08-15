@@ -19,8 +19,10 @@ func TestProcessICloudValidationTriesEveryChannelAndAcceptsAnyAuthorizedForward(
 	db := openICloudValidationTestDB(t, "all-channels")
 	task := createICloudValidationTestResource(t, db, now, now.Add(time.Hour))
 	setICloudForwardingSuffixes(t, "relay.example")
-	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", 1).
-		Update("selected_forward_to", "old@other.example").Error; err != nil {
+	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", 1).Updates(map[string]any{
+		"selected_forward_to": "old@other.example",
+		"alias_count":         iCloudMaxAliases,
+	}).Error; err != nil {
 		t.Fatalf("set stale forwarding target: %v", err)
 	}
 	if err := db.Create(&iCloudAliasModel{
@@ -60,12 +62,11 @@ func TestProcessICloudValidationTriesEveryChannelAndAcceptsAnyAuthorizedForward(
 			body = `{"timeOutInterval":15}`
 		case "/account/manage":
 			body = `{"apiKey":"api-key"}`
-		case "/account/manage/email/private/add":
-			body = `{"emailAddress":"new-alias@icloud.com"}`
-		case "/account/manage/email/private/add/complete":
-			body = `{"emailAddress":"new-alias@icloud.com","id":"apple-id","active":true}`
-		case "/account/manage/email/private/apple-id.em":
-			body = `{"emailAddress":"new-alias@icloud.com","forwardToEmail":"anything@relay.example","active":true}`
+		case appleAccountPrivateEmailPath:
+			body = `{"privateEmailList":[
+				{"emailAddress":"new-alias@icloud.com","label":"ReMail","id":"apple-id","active":true},
+				{"emailAddress":"old@icloud.com","id":"old-id","forwardToEmail":"old@other.example","active":true}
+			],"inactivePrivateEmailList":[],"forwardToEmailAddress":"anything@relay.example","maxLimitReached":false}`
 		default:
 			t.Fatalf("unexpected Apple Account path %q", request.URL.Path)
 		}
@@ -82,9 +83,7 @@ func TestProcessICloudValidationTriesEveryChannelAndAcceptsAnyAuthorizedForward(
 	if got, want := strings.Join(applePaths, ","), strings.Join([]string{
 		appleAccountTokenPath,
 		"/account/manage",
-		"/account/manage/email/private/add",
-		"/account/manage/email/private/add/complete",
-		"/account/manage/email/private/apple-id.em",
+		appleAccountPrivateEmailPath,
 	}, ","); got != want {
 		t.Fatalf("Apple Account sequence = %q, want %q", got, want)
 	}
@@ -98,7 +97,7 @@ func TestProcessICloudValidationTriesEveryChannelAndAcceptsAnyAuthorizedForward(
 	}
 	if resource.Status != iCloudResourceNormal || resource.SelectedForwardTo != "anything@relay.example" ||
 		resource.NextProvisionAt == nil || !resource.NextProvisionAt.Equal(now) ||
-		resource.NextValidationAt != nil || resource.LastValidAt == nil {
+		resource.NextValidationAt != nil || resource.LastValidAt == nil || resource.AliasCount != 2 || resource.LastAliasSyncAt == nil {
 		t.Fatalf("unexpected validated resource: %#v", resource)
 	}
 	var alias iCloudAliasModel
@@ -124,6 +123,9 @@ func TestProcessICloudValidationTriesEveryChannelAndAcceptsAnyAuthorizedForward(
 	for _, channel := range storedChannels {
 		statuses[channel.Kind] = channel.SessionStatus
 		failures[channel.Kind] = channel.SessionFailures
+		if channel.Kind == iCloudChannelAppleAccount && channel.ProvisionWindowCount != 0 {
+			t.Fatalf("listing existing aliases consumed a creation slot: %#v", channel)
+		}
 	}
 	if statuses[iCloudChannelAppleAccount] != iCloudSessionValid || statuses[iCloudChannelWeb] != iCloudSessionUnchecked ||
 		failures[iCloudChannelWeb] != 1 {
@@ -836,6 +838,8 @@ func newICloudValidationAppleClient(t *testing.T, anonymousID, forwardToEmail st
 			body = `{"timeOutInterval":15}`
 		case "/account/manage":
 			body = `{"apiKey":"api-key"}`
+		case appleAccountPrivateEmailPath:
+			body = fmt.Sprintf(`{"privateEmailList":[],"inactivePrivateEmailList":[],"forwardToEmailAddress":%q,"maxLimitReached":false}`, forwardToEmail)
 		case "/account/manage/email/private/add":
 			body = `{"emailAddress":"created@icloud.com"}`
 		case "/account/manage/email/private/add/complete":

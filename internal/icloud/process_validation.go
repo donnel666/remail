@@ -13,9 +13,9 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// ProcessICloudValidation creates one alias through every imported channel.
-// A resource is usable when at least one created alias forwards to an approved
-// auxiliary domain; channel failures remain isolated on their channel rows.
+// ProcessICloudValidation checks every imported channel and creates an alias
+// when no existing alias forwards to an approved auxiliary domain. Channel
+// failures remain isolated on their channel rows.
 func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValidationTask) error {
 	if s == nil || s.db == nil || task.ResourceID == 0 || task.OwnerUserID == 0 ||
 		task.ValidationGeneration == 0 || task.ExpectedCredentialRevision == 0 {
@@ -33,13 +33,13 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 	if !resource.ExpireAt.After(now) {
 		return s.applyICloudChannelValidationResult(ctx, task, "", "The iCloud resource has expired and cannot create a validation alias.", false, false, time.Time{})
 	}
-	if resource.AliasCount >= iCloudMaxAliases {
-		return s.applyICloudChannelValidationResult(ctx, task, "", "The iCloud alias limit has been reached.", false, false, time.Time{})
-	}
 	var channels []iCloudResourceChannelModel
 	if err := s.db.WithContext(ctx).Order("CASE kind WHEN 'apple_account' THEN 0 ELSE 1 END").
 		Where("resource_id = ?", resource.ID).Find(&channels).Error; err != nil {
 		return ErrICloudValidationTemp
+	}
+	if resource.AliasCount >= iCloudMaxAliases && findICloudProvisionChannel(channels, iCloudChannelAppleAccount) == nil {
+		return s.applyICloudChannelValidationResult(ctx, task, "", "The iCloud alias limit has been reached.", false, false, time.Time{})
 	}
 	selectedForwardTo := ""
 	expectedForwardTo := strings.ToLower(strings.TrimSpace(resource.RequiredForwardTo))
@@ -60,7 +60,8 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 			failures = append(failures, loadErr)
 			continue
 		}
-		if !currentResource.ExpireAt.After(now) || currentResource.AliasCount >= iCloudMaxAliases {
+		if !currentResource.ExpireAt.After(now) ||
+			(currentResource.AliasCount >= iCloudMaxAliases && currentChannel.Kind != iCloudChannelAppleAccount) {
 			failures = append(failures, fmt.Errorf("iCloud resource cannot create another alias"))
 			continue
 		}
@@ -80,7 +81,7 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 		if currentChannel.Kind == iCloudChannelWeb && strings.TrimSpace(currentResource.AliasProvisionCandidate) != "" {
 			createAllowed = true
 		}
-		if !createAllowed {
+		if !createAllowed && currentChannel.Kind != iCloudChannelAppleAccount {
 			retryValidation = true
 			transientValidation = true
 			nextValidationAt = earlierICloudProvisionAt(nextValidationAt, createAt)
@@ -90,7 +91,25 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 		definiteAttemptFailure := false
 		switch currentChannel.Kind {
 		case iCloudChannelAppleAccount:
-			alias, loadErr = s.provisionICloudAppleAccount(ctx, currentResource, currentChannel, true, now)
+			var list hmeListResult
+			var refreshed iCloudResourceChannelModel
+			list, refreshed, loadErr = s.syncICloudAppleAccount(ctx, currentResource, currentChannel, now)
+			if loadErr == nil {
+				alias = findICloudValidationAlias(list.Aliases, allowedDomains, expectedForwardTo)
+				if alias == nil && (list.MaxLimitReached || len(list.Aliases) >= iCloudMaxAliases) {
+					failures = append(failures, fmt.Errorf("iCloud alias limit has been reached"))
+					continue
+				}
+				if alias == nil && !createAllowed {
+					retryValidation = true
+					transientValidation = true
+					nextValidationAt = earlierICloudProvisionAt(nextValidationAt, createAt)
+					continue
+				}
+				if alias == nil {
+					alias, loadErr = s.createICloudAppleAccountAlias(ctx, currentResource, refreshed, now)
+				}
+			}
 		case iCloudChannelWeb:
 			var immediate bool
 			alias, immediate, loadErr = s.provisionICloudWeb(ctx, currentResource, currentChannel, true, now)
@@ -187,6 +206,19 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 		countFailure = false
 	}
 	return s.applyICloudChannelValidationResult(ctx, task, selectedForwardTo, message, countFailure, retryValidation, nextValidationAt)
+}
+
+func findICloudValidationAlias(aliases []hmeAlias, allowedDomains map[string]struct{}, expectedForwardTo string) *hmeAlias {
+	expectedForwardTo = strings.ToLower(strings.TrimSpace(expectedForwardTo))
+	for index := range aliases {
+		forwardTo := strings.ToLower(strings.TrimSpace(aliases[index].ForwardToEmail))
+		if !aliases[index].Active || !iCloudForwardingDomainAllowed(forwardTo, allowedDomains) ||
+			(expectedForwardTo != "" && forwardTo != expectedForwardTo) {
+			continue
+		}
+		return &aliases[index]
+	}
+	return nil
 }
 
 func iCloudValidationErrorCountsFailure(requestErr error) bool {
