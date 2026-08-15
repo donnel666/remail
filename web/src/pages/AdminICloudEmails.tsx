@@ -1129,13 +1129,16 @@ export function ICloudTasksPanel({
           return;
         }
         setResponse(next);
-        const pollDelay = next.items.some((task) => task.status === "queued" || task.status === "running")
-          ? 1500
-          : 5000;
-        pollTimer = globalThis.setTimeout(
-          () => setRefreshKey((value) => value + 1),
-          pollDelay,
-        );
+        if (
+          next.items.some(
+            (task) => task.status === "queued" || task.status === "running",
+          )
+        ) {
+          pollTimer = globalThis.setTimeout(
+            () => setRefreshKey((value) => value + 1),
+            1_500,
+          );
+        }
       })
       .catch((error) => {
         if (!controller.signal.aborted) {
@@ -1747,7 +1750,6 @@ export default function AdminICloudEmails() {
   );
   const [bulkBusy, setBulkBusy] = useState<ICloudBulkBusyAction | null>(null);
   const [refreshGeneration, setRefreshGeneration] = useState(0);
-  const [sessionRefreshGeneration, setSessionRefreshGeneration] = useState(0);
   const listRequestRef = useRef<AbortController | null>(null);
   const statsRequestRef = useRef<AbortController | null>(null);
   const detailRequestRef = useRef<AbortController | null>(null);
@@ -1932,22 +1934,7 @@ export default function AdminICloudEmails() {
         }
       });
     return () => controller.abort();
-  }, [activePage, filter, pageSize, refreshGeneration, sessionRefreshGeneration, t]);
-
-  useEffect(() => {
-    if (!items.some((item) =>
-      item.status === "normal" &&
-      item.nextProvisionAt !== null &&
-      (item.newSession?.status === "unchecked" || item.oldSession?.status === "unchecked")
-    )) {
-      return;
-    }
-    const timeoutId = window.setTimeout(
-      () => setSessionRefreshGeneration((value) => value + 1),
-      3000,
-    );
-    return () => window.clearTimeout(timeoutId);
-  }, [items]);
+  }, [activePage, filter, pageSize, refreshGeneration, t]);
 
   useEffect(() => {
     statsRequestRef.current?.abort();

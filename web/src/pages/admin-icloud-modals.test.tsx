@@ -407,7 +407,7 @@ describe("admin iCloud modal workflows", () => {
     expect(calls[calls.length - 1]?.[0]).toMatchObject({ selectedCount: 0 });
   });
 
-  it("refreshes the resource list while a Cookie check is pending", async () => {
+  it("does not refresh the resource list while a Cookie check is pending", async () => {
     vi.useFakeTimers();
     const pending = resource();
     pending.newSession = { ...pending.newSession!, status: "unchecked" };
@@ -435,7 +435,7 @@ describe("admin iCloud modal workflows", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3000);
     });
-    expect(mocks.listResources).toHaveBeenCalledTimes(3);
+    expect(mocks.listResources).toHaveBeenCalledTimes(2);
   });
 
   it("exposes expiration for selected resources", async () => {
@@ -486,6 +486,48 @@ describe("admin iCloud modal workflows", () => {
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
 
     await waitFor(() => expect(mocks.tasks).toHaveBeenCalledTimes(2));
+  });
+
+  it("polls active tasks and stops after the task reaches a terminal state", async () => {
+    vi.useFakeTimers();
+    mocks.tasks
+      .mockResolvedValueOnce({
+        items: [{ status: "running", taskId: "alias:41" }],
+        limit: 20,
+        offset: 0,
+        succeeded: 0,
+        total: 1,
+      })
+      .mockResolvedValueOnce({
+        items: [{ status: "succeeded", taskId: "alias:41" }],
+        limit: 20,
+        offset: 0,
+        succeeded: 1,
+        total: 1,
+      });
+    render(
+      <ICloudTasksPanel
+        canOperate={false}
+        item={resourceDetail()}
+        onRefresh={vi.fn()}
+        refreshGeneration={0}
+      />,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mocks.tasks).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_500);
+    });
+    expect(mocks.tasks).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_500);
+    });
+    expect(mocks.tasks).toHaveBeenCalledTimes(2);
   });
 
   it("submits alias provisioning from task details", async () => {
