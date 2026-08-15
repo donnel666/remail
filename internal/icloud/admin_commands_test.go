@@ -111,7 +111,8 @@ func TestEditAdminICloudResourcePatchesSubmittedChannels(t *testing.T) {
 		t.Fatalf("read channels: %v", err)
 	}
 	if len(channels) != 2 || channels[0].Kind != iCloudChannelAppleAccount || channels[1].Kind != iCloudChannelWeb ||
-		channels[0].FDClientInfo != testICloudFDClientInfo || channels[0].Scnt != testICloudLongScnt || channels[0].APIKey != "api-key" {
+		channels[0].FDClientInfo != testICloudFDClientInfo || channels[0].Scnt != testICloudLongScnt || channels[0].APIKey != "api-key" ||
+		channels[0].ManageExpiresAt == nil || !channels[0].ManageExpiresAt.Equal(now.Add(iCloudImportedAppleManageTTL)) {
 		t.Fatalf("unexpected edited channels: %#v", channels)
 	}
 	for _, channel := range channels {
@@ -370,7 +371,8 @@ func TestEditAdminICloudResourceAlwaysReplacesSubmittedCredentials(t *testing.T)
 	}
 	if stored.SessionStatus != iCloudSessionUnchecked || stored.SessionFailures != 0 || stored.CooldownUntil != nil ||
 		stored.CooldownStage != 0 || stored.NextKeepaliveAt != nil || stored.SessionID != "" || stored.APIKey != input.APIKey ||
-		stored.DataAccessToken != "" || stored.ManageExpiresAt != nil || stored.LastCheckedAt != nil || stored.LastValidAt != nil {
+		stored.DataAccessToken != "" || stored.ManageExpiresAt == nil ||
+		!stored.ManageExpiresAt.Equal(now.Add(iCloudImportedAppleManageTTL)) || stored.LastCheckedAt != nil || stored.LastValidAt != nil {
 		t.Fatalf("submitted credentials did not reset channel runtime state: %#v", stored)
 	}
 	var alias iCloudAliasModel

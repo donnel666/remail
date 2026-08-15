@@ -380,6 +380,92 @@ func TestICloudAppleListSessionFailureReachesInvalidThreshold(t *testing.T) {
 	}
 }
 
+func TestICloudAppleKeepaliveRefreshesBeforeList(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:icloud-apple-keepalive-refresh?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	if err := db.AutoMigrate(&iCloudResourceModel{}, &iCloudResourceChannelModel{}, &iCloudAliasModel{}); err != nil {
+		t.Fatalf("migrate database: %v", err)
+	}
+	now := time.Date(2026, 8, 15, 8, 30, 0, 0, time.UTC)
+	manageExpiresAt := now.Add(iCloudImportedAppleManageTTL)
+	resource := iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "owner@example.com",
+		Status: iCloudResourceNormal, ExpireAt: now.Add(time.Hour), CredentialRevision: 1,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&resource).Error; err != nil {
+		t.Fatalf("create resource: %v", err)
+	}
+	channel := iCloudResourceChannelModel{
+		ResourceID: 1, Kind: iCloudChannelAppleAccount, Host: "appleid.apple.com",
+		Cookie: "myacinfo=secret", Scnt: "stale-scnt", APIKey: "stale-api-key",
+		ManageExpiresAt: &manageExpiresAt, SessionStatus: iCloudSessionUnchecked,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+
+	paths := make([]string, 0, 4)
+	listCalls := 0
+	service := NewService(db, nil, nil)
+	service.apple = NewAppleAccountClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		paths = append(paths, request.URL.Path)
+		header := make(http.Header)
+		body := `{}`
+		switch request.URL.Path {
+		case appleAccountTokenPath:
+			header.Set("scnt", "fresh-scnt")
+			body = `{"timeOutInterval":15}`
+		case "/account/manage":
+			body = `{"apiKey":"fresh-api-key"}`
+		case appleAccountPrivateEmailPath:
+			listCalls++
+			wantAPIKey := "stale-api-key"
+			if listCalls > 1 {
+				wantAPIKey = "fresh-api-key"
+			}
+			if request.Header.Get("X-Apple-Api-Key") != wantAPIKey {
+				t.Fatalf("list API key = %q, want %q", request.Header.Get("X-Apple-Api-Key"), wantAPIKey)
+			}
+			body = `{"privateEmailList":[],"inactivePrivateEmailList":[],"forwardToEmailAddress":"mailbox@relay.example","maxLimitReached":false}`
+		default:
+			t.Fatalf("unexpected Apple Account path %q", request.URL.Path)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: header, Body: io.NopCloser(strings.NewReader(body))}, nil
+	})})
+
+	_, initial, err := service.syncICloudAppleAccount(context.Background(), resource, channel, now)
+	if err != nil {
+		t.Fatalf("check imported Apple Account: %v", err)
+	}
+	if strings.Join(paths, "\n") != appleAccountPrivateEmailPath || initial.NextKeepaliveAt == nil ||
+		!initial.NextKeepaliveAt.Equal(now.Add(iCloudCookieKeepaliveInterval())) || initial.ManageExpiresAt == nil ||
+		!initial.ManageExpiresAt.Equal(manageExpiresAt) {
+		t.Fatalf("initial Apple Account check = paths %#v, channel %#v", paths, initial)
+	}
+
+	now = *initial.NextKeepaliveAt
+	if err := db.First(&channel, channel.ID).Error; err != nil {
+		t.Fatalf("read scheduled Apple Account channel: %v", err)
+	}
+	_, refreshed, err := service.syncICloudAppleAccount(context.Background(), resource, channel, now)
+	if err != nil {
+		t.Fatalf("refresh due Apple Account keepalive: %v", err)
+	}
+	wantPaths := []string{appleAccountPrivateEmailPath, appleAccountTokenPath, "/account/manage", appleAccountPrivateEmailPath}
+	if strings.Join(paths, "\n") != strings.Join(wantPaths, "\n") {
+		t.Fatalf("keepalive paths = %#v, want %#v", paths, wantPaths)
+	}
+	if refreshed.APIKey != "fresh-api-key" || refreshed.Scnt != "fresh-scnt" || refreshed.NextKeepaliveAt == nil ||
+		!refreshed.NextKeepaliveAt.Equal(now.Add(iCloudCookieKeepaliveInterval())) || refreshed.ManageExpiresAt == nil ||
+		!refreshed.ManageExpiresAt.Equal(now.Add(15*time.Minute)) {
+		t.Fatalf("keepalive did not persist refreshed Apple state: %#v", refreshed)
+	}
+}
+
 func TestICloudProvisionFallsBackFromRateLimitedNewChannelToLegacyReconcile(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:icloud-provision-fallback?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {

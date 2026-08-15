@@ -275,7 +275,9 @@ func (s *Service) syncICloudAppleAccount(ctx context.Context, resource iCloudRes
 		client = NewAppleAccountClient(nil)
 	}
 	current := channel
-	if strings.TrimSpace(current.APIKey) == "" || (current.ManageExpiresAt != nil && !current.ManageExpiresAt.After(now)) {
+	if strings.TrimSpace(current.APIKey) == "" ||
+		(current.NextKeepaliveAt != nil && !current.NextKeepaliveAt.After(now)) ||
+		(current.ManageExpiresAt != nil && !current.ManageExpiresAt.After(now)) {
 		refreshed, err := client.refresh(ctx, current, now)
 		if err != nil {
 			return hmeListResult{}, current, s.applyICloudProvisionError(ctx, resource, current, err, now)

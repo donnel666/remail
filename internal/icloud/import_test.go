@@ -171,6 +171,7 @@ func TestICloudImportPersistsBothChannelsWithoutQueueSecrets(t *testing.T) {
 	}
 	if len(channels) != 2 || channels[0].Kind != iCloudChannelAppleAccount || channels[1].Kind != iCloudChannelWeb ||
 		channels[0].FDClientInfo != testICloudFDClientInfo || channels[0].SessionStatus != iCloudSessionUnchecked ||
+		channels[0].ManageExpiresAt == nil || !channels[0].ManageExpiresAt.Equal(now.Add(iCloudImportedAppleManageTTL)) ||
 		channels[1].SessionStatus != iCloudSessionUnchecked {
 		t.Fatalf("unexpected channels: %#v", channels)
 	}
@@ -225,7 +226,8 @@ func TestICloudImportPersistsBothChannelsWithoutQueueSecrets(t *testing.T) {
 	if err := db.Where("resource_id = ?", resource.ID).Find(&channels).Error; err != nil {
 		t.Fatalf("read rotated channels: %v", err)
 	}
-	if len(channels) != 1 || channels[0].Kind != iCloudChannelAppleAccount || !strings.Contains(channels[0].Cookie, "rotated") {
+	if len(channels) != 1 || channels[0].Kind != iCloudChannelAppleAccount || !strings.Contains(channels[0].Cookie, "rotated") ||
+		channels[0].ManageExpiresAt == nil || !channels[0].ManageExpiresAt.Equal(now.Add(iCloudImportedAppleManageTTL)) {
 		t.Fatalf("rotated import did not replace channels: %#v", channels)
 	}
 	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", resource.ID).Updates(map[string]any{

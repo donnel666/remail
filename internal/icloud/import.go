@@ -42,6 +42,7 @@ const (
 	iCloudAppleAccountValueMaxLength       = 1000
 	iCloudImportBuildMaxLength             = 64
 	iCloudImportCookieMaxBytes             = 65_535
+	iCloudImportedAppleManageTTL           = 10 * time.Minute
 )
 
 var iCloudCurlContinuationPattern = regexp.MustCompile(`[ \t]*\\[ \t]*\r?\n[ \t]*`)
@@ -1189,6 +1190,9 @@ func upsertICloudImportChannelsTx(tx *gorm.DB, resourceID uint, channels []iClou
 		}
 		if kind == iCloudChannelWeb {
 			row.SetupCookie = row.Cookie
+		} else {
+			expiresAt := now.Add(iCloudImportedAppleManageTTL)
+			row.ManageExpiresAt = &expiresAt
 		}
 		var current iCloudResourceChannelModel
 		result := tx.Where("resource_id = ? AND kind = ?", resourceID, kind).First(&current)
@@ -1207,7 +1211,7 @@ func upsertICloudImportChannelsTx(tx *gorm.DB, resourceID uint, channels []iClou
 			"fd_client_info": row.FDClientInfo,
 			"dsid":           row.DSID, "client_id": row.ClientID, "client_build_number": row.ClientBuildNumber,
 			"client_mastering_number": row.ClientMasteringNumber, "scnt": row.Scnt,
-			"session_id": "", "api_key": row.APIKey, "data_access_token": "", "manage_expires_at": nil,
+			"session_id": "", "api_key": row.APIKey, "data_access_token": "", "manage_expires_at": row.ManageExpiresAt,
 			"session_status": iCloudSessionUnchecked, "session_failures": 0, "cooldown_until": nil, "cooldown_stage": 0,
 			"next_keepalive_at": nil, "last_checked_at": nil, "last_valid_at": nil, "updated_at": now,
 		}
