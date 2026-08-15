@@ -56,7 +56,7 @@ func (s *Service) CreateAdminICloudImportPreparation(ctx context.Context, operat
 		if err != nil {
 			return nil, ErrICloudImportTemporary
 		}
-		local := make([]byte, 16)
+		local := make([]byte, 6)
 		if _, err := cryptorand.Read(local); err != nil {
 			return nil, ErrICloudImportTemporary
 		}
@@ -64,7 +64,7 @@ func (s *Service) CreateAdminICloudImportPreparation(ctx context.Context, operat
 		model := iCloudImportPreparationModel{
 			OperatorUserID:   operatorUserID,
 			DomainResourceID: domain.ID,
-			ForwardToEmail:   "icloud_" + hex.EncodeToString(local) + "@" + domain.Domain,
+			ForwardToEmail:   hex.EncodeToString(local) + "@" + domain.Domain,
 			ExpiresAt:        now.Add(iCloudImportPreparationTTL),
 			CreatedAt:        now,
 			UpdatedAt:        now,

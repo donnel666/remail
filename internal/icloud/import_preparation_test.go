@@ -76,7 +76,8 @@ func TestCreateAdminICloudImportPreparationUsesEligibleConfiguredDomain(t *testi
 	if err != nil {
 		t.Fatalf("create preparation: %v", err)
 	}
-	if result.Status != "waiting" || !strings.HasPrefix(result.ForwardToEmail, "icloud_") || !strings.HasSuffix(result.ForwardToEmail, "@relay.example") {
+	local, domain, found := strings.Cut(result.ForwardToEmail, "@")
+	if result.Status != "waiting" || !found || len(local) != 12 || domain != "relay.example" {
 		t.Fatalf("unexpected preparation: %#v", result)
 	}
 	var stored iCloudImportPreparationModel
