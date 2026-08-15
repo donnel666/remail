@@ -3,6 +3,7 @@ package icloud
 import (
 	"context"
 	"errors"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	coreDomain "github.com/donnel666/remail/internal/core/domain"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
+	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/glebarez/sqlite"
 	"github.com/hibiken/asynq"
@@ -77,7 +79,8 @@ func TestCreateAdminICloudImportPreparationUsesEligibleConfiguredDomain(t *testi
 		t.Fatalf("create preparation: %v", err)
 	}
 	local, domain, found := strings.Cut(result.ForwardToEmail, "@")
-	if result.Status != "waiting" || !found || len(local) != 12 || domain != "relay.example" {
+	if result.Status != "waiting" || !found ||
+		!regexp.MustCompile(`^[a-z]{6,18}[0-9]{5}$`).MatchString(local) || domain != "relay.example" {
 		t.Fatalf("unexpected preparation: %#v", result)
 	}
 	var stored iCloudImportPreparationModel
@@ -90,6 +93,28 @@ func TestCreateAdminICloudImportPreparationUsesEligibleConfiguredDomain(t *testi
 	}
 	if slices.Contains(remaining, 10) || !slices.Contains(remaining, 11) || !slices.Contains(remaining, oldReferencedID) {
 		t.Fatalf("unexpected cleanup result: %v", remaining)
+	}
+}
+
+func TestGeneratedICloudImportAddressesDoNotShadowAppleVerificationCode(t *testing.T) {
+	setICloudPreparationRuntimeValue(t, "verification_code_pattern", `["(?:^|[^\\d])(\\d{6,8})(?:[^\\d]|$)"]`)
+	now := time.Date(2026, 8, 15, 20, 0, 0, 0, time.UTC)
+	for iteration := 0; iteration < 10_000; iteration++ {
+		local, err := generateICloudImportPreparationLocal()
+		if err != nil {
+			t.Fatalf("generate address %d: %v", iteration, err)
+		}
+		address := local + "@aishop6.com"
+		raw := []byte("From: Apple <noreply@apple.com>\r\n" +
+			"To: " + address + "\r\n" +
+			"Subject: 验证你的 Apple 账户电子邮件地址\r\n" +
+			"Content-Type: text/plain; charset=utf-8\r\n\r\n" +
+			"你最近已添加 " + address + " 作为你 Apple 账户的额外电子邮件地址。" +
+			"为验证此电子邮件地址属于你，请在你的电子邮件验证页面输入下方验证码：\r\n\r\n" +
+			"895089\r\n")
+		if code := mailapp.ParseInboundMessageSummary(raw, now).VerificationCode; code != "895089" {
+			t.Fatalf("iteration %d address %q extracted %q", iteration, address, code)
+		}
 	}
 }
 

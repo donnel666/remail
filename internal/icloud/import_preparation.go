@@ -3,7 +3,6 @@ package icloud
 import (
 	"context"
 	cryptorand "crypto/rand"
-	"encoding/hex"
 	"errors"
 	"math/big"
 	stdmail "net/mail"
@@ -21,6 +20,27 @@ const (
 	iCloudImportPreparationRetention    = 24 * time.Hour
 	iCloudImportPreparationMailLimit    = 50
 	iCloudImportPreparationCleanupBatch = 100
+)
+
+var (
+	iCloudImportFirstNames = []string{
+		"james", "john", "robert", "michael", "david", "william", "richard",
+		"joseph", "thomas", "charles", "daniel", "matthew", "anthony", "mark",
+		"steven", "andrew", "joshua", "brian", "kevin", "george", "edward",
+		"mary", "patricia", "jennifer", "linda", "sarah", "elizabeth", "barbara",
+		"jessica", "susan", "karen", "lisa", "nancy", "betty", "margaret",
+		"sandra", "ashley", "dorothy", "kimberly", "emily", "olivia", "emma",
+		"sophia", "isabella", "ava", "mia", "charlotte", "amelia", "harper",
+	}
+	iCloudImportLastNames = []string{
+		"smith", "johnson", "williams", "brown", "jones", "garcia", "miller",
+		"davis", "rodriguez", "martinez", "hernandez", "lopez", "gonzalez",
+		"wilson", "anderson", "thomas", "taylor", "moore", "jackson", "martin",
+		"lee", "perez", "thompson", "white", "harris", "sanchez", "clark",
+		"ramirez", "lewis", "robinson", "walker", "young", "allen", "king",
+		"wright", "scott", "torres", "nguyen", "hill", "flores", "green",
+		"adams", "nelson", "baker", "hall", "rivera", "campbell", "mitchell",
+	}
 )
 
 func (s *Service) CreateAdminICloudImportPreparation(ctx context.Context, operatorUserID uint) (*ImportPreparationView, error) {
@@ -56,15 +76,15 @@ func (s *Service) CreateAdminICloudImportPreparation(ctx context.Context, operat
 		if err != nil {
 			return nil, ErrICloudImportTemporary
 		}
-		local := make([]byte, 6)
-		if _, err := cryptorand.Read(local); err != nil {
+		local, err := generateICloudImportPreparationLocal()
+		if err != nil {
 			return nil, ErrICloudImportTemporary
 		}
 		domain := domains[index.Int64()]
 		model := iCloudImportPreparationModel{
 			OperatorUserID:   operatorUserID,
 			DomainResourceID: domain.ID,
-			ForwardToEmail:   hex.EncodeToString(local) + "@" + domain.Domain,
+			ForwardToEmail:   local + "@" + domain.Domain,
 			ExpiresAt:        now.Add(iCloudImportPreparationTTL),
 			CreatedAt:        now,
 			UpdatedAt:        now,
@@ -78,6 +98,21 @@ func (s *Service) CreateAdminICloudImportPreparation(ctx context.Context, operat
 		return model.preparationView(now), nil
 	}
 	return nil, ErrICloudImportTemporary
+}
+
+func generateICloudImportPreparationLocal() (string, error) {
+	random := make([]byte, 7)
+	if _, err := cryptorand.Read(random); err != nil {
+		return "", err
+	}
+	first := iCloudImportFirstNames[int(random[0])%len(iCloudImportFirstNames)]
+	last := iCloudImportLastNames[int(random[1])%len(iCloudImportLastNames)]
+	var digits strings.Builder
+	digits.Grow(5)
+	for _, value := range random[2:] {
+		digits.WriteByte('0' + value%10)
+	}
+	return first + last + digits.String(), nil
 }
 
 func (s *Service) cleanupICloudImportPreparations(ctx context.Context, before time.Time) error {
