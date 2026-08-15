@@ -5538,7 +5538,7 @@ type AdminICloudUpdateRequest struct {
 	ExpireAt *time.Time `json:"expireAt,omitempty"`
 	ForSale  *bool      `json:"forSale,omitempty"`
 
-	// ImportLine Complete `email----curl[----curl]` credential line. It accepts one old cURL, one new cURL, or both cURLs in either order, including browser-copied backslash line continuations.
+	// ImportLine Write-only `email----curl[----curl]` credential update. It accepts one old cURL, one new cURL, or both cURLs in either order, including browser-copied backslash line continuations. While the primary email is unchanged, each supplied cURL replaces only its matching channel and omitted channels are preserved. On an already healthy resource, submitted channels are checked asynchronously without changing resource health. Changing the primary email treats the supplied cURLs as the complete credential set, removes omitted channels, and re-queues resource validation.
 	ImportLine *string `json:"importLine,omitempty"`
 	OwnerId    *int    `json:"ownerId,omitempty"`
 

@@ -790,7 +790,7 @@ export function EditICloudModal({
         <div className="space-y-4 py-1">
           {credentialsOnly ? (
             <div className="rounded-lg border border-[var(--semi-color-warning-light-active)] bg-[var(--semi-color-warning-light-default)] px-3 py-2 text-sm text-[var(--semi-color-text-0)]">
-              {t("Existing cURLs are write-only. Enter at least one replacement; an omitted channel is removed.")}
+              {t("Existing cURLs are write-only. Enter at least one replacement; a blank field keeps that channel unchanged unless you change the primary email.")}
             </div>
           ) : null}
 
@@ -865,7 +865,7 @@ export function EditICloudModal({
                 {t("Credentials")}
               </div>
               <div className="mb-3 text-xs leading-5 text-[var(--semi-color-text-2)]">
-                {t("iCloud cURLs are write-only. Leave both blank to keep current channels; entering either replaces the complete set, and the server identifies channels from their URLs.")}
+                {t("iCloud cURLs are write-only. With the same primary email, each non-empty field replaces only its matching channel and a blank field preserves it. Changing the primary email replaces the complete channel set.")}
               </div>
               <div className="space-y-3">
                 <label className="block">
@@ -1747,6 +1747,7 @@ export default function AdminICloudEmails() {
   );
   const [bulkBusy, setBulkBusy] = useState<ICloudBulkBusyAction | null>(null);
   const [refreshGeneration, setRefreshGeneration] = useState(0);
+  const [sessionRefreshGeneration, setSessionRefreshGeneration] = useState(0);
   const listRequestRef = useRef<AbortController | null>(null);
   const statsRequestRef = useRef<AbortController | null>(null);
   const detailRequestRef = useRef<AbortController | null>(null);
@@ -1869,7 +1870,15 @@ export default function AdminICloudEmails() {
   }, []);
 
   useEffect(() => {
-    if (detailId === null || (detail?.status !== "pending" && detail?.status !== "validating")) {
+    if (
+      detailId === null ||
+      (detail?.status !== "pending" &&
+        detail?.status !== "validating" &&
+        (detail?.status !== "normal" ||
+          detail.nextProvisionAt === null ||
+          (detail?.newSession?.status !== "unchecked" &&
+            detail?.oldSession?.status !== "unchecked")))
+    ) {
       return;
     }
     let stopped = false;
@@ -1885,7 +1894,7 @@ export default function AdminICloudEmails() {
       stopped = true;
       if (timeoutId !== undefined) window.clearTimeout(timeoutId);
     };
-  }, [detail?.status, detailId, loadDetail]);
+  }, [detail?.newSession?.status, detail?.oldSession?.status, detail?.status, detailId, loadDetail]);
 
   useEffect(() => {
     listRequestRef.current?.abort();
@@ -1923,7 +1932,22 @@ export default function AdminICloudEmails() {
         }
       });
     return () => controller.abort();
-  }, [activePage, filter, pageSize, refreshGeneration, t]);
+  }, [activePage, filter, pageSize, refreshGeneration, sessionRefreshGeneration, t]);
+
+  useEffect(() => {
+    if (!items.some((item) =>
+      item.status === "normal" &&
+      item.nextProvisionAt !== null &&
+      (item.newSession?.status === "unchecked" || item.oldSession?.status === "unchecked")
+    )) {
+      return;
+    }
+    const timeoutId = window.setTimeout(
+      () => setSessionRefreshGeneration((value) => value + 1),
+      3000,
+    );
+    return () => window.clearTimeout(timeoutId);
+  }, [items]);
 
   useEffect(() => {
     statsRequestRef.current?.abort();

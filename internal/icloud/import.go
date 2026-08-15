@@ -782,7 +782,7 @@ func (s *Service) createICloudResourcesAndMarkImportSucceeded(
 					if rootUpdated.RowsAffected != 1 {
 						return ErrICloudImportClaim
 					}
-					if err := upsertICloudImportChannelsTx(tx, existing.ID, line.Channels, now); err != nil {
+					if err := upsertICloudImportChannelsTx(tx, existing.ID, line.Channels, true, now); err != nil {
 						return err
 					}
 					resourceIDs[index] = existing.ID
@@ -804,7 +804,7 @@ func (s *Service) createICloudResourcesAndMarkImportSucceeded(
 					if line.ExistingResourceID != 0 {
 						continue
 					}
-					if err := upsertICloudImportChannelsTx(tx, resourceIDs[index], line.Channels, now); err != nil {
+					if err := upsertICloudImportChannelsTx(tx, resourceIDs[index], line.Channels, true, now); err != nil {
 						return err
 					}
 				}
@@ -1046,7 +1046,7 @@ func isICloudDuplicateError(err error) bool {
 	return errors.As(err, &mysqlError) && mysqlError.Number == 1062
 }
 
-func upsertICloudImportChannelsTx(tx *gorm.DB, resourceID uint, channels []iCloudImportChannel, now time.Time) error {
+func upsertICloudImportChannelsTx(tx *gorm.DB, resourceID uint, channels []iCloudImportChannel, removeOmitted bool, now time.Time) error {
 	if tx == nil || resourceID == 0 {
 		return ErrICloudImportClaim
 	}
@@ -1093,11 +1093,13 @@ func upsertICloudImportChannelsTx(tx *gorm.DB, resourceID uint, channels []iClou
 			return err
 		}
 	}
-	// The import/edit line is the complete credential set. Do not leave an
-	// omitted channel silently active after an operator intentionally replaced it.
 	if len(seen) == 0 {
 		return ErrICloudImportInvalid
 	}
+	if !removeOmitted {
+		return nil
+	}
+	// Imports are complete credential snapshots; a missing channel is removed.
 	kinds := make([]string, 0, len(seen))
 	for kind := range seen {
 		kinds = append(kinds, kind)

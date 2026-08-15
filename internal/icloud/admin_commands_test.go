@@ -58,7 +58,7 @@ func TestApplyAdminICloudValidationResetsOnlyHealthScheduling(t *testing.T) {
 	}
 }
 
-func TestEditAdminICloudResourceUsesCompleteImportLine(t *testing.T) {
+func TestEditAdminICloudResourcePatchesSubmittedChannels(t *testing.T) {
 	db := newAdminICloudCommandTestDB(t, "icloud-admin-edit")
 	now := time.Date(2026, 8, 14, 9, 0, 0, 0, time.UTC)
 	createAdminICloudCommandResource(t, db, now, iCloudResourceModel{
@@ -94,7 +94,7 @@ func TestEditAdminICloudResourceUsesCompleteImportLine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("edit credentials: %v", err)
 	}
-	if !result.Changed || result.Version != 2 || result.Status != iCloudResourcePending {
+	if !result.Changed || result.Version != 2 || result.Status != iCloudResourceNormal {
 		t.Fatalf("unexpected edit result: %#v", result)
 	}
 	var resource iCloudResourceModel
@@ -102,8 +102,8 @@ func TestEditAdminICloudResourceUsesCompleteImportLine(t *testing.T) {
 		t.Fatalf("read resource: %v", err)
 	}
 	if resource.CredentialRevision != 2 ||
-		resource.ValidationGeneration != 2 || resource.Status != iCloudResourcePending ||
-		resource.NextValidationAt == nil || resource.NextProvisionAt != nil || !resource.ExpireAt.Equal(expireAt) {
+		resource.ValidationGeneration != 1 || resource.Status != iCloudResourceNormal ||
+		resource.NextValidationAt != nil || resource.NextProvisionAt == nil || !resource.NextProvisionAt.Equal(now) || !resource.ExpireAt.Equal(expireAt) {
 		t.Fatalf("unexpected edited resource: %#v", resource)
 	}
 	var channels []iCloudResourceChannelModel
@@ -121,12 +121,17 @@ func TestEditAdminICloudResourceUsesCompleteImportLine(t *testing.T) {
 	}
 
 	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", 1).
-		Updates(map[string]any{"status": iCloudResourceNormal, "next_validation_at": nil}).Error; err != nil {
-		t.Fatalf("mark resource healthy: %v", err)
+		Update("next_provision_at", nil).Error; err != nil {
+		t.Fatalf("finish silent credential check: %v", err)
 	}
 	now = now.Add(time.Minute)
-	rotated := strings.Replace(testICloudNewCurl, "myacinfo=secret", "myacinfo=rotated", 1)
-	line = "owner@icloud.com----" + rotated
+	if err := db.Model(&iCloudResourceChannelModel{}).
+		Where("resource_id = ? AND kind = ?", 1, iCloudChannelAppleAccount).
+		Updates(map[string]any{"session_status": iCloudSessionValid, "api_key": "preserved-api-key"}).Error; err != nil {
+		t.Fatalf("mark omitted channel valid: %v", err)
+	}
+	rotated := strings.Replace(testICloudOldCurl, "X-APPLE-WEBAUTH-TOKEN=token", "X-APPLE-WEBAUTH-TOKEN=rotated", 1)
+	line = "OWNER@ICLOUD.COM----" + rotated
 	result, err = service.EditAdminICloudResource(context.Background(), AdminICloudEditCommand{
 		ResourceID: 1, Version: 2, ImportLine: &line,
 		OperatorUserID: 99, IdempotencyKey: "edit-2", RequestID: "request-2", Path: "/v1/admin/icloud/resources/1",
@@ -134,28 +139,34 @@ func TestEditAdminICloudResourceUsesCompleteImportLine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("edit channel only: %v", err)
 	}
-	if result.Status != iCloudResourcePending {
-		t.Fatalf("cookie edit did not requeue validation: %#v", result)
+	if result.Status != iCloudResourceNormal {
+		t.Fatalf("cookie edit changed resource health: %#v", result)
 	}
 	var channelOnlyResource iCloudResourceModel
 	if err := db.First(&channelOnlyResource, 1).Error; err != nil {
 		t.Fatalf("read channel-only edit: %v", err)
 	}
-	if channelOnlyResource.Status != iCloudResourcePending || channelOnlyResource.ValidationGeneration != 3 ||
-		channelOnlyResource.NextValidationAt == nil || channelOnlyResource.NextProvisionAt != nil ||
+	if channelOnlyResource.Status != iCloudResourceNormal || channelOnlyResource.ValidationGeneration != 1 ||
+		channelOnlyResource.NextValidationAt != nil || channelOnlyResource.NextProvisionAt == nil || !channelOnlyResource.NextProvisionAt.Equal(now) ||
 		channelOnlyResource.SelectedForwardTo != "old@relay.example" || channelOnlyResource.AliasCount != 1 || channelOnlyResource.LastAliasSyncAt == nil {
-		t.Fatalf("channel-only edit did not requeue validation: %#v", channelOnlyResource)
+		t.Fatalf("channel-only edit did not schedule a silent check: %#v", channelOnlyResource)
 	}
 	var retiredAlias iCloudAliasModel
 	if err := db.Where("resource_id = ? AND anonymous_id = ?", 1, "existing-alias").Take(&retiredAlias).Error; err != nil || retiredAlias.Status != iCloudResourceNormal {
 		t.Fatalf("same-account channel edit hid existing alias: alias=%#v err=%v", retiredAlias, err)
 	}
 	channels = nil
-	if err := db.Where("resource_id = ?", 1).Find(&channels).Error; err != nil {
+	if err := db.Where("resource_id = ?", 1).Order("kind").Find(&channels).Error; err != nil {
 		t.Fatalf("read replacement channel: %v", err)
 	}
-	if len(channels) != 1 || channels[0].Kind != iCloudChannelAppleAccount || !strings.Contains(channels[0].Cookie, "rotated") {
-		t.Fatalf("import line did not atomically replace channels: %#v", channels)
+	if len(channels) != 2 || channels[0].Kind != iCloudChannelAppleAccount || channels[1].Kind != iCloudChannelWeb {
+		t.Fatalf("partial edit did not preserve both channels: %#v", channels)
+	}
+	if channels[0].Cookie != "myacinfo=secret" || channels[0].SessionStatus != iCloudSessionValid || channels[0].APIKey != "preserved-api-key" {
+		t.Fatalf("partial edit changed omitted new channel: %#v", channels[0])
+	}
+	if !strings.Contains(channels[1].Cookie, "X-APPLE-WEBAUTH-TOKEN=rotated") || channels[1].SessionStatus != iCloudSessionUnchecked {
+		t.Fatalf("partial edit did not replace submitted old channel: %#v", channels[1])
 	}
 
 	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", 1).Updates(map[string]any{
@@ -164,6 +175,30 @@ func TestEditAdminICloudResourceUsesCompleteImportLine(t *testing.T) {
 		"last_alias_sync_at": now,
 	}).Error; err != nil {
 		t.Fatalf("seed old account inventory: %v", err)
+	}
+	now = now.Add(time.Minute)
+	rotatedNew := strings.Replace(testICloudNewCurl, "myacinfo=secret", "myacinfo=rotated", 1)
+	line = "owner@icloud.com----" + rotatedNew
+	if _, err := service.EditAdminICloudResource(context.Background(), AdminICloudEditCommand{
+		ResourceID: 1, Version: 3, ImportLine: &line,
+		OperatorUserID: 99, IdempotencyKey: "edit-3", RequestID: "request-3", Path: "/v1/admin/icloud/resources/1",
+	}); err != nil {
+		t.Fatalf("edit new channel only: %v", err)
+	}
+	var newChannelOnlyResource iCloudResourceModel
+	if err := db.First(&newChannelOnlyResource, 1).Error; err != nil {
+		t.Fatalf("read new-channel-only edit: %v", err)
+	}
+	if newChannelOnlyResource.AliasProvisionCandidate != "candidate@icloud.com" || !newChannelOnlyResource.AliasProvisionReconcile {
+		t.Fatalf("new-channel edit cleared old-channel candidate: %#v", newChannelOnlyResource)
+	}
+	channels = nil
+	if err := db.Where("resource_id = ?", 1).Order("kind").Find(&channels).Error; err != nil {
+		t.Fatalf("read new-channel-only credentials: %v", err)
+	}
+	if len(channels) != 2 || !strings.Contains(channels[0].Cookie, "myacinfo=rotated") ||
+		!strings.Contains(channels[1].Cookie, "X-APPLE-WEBAUTH-TOKEN=rotated") {
+		t.Fatalf("new-channel edit changed the wrong credentials: %#v", channels)
 	}
 	if err := db.Create(&iCloudAliasModel{
 		ResourceID: 1, AnonymousID: "old-alias-id", Email: "old@icloud.com", Status: iCloudResourceNormal,
@@ -174,8 +209,8 @@ func TestEditAdminICloudResourceUsesCompleteImportLine(t *testing.T) {
 	now = now.Add(time.Minute)
 	line = "renamed@icloud.com----" + rotated
 	if _, err := service.EditAdminICloudResource(context.Background(), AdminICloudEditCommand{
-		ResourceID: 1, Version: 3, ImportLine: &line,
-		OperatorUserID: 99, IdempotencyKey: "edit-3", RequestID: "request-3", Path: "/v1/admin/icloud/resources/1",
+		ResourceID: 1, Version: 4, ImportLine: &line,
+		OperatorUserID: 99, IdempotencyKey: "edit-4", RequestID: "request-4", Path: "/v1/admin/icloud/resources/1",
 	}); err != nil {
 		t.Fatalf("edit Apple account email: %v", err)
 	}
@@ -190,6 +225,85 @@ func TestEditAdminICloudResourceUsesCompleteImportLine(t *testing.T) {
 	var oldAlias iCloudAliasModel
 	if err := db.Where("resource_id = ?", 1).First(&oldAlias).Error; err != nil || oldAlias.Status != "missing" {
 		t.Fatalf("old alias was not retired: alias=%#v err=%v", oldAlias, err)
+	}
+	channels = nil
+	if err := db.Where("resource_id = ?", 1).Find(&channels).Error; err != nil {
+		t.Fatalf("read renamed account channels: %v", err)
+	}
+	if len(channels) != 1 || channels[0].Kind != iCloudChannelWeb || !strings.Contains(channels[0].Cookie, "X-APPLE-WEBAUTH-TOKEN=rotated") {
+		t.Fatalf("email edit retained an omitted old-account channel: %#v", channels)
+	}
+}
+
+func TestEditAdminICloudResourceSilentlyVerifiesUpdatedChannel(t *testing.T) {
+	db := newAdminICloudCommandTestDB(t, "icloud-admin-edit-silent-channel-check")
+	now := time.Date(2026, 8, 15, 9, 30, 0, 0, time.UTC)
+	createAdminICloudCommandResource(t, db, now, iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "owner@icloud.com",
+		Status: iCloudResourceNormal, ExpireAt: now.Add(time.Hour), CredentialRevision: 1, ValidationGeneration: 1,
+	})
+	parsed, failure := parseICloudCurlImportLine(1, "owner@icloud.com----"+testICloudNewCurl+"----"+testICloudOldCurl)
+	if failure != nil || parsed == nil {
+		t.Fatalf("parse initial credentials: line=%#v failure=%#v", parsed, failure)
+	}
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		return upsertICloudImportChannelsTx(tx, 1, parsed.Channels, true, now)
+	}); err != nil {
+		t.Fatalf("store initial credentials: %v", err)
+	}
+	if err := db.Model(&iCloudResourceChannelModel{}).Where("resource_id = ?", 1).
+		Update("session_status", iCloudSessionValid).Error; err != nil {
+		t.Fatalf("mark initial credentials valid: %v", err)
+	}
+
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	rotated := strings.Replace(testICloudNewCurl, "myacinfo=secret", "myacinfo=rotated", 1)
+	line := "owner@icloud.com----" + rotated
+	result, err := service.EditAdminICloudResource(context.Background(), AdminICloudEditCommand{
+		ResourceID: 1, Version: 1, ImportLine: &line,
+		OperatorUserID: 99, IdempotencyKey: "silent-check", RequestID: "request-silent", Path: "/v1/admin/icloud/resources/1",
+	})
+	if err != nil {
+		t.Fatalf("edit new channel: %v", err)
+	}
+	if result.Status != iCloudResourceNormal {
+		t.Fatalf("credential edit changed resource health: %#v", result)
+	}
+	var resource iCloudResourceModel
+	if err := db.First(&resource, 1).Error; err != nil || resource.NextValidationAt != nil || resource.NextProvisionAt == nil {
+		t.Fatalf("silent channel check was not scheduled: resource=%#v err=%v", resource, err)
+	}
+	var channels []iCloudResourceChannelModel
+	if err := db.Where("resource_id = ?", 1).Order("kind").Find(&channels).Error; err != nil {
+		t.Fatalf("read edited channels: %v", err)
+	}
+	if len(channels) != 2 || channels[0].SessionStatus != iCloudSessionUnchecked || channels[1].SessionStatus != iCloudSessionValid {
+		t.Fatalf("edit did not isolate the submitted channel: %#v", channels)
+	}
+	cooldown := now.Add(time.Hour)
+	if err := db.Model(&iCloudResourceChannelModel{}).
+		Where("resource_id = ? AND kind = ?", 1, iCloudChannelWeb).
+		Update("cooldown_until", cooldown).Error; err != nil {
+		t.Fatalf("defer omitted channel: %v", err)
+	}
+	setICloudForwardingSuffixes(t, "relay.example")
+	service.apple = newICloudValidationAppleClient(t, "silent-check-id", "mailbox@relay.example")
+	if err := service.ProcessICloudProvision(context.Background(), iCloudProvisionTask{ResourceID: 1}); err != nil {
+		t.Fatalf("process silent channel check: %v", err)
+	}
+	var updatedNew, preservedOld iCloudResourceChannelModel
+	if err := db.Where("resource_id = ? AND kind = ?", 1, iCloudChannelAppleAccount).Take(&updatedNew).Error; err != nil {
+		t.Fatalf("read verified new channel: %v", err)
+	}
+	if err := db.Where("resource_id = ? AND kind = ?", 1, iCloudChannelWeb).Take(&preservedOld).Error; err != nil {
+		t.Fatalf("read preserved old channel: %v", err)
+	}
+	if updatedNew.SessionStatus != iCloudSessionValid || updatedNew.LastValidAt == nil || preservedOld.SessionStatus != iCloudSessionValid {
+		t.Fatalf("silent check did not verify only the updated channel: new=%#v old=%#v", updatedNew, preservedOld)
+	}
+	if err := db.First(&resource, 1).Error; err != nil || resource.Status != iCloudResourceNormal {
+		t.Fatalf("silent check changed resource health: resource=%#v err=%v", resource, err)
 	}
 }
 
@@ -365,7 +479,7 @@ func newAdminICloudCommandTestDB(t *testing.T, name string) *gorm.DB {
 		t.Fatalf("open database: %v", err)
 	}
 	if err := db.AutoMigrate(
-		&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudResourceChannelModel{}, &iCloudAliasModel{}, &iCloudMaintenanceRunModel{}, &iCloudAdminCommandAllocation{},
+		&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudResourceChannelModel{}, &iCloudAliasModel{}, &iCloudAliasRouteModel{}, &iCloudMaintenanceRunModel{}, &iCloudAdminCommandAllocation{},
 		&governanceinfra.OperationLogModel{}, &coreinfra.AdminResourceCommandReceiptModel{},
 	); err != nil {
 		t.Fatalf("migrate database: %v", err)

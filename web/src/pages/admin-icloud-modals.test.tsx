@@ -304,7 +304,10 @@ describe("admin iCloud modal workflows", () => {
     });
   });
 
-  afterEach(() => cleanup());
+  afterEach(() => {
+    vi.useRealTimers();
+    cleanup();
+  });
 
   it("submits create-alias through the independent alias endpoint", async () => {
     render(
@@ -402,6 +405,37 @@ describe("admin iCloud modal workflows", () => {
     await waitFor(() => expect(mocks.selectionNotification).toHaveBeenCalled());
     const calls = mocks.selectionNotification.mock.calls;
     expect(calls[calls.length - 1]?.[0]).toMatchObject({ selectedCount: 0 });
+  });
+
+  it("refreshes the resource list while a Cookie check is pending", async () => {
+    vi.useFakeTimers();
+    const pending = resource();
+    pending.newSession = { ...pending.newSession!, status: "unchecked" };
+    pending.nextProvisionAt = "2026-08-15T04:00:00Z";
+    mocks.listResources.mockResolvedValue({
+      aliasLimit: 750,
+      forwardingSuffixes: ["relay.example"],
+      facets: {
+        forSale: { all: 1, no: 0, yes: 1 },
+        status: { abnormal: 0, all: 1, deleted: 0, disabled: 0, normal: 1, pending: 0, validating: 0 },
+      },
+      items: [pending],
+      limit: 20,
+      offset: 0,
+      total: 1,
+    });
+
+    render(<AdminICloudEmails />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(mocks.listResources).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect(mocks.listResources).toHaveBeenCalledTimes(3);
   });
 
   it("exposes expiration for selected resources", async () => {
@@ -679,6 +713,32 @@ describe("admin iCloud modal workflows", () => {
     expect(mocks.toastWarning).toHaveBeenCalledWith(
       "At least one iCloud cURL is required.",
     );
+  });
+
+  it("submits only the non-empty credential channel", async () => {
+    render(
+      <EditICloudModal
+        canOperate
+        credentialsOnly
+        onCancel={vi.fn()}
+        onSaved={vi.fn()}
+        owners={[owner]}
+        target={resource()}
+      />,
+    );
+
+    const oldCurl =
+      "curl --url 'https://p217-maildomainws.icloud.com.cn/v2/hme/list?dsid=123' -b 'X-APPLE-WEBAUTH-TOKEN=rotated'";
+    fireEvent.change(screen.getByLabelText("Old Cookie cURL"), {
+      target: { value: oldCurl },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Replace credentials" }));
+
+    await waitFor(() => expect(mocks.updateResource).toHaveBeenCalledWith(41, {
+      importLine: `main@icloud.com----${oldCurl}`,
+      version: 3,
+    }));
+    expect(screen.getByText(/a blank field keeps that channel unchanged/)).toBeInTheDocument();
   });
 
   it("builds one normalized import line from the separate email and cURL fields", async () => {

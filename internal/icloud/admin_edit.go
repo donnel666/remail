@@ -117,9 +117,19 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 			return ErrICloudResourceNotFound
 		}
 
-		emailChanged := imported != nil && imported.PrimaryEmail != resource.PrimaryEmail
+		emailChanged := imported != nil && !strings.EqualFold(strings.TrimSpace(imported.PrimaryEmail), strings.TrimSpace(resource.PrimaryEmail))
 		credentialsSubmitted := imported != nil
 		accountIdentityChanged := emailChanged
+		silentCredentialRefresh := credentialsSubmitted && !accountIdentityChanged && resource.Status == iCloudResourceNormal
+		webChannelSubmitted := false
+		if imported != nil {
+			for _, channel := range imported.Channels {
+				if channel.Kind == iCloudChannelWeb {
+					webChannelSubmitted = true
+					break
+				}
+			}
+		}
 		ownerChanged := command.OwnerUserID != nil && *command.OwnerUserID != root.OwnerUserID
 		expireAtChanged := command.ExpireAt != nil && !command.ExpireAt.Equal(resource.ExpireAt)
 		if (emailChanged || ownerChanged) && assertNoActiveAdminICloudAllocationTx(ctx, tx, command.ResourceID) != nil {
@@ -161,8 +171,10 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 				updates["alias_count"] = 0
 				updates["last_alias_sync_at"] = nil
 			}
-			updates["alias_provision_candidate"] = ""
-			updates["alias_provision_reconcile"] = false
+			if accountIdentityChanged || webChannelSubmitted {
+				updates["alias_provision_candidate"] = ""
+				updates["alias_provision_reconcile"] = false
+			}
 			if emailChanged {
 				updates["primary_email"] = imported.PrimaryEmail
 			}
@@ -176,19 +188,24 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 
 		queuedGeneration := uint64(0)
 		if credentialsSubmitted {
-			if resource.Status != iCloudResourceDisabled {
+			switch {
+			case resource.Status == iCloudResourceDisabled:
+				updates["next_validation_at"] = nil
+			case silentCredentialRefresh:
+				updates["next_validation_at"] = nil
+				updates["next_provision_at"] = now
+				queuedProvision = true
+			default:
 				queuedGeneration = queueAdminICloudValidation(updates, resource, now)
 				queuedValidation = true
-			} else {
-				updates["next_validation_at"] = nil
 			}
 		}
 		provisionExpireAt := resource.ExpireAt
 		if command.ExpireAt != nil {
 			provisionExpireAt = *command.ExpireAt
 		}
-		if credentialsSubmitted || expireAtChanged {
-			if !credentialsSubmitted && resource.Status == iCloudResourceNormal && provisionExpireAt.After(now) && resource.AliasCount < iCloudMaxAliases {
+		if expireAtChanged && !credentialsSubmitted {
+			if resource.Status == iCloudResourceNormal && provisionExpireAt.After(now) && resource.AliasCount < iCloudMaxAliases {
 				updates["next_provision_at"] = now
 				queuedProvision = true
 			} else if !provisionExpireAt.After(now) || resource.AliasCount >= iCloudMaxAliases {
@@ -215,7 +232,7 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 			}
 		}
 		if credentialsSubmitted {
-			if err := upsertICloudImportChannelsTx(tx, command.ResourceID, imported.Channels, now); err != nil {
+			if err := upsertICloudImportChannelsTx(tx, command.ResourceID, imported.Channels, accountIdentityChanged, now); err != nil {
 				return err
 			}
 		}

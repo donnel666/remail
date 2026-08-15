@@ -3696,7 +3696,7 @@ export interface paths {
         head?: never;
         /**
          * Atomically edit an iCloud resource
-         * @description Base fields require `core:resource/write`. Supplying `forSale`, `expireAt`, or `importLine` additionally requires `core:resource/operate`. Session authentication, CSRF, and an idempotency key are required. `importLine` is the same complete write-only line accepted by import: `email----curl[----curl]`, with one old cURL, one new cURL, or both cURLs in either order. Changing the email or either cURL channel re-queues validation. Changing the email or owner conflicts with an active allocation. Changing `expireAt` only changes future alias creation eligibility.
+         * @description Base fields require `core:resource/write`. Supplying `forSale`, `expireAt`, or `importLine` additionally requires `core:resource/operate`. Session authentication, CSRF, and an idempotency key are required. `importLine` accepts `email----curl[----curl]`, with one old cURL, one new cURL, or both cURLs in either order. While the primary email is unchanged, each supplied cURL replaces only its matching channel and omitted channels are preserved. On an already healthy resource, submitted channels are checked asynchronously without changing resource health. Changing the primary email treats the supplied cURLs as the complete credential set, removes omitted channels, and re-queues resource validation. Changing the email or owner conflicts with an active allocation. Changing `expireAt` only changes future alias creation eligibility.
          */
         patch: operations["patchAdminICloudResource"];
         trace?: never;
@@ -7338,7 +7338,7 @@ export interface components {
         AdminICloudUpdateRequest: {
             /** @description Last observed resource version; stale writes return 409. */
             version: number;
-            /** @description Complete `email----curl[----curl]` credential line. It accepts one old cURL, one new cURL, or both cURLs in either order, including browser-copied backslash line continuations. */
+            /** @description Write-only `email----curl[----curl]` credential update. It accepts one old cURL, one new cURL, or both cURLs in either order, including browser-copied backslash line continuations. While the primary email is unchanged, each supplied cURL replaces only its matching channel and omitted channels are preserved. On an already healthy resource, submitted channels are checked asynchronously without changing resource health. Changing the primary email treats the supplied cURLs as the complete credential set, removes omitted channels, and re-queues resource validation. */
             importLine?: string;
             ownerId?: number;
             forSale?: boolean;
