@@ -144,7 +144,7 @@ export function ProductPickerPanel({
               <button
                 className={cn(
                   "workbench-product-row",
-                  product.emailSuffix && "is-suffix",
+                  product.id !== product.productType && "is-suffix",
                   selected && "is-selected"
                 )}
                 key={product.id}

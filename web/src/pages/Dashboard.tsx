@@ -80,7 +80,7 @@ function filterProjects(projects: WorkbenchProject[], search: string) {
   });
 }
 
-function filterProducts(
+export function filterProducts(
   products: WorkbenchProduct[],
   search: string,
   serviceMode: ServiceMode,
@@ -90,7 +90,6 @@ function filterProducts(
     .filter((product) =>
       serviceMode === "code" ? product.codeEnabled : product.purchaseEnabled,
     )
-    .filter((product) => product.emailSuffix)
     .filter((product) =>
       q
         ? [
@@ -172,7 +171,7 @@ function toWorkbenchProject(
   };
 }
 
-function toWorkbenchProducts(
+export function toWorkbenchProducts(
   projectId: number,
   product: ProjectProductSummary,
   inventory?: ProductInventoryTotal,
@@ -203,12 +202,14 @@ function toWorkbenchProducts(
     inventory?.purchasePublicAvailable ??
     product.purchasePublicAvailable ??
     publicAvailable;
-  const fixedSuffix =
-    product.type === "gmail"
-      ? "gmail.com"
-      : product.type === "icloud"
-        ? "icloud.com"
-        : "";
+  const emailSuffix =
+    product.type === "microsoft"
+      ? "outlook"
+      : product.type === "domain"
+        ? "domain"
+        : product.type === "gmail"
+          ? "gmail.com"
+          : "icloud.com";
   const baseProduct: WorkbenchProduct = {
     activationWindowMinutes: product.activationWindowMinutes,
     codeEnabled: product.codeEnabled,
@@ -216,7 +217,7 @@ function toWorkbenchProducts(
     codePublicInventory: codePublicAvailable,
     codePrice: moneyToNumber(product.codePrice),
     codeWindowMinutes: product.codeWindowMinutes,
-    emailSuffix: fixedSuffix,
+    emailSuffix,
     id: product.type,
     label,
     productType: product.type,
@@ -226,7 +227,10 @@ function toWorkbenchProducts(
     purchaseInventory: purchaseAvailable,
     purchasePublicInventory: purchasePublicAvailable,
     purchasePrice: moneyToNumber(product.purchasePrice),
-    suffix: fixedSuffix ? `@${fixedSuffix}` : label,
+    suffix:
+      product.type === "gmail" || product.type === "icloud"
+        ? `@${emailSuffix}`
+        : label,
     warrantyHours: Math.max(1, Math.ceil(product.warrantyMinutes / 60)),
   };
   const suffixProducts =
@@ -239,7 +243,7 @@ function toWorkbenchProducts(
   return [baseProduct, ...suffixProducts];
 }
 
-function mergeProjectInventory(
+export function mergeProjectInventory(
   project: WorkbenchProject,
   inventory: ProjectInventoryTotalResponse,
 ): WorkbenchProject {
@@ -266,7 +270,6 @@ function mergeProjectInventory(
         purchaseInventory: inventoryItem.purchaseAvailable ?? totalAvailable,
         purchasePublicInventory:
           inventoryItem.purchasePublicAvailable ?? publicAvailable,
-        suffix: product.emailSuffix ? `@${product.emailSuffix}` : product.label,
       };
       const suffixProducts =
         product.productType === "microsoft" || product.productType === "domain"
