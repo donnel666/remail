@@ -5491,10 +5491,13 @@ type AdminICloudResourceListResponse struct {
 	AliasLimit AdminICloudResourceListResponseAliasLimit `json:"aliasLimit"`
 
 	// Facets Zero-valued when includeFacets=false.
-	Facets AdminICloudFacets         `json:"facets"`
-	Items  []AdminICloudResourceItem `json:"items"`
-	Limit  int                       `json:"limit"`
-	Offset int                       `json:"offset"`
+	Facets AdminICloudFacets `json:"facets"`
+
+	// ForwardingSuffixes Authorized forwarding domain suffixes accepted during iCloud validation.
+	ForwardingSuffixes []string                  `json:"forwardingSuffixes"`
+	Items              []AdminICloudResourceItem `json:"items"`
+	Limit              int                       `json:"limit"`
+	Offset             int                       `json:"offset"`
 
 	// Total Zero when includeTotal=false.
 	Total int64 `json:"total"`
