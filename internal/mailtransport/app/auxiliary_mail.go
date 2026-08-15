@@ -235,9 +235,10 @@ func (s *AuxiliaryMailQueryService) Get(ctx context.Context, request AuxiliaryMa
 	parsed := parseInboundMessage(stored.ContentBytes, auxiliaryReceivedAt(*row))
 	merged := mergeParsedAuxiliaryMessage(*row, parsed)
 	auditResourceID := fmt.Sprintf("%d:%d", request.ResourceID, request.MessageID)
-	if request.ResourceType == domain.InboundResourceDomain {
+	switch request.ResourceType {
+	case domain.InboundResourceDomain:
 		auditResourceID = fmt.Sprintf("domain:%d:%d", request.ResourceID, request.MessageID)
-	} else if request.ResourceType == domain.InboundResourceICloud {
+	case domain.InboundResourceICloud:
 		auditResourceID = fmt.Sprintf("icloud:%d:%d", request.ResourceID, request.MessageID)
 	}
 	if err := s.operationLogs.Create(ctx, &governancedomain.OperationLog{

@@ -91,7 +91,8 @@ func (r *AuxiliaryMailRepo) ListMessages(ctx context.Context, filter mailapp.Aux
 
 func (r *AuxiliaryMailRepo) auxiliaryListQuery(ctx context.Context, filter mailapp.AuxiliaryMailFilter, table string) *gorm.DB {
 	query := r.dbFor(ctx).Table(table + " AS im")
-	if filter.ResourceType == domain.InboundResourceDomain {
+	switch filter.ResourceType {
+	case domain.InboundResourceDomain:
 		// ponytail: recipient-domain scan is enough for an admin detail tab; add an indexed recipient_domain only if this query becomes slow.
 		query = query.
 			Joins("JOIN domain_resources AS dr ON dr.id = ? AND dr.purpose = 'binding'", filter.ResourceID).
@@ -99,11 +100,11 @@ func (r *AuxiliaryMailRepo) auxiliaryListQuery(ctx context.Context, filter maila
 (im.resource_type = ? AND im.resource_id = dr.id)
 OR (im.resource_type = ? AND LOWER(SUBSTRING_INDEX(im.recipient, '@', -1)) = LOWER(dr.domain))
 )`, string(domain.InboundResourceDomain), string(domain.InboundResourceMicrosoft))
-	} else if filter.ResourceType == domain.InboundResourceICloud {
+	case domain.InboundResourceICloud:
 		query = query.
 			Joins("JOIN icloud_resources AS ir ON ir.id = ? AND COALESCE(NULLIF(ir.required_forward_to, ''), ir.selected_forward_to) <> ''", filter.ResourceID).
 			Where("LOWER(im.recipient) = LOWER(COALESCE(NULLIF(ir.required_forward_to, ''), ir.selected_forward_to))")
-	} else {
+	default:
 		query = query.Where("im.resource_id = ? AND im.resource_type = ?", filter.ResourceID, string(domain.InboundResourceMicrosoft))
 	}
 	if search := strings.TrimSpace(filter.Search); search != "" {

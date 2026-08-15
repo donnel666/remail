@@ -486,7 +486,7 @@ func toICloudImportResponse(item *ImportStatusView, reused bool) iCloudImportRes
 	}
 }
 
-func toICloudImportPreparationResponse(item *ICloudImportPreparationView) iCloudImportPreparationResponse {
+func toICloudImportPreparationResponse(item *ImportPreparationView) iCloudImportPreparationResponse {
 	var code *string
 	if value := strings.TrimSpace(item.VerificationCode); value != "" {
 		code = &value

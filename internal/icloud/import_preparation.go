@@ -23,7 +23,7 @@ const (
 	iCloudImportPreparationCleanupBatch = 100
 )
 
-func (s *Service) CreateAdminICloudImportPreparation(ctx context.Context, operatorUserID uint) (*ICloudImportPreparationView, error) {
+func (s *Service) CreateAdminICloudImportPreparation(ctx context.Context, operatorUserID uint) (*ImportPreparationView, error) {
 	if s == nil || s.db == nil || operatorUserID == 0 {
 		return nil, ErrICloudImportDependency
 	}
@@ -99,7 +99,7 @@ func (s *Service) cleanupICloudImportPreparations(ctx context.Context, before ti
 	})
 }
 
-func (s *Service) GetAdminICloudImportPreparation(ctx context.Context, operatorUserID, preparationID uint) (*ICloudImportPreparationView, error) {
+func (s *Service) GetAdminICloudImportPreparation(ctx context.Context, operatorUserID, preparationID uint) (*ImportPreparationView, error) {
 	if s == nil || s.db == nil || operatorUserID == 0 || preparationID == 0 {
 		return nil, ErrICloudImportPreparationNotFound
 	}
@@ -192,7 +192,7 @@ type iCloudPreparationInboundMail struct {
 	CreatedAt        time.Time  `gorm:"column:created_at"`
 }
 
-func (m iCloudImportPreparationModel) preparationView(now time.Time) *ICloudImportPreparationView {
+func (m iCloudImportPreparationModel) preparationView(now time.Time) *ImportPreparationView {
 	status := "waiting"
 	if m.ConsumedAt != nil {
 		status = "consumed"
@@ -201,7 +201,7 @@ func (m iCloudImportPreparationModel) preparationView(now time.Time) *ICloudImpo
 	} else if strings.TrimSpace(m.VerificationCode) != "" {
 		status = "code_received"
 	}
-	return &ICloudImportPreparationView{
+	return &ImportPreparationView{
 		ID: m.ID, ForwardToEmail: m.ForwardToEmail, Status: status,
 		VerificationCode: strings.TrimSpace(m.VerificationCode),
 		ExpiresAt:        m.ExpiresAt, CreatedAt: m.CreatedAt,

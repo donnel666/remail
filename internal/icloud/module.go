@@ -284,7 +284,7 @@ func (iCloudImportPreparationModel) TableName() string {
 	return "icloud_import_preparations"
 }
 
-type ICloudImportPreparationView struct {
+type ImportPreparationView struct {
 	ID               uint
 	ForwardToEmail   string
 	Status           string
