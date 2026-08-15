@@ -19,15 +19,16 @@ import (
 
 type inventoryCacheRepoStub struct {
 	allocapp.Repository
-	stats        allocapp.InventoryStats
-	totals       allocapp.ProjectProductInventoryTotals
-	statsCalls   int
-	productCalls int
-	accessCalls  int
-	accessErr    error
-	projectIDs   []uint
-	projectCalls int
-	userICloud   []allocapp.UserICloudInventoryTotal
+	stats         allocapp.InventoryStats
+	totals        allocapp.ProjectProductInventoryTotals
+	statsCalls    int
+	productCalls  int
+	accessCalls   int
+	accessErr     error
+	projectIDs    []uint
+	projectCalls  int
+	privateGmail  []allocapp.PrivateSingletonInventoryTotal
+	privateICloud []allocapp.PrivateSingletonInventoryTotal
 }
 
 func (r *inventoryCacheRepoStub) ListInventoryProjectIDs(context.Context) ([]uint, error) {
@@ -83,8 +84,12 @@ func (r *inventoryCacheRepoStub) ListPrivateDomainInventoryTotals(context.Contex
 	return nil, nil
 }
 
-func (r *inventoryCacheRepoStub) ListUserICloudInventoryTotals(context.Context, uint, uint) ([]allocapp.UserICloudInventoryTotal, error) {
-	return r.userICloud, nil
+func (r *inventoryCacheRepoStub) ListPrivateGmailInventoryTotals(context.Context, uint, uint) ([]allocapp.PrivateSingletonInventoryTotal, error) {
+	return r.privateGmail, nil
+}
+
+func (r *inventoryCacheRepoStub) ListPrivateICloudInventoryTotals(context.Context, uint, uint) ([]allocapp.PrivateSingletonInventoryTotal, error) {
+	return r.privateICloud, nil
 }
 
 func TestInventoryCacheServesRedisAndRefreshesScheduledEntries(t *testing.T) {
@@ -321,6 +326,23 @@ func TestProductUnavailableCorrectionDoesNotDoubleCountOverlappingProducts(t *te
 	require.EqualValues(t, 7, totals.TotalAvailable)
 }
 
+func TestProductUnavailableCorrectionClearsModeInventory(t *testing.T) {
+	code, codePublic := int64(4), int64(3)
+	purchase, purchasePublic := int64(5), int64(2)
+	totals := &allocapp.ProjectProductInventoryTotals{Items: []allocapp.ProductInventoryTotal{{
+		ProductID:     1,
+		CodeAvailable: &code, CodePublicAvailable: &codePublic,
+		PurchaseAvailable: &purchase, PurchasePublicAvailable: &purchasePublic,
+	}}}
+
+	require.True(t, markProductUnavailable(totals, allocapp.ProductInventoryAvailabilityRequest{ProductID: 1, PublicOnly: true}))
+	require.Zero(t, *totals.Items[0].CodePublicAvailable)
+	require.Zero(t, *totals.Items[0].PurchasePublicAvailable)
+	require.True(t, markProductUnavailable(totals, allocapp.ProductInventoryAvailabilityRequest{ProductID: 1}))
+	require.Zero(t, *totals.Items[0].CodeAvailable)
+	require.Zero(t, *totals.Items[0].PurchaseAvailable)
+}
+
 func TestInventoryCacheRewarmKeepsExistingDueSchedule(t *testing.T) {
 	server := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
@@ -454,6 +476,35 @@ func TestInventoryCacheV6DoesNotServeV4InventorySemantics(t *testing.T) {
 	require.EqualValues(t, 1, client.ZCard(context.Background(), oldActiveKey).Val())
 }
 
+func TestInventoryCacheBackfillsLegacySingletonModeInventory(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	cache := NewInventoryCache(client)
+	require.NoError(t, server.Set(inventoryCacheKey(allocapp.InventoryCacheProducts, 10), `{
+		"ProjectID":10,
+		"TotalAvailable":10,
+		"Items":[
+			{"ProductID":20,"ProductType":"gmail","TotalAvailable":3,"PublicAvailable":2},
+			{"ProductID":21,"ProductType":"icloud","TotalAvailable":7,"PublicAvailable":5}
+		]
+	}`))
+
+	totals, err := cache.GetProductInventoryTotals(context.Background(), 10)
+	require.NoError(t, err)
+	require.Len(t, totals.Items, 2)
+	for _, item := range totals.Items {
+		require.NotNil(t, item.CodeAvailable)
+		require.NotNil(t, item.CodePublicAvailable)
+		require.NotNil(t, item.PurchaseAvailable)
+		require.NotNil(t, item.PurchasePublicAvailable)
+		require.Equal(t, item.TotalAvailable, *item.CodeAvailable)
+		require.Equal(t, item.TotalAvailable, *item.PurchaseAvailable)
+		require.Equal(t, item.PublicAvailable, *item.CodePublicAvailable)
+		require.Equal(t, item.PublicAvailable, *item.PurchasePublicAvailable)
+	}
+}
+
 func TestInventoryCacheTreatsLegacyColdStatsAsUnknown(t *testing.T) {
 	server := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
@@ -552,13 +603,14 @@ func TestInventoryCacheSharesOneProjectSnapshotAcrossViewers(t *testing.T) {
 	require.False(t, server.Exists("alloc:inventory:v6:products:10:8"))
 }
 
-func TestColdProductInventoryIncludesOwnedPrivateICloud(t *testing.T) {
+func TestColdProductInventoryIncludesOwnedPrivateSingletonModes(t *testing.T) {
 	server := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
 	t.Cleanup(func() { require.NoError(t, client.Close()) })
-	repo := &inventoryCacheRepoStub{userICloud: []allocapp.UserICloudInventoryTotal{{
-		ProductID: 20, OwnedAvailable: 3,
-	}}}
+	repo := &inventoryCacheRepoStub{
+		privateGmail:  []allocapp.PrivateSingletonInventoryTotal{{ProductID: 20, Available: 2}},
+		privateICloud: []allocapp.PrivateSingletonInventoryTotal{{ProductID: 21, Available: 3}},
+	}
 	cache := NewInventoryCache(client)
 	require.NoError(t, cache.InitializeInventory(context.Background(), []allocapp.InventoryCacheEntry{{
 		Kind: allocapp.InventoryCacheProducts, ProjectID: 10,
@@ -569,10 +621,23 @@ func TestColdProductInventoryIncludesOwnedPrivateICloud(t *testing.T) {
 	totals, err := useCase.GetProductInventoryTotals(context.Background(), 10, 7)
 	require.NoError(t, err)
 	require.True(t, totals.Cold)
-	require.EqualValues(t, 3, totals.TotalAvailable)
-	require.Equal(t, []allocapp.ProductInventoryTotal{{
-		ProductID: 20, ProductType: coredomain.ProductTypeICloud, TotalAvailable: 3,
-	}}, totals.Items)
+	require.EqualValues(t, 5, totals.TotalAvailable)
+	require.Len(t, totals.Items, 2)
+	for index, expected := range []struct {
+		productID   uint
+		productType coredomain.ProductType
+		available   int64
+	}{{20, coredomain.ProductTypeGmail, 2}, {21, coredomain.ProductTypeICloud, 3}} {
+		item := totals.Items[index]
+		require.Equal(t, expected.productID, item.ProductID)
+		require.Equal(t, expected.productType, item.ProductType)
+		require.Equal(t, expected.available, item.TotalAvailable)
+		require.Zero(t, item.PublicAvailable)
+		require.Equal(t, expected.available, *item.CodeAvailable)
+		require.Zero(t, *item.CodePublicAvailable)
+		require.Equal(t, expected.available, *item.PurchaseAvailable)
+		require.Zero(t, *item.PurchasePublicAvailable)
+	}
 }
 
 type blockingInventoryRepoStub struct {

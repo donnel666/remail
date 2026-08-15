@@ -196,6 +196,7 @@ func TestGmailUnifiedAllocationInventoryMySQL(t *testing.T) {
 		{ID: 1000, OwnerUserID: 1, Email: "firstname@gmail.com", ForSale: true},
 		{ID: 1001, OwnerUserID: 1, Email: "ab@gmail.com", ForSale: true},
 		{ID: 1002, OwnerUserID: 3, Email: "ignored@gmail.com", ForSale: true},
+		{ID: 1003, OwnerUserID: 2, Email: "xy@gmail.com", ForSale: false},
 	})
 
 	repo := NewRepo(db)
@@ -233,19 +234,21 @@ func TestGmailUnifiedAllocationInventoryMySQL(t *testing.T) {
 		item := totals.Items[0]
 		require.NotNil(t, item.CodeAvailable)
 		require.NotNil(t, item.PurchaseAvailable)
-		if codeEnabled {
-			require.Equal(t, int64(11), *item.CodeAvailable)
-		} else {
-			require.Zero(t, *item.CodeAvailable)
-		}
-		if purchaseEnabled {
-			require.Equal(t, int64(11), *item.PurchaseAvailable)
-		} else {
-			require.Zero(t, *item.PurchaseAvailable)
-		}
+		require.Equal(t, int64(11), *item.CodeAvailable)
+		require.Equal(t, int64(11), *item.PurchaseAvailable)
 	}
 
 	assertInventory(true, false)
+	privateInventory, err := repo.ListPrivateGmailInventoryTotals(context.Background(), 10, 2)
+	require.NoError(t, err)
+	require.Equal(t, []allocapp.PrivateSingletonInventoryTotal{{ProductID: 20, Available: 3}}, privateInventory)
+	viewerTotals, err := uc.GetProductInventoryTotals(context.Background(), 10, 2)
+	require.NoError(t, err)
+	require.EqualValues(t, 14, viewerTotals.TotalAvailable)
+	require.EqualValues(t, 14, *viewerTotals.Items[0].CodeAvailable)
+	require.EqualValues(t, 14, *viewerTotals.Items[0].PurchaseAvailable)
+	require.EqualValues(t, 11, *viewerTotals.Items[0].CodePublicAvailable)
+	require.EqualValues(t, 11, *viewerTotals.Items[0].PurchasePublicAvailable)
 	require.NoError(t, db.Table("project_products").Where("id = ?", 20).
 		Updates(map[string]any{"main_weight": 0, "dot_weight": 0, "plus_weight": 1}).Error)
 	active, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
@@ -1148,6 +1151,11 @@ INSERT INTO icloud_resource_channels(resource_id, kind, host, cookie, session_st
 	require.NoError(t, err)
 	require.Equal(t, int64(2), totals.TotalAvailable)
 	require.Equal(t, int64(2), totals.Items[0].PublicAvailable)
+	require.NotNil(t, totals.Items[0].CodeAvailable)
+	require.NotNil(t, totals.Items[0].PurchaseAvailable)
+	require.Equal(t, int64(2), *totals.Items[0].CodeAvailable)
+	require.Equal(t, int64(2), *totals.Items[0].PurchaseAvailable)
+	require.Equal(t, int64(2), *totals.Items[0].PurchasePublicAvailable)
 
 	candidates, err := repo.ListICloudSourceCandidates(
 		context.Background(), 10, 2, domain.SupplyScopePublic, time.Now(), 10,
@@ -1173,10 +1181,10 @@ INSERT INTO icloud_resource_channels(resource_id, kind, host, cookie, session_st
 	require.NotNil(t, locked)
 
 	require.NoError(t, db.Table("icloud_resources").Where("id = ?", 1001).Update("for_sale", false).Error)
-	ownedTotals, err := repo.ListUserICloudInventoryTotals(context.Background(), 10, 2)
+	ownedTotals, err := repo.ListPrivateICloudInventoryTotals(context.Background(), 10, 2)
 	require.NoError(t, err)
-	require.Equal(t, []allocapp.UserICloudInventoryTotal{{
-		ProductID: 20, OwnedAvailable: 1, OwnedPublicAvailable: 0,
+	require.Equal(t, []allocapp.PrivateSingletonInventoryTotal{{
+		ProductID: 20, Available: 1,
 	}}, ownedTotals)
 	owned, err = repo.ListICloudSourceCandidates(
 		context.Background(), 10, 2, domain.SupplyScopeOwned, time.Now(), 10,
@@ -1189,9 +1197,13 @@ INSERT INTO icloud_resource_channels(resource_id, kind, host, cookie, session_st
 	require.NoError(t, err)
 	require.Equal(t, int64(2), userTotals.Items[0].TotalAvailable)
 	require.Equal(t, int64(1), userTotals.Items[0].PublicAvailable)
+	require.Equal(t, int64(2), *userTotals.Items[0].CodeAvailable)
+	require.Equal(t, int64(2), *userTotals.Items[0].PurchaseAvailable)
+	require.Equal(t, int64(1), *userTotals.Items[0].CodePublicAvailable)
+	require.Equal(t, int64(1), *userTotals.Items[0].PurchasePublicAvailable)
 }
 
-func TestUserICloudInventoryTotalsAreOwnerScopedMySQL(t *testing.T) {
+func TestPrivateICloudInventoryTotalsAreOwnerScopedMySQL(t *testing.T) {
 	db := newAllocMySQLTestDB(t)
 	seedAllocBase(t, db, "icloud", 1, 0, 0)
 	seedDomainResourcesWithPurpose(t, db, 1, 2000, 1, "binding")
@@ -1217,10 +1229,10 @@ INSERT INTO email_resources(id, type, owner_user_id) VALUES
 	    (1002, 'anon-2', 'owned-private-alias@icloud.com', 'mailbox@d2000.example.com', 'normal')`).Error)
 
 	repo := NewRepo(db)
-	rows, err := repo.ListUserICloudInventoryTotals(context.Background(), 10, 2)
+	rows, err := repo.ListPrivateICloudInventoryTotals(context.Background(), 10, 2)
 	require.NoError(t, err)
-	require.Equal(t, []allocapp.UserICloudInventoryTotal{{
-		ProductID: 20, OwnedAvailable: 2, OwnedPublicAvailable: 1,
+	require.Equal(t, []allocapp.PrivateSingletonInventoryTotal{{
+		ProductID: 20, Available: 1,
 	}}, rows)
 
 	totals, err := allocapp.NewUseCase(repo).GetProductInventoryTotals(context.Background(), 10, 2)
@@ -1228,6 +1240,8 @@ INSERT INTO email_resources(id, type, owner_user_id) VALUES
 	require.EqualValues(t, 3, totals.TotalAvailable)
 	require.EqualValues(t, 3, totals.Items[0].TotalAvailable)
 	require.EqualValues(t, 2, totals.Items[0].PublicAvailable)
+	require.EqualValues(t, 3, *totals.Items[0].CodeAvailable)
+	require.EqualValues(t, 3, *totals.Items[0].PurchaseAvailable)
 }
 
 func TestInventoryStatsExcludeReleasedProjectMainAndAliasHistoryMySQL(t *testing.T) {

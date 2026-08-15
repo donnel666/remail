@@ -9,6 +9,7 @@ import (
 	"time"
 
 	allocapp "github.com/donnel666/remail/internal/alloc/app"
+	coredomain "github.com/donnel666/remail/internal/core/domain"
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/redis/go-redis/v9"
 )
@@ -72,6 +73,30 @@ func (c *InventoryCache) GetProductInventorySnapshots(ctx context.Context, proje
 		var totals allocapp.ProjectProductInventoryTotals
 		if err := json.Unmarshal([]byte(fmt.Sprint(payload)), &totals); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", keys[i], err)
+		}
+		// Gmail and iCloud share one inventory pool across both service modes.
+		// Backfill v6 snapshots written before the mode fields were introduced.
+		for itemIndex := range totals.Items {
+			item := &totals.Items[itemIndex]
+			if item.ProductType != coredomain.ProductTypeGmail && item.ProductType != coredomain.ProductTypeICloud {
+				continue
+			}
+			if item.CodeAvailable == nil {
+				value := item.TotalAvailable
+				item.CodeAvailable = &value
+			}
+			if item.CodePublicAvailable == nil {
+				value := item.PublicAvailable
+				item.CodePublicAvailable = &value
+			}
+			if item.PurchaseAvailable == nil {
+				value := item.TotalAvailable
+				item.PurchaseAvailable = &value
+			}
+			if item.PurchasePublicAvailable == nil {
+				value := item.PublicAvailable
+				item.PurchasePublicAvailable = &value
+			}
 		}
 		result[projectIDs[i]] = &totals
 		loadedKeys = append(loadedKeys, redis.Z{Score: float64(time.Now().UnixMilli()), Member: keys[i]})
@@ -283,7 +308,10 @@ func markProductUnavailable(totals *allocapp.ProjectProductInventoryTotals, req 
 			if req.PublicOnly {
 				changed = item.PublicAvailable != 0
 				item.PublicAvailable = 0
+				changed = zeroInventoryValue(item.CodePublicAvailable) || changed
+				changed = zeroInventoryValue(item.PurchasePublicAvailable) || changed
 				for j := range item.Suffixes {
+					changed = item.Suffixes[j].PublicAvailable != 0 || changed
 					item.Suffixes[j].PublicAvailable = 0
 				}
 			} else {
@@ -291,7 +319,12 @@ func markProductUnavailable(totals *allocapp.ProjectProductInventoryTotals, req 
 				removedTotal = item.TotalAvailable
 				item.TotalAvailable = 0
 				item.PublicAvailable = 0
+				changed = zeroInventoryValue(item.CodeAvailable) || changed
+				changed = zeroInventoryValue(item.CodePublicAvailable) || changed
+				changed = zeroInventoryValue(item.PurchaseAvailable) || changed
+				changed = zeroInventoryValue(item.PurchasePublicAvailable) || changed
 				for j := range item.Suffixes {
+					changed = item.Suffixes[j].TotalAvailable != 0 || item.Suffixes[j].PublicAvailable != 0 || changed
 					item.Suffixes[j].TotalAvailable = 0
 					item.Suffixes[j].PublicAvailable = 0
 				}
@@ -333,6 +366,14 @@ func markProductUnavailable(totals *allocapp.ProjectProductInventoryTotals, req 
 	if !req.PublicOnly {
 		totals.TotalAvailable = max(0, totals.TotalAvailable-removedTotal)
 	}
+	return true
+}
+
+func zeroInventoryValue(value *int64) bool {
+	if value == nil || *value == 0 {
+		return false
+	}
+	*value = 0
 	return true
 }
 

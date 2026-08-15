@@ -947,41 +947,68 @@ func (uc *UseCase) GetProductInventoryTotals(ctx context.Context, projectID uint
 	if err != nil {
 		return nil, err
 	}
-	userICloud, err := uc.repo.ListUserICloudInventoryTotals(ctx, projectID, viewerUserID)
+	privateGmail, err := uc.repo.ListPrivateGmailInventoryTotals(ctx, projectID, viewerUserID)
 	if err != nil {
 		return nil, err
 	}
-	if len(privateMicrosoft) == 0 && len(privateDomains) == 0 && len(userICloud) == 0 {
+	privateICloud, err := uc.repo.ListPrivateICloudInventoryTotals(ctx, projectID, viewerUserID)
+	if err != nil {
+		return nil, err
+	}
+	if len(privateMicrosoft) == 0 && len(privateDomains) == 0 && len(privateGmail) == 0 && len(privateICloud) == 0 {
 		return snapshot, nil
 	}
 	result := cloneProductInventoryTotals(snapshot)
 	mergePrivateProductInventory(result, privateMicrosoft, coredomain.ProductTypeMicrosoft)
 	mergePrivateProductInventory(result, privateDomains, coredomain.ProductTypeDomain)
+	mergePrivateSingletonInventory(result, privateGmail, coredomain.ProductTypeGmail)
+	mergePrivateSingletonInventory(result, privateICloud, coredomain.ProductTypeICloud)
 	for i := range result.Items {
 		sort.Slice(result.Items[i].Suffixes, func(left, right int) bool {
 			return result.Items[i].Suffixes[left].Suffix < result.Items[i].Suffixes[right].Suffix
 		})
 	}
-	for _, inventory := range userICloud {
-		privateAvailable := inventory.OwnedAvailable - inventory.OwnedPublicAvailable
-		if privateAvailable <= 0 {
+	return result, nil
+}
+
+func mergePrivateSingletonInventory(result *ProjectProductInventoryTotals, inventory []PrivateSingletonInventoryTotal, productType coredomain.ProductType) {
+	for _, private := range inventory {
+		if private.Available <= 0 {
 			continue
 		}
 		itemIndex := -1
 		for i := range result.Items {
-			if result.Items[i].ProductID == inventory.ProductID {
+			if result.Items[i].ProductID == private.ProductID {
 				itemIndex = i
 				break
 			}
 		}
 		if itemIndex < 0 {
-			result.Items = append(result.Items, ProductInventoryTotal{ProductID: inventory.ProductID, ProductType: coredomain.ProductTypeICloud})
+			result.Items = append(result.Items, ProductInventoryTotal{ProductID: private.ProductID, ProductType: productType})
 			itemIndex = len(result.Items) - 1
 		}
-		result.Items[itemIndex].TotalAvailable += privateAvailable
-		result.TotalAvailable += privateAvailable
+		item := &result.Items[itemIndex]
+		codeAvailable := private.Available
+		if item.CodeAvailable != nil {
+			codeAvailable += *item.CodeAvailable
+		}
+		item.CodeAvailable = &codeAvailable
+		purchaseAvailable := private.Available
+		if item.PurchaseAvailable != nil {
+			purchaseAvailable += *item.PurchaseAvailable
+		}
+		item.PurchaseAvailable = &purchaseAvailable
+		if item.CodePublicAvailable == nil {
+			available := int64(0)
+			item.CodePublicAvailable = &available
+		}
+		if item.PurchasePublicAvailable == nil {
+			available := int64(0)
+			item.PurchasePublicAvailable = &available
+		}
+		item.TotalAvailable += private.Available
+		result.TotalAvailable += private.Available
 	}
-	return result, nil
 }
 
 func mergePrivateProductInventory(result *ProjectProductInventoryTotals, inventory []PrivateProductInventoryTotal, productType coredomain.ProductType) {

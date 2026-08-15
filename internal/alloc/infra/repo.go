@@ -2128,7 +2128,7 @@ WHERE adu.usage_date = ?
 		stats.Domain.MailboxDailyAvailable = nonNegative(stats.Domain.MailboxDailyLimit - stats.Domain.MailboxDailyUsed)
 		stats.Domain.TotalAvailable = stats.Domain.MailboxDailyAvailable
 	}
-	if stats.Gmail.Enabled && (stats.Gmail.CodeEnabled || stats.Gmail.PurchaseEnabled) {
+	if stats.Gmail.Enabled {
 		gmailScope := "gr.for_sale = TRUE AND owner.status = 'active' AND owner.role IN ('supplier', 'admin', 'super_admin')"
 		if err := scan(&stats.Gmail.EligibleResources, `
 SELECT COUNT(*)
@@ -2356,20 +2356,11 @@ JOIN project_products pp ON pp.project_id = p.id
 			item.Suffixes, err = r.microsoftProductInventorySuffixTotals(ctx, projectID, row)
 		case coredomain.ProductTypeDomain:
 			item.Suffixes, err = r.domainProductInventorySuffixTotals(ctx)
-		case coredomain.ProductTypeGmail:
-			codeAvailable, codePublicAvailable := int64(0), int64(0)
-			purchaseAvailable, purchasePublicAvailable := int64(0), int64(0)
-			if row.CodeEnabled {
-				codeAvailable, codePublicAvailable = item.TotalAvailable, item.PublicAvailable
-			}
-			if row.PurchaseEnabled {
-				purchaseAvailable, purchasePublicAvailable = item.TotalAvailable, item.PublicAvailable
-			}
+		case coredomain.ProductTypeGmail, coredomain.ProductTypeICloud:
+			codeAvailable, codePublicAvailable := item.TotalAvailable, item.PublicAvailable
+			purchaseAvailable, purchasePublicAvailable := item.TotalAvailable, item.PublicAvailable
 			item.CodeAvailable, item.CodePublicAvailable = &codeAvailable, &codePublicAvailable
 			item.PurchaseAvailable, item.PurchasePublicAvailable = &purchaseAvailable, &purchasePublicAvailable
-			item.TotalAvailable = max(codeAvailable, purchaseAvailable)
-			item.PublicAvailable = max(codePublicAvailable, purchasePublicAvailable)
-		case coredomain.ProductTypeICloud:
 		default:
 			return nil, domain.ErrProjectNotAllocatable
 		}
@@ -2687,13 +2678,93 @@ func privateProductInventoryTotals(productID uint, totals map[string]int64) []al
 	return result
 }
 
-func (r *Repo) ListUserICloudInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint) ([]allocapp.UserICloudInventoryTotal, error) {
-	var rows []allocapp.UserICloudInventoryTotal
+func (r *Repo) ListPrivateGmailInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint) ([]allocapp.PrivateSingletonInventoryTotal, error) {
+	row, err := r.enabledProductInventoryRow(ctx, projectID, coredomain.ProductTypeGmail)
+	if err != nil || row == nil {
+		return nil, err
+	}
+	available := int64(0)
+	if row.MainWeight > 0 {
+		var mainAvailable int64
+		if err := r.dbFor(ctx).Raw(`
+SELECT COUNT(*)
+FROM gmail_resources gr
+JOIN email_resources er ON er.id = gr.id AND er.type = 'gmail'
+WHERE gr.status IN ('normal', 'available')
+  AND gr.for_sale = FALSE
+  AND er.owner_user_id = ?
+  AND NOT EXISTS (
+      SELECT 1 FROM gmail_allocations active
+      WHERE active.source = 'local'
+        AND active.resource_id = gr.id
+        AND active.mailbox = 'main'
+        AND active.status = 'allocated'
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM gmail_allocations history
+      WHERE history.source = 'local'
+        AND history.resource_id = gr.id
+        AND history.project_id = ?
+        AND history.mailbox = 'main'
+  )`, buyerUserID, projectID).Scan(&mainAvailable).Error; err != nil {
+			return nil, fmt.Errorf("private Gmail main inventory: %w", err)
+		}
+		available += mainAvailable
+	}
+	if row.DotWeight > 0 {
+		var capacity, used int64
+		if err := r.dbFor(ctx).Raw(`
+SELECT COALESCE(SUM(`+gmailDotCapacityExpression("gr")+`), 0)
+FROM gmail_resources gr
+JOIN email_resources er ON er.id = gr.id AND er.type = 'gmail'
+WHERE gr.status IN ('normal', 'available')
+  AND gr.for_sale = FALSE
+  AND er.owner_user_id = ?`, buyerUserID).Scan(&capacity).Error; err != nil {
+			return nil, fmt.Errorf("private Gmail dot capacity: %w", err)
+		}
+		if err := r.dbFor(ctx).Raw(`
+SELECT COUNT(*)
+FROM gmail_allocations history
+JOIN gmail_resources gr ON gr.id = history.resource_id
+JOIN email_resources er ON er.id = gr.id AND er.type = 'gmail'
+WHERE history.source = 'local'
+  AND history.project_id = ?
+  AND history.mailbox = 'dot'
+  AND gr.status IN ('normal', 'available')
+  AND gr.for_sale = FALSE
+  AND er.owner_user_id = ?`, projectID, buyerUserID).Scan(&used).Error; err != nil {
+			return nil, fmt.Errorf("private Gmail dot usage: %w", err)
+		}
+		available += nonNegative(capacity - used)
+	}
+	if row.PlusWeight > 0 {
+		var plusAvailable int64
+		if err := r.dbFor(ctx).Raw(`
+SELECT COUNT(*)
+FROM gmail_resources gr
+JOIN email_resources er ON er.id = gr.id AND er.type = 'gmail'
+WHERE gr.status IN ('normal', 'available')
+  AND gr.for_sale = FALSE
+  AND er.owner_user_id = ?`, buyerUserID).Scan(&plusAvailable).Error; err != nil {
+			return nil, fmt.Errorf("private Gmail plus inventory: %w", err)
+		}
+		available += plusAvailable
+	}
+	if available <= 0 {
+		return nil, nil
+	}
+	return []allocapp.PrivateSingletonInventoryTotal{{
+		ProductID: row.ProductID,
+		Available: available,
+	}}, nil
+}
+
+func (r *Repo) ListPrivateICloudInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint) ([]allocapp.PrivateSingletonInventoryTotal, error) {
+	var rows []allocapp.PrivateSingletonInventoryTotal
 	if err := r.dbFor(ctx).Raw(`
 SELECT
-    pp.id AS product_id,
-    COUNT(ia.id) AS owned_available,
-    COUNT(CASE WHEN ir.for_sale = TRUE THEN ia.id END) AS owned_public_available
+	pp.id AS product_id,
+	COUNT(ia.id) AS available
 FROM project_products pp
 JOIN projects p ON p.id = pp.project_id AND p.status = 'listed'
 JOIN icloud_aliases ia ON ia.status = 'normal'
@@ -2701,20 +2772,21 @@ JOIN icloud_resources ir ON ir.id = ia.resource_id
 JOIN email_resources er ON er.id = ir.id AND er.type = 'icloud'
 WHERE pp.project_id = ?
   AND pp.type = 'icloud'
-  AND pp.status = 'enabled'
-  AND ir.status = 'normal'
-  AND er.owner_user_id = ?
-  AND NOT EXISTS (
-      SELECT 1 FROM icloud_allocations history
-      WHERE history.alias_id = ia.id AND history.project_id = pp.project_id
+	AND pp.status = 'enabled'
+	AND ir.status = 'normal'
+	AND er.owner_user_id = ?
+	AND ir.for_sale = FALSE
+	AND NOT EXISTS (
+		SELECT 1 FROM icloud_allocations history
+		WHERE history.alias_id = ia.id AND history.project_id = pp.project_id
   )
   AND NOT EXISTS (
-      SELECT 1 FROM icloud_allocations active
-      WHERE active.alias_id = ia.id AND active.status = 'allocated'
-  )
+		SELECT 1 FROM icloud_allocations active
+		WHERE active.alias_id = ia.id AND active.status = 'allocated'
+	)
 GROUP BY pp.id
 ORDER BY pp.id`, projectID, buyerUserID).Scan(&rows).Error; err != nil {
-		return nil, fmt.Errorf("list user iCloud inventory totals: %w", err)
+		return nil, fmt.Errorf("list private iCloud inventory totals: %w", err)
 	}
 	return rows, nil
 }
