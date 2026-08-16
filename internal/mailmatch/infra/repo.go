@@ -756,7 +756,19 @@ FROM icloud_allocations ia
 JOIN orders o ON o.order_no = ia.order_no AND o.allocation_type = 'icloud'
 JOIN projects p ON p.id = o.project_id
 WHERE ia.resource_id = ?
-  AND ia.email = ?
+  AND (
+    ia.email = ?
+    OR EXISTS (
+      SELECT 1 FROM icloud_plus_aliases ipa
+      WHERE ipa.resource_id = ia.resource_id AND ipa.alias_id = ia.alias_id
+        AND ipa.email = ? AND ipa.status = 'normal'
+    )
+    OR EXISTS (
+      SELECT 1 FROM icloud_dot_aliases ida
+      WHERE ida.resource_id = ia.resource_id AND ida.alias_id = ia.alias_id
+        AND ida.email = ? AND ida.status = 'normal'
+    )
+  )
   AND ia.status = 'allocated'
   AND (o.receive_started_at IS NULL OR ? >= DATE_SUB(o.receive_started_at, INTERVAL 2 MINUTE))
   AND (
@@ -1002,7 +1014,13 @@ func (r *Repo) ListMatchingScopesByRecipient(ctx context.Context, resourceType d
 			}
 		}
 	case domain.ResourceTypeICloud:
-		err = r.dbFor(ctx).Raw(icloudMatchingScopesSQL, emailResourceID, recipient, receivedAt, receivedAt).Scan(&rows).Error
+		_, plusBase, _, ok := domain.RecipientAliasForms(recipient)
+		if !ok {
+			return nil, nil
+		}
+		err = r.dbFor(ctx).Raw(
+			icloudMatchingScopesSQL, emailResourceID, recipient, recipient, plusBase, receivedAt, receivedAt,
+		).Scan(&rows).Error
 	default:
 		return nil, nil
 	}

@@ -220,6 +220,28 @@ type iCloudAliasModel struct {
 
 func (iCloudAliasModel) TableName() string { return "icloud_aliases" }
 
+type iCloudDotAliasModel struct {
+	ID         uint      `gorm:"column:id;primaryKey;autoIncrement"`
+	ResourceID uint      `gorm:"column:resource_id;uniqueIndex:uk_icloud_dot_aliases_resource_email"`
+	AliasID    uint      `gorm:"column:alias_id"`
+	Email      string    `gorm:"column:email;uniqueIndex:uk_icloud_dot_aliases_resource_email"`
+	Status     string    `gorm:"column:status"`
+	CreatedAt  time.Time `gorm:"column:created_at"`
+}
+
+func (iCloudDotAliasModel) TableName() string { return "icloud_dot_aliases" }
+
+type iCloudPlusAliasModel struct {
+	ID         uint      `gorm:"column:id;primaryKey;autoIncrement"`
+	ResourceID uint      `gorm:"column:resource_id;uniqueIndex:uk_icloud_plus_aliases_resource_email"`
+	AliasID    uint      `gorm:"column:alias_id"`
+	Email      string    `gorm:"column:email;uniqueIndex:uk_icloud_plus_aliases_resource_email"`
+	Status     string    `gorm:"column:status"`
+	CreatedAt  time.Time `gorm:"column:created_at"`
+}
+
+func (iCloudPlusAliasModel) TableName() string { return "icloud_plus_aliases" }
+
 // iCloudAliasRouteModel keeps old Apple relay route pairs addressable when
 // Apple changes the selected forwarding mailbox for an existing alias.
 type iCloudAliasRouteModel struct {

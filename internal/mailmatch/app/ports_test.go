@@ -1473,13 +1473,19 @@ func TestGmailRecipientRulesNormalizeGooglemailDotAndPlusAliases(t *testing.T) {
 	require.Equal(t, "654321", code)
 }
 
-func TestICloudRecipientRulesAreExactOnly(t *testing.T) {
+func TestICloudRecipientRulesUseConfiguredAliasKinds(t *testing.T) {
 	scope := OrderScope{Recipient: "alias.name@icloud.com", RecipientKind: "exact"}
 
 	require.True(t, matchRecipientPatterns([]string{"exact"}, FetchedMessage{
 		ResourceType: domain.ResourceTypeICloud, Recipient: "Alias.Name@iCloud.com",
 	}, scope))
-	require.False(t, matchRecipientPatterns([]string{"dot", "plus"}, FetchedMessage{
+	require.True(t, matchRecipientPatterns([]string{"plus"}, FetchedMessage{
+		ResourceType: domain.ResourceTypeICloud, Recipient: "alias.name+tag@icloud.com",
+	}, scope))
+	require.False(t, matchRecipientPatterns([]string{"exact"}, FetchedMessage{
+		ResourceType: domain.ResourceTypeICloud, Recipient: "alias.name+tag@icloud.com",
+	}, scope))
+	require.True(t, matchRecipientPatterns([]string{"dot", "plus"}, FetchedMessage{
 		ResourceType: domain.ResourceTypeICloud, Recipient: "aliasname+tag@icloud.com",
 	}, scope))
 }

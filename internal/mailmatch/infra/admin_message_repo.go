@@ -40,6 +40,14 @@ END`
 const adminICloudMessageMailboxSQL = `CASE
     WHEN LOWER(m.recipient) = LOWER(ir.primary_email) THEN 'main'
     WHEN EXISTS (
+        SELECT 1 FROM icloud_plus_aliases ipa
+        WHERE ipa.resource_id = m.email_resource_id AND LOWER(ipa.email) = LOWER(m.recipient)
+    ) THEN 'plus'
+    WHEN EXISTS (
+        SELECT 1 FROM icloud_dot_aliases ida
+        WHERE ida.resource_id = m.email_resource_id AND LOWER(ida.email) = LOWER(m.recipient)
+    ) THEN 'dot'
+    WHEN EXISTS (
         SELECT 1 FROM icloud_aliases ia
         WHERE ia.resource_id = m.email_resource_id AND LOWER(ia.email) = LOWER(m.recipient)
     ) THEN 'alias'

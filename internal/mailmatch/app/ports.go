@@ -2158,9 +2158,6 @@ func matchRecipientPatterns(patterns []string, message FetchedMessage, scope Ord
 	if message.ResourceType == domain.ResourceTypeDomain {
 		return allowed["exact"] && mailbox.Normalize(message.Recipient) != "" && mailbox.Normalize(message.Recipient) == mailbox.Normalize(scope.Recipient)
 	}
-	if message.ResourceType == domain.ResourceTypeICloud {
-		return allowed["exact"] && normalizeEmail(message.Recipient) != "" && normalizeEmail(message.Recipient) == normalizeEmail(scope.Recipient)
-	}
 	if message.ResourceType == domain.ResourceTypeGmail {
 		recipient, recipientPlus, recipientDots, ok := domain.RecipientAliasForms(message.Recipient)
 		if !ok {

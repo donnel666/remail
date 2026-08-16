@@ -17,6 +17,7 @@ import (
 type iCloudInboundMailTestModel struct {
 	ID              uint      `gorm:"column:id;primaryKey"`
 	EnvelopeFrom    string    `gorm:"column:envelope_from"`
+	HeaderFrom      string    `gorm:"column:header_from"`
 	Recipient       string    `gorm:"column:recipient"`
 	MailboxKey      string    `gorm:"column:mailbox_key"`
 	ResourceType    string    `gorm:"column:resource_type"`
@@ -87,6 +88,97 @@ func TestDecodeICloudRelaySenderRequiresPersistedAliasID(t *testing.T) {
 	}
 	if _, ok := decodeICloudRelaySender(envelope, "other552k9812"); ok {
 		t.Fatal("a different anonymous ID must not select the message")
+	}
+}
+
+func TestFetchMailUsesHeaderSenderAndRestoresPlusRecipient(t *testing.T) {
+	db := newICloudDomainMailTestDB(t, "icloud-domain-openai-plus")
+	base := time.Date(2026, 8, 15, 17, 11, 43, 0, time.UTC)
+	if err := db.Create(&iCloudAliasModel{
+		ID: 238, ResourceID: 41, AnonymousID: "8m62jf69v89850", Email: "tile.mosses-7s@icloud.com",
+		ForwardToEmail: "relay@example.com", Status: iCloudResourceNormal,
+	}).Error; err != nil {
+		t.Fatalf("create alias: %v", err)
+	}
+	files := &iCloudDomainMailFileStore{files: make(map[string]governancedomain.PrivateFile)}
+	storeICloudInboundMail(t, db, files, iCloudInboundMailTestModel{
+		ID:           1,
+		EnvelopeFrom: "bounces+20216706-a5d4-tile.mosses-7s+t3tgpd=icloud.com_at_em7877_tm_openai_com_8m62jf69v89850_57152536@icloud.com",
+		HeaderFrom:   "noreply_at_tm_openai_com_8m62jf69v89850_cd655749@icloud.com",
+		Recipient:    "relay@example.com", ResourceType: "domain", SourceObjectKey: "mail/openai.eml",
+		Status: "stored", CreatedAt: base,
+	}, false)
+	files.files["mail/openai.eml"] = governancedomain.PrivateFile{
+		ObjectKey: "mail/openai.eml",
+		ContentBytes: []byte("From: OpenAI <noreply_at_tm_openai_com_8m62jf69v89850_cd655749@icloud.com>\r\n" +
+			"To: Hide My Email <tile.mosses-7s@icloud.com>\r\n" +
+			"X-ICLOUD-HME: p=tile.mosses-7s@icloud.com; d=; f=relay@example.com; r=to; s=noreply@tm.openai.com\r\n" +
+			"Subject: Your temporary OpenAI verification code\r\n\r\nCode 126515"),
+	}
+
+	result, err := NewService(db, nil, files).FetchMail(context.Background(), MailFetchRequest{
+		ResourceID: 41, Recipient: "tile.mosses-7s@icloud.com", MaxMessages: 10,
+	})
+	if err != nil {
+		t.Fatalf("fetch mail: %v", err)
+	}
+	if len(result.Messages) != 1 || result.Messages[0].Sender != "noreply@tm.openai.com" ||
+		result.Messages[0].Recipient != "tile.mosses-7s+t3tgpd@icloud.com" {
+		t.Fatalf("messages = %#v", result.Messages)
+	}
+	var plusAlias iCloudPlusAliasModel
+	if err := db.Where("resource_id = ? AND email = ?", 41, "tile.mosses-7s+t3tgpd@icloud.com").Take(&plusAlias).Error; err != nil {
+		t.Fatalf("load persisted plus alias: %v", err)
+	}
+	if plusAlias.AliasID != 238 || plusAlias.Status != iCloudResourceNormal {
+		t.Fatalf("plus alias = %#v", plusAlias)
+	}
+	if _, err := NewService(db, nil, files).FetchMail(context.Background(), MailFetchRequest{
+		ResourceID: 41, Recipient: "tile.mosses-7s@icloud.com", MaxMessages: 10,
+	}); err != nil {
+		t.Fatalf("fetch mail again: %v", err)
+	}
+	var plusCount int64
+	if err := db.Model(&iCloudPlusAliasModel{}).Count(&plusCount).Error; err != nil || plusCount != 1 {
+		t.Fatalf("plus aliases = %d, %v", plusCount, err)
+	}
+	var dotCount int64
+	if err := db.Model(&iCloudDotAliasModel{}).Count(&dotCount).Error; err != nil || dotCount != 0 {
+		t.Fatalf("dot aliases = %d, %v", dotCount, err)
+	}
+}
+
+func TestPersistICloudAliasVariantsSplitsCombinedRecipient(t *testing.T) {
+	db := newICloudDomainMailTestDB(t, "icloud-domain-dot-plus")
+	if err := db.Create(&iCloudAliasModel{
+		ID: 238, ResourceID: 41, AnonymousID: "8m62jf69v89850", Email: "tile.mosses-7s@icloud.com",
+		ForwardToEmail: "relay@example.com", Status: iCloudResourceNormal,
+	}).Error; err != nil {
+		t.Fatalf("create alias: %v", err)
+	}
+	if err := NewService(db, nil, nil).persistICloudAliasVariants(context.Background(), []iCloudMailCandidate{{
+		scope: iCloudMailAliasScope{
+			ResourceID: 41, AliasID: 238, AliasEmail: "tile.mosses-7s@icloud.com",
+		},
+		recipient: "tilemosses-7s+t3tgpd@icloud.com",
+	}}); err != nil {
+		t.Fatalf("persist aliases: %v", err)
+	}
+	for table, email := range map[string]string{
+		"icloud_dot_aliases":  "tilemosses-7s@icloud.com",
+		"icloud_plus_aliases": "tilemosses-7s+t3tgpd@icloud.com",
+	} {
+		var row struct{ AliasID uint }
+		if err := db.Table(table).Select("alias_id").Where("resource_id = ? AND email = ?", 41, email).Take(&row).Error; err != nil || row.AliasID != 238 {
+			t.Fatalf("%s alias = %#v, %v", table, row, err)
+		}
+	}
+}
+
+func TestRestoreICloudRelayRecipientKeepsFullPlusAlias(t *testing.T) {
+	envelope := "bounces+1-a5d4-tile.mosses-7s+tilemosses-7s=icloud.com_at_sender_example_com_8m62jf69v89850_57152536@icloud.com"
+	if recipient := restoreICloudRelayRecipient(envelope, "tile.mosses-7s@icloud.com", "8m62jf69v89850", ""); recipient != "tile.mosses-7s+tilemosses-7s@icloud.com" {
+		t.Fatalf("recipient = %q", recipient)
 	}
 }
 
@@ -236,7 +328,10 @@ func newICloudDomainMailTestDB(t *testing.T, name string) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open database: %v", err)
 	}
-	if err := db.AutoMigrate(&iCloudAliasModel{}, &iCloudAliasRouteModel{}, &iCloudInboundMailTestModel{}); err != nil {
+	if err := db.AutoMigrate(
+		&iCloudAliasModel{}, &iCloudDotAliasModel{}, &iCloudPlusAliasModel{},
+		&iCloudAliasRouteModel{}, &iCloudInboundMailTestModel{},
+	); err != nil {
 		t.Fatalf("migrate database: %v", err)
 	}
 	return db

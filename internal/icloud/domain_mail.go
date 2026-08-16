@@ -13,6 +13,7 @@ import (
 
 	"github.com/donnel666/remail/internal/mailbox"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
+	"gorm.io/gorm/clause"
 )
 
 type iCloudMailAliasScope struct {
@@ -33,6 +34,7 @@ type iCloudMailRoute struct {
 type iCloudForwardedMailRow struct {
 	ID              uint      `gorm:"column:id"`
 	EnvelopeFrom    string    `gorm:"column:envelope_from"`
+	HeaderFrom      string    `gorm:"column:header_from"`
 	SourceObjectKey string    `gorm:"column:source_object_key"`
 	CreatedAt       time.Time `gorm:"column:created_at"`
 }
@@ -44,9 +46,10 @@ type iCloudScopedMailRoute struct {
 }
 
 type iCloudMailCandidate struct {
-	scope  iCloudMailAliasScope
-	row    iCloudForwardedMailRow
-	sender string
+	scope     iCloudMailAliasScope
+	row       iCloudForwardedMailRow
+	recipient string
+	sender    string
 }
 
 type MailFetchRequest struct {
@@ -107,7 +110,7 @@ func (s *Service) FetchMail(ctx context.Context, request MailFetchRequest) (*Mai
 			return nil, fmt.Errorf("%w: read inbound message %d: %v", ErrICloudMailUnavailable, candidate.row.ID, readErr)
 		}
 		result.Messages = append(result.Messages, MailFetchedMessage{
-			Recipient:         strings.ToLower(strings.TrimSpace(candidate.scope.AliasEmail)),
+			Recipient:         candidate.recipient,
 			Sender:            candidate.sender,
 			Raw:               object.ContentBytes,
 			ReceivedAt:        candidate.row.CreatedAt.UTC(),
@@ -195,14 +198,20 @@ func (s *Service) fetchICloudMailCandidates(
 			if _, exists := seenRows[row.ID]; exists {
 				return true
 			}
-			resolved, sender, ok := resolveICloudMailboxAlias(row.EnvelopeFrom, resolverRoutes)
+			resolved, sender, recipientMailID, ok := resolveICloudMailboxAlias(row.EnvelopeFrom, resolverRoutes)
 			if !ok {
 				return true
 			}
 			target, ok := activeICloudTargetScope(targetRoutes, resolved.AliasID, row.CreatedAt)
 			if ok {
 				seenRows[row.ID] = struct{}{}
-				candidates = append(candidates, iCloudMailCandidate{scope: target, row: row, sender: sender})
+				candidates = append(candidates, iCloudMailCandidate{
+					scope: target, row: row,
+					sender: iCloudHeaderSender(row.HeaderFrom, target.AnonymousID, recipientMailID, sender),
+					recipient: restoreICloudRelayRecipient(
+						row.EnvelopeFrom, target.AliasEmail, target.AnonymousID, recipientMailID,
+					),
+				})
 			}
 			return true
 		})
@@ -220,6 +229,9 @@ func (s *Service) fetchICloudMailCandidates(
 		candidates = candidates[:readLimit]
 	}
 	slices.Reverse(candidates)
+	if err := s.persistICloudAliasVariants(ctx, candidates); err != nil {
+		return nil, err
+	}
 	return candidates, nil
 }
 
@@ -268,9 +280,10 @@ func (s *Service) loadICloudMailboxResolverRoutes(ctx context.Context, forwardTo
 	return routes, nil
 }
 
-func resolveICloudMailboxAlias(envelopeFrom string, routes []iCloudScopedMailRoute) (iCloudMailAliasScope, string, bool) {
+func resolveICloudMailboxAlias(envelopeFrom string, routes []iCloudScopedMailRoute) (iCloudMailAliasScope, string, string, bool) {
 	var exactScope iCloudMailAliasScope
 	exactSender := ""
+	exactRecipientMailID := ""
 	exactLength := -1
 	for _, route := range routes {
 		recipientMailID := strings.TrimSpace(route.recipientMailID)
@@ -282,12 +295,12 @@ func resolveICloudMailboxAlias(envelopeFrom string, routes []iCloudScopedMailRou
 			continue
 		}
 		if len(recipientMailID) == exactLength && exactScope.AliasID != 0 && exactScope.AliasID != route.scope.AliasID {
-			return iCloudMailAliasScope{}, "", false
+			return iCloudMailAliasScope{}, "", "", false
 		}
-		exactScope, exactSender, exactLength = route.scope, sender, len(recipientMailID)
+		exactScope, exactSender, exactRecipientMailID, exactLength = route.scope, sender, recipientMailID, len(recipientMailID)
 	}
 	if exactScope.AliasID != 0 {
-		return exactScope, exactSender, true
+		return exactScope, exactSender, exactRecipientMailID, true
 	}
 
 	var fallbackScope iCloudMailAliasScope
@@ -301,14 +314,14 @@ func resolveICloudMailboxAlias(envelopeFrom string, routes []iCloudScopedMailRou
 			continue
 		}
 		if fallbackScope.AliasID != 0 && fallbackScope.AliasID != route.scope.AliasID {
-			return iCloudMailAliasScope{}, "", false
+			return iCloudMailAliasScope{}, "", "", false
 		}
 		fallbackScope, fallbackSender = route.scope, sender
 	}
 	if fallbackScope.AliasID == 0 {
-		return iCloudMailAliasScope{}, "", false
+		return iCloudMailAliasScope{}, "", "", false
 	}
-	return fallbackScope, fallbackSender, true
+	return fallbackScope, fallbackSender, "", true
 }
 
 func activeICloudTargetScope(routes []iCloudScopedMailRoute, aliasID uint, receivedAt time.Time) (iCloudMailAliasScope, bool) {
@@ -389,7 +402,7 @@ func (s *Service) scanICloudMailboxRows(
 		return ErrICloudMailUnavailable
 	}
 	query := s.db.WithContext(ctx).Table("inbound_mails").
-		Select("id, envelope_from, source_object_key, created_at").
+		Select("id, envelope_from, header_from, source_object_key, created_at").
 		Where("resource_type = ? AND mailbox_key = ? AND status = ?", "domain", mailboxKey, "stored").
 		Order("created_at DESC, id DESC").Limit(limit)
 	if !sinceAt.IsZero() {
@@ -426,6 +439,24 @@ func decodeICloudRelaySender(envelopeFrom string, anonymousID string) (string, b
 }
 
 func decodeICloudRelaySenderForRoute(envelopeFrom, anonymousID, recipientMailID string) (string, bool) {
+	encodedSender, ok := encodedICloudRelaySenderForRoute(envelopeFrom, anonymousID, recipientMailID)
+	if !ok {
+		return "", false
+	}
+	separator := strings.LastIndex(encodedSender, "_at_")
+	if separator <= 0 || separator+len("_at_") >= len(encodedSender) {
+		return "", false
+	}
+	restored := strings.ReplaceAll(encodedSender[:separator], "_", ".") + "@" +
+		strings.ReplaceAll(encodedSender[separator+len("_at_"):], "_", ".")
+	restoredAddress, err := stdmail.ParseAddress(restored)
+	if err != nil || !strings.EqualFold(strings.TrimSpace(restoredAddress.Address), restored) {
+		return "", false
+	}
+	return restored, true
+}
+
+func encodedICloudRelaySenderForRoute(envelopeFrom, anonymousID, recipientMailID string) (string, bool) {
 	parsed, err := stdmail.ParseAddress(strings.TrimSpace(envelopeFrom))
 	if err != nil {
 		return "", false
@@ -454,17 +485,125 @@ func decodeICloudRelaySenderForRoute(envelopeFrom, anonymousID, recipientMailID 
 			return "", false
 		}
 	}
+	return encodedSender, true
+}
+
+func iCloudHeaderSender(headerFrom, anonymousID, recipientMailID, fallback string) string {
+	if sender, ok := decodeICloudRelaySenderForRoute(headerFrom, anonymousID, recipientMailID); ok {
+		return sender
+	}
+	if sender, ok := decodeICloudRelaySender(headerFrom, anonymousID); ok {
+		return sender
+	}
+	parsed, err := stdmail.ParseAddress(strings.TrimSpace(headerFrom))
+	if err != nil {
+		return fallback
+	}
+	return strings.ToLower(strings.TrimSpace(parsed.Address))
+}
+
+func restoreICloudRelayRecipient(envelopeFrom, aliasEmail, anonymousID, recipientMailID string) string {
+	alias, err := stdmail.ParseAddress(strings.TrimSpace(aliasEmail))
+	if err != nil {
+		return strings.ToLower(strings.TrimSpace(aliasEmail))
+	}
+	aliasAddress := strings.ToLower(strings.TrimSpace(alias.Address))
+	_, aliasHost, ok := strings.Cut(aliasAddress, "@")
+	if !ok {
+		return aliasAddress
+	}
+	encodedSender, ok := encodedICloudRelaySenderForRoute(envelopeFrom, anonymousID, recipientMailID)
+	if !ok {
+		return aliasAddress
+	}
 	separator := strings.LastIndex(encodedSender, "_at_")
-	if separator <= 0 || separator+len("_at_") >= len(encodedSender) {
-		return "", false
+	if separator <= 0 {
+		return aliasAddress
 	}
-	restored := strings.ReplaceAll(encodedSender[:separator], "_", ".") + "@" +
-		strings.ReplaceAll(encodedSender[separator+len("_at_"):], "_", ".")
-	restoredAddress, err := stdmail.ParseAddress(restored)
-	if err != nil || !strings.EqualFold(strings.TrimSpace(restoredAddress.Address), restored) {
-		return "", false
+	senderLocal := encodedSender[:separator]
+	suffix := "=" + aliasHost
+	if !strings.HasSuffix(senderLocal, suffix) {
+		return aliasAddress
 	}
-	return restored, true
+	encodedRecipient := strings.TrimSuffix(senderLocal, suffix)
+	_, _, aliasCanonical, ok := mailbox.AliasForms(aliasAddress)
+	if !ok {
+		return aliasAddress
+	}
+	for start := 0; start < len(encodedRecipient); start++ {
+		if start > 0 && !strings.ContainsRune("-+=_", rune(encodedRecipient[start-1])) {
+			continue
+		}
+		candidate := encodedRecipient[start:] + "@" + aliasHost
+		parsed, parseErr := stdmail.ParseAddress(candidate)
+		if parseErr != nil || !strings.EqualFold(strings.TrimSpace(parsed.Address), candidate) {
+			continue
+		}
+		exact, _, canonical, formsOK := mailbox.AliasForms(candidate)
+		if formsOK && canonical == aliasCanonical {
+			return exact
+		}
+	}
+	return aliasAddress
+}
+
+func iCloudAliasVariants(aliasEmail, recipient string) (dot, plus string) {
+	alias, _, aliasCanonical, aliasOK := mailbox.AliasForms(aliasEmail)
+	exact, plusBase, canonical, recipientOK := mailbox.AliasForms(recipient)
+	if !aliasOK || !recipientOK || canonical != aliasCanonical {
+		return "", ""
+	}
+	if exact != plusBase {
+		plus = exact
+	}
+	if plusBase != alias {
+		dot = plusBase
+	}
+	return dot, plus
+}
+
+func (s *Service) persistICloudAliasVariants(ctx context.Context, candidates []iCloudMailCandidate) error {
+	dots := make(map[string]iCloudDotAliasModel)
+	pluses := make(map[string]iCloudPlusAliasModel)
+	for _, candidate := range candidates {
+		if candidate.scope.ResourceID == 0 || candidate.scope.AliasID == 0 {
+			continue
+		}
+		dot, plus := iCloudAliasVariants(candidate.scope.AliasEmail, candidate.recipient)
+		if dot != "" {
+			key := fmt.Sprintf("%d\x00%s", candidate.scope.ResourceID, dot)
+			dots[key] = iCloudDotAliasModel{
+				ResourceID: candidate.scope.ResourceID, AliasID: candidate.scope.AliasID,
+				Email: dot, Status: iCloudResourceNormal,
+			}
+		}
+		if plus != "" {
+			key := fmt.Sprintf("%d\x00%s", candidate.scope.ResourceID, plus)
+			pluses[key] = iCloudPlusAliasModel{
+				ResourceID: candidate.scope.ResourceID, AliasID: candidate.scope.AliasID,
+				Email: plus, Status: iCloudResourceNormal,
+			}
+		}
+	}
+	if len(dots) > 0 {
+		rows := make([]iCloudDotAliasModel, 0, len(dots))
+		for _, row := range dots {
+			rows = append(rows, row)
+		}
+		if err := s.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&rows).Error; err != nil {
+			return fmt.Errorf("%w: persist iCloud dot aliases", ErrICloudMailUnavailable)
+		}
+	}
+	if len(pluses) > 0 {
+		rows := make([]iCloudPlusAliasModel, 0, len(pluses))
+		for _, row := range pluses {
+			rows = append(rows, row)
+		}
+		if err := s.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&rows).Error; err != nil {
+			return fmt.Errorf("%w: persist iCloud plus aliases", ErrICloudMailUnavailable)
+		}
+	}
+	return nil
 }
 
 func iCloudKnownInboundRowIDs(values []string) []uint {
