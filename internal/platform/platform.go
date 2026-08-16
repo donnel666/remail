@@ -85,8 +85,8 @@ type Platform struct {
 	SMTP                  SMTPConfig
 	TrustedProxies        []string
 	SessionSecure         bool
-	// ponytail: reuse SESSION_SECRET with HMAC domain separation; add a dedicated
-	// stable ticket secret if reply links must survive session-secret rotation.
+	// ponytail: add a dedicated stable ticket secret if reply links must survive
+	// session-secret rotation.
 	TicketReplySecret string
 	Turnstile         TurnstileConfig
 	Diagnostics       DiagnosticsConfig

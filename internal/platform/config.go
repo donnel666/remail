@@ -127,6 +127,7 @@ func Load() (*Config, error) {
 	_ = godotenv.Load()
 
 	environment := strings.ToLower(strings.TrimSpace(getEnv("APP_ENV", "development")))
+	sessionSecret := getEnv("SESSION_SECRET", "")
 	trustedProxiesDefault := "127.0.0.1,::1"
 	if environment == "production" {
 		trustedProxiesDefault = ""
@@ -161,7 +162,7 @@ func Load() (*Config, error) {
 			Dir: getEnv("MIGRATIONS_DIR", ""),
 		},
 		Session: SessionConfig{
-			Secret: getEnv("SESSION_SECRET", ""),
+			Secret: sessionSecret,
 			Secure: getBool("SESSION_SECURE", false),
 		},
 		Turnstile: TurnstileConfig{
