@@ -3,6 +3,7 @@ package kitesim
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -26,7 +27,7 @@ func TestHandlerStatusesMatchOpenAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&accountModel{}, &phoneModel{}); err != nil {
+	if err := db.AutoMigrate(&accountModel{}, &phoneModel{}, &upstreamSettingsModel{}, &operationModel{}, &syncRunModel{}); err != nil {
 		t.Fatal(err)
 	}
 	queue := &testSyncQueue{}
@@ -54,6 +55,50 @@ func TestHandlerStatusesMatchOpenAPI(t *testing.T) {
 	h.importAccounts(importContext)
 	if importRecorder.Code != http.StatusAccepted {
 		t.Fatalf("import status = %d, want %d", importRecorder.Code, http.StatusAccepted)
+	}
+	var account accountModel
+	if err := db.Where("account = ?", "owner@example.com").First(&account).Error; err != nil {
+		t.Fatal(err)
+	}
+	tasksRecorder := httptest.NewRecorder()
+	tasksContext, _ := gin.CreateTestContext(tasksRecorder)
+	tasksContext.Request = httptest.NewRequest(http.MethodGet, "/v1/admin/kitesim/accounts/1/tasks?offset=0&limit=20", nil)
+	tasksContext.Params = gin.Params{{Key: "accountId", Value: fmt.Sprint(account.ID)}}
+	h.listAccountTasks(tasksContext)
+	if tasksRecorder.Code != http.StatusOK || !bytes.Contains(tasksRecorder.Body.Bytes(), []byte(`"total":1`)) {
+		t.Fatalf("task list status=%d body=%s", tasksRecorder.Code, tasksRecorder.Body.String())
+	}
+	phone := phoneModel{AccountID: account.ID, ProviderOrderID: "order-1", PhoneNumber: "14165550001"}
+	if err := db.Create(&phone).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	disableRecorder := httptest.NewRecorder()
+	disableContext, _ := gin.CreateTestContext(disableRecorder)
+	disableContext.Request = httptest.NewRequest(
+		http.MethodPost,
+		"/v1/admin/kitesim/phones/disable",
+		bytes.NewBufferString(fmt.Sprintf(`{"phoneIds":[%d]}`, phone.ID)),
+	)
+	disableContext.Request.Header.Set("Content-Type", "application/json")
+	middleware.SetCurrentUser(disableContext, 1, "super_admin", "admin@example.com", "session")
+	h.disablePhones(disableContext)
+	if disableRecorder.Code != http.StatusOK {
+		t.Fatalf("disable status = %d, want %d", disableRecorder.Code, http.StatusOK)
+	}
+
+	deleteRecorder := httptest.NewRecorder()
+	deleteContext, _ := gin.CreateTestContext(deleteRecorder)
+	deleteContext.Request = httptest.NewRequest(
+		http.MethodPost,
+		"/v1/admin/kitesim/phones/delete",
+		bytes.NewBufferString(fmt.Sprintf(`{"phoneIds":[%d]}`, phone.ID)),
+	)
+	deleteContext.Request.Header.Set("Content-Type", "application/json")
+	middleware.SetCurrentUser(deleteContext, 1, "super_admin", "admin@example.com", "session")
+	h.deletePhones(deleteContext)
+	if deleteRecorder.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, want %d", deleteRecorder.Code, http.StatusOK)
 	}
 }
 

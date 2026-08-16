@@ -450,3 +450,32 @@ func TestExecutePurchaseRefreshesInventoryBeforeEachOrder(t *testing.T) {
 		t.Fatalf("purchased numbers = %v", purchased)
 	}
 }
+
+func TestRefreshedTokenDoesNotOverwriteReimportedCredentials(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&accountModel{}); err != nil {
+		t.Fatal(err)
+	}
+	account := testAccount("owner@example.com", "old-password", "old-token")
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&accountModel{}).Where("id = ?", account.ID).Updates(map[string]any{
+		"password": "new-password", "token": "new-token",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := saveRefreshedAccountToken(db, account, "stale-worker-token", time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	var stored accountModel
+	if err := db.First(&stored, account.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.Password != "new-password" || stored.Token != "new-token" {
+		t.Fatalf("stale task overwrote reimported credentials: %+v", stored)
+	}
+}

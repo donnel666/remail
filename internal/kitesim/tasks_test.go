@@ -18,7 +18,7 @@ func TestWorkersOnlyClaimQueuedStates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&accountModel{}, &upstreamSettingsModel{}); err != nil {
+	if err := db.AutoMigrate(&accountModel{}, &upstreamSettingsModel{}, &syncRunModel{}); err != nil {
 		t.Fatal(err)
 	}
 	account := accountModel{Account: "owner@example.com", SyncStatus: string(SyncTaskSucceeded)}

@@ -52,7 +52,7 @@ func TestQueueAccountSyncPersistsBeforeEnqueueFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&accountModel{}); err != nil {
+	if err := db.AutoMigrate(&accountModel{}, &syncRunModel{}); err != nil {
 		t.Fatal(err)
 	}
 	account := testAccount("owner@example.com", "password", "")
@@ -76,6 +76,13 @@ func TestQueueAccountSyncPersistsBeforeEnqueueFailure(t *testing.T) {
 	if SyncTaskStatus(account.SyncStatus) != SyncTaskQueued || account.SyncQueuedAt == nil {
 		t.Fatalf("durable sync state = %+v", account)
 	}
+	var run syncRunModel
+	if err := db.Where("account_id = ?", account.ID).First(&run).Error; err != nil {
+		t.Fatal(err)
+	}
+	if SyncTaskStatus(run.Status) != SyncTaskQueued || !run.QueuedAt.Equal(*account.SyncQueuedAt) {
+		t.Fatalf("durable sync run = %+v", run)
+	}
 }
 
 func TestImportAccountsClearsStoredToken(t *testing.T) {
@@ -83,7 +90,7 @@ func TestImportAccountsClearsStoredToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&accountModel{}); err != nil {
+	if err := db.AutoMigrate(&accountModel{}, &phoneModel{}, &syncRunModel{}); err != nil {
 		t.Fatal(err)
 	}
 	tokenUpdated := time.Now().UTC()
@@ -119,7 +126,7 @@ func TestReimportSupersedesRunningAccountSync(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&accountModel{}, &phoneModel{}); err != nil {
+	if err := db.AutoMigrate(&accountModel{}, &phoneModel{}, &syncRunModel{}); err != nil {
 		t.Fatal(err)
 	}
 	captcha, err := os.ReadFile("testdata/NUY7.png")
@@ -212,7 +219,7 @@ func TestImportSyncListAndMessages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&accountModel{}, &phoneModel{}); err != nil {
+	if err := db.AutoMigrate(&accountModel{}, &phoneModel{}, &syncRunModel{}); err != nil {
 		t.Fatal(err)
 	}
 	captcha, err := os.ReadFile("testdata/NUY7.png")
@@ -346,7 +353,7 @@ func TestSyncEmptyUpstreamResponsePreservesHistoricalPhones(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&accountModel{}, &phoneModel{}); err != nil {
+	if err := db.AutoMigrate(&accountModel{}, &phoneModel{}, &syncRunModel{}); err != nil {
 		t.Fatal(err)
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
@@ -400,7 +407,7 @@ func TestMessagesDoesNotOverwriteNewerToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&accountModel{}, &phoneModel{}); err != nil {
+	if err := db.AutoMigrate(&accountModel{}, &phoneModel{}, &syncRunModel{}); err != nil {
 		t.Fatal(err)
 	}
 	captcha, err := os.ReadFile("testdata/NUY7.png")
@@ -460,5 +467,186 @@ func TestMessagesDoesNotOverwriteNewerToken(t *testing.T) {
 	}
 	if account.Token != "newer-token" {
 		t.Fatalf("newer token was overwritten with %q", account.Token)
+	}
+}
+
+func TestPhoneLifecycleSoftDeleteAndReimport(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&accountModel{}, &phoneModel{}, &upstreamSettingsModel{}, &operationModel{}, &syncRunModel{}); err != nil {
+		t.Fatal(err)
+	}
+	account := testAccount("owner@example.com", "password", "token")
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatal(err)
+	}
+	phones := []phoneModel{
+		{AccountID: account.ID, ProviderOrderID: "order-1", PhoneNumber: "14165550001", Status: int(PhoneActive)},
+		{AccountID: account.ID, ProviderOrderID: "order-2", PhoneNumber: "14165550002", Status: int(PhoneActive)},
+	}
+	if err := db.Create(&phones).Error; err != nil {
+		t.Fatal(err)
+	}
+	queue := &testSyncQueue{}
+	service := NewService(db, queue)
+	service.logs = testOperationLogs{}
+	meta := MutationMeta{OperatorUserID: 1, Path: "/test"}
+
+	if _, err := service.SetPhonesDisabled(context.Background(), []uint{phones[0].ID}, true, meta); err != nil {
+		t.Fatal(err)
+	}
+	list, err := service.ListPhones(context.Background(), PhoneListFilter{Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Items) != 2 || list.Facets.Disabled != 1 {
+		t.Fatalf("disabled list = %+v facets=%+v", list.Items, list.Facets)
+	}
+
+	if _, err := service.DeletePhones(context.Background(), []uint{phones[0].ID}, nil, meta); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(&account, account.ID).Error; err != nil || account.DeletedAt != nil {
+		t.Fatalf("account deleted before its final phone: %+v err=%v", account, err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/userPhonePurchase/getOrderPage" {
+			http.NotFound(response, request)
+			return
+		}
+		records := []map[string]any{}
+		if request.URL.Query().Get("status") == "1" {
+			records = append(records,
+				map[string]any{"id": "order-1", "orderNo": "ORDER-1", "phoneNumber": "14165550001"},
+				map[string]any{"id": "order-2", "orderNo": "ORDER-2", "phoneNumber": "14165550002"},
+			)
+		}
+		_ = json.NewEncoder(response).Encode(map[string]any{
+			"code": 200, "data": map[string]any{"records": records, "totalPage": 1},
+		})
+	}))
+	defer server.Close()
+	service.client = NewClient(server.Client())
+	service.client.BaseURL = server.URL
+	if err := db.Model(&accountModel{}).Where("id = ?", account.ID).Updates(map[string]any{
+		"sync_status": SyncTaskQueued, "sync_queued_at": time.Now().UTC(),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	claim, err := service.markSyncRunning(context.Background(), account.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.processAccountSync(context.Background(), claim); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(&phones[0], phones[0].ID).Error; err != nil || phones[0].DeletedAt == nil || phones[0].DisabledAt == nil {
+		t.Fatalf("ordinary sync restored a deleted phone: %+v err=%v", phones[0], err)
+	}
+	if _, err := service.DeletePhones(context.Background(), []uint{phones[1].ID}, nil, meta); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(&account, account.ID).Error; err != nil || account.DeletedAt == nil {
+		t.Fatalf("account not soft-deleted after final phone: %+v err=%v", account, err)
+	}
+
+	if _, err := service.ImportAccounts(context.Background(), "owner@example.com----new-password", meta); err != nil {
+		t.Fatal(err)
+	}
+	var restoredAccount accountModel
+	if err := db.First(&restoredAccount, account.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if restoredAccount.DeletedAt != nil || restoredAccount.Password != "new-password" || len(queue.accountIDs) != 1 {
+		t.Fatalf("reimported account was not restored: %+v queued=%v", restoredAccount, queue.accountIDs)
+	}
+	var restored []phoneModel
+	if err := db.Where("account_id = ?", restoredAccount.ID).Order("id").Find(&restored).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(restored) != 2 || restored[0].DeletedAt != nil || restored[0].DisabledAt != nil ||
+		restored[1].DeletedAt != nil || restored[1].DisabledAt != nil {
+		t.Fatalf("reimported phones were not restored: %+v", restored)
+	}
+}
+
+func TestReimportPreservesExplicitPhoneDisable(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&accountModel{}, &phoneModel{}, &syncRunModel{}); err != nil {
+		t.Fatal(err)
+	}
+	account := testAccount("owner@example.com", "password", "token")
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatal(err)
+	}
+	disabledAt := time.Now().UTC()
+	phone := phoneModel{
+		AccountID: account.ID, ProviderOrderID: "order-1", PhoneNumber: "14165550001",
+		Status: int(PhoneActive), DisabledAt: &disabledAt,
+	}
+	if err := db.Create(&phone).Error; err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(db, &testSyncQueue{})
+	service.logs = testOperationLogs{}
+	if _, err := service.ImportAccounts(context.Background(), "owner@example.com----new-password", MutationMeta{OperatorUserID: 1, Path: "/test"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(&phone, phone.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if phone.DeletedAt != nil || phone.DisabledAt == nil {
+		t.Fatalf("reimport changed explicit disabled state: %+v", phone)
+	}
+}
+
+func TestListSyncRunsReturnsExactAccountHistory(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&accountModel{}, &syncRunModel{}); err != nil {
+		t.Fatal(err)
+	}
+	accountA := testAccount("a@example.com", "password", "")
+	accountB := testAccount("b@example.com", "password", "")
+	if err := db.Create(&accountA).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&accountB).Error; err != nil {
+		t.Fatal(err)
+	}
+	queuedAt := time.Date(2026, time.August, 16, 12, 0, 0, 0, time.UTC)
+	finishedAt := queuedAt.Add(time.Minute)
+	runs := []syncRunModel{
+		{AccountID: accountA.ID, Status: string(SyncTaskSucceeded), Attempts: 1, QueuedAt: queuedAt, FinishedAt: &finishedAt, UpdatedAt: finishedAt},
+		{AccountID: accountA.ID, Status: string(SyncTaskFailed), Attempts: 2, LastSafeError: "safe failure", QueuedAt: queuedAt.Add(time.Hour), FinishedAt: &finishedAt, UpdatedAt: finishedAt.Add(time.Hour)},
+		{AccountID: accountB.ID, Status: string(SyncTaskSucceeded), Attempts: 1, QueuedAt: queuedAt, FinishedAt: &finishedAt, UpdatedAt: finishedAt.Add(2 * time.Hour)},
+	}
+	if err := db.Create(&runs).Error; err != nil {
+		t.Fatal(err)
+	}
+	result, err := NewService(db, nil).ListSyncRuns(context.Background(), accountA.ID, 0, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Total != 2 || result.Succeeded != 1 || len(result.Items) != 1 ||
+		result.Items[0].TaskID != fmt.Sprintf("kitesim-sync:%d", runs[1].ID) || result.Items[0].LastSafeError != "safe failure" {
+		t.Fatalf("sync history = %+v", result)
+	}
+}
+
+func TestJSONTextBindsAsDatabaseText(t *testing.T) {
+	value, err := jsonText(`{"ok":true}`).Value()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := value.(string); !ok {
+		t.Fatalf("JSON database value type = %T, want string", value)
 	}
 }

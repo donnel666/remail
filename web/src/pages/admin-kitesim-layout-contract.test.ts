@@ -25,7 +25,6 @@ describe("admin Kitesim page layout", () => {
       'className="resources-search-input w-full md:w-56"',
       'className="remail-toolbar-fixed-button flex-1 md:flex-none"',
       'className="overflow-hidden rounded-xl"',
-      'scroll={{ x: "max(100%, 2030px)", y: DESKTOP_TABLE_SCROLL_Y }}',
       'size="middle"',
       "<StatisticFilterOption",
       "<CompactModeToggle",
@@ -40,17 +39,16 @@ describe("admin Kitesim page layout", () => {
       "<ImportKitesimModal",
       "<KitesimDetailSheet",
       "<KitesimMessagesPanel",
+      "<KitesimTaskDiagnostics",
+      "<ServerPaginatedDrawerTable",
       "<KitesimRenewalModal",
       '<Tabs.TabPane itemKey="basic"',
-      '<Tabs.TabPane itemKey="orders"',
-      '<Tabs.TabPane itemKey="status"',
-      '<Tabs.TabPane itemKey="renewal"',
       '<Tabs.TabPane itemKey="tasks"',
       '<Tabs.TabPane itemKey="mails"',
-      '<Tabs.TabPane itemKey="account"',
-      't("SMS inbox")',
+      't("Inbox")',
       't("Renew")',
       "listAdminKitesimMessages",
+      "listAdminKitesimAccountTasks",
       "listKitesimProducts",
       "renewKitesimPhone",
       "maxUnitPrice",
@@ -68,6 +66,17 @@ describe("admin Kitesim page layout", () => {
     expect(kitesimSource).not.toContain('from "@/lib/admin-microsoft-api"');
     expect(kitesimSource).toContain("const price = product.buyPrice;");
     expect(kitesimSource).toContain("const maxUnitPrice = selectedProduct.buyPrice;");
+    expect(microsoftSource).toContain('scroll={{ x: "max(100%, 2030px)", y: DESKTOP_TABLE_SCROLL_Y }}');
+    expect(kitesimSource).toContain('scroll={{ x: "max(100%, 1960px)", y: DESKTOP_TABLE_SCROLL_Y }}');
+    expect(kitesimSource).not.toContain('dataIndex: "orderNo"');
+    expect(kitesimSource).not.toContain("window.setInterval(() => void refreshList()");
+    expect(kitesimSource).not.toContain('<Tabs.TabPane itemKey="orders"');
+    expect(kitesimSource).not.toContain('<Tabs.TabPane itemKey="status"');
+    expect(kitesimSource).not.toContain('<Tabs.TabPane itemKey="renewal"');
+    expect(kitesimSource).not.toContain('<Tabs.TabPane itemKey="account"');
+    expect(kitesimSource).toContain("globalThis.setTimeout");
+    expect(kitesimSource).not.toContain('t("Synchronize selected")');
+    expect(kitesimSource).not.toContain('t("Clear selection")');
   });
 
   it("gates Kitesim mutations without changing the resource-page layout", () => {
@@ -75,7 +84,11 @@ describe("admin Kitesim page layout", () => {
       'permissionKey("core:resource", "write")',
       'permissionKey("core:resource", "operate")',
       'permissionKey("system:settings", "write")',
-      "onCheck: canOperate ? syncSelected : undefined",
+      "onDelete: canOperate ? confirmDeleteSelected : undefined",
+      "onSell: canOperate && phoneIDs(selectedItems).length > 0 ? confirmDisableSelected : undefined",
+      "disableAdminKitesimPhones",
+      "enableAdminKitesimPhones",
+      "deleteAdminKitesimPhones",
       'disabled={!canWrite}',
       'disabled={!canOperate || pagedItems.length === 0}',
       'item.status !== "active" && item.status !== "expired"',
@@ -92,9 +105,7 @@ describe("admin Kitesim page layout", () => {
       "canReadMessages={canReadMessages}",
       '<Tabs.TabPane itemKey="mails" disabled={!canReadMessages}',
       'activeTab === "mails" && canReadMessages',
-      "disabled: !canReadMessages",
       "disabled={!canReadMessages || !item.phoneId || busy}",
-      "disabled={!canReadMessages || selectedItems.length !== 1 || !selectedItems[0]?.phoneId}",
       "disabled={!canReadMessages || !item.phoneId}",
     ]) {
       expect(kitesimSource).toContain(fragment);

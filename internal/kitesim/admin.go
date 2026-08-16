@@ -34,6 +34,7 @@ const (
 	AdminPhoneExpired    AdminPhoneStatus = "expired"
 	AdminPhoneRefunded   AdminPhoneStatus = "refunded"
 	AdminPhoneUnsynced   AdminPhoneStatus = "unsynced"
+	AdminPhoneDisabled   AdminPhoneStatus = "disabled"
 )
 
 type SyncTaskStatus string
@@ -59,6 +60,7 @@ type accountModel struct {
 	SyncStartedAt  *time.Time `gorm:"column:sync_started_at"`
 	SyncFinishedAt *time.Time `gorm:"column:sync_finished_at"`
 	SyncAttempts   int        `gorm:"column:sync_attempts"`
+	DeletedAt      *time.Time `gorm:"column:deleted_at"`
 	CreatedAt      time.Time  `gorm:"column:created_at"`
 	UpdatedAt      time.Time  `gorm:"column:updated_at"`
 }
@@ -90,12 +92,29 @@ type phoneModel struct {
 	LatestRenewal   string     `gorm:"column:latest_renewal_time"`
 	NextRenewalDate string     `gorm:"column:next_renewal_date"`
 	RefundTime      string     `gorm:"column:refund_time"`
-	RawPayload      []byte     `gorm:"column:raw_payload;type:json"`
+	DisabledAt      *time.Time `gorm:"column:disabled_at"`
+	DeletedAt       *time.Time `gorm:"column:deleted_at"`
+	RawPayload      jsonText   `gorm:"column:raw_payload;type:json"`
 	CreatedAt       time.Time  `gorm:"column:created_at"`
 	UpdatedAt       time.Time  `gorm:"column:updated_at"`
 }
 
 func (phoneModel) TableName() string { return "kitesim_phones" }
+
+type syncRunModel struct {
+	ID            uint64     `gorm:"column:id;primaryKey;autoIncrement"`
+	AccountID     uint       `gorm:"column:account_id;index"`
+	Status        string     `gorm:"column:status"`
+	Attempts      int        `gorm:"column:attempts"`
+	LastSafeError string     `gorm:"column:last_safe_error"`
+	QueuedAt      time.Time  `gorm:"column:queued_at"`
+	StartedAt     *time.Time `gorm:"column:started_at"`
+	FinishedAt    *time.Time `gorm:"column:finished_at"`
+	CreatedAt     time.Time  `gorm:"column:created_at"`
+	UpdatedAt     time.Time  `gorm:"column:updated_at"`
+}
+
+func (syncRunModel) TableName() string { return "kitesim_sync_runs" }
 
 type MutationMeta struct {
 	OperatorUserID uint
@@ -184,6 +203,7 @@ type PhoneFacets struct {
 	Expired        int64         `json:"expired"`
 	Refunded       int64         `json:"refunded"`
 	Unsynced       int64         `json:"unsynced"`
+	Disabled       int64         `json:"disabled"`
 	AutoRenew      BooleanFacets `json:"autoRenew"`
 	TokenAvailable BooleanFacets `json:"tokenAvailable"`
 	SyncHealthy    BooleanFacets `json:"syncHealthy"`
@@ -242,6 +262,7 @@ func (s *Service) ListPhones(ctx context.Context, filter PhoneListFilter) (*Phon
 		SyncAttempts     int        `gorm:"column:sync_attempts"`
 		LastSafeError    string     `gorm:"column:last_safe_error"`
 		LastSyncedAt     *time.Time `gorm:"column:last_synced_at"`
+		DisabledAt       *time.Time `gorm:"column:disabled_at"`
 		AccountCreatedAt time.Time  `gorm:"column:account_created"`
 	}
 	var rows []row
@@ -249,7 +270,7 @@ func (s *Service) ListPhones(ctx context.Context, filter PhoneListFilter) (*Phon
 p.phone_code, p.phone_number, p.status, p.order_no, p.country_code, p.order_status,
 p.package_id, p.duration_type, p.duration_value, p.auto_renew, p.currency,
 p.original_amount, p.paid_amount, p.auto_renew_price, p.create_time, p.payment_time,
-p.expire_time, p.latest_renewal_time, p.next_renewal_date, p.refund_time,
+p.expire_time, p.latest_renewal_time, p.next_renewal_date, p.refund_time, p.disabled_at,
 CASE WHEN a.token IS NOT NULL AND LENGTH(a.token) > 0 THEN 1 ELSE 0 END AS token_available, a.token_updated_at,
 (a.last_synced_at IS NOT NULL AND a.last_safe_error = '') AS sync_healthy,
 a.sync_status, a.sync_queued_at, a.sync_started_at, a.sync_finished_at, a.sync_attempts,
@@ -276,6 +297,9 @@ a.last_safe_error, a.last_synced_at, a.created_at AS account_created`).
 		}
 		if row.Status != nil {
 			item.Status = adminStatus(PhoneStatus(*row.Status))
+		}
+		if row.DisabledAt != nil {
+			item.Status = AdminPhoneDisabled
 		}
 		if row.OrderNo != nil {
 			item.OrderNo = *row.OrderNo
@@ -376,19 +400,23 @@ func (s *Service) filteredPhoneQuery(ctx context.Context, filter PhoneListFilter
 	if filter.Status == AdminPhoneUnsynced {
 		return query.Where("p.id IS NULL")
 	}
+	if filter.Status == AdminPhoneDisabled {
+		return query.Where("p.disabled_at IS NOT NULL")
+	}
 	if filter.Status != "" {
 		status, ok := providerStatus(filter.Status)
 		if !ok {
 			return query.Where("1 = 0")
 		}
-		query = query.Where("p.status = ?", status)
+		query = query.Where("p.disabled_at IS NULL AND p.status = ?", status)
 	}
 	return query
 }
 
 func (s *Service) basePhoneQuery(ctx context.Context, search string, createdFrom, createdTo *time.Time) *gorm.DB {
 	query := s.db.WithContext(ctx).Table("kitesim_accounts AS a").
-		Joins("LEFT JOIN kitesim_phones AS p ON p.account_id = a.id")
+		Joins("LEFT JOIN kitesim_phones AS p ON p.account_id = a.id AND p.deleted_at IS NULL").
+		Where("a.deleted_at IS NULL")
 	search = strings.TrimSpace(search)
 	if search != "" {
 		like := "%" + search + "%"
@@ -412,6 +440,7 @@ func (s *Service) phoneFacets(ctx context.Context, filter PhoneListFilter) (Phon
 		Expired           int64 `gorm:"column:expired_count"`
 		Refunded          int64 `gorm:"column:refunded_count"`
 		Unsynced          int64 `gorm:"column:unsynced_count"`
+		Disabled          int64 `gorm:"column:disabled_count"`
 		AutoRenewYes      int64 `gorm:"column:auto_renew_yes"`
 		TokenAvailableYes int64 `gorm:"column:token_available_yes"`
 		SyncHealthyYes    int64 `gorm:"column:sync_healthy_yes"`
@@ -420,12 +449,13 @@ func (s *Service) phoneFacets(ctx context.Context, filter PhoneListFilter) (Phon
 	query := s.basePhoneQuery(ctx, filter.Search, filter.CreatedFrom, filter.CreatedTo)
 	var row counts
 	if err := query.Select(`COUNT(*) AS all_count,
-SUM(CASE WHEN p.status = 1 THEN 1 ELSE 0 END) AS active_count,
-SUM(CASE WHEN p.status = 2 THEN 1 ELSE 0 END) AS pending_count,
-SUM(CASE WHEN p.status = 3 THEN 1 ELSE 0 END) AS activating_count,
-SUM(CASE WHEN p.status = 0 THEN 1 ELSE 0 END) AS expired_count,
-SUM(CASE WHEN p.status = 4 THEN 1 ELSE 0 END) AS refunded_count,
+SUM(CASE WHEN p.disabled_at IS NULL AND p.status = 1 THEN 1 ELSE 0 END) AS active_count,
+SUM(CASE WHEN p.disabled_at IS NULL AND p.status = 2 THEN 1 ELSE 0 END) AS pending_count,
+SUM(CASE WHEN p.disabled_at IS NULL AND p.status = 3 THEN 1 ELSE 0 END) AS activating_count,
+SUM(CASE WHEN p.disabled_at IS NULL AND p.status = 0 THEN 1 ELSE 0 END) AS expired_count,
+SUM(CASE WHEN p.disabled_at IS NULL AND p.status = 4 THEN 1 ELSE 0 END) AS refunded_count,
 SUM(CASE WHEN p.id IS NULL THEN 1 ELSE 0 END) AS unsynced_count,
+SUM(CASE WHEN p.disabled_at IS NOT NULL THEN 1 ELSE 0 END) AS disabled_count,
 SUM(CASE WHEN p.id IS NOT NULL AND p.auto_renew = 1 THEN 1 ELSE 0 END) AS auto_renew_yes,
 SUM(CASE WHEN a.token IS NOT NULL AND LENGTH(a.token) > 0 THEN 1 ELSE 0 END) AS token_available_yes,
 SUM(CASE WHEN a.last_synced_at IS NOT NULL AND a.last_safe_error = '' THEN 1 ELSE 0 END) AS sync_healthy_yes,
@@ -438,7 +468,7 @@ SUM(CASE WHEN p.id IS NOT NULL THEN 1 ELSE 0 END) AS phone_available_yes`).Scan(
 	return PhoneFacets{
 		All: row.All, Active: row.Active, Pending: row.Pending,
 		Activating: row.Activating, Expired: row.Expired,
-		Refunded: row.Refunded, Unsynced: row.Unsynced,
+		Refunded: row.Refunded, Unsynced: row.Unsynced, Disabled: row.Disabled,
 		AutoRenew: boolean(row.AutoRenewYes), TokenAvailable: boolean(row.TokenAvailableYes),
 		SyncHealthy: boolean(row.SyncHealthyYes), PhoneAvailable: boolean(row.PhoneAvailableYes),
 	}, nil
@@ -465,6 +495,25 @@ type SyncTaskView struct {
 	Attempts   int            `json:"attempts"`
 }
 
+type SyncRunItem struct {
+	TaskID        string         `json:"taskId"`
+	Status        SyncTaskStatus `json:"status"`
+	Attempts      int            `json:"attempts"`
+	LastSafeError string         `json:"lastSafeError,omitempty"`
+	QueuedAt      time.Time      `json:"queuedAt"`
+	StartedAt     *time.Time     `json:"startedAt,omitempty"`
+	FinishedAt    *time.Time     `json:"finishedAt,omitempty"`
+	UpdatedAt     time.Time      `json:"updatedAt"`
+}
+
+type SyncRunList struct {
+	Items     []SyncRunItem `json:"items"`
+	Total     int64         `json:"total"`
+	Succeeded int64         `json:"succeeded"`
+	Offset    int           `json:"offset"`
+	Limit     int           `json:"limit"`
+}
+
 type importAccount struct {
 	Account  string
 	Password string
@@ -487,7 +536,8 @@ func (s *Service) ImportAccounts(ctx context.Context, content string, meta Mutat
 				Columns: []clause.Column{{Name: "account"}},
 				DoUpdates: clause.AssignmentColumns([]string{
 					"password", "token", "token_updated_at", "sync_status", "sync_queued_at",
-					"sync_started_at", "sync_finished_at", "sync_attempts", "last_safe_error", "updated_at",
+					"sync_started_at", "sync_finished_at", "sync_attempts", "last_safe_error",
+					"deleted_at", "updated_at",
 				}),
 			}).Create(&model).Error; err != nil {
 				return fmt.Errorf("upsert Kitesim account: %w", err)
@@ -496,6 +546,24 @@ func (s *Service) ImportAccounts(ctx context.Context, content string, meta Mutat
 				return fmt.Errorf("load Kitesim account: %w", err)
 			}
 			accounts[i].ID = model.ID
+			if err := tx.Model(&syncRunModel{}).
+				Where("account_id = ? AND status IN ?", model.ID, []SyncTaskStatus{SyncTaskQueued, SyncTaskRunning}).
+				Updates(map[string]any{
+					"status": SyncTaskFailed, "finished_at": now,
+					"last_safe_error": "Kitesim 同步已被重新导入替代。",
+				}).Error; err != nil {
+				return fmt.Errorf("supersede Kitesim sync run: %w", err)
+			}
+			if err := tx.Create(&syncRunModel{
+				AccountID: model.ID, Status: string(SyncTaskQueued), QueuedAt: now,
+			}).Error; err != nil {
+				return fmt.Errorf("create Kitesim sync run: %w", err)
+			}
+			if err := tx.Model(&phoneModel{}).
+				Where("account_id = ? AND deleted_at IS NOT NULL", model.ID).
+				Updates(map[string]any{"disabled_at": nil, "deleted_at": nil}).Error; err != nil {
+				return fmt.Errorf("restore Kitesim phones: %w", err)
+			}
 		}
 		return s.createAudit(platform.WithGormTx(ctx, tx), meta, "kitesim.accounts.import", "kitesim_account", "bulk", fmt.Sprintf("imported or updated %d Kitesim accounts", len(accounts)))
 	})
@@ -514,11 +582,268 @@ func (s *Service) ImportAccounts(ctx context.Context, content string, meta Mutat
 	return result, nil
 }
 
+type PhoneMutationResult struct {
+	Affected int64 `json:"affected"`
+}
+
+func normalizeIDs(ids []uint) ([]uint, error) {
+	if len(ids) == 0 || len(ids) > maxImportAccounts {
+		return nil, ErrInvalidInput
+	}
+	seen := make(map[uint]struct{}, len(ids))
+	result := make([]uint, 0, len(ids))
+	for _, id := range ids {
+		if id == 0 {
+			return nil, ErrInvalidInput
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		result = append(result, id)
+	}
+	return result, nil
+}
+
+func (s *Service) SetPhonesDisabled(ctx context.Context, phoneIDs []uint, disabled bool, meta MutationMeta) (*PhoneMutationResult, error) {
+	ids, err := normalizeIDs(phoneIDs)
+	if err != nil {
+		return nil, err
+	}
+	result := &PhoneMutationResult{}
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		accountIDs, err := s.phoneAccountIDs(tx, ids)
+		if err != nil {
+			return err
+		}
+		if err := s.ensureAccountsWithoutActiveOperations(tx, accountIDs); err != nil {
+			return err
+		}
+		query := tx.Model(&phoneModel{}).Where("id IN ? AND deleted_at IS NULL", ids)
+		var updated *gorm.DB
+		if disabled {
+			updated = query.Where("disabled_at IS NULL").Update("disabled_at", s.now().UTC().Truncate(time.Millisecond))
+		} else {
+			updated = query.Where("disabled_at IS NOT NULL").Update("disabled_at", nil)
+		}
+		if updated.Error != nil {
+			return fmt.Errorf("update Kitesim phone disabled state: %w", updated.Error)
+		}
+		result.Affected = updated.RowsAffected
+		operation := "disable"
+		if !disabled {
+			operation = "enable"
+		}
+		return s.createAudit(
+			platform.WithGormTx(ctx, tx), meta, "kitesim.phones."+operation,
+			"kitesim_phone", "bulk", fmt.Sprintf("%sd %d Kitesim phones", operation, result.Affected),
+		)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (s *Service) DeletePhones(ctx context.Context, phoneIDs, emptyAccountIDs []uint, meta MutationMeta) (*PhoneMutationResult, error) {
+	var ids []uint
+	var err error
+	if len(phoneIDs) > 0 {
+		ids, err = normalizeIDs(phoneIDs)
+		if err != nil {
+			return nil, err
+		}
+	}
+	accountIDs := make([]uint, 0, len(ids)+len(emptyAccountIDs))
+	emptyAccountSet := make(map[uint]struct{}, len(emptyAccountIDs))
+	if len(emptyAccountIDs) > 0 {
+		emptyAccountIDs, err = normalizeIDs(emptyAccountIDs)
+		if err != nil {
+			return nil, err
+		}
+		accountIDs = append(accountIDs, emptyAccountIDs...)
+		for _, accountID := range emptyAccountIDs {
+			emptyAccountSet[accountID] = struct{}{}
+		}
+	}
+	if len(ids) == 0 && len(accountIDs) == 0 {
+		return nil, ErrInvalidInput
+	}
+	result := &PhoneMutationResult{}
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if len(ids) > 0 {
+			phoneAccounts, err := s.phoneAccountIDs(tx, ids)
+			if err != nil {
+				return err
+			}
+			accountIDs = append(accountIDs, phoneAccounts...)
+		}
+		accountIDs, err = uniqueIDs(accountIDs)
+		if err != nil {
+			return err
+		}
+		if err := s.ensureAccountsWithoutActiveOperations(tx, accountIDs); err != nil {
+			return err
+		}
+		now := s.now().UTC().Truncate(time.Millisecond)
+		if len(ids) > 0 {
+			updated := tx.Model(&phoneModel{}).Where("id IN ? AND deleted_at IS NULL", ids).
+				Updates(map[string]any{"deleted_at": now, "disabled_at": now})
+			if updated.Error != nil {
+				return fmt.Errorf("delete Kitesim phones: %w", updated.Error)
+			}
+			result.Affected += updated.RowsAffected
+		}
+		for _, accountID := range accountIDs {
+			var remaining int64
+			if err := tx.Model(&phoneModel{}).
+				Where("account_id = ? AND deleted_at IS NULL", accountID).Count(&remaining).Error; err != nil {
+				return fmt.Errorf("count remaining Kitesim phones: %w", err)
+			}
+			if remaining > 0 {
+				continue
+			}
+			updated := tx.Model(&accountModel{}).Where("id = ? AND deleted_at IS NULL", accountID).
+				Updates(map[string]any{
+					"deleted_at": now, "sync_status": SyncTaskIdle,
+					"sync_queued_at": nil, "sync_started_at": nil, "sync_finished_at": nil,
+				})
+			if updated.Error != nil {
+				return fmt.Errorf("delete empty Kitesim account: %w", updated.Error)
+			}
+			if err := tx.Model(&syncRunModel{}).
+				Where("account_id = ? AND status IN ?", accountID, []SyncTaskStatus{SyncTaskQueued, SyncTaskRunning}).
+				Updates(map[string]any{
+					"status": SyncTaskFailed, "finished_at": now,
+					"last_safe_error": "Kitesim 平台账号已删除，同步任务已停止。",
+				}).Error; err != nil {
+				return fmt.Errorf("stop deleted Kitesim account sync: %w", err)
+			}
+			if _, selected := emptyAccountSet[accountID]; selected {
+				result.Affected += updated.RowsAffected
+			}
+			if err := tx.Model(&upstreamSettingsModel{}).Where("account_id = ?", accountID).
+				Updates(map[string]any{
+					"account_id": nil, "balance": "0", "balance_updated_at": nil,
+					"refresh_status": SyncTaskIdle, "refresh_queued_at": nil,
+					"refresh_started_at": nil, "refresh_finished_at": nil,
+					"refresh_attempts": 0, "last_safe_error": "",
+				}).Error; err != nil {
+				return fmt.Errorf("clear deleted Kitesim system account: %w", err)
+			}
+		}
+		return s.createAudit(
+			platform.WithGormTx(ctx, tx), meta, "kitesim.phones.delete",
+			"kitesim_phone", "bulk", fmt.Sprintf("deleted %d Kitesim rows", result.Affected),
+		)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func uniqueIDs(ids []uint) ([]uint, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	return normalizeIDs(ids)
+}
+
+func (s *Service) phoneAccountIDs(tx *gorm.DB, phoneIDs []uint) ([]uint, error) {
+	type phoneAccount struct {
+		ID        uint
+		AccountID uint
+	}
+	var phones []phoneAccount
+	if err := tx.Model(&phoneModel{}).Select("id", "account_id").
+		Where("id IN ? AND deleted_at IS NULL", phoneIDs).Find(&phones).Error; err != nil {
+		return nil, fmt.Errorf("load Kitesim phone accounts: %w", err)
+	}
+	if len(phones) != len(phoneIDs) {
+		return nil, ErrPhoneMissing
+	}
+	accountIDs := make([]uint, 0, len(phones))
+	for _, phone := range phones {
+		accountIDs = append(accountIDs, phone.AccountID)
+	}
+	accountIDs, err := uniqueIDs(accountIDs)
+	if err != nil {
+		return nil, err
+	}
+	return accountIDs, nil
+}
+
+func (s *Service) ensureAccountsWithoutActiveOperations(tx *gorm.DB, accountIDs []uint) error {
+	if len(accountIDs) == 0 {
+		return nil
+	}
+	var accounts []accountModel
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Model(&accountModel{}).
+		Select("id").Where("id IN ? AND deleted_at IS NULL", accountIDs).Find(&accounts).Error; err != nil {
+		return fmt.Errorf("check Kitesim accounts: %w", err)
+	}
+	if len(accounts) != len(accountIDs) {
+		return ErrAccountMissing
+	}
+	var activeOperations int64
+	if err := tx.Model(&operationModel{}).
+		Where("account_id IN ? AND status IN ?", accountIDs, []OperationStatus{
+			OperationQueued, OperationRunning, OperationUncertain, OperationRequiresAction,
+		}).Count(&activeOperations).Error; err != nil {
+		return fmt.Errorf("check Kitesim account operations: %w", err)
+	}
+	if activeOperations > 0 {
+		return ErrOperationBusy
+	}
+	return nil
+}
+
 func (s *Service) SyncAccount(ctx context.Context, accountID uint, meta MutationMeta) (*SyncTaskView, error) {
 	if accountID == 0 {
 		return nil, ErrAccountMissing
 	}
 	return s.queueAccountSync(ctx, accountID, &meta)
+}
+
+func (s *Service) ListSyncRuns(ctx context.Context, accountID uint, offset, limit int) (*SyncRunList, error) {
+	if accountID == 0 || offset < 0 || limit < 1 || limit > 100 {
+		return nil, ErrInvalidInput
+	}
+	var accountCount int64
+	if err := s.db.WithContext(ctx).Model(&accountModel{}).
+		Where("id = ? AND deleted_at IS NULL", accountID).Count(&accountCount).Error; err != nil {
+		return nil, fmt.Errorf("load Kitesim sync account: %w", err)
+	}
+	if accountCount == 0 {
+		return nil, ErrAccountMissing
+	}
+	var total, succeeded int64
+	if err := s.db.WithContext(ctx).Model(&syncRunModel{}).
+		Where("account_id = ?", accountID).Count(&total).Error; err != nil {
+		return nil, fmt.Errorf("count Kitesim sync runs: %w", err)
+	}
+	if err := s.db.WithContext(ctx).Model(&syncRunModel{}).
+		Where("account_id = ? AND status = ?", accountID, SyncTaskSucceeded).Count(&succeeded).Error; err != nil {
+		return nil, fmt.Errorf("count successful Kitesim sync runs: %w", err)
+	}
+	var runs []syncRunModel
+	if err := s.db.WithContext(ctx).Where("account_id = ?", accountID).
+		Order("updated_at DESC, id DESC").Offset(offset).Limit(limit).Find(&runs).Error; err != nil {
+		return nil, fmt.Errorf("list Kitesim sync runs: %w", err)
+	}
+	items := make([]SyncRunItem, 0, len(runs))
+	for _, run := range runs {
+		items = append(items, SyncRunItem{
+			TaskID: fmt.Sprintf("kitesim-sync:%d", run.ID), Status: SyncTaskStatus(run.Status),
+			Attempts: run.Attempts, LastSafeError: run.LastSafeError,
+			QueuedAt: run.QueuedAt, StartedAt: run.StartedAt, FinishedAt: run.FinishedAt,
+			UpdatedAt: run.UpdatedAt,
+		})
+	}
+	return &SyncRunList{
+		Items: items, Total: total, Succeeded: succeeded, Offset: offset, Limit: limit,
+	}, nil
 }
 
 func (s *Service) queueAccountSync(ctx context.Context, accountID uint, meta *MutationMeta) (*SyncTaskView, error) {
@@ -531,7 +856,7 @@ func (s *Service) queueAccountSync(ctx context.Context, accountID uint, meta *Mu
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Select("id", "sync_status", "sync_queued_at", "sync_started_at", "sync_finished_at", "sync_attempts").
-			First(&account, accountID).Error; err != nil {
+			Where("id = ? AND deleted_at IS NULL", accountID).First(&account).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrAccountMissing
 			}
@@ -541,6 +866,9 @@ func (s *Service) queueAccountSync(ctx context.Context, accountID uint, meta *Mu
 		case SyncTaskRunning:
 			return nil
 		case SyncTaskQueued:
+			if err := ensureQueuedSyncRun(tx, account.ID, account.SyncQueuedAt, now); err != nil {
+				return err
+			}
 			shouldEnqueue = true
 			return nil
 		}
@@ -557,6 +885,11 @@ func (s *Service) queueAccountSync(ctx context.Context, accountID uint, meta *Mu
 		account.SyncStartedAt = nil
 		account.SyncFinishedAt = nil
 		account.SyncAttempts = 0
+		if err := tx.Create(&syncRunModel{
+			AccountID: account.ID, Status: string(SyncTaskQueued), QueuedAt: now,
+		}).Error; err != nil {
+			return fmt.Errorf("create Kitesim sync run: %w", err)
+		}
 		shouldEnqueue = true
 		if meta == nil {
 			return nil
@@ -570,6 +903,27 @@ func (s *Service) queueAccountSync(ctx context.Context, accountID uint, meta *Mu
 		_, _ = s.queue.Enqueue(ctx, accountID)
 	}
 	return syncTaskView(account), nil
+}
+
+func ensureQueuedSyncRun(tx *gorm.DB, accountID uint, queuedAt *time.Time, fallback time.Time) error {
+	var count int64
+	if err := tx.Model(&syncRunModel{}).
+		Where("account_id = ? AND status = ?", accountID, SyncTaskQueued).Count(&count).Error; err != nil {
+		return fmt.Errorf("load queued Kitesim sync run: %w", err)
+	}
+	if count > 0 {
+		return nil
+	}
+	queued := fallback
+	if queuedAt != nil {
+		queued = *queuedAt
+	}
+	if err := tx.Create(&syncRunModel{
+		AccountID: accountID, Status: string(SyncTaskQueued), QueuedAt: queued,
+	}).Error; err != nil {
+		return fmt.Errorf("create queued Kitesim sync run: %w", err)
+	}
+	return nil
 }
 
 func syncTaskView(account accountModel) *SyncTaskView {
@@ -590,7 +944,7 @@ func (s *Service) processAccountSync(ctx context.Context, claim accountSyncClaim
 	}
 	var account accountModel
 	if err := s.db.WithContext(ctx).
-		Where("id = ? AND sync_status = ? AND sync_started_at = ?", claim.AccountID, SyncTaskRunning, claim.StartedAt).
+		Where("id = ? AND deleted_at IS NULL AND sync_status = ? AND sync_started_at = ?", claim.AccountID, SyncTaskRunning, claim.StartedAt).
 		First(&account).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return errSyncSuperseded
@@ -649,7 +1003,7 @@ func (s *Service) processAccountSync(ctx context.Context, claim accountSyncClaim
 				LatestRenewal:   strings.TrimSpace(order.LatestRenewalTime),
 				NextRenewalDate: strings.TrimSpace(string(order.NextRenewalDate)),
 				RefundTime:      strings.TrimSpace(string(order.RefundTime)),
-				RawPayload:      append([]byte(nil), order.RawPayload...),
+				RawPayload:      jsonText(order.RawPayload),
 			})
 		}
 		if len(phones) > 0 {
@@ -674,10 +1028,21 @@ func (s *Service) processAccountSync(ctx context.Context, claim accountSyncClaim
 			updates["token_updated_at"] = now
 		}
 		result := tx.Model(&accountModel{}).
-			Where("id = ? AND sync_status = ? AND sync_started_at = ?", claim.AccountID, SyncTaskRunning, claim.StartedAt).
+			Where("id = ? AND deleted_at IS NULL AND sync_status = ? AND sync_started_at = ?", claim.AccountID, SyncTaskRunning, claim.StartedAt).
 			Updates(updates)
 		if result.Error != nil {
 			return fmt.Errorf("update Kitesim sync state: %w", result.Error)
+		}
+		if result.RowsAffected != 1 {
+			return errSyncSuperseded
+		}
+		result = tx.Model(&syncRunModel{}).
+			Where("id = ? AND account_id = ? AND status = ? AND started_at = ?", claim.RunID, claim.AccountID, SyncTaskRunning, claim.StartedAt).
+			Updates(map[string]any{
+				"status": SyncTaskSucceeded, "finished_at": now, "last_safe_error": "",
+			})
+		if result.Error != nil {
+			return fmt.Errorf("complete Kitesim sync run: %w", result.Error)
 		}
 		if result.RowsAffected != 1 {
 			return errSyncSuperseded
@@ -727,7 +1092,7 @@ func (s *Service) Messages(ctx context.Context, phoneID uint, meta MutationMeta)
 	result := s.db.WithContext(ctx).Table("kitesim_phones AS p").
 		Select("a.id AS account_id, p.provider_order_id, p.phone_number, a.account, a.password, a.token").
 		Joins("JOIN kitesim_accounts AS a ON a.id = p.account_id").
-		Where("p.id = ?", phoneID).Take(&phone)
+		Where("p.id = ? AND p.deleted_at IS NULL AND a.deleted_at IS NULL", phoneID).Take(&phone)
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		return nil, ErrPhoneMissing
 	}
@@ -764,7 +1129,7 @@ func (s *Service) Messages(ctx context.Context, phoneID uint, meta MutationMeta)
 	if refreshedToken != "" {
 		now := s.now().UTC().Truncate(time.Millisecond)
 		_ = s.db.WithContext(context.WithoutCancel(ctx)).Model(&accountModel{}).
-			Where("id = ? AND password = ? AND COALESCE(token, '') = ?", phone.AccountID, phone.Password, phone.Token).
+			Where("id = ? AND deleted_at IS NULL AND password = ? AND COALESCE(token, '') = ?", phone.AccountID, phone.Password, phone.Token).
 			Updates(map[string]any{"token": refreshedToken, "token_updated_at": now}).Error
 	}
 	items := make([]MessageItem, 0, len(messages))

@@ -13164,6 +13164,114 @@ paths:
         "502":
           $ref: "#/components/responses/BadGateway"
 
+  /v1/admin/kitesim/phones/disable:
+    post:
+      operationId: postAdminKitesimPhonesDisable
+      summary: Disable Kitesim phone numbers
+      description: Soft-disables up to 100 phone rows. Platform accounts are not disabled.
+      tags: [Core]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminKitesimPhoneMutationRequest"
+      responses:
+        "200":
+          description: Number of phone rows disabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminKitesimPhoneMutationResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /v1/admin/kitesim/phones/enable:
+    post:
+      operationId: postAdminKitesimPhonesEnable
+      summary: Enable Kitesim phone numbers
+      description: Clears the soft-disabled state for up to 100 non-deleted phone rows.
+      tags: [Core]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminKitesimPhoneMutationRequest"
+      responses:
+        "200":
+          description: Number of phone rows enabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminKitesimPhoneMutationResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /v1/admin/kitesim/phones/delete:
+    post:
+      operationId: postAdminKitesimPhonesDelete
+      summary: Soft-delete Kitesim phone rows
+      description: Soft-deletes up to 100 selected rows. An account is soft-deleted only after all of its phone rows are deleted; importing the same platform account restores the account and all of its phone rows.
+      tags: [Core]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminKitesimPhoneDeleteRequest"
+      responses:
+        "200":
+          description: Number of selected phone or empty-account rows deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminKitesimPhoneMutationResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
   /v1/admin/kitesim/accounts/imports:
     post:
       operationId: postAdminKitesimAccountImport
@@ -13214,6 +13322,41 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /v1/admin/kitesim/accounts/{accountId}/tasks:
+    get:
+      operationId: getAdminKitesimAccountTasks
+      summary: List synchronization task history for one Kitesim account
+      description: Requires `core:resource/read`. Returns durable, administrator-safe synchronization status and timestamps without platform credentials, tokens, or upstream payloads.
+      tags: [Core]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - $ref: "#/components/parameters/OffsetQuery"
+        - $ref: "#/components/parameters/LimitQuery"
+      responses:
+        "200":
+          description: Paginated Kitesim synchronization task history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminKitesimSyncRunList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "502":
           $ref: "#/components/responses/BadGateway"
 
@@ -22096,7 +22239,7 @@ components:
 
     AdminKitesimPhoneStatus:
       type: string
-      enum: [active, pending, activating, expired, refunded, unsynced]
+      enum: [active, pending, activating, expired, refunded, unsynced, disabled]
 
     AdminKitesimSyncTaskStatus:
       type: string
@@ -22122,7 +22265,7 @@ components:
 
     AdminKitesimPhoneFacets:
       type: object
-      required: [all, active, pending, activating, expired, refunded, unsynced, autoRenew, tokenAvailable, syncHealthy, phoneAvailable]
+      required: [all, active, pending, activating, expired, refunded, unsynced, disabled, autoRenew, tokenAvailable, syncHealthy, phoneAvailable]
       properties:
         all:
           type: integer
@@ -22149,6 +22292,10 @@ components:
           format: int64
           minimum: 0
         unsynced:
+          type: integer
+          format: int64
+          minimum: 0
+        disabled:
           type: integer
           format: int64
           minimum: 0
@@ -22282,6 +22429,51 @@ components:
           $ref: "#/components/schemas/AdminKitesimPhoneFacets"
       additionalProperties: false
 
+    AdminKitesimPhoneMutationRequest:
+      type: object
+      required: [phoneIds]
+      properties:
+        phoneIds:
+          type: array
+          minItems: 1
+          maxItems: 100
+          uniqueItems: true
+          items:
+            type: integer
+            minimum: 1
+      additionalProperties: false
+
+    AdminKitesimPhoneDeleteRequest:
+      type: object
+      required: [phoneIds, accountIds]
+      properties:
+        phoneIds:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          items:
+            type: integer
+            minimum: 1
+        accountIds:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          description: Accounts represented by unsynchronized rows that do not have a phone ID.
+          items:
+            type: integer
+            minimum: 1
+      additionalProperties: false
+
+    AdminKitesimPhoneMutationResult:
+      type: object
+      required: [affected]
+      properties:
+        affected:
+          type: integer
+          format: int64
+          minimum: 0
+      additionalProperties: false
+
     AdminKitesimImportRequest:
       type: object
       required: [content]
@@ -22344,6 +22536,58 @@ components:
         attempts:
           type: integer
           minimum: 0
+      additionalProperties: false
+
+    AdminKitesimSyncRun:
+      type: object
+      required: [taskId, status, attempts, queuedAt, updatedAt]
+      properties:
+        taskId:
+          type: string
+        status:
+          $ref: "#/components/schemas/AdminKitesimSyncTaskStatus"
+        attempts:
+          type: integer
+          minimum: 0
+        lastSafeError:
+          type: string
+        queuedAt:
+          type: string
+          format: date-time
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    AdminKitesimSyncRunList:
+      type: object
+      required: [items, total, succeeded, offset, limit]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminKitesimSyncRun"
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+        succeeded:
+          type: integer
+          format: int64
+          minimum: 0
+        offset:
+          type: integer
+          minimum: 0
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
       additionalProperties: false
 
     AdminKitesimMessage:

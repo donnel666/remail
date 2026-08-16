@@ -87,14 +87,14 @@ func (s *Service) executeRecharge(ctx context.Context, operation operationModel,
 		return "", ErrOperationState
 	}
 	var card CardProfile
-	if err := json.Unmarshal(settings.CardData, &card); err != nil {
+	if err := json.Unmarshal([]byte(settings.CardData), &card); err != nil {
 		return "", err
 	}
 	if _, err := normalizeCard(&card, s.now()); err != nil {
 		return "", err
 	}
 	var account accountModel
-	if err := s.db.WithContext(ctx).First(&account, operation.AccountID).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", operation.AccountID).First(&account).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return "", ErrAccountMissing
 		}

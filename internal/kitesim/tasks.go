@@ -300,32 +300,107 @@ func (s *Service) DispatchQueuedOperations(ctx context.Context) error {
 		}).Error; err != nil {
 		return fmt.Errorf("expire queued Kitesim recharge secrets: %w", err)
 	}
+	var postOperationAccountIDs []uint
 	if err := s.db.WithContext(ctx).Model(&accountModel{}).
-		Where(`sync_status NOT IN ? AND EXISTS (
+		Where(`deleted_at IS NULL AND sync_status NOT IN ? AND EXISTS (
 			SELECT 1 FROM kitesim_operations AS operation
 			WHERE operation.account_id = kitesim_accounts.id
 				AND operation.status NOT IN ('queued', 'running')
 				AND operation.finished_at IS NOT NULL
 				AND (kitesim_accounts.sync_started_at IS NULL OR operation.finished_at > kitesim_accounts.sync_started_at)
 		)`, []SyncTaskStatus{SyncTaskQueued, SyncTaskRunning}).
-		Updates(map[string]any{
-			"sync_status": SyncTaskQueued, "sync_queued_at": now,
-			"sync_started_at": nil, "sync_finished_at": nil, "last_safe_error": "",
-		}).Error; err != nil {
-		return fmt.Errorf("queue post-operation Kitesim sync: %w", err)
+		Order("id ASC").Limit(100).Pluck("id", &postOperationAccountIDs).Error; err != nil {
+		return fmt.Errorf("list post-operation Kitesim syncs: %w", err)
 	}
+	if len(postOperationAccountIDs) > 0 {
+		if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			for _, accountID := range postOperationAccountIDs {
+				var account accountModel
+				if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+					Select("id", "sync_status").
+					Where("id = ? AND deleted_at IS NULL", accountID).First(&account).Error; err != nil {
+					if errors.Is(err, gorm.ErrRecordNotFound) {
+						continue
+					}
+					return err
+				}
+				if SyncTaskStatus(account.SyncStatus) == SyncTaskQueued || SyncTaskStatus(account.SyncStatus) == SyncTaskRunning {
+					continue
+				}
+				result := tx.Model(&accountModel{}).
+					Where("id = ? AND deleted_at IS NULL AND sync_status NOT IN ?", accountID, []SyncTaskStatus{SyncTaskQueued, SyncTaskRunning}).
+					Updates(map[string]any{
+						"sync_status": SyncTaskQueued, "sync_queued_at": now,
+						"sync_started_at": nil, "sync_finished_at": nil,
+						"sync_attempts": 0, "last_safe_error": "",
+					})
+				if result.Error != nil {
+					return result.Error
+				}
+				if result.RowsAffected == 1 {
+					if err := tx.Create(&syncRunModel{
+						AccountID: accountID, Status: string(SyncTaskQueued), QueuedAt: now,
+					}).Error; err != nil {
+						return err
+					}
+				}
+			}
+			return nil
+		}); err != nil {
+			return fmt.Errorf("queue post-operation Kitesim sync: %w", err)
+		}
+	}
+	staleCutoff := now.Add(-syncTaskTimeout)
+	var staleSyncAccountIDs []uint
 	if err := s.db.WithContext(ctx).Model(&accountModel{}).
-		Where("sync_status = ? AND sync_started_at IS NOT NULL AND sync_started_at <= ?", SyncTaskRunning, now.Add(-syncTaskTimeout)).
-		Updates(map[string]any{
-			"sync_status": SyncTaskQueued, "sync_queued_at": now,
-			"sync_started_at": nil, "sync_finished_at": nil,
-			"last_safe_error": "Kitesim 同步任务超时，已重新排队。",
-		}).Error; err != nil {
-		return fmt.Errorf("recover stale Kitesim sync tasks: %w", err)
+		Where("deleted_at IS NULL AND sync_status = ? AND sync_started_at IS NOT NULL AND sync_started_at <= ?", SyncTaskRunning, staleCutoff).
+		Order("sync_started_at ASC, id ASC").Limit(100).Pluck("id", &staleSyncAccountIDs).Error; err != nil {
+		return fmt.Errorf("list stale Kitesim sync tasks: %w", err)
+	}
+	if len(staleSyncAccountIDs) > 0 {
+		if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			for _, accountID := range staleSyncAccountIDs {
+				var account accountModel
+				if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+					Select("id", "sync_status", "sync_started_at").
+					Where("id = ? AND deleted_at IS NULL", accountID).First(&account).Error; err != nil {
+					if errors.Is(err, gorm.ErrRecordNotFound) {
+						continue
+					}
+					return err
+				}
+				if SyncTaskStatus(account.SyncStatus) != SyncTaskRunning || account.SyncStartedAt == nil || account.SyncStartedAt.After(staleCutoff) {
+					continue
+				}
+				result := tx.Model(&accountModel{}).
+					Where("id = ? AND deleted_at IS NULL AND sync_status = ? AND sync_started_at = ?", accountID, SyncTaskRunning, account.SyncStartedAt).
+					Updates(map[string]any{
+						"sync_status": SyncTaskQueued, "sync_queued_at": now,
+						"sync_started_at": nil, "sync_finished_at": nil,
+						"last_safe_error": "Kitesim 同步任务超时，已重新排队。",
+					})
+				if result.Error != nil {
+					return result.Error
+				}
+				if result.RowsAffected == 1 {
+					if err := tx.Model(&syncRunModel{}).
+						Where("account_id = ? AND status = ? AND started_at = ?", accountID, SyncTaskRunning, account.SyncStartedAt).
+						Updates(map[string]any{
+							"status": SyncTaskQueued, "queued_at": now, "started_at": nil,
+							"finished_at": nil, "last_safe_error": "Kitesim 同步任务超时，已重新排队。",
+						}).Error; err != nil {
+						return err
+					}
+				}
+			}
+			return nil
+		}); err != nil {
+			return fmt.Errorf("recover stale Kitesim sync tasks: %w", err)
+		}
 	}
 	var syncAccountIDs []uint
 	if err := s.db.WithContext(ctx).Model(&accountModel{}).
-		Where("sync_status = ?", SyncTaskQueued).Order("sync_queued_at ASC, id ASC").Limit(100).
+		Where("deleted_at IS NULL AND sync_status = ?", SyncTaskQueued).Order("sync_queued_at ASC, id ASC").Limit(100).
 		Pluck("id", &syncAccountIDs).Error; err != nil {
 		return fmt.Errorf("list queued Kitesim sync tasks: %w", err)
 	}
@@ -336,20 +411,32 @@ func (s *Service) DispatchQueuedOperations(ctx context.Context) error {
 	}
 	if refreshQueue, ok := s.queue.(UpstreamRefreshQueue); ok && refreshQueue != nil {
 		if err := s.db.WithContext(ctx).Model(&upstreamSettingsModel{}).
-			Where(`id = ? AND refresh_status NOT IN ? AND EXISTS (
+			Where("id = ? AND account_id IS NULL AND refresh_status IN ?", upstreamSettingsID, []SyncTaskStatus{SyncTaskQueued, SyncTaskRunning}).
+			Updates(map[string]any{
+				"refresh_status": SyncTaskIdle, "refresh_queued_at": nil,
+				"refresh_started_at": nil, "refresh_finished_at": nil,
+				"refresh_attempts": 0,
+				"last_safe_error":  "Kitesim 系统账号已移除，上游刷新任务已停止。",
+			}).Error; err != nil {
+			return fmt.Errorf("stop orphaned Kitesim upstream refresh: %w", err)
+		}
+		if err := s.db.WithContext(ctx).Model(&upstreamSettingsModel{}).
+			Where(`id = ? AND account_id IS NOT NULL AND refresh_status NOT IN ? AND EXISTS (
 				SELECT 1 FROM kitesim_operations AS operation
-				WHERE operation.status NOT IN ('queued', 'running')
+				WHERE operation.account_id = kitesim_upstream_settings.account_id
+					AND operation.status NOT IN ('queued', 'running')
 					AND operation.finished_at IS NOT NULL
 					AND (kitesim_upstream_settings.refresh_started_at IS NULL OR operation.finished_at > kitesim_upstream_settings.refresh_started_at)
 			)`, upstreamSettingsID, []SyncTaskStatus{SyncTaskQueued, SyncTaskRunning}).
 			Updates(map[string]any{
 				"refresh_status": SyncTaskQueued, "refresh_queued_at": now,
-				"refresh_started_at": nil, "refresh_finished_at": nil, "last_safe_error": "",
+				"refresh_started_at": nil, "refresh_finished_at": nil,
+				"refresh_attempts": 0, "last_safe_error": "",
 			}).Error; err != nil {
 			return fmt.Errorf("queue post-operation Kitesim upstream refresh: %w", err)
 		}
 		if err := s.db.WithContext(ctx).Model(&upstreamSettingsModel{}).
-			Where("refresh_status = ? AND refresh_started_at IS NOT NULL AND refresh_started_at <= ?", SyncTaskRunning, now.Add(-refreshTaskTimeout)).
+			Where("account_id IS NOT NULL AND refresh_status = ? AND refresh_started_at IS NOT NULL AND refresh_started_at <= ?", SyncTaskRunning, now.Add(-refreshTaskTimeout)).
 			Updates(map[string]any{
 				"refresh_status": SyncTaskQueued, "refresh_queued_at": now,
 				"refresh_started_at": nil, "refresh_finished_at": nil,
@@ -359,7 +446,7 @@ func (s *Service) DispatchQueuedOperations(ctx context.Context) error {
 		}
 		var refreshCount int64
 		if err := s.db.WithContext(ctx).Model(&upstreamSettingsModel{}).
-			Where("id = ? AND refresh_status = ?", upstreamSettingsID, SyncTaskQueued).
+			Where("id = ? AND account_id IS NOT NULL AND refresh_status = ?", upstreamSettingsID, SyncTaskQueued).
 			Count(&refreshCount).Error; err != nil {
 			return fmt.Errorf("load queued Kitesim upstream refresh: %w", err)
 		}
@@ -401,6 +488,7 @@ func (s *Service) DispatchQueuedOperations(ctx context.Context) error {
 
 type accountSyncClaim struct {
 	AccountID uint
+	RunID     uint64
 	StartedAt time.Time
 }
 
@@ -410,7 +498,7 @@ func (s *Service) markSyncRunning(ctx context.Context, accountID uint) (accountS
 		var account accountModel
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Select("id", "sync_status", "sync_queued_at", "sync_started_at").
-			First(&account, accountID).Error; err != nil {
+			Where("id = ? AND deleted_at IS NULL", accountID).First(&account).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrAccountMissing
 			}
@@ -419,14 +507,24 @@ func (s *Service) markSyncRunning(ctx context.Context, accountID uint) (accountS
 		if SyncTaskStatus(account.SyncStatus) != SyncTaskQueued {
 			return errTaskNotQueued
 		}
+		if err := ensureQueuedSyncRun(tx, account.ID, account.SyncQueuedAt, s.now().UTC().Truncate(time.Millisecond)); err != nil {
+			return err
+		}
+		var run syncRunModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("account_id = ? AND status = ?", accountID, SyncTaskQueued).
+			Order("id DESC").First(&run).Error; err != nil {
+			return fmt.Errorf("load Kitesim sync run: %w", err)
+		}
 		startedAt := s.now().UTC().Truncate(time.Millisecond)
-		for _, previous := range []*time.Time{account.SyncQueuedAt, account.SyncStartedAt} {
+		runQueuedAt := run.QueuedAt
+		for _, previous := range []*time.Time{account.SyncQueuedAt, account.SyncStartedAt, &runQueuedAt} {
 			if previous != nil && !startedAt.After(*previous) {
 				startedAt = previous.Add(time.Millisecond)
 			}
 		}
 		result := tx.Model(&accountModel{}).
-			Where("id = ? AND sync_status = ?", accountID, SyncTaskQueued).
+			Where("id = ? AND deleted_at IS NULL AND sync_status = ?", accountID, SyncTaskQueued).
 			Updates(map[string]any{
 				"sync_status": SyncTaskRunning, "sync_started_at": startedAt,
 				"sync_finished_at": nil, "sync_attempts": gorm.Expr("sync_attempts + 1"),
@@ -437,6 +535,19 @@ func (s *Service) markSyncRunning(ctx context.Context, accountID uint) (accountS
 		if result.RowsAffected == 0 {
 			return errTaskNotQueued
 		}
+		result = tx.Model(&syncRunModel{}).
+			Where("id = ? AND account_id = ? AND status = ?", run.ID, accountID, SyncTaskQueued).
+			Updates(map[string]any{
+				"status": SyncTaskRunning, "started_at": startedAt,
+				"finished_at": nil, "attempts": gorm.Expr("attempts + 1"),
+			})
+		if result.Error != nil {
+			return fmt.Errorf("start Kitesim sync run: %w", result.Error)
+		}
+		if result.RowsAffected == 0 {
+			return errTaskNotQueued
+		}
+		claim.RunID = run.ID
 		claim.StartedAt = startedAt
 		return nil
 	})
@@ -462,9 +573,31 @@ func (s *Service) recordSyncTaskFailure(ctx context.Context, claim accountSyncCl
 		updates["sync_started_at"] = nil
 		updates["sync_finished_at"] = finishedAt
 	}
-	_ = s.db.WithContext(context.WithoutCancel(ctx)).Model(&accountModel{}).
-		Where("id = ? AND sync_status = ? AND sync_started_at = ?", claim.AccountID, SyncTaskRunning, claim.StartedAt).
-		Updates(updates).Error
+	_ = s.db.WithContext(context.WithoutCancel(ctx)).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&accountModel{}).
+			Where("id = ? AND deleted_at IS NULL AND sync_status = ? AND sync_started_at = ?", claim.AccountID, SyncTaskRunning, claim.StartedAt).
+			Updates(updates)
+		if result.Error != nil || result.RowsAffected == 0 || claim.RunID == 0 {
+			return result.Error
+		}
+		runUpdates := map[string]any{
+			"last_safe_error": message, "status": status, "finished_at": finishedAt,
+		}
+		if retry {
+			runUpdates["queued_at"] = now
+			runUpdates["started_at"] = nil
+		}
+		result = tx.Model(&syncRunModel{}).
+			Where("id = ? AND account_id = ? AND status = ? AND started_at = ?", claim.RunID, claim.AccountID, SyncTaskRunning, claim.StartedAt).
+			Updates(runUpdates)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return errSyncSuperseded
+		}
+		return nil
+	})
 }
 
 type upstreamRefreshClaim struct {

@@ -80,7 +80,7 @@ func (s *Service) localNumberSegmentCounts(ctx context.Context, countryCode stri
 	var phones []phoneModel
 	if err := s.db.WithContext(ctx).
 		Select("phone_code", "phone_number").
-		Where("UPPER(country_code) = ?", strings.ToUpper(strings.TrimSpace(countryCode))).
+		Where("UPPER(country_code) = ? AND deleted_at IS NULL", strings.ToUpper(strings.TrimSpace(countryCode))).
 		Find(&phones).Error; err != nil {
 		return nil, fmt.Errorf("load Kitesim local phone inventory: %w", err)
 	}
@@ -103,7 +103,9 @@ func (s *Service) executeRenewal(ctx context.Context, operation operationModel) 
 		return "", err
 	}
 	var phone phoneModel
-	if err := s.db.WithContext(ctx).Where("id = ? AND account_id = ?", *operation.PhoneID, operation.AccountID).First(&phone).Error; err != nil {
+	if err := s.db.WithContext(ctx).
+		Where("id = ? AND account_id = ? AND deleted_at IS NULL AND disabled_at IS NULL", *operation.PhoneID, operation.AccountID).
+		First(&phone).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return "", ErrPhoneMissing
 		}
@@ -151,7 +153,7 @@ func (s *Service) executeRenewal(ctx context.Context, operation operationModel) 
 
 func (s *Service) operationAccountAndProduct(ctx context.Context, operation operationModel) (accountModel, productModel, error) {
 	var account accountModel
-	if err := s.db.WithContext(ctx).First(&account, operation.AccountID).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", operation.AccountID).First(&account).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return accountModel{}, productModel{}, ErrAccountMissing
 		}

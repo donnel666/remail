@@ -825,6 +825,7 @@ func (e AdminKitesimOperationStatus) Valid() bool {
 const (
 	AdminKitesimPhoneStatusActivating AdminKitesimPhoneStatus = "activating"
 	AdminKitesimPhoneStatusActive     AdminKitesimPhoneStatus = "active"
+	AdminKitesimPhoneStatusDisabled   AdminKitesimPhoneStatus = "disabled"
 	AdminKitesimPhoneStatusExpired    AdminKitesimPhoneStatus = "expired"
 	AdminKitesimPhoneStatusPending    AdminKitesimPhoneStatus = "pending"
 	AdminKitesimPhoneStatusRefunded   AdminKitesimPhoneStatus = "refunded"
@@ -837,6 +838,8 @@ func (e AdminKitesimPhoneStatus) Valid() bool {
 	case AdminKitesimPhoneStatusActivating:
 		return true
 	case AdminKitesimPhoneStatusActive:
+		return true
+	case AdminKitesimPhoneStatusDisabled:
 		return true
 	case AdminKitesimPhoneStatusExpired:
 		return true
@@ -5837,12 +5840,20 @@ type AdminKitesimOperationResolutionRequestOutcome string
 // AdminKitesimOperationStatus defines model for AdminKitesimOperationStatus.
 type AdminKitesimOperationStatus string
 
+// AdminKitesimPhoneDeleteRequest defines model for AdminKitesimPhoneDeleteRequest.
+type AdminKitesimPhoneDeleteRequest struct {
+	// AccountIds Accounts represented by unsynchronized rows that do not have a phone ID.
+	AccountIds []int `json:"accountIds"`
+	PhoneIds   []int `json:"phoneIds"`
+}
+
 // AdminKitesimPhoneFacets defines model for AdminKitesimPhoneFacets.
 type AdminKitesimPhoneFacets struct {
 	Activating     int64                    `json:"activating"`
 	Active         int64                    `json:"active"`
 	All            int64                    `json:"all"`
 	AutoRenew      AdminKitesimBooleanFacet `json:"autoRenew"`
+	Disabled       int64                    `json:"disabled"`
 	Expired        int64                    `json:"expired"`
 	Pending        int64                    `json:"pending"`
 	PhoneAvailable AdminKitesimBooleanFacet `json:"phoneAvailable"`
@@ -5899,6 +5910,16 @@ type AdminKitesimPhoneList struct {
 	Total  int64                   `json:"total"`
 }
 
+// AdminKitesimPhoneMutationRequest defines model for AdminKitesimPhoneMutationRequest.
+type AdminKitesimPhoneMutationRequest struct {
+	PhoneIds []int `json:"phoneIds"`
+}
+
+// AdminKitesimPhoneMutationResult defines model for AdminKitesimPhoneMutationResult.
+type AdminKitesimPhoneMutationResult struct {
+	Affected int64 `json:"affected"`
+}
+
 // AdminKitesimPhoneStatus defines model for AdminKitesimPhoneStatus.
 type AdminKitesimPhoneStatus string
 
@@ -5946,6 +5967,27 @@ type AdminKitesimRenewalRequest struct {
 	// MaxUnitPrice Maximum renewal price confirmed by the administrator.
 	MaxUnitPrice string `json:"maxUnitPrice"`
 	ProductId    int    `json:"productId"`
+}
+
+// AdminKitesimSyncRun defines model for AdminKitesimSyncRun.
+type AdminKitesimSyncRun struct {
+	Attempts      int                        `json:"attempts"`
+	FinishedAt    *time.Time                 `json:"finishedAt,omitempty"`
+	LastSafeError *string                    `json:"lastSafeError,omitempty"`
+	QueuedAt      time.Time                  `json:"queuedAt"`
+	StartedAt     *time.Time                 `json:"startedAt,omitempty"`
+	Status        AdminKitesimSyncTaskStatus `json:"status"`
+	TaskId        string                     `json:"taskId"`
+	UpdatedAt     time.Time                  `json:"updatedAt"`
+}
+
+// AdminKitesimSyncRunList defines model for AdminKitesimSyncRunList.
+type AdminKitesimSyncRunList struct {
+	Items     []AdminKitesimSyncRun `json:"items"`
+	Limit     int                   `json:"limit"`
+	Offset    int                   `json:"offset"`
+	Succeeded int64                 `json:"succeeded"`
+	Total     int64                 `json:"total"`
 }
 
 // AdminKitesimSyncTask defines model for AdminKitesimSyncTask.
@@ -10606,6 +10648,13 @@ type PostAdminKitesimAccountSyncParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// GetAdminKitesimAccountTasksParams defines parameters for GetAdminKitesimAccountTasks.
+type GetAdminKitesimAccountTasksParams struct {
+	// Offset Row offset used when afterId is absent.
+	Offset *OffsetQuery `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *LimitQuery  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // GetAdminKitesimPhonesParams defines parameters for GetAdminKitesimPhones.
 type GetAdminKitesimPhonesParams struct {
 	// Offset Row offset used when afterId is absent.
@@ -10619,6 +10668,24 @@ type GetAdminKitesimPhonesParams struct {
 	PhoneAvailable *bool                    `form:"phoneAvailable,omitempty" json:"phoneAvailable,omitempty"`
 	CreatedFrom    *time.Time               `form:"createdFrom,omitempty" json:"createdFrom,omitempty"`
 	CreatedTo      *time.Time               `form:"createdTo,omitempty" json:"createdTo,omitempty"`
+}
+
+// PostAdminKitesimPhonesDeleteParams defines parameters for PostAdminKitesimPhonesDelete.
+type PostAdminKitesimPhonesDeleteParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminKitesimPhonesDisableParams defines parameters for PostAdminKitesimPhonesDisable.
+type PostAdminKitesimPhonesDisableParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminKitesimPhonesEnableParams defines parameters for PostAdminKitesimPhonesEnable.
+type PostAdminKitesimPhonesEnableParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminKitesimPhoneRenewalParams defines parameters for PostAdminKitesimPhoneRenewal.
@@ -12196,6 +12263,15 @@ type PatchAdminInviteJSONRequestBody = AdminUpdateInviteRequest
 // PostAdminKitesimAccountImportJSONRequestBody defines body for PostAdminKitesimAccountImport for application/json ContentType.
 type PostAdminKitesimAccountImportJSONRequestBody = AdminKitesimImportRequest
 
+// PostAdminKitesimPhonesDeleteJSONRequestBody defines body for PostAdminKitesimPhonesDelete for application/json ContentType.
+type PostAdminKitesimPhonesDeleteJSONRequestBody = AdminKitesimPhoneDeleteRequest
+
+// PostAdminKitesimPhonesDisableJSONRequestBody defines body for PostAdminKitesimPhonesDisable for application/json ContentType.
+type PostAdminKitesimPhonesDisableJSONRequestBody = AdminKitesimPhoneMutationRequest
+
+// PostAdminKitesimPhonesEnableJSONRequestBody defines body for PostAdminKitesimPhonesEnable for application/json ContentType.
+type PostAdminKitesimPhonesEnableJSONRequestBody = AdminKitesimPhoneMutationRequest
+
 // PostAdminKitesimPhoneRenewalJSONRequestBody defines body for PostAdminKitesimPhoneRenewal for application/json ContentType.
 type PostAdminKitesimPhoneRenewalJSONRequestBody = AdminKitesimRenewalRequest
 
@@ -13483,9 +13559,21 @@ type ServerInterface interface {
 	// Refresh one Kitesim account and its phone status rows
 	// (POST /v1/admin/kitesim/accounts/{accountId}/sync)
 	PostAdminKitesimAccountSync(c *gin.Context, accountId int, params PostAdminKitesimAccountSyncParams)
+	// List synchronization task history for one Kitesim account
+	// (GET /v1/admin/kitesim/accounts/{accountId}/tasks)
+	GetAdminKitesimAccountTasks(c *gin.Context, accountId int, params GetAdminKitesimAccountTasksParams)
 	// List Kitesim accounts joined to one row per phone number
 	// (GET /v1/admin/kitesim/phones)
 	GetAdminKitesimPhones(c *gin.Context, params GetAdminKitesimPhonesParams)
+	// Soft-delete Kitesim phone rows
+	// (POST /v1/admin/kitesim/phones/delete)
+	PostAdminKitesimPhonesDelete(c *gin.Context, params PostAdminKitesimPhonesDeleteParams)
+	// Disable Kitesim phone numbers
+	// (POST /v1/admin/kitesim/phones/disable)
+	PostAdminKitesimPhonesDisable(c *gin.Context, params PostAdminKitesimPhonesDisableParams)
+	// Enable Kitesim phone numbers
+	// (POST /v1/admin/kitesim/phones/enable)
+	PostAdminKitesimPhonesEnable(c *gin.Context, params PostAdminKitesimPhonesEnableParams)
 	// Read current SMS messages for one Kitesim phone number
 	// (GET /v1/admin/kitesim/phones/{phoneId}/messages)
 	GetAdminKitesimPhoneMessages(c *gin.Context, phoneId int)
@@ -19923,6 +20011,52 @@ func (siw *ServerInterfaceWrapper) PostAdminKitesimAccountSync(c *gin.Context) {
 	siw.Handler.PostAdminKitesimAccountSync(c, accountId, params)
 }
 
+// GetAdminKitesimAccountTasks operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminKitesimAccountTasks(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "accountId" -------------
+	var accountId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "accountId", c.Param("accountId"), &accountId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter accountId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminKitesimAccountTasksParams
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminKitesimAccountTasks(c, accountId, params)
+}
+
 // GetAdminKitesimPhones operation middleware
 func (siw *ServerInterfaceWrapper) GetAdminKitesimPhones(c *gin.Context) {
 
@@ -20022,6 +20156,141 @@ func (siw *ServerInterfaceWrapper) GetAdminKitesimPhones(c *gin.Context) {
 	}
 
 	siw.Handler.GetAdminKitesimPhones(c, params)
+}
+
+// PostAdminKitesimPhonesDelete operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminKitesimPhonesDelete(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminKitesimPhonesDeleteParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminKitesimPhonesDelete(c, params)
+}
+
+// PostAdminKitesimPhonesDisable operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminKitesimPhonesDisable(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminKitesimPhonesDisableParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminKitesimPhonesDisable(c, params)
+}
+
+// PostAdminKitesimPhonesEnable operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminKitesimPhonesEnable(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminKitesimPhonesEnableParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminKitesimPhonesEnable(c, params)
 }
 
 // GetAdminKitesimPhoneMessages operation middleware
@@ -30890,7 +31159,11 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/admin/invites/:code/uses", wrapper.GetAdminInviteUses)
 	router.POST(options.BaseURL+"/v1/admin/kitesim/accounts/imports", wrapper.PostAdminKitesimAccountImport)
 	router.POST(options.BaseURL+"/v1/admin/kitesim/accounts/:accountId/sync", wrapper.PostAdminKitesimAccountSync)
+	router.GET(options.BaseURL+"/v1/admin/kitesim/accounts/:accountId/tasks", wrapper.GetAdminKitesimAccountTasks)
 	router.GET(options.BaseURL+"/v1/admin/kitesim/phones", wrapper.GetAdminKitesimPhones)
+	router.POST(options.BaseURL+"/v1/admin/kitesim/phones/delete", wrapper.PostAdminKitesimPhonesDelete)
+	router.POST(options.BaseURL+"/v1/admin/kitesim/phones/disable", wrapper.PostAdminKitesimPhonesDisable)
+	router.POST(options.BaseURL+"/v1/admin/kitesim/phones/enable", wrapper.PostAdminKitesimPhonesEnable)
 	router.GET(options.BaseURL+"/v1/admin/kitesim/phones/:phoneId/messages", wrapper.GetAdminKitesimPhoneMessages)
 	router.POST(options.BaseURL+"/v1/admin/kitesim/phones/:phoneId/renewals", wrapper.PostAdminKitesimPhoneRenewal)
 	router.GET(options.BaseURL+"/v1/admin/kitesim/products", wrapper.GetAdminKitesimProducts)

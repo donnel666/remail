@@ -29,7 +29,7 @@ var (
 type upstreamSettingsModel struct {
 	ID              uint8      `gorm:"column:id;primaryKey"`
 	AccountID       *uint      `gorm:"column:account_id"`
-	CardData        []byte     `gorm:"column:card_profile;type:json"`
+	CardData        jsonText   `gorm:"column:card_profile;type:json"`
 	CardBrand       string     `gorm:"column:card_brand"`
 	CardLast4       string     `gorm:"column:card_last4"`
 	CardExpiryMonth int        `gorm:"column:card_expiry_month"`
@@ -60,7 +60,7 @@ type productModel struct {
 	OriginalPrice  string    `gorm:"column:original_price"`
 	AutoRenewPrice string    `gorm:"column:auto_renew_price"`
 	Active         bool      `gorm:"column:active"`
-	RawPayload     []byte    `gorm:"column:raw_payload;type:json"`
+	RawPayload     jsonText  `gorm:"column:raw_payload;type:json"`
 	LastSeenAt     time.Time `gorm:"column:last_seen_at"`
 	CreatedAt      time.Time `gorm:"column:created_at"`
 	UpdatedAt      time.Time `gorm:"column:updated_at"`
@@ -146,6 +146,7 @@ func (s *Service) GetUpstream(ctx context.Context) (*UpstreamView, error) {
 	var accounts []accountRow
 	if err := s.db.WithContext(ctx).Model(&accountModel{}).
 		Select("id, account, CASE WHEN token IS NOT NULL AND LENGTH(token) > 0 THEN 1 ELSE 0 END AS token_available, sync_status, last_synced_at").
+		Where("deleted_at IS NULL").
 		Order("id DESC").Scan(&accounts).Error; err != nil {
 		return nil, fmt.Errorf("list Kitesim upstream accounts: %w", err)
 	}
@@ -217,28 +218,7 @@ func (s *Service) SaveUpstream(ctx context.Context, update UpstreamConfigUpdate,
 	if update.AccountID == 0 {
 		return ErrInvalidInput
 	}
-	current, err := s.loadUpstreamSettings(ctx)
-	if err != nil {
-		return err
-	}
-	var account accountModel
-	if err := s.db.WithContext(ctx).Select("id").First(&account, update.AccountID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return ErrAccountMissing
-		}
-		return fmt.Errorf("load Kitesim upstream account: %w", err)
-	}
 	updates := map[string]any{"account_id": update.AccountID}
-	if current.AccountID == nil || *current.AccountID != update.AccountID {
-		updates["balance"] = "0"
-		updates["balance_updated_at"] = nil
-		updates["refresh_status"] = SyncTaskIdle
-		updates["refresh_queued_at"] = nil
-		updates["refresh_started_at"] = nil
-		updates["refresh_finished_at"] = nil
-		updates["refresh_attempts"] = 0
-		updates["last_safe_error"] = ""
-	}
 	if update.ClearCard {
 		updates["card_profile"] = nil
 		updates["card_brand"] = ""
@@ -257,7 +237,7 @@ func (s *Service) SaveUpstream(ctx context.Context, update UpstreamConfigUpdate,
 		if err != nil {
 			return err
 		}
-		updates["card_profile"] = encoded
+		updates["card_profile"] = jsonText(encoded)
 		updates["card_brand"] = brand
 		updates["card_last4"] = card.Number[len(card.Number)-4:]
 		updates["card_expiry_month"] = card.ExpiryMonth
@@ -265,8 +245,30 @@ func (s *Service) SaveUpstream(ctx context.Context, update UpstreamConfigUpdate,
 		updates["card_revision"] = gorm.Expr("card_revision + 1")
 	}
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var account accountModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id").Where("id = ? AND deleted_at IS NULL", update.AccountID).First(&account).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrAccountMissing
+			}
+			return fmt.Errorf("load Kitesim upstream account: %w", err)
+		}
 		if err := ensureUpstreamSettings(tx); err != nil {
 			return err
+		}
+		var current upstreamSettingsModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&current, upstreamSettingsID).Error; err != nil {
+			return fmt.Errorf("lock Kitesim upstream settings: %w", err)
+		}
+		if current.AccountID == nil || *current.AccountID != update.AccountID {
+			updates["balance"] = "0"
+			updates["balance_updated_at"] = nil
+			updates["refresh_status"] = SyncTaskIdle
+			updates["refresh_queued_at"] = nil
+			updates["refresh_started_at"] = nil
+			updates["refresh_finished_at"] = nil
+			updates["refresh_attempts"] = 0
+			updates["last_safe_error"] = ""
 		}
 		if err := tx.Model(&upstreamSettingsModel{}).Where("id = ?", upstreamSettingsID).Updates(updates).Error; err != nil {
 			return fmt.Errorf("save Kitesim upstream settings: %w", err)
@@ -334,7 +336,7 @@ func (s *Service) processUpstreamRefresh(ctx context.Context, claim upstreamRefr
 		return ErrUpstreamNotConfigured
 	}
 	var account accountModel
-	if err := s.db.WithContext(ctx).First(&account, claim.AccountID).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", claim.AccountID).First(&account).Error; err != nil {
 		return fmt.Errorf("load Kitesim upstream account: %w", err)
 	}
 	var (
@@ -405,9 +407,9 @@ func (s *Service) processUpstreamRefresh(ctx context.Context, claim upstreamRefr
 			if err != nil {
 				return fmt.Errorf("parse Kitesim auto-renew price: %w", err)
 			}
-			raw := item.RawPayload
+			raw := jsonText(item.RawPayload)
 			if len(raw) == 0 {
-				raw = []byte("{}")
+				raw = "{}"
 			}
 			model := productModel{
 				CountryCode: countryCode, PackageID: packageID,
@@ -448,9 +450,7 @@ func (s *Service) processUpstreamRefresh(ctx context.Context, claim upstreamRefr
 			return errRefreshSuperseded
 		}
 		if tokenRefreshed {
-			if err := tx.Model(&accountModel{}).Where("id = ?", account.ID).Updates(map[string]any{
-				"token": token, "token_updated_at": now,
-			}).Error; err != nil {
+			if err := saveRefreshedAccountToken(tx, account, token, now); err != nil {
 				return fmt.Errorf("save Kitesim upstream token: %w", err)
 			}
 		}
@@ -485,9 +485,7 @@ func (s *Service) authenticateOperationClient(ctx context.Context, client *Clien
 	now := s.now().UTC().Truncate(time.Millisecond)
 	return token, s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if refreshed {
-			if err := tx.Model(&accountModel{}).Where("id = ?", account.ID).Updates(map[string]any{
-				"token": token, "token_updated_at": now,
-			}).Error; err != nil {
+			if err := saveRefreshedAccountToken(tx, account, token, now); err != nil {
 				return fmt.Errorf("save Kitesim upstream token: %w", err)
 			}
 		}
@@ -498,6 +496,17 @@ func (s *Service) authenticateOperationClient(ctx context.Context, client *Clien
 		}
 		return nil
 	})
+}
+
+func saveRefreshedAccountToken(tx *gorm.DB, account accountModel, token string, now time.Time) error {
+	return tx.Model(&accountModel{}).
+		Where(
+			"id = ? AND deleted_at IS NULL AND password = ? AND COALESCE(token, '') = ?",
+			account.ID,
+			account.Password,
+			account.Token,
+		).
+		Updates(map[string]any{"token": token, "token_updated_at": now}).Error
 }
 
 func (s *Service) loadUpstreamSettings(ctx context.Context) (*upstreamSettingsModel, error) {

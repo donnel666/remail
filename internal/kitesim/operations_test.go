@@ -26,7 +26,7 @@ func TestMoneyOperationIdempotencyReplaysOnlyTheSameCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&accountModel{}, &upstreamSettingsModel{}, &productModel{}, &operationModel{}); err != nil {
+	if err := db.AutoMigrate(&accountModel{}, &upstreamSettingsModel{}, &productModel{}, &operationModel{}, &syncRunModel{}); err != nil {
 		t.Fatal(err)
 	}
 	queue := &testOperationQueue{}
@@ -66,7 +66,7 @@ func TestDispatcherRecoversDurableQueuedAndExpiresRechargeSecrets(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&accountModel{}, &upstreamSettingsModel{}, &operationModel{}); err != nil {
+	if err := db.AutoMigrate(&accountModel{}, &upstreamSettingsModel{}, &operationModel{}, &syncRunModel{}); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, time.August, 16, 12, 0, 0, 0, time.UTC)
@@ -80,19 +80,21 @@ func TestDispatcherRecoversDurableQueuedAndExpiresRechargeSecrets(t *testing.T) 
 		Kind: string(OperationRecharge), AccountID: 2, RequestedCount: 1, Amount: "10",
 		Status: string(OperationRunning), OperatorUserID: 1, IdempotencyKey: "running-1",
 		RequestFingerprint: strings.Repeat("b", 64), QueuedAt: started, StartedAt: &started,
-		SecretPayload: []byte(`{"cvc":"123"}`),
+		SecretPayload: jsonText(`{"cvc":"123"}`),
 	}
 	expiredRecharge := operationModel{
 		Kind: string(OperationRecharge), AccountID: 3, RequestedCount: 1, Amount: "10",
 		Status: string(OperationQueued), OperatorUserID: 1, IdempotencyKey: "expired-recharge-1",
 		RequestFingerprint: strings.Repeat("c", 64), QueuedAt: now.Add(-queuedRechargeSecretTTL - time.Second),
-		SecretPayload: []byte(`{"cvc":"456"}`),
+		SecretPayload: jsonText(`{"cvc":"456"}`),
 	}
 	account := accountModel{Account: "owner@example.com", SyncStatus: string(SyncTaskQueued), SyncQueuedAt: &now}
 	if err := db.Create(&account).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Create(&upstreamSettingsModel{ID: upstreamSettingsID, RefreshStatus: string(SyncTaskQueued), RefreshQueued: &now}).Error; err != nil {
+	if err := db.Create(&upstreamSettingsModel{
+		ID: upstreamSettingsID, RefreshStatus: string(SyncTaskQueued), RefreshQueued: &now, RefreshAttempts: 4,
+	}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Create(&queued).Error; err != nil {
@@ -111,7 +113,7 @@ func TestDispatcherRecoversDurableQueuedAndExpiresRechargeSecrets(t *testing.T) 
 	if err := service.DispatchQueuedOperations(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if len(queue.accountIDs) != 1 || queue.accountIDs[0] != account.ID || queue.refreshes != 1 ||
+	if len(queue.accountIDs) != 1 || queue.accountIDs[0] != account.ID || queue.refreshes != 0 ||
 		len(queue.operationIDs) != 1 || queue.operationIDs[0] != queued.ID ||
 		len(queue.reconcileIDs) != 1 || queue.reconcileIDs[0] != stale.ID {
 		t.Fatalf("sync queue=%v refreshes=%d operation queue=%v reconcile queue=%v", queue.accountIDs, queue.refreshes, queue.operationIDs, queue.reconcileIDs)
@@ -129,6 +131,13 @@ func TestDispatcherRecoversDurableQueuedAndExpiresRechargeSecrets(t *testing.T) 
 		expiredRecharge.FinishedAt == nil || !strings.Contains(expiredRecharge.LastSafeError, "CVC") {
 		t.Fatalf("expired recharge secret was not cleared: %+v", expiredRecharge)
 	}
+	var settings upstreamSettingsModel
+	if err := db.First(&settings, upstreamSettingsID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if SyncTaskStatus(settings.RefreshStatus) != SyncTaskIdle || settings.RefreshAttempts != 0 || !strings.Contains(settings.LastSafeError, "已停止") {
+		t.Fatalf("orphaned refresh was not stopped: %+v", settings)
+	}
 }
 
 func TestDispatcherSchedulesFollowUpAfterConcurrentReadRefresh(t *testing.T) {
@@ -136,7 +145,7 @@ func TestDispatcherSchedulesFollowUpAfterConcurrentReadRefresh(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&accountModel{}, &upstreamSettingsModel{}, &operationModel{}); err != nil {
+	if err := db.AutoMigrate(&accountModel{}, &upstreamSettingsModel{}, &operationModel{}, &syncRunModel{}); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, time.August, 16, 12, 0, 0, 0, time.UTC)
@@ -144,14 +153,14 @@ func TestDispatcherSchedulesFollowUpAfterConcurrentReadRefresh(t *testing.T) {
 	operationFinished := now.Add(-time.Minute)
 	account := accountModel{
 		Account: "owner@example.com", SyncStatus: string(SyncTaskSucceeded),
-		SyncStartedAt: &readStarted, LastSyncedAt: &now,
+		SyncStartedAt: &readStarted, SyncAttempts: 4, LastSyncedAt: &now,
 	}
 	if err := db.Create(&account).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Create(&upstreamSettingsModel{
-		ID: upstreamSettingsID, RefreshStatus: string(SyncTaskSucceeded),
-		RefreshStarted: &readStarted, RefreshFinished: &now,
+		ID: upstreamSettingsID, AccountID: &account.ID, RefreshStatus: string(SyncTaskSucceeded),
+		RefreshStarted: &readStarted, RefreshFinished: &now, RefreshAttempts: 3,
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -174,6 +183,89 @@ func TestDispatcherSchedulesFollowUpAfterConcurrentReadRefresh(t *testing.T) {
 	if len(queue.accountIDs) != 1 || queue.accountIDs[0] != account.ID || queue.refreshes != 1 {
 		t.Fatalf("post-operation refresh queue = accounts %v, refreshes %d", queue.accountIDs, queue.refreshes)
 	}
+	if err := db.First(&account, account.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	var settings upstreamSettingsModel
+	if err := db.First(&settings, upstreamSettingsID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if account.SyncAttempts != 0 || settings.RefreshAttempts != 0 {
+		t.Fatalf("new post-operation tasks kept old attempts: account=%d refresh=%d", account.SyncAttempts, settings.RefreshAttempts)
+	}
+}
+
+func TestOperationCreationRejectsStaleLifecycleState(t *testing.T) {
+	meta := MutationMeta{OperatorUserID: 7, IdempotencyKey: "stale-state", Path: "/test"}
+	newService := func(t *testing.T) (*gorm.DB, *Service, accountModel) {
+		t.Helper()
+		db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := db.AutoMigrate(&accountModel{}, &phoneModel{}, &upstreamSettingsModel{}, &operationModel{}); err != nil {
+			t.Fatal(err)
+		}
+		account := testAccount("owner@example.com", "password", "")
+		if err := db.Create(&account).Error; err != nil {
+			t.Fatal(err)
+		}
+		service := NewService(db, &testOperationQueue{})
+		service.logs = testOperationLogs{}
+		return db, service, account
+	}
+
+	t.Run("deleted account", func(t *testing.T) {
+		db, service, account := newService(t)
+		now := time.Now().UTC()
+		if err := db.Model(&accountModel{}).Where("id = ?", account.ID).Update("deleted_at", now).Error; err != nil {
+			t.Fatal(err)
+		}
+		operation := operationModel{
+			Kind: string(OperationPurchase), AccountID: account.ID, RequestedCount: 1,
+			RequestFingerprint: strings.Repeat("a", 64),
+		}
+		if _, err := service.createAndEnqueueOperation(context.Background(), operation, meta); !errors.Is(err, ErrAccountMissing) {
+			t.Fatalf("deleted account operation error = %v", err)
+		}
+	})
+
+	t.Run("disabled renewal phone", func(t *testing.T) {
+		db, service, account := newService(t)
+		now := time.Now().UTC()
+		phone := phoneModel{
+			AccountID: account.ID, ProviderOrderID: "order-1", PhoneNumber: "14165550001",
+			Status: int(PhoneActive), DisabledAt: &now,
+		}
+		if err := db.Create(&phone).Error; err != nil {
+			t.Fatal(err)
+		}
+		operation := operationModel{
+			Kind: string(OperationRenew), AccountID: account.ID, PhoneID: &phone.ID, RequestedCount: 1,
+			RequestFingerprint: strings.Repeat("b", 64),
+		}
+		if _, err := service.createAndEnqueueOperation(context.Background(), operation, meta); !errors.Is(err, ErrPhoneMissing) {
+			t.Fatalf("disabled phone operation error = %v", err)
+		}
+	})
+
+	t.Run("changed system account", func(t *testing.T) {
+		db, service, account := newService(t)
+		other := testAccount("other@example.com", "password", "")
+		if err := db.Create(&other).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Create(&upstreamSettingsModel{ID: upstreamSettingsID, AccountID: &other.ID}).Error; err != nil {
+			t.Fatal(err)
+		}
+		operation := operationModel{
+			Kind: string(OperationPurchase), AccountID: account.ID, RequestedCount: 1,
+			RequestFingerprint: strings.Repeat("c", 64),
+		}
+		if _, err := service.createAndEnqueueOperation(context.Background(), operation, meta); !errors.Is(err, ErrUpstreamNotConfigured) {
+			t.Fatalf("changed upstream operation error = %v", err)
+		}
+	})
 }
 
 func TestDispatcherClearsExpiredRechargeBeforeQueueFailure(t *testing.T) {
@@ -181,7 +273,7 @@ func TestDispatcherClearsExpiredRechargeBeforeQueueFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&accountModel{}, &upstreamSettingsModel{}, &operationModel{}); err != nil {
+	if err := db.AutoMigrate(&accountModel{}, &upstreamSettingsModel{}, &operationModel{}, &syncRunModel{}); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, time.August, 16, 12, 0, 0, 0, time.UTC)
@@ -193,7 +285,7 @@ func TestDispatcherClearsExpiredRechargeBeforeQueueFailure(t *testing.T) {
 		Kind: string(OperationRecharge), AccountID: account.ID, RequestedCount: 1, Amount: "10",
 		Status: string(OperationQueued), OperatorUserID: 1, IdempotencyKey: "expired-before-redis-error",
 		RequestFingerprint: strings.Repeat("d", 64), QueuedAt: now.Add(-queuedRechargeSecretTTL - time.Second),
-		SecretPayload: []byte(`{"cvc":"123"}`),
+		SecretPayload: jsonText(`{"cvc":"123"}`),
 	}
 	if err := db.Create(&operation).Error; err != nil {
 		t.Fatal(err)
@@ -316,7 +408,7 @@ func TestRechargeCVCIsStoredPlainThenClearedOnClaim(t *testing.T) {
 	}
 	service.logs = testOperationLogs{}
 	if err := db.Create(&upstreamSettingsModel{
-		ID: upstreamSettingsID, AccountID: &account.ID, CardData: []byte(`{"number":"4111111111111111"}`),
+		ID: upstreamSettingsID, AccountID: &account.ID, CardData: jsonText(`{"number":"4111111111111111"}`),
 		Balance: "0", RefreshStatus: string(SyncTaskIdle),
 	}).Error; err != nil {
 		t.Fatal(err)
@@ -332,7 +424,7 @@ func TestRechargeCVCIsStoredPlainThenClearedOnClaim(t *testing.T) {
 	if err := db.First(&stored, operation.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if len(stored.SecretPayload) == 0 || !bytes.Contains(stored.SecretPayload, []byte("123")) {
+	if len(stored.SecretPayload) == 0 || !bytes.Contains([]byte(stored.SecretPayload), []byte("123")) {
 		t.Fatal("CVC was not stored as plain JSON")
 	}
 	claimed, secret, err := service.claimOperation(context.Background(), operation.ID)
@@ -363,7 +455,7 @@ func TestExpiredRechargeFailsAndClearsSecretOnClaim(t *testing.T) {
 		Kind: string(OperationRecharge), AccountID: 1, RequestedCount: 1, Amount: "10",
 		Status: string(OperationQueued), OperatorUserID: 1, IdempotencyKey: "expired-on-claim",
 		RequestFingerprint: strings.Repeat("e", 64), QueuedAt: now.Add(-queuedRechargeSecretTTL),
-		SecretPayload: []byte(`{"cvc":"123"}`),
+		SecretPayload: jsonText(`{"cvc":"123"}`),
 	}
 	if err := db.Create(&operation).Error; err != nil {
 		t.Fatal(err)

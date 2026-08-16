@@ -59,8 +59,8 @@ type operationModel struct {
 	CardRevision         uint64     `gorm:"column:card_revision"`
 	Status               string     `gorm:"column:status"`
 	Attempts             int        `gorm:"column:attempts"`
-	ProviderOrderNos     []byte     `gorm:"column:provider_order_nos;type:json"`
-	SecretPayload        []byte     `gorm:"column:secret_payload;type:json"`
+	ProviderOrderNos     jsonText   `gorm:"column:provider_order_nos;type:json"`
+	SecretPayload        jsonText   `gorm:"column:secret_payload;type:json"`
 	LastSafeError        string     `gorm:"column:last_safe_error"`
 	OperatorUserID       uint       `gorm:"column:operator_user_id;uniqueIndex:uk_kitesim_operations_idempotency"`
 	IdempotencyKey       string     `gorm:"column:idempotency_key;uniqueIndex:uk_kitesim_operations_idempotency"`
@@ -180,7 +180,7 @@ func (s *Service) QueueRecharge(ctx context.Context, amount, cvc string, meta Mu
 	operation := operationModel{
 		Kind: string(OperationRecharge), AccountID: *settings.AccountID,
 		RequestedCount: 1, Amount: parsed.String(), Currency: "HKD",
-		CardRevision: settings.CardRevision, SecretPayload: secret,
+		CardRevision: settings.CardRevision, SecretPayload: jsonText(secret),
 	}
 	operation.RequestFingerprint, err = operationFingerprint(struct {
 		Kind         OperationKind `json:"kind"`
@@ -200,7 +200,9 @@ func (s *Service) QueueRenewal(ctx context.Context, phoneID, productID uint, max
 		return nil, ErrInvalidInput
 	}
 	var phone phoneModel
-	if err := s.db.WithContext(ctx).First(&phone, phoneID).Error; err != nil {
+	if err := s.db.WithContext(ctx).
+		Where("id = ? AND deleted_at IS NULL AND disabled_at IS NULL", phoneID).
+		First(&phone).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrPhoneMissing
 		}
@@ -260,6 +262,9 @@ func (s *Service) createAndEnqueueOperation(ctx context.Context, operation opera
 	operation.RequestID = strings.TrimSpace(meta.RequestID)
 	operation.Path = strings.TrimSpace(meta.Path)
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := s.validateOperationLifecycle(tx, operation); err != nil {
+			return err
+		}
 		if err := tx.Create(&operation).Error; err != nil {
 			return err
 		}
@@ -287,6 +292,57 @@ func (s *Service) createAndEnqueueOperation(ctx context.Context, operation opera
 	}
 	_, _ = queue.EnqueueOperation(ctx, operation.ID)
 	return operationView(operation, "", ""), nil
+}
+
+func (s *Service) validateOperationLifecycle(tx *gorm.DB, operation operationModel) error {
+	var account accountModel
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Select("id").Where("id = ? AND deleted_at IS NULL", operation.AccountID).First(&account).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrAccountMissing
+		}
+		return fmt.Errorf("lock Kitesim operation account: %w", err)
+	}
+
+	switch OperationKind(operation.Kind) {
+	case OperationPurchase, OperationRecharge:
+		var settings upstreamSettingsModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("account_id", "card_profile", "card_revision").First(&settings, upstreamSettingsID).Error; err != nil {
+			return fmt.Errorf("lock Kitesim upstream settings: %w", err)
+		}
+		if settings.AccountID == nil || *settings.AccountID != operation.AccountID {
+			return ErrUpstreamNotConfigured
+		}
+		if OperationKind(operation.Kind) == OperationRecharge {
+			if len(settings.CardData) == 0 {
+				return ErrCardNotConfigured
+			}
+			if settings.CardRevision != operation.CardRevision {
+				return ErrOperationState
+			}
+		}
+	case OperationRenew:
+		if operation.PhoneID == nil || *operation.PhoneID == 0 {
+			return ErrPhoneMissing
+		}
+		var phone phoneModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id", "status").
+			Where("id = ? AND account_id = ? AND deleted_at IS NULL AND disabled_at IS NULL", *operation.PhoneID, operation.AccountID).
+			First(&phone).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrPhoneMissing
+			}
+			return fmt.Errorf("lock Kitesim renewal phone: %w", err)
+		}
+		if PhoneStatus(phone.Status) != PhoneActive && PhoneStatus(phone.Status) != PhoneExpired {
+			return ErrOperationState
+		}
+	default:
+		return ErrInvalidInput
+	}
+	return nil
 }
 
 func (s *Service) idempotentOperation(ctx context.Context, operatorUserID uint, idempotencyKey string) (operationModel, bool, error) {
@@ -365,7 +421,7 @@ func (s *Service) listOperationViews(ctx context.Context, limit int) ([]Operatio
 }
 
 func operationView(operation operationModel, account, phone string) *OperationItem {
-	refs, _ := decodeOperationRefs(operation.ProviderOrderNos)
+	refs, _ := decodeOperationRefs([]byte(operation.ProviderOrderNos))
 	if refs.OrderNos == nil {
 		refs.OrderNos = []string{}
 	}
@@ -478,7 +534,7 @@ func (s *Service) claimOperation(ctx context.Context, operationID uint64) (opera
 	operation.Status = string(OperationRunning)
 	operation.StartedAt = &now
 	operation.Attempts++
-	operation.SecretPayload = nil
+	operation.SecretPayload = ""
 	return operation, secret, nil
 }
 
@@ -489,7 +545,7 @@ func (s *Service) recordOperationProgress(ctx context.Context, operationID uint6
 	}
 	result := s.db.WithContext(context.WithoutCancel(ctx)).Model(&operationModel{}).
 		Where("id = ? AND status = ?", operationID, OperationRunning).
-		Updates(map[string]any{"completed_count": completed, "provider_order_nos": encoded})
+		Updates(map[string]any{"completed_count": completed, "provider_order_nos": jsonText(encoded)})
 	if result.Error != nil {
 		return fmt.Errorf("save Kitesim operation references: %w", result.Error)
 	}

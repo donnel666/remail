@@ -4790,6 +4790,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/kitesim/phones/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Disable Kitesim phone numbers
+         * @description Soft-disables up to 100 phone rows. Platform accounts are not disabled.
+         */
+        post: operations["postAdminKitesimPhonesDisable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/kitesim/phones/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enable Kitesim phone numbers
+         * @description Clears the soft-disabled state for up to 100 non-deleted phone rows.
+         */
+        post: operations["postAdminKitesimPhonesEnable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/kitesim/phones/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Soft-delete Kitesim phone rows
+         * @description Soft-deletes up to 100 selected rows. An account is soft-deleted only after all of its phone rows are deleted; importing the same platform account restores the account and all of its phone rows.
+         */
+        post: operations["postAdminKitesimPhonesDelete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/kitesim/accounts/imports": {
         parameters: {
             query?: never;
@@ -4819,6 +4879,26 @@ export interface paths {
          * @description Requires `core:resource/read`. Returns synchronized public package prices only and does not expose the selected system account, balance, card, token, or recent money operations.
          */
         get: operations["getAdminKitesimProducts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/kitesim/accounts/{accountId}/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List synchronization task history for one Kitesim account
+         * @description Requires `core:resource/read`. Returns durable, administrator-safe synchronization status and timestamps without platform credentials, tokens, or upstream payloads.
+         */
+        get: operations["getAdminKitesimAccountTasks"];
         put?: never;
         post?: never;
         delete?: never;
@@ -8359,7 +8439,7 @@ export interface components {
             limit: number;
         };
         /** @enum {string} */
-        AdminKitesimPhoneStatus: "active" | "pending" | "activating" | "expired" | "refunded" | "unsynced";
+        AdminKitesimPhoneStatus: "active" | "pending" | "activating" | "expired" | "refunded" | "unsynced" | "disabled";
         /** @enum {string} */
         AdminKitesimSyncTaskStatus: "idle" | "queued" | "running" | "succeeded" | "failed";
         AdminKitesimBooleanFacet: {
@@ -8385,6 +8465,8 @@ export interface components {
             refunded: number;
             /** Format: int64 */
             unsynced: number;
+            /** Format: int64 */
+            disabled: number;
             autoRenew: components["schemas"]["AdminKitesimBooleanFacet"];
             tokenAvailable: components["schemas"]["AdminKitesimBooleanFacet"];
             syncHealthy: components["schemas"]["AdminKitesimBooleanFacet"];
@@ -8441,6 +8523,18 @@ export interface components {
             limit: number;
             facets: components["schemas"]["AdminKitesimPhoneFacets"];
         };
+        AdminKitesimPhoneMutationRequest: {
+            phoneIds: number[];
+        };
+        AdminKitesimPhoneDeleteRequest: {
+            phoneIds: number[];
+            /** @description Accounts represented by unsynchronized rows that do not have a phone ID. */
+            accountIds: number[];
+        };
+        AdminKitesimPhoneMutationResult: {
+            /** Format: int64 */
+            affected: number;
+        };
         AdminKitesimImportRequest: {
             /** @description One `account----password` entry per non-empty line. */
             content: string;
@@ -8466,6 +8560,29 @@ export interface components {
             /** Format: date-time */
             finishedAt?: string;
             attempts: number;
+        };
+        AdminKitesimSyncRun: {
+            taskId: string;
+            status: components["schemas"]["AdminKitesimSyncTaskStatus"];
+            attempts: number;
+            lastSafeError?: string;
+            /** Format: date-time */
+            queuedAt: string;
+            /** Format: date-time */
+            startedAt?: string;
+            /** Format: date-time */
+            finishedAt?: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        AdminKitesimSyncRunList: {
+            items: components["schemas"]["AdminKitesimSyncRun"][];
+            /** Format: int64 */
+            total: number;
+            /** Format: int64 */
+            succeeded: number;
+            offset: number;
+            limit: number;
         };
         AdminKitesimMessage: {
             caller: string;
@@ -23345,6 +23462,105 @@ export interface operations {
             502: components["responses"]["BadGateway"];
         };
     };
+    postAdminKitesimPhonesDisable: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminKitesimPhoneMutationRequest"];
+            };
+        };
+        responses: {
+            /** @description Number of phone rows disabled */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminKitesimPhoneMutationResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            502: components["responses"]["BadGateway"];
+        };
+    };
+    postAdminKitesimPhonesEnable: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminKitesimPhoneMutationRequest"];
+            };
+        };
+        responses: {
+            /** @description Number of phone rows enabled */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminKitesimPhoneMutationResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            502: components["responses"]["BadGateway"];
+        };
+    };
+    postAdminKitesimPhonesDelete: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminKitesimPhoneDeleteRequest"];
+            };
+        };
+        responses: {
+            /** @description Number of selected phone or empty-account rows deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminKitesimPhoneMutationResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            502: components["responses"]["BadGateway"];
+        };
+    };
     postAdminKitesimAccountImport: {
         parameters: {
             query?: never;
@@ -23396,6 +23612,37 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            502: components["responses"]["BadGateway"];
+        };
+    };
+    getAdminKitesimAccountTasks: {
+        parameters: {
+            query?: {
+                /** @description Row offset used when afterId is absent. */
+                offset?: components["parameters"]["OffsetQuery"];
+                limit?: components["parameters"]["LimitQuery"];
+            };
+            header?: never;
+            path: {
+                accountId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paginated Kitesim synchronization task history */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminKitesimSyncRunList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
             502: components["responses"]["BadGateway"];
         };
     };

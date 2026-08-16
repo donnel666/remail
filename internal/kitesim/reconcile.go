@@ -30,7 +30,7 @@ func (s *Service) QueueOperationReconcile(ctx context.Context, operationID uint6
 		if OperationStatus(operation.Status) == OperationRunning && operation.StartedAt != nil && !operation.StartedAt.After(now.Add(-operationTaskTimeout-operationSettlementGrace)) {
 			operation.Status = string(OperationUncertain)
 			operation.FinishedAt = &now
-			operation.SecretPayload = nil
+			operation.SecretPayload = ""
 			operation.LastSafeError = "Kitesim 任务执行超时，已停止自动重放并等待只读对账。"
 		}
 		if OperationStatus(operation.Status) != OperationUncertain && OperationStatus(operation.Status) != OperationRequiresAction {
@@ -131,12 +131,12 @@ func (s *Service) processOperationReconcile(ctx context.Context, operationID uin
 	if status != OperationUncertain && status != OperationRequiresAction {
 		return nil
 	}
-	refs, err := decodeOperationRefs(operation.ProviderOrderNos)
+	refs, err := decodeOperationRefs([]byte(operation.ProviderOrderNos))
 	if err != nil {
 		return s.finishReconcileAttempt(ctx, operation, "", operation.CompletedCount, err)
 	}
 	var account accountModel
-	if err := s.db.WithContext(ctx).First(&account, operation.AccountID).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", operation.AccountID).First(&account).Error; err != nil {
 		return s.finishReconcileAttempt(ctx, operation, "", operation.CompletedCount, err)
 	}
 	var outcome OperationStatus

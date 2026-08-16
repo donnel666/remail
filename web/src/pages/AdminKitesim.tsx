@@ -43,7 +43,11 @@ import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import {
+  deleteAdminKitesimPhones,
+  disableAdminKitesimPhones,
+  enableAdminKitesimPhones,
   importAdminKitesimAccounts,
+  listAdminKitesimAccountTasks,
   listAdminKitesimMessages,
   listAdminKitesimPhones,
   syncAdminKitesimAccount,
@@ -52,6 +56,8 @@ import {
   type AdminKitesimPhoneFacets,
   type AdminKitesimPhoneItem,
   type AdminKitesimPhoneStatus,
+  type AdminKitesimSyncRun,
+  type AdminKitesimSyncRunList,
   type AdminKitesimSyncTaskStatus,
 } from "@/lib/admin-kitesim-api";
 import { copyText } from "@/lib/clipboard";
@@ -63,6 +69,7 @@ import {
 } from "@/lib/kitesim-upstream-api";
 
 import { InfoItem } from "./admin-microsoft/microsoft-meta";
+import { ServerPaginatedDrawerTable } from "./admin-microsoft/microsoft-detail-sheet";
 import {
   DATE_RANGE_DROPDOWN_CLASS,
   createDateRangePresets,
@@ -78,14 +85,8 @@ const IMPORT_ENTRY_AREA_HEIGHT = 208;
 
 type StatusFilter = "all" | AdminKitesimPhoneStatus;
 type BooleanFilter = "all" | "yes" | "no";
-type DetailTab =
-  | "basic"
-  | "orders"
-  | "status"
-  | "renewal"
-  | "tasks"
-  | "mails"
-  | "account";
+type DetailTab = "basic" | "tasks" | "mails";
+type LifecycleAction = "disable" | "enable" | "delete";
 
 const STATUS_ORDER: AdminKitesimPhoneStatus[] = [
   "active",
@@ -94,6 +95,7 @@ const STATUS_ORDER: AdminKitesimPhoneStatus[] = [
   "expired",
   "refunded",
   "unsynced",
+  "disabled",
 ];
 
 const STATUS_META: Record<
@@ -106,6 +108,7 @@ const STATUS_META: Record<
   expired: { color: "red", label: "Expired" },
   refunded: { color: "grey", label: "Refunded" },
   unsynced: { color: "grey", label: "Unsynced" },
+  disabled: { color: "grey", label: "Disabled" },
 };
 
 const SYNC_META: Record<
@@ -121,6 +124,17 @@ const SYNC_META: Record<
 
 function rowKey(item: AdminKitesimPhoneItem) {
   return `${item.accountId}:${item.phoneId ?? 0}`;
+}
+
+function phoneIDs(items: AdminKitesimPhoneItem[]) {
+  return Array.from(new Set(items.flatMap((item) => item.phoneId ? [item.phoneId] : [])));
+}
+
+function deleteTargets(items: AdminKitesimPhoneItem[]) {
+  return {
+    accountIds: Array.from(new Set(items.flatMap((item) => item.phoneId ? [] : [item.accountId]))),
+    phoneIds: phoneIDs(items),
+  };
 }
 
 function formatTime(value?: string | null) {
@@ -490,6 +504,144 @@ export function KitesimMessagesPanel({ item }: { item: AdminKitesimPhoneItem }) 
   );
 }
 
+export function KitesimTaskDiagnostics({ item }: { item: AdminKitesimPhoneItem }) {
+  const { t } = useTranslation();
+  const [pageSize, setPageSize] = useSharedPageSize();
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [response, setResponse] = useState<AdminKitesimSyncRunList>({
+    items: [],
+    limit: pageSize,
+    offset: 0,
+    succeeded: 0,
+    total: 0,
+  });
+
+  useEffect(() => setPage(1), [item.accountId, pageSize]);
+  useEffect(() => {
+    const controller = new AbortController();
+    let pollTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
+    setLoading(true);
+    void listAdminKitesimAccountTasks(
+      item.accountId,
+      (page - 1) * pageSize,
+      pageSize,
+      controller.signal,
+    )
+      .then((next) => {
+        if (controller.signal.aborted) return;
+        const lastPage = Math.max(1, Math.ceil(next.total / pageSize));
+        if (page > lastPage) {
+          setPage(lastPage);
+          return;
+        }
+        setResponse(next);
+        if (next.items.some((task) => task.status === "queued" || task.status === "running")) {
+          pollTimer = globalThis.setTimeout(() => {
+            setRefreshKey((value) => value + 1);
+          }, 1_500);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          Toast.error(getIamErrorMessage(t, error, "Kitesim task load failed."));
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => {
+      controller.abort();
+      if (pollTimer) globalThis.clearTimeout(pollTimer);
+    };
+  }, [item.accountId, page, pageSize, refreshKey, t]);
+
+  const total = response.total;
+  const succeeded = response.succeeded;
+  const successRate = total > 0 ? Math.round((succeeded / total) * 100) : 0;
+  const columns = useMemo(
+    () => [
+      {
+        dataIndex: "taskId",
+        title: t("Type"),
+        width: 140,
+        render: () => t("Synchronize"),
+      },
+      {
+        dataIndex: "status",
+        title: t("Status"),
+        width: 110,
+        render: (value: unknown, record: AdminKitesimSyncRun) => {
+          const tag = syncTag(value as AdminKitesimSyncTaskStatus, t);
+          return record.lastSafeError ? <Tooltip content={record.lastSafeError}>{tag}</Tooltip> : tag;
+        },
+      },
+      {
+        dataIndex: "attempts",
+        title: t("Attempts"),
+        width: 110,
+        render: (value: unknown) => <span className="font-mono tabular-nums">{Number(value)}</span>,
+      },
+      {
+        dataIndex: "queuedAt",
+        title: t("Queued at"),
+        width: 170,
+        render: (value: unknown) => formatTime(value ? String(value) : undefined),
+      },
+      {
+        dataIndex: "startedAt",
+        title: t("Started at"),
+        width: 170,
+        render: (value: unknown) => formatTime(value ? String(value) : undefined),
+      },
+      {
+        dataIndex: "finishedAt",
+        title: t("Finished at"),
+        width: 170,
+        render: (value: unknown) => formatTime(value ? String(value) : undefined),
+      },
+      {
+        dataIndex: "updatedAt",
+        title: t("Updated at"),
+        width: 170,
+        render: (value: unknown) => formatTime(value ? String(value) : undefined),
+      },
+    ],
+    [t],
+  );
+
+  return (
+    <div>
+      <div className="mb-4">
+        <div className="grid gap-3 sm:grid-cols-3">
+          <InfoItem label={t("Total tasks")} value={<span className="font-mono tabular-nums">{total}</span>} />
+          <InfoItem label={t("Succeeded tasks")} value={<span className="font-mono tabular-nums">{succeeded}</span>} />
+          <InfoItem label={t("Success rate")} value={<span className="font-mono tabular-nums">{successRate}%</span>} />
+        </div>
+      </div>
+      <ServerPaginatedDrawerTable
+        columns={columns}
+        dataSource={response.items}
+        emptyDescription={t("No task records")}
+        extraOffset={150}
+        loading={loading}
+        onPageChange={setPage}
+        onPageSizeChange={(size) => {
+          setPageSize(size);
+          setPage(1);
+        }}
+        page={page}
+        pageSize={pageSize}
+        rowKey="taskId"
+        scrollX={1050}
+        t={t}
+        total={response.total}
+      />
+    </div>
+  );
+}
+
 function KitesimDetailSheet({
   busy,
   canOperate,
@@ -497,8 +649,10 @@ function KitesimDetailSheet({
   initialTab,
   item,
   onCancel,
+  onDelete,
   onRefresh,
   onSync,
+  onToggleDisabled,
 }: {
   busy: boolean;
   canOperate: boolean;
@@ -506,8 +660,10 @@ function KitesimDetailSheet({
   initialTab: DetailTab;
   item: AdminKitesimPhoneItem | null;
   onCancel: () => void;
+  onDelete: (item: AdminKitesimPhoneItem) => void;
   onRefresh: () => void | Promise<void>;
   onSync: (item: AdminKitesimPhoneItem) => void | Promise<void>;
+  onToggleDisabled: (item: AdminKitesimPhoneItem) => void | Promise<void>;
 }) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
@@ -545,87 +701,77 @@ function KitesimDetailSheet({
               type="line"
             >
               <Tabs.TabPane itemKey="basic" tab={t("Basic info")} />
-              <Tabs.TabPane itemKey="orders" tab={t("Orders")} />
-              <Tabs.TabPane itemKey="status" tab={t("Phone status")} />
-              <Tabs.TabPane itemKey="renewal" tab={t("Renewal details")} />
               <Tabs.TabPane itemKey="tasks" tab={t("Task details")} />
-              <Tabs.TabPane itemKey="mails" disabled={!canReadMessages} tab={t("SMS inbox")} />
-              <Tabs.TabPane itemKey="account" tab={t("Platform account")} />
+              <Tabs.TabPane itemKey="mails" disabled={!canReadMessages} tab={t("Inbox")} />
             </Tabs>
           </div>
 
           <div className="flex-1 p-5">
             {activeTab === "basic" ? (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                <InfoItem label={t("Phone number")} value={<CopyableTableText copiedText={t("Copied")} text={item.phoneNumber || "-"} />} />
-                <InfoItem label={t("Country")} value={item.countryCode || "-"} />
-                <InfoItem label={t("Status")} value={statusTag(item.status, item.lastSafeError, t)} />
-                <InfoItem label={t("Created at")} value={formatTime(item.createTime)} />
-                <InfoItem label={t("Expires at")} value={formatTime(item.expireTime)} />
-                <InfoItem label={t("Platform account")} value={<CopyableTableText copiedText={t("Copied")} text={item.account} />} />
+              <div className="space-y-6">
+                <section>
+                  <div className="mb-3 text-sm font-semibold text-[var(--semi-color-text-0)]">{t("Phone status")}</div>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    <InfoItem label={t("Phone number")} value={<CopyableTableText copiedText={t("Copied")} text={item.phoneNumber || "-"} />} />
+                    <InfoItem label={t("Country")} value={item.countryCode || "-"} />
+                    <InfoItem label={t("Status")} value={statusTag(item.status, item.lastSafeError, t)} />
+                    <InfoItem label={t("Phone available")} value={booleanTag(Boolean(item.phoneId), t)} />
+                    <InfoItem label={t("Created at")} value={formatTime(item.createTime)} />
+                    <InfoItem label={t("Expires at")} value={formatTime(item.expireTime)} />
+                    <InfoItem label={t("Refund time")} value={formatTime(item.refundTime)} />
+                  </div>
+                </section>
+
+                <section>
+                  <div className="mb-3 text-sm font-semibold text-[var(--semi-color-text-0)]">{t("Orders")}</div>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    <InfoItem label={t("Order ID")} value={item.providerOrderId || "-"} />
+                    <InfoItem label={t("Order number")} value={item.orderNo || "-"} />
+                    <InfoItem label={t("Order status")} value={item.orderStatus ?? "-"} />
+                    <InfoItem label={t("Package ID")} value={item.packageId || "-"} />
+                    <InfoItem label={t("Original amount")} value={formatMoney(item.currency, item.originalAmount)} />
+                    <InfoItem label={t("Paid amount")} value={formatMoney(item.currency, item.paidAmount)} />
+                    <InfoItem label={t("Payment time")} value={formatTime(item.paymentTime)} />
+                  </div>
+                </section>
+
+                <section>
+                  <div className="mb-3 text-sm font-semibold text-[var(--semi-color-text-0)]">{t("Renewal details")}</div>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    <InfoItem label={t("Auto renew")} value={booleanTag(item.autoRenew, t)} />
+                    <InfoItem label={t("Auto renew price")} value={formatMoney(item.currency, item.autoRenewPrice)} />
+                    <InfoItem label={t("Duration")} value={item.durationValue ? `${item.durationValue} / ${item.durationType ?? 0}` : "-"} />
+                    <InfoItem label={t("Latest renewal")} value={formatTime(item.latestRenewalTime)} />
+                    <InfoItem label={t("Next renewal")} value={formatTime(item.nextRenewalDate)} />
+                  </div>
+                </section>
+
+                <section>
+                  <div className="mb-3 text-sm font-semibold text-[var(--semi-color-text-0)]">{t("Platform account")}</div>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    <InfoItem label={t("Platform account")} value={<CopyableTableText copiedText={t("Copied")} text={item.account} />} />
+                    <InfoItem label={t("Token available")} value={booleanTag(item.tokenAvailable, t)} />
+                    <InfoItem label={t("Token updated at")} value={formatTime(item.tokenUpdatedAt)} />
+                    <InfoItem label={t("Sync healthy")} value={booleanTag(item.syncHealthy, t)} />
+                    <InfoItem label={t("Last synchronized")} value={formatTime(item.lastSyncedAt)} />
+                    <InfoItem label={t("Account created at")} value={formatTime(item.createdAt)} />
+                  </div>
+                </section>
               </div>
             ) : null}
 
-            {activeTab === "orders" ? (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                <InfoItem label={t("Order ID")} value={item.providerOrderId || "-"} />
-                <InfoItem label={t("Order number")} value={item.orderNo || "-"} />
-                <InfoItem label={t("Order status")} value={item.orderStatus ?? "-"} />
-                <InfoItem label={t("Package ID")} value={item.packageId || "-"} />
-                <InfoItem label={t("Original amount")} value={formatMoney(item.currency, item.originalAmount)} />
-                <InfoItem label={t("Paid amount")} value={formatMoney(item.currency, item.paidAmount)} />
-                <InfoItem label={t("Payment time")} value={formatTime(item.paymentTime)} />
-              </div>
-            ) : null}
-
-            {activeTab === "status" ? (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                <InfoItem label={t("Phone status")} value={statusTag(item.status, item.lastSafeError, t)} />
-                <InfoItem label={t("Created at")} value={formatTime(item.createTime)} />
-                <InfoItem label={t("Payment time")} value={formatTime(item.paymentTime)} />
-                <InfoItem label={t("Expires at")} value={formatTime(item.expireTime)} />
-                <InfoItem label={t("Refund time")} value={formatTime(item.refundTime)} />
-                <InfoItem label={t("Phone available")} value={booleanTag(Boolean(item.phoneId), t)} />
-              </div>
-            ) : null}
-
-            {activeTab === "renewal" ? (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                <InfoItem label={t("Auto renew")} value={booleanTag(item.autoRenew, t)} />
-                <InfoItem label={t("Auto renew price")} value={formatMoney(item.currency, item.autoRenewPrice)} />
-                <InfoItem label={t("Duration")} value={item.durationValue ? `${item.durationValue} / ${item.durationType ?? 0}` : "-"} />
-                <InfoItem label={t("Latest renewal")} value={formatTime(item.latestRenewalTime)} />
-                <InfoItem label={t("Next renewal")} value={formatTime(item.nextRenewalDate)} />
-                <InfoItem label={t("Expires at")} value={formatTime(item.expireTime)} />
-              </div>
-            ) : null}
-
-            {activeTab === "tasks" ? (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                <InfoItem label={t("Task status")} value={syncTag(item.syncStatus, t)} />
-                <InfoItem label={t("Queued at")} value={formatTime(item.syncQueuedAt)} />
-                <InfoItem label={t("Started at")} value={formatTime(item.syncStartedAt)} />
-                <InfoItem label={t("Finished at")} value={formatTime(item.syncFinishedAt)} />
-                <InfoItem label={t("Attempts")} value={item.syncAttempts} />
-                <InfoItem label={t("Last error")} value={item.lastSafeError || "-"} />
-              </div>
-            ) : null}
+            {activeTab === "tasks" ? <KitesimTaskDiagnostics item={item} /> : null}
 
             {activeTab === "mails" && canReadMessages ? <KitesimMessagesPanel item={item} /> : null}
-
-            {activeTab === "account" ? (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                <InfoItem label={t("Platform account")} value={<CopyableTableText copiedText={t("Copied")} text={item.account} />} />
-                <InfoItem label={t("Token available")} value={booleanTag(item.tokenAvailable, t)} />
-                <InfoItem label={t("Token updated at")} value={formatTime(item.tokenUpdatedAt)} />
-                <InfoItem label={t("Sync healthy")} value={booleanTag(item.syncHealthy, t)} />
-                <InfoItem label={t("Last synchronized")} value={formatTime(item.lastSyncedAt)} />
-                <InfoItem label={t("Account created at")} value={formatTime(item.createdAt)} />
-              </div>
-            ) : null}
           </div>
 
           <div className="sticky bottom-0 flex flex-wrap items-center justify-end gap-2 border-t border-[var(--semi-color-border)] bg-[var(--semi-color-bg-0)] px-5 py-3">
+            <Button disabled={!canOperate || !item.phoneId || busy} onClick={() => void onToggleDisabled(item)} type="tertiary">
+              {item.status === "disabled" ? t("Enable") : t("Disable")}
+            </Button>
+            <Button disabled={!canOperate || busy} onClick={() => onDelete(item)} type="danger">
+              {t("Delete")}
+            </Button>
             <Button disabled={!canOperate} loading={busy} onClick={() => void onSync(item)} type="primary">
               {t("Synchronize")}
             </Button>
@@ -633,7 +779,7 @@ function KitesimDetailSheet({
               {t("Refresh")}
             </Button>
             <Button disabled={!canReadMessages || !item.phoneId} onClick={() => setActiveTab("mails")} type="tertiary">
-              {t("SMS inbox")}
+              {t("Inbox")}
             </Button>
             <Button disabled={!item.phoneNumber} onClick={() => void copy(item.phoneNumber)} type="tertiary">
               {t("Copy phone number")}
@@ -672,6 +818,8 @@ export default function AdminKitesim() {
   const [detailTab, setDetailTab] = useState<DetailTab>("basic");
   const [renewalItem, setRenewalItem] = useState<AdminKitesimPhoneItem | null>(null);
   const [syncingAccountIds, setSyncingAccountIds] = useState<number[]>([]);
+  const [rowMutation, setRowMutation] = useState<{ action: LifecycleAction; key: string } | null>(null);
+  const [bulkMutation, setBulkMutation] = useState<LifecycleAction | null>(null);
   const canWrite = hasPermissionKey(
     currentUser,
     permissionKey("core:resource", "write"),
@@ -747,18 +895,10 @@ export default function AdminKitesim() {
   });
 
   useEffect(() => {
-    if (!pagedItems.some((item) => item.syncStatus === "queued" || item.syncStatus === "running")) {
-      return undefined;
-    }
-    const timer = window.setInterval(() => void refreshList(), 3000);
-    return () => window.clearInterval(timer);
-  }, [pagedItems, refreshList]);
-
-  useEffect(() => {
-    if (!detail) return;
+    if (!detail || loading) return;
     const updated = pagedItems.find((item) => rowKey(item) === rowKey(detail));
-    if (updated) setDetail(updated);
-  }, [detail && rowKey(detail), pagedItems]);
+    setDetail(updated ?? null);
+  }, [detail && rowKey(detail), loading, pagedItems]);
 
   const refresh = useCallback(async () => {
     await refreshList();
@@ -781,6 +921,7 @@ export default function AdminKitesim() {
       expired: 0,
       refunded: 0,
       unsynced: 0,
+      disabled: 0,
       autoRenew: emptyBoolean,
       tokenAvailable: emptyBoolean,
       syncHealthy: emptyBoolean,
@@ -841,66 +982,148 @@ export default function AdminKitesim() {
     [canOperate, refresh, t],
   );
 
+  const runLifecycle = useCallback(
+    async (
+      items: AdminKitesimPhoneItem[],
+      action: LifecycleAction,
+      row?: AdminKitesimPhoneItem,
+    ) => {
+      if (!canOperate || items.length === 0) return;
+      const ids = phoneIDs(items);
+      if (action !== "delete" && ids.length === 0) return;
+      if (row) setRowMutation({ action, key: rowKey(row) });
+      else setBulkMutation(action);
+      try {
+        const targets = deleteTargets(items);
+        const result = action === "disable"
+          ? await disableAdminKitesimPhones(ids)
+          : action === "enable"
+            ? await enableAdminKitesimPhones(ids)
+            : await deleteAdminKitesimPhones(targets.phoneIds, targets.accountIds);
+        Toast.success(t(
+          action === "delete"
+            ? "Kitesim phone rows deleted."
+            : action === "disable"
+              ? "Kitesim phones disabled."
+              : "Kitesim phones enabled.",
+          { count: result.affected },
+        ));
+        setSelectedKeys([]);
+        if (action === "delete") {
+          setActivePage(1);
+          if (detail && items.some((item) => rowKey(item) === rowKey(detail))) {
+            setDetail(null);
+          }
+        }
+        await refresh();
+      } catch (error) {
+        Toast.error(getIamErrorMessage(t, error, "Kitesim operation failed."));
+      } finally {
+        if (row) setRowMutation(null);
+        else setBulkMutation(null);
+      }
+    },
+    [canOperate, detail, refresh, t],
+  );
+
+  const confirmDelete = useCallback(
+    (item: AdminKitesimPhoneItem) => {
+      Modal.confirm({
+        cancelText: t("Cancel"),
+        content: t("Confirm delete Kitesim phone row", {
+          value: item.phoneNumber || item.account,
+        }),
+        okButtonProps: { type: "danger" },
+        okText: t("Delete"),
+        onOk: () => runLifecycle([item], "delete", item),
+        title: t("Confirm delete"),
+      });
+    },
+    [runLifecycle, t],
+  );
+
+  const confirmDisableSelected = useCallback(() => {
+    const count = phoneIDs(selectedItems).length;
+    if (count === 0) return;
+    Modal.confirm({
+      cancelText: t("Cancel"),
+      content: t("Confirm disable selected Kitesim phones", { count }),
+      okText: t("Disable"),
+      onOk: () => runLifecycle(selectedItems, "disable"),
+      title: t("Disable"),
+    });
+  }, [runLifecycle, selectedItems, t]);
+
+  const confirmDeleteSelected = useCallback(() => {
+    if (selectedItems.length === 0) return;
+    Modal.confirm({
+      cancelText: t("Cancel"),
+      content: t("Confirm delete selected Kitesim phone rows", { count: selectedItems.length }),
+      okButtonProps: { type: "danger" },
+      okText: t("Delete"),
+      onOk: () => runLifecycle(selectedItems, "delete"),
+      title: t("Confirm delete selected"),
+    });
+  }, [runLifecycle, selectedItems, t]);
+
   const openDetail = useCallback((item: AdminKitesimPhoneItem, tab: DetailTab = "basic") => {
     setDetailTab(tab);
     setDetail(item);
   }, []);
 
-  const openSelectedMessages = useCallback(() => {
-    if (canReadMessages && selectedItems.length === 1 && selectedItems[0].phoneId) {
-      openDetail(selectedItems[0], "mails");
-    }
-  }, [canReadMessages, openDetail, selectedItems]);
-
-  const syncSelected = useCallback(() => {
-    void queueSync(selectedItems);
-  }, [queueSync, selectedItems]);
-
-  const selectionExtraActions = useMemo(
-    () => [
-      {
-        key: "messages",
-        labelKey: "SMS inbox",
-        onClick: openSelectedMessages,
-        disabled: !canReadMessages,
-        type: "tertiary" as const,
-      },
-    ],
-    [canReadMessages, openSelectedMessages],
-  );
-
   useSelectionNotification({
-    checkLabelKey: "Synchronize",
-    checkLoading: syncingAccountIds.length > 0,
-    extraActions: selectedItems.length === 1 && selectedItems[0].phoneId ? selectionExtraActions : [],
-    onCheck: canOperate ? syncSelected : undefined,
     onClear: () => setSelectedKeys([]),
+    onDelete: canOperate ? confirmDeleteSelected : undefined,
+    onSell: canOperate && phoneIDs(selectedItems).length > 0 ? confirmDisableSelected : undefined,
+    deleteLoading: bulkMutation === "delete",
     selectedCount: selectedKeys.length,
     selectionDescriptionKey: "Selected Kitesim phone numbers",
+    sellLabelKey: "Disable",
+    sellLoading: bulkMutation === "disable",
     t,
   });
 
   const renderRowActions = useCallback(
     (item: AdminKitesimPhoneItem) => {
-      const busy = syncingAccountIds.includes(item.accountId);
+      const syncing = syncingAccountIds.includes(item.accountId);
+      const lifecycleAction = rowMutation?.key === rowKey(item) ? rowMutation.action : null;
+      const busy = syncing || Boolean(lifecycleAction);
       return (
         <Space spacing={4} wrap={false}>
           <Button disabled={busy} onClick={() => openDetail(item)} size="small" type="tertiary">
             {t("Details")}
           </Button>
           <Button disabled={!canReadMessages || !item.phoneId || busy} onClick={() => openDetail(item, "mails")} size="small" type="tertiary">
-            {t("SMS inbox")}
+            {t("Inbox")}
           </Button>
           <Button disabled={!canRenew || !item.phoneId || busy || (item.status !== "active" && item.status !== "expired")} onClick={() => setRenewalItem(item)} size="small" type="tertiary">
             {t("Renew")}
           </Button>
-          <Button disabled={!canOperate} loading={busy} onClick={() => void queueSync([item])} size="small" type="primary">
+          <Button disabled={!canOperate || busy} loading={syncing} onClick={() => void queueSync([item])} size="small" type="primary">
             {t("Synchronize")}
+          </Button>
+          <Button
+            disabled={!canOperate || !item.phoneId || busy}
+            loading={lifecycleAction === "disable" || lifecycleAction === "enable"}
+            onClick={() => void runLifecycle([item], item.status === "disabled" ? "enable" : "disable", item)}
+            size="small"
+            type="tertiary"
+          >
+            {item.status === "disabled" ? t("Enable") : t("Disable")}
+          </Button>
+          <Button
+            disabled={!canOperate || busy}
+            loading={lifecycleAction === "delete"}
+            onClick={() => confirmDelete(item)}
+            size="small"
+            type="danger"
+          >
+            {t("Delete")}
           </Button>
         </Space>
       );
     },
-    [canOperate, canReadMessages, canRenew, openDetail, queueSync, syncingAccountIds, t],
+    [canOperate, canReadMessages, canRenew, confirmDelete, openDetail, queueSync, rowMutation, runLifecycle, syncingAccountIds, t],
   );
 
   const columns = useMemo(
@@ -922,14 +1145,6 @@ export default function AdminKitesim() {
           key: "phone",
           title: t("Phone number"),
           width: 280,
-          render: (value: unknown) =>
-            value ? <CopyableTableText copiedText={t("Copied")} text={String(value)} /> : "-",
-        },
-        {
-          dataIndex: "orderNo",
-          key: "order",
-          title: t("Order number"),
-          width: 240,
           render: (value: unknown) =>
             value ? <CopyableTableText copiedText={t("Copied")} text={String(value)} /> : "-",
         },
@@ -993,7 +1208,7 @@ export default function AdminKitesim() {
           fixed: "right",
           key: "operate",
           title: t("Action"),
-          width: 350,
+          width: 520,
           render: (_: unknown, item: AdminKitesimPhoneItem) => renderRowActions(item),
         },
       ] as any[],
@@ -1069,22 +1284,17 @@ export default function AdminKitesim() {
         </Button>
         <Tooltip content={t("Synchronize current page")} mouseEnterDelay={0} mouseLeaveDelay={0.05} position="top">
           <Button className="flex-1 md:flex-initial" disabled={!canOperate || pagedItems.length === 0} loading={syncingAccountIds.length > 0} onClick={() => void queueSync(pagedItems)} size="small" type="tertiary">
-            {t("Synchronize all")}
+            {t("Synchronize")}
           </Button>
         </Tooltip>
-        <Tooltip content={t("Synchronize selected")} mouseEnterDelay={0} mouseLeaveDelay={0.05} position="top">
-          <Button className="flex-1 md:flex-initial" disabled={!canOperate || selectedItems.length === 0} loading={syncingAccountIds.length > 0} onClick={syncSelected} size="small" type="tertiary">
-            {t("Synchronize selected")}
+        <Tooltip content={t("Disable selected Kitesim phones")} mouseEnterDelay={0} mouseLeaveDelay={0.05} position="top">
+          <Button className="flex-1 md:flex-initial" disabled={!canOperate || phoneIDs(selectedItems).length === 0} loading={bulkMutation === "disable"} onClick={confirmDisableSelected} size="small" type="tertiary">
+            {t("Disable")}
           </Button>
         </Tooltip>
-        <Tooltip content={t("Open selected SMS inbox")} mouseEnterDelay={0} mouseLeaveDelay={0.05} position="top">
-          <Button className="flex-1 md:flex-initial" disabled={!canReadMessages || selectedItems.length !== 1 || !selectedItems[0]?.phoneId} onClick={openSelectedMessages} size="small" type="tertiary">
-            {t("SMS inbox")}
-          </Button>
-        </Tooltip>
-        <Tooltip content={t("Clear selection")} mouseEnterDelay={0} mouseLeaveDelay={0.05} position="top">
-          <Button className="flex-1 md:flex-initial" disabled={selectedKeys.length === 0} onClick={() => setSelectedKeys([])} size="small" type="tertiary">
-            {t("Clear selection")}
+        <Tooltip content={t("Delete selected Kitesim phone rows")} mouseEnterDelay={0} mouseLeaveDelay={0.05} position="top">
+          <Button className="flex-1 md:flex-initial" disabled={!canOperate || selectedItems.length === 0} loading={bulkMutation === "delete"} onClick={confirmDeleteSelected} size="small" type="danger">
+            {t("Delete")}
           </Button>
         </Tooltip>
         <CompactModeToggle compactMode={compactMode} setCompactMode={setCompactMode} t={t} />
@@ -1176,7 +1386,7 @@ export default function AdminKitesim() {
         <Input
           className="resources-search-input w-full md:w-56"
           onChange={(value) => { setSearchKeyword(String(value)); resetPageAndSelection(); }}
-          placeholder={t("Search account, phone or order")}
+          placeholder={t("Search account or phone")}
           prefix={<IconSearch />}
           showClear
           size="small"
@@ -1240,7 +1450,7 @@ export default function AdminKitesim() {
           pagination={false}
           rowKey={rowKey}
           rowSelection={rowSelection}
-          scroll={{ x: "max(100%, 2030px)", y: DESKTOP_TABLE_SCROLL_Y }}
+          scroll={{ x: "max(100%, 1960px)", y: DESKTOP_TABLE_SCROLL_Y }}
           size="middle"
         />
       </CardPro>
@@ -1258,14 +1468,18 @@ export default function AdminKitesim() {
       />
 
       <KitesimDetailSheet
-        busy={detail ? syncingAccountIds.includes(detail.accountId) : false}
+        busy={detail ? syncingAccountIds.includes(detail.accountId) || rowMutation?.key === rowKey(detail) : false}
         canOperate={canOperate}
         canReadMessages={canReadMessages}
         initialTab={detailTab}
         item={detail}
         onCancel={() => setDetail(null)}
+        onDelete={confirmDelete}
         onRefresh={refresh}
         onSync={async (item) => { await queueSync([item]); }}
+        onToggleDisabled={async (item) => {
+          await runLifecycle([item], item.status === "disabled" ? "enable" : "disable", item);
+        }}
       />
     </div>
   );

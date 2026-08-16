@@ -16,8 +16,12 @@ func RegisterRoutes(rg *gin.RouterGroup, service *Service, fetcher middleware.Se
 	admin := rg.Group("/admin/kitesim")
 	admin.Use(middleware.LoadSession(fetcher), middleware.AuthRequired(), middleware.CSRFRequired())
 	admin.GET("/phones", middleware.PermissionRequired(checker, "core:resource", "read"), h.listPhones)
+	admin.POST("/phones/disable", middleware.PermissionRequired(checker, "core:resource", "operate"), h.disablePhones)
+	admin.POST("/phones/enable", middleware.PermissionRequired(checker, "core:resource", "operate"), h.enablePhones)
+	admin.POST("/phones/delete", middleware.PermissionRequired(checker, "core:resource", "operate"), h.deletePhones)
 	admin.GET("/products", middleware.PermissionRequired(checker, "core:resource", "read"), h.products)
 	admin.POST("/accounts/imports", middleware.PermissionRequired(checker, "core:resource", "write"), h.importAccounts)
+	admin.GET("/accounts/:accountId/tasks", middleware.PermissionRequired(checker, "core:resource", "read"), h.listAccountTasks)
 	admin.POST("/accounts/:accountId/sync", middleware.PermissionRequired(checker, "core:resource", "operate"), h.syncAccount)
 	admin.GET("/phones/:phoneId/messages", middleware.PermissionRequired(checker, "mailmatch:message", "read"), h.messages)
 	admin.POST(
@@ -60,7 +64,7 @@ func (h *handler) listPhones(c *gin.Context) {
 		return
 	}
 	status := AdminPhoneStatus(strings.TrimSpace(c.Query("status")))
-	if status != "" && status != AdminPhoneUnsynced {
+	if status != "" && status != AdminPhoneUnsynced && status != AdminPhoneDisabled {
 		if _, valid := providerStatus(status); !valid {
 			writeError(c, ErrInvalidInput)
 			return
@@ -111,6 +115,55 @@ func (h *handler) listPhones(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+type phoneMutationRequest struct {
+	PhoneIDs []uint `json:"phoneIds"`
+}
+
+type phoneDeleteRequest struct {
+	PhoneIDs   []uint `json:"phoneIds"`
+	AccountIDs []uint `json:"accountIds"`
+}
+
+func (h *handler) disablePhones(c *gin.Context) {
+	h.setPhonesDisabled(c, true)
+}
+
+func (h *handler) enablePhones(c *gin.Context) {
+	h.setPhonesDisabled(c, false)
+}
+
+func (h *handler) setPhonesDisabled(c *gin.Context, disabled bool) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 8<<10)
+	var request phoneMutationRequest
+	if c.ShouldBindJSON(&request) != nil {
+		writeError(c, ErrInvalidInput)
+		return
+	}
+	result, err := h.service.SetPhonesDisabled(c.Request.Context(), request.PhoneIDs, disabled, mutationMeta(c))
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *handler) deletePhones(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 8<<10)
+	var request phoneDeleteRequest
+	if c.ShouldBindJSON(&request) != nil {
+		writeError(c, ErrInvalidInput)
+		return
+	}
+	result, err := h.service.DeletePhones(c.Request.Context(), request.PhoneIDs, request.AccountIDs, mutationMeta(c))
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, result)
+}
+
 type importRequest struct {
 	Content string `json:"content" binding:"required"`
 }
@@ -144,6 +197,25 @@ func (h *handler) syncAccount(c *gin.Context) {
 	}
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusAccepted, task)
+}
+
+func (h *handler) listAccountTasks(c *gin.Context) {
+	accountID, err := pathID(c.Param("accountId"))
+	if err != nil {
+		writeError(c, ErrAccountMissing)
+		return
+	}
+	offset, limit, ok := middleware.ParsePagination(c, middleware.PaginationOptions{DefaultLimit: 20, MaxLimit: 100})
+	if !ok {
+		return
+	}
+	result, err := h.service.ListSyncRuns(c.Request.Context(), accountID, offset, limit)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, result)
 }
 
 func (h *handler) messages(c *gin.Context) {

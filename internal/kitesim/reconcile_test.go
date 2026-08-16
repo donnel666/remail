@@ -131,7 +131,7 @@ func TestPurchaseReconcileClosesConfirmedPartialCompletion(t *testing.T) {
 	}
 	operation := operationModel{
 		Kind: string(OperationPurchase), AccountID: account.ID, RequestedCount: 3, CompletedCount: 1,
-		Amount: "1", Status: string(OperationUncertain), ProviderOrderNos: refs,
+		Amount: "1", Status: string(OperationUncertain), ProviderOrderNos: jsonText(refs),
 		OperatorUserID: 7, IdempotencyKey: "purchase-partial", RequestFingerprint: strings.Repeat("a", 64),
 		QueuedAt: time.Now(),
 	}

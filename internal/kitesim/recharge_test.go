@@ -199,7 +199,7 @@ func TestRechargeThreeDSFailsAndClearsCVC(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	settings := upstreamSettingsModel{ID: upstreamSettingsID, AccountID: &account.ID, CardData: encodedCard, Balance: "0"}
+	settings := upstreamSettingsModel{ID: upstreamSettingsID, AccountID: &account.ID, CardData: jsonText(encodedCard), Balance: "0"}
 	if err := db.Create(&settings).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -212,12 +212,12 @@ func TestRechargeThreeDSFailsAndClearsCVC(t *testing.T) {
 	}
 	operation := operationModel{
 		Kind: string(OperationRecharge), AccountID: account.ID, RequestedCount: 1, Amount: "10",
-		Status: string(OperationQueued), SecretPayload: cvc, QueuedAt: service.now(),
+		Status: string(OperationQueued), SecretPayload: jsonText(cvc), QueuedAt: service.now(),
 	}
 	if err := db.Create(&operation).Error; err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(operation.SecretPayload, []byte("123")) {
+	if !bytes.Contains([]byte(operation.SecretPayload), []byte("123")) {
 		t.Fatal("queued CVC was not stored as plain JSON")
 	}
 	if err := service.processOperation(context.Background(), operation.ID); err != nil {
@@ -230,7 +230,7 @@ func TestRechargeThreeDSFailsAndClearsCVC(t *testing.T) {
 	if err := db.First(&stored, operation.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	references, err := decodeOperationRefs(stored.ProviderOrderNos)
+	references, err := decodeOperationRefs([]byte(stored.ProviderOrderNos))
 	if err != nil {
 		t.Fatal(err)
 	}
