@@ -18,6 +18,10 @@ func (s *Service) executePurchase(ctx context.Context, operation operationModel)
 	completed := 0
 	orderNos := make([]string, 0, operation.RequestedCount)
 	refs := operationProviderRefs{}
+	localCounts, err := s.localNumberSegmentCounts(ctx, operation.CountryCode)
+	if err != nil {
+		return 0, nil, err
+	}
 	err = s.withSingleUpstreamClient(ctx, account.Account, proxydomain.ProxyPurposeAuth, func(client *Client) error {
 		token, err := s.authenticateOperationClient(ctx, client, account)
 		if err != nil {
@@ -28,7 +32,7 @@ func (s *Service) executePurchase(ctx context.Context, operation operationModel)
 			if err != nil {
 				return err
 			}
-			selectedNumber, err := pickBestNumber(numbers)
+			selectedNumber, err := pickBestNumber(numbers, localCounts)
 			if err != nil {
 				return err
 			}
@@ -65,10 +69,29 @@ func (s *Service) executePurchase(ctx context.Context, operation operationModel)
 			if err := s.recordOperationProgress(ctx, operation.ID, completed, refs); err != nil {
 				return errors.Join(ErrPaymentUncertain, err)
 			}
+			localCounts[numberSegment(selectedNumber)]++
 		}
 		return nil
 	})
 	return completed, orderNos, err
+}
+
+func (s *Service) localNumberSegmentCounts(ctx context.Context, countryCode string) (map[string]int, error) {
+	var phones []phoneModel
+	if err := s.db.WithContext(ctx).
+		Select("phone_code", "phone_number").
+		Where("UPPER(country_code) = ?", strings.ToUpper(strings.TrimSpace(countryCode))).
+		Find(&phones).Error; err != nil {
+		return nil, fmt.Errorf("load Kitesim local phone inventory: %w", err)
+	}
+	counts := make(map[string]int, len(phones))
+	for _, phone := range phones {
+		segment := numberSegment(PhoneNumberOffer{PhoneCode: stringValue(phone.PhoneCode), PhoneNumber: phone.PhoneNumber})
+		if segment != "" {
+			counts[segment]++
+		}
+	}
+	return counts, nil
 }
 
 func (s *Service) executeRenewal(ctx context.Context, operation operationModel) (string, error) {

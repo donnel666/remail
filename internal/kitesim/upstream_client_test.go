@@ -44,12 +44,26 @@ func TestPickBestNumberUsesRarestSegmentThenLowestPrice(t *testing.T) {
 		{PhoneCode: "1", PhoneNumber: "16045550003", BuyPrice: "1.10"},
 		{PhoneCode: "1", PhoneNumber: "16475550004", BuyPrice: "1.30"},
 		{PhoneCode: "1", PhoneNumber: "16475550005", BuyPrice: "0.90"},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if number.PhoneNumber != "16045550003" {
 		t.Fatalf("picked %s, want the only 604 number", number.PhoneNumber)
+	}
+}
+
+func TestPickBestNumberSubtractsLocalInventoryFromRemoteRank(t *testing.T) {
+	number, err := pickBestNumber([]PhoneNumberOffer{
+		{PhoneCode: "1", PhoneNumber: "16045550001", BuyPrice: "0.80"},
+		{PhoneCode: "1", PhoneNumber: "14165550002", BuyPrice: "1.20"},
+		{PhoneCode: "1", PhoneNumber: "14165550003", BuyPrice: "0.90"},
+	}, map[string]int{"604": 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if number.PhoneNumber != "14165550003" {
+		t.Fatalf("picked %s, want the 416 segment after local inventory penalty", number.PhoneNumber)
 	}
 }
 
@@ -360,13 +374,13 @@ func TestExecutePurchaseRefreshesInventoryBeforeEachOrder(t *testing.T) {
 			_ = json.NewEncoder(response).Encode(map[string]any{"code": 200, "data": map[string]any{"balance": "100"}})
 		case "/countryCode/getPhoneNumber/CA":
 			inventoryFetches++
-			numbers := []map[string]any{{"phoneCode": "1", "phoneNumber": "14165550001", "buyPrice": "1"}}
+			numbers := []map[string]any{
+				{"phoneCode": "1", "phoneNumber": "14165550001", "buyPrice": "0.50"},
+				{"phoneCode": "1", "phoneNumber": "14165550003", "buyPrice": "0.40"},
+				{"phoneCode": "1", "phoneNumber": "16045550004", "buyPrice": "1.20"},
+			}
 			if inventoryFetches > 1 {
-				numbers = []map[string]any{
-					{"phoneCode": "1", "phoneNumber": "14165550002", "buyPrice": "0.50"},
-					{"phoneCode": "1", "phoneNumber": "14165550003", "buyPrice": "0.40"},
-					{"phoneCode": "1", "phoneNumber": "16045550004", "buyPrice": "1.20"},
-				}
+				numbers[1] = map[string]any{"phoneCode": "1", "phoneNumber": "14165550005", "buyPrice": "0.60"}
 			}
 			_ = json.NewEncoder(response).Encode(map[string]any{"code": 200, "data": numbers})
 		case "/package/getNumberPackageList":
@@ -393,12 +407,18 @@ func TestExecutePurchaseRefreshesInventoryBeforeEachOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&accountModel{}, &productModel{}, &upstreamSettingsModel{}, &operationModel{}); err != nil {
+	if err := db.AutoMigrate(&accountModel{}, &phoneModel{}, &productModel{}, &upstreamSettingsModel{}, &operationModel{}); err != nil {
 		t.Fatal(err)
 	}
 	service := NewService(db, nil)
 	account := testAccount("owner@example.com", "unused", "token")
 	if err := db.Create(&account).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create([]phoneModel{
+		{AccountID: account.ID, ProviderOrderID: "local-604-1", PhoneCode: "1", PhoneNumber: "16045550101", CountryCode: "CA", Status: int(PhoneActive)},
+		{AccountID: account.ID, ProviderOrderID: "local-604-2", PhoneCode: "1", PhoneNumber: "16045550102", CountryCode: "CA", Status: int(PhoneActive)},
+	}).Error; err != nil {
 		t.Fatal(err)
 	}
 	product := productModel{CountryCode: "CA", PackageID: "package", DurationType: 2, DurationValue: 1, Active: true}
@@ -426,7 +446,7 @@ func TestExecutePurchaseRefreshesInventoryBeforeEachOrder(t *testing.T) {
 	if completed != 2 || len(orderNos) != 2 || inventoryFetches != 2 || confirmations != 2 {
 		t.Fatalf("completed=%d orders=%v inventoryFetches=%d confirmations=%d", completed, orderNos, inventoryFetches, confirmations)
 	}
-	if len(purchased) != 2 || purchased[0] != "14165550001" || purchased[1] != "16045550004" {
+	if len(purchased) != 2 || purchased[0] != "14165550003" || purchased[1] != "16045550004" {
 		t.Fatalf("purchased numbers = %v", purchased)
 	}
 }

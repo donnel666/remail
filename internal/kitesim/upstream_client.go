@@ -226,19 +226,44 @@ func orderNoFromJSON(raw json.RawMessage) (string, error) {
 	return "", errors.New("kitesim: order number missing")
 }
 
-func pickBestNumber(numbers []PhoneNumberOffer) (PhoneNumberOffer, error) {
+const topNumberSegmentScore = 10000
+
+func pickBestNumber(numbers []PhoneNumberOffer, localCounts map[string]int) (PhoneNumberOffer, error) {
 	if len(numbers) == 0 {
 		return PhoneNumberOffer{}, errors.New("kitesim: no phone numbers available")
 	}
-	segments := make(map[string]int, len(numbers))
+	remoteCounts := make(map[string]int, len(numbers))
 	for _, number := range numbers {
-		segments[numberSegment(number)]++
+		remoteCounts[numberSegment(number)]++
 	}
-	best := numbers[0]
-	for _, candidate := range numbers[1:] {
-		bestCount, candidateCount := segments[numberSegment(best)], segments[numberSegment(candidate)]
-		if candidateCount < bestCount || candidateCount == bestCount && decimalLess(candidate.BuyPrice, best.BuyPrice) {
-			best = candidate
+	segments := make([]string, 0, len(remoteCounts))
+	for segment := range remoteCounts {
+		segments = append(segments, segment)
+	}
+	sort.Slice(segments, func(i, j int) bool {
+		if remoteCounts[segments[i]] != remoteCounts[segments[j]] {
+			return remoteCounts[segments[i]] < remoteCounts[segments[j]]
+		}
+		return segments[i] < segments[j]
+	})
+
+	bestSegment := segments[0]
+	bestScore := topNumberSegmentScore - localCounts[bestSegment]
+	for rank, segment := range segments[1:] {
+		score := topNumberSegmentScore - rank - 1 - localCounts[segment]
+		if score > bestScore {
+			bestSegment, bestScore = segment, score
+		}
+	}
+
+	var best PhoneNumberOffer
+	found := false
+	for _, candidate := range numbers {
+		if numberSegment(candidate) != bestSegment {
+			continue
+		}
+		if !found || decimalLess(candidate.BuyPrice, best.BuyPrice) {
+			best, found = candidate, true
 		}
 	}
 	return best, nil
