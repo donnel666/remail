@@ -290,7 +290,8 @@ func (iCloudImportModel) TableName() string { return "icloud_resource_imports" }
 
 type iCloudImportPreparationModel struct {
 	ID                    uint       `gorm:"column:id;primaryKey;autoIncrement"`
-	OperatorUserID        uint       `gorm:"column:operator_user_id"`
+	OperatorUserID        *uint      `gorm:"column:operator_user_id"`
+	SystemKeyID           *uint      `gorm:"column:system_key_id"`
 	DomainResourceID      uint       `gorm:"column:domain_resource_id"`
 	ForwardToEmail        string     `gorm:"column:forward_to_email"`
 	VerificationMessageID *uint      `gorm:"column:verification_message_id"`

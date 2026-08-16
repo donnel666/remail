@@ -28,5 +28,20 @@ func RegisterRoutes(rg *gin.RouterGroup, module *Module, fetcher middleware.Sess
 		admin.PUT("/settings", middleware.PermissionRequired(checker, "system:settings", "write"), h.PutBulk)
 		admin.PUT("/settings/:key", middleware.PermissionRequired(checker, "system:settings", "write"), h.Put)
 		admin.DELETE("/settings/:key", middleware.PermissionRequired(checker, "system:settings", "write"), h.Delete)
+		admin.GET("/system-keys",
+			middleware.PermissionRequired(checker, "system:settings", "read"),
+			middleware.PermissionRequired(checker, "system:settings", "sensitive"),
+			h.GetSystemKeys,
+		)
+		admin.POST("/system-keys",
+			middleware.PermissionRequired(checker, "system:settings", "write"),
+			middleware.PermissionRequired(checker, "system:settings", "sensitive"),
+			h.PostSystemKey,
+		)
+		admin.DELETE("/system-keys/:keyId",
+			middleware.PermissionRequired(checker, "system:settings", "write"),
+			middleware.PermissionRequired(checker, "system:settings", "sensitive"),
+			h.DeleteSystemKey,
+		)
 	}
 }

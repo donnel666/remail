@@ -4,6 +4,7 @@ import (
 	"github.com/donnel666/remail/api/middleware"
 	billingapi "github.com/donnel666/remail/internal/billing/api"
 	coreapi "github.com/donnel666/remail/internal/core/api"
+	icloudapi "github.com/donnel666/remail/internal/icloud"
 	openapiapi "github.com/donnel666/remail/internal/openapi/api"
 	tradeapi "github.com/donnel666/remail/internal/trade/api"
 	"github.com/gin-gonic/gin"
@@ -21,9 +22,13 @@ func registerOpenRoutes(
 	coreMod *coreapi.CoreModule,
 	billingMod *billingapi.BillingModule,
 	tradeMod *tradeapi.Module,
+	icloudMod *icloudapi.Module,
+	systemKeys middleware.SystemKeyAuthenticator,
 	checker middleware.PermissionChecker,
 	rdb redis.UniversalClient,
 ) {
+	icloudapi.RegisterSystemKeyRoutes(v1, icloudMod, systemKeys, rdb)
+
 	open := v1.Group("/open")
 	open.Use(openapiapi.LoadAPIKey(openapiMod.UseCase))
 	open.Use(openapiapi.KeyRequired())

@@ -74,3 +74,35 @@ func TestRateLimitPerUserFailsClosedWithoutRedis(t *testing.T) {
 
 	require.Equal(t, http.StatusServiceUnavailable, postRedeem(rateLimitRouter(rdb, 7)).Code)
 }
+
+func systemKeyRateLimitRouter(rdb redis.UniversalClient, keyID uint) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.GET("/code",
+		func(c *gin.Context) {
+			c.Set(contextKeySystemKeyID, keyID)
+			c.Next()
+		},
+		RateLimitPerSystemKey(rdb, "icloud_forwarding_email_read", 1, 60),
+		func(c *gin.Context) { c.Status(http.StatusOK) },
+	)
+	return router
+}
+
+func getCode(router *gin.Engine) *httptest.ResponseRecorder {
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/code", nil))
+	return response
+}
+
+func TestRateLimitPerSystemKeyCountsEachApplicationSeparately(t *testing.T) {
+	server := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+
+	require.Equal(t, http.StatusOK, getCode(systemKeyRateLimitRouter(rdb, 7)).Code)
+	blocked := getCode(systemKeyRateLimitRouter(rdb, 7))
+	require.Equal(t, http.StatusTooManyRequests, blocked.Code)
+	require.Equal(t, "60", blocked.Header().Get("Retry-After"))
+	require.Equal(t, http.StatusOK, getCode(systemKeyRateLimitRouter(rdb, 8)).Code)
+}

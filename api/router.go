@@ -322,7 +322,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		mailmatchapi.RegisterRoutes(v1, mailmatchMod)
 		mailmatchapi.RegisterAdminRoutes(v1, mailmatchMod, iamSessionFetcher, iamMod.PermissionChecker)
 
-		registerOpenRoutes(v1, openapiMod, coreMod, billingMod, tradeMod, iamMod.PermissionChecker, p.Redis)
+		registerOpenRoutes(v1, openapiMod, coreMod, billingMod, tradeMod, icloudMod, systemSettingsMod.SystemKeys, iamMod.PermissionChecker, p.Redis)
 
 		// Dashboard module (read-only console analytics; self-contained raw-SQL
 		// aggregates over orders, code receipts, wallets, projects and users).

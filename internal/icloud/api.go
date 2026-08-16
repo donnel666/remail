@@ -12,6 +12,12 @@ import (
 	"github.com/donnel666/remail/api/middleware"
 	coreDomain "github.com/donnel666/remail/internal/core/domain"
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
+)
+
+const (
+	systemForwardingEmailCreatesPerMinute = 120
+	systemForwardingEmailReadsPerMinute   = 1200
 )
 
 // RegisterRoutes exposes the safe administrator lifecycle. Resource session
@@ -46,6 +52,34 @@ func RegisterRoutes(rg *gin.RouterGroup, module *Module, fetcher middleware.Sess
 	resources.POST("/:resourceId/unpublish", middleware.PermissionRequired(checker, "core:resource", "operate"), h.resourceCommand(AdminICloudUnpublish))
 	resources.POST("/:resourceId/recover", middleware.PermissionRequired(checker, "core:resource", "operate"), h.resourceCommand(AdminICloudRecover))
 	resources.DELETE("/:resourceId", middleware.PermissionRequired(checker, "core:resource", "operate"), h.resourceCommand(AdminICloudDelete))
+}
+
+func RegisterSystemKeyRoutes(
+	rg *gin.RouterGroup,
+	module *Module,
+	authenticator middleware.SystemKeyAuthenticator,
+	rdb redis.UniversalClient,
+) {
+	if rg == nil {
+		return
+	}
+	var service *Service
+	if module != nil {
+		service = module.Service
+	}
+	h := &handler{service: service}
+	routes := rg.Group("/open/icloud")
+	routes.Use(middleware.SystemKeyRequired(authenticator))
+	routes.POST(
+		"/forwarding-emails",
+		middleware.RateLimitPerSystemKey(rdb, "icloud_forwarding_email_create", systemForwardingEmailCreatesPerMinute, 60),
+		h.createSystemForwardingEmail,
+	)
+	routes.GET(
+		"/forwarding-emails/:preparationId",
+		middleware.RateLimitPerSystemKey(rdb, "icloud_forwarding_email_read", systemForwardingEmailReadsPerMinute, 60),
+		h.systemForwardingEmail,
+	)
 }
 
 type handler struct {
@@ -181,9 +215,8 @@ func (h *handler) createImportPreparation(c *gin.Context) {
 }
 
 func (h *handler) importPreparation(c *gin.Context) {
-	preparationID, err := strconv.ParseUint(strings.TrimSpace(c.Param("preparationId")), 10, 64)
-	if err != nil || preparationID == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid preparation ID.", "requestId": middleware.GetRequestID(c)})
+	preparationID, ok := parseICloudPreparationID(c)
+	if !ok {
 		return
 	}
 	operatorUserID, ok := middleware.GetCurrentUserID(c)
@@ -191,13 +224,56 @@ func (h *handler) importPreparation(c *gin.Context) {
 		c.Status(http.StatusUnauthorized)
 		return
 	}
-	result, err := h.service.GetAdminICloudImportPreparation(c.Request.Context(), operatorUserID, uint(preparationID))
+	result, err := h.service.GetAdminICloudImportPreparation(c.Request.Context(), operatorUserID, preparationID)
 	if err != nil {
 		writeICloudError(c, err)
 		return
 	}
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, toICloudImportPreparationResponse(result))
+}
+
+func (h *handler) createSystemForwardingEmail(c *gin.Context) {
+	systemKeyID, ok := middleware.GetCurrentSystemKeyID(c)
+	if !ok {
+		c.Status(http.StatusUnauthorized)
+		return
+	}
+	result, err := h.service.CreateSystemICloudImportPreparation(c.Request.Context(), systemKeyID)
+	if err != nil {
+		writeICloudError(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusCreated, toICloudImportPreparationResponse(result))
+}
+
+func (h *handler) systemForwardingEmail(c *gin.Context) {
+	preparationID, ok := parseICloudPreparationID(c)
+	if !ok {
+		return
+	}
+	systemKeyID, ok := middleware.GetCurrentSystemKeyID(c)
+	if !ok {
+		c.Status(http.StatusUnauthorized)
+		return
+	}
+	result, err := h.service.GetSystemICloudImportPreparation(c.Request.Context(), systemKeyID, preparationID)
+	if err != nil {
+		writeICloudError(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, toICloudImportPreparationResponse(result))
+}
+
+func parseICloudPreparationID(c *gin.Context) (uint, bool) {
+	preparationID, err := strconv.ParseUint(strings.TrimSpace(c.Param("preparationId")), 10, 64)
+	if err != nil || preparationID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid preparation ID.", "requestId": middleware.GetRequestID(c)})
+		return 0, false
+	}
+	return uint(preparationID), true
 }
 
 func (h *handler) importResources(c *gin.Context) {

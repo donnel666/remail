@@ -44,7 +44,21 @@ var (
 )
 
 func (s *Service) CreateAdminICloudImportPreparation(ctx context.Context, operatorUserID uint) (*ImportPreparationView, error) {
-	if s == nil || s.db == nil || operatorUserID == 0 {
+	if operatorUserID == 0 {
+		return nil, ErrICloudImportDependency
+	}
+	return s.createICloudImportPreparation(ctx, &operatorUserID, nil)
+}
+
+func (s *Service) CreateSystemICloudImportPreparation(ctx context.Context, systemKeyID uint) (*ImportPreparationView, error) {
+	if systemKeyID == 0 {
+		return nil, ErrICloudImportDependency
+	}
+	return s.createICloudImportPreparation(ctx, nil, &systemKeyID)
+}
+
+func (s *Service) createICloudImportPreparation(ctx context.Context, operatorUserID, systemKeyID *uint) (*ImportPreparationView, error) {
+	if s == nil || s.db == nil || (operatorUserID == nil) == (systemKeyID == nil) {
 		return nil, ErrICloudImportDependency
 	}
 	now := s.now().UTC()
@@ -83,6 +97,7 @@ func (s *Service) CreateAdminICloudImportPreparation(ctx context.Context, operat
 		domain := domains[index.Int64()]
 		model := iCloudImportPreparationModel{
 			OperatorUserID:   operatorUserID,
+			SystemKeyID:      systemKeyID,
 			DomainResourceID: domain.ID,
 			ForwardToEmail:   local + "@" + domain.Domain,
 			ExpiresAt:        now.Add(iCloudImportPreparationTTL),
@@ -135,12 +150,26 @@ func (s *Service) cleanupICloudImportPreparations(ctx context.Context, before ti
 }
 
 func (s *Service) GetAdminICloudImportPreparation(ctx context.Context, operatorUserID, preparationID uint) (*ImportPreparationView, error) {
-	if s == nil || s.db == nil || operatorUserID == 0 || preparationID == 0 {
+	if operatorUserID == 0 {
+		return nil, ErrICloudImportPreparationNotFound
+	}
+	return s.getICloudImportPreparation(ctx, "operator_user_id", operatorUserID, preparationID)
+}
+
+func (s *Service) GetSystemICloudImportPreparation(ctx context.Context, systemKeyID, preparationID uint) (*ImportPreparationView, error) {
+	if systemKeyID == 0 {
+		return nil, ErrICloudImportPreparationNotFound
+	}
+	return s.getICloudImportPreparation(ctx, "system_key_id", systemKeyID, preparationID)
+}
+
+func (s *Service) getICloudImportPreparation(ctx context.Context, ownerColumn string, ownerID, preparationID uint) (*ImportPreparationView, error) {
+	if s == nil || s.db == nil || ownerID == 0 || preparationID == 0 {
 		return nil, ErrICloudImportPreparationNotFound
 	}
 	var model iCloudImportPreparationModel
 	err := s.db.WithContext(ctx).
-		Where("id = ? AND operator_user_id = ?", preparationID, operatorUserID).
+		Where("id = ? AND "+ownerColumn+" = ?", preparationID, ownerID).
 		First(&model).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrICloudImportPreparationNotFound
@@ -192,7 +221,7 @@ func (s *Service) GetAdminICloudImportPreparation(ctx context.Context, operatorU
 		}
 		verifiedAt := now
 		result := s.db.WithContext(ctx).Model(&iCloudImportPreparationModel{}).
-			Where("id = ? AND operator_user_id = ? AND verification_message_id IS NULL AND consumed_at IS NULL AND expires_at > ?", model.ID, operatorUserID, now).
+			Where("id = ? AND "+ownerColumn+" = ? AND verification_message_id IS NULL AND consumed_at IS NULL AND expires_at > ?", model.ID, ownerID, now).
 			Updates(map[string]any{
 				"verification_message_id": row.ID,
 				"verification_code":       code,
@@ -210,7 +239,7 @@ func (s *Service) GetAdminICloudImportPreparation(ctx context.Context, operatorU
 			model.UpdatedAt = now
 			return model.preparationView(now), nil
 		}
-		return s.GetAdminICloudImportPreparation(ctx, operatorUserID, preparationID)
+		return s.getICloudImportPreparation(ctx, ownerColumn, ownerID, preparationID)
 	}
 	if readFailed {
 		return nil, ErrICloudImportTemporary

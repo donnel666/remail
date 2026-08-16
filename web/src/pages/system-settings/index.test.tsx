@@ -51,6 +51,7 @@ vi.mock("./settings-layout", () => ({
 
 vi.mock("./site-content", () => ({ default: () => <div data-testid="settings-section" /> }));
 vi.mock("./auth-security", () => ({ default: () => <div data-testid="settings-section" /> }));
+vi.mock("./system-keys", () => ({ default: () => <div data-testid="settings-section" /> }));
 vi.mock("./email-service", () => ({
   default: ({ onBulkSave }: any) => (
     <button

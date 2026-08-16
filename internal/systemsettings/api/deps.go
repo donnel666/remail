@@ -16,6 +16,7 @@ import (
 // Module contains the dependencies for the administrator system-settings API.
 type Module struct {
 	Settings    *app.SystemSettingsUseCase
+	SystemKeys  *app.SystemKeyUseCase
 	runtimeSync *runtimeSettingsSync
 }
 
@@ -42,12 +43,11 @@ func NewModule(db *gorm.DB, redisClients ...redis.UniversalClient) (*Module, err
 		slog.Warn("ignoring conflicting persisted runtime settings", "error", err)
 	}
 	runtimeconfig.Replace(settings)
-	useCase := app.NewSystemSettingsUseCase(
-		repo,
-		governanceinfra.NewOperationLogRepo(db),
-	)
+	operationLogs := governanceinfra.NewOperationLogRepo(db)
+	useCase := app.NewSystemSettingsUseCase(repo, operationLogs)
 	module := &Module{
 		Settings:    useCase,
+		SystemKeys:  app.NewSystemKeyUseCase(repo, operationLogs),
 		runtimeSync: newRuntimeSettingsSync(redisClient, repo),
 	}
 	useCase.SetRuntimeSettingsPublisher(newRedisRuntimeSettingsPublisher(redisClient))

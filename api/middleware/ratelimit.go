@@ -31,10 +31,24 @@ return ttl
 // Fails closed when Redis is unreachable: accepting an uncounted money-moving
 // request would silently remove the protection this middleware exists for.
 func RateLimitPerUser(rdb redis.UniversalClient, scope string, limit, windowSeconds int) gin.HandlerFunc {
+	return rateLimitPerID(rdb, "ratelimit:"+scope+":", limit, windowSeconds, GetCurrentUserID)
+}
+
+// RateLimitPerSystemKey gives each third-party application its own budget.
+func RateLimitPerSystemKey(rdb redis.UniversalClient, scope string, limit, windowSeconds int) gin.HandlerFunc {
+	return rateLimitPerID(rdb, "ratelimit:system_key:"+scope+":", limit, windowSeconds, GetCurrentSystemKeyID)
+}
+
+func rateLimitPerID(
+	rdb redis.UniversalClient,
+	keyPrefix string,
+	limit, windowSeconds int,
+	getID func(*gin.Context) (uint, bool),
+) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		userID, ok := GetCurrentUserID(c)
+		id, ok := getID(c)
 		if !ok {
-			// No user means this ran ahead of authentication, which would itself
+			// No identity means this ran ahead of authentication, which would itself
 			// reject the request; there is nothing to count either way.
 			c.Next()
 			return
@@ -44,7 +58,7 @@ func RateLimitPerUser(rdb redis.UniversalClient, scope string, limit, windowSeco
 			return
 		}
 
-		key := "ratelimit:" + scope + ":" + strconv.FormatUint(uint64(userID), 10)
+		key := keyPrefix + strconv.FormatUint(uint64(id), 10)
 		retryAfter, err := rateLimitScript.Run(c.Request.Context(), rdb, []string{key}, limit, windowSeconds).Int()
 		if err != nil {
 			abortRateLimitUnavailable(c, err)

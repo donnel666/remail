@@ -8,12 +8,13 @@ import {
 import { useAuth, hasPermissionKey } from "@/context/auth-provider";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import {
-  Shield, Mail, Cpu, ShoppingCart, Cog, Users, Cloud,
+  Shield, Mail, Cpu, ShoppingCart, Cog, Users, Cloud, KeyRound,
 } from "lucide-react";
 
 // Section components
 import SiteContentSection from "./site-content";
 import AuthSecuritySection from "./auth-security";
+import SystemKeysSection from "./system-keys";
 import EmailServiceSection from "./email-service";
 import OrdersPaymentSection from "./orders-payment";
 import SystemOperationsSection from "./system-operations";
@@ -43,6 +44,7 @@ type Section = {
 const SECTIONS: Section[] = [
   { key: "site-content", label: "内容管理", labelEn: "Content", icon: <Cog size={18} />, component: SiteContentSection },
   { key: "auth", label: "认证安全", labelEn: "Auth & Security", icon: <Shield size={18} />, component: AuthSecuritySection },
+  { key: "system-keys", label: "System keys", labelEn: "System Keys", icon: <KeyRound size={18} />, component: SystemKeysSection },
   { key: "email-service", label: "邮箱服务", labelEn: "Email Service", icon: <Mail size={18} />, component: EmailServiceSection },
   { key: "upstreams", label: "上游设置", labelEn: "Upstreams", icon: <Cloud size={18} />, component: UpstreamsSection },
   { key: "orders-payment", label: "订单支付", labelEn: "Orders & Payment", icon: <ShoppingCart size={18} />, component: OrdersPaymentSection },

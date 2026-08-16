@@ -766,6 +766,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/system-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List active system keys
+         * @description Requires system settings read and sensitive permissions. Plain key values are never returned.
+         */
+        get: operations["getAdminSystemKeys"];
+        put?: never;
+        /**
+         * Create a system key
+         * @description Requires system settings write and sensitive permissions. The plain key is returned only in this response.
+         */
+        post: operations["postAdminSystemKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/system-keys/{keyId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke a system key */
+        delete: operations["deleteAdminSystemKey"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/users/{userId}/dashboard": {
         parameters: {
             query?: never;
@@ -4732,6 +4773,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/open/icloud/forwarding-emails": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a temporary iCloud forwarding email
+         * @description Creates a 30-minute forwarding email owned by the authenticated system key.
+         */
+        post: operations["postSystemICloudForwardingEmail"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/open/icloud/forwarding-emails/{preparationId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the Apple verification code for a forwarding email
+         * @description Returns only a forwarding email created by the same system key. The status remains waiting until a new message from noreply@apple.com supplies a verification code.
+         */
+        get: operations["getSystemICloudForwardingEmail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -6002,6 +6083,23 @@ export interface components {
         };
         AdminSystemSettingsBulkRequest: {
             settings: components["schemas"]["AdminSystemSettingUpdate"][];
+        };
+        AdminSystemKeyCreateRequest: {
+            name: string;
+        };
+        AdminSystemKey: {
+            id: number;
+            name: string;
+            keyPrefix: string;
+            /** @description Plain system key returned only by the create endpoint. */
+            keyPlain?: string;
+            /** Format: date-time */
+            lastUsedAt: string | null;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        AdminSystemKeyList: {
+            items: components["schemas"]["AdminSystemKey"][];
         };
         AdminUpdateUserRequest: {
             enabled?: boolean;
@@ -7347,7 +7445,7 @@ export interface components {
             facets: components["schemas"]["AdminICloudFacets"];
         };
         AdminICloudImportResponse: components["schemas"]["AdminMicrosoftImportResponse"];
-        AdminICloudImportPreparation: {
+        ICloudForwardingEmail: {
             id: number;
             /** Format: email */
             forwardToEmail: string;
@@ -7359,6 +7457,7 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
         };
+        AdminICloudImportPreparation: components["schemas"]["ICloudForwardingEmail"];
         /** @enum {string} */
         AdminICloudAliasStatus: "normal" | "disabled" | "missing" | "deleted";
         AdminICloudAliasItem: {
@@ -10941,6 +11040,88 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+        };
+    };
+    getAdminSystemKeys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Active system keys */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminSystemKeyList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminSystemKey: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminSystemKeyCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description System key created; copy keyPlain now because it cannot be recovered later */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminSystemKey"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    deleteAdminSystemKey: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path: {
+                keyId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description System key revoked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getAdminUserDashboard: {
@@ -22640,6 +22821,57 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+        };
+    };
+    postSystemICloudForwardingEmail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Temporary forwarding email created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ICloudForwardingEmail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            422: components["responses"]["UnprocessableEntity"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getSystemICloudForwardingEmail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                preparationId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current forwarding email and verification-code status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ICloudForwardingEmail"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
 }

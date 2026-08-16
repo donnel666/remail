@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -68,6 +69,82 @@ type bulkSettingRequest struct {
 type bulkSettingItem struct {
 	Key   string  `json:"key"`
 	Value *string `json:"value"`
+}
+
+type systemKeyRequest struct {
+	Name string `json:"name"`
+}
+
+type systemKeyDTO struct {
+	ID         uint       `json:"id"`
+	Name       string     `json:"name"`
+	KeyPrefix  string     `json:"keyPrefix"`
+	KeyPlain   string     `json:"keyPlain,omitempty"`
+	LastUsedAt *time.Time `json:"lastUsedAt"`
+	CreatedAt  time.Time  `json:"createdAt"`
+}
+
+func (h *Handler) GetSystemKeys(c *gin.Context) {
+	if h == nil || h.module == nil || h.module.SystemKeys == nil {
+		writeSystemKeyError(c, errUnavailable)
+		return
+	}
+	keys, err := h.module.SystemKeys.List(c.Request.Context())
+	if err != nil {
+		writeSystemKeyError(c, err)
+		return
+	}
+	items := make([]systemKeyDTO, len(keys))
+	for i := range keys {
+		items[i] = toSystemKeyDTO(keys[i], false)
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items})
+}
+
+func (h *Handler) PostSystemKey(c *gin.Context) {
+	if h == nil || h.module == nil || h.module.SystemKeys == nil {
+		writeSystemKeyError(c, errUnavailable)
+		return
+	}
+	var req systemKeyRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeSystemKeyError(c, domain.ErrInvalidSystemKey)
+		return
+	}
+	key, err := h.module.SystemKeys.Create(c.Request.Context(), req.Name, mutationMeta(c))
+	if err != nil {
+		writeSystemKeyError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, toSystemKeyDTO(*key, true))
+}
+
+func (h *Handler) DeleteSystemKey(c *gin.Context) {
+	if h == nil || h.module == nil || h.module.SystemKeys == nil {
+		writeSystemKeyError(c, errUnavailable)
+		return
+	}
+	keyID, err := strconv.ParseUint(strings.TrimSpace(c.Param("keyId")), 10, 64)
+	if err != nil || keyID == 0 {
+		writeSystemKeyError(c, domain.ErrInvalidSystemKey)
+		return
+	}
+	if err := h.module.SystemKeys.Delete(c.Request.Context(), uint(keyID), mutationMeta(c)); err != nil {
+		writeSystemKeyError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func toSystemKeyDTO(key domain.SystemKey, includePlain bool) systemKeyDTO {
+	dto := systemKeyDTO{
+		ID: key.ID, Name: key.Name, KeyPrefix: key.KeyPrefix,
+		LastUsedAt: key.LastUsedAt, CreatedAt: key.CreatedAt,
+	}
+	if includePlain {
+		dto.KeyPlain = key.KeyPlain
+	}
+	return dto
 }
 
 func (h *Handler) Get(c *gin.Context) {
@@ -327,4 +404,18 @@ func writeError(c *gin.Context, err error) {
 		body["fields"] = fieldError.Fields
 	}
 	c.JSON(status, body)
+}
+
+func writeSystemKeyError(c *gin.Context, err error) {
+	status := http.StatusInternalServerError
+	message := "An unexpected error occurred."
+	switch {
+	case errors.Is(err, domain.ErrInvalidSystemKey):
+		status, message = http.StatusBadRequest, "Invalid system key."
+	case errors.Is(err, domain.ErrSystemKeyNotFound):
+		status, message = http.StatusNotFound, "System key not found."
+	case errors.Is(err, errUnavailable):
+		status, message = http.StatusServiceUnavailable, "System keys are unavailable."
+	}
+	c.JSON(status, gin.H{"message": message, "requestId": middleware.GetRequestID(c)})
 }

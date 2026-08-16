@@ -15,8 +15,9 @@ import (
 )
 
 const (
-	BearerAuthScopes bearerAuthContextKey = "bearerAuth.Scopes"
-	CookieAuthScopes cookieAuthContextKey = "cookieAuth.Scopes"
+	BearerAuthScopes    bearerAuthContextKey    = "bearerAuth.Scopes"
+	CookieAuthScopes    cookieAuthContextKey    = "cookieAuth.Scopes"
+	SystemKeyAuthScopes systemKeyAuthContextKey = "systemKeyAuth.Scopes"
 )
 
 // Defines values for AdminAllocationItemMailbox.
@@ -622,30 +623,6 @@ const (
 func (e AdminICloudIdsSelectionMode) Valid() bool {
 	switch e {
 	case AdminICloudIdsSelectionModeIds:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for AdminICloudImportPreparationStatus.
-const (
-	AdminICloudImportPreparationStatusCodeReceived AdminICloudImportPreparationStatus = "code_received"
-	AdminICloudImportPreparationStatusConsumed     AdminICloudImportPreparationStatus = "consumed"
-	AdminICloudImportPreparationStatusExpired      AdminICloudImportPreparationStatus = "expired"
-	AdminICloudImportPreparationStatusWaiting      AdminICloudImportPreparationStatus = "waiting"
-)
-
-// Valid indicates whether the value is a known member of the AdminICloudImportPreparationStatus enum.
-func (e AdminICloudImportPreparationStatus) Valid() bool {
-	switch e {
-	case AdminICloudImportPreparationStatusCodeReceived:
-		return true
-	case AdminICloudImportPreparationStatusConsumed:
-		return true
-	case AdminICloudImportPreparationStatusExpired:
-		return true
-	case AdminICloudImportPreparationStatusWaiting:
 		return true
 	default:
 		return false
@@ -1882,6 +1859,30 @@ func (e GmailUpstreamActivationItemStatus) Valid() bool {
 	case GmailUpstreamActivationItemStatusProvisioning:
 		return true
 	case GmailUpstreamActivationItemStatusUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ICloudForwardingEmailStatus.
+const (
+	ICloudForwardingEmailStatusCodeReceived ICloudForwardingEmailStatus = "code_received"
+	ICloudForwardingEmailStatusConsumed     ICloudForwardingEmailStatus = "consumed"
+	ICloudForwardingEmailStatusExpired      ICloudForwardingEmailStatus = "expired"
+	ICloudForwardingEmailStatusWaiting      ICloudForwardingEmailStatus = "waiting"
+)
+
+// Valid indicates whether the value is a known member of the ICloudForwardingEmailStatus enum.
+func (e ICloudForwardingEmailStatus) Valid() bool {
+	switch e {
+	case ICloudForwardingEmailStatusCodeReceived:
+		return true
+	case ICloudForwardingEmailStatusConsumed:
+		return true
+	case ICloudForwardingEmailStatusExpired:
+		return true
+	case ICloudForwardingEmailStatusWaiting:
 		return true
 	default:
 		return false
@@ -5429,17 +5430,7 @@ type AdminICloudIdsSelection struct {
 type AdminICloudIdsSelectionMode string
 
 // AdminICloudImportPreparation defines model for AdminICloudImportPreparation.
-type AdminICloudImportPreparation struct {
-	CreatedAt        time.Time                          `json:"createdAt"`
-	ExpiresAt        time.Time                          `json:"expiresAt"`
-	ForwardToEmail   openapi_types.Email                `json:"forwardToEmail"`
-	Id               int                                `json:"id"`
-	Status           AdminICloudImportPreparationStatus `json:"status"`
-	VerificationCode *string                            `json:"verificationCode"`
-}
-
-// AdminICloudImportPreparationStatus defines model for AdminICloudImportPreparation.Status.
-type AdminICloudImportPreparationStatus string
+type AdminICloudImportPreparation = ICloudForwardingEmail
 
 // AdminICloudImportResponse defines model for AdminICloudImportResponse.
 type AdminICloudImportResponse = AdminMicrosoftImportResponse
@@ -6170,6 +6161,28 @@ type AdminRejectProjectRequest struct {
 type AdminReverseTransactionResponse struct {
 	Original AdminTransactionItem `json:"original"`
 	Reversal AdminTransactionItem `json:"reversal"`
+}
+
+// AdminSystemKey defines model for AdminSystemKey.
+type AdminSystemKey struct {
+	CreatedAt time.Time `json:"createdAt"`
+	Id        int       `json:"id"`
+
+	// KeyPlain Plain system key returned only by the create endpoint.
+	KeyPlain   *string    `json:"keyPlain,omitempty"`
+	KeyPrefix  string     `json:"keyPrefix"`
+	LastUsedAt *time.Time `json:"lastUsedAt"`
+	Name       string     `json:"name"`
+}
+
+// AdminSystemKeyCreateRequest defines model for AdminSystemKeyCreateRequest.
+type AdminSystemKeyCreateRequest struct {
+	Name string `json:"name"`
+}
+
+// AdminSystemKeyList defines model for AdminSystemKeyList.
+type AdminSystemKeyList struct {
+	Items []AdminSystemKey `json:"items"`
 }
 
 // AdminSystemLogItem defines model for AdminSystemLogItem.
@@ -7316,6 +7329,19 @@ type GrantProjectAccessRequest struct {
 type HealthResponse struct {
 	Status string `json:"status"`
 }
+
+// ICloudForwardingEmail defines model for ICloudForwardingEmail.
+type ICloudForwardingEmail struct {
+	CreatedAt        time.Time                   `json:"createdAt"`
+	ExpiresAt        time.Time                   `json:"expiresAt"`
+	ForwardToEmail   openapi_types.Email         `json:"forwardToEmail"`
+	Id               int                         `json:"id"`
+	Status           ICloudForwardingEmailStatus `json:"status"`
+	VerificationCode *string                     `json:"verificationCode"`
+}
+
+// ICloudForwardingEmailStatus defines model for ICloudForwardingEmail.Status.
+type ICloudForwardingEmailStatus string
 
 // ICloudInventory defines model for ICloudInventory.
 type ICloudInventory struct {
@@ -9351,6 +9377,9 @@ type bearerAuthContextKey string
 // cookieAuthContextKey is the context key for cookieAuth security scheme
 type cookieAuthContextKey string
 
+// systemKeyAuthContextKey is the context key for systemKeyAuth security scheme
+type systemKeyAuthContextKey string
+
 // GetAdminAllocationsParams defines parameters for GetAdminAllocations.
 type GetAdminAllocationsParams struct {
 	Type       *GetAdminAllocationsParamsType    `form:"type,omitempty" json:"type,omitempty"`
@@ -10764,6 +10793,18 @@ type PutAdminSettingParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// PostAdminSystemKeyParams defines parameters for PostAdminSystemKey.
+type PostAdminSystemKeyParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// DeleteAdminSystemKeyParams defines parameters for DeleteAdminSystemKey.
+type DeleteAdminSystemKeyParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // GetAdminTasksParams defines parameters for GetAdminTasks.
 type GetAdminTasksParams struct {
 	BizType GetAdminTasksParamsBizType `form:"bizType" json:"bizType"`
@@ -11766,6 +11807,9 @@ type PutAdminSettingsJSONRequestBody = AdminSystemSettingsBulkRequest
 
 // PutAdminSettingJSONRequestBody defines body for PutAdminSetting for application/json ContentType.
 type PutAdminSettingJSONRequestBody = AdminSystemSettingRequest
+
+// PostAdminSystemKeyJSONRequestBody defines body for PostAdminSystemKey for application/json ContentType.
+type PostAdminSystemKeyJSONRequestBody = AdminSystemKeyCreateRequest
 
 // PostAdminTicketMessageJSONRequestBody defines body for PostAdminTicketMessage for application/json ContentType.
 type PostAdminTicketMessageJSONRequestBody = ReplyTicketRequest
@@ -13153,6 +13197,15 @@ type ServerInterface interface {
 	// Upsert one system setting (admin only)
 	// (PUT /v1/admin/settings/{key})
 	PutAdminSetting(c *gin.Context, key string, params PutAdminSettingParams)
+	// List active system keys
+	// (GET /v1/admin/system-keys)
+	GetAdminSystemKeys(c *gin.Context)
+	// Create a system key
+	// (POST /v1/admin/system-keys)
+	PostAdminSystemKey(c *gin.Context, params PostAdminSystemKeyParams)
+	// Revoke a system key
+	// (DELETE /v1/admin/system-keys/{keyId})
+	DeleteAdminSystemKey(c *gin.Context, keyId int, params DeleteAdminSystemKeyParams)
 	// List normalized administrator tasks for a Microsoft, Gmail, iCloud, or domain resource
 	// (GET /v1/admin/tasks)
 	GetAdminTasks(c *gin.Context, params GetAdminTasksParams)
@@ -13396,6 +13449,12 @@ type ServerInterface interface {
 	// Get the pending Linux DO account ownership choice
 	// (GET /v1/oauth/linuxdo/pending)
 	GetLinuxDOPending(c *gin.Context)
+	// Create a temporary iCloud forwarding email
+	// (POST /v1/open/icloud/forwarding-emails)
+	PostSystemICloudForwardingEmail(c *gin.Context)
+	// Read the Apple verification code for a forwarding email
+	// (GET /v1/open/icloud/forwarding-emails/{preparationId})
+	GetSystemICloudForwardingEmail(c *gin.Context, preparationId int)
 	// List orders
 	// (GET /v1/orders)
 	GetOrders(c *gin.Context, params GetOrdersParams)
@@ -23523,6 +23582,120 @@ func (siw *ServerInterfaceWrapper) PutAdminSetting(c *gin.Context) {
 	siw.Handler.PutAdminSetting(c, key, params)
 }
 
+// GetAdminSystemKeys operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminSystemKeys(c *gin.Context) {
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminSystemKeys(c)
+}
+
+// PostAdminSystemKey operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminSystemKey(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminSystemKeyParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminSystemKey(c, params)
+}
+
+// DeleteAdminSystemKey operation middleware
+func (siw *ServerInterfaceWrapper) DeleteAdminSystemKey(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "keyId" -------------
+	var keyId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "keyId", c.Param("keyId"), &keyId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter keyId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteAdminSystemKeyParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DeleteAdminSystemKey(c, keyId, params)
+}
+
 // GetAdminTasks operation middleware
 func (siw *ServerInterfaceWrapper) GetAdminTasks(c *gin.Context) {
 
@@ -26726,6 +26899,48 @@ func (siw *ServerInterfaceWrapper) GetLinuxDOPending(c *gin.Context) {
 	siw.Handler.GetLinuxDOPending(c)
 }
 
+// PostSystemICloudForwardingEmail operation middleware
+func (siw *ServerInterfaceWrapper) PostSystemICloudForwardingEmail(c *gin.Context) {
+
+	c.Set(string(SystemKeyAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostSystemICloudForwardingEmail(c)
+}
+
+// GetSystemICloudForwardingEmail operation middleware
+func (siw *ServerInterfaceWrapper) GetSystemICloudForwardingEmail(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "preparationId" -------------
+	var preparationId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "preparationId", c.Param("preparationId"), &preparationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter preparationId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(SystemKeyAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetSystemICloudForwardingEmail(c, preparationId)
+}
+
 // GetOrders operation middleware
 func (siw *ServerInterfaceWrapper) GetOrders(c *gin.Context) {
 
@@ -29539,6 +29754,9 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.DELETE(options.BaseURL+"/v1/admin/settings/:key", wrapper.DeleteAdminSetting)
 	router.GET(options.BaseURL+"/v1/admin/settings/:key", wrapper.GetAdminSetting)
 	router.PUT(options.BaseURL+"/v1/admin/settings/:key", wrapper.PutAdminSetting)
+	router.GET(options.BaseURL+"/v1/admin/system-keys", wrapper.GetAdminSystemKeys)
+	router.POST(options.BaseURL+"/v1/admin/system-keys", wrapper.PostAdminSystemKey)
+	router.DELETE(options.BaseURL+"/v1/admin/system-keys/:keyId", wrapper.DeleteAdminSystemKey)
 	router.GET(options.BaseURL+"/v1/admin/tasks", wrapper.GetAdminTasks)
 	router.GET(options.BaseURL+"/v1/admin/tasks/:taskId", wrapper.GetAdminTask)
 	router.GET(options.BaseURL+"/v1/admin/tickets", wrapper.GetAdminTickets)
@@ -29620,6 +29838,8 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/oauth/linuxdo/complete", wrapper.PostLinuxDOComplete)
 	router.POST(options.BaseURL+"/v1/oauth/linuxdo/email/code", wrapper.PostLinuxDOEmailCode)
 	router.GET(options.BaseURL+"/v1/oauth/linuxdo/pending", wrapper.GetLinuxDOPending)
+	router.POST(options.BaseURL+"/v1/open/icloud/forwarding-emails", wrapper.PostSystemICloudForwardingEmail)
+	router.GET(options.BaseURL+"/v1/open/icloud/forwarding-emails/:preparationId", wrapper.GetSystemICloudForwardingEmail)
 	router.GET(options.BaseURL+"/v1/orders", wrapper.GetOrders)
 	router.POST(options.BaseURL+"/v1/orders", wrapper.PostOrder)
 	router.POST(options.BaseURL+"/v1/orders/batch", wrapper.PostOrderBatch)

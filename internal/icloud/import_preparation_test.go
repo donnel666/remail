@@ -47,6 +47,8 @@ type iCloudPreparationMailTestModel struct {
 
 func (iCloudPreparationMailTestModel) TableName() string { return "inbound_mails" }
 
+func icloudUintPtr(value uint) *uint { return &value }
+
 func TestCreateAdminICloudImportPreparationUsesEligibleConfiguredDomain(t *testing.T) {
 	db := newICloudPreparationTestDB(t, "icloud-preparation-domain", &iCloudPreparationDomainTestModel{}, &iCloudImportPreparationModel{}, &iCloudImportModel{})
 	domains := []iCloudPreparationDomainTestModel{
@@ -62,9 +64,9 @@ func TestCreateAdminICloudImportPreparationUsesEligibleConfiguredDomain(t *testi
 	now := time.Date(2026, 8, 15, 8, 0, 0, 0, time.UTC)
 	oldReferencedID := uint(12)
 	preparations := []iCloudImportPreparationModel{
-		{ID: 10, OperatorUserID: 9, DomainResourceID: 1, ForwardToEmail: "old@relay.example", ExpiresAt: now.Add(-25 * time.Hour), CreatedAt: now.Add(-26 * time.Hour), UpdatedAt: now},
-		{ID: 11, OperatorUserID: 9, DomainResourceID: 1, ForwardToEmail: "recent@relay.example", ExpiresAt: now.Add(-23 * time.Hour), CreatedAt: now.Add(-24 * time.Hour), UpdatedAt: now},
-		{ID: oldReferencedID, OperatorUserID: 9, DomainResourceID: 1, ForwardToEmail: "referenced@relay.example", ExpiresAt: now.Add(-25 * time.Hour), CreatedAt: now.Add(-26 * time.Hour), UpdatedAt: now},
+		{ID: 10, OperatorUserID: icloudUintPtr(9), DomainResourceID: 1, ForwardToEmail: "old@relay.example", ExpiresAt: now.Add(-25 * time.Hour), CreatedAt: now.Add(-26 * time.Hour), UpdatedAt: now},
+		{ID: 11, OperatorUserID: icloudUintPtr(9), DomainResourceID: 1, ForwardToEmail: "recent@relay.example", ExpiresAt: now.Add(-23 * time.Hour), CreatedAt: now.Add(-24 * time.Hour), UpdatedAt: now},
+		{ID: oldReferencedID, OperatorUserID: icloudUintPtr(9), DomainResourceID: 1, ForwardToEmail: "referenced@relay.example", ExpiresAt: now.Add(-25 * time.Hour), CreatedAt: now.Add(-26 * time.Hour), UpdatedAt: now},
 	}
 	if err := db.Create(&preparations).Error; err != nil {
 		t.Fatalf("create cleanup preparations: %v", err)
@@ -96,6 +98,49 @@ func TestCreateAdminICloudImportPreparationUsesEligibleConfiguredDomain(t *testi
 	}
 }
 
+func TestSystemICloudPreparationIsScopedToItsSystemKey(t *testing.T) {
+	db := newICloudPreparationTestDB(
+		t, "icloud-system-preparation",
+		&iCloudPreparationDomainTestModel{}, &iCloudImportPreparationModel{},
+		&iCloudImportModel{}, &iCloudPreparationMailTestModel{},
+	)
+	requireDomain := iCloudPreparationDomainTestModel{
+		ID: 1, Domain: "relay.example", Purpose: "binding", Status: "normal", AllowNewBindings: true,
+	}
+	if err := db.Create(&requireDomain).Error; err != nil {
+		t.Fatalf("create forwarding domain: %v", err)
+	}
+	setICloudPreparationRuntimeValue(t, runtimeconfig.ICloudForwardingSuffixesKey, "relay.example")
+
+	now := time.Date(2026, 8, 16, 8, 0, 0, 0, time.UTC)
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	created, err := service.CreateSystemICloudImportPreparation(context.Background(), 21)
+	if err != nil {
+		t.Fatalf("create system preparation: %v", err)
+	}
+	var stored iCloudImportPreparationModel
+	if err := db.First(&stored, created.ID).Error; err != nil || stored.OperatorUserID != nil || stored.SystemKeyID == nil || *stored.SystemKeyID != 21 {
+		t.Fatalf("stored system preparation=%#v err=%v", stored, err)
+	}
+	parsedAt := now.Add(time.Minute)
+	if err := db.Create(&iCloudPreparationMailTestModel{
+		ID: 1, HeaderFrom: "noreply@apple.com", Recipient: created.ForwardToEmail,
+		VerificationCode: "654321", ParsedAt: &parsedAt,
+		CreatedAt: parsedAt, UpdatedAt: parsedAt,
+	}).Error; err != nil {
+		t.Fatalf("create verification mail: %v", err)
+	}
+	service.now = func() time.Time { return now.Add(2 * time.Minute) }
+	result, err := service.GetSystemICloudImportPreparation(context.Background(), 21, created.ID)
+	if err != nil || result.VerificationCode != "654321" {
+		t.Fatalf("get system preparation result=%#v err=%v", result, err)
+	}
+	if _, err := service.GetSystemICloudImportPreparation(context.Background(), 22, created.ID); !errors.Is(err, ErrICloudImportPreparationNotFound) {
+		t.Fatalf("cross-key read error = %v", err)
+	}
+}
+
 func TestGeneratedICloudImportAddressesDoNotShadowAppleVerificationCode(t *testing.T) {
 	setICloudPreparationRuntimeValue(t, "verification_code_pattern", `["(?:^|[^\\d])(\\d{6,8})(?:[^\\d]|$)"]`)
 	now := time.Date(2026, 8, 15, 20, 0, 0, 0, time.UTC)
@@ -122,7 +167,7 @@ func TestGetAdminICloudImportPreparationAcceptsOnlyNewExactAppleMail(t *testing.
 	db := newICloudPreparationTestDB(t, "icloud-preparation-mail", &iCloudImportPreparationModel{}, &iCloudPreparationMailTestModel{})
 	base := time.Date(2026, 8, 15, 9, 0, 0, 0, time.UTC)
 	preparation := iCloudImportPreparationModel{
-		ID: 7, OperatorUserID: 9, DomainResourceID: 1,
+		ID: 7, OperatorUserID: icloudUintPtr(9), DomainResourceID: 1,
 		ForwardToEmail: "icloud_test@relay.example", ExpiresAt: base.Add(30 * time.Minute),
 		CreatedAt: base, UpdatedAt: base,
 	}
@@ -203,14 +248,14 @@ func TestPreparedICloudImportConsumesVerifiedPreparationOnce(t *testing.T) {
 	}
 	setICloudPreparationRuntimeValue(t, runtimeconfig.ICloudForwardingSuffixesKey, "relay.example,purpose.example,status.example,bindings.example")
 	preparations := []iCloudImportPreparationModel{
-		{ID: 1, OperatorUserID: 9, DomainResourceID: 1, ForwardToEmail: "icloud_ok@relay.example", VerificationCode: "088556", VerifiedAt: &verifiedAt, ExpiresAt: now.Add(20 * time.Minute), CreatedAt: now.Add(-2 * time.Minute), UpdatedAt: now},
-		{ID: 2, OperatorUserID: 9, DomainResourceID: 1, ForwardToEmail: "icloud_waiting@relay.example", ExpiresAt: now.Add(20 * time.Minute), CreatedAt: now, UpdatedAt: now},
-		{ID: 3, OperatorUserID: 9, DomainResourceID: 1, ForwardToEmail: "icloud_expired@relay.example", VerificationCode: "123456", VerifiedAt: &verifiedAt, ExpiresAt: now.Add(-time.Second), CreatedAt: now.Add(-time.Hour), UpdatedAt: now},
-		{ID: 4, OperatorUserID: 9, DomainResourceID: 2, ForwardToEmail: "icloud_purpose@purpose.example", VerificationCode: "123456", VerifiedAt: &verifiedAt, ExpiresAt: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now},
-		{ID: 5, OperatorUserID: 9, DomainResourceID: 3, ForwardToEmail: "icloud_status@status.example", VerificationCode: "123456", VerifiedAt: &verifiedAt, ExpiresAt: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now},
-		{ID: 6, OperatorUserID: 9, DomainResourceID: 4, ForwardToEmail: "icloud_bindings@bindings.example", VerificationCode: "123456", VerifiedAt: &verifiedAt, ExpiresAt: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now},
-		{ID: 7, OperatorUserID: 9, DomainResourceID: 5, ForwardToEmail: "icloud_whitelist@whitelist.example", VerificationCode: "123456", VerifiedAt: &verifiedAt, ExpiresAt: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now},
-		{ID: 8, OperatorUserID: 9, DomainResourceID: 1, ForwardToEmail: "icloud_mismatch@purpose.example", VerificationCode: "123456", VerifiedAt: &verifiedAt, ExpiresAt: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now},
+		{ID: 1, OperatorUserID: icloudUintPtr(9), DomainResourceID: 1, ForwardToEmail: "icloud_ok@relay.example", VerificationCode: "088556", VerifiedAt: &verifiedAt, ExpiresAt: now.Add(20 * time.Minute), CreatedAt: now.Add(-2 * time.Minute), UpdatedAt: now},
+		{ID: 2, OperatorUserID: icloudUintPtr(9), DomainResourceID: 1, ForwardToEmail: "icloud_waiting@relay.example", ExpiresAt: now.Add(20 * time.Minute), CreatedAt: now, UpdatedAt: now},
+		{ID: 3, OperatorUserID: icloudUintPtr(9), DomainResourceID: 1, ForwardToEmail: "icloud_expired@relay.example", VerificationCode: "123456", VerifiedAt: &verifiedAt, ExpiresAt: now.Add(-time.Second), CreatedAt: now.Add(-time.Hour), UpdatedAt: now},
+		{ID: 4, OperatorUserID: icloudUintPtr(9), DomainResourceID: 2, ForwardToEmail: "icloud_purpose@purpose.example", VerificationCode: "123456", VerifiedAt: &verifiedAt, ExpiresAt: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now},
+		{ID: 5, OperatorUserID: icloudUintPtr(9), DomainResourceID: 3, ForwardToEmail: "icloud_status@status.example", VerificationCode: "123456", VerifiedAt: &verifiedAt, ExpiresAt: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now},
+		{ID: 6, OperatorUserID: icloudUintPtr(9), DomainResourceID: 4, ForwardToEmail: "icloud_bindings@bindings.example", VerificationCode: "123456", VerifiedAt: &verifiedAt, ExpiresAt: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now},
+		{ID: 7, OperatorUserID: icloudUintPtr(9), DomainResourceID: 5, ForwardToEmail: "icloud_whitelist@whitelist.example", VerificationCode: "123456", VerifiedAt: &verifiedAt, ExpiresAt: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now},
+		{ID: 8, OperatorUserID: icloudUintPtr(9), DomainResourceID: 1, ForwardToEmail: "icloud_mismatch@purpose.example", VerificationCode: "123456", VerifiedAt: &verifiedAt, ExpiresAt: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now},
 	}
 	if err := db.Create(&preparations).Error; err != nil {
 		t.Fatalf("create preparations: %v", err)
