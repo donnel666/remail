@@ -20,7 +20,7 @@ CREATE TABLE kitesim_sync_runs (
     INDEX idx_kitesim_sync_runs_account_recent (account_id, updated_at, id),
     INDEX idx_kitesim_sync_runs_dispatch (status, updated_at, id),
     CONSTRAINT fk_kitesim_sync_runs_account
-        FOREIGN KEY (account_id) REFERENCES kitesim_accounts(id) ON DELETE CASCADE,
+        FOREIGN KEY (account_id) REFERENCES kitesim_accounts(id) ON DELETE RESTRICT,
     CONSTRAINT chk_kitesim_sync_runs_status
         CHECK (status IN ('queued', 'running', 'succeeded', 'failed'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
