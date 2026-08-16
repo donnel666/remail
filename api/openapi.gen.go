@@ -734,6 +734,150 @@ func (e AdminICloudSessionStatus) Valid() bool {
 	}
 }
 
+// Defines values for AdminKitesimOperationResolutionSource.
+const (
+	Manual AdminKitesimOperationResolutionSource = "manual"
+	Query  AdminKitesimOperationResolutionSource = "query"
+)
+
+// Valid indicates whether the value is a known member of the AdminKitesimOperationResolutionSource enum.
+func (e AdminKitesimOperationResolutionSource) Valid() bool {
+	switch e {
+	case Manual:
+		return true
+	case Query:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminKitesimOperationKind.
+const (
+	AdminKitesimOperationKindPurchase AdminKitesimOperationKind = "purchase"
+	AdminKitesimOperationKindRecharge AdminKitesimOperationKind = "recharge"
+	AdminKitesimOperationKindRenew    AdminKitesimOperationKind = "renew"
+)
+
+// Valid indicates whether the value is a known member of the AdminKitesimOperationKind enum.
+func (e AdminKitesimOperationKind) Valid() bool {
+	switch e {
+	case AdminKitesimOperationKindPurchase:
+		return true
+	case AdminKitesimOperationKindRecharge:
+		return true
+	case AdminKitesimOperationKindRenew:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminKitesimOperationResolutionRequestOutcome.
+const (
+	AdminKitesimOperationResolutionRequestOutcomeFailed    AdminKitesimOperationResolutionRequestOutcome = "failed"
+	AdminKitesimOperationResolutionRequestOutcomeSucceeded AdminKitesimOperationResolutionRequestOutcome = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the AdminKitesimOperationResolutionRequestOutcome enum.
+func (e AdminKitesimOperationResolutionRequestOutcome) Valid() bool {
+	switch e {
+	case AdminKitesimOperationResolutionRequestOutcomeFailed:
+		return true
+	case AdminKitesimOperationResolutionRequestOutcomeSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminKitesimOperationStatus.
+const (
+	AdminKitesimOperationStatusFailed         AdminKitesimOperationStatus = "failed"
+	AdminKitesimOperationStatusQueued         AdminKitesimOperationStatus = "queued"
+	AdminKitesimOperationStatusRequiresAction AdminKitesimOperationStatus = "requires_action"
+	AdminKitesimOperationStatusRunning        AdminKitesimOperationStatus = "running"
+	AdminKitesimOperationStatusSucceeded      AdminKitesimOperationStatus = "succeeded"
+	AdminKitesimOperationStatusUncertain      AdminKitesimOperationStatus = "uncertain"
+)
+
+// Valid indicates whether the value is a known member of the AdminKitesimOperationStatus enum.
+func (e AdminKitesimOperationStatus) Valid() bool {
+	switch e {
+	case AdminKitesimOperationStatusFailed:
+		return true
+	case AdminKitesimOperationStatusQueued:
+		return true
+	case AdminKitesimOperationStatusRequiresAction:
+		return true
+	case AdminKitesimOperationStatusRunning:
+		return true
+	case AdminKitesimOperationStatusSucceeded:
+		return true
+	case AdminKitesimOperationStatusUncertain:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminKitesimPhoneStatus.
+const (
+	AdminKitesimPhoneStatusActivating AdminKitesimPhoneStatus = "activating"
+	AdminKitesimPhoneStatusActive     AdminKitesimPhoneStatus = "active"
+	AdminKitesimPhoneStatusExpired    AdminKitesimPhoneStatus = "expired"
+	AdminKitesimPhoneStatusPending    AdminKitesimPhoneStatus = "pending"
+	AdminKitesimPhoneStatusRefunded   AdminKitesimPhoneStatus = "refunded"
+	AdminKitesimPhoneStatusUnsynced   AdminKitesimPhoneStatus = "unsynced"
+)
+
+// Valid indicates whether the value is a known member of the AdminKitesimPhoneStatus enum.
+func (e AdminKitesimPhoneStatus) Valid() bool {
+	switch e {
+	case AdminKitesimPhoneStatusActivating:
+		return true
+	case AdminKitesimPhoneStatusActive:
+		return true
+	case AdminKitesimPhoneStatusExpired:
+		return true
+	case AdminKitesimPhoneStatusPending:
+		return true
+	case AdminKitesimPhoneStatusRefunded:
+		return true
+	case AdminKitesimPhoneStatusUnsynced:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminKitesimSyncTaskStatus.
+const (
+	AdminKitesimSyncTaskStatusFailed    AdminKitesimSyncTaskStatus = "failed"
+	AdminKitesimSyncTaskStatusIdle      AdminKitesimSyncTaskStatus = "idle"
+	AdminKitesimSyncTaskStatusQueued    AdminKitesimSyncTaskStatus = "queued"
+	AdminKitesimSyncTaskStatusRunning   AdminKitesimSyncTaskStatus = "running"
+	AdminKitesimSyncTaskStatusSucceeded AdminKitesimSyncTaskStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the AdminKitesimSyncTaskStatus enum.
+func (e AdminKitesimSyncTaskStatus) Valid() bool {
+	switch e {
+	case AdminKitesimSyncTaskStatusFailed:
+		return true
+	case AdminKitesimSyncTaskStatusIdle:
+		return true
+	case AdminKitesimSyncTaskStatusQueued:
+		return true
+	case AdminKitesimSyncTaskStatusRunning:
+		return true
+	case AdminKitesimSyncTaskStatusSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AdminLogLevel.
 const (
 	AdminLogLevelError   AdminLogLevel = "error"
@@ -3919,28 +4063,28 @@ func (e GetAdminProxyStatsParamsIp) Valid() bool {
 
 // Defines values for GetAdminProxyStatsParamsStatus.
 const (
-	GetAdminProxyStatsParamsStatusAbnormal GetAdminProxyStatsParamsStatus = "abnormal"
-	GetAdminProxyStatsParamsStatusChecking GetAdminProxyStatsParamsStatus = "checking"
-	GetAdminProxyStatsParamsStatusDisabled GetAdminProxyStatsParamsStatus = "disabled"
-	GetAdminProxyStatsParamsStatusExpired  GetAdminProxyStatsParamsStatus = "expired"
-	GetAdminProxyStatsParamsStatusNormal   GetAdminProxyStatsParamsStatus = "normal"
-	GetAdminProxyStatsParamsStatusPending  GetAdminProxyStatsParamsStatus = "pending"
+	Abnormal GetAdminProxyStatsParamsStatus = "abnormal"
+	Checking GetAdminProxyStatsParamsStatus = "checking"
+	Disabled GetAdminProxyStatsParamsStatus = "disabled"
+	Expired  GetAdminProxyStatsParamsStatus = "expired"
+	Normal   GetAdminProxyStatsParamsStatus = "normal"
+	Pending  GetAdminProxyStatsParamsStatus = "pending"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminProxyStatsParamsStatus enum.
 func (e GetAdminProxyStatsParamsStatus) Valid() bool {
 	switch e {
-	case GetAdminProxyStatsParamsStatusAbnormal:
+	case Abnormal:
 		return true
-	case GetAdminProxyStatsParamsStatusChecking:
+	case Checking:
 		return true
-	case GetAdminProxyStatsParamsStatusDisabled:
+	case Disabled:
 		return true
-	case GetAdminProxyStatsParamsStatusExpired:
+	case Expired:
 		return true
-	case GetAdminProxyStatsParamsStatusNormal:
+	case Normal:
 		return true
-	case GetAdminProxyStatsParamsStatusPending:
+	case Pending:
 		return true
 	default:
 		return false
@@ -4297,16 +4441,16 @@ func (e PostOrderParamsSupply) Valid() bool {
 
 // Defines values for PostOrderBatchParamsServiceMode.
 const (
-	PostOrderBatchParamsServiceModeCode     PostOrderBatchParamsServiceMode = "code"
-	PostOrderBatchParamsServiceModePurchase PostOrderBatchParamsServiceMode = "purchase"
+	Code     PostOrderBatchParamsServiceMode = "code"
+	Purchase PostOrderBatchParamsServiceMode = "purchase"
 )
 
 // Valid indicates whether the value is a known member of the PostOrderBatchParamsServiceMode enum.
 func (e PostOrderBatchParamsServiceMode) Valid() bool {
 	switch e {
-	case PostOrderBatchParamsServiceModeCode:
+	case Code:
 		return true
-	case PostOrderBatchParamsServiceModePurchase:
+	case Purchase:
 		return true
 	default:
 		return false
@@ -4435,25 +4579,25 @@ func (e GetRechargesParamsScope) Valid() bool {
 
 // Defines values for GetRechargesParamsStatus.
 const (
-	Callback   GetRechargesParamsStatus = "callback"
-	Credited   GetRechargesParamsStatus = "credited"
-	Failed     GetRechargesParamsStatus = "failed"
-	Paying     GetRechargesParamsStatus = "paying"
-	Reconciled GetRechargesParamsStatus = "reconciled"
+	GetRechargesParamsStatusCallback   GetRechargesParamsStatus = "callback"
+	GetRechargesParamsStatusCredited   GetRechargesParamsStatus = "credited"
+	GetRechargesParamsStatusFailed     GetRechargesParamsStatus = "failed"
+	GetRechargesParamsStatusPaying     GetRechargesParamsStatus = "paying"
+	GetRechargesParamsStatusReconciled GetRechargesParamsStatus = "reconciled"
 )
 
 // Valid indicates whether the value is a known member of the GetRechargesParamsStatus enum.
 func (e GetRechargesParamsStatus) Valid() bool {
 	switch e {
-	case Callback:
+	case GetRechargesParamsStatusCallback:
 		return true
-	case Credited:
+	case GetRechargesParamsStatusCredited:
 		return true
-	case Failed:
+	case GetRechargesParamsStatusFailed:
 		return true
-	case Paying:
+	case GetRechargesParamsStatusPaying:
 		return true
-	case Reconciled:
+	case GetRechargesParamsStatusReconciled:
 		return true
 	default:
 		return false
@@ -5588,6 +5732,271 @@ type AdminInviteBulkRequest struct {
 // AdminInviteUsesResponse defines model for AdminInviteUsesResponse.
 type AdminInviteUsesResponse struct {
 	Uses []InviteUseResponse `json:"uses"`
+}
+
+// AdminKitesimBooleanFacet defines model for AdminKitesimBooleanFacet.
+type AdminKitesimBooleanFacet struct {
+	All int64 `json:"all"`
+	No  int64 `json:"no"`
+	Yes int64 `json:"yes"`
+}
+
+// AdminKitesimCardInput defines model for AdminKitesimCardInput.
+type AdminKitesimCardInput struct {
+	Address      string              `json:"address"`
+	BillingEmail openapi_types.Email `json:"billingEmail"`
+	City         string              `json:"city"`
+	Country      string              `json:"country"`
+	ExpiryMonth  int                 `json:"expiryMonth"`
+	ExpiryYear   int                 `json:"expiryYear"`
+	FirstName    string              `json:"firstName"`
+	Holder       string              `json:"holder"`
+	LastName     string              `json:"lastName"`
+
+	// Number Write-only PAN. The API never returns it.
+	Number string `json:"number"`
+	Phone  string `json:"phone"`
+}
+
+// AdminKitesimImportFailure defines model for AdminKitesimImportFailure.
+type AdminKitesimImportFailure struct {
+	Account openapi_types.Email `json:"account"`
+	Message string              `json:"message"`
+}
+
+// AdminKitesimImportRequest defines model for AdminKitesimImportRequest.
+type AdminKitesimImportRequest struct {
+	// Content One `account----password` entry per non-empty line.
+	Content string `json:"content"`
+}
+
+// AdminKitesimImportResult defines model for AdminKitesimImportResult.
+type AdminKitesimImportResult struct {
+	Errors   []AdminKitesimImportFailure `json:"errors"`
+	Failed   int                         `json:"failed"`
+	Imported int                         `json:"imported"`
+	Queued   int                         `json:"queued"`
+}
+
+// AdminKitesimMessage defines model for AdminKitesimMessage.
+type AdminKitesimMessage struct {
+	Caller  string `json:"caller"`
+	Content string `json:"content"`
+	Time    string `json:"time"`
+}
+
+// AdminKitesimMessageList defines model for AdminKitesimMessageList.
+type AdminKitesimMessageList struct {
+	Items []AdminKitesimMessage `json:"items"`
+}
+
+// AdminKitesimOperation defines model for AdminKitesimOperation.
+type AdminKitesimOperation struct {
+	Account              *openapi_types.Email                   `json:"account,omitempty"`
+	AccountId            int                                    `json:"accountId"`
+	Amount               string                                 `json:"amount"`
+	Attempts             int                                    `json:"attempts"`
+	CompletedCount       int                                    `json:"completedCount"`
+	CountryCode          *string                                `json:"countryCode,omitempty"`
+	Currency             *string                                `json:"currency,omitempty"`
+	FinishedAt           *time.Time                             `json:"finishedAt,omitempty"`
+	Id                   int64                                  `json:"id"`
+	Kind                 AdminKitesimOperationKind              `json:"kind"`
+	LastReconciledAt     *time.Time                             `json:"lastReconciledAt,omitempty"`
+	LastSafeError        *string                                `json:"lastSafeError,omitempty"`
+	PackageId            *string                                `json:"packageId,omitempty"`
+	PhoneId              *int                                   `json:"phoneId,omitempty"`
+	PhoneNumber          *string                                `json:"phoneNumber,omitempty"`
+	ProviderOrderNos     []string                               `json:"providerOrderNos"`
+	QueuedAt             time.Time                              `json:"queuedAt"`
+	ReconcileAttempts    int                                    `json:"reconcileAttempts"`
+	ReconcileRequestedAt *time.Time                             `json:"reconcileRequestedAt,omitempty"`
+	RequestedCount       int                                    `json:"requestedCount"`
+	ResolutionNote       *string                                `json:"resolutionNote,omitempty"`
+	ResolutionSource     *AdminKitesimOperationResolutionSource `json:"resolutionSource,omitempty"`
+	ResolvedAt           *time.Time                             `json:"resolvedAt,omitempty"`
+	StartedAt            *time.Time                             `json:"startedAt,omitempty"`
+	Status               AdminKitesimOperationStatus            `json:"status"`
+}
+
+// AdminKitesimOperationResolutionSource defines model for AdminKitesimOperation.ResolutionSource.
+type AdminKitesimOperationResolutionSource string
+
+// AdminKitesimOperationKind defines model for AdminKitesimOperationKind.
+type AdminKitesimOperationKind string
+
+// AdminKitesimOperationResolutionRequest defines model for AdminKitesimOperationResolutionRequest.
+type AdminKitesimOperationResolutionRequest struct {
+	Note    string                                        `json:"note"`
+	Outcome AdminKitesimOperationResolutionRequestOutcome `json:"outcome"`
+}
+
+// AdminKitesimOperationResolutionRequestOutcome defines model for AdminKitesimOperationResolutionRequest.Outcome.
+type AdminKitesimOperationResolutionRequestOutcome string
+
+// AdminKitesimOperationStatus defines model for AdminKitesimOperationStatus.
+type AdminKitesimOperationStatus string
+
+// AdminKitesimPhoneFacets defines model for AdminKitesimPhoneFacets.
+type AdminKitesimPhoneFacets struct {
+	Activating     int64                    `json:"activating"`
+	Active         int64                    `json:"active"`
+	All            int64                    `json:"all"`
+	AutoRenew      AdminKitesimBooleanFacet `json:"autoRenew"`
+	Expired        int64                    `json:"expired"`
+	Pending        int64                    `json:"pending"`
+	PhoneAvailable AdminKitesimBooleanFacet `json:"phoneAvailable"`
+	Refunded       int64                    `json:"refunded"`
+	SyncHealthy    AdminKitesimBooleanFacet `json:"syncHealthy"`
+	TokenAvailable AdminKitesimBooleanFacet `json:"tokenAvailable"`
+	Unsynced       int64                    `json:"unsynced"`
+}
+
+// AdminKitesimPhoneItem defines model for AdminKitesimPhoneItem.
+type AdminKitesimPhoneItem struct {
+	Account           openapi_types.Email        `json:"account"`
+	AccountId         int                        `json:"accountId"`
+	AutoRenew         bool                       `json:"autoRenew"`
+	AutoRenewPrice    *string                    `json:"autoRenewPrice,omitempty"`
+	CountryCode       *string                    `json:"countryCode,omitempty"`
+	CreateTime        *string                    `json:"createTime,omitempty"`
+	CreatedAt         time.Time                  `json:"createdAt"`
+	Currency          *string                    `json:"currency,omitempty"`
+	DurationType      *int                       `json:"durationType,omitempty"`
+	DurationValue     *int                       `json:"durationValue,omitempty"`
+	ExpireTime        *string                    `json:"expireTime,omitempty"`
+	LastSafeError     *string                    `json:"lastSafeError,omitempty"`
+	LastSyncedAt      *time.Time                 `json:"lastSyncedAt,omitempty"`
+	LatestRenewalTime *string                    `json:"latestRenewalTime,omitempty"`
+	NextRenewalDate   *string                    `json:"nextRenewalDate,omitempty"`
+	OrderNo           *string                    `json:"orderNo,omitempty"`
+	OrderStatus       *int                       `json:"orderStatus,omitempty"`
+	OriginalAmount    *string                    `json:"originalAmount,omitempty"`
+	PackageId         *string                    `json:"packageId,omitempty"`
+	PaidAmount        *string                    `json:"paidAmount,omitempty"`
+	PaymentTime       *string                    `json:"paymentTime,omitempty"`
+	PhoneId           *int                       `json:"phoneId"`
+	PhoneNumber       string                     `json:"phoneNumber"`
+	ProviderOrderId   *string                    `json:"providerOrderId,omitempty"`
+	RefundTime        *string                    `json:"refundTime,omitempty"`
+	Status            AdminKitesimPhoneStatus    `json:"status"`
+	SyncAttempts      int                        `json:"syncAttempts"`
+	SyncFinishedAt    *time.Time                 `json:"syncFinishedAt,omitempty"`
+	SyncHealthy       bool                       `json:"syncHealthy"`
+	SyncQueuedAt      *time.Time                 `json:"syncQueuedAt,omitempty"`
+	SyncStartedAt     *time.Time                 `json:"syncStartedAt,omitempty"`
+	SyncStatus        AdminKitesimSyncTaskStatus `json:"syncStatus"`
+	TokenAvailable    bool                       `json:"tokenAvailable"`
+	TokenUpdatedAt    *time.Time                 `json:"tokenUpdatedAt,omitempty"`
+}
+
+// AdminKitesimPhoneList defines model for AdminKitesimPhoneList.
+type AdminKitesimPhoneList struct {
+	Facets AdminKitesimPhoneFacets `json:"facets"`
+	Items  []AdminKitesimPhoneItem `json:"items"`
+	Limit  int                     `json:"limit"`
+	Offset int                     `json:"offset"`
+	Total  int64                   `json:"total"`
+}
+
+// AdminKitesimPhoneStatus defines model for AdminKitesimPhoneStatus.
+type AdminKitesimPhoneStatus string
+
+// AdminKitesimProduct defines model for AdminKitesimProduct.
+type AdminKitesimProduct struct {
+	Active         bool   `json:"active"`
+	AutoRenewPrice string `json:"autoRenewPrice"`
+	BuyPrice       string `json:"buyPrice"`
+	CountryCode    string `json:"countryCode"`
+	Currency       string `json:"currency"`
+
+	// DurationType 1=month, 2=quarter, 3=half-year.
+	DurationType  int       `json:"durationType"`
+	DurationValue int       `json:"durationValue"`
+	Id            int       `json:"id"`
+	LastSeenAt    time.Time `json:"lastSeenAt"`
+	OriginalPrice string    `json:"originalPrice"`
+	PackageId     string    `json:"packageId"`
+}
+
+// AdminKitesimProductList defines model for AdminKitesimProductList.
+type AdminKitesimProductList struct {
+	Items []AdminKitesimProduct `json:"items"`
+}
+
+// AdminKitesimPurchaseRequest defines model for AdminKitesimPurchaseRequest.
+type AdminKitesimPurchaseRequest struct {
+	Count int `json:"count"`
+
+	// MaxUnitPrice Maximum per-number price confirmed by the administrator.
+	MaxUnitPrice string `json:"maxUnitPrice"`
+	ProductId    int    `json:"productId"`
+}
+
+// AdminKitesimRechargeRequest defines model for AdminKitesimRechargeRequest.
+type AdminKitesimRechargeRequest struct {
+	Amount string `json:"amount"`
+
+	// Cvc Write-only and cleared from durable storage when the worker claims the task.
+	Cvc string `json:"cvc"`
+}
+
+// AdminKitesimRenewalRequest defines model for AdminKitesimRenewalRequest.
+type AdminKitesimRenewalRequest struct {
+	// MaxUnitPrice Maximum renewal price confirmed by the administrator.
+	MaxUnitPrice string `json:"maxUnitPrice"`
+	ProductId    int    `json:"productId"`
+}
+
+// AdminKitesimSyncTask defines model for AdminKitesimSyncTask.
+type AdminKitesimSyncTask struct {
+	AccountId  int                        `json:"accountId"`
+	Attempts   int                        `json:"attempts"`
+	FinishedAt *time.Time                 `json:"finishedAt,omitempty"`
+	QueuedAt   *time.Time                 `json:"queuedAt,omitempty"`
+	StartedAt  *time.Time                 `json:"startedAt,omitempty"`
+	Status     AdminKitesimSyncTaskStatus `json:"status"`
+}
+
+// AdminKitesimSyncTaskStatus defines model for AdminKitesimSyncTaskStatus.
+type AdminKitesimSyncTaskStatus string
+
+// AdminKitesimUpstream defines model for AdminKitesimUpstream.
+type AdminKitesimUpstream struct {
+	Account           *openapi_types.Email          `json:"account,omitempty"`
+	AccountId         *int                          `json:"accountId"`
+	Accounts          []AdminKitesimUpstreamAccount `json:"accounts"`
+	Balance           string                        `json:"balance"`
+	BalanceUpdatedAt  *time.Time                    `json:"balanceUpdatedAt,omitempty"`
+	CardBrand         *string                       `json:"cardBrand,omitempty"`
+	CardConfigured    bool                          `json:"cardConfigured"`
+	CardExpiryMonth   *int                          `json:"cardExpiryMonth,omitempty"`
+	CardExpiryYear    *int                          `json:"cardExpiryYear,omitempty"`
+	CardLast4         *string                       `json:"cardLast4,omitempty"`
+	LastSafeError     *string                       `json:"lastSafeError,omitempty"`
+	Operations        []AdminKitesimOperation       `json:"operations"`
+	Products          []AdminKitesimProduct         `json:"products"`
+	RefreshAttempts   int                           `json:"refreshAttempts"`
+	RefreshFinishedAt *time.Time                    `json:"refreshFinishedAt,omitempty"`
+	RefreshQueuedAt   *time.Time                    `json:"refreshQueuedAt,omitempty"`
+	RefreshStartedAt  *time.Time                    `json:"refreshStartedAt,omitempty"`
+	RefreshStatus     AdminKitesimSyncTaskStatus    `json:"refreshStatus"`
+}
+
+// AdminKitesimUpstreamAccount defines model for AdminKitesimUpstreamAccount.
+type AdminKitesimUpstreamAccount struct {
+	Account        openapi_types.Email        `json:"account"`
+	Id             int                        `json:"id"`
+	LastSyncedAt   *time.Time                 `json:"lastSyncedAt,omitempty"`
+	SyncStatus     AdminKitesimSyncTaskStatus `json:"syncStatus"`
+	TokenAvailable bool                       `json:"tokenAvailable"`
+}
+
+// AdminKitesimUpstreamUpdate defines model for AdminKitesimUpstreamUpdate.
+type AdminKitesimUpstreamUpdate struct {
+	AccountId int                    `json:"accountId"`
+	Card      *AdminKitesimCardInput `json:"card,omitempty"`
+	ClearCard *bool                  `json:"clearCard,omitempty"`
 }
 
 // AdminLogCleanupResponse defines model for AdminLogCleanupResponse.
@@ -10185,6 +10594,84 @@ type PatchAdminInviteParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// PostAdminKitesimAccountImportParams defines parameters for PostAdminKitesimAccountImport.
+type PostAdminKitesimAccountImportParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminKitesimAccountSyncParams defines parameters for PostAdminKitesimAccountSync.
+type PostAdminKitesimAccountSyncParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// GetAdminKitesimPhonesParams defines parameters for GetAdminKitesimPhones.
+type GetAdminKitesimPhonesParams struct {
+	// Offset Row offset used when afterId is absent.
+	Offset         *OffsetQuery             `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit          *int                     `form:"limit,omitempty" json:"limit,omitempty"`
+	Search         *string                  `form:"search,omitempty" json:"search,omitempty"`
+	Status         *AdminKitesimPhoneStatus `form:"status,omitempty" json:"status,omitempty"`
+	AutoRenew      *bool                    `form:"autoRenew,omitempty" json:"autoRenew,omitempty"`
+	TokenAvailable *bool                    `form:"tokenAvailable,omitempty" json:"tokenAvailable,omitempty"`
+	SyncHealthy    *bool                    `form:"syncHealthy,omitempty" json:"syncHealthy,omitempty"`
+	PhoneAvailable *bool                    `form:"phoneAvailable,omitempty" json:"phoneAvailable,omitempty"`
+	CreatedFrom    *time.Time               `form:"createdFrom,omitempty" json:"createdFrom,omitempty"`
+	CreatedTo      *time.Time               `form:"createdTo,omitempty" json:"createdTo,omitempty"`
+}
+
+// PostAdminKitesimPhoneRenewalParams defines parameters for PostAdminKitesimPhoneRenewal.
+type PostAdminKitesimPhoneRenewalParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PutAdminKitesimUpstreamParams defines parameters for PutAdminKitesimUpstream.
+type PutAdminKitesimUpstreamParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminKitesimOperationReconcileParams defines parameters for PostAdminKitesimOperationReconcile.
+type PostAdminKitesimOperationReconcileParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminKitesimOperationResolutionParams defines parameters for PostAdminKitesimOperationResolution.
+type PostAdminKitesimOperationResolutionParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminKitesimUpstreamPurchaseParams defines parameters for PostAdminKitesimUpstreamPurchase.
+type PostAdminKitesimUpstreamPurchaseParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminKitesimUpstreamRechargeParams defines parameters for PostAdminKitesimUpstreamRecharge.
+type PostAdminKitesimUpstreamRechargeParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminKitesimUpstreamRefreshParams defines parameters for PostAdminKitesimUpstreamRefresh.
+type PostAdminKitesimUpstreamRefreshParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // DeleteAdminOperationLogsParams defines parameters for DeleteAdminOperationLogs.
 type DeleteAdminOperationLogsParams struct {
 	Before time.Time `form:"before" json:"before"`
@@ -11706,6 +12193,24 @@ type PostAdminInvitesEnableJSONRequestBody = AdminInviteBulkRequest
 // PatchAdminInviteJSONRequestBody defines body for PatchAdminInvite for application/json ContentType.
 type PatchAdminInviteJSONRequestBody = AdminUpdateInviteRequest
 
+// PostAdminKitesimAccountImportJSONRequestBody defines body for PostAdminKitesimAccountImport for application/json ContentType.
+type PostAdminKitesimAccountImportJSONRequestBody = AdminKitesimImportRequest
+
+// PostAdminKitesimPhoneRenewalJSONRequestBody defines body for PostAdminKitesimPhoneRenewal for application/json ContentType.
+type PostAdminKitesimPhoneRenewalJSONRequestBody = AdminKitesimRenewalRequest
+
+// PutAdminKitesimUpstreamJSONRequestBody defines body for PutAdminKitesimUpstream for application/json ContentType.
+type PutAdminKitesimUpstreamJSONRequestBody = AdminKitesimUpstreamUpdate
+
+// PostAdminKitesimOperationResolutionJSONRequestBody defines body for PostAdminKitesimOperationResolution for application/json ContentType.
+type PostAdminKitesimOperationResolutionJSONRequestBody = AdminKitesimOperationResolutionRequest
+
+// PostAdminKitesimUpstreamPurchaseJSONRequestBody defines body for PostAdminKitesimUpstreamPurchase for application/json ContentType.
+type PostAdminKitesimUpstreamPurchaseJSONRequestBody = AdminKitesimPurchaseRequest
+
+// PostAdminKitesimUpstreamRechargeJSONRequestBody defines body for PostAdminKitesimUpstreamRecharge for application/json ContentType.
+type PostAdminKitesimUpstreamRechargeJSONRequestBody = AdminKitesimRechargeRequest
+
 // PostAdminOrderRefundJSONRequestBody defines body for PostAdminOrderRefund for application/json ContentType.
 type PostAdminOrderRefundJSONRequestBody = AdminOrderCommandRequest
 
@@ -12972,6 +13477,45 @@ type ServerInterface interface {
 	// List invite redemptions
 	// (GET /v1/admin/invites/{code}/uses)
 	GetAdminInviteUses(c *gin.Context, code string)
+	// Import Kitesim platform accounts and synchronize their phone numbers
+	// (POST /v1/admin/kitesim/accounts/imports)
+	PostAdminKitesimAccountImport(c *gin.Context, params PostAdminKitesimAccountImportParams)
+	// Refresh one Kitesim account and its phone status rows
+	// (POST /v1/admin/kitesim/accounts/{accountId}/sync)
+	PostAdminKitesimAccountSync(c *gin.Context, accountId int, params PostAdminKitesimAccountSyncParams)
+	// List Kitesim accounts joined to one row per phone number
+	// (GET /v1/admin/kitesim/phones)
+	GetAdminKitesimPhones(c *gin.Context, params GetAdminKitesimPhonesParams)
+	// Read current SMS messages for one Kitesim phone number
+	// (GET /v1/admin/kitesim/phones/{phoneId}/messages)
+	GetAdminKitesimPhoneMessages(c *gin.Context, phoneId int)
+	// Queue a one-time Kitesim phone renewal
+	// (POST /v1/admin/kitesim/phones/{phoneId}/renewals)
+	PostAdminKitesimPhoneRenewal(c *gin.Context, phoneId int, params PostAdminKitesimPhoneRenewalParams)
+	// List safe Kitesim packages for replenishment and renewal
+	// (GET /v1/admin/kitesim/products)
+	GetAdminKitesimProducts(c *gin.Context)
+	// Read Kitesim upstream settings, balance, products, and recent operations
+	// (GET /v1/admin/kitesim/upstream)
+	GetAdminKitesimUpstream(c *gin.Context)
+	// Select the Kitesim system account and optionally replace its card profile
+	// (PUT /v1/admin/kitesim/upstream)
+	PutAdminKitesimUpstream(c *gin.Context, params PutAdminKitesimUpstreamParams)
+	// Queue a read-only reconciliation of an uncertain Kitesim operation
+	// (POST /v1/admin/kitesim/upstream/operations/{operationId}/reconcile)
+	PostAdminKitesimOperationReconcile(c *gin.Context, operationId int64, params PostAdminKitesimOperationReconcileParams)
+	// Record an administrator-verified terminal result for a Kitesim operation
+	// (POST /v1/admin/kitesim/upstream/operations/{operationId}/resolution)
+	PostAdminKitesimOperationResolution(c *gin.Context, operationId int64, params PostAdminKitesimOperationResolutionParams)
+	// Queue serial Kitesim phone replenishment
+	// (POST /v1/admin/kitesim/upstream/purchases)
+	PostAdminKitesimUpstreamPurchase(c *gin.Context, params PostAdminKitesimUpstreamPurchaseParams)
+	// Queue a one-time Kitesim card recharge
+	// (POST /v1/admin/kitesim/upstream/recharges)
+	PostAdminKitesimUpstreamRecharge(c *gin.Context, params PostAdminKitesimUpstreamRechargeParams)
+	// Queue a Kitesim balance and product catalog refresh
+	// (POST /v1/admin/kitesim/upstream/refresh)
+	PostAdminKitesimUpstreamRefresh(c *gin.Context, params PostAdminKitesimUpstreamRefreshParams)
 	// Delete operation audit logs before a cutoff
 	// (DELETE /v1/admin/logs/operations)
 	DeleteAdminOperationLogs(c *gin.Context, params DeleteAdminOperationLogsParams)
@@ -19278,6 +19822,671 @@ func (siw *ServerInterfaceWrapper) GetAdminInviteUses(c *gin.Context) {
 	}
 
 	siw.Handler.GetAdminInviteUses(c, code)
+}
+
+// PostAdminKitesimAccountImport operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminKitesimAccountImport(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminKitesimAccountImportParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminKitesimAccountImport(c, params)
+}
+
+// PostAdminKitesimAccountSync operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminKitesimAccountSync(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "accountId" -------------
+	var accountId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "accountId", c.Param("accountId"), &accountId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter accountId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminKitesimAccountSyncParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminKitesimAccountSync(c, accountId, params)
+}
+
+// GetAdminKitesimPhones operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminKitesimPhones(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminKitesimPhonesParams
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", c.Request.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter search: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", c.Request.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter status: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "autoRenew" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "autoRenew", c.Request.URL.Query(), &params.AutoRenew, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter autoRenew: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "tokenAvailable" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "tokenAvailable", c.Request.URL.Query(), &params.TokenAvailable, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter tokenAvailable: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "syncHealthy" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "syncHealthy", c.Request.URL.Query(), &params.SyncHealthy, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter syncHealthy: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "phoneAvailable" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "phoneAvailable", c.Request.URL.Query(), &params.PhoneAvailable, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter phoneAvailable: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdFrom" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdFrom", c.Request.URL.Query(), &params.CreatedFrom, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdFrom: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdTo" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdTo", c.Request.URL.Query(), &params.CreatedTo, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdTo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminKitesimPhones(c, params)
+}
+
+// GetAdminKitesimPhoneMessages operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminKitesimPhoneMessages(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "phoneId" -------------
+	var phoneId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "phoneId", c.Param("phoneId"), &phoneId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter phoneId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminKitesimPhoneMessages(c, phoneId)
+}
+
+// PostAdminKitesimPhoneRenewal operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminKitesimPhoneRenewal(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "phoneId" -------------
+	var phoneId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "phoneId", c.Param("phoneId"), &phoneId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter phoneId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminKitesimPhoneRenewalParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminKitesimPhoneRenewal(c, phoneId, params)
+}
+
+// GetAdminKitesimProducts operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminKitesimProducts(c *gin.Context) {
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminKitesimProducts(c)
+}
+
+// GetAdminKitesimUpstream operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminKitesimUpstream(c *gin.Context) {
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminKitesimUpstream(c)
+}
+
+// PutAdminKitesimUpstream operation middleware
+func (siw *ServerInterfaceWrapper) PutAdminKitesimUpstream(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PutAdminKitesimUpstreamParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PutAdminKitesimUpstream(c, params)
+}
+
+// PostAdminKitesimOperationReconcile operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminKitesimOperationReconcile(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "operationId" -------------
+	var operationId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "operationId", c.Param("operationId"), &operationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter operationId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminKitesimOperationReconcileParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminKitesimOperationReconcile(c, operationId, params)
+}
+
+// PostAdminKitesimOperationResolution operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminKitesimOperationResolution(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "operationId" -------------
+	var operationId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "operationId", c.Param("operationId"), &operationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter operationId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminKitesimOperationResolutionParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminKitesimOperationResolution(c, operationId, params)
+}
+
+// PostAdminKitesimUpstreamPurchase operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminKitesimUpstreamPurchase(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminKitesimUpstreamPurchaseParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminKitesimUpstreamPurchase(c, params)
+}
+
+// PostAdminKitesimUpstreamRecharge operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminKitesimUpstreamRecharge(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminKitesimUpstreamRechargeParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminKitesimUpstreamRecharge(c, params)
+}
+
+// PostAdminKitesimUpstreamRefresh operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminKitesimUpstreamRefresh(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminKitesimUpstreamRefreshParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminKitesimUpstreamRefresh(c, params)
 }
 
 // DeleteAdminOperationLogs operation middleware
@@ -29679,6 +30888,19 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/invites/enable", wrapper.PostAdminInvitesEnable)
 	router.PATCH(options.BaseURL+"/v1/admin/invites/:code", wrapper.PatchAdminInvite)
 	router.GET(options.BaseURL+"/v1/admin/invites/:code/uses", wrapper.GetAdminInviteUses)
+	router.POST(options.BaseURL+"/v1/admin/kitesim/accounts/imports", wrapper.PostAdminKitesimAccountImport)
+	router.POST(options.BaseURL+"/v1/admin/kitesim/accounts/:accountId/sync", wrapper.PostAdminKitesimAccountSync)
+	router.GET(options.BaseURL+"/v1/admin/kitesim/phones", wrapper.GetAdminKitesimPhones)
+	router.GET(options.BaseURL+"/v1/admin/kitesim/phones/:phoneId/messages", wrapper.GetAdminKitesimPhoneMessages)
+	router.POST(options.BaseURL+"/v1/admin/kitesim/phones/:phoneId/renewals", wrapper.PostAdminKitesimPhoneRenewal)
+	router.GET(options.BaseURL+"/v1/admin/kitesim/products", wrapper.GetAdminKitesimProducts)
+	router.GET(options.BaseURL+"/v1/admin/kitesim/upstream", wrapper.GetAdminKitesimUpstream)
+	router.PUT(options.BaseURL+"/v1/admin/kitesim/upstream", wrapper.PutAdminKitesimUpstream)
+	router.POST(options.BaseURL+"/v1/admin/kitesim/upstream/operations/:operationId/reconcile", wrapper.PostAdminKitesimOperationReconcile)
+	router.POST(options.BaseURL+"/v1/admin/kitesim/upstream/operations/:operationId/resolution", wrapper.PostAdminKitesimOperationResolution)
+	router.POST(options.BaseURL+"/v1/admin/kitesim/upstream/purchases", wrapper.PostAdminKitesimUpstreamPurchase)
+	router.POST(options.BaseURL+"/v1/admin/kitesim/upstream/recharges", wrapper.PostAdminKitesimUpstreamRecharge)
+	router.POST(options.BaseURL+"/v1/admin/kitesim/upstream/refresh", wrapper.PostAdminKitesimUpstreamRefresh)
 	router.DELETE(options.BaseURL+"/v1/admin/logs/operations", wrapper.DeleteAdminOperationLogs)
 	router.GET(options.BaseURL+"/v1/admin/logs/operations", wrapper.GetAdminOperationLogs)
 	router.DELETE(options.BaseURL+"/v1/admin/logs/system", wrapper.DeleteAdminSystemLogs)

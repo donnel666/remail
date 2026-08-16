@@ -4773,6 +4773,241 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/kitesim/phones": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Kitesim accounts joined to one row per phone number */
+        get: operations["getAdminKitesimPhones"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/kitesim/accounts/imports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Import Kitesim platform accounts and synchronize their phone numbers */
+        post: operations["postAdminKitesimAccountImport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/kitesim/products": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List safe Kitesim packages for replenishment and renewal
+         * @description Requires `core:resource/read`. Returns synchronized public package prices only and does not expose the selected system account, balance, card, token, or recent money operations.
+         */
+        get: operations["getAdminKitesimProducts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/kitesim/accounts/{accountId}/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Refresh one Kitesim account and its phone status rows */
+        post: operations["postAdminKitesimAccountSync"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/kitesim/phones/{phoneId}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read current SMS messages for one Kitesim phone number
+         * @description Requires `mailmatch:message/read`. The read is audited and may return SMS bodies and verification codes, but never platform credentials or tokens.
+         */
+        get: operations["getAdminKitesimPhoneMessages"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/kitesim/phones/{phoneId}/renewals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Queue a one-time Kitesim phone renewal
+         * @description Requires `core:resource/operate` and `system:settings/write`. Only active or expired numbers may be renewed. The confirmed maximum unit price is checked again immediately before the balance confirmation, which executes at most once on the default queue.
+         */
+        post: operations["postAdminKitesimPhoneRenewal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/kitesim/upstream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Kitesim upstream settings, balance, products, and recent operations
+         * @description Requires `system:settings/read`. Card PAN, billing details, CVC, account passwords, tokens, signed cashier URLs, and raw upstream payloads are never returned.
+         */
+        get: operations["getAdminKitesimUpstream"];
+        /**
+         * Select the Kitesim system account and optionally replace its card profile
+         * @description Requires `system:settings/write`; setting or clearing the write-only card additionally requires `system:settings/sensitive`. CVC is never accepted here.
+         */
+        put: operations["putAdminKitesimUpstream"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/kitesim/upstream/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Queue a Kitesim balance and product catalog refresh
+         * @description Requires `system:settings/write`. Runs on the default queue and may retry because it performs read-only upstream requests.
+         */
+        post: operations["postAdminKitesimUpstreamRefresh"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/kitesim/upstream/purchases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Queue serial Kitesim phone replenishment
+         * @description Requires `system:settings/write`. Buys one number, refreshes the number pool, then repeatedly selects the rarest three-digit segment with lowest-price tie breaking. The confirmed maximum unit price is checked before every order and each payment confirmation executes at most once on the default queue.
+         */
+        post: operations["postAdminKitesimUpstreamPurchase"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/kitesim/upstream/recharges": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Queue a one-time Kitesim card recharge
+         * @description Requires `system:settings/write` and `system:settings/sensitive`. CVC is stored only until the worker claims the task, never enters Redis or any read API, and is cleared before payment. The card payment flow executes at most once and stops on 3DS or an uncertain result.
+         */
+        post: operations["postAdminKitesimUpstreamRecharge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/kitesim/upstream/operations/{operationId}/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Queue a read-only reconciliation of an uncertain Kitesim operation
+         * @description Requires `system:settings/write`. Only saved provider references are queried; no purchase, recharge, renewal, card, or payment write is replayed.
+         */
+        post: operations["postAdminKitesimOperationReconcile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/kitesim/upstream/operations/{operationId}/resolution": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record an administrator-verified terminal result for a Kitesim operation
+         * @description Requires `system:settings/write` and `system:settings/sensitive`. Only uncertain, action-required, or stale-running operations may be resolved; this endpoint never calls a provider payment write.
+         */
+        post: operations["postAdminKitesimOperationResolution"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/open/icloud/forwarding-emails": {
         parameters: {
             query?: never;
@@ -8122,6 +8357,257 @@ export interface components {
             total: number;
             offset: number;
             limit: number;
+        };
+        /** @enum {string} */
+        AdminKitesimPhoneStatus: "active" | "pending" | "activating" | "expired" | "refunded" | "unsynced";
+        /** @enum {string} */
+        AdminKitesimSyncTaskStatus: "idle" | "queued" | "running" | "succeeded" | "failed";
+        AdminKitesimBooleanFacet: {
+            /** Format: int64 */
+            all: number;
+            /** Format: int64 */
+            yes: number;
+            /** Format: int64 */
+            no: number;
+        };
+        AdminKitesimPhoneFacets: {
+            /** Format: int64 */
+            all: number;
+            /** Format: int64 */
+            active: number;
+            /** Format: int64 */
+            pending: number;
+            /** Format: int64 */
+            activating: number;
+            /** Format: int64 */
+            expired: number;
+            /** Format: int64 */
+            refunded: number;
+            /** Format: int64 */
+            unsynced: number;
+            autoRenew: components["schemas"]["AdminKitesimBooleanFacet"];
+            tokenAvailable: components["schemas"]["AdminKitesimBooleanFacet"];
+            syncHealthy: components["schemas"]["AdminKitesimBooleanFacet"];
+            phoneAvailable: components["schemas"]["AdminKitesimBooleanFacet"];
+        };
+        AdminKitesimPhoneItem: {
+            accountId: number;
+            phoneId: number | null;
+            providerOrderId?: string;
+            /** Format: email */
+            account: string;
+            phoneNumber: string;
+            status: components["schemas"]["AdminKitesimPhoneStatus"];
+            orderNo?: string;
+            countryCode?: string;
+            orderStatus?: number;
+            packageId?: string;
+            durationType?: number;
+            durationValue?: number;
+            autoRenew: boolean;
+            currency?: string;
+            originalAmount?: string;
+            paidAmount?: string;
+            autoRenewPrice?: string;
+            createTime?: string;
+            paymentTime?: string;
+            expireTime?: string;
+            latestRenewalTime?: string;
+            nextRenewalDate?: string;
+            refundTime?: string;
+            tokenAvailable: boolean;
+            /** Format: date-time */
+            tokenUpdatedAt?: string;
+            syncHealthy: boolean;
+            syncStatus: components["schemas"]["AdminKitesimSyncTaskStatus"];
+            /** Format: date-time */
+            syncQueuedAt?: string;
+            /** Format: date-time */
+            syncStartedAt?: string;
+            /** Format: date-time */
+            syncFinishedAt?: string;
+            syncAttempts: number;
+            lastSafeError?: string;
+            /** Format: date-time */
+            lastSyncedAt?: string;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        AdminKitesimPhoneList: {
+            items: components["schemas"]["AdminKitesimPhoneItem"][];
+            /** Format: int64 */
+            total: number;
+            offset: number;
+            limit: number;
+            facets: components["schemas"]["AdminKitesimPhoneFacets"];
+        };
+        AdminKitesimImportRequest: {
+            /** @description One `account----password` entry per non-empty line. */
+            content: string;
+        };
+        AdminKitesimImportFailure: {
+            /** Format: email */
+            account: string;
+            message: string;
+        };
+        AdminKitesimImportResult: {
+            imported: number;
+            queued: number;
+            failed: number;
+            errors: components["schemas"]["AdminKitesimImportFailure"][];
+        };
+        AdminKitesimSyncTask: {
+            accountId: number;
+            status: components["schemas"]["AdminKitesimSyncTaskStatus"];
+            /** Format: date-time */
+            queuedAt?: string;
+            /** Format: date-time */
+            startedAt?: string;
+            /** Format: date-time */
+            finishedAt?: string;
+            attempts: number;
+        };
+        AdminKitesimMessage: {
+            caller: string;
+            content: string;
+            time: string;
+        };
+        AdminKitesimMessageList: {
+            items: components["schemas"]["AdminKitesimMessage"][];
+        };
+        AdminKitesimCardInput: {
+            /** @description Write-only PAN. The API never returns it. */
+            number: string;
+            expiryMonth: number;
+            expiryYear: number;
+            holder: string;
+            /** Format: email */
+            billingEmail: string;
+            firstName: string;
+            lastName: string;
+            phone: string;
+            country: string;
+            city: string;
+            address: string;
+        };
+        AdminKitesimUpstreamUpdate: {
+            accountId: number;
+            card?: components["schemas"]["AdminKitesimCardInput"];
+            /** @default false */
+            clearCard: boolean;
+        };
+        AdminKitesimUpstreamAccount: {
+            id: number;
+            /** Format: email */
+            account: string;
+            tokenAvailable: boolean;
+            syncStatus: components["schemas"]["AdminKitesimSyncTaskStatus"];
+            /** Format: date-time */
+            lastSyncedAt?: string;
+        };
+        AdminKitesimProduct: {
+            id: number;
+            countryCode: string;
+            packageId: string;
+            /** @description 1=month, 2=quarter, 3=half-year. */
+            durationType: number;
+            durationValue: number;
+            currency: string;
+            buyPrice: string;
+            originalPrice: string;
+            autoRenewPrice: string;
+            active: boolean;
+            /** Format: date-time */
+            lastSeenAt: string;
+        };
+        AdminKitesimProductList: {
+            items: components["schemas"]["AdminKitesimProduct"][];
+        };
+        /** @enum {string} */
+        AdminKitesimOperationKind: "purchase" | "recharge" | "renew";
+        /** @enum {string} */
+        AdminKitesimOperationStatus: "queued" | "running" | "succeeded" | "failed" | "uncertain" | "requires_action";
+        AdminKitesimOperation: {
+            /** Format: int64 */
+            id: number;
+            kind: components["schemas"]["AdminKitesimOperationKind"];
+            status: components["schemas"]["AdminKitesimOperationStatus"];
+            accountId: number;
+            /** Format: email */
+            account?: string;
+            phoneId?: number;
+            phoneNumber?: string;
+            countryCode?: string;
+            packageId?: string;
+            requestedCount: number;
+            completedCount: number;
+            amount: string;
+            currency?: string;
+            attempts: number;
+            providerOrderNos: string[];
+            lastSafeError?: string;
+            reconcileAttempts: number;
+            /** Format: date-time */
+            reconcileRequestedAt?: string;
+            /** Format: date-time */
+            lastReconciledAt?: string;
+            /** @enum {string} */
+            resolutionSource?: "query" | "manual";
+            resolutionNote?: string;
+            /** Format: date-time */
+            resolvedAt?: string;
+            /** Format: date-time */
+            queuedAt: string;
+            /** Format: date-time */
+            startedAt?: string;
+            /** Format: date-time */
+            finishedAt?: string;
+        };
+        AdminKitesimUpstream: {
+            accountId: number | null;
+            /** Format: email */
+            account?: string;
+            accounts: components["schemas"]["AdminKitesimUpstreamAccount"][];
+            cardConfigured: boolean;
+            cardBrand?: string;
+            cardLast4?: string;
+            cardExpiryMonth?: number;
+            cardExpiryYear?: number;
+            balance: string;
+            /** Format: date-time */
+            balanceUpdatedAt?: string;
+            refreshStatus: components["schemas"]["AdminKitesimSyncTaskStatus"];
+            /** Format: date-time */
+            refreshQueuedAt?: string;
+            /** Format: date-time */
+            refreshStartedAt?: string;
+            /** Format: date-time */
+            refreshFinishedAt?: string;
+            refreshAttempts: number;
+            lastSafeError?: string;
+            products: components["schemas"]["AdminKitesimProduct"][];
+            operations: components["schemas"]["AdminKitesimOperation"][];
+        };
+        AdminKitesimPurchaseRequest: {
+            productId: number;
+            count: number;
+            /** @description Maximum per-number price confirmed by the administrator. */
+            maxUnitPrice: string;
+        };
+        AdminKitesimRechargeRequest: {
+            amount: string;
+            /** @description Write-only and cleared from durable storage when the worker claims the task. */
+            cvc: string;
+        };
+        AdminKitesimRenewalRequest: {
+            productId: number;
+            /** @description Maximum renewal price confirmed by the administrator. */
+            maxUnitPrice: string;
+        };
+        AdminKitesimOperationResolutionRequest: {
+            /** @enum {string} */
+            outcome: "succeeded" | "failed";
+            note: string;
         };
         /** @enum {string} */
         SMSBowerStrategy: "local_first" | "upstream_first";
@@ -22821,6 +23307,406 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+        };
+    };
+    getAdminKitesimPhones: {
+        parameters: {
+            query?: {
+                /** @description Row offset used when afterId is absent. */
+                offset?: components["parameters"]["OffsetQuery"];
+                limit?: number;
+                search?: string;
+                status?: components["schemas"]["AdminKitesimPhoneStatus"];
+                autoRenew?: boolean;
+                tokenAvailable?: boolean;
+                syncHealthy?: boolean;
+                phoneAvailable?: boolean;
+                createdFrom?: string;
+                createdTo?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Kitesim account and phone rows without passwords or tokens */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminKitesimPhoneList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
+            502: components["responses"]["BadGateway"];
+        };
+    };
+    postAdminKitesimAccountImport: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminKitesimImportRequest"];
+            };
+        };
+        responses: {
+            /** @description Import result with account synchronization tasks queued */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminKitesimImportResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
+            502: components["responses"]["BadGateway"];
+        };
+    };
+    getAdminKitesimProducts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Kitesim package catalog */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminKitesimProductList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            502: components["responses"]["BadGateway"];
+        };
+    };
+    postAdminKitesimAccountSync: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path: {
+                accountId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Account synchronization task accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminKitesimSyncTask"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["BadGateway"];
+        };
+    };
+    getAdminKitesimPhoneMessages: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                phoneId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current upstream SMS messages */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminKitesimMessageList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["BadGateway"];
+        };
+    };
+    postAdminKitesimPhoneRenewal: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
+            };
+            path: {
+                phoneId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminKitesimRenewalRequest"];
+            };
+        };
+        responses: {
+            /** @description Renewal task accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminKitesimOperation"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            502: components["responses"]["BadGateway"];
+        };
+    };
+    getAdminKitesimUpstream: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Safe Kitesim upstream aggregate */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminKitesimUpstream"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            502: components["responses"]["BadGateway"];
+        };
+    };
+    putAdminKitesimUpstream: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminKitesimUpstreamUpdate"];
+            };
+        };
+        responses: {
+            /** @description Updated safe Kitesim upstream aggregate */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminKitesimUpstream"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+            502: components["responses"]["BadGateway"];
+        };
+    };
+    postAdminKitesimUpstreamRefresh: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Refresh task accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminKitesimSyncTask"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            502: components["responses"]["BadGateway"];
+        };
+    };
+    postAdminKitesimUpstreamPurchase: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminKitesimPurchaseRequest"];
+            };
+        };
+        responses: {
+            /** @description Purchase task accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminKitesimOperation"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            502: components["responses"]["BadGateway"];
+        };
+    };
+    postAdminKitesimUpstreamRecharge: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminKitesimRechargeRequest"];
+            };
+        };
+        responses: {
+            /** @description Recharge task accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminKitesimOperation"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            502: components["responses"]["BadGateway"];
+        };
+    };
+    postAdminKitesimOperationReconcile: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path: {
+                operationId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Reconciliation task accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminKitesimOperation"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            502: components["responses"]["BadGateway"];
+        };
+    };
+    postAdminKitesimOperationResolution: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path: {
+                operationId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminKitesimOperationResolutionRequest"];
+            };
+        };
+        responses: {
+            /** @description Operation terminal result recorded */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminKitesimOperation"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            502: components["responses"]["BadGateway"];
         };
     };
     postSystemICloudForwardingEmail: {

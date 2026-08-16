@@ -44,6 +44,14 @@ describe("admin navigation permissions", () => {
     ]);
   });
 
+  it("guards the Kitesim page with resource read permission", () => {
+    expect(visiblePaths([])).not.toContain("/admin/kitesim");
+    expect(visiblePaths(["core:resource:read"])).toContain("/admin/kitesim");
+    expect(getSidebarRouteRequiredPermissions("/admin/kitesim")).toEqual([
+      "core:resource:read",
+    ]);
+  });
+
   it("guards the iCloud resource page with resource read permission", () => {
     expect(visiblePaths([])).not.toContain("/admin/icloud");
     expect(visiblePaths(["core:resource:read"])).toContain("/admin/icloud");

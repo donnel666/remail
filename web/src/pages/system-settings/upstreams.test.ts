@@ -1,8 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
+// @ts-expect-error -- this source-contract check runs in Node without Node types.
+import { readFileSync } from "node:fs";
 
 import type { ProjectItem } from "@/lib/projects-api";
 
 import { loadAllProjects } from "./upstream-settings-values";
+
+const upstreamsSource = readFileSync(new URL("./upstreams.tsx", import.meta.url), "utf8");
 
 function project(id: number): ProjectItem {
   return {
@@ -33,5 +37,18 @@ describe("loadAllProjects", () => {
 
     await expect(loadAllProjects(fetchPage)).resolves.toHaveLength(205);
     expect(fetchPage.mock.calls).toEqual([[0, 100], [100, 100], [200, 100]]);
+  });
+});
+
+describe("Kitesim upstream money commands", () => {
+  it("passes the selected purchase price as the command ceiling", () => {
+    expect(upstreamsSource).toContain("selectedProduct.buyPrice");
+    expect(upstreamsSource).toContain("purchaseKitesimNumbers(");
+  });
+
+  it("preserves an edited system account while background refreshes run", () => {
+    expect(upstreamsSource).toContain("if (!accountEditedRef.current) setAccountId(next.accountId || 0);");
+    expect(upstreamsSource).toContain("accountEditedRef.current = nextAccountId !== (upstream?.accountId ?? 0);");
+    expect(upstreamsSource).toContain("accountEditedRef.current = false;");
   });
 });

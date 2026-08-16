@@ -8,6 +8,7 @@ interface SelectionExtraAction {
   key: string;
   labelKey: string;
   onClick: () => void;
+  disabled?: boolean;
   loading?: boolean;
   type?: "primary" | "secondary" | "tertiary" | "warning" | "danger";
 }
@@ -77,6 +78,7 @@ export function useSelectionNotification({
             ) : null}
             {extraActions?.map((action) => (
               <Button
+                disabled={action.disabled}
                 key={action.key}
                 loading={action.loading}
                 onClick={action.onClick}

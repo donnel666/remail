@@ -23,6 +23,7 @@ import (
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	iamapi "github.com/donnel666/remail/internal/iam/api"
 	icloudapi "github.com/donnel666/remail/internal/icloud"
+	"github.com/donnel666/remail/internal/kitesim"
 	mailmatchapi "github.com/donnel666/remail/internal/mailmatch/api"
 	mailapi "github.com/donnel666/remail/internal/mailtransport/api"
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
@@ -269,6 +270,11 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		})
 		icloudapi.RegisterRoutes(v1, icloudMod, iamSessionFetcher, iamMod.PermissionChecker)
 		cleanupFuncs = append(cleanupFuncs, icloudapi.RegisterTaskHandlers(taskMux, icloudMod.Service))
+		kitesimService := kitesim.NewService(p.DB, kitesim.NewSyncQueue(p.Asynq))
+		kitesimService.SetProxyProvider(proxyMod.ProxyUseCase)
+		kitesim.RegisterRoutes(v1, kitesimService, iamSessionFetcher, iamMod.PermissionChecker)
+		kitesim.RegisterTaskHandlers(taskMux, kitesimService)
+		cleanupFuncs = append(cleanupFuncs, kitesim.StartOperationDispatcher(kitesimService))
 		smsbower.RegisterRoutes(v1, smsbowerMod, iamSessionFetcher, iamMod.PermissionChecker, systemSettingsMod.Settings)
 		cleanupFuncs = append(cleanupFuncs, smsbower.RegisterTaskHandlers(taskMux, smsbowerMod.Service))
 

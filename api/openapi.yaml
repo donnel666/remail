@@ -13097,6 +13097,465 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
+  /v1/admin/kitesim/phones:
+    get:
+      operationId: getAdminKitesimPhones
+      summary: List Kitesim accounts joined to one row per phone number
+      tags: [Core]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OffsetQuery"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: search
+          in: query
+          schema:
+            type: string
+            maxLength: 320
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/AdminKitesimPhoneStatus"
+        - name: autoRenew
+          in: query
+          schema:
+            type: boolean
+        - name: tokenAvailable
+          in: query
+          schema:
+            type: boolean
+        - name: syncHealthy
+          in: query
+          schema:
+            type: boolean
+        - name: phoneAvailable
+          in: query
+          schema:
+            type: boolean
+        - name: createdFrom
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: createdTo
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Kitesim account and phone rows without passwords or tokens
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminKitesimPhoneList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /v1/admin/kitesim/accounts/imports:
+    post:
+      operationId: postAdminKitesimAccountImport
+      summary: Import Kitesim platform accounts and synchronize their phone numbers
+      tags: [Core]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminKitesimImportRequest"
+      responses:
+        "202":
+          description: Import result with account synchronization tasks queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminKitesimImportResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /v1/admin/kitesim/products:
+    get:
+      operationId: getAdminKitesimProducts
+      summary: List safe Kitesim packages for replenishment and renewal
+      description: Requires `core:resource/read`. Returns synchronized public package prices only and does not expose the selected system account, balance, card, token, or recent money operations.
+      tags: [Core]
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Kitesim package catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminKitesimProductList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /v1/admin/kitesim/accounts/{accountId}/sync:
+    post:
+      operationId: postAdminKitesimAccountSync
+      summary: Refresh one Kitesim account and its phone status rows
+      tags: [Core]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "202":
+          description: Account synchronization task accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminKitesimSyncTask"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /v1/admin/kitesim/phones/{phoneId}/messages:
+    get:
+      operationId: getAdminKitesimPhoneMessages
+      summary: Read current SMS messages for one Kitesim phone number
+      description: Requires `mailmatch:message/read`. The read is audited and may return SMS bodies and verification codes, but never platform credentials or tokens.
+      tags: [Core]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: phoneId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Current upstream SMS messages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminKitesimMessageList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /v1/admin/kitesim/phones/{phoneId}/renewals:
+    post:
+      operationId: postAdminKitesimPhoneRenewal
+      summary: Queue a one-time Kitesim phone renewal
+      description: Requires `core:resource/operate` and `system:settings/write`. Only active or expired numbers may be renewed. The confirmed maximum unit price is checked again immediately before the balance confirmation, which executes at most once on the default queue.
+      tags: [Core]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: phoneId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminKitesimRenewalRequest"
+      responses:
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "202":
+          description: Renewal task accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminKitesimOperation"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /v1/admin/kitesim/upstream:
+    get:
+      operationId: getAdminKitesimUpstream
+      summary: Read Kitesim upstream settings, balance, products, and recent operations
+      description: Requires `system:settings/read`. Card PAN, billing details, CVC, account passwords, tokens, signed cashier URLs, and raw upstream payloads are never returned.
+      tags: [Core]
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Safe Kitesim upstream aggregate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminKitesimUpstream"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+    put:
+      operationId: putAdminKitesimUpstream
+      summary: Select the Kitesim system account and optionally replace its card profile
+      description: Requires `system:settings/write`; setting or clearing the write-only card additionally requires `system:settings/sensitive`. CVC is never accepted here.
+      tags: [Core]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminKitesimUpstreamUpdate"
+      responses:
+        "200":
+          description: Updated safe Kitesim upstream aggregate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminKitesimUpstream"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /v1/admin/kitesim/upstream/refresh:
+    post:
+      operationId: postAdminKitesimUpstreamRefresh
+      summary: Queue a Kitesim balance and product catalog refresh
+      description: Requires `system:settings/write`. Runs on the default queue and may retry because it performs read-only upstream requests.
+      tags: [Core]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "202":
+          description: Refresh task accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminKitesimSyncTask"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /v1/admin/kitesim/upstream/purchases:
+    post:
+      operationId: postAdminKitesimUpstreamPurchase
+      summary: Queue serial Kitesim phone replenishment
+      description: Requires `system:settings/write`. Buys one number, refreshes the number pool, then repeatedly selects the rarest three-digit segment with lowest-price tie breaking. The confirmed maximum unit price is checked before every order and each payment confirmation executes at most once on the default queue.
+      tags: [Core]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminKitesimPurchaseRequest"
+      responses:
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "202":
+          description: Purchase task accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminKitesimOperation"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /v1/admin/kitesim/upstream/recharges:
+    post:
+      operationId: postAdminKitesimUpstreamRecharge
+      summary: Queue a one-time Kitesim card recharge
+      description: Requires `system:settings/write` and `system:settings/sensitive`. CVC is stored only until the worker claims the task, never enters Redis or any read API, and is cleared before payment. The card payment flow executes at most once and stops on 3DS or an uncertain result.
+      tags: [Core]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminKitesimRechargeRequest"
+      responses:
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "202":
+          description: Recharge task accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminKitesimOperation"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /v1/admin/kitesim/upstream/operations/{operationId}/reconcile:
+    post:
+      operationId: postAdminKitesimOperationReconcile
+      summary: Queue a read-only reconciliation of an uncertain Kitesim operation
+      description: Requires `system:settings/write`. Only saved provider references are queried; no purchase, recharge, renewal, card, or payment write is replayed.
+      tags: [Core]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: operationId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "202":
+          description: Reconciliation task accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminKitesimOperation"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /v1/admin/kitesim/upstream/operations/{operationId}/resolution:
+    post:
+      operationId: postAdminKitesimOperationResolution
+      summary: Record an administrator-verified terminal result for a Kitesim operation
+      description: Requires `system:settings/write` and `system:settings/sensitive`. Only uncertain, action-required, or stale-running operations may be resolved; this endpoint never calls a provider payment write.
+      tags: [Core]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: operationId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminKitesimOperationResolutionRequest"
+      responses:
+        "200":
+          description: Operation terminal result recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminKitesimOperation"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
   /v1/open/icloud/forwarding-emails:
     post:
       operationId: postSystemICloudForwardingEmail
@@ -21633,6 +22092,603 @@ components:
           type: integer
           minimum: 1
           maximum: 100
+      additionalProperties: false
+
+    AdminKitesimPhoneStatus:
+      type: string
+      enum: [active, pending, activating, expired, refunded, unsynced]
+
+    AdminKitesimSyncTaskStatus:
+      type: string
+      enum: [idle, queued, running, succeeded, failed]
+
+    AdminKitesimBooleanFacet:
+      type: object
+      required: [all, yes, no]
+      properties:
+        all:
+          type: integer
+          format: int64
+          minimum: 0
+        yes:
+          type: integer
+          format: int64
+          minimum: 0
+        no:
+          type: integer
+          format: int64
+          minimum: 0
+      additionalProperties: false
+
+    AdminKitesimPhoneFacets:
+      type: object
+      required: [all, active, pending, activating, expired, refunded, unsynced, autoRenew, tokenAvailable, syncHealthy, phoneAvailable]
+      properties:
+        all:
+          type: integer
+          format: int64
+          minimum: 0
+        active:
+          type: integer
+          format: int64
+          minimum: 0
+        pending:
+          type: integer
+          format: int64
+          minimum: 0
+        activating:
+          type: integer
+          format: int64
+          minimum: 0
+        expired:
+          type: integer
+          format: int64
+          minimum: 0
+        refunded:
+          type: integer
+          format: int64
+          minimum: 0
+        unsynced:
+          type: integer
+          format: int64
+          minimum: 0
+        autoRenew:
+          $ref: "#/components/schemas/AdminKitesimBooleanFacet"
+        tokenAvailable:
+          $ref: "#/components/schemas/AdminKitesimBooleanFacet"
+        syncHealthy:
+          $ref: "#/components/schemas/AdminKitesimBooleanFacet"
+        phoneAvailable:
+          $ref: "#/components/schemas/AdminKitesimBooleanFacet"
+      additionalProperties: false
+
+    AdminKitesimPhoneItem:
+      type: object
+      required:
+        - accountId
+        - phoneId
+        - account
+        - phoneNumber
+        - status
+        - autoRenew
+        - tokenAvailable
+        - syncHealthy
+        - syncStatus
+        - syncAttempts
+        - createdAt
+      properties:
+        accountId:
+          type: integer
+          minimum: 1
+        phoneId:
+          type: integer
+          minimum: 1
+          nullable: true
+        providerOrderId:
+          type: string
+          minLength: 1
+        account:
+          type: string
+          format: email
+        phoneNumber:
+          type: string
+        status:
+          $ref: "#/components/schemas/AdminKitesimPhoneStatus"
+        orderNo:
+          type: string
+        countryCode:
+          type: string
+        orderStatus:
+          type: integer
+        packageId:
+          type: string
+        durationType:
+          type: integer
+        durationValue:
+          type: integer
+        autoRenew:
+          type: boolean
+        currency:
+          type: string
+        originalAmount:
+          type: string
+        paidAmount:
+          type: string
+        autoRenewPrice:
+          type: string
+        createTime:
+          type: string
+        paymentTime:
+          type: string
+        expireTime:
+          type: string
+        latestRenewalTime:
+          type: string
+        nextRenewalDate:
+          type: string
+        refundTime:
+          type: string
+        tokenAvailable:
+          type: boolean
+        tokenUpdatedAt:
+          type: string
+          format: date-time
+        syncHealthy:
+          type: boolean
+        syncStatus:
+          $ref: "#/components/schemas/AdminKitesimSyncTaskStatus"
+        syncQueuedAt:
+          type: string
+          format: date-time
+        syncStartedAt:
+          type: string
+          format: date-time
+        syncFinishedAt:
+          type: string
+          format: date-time
+        syncAttempts:
+          type: integer
+          minimum: 0
+        lastSafeError:
+          type: string
+        lastSyncedAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    AdminKitesimPhoneList:
+      type: object
+      required: [items, total, offset, limit, facets]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminKitesimPhoneItem"
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+        offset:
+          type: integer
+          minimum: 0
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+        facets:
+          $ref: "#/components/schemas/AdminKitesimPhoneFacets"
+      additionalProperties: false
+
+    AdminKitesimImportRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+          minLength: 1
+          maxLength: 131072
+          description: One `account----password` entry per non-empty line.
+      additionalProperties: false
+
+    AdminKitesimImportFailure:
+      type: object
+      required: [account, message]
+      properties:
+        account:
+          type: string
+          format: email
+        message:
+          type: string
+      additionalProperties: false
+
+    AdminKitesimImportResult:
+      type: object
+      required: [imported, queued, failed, errors]
+      properties:
+        imported:
+          type: integer
+          minimum: 0
+        queued:
+          type: integer
+          minimum: 0
+        failed:
+          type: integer
+          minimum: 0
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminKitesimImportFailure"
+      additionalProperties: false
+
+    AdminKitesimSyncTask:
+      type: object
+      required: [accountId, status, attempts]
+      properties:
+        accountId:
+          type: integer
+          minimum: 1
+        status:
+          $ref: "#/components/schemas/AdminKitesimSyncTaskStatus"
+        queuedAt:
+          type: string
+          format: date-time
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+        attempts:
+          type: integer
+          minimum: 0
+      additionalProperties: false
+
+    AdminKitesimMessage:
+      type: object
+      required: [caller, content, time]
+      properties:
+        caller:
+          type: string
+        content:
+          type: string
+        time:
+          type: string
+      additionalProperties: false
+
+    AdminKitesimMessageList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminKitesimMessage"
+      additionalProperties: false
+
+    AdminKitesimCardInput:
+      type: object
+      required: [number, expiryMonth, expiryYear, holder, billingEmail, firstName, lastName, phone, country, city, address]
+      properties:
+        number:
+          type: string
+          minLength: 13
+          maxLength: 32
+          description: Write-only PAN. The API never returns it.
+        expiryMonth:
+          type: integer
+          minimum: 1
+          maximum: 12
+        expiryYear:
+          type: integer
+          minimum: 2000
+          maximum: 2200
+        holder:
+          type: string
+          minLength: 1
+          maxLength: 120
+        billingEmail:
+          type: string
+          format: email
+          maxLength: 320
+        firstName:
+          type: string
+          minLength: 1
+          maxLength: 80
+        lastName:
+          type: string
+          minLength: 1
+          maxLength: 80
+        phone:
+          type: string
+          minLength: 1
+          maxLength: 40
+        country:
+          type: string
+          pattern: "^[A-Za-z]{2}$"
+        city:
+          type: string
+          minLength: 1
+          maxLength: 120
+        address:
+          type: string
+          minLength: 1
+          maxLength: 300
+      additionalProperties: false
+
+    AdminKitesimUpstreamUpdate:
+      type: object
+      required: [accountId]
+      properties:
+        accountId:
+          type: integer
+          minimum: 1
+        card:
+          $ref: "#/components/schemas/AdminKitesimCardInput"
+        clearCard:
+          type: boolean
+          default: false
+      additionalProperties: false
+
+    AdminKitesimUpstreamAccount:
+      type: object
+      required: [id, account, tokenAvailable, syncStatus]
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        account:
+          type: string
+          format: email
+        tokenAvailable:
+          type: boolean
+        syncStatus:
+          $ref: "#/components/schemas/AdminKitesimSyncTaskStatus"
+        lastSyncedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    AdminKitesimProduct:
+      type: object
+      required: [id, countryCode, packageId, durationType, durationValue, currency, buyPrice, originalPrice, autoRenewPrice, active, lastSeenAt]
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        countryCode:
+          type: string
+        packageId:
+          type: string
+        durationType:
+          type: integer
+          description: 1=month, 2=quarter, 3=half-year.
+        durationValue:
+          type: integer
+          minimum: 0
+        currency:
+          type: string
+        buyPrice:
+          type: string
+        originalPrice:
+          type: string
+        autoRenewPrice:
+          type: string
+        active:
+          type: boolean
+        lastSeenAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    AdminKitesimProductList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminKitesimProduct"
+      additionalProperties: false
+
+    AdminKitesimOperationKind:
+      type: string
+      enum: [purchase, recharge, renew]
+
+    AdminKitesimOperationStatus:
+      type: string
+      enum: [queued, running, succeeded, failed, uncertain, requires_action]
+
+    AdminKitesimOperation:
+      type: object
+      required: [id, kind, status, accountId, requestedCount, completedCount, amount, attempts, providerOrderNos, reconcileAttempts, queuedAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+        kind:
+          $ref: "#/components/schemas/AdminKitesimOperationKind"
+        status:
+          $ref: "#/components/schemas/AdminKitesimOperationStatus"
+        accountId:
+          type: integer
+          minimum: 1
+        account:
+          type: string
+          format: email
+        phoneId:
+          type: integer
+          minimum: 1
+        phoneNumber:
+          type: string
+        countryCode:
+          type: string
+        packageId:
+          type: string
+        requestedCount:
+          type: integer
+          minimum: 0
+        completedCount:
+          type: integer
+          minimum: 0
+        amount:
+          type: string
+        currency:
+          type: string
+        attempts:
+          type: integer
+          minimum: 0
+        providerOrderNos:
+          type: array
+          items:
+            type: string
+        lastSafeError:
+          type: string
+        reconcileAttempts:
+          type: integer
+          minimum: 0
+        reconcileRequestedAt:
+          type: string
+          format: date-time
+        lastReconciledAt:
+          type: string
+          format: date-time
+        resolutionSource:
+          type: string
+          enum: [query, manual]
+        resolutionNote:
+          type: string
+        resolvedAt:
+          type: string
+          format: date-time
+        queuedAt:
+          type: string
+          format: date-time
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    AdminKitesimUpstream:
+      type: object
+      required: [accountId, accounts, cardConfigured, balance, refreshStatus, refreshAttempts, products, operations]
+      properties:
+        accountId:
+          type: integer
+          minimum: 1
+          nullable: true
+        account:
+          type: string
+          format: email
+        accounts:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminKitesimUpstreamAccount"
+        cardConfigured:
+          type: boolean
+        cardBrand:
+          type: string
+        cardLast4:
+          type: string
+          pattern: "^[0-9]{4}$"
+        cardExpiryMonth:
+          type: integer
+          minimum: 1
+          maximum: 12
+        cardExpiryYear:
+          type: integer
+          minimum: 2000
+        balance:
+          type: string
+        balanceUpdatedAt:
+          type: string
+          format: date-time
+        refreshStatus:
+          $ref: "#/components/schemas/AdminKitesimSyncTaskStatus"
+        refreshQueuedAt:
+          type: string
+          format: date-time
+        refreshStartedAt:
+          type: string
+          format: date-time
+        refreshFinishedAt:
+          type: string
+          format: date-time
+        refreshAttempts:
+          type: integer
+          minimum: 0
+        lastSafeError:
+          type: string
+        products:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminKitesimProduct"
+        operations:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminKitesimOperation"
+      additionalProperties: false
+
+    AdminKitesimPurchaseRequest:
+      type: object
+      required: [productId, count, maxUnitPrice]
+      properties:
+        productId:
+          type: integer
+          minimum: 1
+        count:
+          type: integer
+          minimum: 1
+          maximum: 100
+        maxUnitPrice:
+          type: string
+          pattern: "^[0-9]+(?:\\.[0-9]{1,6})?$"
+          description: Maximum per-number price confirmed by the administrator.
+      additionalProperties: false
+
+    AdminKitesimRechargeRequest:
+      type: object
+      required: [amount, cvc]
+      properties:
+        amount:
+          type: string
+          pattern: "^[0-9]+(?:\\.[0-9]{1,6})?$"
+        cvc:
+          type: string
+          pattern: "^[0-9]{3,4}$"
+          description: Write-only and cleared from durable storage when the worker claims the task.
+      additionalProperties: false
+
+    AdminKitesimRenewalRequest:
+      type: object
+      required: [productId, maxUnitPrice]
+      properties:
+        productId:
+          type: integer
+          minimum: 1
+        maxUnitPrice:
+          type: string
+          pattern: "^[0-9]+(?:\\.[0-9]{1,6})?$"
+          description: Maximum renewal price confirmed by the administrator.
+      additionalProperties: false
+
+    AdminKitesimOperationResolutionRequest:
+      type: object
+      required: [outcome, note]
+      properties:
+        outcome:
+          type: string
+          enum: [succeeded, failed]
+        note:
+          type: string
+          minLength: 1
+          maxLength: 500
       additionalProperties: false
 
     SMSBowerStrategy:

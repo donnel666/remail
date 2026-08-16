@@ -11,6 +11,7 @@ import {
   PackageOpen,
   ScrollText,
   Settings,
+  Smartphone,
   Users,
   Wallet,
   Zap,
@@ -68,6 +69,12 @@ export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
         path: "/admin/microsoft",
         labelKey: "Admin Microsoft Emails",
         icon: Database,
+        requiredPermission: permissionKey("core:resource", "read"),
+      },
+      {
+        path: "/admin/kitesim",
+        labelKey: "Admin Kitesim",
+        icon: Smartphone,
         requiredPermission: permissionKey("core:resource", "read"),
       },
       {
