@@ -114,7 +114,7 @@ type resourceTaskRepository interface {
 type AdminResourceFetchRepository interface {
 	resourceTaskRepository
 	AssertResourceFetchFence(ctx context.Context, resourceID uint, generation uint64, expectedCredentialRevision uint64) error
-	CompleteResourceFetch(ctx context.Context, resourceID uint, generation uint64, expectedCredentialRevision uint64, rotatedRefreshToken string, fetched int, stored int, matched int, now time.Time, log *governancedomain.SystemLog) error
+	CompleteResourceFetch(ctx context.Context, resourceID uint, generation uint64, expectedCredentialRevision uint64, rotatedRefreshToken string, graphAvailable *bool, fetched int, stored int, matched int, now time.Time, log *governancedomain.SystemLog) error
 	AssertICloudResourceFetchFence(ctx context.Context, resourceID uint, generation uint64, expectedCredentialRevision uint64) error
 	CompleteICloudResourceFetch(ctx context.Context, resourceID uint, generation uint64, expectedCredentialRevision uint64, fetched int, stored int, matched int, now time.Time, log *governancedomain.SystemLog) error
 }
@@ -309,14 +309,15 @@ func (uc *resourceTaskUseCase) process(ctx context.Context, resourceID uint, gen
 	}
 	fetched, err := uc.transport.FetchMicrosoftMessages(ctx, FetchMessagesRequest{
 		Scope: OrderScope{
-			OrderNo:            firstNonBlank(job.RequestID, fmt.Sprintf("resource-fetch-%d", job.ID)),
-			AllocationType:     domain.ResourceTypeMicrosoft,
-			EmailResourceID:    scope.ResourceID,
-			Recipient:          scope.EmailAddress,
-			MicrosoftEmail:     scope.EmailAddress,
-			MicrosoftClientID:  scope.ClientID,
-			MicrosoftRT:        scope.RefreshToken,
-			CredentialRevision: job.ExpectedCredentialRevision,
+			OrderNo:                 firstNonBlank(job.RequestID, fmt.Sprintf("resource-fetch-%d", job.ID)),
+			AllocationType:          domain.ResourceTypeMicrosoft,
+			EmailResourceID:         scope.ResourceID,
+			Recipient:               scope.EmailAddress,
+			MicrosoftEmail:          scope.EmailAddress,
+			MicrosoftClientID:       scope.ClientID,
+			MicrosoftRT:             scope.RefreshToken,
+			MicrosoftGraphAvailable: scope.GraphAvailable,
+			CredentialRevision:      job.ExpectedCredentialRevision,
 		},
 		SinceAt:     time.Time{},
 		UntilAt:     dereferenceTime(job.UntilAt, uc.now()),
@@ -368,6 +369,7 @@ func (uc *resourceTaskUseCase) process(ctx context.Context, resourceID uint, gen
 		job.Generation,
 		job.ExpectedCredentialRevision,
 		strings.TrimSpace(fetched.RefreshToken),
+		fetched.GraphAvailable,
 		len(fetched.Messages),
 		stored,
 		matched,

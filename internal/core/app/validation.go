@@ -18,7 +18,7 @@ import (
 // applies results from temporary Redis tasks.
 type ResourceValidationRepository interface {
 	MarkResourcePendingWithLog(ctx context.Context, resourceID uint, resourceType domain.ResourceType, ownerUserID uint, log *governancedomain.OperationLog) error
-	RecordMicrosoftFetchFailure(ctx context.Context, resourceID uint, expectedCredentialRevision uint64, refreshToken string, safeError string, requestID string, systemLog *governancedomain.SystemLog) (abnormal bool, err error)
+	RecordMicrosoftFetchFailure(ctx context.Context, resourceID uint, expectedCredentialRevision uint64, refreshToken string, safeError string, requestID string, markAbnormal bool, systemLog *governancedomain.SystemLog) (abnormal bool, err error)
 	MarkValidationBatchPending(ctx context.Context, task ResourceValidationBatchTask, limit int) (*ResourceValidationBatchPageResult, error)
 	ClaimPendingValidations(ctx context.Context, limit int) ([]ResourceValidationTask, error)
 	MarkValidationDispatched(ctx context.Context, task ResourceValidationTask) (bool, error)
@@ -259,7 +259,7 @@ func NewResourceValidationUseCase(resources EmailResourceRepository, validations
 	}
 }
 
-func (uc *ResourceValidationUseCase) MarkMicrosoftAbnormalAfterFetchFailure(
+func (uc *ResourceValidationUseCase) RecordMicrosoftFetchFailure(
 	ctx context.Context,
 	resourceID uint,
 	expectedCredentialRevision uint64,
@@ -267,6 +267,7 @@ func (uc *ResourceValidationUseCase) MarkMicrosoftAbnormalAfterFetchFailure(
 	category string,
 	safeMessage string,
 	requestID string,
+	markAbnormal bool,
 ) (bool, error) {
 	if uc == nil || uc.validations == nil || resourceID == 0 || expectedCredentialRevision == 0 {
 		return false, domain.ErrInvalidResourceCommand
@@ -274,18 +275,22 @@ func (uc *ResourceValidationUseCase) MarkMicrosoftAbnormalAfterFetchFailure(
 	category = strings.ToLower(strings.TrimSpace(category))
 	safeMessage = strings.TrimSpace(safeMessage)
 	if safeMessage == "" {
-		safeMessage = "Microsoft mail fetch permanently failed."
+		safeMessage = "Microsoft mail fetch failed."
 	}
-	return uc.validations.RecordMicrosoftFetchFailure(ctx, resourceID, expectedCredentialRevision, refreshToken, safeMessage, requestID, &governancedomain.SystemLog{
-		Level:     "warning",
-		Module:    "core",
-		EventType: "resource.microsoft_fetch_permanent_failure",
-		RequestID: strings.TrimSpace(requestID),
-		BizType:   "resource",
-		BizID:     fmt.Sprintf("%d", resourceID),
-		Message:   "Microsoft resource marked abnormal after a permanent mail fetch failure.",
-		Detail:    safeValidationDetail(category, safeMessage),
-	})
+	var systemLog *governancedomain.SystemLog
+	if markAbnormal {
+		systemLog = &governancedomain.SystemLog{
+			Level:     "warning",
+			Module:    "core",
+			EventType: "resource.microsoft_fetch_failure_threshold",
+			RequestID: strings.TrimSpace(requestID),
+			BizType:   "resource",
+			BizID:     fmt.Sprintf("%d", resourceID),
+			Message:   "Microsoft resource marked abnormal after repeated mail fetch failures.",
+			Detail:    safeValidationDetail(category, safeMessage),
+		}
+	}
+	return uc.validations.RecordMicrosoftFetchFailure(ctx, resourceID, expectedCredentialRevision, refreshToken, safeMessage, requestID, markAbnormal, systemLog)
 }
 
 func (uc *ResourceValidationUseCase) Create(ctx context.Context, resourceID uint, userID uint, isAdmin bool, requestID, path string) (*ResourceBatchValidationResult, error) {

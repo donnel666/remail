@@ -83,28 +83,29 @@ type MailRule struct {
 }
 
 type OrderScope struct {
-	OrderID            uint
-	OrderNo            string
-	UserID             uint
-	ProjectID          uint
-	ProductID          uint
-	ServiceMode        string
-	OrderStatus        string
-	AllocationType     domain.ResourceType
-	AllocationID       uint
-	RecipientKind      string
-	EmailResourceID    uint
-	Recipient          string
-	ReceiveStartedAt   *time.Time
-	ReceiveUntil       *time.Time
-	ActivatedAt        *time.Time
-	AfterSaleUntil     *time.Time
-	LooseMatch         bool
-	Rules              []MailRule
-	MicrosoftEmail     string
-	MicrosoftClientID  string
-	MicrosoftRT        string
-	CredentialRevision uint64
+	OrderID                 uint
+	OrderNo                 string
+	UserID                  uint
+	ProjectID               uint
+	ProductID               uint
+	ServiceMode             string
+	OrderStatus             string
+	AllocationType          domain.ResourceType
+	AllocationID            uint
+	RecipientKind           string
+	EmailResourceID         uint
+	Recipient               string
+	ReceiveStartedAt        *time.Time
+	ReceiveUntil            *time.Time
+	ActivatedAt             *time.Time
+	AfterSaleUntil          *time.Time
+	LooseMatch              bool
+	Rules                   []MailRule
+	MicrosoftEmail          string
+	MicrosoftClientID       string
+	MicrosoftRT             string
+	MicrosoftGraphAvailable bool
+	CredentialRevision      uint64
 }
 
 func OrderReadLimit(scope OrderScope) int {
@@ -170,9 +171,10 @@ type FetchMessagesRequest struct {
 }
 
 type FetchMessagesResult struct {
-	Messages     []FetchedMessage
-	RefreshToken string
-	CommitCursor func(context.Context, func(context.Context) error) error
+	Messages       []FetchedMessage
+	RefreshToken   string
+	GraphAvailable *bool
+	CommitCursor   func(context.Context, func(context.Context) error) error
 }
 
 type InboundMailRequest struct {
@@ -259,6 +261,7 @@ type PermanentMicrosoftFetchFailure struct {
 	RequestID          string
 	Category           string
 	SafeMessage        string
+	FailureCount       int64
 }
 
 type PermanentMicrosoftFetchFailurePort interface {
@@ -1117,9 +1120,9 @@ func (uc *UseCase) processFetch(ctx context.Context, task FetchTask, timing pick
 	if !current {
 		return nil
 	}
-	if strings.TrimSpace(fetched.RefreshToken) != "" &&
-		strings.TrimSpace(fetched.RefreshToken) != strings.TrimSpace(scope.MicrosoftRT) &&
-		scope.AllocationType == domain.ResourceTypeMicrosoft {
+	if scope.AllocationType == domain.ResourceTypeMicrosoft &&
+		(fetched.GraphAvailable != nil ||
+			(strings.TrimSpace(fetched.RefreshToken) != "" && strings.TrimSpace(fetched.RefreshToken) != strings.TrimSpace(scope.MicrosoftRT))) {
 		if uc.credentials == nil {
 			return errors.New("microsoft credential service is unavailable")
 		}
@@ -1127,6 +1130,7 @@ func (uc *UseCase) processFetch(ctx context.Context, task FetchTask, timing pick
 			ResourceID:                 scope.EmailResourceID,
 			ExpectedCredentialRevision: scope.CredentialRevision,
 			RefreshToken:               fetched.RefreshToken,
+			GraphAvailable:             fetched.GraphAvailable,
 			Now:                        uc.now(),
 		})
 		if errors.Is(err, coreapp.ErrMicrosoftCredentialChanged) || errors.Is(err, coreapp.ErrMicrosoftCredentialDeleted) || errors.Is(err, coreapp.ErrMicrosoftCredentialNotFound) {

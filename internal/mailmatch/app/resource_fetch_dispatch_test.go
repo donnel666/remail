@@ -32,7 +32,7 @@ func (*resourceFetchDispatchRepoStub) AssertResourceFetchFence(context.Context, 
 	return nil
 }
 
-func (*resourceFetchDispatchRepoStub) CompleteResourceFetch(context.Context, uint, uint64, uint64, string, int, int, int, time.Time, *governancedomain.SystemLog) error {
+func (*resourceFetchDispatchRepoStub) CompleteResourceFetch(context.Context, uint, uint64, uint64, string, *bool, int, int, int, time.Time, *governancedomain.SystemLog) error {
 	return nil
 }
 

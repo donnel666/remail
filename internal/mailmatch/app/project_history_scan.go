@@ -262,7 +262,8 @@ func (uc *ProjectHistoryScanUseCase) scanValidatedMicrosoftHistory(ctx context.C
 			OrderNo: "validated-microsoft-history", AllocationType: domain.ResourceTypeMicrosoft,
 			EmailResourceID: resource.ResourceID, Recipient: resource.EmailAddress,
 			MicrosoftEmail: resource.EmailAddress, MicrosoftClientID: resource.ClientID, MicrosoftRT: resource.RefreshToken,
-			CredentialRevision: resource.CredentialRevision,
+			MicrosoftGraphAvailable: resource.GraphAvailable,
+			CredentialRevision:      resource.CredentialRevision,
 		},
 		SinceAt: time.Time{}, UntilAt: time.Time{},
 		RequestID: strings.TrimSpace(task.RequestID), FullHistory: true,
@@ -312,7 +313,7 @@ func (uc *ProjectHistoryScanUseCase) scanValidatedMicrosoftHistory(ctx context.C
 		}
 		return uc.credentials.ApplyMicrosoftHistoryScanResult(txCtx, coreapp.MicrosoftHistoryScanResult{
 			ResourceID: resource.ResourceID, ExpectedCredentialRevision: resource.CredentialRevision,
-			RefreshToken: refreshToken, Completed: true, Now: uc.now(),
+			RefreshToken: refreshToken, GraphAvailable: fetched.GraphAvailable, Completed: true, Now: uc.now(),
 		})
 	})
 	if errors.Is(err, coreapp.ErrMicrosoftCredentialDeleted) || errors.Is(err, coreapp.ErrMicrosoftCredentialNotFound) {
@@ -384,7 +385,8 @@ func (uc *ProjectHistoryScanUseCase) scanProjectHistoryResource(
 			OrderNo: "project-history", AllocationType: domain.ResourceTypeMicrosoft,
 			EmailResourceID: resource.ResourceID, Recipient: resource.EmailAddress,
 			MicrosoftEmail: resource.EmailAddress, MicrosoftClientID: resource.ClientID, MicrosoftRT: resource.RefreshToken,
-			CredentialRevision: resource.CredentialRevision,
+			MicrosoftGraphAvailable: resource.GraphAvailable,
+			CredentialRevision:      resource.CredentialRevision,
 		},
 		SinceAt: time.Time{}, UntilAt: time.Time{},
 		RequestID: task.RequestID, FullHistory: true, OnMessages: accumulator.add, OnReset: accumulator.reset,
@@ -440,7 +442,7 @@ func (uc *ProjectHistoryScanUseCase) scanProjectHistoryResource(
 		}
 		if err := uc.credentials.ApplyMicrosoftFetchRefreshToken(txCtx, coreapp.MicrosoftFetchRefreshTokenRotation{
 			ResourceID: resource.ResourceID, ExpectedCredentialRevision: resource.CredentialRevision,
-			RefreshToken: refreshToken, Now: uc.now(),
+			RefreshToken: refreshToken, GraphAvailable: fetched.GraphAvailable, Now: uc.now(),
 		}); err != nil {
 			return err
 		}

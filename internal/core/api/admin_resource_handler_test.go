@@ -210,7 +210,7 @@ func (*adminHandlerValidationRepo) ApplyMicrosoftResult(context.Context, coreapp
 	return nil
 }
 
-func (*adminHandlerValidationRepo) RecordMicrosoftFetchFailure(context.Context, uint, uint64, string, string, string, *governancedomain.SystemLog) (bool, error) {
+func (*adminHandlerValidationRepo) RecordMicrosoftFetchFailure(context.Context, uint, uint64, string, string, string, bool, *governancedomain.SystemLog) (bool, error) {
 	return true, nil
 }
 func (*adminHandlerValidationRepo) ApplyDomainResult(context.Context, coreapp.ResourceValidationTask, coreapp.DomainValidationResult, *governancedomain.SystemLog) error {

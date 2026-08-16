@@ -1642,7 +1642,7 @@ func (r *mockValidationRepo) ApplyMicrosoftResult(_ context.Context, task coreap
 	return nil
 }
 
-func (*mockValidationRepo) RecordMicrosoftFetchFailure(context.Context, uint, uint64, string, string, string, *governancedomain.SystemLog) (bool, error) {
+func (*mockValidationRepo) RecordMicrosoftFetchFailure(context.Context, uint, uint64, string, string, string, bool, *governancedomain.SystemLog) (bool, error) {
 	return true, nil
 }
 

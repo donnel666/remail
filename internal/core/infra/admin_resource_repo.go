@@ -203,7 +203,7 @@ func (r *AdminResourceRepo) FindNextMicrosoft(ctx context.Context, afterID, maxI
 	var resource MicrosoftResourceModel
 	result := r.dbFor(ctx).
 		Table("microsoft_resources AS mr").
-		Select("mr.id, mr.status, mr.email_address, mr.client_id, mr.refresh_token, mr.credential_revision").
+		Select("mr.id, mr.status, mr.email_address, mr.client_id, mr.refresh_token, mr.graph_available, mr.credential_revision").
 		Where("mr.id > ? AND mr.id <= ? AND mr.status <> ?", afterID, maxID, domain.MicrosoftStatusDeleted).
 		Order("mr.id ASC").
 		Limit(1).

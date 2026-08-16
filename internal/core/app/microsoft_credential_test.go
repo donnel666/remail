@@ -83,6 +83,22 @@ func TestMicrosoftCredentialServiceMutations(t *testing.T) {
 		require.Equal(t, uint64(2), repo.root.Version)
 	})
 
+	t.Run("graph fetch success repairs the protocol flag without rotating credentials", func(t *testing.T) {
+		repo := newMicrosoftCredentialRepositoryStub()
+		service := NewMicrosoftCredentialService(repo)
+		graphAvailable := true
+
+		err := service.ApplyMicrosoftFetchRefreshToken(context.Background(), MicrosoftFetchRefreshTokenRotation{
+			ResourceID: 10, ExpectedCredentialRevision: 4,
+			RefreshToken: "old-refresh-token", GraphAvailable: &graphAvailable, Now: now,
+		})
+
+		require.NoError(t, err)
+		require.True(t, repo.resource.GraphAvailable)
+		require.Equal(t, uint64(4), repo.resource.CredentialRevision)
+		require.Equal(t, 1, repo.saves)
+	})
+
 	t.Run("rotation returns an in-flight validation to pending", func(t *testing.T) {
 		repo := newMicrosoftCredentialRepositoryStub()
 		repo.resource.Status = domain.MicrosoftStatusValidating

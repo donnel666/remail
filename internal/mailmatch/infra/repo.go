@@ -431,28 +431,29 @@ func (r *Repo) loadOrderScope(ctx context.Context, orderNo string) (*app.OrderSc
 }
 
 type orderScopeRow struct {
-	TokenPlain         string
-	OrderID            uint
-	OrderNo            string
-	UserID             uint
-	ProjectID          uint
-	ProductID          uint
-	ServiceMode        string
-	OrderStatus        string
-	AllocationType     string
-	AllocationID       uint
-	RecipientKind      string
-	EmailResourceID    uint
-	Recipient          string
-	ReceiveStartedAt   *time.Time
-	ReceiveUntil       *time.Time
-	ActivatedAt        *time.Time
-	AfterSaleUntil     *time.Time
-	LooseMatch         bool
-	MicrosoftEmail     string
-	MicrosoftClientID  string
-	MicrosoftRT        string
-	CredentialRevision uint64
+	TokenPlain              string
+	OrderID                 uint
+	OrderNo                 string
+	UserID                  uint
+	ProjectID               uint
+	ProductID               uint
+	ServiceMode             string
+	OrderStatus             string
+	AllocationType          string
+	AllocationID            uint
+	RecipientKind           string
+	EmailResourceID         uint
+	Recipient               string
+	ReceiveStartedAt        *time.Time
+	ReceiveUntil            *time.Time
+	ActivatedAt             *time.Time
+	AfterSaleUntil          *time.Time
+	LooseMatch              bool
+	MicrosoftEmail          string
+	MicrosoftClientID       string
+	MicrosoftRT             string
+	MicrosoftGraphAvailable bool
+	CredentialRevision      uint64
 }
 
 const orderScopeSQL = `
@@ -491,6 +492,7 @@ SELECT
     COALESCE(mr.email_address, '') AS microsoft_email,
     COALESCE(mr.client_id, '') AS microsoft_client_id,
     COALESCE(mr.refresh_token, '') AS microsoft_rt,
+    COALESCE(mr.graph_available, FALSE) AS microsoft_graph_available,
     COALESCE(mr.credential_revision, 0) AS credential_revision
 FROM orders o
 JOIN projects p ON p.id = o.project_id
@@ -779,28 +781,29 @@ ORDER BY o.created_at ASC, o.id ASC`
 
 func (r orderScopeRow) toScope(rules []app.MailRule) *app.OrderScope {
 	return &app.OrderScope{
-		OrderID:            r.OrderID,
-		OrderNo:            r.OrderNo,
-		UserID:             r.UserID,
-		ProjectID:          r.ProjectID,
-		ProductID:          r.ProductID,
-		ServiceMode:        r.ServiceMode,
-		OrderStatus:        r.OrderStatus,
-		AllocationType:     domain.ResourceType(r.AllocationType),
-		AllocationID:       r.AllocationID,
-		RecipientKind:      strings.ToLower(strings.TrimSpace(r.RecipientKind)),
-		EmailResourceID:    r.EmailResourceID,
-		Recipient:          strings.ToLower(strings.TrimSpace(r.Recipient)),
-		ReceiveStartedAt:   r.ReceiveStartedAt,
-		ReceiveUntil:       r.ReceiveUntil,
-		ActivatedAt:        r.ActivatedAt,
-		AfterSaleUntil:     r.AfterSaleUntil,
-		LooseMatch:         r.LooseMatch,
-		Rules:              rules,
-		MicrosoftEmail:     r.MicrosoftEmail,
-		MicrosoftClientID:  r.MicrosoftClientID,
-		MicrosoftRT:        r.MicrosoftRT,
-		CredentialRevision: r.CredentialRevision,
+		OrderID:                 r.OrderID,
+		OrderNo:                 r.OrderNo,
+		UserID:                  r.UserID,
+		ProjectID:               r.ProjectID,
+		ProductID:               r.ProductID,
+		ServiceMode:             r.ServiceMode,
+		OrderStatus:             r.OrderStatus,
+		AllocationType:          domain.ResourceType(r.AllocationType),
+		AllocationID:            r.AllocationID,
+		RecipientKind:           strings.ToLower(strings.TrimSpace(r.RecipientKind)),
+		EmailResourceID:         r.EmailResourceID,
+		Recipient:               strings.ToLower(strings.TrimSpace(r.Recipient)),
+		ReceiveStartedAt:        r.ReceiveStartedAt,
+		ReceiveUntil:            r.ReceiveUntil,
+		ActivatedAt:             r.ActivatedAt,
+		AfterSaleUntil:          r.AfterSaleUntil,
+		LooseMatch:              r.LooseMatch,
+		Rules:                   rules,
+		MicrosoftEmail:          r.MicrosoftEmail,
+		MicrosoftClientID:       r.MicrosoftClientID,
+		MicrosoftRT:             r.MicrosoftRT,
+		MicrosoftGraphAvailable: r.MicrosoftGraphAvailable,
+		CredentialRevision:      r.CredentialRevision,
 	}
 }
 

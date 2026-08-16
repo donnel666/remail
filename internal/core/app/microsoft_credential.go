@@ -24,6 +24,7 @@ type MicrosoftCredentialScope struct {
 	EmailAddress       string
 	ClientID           string
 	RefreshToken       string
+	GraphAvailable     bool
 	CredentialRevision uint64
 }
 
@@ -47,6 +48,7 @@ type MicrosoftFetchRefreshTokenRotation struct {
 	ResourceID                 uint
 	ExpectedCredentialRevision uint64
 	RefreshToken               string
+	GraphAvailable             *bool
 	Now                        time.Time
 }
 
@@ -54,6 +56,7 @@ type MicrosoftHistoryScanResult struct {
 	ResourceID                 uint
 	ExpectedCredentialRevision uint64
 	RefreshToken               string
+	GraphAvailable             *bool
 	Completed                  bool
 	Now                        time.Time
 }
@@ -170,14 +173,19 @@ func (s *MicrosoftCredentialService) ApplyMicrosoftFetchRefreshToken(ctx context
 		if resource.Status == domain.MicrosoftStatusDeleted {
 			return false, ErrMicrosoftCredentialDeleted
 		}
-		refreshToken := strings.TrimSpace(update.RefreshToken)
-		if refreshToken == "" || refreshToken == strings.TrimSpace(resource.RefreshToken) {
-			return false, nil
+		changed := false
+		if update.GraphAvailable != nil && resource.GraphAvailable != *update.GraphAvailable {
+			resource.GraphAvailable = *update.GraphAvailable
+			changed = true
 		}
-		resource.RefreshToken = refreshToken
-		resource.CredentialRevision++
-		resource.CredentialUpdatedAt = credentialTime(update.Now)
-		return true, nil
+		refreshToken := strings.TrimSpace(update.RefreshToken)
+		if refreshToken != "" && refreshToken != strings.TrimSpace(resource.RefreshToken) {
+			resource.RefreshToken = refreshToken
+			resource.CredentialRevision++
+			resource.CredentialUpdatedAt = credentialTime(update.Now)
+			changed = true
+		}
+		return changed, nil
 	})
 }
 
@@ -201,6 +209,10 @@ func (s *MicrosoftCredentialService) ApplyMicrosoftHistoryScanResult(ctx context
 		}
 
 		changed := false
+		if result.GraphAvailable != nil && resource.GraphAvailable != *result.GraphAvailable {
+			resource.GraphAvailable = *result.GraphAvailable
+			changed = true
+		}
 		if refreshToken := strings.TrimSpace(result.RefreshToken); refreshToken != "" && refreshToken != strings.TrimSpace(resource.RefreshToken) {
 			resource.RefreshToken = refreshToken
 			resource.CredentialRevision++
@@ -265,6 +277,7 @@ func microsoftCredentialScope(resource *domain.MicrosoftResource) *MicrosoftCred
 		EmailAddress:       resource.EmailAddress,
 		ClientID:           resource.ClientID,
 		RefreshToken:       resource.RefreshToken,
+		GraphAvailable:     resource.GraphAvailable,
 		CredentialRevision: resource.CredentialRevision,
 	}
 }

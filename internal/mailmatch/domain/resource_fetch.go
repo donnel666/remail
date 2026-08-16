@@ -69,6 +69,7 @@ type ResourceFetchScope struct {
 	OrderNo            string
 	ClientID           string
 	RefreshToken       string
+	GraphAvailable     bool
 	CredentialRevision uint64
 }
 

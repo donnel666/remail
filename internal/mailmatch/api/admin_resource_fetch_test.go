@@ -302,7 +302,7 @@ func (*adminResourceFetchRepoStub) AssertResourceFetchFence(context.Context, uin
 	return nil
 }
 
-func (*adminResourceFetchRepoStub) CompleteResourceFetch(context.Context, uint, uint64, uint64, string, int, int, int, time.Time, *governancedomain.SystemLog) error {
+func (*adminResourceFetchRepoStub) CompleteResourceFetch(context.Context, uint, uint64, uint64, string, *bool, int, int, int, time.Time, *governancedomain.SystemLog) error {
 	return nil
 }
 

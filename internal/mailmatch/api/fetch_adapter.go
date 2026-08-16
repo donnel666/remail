@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	stdmail "net/mail"
 	"regexp"
@@ -14,17 +15,19 @@ import (
 	mailinfra "github.com/donnel666/remail/internal/mailtransport/infra"
 	proxyapp "github.com/donnel666/remail/internal/proxy/app"
 	proxydomain "github.com/donnel666/remail/internal/proxy/domain"
-	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
+	"github.com/redis/go-redis/v9"
 )
 
 const (
-	fetchProxyAttempts           = 2
-	maxFetchProxyAttempts        = 20
-	permanentFetchFailureTimeout = 30 * time.Second
+	microsoftFetchAttempts         = 3
+	permanentFetchFailureTimeout   = 30 * time.Second
+	microsoftFetchFailureThreshold = int64(3)
+	microsoftFetchFailureTTL       = time.Hour
 )
 
 type microsoftMessageFetchClient interface {
-	FetchAll(context.Context, mailinfra.MicrosoftMailFetchRequest) (mailinfra.MicrosoftMailFetchResult, error)
+	FetchGraphOnly(context.Context, mailinfra.MicrosoftMailFetchRequest) (mailinfra.MicrosoftMailFetchResult, error)
+	FetchIMAPOnly(context.Context, mailinfra.MicrosoftMailFetchRequest) (mailinfra.MicrosoftMailFetchResult, error)
 }
 
 type microsoftFetchProxyProvider interface {
@@ -37,11 +40,13 @@ type MicrosoftFetchAdapter struct {
 	client        microsoftMessageFetchClient
 	proxies       microsoftFetchProxyProvider
 	fetchFailures mailmatchapp.PermanentMicrosoftFetchFailurePort
+	redis         redis.UniversalClient
 }
 
-func NewMicrosoftFetchAdapter(proxies *proxyapp.ProxyUseCase) *MicrosoftFetchAdapter {
+func NewMicrosoftFetchAdapter(proxies *proxyapp.ProxyUseCase, redisClient redis.UniversalClient) *MicrosoftFetchAdapter {
 	adapter := &MicrosoftFetchAdapter{
 		client: mailinfra.NewMicrosoftMailFetchClient(),
+		redis:  redisClient,
 	}
 	if proxies != nil {
 		adapter.proxies = proxies
@@ -77,9 +82,8 @@ func (a *MicrosoftFetchAdapter) FetchMicrosoftMessages(ctx context.Context, req 
 		maxMessages = 0
 		stopAfterLimit = false
 	}
-	proxyAttempts := min(runtimeconfig.Int("max_proxy_attempts", fetchProxyAttempts, 1), maxFetchProxyAttempts)
 	var avoidServerIDs []uint
-	for attempt := 0; attempt < proxyAttempts; attempt++ {
+	for attempt := 0; attempt < microsoftFetchAttempts; attempt++ {
 		streamed := false
 		var onMessages func([]mailinfra.MicrosoftFetchedMessage)
 		if req.OnMessages != nil {
@@ -104,7 +108,7 @@ func (a *MicrosoftFetchAdapter) FetchMicrosoftMessages(ctx context.Context, req 
 			proxyURL = proxyConfig.URL
 			proxyID = proxyConfig.ID
 		}
-		result, err := a.client.FetchAll(ctx, mailinfra.MicrosoftMailFetchRequest{
+		fetchRequest := mailinfra.MicrosoftMailFetchRequest{
 			EmailAddress:    req.Scope.MicrosoftEmail,
 			ClientID:        req.Scope.MicrosoftClientID,
 			RefreshToken:    req.Scope.MicrosoftRT,
@@ -116,7 +120,13 @@ func (a *MicrosoftFetchAdapter) FetchMicrosoftMessages(ctx context.Context, req 
 			KnownMessageIDs: req.KnownMessageIDs,
 			OnMessages:      onMessages,
 			OnReset:         req.OnReset,
-		})
+		}
+		var result mailinfra.MicrosoftMailFetchResult
+		if req.Scope.MicrosoftGraphAvailable {
+			result, err = a.client.FetchGraphOnly(ctx, fetchRequest)
+		} else {
+			result, err = a.client.FetchIMAPOnly(ctx, fetchRequest)
+		}
 		if rotated := strings.TrimSpace(result.RefreshToken); rotated != "" {
 			// A mailbox operation can fail after Microsoft has already rotated the
 			// RT. Reuse the newest credential for the next proxy attempt instead of
@@ -153,19 +163,23 @@ func (a *MicrosoftFetchAdapter) FetchMicrosoftMessages(ctx context.Context, req 
 				}
 				req.OnReset()
 			}
-			if result.ProxyFailure {
-				continue
-			}
-			if strings.TrimSpace(result.Category) != "" {
+			if !result.ProxyFailure && strings.TrimSpace(result.Category) != "" {
 				_ = a.reportProxySuccess(ctx, proxyID)
 			}
-			return a.finishFailure(ctx, req, lastFailure)
+			continue
 		}
 		if result.Valid {
 			_ = a.reportProxySuccess(ctx, proxyID)
+			a.clearFailureCount(ctx, req.Scope.EmailResourceID)
+			var graphAvailable *bool
+			if strings.EqualFold(strings.TrimSpace(result.Protocol), "graph") {
+				confirmed := true
+				graphAvailable = &confirmed
+			}
 			return &mailmatchapp.FetchMessagesResult{
-				Messages:     microsoftMessagesToMailmatch(req.Scope, result.Messages),
-				RefreshToken: strings.TrimSpace(result.RefreshToken),
+				Messages:       microsoftMessagesToMailmatch(req.Scope, result.Messages),
+				RefreshToken:   strings.TrimSpace(result.RefreshToken),
+				GraphAvailable: graphAvailable,
 			}, nil
 		}
 		failure := microsoftFetchFailure(result.Category, result.SafeMessage, result.ProxyFailure)
@@ -187,18 +201,15 @@ func (a *MicrosoftFetchAdapter) FetchMicrosoftMessages(ctx context.Context, req 
 		if result.ProxyFailure {
 			avoidServerIDs = proxyapp.AppendAvoidProxyServerID(avoidServerIDs, proxyConfig)
 			_ = a.reportProxyFailure(ctx, proxyID, result.SafeMessage)
-			if streamed {
-				if req.OnReset == nil {
-					return nil, lastFailure
-				}
-				req.OnReset()
-			}
-			continue
-		}
-		if proxyID != 0 {
+		} else if proxyID != 0 {
 			_ = a.reportProxySuccess(ctx, proxyID)
 		}
-		return a.finishFailure(ctx, req, lastFailure)
+		if streamed {
+			if req.OnReset == nil {
+				return nil, lastFailure
+			}
+			req.OnReset()
+		}
 	}
 	if lastFailure != nil {
 		return a.finishFailure(ctx, req, lastFailure)
@@ -212,11 +223,20 @@ func (a *MicrosoftFetchAdapter) FetchMicrosoftMessages(ctx context.Context, req 
 }
 
 func (a *MicrosoftFetchAdapter) finishFailure(ctx context.Context, req mailmatchapp.FetchMessagesRequest, failure *mailmatchapp.MailFetchFailure) (*mailmatchapp.FetchMessagesResult, error) {
-	if failure == nil || failure.Retryable || a == nil || a.fetchFailures == nil || req.Scope.EmailResourceID == 0 || req.Scope.CredentialRevision == 0 {
+	if failure == nil || a == nil || a.fetchFailures == nil || req.Scope.EmailResourceID == 0 || req.Scope.CredentialRevision == 0 {
+		return nil, failure
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		failure.Cause = ctxErr
 		return nil, failure
 	}
 	handleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), permanentFetchFailureTimeout)
 	defer cancel()
+	failureCount, countErr := a.incrementFailureCount(handleCtx, req.Scope.EmailResourceID)
+	if countErr != nil {
+		slog.Warn("microsoft fetch failure counter unavailable", "resource_id", req.Scope.EmailResourceID, "error", countErr)
+		failureCount = 0
+	}
 	handleErr := a.fetchFailures.HandlePermanentMicrosoftFetchFailure(handleCtx, mailmatchapp.PermanentMicrosoftFetchFailure{
 		ResourceID:         req.Scope.EmailResourceID,
 		CredentialRevision: req.Scope.CredentialRevision,
@@ -225,11 +245,41 @@ func (a *MicrosoftFetchAdapter) finishFailure(ctx context.Context, req mailmatch
 		RequestID:          firstNonEmpty(req.RequestID, req.Scope.OrderNo),
 		Category:           failure.Category,
 		SafeMessage:        failure.SafeMessage,
+		FailureCount:       failureCount,
 	})
 	if handleErr != nil {
 		return nil, errors.Join(mailmatchapp.ErrPermanentMicrosoftFetchFailureHandling, handleErr)
 	}
 	return nil, failure
+}
+
+func (a *MicrosoftFetchAdapter) incrementFailureCount(ctx context.Context, resourceID uint) (int64, error) {
+	if a == nil || a.redis == nil || resourceID == 0 {
+		return 0, nil
+	}
+	var increment *redis.IntCmd
+	_, err := a.redis.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+		increment = pipe.Incr(ctx, microsoftFetchFailureKey(resourceID))
+		pipe.Expire(ctx, microsoftFetchFailureKey(resourceID), microsoftFetchFailureTTL)
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return increment.Val(), nil
+}
+
+func (a *MicrosoftFetchAdapter) clearFailureCount(ctx context.Context, resourceID uint) {
+	if a == nil || a.redis == nil || resourceID == 0 {
+		return
+	}
+	if err := a.redis.Del(ctx, microsoftFetchFailureKey(resourceID)).Err(); err != nil {
+		slog.Warn("microsoft fetch failure counter clear failed", "resource_id", resourceID, "error", err)
+	}
+}
+
+func microsoftFetchFailureKey(resourceID uint) string {
+	return fmt.Sprintf("mailmatch:microsoft:fetch_failures:%d", resourceID)
 }
 
 func (a *MicrosoftFetchAdapter) acquireProxy(ctx context.Context, scope mailmatchapp.OrderScope, requestID string, fullHistory bool, attempt int, avoidServerIDs []uint) (*proxyapp.ProxyConfig, error) {

@@ -316,7 +316,7 @@ func (r *ResourceFetchRepo) AssertICloudResourceFetchFence(ctx context.Context, 
 	})
 }
 
-func (r *ResourceFetchRepo) CompleteResourceFetch(ctx context.Context, resourceID uint, generation uint64, expectedCredentialRevision uint64, rotatedRefreshToken string, fetched int, stored int, matched int, now time.Time, log *governancedomain.SystemLog) error {
+func (r *ResourceFetchRepo) CompleteResourceFetch(ctx context.Context, resourceID uint, generation uint64, expectedCredentialRevision uint64, rotatedRefreshToken string, graphAvailable *bool, fetched int, stored int, matched int, now time.Time, log *governancedomain.SystemLog) error {
 	return r.withTx(ctx, func(txCtx context.Context, tx *gorm.DB) error {
 		if err := r.lockResourceFetchState(tx, resourceID, generation); err != nil {
 			return err
@@ -330,7 +330,7 @@ func (r *ResourceFetchRepo) CompleteResourceFetch(ctx context.Context, resourceI
 		}
 		if err := r.applyResourceFetchRefreshToken(txCtx, coreapp.MicrosoftFetchRefreshTokenRotation{
 			ResourceID: resourceID, ExpectedCredentialRevision: expectedCredentialRevision,
-			RefreshToken: strings.TrimSpace(rotatedRefreshToken), Now: now,
+			RefreshToken: strings.TrimSpace(rotatedRefreshToken), GraphAvailable: graphAvailable, Now: now,
 		}); err != nil {
 			return err
 		}
@@ -470,7 +470,7 @@ func (r *ResourceFetchRepo) lockResourceFetchScope(ctx context.Context, resource
 	}
 	return &domain.ResourceFetchScope{
 		ResourceID: scope.ResourceID, ResourceType: domain.ResourceTypeMicrosoft, Status: scope.Status, EmailAddress: scope.EmailAddress,
-		ClientID: scope.ClientID, RefreshToken: scope.RefreshToken, CredentialRevision: scope.CredentialRevision,
+		ClientID: scope.ClientID, RefreshToken: scope.RefreshToken, GraphAvailable: scope.GraphAvailable, CredentialRevision: scope.CredentialRevision,
 	}, nil
 }
 

@@ -98,6 +98,7 @@ func (r *ResourceValidationRepo) RecordMicrosoftFetchFailure(
 	refreshToken string,
 	safeError string,
 	requestID string,
+	markAbnormal bool,
 	systemLog *governancedomain.SystemLog,
 ) (abnormal bool, err error) {
 	if r == nil || r.db == nil || resourceID == 0 || expectedCredentialRevision == 0 {
@@ -112,22 +113,11 @@ func (r *ResourceValidationRepo) RecordMicrosoftFetchFailure(
 			return fmt.Errorf("lock microsoft resource after fetch failure: %w", err)
 		}
 		status := domain.MicrosoftResourceStatus(resource.Status)
-		if status == domain.MicrosoftStatusAbnormal {
-			abnormal = true
-			return nil
-		}
 		if (status != domain.MicrosoftStatusNormal && status != domain.MicrosoftStatusIdentifying) || resource.CredentialRevision != expectedCredentialRevision {
 			return nil
 		}
 		now := time.Now().UTC()
-		updates := map[string]any{
-			"status":              string(domain.MicrosoftStatusAbnormal),
-			"graph_available":     false,
-			"quality_score":       0,
-			"validation_failures": coreapp.ResourceValidationMaxFailuresValue(),
-			"last_safe_error":     safeValidationMessage(safeError),
-			"updated_at":          now,
-		}
+		updates := map[string]any{}
 		if refreshToken = strings.TrimSpace(refreshToken); refreshToken != "" && refreshToken != strings.TrimSpace(resource.RefreshToken) {
 			updates["refresh_token"] = refreshToken
 			updates["credential_revision"] = resource.CredentialRevision + 1
@@ -135,15 +125,26 @@ func (r *ResourceValidationRepo) RecordMicrosoftFetchFailure(
 			updates["token_last_refreshed_at"] = now
 			updates["token_last_request_id"] = strings.TrimSpace(requestID)
 		}
+		if markAbnormal {
+			updates["status"] = string(domain.MicrosoftStatusAbnormal)
+			updates["last_safe_error"] = safeValidationMessage(safeError)
+		}
+		if len(updates) == 0 {
+			return nil
+		}
+		updates["updated_at"] = now
 		result := tx.Model(&MicrosoftResourceModel{}).
 			Where("id = ? AND status IN ? AND credential_revision = ?", resourceID, []string{
 				string(domain.MicrosoftStatusNormal), string(domain.MicrosoftStatusIdentifying),
 			}, expectedCredentialRevision).
 			Updates(updates)
 		if result.Error != nil {
-			return fmt.Errorf("mark microsoft resource abnormal after fetch failure: %w", result.Error)
+			return fmt.Errorf("record microsoft resource fetch failure: %w", result.Error)
 		}
 		if result.RowsAffected != 1 {
+			return nil
+		}
+		if !markAbnormal {
 			return nil
 		}
 		abnormal = true

@@ -19,6 +19,7 @@ type validationBatchRepoStub struct {
 		refreshToken string
 		safeError    string
 		requestID    string
+		markAbnormal bool
 		log          *governancedomain.SystemLog
 	}
 }
@@ -28,12 +29,13 @@ func (s *validationBatchRepoStub) MarkValidationBatchPending(context.Context, Re
 	return &s.page, nil
 }
 
-func (s *validationBatchRepoStub) RecordMicrosoftFetchFailure(_ context.Context, resourceID uint, revision uint64, refreshToken string, safeError string, requestID string, log *governancedomain.SystemLog) (bool, error) {
+func (s *validationBatchRepoStub) RecordMicrosoftFetchFailure(_ context.Context, resourceID uint, revision uint64, refreshToken string, safeError string, requestID string, markAbnormal bool, log *governancedomain.SystemLog) (bool, error) {
 	s.fetch.resourceID = resourceID
 	s.fetch.revision = revision
 	s.fetch.refreshToken = refreshToken
 	s.fetch.safeError = safeError
 	s.fetch.requestID = requestID
+	s.fetch.markAbnormal = markAbnormal
 	s.fetch.log = log
 	return true, nil
 }
@@ -111,12 +113,12 @@ func TestValidationCategoryRequiresExplicitTerminalEvidence(t *testing.T) {
 	}
 }
 
-func TestPermanentMicrosoftFetchFailureMarksResourceAbnormal(t *testing.T) {
+func TestMicrosoftFetchFailureThresholdMarksResourceAbnormal(t *testing.T) {
 	repo := &validationBatchRepoStub{}
 	uc := NewResourceValidationUseCase(nil, repo, nil, nil)
 
-	abnormal, err := uc.MarkMicrosoftAbnormalAfterFetchFailure(
-		context.Background(), 95, 7, "rotated-refresh-token", "oauth_invalid_grant", "Microsoft refresh token is invalid or expired.", "ORDER-PERMANENT",
+	abnormal, err := uc.RecordMicrosoftFetchFailure(
+		context.Background(), 95, 7, "rotated-refresh-token", "oauth_invalid_grant", "Microsoft refresh token is invalid or expired.", "ORDER-PERMANENT", true,
 	)
 
 	require.NoError(t, err)
@@ -126,5 +128,6 @@ func TestPermanentMicrosoftFetchFailureMarksResourceAbnormal(t *testing.T) {
 	require.Equal(t, "rotated-refresh-token", repo.fetch.refreshToken)
 	require.Equal(t, "Microsoft refresh token is invalid or expired.", repo.fetch.safeError)
 	require.Equal(t, "ORDER-PERMANENT", repo.fetch.requestID)
+	require.True(t, repo.fetch.markAbnormal)
 	require.Equal(t, "oauth_invalid_grant: Microsoft refresh token is invalid or expired.", repo.fetch.log.Detail)
 }

@@ -6,18 +6,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	mailmatchapp "github.com/donnel666/remail/internal/mailmatch/app"
 	mailinfra "github.com/donnel666/remail/internal/mailtransport/infra"
 	proxyapp "github.com/donnel666/remail/internal/proxy/app"
 	proxydomain "github.com/donnel666/remail/internal/proxy/domain"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )
 
 type microsoftMessageFetchClientStub struct {
-	requests []mailinfra.MicrosoftMailFetchRequest
-	results  []mailinfra.MicrosoftMailFetchResult
-	errs     []error
+	requests  []mailinfra.MicrosoftMailFetchRequest
+	protocols []string
+	results   []mailinfra.MicrosoftMailFetchResult
+	errs      []error
 }
 
 type microsoftFetchProxyProviderStub struct {
@@ -78,8 +81,39 @@ func TestMicrosoftFetchAdapterRealtimeUsesPurchaseReadLimitWithinRequestedWindow
 	require.Equal(t, []string{"internet:cached@example.com"}, client.requests[0].KnownMessageIDs)
 }
 
-func (s *microsoftMessageFetchClientStub) FetchAll(_ context.Context, req mailinfra.MicrosoftMailFetchRequest) (mailinfra.MicrosoftMailFetchResult, error) {
+func TestMicrosoftFetchAdapterUsesKnownMicrosoftProtocol(t *testing.T) {
+	client := &microsoftMessageFetchClientStub{results: []mailinfra.MicrosoftMailFetchResult{
+		{Valid: true, Protocol: "imap"},
+		{Valid: true, Protocol: "graph"},
+	}}
+	adapter := &MicrosoftFetchAdapter{client: client}
+	req := mailmatchapp.FetchMessagesRequest{Scope: mailmatchapp.OrderScope{
+		MicrosoftEmail: "owner@example.test", MicrosoftClientID: "client-id", MicrosoftRT: "refresh-token",
+	}}
+
+	imapResult, err := adapter.FetchMicrosoftMessages(context.Background(), req)
+	require.NoError(t, err)
+	require.Nil(t, imapResult.GraphAvailable)
+
+	req.Scope.MicrosoftGraphAvailable = true
+	graphResult, err := adapter.FetchMicrosoftMessages(context.Background(), req)
+	require.NoError(t, err)
+	require.NotNil(t, graphResult.GraphAvailable)
+	require.True(t, *graphResult.GraphAvailable)
+	require.Equal(t, []string{"imap", "graph"}, client.protocols)
+}
+
+func (s *microsoftMessageFetchClientStub) FetchGraphOnly(_ context.Context, req mailinfra.MicrosoftMailFetchRequest) (mailinfra.MicrosoftMailFetchResult, error) {
+	return s.fetch(req, "graph")
+}
+
+func (s *microsoftMessageFetchClientStub) FetchIMAPOnly(_ context.Context, req mailinfra.MicrosoftMailFetchRequest) (mailinfra.MicrosoftMailFetchResult, error) {
+	return s.fetch(req, "imap")
+}
+
+func (s *microsoftMessageFetchClientStub) fetch(req mailinfra.MicrosoftMailFetchRequest, protocol string) (mailinfra.MicrosoftMailFetchResult, error) {
 	s.requests = append(s.requests, req)
+	s.protocols = append(s.protocols, protocol)
 	index := len(s.requests) - 1
 	var result mailinfra.MicrosoftMailFetchResult
 	if index < len(s.results) {
@@ -147,12 +181,14 @@ func TestMicrosoftFetchAdapterAvoidsFailedProxyServerOnRetry(t *testing.T) {
 }
 
 func TestMicrosoftFetchAdapterDoesNotFailProxyForIMAPAuthenticationFailure(t *testing.T) {
+	result := mailinfra.MicrosoftMailFetchResult{
+		Category:    "imap_auth_failed",
+		SafeMessage: "Microsoft IMAP authentication failed.",
+	}
+	fetchErr := errors.New("imap authentication failed")
 	client := &microsoftMessageFetchClientStub{
-		results: []mailinfra.MicrosoftMailFetchResult{{
-			Category:    "imap_auth_failed",
-			SafeMessage: "Microsoft IMAP authentication failed.",
-		}},
-		errs: []error{errors.New("imap authentication failed")},
+		results: []mailinfra.MicrosoftMailFetchResult{result, result, result},
+		errs:    []error{fetchErr, fetchErr, fetchErr},
 	}
 	proxies := &microsoftFetchProxyProviderStub{}
 	adapter := &MicrosoftFetchAdapter{client: client, proxies: proxies}
@@ -166,14 +202,14 @@ func TestMicrosoftFetchAdapterDoesNotFailProxyForIMAPAuthenticationFailure(t *te
 	var failure *mailmatchapp.MailFetchFailure
 	require.ErrorAs(t, err, &failure)
 	require.Equal(t, "imap_auth_failed", failure.Category)
-	require.Len(t, client.requests, 1)
+	require.Len(t, client.requests, 3)
 	require.Empty(t, proxies.failures)
-	require.Equal(t, []uint{11}, proxies.successes)
+	require.Equal(t, []uint{11, 21, 31}, proxies.successes)
 }
 
 func TestMicrosoftFetchAdapterLeavesProxyNeutralForTaskError(t *testing.T) {
 	taskErr := errors.New("local task failure")
-	client := &microsoftMessageFetchClientStub{errs: []error{taskErr}}
+	client := &microsoftMessageFetchClientStub{errs: []error{taskErr, taskErr, taskErr}}
 	proxies := &microsoftFetchProxyProviderStub{}
 	adapter := &MicrosoftFetchAdapter{client: client, proxies: proxies}
 
@@ -187,7 +223,7 @@ func TestMicrosoftFetchAdapterLeavesProxyNeutralForTaskError(t *testing.T) {
 	require.ErrorAs(t, err, &failure)
 	require.ErrorIs(t, err, taskErr)
 	require.True(t, failure.Retryable)
-	require.Len(t, client.requests, 1)
+	require.Len(t, client.requests, 3)
 	require.Empty(t, proxies.failures)
 	require.Empty(t, proxies.successes)
 }
@@ -209,8 +245,9 @@ func TestMicrosoftFetchAdapterLeavesProxyNeutralForCancellation(t *testing.T) {
 	require.Empty(t, proxies.successes)
 }
 
-func TestMicrosoftFetchAdapterStopsAfterTwoInternalAttempts(t *testing.T) {
+func TestMicrosoftFetchAdapterStopsAfterThreeInternalAttempts(t *testing.T) {
 	client := &microsoftMessageFetchClientStub{results: []mailinfra.MicrosoftMailFetchResult{
+		{Category: "request", ProxyFailure: true},
 		{Category: "request", ProxyFailure: true},
 		{Category: "request", ProxyFailure: true},
 		{Valid: true},
@@ -224,12 +261,12 @@ func TestMicrosoftFetchAdapterStopsAfterTwoInternalAttempts(t *testing.T) {
 	})
 
 	require.Error(t, err)
-	require.Len(t, client.requests, 2)
+	require.Len(t, client.requests, 3)
 }
 
-func TestMicrosoftFetchAdapterProxyAttemptsUpdateAtRuntime(t *testing.T) {
+func TestMicrosoftFetchAdapterAlwaysUsesThreeFetchAttempts(t *testing.T) {
 	defer runtimeconfig.Delete("max_proxy_attempts")
-	runtimeconfig.Set("max_proxy_attempts", "3")
+	runtimeconfig.Set("max_proxy_attempts", "1")
 	client := &microsoftMessageFetchClientStub{results: []mailinfra.MicrosoftMailFetchResult{
 		{Category: "request", ProxyFailure: true},
 		{Category: "request", ProxyFailure: true},
@@ -244,18 +281,6 @@ func TestMicrosoftFetchAdapterProxyAttemptsUpdateAtRuntime(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Len(t, client.requests, 3)
-
-	runtimeconfig.Set("max_proxy_attempts", "1")
-	client.requests = nil
-	client.results = []mailinfra.MicrosoftMailFetchResult{
-		{Category: "request", ProxyFailure: true},
-		{Valid: true},
-	}
-
-	_, err = adapter.FetchMicrosoftMessages(context.Background(), req)
-
-	require.Error(t, err)
-	require.Len(t, client.requests, 1)
 }
 
 func TestMicrosoftFetchAdapterFullHistoryPreservesWindowWithoutMessageLimit(t *testing.T) {
@@ -283,9 +308,10 @@ func TestMicrosoftFetchAdapterFullHistoryPreservesWindowWithoutMessageLimit(t *t
 }
 
 func TestMicrosoftFetchAdapterReturnsRotatedTokenOnFetchFailure(t *testing.T) {
-	client := &microsoftMessageFetchClientStub{results: []mailinfra.MicrosoftMailFetchResult{{
+	result := mailinfra.MicrosoftMailFetchResult{
 		Category: "graph_forbidden", SafeMessage: "Mailbox permission is unavailable.", RefreshToken: "rotated-refresh-token",
-	}}}
+	}
+	client := &microsoftMessageFetchClientStub{results: []mailinfra.MicrosoftMailFetchResult{result, result, result}}
 	adapter := &MicrosoftFetchAdapter{client: client}
 
 	_, err := adapter.FetchMicrosoftMessages(context.Background(), mailmatchapp.FetchMessagesRequest{
@@ -315,9 +341,10 @@ func TestMicrosoftFetchFailureKeepsTerminalClassification(t *testing.T) {
 }
 
 func TestMicrosoftFetchAdapterHandlesPermanentFailureForEveryCaller(t *testing.T) {
-	client := &microsoftMessageFetchClientStub{results: []mailinfra.MicrosoftMailFetchResult{{
+	result := mailinfra.MicrosoftMailFetchResult{
 		Category: "oauth_invalid_grant", SafeMessage: "Microsoft refresh token is invalid or expired.", RefreshToken: "rotated-refresh-token",
-	}}}
+	}
+	client := &microsoftMessageFetchClientStub{results: []mailinfra.MicrosoftMailFetchResult{result, result, result}}
 	failures := &permanentFetchFailurePortStub{}
 	adapter := &MicrosoftFetchAdapter{client: client, fetchFailures: failures}
 
@@ -335,6 +362,7 @@ func TestMicrosoftFetchAdapterHandlesPermanentFailureForEveryCaller(t *testing.T
 	require.True(t, errors.As(err, &fetchFailure))
 	require.Equal(t, "oauth_invalid_grant", fetchFailure.Category)
 	require.False(t, fetchFailure.Retryable)
+	require.Len(t, client.requests, 3)
 	require.Equal(t, []mailmatchapp.PermanentMicrosoftFetchFailure{{
 		ResourceID: 30043, CredentialRevision: 7,
 		RefreshToken: "rotated-refresh-token",
@@ -344,8 +372,48 @@ func TestMicrosoftFetchAdapterHandlesPermanentFailureForEveryCaller(t *testing.T
 	require.True(t, failures.hasDeadline)
 }
 
+func TestMicrosoftFetchAdapterCountsThreeFailedTasksAndClearsOnSuccess(t *testing.T) {
+	server := miniredis.RunT(t)
+	redisClient := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = redisClient.Close() })
+	failureResult := mailinfra.MicrosoftMailFetchResult{
+		Category: "graph_forbidden", SafeMessage: "Mailbox permission is unavailable.",
+	}
+	results := make([]mailinfra.MicrosoftMailFetchResult, 9, 10)
+	for i := range results {
+		results[i] = failureResult
+	}
+	results = append(results, mailinfra.MicrosoftMailFetchResult{Valid: true, Protocol: "graph"})
+	client := &microsoftMessageFetchClientStub{results: results}
+	failures := &permanentFetchFailurePortStub{}
+	adapter := &MicrosoftFetchAdapter{client: client, fetchFailures: failures, redis: redisClient}
+	req := mailmatchapp.FetchMessagesRequest{Scope: mailmatchapp.OrderScope{
+		EmailResourceID: 30043, CredentialRevision: 7, MicrosoftGraphAvailable: true,
+		MicrosoftEmail: "owner@example.test", MicrosoftClientID: "client-id", MicrosoftRT: "refresh-token",
+	}}
+	key := microsoftFetchFailureKey(req.Scope.EmailResourceID)
+
+	for task := int64(1); task <= microsoftFetchFailureThreshold; task++ {
+		_, err := adapter.FetchMicrosoftMessages(context.Background(), req)
+		require.Error(t, err)
+		require.Len(t, failures.failures, int(task))
+		require.Equal(t, task, failures.failures[task-1].FailureCount)
+		require.Equal(t, microsoftFetchFailureTTL, server.TTL(key))
+		if task < microsoftFetchFailureThreshold {
+			server.FastForward(30 * time.Minute)
+		}
+	}
+	require.Len(t, client.requests, 9)
+
+	_, err := adapter.FetchMicrosoftMessages(context.Background(), req)
+	require.NoError(t, err)
+	require.Len(t, client.requests, 10)
+	require.False(t, server.Exists(key))
+}
+
 func TestMicrosoftFetchAdapterRetriesWhenPermanentFailureHandlingFails(t *testing.T) {
-	client := &microsoftMessageFetchClientStub{results: []mailinfra.MicrosoftMailFetchResult{{Category: "oauth_invalid_grant"}}}
+	result := mailinfra.MicrosoftMailFetchResult{Category: "oauth_invalid_grant"}
+	client := &microsoftMessageFetchClientStub{results: []mailinfra.MicrosoftMailFetchResult{result, result, result}}
 	adapter := &MicrosoftFetchAdapter{
 		client: client,
 		fetchFailures: &permanentFetchFailurePortStub{

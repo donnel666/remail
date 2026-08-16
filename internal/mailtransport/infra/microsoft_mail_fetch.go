@@ -202,6 +202,34 @@ func (c *MicrosoftMailFetchClient) FetchAll(ctx context.Context, req MicrosoftMa
 	return c.fetchAll(ctx, req, imapFallback)
 }
 
+func (c *MicrosoftMailFetchClient) FetchGraphOnly(ctx context.Context, req MicrosoftMailFetchRequest) (result MicrosoftMailFetchResult, err error) {
+	startedAt := time.Now()
+	defer func() {
+		outcome := "failed"
+		if err == nil && result.Valid {
+			outcome = "succeeded"
+		} else if ctx.Err() != nil {
+			outcome = "canceled"
+		}
+		platform.ObserveExternalService("microsoft", "mail_fetch", outcome, startedAt)
+	}()
+	return c.fetchAll(ctx, req, nil)
+}
+
+func (c *MicrosoftMailFetchClient) FetchIMAPOnly(ctx context.Context, req MicrosoftMailFetchRequest) (result MicrosoftMailFetchResult, err error) {
+	startedAt := time.Now()
+	defer func() {
+		outcome := "failed"
+		if err == nil && result.Valid {
+			outcome = "succeeded"
+		} else if ctx.Err() != nil {
+			outcome = "canceled"
+		}
+		platform.ObserveExternalService("microsoft", "mail_fetch", outcome, startedAt)
+	}()
+	return c.fetchIMAPOnly(ctx, req, outlookIMAPClient{})
+}
+
 func (c *MicrosoftMailFetchClient) fetchAll(ctx context.Context, req MicrosoftMailFetchRequest, imapFallback microsoftIMAPClient) (MicrosoftMailFetchResult, error) {
 	req = normalizeMailFetchRequest(req)
 	if req.EmailAddress == "" || req.ClientID == "" || req.RefreshToken == "" {
@@ -296,6 +324,37 @@ func (c *MicrosoftMailFetchClient) fetchAll(ctx context.Context, req MicrosoftMa
 		graphResult = microsoftMailFetchFailure("request", "Microsoft mail service is temporarily unavailable.", graphResult.ProxyFailure)
 	}
 	return graphResult, graphErr
+}
+
+func (c *MicrosoftMailFetchClient) fetchIMAPOnly(ctx context.Context, req MicrosoftMailFetchRequest, imapClient microsoftIMAPClient) (MicrosoftMailFetchResult, error) {
+	req = normalizeMailFetchRequest(req)
+	if req.EmailAddress == "" || req.ClientID == "" || req.RefreshToken == "" {
+		return microsoftMailFetchFailure("missing_token", "Microsoft mail fetch credentials are incomplete.", false), nil
+	}
+	accessToken, refreshToken, tokenResult, err := c.exchangeIMAPAccessToken(ctx, req)
+	if refreshToken = strings.TrimSpace(refreshToken); refreshToken != "" {
+		tokenResult.RefreshToken = refreshToken
+	}
+	if err != nil || accessToken == "" {
+		return tokenResult, err
+	}
+
+	result, fetchErr := imapClient.FetchAll(ctx, req, accessToken)
+	if refreshToken != "" {
+		result.RefreshToken = refreshToken
+	}
+	if fetchErr != nil && (strings.TrimSpace(result.Category) == "" || isTemporaryMicrosoftMailFetchCategory(result.Category)) {
+		latestRefreshToken := result.RefreshToken
+		result = microsoftMailFetchFailure("request", "Microsoft mail service is temporarily unavailable.", result.ProxyFailure)
+		result.RefreshToken = latestRefreshToken
+	}
+	if result.Valid {
+		result.Protocol = "imap"
+		if len(req.KnownMessageIDs) > 0 {
+			applyMicrosoftMessageBoundary(&result, req.KnownMessageIDs, req.MaxMessages)
+		}
+	}
+	return result, fetchErr
 }
 
 func (c *MicrosoftMailFetchClient) fetchGraphAll(ctx context.Context, req MicrosoftMailFetchRequest) (MicrosoftMailFetchResult, error) {

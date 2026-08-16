@@ -197,15 +197,18 @@ func TestResourceFetchRepoCompletesCurrentGenerationAndRotatesTokenMySQL(t *test
 	current, err := repo.MarkResourceFetchProcessing(ctx, 100, job.Generation)
 	require.NoError(t, err)
 	require.True(t, current)
+	graphAvailable := true
 
 	require.NoError(t, repo.CompleteResourceFetch(
-		ctx, 100, job.Generation, 7, "rotated", 5, 4, 3, time.Now().UTC(), nil,
+		ctx, 100, job.Generation, 7, "rotated", &graphAvailable, 5, 4, 3, time.Now().UTC(), nil,
 	))
 	stored, err := repo.FindResourceFetch(ctx, 100, job.Generation)
 	require.NoError(t, err)
 	require.Equal(t, domain.ResourceFetchJobSucceeded, stored.Status)
 	require.Equal(t, 5, stored.FetchedCount)
 	require.Equal(t, "rotated", credentials.rotated.RefreshToken)
+	require.NotNil(t, credentials.rotated.GraphAvailable)
+	require.True(t, *credentials.rotated.GraphAvailable)
 }
 
 func resourceFetchStateRequest(idempotencyKey string) domain.ResourceFetchJob {

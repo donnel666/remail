@@ -65,6 +65,52 @@ func TestMicrosoftMailFetchClientGraphSuccessDoesNotFallback(t *testing.T) {
 	assert.False(t, imapFallback.called)
 }
 
+func TestMicrosoftMailFetchClientGraphOnlyDoesNotFallback(t *testing.T) {
+	imapExchangeCalled := false
+	client := &MicrosoftMailFetchClient{
+		graphFetch: func(context.Context, MicrosoftMailFetchRequest) (MicrosoftMailFetchResult, error) {
+			return microsoftMailFetchFailure("graph_forbidden", "Mailbox permission is unavailable.", false), errors.New("graph forbidden")
+		},
+		exchangeIMAPToken: func(context.Context, MicrosoftMailFetchRequest) (string, string, MicrosoftMailFetchResult, error) {
+			imapExchangeCalled = true
+			return "imap-access-token", "", MicrosoftMailFetchResult{}, nil
+		},
+	}
+
+	result, err := client.FetchGraphOnly(context.Background(), MicrosoftMailFetchRequest{
+		EmailAddress: "user@example.com", ClientID: "client-id", RefreshToken: "refresh-token",
+	})
+
+	require.Error(t, err)
+	require.Equal(t, "graph_forbidden", result.Category)
+	require.False(t, imapExchangeCalled)
+}
+
+func TestMicrosoftMailFetchClientIMAPOnlySkipsGraph(t *testing.T) {
+	graphCalled := false
+	client := &MicrosoftMailFetchClient{
+		graphFetch: func(context.Context, MicrosoftMailFetchRequest) (MicrosoftMailFetchResult, error) {
+			graphCalled = true
+			return MicrosoftMailFetchResult{Valid: true, Protocol: "graph"}, nil
+		},
+		exchangeIMAPToken: func(context.Context, MicrosoftMailFetchRequest) (string, string, MicrosoftMailFetchResult, error) {
+			return "imap-access-token", "imap-rotated-rt", MicrosoftMailFetchResult{}, nil
+		},
+	}
+	imapClient := &fakeMicrosoftIMAPClient{result: MicrosoftMailFetchResult{Valid: true}}
+
+	result, err := client.fetchIMAPOnly(context.Background(), MicrosoftMailFetchRequest{
+		EmailAddress: "user@example.com", ClientID: "client-id", RefreshToken: "refresh-token",
+	}, imapClient)
+
+	require.NoError(t, err)
+	require.True(t, result.Valid)
+	require.Equal(t, "imap", result.Protocol)
+	require.Equal(t, "imap-rotated-rt", result.RefreshToken)
+	require.True(t, imapClient.called)
+	require.False(t, graphCalled)
+}
+
 func TestMicrosoftMailFetchClientFallsBackToIMAPAfterGraphFailure(t *testing.T) {
 	client := &MicrosoftMailFetchClient{
 		graphFetch: func(context.Context, MicrosoftMailFetchRequest) (MicrosoftMailFetchResult, error) {

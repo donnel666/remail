@@ -106,7 +106,7 @@ func NewModule(db *gorm.DB, files governanceapp.FilePort, redisClient redis.Univ
 	projectHistoryRepo := mailmatchinfra.NewProjectHistoryScanRepo(db)
 	adminMessageRepo := mailmatchinfra.NewAdminMessageRepo(db)
 	queue := mailmatchinfra.NewFetchQueue(asynqClient)
-	transport := NewMicrosoftFetchAdapter(proxies)
+	transport := NewMicrosoftFetchAdapter(proxies, redisClient)
 	if validation != nil && trade != nil {
 		transport.SetPermanentMicrosoftFetchFailurePort(permanentMicrosoftFetchFailureAdapter{validation: validation, trade: trade})
 	}
@@ -145,7 +145,7 @@ type permanentMicrosoftFetchFailureAdapter struct {
 }
 
 func (a permanentMicrosoftFetchFailureAdapter) HandlePermanentMicrosoftFetchFailure(ctx context.Context, failure mailmatchapp.PermanentMicrosoftFetchFailure) error {
-	abnormal, err := a.validation.MarkMicrosoftAbnormalAfterFetchFailure(
+	abnormal, err := a.validation.RecordMicrosoftFetchFailure(
 		ctx,
 		failure.ResourceID,
 		failure.CredentialRevision,
@@ -153,6 +153,7 @@ func (a permanentMicrosoftFetchFailureAdapter) HandlePermanentMicrosoftFetchFail
 		failure.Category,
 		failure.SafeMessage,
 		failure.RequestID,
+		failure.FailureCount >= microsoftFetchFailureThreshold,
 	)
 	if err != nil || !abnormal {
 		return err
