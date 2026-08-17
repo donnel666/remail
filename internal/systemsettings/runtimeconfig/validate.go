@@ -40,6 +40,7 @@ var integerRanges = map[string]integerRange{
 	SMSBowerNoCodeRefundTimeoutMinutesKey: positive(25),
 
 	"domain_max_subdomains_per_registrable_domain": positive(1000), "default_plus_daily_limit": positive(2_147_483_647), "default_mailbox_daily_limit": positive(2_147_483_647), "resource_validation_max_failures": positive(100), ICloudCookieKeepaliveMinutesKey: {min: 1, max: 12},
+	DomainSaleQualityMinOrdersKey: positive(1_000_000), DomainSaleQualityMinSuccessPercentKey: {min: 1, max: 100}, DomainSaleQualityWindowHoursKey: positive(8760), DomainSaleQualityCheckIntervalSecondsKey: positive(86400),
 	ICloudPhoneHourlySMSLimitKey: positive(1000), ICloudPhoneCooldownBaseSecondsKey: positive(3600), ICloudPhoneCooldownMaxSecondsKey: positive(86400), ICloudPhoneSendFailureThresholdKey: positive(100), ICloudPhoneBlacklistHoursKey: positive(8760),
 	"resource_import_max_bytes": positive(512 << 20), "max_project_logo_bytes": positive(20 << 20), "project_name_max": positive(120), "project_description_max": positive(1000), "project_target_platform_max": positive(120),
 	"candidate_window_size": positive(100), "global_candidate_window": positive(100), "bucket_probe_count": positive(64), "alias_generation_window": positive(1000),
@@ -182,6 +183,15 @@ func Validate(key, value string) error {
 		}
 	case "verification_code_pattern":
 		return validateVerificationPatterns(rawValue)
+	case DomainSaleTLDWhitelistKey:
+		if value == "" {
+			return nil
+		}
+		for _, candidate := range strings.Split(value, ",") {
+			if !validTLDWhitelistPattern(candidate) {
+				return domain.ErrInvalidValue
+			}
+		}
 	case "microsoft_domain_whitelist", "registration_email_whitelist", "domain_custom_tlds", ICloudForwardingSuffixesKey:
 		if value == "" {
 			return nil
@@ -538,6 +548,27 @@ func smtpTaskBudgetSeconds(retries int) int {
 
 func validDomain(value string) bool {
 	if len(value) > 253 || !strings.Contains(value, ".") {
+		return false
+	}
+	for _, label := range strings.Split(value, ".") {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, r := range label {
+			if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func validTLDWhitelistPattern(value string) bool {
+	value = strings.TrimSpace(value)
+	if strings.HasSuffix(value, ".*") {
+		value = strings.TrimSuffix(value, ".*")
+	}
+	if value == "" || len(value) > 253 || strings.Contains(value, "*") {
 		return false
 	}
 	for _, label := range strings.Split(value, ".") {

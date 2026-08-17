@@ -118,6 +118,8 @@ const wallet = {
   supplierFrozen: "0.000001",
   historicalSpend: "0.00",
   orderCount: 0,
+  supplierAllocationCount: 42,
+  supplierFulfillmentSuccessRate: 75,
   updatedAt: "2026-07-26T00:00:00Z",
 };
 
@@ -143,6 +145,10 @@ describe("FinanceCenter", () => {
     expect((await screen.findAllByText("1T")).length).toBeGreaterThanOrEqual(2);
     expect(screen.getByRole("button", { name: "Withdraw to Alipay" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Transfer to user wallet" })).toBeEnabled();
+    expect(screen.getByText("Allocation count")).toBeVisible();
+    expect(screen.getByText("42")).toBeVisible();
+    expect(screen.getByText("Order fulfillment success rate")).toBeVisible();
+    expect(screen.getByText("75%")).toBeVisible();
     expect(mocks.toastError).toHaveBeenCalledWith("Supplier transactions load failed.");
 
     fireEvent.click(screen.getByRole("button", { name: "Withdraw to Alipay" }));

@@ -1002,6 +1002,7 @@ export function DomainDetailSheet({
                   </div>
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     <DomainInfoItem label={t("Mailboxes")} value={detail.mailboxCount} />
+                    <DomainInfoItem label={t("Window successful orders / eligible orders")} value={`${detail.successfulOrderCount} / ${detail.orderCount}`} />
                     <DomainInfoItem label={t("Last allocated")} value={formatDomainTime(detail.lastAllocatedAt)} />
                     <DomainInfoItem label={t("Orders")} value={detail.orders.length} />
                     <DomainInfoItem

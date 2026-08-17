@@ -50,6 +50,13 @@ func (m *CoreModule) ReindexDomainTLDs(ctx context.Context) error {
 	return m.resourceRepo.ReindexDomainTLDs(ctx)
 }
 
+func (m *CoreModule) EnforceDomainSaleQuality(ctx context.Context) (int, error) {
+	if m == nil || m.resourceRepo == nil {
+		return 0, nil
+	}
+	return m.resourceRepo.EnforceDomainSaleQuality(ctx)
+}
+
 func (m *CoreModule) SetBackgroundExecutionGate(gate BackgroundExecutionGate) {
 	if m != nil {
 		m.BackgroundExecution = gate

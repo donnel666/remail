@@ -28,20 +28,22 @@ type AdminDomainListFilter struct {
 }
 
 type AdminDomainRecord struct {
-	ID               uint
-	OwnerUserID      uint
-	Version          uint64
-	Domain           string
-	DomainTLD        string
-	MailServerID     uint
-	Purpose          domain.ResourcePurpose
-	AllowNewBindings bool
-	Status           domain.MailDomainStatus
-	MailboxCount     int64
-	LastSafeError    string
-	LastAllocatedAt  *time.Time
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	ID                   uint
+	OwnerUserID          uint
+	Version              uint64
+	Domain               string
+	DomainTLD            string
+	MailServerID         uint
+	Purpose              domain.ResourcePurpose
+	AllowNewBindings     bool
+	Status               domain.MailDomainStatus
+	MailboxCount         int64
+	OrderCount           int64
+	SuccessfulOrderCount int64
+	LastSafeError        string
+	LastAllocatedAt      *time.Time
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
 }
 
 type AdminDomainStatusFacets struct {
@@ -68,20 +70,22 @@ type AdminDomainFacets struct {
 }
 
 type AdminDomainItem struct {
-	ID               uint
-	Version          uint64
-	Domain           string
-	DomainTLD        string
-	Owner            AdminOwnerSummary
-	Purpose          string
-	AllowNewBindings bool
-	Status           string
-	MailServerID     uint
-	MailboxCount     int64
-	LastSafeError    *string
-	LastAllocatedAt  *time.Time
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	ID                   uint
+	Version              uint64
+	Domain               string
+	DomainTLD            string
+	Owner                AdminOwnerSummary
+	Purpose              string
+	AllowNewBindings     bool
+	Status               string
+	MailServerID         uint
+	MailboxCount         int64
+	OrderCount           int64
+	SuccessfulOrderCount int64
+	LastSafeError        *string
+	LastAllocatedAt      *time.Time
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
 }
 
 type AdminDomainListResult struct {
@@ -249,7 +253,8 @@ func adminDomainItem(record AdminDomainRecord, owner AdminOwnerSummary) AdminDom
 		ID: record.ID, Version: record.Version, Domain: record.Domain, DomainTLD: record.DomainTLD,
 		Owner: owner, Purpose: string(record.Purpose), Status: string(record.Status), MailServerID: record.MailServerID,
 		AllowNewBindings: record.AllowNewBindings,
-		MailboxCount:     record.MailboxCount, LastSafeError: safeError, LastAllocatedAt: record.LastAllocatedAt,
+		MailboxCount:     record.MailboxCount, OrderCount: record.OrderCount, SuccessfulOrderCount: record.SuccessfulOrderCount,
+		LastSafeError: safeError, LastAllocatedAt: record.LastAllocatedAt,
 		CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt,
 	}
 }

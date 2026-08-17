@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -475,6 +476,9 @@ func (r *BillingRepo) TransferSupplierBalance(ctx context.Context, cmd billingap
 	})
 	if err != nil {
 		return nil, err
+	}
+	if err := r.populateSupplierFulfillmentMetrics(ctx, r.db.WithContext(ctx), cmd.UserID, &result); err != nil {
+		slog.Warn("supplier fulfillment metrics unavailable after balance transfer", "user_id", cmd.UserID, "error", err)
 	}
 	return &result, nil
 }

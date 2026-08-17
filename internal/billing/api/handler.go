@@ -787,6 +787,8 @@ func parsePagination(c *gin.Context) (int, int, bool) {
 func walletResponse(summary domain.WalletSummary) WalletResponse {
 	response := walletOnlyResponse(summary.Wallet, summary.HistoricalSpend, summary.OrderCount)
 	response.TotalRecharged = summary.TotalRecharged
+	response.SupplierAllocationCount = summary.SupplierAllocationCount
+	response.SupplierFulfillmentSuccessRate = summary.SupplierFulfillmentSuccessRate
 	return response
 }
 

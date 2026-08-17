@@ -945,6 +945,17 @@ export default function AdminDomainEmails() {
           ),
         },
         {
+          dataIndex: "successfulOrderCount",
+          key: "successfulOrderCount",
+          title: t("Window successful orders / eligible orders"),
+          width: 150,
+          render: (_: unknown, record: AdminDomainItem) => (
+            <span className="tabular-nums font-medium text-[var(--semi-color-text-1)]">
+              {record.successfulOrderCount} / {record.orderCount}
+            </span>
+          ),
+        },
+        {
           dataIndex: "createdAt",
           key: "createdAt",
           title: t("Created at"),

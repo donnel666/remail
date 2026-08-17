@@ -211,6 +211,44 @@ const (
 	generatedMailboxRetiredStatus      = "retired"
 )
 
+const domainOrderMetricsSQL = `
+SELECT da.resource_id,
+       COUNT(DISTINCT o.id) AS order_count,
+       COUNT(DISTINCT CASE
+           WHEN o.status NOT IN ('refunded', 'failed') AND (
+               (o.service_mode = 'code' AND EXISTS (
+                   SELECT 1 FROM mailmatch_order_delivery_heads h WHERE h.order_id = o.id
+               )) OR
+               (o.service_mode = 'purchase' AND o.activated_at IS NOT NULL)
+           ) THEN o.id
+       END) AS successful_order_count
+FROM domain_allocations da
+JOIN orders o ON o.order_no = da.order_no
+WHERE da.supply_scope = 'public'
+  AND o.debit_tx_id IS NOT NULL
+  AND o.order_no NOT LIKE 'HIST-%'
+  AND o.created_at >= ?
+  AND (
+      (o.status NOT IN ('refunded', 'failed') AND (
+          (o.service_mode = 'code' AND EXISTS (
+              SELECT 1 FROM mailmatch_order_delivery_heads h WHERE h.order_id = o.id
+          )) OR
+          (o.service_mode = 'purchase' AND o.activated_at IS NOT NULL)
+      )) OR
+      o.status IN ('refunded', 'failed', 'closed') OR
+      (o.receive_until IS NOT NULL AND o.receive_until <= ?)
+  )
+GROUP BY da.resource_id`
+
+func domainSaleQualityWindowStart(now time.Time) time.Time {
+	hours := runtimeconfig.Int(runtimeconfig.DomainSaleQualityWindowHoursKey, runtimeconfig.DefaultDomainSaleQualityWindowHours, 1)
+	return now.UTC().Add(-time.Duration(hours) * time.Hour)
+}
+
+func domainOrderMetricsQuery(db *gorm.DB, windowStart time.Time) *gorm.DB {
+	return db.Raw(domainOrderMetricsSQL, windowStart.UTC(), time.Now().UTC())
+}
+
 // NewResourceRepo creates a new GORM-backed resource repository.
 func NewResourceRepo(db *gorm.DB) *ResourceRepo {
 	return &ResourceRepo{
@@ -1550,22 +1588,26 @@ func (r *ResourceRepo) ListMicrosoftStatus(ctx context.Context, ids []uint) ([]c
 // ListDomainStatus returns API-safe status for a batch of domain resources.
 func (r *ResourceRepo) ListDomainStatus(ctx context.Context, ids []uint) ([]coreapp.DomainStatusResult, error) {
 	type domainStatusRow struct {
-		ID              uint
-		Domain          string
-		DomainTLD       string
-		MailServerID    uint
-		Purpose         string
-		Status          string
-		LastSafeError   string
-		MailboxCount    int
-		LastAllocatedAt *time.Time
-		UpdatedAt       time.Time
+		ID                   uint
+		Domain               string
+		DomainTLD            string
+		MailServerID         uint
+		Purpose              string
+		Status               string
+		LastSafeError        string
+		MailboxCount         int
+		OrderCount           int64
+		SuccessfulOrderCount int64
+		LastAllocatedAt      *time.Time
+		UpdatedAt            time.Time
 	}
 	var rows []domainStatusRow
+	metrics := domainOrderMetricsQuery(r.db.WithContext(ctx), domainSaleQualityWindowStart(time.Now()))
 	err := r.db.WithContext(ctx).
 		Table("domain_resources AS dr").
-		Select("dr.id, dr.domain, dr.domain_tld, dr.mail_server_id, dr.purpose, dr.status, dr.last_safe_error, dr.last_allocated_at, dr.updated_at, COUNT(gm.id) AS mailbox_count").
+		Select("dr.id, dr.domain, dr.domain_tld, dr.mail_server_id, dr.purpose, dr.status, dr.last_safe_error, dr.last_allocated_at, dr.updated_at, COUNT(gm.id) AS mailbox_count, COALESCE(MAX(oq.order_count), 0) AS order_count, COALESCE(MAX(oq.successful_order_count), 0) AS successful_order_count").
 		Joins("LEFT JOIN generated_mailboxes gm ON gm.resource_id = dr.id AND gm.owner_user_id = dr.owner_user_id AND gm.status <> ?", generatedMailboxRetiredStatus).
+		Joins("LEFT JOIN (?) AS oq ON oq.resource_id = dr.id", metrics).
 		Where("dr.id IN ? AND dr.status <> ?", ids, string(domain.DomainStatusDeleted)).
 		Group("dr.id, dr.domain, dr.domain_tld, dr.mail_server_id, dr.purpose, dr.status, dr.last_safe_error, dr.last_allocated_at, dr.updated_at").
 		Find(&rows).Error
@@ -1575,16 +1617,18 @@ func (r *ResourceRepo) ListDomainStatus(ctx context.Context, ids []uint) ([]core
 	result := make([]coreapp.DomainStatusResult, len(rows))
 	for i, row := range rows {
 		result[i] = coreapp.DomainStatusResult{
-			ID:              row.ID,
-			Domain:          row.Domain,
-			DomainTLD:       row.DomainTLD,
-			MailServerID:    row.MailServerID,
-			Purpose:         row.Purpose,
-			Status:          row.Status,
-			LastSafeError:   row.LastSafeError,
-			MailboxCount:    row.MailboxCount,
-			LastAllocatedAt: row.LastAllocatedAt,
-			UpdatedAt:       row.UpdatedAt,
+			ID:                   row.ID,
+			Domain:               row.Domain,
+			DomainTLD:            row.DomainTLD,
+			MailServerID:         row.MailServerID,
+			Purpose:              row.Purpose,
+			Status:               row.Status,
+			LastSafeError:        row.LastSafeError,
+			MailboxCount:         row.MailboxCount,
+			OrderCount:           row.OrderCount,
+			SuccessfulOrderCount: row.SuccessfulOrderCount,
+			LastAllocatedAt:      row.LastAllocatedAt,
+			UpdatedAt:            row.UpdatedAt,
 		}
 	}
 	return result, nil
@@ -1816,6 +1860,9 @@ func publishLockedDomainRows(ctx context.Context, tx *gorm.DB, resourceIDs []uin
 
 		switch domain.ResourcePurpose(row.Purpose) {
 		case domain.PurposeNotSale:
+			if !runtimeconfig.DomainSaleTLDAllowed(row.Domain) {
+				return nil, domain.ErrDomainTLDNotAllowed
+			}
 			idsToPublish = append(idsToPublish, row.ID)
 		case domain.PurposeSale:
 			continue
@@ -2075,6 +2122,9 @@ func (r *ResourceRepo) PublishDomainWithLog(ctx context.Context, ownerUserID uin
 		if domain.ResourcePurpose(dr.Purpose) != domain.PurposeNotSale {
 			return domain.ErrResourceNotPrivate
 		}
+		if !runtimeconfig.DomainSaleTLDAllowed(dr.Domain) {
+			return domain.ErrDomainTLDNotAllowed
+		}
 
 		result := tx.Model(&DomainResourceModel{}).
 			Where("id = ? AND purpose = ? AND status <> ?", resourceID, string(domain.PurposeNotSale), string(domain.DomainStatusDeleted)).
@@ -2102,6 +2152,48 @@ func (r *ResourceRepo) PublishDomainWithLog(ctx context.Context, ownerUserID uin
 		return false, err
 	}
 	return published, nil
+}
+
+// EnforceDomainSaleQuality moves public domains below the configured rolling
+// success threshold back to private supply.
+func (r *ResourceRepo) EnforceDomainSaleQuality(ctx context.Context) (int, error) {
+	settings := runtimeconfig.Snapshot()
+	minOrders := settings.Int(runtimeconfig.DomainSaleQualityMinOrdersKey, runtimeconfig.DefaultDomainSaleQualityMinOrders, 1)
+	minSuccessPercent := settings.Int(runtimeconfig.DomainSaleQualityMinSuccessPercentKey, runtimeconfig.DefaultDomainSaleMinSuccessPercent, 1)
+	windowHours := settings.Int(runtimeconfig.DomainSaleQualityWindowHoursKey, runtimeconfig.DefaultDomainSaleQualityWindowHours, 1)
+	now := time.Now().UTC()
+	windowStart := now.Add(-time.Duration(windowHours) * time.Hour)
+	affected := int64(0)
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Exec(`
+UPDATE domain_resources AS dr
+JOIN (`+domainOrderMetricsSQL+`) AS oq ON oq.resource_id = dr.id
+SET dr.purpose = ?, dr.updated_at = ?
+WHERE dr.purpose = ?
+	  AND oq.order_count > ?
+	  AND oq.successful_order_count * 100 < oq.order_count * ?`,
+			windowStart, now, string(domain.PurposeNotSale), now, string(domain.PurposeSale), minOrders, minSuccessPercent,
+		)
+		if result.Error != nil {
+			return fmt.Errorf("enforce domain sale quality: %w", result.Error)
+		}
+		affected = result.RowsAffected
+		if affected == 0 {
+			return nil
+		}
+		return r.operationLogs.CreateInTx(ctx, tx, &governancedomain.OperationLog{
+			OperationType: "core.domain_resource.auto_unpublish",
+			ResourceType:  "domain_resource",
+			ResourceID:    resourceBulkOperationLogResourceID,
+			Path:          "/system/domain-sale-quality",
+			Result:        "success",
+			SafeSummary: fmt.Sprintf(
+				"Automatically converted low-quality domains to private. affected=%d window_hours=%d min_orders=%d min_success_percent=%d.",
+				affected, windowHours, minOrders, minSuccessPercent,
+			),
+		})
+	})
+	return int(affected), err
 }
 
 // DeletePrivateMicrosoftWithLog logically removes one owned Microsoft resource while it is still private.

@@ -69,6 +69,8 @@ func TestValidateEmailServiceSettings(t *testing.T) {
 	require.ErrorIs(t, Validate("domain_custom_tlds", "kg"), domain.ErrInvalidValue)
 	require.NoError(t, Validate("domain_max_subdomains_per_registrable_domain", "3"))
 	require.ErrorIs(t, Validate("domain_max_subdomains_per_registrable_domain", "0"), domain.ErrInvalidValue)
+	require.ErrorIs(t, Validate(DomainSaleQualityCheckIntervalSecondsKey, "0"), domain.ErrInvalidValue)
+	require.ErrorIs(t, Validate(DomainSaleQualityCheckIntervalSecondsKey, "86401"), domain.ErrInvalidValue)
 	require.ErrorIs(t, Validate("smtp_outbound_payload_ttl_minutes", "0"), domain.ErrInvalidValue)
 	require.NoError(t, Validate("smtp_task_retry_count", "0"))
 }
@@ -331,6 +333,22 @@ func TestICloudForwardingSuffixesAreCanonical(t *testing.T) {
 	require.Equal(t, []string{"relay.example", "mail.example"}, ICloudForwardingSuffixes(
 		" RELAY.EXAMPLE.，mail.example relay.example ",
 	))
+}
+
+func TestDomainSaleTLDWhitelistIsCanonicalAndMatchesEducationSuffixes(t *testing.T) {
+	require.Equal(t, "com,edu.kg,edu.*", NormalizeValue(
+		DomainSaleTLDWhitelistKey, " .COM，@edu.kg edu.* .com ",
+	))
+	require.NoError(t, Validate(DomainSaleTLDWhitelistKey, "com,edu.kg,edu.*"))
+	require.ErrorIs(t, Validate(DomainSaleTLDWhitelistKey, "com,*"), domain.ErrInvalidValue)
+
+	Set(DomainSaleTLDWhitelistKey, "com,edu.kg,edu.*")
+	t.Cleanup(func() { Delete(DomainSaleTLDWhitelistKey) })
+	require.True(t, DomainSaleTLDAllowed("mail.example.com"))
+	require.True(t, DomainSaleTLDAllowed("school.edu.kg"))
+	require.True(t, DomainSaleTLDAllowed("school.edu.example"))
+	require.False(t, DomainSaleTLDAllowed("edu.example.net"))
+	require.False(t, DomainSaleTLDAllowed("mail.example.net"))
 }
 
 func TestReplaceFallsBackFromConflictingPersistedValues(t *testing.T) {

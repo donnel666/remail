@@ -1515,6 +1515,165 @@ func TestResourceRepoPublishResourcesBatchWithLogPublishesMixedResourcesAndRolls
 	require.Zero(t, rollbackLogCount)
 }
 
+func TestDomainSaleWhitelistMetricsAndQualityEnforcementMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	repo := NewResourceRepo(db)
+	ctx := context.Background()
+	runtimeconfig.Set(runtimeconfig.DomainSaleTLDWhitelistKey, "com")
+	runtimeconfig.Set(runtimeconfig.DomainSaleQualityMinOrdersKey, "4")
+	runtimeconfig.Set(runtimeconfig.DomainSaleQualityMinSuccessPercentKey, "60")
+	runtimeconfig.Set(runtimeconfig.DomainSaleQualityWindowHoursKey, "1")
+	t.Cleanup(func() {
+		runtimeconfig.Delete(runtimeconfig.DomainSaleTLDWhitelistKey)
+		runtimeconfig.Delete(runtimeconfig.DomainSaleQualityMinOrdersKey)
+		runtimeconfig.Delete(runtimeconfig.DomainSaleQualityMinSuccessPercentKey)
+		runtimeconfig.Delete(runtimeconfig.DomainSaleQualityWindowHoursKey)
+	})
+
+	require.NoError(t, db.Exec(`
+INSERT INTO users(id, email, password_hash, role, status)
+VALUES
+    (9601, 'quality-owner@test.local', 'hash', 'supplier', 'active'),
+    (9602, 'quality-buyer@test.local', 'hash', 'user', 'active')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO mail_servers(id, owner_user_id, server_address, mx_record, status)
+VALUES (9601, 9601, 'mx.quality.test', 'mx.quality.test', 'online')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO projects(id, name, target_platform, status)
+VALUES (9601, 'Domain Quality', 'test', 'listed')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO project_products(id, project_id, type, main_weight, dot_weight, plus_weight)
+VALUES (9601, 9601, 'domain', 0, 0, 0)`).Error)
+
+	blockedRoot := &domain.EmailResource{Type: domain.ResourceTypeDomain, OwnerUserID: 9601}
+	blocked := &domain.MailDomainResource{
+		Domain: "blocked-quality.example.net", MailServerID: 9601,
+		Purpose: domain.PurposeNotSale, Status: domain.DomainStatusNormal,
+	}
+	require.NoError(t, repo.CreateDomain(ctx, blockedRoot, blocked))
+	_, err := repo.PublishDomainWithLog(ctx, 9601, blocked.ID, governancedomain.OperationLog{
+		OperatorUserID: 9601, OperationType: "core.domain_resource.publish", ResourceType: "domain_resource",
+		Path: "/v1/resources", Result: "success", RequestID: "quality-blocked",
+	})
+	require.ErrorIs(t, err, domain.ErrDomainTLDNotAllowed)
+
+	root := &domain.EmailResource{Type: domain.ResourceTypeDomain, OwnerUserID: 9601}
+	resource := &domain.MailDomainResource{
+		Domain: "quality.example.com", MailServerID: 9601,
+		Purpose: domain.PurposeSale, Status: domain.DomainStatusNormal,
+	}
+	require.NoError(t, repo.CreateDomain(ctx, root, resource))
+	require.NoError(t, db.Exec(`
+INSERT INTO generated_mailboxes(resource_id, owner_user_id, email, status)
+VALUES (?, ?, 'orders@quality.example.com', 'normal')`, resource.ID, 9601).Error)
+	var mailboxID uint
+	require.NoError(t, db.Table("generated_mailboxes").Select("id").Where("resource_id = ?", resource.ID).Scan(&mailboxID).Error)
+
+	type qualityOrder struct {
+		orderNo string
+		scope   string
+		paid    bool
+		success bool
+		waiting bool
+	}
+	insertOrder := func(i int, item qualityOrder) {
+		t.Helper()
+		orderNo := item.orderNo
+		require.NoError(t, db.Exec("INSERT INTO allocation_order_guards(order_no, type) VALUES (?, 'domain')", orderNo).Error)
+		require.NoError(t, db.Exec(`
+	INSERT INTO domain_allocations(order_no, project_id, product_id, resource_id, supply_scope, mailbox_id, email, status, released_at)
+	VALUES (?, 9601, 9601, ?, ?, ?, 'orders@quality.example.com', 'released', NOW())`, orderNo, resource.ID, item.scope, mailboxID).Error)
+		var debitTxID any
+		if item.paid {
+			transactionID := 9800 + i
+			require.NoError(t, db.Exec(`
+	INSERT INTO wallet_transactions(id, transaction_no, user_id, transaction_type, balance_bucket, direction, amount, balance_before, balance_after, biz_type, biz_id)
+	VALUES (?, ?, 9602, 'debit', 'consumer', 'out', 0, 0, 0, 'order', ?)`,
+				transactionID, fmt.Sprintf("quality-tx-%d", i), orderNo).Error)
+			debitTxID = transactionID
+		}
+		status := "closed"
+		receiveUntil := time.Now().UTC().Add(-time.Minute)
+		if item.success || item.waiting {
+			status = "active"
+			receiveUntil = time.Now().UTC().Add(time.Hour)
+		}
+		require.NoError(t, db.Exec(`
+	INSERT INTO orders(
+	    order_no, user_id, project_id, project_product_id, product_type, service_mode,
+	    supply_policy, status, pay_amount, refund_amount, code_window_minutes,
+	    activation_window_minutes, warranty_minutes, allocation_type, delivery_email,
+	    debit_tx_id, receive_started_at, receive_until,
+	    client_channel, idempotency_key, request_fingerprint, service_cleanup_status, created_at
+	)
+	VALUES (?, 9602, 9601, 9601, 'domain', 'code', 'public_only', ?, 0, 0, 10, 10, 10, 'domain',
+	        'orders@quality.example.com', ?, NOW(), ?, 'console', ?, ?, 'none', NOW())`,
+			orderNo, status, debitTxID, receiveUntil, orderNo, fmt.Sprintf("%064x", i)).Error)
+		if item.success {
+			var orderID uint
+			require.NoError(t, db.Table("orders").Select("id").Where("order_no = ?", orderNo).Scan(&orderID).Error)
+			result := db.Exec(`
+	INSERT INTO mailmatch_messages(email_resource_id, resource_type, recipient, dedupe_key, status, received_at)
+	VALUES (?, 'domain', 'orders@quality.example.com', ?, 'matched', NOW())`, resource.ID, fmt.Sprintf("%064x", 100+i))
+			require.NoError(t, result.Error)
+			var messageID uint
+			require.NoError(t, db.Table("mailmatch_messages").Select("id").Order("id DESC").Limit(1).Scan(&messageID).Error)
+			require.NoError(t, db.Exec(`
+INSERT INTO mailmatch_order_delivery_heads(order_id, message_id, message_received_at)
+			VALUES (?, ?, NOW())`, orderID, messageID).Error)
+		}
+	}
+	orders := []qualityOrder{
+		{orderNo: "quality-success-1", scope: "public", paid: true, success: true},
+		{orderNo: "quality-success-2", scope: "public", paid: true, success: true},
+		{orderNo: "quality-success-3", scope: "public", paid: true, success: true},
+		{orderNo: "quality-failed-1", scope: "public", paid: true},
+		{orderNo: "quality-failed-2", scope: "public", paid: true},
+		{orderNo: "quality-waiting", scope: "public", paid: true, waiting: true},
+		{orderNo: "quality-unpaid", scope: "public"},
+		{orderNo: "quality-owned", scope: "owned", paid: true},
+		{orderNo: "HIST-quality-success", scope: "public", paid: true, success: true},
+	}
+	for i, item := range orders {
+		insertOrder(i+1, item)
+	}
+
+	statuses, err := repo.ListDomainStatus(ctx, []uint{resource.ID})
+	require.NoError(t, err)
+	require.Len(t, statuses, 1)
+	require.EqualValues(t, 5, statuses[0].OrderCount)
+	require.EqualValues(t, 3, statuses[0].SuccessfulOrderCount)
+
+	adminRecords, _, err := NewAdminResourceRepo(db).ListAdminDomains(ctx, coreapp.AdminDomainListFilter{Search: "quality.example.com"}, 0, 20, 0)
+	require.NoError(t, err)
+	require.Len(t, adminRecords, 1)
+	require.EqualValues(t, 5, adminRecords[0].OrderCount)
+	require.EqualValues(t, 3, adminRecords[0].SuccessfulOrderCount)
+
+	affected, err := repo.EnforceDomainSaleQuality(ctx)
+	require.NoError(t, err)
+	require.Zero(t, affected, "exactly 60 percent must remain public")
+	var purpose string
+	require.NoError(t, db.Table("domain_resources").Select("purpose").Where("id = ?", resource.ID).Scan(&purpose).Error)
+	require.Equal(t, string(domain.PurposeSale), purpose)
+
+	insertOrder(10, qualityOrder{orderNo: "quality-failed-3", scope: "public", paid: true})
+	affected, err = repo.EnforceDomainSaleQuality(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, affected)
+	require.NoError(t, db.Table("domain_resources").Select("purpose").Where("id = ?", resource.ID).Scan(&purpose).Error)
+	require.Equal(t, string(domain.PurposeNotSale), purpose)
+
+	var indexCount int64
+	require.NoError(t, db.Raw(`
+	SELECT COUNT(*)
+	FROM information_schema.statistics
+	WHERE table_schema = DATABASE()
+	  AND table_name = 'orders'
+	  AND index_name = 'idx_orders_created_order'`).Scan(&indexCount).Error)
+	require.Positive(t, indexCount)
+}
+
 func TestResourceRepoListExcludesBindingDomainsWhenRequestedMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 	repo := NewResourceRepo(db)

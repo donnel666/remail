@@ -17,6 +17,8 @@ export interface DomainResource {
   status: DomainStatus;
   lastSafeError?: string;
   mailboxCount: number;
+  orderCount: number;
+  successfulOrderCount: number;
   createdAt: string;
 }
 
@@ -67,6 +69,8 @@ export function toDomainResource(item: ResourceItem): DomainResource | null {
     status: mapDomainStatus(item.status),
     lastSafeError: item.lastSafeError || undefined,
     mailboxCount: item.mailboxCount ?? 0,
+    orderCount: item.orderCount ?? 0,
+    successfulOrderCount: item.successfulOrderCount ?? 0,
     createdAt: item.createdAt,
   };
 }

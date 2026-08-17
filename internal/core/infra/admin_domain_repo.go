@@ -16,20 +16,22 @@ import (
 )
 
 type adminDomainRow struct {
-	ID               uint
-	OwnerUserID      uint
-	Version          uint64
-	Domain           string
-	DomainTLD        string
-	MailServerID     uint
-	Purpose          string
-	AllowNewBindings bool
-	Status           string
-	MailboxCount     int64
-	LastSafeError    string
-	LastAllocatedAt  *time.Time
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	ID                   uint
+	OwnerUserID          uint
+	Version              uint64
+	Domain               string
+	DomainTLD            string
+	MailServerID         uint
+	Purpose              string
+	AllowNewBindings     bool
+	Status               string
+	MailboxCount         int64
+	OrderCount           int64
+	SuccessfulOrderCount int64
+	LastSafeError        string
+	LastAllocatedAt      *time.Time
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
 }
 
 const adminDomainListSelect = `
@@ -41,9 +43,11 @@ dr.domain_tld AS domain_tld,
 dr.mail_server_id AS mail_server_id,
 dr.purpose AS purpose,
 dr.allow_new_bindings AS allow_new_bindings,
-dr.status AS status,
-(SELECT COUNT(*) FROM generated_mailboxes gm WHERE gm.resource_id = er.id AND gm.owner_user_id = er.owner_user_id AND gm.status <> 'retired') AS mailbox_count,
-dr.last_safe_error AS last_safe_error,
+	dr.status AS status,
+	(SELECT COUNT(*) FROM generated_mailboxes gm WHERE gm.resource_id = er.id AND gm.owner_user_id = er.owner_user_id AND gm.status <> 'retired') AS mailbox_count,
+	COALESCE(oq.order_count, 0) AS order_count,
+	COALESCE(oq.successful_order_count, 0) AS successful_order_count,
+	dr.last_safe_error AS last_safe_error,
 dr.last_allocated_at AS last_allocated_at,
 er.created_at AS created_at,
 GREATEST(er.updated_at, dr.updated_at) AS updated_at`
@@ -54,7 +58,11 @@ func (r *AdminResourceRepo) ListAdminDomains(ctx context.Context, filter coreapp
 	if err := base.Session(&gorm.Session{}).Count(&total).Error; err != nil {
 		return nil, 0, fmt.Errorf("count administrator domains: %w", err)
 	}
-	query := base.Session(&gorm.Session{}).Select(adminDomainListSelect).Order("er.id DESC")
+	metrics := domainOrderMetricsQuery(r.dbFor(ctx), domainSaleQualityWindowStart(time.Now()))
+	query := base.Session(&gorm.Session{}).
+		Joins("LEFT JOIN (?) AS oq ON oq.resource_id = dr.id", metrics).
+		Select(adminDomainListSelect).
+		Order("er.id DESC")
 	if afterID > 0 {
 		query = query.Where("er.id < ?", afterID)
 	} else {
@@ -79,6 +87,7 @@ func (r *AdminResourceRepo) FindAdminDomain(ctx context.Context, resourceID uint
 	result := r.dbFor(ctx).
 		Table("email_resources AS er").
 		Joins("JOIN domain_resources AS dr ON dr.id = er.id AND er.type = ?", string(domain.ResourceTypeDomain)).
+		Joins("LEFT JOIN (?) AS oq ON oq.resource_id = dr.id", domainOrderMetricsQuery(r.dbFor(ctx), domainSaleQualityWindowStart(time.Now()))).
 		Select(adminDomainListSelect).
 		Where("er.id = ?", resourceID).
 		Take(&row)
@@ -372,7 +381,8 @@ func adminDomainRecord(row adminDomainRow) coreapp.AdminDomainRecord {
 	return coreapp.AdminDomainRecord{
 		ID: row.ID, OwnerUserID: row.OwnerUserID, Version: row.Version, Domain: row.Domain, DomainTLD: row.DomainTLD,
 		MailServerID: row.MailServerID, Purpose: domain.ResourcePurpose(row.Purpose), AllowNewBindings: row.AllowNewBindings, Status: domain.MailDomainStatus(row.Status),
-		MailboxCount: row.MailboxCount, LastSafeError: row.LastSafeError, LastAllocatedAt: row.LastAllocatedAt,
+		MailboxCount: row.MailboxCount, OrderCount: row.OrderCount, SuccessfulOrderCount: row.SuccessfulOrderCount,
+		LastSafeError: row.LastSafeError, LastAllocatedAt: row.LastAllocatedAt,
 		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 	}
 }

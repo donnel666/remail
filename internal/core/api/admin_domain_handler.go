@@ -13,23 +13,25 @@ import (
 )
 
 type adminDomainItemResponse struct {
-	ID               uint       `json:"id"`
-	Version          uint64     `json:"version"`
-	OwnerID          uint       `json:"ownerId"`
-	OwnerEmail       string     `json:"ownerEmail"`
-	OwnerNickname    string     `json:"ownerNickname"`
-	OwnerRole        string     `json:"ownerRole"`
-	Domain           string     `json:"domain"`
-	DomainTLD        string     `json:"domainTld"`
-	MailServerID     uint       `json:"mailServerId"`
-	Purpose          string     `json:"purpose"`
-	AllowNewBindings bool       `json:"allowNewBindings"`
-	Status           string     `json:"status"`
-	MailboxCount     int64      `json:"mailboxCount"`
-	LastSafeError    *string    `json:"lastSafeError,omitempty"`
-	LastAllocatedAt  *time.Time `json:"lastAllocatedAt,omitempty"`
-	CreatedAt        time.Time  `json:"createdAt"`
-	UpdatedAt        time.Time  `json:"updatedAt"`
+	ID                   uint       `json:"id"`
+	Version              uint64     `json:"version"`
+	OwnerID              uint       `json:"ownerId"`
+	OwnerEmail           string     `json:"ownerEmail"`
+	OwnerNickname        string     `json:"ownerNickname"`
+	OwnerRole            string     `json:"ownerRole"`
+	Domain               string     `json:"domain"`
+	DomainTLD            string     `json:"domainTld"`
+	MailServerID         uint       `json:"mailServerId"`
+	Purpose              string     `json:"purpose"`
+	AllowNewBindings     bool       `json:"allowNewBindings"`
+	Status               string     `json:"status"`
+	MailboxCount         int64      `json:"mailboxCount"`
+	OrderCount           int64      `json:"orderCount"`
+	SuccessfulOrderCount int64      `json:"successfulOrderCount"`
+	LastSafeError        *string    `json:"lastSafeError,omitempty"`
+	LastAllocatedAt      *time.Time `json:"lastAllocatedAt,omitempty"`
+	CreatedAt            time.Time  `json:"createdAt"`
+	UpdatedAt            time.Time  `json:"updatedAt"`
 }
 
 type adminDomainStatusFacetsResponse struct {
@@ -643,7 +645,8 @@ func adminDomainFromApp(item *coreapp.AdminDomainItem) adminDomainItemResponse {
 		ID: item.ID, Version: item.Version, OwnerID: item.Owner.ID, OwnerEmail: item.Owner.Email, OwnerNickname: item.Owner.Nickname, OwnerRole: item.Owner.Role,
 		Domain: item.Domain, DomainTLD: item.DomainTLD, MailServerID: item.MailServerID, Purpose: item.Purpose,
 		AllowNewBindings: item.AllowNewBindings, Status: item.Status,
-		MailboxCount: item.MailboxCount, LastSafeError: item.LastSafeError, LastAllocatedAt: item.LastAllocatedAt, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
+		MailboxCount: item.MailboxCount, OrderCount: item.OrderCount, SuccessfulOrderCount: item.SuccessfulOrderCount,
+		LastSafeError: item.LastSafeError, LastAllocatedAt: item.LastAllocatedAt, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
 	}
 }
 

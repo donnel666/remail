@@ -21,6 +21,7 @@ var (
 	ErrDuplicateEmail              = errors.New("duplicate email address in resource import")
 	ErrDuplicateDomain             = errors.New("domain already exists")
 	ErrDomainSubdomainLimit        = errors.New("domain subdomain limit reached")
+	ErrDomainTLDNotAllowed         = errors.New("domain TLD is not allowed for sale")
 	ErrInvalidImportFormat         = errors.New("invalid import format")
 	ErrFileStorageUnavailable      = errors.New("file storage is temporarily unavailable")
 	ErrImportQueueUnavailable      = errors.New("resource import queue is temporarily unavailable")

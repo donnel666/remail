@@ -414,6 +414,12 @@ FOR UPDATE`).Scan(&id).Error; err != nil {
 	}
 	require.NoError(t, repo.CreateMicrosoftAllocation(allocationCtx, allocation))
 	require.NoError(t, allocationTx.Commit().Error)
+	var supplierUserID uint
+	require.NoError(t, db.Table("microsoft_allocations").Select("supplier_user_id").Where("id = ?", allocation.ID).Scan(&supplierUserID).Error)
+	require.EqualValues(t, 1, supplierUserID)
+	require.NoError(t, db.Table("email_resources").Where("id = ?", allocation.ResourceID).Update("owner_user_id", 3).Error)
+	require.NoError(t, db.Table("microsoft_allocations").Select("supplier_user_id").Where("id = ?", allocation.ID).Scan(&supplierUserID).Error)
+	require.EqualValues(t, 1, supplierUserID)
 
 	select {
 	case err := <-adminDone:

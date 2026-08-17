@@ -163,6 +163,7 @@ type MicrosoftAllocationModel struct {
 	ProductID       uint       `gorm:"not null;column:product_id"`
 	ResourceID      uint       `gorm:"not null;column:resource_id"`
 	SupplyScope     string     `gorm:"type:varchar(16);not null;column:supply_scope"`
+	SupplierUserID  *uint      `gorm:"column:supplier_user_id"`
 	Mailbox         string     `gorm:"type:varchar(32);not null"`
 	ExplicitAliasID *uint      `gorm:"column:explicit_alias_id"`
 	DotAliasID      *uint      `gorm:"column:dot_alias_id"`
@@ -243,6 +244,7 @@ type GmailAllocationModel struct {
 	ServiceMode        string     `gorm:"type:varchar(32);not null;column:service_mode"`
 	ResourceID         uint       `gorm:"column:resource_id"`
 	SupplyScope        string     `gorm:"type:varchar(16);not null;column:supply_scope"`
+	SupplierUserID     *uint      `gorm:"column:supplier_user_id"`
 	Mailbox            string     `gorm:"type:varchar(16);not null;column:mailbox"`
 	Email              string     `gorm:"type:varchar(320);not null;column:email"`
 	Status             string     `gorm:"type:varchar(32);not null;column:status"`
@@ -284,17 +286,18 @@ func (m GmailAllocationModel) unified() domain.UnifiedAllocation {
 }
 
 type ICloudAllocationModel struct {
-	ID          uint       `gorm:"primaryKey;autoIncrement"`
-	OrderNo     string     `gorm:"type:varchar(64);not null;column:order_no"`
-	ProjectID   uint       `gorm:"not null;column:project_id"`
-	ProductID   uint       `gorm:"not null;column:product_id"`
-	ResourceID  uint       `gorm:"not null;column:resource_id"`
-	AliasID     uint       `gorm:"not null;column:alias_id"`
-	SupplyScope string     `gorm:"type:varchar(16);not null;column:supply_scope"`
-	Email       string     `gorm:"type:varchar(320);not null"`
-	Status      string     `gorm:"type:varchar(32);not null;default:'allocated'"`
-	CreatedAt   time.Time  `gorm:"not null;autoCreateTime;column:created_at"`
-	ReleasedAt  *time.Time `gorm:"column:released_at"`
+	ID             uint       `gorm:"primaryKey;autoIncrement"`
+	OrderNo        string     `gorm:"type:varchar(64);not null;column:order_no"`
+	ProjectID      uint       `gorm:"not null;column:project_id"`
+	ProductID      uint       `gorm:"not null;column:product_id"`
+	ResourceID     uint       `gorm:"not null;column:resource_id"`
+	AliasID        uint       `gorm:"not null;column:alias_id"`
+	SupplyScope    string     `gorm:"type:varchar(16);not null;column:supply_scope"`
+	SupplierUserID *uint      `gorm:"column:supplier_user_id"`
+	Email          string     `gorm:"type:varchar(320);not null"`
+	Status         string     `gorm:"type:varchar(32);not null;default:'allocated'"`
+	CreatedAt      time.Time  `gorm:"not null;autoCreateTime;column:created_at"`
+	ReleasedAt     *time.Time `gorm:"column:released_at"`
 }
 
 func (ICloudAllocationModel) TableName() string { return "icloud_allocations" }
@@ -329,17 +332,18 @@ func (m ICloudAllocationModel) unified() domain.UnifiedAllocation {
 }
 
 type DomainAllocationModel struct {
-	ID          uint       `gorm:"primaryKey;autoIncrement"`
-	OrderNo     string     `gorm:"type:varchar(64);not null;column:order_no"`
-	ProjectID   uint       `gorm:"not null;column:project_id"`
-	ProductID   uint       `gorm:"not null;column:product_id"`
-	ResourceID  uint       `gorm:"not null;column:resource_id"`
-	SupplyScope string     `gorm:"type:varchar(16);not null;column:supply_scope"`
-	MailboxID   uint       `gorm:"not null;column:mailbox_id"`
-	Email       string     `gorm:"type:varchar(255);not null"`
-	Status      string     `gorm:"type:varchar(32);not null;default:'allocated'"`
-	CreatedAt   time.Time  `gorm:"not null;autoCreateTime;column:created_at"`
-	ReleasedAt  *time.Time `gorm:"column:released_at"`
+	ID             uint       `gorm:"primaryKey;autoIncrement"`
+	OrderNo        string     `gorm:"type:varchar(64);not null;column:order_no"`
+	ProjectID      uint       `gorm:"not null;column:project_id"`
+	ProductID      uint       `gorm:"not null;column:product_id"`
+	ResourceID     uint       `gorm:"not null;column:resource_id"`
+	SupplyScope    string     `gorm:"type:varchar(16);not null;column:supply_scope"`
+	SupplierUserID *uint      `gorm:"column:supplier_user_id"`
+	MailboxID      uint       `gorm:"not null;column:mailbox_id"`
+	Email          string     `gorm:"type:varchar(255);not null"`
+	Status         string     `gorm:"type:varchar(32);not null;default:'allocated'"`
+	CreatedAt      time.Time  `gorm:"not null;autoCreateTime;column:created_at"`
+	ReleasedAt     *time.Time `gorm:"column:released_at"`
 }
 
 func (DomainAllocationModel) TableName() string { return "domain_allocations" }
@@ -1553,6 +1557,11 @@ func (r *Repo) CreateMicrosoftAllocation(ctx context.Context, allocation *domain
 		allocation.Status = domain.AllocationStatusAllocated
 	}
 	model := microsoftAllocationFromDomain(allocation)
+	supplierUserID, err := r.publicAllocationSupplierUserID(ctx, allocation.ResourceID, allocation.SupplyScope)
+	if err != nil {
+		return err
+	}
+	model.SupplierUserID = supplierUserID
 	if err := r.dbFor(ctx).Create(model).Error; err != nil {
 		if isDuplicateKeyError(err) {
 			return domain.ErrAllocationConflict
@@ -1575,6 +1584,11 @@ func (r *Repo) CreateGmailAllocation(ctx context.Context, allocation *domain.Gma
 		allocation.Status = domain.AllocationStatusAllocated
 	}
 	model := gmailAllocationFromDomain(allocation)
+	supplierUserID, err := r.publicAllocationSupplierUserID(ctx, allocation.ResourceID, allocation.SupplyScope)
+	if err != nil {
+		return err
+	}
+	model.SupplierUserID = supplierUserID
 	if err := r.dbFor(ctx).Create(model).Error; err != nil {
 		if isDuplicateKeyError(err) {
 			return domain.ErrAllocationConflict
@@ -1593,6 +1607,11 @@ func (r *Repo) CreateICloudAllocation(ctx context.Context, allocation *domain.IC
 		allocation.Status = domain.AllocationStatusAllocated
 	}
 	model := icloudAllocationFromDomain(allocation)
+	supplierUserID, err := r.publicAllocationSupplierUserID(ctx, allocation.ResourceID, allocation.SupplyScope)
+	if err != nil {
+		return err
+	}
+	model.SupplierUserID = supplierUserID
 	if err := r.dbFor(ctx).Create(model).Error; err != nil {
 		if isDuplicateKeyError(err) {
 			return domain.ErrAllocationConflict
@@ -1611,6 +1630,11 @@ func (r *Repo) CreateDomainAllocation(ctx context.Context, allocation *domain.Ge
 		allocation.Status = domain.AllocationStatusAllocated
 	}
 	model := domainAllocationFromDomain(allocation)
+	supplierUserID, err := r.publicAllocationSupplierUserID(ctx, allocation.ResourceID, allocation.SupplyScope)
+	if err != nil {
+		return err
+	}
+	model.SupplierUserID = supplierUserID
 	if err := r.dbFor(ctx).Create(model).Error; err != nil {
 		if isDuplicateKeyError(err) {
 			return domain.ErrAllocationConflict
@@ -1622,6 +1646,25 @@ func (r *Repo) CreateDomainAllocation(ctx context.Context, allocation *domain.Ge
 	}
 	*allocation = model.toDomain()
 	return nil
+}
+
+func (r *Repo) publicAllocationSupplierUserID(ctx context.Context, resourceID uint, supplyScope domain.SupplyScope) (*uint, error) {
+	if domain.NormalizeSupplyScope(supplyScope) != domain.SupplyScopePublic {
+		return nil, nil
+	}
+	var resource struct {
+		OwnerUserID uint `gorm:"column:owner_user_id"`
+	}
+	if err := r.dbFor(ctx).Table("email_resources").Select("owner_user_id").Where("id = ?", resourceID).Take(&resource).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, domain.ErrInvalidAllocationRequest
+		}
+		return nil, fmt.Errorf("load allocation supplier: %w", err)
+	}
+	if resource.OwnerUserID == 0 {
+		return nil, domain.ErrInvalidAllocationRequest
+	}
+	return &resource.OwnerUserID, nil
 }
 
 func (r *Repo) TouchMicrosoftAllocated(ctx context.Context, resourceID uint, allocatedAt time.Time) error {

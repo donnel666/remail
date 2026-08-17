@@ -54,6 +54,129 @@ func billingMigrationsDir(t *testing.T) string {
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "../../..", "migrations"))
 }
 
+func TestWalletSummaryIncludesSupplierFulfillmentMetricsMySQL(t *testing.T) {
+	db := newBillingMySQLTestDB(t)
+	ctx := context.Background()
+	ownerID := createBillingTestUser(t, db, "supplier-metrics@example.com")
+	newOwnerID := createBillingTestUser(t, db, "supplier-metrics-new-owner@example.com")
+	buyerID := createBillingTestUser(t, db, "supplier-metrics-buyer@example.com")
+
+	require.NoError(t, db.Exec(`
+INSERT INTO mail_servers(id, owner_user_id, server_address, mx_record, status)
+VALUES (9701, ?, 'mx.metrics.test', 'mx.metrics.test', 'online')`, ownerID).Error)
+	require.NoError(t, db.Exec("INSERT INTO email_resources(id, type, owner_user_id) VALUES (9701, 'domain', ?)", ownerID).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO domain_resources(id, domain, owner_user_id, mail_server_id, purpose, status)
+VALUES (9701, 'supplier-metrics.example.com', ?, 9701, 'sale', 'normal')`, ownerID).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO generated_mailboxes(id, resource_id, owner_user_id, email, status)
+VALUES (9701, 9701, ?, 'orders@supplier-metrics.example.com', 'normal')`, ownerID).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO projects(id, name, target_platform, status)
+VALUES (9701, 'Supplier Metrics', 'test', 'listed')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO project_products(id, project_id, type, main_weight, dot_weight, plus_weight)
+VALUES (9701, 9701, 'domain', 0, 0, 0)`).Error)
+
+	type metricOrder struct {
+		orderNo     string
+		scope       string
+		paid        bool
+		serviceMode string
+		success     bool
+		waiting     bool
+	}
+	orders := []metricOrder{
+		{orderNo: "supplier-metrics-code-success", scope: "public", paid: true, serviceMode: "code", success: true},
+		{orderNo: "supplier-metrics-purchase-success", scope: "public", paid: true, serviceMode: "purchase", success: true},
+		{orderNo: "supplier-metrics-waiting", scope: "public", paid: true, serviceMode: "code", waiting: true},
+		{orderNo: "supplier-metrics-failed", scope: "public", paid: true, serviceMode: "code"},
+		{orderNo: "supplier-metrics-owned", scope: "owned", paid: true, serviceMode: "purchase", success: true},
+		{orderNo: "supplier-metrics-unpaid", scope: "public", serviceMode: "code"},
+		{orderNo: "HIST-supplier-metrics", scope: "public", paid: true, serviceMode: "purchase", success: true},
+	}
+	for i, item := range orders {
+		orderNo := item.orderNo
+		require.NoError(t, db.Exec("INSERT INTO allocation_order_guards(order_no, type) VALUES (?, 'domain')", orderNo).Error)
+		var supplierUserID any
+		if item.scope == "public" {
+			supplierUserID = ownerID
+		}
+		require.NoError(t, db.Exec(`
+	INSERT INTO domain_allocations(order_no, project_id, product_id, resource_id, supply_scope, supplier_user_id, mailbox_id, email, status, released_at)
+	VALUES (?, 9701, 9701, 9701, ?, ?, 9701, 'orders@supplier-metrics.example.com', 'released', NOW())`,
+			orderNo, item.scope, supplierUserID).Error)
+		var debitTxID any
+		if item.paid {
+			transactionID := 9900 + i
+			require.NoError(t, db.Exec(`
+	INSERT INTO wallet_transactions(id, transaction_no, user_id, transaction_type, balance_bucket, direction, amount, balance_before, balance_after, biz_type, biz_id)
+	VALUES (?, ?, ?, 'debit', 'consumer', 'out', 0, 0, 0, 'order', ?)`,
+				transactionID, fmt.Sprintf("supplier-metrics-tx-%d", i), buyerID, orderNo).Error)
+			debitTxID = transactionID
+		}
+		status := "closed"
+		receiveUntil := time.Now().UTC().Add(-time.Minute)
+		if item.waiting || item.success {
+			status = "active"
+			receiveUntil = time.Now().UTC().Add(time.Hour)
+		}
+		var activatedAt any
+		if item.serviceMode == "purchase" && item.success {
+			activatedAt = time.Now().UTC()
+		}
+		require.NoError(t, db.Exec(`
+	INSERT INTO orders(
+	    order_no, user_id, project_id, project_product_id, product_type, service_mode,
+	    supply_policy, status, pay_amount, refund_amount, code_window_minutes,
+	    activation_window_minutes, warranty_minutes, allocation_type, delivery_email,
+	    debit_tx_id, receive_started_at, receive_until, activated_at,
+	    client_channel, idempotency_key, request_fingerprint, service_cleanup_status
+	)
+	VALUES (?, ?, 9701, 9701, 'domain', ?, 'public_only', ?, 0, 0, 10, 10, 10, 'domain',
+	        'orders@supplier-metrics.example.com', ?, NOW(), ?, ?, 'console', ?, ?, 'none')`,
+			orderNo, buyerID, item.serviceMode, status, debitTxID, receiveUntil, activatedAt,
+			orderNo, fmt.Sprintf("%064x", i+1)).Error)
+		if item.serviceMode == "code" && item.success {
+			var orderID uint
+			require.NoError(t, db.Table("orders").Select("id").Where("order_no = ?", orderNo).Scan(&orderID).Error)
+			require.NoError(t, db.Exec(`
+	INSERT INTO mailmatch_messages(email_resource_id, resource_type, recipient, dedupe_key, status, received_at)
+	VALUES (9701, 'domain', 'orders@supplier-metrics.example.com', ?, 'matched', NOW())`, fmt.Sprintf("%064x", 100+i)).Error)
+			var messageID uint
+			require.NoError(t, db.Table("mailmatch_messages").Select("id").Order("id DESC").Limit(1).Scan(&messageID).Error)
+			require.NoError(t, db.Exec(`
+INSERT INTO mailmatch_order_delivery_heads(order_id, message_id, message_received_at)
+VALUES (?, ?, NOW())`, orderID, messageID).Error)
+		}
+	}
+	require.NoError(t, db.Table("email_resources").Where("id = 9701").Update("owner_user_id", newOwnerID).Error)
+
+	repo := NewBillingRepo(db)
+	summary, err := repo.GetOrCreateWalletSummary(ctx, ownerID)
+	require.NoError(t, err)
+	require.EqualValues(t, 4, summary.SupplierAllocationCount)
+	require.Equal(t, 66.7, summary.SupplierFulfillmentSuccessRate)
+	newOwnerSummary, err := NewBillingRepo(db).GetOrCreateWalletSummary(ctx, newOwnerID)
+	require.NoError(t, err)
+	require.Zero(t, newOwnerSummary.SupplierAllocationCount)
+	require.Zero(t, newOwnerSummary.SupplierFulfillmentSuccessRate)
+
+	require.NoError(t, db.Model(&WalletModel{}).Where("user_id = ?", ownerID).Update("supplier_available", "10.000000").Error)
+	command := billingapp.TransferSupplierBalanceCommand{
+		UserID: ownerID, Amount: "1.000000", IdempotencyKey: "supplier-metrics-transfer",
+		RequestFingerprint: strings.Repeat("c", 64), RequestID: "supplier-metrics-transfer-request",
+	}
+	transferred, err := repo.TransferSupplierBalance(ctx, command)
+	require.NoError(t, err)
+	require.EqualValues(t, 4, transferred.SupplierAllocationCount)
+	require.Equal(t, 66.7, transferred.SupplierFulfillmentSuccessRate)
+	replayed, err := repo.TransferSupplierBalance(ctx, command)
+	require.NoError(t, err)
+	require.EqualValues(t, 4, replayed.SupplierAllocationCount)
+	require.Equal(t, 66.7, replayed.SupplierFulfillmentSuccessRate)
+}
+
 func TestBillingRepoRedeemCardMySQL(t *testing.T) {
 	db := newBillingMySQLTestDB(t)
 	ctx := context.Background()

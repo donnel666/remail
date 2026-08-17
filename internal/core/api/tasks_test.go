@@ -11,6 +11,7 @@ import (
 	coredomain "github.com/donnel666/remail/internal/core/domain"
 	coreinfra "github.com/donnel666/remail/internal/core/infra"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/hibiken/asynq"
 	"github.com/stretchr/testify/require"
 )
@@ -160,6 +161,44 @@ func TestResourceValidationDispatcherDeadlinesAllowLaterTicksAndShutdown(t *test
 	shutdownAt := time.Now()
 	cleanup(shutdownCtx)
 	require.Less(t, time.Since(shutdownAt), 50*time.Millisecond, "shutdown must cancel the active call")
+}
+
+func TestDomainSaleQualityCheckIntervalUsesRuntimeSetting(t *testing.T) {
+	runtimeconfig.Delete(runtimeconfig.DomainSaleQualityCheckIntervalSecondsKey)
+	t.Cleanup(func() { runtimeconfig.Delete(runtimeconfig.DomainSaleQualityCheckIntervalSecondsKey) })
+
+	require.Equal(t, 30*time.Second, domainSaleQualityCheckInterval())
+	runtimeconfig.Set(runtimeconfig.DomainSaleQualityCheckIntervalSecondsKey, "7")
+	require.Equal(t, 7*time.Second, domainSaleQualityCheckInterval())
+	runtimeconfig.Set(runtimeconfig.DomainSaleQualityCheckIntervalSecondsKey, "0")
+	require.Equal(t, 30*time.Second, domainSaleQualityCheckInterval())
+}
+
+func TestDomainSaleQualityEnforcerReloadsIntervalAndStops(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	var calls atomic.Int32
+	var intervalNanos atomic.Int64
+	intervalNanos.Store(int64(20 * time.Millisecond))
+
+	done := startDomainSaleQualityEnforcer(ctx, time.Second, func() time.Duration {
+		return time.Duration(intervalNanos.Load())
+	}, func(context.Context) (int, error) {
+		if calls.Add(1) == 2 {
+			intervalNanos.Store(int64(time.Millisecond))
+		}
+		return 0, nil
+	})
+
+	require.Eventually(t, func() bool { return calls.Load() >= 4 }, 100*time.Millisecond, time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("domain sale quality enforcer did not stop")
+	}
+	stoppedAt := calls.Load()
+	time.Sleep(5 * time.Millisecond)
+	require.Equal(t, stoppedAt, calls.Load())
 }
 
 type adminResourceBulkCleanupQueue struct {

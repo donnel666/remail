@@ -150,7 +150,7 @@ describe("wallet payment modal", () => {
       return 1;
     });
     vi.spyOn(window, "clearInterval").mockImplementation(() => undefined);
-    mocks.getWallet.mockResolvedValue({ consumerBalance: "0.00", supplierAvailable: "0.00", supplierFrozen: "0.00", totalRecharged: "0.00", historicalSpend: "0.00", orderCount: 0 });
+    mocks.getWallet.mockResolvedValue({ consumerBalance: "0.00", supplierAvailable: "0.00", supplierFrozen: "0.00", totalRecharged: "0.00", historicalSpend: "0.00", orderCount: 0, supplierAllocationCount: 0, supplierFulfillmentSuccessRate: 0 });
     mocks.getWalletReferrals.mockResolvedValue({ inviteCount: 0, pendingRewards: "0.00", totalEarned: "0.00" });
     mocks.getRechargeConfig.mockResolvedValue({ enabled: true, minPoints: "1000.00", feeRate: "0.6", feeCapPoints: "0", redemptionCodePurchaseUrl: "https://shop.example.com/cards", tiers: [{ points: "1000.00", bonusPoints: "0.00", feePoints: "6.00", creditedPoints: "1000.00" }] });
     mocks.quoteRecharge.mockResolvedValue({ points: "1000.00", bonusPoints: "0.00", feePoints: "6.00", creditedPoints: "1000.00" });

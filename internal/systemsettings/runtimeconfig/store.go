@@ -158,7 +158,8 @@ func canonicalKey(key string) string {
 }
 
 func NormalizeValue(key, value string) string {
-	if canonicalKey(key) != ICloudForwardingSuffixesKey {
+	key = canonicalKey(key)
+	if key != ICloudForwardingSuffixesKey && key != DomainSaleTLDWhitelistKey {
 		return value
 	}
 	seen := make(map[string]struct{})
@@ -166,7 +167,12 @@ func NormalizeValue(key, value string) string {
 	for _, candidate := range strings.FieldsFunc(value, func(r rune) bool {
 		return r == ',' || r == '，' || unicode.IsSpace(r)
 	}) {
-		domain := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(candidate)), ".")
+		domain := strings.ToLower(strings.TrimSpace(candidate))
+		if key == DomainSaleTLDWhitelistKey {
+			domain = strings.TrimLeft(domain, ".@")
+		} else {
+			domain = strings.TrimSuffix(domain, ".")
+		}
 		if domain == "" {
 			continue
 		}
@@ -177,6 +183,31 @@ func NormalizeValue(key, value string) string {
 		domains = append(domains, domain)
 	}
 	return strings.Join(domains, ",")
+}
+
+// DomainSaleTLDAllowed reports whether a domain ends in an exact configured
+// suffix or a wildcard such as edu.*.
+func DomainSaleTLDAllowed(value string) bool {
+	domain := strings.Trim(strings.ToLower(strings.TrimSpace(value)), ".")
+	if domain == "" {
+		return false
+	}
+	for _, candidate := range strings.Split(NormalizeValue(DomainSaleTLDWhitelistKey, String(DomainSaleTLDWhitelistKey, DefaultDomainSaleTLDWhitelist)), ",") {
+		if strings.HasSuffix(candidate, ".*") {
+			prefix := strings.TrimSuffix(candidate, ".*")
+			if dot := strings.LastIndexByte(domain, '.'); dot > 0 {
+				withoutFinalLabel := domain[:dot]
+				if withoutFinalLabel == prefix || strings.HasSuffix(withoutFinalLabel, "."+prefix) {
+					return true
+				}
+			}
+			continue
+		}
+		if domain == candidate || strings.HasSuffix(domain, "."+candidate) {
+			return true
+		}
+	}
+	return false
 }
 
 func ICloudForwardingSuffixes(value string) []string {

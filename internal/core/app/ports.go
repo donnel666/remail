@@ -990,23 +990,25 @@ func NewResourceUseCase(resources EmailResourceRepository) *ResourceUseCase {
 
 // ResourceItem is the API-safe view of a resource.
 type ResourceItem struct {
-	ID              uint                `json:"id"`
-	Type            domain.ResourceType `json:"type"`
-	OwnerID         uint                `json:"ownerId"`
-	Status          string              `json:"status"`
-	ForSale         *bool               `json:"forSale,omitempty"`
-	LongLived       *bool               `json:"longLived,omitempty"`
-	GraphAvailable  *bool               `json:"graphAvailable,omitempty"`
-	LastSafeError   string              `json:"lastSafeError,omitempty"`
-	Email           string              `json:"email,omitempty"`
-	Domain          string              `json:"domain,omitempty"`
-	DomainTLD       string              `json:"domainTld,omitempty"`
-	MailServerID    uint                `json:"mailServerId,omitempty"`
-	Purpose         string              `json:"purpose,omitempty"`
-	MailboxCount    int                 `json:"mailboxCount,omitempty"`
-	LastAllocatedAt *time.Time          `json:"lastAllocatedAt,omitempty"`
-	CreatedAt       time.Time           `json:"createdAt"`
-	UpdatedAt       time.Time           `json:"updatedAt"`
+	ID                   uint                `json:"id"`
+	Type                 domain.ResourceType `json:"type"`
+	OwnerID              uint                `json:"ownerId"`
+	Status               string              `json:"status"`
+	ForSale              *bool               `json:"forSale,omitempty"`
+	LongLived            *bool               `json:"longLived,omitempty"`
+	GraphAvailable       *bool               `json:"graphAvailable,omitempty"`
+	LastSafeError        string              `json:"lastSafeError,omitempty"`
+	Email                string              `json:"email,omitempty"`
+	Domain               string              `json:"domain,omitempty"`
+	DomainTLD            string              `json:"domainTld,omitempty"`
+	MailServerID         uint                `json:"mailServerId,omitempty"`
+	Purpose              string              `json:"purpose,omitempty"`
+	MailboxCount         int                 `json:"mailboxCount,omitempty"`
+	OrderCount           int64               `json:"orderCount,omitempty"`
+	SuccessfulOrderCount int64               `json:"successfulOrderCount,omitempty"`
+	LastAllocatedAt      *time.Time          `json:"lastAllocatedAt,omitempty"`
+	CreatedAt            time.Time           `json:"createdAt"`
+	UpdatedAt            time.Time           `json:"updatedAt"`
 }
 
 // MicrosoftResourceDetail is the API-safe view of a Microsoft resource (no credentials).
@@ -1160,16 +1162,18 @@ type MicrosoftStatusResult struct {
 
 // DomainStatusResult holds minimal API-safe status for a domain resource.
 type DomainStatusResult struct {
-	ID              uint
-	Domain          string
-	DomainTLD       string
-	MailServerID    uint
-	Purpose         string
-	Status          string
-	LastSafeError   string
-	MailboxCount    int
-	LastAllocatedAt *time.Time
-	UpdatedAt       time.Time
+	ID                   uint
+	Domain               string
+	DomainTLD            string
+	MailServerID         uint
+	Purpose              string
+	Status               string
+	LastSafeError        string
+	MailboxCount         int
+	OrderCount           int64
+	SuccessfulOrderCount int64
+	LastAllocatedAt      *time.Time
+	UpdatedAt            time.Time
 }
 
 const (
@@ -1304,6 +1308,8 @@ func (uc *ResourceUseCase) List(ctx context.Context, ownerUserID uint, scope str
 				item.Purpose = s.Purpose
 				item.LastSafeError = s.LastSafeError
 				item.MailboxCount = s.MailboxCount
+				item.OrderCount = s.OrderCount
+				item.SuccessfulOrderCount = s.SuccessfulOrderCount
 				item.LastAllocatedAt = s.LastAllocatedAt
 				item.UpdatedAt = s.UpdatedAt
 			} else {

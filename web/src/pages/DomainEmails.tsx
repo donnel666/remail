@@ -680,6 +680,16 @@ export default function DomainEmails() {
           ),
         },
         {
+          title: t("Window successful orders / eligible orders"),
+          dataIndex: "successfulOrderCount",
+          width: 150,
+          render: (_: number, record: DomainResource) => (
+            <span className="tabular-nums font-medium text-[var(--semi-color-text-1)]">
+              {record.successfulOrderCount} / {record.orderCount}
+            </span>
+          ),
+        },
+        {
           title: t("Action"),
           dataIndex: "operate",
           width: 190,

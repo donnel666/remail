@@ -63,6 +63,8 @@ describe("admin-finance-api response mappers", () => {
       totalRecharged: "0.00",
       historicalSpend: "0.00",
       orderCount: 0,
+      supplierAllocationCount: 0,
+      supplierFulfillmentSuccessRate: 0,
       updatedAt: "2026-01-04T00:00:00Z",
     });
 

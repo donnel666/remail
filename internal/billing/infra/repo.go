@@ -193,15 +193,24 @@ func (ReferralRewardModel) TableName() string {
 }
 
 type BillingRepo struct {
-	db            *gorm.DB
-	operationLogs operationLogWriter
+	db                             *gorm.DB
+	operationLogs                  operationLogWriter
+	hasGmailAllocations            bool
+	hasICloudAllocations           bool
+	hasSupplierAllocationSnapshots bool
 }
 
 func NewBillingRepo(db *gorm.DB) *BillingRepo {
-	return &BillingRepo{
+	repo := &BillingRepo{
 		db:            db,
 		operationLogs: governanceinfra.NewOperationLogRepo(db),
 	}
+	if db != nil {
+		repo.hasGmailAllocations = db.Migrator().HasTable("gmail_allocations")
+		repo.hasICloudAllocations = db.Migrator().HasTable("icloud_allocations")
+		repo.hasSupplierAllocationSnapshots = db.Migrator().HasColumn("microsoft_allocations", "supplier_user_id")
+	}
+	return repo
 }
 
 func (r *BillingRepo) withTx(ctx context.Context, fn func(context.Context, *gorm.DB) error) error {
@@ -222,7 +231,87 @@ func (r *BillingRepo) GetOrCreateWalletSummary(ctx context.Context, userID uint)
 	if err != nil {
 		return nil, err
 	}
-	return walletSummaryFromModel(wallet)
+	summary, err := walletSummaryFromModel(wallet)
+	if err != nil {
+		return nil, err
+	}
+	if err := r.populateSupplierFulfillmentMetrics(ctx, r.db.WithContext(ctx), userID, summary); err != nil {
+		return nil, err
+	}
+	return summary, nil
+}
+
+const supplierFulfillmentMetricsPrefix = `
+SELECT COUNT(*) AS allocation_count,
+       COALESCE(ROUND(
+           SUM(CASE
+               WHEN o.status NOT IN ('refunded', 'failed') AND (
+                   (o.service_mode = 'code' AND EXISTS (
+                       SELECT 1 FROM mailmatch_order_delivery_heads h WHERE h.order_id = o.id
+                   )) OR
+                   (o.service_mode = 'purchase' AND o.activated_at IS NOT NULL)
+               ) THEN 1 ELSE 0
+           END) * 100.0 / NULLIF(SUM(CASE
+               WHEN (o.status NOT IN ('refunded', 'failed') AND (
+                   (o.service_mode = 'code' AND EXISTS (
+                       SELECT 1 FROM mailmatch_order_delivery_heads h WHERE h.order_id = o.id
+                   )) OR
+                   (o.service_mode = 'purchase' AND o.activated_at IS NOT NULL)
+               )) OR
+               o.status IN ('refunded', 'failed', 'closed') OR
+               (o.receive_until IS NOT NULL AND o.receive_until <= ?)
+               THEN 1 ELSE 0
+           END), 0),
+           1
+       ), 0) AS fulfillment_success_rate
+FROM (`
+
+const supplierMicrosoftAllocationsSQL = `SELECT ma.order_no
+    FROM microsoft_allocations ma
+    WHERE ma.supplier_user_id = ? AND ma.supply_scope = 'public'`
+
+const supplierDomainAllocationsSQL = `SELECT da.order_no
+    FROM domain_allocations da
+    WHERE da.supplier_user_id = ? AND da.supply_scope = 'public'`
+
+const supplierGmailAllocationsSQL = `SELECT ga.order_no
+    FROM gmail_allocations ga
+    WHERE ga.source = 'local' AND ga.supplier_user_id = ? AND ga.supply_scope = 'public'`
+
+const supplierICloudAllocationsSQL = `SELECT ia.order_no
+    FROM icloud_allocations ia
+    WHERE ia.supplier_user_id = ? AND ia.supply_scope = 'public'`
+
+const supplierFulfillmentMetricsSuffix = `) allocations
+JOIN orders o ON o.order_no = allocations.order_no
+WHERE o.debit_tx_id IS NOT NULL
+  AND o.order_no NOT LIKE 'HIST-%'`
+
+func (r *BillingRepo) populateSupplierFulfillmentMetrics(ctx context.Context, db *gorm.DB, userID uint, summary *domain.WalletSummary) error {
+	if !r.hasSupplierAllocationSnapshots {
+		return nil
+	}
+	var metrics struct {
+		AllocationCount        int64   `gorm:"column:allocation_count"`
+		FulfillmentSuccessRate float64 `gorm:"column:fulfillment_success_rate"`
+	}
+	allocationQueries := []string{supplierMicrosoftAllocationsSQL, supplierDomainAllocationsSQL}
+	args := []any{time.Now().UTC(), userID, userID}
+	if r.hasGmailAllocations {
+		allocationQueries = append(allocationQueries, supplierGmailAllocationsSQL)
+		args = append(args, userID)
+	}
+	if r.hasICloudAllocations {
+		allocationQueries = append(allocationQueries, supplierICloudAllocationsSQL)
+		args = append(args, userID)
+	}
+	query := supplierFulfillmentMetricsPrefix + strings.Join(allocationQueries, "\nUNION ALL\n") + supplierFulfillmentMetricsSuffix
+	if err := db.WithContext(ctx).Raw(query, args...).Scan(&metrics).Error; err != nil {
+		return fmt.Errorf("load supplier fulfillment metrics: %w", err)
+	}
+	summary.SupplierAllocationCount = metrics.AllocationCount
+	summary.SupplierFulfillmentSuccessRate = metrics.FulfillmentSuccessRate
+	return nil
 }
 
 func walletSummaryFromModel(wallet WalletModel) (*domain.WalletSummary, error) {

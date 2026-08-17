@@ -16,14 +16,16 @@ type DailyCheckinResponse struct {
 }
 
 type WalletResponse struct {
-	UserID            uint      `json:"userId"`
-	ConsumerBalance   string    `json:"consumerBalance"`
-	SupplierAvailable string    `json:"supplierAvailable"`
-	SupplierFrozen    string    `json:"supplierFrozen"`
-	TotalRecharged    string    `json:"totalRecharged"`
-	HistoricalSpend   string    `json:"historicalSpend"`
-	OrderCount        int64     `json:"orderCount"`
-	UpdatedAt         time.Time `json:"updatedAt"`
+	UserID                         uint      `json:"userId"`
+	ConsumerBalance                string    `json:"consumerBalance"`
+	SupplierAvailable              string    `json:"supplierAvailable"`
+	SupplierFrozen                 string    `json:"supplierFrozen"`
+	TotalRecharged                 string    `json:"totalRecharged"`
+	HistoricalSpend                string    `json:"historicalSpend"`
+	OrderCount                     int64     `json:"orderCount"`
+	SupplierAllocationCount        int64     `json:"supplierAllocationCount"`
+	SupplierFulfillmentSuccessRate float64   `json:"supplierFulfillmentSuccessRate"`
+	UpdatedAt                      time.Time `json:"updatedAt"`
 }
 
 type WalletReferralResponse struct {

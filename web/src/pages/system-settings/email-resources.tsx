@@ -11,7 +11,7 @@ import type { SectionProps } from "./index";
 import { FormItem, FormLabel, SettingsCardHeader, SettingsFormGrid, SettingsInvalidValuesNotice, SettingsNumberField, SettingsSection } from "./settings-layout";
 import { EMAIL_RESOURCE_KEYS } from "./email-service-keys";
 const BYTES_PER_MB = 1024 * 1024;
-const NUMERIC_KEYS = EMAIL_RESOURCE_KEYS.filter((key) => key !== "microsoft_domain_whitelist" && key !== "icloud_forwarding_suffixes" && key !== "domain_custom_tlds");
+const NUMERIC_KEYS = EMAIL_RESOURCE_KEYS.filter((key) => key !== "microsoft_domain_whitelist" && key !== "icloud_forwarding_suffixes" && key !== "domain_custom_tlds" && key !== "domain_sale_tld_whitelist");
 
 export default function EmailResourceSection({ options, onBulkSave }: SectionProps) {
   const { t } = useTranslation();
@@ -31,6 +31,7 @@ export default function EmailResourceSection({ options, onBulkSave }: SectionPro
   const domains = tags("microsoft_domain_whitelist");
   const forwardingSuffixes = tags("icloud_forwarding_suffixes");
   const customTLDs = tags("domain_custom_tlds");
+  const saleTLDs = tags("domain_sale_tld_whitelist");
   const invalidKeys = invalidNumericKeys(form, NUMERIC_KEYS);
   const save = async () => {
     setSaving(true);
@@ -90,6 +91,15 @@ export default function EmailResourceSection({ options, onBulkSave }: SectionPro
         <TagInput aria-label={t("自定义 TLD")} value={customTLDs} separator={[",", "，", " ", "\n"]} allowDuplicates={false} addOnBlur showClear placeholder={t("输入 TLD 后回车")} onChange={(values) => update("domain_custom_tlds", values.map((value) => value.trim()).filter(Boolean).join(","))} style={{ width: "100%" }} />
         <p className="text-xs text-[var(--semi-color-text-2)]">{t("系统默认使用 Public Suffix List；这里仅填写需要人工补充的公共后缀，例如 edu.kg")}</p>
       </FormItem>
+      <FormItem spanFull>
+        <FormLabel>{t("域名出售 TLD 白名单")}</FormLabel>
+        <TagInput aria-label={t("域名出售 TLD 白名单")} value={saleTLDs} separator={[",", "，", " ", "\n"]} allowDuplicates={false} addOnBlur showClear placeholder={t("输入可出售 TLD 后回车")} onChange={(values) => update("domain_sale_tld_whitelist", values.map((value) => value.trim()).filter(Boolean).join(","))} style={{ width: "100%" }} />
+        <p className="text-xs text-[var(--semi-color-text-2)]">{t("普通用户仅可出售白名单后缀；支持 com、edu.kg 和 edu.*")}</p>
+      </FormItem>
+      <SettingsNumberField label={t("域名质量最小订单数")} description={t("统计窗口内订单数超过该值后才检查成功率")} value={number(form.domain_sale_quality_min_orders)} onChange={(value) => update("domain_sale_quality_min_orders", value)} min={1} max={1000000} />
+      <SettingsNumberField label={t("域名质量最低成功率（%）")} description={t("低于该比例时自动转为私有")} value={number(form.domain_sale_quality_min_success_percent)} onChange={(value) => update("domain_sale_quality_min_success_percent", value)} min={1} max={100} />
+      <SettingsNumberField label={t("域名质量统计窗口（小时）")} value={number(form.domain_sale_quality_window_hours)} onChange={(value) => update("domain_sale_quality_window_hours", value)} min={1} max={8760} />
+      <SettingsNumberField label={t("域名质量检查间隔（秒）")} value={number(form.domain_sale_quality_check_interval_seconds)} onChange={(value) => update("domain_sale_quality_check_interval_seconds", value)} min={1} max={86400} />
       <SettingsNumberField
         label={t("iCloud Cookie 保活间隔（分钟）")}
         description={t("Apple 会话通常约 15 分钟失效，建议保持为 8 分钟")}

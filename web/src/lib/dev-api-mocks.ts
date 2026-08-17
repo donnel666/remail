@@ -48,6 +48,8 @@ export const DEV_WALLET = {
   totalRecharged: "268.00",
   historicalSpend: "128.50",
   orderCount: 12,
+  supplierAllocationCount: 368,
+  supplierFulfillmentSuccessRate: 96.2,
   updatedAt: "2024-01-01T00:00:00Z",
 };
 

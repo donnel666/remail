@@ -64,10 +64,12 @@ type Wallet struct {
 }
 
 type WalletSummary struct {
-	Wallet          Wallet
-	TotalRecharged  string
-	HistoricalSpend string
-	OrderCount      int64
+	Wallet                         Wallet
+	TotalRecharged                 string
+	HistoricalSpend                string
+	OrderCount                     int64
+	SupplierAllocationCount        int64
+	SupplierFulfillmentSuccessRate float64
 }
 
 type ReferralSummary struct {

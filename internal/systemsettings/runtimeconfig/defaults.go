@@ -3,24 +3,35 @@ package runtimeconfig
 import "github.com/donnel666/remail/internal/systemsettings/domain"
 
 const (
-	DefaultSettingsCount                  = 243
-	SMSBowerNoCodeRefundTimeoutMinutesKey = "smsbower_no_code_refund_timeout_minutes"
-	MicrosoftPriceMultiplierKey           = "product_price_multiplier_microsoft"
-	GmailPriceMultiplierKey               = "product_price_multiplier_gmail"
-	ICloudPriceMultiplierKey              = "product_price_multiplier_icloud"
-	DomainPriceMultiplierKey              = "product_price_multiplier_domain"
-	ICloudForwardingSuffixesKey           = "icloud_forwarding_suffixes"
-	ICloudCookieKeepaliveMinutesKey       = "icloud_cookie_keepalive_minutes"
-	ICloudMailmatchScanLimitKey           = "icloud_mailmatch_scan_limit"
-	ICloudAdminReadLimitKey               = "icloud_admin_read_limit"
-	ICloudPhoneHourlySMSLimitKey          = "icloud_phone_hourly_sms_limit"
-	ICloudPhoneCooldownBaseSecondsKey     = "icloud_phone_cooldown_base_seconds"
-	ICloudPhoneCooldownMaxSecondsKey      = "icloud_phone_cooldown_max_seconds"
-	ICloudPhoneSendFailureThresholdKey    = "icloud_phone_send_failure_threshold"
-	ICloudPhoneBlacklistHoursKey          = "icloud_phone_blacklist_hours"
-	DefaultICloudMailmatchScanLimit       = 1000
-	DefaultICloudAdminReadLimit           = 5000
+	DefaultSettingsCount                         = 248
+	SMSBowerNoCodeRefundTimeoutMinutesKey        = "smsbower_no_code_refund_timeout_minutes"
+	MicrosoftPriceMultiplierKey                  = "product_price_multiplier_microsoft"
+	GmailPriceMultiplierKey                      = "product_price_multiplier_gmail"
+	ICloudPriceMultiplierKey                     = "product_price_multiplier_icloud"
+	DomainPriceMultiplierKey                     = "product_price_multiplier_domain"
+	ICloudForwardingSuffixesKey                  = "icloud_forwarding_suffixes"
+	ICloudCookieKeepaliveMinutesKey              = "icloud_cookie_keepalive_minutes"
+	ICloudMailmatchScanLimitKey                  = "icloud_mailmatch_scan_limit"
+	ICloudAdminReadLimitKey                      = "icloud_admin_read_limit"
+	ICloudPhoneHourlySMSLimitKey                 = "icloud_phone_hourly_sms_limit"
+	ICloudPhoneCooldownBaseSecondsKey            = "icloud_phone_cooldown_base_seconds"
+	ICloudPhoneCooldownMaxSecondsKey             = "icloud_phone_cooldown_max_seconds"
+	ICloudPhoneSendFailureThresholdKey           = "icloud_phone_send_failure_threshold"
+	ICloudPhoneBlacklistHoursKey                 = "icloud_phone_blacklist_hours"
+	DomainSaleTLDWhitelistKey                    = "domain_sale_tld_whitelist"
+	DomainSaleQualityMinOrdersKey                = "domain_sale_quality_min_orders"
+	DomainSaleQualityMinSuccessPercentKey        = "domain_sale_quality_min_success_percent"
+	DomainSaleQualityWindowHoursKey              = "domain_sale_quality_window_hours"
+	DomainSaleQualityCheckIntervalSecondsKey     = "domain_sale_quality_check_interval_seconds"
+	DefaultICloudMailmatchScanLimit              = 1000
+	DefaultICloudAdminReadLimit                  = 5000
+	DefaultDomainSaleQualityMinOrders            = 100
+	DefaultDomainSaleMinSuccessPercent           = 60
+	DefaultDomainSaleQualityWindowHours          = 1
+	DefaultDomainSaleQualityCheckIntervalSeconds = 30
 )
+
+const DefaultDomainSaleTLDWhitelist = "com,cn,net,org,info,biz,xyz,top,site,online,store,shop,club,me,io,co,cc,us,uk,de,fr,jp,kr,ca,au,nz,in,ai,app,dev,tech,cloud,live,world,vip,pro,name,mobi,tv,com.cn,net.cn,org.cn,gov.cn,com.hk,com.tw,co.uk,org.uk,me.uk,com.au,net.au,org.au,co.nz,co.jp,co.kr,co.in,co.za,edu,edu.kg,edu.*"
 
 // DefaultSettings is the single source of initial values for runtime-managed
 // settings. Startup inserts only keys that are not in storage.
@@ -121,6 +132,11 @@ var defaultSettings = []domain.Setting{
 	{Key: "icloud_phone_send_failure_threshold", Value: "3"},
 	{Key: "icloud_phone_blacklist_hours", Value: "24"},
 	{Key: "domain_custom_tlds", Value: ""},
+	{Key: "domain_sale_tld_whitelist", Value: DefaultDomainSaleTLDWhitelist},
+	{Key: "domain_sale_quality_min_orders", Value: "100"},
+	{Key: "domain_sale_quality_min_success_percent", Value: "60"},
+	{Key: "domain_sale_quality_window_hours", Value: "1"},
+	{Key: "domain_sale_quality_check_interval_seconds", Value: "30"},
 	{Key: "domain_max_subdomains_per_registrable_domain", Value: "3"},
 	{Key: "default_plus_daily_limit", Value: "10000"},
 	{Key: "default_mailbox_daily_limit", Value: "10000"},

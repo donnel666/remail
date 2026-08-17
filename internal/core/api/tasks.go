@@ -401,7 +401,7 @@ func StartResourceValidationDispatcher(ctx context.Context, module *CoreModule) 
 }
 
 func startResourceValidationDispatcher(ctx context.Context, module *CoreModule, interval, callTimeout time.Duration) func(context.Context) {
-	if module == nil || module.ValidationUseCase == nil {
+	if module == nil {
 		return func(context.Context) {}
 	}
 	if interval <= 0 {
@@ -413,6 +413,9 @@ func startResourceValidationDispatcher(ctx context.Context, module *CoreModule, 
 	ctx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	seedValidation := func() {
+		if module.ValidationUseCase == nil {
+			return
+		}
 		callCtx, callCancel := context.WithTimeout(ctx, callTimeout)
 		defer callCancel()
 		module.ValidationUseCase.ScheduleDispatcher(callCtx, 0)
@@ -428,6 +431,7 @@ func startResourceValidationDispatcher(ctx context.Context, module *CoreModule, 
 		}
 	}
 	seedValidation()
+	qualityDone := startDomainSaleQualityEnforcer(ctx, callTimeout, domainSaleQualityCheckInterval, module.EnforceDomainSaleQuality)
 	go func() {
 		defer close(done)
 		ticker := time.NewTicker(interval)
@@ -449,7 +453,71 @@ func startResourceValidationDispatcher(ctx context.Context, module *CoreModule, 
 		case <-done:
 		case <-shutdownCtx.Done():
 		}
+		select {
+		case <-qualityDone:
+		case <-shutdownCtx.Done():
+		}
 	}
+}
+
+func domainSaleQualityCheckInterval() time.Duration {
+	return runtimeconfig.Duration(
+		runtimeconfig.DomainSaleQualityCheckIntervalSecondsKey,
+		time.Duration(runtimeconfig.DefaultDomainSaleQualityCheckIntervalSeconds)*time.Second,
+		time.Second,
+		1,
+	)
+}
+
+func startDomainSaleQualityEnforcer(
+	ctx context.Context,
+	callTimeout time.Duration,
+	interval func() time.Duration,
+	enforce func(context.Context) (int, error),
+) <-chan struct{} {
+	done := make(chan struct{})
+	if enforce == nil {
+		close(done)
+		return done
+	}
+	if callTimeout <= 0 {
+		callTimeout = backgroundLegacyReleaseTimeout
+	}
+	if interval == nil {
+		interval = domainSaleQualityCheckInterval
+	}
+	run := func() {
+		callCtx, cancel := context.WithTimeout(ctx, callTimeout)
+		defer cancel()
+		affected, err := enforce(callCtx)
+		if err != nil {
+			slog.Warn("domain sale quality enforcement failed", "error", err)
+		} else if affected > 0 {
+			slog.Info("low-quality domains converted to private", "affected", affected)
+		}
+	}
+	nextInterval := func() time.Duration {
+		if next := interval(); next > 0 {
+			return next
+		}
+		return time.Duration(runtimeconfig.DefaultDomainSaleQualityCheckIntervalSeconds) * time.Second
+	}
+	run()
+	go func() {
+		defer close(done)
+		timer := time.NewTimer(nextInterval())
+		defer timer.Stop()
+		for {
+			select {
+			case <-timer.C:
+				run()
+				timer.Reset(nextInterval())
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return done
 }
 
 func isFinalAttempt(ctx context.Context) bool {

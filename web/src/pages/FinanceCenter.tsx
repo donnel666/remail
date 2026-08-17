@@ -15,6 +15,8 @@ import {
 } from "@douyinfe/semi-ui";
 import {
   ArrowRightLeft,
+  BadgeCheck,
+  Boxes,
   CircleDollarSign,
   RefreshCw,
   Snowflake,
@@ -514,13 +516,29 @@ export default function FinanceCenter() {
             </div>
           }
         >
-          <MetricRow
-            color="blue"
-            icon={<Wallet size={16} />}
-            label={t("User wallet")}
-            loading={walletLoading}
-            value={formatPoints(wallet?.consumerBalance)}
-          />
+          <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-1">
+            <MetricRow
+              color="blue"
+              icon={<Wallet size={16} />}
+              label={t("User wallet")}
+              loading={walletLoading}
+              value={formatPoints(wallet?.consumerBalance)}
+            />
+            <MetricRow
+              color="cyan"
+              icon={<Boxes size={16} />}
+              label={t("Allocation count")}
+              loading={walletLoading}
+              value={String(wallet?.supplierAllocationCount ?? 0)}
+            />
+            <MetricRow
+              color="green"
+              icon={<BadgeCheck size={16} />}
+              label={t("Order fulfillment success rate")}
+              loading={walletLoading}
+              value={`${wallet?.supplierFulfillmentSuccessRate ?? 0}%`}
+            />
+          </div>
         </Card>
       </div>
 

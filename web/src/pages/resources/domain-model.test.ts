@@ -29,6 +29,8 @@ describe("toDomainResource", () => {
       status: "normal",
       lastSafeError: undefined,
       mailboxCount: 2,
+      orderCount: 0,
+      successfulOrderCount: 0,
       createdAt: "2026-07-15T00:00:00Z",
     });
   });
