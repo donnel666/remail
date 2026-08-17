@@ -3931,6 +3931,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/icloud/resources/{resourceId}/icloud-activation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fetch the old iCloud V2 Cookie after iCloud was enabled manually
+         * @description Queues the existing durable Cookie-refresh workflow from the iCloud login stage. The resource is marked as iCloud-opened only after Apple returns a usable old V2 Cookie. Requires a permanent eSIM phone binding, complete stored Apple credentials, and no active Cookie-refresh task.
+         */
+        post: operations["postAdminICloudResourceActivateICloud"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/icloud/resources/{resourceId}/enable": {
         parameters: {
             query?: never;
@@ -5630,6 +5650,9 @@ export interface components {
             totalRecharged: components["schemas"]["NonNegativeLedgerAmount"];
             historicalSpend: components["schemas"]["NonNegativeLedgerAmount"];
             orderCount: number;
+            supplierAllocationCount: number;
+            /** Format: double */
+            supplierFulfillmentSuccessRate: number;
             /** Format: date-time */
             updatedAt: string;
         };
@@ -6789,6 +6812,10 @@ export interface components {
             purpose?: "not_sale" | "sale" | "binding";
             /** @description Generated-mailbox count for ordinary domain resources; active Microsoft auxiliary-binding count for purpose=binding domains. */
             mailboxCount?: number;
+            /** @description Domain orders created within the configured rolling quality window. */
+            orderCount?: number;
+            /** @description Successfully fulfilled domain orders within the configured rolling quality window. */
+            successfulOrderCount?: number;
             /** Format: date-time */
             lastAllocatedAt?: string | null;
             /** Format: date-time */
@@ -7687,6 +7714,10 @@ export interface components {
             status: "pending" | "validating" | "normal" | "abnormal" | "disabled" | "deleted";
             /** @description Generated-mailbox count for ordinary domains; active Microsoft auxiliary-binding count for purpose=binding domains. */
             mailboxCount: number;
+            /** @description Domain orders created within the configured rolling quality window. */
+            orderCount: number;
+            /** @description Successfully fulfilled domain orders within the configured rolling quality window. */
+            successfulOrderCount: number;
             lastSafeError?: string;
             /** Format: date-time */
             lastAllocatedAt?: string | null;
@@ -8396,7 +8427,7 @@ export interface components {
             removed: number;
         };
         /** @enum {string} */
-        AdminTaskKind: "import" | "validation" | "alias" | "token" | "fetch" | "history" | "bulk_validation" | "bulk_alias" | "bulk_history" | "bulk_token" | "bulk_publish" | "bulk_unpublish" | "bulk_delete";
+        AdminTaskKind: "import" | "validation" | "alias" | "token" | "refresh" | "fetch" | "history" | "bulk_validation" | "bulk_alias" | "bulk_history" | "bulk_token" | "bulk_publish" | "bulk_unpublish" | "bulk_delete";
         /** @enum {string} */
         AdminTaskStatus: "queued" | "running" | "succeeded" | "failed" | "uncertain" | "canceled";
         /** @enum {string} */
@@ -8418,7 +8449,7 @@ export interface components {
             taskId: string;
             kind: components["schemas"]["AdminTaskKind"];
             status: components["schemas"]["AdminTaskStatus"];
-            /** @description Credential revision fixed when a token or fetch task was submitted; null for tasks that do not read credentials. */
+            /** @description Credential revision fixed when a token, fetch, or refresh task was submitted; null for tasks that do not read credentials. */
             credentialRevision: number | null;
             /** Format: date-time */
             updatedAt: string;
@@ -21928,6 +21959,42 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    postAdminICloudResourceActivateICloud: {
+        parameters: {
+            query: {
+                /** @description Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write. */
+                version: components["parameters"]["ExpectedAdminResourceVersion"];
+            };
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op. */
+                "Idempotency-Key": components["parameters"]["AdminStateCommandIdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Durable old Cookie refresh queued */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudMutationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     postAdminICloudResourceEnable: {
         parameters: {
             query: {
@@ -22235,8 +22302,8 @@ export interface operations {
                 bizType: "microsoft_resource" | "gmail_resource" | "icloud_resource" | "domain_resource" | "icloud_resource_import";
                 /** @description Resource ID matching bizType. Omit only when listing iCloud imports globally. */
                 bizId?: number;
-                /** @description Optional normalized task source. Use `icloud_onboarding` to list recoverable Apple onboarding batches without unrelated iCloud imports consuming the page. */
-                source?: "import" | "alias" | "alias_schedule" | "token" | "fetch" | "resource_history" | "bulk" | "gmail_validation" | "gmail_history" | "icloud_import" | "icloud_onboarding" | "icloud_validation";
+                /** @description Optional normalized task source. Use `icloud_onboarding` to list recoverable Apple onboarding batches without unrelated iCloud imports consuming the page; `icloud_refresh` identifies resource-level Cookie refresh tasks. */
+                source?: "import" | "alias" | "alias_schedule" | "token" | "fetch" | "resource_history" | "bulk" | "gmail_validation" | "gmail_history" | "icloud_import" | "icloud_onboarding" | "icloud_refresh" | "icloud_validation";
                 kind?: components["schemas"]["AdminTaskKind"];
                 status?: components["schemas"]["AdminTaskStatus"];
                 offset?: number;

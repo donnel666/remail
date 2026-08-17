@@ -718,16 +718,16 @@ func (e AdminICloudOnboardingTaskStatus) Valid() bool {
 
 // Defines values for AdminICloudOnboardingTaskTaskKind.
 const (
-	Onboarding AdminICloudOnboardingTaskTaskKind = "onboarding"
-	Refresh    AdminICloudOnboardingTaskTaskKind = "refresh"
+	AdminICloudOnboardingTaskTaskKindOnboarding AdminICloudOnboardingTaskTaskKind = "onboarding"
+	AdminICloudOnboardingTaskTaskKindRefresh    AdminICloudOnboardingTaskTaskKind = "refresh"
 )
 
 // Valid indicates whether the value is a known member of the AdminICloudOnboardingTaskTaskKind enum.
 func (e AdminICloudOnboardingTaskTaskKind) Valid() bool {
 	switch e {
-	case Onboarding:
+	case AdminICloudOnboardingTaskTaskKindOnboarding:
 		return true
-	case Refresh:
+	case AdminICloudOnboardingTaskTaskKindRefresh:
 		return true
 	default:
 		return false
@@ -1575,6 +1575,7 @@ const (
 	AdminTaskKindFetch          AdminTaskKind = "fetch"
 	AdminTaskKindHistory        AdminTaskKind = "history"
 	AdminTaskKindImport         AdminTaskKind = "import"
+	AdminTaskKindRefresh        AdminTaskKind = "refresh"
 	AdminTaskKindToken          AdminTaskKind = "token"
 	AdminTaskKindValidation     AdminTaskKind = "validation"
 )
@@ -1603,6 +1604,8 @@ func (e AdminTaskKind) Valid() bool {
 	case AdminTaskKindHistory:
 		return true
 	case AdminTaskKindImport:
+		return true
+	case AdminTaskKindRefresh:
 		return true
 	case AdminTaskKindToken:
 		return true
@@ -4401,6 +4404,7 @@ const (
 	GmailValidation  GetAdminTasksParamsSource = "gmail_validation"
 	IcloudImport     GetAdminTasksParamsSource = "icloud_import"
 	IcloudOnboarding GetAdminTasksParamsSource = "icloud_onboarding"
+	IcloudRefresh    GetAdminTasksParamsSource = "icloud_refresh"
 	IcloudValidation GetAdminTasksParamsSource = "icloud_validation"
 	Import           GetAdminTasksParamsSource = "import"
 	ResourceHistory  GetAdminTasksParamsSource = "resource_history"
@@ -4425,6 +4429,8 @@ func (e GetAdminTasksParamsSource) Valid() bool {
 	case IcloudImport:
 		return true
 	case IcloudOnboarding:
+		return true
+	case IcloudRefresh:
 		return true
 	case IcloudValidation:
 		return true
@@ -4960,16 +4966,16 @@ func (e GetTicketsParamsStatus) Valid() bool {
 
 // Defines values for GetWalletTransactionsParamsScope.
 const (
-	GetWalletTransactionsParamsScopeAll  GetWalletTransactionsParamsScope = "all"
-	GetWalletTransactionsParamsScopeMine GetWalletTransactionsParamsScope = "mine"
+	All  GetWalletTransactionsParamsScope = "all"
+	Mine GetWalletTransactionsParamsScope = "mine"
 )
 
 // Valid indicates whether the value is a known member of the GetWalletTransactionsParamsScope enum.
 func (e GetWalletTransactionsParamsScope) Valid() bool {
 	switch e {
-	case GetWalletTransactionsParamsScopeAll:
+	case All:
 		return true
-	case GetWalletTransactionsParamsScopeMine:
+	case Mine:
 		return true
 	default:
 		return false
@@ -5501,15 +5507,21 @@ type AdminDomainItem struct {
 	MailServerId    int        `json:"mailServerId"`
 
 	// MailboxCount Generated-mailbox count for ordinary domains; active Microsoft auxiliary-binding count for purpose=binding domains.
-	MailboxCount  int                      `json:"mailboxCount"`
+	MailboxCount int `json:"mailboxCount"`
+
+	// OrderCount Domain orders created within the configured rolling quality window.
+	OrderCount    int                      `json:"orderCount"`
 	OwnerEmail    openapi_types.Email      `json:"ownerEmail"`
 	OwnerId       int                      `json:"ownerId"`
 	OwnerNickname string                   `json:"ownerNickname"`
 	OwnerRole     AdminDomainItemOwnerRole `json:"ownerRole"`
 	Purpose       AdminDomainItemPurpose   `json:"purpose"`
 	Status        AdminDomainItemStatus    `json:"status"`
-	UpdatedAt     time.Time                `json:"updatedAt"`
-	Version       int                      `json:"version"`
+
+	// SuccessfulOrderCount Successfully fulfilled domain orders within the configured rolling quality window.
+	SuccessfulOrderCount int       `json:"successfulOrderCount"`
+	UpdatedAt            time.Time `json:"updatedAt"`
+	Version              int       `json:"version"`
 }
 
 // AdminDomainItemOwnerRole defines model for AdminDomainItem.OwnerRole.
@@ -7121,7 +7133,7 @@ type AdminTaskStatus string
 
 // AdminTaskSummary defines model for AdminTaskSummary.
 type AdminTaskSummary struct {
-	// CredentialRevision Credential revision fixed when a token or fetch task was submitted; null for tasks that do not read credentials.
+	// CredentialRevision Credential revision fixed when a token, fetch, or refresh task was submitted; null for tasks that do not read credentials.
 	CredentialRevision *int            `json:"credentialRevision"`
 	Kind               AdminTaskKind   `json:"kind"`
 	Status             AdminTaskStatus `json:"status"`
@@ -9635,15 +9647,21 @@ type ResourceItem struct {
 
 	// MailboxCount Generated-mailbox count for ordinary domain resources; active Microsoft auxiliary-binding count for purpose=binding domains.
 	MailboxCount *int `json:"mailboxCount,omitempty"`
-	OwnerId      int  `json:"ownerId"`
+
+	// OrderCount Domain orders created within the configured rolling quality window.
+	OrderCount *int `json:"orderCount,omitempty"`
+	OwnerId    int  `json:"ownerId"`
 
 	// Purpose Domain resource purpose (domain resources only; not_sale means user-side private/unavailable for sale, binding is displayed as auxiliary mailbox in Chinese)
 	Purpose *ResourceItemPurpose `json:"purpose,omitempty"`
 
 	// Status Resource status (pending waits for validation assignment; validating has a live Redis/Asynq validation assignment; identifying waits for Microsoft project-history identification).
-	Status    *string   `json:"status,omitempty"`
-	Type      string    `json:"type"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	Status *string `json:"status,omitempty"`
+
+	// SuccessfulOrderCount Successfully fulfilled domain orders within the configured rolling quality window.
+	SuccessfulOrderCount *int      `json:"successfulOrderCount,omitempty"`
+	Type                 string    `json:"type"`
+	UpdatedAt            time.Time `json:"updatedAt"`
 }
 
 // ResourceItemPurpose Domain resource purpose (domain resources only; not_sale means user-side private/unavailable for sale, binding is displayed as auxiliary mailbox in Chinese)
@@ -10098,14 +10116,16 @@ type WalletResponse struct {
 	ConsumerBalance NonNegativeLedgerAmount `json:"consumerBalance"`
 
 	// HistoricalSpend Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
-	HistoricalSpend NonNegativeLedgerAmount `json:"historicalSpend"`
-	OrderCount      int                     `json:"orderCount"`
+	HistoricalSpend         NonNegativeLedgerAmount `json:"historicalSpend"`
+	OrderCount              int                     `json:"orderCount"`
+	SupplierAllocationCount int                     `json:"supplierAllocationCount"`
 
 	// SupplierAvailable Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	SupplierAvailable NonNegativeLedgerAmount `json:"supplierAvailable"`
 
 	// SupplierFrozen Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
-	SupplierFrozen NonNegativeLedgerAmount `json:"supplierFrozen"`
+	SupplierFrozen                 NonNegativeLedgerAmount `json:"supplierFrozen"`
+	SupplierFulfillmentSuccessRate float64                 `json:"supplierFulfillmentSuccessRate"`
 
 	// TotalRecharged Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	TotalRecharged NonNegativeLedgerAmount `json:"totalRecharged"`
@@ -10959,6 +10979,18 @@ type PostAdminICloudResourceEnableParams struct {
 	IdempotencyKey AdminStateCommandIdempotencyKey `json:"Idempotency-Key"`
 }
 
+// PostAdminICloudResourceActivateICloudParams defines parameters for PostAdminICloudResourceActivateICloud.
+type PostAdminICloudResourceActivateICloudParams struct {
+	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
+	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op.
+	IdempotencyKey AdminStateCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
 // PostAdminICloudResourcePublishParams defines parameters for PostAdminICloudResourcePublish.
 type PostAdminICloudResourcePublishParams struct {
 	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
@@ -11790,7 +11822,7 @@ type GetAdminTasksParams struct {
 	// BizId Resource ID matching bizType. Omit only when listing iCloud imports globally.
 	BizId *int `form:"bizId,omitempty" json:"bizId,omitempty"`
 
-	// Source Optional normalized task source. Use `icloud_onboarding` to list recoverable Apple onboarding batches without unrelated iCloud imports consuming the page.
+	// Source Optional normalized task source. Use `icloud_onboarding` to list recoverable Apple onboarding batches without unrelated iCloud imports consuming the page; `icloud_refresh` identifies resource-level Cookie refresh tasks.
 	Source *GetAdminTasksParamsSource `form:"source,omitempty" json:"source,omitempty"`
 	Kind   *AdminTaskKind             `form:"kind,omitempty" json:"kind,omitempty"`
 	Status *AdminTaskStatus           `form:"status,omitempty" json:"status,omitempty"`
@@ -13968,6 +14000,9 @@ type ServerInterface interface {
 	// Enable one disabled iCloud resource and queue validation
 	// (POST /v1/admin/icloud/resources/{resourceId}/enable)
 	PostAdminICloudResourceEnable(c *gin.Context, resourceId int, params PostAdminICloudResourceEnableParams)
+	// Fetch the old iCloud V2 Cookie after iCloud was enabled manually
+	// (POST /v1/admin/icloud/resources/{resourceId}/icloud-activation)
+	PostAdminICloudResourceActivateICloud(c *gin.Context, resourceId int, params PostAdminICloudResourceActivateICloudParams)
 	// Publish one iCloud resource for public supply
 	// (POST /v1/admin/icloud/resources/{resourceId}/publish)
 	PostAdminICloudResourcePublish(c *gin.Context, resourceId int, params PostAdminICloudResourcePublishParams)
@@ -20006,6 +20041,90 @@ func (siw *ServerInterfaceWrapper) PostAdminICloudResourceEnable(c *gin.Context)
 	}
 
 	siw.Handler.PostAdminICloudResourceEnable(c, resourceId, params)
+}
+
+// PostAdminICloudResourceActivateICloud operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminICloudResourceActivateICloud(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminICloudResourceActivateICloudParams
+
+	// ------------- Required query parameter "version" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "version", c.Request.URL.Query(), &params.Version, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter version: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminStateCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminICloudResourceActivateICloud(c, resourceId, params)
 }
 
 // PostAdminICloudResourcePublish operation middleware
@@ -31988,6 +32107,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/aliases", wrapper.PostAdminICloudResourceCreateAliases)
 	router.POST(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/disable", wrapper.PostAdminICloudResourceDisable)
 	router.POST(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/enable", wrapper.PostAdminICloudResourceEnable)
+	router.POST(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/icloud-activation", wrapper.PostAdminICloudResourceActivateICloud)
 	router.POST(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/publish", wrapper.PostAdminICloudResourcePublish)
 	router.POST(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/recover", wrapper.PostAdminICloudResourceRecover)
 	router.POST(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/unpublish", wrapper.PostAdminICloudResourceUnpublish)

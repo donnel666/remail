@@ -242,7 +242,7 @@ func TestImportSyncListAndMessages(t *testing.T) {
 			records := []map[string]any{}
 			if r.URL.Query().Get("status") == "1" {
 				records = append(records, map[string]any{
-					"id": "order-id-77", "orderNo": "ORDER-77", "phoneCode": "86", "phoneNumber": "13600000000",
+					"id": "order-id-77", "orderNo": "ORDER-77", "phoneCode": "1", "phoneNumber": "15488768536",
 					"autoRenew": 1, "createTime": "2026-08-16 09:00:00", "expireTime": "2026-09-16 09:00:00",
 				})
 			}
@@ -305,7 +305,7 @@ func TestImportSyncListAndMessages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(list.Items) != 1 || list.Items[0].PhoneID == nil || list.Items[0].PhoneNumber != "+86 13600000000" || list.Items[0].Status != AdminPhoneActive || !list.Items[0].AutoRenew || !list.Items[0].TokenAvailable || list.Items[0].SyncStatus != SyncTaskSucceeded {
+	if len(list.Items) != 1 || list.Items[0].PhoneID == nil || list.Items[0].PhoneNumber != "+1 5488768536" || list.Items[0].Status != AdminPhoneActive || !list.Items[0].AutoRenew || !list.Items[0].TokenAvailable || list.Items[0].SyncStatus != SyncTaskSucceeded {
 		t.Fatalf("unexpected phone list: %+v", list.Items)
 	}
 	encodedList, err := json.Marshal(list)

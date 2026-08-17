@@ -322,8 +322,23 @@ func smsPhoneBinding(phone phoneModel, source string) SMSPhoneBinding {
 }
 
 func samePhoneDigits(binding SMSPhoneBinding, requested string) bool {
-	number := phoneDigits(binding.PhoneNumber)
-	return number == requested || phoneDigits(binding.PhoneCode+binding.PhoneNumber) == requested
+	code, number := phoneNumberParts(binding.PhoneCode, binding.PhoneNumber)
+	return number == requested || code+number == requested
+}
+
+func formatPhoneNumber(phoneCode, phoneNumber string) string {
+	code, number := phoneNumberParts(phoneCode, phoneNumber)
+	if code == "" {
+		return number
+	}
+	return "+" + code + " " + number
+}
+
+func phoneNumberParts(phoneCode, phoneNumber string) (string, string) {
+	code := phoneDigits(phoneCode)
+	number := phoneDigits(phoneNumber)
+	// Kitesim mixes full numbers and local numbers; a repeated phoneCode belongs to the upstream full number.
+	return code, strings.TrimPrefix(number, code)
 }
 
 func phoneDigits(value string) string {

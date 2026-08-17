@@ -21,6 +21,7 @@ vi.mock("./idempotency", () => ({
 }));
 
 import {
+  activateAdminICloudResource,
   batchAdminICloudResourcesByFilter,
   batchAdminICloudResourcesByIds,
   confirmAdminICloudOnboardingFamilyReset,
@@ -569,6 +570,29 @@ describe("admin iCloud API adapter", () => {
           query: { version: 4 },
         }),
       }),
+    );
+  });
+
+  it("queues the durable old Cookie refresh command", async () => {
+    apiMocks.POST.mockResolvedValueOnce({
+      data: { resourceId: 7, version: 5, status: "normal", forSale: false, changed: true },
+    });
+
+    await activateAdminICloudResource(7, 4);
+
+    expect(apiMocks.POST).toHaveBeenCalledWith(
+      "/v1/admin/icloud/resources/{resourceId}/icloud-activation",
+      {
+        params: {
+          header: {
+            "X-CSRF-Token": "admin-csrf",
+            "Idempotency-Key": "icloud-command-1",
+          },
+          path: { resourceId: 7 },
+          query: { version: 4 },
+        },
+        signal: undefined,
+      },
     );
   });
 

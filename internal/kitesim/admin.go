@@ -361,12 +361,9 @@ a.last_safe_error, a.last_synced_at, a.created_at AS account_created`).
 		if row.PhoneNumber != nil {
 			code := ""
 			if row.PhoneCode != nil {
-				code = strings.TrimPrefix(strings.TrimSpace(*row.PhoneCode), "+")
+				code = *row.PhoneCode
 			}
-			item.PhoneNumber = strings.TrimSpace(*row.PhoneNumber)
-			if code != "" {
-				item.PhoneNumber = "+" + code + " " + item.PhoneNumber
-			}
+			item.PhoneNumber = formatPhoneNumber(code, *row.PhoneNumber)
 		}
 		items = append(items, item)
 	}

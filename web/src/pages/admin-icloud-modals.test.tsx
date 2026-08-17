@@ -14,6 +14,7 @@ import type {
 } from "@/lib/admin-icloud-api";
 
 const mocks = vi.hoisted(() => ({
+  activate: vi.fn(),
   alias: vi.fn(),
   batchByFilter: vi.fn(),
   batchByIds: vi.fn(),
@@ -105,11 +106,11 @@ vi.mock("@douyinfe/semi-ui", async () => {
       type="checkbox"
     />
   );
-  const TextArea = ({ onChange, placeholder, value }: any) => (
+  const TextArea = ({ onChange, ...props }: any) => (
     <textarea
       onChange={(event) => onChange?.(event.target.value)}
-      placeholder={placeholder}
-      value={value ?? ""}
+      {...props}
+      value={props.value ?? ""}
     />
   );
   const TabPane = () => null;
@@ -185,6 +186,7 @@ vi.mock("@/hooks/use-is-mobile", () => ({ useIsMobile: () => false }));
 vi.mock("@/hooks/use-shared-page-size", () => ({ useSharedPageSize: () => [20, vi.fn()] }));
 vi.mock("@/lib/admin-icloud-api", async (importOriginal) => ({
   ...(await importOriginal<any>()),
+  activateAdminICloudResource: mocks.activate,
   batchAdminICloudResourcesByFilter: mocks.batchByFilter,
   batchAdminICloudResourcesByIds: mocks.batchByIds,
   confirmAdminICloudOnboardingFamilyReset: mocks.confirmFamilyReset,
@@ -408,6 +410,7 @@ describe("admin iCloud modal workflows", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.permissions = {};
+    mocks.activate.mockResolvedValue({ changed: true, version: 4 });
     mocks.alias.mockResolvedValue({ changed: true });
     mocks.createPreparation.mockResolvedValue(importPreparation());
     mocks.confirmFamilyReset.mockResolvedValue(onboardingTask());
@@ -457,6 +460,23 @@ describe("admin iCloud modal workflows", () => {
     await waitFor(() => expect(mocks.alias).toHaveBeenCalledWith(41, 3));
     expect(mocks.validate).not.toHaveBeenCalled();
     expect(mocks.toastSuccess).toHaveBeenCalledWith("Alias creation batch submitted.");
+  });
+
+  it("queues an old Cookie refresh after iCloud is enabled manually", async () => {
+    render(
+      <ICloudMaintenanceModal
+        aliasLimit={750}
+        onCancel={vi.fn()}
+        onCompleted={vi.fn()}
+        target={{ item: { ...resource(), icloudOpened: false }, mode: "row" }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Fetch old Cookie/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Submit maintenance task" }));
+
+    await waitFor(() => expect(mocks.activate).toHaveBeenCalledWith(41, 3));
+    expect(mocks.toastSuccess).toHaveBeenCalledWith("Old Cookie refresh submitted.");
   });
 
   it("hides fact-owner tabs when their read permissions are missing", () => {
@@ -935,6 +955,41 @@ describe("admin iCloud modal workflows", () => {
     expect(mocks.getPreparation).not.toHaveBeenCalled();
   });
 
+  it("pastes Apple account entries and starts onboarding", async () => {
+    const onChanged = vi.fn();
+    render(
+      <ICloudOnboardingModal
+        canOperate
+        canReadTasks
+        onCancel={vi.fn()}
+        onChanged={onChanged}
+        owners={[owner]}
+        visible
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByLabelText("owner")).toHaveValue("7"));
+    const content =
+      "美国区----是----primary@example.test----not-a-real-password----answer-1----answer-2----answer-3----2000-11-02--------https://example.test/family/invite";
+    expect(screen.getByRole("button", { name: "Manual input" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    fireEvent.change(screen.getByLabelText("iCloud resource entries"), {
+      target: { value: content },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Start onboarding" }));
+
+    await waitFor(() =>
+      expect(mocks.importOnboarding).toHaveBeenCalledWith({
+        content,
+        expireAt: expect.any(String),
+        ownerId: 7,
+      }),
+    );
+    expect(onChanged).toHaveBeenCalledTimes(1);
+  });
+
   it("uploads an Apple account TXT file and starts onboarding", async () => {
     const onChanged = vi.fn();
     render(
@@ -953,6 +1008,7 @@ describe("admin iCloud modal workflows", () => {
       "美国区----是----primary@example.test----not-a-real-password----answer-1----answer-2----answer-3----2000-11-02--------https://example.test/family/invite";
     const file = new File([content], "apple-accounts.txt", { type: "text/plain" });
     Object.defineProperty(file, "text", { value: vi.fn().mockResolvedValue(content) });
+    fireEvent.click(screen.getByRole("button", { name: "TXT file" }));
     fireEvent.change(screen.getByLabelText("Apple account TXT file"), {
       target: { files: [file] },
     });

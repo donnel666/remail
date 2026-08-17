@@ -11167,6 +11167,44 @@ paths:
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 
+  /v1/admin/icloud/resources/{resourceId}/icloud-activation:
+    post:
+      operationId: postAdminICloudResourceActivateICloud
+      summary: Fetch the old iCloud V2 Cookie after iCloud was enabled manually
+      description: Queues the existing durable Cookie-refresh workflow from the iCloud login stage. The resource is marked as iCloud-opened only after Apple returns a usable old V2 Cookie. Requires a permanent eSIM phone binding, complete stored Apple credentials, and no active Cookie-refresh task.
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/ExpectedAdminResourceVersion"
+        - $ref: "#/components/parameters/AdminStateCommandIdempotencyKey"
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "202":
+          description: Durable old Cookie refresh queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudMutationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
   /v1/admin/icloud/resources/{resourceId}/enable:
     post:
       operationId: postAdminICloudResourceEnable
@@ -11555,10 +11593,10 @@ paths:
             minimum: 1
         - name: source
           in: query
-          description: Optional normalized task source. Use `icloud_onboarding` to list recoverable Apple onboarding batches without unrelated iCloud imports consuming the page.
+          description: Optional normalized task source. Use `icloud_onboarding` to list recoverable Apple onboarding batches without unrelated iCloud imports consuming the page; `icloud_refresh` identifies resource-level Cookie refresh tasks.
           schema:
             type: string
-            enum: [import, alias, alias_schedule, token, fetch, resource_history, bulk, gmail_validation, gmail_history, icloud_import, icloud_onboarding, icloud_validation]
+            enum: [import, alias, alias_schedule, token, fetch, resource_history, bulk, gmail_validation, gmail_history, icloud_import, icloud_onboarding, icloud_refresh, icloud_validation]
         - name: kind
           in: query
           schema:
@@ -15098,6 +15136,8 @@ components:
         - totalRecharged
         - historicalSpend
         - orderCount
+        - supplierAllocationCount
+        - supplierFulfillmentSuccessRate
         - updatedAt
       properties:
         userId:
@@ -15114,6 +15154,14 @@ components:
           $ref: "#/components/schemas/NonNegativeLedgerAmount"
         orderCount:
           type: integer
+        supplierAllocationCount:
+          type: integer
+          minimum: 0
+        supplierFulfillmentSuccessRate:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
         updatedAt:
           type: string
           format: date-time
@@ -18209,6 +18257,14 @@ components:
         mailboxCount:
           type: integer
           description: Generated-mailbox count for ordinary domain resources; active Microsoft auxiliary-binding count for purpose=binding domains.
+        orderCount:
+          type: integer
+          minimum: 0
+          description: Domain orders created within the configured rolling quality window.
+        successfulOrderCount:
+          type: integer
+          minimum: 0
+          description: Successfully fulfilled domain orders within the configured rolling quality window.
         lastAllocatedAt:
           type: string
           format: date-time
@@ -20348,6 +20404,8 @@ components:
         - allowNewBindings
         - status
         - mailboxCount
+        - orderCount
+        - successfulOrderCount
         - createdAt
         - updatedAt
       properties:
@@ -20386,6 +20444,14 @@ components:
           type: integer
           minimum: 0
           description: Generated-mailbox count for ordinary domains; active Microsoft auxiliary-binding count for purpose=binding domains.
+        orderCount:
+          type: integer
+          minimum: 0
+          description: Domain orders created within the configured rolling quality window.
+        successfulOrderCount:
+          type: integer
+          minimum: 0
+          description: Successfully fulfilled domain orders within the configured rolling quality window.
         lastSafeError:
           type: string
         lastAllocatedAt:
@@ -22068,6 +22134,7 @@ components:
         - validation
         - alias
         - token
+        - refresh
         - fetch
         - history
         - bulk_validation
@@ -22140,7 +22207,7 @@ components:
           type: integer
           minimum: 0
           nullable: true
-          description: Credential revision fixed when a token or fetch task was submitted; null for tasks that do not read credentials.
+          description: Credential revision fixed when a token, fetch, or refresh task was submitted; null for tasks that do not read credentials.
         updatedAt:
           type: string
           format: date-time

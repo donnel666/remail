@@ -95,12 +95,7 @@ func (o *PhoneOrder) UnmarshalJSON(data []byte) error {
 }
 
 func (o PhoneOrder) FullPhoneNumber() string {
-	code := strings.TrimPrefix(strings.TrimSpace(string(o.PhoneCode)), "+")
-	number := strings.TrimSpace(o.PhoneNumber)
-	if code == "" {
-		return number
-	}
-	return "+" + code + " " + number
+	return formatPhoneNumber(string(o.PhoneCode), o.PhoneNumber)
 }
 
 type Message struct {

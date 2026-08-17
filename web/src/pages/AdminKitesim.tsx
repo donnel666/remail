@@ -148,6 +148,10 @@ function formatMoney(currency?: string, value?: string) {
   return [currency, value].filter(Boolean).join(" ");
 }
 
+function phoneCopyContent(value: string) {
+  return value.replace(/^\+\d+\s+/, "");
+}
+
 function statusTag(status: AdminKitesimPhoneStatus, error: string | undefined, t: (key: string) => string) {
   const tag = (
     <Tag color={STATUS_META[status].color} shape="circle">
@@ -480,7 +484,7 @@ export function KitesimMessagesPanel({ item }: { item: AdminKitesimPhoneItem }) 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <CopyableTableText copiedText={t("Copied")} text={item.phoneNumber} />
+        <CopyableTableText copiedText={t("Copied")} copyContent={phoneCopyContent(item.phoneNumber)} text={item.phoneNumber} />
         <Button loading={loading} onClick={() => void load()} size="small" type="tertiary">
           {t("Refresh")}
         </Button>
@@ -712,7 +716,7 @@ function KitesimDetailSheet({
                 <section>
                   <div className="mb-3 text-sm font-semibold text-[var(--semi-color-text-0)]">{t("Phone status")}</div>
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                    <InfoItem label={t("Phone number")} value={<CopyableTableText copiedText={t("Copied")} text={item.phoneNumber || "-"} />} />
+                    <InfoItem label={t("Phone number")} value={<CopyableTableText copiedText={t("Copied")} copyContent={phoneCopyContent(item.phoneNumber || "-")} text={item.phoneNumber || "-"} />} />
                     <InfoItem label={t("Country")} value={item.countryCode || "-"} />
                     <InfoItem label={t("Status")} value={statusTag(item.status, item.lastSafeError, t)} />
                     <InfoItem label={t("Phone available")} value={booleanTag(Boolean(item.phoneId), t)} />
@@ -781,7 +785,7 @@ function KitesimDetailSheet({
             <Button disabled={!canReadMessages || !item.phoneId} onClick={() => setActiveTab("mails")} type="tertiary">
               {t("Inbox")}
             </Button>
-            <Button disabled={!item.phoneNumber} onClick={() => void copy(item.phoneNumber)} type="tertiary">
+            <Button disabled={!item.phoneNumber} onClick={() => void copy(phoneCopyContent(item.phoneNumber))} type="tertiary">
               {t("Copy phone number")}
             </Button>
             <Button onClick={() => void copy(item.account)} type="tertiary">
@@ -1146,7 +1150,7 @@ export default function AdminKitesim() {
           title: t("Phone number"),
           width: 280,
           render: (value: unknown) =>
-            value ? <CopyableTableText copiedText={t("Copied")} text={String(value)} /> : "-",
+            value ? <CopyableTableText copiedText={t("Copied")} copyContent={phoneCopyContent(String(value))} text={String(value)} /> : "-",
         },
         {
           dataIndex: "account",

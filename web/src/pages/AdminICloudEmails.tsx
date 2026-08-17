@@ -32,6 +32,7 @@ import {
 } from "@douyinfe/semi-illustrations";
 import {
   AtSign,
+  CloudDownload,
   FileText,
   RefreshCw,
   ShieldCheck,
@@ -64,6 +65,7 @@ import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import {
+  activateAdminICloudResource,
   batchAdminICloudResourcesByFilter,
   batchAdminICloudResourcesByIds,
   confirmAdminICloudOnboardingFamilyReset,
@@ -154,6 +156,7 @@ type RowAction =
   | "expiration";
 type ImportMode = "paste" | "file";
 type ICloudMaintenanceAction = "validate" | "alias";
+type ICloudRowMaintenanceAction = ICloudMaintenanceAction | "oldCookie";
 type ICloudMaintenanceTarget =
   | { item: AdminICloudResourceItem; mode: "row" }
   | { count: number; mode: "ids"; resourceIds: number[] }
@@ -596,6 +599,8 @@ export function ICloudOnboardingModal({
   visible: boolean;
 }) {
   const { t } = useTranslation();
+  const [mode, setMode] = useState<ImportMode>("paste");
+  const [content, setContent] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [ownerId, setOwnerId] = useState<number | undefined>();
   const [expireAt, setExpireAt] = useState<Date | null>(() => defaultICloudExpireAt());
@@ -607,9 +612,15 @@ export function ICloudOnboardingModal({
   const [pollError, setPollError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const lineCount = useMemo(
+    () => content.split(/\r?\n/).filter((line) => line.trim()).length,
+    [content],
+  );
 
   useEffect(() => {
     if (!visible) return;
+    setMode("paste");
+    setContent("");
     setFile(null);
     setOwnerId(undefined);
     setExpireAt(defaultICloudExpireAt());
@@ -688,23 +699,33 @@ export function ICloudOnboardingModal({
       Toast.warning(t("Expiration must be in the future."));
       return;
     }
-    if (!file) {
-      Toast.warning(t("Please select a TXT file."));
-      return;
-    }
     setSubmitting(true);
     try {
-      const content = await file.text();
-      if (!content.trim()) {
-        Toast.warning(t("Please select a non-empty TXT file."));
+      let sourceContent = content;
+      if (mode === "file") {
+        if (!file) {
+          Toast.warning(t("Please select a TXT file."));
+          return;
+        }
+        sourceContent = await file.text();
+      }
+      if (!sourceContent.trim()) {
+        Toast.warning(
+          t(
+            mode === "file"
+              ? "Please select a non-empty TXT file."
+              : "Please enter iCloud resources.",
+          ),
+        );
         return;
       }
       const next = await importAdminICloudOnboardingAccounts({
-        content,
+        content: sourceContent,
         expireAt: expireAt.toISOString(),
         ownerId,
       });
       setResult(next);
+      setContent("");
       setFile(null);
       if (fileRef.current) fileRef.current.value = "";
       Toast.success(t("Apple account onboarding started.", { count: next.accepted }));
@@ -833,7 +854,9 @@ export function ICloudOnboardingModal({
         if (result) onCancel();
         else void submit();
       }}
-      okButtonProps={{ disabled: !result && !file }}
+      okButtonProps={{
+        disabled: !result && (mode === "paste" ? !content.trim() : !file),
+      }}
       okText={t(result ? "Close" : "Start onboarding")}
       title={t("Automatic Apple onboarding")}
       visible={visible}
@@ -935,25 +958,80 @@ export function ICloudOnboardingModal({
               value={expireAt ?? undefined}
             />
           </label>
-          <input
-            accept=".txt,text/plain"
-            aria-label={t("Apple account TXT file")}
-            className="hidden"
-            onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-            ref={fileRef}
-            type="file"
-          />
-          <button
-            className="flex h-40 w-full cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-[var(--semi-color-border)] bg-[var(--semi-color-fill-0)] p-5 text-center hover:bg-[var(--semi-color-fill-1)]"
-            onClick={() => fileRef.current?.click()}
-            type="button"
+          <div
+            aria-label={t("Import mode")}
+            className="grid grid-cols-2 gap-2"
+            role="group"
           >
-            <FileText className="mb-2 size-8 text-[var(--semi-color-text-2)]" />
-            <Text strong>{file ? file.name : t("Select TXT file")}</Text>
-            <Text size="small" type="tertiary">
-              {file ? `${(file.size / 1024).toFixed(1)} KB` : t("Up to 1,000 accounts")}
-            </Text>
-          </button>
+            <button
+              aria-pressed={mode === "paste"}
+              className={switchButtonClass(mode === "paste")}
+              onClick={() => {
+                setMode("paste");
+                setFile(null);
+                if (fileRef.current) fileRef.current.value = "";
+              }}
+              type="button"
+            >
+              <FileText size={16} />
+              {t("Manual input")}
+            </button>
+            <button
+              aria-pressed={mode === "file"}
+              className={switchButtonClass(mode === "file")}
+              onClick={() => {
+                setMode("file");
+                setContent("");
+              }}
+              type="button"
+            >
+              <Upload size={16} />
+              {t("TXT file")}
+            </button>
+          </div>
+          {mode === "paste" ? (
+            <label className="block">
+              <span className="mb-1.5 flex items-center justify-between text-sm font-medium text-[var(--semi-color-text-0)]">
+                <span>{t("iCloud resource entries")} *</span>
+                <Text size="small" type="tertiary">
+                  {t("Parsed entries", { count: lineCount })}
+                </Text>
+              </span>
+              <TextArea
+                aria-label={t("iCloud resource entries")}
+                className="font-mono"
+                onChange={setContent}
+                rows={8}
+                style={{ height: IMPORT_ENTRY_AREA_HEIGHT, resize: "none" }}
+                value={content}
+              />
+            </label>
+          ) : (
+            <>
+              <input
+                accept=".txt,text/plain"
+                aria-label={t("Apple account TXT file")}
+                className="hidden"
+                onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+                ref={fileRef}
+                type="file"
+              />
+              <button
+                className="flex w-full cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-[var(--semi-color-border)] bg-[var(--semi-color-fill-0)] p-5 text-center transition-colors hover:bg-[var(--semi-color-fill-1)]"
+                onClick={() => fileRef.current?.click()}
+                style={{ height: IMPORT_ENTRY_AREA_HEIGHT }}
+                type="button"
+              >
+                <FileText className="mb-2 size-8 text-[var(--semi-color-text-2)]" />
+                <Text strong>{file ? file.name : t("Select TXT file")}</Text>
+                <Text size="small" type="tertiary">
+                  {file
+                    ? `${(file.size / 1024).toFixed(1)} KB`
+                    : t("Supports .txt files, one entry per line")}
+                </Text>
+              </button>
+            </>
+          )}
           <div className="border-y border-[var(--semi-color-border)] py-3">
             <div className="mb-1 text-xs font-medium text-[var(--semi-color-text-0)]">
               {t("Import format")}
@@ -1738,7 +1816,7 @@ export function ICloudMaintenanceModal({
   target: ICloudMaintenanceTarget | null;
 }) {
   const { t } = useTranslation();
-  const [selected, setSelected] = useState<ICloudMaintenanceAction>("validate");
+  const [selected, setSelected] = useState<ICloudRowMaintenanceAction>("validate");
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -1749,7 +1827,13 @@ export function ICloudMaintenanceModal({
 
   const rowDisabled = target.mode === "row" &&
     (target.item.status === "disabled" || target.item.status === "deleted");
-  const actions = [
+  const actions: Array<{
+    description: string;
+    disabled: boolean;
+    icon: typeof ShieldCheck;
+    key: ICloudRowMaintenanceAction;
+    label: string;
+  }> = [
     {
       description: "Check whether each configured Cookie can create an alias.",
       disabled: rowDisabled,
@@ -1765,6 +1849,19 @@ export function ICloudMaintenanceModal({
       label: "Create alias",
     },
   ];
+  if (target.mode === "row") {
+    actions.push({
+      description: "Use this after enabling iCloud manually. The existing refresh workflow logs in with the permanent eSIM phone and stores the old V2 Cookie.",
+      disabled:
+        rowDisabled ||
+        !target.item.boundPhoneNumber ||
+        !target.item.kitesimPhoneId ||
+        (target.item.icloudOpened && target.item.oldSession?.status === "valid"),
+      icon: CloudDownload,
+      key: "oldCookie",
+      label: "Fetch old Cookie",
+    });
+  }
   const selectedAction = actions.find((item) => item.key === selected) ?? actions[0];
   const rowItem = target.mode === "row" ? target.item : null;
   const submit = async () => {
@@ -1772,7 +1869,10 @@ export function ICloudMaintenanceModal({
     setSubmitting(true);
     try {
       let count = 1;
-      if (target.mode === "row") {
+      if (selected === "oldCookie") {
+        if (target.mode !== "row") return;
+        await activateAdminICloudResource(target.item.id, target.item.version);
+      } else if (target.mode === "row") {
         if (selected === "alias") {
           const result = await createAdminICloudAliases(target.item.id, target.item.version);
           if (!result.changed) {
@@ -1791,7 +1891,11 @@ export function ICloudMaintenanceModal({
         count = response.affected;
       }
       Toast.success(t(
-        selected === "alias" ? "Alias creation batch submitted." : "Resource validation batch submitted.",
+        selected === "alias"
+          ? "Alias creation batch submitted."
+          : selected === "oldCookie"
+            ? "Old Cookie refresh submitted."
+            : "Resource validation batch submitted.",
         { count },
       ));
       await onCompleted(target.mode === "row" ? target.item.id : undefined);
@@ -3447,64 +3551,6 @@ export default function AdminICloudEmails() {
           [item.region, item.countryCode].filter(Boolean).join(" · ") || "-",
       },
       {
-        dataIndex: "accountRole",
-        key: "accountRole",
-        title: t("Account role"),
-        width: 150,
-        render: (_: unknown, item: AdminICloudResourceItem) => (
-          <div className="space-y-1">
-            <ICloudAccountRoleTag role={item.accountRole} />
-            <div className="text-xs text-[var(--semi-color-text-2)]">
-              {t(item.icloudOpened ? "iCloud opened" : "iCloud not opened")}
-            </div>
-          </div>
-        ),
-      },
-      {
-        key: "family",
-        title: t("Family"),
-        width: 260,
-        render: (_: unknown, item: AdminICloudResourceItem) => {
-          if (item.accountRole === "primary") {
-            return (
-              <div className="space-y-1">
-                <Tag color="blue" shape="circle" size="small">
-                  {item.familyChildCount}/{item.familyChildLimit}
-                </Tag>
-                <ICloudFamilySyncTag item={item} />
-                {item.familyInviteUrl ? (
-                  <CopyableTableText copiedText={t("Copied")} text={item.familyInviteUrl} />
-                ) : (
-                  <span className="text-xs text-[var(--semi-color-text-2)]">-</span>
-                )}
-              </div>
-            );
-          }
-          if (item.accountRole === "child") {
-            return item.familyPrimaryEmail ||
-              (item.familyPrimaryResourceId ? `#${item.familyPrimaryResourceId}` : "-");
-          }
-          return "-";
-        },
-      },
-      {
-        key: "boundPhone",
-        title: t("Bound phone"),
-        width: 190,
-        render: (_: unknown, item: AdminICloudResourceItem) => (
-          <div className="space-y-1">
-            {item.boundPhoneNumber ? (
-              <CopyableTableText copiedText={t("Copied")} text={item.boundPhoneNumber} />
-            ) : (
-              "-"
-            )}
-            <div className="text-xs text-[var(--semi-color-text-2)]">
-              {phoneSourceLabel(item.boundPhoneSource, t)}
-            </div>
-          </div>
-        ),
-      },
-      {
         dataIndex: "selectedForwardTo",
         key: "selectedForwardTo",
         title: t("Forwarding mailbox"),
@@ -3907,7 +3953,7 @@ export default function AdminICloudEmails() {
           pagination={false}
           rowKey="id"
           rowSelection={canOperate ? rowSelection : undefined}
-          scroll={{ x: "max(100%, 2840px)", y: DESKTOP_TABLE_SCROLL_Y }}
+          scroll={{ x: "max(100%, 2240px)", y: DESKTOP_TABLE_SCROLL_Y }}
           size="middle"
         />
       </CardPro>

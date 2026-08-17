@@ -61,7 +61,9 @@ vi.mock("@/components/semi/card-table", () => ({
 }));
 
 vi.mock("@/components/semi/copyable-table-text", () => ({
-  CopyableTableText: ({ text }: { text: string }) => <span>{text}</span>,
+  CopyableTableText: ({ copyContent, text }: { copyContent?: string; text: string }) => (
+    <span data-copy-content={copyContent}>{text}</span>
+  ),
 }));
 
 vi.mock("@/lib/admin-kitesim-api", () => ({
@@ -91,6 +93,14 @@ function phone(phoneId: number, phoneNumber: string) {
 describe("KitesimMessagesPanel", () => {
   beforeEach(() => vi.clearAllMocks());
   afterEach(cleanup);
+
+  it("copies the local number while displaying the Kitesim dialing code", () => {
+    mocks.listMessages.mockResolvedValue([]);
+
+    render(<KitesimMessagesPanel item={phone(1, "+1 5488768536")} />);
+
+    expect(screen.getByText("+1 5488768536")).toHaveAttribute("data-copy-content", "5488768536");
+  });
 
   it("does not retain the previous phone messages when the next load fails", async () => {
     mocks.listMessages

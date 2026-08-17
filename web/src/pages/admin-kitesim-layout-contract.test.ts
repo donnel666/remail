@@ -111,4 +111,10 @@ describe("admin Kitesim page layout", () => {
       expect(kitesimSource).toContain(fragment);
     }
   });
+
+  it("copies the local phone number without its dialing code", () => {
+    expect(kitesimSource).toContain('return value.replace(/^\\+\\d+\\s+/, "");');
+    expect(kitesimSource).toContain("copyContent={phoneCopyContent(item.phoneNumber)}");
+    expect(kitesimSource).toContain("copy(phoneCopyContent(item.phoneNumber))");
+  });
 });

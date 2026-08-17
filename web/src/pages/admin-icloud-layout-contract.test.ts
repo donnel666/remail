@@ -93,4 +93,18 @@ describe("admin iCloud page layout", () => {
     expect(icloudSource).toContain('from "@/lib/admin-icloud-api"');
     expect(icloudSource).not.toContain('from "@/lib/admin-microsoft-api"');
   });
+
+  it("keeps account, family, and phone details out of the resource table", () => {
+    const columnsStart = icloudSource.lastIndexOf("const columns = useMemo(");
+    const columnsEnd = icloudSource.indexOf("const tableColumns =", columnsStart);
+    const resourceColumns = icloudSource.slice(columnsStart, columnsEnd);
+
+    expect(resourceColumns).not.toContain('title: t("Account role")');
+    expect(resourceColumns).not.toContain('title: t("Family")');
+    expect(resourceColumns).not.toContain('title: t("Bound phone")');
+    expect(icloudSource).toContain('label={t("Account role")}');
+    expect(icloudSource).toContain('label={t("Bound phone")}');
+    expect(icloudSource).toContain('label={t("Family primary")}');
+    expect(icloudSource).toContain('scroll={{ x: "max(100%, 2240px)"');
+  });
 });

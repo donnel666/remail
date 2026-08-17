@@ -507,6 +507,26 @@ export async function validateAdminICloudResource(
   );
 }
 
+export async function activateAdminICloudResource(
+  resourceId: number,
+  version: number,
+  signal?: AbortSignal,
+) {
+  return unwrap(
+    await client.POST(
+      "/v1/admin/icloud/resources/{resourceId}/icloud-activation",
+      {
+        params: {
+          header: commandHeaders(),
+          path: { resourceId },
+          query: { version },
+        },
+        signal,
+      },
+    ),
+  );
+}
+
 export async function createAdminICloudAliases(
   resourceId: number,
   version: number,

@@ -192,6 +192,8 @@ export function taskKindLabel(kind: AdminMicrosoftAsyncTaskKind) {
       return "Alias replenishment";
     case "token":
       return "Token refresh";
+    case "refresh":
+      return "Cookie refresh task";
     case "fetch":
       return "Mail fetch";
     case "history":

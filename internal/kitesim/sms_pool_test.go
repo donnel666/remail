@@ -44,6 +44,21 @@ func newSMSPoolTestService(t *testing.T) (*Service, *gorm.DB, *time.Time) {
 	return service, db, &clock
 }
 
+func TestPhoneDisplayAndMatchingAcceptLocalNumber(t *testing.T) {
+	binding := SMSPhoneBinding{PhoneCode: "1", PhoneNumber: "15488768536"}
+	if got := formatPhoneNumber(binding.PhoneCode, binding.PhoneNumber); got != "+1 5488768536" {
+		t.Fatalf("formatted US number = %q", got)
+	}
+	for _, requested := range []string{"5488768536", "15488768536"} {
+		if !samePhoneDigits(binding, requested) {
+			t.Fatalf("requested number %q did not match %+v", requested, binding)
+		}
+	}
+	if got := formatPhoneNumber("86", "13600000000"); got != "+86 13600000000" {
+		t.Fatalf("formatted CN number = %q", got)
+	}
+}
+
 func TestBindICloudSMSPhoneBySuffixIsUniqueAndNeverAutoAllocates(t *testing.T) {
 	service, db, _ := newSMSPoolTestService(t)
 	ctx := context.Background()
@@ -103,7 +118,7 @@ func TestBindICloudSMSPhoneBalancesAndRemainsPermanent(t *testing.T) {
 	if _, err := service.BindICloudSMSPhone(ctx, "first@example.com", second.PhoneNumber); !errors.Is(err, ErrSMSPhoneBindingConflict) {
 		t.Fatalf("binding conflict error = %v", err)
 	}
-	matched, err := service.BindICloudSMSPhone(ctx, "manual@example.com", second.PhoneNumber)
+	matched, err := service.BindICloudSMSPhone(ctx, "manual@example.com", "4165550002")
 	if err != nil || matched.PhoneID != second.PhoneID || matched.Source != "matched" {
 		t.Fatalf("manual match = %+v err=%v", matched, err)
 	}
