@@ -574,18 +574,43 @@ describe("admin iCloud modal workflows", () => {
     render(<AdminICloudEmails />);
 
     expect(await screen.findByTestId("selection-disabled")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Automatic onboarding" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Import" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "Select test row" })).not.toBeInTheDocument();
     await waitFor(() => expect(mocks.selectionNotification).toHaveBeenCalled());
     const calls = mocks.selectionNotification.mock.calls;
     expect(calls[calls.length - 1]?.[0]).toMatchObject({ selectedCount: 0 });
   });
 
-  it("disables onboarding when governance tasks cannot be read", async () => {
+  it("falls back to legacy import when governance tasks cannot be read", async () => {
     mocks.permissions["governance:task/read"] = false;
     render(<AdminICloudEmails />);
 
-    expect(await screen.findByRole("button", { name: "Automatic onboarding" })).toBeDisabled();
+    fireEvent.click(await screen.findByRole("button", { name: "Import" }));
+    expect(await screen.findByRole("dialog", { name: "Import iCloud Emails" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Automated eSIM onboarding" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Legacy double-cURL import" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
+  it("opens automated onboarding by default and can switch to legacy double-cURL import", async () => {
+    render(<AdminICloudEmails />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Import" }));
+    expect(
+      await screen.findByRole("dialog", { name: "Automatic Apple onboarding" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Automated eSIM onboarding" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Legacy double-cURL import" }));
+    expect(await screen.findByRole("dialog", { name: "Import iCloud Emails" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("dialog", { name: "Automatic Apple onboarding" }),
+    ).not.toBeInTheDocument();
   });
 
   it("does not refresh the resource list while a Cookie check is pending", async () => {

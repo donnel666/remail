@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   Button,
   DatePicker,
@@ -138,6 +145,7 @@ const IMPORT_ENTRY_AREA_HEIGHT = 208;
 const ADMIN_ICLOUD_BATCH_MAX = 1000;
 type StatusFilter = "all" | AdminICloudResourceStatus;
 type BooleanFilter = "all" | "yes" | "no";
+type ICloudImportFlowMode = "automatic" | "legacy";
 type RowAction =
   | "toggle"
   | "publish"
@@ -216,6 +224,53 @@ function switchButtonClass(active: boolean) {
       ? "border-[var(--semi-color-primary)] bg-[var(--semi-color-primary-light-default)] text-[var(--semi-color-primary)]"
       : "border-[var(--semi-color-border)] bg-[var(--semi-color-bg-2)] text-[var(--semi-color-text-1)] hover:border-[var(--semi-color-primary)] hover:bg-[var(--semi-color-fill-0)]",
   ].join(" ");
+}
+
+function ICloudImportFlowSelector({
+  canAutomatic,
+  canLegacy,
+  mode,
+  onChange,
+}: {
+  canAutomatic: boolean;
+  canLegacy: boolean;
+  mode: ICloudImportFlowMode;
+  onChange: (mode: ICloudImportFlowMode) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div>
+      <div className="mb-1.5 text-sm font-medium text-[var(--semi-color-text-0)]">
+        {t("Import mode")}
+      </div>
+      <div
+        aria-label={t("Import mode")}
+        className="grid grid-cols-1 gap-2 sm:grid-cols-2"
+        role="group"
+      >
+        <button
+          aria-pressed={mode === "automatic"}
+          className={`${switchButtonClass(mode === "automatic")} disabled:cursor-not-allowed disabled:opacity-50`}
+          disabled={!canAutomatic}
+          onClick={() => onChange("automatic")}
+          type="button"
+        >
+          <Workflow size={16} />
+          {t("Automated eSIM onboarding")}
+        </button>
+        <button
+          aria-pressed={mode === "legacy"}
+          className={`${switchButtonClass(mode === "legacy")} disabled:cursor-not-allowed disabled:opacity-50`}
+          disabled={!canLegacy}
+          onClick={() => onChange("legacy")}
+          type="button"
+        >
+          <FileText size={16} />
+          {t("Legacy double-cURL import")}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function ResourceStatusTag({ item }: { item: AdminICloudResourceItem }) {
@@ -526,6 +581,7 @@ export function ICloudOnboardingTaskAction({
 export function ICloudOnboardingModal({
   canOperate,
   canReadTasks,
+  modeSelector,
   onCancel,
   onChanged,
   owners,
@@ -533,6 +589,7 @@ export function ICloudOnboardingModal({
 }: {
   canOperate: boolean;
   canReadTasks: boolean;
+  modeSelector?: ReactNode;
   onCancel: () => void;
   onChanged: () => void | Promise<void>;
   owners: AdminICloudOwner[];
@@ -782,6 +839,7 @@ export function ICloudOnboardingModal({
       visible={visible}
       width="min(1080px, calc(100vw - 32px))"
     >
+      {!result && modeSelector ? <div className="mb-4">{modeSelector}</div> : null}
       {result ? (
         <div className="space-y-4 py-1">
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -911,11 +969,13 @@ export function ICloudOnboardingModal({
 }
 
 export function ImportICloudModal({
+  modeSelector,
   onCancel,
   onImported,
   owners,
   visible,
 }: {
+  modeSelector?: ReactNode;
   onCancel: () => void;
   onImported: () => void | Promise<void>;
   owners: AdminICloudOwner[];
@@ -1135,6 +1195,7 @@ export function ImportICloudModal({
       visible={visible}
       width="min(720px, calc(100vw - 32px))"
     >
+      {modeSelector ? <div className="mb-4">{modeSelector}</div> : null}
       {step === "verification" ? (
         <div className="space-y-4 py-1">
           <div className="flex items-center justify-between text-sm">
@@ -2643,7 +2704,8 @@ export default function AdminICloudEmails() {
   );
   const [loading, setLoading] = useState(true);
   const [importOpen, setImportOpen] = useState(false);
-  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [importFlowMode, setImportFlowMode] =
+    useState<ICloudImportFlowMode>("automatic");
   const [detailId, setDetailId] = useState<number | null>(null);
   const [detail, setDetail] = useState<AdminICloudResourceDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -2682,6 +2744,8 @@ export default function AdminICloudEmails() {
     currentUser,
     permissionKey("governance:task", "read"),
   );
+  const canAutomaticImport = canOperate && canReadTasks;
+  const canLegacyImport = canWrite;
   const canReadMessages = hasPermissionKey(
     currentUser,
     permissionKey("mailmatch:message", "read"),
@@ -3561,20 +3625,14 @@ export default function AdminICloudEmails() {
       <div className="order-2 flex w-full flex-wrap gap-2 md:order-1 md:w-auto">
         <Button
           className="flex-1 md:flex-initial"
-          disabled={!canOperate || !canReadTasks}
-          icon={<Workflow size={14} />}
-          onClick={() => setOnboardingOpen(true)}
+          disabled={!canAutomaticImport && !canLegacyImport}
+          icon={<Upload size={14} />}
+          onClick={() => {
+            setImportFlowMode(canAutomaticImport ? "automatic" : "legacy");
+            setImportOpen(true);
+          }}
           size="small"
           type="primary"
-        >
-          {t("Automatic onboarding")}
-        </Button>
-        <Button
-          className="flex-1 md:flex-initial"
-          disabled={!canWrite}
-          onClick={() => setImportOpen(true)}
-          size="small"
-          type="tertiary"
         >
           {t("Import")}
         </Button>
@@ -3855,6 +3913,14 @@ export default function AdminICloudEmails() {
       </CardPro>
 
       <ImportICloudModal
+        modeSelector={
+          <ICloudImportFlowSelector
+            canAutomatic={canAutomaticImport}
+            canLegacy={canLegacyImport}
+            mode={importFlowMode}
+            onChange={setImportFlowMode}
+          />
+        }
         onCancel={() => setImportOpen(false)}
         onImported={async () => {
           setActivePage(1);
@@ -3862,16 +3928,24 @@ export default function AdminICloudEmails() {
           await refresh();
         }}
         owners={importOwners}
-        visible={importOpen && canWrite}
+        visible={importOpen && importFlowMode === "legacy" && canLegacyImport}
       />
 
       <ICloudOnboardingModal
         canOperate={canOperate}
         canReadTasks={canReadTasks}
-        onCancel={() => setOnboardingOpen(false)}
+        modeSelector={
+          <ICloudImportFlowSelector
+            canAutomatic={canAutomaticImport}
+            canLegacy={canLegacyImport}
+            mode={importFlowMode}
+            onChange={setImportFlowMode}
+          />
+        }
+        onCancel={() => setImportOpen(false)}
         onChanged={refresh}
         owners={importOwners}
-        visible={onboardingOpen && canOperate && canReadTasks}
+        visible={importOpen && importFlowMode === "automatic" && canAutomaticImport}
       />
 
       <EditICloudModal
