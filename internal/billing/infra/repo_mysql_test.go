@@ -98,14 +98,10 @@ VALUES (9701, 9701, 'domain', 0, 0, 0)`).Error)
 	for i, item := range orders {
 		orderNo := item.orderNo
 		require.NoError(t, db.Exec("INSERT INTO allocation_order_guards(order_no, type) VALUES (?, 'domain')", orderNo).Error)
-		var supplierUserID any
-		if item.scope == "public" {
-			supplierUserID = ownerID
-		}
 		require.NoError(t, db.Exec(`
-	INSERT INTO domain_allocations(order_no, project_id, product_id, resource_id, supply_scope, supplier_user_id, mailbox_id, email, status, released_at)
-	VALUES (?, 9701, 9701, 9701, ?, ?, 9701, 'orders@supplier-metrics.example.com', 'released', NOW())`,
-			orderNo, item.scope, supplierUserID).Error)
+	INSERT INTO domain_allocations(order_no, project_id, product_id, resource_id, supply_scope, mailbox_id, email, status, released_at)
+	VALUES (?, 9701, 9701, 9701, ?, 9701, 'orders@supplier-metrics.example.com', 'released', NOW())`,
+			orderNo, item.scope).Error)
 		var debitTxID any
 		if item.paid {
 			transactionID := 9900 + i
@@ -150,8 +146,6 @@ INSERT INTO mailmatch_order_delivery_heads(order_id, message_id, message_receive
 VALUES (?, ?, NOW())`, orderID, messageID).Error)
 		}
 	}
-	require.NoError(t, db.Table("email_resources").Where("id = 9701").Update("owner_user_id", newOwnerID).Error)
-
 	repo := NewBillingRepo(db)
 	summary, err := repo.GetOrCreateWalletSummary(ctx, ownerID)
 	require.NoError(t, err)
@@ -175,6 +169,16 @@ VALUES (?, ?, NOW())`, orderID, messageID).Error)
 	require.NoError(t, err)
 	require.EqualValues(t, 4, replayed.SupplierAllocationCount)
 	require.Equal(t, 66.7, replayed.SupplierFulfillmentSuccessRate)
+
+	require.NoError(t, db.Table("email_resources").Where("id = 9701").Update("owner_user_id", newOwnerID).Error)
+	oldOwnerSummary, err := repo.GetOrCreateWalletSummary(ctx, ownerID)
+	require.NoError(t, err)
+	require.Zero(t, oldOwnerSummary.SupplierAllocationCount)
+	require.Zero(t, oldOwnerSummary.SupplierFulfillmentSuccessRate)
+	newOwnerSummary, err = NewBillingRepo(db).GetOrCreateWalletSummary(ctx, newOwnerID)
+	require.NoError(t, err)
+	require.EqualValues(t, 4, newOwnerSummary.SupplierAllocationCount)
+	require.Equal(t, 66.7, newOwnerSummary.SupplierFulfillmentSuccessRate)
 }
 
 func TestBillingRepoRedeemCardMySQL(t *testing.T) {

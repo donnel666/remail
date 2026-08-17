@@ -193,11 +193,10 @@ func (ReferralRewardModel) TableName() string {
 }
 
 type BillingRepo struct {
-	db                             *gorm.DB
-	operationLogs                  operationLogWriter
-	hasGmailAllocations            bool
-	hasICloudAllocations           bool
-	hasSupplierAllocationSnapshots bool
+	db                   *gorm.DB
+	operationLogs        operationLogWriter
+	hasGmailAllocations  bool
+	hasICloudAllocations bool
 }
 
 func NewBillingRepo(db *gorm.DB) *BillingRepo {
@@ -208,7 +207,6 @@ func NewBillingRepo(db *gorm.DB) *BillingRepo {
 	if db != nil {
 		repo.hasGmailAllocations = db.Migrator().HasTable("gmail_allocations")
 		repo.hasICloudAllocations = db.Migrator().HasTable("icloud_allocations")
-		repo.hasSupplierAllocationSnapshots = db.Migrator().HasColumn("microsoft_allocations", "supplier_user_id")
 	}
 	return repo
 }
@@ -268,19 +266,23 @@ FROM (`
 
 const supplierMicrosoftAllocationsSQL = `SELECT ma.order_no
     FROM microsoft_allocations ma
-    WHERE ma.supplier_user_id = ? AND ma.supply_scope = 'public'`
+    JOIN email_resources er ON er.id = ma.resource_id AND er.type = 'microsoft'
+    WHERE er.owner_user_id = ? AND ma.supply_scope = 'public'`
 
 const supplierDomainAllocationsSQL = `SELECT da.order_no
     FROM domain_allocations da
-    WHERE da.supplier_user_id = ? AND da.supply_scope = 'public'`
+    JOIN email_resources er ON er.id = da.resource_id AND er.type = 'domain'
+    WHERE er.owner_user_id = ? AND da.supply_scope = 'public'`
 
 const supplierGmailAllocationsSQL = `SELECT ga.order_no
     FROM gmail_allocations ga
-    WHERE ga.source = 'local' AND ga.supplier_user_id = ? AND ga.supply_scope = 'public'`
+    JOIN email_resources er ON er.id = ga.resource_id AND er.type = 'gmail'
+    WHERE ga.source = 'local' AND er.owner_user_id = ? AND ga.supply_scope = 'public'`
 
 const supplierICloudAllocationsSQL = `SELECT ia.order_no
     FROM icloud_allocations ia
-    WHERE ia.supplier_user_id = ? AND ia.supply_scope = 'public'`
+    JOIN email_resources er ON er.id = ia.resource_id AND er.type = 'icloud'
+    WHERE er.owner_user_id = ? AND ia.supply_scope = 'public'`
 
 const supplierFulfillmentMetricsSuffix = `) allocations
 JOIN orders o ON o.order_no = allocations.order_no
@@ -288,9 +290,6 @@ WHERE o.debit_tx_id IS NOT NULL
   AND o.order_no NOT LIKE 'HIST-%'`
 
 func (r *BillingRepo) populateSupplierFulfillmentMetrics(ctx context.Context, db *gorm.DB, userID uint, summary *domain.WalletSummary) error {
-	if !r.hasSupplierAllocationSnapshots {
-		return nil
-	}
 	var metrics struct {
 		AllocationCount        int64   `gorm:"column:allocation_count"`
 		FulfillmentSuccessRate float64 `gorm:"column:fulfillment_success_rate"`

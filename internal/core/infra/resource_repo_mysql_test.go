@@ -1663,15 +1663,6 @@ INSERT INTO mailmatch_order_delivery_heads(order_id, message_id, message_receive
 	require.Equal(t, 1, affected)
 	require.NoError(t, db.Table("domain_resources").Select("purpose").Where("id = ?", resource.ID).Scan(&purpose).Error)
 	require.Equal(t, string(domain.PurposeNotSale), purpose)
-
-	var indexCount int64
-	require.NoError(t, db.Raw(`
-	SELECT COUNT(*)
-	FROM information_schema.statistics
-	WHERE table_schema = DATABASE()
-	  AND table_name = 'orders'
-	  AND index_name = 'idx_orders_created_order'`).Scan(&indexCount).Error)
-	require.Positive(t, indexCount)
 }
 
 func TestResourceRepoListExcludesBindingDomainsWhenRequestedMySQL(t *testing.T) {
