@@ -99,6 +99,7 @@ type config struct {
 	stage1StartupInterval   time.Duration
 	credentialTypeRPS       int
 	credentialTypeBurst     int
+	retryRecoverableErrors  bool
 	retryAllErrors          bool
 }
 
@@ -138,7 +139,16 @@ type databaseState struct {
 	Status               coredomain.MicrosoftResourceStatus
 	ValidationGeneration uint64
 	CredentialRevision   uint64
+	LastSafeError        string
 }
+
+type failureClass uint8
+
+const (
+	failureRecoverable failureClass = iota
+	failureUnrecoverable
+	failureRateLimited
+)
 
 type commandRuntime struct {
 	platform          *platform.Platform
@@ -185,19 +195,22 @@ type validationProxyLeasePool struct {
 type validationProxyRouteLoader func(context.Context) ([]proxyapp.ProxyConfig, error)
 
 type tracker struct {
-	mu           sync.Mutex
-	failed       map[string]struct{}
-	rateLimited  map[string]struct{}
-	succeeded    map[string]struct{}
-	seen         map[string]struct{}
-	success      atomic.Int64
-	failure      atomic.Int64
-	stage1       atomic.Int64
-	stage2       atomic.Int64
-	recoveryBusy atomic.Int64
-	errorOut     string
-	rateLimitOut string
-	successOut   string
+	mu             sync.Mutex
+	failed         map[string]struct{}
+	recoverable    map[string]struct{}
+	unrecoverable  map[string]struct{}
+	rateLimited    map[string]struct{}
+	succeeded      map[string]struct{}
+	seen           map[string]struct{}
+	success        atomic.Int64
+	failure        atomic.Int64
+	stage1         atomic.Int64
+	stage2         atomic.Int64
+	recoveryBusy   atomic.Int64
+	errorOut       string
+	recoverableOut string
+	rateLimitOut   string
+	successOut     string
 }
 
 type stage1Completion struct {
@@ -964,7 +977,7 @@ func parseFlags() config {
 	flag.StringVar(&cfg.fallbackCredentialsPath, "fallback-credentials", "", "import TXT used only when the database refresh token is missing or expired")
 	flag.StringVar(&cfg.manifestPath, "manifest", "/state/luckmail-validation.tsv", "durable resource manifest")
 	flag.StringVar(&cfg.statePath, "state", "/state/luckmail-validation.json", "durable checkpoint")
-	flag.StringVar(&cfg.errorPath, "error", "/state/error.txt", "failed email output")
+	flag.StringVar(&cfg.errorPath, "error", "/state/error.txt", "unrecoverable error output; recoverable.txt and 429.txt use the same directory")
 	flag.StringVar(&cfg.runID, "run-id", "", "safe run identifier")
 	flag.Uint64Var(&cfg.operatorID, "operator-user-id", 1, "active admin or super-admin user ID")
 	flag.IntVar(&cfg.concurrency, "concurrency", 150, "workers in each independent stage")
@@ -979,7 +992,8 @@ func parseFlags() config {
 	flag.DurationVar(&cfg.stage1StartupInterval, "stage1-startup-interval", 2*time.Second, "delay between enabling stage-one workers during cold start; zero disables the ramp")
 	flag.IntVar(&cfg.credentialTypeRPS, "credential-type-rps", 5, "CMD-wide GetCredentialType requests per second; zero disables the gate")
 	flag.IntVar(&cfg.credentialTypeBurst, "credential-type-burst", 1, "maximum immediate GetCredentialType burst")
-	flag.BoolVar(&cfg.retryAllErrors, "retry-all-errors", false, "on checkpoint resume, retry all error.txt entries instead of only 429.txt")
+	flag.BoolVar(&cfg.retryRecoverableErrors, "retry-recoverable-errors", false, "on checkpoint resume, retry recoverable.txt and 429.txt entries")
+	flag.BoolVar(&cfg.retryAllErrors, "retry-all-errors", false, "on checkpoint resume, retry unrecoverable, recoverable, and 429 entries")
 	flag.Parse()
 	return cfg
 }
@@ -1023,8 +1037,12 @@ func run(ctx context.Context, cfg config) error {
 	var manifest []manifestRecord
 	var previousSuccess map[string]struct{}
 	var previousErrors map[string]struct{}
+	var previousRecoverable map[string]struct{}
+	var previousUnrecoverable map[string]struct{}
 	var previousRateLimited map[string]struct{}
 	var resumeSkippedErrors map[string]struct{}
+	var migratedFailureLedger bool
+	var retryableErrors int
 	if !found {
 		previousSuccess, err = loadEmailSet(filepath.Join(filepath.Dir(cfg.errorPath), "success.txt"))
 		if err != nil {
@@ -1097,28 +1115,39 @@ func run(ctx context.Context, cfg config) error {
 		if err != nil {
 			return err
 		}
-		previousErrors, err = loadEmailSet(cfg.errorPath)
+		previousRecoverable, previousUnrecoverable, previousRateLimited, migratedFailureLedger, err = loadFailureLedgers(ctx, conn, cfg.errorPath, manifest, cfg.chunkSize)
 		if err != nil {
 			return err
 		}
-		previousRateLimited, err = loadEmailSet(filepath.Join(filepath.Dir(cfg.errorPath), "429.txt"))
-		if err != nil {
-			return err
-		}
-		resumeSkippedErrors = resumeErrorSkipSet(previousErrors, previousRateLimited, cfg.retryAllErrors)
-		retryableErrors := len(previousErrors) - len(resumeSkippedErrors)
+		previousErrors = mergeEmailSets(previousRecoverable, previousUnrecoverable, previousRateLimited)
+		resumeSkippedErrors = resumeErrorSkipSet(previousRecoverable, previousUnrecoverable, previousRateLimited, cfg.retryRecoverableErrors, cfg.retryAllErrors)
+		retryableErrors = len(previousErrors) - len(resumeSkippedErrors)
 		mode := "429-only"
 		if cfg.retryAllErrors {
 			mode = "all-errors"
+		} else if cfg.retryRecoverableErrors {
+			mode = "recoverable-and-429"
 		}
-		log.Printf("resume_failure_policy mode=%s skipped_error=%d retry_error=%d", mode, len(resumeSkippedErrors), retryableErrors)
+		log.Printf("resume_failure_policy mode=%s skipped_error=%d retry_error=%d recoverable=%d unrecoverable=%d rate_limited=%d", mode, len(resumeSkippedErrors), retryableErrors, len(previousRecoverable), len(previousUnrecoverable), len(previousRateLimited))
 		if cfg.pendingCap < cfg.concurrency || cfg.pendingCap > 10000 {
 			return errors.New("checkpoint contains an invalid pending capacity")
 		}
 		log.Printf("resuming run=%s phase=%s freeze_offset=%d/%d", state.RunID, state.Phase, state.FreezeOffset, state.Total)
 	}
+	result := newTracker(cfg.errorPath, previousSuccess, previousRecoverable, previousUnrecoverable, previousRateLimited)
+	if migratedFailureLedger {
+		if err := result.saveErrors(); err != nil {
+			return err
+		}
+	}
 	if state.Phase == phaseDone {
-		return nil
+		if retryableErrors == 0 {
+			return nil
+		}
+		state.Phase = phaseProcessing
+		if err := saveCheckpoint(cfg.statePath, &state); err != nil {
+			return err
+		}
 	}
 	skippedSuccess := 0
 	for _, item := range manifest {
@@ -1145,7 +1174,6 @@ func run(ctx context.Context, cfg config) error {
 		return err
 	}
 
-	result := newTracker(cfg.errorPath, previousSuccess, previousErrors, previousRateLimited)
 	stage1Jobs, stage2Jobs, err := classifyJobs(ctx, conn, manifest[:state.FreezeOffset], cfg.chunkSize, result, resumeSkippedErrors, previousSuccess)
 	if err != nil {
 		return err
@@ -1211,7 +1239,7 @@ func run(ctx context.Context, cfg config) error {
 				err := processHistory(workCtx, runtime, runState, cfg, item)
 				result.stage2.Add(1)
 				if err != nil {
-					result.fail(item.Email)
+					result.fail(item.Email, validationFailureClass(workCtx, runtime, item.ResourceID, err))
 					continue
 				}
 				result.succeed(item.Email)
@@ -1267,7 +1295,11 @@ func run(ctx context.Context, cfg config) error {
 				needsHistory, complete, err := processValidation(workCtx, runtime, runState, cfg, item)
 				historyTrigger.unbind(item.ResourceID)
 				busy := errors.Is(err, errRecoveryMailboxBusy)
-				rateLimited := err != nil && validationFailureWasRateLimited(workCtx, runtime, item.ResourceID)
+				failureClass := failureRecoverable
+				if err != nil {
+					failureClass = validationFailureClass(workCtx, runtime, item.ResourceID, err)
+				}
+				rateLimited := err != nil && failureClass == failureRateLimited
 				if rateLimited {
 					runtime.validationProxies.CooldownLease(item.Email)
 				}
@@ -1300,18 +1332,15 @@ func run(ctx context.Context, cfg config) error {
 				}
 				switch {
 				case err != nil:
-					result.fail(item.Email)
-					if rateLimited {
-						result.markRateLimited(item.Email)
-					}
+					result.fail(item.Email, failureClass)
 				case complete:
 					result.succeed(item.Email)
 				case needsHistory:
 					if scheduleErr := historyTrigger.enqueue(workCtx, item); scheduleErr != nil {
-						result.fail(item.Email)
+						result.fail(item.Email, failureRecoverable)
 					}
 				default:
-					result.fail(item.Email)
+					result.fail(item.Email, failureRecoverable)
 				}
 			}
 		}()
@@ -1363,7 +1392,8 @@ func run(ctx context.Context, cfg config) error {
 		return err
 	}
 	elapsed := time.Since(state.StartedAt)
-	log.Printf("completed total=%d succeeded=%d failed=%d skipped_success=%d rate_limited=%d recovery_mailbox_busy_events=%d elapsed=%s average_per_minute=%.2f", len(manifest), result.success.Load(), result.failure.Load(), skippedSuccess, result.rateLimitedCount(), result.recoveryBusy.Load(), elapsed.Round(time.Second), float64(processed)/max(elapsed.Minutes(), 1.0/60.0))
+	recoverable, unrecoverable := result.failureLedgerCounts()
+	log.Printf("completed total=%d succeeded=%d failed=%d skipped_success=%d recoverable=%d unrecoverable=%d rate_limited=%d recovery_mailbox_busy_events=%d elapsed=%s average_per_minute=%.2f", len(manifest), result.success.Load(), result.failure.Load(), skippedSuccess, recoverable, unrecoverable, result.rateLimitedCount(), result.recoveryBusy.Load(), elapsed.Round(time.Second), float64(processed)/max(elapsed.Minutes(), 1.0/60.0))
 	return nil
 }
 
@@ -1632,16 +1662,16 @@ func classifyJobs(ctx context.Context, conn *sql.Conn, manifest []manifestRecord
 				continue
 			}
 			if !item.Eligible || item.ResourceID == 0 {
-				result.fail(item.Email)
+				result.fail(item.Email, failureUnrecoverable)
 				continue
 			}
 			if _, skipped := skippedErrors[item.Email]; skipped {
-				result.fail(item.Email)
+				result.reject(item.Email)
 				continue
 			}
 			current, ok := states[item.ResourceID]
 			if !ok || current.ValidationGeneration < item.ValidationGen+1 {
-				result.fail(item.Email)
+				result.fail(item.Email, failureRecoverable)
 				continue
 			}
 			switch current.Status {
@@ -1651,8 +1681,10 @@ func classifyJobs(ctx context.Context, conn *sql.Conn, manifest []manifestRecord
 				stage2 = append(stage2, item)
 			case coredomain.MicrosoftStatusNormal:
 				result.succeed(item.Email)
+			case coredomain.MicrosoftStatusDisabled, coredomain.MicrosoftStatusDeleted:
+				result.fail(item.Email, failureUnrecoverable)
 			default:
-				result.fail(item.Email)
+				result.fail(item.Email, failureClassForSafeMessage(current.LastSafeError))
 			}
 		}
 	}
@@ -1845,6 +1877,132 @@ func loadEmailSet(path string) (map[string]struct{}, error) {
 	return emails, nil
 }
 
+func loadFailureLedgers(
+	ctx context.Context,
+	conn *sql.Conn,
+	errorPath string,
+	manifest []manifestRecord,
+	chunkSize int,
+) (recoverable, unrecoverable, rateLimited map[string]struct{}, migrated bool, err error) {
+	recoverablePath := filepath.Join(filepath.Dir(errorPath), "recoverable.txt")
+	rateLimitedPath := filepath.Join(filepath.Dir(errorPath), "429.txt")
+	rateLimited, err = loadEmailSet(rateLimitedPath)
+	if err != nil {
+		return nil, nil, nil, false, err
+	}
+	if _, statErr := os.Stat(recoverablePath); statErr == nil {
+		recoverable, err = loadEmailSet(recoverablePath)
+		if err != nil {
+			return nil, nil, nil, false, err
+		}
+		unrecoverable, err = loadEmailSet(errorPath)
+		if err != nil {
+			return nil, nil, nil, false, err
+		}
+		removeEmails(recoverable, rateLimited)
+		removeEmails(unrecoverable, rateLimited)
+		removeEmails(recoverable, unrecoverable)
+		return recoverable, unrecoverable, rateLimited, false, nil
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return nil, nil, nil, false, statErr
+	}
+
+	legacyErrors, err := loadEmailSet(errorPath)
+	if err != nil {
+		return nil, nil, nil, false, err
+	}
+	recoverable, unrecoverable, err = splitLegacyFailures(ctx, conn, manifest, legacyErrors, rateLimited, chunkSize)
+	if err != nil {
+		return nil, nil, nil, false, err
+	}
+	log.Printf("legacy_error_ledger_split recoverable=%d unrecoverable=%d rate_limited=%d", len(recoverable), len(unrecoverable), len(rateLimited))
+	return recoverable, unrecoverable, rateLimited, true, nil
+}
+
+func splitLegacyFailures(
+	ctx context.Context,
+	conn *sql.Conn,
+	manifest []manifestRecord,
+	legacyErrors, rateLimited map[string]struct{},
+	chunkSize int,
+) (map[string]struct{}, map[string]struct{}, error) {
+	recoverable := make(map[string]struct{})
+	unrecoverable := make(map[string]struct{})
+	classified := make(map[string]struct{}, len(legacyErrors))
+	for start := 0; start < len(manifest); start += chunkSize {
+		end := min(start+chunkSize, len(manifest))
+		chunk := manifest[start:end]
+		ids := make([]uint64, 0, len(chunk))
+		for _, item := range chunk {
+			if _, failed := legacyErrors[item.Email]; !failed {
+				continue
+			}
+			if _, limited := rateLimited[item.Email]; limited {
+				classified[item.Email] = struct{}{}
+				continue
+			}
+			if item.Eligible && item.ResourceID != 0 {
+				ids = append(ids, uint64(item.ResourceID))
+			}
+		}
+		states, err := loadDatabaseStates(ctx, conn, ids)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, item := range chunk {
+			if _, failed := legacyErrors[item.Email]; !failed {
+				continue
+			}
+			if _, limited := rateLimited[item.Email]; limited {
+				continue
+			}
+			classified[item.Email] = struct{}{}
+			state, ok := states[item.ResourceID]
+			if !item.Eligible || item.ResourceID == 0 || !ok {
+				unrecoverable[item.Email] = struct{}{}
+				continue
+			}
+			if state.Status == coredomain.MicrosoftStatusDisabled || state.Status == coredomain.MicrosoftStatusDeleted {
+				unrecoverable[item.Email] = struct{}{}
+				continue
+			}
+			switch failureClassForSafeMessage(state.LastSafeError) {
+			case failureRateLimited:
+				rateLimited[item.Email] = struct{}{}
+			case failureUnrecoverable:
+				unrecoverable[item.Email] = struct{}{}
+			default:
+				recoverable[item.Email] = struct{}{}
+			}
+		}
+	}
+	for email := range legacyErrors {
+		if _, limited := rateLimited[email]; limited {
+			continue
+		}
+		if _, ok := classified[email]; !ok {
+			unrecoverable[email] = struct{}{}
+		}
+	}
+	return recoverable, unrecoverable, nil
+}
+
+func mergeEmailSets(sets ...map[string]struct{}) map[string]struct{} {
+	merged := make(map[string]struct{})
+	for _, set := range sets {
+		for email := range set {
+			merged[email] = struct{}{}
+		}
+	}
+	return merged
+}
+
+func removeEmails(target, removed map[string]struct{}) {
+	for email := range removed {
+		delete(target, email)
+	}
+}
+
 func excludeEmails(emails []string, excluded map[string]struct{}) ([]string, int) {
 	if len(excluded) == 0 {
 		return emails, 0
@@ -1859,14 +2017,21 @@ func excludeEmails(emails []string, excluded map[string]struct{}) ([]string, int
 	return remaining, len(emails) - len(remaining)
 }
 
-func resumeErrorSkipSet(previousErrors, previousRateLimited map[string]struct{}, retryAll bool) map[string]struct{} {
-	if retryAll || len(previousErrors) == 0 {
+func resumeErrorSkipSet(previousRecoverable, previousUnrecoverable, previousRateLimited map[string]struct{}, retryRecoverable, retryAll bool) map[string]struct{} {
+	if retryAll {
 		return nil
 	}
-	skipped := make(map[string]struct{}, len(previousErrors))
-	for email := range previousErrors {
-		if _, retry := previousRateLimited[email]; !retry {
+	skipped := make(map[string]struct{}, len(previousRecoverable)+len(previousUnrecoverable))
+	for email := range previousUnrecoverable {
+		if _, limited := previousRateLimited[email]; !limited {
 			skipped[email] = struct{}{}
+		}
+	}
+	if !retryRecoverable {
+		for email := range previousRecoverable {
+			if _, limited := previousRateLimited[email]; !limited {
+				skipped[email] = struct{}{}
+			}
 		}
 	}
 	return skipped
@@ -1986,7 +2151,7 @@ func freezeAndFeed(
 			continue
 		}
 		if _, skipped := skippedErrors[item.Email]; skipped {
-			result.fail(item.Email)
+			result.reject(item.Email)
 			continue
 		}
 		if err := acquireSlot(ctx, slots); err != nil {
@@ -2012,11 +2177,11 @@ func freezeAndFeed(
 				continue
 			}
 			if _, skipped := skippedErrors[item.Email]; skipped {
-				result.fail(item.Email)
+				result.reject(item.Email)
 				continue
 			}
 			if !item.Eligible || item.ResourceID == 0 {
-				result.fail(item.Email)
+				result.fail(item.Email, failureUnrecoverable)
 				continue
 			}
 			if err := acquireSlot(ctx, slots); err != nil {
@@ -2032,12 +2197,12 @@ func freezeAndFeed(
 				continue
 			}
 			if _, skipped := skippedErrors[item.Email]; skipped {
-				result.fail(item.Email)
+				result.reject(item.Email)
 				next++
 				continue
 			}
 			if !item.Eligible || item.ResourceID == 0 {
-				result.fail(item.Email)
+				result.fail(item.Email, failureUnrecoverable)
 				next++
 				continue
 			}
@@ -2263,7 +2428,7 @@ func loadDatabaseStates(ctx context.Context, conn *sql.Conn, ids []uint64) (map[
 	if len(ids) == 0 {
 		return result, nil
 	}
-	rows, err := conn.QueryContext(ctx, `SELECT id, status, validation_generation, credential_revision
+	rows, err := conn.QueryContext(ctx, `SELECT id, status, validation_generation, credential_revision, last_safe_error
 FROM microsoft_resources WHERE id IN (`+sqlPlaceholders(len(ids))+`)`, uint64Args(ids)...)
 	if err != nil {
 		return nil, err
@@ -2272,7 +2437,7 @@ FROM microsoft_resources WHERE id IN (`+sqlPlaceholders(len(ids))+`)`, uint64Arg
 		var id uint
 		var status string
 		var state databaseState
-		if err := rows.Scan(&id, &status, &state.ValidationGeneration, &state.CredentialRevision); err != nil {
+		if err := rows.Scan(&id, &status, &state.ValidationGeneration, &state.CredentialRevision, &state.LastSafeError); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -2298,12 +2463,18 @@ WHERE id = ? AND status IN ('pending','validating','identifying')`, safeError, r
 	})
 }
 
-func validationFailureWasRateLimited(ctx context.Context, runtime *commandRuntime, resourceID uint) bool {
-	if runtime == nil || runtime.resources == nil || resourceID == 0 {
-		return false
+func validationFailureClass(ctx context.Context, runtime *commandRuntime, resourceID uint, err error) failureClass {
+	if errors.Is(err, coredomain.ErrResourceNotFound) {
+		return failureUnrecoverable
 	}
-	resource, err := runtime.resources.FindMicrosoftByID(ctx, resourceID)
-	return err == nil && resource != nil && isRateLimitedSafeMessage(resource.LastSafeError)
+	if runtime == nil || runtime.resources == nil || resourceID == 0 {
+		return failureRecoverable
+	}
+	resource, loadErr := runtime.resources.FindMicrosoftByID(ctx, resourceID)
+	if loadErr != nil || resource == nil {
+		return failureRecoverable
+	}
+	return failureClassForSafeMessage(resource.LastSafeError)
 }
 
 func isRecoveryMailboxBusySafeMessage(message string) bool {
@@ -2323,26 +2494,66 @@ func isRateLimitedSafeMessage(message string) bool {
 		strings.Contains(message, "频率受限")
 }
 
-func newTracker(errorOut string, previousSuccess, previousErrors, previousRateLimited map[string]struct{}) *tracker {
+func failureClassForSafeMessage(message string) failureClass {
+	if isRateLimitedSafeMessage(message) {
+		return failureRateLimited
+	}
+	switch strings.ToLower(strings.TrimSpace(message)) {
+	case "microsoft refresh token is invalid or expired.",
+		"microsoft oauth client is invalid or not allowed.",
+		"microsoft oauth permission is not available.",
+		"microsoft account requires authenticator verification.",
+		"microsoft account requires passkey verification.",
+		"microsoft account requires phone verification.",
+		"microsoft account password is incorrect.",
+		"microsoft account does not exist or recovery mailbox is not supported.",
+		"microsoft account is locked.",
+		"microsoft account is restricted or requires recovery.",
+		"external recovery-mailbox binding requires existing oauth credentials.",
+		"previous microsoft refresh-token revocation could not be verified.",
+		"previous microsoft refresh token is still accepted after reauthorization.",
+		"microsoft graph verification did not complete after reauthorization.":
+		return failureUnrecoverable
+	default:
+		return failureRecoverable
+	}
+}
+
+func newTracker(errorOut string, previousSuccess, previousRecoverable, previousUnrecoverable, previousRateLimited map[string]struct{}) *tracker {
 	succeeded := make(map[string]struct{}, len(previousSuccess))
 	for email := range previousSuccess {
 		succeeded[email] = struct{}{}
 	}
-	failed := make(map[string]struct{}, len(previousErrors))
-	for email := range previousErrors {
+	failed := make(map[string]struct{}, len(previousRecoverable)+len(previousUnrecoverable)+len(previousRateLimited))
+	recoverable := make(map[string]struct{}, len(previousRecoverable))
+	for email := range previousRecoverable {
 		if _, completed := succeeded[email]; !completed {
 			failed[email] = struct{}{}
+			recoverable[email] = struct{}{}
+		}
+	}
+	unrecoverable := make(map[string]struct{}, len(previousUnrecoverable))
+	for email := range previousUnrecoverable {
+		if _, completed := succeeded[email]; !completed {
+			failed[email] = struct{}{}
+			delete(recoverable, email)
+			unrecoverable[email] = struct{}{}
 		}
 	}
 	rateLimited := make(map[string]struct{}, len(previousRateLimited))
 	for email := range previousRateLimited {
-		if _, failed := failed[email]; failed {
+		if _, completed := succeeded[email]; !completed {
+			failed[email] = struct{}{}
+			delete(recoverable, email)
+			delete(unrecoverable, email)
 			rateLimited[email] = struct{}{}
 		}
 	}
 	return &tracker{
-		failed: failed, rateLimited: rateLimited, succeeded: succeeded, seen: make(map[string]struct{}),
-		errorOut: errorOut, rateLimitOut: filepath.Join(filepath.Dir(errorOut), "429.txt"), successOut: filepath.Join(filepath.Dir(errorOut), "success.txt"),
+		failed: failed, recoverable: recoverable, unrecoverable: unrecoverable, rateLimited: rateLimited,
+		succeeded: succeeded, seen: make(map[string]struct{}),
+		errorOut: errorOut, recoverableOut: filepath.Join(filepath.Dir(errorOut), "recoverable.txt"),
+		rateLimitOut: filepath.Join(filepath.Dir(errorOut), "429.txt"), successOut: filepath.Join(filepath.Dir(errorOut), "success.txt"),
 	}
 }
 
@@ -2357,12 +2568,14 @@ func (t *tracker) succeed(email string) {
 	}
 	t.seen[email] = struct{}{}
 	delete(t.failed, email)
+	delete(t.recoverable, email)
+	delete(t.unrecoverable, email)
 	delete(t.rateLimited, email)
 	t.succeeded[email] = struct{}{}
 	t.success.Add(1)
 }
 
-func (t *tracker) fail(email string) {
+func (t *tracker) fail(email string, class failureClass) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if _, ok := t.succeeded[email]; ok {
@@ -2372,17 +2585,36 @@ func (t *tracker) fail(email string) {
 		return
 	}
 	t.seen[email] = struct{}{}
-	delete(t.rateLimited, email)
 	t.failed[email] = struct{}{}
+	delete(t.recoverable, email)
+	delete(t.unrecoverable, email)
+	delete(t.rateLimited, email)
+	switch class {
+	case failureUnrecoverable:
+		t.unrecoverable[email] = struct{}{}
+	case failureRateLimited:
+		t.rateLimited[email] = struct{}{}
+	default:
+		t.recoverable[email] = struct{}{}
+	}
 	t.failure.Add(1)
 }
 
-func (t *tracker) markRateLimited(email string) {
+func (t *tracker) reject(email string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if _, failed := t.failed[email]; failed {
-		t.rateLimited[email] = struct{}{}
+	if _, ok := t.succeeded[email]; ok {
+		return
 	}
+	if _, ok := t.seen[email]; ok {
+		return
+	}
+	t.seen[email] = struct{}{}
+	if _, failed := t.failed[email]; !failed {
+		t.failed[email] = struct{}{}
+		t.recoverable[email] = struct{}{}
+	}
+	t.failure.Add(1)
 }
 
 func (t *tracker) rateLimitedCount() int {
@@ -2391,11 +2623,21 @@ func (t *tracker) rateLimitedCount() int {
 	return len(t.rateLimited)
 }
 
+func (t *tracker) failureLedgerCounts() (recoverable, unrecoverable int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return len(t.recoverable), len(t.unrecoverable)
+}
+
 func (t *tracker) saveErrors() error {
 	t.mu.Lock()
-	emails := make([]string, 0, len(t.failed))
-	for email := range t.failed {
-		emails = append(emails, email)
+	recoverable := make([]string, 0, len(t.recoverable))
+	for email := range t.recoverable {
+		recoverable = append(recoverable, email)
+	}
+	unrecoverable := make([]string, 0, len(t.unrecoverable))
+	for email := range t.unrecoverable {
+		unrecoverable = append(unrecoverable, email)
 	}
 	rateLimited := make([]string, 0, len(t.rateLimited))
 	for email := range t.rateLimited {
@@ -2406,11 +2648,13 @@ func (t *tracker) saveErrors() error {
 		succeeded = append(succeeded, email)
 	}
 	t.mu.Unlock()
-	sort.Strings(emails)
+	sort.Strings(recoverable)
+	sort.Strings(unrecoverable)
 	sort.Strings(rateLimited)
 	sort.Strings(succeeded)
 	return errors.Join(
-		saveErrors(t.errorOut, emails),
+		saveErrors(t.errorOut, unrecoverable),
+		saveErrors(t.recoverableOut, recoverable),
 		saveErrors(t.rateLimitOut, rateLimited),
 		saveErrors(t.successOut, succeeded),
 	)

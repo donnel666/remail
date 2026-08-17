@@ -768,11 +768,11 @@ func TestTrackerWritesRateLimitedFailuresTo429File(t *testing.T) {
 		t.Fatal("rate-limit safe-message classification is incorrect")
 	}
 	dir := t.TempDir()
-	tracker := newTracker(filepath.Join(dir, "error.txt"), map[string]struct{}{"previous@example.com": {}}, nil, nil)
-	tracker.fail("ordinary@example.com")
-	tracker.fail("limited@example.com")
-	tracker.fail("previous@example.com")
-	tracker.markRateLimited("limited@example.com")
+	tracker := newTracker(filepath.Join(dir, "error.txt"), map[string]struct{}{"previous@example.com": {}}, nil, nil, nil)
+	tracker.fail("ordinary@example.com", failureRecoverable)
+	tracker.fail("permanent@example.com", failureUnrecoverable)
+	tracker.fail("limited@example.com", failureRateLimited)
+	tracker.fail("previous@example.com", failureRecoverable)
 	tracker.succeed("previous@example.com")
 	tracker.succeed("success@example.com")
 
@@ -780,6 +780,10 @@ func TestTrackerWritesRateLimitedFailuresTo429File(t *testing.T) {
 		t.Fatal(err)
 	}
 	errorData, err := os.ReadFile(filepath.Join(dir, "error.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	recoverableData, err := os.ReadFile(filepath.Join(dir, "recoverable.txt"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -791,8 +795,11 @@ func TestTrackerWritesRateLimitedFailuresTo429File(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(errorData) != "limited@example.com\nordinary@example.com\n" {
+	if string(errorData) != "permanent@example.com\n" {
 		t.Fatalf("error.txt = %q", errorData)
+	}
+	if string(recoverableData) != "ordinary@example.com\n" {
+		t.Fatalf("recoverable.txt = %q", recoverableData)
 	}
 	if string(rateLimitData) != "limited@example.com\n" {
 		t.Fatalf("429.txt = %q", rateLimitData)
@@ -800,7 +807,7 @@ func TestTrackerWritesRateLimitedFailuresTo429File(t *testing.T) {
 	if string(successData) != "previous@example.com\nsuccess@example.com\n" {
 		t.Fatalf("success.txt = %q", successData)
 	}
-	if tracker.success.Load() != 1 || tracker.failure.Load() != 2 {
+	if tracker.success.Load() != 1 || tracker.failure.Load() != 3 {
 		t.Fatalf("current-run accounting success=%d failure=%d", tracker.success.Load(), tracker.failure.Load())
 	}
 	completed, err := loadEmailSet(filepath.Join(dir, "success.txt"))
@@ -819,24 +826,56 @@ func TestTrackerWritesRateLimitedFailuresTo429File(t *testing.T) {
 	}
 }
 
+func TestFailureClassForSafeMessageUsesExplicitTerminalEvidence(t *testing.T) {
+	for _, message := range []string{
+		"Microsoft refresh token is invalid or expired.",
+		"Microsoft account password is incorrect.",
+		"Microsoft account is restricted or requires recovery.",
+		"Microsoft Graph verification did not complete after reauthorization.",
+	} {
+		if got := failureClassForSafeMessage(message); got != failureUnrecoverable {
+			t.Fatalf("failure class for %q = %d, want unrecoverable", message, got)
+		}
+	}
+	for _, message := range []string{
+		"Microsoft authorization timed out.",
+		"Microsoft authorization request failed temporarily.",
+		"Auxiliary mailbox verification code was not received in time.",
+		"Microsoft reauthorization returned incomplete OAuth credentials.",
+		"Microsoft account authorization cleanup did not complete.",
+		"Old-project identification did not complete.",
+		"unknown future transient failure",
+	} {
+		if got := failureClassForSafeMessage(message); got != failureRecoverable {
+			t.Fatalf("failure class for %q = %d, want recoverable", message, got)
+		}
+	}
+	if got := failureClassForSafeMessage("Microsoft authorization is temporarily rate limited."); got != failureRateLimited {
+		t.Fatalf("rate-limit failure class = %d", got)
+	}
+}
+
 func TestTrackerPreservesPreviousFailureLedgersUntilClassified(t *testing.T) {
 	dir := t.TempDir()
 	previousSuccess := map[string]struct{}{"done@example.com": {}}
-	previousErrors := map[string]struct{}{
+	previousRecoverable := map[string]struct{}{
 		"ordinary@example.com": {},
-		"limited@example.com":  {},
-		"done@example.com":     {},
+	}
+	previousUnrecoverable := map[string]struct{}{
+		"permanent@example.com": {},
+		"done@example.com":      {},
 	}
 	previousRateLimited := map[string]struct{}{
 		"limited@example.com": {},
 		"done@example.com":    {},
 	}
-	assertLedgers := func(wantErrors, wantRateLimited, wantSuccess string) {
+	assertLedgers := func(wantErrors, wantRecoverable, wantRateLimited, wantSuccess string) {
 		t.Helper()
 		for name, want := range map[string]string{
-			"error.txt":   wantErrors,
-			"429.txt":     wantRateLimited,
-			"success.txt": wantSuccess,
+			"error.txt":       wantErrors,
+			"recoverable.txt": wantRecoverable,
+			"429.txt":         wantRateLimited,
+			"success.txt":     wantSuccess,
 		} {
 			data, err := os.ReadFile(filepath.Join(dir, name))
 			if err != nil {
@@ -848,12 +887,13 @@ func TestTrackerPreservesPreviousFailureLedgersUntilClassified(t *testing.T) {
 		}
 	}
 
-	tracker := newTracker(filepath.Join(dir, "error.txt"), previousSuccess, previousErrors, previousRateLimited)
+	tracker := newTracker(filepath.Join(dir, "error.txt"), previousSuccess, previousRecoverable, previousUnrecoverable, previousRateLimited)
 	if err := tracker.saveErrors(); err != nil {
 		t.Fatal(err)
 	}
 	assertLedgers(
-		"limited@example.com\nordinary@example.com\n",
+		"permanent@example.com\n",
+		"ordinary@example.com\n",
 		"limited@example.com\n",
 		"done@example.com\n",
 	)
@@ -863,17 +903,19 @@ func TestTrackerPreservesPreviousFailureLedgersUntilClassified(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertLedgers(
+		"permanent@example.com\n",
 		"ordinary@example.com\n",
 		"",
 		"done@example.com\nlimited@example.com\n",
 	)
 
-	tracker = newTracker(filepath.Join(dir, "error.txt"), previousSuccess, previousErrors, previousRateLimited)
-	tracker.fail("limited@example.com")
+	tracker = newTracker(filepath.Join(dir, "error.txt"), previousSuccess, previousRecoverable, previousUnrecoverable, previousRateLimited)
+	tracker.fail("limited@example.com", failureRecoverable)
 	if err := tracker.saveErrors(); err != nil {
 		t.Fatal(err)
 	}
 	assertLedgers(
+		"permanent@example.com\n",
 		"limited@example.com\nordinary@example.com\n",
 		"",
 		"done@example.com\n",
@@ -881,25 +923,31 @@ func TestTrackerPreservesPreviousFailureLedgersUntilClassified(t *testing.T) {
 }
 
 func TestResumeErrorSkipSetDefaultsTo429Only(t *testing.T) {
-	previousErrors := map[string]struct{}{
+	previousRecoverable := map[string]struct{}{
 		"ordinary@example.com": {},
-		"limited@example.com":  {},
+	}
+	previousUnrecoverable := map[string]struct{}{
+		"permanent@example.com": {},
 	}
 	previousRateLimited := map[string]struct{}{
 		"limited@example.com": {},
 	}
 
-	skipped := resumeErrorSkipSet(previousErrors, previousRateLimited, false)
-	if !reflect.DeepEqual(skipped, map[string]struct{}{"ordinary@example.com": {}}) {
+	skipped := resumeErrorSkipSet(previousRecoverable, previousUnrecoverable, previousRateLimited, false, false)
+	if !reflect.DeepEqual(skipped, map[string]struct{}{"ordinary@example.com": {}, "permanent@example.com": {}}) {
 		t.Fatalf("default skipped errors = %#v", skipped)
 	}
-	if retryAll := resumeErrorSkipSet(previousErrors, previousRateLimited, true); len(retryAll) != 0 {
+	recoverable := resumeErrorSkipSet(previousRecoverable, previousUnrecoverable, previousRateLimited, true, false)
+	if !reflect.DeepEqual(recoverable, map[string]struct{}{"permanent@example.com": {}}) {
+		t.Fatalf("recoverable skipped errors = %#v", recoverable)
+	}
+	if retryAll := resumeErrorSkipSet(previousRecoverable, previousUnrecoverable, previousRateLimited, false, true); len(retryAll) != 0 {
 		t.Fatalf("retry-all skipped errors = %#v, want empty", retryAll)
 	}
 }
 
 func TestClassifyJobsSkipsPreviousSuccessWithoutLoadingOrMutating(t *testing.T) {
-	result := newTracker(filepath.Join(t.TempDir(), "error.txt"), nil, nil, nil)
+	result := newTracker(filepath.Join(t.TempDir(), "error.txt"), nil, nil, nil, nil)
 	manifest := []manifestRecord{{Email: "done@example.com", ResourceID: 10, Eligible: true}}
 	previousSuccess := map[string]struct{}{"done@example.com": {}}
 
@@ -947,7 +995,7 @@ func TestRecoverAbandonedValidationsSkipsPreviousSuccess(t *testing.T) {
 
 func TestFreezeAndFeedSkipsPreviousSuccessWithoutFreezing(t *testing.T) {
 	dir := t.TempDir()
-	result := newTracker(filepath.Join(dir, "error.txt"), nil, nil, nil)
+	result := newTracker(filepath.Join(dir, "error.txt"), nil, nil, nil, nil)
 	state := checkpoint{Total: 1}
 	cfg := config{chunkSize: 10, pendingCap: 10, statePath: filepath.Join(dir, "state.json")}
 	manifest := []manifestRecord{{Email: "done@example.com", ResourceID: 10, Eligible: true}}
