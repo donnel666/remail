@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/platform/testmysql"
@@ -81,6 +82,20 @@ func TestICloudOnboardingMigrationMySQL(t *testing.T) {
 	require.NoError(t, platform.RunMigrations(sqlDB, through115))
 	require.True(t, db.Migrator().HasColumn("icloud_account_onboarding_tasks", "icloud_activation_confirmed_at"))
 	require.True(t, db.Migrator().HasTable("icloud_apple_id_reservations"))
+	importID := uint(990115)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	jsonTask := iCloudOnboardingTaskModel{
+		ImportID: &importID, TaskKind: "onboarding", LineNumber: 2,
+		PrimaryEmail: "json-payload@example.com", AccountRole: "primary", Region: "US", CountryCode: "US", ICloudOpened: true,
+		SecretPayload: []byte(`{"password":"secret"}`), SessionPayload: []byte(`{"session":true}`),
+		Status: iCloudOnboardingProcessing, Stage: "accepted", DispatchStatus: "pending",
+		Generation: 1, MaxAttempts: iCloudOnboardingMaxAttempts, CreatedAt: now, UpdatedAt: now,
+	}
+	require.NoError(t, db.Create(&jsonTask).Error)
+	var storedJSONTask iCloudOnboardingTaskModel
+	require.NoError(t, db.First(&storedJSONTask, jsonTask.ID).Error)
+	require.JSONEq(t, string(jsonTask.SecretPayload), string(storedJSONTask.SecretPayload))
+	require.JSONEq(t, string(jsonTask.SessionPayload), string(storedJSONTask.SessionPayload))
 	var reservation iCloudAppleIDReservationModel
 	require.NoError(t, db.First(&reservation, "email_key = ?", "waiting-reset@example.com").Error)
 	require.Equal(t, iCloudAppleIDReservationOnboarding, reservation.OwnerKind)

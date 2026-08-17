@@ -378,7 +378,7 @@ func (s *Service) prepareICloudOnboardingAppleWithInvite(ctx context.Context, ta
 	}
 	updates := map[string]any{}
 	if len(response.Session) > 0 {
-		updates["session_payload"] = []byte(response.Session)
+		updates["session_payload"] = iCloudJSON(response.Session)
 	}
 	if response.Next == "ready" || response.Next == "" {
 		return s.advanceICloudOnboardingTask(ctx, task, readyStage, nil, updates)
@@ -524,7 +524,7 @@ func (s *Service) sendICloudOnboardingSMS(ctx context.Context, task *iCloudOnboa
 		deadline := now.Add(iCloudOnboardingSMSDeadline)
 		updates := map[string]any{"sms_sent_at": now, "sms_poll_deadline": deadline, "manual_verification_code": ""}
 		if len(response.Session) > 0 {
-			updates["session_payload"] = []byte(response.Session)
+			updates["session_payload"] = iCloudJSON(response.Session)
 		}
 		return s.waitICloudOnboardingTaskWithUpdates(ctx, task, nil, "waiting", "Waiting for a manually entered Apple verification code.", updatesWith(updates, "stage", "sms_wait"))
 	}
@@ -614,7 +614,7 @@ func (s *Service) verifyICloudOnboardingSMS(ctx context.Context, task *iCloudOnb
 		updates["pending_sms_purpose"] = ""
 	}
 	if len(response.Session) > 0 {
-		updates["session_payload"] = []byte(response.Session)
+		updates["session_payload"] = iCloudJSON(response.Session)
 	}
 	return s.advanceICloudOnboardingTask(ctx, task, next, nil, updates)
 }
@@ -661,7 +661,7 @@ func (s *Service) waitForICloudOnboardingSMSChallenge(ctx context.Context, task 
 		"manual_verification_code": "", "stage_attempts": task.StageAttempts,
 	}
 	if len(session) > 0 {
-		updates["session_payload"] = []byte(session)
+		updates["session_payload"] = iCloudJSON(session)
 	}
 	retryAt := s.now().UTC().Add(iCloudOnboardingSMSPoll)
 	if retryAt.After(challenge.ExpiresAt) {
@@ -719,7 +719,7 @@ func (s *Service) finishICloudOnboardingICloud(ctx context.Context, task *iCloud
 	}
 	updates := map[string]any{}
 	if len(response.Session) > 0 {
-		updates["session_payload"] = []byte(response.Session)
+		updates["session_payload"] = iCloudJSON(response.Session)
 	}
 	if code := strings.ToUpper(strings.TrimSpace(response.CountryCode)); code != "" {
 		updates["country_code"] = code
@@ -917,7 +917,7 @@ func (s *Service) joinICloudOnboardingFamily(ctx context.Context, task *iCloudOn
 	}
 	updates := map[string]any{}
 	if len(response.Session) > 0 {
-		updates["session_payload"] = []byte(response.Session)
+		updates["session_payload"] = iCloudJSON(response.Session)
 	}
 	if err := s.reconcileICloudOnboardingFamily(ctx, task, response.FamilyChannel); err != nil {
 		category := iCloudFamilyErrorCategory(err)
@@ -948,7 +948,7 @@ func (s *Service) fetchICloudOnboardingManage(ctx context.Context, task *iCloudO
 	}
 	updates := map[string]any{}
 	if len(response.Session) > 0 {
-		updates["session_payload"] = []byte(response.Session)
+		updates["session_payload"] = iCloudJSON(response.Session)
 	}
 	if code := strings.ToUpper(strings.TrimSpace(response.CountryCode)); code != "" {
 		updates["country_code"] = code
@@ -1013,7 +1013,7 @@ func (s *Service) sendICloudOnboardingForwarding(ctx context.Context, task *iClo
 	}
 	updates := map[string]any{}
 	if len(response.Session) > 0 {
-		updates["session_payload"] = []byte(response.Session)
+		updates["session_payload"] = iCloudJSON(response.Session)
 	}
 	if response.Next == "verified" {
 		return s.advanceICloudOnboardingTask(ctx, task, "resource_import", nil, updates)
@@ -1058,7 +1058,7 @@ func (s *Service) verifyICloudOnboardingForwarding(ctx context.Context, task *iC
 	}
 	updates := map[string]any{}
 	if len(response.Session) > 0 {
-		updates["session_payload"] = []byte(response.Session)
+		updates["session_payload"] = iCloudJSON(response.Session)
 	}
 	return s.advanceICloudOnboardingTask(ctx, task, "resource_import", nil, updates)
 }
