@@ -422,13 +422,13 @@ func TestClaimAppleSMSMessageFiltersWindowAndConsumesMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 	messages := []MessageItem{
-		{Caller: "Other", Content: "code 111111", Time: clock.Add(time.Second).Format(time.RFC3339)},
-		{Caller: "Apple", Content: "code 222222", Time: clock.Add(-time.Minute).Format(time.RFC3339)},
-		{Caller: "Apple", Content: "code 333333", Time: "2026-08-16 20:00:05"},
+		{Caller: "Apple", Content: "code 111111", Time: clock.Add(time.Second).Format(time.RFC3339)},
+		{Caller: "106", Content: "Your Apple Account Code is: 222222. Don't share it with anyone.", Time: clock.Add(-time.Minute).Format(time.RFC3339)},
+		{Caller: "106", Content: "你的Apple账户验证码是 333333，切勿向任何人泄露，以防账户或信息被盗。", Time: "2026-08-16 20:00:05"},
 	}
 	*clock = clock.Add(10 * time.Second)
 	claimed, err := service.claimAppleSMSMessage(ctx, first.ID, messages)
-	if err != nil || claimed.Content != "code 333333" {
+	if err != nil || appleSMSCode(claimed.Content) != "333333" {
 		t.Fatalf("first claim = %+v err=%v", claimed, err)
 	}
 	replayed, err := service.claimAppleSMSMessage(ctx, first.ID, nil)
@@ -446,10 +446,10 @@ func TestClaimAppleSMSMessageFiltersWindowAndConsumesMessage(t *testing.T) {
 	if err := service.MarkSMSAttemptSent(ctx, second.ID); err != nil {
 		t.Fatal(err)
 	}
-	newMessage := MessageItem{Caller: "Apple Verify", Content: "code 444444", Time: clock.Add(2 * time.Second).Format(time.RFC3339)}
+	newMessage := MessageItem{Content: "Your Apple Account Code is: 444444. Don't share it with anyone.", Time: clock.Add(2 * time.Second).Format(time.RFC3339)}
 	*clock = clock.Add(3 * time.Second)
 	claimed, err = service.claimAppleSMSMessage(ctx, second.ID, []MessageItem{messages[2], newMessage})
-	if err != nil || claimed.Content != newMessage.Content {
+	if err != nil || appleSMSCode(claimed.Content) != "444444" {
 		t.Fatalf("consumed message was reused: %+v err=%v", claimed, err)
 	}
 }

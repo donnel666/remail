@@ -29,7 +29,10 @@ const (
 	appleSMSClockSkew      = 15 * time.Second
 )
 
-var appleSMSCodePattern = regexp.MustCompile(`(?:^|[^0-9])([0-9]{6})(?:[^0-9]|$)`)
+var appleSMSCodePatterns = []*regexp.Regexp{
+	regexp.MustCompile(`^你的Apple账户验证码是[[:space:]]*([0-9]{6})，切勿向任何人泄露，以防账户或信息被盗。$`),
+	regexp.MustCompile(`(?i)^Your Apple Account Code is:[[:space:]]*([0-9]{6})\.[[:space:]]*Don(?:'|’|‘)t share it with anyone\.$`),
+}
 
 type smsChallengeModel struct {
 	ID                 uint64     `gorm:"column:id;primaryKey;autoIncrement"`
@@ -528,8 +531,8 @@ func smsChallenge(model smsChallengeModel) SMSChallenge {
 }
 
 // ClaimAppleSMSMessage returns the same persisted message on retries. A
-// message can belong to only one challenge and must come from Apple during the
-// challenge's send window.
+// message can belong to only one challenge, match a supported Apple message
+// body, and arrive during the challenge's send window. Caller is not trusted.
 func (s *Service) ClaimAppleSMSMessage(ctx context.Context, challengeID uint64) (*MessageItem, error) {
 	challenge, err := s.GetSMSChallenge(ctx, challengeID)
 	if err != nil {
@@ -605,8 +608,7 @@ type appleSMSMessageCandidate struct {
 func appleSMSMessageCandidates(messages []MessageItem, sentAt, expiresAt time.Time) []appleSMSMessageCandidate {
 	result := make([]appleSMSMessageCandidate, 0, len(messages))
 	for _, message := range messages {
-		caller := strings.ToLower(strings.TrimSpace(message.Caller))
-		if !strings.Contains(caller, "apple") || appleSMSCodePattern.FindStringSubmatch(message.Content) == nil {
+		if appleSMSCode(message.Content) == "" {
 			continue
 		}
 		receivedAt := parseProviderTime(message.Time)
@@ -617,6 +619,16 @@ func appleSMSMessageCandidates(messages []MessageItem, sentAt, expiresAt time.Ti
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].receivedAt.Before(result[j].receivedAt) })
 	return result
+}
+
+func appleSMSCode(content string) string {
+	content = strings.TrimSpace(content)
+	for _, pattern := range appleSMSCodePatterns {
+		if match := pattern.FindStringSubmatch(content); len(match) == 2 {
+			return match[1]
+		}
+	}
+	return ""
 }
 
 func smsMessageFingerprint(phoneID uint, message MessageItem) string {
