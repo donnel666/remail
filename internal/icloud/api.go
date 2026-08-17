@@ -52,6 +52,7 @@ func RegisterRoutes(rg *gin.RouterGroup, module *Module, fetcher middleware.Sess
 	resources.POST("/:resourceId/aliases", middleware.PermissionRequired(checker, "core:resource", "operate"), h.resourceCommand(AdminICloudAlias))
 	resources.PATCH("/:resourceId", middleware.PermissionRequired(checker, "core:resource", "write"), h.patchResource)
 	resources.POST("/:resourceId/validation", middleware.PermissionRequired(checker, "core:resource", "operate"), h.resourceCommand(AdminICloudValidate))
+	resources.POST("/:resourceId/icloud-activation", middleware.PermissionRequired(checker, "core:resource", "operate"), h.resourceCommand(AdminICloudActivate))
 	resources.POST("/:resourceId/enable", middleware.PermissionRequired(checker, "core:resource", "operate"), h.resourceCommand(AdminICloudEnable))
 	resources.POST("/:resourceId/disable", middleware.PermissionRequired(checker, "core:resource", "operate"), h.resourceCommand(AdminICloudDisable))
 	resources.POST("/:resourceId/publish", middleware.PermissionRequired(checker, "core:resource", "operate"), h.resourceCommand(AdminICloudPublish))
@@ -692,7 +693,7 @@ func (h *handler) resourceCommand(command AdminICloudCommand) gin.HandlerFunc {
 		}
 		c.Header("Cache-Control", "no-store")
 		status := http.StatusOK
-		if command == AdminICloudValidate || (command == AdminICloudAlias && result.Changed) {
+		if command == AdminICloudValidate || command == AdminICloudActivate || (command == AdminICloudAlias && result.Changed) {
 			status = http.StatusAccepted
 		}
 		c.JSON(status, result)
@@ -819,6 +820,8 @@ func writeICloudError(c *gin.Context, err error) {
 		c.JSON(http.StatusNotFound, gin.H{"message": "iCloud resource not found.", "requestId": requestID})
 	case errors.Is(err, ErrICloudResourceStatus):
 		c.JSON(http.StatusConflict, gin.H{"message": "iCloud resource status does not allow this operation.", "requestId": requestID})
+	case errors.Is(err, ErrICloudCookieRefreshUnavailable):
+		c.JSON(http.StatusConflict, gin.H{"message": "Old Cookie refresh requires a permanent eSIM phone, complete Apple credentials, and no active Cookie refresh task.", "requestId": requestID})
 	case errors.Is(err, ErrICloudResourceVersion):
 		c.JSON(http.StatusConflict, gin.H{"message": "iCloud resource was changed by another operation.", "requestId": requestID})
 	case errors.Is(err, ErrICloudResourceIdentity):

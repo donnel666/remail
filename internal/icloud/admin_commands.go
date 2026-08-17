@@ -41,6 +41,7 @@ const (
 	AdminICloudUnpublish AdminICloudCommand = "unpublish"
 	AdminICloudDelete    AdminICloudCommand = "delete"
 	AdminICloudRecover   AdminICloudCommand = "recover"
+	AdminICloudActivate  AdminICloudCommand = "icloud_activation"
 	AdminICloudExpire    AdminICloudCommand = "expire"
 )
 
@@ -110,7 +111,13 @@ func (s *Service) ApplyAdminICloudCommand(
 			replayed = wasReplayed
 			return err
 		}
-		state, changed, err := mutateAdminICloudResourceTx(ctx, tx, command, resourceID, &version, nil, s.now().UTC())
+		var state *AdminICloudMutationResult
+		var changed bool
+		if command == AdminICloudActivate {
+			state, changed, err = s.activateAdminICloudResourceTx(ctx, tx, resourceID, version, s.now().UTC())
+		} else {
+			state, changed, err = mutateAdminICloudResourceTx(ctx, tx, command, resourceID, &version, nil, s.now().UTC())
+		}
 		if err != nil {
 			return err
 		}
@@ -142,6 +149,9 @@ func (s *Service) ApplyAdminICloudCommand(
 	}
 	if !replayed && result.Changed && (command == AdminICloudAlias || command == AdminICloudExpire) {
 		_ = s.ScheduleICloudProvisionDispatcher(context.WithoutCancel(ctx), 0)
+	}
+	if !replayed && result.Changed && command == AdminICloudActivate {
+		_ = s.ScheduleICloudOnboardingDispatcher(context.WithoutCancel(ctx), 0)
 	}
 	return result, nil
 }
@@ -331,7 +341,7 @@ func (s *Service) completeAdminICloudCommand(ctx context.Context, tx *gorm.DB, o
 func validAdminICloudCommand(command AdminICloudCommand) bool {
 	switch command {
 	case AdminICloudValidate, AdminICloudAlias, AdminICloudEnable, AdminICloudDisable, AdminICloudPublish,
-		AdminICloudUnpublish, AdminICloudDelete, AdminICloudRecover:
+		AdminICloudUnpublish, AdminICloudDelete, AdminICloudRecover, AdminICloudActivate:
 		return true
 	default:
 		return false
@@ -679,7 +689,7 @@ func normalizeAdminICloudCommandError(err error) error {
 		errors.Is(err, ErrICloudResourceNotFound), errors.Is(err, ErrICloudResourceStatus),
 		errors.Is(err, ErrICloudResourceVersion), errors.Is(err, ErrICloudResourceOwner),
 		errors.Is(err, ErrICloudResourceAllocation), errors.Is(err, ErrICloudResourceUpdate),
-		errors.Is(err, ErrICloudResourceIdentity):
+		errors.Is(err, ErrICloudResourceIdentity), errors.Is(err, ErrICloudCookieRefreshUnavailable):
 		return err
 	default:
 		return ErrICloudResourceQueryTemporary

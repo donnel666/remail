@@ -408,6 +408,37 @@ SELECT
     NULL AS reason_buckets
 FROM icloud_maintenance_runs AS run`
 
+const iCloudRefreshTaskSelect = `
+SELECT
+    'icloud_refresh' AS source,
+    task.id AS source_id,
+    task.resource_id AS resource_scope_id,
+    'icloud_resource' AS biz_type,
+    task.resource_id AS biz_id,
+    'refresh' AS kind,
+    CASE
+        WHEN task.status = 'completed' THEN 'succeeded'
+        WHEN task.status = 'failed' THEN 'failed'
+        WHEN task.status = 'waiting' AND task.dispatch_status = 'waiting' THEN 'uncertain'
+        WHEN task.dispatch_status IN ('pending', 'queued') THEN 'queued'
+        ELSE 'running'
+    END AS status,
+    task.attempts AS attempts,
+    task.max_attempts AS max_attempts,
+    task.expected_credential_revision AS credential_revision,
+    task.created_at AS queued_at,
+    task.started_at AS started_at,
+    task.finished_at AS finished_at,
+    task.updated_at AS updated_at,
+    NULL AS progress_total,
+    NULL AS progress_processed,
+    NULL AS progress_succeeded,
+    NULL AS progress_skipped,
+    NULL AS progress_failed,
+    NULL AS reason_buckets
+FROM icloud_account_onboarding_tasks AS task
+WHERE task.task_kind = 'refresh' AND task.resource_id IS NOT NULL`
+
 // Redis-only bulk cursors are absent from per-resource lists. Their bounded
 // live status remains available through the source-qualified lookup below.
 const microsoftResourceTaskUnion = importResourceTaskSelect + `
@@ -434,6 +465,8 @@ UNION ALL
 const iCloudResourceTaskUnion = iCloudImportResourceTaskSelect + `
 UNION ALL
 ` + iCloudValidationTaskSelect + `
+UNION ALL
+` + iCloudRefreshTaskSelect + `
 UNION ALL
 ` + fetchTaskSelect
 
@@ -895,6 +928,8 @@ func singleTaskSelect(source string) (string, error) {
 		return iCloudImportSingleTaskSelect, nil
 	case governanceapp.AdminTaskSourceICloudOnboarding:
 		return iCloudOnboardingSingleTaskSelect, nil
+	case governanceapp.AdminTaskSourceICloudRefresh:
+		return iCloudRefreshTaskSelect, nil
 	case governanceapp.AdminTaskSourceICloudValidate:
 		return iCloudValidationTaskSelect, nil
 	default:

@@ -86,7 +86,7 @@ func (f *appleOnboardingFlow) prepareICloud(request AppleOnboardingRequest) (App
 
 func (f *appleOnboardingFlow) sendSMS(request AppleOnboardingRequest) (AppleOnboardingResponse, error) {
 	switch request.SMSPurpose {
-	case appleSMSICloudLogin, appleSMSICloudCookieLogin, appleSMSFamilyLogin, appleSMSFamilyReconcileLogin, appleSMSManageLogin:
+	case appleSMSICloudLogin, appleSMSOldCookieLogin, appleSMSICloudCookieLogin, appleSMSFamilyLogin, appleSMSFamilyReconcileLogin, appleSMSManageLogin:
 		phoneID, err := appleOnboardingRawValue(f.state.PendingTrustedPhoneID)
 		if err != nil {
 			return AppleOnboardingResponse{}, appleOnboardingRestart(appleOnboardingRestartStage(request.SMSPurpose))
@@ -142,7 +142,7 @@ func (f *appleOnboardingFlow) verifySMS(request AppleOnboardingRequest) (AppleOn
 		return AppleOnboardingResponse{}, &AppleOnboardingError{Category: "verification_code_missing", SafeMessage: "Apple verification code is missing.", CodeRejected: true}
 	}
 	switch request.SMSPurpose {
-	case appleSMSICloudLogin, appleSMSICloudCookieLogin, appleSMSFamilyLogin, appleSMSFamilyReconcileLogin, appleSMSManageLogin:
+	case appleSMSICloudLogin, appleSMSOldCookieLogin, appleSMSICloudCookieLogin, appleSMSFamilyLogin, appleSMSFamilyReconcileLogin, appleSMSManageLogin:
 		phoneID, err := appleOnboardingRawValue(f.state.PendingTrustedPhoneID)
 		if err != nil {
 			return AppleOnboardingResponse{}, appleOnboardingRestart(appleOnboardingRestartStage(request.SMSPurpose))
@@ -254,7 +254,7 @@ func (f *appleOnboardingFlow) finishICloud(request AppleOnboardingRequest) (Appl
 	} else {
 		f.state.OldChannel = nil
 	}
-	return AppleOnboardingResponse{Next: "ready", CountryCode: f.state.AccountCountry, ICloudOpened: &opened}, nil
+	return AppleOnboardingResponse{Next: "ready", CountryCode: f.state.AccountCountry, ICloudOpened: &opened, OldChannel: f.state.OldChannel}, nil
 }
 
 func (f *appleOnboardingFlow) prepareFamily(request AppleOnboardingRequest) (AppleOnboardingResponse, error) {
@@ -975,6 +975,8 @@ func appleOnboardingRestartStage(purpose string) string {
 	switch purpose {
 	case appleSMSICloudLogin, appleSMSPhoneEnrollment:
 		return "icloud_prepare"
+	case appleSMSOldCookieLogin:
+		return "old_cookie_prepare"
 	case appleSMSICloudCookieLogin:
 		return "icloud_cookie_prepare"
 	case appleSMSFamilyLogin:

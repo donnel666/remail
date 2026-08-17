@@ -73,6 +73,9 @@ func TestParseAdminTaskRefRequiresQualifiedNumericSource(t *testing.T) {
 	historyRef, err := ParseAdminTaskRef("resource_history:42")
 	require.NoError(t, err)
 	require.Equal(t, AdminTaskSourceResourceHistory, historyRef.Source)
+	refreshRef, err := ParseAdminTaskRef("icloud_refresh:42")
+	require.NoError(t, err)
+	require.Equal(t, AdminTaskSourceICloudRefresh, refreshRef.Source)
 
 	for _, value := range []string{"42", "validation:42", "token:", "unknown:1", "token:0", "token:1:2", "token:secret"} {
 		_, err := ParseAdminTaskRef(value)

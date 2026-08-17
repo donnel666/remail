@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	coreinfra "github.com/donnel666/remail/internal/core/infra"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	"github.com/donnel666/remail/internal/kitesim"
 	"github.com/glebarez/sqlite"
@@ -70,6 +71,19 @@ func (p *refreshCountingApple) Execute(context.Context, AppleOnboardingRequest) 
 	return AppleOnboardingResponse{}, errors.New("unexpected Apple call")
 }
 
+type oldCookieBackfillApple struct {
+	calls    int
+	request  AppleOnboardingRequest
+	response AppleOnboardingResponse
+	err      error
+}
+
+func (p *oldCookieBackfillApple) Execute(_ context.Context, request AppleOnboardingRequest) (AppleOnboardingResponse, error) {
+	p.calls++
+	p.request = request
+	return p.response, p.err
+}
+
 type refreshExactPhoneRequired struct {
 	onboardingProvidedPhone
 	exactCalls  int
@@ -95,6 +109,7 @@ func newICloudRefreshTestDB(t *testing.T) *gorm.DB {
 	if err := db.AutoMigrate(
 		&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudResourceChannelModel{}, &iCloudResourceCredentialModel{},
 		&iCloudOnboardingImportModel{}, &iCloudOnboardingTaskModel{},
+		&governanceinfra.OperationLogModel{}, &coreinfra.AdminResourceCommandReceiptModel{},
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -153,6 +168,218 @@ func TestEnsureICloudCookieRefreshCreatesOnePermanentPhoneTask(t *testing.T) {
 	}
 	if len(tasks) != 1 || tasks[0].Stage != "icloud_prepare" || tasks[0].BoundPhoneNumber != resource.BoundPhoneNumber || tasks[0].ExpectedCredentialRevision != resource.CredentialRevision {
 		t.Fatalf("unexpected refresh tasks: %+v", tasks)
+	}
+}
+
+func TestApplyAdminICloudActivationQueuesForcedOldCookieRefresh(t *testing.T) {
+	now := time.Date(2026, 8, 17, 8, 0, 0, 0, time.UTC)
+	db := newICloudRefreshTestDB(t)
+	resource := seedICloudRefreshResource(t, db, now)
+	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", resource.ID).Update("icloud_opened", false).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Where("resource_id = ? AND kind = ?", resource.ID, iCloudChannelWeb).Delete(&iCloudResourceChannelModel{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&iCloudResourceChannelModel{}).Where("resource_id = ?", resource.ID).Update("session_status", iCloudSessionValid).Error; err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+
+	result, err := service.ApplyAdminICloudCommand(
+		context.Background(), AdminICloudActivate, resource.ID, 1, 9,
+		"activate-icloud-1", "request-1", "/v1/admin/icloud/resources/1/icloud-activation",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Changed || result.Version != 2 {
+		t.Fatalf("activation result = %+v", result)
+	}
+	var stored iCloudResourceModel
+	if err := db.First(&stored, resource.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.ICloudOpened {
+		t.Fatal("resource was marked open before the old Cookie was exported")
+	}
+	var tasks []iCloudOnboardingTaskModel
+	if err := db.Where("task_kind = ? AND resource_id = ?", "refresh", resource.ID).Find(&tasks).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 1 || tasks[0].Stage != "old_cookie_prepare" || tasks[0].PendingSMSPurpose != appleSMSOldCookieLogin || !tasks[0].ICloudOpened {
+		t.Fatalf("forced refresh task = %+v", tasks)
+	}
+
+	replayed, err := service.ApplyAdminICloudCommand(
+		context.Background(), AdminICloudActivate, resource.ID, 1, 9,
+		"activate-icloud-1", "request-1", "/v1/admin/icloud/resources/1/icloud-activation",
+	)
+	if err != nil || replayed.Version != result.Version {
+		t.Fatalf("replayed activation = %+v, err = %v", replayed, err)
+	}
+	var count int64
+	if err := db.Model(&iCloudOnboardingTaskModel{}).Where("task_kind = ? AND resource_id = ?", "refresh", resource.ID).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("refresh task count = %d, err = %v", count, err)
+	}
+}
+
+func TestICloudOldCookieBackfillPreservesNewCookieAndResourceState(t *testing.T) {
+	now := time.Date(2026, 8, 17, 8, 10, 0, 0, time.UTC)
+	db := newICloudRefreshTestDB(t)
+	resource := seedICloudRefreshResource(t, db, now)
+	nextValidationAt := now.Add(10 * time.Minute)
+	nextProvisionAt := now.Add(20 * time.Minute)
+	lastAllocatedAt := now.Add(-time.Hour)
+	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", resource.ID).Updates(map[string]any{
+		"icloud_opened": false, "status": iCloudResourceNormal, "for_sale": true,
+		"next_validation_at": nextValidationAt, "next_provision_at": nextProvisionAt,
+		"validation_failures": 2, "alias_count": 4, "alias_provision_candidate": "pending@example.com", "alias_provision_reconcile": true,
+		"last_allocated_at": lastAllocatedAt, "last_safe_error": "keep-resource-state",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&iCloudResourceChannelModel{}).
+		Where("resource_id = ? AND kind = ?", resource.ID, iCloudChannelAppleAccount).
+		Updates(map[string]any{"cookie": "myacinfo=healthy-new", "session_status": iCloudSessionValid}).Error; err != nil {
+		t.Fatal(err)
+	}
+	secret, _ := json.Marshal(iCloudOnboardingSecret{Password: "Secret1!", Birthday: "2000-11-02"})
+	resourceID := resource.ID
+	task := iCloudOnboardingTaskModel{
+		ResourceID: &resourceID, TaskKind: "refresh", PrimaryEmail: resource.PrimaryEmail, AccountRole: "primary", ICloudOpened: true,
+		BoundPhoneNumber: resource.BoundPhoneNumber, BoundPhoneCountryCode: "US", BoundPhoneSource: "manual", KitesimPhoneID: resource.KitesimPhoneID,
+		SecretPayload: secret, PendingSMSPurpose: appleSMSOldCookieLogin,
+		Status: iCloudOnboardingProcessing, Stage: "old_cookie_finish", DispatchStatus: "pending",
+		Generation: 1, ExpectedCredentialRevision: resource.CredentialRevision, MaxAttempts: 5, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&task).Error; err != nil {
+		t.Fatal(err)
+	}
+	opened := true
+	provider := &oldCookieBackfillApple{response: AppleOnboardingResponse{
+		ICloudOpened: &opened,
+		OldChannel: &AppleOnboardingChannel{
+			Kind: iCloudChannelWeb, Host: "p1-maildomainws.icloud.com", Cookie: "X-APPLE-WEBAUTH-TOKEN=backfilled",
+			DSID: "123", ClientID: "client", ClientBuildNumber: "build", ClientMasteringNumber: "master",
+		},
+	}}
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	service.onboardingApple = provider
+	if err := service.ProcessICloudOnboardingTask(context.Background(), iCloudOnboardingTask{TaskID: task.ID, Generation: task.Generation}); err != nil {
+		t.Fatal(err)
+	}
+	if provider.calls != 1 || provider.request.Operation != appleOnboardingFinishICloud {
+		t.Fatalf("backfill requests = %d, last = %+v", provider.calls, provider.request)
+	}
+	var newChannel, oldChannel iCloudResourceChannelModel
+	if err := db.Where("resource_id = ? AND kind = ?", resource.ID, iCloudChannelAppleAccount).First(&newChannel).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Where("resource_id = ? AND kind = ?", resource.ID, iCloudChannelWeb).First(&oldChannel).Error; err != nil {
+		t.Fatal(err)
+	}
+	if newChannel.Cookie != "myacinfo=healthy-new" || newChannel.SessionStatus != iCloudSessionValid || oldChannel.Cookie != "X-APPLE-WEBAUTH-TOKEN=backfilled" {
+		t.Fatalf("channels after backfill: new=%+v old=%+v", newChannel, oldChannel)
+	}
+	var stored iCloudResourceModel
+	if err := db.First(&stored, resource.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !stored.ICloudOpened || stored.Status != iCloudResourceNormal || !stored.ForSale || stored.ValidationGeneration != resource.ValidationGeneration || stored.ValidationFailures != 2 || stored.AliasCount != 4 ||
+		stored.AliasProvisionCandidate != "pending@example.com" || !stored.AliasProvisionReconcile || stored.LastAllocatedAt == nil || !stored.LastAllocatedAt.Equal(lastAllocatedAt) || stored.LastSafeError != "keep-resource-state" ||
+		stored.NextValidationAt == nil || !stored.NextValidationAt.Equal(nextValidationAt) || stored.NextProvisionAt == nil || !stored.NextProvisionAt.Equal(nextProvisionAt) {
+		t.Fatalf("resource state changed by backfill: %+v", stored)
+	}
+	if err := db.First(&task, task.ID).Error; err != nil || task.Status != iCloudOnboardingCompleted || task.PendingSMSPurpose != "" {
+		t.Fatalf("backfill task = %+v err=%v", task, err)
+	}
+}
+
+func TestICloudOldCookieBackfillFailuresDoNotMarkHealthyResourceAbnormal(t *testing.T) {
+	for _, infrastructureFailure := range []bool{false, true} {
+		name := "provider"
+		if infrastructureFailure {
+			name = "infrastructure"
+		}
+		t.Run(name, func(t *testing.T) {
+			now := time.Date(2026, 8, 17, 8, 20, 0, 0, time.UTC)
+			db := newICloudRefreshTestDB(t)
+			resource := seedICloudRefreshResource(t, db, now)
+			nextProvisionAt := now.Add(30 * time.Minute)
+			lastAllocatedAt := now.Add(-time.Hour)
+			if err := db.Model(&iCloudResourceModel{}).Where("id = ?", resource.ID).Updates(map[string]any{
+				"status": iCloudResourceNormal, "for_sale": true, "next_provision_at": nextProvisionAt,
+				"alias_provision_candidate": "pending@example.com", "alias_provision_reconcile": true,
+				"last_allocated_at": lastAllocatedAt, "last_safe_error": "healthy",
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			secret, _ := json.Marshal(iCloudOnboardingSecret{Password: "Secret1!", Birthday: "2000-11-02"})
+			resourceID := resource.ID
+			task := iCloudOnboardingTaskModel{
+				ResourceID: &resourceID, TaskKind: "refresh", PrimaryEmail: resource.PrimaryEmail, AccountRole: "primary", ICloudOpened: true,
+				BoundPhoneNumber: resource.BoundPhoneNumber, BoundPhoneCountryCode: "US", BoundPhoneSource: "manual", KitesimPhoneID: resource.KitesimPhoneID,
+				SecretPayload: secret, PendingSMSPurpose: appleSMSOldCookieLogin,
+				Status: iCloudOnboardingProcessing, Stage: "old_cookie_prepare", DispatchStatus: "pending",
+				Generation: 1, ExpectedCredentialRevision: resource.CredentialRevision, MaxAttempts: 2, CreatedAt: now, UpdatedAt: now,
+			}
+			if infrastructureFailure {
+				task.DispatchStatus = "running"
+				task.ClaimToken = "claim"
+				task.Attempts = 1
+			}
+			if err := db.Create(&task).Error; err != nil {
+				t.Fatal(err)
+			}
+			service := NewService(db, nil, nil)
+			service.now = func() time.Time { return now }
+			if infrastructureFailure {
+				if err := service.ReleaseICloudOnboardingTask(context.Background(), iCloudOnboardingTask{TaskID: task.ID, Generation: task.Generation}, "temporary failure"); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				service.onboardingApple = &oldCookieBackfillApple{err: &AppleOnboardingError{Category: "provider_rejected", SafeMessage: "Apple rejected the request."}}
+				if err := service.ProcessICloudOnboardingTask(context.Background(), iCloudOnboardingTask{TaskID: task.ID, Generation: task.Generation}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := db.First(&task, task.ID).Error; err != nil || task.Status != iCloudOnboardingFailed {
+				t.Fatalf("failed backfill task = %+v err=%v", task, err)
+			}
+			var stored iCloudResourceModel
+			if err := db.First(&stored, resource.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			if stored.Status != iCloudResourceNormal || !stored.ForSale || stored.NextProvisionAt == nil || !stored.NextProvisionAt.Equal(nextProvisionAt) ||
+				stored.AliasProvisionCandidate != "pending@example.com" || !stored.AliasProvisionReconcile || stored.LastAllocatedAt == nil || !stored.LastAllocatedAt.Equal(lastAllocatedAt) || stored.LastSafeError != "healthy" {
+				t.Fatalf("healthy resource changed after backfill failure: %+v", stored)
+			}
+		})
+	}
+}
+
+func TestICloudOldCookieSMSRecoveryKeepsBackfillMarker(t *testing.T) {
+	now := time.Date(2026, 8, 17, 8, 30, 0, 0, time.UTC)
+	db := newICloudRefreshTestDB(t)
+	task := iCloudOnboardingTaskModel{
+		TaskKind: "refresh", PrimaryEmail: "backfill-recovery@example.com", AccountRole: "primary",
+		PendingSMSPurpose: appleSMSOldCookieLogin, Status: iCloudOnboardingProcessing,
+		Stage: "sms_verify_recover", DispatchStatus: "running", ClaimToken: "claim",
+		Generation: 1, MaxAttempts: 5, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&task).Error; err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	if err := service.recoverICloudOnboardingSMSVerification(context.Background(), &task); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(&task, task.ID).Error; err != nil || task.Stage != "old_cookie_prepare" || task.PendingSMSPurpose != appleSMSOldCookieLogin {
+		t.Fatalf("recovered backfill task = %+v err=%v", task, err)
 	}
 }
 

@@ -27,6 +27,7 @@ const (
 	AdminTaskKindValidation    = "validation"
 	AdminTaskKindAlias         = "alias"
 	AdminTaskKindToken         = "token"
+	AdminTaskKindRefresh       = "refresh"
 	AdminTaskKindFetch         = "fetch"
 	AdminTaskKindHistory       = "history"
 	AdminTaskKindBulkValidate  = "bulk_validation"
@@ -55,6 +56,7 @@ const (
 	AdminTaskSourceGmailHistory     = "gmail_history"
 	AdminTaskSourceICloudImport     = "icloud_import"
 	AdminTaskSourceICloudOnboarding = "icloud_onboarding"
+	AdminTaskSourceICloudRefresh    = "icloud_refresh"
 	AdminTaskSourceICloudValidate   = "icloud_validation"
 )
 
@@ -114,6 +116,7 @@ func isAdminTaskSource(value string) bool {
 		AdminTaskSourceGmailHistory,
 		AdminTaskSourceICloudImport,
 		AdminTaskSourceICloudOnboarding,
+		AdminTaskSourceICloudRefresh,
 		AdminTaskSourceICloudValidate:
 		return true
 	default:
@@ -305,6 +308,7 @@ func isAdminTaskKind(value string) bool {
 		AdminTaskKindValidation,
 		AdminTaskKindAlias,
 		AdminTaskKindToken,
+		AdminTaskKindRefresh,
 		AdminTaskKindFetch,
 		AdminTaskKindHistory,
 		AdminTaskKindBulkValidate,

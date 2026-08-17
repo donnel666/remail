@@ -194,6 +194,8 @@ func (s *Service) processICloudOnboardingStage(ctx context.Context, task *iCloud
 		return s.assignICloudOnboardingPhone(ctx, task)
 	case "icloud_prepare":
 		return s.prepareICloudOnboardingApple(ctx, task, secret, appleOnboardingPrepareICloud, "icloud_finish")
+	case "old_cookie_prepare":
+		return s.prepareICloudOnboardingApple(ctx, task, secret, appleOnboardingPrepareICloud, "old_cookie_finish")
 	case "icloud_cookie_prepare":
 		return s.prepareICloudOnboardingApple(ctx, task, secret, appleOnboardingPrepareICloudCookie, "icloud_cookie_finish")
 	case "sms_send":
@@ -205,6 +207,8 @@ func (s *Service) processICloudOnboardingStage(ctx context.Context, task *iCloud
 	case "sms_verify_recover":
 		return s.recoverICloudOnboardingSMSVerification(ctx, task)
 	case "icloud_finish":
+		return s.finishICloudOnboardingICloud(ctx, task, secret, false)
+	case "old_cookie_finish":
 		return s.finishICloudOnboardingICloud(ctx, task, secret, false)
 	case "icloud_cookie_finish":
 		return s.finishICloudOnboardingICloud(ctx, task, secret, true)
@@ -379,7 +383,10 @@ func (s *Service) prepareICloudOnboardingAppleWithInvite(ctx context.Context, ta
 	if response.Next == "ready" || response.Next == "" {
 		return s.advanceICloudOnboardingTask(ctx, task, readyStage, nil, updates)
 	}
-	if response.Next != appleSMSICloudLogin && response.Next != appleSMSICloudCookieLogin && response.Next != appleSMSPhoneEnrollment && response.Next != appleSMSFamilyLogin && response.Next != appleSMSFamilyReconcileLogin && response.Next != appleSMSManageLogin {
+	if isICloudOldCookieBackfill(task) && response.Next == appleSMSICloudLogin {
+		response.Next = appleSMSOldCookieLogin
+	}
+	if response.Next != appleSMSICloudLogin && response.Next != appleSMSOldCookieLogin && response.Next != appleSMSICloudCookieLogin && response.Next != appleSMSPhoneEnrollment && response.Next != appleSMSFamilyLogin && response.Next != appleSMSFamilyReconcileLogin && response.Next != appleSMSManageLogin {
 		return s.failICloudOnboardingTask(ctx, task, "unsupported_challenge", "Apple returned an unsupported authentication challenge.")
 	}
 	if task.KitesimPhoneID == nil && response.Next != appleSMSPhoneEnrollment {
@@ -573,6 +580,7 @@ func (s *Service) verifyICloudOnboardingSMS(ctx context.Context, task *iCloudOnb
 	}
 	next := map[string]string{
 		appleSMSICloudLogin: "icloud_finish", appleSMSPhoneEnrollment: "icloud_finish",
+		appleSMSOldCookieLogin:       "old_cookie_finish",
 		appleSMSICloudCookieLogin:    "icloud_cookie_finish",
 		appleSMSFamilyLogin:          "family_join_intent",
 		appleSMSFamilyReconcileLogin: "family_join_apply",
@@ -601,8 +609,9 @@ func (s *Service) verifyICloudOnboardingSMS(ctx context.Context, task *iCloudOnb
 			return ErrICloudOnboardingTemporary
 		}
 	}
-	updates := map[string]any{
-		"manual_verification_code": "", "pending_sms_purpose": "", "sms_sent_at": nil, "sms_poll_deadline": nil,
+	updates := map[string]any{"manual_verification_code": "", "sms_sent_at": nil, "sms_poll_deadline": nil}
+	if task.PendingSMSPurpose != appleSMSOldCookieLogin {
+		updates["pending_sms_purpose"] = ""
 	}
 	if len(response.Session) > 0 {
 		updates["session_payload"] = []byte(response.Session)
@@ -629,16 +638,17 @@ func (s *Service) prepareICloudOnboardingSMSVerification(ctx context.Context, ta
 
 func (s *Service) recoverICloudOnboardingSMSVerification(ctx context.Context, task *iCloudOnboardingTaskModel) error {
 	switch task.PendingSMSPurpose {
-	case appleSMSICloudLogin, appleSMSICloudCookieLogin, appleSMSPhoneEnrollment, appleSMSFamilyLogin, appleSMSFamilyReconcileLogin, appleSMSManageLogin:
+	case appleSMSICloudLogin, appleSMSOldCookieLogin, appleSMSICloudCookieLogin, appleSMSPhoneEnrollment, appleSMSFamilyLogin, appleSMSFamilyReconcileLogin, appleSMSManageLogin:
 	default:
 		return s.failICloudOnboardingTask(ctx, task, "invalid_sms_state", "Apple SMS verification recovery state is invalid.")
 	}
 	restart := appleOnboardingRestartStage(task.PendingSMSPurpose)
 	s.cancelICloudOnboardingSMSChallenge(context.WithoutCancel(ctx), task)
-	return s.advanceICloudOnboardingTask(ctx, task, restart, nil, map[string]any{
-		"session_payload": nil, "pending_sms_purpose": "", "manual_verification_code": "",
-		"sms_sent_at": nil, "sms_poll_deadline": nil,
-	})
+	updates := map[string]any{"session_payload": nil, "manual_verification_code": "", "sms_sent_at": nil, "sms_poll_deadline": nil}
+	if task.PendingSMSPurpose != appleSMSOldCookieLogin {
+		updates["pending_sms_purpose"] = ""
+	}
+	return s.advanceICloudOnboardingTask(ctx, task, restart, nil, updates)
 }
 
 func (s *Service) waitForICloudOnboardingSMSChallenge(ctx context.Context, task *iCloudOnboardingTaskModel, reservation kitesim.SMSReservation, session json.RawMessage) error {
@@ -720,6 +730,12 @@ func (s *Service) finishICloudOnboardingICloud(ctx context.Context, task *iCloud
 	if response.ICloudOpened != nil && !*response.ICloudOpened {
 		updates["icloud_activation_confirmed_at"] = gorm.Expr("NULL")
 		return s.waitICloudOnboardingTaskWithUpdates(ctx, task, nil, "waiting", "Waiting for manual iCloud activation.", updatesWith(updates, "stage", "waiting_icloud_activation"))
+	}
+	if isICloudOldCookieBackfill(task) {
+		if response.OldChannel == nil || strings.TrimSpace(response.OldChannel.Cookie) == "" {
+			return s.failICloudOnboardingTask(ctx, task, "old_cookie_missing", "iCloud did not return a usable V2 session cookie.")
+		}
+		return s.completeICloudOldCookieBackfill(ctx, task, *response.OldChannel)
 	}
 	next := "family_select"
 	if afterFamily || task.TaskKind == "refresh" || task.AccountRole == "primary" || task.BoundPhoneSource == "manual" {
@@ -1281,6 +1297,9 @@ func (s *Service) handleICloudOnboardingAppleError(ctx context.Context, task *iC
 		return ErrICloudOnboardingTemporary
 	}
 	if restart := strings.TrimSpace(appleErr.RestartStage); restart != "" {
+		if isICloudOldCookieBackfill(task) && restart == "icloud_prepare" {
+			restart = "old_cookie_prepare"
+		}
 		if isICloudPostFamilyRecoveryTask(task) {
 			switch restart {
 			case "icloud_prepare":
@@ -1290,16 +1309,15 @@ func (s *Service) handleICloudOnboardingAppleError(ctx context.Context, task *iC
 			}
 		}
 		switch restart {
-		case "icloud_prepare", "icloud_cookie_prepare", "family_prepare", "family_reconcile_prepare", "manage_prepare",
+		case "icloud_prepare", "old_cookie_prepare", "icloud_cookie_prepare", "family_prepare", "family_reconcile_prepare", "manage_prepare",
 			"forwarding_prepare", "forwarding_add_intent", "forwarding_add_apply", "forwarding_wait",
 			"forwarding_verify_intent", "forwarding_verify_apply", "resource_import":
 		default:
 			return s.failICloudOnboardingTask(ctx, task, "invalid_restart_stage", "Apple onboarding could not recover its authentication session.")
 		}
-		updates := map[string]any{
-			"session_payload":     nil,
-			"pending_sms_purpose": "", "manual_verification_code": "",
-			"sms_sent_at": nil, "sms_poll_deadline": nil,
+		updates := map[string]any{"session_payload": nil, "manual_verification_code": "", "sms_sent_at": nil, "sms_poll_deadline": nil}
+		if !isICloudOldCookieBackfill(task) {
+			updates["pending_sms_purpose"] = ""
 		}
 		s.cancelICloudOnboardingSMSChallenge(context.WithoutCancel(ctx), task)
 		return s.retryICloudOnboardingTask(ctx, task, restart, nil, firstNonEmpty(appleErr.Category, "session_expired"), appleErr.SafeMessage, updates)
@@ -1603,7 +1621,7 @@ func (s *Service) releaseICloudOnboardingTask(ctx context.Context, payload iClou
 				return err
 			}
 		}
-		if task.TaskKind == "refresh" && task.ResourceID != nil {
+		if task.TaskKind == "refresh" && task.ResourceID != nil && !isICloudOldCookieBackfill(&task) {
 			return tx.Model(&iCloudResourceModel{}).
 				Where("id = ? AND credential_revision = ? AND status NOT IN ?", *task.ResourceID, task.ExpectedCredentialRevision, []string{iCloudResourceDeleted, iCloudResourceDisabled}).
 				Updates(map[string]any{
@@ -1913,7 +1931,9 @@ func (s *Service) ConfirmICloudOnboardingActivation(ctx context.Context, taskID,
 		}
 		importID = iCloudOnboardingImportID(&task)
 		nextStage := "icloud_prepare"
-		if task.FamilyReservationConfirmed {
+		if isICloudOldCookieBackfill(&task) {
+			nextStage = "old_cookie_prepare"
+		} else if task.FamilyReservationConfirmed {
 			nextStage = "icloud_cookie_prepare"
 		} else if firstNonEmpty(task.TaskKind, "onboarding") == "onboarding" && task.AccountRole == "child" &&
 			task.BoundPhoneSource != "manual" {

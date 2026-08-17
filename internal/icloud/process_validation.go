@@ -379,7 +379,7 @@ func (s *Service) applyICloudChannelValidationResult(ctx context.Context, task i
 			return errICloudValidationStale
 		}
 		var ensureErr error
-		refreshCreated, ensureErr = s.ensureICloudCookieRefreshTx(ctx, tx, resource.ID)
+		refreshCreated, ensureErr = s.ensureICloudCookieRefreshTx(ctx, tx, resource.ID, false)
 		if ensureErr != nil {
 			return ensureErr
 		}

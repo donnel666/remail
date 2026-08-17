@@ -83,6 +83,72 @@ INSERT INTO icloud_maintenance_runs(
 	require.WithinDuration(t, time.Date(2026, 8, 8, 0, 0, 0, 0, time.UTC), items[1].QueuedAt.UTC(), time.Second)
 }
 
+func TestAdminTaskViewRepoListsICloudRefreshTasks(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:governance-icloud-refresh?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.Exec(`
+CREATE TABLE icloud_account_onboarding_tasks (
+    id INTEGER PRIMARY KEY,
+    resource_id INTEGER,
+    task_kind TEXT NOT NULL,
+    status TEXT NOT NULL,
+    dispatch_status TEXT NOT NULL,
+    attempts INTEGER NOT NULL,
+    max_attempts INTEGER NOT NULL,
+    expected_credential_revision INTEGER NOT NULL,
+    created_at DATETIME NOT NULL,
+    started_at DATETIME,
+    finished_at DATETIME,
+    updated_at DATETIME NOT NULL
+);
+INSERT INTO icloud_account_onboarding_tasks(
+    id, resource_id, task_kind, status, dispatch_status, attempts, max_attempts,
+    expected_credential_revision, created_at, started_at, finished_at, updated_at
+) VALUES
+    (201, 7, 'refresh', 'processing', 'pending', 0, 5, 9, '2026-08-17 08:00:00', NULL, NULL, '2026-08-17 08:00:00'),
+    (202, 7, 'refresh', 'processing', 'running', 1, 5, 9, '2026-08-17 08:01:00', '2026-08-17 08:01:01', NULL, '2026-08-17 08:01:01'),
+    (203, 7, 'refresh', 'waiting', 'waiting', 2, 5, 9, '2026-08-17 08:02:00', '2026-08-17 08:02:01', NULL, '2026-08-17 08:02:02'),
+    (204, 7, 'refresh', 'completed', 'succeeded', 2, 5, 9, '2026-08-17 08:03:00', '2026-08-17 08:03:01', '2026-08-17 08:03:02', '2026-08-17 08:03:02'),
+    (205, 7, 'refresh', 'failed', 'failed', 5, 5, 9, '2026-08-17 08:04:00', '2026-08-17 08:04:01', '2026-08-17 08:04:02', '2026-08-17 08:04:02'),
+    (206, 8, 'refresh', 'processing', 'pending', 0, 5, 4, '2026-08-17 08:05:00', NULL, NULL, '2026-08-17 08:05:00'),
+    (207, 7, 'onboarding', 'processing', 'pending', 0, 5, 0, '2026-08-17 08:06:00', NULL, NULL, '2026-08-17 08:06:00');
+`).Error)
+
+	repo := NewAdminTaskViewRepo(db)
+	items, total, succeeded, err := repo.listForResource(context.Background(), governanceapp.AdminTaskListFilter{
+		BizID: 7, Source: governanceapp.AdminTaskSourceICloudRefresh, Limit: 20,
+	}, iCloudRefreshTaskSelect)
+	require.NoError(t, err)
+	require.Equal(t, int64(5), total)
+	require.Equal(t, int64(1), succeeded)
+	require.Len(t, items, 5)
+	require.Contains(t, iCloudResourceTaskUnion, iCloudRefreshTaskSelect)
+
+	statuses := make(map[string]string, len(items))
+	for _, item := range items {
+		statuses[item.TaskID()] = item.Status
+		require.Equal(t, governanceapp.AdminTaskBizICloudResource, item.BizType)
+		require.Equal(t, uint64(7), item.BizID)
+		require.Equal(t, governanceapp.AdminTaskKindRefresh, item.Kind)
+		require.Equal(t, uint64(9), *item.CredentialRevision)
+	}
+	require.Equal(t, map[string]string{
+		"icloud_refresh:201": governanceapp.AdminTaskStatusQueued,
+		"icloud_refresh:202": governanceapp.AdminTaskStatusRunning,
+		"icloud_refresh:203": governanceapp.AdminTaskStatusUncertain,
+		"icloud_refresh:204": governanceapp.AdminTaskStatusSucceeded,
+		"icloud_refresh:205": governanceapp.AdminTaskStatusFailed,
+	}, statuses)
+
+	task, err := repo.FindByRef(context.Background(), governanceapp.AdminTaskRef{
+		Source: governanceapp.AdminTaskSourceICloudRefresh,
+		ID:     203,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "icloud_refresh:203", task.TaskID())
+	require.Equal(t, governanceapp.AdminTaskStatusUncertain, task.Status)
+}
+
 func TestAdminTaskViewRepoListsActiveICloudOnboardingImports(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:governance-icloud-onboarding?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)

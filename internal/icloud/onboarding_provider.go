@@ -27,6 +27,7 @@ const (
 	appleOnboardingExport                 = "export"
 
 	appleSMSICloudLogin          = "icloud_login"
+	appleSMSOldCookieLogin       = "old_cookie_login"
 	appleSMSICloudCookieLogin    = "icloud_cookie_login"
 	appleSMSPhoneEnrollment      = "phone_enrollment"
 	appleSMSFamilyLogin          = "family_login"
