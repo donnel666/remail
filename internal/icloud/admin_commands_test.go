@@ -236,6 +236,108 @@ func TestEditAdminICloudResourcePatchesSubmittedChannels(t *testing.T) {
 	}
 }
 
+func TestEditAdminICloudResourceRejectsOnboardedIdentityChange(t *testing.T) {
+	tests := []struct {
+		name      string
+		role      string
+		withPhone bool
+	}{
+		{name: "account role", role: "child"},
+		{name: "permanent phone binding", role: "unknown", withPhone: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			db := newAdminICloudCommandTestDB(t, "icloud-admin-edit-identity-"+strings.ReplaceAll(test.name, " ", "-"))
+			now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+			resource := iCloudResourceModel{
+				ID: 1, ResourceType: "icloud", PrimaryEmail: "owner@icloud.com", AccountRole: test.role,
+				Status: iCloudResourceNormal, ExpireAt: now.Add(time.Hour), CredentialRevision: 1,
+			}
+			if test.withPhone {
+				phoneID := uint(42)
+				resource.KitesimPhoneID = &phoneID
+			}
+			createAdminICloudCommandResource(t, db, now, resource)
+
+			service := NewService(db, nil, nil)
+			service.now = func() time.Time { return now }
+			line := "renamed@icloud.com----" + testICloudOldCurl
+			_, err := service.EditAdminICloudResource(context.Background(), AdminICloudEditCommand{
+				ResourceID: 1, Version: 1, ImportLine: &line,
+				OperatorUserID: 99, IdempotencyKey: "reject-identity-change", RequestID: "reject-identity-change", Path: "/v1/admin/icloud/resources/1",
+			})
+			if !errors.Is(err, ErrICloudResourceUpdate) {
+				t.Fatalf("identity change error = %v", err)
+			}
+			var stored iCloudResourceModel
+			if err := db.First(&stored, 1).Error; err != nil || stored.PrimaryEmail != "owner@icloud.com" {
+				t.Fatalf("identity change mutated resource: resource=%#v err=%v", stored, err)
+			}
+		})
+	}
+}
+
+func TestEditAdminICloudResourceChangingInviteClearsQuarantine(t *testing.T) {
+	db := newAdminICloudCommandTestDB(t, "icloud-admin-edit-family-invite")
+	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	createAdminICloudCommandResource(t, db, now, iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "primary@example.com", AccountRole: "primary",
+		FamilyInviteURL: "old-token", FamilySyncStatus: iCloudFamilySyncReady,
+		FamilySyncErrorCategory: "family_invite_invalid", Status: iCloudResourceNormal, ExpireAt: now.Add(time.Hour),
+	})
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+
+	same := "old-token"
+	result, err := service.EditAdminICloudResource(context.Background(), AdminICloudEditCommand{
+		ResourceID: 1, Version: 1, FamilyInviteURL: &same,
+		OperatorUserID: 99, IdempotencyKey: "same-invite", RequestID: "same-invite", Path: "/v1/admin/icloud/resources/1",
+	})
+	if err != nil || result.Changed || result.Version != 1 {
+		t.Fatalf("same invitation edit: result=%#v err=%v", result, err)
+	}
+	var resource iCloudResourceModel
+	if err := db.First(&resource, 1).Error; err != nil || resource.FamilySyncErrorCategory != "family_invite_invalid" {
+		t.Fatalf("same invitation removed quarantine: resource=%#v err=%v", resource, err)
+	}
+
+	replacement := "new-token"
+	result, err = service.EditAdminICloudResource(context.Background(), AdminICloudEditCommand{
+		ResourceID: 1, Version: 1, FamilyInviteURL: &replacement,
+		OperatorUserID: 99, IdempotencyKey: "replacement-invite", RequestID: "replacement-invite", Path: "/v1/admin/icloud/resources/1",
+	})
+	if err != nil || !result.Changed || result.Version != 2 {
+		t.Fatalf("replacement invitation edit: result=%#v err=%v", result, err)
+	}
+	if err := db.First(&resource, 1).Error; err != nil || resource.FamilyInviteURL != replacement || resource.FamilySyncErrorCategory != "" {
+		t.Fatalf("replacement invitation did not clear quarantine: resource=%#v err=%v", resource, err)
+	}
+}
+
+func TestEditAdminICloudResourceRejectsInviteOnChild(t *testing.T) {
+	db := newAdminICloudCommandTestDB(t, "icloud-admin-edit-child-family-invite")
+	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	createAdminICloudCommandResource(t, db, now, iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "child@example.com", AccountRole: "child",
+		Status: iCloudResourceNormal, ExpireAt: now.Add(time.Hour),
+	})
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	invite := "new-token"
+
+	_, err := service.EditAdminICloudResource(context.Background(), AdminICloudEditCommand{
+		ResourceID: 1, Version: 1, FamilyInviteURL: &invite,
+		OperatorUserID: 99, IdempotencyKey: "child-invite", RequestID: "child-invite", Path: "/v1/admin/icloud/resources/1",
+	})
+	if !errors.Is(err, ErrICloudResourceUpdate) {
+		t.Fatalf("child invitation error = %v", err)
+	}
+	var resource iCloudResourceModel
+	if err := db.First(&resource, 1).Error; err != nil || resource.FamilyInviteURL != "" {
+		t.Fatalf("child invitation mutated resource: resource=%#v err=%v", resource, err)
+	}
+}
+
 func TestEditAdminICloudResourceSilentlyVerifiesUpdatedChannel(t *testing.T) {
 	db := newAdminICloudCommandTestDB(t, "icloud-admin-edit-silent-channel-check")
 	now := time.Date(2026, 8, 15, 9, 30, 0, 0, time.UTC)

@@ -30,6 +30,15 @@ type iCloudAdminTestGroup struct {
 
 func (iCloudAdminTestGroup) TableName() string { return "user_groups" }
 
+type iCloudAdminTestPhone struct {
+	ID          uint   `gorm:"column:id;primaryKey"`
+	PhoneCode   string `gorm:"column:phone_code"`
+	PhoneNumber string `gorm:"column:phone_number"`
+	Status      int    `gorm:"column:status"`
+}
+
+func (iCloudAdminTestPhone) TableName() string { return "kitesim_phones" }
+
 func TestListAdminICloudResourcesReturnsOnlySafeOperationalFacts(t *testing.T) {
 	previousSuffixes := runtimeconfig.String(runtimeconfig.ICloudForwardingSuffixesKey, "")
 	runtimeconfig.Set(runtimeconfig.ICloudForwardingSuffixesKey, "RELAY.EXAMPLE.,mail.example")
@@ -42,11 +51,13 @@ func TestListAdminICloudResourcesReturnsOnlySafeOperationalFacts(t *testing.T) {
 	if err := db.AutoMigrate(
 		&iCloudAdminTestGroup{}, &iCloudAdminTestUser{}, &iCloudRootModel{},
 		&iCloudResourceModel{}, &iCloudResourceChannelModel{}, &iCloudAliasModel{},
+		&iCloudOnboardingTaskModel{}, &iCloudAdminTestPhone{},
 	); err != nil {
 		t.Fatalf("migrate database: %v", err)
 	}
 	now := time.Date(2026, 8, 14, 8, 0, 0, 0, time.UTC)
 	nextProvisionAt := now.Add(time.Minute)
+	phoneID := uint(91)
 	models := []any{
 		&iCloudAdminTestGroup{ID: 3, Name: "Suppliers"},
 		&iCloudAdminTestUser{ID: 7, Email: "owner@example.com", Nickname: "Owner", Status: "active", Role: "supplier", UserGroupID: 3},
@@ -54,6 +65,7 @@ func TestListAdminICloudResourcesReturnsOnlySafeOperationalFacts(t *testing.T) {
 		&iCloudRootModel{ID: 2, Type: "icloud", OwnerUserID: 7, Version: 2, CreatedAt: now.Add(-time.Hour), UpdatedAt: now},
 		&iCloudResourceModel{
 			ID: 1, ResourceType: "icloud", PrimaryEmail: "main@icloud.com",
+			BoundPhoneNumber: "13600000000", BoundPhoneCountryCode: "CN", KitesimPhoneID: &phoneID,
 			SelectedForwardTo: "inbox@relay.example",
 			ExpireAt:          now.Add(30 * 24 * time.Hour), Status: iCloudResourceNormal, AliasCount: iCloudMaxAliases - 1,
 			AliasProvisionCandidate: "candidate@icloud.com", NextProvisionAt: &nextProvisionAt,
@@ -68,6 +80,7 @@ func TestListAdminICloudResourcesReturnsOnlySafeOperationalFacts(t *testing.T) {
 		},
 		&iCloudResourceChannelModel{ResourceID: 1, Kind: iCloudChannelAppleAccount, Host: "appleid.apple.com", Cookie: "secret-new-cookie", Scnt: "secret-scnt", SessionStatus: iCloudSessionInvalid, SessionFailures: 2, CreatedAt: now, UpdatedAt: now},
 		&iCloudResourceChannelModel{ResourceID: 1, Kind: iCloudChannelWeb, Host: "p119-maildomainws.icloud.com", Cookie: "secret-old-cookie", DSID: "secret-dsid", SessionStatus: iCloudSessionValid, SessionFailures: 1, CreatedAt: now, UpdatedAt: now},
+		&iCloudAdminTestPhone{ID: phoneID, PhoneCode: "86", PhoneNumber: "13600000000", Status: 1},
 		&iCloudAliasModel{ResourceID: 1, AnonymousID: "alias-1", Email: "alias@icloud.com", Status: iCloudResourceNormal, CreatedAt: now, UpdatedAt: now},
 	}
 	for _, model := range models {
@@ -88,7 +101,7 @@ func TestListAdminICloudResourcesReturnsOnlySafeOperationalFacts(t *testing.T) {
 		t.Fatalf("result size = total %d items %d", result.Total, len(result.Items))
 	}
 	item := result.Items[0]
-	if item.PrimaryEmail != "main@icloud.com" || item.SelectedForwardTo != "inbox@relay.example" || item.AliasCount != iCloudMaxAliases-1 ||
+	if item.PrimaryEmail != "main@icloud.com" || item.BoundPhoneNumber != "+8613600000000" || item.SelectedForwardTo != "inbox@relay.example" || item.AliasCount != iCloudMaxAliases-1 ||
 		item.NewSession == nil || item.NewSession.Status != iCloudSessionInvalid ||
 		item.OldSession == nil || item.OldSession.Status != iCloudSessionValid {
 		t.Fatalf("unexpected safe item: %#v", item)

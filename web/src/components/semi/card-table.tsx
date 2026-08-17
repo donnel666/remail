@@ -277,7 +277,7 @@ export function CardTable<T extends RowData>({
               <span className="mr-2 whitespace-nowrap font-medium text-gray-600 select-none">
                 {column.title}
               </span>
-              <div className="flex flex-1 items-center justify-end gap-1 break-all">
+              <div className="flex min-w-0 flex-1 items-center justify-end gap-1 break-all [&>*]:min-w-0">
                 {cellContent !== undefined && cellContent !== null
                   ? (cellContent as ReactNode)
                   : "-"}

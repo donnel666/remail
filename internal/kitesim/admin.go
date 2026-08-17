@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/donnel666/remail/internal/businessday"
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
@@ -68,35 +69,40 @@ type accountModel struct {
 func (accountModel) TableName() string { return "kitesim_accounts" }
 
 type phoneModel struct {
-	ID              uint       `gorm:"column:id;primaryKey;autoIncrement"`
-	AccountID       uint       `gorm:"column:account_id;uniqueIndex:uk_kitesim_phones_account_order"`
-	ProviderOrderID string     `gorm:"column:provider_order_id;size:128;uniqueIndex:uk_kitesim_phones_account_order"`
-	OrderNo         string     `gorm:"column:order_no"`
-	PhoneCode       string     `gorm:"column:phone_code"`
-	PhoneNumber     string     `gorm:"column:phone_number"`
-	CountryCode     string     `gorm:"column:country_code"`
-	Status          int        `gorm:"column:status"`
-	OrderStatus     int        `gorm:"column:order_status"`
-	PackageID       string     `gorm:"column:package_id"`
-	DurationType    int        `gorm:"column:duration_type"`
-	DurationValue   int        `gorm:"column:duration_value"`
-	AutoRenew       bool       `gorm:"column:auto_renew"`
-	Currency        string     `gorm:"column:currency"`
-	OriginalAmount  string     `gorm:"column:original_amount"`
-	PaidAmount      string     `gorm:"column:paid_amount"`
-	AutoRenewPrice  string     `gorm:"column:auto_renew_price"`
-	CreateTime      string     `gorm:"column:create_time"`
-	ProviderCreated *time.Time `gorm:"column:provider_created_at"`
-	PaymentTime     string     `gorm:"column:payment_time"`
-	ExpireTime      string     `gorm:"column:expire_time"`
-	LatestRenewal   string     `gorm:"column:latest_renewal_time"`
-	NextRenewalDate string     `gorm:"column:next_renewal_date"`
-	RefundTime      string     `gorm:"column:refund_time"`
-	DisabledAt      *time.Time `gorm:"column:disabled_at"`
-	DeletedAt       *time.Time `gorm:"column:deleted_at"`
-	RawPayload      jsonText   `gorm:"column:raw_payload;type:json"`
-	CreatedAt       time.Time  `gorm:"column:created_at"`
-	UpdatedAt       time.Time  `gorm:"column:updated_at"`
+	ID                     uint       `gorm:"column:id;primaryKey;autoIncrement"`
+	AccountID              uint       `gorm:"column:account_id;uniqueIndex:uk_kitesim_phones_account_order"`
+	ProviderOrderID        string     `gorm:"column:provider_order_id;size:128;uniqueIndex:uk_kitesim_phones_account_order"`
+	OrderNo                string     `gorm:"column:order_no"`
+	PhoneCode              string     `gorm:"column:phone_code"`
+	PhoneNumber            string     `gorm:"column:phone_number"`
+	CountryCode            string     `gorm:"column:country_code"`
+	Status                 int        `gorm:"column:status"`
+	OrderStatus            int        `gorm:"column:order_status"`
+	PackageID              string     `gorm:"column:package_id"`
+	DurationType           int        `gorm:"column:duration_type"`
+	DurationValue          int        `gorm:"column:duration_value"`
+	AutoRenew              bool       `gorm:"column:auto_renew"`
+	Currency               string     `gorm:"column:currency"`
+	OriginalAmount         string     `gorm:"column:original_amount"`
+	PaidAmount             string     `gorm:"column:paid_amount"`
+	AutoRenewPrice         string     `gorm:"column:auto_renew_price"`
+	CreateTime             string     `gorm:"column:create_time"`
+	ProviderCreated        *time.Time `gorm:"column:provider_created_at"`
+	PaymentTime            string     `gorm:"column:payment_time"`
+	ExpireTime             string     `gorm:"column:expire_time"`
+	LatestRenewal          string     `gorm:"column:latest_renewal_time"`
+	NextRenewalDate        string     `gorm:"column:next_renewal_date"`
+	RefundTime             string     `gorm:"column:refund_time"`
+	DisabledAt             *time.Time `gorm:"column:disabled_at"`
+	DeletedAt              *time.Time `gorm:"column:deleted_at"`
+	SMSCooldownUntil       *time.Time `gorm:"column:sms_cooldown_until"`
+	SMSCooldownStage       uint8      `gorm:"column:sms_cooldown_stage"`
+	SMSConsecutiveFailures uint       `gorm:"column:sms_consecutive_failures"`
+	SMSBlacklistedUntil    *time.Time `gorm:"column:sms_blacklisted_until"`
+	SMSLastUsedAt          *time.Time `gorm:"column:sms_last_used_at"`
+	RawPayload             jsonText   `gorm:"column:raw_payload;type:json"`
+	CreatedAt              time.Time  `gorm:"column:created_at"`
+	UpdatedAt              time.Time  `gorm:"column:updated_at"`
 }
 
 func (phoneModel) TableName() string { return "kitesim_phones" }
@@ -1077,27 +1083,53 @@ type MessageItem struct {
 }
 
 func (s *Service) Messages(ctx context.Context, phoneID uint, meta MutationMeta) ([]MessageItem, error) {
+	items, err := s.FetchSMSMessages(ctx, phoneID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.createAudit(
+		ctx,
+		meta,
+		"kitesim.phone.messages.read",
+		"kitesim_phone",
+		strconv.FormatUint(uint64(phoneID), 10),
+		"read Kitesim SMS message bodies",
+	); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+// FetchSMSMessages is the service-to-service polling path used by durable
+// verification tasks. The administrator endpoint above remains audited.
+func (s *Service) FetchSMSMessages(ctx context.Context, phoneID uint) ([]MessageItem, error) {
 	if phoneID == 0 {
 		return nil, ErrPhoneMissing
 	}
 	type row struct {
-		AccountID       uint   `gorm:"column:account_id"`
-		ProviderOrderID string `gorm:"column:provider_order_id"`
-		PhoneNumber     string `gorm:"column:phone_number"`
-		Account         string `gorm:"column:account"`
-		Password        string `gorm:"column:password"`
-		Token           string `gorm:"column:token"`
+		AccountID       uint       `gorm:"column:account_id"`
+		ProviderOrderID string     `gorm:"column:provider_order_id"`
+		PhoneNumber     string     `gorm:"column:phone_number"`
+		Status          int        `gorm:"column:status"`
+		DisabledAt      *time.Time `gorm:"column:disabled_at"`
+		DeletedAt       *time.Time `gorm:"column:deleted_at"`
+		Account         string     `gorm:"column:account"`
+		Password        string     `gorm:"column:password"`
+		Token           string     `gorm:"column:token"`
 	}
 	var phone row
 	result := s.db.WithContext(ctx).Table("kitesim_phones AS p").
-		Select("a.id AS account_id, p.provider_order_id, p.phone_number, a.account, a.password, a.token").
+		Select("a.id AS account_id, p.provider_order_id, p.phone_number, p.status, p.disabled_at, p.deleted_at, a.account, a.password, a.token").
 		Joins("JOIN kitesim_accounts AS a ON a.id = p.account_id").
-		Where("p.id = ? AND p.deleted_at IS NULL AND a.deleted_at IS NULL", phoneID).Take(&phone)
+		Where("p.id = ? AND a.deleted_at IS NULL", phoneID).Take(&phone)
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		return nil, ErrPhoneMissing
 	}
 	if result.Error != nil {
 		return nil, fmt.Errorf("load Kitesim phone: %w", result.Error)
+	}
+	if phone.DeletedAt != nil || phone.DisabledAt != nil || PhoneStatus(phone.Status) != PhoneActive {
+		return nil, smsInactivePhoneError(s.db.WithContext(ctx), phoneID)
 	}
 	token := phone.Token
 	var messages []Message
@@ -1140,23 +1172,17 @@ func (s *Service) Messages(ctx context.Context, phoneID uint, meta MutationMeta)
 			Time:    strings.TrimSpace(message.Time()),
 		})
 	}
-	if err := s.createAudit(
-		ctx,
-		meta,
-		"kitesim.phone.messages.read",
-		"kitesim_phone",
-		strconv.FormatUint(uint64(phoneID), 10),
-		"read Kitesim SMS message bodies",
-	); err != nil {
-		return nil, err
-	}
 	return items, nil
 }
 
 func parseProviderTime(value string) *time.Time {
 	value = strings.TrimSpace(value)
-	for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05.999999999", "2006-01-02 15:04:05"} {
-		parsed, err := time.Parse(layout, value)
+	if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil {
+		parsed = parsed.UTC()
+		return &parsed
+	}
+	for _, layout := range []string{"2006-01-02 15:04:05.999999999", "2006-01-02 15:04:05"} {
+		parsed, err := time.ParseInLocation(layout, value, businessday.Shanghai)
 		if err == nil {
 			parsed = parsed.UTC()
 			return &parsed

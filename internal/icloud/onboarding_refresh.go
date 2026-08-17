@@ -1,0 +1,304 @@
+package icloud
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"strings"
+	"time"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+)
+
+var errICloudRefreshStale = errors.New("icloud: account refresh is stale")
+
+// EnsureICloudCookieRefresh creates at most one active refresh task for an
+// automated resource whose imported Apple session is known to be invalid.
+func (s *Service) EnsureICloudCookieRefresh(ctx context.Context, resourceID uint) error {
+	if s == nil || s.db == nil || resourceID == 0 {
+		return ErrICloudOnboardingTemporary
+	}
+	created := false
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var err error
+		created, err = s.ensureICloudCookieRefreshTx(ctx, tx, resourceID)
+		return err
+	})
+	if err != nil {
+		return ErrICloudOnboardingTemporary
+	}
+	if created {
+		_ = s.ScheduleICloudOnboardingDispatcher(context.WithoutCancel(ctx), 0)
+	}
+	return nil
+}
+
+func (s *Service) ensureICloudCookieRefreshTx(ctx context.Context, tx *gorm.DB, resourceID uint) (bool, error) {
+	if s == nil || tx == nil || resourceID == 0 {
+		return false, ErrICloudOnboardingTemporary
+	}
+	var resource iCloudResourceModel
+	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).First(&resource, resourceID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	if resource.Status == iCloudResourceDeleted || resource.Status == iCloudResourceDisabled || strings.TrimSpace(resource.BoundPhoneNumber) == "" || resource.KitesimPhoneID == nil {
+		return false, nil
+	}
+	var invalidChannels int64
+	if err := tx.Model(&iCloudResourceChannelModel{}).
+		Where("resource_id = ? AND session_status = ?", resourceID, iCloudSessionInvalid).
+		Count(&invalidChannels).Error; err != nil || invalidChannels == 0 {
+		return false, err
+	}
+	var active int64
+	if err := tx.Model(&iCloudOnboardingTaskModel{}).
+		Where("task_kind = ? AND resource_id = ? AND status IN ?", "refresh", resourceID, []string{iCloudOnboardingProcessing, iCloudOnboardingWaiting}).
+		Count(&active).Error; err != nil || active > 0 {
+		return false, err
+	}
+	var credential iCloudResourceCredentialModel
+	if err := tx.First(&credential, resourceID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	var answers [3]iCloudSecurityAnswer
+	if err := json.Unmarshal(credential.SecurityAnswers, &answers); err != nil || strings.TrimSpace(credential.ApplePassword) == "" || credential.Birthday.IsZero() {
+		return false, nil
+	}
+	for _, answer := range answers {
+		if strings.TrimSpace(answer.Question) == "" || strings.TrimSpace(answer.Answer) == "" {
+			return false, nil
+		}
+	}
+	secret, err := json.Marshal(iCloudOnboardingSecret{
+		Password: credential.ApplePassword, SecurityAnswers: answers, Birthday: credential.Birthday.Format("2006-01-02"),
+	})
+	if err != nil {
+		return false, err
+	}
+	stage := "manage_prepare"
+	var invalidWeb int64
+	if err := tx.Model(&iCloudResourceChannelModel{}).
+		Where("resource_id = ? AND kind = ? AND session_status = ?", resourceID, iCloudChannelWeb, iCloudSessionInvalid).
+		Count(&invalidWeb).Error; err != nil {
+		return false, err
+	}
+	if resource.ICloudOpened || invalidWeb > 0 {
+		stage = "icloud_prepare"
+	}
+	role := resource.AccountRole
+	if role != "primary" && role != "child" {
+		role = "primary"
+	}
+	now := s.now().UTC().Truncate(time.Millisecond)
+	id := resource.ID
+	task := iCloudOnboardingTaskModel{
+		ResourceID: &id, TaskKind: "refresh", PrimaryEmail: resource.PrimaryEmail, AccountRole: role,
+		FamilyPrimaryResourceID: resource.FamilyPrimaryResourceID, Region: resource.Region, CountryCode: resource.CountryCode,
+		ICloudOpened: resource.ICloudOpened, FamilyInviteURL: resource.FamilyInviteURL,
+		BoundPhoneNumber: resource.BoundPhoneNumber, BoundPhoneCountryCode: resource.BoundPhoneCountryCode,
+		BoundPhoneSource: resource.BoundPhoneSource, KitesimPhoneID: resource.KitesimPhoneID,
+		SecretPayload: secret, Status: iCloudOnboardingProcessing, Stage: stage, DispatchStatus: "pending",
+		Generation: 1, ExpectedCredentialRevision: resource.CredentialRevision,
+		MaxAttempts: iCloudOnboardingMaxAttempts, NextAttemptAt: &now, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&task).Error; err != nil {
+		return false, err
+	}
+	if task.ID != 0 {
+		return true, nil
+	}
+	var existing iCloudOnboardingTaskModel
+	err = tx.Select("id").
+		Where("task_kind = ? AND resource_id = ? AND status IN ?", "refresh", resourceID, []string{iCloudOnboardingProcessing, iCloudOnboardingWaiting}).
+		Take(&existing).Error
+	if err == nil {
+		return false, nil
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, ErrICloudOnboardingTemporary
+	}
+	return false, err
+}
+
+func (s *Service) preflightICloudRefreshTask(ctx context.Context, task *iCloudOnboardingTaskModel) (bool, error) {
+	if task == nil || task.TaskKind != "refresh" {
+		return true, nil
+	}
+	if task.ResourceID == nil {
+		return false, s.failICloudOnboardingTask(ctx, task, "invalid_refresh_state", "Apple session refresh state is invalid.")
+	}
+	var locked iCloudOnboardingTaskModel
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND generation = ? AND claim_token = ? AND dispatch_status = ? AND task_kind = ?", task.ID, task.Generation, task.ClaimToken, "running", "refresh").
+			First(&locked).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errICloudRefreshStale
+			}
+			return err
+		}
+		if locked.ResourceID == nil || *locked.ResourceID != *task.ResourceID {
+			return errICloudRefreshStale
+		}
+		var resource iCloudResourceModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&resource, *locked.ResourceID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errICloudRefreshStale
+			}
+			return err
+		}
+		resourcePhone := onboardingPhoneDigits(resource.BoundPhoneNumber)
+		if resource.Status == iCloudResourceDeleted || resource.Status == iCloudResourceDisabled ||
+			resource.CredentialRevision != locked.ExpectedCredentialRevision || resourcePhone == "" ||
+			resourcePhone != onboardingPhoneDigits(locked.BoundPhoneNumber) || resource.KitesimPhoneID == nil ||
+			locked.KitesimPhoneID == nil || *resource.KitesimPhoneID != *locked.KitesimPhoneID {
+			return errICloudRefreshStale
+		}
+		return nil
+	})
+	if errors.Is(err, errICloudRefreshStale) {
+		return false, s.failICloudRefreshTask(ctx, task, "refresh_stale", "Apple session refresh was canceled because the resource changed.")
+	}
+	if err != nil {
+		return false, ErrICloudOnboardingTemporary
+	}
+	*task = locked
+	return true, nil
+}
+
+func (s *Service) refreshICloudOnboardingResource(ctx context.Context, task *iCloudOnboardingTaskModel, secret iCloudOnboardingSecret) error {
+	if task == nil {
+		return ErrICloudOnboardingTemporary
+	}
+	if task.TaskKind != "refresh" || task.ResourceID == nil {
+		return s.failICloudOnboardingTask(ctx, task, "invalid_refresh_state", "Apple session refresh state is invalid.")
+	}
+	if task.KitesimPhoneID == nil || strings.TrimSpace(task.BoundPhoneNumber) == "" {
+		return s.failICloudOnboardingTask(ctx, task, "phone_binding_missing", "Cookie refresh requires the permanently bound eSIM phone.")
+	}
+	response, err := s.executeICloudOnboardingApple(ctx, task, secret, AppleOnboardingRequest{Operation: appleOnboardingExport})
+	if err != nil {
+		return s.handleICloudOnboardingAppleError(ctx, task, err)
+	}
+	if response.NewChannel == nil || strings.TrimSpace(response.NewChannel.Cookie) == "" {
+		return s.failICloudOnboardingTask(ctx, task, "new_cookie_missing", "Apple Account did not return a usable refreshed session cookie.")
+	}
+	if task.ICloudOpened && (response.OldChannel == nil || strings.TrimSpace(response.OldChannel.Cookie) == "") {
+		return s.failICloudOnboardingTask(ctx, task, "old_cookie_missing", "iCloud did not return a usable refreshed V2 session cookie.")
+	}
+	now := s.now().UTC().Truncate(time.Millisecond)
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var locked iCloudOnboardingTaskModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND generation = ? AND claim_token = ? AND dispatch_status = ? AND task_kind = ?", task.ID, task.Generation, task.ClaimToken, "running", "refresh").
+			First(&locked).Error; err != nil {
+			return errICloudRefreshStale
+		}
+		if locked.ResourceID == nil || *locked.ResourceID != *task.ResourceID {
+			return errICloudRefreshStale
+		}
+		var resource iCloudResourceModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&resource, *locked.ResourceID).Error; err != nil {
+			return errICloudRefreshStale
+		}
+		if resource.CredentialRevision != locked.ExpectedCredentialRevision || resource.Status == iCloudResourceDeleted || resource.Status == iCloudResourceDisabled {
+			return errICloudRefreshStale
+		}
+		channels := []iCloudImportChannel{appleOnboardingImportChannel(*response.NewChannel)}
+		if locked.ICloudOpened && response.OldChannel != nil {
+			channels = append(channels, appleOnboardingImportChannel(*response.OldChannel))
+		}
+		if err := upsertICloudImportChannelsTx(tx, resource.ID, channels, true, now); err != nil {
+			return err
+		}
+		countryCode := resource.CountryCode
+		if value := strings.ToUpper(strings.TrimSpace(response.CountryCode)); value != "" {
+			countryCode = value
+		}
+		generation := resource.ValidationGeneration + 1
+		if generation == 0 {
+			generation = 1
+		}
+		updates := map[string]any{
+			"country_code": countryCode, "icloud_opened": locked.ICloudOpened,
+			"status": iCloudResourcePending, "validation_generation": generation, "validation_failures": 0,
+			"next_validation_at": now, "next_provision_at": nil, "last_safe_error": "", "updated_at": now,
+		}
+		if resource.AccountRole == "primary" {
+			updates["family_next_sync_at"] = now
+		}
+		updated := tx.Model(&iCloudResourceModel{}).
+			Where("id = ? AND credential_revision = ?", resource.ID, locked.ExpectedCredentialRevision).
+			Updates(updates)
+		if updated.Error != nil || updated.RowsAffected != 1 {
+			return errICloudRefreshStale
+		}
+		if err := tx.Model(&iCloudRootModel{}).Where("id = ?", resource.ID).
+			Updates(map[string]any{"version": gorm.Expr("version + 1"), "updated_at": now}).Error; err != nil {
+			return err
+		}
+		finished := tx.Model(&iCloudOnboardingTaskModel{}).
+			Where("id = ? AND generation = ? AND claim_token = ?", locked.ID, locked.Generation, locked.ClaimToken).
+			Updates(map[string]any{
+				"status": iCloudOnboardingCompleted, "stage": "completed", "dispatch_status": "succeeded",
+				"secret_payload": nil, "session_payload": nil, "manual_verification_code": "", "pending_sms_purpose": "",
+				"sms_sent_at": nil, "sms_poll_deadline": nil, "forward_preparation_id": nil,
+				"claim_token": "", "next_attempt_at": nil,
+				"last_error_category": "", "last_safe_error": "", "finished_at": now, "updated_at": now,
+			})
+		if finished.Error != nil || finished.RowsAffected != 1 {
+			return errICloudRefreshStale
+		}
+		return nil
+	})
+	if errors.Is(err, errICloudRefreshStale) {
+		return s.failICloudOnboardingTask(ctx, task, "refresh_stale", "Apple session refresh was canceled because the resource changed.")
+	}
+	if err != nil {
+		return ErrICloudOnboardingTemporary
+	}
+	_ = s.ScheduleICloudValidationDispatcher(context.WithoutCancel(ctx), 0)
+	return nil
+}
+
+func (s *Service) failICloudRefreshTask(ctx context.Context, task *iCloudOnboardingTaskModel, category, message string) error {
+	if task == nil || task.ResourceID == nil {
+		return ErrICloudOnboardingTemporary
+	}
+	now := s.now().UTC().Truncate(time.Millisecond)
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&iCloudOnboardingTaskModel{}).
+			Where("id = ? AND generation = ? AND claim_token = ? AND dispatch_status = ? AND task_kind = ?", task.ID, task.Generation, task.ClaimToken, "running", "refresh").
+			Updates(map[string]any{
+				"status": iCloudOnboardingFailed, "dispatch_status": "failed", "claim_token": "", "next_attempt_at": nil,
+				"attempts": min(task.Attempts+1, task.MaxAttempts), "last_error_category": safeICloudImportMessage(category),
+				"last_safe_error": safeICloudImportMessage(message), "secret_payload": nil, "session_payload": nil,
+				"manual_verification_code": "", "pending_sms_purpose": "", "sms_sent_at": nil, "sms_poll_deadline": nil,
+				"forward_preparation_id": nil, "finished_at": now, "updated_at": now,
+			})
+		if result.Error != nil || result.RowsAffected != 1 {
+			return result.Error
+		}
+		if category == "refresh_stale" {
+			return nil
+		}
+		resource := tx.Model(&iCloudResourceModel{}).
+			Where("id = ? AND credential_revision = ? AND status NOT IN ?", *task.ResourceID, task.ExpectedCredentialRevision, []string{iCloudResourceDeleted, iCloudResourceDisabled}).
+			Updates(map[string]any{
+				"status": iCloudResourceAbnormal, "next_validation_at": nil, "next_provision_at": nil,
+				"last_safe_error": safeICloudImportMessage(message), "updated_at": now,
+			})
+		return resource.Error
+	})
+	if err != nil {
+		return ErrICloudOnboardingTemporary
+	}
+	return nil
+}

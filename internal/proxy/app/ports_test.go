@@ -25,6 +25,7 @@ type fakeProxyRepository struct {
 	failureProxy  *domain.Proxy
 
 	resourceAcquireCount    int
+	resourceRenewBinding    bool
 	systemAcquireCount      int
 	systemSelection         ProxyServerSelection
 	reportSuccessCount      int
@@ -221,8 +222,9 @@ func (r *fakeProxyRepository) rememberPendingTask(proxyID uint, generation uint6
 	}
 	r.pendingTasks[proxyID] = ProxyCheckTask{ProxyID: proxyID, CheckGeneration: generation}
 }
-func (r *fakeProxyRepository) AcquireResourceProxy(context.Context, string, domain.ProxyIPVersion, time.Time, time.Duration) (*domain.Proxy, error) {
+func (r *fakeProxyRepository) AcquireResourceProxy(_ context.Context, _ string, _ domain.ProxyIPVersion, _ time.Time, _ time.Duration, renewBinding ...bool) (*domain.Proxy, error) {
 	r.resourceAcquireCount++
+	r.resourceRenewBinding = len(renewBinding) > 0 && renewBinding[0]
 	return r.resourceProxy, r.resourceErr
 }
 func (r *fakeProxyRepository) AcquireSystemProxy(_ context.Context, _ domain.ProxyIPVersion, _ time.Time, selection ProxyServerSelection) (*domain.Proxy, error) {
@@ -816,6 +818,21 @@ func TestProxyAcquireUsesDirectFallbackAfterAttemptBudget(t *testing.T) {
 	require.True(t, config.Direct)
 	require.Equal(t, 0, repo.resourceAcquireCount)
 	require.Equal(t, 0, repo.systemAcquireCount)
+}
+
+func TestProxyAcquireRenewsBindingOnlyWhenExplicitlyRequested(t *testing.T) {
+	repo := &fakeProxyRepository{resourceProxy: &domain.Proxy{
+		ID: 1, Pool: domain.ProxyPoolResource, URL: "http://resource.example:8080",
+	}}
+	uc := NewProxyUseCase(repo, nil, nil, nil, nil)
+
+	_, err := uc.Acquire(context.Background(), AcquireProxyRequest{Key: "fixed@example.com"})
+	require.NoError(t, err)
+	require.False(t, repo.resourceRenewBinding)
+
+	_, err = uc.Acquire(context.Background(), AcquireProxyRequest{Key: "apple@example.com", RenewBinding: true})
+	require.NoError(t, err)
+	require.True(t, repo.resourceRenewBinding)
 }
 
 func TestProxyAcquireRetriesSystemBeforeDirect(t *testing.T) {

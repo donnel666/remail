@@ -23,8 +23,9 @@ const (
 	iCloudSessionValid     = "valid"
 	iCloudSessionInvalid   = "invalid"
 
-	iCloudChannelWeb          = "icloud_web"
-	iCloudChannelAppleAccount = "apple_account"
+	iCloudChannelWeb           = "icloud_web"
+	iCloudChannelAppleAccount  = "apple_account"
+	iCloudChannelFamilySession = "family_session"
 
 	iCloudImportProcessing = "processing"
 	iCloudImportImported   = "imported"
@@ -84,21 +85,63 @@ type Service struct {
 	systemLogs          *governanceinfra.SystemLogRepo
 	hme                 *HMEClient
 	apple               *AppleAccountClient
+	family              *iCloudFamilyClient
+	appleRoutes         *appleRouteManager
+	onboardingApple     AppleOnboardingProvider
+	smsPhones           ICloudSMSPhoneService
 	now                 func() time.Time
 	validateImportOwner func(context.Context, uint) (bool, error)
 	backgroundExecution BackgroundExecutionGate
 }
 
 func NewService(db *gorm.DB, queue *asynq.Client, files governanceapp.FilePort) *Service {
+	appleRoutes := newAppleRouteManager()
 	return &Service{
-		db:            db,
-		queue:         queue,
-		files:         files,
-		operationLogs: governanceinfra.NewOperationLogRepo(db),
-		systemLogs:    governanceinfra.NewSystemLogRepo(db),
-		hme:           NewHMEClient(nil),
-		apple:         NewAppleAccountClient(nil),
-		now:           time.Now,
+		db:              db,
+		queue:           queue,
+		files:           files,
+		operationLogs:   governanceinfra.NewOperationLogRepo(db),
+		systemLogs:      governanceinfra.NewSystemLogRepo(db),
+		hme:             newRoutedHMEClient(appleRoutes),
+		apple:           newRoutedAppleAccountClient(appleRoutes),
+		family:          newRoutedICloudFamilyClient(appleRoutes),
+		appleRoutes:     appleRoutes,
+		onboardingApple: newRoutedAppleOnboardingProvider(appleRoutes),
+		now:             time.Now,
+	}
+}
+
+func (s *Service) SetAppleProxyProvider(provider AppleProxyProvider) {
+	if s == nil {
+		return
+	}
+	if s.appleRoutes == nil {
+		s.appleRoutes = newAppleRouteManager()
+		if s.hme == nil {
+			s.hme = newRoutedHMEClient(s.appleRoutes)
+		}
+		if s.apple == nil {
+			s.apple = newRoutedAppleAccountClient(s.appleRoutes)
+		}
+		if s.family == nil {
+			s.family = newRoutedICloudFamilyClient(s.appleRoutes)
+		}
+		if s.onboardingApple == nil {
+			s.onboardingApple = newRoutedAppleOnboardingProvider(s.appleRoutes)
+		}
+	}
+	s.appleRoutes.proxies = provider
+}
+
+func (s *Service) SetICloudSMSPhoneService(service ICloudSMSPhoneService) {
+	if s != nil {
+		s.smsPhones = service
+	}
+}
+
+func (s *Service) SetAppleOnboardingProvider(provider AppleOnboardingProvider) {
+	if s != nil && provider != nil {
+		s.onboardingApple = provider
 	}
 }
 
@@ -131,6 +174,23 @@ type iCloudResourceModel struct {
 	ID                      uint       `gorm:"column:id;primaryKey"`
 	ResourceType            string     `gorm:"column:resource_type"`
 	PrimaryEmail            string     `gorm:"column:primary_email"`
+	AccountRole             string     `gorm:"column:account_role"`
+	FamilyPrimaryResourceID *uint      `gorm:"column:family_primary_resource_id"`
+	Region                  string     `gorm:"column:region"`
+	CountryCode             string     `gorm:"column:country_code"`
+	ICloudOpened            bool       `gorm:"column:icloud_opened"`
+	BoundPhoneNumber        string     `gorm:"column:bound_phone_number"`
+	BoundPhoneCountryCode   string     `gorm:"column:bound_phone_country_code"`
+	BoundPhoneSource        string     `gorm:"column:bound_phone_source"`
+	KitesimPhoneID          *uint      `gorm:"column:kitesim_phone_id"`
+	FamilyInviteURL         string     `gorm:"column:family_invite_url"`
+	FamilyID                string     `gorm:"column:family_id"`
+	FamilyOrganizerDSID     string     `gorm:"column:family_organizer_dsid"`
+	FamilyRemoteMemberCount uint8      `gorm:"column:family_remote_member_count"`
+	FamilySyncStatus        string     `gorm:"column:family_sync_status"`
+	FamilySyncedAt          *time.Time `gorm:"column:family_synced_at"`
+	FamilyNextSyncAt        *time.Time `gorm:"column:family_next_sync_at"`
+	FamilySyncErrorCategory string     `gorm:"column:family_sync_error_category"`
 	SelectedForwardTo       string     `gorm:"column:selected_forward_to"`
 	RequiredForwardTo       string     `gorm:"column:required_forward_to"`
 	ExpireAt                time.Time  `gorm:"column:expire_at"`

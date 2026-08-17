@@ -133,7 +133,7 @@ func TestSRPProofMatchesAppleScriptVector(t *testing.T) {
 	require.Equal(t, "s0a44j1dXjV.Duv", encoded)
 	clientInfo, err := fdClientInfo(time.UnixMilli(1700000000123))
 	require.NoError(t, err)
-	require.Equal(t, `{"U":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36","L":"zh-CN","Z":"GMT+08:00","V":"1.1","F":"cda44j1e3NlY5BNlY5BSmHACVZXnNA9hLfNH1ZrurJhBR.uMp4UdHz13NlgN.xLB.Tf1cK8D9Jsdj.z9_ye3NlY5BNp55BNlan0Os5Apw.2YL"}`, clientInfo)
+	require.Equal(t, `{"U":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36","L":"zh-CN","Z":"GMT+08:00","V":"1.1","F":"cda44j1e3NlY5BNlY5BSmHACVZXnNA9hLfNH1ZrurJhBR.uMp4UdHz13NlgN.xLB.Tf1cK8D9Jsdj.z9_ye3NlY5BNp55BNlan0Os5Apw.2YL"}`, clientInfo)
 }
 
 func mustDecodeHex(t *testing.T, value string) []byte {

@@ -23,7 +23,15 @@ import {
   IllustrationNoResult,
   IllustrationNoResultDark,
 } from "@douyinfe/semi-illustrations";
-import { AtSign, FileText, RefreshCw, ShieldCheck, SlidersHorizontal, Upload } from "lucide-react";
+import {
+  AtSign,
+  FileText,
+  RefreshCw,
+  ShieldCheck,
+  SlidersHorizontal,
+  Upload,
+  Workflow,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { CardPro } from "@/components/semi/card-pro";
@@ -51,23 +59,30 @@ import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import {
   batchAdminICloudResourcesByFilter,
   batchAdminICloudResourcesByIds,
+  confirmAdminICloudOnboardingFamilyReset,
+  confirmAdminICloudOnboardingICloudActivation,
   createAdminICloudImportPreparation,
   createAdminICloudAliases,
   deleteAdminICloudResource,
   disableAdminICloudResource,
   enableAdminICloudResource,
   getAdminICloudImportPreparation,
+  getAdminICloudOnboardingImport,
   getAdminICloudResourceDetail,
+  importAdminICloudOnboardingAccounts,
   importAdminICloudResources,
   listAdminICloudAliases,
+  listAdminICloudOnboardingImports,
   listAdminICloudOwners,
   listAdminICloudResources,
   listAdminICloudTasks,
   normalizeICloudImportContent,
   publishAdminICloudResource,
   recoverAdminICloudResource,
+  retryAdminICloudOnboardingPostFamily,
   setAdminICloudResourcesExpirationByFilter,
   setAdminICloudResourcesExpirationByIds,
+  submitAdminICloudOnboardingSmsCode,
   unpublishAdminICloudResource,
   updateAdminICloudResource,
   validateAdminICloudResource,
@@ -77,6 +92,8 @@ import {
   type AdminICloudImportErrorStrategy,
   type AdminICloudImportPreparation,
   type AdminICloudMutationResponse,
+  type AdminICloudOnboardingImportResponse,
+  type AdminICloudOnboardingTask,
   type AdminICloudOwner,
   type AdminICloudResourceDetail,
   type AdminICloudResourceItem,
@@ -301,6 +318,595 @@ function OwnerSelect({
       style={{ width: "100%" }}
       value={value}
     />
+  );
+}
+
+function ICloudAccountRoleTag({ role }: { role: AdminICloudResourceItem["accountRole"] }) {
+  const { t } = useTranslation();
+  const meta = {
+    child: { color: "green" as const, label: "Child account" },
+    primary: { color: "blue" as const, label: "Primary account" },
+    unknown: { color: "grey" as const, label: "Unknown" },
+  }[role];
+  return (
+    <Tag color={meta.color} shape="circle" size="small">
+      {t(meta.label)}
+    </Tag>
+  );
+}
+
+function onboardingTaskStatusTag(task: AdminICloudOnboardingTask, t: ReturnType<typeof useTranslation>["t"]) {
+  const meta = {
+    completed: { color: "green" as const, label: "Completed" },
+    failed: { color: "red" as const, label: "Failed" },
+    processing: { color: "blue" as const, label: "Processing" },
+    waiting: { color: "orange" as const, label: "Waiting" },
+  }[task.status];
+  return (
+    <Tag color={meta.color} shape="circle" size="small">
+      {t(meta.label)}
+    </Tag>
+  );
+}
+
+function phoneSourceLabel(source: AdminICloudResourceItem["boundPhoneSource"], t: ReturnType<typeof useTranslation>["t"]) {
+  if (source === "kitesim") return t("Kitesim assigned");
+  if (source === "manual") return t("Manually supplied");
+  return "-";
+}
+
+function ICloudFamilySyncTag({ item }: { item: AdminICloudResourceItem }) {
+  const { t } = useTranslation();
+  const meta = {
+    failed: { color: "red" as const, label: "Failed" },
+    inactive: { color: "grey" as const, label: "Inactive" },
+    ready: { color: "green" as const, label: "Ready" },
+    unknown: { color: "orange" as const, label: "Unknown" },
+  }[item.familySyncStatus] ?? { color: "orange" as const, label: "Unknown" };
+  return <Tag color={meta.color} size="small">{t(meta.label)}</Tag>;
+}
+
+export function ICloudOnboardingTaskAction({
+  disabled = false,
+  onChanged,
+  task,
+}: {
+  disabled?: boolean;
+  onChanged: (task: AdminICloudOnboardingTask) => void | Promise<void>;
+  task: AdminICloudOnboardingTask;
+}) {
+  const { t } = useTranslation();
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState<"activation" | "code" | "family" | "retry" | null>(null);
+
+  const submitCode = async () => {
+    if (!/^\d{4,10}$/.test(code.trim())) {
+      Toast.warning(t("Enter a 4 to 10 digit SMS code."));
+      return;
+    }
+    setBusy("code");
+    try {
+      const updated = await submitAdminICloudOnboardingSmsCode(task.id, code);
+      setCode("");
+      await onChanged(updated);
+      Toast.success(t("SMS code submitted."));
+    } catch (error) {
+      Toast.error(getIamErrorMessage(t, error, "SMS code submission failed."));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const confirmFamilyReset = () => {
+    Modal.confirm({
+      cancelText: t("Cancel"),
+      content: t("Confirm that family sharing was disabled and enabled again on the primary account {{email}}.", {
+        email: task.familyPrimaryEmail || `#${task.familyPrimaryResourceId ?? "-"}`,
+      }),
+      okText: t("Confirm"),
+      onOk: async () => {
+        setBusy("family");
+        try {
+          const updated = await confirmAdminICloudOnboardingFamilyReset(task.id);
+          await onChanged(updated);
+          Toast.success(t("Family sharing reset confirmed."));
+        } catch (error) {
+          Toast.error(getIamErrorMessage(t, error, "Family sharing confirmation failed."));
+          throw error;
+        } finally {
+          setBusy(null);
+        }
+      },
+      title: t("Confirm family sharing reset"),
+    });
+  };
+
+  const confirmICloudActivation = () => {
+    Modal.confirm({
+      cancelText: t("Cancel"),
+      content: t("Confirm that iCloud was manually enabled for this Apple account."),
+      okText: t("Confirm"),
+      onOk: async () => {
+        setBusy("activation");
+        try {
+          const updated = await confirmAdminICloudOnboardingICloudActivation(task.id);
+          await onChanged(updated);
+          Toast.success(t("iCloud activation confirmed."));
+        } catch (error) {
+          Toast.error(getIamErrorMessage(t, error, "iCloud activation confirmation failed."));
+          throw error;
+        } finally {
+          setBusy(null);
+        }
+      },
+      title: t("Confirm iCloud activation"),
+    });
+  };
+
+  const retryPostFamily = async () => {
+    setBusy("retry");
+    try {
+      const updated = await retryAdminICloudOnboardingPostFamily(task.id);
+      await onChanged(updated);
+      Toast.success(t("Onboarding retry queued."));
+    } catch (error) {
+      Toast.error(getIamErrorMessage(t, error, "Onboarding retry failed."));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (task.needsPostFamilyRecovery) {
+    return (
+      <Button
+        disabled={disabled || busy !== null}
+        icon={<RefreshCw size={14} />}
+        loading={busy === "retry"}
+        onClick={() => void retryPostFamily()}
+        size="small"
+        type="primary"
+      >
+        {t("Retry")}
+      </Button>
+    );
+  }
+
+  if (task.needsManualCode) {
+    return (
+      <div className="flex min-w-56 items-center gap-2">
+        <Input
+          disabled={disabled || busy !== null}
+          maxLength={10}
+          onChange={(value) => setCode(String(value).replace(/\D/g, ""))}
+          placeholder={t("SMS code")}
+          size="small"
+          value={code}
+        />
+        <Button
+          disabled={disabled || busy === "family"}
+          loading={busy === "code"}
+          onClick={() => void submitCode()}
+          size="small"
+          type="primary"
+        >
+          {t("Submit code")}
+        </Button>
+      </div>
+    );
+  }
+  if (task.needsFamilyReset) {
+    return (
+      <Button
+        disabled={disabled || busy === "code"}
+        loading={busy === "family"}
+        onClick={confirmFamilyReset}
+        size="small"
+        type="primary"
+      >
+        {t("Confirm reset")}
+      </Button>
+    );
+  }
+  if (task.needsICloudActivation) {
+    return (
+      <Button
+        disabled={disabled || busy !== null}
+        loading={busy === "activation"}
+        onClick={confirmICloudActivation}
+        size="small"
+        type="primary"
+      >
+        {t("Confirm activation")}
+      </Button>
+    );
+  }
+  return null;
+}
+
+export function ICloudOnboardingModal({
+  canOperate,
+  canReadTasks,
+  onCancel,
+  onChanged,
+  owners,
+  visible,
+}: {
+  canOperate: boolean;
+  canReadTasks: boolean;
+  onCancel: () => void;
+  onChanged: () => void | Promise<void>;
+  owners: AdminICloudOwner[];
+  visible: boolean;
+}) {
+  const { t } = useTranslation();
+  const [file, setFile] = useState<File | null>(null);
+  const [ownerId, setOwnerId] = useState<number | undefined>();
+  const [expireAt, setExpireAt] = useState<Date | null>(() => defaultICloudExpireAt());
+  const [result, setResult] = useState<AdminICloudOnboardingImportResponse | null>(null);
+  const [activeImports, setActiveImports] = useState<AdminICloudTask[]>([]);
+  const [activeImportsLoading, setActiveImportsLoading] = useState(false);
+  const [openingImportId, setOpeningImportId] = useState<number | null>(null);
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
+  const [pollError, setPollError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!visible) return;
+    setFile(null);
+    setOwnerId(undefined);
+    setExpireAt(defaultICloudExpireAt());
+    setResult(null);
+    setActiveImports([]);
+    setOpeningImportId(null);
+    setRecoveryError(null);
+    setPollError(null);
+    setSubmitting(false);
+    if (fileRef.current) fileRef.current.value = "";
+  }, [visible]);
+
+  useEffect(() => {
+    if (!visible || !canReadTasks) return;
+    const controller = new AbortController();
+    setActiveImportsLoading(true);
+    void listAdminICloudOnboardingImports(controller.signal)
+      .then((response) => {
+        if (controller.signal.aborted) return;
+        setActiveImports(response.items);
+        setRecoveryError(null);
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) {
+          setRecoveryError(getIamErrorMessage(t, error, "Active onboarding tasks could not be loaded."));
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setActiveImportsLoading(false);
+      });
+    return () => controller.abort();
+  }, [canReadTasks, t, visible]);
+
+  useEffect(() => {
+    if (!visible || ownerId !== undefined) return;
+    setOwnerId(owners.find((owner) => owner.enabled)?.id ?? owners[0]?.id);
+  }, [ownerId, owners, visible]);
+
+  useEffect(() => {
+    if (!visible || !result || result.status !== "processing") return;
+    let stopped = false;
+    let timeoutId: number | undefined;
+    let controller: AbortController | null = null;
+    const poll = () => {
+      timeoutId = window.setTimeout(async () => {
+        controller = new AbortController();
+        try {
+          const next = await getAdminICloudOnboardingImport(result.importId, controller.signal);
+          if (stopped) return;
+          setResult(next);
+          setPollError(null);
+          if (next.status === "processing") poll();
+          else await onChanged();
+        } catch (error) {
+          if (!stopped && !controller.signal.aborted) {
+            setPollError(getIamErrorMessage(t, error, "Apple onboarding status check failed."));
+            poll();
+          }
+        }
+      }, 3_000);
+    };
+    poll();
+    return () => {
+      stopped = true;
+      controller?.abort();
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+    };
+  }, [onChanged, result?.importId, result?.status, t, visible]);
+
+  const submit = async () => {
+    if (!ownerId) {
+      Toast.warning(t("Please select an owner."));
+      return;
+    }
+    if (!expireAt || !Number.isFinite(expireAt.getTime()) || expireAt.getTime() <= Date.now()) {
+      Toast.warning(t("Expiration must be in the future."));
+      return;
+    }
+    if (!file) {
+      Toast.warning(t("Please select a TXT file."));
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const content = await file.text();
+      if (!content.trim()) {
+        Toast.warning(t("Please select a non-empty TXT file."));
+        return;
+      }
+      const next = await importAdminICloudOnboardingAccounts({
+        content,
+        expireAt: expireAt.toISOString(),
+        ownerId,
+      });
+      setResult(next);
+      setFile(null);
+      if (fileRef.current) fileRef.current.value = "";
+      Toast.success(t("Apple account onboarding started.", { count: next.accepted }));
+      await onChanged();
+    } catch (error) {
+      Toast.error(getIamErrorMessage(t, error, "Apple account onboarding failed."));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const taskChanged = useCallback(async (updated: AdminICloudOnboardingTask) => {
+    setResult((current) =>
+      current
+        ? {
+            ...current,
+            tasks: current.tasks.map((task) => (task.id === updated.id ? updated : task)),
+            updatedAt: updated.updatedAt,
+          }
+        : current,
+    );
+    await onChanged();
+  }, [onChanged]);
+
+  const openActiveImport = async (importId: number) => {
+    setOpeningImportId(importId);
+    try {
+      setResult(await getAdminICloudOnboardingImport(importId));
+      setPollError(null);
+    } catch (error) {
+      Toast.error(getIamErrorMessage(t, error, "Apple onboarding status check failed."));
+    } finally {
+      setOpeningImportId(null);
+    }
+  };
+
+  const columns = useMemo(
+    () => [
+      {
+        dataIndex: "primaryEmail",
+        title: t("Apple ID"),
+        width: 220,
+        render: (value: unknown) => (
+          <CopyableTableText copiedText={t("Copied")} text={String(value)} />
+        ),
+      },
+      {
+        key: "account",
+        title: t("Account"),
+        width: 150,
+        render: (_: unknown, task: AdminICloudOnboardingTask) => (
+          <div className="space-y-1">
+            <ICloudAccountRoleTag role={task.accountRole} />
+            <div className="text-xs text-[var(--semi-color-text-2)]">
+              {task.region}{task.countryCode ? ` · ${task.countryCode}` : ""}
+            </div>
+          </div>
+        ),
+      },
+      {
+        key: "phone",
+        title: t("Bound phone"),
+        width: 190,
+        render: (_: unknown, task: AdminICloudOnboardingTask) => (
+          <div className="space-y-1">
+            {task.boundPhoneNumber ? (
+              <CopyableTableText copiedText={t("Copied")} text={task.boundPhoneNumber} />
+            ) : (
+              <span>{t(task.accountRole === "primary" ? "Pending recovery" : "Pending assignment")}</span>
+            )}
+            <div className="text-xs text-[var(--semi-color-text-2)]">
+              {phoneSourceLabel(task.boundPhoneSource, t)}
+            </div>
+          </div>
+        ),
+      },
+      {
+        key: "state",
+        title: t("State"),
+        width: 180,
+        render: (_: unknown, task: AdminICloudOnboardingTask) => (
+          <div className="space-y-1">
+            {onboardingTaskStatusTag(task, t)}
+            <code className="block break-all text-xs text-[var(--semi-color-text-2)]">
+              {task.stage}
+            </code>
+          </div>
+        ),
+      },
+      {
+        dataIndex: "lastSafeError",
+        title: t("Last error"),
+        width: 240,
+        render: (value: unknown) => (
+          <span className="block break-words text-xs text-[var(--semi-color-text-2)]">
+            {String(value || "-")}
+          </span>
+        ),
+      },
+      {
+        key: "action",
+        title: t("Action"),
+        width: 270,
+        render: (_: unknown, task: AdminICloudOnboardingTask) =>
+          task.needsManualCode || task.needsICloudActivation || task.needsFamilyReset || task.needsPostFamilyRecovery ? (
+            <ICloudOnboardingTaskAction
+              disabled={!canOperate}
+              onChanged={taskChanged}
+              task={task}
+            />
+          ) : (
+            "-"
+          ),
+      },
+    ],
+    [canOperate, t, taskChanged],
+  );
+
+  return (
+    <Modal
+      cancelText={t("Cancel")}
+      centered
+      confirmLoading={submitting}
+      onCancel={onCancel}
+      onOk={() => {
+        if (result) onCancel();
+        else void submit();
+      }}
+      okButtonProps={{ disabled: !result && !file }}
+      okText={t(result ? "Close" : "Start onboarding")}
+      title={t("Automatic Apple onboarding")}
+      visible={visible}
+      width="min(1080px, calc(100vw - 32px))"
+    >
+      {result ? (
+        <div className="space-y-4 py-1">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {[
+              ["Accepted", result.accepted],
+              ["Completed", result.completed],
+              ["Waiting", result.waiting],
+              ["Failed", result.failed],
+            ].map(([label, value]) => (
+              <div className="border-l-2 border-[var(--semi-color-border)] px-3 py-1" key={label}>
+                <div className="text-xs text-[var(--semi-color-text-2)]">{t(String(label))}</div>
+                <div className="mt-1 text-lg font-semibold tabular-nums">{value}</div>
+              </div>
+            ))}
+          </div>
+          <Table
+            columns={columns}
+            dataSource={result.tasks}
+            pagination={false}
+            rowKey="id"
+            scroll={{ x: 1250, y: 420 }}
+            size="small"
+          />
+          {pollError ? (
+            <div className="text-xs text-[var(--semi-color-warning)]">{pollError}</div>
+          ) : null}
+        </div>
+      ) : (
+        <div className="space-y-4 py-1">
+          {canReadTasks ? (
+            <section className="border-b border-[var(--semi-color-border)] pb-4">
+              <div className="mb-2 text-sm font-medium text-[var(--semi-color-text-0)]">
+                {t("Active onboarding tasks")}
+              </div>
+              {activeImportsLoading ? (
+                <Spin size="small" />
+              ) : activeImports.length > 0 ? (
+                <div className="divide-y divide-[var(--semi-color-border)]">
+                  {activeImports.map((task) => (
+                    <div className="flex items-center justify-between gap-3 py-2" key={task.taskId}>
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <code className="text-xs">{task.taskId}</code>
+                          {renderTaskStatusTag(task.status, t)}
+                        </div>
+                        <div className="mt-1 text-xs text-[var(--semi-color-text-2)]">
+                          {task.progress
+                            ? t("{{processed}} of {{total}} processed", {
+                                processed: task.progress.processed,
+                                total: task.progress.total,
+                              })
+                            : formatTime(task.updatedAt)}
+                        </div>
+                      </div>
+                      <Button
+                        loading={openingImportId === task.bizId}
+                        onClick={() => void openActiveImport(task.bizId)}
+                        size="small"
+                        type="tertiary"
+                      >
+                        {t("Open")}
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-xs text-[var(--semi-color-text-2)]">
+                  {t("No active onboarding tasks")}
+                </div>
+              )}
+              {recoveryError ? (
+                <div className="mt-2 text-xs text-[var(--semi-color-warning)]">{recoveryError}</div>
+              ) : null}
+            </section>
+          ) : null}
+          <label className="block">
+            <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
+              {t("Owner")} *
+            </span>
+            <OwnerSelect onChange={setOwnerId} owners={owners} t={t} value={ownerId} />
+          </label>
+          <label className="block">
+            <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
+              {t("Resource expires at")} *
+            </span>
+            <DatePicker
+              aria-label={t("Resource expires at")}
+              format="yyyy-MM-dd HH:mm:ss"
+              onChange={(value) => setExpireAt(value instanceof Date ? value : null)}
+              showClear={false}
+              style={{ width: "100%" }}
+              type="dateTime"
+              value={expireAt ?? undefined}
+            />
+          </label>
+          <input
+            accept=".txt,text/plain"
+            aria-label={t("Apple account TXT file")}
+            className="hidden"
+            onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+            ref={fileRef}
+            type="file"
+          />
+          <button
+            className="flex h-40 w-full cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-[var(--semi-color-border)] bg-[var(--semi-color-fill-0)] p-5 text-center hover:bg-[var(--semi-color-fill-1)]"
+            onClick={() => fileRef.current?.click()}
+            type="button"
+          >
+            <FileText className="mb-2 size-8 text-[var(--semi-color-text-2)]" />
+            <Text strong>{file ? file.name : t("Select TXT file")}</Text>
+            <Text size="small" type="tertiary">
+              {file ? `${(file.size / 1024).toFixed(1)} KB` : t("Up to 1,000 accounts")}
+            </Text>
+          </button>
+          <div className="border-y border-[var(--semi-color-border)] py-3">
+            <div className="mb-1 text-xs font-medium text-[var(--semi-color-text-0)]">
+              {t("Import format")}
+            </div>
+            <code className="block whitespace-pre-wrap break-all font-mono text-xs leading-5 text-[var(--semi-color-text-2)]">
+              {t("Region----iCloud opened----Apple ID----Password----Security answer 1----Security answer 2----Security answer 3----Birthday[----Phone][----Invitation URL (non-empty marks primary)]")}
+            </code>
+          </div>
+        </div>
+      )}
+    </Modal>
   );
 }
 
@@ -1676,6 +2282,77 @@ export function ICloudDetailSheet({
                     }
                   />
                   <InfoItem
+                    label={t("Account role")}
+                    value={<ICloudAccountRoleTag role={item.accountRole} />}
+                  />
+                  <InfoItem
+                    label={t("Region")}
+                    value={[item.region, item.countryCode].filter(Boolean).join(" · ") || "-"}
+                  />
+                  <InfoItem
+                    label={t("iCloud opened")}
+                    value={
+                      <Tag color={item.icloudOpened ? "green" : "orange"} shape="circle" size="small">
+                        {t(item.icloudOpened ? "Yes" : "No")}
+                      </Tag>
+                    }
+                  />
+                  <InfoItem
+                    label={t("Bound phone")}
+                    value={
+                      item.boundPhoneNumber ? (
+                        <CopyableTableText copiedText={t("Copied")} text={item.boundPhoneNumber} />
+                      ) : (
+                        "-"
+                      )
+                    }
+                  />
+                  <InfoItem
+                    label={t("Phone source")}
+                    value={phoneSourceLabel(item.boundPhoneSource, t)}
+                  />
+                  <InfoItem
+                    label={t("Kitesim phone ID")}
+                    value={item.kitesimPhoneId ? `#${item.kitesimPhoneId}` : "-"}
+                  />
+                  <InfoItem
+                    label={t("Family primary")}
+                    value={
+                      item.familyPrimaryEmail ||
+                      (item.familyPrimaryResourceId ? `#${item.familyPrimaryResourceId}` : "-")
+                    }
+                  />
+                  <InfoItem
+                    label={t("Family children")}
+                    value={
+                      item.accountRole === "primary"
+                        ? `${item.familyChildCount}/${item.familyChildLimit}`
+                        : "-"
+                    }
+                  />
+                  <InfoItem
+                    label={t("Family sync")}
+                    value={item.accountRole === "primary" ? <ICloudFamilySyncTag item={item} /> : "-"}
+                  />
+                  <InfoItem
+                    label={t("Family synced at")}
+                    value={item.accountRole === "primary" ? formatTime(item.familySyncedAt) : "-"}
+                  />
+                  <InfoItem
+                    label={t("Family sync error")}
+                    value={item.accountRole === "primary" ? item.familySyncErrorCategory || "-" : "-"}
+                  />
+                  <InfoItem
+                    label={t("Invitation URL")}
+                    value={
+                      item.familyInviteUrl ? (
+                        <CopyableTableText copiedText={t("Copied")} text={item.familyInviteUrl} />
+                      ) : (
+                        "-"
+                      )
+                    }
+                  />
+                  <InfoItem
                     label={t("Owner")}
                     value={<OwnerIdentity owner={item.owner} t={t} />}
                   />
@@ -1733,6 +2410,47 @@ export function ICloudDetailSheet({
                 {item.lastSafeError ? (
                   <div className="rounded-lg border border-[var(--semi-color-warning-light-active)] bg-[var(--semi-color-warning-light-default)] px-3 py-2 text-sm text-[var(--semi-color-text-0)]">
                     {item.lastSafeError}
+                  </div>
+                ) : null}
+                {item.refreshTask ? (
+                  <div className="border-t border-[var(--semi-color-border)] pt-4">
+                    <div className="mb-3 text-sm font-semibold text-[var(--semi-color-text-0)]">
+                      {t("Cookie refresh task")}
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                      <InfoItem
+                        label={t("Status")}
+                        value={onboardingTaskStatusTag(item.refreshTask, t)}
+                      />
+                      <InfoItem
+                        label={t("Stage")}
+                        value={<code className="break-all text-xs">{item.refreshTask.stage}</code>}
+                      />
+                      <InfoItem
+                        label={t("Bound phone")}
+                        value={item.refreshTask.boundPhoneNumber || item.boundPhoneNumber || "-"}
+                      />
+                      <InfoItem
+                        label={t("Next attempt")}
+                        value={formatTime(item.refreshTask.nextAttemptAt)}
+                      />
+                    </div>
+                    {item.refreshTask.lastSafeError ? (
+                      <div className="mt-3 text-sm text-[var(--semi-color-warning)]">
+                        {item.refreshTask.lastSafeError}
+                      </div>
+                    ) : null}
+                    {item.refreshTask.needsManualCode || item.refreshTask.needsICloudActivation || item.refreshTask.needsFamilyReset || item.refreshTask.needsPostFamilyRecovery ? (
+                      <div className="mt-3">
+                        <ICloudOnboardingTaskAction
+                          disabled={!canOperate}
+                          onChanged={async () => {
+                            await onRefresh();
+                          }}
+                          task={item.refreshTask}
+                        />
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
               </div>
@@ -1925,6 +2643,7 @@ export default function AdminICloudEmails() {
   );
   const [loading, setLoading] = useState(true);
   const [importOpen, setImportOpen] = useState(false);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [detailId, setDetailId] = useState<number | null>(null);
   const [detail, setDetail] = useState<AdminICloudResourceDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -2061,9 +2780,12 @@ export default function AdminICloudEmails() {
   }, []);
 
   useEffect(() => {
+    const refreshTaskActive =
+      detail?.refreshTask?.status === "processing" || detail?.refreshTask?.status === "waiting";
     if (
       detailId === null ||
-      (detail?.status !== "pending" &&
+      (!refreshTaskActive &&
+        detail?.status !== "pending" &&
         detail?.status !== "validating" &&
         (detail?.status !== "normal" ||
           detail.nextProvisionAt === null ||
@@ -2085,7 +2807,14 @@ export default function AdminICloudEmails() {
       stopped = true;
       if (timeoutId !== undefined) window.clearTimeout(timeoutId);
     };
-  }, [detail?.newSession?.status, detail?.oldSession?.status, detail?.status, detailId, loadDetail]);
+  }, [
+    detail?.newSession?.status,
+    detail?.oldSession?.status,
+    detail?.refreshTask?.status,
+    detail?.status,
+    detailId,
+    loadDetail,
+  ]);
 
   useEffect(() => {
     listRequestRef.current?.abort();
@@ -2534,7 +3263,7 @@ export default function AdminICloudEmails() {
       const busyAction = rowBusy?.id === item.id ? rowBusy.action : null;
       if (item.status === "deleted") {
         return (
-          <Space spacing={4} wrap={false}>
+          <Space spacing={4} wrap={isMobile}>
             <Button
               disabled={Boolean(busyAction)}
               onClick={() => openDetail(item.id)}
@@ -2559,7 +3288,7 @@ export default function AdminICloudEmails() {
       }
 
       return (
-        <Space spacing={4} wrap={false}>
+        <Space spacing={4} wrap={isMobile}>
           <Button
             disabled={Boolean(busyAction)}
             onClick={() => openDetail(item.id)}
@@ -2624,6 +3353,7 @@ export default function AdminICloudEmails() {
       canOperate,
       canWrite,
       confirmDelete,
+      isMobile,
       openDetail,
       recoverResource,
       rowBusy,
@@ -2642,6 +3372,72 @@ export default function AdminICloudEmails() {
         width: 280,
         render: (value: unknown) => (
           <CopyableTableText copiedText={t("Copied")} text={String(value)} />
+        ),
+      },
+      {
+        dataIndex: "region",
+        key: "region",
+        title: t("Region"),
+        width: 130,
+        render: (_: unknown, item: AdminICloudResourceItem) =>
+          [item.region, item.countryCode].filter(Boolean).join(" · ") || "-",
+      },
+      {
+        dataIndex: "accountRole",
+        key: "accountRole",
+        title: t("Account role"),
+        width: 150,
+        render: (_: unknown, item: AdminICloudResourceItem) => (
+          <div className="space-y-1">
+            <ICloudAccountRoleTag role={item.accountRole} />
+            <div className="text-xs text-[var(--semi-color-text-2)]">
+              {t(item.icloudOpened ? "iCloud opened" : "iCloud not opened")}
+            </div>
+          </div>
+        ),
+      },
+      {
+        key: "family",
+        title: t("Family"),
+        width: 260,
+        render: (_: unknown, item: AdminICloudResourceItem) => {
+          if (item.accountRole === "primary") {
+            return (
+              <div className="space-y-1">
+                <Tag color="blue" shape="circle" size="small">
+                  {item.familyChildCount}/{item.familyChildLimit}
+                </Tag>
+                <ICloudFamilySyncTag item={item} />
+                {item.familyInviteUrl ? (
+                  <CopyableTableText copiedText={t("Copied")} text={item.familyInviteUrl} />
+                ) : (
+                  <span className="text-xs text-[var(--semi-color-text-2)]">-</span>
+                )}
+              </div>
+            );
+          }
+          if (item.accountRole === "child") {
+            return item.familyPrimaryEmail ||
+              (item.familyPrimaryResourceId ? `#${item.familyPrimaryResourceId}` : "-");
+          }
+          return "-";
+        },
+      },
+      {
+        key: "boundPhone",
+        title: t("Bound phone"),
+        width: 190,
+        render: (_: unknown, item: AdminICloudResourceItem) => (
+          <div className="space-y-1">
+            {item.boundPhoneNumber ? (
+              <CopyableTableText copiedText={t("Copied")} text={item.boundPhoneNumber} />
+            ) : (
+              "-"
+            )}
+            <div className="text-xs text-[var(--semi-color-text-2)]">
+              {phoneSourceLabel(item.boundPhoneSource, t)}
+            </div>
+          </div>
         ),
       },
       {
@@ -2765,10 +3561,20 @@ export default function AdminICloudEmails() {
       <div className="order-2 flex w-full flex-wrap gap-2 md:order-1 md:w-auto">
         <Button
           className="flex-1 md:flex-initial"
+          disabled={!canOperate || !canReadTasks}
+          icon={<Workflow size={14} />}
+          onClick={() => setOnboardingOpen(true)}
+          size="small"
+          type="primary"
+        >
+          {t("Automatic onboarding")}
+        </Button>
+        <Button
+          className="flex-1 md:flex-initial"
           disabled={!canWrite}
           onClick={() => setImportOpen(true)}
           size="small"
-          type="primary"
+          type="tertiary"
         >
           {t("Import")}
         </Button>
@@ -3043,7 +3849,7 @@ export default function AdminICloudEmails() {
           pagination={false}
           rowKey="id"
           rowSelection={canOperate ? rowSelection : undefined}
-          scroll={{ x: "max(100%, 2010px)", y: DESKTOP_TABLE_SCROLL_Y }}
+          scroll={{ x: "max(100%, 2840px)", y: DESKTOP_TABLE_SCROLL_Y }}
           size="middle"
         />
       </CardPro>
@@ -3057,6 +3863,15 @@ export default function AdminICloudEmails() {
         }}
         owners={importOwners}
         visible={importOpen && canWrite}
+      />
+
+      <ICloudOnboardingModal
+        canOperate={canOperate}
+        canReadTasks={canReadTasks}
+        onCancel={() => setOnboardingOpen(false)}
+        onChanged={refresh}
+        owners={importOwners}
+        visible={onboardingOpen && canOperate && canReadTasks}
       />
 
       <EditICloudModal

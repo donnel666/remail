@@ -44,17 +44,18 @@ const (
 	AdminTaskStatusUncertain = "uncertain"
 	AdminTaskStatusCanceled  = "canceled"
 
-	AdminTaskSourceImport          = "import"
-	AdminTaskSourceAlias           = "alias"
-	AdminTaskSourceAliasSchedule   = "alias_schedule"
-	AdminTaskSourceToken           = "token"
-	AdminTaskSourceFetch           = "fetch"
-	AdminTaskSourceResourceHistory = "resource_history"
-	AdminTaskSourceBulk            = "bulk"
-	AdminTaskSourceGmailValidate   = "gmail_validation"
-	AdminTaskSourceGmailHistory    = "gmail_history"
-	AdminTaskSourceICloudImport    = "icloud_import"
-	AdminTaskSourceICloudValidate  = "icloud_validation"
+	AdminTaskSourceImport           = "import"
+	AdminTaskSourceAlias            = "alias"
+	AdminTaskSourceAliasSchedule    = "alias_schedule"
+	AdminTaskSourceToken            = "token"
+	AdminTaskSourceFetch            = "fetch"
+	AdminTaskSourceResourceHistory  = "resource_history"
+	AdminTaskSourceBulk             = "bulk"
+	AdminTaskSourceGmailValidate    = "gmail_validation"
+	AdminTaskSourceGmailHistory     = "gmail_history"
+	AdminTaskSourceICloudImport     = "icloud_import"
+	AdminTaskSourceICloudOnboarding = "icloud_onboarding"
+	AdminTaskSourceICloudValidate   = "icloud_validation"
 )
 
 func AdminTaskLimits() (int, int) {
@@ -112,6 +113,7 @@ func isAdminTaskSource(value string) bool {
 		AdminTaskSourceGmailValidate,
 		AdminTaskSourceGmailHistory,
 		AdminTaskSourceICloudImport,
+		AdminTaskSourceICloudOnboarding,
 		AdminTaskSourceICloudValidate:
 		return true
 	default:
@@ -159,6 +161,7 @@ func (t AdminTaskView) TaskID() string {
 type AdminTaskListFilter struct {
 	BizType string
 	BizID   uint
+	Source  string
 	Kind    string
 	Status  string
 	Offset  int
@@ -182,6 +185,7 @@ type AdminTaskViewRepository interface {
 	ListForDomainResource(ctx context.Context, filter AdminTaskListFilter) ([]AdminTaskView, int64, int64, error)
 	ListForGmailResource(ctx context.Context, filter AdminTaskListFilter) ([]AdminTaskView, int64, int64, error)
 	ListForICloudResource(ctx context.Context, filter AdminTaskListFilter) ([]AdminTaskView, int64, int64, error)
+	ListForICloudImports(ctx context.Context, filter AdminTaskListFilter) ([]AdminTaskView, int64, int64, error)
 	FindByRef(ctx context.Context, ref AdminTaskRef) (*AdminTaskView, error)
 }
 
@@ -201,7 +205,7 @@ func (s *AdminTaskQueryService) List(ctx context.Context, filter AdminTaskListFi
 	if err != nil {
 		return nil, err
 	}
-	var exists bool
+	var exists = normalized.BizType == AdminTaskBizICloudResourceImport
 	var items []AdminTaskView
 	var total, succeeded int64
 	switch normalized.BizType {
@@ -229,6 +233,8 @@ func (s *AdminTaskQueryService) List(ctx context.Context, filter AdminTaskListFi
 		items, total, succeeded, err = s.repo.ListForGmailResource(ctx, normalized)
 	case AdminTaskBizICloudResource:
 		items, total, succeeded, err = s.repo.ListForICloudResource(ctx, normalized)
+	case AdminTaskBizICloudResourceImport:
+		items, total, succeeded, err = s.repo.ListForICloudImports(ctx, normalized)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: list normalized tasks", ErrAdminTaskUnavailable)
@@ -268,9 +274,10 @@ func (s *AdminTaskQueryService) Get(ctx context.Context, taskID string) (*AdminT
 
 func normalizeAdminTaskListFilter(filter AdminTaskListFilter) (AdminTaskListFilter, error) {
 	filter.BizType = strings.TrimSpace(filter.BizType)
+	filter.Source = strings.TrimSpace(filter.Source)
 	filter.Kind = strings.TrimSpace(filter.Kind)
 	filter.Status = strings.TrimSpace(filter.Status)
-	if (filter.BizType != AdminTaskBizMicrosoftResource && filter.BizType != AdminTaskBizDomainResource && filter.BizType != AdminTaskBizGmailResource && filter.BizType != AdminTaskBizICloudResource) || filter.BizID == 0 || filter.Offset < 0 {
+	if (filter.BizType != AdminTaskBizMicrosoftResource && filter.BizType != AdminTaskBizDomainResource && filter.BizType != AdminTaskBizGmailResource && filter.BizType != AdminTaskBizICloudResource && filter.BizType != AdminTaskBizICloudResourceImport) || (filter.BizType != AdminTaskBizICloudResourceImport && filter.BizID == 0) || filter.Offset < 0 {
 		return AdminTaskListFilter{}, ErrInvalidAdminTaskQuery
 	}
 	defaultLimit, maxLimit := AdminTaskLimits()
@@ -278,6 +285,9 @@ func normalizeAdminTaskListFilter(filter AdminTaskListFilter) (AdminTaskListFilt
 		filter.Limit = defaultLimit
 	}
 	if filter.Limit < 1 || filter.Limit > maxLimit {
+		return AdminTaskListFilter{}, ErrInvalidAdminTaskQuery
+	}
+	if filter.Source != "" && !isAdminTaskSource(filter.Source) {
 		return AdminTaskListFilter{}, ErrInvalidAdminTaskQuery
 	}
 	if filter.Kind != "" && !isAdminTaskKind(filter.Kind) {

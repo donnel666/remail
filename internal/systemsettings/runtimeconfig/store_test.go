@@ -308,6 +308,9 @@ func TestRuntimeSettingsRejectUnsafeAndConflictingValues(t *testing.T) {
 		{Key: "smtp_task_retry_count", Value: "20"},
 		{Key: "outbound_mail_timeout_minutes", Value: "13"},
 	}), domain.ErrInvalidValue)
+	require.ErrorIs(t, ValidatePersistedUpdates(DefaultSettings(), []domain.Setting{
+		{Key: ICloudPhoneCooldownBaseSecondsKey, Value: "121"},
+	}), domain.ErrInvalidValue)
 	require.NoError(t, ValidateUpdates([]domain.Setting{
 		{Key: "smtp_task_retry_count", Value: "20"},
 		{Key: "outbound_mail_timeout_minutes", Value: "14"},
@@ -335,9 +338,13 @@ func TestReplaceFallsBackFromConflictingPersistedValues(t *testing.T) {
 		{Key: "pickup_fetch_reserve_ttl_minutes", Value: "1"},
 		{Key: "pickup_fetch_lease_ttl_minutes", Value: "1"},
 		{Key: "pickup_fetch_heartbeat_seconds", Value: "120"},
+		{Key: ICloudPhoneCooldownBaseSecondsKey, Value: "121"},
+		{Key: ICloudPhoneCooldownMaxSecondsKey, Value: "120"},
 	})
 	t.Cleanup(func() { Replace(nil) })
 
 	require.Equal(t, 2*time.Minute, Duration("pickup_fetch_lease_ttl_minutes", 2*time.Minute, time.Minute, 1))
 	require.Equal(t, 30*time.Second, Duration("pickup_fetch_heartbeat_seconds", 30*time.Second, time.Second, 1))
+	require.Equal(t, 30, Int(ICloudPhoneCooldownBaseSecondsKey, 30, 1))
+	require.Equal(t, 120, Int(ICloudPhoneCooldownMaxSecondsKey, 120, 1))
 }

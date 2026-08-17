@@ -356,8 +356,14 @@ func TestProcessICloudValidationCreationBlockPreservesExistingHealth(t *testing.
 			if err := db.First(&resource, 1).Error; err != nil {
 				t.Fatalf("read resource: %v", err)
 			}
+			var wantNextProvision *time.Time
+			if test.name == "full" {
+				wantNextProvision = &now
+			}
 			if resource.Status != iCloudResourceNormal || resource.ValidationFailures != 2 ||
-				resource.SelectedForwardTo != "mailbox@relay.example" || resource.NextValidationAt != nil || resource.NextProvisionAt != nil {
+				resource.SelectedForwardTo != "mailbox@relay.example" || resource.NextValidationAt != nil ||
+				(resource.NextProvisionAt == nil) != (wantNextProvision == nil) ||
+				(resource.NextProvisionAt != nil && !resource.NextProvisionAt.Equal(*wantNextProvision)) {
 				t.Fatalf("creation block changed resource health: %#v", resource)
 			}
 		})

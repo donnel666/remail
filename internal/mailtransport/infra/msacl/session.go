@@ -169,13 +169,15 @@ func proxyLabel(proxy string) string {
 	return fmt.Sprintf("%s://%s%s", parts.Scheme, parts.Hostname(), port)
 }
 
-func newTLSHTTPClient(profile profiles.ClientProfile, proxy string, timeoutSeconds int) (tlsclient.HttpClient, error) {
+func newTLSHTTPClient(profile profiles.ClientProfile, proxy string, timeoutSeconds int, randomExtensionOrder bool) (tlsclient.HttpClient, error) {
 	options := []tlsclient.HttpClientOption{
 		tlsclient.WithClientProfile(profile),
 		tlsclient.WithTimeoutSeconds(timeoutSeconds),
-		tlsclient.WithRandomTLSExtensionOrder(),
 		tlsclient.WithDisableHttp3(),
 		tlsclient.WithCookieJar(tlsclient.NewCookieJar()),
+	}
+	if randomExtensionOrder {
+		options = append(options, tlsclient.WithRandomTLSExtensionOrder())
 	}
 	if proxy = normalizeProxy(proxy); proxy != "" {
 		options = append(options, tlsclient.WithProxyUrl(proxy))
@@ -189,7 +191,7 @@ func newBrowserSession(ctx context.Context, proxy string) (*Session, error) {
 	if proxy != "" {
 		logDebug("微软请求使用代理: %s", proxyLabel(proxy))
 	}
-	client, err := newTLSHTTPClient(fp.Profile, proxy, oauthValidationTimeoutSeconds())
+	client, err := newTLSHTTPClient(fp.Profile, proxy, oauthValidationTimeoutSeconds(), true)
 	if err != nil {
 		return nil, newSessionTransportError(err, proxy != "")
 	}
@@ -210,7 +212,7 @@ func oauthValidationTimeoutSeconds() int {
 
 func newPlainSession(ctx context.Context, proxy string, timeoutSeconds int) (*Session, error) {
 	proxy = normalizeProxy(proxy)
-	client, err := newTLSHTTPClient(profiles.Chrome_124, proxy, timeoutSeconds)
+	client, err := newTLSHTTPClient(profiles.Chrome_124, proxy, timeoutSeconds, true)
 	if err != nil {
 		return nil, newSessionTransportError(err, proxy != "")
 	}
@@ -220,6 +222,19 @@ func newPlainSession(ctx context.Context, proxy string, timeoutSeconds int) (*Se
 		userAgent:                     "Mozilla/5.0",
 		usesProxy:                     proxy != "",
 		retryCredentialTypeRateLimits: credentialTypeRateLimitRetryEnabled(ctx),
+	}, nil
+}
+
+func newAppleSession(ctx context.Context, proxy string, timeoutSeconds int) (*Session, error) {
+	proxy = normalizeProxy(proxy)
+	client, err := newTLSHTTPClient(profiles.Chrome_133, proxy, timeoutSeconds, false)
+	if err != nil {
+		return nil, newSessionTransportError(err, proxy != "")
+	}
+	return &Session{
+		client:    client,
+		ctx:       contextOrBackground(ctx),
+		usesProxy: proxy != "",
 	}, nil
 }
 

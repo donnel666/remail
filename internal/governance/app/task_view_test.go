@@ -50,6 +50,10 @@ func (s *taskViewRepoStub) ListForICloudResource(context.Context, AdminTaskListF
 	return s.items, s.total, s.success, s.err
 }
 
+func (s *taskViewRepoStub) ListForICloudImports(context.Context, AdminTaskListFilter) ([]AdminTaskView, int64, int64, error) {
+	return s.items, s.total, s.success, s.err
+}
+
 func (s *taskViewRepoStub) FindByRef(context.Context, AdminTaskRef) (*AdminTaskView, error) {
 	if s.err != nil {
 		return nil, s.err
@@ -104,6 +108,20 @@ func TestAdminTaskQueryServiceListsICloudResourceTasks(t *testing.T) {
 	require.Equal(t, "icloud_validation:12", result.Items[0].TaskID())
 }
 
+func TestAdminTaskQueryServiceListsICloudImportsWithoutBizID(t *testing.T) {
+	repo := &taskViewRepoStub{total: 1, items: []AdminTaskView{{
+		Ref: AdminTaskRef{Source: AdminTaskSourceICloudOnboarding, ID: 23}, BizType: AdminTaskBizICloudResourceImport,
+		BizID: 23, Kind: AdminTaskKindImport, Status: AdminTaskStatusRunning,
+	}}}
+
+	result, err := NewAdminTaskQueryService(repo).List(context.Background(), AdminTaskListFilter{
+		BizType: AdminTaskBizICloudResourceImport,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "icloud_onboarding:23", result.Items[0].TaskID())
+}
+
 func TestAdminTaskQueryServiceListUsesStableDefaults(t *testing.T) {
 	now := time.Now().UTC()
 	repo := &taskViewRepoStub{
@@ -130,6 +148,8 @@ func TestAdminTaskQueryServiceListUsesStableDefaults(t *testing.T) {
 	require.Equal(t, "token:9", result.Items[0].TaskID())
 
 	_, err = service.List(context.Background(), AdminTaskListFilter{BizType: AdminTaskBizMicrosoftResource, BizID: 7, Status: "done"})
+	require.ErrorIs(t, err, ErrInvalidAdminTaskQuery)
+	_, err = service.List(context.Background(), AdminTaskListFilter{BizType: AdminTaskBizMicrosoftResource, BizID: 7, Source: "unknown"})
 	require.ErrorIs(t, err, ErrInvalidAdminTaskQuery)
 }
 

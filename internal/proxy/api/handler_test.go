@@ -193,7 +193,7 @@ func (r *fakeProxyRepo) UpdateCheckResultForGenerationWithLog(ctx context.Contex
 	return r.UpdateCheckResult(ctx, id, result, success)
 }
 
-func (r *fakeProxyRepo) AcquireResourceProxy(_ context.Context, _ string, _ domain.ProxyIPVersion, _ time.Time, _ time.Duration) (*domain.Proxy, error) {
+func (r *fakeProxyRepo) AcquireResourceProxy(_ context.Context, _ string, _ domain.ProxyIPVersion, _ time.Time, _ time.Duration, _ ...bool) (*domain.Proxy, error) {
 	return nil, nil
 }
 

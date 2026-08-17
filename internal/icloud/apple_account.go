@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/donnel666/remail/internal/appleweb"
 )
 
 const (
@@ -53,7 +55,7 @@ func (e *appleAccountError) Error() string {
 }
 
 type AppleAccountClient struct {
-	httpClient *http.Client
+	httpClient appleHTTPDoer
 }
 
 func NewAppleAccountClient(client *http.Client) *AppleAccountClient {
@@ -306,26 +308,29 @@ func (c *AppleAccountClient) request(
 	if origin == "" {
 		origin = defaultAppleAccountOrigin(channel.Host)
 	}
-	userAgent := strings.TrimSpace(channel.UserAgent)
-	if userAgent == "" {
-		userAgent = defaultICloudHMEUserAgent
-	}
+	userAgent := appleweb.UserAgent
+	clientInfo := appleAccountRequestFDClientInfo(*channel, userAgent, now)
+	channel.UserAgent = userAgent
+	channel.FDClientInfo = clientInfo
 	request.Header.Set("Accept", "application/json, text/plain, */*")
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Origin", origin)
 	request.Header.Set("Referer", origin+"/")
 	request.Header.Set("User-Agent", userAgent)
-	request.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	request.Header.Set("Accept-Language", appleweb.AcceptLanguage)
 	request.Header.Set("Cookie", channel.Cookie)
 	if scnt != "" {
 		request.Header.Set("scnt", scnt)
 	}
 	request.Header.Set("X-Apple-I-Request-Context", "ca")
-	request.Header.Set("X-Apple-I-TimeZone", "Asia/Shanghai")
-	request.Header.Set("X-Apple-I-FD-Client-Info", appleAccountRequestFDClientInfo(*channel, userAgent))
+	request.Header.Set("X-Apple-I-TimeZone", appleweb.TimeZone)
+	request.Header.Set("X-Apple-I-FD-Client-Info", clientInfo)
 	request.Header.Set("Sec-Fetch-Site", "same-site")
 	request.Header.Set("Sec-Fetch-Mode", "cors")
 	request.Header.Set("Sec-Fetch-Dest", "empty")
+	request.Header.Set("Sec-CH-UA", appleweb.SecCHUA)
+	request.Header.Set("Sec-CH-UA-Mobile", "?0")
+	request.Header.Set("Sec-CH-UA-Platform", appleweb.SecCHPlatform)
 	if apiKey = strings.TrimSpace(apiKey); apiKey != "" {
 		request.Header.Set("X-Apple-Api-Key", apiKey)
 	}
@@ -436,18 +441,21 @@ func (c *AppleAccountClient) portalRequest(ctx context.Context, channel *iCloudR
 	if err != nil {
 		return &appleAccountError{Category: "invalid_context", SafeMessage: "Invalid Apple Account request context."}
 	}
-	userAgent := strings.TrimSpace(channel.UserAgent)
-	if userAgent == "" {
-		userAgent = defaultICloudHMEUserAgent
-	}
+	userAgent := appleweb.UserAgent
+	clientInfo := appleAccountRequestFDClientInfo(*channel, userAgent, now)
+	channel.UserAgent = userAgent
+	channel.FDClientInfo = clientInfo
 	request.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 	request.Header.Set("Referer", portalBase.String()+"/")
 	request.Header.Set("User-Agent", userAgent)
-	request.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	request.Header.Set("Accept-Language", appleweb.AcceptLanguage)
 	request.Header.Set("Cookie", channel.Cookie)
 	request.Header.Set("Sec-Fetch-Site", "same-origin")
 	request.Header.Set("Sec-Fetch-Mode", "navigate")
 	request.Header.Set("Sec-Fetch-Dest", "document")
+	request.Header.Set("Sec-CH-UA", appleweb.SecCHUA)
+	request.Header.Set("Sec-CH-UA-Mobile", "?0")
+	request.Header.Set("Sec-CH-UA-Platform", appleweb.SecCHPlatform)
 	if jsonContent {
 		request.Header.Set("Accept", "application/json, text/plain, */*")
 		request.Header.Set("Content-Type", "application/json")
@@ -455,8 +463,8 @@ func (c *AppleAccountClient) portalRequest(ctx context.Context, channel *iCloudR
 		request.Header.Set("Sec-Fetch-Mode", "cors")
 		request.Header.Set("Sec-Fetch-Dest", "empty")
 		request.Header.Set("X-Apple-I-Request-Context", "ca")
-		request.Header.Set("X-Apple-I-TimeZone", "Asia/Shanghai")
-		request.Header.Set("X-Apple-I-FD-Client-Info", appleAccountRequestFDClientInfo(*channel, userAgent))
+		request.Header.Set("X-Apple-I-TimeZone", appleweb.TimeZone)
+		request.Header.Set("X-Apple-I-FD-Client-Info", clientInfo)
 	}
 	client := c
 	if client == nil || client.httpClient == nil {
@@ -511,8 +519,19 @@ func appleAccountFDClientInfo(userAgent string) string {
 	return string(encoded)
 }
 
-func appleAccountRequestFDClientInfo(channel iCloudResourceChannelModel, userAgent string) string {
+func appleAccountRequestFDClientInfo(channel iCloudResourceChannelModel, userAgent string, now time.Time) string {
 	if value := strings.TrimSpace(channel.FDClientInfo); value != "" && validICloudCurlHeader(value) {
+		var payload struct {
+			UserAgent string `json:"U"`
+		}
+		if json.Unmarshal([]byte(value), &payload) == nil && payload.UserAgent == userAgent {
+			return value
+		}
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if value, err := appleweb.FDClientInfo(now); err == nil {
 		return value
 	}
 	return appleAccountFDClientInfo(userAgent)

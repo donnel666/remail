@@ -40,6 +40,7 @@ var integerRanges = map[string]integerRange{
 	SMSBowerNoCodeRefundTimeoutMinutesKey: positive(25),
 
 	"domain_max_subdomains_per_registrable_domain": positive(1000), "default_plus_daily_limit": positive(2_147_483_647), "default_mailbox_daily_limit": positive(2_147_483_647), "resource_validation_max_failures": positive(100), ICloudCookieKeepaliveMinutesKey: {min: 1, max: 12},
+	ICloudPhoneHourlySMSLimitKey: positive(1000), ICloudPhoneCooldownBaseSecondsKey: positive(3600), ICloudPhoneCooldownMaxSecondsKey: positive(86400), ICloudPhoneSendFailureThresholdKey: positive(100), ICloudPhoneBlacklistHoursKey: positive(8760),
 	"resource_import_max_bytes": positive(512 << 20), "max_project_logo_bytes": positive(20 << 20), "project_name_max": positive(120), "project_description_max": positive(1000), "project_target_platform_max": positive(120),
 	"candidate_window_size": positive(100), "global_candidate_window": positive(100), "bucket_probe_count": positive(64), "alias_generation_window": positive(1000),
 	"candidate_retry_count": positive(20), "dot_alias_capacity_per_resource": positive(64), "inventory_refresh_interval_minutes": positive(1440), "inventory_cache_hard_ttl_hours": positive(8760),
@@ -388,6 +389,9 @@ func sanitizeRelationships(values map[string]string) {
 	if value("microsoft_alias_transient_backoff_base_minutes", 15) > value("microsoft_alias_transient_backoff_max_hours", 12)*60 {
 		drop("microsoft_alias_transient_backoff_base_minutes", "microsoft_alias_transient_backoff_max_hours")
 	}
+	if value(ICloudPhoneCooldownBaseSecondsKey, 30) > value(ICloudPhoneCooldownMaxSecondsKey, 120) {
+		drop(ICloudPhoneCooldownBaseSecondsKey, ICloudPhoneCooldownMaxSecondsKey)
+	}
 	if value("recovery_code_lease_minutes", 10)*60 < value("password_recovery_code_wait_seconds", 90)+30 {
 		drop("recovery_code_lease_minutes", "password_recovery_code_wait_seconds")
 	}
@@ -437,6 +441,7 @@ func validateRelationships(values map[string]string) error {
 		value("pickup_fetch_heartbeat_seconds", 30) > min(value("pickup_fetch_reserve_ttl_minutes", 2), value("pickup_fetch_lease_ttl_minutes", 2))*30 ||
 		value("microsoft_alias_weekly_limit", 2) > value("microsoft_alias_yearly_limit", 10) ||
 		value("microsoft_alias_transient_backoff_base_minutes", 15) > value("microsoft_alias_transient_backoff_max_hours", 12)*60 ||
+		value(ICloudPhoneCooldownBaseSecondsKey, 30) > value(ICloudPhoneCooldownMaxSecondsKey, 120) ||
 		value("recovery_code_lease_minutes", 10)*60 < value("password_recovery_code_wait_seconds", 90)+30 ||
 		value("pickup_fetch_reserve_ttl_minutes", 2) > value("pickup_request_fetch_timeout_minutes", 2) ||
 		value("imap_full_history_timeout_minutes", 15) > value("project_history_timeout_minutes", 20) ||

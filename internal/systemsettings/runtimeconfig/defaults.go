@@ -3,7 +3,7 @@ package runtimeconfig
 import "github.com/donnel666/remail/internal/systemsettings/domain"
 
 const (
-	DefaultSettingsCount                  = 238
+	DefaultSettingsCount                  = 243
 	SMSBowerNoCodeRefundTimeoutMinutesKey = "smsbower_no_code_refund_timeout_minutes"
 	MicrosoftPriceMultiplierKey           = "product_price_multiplier_microsoft"
 	GmailPriceMultiplierKey               = "product_price_multiplier_gmail"
@@ -13,6 +13,11 @@ const (
 	ICloudCookieKeepaliveMinutesKey       = "icloud_cookie_keepalive_minutes"
 	ICloudMailmatchScanLimitKey           = "icloud_mailmatch_scan_limit"
 	ICloudAdminReadLimitKey               = "icloud_admin_read_limit"
+	ICloudPhoneHourlySMSLimitKey          = "icloud_phone_hourly_sms_limit"
+	ICloudPhoneCooldownBaseSecondsKey     = "icloud_phone_cooldown_base_seconds"
+	ICloudPhoneCooldownMaxSecondsKey      = "icloud_phone_cooldown_max_seconds"
+	ICloudPhoneSendFailureThresholdKey    = "icloud_phone_send_failure_threshold"
+	ICloudPhoneBlacklistHoursKey          = "icloud_phone_blacklist_hours"
 	DefaultICloudMailmatchScanLimit       = 1000
 	DefaultICloudAdminReadLimit           = 5000
 )
@@ -110,6 +115,11 @@ var defaultSettings = []domain.Setting{
 	{Key: "microsoft_domain_whitelist", Value: "outlook.com,hotmail.com,outlook.sa,outlook.com.ar,outlook.com.au,outlook.at,outlook.be,outlook.com.br,outlook.cl,outlook.cz,outlook.fr,outlook.de,outlook.com.gr,outlook.co.il,outlook.in,outlook.co.id,outlook.ie,outlook.it,outlook.hu,outlook.jp,outlook.kr,outlook.lv,outlook.my,outlook.co.nz,outlook.ph,outlook.pt,outlook.sg,outlook.sk,outlook.es,outlook.co.th,outlook.com.tr,outlook.com.vn"},
 	{Key: "icloud_forwarding_suffixes", Value: ""},
 	{Key: "icloud_cookie_keepalive_minutes", Value: "8"},
+	{Key: "icloud_phone_hourly_sms_limit", Value: "10"},
+	{Key: "icloud_phone_cooldown_base_seconds", Value: "30"},
+	{Key: "icloud_phone_cooldown_max_seconds", Value: "120"},
+	{Key: "icloud_phone_send_failure_threshold", Value: "3"},
+	{Key: "icloud_phone_blacklist_hours", Value: "24"},
 	{Key: "domain_custom_tlds", Value: ""},
 	{Key: "domain_max_subdomains_per_registrable_domain", Value: "3"},
 	{Key: "default_plus_daily_limit", Value: "10000"},

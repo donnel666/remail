@@ -98,6 +98,11 @@ export default function EmailResourceSection({ options, onBulkSave }: SectionPro
         min={1}
         max={12}
       />
+      <SettingsNumberField label={t("Apple 手机号每小时接码上限")} description={t("发送失败也占用一次额度")} value={number(form.icloud_phone_hourly_sms_limit)} onChange={(value) => update("icloud_phone_hourly_sms_limit", value)} min={1} max={1000} />
+      <SettingsNumberField label={t("Apple 手机号初始冷却（秒）")} value={number(form.icloud_phone_cooldown_base_seconds)} onChange={(value) => update("icloud_phone_cooldown_base_seconds", value)} min={1} max={3600} />
+      <SettingsNumberField label={t("Apple 手机号最大冷却（秒）")} value={number(form.icloud_phone_cooldown_max_seconds)} onChange={(value) => update("icloud_phone_cooldown_max_seconds", value)} min={1} max={86400} />
+      <SettingsNumberField label={t("Apple 验证码连续发送失败阈值")} value={number(form.icloud_phone_send_failure_threshold)} onChange={(value) => update("icloud_phone_send_failure_threshold", value)} min={1} max={100} />
+      <SettingsNumberField label={t("Apple 手机号小黑屋时长（小时）")} value={number(form.icloud_phone_blacklist_hours)} onChange={(value) => update("icloud_phone_blacklist_hours", value)} min={1} max={8760} />
       <SettingsNumberField label={t("每个可注册域名最多子域名数")} description={t("根域名本身不计入限额")} value={number(form.domain_max_subdomains_per_registrable_domain)} onChange={(value) => update("domain_max_subdomains_per_registrable_domain", value)} min={1} max={1000} />
       <SettingsNumberField label={t("子地址默认日配额")} value={number(form.default_plus_daily_limit)} onChange={(value) => update("default_plus_daily_limit", value)} min={1} />
       <SettingsNumberField label={t("邮箱默认日配额")} value={number(form.default_mailbox_daily_limit)} onChange={(value) => update("default_mailbox_daily_limit", value)} min={1} />

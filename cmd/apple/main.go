@@ -600,6 +600,7 @@ func processAccountWithProxy(
 			IPVersion:           proxydomain.ProxyIPv4,
 			Purpose:             proxydomain.ProxyPurposeAuth,
 			AllowSystemFallback: true,
+			RenewBinding:        true,
 			Attempt:             attempt,
 			RequestID:           requestID,
 			AvoidProxyServerIDs: avoidServerIDs,

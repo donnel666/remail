@@ -575,6 +575,27 @@ func (e AdminGmailValidationBatchStatus) Valid() bool {
 	}
 }
 
+// Defines values for AdminICloudAccountRole.
+const (
+	AdminICloudAccountRoleChild   AdminICloudAccountRole = "child"
+	AdminICloudAccountRolePrimary AdminICloudAccountRole = "primary"
+	AdminICloudAccountRoleUnknown AdminICloudAccountRole = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the AdminICloudAccountRole enum.
+func (e AdminICloudAccountRole) Valid() bool {
+	switch e {
+	case AdminICloudAccountRoleChild:
+		return true
+	case AdminICloudAccountRolePrimary:
+		return true
+	case AdminICloudAccountRoleUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AdminICloudAliasStatus.
 const (
 	AdminICloudAliasStatusDeleted  AdminICloudAliasStatus = "deleted"
@@ -629,6 +650,90 @@ func (e AdminICloudIdsSelectionMode) Valid() bool {
 	}
 }
 
+// Defines values for AdminICloudOnboardingImportResponseStatus.
+const (
+	AdminICloudOnboardingImportResponseStatusCompleted  AdminICloudOnboardingImportResponseStatus = "completed"
+	AdminICloudOnboardingImportResponseStatusFailed     AdminICloudOnboardingImportResponseStatus = "failed"
+	AdminICloudOnboardingImportResponseStatusPartial    AdminICloudOnboardingImportResponseStatus = "partial"
+	AdminICloudOnboardingImportResponseStatusProcessing AdminICloudOnboardingImportResponseStatus = "processing"
+)
+
+// Valid indicates whether the value is a known member of the AdminICloudOnboardingImportResponseStatus enum.
+func (e AdminICloudOnboardingImportResponseStatus) Valid() bool {
+	switch e {
+	case AdminICloudOnboardingImportResponseStatusCompleted:
+		return true
+	case AdminICloudOnboardingImportResponseStatusFailed:
+		return true
+	case AdminICloudOnboardingImportResponseStatusPartial:
+		return true
+	case AdminICloudOnboardingImportResponseStatusProcessing:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminICloudOnboardingTaskAccountRole.
+const (
+	AdminICloudOnboardingTaskAccountRoleChild   AdminICloudOnboardingTaskAccountRole = "child"
+	AdminICloudOnboardingTaskAccountRolePrimary AdminICloudOnboardingTaskAccountRole = "primary"
+)
+
+// Valid indicates whether the value is a known member of the AdminICloudOnboardingTaskAccountRole enum.
+func (e AdminICloudOnboardingTaskAccountRole) Valid() bool {
+	switch e {
+	case AdminICloudOnboardingTaskAccountRoleChild:
+		return true
+	case AdminICloudOnboardingTaskAccountRolePrimary:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminICloudOnboardingTaskStatus.
+const (
+	AdminICloudOnboardingTaskStatusCompleted  AdminICloudOnboardingTaskStatus = "completed"
+	AdminICloudOnboardingTaskStatusFailed     AdminICloudOnboardingTaskStatus = "failed"
+	AdminICloudOnboardingTaskStatusProcessing AdminICloudOnboardingTaskStatus = "processing"
+	AdminICloudOnboardingTaskStatusWaiting    AdminICloudOnboardingTaskStatus = "waiting"
+)
+
+// Valid indicates whether the value is a known member of the AdminICloudOnboardingTaskStatus enum.
+func (e AdminICloudOnboardingTaskStatus) Valid() bool {
+	switch e {
+	case AdminICloudOnboardingTaskStatusCompleted:
+		return true
+	case AdminICloudOnboardingTaskStatusFailed:
+		return true
+	case AdminICloudOnboardingTaskStatusProcessing:
+		return true
+	case AdminICloudOnboardingTaskStatusWaiting:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminICloudOnboardingTaskTaskKind.
+const (
+	Onboarding AdminICloudOnboardingTaskTaskKind = "onboarding"
+	Refresh    AdminICloudOnboardingTaskTaskKind = "refresh"
+)
+
+// Valid indicates whether the value is a known member of the AdminICloudOnboardingTaskTaskKind enum.
+func (e AdminICloudOnboardingTaskTaskKind) Valid() bool {
+	switch e {
+	case Onboarding:
+		return true
+	case Refresh:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AdminICloudOwnerSummaryRole.
 const (
 	AdminICloudOwnerSummaryRoleAdmin      AdminICloudOwnerSummaryRole = "admin"
@@ -653,6 +758,24 @@ func (e AdminICloudOwnerSummaryRole) Valid() bool {
 	}
 }
 
+// Defines values for AdminICloudPhoneSource.
+const (
+	AdminICloudPhoneSourceKitesim AdminICloudPhoneSource = "kitesim"
+	AdminICloudPhoneSourceManual  AdminICloudPhoneSource = "manual"
+)
+
+// Valid indicates whether the value is a known member of the AdminICloudPhoneSource enum.
+func (e AdminICloudPhoneSource) Valid() bool {
+	switch e {
+	case AdminICloudPhoneSourceKitesim:
+		return true
+	case AdminICloudPhoneSourceManual:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AdminICloudResourceDetailAliasLimit.
 const (
 	AdminICloudResourceDetailAliasLimitN750 AdminICloudResourceDetailAliasLimit = 750
@@ -662,6 +785,84 @@ const (
 func (e AdminICloudResourceDetailAliasLimit) Valid() bool {
 	switch e {
 	case AdminICloudResourceDetailAliasLimitN750:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminICloudResourceDetailFamilyChildLimit.
+const (
+	AdminICloudResourceDetailFamilyChildLimitN5 AdminICloudResourceDetailFamilyChildLimit = 5
+)
+
+// Valid indicates whether the value is a known member of the AdminICloudResourceDetailFamilyChildLimit enum.
+func (e AdminICloudResourceDetailFamilyChildLimit) Valid() bool {
+	switch e {
+	case AdminICloudResourceDetailFamilyChildLimitN5:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminICloudResourceDetailFamilySyncStatus.
+const (
+	AdminICloudResourceDetailFamilySyncStatusFailed   AdminICloudResourceDetailFamilySyncStatus = "failed"
+	AdminICloudResourceDetailFamilySyncStatusInactive AdminICloudResourceDetailFamilySyncStatus = "inactive"
+	AdminICloudResourceDetailFamilySyncStatusReady    AdminICloudResourceDetailFamilySyncStatus = "ready"
+	AdminICloudResourceDetailFamilySyncStatusUnknown  AdminICloudResourceDetailFamilySyncStatus = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the AdminICloudResourceDetailFamilySyncStatus enum.
+func (e AdminICloudResourceDetailFamilySyncStatus) Valid() bool {
+	switch e {
+	case AdminICloudResourceDetailFamilySyncStatusFailed:
+		return true
+	case AdminICloudResourceDetailFamilySyncStatusInactive:
+		return true
+	case AdminICloudResourceDetailFamilySyncStatusReady:
+		return true
+	case AdminICloudResourceDetailFamilySyncStatusUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminICloudResourceItemFamilyChildLimit.
+const (
+	AdminICloudResourceItemFamilyChildLimitN5 AdminICloudResourceItemFamilyChildLimit = 5
+)
+
+// Valid indicates whether the value is a known member of the AdminICloudResourceItemFamilyChildLimit enum.
+func (e AdminICloudResourceItemFamilyChildLimit) Valid() bool {
+	switch e {
+	case AdminICloudResourceItemFamilyChildLimitN5:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminICloudResourceItemFamilySyncStatus.
+const (
+	AdminICloudResourceItemFamilySyncStatusFailed   AdminICloudResourceItemFamilySyncStatus = "failed"
+	AdminICloudResourceItemFamilySyncStatusInactive AdminICloudResourceItemFamilySyncStatus = "inactive"
+	AdminICloudResourceItemFamilySyncStatusReady    AdminICloudResourceItemFamilySyncStatus = "ready"
+	AdminICloudResourceItemFamilySyncStatusUnknown  AdminICloudResourceItemFamilySyncStatus = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the AdminICloudResourceItemFamilySyncStatus enum.
+func (e AdminICloudResourceItemFamilySyncStatus) Valid() bool {
+	switch e {
+	case AdminICloudResourceItemFamilySyncStatusFailed:
+		return true
+	case AdminICloudResourceItemFamilySyncStatusInactive:
+		return true
+	case AdminICloudResourceItemFamilySyncStatusReady:
+		return true
+	case AdminICloudResourceItemFamilySyncStatusUnknown:
 		return true
 	default:
 		return false
@@ -736,16 +937,16 @@ func (e AdminICloudSessionStatus) Valid() bool {
 
 // Defines values for AdminKitesimOperationResolutionSource.
 const (
-	Manual AdminKitesimOperationResolutionSource = "manual"
-	Query  AdminKitesimOperationResolutionSource = "query"
+	AdminKitesimOperationResolutionSourceManual AdminKitesimOperationResolutionSource = "manual"
+	AdminKitesimOperationResolutionSourceQuery  AdminKitesimOperationResolutionSource = "query"
 )
 
 // Valid indicates whether the value is a known member of the AdminKitesimOperationResolutionSource enum.
 func (e AdminKitesimOperationResolutionSource) Valid() bool {
 	switch e {
-	case Manual:
+	case AdminKitesimOperationResolutionSourceManual:
 		return true
-	case Query:
+	case AdminKitesimOperationResolutionSourceQuery:
 		return true
 	default:
 		return false
@@ -4165,10 +4366,11 @@ func (e PostAdminMicrosoftResourceMessagesFetchParamsType) Valid() bool {
 
 // Defines values for GetAdminTasksParamsBizType.
 const (
-	GetAdminTasksParamsBizTypeDomainResource    GetAdminTasksParamsBizType = "domain_resource"
-	GetAdminTasksParamsBizTypeGmailResource     GetAdminTasksParamsBizType = "gmail_resource"
-	GetAdminTasksParamsBizTypeIcloudResource    GetAdminTasksParamsBizType = "icloud_resource"
-	GetAdminTasksParamsBizTypeMicrosoftResource GetAdminTasksParamsBizType = "microsoft_resource"
+	GetAdminTasksParamsBizTypeDomainResource       GetAdminTasksParamsBizType = "domain_resource"
+	GetAdminTasksParamsBizTypeGmailResource        GetAdminTasksParamsBizType = "gmail_resource"
+	GetAdminTasksParamsBizTypeIcloudResource       GetAdminTasksParamsBizType = "icloud_resource"
+	GetAdminTasksParamsBizTypeIcloudResourceImport GetAdminTasksParamsBizType = "icloud_resource_import"
+	GetAdminTasksParamsBizTypeMicrosoftResource    GetAdminTasksParamsBizType = "microsoft_resource"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminTasksParamsBizType enum.
@@ -4180,7 +4382,57 @@ func (e GetAdminTasksParamsBizType) Valid() bool {
 		return true
 	case GetAdminTasksParamsBizTypeIcloudResource:
 		return true
+	case GetAdminTasksParamsBizTypeIcloudResourceImport:
+		return true
 	case GetAdminTasksParamsBizTypeMicrosoftResource:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetAdminTasksParamsSource.
+const (
+	Alias            GetAdminTasksParamsSource = "alias"
+	AliasSchedule    GetAdminTasksParamsSource = "alias_schedule"
+	Bulk             GetAdminTasksParamsSource = "bulk"
+	Fetch            GetAdminTasksParamsSource = "fetch"
+	GmailHistory     GetAdminTasksParamsSource = "gmail_history"
+	GmailValidation  GetAdminTasksParamsSource = "gmail_validation"
+	IcloudImport     GetAdminTasksParamsSource = "icloud_import"
+	IcloudOnboarding GetAdminTasksParamsSource = "icloud_onboarding"
+	IcloudValidation GetAdminTasksParamsSource = "icloud_validation"
+	Import           GetAdminTasksParamsSource = "import"
+	ResourceHistory  GetAdminTasksParamsSource = "resource_history"
+	Token            GetAdminTasksParamsSource = "token"
+)
+
+// Valid indicates whether the value is a known member of the GetAdminTasksParamsSource enum.
+func (e GetAdminTasksParamsSource) Valid() bool {
+	switch e {
+	case Alias:
+		return true
+	case AliasSchedule:
+		return true
+	case Bulk:
+		return true
+	case Fetch:
+		return true
+	case GmailHistory:
+		return true
+	case GmailValidation:
+		return true
+	case IcloudImport:
+		return true
+	case IcloudOnboarding:
+		return true
+	case IcloudValidation:
+		return true
+	case Import:
+		return true
+	case ResourceHistory:
+		return true
+	case Token:
 		return true
 	default:
 		return false
@@ -5498,6 +5750,9 @@ type AdminGmailValidationBatchRequest struct {
 	ResourceIds []int `json:"resourceIds"`
 }
 
+// AdminICloudAccountRole defines model for AdminICloudAccountRole.
+type AdminICloudAccountRole string
+
 // AdminICloudAliasItem defines model for AdminICloudAliasItem.
 type AdminICloudAliasItem struct {
 	// AnonymousId Apple HME alias identifier used for alias maintenance.
@@ -5592,6 +5847,75 @@ type AdminICloudMutationResponse struct {
 	Version    int                       `json:"version"`
 }
 
+// AdminICloudOnboardingImportResponse defines model for AdminICloudOnboardingImportResponse.
+type AdminICloudOnboardingImportResponse struct {
+	Accepted      int                                       `json:"accepted"`
+	Completed     int                                       `json:"completed"`
+	CreatedAt     time.Time                                 `json:"createdAt"`
+	Failed        int                                       `json:"failed"`
+	ImportId      int                                       `json:"importId"`
+	LastSafeError *string                                   `json:"lastSafeError,omitempty"`
+	RequestId     string                                    `json:"requestId"`
+	Reused        bool                                      `json:"reused"`
+	Status        AdminICloudOnboardingImportResponseStatus `json:"status"`
+	Tasks         []AdminICloudOnboardingTask               `json:"tasks"`
+	UpdatedAt     time.Time                                 `json:"updatedAt"`
+	Waiting       int                                       `json:"waiting"`
+}
+
+// AdminICloudOnboardingImportResponseStatus defines model for AdminICloudOnboardingImportResponse.Status.
+type AdminICloudOnboardingImportResponseStatus string
+
+// AdminICloudOnboardingSmsCodeRequest defines model for AdminICloudOnboardingSmsCodeRequest.
+type AdminICloudOnboardingSmsCodeRequest struct {
+	Code string `json:"code"`
+}
+
+// AdminICloudOnboardingTask Safe progress for an onboarding or Cookie-refresh task. Apple passwords, security answers, browser session payloads, Cookie values, and submitted verification codes are never returned.
+type AdminICloudOnboardingTask struct {
+	AccountRole             AdminICloudOnboardingTaskAccountRole `json:"accountRole"`
+	Attempts                int                                  `json:"attempts"`
+	BoundPhoneCountryCode   *string                              `json:"boundPhoneCountryCode,omitempty"`
+	BoundPhoneNumber        *string                              `json:"boundPhoneNumber,omitempty"`
+	BoundPhoneSource        *AdminICloudPhoneSource              `json:"boundPhoneSource,omitempty"`
+	CountryCode             string                               `json:"countryCode"`
+	CreatedAt               time.Time                            `json:"createdAt"`
+	FamilyInviteUrl         *string                              `json:"familyInviteUrl,omitempty"`
+	FamilyPrimaryEmail      *string                              `json:"familyPrimaryEmail,omitempty"`
+	FamilyPrimaryResourceId *int                                 `json:"familyPrimaryResourceId"`
+	FinishedAt              *time.Time                           `json:"finishedAt"`
+	IcloudOpened            bool                                 `json:"icloudOpened"`
+	Id                      int                                  `json:"id"`
+	KitesimPhoneId          *int                                 `json:"kitesimPhoneId"`
+	LastErrorCategory       *string                              `json:"lastErrorCategory,omitempty"`
+	LastSafeError           *string                              `json:"lastSafeError,omitempty"`
+	LineNumber              int                                  `json:"lineNumber"`
+	MaxAttempts             int                                  `json:"maxAttempts"`
+	NeedsFamilyReset        bool                                 `json:"needsFamilyReset"`
+	NeedsICloudActivation   bool                                 `json:"needsICloudActivation"`
+	NeedsManualCode         bool                                 `json:"needsManualCode"`
+	NeedsPostFamilyRecovery bool                                 `json:"needsPostFamilyRecovery"`
+	NextAttemptAt           *time.Time                           `json:"nextAttemptAt"`
+	PendingSmsPurpose       *string                              `json:"pendingSmsPurpose,omitempty"`
+	PrimaryEmail            openapi_types.Email                  `json:"primaryEmail"`
+	Region                  string                               `json:"region"`
+	ResourceId              *int                                 `json:"resourceId"`
+	Stage                   string                               `json:"stage"`
+	StartedAt               *time.Time                           `json:"startedAt"`
+	Status                  AdminICloudOnboardingTaskStatus      `json:"status"`
+	TaskKind                AdminICloudOnboardingTaskTaskKind    `json:"taskKind"`
+	UpdatedAt               time.Time                            `json:"updatedAt"`
+}
+
+// AdminICloudOnboardingTaskAccountRole defines model for AdminICloudOnboardingTask.AccountRole.
+type AdminICloudOnboardingTaskAccountRole string
+
+// AdminICloudOnboardingTaskStatus defines model for AdminICloudOnboardingTask.Status.
+type AdminICloudOnboardingTaskStatus string
+
+// AdminICloudOnboardingTaskTaskKind defines model for AdminICloudOnboardingTask.TaskKind.
+type AdminICloudOnboardingTaskTaskKind string
+
 // AdminICloudOwnerSummary defines model for AdminICloudOwnerSummary.
 type AdminICloudOwnerSummary struct {
 	Email     openapi_types.Email         `json:"email"`
@@ -5605,29 +5929,49 @@ type AdminICloudOwnerSummary struct {
 // AdminICloudOwnerSummaryRole defines model for AdminICloudOwnerSummary.Role.
 type AdminICloudOwnerSummaryRole string
 
+// AdminICloudPhoneSource defines model for AdminICloudPhoneSource.
+type AdminICloudPhoneSource string
+
 // AdminICloudResourceDetail defines model for AdminICloudResourceDetail.
 type AdminICloudResourceDetail struct {
-	AliasCount          int                                 `json:"aliasCount"`
-	AliasLimit          AdminICloudResourceDetailAliasLimit `json:"aliasLimit"`
-	AliasProvisioning   bool                                `json:"aliasProvisioning"`
-	AliasRemaining      int                                 `json:"aliasRemaining"`
-	CreatedAt           time.Time                           `json:"createdAt"`
-	CredentialRevision  int64                               `json:"credentialRevision"`
-	CredentialUpdatedAt time.Time                           `json:"credentialUpdatedAt"`
-	ExpireAt            time.Time                           `json:"expireAt"`
-	ForSale             bool                                `json:"forSale"`
-	Id                  int                                 `json:"id"`
-	LastAliasSyncAt     *time.Time                          `json:"lastAliasSyncAt"`
-	LastAllocatedAt     *time.Time                          `json:"lastAllocatedAt"`
-	LastCheckedAt       *time.Time                          `json:"lastCheckedAt"`
-	LastSafeError       *string                             `json:"lastSafeError"`
-	LastValidAt         *time.Time                          `json:"lastValidAt"`
-	NewSession          *AdminICloudSessionView             `json:"newSession"`
-	NextProvisionAt     *time.Time                          `json:"nextProvisionAt"`
-	NextValidationAt    *time.Time                          `json:"nextValidationAt"`
-	OldSession          *AdminICloudSessionView             `json:"oldSession"`
-	Owner               AdminICloudOwnerSummary             `json:"owner"`
-	PrimaryEmail        openapi_types.Email                 `json:"primaryEmail"`
+	AccountRole             AdminICloudAccountRole                    `json:"accountRole"`
+	AliasCount              int                                       `json:"aliasCount"`
+	AliasLimit              AdminICloudResourceDetailAliasLimit       `json:"aliasLimit"`
+	AliasProvisioning       bool                                      `json:"aliasProvisioning"`
+	AliasRemaining          int                                       `json:"aliasRemaining"`
+	BoundPhoneCountryCode   *string                                   `json:"boundPhoneCountryCode,omitempty"`
+	BoundPhoneNumber        *string                                   `json:"boundPhoneNumber,omitempty"`
+	BoundPhoneSource        *AdminICloudPhoneSource                   `json:"boundPhoneSource,omitempty"`
+	CountryCode             string                                    `json:"countryCode"`
+	CreatedAt               time.Time                                 `json:"createdAt"`
+	CredentialRevision      int64                                     `json:"credentialRevision"`
+	CredentialUpdatedAt     time.Time                                 `json:"credentialUpdatedAt"`
+	ExpireAt                time.Time                                 `json:"expireAt"`
+	FamilyChildCount        int                                       `json:"familyChildCount"`
+	FamilyChildLimit        AdminICloudResourceDetailFamilyChildLimit `json:"familyChildLimit"`
+	FamilyInviteUrl         *string                                   `json:"familyInviteUrl,omitempty"`
+	FamilyPrimaryEmail      *openapi_types.Email                      `json:"familyPrimaryEmail,omitempty"`
+	FamilyPrimaryResourceId *int                                      `json:"familyPrimaryResourceId"`
+	FamilySyncErrorCategory *string                                   `json:"familySyncErrorCategory,omitempty"`
+	FamilySyncStatus        AdminICloudResourceDetailFamilySyncStatus `json:"familySyncStatus"`
+	FamilySyncedAt          *time.Time                                `json:"familySyncedAt"`
+	ForSale                 bool                                      `json:"forSale"`
+	IcloudOpened            bool                                      `json:"icloudOpened"`
+	Id                      int                                       `json:"id"`
+	KitesimPhoneId          *int                                      `json:"kitesimPhoneId"`
+	LastAliasSyncAt         *time.Time                                `json:"lastAliasSyncAt"`
+	LastAllocatedAt         *time.Time                                `json:"lastAllocatedAt"`
+	LastCheckedAt           *time.Time                                `json:"lastCheckedAt"`
+	LastSafeError           *string                                   `json:"lastSafeError"`
+	LastValidAt             *time.Time                                `json:"lastValidAt"`
+	NewSession              *AdminICloudSessionView                   `json:"newSession"`
+	NextProvisionAt         *time.Time                                `json:"nextProvisionAt"`
+	NextValidationAt        *time.Time                                `json:"nextValidationAt"`
+	OldSession              *AdminICloudSessionView                   `json:"oldSession"`
+	Owner                   AdminICloudOwnerSummary                   `json:"owner"`
+	PrimaryEmail            openapi_types.Email                       `json:"primaryEmail"`
+	RefreshTask             *AdminICloudOnboardingTask                `json:"refreshTask"`
+	Region                  string                                    `json:"region"`
 
 	// SelectedForwardTo Last Apple HME forwarding mailbox observed during validation or provisioning.
 	SelectedForwardTo    string                    `json:"selectedForwardTo"`
@@ -5641,24 +5985,46 @@ type AdminICloudResourceDetail struct {
 // AdminICloudResourceDetailAliasLimit defines model for AdminICloudResourceDetail.AliasLimit.
 type AdminICloudResourceDetailAliasLimit int
 
-// AdminICloudResourceItem Administrator-safe operational facts. Cookies, DSID, host, client context, and provider request payloads are never returned.
+// AdminICloudResourceDetailFamilyChildLimit defines model for AdminICloudResourceDetail.FamilyChildLimit.
+type AdminICloudResourceDetailFamilyChildLimit int
+
+// AdminICloudResourceDetailFamilySyncStatus defines model for AdminICloudResourceDetail.FamilySyncStatus.
+type AdminICloudResourceDetailFamilySyncStatus string
+
+// AdminICloudResourceItem Administrator-safe operational facts. Apple passwords, security answers, browser session payloads, Cookie values, DSID, host, client context, and provider request payloads are never returned.
 type AdminICloudResourceItem struct {
-	AliasCount       int                     `json:"aliasCount"`
-	CreatedAt        time.Time               `json:"createdAt"`
-	ExpireAt         time.Time               `json:"expireAt"`
-	ForSale          bool                    `json:"forSale"`
-	Id               int                     `json:"id"`
-	LastAliasSyncAt  *time.Time              `json:"lastAliasSyncAt"`
-	LastAllocatedAt  *time.Time              `json:"lastAllocatedAt"`
-	LastCheckedAt    *time.Time              `json:"lastCheckedAt"`
-	LastSafeError    *string                 `json:"lastSafeError"`
-	LastValidAt      *time.Time              `json:"lastValidAt"`
-	NewSession       *AdminICloudSessionView `json:"newSession"`
-	NextProvisionAt  *time.Time              `json:"nextProvisionAt"`
-	NextValidationAt *time.Time              `json:"nextValidationAt"`
-	OldSession       *AdminICloudSessionView `json:"oldSession"`
-	Owner            AdminICloudOwnerSummary `json:"owner"`
-	PrimaryEmail     openapi_types.Email     `json:"primaryEmail"`
+	AccountRole             AdminICloudAccountRole                  `json:"accountRole"`
+	AliasCount              int                                     `json:"aliasCount"`
+	BoundPhoneCountryCode   *string                                 `json:"boundPhoneCountryCode,omitempty"`
+	BoundPhoneNumber        *string                                 `json:"boundPhoneNumber,omitempty"`
+	BoundPhoneSource        *AdminICloudPhoneSource                 `json:"boundPhoneSource,omitempty"`
+	CountryCode             string                                  `json:"countryCode"`
+	CreatedAt               time.Time                               `json:"createdAt"`
+	ExpireAt                time.Time                               `json:"expireAt"`
+	FamilyChildCount        int                                     `json:"familyChildCount"`
+	FamilyChildLimit        AdminICloudResourceItemFamilyChildLimit `json:"familyChildLimit"`
+	FamilyInviteUrl         *string                                 `json:"familyInviteUrl,omitempty"`
+	FamilyPrimaryEmail      *openapi_types.Email                    `json:"familyPrimaryEmail,omitempty"`
+	FamilyPrimaryResourceId *int                                    `json:"familyPrimaryResourceId"`
+	FamilySyncErrorCategory *string                                 `json:"familySyncErrorCategory,omitempty"`
+	FamilySyncStatus        AdminICloudResourceItemFamilySyncStatus `json:"familySyncStatus"`
+	FamilySyncedAt          *time.Time                              `json:"familySyncedAt"`
+	ForSale                 bool                                    `json:"forSale"`
+	IcloudOpened            bool                                    `json:"icloudOpened"`
+	Id                      int                                     `json:"id"`
+	KitesimPhoneId          *int                                    `json:"kitesimPhoneId"`
+	LastAliasSyncAt         *time.Time                              `json:"lastAliasSyncAt"`
+	LastAllocatedAt         *time.Time                              `json:"lastAllocatedAt"`
+	LastCheckedAt           *time.Time                              `json:"lastCheckedAt"`
+	LastSafeError           *string                                 `json:"lastSafeError"`
+	LastValidAt             *time.Time                              `json:"lastValidAt"`
+	NewSession              *AdminICloudSessionView                 `json:"newSession"`
+	NextProvisionAt         *time.Time                              `json:"nextProvisionAt"`
+	NextValidationAt        *time.Time                              `json:"nextValidationAt"`
+	OldSession              *AdminICloudSessionView                 `json:"oldSession"`
+	Owner                   AdminICloudOwnerSummary                 `json:"owner"`
+	PrimaryEmail            openapi_types.Email                     `json:"primaryEmail"`
+	Region                  string                                  `json:"region"`
 
 	// SelectedForwardTo Last Apple HME forwarding mailbox observed during validation or provisioning.
 	SelectedForwardTo string                    `json:"selectedForwardTo"`
@@ -5666,6 +6032,12 @@ type AdminICloudResourceItem struct {
 	UpdatedAt         time.Time                 `json:"updatedAt"`
 	Version           int                       `json:"version"`
 }
+
+// AdminICloudResourceItemFamilyChildLimit defines model for AdminICloudResourceItem.FamilyChildLimit.
+type AdminICloudResourceItemFamilyChildLimit int
+
+// AdminICloudResourceItemFamilySyncStatus defines model for AdminICloudResourceItem.FamilySyncStatus.
+type AdminICloudResourceItemFamilySyncStatus string
 
 // AdminICloudResourceListResponse defines model for AdminICloudResourceListResponse.
 type AdminICloudResourceListResponse struct {
@@ -5717,7 +6089,10 @@ type AdminICloudStatusFacet struct {
 // AdminICloudUpdateRequest defines model for AdminICloudUpdateRequest.
 type AdminICloudUpdateRequest struct {
 	ExpireAt *time.Time `json:"expireAt,omitempty"`
-	ForSale  *bool      `json:"forSale,omitempty"`
+
+	// FamilyInviteUrl Replacement family invitation for a primary account. A different valid value clears a persisted invalid-invitation quarantine.
+	FamilyInviteUrl *string `json:"familyInviteUrl,omitempty"`
+	ForSale         *bool   `json:"forSale,omitempty"`
 
 	// ImportLine Write-only `email----curl[----curl]` credential update. It accepts one old cURL, one new cURL, or both cURLs in either order, including browser-copied backslash line continuations. While the primary email is unchanged, each supplied cURL replaces only its matching channel and omitted channels are preserved. On an already healthy resource, submitted channels are checked asynchronously without changing resource health. Changing the primary email treats the supplied cURLs as the complete credential set, removes omitted channels, and re-queues resource validation.
 	ImportLine *string `json:"importLine,omitempty"`
@@ -10472,6 +10847,55 @@ type PostAdminICloudResourceImportParams struct {
 // PostAdminICloudResourceImportMultipartBodyErrorStrategy defines parameters for PostAdminICloudResourceImport.
 type PostAdminICloudResourceImportMultipartBodyErrorStrategy string
 
+// PostAdminICloudOnboardingImportMultipartBody defines parameters for PostAdminICloudOnboardingImport.
+type PostAdminICloudOnboardingImportMultipartBody struct {
+	ExpireAt time.Time          `json:"expireAt"`
+	File     openapi_types.File `json:"file"`
+	OwnerId  int                `json:"ownerId"`
+}
+
+// PostAdminICloudOnboardingImportParams defines parameters for PostAdminICloudOnboardingImport.
+type PostAdminICloudOnboardingImportParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminICloudOnboardingTaskFamilyResetParams defines parameters for PostAdminICloudOnboardingTaskFamilyReset.
+type PostAdminICloudOnboardingTaskFamilyResetParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminICloudOnboardingTaskICloudActivationParams defines parameters for PostAdminICloudOnboardingTaskICloudActivation.
+type PostAdminICloudOnboardingTaskICloudActivationParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminICloudOnboardingTaskRetryParams defines parameters for PostAdminICloudOnboardingTaskRetry.
+type PostAdminICloudOnboardingTaskRetryParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminICloudOnboardingTaskSmsCodeParams defines parameters for PostAdminICloudOnboardingTaskSmsCode.
+type PostAdminICloudOnboardingTaskSmsCodeParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // DeleteAdminICloudResourceParams defines parameters for DeleteAdminICloudResource.
 type DeleteAdminICloudResourceParams struct {
 	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
@@ -11363,16 +11787,22 @@ type DeleteAdminSystemKeyParams struct {
 type GetAdminTasksParams struct {
 	BizType GetAdminTasksParamsBizType `form:"bizType" json:"bizType"`
 
-	// BizId Resource ID matching bizType.
-	BizId  int              `form:"bizId" json:"bizId"`
-	Kind   *AdminTaskKind   `form:"kind,omitempty" json:"kind,omitempty"`
-	Status *AdminTaskStatus `form:"status,omitempty" json:"status,omitempty"`
-	Offset *int             `form:"offset,omitempty" json:"offset,omitempty"`
-	Limit  *int             `form:"limit,omitempty" json:"limit,omitempty"`
+	// BizId Resource ID matching bizType. Omit only when listing iCloud imports globally.
+	BizId *int `form:"bizId,omitempty" json:"bizId,omitempty"`
+
+	// Source Optional normalized task source. Use `icloud_onboarding` to list recoverable Apple onboarding batches without unrelated iCloud imports consuming the page.
+	Source *GetAdminTasksParamsSource `form:"source,omitempty" json:"source,omitempty"`
+	Kind   *AdminTaskKind             `form:"kind,omitempty" json:"kind,omitempty"`
+	Status *AdminTaskStatus           `form:"status,omitempty" json:"status,omitempty"`
+	Offset *int                       `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *int                       `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // GetAdminTasksParamsBizType defines parameters for GetAdminTasks.
 type GetAdminTasksParamsBizType string
+
+// GetAdminTasksParamsSource defines parameters for GetAdminTasks.
+type GetAdminTasksParamsSource string
 
 // GetAdminTicketsParams defines parameters for GetAdminTickets.
 type GetAdminTicketsParams struct {
@@ -12238,6 +12668,12 @@ type PostAdminICloudResourcesValidateJSONRequestBody = AdminICloudBulkCommandReq
 
 // PostAdminICloudResourceImportMultipartRequestBody defines body for PostAdminICloudResourceImport for multipart/form-data ContentType.
 type PostAdminICloudResourceImportMultipartRequestBody PostAdminICloudResourceImportMultipartBody
+
+// PostAdminICloudOnboardingImportMultipartRequestBody defines body for PostAdminICloudOnboardingImport for multipart/form-data ContentType.
+type PostAdminICloudOnboardingImportMultipartRequestBody PostAdminICloudOnboardingImportMultipartBody
+
+// PostAdminICloudOnboardingTaskSmsCodeJSONRequestBody defines body for PostAdminICloudOnboardingTaskSmsCode for application/json ContentType.
+type PostAdminICloudOnboardingTaskSmsCodeJSONRequestBody = AdminICloudOnboardingSmsCodeRequest
 
 // PatchAdminICloudResourceJSONRequestBody defines body for PatchAdminICloudResource for application/json ContentType.
 type PatchAdminICloudResourceJSONRequestBody = AdminICloudUpdateRequest
@@ -13493,6 +13929,24 @@ type ServerInterface interface {
 	// Get an iCloud resource import status
 	// (GET /v1/admin/icloud/resources/imports/{importId})
 	GetAdminICloudResourceImport(c *gin.Context, importId int)
+	// Start Apple account onboarding for iCloud resources
+	// (POST /v1/admin/icloud/resources/onboarding-imports)
+	PostAdminICloudOnboardingImport(c *gin.Context, params PostAdminICloudOnboardingImportParams)
+	// Get an Apple account onboarding import
+	// (GET /v1/admin/icloud/resources/onboarding-imports/{importId})
+	GetAdminICloudOnboardingImport(c *gin.Context, importId int)
+	// Confirm the primary family-sharing reset
+	// (POST /v1/admin/icloud/resources/onboarding-tasks/{taskId}/family-reset)
+	PostAdminICloudOnboardingTaskFamilyReset(c *gin.Context, taskId int, params PostAdminICloudOnboardingTaskFamilyResetParams)
+	// Confirm manual iCloud activation
+	// (POST /v1/admin/icloud/resources/onboarding-tasks/{taskId}/icloud-activation)
+	PostAdminICloudOnboardingTaskICloudActivation(c *gin.Context, taskId int, params PostAdminICloudOnboardingTaskICloudActivationParams)
+	// Retry onboarding after family membership was confirmed
+	// (POST /v1/admin/icloud/resources/onboarding-tasks/{taskId}/retry)
+	PostAdminICloudOnboardingTaskRetry(c *gin.Context, taskId int, params PostAdminICloudOnboardingTaskRetryParams)
+	// Submit a manually received Apple SMS code
+	// (POST /v1/admin/icloud/resources/onboarding-tasks/{taskId}/sms-code)
+	PostAdminICloudOnboardingTaskSmsCode(c *gin.Context, taskId int, params PostAdminICloudOnboardingTaskSmsCodeParams)
 	// Logically delete one iCloud resource
 	// (DELETE /v1/admin/icloud/resources/{resourceId})
 	DeleteAdminICloudResource(c *gin.Context, resourceId int, params DeleteAdminICloudResourceParams)
@@ -13838,7 +14292,7 @@ type ServerInterface interface {
 	// Revoke a system key
 	// (DELETE /v1/admin/system-keys/{keyId})
 	DeleteAdminSystemKey(c *gin.Context, keyId int, params DeleteAdminSystemKeyParams)
-	// List normalized administrator tasks for a Microsoft, Gmail, iCloud, or domain resource
+	// List normalized administrator tasks for a resource or iCloud import
 	// (GET /v1/admin/tasks)
 	GetAdminTasks(c *gin.Context, params GetAdminTasksParams)
 	// Get one normalized administrator task
@@ -18691,6 +19145,382 @@ func (siw *ServerInterfaceWrapper) GetAdminICloudResourceImport(c *gin.Context) 
 	}
 
 	siw.Handler.GetAdminICloudResourceImport(c, importId)
+}
+
+// PostAdminICloudOnboardingImport operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminICloudOnboardingImport(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminICloudOnboardingImportParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminICloudOnboardingImport(c, params)
+}
+
+// GetAdminICloudOnboardingImport operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminICloudOnboardingImport(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "importId" -------------
+	var importId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "importId", c.Param("importId"), &importId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter importId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminICloudOnboardingImport(c, importId)
+}
+
+// PostAdminICloudOnboardingTaskFamilyReset operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminICloudOnboardingTaskFamilyReset(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "taskId" -------------
+	var taskId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "taskId", c.Param("taskId"), &taskId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter taskId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminICloudOnboardingTaskFamilyResetParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminICloudOnboardingTaskFamilyReset(c, taskId, params)
+}
+
+// PostAdminICloudOnboardingTaskICloudActivation operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminICloudOnboardingTaskICloudActivation(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "taskId" -------------
+	var taskId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "taskId", c.Param("taskId"), &taskId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter taskId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminICloudOnboardingTaskICloudActivationParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminICloudOnboardingTaskICloudActivation(c, taskId, params)
+}
+
+// PostAdminICloudOnboardingTaskRetry operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminICloudOnboardingTaskRetry(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "taskId" -------------
+	var taskId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "taskId", c.Param("taskId"), &taskId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter taskId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminICloudOnboardingTaskRetryParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminICloudOnboardingTaskRetry(c, taskId, params)
+}
+
+// PostAdminICloudOnboardingTaskSmsCode operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminICloudOnboardingTaskSmsCode(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "taskId" -------------
+	var taskId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "taskId", c.Param("taskId"), &taskId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter taskId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminICloudOnboardingTaskSmsCodeParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminICloudOnboardingTaskSmsCode(c, taskId, params)
 }
 
 // DeleteAdminICloudResource operation middleware
@@ -25193,11 +26023,19 @@ func (siw *ServerInterfaceWrapper) GetAdminTasks(c *gin.Context) {
 		return
 	}
 
-	// ------------- Required query parameter "bizId" -------------
+	// ------------- Optional query parameter "bizId" -------------
 
-	err = runtime.BindQueryParameterWithOptions("form", true, true, "bizId", c.Request.URL.Query(), &params.BizId, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "bizId", c.Request.URL.Query(), &params.BizId, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
 	if err != nil {
 		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter bizId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "source" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "source", c.Request.URL.Query(), &params.Source, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter source: %w", err), http.StatusBadRequest)
 		return
 	}
 
@@ -31137,6 +31975,12 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/admin/icloud/resources/import-preparations/:preparationId", wrapper.GetAdminICloudImportPreparation)
 	router.POST(options.BaseURL+"/v1/admin/icloud/resources/imports", wrapper.PostAdminICloudResourceImport)
 	router.GET(options.BaseURL+"/v1/admin/icloud/resources/imports/:importId", wrapper.GetAdminICloudResourceImport)
+	router.POST(options.BaseURL+"/v1/admin/icloud/resources/onboarding-imports", wrapper.PostAdminICloudOnboardingImport)
+	router.GET(options.BaseURL+"/v1/admin/icloud/resources/onboarding-imports/:importId", wrapper.GetAdminICloudOnboardingImport)
+	router.POST(options.BaseURL+"/v1/admin/icloud/resources/onboarding-tasks/:taskId/family-reset", wrapper.PostAdminICloudOnboardingTaskFamilyReset)
+	router.POST(options.BaseURL+"/v1/admin/icloud/resources/onboarding-tasks/:taskId/icloud-activation", wrapper.PostAdminICloudOnboardingTaskICloudActivation)
+	router.POST(options.BaseURL+"/v1/admin/icloud/resources/onboarding-tasks/:taskId/retry", wrapper.PostAdminICloudOnboardingTaskRetry)
+	router.POST(options.BaseURL+"/v1/admin/icloud/resources/onboarding-tasks/:taskId/sms-code", wrapper.PostAdminICloudOnboardingTaskSmsCode)
 	router.DELETE(options.BaseURL+"/v1/admin/icloud/resources/:resourceId", wrapper.DeleteAdminICloudResource)
 	router.GET(options.BaseURL+"/v1/admin/icloud/resources/:resourceId", wrapper.GetAdminICloudResource)
 	router.PATCH(options.BaseURL+"/v1/admin/icloud/resources/:resourceId", wrapper.PatchAdminICloudResource)

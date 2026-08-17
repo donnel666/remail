@@ -710,7 +710,7 @@ func updateCheckResultInTx(ctx context.Context, tx *gorm.DB, id uint, generation
 	return proxy, nil
 }
 
-func (r *ProxyRepo) AcquireResourceProxy(ctx context.Context, key string, ipVersion domain.ProxyIPVersion, now time.Time, bindingTTL time.Duration) (*domain.Proxy, error) {
+func (r *ProxyRepo) AcquireResourceProxy(ctx context.Context, key string, ipVersion domain.ProxyIPVersion, now time.Time, bindingTTL time.Duration, renewBinding ...bool) (*domain.Proxy, error) {
 	key = strings.TrimSpace(strings.ToLower(key))
 	if key == "" {
 		return nil, domain.ErrProxyBindingInvalid
@@ -720,12 +720,13 @@ func (r *ProxyRepo) AcquireResourceProxy(ctx context.Context, key string, ipVers
 	}
 	var selected *domain.Proxy
 	var failover *proxyServerFailover
+	renew := len(renewBinding) > 0 && renewBinding[0]
 	selectionContentions := 0
 	err := withTransactionRetry(func() error {
 		selected = nil
 		failover = nil
 		return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			if bound, err := findBoundResourceProxy(ctx, tx, key, ipVersion, now); err != nil {
+			if bound, err := findBoundResourceProxy(ctx, tx, key, ipVersion, now, bindingTTL, renew); err != nil {
 				return err
 			} else if bound != nil {
 				selected = bound
@@ -1133,7 +1134,7 @@ func (r *ProxyRepo) CompleteProxyServerCheck(
 	return update, nil
 }
 
-func findBoundResourceProxy(ctx context.Context, tx *gorm.DB, key string, ipVersion domain.ProxyIPVersion, now time.Time) (*domain.Proxy, error) {
+func findBoundResourceProxy(ctx context.Context, tx *gorm.DB, key string, ipVersion domain.ProxyIPVersion, now time.Time, bindingTTL time.Duration, renewBinding bool) (*domain.Proxy, error) {
 	var binding ProxyBindingModel
 	query := tx.WithContext(ctx).
 		Table("proxy_bindings AS b").
@@ -1170,15 +1171,40 @@ func findBoundResourceProxy(ctx context.Context, tx *gorm.DB, key string, ipVers
 	if !binding.ExpireAt.After(now) || !bindingMatchesIPVersion(binding, ipVersion) || !usableResourceProxyModel(model, now) {
 		return nil, nil
 	}
+	proxy := proxyFromModel(model)
 	result := tx.Model(&ProxyBindingModel{}).
 		Where("id = ? AND expire_at > ?", binding.ID, now).
-		Update("last_used_at", now)
+		Updates(resourceBindingTouchUpdates(binding.ExpireAt, proxy.ExpireAt, now, bindingTTL, renewBinding))
 	if result.Error != nil {
 		return nil, fmt.Errorf("touch proxy binding: %w", result.Error)
 	}
-	proxy := proxyFromModel(model)
 	proxy.LastUsedAt = &now
 	return &proxy, nil
+}
+
+func resourceBindingTouchUpdates(current, proxyExpireAt, now time.Time, ttl time.Duration, renew bool) map[string]any {
+	updates := map[string]any{"last_used_at": now}
+	if renew {
+		updates["expire_at"] = extendResourceBindingExpireAt(current, proxyExpireAt, now, ttl)
+	}
+	return updates
+}
+
+func extendResourceBindingExpireAt(current, proxyExpireAt, now time.Time, ttl time.Duration) time.Time {
+	if ttl <= 0 {
+		return current
+	}
+	if !proxyExpireAt.IsZero() && current.After(proxyExpireAt) {
+		current = proxyExpireAt
+	}
+	next := now.Add(ttl)
+	if !proxyExpireAt.IsZero() && proxyExpireAt.Before(next) {
+		next = proxyExpireAt
+	}
+	if next.After(current) {
+		return next
+	}
+	return current
 }
 
 func findExactBoundResourceProxy(ctx context.Context, tx *gorm.DB, key string, ipVersion domain.ProxyIPVersion, now time.Time) (*domain.Proxy, error) {

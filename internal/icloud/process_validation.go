@@ -289,6 +289,7 @@ func (s *Service) applyICloudChannelValidationResult(ctx context.Context, task i
 		message = "The iCloud forwarding domain is no longer authorized."
 		countFailure = true
 	}
+	refreshCreated := false
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var root iCloudRootModel
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -352,8 +353,11 @@ func (s *Service) applyICloudChannelValidationResult(ctx context.Context, task i
 			if selectedForwardTo != "" {
 				updates["last_valid_at"] = now
 			}
-			if resource.ExpireAt.After(now) && resource.AliasCount < iCloudMaxAliases {
+			if resource.ExpireAt.After(now) {
 				updates["next_provision_at"] = now
+			}
+			if resource.AccountRole == "primary" {
+				updates["family_next_sync_at"] = now
 			}
 		}
 		result := tx.Model(&iCloudResourceModel{}).
@@ -374,6 +378,11 @@ func (s *Service) applyICloudChannelValidationResult(ctx context.Context, task i
 		if rootResult.RowsAffected != 1 {
 			return errICloudValidationStale
 		}
+		var ensureErr error
+		refreshCreated, ensureErr = s.ensureICloudCookieRefreshTx(ctx, tx, resource.ID)
+		if ensureErr != nil {
+			return ensureErr
+		}
 		if run, err := findICloudMaintenanceRunTx(ctx, tx, task); err != nil {
 			return err
 		} else if run != nil {
@@ -393,6 +402,9 @@ func (s *Service) applyICloudChannelValidationResult(ctx context.Context, task i
 	}
 	if err != nil {
 		return ErrICloudValidationTemp
+	}
+	if refreshCreated {
+		_ = s.ScheduleICloudOnboardingDispatcher(context.WithoutCancel(ctx), 0)
 	}
 	if selectedForwardTo != "" {
 		_ = s.ScheduleICloudProvisionDispatcher(context.WithoutCancel(ctx), 0)

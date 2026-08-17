@@ -123,7 +123,7 @@ func TestICloudImportPersistsBothChannelsWithoutQueueSecrets(t *testing.T) {
 	}
 	if err := db.AutoMigrate(
 		&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudResourceChannelModel{},
-		&iCloudAliasModel{}, &iCloudImportModel{}, &iCloudImportItemModel{}, &governanceinfra.OperationLogModel{},
+		&iCloudAliasModel{}, &iCloudImportModel{}, &iCloudImportItemModel{}, &iCloudAppleIDReservationModel{}, &governanceinfra.OperationLogModel{},
 	); err != nil {
 		t.Fatalf("migrate database: %v", err)
 	}

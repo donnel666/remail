@@ -6,6 +6,12 @@ func NewAPISession(ctx context.Context, proxy string, timeoutSeconds int) (*Sess
 	return newPlainSession(ctx, proxy, timeoutSeconds)
 }
 
+// NewAppleAPISession uses one deterministic Chrome profile. Apple workflows
+// provide their matching macOS browser headers at the request layer.
+func NewAppleAPISession(ctx context.Context, proxy string, timeoutSeconds int) (*Session, error) {
+	return newAppleSession(ctx, proxy, timeoutSeconds)
+}
+
 // Request exposes the shared TLS client for protocol clients that need custom
 // headers, JSON bodies, or redirect handling.
 func (s *Session) Request(method, rawURL string, headers map[string]string, jsonBody any, followRedirects bool) (*HTTPResponse, error) {

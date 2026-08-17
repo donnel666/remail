@@ -476,7 +476,7 @@ const iCloudImportSingleTaskSelect = `
 SELECT
     'icloud_import' AS source,
     imp.id AS source_id,
-    0 AS resource_scope_id,
+    imp.id AS resource_scope_id,
     'icloud_resource_import' AS biz_type,
     imp.id AS biz_id,
     'import' AS kind,
@@ -488,20 +488,66 @@ SELECT
     imp.started_at AS started_at,
     imp.finished_at AS finished_at,
     imp.updated_at AS updated_at,
-    GREATEST(imp.accepted_count + imp.skipped_count, imp.imported_count + imp.skipped_count) AS progress_total,
-    LEAST(
-        GREATEST(imp.accepted_count + imp.skipped_count, imp.imported_count + imp.skipped_count),
-        imp.imported_count + imp.skipped_count
-    ) AS progress_processed,
+    CASE
+        WHEN imp.accepted_count > imp.imported_count THEN imp.accepted_count + imp.skipped_count
+        ELSE imp.imported_count + imp.skipped_count
+    END AS progress_total,
+    imp.imported_count + imp.skipped_count AS progress_processed,
     imp.imported_count AS progress_succeeded,
     imp.skipped_count AS progress_skipped,
-    GREATEST(
-        GREATEST(imp.accepted_count + imp.skipped_count, imp.imported_count + imp.skipped_count)
-            - imp.imported_count - imp.skipped_count,
-        0
-    ) AS progress_failed,
+    CASE WHEN imp.accepted_count > imp.imported_count THEN imp.accepted_count - imp.imported_count ELSE 0 END AS progress_failed,
     NULL AS reason_buckets
 FROM icloud_resource_imports AS imp`
+
+const iCloudOnboardingSingleTaskSelect = `
+SELECT
+    'icloud_onboarding' AS source,
+    imp.id AS source_id,
+    imp.id AS resource_scope_id,
+    'icloud_resource_import' AS biz_type,
+    imp.id AS biz_id,
+    'import' AS kind,
+    CASE imp.status
+        WHEN 'processing' THEN 'running'
+        WHEN 'completed' THEN 'succeeded'
+        WHEN 'partial' THEN 'uncertain'
+        ELSE 'failed'
+    END AS status,
+    COALESCE((
+        SELECT MAX(task.attempts)
+        FROM icloud_account_onboarding_tasks AS task
+        WHERE task.import_id = imp.id
+    ), 0) AS attempts,
+    COALESCE((
+        SELECT MAX(task.max_attempts)
+        FROM icloud_account_onboarding_tasks AS task
+        WHERE task.import_id = imp.id
+    ), 1) AS max_attempts,
+    NULL AS credential_revision,
+    imp.created_at AS queued_at,
+    (
+        SELECT task.started_at
+        FROM icloud_account_onboarding_tasks AS task
+        WHERE task.import_id = imp.id AND task.started_at IS NOT NULL
+        ORDER BY task.started_at ASC
+        LIMIT 1
+    ) AS started_at,
+    CASE WHEN imp.status IN ('completed', 'partial', 'failed') THEN imp.updated_at ELSE NULL END AS finished_at,
+    imp.updated_at AS updated_at,
+    imp.accepted_count AS progress_total,
+    CASE
+        WHEN imp.completed_count + imp.failed_count > imp.accepted_count THEN imp.accepted_count
+        ELSE imp.completed_count + imp.failed_count
+    END AS progress_processed,
+    imp.completed_count AS progress_succeeded,
+    0 AS progress_skipped,
+    imp.failed_count AS progress_failed,
+    NULL AS reason_buckets
+FROM icloud_account_onboarding_imports AS imp`
+
+const iCloudImportTaskUnion = iCloudImportSingleTaskSelect + `
+UNION ALL
+` + iCloudOnboardingSingleTaskSelect
 
 func (r *AdminTaskViewRepo) MicrosoftResourceExists(ctx context.Context, resourceID uint) (bool, error) {
 	if r == nil || r.db == nil || resourceID == 0 {
@@ -579,16 +625,21 @@ func (r *AdminTaskViewRepo) ListForICloudResource(ctx context.Context, filter go
 	return r.listForResource(ctx, filter, iCloudResourceTaskUnion)
 }
 
+func (r *AdminTaskViewRepo) ListForICloudImports(ctx context.Context, filter governanceapp.AdminTaskListFilter) ([]governanceapp.AdminTaskView, int64, int64, error) {
+	return r.listForResource(ctx, filter, iCloudImportTaskUnion)
+}
+
 func (r *AdminTaskViewRepo) listForResource(ctx context.Context, filter governanceapp.AdminTaskListFilter, taskUnion string) ([]governanceapp.AdminTaskView, int64, int64, error) {
 	if r == nil || r.db == nil {
 		return nil, 0, 0, errors.New("administrator task database is unavailable")
 	}
 	outerWhere := `
 FROM (` + taskUnion + `) AS normalized
-WHERE normalized.resource_scope_id = ?
-  AND (? = '' OR normalized.kind = ?)
-  AND (? = '' OR normalized.status = ?)`
-	args := []any{filter.BizID, filter.Kind, filter.Kind, filter.Status, filter.Status}
+WHERE (? = 0 OR normalized.resource_scope_id = ?)
+	  AND (? = '' OR normalized.source = ?)
+	  AND (? = '' OR normalized.kind = ?)
+	  AND (? = '' OR normalized.status = ?)`
+	args := []any{filter.BizID, filter.BizID, filter.Source, filter.Source, filter.Kind, filter.Kind, filter.Status, filter.Status}
 
 	var aggregate struct {
 		Total     int64 `gorm:"column:total"`
@@ -842,6 +893,8 @@ func singleTaskSelect(source string) (string, error) {
 		return gmailHistoryTaskSelect, nil
 	case governanceapp.AdminTaskSourceICloudImport:
 		return iCloudImportSingleTaskSelect, nil
+	case governanceapp.AdminTaskSourceICloudOnboarding:
+		return iCloudOnboardingSingleTaskSelect, nil
 	case governanceapp.AdminTaskSourceICloudValidate:
 		return iCloudValidationTaskSelect, nil
 	default:

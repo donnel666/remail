@@ -19,13 +19,64 @@ const (
 	typeICloudValidationDispatcher = "icloud:resource_validation_dispatcher"
 	typeICloudProvision            = "icloud:resource_provision"
 	typeICloudProvisionDispatcher  = "icloud:resource_provision_dispatcher"
+	typeICloudOnboarding           = "icloud:account_onboarding"
+	typeICloudOnboardingDispatcher = "icloud:account_onboarding_dispatcher"
 
 	iCloudDispatcherPeriod         = 30 * time.Second
 	iCloudDispatcherTaskTimeout    = 30 * time.Second
 	iCloudValidationTaskTimeout    = 3 * time.Minute
 	iCloudValidationActivationWait = time.Second
 	iCloudProvisionTaskTimeout     = 3 * time.Minute
+	iCloudOnboardingTaskTimeout    = 2 * time.Minute
+	iCloudOnboardingActivationWait = time.Second
 )
+
+func (s *Service) ScheduleICloudOnboardingDispatcher(ctx context.Context, delay time.Duration) error {
+	if s == nil || s.queue == nil {
+		return ErrICloudOnboardingTemporary
+	}
+	if delay < 0 {
+		delay = 0
+	}
+	options := []asynq.Option{
+		asynq.Queue(platform.QueueBackgroundICloudValidation), asynq.Unique(iCloudDispatcherTaskTimeout + delay),
+		asynq.MaxRetry(0), asynq.Timeout(iCloudDispatcherTaskTimeout), asynq.Retention(0),
+	}
+	if delay > 0 {
+		options = append(options, asynq.ProcessIn(delay))
+	}
+	_, err := s.queue.EnqueueContext(ctx, asynq.NewTask(typeICloudOnboardingDispatcher, nil), options...)
+	if errors.Is(err, asynq.ErrDuplicateTask) {
+		return nil
+	}
+	if err != nil {
+		return ErrICloudOnboardingTemporary
+	}
+	return nil
+}
+
+func (s *Service) enqueueICloudOnboardingTask(ctx context.Context, task iCloudOnboardingTask) (bool, error) {
+	if s == nil || s.queue == nil || task.TaskID == 0 || task.Generation == 0 {
+		return false, ErrICloudOnboardingTemporary
+	}
+	payload, err := json.Marshal(task)
+	if err != nil {
+		return false, ErrICloudOnboardingTemporary
+	}
+	_, err = s.queue.EnqueueContext(ctx, asynq.NewTask(typeICloudOnboarding, payload),
+		asynq.Queue(platform.QueueBackgroundICloudValidation),
+		asynq.Unique(iCloudOnboardingTaskTimeout+iCloudOnboardingActivationWait),
+		asynq.MaxRetry(platform.BackgroundTaskMaxRetryValue()), asynq.Timeout(iCloudOnboardingTaskTimeout),
+		asynq.ProcessIn(iCloudOnboardingActivationWait), asynq.Retention(0),
+	)
+	if errors.Is(err, asynq.ErrDuplicateTask) {
+		return false, nil
+	}
+	if err != nil {
+		return false, ErrICloudOnboardingTemporary
+	}
+	return true, nil
+}
 
 func (s *Service) ScheduleICloudImportDispatcher(ctx context.Context, delay time.Duration) error {
 	if s == nil || s.queue == nil {
@@ -165,6 +216,37 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, service *Service) func(context.Co
 	mux.HandleFunc(typeICloudProvisionDispatcher, func(ctx context.Context, _ *asynq.Task) error {
 		return service.DispatchICloudProvisions(ctx, iCloudProvisionBatchLimit)
 	})
+	mux.HandleFunc(typeICloudOnboardingDispatcher, func(ctx context.Context, _ *asynq.Task) error {
+		_ = service.DispatchICloudOnboardingTasks(ctx, 100)
+		return nil
+	})
+	mux.HandleFunc(typeICloudOnboarding, func(ctx context.Context, task *asynq.Task) error {
+		payload, err := decodeICloudOnboardingTask(task)
+		if err != nil {
+			return err
+		}
+		release, admitted := platform.AcquireBackgroundExecution(ctx, service.backgroundExecution)
+		if !admitted {
+			if platform.BackgroundTaskHasRetryHeadroom(ctx) {
+				return platform.ErrBackgroundExecutionDeferred
+			}
+			_ = service.ReleaseICloudOnboardingTask(context.WithoutCancel(ctx), payload, "Onboarding execution was deferred; dispatcher will retry.")
+			return nil
+		}
+		defer release()
+		if err := service.ProcessICloudOnboardingTask(ctx, payload); err != nil {
+			if platform.BackgroundTaskHasRetryHeadroom(ctx) {
+				return err
+			}
+			releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			_ = service.ReleaseICloudOnboardingTask(releaseCtx, payload, "Onboarding infrastructure is temporarily unavailable; dispatcher will retry.")
+			_ = service.ScheduleICloudOnboardingDispatcher(releaseCtx, time.Second)
+			return nil
+		}
+		_ = service.ScheduleICloudOnboardingDispatcher(context.WithoutCancel(ctx), 0)
+		return nil
+	})
 	mux.HandleFunc(typeICloudProvision, func(ctx context.Context, task *asynq.Task) error {
 		var payload iCloudProvisionTask
 		if task == nil || json.Unmarshal(task.Payload(), &payload) != nil || payload.ResourceID == 0 {
@@ -226,6 +308,7 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, service *Service) func(context.Co
 		_ = service.ScheduleICloudImportDispatcher(callCtx, 0)
 		_ = service.ScheduleICloudValidationDispatcher(callCtx, 0)
 		_ = service.ScheduleICloudProvisionDispatcher(callCtx, 0)
+		_ = service.ScheduleICloudOnboardingDispatcher(callCtx, 0)
 	}
 	go func() {
 		defer close(done)
@@ -306,6 +389,14 @@ func decodeICloudValidationTask(task *asynq.Task) (iCloudValidationTask, error) 
 	var payload iCloudValidationTask
 	if task == nil || json.Unmarshal(task.Payload(), &payload) != nil || payload.ResourceID == 0 || payload.OwnerUserID == 0 || payload.ValidationGeneration == 0 || payload.ExpectedCredentialRevision == 0 {
 		return iCloudValidationTask{}, fmt.Errorf("decode iCloud validation task: %w", asynq.SkipRetry)
+	}
+	return payload, nil
+}
+
+func decodeICloudOnboardingTask(task *asynq.Task) (iCloudOnboardingTask, error) {
+	var payload iCloudOnboardingTask
+	if task == nil || json.Unmarshal(task.Payload(), &payload) != nil || payload.TaskID == 0 || payload.Generation == 0 {
+		return iCloudOnboardingTask{}, fmt.Errorf("decode iCloud onboarding task: %w", asynq.SkipRetry)
 	}
 	return payload, nil
 }

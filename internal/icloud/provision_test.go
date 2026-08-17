@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/donnel666/remail/internal/appleweb"
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/glebarez/sqlite"
@@ -26,9 +27,7 @@ func TestAppleAccountRefreshBootstrapsScntFromTokenResponse(t *testing.T) {
 	sessionID := strings.Repeat("i", iCloudAppleAccountValueMaxLength)
 	dataAccessToken := strings.Repeat("d", iCloudAppleAccountValueMaxLength)
 	client := NewAppleAccountClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
-		if got := request.Header.Get("X-Apple-I-FD-Client-Info"); got != testICloudFDClientInfo {
-			t.Fatalf("FD client info = %q, want imported value", got)
-		}
+		assertFixedAppleRequestFingerprint(t, request)
 		header := make(http.Header)
 		switch request.URL.Path {
 		case "/account/manage/gs/ws/token":
@@ -111,9 +110,7 @@ func TestAppleAccountRefreshWarmsPortalBeforeRetryingMissingScnt(t *testing.T) {
 		case "/account/manage/section/privacy":
 			return &http.Response{StatusCode: http.StatusOK, Header: header, Body: io.NopCloser(strings.NewReader(`<html></html>`))}, nil
 		case "/bootstrap/portal":
-			if got := request.Header.Get("X-Apple-I-FD-Client-Info"); got != testICloudFDClientInfo {
-				t.Fatalf("bootstrap FD client info = %q", got)
-			}
+			assertFixedAppleRequestFingerprint(t, request)
 			return &http.Response{StatusCode: http.StatusOK, Header: header, Body: io.NopCloser(strings.NewReader(`{}`))}, nil
 		case "/account/manage":
 			return &http.Response{StatusCode: http.StatusOK, Header: header, Body: io.NopCloser(strings.NewReader(`{"apiKey":"api-key"}`))}, nil
@@ -138,6 +135,22 @@ func TestAppleAccountRefreshWarmsPortalBeforeRetryingMissingScnt(t *testing.T) {
 	}
 	if strings.Join(paths, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("bootstrap paths = %#v, want %#v", paths, want)
+	}
+}
+
+func assertFixedAppleRequestFingerprint(t *testing.T, request *http.Request) {
+	t.Helper()
+	if got := request.Header.Get("User-Agent"); got != appleweb.UserAgent {
+		t.Fatalf("Apple user agent = %q", got)
+	}
+	if got := request.Header.Get("Sec-CH-UA-Platform"); got != appleweb.SecCHPlatform {
+		t.Fatalf("Apple client-hint platform = %q", got)
+	}
+	var payload struct {
+		UserAgent string `json:"U"`
+	}
+	if err := json.Unmarshal([]byte(request.Header.Get("X-Apple-I-FD-Client-Info")), &payload); err != nil || payload.UserAgent != appleweb.UserAgent {
+		t.Fatalf("Apple FD client info is not fixed to macOS: payload=%+v err=%v", payload, err)
 	}
 }
 
@@ -1074,6 +1087,44 @@ func TestICloudProvisionRequiresThreeSessionFailuresBeforeInvalidation(t *testin
 	}
 }
 
+func TestICloudProvisionPermanentProviderErrorsDoNotRetry(t *testing.T) {
+	now := time.Date(2026, 8, 14, 11, 25, 0, 0, time.UTC)
+	for _, test := range []struct {
+		name string
+		err  error
+	}{
+		{name: "invalid HME context", err: &hmeError{Category: "invalid_context", SafeMessage: "invalid context"}},
+		{name: "Apple rejected request", err: &appleAccountError{Category: "provider_rejected", SafeMessage: "rejected"}},
+		{name: "invalid Apple response", err: &appleAccountError{Category: "provider_response", SafeMessage: "invalid response"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			db, err := gorm.Open(sqlite.Open("file:icloud-permanent-provider-"+strings.ReplaceAll(test.name, " ", "-")+"?mode=memory&cache=shared"), &gorm.Config{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := db.AutoMigrate(&iCloudResourceModel{}, &iCloudResourceChannelModel{}); err != nil {
+				t.Fatal(err)
+			}
+			resource := iCloudResourceModel{ID: 1, ResourceType: "icloud", Status: iCloudResourceNormal, CredentialRevision: 1, ExpireAt: now.Add(time.Hour)}
+			channel := iCloudResourceChannelModel{ID: 1, ResourceID: 1, Kind: iCloudChannelWeb, SessionStatus: iCloudSessionValid}
+			if err := db.Create(&resource).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&channel).Error; err != nil {
+				t.Fatal(err)
+			}
+			service := NewService(db, nil, nil)
+			_ = service.applyICloudProvisionError(context.Background(), resource, channel, test.err, now)
+			if err := db.First(&channel, channel.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			if channel.SessionStatus != iCloudSessionInvalid || !iCloudProvisionRequestRetryAt(test.err, channel, now).IsZero() {
+				t.Fatalf("permanent error remained retryable: %#v", channel)
+			}
+		})
+	}
+}
+
 func TestICloudProvisionDispatcherDrainsAllInvalidChannels(t *testing.T) {
 	redisServer := miniredis.RunT(t)
 	queue := asynq.NewClient(asynq.RedisClientOpt{Addr: redisServer.Addr()})
@@ -1129,6 +1180,72 @@ func TestICloudProvisionDispatcherDrainsAllInvalidChannels(t *testing.T) {
 	}
 	if run.Status != iCloudMaintenanceCanceled || run.FinishedAt == nil || run.LastSafeError == "" {
 		t.Fatalf("invalid-channel run = %#v", run)
+	}
+}
+
+func TestICloudProvisionCreatesRefreshTaskForInvalidChannel(t *testing.T) {
+	for _, test := range []struct {
+		name            string
+		sessionStatus   string
+		sessionFailures uint8
+	}{
+		{name: "already invalid", sessionStatus: iCloudSessionInvalid},
+		{name: "becomes invalid", sessionStatus: iCloudSessionValid, sessionFailures: iCloudSessionFailureLimit - 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			db, err := gorm.Open(sqlite.Open("file:icloud-provision-refresh-"+strings.ReplaceAll(test.name, " ", "-")+"?mode=memory&cache=shared"), &gorm.Config{})
+			if err != nil {
+				t.Fatalf("open database: %v", err)
+			}
+			if err := db.AutoMigrate(
+				&iCloudResourceModel{}, &iCloudResourceChannelModel{}, &iCloudResourceCredentialModel{},
+				&iCloudMaintenanceRunModel{}, &iCloudOnboardingImportModel{}, &iCloudOnboardingTaskModel{},
+			); err != nil {
+				t.Fatalf("migrate database: %v", err)
+			}
+			now := time.Date(2026, 8, 14, 11, 40, 0, 0, time.UTC)
+			resource := iCloudResourceModel{
+				ID: 1, ResourceType: "icloud", PrimaryEmail: "owner@example.com", AccountRole: "primary",
+				Region: "US", CountryCode: "US", ICloudOpened: true, BoundPhoneNumber: "14155550001",
+				BoundPhoneCountryCode: "US", BoundPhoneSource: "manual", Status: iCloudResourceNormal,
+				ExpireAt: now.Add(time.Hour), CredentialRevision: 1, NextProvisionAt: &now, CreatedAt: now, UpdatedAt: now,
+			}
+			if err := db.Create(&resource).Error; err != nil {
+				t.Fatalf("create resource: %v", err)
+			}
+			answers, _ := json.Marshal([3]iCloudSecurityAnswer{
+				{Question: "q1", Answer: "a1"}, {Question: "q2", Answer: "a2"}, {Question: "q3", Answer: "a3"},
+			})
+			if err := db.Create(&iCloudResourceCredentialModel{
+				ResourceID: resource.ID, ApplePassword: "Secret1!", SecurityAnswers: answers,
+				Birthday: time.Date(2000, 11, 2, 0, 0, 0, 0, time.UTC), CreatedAt: now, UpdatedAt: now,
+			}).Error; err != nil {
+				t.Fatalf("create credential: %v", err)
+			}
+			if err := db.Create(&iCloudResourceChannelModel{
+				ResourceID: resource.ID, Kind: iCloudChannelAppleAccount, Host: "appleid.apple.com",
+				Cookie: "expired", Scnt: "scnt", APIKey: "api-key", SessionStatus: test.sessionStatus,
+				SessionFailures: test.sessionFailures, CreatedAt: now, UpdatedAt: now,
+			}).Error; err != nil {
+				t.Fatalf("create channel: %v", err)
+			}
+			service := NewService(db, nil, nil)
+			service.now = func() time.Time { return now }
+			service.apple = NewAppleAccountClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: http.StatusUnauthorized, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+			})})
+
+			if err := service.ProcessICloudProvision(context.Background(), iCloudProvisionTask{ResourceID: resource.ID}); err != nil {
+				t.Fatalf("process provisioning: %v", err)
+			}
+			var tasks []iCloudOnboardingTaskModel
+			if err := db.Where("task_kind = ? AND resource_id = ?", "refresh", resource.ID).Find(&tasks).Error; err != nil {
+				t.Fatalf("read refresh task: %v", err)
+			}
+			if len(tasks) != 1 || tasks[0].BoundPhoneNumber != resource.BoundPhoneNumber || tasks[0].Stage != "icloud_prepare" {
+				t.Fatalf("unexpected refresh tasks: %+v", tasks)
+			}
+		})
 	}
 }
 

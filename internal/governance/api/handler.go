@@ -25,9 +25,13 @@ func (h *Handler) GetAdminTasks(c *gin.Context) {
 		writeAdminTaskError(c, governanceapp.ErrAdminTaskUnavailable)
 		return
 	}
-	bizID, ok := parseRequiredAdminTaskUint(c, "bizId")
-	if !ok {
-		return
+	var bizID uint
+	if _, exists := c.GetQuery("bizId"); exists {
+		var ok bool
+		bizID, ok = parseRequiredAdminTaskUint(c, "bizId")
+		if !ok {
+			return
+		}
 	}
 	offset, ok := parseAdminTaskInt(c, "offset", 0, 0, int(^uint(0)>>1))
 	if !ok {
@@ -41,6 +45,7 @@ func (h *Handler) GetAdminTasks(c *gin.Context) {
 	result, err := h.module.Tasks.List(c.Request.Context(), governanceapp.AdminTaskListFilter{
 		BizType: strings.TrimSpace(c.Query("bizType")),
 		BizID:   bizID,
+		Source:  strings.TrimSpace(c.Query("source")),
 		Kind:    strings.TrimSpace(c.Query("kind")),
 		Status:  strings.TrimSpace(c.Query("status")),
 		Offset:  offset,

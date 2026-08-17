@@ -82,3 +82,51 @@ INSERT INTO icloud_maintenance_runs(
 	require.Equal(t, "icloud_validation:101", items[1].TaskID())
 	require.WithinDuration(t, time.Date(2026, 8, 8, 0, 0, 0, 0, time.UTC), items[1].QueuedAt.UTC(), time.Second)
 }
+
+func TestAdminTaskViewRepoListsActiveICloudOnboardingImports(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:governance-icloud-onboarding?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.Exec(`
+CREATE TABLE icloud_resource_imports (
+    id INTEGER PRIMARY KEY, dispatch_status TEXT, attempts INTEGER, max_attempts INTEGER,
+    accepted_count INTEGER, skipped_count INTEGER, imported_count INTEGER,
+    created_at DATETIME, started_at DATETIME, finished_at DATETIME, updated_at DATETIME
+);
+CREATE TABLE icloud_resource_import_items (import_id INTEGER, outcome TEXT, category TEXT);
+CREATE TABLE icloud_account_onboarding_imports (
+    id INTEGER PRIMARY KEY, status TEXT, accepted_count INTEGER, completed_count INTEGER,
+    failed_count INTEGER, created_at DATETIME, updated_at DATETIME
+);
+CREATE TABLE icloud_account_onboarding_tasks (
+    id INTEGER PRIMARY KEY, import_id INTEGER, attempts INTEGER, max_attempts INTEGER, started_at DATETIME
+);
+INSERT INTO icloud_resource_imports(
+    id, dispatch_status, attempts, max_attempts, accepted_count, skipped_count,
+    imported_count, created_at, started_at, finished_at, updated_at
+) VALUES (99, 'running', 1, 3, 1, 0, 0, '2026-08-16 08:06:00', '2026-08-16 08:06:01', NULL, '2026-08-16 08:06:02');
+INSERT INTO icloud_account_onboarding_imports(
+    id, status, accepted_count, completed_count, failed_count, created_at, updated_at
+) VALUES (23, 'processing', 3, 1, 1, '2026-08-16 08:00:00', '2026-08-16 08:05:00');
+INSERT INTO icloud_account_onboarding_tasks(id, import_id, attempts, max_attempts, started_at) VALUES
+    (31, 23, 1, 5, '2026-08-16 08:00:01'),
+    (32, 23, 2, 5, '2026-08-16 08:00:02');
+`).Error)
+
+	items, total, succeeded, err := NewAdminTaskViewRepo(db).ListForICloudImports(
+		context.Background(),
+		governanceapp.AdminTaskListFilter{
+			BizType: governanceapp.AdminTaskBizICloudResourceImport,
+			Source:  governanceapp.AdminTaskSourceICloudOnboarding,
+			Status:  governanceapp.AdminTaskStatusRunning,
+			Limit:   1,
+		},
+	)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Zero(t, succeeded)
+	require.Len(t, items, 1)
+	require.Equal(t, "icloud_onboarding:23", items[0].TaskID())
+	require.Equal(t, governanceapp.AdminTaskStatusRunning, items[0].Status)
+	require.Equal(t, 2, items[0].Attempts)
+	require.Equal(t, &governanceapp.AdminTaskProgress{Total: 3, Processed: 2, Succeeded: 1, Failed: 1, ReasonCounts: []governanceapp.AdminTaskReasonCount{}}, items[0].Progress)
+}

@@ -14,10 +14,11 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/donnel666/remail/internal/appleweb"
 	"github.com/donnel666/remail/internal/platform"
 )
 
-const defaultICloudHMEUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
+const defaultICloudHMEUserAgent = appleweb.UserAgent
 
 const (
 	iCloudHMEEmailMaxLength           = 320
@@ -109,7 +110,7 @@ func (e *hmeError) Error() string {
 // HMEClient owns the legacy provisioning surface: list, generate and reserve.
 // It keeps Apple session material inside the request/response path.
 type HMEClient struct {
-	httpClient *http.Client
+	httpClient appleHTTPDoer
 }
 
 func NewHMEClient(client *http.Client) *HMEClient {
@@ -151,7 +152,7 @@ func (c *HMEClient) refreshSession(ctx context.Context, config hmeConfig) (hmeCo
 		return config, &hmeError{Category: "invalid_context", SafeMessage: "Invalid iCloud session refresh context.", Stage: "validate"}
 	}
 	request.Header.Set("Accept", "*/*")
-	request.Header.Set("Accept-Language", iCloudAcceptLanguage(config.LangCode))
+	request.Header.Set("Accept-Language", appleweb.AcceptLanguage)
 	request.Header.Set("Content-Type", "text/plain;charset=UTF-8")
 	request.Header.Set("Origin", config.Origin)
 	request.Header.Set("Referer", config.Referer)
@@ -159,6 +160,9 @@ func (c *HMEClient) refreshSession(ctx context.Context, config hmeConfig) (hmeCo
 	request.Header.Set("Sec-Fetch-Dest", "empty")
 	request.Header.Set("Sec-Fetch-Mode", "cors")
 	request.Header.Set("Sec-Fetch-Site", "same-site")
+	request.Header.Set("Sec-CH-UA", appleweb.SecCHUA)
+	request.Header.Set("Sec-CH-UA-Mobile", "?0")
+	request.Header.Set("Sec-CH-UA-Platform", appleweb.SecCHPlatform)
 	request.Header.Set("Cookie", config.SetupCookie)
 	client := c
 	if client == nil || client.httpClient == nil {
@@ -641,12 +645,15 @@ func (c *HMEClient) request(ctx context.Context, config hmeConfig, method, reque
 		return nil, "", &hmeError{Category: "invalid_context", SafeMessage: "Invalid iCloud HME request context."}
 	}
 	request.Header.Set("Accept", "*/*")
-	request.Header.Set("Accept-Language", iCloudAcceptLanguage(config.LangCode))
+	request.Header.Set("Accept-Language", appleweb.AcceptLanguage)
 	request.Header.Set("Content-Type", "text/plain")
 	request.Header.Set("Origin", config.Origin)
 	request.Header.Set("Referer", config.Referer)
 	request.Header.Set("User-Agent", config.UserAgent)
 	request.Header.Set("Cookie", config.Cookie)
+	request.Header.Set("Sec-CH-UA", appleweb.SecCHUA)
+	request.Header.Set("Sec-CH-UA-Mobile", "?0")
+	request.Header.Set("Sec-CH-UA-Platform", appleweb.SecCHPlatform)
 	client := c
 	if client == nil || client.httpClient == nil {
 		client = NewHMEClient(nil)
@@ -787,7 +794,7 @@ func normalizeHMEConfig(config hmeConfig) hmeConfig {
 	config.LangCode = strings.TrimSpace(config.LangCode)
 	config.Origin = strings.TrimSpace(config.Origin)
 	config.Referer = strings.TrimSpace(config.Referer)
-	config.UserAgent = strings.TrimSpace(config.UserAgent)
+	config.UserAgent = defaultICloudHMEUserAgent
 	langCode, origin, referer := defaultICloudHMEContext(config.Host)
 	if config.LangCode == "" {
 		config.LangCode = langCode
@@ -797,9 +804,6 @@ func normalizeHMEConfig(config hmeConfig) hmeConfig {
 	}
 	if config.Referer == "" {
 		config.Referer = referer
-	}
-	if config.UserAgent == "" {
-		config.UserAgent = defaultICloudHMEUserAgent
 	}
 	return config
 }

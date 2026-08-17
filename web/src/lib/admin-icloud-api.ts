@@ -27,6 +27,10 @@ export type AdminICloudImportResponse =
   components["schemas"]["AdminICloudImportResponse"];
 export type AdminICloudImportPreparation =
   components["schemas"]["AdminICloudImportPreparation"];
+export type AdminICloudOnboardingTask =
+  components["schemas"]["AdminICloudOnboardingTask"];
+export type AdminICloudOnboardingImportResponse =
+  components["schemas"]["AdminICloudOnboardingImportResponse"];
 export type AdminICloudMutationResponse =
   components["schemas"]["AdminICloudMutationResponse"];
 export type AdminICloudTask = components["schemas"]["AdminTaskView"];
@@ -58,6 +62,12 @@ export interface AdminICloudImportRequest {
   ownerId: number;
   preparationId: number;
   errorStrategy: AdminICloudImportErrorStrategy;
+  expireAt: string;
+}
+
+export interface AdminICloudOnboardingImportRequest {
+  content: string;
+  ownerId: number;
   expireAt: string;
 }
 
@@ -270,6 +280,125 @@ export async function waitForAdminICloudResourceImport(
   throw new Error("The iCloud resource import is still processing.");
 }
 
+export async function importAdminICloudOnboardingAccounts(
+  request: AdminICloudOnboardingImportRequest,
+  signal?: AbortSignal,
+): Promise<AdminICloudOnboardingImportResponse> {
+  const formData = new FormData();
+  formData.append(
+    "file",
+    new File([request.content], "icloud-onboarding.txt", { type: "text/plain" }),
+  );
+  formData.append("ownerId", String(request.ownerId));
+  formData.append("expireAt", request.expireAt);
+  return unwrap(
+    await client.POST("/v1/admin/icloud/resources/onboarding-imports", {
+      body: formData as never,
+      bodySerializer: (body) => body,
+      params: { header: importHeaders() },
+      signal,
+    }),
+  );
+}
+
+export async function getAdminICloudOnboardingImport(
+  importId: number,
+  signal?: AbortSignal,
+): Promise<AdminICloudOnboardingImportResponse> {
+  return unwrap(
+    await client.GET(
+      "/v1/admin/icloud/resources/onboarding-imports/{importId}",
+      { params: { path: { importId } }, signal },
+    ),
+  );
+}
+
+export async function waitForAdminICloudOnboardingImport(
+  importId: number,
+  options: {
+    intervalMs?: number;
+    maxAttempts?: number;
+    signal?: AbortSignal;
+  } = {},
+): Promise<AdminICloudOnboardingImportResponse> {
+  const intervalMs = options.intervalMs ?? 1_000;
+  const maxAttempts = options.maxAttempts ?? 120;
+  let lastStatus: AdminICloudOnboardingImportResponse | undefined;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    throwIfAborted(options.signal);
+    lastStatus = await getAdminICloudOnboardingImport(importId, options.signal);
+    if (lastStatus.status !== "processing") return lastStatus;
+    if (attempt + 1 < maxAttempts) {
+      await abortableDelay(intervalMs, options.signal);
+    }
+  }
+  throwIfAborted(options.signal);
+  if (lastStatus) return lastStatus;
+  throw new Error("The Apple account onboarding import is still processing.");
+}
+
+export async function submitAdminICloudOnboardingSmsCode(
+  taskId: number,
+  code: string,
+  signal?: AbortSignal,
+): Promise<AdminICloudOnboardingTask> {
+  return unwrap(
+    await client.POST(
+      "/v1/admin/icloud/resources/onboarding-tasks/{taskId}/sms-code",
+      {
+        body: { code: code.trim() },
+        params: { header: csrfHeader(), path: { taskId } },
+        signal,
+      },
+    ),
+  );
+}
+
+export async function confirmAdminICloudOnboardingFamilyReset(
+  taskId: number,
+  signal?: AbortSignal,
+): Promise<AdminICloudOnboardingTask> {
+  return unwrap(
+    await client.POST(
+      "/v1/admin/icloud/resources/onboarding-tasks/{taskId}/family-reset",
+      {
+        params: { header: commandHeaders(), path: { taskId } },
+        signal,
+      },
+    ),
+  );
+}
+
+export async function retryAdminICloudOnboardingPostFamily(
+  taskId: number,
+  signal?: AbortSignal,
+): Promise<AdminICloudOnboardingTask> {
+  return unwrap(
+    await client.POST(
+      "/v1/admin/icloud/resources/onboarding-tasks/{taskId}/retry",
+      {
+        params: { header: commandHeaders(), path: { taskId } },
+        signal,
+      },
+    ),
+  );
+}
+
+export async function confirmAdminICloudOnboardingICloudActivation(
+  taskId: number,
+  signal?: AbortSignal,
+): Promise<AdminICloudOnboardingTask> {
+  return unwrap(
+    await client.POST(
+      "/v1/admin/icloud/resources/onboarding-tasks/{taskId}/icloud-activation",
+      {
+        params: { header: commandHeaders(), path: { taskId } },
+        signal,
+      },
+    ),
+  );
+}
+
 export async function listAdminICloudAliases(
   resourceId: number,
   offset = 0,
@@ -309,6 +438,32 @@ export async function listAdminICloudTasks(
       signal,
     }),
   );
+}
+
+export async function listAdminICloudOnboardingImports(
+  signal?: AbortSignal,
+): Promise<AdminICloudTaskList> {
+  const items: AdminICloudTask[] = [];
+  let page: AdminICloudTaskList;
+  do {
+    page = await unwrap(
+      await client.GET("/v1/admin/tasks", {
+        params: {
+          query: {
+            bizType: "icloud_resource_import",
+            source: "icloud_onboarding",
+            kind: "import",
+            status: "running",
+            offset: items.length,
+            limit: 100,
+          },
+        },
+        signal,
+      }),
+    );
+    items.push(...page.items);
+  } while (page.items.length > 0 && items.length < page.total);
+  return { ...page, items, offset: 0 };
 }
 
 export async function updateAdminICloudResource(

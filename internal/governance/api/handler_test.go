@@ -23,6 +23,7 @@ type apiTaskRepoStub struct {
 	existsCalls int
 	lists       int
 	gets        int
+	lastFilter  governanceapp.AdminTaskListFilter
 }
 
 func (s *apiTaskRepoStub) MicrosoftResourceExists(context.Context, uint) (bool, error) {
@@ -45,8 +46,9 @@ func (s *apiTaskRepoStub) ICloudResourceExists(context.Context, uint) (bool, err
 	return s.exists, s.err
 }
 
-func (s *apiTaskRepoStub) ListForMicrosoftResource(context.Context, governanceapp.AdminTaskListFilter) ([]governanceapp.AdminTaskView, int64, int64, error) {
+func (s *apiTaskRepoStub) ListForMicrosoftResource(_ context.Context, filter governanceapp.AdminTaskListFilter) ([]governanceapp.AdminTaskView, int64, int64, error) {
 	s.lists++
+	s.lastFilter = filter
 	if s.err != nil {
 		return nil, 0, 0, s.err
 	}
@@ -65,6 +67,10 @@ func (s *apiTaskRepoStub) ListForGmailResource(ctx context.Context, filter gover
 }
 
 func (s *apiTaskRepoStub) ListForICloudResource(ctx context.Context, filter governanceapp.AdminTaskListFilter) ([]governanceapp.AdminTaskView, int64, int64, error) {
+	return s.ListForMicrosoftResource(ctx, filter)
+}
+
+func (s *apiTaskRepoStub) ListForICloudImports(ctx context.Context, filter governanceapp.AdminTaskListFilter) ([]governanceapp.AdminTaskView, int64, int64, error) {
 	return s.ListForMicrosoftResource(ctx, filter)
 }
 
@@ -161,7 +167,7 @@ func TestAdminTaskRoutesRequireGovernancePermissionAndReturnSafeDTO(t *testing.T
 	require.Equal(t, "read", checker.action)
 	require.Contains(t, response.Body.String(), `"taskId":"fetch:71"`)
 	require.Contains(t, response.Body.String(), `"remainingAttempts":2`)
-	for _, forbidden := range []string{"claimToken", "dispatchToken", "fencing", "selection_json", "never-return-secret"} {
+	for _, forbidden := range []string{"claimToken", "dispatchToken", "fencing", "selection_json", "password", "securityAnswer", "cookie", "sessionPayload", "verificationCode", "never-return-secret"} {
 		require.NotContains(t, response.Body.String(), forbidden)
 	}
 }
@@ -182,6 +188,26 @@ func TestAdminTaskRoutesAcceptICloudResource(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 	require.Contains(t, response.Body.String(), `"taskId":"icloud_validation:61"`)
+}
+
+func TestAdminTaskRoutesListICloudImportsWithoutBizID(t *testing.T) {
+	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
+	repo := &apiTaskRepoStub{task: &governanceapp.AdminTaskView{
+		Ref:     governanceapp.AdminTaskRef{Source: governanceapp.AdminTaskSourceICloudOnboarding, ID: 23},
+		BizType: governanceapp.AdminTaskBizICloudResourceImport, BizID: 23,
+		Kind: governanceapp.AdminTaskKindImport, Status: governanceapp.AdminTaskStatusRunning,
+		MaxAttempts: 5, QueuedAt: now, UpdatedAt: now,
+	}}
+	router := adminTaskTestRouter(repo, &taskPermissionChecker{allow: true})
+	request := httptest.NewRequest(http.MethodGet, "/v1/admin/tasks?bizType=icloud_resource_import&source=icloud_onboarding", nil)
+	request.AddCookie(&http.Cookie{Name: middleware.SessionCookieName, Value: "admin-session"})
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.Contains(t, response.Body.String(), `"taskId":"icloud_onboarding:23"`)
+	require.Zero(t, repo.existsCalls)
+	require.Equal(t, governanceapp.AdminTaskSourceICloudOnboarding, repo.lastFilter.Source)
 }
 
 func TestAdminTaskRoutesRejectPermissionBeforeQuery(t *testing.T) {

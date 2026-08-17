@@ -264,6 +264,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		cleanupFuncs = append(cleanupFuncs, gmailapi.RegisterTaskHandlers(taskMux, gmailMod.Service))
 		icloudMod = icloudapi.NewModule(p.DB, p.Asynq, fileStore)
 		icloudMod.Service.SetBackgroundExecutionGate(p.BackgroundLoad)
+		icloudMod.Service.SetAppleProxyProvider(proxyMod.ProxyUseCase)
 		icloudMod.Service.SetImportOwnerValidator(func(ctx context.Context, ownerID uint) (bool, error) {
 			owner, err := iamMod.AdminResourceOwners.ValidateTargetOwner(ctx, ownerID)
 			return owner != nil && owner.ID != 0 && owner.Enabled, err
@@ -272,6 +273,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		cleanupFuncs = append(cleanupFuncs, icloudapi.RegisterTaskHandlers(taskMux, icloudMod.Service))
 		kitesimService := kitesim.NewService(p.DB, kitesim.NewSyncQueue(p.Asynq))
 		kitesimService.SetProxyProvider(proxyMod.ProxyUseCase)
+		icloudMod.Service.SetICloudSMSPhoneService(kitesimService)
 		kitesim.RegisterRoutes(v1, kitesimService, iamSessionFetcher, iamMod.PermissionChecker)
 		kitesim.RegisterTaskHandlers(taskMux, kitesimService)
 		cleanupFuncs = append(cleanupFuncs, kitesim.StartOperationDispatcher(kitesimService))

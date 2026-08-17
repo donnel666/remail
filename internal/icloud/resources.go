@@ -52,43 +52,77 @@ type AdminICloudSessionView struct {
 }
 
 type AdminICloudResourceView struct {
-	ID                uint                    `json:"id"`
-	Version           uint64                  `json:"version"`
-	PrimaryEmail      string                  `json:"primaryEmail"`
-	SelectedForwardTo string                  `json:"selectedForwardTo"`
-	Owner             AdminICloudOwnerView    `json:"owner"`
-	Status            string                  `json:"status"`
-	ForSale           bool                    `json:"forSale"`
-	NewSession        *AdminICloudSessionView `json:"newSession"`
-	OldSession        *AdminICloudSessionView `json:"oldSession"`
-	AliasCount        uint                    `json:"aliasCount"`
-	ExpireAt          time.Time               `json:"expireAt"`
-	NextValidationAt  *time.Time              `json:"nextValidationAt"`
-	NextProvisionAt   *time.Time              `json:"nextProvisionAt"`
-	LastCheckedAt     *time.Time              `json:"lastCheckedAt"`
-	LastValidAt       *time.Time              `json:"lastValidAt"`
-	LastAliasSyncAt   *time.Time              `json:"lastAliasSyncAt"`
-	LastAllocatedAt   *time.Time              `json:"lastAllocatedAt"`
-	LastSafeError     *string                 `json:"lastSafeError"`
-	CreatedAt         time.Time               `json:"createdAt"`
-	UpdatedAt         time.Time               `json:"updatedAt"`
+	ID                      uint                    `json:"id"`
+	Version                 uint64                  `json:"version"`
+	PrimaryEmail            string                  `json:"primaryEmail"`
+	AccountRole             string                  `json:"accountRole"`
+	FamilyPrimaryResourceID *uint                   `json:"familyPrimaryResourceId"`
+	FamilyPrimaryEmail      string                  `json:"familyPrimaryEmail,omitempty"`
+	FamilyChildCount        uint                    `json:"familyChildCount"`
+	FamilyChildLimit        uint                    `json:"familyChildLimit"`
+	FamilySyncStatus        string                  `json:"familySyncStatus"`
+	FamilySyncedAt          *time.Time              `json:"familySyncedAt"`
+	FamilySyncErrorCategory string                  `json:"familySyncErrorCategory,omitempty"`
+	Region                  string                  `json:"region"`
+	CountryCode             string                  `json:"countryCode"`
+	ICloudOpened            bool                    `json:"icloudOpened"`
+	BoundPhoneNumber        string                  `json:"boundPhoneNumber,omitempty"`
+	BoundPhoneCountryCode   string                  `json:"boundPhoneCountryCode,omitempty"`
+	BoundPhoneSource        string                  `json:"boundPhoneSource,omitempty"`
+	KitesimPhoneID          *uint                   `json:"kitesimPhoneId"`
+	FamilyInviteURL         string                  `json:"familyInviteUrl,omitempty"`
+	SelectedForwardTo       string                  `json:"selectedForwardTo"`
+	Owner                   AdminICloudOwnerView    `json:"owner"`
+	Status                  string                  `json:"status"`
+	ForSale                 bool                    `json:"forSale"`
+	NewSession              *AdminICloudSessionView `json:"newSession"`
+	OldSession              *AdminICloudSessionView `json:"oldSession"`
+	AliasCount              uint                    `json:"aliasCount"`
+	ExpireAt                time.Time               `json:"expireAt"`
+	NextValidationAt        *time.Time              `json:"nextValidationAt"`
+	NextProvisionAt         *time.Time              `json:"nextProvisionAt"`
+	LastCheckedAt           *time.Time              `json:"lastCheckedAt"`
+	LastValidAt             *time.Time              `json:"lastValidAt"`
+	LastAliasSyncAt         *time.Time              `json:"lastAliasSyncAt"`
+	LastAllocatedAt         *time.Time              `json:"lastAllocatedAt"`
+	LastSafeError           *string                 `json:"lastSafeError"`
+	CreatedAt               time.Time               `json:"createdAt"`
+	UpdatedAt               time.Time               `json:"updatedAt"`
 }
 
 type AdminICloudResourceDetail struct {
 	AdminICloudResourceView
-	AliasLimit           uint      `json:"aliasLimit"`
-	AliasRemaining       uint      `json:"aliasRemaining"`
-	AliasProvisioning    bool      `json:"aliasProvisioning"`
-	CredentialRevision   uint64    `json:"credentialRevision"`
-	CredentialUpdatedAt  time.Time `json:"credentialUpdatedAt"`
-	ValidationGeneration uint64    `json:"validationGeneration"`
-	ValidationFailures   uint8     `json:"validationFailures"`
+	AliasLimit           uint                      `json:"aliasLimit"`
+	AliasRemaining       uint                      `json:"aliasRemaining"`
+	AliasProvisioning    bool                      `json:"aliasProvisioning"`
+	CredentialRevision   uint64                    `json:"credentialRevision"`
+	CredentialUpdatedAt  time.Time                 `json:"credentialUpdatedAt"`
+	ValidationGeneration uint64                    `json:"validationGeneration"`
+	ValidationFailures   uint8                     `json:"validationFailures"`
+	RefreshTask          *ICloudOnboardingTaskView `json:"refreshTask"`
 }
 
 type adminICloudResourceRow struct {
 	ID                      uint       `gorm:"column:id"`
 	Version                 uint64     `gorm:"column:version"`
 	PrimaryEmail            string     `gorm:"column:primary_email"`
+	AccountRole             string     `gorm:"column:account_role"`
+	FamilyPrimaryResourceID *uint      `gorm:"column:family_primary_resource_id"`
+	FamilyPrimaryEmail      string     `gorm:"column:family_primary_email"`
+	FamilyChildCount        uint       `gorm:"column:family_child_count"`
+	FamilySyncStatus        string     `gorm:"column:family_sync_status"`
+	FamilySyncedAt          *time.Time `gorm:"column:family_synced_at"`
+	FamilySyncErrorCategory string     `gorm:"column:family_sync_error_category"`
+	Region                  string     `gorm:"column:region"`
+	CountryCode             string     `gorm:"column:country_code"`
+	ICloudOpened            bool       `gorm:"column:icloud_opened"`
+	BoundPhoneNumber        string     `gorm:"column:bound_phone_number"`
+	BoundPhoneCountryCode   string     `gorm:"column:bound_phone_country_code"`
+	BoundPhoneSource        string     `gorm:"column:bound_phone_source"`
+	KitesimPhoneID          *uint      `gorm:"column:kitesim_phone_id"`
+	KitesimPhoneCode        string     `gorm:"column:kitesim_phone_code"`
+	KitesimPhoneNumber      string     `gorm:"column:kitesim_phone_number"`
+	FamilyInviteURL         string     `gorm:"column:family_invite_url"`
 	SelectedForwardTo       string     `gorm:"column:selected_forward_to"`
 	OwnerID                 uint       `gorm:"column:owner_id"`
 	OwnerEmail              string     `gorm:"column:owner_email"`
@@ -132,7 +166,16 @@ type adminICloudResourceRow struct {
 }
 
 const adminICloudResourceSelect = `
-	ir.id, er.version, ir.primary_email, ir.selected_forward_to, er.owner_user_id AS owner_id,
+	ir.id, er.version, ir.primary_email, ir.account_role, ir.family_primary_resource_id,
+	COALESCE(family_primary.primary_email, '') AS family_primary_email,
+	ir.family_remote_member_count AS family_child_count,
+	ir.family_sync_status, ir.family_synced_at, ir.family_sync_error_category,
+	ir.region, ir.country_code, ir.icloud_opened, ir.bound_phone_number, ir.bound_phone_country_code,
+		ir.bound_phone_source, ir.kitesim_phone_id,
+		COALESCE(kp.phone_code, '') AS kitesim_phone_code,
+		COALESCE(kp.phone_number, '') AS kitesim_phone_number,
+		ir.family_invite_url,
+	ir.selected_forward_to, er.owner_user_id AS owner_id,
 	u.email AS owner_email, u.nickname AS owner_nickname,
 	COALESCE(ug.name, '') AS owner_group_name, u.role AS owner_role,
 	u.status AS owner_status, ir.status, ir.for_sale,
@@ -224,7 +267,7 @@ func (s *Service) ListAdminICloudResources(ctx context.Context, filter AdminIClo
 		}
 	}
 	var rows []adminICloudResourceRow
-	query := s.applyAdminICloudResourceFilter(s.adminICloudResourceQuery(ctx), filter, adminICloudFilterIgnore{})
+	query := s.applyAdminICloudResourceFilter(s.adminICloudResourceViewQuery(ctx), filter, adminICloudFilterIgnore{})
 	if err := query.Select(adminICloudResourceSelect).Order("ir.id DESC").Offset(filter.Offset).Limit(filter.Limit).Scan(&rows).Error; err != nil {
 		return nil, fmt.Errorf("list administrator iCloud resources: %w", ErrICloudResourceQueryTemporary)
 	}
@@ -256,7 +299,7 @@ func (s *Service) GetAdminICloudResource(ctx context.Context, resourceID uint) (
 		return nil, ErrICloudResourceQuery
 	}
 	var row adminICloudResourceRow
-	err := s.adminICloudResourceQuery(ctx).Where("ir.id = ?", resourceID).Select(adminICloudResourceSelect).Take(&row).Error
+	err := s.adminICloudResourceViewQuery(ctx).Where("ir.id = ?", resourceID).Select(adminICloudResourceSelect).Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrICloudResourceNotFound
 	}
@@ -267,13 +310,21 @@ func (s *Service) GetAdminICloudResource(ctx context.Context, resourceID uint) (
 	if row.AliasCount < iCloudMaxAliases {
 		remaining = iCloudMaxAliases - row.AliasCount
 	}
-	return &AdminICloudResourceDetail{
+	detail := &AdminICloudResourceDetail{
 		AdminICloudResourceView: adminICloudResourceView(row), AliasLimit: iCloudMaxAliases,
 		AliasRemaining:     remaining,
 		AliasProvisioning:  row.NextProvisionAt != nil || strings.TrimSpace(row.AliasProvisionCandidate) != "" || row.AliasProvisionReconcile,
 		CredentialRevision: row.CredentialRevision, CredentialUpdatedAt: row.CredentialUpdatedAt,
 		ValidationGeneration: row.ValidationGeneration, ValidationFailures: row.ValidationFailures,
-	}, nil
+	}
+	var refresh iCloudOnboardingTaskModel
+	if err := s.db.WithContext(ctx).Where("task_kind = ? AND resource_id = ?", "refresh", resourceID).Order("id DESC").Take(&refresh).Error; err == nil {
+		view := iCloudOnboardingTaskView(refresh)
+		detail.RefreshTask = &view
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrICloudResourceQueryTemporary
+	}
+	return detail, nil
 }
 
 func adminICloudResourceView(row adminICloudResourceRow) AdminICloudResourceView {
@@ -282,9 +333,16 @@ func adminICloudResourceView(row adminICloudResourceRow) AdminICloudResourceView
 		safeError = &value
 	}
 	return AdminICloudResourceView{
-		ID: row.ID, Version: row.Version, PrimaryEmail: row.PrimaryEmail, SelectedForwardTo: row.SelectedForwardTo,
-		Owner:  AdminICloudOwnerView{ID: row.OwnerID, Email: row.OwnerEmail, Nickname: row.OwnerNickname, GroupName: row.OwnerGroupName, Role: row.OwnerRole, Enabled: row.OwnerStatus == "active"},
-		Status: row.Status, ForSale: row.ForSale,
+		ID: row.ID, Version: row.Version, PrimaryEmail: row.PrimaryEmail,
+		AccountRole: firstNonEmpty(row.AccountRole, "unknown"), FamilyPrimaryResourceID: row.FamilyPrimaryResourceID,
+		FamilyPrimaryEmail: row.FamilyPrimaryEmail, FamilyChildCount: row.FamilyChildCount, FamilyChildLimit: iCloudFamilyChildLimit,
+		FamilySyncStatus: row.FamilySyncStatus, FamilySyncedAt: row.FamilySyncedAt, FamilySyncErrorCategory: row.FamilySyncErrorCategory,
+		Region: row.Region, CountryCode: row.CountryCode, ICloudOpened: row.ICloudOpened,
+		BoundPhoneNumber: adminICloudBoundPhoneNumber(row), BoundPhoneCountryCode: row.BoundPhoneCountryCode,
+		BoundPhoneSource: row.BoundPhoneSource, KitesimPhoneID: row.KitesimPhoneID, FamilyInviteURL: row.FamilyInviteURL,
+		SelectedForwardTo: row.SelectedForwardTo,
+		Owner:             AdminICloudOwnerView{ID: row.OwnerID, Email: row.OwnerEmail, Nickname: row.OwnerNickname, GroupName: row.OwnerGroupName, Role: row.OwnerRole, Enabled: row.OwnerStatus == "active"},
+		Status:            row.Status, ForSale: row.ForSale,
 		NewSession: adminICloudSessionView(row.NewChannelID, row.NewSessionStatus, row.NewSessionFailures, row.NewCooldownUntil, row.NewNextKeepaliveAt, row.NewLastCheckedAt, row.NewLastValidAt),
 		OldSession: adminICloudSessionView(row.OldChannelID, row.OldSessionStatus, row.OldSessionFailures, row.OldCooldownUntil, row.OldNextKeepaliveAt, row.OldLastCheckedAt, row.OldLastValidAt),
 		AliasCount: row.AliasCount, ExpireAt: row.ExpireAt, NextValidationAt: row.NextValidationAt,
@@ -293,6 +351,17 @@ func adminICloudResourceView(row adminICloudResourceRow) AdminICloudResourceView
 		LastAllocatedAt: row.LastAllocatedAt, LastSafeError: safeError,
 		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 	}
+}
+
+func adminICloudBoundPhoneNumber(row adminICloudResourceRow) string {
+	number := onboardingPhoneDigits(row.KitesimPhoneNumber)
+	if number == "" {
+		return strings.TrimSpace(row.BoundPhoneNumber)
+	}
+	if code := onboardingPhoneDigits(row.KitesimPhoneCode); code != "" && !strings.HasPrefix(number, code) {
+		number = code + number
+	}
+	return "+" + number
 }
 
 func adminICloudSessionView(id *uint, status string, failures uint8, cooldown, keepalive, checked, valid *time.Time) *AdminICloudSessionView {
@@ -343,11 +412,17 @@ func (s *Service) adminICloudResourceQuery(ctx context.Context) *gorm.DB {
 	return adminICloudResourceQueryDB(ctx, s.db)
 }
 
+func (s *Service) adminICloudResourceViewQuery(ctx context.Context) *gorm.DB {
+	return s.adminICloudResourceQuery(ctx).
+		Joins("LEFT JOIN kitesim_phones AS kp ON kp.id = ir.kitesim_phone_id")
+}
+
 func adminICloudResourceQueryDB(ctx context.Context, db *gorm.DB) *gorm.DB {
 	return db.WithContext(ctx).Table("icloud_resources AS ir").
 		Joins("JOIN email_resources AS er ON er.id = ir.id AND er.type = ?", "icloud").
 		Joins("JOIN users AS u ON u.id = er.owner_user_id").
 		Joins("LEFT JOIN user_groups AS ug ON ug.id = u.user_group_id").
+		Joins("LEFT JOIN icloud_resources AS family_primary ON family_primary.id = ir.family_primary_resource_id").
 		Joins("LEFT JOIN icloud_resource_channels AS new_ch ON new_ch.resource_id = ir.id AND new_ch.kind = ?", iCloudChannelAppleAccount).
 		Joins("LEFT JOIN icloud_resource_channels AS old_ch ON old_ch.resource_id = ir.id AND old_ch.kind = ?", iCloudChannelWeb)
 }
@@ -394,11 +469,13 @@ func applyAdminICloudResourceFilterDB(query *gorm.DB, filter AdminICloudResource
 		like := "%" + filter.Search + "%"
 		query = query.Where(`(
 			LOWER(ir.primary_email) LIKE ? OR LOWER(u.email) LIKE ? OR LOWER(u.nickname) LIKE ? OR
+			LOWER(ir.region) LIKE ? OR LOWER(ir.country_code) LIKE ? OR LOWER(ir.account_role) LIKE ? OR
+			LOWER(ir.bound_phone_number) LIKE ? OR LOWER(COALESCE(family_primary.primary_email, '')) LIKE ? OR
 			CAST(ir.id AS CHAR) LIKE ? OR CAST(er.owner_user_id AS CHAR) LIKE ? OR EXISTS (
 				SELECT 1 FROM icloud_aliases AS ia
 				WHERE ia.resource_id = ir.id AND (LOWER(ia.email) LIKE ? OR LOWER(ia.anonymous_id) LIKE ?)
 			)
-		)`, like, like, like, like, like, like, like)
+		)`, like, like, like, like, like, like, like, like, like, like, like, like)
 	}
 	if !ignore.status {
 		if filter.Status == "" {

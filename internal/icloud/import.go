@@ -635,7 +635,7 @@ func (s *Service) processICloudImportClaimed(ctx context.Context, record *iCloud
 		if errors.Is(err, ErrICloudImportClaim) {
 			return ErrICloudImportClaim
 		}
-		if isICloudDuplicateError(err) {
+		if errors.Is(err, ErrICloudResourceIdentity) || isICloudDuplicateError(err) {
 			return s.failICloudImport(ctx, record, iCloudImportFailure{
 				Category: "duplicate_resource", SafeMessage: "An iCloud resource in the import already exists.",
 			})
@@ -822,6 +822,18 @@ func (s *Service) createICloudResourcesAndMarkImportSucceeded(
 			if err != nil {
 				return err
 			}
+			reservations := make([]iCloudAppleIDReservationModel, len(chunk))
+			reservationKeys := make([]string, len(chunk))
+			for index, line := range chunk {
+				reservationKeys[index] = iCloudImportEmailKey(line.PrimaryEmail)
+				reservations[index] = iCloudAppleIDReservationModel{
+					EmailKey: reservationKeys[index], OwnerKind: iCloudAppleIDReservationImport,
+					OwnerID: locked.ID, CreatedAt: now,
+				}
+			}
+			if err := reserveICloudAppleIDsTx(tx, reservations); err != nil {
+				return err
+			}
 			expiresAt := locked.ResourceExpireAt
 			if expiresAt.IsZero() {
 				expiresAt = locked.CreatedAt.AddDate(0, 1, 0)
@@ -944,7 +956,8 @@ func (s *Service) createICloudResourcesAndMarkImportSucceeded(
 			if updated.RowsAffected != 1 {
 				return ErrICloudImportClaim
 			}
-			return nil
+			return tx.Where("owner_kind = ? AND owner_id = ? AND email_key IN ?", iCloudAppleIDReservationImport, locked.ID, reservationKeys).
+				Delete(&iCloudAppleIDReservationModel{}).Error
 		})
 		if err != nil {
 			return err

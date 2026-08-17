@@ -3638,6 +3638,120 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/icloud/resources/onboarding-imports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Apple account onboarding for iCloud resources
+         * @description Requires `core:resource/operate` and `governance:task/read`, so every operator who starts onboarding can recover its durable task after closing the dialog. Accepts up to 1,000 UTF-8 account lines in `region----iCloud opened----Apple ID----password----security answer 1----security answer 2----security answer 3----birthday[----phone][----family invitation URL]` format. A non-empty invitation URL marks a primary account; primary accounts are stored without joining a family, while child accounts reserve capacity on the least-loaded compatible primary account in the same region. A supplied phone becomes the permanent binding, reusing matching Kitesim inventory when available. A child with no phone receives a permanent Kitesim binding; a primary with no phone recovers its existing Apple trusted phone and must match exactly one Kitesim pool number, otherwise onboarding stops and requires an explicit phone. Apple passwords, security answers, browser session payloads, Cookie values, submitted verification codes, and uploaded source text remain write-only.
+         */
+        post: operations["postAdminICloudOnboardingImport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/icloud/resources/onboarding-imports/{importId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get an Apple account onboarding import */
+        get: operations["getAdminICloudOnboardingImport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/icloud/resources/onboarding-tasks/{taskId}/sms-code": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Submit a manually received Apple SMS code */
+        post: operations["postAdminICloudOnboardingTaskSmsCode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/icloud/resources/onboarding-tasks/{taskId}/family-reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm the primary family-sharing reset
+         * @description Completes a task after an operator manually disables and re-enables sharing on the primary Apple account.
+         */
+        post: operations["postAdminICloudOnboardingTaskFamilyReset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/icloud/resources/onboarding-tasks/{taskId}/icloud-activation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm manual iCloud activation
+         * @description Resumes a child onboarding task after an operator manually enables iCloud for the Apple account.
+         */
+        post: operations["postAdminICloudOnboardingTaskICloudActivation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/icloud/resources/onboarding-tasks/{taskId}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry onboarding after family membership was confirmed
+         * @description Requeues the same durable task from its recoverable post-family stage without selecting or joining another family.
+         */
+        post: operations["postAdminICloudOnboardingTaskRetry"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/icloud/resources/batch/validation": {
         parameters: {
             query?: never;
@@ -3958,7 +4072,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List normalized administrator tasks for a Microsoft, Gmail, iCloud, or domain resource
+         * List normalized administrator tasks for a resource or iCloud import
          * @description Requires `governance:task/read`. Governance normalizes durable facts from their owning contexts without becoming their source of truth. Results use source-qualified task IDs, the stable `queued/running/succeeded/failed/uncertain/canceled` status union, and safe progress only. Internal table paths, claim/dispatch/lease/fencing tokens, upstream payloads, and raw errors are never returned. If any required task source is unavailable, the request returns 503 instead of a stale or partial success.
          */
         get: operations["getAdminTasks"];
@@ -7652,6 +7766,10 @@ export interface components {
         AdminICloudResourceStatus: "pending" | "validating" | "normal" | "abnormal" | "disabled" | "deleted";
         /** @enum {string} */
         AdminICloudSessionStatus: "unchecked" | "valid" | "invalid";
+        /** @enum {string} */
+        AdminICloudAccountRole: "unknown" | "primary" | "child";
+        /** @enum {string} */
+        AdminICloudPhoneSource: "kitesim" | "manual";
         AdminICloudOwnerSummary: {
             id: number;
             /** Format: email */
@@ -7662,12 +7780,32 @@ export interface components {
             role: "user" | "supplier" | "admin" | "super_admin";
             enabled: boolean;
         };
-        /** @description Administrator-safe operational facts. Cookies, DSID, host, client context, and provider request payloads are never returned. */
+        /** @description Administrator-safe operational facts. Apple passwords, security answers, browser session payloads, Cookie values, DSID, host, client context, and provider request payloads are never returned. */
         AdminICloudResourceItem: {
             id: number;
             version: number;
             /** Format: email */
             primaryEmail: string;
+            accountRole: components["schemas"]["AdminICloudAccountRole"];
+            familyPrimaryResourceId: number | null;
+            /** Format: email */
+            familyPrimaryEmail?: string;
+            familyChildCount: number;
+            /** @enum {integer} */
+            familyChildLimit: 5;
+            /** @enum {string} */
+            familySyncStatus: "unknown" | "ready" | "failed" | "inactive";
+            /** Format: date-time */
+            familySyncedAt: string | null;
+            familySyncErrorCategory?: string;
+            region: string;
+            countryCode: string;
+            icloudOpened: boolean;
+            boundPhoneNumber?: string;
+            boundPhoneCountryCode?: string;
+            boundPhoneSource?: components["schemas"]["AdminICloudPhoneSource"];
+            kitesimPhoneId: number | null;
+            familyInviteUrl?: string;
             /** @description Last Apple HME forwarding mailbox observed during validation or provisioning. */
             selectedForwardTo: string;
             owner: components["schemas"]["AdminICloudOwnerSummary"];
@@ -7696,7 +7834,7 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
         };
-        /** @description Administrator-safe iCloud resource detail with validation and provisioning diagnostics. HME cookies, DSID, and request context are never returned. */
+        /** @description Administrator-safe iCloud resource detail with validation and provisioning diagnostics. Apple passwords, security answers, browser session payloads, Cookie values, DSID, and request context are never returned. */
         AdminICloudResourceDetail: components["schemas"]["AdminICloudResourceItem"] & {
             /** @enum {integer} */
             aliasLimit: 750;
@@ -7709,6 +7847,7 @@ export interface components {
             /** Format: int64 */
             validationGeneration: number;
             validationFailures: number;
+            refreshTask: components["schemas"]["AdminICloudOnboardingTask"] | null;
         };
         AdminICloudStatusFacet: {
             /** Format: int64 */
@@ -7760,6 +7899,70 @@ export interface components {
             facets: components["schemas"]["AdminICloudFacets"];
         };
         AdminICloudImportResponse: components["schemas"]["AdminMicrosoftImportResponse"];
+        AdminICloudOnboardingSmsCodeRequest: {
+            code: string;
+        };
+        /** @description Safe progress for an onboarding or Cookie-refresh task. Apple passwords, security answers, browser session payloads, Cookie values, and submitted verification codes are never returned. */
+        AdminICloudOnboardingTask: {
+            id: number;
+            /** @enum {string} */
+            taskKind: "onboarding" | "refresh";
+            resourceId: number | null;
+            lineNumber: number;
+            /** Format: email */
+            primaryEmail: string;
+            /** @enum {string} */
+            accountRole: "primary" | "child";
+            familyPrimaryResourceId: number | null;
+            familyPrimaryEmail?: string;
+            region: string;
+            countryCode: string;
+            icloudOpened: boolean;
+            familyInviteUrl?: string;
+            boundPhoneNumber?: string;
+            boundPhoneCountryCode?: string;
+            boundPhoneSource?: components["schemas"]["AdminICloudPhoneSource"];
+            kitesimPhoneId: number | null;
+            /** @enum {string} */
+            status: "processing" | "waiting" | "completed" | "failed";
+            stage: string;
+            attempts: number;
+            maxAttempts: number;
+            /** Format: date-time */
+            nextAttemptAt: string | null;
+            pendingSmsPurpose?: string;
+            needsManualCode: boolean;
+            needsICloudActivation: boolean;
+            needsFamilyReset: boolean;
+            needsPostFamilyRecovery: boolean;
+            lastErrorCategory?: string;
+            lastSafeError?: string;
+            /** Format: date-time */
+            startedAt: string | null;
+            /** Format: date-time */
+            finishedAt: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        AdminICloudOnboardingImportResponse: {
+            importId: number;
+            requestId: string;
+            /** @enum {string} */
+            status: "processing" | "completed" | "partial" | "failed";
+            accepted: number;
+            completed: number;
+            failed: number;
+            waiting: number;
+            lastSafeError?: string;
+            tasks: components["schemas"]["AdminICloudOnboardingTask"][];
+            reused: boolean;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
         ICloudForwardingEmail: {
             id: number;
             /** Format: email */
@@ -7806,6 +8009,8 @@ export interface components {
             version: number;
             /** @description Write-only `email----curl[----curl]` credential update. It accepts one old cURL, one new cURL, or both cURLs in either order, including browser-copied backslash line continuations. While the primary email is unchanged, each supplied cURL replaces only its matching channel and omitted channels are preserved. On an already healthy resource, submitted channels are checked asynchronously without changing resource health. Changing the primary email treats the supplied cURLs as the complete credential set, removes omitted channels, and re-queues resource validation. */
             importLine?: string;
+            /** @description Replacement family invitation for a primary account. A different valid value clears a persisted invalid-invitation quarantine. */
+            familyInviteUrl?: string;
             ownerId?: number;
             forSale?: boolean;
             /** Format: date-time */
@@ -21062,6 +21267,209 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    postAdminICloudOnboardingImport: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    file: string;
+                    ownerId: number;
+                    /** Format: date-time */
+                    expireAt: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Durable onboarding import accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudOnboardingImportResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getAdminICloudOnboardingImport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                importId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current safe task progress */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudOnboardingImportResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminICloudOnboardingTaskSmsCode: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path: {
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminICloudOnboardingSmsCodeRequest"];
+            };
+        };
+        responses: {
+            /** @description Code accepted and task requeued */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudOnboardingTask"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminICloudOnboardingTaskFamilyReset: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
+            };
+            path: {
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Manual reset confirmed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudOnboardingTask"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminICloudOnboardingTaskICloudActivation: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
+            };
+            path: {
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Manual activation confirmed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudOnboardingTask"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminICloudOnboardingTaskRetry: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
+            };
+            path: {
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Recoverable task requeued */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudOnboardingTask"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     postAdminICloudResourcesValidate: {
         parameters: {
             query?: never;
@@ -21824,9 +22232,11 @@ export interface operations {
     getAdminTasks: {
         parameters: {
             query: {
-                bizType: "microsoft_resource" | "gmail_resource" | "icloud_resource" | "domain_resource";
-                /** @description Resource ID matching bizType. */
-                bizId: number;
+                bizType: "microsoft_resource" | "gmail_resource" | "icloud_resource" | "domain_resource" | "icloud_resource_import";
+                /** @description Resource ID matching bizType. Omit only when listing iCloud imports globally. */
+                bizId?: number;
+                /** @description Optional normalized task source. Use `icloud_onboarding` to list recoverable Apple onboarding batches without unrelated iCloud imports consuming the page. */
+                source?: "import" | "alias" | "alias_schedule" | "token" | "fetch" | "resource_history" | "bulk" | "gmail_validation" | "gmail_history" | "icloud_import" | "icloud_onboarding" | "icloud_validation";
                 kind?: components["schemas"]["AdminTaskKind"];
                 status?: components["schemas"]["AdminTaskStatus"];
                 offset?: number;

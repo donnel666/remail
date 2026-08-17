@@ -23,23 +23,31 @@ vi.mock("./idempotency", () => ({
 import {
   batchAdminICloudResourcesByFilter,
   batchAdminICloudResourcesByIds,
+  confirmAdminICloudOnboardingFamilyReset,
   createAdminICloudAliases,
   createAdminICloudImportPreparation,
   deleteAdminICloudResource,
   getAdminICloudImportPreparation,
+  getAdminICloudOnboardingImport,
   getAdminICloudResourceDetail,
+  importAdminICloudOnboardingAccounts,
   importAdminICloudResources,
   listAdminICloudAliases,
+  listAdminICloudOnboardingImports,
   listAdminICloudResources,
   listAdminICloudTasks,
   normalizeICloudImportContent,
+  retryAdminICloudOnboardingPostFamily,
   setAdminICloudResourcesExpirationByFilter,
   setAdminICloudResourcesExpirationByIds,
+  submitAdminICloudOnboardingSmsCode,
   updateAdminICloudResource,
   validateAdminICloudResource,
   waitForAdminICloudResourceImport,
+  waitForAdminICloudOnboardingImport,
   type AdminICloudImportResponse,
   type AdminICloudImportPreparation,
+  type AdminICloudOnboardingImportResponse,
   type AdminICloudResourceList,
 } from "./admin-icloud-api";
 
@@ -102,6 +110,52 @@ const IMPORT_PREPARATION = {
   expiresAt: "2026-08-15T08:30:00Z",
   createdAt: "2026-08-15T08:00:00Z",
 } satisfies AdminICloudImportPreparation;
+
+const ONBOARDING_RESPONSE = {
+  importId: 23,
+  requestId: "request-onboarding-23",
+  status: "processing",
+  accepted: 1,
+  completed: 0,
+  failed: 0,
+  waiting: 1,
+  reused: false,
+  tasks: [
+    {
+      id: 31,
+      taskKind: "onboarding",
+      resourceId: null,
+      lineNumber: 1,
+      primaryEmail: "child@example.com",
+      accountRole: "child",
+      familyPrimaryResourceId: 7,
+      familyPrimaryEmail: "primary@example.com",
+      region: "美国区",
+      countryCode: "US",
+      icloudOpened: true,
+      boundPhoneNumber: "+15550001111",
+      boundPhoneCountryCode: "1",
+      boundPhoneSource: "manual",
+      kitesimPhoneId: null,
+      status: "waiting",
+      stage: "sms_wait",
+      attempts: 0,
+      maxAttempts: 5,
+      nextAttemptAt: null,
+      pendingSmsPurpose: "icloud_login",
+      needsManualCode: true,
+      needsICloudActivation: false,
+      needsFamilyReset: false,
+      needsPostFamilyRecovery: false,
+      startedAt: "2026-08-16T08:00:00Z",
+      finishedAt: null,
+      createdAt: "2026-08-16T08:00:00Z",
+      updatedAt: "2026-08-16T08:01:00Z",
+    },
+  ],
+  createdAt: "2026-08-16T08:00:00Z",
+  updatedAt: "2026-08-16T08:01:00Z",
+} satisfies AdminICloudOnboardingImportResponse;
 
 describe("admin iCloud API adapter", () => {
   beforeEach(() => {
@@ -205,6 +259,147 @@ describe("admin iCloud API adapter", () => {
     expect(request.params.header).toEqual({
       "X-CSRF-Token": "admin-csrf",
       "Idempotency-Key": "icloud-command-1",
+    });
+  });
+
+  it("submits and controls Apple account onboarding tasks", async () => {
+    const task = ONBOARDING_RESPONSE.tasks[0];
+    apiMocks.POST
+      .mockResolvedValueOnce({ data: ONBOARDING_RESPONSE })
+      .mockResolvedValueOnce({ data: task })
+      .mockResolvedValueOnce({ data: task })
+      .mockResolvedValueOnce({ data: task });
+    apiMocks.GET.mockResolvedValueOnce({ data: ONBOARDING_RESPONSE });
+
+    await expect(
+      importAdminICloudOnboardingAccounts({
+        content:
+          "美国区----是----child@example.com----password----q1(a1)----q2(a2)----q3(a3)----2000-11-02----+15550001111",
+        ownerId: 101,
+        expireAt: "2026-10-07T08:00:00Z",
+      }),
+    ).resolves.toEqual(ONBOARDING_RESPONSE);
+    await expect(getAdminICloudOnboardingImport(23)).resolves.toEqual(
+      ONBOARDING_RESPONSE,
+    );
+    await expect(
+      submitAdminICloudOnboardingSmsCode(31, " 123456 "),
+    ).resolves.toEqual(task);
+    await expect(
+      confirmAdminICloudOnboardingFamilyReset(31),
+    ).resolves.toEqual(task);
+    await expect(
+      retryAdminICloudOnboardingPostFamily(31),
+    ).resolves.toEqual(task);
+
+    const [, importRequest] = apiMocks.POST.mock.calls[0] as [
+      string,
+      Record<string, any>,
+    ];
+    const formData = importRequest.body as FormData;
+    expect(apiMocks.POST.mock.calls[0]?.[0]).toBe(
+      "/v1/admin/icloud/resources/onboarding-imports",
+    );
+    expect(formData.get("ownerId")).toBe("101");
+    expect(formData.get("expireAt")).toBe("2026-10-07T08:00:00Z");
+    expect((formData.get("file") as File).name).toBe("icloud-onboarding.txt");
+    expect(importRequest.params.header).toEqual({
+      "X-CSRF-Token": "admin-csrf",
+      "Idempotency-Key": "icloud-command-1",
+    });
+    expect(apiMocks.GET).toHaveBeenCalledWith(
+      "/v1/admin/icloud/resources/onboarding-imports/{importId}",
+      { params: { path: { importId: 23 } }, signal: undefined },
+    );
+    expect(apiMocks.POST).toHaveBeenNthCalledWith(
+      2,
+      "/v1/admin/icloud/resources/onboarding-tasks/{taskId}/sms-code",
+      {
+        body: { code: "123456" },
+        params: {
+          header: { "X-CSRF-Token": "admin-csrf" },
+          path: { taskId: 31 },
+        },
+        signal: undefined,
+      },
+    );
+    expect(apiMocks.POST).toHaveBeenNthCalledWith(
+      3,
+      "/v1/admin/icloud/resources/onboarding-tasks/{taskId}/family-reset",
+      {
+        params: {
+          header: {
+            "X-CSRF-Token": "admin-csrf",
+            "Idempotency-Key": "icloud-command-1",
+          },
+          path: { taskId: 31 },
+        },
+        signal: undefined,
+      },
+    );
+    expect(apiMocks.POST).toHaveBeenNthCalledWith(
+      4,
+      "/v1/admin/icloud/resources/onboarding-tasks/{taskId}/retry",
+      {
+        params: {
+          header: {
+            "X-CSRF-Token": "admin-csrf",
+            "Idempotency-Key": "icloud-command-1",
+          },
+          path: { taskId: 31 },
+        },
+        signal: undefined,
+      },
+    );
+  });
+
+  it("lists active onboarding imports through governance tasks", async () => {
+    const first = {
+      items: Array.from({ length: 100 }, (_, index) => ({ taskId: `task:${index + 1}` })),
+      total: 101,
+      succeeded: 0,
+      offset: 0,
+      limit: 100,
+    };
+    const second = {
+      items: [{ taskId: "task:101" }],
+      total: 101,
+      succeeded: 0,
+      offset: 100,
+      limit: 100,
+    };
+    apiMocks.GET.mockResolvedValueOnce({ data: first }).mockResolvedValueOnce({ data: second });
+
+    await expect(listAdminICloudOnboardingImports()).resolves.toEqual({
+      ...second,
+      items: [...first.items, ...second.items],
+      offset: 0,
+    });
+    expect(apiMocks.GET).toHaveBeenNthCalledWith(1, "/v1/admin/tasks", {
+      params: {
+        query: {
+          bizType: "icloud_resource_import",
+          source: "icloud_onboarding",
+          kind: "import",
+          status: "running",
+          offset: 0,
+          limit: 100,
+        },
+      },
+      signal: undefined,
+    });
+    expect(apiMocks.GET).toHaveBeenNthCalledWith(2, "/v1/admin/tasks", {
+      params: {
+        query: {
+          bizType: "icloud_resource_import",
+          source: "icloud_onboarding",
+          kind: "import",
+          status: "running",
+          offset: 100,
+          limit: 100,
+        },
+      },
+      signal: undefined,
     });
   });
 
@@ -423,5 +618,33 @@ describe("admin iCloud API adapter", () => {
     await expect(
       waitForAdminICloudResourceImport(17, { maxAttempts: 1 }),
     ).resolves.toEqual(processing);
+  });
+
+  it("polls Apple account onboarding until the import is terminal", async () => {
+    const completed = {
+      ...ONBOARDING_RESPONSE,
+      status: "completed",
+      completed: 1,
+      waiting: 0,
+      tasks: [
+        {
+          ...ONBOARDING_RESPONSE.tasks[0],
+          status: "completed",
+          stage: "completed",
+          needsManualCode: false,
+          finishedAt: "2026-08-16T08:02:00Z",
+        },
+      ],
+    } satisfies AdminICloudOnboardingImportResponse;
+    apiMocks.GET
+      .mockResolvedValueOnce({ data: ONBOARDING_RESPONSE })
+      .mockResolvedValueOnce({ data: completed });
+
+    await expect(
+      waitForAdminICloudOnboardingImport(23, {
+        intervalMs: 0,
+        maxAttempts: 2,
+      }),
+    ).resolves.toEqual(completed);
   });
 });

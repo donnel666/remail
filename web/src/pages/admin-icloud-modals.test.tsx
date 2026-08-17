@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
   AdminICloudImportPreparation,
+  AdminICloudOnboardingImportResponse,
+  AdminICloudOnboardingTask,
   AdminICloudOwner,
   AdminICloudResourceDetail,
   AdminICloudResourceItem,
@@ -18,14 +20,20 @@ const mocks = vi.hoisted(() => ({
   expirationByFilter: vi.fn(),
   expirationByIds: vi.fn(),
   createPreparation: vi.fn(),
+  confirmFamilyReset: vi.fn(),
   getPreparation: vi.fn(),
+  getOnboarding: vi.fn(),
+  importOnboarding: vi.fn(),
   importResources: vi.fn(),
   listResources: vi.fn(),
+  listOnboardingImports: vi.fn(),
   modalConfirm: vi.fn(),
   permissions: {} as Record<string, boolean>,
   resourceMailsPanel: vi.fn(),
+  retryPostFamily: vi.fn(),
   selectionNotification: vi.fn(),
   tasks: vi.fn(),
+  submitSmsCode: vi.fn(),
   translate: (key: string) => key,
   toastError: vi.fn(),
   toastInfo: vi.fn(),
@@ -149,7 +157,9 @@ vi.mock("@douyinfe/semi-illustrations", () => ({
   IllustrationNoResult: () => null,
   IllustrationNoResultDark: () => null,
 }));
-vi.mock("@/components/semi/card-pro", () => ({ CardPro: ({ children }: any) => <>{children}</> }));
+vi.mock("@/components/semi/card-pro", () => ({
+  CardPro: ({ actionsArea, children }: any) => <>{actionsArea}{children}</>,
+}));
 vi.mock("@/components/semi/card-pro-pagination", () => ({ createCardProPagination: () => null }));
 vi.mock("@/components/semi/card-table", () => ({
   CardTable: ({ rowSelection }: any) => rowSelection ? (
@@ -177,6 +187,7 @@ vi.mock("@/lib/admin-icloud-api", async (importOriginal) => ({
   ...(await importOriginal<any>()),
   batchAdminICloudResourcesByFilter: mocks.batchByFilter,
   batchAdminICloudResourcesByIds: mocks.batchByIds,
+  confirmAdminICloudOnboardingFamilyReset: mocks.confirmFamilyReset,
   createAdminICloudAliases: mocks.alias,
   createAdminICloudImportPreparation: mocks.createPreparation,
   deleteAdminICloudResource: vi.fn(),
@@ -184,15 +195,20 @@ vi.mock("@/lib/admin-icloud-api", async (importOriginal) => ({
   enableAdminICloudResource: vi.fn(),
   getAdminICloudResourceDetail: vi.fn(),
   getAdminICloudImportPreparation: mocks.getPreparation,
+  getAdminICloudOnboardingImport: mocks.getOnboarding,
   importAdminICloudResources: mocks.importResources,
+  importAdminICloudOnboardingAccounts: mocks.importOnboarding,
   listAdminICloudAliases: vi.fn(),
+  listAdminICloudOnboardingImports: mocks.listOnboardingImports,
   listAdminICloudOwners: vi.fn().mockResolvedValue([]),
   listAdminICloudResources: mocks.listResources,
   listAdminICloudTasks: mocks.tasks,
   publishAdminICloudResource: vi.fn(),
   recoverAdminICloudResource: vi.fn(),
+  retryAdminICloudOnboardingPostFamily: mocks.retryPostFamily,
   setAdminICloudResourcesExpirationByFilter: mocks.expirationByFilter,
   setAdminICloudResourcesExpirationByIds: mocks.expirationByIds,
+  submitAdminICloudOnboardingSmsCode: mocks.submitSmsCode,
   unpublishAdminICloudResource: vi.fn(),
   updateAdminICloudResource: mocks.updateResource,
   validateAdminICloudResource: mocks.validate,
@@ -207,6 +223,8 @@ vi.mock("./admin-microsoft/microsoft-meta", () => ({
   OwnerIdentity: () => null,
   formatTime: (value: unknown) => String(value ?? "-"),
   ownerRoleLabel: (role: string) => role,
+  renderTaskStatusTag: (status: string) => <span>{status}</span>,
+  taskKindLabel: (kind: string) => kind,
 }));
 vi.mock("./admin-microsoft/microsoft-detail-sheet", () => ({
   RelatedOrdersTable: () => <div>Orders panel</div>,
@@ -232,6 +250,8 @@ import {
   EditICloudModal,
   ICloudDetailSheet,
   ICloudMaintenanceModal,
+  ICloudOnboardingModal,
+  ICloudOnboardingTaskAction,
   ICloudTasksPanel,
   ImportICloudModal,
 } from "./AdminICloudEmails";
@@ -248,11 +268,24 @@ const owner: AdminICloudOwner = {
 function resource(): AdminICloudResourceItem {
   const now = "2026-08-08T00:00:00Z";
   return {
+    accountRole: "primary",
     aliasCount: 12,
+    boundPhoneCountryCode: "1",
+    boundPhoneNumber: "+15550001111",
+    boundPhoneSource: "kitesim",
+    countryCode: "US",
     createdAt: now,
     expireAt: "2026-09-08T00:00:00Z",
     forSale: true,
+    familyChildCount: 2,
+    familyChildLimit: 5,
+    familyInviteUrl: "https://www.icloud.com/iclouddrive/family-invite",
+    familyPrimaryResourceId: null,
+    familySyncStatus: "ready",
+    familySyncedAt: now,
     id: 41,
+    icloudOpened: true,
+    kitesimPhoneId: 91,
     lastAliasSyncAt: null,
     lastAllocatedAt: null,
     lastCheckedAt: now,
@@ -271,6 +304,7 @@ function resource(): AdminICloudResourceItem {
     oldSession: null,
     owner,
     primaryEmail: "main@icloud.com",
+    region: "美国区",
     selectedForwardTo: "inbox@relay.example",
     status: "normal",
     updatedAt: now,
@@ -288,7 +322,72 @@ function resourceDetail(): AdminICloudResourceDetail {
     credentialUpdatedAt: "2026-08-08T00:00:00Z",
     validationFailures: 0,
     validationGeneration: 3,
+    refreshTask: null,
   } as AdminICloudResourceDetail;
+}
+
+function onboardingTask(
+  overrides: Partial<AdminICloudOnboardingTask> = {},
+): AdminICloudOnboardingTask {
+  const now = "2026-08-16T08:00:00Z";
+  return {
+    accountRole: "child",
+    attempts: 0,
+    boundPhoneCountryCode: "1",
+    boundPhoneNumber: "+15550001111",
+    boundPhoneSource: "manual",
+    countryCode: "US",
+    createdAt: now,
+    familyPrimaryEmail: "primary@example.com",
+    familyPrimaryResourceId: 41,
+    finishedAt: null,
+    icloudOpened: true,
+    id: 31,
+    kitesimPhoneId: null,
+    lineNumber: 1,
+    maxAttempts: 5,
+    needsFamilyReset: false,
+    needsICloudActivation: false,
+    needsManualCode: true,
+    needsPostFamilyRecovery: false,
+    nextAttemptAt: null,
+    primaryEmail: "child@example.com",
+    region: "美国区",
+    resourceId: null,
+    stage: "sms_wait",
+    startedAt: now,
+    status: "waiting",
+    taskKind: "onboarding",
+    updatedAt: now,
+    ...overrides,
+  };
+}
+
+function onboardingResponse(
+  overrides: Partial<AdminICloudOnboardingImportResponse> = {},
+): AdminICloudOnboardingImportResponse {
+  const now = "2026-08-16T08:00:00Z";
+  return {
+    accepted: 1,
+    completed: 1,
+    createdAt: now,
+    failed: 0,
+    importId: 23,
+    requestId: "request-23",
+    reused: false,
+    status: "completed",
+    tasks: [
+      onboardingTask({
+        finishedAt: now,
+        needsManualCode: false,
+        stage: "completed",
+        status: "completed",
+      }),
+    ],
+    updatedAt: now,
+    waiting: 0,
+    ...overrides,
+  };
 }
 
 function importPreparation(
@@ -311,8 +410,13 @@ describe("admin iCloud modal workflows", () => {
     mocks.permissions = {};
     mocks.alias.mockResolvedValue({ changed: true });
     mocks.createPreparation.mockResolvedValue(importPreparation());
+    mocks.confirmFamilyReset.mockResolvedValue(onboardingTask());
     mocks.getPreparation.mockResolvedValue(importPreparation());
     mocks.importResources.mockResolvedValue({ imported: 1, skipped: 0, status: "imported" });
+    mocks.importOnboarding.mockResolvedValue(onboardingResponse());
+    mocks.getOnboarding.mockResolvedValue(onboardingResponse());
+    mocks.retryPostFamily.mockResolvedValue(onboardingTask({ needsPostFamilyRecovery: false }));
+    mocks.submitSmsCode.mockResolvedValue(onboardingTask({ needsManualCode: false }));
     mocks.updateResource.mockResolvedValue({});
     mocks.tasks.mockResolvedValue({ items: [], limit: 20, offset: 0, succeeded: 0, total: 0 });
     mocks.listResources.mockResolvedValue({
@@ -326,6 +430,9 @@ describe("admin iCloud modal workflows", () => {
       limit: 20,
       offset: 0,
       total: 0,
+    });
+    mocks.listOnboardingImports.mockResolvedValue({
+      items: [], limit: 100, offset: 0, succeeded: 0, total: 0,
     });
   });
 
@@ -467,10 +574,18 @@ describe("admin iCloud modal workflows", () => {
     render(<AdminICloudEmails />);
 
     expect(await screen.findByTestId("selection-disabled")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Automatic onboarding" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Select test row" })).not.toBeInTheDocument();
     await waitFor(() => expect(mocks.selectionNotification).toHaveBeenCalled());
     const calls = mocks.selectionNotification.mock.calls;
     expect(calls[calls.length - 1]?.[0]).toMatchObject({ selectedCount: 0 });
+  });
+
+  it("disables onboarding when governance tasks cannot be read", async () => {
+    mocks.permissions["governance:task/read"] = false;
+    render(<AdminICloudEmails />);
+
+    expect(await screen.findByRole("button", { name: "Automatic onboarding" })).toBeDisabled();
   });
 
   it("does not refresh the resource list while a Cookie check is pending", async () => {
@@ -793,6 +908,178 @@ describe("admin iCloud modal workflows", () => {
       await vi.advanceTimersByTimeAsync(5_000);
     });
     expect(mocks.getPreparation).not.toHaveBeenCalled();
+  });
+
+  it("uploads an Apple account TXT file and starts onboarding", async () => {
+    const onChanged = vi.fn();
+    render(
+      <ICloudOnboardingModal
+        canOperate
+        canReadTasks
+        onCancel={vi.fn()}
+        onChanged={onChanged}
+        owners={[owner]}
+        visible
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByLabelText("owner")).toHaveValue("7"));
+    const content =
+      "美国区----是----primary@example.test----not-a-real-password----answer-1----answer-2----answer-3----2000-11-02--------https://example.test/family/invite";
+    const file = new File([content], "apple-accounts.txt", { type: "text/plain" });
+    Object.defineProperty(file, "text", { value: vi.fn().mockResolvedValue(content) });
+    fireEvent.change(screen.getByLabelText("Apple account TXT file"), {
+      target: { files: [file] },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Start onboarding" }));
+
+    await waitFor(() => expect(mocks.importOnboarding).toHaveBeenCalledWith({
+      content,
+      expireAt: expect.any(String),
+      ownerId: 7,
+    }));
+    expect(onChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it("recovers manual waiting tasks after closing and reopening the onboarding dialog", async () => {
+    mocks.listOnboardingImports.mockResolvedValue({
+      items: [{
+        attempts: 0,
+        bizId: 23,
+        bizType: "icloud_resource_import",
+        credentialRevision: null,
+        finishedAt: null,
+        kind: "import",
+        maxAttempts: 5,
+        progress: { failed: 0, processed: 0, reasonCounts: [], skipped: 0, succeeded: 0, total: 1 },
+        queuedAt: "2026-08-16T08:00:00Z",
+        remainingAttempts: 5,
+        startedAt: "2026-08-16T08:00:01Z",
+        status: "running",
+        taskId: "server_filtered:23",
+        updatedAt: "2026-08-16T08:00:01Z",
+      }],
+      limit: 100,
+      offset: 0,
+      succeeded: 0,
+      total: 1,
+    });
+    mocks.getOnboarding.mockResolvedValue(onboardingResponse({
+      completed: 0,
+      status: "processing",
+      tasks: [
+        onboardingTask(),
+        onboardingTask({
+          id: 32,
+          needsFamilyReset: true,
+          needsManualCode: false,
+          stage: "waiting_family_reset",
+        }),
+      ],
+      waiting: 2,
+    }));
+
+    const onCancel = vi.fn();
+    const { rerender } = render(
+      <ICloudOnboardingModal
+        canOperate
+        canReadTasks
+        onCancel={onCancel}
+        onChanged={vi.fn()}
+        owners={[owner]}
+        visible
+      />,
+    );
+
+    await screen.findByText("server_filtered:23");
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    await waitFor(() => expect(mocks.getOnboarding).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    rerender(
+      <ICloudOnboardingModal
+        canOperate
+        canReadTasks
+        onCancel={onCancel}
+        onChanged={vi.fn()}
+        owners={[owner]}
+        visible={false}
+      />,
+    );
+    rerender(
+      <ICloudOnboardingModal
+        canOperate
+        canReadTasks
+        onCancel={onCancel}
+        onChanged={vi.fn()}
+        owners={[owner]}
+        visible
+      />,
+    );
+
+    await screen.findByText("server_filtered:23");
+    expect(mocks.listOnboardingImports).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    await waitFor(() => expect(mocks.getOnboarding).toHaveBeenCalledTimes(2));
+    expect(mocks.getOnboarding).toHaveBeenLastCalledWith(23);
+  });
+
+  it("submits the manual SMS code for an onboarding task", async () => {
+    const updated = onboardingTask({ needsManualCode: false, stage: "account_login" });
+    const onChanged = vi.fn();
+    mocks.submitSmsCode.mockResolvedValueOnce(updated);
+    render(<ICloudOnboardingTaskAction onChanged={onChanged} task={onboardingTask()} />);
+
+    fireEvent.change(screen.getByPlaceholderText("SMS code"), {
+      target: { value: "12a3456" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Submit code" }));
+
+    await waitFor(() => expect(mocks.submitSmsCode).toHaveBeenCalledWith(31, "123456"));
+    expect(onChanged).toHaveBeenCalledWith(updated);
+  });
+
+  it("confirms the manual family-sharing reset", async () => {
+    const task = onboardingTask({
+      needsFamilyReset: true,
+      needsManualCode: false,
+      stage: "waiting_family_reset",
+    });
+    const updated = onboardingTask({ needsFamilyReset: false, needsManualCode: false });
+    const onChanged = vi.fn();
+    mocks.confirmFamilyReset.mockResolvedValueOnce(updated);
+    render(<ICloudOnboardingTaskAction onChanged={onChanged} task={task} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Confirm reset" }));
+    const confirmOptions = mocks.modalConfirm.mock.calls[0]?.[0] as any;
+    expect(confirmOptions).toMatchObject({ title: "Confirm family sharing reset" });
+    await act(async () => confirmOptions.onOk());
+
+    expect(mocks.confirmFamilyReset).toHaveBeenCalledWith(31);
+    expect(onChanged).toHaveBeenCalledWith(updated);
+  });
+
+  it("retries a recoverable post-family onboarding task", async () => {
+    const task = onboardingTask({
+      needsManualCode: false,
+      needsPostFamilyRecovery: true,
+      stage: "family_join_apply",
+    });
+    const updated = onboardingTask({
+      needsManualCode: false,
+      needsPostFamilyRecovery: false,
+      stage: "family_join_apply",
+      status: "processing",
+    });
+    const onChanged = vi.fn();
+    mocks.retryPostFamily.mockResolvedValueOnce(updated);
+    render(<ICloudOnboardingTaskAction onChanged={onChanged} task={task} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    await waitFor(() => expect(mocks.retryPostFamily).toHaveBeenCalledWith(31));
+    expect(onChanged).toHaveBeenCalledWith(updated);
   });
 
   it("submits a complete credential line from manual input", async () => {

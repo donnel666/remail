@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/donnel666/remail/internal/appleweb"
 	"github.com/donnel666/remail/internal/mailtransport/infra/msacl"
 )
 
@@ -23,7 +24,7 @@ const (
 	appleIDURL       = "https://appleid.apple.com"
 	appleAuthVersion = "8.0.2"
 	appleSKVersion   = "7"
-	appleUserAgent   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+	appleUserAgent   = appleweb.UserAgent
 )
 
 var bootArgsPattern = regexp.MustCompile(`(?s)<script type="application/json" class="boot_args">\s*(.*?)</script>`)
@@ -71,7 +72,7 @@ type appleFlow struct {
 }
 
 func newAppleFlow(ctx context.Context, proxyURL string) (*appleFlow, error) {
-	session, err := msacl.NewAPISession(ctx, proxyURL, 30)
+	session, err := msacl.NewAppleAPISession(ctx, proxyURL, 30)
 	if err != nil {
 		return nil, err
 	}

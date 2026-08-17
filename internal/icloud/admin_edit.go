@@ -19,21 +19,22 @@ var (
 )
 
 type AdminICloudEditCommand struct {
-	ResourceID     uint
-	Version        uint64
-	ImportLine     *string
-	OwnerUserID    *uint
-	ForSale        *bool
-	ExpireAt       *time.Time
-	OperatorUserID uint
-	IdempotencyKey string
-	RequestID      string
-	Path           string
+	ResourceID      uint
+	Version         uint64
+	ImportLine      *string
+	FamilyInviteURL *string
+	OwnerUserID     *uint
+	ForSale         *bool
+	ExpireAt        *time.Time
+	OperatorUserID  uint
+	IdempotencyKey  string
+	RequestID       string
+	Path            string
 }
 
 func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminICloudEditCommand) (*AdminICloudMutationResult, error) {
 	if s == nil || s.db == nil || s.operationLogs == nil || command.ResourceID == 0 || command.Version == 0 ||
-		command.OperatorUserID == 0 || (command.ImportLine == nil && command.OwnerUserID == nil && command.ForSale == nil && command.ExpireAt == nil) {
+		command.OperatorUserID == 0 || (command.ImportLine == nil && command.FamilyInviteURL == nil && command.OwnerUserID == nil && command.ForSale == nil && command.ExpireAt == nil) {
 		return nil, ErrICloudResourceUpdate
 	}
 
@@ -58,6 +59,13 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 			return nil, err
 		}
 	}
+	if command.FamilyInviteURL != nil {
+		value := strings.TrimSpace(*command.FamilyInviteURL)
+		if !validICloudFamilyInvite(value) {
+			return nil, ErrICloudResourceUpdate
+		}
+		command.FamilyInviteURL = &value
+	}
 	if command.ExpireAt != nil {
 		value := normalizeICloudResourceExpireAt(*command.ExpireAt)
 		if !validICloudResourceExpireAt(value, s.now().UTC()) {
@@ -70,12 +78,13 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 		return nil, ErrICloudResourceUpdate
 	}
 	fingerprint, err := adminICloudCommandFingerprint(struct {
-		Version    uint64     `json:"version"`
-		ImportLine *string    `json:"importLine,omitempty"`
-		OwnerID    *uint      `json:"ownerId,omitempty"`
-		ForSale    *bool      `json:"forSale,omitempty"`
-		ExpireAt   *time.Time `json:"expireAt,omitempty"`
-	}{command.Version, command.ImportLine, command.OwnerUserID, command.ForSale, command.ExpireAt})
+		Version         uint64     `json:"version"`
+		ImportLine      *string    `json:"importLine,omitempty"`
+		FamilyInviteURL *string    `json:"familyInviteUrl,omitempty"`
+		OwnerID         *uint      `json:"ownerId,omitempty"`
+		ForSale         *bool      `json:"forSale,omitempty"`
+		ExpireAt        *time.Time `json:"expireAt,omitempty"`
+	}{command.Version, command.ImportLine, command.FamilyInviteURL, command.OwnerUserID, command.ForSale, command.ExpireAt})
 	if err != nil {
 		return nil, ErrICloudResourceQueryTemporary
 	}
@@ -116,10 +125,16 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 		if resource.Status == iCloudResourceDeleted {
 			return ErrICloudResourceNotFound
 		}
+		if command.FamilyInviteURL != nil && resource.AccountRole != "primary" {
+			return ErrICloudResourceUpdate
+		}
 
 		emailChanged := imported != nil && !strings.EqualFold(strings.TrimSpace(imported.PrimaryEmail), strings.TrimSpace(resource.PrimaryEmail))
 		credentialsSubmitted := imported != nil
 		accountIdentityChanged := emailChanged
+		if accountIdentityChanged && (firstNonEmpty(strings.TrimSpace(resource.AccountRole), "unknown") != "unknown" || resource.KitesimPhoneID != nil) {
+			return ErrICloudResourceUpdate
+		}
 		silentCredentialRefresh := credentialsSubmitted && !accountIdentityChanged && resource.Status == iCloudResourceNormal
 		webChannelSubmitted := false
 		if imported != nil {
@@ -132,6 +147,7 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 		}
 		ownerChanged := command.OwnerUserID != nil && *command.OwnerUserID != root.OwnerUserID
 		expireAtChanged := command.ExpireAt != nil && !command.ExpireAt.Equal(resource.ExpireAt)
+		familyInviteChanged := command.FamilyInviteURL != nil && *command.FamilyInviteURL != strings.TrimSpace(resource.FamilyInviteURL)
 		if (emailChanged || ownerChanged) && assertNoActiveAdminICloudAllocationTx(ctx, tx, command.ResourceID) != nil {
 			return ErrICloudResourceAllocation
 		}
@@ -185,6 +201,12 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 		}
 		if expireAtChanged {
 			updates["expire_at"] = *command.ExpireAt
+		}
+		if familyInviteChanged {
+			updates["family_invite_url"] = *command.FamilyInviteURL
+			if isICloudFamilyInviteFailure(resource.FamilySyncErrorCategory) {
+				updates["family_sync_error_category"] = ""
+			}
 		}
 
 		queuedGeneration := uint64(0)

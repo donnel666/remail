@@ -47,10 +47,25 @@ type iCloudPreparationMailTestModel struct {
 
 func (iCloudPreparationMailTestModel) TableName() string { return "inbound_mails" }
 
+type iCloudPreparationOnboardingTaskTestModel struct {
+	ID                   uint      `gorm:"column:id;primaryKey"`
+	Status               string    `gorm:"column:status"`
+	Stage                string    `gorm:"column:stage"`
+	ForwardPreparationID *uint     `gorm:"column:forward_preparation_id"`
+	UpdatedAt            time.Time `gorm:"column:updated_at"`
+}
+
+func (iCloudPreparationOnboardingTaskTestModel) TableName() string {
+	return "icloud_account_onboarding_tasks"
+}
+
 func icloudUintPtr(value uint) *uint { return &value }
 
 func TestCreateAdminICloudImportPreparationUsesEligibleConfiguredDomain(t *testing.T) {
-	db := newICloudPreparationTestDB(t, "icloud-preparation-domain", &iCloudPreparationDomainTestModel{}, &iCloudImportPreparationModel{}, &iCloudImportModel{})
+	db := newICloudPreparationTestDB(
+		t, "icloud-preparation-domain", &iCloudPreparationDomainTestModel{}, &iCloudImportPreparationModel{},
+		&iCloudImportModel{}, &iCloudPreparationOnboardingTaskTestModel{},
+	)
 	domains := []iCloudPreparationDomainTestModel{
 		{ID: 1, Domain: "relay.example", Purpose: "binding", Status: "normal", AllowNewBindings: true},
 		{ID: 2, Domain: "disabled.example", Purpose: "binding", Status: "normal", AllowNewBindings: false},
@@ -63,16 +78,26 @@ func TestCreateAdminICloudImportPreparationUsesEligibleConfiguredDomain(t *testi
 
 	now := time.Date(2026, 8, 15, 8, 0, 0, 0, time.UTC)
 	oldReferencedID := uint(12)
+	activeOnboardingID := uint(13)
+	completedOnboardingID := uint(14)
 	preparations := []iCloudImportPreparationModel{
 		{ID: 10, OperatorUserID: icloudUintPtr(9), DomainResourceID: 1, ForwardToEmail: "old@relay.example", ExpiresAt: now.Add(-25 * time.Hour), CreatedAt: now.Add(-26 * time.Hour), UpdatedAt: now},
 		{ID: 11, OperatorUserID: icloudUintPtr(9), DomainResourceID: 1, ForwardToEmail: "recent@relay.example", ExpiresAt: now.Add(-23 * time.Hour), CreatedAt: now.Add(-24 * time.Hour), UpdatedAt: now},
 		{ID: oldReferencedID, OperatorUserID: icloudUintPtr(9), DomainResourceID: 1, ForwardToEmail: "referenced@relay.example", ExpiresAt: now.Add(-25 * time.Hour), CreatedAt: now.Add(-26 * time.Hour), UpdatedAt: now},
+		{ID: activeOnboardingID, OperatorUserID: icloudUintPtr(9), DomainResourceID: 1, ForwardToEmail: "active@relay.example", ExpiresAt: now.Add(-25 * time.Hour), CreatedAt: now.Add(-26 * time.Hour), UpdatedAt: now},
+		{ID: completedOnboardingID, OperatorUserID: icloudUintPtr(9), DomainResourceID: 1, ForwardToEmail: "completed@relay.example", ExpiresAt: now.Add(-25 * time.Hour), CreatedAt: now.Add(-26 * time.Hour), UpdatedAt: now},
 	}
 	if err := db.Create(&preparations).Error; err != nil {
 		t.Fatalf("create cleanup preparations: %v", err)
 	}
 	if err := db.Create(&iCloudImportModel{ID: 20, PreparationID: &oldReferencedID}).Error; err != nil {
 		t.Fatalf("create referenced import: %v", err)
+	}
+	if err := db.Create(&[]iCloudPreparationOnboardingTaskTestModel{
+		{ID: 30, Status: iCloudOnboardingProcessing, Stage: "forwarding_wait", ForwardPreparationID: &activeOnboardingID},
+		{ID: 31, Status: iCloudOnboardingCompleted, Stage: "completed", ForwardPreparationID: &completedOnboardingID},
+	}).Error; err != nil {
+		t.Fatalf("create onboarding references: %v", err)
 	}
 	service := NewService(db, nil, nil)
 	service.now = func() time.Time { return now }
@@ -93,8 +118,16 @@ func TestCreateAdminICloudImportPreparationUsesEligibleConfiguredDomain(t *testi
 	if err := db.Model(&iCloudImportPreparationModel{}).Order("id").Pluck("id", &remaining).Error; err != nil {
 		t.Fatalf("list preparations after cleanup: %v", err)
 	}
-	if slices.Contains(remaining, 10) || !slices.Contains(remaining, 11) || !slices.Contains(remaining, oldReferencedID) {
+	if slices.Contains(remaining, 10) || !slices.Contains(remaining, 11) || !slices.Contains(remaining, oldReferencedID) ||
+		!slices.Contains(remaining, activeOnboardingID) || slices.Contains(remaining, completedOnboardingID) {
 		t.Fatalf("unexpected cleanup result: %v", remaining)
+	}
+	var activeTask, completedTask iCloudPreparationOnboardingTaskTestModel
+	if err := db.First(&activeTask, 30).Error; err != nil || activeTask.ForwardPreparationID == nil || *activeTask.ForwardPreparationID != activeOnboardingID {
+		t.Fatalf("active onboarding reference=%#v err=%v", activeTask, err)
+	}
+	if err := db.First(&completedTask, 31).Error; err != nil || completedTask.ForwardPreparationID != nil {
+		t.Fatalf("completed onboarding reference=%#v err=%v", completedTask, err)
 	}
 }
 
@@ -102,7 +135,7 @@ func TestSystemICloudPreparationIsScopedToItsSystemKey(t *testing.T) {
 	db := newICloudPreparationTestDB(
 		t, "icloud-system-preparation",
 		&iCloudPreparationDomainTestModel{}, &iCloudImportPreparationModel{},
-		&iCloudImportModel{}, &iCloudPreparationMailTestModel{},
+		&iCloudImportModel{}, &iCloudPreparationMailTestModel{}, &iCloudPreparationOnboardingTaskTestModel{},
 	)
 	requireDomain := iCloudPreparationDomainTestModel{
 		ID: 1, Domain: "relay.example", Purpose: "binding", Status: "normal", AllowNewBindings: true,
@@ -231,6 +264,7 @@ func TestPreparedICloudImportConsumesVerifiedPreparationOnce(t *testing.T) {
 		&iCloudRootModel{},
 		&iCloudResourceModel{},
 		&iCloudResourceChannelModel{},
+		&iCloudAppleIDReservationModel{},
 		&iCloudAliasModel{},
 		&governanceinfra.OperationLogModel{},
 	)

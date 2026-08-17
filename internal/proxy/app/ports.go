@@ -36,7 +36,7 @@ type ProxyRepository interface {
 	ActivateProxyCheck(ctx context.Context, id uint, generation uint64) (bool, error)
 	ReleaseProxyCheckInfrastructureFailure(ctx context.Context, id uint, generation uint64, safeError string) (bool, error)
 	UpdateCheckResultForGenerationWithLog(ctx context.Context, id uint, generation uint64, result domain.CheckResult, success bool, log *governancedomain.OperationLog) (*domain.Proxy, error)
-	AcquireResourceProxy(ctx context.Context, key string, ipVersion domain.ProxyIPVersion, now time.Time, bindingTTL time.Duration) (*domain.Proxy, error)
+	AcquireResourceProxy(ctx context.Context, key string, ipVersion domain.ProxyIPVersion, now time.Time, bindingTTL time.Duration, renewBinding ...bool) (*domain.Proxy, error)
 	AcquireSystemProxy(ctx context.Context, ipVersion domain.ProxyIPVersion, now time.Time, selection ProxyServerSelection) (*domain.Proxy, error)
 	ReportSuccess(ctx context.Context, proxyID uint, usedAt time.Time) error
 	ReportFailure(ctx context.Context, proxyID uint, safeError string, retryable bool) (*domain.Proxy, error)
@@ -200,6 +200,7 @@ type AcquireProxyRequest struct {
 	IPVersion           domain.ProxyIPVersion
 	Purpose             domain.ProxyPurpose
 	AllowSystemFallback bool
+	RenewBinding        bool
 	Attempt             int
 	RequestID           string
 	AvoidProxyServerIDs []uint
@@ -945,7 +946,11 @@ func (uc *ProxyUseCase) Acquire(ctx context.Context, req AcquireProxyRequest) (*
 	var proxy *domain.Proxy
 	var err error
 	if req.Key != "" && req.Attempt == 0 {
-		proxy, err = uc.proxies.AcquireResourceProxy(ctx, req.Key, ipVersion, now, runtimeconfig.Duration("resource_binding_ttl_days", resourceBindingTTL, 24*time.Hour, 1))
+		proxy, err = uc.proxies.AcquireResourceProxy(
+			ctx, req.Key, ipVersion, now,
+			runtimeconfig.Duration("resource_binding_ttl_days", resourceBindingTTL, 24*time.Hour, 1),
+			req.RenewBinding,
+		)
 		if err == nil {
 			return proxyConfig(proxy), nil
 		}

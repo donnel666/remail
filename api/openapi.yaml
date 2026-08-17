@@ -10442,6 +10442,242 @@ paths:
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 
+  /v1/admin/icloud/resources/onboarding-imports:
+    post:
+      operationId: postAdminICloudOnboardingImport
+      summary: Start Apple account onboarding for iCloud resources
+      description: |
+        Requires `core:resource/operate` and `governance:task/read`, so every operator who starts onboarding can recover its durable task after closing the dialog. Accepts up to 1,000 UTF-8 account lines in `region----iCloud opened----Apple ID----password----security answer 1----security answer 2----security answer 3----birthday[----phone][----family invitation URL]` format. A non-empty invitation URL marks a primary account; primary accounts are stored without joining a family, while child accounts reserve capacity on the least-loaded compatible primary account in the same region. A supplied phone becomes the permanent binding, reusing matching Kitesim inventory when available. A child with no phone receives a permanent Kitesim binding; a primary with no phone recovers its existing Apple trusted phone and must match exactly one Kitesim pool number, otherwise onboarding stops and requires an explicit phone. Apple passwords, security answers, browser session payloads, Cookie values, submitted verification codes, and uploaded source text remain write-only.
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, ownerId, expireAt]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                ownerId:
+                  type: integer
+                  minimum: 1
+                expireAt:
+                  type: string
+                  format: date-time
+              additionalProperties: false
+      responses:
+        "202":
+          description: Durable onboarding import accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudOnboardingImportResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/admin/icloud/resources/onboarding-imports/{importId}:
+    get:
+      operationId: getAdminICloudOnboardingImport
+      summary: Get an Apple account onboarding import
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: importId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Current safe task progress
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudOnboardingImportResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/admin/icloud/resources/onboarding-tasks/{taskId}/sms-code:
+    post:
+      operationId: postAdminICloudOnboardingTaskSmsCode
+      summary: Submit a manually received Apple SMS code
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminICloudOnboardingSmsCodeRequest"
+      responses:
+        "202":
+          description: Code accepted and task requeued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudOnboardingTask"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/admin/icloud/resources/onboarding-tasks/{taskId}/family-reset:
+    post:
+      operationId: postAdminICloudOnboardingTaskFamilyReset
+      summary: Confirm the primary family-sharing reset
+      description: Completes a task after an operator manually disables and re-enables sharing on the primary Apple account.
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Manual reset confirmed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudOnboardingTask"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/admin/icloud/resources/onboarding-tasks/{taskId}/icloud-activation:
+    post:
+      operationId: postAdminICloudOnboardingTaskICloudActivation
+      summary: Confirm manual iCloud activation
+      description: Resumes a child onboarding task after an operator manually enables iCloud for the Apple account.
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Manual activation confirmed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudOnboardingTask"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/admin/icloud/resources/onboarding-tasks/{taskId}/retry:
+    post:
+      operationId: postAdminICloudOnboardingTaskRetry
+      summary: Retry onboarding after family membership was confirmed
+      description: Requeues the same durable task from its recoverable post-family stage without selecting or joining another family.
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Recoverable task requeued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudOnboardingTask"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
   /v1/admin/icloud/resources/batch/validation:
     post:
       operationId: postAdminICloudResourcesValidate
@@ -11297,7 +11533,7 @@ paths:
   /v1/admin/tasks:
     get:
       operationId: getAdminTasks
-      summary: List normalized administrator tasks for a Microsoft, Gmail, iCloud, or domain resource
+      summary: List normalized administrator tasks for a resource or iCloud import
       description: |
         Requires `governance:task/read`. Governance normalizes durable facts from their owning contexts without becoming their source of truth. Results use source-qualified task IDs, the stable `queued/running/succeeded/failed/uncertain/canceled` status union, and safe progress only. Internal table paths, claim/dispatch/lease/fencing tokens, upstream payloads, and raw errors are never returned. If any required task source is unavailable, the request returns 503 instead of a stale or partial success.
       tags:
@@ -11310,14 +11546,19 @@ paths:
           required: true
           schema:
             type: string
-            enum: [microsoft_resource, gmail_resource, icloud_resource, domain_resource]
+            enum: [microsoft_resource, gmail_resource, icloud_resource, domain_resource, icloud_resource_import]
         - name: bizId
           in: query
-          required: true
-          description: Resource ID matching bizType.
+          description: Resource ID matching bizType. Omit only when listing iCloud imports globally.
           schema:
             type: integer
             minimum: 1
+        - name: source
+          in: query
+          description: Optional normalized task source. Use `icloud_onboarding` to list recoverable Apple onboarding batches without unrelated iCloud imports consuming the page.
+          schema:
+            type: string
+            enum: [import, alias, alias_schedule, token, fetch, resource_history, bulk, gmail_validation, gmail_history, icloud_import, icloud_onboarding, icloud_validation]
         - name: kind
           in: query
           schema:
@@ -20336,6 +20577,12 @@ components:
       type: string
       enum: [unchecked, valid, invalid]
       x-enum-varnames: [AdminICloudSessionStatusUnchecked, AdminICloudSessionStatusValid, AdminICloudSessionStatusInvalid]
+    AdminICloudAccountRole:
+      type: string
+      enum: [unknown, primary, child]
+    AdminICloudPhoneSource:
+      type: string
+      enum: [kitesim, manual]
     AdminICloudOwnerSummary:
       type: object
       required: [id, email, nickname, groupName, role, enabled]
@@ -20358,11 +20605,21 @@ components:
       additionalProperties: false
     AdminICloudResourceItem:
       type: object
-      description: Administrator-safe operational facts. Cookies, DSID, host, client context, and provider request payloads are never returned.
+      description: Administrator-safe operational facts. Apple passwords, security answers, browser session payloads, Cookie values, DSID, host, client context, and provider request payloads are never returned.
       required:
         - id
         - version
         - primaryEmail
+        - accountRole
+        - familyPrimaryResourceId
+        - familyChildCount
+        - familyChildLimit
+        - familySyncStatus
+        - familySyncedAt
+        - region
+        - countryCode
+        - icloudOpened
+        - kitesimPhoneId
         - selectedForwardTo
         - owner
         - status
@@ -20390,6 +20647,49 @@ components:
         primaryEmail:
           type: string
           format: email
+        accountRole:
+          $ref: "#/components/schemas/AdminICloudAccountRole"
+        familyPrimaryResourceId:
+          type: integer
+          minimum: 1
+          nullable: true
+        familyPrimaryEmail:
+          type: string
+          format: email
+        familyChildCount:
+          type: integer
+          minimum: 0
+        familyChildLimit:
+          type: integer
+          minimum: 1
+          enum: [5]
+        familySyncStatus:
+          type: string
+          enum: [unknown, ready, failed, inactive]
+        familySyncedAt:
+          type: string
+          format: date-time
+          nullable: true
+        familySyncErrorCategory:
+          type: string
+        region:
+          type: string
+        countryCode:
+          type: string
+        icloudOpened:
+          type: boolean
+        boundPhoneNumber:
+          type: string
+        boundPhoneCountryCode:
+          type: string
+        boundPhoneSource:
+          $ref: "#/components/schemas/AdminICloudPhoneSource"
+        kitesimPhoneId:
+          type: integer
+          minimum: 1
+          nullable: true
+        familyInviteUrl:
+          type: string
         selectedForwardTo:
           type: string
           description: Last Apple HME forwarding mailbox observed during validation or provisioning.
@@ -20448,7 +20748,7 @@ components:
           format: date-time
       additionalProperties: false
     AdminICloudResourceDetail:
-      description: Administrator-safe iCloud resource detail with validation and provisioning diagnostics. HME cookies, DSID, and request context are never returned.
+      description: Administrator-safe iCloud resource detail with validation and provisioning diagnostics. Apple passwords, security answers, browser session payloads, Cookie values, DSID, and request context are never returned.
       allOf:
         - $ref: "#/components/schemas/AdminICloudResourceItem"
         - type: object
@@ -20460,6 +20760,7 @@ components:
             - credentialUpdatedAt
             - validationGeneration
             - validationFailures
+            - refreshTask
           properties:
             aliasLimit:
               type: integer
@@ -20485,6 +20786,10 @@ components:
             validationFailures:
               type: integer
               minimum: 0
+            refreshTask:
+              allOf:
+                - $ref: "#/components/schemas/AdminICloudOnboardingTask"
+              nullable: true
     AdminICloudStatusFacet:
       type: object
       required: [all, pending, validating, normal, abnormal, disabled, deleted]
@@ -20570,6 +20875,170 @@ components:
       additionalProperties: false
     AdminICloudImportResponse:
       $ref: "#/components/schemas/AdminMicrosoftImportResponse"
+    AdminICloudOnboardingSmsCodeRequest:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+          pattern: "^[0-9]{4,10}$"
+      additionalProperties: false
+    AdminICloudOnboardingTask:
+      type: object
+      description: Safe progress for an onboarding or Cookie-refresh task. Apple passwords, security answers, browser session payloads, Cookie values, and submitted verification codes are never returned.
+      required:
+        - id
+        - taskKind
+        - resourceId
+        - lineNumber
+        - primaryEmail
+        - accountRole
+        - familyPrimaryResourceId
+        - region
+        - countryCode
+        - icloudOpened
+        - kitesimPhoneId
+        - status
+        - stage
+        - attempts
+        - maxAttempts
+        - nextAttemptAt
+        - needsManualCode
+        - needsICloudActivation
+        - needsFamilyReset
+        - needsPostFamilyRecovery
+        - startedAt
+        - finishedAt
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        taskKind:
+          type: string
+          enum: [onboarding, refresh]
+        resourceId:
+          type: integer
+          minimum: 1
+          nullable: true
+        lineNumber:
+          type: integer
+          minimum: 0
+        primaryEmail:
+          type: string
+          format: email
+        accountRole:
+          type: string
+          enum: [primary, child]
+        familyPrimaryResourceId:
+          type: integer
+          minimum: 1
+          nullable: true
+        familyPrimaryEmail:
+          type: string
+        region:
+          type: string
+          minLength: 1
+        countryCode:
+          type: string
+        icloudOpened:
+          type: boolean
+        familyInviteUrl:
+          type: string
+        boundPhoneNumber:
+          type: string
+        boundPhoneCountryCode:
+          type: string
+        boundPhoneSource:
+          $ref: "#/components/schemas/AdminICloudPhoneSource"
+        kitesimPhoneId:
+          type: integer
+          minimum: 1
+          nullable: true
+        status:
+          type: string
+          enum: [processing, waiting, completed, failed]
+        stage:
+          type: string
+        attempts:
+          type: integer
+          minimum: 0
+        maxAttempts:
+          type: integer
+          minimum: 1
+        nextAttemptAt:
+          type: string
+          format: date-time
+          nullable: true
+        pendingSmsPurpose:
+          type: string
+        needsManualCode:
+          type: boolean
+        needsICloudActivation:
+          type: boolean
+        needsFamilyReset:
+          type: boolean
+        needsPostFamilyRecovery:
+          type: boolean
+        lastErrorCategory:
+          type: string
+        lastSafeError:
+          type: string
+        startedAt:
+          type: string
+          format: date-time
+          nullable: true
+        finishedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+    AdminICloudOnboardingImportResponse:
+      type: object
+      required: [importId, requestId, status, accepted, completed, failed, waiting, tasks, reused, createdAt, updatedAt]
+      properties:
+        importId:
+          type: integer
+          minimum: 1
+        requestId:
+          type: string
+        status:
+          type: string
+          enum: [processing, completed, partial, failed]
+        accepted:
+          type: integer
+          minimum: 0
+        completed:
+          type: integer
+          minimum: 0
+        failed:
+          type: integer
+          minimum: 0
+        waiting:
+          type: integer
+          minimum: 0
+        lastSafeError:
+          type: string
+        tasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminICloudOnboardingTask"
+        reused:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
     ICloudForwardingEmail:
       type: object
       required: [id, forwardToEmail, status, verificationCode, expiresAt, createdAt]
@@ -20679,6 +21148,11 @@ components:
           maxLength: 131072
           writeOnly: true
           description: Write-only `email----curl[----curl]` credential update. It accepts one old cURL, one new cURL, or both cURLs in either order, including browser-copied backslash line continuations. While the primary email is unchanged, each supplied cURL replaces only its matching channel and omitted channels are preserved. On an already healthy resource, submitted channels are checked asynchronously without changing resource health. Changing the primary email treats the supplied cURLs as the complete credential set, removes omitted channels, and re-queues resource validation.
+        familyInviteUrl:
+          type: string
+          minLength: 1
+          maxLength: 2048
+          description: Replacement family invitation for a primary account. A different valid value clears a persisted invalid-invitation quarantine.
         ownerId:
           type: integer
           minimum: 1

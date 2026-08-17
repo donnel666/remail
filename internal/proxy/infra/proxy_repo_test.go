@@ -3,6 +3,7 @@ package infra
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -46,4 +47,27 @@ func TestTransactionRetryKeepsWaitingAfterProxySelectionContention(t *testing.T)
 	})
 	require.NoError(t, err)
 	require.Equal(t, proxySelectionRetryAttempts+1, attempts)
+}
+
+func TestExtendResourceBindingExpireAtSlidesWithoutOutlivingProxy(t *testing.T) {
+	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	require.Equal(t, now.Add(7*24*time.Hour), extendResourceBindingExpireAt(
+		now.Add(time.Hour), time.Time{}, now, 7*24*time.Hour,
+	))
+	require.Equal(t, now.Add(2*time.Hour), extendResourceBindingExpireAt(
+		now.Add(time.Hour), now.Add(2*time.Hour), now, 7*24*time.Hour,
+	))
+	require.Equal(t, now.Add(2*time.Hour), extendResourceBindingExpireAt(
+		now.Add(10*time.Hour), now.Add(2*time.Hour), now, 7*24*time.Hour,
+	))
+}
+
+func TestResourceBindingTouchRenewsOnlyWhenRequested(t *testing.T) {
+	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	fixed := resourceBindingTouchUpdates(now.Add(time.Hour), time.Time{}, now, 7*24*time.Hour, false)
+	require.Equal(t, now, fixed["last_used_at"])
+	require.NotContains(t, fixed, "expire_at")
+
+	renewed := resourceBindingTouchUpdates(now.Add(time.Hour), time.Time{}, now, 7*24*time.Hour, true)
+	require.Equal(t, now.Add(7*24*time.Hour), renewed["expire_at"])
 }
