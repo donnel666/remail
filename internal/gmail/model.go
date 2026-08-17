@@ -130,6 +130,7 @@ type allocationModel struct {
 	ServiceMode        string     `gorm:"column:service_mode"`
 	ResourceID         *uint      `gorm:"column:resource_id"`
 	SupplyScope        string     `gorm:"column:supply_scope"`
+	SupplierUserID     *uint      `gorm:"column:supplier_user_id"`
 	Mailbox            string     `gorm:"column:mailbox;default:main"`
 	Email              string     `gorm:"column:email"`
 	Status             string     `gorm:"column:status"`

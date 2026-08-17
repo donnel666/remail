@@ -564,10 +564,7 @@ func validDomain(value string) bool {
 }
 
 func validTLDWhitelistPattern(value string) bool {
-	value = strings.TrimSpace(value)
-	if strings.HasSuffix(value, ".*") {
-		value = strings.TrimSuffix(value, ".*")
-	}
+	value = strings.TrimSuffix(strings.TrimSpace(value), ".*")
 	if value == "" || len(value) > 253 || strings.Contains(value, "*") {
 		return false
 	}
