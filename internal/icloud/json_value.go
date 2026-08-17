@@ -8,6 +8,28 @@ import (
 
 type iCloudJSON []byte
 
+func (value iCloudJSON) MarshalJSON() ([]byte, error) {
+	if len(value) == 0 {
+		return []byte("null"), nil
+	}
+	if !json.Valid(value) {
+		return nil, errors.New("icloud: invalid JSON value")
+	}
+	return value, nil
+}
+
+func (value *iCloudJSON) UnmarshalJSON(source []byte) error {
+	if string(source) == "null" {
+		*value = nil
+		return nil
+	}
+	if !json.Valid(source) {
+		return errors.New("icloud: invalid JSON database value")
+	}
+	*value = append((*value)[:0], source...)
+	return nil
+}
+
 func (value iCloudJSON) Value() (driver.Value, error) {
 	if len(value) == 0 {
 		return nil, nil
