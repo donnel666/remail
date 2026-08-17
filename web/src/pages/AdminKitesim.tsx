@@ -1208,7 +1208,7 @@ export default function AdminKitesim() {
           fixed: "right",
           key: "operate",
           title: t("Action"),
-          width: 520,
+          width: 360,
           render: (_: unknown, item: AdminKitesimPhoneItem) => renderRowActions(item),
         },
       ] as any[],
