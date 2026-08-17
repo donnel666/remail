@@ -261,7 +261,7 @@ func (s *Service) pickSMSPhone(tx *gorm.DB, now time.Time) (phoneModel, error) {
 		  COALESCE(p.sms_last_used_at, p.created_at) ASC,
 		  p.id ASC
 		LIMIT 1`
-	if tx.Dialector.Name() == "mysql" {
+	if tx.Name() == "mysql" {
 		query += " FOR UPDATE"
 	}
 	var phone phoneModel

@@ -88,7 +88,7 @@ type Service struct {
 	family              *iCloudFamilyClient
 	appleRoutes         *appleRouteManager
 	onboardingApple     AppleOnboardingProvider
-	smsPhones           ICloudSMSPhoneService
+	smsPhones           SMSPhoneService
 	now                 func() time.Time
 	validateImportOwner func(context.Context, uint) (bool, error)
 	backgroundExecution BackgroundExecutionGate
@@ -133,7 +133,7 @@ func (s *Service) SetAppleProxyProvider(provider AppleProxyProvider) {
 	s.appleRoutes.proxies = provider
 }
 
-func (s *Service) SetICloudSMSPhoneService(service ICloudSMSPhoneService) {
+func (s *Service) SetICloudSMSPhoneService(service SMSPhoneService) {
 	if s != nil {
 		s.smsPhones = service
 	}

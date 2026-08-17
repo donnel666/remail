@@ -315,7 +315,9 @@ func (s *Service) finishSMSAttempt(ctx context.Context, challengeID uint64, resu
 			}
 			return nil
 		}
-		if challenge.Status != SMSChallengeReserved && !(challenge.Status == SMSChallengeSent && (result == SMSChallengeSendFailed || result == SMSChallengeInfrastructureFailed)) {
+		recoveringSentFailure := challenge.Status == SMSChallengeSent &&
+			(result == SMSChallengeSendFailed || result == SMSChallengeInfrastructureFailed)
+		if challenge.Status != SMSChallengeReserved && !recoveringSentFailure {
 			return ErrSMSChallengeInactive
 		}
 		if err := tx.Model(&phoneUsageEventModel{}).Where("id = ? AND result IN ?", challenge.UsageEventID, []string{SMSChallengeReserved, SMSChallengeSent}).

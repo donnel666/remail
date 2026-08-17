@@ -152,7 +152,7 @@ type iCloudOnboardingLine struct {
 	Secret          iCloudOnboardingSecret
 }
 
-type ICloudOnboardingTaskView struct {
+type OnboardingTaskView struct {
 	ID                      uint       `json:"id"`
 	TaskKind                string     `json:"taskKind"`
 	ResourceID              *uint      `json:"resourceId"`
@@ -187,18 +187,18 @@ type ICloudOnboardingTaskView struct {
 	UpdatedAt               time.Time  `json:"updatedAt"`
 }
 
-type ICloudOnboardingImportView struct {
-	ImportID      uint                       `json:"importId"`
-	RequestID     string                     `json:"requestId"`
-	Status        string                     `json:"status"`
-	Accepted      int                        `json:"accepted"`
-	Completed     int                        `json:"completed"`
-	Failed        int                        `json:"failed"`
-	Waiting       int                        `json:"waiting"`
-	LastSafeError string                     `json:"lastSafeError,omitempty"`
-	Tasks         []ICloudOnboardingTaskView `json:"tasks"`
-	CreatedAt     time.Time                  `json:"createdAt"`
-	UpdatedAt     time.Time                  `json:"updatedAt"`
+type OnboardingImportView struct {
+	ImportID      uint                 `json:"importId"`
+	RequestID     string               `json:"requestId"`
+	Status        string               `json:"status"`
+	Accepted      int                  `json:"accepted"`
+	Completed     int                  `json:"completed"`
+	Failed        int                  `json:"failed"`
+	Waiting       int                  `json:"waiting"`
+	LastSafeError string               `json:"lastSafeError,omitempty"`
+	Tasks         []OnboardingTaskView `json:"tasks"`
+	CreatedAt     time.Time            `json:"createdAt"`
+	UpdatedAt     time.Time            `json:"updatedAt"`
 }
 
 func parseICloudOnboardingImport(content []byte) ([]iCloudOnboardingLine, error) {
@@ -273,14 +273,14 @@ func parseICloudOnboardingLine(lineNumber int, raw string) (iCloudOnboardingLine
 		phoneShaped := candidate != "" && strings.IndexFunc(candidate, func(char rune) bool {
 			return (char < '0' || char > '9') && !strings.ContainsRune("+ -().", char)
 		}) == -1
-		if candidate == "" {
-			// A trailing optional phone field is equivalent to omitting it.
-		} else if !phoneShaped {
-			invite = candidate
-		} else {
-			phone = onboardingPhoneDigits(candidate)
-			if len(phone) < 7 || len(phone) > 20 {
-				return iCloudOnboardingLine{}, fmt.Errorf("%w: invalid phone number on line %d", ErrICloudOnboardingInvalid, lineNumber)
+		if candidate != "" {
+			if !phoneShaped {
+				invite = candidate
+			} else {
+				phone = onboardingPhoneDigits(candidate)
+				if len(phone) < 7 || len(phone) > 20 {
+					return iCloudOnboardingLine{}, fmt.Errorf("%w: invalid phone number on line %d", ErrICloudOnboardingInvalid, lineNumber)
+				}
 			}
 		}
 	}
@@ -397,7 +397,7 @@ func (s *Service) AcceptAdminICloudOnboardingImport(
 	content []byte,
 	resourceExpireAt time.Time,
 	idempotencyKey, requestID, pathValue string,
-) (*ICloudOnboardingImportView, bool, error) {
+) (*OnboardingImportView, bool, error) {
 	if err := s.validateICloudImportOwner(ctx, ownerUserID); err != nil {
 		return nil, false, err
 	}
@@ -543,7 +543,7 @@ func (s *Service) AcceptAdminICloudOnboardingImport(
 	return view, !created, nil
 }
 
-func (s *Service) GetAdminICloudOnboardingImport(ctx context.Context, importID uint) (*ICloudOnboardingImportView, error) {
+func (s *Service) GetAdminICloudOnboardingImport(ctx context.Context, importID uint) (*OnboardingImportView, error) {
 	if s == nil || s.db == nil || importID == 0 {
 		return nil, ErrICloudOnboardingNotFound
 	}
@@ -557,11 +557,11 @@ func (s *Service) GetAdminICloudOnboardingImport(ctx context.Context, importID u
 		}
 		return nil, ErrICloudOnboardingTemporary
 	}
-	view := &ICloudOnboardingImportView{
+	view := &OnboardingImportView{
 		ImportID: model.ID, RequestID: model.RequestID, Status: model.Status,
 		Accepted: model.AcceptedCount, Completed: model.CompletedCount, Failed: model.FailedCount, Waiting: model.WaitingCount,
 		LastSafeError: model.LastSafeError, CreatedAt: model.CreatedAt, UpdatedAt: model.UpdatedAt,
-		Tasks: make([]ICloudOnboardingTaskView, len(model.Tasks)),
+		Tasks: make([]OnboardingTaskView, len(model.Tasks)),
 	}
 	for index, task := range model.Tasks {
 		view.Tasks[index] = iCloudOnboardingTaskView(task)
@@ -572,7 +572,7 @@ func (s *Service) GetAdminICloudOnboardingImport(ctx context.Context, importID u
 	return view, nil
 }
 
-func (s *Service) GetAdminICloudOnboardingTask(ctx context.Context, taskID uint) (*ICloudOnboardingTaskView, error) {
+func (s *Service) GetAdminICloudOnboardingTask(ctx context.Context, taskID uint) (*OnboardingTaskView, error) {
 	if s == nil || s.db == nil || taskID == 0 {
 		return nil, ErrICloudOnboardingNotFound
 	}
@@ -584,7 +584,7 @@ func (s *Service) GetAdminICloudOnboardingTask(ctx context.Context, taskID uint)
 		return nil, ErrICloudOnboardingTemporary
 	}
 	view := iCloudOnboardingTaskView(task)
-	views := []ICloudOnboardingTaskView{view}
+	views := []OnboardingTaskView{view}
 	if err := s.populateICloudOnboardingFamilyEmails(ctx, views); err != nil {
 		return nil, err
 	}
@@ -592,7 +592,7 @@ func (s *Service) GetAdminICloudOnboardingTask(ctx context.Context, taskID uint)
 	return &view, nil
 }
 
-func (s *Service) populateICloudOnboardingFamilyEmails(ctx context.Context, tasks []ICloudOnboardingTaskView) error {
+func (s *Service) populateICloudOnboardingFamilyEmails(ctx context.Context, tasks []OnboardingTaskView) error {
 	ids := make([]uint, 0)
 	seen := make(map[uint]struct{})
 	for _, task := range tasks {
@@ -626,9 +626,9 @@ func (s *Service) populateICloudOnboardingFamilyEmails(ctx context.Context, task
 	return nil
 }
 
-func iCloudOnboardingTaskView(task iCloudOnboardingTaskModel) ICloudOnboardingTaskView {
+func iCloudOnboardingTaskView(task iCloudOnboardingTaskModel) OnboardingTaskView {
 	needsPostFamilyRecovery := isICloudPostFamilyRecoveryWaiting(task)
-	return ICloudOnboardingTaskView{
+	return OnboardingTaskView{
 		ID: task.ID, TaskKind: firstNonEmpty(task.TaskKind, "onboarding"), ResourceID: task.ResourceID, LineNumber: task.LineNumber,
 		PrimaryEmail: task.PrimaryEmail, AccountRole: task.AccountRole, FamilyPrimaryResourceID: task.FamilyPrimaryResourceID,
 		Region: task.Region, CountryCode: task.CountryCode, ICloudOpened: task.ICloudOpened,

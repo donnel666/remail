@@ -353,7 +353,7 @@ func (h *handler) resourceImport(c *gin.Context) {
 }
 
 type iCloudOnboardingImportResponse struct {
-	*ICloudOnboardingImportView
+	*OnboardingImportView
 	Reused bool `json:"reused"`
 }
 
@@ -401,7 +401,7 @@ func (h *handler) importOnboardingAccounts(c *gin.Context) {
 		return
 	}
 	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusAccepted, iCloudOnboardingImportResponse{ICloudOnboardingImportView: result, Reused: reused})
+	c.JSON(http.StatusAccepted, iCloudOnboardingImportResponse{OnboardingImportView: result, Reused: reused})
 }
 
 func (h *handler) onboardingImport(c *gin.Context) {
@@ -419,7 +419,7 @@ func (h *handler) onboardingImport(c *gin.Context) {
 		return
 	}
 	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusOK, iCloudOnboardingImportResponse{ICloudOnboardingImportView: result})
+	c.JSON(http.StatusOK, iCloudOnboardingImportResponse{OnboardingImportView: result})
 }
 
 func parseICloudOnboardingTaskID(c *gin.Context) (uint, bool) {

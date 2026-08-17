@@ -70,12 +70,6 @@ func (p *refreshCountingApple) Execute(context.Context, AppleOnboardingRequest) 
 	return AppleOnboardingResponse{}, errors.New("unexpected Apple call")
 }
 
-type refreshTrustedPhoneApple struct{}
-
-func (refreshTrustedPhoneApple) Execute(context.Context, AppleOnboardingRequest) (AppleOnboardingResponse, error) {
-	return AppleOnboardingResponse{Session: json.RawMessage(`{"flow":"ok"}`), Next: appleSMSManageLogin, TrustedPhoneLastTwo: "01"}, nil
-}
-
 type refreshExactPhoneRequired struct {
 	onboardingProvidedPhone
 	exactCalls  int

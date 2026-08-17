@@ -92,14 +92,14 @@ type AdminICloudResourceView struct {
 
 type AdminICloudResourceDetail struct {
 	AdminICloudResourceView
-	AliasLimit           uint                      `json:"aliasLimit"`
-	AliasRemaining       uint                      `json:"aliasRemaining"`
-	AliasProvisioning    bool                      `json:"aliasProvisioning"`
-	CredentialRevision   uint64                    `json:"credentialRevision"`
-	CredentialUpdatedAt  time.Time                 `json:"credentialUpdatedAt"`
-	ValidationGeneration uint64                    `json:"validationGeneration"`
-	ValidationFailures   uint8                     `json:"validationFailures"`
-	RefreshTask          *ICloudOnboardingTaskView `json:"refreshTask"`
+	AliasLimit           uint                `json:"aliasLimit"`
+	AliasRemaining       uint                `json:"aliasRemaining"`
+	AliasProvisioning    bool                `json:"aliasProvisioning"`
+	CredentialRevision   uint64              `json:"credentialRevision"`
+	CredentialUpdatedAt  time.Time           `json:"credentialUpdatedAt"`
+	ValidationGeneration uint64              `json:"validationGeneration"`
+	ValidationFailures   uint8               `json:"validationFailures"`
+	RefreshTask          *OnboardingTaskView `json:"refreshTask"`
 }
 
 type adminICloudResourceRow struct {

@@ -42,7 +42,7 @@ const testICloudPrimaryFamilyResponse = `{
 }`
 
 func TestICloudFamilyClientValidatesAuthoritativeMembership(t *testing.T) {
-	client := NewICloudFamilyClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+	client := newICloudFamilyClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
 		if request.Method != http.MethodGet || request.URL.String() != iCloudFamilyMembersEndpoint {
 			t.Fatalf("family request = %s %s", request.Method, request.URL)
 		}
@@ -132,7 +132,7 @@ func TestICloudPrimaryKeepaliveSynchronizesFamilyState(t *testing.T) {
 		body := `{"success":true,"result":{"selectedForwardTo":"mailbox@relay.example","total":0,"hasMore":false,"hmeEmails":[]}}`
 		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
 	})})
-	service.family = NewICloudFamilyClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+	service.family = newICloudFamilyClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(testICloudPrimaryFamilyResponse))}, nil
 	})})
 	service.family.now = func() time.Time { return now }
@@ -209,7 +209,7 @@ func TestICloudFamilyRetryAfterSurvivesEarlierHMERetry(t *testing.T) {
 		}
 		return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
 	})})
-	service.family = NewICloudFamilyClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+	service.family = newICloudFamilyClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
 		familyCalls++
 		header := make(http.Header)
 		header.Set("Retry-After", "1200")
@@ -261,7 +261,7 @@ func TestICloudFamilySyncContinuesWithInvalidHMEChannel(t *testing.T) {
 	familyCalls := 0
 	service := NewService(db, nil, nil)
 	service.now = func() time.Time { return now }
-	service.family = NewICloudFamilyClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+	service.family = newICloudFamilyClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
 		familyCalls++
 		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(testICloudPrimaryFamilyResponse))}, nil
 	})})
@@ -309,7 +309,7 @@ func TestICloudPrimaryFamilySessionInvalidFailsClosed(t *testing.T) {
 	}
 	service := NewService(db, nil, nil)
 	service.now = func() time.Time { return now }
-	service.family = NewICloudFamilyClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+	service.family = newICloudFamilyClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusUnauthorized, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{}`))}, nil
 	})})
 	if err := service.syncICloudPrimaryFamily(context.Background(), resource, channel, now); err != nil {
@@ -416,7 +416,7 @@ func TestICloudFamilyReconcileConfirmsReservationByStableIdentity(t *testing.T) 
 	service := NewService(db, nil, nil)
 	service.now = func() time.Time { return now }
 	responseBody := testICloudFamilyResponse
-	service.family = NewICloudFamilyClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+	service.family = newICloudFamilyClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(responseBody))}, nil
 	})})
 	channel := &AppleOnboardingChannel{Kind: iCloudChannelFamilySession, Cookie: testICloudFamilyCookie, UserAgent: "fixed-macos"}
@@ -493,7 +493,7 @@ func TestICloudFamilyConcurrentStaleReconciliationsFailClosed(t *testing.T) {
 		"isLinkedToFamily":true,"isMemberOfFamily":true}`
 	service := NewService(db, nil, nil)
 	service.now = func() time.Time { return now }
-	service.family = NewICloudFamilyClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+	service.family = newICloudFamilyClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(staleSnapshot))}, nil
 	})})
 	channel := &AppleOnboardingChannel{Kind: iCloudChannelFamilySession, Cookie: testICloudFamilyCookie, UserAgent: "fixed-macos"}

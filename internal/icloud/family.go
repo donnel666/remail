@@ -68,7 +68,7 @@ type iCloudFamilyClient struct {
 	now        func() time.Time
 }
 
-func NewICloudFamilyClient(client *http.Client) *iCloudFamilyClient {
+func newICloudFamilyClient(client *http.Client) *iCloudFamilyClient {
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
@@ -217,9 +217,9 @@ func invalidICloudFamilyResponse() *iCloudFamilyError {
 	return &iCloudFamilyError{Category: "provider_response_invalid", SafeMessage: "iCloud family service returned an invalid response.", Retryable: true}
 }
 
-func normalizeICloudFamilyValue(value string, max int) string {
+func normalizeICloudFamilyValue(value string, maxRunes int) string {
 	value = strings.TrimSpace(value)
-	if value == "" || !utf8.ValidString(value) || utf8.RuneCountInString(value) > max || strings.ContainsAny(value, "\r\n\x00") {
+	if value == "" || !utf8.ValidString(value) || utf8.RuneCountInString(value) > maxRunes || strings.ContainsAny(value, "\r\n\x00") {
 		return ""
 	}
 	return value
@@ -408,7 +408,7 @@ func (s *Service) selectICloudFamilyPrimaryID(ctx context.Context, tx *gorm.DB, 
 		          AND ot.id <> ? AND ot.status IN ('processing', 'waiting')
 		          AND ot.family_reservation_confirmed = 0)) ASC,
 		  p.family_synced_at DESC, p.id ASC LIMIT 1`
-	if tx.Dialector.Name() == "mysql" {
+	if tx.Name() == "mysql" {
 		query += " FOR UPDATE"
 	}
 	var row struct {

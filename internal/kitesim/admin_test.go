@@ -312,8 +312,8 @@ func TestImportSyncListAndMessages(t *testing.T) {
 	if err != nil || strings.Contains(string(encodedList), "password1") || strings.Contains(string(encodedList), "long-lived-token-value") {
 		t.Fatalf("phone read API exposed a stored credential: %s, err=%v", encodedList, err)
 	}
-	createdFrom := time.Date(2026, time.August, 16, 8, 30, 0, 0, time.UTC)
-	createdTo := time.Date(2026, time.August, 16, 9, 30, 0, 0, time.UTC)
+	createdFrom := time.Date(2026, time.August, 16, 0, 30, 0, 0, time.UTC)
+	createdTo := time.Date(2026, time.August, 16, 1, 30, 0, 0, time.UTC)
 	filtered, err := service.ListPhones(context.Background(), PhoneListFilter{Limit: 20, CreatedFrom: &createdFrom, CreatedTo: &createdTo})
 	if err != nil {
 		t.Fatal(err)
@@ -441,7 +441,9 @@ func TestMessagesDoesNotOverwriteNewerToken(t *testing.T) {
 	if err := db.Create(&account).Error; err != nil {
 		t.Fatal(err)
 	}
-	phone := phoneModel{AccountID: account.ID, ProviderOrderID: "order-1", PhoneNumber: "14165550001"}
+	phone := phoneModel{
+		AccountID: account.ID, ProviderOrderID: "order-1", PhoneNumber: "14165550001", Status: int(PhoneActive),
+	}
 	if err := db.Create(&phone).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -454,13 +456,25 @@ func TestMessagesDoesNotOverwriteNewerToken(t *testing.T) {
 		_, err := service.Messages(context.Background(), phone.ID, MutationMeta{OperatorUserID: 1, Path: "/test"})
 		errCh <- err
 	}()
-	<-messageStarted
-	if err := db.Model(&accountModel{}).Where("id = ?", account.ID).Update("token", "newer-token").Error; err != nil {
-		t.Fatal(err)
+	select {
+	case <-messageStarted:
+	case err := <-errCh:
+		t.Fatalf("messages returned before the upstream request started: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the upstream message request")
 	}
+	updateErr := db.Model(&accountModel{}).Where("id = ?", account.ID).Update("token", "newer-token").Error
 	close(releaseMessage)
-	if err := <-errCh; err != nil {
-		t.Fatal(err)
+	if updateErr != nil {
+		t.Fatal(updateErr)
+	}
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the message request to finish")
 	}
 	if err := db.First(&account, account.ID).Error; err != nil {
 		t.Fatal(err)

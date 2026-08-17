@@ -107,7 +107,7 @@ type AppleOnboardingProvider interface {
 	Execute(context.Context, AppleOnboardingRequest) (AppleOnboardingResponse, error)
 }
 
-type ICloudSMSPhoneService interface {
+type SMSPhoneService interface {
 	BindICloudSMSPhone(context.Context, string, string) (kitesim.SMSPhoneBinding, error)
 	BindICloudSMSPhoneBySuffix(context.Context, string, string) (kitesim.SMSPhoneBinding, error)
 	ReserveSMSChallenge(context.Context, uint, string, string, time.Time) (kitesim.SMSReservation, error)

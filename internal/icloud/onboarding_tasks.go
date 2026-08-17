@@ -260,11 +260,11 @@ func (s *Service) processICloudOnboardingStage(ctx context.Context, task *iCloud
 
 func (s *Service) ensureICloudOnboardingAppleIDReservation(ctx context.Context, task *iCloudOnboardingTaskModel) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		return s.ensureICloudOnboardingAppleIDReservationTx(ctx, tx, task)
+		return s.ensureICloudOnboardingAppleIDReservationTx(tx, task)
 	})
 }
 
-func (s *Service) ensureICloudOnboardingAppleIDReservationTx(ctx context.Context, tx *gorm.DB, task *iCloudOnboardingTaskModel) error {
+func (s *Service) ensureICloudOnboardingAppleIDReservationTx(tx *gorm.DB, task *iCloudOnboardingTaskModel) error {
 	if tx == nil || task == nil || task.ImportID == nil || *task.ImportID == 0 {
 		return ErrICloudResourceIdentity
 	}
@@ -1695,7 +1695,7 @@ func (s *Service) SubmitICloudOnboardingSMSCode(ctx context.Context, taskID, ope
 			return err
 		}
 		if task.TaskKind == "onboarding" {
-			if err := s.ensureICloudOnboardingAppleIDReservationTx(ctx, tx, &task); err != nil {
+			if err := s.ensureICloudOnboardingAppleIDReservationTx(tx, &task); err != nil {
 				return err
 			}
 		}
@@ -1752,7 +1752,7 @@ func (s *Service) ConfirmICloudOnboardingFamilyReset(ctx context.Context, taskID
 		if task.ResourceID == nil {
 			return ErrICloudOnboardingInvalid
 		}
-		if err := s.ensureICloudOnboardingAppleIDReservationTx(ctx, tx, &task); err != nil {
+		if err := s.ensureICloudOnboardingAppleIDReservationTx(tx, &task); err != nil {
 			return err
 		}
 		importID = iCloudOnboardingImportID(&task)
@@ -1837,7 +1837,7 @@ func (s *Service) RetryICloudOnboardingPostFamily(
 		if !isICloudPostFamilyRecoveryWaiting(task) || stage == "" {
 			return ErrICloudOnboardingInvalid
 		}
-		if err := s.ensureICloudOnboardingAppleIDReservationTx(ctx, tx, &task); err != nil {
+		if err := s.ensureICloudOnboardingAppleIDReservationTx(tx, &task); err != nil {
 			return err
 		}
 		importID = iCloudOnboardingImportID(&task)
@@ -1907,7 +1907,7 @@ func (s *Service) ConfirmICloudOnboardingActivation(ctx context.Context, taskID,
 			return ErrICloudOnboardingInvalid
 		}
 		if task.TaskKind == "onboarding" {
-			if err := s.ensureICloudOnboardingAppleIDReservationTx(ctx, tx, &task); err != nil {
+			if err := s.ensureICloudOnboardingAppleIDReservationTx(tx, &task); err != nil {
 				return err
 			}
 		}

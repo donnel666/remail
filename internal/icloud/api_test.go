@@ -356,7 +356,7 @@ func TestPatchAdminICloudResourceRequiresOperateOnlyForSensitiveFields(t *testin
 			t.Fatalf("sensitive edit %d status=%d body=%s", index, recorder.Code, recorder.Body.String())
 		}
 	}
-	if operateChecks != 3 {
-		t.Fatalf("operate checks = %d, want 3", operateChecks)
+	if operateChecks != 4 {
+		t.Fatalf("operate checks = %d, want 4", operateChecks)
 	}
 }

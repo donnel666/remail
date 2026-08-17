@@ -1084,7 +1084,7 @@ func TestICloudOnboardingFamilyApplyReconcilesPersistedIntentBeforeCurrentInvite
 	service := NewService(db, nil, nil)
 	service.now = func() time.Time { return now }
 	service.onboardingApple = apple
-	service.family = NewICloudFamilyClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+	service.family = newICloudFamilyClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(testICloudFamilyResponse))}, nil
 	})})
 
@@ -1587,7 +1587,7 @@ func TestICloudOnboardingFamilyReconciliationConsumesMaxAttempts(t *testing.T) {
 	}
 	primaryID := uint(99)
 	service.onboardingApple = &onboardingJoinedFamilyApple{}
-	service.family = NewICloudFamilyClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+	service.family = newICloudFamilyClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusServiceUnavailable, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{}`))}, nil
 	})})
 	if err := db.Model(task).Updates(map[string]any{

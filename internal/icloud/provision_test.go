@@ -1204,10 +1204,11 @@ func TestICloudProvisionCreatesRefreshTaskForInvalidChannel(t *testing.T) {
 				t.Fatalf("migrate database: %v", err)
 			}
 			now := time.Date(2026, 8, 14, 11, 40, 0, 0, time.UTC)
+			phoneID := uint(17)
 			resource := iCloudResourceModel{
 				ID: 1, ResourceType: "icloud", PrimaryEmail: "owner@example.com", AccountRole: "primary",
 				Region: "US", CountryCode: "US", ICloudOpened: true, BoundPhoneNumber: "14155550001",
-				BoundPhoneCountryCode: "US", BoundPhoneSource: "manual", Status: iCloudResourceNormal,
+				BoundPhoneCountryCode: "US", BoundPhoneSource: "manual", KitesimPhoneID: &phoneID, Status: iCloudResourceNormal,
 				ExpireAt: now.Add(time.Hour), CredentialRevision: 1, NextProvisionAt: &now, CreatedAt: now, UpdatedAt: now,
 			}
 			if err := db.Create(&resource).Error; err != nil {

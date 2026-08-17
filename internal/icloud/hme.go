@@ -819,13 +819,6 @@ func defaultICloudHMEContext(host string) (langCode, origin, referer string) {
 	return "zh-tw", "https://www.icloud.com", "https://www.icloud.com/"
 }
 
-func iCloudAcceptLanguage(langCode string) string {
-	if strings.EqualFold(strings.TrimSpace(langCode), "zh-cn") {
-		return "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7"
-	}
-	return "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7"
-}
-
 func hasRequiredICloudCookies(value string) bool {
 	values := iCloudCookieValues(value)
 	for _, name := range requiredICloudCookieNames {

@@ -146,7 +146,7 @@ func TestBindICloudSMSPhoneRejectsConflictingRaceWinner(t *testing.T) {
 			"INSERT INTO kitesim_phone_bindings(phone_id, consumer_type, consumer_key, source, created_at) VALUES (?, ?, ?, ?, ?)",
 			second.ID, smsConsumerICloud, row.ConsumerKey, "matched", time.Now().UTC(),
 		).Error; err != nil {
-			tx.AddError(err)
+			_ = tx.AddError(err)
 		}
 	}); err != nil {
 		t.Fatal(err)
