@@ -322,6 +322,7 @@ function resourceDetail(): AdminICloudResourceDetail {
     aliasRemaining: 738,
     credentialRevision: 2,
     credentialUpdatedAt: "2026-08-08T00:00:00Z",
+    onboardingTask: null,
     validationFailures: 0,
     validationGeneration: 3,
     refreshTask: null,

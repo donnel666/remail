@@ -463,3 +463,17 @@ func TestParseProviderTimeUsesShanghaiForNaiveValues(t *testing.T) {
 		}
 	}
 }
+
+func TestAppleSMSCodeMatchesBodyWithProviderWhitespace(t *testing.T) {
+	for _, test := range []struct {
+		body string
+		want string
+	}{
+		{body: "通知\n你的Apple账户验证码是 964445，切勿向任何人泄露，以防账户或信息被盗。\nSent by provider", want: "964445"},
+		{body: "Your Apple Account Code is: 953675.\nDon't share it with anyone.", want: "953675"},
+	} {
+		if got := appleSMSCode(test.body); got != test.want {
+			t.Fatalf("appleSMSCode(%q) = %q, want %q", test.body, got, test.want)
+		}
+	}
+}

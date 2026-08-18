@@ -1199,7 +1199,7 @@ func TestICloudProvisionCreatesRefreshTaskForInvalidChannel(t *testing.T) {
 			}
 			if err := db.AutoMigrate(
 				&iCloudResourceModel{}, &iCloudResourceChannelModel{}, &iCloudResourceCredentialModel{},
-				&iCloudMaintenanceRunModel{}, &iCloudOnboardingImportModel{}, &iCloudOnboardingTaskModel{},
+				&iCloudMaintenanceRunModel{},
 			); err != nil {
 				t.Fatalf("migrate database: %v", err)
 			}

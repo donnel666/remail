@@ -3,6 +3,7 @@ package infra
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -51,10 +52,10 @@ type adminTaskRow struct {
 	Attempts           int             `gorm:"column:attempts"`
 	MaxAttempts        int             `gorm:"column:max_attempts"`
 	CredentialRevision sql.NullInt64   `gorm:"column:credential_revision"`
-	QueuedAt           time.Time       `gorm:"column:queued_at"`
-	StartedAt          sql.NullTime    `gorm:"column:started_at"`
-	FinishedAt         sql.NullTime    `gorm:"column:finished_at"`
-	UpdatedAt          time.Time       `gorm:"column:updated_at"`
+	QueuedAt           adminTaskTime   `gorm:"column:queued_at"`
+	StartedAt          adminTaskTime   `gorm:"column:started_at"`
+	FinishedAt         adminTaskTime   `gorm:"column:finished_at"`
+	UpdatedAt          adminTaskTime   `gorm:"column:updated_at"`
 	ProgressTotal      sql.NullInt64   `gorm:"column:progress_total"`
 	ProgressProcessed  sql.NullInt64   `gorm:"column:progress_processed"`
 	ProgressSucceeded  sql.NullInt64   `gorm:"column:progress_succeeded"`
@@ -411,33 +412,33 @@ FROM icloud_maintenance_runs AS run`
 const iCloudRefreshTaskSelect = `
 SELECT
     'icloud_refresh' AS source,
-    task.id AS source_id,
-    task.resource_id AS resource_scope_id,
+    resource.id AS source_id,
+    resource.id AS resource_scope_id,
     'icloud_resource' AS biz_type,
-    task.resource_id AS biz_id,
+    resource.id AS biz_id,
     'refresh' AS kind,
     CASE
-        WHEN task.status = 'completed' THEN 'succeeded'
-        WHEN task.status = 'failed' THEN 'failed'
-        WHEN task.status = 'waiting' AND task.dispatch_status = 'waiting' THEN 'uncertain'
-        WHEN task.dispatch_status IN ('pending', 'queued') THEN 'queued'
+        WHEN resource.onboarding_status = 'completed' THEN 'succeeded'
+        WHEN resource.onboarding_status = 'failed' THEN 'failed'
+        WHEN resource.onboarding_status = 'waiting' AND resource.dispatch_status = 'waiting' THEN 'uncertain'
+        WHEN resource.dispatch_status IN ('pending', 'queued') THEN 'queued'
         ELSE 'running'
     END AS status,
-    task.attempts AS attempts,
-    task.max_attempts AS max_attempts,
-    task.expected_credential_revision AS credential_revision,
-    task.created_at AS queued_at,
-    task.started_at AS started_at,
-    task.finished_at AS finished_at,
-    task.updated_at AS updated_at,
+    resource.attempts AS attempts,
+    resource.max_attempts AS max_attempts,
+    resource.expected_credential_revision AS credential_revision,
+    resource.created_at AS queued_at,
+    resource.started_at AS started_at,
+    resource.finished_at AS finished_at,
+    resource.updated_at AS updated_at,
     NULL AS progress_total,
     NULL AS progress_processed,
     NULL AS progress_succeeded,
     NULL AS progress_skipped,
     NULL AS progress_failed,
     NULL AS reason_buckets
-FROM icloud_account_onboarding_tasks AS task
-WHERE task.task_kind = 'refresh' AND task.resource_id IS NOT NULL`
+FROM icloud_resources AS resource
+WHERE resource.task_kind = 'refresh'`
 
 // Redis-only bulk cursors are absent from per-resource lists. Their bounded
 // live status remains available through the source-qualified lookup below.
@@ -535,48 +536,41 @@ FROM icloud_resource_imports AS imp`
 const iCloudOnboardingSingleTaskSelect = `
 SELECT
     'icloud_onboarding' AS source,
-    imp.id AS source_id,
-    imp.id AS resource_scope_id,
+    resource.import_id AS source_id,
+    resource.import_id AS resource_scope_id,
     'icloud_resource_import' AS biz_type,
-    imp.id AS biz_id,
+    resource.import_id AS biz_id,
     'import' AS kind,
-    CASE imp.status
-        WHEN 'processing' THEN 'running'
-        WHEN 'completed' THEN 'succeeded'
-        WHEN 'partial' THEN 'uncertain'
-        ELSE 'failed'
-    END AS status,
-    COALESCE((
-        SELECT MAX(task.attempts)
-        FROM icloud_account_onboarding_tasks AS task
-        WHERE task.import_id = imp.id
-    ), 0) AS attempts,
-    COALESCE((
-        SELECT MAX(task.max_attempts)
-        FROM icloud_account_onboarding_tasks AS task
-        WHERE task.import_id = imp.id
-    ), 1) AS max_attempts,
-    NULL AS credential_revision,
-    imp.created_at AS queued_at,
-    (
-        SELECT task.started_at
-        FROM icloud_account_onboarding_tasks AS task
-        WHERE task.import_id = imp.id AND task.started_at IS NOT NULL
-        ORDER BY task.started_at ASC
-        LIMIT 1
-    ) AS started_at,
-    CASE WHEN imp.status IN ('completed', 'partial', 'failed') THEN imp.updated_at ELSE NULL END AS finished_at,
-    imp.updated_at AS updated_at,
-    imp.accepted_count AS progress_total,
     CASE
-        WHEN imp.completed_count + imp.failed_count > imp.accepted_count THEN imp.accepted_count
-        ELSE imp.completed_count + imp.failed_count
-    END AS progress_processed,
-    imp.completed_count AS progress_succeeded,
+        WHEN SUM(CASE WHEN resource.onboarding_status IN ('completed', 'failed') THEN 1 ELSE 0 END) < COUNT(*)
+             AND SUM(CASE WHEN resource.onboarding_status = 'waiting' AND resource.dispatch_status = 'waiting' THEN 1 ELSE 0 END)
+                 = COUNT(*) - SUM(CASE WHEN resource.onboarding_status IN ('completed', 'failed') THEN 1 ELSE 0 END)
+            THEN 'uncertain'
+        WHEN SUM(CASE WHEN resource.onboarding_status IN ('completed', 'failed') THEN 1 ELSE 0 END) < COUNT(*) THEN 'running'
+        WHEN SUM(CASE WHEN resource.onboarding_status = 'failed' THEN 1 ELSE 0 END) = 0 THEN 'succeeded'
+        WHEN SUM(CASE WHEN resource.onboarding_status = 'completed' THEN 1 ELSE 0 END) = 0 THEN 'failed'
+        ELSE 'uncertain'
+    END AS status,
+    COALESCE(MAX(resource.attempts), 0) AS attempts,
+    COALESCE(MAX(resource.max_attempts), 1) AS max_attempts,
+    NULL AS credential_revision,
+    MIN(resource.created_at) AS queued_at,
+    MIN(resource.started_at) AS started_at,
+    CASE
+        WHEN SUM(CASE WHEN resource.onboarding_status IN ('completed', 'failed') THEN 1 ELSE 0 END) = COUNT(*)
+        THEN MAX(resource.updated_at)
+        ELSE NULL
+    END AS finished_at,
+    MAX(resource.updated_at) AS updated_at,
+    COUNT(*) AS progress_total,
+    SUM(CASE WHEN resource.onboarding_status IN ('completed', 'failed') THEN 1 ELSE 0 END) AS progress_processed,
+    SUM(CASE WHEN resource.onboarding_status = 'completed' THEN 1 ELSE 0 END) AS progress_succeeded,
     0 AS progress_skipped,
-    imp.failed_count AS progress_failed,
+    SUM(CASE WHEN resource.onboarding_status = 'failed' THEN 1 ELSE 0 END) AS progress_failed,
     NULL AS reason_buckets
-FROM icloud_account_onboarding_imports AS imp`
+FROM icloud_resources AS resource
+WHERE resource.task_kind = 'onboarding' AND resource.import_id IS NOT NULL
+GROUP BY resource.import_id`
 
 const iCloudImportTaskUnion = iCloudImportSingleTaskSelect + `
 UNION ALL
@@ -962,9 +956,9 @@ func adminTaskView(row adminTaskRow) governanceapp.AdminTaskView {
 		value := uint64(row.CredentialRevision.Int64)
 		credentialRevision = &value
 	}
-	queuedAt := row.QueuedAt
+	queuedAt := row.QueuedAt.Time
 	if queuedAt.IsZero() {
-		queuedAt = row.UpdatedAt
+		queuedAt = row.UpdatedAt.Time
 	}
 	view := governanceapp.AdminTaskView{
 		Ref:                governanceapp.AdminTaskRef{Source: row.Source, ID: row.SourceID},
@@ -978,7 +972,7 @@ func adminTaskView(row adminTaskRow) governanceapp.AdminTaskView {
 		QueuedAt:           queuedAt,
 		StartedAt:          nullTimePointer(row.StartedAt),
 		FinishedAt:         nullTimePointer(row.FinishedAt),
-		UpdatedAt:          row.UpdatedAt,
+		UpdatedAt:          row.UpdatedAt.Time,
 	}
 	if row.ProgressTotal.Valid {
 		view.Progress = &governanceapp.AdminTaskProgress{
@@ -1086,7 +1080,70 @@ func reasonCountMap(counts map[string]int64) []governanceapp.AdminTaskReasonCoun
 	return result
 }
 
-func nullTimePointer(value sql.NullTime) *time.Time {
+// adminTaskTime accepts native database timestamps and SQLite's string result
+// for datetime aggregate expressions such as MIN/MAX.
+type adminTaskTime struct {
+	time.Time
+	Valid bool
+}
+
+func (value *adminTaskTime) Scan(src any) error {
+	if src == nil {
+		value.Time = time.Time{}
+		value.Valid = false
+		return nil
+	}
+	switch raw := src.(type) {
+	case time.Time:
+		value.Time = raw
+		value.Valid = true
+		return nil
+	case string:
+		parsed, err := parseAdminTaskTime(raw)
+		if err != nil {
+			return err
+		}
+		value.Time = parsed
+		value.Valid = true
+		return nil
+	case []byte:
+		parsed, err := parseAdminTaskTime(string(raw))
+		if err != nil {
+			return err
+		}
+		value.Time = parsed
+		value.Valid = true
+		return nil
+	default:
+		return fmt.Errorf("unsupported administrator task timestamp type %T", src)
+	}
+}
+
+func (value adminTaskTime) Value() (driver.Value, error) {
+	if !value.Valid {
+		return nil, nil
+	}
+	return value.Time, nil
+}
+
+func parseAdminTaskTime(raw string) (time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		"2006-01-02 15:04:05.999999999-07:00",
+		"2006-01-02 15:04:05.999999999",
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04:05.999999999",
+		"2006-01-02T15:04:05",
+	} {
+		if parsed, err := time.ParseInLocation(layout, raw, time.UTC); err == nil {
+			return parsed, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("invalid administrator task timestamp %q", raw)
+}
+
+func nullTimePointer(value adminTaskTime) *time.Time {
 	if !value.Valid {
 		return nil
 	}

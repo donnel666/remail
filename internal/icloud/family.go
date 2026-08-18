@@ -398,14 +398,16 @@ func (s *Service) selectICloudFamilyPrimaryID(ctx context.Context, tx *gorm.DB, 
 		  AND p.family_sync_error_category NOT IN ('family_invite_expired', 'family_invite_invalid', 'family_invite_unavailable')
 		  AND p.family_id <> '' AND p.family_organizer_dsid <> ''
 		  AND (p.family_remote_member_count +
-		       (SELECT COUNT(*) FROM icloud_account_onboarding_tasks AS ot
-		        WHERE ot.family_primary_resource_id = p.id AND ot.resource_id IS NULL
-		          AND ot.id <> ? AND ot.status IN ('processing', 'waiting')
+		       (SELECT COUNT(*) FROM icloud_resources AS ot
+		        WHERE ot.family_primary_resource_id = p.id
+		          AND ot.task_kind = 'onboarding'
+		          AND ot.id <> ? AND ot.onboarding_status IN ('processing', 'waiting')
 		          AND ot.family_reservation_confirmed = 0)) < ?
 		ORDER BY (p.family_remote_member_count +
-		       (SELECT COUNT(*) FROM icloud_account_onboarding_tasks AS ot
-		        WHERE ot.family_primary_resource_id = p.id AND ot.resource_id IS NULL
-		          AND ot.id <> ? AND ot.status IN ('processing', 'waiting')
+		       (SELECT COUNT(*) FROM icloud_resources AS ot
+		        WHERE ot.family_primary_resource_id = p.id
+		          AND ot.task_kind = 'onboarding'
+		          AND ot.id <> ? AND ot.onboarding_status IN ('processing', 'waiting')
 		          AND ot.family_reservation_confirmed = 0)) ASC,
 		  p.family_synced_at DESC, p.id ASC LIMIT 1`
 	if tx.Name() == "mysql" {

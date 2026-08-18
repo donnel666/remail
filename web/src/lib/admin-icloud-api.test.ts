@@ -354,50 +354,51 @@ describe("admin iCloud API adapter", () => {
     );
   });
 
-  it("lists active onboarding imports through governance tasks", async () => {
-    const first = {
-      items: Array.from({ length: 100 }, (_, index) => ({ taskId: `task:${index + 1}` })),
-      total: 101,
-      succeeded: 0,
-      offset: 0,
-      limit: 100,
-    };
-    const second = {
-      items: [{ taskId: "task:101" }],
-      total: 101,
-      succeeded: 0,
-      offset: 100,
-      limit: 100,
-    };
-    apiMocks.GET.mockResolvedValueOnce({ data: first }).mockResolvedValueOnce({ data: second });
+	it("lists active onboarding imports through governance tasks", async () => {
+		const running = {
+			items: [{ taskId: "task:1", bizId: 1, updatedAt: "2026-08-18T01:00:00Z" }],
+			total: 1,
+			succeeded: 0,
+			offset: 0,
+			limit: 100,
+		};
+		const uncertain = {
+			items: [{ taskId: "task:2", bizId: 2, updatedAt: "2026-08-18T02:00:00Z" }],
+			total: 1,
+			succeeded: 0,
+			offset: 0,
+			limit: 100,
+		};
+		apiMocks.GET.mockResolvedValueOnce({ data: running }).mockResolvedValueOnce({ data: uncertain });
 
-    await expect(listAdminICloudOnboardingImports()).resolves.toEqual({
-      ...second,
-      items: [...first.items, ...second.items],
-      offset: 0,
-    });
+		await expect(listAdminICloudOnboardingImports()).resolves.toEqual({
+			...running,
+			items: [...uncertain.items, ...running.items],
+			total: 2,
+			offset: 0,
+		});
     expect(apiMocks.GET).toHaveBeenNthCalledWith(1, "/v1/admin/tasks", {
       params: {
         query: {
           bizType: "icloud_resource_import",
           source: "icloud_onboarding",
           kind: "import",
-          status: "running",
+			status: "running",
           offset: 0,
           limit: 100,
         },
       },
       signal: undefined,
     });
-    expect(apiMocks.GET).toHaveBeenNthCalledWith(2, "/v1/admin/tasks", {
-      params: {
-        query: {
-          bizType: "icloud_resource_import",
-          source: "icloud_onboarding",
-          kind: "import",
-          status: "running",
-          offset: 100,
-          limit: 100,
+		expect(apiMocks.GET).toHaveBeenNthCalledWith(2, "/v1/admin/tasks", {
+			params: {
+				query: {
+					bizType: "icloud_resource_import",
+					source: "icloud_onboarding",
+					kind: "import",
+					status: "uncertain",
+					offset: 0,
+					limit: 100,
         },
       },
       signal: undefined,

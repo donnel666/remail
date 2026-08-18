@@ -443,27 +443,44 @@ export async function listAdminICloudTasks(
 export async function listAdminICloudOnboardingImports(
   signal?: AbortSignal,
 ): Promise<AdminICloudTaskList> {
-  const items: AdminICloudTask[] = [];
-  let page: AdminICloudTaskList;
-  do {
-    page = await unwrap(
-      await client.GET("/v1/admin/tasks", {
-        params: {
-          query: {
-            bizType: "icloud_resource_import",
-            source: "icloud_onboarding",
-            kind: "import",
-            status: "running",
-            offset: items.length,
-            limit: 100,
+  const load = async (status: "running" | "uncertain") => {
+    const items: AdminICloudTask[] = [];
+    let page: AdminICloudTaskList = { items: [], total: 0, succeeded: 0, offset: 0, limit: 100 };
+    do {
+      page = await unwrap(
+        await client.GET("/v1/admin/tasks", {
+          params: {
+            query: {
+              bizType: "icloud_resource_import",
+              source: "icloud_onboarding",
+              kind: "import",
+              status,
+              offset: items.length,
+              limit: 100,
+            },
           },
-        },
-        signal,
-      }),
-    );
-    items.push(...page.items);
-  } while (page.items.length > 0 && items.length < page.total);
-  return { ...page, items, offset: 0 };
+          signal,
+        }),
+      );
+      items.push(...page.items);
+    } while (page.items.length > 0 && items.length < page.total);
+    return { ...page, items, offset: 0 };
+  };
+  const [running, uncertain] = await Promise.all([load("running"), load("uncertain")]);
+  const byID = new Map<string, AdminICloudTask>();
+  for (const task of [...running.items, ...uncertain.items]) {
+    byID.set(String(task.bizId ?? task.taskId), task);
+  }
+  const items = [...byID.values()].sort((left, right) =>
+    String(right.updatedAt).localeCompare(String(left.updatedAt)),
+  );
+  return {
+    ...running,
+    items,
+    total: items.length,
+    succeeded: 0,
+    offset: 0,
+  };
 }
 
 export async function updateAdminICloudResource(

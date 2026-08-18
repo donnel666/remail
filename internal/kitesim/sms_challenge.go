@@ -30,8 +30,10 @@ const (
 )
 
 var appleSMSCodePatterns = []*regexp.Regexp{
-	regexp.MustCompile(`^你的Apple账户验证码是[[:space:]]*([0-9]{6})，切勿向任何人泄露，以防账户或信息被盗。$`),
-	regexp.MustCompile(`(?i)^Your Apple Account Code is:[[:space:]]*([0-9]{6})\.[[:space:]]*Don(?:'|’|‘)t share it with anyone\.$`),
+	// Apple sometimes wraps the body or appends a provider footer. Match the
+	// body text only; the caller is intentionally not part of verification.
+	regexp.MustCompile(`你的Apple账户验证码是[[:space:]]*([0-9]{6})[[:space:]]*，切勿向任何人泄露，以防账户或信息被盗。`),
+	regexp.MustCompile(`(?i)Your Apple Account Code is:[[:space:]]*([0-9]{6})[[:space:]]*\.[[:space:]]*Don(?:'|’|‘)t share it with anyone\.`),
 }
 
 type smsChallengeModel struct {

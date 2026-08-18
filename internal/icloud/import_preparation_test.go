@@ -49,14 +49,15 @@ func (iCloudPreparationMailTestModel) TableName() string { return "inbound_mails
 
 type iCloudPreparationOnboardingTaskTestModel struct {
 	ID                   uint      `gorm:"column:id;primaryKey"`
-	Status               string    `gorm:"column:status"`
+	TaskKind             string    `gorm:"column:task_kind"`
+	Status               string    `gorm:"column:onboarding_status"`
 	Stage                string    `gorm:"column:stage"`
 	ForwardPreparationID *uint     `gorm:"column:forward_preparation_id"`
 	UpdatedAt            time.Time `gorm:"column:updated_at"`
 }
 
 func (iCloudPreparationOnboardingTaskTestModel) TableName() string {
-	return "icloud_account_onboarding_tasks"
+	return "icloud_resources"
 }
 
 func icloudUintPtr(value uint) *uint { return &value }
@@ -94,8 +95,8 @@ func TestCreateAdminICloudImportPreparationUsesEligibleConfiguredDomain(t *testi
 		t.Fatalf("create referenced import: %v", err)
 	}
 	if err := db.Create(&[]iCloudPreparationOnboardingTaskTestModel{
-		{ID: 30, Status: iCloudOnboardingProcessing, Stage: "forwarding_wait", ForwardPreparationID: &activeOnboardingID},
-		{ID: 31, Status: iCloudOnboardingCompleted, Stage: "completed", ForwardPreparationID: &completedOnboardingID},
+		{ID: 30, TaskKind: "onboarding", Status: iCloudOnboardingProcessing, Stage: "forwarding_wait", ForwardPreparationID: &activeOnboardingID},
+		{ID: 31, TaskKind: "onboarding", Status: iCloudOnboardingCompleted, Stage: "completed", ForwardPreparationID: &completedOnboardingID},
 	}).Error; err != nil {
 		t.Fatalf("create onboarding references: %v", err)
 	}

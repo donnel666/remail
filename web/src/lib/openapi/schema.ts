@@ -7878,6 +7878,7 @@ export interface components {
             /** Format: int64 */
             validationGeneration: number;
             validationFailures: number;
+            onboardingTask: components["schemas"]["AdminICloudOnboardingTask"] | null;
             refreshTask: components["schemas"]["AdminICloudOnboardingTask"] | null;
         };
         AdminICloudStatusFacet: {

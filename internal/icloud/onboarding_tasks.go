@@ -47,7 +47,7 @@ func (s *Service) DispatchICloudOnboardingTasks(ctx context.Context, limit int) 
 	}
 	var tasks []iCloudOnboardingTaskModel
 	if err := s.db.WithContext(ctx).
-		Where("status IN ? AND dispatch_status = ? AND (next_attempt_at IS NULL OR next_attempt_at <= ?)", []string{iCloudOnboardingProcessing, iCloudOnboardingWaiting}, "pending", now).
+		Where("task_kind IN ? AND onboarding_status IN ? AND dispatch_status = ? AND (next_attempt_at IS NULL OR next_attempt_at <= ?)", []string{"onboarding", "refresh"}, []string{iCloudOnboardingProcessing, iCloudOnboardingWaiting}, "pending", now).
 		Order("id ASC").Limit(limit).Find(&tasks).Error; err != nil {
 		return ErrICloudOnboardingTemporary
 	}
@@ -62,8 +62,8 @@ func (s *Service) DispatchICloudOnboardingTasks(ctx context.Context, limit int) 
 			continue
 		}
 		updated := s.db.WithContext(ctx).Model(&iCloudOnboardingTaskModel{}).
-			Where("id = ? AND generation = ? AND status IN ? AND dispatch_status = ?", task.ID, task.Generation, []string{iCloudOnboardingProcessing, iCloudOnboardingWaiting}, "pending").
-			Updates(map[string]any{"status": iCloudOnboardingProcessing, "dispatch_status": "queued", "updated_at": now})
+			Where("id = ? AND generation = ? AND onboarding_status IN ? AND dispatch_status = ?", task.ID, task.Generation, []string{iCloudOnboardingProcessing, iCloudOnboardingWaiting}, "pending").
+			Updates(map[string]any{"onboarding_status": iCloudOnboardingProcessing, "dispatch_status": "queued", "next_attempt_at": now, "updated_at": now})
 		if updated.Error != nil {
 			result = errors.Join(result, ErrICloudOnboardingTemporary)
 		}
@@ -77,29 +77,12 @@ func (s *Service) DispatchICloudOnboardingTasks(ctx context.Context, limit int) 
 func (s *Service) reconcileICloudOnboardingImports(ctx context.Context, limit int) error {
 	var importIDs []uint
 	if err := s.db.WithContext(ctx).Raw(`
-		SELECT batch.id
-		FROM icloud_account_onboarding_imports AS batch
-		JOIN (
-			SELECT task.import_id,
-				COUNT(*) AS accepted,
-				SUM(CASE WHEN task.status = ? THEN 1 ELSE 0 END) AS completed,
-				SUM(CASE WHEN task.status = ? THEN 1 ELSE 0 END) AS failed,
-				SUM(CASE WHEN task.status = ? THEN 1 ELSE 0 END) AS waiting
-			FROM icloud_account_onboarding_tasks AS task
-			JOIN icloud_account_onboarding_imports AS active_batch
-				ON active_batch.id = task.import_id AND active_batch.status = ?
-			GROUP BY task.import_id
-		) AS counts ON counts.import_id = batch.id
-		WHERE batch.status = ? AND (
-			batch.accepted_count <> counts.accepted OR
-			batch.completed_count <> counts.completed OR
-			batch.failed_count <> counts.failed OR
-			batch.waiting_count <> counts.waiting OR
-			counts.completed + counts.failed = counts.accepted
-		)
-		ORDER BY batch.id ASC
-		LIMIT ?`, iCloudOnboardingCompleted, iCloudOnboardingFailed, iCloudOnboardingWaiting,
-		iCloudOnboardingProcessing, iCloudOnboardingProcessing, limit).Scan(&importIDs).Error; err != nil {
+		SELECT DISTINCT import_id
+		FROM icloud_resources
+		WHERE import_id IS NOT NULL AND task_kind = 'onboarding'
+		  AND onboarding_status IN (?, ?)
+		ORDER BY import_id ASC
+		LIMIT ?`, iCloudOnboardingProcessing, iCloudOnboardingWaiting, limit).Scan(&importIDs).Error; err != nil {
 		return ErrICloudOnboardingTemporary
 	}
 	var result error
@@ -112,10 +95,10 @@ func (s *Service) reconcileICloudOnboardingImports(ctx context.Context, limit in
 func (s *Service) recoverStaleICloudOnboardingTasks(ctx context.Context, now time.Time) error {
 	var tasks []iCloudOnboardingTaskModel
 	if err := s.db.WithContext(ctx).
-		Where(`status IN ? AND (
-			(dispatch_status = ? AND updated_at <= ?) OR
-			(dispatch_status = ? AND started_at IS NOT NULL AND updated_at <= ?)
-		)`, []string{iCloudOnboardingProcessing, iCloudOnboardingWaiting}, "queued", now.Add(-iCloudOnboardingQueueLease), "running", now.Add(-iCloudOnboardingRunningLease)).
+		Where(`task_kind IN ? AND onboarding_status IN ? AND (
+			(dispatch_status = ? AND next_attempt_at IS NOT NULL AND next_attempt_at <= ?) OR
+			(dispatch_status = ? AND started_at IS NOT NULL AND started_at <= ?)
+		)`, []string{"onboarding", "refresh"}, []string{iCloudOnboardingProcessing, iCloudOnboardingWaiting}, "queued", now.Add(-iCloudOnboardingQueueLease), "running", now.Add(-iCloudOnboardingRunningLease)).
 		Order("id ASC").Find(&tasks).Error; err != nil {
 		return ErrICloudOnboardingTemporary
 	}
@@ -134,17 +117,19 @@ func (s *Service) ProcessICloudOnboardingTask(ctx context.Context, payload iClou
 	claim := newICloudOnboardingClaimToken()
 	now := s.now().UTC().Truncate(time.Millisecond)
 	result := s.db.WithContext(ctx).Model(&iCloudOnboardingTaskModel{}).
-		Where("id = ? AND generation = ? AND status IN ? AND dispatch_status IN ?", payload.TaskID, payload.Generation, []string{iCloudOnboardingProcessing, iCloudOnboardingWaiting}, []string{"pending", "queued"}).
+		Where("id = ? AND generation = ? AND task_kind IN ? AND onboarding_status IN ? AND dispatch_status IN ?", payload.TaskID, payload.Generation, []string{"onboarding", "refresh"}, []string{iCloudOnboardingProcessing, iCloudOnboardingWaiting}, []string{"pending", "queued"}).
 		Updates(map[string]any{
-			"status": iCloudOnboardingProcessing, "dispatch_status": "running", "claim_token": claim,
-			"started_at": gorm.Expr("COALESCE(started_at, ?)", now), "next_attempt_at": nil, "updated_at": now,
+			"onboarding_status": iCloudOnboardingProcessing, "dispatch_status": "running", "claim_token": claim,
+			// started_at is the current worker lease timestamp, not the
+			// lifetime start of the resource workflow.
+			"started_at": now, "next_attempt_at": nil, "updated_at": now,
 		})
 	if result.Error != nil {
 		return ErrICloudOnboardingTemporary
 	}
 	if result.RowsAffected != 1 {
 		var current iCloudOnboardingTaskModel
-		if err := s.db.WithContext(ctx).Select("id", "generation", "status", "dispatch_status").First(&current, payload.TaskID).Error; err != nil {
+		if err := s.db.WithContext(ctx).Select("id", "generation", "onboarding_status", "dispatch_status").First(&current, payload.TaskID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return nil
 			}
@@ -172,6 +157,9 @@ func (s *Service) ProcessICloudOnboardingTask(ctx context.Context, payload iClou
 	}
 	if task.TaskKind == "onboarding" {
 		if err := s.ensureICloudOnboardingAppleIDReservation(ctx, &task); err != nil {
+			if errors.Is(err, ErrICloudOnboardingInvalid) {
+				return s.failICloudOnboardingTask(ctx, &task, "invalid_credentials", "Stored Apple credentials are invalid.")
+			}
 			if !errors.Is(err, ErrICloudResourceIdentity) {
 				return ErrICloudOnboardingTemporary
 			}
@@ -269,7 +257,16 @@ func (s *Service) ensureICloudOnboardingAppleIDReservation(ctx context.Context, 
 }
 
 func (s *Service) ensureICloudOnboardingAppleIDReservationTx(tx *gorm.DB, task *iCloudOnboardingTaskModel) error {
-	if tx == nil || task == nil || task.ImportID == nil || *task.ImportID == 0 {
+	if tx == nil || task == nil || task.ID == 0 || task.ResourceID == nil || *task.ResourceID != task.ID || task.ImportID == nil || *task.ImportID == 0 {
+		return ErrICloudResourceIdentity
+	}
+	var duplicateCount int64
+	if err := tx.Model(&iCloudResourceModel{}).
+		Where("id <> ? AND LOWER(primary_email) = ?", task.ID, iCloudImportEmailKey(task.PrimaryEmail)).
+		Count(&duplicateCount).Error; err != nil {
+		return err
+	}
+	if duplicateCount != 0 {
 		return ErrICloudResourceIdentity
 	}
 	now := s.now().UTC().Truncate(time.Millisecond)
@@ -278,18 +275,6 @@ func (s *Service) ensureICloudOnboardingAppleIDReservationTx(tx *gorm.DB, task *
 		OwnerID: *task.ImportID, CreatedAt: now,
 	}}); err != nil {
 		return err
-	}
-	if task.ResourceID == nil {
-		var existing iCloudResourceModel
-		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("LOWER(primary_email) = ?", iCloudImportEmailKey(task.PrimaryEmail)).Take(&existing).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		return ErrICloudResourceIdentity
 	}
 	var resource struct {
 		ID          uint   `gorm:"column:id"`
@@ -307,12 +292,8 @@ func (s *Service) ensureICloudOnboardingAppleIDReservationTx(tx *gorm.DB, task *
 		}
 		return err
 	}
-	var batch iCloudOnboardingImportModel
-	if err := tx.Select("owner_user_id").First(&batch, *task.ImportID).Error; err != nil {
-		return err
-	}
-	validRole := resource.AccountRole == "unknown" || task.Stage == "waiting_family_reset" && resource.AccountRole == task.AccountRole
-	if resource.OwnerUserID != batch.OwnerUserID || !validRole || resource.Status == iCloudResourceDeleted {
+	validRole := resource.AccountRole == "unknown" || resource.AccountRole == task.AccountRole
+	if resource.OwnerUserID == 0 || !validRole || resource.Status == iCloudResourceDeleted {
 		return ErrICloudResourceIdentity
 	}
 	return nil
@@ -684,6 +665,7 @@ func (s *Service) retryICloudOnboardingSMSRoundAt(ctx context.Context, task *iCl
 		"stage_attempts": attempts, "manual_verification_code": "", "sms_sent_at": nil, "sms_poll_deadline": nil,
 		"last_error_category": "sms_round_failed", "last_safe_error": safeICloudImportMessage(message),
 	}
+	omitICloudOldCookieSafeError(task, updates)
 	if retryAt != nil {
 		updates["stage"] = "sms_send"
 		return s.waitICloudOnboardingTaskWithUpdates(ctx, task, retryAt, "pending", message, updates)
@@ -762,7 +744,7 @@ func (s *Service) selectICloudOnboardingFamily(ctx context.Context, task *iCloud
 			Where("id = ? AND generation = ? AND claim_token = ? AND dispatch_status = ?", task.ID, task.Generation, task.ClaimToken, "running").
 			Updates(map[string]any{
 				"family_primary_resource_id": primaryID, "family_reservation_confirmed": false,
-				"stage": "family_prepare", "status": iCloudOnboardingProcessing,
+				"stage": "family_prepare", "onboarding_status": iCloudOnboardingProcessing,
 				"dispatch_status": "pending", "claim_token": "", "next_attempt_at": nil,
 				"last_error_category": "", "last_safe_error": "", "stage_attempts": 0, "updated_at": now,
 			})
@@ -867,7 +849,7 @@ func (s *Service) retryICloudOnboardingFamilySelection(ctx context.Context, task
 			"last_error_category": safeICloudImportMessage(category), "last_safe_error": safeICloudImportMessage(message), "updated_at": now,
 		}
 		if terminal {
-			updates["status"] = iCloudOnboardingFailed
+			updates["onboarding_status"] = iCloudOnboardingFailed
 			updates["stage"] = "family_select"
 			updates["dispatch_status"] = "failed"
 			updates["forward_preparation_id"] = nil
@@ -877,7 +859,7 @@ func (s *Service) retryICloudOnboardingFamilySelection(ctx context.Context, task
 			updates["secret_payload"] = nil
 			updates["finished_at"] = now
 		} else {
-			updates["status"] = iCloudOnboardingProcessing
+			updates["onboarding_status"] = iCloudOnboardingProcessing
 			updates["stage"] = "family_select"
 			updates["dispatch_status"] = "pending"
 			updates["next_attempt_at"] = now
@@ -889,6 +871,11 @@ func (s *Service) retryICloudOnboardingFamilySelection(ctx context.Context, task
 		}
 		if updated.RowsAffected != 1 {
 			return ErrICloudImportClaim
+		}
+		if terminal {
+			if err := markICloudOnboardingResourceFailedTx(tx, &locked, "No usable primary family invitation remained after repeated selection attempts.", now); err != nil {
+				return err
+			}
 		}
 		if terminal && locked.ImportID != nil {
 			return releaseICloudAppleIDReservationTx(tx, iCloudAppleIDReservationOnboarding, *locked.ImportID, locked.PrimaryEmail)
@@ -987,7 +974,9 @@ func (s *Service) prepareICloudOnboardingForwarding(ctx context.Context, task *i
 
 func (s *Service) iCloudOnboardingOperatorID(ctx context.Context, importID uint) uint {
 	var operatorID uint
-	_ = s.db.WithContext(ctx).Model(&iCloudOnboardingImportModel{}).Where("id = ?", importID).Pluck("operator_user_id", &operatorID).Error
+	_ = s.db.WithContext(ctx).Model(&iCloudOnboardingTaskModel{}).
+		Where("import_id = ?", importID).Order("id ASC").Limit(1).
+		Pluck("onboarding_operator_user_id", &operatorID).Error
 	return operatorID
 }
 
@@ -1093,62 +1082,30 @@ func (s *Service) importICloudOnboardingResource(ctx context.Context, task *iClo
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND generation = ? AND claim_token = ? AND dispatch_status = ?", task.ID, task.Generation, task.ClaimToken, "running").First(&locked).Error; err != nil {
 			return ErrICloudImportClaim
 		}
-		var batch iCloudOnboardingImportModel
 		if locked.ImportID == nil || *locked.ImportID == 0 {
 			return ErrICloudOnboardingInvalid
-		}
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&batch, *locked.ImportID).Error; err != nil {
-			return err
 		}
 		if err := requireICloudAppleIDReservationTx(tx, iCloudAppleIDReservationOnboarding, *locked.ImportID, locked.PrimaryEmail); err != nil {
 			return err
 		}
 		waitingFamilyReset := locked.AccountRole == "child" && locked.FamilyPrimaryResourceID != nil && locked.FamilyReservationConfirmed
-		if locked.ResourceID == nil {
-			var existing int64
-			if err := tx.Model(&iCloudResourceModel{}).Where("LOWER(primary_email) = ?", iCloudImportEmailKey(locked.PrimaryEmail)).Count(&existing).Error; err != nil {
-				return err
-			}
-			if existing != 0 {
-				return fmt.Errorf("duplicate resource: %w", ErrICloudResourceIdentity)
-			}
-			root := iCloudRootModel{Type: "icloud", OwnerUserID: batch.OwnerUserID, Version: 1, CreatedAt: now, UpdatedAt: now}
-			if err := tx.Create(&root).Error; err != nil {
-				return err
-			}
-			resourceID = root.ID
-			resource := iCloudResourceModel{
-				ID: root.ID, ResourceType: "icloud", PrimaryEmail: locked.PrimaryEmail,
-				AccountRole: locked.AccountRole, FamilyPrimaryResourceID: locked.FamilyPrimaryResourceID,
-				Region: locked.Region, CountryCode: locked.CountryCode, ICloudOpened: locked.ICloudOpened,
-				BoundPhoneNumber: locked.BoundPhoneNumber, BoundPhoneCountryCode: locked.BoundPhoneCountryCode,
-				BoundPhoneSource: locked.BoundPhoneSource, KitesimPhoneID: locked.KitesimPhoneID, FamilyInviteURL: locked.FamilyInviteURL,
-				SelectedForwardTo: preparation.ForwardToEmail, RequiredForwardTo: preparation.ForwardToEmail,
-				ExpireAt: batch.ResourceExpireAt, ForSale: false, Status: iCloudResourcePending,
-				CredentialRevision: 1, CredentialUpdatedAt: now, ValidationGeneration: 1,
-				CreatedAt: now, UpdatedAt: now,
-			}
-			if !waitingFamilyReset {
-				resource.NextValidationAt = iCloudTimePointer(now)
-				validationReady = true
-			}
-			if err := tx.Create(&resource).Error; err != nil {
-				return err
-			}
-		} else {
-			var root iCloudRootModel
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-				Where("id = ? AND type = ? AND owner_user_id = ?", *locked.ResourceID, "icloud", batch.OwnerUserID).First(&root).Error; err != nil {
-				return fmt.Errorf("legacy resource root changed: %w", ErrICloudResourceIdentity)
-			}
-			var existing iCloudResourceModel
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&existing, root.ID).Error; err != nil {
-				return fmt.Errorf("legacy resource missing: %w", ErrICloudResourceIdentity)
-			}
-			if iCloudImportEmailKey(existing.PrimaryEmail) != iCloudImportEmailKey(locked.PrimaryEmail) || existing.AccountRole != "unknown" || existing.Status == iCloudResourceDeleted {
-				return fmt.Errorf("legacy resource is no longer upgradeable: %w", ErrICloudResourceIdentity)
-			}
-			resourceID = existing.ID
+		if locked.ResourceID == nil || *locked.ResourceID != locked.ID {
+			return ErrICloudResourceIdentity
+		}
+		var root iCloudRootModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND type = ?", *locked.ResourceID, "icloud").First(&root).Error; err != nil {
+			return fmt.Errorf("onboarding resource root changed: %w", ErrICloudResourceIdentity)
+		}
+		var existing iCloudResourceModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&existing, root.ID).Error; err != nil {
+			return fmt.Errorf("onboarding resource missing: %w", ErrICloudResourceIdentity)
+		}
+		if iCloudImportEmailKey(existing.PrimaryEmail) != iCloudImportEmailKey(locked.PrimaryEmail) || existing.Status == iCloudResourceDeleted {
+			return fmt.Errorf("onboarding resource identity changed: %w", ErrICloudResourceIdentity)
+		}
+		resourceID = existing.ID
+		if existing.AccountRole == "unknown" {
 			credentialRevision := existing.CredentialRevision + 1
 			if credentialRevision < 2 {
 				credentialRevision = 2
@@ -1164,7 +1121,7 @@ func (s *Service) importICloudOnboardingResource(ctx context.Context, task *iClo
 				"bound_phone_source": locked.BoundPhoneSource, "kitesim_phone_id": locked.KitesimPhoneID,
 				"family_invite_url":   locked.FamilyInviteURL,
 				"selected_forward_to": preparation.ForwardToEmail, "required_forward_to": preparation.ForwardToEmail,
-				"expire_at": batch.ResourceExpireAt, "for_sale": false,
+				"for_sale":            false,
 				"credential_revision": credentialRevision, "credential_updated_at": now,
 				"validation_generation": validationGeneration, "validation_failures": 0,
 				"alias_count": 0, "last_alias_sync_at": nil, "alias_provision_candidate": "", "alias_provision_reconcile": false,
@@ -1184,18 +1141,48 @@ func (s *Service) importICloudOnboardingResource(ctx context.Context, task *iClo
 			if updated.RowsAffected != 1 {
 				return ErrICloudResourceIdentity
 			}
-			rootUpdated := tx.Model(&iCloudRootModel{}).Where("id = ? AND version = ?", root.ID, root.Version).
-				Updates(map[string]any{"version": gorm.Expr("version + 1"), "updated_at": now})
-			if rootUpdated.Error != nil {
-				return rootUpdated.Error
-			}
-			if rootUpdated.RowsAffected != 1 {
-				return ErrICloudImportClaim
-			}
 			if err := tx.Model(&iCloudAliasModel{}).Where("resource_id = ? AND status <> ?", existing.ID, iCloudResourceDeleted).
 				Updates(map[string]any{"status": "missing", "updated_at": now}).Error; err != nil {
 				return err
 			}
+		} else {
+			if existing.AccountRole != locked.AccountRole {
+				return fmt.Errorf("onboarding resource role changed: %w", ErrICloudResourceIdentity)
+			}
+			updates := map[string]any{
+				"family_primary_resource_id": locked.FamilyPrimaryResourceID,
+				"region":                     locked.Region, "country_code": locked.CountryCode, "icloud_opened": locked.ICloudOpened,
+				"bound_phone_number": locked.BoundPhoneNumber, "bound_phone_country_code": locked.BoundPhoneCountryCode,
+				"bound_phone_source": locked.BoundPhoneSource, "kitesim_phone_id": locked.KitesimPhoneID,
+				"family_invite_url":   locked.FamilyInviteURL,
+				"selected_forward_to": preparation.ForwardToEmail, "required_forward_to": preparation.ForwardToEmail,
+				"for_sale":            false,
+				"validation_failures": 0, "next_validation_at": nil, "next_provision_at": nil,
+				"last_safe_error": "", "updated_at": now,
+			}
+			if existing.Status != iCloudResourceDisabled {
+				updates["status"] = iCloudResourcePending
+				if !waitingFamilyReset {
+					updates["next_validation_at"] = now
+					validationReady = true
+				}
+			}
+			updated := tx.Model(&iCloudResourceModel{}).
+				Where("id = ? AND account_role = ?", existing.ID, locked.AccountRole).Updates(updates)
+			if updated.Error != nil {
+				return updated.Error
+			}
+			if updated.RowsAffected != 1 {
+				return ErrICloudResourceIdentity
+			}
+		}
+		rootUpdated := tx.Model(&iCloudRootModel{}).Where("id = ? AND version = ?", root.ID, root.Version).
+			Updates(map[string]any{"version": gorm.Expr("version + 1"), "updated_at": now})
+		if rootUpdated.Error != nil {
+			return rootUpdated.Error
+		}
+		if rootUpdated.RowsAffected != 1 {
+			return ErrICloudImportClaim
 		}
 		answers, err := json.Marshal(secret.SecurityAnswers)
 		if err != nil {
@@ -1205,7 +1192,7 @@ func (s *Service) importICloudOnboardingResource(ctx context.Context, task *iClo
 			Columns:   []clause.Column{{Name: "resource_id"}},
 			DoUpdates: clause.AssignmentColumns([]string{"apple_password", "security_answers", "birthday", "updated_at"}),
 		}).Create(&iCloudResourceCredentialModel{
-			ResourceID: resourceID, ApplePassword: secret.Password, SecurityAnswers: answers,
+			ResourceID: resourceID, ApplePassword: secret.Password, SecurityAnswers: iCloudJSON(answers),
 			Birthday: birthday, CreatedAt: now, UpdatedAt: now,
 		}).Error; err != nil {
 			return err
@@ -1228,11 +1215,11 @@ func (s *Service) importICloudOnboardingResource(ctx context.Context, task *iClo
 			"last_error_category": "", "last_safe_error": "", "updated_at": now,
 		}
 		if waitingFamilyReset {
-			updates["status"] = iCloudOnboardingWaiting
+			updates["onboarding_status"] = iCloudOnboardingWaiting
 			updates["stage"] = "waiting_family_reset"
 			updates["dispatch_status"] = "waiting"
 		} else {
-			updates["status"] = iCloudOnboardingCompleted
+			updates["onboarding_status"] = iCloudOnboardingCompleted
 			updates["stage"] = "completed"
 			updates["dispatch_status"] = "succeeded"
 			updates["finished_at"] = now
@@ -1361,6 +1348,7 @@ func (s *Service) retryICloudOnboardingTask(ctx context.Context, task *iCloudOnb
 	for key, value := range extra {
 		updates[key] = value
 	}
+	omitICloudOldCookieSafeError(task, updates)
 	if retryAt != nil {
 		updates["stage"] = stage
 		return s.waitICloudOnboardingTaskWithUpdates(ctx, task, retryAt, "pending", message, updates)
@@ -1371,12 +1359,13 @@ func (s *Service) retryICloudOnboardingTask(ctx context.Context, task *iCloudOnb
 func (s *Service) advanceICloudOnboardingTask(ctx context.Context, task *iCloudOnboardingTaskModel, stage string, nextAttempt *time.Time, extra map[string]any) error {
 	now := s.now().UTC().Truncate(time.Millisecond)
 	updates := map[string]any{
-		"status": iCloudOnboardingProcessing, "stage": stage, "dispatch_status": "pending", "claim_token": "",
+		"onboarding_status": iCloudOnboardingProcessing, "stage": stage, "dispatch_status": "pending", "claim_token": "",
 		"next_attempt_at": nextAttempt, "stage_attempts": 0, "last_error_category": "", "last_safe_error": "", "updated_at": now,
 	}
 	for key, value := range extra {
 		updates[key] = value
 	}
+	omitICloudOldCookieSafeError(task, updates)
 	result := s.db.WithContext(ctx).Model(&iCloudOnboardingTaskModel{}).
 		Where("id = ? AND generation = ? AND claim_token = ? AND dispatch_status = ?", task.ID, task.Generation, task.ClaimToken, "running").Updates(updates)
 	if result.Error != nil {
@@ -1397,12 +1386,13 @@ func (s *Service) waitICloudOnboardingTask(ctx context.Context, task *iCloudOnbo
 func (s *Service) waitICloudOnboardingTaskWithUpdates(ctx context.Context, task *iCloudOnboardingTaskModel, retryAt *time.Time, dispatch, message string, extra map[string]any) error {
 	now := s.now().UTC().Truncate(time.Millisecond)
 	updates := map[string]any{
-		"status": iCloudOnboardingWaiting, "dispatch_status": dispatch, "claim_token": "",
+		"onboarding_status": iCloudOnboardingWaiting, "dispatch_status": dispatch, "claim_token": "",
 		"next_attempt_at": retryAt, "last_safe_error": safeICloudImportMessage(message), "updated_at": now,
 	}
 	for key, value := range extra {
 		updates[key] = value
 	}
+	omitICloudOldCookieSafeError(task, updates)
 	result := s.db.WithContext(ctx).Model(&iCloudOnboardingTaskModel{}).
 		Where("id = ? AND generation = ? AND claim_token = ? AND dispatch_status = ?", task.ID, task.Generation, task.ClaimToken, "running").Updates(updates)
 	if result.Error != nil {
@@ -1420,7 +1410,7 @@ func (s *Service) waitICloudOnboardingTaskWithUpdates(ctx context.Context, task 
 
 func isICloudPostFamilyRecoveryTask(task *iCloudOnboardingTaskModel) bool {
 	if task == nil || firstNonEmpty(task.TaskKind, "onboarding") != "onboarding" || task.AccountRole != "child" ||
-		task.ResourceID != nil || task.FamilyPrimaryResourceID == nil {
+		task.FamilyPrimaryResourceID == nil {
 		return false
 	}
 	if task.FamilyReservationConfirmed || task.Stage == "family_join_apply" || task.Stage == "family_reconcile_prepare" {
@@ -1475,13 +1465,14 @@ func iCloudPostFamilyRecoveryStage(task iCloudOnboardingTaskModel) string {
 func (s *Service) waitICloudPostFamilyRecovery(ctx context.Context, task *iCloudOnboardingTaskModel, category, message string, attempts int, extra map[string]any) error {
 	now := s.now().UTC().Truncate(time.Millisecond)
 	updates := map[string]any{
-		"status": iCloudOnboardingWaiting, "dispatch_status": "waiting", "claim_token": "", "next_attempt_at": nil,
+		"onboarding_status": iCloudOnboardingWaiting, "dispatch_status": "waiting", "claim_token": "", "next_attempt_at": nil,
 		"attempts": min(attempts, task.MaxAttempts), "last_error_category": safeICloudImportMessage(category),
 		"last_safe_error": safeICloudImportMessage(message), "finished_at": nil, "updated_at": now,
 	}
 	for key, value := range extra {
 		updates[key] = value
 	}
+	omitICloudOldCookieSafeError(task, updates)
 	updated := false
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if task.FamilyPrimaryResourceID != nil && isICloudFamilyInviteFailure(category) {
@@ -1530,7 +1521,7 @@ func (s *Service) failICloudOnboardingTask(ctx context.Context, task *iCloudOnbo
 		result := tx.Model(&iCloudOnboardingTaskModel{}).
 			Where("id = ? AND generation = ? AND claim_token = ? AND dispatch_status = ?", task.ID, task.Generation, task.ClaimToken, "running").
 			Updates(map[string]any{
-				"status": iCloudOnboardingFailed, "dispatch_status": "failed", "claim_token": "", "next_attempt_at": nil,
+				"onboarding_status": iCloudOnboardingFailed, "dispatch_status": "failed", "claim_token": "", "next_attempt_at": nil,
 				"attempts":            min(task.Attempts+1, task.MaxAttempts),
 				"last_error_category": safeICloudImportMessage(category), "last_safe_error": safeICloudImportMessage(message),
 				"secret_payload": nil, "session_payload": nil, "manual_verification_code": "", "pending_sms_purpose": "",
@@ -1544,6 +1535,9 @@ func (s *Service) failICloudOnboardingTask(ctx context.Context, task *iCloudOnbo
 			return ErrICloudImportClaim
 		}
 		updated = true
+		if err := markICloudOnboardingResourceFailedTx(tx, task, message, now); err != nil {
+			return err
+		}
 		if task.ImportID != nil {
 			return releaseICloudAppleIDReservationTx(tx, iCloudAppleIDReservationOnboarding, *task.ImportID, task.PrimaryEmail)
 		}
@@ -1562,6 +1556,27 @@ func (s *Service) failICloudOnboardingTask(ctx context.Context, task *iCloudOnbo
 	return nil
 }
 
+func markICloudOnboardingResourceFailedTx(tx *gorm.DB, task *iCloudOnboardingTaskModel, message string, now time.Time) error {
+	if tx == nil || task == nil || firstNonEmpty(task.TaskKind, "onboarding") != "onboarding" || task.ResourceID == nil {
+		return nil
+	}
+	result := tx.Model(&iCloudResourceModel{}).
+		Where("id = ? AND (account_role = ? OR account_role = ?) AND status NOT IN ?", *task.ResourceID, task.AccountRole, "unknown", []string{iCloudResourceDisabled, iCloudResourceDeleted}).
+		Updates(map[string]any{
+			"status": iCloudResourceAbnormal, "for_sale": false,
+			"next_validation_at": nil, "next_provision_at": nil,
+			"last_safe_error": safeICloudImportMessage(message), "updated_at": now,
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil
+	}
+	return tx.Model(&iCloudRootModel{}).Where("id = ?", *task.ResourceID).
+		Updates(map[string]any{"version": gorm.Expr("version + 1"), "updated_at": now}).Error
+}
+
 func (s *Service) ReleaseICloudOnboardingTask(ctx context.Context, payload iCloudOnboardingTask, safeError string) error {
 	if s == nil || s.db == nil || payload.TaskID == 0 || payload.Generation == 0 {
 		return ErrICloudOnboardingTemporary
@@ -1575,7 +1590,7 @@ func (s *Service) releaseICloudOnboardingTask(ctx context.Context, payload iClou
 	var postFamilyRecovery *iCloudOnboardingTaskModel
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var task iCloudOnboardingTaskModel
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND generation = ? AND status IN ?", payload.TaskID, payload.Generation, []string{iCloudOnboardingProcessing, iCloudOnboardingWaiting}).First(&task).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND generation = ? AND onboarding_status IN ?", payload.TaskID, payload.Generation, []string{iCloudOnboardingProcessing, iCloudOnboardingWaiting}).First(&task).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return nil
 			}
@@ -1587,47 +1602,48 @@ func (s *Service) releaseICloudOnboardingTask(ctx context.Context, payload iClou
 		importID = iCloudOnboardingImportID(&task)
 		attempts := min(task.Attempts+1, task.MaxAttempts)
 		if attempts < task.MaxAttempts {
-			return tx.Model(&iCloudOnboardingTaskModel{}).Where("id = ? AND generation = ?", task.ID, task.Generation).Updates(map[string]any{
-				"status": iCloudOnboardingProcessing, "dispatch_status": "pending", "generation": task.Generation + 1,
+			updates := map[string]any{
+				"onboarding_status": iCloudOnboardingProcessing, "dispatch_status": "pending", "generation": task.Generation + 1,
 				"claim_token": "", "attempts": attempts, "next_attempt_at": now.Add(time.Second),
 				"last_safe_error": safeICloudImportMessage(safeError), "updated_at": now,
-			}).Error
+			}
+			omitICloudOldCookieSafeError(&task, updates)
+			return tx.Model(&iCloudOnboardingTaskModel{}).Where("id = ? AND generation = ?", task.ID, task.Generation).Updates(updates).Error
 		}
 		message := "Onboarding could not continue after repeated infrastructure failures."
 		if isICloudPostFamilyRecoveryTask(&task) {
 			stored := task
 			postFamilyRecovery = &stored
-			return tx.Model(&iCloudOnboardingTaskModel{}).Where("id = ? AND generation = ?", task.ID, task.Generation).Updates(map[string]any{
-				"status": iCloudOnboardingWaiting, "dispatch_status": "waiting", "claim_token": "", "attempts": attempts,
+			updates := map[string]any{
+				"onboarding_status": iCloudOnboardingWaiting, "dispatch_status": "waiting", "claim_token": "", "attempts": attempts,
 				"next_attempt_at": nil, "last_error_category": "infrastructure_retries_exhausted", "last_safe_error": message,
 				"finished_at": nil, "updated_at": now,
-			}).Error
+			}
+			omitICloudOldCookieSafeError(&task, updates)
+			return tx.Model(&iCloudOnboardingTaskModel{}).Where("id = ? AND generation = ?", task.ID, task.Generation).Updates(updates).Error
 		}
-		result := tx.Model(&iCloudOnboardingTaskModel{}).Where("id = ? AND generation = ?", task.ID, task.Generation).Updates(map[string]any{
-			"status": iCloudOnboardingFailed, "dispatch_status": "failed", "claim_token": "", "attempts": attempts,
+		updates := map[string]any{
+			"onboarding_status": iCloudOnboardingFailed, "dispatch_status": "failed", "claim_token": "", "attempts": attempts,
 			"next_attempt_at": nil, "last_error_category": "infrastructure_retries_exhausted", "last_safe_error": message,
 			"secret_payload": nil, "session_payload": nil, "manual_verification_code": "", "pending_sms_purpose": "",
 			"sms_sent_at": nil, "sms_poll_deadline": nil, "forward_preparation_id": nil,
 			"finished_at": now, "updated_at": now,
-		})
+		}
+		omitICloudOldCookieSafeError(&task, updates)
+		result := tx.Model(&iCloudOnboardingTaskModel{}).Where("id = ? AND generation = ?", task.ID, task.Generation).Updates(updates)
 		if result.Error != nil {
 			return result.Error
 		}
 		if result.RowsAffected != 1 {
 			return ErrICloudOnboardingTemporary
 		}
+		if err := markICloudOnboardingResourceFailedTx(tx, &task, message, now); err != nil {
+			return err
+		}
 		if task.TaskKind == "onboarding" && task.ImportID != nil {
 			if err := releaseICloudAppleIDReservationTx(tx, iCloudAppleIDReservationOnboarding, *task.ImportID, task.PrimaryEmail); err != nil {
 				return err
 			}
-		}
-		if task.TaskKind == "refresh" && task.ResourceID != nil && !isICloudOldCookieBackfill(&task) {
-			return tx.Model(&iCloudResourceModel{}).
-				Where("id = ? AND credential_revision = ? AND status NOT IN ?", *task.ResourceID, task.ExpectedCredentialRevision, []string{iCloudResourceDeleted, iCloudResourceDisabled}).
-				Updates(map[string]any{
-					"status": iCloudResourceAbnormal, "next_validation_at": nil, "next_provision_at": nil,
-					"last_safe_error": message, "updated_at": now,
-				}).Error
 		}
 		return nil
 	})
@@ -1646,51 +1662,18 @@ func (s *Service) releaseICloudOnboardingTask(ctx context.Context, payload iClou
 func iCloudOnboardingLeaseExpired(task iCloudOnboardingTaskModel, now time.Time) bool {
 	switch task.DispatchStatus {
 	case "queued":
-		return !task.UpdatedAt.After(now.Add(-iCloudOnboardingQueueLease))
+		return task.NextAttemptAt != nil && !task.NextAttemptAt.After(now.Add(-iCloudOnboardingQueueLease))
 	case "running":
-		return task.StartedAt != nil && !task.UpdatedAt.After(now.Add(-iCloudOnboardingRunningLease))
+		return task.StartedAt != nil && !task.StartedAt.After(now.Add(-iCloudOnboardingRunningLease))
 	default:
 		return false
 	}
 }
 
-func (s *Service) refreshICloudOnboardingImport(ctx context.Context, importID uint) error {
-	if importID == 0 {
-		return nil
-	}
-	var counts struct {
-		Accepted  int `gorm:"column:accepted"`
-		Completed int `gorm:"column:completed"`
-		Failed    int `gorm:"column:failed"`
-		Waiting   int `gorm:"column:waiting"`
-	}
-	if err := s.db.WithContext(ctx).Model(&iCloudOnboardingTaskModel{}).
-		Select(`COUNT(*) AS accepted,
-			SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed,
-			SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
-			SUM(CASE WHEN status = 'waiting' THEN 1 ELSE 0 END) AS waiting`).
-		Where("import_id = ?", importID).Scan(&counts).Error; err != nil {
-		return ErrICloudOnboardingTemporary
-	}
-	status := iCloudOnboardingProcessing
-	if counts.Completed+counts.Failed == counts.Accepted && counts.Accepted > 0 {
-		switch {
-		case counts.Failed == 0:
-			status = "completed"
-		case counts.Completed == 0:
-			status = "failed"
-		default:
-			status = "partial"
-		}
-	}
-	return s.db.WithContext(ctx).Model(&iCloudOnboardingImportModel{}).
-		Where(`id = ? AND (
-			status <> ? OR accepted_count <> ? OR completed_count <> ? OR failed_count <> ? OR waiting_count <> ?
-		)`, importID, status, counts.Accepted, counts.Completed, counts.Failed, counts.Waiting).
-		Updates(map[string]any{
-			"status": status, "accepted_count": counts.Accepted, "completed_count": counts.Completed,
-			"failed_count": counts.Failed, "waiting_count": counts.Waiting, "updated_at": s.now().UTC().Truncate(time.Millisecond),
-		}).Error
+func (s *Service) refreshICloudOnboardingImport(context.Context, uint) error {
+	// Batch summaries are derived on read from icloud_resources. There is no
+	// mutable import row to refresh.
+	return nil
 }
 
 func (s *Service) SubmitICloudOnboardingSMSCode(ctx context.Context, taskID, operatorUserID uint, code, requestID, pathValue string) error {
@@ -1705,7 +1688,7 @@ func (s *Service) SubmitICloudOnboardingSMSCode(ctx context.Context, taskID, ope
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var task iCloudOnboardingTaskModel
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("id = ? AND status = ? AND dispatch_status = ? AND stage = ? AND kitesim_phone_id IS NULL", taskID, iCloudOnboardingWaiting, "waiting", "sms_wait").
+			Where("id = ? AND onboarding_status = ? AND dispatch_status = ? AND stage = ? AND kitesim_phone_id IS NULL", taskID, iCloudOnboardingWaiting, "waiting", "sms_wait").
 			First(&task).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrICloudOnboardingInvalid
@@ -1717,12 +1700,14 @@ func (s *Service) SubmitICloudOnboardingSMSCode(ctx context.Context, taskID, ope
 				return err
 			}
 		}
+		updates := map[string]any{
+			"manual_verification_code": code, "onboarding_status": iCloudOnboardingProcessing, "dispatch_status": "pending",
+			"generation": gorm.Expr("generation + 1"), "next_attempt_at": now, "last_safe_error": "", "updated_at": now,
+		}
+		omitICloudOldCookieSafeError(&task, updates)
 		result := tx.Model(&iCloudOnboardingTaskModel{}).
-			Where("id = ? AND status = ? AND dispatch_status = ? AND stage = ? AND kitesim_phone_id IS NULL", taskID, iCloudOnboardingWaiting, "waiting", "sms_wait").
-			Updates(map[string]any{
-				"manual_verification_code": code, "status": iCloudOnboardingProcessing, "dispatch_status": "pending",
-				"generation": gorm.Expr("generation + 1"), "next_attempt_at": now, "last_safe_error": "", "updated_at": now,
-			})
+			Where("id = ? AND onboarding_status = ? AND dispatch_status = ? AND stage = ? AND kitesim_phone_id IS NULL", taskID, iCloudOnboardingWaiting, "waiting", "sms_wait").
+			Updates(updates)
 		if result.Error != nil {
 			return result.Error
 		}
@@ -1778,7 +1763,7 @@ func (s *Service) ConfirmICloudOnboardingFamilyReset(ctx context.Context, taskID
 			return err
 		}
 		if err := tx.Model(&iCloudOnboardingTaskModel{}).Where("id = ?", task.ID).Updates(map[string]any{
-			"status": iCloudOnboardingCompleted, "stage": "completed", "dispatch_status": "succeeded",
+			"onboarding_status": iCloudOnboardingCompleted, "stage": "completed", "dispatch_status": "succeeded",
 			"forward_preparation_id": nil, "last_safe_error": "", "finished_at": now, "updated_at": now,
 		}).Error; err != nil {
 			return err
@@ -1863,7 +1848,7 @@ func (s *Service) RetryICloudOnboardingPostFamily(
 		challengeTask = &stored
 		generation := task.Generation + 1
 		updates := map[string]any{
-			"status": iCloudOnboardingProcessing, "stage": stage, "dispatch_status": "pending", "generation": generation,
+			"onboarding_status": iCloudOnboardingProcessing, "stage": stage, "dispatch_status": "pending", "generation": generation,
 			"claim_token": "", "attempts": 0, "stage_attempts": 0, "next_attempt_at": now,
 			"manual_verification_code": "", "pending_sms_purpose": "", "sms_sent_at": nil, "sms_poll_deadline": nil,
 			"last_error_category": "", "last_safe_error": "", "finished_at": nil, "updated_at": now,
@@ -1939,12 +1924,14 @@ func (s *Service) ConfirmICloudOnboardingActivation(ctx context.Context, taskID,
 			task.BoundPhoneSource != "manual" {
 			nextStage = "family_select"
 		}
-		if err := tx.Model(&iCloudOnboardingTaskModel{}).Where("id = ?", task.ID).Updates(map[string]any{
-			"status": iCloudOnboardingProcessing, "stage": nextStage, "dispatch_status": "pending",
+		updates := map[string]any{
+			"onboarding_status": iCloudOnboardingProcessing, "stage": nextStage, "dispatch_status": "pending",
 			"generation": task.Generation + 1, "claim_token": "", "session_payload": nil,
 			"icloud_activation_confirmed_at": now,
 			"next_attempt_at":                now, "last_error_category": "", "last_safe_error": "", "updated_at": now,
-		}).Error; err != nil {
+		}
+		omitICloudOldCookieSafeError(&task, updates)
+		if err := tx.Model(&iCloudOnboardingTaskModel{}).Where("id = ?", task.ID).Updates(updates).Error; err != nil {
 			return err
 		}
 		if s.operationLogs == nil {

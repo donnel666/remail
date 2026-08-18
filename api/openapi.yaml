@@ -20826,6 +20826,7 @@ components:
             - credentialUpdatedAt
             - validationGeneration
             - validationFailures
+            - onboardingTask
             - refreshTask
           properties:
             aliasLimit:
@@ -20852,6 +20853,10 @@ components:
             validationFailures:
               type: integer
               minimum: 0
+            onboardingTask:
+              allOf:
+                - $ref: "#/components/schemas/AdminICloudOnboardingTask"
+              nullable: true
             refreshTask:
               allOf:
                 - $ref: "#/components/schemas/AdminICloudOnboardingTask"

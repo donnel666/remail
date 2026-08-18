@@ -2577,47 +2577,58 @@ export function ICloudDetailSheet({
                     {item.lastSafeError}
                   </div>
                 ) : null}
-                {item.refreshTask ? (
-                  <div className="border-t border-[var(--semi-color-border)] pt-4">
-                    <div className="mb-3 text-sm font-semibold text-[var(--semi-color-text-0)]">
-                      {t("Cookie refresh task")}
-                    </div>
-                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                      <InfoItem
-                        label={t("Status")}
-                        value={onboardingTaskStatusTag(item.refreshTask, t)}
-                      />
-                      <InfoItem
-                        label={t("Stage")}
-                        value={<code className="break-all text-xs">{item.refreshTask.stage}</code>}
-                      />
-                      <InfoItem
-                        label={t("Bound phone")}
-                        value={item.refreshTask.boundPhoneNumber || item.boundPhoneNumber || "-"}
-                      />
-                      <InfoItem
-                        label={t("Next attempt")}
-                        value={formatTime(item.refreshTask.nextAttemptAt)}
-                      />
-                    </div>
-                    {item.refreshTask.lastSafeError ? (
-                      <div className="mt-3 text-sm text-[var(--semi-color-warning)]">
-                        {item.refreshTask.lastSafeError}
+                {[
+                  { task: item.onboardingTask, title: t("Automatic Apple onboarding") },
+                  { task: item.refreshTask, title: t("Cookie refresh task") },
+                ].map(({ task, title }) =>
+                  task ? (
+                    <div
+                      className="border-t border-[var(--semi-color-border)] pt-4"
+                      key={title}
+                    >
+                      <div className="mb-3 text-sm font-semibold text-[var(--semi-color-text-0)]">
+                        {title}
                       </div>
-                    ) : null}
-                    {item.refreshTask.needsManualCode || item.refreshTask.needsICloudActivation || item.refreshTask.needsFamilyReset || item.refreshTask.needsPostFamilyRecovery ? (
-                      <div className="mt-3">
-                        <ICloudOnboardingTaskAction
-                          disabled={!canOperate}
-                          onChanged={async () => {
-                            await onRefresh();
-                          }}
-                          task={item.refreshTask}
+                      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                        <InfoItem
+                          label={t("Status")}
+                          value={onboardingTaskStatusTag(task, t)}
+                        />
+                        <InfoItem
+                          label={t("Stage")}
+                          value={
+                            <code className="break-all text-xs">{task.stage}</code>
+                          }
+                        />
+                        <InfoItem
+                          label={t("Bound phone")}
+                          value={task.boundPhoneNumber || item.boundPhoneNumber || "-"}
+                        />
+                        <InfoItem
+                          label={t("Next attempt")}
+                          value={formatTime(task.nextAttemptAt)}
                         />
                       </div>
-                    ) : null}
-                  </div>
-                ) : null}
+                      {task.lastSafeError ? (
+                        <div className="mt-3 text-sm text-[var(--semi-color-warning)]">
+                          {task.lastSafeError}
+                        </div>
+                      ) : null}
+                      {task.needsManualCode ||
+                      task.needsICloudActivation ||
+                      task.needsFamilyReset ||
+                      task.needsPostFamilyRecovery ? (
+                        <div className="mt-3">
+                          <ICloudOnboardingTaskAction
+                            disabled={!canOperate}
+                            onChanged={onRefresh}
+                            task={task}
+                          />
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null,
+                )}
               </div>
             ) : null}
 
@@ -2948,11 +2959,12 @@ export default function AdminICloudEmails() {
   }, []);
 
   useEffect(() => {
-    const refreshTaskActive =
-      detail?.refreshTask?.status === "processing" || detail?.refreshTask?.status === "waiting";
+    const automationTaskActive = [detail?.onboardingTask, detail?.refreshTask].some(
+      (task) => task?.status === "processing" || task?.status === "waiting",
+    );
     if (
       detailId === null ||
-      (!refreshTaskActive &&
+      (!automationTaskActive &&
         detail?.status !== "pending" &&
         detail?.status !== "validating" &&
         (detail?.status !== "normal" ||
@@ -2977,6 +2989,7 @@ export default function AdminICloudEmails() {
     };
   }, [
     detail?.newSession?.status,
+    detail?.onboardingTask?.status,
     detail?.oldSession?.status,
     detail?.refreshTask?.status,
     detail?.status,
@@ -3989,7 +4002,11 @@ export default function AdminICloudEmails() {
           />
         }
         onCancel={() => setImportOpen(false)}
-        onChanged={refresh}
+        onChanged={async () => {
+          setActivePage(1);
+          setSelectedKeys([]);
+          await refresh();
+        }}
         owners={importOwners}
         visible={importOpen && importFlowMode === "automatic" && canAutomaticImport}
       />

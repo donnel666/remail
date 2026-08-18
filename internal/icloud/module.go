@@ -210,8 +210,40 @@ type iCloudResourceModel struct {
 	LastAliasSyncAt         *time.Time `gorm:"column:last_alias_sync_at"`
 	LastAllocatedAt         *time.Time `gorm:"column:last_allocated_at"`
 	LastSafeError           string     `gorm:"column:last_safe_error"`
-	CreatedAt               time.Time  `gorm:"column:created_at"`
-	UpdatedAt               time.Time  `gorm:"column:updated_at"`
+	// Onboarding state lives on the resource row. Redis/Asynq only carries the
+	// resource id and generation; this is the durable source of truth.
+	WorkflowImportID             *uint      `gorm:"column:import_id"`
+	WorkflowResourceID           *uint      `gorm:"column:resource_id"`
+	WorkflowTaskKind             string     `gorm:"column:task_kind"`
+	WorkflowLineNumber           int        `gorm:"column:line_number"`
+	WorkflowFamilyReservation    bool       `gorm:"column:family_reservation_confirmed"`
+	WorkflowSecretPayload        iCloudJSON `gorm:"column:secret_payload;type:json;serializer:json"`
+	WorkflowSessionPayload       iCloudJSON `gorm:"column:session_payload;type:json;serializer:json"`
+	WorkflowManualCode           string     `gorm:"column:manual_verification_code"`
+	WorkflowSMSPurpose           string     `gorm:"column:pending_sms_purpose"`
+	WorkflowSMSSentAt            *time.Time `gorm:"column:sms_sent_at"`
+	WorkflowSMSPollDeadline      *time.Time `gorm:"column:sms_poll_deadline"`
+	WorkflowForwardPreparationID *uint      `gorm:"column:forward_preparation_id"`
+	OnboardingStatus             string     `gorm:"column:onboarding_status"`
+	WorkflowStage                string     `gorm:"column:stage"`
+	WorkflowDispatchStatus       string     `gorm:"column:dispatch_status"`
+	WorkflowGeneration           uint64     `gorm:"column:generation"`
+	WorkflowExpectedCredential   uint64     `gorm:"column:expected_credential_revision"`
+	WorkflowClaimToken           string     `gorm:"column:claim_token"`
+	WorkflowAttempts             int        `gorm:"column:attempts"`
+	WorkflowMaxAttempts          int        `gorm:"column:max_attempts"`
+	WorkflowStageAttempts        int        `gorm:"column:stage_attempts"`
+	WorkflowNextAttemptAt        *time.Time `gorm:"column:next_attempt_at"`
+	WorkflowLastErrorCategory    string     `gorm:"column:last_error_category"`
+	WorkflowStartedAt            *time.Time `gorm:"column:started_at"`
+	WorkflowFinishedAt           *time.Time `gorm:"column:finished_at"`
+	WorkflowActivationConfirmed  *time.Time `gorm:"column:icloud_activation_confirmed_at"`
+	WorkflowOperatorUserID       uint       `gorm:"column:onboarding_operator_user_id"`
+	WorkflowRequestID            string     `gorm:"column:onboarding_request_id"`
+	WorkflowIdempotencyKey       string     `gorm:"column:onboarding_idempotency_key"`
+	WorkflowRequestFingerprint   string     `gorm:"column:onboarding_request_fingerprint"`
+	CreatedAt                    time.Time  `gorm:"column:created_at"`
+	UpdatedAt                    time.Time  `gorm:"column:updated_at"`
 }
 
 func (iCloudResourceModel) TableName() string { return "icloud_resources" }

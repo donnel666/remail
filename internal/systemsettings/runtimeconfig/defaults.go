@@ -3,7 +3,7 @@ package runtimeconfig
 import "github.com/donnel666/remail/internal/systemsettings/domain"
 
 const (
-	DefaultSettingsCount                         = 248
+	DefaultSettingsCount                         = 249
 	SMSBowerNoCodeRefundTimeoutMinutesKey        = "smsbower_no_code_refund_timeout_minutes"
 	MicrosoftPriceMultiplierKey                  = "product_price_multiplier_microsoft"
 	GmailPriceMultiplierKey                      = "product_price_multiplier_gmail"
@@ -18,6 +18,7 @@ const (
 	ICloudPhoneCooldownMaxSecondsKey             = "icloud_phone_cooldown_max_seconds"
 	ICloudPhoneSendFailureThresholdKey           = "icloud_phone_send_failure_threshold"
 	ICloudPhoneBlacklistHoursKey                 = "icloud_phone_blacklist_hours"
+	ICloudOnboardingMaxAttemptsKey               = "icloud_onboarding_max_attempts"
 	DomainSaleTLDWhitelistKey                    = "domain_sale_tld_whitelist"
 	DomainSaleQualityMinOrdersKey                = "domain_sale_quality_min_orders"
 	DomainSaleQualityMinSuccessPercentKey        = "domain_sale_quality_min_success_percent"
@@ -131,6 +132,7 @@ var defaultSettings = []domain.Setting{
 	{Key: "icloud_phone_cooldown_max_seconds", Value: "120"},
 	{Key: "icloud_phone_send_failure_threshold", Value: "3"},
 	{Key: "icloud_phone_blacklist_hours", Value: "24"},
+	{Key: "icloud_onboarding_max_attempts", Value: "5"},
 	{Key: "domain_custom_tlds", Value: ""},
 	{Key: "domain_sale_tld_whitelist", Value: DefaultDomainSaleTLDWhitelist},
 	{Key: "domain_sale_quality_min_orders", Value: "100"},

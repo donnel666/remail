@@ -71,6 +71,18 @@ func (p *refreshCountingApple) Execute(context.Context, AppleOnboardingRequest) 
 	return AppleOnboardingResponse{}, errors.New("unexpected Apple call")
 }
 
+type refreshMutatingApple struct {
+	mutate   func()
+	response AppleOnboardingResponse
+}
+
+func (p *refreshMutatingApple) Execute(context.Context, AppleOnboardingRequest) (AppleOnboardingResponse, error) {
+	if p.mutate != nil {
+		p.mutate()
+	}
+	return p.response, nil
+}
+
 type oldCookieBackfillApple struct {
 	calls    int
 	request  AppleOnboardingRequest
@@ -108,7 +120,6 @@ func newICloudRefreshTestDB(t *testing.T) *gorm.DB {
 	}
 	if err := db.AutoMigrate(
 		&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudResourceChannelModel{}, &iCloudResourceCredentialModel{},
-		&iCloudOnboardingImportModel{}, &iCloudOnboardingTaskModel{},
 		&governanceinfra.OperationLogModel{}, &coreinfra.AdminResourceCommandReceiptModel{},
 	); err != nil {
 		t.Fatal(err)
@@ -175,7 +186,9 @@ func TestApplyAdminICloudActivationQueuesForcedOldCookieRefresh(t *testing.T) {
 	now := time.Date(2026, 8, 17, 8, 0, 0, 0, time.UTC)
 	db := newICloudRefreshTestDB(t)
 	resource := seedICloudRefreshResource(t, db, now)
-	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", resource.ID).Update("icloud_opened", false).Error; err != nil {
+	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", resource.ID).Updates(map[string]any{
+		"icloud_opened": false, "status": iCloudResourceNormal, "for_sale": true, "last_safe_error": "healthy",
+	}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Where("resource_id = ? AND kind = ?", resource.ID, iCloudChannelWeb).Delete(&iCloudResourceChannelModel{}).Error; err != nil {
@@ -201,14 +214,14 @@ func TestApplyAdminICloudActivationQueuesForcedOldCookieRefresh(t *testing.T) {
 	if err := db.First(&stored, resource.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if stored.ICloudOpened {
-		t.Fatal("resource was marked open before the old Cookie was exported")
+	if stored.ICloudOpened || stored.Status != iCloudResourceNormal || !stored.ForSale || stored.LastSafeError != "healthy" {
+		t.Fatalf("resource state changed while queuing old Cookie backfill: %+v", stored)
 	}
 	var tasks []iCloudOnboardingTaskModel
 	if err := db.Where("task_kind = ? AND resource_id = ?", "refresh", resource.ID).Find(&tasks).Error; err != nil {
 		t.Fatal(err)
 	}
-	if len(tasks) != 1 || tasks[0].Stage != "old_cookie_prepare" || tasks[0].PendingSMSPurpose != appleSMSOldCookieLogin || !tasks[0].ICloudOpened {
+	if len(tasks) != 1 || tasks[0].Stage != "old_cookie_prepare" || tasks[0].PendingSMSPurpose != appleSMSOldCookieLogin || tasks[0].ICloudOpened {
 		t.Fatalf("forced refresh task = %+v", tasks)
 	}
 
@@ -361,6 +374,43 @@ func TestICloudOldCookieBackfillFailuresDoNotMarkHealthyResourceAbnormal(t *test
 	}
 }
 
+func TestICloudOldCookieBackfillSelfRowFailurePreservesResourceSafeError(t *testing.T) {
+	now := time.Date(2026, 8, 17, 8, 25, 0, 0, time.UTC)
+	db := newICloudRefreshTestDB(t)
+	resource := seedICloudRefreshResource(t, db, now)
+	secret, _ := json.Marshal(iCloudOnboardingSecret{Password: "Secret1!", Birthday: "2000-11-02"})
+	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", resource.ID).Updates(map[string]any{
+		"status": iCloudResourceNormal, "for_sale": true, "last_safe_error": "healthy",
+		"task_kind": "refresh", "resource_id": resource.ID, "pending_sms_purpose": appleSMSOldCookieLogin,
+		"onboarding_status": iCloudOnboardingProcessing, "stage": "old_cookie_prepare", "dispatch_status": "pending",
+		"generation": uint64(1), "expected_credential_revision": resource.CredentialRevision,
+		"secret_payload": iCloudJSON(secret), "max_attempts": 2, "updated_at": now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	service.onboardingApple = &oldCookieBackfillApple{err: &AppleOnboardingError{
+		Category: "provider_rejected", SafeMessage: "Apple rejected the request.",
+	}}
+	if err := service.ProcessICloudOnboardingTask(context.Background(), iCloudOnboardingTask{TaskID: resource.ID, Generation: 1}); err != nil {
+		t.Fatal(err)
+	}
+
+	var stored iCloudResourceModel
+	if err := db.First(&stored, resource.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != iCloudResourceNormal || !stored.ForSale || stored.LastSafeError != "healthy" {
+		t.Fatalf("resource state changed after self-row backfill failure: %+v", stored)
+	}
+	if stored.OnboardingStatus != iCloudOnboardingFailed || stored.WorkflowLastErrorCategory != "provider_rejected" ||
+		len(stored.WorkflowSecretPayload) != 0 || len(stored.WorkflowSessionPayload) != 0 || stored.WorkflowSMSPurpose != "" {
+		t.Fatalf("self-row backfill workflow = %+v", stored)
+	}
+}
+
 func TestICloudOldCookieSMSRecoveryKeepsBackfillMarker(t *testing.T) {
 	now := time.Date(2026, 8, 17, 8, 30, 0, 0, time.UTC)
 	db := newICloudRefreshTestDB(t)
@@ -383,22 +433,21 @@ func TestICloudOldCookieSMSRecoveryKeepsBackfillMarker(t *testing.T) {
 	}
 }
 
-func TestEnsureICloudCookieRefreshRejectsUnrelatedInsertConflict(t *testing.T) {
+func TestEnsureICloudCookieRefreshUpdatesTheResourceWorkflowRow(t *testing.T) {
 	now := time.Date(2026, 8, 16, 12, 5, 0, 0, time.UTC)
 	db := newICloudRefreshTestDB(t)
 	resource := seedICloudRefreshResource(t, db, now)
-	if err := db.Exec(`CREATE TRIGGER ignore_refresh_insert BEFORE INSERT ON icloud_account_onboarding_tasks
-		BEGIN SELECT RAISE(IGNORE); END`).Error; err != nil {
-		t.Fatal(err)
-	}
 	service := NewService(db, nil, nil)
 	service.now = func() time.Time { return now }
-	if err := service.EnsureICloudCookieRefresh(context.Background(), resource.ID); !errors.Is(err, ErrICloudOnboardingTemporary) {
-		t.Fatalf("unrelated ignored insert error = %v", err)
+	if err := service.EnsureICloudCookieRefresh(context.Background(), resource.ID); err != nil {
+		t.Fatalf("resource workflow update error = %v", err)
 	}
-	var count int64
-	if err := db.Model(&iCloudOnboardingTaskModel{}).Count(&count).Error; err != nil || count != 0 {
-		t.Fatalf("refresh tasks=%d err=%v", count, err)
+	var stored iCloudResourceModel
+	if err := db.First(&stored, resource.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.WorkflowTaskKind != "refresh" || stored.OnboardingStatus != iCloudOnboardingProcessing || stored.WorkflowResourceID == nil || *stored.WorkflowResourceID != resource.ID {
+		t.Fatalf("unexpected resource workflow: %+v", stored)
 	}
 }
 
@@ -671,6 +720,12 @@ func TestICloudCookieRefreshAtomicallyReplacesChannels(t *testing.T) {
 	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
 	db := newICloudRefreshTestDB(t)
 	resource := seedICloudRefreshResource(t, db, now)
+	nextProvisionAt := now.Add(15 * time.Minute)
+	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", resource.ID).Updates(map[string]any{
+		"status": iCloudResourceNormal, "for_sale": true, "next_provision_at": nextProvisionAt,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
 	secret, _ := json.Marshal(iCloudOnboardingSecret{
 		Password: "Secret1!", Birthday: "2000-11-02",
 		SecurityAnswers: [3]iCloudSecurityAnswer{{Question: "q1", Answer: "a1"}, {Question: "q2", Answer: "a2"}, {Question: "q3", Answer: "a3"}},
@@ -707,12 +762,128 @@ func TestICloudCookieRefreshAtomicallyReplacesChannels(t *testing.T) {
 	if err := db.First(&storedResource, resource.ID).Error; err != nil || storedResource.ValidationGeneration != resource.ValidationGeneration+1 || storedResource.NextValidationAt == nil {
 		t.Fatalf("resource validation was not requeued: %+v err=%v", storedResource, err)
 	}
+	if storedResource.Status != iCloudResourceNormal || !storedResource.ForSale || storedResource.NextProvisionAt == nil || !storedResource.NextProvisionAt.Equal(nextProvisionAt) {
+		t.Fatalf("refresh changed resource availability: %+v", storedResource)
+	}
 }
 
-func TestICloudRefreshInfrastructureRetriesMarkResourceAbnormal(t *testing.T) {
+func TestICloudRefreshRejectsResourceChangedAfterAppleCall(t *testing.T) {
+	now := time.Date(2026, 8, 17, 9, 0, 0, 0, time.UTC)
+	db := newICloudRefreshTestDB(t)
+	resource := seedICloudRefreshResource(t, db, now)
+	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", resource.ID).Updates(map[string]any{"status": iCloudResourceNormal, "for_sale": true}).Error; err != nil {
+		t.Fatal(err)
+	}
+	secret, _ := json.Marshal(iCloudOnboardingSecret{Password: "Secret1!", Birthday: "2000-11-02"})
+	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", resource.ID).Updates(map[string]any{
+		"resource_id": resource.ID, "task_kind": "refresh", "onboarding_status": iCloudOnboardingProcessing,
+		"stage": "resource_refresh", "dispatch_status": "pending", "generation": uint64(1),
+		"expected_credential_revision": resource.CredentialRevision, "secret_payload": iCloudJSON(secret), "max_attempts": 5,
+		"updated_at": now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	var task iCloudOnboardingTaskModel
+	if err := db.First(&task, resource.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	provider := &refreshMutatingApple{
+		mutate: func() {
+			if err := db.Model(&iCloudResourceModel{}).Where("id = ?", resource.ID).Update("bound_phone_number", "15488768537").Error; err != nil {
+				panic(err)
+			}
+		},
+		response: AppleOnboardingResponse{
+			CountryCode: "US",
+			NewChannel:  &AppleOnboardingChannel{Kind: iCloudChannelAppleAccount, Host: "appleid.apple.com", Cookie: "myacinfo=should-not-save"},
+			OldChannel:  &AppleOnboardingChannel{Kind: iCloudChannelWeb, Host: "p1-maildomainws.icloud.com", Cookie: "X-APPLE-WEBAUTH-TOKEN=should-not-save"},
+		},
+	}
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	service.onboardingApple = provider
+	if err := service.ProcessICloudOnboardingTask(context.Background(), iCloudOnboardingTask{TaskID: task.ID, Generation: task.Generation}); err != nil {
+		t.Fatal(err)
+	}
+	var storedTask iCloudOnboardingTaskModel
+	if err := db.First(&storedTask, task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if storedTask.Status != iCloudOnboardingFailed || storedTask.LastErrorCategory != "refresh_stale" {
+		t.Fatalf("stale refresh task = %+v", storedTask)
+	}
+	var channel iCloudResourceChannelModel
+	if err := db.Where("resource_id = ? AND kind = ?", resource.ID, iCloudChannelAppleAccount).First(&channel).Error; err != nil {
+		t.Fatal(err)
+	}
+	if channel.Cookie != "expired" {
+		t.Fatalf("stale refresh wrote a cookie: %+v", channel)
+	}
+}
+
+func TestICloudOldCookieBackfillRejectsResourceChangedAfterAppleCall(t *testing.T) {
+	now := time.Date(2026, 8, 17, 9, 5, 0, 0, time.UTC)
+	db := newICloudRefreshTestDB(t)
+	resource := seedICloudRefreshResource(t, db, now)
+	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", resource.ID).Updates(map[string]any{"status": iCloudResourceNormal, "for_sale": true}).Error; err != nil {
+		t.Fatal(err)
+	}
+	secret, _ := json.Marshal(iCloudOnboardingSecret{Password: "Secret1!", Birthday: "2000-11-02"})
+	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", resource.ID).Updates(map[string]any{
+		"resource_id": resource.ID, "task_kind": "refresh", "onboarding_status": iCloudOnboardingProcessing,
+		"stage": "old_cookie_finish", "dispatch_status": "pending", "generation": uint64(1),
+		"expected_credential_revision": resource.CredentialRevision, "secret_payload": iCloudJSON(secret),
+		"pending_sms_purpose": appleSMSOldCookieLogin, "max_attempts": 5, "updated_at": now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	var task iCloudOnboardingTaskModel
+	if err := db.First(&task, resource.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	provider := &refreshMutatingApple{
+		mutate: func() {
+			if err := db.Model(&iCloudResourceModel{}).Where("id = ?", resource.ID).Update("kitesim_phone_id", 8).Error; err != nil {
+				panic(err)
+			}
+		},
+		response: AppleOnboardingResponse{
+			ICloudOpened: func() *bool { opened := true; return &opened }(),
+			OldChannel:   &AppleOnboardingChannel{Kind: iCloudChannelWeb, Host: "p1-maildomainws.icloud.com", Cookie: "should-not-save"},
+		},
+	}
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	service.onboardingApple = provider
+	if err := service.ProcessICloudOnboardingTask(context.Background(), iCloudOnboardingTask{TaskID: task.ID, Generation: task.Generation}); err != nil {
+		t.Fatal(err)
+	}
+	var storedTask iCloudOnboardingTaskModel
+	if err := db.First(&storedTask, task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if storedTask.Status != iCloudOnboardingFailed || storedTask.LastErrorCategory != "refresh_stale" {
+		t.Fatalf("stale old-cookie task = %+v", storedTask)
+	}
+	var channel iCloudResourceChannelModel
+	if err := db.Where("resource_id = ? AND kind = ?", resource.ID, iCloudChannelWeb).First(&channel).Error; err != nil {
+		t.Fatal(err)
+	}
+	if channel.Cookie != "expired" {
+		t.Fatalf("stale old-cookie refresh wrote a cookie: %+v", channel)
+	}
+}
+
+func TestICloudRefreshInfrastructureRetriesPreserveResourceState(t *testing.T) {
 	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
 	db := newICloudRefreshTestDB(t)
 	resource := seedICloudRefreshResource(t, db, now)
+	nextProvisionAt := now.Add(20 * time.Minute)
+	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", resource.ID).Updates(map[string]any{
+		"status": iCloudResourceNormal, "for_sale": true, "next_provision_at": nextProvisionAt,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
 	secret, _ := json.Marshal(iCloudOnboardingSecret{Password: "Secret1!", Birthday: "2000-11-02"})
 	resourceID := resource.ID
 	task := iCloudOnboardingTaskModel{
@@ -741,7 +912,7 @@ func TestICloudRefreshInfrastructureRetriesMarkResourceAbnormal(t *testing.T) {
 	if task.Status != iCloudOnboardingFailed || len(task.SecretPayload) != 0 || len(task.SessionPayload) != 0 || task.ManualVerificationCode != "" {
 		t.Fatalf("refresh task = %+v", task)
 	}
-	if resource.Status != iCloudResourceAbnormal || resource.NextValidationAt != nil || resource.NextProvisionAt != nil {
+	if resource.Status != iCloudResourceNormal || !resource.ForSale || resource.NextProvisionAt == nil || !resource.NextProvisionAt.Equal(nextProvisionAt) {
 		t.Fatalf("refresh resource = %+v", resource)
 	}
 }

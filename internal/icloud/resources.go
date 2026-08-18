@@ -99,6 +99,7 @@ type AdminICloudResourceDetail struct {
 	CredentialUpdatedAt  time.Time           `json:"credentialUpdatedAt"`
 	ValidationGeneration uint64              `json:"validationGeneration"`
 	ValidationFailures   uint8               `json:"validationFailures"`
+	OnboardingTask       *OnboardingTaskView `json:"onboardingTask"`
 	RefreshTask          *OnboardingTaskView `json:"refreshTask"`
 }
 
@@ -318,6 +319,17 @@ func (s *Service) GetAdminICloudResource(ctx context.Context, resourceID uint) (
 		ValidationGeneration: row.ValidationGeneration, ValidationFailures: row.ValidationFailures,
 	}
 	var refresh iCloudOnboardingTaskModel
+	var onboarding iCloudOnboardingTaskModel
+	if err := s.db.WithContext(ctx).Where("task_kind = ? AND resource_id = ?", "onboarding", resourceID).Order("id DESC").Take(&onboarding).Error; err == nil {
+		view := iCloudOnboardingTaskView(onboarding)
+		views := []OnboardingTaskView{view}
+		if err := s.populateICloudOnboardingFamilyEmails(ctx, views); err != nil {
+			return nil, err
+		}
+		detail.OnboardingTask = &views[0]
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrICloudResourceQueryTemporary
+	}
 	if err := s.db.WithContext(ctx).Where("task_kind = ? AND resource_id = ?", "refresh", resourceID).Order("id DESC").Take(&refresh).Error; err == nil {
 		view := iCloudOnboardingTaskView(refresh)
 		detail.RefreshTask = &view
@@ -358,10 +370,10 @@ func adminICloudBoundPhoneNumber(row adminICloudResourceRow) string {
 	if number == "" {
 		return strings.TrimSpace(row.BoundPhoneNumber)
 	}
-	if code := onboardingPhoneDigits(row.KitesimPhoneCode); code != "" && !strings.HasPrefix(number, code) {
-		number = code + number
+	if code := onboardingPhoneDigits(row.KitesimPhoneCode); code != "" {
+		return "+" + code + " " + strings.TrimPrefix(number, code)
 	}
-	return "+" + number
+	return number
 }
 
 func adminICloudSessionView(id *uint, status string, failures uint8, cooldown, keepalive, checked, valid *time.Time) *AdminICloudSessionView {

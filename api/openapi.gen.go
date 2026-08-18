@@ -5980,6 +5980,7 @@ type AdminICloudResourceDetail struct {
 	NextProvisionAt         *time.Time                                `json:"nextProvisionAt"`
 	NextValidationAt        *time.Time                                `json:"nextValidationAt"`
 	OldSession              *AdminICloudSessionView                   `json:"oldSession"`
+	OnboardingTask          *AdminICloudOnboardingTask                `json:"onboardingTask"`
 	Owner                   AdminICloudOwnerSummary                   `json:"owner"`
 	PrimaryEmail            openapi_types.Email                       `json:"primaryEmail"`
 	RefreshTask             *AdminICloudOnboardingTask                `json:"refreshTask"`

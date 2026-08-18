@@ -370,10 +370,11 @@ func TestICloudFamilyCapacityFailsClosedAndCountsReservations(t *testing.T) {
 		t.Fatalf("create primaries: %v", err)
 	}
 	reservations := []iCloudOnboardingTaskModel{
-		{ID: 10, PrimaryEmail: "one-child@example.com", AccountRole: "child", FamilyPrimaryResourceID: testICloudFamilyUintPtr(1), Status: iCloudOnboardingProcessing, FamilyReservationConfirmed: false},
-		{ID: 20, PrimaryEmail: "two-child-a@example.com", AccountRole: "child", FamilyPrimaryResourceID: testICloudFamilyUintPtr(2), Status: iCloudOnboardingProcessing, FamilyReservationConfirmed: false},
-		{ID: 21, PrimaryEmail: "two-child-b@example.com", AccountRole: "child", FamilyPrimaryResourceID: testICloudFamilyUintPtr(2), Status: iCloudOnboardingWaiting, FamilyReservationConfirmed: false},
-		{ID: 22, PrimaryEmail: "two-confirmed@example.com", AccountRole: "child", FamilyPrimaryResourceID: testICloudFamilyUintPtr(2), Status: iCloudOnboardingProcessing, FamilyReservationConfirmed: true},
+		{ID: 10, ResourceID: testICloudFamilyUintPtr(10), TaskKind: "onboarding", PrimaryEmail: "one-child@example.com", AccountRole: "child", FamilyPrimaryResourceID: testICloudFamilyUintPtr(1), Status: iCloudOnboardingProcessing, FamilyReservationConfirmed: false},
+		{ID: 11, ResourceID: testICloudFamilyUintPtr(11), TaskKind: "refresh", PrimaryEmail: "one-refresh@example.com", AccountRole: "child", FamilyPrimaryResourceID: testICloudFamilyUintPtr(1), Status: iCloudOnboardingProcessing, FamilyReservationConfirmed: false},
+		{ID: 20, ResourceID: testICloudFamilyUintPtr(20), TaskKind: "onboarding", PrimaryEmail: "two-child-a@example.com", AccountRole: "child", FamilyPrimaryResourceID: testICloudFamilyUintPtr(2), Status: iCloudOnboardingProcessing, FamilyReservationConfirmed: false},
+		{ID: 21, ResourceID: testICloudFamilyUintPtr(21), TaskKind: "onboarding", PrimaryEmail: "two-child-b@example.com", AccountRole: "child", FamilyPrimaryResourceID: testICloudFamilyUintPtr(2), Status: iCloudOnboardingWaiting, FamilyReservationConfirmed: false},
+		{ID: 22, ResourceID: testICloudFamilyUintPtr(22), TaskKind: "onboarding", PrimaryEmail: "two-confirmed@example.com", AccountRole: "child", FamilyPrimaryResourceID: testICloudFamilyUintPtr(2), Status: iCloudOnboardingProcessing, FamilyReservationConfirmed: true},
 	}
 	if err := db.Create(&reservations).Error; err != nil {
 		t.Fatalf("create reservations: %v", err)
@@ -522,7 +523,7 @@ func openICloudFamilyTestDB(t *testing.T, name string) *gorm.DB {
 	}
 	if err := db.AutoMigrate(
 		&iCloudResourceModel{}, &iCloudResourceChannelModel{}, &iCloudAliasModel{},
-		&iCloudAliasRouteModel{}, &iCloudMaintenanceRunModel{}, &iCloudOnboardingTaskModel{},
+		&iCloudAliasRouteModel{}, &iCloudMaintenanceRunModel{},
 	); err != nil {
 		t.Fatalf("migrate sqlite: %v", err)
 	}

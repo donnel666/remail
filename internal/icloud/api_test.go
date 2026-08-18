@@ -164,7 +164,7 @@ func TestRetryAdminICloudOnboardingPostFamily(t *testing.T) {
 	service, db, task, _ := newOnboardingStateTest(t)
 	primaryID := uint(88)
 	if err := db.Model(task).Updates(map[string]any{
-		"stage": "family_join_apply", "status": iCloudOnboardingWaiting, "dispatch_status": "waiting",
+		"stage": "family_join_apply", "onboarding_status": iCloudOnboardingWaiting, "dispatch_status": "waiting",
 		"family_primary_resource_id": primaryID, "attempts": 5, "max_attempts": 5,
 		"session_payload":     []byte(`{"private":"api-secret-session"}`),
 		"last_error_category": "provider_unavailable", "last_safe_error": "Apple family state is uncertain.",

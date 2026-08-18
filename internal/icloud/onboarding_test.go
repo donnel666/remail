@@ -65,8 +65,8 @@ func TestAcceptICloudOnboardingRejectsExistingResourceAfterIdempotencyLookup(t *
 		t.Fatal(err)
 	}
 	if err := db.AutoMigrate(
-		&iCloudRootModel{}, &iCloudOnboardingImportModel{}, &iCloudOnboardingTaskModel{},
-		&iCloudAppleIDReservationModel{}, &iCloudResourceModel{}, &governanceinfra.OperationLogModel{},
+		&iCloudRootModel{}, &iCloudAppleIDReservationModel{}, &iCloudResourceModel{}, &iCloudResourceCredentialModel{},
+		&governanceinfra.OperationLogModel{}, &coreinfra.AdminResourceCommandReceiptModel{},
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -87,32 +87,108 @@ func TestAcceptICloudOnboardingRejectsExistingResourceAfterIdempotencyLookup(t *
 		t.Fatalf("duplicate resource error = %v", err)
 	}
 	var taskCount int64
-	if err := db.Model(&iCloudOnboardingTaskModel{}).Count(&taskCount).Error; err != nil || taskCount != 0 {
+	if err := db.Model(&iCloudOnboardingTaskModel{}).Where("task_kind = ?", "onboarding").Count(&taskCount).Error; err != nil || taskCount != 0 {
 		t.Fatalf("task count = %d, err = %v", taskCount, err)
 	}
-	if err := db.Create(&iCloudRootModel{ID: 2, Type: "icloud", OwnerUserID: 1, Version: 1}).Error; err != nil {
+	pendingContent := []byte("美国区----否----pending@example.com----Secret1!----问题一?(remail1)----问题二?(remail2)----问题三?(remail3)----2000-11-02----14155550001")
+	pendingView, reused, err := service.AcceptAdminICloudOnboardingImport(context.Background(), 1, 1, pendingContent, expiresAt, "pending-key", "request", "/test")
+	if err != nil || reused || len(pendingView.Tasks) != 1 || pendingView.Tasks[0].ResourceID == nil {
+		t.Fatalf("pending acceptance = view=%+v reused=%v err=%v", pendingView, reused, err)
+	}
+	pendingID := *pendingView.Tasks[0].ResourceID
+	var pending iCloudResourceModel
+	if err := db.First(&pending, pendingID).Error; err != nil || pending.PrimaryEmail != "pending@example.com" ||
+		pending.AccountRole != "child" || pending.Status != iCloudResourcePending || pending.ForSale || pending.NextValidationAt != nil {
+		t.Fatalf("pending resource = %+v err=%v", pending, err)
+	}
+	var credential iCloudResourceCredentialModel
+	if err := db.First(&credential, pendingID).Error; err != nil || credential.ApplePassword != "Secret1!" || len(credential.SecurityAnswers) == 0 {
+		t.Fatalf("pending credential = %+v err=%v", credential, err)
+	}
+	if err := db.Create(&iCloudRootModel{ID: 20, Type: "icloud", OwnerUserID: 1, Version: 1}).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Create(&iCloudResourceModel{ID: 2, PrimaryEmail: "legacy@example.com", AccountRole: "unknown", Status: iCloudResourceNormal}).Error; err != nil {
+	if err := db.Create(&iCloudResourceModel{ID: 20, PrimaryEmail: "legacy@example.com", AccountRole: "unknown", Status: iCloudResourceNormal}).Error; err != nil {
 		t.Fatal(err)
 	}
 	legacyContent := []byte("美国区----否----legacy@example.com----Secret1!----问题一?(remail1)----问题二?(remail2)----问题三?(remail3)----2000-11-02----14155550001")
 	legacyView, reused, err := service.AcceptAdminICloudOnboardingImport(context.Background(), 1, 1, legacyContent, expiresAt, "legacy-key", "request", "/test")
-	if err != nil || reused || len(legacyView.Tasks) != 1 || legacyView.Tasks[0].ResourceID == nil || *legacyView.Tasks[0].ResourceID != 2 {
+	if err != nil || reused || len(legacyView.Tasks) != 1 || legacyView.Tasks[0].ResourceID == nil || *legacyView.Tasks[0].ResourceID != 20 {
 		t.Fatalf("legacy acceptance = view=%+v reused=%v err=%v", legacyView, reused, err)
 	}
-
-	stored := iCloudOnboardingImportModel{
-		OwnerUserID: 1, OperatorUserID: 1, Status: iCloudOnboardingProcessing, AcceptedCount: 1,
-		ResourceExpireAt: expiresAt, IdempotencyKey: "replay-key",
-		RequestFingerprint: iCloudOnboardingFingerprint(1, expiresAt, content), CreatedAt: now, UpdatedAt: now,
+	var legacy iCloudResourceModel
+	if err := db.First(&legacy, 20).Error; err != nil || legacy.AccountRole != "child" || legacy.Status != iCloudResourcePending || legacy.ForSale {
+		t.Fatalf("legacy resource was not prepared: %+v err=%v", legacy, err)
 	}
-	if err := db.Create(&stored).Error; err != nil {
+	var legacyRoot iCloudRootModel
+	if err := db.First(&legacyRoot, 20).Error; err != nil || legacyRoot.Version != 2 {
+		t.Fatalf("legacy resource version = %+v err=%v", legacyRoot, err)
+	}
+
+	replayContent := []byte("美国区----是----replay@example.com----Secret1!----问题一?(remail1)----问题二?(remail2)----问题三?(remail3)----2000-11-02")
+	first, reused, err := service.AcceptAdminICloudOnboardingImport(context.Background(), 1, 1, replayContent, expiresAt, "replay-key", "request", "/test")
+	if err != nil || reused || first == nil {
+		t.Fatalf("initial idempotent import = view %+v, reused %v, err %v", first, reused, err)
+	}
+	view, reused, err := service.AcceptAdminICloudOnboardingImport(context.Background(), 1, 1, replayContent, expiresAt, "replay-key", "request", "/test")
+	if err != nil || !reused || view.ImportID != first.ImportID {
+		t.Fatalf("idempotent replay = view %+v, reused %v, err %v", view, reused, err)
+	}
+}
+
+func TestAcceptICloudOnboardingRejectsActiveUnknownWorkflow(t *testing.T) {
+	service, db, task, _ := newOnboardingStateTest(t)
+	if err := db.Model(task).Updates(map[string]any{
+		"account_role": "unknown", "task_kind": "onboarding", "onboarding_status": iCloudOnboardingProcessing,
+		"dispatch_status": "running", "for_sale": false,
+	}).Error; err != nil {
 		t.Fatal(err)
 	}
-	view, reused, err := service.AcceptAdminICloudOnboardingImport(context.Background(), 1, 1, content, expiresAt, "replay-key", "request", "/test")
-	if err != nil || !reused || view.ImportID != stored.ID {
-		t.Fatalf("idempotent replay = view %+v, reused %v, err %v", view, reused, err)
+	service.SetImportOwnerValidator(func(context.Context, uint) (bool, error) { return true, nil })
+	content := []byte("美国区----否----child@example.com----Secret2!----问题一?(a1)----问题二?(a2)----问题三?(a3)----2000-11-02")
+	if _, _, err := service.AcceptAdminICloudOnboardingImport(context.Background(), 1, 1, content, service.now().Add(time.Hour), "active-unknown-key", "request", "/test"); !errors.Is(err, ErrICloudResourceIdentity) {
+		t.Fatalf("active unknown workflow error = %v", err)
+	}
+	var resource iCloudResourceModel
+	if err := db.First(&resource, task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if resource.AccountRole != "unknown" || resource.WorkflowTaskKind != "onboarding" || resource.OnboardingStatus != iCloudOnboardingProcessing {
+		t.Fatalf("active unknown workflow was overwritten: %+v", resource)
+	}
+}
+
+func TestAcceptICloudOnboardingRejectsPermanentPhoneChangeBeforeUpdate(t *testing.T) {
+	service, db, task, _ := newOnboardingStateTest(t)
+	phoneID := uint(7)
+	if err := db.Model(task).Updates(map[string]any{
+		"account_role": "unknown", "task_kind": "", "onboarding_status": "", "kitesim_phone_id": phoneID,
+		"bound_phone_number": "15488768536", "credential_revision": 2,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	service.SetImportOwnerValidator(func(context.Context, uint) (bool, error) { return true, nil })
+	content := []byte("美国区----否----child@example.com----Secret2!----问题一?(a1)----问题二?(a2)----问题三?(a3)----2000-11-02----5488768537")
+	if _, _, err := service.AcceptAdminICloudOnboardingImport(context.Background(), 1, 1, content, service.now().Add(time.Hour), "phone-conflict-key", "request", "/test"); !errors.Is(err, ErrICloudResourceIdentity) {
+		t.Fatalf("permanent phone conflict error = %v", err)
+	}
+	var resource iCloudResourceModel
+	if err := db.First(&resource, task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if resource.BoundPhoneNumber != "15488768536" || resource.CredentialRevision != 2 || resource.KitesimPhoneID == nil || *resource.KitesimPhoneID != phoneID {
+		t.Fatalf("permanent phone was overwritten: %+v", resource)
+	}
+}
+
+func TestSameICloudPhoneNumberAcceptsCountryCodeVariants(t *testing.T) {
+	for _, value := range []string{"+15488768536", "15488768536", "5488768536"} {
+		if !sameICloudPhoneNumber("15488768536", value) {
+			t.Fatalf("phone variant %q did not match", value)
+		}
+	}
+	if sameICloudPhoneNumber("15488768536", "5488768537") {
+		t.Fatal("different phone matched permanent binding")
 	}
 }
 
@@ -358,32 +434,44 @@ func newOnboardingStateTest(t *testing.T) (*Service, *gorm.DB, *iCloudOnboarding
 		t.Fatal(err)
 	}
 	if err := db.AutoMigrate(
-		&iCloudOnboardingImportModel{}, &iCloudOnboardingTaskModel{}, &iCloudAppleIDReservationModel{},
-		&iCloudResourceModel{}, &governanceinfra.OperationLogModel{}, &coreinfra.AdminResourceCommandReceiptModel{},
+		&iCloudRootModel{}, &iCloudAppleIDReservationModel{},
+		&iCloudResourceModel{}, &iCloudResourceCredentialModel{},
+		&governanceinfra.OperationLogModel{}, &coreinfra.AdminResourceCommandReceiptModel{},
 	); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, time.August, 16, 12, 0, 0, 0, time.UTC)
-	batch := iCloudOnboardingImportModel{
-		OwnerUserID: 1, OperatorUserID: 1, Status: iCloudOnboardingProcessing, AcceptedCount: 1,
-		ResourceExpireAt: now.AddDate(0, 1, 0), IdempotencyKey: "key", RequestFingerprint: "fingerprint",
-		CreatedAt: now, UpdatedAt: now,
-	}
-	if err := db.Create(&batch).Error; err != nil {
-		t.Fatal(err)
-	}
 	secret, _ := json.Marshal(iCloudOnboardingSecret{
 		Password: "Secret1!", Birthday: "2000-11-02",
 		SecurityAnswers: [3]iCloudSecurityAnswer{{Question: "q1", Answer: "a1"}, {Question: "q2", Answer: "a2"}, {Question: "q3", Answer: "a3"}},
 	})
-	importID := batch.ID
-	task := &iCloudOnboardingTaskModel{
-		ImportID: &importID, TaskKind: "onboarding", LineNumber: 1, PrimaryEmail: "child@example.com", AccountRole: "child",
-		Region: "美国区", CountryCode: "US", BoundPhoneNumber: "14155550001",
-		SecretPayload: secret, Status: iCloudOnboardingProcessing, Stage: "accepted", DispatchStatus: "pending",
-		Generation: 1, MaxAttempts: 5, CreatedAt: now, UpdatedAt: now,
+	answers, _ := json.Marshal([3]iCloudSecurityAnswer{{Question: "q1", Answer: "a1"}, {Question: "q2", Answer: "a2"}, {Question: "q3", Answer: "a3"}})
+	root := iCloudRootModel{Type: "icloud", OwnerUserID: 1, Version: 1, CreatedAt: now, UpdatedAt: now}
+	if err := db.Create(&root).Error; err != nil {
+		t.Fatal(err)
 	}
-	if err := db.Create(task).Error; err != nil {
+	resourceID := root.ID
+	resource := iCloudResourceModel{
+		ID: root.ID, ResourceType: "icloud", PrimaryEmail: "child@example.com", AccountRole: "child",
+		Region: "美国区", CountryCode: "US", BoundPhoneNumber: "14155550001", Status: iCloudResourcePending,
+		ExpireAt: now.AddDate(0, 1, 0), CredentialRevision: 1, CredentialUpdatedAt: now, ValidationGeneration: 1,
+		WorkflowImportID: &resourceID, WorkflowResourceID: &resourceID, WorkflowTaskKind: "onboarding", WorkflowLineNumber: 1,
+		WorkflowSecretPayload: iCloudJSON(secret), OnboardingStatus: iCloudOnboardingProcessing, WorkflowStage: "accepted",
+		WorkflowDispatchStatus: "pending", WorkflowGeneration: 1, WorkflowExpectedCredential: 1, WorkflowMaxAttempts: 5,
+		WorkflowOperatorUserID: 1, WorkflowIdempotencyKey: "key", WorkflowRequestFingerprint: "fingerprint",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&resource).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&iCloudResourceCredentialModel{
+		ResourceID: root.ID, ApplePassword: "Secret1!", SecurityAnswers: iCloudJSON(answers),
+		Birthday: time.Date(2000, 11, 2, 0, 0, 0, 0, time.UTC), CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	task := &iCloudOnboardingTaskModel{}
+	if err := db.First(task, root.ID).Error; err != nil {
 		t.Fatal(err)
 	}
 	fakeApple := &onboardingFakeApple{}
@@ -409,7 +497,7 @@ func processOnboardingStageForTest(t *testing.T, service *Service, db *gorm.DB, 
 func TestICloudOnboardingProvidedPhoneSkipsEnrollmentAndFamily(t *testing.T) {
 	service, db, task, fakeApple := newOnboardingStateTest(t)
 	processOnboardingStageForTest(t, service, db, task)
-	if task.Stage != "manage_prepare" || task.BoundPhoneSource != "manual" || task.KitesimPhoneID == nil {
+	if task.ResourceID == nil || task.Stage != "manage_prepare" || task.BoundPhoneSource != "manual" || task.KitesimPhoneID == nil {
 		t.Fatalf("assigned task = %+v", task)
 	}
 	processOnboardingStageForTest(t, service, db, task)
@@ -422,6 +510,21 @@ func TestICloudOnboardingProvidedPhoneSkipsEnrollmentAndFamily(t *testing.T) {
 	}
 	if len(fakeApple.operations) != 2 || fakeApple.operations[0] != appleOnboardingPrepareManage+":" || fakeApple.operations[1] != appleOnboardingFetchManage+":" {
 		t.Fatalf("Apple operations = %v", fakeApple.operations)
+	}
+}
+
+func TestICloudOnboardingRejectsMissingResourceProjection(t *testing.T) {
+	service, db, task, _ := newOnboardingStateTest(t)
+	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", task.ID).Updates(map[string]any{
+		"resource_id": nil,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(task, task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := service.ensureICloudOnboardingAppleIDReservation(context.Background(), task); !errors.Is(err, ErrICloudResourceIdentity) {
+		t.Fatalf("missing resource projection error = %v", err)
 	}
 }
 
@@ -528,18 +631,9 @@ func TestICloudOnboardingClosedICloudPreservesDeclaredStateAndWaits(t *testing.T
 			}
 			if test.taskKind == "refresh" {
 				phoneID := uint(7)
-				resource := iCloudResourceModel{
-					ID: 1, ResourceType: "icloud", PrimaryEmail: task.PrimaryEmail, AccountRole: test.accountRole,
-					Region: task.Region, CountryCode: task.CountryCode, ICloudOpened: test.icloudOpened,
-					BoundPhoneNumber: task.BoundPhoneNumber, BoundPhoneSource: test.phoneSource, KitesimPhoneID: &phoneID,
-					Status: iCloudResourcePending, CredentialRevision: 1, CreatedAt: task.CreatedAt, UpdatedAt: task.UpdatedAt,
-				}
-				if err := db.Create(&resource).Error; err != nil {
-					t.Fatal(err)
-				}
-				updates["resource_id"] = resource.ID
+				updates["resource_id"] = task.ID
 				updates["kitesim_phone_id"] = phoneID
-				updates["expected_credential_revision"] = resource.CredentialRevision
+				updates["expected_credential_revision"] = task.ExpectedCredentialRevision
 			}
 			if err := db.Model(task).Updates(updates).Error; err != nil {
 				t.Fatal(err)
@@ -624,68 +718,45 @@ func TestICloudOnboardingResourceImportRejectsMissingPermanentPhone(t *testing.T
 func TestICloudOnboardingUpgradesUnknownResourceInPlace(t *testing.T) {
 	service, db, task, _ := newOnboardingStateTest(t)
 	if err := db.AutoMigrate(
-		&iCloudRootModel{}, &iCloudResourceCredentialModel{}, &iCloudResourceChannelModel{},
-		&iCloudImportPreparationModel{}, &iCloudAliasModel{},
+		&iCloudAliasModel{},
 	); err != nil {
 		t.Fatal(err)
 	}
 	now := service.now().UTC()
-	const resourceID = uint(77)
-	if err := db.Create(&iCloudRootModel{ID: resourceID, Type: "icloud", OwnerUserID: 1, Version: 3, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Create(&iCloudResourceModel{
-		ID: resourceID, ResourceType: "icloud", PrimaryEmail: task.PrimaryEmail, AccountRole: "unknown",
-		Status: iCloudResourceNormal, CredentialRevision: 2, ValidationGeneration: 4, AliasCount: 1,
-		CreatedAt: now, UpdatedAt: now,
+	resourceID := task.ID
+	if err := db.Model(task).Updates(map[string]any{
+		"account_role": "unknown", "status": iCloudResourceNormal, "task_kind": "",
+		"onboarding_status": "", "for_sale": false, "credential_revision": 2,
+		"validation_generation": 4, "alias_count": 1, "import_id": nil,
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Create(&iCloudAliasModel{ResourceID: resourceID, Email: "old@icloud.com", Status: iCloudResourceNormal, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
 		t.Fatal(err)
 	}
-	operatorID := uint(1)
-	preparation := iCloudImportPreparationModel{
-		OperatorUserID: &operatorID, ForwardToEmail: "relay@example.com", VerificationCode: "654321",
-		VerifiedAt: &now, ExpiresAt: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now,
-	}
-	if err := db.Create(&preparation).Error; err != nil {
-		t.Fatal(err)
-	}
-	phoneID := uint(7)
-	if err := db.Model(task).Updates(map[string]any{
-		"resource_id": resourceID, "stage": "resource_import", "bound_phone_source": "manual",
-		"kitesim_phone_id": phoneID, "forward_preparation_id": preparation.ID, "icloud_opened": false,
-	}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := db.First(task, task.ID).Error; err != nil {
-		t.Fatal(err)
-	}
-	apple := &onboardingExportApple{}
-	service.onboardingApple = apple
-	processOnboardingStageForTest(t, service, db, task)
-	if task.Status != iCloudOnboardingCompleted || task.ResourceID == nil || *task.ResourceID != resourceID || task.ForwardPreparationID != nil || apple.calls != 1 {
-		t.Fatalf("upgrade task = %+v Apple calls=%d", task, apple.calls)
+	service.SetImportOwnerValidator(func(context.Context, uint) (bool, error) { return true, nil })
+	content := []byte("美国区----否----child@example.com----Secret2!----问题一?(a1)----问题二?(a2)----问题三?(a3)----2000-11-02----14155550001")
+	view, reused, err := service.AcceptAdminICloudOnboardingImport(context.Background(), 1, 1, content, now.Add(time.Hour), "upgrade-key", "request", "/test")
+	if err != nil || reused || view == nil || len(view.Tasks) != 1 || view.Tasks[0].ResourceID == nil || *view.Tasks[0].ResourceID != resourceID {
+		t.Fatalf("upgrade acceptance = view=%+v reused=%v err=%v", view, reused, err)
 	}
 	var resource iCloudResourceModel
 	if err := db.First(&resource, resourceID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if resource.ID != resourceID || resource.AccountRole != "child" || resource.BoundPhoneNumber != task.BoundPhoneNumber ||
-		resource.SelectedForwardTo != preparation.ForwardToEmail || resource.CredentialRevision != 3 || resource.ValidationGeneration != 5 ||
-		resource.Status != iCloudResourcePending || resource.NextValidationAt == nil || !resource.NextValidationAt.Equal(now) {
+	if resource.ID != resourceID || resource.AccountRole != "child" || resource.BoundPhoneNumber != "14155550001" ||
+		resource.CredentialRevision != 3 || resource.ValidationGeneration != 5 || resource.Status != iCloudResourcePending || resource.ForSale {
 		t.Fatalf("upgraded resource = %+v", resource)
 	}
 	var rootCount, reservationCount int64
 	if err := db.Model(&iCloudRootModel{}).Count(&rootCount).Error; err != nil || rootCount != 1 {
 		t.Fatalf("root count = %d err=%v", rootCount, err)
 	}
-	if err := db.Model(&iCloudAppleIDReservationModel{}).Count(&reservationCount).Error; err != nil || reservationCount != 0 {
+	if err := db.Model(&iCloudAppleIDReservationModel{}).Count(&reservationCount).Error; err != nil || reservationCount != 1 {
 		t.Fatalf("reservation count = %d err=%v", reservationCount, err)
 	}
 	var alias iCloudAliasModel
-	if err := db.First(&alias).Error; err != nil || alias.Status != "missing" {
+	if err := db.First(&alias).Error; err != nil || alias.Status != iCloudResourceNormal {
 		t.Fatalf("alias = %+v err=%v", alias, err)
 	}
 }
@@ -706,6 +777,13 @@ func TestICloudOnboardingFamilyResetWaitKeepsAppleIDReservation(t *testing.T) {
 	if err := db.Create(&preparation).Error; err != nil {
 		t.Fatal(err)
 	}
+	if err := service.ensureICloudOnboardingAppleIDReservation(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(task, task.ID).Error; err != nil || task.ResourceID == nil {
+		t.Fatalf("placeholder resource = %+v err=%v", task, err)
+	}
+	placeholderID := *task.ResourceID
 	phoneID, primaryID := uint(7), uint(99)
 	if err := db.Model(task).Updates(map[string]any{
 		"stage": "resource_import", "bound_phone_source": "kitesim", "kitesim_phone_id": phoneID,
@@ -721,7 +799,8 @@ func TestICloudOnboardingFamilyResetWaitKeepsAppleIDReservation(t *testing.T) {
 	service.onboardingApple = apple
 
 	processOnboardingStageForTest(t, service, db, task)
-	if task.Status != iCloudOnboardingWaiting || task.Stage != "waiting_family_reset" || task.ResourceID == nil || apple.calls != 1 {
+	if task.Status != iCloudOnboardingWaiting || task.Stage != "waiting_family_reset" || task.ResourceID == nil ||
+		*task.ResourceID != placeholderID || apple.calls != 1 {
 		t.Fatalf("family reset wait = %+v Apple calls=%d", task, apple.calls)
 	}
 	var count int64
@@ -743,7 +822,7 @@ func TestICloudOnboardingFamilyResetWaitKeepsAppleIDReservation(t *testing.T) {
 func TestSubmitICloudOnboardingSMSCodeUsesMissingPoolBinding(t *testing.T) {
 	service, db, task, _ := newOnboardingStateTest(t)
 	if err := db.Model(task).Updates(map[string]any{
-		"status": iCloudOnboardingWaiting, "stage": "sms_wait", "dispatch_status": "waiting",
+		"onboarding_status": iCloudOnboardingWaiting, "stage": "sms_wait", "dispatch_status": "waiting",
 		"bound_phone_source": "kitesim", "kitesim_phone_id": nil, "pending_sms_purpose": appleSMSManageLogin,
 	}).Error; err != nil {
 		t.Fatal(err)
@@ -766,7 +845,7 @@ func TestSubmitICloudOnboardingSMSCodeUsesMissingPoolBinding(t *testing.T) {
 	}
 
 	if err := db.Model(task).Updates(map[string]any{
-		"status": iCloudOnboardingWaiting, "stage": "sms_wait", "dispatch_status": "waiting",
+		"onboarding_status": iCloudOnboardingWaiting, "stage": "sms_wait", "dispatch_status": "waiting",
 		"bound_phone_source": "manual", "kitesim_phone_id": 7, "manual_verification_code": "",
 	}).Error; err != nil {
 		t.Fatal(err)
@@ -780,7 +859,7 @@ func TestICloudOnboardingManualConfirmationsAreNaturallyIdempotent(t *testing.T)
 	t.Run("activation", func(t *testing.T) {
 		service, db, task, _ := newOnboardingStateTest(t)
 		if err := db.Model(task).Updates(map[string]any{
-			"status": iCloudOnboardingWaiting, "stage": "waiting_icloud_activation", "dispatch_status": "waiting",
+			"onboarding_status": iCloudOnboardingWaiting, "stage": "waiting_icloud_activation", "dispatch_status": "waiting",
 			"bound_phone_source": "kitesim", "icloud_opened": false,
 		}).Error; err != nil {
 			t.Fatal(err)
@@ -804,20 +883,11 @@ func TestICloudOnboardingManualConfirmationsAreNaturallyIdempotent(t *testing.T)
 
 	t.Run("family_reset", func(t *testing.T) {
 		service, db, task, _ := newOnboardingStateTest(t)
-		resourceID := uint(88)
+		resourceID := task.ID
 		primaryID := uint(99)
-		if err := db.AutoMigrate(&iCloudRootModel{}); err != nil {
-			t.Fatal(err)
-		}
-		if err := db.Create(&iCloudRootModel{ID: resourceID, Type: "icloud", OwnerUserID: 1, Version: 1}).Error; err != nil {
-			t.Fatal(err)
-		}
-		if err := db.Create(&iCloudResourceModel{ID: resourceID, ResourceType: "icloud", PrimaryEmail: task.PrimaryEmail, AccountRole: "child", Status: iCloudResourcePending}).Error; err != nil {
-			t.Fatal(err)
-		}
 		if err := db.Model(task).Updates(map[string]any{
 			"resource_id": resourceID, "family_primary_resource_id": primaryID, "family_reservation_confirmed": true,
-			"status": iCloudOnboardingWaiting, "stage": "waiting_family_reset", "dispatch_status": "waiting",
+			"onboarding_status": iCloudOnboardingWaiting, "stage": "waiting_family_reset", "dispatch_status": "waiting",
 		}).Error; err != nil {
 			t.Fatal(err)
 		}
@@ -910,6 +980,13 @@ func TestICloudOnboardingFamilySelectionRejectsUnresolvedCountry(t *testing.T) {
 	processOnboardingStageForTest(t, service, db, task)
 	if task.Status != iCloudOnboardingFailed || task.DispatchStatus != "failed" || task.LastErrorCategory != "country_unresolved" || task.NextAttemptAt != nil {
 		t.Fatalf("unresolved country did not terminate family selection: %+v", task)
+	}
+	if task.ResourceID == nil {
+		t.Fatal("failed onboarding task lost its resource")
+	}
+	var failedResource iCloudResourceModel
+	if err := db.First(&failedResource, *task.ResourceID).Error; err != nil || failedResource.Status != iCloudResourceAbnormal || failedResource.ForSale || failedResource.LastSafeError == "" {
+		t.Fatalf("failed onboarding resource = %+v err=%v", failedResource, err)
 	}
 }
 
@@ -1446,7 +1523,7 @@ func TestRetryICloudOnboardingPostFamilyIsIdempotentAndRestoresReservation(t *te
 	service, db, task, apple := newOnboardingStateTest(t)
 	primaryID, preparationID := uint(88), uint(77)
 	if err := db.Model(task).Updates(map[string]any{
-		"stage": "sms_verify", "status": iCloudOnboardingWaiting, "dispatch_status": "waiting",
+		"stage": "sms_verify", "onboarding_status": iCloudOnboardingWaiting, "dispatch_status": "waiting",
 		"family_primary_resource_id": primaryID, "family_reservation_confirmed": true,
 		"forward_preparation_id": preparationID, "session_payload": []byte(`{"flow":"post-family"}`),
 		"pending_sms_purpose": appleSMSManageLogin, "manual_verification_code": "123456",
@@ -1499,7 +1576,7 @@ func TestRetryICloudOnboardingPostFamilyReplacesUnusableForwardingPreparation(t 
 			service, db, task, apple := newOnboardingStateTest(t)
 			primaryID, preparationID := uint(88), uint(77)
 			if err := db.Model(task).Updates(map[string]any{
-				"stage": test.stage, "status": iCloudOnboardingWaiting, "dispatch_status": "waiting",
+				"stage": test.stage, "onboarding_status": iCloudOnboardingWaiting, "dispatch_status": "waiting",
 				"family_primary_resource_id": primaryID, "family_reservation_confirmed": true,
 				"forward_preparation_id": preparationID, "attempts": 5, "max_attempts": 5,
 				"last_error_category": test.category, "last_safe_error": "Apple rejected forwarding.",
@@ -1549,7 +1626,7 @@ func TestRetryICloudOnboardingPostFamilyReservationConflictStopsBeforeApple(t *t
 	service, db, task, apple := newOnboardingStateTest(t)
 	primaryID := uint(88)
 	if err := db.Model(task).Updates(map[string]any{
-		"stage": "family_join_apply", "status": iCloudOnboardingWaiting, "dispatch_status": "waiting",
+		"stage": "family_join_apply", "onboarding_status": iCloudOnboardingWaiting, "dispatch_status": "waiting",
 		"family_primary_resource_id": primaryID, "attempts": 5, "max_attempts": 5,
 		"last_error_category": "provider_unavailable", "last_safe_error": "Apple family state is uncertain.",
 	}).Error; err != nil {
@@ -1663,8 +1740,8 @@ func TestICloudOnboardingInfrastructureRetriesTerminateAndRefreshImport(t *testi
 	if task.Status != iCloudOnboardingFailed || task.DispatchStatus != "failed" || task.Attempts != 5 || task.FinishedAt == nil || len(task.SecretPayload) != 0 || len(task.SessionPayload) != 0 || task.ManualVerificationCode != "" {
 		t.Fatalf("exhausted task = %+v", task)
 	}
-	var batch iCloudOnboardingImportModel
-	if err := db.First(&batch, *task.ImportID).Error; err != nil || batch.Status != "failed" || batch.FailedCount != 1 {
+	batch, err := service.loadICloudOnboardingImport(context.Background(), *task.ImportID)
+	if err != nil || batch.Status != iCloudOnboardingFailed || batch.FailedCount != 1 {
 		t.Fatalf("import summary = %+v err=%v", batch, err)
 	}
 }
@@ -1672,7 +1749,7 @@ func TestICloudOnboardingInfrastructureRetriesTerminateAndRefreshImport(t *testi
 func TestGetICloudOnboardingImportRepairsStaleSummary(t *testing.T) {
 	service, db, task, _ := newOnboardingStateTest(t)
 	if err := db.Model(task).Updates(map[string]any{
-		"status": iCloudOnboardingCompleted, "stage": "completed", "dispatch_status": "succeeded",
+		"onboarding_status": iCloudOnboardingCompleted, "stage": "completed", "dispatch_status": "succeeded",
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -1689,8 +1766,9 @@ func TestGetICloudOnboardingImportRepairsStaleSummary(t *testing.T) {
 func TestRecoverStaleICloudOnboardingTasksConsumesRetryBudget(t *testing.T) {
 	service, db, task, _ := newOnboardingStateTest(t)
 	now := service.now().UTC()
+	queuedAt := now.Add(-3 * time.Minute)
 	if err := db.Model(task).Updates(map[string]any{
-		"attempts": 0, "max_attempts": 2, "dispatch_status": "queued", "updated_at": now.Add(-3 * time.Minute),
+		"attempts": 0, "max_attempts": 2, "dispatch_status": "queued", "next_attempt_at": queuedAt,
 	}).Error; err != nil {
 		t.Fatal(err)
 	}

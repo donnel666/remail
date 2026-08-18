@@ -51,7 +51,7 @@ func TestListAdminICloudResourcesReturnsOnlySafeOperationalFacts(t *testing.T) {
 	if err := db.AutoMigrate(
 		&iCloudAdminTestGroup{}, &iCloudAdminTestUser{}, &iCloudRootModel{},
 		&iCloudResourceModel{}, &iCloudResourceChannelModel{}, &iCloudAliasModel{},
-		&iCloudOnboardingTaskModel{}, &iCloudAdminTestPhone{},
+		&iCloudAdminTestPhone{},
 	); err != nil {
 		t.Fatalf("migrate database: %v", err)
 	}
@@ -88,6 +88,13 @@ func TestListAdminICloudResourcesReturnsOnlySafeOperationalFacts(t *testing.T) {
 			t.Fatalf("create %T: %v", model, err)
 		}
 	}
+	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", 1).Updates(map[string]any{
+		"resource_id": 1, "task_kind": "onboarding", "account_role": "primary",
+		"onboarding_status": iCloudOnboardingWaiting, "stage": "sms_wait", "dispatch_status": "waiting",
+		"pending_sms_purpose": appleSMSManageLogin, "generation": 1, "max_attempts": 5,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
 
 	falseValue := false
 	service := NewService(db, nil, nil)
@@ -101,7 +108,7 @@ func TestListAdminICloudResourcesReturnsOnlySafeOperationalFacts(t *testing.T) {
 		t.Fatalf("result size = total %d items %d", result.Total, len(result.Items))
 	}
 	item := result.Items[0]
-	if item.PrimaryEmail != "main@icloud.com" || item.BoundPhoneNumber != "+8613600000000" || item.SelectedForwardTo != "inbox@relay.example" || item.AliasCount != iCloudMaxAliases-1 ||
+	if item.PrimaryEmail != "main@icloud.com" || item.BoundPhoneNumber != "+86 13600000000" || item.SelectedForwardTo != "inbox@relay.example" || item.AliasCount != iCloudMaxAliases-1 ||
 		item.NewSession == nil || item.NewSession.Status != iCloudSessionInvalid ||
 		item.OldSession == nil || item.OldSession.Status != iCloudSessionValid {
 		t.Fatalf("unexpected safe item: %#v", item)
@@ -129,7 +136,8 @@ func TestListAdminICloudResourcesReturnsOnlySafeOperationalFacts(t *testing.T) {
 	}
 	if detail.Version != 4 || detail.AliasLimit != iCloudMaxAliases || detail.AliasRemaining != 1 ||
 		!detail.AliasProvisioning || detail.CredentialRevision != 3 || detail.ValidationGeneration != 4 ||
-		detail.ValidationFailures != 2 || detail.NewSession.Failures != 2 || detail.OldSession.Failures != 1 {
+		detail.ValidationFailures != 2 || detail.NewSession.Failures != 2 || detail.OldSession.Failures != 1 ||
+		detail.OnboardingTask == nil || detail.OnboardingTask.Stage != "sms_wait" {
 		t.Fatalf("unexpected safe detail: %#v", detail)
 	}
 
@@ -141,6 +149,13 @@ func TestListAdminICloudResourcesReturnsOnlySafeOperationalFacts(t *testing.T) {
 	}
 	if fast.Total != 0 || fast.Facets.Status.All != 0 || len(fast.Items) != 2 {
 		t.Fatalf("aggregate-free page returned unexpected metadata: %#v", fast)
+	}
+}
+
+func TestAdminICloudBoundPhoneNumberRemovesRepeatedCountryCode(t *testing.T) {
+	got := adminICloudBoundPhoneNumber(adminICloudResourceRow{KitesimPhoneCode: "+1", KitesimPhoneNumber: "15488768536"})
+	if got != "+1 5488768536" {
+		t.Fatalf("bound phone = %q", got)
 	}
 }
 
