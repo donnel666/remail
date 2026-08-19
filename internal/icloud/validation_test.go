@@ -832,6 +832,96 @@ func TestICloudValidationRetryDoesNotReuseAliasRunForSameGeneration(t *testing.T
 	}
 }
 
+func TestICloudValidationStopsAtMaximumAttempts(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		status     string
+		wantStatus string
+	}{
+		{name: "normal", status: iCloudResourceNormal, wantStatus: iCloudResourceNormal},
+		{name: "pending", status: iCloudResourcePending, wantStatus: iCloudResourceAbnormal},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			now := time.Date(2026, 8, 14, 11, 0, 0, 0, time.UTC)
+			db := openICloudValidationTestDB(t, "max-attempts-"+test.name)
+			if err := db.Create(&iCloudRootModel{ID: 1, Type: "icloud", OwnerUserID: 7, Version: 1, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&iCloudResourceModel{
+				ID: 1, ResourceType: "icloud", PrimaryEmail: "owner@example.com", Status: test.status,
+				ExpireAt: now.Add(time.Hour), CredentialRevision: 1, ValidationGeneration: 1,
+				NextValidationAt: &now, CreatedAt: now, UpdatedAt: now,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			finishedAt := now.Add(-time.Minute)
+			if err := db.Create(&iCloudMaintenanceRunModel{
+				ResourceID: 1, ValidationGeneration: 1, Kind: iCloudMaintenanceValidation,
+				Status: iCloudMaintenanceFailed, Attempts: iCloudValidationMaxFailures, MaxAttempts: iCloudValidationMaxFailures,
+				CredentialRevision: 1, QueuedAt: finishedAt, FinishedAt: &finishedAt, CreatedAt: finishedAt, UpdatedAt: finishedAt,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			service := NewService(db, nil, nil)
+			service.now = func() time.Time { return now }
+			_, claimed, err := service.markICloudValidationDispatched(context.Background(), iCloudValidationTask{
+				ResourceID: 1, OwnerUserID: 7, ValidationGeneration: 1, ExpectedCredentialRevision: 1,
+			})
+			if err != nil || claimed {
+				t.Fatalf("maximum-attempt validation claim = %t, err=%v", claimed, err)
+			}
+			var resource iCloudResourceModel
+			if err := db.First(&resource, 1).Error; err != nil {
+				t.Fatal(err)
+			}
+			if resource.Status != test.wantStatus || resource.NextValidationAt != nil {
+				t.Fatalf("resource was not terminally handled: %#v", resource)
+			}
+		})
+	}
+}
+
+func TestICloudValidationLeaseRecoveryCountsExpiredAttempt(t *testing.T) {
+	now := time.Date(2026, 8, 14, 11, 20, 0, 0, time.UTC)
+	db := openICloudValidationTestDB(t, "lease-attempt")
+	if err := db.Create(&iCloudRootModel{ID: 1, Type: "icloud", OwnerUserID: 7, Version: 1, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "owner@example.com", Status: iCloudResourceNormal,
+		ExpireAt: now.Add(time.Hour), CredentialRevision: 1, ValidationGeneration: 1, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	startedAt := now.Add(-iCloudValidationRunningLease - time.Minute)
+	if err := db.Create(&iCloudMaintenanceRunModel{
+		ID: 1, ResourceID: 1, ValidationGeneration: 1, Kind: iCloudMaintenanceValidation,
+		Status: iCloudMaintenanceRunning, Attempts: 1, MaxAttempts: iCloudValidationMaxFailures,
+		CredentialRevision: 1, QueuedAt: startedAt, StartedAt: &startedAt, CreatedAt: startedAt, UpdatedAt: startedAt,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	if err := service.recoverStaleICloudValidations(context.Background(), now); err != nil {
+		t.Fatal(err)
+	}
+	var run iCloudMaintenanceRunModel
+	if err := db.First(&run, 1).Error; err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != iCloudMaintenanceQueued || run.Attempts != 2 || run.StartedAt != nil {
+		t.Fatalf("expired lease was not counted: %#v", run)
+	}
+	var resource iCloudResourceModel
+	if err := db.First(&resource, 1).Error; err != nil {
+		t.Fatal(err)
+	}
+	if resource.Status != iCloudResourceNormal || resource.NextValidationAt == nil || !resource.NextValidationAt.Equal(now) {
+		t.Fatalf("normal resource lease recovery changed scheduling incorrectly: %#v", resource)
+	}
+}
+
 func openICloudValidationTestDB(t *testing.T, name string) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:icloud-validation-%s?mode=memory&cache=shared", name)), &gorm.Config{})

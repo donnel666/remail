@@ -601,6 +601,23 @@ func queueAdminICloudValidation(updates map[string]any, resource iCloudResourceM
 	return generation
 }
 
+// queueAdminICloudCredentialCheck keeps a usable resource usable while the
+// submitted Apple sessions are checked by the normal validation worker.
+func queueAdminICloudCredentialCheck(updates map[string]any, resource iCloudResourceModel, now time.Time) uint64 {
+	generation := resource.ValidationGeneration
+	if generation == 0 {
+		generation = 1
+	} else {
+		generation++
+	}
+	updates["validation_generation"] = generation
+	updates["validation_failures"] = 0
+	updates["next_validation_at"] = now
+	updates["next_provision_at"] = nil
+	updates["last_safe_error"] = ""
+	return generation
+}
+
 func adminICloudMutationResult(root iCloudRootModel, resource iCloudResourceModel) *AdminICloudMutationResult {
 	return &AdminICloudMutationResult{
 		ResourceID: resource.ID,

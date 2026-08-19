@@ -308,13 +308,18 @@ func (s *Service) refreshICloudOnboardingResource(ctx context.Context, task *iCl
 		if generation == 0 {
 			generation = 1
 		}
+		credentialRevision := resource.CredentialRevision + 1
+		if credentialRevision == 0 {
+			credentialRevision = 1
+		}
 		updates := map[string]any{
 			"country_code": countryCode, "icloud_opened": locked.ICloudOpened,
 			// Cookie maintenance is independent from the resource's sale and
 			// provisioning state. Validation may be queued, but it must not make
 			// an otherwise usable resource unavailable to normal operations.
+			"credential_revision": credentialRevision, "credential_updated_at": now,
 			"validation_generation": generation, "validation_failures": 0,
-			"next_validation_at": now, "last_safe_error": "", "updated_at": now,
+			"next_validation_at": now, "next_provision_at": nil, "last_safe_error": "", "updated_at": now,
 		}
 		if resource.AccountRole == "primary" {
 			updates["family_next_sync_at"] = now
@@ -377,9 +382,29 @@ func (s *Service) completeICloudOldCookieBackfill(ctx context.Context, task *iCl
 		if err := upsertICloudImportChannelsTx(tx, resource.ID, []iCloudImportChannel{appleOnboardingImportChannel(channel)}, false, now); err != nil {
 			return err
 		}
-		if err := tx.Model(&iCloudResourceModel{}).Where("id = ?", resource.ID).
-			Updates(map[string]any{"icloud_opened": true, "updated_at": now}).Error; err != nil {
-			return err
+		credentialRevision := resource.CredentialRevision + 1
+		if credentialRevision == 0 {
+			credentialRevision = 1
+		}
+		validationGeneration := resource.ValidationGeneration + 1
+		if validationGeneration == 0 {
+			validationGeneration = 1
+		}
+		// Backfilling the V2 channel is a credential replacement. Advance both
+		// fences so queued provisioning work using the old cookie is stale and
+		// the newly unchecked channel is picked up by validation.
+		updated := tx.Model(&iCloudResourceModel{}).
+			Where("id = ? AND credential_revision = ?", resource.ID, resource.CredentialRevision).
+			Updates(map[string]any{
+				"icloud_opened": true, "credential_revision": credentialRevision,
+				"credential_updated_at": now, "validation_generation": validationGeneration,
+				"next_validation_at": now, "next_provision_at": nil, "updated_at": now,
+			})
+		if updated.Error != nil {
+			return updated.Error
+		}
+		if updated.RowsAffected != 1 {
+			return errICloudRefreshStale
 		}
 		if err := tx.Model(&iCloudRootModel{}).Where("id = ?", resource.ID).
 			Updates(map[string]any{"version": gorm.Expr("version + 1"), "updated_at": now}).Error; err != nil {
@@ -407,6 +432,7 @@ func (s *Service) completeICloudOldCookieBackfill(ctx context.Context, task *iCl
 	if err != nil {
 		return ErrICloudOnboardingTemporary
 	}
+	_ = s.ScheduleICloudValidationDispatcher(context.WithoutCancel(ctx), 0)
 	return nil
 }
 

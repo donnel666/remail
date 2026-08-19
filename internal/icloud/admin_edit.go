@@ -215,9 +215,8 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 			case resource.Status == iCloudResourceDisabled:
 				updates["next_validation_at"] = nil
 			case silentCredentialRefresh:
-				updates["next_validation_at"] = nil
-				updates["next_provision_at"] = now
-				queuedProvision = true
+				queuedGeneration = queueAdminICloudCredentialCheck(updates, resource, now)
+				queuedValidation = true
 			default:
 				queuedGeneration = queueAdminICloudValidation(updates, resource, now)
 				queuedValidation = true

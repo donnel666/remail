@@ -102,8 +102,8 @@ func TestEditAdminICloudResourcePatchesSubmittedChannels(t *testing.T) {
 		t.Fatalf("read resource: %v", err)
 	}
 	if resource.CredentialRevision != 2 ||
-		resource.ValidationGeneration != 1 || resource.Status != iCloudResourceNormal ||
-		resource.NextValidationAt != nil || resource.NextProvisionAt == nil || !resource.NextProvisionAt.Equal(now) || !resource.ExpireAt.Equal(expireAt) {
+		resource.ValidationGeneration != 2 || resource.Status != iCloudResourceNormal ||
+		resource.NextValidationAt == nil || !resource.NextValidationAt.Equal(now) || resource.NextProvisionAt != nil || !resource.ExpireAt.Equal(expireAt) {
 		t.Fatalf("unexpected edited resource: %#v", resource)
 	}
 	var channels []iCloudResourceChannelModel
@@ -122,8 +122,8 @@ func TestEditAdminICloudResourcePatchesSubmittedChannels(t *testing.T) {
 	}
 
 	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", 1).
-		Update("next_provision_at", nil).Error; err != nil {
-		t.Fatalf("finish silent credential check: %v", err)
+		Update("next_validation_at", nil).Error; err != nil {
+		t.Fatalf("finish credential check: %v", err)
 	}
 	now = now.Add(time.Minute)
 	if err := db.Model(&iCloudResourceChannelModel{}).
@@ -147,10 +147,10 @@ func TestEditAdminICloudResourcePatchesSubmittedChannels(t *testing.T) {
 	if err := db.First(&channelOnlyResource, 1).Error; err != nil {
 		t.Fatalf("read channel-only edit: %v", err)
 	}
-	if channelOnlyResource.Status != iCloudResourceNormal || channelOnlyResource.ValidationGeneration != 1 ||
-		channelOnlyResource.NextValidationAt != nil || channelOnlyResource.NextProvisionAt == nil || !channelOnlyResource.NextProvisionAt.Equal(now) ||
+	if channelOnlyResource.Status != iCloudResourceNormal || channelOnlyResource.ValidationGeneration != 3 ||
+		channelOnlyResource.NextValidationAt == nil || !channelOnlyResource.NextValidationAt.Equal(now) || channelOnlyResource.NextProvisionAt != nil ||
 		channelOnlyResource.SelectedForwardTo != "old@relay.example" || channelOnlyResource.AliasCount != 1 || channelOnlyResource.LastAliasSyncAt == nil {
-		t.Fatalf("channel-only edit did not schedule a silent check: %#v", channelOnlyResource)
+		t.Fatalf("channel-only edit did not queue a credential check: %#v", channelOnlyResource)
 	}
 	var retiredAlias iCloudAliasModel
 	if err := db.Where("resource_id = ? AND anonymous_id = ?", 1, "existing-alias").Take(&retiredAlias).Error; err != nil || retiredAlias.Status != iCloudResourceNormal {
@@ -338,7 +338,7 @@ func TestEditAdminICloudResourceRejectsInviteOnChild(t *testing.T) {
 	}
 }
 
-func TestEditAdminICloudResourceSilentlyVerifiesUpdatedChannel(t *testing.T) {
+func TestEditAdminICloudResourceQueuesCredentialCheckWithoutChangingHealth(t *testing.T) {
 	db := newAdminICloudCommandTestDB(t, "icloud-admin-edit-silent-channel-check")
 	now := time.Date(2026, 8, 15, 9, 30, 0, 0, time.UTC)
 	createAdminICloudCommandResource(t, db, now, iCloudResourceModel{
@@ -374,8 +374,8 @@ func TestEditAdminICloudResourceSilentlyVerifiesUpdatedChannel(t *testing.T) {
 		t.Fatalf("credential edit changed resource health: %#v", result)
 	}
 	var resource iCloudResourceModel
-	if err := db.First(&resource, 1).Error; err != nil || resource.NextValidationAt != nil || resource.NextProvisionAt == nil {
-		t.Fatalf("silent channel check was not scheduled: resource=%#v err=%v", resource, err)
+	if err := db.First(&resource, 1).Error; err != nil || resource.NextValidationAt == nil || resource.NextProvisionAt != nil || resource.ValidationGeneration != 2 {
+		t.Fatalf("credential check was not scheduled: resource=%#v err=%v", resource, err)
 	}
 	var channels []iCloudResourceChannelModel
 	if err := db.Where("resource_id = ?", 1).Order("kind").Find(&channels).Error; err != nil {
@@ -392,8 +392,16 @@ func TestEditAdminICloudResourceSilentlyVerifiesUpdatedChannel(t *testing.T) {
 	}
 	setICloudForwardingSuffixes(t, "relay.example")
 	service.apple = newICloudValidationAppleClient(t, "silent-check-id", "mailbox@relay.example")
-	if err := service.ProcessICloudProvision(context.Background(), iCloudProvisionTask{ResourceID: 1}); err != nil {
-		t.Fatalf("process silent channel check: %v", err)
+	tasks, err := service.iCloudValidationCandidates(context.Background(), 10)
+	if err != nil || len(tasks) != 1 || !tasks[0].PreserveResourceStatus {
+		t.Fatalf("list credential checks: tasks=%#v err=%v", tasks, err)
+	}
+	queued, claimed, err := service.markICloudValidationDispatched(context.Background(), tasks[0])
+	if err != nil || !claimed || !queued.PreserveResourceStatus {
+		t.Fatalf("claim credential check: task=%#v claimed=%v err=%v", queued, claimed, err)
+	}
+	if err := service.ProcessICloudValidation(context.Background(), queued); err != nil {
+		t.Fatalf("process credential check: %v", err)
 	}
 	var updatedNew, preservedOld iCloudResourceChannelModel
 	if err := db.Where("resource_id = ? AND kind = ?", 1, iCloudChannelAppleAccount).Take(&updatedNew).Error; err != nil {

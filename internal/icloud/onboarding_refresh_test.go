@@ -294,16 +294,16 @@ func TestICloudOldCookieBackfillPreservesNewCookieAndResourceState(t *testing.T)
 	if err := db.Where("resource_id = ? AND kind = ?", resource.ID, iCloudChannelWeb).First(&oldChannel).Error; err != nil {
 		t.Fatal(err)
 	}
-	if newChannel.Cookie != "myacinfo=healthy-new" || newChannel.SessionStatus != iCloudSessionValid || oldChannel.Cookie != "X-APPLE-WEBAUTH-TOKEN=backfilled" {
+	if newChannel.Cookie != "myacinfo=healthy-new" || newChannel.SessionStatus != iCloudSessionValid || oldChannel.Cookie != "X-APPLE-WEBAUTH-TOKEN=backfilled" || oldChannel.SessionStatus != iCloudSessionUnchecked {
 		t.Fatalf("channels after backfill: new=%+v old=%+v", newChannel, oldChannel)
 	}
 	var stored iCloudResourceModel
 	if err := db.First(&stored, resource.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if !stored.ICloudOpened || stored.Status != iCloudResourceNormal || !stored.ForSale || stored.ValidationGeneration != resource.ValidationGeneration || stored.ValidationFailures != 2 || stored.AliasCount != 4 ||
+	if !stored.ICloudOpened || stored.Status != iCloudResourceNormal || !stored.ForSale || stored.CredentialRevision != resource.CredentialRevision+1 || stored.ValidationGeneration != resource.ValidationGeneration+1 || stored.ValidationFailures != 2 || stored.AliasCount != 4 ||
 		stored.AliasProvisionCandidate != "pending@example.com" || !stored.AliasProvisionReconcile || stored.LastAllocatedAt == nil || !stored.LastAllocatedAt.Equal(lastAllocatedAt) || stored.LastSafeError != "keep-resource-state" ||
-		stored.NextValidationAt == nil || !stored.NextValidationAt.Equal(nextValidationAt) || stored.NextProvisionAt == nil || !stored.NextProvisionAt.Equal(nextProvisionAt) {
+		stored.NextValidationAt == nil || !stored.NextValidationAt.Equal(now) || stored.NextProvisionAt != nil || stored.CredentialUpdatedAt.IsZero() || !stored.CredentialUpdatedAt.Equal(now) {
 		t.Fatalf("resource state changed by backfill: %+v", stored)
 	}
 	if err := db.First(&task, task.ID).Error; err != nil || task.Status != iCloudOnboardingCompleted || task.PendingSMSPurpose != "" {
@@ -762,7 +762,8 @@ func TestICloudCookieRefreshAtomicallyReplacesChannels(t *testing.T) {
 	if err := db.First(&storedResource, resource.ID).Error; err != nil || storedResource.ValidationGeneration != resource.ValidationGeneration+1 || storedResource.NextValidationAt == nil {
 		t.Fatalf("resource validation was not requeued: %+v err=%v", storedResource, err)
 	}
-	if storedResource.Status != iCloudResourceNormal || !storedResource.ForSale || storedResource.NextProvisionAt == nil || !storedResource.NextProvisionAt.Equal(nextProvisionAt) {
+	if storedResource.Status != iCloudResourceNormal || !storedResource.ForSale ||
+		storedResource.CredentialRevision != resource.CredentialRevision+1 || storedResource.NextProvisionAt != nil {
 		t.Fatalf("refresh changed resource availability: %+v", storedResource)
 	}
 }

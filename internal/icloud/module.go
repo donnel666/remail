@@ -458,6 +458,7 @@ type iCloudValidationTask struct {
 	OwnerUserID                uint   `json:"ownerUserId"`
 	ValidationGeneration       uint64 `json:"validationGeneration"`
 	ExpectedCredentialRevision uint64 `json:"expectedCredentialRevision"`
+	PreserveResourceStatus     bool   `json:"preserveResourceStatus,omitempty"`
 	MaintenanceRunID           uint64 `json:"maintenanceRunId,omitempty"`
 	MaintenanceKind            string `json:"maintenanceKind,omitempty"`
 	RequestID                  string `json:"requestId,omitempty"`
