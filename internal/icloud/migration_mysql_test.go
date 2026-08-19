@@ -104,9 +104,9 @@ func TestICloudOnboardingMigrationMySQL(t *testing.T) {
 
 	goose.SetTableName("goose_db_version")
 	require.NoError(t, goose.SetDialect("mysql"))
-	require.Error(t, goose.DownTo(sqlDB, through116, 115))
+	require.NoError(t, goose.DownTo(sqlDB, through116, 110))
 	require.False(t, db.Migrator().HasTable("icloud_account_onboarding_tasks"))
-	require.True(t, db.Migrator().HasTable("icloud_apple_id_reservations"))
+	require.False(t, db.Migrator().HasTable("icloud_apple_id_reservations"))
 	require.False(t, db.Migrator().HasTable("icloud_account_onboarding_imports"))
 	require.True(t, db.Migrator().HasColumn("icloud_resources", "onboarding_status"))
 }

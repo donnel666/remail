@@ -146,7 +146,22 @@ DROP TABLE icloud_account_onboarding_imports;
 
 -- +goose Down
 
--- Irreversible: the source task/import tables were folded into resource rows
--- and dropped. Failing here prevents Goose from recording a partial rollback
--- that older migrations cannot safely continue.
-SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'migration 00116_icloud_resource_workflow is irreversible';
+-- The source task/import tables were folded into resource rows and dropped.
+-- Recreate only the columns that older Down migrations need.  The original
+-- rows cannot be reconstructed after the resource-first migration, but these
+-- empty compatibility tables let the rollback chain continue to 00111.
+CREATE TABLE IF NOT EXISTS icloud_account_onboarding_imports (
+    id BIGINT UNSIGNED NOT NULL PRIMARY KEY
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS icloud_account_onboarding_tasks (
+    id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+    family_primary_resource_id BIGINT UNSIGNED NULL,
+    family_reservation_confirmed TINYINT(1) NOT NULL DEFAULT 0,
+    icloud_activation_confirmed_at DATETIME(3) NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'processing',
+    INDEX idx_icloud_onboard_task_family_reservation
+        (family_primary_resource_id, status, family_reservation_confirmed, id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+SELECT 1;
