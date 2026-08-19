@@ -51,7 +51,7 @@ func TestAppleAccountRefreshBootstrapsScntFromTokenResponse(t *testing.T) {
 	})})
 
 	refreshed, err := client.refresh(context.Background(), iCloudResourceChannelModel{
-		Host: "appleid.apple.com", Cookie: "myacinfo=secret", FDClientInfo: testICloudFDClientInfo,
+		Host: "appleid.apple.com", Cookie: "myacinfo=secret",
 	}, now)
 	if err != nil {
 		t.Fatalf("refresh Apple Account state: %v", err)
@@ -121,7 +121,7 @@ func TestAppleAccountRefreshWarmsPortalBeforeRetryingMissingScnt(t *testing.T) {
 	})})
 
 	refreshed, err := client.refresh(context.Background(), iCloudResourceChannelModel{
-		Host: "appleid.apple.com.cn", Cookie: "myacinfo=secret", FDClientInfo: testICloudFDClientInfo,
+		Host: "appleid.apple.com.cn", Cookie: "myacinfo=secret",
 	}, now)
 	if err != nil || refreshed.Scnt != "retry-scnt" || refreshed.APIKey != "api-key" {
 		t.Fatalf("portal bootstrap refresh: state=%#v err=%v", refreshed, err)
