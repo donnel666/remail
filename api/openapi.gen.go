@@ -2417,6 +2417,54 @@ func (e LinuxDOPendingResponseProvider) Valid() bool {
 	}
 }
 
+// Defines values for LotteryPayoutResponseTier.
+const (
+	LotteryPayoutResponseTierConsolation LotteryPayoutResponseTier = "consolation"
+	LotteryPayoutResponseTierLucky       LotteryPayoutResponseTier = "lucky"
+	LotteryPayoutResponseTierNormal      LotteryPayoutResponseTier = "normal"
+)
+
+// Valid indicates whether the value is a known member of the LotteryPayoutResponseTier enum.
+func (e LotteryPayoutResponseTier) Valid() bool {
+	switch e {
+	case LotteryPayoutResponseTierConsolation:
+		return true
+	case LotteryPayoutResponseTierLucky:
+		return true
+	case LotteryPayoutResponseTierNormal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LotteryResponseStatus.
+const (
+	LotteryResponseStatusCancelled LotteryResponseStatus = "cancelled"
+	LotteryResponseStatusCompleted LotteryResponseStatus = "completed"
+	LotteryResponseStatusFunding   LotteryResponseStatus = "funding"
+	LotteryResponseStatusOpen      LotteryResponseStatus = "open"
+	LotteryResponseStatusSettling  LotteryResponseStatus = "settling"
+)
+
+// Valid indicates whether the value is a known member of the LotteryResponseStatus enum.
+func (e LotteryResponseStatus) Valid() bool {
+	switch e {
+	case LotteryResponseStatusCancelled:
+		return true
+	case LotteryResponseStatusCompleted:
+		return true
+	case LotteryResponseStatusFunding:
+		return true
+	case LotteryResponseStatusOpen:
+		return true
+	case LotteryResponseStatusSettling:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MonitoringMetricSeriesType.
 const (
 	Counter   MonitoringMetricSeriesType = "counter"
@@ -4091,6 +4139,33 @@ func (e GetAdminInvitesParamsOwnerRole) Valid() bool {
 	}
 }
 
+// Defines values for GetAdminLotteriesParamsStatus.
+const (
+	GetAdminLotteriesParamsStatusCancelled GetAdminLotteriesParamsStatus = "cancelled"
+	GetAdminLotteriesParamsStatusCompleted GetAdminLotteriesParamsStatus = "completed"
+	GetAdminLotteriesParamsStatusFunding   GetAdminLotteriesParamsStatus = "funding"
+	GetAdminLotteriesParamsStatusOpen      GetAdminLotteriesParamsStatus = "open"
+	GetAdminLotteriesParamsStatusSettling  GetAdminLotteriesParamsStatus = "settling"
+)
+
+// Valid indicates whether the value is a known member of the GetAdminLotteriesParamsStatus enum.
+func (e GetAdminLotteriesParamsStatus) Valid() bool {
+	switch e {
+	case GetAdminLotteriesParamsStatusCancelled:
+		return true
+	case GetAdminLotteriesParamsStatusCompleted:
+		return true
+	case GetAdminLotteriesParamsStatusFunding:
+		return true
+	case GetAdminLotteriesParamsStatusOpen:
+		return true
+	case GetAdminLotteriesParamsStatusSettling:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetAdminMessagesParamsType.
 const (
 	GetAdminMessagesParamsTypeDomain    GetAdminMessagesParamsType = "domain"
@@ -4270,28 +4345,28 @@ func (e GetAdminProxyStatsParamsIp) Valid() bool {
 
 // Defines values for GetAdminProxyStatsParamsStatus.
 const (
-	Abnormal GetAdminProxyStatsParamsStatus = "abnormal"
-	Checking GetAdminProxyStatsParamsStatus = "checking"
-	Disabled GetAdminProxyStatsParamsStatus = "disabled"
-	Expired  GetAdminProxyStatsParamsStatus = "expired"
-	Normal   GetAdminProxyStatsParamsStatus = "normal"
-	Pending  GetAdminProxyStatsParamsStatus = "pending"
+	GetAdminProxyStatsParamsStatusAbnormal GetAdminProxyStatsParamsStatus = "abnormal"
+	GetAdminProxyStatsParamsStatusChecking GetAdminProxyStatsParamsStatus = "checking"
+	GetAdminProxyStatsParamsStatusDisabled GetAdminProxyStatsParamsStatus = "disabled"
+	GetAdminProxyStatsParamsStatusExpired  GetAdminProxyStatsParamsStatus = "expired"
+	GetAdminProxyStatsParamsStatusNormal   GetAdminProxyStatsParamsStatus = "normal"
+	GetAdminProxyStatsParamsStatusPending  GetAdminProxyStatsParamsStatus = "pending"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminProxyStatsParamsStatus enum.
 func (e GetAdminProxyStatsParamsStatus) Valid() bool {
 	switch e {
-	case Abnormal:
+	case GetAdminProxyStatsParamsStatusAbnormal:
 		return true
-	case Checking:
+	case GetAdminProxyStatsParamsStatusChecking:
 		return true
-	case Disabled:
+	case GetAdminProxyStatsParamsStatusDisabled:
 		return true
-	case Expired:
+	case GetAdminProxyStatsParamsStatusExpired:
 		return true
-	case Normal:
+	case GetAdminProxyStatsParamsStatusNormal:
 		return true
-	case Pending:
+	case GetAdminProxyStatsParamsStatusPending:
 		return true
 	default:
 		return false
@@ -7600,6 +7675,18 @@ type CreateDomainRequest struct {
 // CreateDomainRequestPurpose Defaults to not_sale. Domain creation does not accept sale; suppliers publish private domains through the resource publish endpoint. binding is admin-only and displayed as auxiliary mailbox in Chinese.
 type CreateDomainRequestPurpose string
 
+// CreateLotteryRequest defines model for CreateLotteryRequest.
+type CreateLotteryRequest struct {
+	DrawAt            time.Time          `json:"drawAt"`
+	MaxPayout         string             `json:"maxPayout"`
+	MinAccountAgeDays int                `json:"minAccountAgeDays"`
+	MinPayout         string             `json:"minPayout"`
+	ParticipantTarget int                `json:"participantTarget"`
+	TierWeights       LotteryTierWeights `json:"tierWeights"`
+	Title             string             `json:"title"`
+	TotalAmount       string             `json:"totalAmount"`
+}
+
 // CreateMailServerRequest defines model for CreateMailServerRequest.
 type CreateMailServerRequest struct {
 	DkimRecord    *string `json:"dkimRecord,omitempty"`
@@ -8410,6 +8497,84 @@ type LoginRequest struct {
 // LoginResponse defines model for LoginResponse.
 type LoginResponse struct {
 	User UserResponse `json:"user"`
+}
+
+// LotteryEntryListResponse defines model for LotteryEntryListResponse.
+type LotteryEntryListResponse struct {
+	Items  []LotteryEntryResponse `json:"items"`
+	Limit  int                    `json:"limit"`
+	Offset int                    `json:"offset"`
+	Total  int64                  `json:"total"`
+}
+
+// LotteryEntryResponse defines model for LotteryEntryResponse.
+type LotteryEntryResponse struct {
+	Already      bool      `json:"already"`
+	Id           int       `json:"id"`
+	LotteryId    int       `json:"lotteryId"`
+	RegisteredAt time.Time `json:"registeredAt"`
+	UserId       int       `json:"userId"`
+}
+
+// LotteryListResponse defines model for LotteryListResponse.
+type LotteryListResponse struct {
+	Items  []LotteryResponse `json:"items"`
+	Limit  int               `json:"limit"`
+	Offset int               `json:"offset"`
+	Total  int64             `json:"total"`
+}
+
+// LotteryPayoutListResponse defines model for LotteryPayoutListResponse.
+type LotteryPayoutListResponse struct {
+	Items  []LotteryPayoutResponse `json:"items"`
+	Limit  int                     `json:"limit"`
+	Offset int                     `json:"offset"`
+	Total  int64                   `json:"total"`
+}
+
+// LotteryPayoutResponse defines model for LotteryPayoutResponse.
+type LotteryPayoutResponse struct {
+	Amount               string                    `json:"amount"`
+	BillingTransactionNo *string                   `json:"billingTransactionNo,omitempty"`
+	Id                   int                       `json:"id"`
+	LotteryId            int                       `json:"lotteryId"`
+	Tier                 LotteryPayoutResponseTier `json:"tier"`
+	UserId               int                       `json:"userId"`
+}
+
+// LotteryPayoutResponseTier defines model for LotteryPayoutResponse.Tier.
+type LotteryPayoutResponseTier string
+
+// LotteryResponse defines model for LotteryResponse.
+type LotteryResponse struct {
+	CreatedAt         time.Time             `json:"createdAt"`
+	DrawAt            *time.Time            `json:"drawAt,omitempty"`
+	Id                int                   `json:"id"`
+	MaxParticipants   int                   `json:"maxParticipants"`
+	MaxPayout         string                `json:"maxPayout"`
+	MinAccountAgeDays int                   `json:"minAccountAgeDays"`
+	MinPayout         string                `json:"minPayout"`
+	ParticipantCount  int                   `json:"participantCount"`
+	ParticipantTarget *int                  `json:"participantTarget,omitempty"`
+	PublicToken       string                `json:"publicToken"`
+	PublicUrl         string                `json:"publicUrl"`
+	SettledAt         *time.Time            `json:"settledAt,omitempty"`
+	Status            LotteryResponseStatus `json:"status"`
+	TierWeights       LotteryTierWeights    `json:"tierWeights"`
+	Title             string                `json:"title"`
+	TotalAmount       string                `json:"totalAmount"`
+	TriggeredBy       *string               `json:"triggeredBy,omitempty"`
+	UnusedAmount      string                `json:"unusedAmount"`
+}
+
+// LotteryResponseStatus defines model for LotteryResponse.Status.
+type LotteryResponseStatus string
+
+// LotteryTierWeights defines model for LotteryTierWeights.
+type LotteryTierWeights struct {
+	Consolation int `json:"consolation"`
+	Lucky       int `json:"lucky"`
+	Normal      int `json:"normal"`
 }
 
 // MailContentDetailResponse defines model for MailContentDetailResponse.
@@ -9392,6 +9557,13 @@ type ProxyStatsResponse struct {
 	Pools      []ProxyCount `json:"pools"`
 	Statuses   []ProxyCount `json:"statuses"`
 	Total      int          `json:"total"`
+}
+
+// PublicLotteryResponse defines model for PublicLotteryResponse.
+type PublicLotteryResponse struct {
+	HasEntered bool                   `json:"hasEntered"`
+	Lottery    LotteryResponse        `json:"lottery"`
+	MyPayout   *LotteryPayoutResponse `json:"myPayout,omitempty"`
 }
 
 // PublishResourcesRequest defines model for PublishResourcesRequest.
@@ -11232,6 +11404,44 @@ type GetAdminSystemLogsParams struct {
 	Limit  *int           `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// GetAdminLotteriesParams defines parameters for GetAdminLotteries.
+type GetAdminLotteriesParams struct {
+	Status *GetAdminLotteriesParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+
+	// Offset Row offset used when afterId is absent.
+	Offset *OffsetQuery `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *LimitQuery  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// GetAdminLotteriesParamsStatus defines parameters for GetAdminLotteries.
+type GetAdminLotteriesParamsStatus string
+
+// PostAdminLotteryParams defines parameters for PostAdminLottery.
+type PostAdminLotteryParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+
+	// XTurnstileToken Single-use Cloudflare Turnstile token. Required when captcha_enabled is on for low-frequency, high-damage writes (money movement, submissions entering a human review queue, bulk supplier imports). Each route expects a token minted for its own action string, so a token cannot be replayed across routes. Ignored when the captcha_enabled system setting is off. Not required on the API-key /v1/open surface.
+	XTurnstileToken *TurnstileToken `json:"X-Turnstile-Token,omitempty"`
+}
+
+// GetAdminLotteryEntriesParams defines parameters for GetAdminLotteryEntries.
+type GetAdminLotteryEntriesParams struct {
+	// Offset Row offset used when afterId is absent.
+	Offset *OffsetQuery `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *LimitQuery  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// GetAdminLotteryPayoutsParams defines parameters for GetAdminLotteryPayouts.
+type GetAdminLotteryPayoutsParams struct {
+	// Offset Row offset used when afterId is absent.
+	Offset *OffsetQuery `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *LimitQuery  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // GetAdminMessagesParams defines parameters for GetAdminMessages.
 type GetAdminMessagesParams struct {
 	// Type Resource type; defaults to microsoft for backward compatibility.
@@ -12178,6 +12388,15 @@ type GetDomainMailboxesParams struct {
 	Limit  *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// PostPublicLotteryEntryParams defines parameters for PostPublicLotteryEntry.
+type PostPublicLotteryEntryParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// XTurnstileToken Single-use Cloudflare Turnstile token. Required when captcha_enabled is on for low-frequency, high-damage writes (money movement, submissions entering a human review queue, bulk supplier imports). Each route expects a token minted for its own action string, so a token cannot be replayed across routes. Ignored when the captcha_enabled system setting is off. Not required on the API-key /v1/open surface.
+	XTurnstileToken *TurnstileToken `json:"X-Turnstile-Token,omitempty"`
+}
+
 // PostMeInviteParams defines parameters for PostMeInvite.
 type PostMeInviteParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
@@ -12755,6 +12974,9 @@ type PostAdminKitesimUpstreamPurchaseJSONRequestBody = AdminKitesimPurchaseReque
 
 // PostAdminKitesimUpstreamRechargeJSONRequestBody defines body for PostAdminKitesimUpstreamRecharge for application/json ContentType.
 type PostAdminKitesimUpstreamRechargeJSONRequestBody = AdminKitesimRechargeRequest
+
+// PostAdminLotteryJSONRequestBody defines body for PostAdminLottery for application/json ContentType.
+type PostAdminLotteryJSONRequestBody = CreateLotteryRequest
 
 // PostAdminOrderRefundJSONRequestBody defines body for PostAdminOrderRefund for application/json ContentType.
 type PostAdminOrderRefundJSONRequestBody = AdminOrderCommandRequest
@@ -14106,6 +14328,21 @@ type ServerInterface interface {
 	// List safe system event logs
 	// (GET /v1/admin/logs/system)
 	GetAdminSystemLogs(c *gin.Context, params GetAdminSystemLogsParams)
+	// List lottery campaigns
+	// (GET /v1/admin/lotteries)
+	GetAdminLotteries(c *gin.Context, params GetAdminLotteriesParams)
+	// Publish a lottery campaign
+	// (POST /v1/admin/lotteries)
+	PostAdminLottery(c *gin.Context, params PostAdminLotteryParams)
+	// Read a lottery campaign
+	// (GET /v1/admin/lotteries/{lotteryId})
+	GetAdminLottery(c *gin.Context, lotteryId int)
+	// List lottery entries
+	// (GET /v1/admin/lotteries/{lotteryId}/entries)
+	GetAdminLotteryEntries(c *gin.Context, lotteryId int, params GetAdminLotteryEntriesParams)
+	// List lottery payouts
+	// (GET /v1/admin/lotteries/{lotteryId}/payouts)
+	GetAdminLotteryPayouts(c *gin.Context, lotteryId int, params GetAdminLotteryPayoutsParams)
 	// List primary-mailbox message summaries for a resource
 	// (GET /v1/admin/messages)
 	GetAdminMessages(c *gin.Context, params GetAdminMessagesParams)
@@ -14523,6 +14760,12 @@ type ServerInterface interface {
 	// Get enabled login methods and current binding state
 	// (GET /v1/login/config)
 	GetLoginConfig(c *gin.Context)
+	// Read a public lottery and the current user's state
+	// (GET /v1/lotteries/{token})
+	GetPublicLottery(c *gin.Context, token string)
+	// Enter a public lottery
+	// (POST /v1/lotteries/{token}/entries)
+	PostPublicLotteryEntry(c *gin.Context, token string, params PostPublicLotteryEntryParams)
 	// Get current authenticated user profile
 	// (GET /v1/me)
 	GetMe(c *gin.Context)
@@ -21952,6 +22195,256 @@ func (siw *ServerInterfaceWrapper) GetAdminSystemLogs(c *gin.Context) {
 	siw.Handler.GetAdminSystemLogs(c, params)
 }
 
+// GetAdminLotteries operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminLotteries(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminLotteriesParams
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", c.Request.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter status: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminLotteries(c, params)
+}
+
+// PostAdminLottery operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminLottery(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminLotteryParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional header parameter "X-Turnstile-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Turnstile-Token")]; found {
+		var XTurnstileToken TurnstileToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Turnstile-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Turnstile-Token", valueList[0], &XTurnstileToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Turnstile-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XTurnstileToken = &XTurnstileToken
+
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminLottery(c, params)
+}
+
+// GetAdminLottery operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminLottery(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "lotteryId" -------------
+	var lotteryId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "lotteryId", c.Param("lotteryId"), &lotteryId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter lotteryId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminLottery(c, lotteryId)
+}
+
+// GetAdminLotteryEntries operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminLotteryEntries(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "lotteryId" -------------
+	var lotteryId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "lotteryId", c.Param("lotteryId"), &lotteryId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter lotteryId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminLotteryEntriesParams
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminLotteryEntries(c, lotteryId, params)
+}
+
+// GetAdminLotteryPayouts operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminLotteryPayouts(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "lotteryId" -------------
+	var lotteryId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "lotteryId", c.Param("lotteryId"), &lotteryId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter lotteryId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminLotteryPayoutsParams
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminLotteryPayouts(c, lotteryId, params)
+}
+
 // GetAdminMessages operation middleware
 func (siw *ServerInterfaceWrapper) GetAdminMessages(c *gin.Context) {
 
@@ -29031,6 +29524,104 @@ func (siw *ServerInterfaceWrapper) GetLoginConfig(c *gin.Context) {
 	siw.Handler.GetLoginConfig(c)
 }
 
+// GetPublicLottery operation middleware
+func (siw *ServerInterfaceWrapper) GetPublicLottery(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "token" -------------
+	var token string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "token", c.Param("token"), &token, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter token: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetPublicLottery(c, token)
+}
+
+// PostPublicLotteryEntry operation middleware
+func (siw *ServerInterfaceWrapper) PostPublicLotteryEntry(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "token" -------------
+	var token string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "token", c.Param("token"), &token, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter token: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostPublicLotteryEntryParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional header parameter "X-Turnstile-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Turnstile-Token")]; found {
+		var XTurnstileToken TurnstileToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Turnstile-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Turnstile-Token", valueList[0], &XTurnstileToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Turnstile-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XTurnstileToken = &XTurnstileToken
+
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostPublicLotteryEntry(c, token, params)
+}
+
 // GetMe operation middleware
 func (siw *ServerInterfaceWrapper) GetMe(c *gin.Context) {
 
@@ -32143,6 +32734,11 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/admin/logs/operations", wrapper.GetAdminOperationLogs)
 	router.DELETE(options.BaseURL+"/v1/admin/logs/system", wrapper.DeleteAdminSystemLogs)
 	router.GET(options.BaseURL+"/v1/admin/logs/system", wrapper.GetAdminSystemLogs)
+	router.GET(options.BaseURL+"/v1/admin/lotteries", wrapper.GetAdminLotteries)
+	router.POST(options.BaseURL+"/v1/admin/lotteries", wrapper.PostAdminLottery)
+	router.GET(options.BaseURL+"/v1/admin/lotteries/:lotteryId", wrapper.GetAdminLottery)
+	router.GET(options.BaseURL+"/v1/admin/lotteries/:lotteryId/entries", wrapper.GetAdminLotteryEntries)
+	router.GET(options.BaseURL+"/v1/admin/lotteries/:lotteryId/payouts", wrapper.GetAdminLotteryPayouts)
 	router.GET(options.BaseURL+"/v1/admin/messages", wrapper.GetAdminMessages)
 	router.GET(options.BaseURL+"/v1/admin/messages/:messageId", wrapper.GetAdminMessage)
 	router.GET(options.BaseURL+"/v1/admin/monitoring", wrapper.GetAdminSystemMonitoring)
@@ -32282,6 +32878,8 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/faqs", wrapper.GetSystemFAQs)
 	router.POST(options.BaseURL+"/v1/login", wrapper.PostLogin)
 	router.GET(options.BaseURL+"/v1/login/config", wrapper.GetLoginConfig)
+	router.GET(options.BaseURL+"/v1/lotteries/:token", wrapper.GetPublicLottery)
+	router.POST(options.BaseURL+"/v1/lotteries/:token/entries", wrapper.PostPublicLotteryEntry)
 	router.GET(options.BaseURL+"/v1/me", wrapper.GetMe)
 	router.GET(options.BaseURL+"/v1/me/invite", wrapper.GetMeInvite)
 	router.POST(options.BaseURL+"/v1/me/invite", wrapper.PostMeInvite)

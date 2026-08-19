@@ -79,6 +79,8 @@ const pageLoaders = {
   adminTickets: () => import("./pages/AdminTickets"),
   adminOrders: () => import("./pages/AdminOrders"),
   adminSystemLogs: () => import("./pages/AdminSystemLogs"),
+  adminLotteries: () => import("./pages/AdminLotteries"),
+  lottery: () => import("./pages/Lottery"),
   proxyManagement: () => import("./pages/ProxyManagement"),
   invite: () => import("./pages/Invite"),
   recharge: () => import("./pages/Recharge"),
@@ -116,6 +118,8 @@ const AdminFinance = lazy(pageLoaders.adminFinance);
 const AdminTickets = lazy(pageLoaders.adminTickets);
 const AdminOrders = lazy(pageLoaders.adminOrders);
 const AdminSystemLogs = lazy(pageLoaders.adminSystemLogs);
+const AdminLotteries = lazy(pageLoaders.adminLotteries);
+const Lottery = lazy(pageLoaders.lottery);
 const ProxyManagement = lazy(pageLoaders.proxyManagement);
 const Invite = lazy(pageLoaders.invite);
 const Recharge = lazy(pageLoaders.recharge);
@@ -181,6 +185,7 @@ const preloadRouteByLoader: Partial<Record<PageLoaderKey, string>> = {
   adminMicrosoftEmails: "/admin/microsoft",
   adminProjects: "/admin/projects",
   adminTickets: "/admin/tickets",
+  adminLotteries: "/admin/lotteries",
   adminUsers: "/admin/users",
   consoleOverview: "/console",
   dashboard: "/dashboard",
@@ -591,6 +596,8 @@ const routeTree = rootRoute.addChildren([
   createRoute({ getParentRoute: () => rootRoute, path: "/admin/finance", component: AdminFinance }),
   createRoute({ getParentRoute: () => rootRoute, path: "/admin/orders", component: AdminOrders }),
   createRoute({ getParentRoute: () => rootRoute, path: "/admin/logs", component: AdminSystemLogs }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/admin/lotteries", component: AdminLotteries }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/lottery/$token", component: Lottery }),
   createRoute({
     getParentRoute: () => rootRoute,
     path: "/admin/tickets",

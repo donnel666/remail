@@ -5262,6 +5262,109 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/lotteries/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read a public lottery and the current user's state */
+        get: operations["getPublicLottery"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/lotteries/{token}/entries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Enter a public lottery */
+        post: operations["postPublicLotteryEntry"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/lotteries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List lottery campaigns */
+        get: operations["getAdminLotteries"];
+        put?: never;
+        /** Publish a lottery campaign */
+        post: operations["postAdminLottery"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/lotteries/{lotteryId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read a lottery campaign */
+        get: operations["getAdminLottery"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/lotteries/{lotteryId}/entries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List lottery entries */
+        get: operations["getAdminLotteryEntries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/lotteries/{lotteryId}/payouts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List lottery payouts */
+        get: operations["getAdminLotteryPayouts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -5292,6 +5395,89 @@ export interface components {
             fields?: {
                 [key: string]: string;
             };
+        };
+        LotteryTierWeights: {
+            consolation: number;
+            normal: number;
+            lucky: number;
+        };
+        CreateLotteryRequest: {
+            title: string;
+            totalAmount: string;
+            minPayout: string;
+            maxPayout: string;
+            tierWeights: components["schemas"]["LotteryTierWeights"];
+            minAccountAgeDays: number;
+            /** Format: date-time */
+            drawAt: string;
+            participantTarget: number;
+        };
+        LotteryResponse: {
+            id: number;
+            publicToken: string;
+            publicUrl: string;
+            title: string;
+            totalAmount: string;
+            minPayout: string;
+            maxPayout: string;
+            tierWeights: components["schemas"]["LotteryTierWeights"];
+            minAccountAgeDays: number;
+            /** Format: date-time */
+            drawAt?: string | null;
+            participantTarget?: number | null;
+            participantCount: number;
+            maxParticipants: number;
+            /** @enum {string} */
+            status: "funding" | "open" | "settling" | "completed" | "cancelled";
+            triggeredBy?: string | null;
+            unusedAmount: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            settledAt?: string | null;
+        };
+        PublicLotteryResponse: {
+            lottery: components["schemas"]["LotteryResponse"];
+            hasEntered: boolean;
+            myPayout?: components["schemas"]["LotteryPayoutResponse"] | null;
+        };
+        LotteryEntryResponse: {
+            id: number;
+            lotteryId: number;
+            userId: number;
+            /** Format: date-time */
+            registeredAt: string;
+            already: boolean;
+        };
+        LotteryPayoutResponse: {
+            id: number;
+            lotteryId: number;
+            userId: number;
+            /** @enum {string} */
+            tier: "consolation" | "normal" | "lucky";
+            amount: string;
+            billingTransactionNo?: string;
+        };
+        LotteryListResponse: {
+            items: components["schemas"]["LotteryResponse"][];
+            /** Format: int64 */
+            total: number;
+            offset: number;
+            limit: number;
+        };
+        LotteryEntryListResponse: {
+            items: components["schemas"]["LotteryEntryResponse"][];
+            /** Format: int64 */
+            total: number;
+            offset: number;
+            limit: number;
+        };
+        LotteryPayoutListResponse: {
+            items: components["schemas"]["LotteryPayoutResponse"][];
+            /** Format: int64 */
+            total: number;
+            offset: number;
+            limit: number;
         };
         APIKeyCreateRequest: {
             name?: string;
@@ -24483,6 +24669,223 @@ export interface operations {
             404: components["responses"]["NotFound"];
             429: components["responses"]["TooManyRequests"];
             503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getPublicLottery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Public lottery */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicLotteryResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    postPublicLotteryEntry: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Single-use Cloudflare Turnstile token. Required when captcha_enabled is on for low-frequency, high-damage writes (money movement, submissions entering a human review queue, bulk supplier imports). Each route expects a token minted for its own action string, so a token cannot be replayed across routes. Ignored when the captcha_enabled system setting is off. Not required on the API-key /v1/open surface. */
+                "X-Turnstile-Token"?: components["parameters"]["TurnstileToken"];
+            };
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Entry already existed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LotteryEntryResponse"];
+                };
+            };
+            /** @description Entry accepted */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LotteryEntryResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    getAdminLotteries: {
+        parameters: {
+            query?: {
+                status?: "funding" | "open" | "settling" | "completed" | "cancelled";
+                /** @description Row offset used when afterId is absent. */
+                offset?: components["parameters"]["OffsetQuery"];
+                limit?: components["parameters"]["LimitQuery"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Lottery list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LotteryListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    postAdminLottery: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
+                /** @description Single-use Cloudflare Turnstile token. Required when captcha_enabled is on for low-frequency, high-damage writes (money movement, submissions entering a human review queue, bulk supplier imports). Each route expects a token minted for its own action string, so a token cannot be replayed across routes. Ignored when the captcha_enabled system setting is off. Not required on the API-key /v1/open surface. */
+                "X-Turnstile-Token"?: components["parameters"]["TurnstileToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateLotteryRequest"];
+            };
+        };
+        responses: {
+            /** @description Idempotent replay of a published lottery */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LotteryResponse"];
+                };
+            };
+            /** @description Lottery published */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LotteryResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    getAdminLottery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                lotteryId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Lottery campaign */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LotteryResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getAdminLotteryEntries: {
+        parameters: {
+            query?: {
+                /** @description Row offset used when afterId is absent. */
+                offset?: components["parameters"]["OffsetQuery"];
+                limit?: components["parameters"]["LimitQuery"];
+            };
+            header?: never;
+            path: {
+                lotteryId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Lottery entries */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LotteryEntryListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getAdminLotteryPayouts: {
+        parameters: {
+            query?: {
+                /** @description Row offset used when afterId is absent. */
+                offset?: components["parameters"]["OffsetQuery"];
+                limit?: components["parameters"]["LimitQuery"];
+            };
+            header?: never;
+            path: {
+                lotteryId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Lottery payouts */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LotteryPayoutListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
 }

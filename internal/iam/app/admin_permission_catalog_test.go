@@ -37,6 +37,9 @@ func TestPermissionCatalogCoversAdminFrontendContract(t *testing.T) {
 		"billing:card:write",
 		"billing:card:operate",
 		"billing:card:sensitive",
+		"lottery:lottery:read",
+		"lottery:lottery:write",
+		"lottery:lottery:operate",
 		"governance:log:read",
 		"governance:log:operate",
 	}

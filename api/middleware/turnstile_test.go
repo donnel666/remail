@@ -47,6 +47,8 @@ func turnstileRouter(verifier TurnstileVerifier) *gin.Engine {
 	v1.POST("/open/cards/redeem", func(c *gin.Context) { c.Status(http.StatusOK) })
 	v1.POST("/projects/:projectId/resubmit", func(c *gin.Context) { c.Status(http.StatusOK) })
 	v1.POST("/domains", func(c *gin.Context) { c.Status(http.StatusCreated) })
+	v1.POST("/lotteries/:token/entries", func(c *gin.Context) { c.Status(http.StatusCreated) })
+	v1.POST("/admin/lotteries", func(c *gin.Context) { c.Status(http.StatusCreated) })
 	return router
 }
 
@@ -148,6 +150,16 @@ func TestTurnstileGuardSkippedWhenCaptchaDisabled(t *testing.T) {
 		http.StatusCreated,
 		doTurnstile(turnstileRouter(verifier), http.MethodPost, "/v1/tickets", "").Code)
 	require.Zero(t, verifier.calls)
+}
+
+func TestLotteryTurnstileRemainsRequiredWhenCaptchaDisabled(t *testing.T) {
+	runtimeconfig.Replace([]settingsdomain.Setting{{Key: "captcha_enabled", Value: "false"}})
+	t.Cleanup(func() { runtimeconfig.Replace(nil) })
+
+	verifier := &stubTurnstileVerifier{}
+	router := turnstileRouter(verifier)
+	require.Equal(t, http.StatusUnprocessableEntity, doTurnstile(router, http.MethodPost, "/v1/lotteries/abc/entries", "").Code)
+	require.Equal(t, http.StatusUnprocessableEntity, doTurnstile(router, http.MethodPost, "/v1/admin/lotteries", "").Code)
 }
 
 func TestTurnstileActionsCoverDistinctActions(t *testing.T) {

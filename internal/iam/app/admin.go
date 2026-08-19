@@ -123,6 +123,7 @@ var permissionCatalog = []domain.PermissionCatalogItem{
 	{Resource: "trade:order", Actions: []string{"read", "write", "operate"}},
 	{Resource: "billing:wallet", Actions: []string{"read", "write", "operate", "sensitive"}},
 	{Resource: "billing:card", Actions: []string{"read", "write", "operate", "sensitive"}},
+	{Resource: "lottery:lottery", Actions: []string{"read", "write", "operate"}},
 	{Resource: "proxy:proxy", Actions: []string{"read", "write", "operate"}},
 	{Resource: "alloc:allocation", Actions: []string{"read", "operate"}},
 	{Resource: "mailmatch:message", Actions: []string{"read", "operate"}},

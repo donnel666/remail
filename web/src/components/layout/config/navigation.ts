@@ -5,6 +5,7 @@ import {
   ClipboardList,
   Database,
   Globe,
+  Gift,
   Headphones,
   Mail,
   Network,
@@ -141,6 +142,12 @@ export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
         requiredPermission: permissionKey("governance:log", "read"),
       },
       {
+        path: "/admin/lotteries",
+        labelKey: "Lottery Management",
+        icon: Gift,
+        requiredPermission: permissionKey("lottery:lottery", "read"),
+      },
+      {
         path: "/admin/settings",
         labelKey: "System Settings",
         icon: Settings,
@@ -160,7 +167,7 @@ export const SIDEBAR_NAV_ITEMS: SidebarNavItem[] = SIDEBAR_NAV_GROUPS.flatMap((g
 );
 
 export const ROUTES_WITH_SIDEBAR = SIDEBAR_NAV_ITEMS.map((item) => item.path);
-export const CHROMELESS_ROUTES: string[] = ["/activation"];
+export const CHROMELESS_ROUTES: string[] = ["/activation", "/lottery"];
 
 export function getVisibleSidebarNavGroups(permissions: string[]): SidebarNavGroup[] {
   const permissionSet = new Set(permissions);

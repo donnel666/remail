@@ -14035,6 +14035,221 @@ paths:
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 
+  /v1/lotteries/{token}:
+    get:
+      operationId: getPublicLottery
+      summary: Read a public lottery and the current user's state
+      tags: [Lottery]
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 16
+            maxLength: 64
+      responses:
+        "200":
+          description: Public lottery
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicLotteryResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/lotteries/{token}/entries:
+    post:
+      operationId: postPublicLotteryEntry
+      summary: Enter a public lottery
+      tags: [Lottery]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 16
+            maxLength: 64
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/TurnstileToken"
+      responses:
+        "201":
+          description: Entry accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LotteryEntryResponse"
+        "200":
+          description: Entry already existed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LotteryEntryResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /v1/admin/lotteries:
+    get:
+      operationId: getAdminLotteries
+      summary: List lottery campaigns
+      tags: [Lottery]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [funding, open, settling, completed, cancelled]
+        - $ref: "#/components/parameters/OffsetQuery"
+        - $ref: "#/components/parameters/LimitQuery"
+      responses:
+        "200":
+          description: Lottery list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LotteryListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+    post:
+      operationId: postAdminLottery
+      summary: Publish a lottery campaign
+      tags: [Lottery]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+        - $ref: "#/components/parameters/TurnstileToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateLotteryRequest"
+      responses:
+        "201":
+          description: Lottery published
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LotteryResponse"
+        "200":
+          description: Idempotent replay of a published lottery
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LotteryResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /v1/admin/lotteries/{lotteryId}:
+    get:
+      operationId: getAdminLottery
+      summary: Read a lottery campaign
+      tags: [Lottery]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: lotteryId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Lottery campaign
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LotteryResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/admin/lotteries/{lotteryId}/entries:
+    get:
+      operationId: getAdminLotteryEntries
+      summary: List lottery entries
+      tags: [Lottery]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: lotteryId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - $ref: "#/components/parameters/OffsetQuery"
+        - $ref: "#/components/parameters/LimitQuery"
+      responses:
+        "200":
+          description: Lottery entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LotteryEntryListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/admin/lotteries/{lotteryId}/payouts:
+    get:
+      operationId: getAdminLotteryPayouts
+      summary: List lottery payouts
+      tags: [Lottery]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: lotteryId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - $ref: "#/components/parameters/OffsetQuery"
+        - $ref: "#/components/parameters/LimitQuery"
+      responses:
+        "200":
+          description: Lottery payouts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LotteryPayoutListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
 components:
   parameters:
     TicketNoPath:
@@ -14293,6 +14508,204 @@ components:
           additionalProperties:
             type: string
             example: "Email format is invalid."
+      additionalProperties: false
+
+    LotteryTierWeights:
+      type: object
+      required: [consolation, normal, lucky]
+      properties:
+        consolation:
+          type: integer
+          minimum: 1
+          maximum: 100
+        normal:
+          type: integer
+          minimum: 0
+          maximum: 100
+        lucky:
+          type: integer
+          minimum: 0
+          maximum: 100
+      additionalProperties: false
+
+    CreateLotteryRequest:
+      type: object
+      required: [title, totalAmount, minPayout, maxPayout, tierWeights, minAccountAgeDays, drawAt, participantTarget]
+      properties:
+        title:
+          type: string
+          maxLength: 120
+        totalAmount:
+          type: string
+          pattern: '^[0-9]+(\\.[0-9]{1,6})?$'
+        minPayout:
+          type: string
+          pattern: '^[0-9]+(\\.[0-9]{1,6})?$'
+        maxPayout:
+          type: string
+          pattern: '^[0-9]+(\\.[0-9]{1,6})?$'
+        tierWeights:
+          $ref: "#/components/schemas/LotteryTierWeights"
+        minAccountAgeDays:
+          type: integer
+          minimum: 0
+        drawAt:
+          type: string
+          format: date-time
+        participantTarget:
+          type: integer
+          minimum: 1
+      additionalProperties: false
+
+    LotteryResponse:
+      type: object
+      required: [id, publicToken, publicUrl, title, totalAmount, minPayout, maxPayout, tierWeights, minAccountAgeDays, participantCount, maxParticipants, status, unusedAmount, createdAt]
+      properties:
+        id:
+          type: integer
+        publicToken:
+          type: string
+        publicUrl:
+          type: string
+        title:
+          type: string
+        totalAmount:
+          type: string
+        minPayout:
+          type: string
+        maxPayout:
+          type: string
+        tierWeights:
+          $ref: "#/components/schemas/LotteryTierWeights"
+        minAccountAgeDays:
+          type: integer
+        drawAt:
+          type: string
+          format: date-time
+          nullable: true
+        participantTarget:
+          type: integer
+          nullable: true
+        participantCount:
+          type: integer
+        maxParticipants:
+          type: integer
+        status:
+          type: string
+          enum: [funding, open, settling, completed, cancelled]
+        triggeredBy:
+          type: string
+          nullable: true
+        unusedAmount:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        settledAt:
+          type: string
+          format: date-time
+          nullable: true
+      additionalProperties: false
+
+    PublicLotteryResponse:
+      type: object
+      required: [lottery, hasEntered]
+      properties:
+        lottery:
+          $ref: "#/components/schemas/LotteryResponse"
+        hasEntered:
+          type: boolean
+        myPayout:
+          allOf:
+            - $ref: "#/components/schemas/LotteryPayoutResponse"
+          nullable: true
+      additionalProperties: false
+
+    LotteryEntryResponse:
+      type: object
+      required: [id, lotteryId, userId, registeredAt, already]
+      properties:
+        id:
+          type: integer
+        lotteryId:
+          type: integer
+        userId:
+          type: integer
+        registeredAt:
+          type: string
+          format: date-time
+        already:
+          type: boolean
+      additionalProperties: false
+
+    LotteryPayoutResponse:
+      type: object
+      required: [id, lotteryId, userId, tier, amount]
+      properties:
+        id:
+          type: integer
+        lotteryId:
+          type: integer
+        userId:
+          type: integer
+        tier:
+          type: string
+          enum: [consolation, normal, lucky]
+        amount:
+          type: string
+        billingTransactionNo:
+          type: string
+      additionalProperties: false
+
+    LotteryListResponse:
+      type: object
+      required: [items, total, offset, limit]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/LotteryResponse"
+        total:
+          type: integer
+          format: int64
+        offset:
+          type: integer
+        limit:
+          type: integer
+      additionalProperties: false
+
+    LotteryEntryListResponse:
+      type: object
+      required: [items, total, offset, limit]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/LotteryEntryResponse"
+        total:
+          type: integer
+          format: int64
+        offset:
+          type: integer
+        limit:
+          type: integer
+      additionalProperties: false
+
+    LotteryPayoutListResponse:
+      type: object
+      required: [items, total, offset, limit]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/LotteryPayoutResponse"
+        total:
+          type: integer
+          format: int64
+        offset:
+          type: integer
+        limit:
+          type: integer
       additionalProperties: false
 
     APIKeyCreateRequest:

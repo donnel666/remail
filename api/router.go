@@ -24,6 +24,7 @@ import (
 	iamapi "github.com/donnel666/remail/internal/iam/api"
 	icloudapi "github.com/donnel666/remail/internal/icloud"
 	"github.com/donnel666/remail/internal/kitesim"
+	lotteryapi "github.com/donnel666/remail/internal/lottery/api"
 	mailmatchapi "github.com/donnel666/remail/internal/mailmatch/api"
 	mailapi "github.com/donnel666/remail/internal/mailtransport/api"
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
@@ -237,6 +238,10 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		iamMod.LoginUseCase.SetRegistrationRewardWallet(billingMod.WalletUseCase)
 		billingapi.RegisterBillingRoutes(v1, billingMod, iamSessionFetcher, iamMod.PermissionChecker, turnstileGuard)
 		cleanupFuncs = append(cleanupFuncs, billingapi.RegisterBillingTaskHandlers(taskMux, billingMod))
+
+		lotteryMod := lotteryapi.NewModule(p.DB, p.Asynq, billingMod.WalletUseCase, iamMod.Users, mailMod.DeliveryUseCase)
+		lotteryapi.RegisterRoutes(v1, lotteryMod, iamSessionFetcher, iamMod.PermissionChecker, turnstileGuard)
+		cleanupFuncs = append(cleanupFuncs, lotteryapi.RegisterTaskHandlers(taskMux, lotteryMod))
 
 		// OpenAPI credentials and order service tokens.
 		openapiMod := openapiapi.NewModule(p.DB, p.Redis)

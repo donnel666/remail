@@ -191,6 +191,39 @@ func LeaderboardRewardMessage(recipient, businessDate string, rank, score int, a
 	)
 }
 
+func LotteryWinnerMessage(recipient string, lotteryID uint, title, amount, tier string) domain.OutboundMessage {
+	recipient = strings.TrimSpace(recipient)
+	title = oneLine(title, 120)
+	if title == "" {
+		title = "ReMail 抽奖"
+	}
+	tierLabel := map[string]string{
+		"consolation": "安慰奖",
+		"normal":      "普通奖",
+		"lucky":       "幸运奖",
+	}[strings.TrimSpace(tier)]
+	if tierLabel == "" {
+		tierLabel = "抽奖奖励"
+	}
+	details := []notificationDetail{
+		{Label: "抽奖活动", Value: title},
+		{Label: "奖励档位", Value: tierLabel},
+		{Label: "奖励积分", Value: amount + " 积分"},
+	}
+	return notificationMessage(
+		domain.PurposeSystemNotice,
+		messageDigest("lottery_winner", lotteryID, recipient),
+		recipient,
+		"ReMail 抽奖奖励到账通知",
+		"抽奖奖励到账",
+		"恭喜您获得本次抽奖奖励。",
+		notificationDetailsText(details),
+		notificationTableContentTemplate,
+		details,
+		"奖励已发放至您的消费钱包，此邮件由系统自动发送。",
+	)
+}
+
 func LoginNotificationMessage(recipient, sessionID, clientIP, userAgent string, at time.Time) domain.OutboundMessage {
 	recipient = strings.TrimSpace(recipient)
 	clientIP = oneLine(clientIP, 64)

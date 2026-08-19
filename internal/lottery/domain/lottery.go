@@ -1,0 +1,110 @@
+package domain
+
+import (
+	"errors"
+	"time"
+)
+
+type Status string
+
+const (
+	// StatusFunding is retained only for records created by the pre-system-grant
+	// implementation. New activities are created directly as open.
+	StatusFunding   Status = "funding"
+	StatusOpen      Status = "open"
+	StatusSettling  Status = "settling"
+	StatusCompleted Status = "completed"
+	StatusCancelled Status = "cancelled"
+)
+
+func (s Status) String() string { return string(s) }
+
+type Trigger string
+
+const (
+	TriggerTime         Trigger = "time"
+	TriggerParticipants Trigger = "participants"
+	TriggerNone         Trigger = ""
+)
+
+type Tier string
+
+const (
+	TierConsolation Tier = "consolation"
+	TierNormal      Tier = "normal"
+	TierLucky       Tier = "lucky"
+)
+
+func (t Tier) String() string { return string(t) }
+
+var (
+	ErrLotteryNotFound            = errors.New("lottery not found")
+	ErrLotteryClosed              = errors.New("lottery is closed")
+	ErrLotteryNotReady            = errors.New("lottery draw conditions are not met")
+	ErrLotteryAlreadyEntered      = errors.New("already entered this lottery")
+	ErrLotteryNotEligible         = errors.New("account is not eligible for this lottery")
+	ErrLotteryNoEntries           = errors.New("lottery has no eligible entries")
+	ErrLotteryInvalidRules        = errors.New("lottery rules are invalid")
+	ErrLotteryIdempotencyConflict = errors.New("lottery idempotency key conflicts with an existing request")
+	ErrLotterySettlement          = errors.New("lottery settlement is pending")
+)
+
+type TierWeights struct {
+	Consolation int `json:"consolation"`
+	Normal      int `json:"normal"`
+	Lucky       int `json:"lucky"`
+}
+
+func (w TierWeights) Total() int { return w.Consolation + w.Normal + w.Lucky }
+
+func (w TierWeights) Valid() bool {
+	return w.Consolation > 0 && w.Consolation <= 100 &&
+		w.Normal >= 0 && w.Normal <= 100 &&
+		w.Lucky >= 0 && w.Lucky <= 100 &&
+		w.Total() == 100
+}
+
+type Lottery struct {
+	ID                 uint
+	PublicToken        string
+	CreatedByUserID    uint
+	Title              string
+	TotalAmount        string
+	MinPayout          string
+	MaxPayout          string
+	TierWeights        TierWeights
+	MinAccountAgeDays  int
+	DrawAt             *time.Time
+	ParticipantTarget  *int
+	ParticipantCount   int
+	MaxParticipants    int
+	Status             Status
+	TriggeredBy        Trigger
+	TargetReachedAt    *time.Time
+	AlgorithmVersion   string
+	UnusedAmount       string
+	IdempotencyKey     string
+	RequestFingerprint string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	SettledAt          *time.Time
+}
+
+type Entry struct {
+	ID           uint
+	LotteryID    uint
+	UserID       uint
+	RegisteredAt time.Time
+	CreatedAt    time.Time
+}
+
+type Payout struct {
+	ID                   uint
+	LotteryID            uint
+	UserID               uint
+	Tier                 Tier
+	Amount               string
+	BillingTransactionNo string
+	MailQueuedAt         *time.Time
+	CreatedAt            time.Time
+}
