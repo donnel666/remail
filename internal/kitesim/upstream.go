@@ -82,6 +82,39 @@ type CardProfile struct {
 	Address      string `json:"address"`
 }
 
+const (
+	kitesimDefaultFirstName = "noreal"
+	kitesimDefaultLastName  = "name"
+	kitesimDefaultPhone     = "6505438765"
+	kitesimDefaultCountry   = "US"
+	kitesimDefaultCity      = "Mountain View"
+	kitesimDefaultAddress   = "1295 Charleston Rd"
+)
+
+func applyKitesimCardDefaults(card *CardProfile, billingEmail string) {
+	if strings.TrimSpace(card.BillingEmail) == "" {
+		card.BillingEmail = strings.TrimSpace(billingEmail)
+	}
+	if strings.TrimSpace(card.FirstName) == "" {
+		card.FirstName = kitesimDefaultFirstName
+	}
+	if strings.TrimSpace(card.LastName) == "" {
+		card.LastName = kitesimDefaultLastName
+	}
+	if strings.TrimSpace(card.Phone) == "" {
+		card.Phone = kitesimDefaultPhone
+	}
+	if strings.TrimSpace(card.Country) == "" {
+		card.Country = kitesimDefaultCountry
+	}
+	if strings.TrimSpace(card.City) == "" {
+		card.City = kitesimDefaultCity
+	}
+	if strings.TrimSpace(card.Address) == "" {
+		card.Address = kitesimDefaultAddress
+	}
+}
+
 type UpstreamConfigUpdate struct {
 	AccountID uint
 	Card      *CardProfile
@@ -227,31 +260,36 @@ func (s *Service) SaveUpstream(ctx context.Context, update UpstreamConfigUpdate,
 		updates["card_expiry_year"] = 0
 		updates["card_revision"] = gorm.Expr("card_revision + 1")
 	}
+	var card *CardProfile
 	if update.Card != nil {
-		card := *update.Card
-		brand, err := normalizeCard(&card, s.now())
-		if err != nil {
-			return err
-		}
-		encoded, err := json.Marshal(card)
-		if err != nil {
-			return err
-		}
-		updates["card_profile"] = jsonText(encoded)
-		updates["card_brand"] = brand
-		updates["card_last4"] = card.Number[len(card.Number)-4:]
-		updates["card_expiry_month"] = card.ExpiryMonth
-		updates["card_expiry_year"] = card.ExpiryYear
-		updates["card_revision"] = gorm.Expr("card_revision + 1")
+		cardValue := *update.Card
+		card = &cardValue
 	}
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var account accountModel
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Select("id").Where("id = ? AND deleted_at IS NULL", update.AccountID).First(&account).Error; err != nil {
+			Select("id, account").Where("id = ? AND deleted_at IS NULL", update.AccountID).First(&account).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrAccountMissing
 			}
 			return fmt.Errorf("load Kitesim upstream account: %w", err)
+		}
+		if card != nil {
+			applyKitesimCardDefaults(card, account.Account)
+			brand, err := normalizeCard(card, s.now())
+			if err != nil {
+				return err
+			}
+			encoded, err := json.Marshal(card)
+			if err != nil {
+				return err
+			}
+			updates["card_profile"] = jsonText(encoded)
+			updates["card_brand"] = brand
+			updates["card_last4"] = card.Number[len(card.Number)-4:]
+			updates["card_expiry_month"] = card.ExpiryMonth
+			updates["card_expiry_year"] = card.ExpiryYear
+			updates["card_revision"] = gorm.Expr("card_revision + 1")
 		}
 		if err := ensureUpstreamSettings(tx); err != nil {
 			return err

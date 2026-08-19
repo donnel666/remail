@@ -124,6 +124,28 @@ const EMPTY_KITESIM_CARD: KitesimCardProfile = {
   address: "",
 };
 
+const KITESIM_BILLING_DEFAULTS = {
+  firstName: "noreal",
+  lastName: "name",
+  phone: "6505438765",
+  country: "US",
+  city: "Mountain View",
+  address: "1295 Charleston Rd",
+};
+
+function withKitesimBillingDefaults(card: KitesimCardProfile, billingEmail: string): KitesimCardProfile {
+  return {
+    ...card,
+    billingEmail: card.billingEmail.trim() || billingEmail,
+    firstName: card.firstName.trim() || KITESIM_BILLING_DEFAULTS.firstName,
+    lastName: card.lastName.trim() || KITESIM_BILLING_DEFAULTS.lastName,
+    phone: card.phone.trim() || KITESIM_BILLING_DEFAULTS.phone,
+    country: card.country.trim() || KITESIM_BILLING_DEFAULTS.country,
+    city: card.city.trim() || KITESIM_BILLING_DEFAULTS.city,
+    address: card.address.trim() || KITESIM_BILLING_DEFAULTS.address,
+  };
+}
+
 const KITESIM_TASK_META: Record<
   KitesimTaskStatus,
   { color: "blue" | "green" | "grey" | "orange" | "red"; label: string }
@@ -239,16 +261,23 @@ function KitesimUpstreamSection({
     [upstream?.products],
   );
   const selectedProduct = activeProducts.find((product) => product.id === purchaseProductId);
+  const selectedAccountEmail = useMemo(
+    () => upstream?.accounts.find((account) => account.id === accountId)?.account
+      ?? (accountId === upstream?.accountId ? upstream?.account ?? "" : ""),
+    [accountId, upstream?.account, upstream?.accountId, upstream?.accounts],
+  );
+  const cardDraft = useMemo(
+    () => withKitesimBillingDefaults(card, selectedAccountEmail),
+    [card, selectedAccountEmail],
+  );
   const settingsDirty = accountId !== (upstream?.accountId ?? 0);
   const cardTouched = Boolean(
-    card.number.trim() || card.expiryMonth || card.expiryYear || card.holder.trim() ||
-    card.billingEmail.trim() || card.firstName.trim() || card.lastName.trim() ||
-    card.phone.trim() || card.country.trim() || card.city.trim() || card.address.trim(),
+    card.number.trim() || card.expiryMonth || card.expiryYear || card.holder.trim(),
   );
   const cardComplete = Boolean(
-    card.number.trim() && card.expiryMonth && card.expiryYear && card.holder.trim() &&
-    card.billingEmail.trim() && card.firstName.trim() && card.lastName.trim() &&
-    card.phone.trim() && card.country.trim() && card.city.trim() && card.address.trim(),
+    cardDraft.number.trim() && cardDraft.expiryMonth && cardDraft.expiryYear && cardDraft.holder.trim() &&
+    cardDraft.billingEmail.trim() && cardDraft.firstName.trim() && cardDraft.lastName.trim() &&
+    cardDraft.phone.trim() && cardDraft.country.trim() && cardDraft.city.trim() && cardDraft.address.trim(),
   );
 
   const saveKitesimSettings = async () => {
@@ -265,7 +294,7 @@ function KitesimUpstreamSection({
       await updateKitesimUpstream({
         accountId,
         clearCard: false,
-        ...(canSensitive && cardComplete ? { card } : {}),
+        ...(canSensitive && cardComplete ? { card: cardDraft } : {}),
       });
       accountEditedRef.current = false;
       setCard({ ...EMPTY_KITESIM_CARD });
@@ -440,13 +469,13 @@ function KitesimUpstreamSection({
                 <SettingsNumberField label="到期月份" value={card.expiryMonth || undefined} onChange={(value) => setCard((current) => ({ ...current, expiryMonth: value }))} min={1} max={12} precision={0} />
                 <SettingsNumberField label="到期年份" value={card.expiryYear || undefined} onChange={(value) => setCard((current) => ({ ...current, expiryYear: value }))} min={new Date().getFullYear()} max={2200} precision={0} />
                 <SettingsTextField label="持卡人姓名" value={card.holder} onChange={(value) => setCard((current) => ({ ...current, holder: value }))} disabled={!canWrite} />
-                <SettingsTextField label="账单邮箱" value={card.billingEmail} onChange={(value) => setCard((current) => ({ ...current, billingEmail: value }))} disabled={!canWrite} />
-                <SettingsTextField label="账单名" value={card.firstName} onChange={(value) => setCard((current) => ({ ...current, firstName: value }))} disabled={!canWrite} />
-                <SettingsTextField label="账单姓" value={card.lastName} onChange={(value) => setCard((current) => ({ ...current, lastName: value }))} disabled={!canWrite} />
-                <SettingsTextField label="账单手机号" value={card.phone} onChange={(value) => setCard((current) => ({ ...current, phone: value }))} disabled={!canWrite} />
-                <SettingsTextField label="账单国家（ISO 2 位）" value={card.country} onChange={(value) => setCard((current) => ({ ...current, country: value.toUpperCase() }))} disabled={!canWrite} placeholder="US" />
-                <SettingsTextField label="账单城市" value={card.city} onChange={(value) => setCard((current) => ({ ...current, city: value }))} disabled={!canWrite} />
-                <SettingsTextField label="账单地址" value={card.address} onChange={(value) => setCard((current) => ({ ...current, address: value }))} disabled={!canWrite} />
+                <SettingsTextField label="账单邮箱" value={cardDraft.billingEmail} onChange={(value) => setCard((current) => ({ ...current, billingEmail: value }))} disabled={!canWrite} />
+                <SettingsTextField label="账单名" value={cardDraft.firstName} onChange={(value) => setCard((current) => ({ ...current, firstName: value }))} disabled={!canWrite} />
+                <SettingsTextField label="账单姓" value={cardDraft.lastName} onChange={(value) => setCard((current) => ({ ...current, lastName: value }))} disabled={!canWrite} />
+                <SettingsTextField label="账单手机号" value={cardDraft.phone} onChange={(value) => setCard((current) => ({ ...current, phone: value }))} disabled={!canWrite} />
+                <SettingsTextField label="账单国家（ISO 2 位）" value={cardDraft.country} onChange={(value) => setCard((current) => ({ ...current, country: value.toUpperCase() }))} disabled={!canWrite} placeholder="US" />
+                <SettingsTextField label="账单城市" value={cardDraft.city} onChange={(value) => setCard((current) => ({ ...current, city: value }))} disabled={!canWrite} />
+                <SettingsTextField label="账单地址" value={cardDraft.address} onChange={(value) => setCard((current) => ({ ...current, address: value }))} disabled={!canWrite} />
               </SettingsFormGrid>
             </SettingsAccessBoundary>
           ) : (

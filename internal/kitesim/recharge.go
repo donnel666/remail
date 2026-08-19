@@ -90,15 +90,16 @@ func (s *Service) executeRecharge(ctx context.Context, operation operationModel,
 	if err := json.Unmarshal([]byte(settings.CardData), &card); err != nil {
 		return "", err
 	}
-	if _, err := normalizeCard(&card, s.now()); err != nil {
-		return "", err
-	}
 	var account accountModel
 	if err := s.db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", operation.AccountID).First(&account).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return "", ErrAccountMissing
 		}
 		return "", fmt.Errorf("load Kitesim recharge account: %w", err)
+	}
+	applyKitesimCardDefaults(&card, account.Account)
+	if _, err := normalizeCard(&card, s.now()); err != nil {
+		return "", err
 	}
 
 	orderNo := ""

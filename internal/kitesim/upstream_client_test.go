@@ -19,6 +19,46 @@ func (failingRequestDoer) Do(*http.Request) (*http.Response, error) {
 	return nil, errors.New("connection reset")
 }
 
+func TestSaveUpstreamAppliesBillingDefaults(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&accountModel{}, &upstreamSettingsModel{}); err != nil {
+		t.Fatal(err)
+	}
+	account := accountModel{Account: "owner@example.com", Password: "password"}
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	service := NewService(db, &testSyncQueue{})
+	service.logs = testOperationLogs{}
+	if err := service.SaveUpstream(context.Background(), UpstreamConfigUpdate{
+		AccountID: account.ID,
+		Card: &CardProfile{
+			Number: "4111111111111111", ExpiryMonth: 8, ExpiryYear: 2030, Holder: "Test User",
+		},
+	}, MutationMeta{OperatorUserID: 1, Path: "/test"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var settings upstreamSettingsModel
+	if err := db.First(&settings, upstreamSettingsID).Error; err != nil {
+		t.Fatal(err)
+	}
+	var card CardProfile
+	if err := json.Unmarshal([]byte(settings.CardData), &card); err != nil {
+		t.Fatal(err)
+	}
+	if card.BillingEmail != account.Account || card.FirstName != kitesimDefaultFirstName ||
+		card.LastName != kitesimDefaultLastName || card.Phone != kitesimDefaultPhone ||
+		card.Country != kitesimDefaultCountry || card.City != kitesimDefaultCity ||
+		card.Address != kitesimDefaultAddress {
+		t.Fatalf("billing defaults = %+v", card)
+	}
+}
+
 type persistedRefreshQueue struct {
 	db        *gorm.DB
 	sawQueued bool
