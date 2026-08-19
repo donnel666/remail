@@ -42,19 +42,20 @@ const testICloudPrimaryFamilyResponse = `{
 }`
 
 func TestICloudFamilyClientValidatesAuthoritativeMembership(t *testing.T) {
+	browser := appleweb.AutomatedBrowserProfile("child@example.com")
 	client := newICloudFamilyClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
 		if request.Method != http.MethodGet || request.URL.String() != iCloudFamilyMembersEndpoint {
 			t.Fatalf("family request = %s %s", request.Method, request.URL)
 		}
-		if request.Header.Get("Cookie") != testICloudFamilyCookie || request.Header.Get("User-Agent") != appleweb.UserAgent ||
-			request.Header.Get("Accept-Language") != appleweb.AcceptLanguage || request.Header.Get("Sec-CH-UA") != appleweb.SecCHUA ||
-			request.Header.Get("Sec-CH-UA-Mobile") != "?0" || request.Header.Get("Sec-CH-UA-Platform") != appleweb.SecCHPlatform {
+		if request.Header.Get("Cookie") != testICloudFamilyCookie || request.Header.Get("User-Agent") != browser.UserAgent ||
+			request.Header.Get("Accept-Language") != appleweb.AcceptLanguage || request.Header.Get("Sec-CH-UA") != browser.SecCHUA ||
+			request.Header.Get("Sec-CH-UA-Mobile") != "?0" || request.Header.Get("Sec-CH-UA-Platform") != browser.SecCHPlatform {
 			t.Fatalf("family request did not reuse channel identity: headers=%v", request.Header)
 		}
 		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(testICloudFamilyResponse))}, nil
 	})})
 	snapshot, err := client.fetch(context.Background(), iCloudResourceChannelModel{
-		Kind: iCloudChannelWeb, Cookie: "mail-cookie=unused", SetupCookie: testICloudFamilyCookie, UserAgent: "windows-must-not-leak",
+		Kind: iCloudChannelWeb, Cookie: "mail-cookie=unused", SetupCookie: testICloudFamilyCookie, UserAgent: browser.UserAgent,
 	})
 	if err != nil {
 		t.Fatalf("fetch family members: %v", err)

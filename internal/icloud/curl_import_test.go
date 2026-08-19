@@ -8,10 +8,11 @@ import (
 )
 
 const (
-	testICloudOldCookie    = "X-APPLE-WEBAUTH-USER=user; X-APPLE-WEBAUTH-TOKEN=token; X-APPLE-DS-WEB-SESSION-TOKEN=session"
-	testICloudNewCookie    = "myacinfo=secret"
-	testICloudFDClientInfo = `{"F":"test-fingerprint"}`
-	testICloudOldCurl      = `curl --url 'https://p119-maildomainws.icloud.com.cn/v2/hme/list?clientBuildNumber=build&clientMasteringNumber=master&clientId=client&dsid=123' -b '` + testICloudOldCookie + `'`
+	testICloudOldCookie       = "X-APPLE-WEBAUTH-USER=user; X-APPLE-WEBAUTH-TOKEN=token; X-APPLE-DS-WEB-SESSION-TOKEN=session"
+	testICloudNewCookie       = "myacinfo=secret"
+	testICloudFDClientInfo    = `{"F":"test-fingerprint"}`
+	testICloudLegacyUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
+	testICloudOldCurl         = `curl --url 'https://p119-maildomainws.icloud.com.cn/v2/hme/list?clientBuildNumber=build&clientMasteringNumber=master&clientId=client&dsid=123' -b '` + testICloudOldCookie + `'`
 )
 
 var (
@@ -43,6 +44,9 @@ func TestParseICloudImportSupportsCompleteCredentialLines(t *testing.T) {
 			for index, kind := range test.wantKinds {
 				if line.Channels[index].Kind != kind {
 					t.Fatalf("channel %d kind = %q, want %q", index, line.Channels[index].Kind, kind)
+				}
+				if line.Channels[index].UserAgent != testICloudLegacyUserAgent {
+					t.Fatalf("channel %d user agent = %q, want legacy Windows default", index, line.Channels[index].UserAgent)
 				}
 				if kind == iCloudChannelAppleAccount &&
 					(line.Channels[index].APIKey != "api-key" || line.Channels[index].FDClientInfo != testICloudFDClientInfo || line.Channels[index].Scnt != testICloudLongScnt) {

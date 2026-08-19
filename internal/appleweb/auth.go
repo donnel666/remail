@@ -28,6 +28,45 @@ const (
 	srpNLength     = 256
 )
 
+type BrowserProfile struct {
+	UserAgent     string
+	SecCHUA       string
+	SecCHPlatform string
+}
+
+var automatedBrowserProfiles = [...]BrowserProfile{
+	{
+		UserAgent:     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+		SecCHUA:       SecCHUA,
+		SecCHPlatform: `"Windows"`,
+	},
+	{
+		UserAgent:     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+		SecCHUA:       SecCHUA,
+		SecCHPlatform: `"Linux"`,
+	},
+}
+
+// AutomatedBrowserProfile gives each Apple ID a stable Windows or Linux
+// identity, so retries and later Cookie refreshes do not change platforms.
+func AutomatedBrowserProfile(key string) BrowserProfile {
+	digest := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(key))))
+	return automatedBrowserProfiles[int(digest[0])%len(automatedBrowserProfiles)]
+}
+
+func BrowserProfileForUserAgent(userAgent string) (BrowserProfile, bool) {
+	userAgent = strings.TrimSpace(userAgent)
+	if userAgent == UserAgent {
+		return BrowserProfile{UserAgent: UserAgent, SecCHUA: SecCHUA, SecCHPlatform: SecCHPlatform}, true
+	}
+	for _, profile := range automatedBrowserProfiles {
+		if userAgent == profile.UserAgent {
+			return profile, true
+		}
+	}
+	return BrowserProfile{}, false
+}
+
 var (
 	srpN = mustBigInt(
 		"AC6BDB41324A9A9BF166DE5E1389582FAF72B6651987EE07FC3192943DB56050" +
@@ -230,6 +269,14 @@ var appleCollectorReplacements = []string{
 }
 
 func FDClientInfo(now time.Time) (string, error) {
+	return FDClientInfoFor(UserAgent, now)
+}
+
+func FDClientInfoFor(userAgent string, now time.Time) (string, error) {
+	userAgent = strings.TrimSpace(userAgent)
+	if userAgent == "" {
+		userAgent = UserAgent
+	}
 	shanghai := time.FixedZone("Asia/Shanghai", 8*60*60)
 	local := now.In(shanghai)
 	current := fmt.Sprintf("%d/%d/%d %d:%d:%d", local.Year(), int(local.Month()), local.Day(), local.Hour(), local.Minute(), local.Second())
@@ -252,7 +299,7 @@ func FDClientInfo(now time.Time) (string, error) {
 		Zone      string `json:"Z"`
 		Version   string `json:"V"`
 		Finger    string `json:"F"`
-	}{UserAgent, Language, TimeZoneOffset, "1.1", encoded}
+	}{userAgent, Language, TimeZoneOffset, "1.1", encoded}
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return "", err

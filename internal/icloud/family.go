@@ -128,10 +128,12 @@ func (c *iCloudFamilyClient) fetch(ctx context.Context, channel iCloudResourceCh
 	request.Header.Set("Sec-Fetch-Dest", "empty")
 	request.Header.Set("Sec-Fetch-Mode", "cors")
 	request.Header.Set("Sec-Fetch-Site", "same-origin")
-	request.Header.Set("Sec-CH-UA", appleweb.SecCHUA)
-	request.Header.Set("Sec-CH-UA-Mobile", "?0")
-	request.Header.Set("Sec-CH-UA-Platform", appleweb.SecCHPlatform)
-	request.Header.Set("User-Agent", defaultICloudHMEUserAgent)
+	userAgent := strings.TrimSpace(channel.UserAgent)
+	if userAgent == "" {
+		userAgent = defaultICloudHMEUserAgent
+	}
+	request.Header.Set("User-Agent", userAgent)
+	setAppleBrowserClientHints(request.Header, userAgent)
 	response, err := c.httpClient.Do(request)
 	if err != nil {
 		if response != nil && response.Body != nil {

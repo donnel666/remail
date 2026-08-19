@@ -140,7 +140,7 @@ func (c *appleOnboardingClient) Execute(ctx context.Context, request AppleOnboar
 	if c == nil || c.newSession == nil || strings.TrimSpace(request.Operation) == "" {
 		return AppleOnboardingResponse{}, ErrICloudOnboardingProvider
 	}
-	flow, err := loadAppleOnboardingFlow(ctx, c, request.Session)
+	flow, err := loadAppleOnboardingFlow(ctx, c, request.Session, request.Email)
 	if err != nil {
 		return AppleOnboardingResponse{}, err
 	}

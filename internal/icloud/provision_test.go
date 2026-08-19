@@ -154,6 +154,60 @@ func assertFixedAppleRequestFingerprint(t *testing.T, request *http.Request) {
 	}
 }
 
+func TestAppleAccountRequestsPreserveImportedWindowsFingerprint(t *testing.T) {
+	const (
+		windowsUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36 Edg/151.0.0.0"
+		windowsFDInfo    = `{"U":"` + windowsUserAgent + `","L":"zh-CN","Z":"GMT+08:00","V":"1.1","F":"imported"}`
+	)
+	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+	client := NewAppleAccountClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		if got := request.Header.Get("User-Agent"); got != windowsUserAgent {
+			t.Fatalf("Apple user agent = %q, want imported Windows fingerprint", got)
+		}
+		for _, name := range []string{"Sec-CH-UA", "Sec-CH-UA-Mobile", "Sec-CH-UA-Platform"} {
+			if got := request.Header.Get(name); got != "" {
+				t.Fatalf("%s = %q, want omitted for imported fingerprint", name, got)
+			}
+		}
+		if request.URL.Path != "/account/manage/section/privacy" && request.Header.Get("X-Apple-I-FD-Client-Info") != windowsFDInfo {
+			t.Fatal("Apple FD client info did not preserve the imported Windows fingerprint")
+		}
+		body := `{}`
+		switch request.URL.Path {
+		case appleAccountPrivateEmailPath:
+			body = `{"privateEmailList":[]}`
+		case "/account/manage/section/privacy":
+			body = `<html></html>`
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+	})})
+	channel := iCloudResourceChannelModel{
+		Host: "appleid.apple.com", Cookie: "myacinfo=secret", Scnt: "scnt", APIKey: "api-key",
+		UserAgent: windowsUserAgent, FDClientInfo: windowsFDInfo,
+	}
+	if _, refreshed, err := client.list(context.Background(), channel, now); err != nil ||
+		refreshed.UserAgent != windowsUserAgent || refreshed.FDClientInfo != windowsFDInfo {
+		t.Fatalf("list with imported fingerprint: channel=%#v err=%v", refreshed, err)
+	}
+	if err := client.portalRequest(context.Background(), &channel, "/account/manage/section/privacy", false, now); err != nil {
+		t.Fatalf("HTML portal request with imported fingerprint: %v", err)
+	}
+	if err := client.portalRequest(context.Background(), &channel, "/bootstrap/portal", true, now); err != nil {
+		t.Fatalf("JSON portal request with imported fingerprint: %v", err)
+	}
+}
+
+func TestAppleAccountRequestFDClientInfoPreservesImportedOpaqueValue(t *testing.T) {
+	for _, value := range []string{
+		`{"F":"imported-without-user-agent"}`,
+		`{"U":"different-user-agent","F":"imported-mismatch"}`,
+	} {
+		if got := appleAccountRequestFDClientInfo(iCloudResourceChannelModel{FDClientInfo: value}, "saved-user-agent", time.Time{}); got != value {
+			t.Fatalf("FD client info = %q, want imported value %q", got, value)
+		}
+	}
+}
+
 func TestAppleAccountRefreshRejectsBootstrapWithoutScnt(t *testing.T) {
 	now := time.Date(2026, 8, 14, 9, 15, 0, 0, time.UTC)
 	client := NewAppleAccountClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {

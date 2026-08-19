@@ -369,7 +369,6 @@ func (s *Service) createICloudAppleAccountAlias(ctx context.Context, resource iC
 
 func (s *Service) provisionICloudWeb(ctx context.Context, resource iCloudResourceModel, channel iCloudResourceChannelModel, createAllowed bool, now time.Time) (*hmeAlias, bool, error) {
 	ctx = withAppleRouteEmail(ctx, resource.PrimaryEmail)
-	channel.UserAgent = defaultICloudHMEUserAgent
 	client := s.hme
 	if client == nil {
 		client = newRoutedHMEClient(s.appleRoutes)

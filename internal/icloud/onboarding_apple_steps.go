@@ -400,10 +400,11 @@ func (f *appleOnboardingFlow) familyJoinResponse() (AppleOnboardingResponse, err
 	if cookie == "" {
 		return AppleOnboardingResponse{}, &AppleOnboardingError{Category: "family_session_missing", SafeMessage: "Apple did not return a usable family session.", Retryable: true}
 	}
+	browser := f.browserProfile()
 	return AppleOnboardingResponse{Next: "ready", FamilyChannel: &AppleOnboardingChannel{
 		Kind: iCloudChannelFamilySession, Host: appleOnboardingHost(endpoint), Cookie: cookie, SetupCookie: cookie,
 		Origin: endpoint, Referer: endpoint + "/members?wid=d&env=idms_prod_account&theme=light&locale=zh_CN",
-		UserAgent: appleweb.UserAgent,
+		UserAgent: browser.UserAgent,
 	}}, nil
 }
 
@@ -761,7 +762,8 @@ func (f *appleOnboardingFlow) exportChannels(AppleOnboardingRequest) (AppleOnboa
 	if cookie == "" {
 		return AppleOnboardingResponse{}, &AppleOnboardingError{Category: "new_cookie_missing", SafeMessage: "Apple Account did not return a usable session cookie."}
 	}
-	fdInfo, err := appleweb.FDClientInfo(f.now())
+	browser := f.browserProfile()
+	fdInfo, err := appleweb.FDClientInfoFor(browser.UserAgent, f.now())
 	if err != nil {
 		return AppleOnboardingResponse{}, err
 	}
@@ -769,7 +771,7 @@ func (f *appleOnboardingFlow) exportChannels(AppleOnboardingRequest) (AppleOnboa
 	newChannel := &AppleOnboardingChannel{
 		Kind: iCloudChannelAppleAccount, Host: appleOnboardingHost(f.endpoints.AppleID), Cookie: cookie,
 		Origin: f.endpoints.Account, Referer: strings.TrimRight(f.endpoints.Account, "/") + "/",
-		UserAgent: appleweb.UserAgent, FDClientInfo: fdInfo, Scnt: f.state.Scnt[appleOnboardingHost(f.endpoints.AppleID)],
+		UserAgent: browser.UserAgent, FDClientInfo: fdInfo, Scnt: f.state.Scnt[appleOnboardingHost(f.endpoints.AppleID)],
 		APIKey: f.state.APIKey, ManageExpiresAt: &expiresAt,
 	}
 	return AppleOnboardingResponse{Next: "ready", CountryCode: f.state.AccountCountry, OldChannel: f.state.OldChannel, NewChannel: newChannel}, nil
@@ -904,14 +906,15 @@ func (f *appleOnboardingFlow) oldChannel() (*AppleOnboardingChannel, error) {
 	if cookie == "" {
 		return nil, &AppleOnboardingError{Category: "old_cookie_missing", SafeMessage: "iCloud did not return a usable V2 session cookie."}
 	}
-	fdInfo, err := appleweb.FDClientInfo(f.now())
+	browser := f.browserProfile()
+	fdInfo, err := appleweb.FDClientInfoFor(browser.UserAgent, f.now())
 	if err != nil {
 		return nil, err
 	}
 	return &AppleOnboardingChannel{
 		Kind: iCloudChannelWeb, Host: appleOnboardingHost(host), Cookie: cookie, SetupCookie: cookie,
 		Origin: f.endpoints.ICloud, Referer: strings.TrimRight(f.endpoints.ICloud, "/") + "/",
-		UserAgent: appleweb.UserAgent, FDClientInfo: fdInfo, DSID: f.state.DSID, ClientID: f.state.SetupClientID,
+		UserAgent: browser.UserAgent, FDClientInfo: fdInfo, DSID: f.state.DSID, ClientID: f.state.SetupClientID,
 		ClientBuildNumber: f.state.BuildNumber, ClientMasteringNumber: f.state.MasteringNumber,
 	}, nil
 }

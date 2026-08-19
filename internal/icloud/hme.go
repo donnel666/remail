@@ -18,7 +18,7 @@ import (
 	"github.com/donnel666/remail/internal/platform"
 )
 
-const defaultICloudHMEUserAgent = appleweb.UserAgent
+const defaultICloudHMEUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
 
 const (
 	iCloudHMEEmailMaxLength           = 320
@@ -160,9 +160,7 @@ func (c *HMEClient) refreshSession(ctx context.Context, config hmeConfig) (hmeCo
 	request.Header.Set("Sec-Fetch-Dest", "empty")
 	request.Header.Set("Sec-Fetch-Mode", "cors")
 	request.Header.Set("Sec-Fetch-Site", "same-site")
-	request.Header.Set("Sec-CH-UA", appleweb.SecCHUA)
-	request.Header.Set("Sec-CH-UA-Mobile", "?0")
-	request.Header.Set("Sec-CH-UA-Platform", appleweb.SecCHPlatform)
+	setAppleBrowserClientHints(request.Header, config.UserAgent)
 	request.Header.Set("Cookie", config.SetupCookie)
 	client := c
 	if client == nil || client.httpClient == nil {
@@ -651,9 +649,7 @@ func (c *HMEClient) request(ctx context.Context, config hmeConfig, method, reque
 	request.Header.Set("Referer", config.Referer)
 	request.Header.Set("User-Agent", config.UserAgent)
 	request.Header.Set("Cookie", config.Cookie)
-	request.Header.Set("Sec-CH-UA", appleweb.SecCHUA)
-	request.Header.Set("Sec-CH-UA-Mobile", "?0")
-	request.Header.Set("Sec-CH-UA-Platform", appleweb.SecCHPlatform)
+	setAppleBrowserClientHints(request.Header, config.UserAgent)
 	client := c
 	if client == nil || client.httpClient == nil {
 		client = NewHMEClient(nil)
@@ -794,7 +790,10 @@ func normalizeHMEConfig(config hmeConfig) hmeConfig {
 	config.LangCode = strings.TrimSpace(config.LangCode)
 	config.Origin = strings.TrimSpace(config.Origin)
 	config.Referer = strings.TrimSpace(config.Referer)
-	config.UserAgent = defaultICloudHMEUserAgent
+	config.UserAgent = strings.TrimSpace(config.UserAgent)
+	if config.UserAgent == "" {
+		config.UserAgent = defaultICloudHMEUserAgent
+	}
 	langCode, origin, referer := defaultICloudHMEContext(config.Host)
 	if config.LangCode == "" {
 		config.LangCode = langCode

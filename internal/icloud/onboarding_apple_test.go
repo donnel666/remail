@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/donnel666/remail/internal/appleweb"
 	"github.com/donnel666/remail/internal/mailtransport/infra/msacl"
 )
 
@@ -71,6 +72,48 @@ func appleOnboardingTestState(t *testing.T, mutate func(*appleOnboardingBrowserS
 	return data
 }
 
+func TestAppleOnboardingNewSessionKeepsWindowsOrLinuxFingerprint(t *testing.T) {
+	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+	session := &appleOnboardingScriptedSession{}
+	client := appleOnboardingTestClient(now, session)
+	flow, err := loadAppleOnboardingFlow(context.Background(), client, nil, "new-account@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, ok := appleweb.BrowserProfileForUserAgent(flow.state.UserAgent)
+	if !ok || profile.SecCHPlatform != `"Windows"` && profile.SecCHPlatform != `"Linux"` {
+		t.Fatalf("new onboarding profile = %+v", profile)
+	}
+	headers, err := flow.headers("https://appleid.apple.com/account/manage", false, true, false, false, false, "application/json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if headers["User-Agent"] != profile.UserAgent || headers["Sec-CH-UA-Platform"] != profile.SecCHPlatform {
+		t.Fatalf("request did not use the selected profile: %v", headers)
+	}
+	var fd struct {
+		UserAgent string `json:"U"`
+	}
+	if err := json.Unmarshal([]byte(headers["X-Apple-I-FD-Client-Info"]), &fd); err != nil || fd.UserAgent != profile.UserAgent {
+		t.Fatalf("FD fingerprint mismatch: payload=%+v err=%v", fd, err)
+	}
+
+	snapshot, err := flow.snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := loadAppleOnboardingFlow(context.Background(), client, snapshot, "different@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.state.UserAgent != profile.UserAgent {
+		t.Fatalf("persisted profile changed: got %q want %q", reloaded.state.UserAgent, profile.UserAgent)
+	}
+	if err := reloaded.reset("manage"); err != nil || reloaded.state.UserAgent != profile.UserAgent {
+		t.Fatalf("reset changed profile: userAgent=%q err=%v", reloaded.state.UserAgent, err)
+	}
+}
+
 func TestAppleOnboardingSendSMSAndClassifiesFailures(t *testing.T) {
 	now := time.Date(2026, 8, 16, 10, 0, 0, 0, time.UTC)
 	t.Run("sent", func(t *testing.T) {
@@ -123,7 +166,7 @@ func TestAppleOnboardingRejectsBadCodeAndMismatchedPermanentPhone(t *testing.T) 
 
 	boot := `<script type="application/json" class="boot_args">{"direct":{"twoSV":{"phoneNumberVerification":{"trustedPhoneNumbers":[{"id":1,"lastTwoDigits":"99"}]}}}}</script>`
 	session = &appleOnboardingScriptedSession{responses: []appleOnboardingScriptedResponse{{status: http.StatusOK, body: boot}}}
-	flow, err := loadAppleOnboardingFlow(context.Background(), appleOnboardingTestClient(now, session), appleOnboardingTestState(t, nil))
+	flow, err := loadAppleOnboardingFlow(context.Background(), appleOnboardingTestClient(now, session), appleOnboardingTestState(t, nil), "test@example.com")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,7 +303,7 @@ func TestAppleOnboardingSelectsUniquePermanentlyBoundTrustedPhone(t *testing.T) 
 		t.Run(test.name, func(t *testing.T) {
 			boot := `<script type="application/json" class="boot_args">{"direct":{"twoSV":{"phoneNumberVerification":{"trustedPhoneNumbers":` + test.phones + `}}}}</script>`
 			session := &appleOnboardingScriptedSession{responses: []appleOnboardingScriptedResponse{{status: http.StatusOK, body: boot}}}
-			flow, err := loadAppleOnboardingFlow(context.Background(), appleOnboardingTestClient(now, session), appleOnboardingTestState(t, nil))
+			flow, err := loadAppleOnboardingFlow(context.Background(), appleOnboardingTestClient(now, session), appleOnboardingTestState(t, nil), "test@example.com")
 			if err != nil {
 				t.Fatal(err)
 			}

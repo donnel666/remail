@@ -16,6 +16,7 @@ func (f roundTripperFunc) RoundTrip(request *http.Request) (*http.Response, erro
 
 func TestHMEListBuildsSafeRequestAndMergesSetCookie(t *testing.T) {
 	const cookie = "X-APPLE-DS-WEB-SESSION-TOKEN=session; X-APPLE-WEBAUTH-USER=user; X-APPLE-WEBAUTH-TOKEN=token"
+	const importedUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36 Edg/151.0.0.0"
 	var seen *http.Request
 	client := NewHMEClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
 		seen = request
@@ -26,12 +27,16 @@ func TestHMEListBuildsSafeRequestAndMergesSetCookie(t *testing.T) {
 	})})
 	result, err := client.list(context.Background(), hmeConfig{
 		Host: "p119-maildomainws.icloud.com", DSID: "123", ClientID: "client", ClientBuildNumber: "build", ClientMasteringNumber: "mastering", Cookie: cookie,
+		UserAgent: importedUserAgent,
 	})
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
 	if seen == nil || seen.URL.Path != "/v2/hme/list" || seen.URL.Query().Get("dsid") != "123" || seen.Header.Get("Cookie") != cookie {
 		t.Fatalf("unexpected HME request: %#v", seen)
+	}
+	if seen.Header.Get("User-Agent") != importedUserAgent || seen.Header.Get("Sec-CH-UA-Platform") != "" {
+		t.Fatalf("HME request changed the imported browser identity: %#v", seen.Header)
 	}
 	if len(result.Aliases) != 1 || result.Aliases[0].Email != "abc@icloud.com" || !result.Aliases[0].Active {
 		t.Fatalf("unexpected HME result: %#v", result)

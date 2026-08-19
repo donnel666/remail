@@ -923,6 +923,7 @@ func (s *Service) createICloudResourcesAndMarkImportSucceeded(
 				} else {
 					resources = append(resources, iCloudResourceModel{
 						ID: resourceIDs[index], ResourceType: "icloud", PrimaryEmail: line.PrimaryEmail,
+						AccountRole: "unknown", FamilySyncStatus: iCloudFamilySyncUnknown,
 						SelectedForwardTo: locked.ForwardToEmail, RequiredForwardTo: locked.ForwardToEmail,
 						ExpireAt: expiresAt, ForSale: false, Status: iCloudResourcePending,
 						CredentialRevision: 1, CredentialUpdatedAt: now, ValidationGeneration: 1, NextValidationAt: iCloudTimePointer(now), CreatedAt: now, UpdatedAt: now,

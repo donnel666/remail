@@ -308,8 +308,7 @@ func (c *AppleAccountClient) request(
 	if origin == "" {
 		origin = defaultAppleAccountOrigin(channel.Host)
 	}
-	userAgent := appleweb.UserAgent
-	clientInfo := appleAccountRequestFDClientInfo(*channel, userAgent, now)
+	userAgent, clientInfo := appleAccountRequestFingerprint(*channel, now)
 	channel.UserAgent = userAgent
 	channel.FDClientInfo = clientInfo
 	request.Header.Set("Accept", "application/json, text/plain, */*")
@@ -328,9 +327,7 @@ func (c *AppleAccountClient) request(
 	request.Header.Set("Sec-Fetch-Site", "same-site")
 	request.Header.Set("Sec-Fetch-Mode", "cors")
 	request.Header.Set("Sec-Fetch-Dest", "empty")
-	request.Header.Set("Sec-CH-UA", appleweb.SecCHUA)
-	request.Header.Set("Sec-CH-UA-Mobile", "?0")
-	request.Header.Set("Sec-CH-UA-Platform", appleweb.SecCHPlatform)
+	setAppleBrowserClientHints(request.Header, userAgent)
 	if apiKey = strings.TrimSpace(apiKey); apiKey != "" {
 		request.Header.Set("X-Apple-Api-Key", apiKey)
 	}
@@ -441,8 +438,7 @@ func (c *AppleAccountClient) portalRequest(ctx context.Context, channel *iCloudR
 	if err != nil {
 		return &appleAccountError{Category: "invalid_context", SafeMessage: "Invalid Apple Account request context."}
 	}
-	userAgent := appleweb.UserAgent
-	clientInfo := appleAccountRequestFDClientInfo(*channel, userAgent, now)
+	userAgent, clientInfo := appleAccountRequestFingerprint(*channel, now)
 	channel.UserAgent = userAgent
 	channel.FDClientInfo = clientInfo
 	request.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
@@ -453,9 +449,7 @@ func (c *AppleAccountClient) portalRequest(ctx context.Context, channel *iCloudR
 	request.Header.Set("Sec-Fetch-Site", "same-origin")
 	request.Header.Set("Sec-Fetch-Mode", "navigate")
 	request.Header.Set("Sec-Fetch-Dest", "document")
-	request.Header.Set("Sec-CH-UA", appleweb.SecCHUA)
-	request.Header.Set("Sec-CH-UA-Mobile", "?0")
-	request.Header.Set("Sec-CH-UA-Platform", appleweb.SecCHPlatform)
+	setAppleBrowserClientHints(request.Header, userAgent)
 	if jsonContent {
 		request.Header.Set("Accept", "application/json, text/plain, */*")
 		request.Header.Set("Content-Type", "application/json")
@@ -519,20 +513,33 @@ func appleAccountFDClientInfo(userAgent string) string {
 	return string(encoded)
 }
 
+func appleAccountRequestFingerprint(channel iCloudResourceChannelModel, now time.Time) (string, string) {
+	userAgent := strings.TrimSpace(channel.UserAgent)
+	if userAgent == "" {
+		userAgent = appleweb.UserAgent
+	}
+	return userAgent, appleAccountRequestFDClientInfo(channel, userAgent, now)
+}
+
 func appleAccountRequestFDClientInfo(channel iCloudResourceChannelModel, userAgent string, now time.Time) string {
 	if value := strings.TrimSpace(channel.FDClientInfo); value != "" && validICloudCurlHeader(value) {
-		var payload struct {
-			UserAgent string `json:"U"`
-		}
-		if json.Unmarshal([]byte(value), &payload) == nil && payload.UserAgent == userAgent {
-			return value
-		}
+		return value
 	}
 	if now.IsZero() {
 		now = time.Now()
 	}
-	if value, err := appleweb.FDClientInfo(now); err == nil {
+	if value, err := appleweb.FDClientInfoFor(userAgent, now); err == nil {
 		return value
 	}
 	return appleAccountFDClientInfo(userAgent)
+}
+
+func setAppleBrowserClientHints(header http.Header, userAgent string) {
+	profile, ok := appleweb.BrowserProfileForUserAgent(userAgent)
+	if !ok {
+		return
+	}
+	header.Set("Sec-CH-UA", profile.SecCHUA)
+	header.Set("Sec-CH-UA-Mobile", "?0")
+	header.Set("Sec-CH-UA-Platform", profile.SecCHPlatform)
 }

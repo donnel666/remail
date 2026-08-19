@@ -162,6 +162,7 @@ func TestICloudImportPersistsBothChannelsWithoutQueueSecrets(t *testing.T) {
 		t.Fatalf("read resource: %v", err)
 	}
 	if resource.Status != iCloudResourcePending ||
+		resource.AccountRole != "unknown" || resource.FamilySyncStatus != iCloudFamilySyncUnknown ||
 		!resource.ExpireAt.Equal(expireAt) || resource.NextValidationAt == nil || resource.NextProvisionAt != nil {
 		t.Fatalf("unexpected persisted resource: %#v", resource)
 	}

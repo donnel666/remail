@@ -96,6 +96,7 @@ func (s *appleOnboardingMSACLSession) RestoreCookies(cookies []msacl.SessionCook
 type appleOnboardingBrowserState struct {
 	Version                int                     `json:"version"`
 	Mode                   string                  `json:"mode,omitempty"`
+	UserAgent              string                  `json:"userAgent,omitempty"`
 	Cookies                []msacl.SessionCookie   `json:"cookies,omitempty"`
 	Status                 int                     `json:"status,omitempty"`
 	Location               string                  `json:"location,omitempty"`
@@ -147,7 +148,7 @@ type appleOnboardingFlow struct {
 	state     appleOnboardingBrowserState
 }
 
-func loadAppleOnboardingFlow(ctx context.Context, client *appleOnboardingClient, raw json.RawMessage) (*appleOnboardingFlow, error) {
+func loadAppleOnboardingFlow(ctx context.Context, client *appleOnboardingClient, raw json.RawMessage, email string) (*appleOnboardingFlow, error) {
 	httpSession, err := client.newSession(ctx)
 	if err != nil {
 		return nil, err
@@ -158,6 +159,7 @@ func loadAppleOnboardingFlow(ctx context.Context, client *appleOnboardingClient,
 	}
 	flow.state = flow.blankState()
 	if len(raw) == 0 {
+		flow.state.UserAgent = appleweb.AutomatedBrowserProfile(email).UserAgent
 		return flow, nil
 	}
 	if err := json.Unmarshal(raw, &flow.state); err != nil || flow.state.Version != appleOnboardingStateVersion {
@@ -165,6 +167,14 @@ func loadAppleOnboardingFlow(ctx context.Context, client *appleOnboardingClient,
 	}
 	if flow.state.Scnt == nil {
 		flow.state.Scnt = make(map[string]string)
+	}
+	// Sessions created before browser identity was persisted keep their old
+	// macOS fingerprint; only newly created automated sessions exclude macOS.
+	if strings.TrimSpace(flow.state.UserAgent) == "" {
+		flow.state.UserAgent = appleweb.UserAgent
+	}
+	if _, ok := appleweb.BrowserProfileForUserAgent(flow.state.UserAgent); !ok {
+		return nil, &AppleOnboardingError{Category: "invalid_session", SafeMessage: "Stored Apple onboarding browser identity is invalid."}
 	}
 	if err := flow.http.RestoreCookies(flow.state.Cookies); err != nil {
 		return nil, err
@@ -186,6 +196,7 @@ func (f *appleOnboardingFlow) blankState() appleOnboardingBrowserState {
 
 func (f *appleOnboardingFlow) reset(mode string) error {
 	oldChannel := f.state.OldChannel
+	userAgent := f.state.UserAgent
 	httpSession, err := f.factory(f.ctx)
 	if err != nil {
 		return err
@@ -193,6 +204,7 @@ func (f *appleOnboardingFlow) reset(mode string) error {
 	f.http = httpSession
 	f.state = f.blankState()
 	f.state.Mode = mode
+	f.state.UserAgent = userAgent
 	f.state.OldChannel = oldChannel
 	frameID, err := appleweb.FrameID()
 	if err != nil {
@@ -201,6 +213,11 @@ func (f *appleOnboardingFlow) reset(mode string) error {
 	f.state.FrameID = frameID
 	f.state.SetupClientID = platform.NewUUIDV7String()
 	return nil
+}
+
+func (f *appleOnboardingFlow) browserProfile() appleweb.BrowserProfile {
+	profile, _ := appleweb.BrowserProfileForUserAgent(f.state.UserAgent)
+	return profile
 }
 
 func (f *appleOnboardingFlow) snapshot() (json.RawMessage, error) {
@@ -267,16 +284,17 @@ func (f *appleOnboardingFlow) headers(rawURL string, html, profile, sendHashcash
 		return nil, err
 	}
 	host := parsed.Hostname()
-	clientInfo, err := appleweb.FDClientInfo(f.now())
+	browser := f.browserProfile()
+	clientInfo, err := appleweb.FDClientInfoFor(browser.UserAgent, f.now())
 	if err != nil {
 		return nil, err
 	}
 	if profile {
 		headers := map[string]string{
-			"User-Agent": appleweb.UserAgent, "Accept": "application/json, text/plain, */*", "Accept-Language": appleweb.AcceptLanguage,
+			"User-Agent": browser.UserAgent, "Accept": "application/json, text/plain, */*", "Accept-Language": appleweb.AcceptLanguage,
 			"Content-Type": "application/json", "Origin": f.endpoints.Account, "Referer": strings.TrimRight(f.endpoints.Account, "/") + "/",
 			"X-Apple-I-FD-Client-Info": clientInfo, "X-Apple-I-Request-Context": "ca", "X-Apple-I-TimeZone": appleweb.TimeZone,
-			"Sec-CH-UA": appleweb.SecCHUA, "Sec-CH-UA-Mobile": "?0", "Sec-CH-UA-Platform": appleweb.SecCHPlatform,
+			"Sec-CH-UA": browser.SecCHUA, "Sec-CH-UA-Mobile": "?0", "Sec-CH-UA-Platform": browser.SecCHPlatform,
 		}
 		if f.state.APIKey != "" {
 			headers["X-Apple-Api-Key"] = f.state.APIKey
@@ -288,10 +306,10 @@ func (f *appleOnboardingFlow) headers(rawURL string, html, profile, sendHashcash
 	}
 	origin := "https://" + parsed.Host
 	headers := map[string]string{
-		"User-Agent": appleweb.UserAgent, "Accept": accept, "Accept-Language": appleweb.AcceptLanguage, "Origin": origin,
+		"User-Agent": browser.UserAgent, "Accept": accept, "Accept-Language": appleweb.AcceptLanguage, "Origin": origin,
 		"Referer": strings.TrimRight(origin, "/") + "/", "X-Apple-I-FD-Client-Info": clientInfo,
 		"X-Apple-I-TimeZone": appleweb.TimeZone, "X-Apple-Privacy-Consent": "true",
-		"Sec-CH-UA": appleweb.SecCHUA, "Sec-CH-UA-Mobile": "?0", "Sec-CH-UA-Platform": appleweb.SecCHPlatform,
+		"Sec-CH-UA": browser.SecCHUA, "Sec-CH-UA-Mobile": "?0", "Sec-CH-UA-Platform": browser.SecCHPlatform,
 	}
 	if !html {
 		headers["Content-Type"] = "application/json"
