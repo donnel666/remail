@@ -2,6 +2,7 @@ export const EMAIL_RESOURCE_KEYS = [
   "microsoft_domain_whitelist",
   "icloud_forwarding_suffixes",
   "icloud_cookie_keepalive_minutes",
+  "icloud_onboarding_max_attempts",
   "icloud_phone_hourly_sms_limit",
   "icloud_phone_cooldown_base_seconds",
   "icloud_phone_cooldown_max_seconds",

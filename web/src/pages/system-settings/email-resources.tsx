@@ -108,6 +108,7 @@ export default function EmailResourceSection({ options, onBulkSave }: SectionPro
         min={1}
         max={12}
       />
+      <SettingsNumberField label={t("iCloud 自动化任务最大重试次数")} value={number(form.icloud_onboarding_max_attempts)} onChange={(value) => update("icloud_onboarding_max_attempts", value)} min={1} max={100} />
       <SettingsNumberField label={t("Apple 手机号每小时接码上限")} description={t("发送失败也占用一次额度")} value={number(form.icloud_phone_hourly_sms_limit)} onChange={(value) => update("icloud_phone_hourly_sms_limit", value)} min={1} max={1000} />
       <SettingsNumberField label={t("Apple 手机号初始冷却（秒）")} value={number(form.icloud_phone_cooldown_base_seconds)} onChange={(value) => update("icloud_phone_cooldown_base_seconds", value)} min={1} max={3600} />
       <SettingsNumberField label={t("Apple 手机号最大冷却（秒）")} value={number(form.icloud_phone_cooldown_max_seconds)} onChange={(value) => update("icloud_phone_cooldown_max_seconds", value)} min={1} max={86400} />
