@@ -154,7 +154,7 @@ func (s *Service) Draw(ctx context.Context, lotteryID uint) error {
 		return err
 	}
 	var payouts []lotterydomain.Payout
-	unusedAmount := "0.00"
+	var unusedAmount string
 	if len(existing) > 0 {
 		payouts = existing
 		unusedAmount, err = remainingUnused(lottery.TotalAmount, payouts)

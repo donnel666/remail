@@ -81,7 +81,7 @@ func TestSettleLotteryPoolRollsBackWholeBatch(t *testing.T) {
 	var created atomic.Int32
 	require.NoError(t, db.Callback().Create().Before("gorm:create").Register("fail-second-lottery-transaction", func(tx *gorm.DB) {
 		if tx.Statement.Table == "wallet_transactions" && created.Add(1) == 2 {
-			tx.AddError(errors.New("forced transaction failure"))
+			_ = tx.AddError(errors.New("forced transaction failure"))
 		}
 	}))
 
