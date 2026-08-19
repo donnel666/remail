@@ -21,4 +21,9 @@ describe("locale contracts", () => {
   it("uses the aligned Chinese Apple mailbox navigation label", () => {
     expect(zh["Admin iCloud Emails"]).toBe("苹果邮箱");
   });
+
+  it("uses the localized activity center navigation label", () => {
+    expect(en["Activity Center"]).toBe("Activity Center");
+    expect(zh["Activity Center"]).toBe("活动中心");
+  });
 });

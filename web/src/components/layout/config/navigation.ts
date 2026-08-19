@@ -143,7 +143,7 @@ export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
       },
       {
         path: "/admin/lotteries",
-        labelKey: "Lottery Management",
+        labelKey: "Activity Center",
         icon: Gift,
         requiredPermission: permissionKey("lottery:lottery", "read"),
       },
