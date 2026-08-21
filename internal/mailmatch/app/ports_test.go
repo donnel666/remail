@@ -383,6 +383,7 @@ func TestDomainCodePickupDoesNotReadMailboxAfterDelivery(t *testing.T) {
 			{Type: MailRuleBody, Pattern: `(\d{6})`, Enabled: true},
 		},
 	}
+	repo.scopes = []OrderScope{scope}
 	uc := NewUseCase(repo, nil, nil, &matchResultStub{})
 	uc.now = func() time.Time { return now }
 
