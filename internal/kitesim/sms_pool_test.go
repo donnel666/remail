@@ -301,6 +301,9 @@ func TestSMSChallengeBlocksPhoneAndRecoversByOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := service.CheckSMSPhoneAvailable(ctx, binding.PhoneID); err != nil {
+		t.Fatalf("available phone preflight = %v", err)
+	}
 	expiresAt := clock.Add(2 * time.Minute)
 	first, err := service.ReserveSMSChallenge(ctx, binding.PhoneID, "apple_manage", "task-1:manage:1", expiresAt)
 	if err != nil {
@@ -308,6 +311,11 @@ func TestSMSChallengeBlocksPhoneAndRecoversByOwner(t *testing.T) {
 	}
 	if err := service.MarkSMSAttemptSent(ctx, first.ID); err != nil {
 		t.Fatal(err)
+	}
+	if err := service.CheckSMSPhoneAvailable(ctx, binding.PhoneID); !errors.Is(err, ErrSMSPhoneUnavailable) {
+		t.Fatalf("active challenge preflight = %v", err)
+	} else if retryAt, ok := SMSRetryAt(err); !ok || !retryAt.Equal(expiresAt) {
+		t.Fatalf("active challenge preflight retry = %v ok=%v", retryAt, ok)
 	}
 	if err := db.Model(&phoneModel{}).Where("id = ?", binding.PhoneID).Update("sms_consecutive_failures", 2).Error; err != nil {
 		t.Fatal(err)
@@ -356,6 +364,30 @@ func TestSMSChallengeBlocksPhoneAndRecoversByOwner(t *testing.T) {
 	old = smsChallengeModel{}
 	if err := db.First(&old, second.ID).Error; err != nil || old.OwnerKey != nil {
 		t.Fatalf("canceled challenge retained owner: %+v err=%v", old, err)
+	}
+}
+
+func TestSMSChallengeExpiredOwnerCanBeRetried(t *testing.T) {
+	setSMSPoolConfig(t, runtimeconfig.ICloudPhoneCooldownBaseSecondsKey, "1")
+	setSMSPoolConfig(t, runtimeconfig.ICloudPhoneCooldownMaxSecondsKey, "1")
+	service, db, clock := newSMSPoolTestService(t)
+	ctx := context.Background()
+	binding, err := service.BindICloudSMSPhone(ctx, "expired-owner@example.com", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := service.ReserveSMSChallenge(ctx, binding.PhoneID, "apple_login", "expired-owner", clock.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	*clock = clock.Add(2 * time.Second)
+	second, err := service.ReserveSMSChallenge(ctx, binding.PhoneID, "apple_login", "expired-owner", clock.Add(time.Minute))
+	if err != nil || second.ID == first.ID {
+		t.Fatalf("expired owner was not retried: %+v err=%v", second, err)
+	}
+	var old smsChallengeModel
+	if err := db.First(&old, first.ID).Error; err != nil || old.OwnerKey != nil {
+		t.Fatalf("expired challenge retained owner: %+v err=%v", old, err)
 	}
 }
 
@@ -422,9 +454,9 @@ func TestClaimAppleSMSMessageFiltersWindowAndConsumesMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 	messages := []MessageItem{
-		{Caller: "Apple", Content: "code 111111", Time: clock.Add(time.Second).Format(time.RFC3339)},
+		{Caller: "Apple", Content: "code 11111", Time: clock.Add(time.Second).Format(time.RFC3339)},
 		{Caller: "106", Content: "Your Apple Account Code is: 222222. Don't share it with anyone.", Time: clock.Add(-time.Minute).Format(time.RFC3339)},
-		{Caller: "106", Content: "你的Apple账户验证码是 333333，切勿向任何人泄露，以防账户或信息被盗。", Time: "2026-08-16 20:00:05"},
+		{Caller: "106", Content: "你的Apple账户验证码是 333333，切勿向任何人泄露，以防账户或信息被盗。", Time: "2026-08-16T20:00:05.124545894"},
 	}
 	*clock = clock.Add(10 * time.Second)
 	claimed, err := service.claimAppleSMSMessage(ctx, first.ID, messages)
@@ -454,12 +486,37 @@ func TestClaimAppleSMSMessageFiltersWindowAndConsumesMessage(t *testing.T) {
 	}
 }
 
+func TestAppleSMSMessageCandidatesPreferNewestCode(t *testing.T) {
+	now := time.Date(2026, time.August, 20, 8, 0, 30, 0, time.UTC)
+	sentAt := now.Add(-20 * time.Second)
+	messages := []MessageItem{
+		{Content: "Your Apple Account Code is: 111111.", Time: now.Add(-15 * time.Second).Format(time.RFC3339)},
+		{Content: "Your Apple Account Code is: 222222.", Time: now.Add(-2 * time.Second).Format(time.RFC3339)},
+	}
+	candidates := appleSMSMessageCandidates(messages, sentAt, now)
+	if len(candidates) != 2 || appleSMSCode(candidates[0].item.Content) != "222222" {
+		t.Fatalf("candidates were not newest-first: %+v", candidates)
+	}
+}
+
 func TestParseProviderTimeUsesShanghaiForNaiveValues(t *testing.T) {
 	want := time.Date(2026, time.August, 16, 12, 0, 5, 0, time.UTC)
-	for _, value := range []string{"2026-08-16 20:00:05", "2026-08-16T20:00:05+08:00"} {
+	for _, value := range []string{
+		"2026-08-16T20:00:05.000000000",
+		"2026-08-16 20:00:05",
+		"2026/8/16 20:00:05",
+		"2026/08/16 20:00:05",
+		"2026-08-16T20:00:05+08:00",
+	} {
 		got := parseProviderTime(value)
 		if got == nil || !got.Equal(want) {
 			t.Fatalf("parseProviderTime(%q) = %v, want %v", value, got, want)
+		}
+	}
+	for _, value := range []string{"1786881605", "1786881605000"} {
+		got := parseProviderTime(value)
+		if got == nil || !got.Equal(time.Unix(1786881605, 0).UTC()) {
+			t.Fatalf("parseProviderTime(%q) = %v", value, got)
 		}
 	}
 }
@@ -471,9 +528,22 @@ func TestAppleSMSCodeMatchesBodyWithProviderWhitespace(t *testing.T) {
 	}{
 		{body: "通知\n你的Apple账户验证码是 964445，切勿向任何人泄露，以防账户或信息被盗。\nSent by provider", want: "964445"},
 		{body: "Your Apple Account Code is: 953675.\nDon't share it with anyone.", want: "953675"},
+		{body: "任意语言、任意发件人 551358 结尾", want: "551358"},
 	} {
 		if got := appleSMSCode(test.body); got != test.want {
 			t.Fatalf("appleSMSCode(%q) = %q, want %q", test.body, got, test.want)
 		}
+	}
+}
+
+func TestConsumedAppleSMSMessageExpiresInMemory(t *testing.T) {
+	service := &Service{}
+	now := time.Date(2026, time.August, 16, 12, 0, 0, 0, time.UTC)
+	service.rememberSMSMessage("message", now)
+	if !service.smsMessageConsumed("message", now.Add(30*time.Second)) {
+		t.Fatal("consumed message was not held during the recent-message window")
+	}
+	if service.smsMessageConsumed("message", now.Add(61*time.Second)) {
+		t.Fatal("consumed message did not expire from memory")
 	}
 }

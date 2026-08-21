@@ -77,6 +77,7 @@ type iCloudOnboardingTaskModel struct {
 	CountryCode                 string     `gorm:"column:country_code"`
 	ICloudOpened                bool       `gorm:"column:icloud_opened"`
 	FamilyInviteURL             string     `gorm:"column:family_invite_url"`
+	SelectedForwardTo           string     `gorm:"column:selected_forward_to"`
 	BoundPhoneNumber            string     `gorm:"column:bound_phone_number"`
 	BoundPhoneCountryCode       string     `gorm:"column:bound_phone_country_code"`
 	BoundPhoneSource            string     `gorm:"column:bound_phone_source"`
@@ -432,6 +433,11 @@ func countryCodeFromICloudRegion(region string) string {
 		return strings.ToUpper(value)
 	}
 	return ""
+}
+
+// CountryCodeFromICloudRegion uses the same region normalization as imports.
+func CountryCodeFromICloudRegion(region string) string {
+	return countryCodeFromICloudRegion(region)
 }
 
 func (s *Service) AcceptAdminICloudOnboardingImport(

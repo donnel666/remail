@@ -244,6 +244,14 @@ func newRoutedAppleOnboardingProvider(routes *appleRouteManager) AppleOnboarding
 	}}
 }
 
+// NewAppleOnboardingClientWithProxyProvider reuses the production sticky
+// Apple proxy route for standalone validation tools.
+func NewAppleOnboardingClientWithProxyProvider(provider AppleProxyProvider) AppleOnboardingProvider {
+	routes := newAppleRouteManager()
+	routes.proxies = provider
+	return newRoutedAppleOnboardingProvider(routes)
+}
+
 func newRoutedAppleAccountClient(routes *appleRouteManager) *AppleAccountClient {
 	return &AppleAccountClient{httpClient: &appleProxyHTTPClient{routes: routes}}
 }

@@ -35,6 +35,31 @@ const (
 	appleSMSManageLogin          = "manage_login"
 )
 
+// The exported names are intentionally small aliases for internal command
+// tools. Production onboarding continues to use the unexported constants.
+const (
+	AppleOnboardingPrepareICloud          = appleOnboardingPrepareICloud
+	AppleOnboardingPrepareICloudCookie    = appleOnboardingPrepareICloudCookie
+	AppleOnboardingSendSMS                = appleOnboardingSendSMS
+	AppleOnboardingVerifySMS              = appleOnboardingVerifySMS
+	AppleOnboardingFinishICloud           = appleOnboardingFinishICloud
+	AppleOnboardingFinishICloudCookie     = appleOnboardingFinishICloudCookie
+	AppleOnboardingPrepareFamily          = appleOnboardingPrepareFamily
+	AppleOnboardingPrepareFamilyReconcile = appleOnboardingPrepareFamilyReconcile
+	AppleOnboardingJoinFamily             = appleOnboardingJoinFamily
+	AppleOnboardingPrepareManage          = appleOnboardingPrepareManage
+	AppleOnboardingFetchManage            = appleOnboardingFetchManage
+	AppleOnboardingAddForward             = appleOnboardingAddForward
+	AppleOnboardingVerifyForward          = appleOnboardingVerifyForward
+	AppleOnboardingExport                 = appleOnboardingExport
+	AppleSMSICloudLogin                   = appleSMSICloudLogin
+	AppleSMSICloudCookieLogin             = appleSMSICloudCookieLogin
+	AppleSMSPhoneEnrollment               = appleSMSPhoneEnrollment
+	AppleSMSFamilyLogin                   = appleSMSFamilyLogin
+	AppleSMSFamilyReconcileLogin          = appleSMSFamilyReconcileLogin
+	AppleSMSManageLogin                   = appleSMSManageLogin
+)
+
 var ErrICloudOnboardingProvider = errors.New("icloud: Apple onboarding provider unavailable")
 
 type AppleOnboardingRequest struct {
@@ -54,8 +79,15 @@ type AppleOnboardingRequest struct {
 	SkipOldChannel       bool
 }
 
+// AppleSecurityAnswer and AppleOnboardingSecret expose only the input shape
+// needed by the standalone validation command. Secret values are never logged
+// or returned by the command.
+type AppleSecurityAnswer = iCloudSecurityAnswer
+type AppleOnboardingSecret = iCloudOnboardingSecret
+
 type AppleOnboardingResponse struct {
 	Session             json.RawMessage
+	HTTPStatus          int
 	Next                string
 	CountryCode         string
 	ICloudOpened        *bool
@@ -86,13 +118,15 @@ type AppleOnboardingChannel struct {
 }
 
 type AppleOnboardingError struct {
-	Category     string
-	SafeMessage  string
-	Retryable    bool
-	SendRejected bool
-	CodeRejected bool
-	RetryAt      *time.Time
-	RestartStage string
+	Category        string
+	SafeMessage     string
+	HTTPStatus      int
+	ProviderMessage string
+	Retryable       bool
+	SendRejected    bool
+	CodeRejected    bool
+	RetryAt         *time.Time
+	RestartStage    string
 }
 
 func (e *AppleOnboardingError) Error() string {
@@ -111,6 +145,7 @@ type AppleOnboardingProvider interface {
 type SMSPhoneService interface {
 	BindICloudSMSPhone(context.Context, string, string) (kitesim.SMSPhoneBinding, error)
 	BindICloudSMSPhoneBySuffix(context.Context, string, string) (kitesim.SMSPhoneBinding, error)
+	CheckSMSPhoneAvailable(context.Context, uint) error
 	ReserveSMSChallenge(context.Context, uint, string, string, time.Time) (kitesim.SMSReservation, error)
 	MarkSMSAttemptSent(context.Context, uint64) error
 	ConfirmSMSAttemptSent(context.Context, uint64) error
@@ -142,6 +177,10 @@ func (c *appleOnboardingClient) Execute(ctx context.Context, request AppleOnboar
 	}
 	flow, err := loadAppleOnboardingFlow(ctx, c, request.Session, request.Email)
 	if err != nil {
+		var providerErr *AppleOnboardingError
+		if errors.As(err, &providerErr) && providerErr.Category == "invalid_session" && providerErr.RestartStage == "" {
+			providerErr.RestartStage = appleOnboardingOperationRestartStage(request)
+		}
 		return AppleOnboardingResponse{}, err
 	}
 	var response AppleOnboardingResponse
@@ -161,7 +200,7 @@ func (c *appleOnboardingClient) Execute(ctx context.Context, request AppleOnboar
 	case appleOnboardingPrepareFamily:
 		response, err = flow.prepareFamily(request)
 	case appleOnboardingPrepareFamilyReconcile:
-		response, err = flow.prepareManage(request)
+		response, err = flow.prepareFamily(request)
 	case appleOnboardingJoinFamily:
 		response, err = flow.joinFamily(request)
 	case appleOnboardingPrepareManage:
@@ -178,11 +217,36 @@ func (c *appleOnboardingClient) Execute(ctx context.Context, request AppleOnboar
 		return AppleOnboardingResponse{}, &AppleOnboardingError{Category: "invalid_operation", SafeMessage: "Apple onboarding operation is invalid."}
 	}
 	if err != nil {
+		var providerErr *AppleOnboardingError
+		if errors.As(err, &providerErr) && providerErr.HTTPStatus == 0 {
+			providerErr.HTTPStatus = flow.lastHTTPStatus
+		}
 		return AppleOnboardingResponse{}, err
 	}
+	response.HTTPStatus = flow.lastHTTPStatus
 	response.Session, err = flow.snapshot()
 	if err != nil {
 		return AppleOnboardingResponse{}, err
 	}
 	return response, nil
+}
+
+func appleOnboardingOperationRestartStage(request AppleOnboardingRequest) string {
+	switch request.Operation {
+	case appleOnboardingPrepareICloud, appleOnboardingFinishICloud:
+		return "icloud_prepare"
+	case appleOnboardingPrepareICloudCookie, appleOnboardingFinishICloudCookie:
+		return "icloud_cookie_prepare"
+	case appleOnboardingPrepareFamily:
+		return "family_prepare"
+	case appleOnboardingPrepareFamilyReconcile, appleOnboardingJoinFamily:
+		return "family_reconcile_prepare"
+	case appleOnboardingPrepareManage, appleOnboardingFetchManage, appleOnboardingAddForward,
+		appleOnboardingVerifyForward, appleOnboardingExport:
+		return "manage_prepare"
+	case appleOnboardingSendSMS, appleOnboardingVerifySMS:
+		return appleOnboardingRestartStage(request.SMSPurpose)
+	default:
+		return ""
+	}
 }

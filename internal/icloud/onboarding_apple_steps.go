@@ -2,6 +2,7 @@ package icloud
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -147,10 +148,14 @@ func (f *appleOnboardingFlow) verifySMS(request AppleOnboardingRequest) (AppleOn
 		if err != nil {
 			return AppleOnboardingResponse{}, appleOnboardingRestart(appleOnboardingRestartStage(request.SMSPurpose))
 		}
-		data, err := f.postObject(strings.TrimRight(f.state.ServiceURL, "/")+"/auth/verify/phone/securitycode", map[string]any{
+		body, err := f.request(http.MethodPost, strings.TrimRight(f.state.ServiceURL, "/")+"/auth/verify/phone/securitycode", map[string]any{
 			"phoneNumber":  map[string]any{"id": phoneID, "nonFTEU": true},
 			"securityCode": map[string]any{"code": code}, "mode": "sms",
-		}, "verify/phone/securitycode", false, false, false)
+		}, false, false, false, true, false, "application/json, text/javascript, */*; q=0.01")
+		if err != nil {
+			return AppleOnboardingResponse{}, err
+		}
+		data, err := decodeAppleOnboardingObject(body, "verify/phone/securitycode")
 		if err != nil {
 			return AppleOnboardingResponse{}, err
 		}
@@ -211,16 +216,26 @@ func (f *appleOnboardingFlow) finishHSA2Login(purpose string) error {
 	if err != nil {
 		return err
 	}
-	if purpose != appleSMSFamilyLogin && f.state.RepairToken != "" && !hasCookie {
-		if err := f.completeRepair(); err != nil {
-			return err
+	switch purpose {
+	case appleSMSICloudLogin, appleSMSOldCookieLogin, appleSMSICloudCookieLogin:
+		if f.state.RepairToken != "" {
+			return f.completeRepair()
 		}
-		hasCookie, err = f.hasCookie("myacinfo")
-		if err != nil {
-			return err
+		return nil
+	case appleSMSFamilyLogin, appleSMSFamilyReconcileLogin:
+		if !hasCookie {
+			return appleOnboardingRestart(appleOnboardingRestartStage(purpose))
 		}
-	}
-	if purpose == appleSMSFamilyLogin || purpose == appleSMSFamilyReconcileLogin || purpose == appleSMSManageLogin {
+	case appleSMSManageLogin:
+		if f.state.RepairToken != "" && !hasCookie {
+			if err := f.completeRepair(); err != nil {
+				return err
+			}
+			hasCookie, err = f.hasCookie("myacinfo")
+			if err != nil {
+				return err
+			}
+		}
 		if !hasCookie {
 			return appleOnboardingRestart(appleOnboardingRestartStage(purpose))
 		}
@@ -248,6 +263,10 @@ func (f *appleOnboardingFlow) finishICloud(request AppleOnboardingRequest) (Appl
 	if opened && !request.SkipOldChannel {
 		channel, err := f.oldChannel()
 		if err != nil {
+			var providerErr *AppleOnboardingError
+			if errors.As(err, &providerErr) && providerErr.Category == "old_cookie_missing" {
+				return AppleOnboardingResponse{}, appleOnboardingRestart(restartStage)
+			}
 			return AppleOnboardingResponse{}, err
 		}
 		f.state.OldChannel = channel
@@ -267,6 +286,12 @@ func (f *appleOnboardingFlow) prepareFamily(request AppleOnboardingRequest) (App
 	}
 	if err := f.reset("family"); err != nil {
 		return AppleOnboardingResponse{}, err
+	}
+	smsPurpose := appleSMSFamilyLogin
+	restartStage := "family_prepare"
+	if request.Operation == appleOnboardingPrepareFamilyReconcile {
+		smsPurpose = appleSMSFamilyReconcileLogin
+		restartStage = "family_reconcile_prepare"
 	}
 	f.state.RedirectURI = f.endpoints.Account
 	f.state.RememberMe = false
@@ -306,7 +331,7 @@ func (f *appleOnboardingFlow) prepareFamily(request AppleOnboardingRequest) (App
 		if err := f.prepareTrustedPhone(request.PhoneNumber); err != nil {
 			return AppleOnboardingResponse{}, err
 		}
-		return AppleOnboardingResponse{Next: appleSMSFamilyLogin, TrustedPhoneLastTwo: f.state.PendingPhoneLastTwo}, nil
+		return AppleOnboardingResponse{Next: smsPurpose, TrustedPhoneLastTwo: f.state.PendingPhoneLastTwo}, nil
 	case status == http.StatusConflict && authType == "sa":
 		if err := f.submitIDMSAQuestions(request.Secret); err != nil {
 			return AppleOnboardingResponse{}, err
@@ -314,6 +339,13 @@ func (f *appleOnboardingFlow) prepareFamily(request AppleOnboardingRequest) (App
 	case status == http.StatusOK || status == http.StatusNoContent:
 	default:
 		return AppleOnboardingResponse{}, &AppleOnboardingError{Category: "unsupported_challenge", SafeMessage: "Apple returned an unsupported family sign-in challenge."}
+	}
+	hasCookie, err := f.hasCookie("myacinfo")
+	if err != nil {
+		return AppleOnboardingResponse{}, err
+	}
+	if !hasCookie {
+		return AppleOnboardingResponse{}, appleOnboardingRestart(restartStage)
 	}
 	return AppleOnboardingResponse{Next: "ready"}, nil
 }
@@ -331,13 +363,6 @@ func (f *appleOnboardingFlow) joinFamily(request AppleOnboardingRequest) (AppleO
 	}
 	if !hasCookie {
 		return AppleOnboardingResponse{}, appleOnboardingRestart("family_reconcile_prepare")
-	}
-	joined, err := f.familyJoinApplied()
-	if err != nil {
-		return AppleOnboardingResponse{}, err
-	}
-	if joined {
-		return f.familyJoinResponse()
 	}
 	_, err = f.request(http.MethodGet, strings.TrimRight(f.endpoints.Account, "/")+"/family/invite/gs/ws/token", nil, false, false, false, false, true, "application/json, text/plain, */*")
 	if err != nil {
@@ -391,14 +416,16 @@ func (f *appleOnboardingFlow) joinFamily(request AppleOnboardingRequest) (AppleO
 }
 
 func (f *appleOnboardingFlow) familyJoinResponse() (AppleOnboardingResponse, error) {
-	endpoint := "https://familyws.icloud.apple.com"
+	// The family member/session host is separate from both the iCloud web host
+	// and account.apple.com. Keep it aligned with the familyws client endpoint.
+	endpoint := iCloudFamilyMembersBase
 	cookies, err := f.http.SnapshotCookies(endpoint, f.endpoints.Account, f.endpoints.Setup)
 	if err != nil {
 		return AppleOnboardingResponse{}, err
 	}
 	cookie := appleOnboardingCookieString(cookies, "apple.com")
 	if cookie == "" {
-		return AppleOnboardingResponse{}, &AppleOnboardingError{Category: "family_session_missing", SafeMessage: "Apple did not return a usable family session.", Retryable: true}
+		return AppleOnboardingResponse{}, appleOnboardingRestart("family_reconcile_prepare")
 	}
 	browser := f.browserProfile()
 	return AppleOnboardingResponse{Next: "ready", FamilyChannel: &AppleOnboardingChannel{
@@ -408,53 +435,18 @@ func (f *appleOnboardingFlow) familyJoinResponse() (AppleOnboardingResponse, err
 	}}, nil
 }
 
-func (f *appleOnboardingFlow) familyJoinApplied() (bool, error) {
-	profile, err := f.loadAccountManage("family_reconcile_prepare")
-	if err != nil {
-		return false, err
-	}
-	family := appleOnboardingAccountFamily(profile)
-	if family.Joined {
-		return true, nil
-	}
-	if f.state.InviteToken == "" {
-		return false, &AppleOnboardingError{Category: "family_invite_unavailable", SafeMessage: "The selected primary family invitation is unavailable."}
-	}
-	details, err := f.getObject(strings.TrimRight(f.endpoints.Account, "/")+"/family/invite/details?token="+url.QueryEscape(f.state.InviteToken), "invite/details", false, false, true, "application/json, text/plain, */*")
-	if err != nil {
-		return false, err
-	}
-	if f.state.Status == http.StatusNotFound || f.state.Status == http.StatusGone {
-		return false, &AppleOnboardingError{Category: "family_invite_expired", SafeMessage: "The family invitation is expired or invalid."}
-	}
-	if f.state.Status == http.StatusUnauthorized || f.state.Status == http.StatusForbidden {
-		return false, appleOnboardingRestart("family_reconcile_prepare")
-	}
-	if f.state.Status != http.StatusOK {
-		return false, &AppleOnboardingError{Category: "family_status_unavailable", SafeMessage: "Apple family membership could not be reconciled.", Retryable: true}
-	}
-	return appleOnboardingInviteAccepted(details), nil
-}
-
 func (f *appleOnboardingFlow) prepareManage(request AppleOnboardingRequest) (AppleOnboardingResponse, error) {
 	if err := validateAppleOnboardingCredentials(request); err != nil {
 		return AppleOnboardingResponse{}, err
 	}
-	mode, smsPurpose, restartStage := "manage", appleSMSManageLogin, "manage_prepare"
-	if request.Operation == appleOnboardingPrepareFamilyReconcile {
-		mode, smsPurpose, restartStage = "family", appleSMSFamilyReconcileLogin, "family_reconcile_prepare"
-	}
-	if err := f.reset(mode); err != nil {
+	if err := f.reset("manage"); err != nil {
 		return AppleOnboardingResponse{}, err
-	}
-	if mode == "family" {
-		f.state.InviteToken, _ = appleOnboardingExtractInvite(request.FamilyInviteURL)
-		f.state.FamilyOrganizerEmail = strings.ToLower(strings.TrimSpace(request.FamilyOrganizerEmail))
 	}
 	f.state.RedirectURI = f.endpoints.Account
 	f.state.DomainID = "11"
 	f.state.RememberMe = true
 	f.state.AuthVersion = appleOnboardingManageAuth
+	smsPurpose, restartStage := appleSMSManageLogin, "manage_prepare"
 	portal, err := f.getObject(strings.TrimRight(f.endpoints.Account, "/")+"/bootstrap/portal", "bootstrap", false, false, false, "application/json, text/plain, */*")
 	if err != nil {
 		return AppleOnboardingResponse{}, err
@@ -519,6 +511,7 @@ func (f *appleOnboardingFlow) fetchManage(request AppleOnboardingRequest) (Apple
 	if f.state.Mode != "manage" {
 		return AppleOnboardingResponse{}, appleOnboardingRestart("manage_prepare")
 	}
+	delete(f.state.Scnt, appleOnboardingHost(f.endpoints.AppleID))
 	_, err := f.request(http.MethodGet, strings.TrimRight(f.endpoints.AppleID, "/")+"/account/manage/gs/ws/token", nil, false, true, false, false, true, "application/json, text/plain, */*")
 	if err != nil {
 		return AppleOnboardingResponse{}, err
@@ -541,14 +534,7 @@ func (f *appleOnboardingFlow) fetchManage(request AppleOnboardingRequest) (Apple
 	if f.state.APIKey == "" {
 		return AppleOnboardingResponse{}, &AppleOnboardingError{Category: "api_key_missing", SafeMessage: "Apple Account profile did not return an API key.", Retryable: true}
 	}
-	phones := appleOnboardingTrustedPhones(data)
-	if len(phones) == 0 {
-		return AppleOnboardingResponse{}, &AppleOnboardingError{Category: "phone_binding_missing", SafeMessage: "Apple Account profile did not return a trusted phone number."}
-	}
-	_, lastTwo, err := selectAppleOnboardingTrustedPhone(phones, request.PhoneNumber)
-	if err != nil {
-		return AppleOnboardingResponse{}, err
-	}
+	_, lastTwo, _ := selectAppleOnboardingTrustedPhone(appleOnboardingTrustedPhones(data), request.PhoneNumber)
 	return AppleOnboardingResponse{Next: "ready", CountryCode: f.state.AccountCountry, TrustedPhoneLastTwo: lastTwo}, nil
 }
 
@@ -604,6 +590,9 @@ func (f *appleOnboardingFlow) verifyForward(request AppleOnboardingRequest) (App
 	if address == "" || code == "" {
 		return AppleOnboardingResponse{}, &AppleOnboardingError{Category: "forward_verification_missing", SafeMessage: "Forwarding verification state is incomplete."}
 	}
+	// Apple may not expose a newly-added pending address in account/manage
+	// immediately. The add response already gave us the verification ID, so
+	// keep the script-compatible path and submit with that ID when present.
 	alternate, err := f.loadAlternateEmail(address)
 	if err != nil {
 		return AppleOnboardingResponse{}, err
@@ -612,11 +601,7 @@ func (f *appleOnboardingFlow) verifyForward(request AppleOnboardingRequest) (App
 		f.state.ForwardVerificationID = ""
 		return AppleOnboardingResponse{Next: "ready"}, nil
 	}
-	if !alternate.Present {
-		retryAt := f.now().UTC().Add(iCloudOnboardingForwardRetry)
-		return AppleOnboardingResponse{}, &AppleOnboardingError{Category: "forward_status_incomplete", SafeMessage: "Apple forwarding verification is not ready yet.", Retryable: true, RetryAt: &retryAt}
-	}
-	if alternate.VerificationID != "" {
+	if f.state.ForwardVerificationID == "" && alternate.VerificationID != "" {
 		f.state.ForwardVerificationID = alternate.VerificationID
 	}
 	if f.state.ForwardVerificationID == "" {
@@ -690,59 +675,14 @@ func appleOnboardingAlternateEmailStatus(data map[string]any, address string) ap
 	return appleOnboardingAlternateEmail{}
 }
 
-type appleOnboardingFamilyStatus struct {
-	Joined bool
-}
-
-func appleOnboardingAccountFamily(data map[string]any) appleOnboardingFamilyStatus {
-	account := appleOnboardingMap(data["account"])
-	person := appleOnboardingMap(account["person"])
-	result := appleOnboardingFamilyStatus{}
-	for _, value := range []any{
-		data["family"], data["familySharing"], data["familyMembership"], data["familyInfo"], data["familyDetails"],
-		account["family"], account["familySharing"], account["familyMembership"], account["familyInfo"], account["familyDetails"],
-		person["family"], person["familySharing"], person["familyMembership"], person["familyInfo"], person["familyDetails"],
-	} {
-		if joined, present := appleOnboardingOptionalBool(value); present && joined {
-			result.Joined = true
-		}
-		entry := appleOnboardingMap(value)
-		for _, key := range []string{"isMember", "isFamilyMember", "isMemberOfFamily", "inFamily", "isInFamily", "active"} {
-			if joined, present := appleOnboardingOptionalBool(entry[key]); present && joined {
-				result.Joined = true
-			}
-		}
-		for _, key := range []string{"status", "state", "membershipStatus", "familyStatus"} {
-			switch strings.ToLower(appleOnboardingString(entry[key])) {
-			case "active", "joined", "member", "accepted", "complete", "completed":
-				result.Joined = true
-			}
-		}
-	}
-	return result
-}
-
-func appleOnboardingInviteAccepted(data map[string]any) bool {
-	for _, value := range []any{data, data["invite"], data["invitation"], data["familyInvitation"]} {
-		entry := appleOnboardingMap(value)
-		for _, key := range []string{"accepted", "isAccepted", "joined", "isMember"} {
-			if accepted, present := appleOnboardingOptionalBool(entry[key]); present && accepted {
-				return true
-			}
-		}
-		for _, key := range []string{"status", "state", "inviteStatus"} {
-			switch strings.ToLower(appleOnboardingString(entry[key])) {
-			case "accepted", "joined", "complete", "completed":
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func (f *appleOnboardingFlow) exportChannels(AppleOnboardingRequest) (AppleOnboardingResponse, error) {
+func (f *appleOnboardingFlow) exportChannels(request AppleOnboardingRequest) (AppleOnboardingResponse, error) {
 	if f.state.Mode != "manage" || f.state.APIKey == "" {
 		return AppleOnboardingResponse{}, appleOnboardingRestart("manage_prepare")
+	}
+	if address := strings.TrimSpace(request.ForwardToEmail); address != "" {
+		if err := f.setDefaultForward(address); err != nil {
+			return AppleOnboardingResponse{}, err
+		}
 	}
 	data, err := f.getObject(strings.TrimRight(f.endpoints.AppleID, "/")+appleAccountPrivateEmailPath, "email/private", false, true, true, "application/json, text/plain, */*")
 	if err != nil {
@@ -760,7 +700,7 @@ func (f *appleOnboardingFlow) exportChannels(AppleOnboardingRequest) (AppleOnboa
 	}
 	cookie := appleOnboardingCookieString(cookies, "apple.com")
 	if cookie == "" {
-		return AppleOnboardingResponse{}, &AppleOnboardingError{Category: "new_cookie_missing", SafeMessage: "Apple Account did not return a usable session cookie."}
+		return AppleOnboardingResponse{}, appleOnboardingRestart("manage_prepare")
 	}
 	browser := f.browserProfile()
 	fdInfo, err := appleweb.FDClientInfoFor(browser.UserAgent, f.now())
@@ -775,6 +715,26 @@ func (f *appleOnboardingFlow) exportChannels(AppleOnboardingRequest) (AppleOnboa
 		APIKey: f.state.APIKey, ManageExpiresAt: &expiresAt,
 	}
 	return AppleOnboardingResponse{Next: "ready", CountryCode: f.state.AccountCountry, OldChannel: f.state.OldChannel, NewChannel: newChannel}, nil
+}
+
+func (f *appleOnboardingFlow) setDefaultForward(address string) error {
+	address = strings.ToLower(strings.TrimSpace(address))
+	if address == "" {
+		return nil
+	}
+	data, err := f.putObject(strings.TrimRight(f.endpoints.AppleID, "/")+"/account/manage/forwardemail", map[string]any{
+		"forwardToEmail": address,
+	}, "forwardemail", true, false, true)
+	if err != nil {
+		return err
+	}
+	if f.state.Status == http.StatusUnauthorized || f.state.Status == http.StatusForbidden {
+		return appleOnboardingRestart("manage_prepare")
+	}
+	if f.state.Status != http.StatusOK && f.state.Status != http.StatusNoContent {
+		return appleOnboardingPermanent("forward_default_failed", "Apple rejected the default forwarding address.", data)
+	}
+	return nil
 }
 
 func (f *appleOnboardingFlow) loadICloudWeb() error {
@@ -821,8 +781,12 @@ func (f *appleOnboardingFlow) loadICloudWeb() error {
 }
 
 func (f *appleOnboardingFlow) accountLogin(dsid string) (map[string]any, error) {
+	restartStage := "icloud_prepare"
+	if f.state.Mode == "icloud_cookie" {
+		restartStage = "icloud_cookie_prepare"
+	}
 	if f.state.RepairToken == "" || f.state.AccountCountry == "" {
-		return nil, appleOnboardingRestart("icloud_prepare")
+		return nil, appleOnboardingRestart(restartStage)
 	}
 	data, err := f.postObject(f.state.AccountLoginURL+"?"+f.icloudQuery(dsid), map[string]any{
 		"dsWebAuthToken": f.state.RepairToken, "accountCountryCode": f.state.AccountCountry, "extended_login": true,
@@ -831,7 +795,7 @@ func (f *appleOnboardingFlow) accountLogin(dsid string) (map[string]any, error) 
 		return nil, err
 	}
 	if f.state.Status == http.StatusUnauthorized || f.state.Status == http.StatusForbidden {
-		return nil, appleOnboardingRestart("icloud_prepare")
+		return nil, appleOnboardingRestart(restartStage)
 	}
 	if f.state.Status != http.StatusOK {
 		return nil, appleOnboardingPermanent("icloud_login_failed", "iCloud web sign-in failed.", data)
@@ -958,7 +922,7 @@ func (f *appleOnboardingFlow) follow(rawURL string, limit int) (string, string, 
 
 func (f *appleOnboardingFlow) icloudQuery(dsid string) string {
 	query := url.Values{
-		"requestId": {platform.NewUUIDV7String()}, "clientBuildNumber": {f.state.BuildNumber},
+		"requestId": {platform.NewUUIDV4String()}, "clientBuildNumber": {f.state.BuildNumber},
 		"clientMasteringNumber": {f.state.MasteringNumber}, "clientId": {f.state.SetupClientID},
 	}
 	if dsid != "" {
@@ -996,11 +960,12 @@ func appleOnboardingRestartStage(purpose string) string {
 func appleOnboardingSendRejected(data map[string]any) error {
 	category := "sms_send_rejected"
 	message := "Apple rejected the verification SMS request."
+	providerMessage := safeICloudImportMessage(appleOnboardingServiceError(data))
 	if appleOnboardingLooksLocked(data) {
 		category = "account_locked"
 		message = "The Apple Account is locked or disabled."
 	}
-	return &AppleOnboardingError{Category: category, SafeMessage: message, SendRejected: true}
+	return &AppleOnboardingError{Category: category, SafeMessage: message, ProviderMessage: providerMessage, SendRejected: true}
 }
 
 func appleOnboardingOptionalBool(value any) (bool, bool) {

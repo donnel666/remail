@@ -239,6 +239,7 @@ func (onboardingProvidedPhone) BindICloudSMSPhone(context.Context, string, strin
 func (onboardingProvidedPhone) BindICloudSMSPhoneBySuffix(context.Context, string, string) (kitesim.SMSPhoneBinding, error) {
 	return kitesim.SMSPhoneBinding{PhoneID: 7, PhoneNumber: "14155550001", CountryCode: "US"}, nil
 }
+func (onboardingProvidedPhone) CheckSMSPhoneAvailable(context.Context, uint) error { return nil }
 func (onboardingProvidedPhone) ReserveSMSChallenge(context.Context, uint, string, string, time.Time) (kitesim.SMSReservation, error) {
 	return kitesim.SMSReservation{}, errors.New("unexpected reservation")
 }
@@ -263,6 +264,12 @@ func (onboardingBindingConflictPhone) BindICloudSMSPhone(context.Context, string
 	return kitesim.SMSPhoneBinding{}, kitesim.ErrSMSPhoneBindingConflict
 }
 
+type onboardingMissingChallengePhone struct{ onboardingProvidedPhone }
+
+func (onboardingMissingChallengePhone) GetSMSChallengeByOwner(context.Context, string) (kitesim.SMSChallenge, error) {
+	return kitesim.SMSChallenge{}, kitesim.ErrSMSReservationNotFound
+}
+
 type onboardingCountingPhone struct {
 	onboardingProvidedPhone
 	bindCalls int
@@ -282,6 +289,19 @@ type onboardingSMSFailurePhone struct {
 	onboardingProvidedPhone
 	cooldown time.Time
 	failed   bool
+}
+
+type onboardingSMSCoolingPhone struct {
+	onboardingProvidedPhone
+	retryAt time.Time
+}
+
+func (p onboardingSMSCoolingPhone) ReserveSMSChallenge(context.Context, uint, string, string, time.Time) (kitesim.SMSReservation, error) {
+	return kitesim.SMSReservation{}, &kitesim.SMSPhoneUnavailableError{RetryAt: p.retryAt, Reason: "cooling down"}
+}
+
+func (p onboardingSMSCoolingPhone) CheckSMSPhoneAvailable(context.Context, uint) error {
+	return &kitesim.SMSPhoneUnavailableError{RetryAt: p.retryAt, Reason: "cooling down"}
 }
 
 func (p *onboardingSMSFailurePhone) ReserveSMSChallenge(context.Context, uint, string, string, time.Time) (kitesim.SMSReservation, error) {
@@ -606,28 +626,27 @@ func TestICloudOnboardingPrimaryWithoutChallengeRestoresPermanentPhone(t *testin
 	}
 }
 
-func TestICloudOnboardingClosedICloudPreservesDeclaredStateAndWaits(t *testing.T) {
+func TestICloudOnboardingClosedICloudSkipsActivationDependentSteps(t *testing.T) {
 	for _, test := range []struct {
-		name           string
-		taskKind       string
-		accountRole    string
-		phoneSource    string
-		icloudOpened   bool
-		confirmedStage string
+		name        string
+		taskKind    string
+		accountRole string
+		phoneSource string
+		declared    bool
+		nextStage   string
 	}{
-		{name: "auto child declared closed", taskKind: "onboarding", accountRole: "child", phoneSource: "kitesim", confirmedStage: "family_select"},
-		{name: "auto child declared open", taskKind: "onboarding", accountRole: "child", phoneSource: "kitesim", icloudOpened: true, confirmedStage: "family_select"},
-		{name: "manual child declared closed", taskKind: "onboarding", accountRole: "child", phoneSource: "manual", confirmedStage: "icloud_prepare"},
-		{name: "manual child declared open", taskKind: "onboarding", accountRole: "child", phoneSource: "manual", icloudOpened: true, confirmedStage: "icloud_prepare"},
-		{name: "primary", taskKind: "onboarding", accountRole: "primary", phoneSource: "kitesim", icloudOpened: true, confirmedStage: "icloud_prepare"},
-		{name: "refresh", taskKind: "refresh", accountRole: "child", phoneSource: "manual", icloudOpened: true, confirmedStage: "icloud_prepare"},
+		{name: "auto child declared closed", taskKind: "onboarding", accountRole: "child", phoneSource: "kitesim", nextStage: "family_select"},
+		{name: "auto child declared open", taskKind: "onboarding", accountRole: "child", phoneSource: "kitesim", declared: true, nextStage: "family_select"},
+		{name: "manual child", taskKind: "onboarding", accountRole: "child", phoneSource: "manual", nextStage: "manage_prepare"},
+		{name: "primary", taskKind: "onboarding", accountRole: "primary", phoneSource: "kitesim", declared: true, nextStage: "manage_prepare"},
+		{name: "refresh", taskKind: "refresh", accountRole: "child", phoneSource: "manual", declared: true, nextStage: "manage_prepare"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			service, db, task, _ := newOnboardingStateTest(t)
 			service.onboardingApple = onboardingClosedICloudApple{}
 			updates := map[string]any{
 				"task_kind": test.taskKind, "account_role": test.accountRole, "bound_phone_source": test.phoneSource,
-				"icloud_opened": test.icloudOpened, "stage": "icloud_finish",
+				"icloud_opened": test.declared, "stage": "icloud_finish",
 			}
 			if test.taskKind == "refresh" {
 				phoneID := uint(7)
@@ -643,34 +662,15 @@ func TestICloudOnboardingClosedICloudPreservesDeclaredStateAndWaits(t *testing.T
 			}
 
 			processOnboardingStageForTest(t, service, db, task)
-			if task.Status != iCloudOnboardingWaiting || task.Stage != "waiting_icloud_activation" ||
-				task.ICloudOpened != test.icloudOpened || task.ICloudActivationConfirmedAt != nil {
-				t.Fatalf("activation wait = %+v", task)
-			}
-			if err := service.ConfirmICloudOnboardingActivation(context.Background(), task.ID, 1, "request-"+test.name, "/activation"); err != nil {
-				t.Fatal(err)
-			}
-			if err := db.First(task, task.ID).Error; err != nil {
-				t.Fatal(err)
-			}
-			if task.Stage != test.confirmedStage || task.ICloudActivationConfirmedAt == nil || task.ICloudOpened != test.icloudOpened {
-				t.Fatalf("activation confirmation = %+v", task)
-			}
-			if test.confirmedStage != "icloud_prepare" {
-				return
-			}
-
-			processOnboardingStageForTest(t, service, db, task)
-			processOnboardingStageForTest(t, service, db, task)
-			if task.Status != iCloudOnboardingWaiting || task.Stage != "waiting_icloud_activation" ||
-				task.ICloudActivationConfirmedAt != nil || task.ICloudOpened != test.icloudOpened {
-				t.Fatalf("activation recheck = %+v", task)
+			if task.Status != iCloudOnboardingProcessing || task.DispatchStatus != "pending" || task.Stage != test.nextStage ||
+				task.ICloudOpened || task.ICloudActivationConfirmedAt != nil {
+				t.Fatalf("closed iCloud continuation = %+v", task)
 			}
 		})
 	}
 }
 
-func TestICloudOnboardingClosedICloudAfterFamilyResumesCookieExtraction(t *testing.T) {
+func TestICloudOnboardingClosedICloudAfterFamilyContinuesToManage(t *testing.T) {
 	service, db, task, _ := newOnboardingStateTest(t)
 	service.onboardingApple = onboardingClosedICloudApple{}
 	if err := db.Model(task).Updates(map[string]any{
@@ -684,17 +684,27 @@ func TestICloudOnboardingClosedICloudAfterFamilyResumesCookieExtraction(t *testi
 	}
 
 	processOnboardingStageForTest(t, service, db, task)
-	if task.Status != iCloudOnboardingWaiting || task.Stage != "waiting_icloud_activation" || !task.ICloudOpened {
-		t.Fatalf("after-family activation wait = %+v", task)
+	if task.Status != iCloudOnboardingProcessing || task.DispatchStatus != "pending" || task.Stage != "manage_prepare" || task.ICloudOpened {
+		t.Fatalf("after-family closed iCloud continuation = %+v", task)
 	}
-	if err := service.ConfirmICloudOnboardingActivation(context.Background(), task.ID, 1, "after-family", "/activation"); err != nil {
+}
+
+func TestICloudOldCookieBackfillStillWaitsForActivation(t *testing.T) {
+	service, db, task, _ := newOnboardingStateTest(t)
+	service.onboardingApple = onboardingClosedICloudApple{}
+	phoneID := uint(7)
+	if err := db.Model(task).Updates(map[string]any{
+		"task_kind": "refresh", "stage": "old_cookie_finish", "pending_sms_purpose": appleSMSOldCookieLogin,
+		"icloud_opened": true, "kitesim_phone_id": phoneID,
+	}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := db.First(task, task.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if task.Stage != "icloud_cookie_prepare" || task.ICloudActivationConfirmedAt == nil {
-		t.Fatalf("after-family activation confirmation = %+v", task)
+	processOnboardingStageForTest(t, service, db, task)
+	if task.Status != iCloudOnboardingWaiting || task.DispatchStatus != "waiting" || task.Stage != "waiting_icloud_activation" || task.ICloudOpened {
+		t.Fatalf("old Cookie backfill activation wait = %+v", task)
 	}
 }
 
@@ -712,6 +722,26 @@ func TestICloudOnboardingResourceImportRejectsMissingPermanentPhone(t *testing.T
 	processOnboardingStageForTest(t, service, db, task)
 	if task.Status != iCloudOnboardingFailed || task.LastErrorCategory != "phone_binding_missing" || len(apple.operations) != 0 {
 		t.Fatalf("missing binding reached Apple export: task=%+v operations=%v", task, apple.operations)
+	}
+}
+
+func TestICloudOnboardingReauthenticatesWhenSavedOldCookieIsMissing(t *testing.T) {
+	service, db, task, _ := newOnboardingStateTest(t)
+	phoneID := uint(7)
+	if err := db.Model(task).Updates(map[string]any{
+		"account_role": "primary", "icloud_opened": true, "stage": "resource_import",
+		"bound_phone_number": "14155550001", "bound_phone_source": "kitesim", "kitesim_phone_id": phoneID,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(task, task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	apple := &onboardingExportApple{}
+	service.onboardingApple = apple
+	processOnboardingStageForTest(t, service, db, task)
+	if task.Status != iCloudOnboardingProcessing || task.Stage != "icloud_cookie_prepare" || task.DispatchStatus != "pending" || task.Attempts != 1 || apple.calls != 1 {
+		t.Fatalf("missing old Cookie recovery = task=%+v Apple calls=%d", task, apple.calls)
 	}
 }
 
@@ -1235,7 +1265,8 @@ func TestICloudOnboardingProvidedPhoneUsesSMSPoolFailurePolicy(t *testing.T) {
 	service.onboardingApple = onboardingSendRejectedApple{}
 	if err := db.Model(task).Updates(map[string]any{
 		"stage": "sms_send", "bound_phone_source": "manual", "kitesim_phone_id": 7,
-		"pending_sms_purpose": appleSMSManageLogin, "stage_attempts": 2,
+		"pending_sms_purpose": appleSMSManageLogin, "stage_attempts": 2, "session_payload": []byte(`{"prepared":true}`),
+		"sms_poll_deadline": service.now().UTC().Add(2 * time.Minute),
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -1243,8 +1274,106 @@ func TestICloudOnboardingProvidedPhoneUsesSMSPoolFailurePolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	processOnboardingStageForTest(t, service, db, task)
-	if task.Status != iCloudOnboardingWaiting || task.DispatchStatus != "pending" || task.StageAttempts != 3 || task.NextAttemptAt == nil || !task.NextAttemptAt.Equal(cooldown) || !phone.failed {
+	if task.Status != iCloudOnboardingWaiting || task.DispatchStatus != "pending" || task.Stage != "manage_prepare" || task.StageAttempts != 3 || task.NextAttemptAt == nil || !task.NextAttemptAt.Equal(cooldown) || !phone.failed || len(task.SessionPayload) != 0 || task.PendingSMSPurpose != "" {
 		t.Fatalf("SMS pool policy was bypassed: task=%+v markedFailed=%v", task, phone.failed)
+	}
+}
+
+func TestICloudOnboardingMissingSMSChallengeRestartsAuthentication(t *testing.T) {
+	service, db, task, _ := newOnboardingStateTest(t)
+	service.smsPhones = onboardingMissingChallengePhone{}
+	if err := db.Model(task).Updates(map[string]any{
+		"stage": "sms_wait", "bound_phone_source": "manual", "kitesim_phone_id": 7,
+		"pending_sms_purpose": appleSMSManageLogin, "stage_attempts": 1, "session_payload": []byte(`{"stale":true}`),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(task, task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	processOnboardingStageForTest(t, service, db, task)
+	if task.Stage != "manage_prepare" || task.StageAttempts != 2 || len(task.SessionPayload) != 0 || task.PendingSMSPurpose != "" {
+		t.Fatalf("missing challenge reused stale Apple transaction: %+v", task)
+	}
+}
+
+func TestICloudOnboardingLegacySMSSendRestartsBeforeReservation(t *testing.T) {
+	service, db, task, _ := newOnboardingStateTest(t)
+	phone := &onboardingSMSUncertainPhone{}
+	apple := &onboardingSMSUncertainApple{}
+	service.smsPhones = phone
+	service.onboardingApple = apple
+	if err := db.Model(task).Updates(map[string]any{
+		"stage": "sms_send", "bound_phone_source": "manual", "kitesim_phone_id": 7,
+		"pending_sms_purpose": appleSMSManageLogin, "session_payload": []byte(`{"stale":true}`),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(task, task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	processOnboardingStageForTest(t, service, db, task)
+	if task.Stage != "manage_prepare" || len(task.SessionPayload) != 0 || task.PendingSMSPurpose != "" || phone.status != "" || apple.calls != 0 {
+		t.Fatalf("legacy SMS send used a stale Apple transaction: task=%+v phone_status=%q Apple_calls=%d", task, phone.status, apple.calls)
+	}
+}
+
+func TestICloudOnboardingSMSCooldownDoesNotKeepPreparedTransaction(t *testing.T) {
+	service, db, task, apple := newOnboardingStateTest(t)
+	retryAt := service.now().UTC().Add(6 * time.Minute)
+	service.smsPhones = onboardingSMSCoolingPhone{retryAt: retryAt}
+	if err := db.Model(task).Updates(map[string]any{
+		"stage": "sms_send", "bound_phone_source": "manual", "kitesim_phone_id": 7,
+		"pending_sms_purpose": appleSMSManageLogin, "stage_attempts": 2, "session_payload": []byte(`{"prepared":true}`),
+		"sms_poll_deadline": service.now().UTC().Add(2 * time.Minute),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(task, task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	processOnboardingStageForTest(t, service, db, task)
+	if task.Stage != "manage_prepare" || task.StageAttempts != 2 || task.NextAttemptAt == nil || !task.NextAttemptAt.Equal(retryAt) || len(task.SessionPayload) != 0 || task.PendingSMSPurpose != "" || len(apple.operations) != 0 {
+		t.Fatalf("SMS cooldown reached Apple send: task=%+v operations=%v", task, apple.operations)
+	}
+}
+
+func TestICloudOnboardingChecksSMSCooldownBeforeEveryPhase(t *testing.T) {
+	for _, stage := range []string{"icloud_prepare", "family_select", "manage_prepare"} {
+		t.Run(stage, func(t *testing.T) {
+			service, db, task, apple := newOnboardingStateTest(t)
+			retryAt := service.now().UTC().Add(6 * time.Minute)
+			service.smsPhones = onboardingSMSCoolingPhone{retryAt: retryAt}
+			if err := db.Model(task).Updates(map[string]any{
+				"stage": stage, "bound_phone_source": "manual", "kitesim_phone_id": 7,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.First(task, task.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			processOnboardingStageForTest(t, service, db, task)
+			if task.Status != iCloudOnboardingWaiting || task.DispatchStatus != "pending" || task.Stage != stage ||
+				task.NextAttemptAt == nil || !task.NextAttemptAt.Equal(retryAt) || len(apple.operations) != 0 {
+				t.Fatalf("cooling phone reached phase %s: task=%+v operations=%v", stage, task, apple.operations)
+			}
+		})
+	}
+}
+
+func TestICloudOnboardingSMSRetryBudgetSurvivesFreshPrepare(t *testing.T) {
+	service, db, task, _ := newOnboardingStateTest(t)
+	if err := db.Model(task).Updates(map[string]any{
+		"stage": "icloud_prepare", "bound_phone_source": "kitesim", "stage_attempts": 3,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(task, task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	processOnboardingStageForTest(t, service, db, task)
+	if task.Stage != "sms_send" || task.StageAttempts != 3 || task.PendingSMSPurpose != appleSMSPhoneEnrollment {
+		t.Fatalf("fresh Apple prepare reset SMS retry budget: %+v", task)
 	}
 }
 
@@ -1254,7 +1383,7 @@ func TestICloudOnboardingConfirmsAcceptedSMSSend(t *testing.T) {
 	service.smsPhones = phone
 	if err := db.Model(task).Updates(map[string]any{
 		"stage": "sms_send", "bound_phone_source": "manual", "kitesim_phone_id": 7,
-		"pending_sms_purpose": appleSMSManageLogin,
+		"pending_sms_purpose": appleSMSManageLogin, "sms_poll_deadline": service.now().UTC().Add(2 * time.Minute),
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -1286,31 +1415,20 @@ func TestICloudOnboardingSMSVerifyRecoveryNeverReplaysCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	payload := iCloudOnboardingTask{TaskID: task.ID, Generation: task.Generation}
-	if err := service.ProcessICloudOnboardingTask(context.Background(), payload); !errors.Is(err, ErrICloudOnboardingTemporary) {
+	if err := service.ProcessICloudOnboardingTask(context.Background(), payload); err != nil {
 		t.Fatalf("first verification error = %v", err)
 	}
 	if err := db.First(task, task.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if task.Stage != "sms_verify_recover" || task.ManualVerificationCode != "" || task.DispatchStatus != "running" || apple.calls != 1 {
-		t.Fatalf("verification recovery intent = task=%+v calls=%d", task, apple.calls)
+	if task.Stage != "manage_profile" || task.ManualVerificationCode != "" || task.DispatchStatus != "pending" || apple.calls != 1 {
+		t.Fatalf("verification was not advanced after Apple success: task=%+v calls=%d", task, apple.calls)
 	}
-	if err := service.ProcessICloudOnboardingTask(context.Background(), payload); !errors.Is(err, ErrICloudOnboardingTemporary) {
-		t.Fatalf("same-generation running retry = %v", err)
+	if err := service.ProcessICloudOnboardingTask(context.Background(), payload); err != nil {
+		t.Fatalf("stale generation retry = %v", err)
 	}
 	if apple.calls != 1 {
-		t.Fatalf("verification code replayed during Asynq retry: calls=%d", apple.calls)
-	}
-	if err := service.ReleaseICloudOnboardingTask(context.Background(), payload, "forced local persistence failure"); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.First(task, task.ID).Error; err != nil {
-		t.Fatal(err)
-	}
-	phone.completeErr = nil
-	processOnboardingStageForTest(t, service, db, task)
-	if task.Stage != "manage_prepare" || task.DispatchStatus != "pending" || apple.calls != 1 {
-		t.Fatalf("verification recovery replayed code: task=%+v calls=%d", task, apple.calls)
+		t.Fatalf("verification code replayed after local completion failure: calls=%d", apple.calls)
 	}
 }
 
@@ -1322,7 +1440,7 @@ func TestICloudOnboardingUnknownSMSSendResultDoesNotResend(t *testing.T) {
 	service.onboardingApple = apple
 	if err := db.Model(task).Updates(map[string]any{
 		"stage": "sms_send", "bound_phone_source": "manual", "kitesim_phone_id": 7,
-		"pending_sms_purpose": appleSMSManageLogin,
+		"pending_sms_purpose": appleSMSManageLogin, "sms_poll_deadline": service.now().UTC().Add(2 * time.Minute),
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -1355,7 +1473,7 @@ func TestICloudOnboardingSendClaimRaceResumesPolling(t *testing.T) {
 	service.onboardingApple = apple
 	if err := db.Model(task).Updates(map[string]any{
 		"stage": "sms_send", "bound_phone_source": "manual", "kitesim_phone_id": 7,
-		"pending_sms_purpose": appleSMSManageLogin,
+		"pending_sms_purpose": appleSMSManageLogin, "sms_poll_deadline": service.now().UTC().Add(2 * time.Minute),
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -1375,6 +1493,7 @@ func TestICloudOnboardingAppleRetryPathsConsumeMaxAttempts(t *testing.T) {
 			retryAt := time.Date(2026, 8, 16, 12, 2, 0, 0, time.UTC)
 			return &AppleOnboardingError{Category: "apple_unavailable", SafeMessage: "Apple unavailable.", Retryable: true, RetryAt: &retryAt}
 		}(),
+		"retry_without_retry_at": {Category: "apple_unavailable", SafeMessage: "Apple unavailable.", Retryable: true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			service, db, task, _ := newOnboardingStateTest(t)
@@ -1746,6 +1865,29 @@ func TestICloudOnboardingInfrastructureRetriesTerminateAndRefreshImport(t *testi
 	}
 }
 
+func TestReleaseICloudOnboardingTaskIgnoresAlreadyAdvancedDispatch(t *testing.T) {
+	service, db, task, _ := newOnboardingStateTest(t)
+	if err := db.Model(task).Updates(map[string]any{
+		"stage": "manage_profile", "dispatch_status": "pending", "attempts": 1,
+		"session_payload": []byte(`{"session":true}`), "last_safe_error": "advanced",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(task, task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	generation, attempts := task.Generation, task.Attempts
+	if err := service.ReleaseICloudOnboardingTask(context.Background(), iCloudOnboardingTask{TaskID: task.ID, Generation: generation}, "stale worker failure"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(task, task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if task.Stage != "manage_profile" || task.DispatchStatus != "pending" || task.Generation != generation || task.Attempts != attempts || task.LastSafeError != "advanced" {
+		t.Fatalf("advanced task was released by stale payload: %+v", task)
+	}
+}
+
 func TestGetICloudOnboardingImportRepairsStaleSummary(t *testing.T) {
 	service, db, task, _ := newOnboardingStateTest(t)
 	if err := db.Model(task).Updates(map[string]any{
@@ -1798,13 +1940,9 @@ func TestRecoverStaleICloudOnboardingTasksConsumesRetryBudget(t *testing.T) {
 	}
 }
 
-func TestFindAppleSMSCodeRejectsOldMessages(t *testing.T) {
-	sent := time.Date(2026, time.August, 16, 12, 0, 0, 0, time.UTC)
-	messages := []kitesim.MessageItem{
-		{Content: "Apple code 111111", Time: "2026-08-16 11:30:00"},
-		{Content: "Apple code 222222", Time: "2026-08-16 12:00:05"},
-	}
-	if code := findAppleSMSCode(messages, &sent); code != "222222" {
+func TestClaimedAppleSMSCodeDoesNotReparseProviderTime(t *testing.T) {
+	message := kitesim.MessageItem{Content: "Apple code 222222", Time: "provider-specific-time"}
+	if code := claimedAppleSMSCode(message); code != "222222" {
 		t.Fatalf("code = %q", code)
 	}
 }

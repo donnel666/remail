@@ -45,7 +45,7 @@ func (s *Service) ScheduleICloudOnboardingDispatcher(ctx context.Context, delay 
 	if delay > 0 {
 		options = append(options, asynq.ProcessIn(delay))
 	}
-	_, err := s.queue.EnqueueContext(ctx, asynq.NewTask(typeICloudOnboardingDispatcher, nil), options...)
+	_, err := s.queue.EnqueueContext(ctx, asynq.NewTask(typeICloudOnboardingDispatcher, iCloudDispatcherPayload(delay)), options...)
 	if errors.Is(err, asynq.ErrDuplicateTask) {
 		return nil
 	}
@@ -53,6 +53,16 @@ func (s *Service) ScheduleICloudOnboardingDispatcher(ctx context.Context, delay 
 		return ErrICloudOnboardingTemporary
 	}
 	return nil
+}
+
+// Dispatcher payloads are ignored by the handlers; the wake bucket only keeps
+// a delayed task from occupying the unique key of an immediate dispatch.
+func iCloudDispatcherPayload(delay time.Duration) []byte {
+	wakeAt := time.Now().UTC().Add(delay).Truncate(time.Second).Unix()
+	payload, _ := json.Marshal(struct {
+		WakeAt int64 `json:"wakeAt"`
+	}{WakeAt: wakeAt})
+	return payload
 }
 
 func (s *Service) enqueueICloudOnboardingTask(ctx context.Context, task iCloudOnboardingTask) (bool, error) {
@@ -92,7 +102,7 @@ func (s *Service) ScheduleICloudImportDispatcher(ctx context.Context, delay time
 	if delay > 0 {
 		options = append(options, asynq.ProcessIn(delay))
 	}
-	_, err := s.queue.EnqueueContext(ctx, asynq.NewTask(typeICloudImportDispatcher, nil), options...)
+	_, err := s.queue.EnqueueContext(ctx, asynq.NewTask(typeICloudImportDispatcher, iCloudDispatcherPayload(delay)), options...)
 	if errors.Is(err, asynq.ErrDuplicateTask) {
 		return nil
 	}
@@ -116,7 +126,7 @@ func (s *Service) ScheduleICloudValidationDispatcher(ctx context.Context, delay 
 	if delay > 0 {
 		options = append(options, asynq.ProcessIn(delay))
 	}
-	_, err := s.queue.EnqueueContext(ctx, asynq.NewTask(typeICloudValidationDispatcher, nil), options...)
+	_, err := s.queue.EnqueueContext(ctx, asynq.NewTask(typeICloudValidationDispatcher, iCloudDispatcherPayload(delay)), options...)
 	if errors.Is(err, asynq.ErrDuplicateTask) {
 		return nil
 	}
@@ -140,7 +150,7 @@ func (s *Service) ScheduleICloudProvisionDispatcher(ctx context.Context, delay t
 	if delay > 0 {
 		options = append(options, asynq.ProcessIn(delay))
 	}
-	_, err := s.queue.EnqueueContext(ctx, asynq.NewTask(typeICloudProvisionDispatcher, nil), options...)
+	_, err := s.queue.EnqueueContext(ctx, asynq.NewTask(typeICloudProvisionDispatcher, iCloudDispatcherPayload(delay)), options...)
 	if errors.Is(err, asynq.ErrDuplicateTask) {
 		return nil
 	}

@@ -27,14 +27,13 @@ const (
 
 	defaultSMSChallengeTTL = 2 * time.Minute
 	appleSMSClockSkew      = 15 * time.Second
+	appleSMSRecentWindow   = time.Minute
 )
 
-var appleSMSCodePatterns = []*regexp.Regexp{
-	// Apple sometimes wraps the body or appends a provider footer. Match the
-	// body text only; the caller is intentionally not part of verification.
-	regexp.MustCompile(`你的Apple账户验证码是[[:space:]]*([0-9]{6})[[:space:]]*，切勿向任何人泄露，以防账户或信息被盗。`),
-	regexp.MustCompile(`(?i)Your Apple Account Code is:[[:space:]]*([0-9]{6})[[:space:]]*\.[[:space:]]*Don(?:'|’|‘)t share it with anyone\.`),
-}
+// The sender and message language are provider data, not verification
+// criteria. Apple verification messages contain one six-digit code in the
+// body; keep the matcher deliberately independent of the surrounding text.
+var appleSMSCodePattern = regexp.MustCompile(`(?:^|[^0-9])([0-9]{6})(?:[^0-9]|$)`)
 
 type smsChallengeModel struct {
 	ID                 uint64     `gorm:"column:id;primaryKey;autoIncrement"`
@@ -91,6 +90,30 @@ func (s *Service) ReserveSMSAttempt(ctx context.Context, phoneID uint, purpose s
 	return s.ReserveSMSChallenge(ctx, phoneID, purpose, "", now.Add(defaultSMSChallengeTTL))
 }
 
+// CheckSMSPhoneAvailable applies the same policy as reservation without
+// consuming quota or starting a cooldown.
+func (s *Service) CheckSMSPhoneAvailable(ctx context.Context, phoneID uint) error {
+	if s == nil || s.db == nil || phoneID == 0 {
+		return ErrInvalidInput
+	}
+	now := s.now().UTC().Truncate(time.Millisecond)
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var phone phoneModel
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&phone, phoneID).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrPhoneMissing
+		}
+		if err != nil {
+			return err
+		}
+		if phone.DeletedAt != nil || phone.DisabledAt != nil || PhoneStatus(phone.Status) != PhoneActive {
+			return smsInactivePhoneError(tx, phoneID)
+		}
+		_, _, err = availableSMSPhonePolicyTx(tx, &phone, now)
+		return err
+	})
+}
+
 // ReserveSMSChallenge atomically consumes quota and owns the phone until the
 // challenge is completed, canceled, fails to send, or expires. Reusing the
 // same non-empty owner key returns the original challenge for crash recovery,
@@ -135,12 +158,15 @@ func (s *Service) ReserveSMSChallenge(ctx context.Context, phoneID uint, purpose
 				if err := expireSMSChallengeIfNeededTx(tx, &existing, now); err != nil {
 					return err
 				}
-				if existing.Status != SMSChallengeCompleted && existing.Status != SMSChallengeCanceled {
+				if smsChallengeActive(existing.Status) {
 					reservation = smsReservation(existing, phone.SMSCooldownUntil)
 					return nil
 				}
 				if err := tx.Model(&smsChallengeModel{}).
-					Where("id = ? AND owner_key = ? AND status IN ?", existing.ID, ownerKey, []string{SMSChallengeCompleted, SMSChallengeCanceled}).
+					Where("id = ? AND owner_key = ? AND status IN ?", existing.ID, ownerKey, []string{
+						SMSChallengeCompleted, SMSChallengeCanceled, SMSChallengeExpired,
+						SMSChallengeSendFailed, SMSChallengeInfrastructureFailed,
+					}).
 					Update("owner_key", nil).Error; err != nil {
 					return err
 				}
@@ -149,20 +175,7 @@ func (s *Service) ReserveSMSChallenge(ctx context.Context, phoneID uint, purpose
 			}
 		}
 
-		var active smsChallengeModel
-		err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("active_phone_id = ?", phoneID).Take(&active).Error
-		if err == nil {
-			if err := expireSMSChallengeIfNeededTx(tx, &active, now); err != nil {
-				return err
-			}
-			if smsChallengeActive(active.Status) {
-				return &SMSPhoneUnavailableError{RetryAt: active.ExpiresAt, Reason: "phone number already has an active SMS challenge"}
-			}
-		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return err
-		}
-
-		cooldownUntil, stage, err := reserveSMSPhonePolicyTx(tx, &phone, now)
+		cooldownUntil, stage, err := availableSMSPhonePolicyTx(tx, &phone, now)
 		if err != nil {
 			return err
 		}
@@ -204,6 +217,22 @@ func (s *Service) ReserveSMSChallenge(ctx context.Context, phoneID uint, purpose
 		return SMSReservation{}, ErrSMSChallengeOwnerConflict
 	}
 	return SMSReservation{ID: existing.ID, PhoneID: existing.PhoneID, Purpose: existing.Purpose, Status: existing.Status, ExpiresAt: existing.ExpiresAt}, nil
+}
+
+func availableSMSPhonePolicyTx(tx *gorm.DB, phone *phoneModel, now time.Time) (time.Time, uint8, error) {
+	var active smsChallengeModel
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("active_phone_id = ?", phone.ID).Take(&active).Error
+	if err == nil {
+		if err := expireSMSChallengeIfNeededTx(tx, &active, now); err != nil {
+			return time.Time{}, 0, err
+		}
+		if smsChallengeActive(active.Status) {
+			return time.Time{}, 0, &SMSPhoneUnavailableError{RetryAt: active.ExpiresAt, Reason: "phone number already has an active SMS challenge"}
+		}
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return time.Time{}, 0, err
+	}
+	return reserveSMSPhonePolicyTx(tx, phone, now)
 }
 
 func reserveSMSPhonePolicyTx(tx *gorm.DB, phone *phoneModel, now time.Time) (time.Time, uint8, error) {
@@ -556,6 +585,7 @@ func (s *Service) ClaimAppleSMSMessage(ctx context.Context, challengeID uint64) 
 func (s *Service) claimAppleSMSMessage(ctx context.Context, challengeID uint64, messages []MessageItem) (*MessageItem, error) {
 	now := s.now().UTC().Truncate(time.Millisecond)
 	var claimed *MessageItem
+	claimedFingerprint := ""
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var challenge smsChallengeModel
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&challenge, challengeID).Error; err != nil {
@@ -574,9 +604,12 @@ func (s *Service) claimAppleSMSMessage(ctx context.Context, challengeID uint64, 
 		if challenge.Status != SMSChallengeSent || challenge.SentAt == nil {
 			return ErrSMSChallengeInactive
 		}
-		candidates := appleSMSMessageCandidates(messages, *challenge.SentAt, challenge.ExpiresAt)
+		candidates := appleSMSMessageCandidates(messages, *challenge.SentAt, now)
 		for _, candidate := range candidates {
 			fingerprint := smsMessageFingerprint(challenge.PhoneID, candidate.item)
+			if s.smsMessageConsumed(fingerprint, now) {
+				continue
+			}
 			var used int64
 			if err := tx.Model(&smsChallengeModel{}).Where("message_fingerprint = ?", fingerprint).Count(&used).Error; err != nil {
 				return err
@@ -593,12 +626,16 @@ func (s *Service) claimAppleSMSMessage(ctx context.Context, challengeID uint64, 
 				return updated.Error
 			}
 			if updated.RowsAffected == 1 {
+				claimedFingerprint = fingerprint
 				claimed = &MessageItem{Caller: caller, Content: content, Time: messageTime}
 				return nil
 			}
 		}
 		return ErrAppleSMSMessageNotFound
 	})
+	if err == nil && claimedFingerprint != "" {
+		s.rememberSMSMessage(claimedFingerprint, now)
+	}
 	return claimed, err
 }
 
@@ -607,35 +644,62 @@ type appleSMSMessageCandidate struct {
 	receivedAt time.Time
 }
 
-func appleSMSMessageCandidates(messages []MessageItem, sentAt, expiresAt time.Time) []appleSMSMessageCandidate {
+func appleSMSMessageCandidates(messages []MessageItem, sentAt, now time.Time) []appleSMSMessageCandidate {
 	result := make([]appleSMSMessageCandidate, 0, len(messages))
+	lowerBound := now.Add(-appleSMSRecentWindow)
+	if sentAt.Add(-appleSMSClockSkew).After(lowerBound) {
+		lowerBound = sentAt.Add(-appleSMSClockSkew)
+	}
 	for _, message := range messages {
 		if appleSMSCode(message.Content) == "" {
 			continue
 		}
 		receivedAt := parseProviderTime(message.Time)
-		if receivedAt == nil || receivedAt.Before(sentAt.Add(-appleSMSClockSkew)) || receivedAt.After(expiresAt.Add(appleSMSClockSkew)) {
+		if receivedAt == nil || receivedAt.Before(lowerBound) || receivedAt.After(now.Add(appleSMSClockSkew)) {
 			continue
 		}
 		result = append(result, appleSMSMessageCandidate{item: message, receivedAt: *receivedAt})
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i].receivedAt.Before(result[j].receivedAt) })
+	// Prefer the newest code when the provider returns several messages in the
+	// same one-minute window. Older codes are the most common source of a
+	// needless verification retry.
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].receivedAt.After(result[j].receivedAt)
+	})
 	return result
 }
 
 func appleSMSCode(content string) string {
-	content = strings.TrimSpace(content)
-	for _, pattern := range appleSMSCodePatterns {
-		if match := pattern.FindStringSubmatch(content); len(match) == 2 {
-			return match[1]
-		}
+	if match := appleSMSCodePattern.FindStringSubmatch(strings.TrimSpace(content)); len(match) == 2 {
+		return match[1]
 	}
 	return ""
 }
 
+func (s *Service) smsMessageConsumed(fingerprint string, now time.Time) bool {
+	s.smsConsumedMu.Lock()
+	defer s.smsConsumedMu.Unlock()
+	for key, until := range s.smsConsumed {
+		if !until.After(now) {
+			delete(s.smsConsumed, key)
+		}
+	}
+	until, ok := s.smsConsumed[fingerprint]
+	return ok && until.After(now)
+}
+
+func (s *Service) rememberSMSMessage(fingerprint string, now time.Time) {
+	s.smsConsumedMu.Lock()
+	defer s.smsConsumedMu.Unlock()
+	if s.smsConsumed == nil {
+		s.smsConsumed = make(map[string]time.Time)
+	}
+	s.smsConsumed[fingerprint] = now.Add(appleSMSRecentWindow)
+}
+
 func smsMessageFingerprint(phoneID uint, message MessageItem) string {
 	payload := strings.Join([]string{
-		strings.TrimSpace(message.Caller), strings.TrimSpace(message.Content), strings.TrimSpace(message.Time),
+		strings.TrimSpace(message.Content), strings.TrimSpace(message.Time),
 	}, "\x00")
 	sum := sha256.Sum256([]byte(strconv.FormatUint(uint64(phoneID), 10) + "\x00" + payload))
 	return hex.EncodeToString(sum[:])

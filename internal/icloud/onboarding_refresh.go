@@ -265,15 +265,23 @@ func (s *Service) refreshICloudOnboardingResource(ctx context.Context, task *iCl
 	if task.KitesimPhoneID == nil || strings.TrimSpace(task.BoundPhoneNumber) == "" {
 		return s.failICloudOnboardingTask(ctx, task, "phone_binding_missing", "Cookie refresh requires the permanently bound eSIM phone.")
 	}
-	response, err := s.executeICloudOnboardingApple(ctx, task, secret, AppleOnboardingRequest{Operation: appleOnboardingExport})
+	response, err := s.executeICloudOnboardingApple(ctx, task, secret, AppleOnboardingRequest{
+		Operation: appleOnboardingExport, ForwardToEmail: task.SelectedForwardTo,
+	})
 	if err != nil {
 		return s.handleICloudOnboardingAppleError(ctx, task, err)
 	}
 	if response.NewChannel == nil || strings.TrimSpace(response.NewChannel.Cookie) == "" {
-		return s.failICloudOnboardingTask(ctx, task, "new_cookie_missing", "Apple Account did not return a usable refreshed session cookie.")
+		return s.retryICloudOnboardingTask(ctx, task, "manage_prepare", nil, "new_cookie_missing", "The refreshed Apple Account session was incomplete; management login will restart.", map[string]any{
+			"session_payload": nil, "pending_sms_purpose": "", "manual_verification_code": "",
+			"sms_sent_at": nil, "sms_poll_deadline": nil,
+		})
 	}
 	if task.ICloudOpened && (response.OldChannel == nil || strings.TrimSpace(response.OldChannel.Cookie) == "") {
-		return s.failICloudOnboardingTask(ctx, task, "old_cookie_missing", "iCloud did not return a usable refreshed V2 session cookie.")
+		return s.retryICloudOnboardingTask(ctx, task, "icloud_prepare", nil, "old_cookie_missing", "The refreshed iCloud V2 session was incomplete; iCloud login will restart.", map[string]any{
+			"session_payload": nil, "pending_sms_purpose": "", "manual_verification_code": "",
+			"sms_sent_at": nil, "sms_poll_deadline": nil,
+		})
 	}
 	now := s.now().UTC().Truncate(time.Millisecond)
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {

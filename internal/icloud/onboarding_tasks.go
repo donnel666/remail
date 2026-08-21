@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand"
 	"regexp"
 	"strconv"
 	"strings"
@@ -18,13 +19,15 @@ import (
 )
 
 const (
-	iCloudOnboardingQueueLease   = 2 * time.Minute
-	iCloudOnboardingRunningLease = 5 * time.Minute
-	iCloudOnboardingSMSPoll      = 4 * time.Second
-	iCloudOnboardingSMSDeadline  = 2 * time.Minute
-	iCloudOnboardingFamilyRetry  = 5 * time.Minute
-	iCloudOnboardingForwardRetry = 4 * time.Second
-	iCloudFamilyChildLimit       = 5
+	iCloudOnboardingQueueLease        = 2 * time.Minute
+	iCloudOnboardingRunningLease      = 5 * time.Minute
+	iCloudOnboardingSMSPoll           = 4 * time.Second
+	iCloudOnboardingSMSDeadline       = 2 * time.Minute
+	iCloudOnboardingFamilyRetry       = 5 * time.Minute
+	iCloudOnboardingForwardRetry      = 4 * time.Second
+	iCloudOnboardingStageDelayMinimum = 60 * time.Second
+	iCloudOnboardingStageDelayMaximum = 200 * time.Second
+	iCloudFamilyChildLimit            = 5
 )
 
 var appleSMSCodePattern = regexp.MustCompile(`(?:^|[^0-9])([0-9]{6})(?:[^0-9]|$)`)
@@ -178,6 +181,13 @@ func (s *Service) processICloudOnboardingStage(ctx context.Context, task *iCloud
 		return s.failICloudOnboardingTask(ctx, task, "invalid_credentials", "Stored Apple credentials are invalid.")
 	}
 	switch task.Stage {
+	case "icloud_prepare", "old_cookie_prepare", "icloud_cookie_prepare", "family_select", "family_prepare", "family_reconcile_prepare", "manage_prepare":
+		ready, err := s.checkICloudOnboardingSMSPhone(ctx, task)
+		if err != nil || !ready {
+			return err
+		}
+	}
+	switch task.Stage {
 	case "accepted":
 		return s.assignICloudOnboardingPhone(ctx, task)
 	case "icloud_prepare":
@@ -325,6 +335,7 @@ func (s *Service) assignICloudOnboardingPhone(ctx context.Context, task *iCloudO
 			return s.failICloudOnboardingTask(ctx, task, "phone_binding_unavailable", "The permanently bound phone is disabled or unavailable in the eSIM phone pool.")
 		}
 		if retryAt, ok := kitesim.SMSRetryAt(err); ok {
+			retryAt = iCloudOnboardingSMSRetryAt(retryAt, s.now().UTC())
 			return s.waitICloudOnboardingTask(ctx, task, &retryAt, "pending", "No eSIM phone is currently available.")
 		}
 		return ErrICloudOnboardingTemporary
@@ -382,7 +393,32 @@ func (s *Service) prepareICloudOnboardingAppleWithInvite(ctx context.Context, ta
 		updates["kitesim_phone_id"] = &phoneID
 	}
 	updates["pending_sms_purpose"] = response.Next
+	updates["stage_attempts"] = task.StageAttempts
+	updates["sms_poll_deadline"] = s.now().UTC().Truncate(time.Millisecond).Add(iCloudOnboardingSMSDeadline)
 	return s.advanceICloudOnboardingTask(ctx, task, "sms_send", nil, updates)
+}
+
+func (s *Service) checkICloudOnboardingSMSPhone(ctx context.Context, task *iCloudOnboardingTaskModel) (bool, error) {
+	if task == nil || task.KitesimPhoneID == nil {
+		return true, nil
+	}
+	if s.smsPhones == nil {
+		return false, ErrICloudOnboardingTemporary
+	}
+	err := s.smsPhones.CheckSMSPhoneAvailable(ctx, *task.KitesimPhoneID)
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, kitesim.ErrSMSPhoneBoundUnavailable):
+		return false, s.failICloudOnboardingTask(ctx, task, "phone_binding_unavailable", "The permanently bound phone is disabled or unavailable in the eSIM phone pool.")
+	case errors.Is(err, kitesim.ErrPhoneMissing):
+		return false, s.failICloudOnboardingTask(ctx, task, "phone_not_in_pool", "The permanently bound phone is not available in the eSIM phone pool.")
+	}
+	if retryAt, ok := kitesim.SMSRetryAt(err); ok {
+		retryAt = iCloudOnboardingSMSRetryAt(retryAt, s.now().UTC())
+		return false, s.waitICloudOnboardingTask(ctx, task, &retryAt, "pending", safeICloudImportMessage(err.Error()))
+	}
+	return false, ErrICloudOnboardingTemporary
 }
 
 func (s *Service) bindICloudOnboardingTrustedPhone(ctx context.Context, task *iCloudOnboardingTaskModel, suffix string) (*kitesim.SMSPhoneBinding, error) {
@@ -426,6 +462,17 @@ func (s *Service) sendICloudOnboardingSMS(ctx context.Context, task *iCloudOnboa
 	if purpose == "" {
 		return s.failICloudOnboardingTask(ctx, task, "invalid_sms_state", "Apple SMS verification state is invalid.")
 	}
+	if task.SMSPollDeadline == nil || !task.SMSPollDeadline.After(s.now().UTC()) {
+		s.cancelICloudOnboardingSMSChallenge(context.WithoutCancel(ctx), task)
+		updates := map[string]any{
+			"session_payload": nil, "manual_verification_code": "", "sms_sent_at": nil, "sms_poll_deadline": nil,
+			"stage_attempts": task.StageAttempts,
+		}
+		if purpose != appleSMSOldCookieLogin {
+			updates["pending_sms_purpose"] = ""
+		}
+		return s.advanceICloudOnboardingTask(ctx, task, appleOnboardingRestartStage(purpose), nil, updates)
+	}
 	var reservation *kitesim.SMSReservation
 	if task.KitesimPhoneID != nil {
 		if s.smsPhones == nil {
@@ -454,7 +501,15 @@ func (s *Service) sendICloudOnboardingSMS(ctx context.Context, task *iCloudOnboa
 				return s.failICloudOnboardingTask(ctx, task, "phone_binding_unavailable", "The permanently bound phone is disabled or unavailable in the eSIM phone pool.")
 			}
 			if retryAt, ok := kitesim.SMSRetryAt(err); ok {
-				return s.waitICloudOnboardingTask(ctx, task, &retryAt, "pending", safeICloudImportMessage(err.Error()))
+				retryAt = iCloudOnboardingSMSRetryAt(retryAt, s.now().UTC())
+				updates := map[string]any{
+					"stage": appleOnboardingRestartStage(purpose), "stage_attempts": task.StageAttempts,
+					"session_payload": nil, "manual_verification_code": "", "sms_sent_at": nil, "sms_poll_deadline": nil,
+				}
+				if purpose != appleSMSOldCookieLogin {
+					updates["pending_sms_purpose"] = ""
+				}
+				return s.waitICloudOnboardingTaskWithUpdates(ctx, task, &retryAt, "pending", safeICloudImportMessage(err.Error()), updates)
 			}
 			return ErrICloudOnboardingTemporary
 		}
@@ -525,7 +580,7 @@ func (s *Service) waitICloudOnboardingSMS(ctx context.Context, task *iCloudOnboa
 	}
 	challenge, err := s.smsPhones.GetSMSChallengeByOwner(ctx, iCloudOnboardingSMSOwner(task))
 	if errors.Is(err, kitesim.ErrSMSReservationNotFound) {
-		return s.advanceICloudOnboardingTask(ctx, task, "sms_send", nil, map[string]any{"stage_attempts": task.StageAttempts})
+		return s.retryICloudOnboardingSMSRound(ctx, task, "The Apple SMS challenge no longer exists; authentication will restart.")
 	}
 	if err != nil {
 		return ErrICloudOnboardingTemporary
@@ -535,7 +590,7 @@ func (s *Service) waitICloudOnboardingSMS(ctx context.Context, task *iCloudOnboa
 	}
 	message, err := s.smsPhones.ClaimAppleSMSMessage(ctx, challenge.ID)
 	if err == nil && message != nil {
-		code := findAppleSMSCode([]kitesim.MessageItem{*message}, challenge.SentAt)
+		code := claimedAppleSMSCode(*message)
 		if code == "" {
 			return s.failICloudOnboardingTask(ctx, task, "invalid_sms_message", "The claimed Apple SMS did not contain a verification code.")
 		}
@@ -584,12 +639,6 @@ func (s *Service) verifyICloudOnboardingSMS(ctx context.Context, task *iCloudOnb
 		}
 		return s.handleICloudOnboardingAppleError(ctx, task, err)
 	}
-	if task.KitesimPhoneID != nil && s.smsPhones != nil {
-		challenge, err := s.smsPhones.GetSMSChallengeByOwner(ctx, iCloudOnboardingSMSOwner(task))
-		if err != nil || s.smsPhones.CompleteSMSChallenge(context.WithoutCancel(ctx), challenge.ID) != nil {
-			return ErrICloudOnboardingTemporary
-		}
-	}
 	updates := map[string]any{"manual_verification_code": "", "sms_sent_at": nil, "sms_poll_deadline": nil}
 	if task.PendingSMSPurpose != appleSMSOldCookieLogin {
 		updates["pending_sms_purpose"] = ""
@@ -597,7 +646,17 @@ func (s *Service) verifyICloudOnboardingSMS(ctx context.Context, task *iCloudOnb
 	if len(response.Session) > 0 {
 		updates["session_payload"] = iCloudJSON(response.Session)
 	}
-	return s.advanceICloudOnboardingTask(ctx, task, next, nil, updates)
+	if err := s.advanceICloudOnboardingTask(ctx, task, next, nil, updates); err != nil {
+		return err
+	}
+	// Apple has accepted the code and the workflow is already advanced. A
+	// transient local completion error must not replay the Apple verification.
+	if task.KitesimPhoneID != nil && s.smsPhones != nil {
+		if challenge, lookupErr := s.smsPhones.GetSMSChallengeByOwner(context.WithoutCancel(ctx), iCloudOnboardingSMSOwner(task)); lookupErr == nil {
+			_ = s.smsPhones.CompleteSMSChallenge(context.WithoutCancel(ctx), challenge.ID)
+		}
+	}
+	return nil
 }
 
 func (s *Service) prepareICloudOnboardingSMSVerification(ctx context.Context, task *iCloudOnboardingTaskModel) (bool, error) {
@@ -661,16 +720,20 @@ func (s *Service) retryICloudOnboardingSMSRoundAt(ctx context.Context, task *iCl
 	if attempts >= task.MaxAttempts {
 		return s.failICloudOnboardingTask(ctx, task, "sms_verification_exhausted", "Apple SMS verification did not complete within the retry limit.")
 	}
+	restart := appleOnboardingRestartStage(task.PendingSMSPurpose)
 	updates := map[string]any{
-		"stage_attempts": attempts, "manual_verification_code": "", "sms_sent_at": nil, "sms_poll_deadline": nil,
+		"stage_attempts": attempts, "session_payload": nil, "manual_verification_code": "", "sms_sent_at": nil, "sms_poll_deadline": nil,
 		"last_error_category": "sms_round_failed", "last_safe_error": safeICloudImportMessage(message),
+	}
+	if task.PendingSMSPurpose != appleSMSOldCookieLogin {
+		updates["pending_sms_purpose"] = ""
 	}
 	omitICloudOldCookieSafeError(task, updates)
 	if retryAt != nil {
-		updates["stage"] = "sms_send"
+		updates["stage"] = restart
 		return s.waitICloudOnboardingTaskWithUpdates(ctx, task, retryAt, "pending", message, updates)
 	}
-	return s.advanceICloudOnboardingTask(ctx, task, "sms_send", nil, updates)
+	return s.advanceICloudOnboardingTask(ctx, task, restart, nil, updates)
 }
 
 func (s *Service) cancelICloudOnboardingSMSChallenge(ctx context.Context, task *iCloudOnboardingTaskModel) {
@@ -693,8 +756,7 @@ func (s *Service) finishICloudOnboardingICloud(ctx context.Context, task *iCloud
 		operation = appleOnboardingFinishICloudCookie
 	}
 	response, err := s.executeICloudOnboardingApple(ctx, task, secret, AppleOnboardingRequest{
-		Operation:      operation,
-		SkipOldChannel: task.TaskKind == "onboarding" && !afterFamily && task.AccountRole == "child" && task.BoundPhoneSource != "manual",
+		Operation: operation,
 	})
 	if err != nil {
 		return s.handleICloudOnboardingAppleError(ctx, task, err)
@@ -706,16 +768,20 @@ func (s *Service) finishICloudOnboardingICloud(ctx context.Context, task *iCloud
 	if code := strings.ToUpper(strings.TrimSpace(response.CountryCode)); code != "" {
 		updates["country_code"] = code
 	}
-	if response.ICloudOpened != nil && *response.ICloudOpened {
-		updates["icloud_opened"] = true
-	}
-	if response.ICloudOpened != nil && !*response.ICloudOpened {
-		updates["icloud_activation_confirmed_at"] = gorm.Expr("NULL")
-		return s.waitICloudOnboardingTaskWithUpdates(ctx, task, nil, "waiting", "Waiting for manual iCloud activation.", updatesWith(updates, "stage", "waiting_icloud_activation"))
+	if response.ICloudOpened != nil {
+		updates["icloud_opened"] = *response.ICloudOpened
+		if !*response.ICloudOpened {
+			updates["icloud_activation_confirmed_at"] = gorm.Expr("NULL")
+			if isICloudOldCookieBackfill(task) {
+				return s.waitICloudOnboardingTaskWithUpdates(ctx, task, nil, "waiting", "Waiting for manual iCloud activation.", updatesWith(updates, "stage", "waiting_icloud_activation"))
+			}
+		}
 	}
 	if isICloudOldCookieBackfill(task) {
 		if response.OldChannel == nil || strings.TrimSpace(response.OldChannel.Cookie) == "" {
-			return s.failICloudOnboardingTask(ctx, task, "old_cookie_missing", "iCloud did not return a usable V2 session cookie.")
+			return s.retryICloudOnboardingTask(ctx, task, "old_cookie_prepare", nil, "old_cookie_missing", "iCloud did not return a usable V2 session cookie; authentication will restart.", map[string]any{
+				"session_payload": nil, "manual_verification_code": "", "sms_sent_at": nil, "sms_poll_deadline": nil,
+			})
 		}
 		return s.completeICloudOldCookieBackfill(ctx, task, *response.OldChannel)
 	}
@@ -921,11 +987,7 @@ func (s *Service) joinICloudOnboardingFamily(ctx context.Context, task *iCloudOn
 		}
 		return s.failICloudOnboardingTask(ctx, task, category, safeICloudImportMessage(err.Error()))
 	}
-	next := "manage_prepare"
-	if task.ICloudOpened {
-		next = "icloud_cookie_prepare"
-	}
-	return s.advanceICloudOnboardingTask(ctx, task, next, nil, updates)
+	return s.advanceICloudOnboardingTask(ctx, task, "manage_prepare", nil, updates)
 }
 
 func (s *Service) fetchICloudOnboardingManage(ctx context.Context, task *iCloudOnboardingTaskModel, secret iCloudOnboardingSecret) error {
@@ -960,40 +1022,69 @@ func (s *Service) fetchICloudOnboardingManage(ctx context.Context, task *iCloudO
 
 func (s *Service) prepareICloudOnboardingForwarding(ctx context.Context, task *iCloudOnboardingTaskModel) error {
 	if task.ForwardPreparationID != nil {
-		return s.advanceICloudOnboardingTask(ctx, task, "forwarding_add_intent", nil, nil)
+		if preparation, err := s.usableICloudOnboardingForwarding(ctx, task); err == nil {
+			return s.advanceICloudOnboardingTask(ctx, task, "forwarding_add_intent", nil, map[string]any{
+				"selected_forward_to": strings.ToLower(strings.TrimSpace(preparation.ForwardToEmail)),
+			})
+		} else if !errors.Is(err, ErrICloudImportPreparationConflict) && !errors.Is(err, ErrICloudImportPreparationNotFound) {
+			return err
+		}
+		// A stale preparation cannot ever receive a usable code. Drop only the
+		// local pointer; the next dispatch creates a fresh mailbox.
+		return s.advanceICloudOnboardingTask(ctx, task, "forwarding_prepare", nil, map[string]any{
+			"forward_preparation_id": nil,
+		})
 	}
-	view, err := s.CreateAdminICloudImportPreparation(ctx, s.iCloudOnboardingOperatorID(ctx, iCloudOnboardingImportID(task)))
+	view, err := s.CreateAdminICloudImportPreparation(ctx, task.OperatorUserID)
 	if err != nil {
 		if errors.Is(err, ErrICloudForwardingUnavailable) {
 			return s.failICloudOnboardingTask(ctx, task, "forwarding_unavailable", "No authorized forwarding mailbox is available.")
 		}
 		return ErrICloudOnboardingTemporary
 	}
-	return s.advanceICloudOnboardingTask(ctx, task, "forwarding_add_intent", nil, map[string]any{"forward_preparation_id": view.ID})
-}
-
-func (s *Service) iCloudOnboardingOperatorID(ctx context.Context, importID uint) uint {
-	var operatorID uint
-	_ = s.db.WithContext(ctx).Model(&iCloudOnboardingTaskModel{}).
-		Where("import_id = ?", importID).Order("id ASC").Limit(1).
-		Pluck("onboarding_operator_user_id", &operatorID).Error
-	return operatorID
+	return s.advanceICloudOnboardingTask(ctx, task, "forwarding_add_intent", nil, map[string]any{
+		"forward_preparation_id": view.ID,
+		"selected_forward_to":    strings.ToLower(strings.TrimSpace(view.ForwardToEmail)),
+	})
 }
 
 func (s *Service) iCloudOnboardingForwarding(ctx context.Context, task *iCloudOnboardingTaskModel) (*iCloudImportPreparationModel, error) {
-	if task.ForwardPreparationID == nil {
-		return nil, ErrICloudOnboardingTemporary
+	if task == nil || task.ForwardPreparationID == nil || task.OperatorUserID == 0 {
+		return nil, ErrICloudImportPreparationConflict
 	}
 	var model iCloudImportPreparationModel
-	if err := s.db.WithContext(ctx).First(&model, *task.ForwardPreparationID).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("id = ? AND operator_user_id = ?", *task.ForwardPreparationID, task.OperatorUserID).First(&model).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrICloudImportPreparationConflict
+		}
 		return nil, ErrICloudOnboardingTemporary
 	}
 	return &model, nil
 }
 
-func (s *Service) sendICloudOnboardingForwarding(ctx context.Context, task *iCloudOnboardingTaskModel, secret iCloudOnboardingSecret) error {
-	preparation, err := s.iCloudOnboardingForwarding(ctx, task)
+func (s *Service) usableICloudOnboardingForwarding(ctx context.Context, task *iCloudOnboardingTaskModel) (*iCloudImportPreparationModel, error) {
+	model, err := s.iCloudOnboardingForwarding(ctx, task)
 	if err != nil {
+		return nil, err
+	}
+	if model.ConsumedAt != nil || !model.ExpiresAt.After(s.now().UTC()) {
+		return nil, ErrICloudImportPreparationConflict
+	}
+	return model, nil
+}
+
+func (s *Service) retryICloudOnboardingForwardingPreparation(ctx context.Context, task *iCloudOnboardingTaskModel) error {
+	return s.retryICloudOnboardingTask(ctx, task, "forwarding_prepare", nil, "forwarding_preparation_expired", "The forwarding mailbox preparation is no longer usable; a replacement will be created.", map[string]any{
+		"forward_preparation_id": nil,
+	})
+}
+
+func (s *Service) sendICloudOnboardingForwarding(ctx context.Context, task *iCloudOnboardingTaskModel, secret iCloudOnboardingSecret) error {
+	preparation, err := s.usableICloudOnboardingForwarding(ctx, task)
+	if err != nil {
+		if errors.Is(err, ErrICloudImportPreparationConflict) || errors.Is(err, ErrICloudImportPreparationNotFound) {
+			return s.retryICloudOnboardingForwardingPreparation(ctx, task)
+		}
 		return err
 	}
 	response, err := s.executeICloudOnboardingApple(ctx, task, secret, AppleOnboardingRequest{Operation: appleOnboardingAddForward, ForwardToEmail: preparation.ForwardToEmail})
@@ -1015,9 +1106,11 @@ func (s *Service) waitICloudOnboardingForwarding(ctx context.Context, task *iClo
 	if task.ForwardPreparationID == nil {
 		return s.advanceICloudOnboardingTask(ctx, task, "forwarding_prepare", nil, nil)
 	}
-	operatorID := s.iCloudOnboardingOperatorID(ctx, iCloudOnboardingImportID(task))
-	view, err := s.GetAdminICloudImportPreparation(ctx, operatorID, *task.ForwardPreparationID)
+	view, err := s.GetAdminICloudImportPreparation(ctx, task.OperatorUserID, *task.ForwardPreparationID)
 	if err != nil {
+		if errors.Is(err, ErrICloudImportPreparationNotFound) || errors.Is(err, ErrICloudImportPreparationConflict) {
+			return s.retryICloudOnboardingForwardingPreparation(ctx, task)
+		}
 		return ErrICloudOnboardingTemporary
 	}
 	switch view.Status {
@@ -1025,15 +1118,20 @@ func (s *Service) waitICloudOnboardingForwarding(ctx context.Context, task *iClo
 		return s.advanceICloudOnboardingTask(ctx, task, "forwarding_verify_intent", nil, nil)
 	case "expired", "consumed":
 		return s.retryICloudOnboardingTask(ctx, task, "forwarding_prepare", nil, "forwarding_preparation_expired", "The forwarding mailbox preparation expired before verification.", map[string]any{"forward_preparation_id": nil})
-	default:
+	case "waiting":
 		retryAt := s.now().UTC().Add(iCloudOnboardingForwardRetry)
 		return s.waitICloudOnboardingTask(ctx, task, &retryAt, "pending", "Waiting for the forwarding verification email.")
+	default:
+		return s.retryICloudOnboardingForwardingPreparation(ctx, task)
 	}
 }
 
 func (s *Service) verifyICloudOnboardingForwarding(ctx context.Context, task *iCloudOnboardingTaskModel, secret iCloudOnboardingSecret) error {
-	preparation, err := s.iCloudOnboardingForwarding(ctx, task)
+	preparation, err := s.usableICloudOnboardingForwarding(ctx, task)
 	if err != nil {
+		if errors.Is(err, ErrICloudImportPreparationConflict) || errors.Is(err, ErrICloudImportPreparationNotFound) {
+			return s.retryICloudOnboardingForwardingPreparation(ctx, task)
+		}
 		return err
 	}
 	if strings.TrimSpace(preparation.VerificationCode) == "" {
@@ -1056,7 +1154,9 @@ func (s *Service) importICloudOnboardingResource(ctx context.Context, task *iClo
 	if task.KitesimPhoneID == nil || strings.TrimSpace(task.BoundPhoneNumber) == "" {
 		return s.failICloudOnboardingTask(ctx, task, "phone_binding_missing", "The Apple ID has no permanent eSIM phone binding.")
 	}
-	response, err := s.executeICloudOnboardingApple(ctx, task, secret, AppleOnboardingRequest{Operation: appleOnboardingExport})
+	response, err := s.executeICloudOnboardingApple(ctx, task, secret, AppleOnboardingRequest{
+		Operation: appleOnboardingExport, ForwardToEmail: task.SelectedForwardTo,
+	})
 	if err != nil {
 		return s.handleICloudOnboardingAppleError(ctx, task, err)
 	}
@@ -1064,10 +1164,16 @@ func (s *Service) importICloudOnboardingResource(ctx context.Context, task *iClo
 		return s.failICloudOnboardingTask(ctx, task, "new_cookie_missing", "Apple Account did not return a usable new session cookie.")
 	}
 	if task.ICloudOpened && (response.OldChannel == nil || strings.TrimSpace(response.OldChannel.Cookie) == "") {
-		return s.failICloudOnboardingTask(ctx, task, "old_cookie_missing", "iCloud did not return a usable V2 session cookie.")
+		return s.retryICloudOnboardingTask(ctx, task, "icloud_cookie_prepare", nil, "old_cookie_missing", "The saved iCloud V2 session was lost; iCloud sign-in will restart.", map[string]any{
+			"session_payload": nil, "pending_sms_purpose": "", "manual_verification_code": "",
+			"sms_sent_at": nil, "sms_poll_deadline": nil,
+		})
 	}
 	preparation, err := s.iCloudOnboardingForwarding(ctx, task)
 	if err != nil {
+		if errors.Is(err, ErrICloudImportPreparationConflict) || errors.Is(err, ErrICloudImportPreparationNotFound) {
+			return s.retryICloudOnboardingForwardingPreparation(ctx, task)
+		}
 		return err
 	}
 	birthday, err := time.Parse("2006-01-02", secret.Birthday)
@@ -1310,11 +1416,13 @@ func (s *Service) handleICloudOnboardingAppleError(ctx context.Context, task *iC
 		return s.retryICloudOnboardingTask(ctx, task, restart, nil, firstNonEmpty(appleErr.Category, "session_expired"), appleErr.SafeMessage, updates)
 	}
 	if appleErr.Retryable {
-		if appleErr.RetryAt != nil {
-			retryAt := appleErr.RetryAt.UTC().Truncate(time.Millisecond)
-			return s.retryICloudOnboardingTask(ctx, task, task.Stage, &retryAt, firstNonEmpty(appleErr.Category, "apple_retryable"), appleErr.SafeMessage, nil)
+		retryAt := appleErr.RetryAt
+		if retryAt == nil {
+			value := appleOnboardingRetryAt("", s.now().UTC())
+			retryAt = &value
 		}
-		return ErrICloudOnboardingTemporary
+		value := retryAt.UTC().Truncate(time.Millisecond)
+		return s.retryICloudOnboardingTask(ctx, task, task.Stage, &value, firstNonEmpty(appleErr.Category, "apple_retryable"), appleErr.SafeMessage, nil)
 	}
 	category := strings.TrimSpace(appleErr.Category)
 	if category == "" {
@@ -1358,6 +1466,12 @@ func (s *Service) retryICloudOnboardingTask(ctx context.Context, task *iCloudOnb
 
 func (s *Service) advanceICloudOnboardingTask(ctx context.Context, task *iCloudOnboardingTaskModel, stage string, nextAttempt *time.Time, extra map[string]any) error {
 	now := s.now().UTC().Truncate(time.Millisecond)
+	if s.queue != nil && iCloudOnboardingMajorStageBoundary(task, stage) {
+		delayedUntil := now.Add(iCloudOnboardingStageDelay())
+		if nextAttempt == nil || delayedUntil.After(*nextAttempt) {
+			nextAttempt = &delayedUntil
+		}
+	}
 	updates := map[string]any{
 		"onboarding_status": iCloudOnboardingProcessing, "stage": stage, "dispatch_status": "pending", "claim_token": "",
 		"next_attempt_at": nextAttempt, "stage_attempts": 0, "last_error_category": "", "last_safe_error": "", "updated_at": now,
@@ -1375,8 +1489,66 @@ func (s *Service) advanceICloudOnboardingTask(ctx context.Context, task *iCloudO
 		return nil
 	}
 	_ = s.refreshICloudOnboardingImport(context.WithoutCancel(ctx), iCloudOnboardingImportID(task))
-	_ = s.ScheduleICloudOnboardingDispatcher(context.WithoutCancel(ctx), 0)
+	delay := time.Duration(0)
+	if nextAttempt != nil && nextAttempt.After(now) {
+		delay = nextAttempt.Sub(now)
+	}
+	_ = s.ScheduleICloudOnboardingDispatcher(context.WithoutCancel(ctx), delay)
 	return nil
+}
+
+func iCloudOnboardingStageDelay() time.Duration {
+	return iCloudOnboardingStageDelayMinimum + time.Duration(rand.Intn(int(iCloudOnboardingStageDelayMaximum-iCloudOnboardingStageDelayMinimum)+1))
+}
+
+func iCloudOnboardingSMSRetryAt(retryAt, now time.Time) time.Time {
+	retryAt = retryAt.UTC().Truncate(time.Millisecond)
+	now = now.UTC().Truncate(time.Millisecond)
+	if !retryAt.After(now) {
+		return now.Add(time.Second)
+	}
+	return retryAt
+}
+
+func iCloudOnboardingMajorStageBoundary(task *iCloudOnboardingTaskModel, nextStage string) bool {
+	if task == nil || firstNonEmpty(task.TaskKind, "onboarding") != "onboarding" {
+		return false
+	}
+	currentPhase := iCloudOnboardingTaskPhase(task)
+	return currentPhase > 0 && iCloudOnboardingPhase(nextStage) > currentPhase
+}
+
+func iCloudOnboardingTaskPhase(task *iCloudOnboardingTaskModel) int {
+	if task == nil {
+		return 0
+	}
+	if strings.HasPrefix(strings.TrimSpace(task.Stage), "sms_") {
+		switch strings.TrimSpace(task.PendingSMSPurpose) {
+		case appleSMSFamilyLogin, appleSMSFamilyReconcileLogin:
+			return 2
+		case appleSMSManageLogin:
+			return 3
+		default:
+			return 1
+		}
+	}
+	return iCloudOnboardingPhase(task.Stage)
+}
+
+func iCloudOnboardingPhase(stage string) int {
+	switch strings.TrimSpace(stage) {
+	case "accepted", "icloud_prepare", "old_cookie_prepare", "icloud_cookie_prepare",
+		"sms_send", "sms_wait", "sms_verify", "sms_verify_recover",
+		"icloud_finish", "old_cookie_finish", "icloud_cookie_finish":
+		return 1
+	case "family_select", "family_prepare", "family_reconcile_prepare", "family_join_intent", "family_join_apply":
+		return 2
+	case "manage_prepare", "manage_profile", "forwarding_prepare", "forwarding_add_intent", "forwarding_add_apply",
+		"forwarding_wait", "forwarding_verify_intent", "forwarding_verify_apply", "resource_import":
+		return 3
+	default:
+		return 0
+	}
 }
 
 func (s *Service) waitICloudOnboardingTask(ctx context.Context, task *iCloudOnboardingTaskModel, retryAt *time.Time, dispatch, message string) error {
@@ -1403,7 +1575,11 @@ func (s *Service) waitICloudOnboardingTaskWithUpdates(ctx context.Context, task 
 	}
 	_ = s.refreshICloudOnboardingImport(context.WithoutCancel(ctx), iCloudOnboardingImportID(task))
 	if dispatch == "pending" {
-		_ = s.ScheduleICloudOnboardingDispatcher(context.WithoutCancel(ctx), time.Until(*retryAt))
+		delay := time.Duration(0)
+		if retryAt != nil {
+			delay = time.Until(*retryAt)
+		}
+		_ = s.ScheduleICloudOnboardingDispatcher(context.WithoutCancel(ctx), delay)
 	}
 	return nil
 }
@@ -1590,7 +1766,7 @@ func (s *Service) releaseICloudOnboardingTask(ctx context.Context, payload iClou
 	var postFamilyRecovery *iCloudOnboardingTaskModel
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var task iCloudOnboardingTaskModel
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND generation = ? AND onboarding_status IN ?", payload.TaskID, payload.Generation, []string{iCloudOnboardingProcessing, iCloudOnboardingWaiting}).First(&task).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND generation = ? AND onboarding_status IN ? AND dispatch_status IN ?", payload.TaskID, payload.Generation, []string{iCloudOnboardingProcessing, iCloudOnboardingWaiting}, []string{"queued", "running"}).First(&task).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return nil
 			}
@@ -1954,40 +2130,12 @@ func (s *Service) ConfirmICloudOnboardingActivation(ctx context.Context, taskID,
 	return nil
 }
 
-func findAppleSMSCode(messages []kitesim.MessageItem, sentAt *time.Time) string {
-	var fallback string
-	var newest time.Time
-	for _, message := range messages {
-		match := appleSMSCodePattern.FindStringSubmatch(message.Content)
-		if len(match) != 2 {
-			continue
-		}
-		when, ok := parseKitesimMessageTime(message.Time)
-		if !ok {
-			if fallback == "" {
-				fallback = match[1]
-			}
-			continue
-		}
-		if sentAt != nil && when.Before(sentAt.Add(-2*time.Minute)) {
-			continue
-		}
-		if newest.IsZero() || when.After(newest) {
-			newest = when
-			fallback = match[1]
-		}
+func claimedAppleSMSCode(message kitesim.MessageItem) string {
+	match := appleSMSCodePattern.FindStringSubmatch(message.Content)
+	if len(match) == 2 {
+		return match[1]
 	}
-	return fallback
-}
-
-func parseKitesimMessageTime(value string) (time.Time, bool) {
-	value = strings.TrimSpace(value)
-	for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05.999999999", "2006-01-02 15:04:05"} {
-		if parsed, err := time.Parse(layout, value); err == nil {
-			return parsed.UTC(), true
-		}
-	}
-	return time.Time{}, false
+	return ""
 }
 
 func updatesWith(values map[string]any, key string, value any) map[string]any {

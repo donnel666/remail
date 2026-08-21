@@ -16,7 +16,8 @@ import (
 )
 
 const (
-	iCloudFamilyMembersEndpoint    = "https://familyws.icloud.apple.com/api/family-members"
+	iCloudFamilyMembersBase        = "https://familyws.icloud.apple.com"
+	iCloudFamilyMembersEndpoint    = iCloudFamilyMembersBase + "/api/family-members"
 	iCloudFamilyResponseMaxBytes   = 1 << 20
 	iCloudFamilyCapacityCacheTTL   = 30 * time.Minute
 	iCloudFamilySyncUnknown        = "unknown"
@@ -124,7 +125,7 @@ func (c *iCloudFamilyClient) fetch(ctx context.Context, channel iCloudResourceCh
 	request.Header.Set("Cache-Control", "no-cache")
 	request.Header.Set("Cookie", cookie)
 	request.Header.Set("Pragma", "no-cache")
-	request.Header.Set("Referer", "https://familyws.icloud.apple.com/members?wid=d&env=idms_prod_account&theme=light&locale=zh_CN")
+	request.Header.Set("Referer", iCloudFamilyMembersBase+"/members?wid=d&env=idms_prod_account&theme=light&locale=zh_CN")
 	request.Header.Set("Sec-Fetch-Dest", "empty")
 	request.Header.Set("Sec-Fetch-Mode", "cors")
 	request.Header.Set("Sec-Fetch-Site", "same-origin")

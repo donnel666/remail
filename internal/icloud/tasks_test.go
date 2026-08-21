@@ -3,6 +3,7 @@ package icloud
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/donnel666/remail/internal/platform"
@@ -101,4 +102,28 @@ func TestLegacyICloudValidationTasksMoveToDedicatedQueue(t *testing.T) {
 			require.Equal(t, test.taskType, tasks[0].Type)
 		})
 	}
+}
+
+func TestICloudOnboardingDispatcherDelayDoesNotBlockImmediateDispatch(t *testing.T) {
+	redisServer := miniredis.RunT(t)
+	redisOpt := asynq.RedisClientOpt{Addr: redisServer.Addr()}
+	queue := asynq.NewClient(redisOpt)
+	inspector := asynq.NewInspector(redisOpt)
+	t.Cleanup(func() {
+		_ = inspector.Close()
+		_ = queue.Close()
+	})
+
+	service := NewService(nil, queue, nil)
+	require.NoError(t, service.ScheduleICloudOnboardingDispatcher(context.Background(), 5*time.Minute))
+	require.NoError(t, service.ScheduleICloudOnboardingDispatcher(context.Background(), 0))
+
+	pending, err := inspector.ListPendingTasks(platform.QueueBackgroundICloudValidation)
+	require.NoError(t, err)
+	scheduled, err := inspector.ListScheduledTasks(platform.QueueBackgroundICloudValidation)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	require.Len(t, scheduled, 1)
+	require.Equal(t, typeICloudOnboardingDispatcher, pending[0].Type)
+	require.Equal(t, typeICloudOnboardingDispatcher, scheduled[0].Type)
 }

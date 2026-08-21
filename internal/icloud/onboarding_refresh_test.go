@@ -311,6 +311,38 @@ func TestICloudOldCookieBackfillPreservesNewCookieAndResourceState(t *testing.T)
 	}
 }
 
+func TestICloudOldCookieBackfillMissingCookieRestartsAuthentication(t *testing.T) {
+	now := time.Date(2026, 8, 17, 8, 15, 0, 0, time.UTC)
+	db := newICloudRefreshTestDB(t)
+	resource := seedICloudRefreshResource(t, db, now)
+	secret, _ := json.Marshal(iCloudOnboardingSecret{Password: "Secret1!", Birthday: "2000-11-02"})
+	resourceID := resource.ID
+	task := iCloudOnboardingTaskModel{
+		ResourceID: &resourceID, TaskKind: "refresh", PrimaryEmail: resource.PrimaryEmail, AccountRole: "primary", ICloudOpened: true,
+		BoundPhoneNumber: resource.BoundPhoneNumber, BoundPhoneCountryCode: "US", BoundPhoneSource: "manual", KitesimPhoneID: resource.KitesimPhoneID,
+		SecretPayload: secret, SessionPayload: iCloudJSON([]byte(`{"stale":true}`)), PendingSMSPurpose: appleSMSOldCookieLogin,
+		Status: iCloudOnboardingProcessing, Stage: "old_cookie_finish", DispatchStatus: "pending",
+		Generation: 1, ExpectedCredentialRevision: resource.CredentialRevision, MaxAttempts: 5, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&task).Error; err != nil {
+		t.Fatal(err)
+	}
+	opened := true
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	service.onboardingApple = &oldCookieBackfillApple{response: AppleOnboardingResponse{ICloudOpened: &opened}}
+	if err := service.ProcessICloudOnboardingTask(context.Background(), iCloudOnboardingTask{TaskID: task.ID, Generation: task.Generation}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(&task, task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if task.Stage != "old_cookie_prepare" || task.DispatchStatus != "pending" || task.Status != iCloudOnboardingProcessing ||
+		task.Attempts != 1 || task.PendingSMSPurpose != appleSMSOldCookieLogin || len(task.SessionPayload) != 0 || len(task.SecretPayload) == 0 {
+		t.Fatalf("missing old Cookie did not restart safely: %+v", task)
+	}
+}
+
 func TestICloudOldCookieBackfillFailuresDoNotMarkHealthyResourceAbnormal(t *testing.T) {
 	for _, infrastructureFailure := range []bool{false, true} {
 		name := "provider"
@@ -561,11 +593,12 @@ func TestICloudRefreshRejectsStalePhoneSnapshotBeforeSMSReservation(t *testing.T
 	resource := seedICloudRefreshResource(t, db, now)
 	secret, _ := json.Marshal(iCloudOnboardingSecret{Password: "Secret1!", Birthday: "2000-11-02"})
 	resourceID := resource.ID
+	smsDeadline := now.Add(2 * time.Minute)
 	task := iCloudOnboardingTaskModel{
 		ResourceID: &resourceID, TaskKind: "refresh", PrimaryEmail: resource.PrimaryEmail, AccountRole: "primary",
 		Region: resource.Region, CountryCode: resource.CountryCode, ICloudOpened: true,
 		BoundPhoneNumber: resource.BoundPhoneNumber, BoundPhoneCountryCode: "US", BoundPhoneSource: "manual", KitesimPhoneID: resource.KitesimPhoneID,
-		SecretPayload: secret, PendingSMSPurpose: appleSMSManageLogin,
+		SecretPayload: secret, SessionPayload: iCloudJSON([]byte(`{"prepared":true}`)), PendingSMSPurpose: appleSMSManageLogin, SMSPollDeadline: &smsDeadline,
 		Status: iCloudOnboardingProcessing, Stage: "sms_send", DispatchStatus: "pending",
 		Generation: 1, ExpectedCredentialRevision: resource.CredentialRevision, MaxAttempts: 5, CreatedAt: now, UpdatedAt: now,
 	}
@@ -678,7 +711,7 @@ func TestICloudRefreshActivationConfirmationRestartsICloud(t *testing.T) {
 	}
 }
 
-func TestICloudRefreshInactiveReopensActivationConfirmation(t *testing.T) {
+func TestICloudRefreshInactiveSkipsOldCookieAndContinues(t *testing.T) {
 	now := time.Date(2026, 8, 16, 12, 20, 0, 0, time.UTC)
 	db := newICloudRefreshTestDB(t)
 	resource := seedICloudRefreshResource(t, db, now)
@@ -704,15 +737,8 @@ func TestICloudRefreshInactiveReopensActivationConfirmation(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stored iCloudOnboardingTaskModel
-	if err := db.First(&stored, task.ID).Error; err != nil || stored.Stage != "waiting_icloud_activation" || stored.ICloudActivationConfirmedAt != nil {
+	if err := db.First(&stored, task.ID).Error; err != nil || stored.Stage != "manage_prepare" || stored.ICloudOpened || stored.ICloudActivationConfirmedAt != nil {
 		t.Fatalf("inactive refresh task = %+v err=%v", stored, err)
-	}
-	if err := service.ConfirmICloudOnboardingActivation(context.Background(), task.ID, 9, "refresh-activation-retry", "/test/activation"); err != nil {
-		t.Fatal(err)
-	}
-	stored = iCloudOnboardingTaskModel{}
-	if err := db.First(&stored, task.ID).Error; err != nil || stored.Stage != "icloud_prepare" || stored.ICloudActivationConfirmedAt == nil {
-		t.Fatalf("reconfirmed refresh task = %+v err=%v", stored, err)
 	}
 }
 

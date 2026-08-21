@@ -23,10 +23,11 @@ const (
 	appleOnboardingAuthVersion  = "latest"
 	appleOnboardingManageAuth   = "8.0.2"
 	appleOnboardingSKVersion    = "7"
+	appleOnboardingLanguage     = "zh-CN,zh;q=0.9"
 )
 
 var (
-	appleOnboardingBootArgsPattern = regexp.MustCompile(`(?s)<script type="application/json" class="boot_args">\s*(.*?)</script>`)
+	appleOnboardingBootArgsPattern = regexp.MustCompile(`(?s)<script type="application/json"(?: class="boot_args"| id="boot_args")>\s*(.*?)</script>`)
 	appleOnboardingHTMLAttrPattern = regexp.MustCompile(`(?i)%s="([^"]*)"`)
 )
 
@@ -80,7 +81,8 @@ func (s *appleOnboardingMSACLSession) Request(method, rawURL string, headers map
 	}
 	headersCopy := make(http.Header, len(response.Header))
 	for key, values := range response.Header {
-		headersCopy[key] = append([]string(nil), values...)
+		key = http.CanonicalHeaderKey(key)
+		headersCopy[key] = append(headersCopy[key], values...)
 	}
 	return &appleOnboardingHTTPResponse{StatusCode: response.StatusCode, Body: response.Body, URL: response.URL, Header: headersCopy}, nil
 }
@@ -140,12 +142,13 @@ type appleOnboardingBrowserState struct {
 }
 
 type appleOnboardingFlow struct {
-	ctx       context.Context
-	http      appleOnboardingHTTPSession
-	factory   appleOnboardingSessionFactory
-	endpoints appleOnboardingEndpoints
-	now       func() time.Time
-	state     appleOnboardingBrowserState
+	ctx            context.Context
+	http           appleOnboardingHTTPSession
+	factory        appleOnboardingSessionFactory
+	endpoints      appleOnboardingEndpoints
+	now            func() time.Time
+	state          appleOnboardingBrowserState
+	lastHTTPStatus int
 }
 
 func loadAppleOnboardingFlow(ctx context.Context, client *appleOnboardingClient, raw json.RawMessage, email string) (*appleOnboardingFlow, error) {
@@ -177,7 +180,7 @@ func loadAppleOnboardingFlow(ctx context.Context, client *appleOnboardingClient,
 		return nil, &AppleOnboardingError{Category: "invalid_session", SafeMessage: "Stored Apple onboarding browser identity is invalid."}
 	}
 	if err := flow.http.RestoreCookies(flow.state.Cookies); err != nil {
-		return nil, err
+		return nil, &AppleOnboardingError{Category: "invalid_session", SafeMessage: "Stored Apple onboarding cookies are invalid."}
 	}
 	return flow, nil
 }
@@ -206,12 +209,9 @@ func (f *appleOnboardingFlow) reset(mode string) error {
 	f.state.Mode = mode
 	f.state.UserAgent = userAgent
 	f.state.OldChannel = oldChannel
-	frameID, err := appleweb.FrameID()
-	if err != nil {
-		return err
-	}
-	f.state.FrameID = frameID
-	f.state.SetupClientID = platform.NewUUIDV7String()
+	// The web flow uses opaque UUID v4 values for both identifiers.
+	f.state.FrameID = platform.NewUUIDV4String()
+	f.state.SetupClientID = platform.NewUUIDV4String()
 	return nil
 }
 
@@ -246,6 +246,7 @@ func (f *appleOnboardingFlow) request(method, rawURL string, body any, html, pro
 		return nil, err
 	}
 	f.state.Status = response.StatusCode
+	f.lastHTTPStatus = response.StatusCode
 	f.absorb(response.Header, appleOnboardingHost(rawURL))
 	if response.StatusCode == http.StatusTooManyRequests || response.StatusCode == http.StatusRequestTimeout || response.StatusCode >= http.StatusInternalServerError {
 		retryAt := appleOnboardingRetryAt(response.Header.Get("Retry-After"), f.now())
@@ -291,11 +292,11 @@ func (f *appleOnboardingFlow) headers(rawURL string, html, profile, sendHashcash
 	}
 	if profile {
 		headers := map[string]string{
-			"User-Agent": browser.UserAgent, "Accept": "application/json, text/plain, */*", "Accept-Language": appleweb.AcceptLanguage,
+			"User-Agent": browser.UserAgent, "Accept": "application/json, text/plain, */*", "Accept-Language": appleOnboardingLanguage,
 			"Content-Type": "application/json", "Origin": f.endpoints.Account, "Referer": strings.TrimRight(f.endpoints.Account, "/") + "/",
 			"X-Apple-I-FD-Client-Info": clientInfo, "X-Apple-I-Request-Context": "ca", "X-Apple-I-TimeZone": appleweb.TimeZone,
-			"Sec-CH-UA": browser.SecCHUA, "Sec-CH-UA-Mobile": "?0", "Sec-CH-UA-Platform": browser.SecCHPlatform,
 		}
+		addAppleOnboardingLegacyClientHints(headers, browser)
 		if f.state.APIKey != "" {
 			headers["X-Apple-Api-Key"] = f.state.APIKey
 		}
@@ -306,11 +307,11 @@ func (f *appleOnboardingFlow) headers(rawURL string, html, profile, sendHashcash
 	}
 	origin := "https://" + parsed.Host
 	headers := map[string]string{
-		"User-Agent": browser.UserAgent, "Accept": accept, "Accept-Language": appleweb.AcceptLanguage, "Origin": origin,
+		"User-Agent": browser.UserAgent, "Accept": accept, "Accept-Language": appleOnboardingLanguage, "Origin": origin,
 		"Referer": strings.TrimRight(origin, "/") + "/", "X-Apple-I-FD-Client-Info": clientInfo,
 		"X-Apple-I-TimeZone": appleweb.TimeZone, "X-Apple-Privacy-Consent": "true",
-		"Sec-CH-UA": browser.SecCHUA, "Sec-CH-UA-Mobile": "?0", "Sec-CH-UA-Platform": browser.SecCHPlatform,
 	}
+	addAppleOnboardingLegacyClientHints(headers, browser)
 	if !html {
 		headers["Content-Type"] = "application/json"
 		headers["X-Requested-With"] = "XMLHttpRequest"
@@ -377,6 +378,15 @@ func (f *appleOnboardingFlow) headers(rawURL string, html, profile, sendHashcash
 		}
 	}
 	return headers, nil
+}
+
+func addAppleOnboardingLegacyClientHints(headers map[string]string, browser appleweb.BrowserProfile) {
+	if browser.UserAgent == appleweb.AutomatedUserAgent {
+		return
+	}
+	headers["Sec-CH-UA"] = browser.SecCHUA
+	headers["Sec-CH-UA-Mobile"] = "?0"
+	headers["Sec-CH-UA-Platform"] = browser.SecCHPlatform
 }
 
 func (f *appleOnboardingFlow) absorb(headers http.Header, host string) {
@@ -491,7 +501,7 @@ func (f *appleOnboardingFlow) signin(email, password string) (map[string]any, er
 		if appleOnboardingLooksLocked(complete) {
 			category = "account_locked"
 		}
-		return nil, &AppleOnboardingError{Category: category, SafeMessage: "Apple Account credentials were rejected."}
+		return nil, &AppleOnboardingError{Category: category, SafeMessage: "Apple Account credentials were rejected.", ProviderMessage: safeICloudImportMessage(appleOnboardingServiceError(complete))}
 	}
 	return complete, nil
 }
@@ -889,11 +899,12 @@ func appleOnboardingLooksLocked(data map[string]any) bool {
 }
 
 func appleOnboardingPermanent(category, message string, data map[string]any) error {
+	providerMessage := safeICloudImportMessage(appleOnboardingServiceError(data))
 	if appleOnboardingLooksLocked(data) {
 		category = "account_locked"
 		message = "The Apple Account is locked or disabled."
 	}
-	return &AppleOnboardingError{Category: category, SafeMessage: message}
+	return &AppleOnboardingError{Category: category, SafeMessage: message, ProviderMessage: providerMessage}
 }
 
 func appleOnboardingRestart(stage string) error {

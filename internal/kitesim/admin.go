@@ -7,6 +7,7 @@ import (
 	"net/mail"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/donnel666/remail/internal/businessday"
@@ -130,12 +131,14 @@ type MutationMeta struct {
 }
 
 type Service struct {
-	db      *gorm.DB
-	client  *Client
-	queue   SyncQueue
-	proxies ProxyProvider
-	logs    governanceapp.OperationLogPort
-	now     func() time.Time
+	db            *gorm.DB
+	client        *Client
+	queue         SyncQueue
+	proxies       ProxyProvider
+	logs          governanceapp.OperationLogPort
+	now           func() time.Time
+	smsConsumedMu sync.Mutex
+	smsConsumed   map[string]time.Time
 }
 
 func NewService(db *gorm.DB, queue SyncQueue) *Service {
@@ -1173,15 +1176,23 @@ func (s *Service) FetchSMSMessages(ctx context.Context, phoneID uint) ([]Message
 }
 
 func parseProviderTime(value string) *time.Time {
-	value = strings.TrimSpace(value)
+	value = strings.ReplaceAll(strings.TrimSpace(value), "/", "-")
+	value = strings.Replace(value, " ", "T", 1)
 	if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil {
 		parsed = parsed.UTC()
 		return &parsed
 	}
-	for _, layout := range []string{"2006-01-02 15:04:05.999999999", "2006-01-02 15:04:05"} {
-		parsed, err := time.ParseInLocation(layout, value, businessday.Shanghai)
-		if err == nil {
-			parsed = parsed.UTC()
+	if parsed, err := time.ParseInLocation("2006-1-2T15:04:05.999999999", value, businessday.Shanghai); err == nil {
+		parsed = parsed.UTC()
+		return &parsed
+	}
+	if unix, err := strconv.ParseInt(value, 10, 64); err == nil {
+		switch len(value) {
+		case 10:
+			parsed := time.Unix(unix, 0).UTC()
+			return &parsed
+		case 13:
+			parsed := time.UnixMilli(unix).UTC()
 			return &parsed
 		}
 	}
