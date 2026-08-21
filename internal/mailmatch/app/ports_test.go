@@ -275,7 +275,7 @@ func TestDomainMailboxReadUsesOrderWindowAndLimitBeforeMatching(t *testing.T) {
 		},
 	}
 	repo := &domainMailboxRepoStub{
-		matchingRepoStub: &matchingRepoStub{},
+		matchingRepoStub: &matchingRepoStub{scopes: []OrderScope{scope}},
 		messages: []FetchedMessage{{
 			EmailResourceID: 9, ResourceType: domain.ResourceTypeDomain,
 			Recipient: "User.Name+tag@Example.COM", Sender: "sender@example.net",
@@ -292,9 +292,51 @@ func TestDomainMailboxReadUsesOrderWindowAndLimitBeforeMatching(t *testing.T) {
 	require.Equal(t, 2, repo.limit)
 	require.Equal(t, startedAt.Add(-3*time.Minute), repo.since)
 	require.Equal(t, now, repo.until)
-	require.Empty(t, repo.matchedResourceTypes, "Domain reads must match only the requested order scope")
+	require.Equal(t, []domain.ResourceType{domain.ResourceTypeDomain}, repo.matchedResourceTypes)
 	require.Len(t, matches.results, 1)
 	require.Equal(t, "123456", matches.results[0].VerificationCode)
+}
+
+func TestDomainMailboxSharedAcrossProjectsStaysAmbiguous(t *testing.T) {
+	now := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
+	scopes := []OrderScope{
+		{
+			OrderID: 42, OrderNo: "OR_DOMAIN_42", ProjectID: 10, AllocationType: domain.ResourceTypeDomain,
+			EmailResourceID: 9, Recipient: "username@example.com", RecipientKind: "exact",
+			ServiceMode: "code", OrderStatus: "active", LooseMatch: true,
+			Rules: []MailRule{
+				{Type: MailRuleRecipient, Pattern: "exact", Enabled: true},
+				{Type: MailRuleSender, Pattern: `sender@example\.net`, Enabled: true},
+				{Type: MailRuleBody, Pattern: `(\d{6})`, Enabled: true},
+			},
+		},
+		{
+			OrderID: 43, OrderNo: "OR_DOMAIN_43", ProjectID: 11, AllocationType: domain.ResourceTypeDomain,
+			EmailResourceID: 9, Recipient: "username@example.com", RecipientKind: "exact",
+			ServiceMode: "code", OrderStatus: "active", LooseMatch: true,
+			Rules: []MailRule{
+				{Type: MailRuleRecipient, Pattern: "exact", Enabled: true},
+				{Type: MailRuleSender, Pattern: `sender@example\.net`, Enabled: true},
+				{Type: MailRuleBody, Pattern: `(\d{6})`, Enabled: true},
+			},
+		},
+	}
+	repo := &domainMailboxRepoStub{
+		matchingRepoStub: &matchingRepoStub{scopes: scopes},
+		messages: []FetchedMessage{{
+			EmailResourceID: 9, ResourceType: domain.ResourceTypeDomain,
+			Recipient: "User.Name+tag@Example.COM", Sender: "sender@example.net",
+			Body: "code 123456", ReceivedAt: now,
+		}},
+	}
+	uc := NewUseCase(repo, nil, nil, &matchResultStub{})
+	uc.now = func() time.Time { return now }
+
+	changed, err := uc.syncDomainMailbox(context.Background(), scopes[0])
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.Nil(t, repo.purchaseDelivery)
+	require.Equal(t, []domain.ResourceType{domain.ResourceTypeDomain}, repo.matchedResourceTypes)
 }
 
 func TestDomainMailboxDoesNotReadUnavailableOrder(t *testing.T) {

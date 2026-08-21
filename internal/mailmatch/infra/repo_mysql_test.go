@@ -1019,6 +1019,95 @@ INSERT INTO microsoft_allocations(
 	}
 }
 
+func TestListMatchingScopesByRecipientReturnsDomainScopesAcrossProjectsMySQL(t *testing.T) {
+	db := newMailmatchMySQLTestDB(t)
+	seedMailmatchOrder(t, db, "OR_DOMAIN_PROJECT_10")
+	now := time.Now().UTC().Truncate(time.Second)
+	require.NoError(t, db.Exec(`
+INSERT INTO projects(id, name, target_platform, status, access_type, loose_match)
+VALUES (11, 'Other Domain Project', 'mailmatch', 'listed', 'public', TRUE)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO project_products(
+    id, project_id, type, status, code_enabled, purchase_enabled,
+    code_price, purchase_price, code_supplier_price, purchase_supplier_price,
+    code_window_minutes, activation_window_minutes, warranty_minutes,
+    main_weight, dot_weight, plus_weight
+) VALUES (21, 11, 'domain', 'enabled', TRUE, TRUE, 1, 2, 0, 0, 10, 60, 60, 0, 0, 0)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO email_resources(id, type, owner_user_id) VALUES (200, 'domain', 1)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO mail_servers(id, owner_user_id, server_address, mx_record, status)
+VALUES (200, 1, 'mail.example.com', 'mx.example.com', 'online')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO domain_resources(id, resource_type, owner_user_id, domain, mail_server_id, purpose, status)
+VALUES (200, 'domain', 1, 'example.com', 200, 'sale', 'normal')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO generated_mailboxes(id, resource_id, owner_user_id, email, status)
+VALUES (200, 200, 1, 'user.name@example.com', 'normal')`).Error)
+
+	for _, projectID := range []uint{10, 11} {
+		productID := uint(22)
+		if projectID == 11 {
+			productID = 21
+		}
+		orderNo := fmt.Sprintf("OR_DOMAIN_PROJECT_%d", projectID)
+		transactionNo := "TX_" + orderNo
+		require.NoError(t, db.Exec(`
+INSERT INTO wallet_transactions(
+    transaction_no, user_id, transaction_type, balance_bucket, direction,
+    amount, balance_before, balance_after, biz_type, biz_id, idempotency_key
+) VALUES (?, 2, 'debit', 'consumer', 'out', -1, 10, 9, 'order', ?, ?)`,
+			transactionNo, orderNo, transactionNo).Error)
+		var debitID uint
+		require.NoError(t, db.Table("wallet_transactions").Select("id").
+			Where("transaction_no = ?", transactionNo).Scan(&debitID).Error)
+		if projectID == 11 {
+			require.NoError(t, db.Exec(`
+INSERT INTO orders(
+    order_no, user_id, project_id, project_product_id, product_type, service_mode,
+    supply_policy, status, pay_amount, refund_amount, debit_tx_id, allocation_type,
+    delivery_email, receive_started_at, receive_until, client_channel,
+    idempotency_key, request_fingerprint, service_cleanup_status
+) VALUES (?, 2, ?, ?, 'domain', 'code', 'public_only', 'active', 0, 0, ?, 'domain',
+          'user.name@example.com', ?, ?, 'console', ?, REPEAT('d', 64), 'none')`,
+				orderNo, projectID, productID, debitID, now.Add(-time.Minute), now.Add(time.Hour), orderNo+"-idem").Error)
+		} else {
+			require.NoError(t, db.Exec(`
+INSERT INTO project_products(
+    id, project_id, type, status, code_enabled, purchase_enabled,
+    code_price, purchase_price, code_supplier_price, purchase_supplier_price,
+    code_window_minutes, activation_window_minutes, warranty_minutes,
+    main_weight, dot_weight, plus_weight
+) VALUES (22, 10, 'domain', 'enabled', TRUE, TRUE, 1, 2, 0, 0, 10, 60, 60, 0, 0, 0)`).Error)
+			require.NoError(t, db.Table("orders").Where("order_no = ?", orderNo).Updates(map[string]any{
+				"product_type":       "domain",
+				"project_product_id": productID,
+				"status":             "active",
+				"debit_tx_id":        debitID,
+				"allocation_type":    "domain",
+				"delivery_email":     "user.name@example.com",
+				"receive_started_at": now.Add(-time.Minute),
+				"receive_until":      now.Add(time.Hour),
+			}).Error)
+		}
+		require.NoError(t, db.Exec("INSERT INTO allocation_order_guards(order_no, type) VALUES (?, 'domain')", orderNo).Error)
+		require.NoError(t, db.Exec(`
+INSERT INTO domain_allocations(
+    order_no, project_id, product_id, resource_id, supply_scope, mailbox_id, email
+) VALUES (?, ?, ?, 200, 'public', 200, 'user.name@example.com')`, orderNo, projectID, productID).Error)
+		require.NoError(t, db.Exec(`
+INSERT INTO project_mail_rules(project_id, rule_type, pattern, enabled)
+VALUES (?, 'recipient', 'exact', TRUE)`, projectID).Error)
+	}
+
+	scopes, err := NewRepo(db, nil).ListMatchingScopesByRecipient(
+		context.Background(), domain.ResourceTypeDomain, 200, "User.Name+tag@Example.COM", now,
+	)
+	require.NoError(t, err)
+	require.Len(t, scopes, 2)
+	require.Equal(t, []uint{10, 11}, []uint{scopes[0].ProjectID, scopes[1].ProjectID})
+}
+
 func TestHistoricalProjectScopeReadAndLegacyClearMySQL(t *testing.T) {
 	db := newMailmatchMySQLTestDB(t)
 	seedMailmatchOrder(t, db, "OR_HISTORY_MATCH")

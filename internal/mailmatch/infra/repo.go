@@ -11,6 +11,7 @@ import (
 	"time"
 
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
+	"github.com/donnel666/remail/internal/mailbox"
 	"github.com/donnel666/remail/internal/mailmatch/app"
 	"github.com/donnel666/remail/internal/mailmatch/domain"
 	"github.com/donnel666/remail/internal/platform"
@@ -731,6 +732,47 @@ WHERE ga.resource_id = ?
   )
 ORDER BY o.created_at ASC, o.id ASC`
 
+const domainMatchingScopesSQL = `
+SELECT
+    o.id AS order_id,
+    o.order_no,
+    o.user_id,
+    o.project_id,
+    o.project_product_id AS product_id,
+    o.service_mode,
+    o.status AS order_status,
+    o.allocation_type,
+    da.id AS allocation_id,
+    'exact' AS recipient_kind,
+    da.resource_id AS email_resource_id,
+    da.email AS recipient,
+    o.receive_started_at,
+    o.receive_until,
+    o.activated_at,
+    o.after_sale_until,
+    p.loose_match,
+    '' AS microsoft_email,
+    '' AS microsoft_client_id,
+    '' AS microsoft_rt,
+    0 AS credential_revision
+FROM domain_allocations da
+JOIN orders o ON o.order_no = da.order_no AND o.allocation_type = 'domain'
+JOIN projects p ON p.id = o.project_id
+WHERE da.resource_id = ?
+  AND LOWER(SUBSTRING_INDEX(da.email, '@', -1)) = ?
+  AND REPLACE(
+        SUBSTRING_INDEX(LOWER(SUBSTRING_INDEX(da.email, '@', 1)), '+', 1),
+        '.',
+        ''
+      ) = ?
+  AND da.status = 'allocated'
+  AND (o.receive_started_at IS NULL OR ? >= DATE_SUB(o.receive_started_at, INTERVAL 2 MINUTE))
+  AND (
+    (o.service_mode = 'code' AND o.status = 'active' AND (o.receive_until IS NULL OR ? <= o.receive_until))
+    OR (o.service_mode = 'purchase' AND o.status IN ('active', 'completed'))
+  )
+ORDER BY o.created_at ASC, o.id ASC`
+
 const icloudMatchingScopesSQL = `
 SELECT
     o.id AS order_id,
@@ -1016,6 +1058,20 @@ func (r *Repo) ListMatchingScopesByRecipient(ctx context.Context, resourceType d
 				rows = exact
 			}
 		}
+	case domain.ResourceTypeDomain:
+		canonical := mailbox.Normalize(recipient)
+		if canonical == "" {
+			return nil, nil
+		}
+		canonicalLocal, canonicalHost, _ := strings.Cut(canonical, "@")
+		err = r.dbFor(ctx).Raw(
+			domainMatchingScopesSQL,
+			emailResourceID,
+			canonicalHost,
+			canonicalLocal,
+			receivedAt,
+			receivedAt,
+		).Scan(&rows).Error
 	case domain.ResourceTypeICloud:
 		_, plusBase, _, ok := domain.RecipientAliasForms(recipient)
 		if !ok {

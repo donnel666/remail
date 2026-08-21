@@ -109,9 +109,20 @@ func TestLocalGmailSupplyIgnoresUpstreamHistoryButKeepsLocalHistory(t *testing.T
 	require.NoError(t, err)
 	require.EqualValues(t, 1, quote.Available)
 
+	// An active allocation in another project must not consume this project's
+	// main-mailbox supply.
 	require.NoError(t, db.Model(&allocationModel{}).Where("order_no = ?", "UPSTREAM-HISTORY").Updates(map[string]any{
-		"source": SourceLocal,
-		"status": AllocationStatusReleased,
+		"source": SourceLocal, "project_id": 12, "status": AllocationStatusAllocated,
+	}).Error)
+	quote, err = service.CheckSupply(
+		context.Background(), 11, 12, 2,
+		tradedomain.ServiceModeCode, tradedomain.SupplyPolicyPublicOnly, "1.00",
+	)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, quote.Available)
+
+	require.NoError(t, db.Model(&allocationModel{}).Where("order_no = ?", "UPSTREAM-HISTORY").Updates(map[string]any{
+		"project_id": 11, "status": AllocationStatusReleased,
 	}).Error)
 	_, err = service.CheckSupply(
 		context.Background(), 11, 12, 2,

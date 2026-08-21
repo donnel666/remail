@@ -46,7 +46,7 @@ const (
 					SELECT 1
 					FROM microsoft_allocations active_main
 					WHERE active_main.active_kind = 1
-					  AND active_main.active_project_id = 0
+					  AND active_main.project_id = ?
 					  AND active_main.active_entity_id = ms.id
 				)
 			)`
@@ -64,7 +64,7 @@ const (
 				  AND NOT EXISTS (
 					SELECT 1 FROM microsoft_allocations ma
 					WHERE ma.active_kind = 2
-					  AND ma.active_project_id = 0
+					  AND ma.project_id = ?
 					  AND ma.active_entity_id = ea.id
 				  )
 			)`
@@ -77,7 +77,7 @@ func reusableExplicitAliasCondition(projectID uint, emailSuffix string) (string,
 		filter = " AND ea.email_domain = ?"
 		args = append(args, suffix)
 	}
-	args = append(args, projectID)
+	args = append(args, projectID, projectID)
 	return fmt.Sprintf(microsoftReusableExplicitAliasConditionTemplate, filter), args
 }
 
@@ -86,10 +86,10 @@ func microsoftMainCandidateCondition(projectID uint, emailSuffix string) (string
 	aliasCondition, aliasArgs := reusableExplicitAliasCondition(projectID, suffix)
 	if suffix == "" {
 		return "(" + microsoftUnusedMainCondition + " OR " + aliasCondition + ")",
-			append([]any{projectID}, aliasArgs...)
+			append([]any{projectID, projectID}, aliasArgs...)
 	}
 	return "((ms.email_domain = ? AND " + microsoftUnusedMainCondition + ") OR " + aliasCondition + ")",
-		append([]any{suffix, projectID}, aliasArgs...)
+		append([]any{suffix, projectID, projectID}, aliasArgs...)
 }
 
 type Repo struct {
@@ -546,7 +546,7 @@ func gmailSourceCandidateQuery(db *gorm.DB, projectID uint, buyerUserID uint, sc
 		Where("gr.status IN (?, ?)", "normal", "available")
 	if mailbox == domain.GmailMailboxMain {
 		query = query.
-			Where("NOT EXISTS (SELECT 1 FROM gmail_allocations active WHERE active.source = ? AND active.resource_id = gr.id AND active.mailbox = ? AND active.status = ?)", gmailLocalSource, domain.GmailMailboxMain, domain.AllocationStatusAllocated).
+			Where("NOT EXISTS (SELECT 1 FROM gmail_allocations active WHERE active.source = ? AND active.resource_id = gr.id AND active.project_id = ? AND active.mailbox = ? AND active.status = ?)", gmailLocalSource, projectID, domain.GmailMailboxMain, domain.AllocationStatusAllocated).
 			Where("NOT EXISTS (SELECT 1 FROM gmail_allocations history WHERE history.source = ? AND history.resource_id = gr.id AND history.project_id = ? AND history.mailbox = ?)", gmailLocalSource, projectID, domain.GmailMailboxMain)
 	}
 	if scope == domain.SupplyScopeOwned {
@@ -608,7 +608,7 @@ LIMIT ?`
 			mainArgs = append(mainArgs, suffix)
 		}
 		mainWhere = append(mainWhere, microsoftUnusedMainCondition)
-		mainArgs = append(mainArgs, projectID)
+		mainArgs = append(mainArgs, projectID, projectID)
 		if bucket != nil {
 			mainWhere = append(mainWhere, "ms.alloc_bucket = ?")
 			mainArgs = append(mainArgs, *bucket)
@@ -636,10 +636,10 @@ LIMIT ?`
         )`, `NOT EXISTS (
             SELECT 1 FROM microsoft_allocations active_alias
             WHERE active_alias.active_kind = 2
-              AND active_alias.active_project_id = 0
+              AND active_alias.project_id = ?
               AND active_alias.active_entity_id = ea.id
         )`)
-		aliasArgs = append(aliasArgs, projectID)
+		aliasArgs = append(aliasArgs, projectID, projectID)
 		if bucket != nil {
 			if suffix != "" {
 				aliasWhere = append(aliasWhere, "ea.alloc_bucket = ?")
@@ -739,11 +739,13 @@ func (r *Repo) ListICloudSourceCandidates(ctx context.Context, projectID uint, b
             WHERE history.alias_id = ia.id AND history.project_id = ?
         )`,
 		`NOT EXISTS (
-            SELECT 1 FROM icloud_allocations active
-            WHERE active.alias_id = ia.id AND active.status = 'allocated'
-        )`,
+	            SELECT 1 FROM icloud_allocations active
+	            WHERE active.alias_id = ia.id
+              AND active.project_id = ?
+              AND active.status = 'allocated'
+	        )`,
 	}
-	args := []any{projectID}
+	args := []any{projectID, projectID}
 	forwardingCondition, forwardingArgs := iCloudForwardingDomainCondition("ia.forward_to_email")
 	where = append(where, forwardingCondition)
 	args = append(args, forwardingArgs...)
@@ -903,7 +905,9 @@ FOR UPDATE`
 }
 
 func (r *Repo) LockMicrosoftCandidate(ctx context.Context, resourceID uint, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.MicrosoftMailbox, emailSuffix string) (*allocapp.MicrosoftCandidate, error) {
-	args := []any{resourceID, projectID}
+	// The SELECT projection comes before the WHERE clause, so its project key
+	// must be the first bound argument.
+	args := []any{projectID, resourceID, projectID}
 	where := []string{
 		"ms.id = ?",
 		"ms.status = 'normal'",
@@ -955,7 +959,7 @@ SELECT ms.id AS resource_id,
            SELECT 1
            FROM microsoft_allocations active_main
            WHERE active_main.active_kind = 1
-             AND active_main.active_project_id = 0
+             AND active_main.project_id = ?
              AND active_main.active_entity_id = ms.id
        ) AS main_allocated
 FROM microsoft_resources ms
@@ -1003,11 +1007,13 @@ func (r *Repo) LockICloudCandidate(ctx context.Context, resourceID uint, aliasID
             WHERE history.alias_id = ia.id AND history.project_id = ?
         )`,
 		`NOT EXISTS (
-            SELECT 1 FROM icloud_allocations active
-            WHERE active.alias_id = ia.id AND active.status = 'allocated'
-        )`,
+	            SELECT 1 FROM icloud_allocations active
+	            WHERE active.alias_id = ia.id
+              AND active.project_id = ?
+              AND active.status = 'allocated'
+	        )`,
 	}
-	args := []any{aliasID, resourceID, projectID}
+	args := []any{aliasID, resourceID, projectID, projectID}
 	forwardingCondition, forwardingArgs := iCloudForwardingDomainCondition("ia.forward_to_email")
 	where = append(where, forwardingCondition)
 	args = append(args, forwardingArgs...)
@@ -1210,9 +1216,9 @@ SELECT EXISTS (
     WHERE source = ?
       AND resource_id = ?
       AND mailbox = ?
-      AND (project_id = ? OR status = ?)
+      AND project_id = ?
     LIMIT 1
-)`, gmailLocalSource, resourceID, domain.GmailMailboxMain, projectID, domain.AllocationStatusAllocated).Scan(&unavailable).Error
+)`, gmailLocalSource, resourceID, domain.GmailMailboxMain, projectID).Scan(&unavailable).Error
 	} else {
 		err = r.dbFor(ctx).Raw(`
 SELECT EXISTS (
@@ -1252,7 +1258,7 @@ SELECT EXISTS (
 func (r *Repo) FindReusableExplicitAlias(ctx context.Context, projectID uint, resourceID uint, emailSuffix string) (*allocapp.AliasCandidate, error) {
 	suffix := normalizeCandidateSuffix(emailSuffix)
 	suffixSQL := ""
-	args := []any{resourceID, projectID}
+	args := []any{resourceID, projectID, projectID}
 	if suffix != "" {
 		suffixSQL = " AND ea.email_domain = ?"
 		args = append(args, suffix)
@@ -1274,7 +1280,7 @@ WHERE ea.resource_id = ?
       SELECT 1
       FROM microsoft_allocations ma
       WHERE ma.active_kind = 2
-        AND ma.active_project_id = 0
+        AND ma.project_id = ?
         AND ma.active_entity_id = ea.id
 	  )`+suffixSQL+`
 ORDER BY ea.id ASC
@@ -1366,7 +1372,7 @@ WHERE a.resource_id = ?
       SELECT 1
       FROM microsoft_allocations ma
       WHERE ma.active_kind = ?
-        AND ma.active_project_id = ?
+        AND ma.project_id = ?
         AND ma.active_entity_id = a.id
   )
   %s
@@ -1980,7 +1986,7 @@ JOIN users u ON u.id = er.owner_user_id
 WHERE ms.status = 'normal'
   AND `+microsoftNotUnderBlockingMaintenanceCondition+`
   AND `+microsoftScope+`
-  AND `+microsoftUnusedMainCondition, append(microsoftScopeArgs, projectID)...); err != nil {
+  AND `+microsoftUnusedMainCondition, append(microsoftScopeArgs, projectID, projectID)...); err != nil {
 				return nil, err
 			}
 			if err := scan(&stats.Microsoft.ExplicitAliasAvailable, `
@@ -2002,9 +2008,9 @@ WHERE ea.status = 'normal'
   AND NOT EXISTS (
       SELECT 1 FROM microsoft_allocations active_alias
       WHERE active_alias.active_kind = 2
-        AND active_alias.active_project_id = 0
+        AND active_alias.project_id = ?
         AND active_alias.active_entity_id = ea.id
-  )`, append(microsoftScopeArgs, projectID)...); err != nil {
+  )`, append(microsoftScopeArgs, projectID, projectID)...); err != nil {
 				return nil, err
 			}
 		}
@@ -2151,6 +2157,7 @@ WHERE gr.status IN ('normal', 'available')
       SELECT 1 FROM gmail_allocations active
       WHERE active.source = 'local'
         AND active.resource_id = gr.id
+        AND active.project_id = ?
         AND active.mailbox = 'main'
         AND active.status = 'allocated'
   )
@@ -2160,7 +2167,7 @@ WHERE gr.status IN ('normal', 'available')
         AND history.resource_id = gr.id
         AND history.project_id = ?
         AND history.mailbox = 'main'
-  )`, projectID); err != nil {
+  )`, projectID, projectID); err != nil {
 				return nil, err
 			}
 			stats.Gmail.MainPublicAvailable = stats.Gmail.MainAvailable
@@ -2226,8 +2233,10 @@ WHERE ia.status = 'normal'
   )
   AND NOT EXISTS (
       SELECT 1 FROM icloud_allocations active
-      WHERE active.alias_id = ia.id AND active.status = 'allocated'
-  )`, projectID); err != nil {
+      WHERE active.alias_id = ia.id
+        AND active.project_id = ?
+        AND active.status = 'allocated'
+  )`, projectID, projectID); err != nil {
 			return nil, err
 		}
 		stats.ICloud.TotalAvailable = stats.ICloud.AliasAvailable
@@ -2481,7 +2490,7 @@ WHERE ms.status = 'normal'
   AND `+microsoftNotUnderBlockingMaintenanceCondition+`
   AND `+scope+`
   AND `+microsoftUnusedMainCondition+`
-GROUP BY ms.email_domain`, append(scopeArgs, projectID)...)
+GROUP BY ms.email_domain`, append(scopeArgs, projectID, projectID)...)
 		if err != nil {
 			return nil, err
 		}
@@ -2504,10 +2513,10 @@ WHERE ea.status = 'normal'
   AND NOT EXISTS (
       SELECT 1 FROM microsoft_allocations active_alias
       WHERE active_alias.active_kind = 2
-        AND active_alias.active_project_id = 0
+        AND active_alias.project_id = ?
         AND active_alias.active_entity_id = ea.id
   )
-GROUP BY ea.email_domain`, append(scopeArgs, projectID)...)
+GROUP BY ea.email_domain`, append(scopeArgs, projectID, projectID)...)
 		if err != nil {
 			return nil, err
 		}
@@ -2696,6 +2705,7 @@ WHERE gr.status IN ('normal', 'available')
       SELECT 1 FROM gmail_allocations active
       WHERE active.source = 'local'
         AND active.resource_id = gr.id
+        AND active.project_id = ?
         AND active.mailbox = 'main'
         AND active.status = 'allocated'
   )
@@ -2705,7 +2715,7 @@ WHERE gr.status IN ('normal', 'available')
         AND history.resource_id = gr.id
         AND history.project_id = ?
         AND history.mailbox = 'main'
-  )`, buyerUserID, projectID).Scan(&mainAvailable).Error; err != nil {
+  )`, buyerUserID, projectID, projectID).Scan(&mainAvailable).Error; err != nil {
 			return nil, fmt.Errorf("private Gmail main inventory: %w", err)
 		}
 		available += mainAvailable
@@ -2781,7 +2791,9 @@ WHERE pp.project_id = ?
   )
   AND NOT EXISTS (
 		SELECT 1 FROM icloud_allocations active
-		WHERE active.alias_id = ia.id AND active.status = 'allocated'
+		WHERE active.alias_id = ia.id
+		  AND active.project_id = pp.project_id
+		  AND active.status = 'allocated'
 	)
 GROUP BY pp.id
 ORDER BY pp.id`, projectID, buyerUserID).Scan(&rows).Error; err != nil {

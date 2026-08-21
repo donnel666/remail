@@ -166,7 +166,7 @@ P1-I5 分配算法采用 Bucketed Locked LRU Allocation。目标是保持实现�
 
 `main/dot/plus` 权重只决定首选 mailbox 类型，不表示唯一可选类型。若首选类型因库存耗尽失败，分配器可按同一商品内其他非零权重类型继续尝试，避免有库存但误报无库存。权重选择必须基于 `orderNo + productId` 的确定性 hash，保证幂等重放不会漂移。
 
-Microsoft `main` 在持有资源根锁后必须同时复核当前项目历史和全局 active main；全局 main 已占用但 explicit alias 可用时直接分配 alias，不得先制造一次必然失败的 main INSERT。dot/plus/generated mailbox 使用幂等 upsert 取得实体，禁用实体只作为候选 miss 跳过，不使用 duplicate-key 异常驱动同事务内的变体循环。历史识别导入若需要创建订单，锁顺序与 Checkout 一致为 `wallet -> resource root -> allocation`；上游历史扫描不得在调用 Trade 前锁定或更新资源，refresh token 写入必须放在历史导入之后。
+Microsoft `main` 在持有资源根锁后必须同时复核当前项目历史和项目级 active main；同一主资源可被不同项目同时使用。当前项目 main 已占用但 explicit alias 可用时直接分配 alias，不得先制造一次必然失败的 main INSERT。dot/plus/generated mailbox 使用幂等 upsert 取得实体，禁用实体只作为候选 miss 跳过，不使用 duplicate-key 异常驱动同事务内的变体循环。历史识别导入若需要创建订单，锁顺序与 Checkout 一致为 `wallet -> resource root -> allocation`；上游历史扫描不得在调用 Trade 前锁定或更新资源，refresh token 写入必须放在历史导入之后。
 
 公开出售候选和自用私有候选必须使用两条显式查询路径：
 
@@ -199,7 +199,7 @@ P1-I5 项目库存按项目商品启用的分配形态计算。管理员库存�
 
 共享库存为公共可售资源的项目级快照。`public_only` 可以在共享库存为零时快速拒绝；`private_first` 不能据此断言买家自有资源也为零，因此必须继续进入权威分配器。
 
-`plusDailyLimit` 归 Microsoft 资源，`mailboxDailyLimit` 归 Domain 资源，默认都是 `10000`。这两个字段保护的是资源本身，不放在项目商品上；多个项目共享同一个资源时，一个项目的消耗会减少其他项目看到的共享可用量。
+`plusDailyLimit` 归 Microsoft 资源，`mailboxDailyLimit` 归 Domain 资源，默认都是 `10000`。这两个字段保护的是资源本身的真实每日发送能力，不放在项目商品上；它与 active allocation 的项目级占用是两层不同约束，多个项目共享同一个资源时仍共享这一物理日限量。
 
 日限量使用 `allocation_daily_usages` 记录每日用量，主键为 `(usageDate, resourceType, resourceId, usageKind)`。这是按资源分散的 counter，不允许设计为项目级或全局总库存行，避免所有请求竞争同一把锁。分配事务先锁源资源行，再锁同一资源当天的 usage row，检查 `usedCount < dailyLimit`，allocation 插入成功后同事务 `usedCount + 1`。释放 allocation 不回补 daily usage，因为 plus/domain 生成次数已经消耗。
 
@@ -214,8 +214,10 @@ MySQL 没有 partial unique index，P1-I5 使用 generated column 表达 active 
 | 表 | 约束 |
 |----|------|
 | `allocation_order_guards` | `orderNo` 主键；allocation 子表通过 `(orderNo, guardType)` 复合外键指向 `(orderNo, type)`，保证一个订单只能进入 Microsoft 或 Domain 其中一种分配。 |
-| `microsoft_allocations` | active main 对 `resourceId` 唯一；active explicit alias 对 `explicitAliasId` 唯一；active dot 对 `projectId + dotAliasId` 唯一；active plus 对 `projectId + plusAliasId` 唯一。 |
+| `microsoft_allocations` | active main 对 `projectId + resourceId` 唯一；active explicit alias 对 `projectId + explicitAliasId` 唯一；active dot 对 `projectId + dotAliasId` 唯一；active plus 对 `projectId + plusAliasId` 唯一。 |
 | `domain_allocations` | active domain 对 `projectId + mailboxId` 唯一；历史查询按 `projectId + email` 禁止同项目再次交付同一实际邮箱地址。 |
+| `gmail_allocations` | active main 对 `projectId + resourceId` 唯一；dot/plus 按 `projectId + mailbox + email` 唯一；历史查询按项目隔离。 |
+| `icloud_allocations` | active alias 对 `projectId + aliasId` 唯一；历史查询按 `projectId + aliasId` 禁止同项目再次交付同一 alias。 |
 
 补充约束：`microsoft_allocations/domain_allocations` 必须写入 `supplyScope=owned/public`，作为 Trade 计算订单实际应付金额的分配事实；`microsoft_allocations` 的显式别名、点别名和加号别名必须通过 `(aliasId, resourceId)` 复合外键确认归属同一个 Microsoft 主资源；`domain_allocations` 的生成邮箱必须通过 `(mailboxId, resourceId)` 复合外键确认归属同一个 Domain 资源；`productId + projectId` 也必须有复合外键确认商品属于该项目。`explicit_aliases.owner_user_id` 固定为首个超级管理员 `users.id=1`，且数据库拒绝任何非 1 的 owner；但显式别名的创建资格与供给范围解耦：`status=normal` 的私有主资源也会预创建别名，BC-ALLOC 仍按 alias 所属 `resource_id`、主资源的 `forSale + owner/buyer` 规则和 allocation 占用状态决定 `owned/public` 可用性，不把 alias owner 字段改造成新的供给过滤条件，也不因 alias 归超级管理员而把私有主资源变成公开供给。以上是数据库兜底，不替代领域层校验。
 

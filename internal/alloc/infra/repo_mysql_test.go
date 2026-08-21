@@ -74,7 +74,8 @@ func TestMicrosoftMainAllocationConcurrentMySQL(t *testing.T) {
 	deadlocksBefore := innodbMetricCount(t, db, "lock_deadlocks")
 	timeoutsBefore := innodbMetricCount(t, db, "lock_timeouts")
 
-	uc := allocapp.NewUseCase(NewRepo(db))
+	repo := NewRepo(db)
+	uc := allocapp.NewUseCase(repo)
 	const workers = 100
 	results := make(chan string, workers)
 	errs := make(chan error, workers)
@@ -117,7 +118,7 @@ func TestMicrosoftMainAllocationConcurrentMySQL(t *testing.T) {
 	require.Equal(t, timeoutsBefore, innodbMetricCount(t, db, "lock_timeouts"), "allocation must not rely on lock-timeout retries")
 }
 
-func TestMicrosoftMainUsesAliasWhenMainIsActiveInAnotherProjectMySQL(t *testing.T) {
+func TestMicrosoftMainCanBeActiveInAnotherProjectMySQL(t *testing.T) {
 	db := newAllocMySQLTestDB(t)
 	seedAllocBase(t, db, "microsoft", 1, 0, 0)
 	seedMicrosoftResources(t, db, 1, 1000, 1, true, "normal")
@@ -125,7 +126,8 @@ func TestMicrosoftMainUsesAliasWhenMainIsActiveInAnotherProjectMySQL(t *testing.
 INSERT INTO explicit_aliases(resource_id, owner_user_id, email, status)
 VALUES (1000, 1, 'alias1000@example.com', 'normal')`).Error)
 
-	uc := allocapp.NewUseCase(NewRepo(db))
+	repo := NewRepo(db)
+	uc := allocapp.NewUseCase(repo)
 	mainAllocation, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
 		OrderNo: "ord-main-project-10", BuyerUserID: 2, ProjectProductID: 20, SupplyScope: domain.SupplyScopePublic,
 	})
@@ -142,13 +144,36 @@ INSERT INTO project_products(
     code_window_minutes, activation_window_minutes, warranty_minutes,
     main_weight, dot_weight, plus_weight
 ) VALUES (21, 11, 'microsoft', 'enabled', TRUE, FALSE, 1, 0, 0.5, 0, 10, 60, 60, 1, 0, 0)`).Error)
+	project11Stats, err := repo.GetInventoryStats(context.Background(), 11)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), project11Stats.Microsoft.MainAvailable)
 
 	aliasAllocation, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
 		OrderNo: "ord-alias-project-11", BuyerUserID: 2, ProjectProductID: 21, SupplyScope: domain.SupplyScopePublic,
 	})
 	require.NoError(t, err)
-	require.Equal(t, "alias", aliasAllocation.Mailbox)
-	require.Equal(t, "alias1000@example.com", aliasAllocation.Email)
+	require.Equal(t, "main", aliasAllocation.Mailbox)
+	require.Equal(t, "ms1000@example.com", aliasAllocation.Email)
+	project10Stats, err := repo.GetInventoryStats(context.Background(), 10)
+	require.NoError(t, err)
+	require.Zero(t, project10Stats.Microsoft.MainAvailable)
+	project11Stats, err = repo.GetInventoryStats(context.Background(), 11)
+	require.NoError(t, err)
+	require.Zero(t, project11Stats.Microsoft.MainAvailable)
+
+	project10Alias, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo: "ord-alias-project-10", BuyerUserID: 2, ProjectProductID: 20, SupplyScope: domain.SupplyScopePublic,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "alias", project10Alias.Mailbox)
+	require.Equal(t, "alias1000@example.com", project10Alias.Email)
+
+	project11Alias, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo: "ord-alias-project-11-second", BuyerUserID: 2, ProjectProductID: 21, SupplyScope: domain.SupplyScopePublic,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "alias", project11Alias.Mailbox)
+	require.Equal(t, project10Alias.Email, project11Alias.Email)
 }
 
 func TestMicrosoftAllocationAndInventoryRespectBlockingMaintenanceMySQL(t *testing.T) {
@@ -271,6 +296,49 @@ func TestGmailUnifiedAllocationInventoryMySQL(t *testing.T) {
 	require.NoError(t, db.Table("project_products").Where("id = ?", 20).
 		Updates(map[string]any{"code_enabled": false, "purchase_enabled": true}).Error)
 	assertInventory(false, true)
+}
+
+func TestGmailMainActiveAllocationIsProjectScopedMySQL(t *testing.T) {
+	db := newAllocMySQLTestDB(t)
+	seedAllocBase(t, db, "gmail", 1, 0, 0)
+	seedGmailResources(t, db, []gmailResourceSeed{{ID: 1000, OwnerUserID: 1, Email: "shared@gmail.com", ForSale: true}})
+	require.NoError(t, db.Exec(`
+INSERT INTO projects(id, name, target_platform, status, access_type)
+VALUES (11, 'Other Gmail Project', 'alloc', 'listed', 'public')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO project_products(
+    id, project_id, type, status, code_enabled, purchase_enabled,
+    code_price, purchase_price, code_supplier_price, purchase_supplier_price,
+    code_window_minutes, activation_window_minutes, warranty_minutes,
+    main_weight, dot_weight, plus_weight
+) VALUES (21, 11, 'gmail', 'enabled', TRUE, FALSE, 1, 0, 0.5, 0, 10, 60, 60, 1, 0, 0)`).Error)
+
+	uc := allocapp.NewUseCase(NewRepo(db))
+	first, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo: "ord-gmail-project-10", BuyerUserID: 2, ProjectProductID: 20,
+		ServiceMode: domain.GmailServiceModeCode, SupplyScope: domain.SupplyScopePublic,
+	})
+	require.NoError(t, err)
+	require.Equal(t, string(domain.GmailMailboxMain), first.Mailbox)
+
+	candidates, err := NewRepo(db).ListGmailSourceCandidates(
+		context.Background(), 11, 2, domain.SupplyScopePublic, domain.GmailMailboxMain, nil, 4,
+	)
+	require.NoError(t, err)
+	require.Len(t, candidates, 1, "another project must not inherit the first project's active exclusion")
+
+	second, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo: "ord-gmail-project-11", BuyerUserID: 2, ProjectProductID: 21,
+		ServiceMode: domain.GmailServiceModeCode, SupplyScope: domain.SupplyScopePublic,
+	})
+	require.NoError(t, err)
+	require.Equal(t, string(domain.GmailMailboxMain), second.Mailbox)
+	require.Equal(t, first.ResourceID, second.ResourceID)
+	require.Equal(t, first.Email, second.Email)
+
+	var active int64
+	require.NoError(t, db.Raw("SELECT COUNT(*) FROM gmail_allocations WHERE resource_id = 1000 AND mailbox = 'main' AND status = 'allocated'").Scan(&active).Error)
+	require.Equal(t, int64(2), active)
 }
 
 func TestAllocationAllowsDelistedProductOnlyForExistingOrderMySQL(t *testing.T) {
@@ -1139,6 +1207,27 @@ INSERT INTO icloud_resource_channels(resource_id, kind, host, cookie, session_st
 	INSERT INTO icloud_aliases(resource_id, anonymous_id, email, forward_to_email, status) VALUES
 	    (1000, 'anon-public', 'public-alias@icloud.com', 'mailbox@d2000.example.com', 'normal'),
 	    (1001, 'anon-owned', 'owned-alias@icloud.com', 'mailbox@d2000.example.com', 'normal')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO projects(id, name, target_platform, status, access_type)
+VALUES (11, 'Other iCloud Project', 'alloc', 'listed', 'public')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO project_products(
+    id, project_id, type, status, code_enabled, purchase_enabled,
+    code_price, purchase_price, code_supplier_price, purchase_supplier_price,
+    code_window_minutes, activation_window_minutes, warranty_minutes,
+    main_weight, dot_weight, plus_weight
+) VALUES (21, 11, 'icloud', 'enabled', TRUE, FALSE, 1, 0, 0.5, 0, 10, 60, 60, 1, 0, 0)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO allocation_order_guards(order_no, type)
+VALUES ('ord-icloud-other-project', 'icloud')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO icloud_allocations(
+    order_no, project_id, product_id, resource_id, alias_id,
+    supply_scope, email, status
+) VALUES (
+    'ord-icloud-other-project', 11, 21, 1000, 1,
+    'public', 'public-alias@icloud.com', 'allocated'
+)`).Error)
 
 	repo := NewRepo(db)
 	stats, err := repo.GetInventoryStats(context.Background(), 10)
@@ -1201,6 +1290,18 @@ INSERT INTO icloud_resource_channels(resource_id, kind, host, cookie, session_st
 	require.Equal(t, int64(2), *userTotals.Items[0].PurchaseAvailable)
 	require.Equal(t, int64(1), *userTotals.Items[0].CodePublicAvailable)
 	require.Equal(t, int64(1), *userTotals.Items[0].PurchasePublicAvailable)
+
+	// The same alias may be active once in each project.
+	require.NoError(t, repo.WithTx(context.Background(), func(ctx context.Context) error {
+		if err := repo.CreateOrderGuard(ctx, "ord-icloud-project-10", domain.AllocationTypeICloud); err != nil {
+			return err
+		}
+		return repo.CreateICloudAllocation(ctx, &domain.ICloudAllocation{
+			OrderNo: "ord-icloud-project-10", ProjectID: 10, ProductID: 20,
+			ResourceID: 1000, AliasID: 1, SupplyScope: domain.SupplyScopePublic,
+			Email: "public-alias@icloud.com", Status: domain.AllocationStatusAllocated,
+		})
+	}))
 }
 
 func TestPrivateICloudInventoryTotalsAreOwnerScopedMySQL(t *testing.T) {
@@ -1850,7 +1951,8 @@ VALUES (1000, 1, 'indexed@example.com', 'normal')`).Error)
 		{"allocation_daily_usages", "idx_allocation_daily_usages_resource"},
 		{"allocation_order_guards", "PRIMARY"},
 		{"allocation_order_guards", "idx_allocation_order_guards_order_type"},
-		{"microsoft_allocations", "idx_ms_alloc_active"},
+		{"microsoft_allocations", "idx_ms_alloc_active_project"},
+		{"microsoft_allocations", "idx_ms_alloc_active_legacy_lookup"},
 		{"microsoft_allocations", "idx_ms_alloc_guard_type"},
 		{"microsoft_allocations", "idx_ms_alloc_product_project"},
 		{"microsoft_allocations", "idx_ms_alloc_explicit_alias_resource"},

@@ -134,7 +134,7 @@ func (s *Service) checkLocalSupply(
 	 WHERE gr.status IN (?, ?)
 	   AND (
 	     (pp.main_weight > 0
-	       AND NOT EXISTS (SELECT 1 FROM gmail_allocations AS active WHERE active.source = 'local' AND active.resource_id = gr.id AND active.mailbox = 'main' AND active.status = ?)
+	       AND NOT EXISTS (SELECT 1 FROM gmail_allocations AS active WHERE active.source = 'local' AND active.resource_id = gr.id AND active.project_id = pp.project_id AND active.mailbox = 'main' AND active.status = ?)
 	       AND NOT EXISTS (SELECT 1 FROM gmail_allocations AS history WHERE history.source = 'local' AND history.resource_id = gr.id AND history.project_id = pp.project_id AND history.mailbox = 'main'))
 	     OR (pp.dot_weight > 0 AND gr.email LIKE '__%@%')
 	     OR pp.plus_weight > 0

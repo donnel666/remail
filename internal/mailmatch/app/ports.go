@@ -474,7 +474,7 @@ func (uc *UseCase) syncDomainMailbox(ctx context.Context, scope OrderScope) (boo
 	if err != nil || len(messages) == 0 {
 		return false, err
 	}
-	_, matched, _, err := uc.ingestFetchedMessagesForScope(ctx, messages, scope)
+	_, matched, _, err := uc.ingestFetchedMessages(ctx, messages)
 	return matched > 0, err
 }
 
