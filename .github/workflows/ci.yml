@@ -236,7 +236,7 @@ jobs:
           /tmp/remail-server &
           SERVER_PID=$!
           echo "SERVER_PID=$SERVER_PID" >> "$GITHUB_ENV"
-          for i in $(seq 1 30); do
+          for i in $(seq 1 120); do
             if curl -sf http://localhost:8080/healthz >/dev/null; then
               echo "Server ready after ${i}s"
               exit 0
