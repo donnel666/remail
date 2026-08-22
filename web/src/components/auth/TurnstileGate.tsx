@@ -100,7 +100,7 @@ function TurnstileGate({ action, onSettle }: TurnstileGateProps) {
       className={
         visible
           ? "fixed inset-0 z-[1100] flex items-center justify-center bg-black/40"
-          : "pointer-events-none fixed left-0 top-0 -z-10 w-80 opacity-0"
+          : "pointer-events-none fixed left-0 top-0 -z-10 w-[min(368px,calc(100vw-16px))] opacity-0"
       }
       inert={visible ? undefined : true}
       onClick={visible ? () => settleRef.current(null) : undefined}
@@ -111,8 +111,8 @@ function TurnstileGate({ action, onSettle }: TurnstileGateProps) {
         aria-modal={visible ? true : undefined}
         className={
           visible
-            ? "w-80 rounded-lg bg-[var(--surface)] p-6 shadow-xl"
-            : "w-full"
+            ? "w-[min(368px,calc(100vw-16px))] rounded-lg bg-[var(--surface)] p-5 shadow-xl sm:p-6"
+            : "w-full p-5 sm:p-6"
         }
         ref={dialogRef}
         role={visible ? "dialog" : undefined}

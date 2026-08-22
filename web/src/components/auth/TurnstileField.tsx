@@ -129,7 +129,7 @@ export function TurnstileField({
   if (captchaDisabled) return null;
 
   return (
-    <div className="relative flex min-h-16 w-full items-center justify-center overflow-hidden">
+    <div className="relative flex min-h-16 w-full items-center justify-center overflow-visible">
       {failed ? (
         <button
           type="button"

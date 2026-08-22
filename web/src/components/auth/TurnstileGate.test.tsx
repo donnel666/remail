@@ -48,6 +48,7 @@ describe("requireTurnstile", () => {
     );
 
     expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(dialog).toHaveClass("w-[min(368px,calc(100vw-16px))]");
     expect(dialog).toHaveAccessibleDescription(
       "Please complete human verification to continue."
     );

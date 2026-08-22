@@ -39,6 +39,7 @@ it("renders the configured action and returns the verified token", async () => {
   const view = render(
     <TurnstileField action="login" resetKey={0} onTokenChange={onTokenChange} />
   );
+  expect(view.container.firstElementChild?.className).toContain("overflow-visible");
   await waitFor(() => expect(renderWidget).toHaveBeenCalledOnce());
 
   act(() => callback?.("verified-token"));
