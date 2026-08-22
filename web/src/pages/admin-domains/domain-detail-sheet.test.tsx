@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const toastError = vi.hoisted(() => vi.fn());
@@ -252,7 +252,8 @@ describe("admin domain mailbox infinite list", () => {
     render(
       <DomainMailsPanel resourceId={42} t={t} />
     );
-    expect(await screen.findByText("Subject 1")).toBeInTheDocument();
+    const messageList = screen.getByTestId("admin-domain-message-list");
+    expect(await within(messageList).findByText("Subject 1")).toBeInTheDocument();
 
     fireEvent.change(
       screen.getByPlaceholderText("Search sender, recipient, subject or body"),
@@ -269,8 +270,8 @@ describe("admin domain mailbox infinite list", () => {
         false
       )
     );
-    expect(await screen.findByText("Subject 9")).toBeInTheDocument();
-    expect(screen.queryByText("Subject 1")).not.toBeInTheDocument();
+    expect(await within(messageList).findByText("Subject 9")).toBeInTheDocument();
+    expect(within(messageList).queryByText("Subject 1")).not.toBeInTheDocument();
   });
 
   it("renders a retryable first-page error instead of an empty mailbox", async () => {
