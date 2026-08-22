@@ -139,6 +139,29 @@ func TestBindICloudSMSPhoneBalancesAndRemainsPermanent(t *testing.T) {
 	}
 }
 
+func TestRebindICloudSMSPhoneChangesPermanentBinding(t *testing.T) {
+	service, db, _ := newSMSPoolTestService(t)
+	ctx := context.Background()
+	first, err := service.BindICloudSMSPhone(ctx, "first@example.com", "4165550001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rebound, err := service.RebindICloudSMSPhone(ctx, "first@example.com", "+1 416 555 0002")
+	if err != nil || rebound.PhoneID == first.PhoneID || rebound.PhoneNumber != "14165550002" {
+		t.Fatalf("rebound phone = %+v err=%v", rebound, err)
+	}
+	loaded, err := service.BindICloudSMSPhone(ctx, "first@example.com", rebound.PhoneNumber)
+	if err != nil || loaded.PhoneID != rebound.PhoneID {
+		t.Fatalf("permanent rebound was not reused: %+v err=%v", loaded, err)
+	}
+	var count int64
+	if err := db.Model(&phoneBindingModel{}).
+		Where("consumer_type = ? AND consumer_key = ?", smsConsumerICloud, "first@example.com").
+		Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("binding count = %d err=%v", count, err)
+	}
+}
+
 func TestBindICloudSMSPhoneRejectsConflictingRaceWinner(t *testing.T) {
 	service, db, _ := newSMSPoolTestService(t)
 	var first, second phoneModel

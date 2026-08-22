@@ -173,36 +173,35 @@ type ICloudBulkBusyAction =
   | Exclude<AdminICloudBatchAction, "validate" | "alias">
   | "expiration";
 
-function normalizeICloudOnboardingManualFields(
-  content: string,
-  phoneNumber: string,
-  familyInviteURL: string,
-) {
-  const phone = phoneNumber.trim();
-  const invite = familyInviteURL.trim();
-  if (!phone && !invite) return content;
-  const lines = content.split(/\r?\n/);
-  const nonEmpty = lines.filter((line) => line.trim());
-  if (nonEmpty.length !== 1) return null;
-  const index = lines.findIndex((line) => line.trim());
-  const parts = lines[index].split("----").map((part) => part.trim());
-  if (parts.length < 8 || parts.length > 10) return null;
-  let currentPhone = "";
-  let currentInvite = "";
-  if (parts.length === 9) {
-    if (/^[+\d\s().-]+$/.test(parts[8])) currentPhone = parts[8];
-    else currentInvite = parts[8];
-  } else if (parts.length === 10) {
-    currentPhone = parts[8];
-    currentInvite = parts[9];
+function phoneDigits(value: string) {
+  return value.replace(/\D/g, "");
+}
+
+function samePhoneNumber(left: string, right: string) {
+  let leftDigits = phoneDigits(left);
+  let rightDigits = phoneDigits(right);
+  if (leftDigits === "" || rightDigits === "") return leftDigits === rightDigits;
+  if (leftDigits.length < rightDigits.length) {
+    [leftDigits, rightDigits] = [rightDigits, leftDigits];
   }
-  const nextPhone = phone || currentPhone;
-  const nextInvite = invite || currentInvite;
-  const base = parts.slice(0, 8);
-  if (nextInvite) base.push(nextPhone, nextInvite);
-  else if (nextPhone) base.push(nextPhone);
-  lines[index] = base.join("----");
-  return lines.join("\n");
+  return leftDigits === rightDigits ||
+    (rightDigits.length >= 7 && leftDigits.endsWith(rightDigits));
+}
+
+async function loadActiveKitesimPhones(signal: AbortSignal) {
+  const items: AdminKitesimPhoneItem[] = [];
+  let offset = 0;
+  for (;;) {
+    const response = await listAdminKitesimPhones(
+      { phoneAvailable: true, status: "active" },
+      offset,
+      100,
+      signal,
+    );
+    items.push(...response.items);
+    offset += response.items.length;
+    if (response.items.length === 0 || offset >= response.total) return items;
+  }
 }
 
 const EMPTY_FACETS: AdminICloudResourceFacets = {
@@ -646,10 +645,6 @@ export function ICloudOnboardingModal({
   const [file, setFile] = useState<File | null>(null);
   const [ownerId, setOwnerId] = useState<number | undefined>();
   const [expireAt, setExpireAt] = useState<Date | null>(() => defaultICloudExpireAt());
-  const [phones, setPhones] = useState<AdminKitesimPhoneItem[]>([]);
-  const [phonesLoading, setPhonesLoading] = useState(false);
-  const [selectedPhone, setSelectedPhone] = useState("");
-  const [familyInviteURL, setFamilyInviteURL] = useState("");
   const [result, setResult] = useState<AdminICloudOnboardingImportResponse | null>(null);
   const [activeImports, setActiveImports] = useState<AdminICloudTask[]>([]);
   const [activeImportsLoading, setActiveImportsLoading] = useState(false);
@@ -670,9 +665,6 @@ export function ICloudOnboardingModal({
     setFile(null);
     setOwnerId(undefined);
     setExpireAt(defaultICloudExpireAt());
-    setPhones([]);
-    setSelectedPhone("");
-    setFamilyInviteURL("");
     setResult(null);
     setActiveImports([]);
     setOpeningImportId(null);
@@ -681,53 +673,6 @@ export function ICloudOnboardingModal({
     setSubmitting(false);
     if (fileRef.current) fileRef.current.value = "";
   }, [visible]);
-
-  useEffect(() => {
-    if (!visible || !canOperate) return;
-    const controller = new AbortController();
-    const loadPhones = async () => {
-      const items: AdminKitesimPhoneItem[] = [];
-      let offset = 0;
-      for (;;) {
-        const response = await listAdminKitesimPhones(
-          { phoneAvailable: true, status: "active" },
-          offset,
-          100,
-          controller.signal,
-        );
-        items.push(...response.items);
-        offset += response.items.length;
-        if (response.items.length === 0 || offset >= response.total) break;
-      }
-      if (!controller.signal.aborted) setPhones(items);
-    };
-    setPhonesLoading(true);
-    void loadPhones()
-      .catch(() => {
-        if (!controller.signal.aborted) setPhones([]);
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setPhonesLoading(false);
-      });
-    return () => controller.abort();
-  }, [canOperate, visible]);
-
-  const phoneOptions = useMemo(
-    () =>
-      phones
-        .filter(
-          (phone) =>
-            phone.phoneId != null &&
-            phone.phoneNumber.trim() !== "" &&
-            phone.status === "active",
-        )
-        .map((phone) => ({
-          label: `${phone.phoneNumber} · ${t("Linked accounts")}: ${phone.linkedAccountCount ?? 0}`,
-          value: phone.phoneNumber,
-        }))
-        .sort((a, b) => a.value.localeCompare(b.value, undefined, { numeric: true })),
-    [phones, t],
-  );
 
   useEffect(() => {
     if (!visible || !canReadTasks) return;
@@ -814,18 +759,6 @@ export function ICloudOnboardingModal({
           ),
         );
         return;
-      }
-      if (selectedPhone || familyInviteURL) {
-        const normalized = normalizeICloudOnboardingManualFields(
-          sourceContent,
-          selectedPhone,
-          familyInviteURL,
-        );
-        if (normalized == null) {
-          Toast.warning(t("Manual phone and invitation selection can only be applied to one entry at a time."));
-          return;
-        }
-        sourceContent = normalized;
       }
       const next = await importAdminICloudOnboardingAccounts({
         content: sourceContent,
@@ -1066,46 +999,6 @@ export function ICloudOnboardingModal({
               value={expireAt ?? undefined}
             />
           </label>
-          <div className="rounded-lg border border-[var(--semi-color-border)] p-3">
-            <div className="mb-1 text-sm font-medium text-[var(--semi-color-text-0)]">
-              {t("Manual Apple account assignment")}
-            </div>
-            <div className="mb-3 text-xs leading-5 text-[var(--semi-color-text-2)]">
-              {t("For a single entry, choose the phone and enter the family invitation URL. The selected values replace the last fields of that entry; batch files must include them on every line.")}
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="block">
-                <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
-                  {t("Binding phone")}
-                </span>
-                <Select
-                  aria-label={t("Binding phone")}
-                  disabled={!canOperate || phonesLoading}
-                  loading={phonesLoading}
-                  onChange={(value) => setSelectedPhone(String(value ?? ""))}
-                  optionList={[
-                    { label: t("No manual phone"), value: "" },
-                    ...phoneOptions,
-                  ]}
-                  placeholder={t("Select a Kitesim phone")}
-                  style={{ width: "100%" }}
-                  value={selectedPhone}
-                />
-              </label>
-              <label className="block">
-                <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
-                  {t("Family invitation URL")}
-                </span>
-                <Input
-                  aria-label={t("Family invitation URL")}
-                  disabled={!canOperate}
-                  onChange={(value) => setFamilyInviteURL(String(value))}
-                  placeholder="https://setup.icloud.com/family/messages?..."
-                  value={familyInviteURL}
-                />
-              </label>
-            </div>
-          </div>
           <div
             aria-label={t("Import mode")}
             className="grid grid-cols-2 gap-2"
@@ -1747,6 +1640,9 @@ export function EditICloudModal({
   const [ownerId, setOwnerId] = useState<number | undefined>();
   const [forSale, setForSale] = useState(false);
   const [familyInviteURL, setFamilyInviteURL] = useState("");
+  const [phones, setPhones] = useState<AdminKitesimPhoneItem[]>([]);
+  const [phonesLoading, setPhonesLoading] = useState(false);
+  const [selectedPhone, setSelectedPhone] = useState("");
   const [expireAt, setExpireAt] = useState<Date | null>(() =>
     target ? new Date(target.expireAt) : null,
   );
@@ -1760,10 +1656,65 @@ export function EditICloudModal({
     setOwnerId(target.owner.id);
     setForSale(target.forSale);
     setFamilyInviteURL(target.familyInviteUrl ?? "");
+    setSelectedPhone(target.boundPhoneNumber ?? "");
     setExpireAt(new Date(target.expireAt));
     setNewCurl("");
     setOldCurl("");
   }, [target]);
+
+  useEffect(() => {
+    if (!target || credentialsOnly || !canOperate) {
+      setPhones([]);
+      setPhonesLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    setPhonesLoading(true);
+    void loadActiveKitesimPhones(controller.signal)
+      .then((items) => {
+        if (controller.signal.aborted) return;
+        setPhones(items);
+        const current = target?.boundPhoneNumber ?? "";
+        const match = items.find((phone) => samePhoneNumber(phone.phoneNumber, current));
+        if (match) setSelectedPhone(match.phoneNumber);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setPhones([]);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setPhonesLoading(false);
+      });
+    return () => controller.abort();
+  }, [canOperate, credentialsOnly, target?.boundPhoneNumber, target?.id]);
+
+  const phoneOptions = useMemo(() => {
+    const options = phones
+      .filter(
+        (phone) =>
+          phone.phoneId != null &&
+          phone.phoneNumber.trim() !== "" &&
+          phone.status === "active",
+      )
+      .map((phone) => ({
+        label: `${phone.phoneNumber} · ${t("Linked accounts")}: ${phone.linkedAccountCount ?? 0}`,
+        linkedAccountCount: phone.linkedAccountCount ?? 0,
+        value: phone.phoneNumber,
+      }));
+    if (
+      target?.boundPhoneNumber &&
+      !options.some((option) => samePhoneNumber(option.value, target.boundPhoneNumber ?? ""))
+    ) {
+      options.push({
+        label: `${target.boundPhoneNumber} · ${t("Linked accounts")}: -`,
+        linkedAccountCount: Number.MAX_SAFE_INTEGER,
+        value: target.boundPhoneNumber,
+      });
+    }
+    return options.sort((a, b) =>
+      a.linkedAccountCount - b.linkedAccountCount ||
+      a.value.localeCompare(b.value, undefined, { numeric: true }),
+    );
+  }, [phones, t, target?.boundPhoneNumber]);
 
   const submit = async () => {
     if (!target || (!credentialsOnly && !ownerId)) return;
@@ -1806,6 +1757,13 @@ export function EditICloudModal({
     if (expireAtChanged && expireAt) request.expireAt = expireAt.toISOString();
     if (familyInviteURL.trim() !== (target.familyInviteUrl ?? "").trim()) {
       request.familyInviteUrl = familyInviteURL.trim();
+    }
+    if (
+      !credentialsOnly &&
+      selectedPhone.trim() !== "" &&
+      !samePhoneNumber(selectedPhone, target.boundPhoneNumber ?? "")
+    ) {
+      request.phoneNumber = selectedPhone.trim();
     }
     if (nextImportLine) request.importLine = nextImportLine;
     if (Object.keys(request).length === 1) {
@@ -1871,6 +1829,23 @@ export function EditICloudModal({
                 onChange={(value) => setFamilyInviteURL(String(value))}
                 placeholder="https://setup.icloud.com/family/messages?..."
                 value={familyInviteURL}
+              />
+            </label>
+          ) : null}
+          {!credentialsOnly ? (
+            <label className="block">
+              <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
+                {t("Binding phone")}
+              </span>
+              <Select
+                aria-label={t("Binding phone")}
+                disabled={!canOperate || phonesLoading}
+                loading={phonesLoading}
+                onChange={(value) => setSelectedPhone(String(value ?? ""))}
+                optionList={phoneOptions}
+                placeholder={t("Select a Kitesim phone")}
+                style={{ width: "100%" }}
+                value={selectedPhone}
               />
             </label>
           ) : null}

@@ -3891,7 +3891,7 @@ export interface paths {
         head?: never;
         /**
          * Atomically edit an iCloud resource
-         * @description Base fields require `core:resource/write`. Supplying `forSale`, `expireAt`, or `importLine` additionally requires `core:resource/operate`. Session authentication, CSRF, and an idempotency key are required. `importLine` accepts `email----curl[----curl]`, with one old cURL, one new cURL, or both cURLs in either order. While the primary email is unchanged, each supplied cURL replaces only its matching channel and omitted channels are preserved. On an already healthy resource, submitted channels are checked asynchronously without changing resource health. Changing the primary email treats the supplied cURLs as the complete credential set, removes omitted channels, and re-queues resource validation. Changing the email or owner conflicts with an active allocation. Changing `expireAt` only changes future alias creation eligibility.
+         * @description Base fields require `core:resource/write`. Supplying `forSale`, `expireAt`, `importLine`, or `phoneNumber` additionally requires `core:resource/operate`. Session authentication, CSRF, and an idempotency key are required. `importLine` accepts `email----curl[----curl]`, with one old cURL, one new cURL, or both cURLs in either order. While the primary email is unchanged, each supplied cURL replaces only its matching channel and omitted channels are preserved. On an already healthy resource, submitted channels are checked asynchronously without changing resource health. Changing the primary email treats the supplied cURLs as the complete credential set, removes omitted channels, and re-queues resource validation. Changing the email or owner conflicts with an active allocation. Changing `expireAt` only changes future alias creation eligibility. `phoneNumber` must match an active Kitesim phone and updates the permanent iCloud binding.
          */
         patch: operations["patchAdminICloudResource"];
         trace?: never;
@@ -8252,6 +8252,8 @@ export interface components {
             importLine?: string;
             /** @description Replacement family invitation for this account. Send an empty string to clear the current invitation; a different valid value clears a persisted invalid-invitation quarantine. */
             familyInviteUrl?: string;
+            /** @description Replace the permanent Kitesim phone binding for this account. The number must match an active Kitesim phone. */
+            phoneNumber?: string;
             ownerId?: number;
             forSale?: boolean;
             /** Format: date-time */

@@ -9,6 +9,7 @@ import (
 
 	coreapp "github.com/donnel666/remail/internal/core/app"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
+	"github.com/donnel666/remail/internal/kitesim"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -23,6 +24,7 @@ type AdminICloudEditCommand struct {
 	Version         uint64
 	ImportLine      *string
 	FamilyInviteURL *string
+	PhoneNumber     *string
 	OwnerUserID     *uint
 	ForSale         *bool
 	ExpireAt        *time.Time
@@ -34,7 +36,7 @@ type AdminICloudEditCommand struct {
 
 func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminICloudEditCommand) (*AdminICloudMutationResult, error) {
 	if s == nil || s.db == nil || s.operationLogs == nil || command.ResourceID == 0 || command.Version == 0 ||
-		command.OperatorUserID == 0 || (command.ImportLine == nil && command.FamilyInviteURL == nil && command.OwnerUserID == nil && command.ForSale == nil && command.ExpireAt == nil) {
+		command.OperatorUserID == 0 || (command.ImportLine == nil && command.FamilyInviteURL == nil && command.PhoneNumber == nil && command.OwnerUserID == nil && command.ForSale == nil && command.ExpireAt == nil) {
 		return nil, ErrICloudResourceUpdate
 	}
 
@@ -66,6 +68,13 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 		}
 		command.FamilyInviteURL = &value
 	}
+	if command.PhoneNumber != nil {
+		value := strings.TrimSpace(*command.PhoneNumber)
+		if value == "" {
+			return nil, ErrICloudResourceUpdate
+		}
+		command.PhoneNumber = &value
+	}
 	if command.ExpireAt != nil {
 		value := normalizeICloudResourceExpireAt(*command.ExpireAt)
 		if !validICloudResourceExpireAt(value, s.now().UTC()) {
@@ -81,10 +90,11 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 		Version         uint64     `json:"version"`
 		ImportLine      *string    `json:"importLine,omitempty"`
 		FamilyInviteURL *string    `json:"familyInviteUrl,omitempty"`
+		PhoneNumber     *string    `json:"phoneNumber,omitempty"`
 		OwnerID         *uint      `json:"ownerId,omitempty"`
 		ForSale         *bool      `json:"forSale,omitempty"`
 		ExpireAt        *time.Time `json:"expireAt,omitempty"`
-	}{command.Version, command.ImportLine, command.FamilyInviteURL, command.OwnerUserID, command.ForSale, command.ExpireAt})
+	}{command.Version, command.ImportLine, command.FamilyInviteURL, command.PhoneNumber, command.OwnerUserID, command.ForSale, command.ExpireAt})
 	if err != nil {
 		return nil, ErrICloudResourceQueryTemporary
 	}
@@ -152,6 +162,25 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 				return err
 			}
 		}
+		phoneChanged := command.PhoneNumber != nil &&
+			(resource.KitesimPhoneID == nil || !sameICloudPhoneNumber(*command.PhoneNumber, resource.BoundPhoneNumber))
+		var phoneBinding *kitesim.SMSPhoneBinding
+		if phoneChanged {
+			rebinder, ok := s.smsPhones.(interface {
+				RebindICloudSMSPhoneTx(context.Context, *gorm.DB, string, string) (kitesim.SMSPhoneBinding, error)
+			})
+			if !ok {
+				return ErrICloudResourceUpdate
+			}
+			binding, err := rebinder.RebindICloudSMSPhoneTx(ctx, tx, resource.PrimaryEmail, *command.PhoneNumber)
+			if err != nil {
+				if errors.Is(err, kitesim.ErrPhoneMissing) || errors.Is(err, kitesim.ErrInvalidInput) {
+					return ErrICloudResourceUpdate
+				}
+				return err
+			}
+			phoneBinding = &binding
+		}
 
 		nextOwnerID := root.OwnerUserID
 		if command.OwnerUserID != nil {
@@ -203,6 +232,13 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 			if isICloudFamilyInviteFailure(resource.FamilySyncErrorCategory) {
 				updates["family_sync_error_category"] = ""
 			}
+		}
+		if phoneBinding != nil {
+			phoneID := phoneBinding.PhoneID
+			updates["bound_phone_number"] = phoneBinding.PhoneNumber
+			updates["bound_phone_country_code"] = phoneBinding.CountryCode
+			updates["bound_phone_source"] = "manual"
+			updates["kitesim_phone_id"] = phoneID
 		}
 
 		queuedGeneration := uint64(0)

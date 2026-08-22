@@ -6213,6 +6213,9 @@ type AdminICloudUpdateRequest struct {
 	ImportLine *string `json:"importLine,omitempty"`
 	OwnerId    *int    `json:"ownerId,omitempty"`
 
+	// PhoneNumber Replace the permanent Kitesim phone binding for this account. The number must match an active Kitesim phone.
+	PhoneNumber *string `json:"phoneNumber,omitempty"`
+
 	// Version Last observed resource version; stale writes return 409.
 	Version int `json:"version"`
 }

@@ -9,9 +9,16 @@ import (
 
 	coreinfra "github.com/donnel666/remail/internal/core/infra"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
+	"github.com/donnel666/remail/internal/kitesim"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
+
+type adminEditPhoneRebinder struct{ onboardingProvidedPhone }
+
+func (adminEditPhoneRebinder) RebindICloudSMSPhoneTx(context.Context, *gorm.DB, string, string) (kitesim.SMSPhoneBinding, error) {
+	return kitesim.SMSPhoneBinding{PhoneID: 8, PhoneNumber: "14165550002", CountryCode: "US", Source: "matched"}, nil
+}
 
 func TestApplyAdminICloudValidationResetsOnlyHealthScheduling(t *testing.T) {
 	db := newAdminICloudCommandTestDB(t, "icloud-admin-validate")
@@ -233,6 +240,40 @@ func TestEditAdminICloudResourcePatchesSubmittedChannels(t *testing.T) {
 	}
 	if len(channels) != 1 || channels[0].Kind != iCloudChannelWeb || !strings.Contains(channels[0].Cookie, "X-APPLE-WEBAUTH-TOKEN=rotated") {
 		t.Fatalf("email edit retained an omitted old-account channel: %#v", channels)
+	}
+}
+
+func TestEditAdminICloudResourceChangesPermanentPhone(t *testing.T) {
+	db := newAdminICloudCommandTestDB(t, "icloud-admin-edit-phone")
+	now := time.Date(2026, 8, 22, 8, 0, 0, 0, time.UTC)
+	phoneID := uint(7)
+	createAdminICloudCommandResource(t, db, now, iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "owner@icloud.com",
+		BoundPhoneNumber: "14165550001", BoundPhoneCountryCode: "US",
+		BoundPhoneSource: "manual", KitesimPhoneID: &phoneID,
+		Status: iCloudResourceNormal, ExpireAt: now.Add(time.Hour),
+	})
+	service := NewService(db, nil, nil)
+	service.smsPhones = adminEditPhoneRebinder{}
+	service.now = func() time.Time { return now }
+	requested := "+1 416 555 0002"
+	result, err := service.EditAdminICloudResource(context.Background(), AdminICloudEditCommand{
+		ResourceID: 1, Version: 1, PhoneNumber: &requested,
+		OperatorUserID: 99, IdempotencyKey: "edit-phone", RequestID: "edit-phone", Path: "/v1/admin/icloud/resources/1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Changed || result.Version != 2 {
+		t.Fatalf("unexpected mutation result: %#v", result)
+	}
+	var resource iCloudResourceModel
+	if err := db.First(&resource, 1).Error; err != nil {
+		t.Fatal(err)
+	}
+	if resource.BoundPhoneNumber != "14165550002" || resource.BoundPhoneCountryCode != "US" ||
+		resource.BoundPhoneSource != "manual" || resource.KitesimPhoneID == nil || *resource.KitesimPhoneID != 8 {
+		t.Fatalf("unexpected phone binding: %#v", resource)
 	}
 }
 

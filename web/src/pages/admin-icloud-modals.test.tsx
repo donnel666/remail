@@ -1052,14 +1052,7 @@ describe("admin iCloud modal workflows", () => {
     expect(onChanged).toHaveBeenCalledTimes(1);
   });
 
-  it("applies the manually selected phone and family invitation to one entry", async () => {
-    mocks.listPhones.mockResolvedValueOnce({
-      items: [{ phoneId: 9, phoneNumber: "+1 5813045473", status: "active", linkedAccountCount: 2 }],
-      limit: 100,
-      offset: 0,
-      total: 1,
-      facets: {},
-    });
+  it("keeps manual phone and invitation controls out of onboarding import", async () => {
     render(
       <ICloudOnboardingModal
         canOperate
@@ -1071,22 +1064,11 @@ describe("admin iCloud modal workflows", () => {
       />,
     );
 
-    await waitFor(() => expect(screen.getByLabelText("Binding phone")).toHaveValue(""));
-    fireEvent.change(screen.getByLabelText("Binding phone"), { target: { value: "+1 5813045473" } });
-    fireEvent.change(screen.getByLabelText("Family invitation URL"), {
-      target: { value: "https://setup.icloud.com/family/messages?inviteCode=test" },
-    });
-    fireEvent.change(screen.getByLabelText("iCloud resource entries"), {
-      target: { value: "美国区----否----child@example.test----password----q1(a1)----q2(a2)----q3(a3)----2000-01-01" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Start onboarding" }));
-
-    await waitFor(() => expect(mocks.importOnboarding).toHaveBeenCalledWith(expect.objectContaining({
-      content: "美国区----否----child@example.test----password----q1(a1)----q2(a2)----q3(a3)----2000-01-01----+1 5813045473----https://setup.icloud.com/family/messages?inviteCode=test",
-    })));
+    expect(screen.queryByLabelText("Binding phone")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Family invitation URL")).not.toBeInTheDocument();
   });
 
-  it("loads every phone page and sorts the binding options by phone number", async () => {
+  it("loads every phone page and sorts edit binding options by linked account count", async () => {
     const page = (items: any[], offset: number, total: number) => ({
       items,
       limit: 100,
@@ -1096,21 +1078,20 @@ describe("admin iCloud modal workflows", () => {
     });
     mocks.listPhones
       .mockResolvedValueOnce(page([
-        { phoneId: 9, phoneNumber: "+1 5813045473", status: "active", linkedAccountCount: 2 },
-        { phoneId: 8, phoneNumber: "+1 2345678901", status: "active", linkedAccountCount: 1 },
+        { phoneId: 9, phoneNumber: "+1 5813045473", status: "active", linkedAccountCount: 1 },
+        { phoneId: 8, phoneNumber: "+1 2345678901", status: "active", linkedAccountCount: 4 },
       ], 0, 3))
       .mockResolvedValueOnce(page([
-        { phoneId: 7, phoneNumber: "+1 9999999999", status: "active", linkedAccountCount: 4 },
+        { phoneId: 7, phoneNumber: "+1 9999999999", status: "active", linkedAccountCount: 2 },
       ], 2, 3));
 
     render(
-      <ICloudOnboardingModal
+      <EditICloudModal
         canOperate
-        canReadTasks={false}
         onCancel={vi.fn()}
-        onChanged={vi.fn()}
+        onSaved={vi.fn()}
         owners={[owner]}
-        visible
+        target={resource()}
       />,
     );
 
@@ -1118,7 +1099,12 @@ describe("admin iCloud modal workflows", () => {
     const options = Array.from(
       (screen.getByLabelText("Binding phone") as HTMLSelectElement).options,
     ).map((option) => option.value);
-    expect(options).toEqual(["", "+1 2345678901", "+1 5813045473", "+1 9999999999"]);
+    expect(options).toEqual([
+      "+1 5813045473",
+      "+1 9999999999",
+      "+1 2345678901",
+      "+15550001111",
+    ]);
   });
 
   it("uploads an Apple account TXT file and starts onboarding", async () => {
@@ -1353,6 +1339,36 @@ describe("admin iCloud modal workflows", () => {
     ));
     const [, request] = mocks.updateResource.mock.calls[0] as [number, { expireAt: string }];
     expect(new Date(request.expireAt).getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it("updates the selected binding phone from the edit modal", async () => {
+    mocks.listPhones.mockResolvedValueOnce({
+      items: [{ phoneId: 9, phoneNumber: "+1 5813045473", status: "active", linkedAccountCount: 2 }],
+      limit: 100,
+      offset: 0,
+      total: 1,
+      facets: {},
+    });
+    render(
+      <EditICloudModal
+        canOperate
+        onCancel={vi.fn()}
+        onSaved={vi.fn()}
+        owners={[owner]}
+        target={resource()}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByLabelText("Binding phone")).toHaveValue("+15550001111"));
+    fireEvent.change(screen.getByLabelText("Binding phone"), {
+      target: { value: "+1 5813045473" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(mocks.updateResource).toHaveBeenCalledWith(41, expect.objectContaining({
+      phoneNumber: "+1 5813045473",
+      version: 3,
+    })));
   });
 
   it("requires at least one cURL when replacing credentials", async () => {

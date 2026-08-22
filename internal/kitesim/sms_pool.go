@@ -150,6 +150,81 @@ func (s *Service) BindICloudSMSPhone(ctx context.Context, email, requestedNumber
 	return binding, err
 }
 
+// RebindICloudSMSPhone updates the permanent iCloud phone assignment. The
+// transaction-aware form is used by iCloud resource edits so the binding and
+// resource metadata commit together.
+func (s *Service) RebindICloudSMSPhone(ctx context.Context, email, requestedNumber string) (SMSPhoneBinding, error) {
+	if s == nil || s.db == nil {
+		return SMSPhoneBinding{}, ErrSMSPhoneUnavailable
+	}
+	var binding SMSPhoneBinding
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var err error
+		binding, err = s.RebindICloudSMSPhoneTx(ctx, tx, email, requestedNumber)
+		return err
+	})
+	return binding, err
+}
+
+// RebindICloudSMSPhoneTx is the transaction-aware rebinding primitive used by
+// the iCloud resource edit command.
+func (s *Service) RebindICloudSMSPhoneTx(ctx context.Context, tx *gorm.DB, email, requestedNumber string) (SMSPhoneBinding, error) {
+	if s == nil || tx == nil {
+		return SMSPhoneBinding{}, ErrSMSPhoneUnavailable
+	}
+	consumerKey := strings.ToLower(strings.TrimSpace(email))
+	requestedDigits := phoneDigits(requestedNumber)
+	if consumerKey == "" || requestedDigits == "" {
+		return SMSPhoneBinding{}, ErrInvalidInput
+	}
+
+	var row phoneBindingModel
+	err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("consumer_type = ? AND consumer_key = ?", smsConsumerICloud, consumerKey).
+		Take(&row).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return SMSPhoneBinding{}, err
+	}
+	found := err == nil
+
+	var candidates []phoneModel
+	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("deleted_at IS NULL AND disabled_at IS NULL AND status = ?", int(PhoneActive)).
+		Order("id ASC").Find(&candidates).Error; err != nil {
+		return SMSPhoneBinding{}, err
+	}
+	var phone phoneModel
+	for _, candidate := range candidates {
+		if samePhoneDigits(smsPhoneBinding(candidate, "matched"), requestedDigits) {
+			phone = candidate
+			break
+		}
+	}
+	if phone.ID == 0 {
+		return SMSPhoneBinding{}, ErrPhoneMissing
+	}
+
+	if !found {
+		createdAt := time.Now().UTC()
+		if s.now != nil {
+			createdAt = s.now().UTC()
+		}
+		row = phoneBindingModel{
+			PhoneID: phone.ID, ConsumerType: smsConsumerICloud, ConsumerKey: consumerKey,
+			Source: "matched", CreatedAt: createdAt,
+		}
+		if err := tx.WithContext(ctx).Create(&row).Error; err != nil {
+			return SMSPhoneBinding{}, err
+		}
+	} else if row.PhoneID != phone.ID || row.Source != "matched" {
+		if err := tx.WithContext(ctx).Model(&phoneBindingModel{}).Where("id = ?", row.ID).
+			Updates(map[string]any{"phone_id": phone.ID, "source": "matched"}).Error; err != nil {
+			return SMSPhoneBinding{}, err
+		}
+	}
+	return smsPhoneBinding(phone, "matched"), nil
+}
+
 // BindICloudSMSPhoneBySuffix reuses an existing permanent binding or creates
 // one only when the supplied suffix identifies exactly one active pool phone.
 // An empty suffix never allocates a new phone.

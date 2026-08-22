@@ -10972,7 +10972,7 @@ paths:
       operationId: patchAdminICloudResource
       summary: Atomically edit an iCloud resource
       description: |
-        Base fields require `core:resource/write`. Supplying `forSale`, `expireAt`, or `importLine` additionally requires `core:resource/operate`. Session authentication, CSRF, and an idempotency key are required. `importLine` accepts `email----curl[----curl]`, with one old cURL, one new cURL, or both cURLs in either order. While the primary email is unchanged, each supplied cURL replaces only its matching channel and omitted channels are preserved. On an already healthy resource, submitted channels are checked asynchronously without changing resource health. Changing the primary email treats the supplied cURLs as the complete credential set, removes omitted channels, and re-queues resource validation. Changing the email or owner conflicts with an active allocation. Changing `expireAt` only changes future alias creation eligibility.
+        Base fields require `core:resource/write`. Supplying `forSale`, `expireAt`, `importLine`, or `phoneNumber` additionally requires `core:resource/operate`. Session authentication, CSRF, and an idempotency key are required. `importLine` accepts `email----curl[----curl]`, with one old cURL, one new cURL, or both cURLs in either order. While the primary email is unchanged, each supplied cURL replaces only its matching channel and omitted channels are preserved. On an already healthy resource, submitted channels are checked asynchronously without changing resource health. Changing the primary email treats the supplied cURLs as the complete credential set, removes omitted channels, and re-queues resource validation. Changing the email or owner conflicts with an active allocation. Changing `expireAt` only changes future alias creation eligibility. `phoneNumber` must match an active Kitesim phone and updates the permanent iCloud binding.
       tags: [Admin]
       security:
         - cookieAuth: []
@@ -21684,6 +21684,11 @@ components:
           type: string
           maxLength: 2048
           description: Replacement family invitation for this account. Send an empty string to clear the current invitation; a different valid value clears a persisted invalid-invitation quarantine.
+        phoneNumber:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Replace the permanent Kitesim phone binding for this account. The number must match an active Kitesim phone.
         ownerId:
           type: integer
           minimum: 1
