@@ -20,7 +20,13 @@ import {
   IllustrationNoResult,
   IllustrationNoResultDark,
 } from "@douyinfe/semi-illustrations";
-import { FileText, Globe2, SlidersHorizontal, Upload } from "lucide-react";
+import {
+  Download,
+  FileText,
+  Globe2,
+  SlidersHorizontal,
+  Upload,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { CardPro } from "@/components/semi/card-pro";
@@ -68,6 +74,7 @@ import {
   proxyToggleCandidateCounts,
   type StatusFilter,
 } from "./proxy-management-counts";
+import { exportProxyURLs } from "./proxy-export";
 
 const { Text } = Typography;
 
@@ -569,6 +576,7 @@ export default function ProxyManagement() {
   const [currentProxyStats, setCurrentProxyStats] =
     useState<ProxyStatsResponse | null>(null);
   const [operationLoading, setOperationLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [checkingIDs, setCheckingIDs] = useState<Set<number>>(new Set());
   const [updatingID, setUpdatingID] = useState<number | null>(null);
   const [deletingBatch, setDeletingBatch] = useState(false);
@@ -1005,6 +1013,28 @@ export default function ProxyManagement() {
     [refresh, t, updateProxyItems]
   );
 
+  const handleExportProxies = useCallback(async () => {
+    if (totalItems === 0) {
+      Toast.info(t("No proxies to export."));
+      return;
+    }
+
+    setExporting(true);
+    try {
+      const urls: string[] = [];
+      for (let offset = 0; offset < totalItems; offset += 10_000) {
+        const response = await listAdminProxies(listFilter, offset, 10_000);
+        urls.push(...response.items.map((item) => item.url));
+        if (response.items.length < 10_000) break;
+      }
+      exportProxyURLs(urls);
+    } catch (error) {
+      Toast.error(getIamErrorMessage(t, error, "Proxy export failed."));
+    } finally {
+      setExporting(false);
+    }
+  }, [listFilter, t, totalItems]);
+
   const handleEditProxy = useCallback(
     async (payload: { expireAt: string | null; url: string }) => {
       if (!editingProxy) return;
@@ -1306,6 +1336,17 @@ export default function ProxyManagement() {
           onClick={() => setImportOpen(true)}
         >
           {t("Import")}
+        </Button>
+        <Button
+          type="tertiary"
+          size="small"
+          className="flex-1 md:flex-initial"
+          disabled={loading || exporting}
+          icon={<Download size={14} />}
+          loading={exporting}
+          onClick={() => void handleExportProxies()}
+        >
+          {t("Export proxies")}
         </Button>
         <Button
           type="tertiary"
