@@ -337,17 +337,10 @@ func parseICloudOnboardingLine(lineNumber int, raw string) (iCloudOnboardingLine
 			return iCloudOnboardingLine{}, fmt.Errorf("%w: invalid family invitation on line %d", ErrICloudOnboardingInvalid, lineNumber)
 		}
 	}
-	role := "child"
-	if invite != "" {
-		role = "primary"
-		if !opened {
-			return iCloudOnboardingLine{}, fmt.Errorf("%w: primary account must have iCloud opened on line %d", ErrICloudOnboardingInvalid, lineNumber)
-		}
-	}
 	return iCloudOnboardingLine{
 		LineNumber: lineNumber, Region: region, CountryCode: countryCodeFromICloudRegion(region),
 		ICloudOpened: opened, PrimaryEmail: emailValue, PhoneNumber: phone,
-		FamilyInviteURL: invite, AccountRole: role,
+		FamilyInviteURL: invite, AccountRole: "child",
 		Secret: iCloudOnboardingSecret{Password: password, SecurityAnswers: answers, Birthday: birthday.Format("2006-01-02")},
 	}, nil
 }
@@ -993,6 +986,11 @@ func isICloudOnboardingFamilySharingStage(stage string) bool {
 func isICloudOnboardingFamilySharingWaitingTask(task *iCloudOnboardingTaskModel) bool {
 	return task != nil && task.Status == iCloudOnboardingWaiting && task.DispatchStatus == "waiting" &&
 		isICloudOnboardingFamilySharingStage(task.Stage)
+}
+
+func hasICloudDirectFamilyInvite(task *iCloudOnboardingTaskModel) bool {
+	return task != nil && firstNonEmpty(task.TaskKind, "onboarding") == "onboarding" &&
+		task.AccountRole == "child" && strings.TrimSpace(task.FamilyInviteURL) != ""
 }
 
 func isICloudOnboardingFamilySharingWaitingResource(resource *iCloudResourceModel) bool {

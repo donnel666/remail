@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   importResources: vi.fn(),
   listResources: vi.fn(),
   listOnboardingImports: vi.fn(),
+  listPhones: vi.fn(),
   modalConfirm: vi.fn(),
   permissions: {} as Record<string, boolean>,
   resourceMailsPanel: vi.fn(),
@@ -89,8 +90,8 @@ vi.mock("@douyinfe/semi-ui", async () => {
       </section>
     ) : null;
   (Modal as any).confirm = mocks.modalConfirm;
-  const Select = ({ onChange, optionList = [], value }: any) => (
-    <select aria-label="owner" onChange={(event) => onChange?.(event.target.value)} value={value ?? ""}>
+  const Select = ({ "aria-label": ariaLabel, onChange, optionList = [], value }: any) => (
+    <select aria-label={ariaLabel ?? "owner"} onChange={(event) => onChange?.(event.target.value)} value={value ?? ""}>
       {optionList.map((option: any) => (
         <option disabled={option.disabled} key={String(option.value)} value={option.value}>
           {option.label}
@@ -215,6 +216,10 @@ vi.mock("@/lib/admin-icloud-api", async (importOriginal) => ({
   unpublishAdminICloudResource: vi.fn(),
   updateAdminICloudResource: mocks.updateResource,
   validateAdminICloudResource: mocks.validate,
+}));
+vi.mock("@/lib/admin-kitesim-api", async (importOriginal) => ({
+  ...(await importOriginal<any>()),
+  listAdminKitesimPhones: mocks.listPhones,
 }));
 vi.mock("@/lib/iam-errors", () => ({
   getIamErrorMessage: (_t: unknown, _error: unknown, fallback: string) => fallback,
@@ -440,6 +445,7 @@ describe("admin iCloud modal workflows", () => {
     mocks.listOnboardingImports.mockResolvedValue({
       items: [], limit: 100, offset: 0, succeeded: 0, total: 0,
     });
+    mocks.listPhones.mockResolvedValue({ items: [], limit: 100, offset: 0, total: 0, facets: {} });
   });
 
   afterEach(() => {
@@ -1044,6 +1050,75 @@ describe("admin iCloud modal workflows", () => {
       }),
     );
     expect(onChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it("applies the manually selected phone and family invitation to one entry", async () => {
+    mocks.listPhones.mockResolvedValueOnce({
+      items: [{ phoneId: 9, phoneNumber: "+1 5813045473", status: "active", linkedAccountCount: 2 }],
+      limit: 100,
+      offset: 0,
+      total: 1,
+      facets: {},
+    });
+    render(
+      <ICloudOnboardingModal
+        canOperate
+        canReadTasks={false}
+        onCancel={vi.fn()}
+        onChanged={vi.fn()}
+        owners={[owner]}
+        visible
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByLabelText("Binding phone")).toHaveValue(""));
+    fireEvent.change(screen.getByLabelText("Binding phone"), { target: { value: "+1 5813045473" } });
+    fireEvent.change(screen.getByLabelText("Family invitation URL"), {
+      target: { value: "https://setup.icloud.com/family/messages?inviteCode=test" },
+    });
+    fireEvent.change(screen.getByLabelText("iCloud resource entries"), {
+      target: { value: "美国区----否----child@example.test----password----q1(a1)----q2(a2)----q3(a3)----2000-01-01" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Start onboarding" }));
+
+    await waitFor(() => expect(mocks.importOnboarding).toHaveBeenCalledWith(expect.objectContaining({
+      content: "美国区----否----child@example.test----password----q1(a1)----q2(a2)----q3(a3)----2000-01-01----+1 5813045473----https://setup.icloud.com/family/messages?inviteCode=test",
+    })));
+  });
+
+  it("loads every phone page and sorts the binding options by phone number", async () => {
+    const page = (items: any[], offset: number, total: number) => ({
+      items,
+      limit: 100,
+      offset,
+      total,
+      facets: {},
+    });
+    mocks.listPhones
+      .mockResolvedValueOnce(page([
+        { phoneId: 9, phoneNumber: "+1 5813045473", status: "active", linkedAccountCount: 2 },
+        { phoneId: 8, phoneNumber: "+1 2345678901", status: "active", linkedAccountCount: 1 },
+      ], 0, 3))
+      .mockResolvedValueOnce(page([
+        { phoneId: 7, phoneNumber: "+1 9999999999", status: "active", linkedAccountCount: 4 },
+      ], 2, 3));
+
+    render(
+      <ICloudOnboardingModal
+        canOperate
+        canReadTasks={false}
+        onCancel={vi.fn()}
+        onChanged={vi.fn()}
+        owners={[owner]}
+        visible
+      />,
+    );
+
+    await waitFor(() => expect(mocks.listPhones).toHaveBeenCalledTimes(2));
+    const options = Array.from(
+      (screen.getByLabelText("Binding phone") as HTMLSelectElement).options,
+    ).map((option) => option.value);
+    expect(options).toEqual(["", "+1 2345678901", "+1 5813045473", "+1 9999999999"]);
   });
 
   it("uploads an Apple account TXT file and starts onboarding", async () => {

@@ -402,6 +402,38 @@ func TestSyncEmptyUpstreamResponsePreservesHistoricalPhones(t *testing.T) {
 	}
 }
 
+func TestListPhonesIncludesLinkedICloudAccountCount(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&accountModel{}, &phoneModel{}); err != nil {
+		t.Fatal(err)
+	}
+	account := testAccount("linked@example.com", "password", "token")
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatal(err)
+	}
+	phone := phoneModel{AccountID: account.ID, ProviderOrderID: "order-linked", PhoneCode: "1", PhoneNumber: "5813045473", CountryCode: "US", Status: 1}
+	if err := db.Create(&phone).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("CREATE TABLE icloud_resources (id INTEGER PRIMARY KEY, kitesim_phone_id INTEGER, status TEXT)").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("INSERT INTO icloud_resources (id, kitesim_phone_id, status) VALUES (?, ?, ?), (?, ?, ?), (?, ?, ?)",
+		1, phone.ID, "normal", 2, phone.ID, "pending", 3, phone.ID, "deleted").Error; err != nil {
+		t.Fatal(err)
+	}
+	list, err := NewService(db, nil).ListPhones(context.Background(), PhoneListFilter{Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Items) != 1 || list.Items[0].LinkedAccountCount != 2 {
+		t.Fatalf("linked account count = %+v", list.Items)
+	}
+}
+
 func TestMessagesDoesNotOverwriteNewerToken(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:kitesim_message_token_fence?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {

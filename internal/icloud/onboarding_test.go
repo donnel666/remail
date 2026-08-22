@@ -18,7 +18,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestParseICloudOnboardingImportDistinguishesPrimaryAndChild(t *testing.T) {
+func TestParseICloudOnboardingImportTreatsEveryEntryAsChild(t *testing.T) {
 	content := []byte(
 		"美国区----是----primary@example.com----Secret1!----问题一?(remail1)----问题二?(remail2)----问题三?(remail3)----2000-11-02----https://www.icloud.com/family/invite?inviteCode=abc\n" +
 			"加拿大区----否----child@example.com----Secret2!----问题一?(remail1)----问题二?(remail2)----问题三?(remail3)----1999-01-03----14165550001\n" +
@@ -33,8 +33,8 @@ func TestParseICloudOnboardingImportDistinguishesPrimaryAndChild(t *testing.T) {
 	if len(lines) != 5 {
 		t.Fatalf("lines = %d", len(lines))
 	}
-	if lines[0].AccountRole != "primary" || lines[0].CountryCode != "US" || lines[0].PhoneNumber != "" || lines[0].FamilyInviteURL == "" || !lines[0].ICloudOpened {
-		t.Fatalf("primary = %+v", lines[0])
+	if lines[0].AccountRole != "child" || lines[0].CountryCode != "US" || lines[0].PhoneNumber != "" || lines[0].FamilyInviteURL == "" || !lines[0].ICloudOpened {
+		t.Fatalf("direct-invite child = %+v", lines[0])
 	}
 	if lines[1].AccountRole != "child" || lines[1].CountryCode != "CA" || lines[1].PhoneNumber != "14165550001" || lines[1].FamilyInviteURL != "" || lines[1].ICloudOpened {
 		t.Fatalf("child = %+v", lines[1])
@@ -42,11 +42,11 @@ func TestParseICloudOnboardingImportDistinguishesPrimaryAndChild(t *testing.T) {
 	if lines[2].AccountRole != "child" || lines[2].CountryCode != "JP" || lines[2].PhoneNumber != "" || lines[2].FamilyInviteURL != "" {
 		t.Fatalf("child without phone = %+v", lines[2])
 	}
-	if lines[3].AccountRole != "primary" || lines[3].CountryCode != "GB" || lines[3].PhoneNumber != "447700900001" || lines[3].FamilyInviteURL != "family-token-123" {
-		t.Fatalf("primary with phone = %+v", lines[3])
+	if lines[3].AccountRole != "child" || lines[3].CountryCode != "GB" || lines[3].PhoneNumber != "447700900001" || lines[3].FamilyInviteURL != "family-token-123" {
+		t.Fatalf("child with phone = %+v", lines[3])
 	}
-	if lines[4].AccountRole != "primary" || lines[4].PhoneNumber != "" || lines[4].FamilyInviteURL == "" {
-		t.Fatalf("primary with empty phone field = %+v", lines[4])
+	if lines[4].AccountRole != "child" || lines[4].PhoneNumber != "" || lines[4].FamilyInviteURL == "" {
+		t.Fatalf("child with empty phone field = %+v", lines[4])
 	}
 	if lines[0].Secret.SecurityAnswers[1].Answer != "remail2" || lines[0].Secret.Birthday != "2000-11-02" {
 		t.Fatalf("secret parser = %+v", lines[0].Secret)
@@ -54,8 +54,33 @@ func TestParseICloudOnboardingImportDistinguishesPrimaryAndChild(t *testing.T) {
 	if _, err := parseICloudOnboardingImport([]byte("美国区----也许----bad@example.com----x----q(a)----q(b)----q(c)----2000-01-01")); !errors.Is(err, ErrICloudOnboardingInvalid) {
 		t.Fatalf("invalid flag error = %v", err)
 	}
-	if _, err := parseICloudOnboardingImport([]byte("美国区----否----primary@example.com----x----q(a)----q(b)----q(c)----2000-01-01----invite-token")); !errors.Is(err, ErrICloudOnboardingInvalid) {
-		t.Fatalf("unopened primary error = %v", err)
+	if lines, err := parseICloudOnboardingImport([]byte("美国区----否----child-invite@example.com----x----q(a)----q(b)----q(c)----2000-01-01----invite-token")); err != nil || len(lines) != 1 || lines[0].AccountRole != "child" {
+		t.Fatalf("unopened direct-invite child = lines=%+v err=%v", lines, err)
+	}
+}
+
+func TestHasICloudDirectFamilyInviteExcludesLegacyPrimaryTasks(t *testing.T) {
+	cases := []struct {
+		name     string
+		taskKind string
+		role     string
+		invite   string
+		expected bool
+	}{
+		{name: "direct child", taskKind: "onboarding", role: "child", invite: "invite", expected: true},
+		{name: "legacy primary", taskKind: "onboarding", role: "primary", invite: "invite", expected: false},
+		{name: "refresh child", taskKind: "refresh", role: "child", invite: "invite", expected: false},
+		{name: "child without invite", taskKind: "onboarding", role: "child", expected: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := hasICloudDirectFamilyInvite(&iCloudOnboardingTaskModel{
+				TaskKind: tc.taskKind, AccountRole: tc.role, FamilyInviteURL: tc.invite,
+			})
+			if got != tc.expected {
+				t.Fatalf("hasICloudDirectFamilyInvite() = %t, want %t", got, tc.expected)
+			}
+		})
 	}
 }
 

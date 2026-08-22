@@ -3649,7 +3649,7 @@ export interface paths {
         put?: never;
         /**
          * Start Apple account onboarding for iCloud resources
-         * @description Requires `core:resource/operate` and `governance:task/read`, so every operator who starts onboarding can recover its durable task after closing the dialog. Accepts up to 1,000 UTF-8 account lines in `region----iCloud opened----Apple ID----password----security answer 1----security answer 2----security answer 3----birthday[----phone][----family invitation URL]` format. A non-empty invitation URL marks a primary account; primary accounts are stored without joining a family, while child accounts reserve capacity on the least-loaded compatible primary account in the same region. A supplied phone becomes the permanent binding, reusing matching Kitesim inventory when available. A child with no phone receives a permanent Kitesim binding; a primary with no phone recovers its existing Apple trusted phone and must match exactly one Kitesim pool number, otherwise onboarding stops and requires an explicit phone. Apple passwords, security answers, browser session payloads, Cookie values, submitted verification codes, and uploaded source text remain write-only.
+         * @description Requires `core:resource/operate` and `governance:task/read`, so every operator who starts onboarding can recover its durable task after closing the dialog. Accepts up to 1,000 UTF-8 account lines in `region----iCloud opened----Apple ID----password----security answer 1----security answer 2----security answer 3----birthday[----phone][----family invitation URL]` format. Entries with an invitation URL are stored as child accounts; the URL is the operator-supplied invitation for that same account and never creates or selects a primary account. A supplied phone becomes the permanent binding, reusing matching Kitesim inventory when available. When optional values are omitted, the existing assignment/recovery behavior is retained for backward compatibility. Historical primary-account fields remain readable for old resources, but are not inferred for direct-invitation entries. Apple passwords, security answers, browser session payloads, Cookie values, submitted verification codes, and uploaded source text remain write-only.
          */
         post: operations["postAdminICloudOnboardingImport"];
         delete?: never;
@@ -3702,8 +3702,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Confirm the primary family-sharing reset
-         * @description Completes a task after an operator manually disables and re-enables sharing on the primary Apple account.
+         * Confirm the family-sharing reset
+         * @description Completes a task after an operator manually disables and re-enables family sharing. Legacy primary-account resources remain supported, while direct-invitation child onboarding does not require a primary resource.
          */
         post: operations["postAdminICloudOnboardingTaskFamilyReset"];
         delete?: never;
@@ -8250,7 +8250,7 @@ export interface components {
             version: number;
             /** @description Write-only `email----curl[----curl]` credential update. It accepts one old cURL, one new cURL, or both cURLs in either order, including browser-copied backslash line continuations. While the primary email is unchanged, each supplied cURL replaces only its matching channel and omitted channels are preserved. On an already healthy resource, submitted channels are checked asynchronously without changing resource health. Changing the primary email treats the supplied cURLs as the complete credential set, removes omitted channels, and re-queues resource validation. */
             importLine?: string;
-            /** @description Replacement family invitation for a primary account. A different valid value clears a persisted invalid-invitation quarantine. */
+            /** @description Replacement family invitation for this account. Send an empty string to clear the current invitation; a different valid value clears a persisted invalid-invitation quarantine. */
             familyInviteUrl?: string;
             ownerId?: number;
             forSale?: boolean;
@@ -8921,6 +8921,11 @@ export interface components {
         AdminKitesimPhoneItem: {
             accountId: number;
             phoneId: number | null;
+            /**
+             * Format: int64
+             * @description Number of non-deleted iCloud resources linked to this phone.
+             */
+            linkedAccountCount: number;
             providerOrderId?: string;
             /** Format: email */
             account: string;

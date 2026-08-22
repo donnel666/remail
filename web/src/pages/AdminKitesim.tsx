@@ -1153,6 +1153,13 @@ export default function AdminKitesim() {
             value ? <CopyableTableText copiedText={t("Copied")} copyContent={phoneCopyContent(String(value))} text={String(value)} /> : "-",
         },
         {
+          dataIndex: "linkedAccountCount",
+          key: "linkedAccounts",
+          title: t("Linked accounts"),
+          width: 130,
+          render: (value: unknown) => String(value ?? 0),
+        },
+        {
           dataIndex: "account",
           key: "account",
           title: t("Platform account"),

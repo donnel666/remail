@@ -1446,11 +1446,11 @@ func redactDebugMessage(value string, request icloud.AppleOnboardingRequest) str
 	return value
 }
 
-func accountRoleForInput(input accountInput) string {
-	if strings.TrimSpace(input.FamilyInviteURL) != "" {
-		return "child"
-	}
-	return "primary"
+func accountRoleForInput(_ accountInput) string {
+	// Every interactive import is a normal account. The invitation URL is
+	// supplied by the operator for this account; it no longer denotes a
+	// primary/organizer resource.
+	return "child"
 }
 
 func savedPhoneBindingFrom(value kitesim.SMSPhoneBinding) *savedPhoneBinding {

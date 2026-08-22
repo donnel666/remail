@@ -61,7 +61,7 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 	}
 	if command.FamilyInviteURL != nil {
 		value := strings.TrimSpace(*command.FamilyInviteURL)
-		if !validICloudFamilyInvite(value) {
+		if value != "" && !validICloudFamilyInvite(value) {
 			return nil, ErrICloudResourceUpdate
 		}
 		command.FamilyInviteURL = &value
@@ -125,10 +125,6 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 		if resource.Status == iCloudResourceDeleted {
 			return ErrICloudResourceNotFound
 		}
-		if command.FamilyInviteURL != nil && resource.AccountRole != "primary" {
-			return ErrICloudResourceUpdate
-		}
-
 		emailChanged := imported != nil && !strings.EqualFold(strings.TrimSpace(imported.PrimaryEmail), strings.TrimSpace(resource.PrimaryEmail))
 		credentialsSubmitted := imported != nil
 		accountIdentityChanged := emailChanged

@@ -61,7 +61,7 @@ func TestCommitStandaloneValidatedAccountPersistsResourceCredentialsAndChannels(
 	if err := db.First(&resource, result.ResourceID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if resource.AccountRole != "child" || resource.FamilyPrimaryResourceID == nil || *resource.FamilyPrimaryResourceID != primaryRoot.ID ||
+	if resource.AccountRole != "child" || resource.FamilyPrimaryResourceID != nil ||
 		resource.FamilyInviteURL != "https://setup.icloud.com/family/messages?inviteCode=invite-token" ||
 		resource.Status != iCloudResourcePending || resource.ForSale || resource.BoundPhoneNumber != "15488768536" ||
 		resource.BoundPhoneSource != "manual" || resource.SelectedForwardTo != "relay@example.com" {
@@ -98,7 +98,7 @@ func TestCommitStandaloneValidatedAccountPersistsResourceCredentialsAndChannels(
 		t.Fatal(err)
 	}
 	if err := db.First(&resource, result.ResourceID).Error; err != nil || !resource.ForSale || resource.Status != iCloudResourceNormal ||
-		resource.FamilyPrimaryResourceID == nil || *resource.FamilyPrimaryResourceID != primaryRoot.ID ||
+		resource.FamilyPrimaryResourceID != nil ||
 		resource.FamilyInviteURL != account.FamilyInviteURL {
 		t.Fatalf("existing resource sale state changed: status=%s for_sale=%t err=%v", resource.Status, resource.ForSale, err)
 	}

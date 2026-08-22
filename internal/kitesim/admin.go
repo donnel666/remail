@@ -162,40 +162,41 @@ type PhoneListFilter struct {
 }
 
 type PhoneItem struct {
-	AccountID        uint             `json:"accountId"`
-	PhoneID          *uint            `json:"phoneId"`
-	ProviderOrderID  string           `json:"providerOrderId,omitempty"`
-	Account          string           `json:"account"`
-	PhoneNumber      string           `json:"phoneNumber"`
-	Status           AdminPhoneStatus `json:"status"`
-	OrderNo          string           `json:"orderNo,omitempty"`
-	CountryCode      string           `json:"countryCode,omitempty"`
-	OrderStatus      int              `json:"orderStatus,omitempty"`
-	PackageID        string           `json:"packageId,omitempty"`
-	DurationType     int              `json:"durationType,omitempty"`
-	DurationValue    int              `json:"durationValue,omitempty"`
-	AutoRenew        bool             `json:"autoRenew"`
-	Currency         string           `json:"currency,omitempty"`
-	OriginalAmount   string           `json:"originalAmount,omitempty"`
-	PaidAmount       string           `json:"paidAmount,omitempty"`
-	AutoRenewPrice   string           `json:"autoRenewPrice,omitempty"`
-	CreateTime       string           `json:"createTime,omitempty"`
-	PaymentTime      string           `json:"paymentTime,omitempty"`
-	ExpireTime       string           `json:"expireTime,omitempty"`
-	LatestRenewal    string           `json:"latestRenewalTime,omitempty"`
-	NextRenewalDate  string           `json:"nextRenewalDate,omitempty"`
-	RefundTime       string           `json:"refundTime,omitempty"`
-	TokenAvailable   bool             `json:"tokenAvailable"`
-	TokenUpdatedAt   *time.Time       `json:"tokenUpdatedAt,omitempty"`
-	SyncHealthy      bool             `json:"syncHealthy"`
-	SyncStatus       SyncTaskStatus   `json:"syncStatus"`
-	SyncQueuedAt     *time.Time       `json:"syncQueuedAt,omitempty"`
-	SyncStartedAt    *time.Time       `json:"syncStartedAt,omitempty"`
-	SyncFinishedAt   *time.Time       `json:"syncFinishedAt,omitempty"`
-	SyncAttempts     int              `json:"syncAttempts"`
-	LastSafeError    string           `json:"lastSafeError,omitempty"`
-	LastSyncedAt     *time.Time       `json:"lastSyncedAt,omitempty"`
-	AccountCreatedAt time.Time        `json:"createdAt"`
+	AccountID          uint             `json:"accountId"`
+	PhoneID            *uint            `json:"phoneId"`
+	LinkedAccountCount int64            `json:"linkedAccountCount"`
+	ProviderOrderID    string           `json:"providerOrderId,omitempty"`
+	Account            string           `json:"account"`
+	PhoneNumber        string           `json:"phoneNumber"`
+	Status             AdminPhoneStatus `json:"status"`
+	OrderNo            string           `json:"orderNo,omitempty"`
+	CountryCode        string           `json:"countryCode,omitempty"`
+	OrderStatus        int              `json:"orderStatus,omitempty"`
+	PackageID          string           `json:"packageId,omitempty"`
+	DurationType       int              `json:"durationType,omitempty"`
+	DurationValue      int              `json:"durationValue,omitempty"`
+	AutoRenew          bool             `json:"autoRenew"`
+	Currency           string           `json:"currency,omitempty"`
+	OriginalAmount     string           `json:"originalAmount,omitempty"`
+	PaidAmount         string           `json:"paidAmount,omitempty"`
+	AutoRenewPrice     string           `json:"autoRenewPrice,omitempty"`
+	CreateTime         string           `json:"createTime,omitempty"`
+	PaymentTime        string           `json:"paymentTime,omitempty"`
+	ExpireTime         string           `json:"expireTime,omitempty"`
+	LatestRenewal      string           `json:"latestRenewalTime,omitempty"`
+	NextRenewalDate    string           `json:"nextRenewalDate,omitempty"`
+	RefundTime         string           `json:"refundTime,omitempty"`
+	TokenAvailable     bool             `json:"tokenAvailable"`
+	TokenUpdatedAt     *time.Time       `json:"tokenUpdatedAt,omitempty"`
+	SyncHealthy        bool             `json:"syncHealthy"`
+	SyncStatus         SyncTaskStatus   `json:"syncStatus"`
+	SyncQueuedAt       *time.Time       `json:"syncQueuedAt,omitempty"`
+	SyncStartedAt      *time.Time       `json:"syncStartedAt,omitempty"`
+	SyncFinishedAt     *time.Time       `json:"syncFinishedAt,omitempty"`
+	SyncAttempts       int              `json:"syncAttempts"`
+	LastSafeError      string           `json:"lastSafeError,omitempty"`
+	LastSyncedAt       *time.Time       `json:"lastSyncedAt,omitempty"`
+	AccountCreatedAt   time.Time        `json:"createdAt"`
 }
 
 type BooleanFacets struct {
@@ -288,9 +289,45 @@ a.last_safe_error, a.last_synced_at, a.created_at AS account_created`).
 		return nil, fmt.Errorf("list Kitesim phones: %w", err)
 	}
 	items := make([]PhoneItem, 0, len(rows))
+	linkedCounts := make(map[uint]int64)
+	if s.db.Migrator().HasTable("icloud_resources") {
+		phoneIDs := make([]uint, 0, len(rows))
+		seenPhoneIDs := make(map[uint]struct{}, len(rows))
+		for _, row := range rows {
+			if row.PhoneID == nil {
+				continue
+			}
+			if _, seen := seenPhoneIDs[*row.PhoneID]; seen {
+				continue
+			}
+			seenPhoneIDs[*row.PhoneID] = struct{}{}
+			phoneIDs = append(phoneIDs, *row.PhoneID)
+		}
+		if len(phoneIDs) > 0 {
+			var counts []struct {
+				PhoneID uint  `gorm:"column:phone_id"`
+				Count   int64 `gorm:"column:linked_account_count"`
+			}
+			if err := s.db.WithContext(ctx).Table("icloud_resources").
+				Select("kitesim_phone_id AS phone_id, COUNT(DISTINCT id) AS linked_account_count").
+				Where("kitesim_phone_id IN ? AND status <> ?", phoneIDs, "deleted").
+				Group("kitesim_phone_id").Scan(&counts).Error; err != nil {
+				return nil, fmt.Errorf("count linked iCloud accounts: %w", err)
+			}
+			for _, count := range counts {
+				linkedCounts[count.PhoneID] = count.Count
+			}
+		}
+	}
 	for _, row := range rows {
 		item := PhoneItem{
 			AccountID: row.AccountID, PhoneID: row.PhoneID, Account: row.Account,
+			LinkedAccountCount: func() int64 {
+				if row.PhoneID == nil {
+					return 0
+				}
+				return linkedCounts[*row.PhoneID]
+			}(),
 			Status: AdminPhoneUnsynced, TokenAvailable: row.TokenAvailable,
 			TokenUpdatedAt: row.TokenUpdatedAt, SyncHealthy: row.SyncHealthy,
 			SyncStatus: SyncTaskStatus(row.SyncStatus), SyncQueuedAt: row.SyncQueuedAt,

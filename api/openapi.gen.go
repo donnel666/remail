@@ -6205,7 +6205,7 @@ type AdminICloudStatusFacet struct {
 type AdminICloudUpdateRequest struct {
 	ExpireAt *time.Time `json:"expireAt,omitempty"`
 
-	// FamilyInviteUrl Replacement family invitation for a primary account. A different valid value clears a persisted invalid-invitation quarantine.
+	// FamilyInviteUrl Replacement family invitation for this account. Send an empty string to clear the current invitation; a different valid value clears a persisted invalid-invitation quarantine.
 	FamilyInviteUrl *string `json:"familyInviteUrl,omitempty"`
 	ForSale         *bool   `json:"forSale,omitempty"`
 
@@ -6355,40 +6355,43 @@ type AdminKitesimPhoneFacets struct {
 
 // AdminKitesimPhoneItem defines model for AdminKitesimPhoneItem.
 type AdminKitesimPhoneItem struct {
-	Account           openapi_types.Email        `json:"account"`
-	AccountId         int                        `json:"accountId"`
-	AutoRenew         bool                       `json:"autoRenew"`
-	AutoRenewPrice    *string                    `json:"autoRenewPrice,omitempty"`
-	CountryCode       *string                    `json:"countryCode,omitempty"`
-	CreateTime        *string                    `json:"createTime,omitempty"`
-	CreatedAt         time.Time                  `json:"createdAt"`
-	Currency          *string                    `json:"currency,omitempty"`
-	DurationType      *int                       `json:"durationType,omitempty"`
-	DurationValue     *int                       `json:"durationValue,omitempty"`
-	ExpireTime        *string                    `json:"expireTime,omitempty"`
-	LastSafeError     *string                    `json:"lastSafeError,omitempty"`
-	LastSyncedAt      *time.Time                 `json:"lastSyncedAt,omitempty"`
-	LatestRenewalTime *string                    `json:"latestRenewalTime,omitempty"`
-	NextRenewalDate   *string                    `json:"nextRenewalDate,omitempty"`
-	OrderNo           *string                    `json:"orderNo,omitempty"`
-	OrderStatus       *int                       `json:"orderStatus,omitempty"`
-	OriginalAmount    *string                    `json:"originalAmount,omitempty"`
-	PackageId         *string                    `json:"packageId,omitempty"`
-	PaidAmount        *string                    `json:"paidAmount,omitempty"`
-	PaymentTime       *string                    `json:"paymentTime,omitempty"`
-	PhoneId           *int                       `json:"phoneId"`
-	PhoneNumber       string                     `json:"phoneNumber"`
-	ProviderOrderId   *string                    `json:"providerOrderId,omitempty"`
-	RefundTime        *string                    `json:"refundTime,omitempty"`
-	Status            AdminKitesimPhoneStatus    `json:"status"`
-	SyncAttempts      int                        `json:"syncAttempts"`
-	SyncFinishedAt    *time.Time                 `json:"syncFinishedAt,omitempty"`
-	SyncHealthy       bool                       `json:"syncHealthy"`
-	SyncQueuedAt      *time.Time                 `json:"syncQueuedAt,omitempty"`
-	SyncStartedAt     *time.Time                 `json:"syncStartedAt,omitempty"`
-	SyncStatus        AdminKitesimSyncTaskStatus `json:"syncStatus"`
-	TokenAvailable    bool                       `json:"tokenAvailable"`
-	TokenUpdatedAt    *time.Time                 `json:"tokenUpdatedAt,omitempty"`
+	Account           openapi_types.Email `json:"account"`
+	AccountId         int                 `json:"accountId"`
+	AutoRenew         bool                `json:"autoRenew"`
+	AutoRenewPrice    *string             `json:"autoRenewPrice,omitempty"`
+	CountryCode       *string             `json:"countryCode,omitempty"`
+	CreateTime        *string             `json:"createTime,omitempty"`
+	CreatedAt         time.Time           `json:"createdAt"`
+	Currency          *string             `json:"currency,omitempty"`
+	DurationType      *int                `json:"durationType,omitempty"`
+	DurationValue     *int                `json:"durationValue,omitempty"`
+	ExpireTime        *string             `json:"expireTime,omitempty"`
+	LastSafeError     *string             `json:"lastSafeError,omitempty"`
+	LastSyncedAt      *time.Time          `json:"lastSyncedAt,omitempty"`
+	LatestRenewalTime *string             `json:"latestRenewalTime,omitempty"`
+
+	// LinkedAccountCount Number of non-deleted iCloud resources linked to this phone.
+	LinkedAccountCount int64                      `json:"linkedAccountCount"`
+	NextRenewalDate    *string                    `json:"nextRenewalDate,omitempty"`
+	OrderNo            *string                    `json:"orderNo,omitempty"`
+	OrderStatus        *int                       `json:"orderStatus,omitempty"`
+	OriginalAmount     *string                    `json:"originalAmount,omitempty"`
+	PackageId          *string                    `json:"packageId,omitempty"`
+	PaidAmount         *string                    `json:"paidAmount,omitempty"`
+	PaymentTime        *string                    `json:"paymentTime,omitempty"`
+	PhoneId            *int                       `json:"phoneId"`
+	PhoneNumber        string                     `json:"phoneNumber"`
+	ProviderOrderId    *string                    `json:"providerOrderId,omitempty"`
+	RefundTime         *string                    `json:"refundTime,omitempty"`
+	Status             AdminKitesimPhoneStatus    `json:"status"`
+	SyncAttempts       int                        `json:"syncAttempts"`
+	SyncFinishedAt     *time.Time                 `json:"syncFinishedAt,omitempty"`
+	SyncHealthy        bool                       `json:"syncHealthy"`
+	SyncQueuedAt       *time.Time                 `json:"syncQueuedAt,omitempty"`
+	SyncStartedAt      *time.Time                 `json:"syncStartedAt,omitempty"`
+	SyncStatus         AdminKitesimSyncTaskStatus `json:"syncStatus"`
+	TokenAvailable     bool                       `json:"tokenAvailable"`
+	TokenUpdatedAt     *time.Time                 `json:"tokenUpdatedAt,omitempty"`
 }
 
 // AdminKitesimPhoneList defines model for AdminKitesimPhoneList.
@@ -14245,7 +14248,7 @@ type ServerInterface interface {
 	// Get an Apple account onboarding import
 	// (GET /v1/admin/icloud/resources/onboarding-imports/{importId})
 	GetAdminICloudOnboardingImport(c *gin.Context, importId int)
-	// Confirm the primary family-sharing reset
+	// Confirm the family-sharing reset
 	// (POST /v1/admin/icloud/resources/onboarding-tasks/{taskId}/family-reset)
 	PostAdminICloudOnboardingTaskFamilyReset(c *gin.Context, taskId int, params PostAdminICloudOnboardingTaskFamilyResetParams)
 	// Confirm manual iCloud activation

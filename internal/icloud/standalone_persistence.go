@@ -118,15 +118,13 @@ func (s *Service) CommitStandaloneValidatedAccount(
 		if findErr != nil && !created {
 			return findErr
 		}
+		// New standalone imports carry their own invitation URL. Do not resolve
+		// or create a synthetic primary account; retain a historical pointer only
+		// when an existing resource already has one.
 		var familyPrimaryID *uint
 		if !created && account.AccountRole == "child" && resource.FamilyPrimaryResourceID != nil {
 			value := *resource.FamilyPrimaryResourceID
 			familyPrimaryID = &value
-		} else {
-			familyPrimaryID, err = standaloneFamilyPrimaryIDTx(tx, ownerUserID, account)
-			if err != nil {
-				return err
-			}
 		}
 		consumePreparation := false
 		if account.ForwardPreparationID != 0 {
@@ -290,42 +288,6 @@ func (s *Service) CommitStandaloneValidatedAccount(
 		}
 	}
 	return result, nil
-}
-
-func standaloneFamilyPrimaryIDTx(tx *gorm.DB, ownerUserID uint, account StandaloneValidatedAccount) (*uint, error) {
-	if account.AccountRole != "child" {
-		return nil, nil
-	}
-	token, err := appleOnboardingExtractInvite(account.FamilyInviteURL)
-	if err != nil {
-		return nil, ErrICloudImportInvalid
-	}
-	var candidates []struct {
-		ID        uint   `gorm:"column:id"`
-		InviteURL string `gorm:"column:family_invite_url"`
-	}
-	if err := tx.Table("icloud_resources AS ir").
-		Select("ir.id, ir.family_invite_url").
-		Joins("JOIN email_resources AS er ON er.id = ir.id AND er.type = ?", "icloud").
-		Where("er.owner_user_id = ? AND ir.account_role = ? AND ir.status NOT IN ? AND ir.family_invite_url <> ''", ownerUserID, "primary", []string{iCloudResourceDisabled, iCloudResourceDeleted}).
-		Find(&candidates).Error; err != nil {
-		return nil, err
-	}
-	var primaryID uint
-	for _, candidate := range candidates {
-		candidateToken, extractErr := appleOnboardingExtractInvite(candidate.InviteURL)
-		if extractErr != nil || candidateToken != token {
-			continue
-		}
-		if primaryID != 0 {
-			return nil, ErrICloudResourceIdentity
-		}
-		primaryID = candidate.ID
-	}
-	if primaryID == 0 {
-		return nil, ErrICloudResourceIdentity
-	}
-	return &primaryID, nil
 }
 
 func validStandaloneICloudEmail(value string) bool {

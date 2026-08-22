@@ -314,7 +314,7 @@ func TestEditAdminICloudResourceChangingInviteClearsQuarantine(t *testing.T) {
 	}
 }
 
-func TestEditAdminICloudResourceRejectsInviteOnChild(t *testing.T) {
+func TestEditAdminICloudResourceAllowsInviteOnChild(t *testing.T) {
 	db := newAdminICloudCommandTestDB(t, "icloud-admin-edit-child-family-invite")
 	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
 	createAdminICloudCommandResource(t, db, now, iCloudResourceModel{
@@ -325,16 +325,40 @@ func TestEditAdminICloudResourceRejectsInviteOnChild(t *testing.T) {
 	service.now = func() time.Time { return now }
 	invite := "new-token"
 
-	_, err := service.EditAdminICloudResource(context.Background(), AdminICloudEditCommand{
+	result, err := service.EditAdminICloudResource(context.Background(), AdminICloudEditCommand{
 		ResourceID: 1, Version: 1, FamilyInviteURL: &invite,
 		OperatorUserID: 99, IdempotencyKey: "child-invite", RequestID: "child-invite", Path: "/v1/admin/icloud/resources/1",
 	})
-	if !errors.Is(err, ErrICloudResourceUpdate) {
-		t.Fatalf("child invitation error = %v", err)
+	if err != nil || result == nil || !result.Changed {
+		t.Fatalf("child invitation update = result=%#v err=%v", result, err)
+	}
+	var resource iCloudResourceModel
+	if err := db.First(&resource, 1).Error; err != nil || resource.FamilyInviteURL != invite {
+		t.Fatalf("child invitation was not saved: resource=%#v err=%v", resource, err)
+	}
+}
+
+func TestEditAdminICloudResourceClearsInviteWithEmptyValue(t *testing.T) {
+	db := newAdminICloudCommandTestDB(t, "icloud-admin-edit-clear-family-invite")
+	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	createAdminICloudCommandResource(t, db, now, iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "child@example.com", AccountRole: "child",
+		FamilyInviteURL: "old-token", Status: iCloudResourceNormal, ExpireAt: now.Add(time.Hour),
+	})
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	empty := ""
+
+	result, err := service.EditAdminICloudResource(context.Background(), AdminICloudEditCommand{
+		ResourceID: 1, Version: 1, FamilyInviteURL: &empty,
+		OperatorUserID: 99, IdempotencyKey: "clear-invite", RequestID: "clear-invite", Path: "/v1/admin/icloud/resources/1",
+	})
+	if err != nil || result == nil || !result.Changed {
+		t.Fatalf("clear invitation update = result=%#v err=%v", result, err)
 	}
 	var resource iCloudResourceModel
 	if err := db.First(&resource, 1).Error; err != nil || resource.FamilyInviteURL != "" {
-		t.Fatalf("child invitation mutated resource: resource=%#v err=%v", resource, err)
+		t.Fatalf("invitation was not cleared: resource=%#v err=%v", resource, err)
 	}
 }
 
