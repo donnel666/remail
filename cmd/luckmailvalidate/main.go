@@ -1048,21 +1048,45 @@ func run(ctx context.Context, cfg config) error {
 		if err != nil {
 			return err
 		}
-		emails, skipped, err := loadEmails(cfg.filePath, cfg.offset, cfg.limit, previousSuccess)
+		var splitFailureLedgers bool
+		previousRecoverable, previousUnrecoverable, previousRateLimited, splitFailureLedgers, err = loadSplitFailureLedgers(cfg.errorPath)
+		if err != nil {
+			return err
+		}
+		if splitFailureLedgers {
+			resumeSkippedErrors = resumeErrorSkipSet(previousRecoverable, previousUnrecoverable, previousRateLimited, cfg.retryRecoverableErrors, cfg.retryAllErrors)
+		}
+		emails, skipped, err := loadEmails(cfg.filePath, cfg.offset, cfg.limit, mergeEmailSets(previousSuccess, resumeSkippedErrors))
 		if err != nil {
 			return err
 		}
 		if skipped > 0 {
-			log.Printf("input_success_skip skipped=%d remaining=%d", skipped, len(emails))
+			log.Printf("input_ledger_skip skipped=%d remaining=%d", skipped, len(emails))
 		}
 		if len(emails) == 0 {
-			log.Printf("input already completed by success.txt")
+			log.Printf("input already completed or excluded by failure policy")
 			return nil
 		}
 		manifest, err = snapshotManifest(ctx, conn, emails, cfg.chunkSize)
 		if err != nil {
 			return err
 		}
+		if !splitFailureLedgers {
+			previousRecoverable, previousUnrecoverable, previousRateLimited, migratedFailureLedger, err = loadFailureLedgers(ctx, conn, cfg.errorPath, manifest, cfg.chunkSize)
+			if err != nil {
+				return err
+			}
+		}
+		previousErrors = mergeEmailSets(previousRecoverable, previousUnrecoverable, previousRateLimited)
+		resumeSkippedErrors = resumeErrorSkipSet(previousRecoverable, previousUnrecoverable, previousRateLimited, cfg.retryRecoverableErrors, cfg.retryAllErrors)
+		retryableErrors = len(previousErrors) - len(resumeSkippedErrors)
+		mode := "429-only"
+		if cfg.retryAllErrors {
+			mode = "all-errors"
+		} else if cfg.retryRecoverableErrors {
+			mode = "recoverable-and-429"
+		}
+		log.Printf("initial_failure_policy mode=%s skipped_error=%d retry_error=%d recoverable=%d unrecoverable=%d rate_limited=%d", mode, len(resumeSkippedErrors), retryableErrors, len(previousRecoverable), len(previousUnrecoverable), len(previousRateLimited))
 		shuffleManifestForRecoveryFairness(manifest)
 		if err := saveManifest(cfg.manifestPath, manifest); err != nil {
 			return err
@@ -1884,27 +1908,15 @@ func loadFailureLedgers(
 	manifest []manifestRecord,
 	chunkSize int,
 ) (recoverable, unrecoverable, rateLimited map[string]struct{}, migrated bool, err error) {
-	recoverablePath := filepath.Join(filepath.Dir(errorPath), "recoverable.txt")
+	recoverable, unrecoverable, rateLimited, found, err := loadSplitFailureLedgers(errorPath)
+	if err != nil || found {
+		return recoverable, unrecoverable, rateLimited, false, err
+	}
+
 	rateLimitedPath := filepath.Join(filepath.Dir(errorPath), "429.txt")
 	rateLimited, err = loadEmailSet(rateLimitedPath)
 	if err != nil {
 		return nil, nil, nil, false, err
-	}
-	if _, statErr := os.Stat(recoverablePath); statErr == nil {
-		recoverable, err = loadEmailSet(recoverablePath)
-		if err != nil {
-			return nil, nil, nil, false, err
-		}
-		unrecoverable, err = loadEmailSet(errorPath)
-		if err != nil {
-			return nil, nil, nil, false, err
-		}
-		removeEmails(recoverable, rateLimited)
-		removeEmails(unrecoverable, rateLimited)
-		removeEmails(recoverable, unrecoverable)
-		return recoverable, unrecoverable, rateLimited, false, nil
-	} else if !errors.Is(statErr, os.ErrNotExist) {
-		return nil, nil, nil, false, statErr
 	}
 
 	legacyErrors, err := loadEmailSet(errorPath)
@@ -1916,6 +1928,31 @@ func loadFailureLedgers(
 		return nil, nil, nil, false, err
 	}
 	log.Printf("legacy_error_ledger_split recoverable=%d unrecoverable=%d rate_limited=%d", len(recoverable), len(unrecoverable), len(rateLimited))
+	return recoverable, unrecoverable, rateLimited, true, nil
+}
+
+func loadSplitFailureLedgers(errorPath string) (recoverable, unrecoverable, rateLimited map[string]struct{}, found bool, err error) {
+	recoverablePath := filepath.Join(filepath.Dir(errorPath), "recoverable.txt")
+	if _, err := os.Stat(recoverablePath); errors.Is(err, os.ErrNotExist) {
+		return nil, nil, nil, false, nil
+	} else if err != nil {
+		return nil, nil, nil, false, err
+	}
+	recoverable, err = loadEmailSet(recoverablePath)
+	if err != nil {
+		return nil, nil, nil, false, err
+	}
+	unrecoverable, err = loadEmailSet(errorPath)
+	if err != nil {
+		return nil, nil, nil, false, err
+	}
+	rateLimited, err = loadEmailSet(filepath.Join(filepath.Dir(errorPath), "429.txt"))
+	if err != nil {
+		return nil, nil, nil, false, err
+	}
+	removeEmails(recoverable, rateLimited)
+	removeEmails(unrecoverable, rateLimited)
+	removeEmails(recoverable, unrecoverable)
 	return recoverable, unrecoverable, rateLimited, true, nil
 }
 

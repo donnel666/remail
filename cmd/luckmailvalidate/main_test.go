@@ -946,6 +946,44 @@ func TestResumeErrorSkipSetDefaultsTo429Only(t *testing.T) {
 	}
 }
 
+func TestFreshInputPolicySkipsSuccessAndUnrecoverable(t *testing.T) {
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"success.txt":     "done@example.com\n",
+		"error.txt":       "permanent@example.com\n",
+		"recoverable.txt": "recoverable@example.com\n",
+		"429.txt":         "limited@example.com\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	input := filepath.Join(dir, "input.txt")
+	if err := os.WriteFile(input, []byte("done@example.com\npermanent@example.com\nrecoverable@example.com\nlimited@example.com\nnew@example.com\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	success, err := loadEmailSet(filepath.Join(dir, "success.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	recoverable, unrecoverable, rateLimited, found, err := loadSplitFailureLedgers(filepath.Join(dir, "error.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		t.Fatal("split failure ledgers were not detected")
+	}
+	skippedErrors := resumeErrorSkipSet(recoverable, unrecoverable, rateLimited, true, false)
+	emails, skipped, err := loadEmails(input, 0, 0, mergeEmailSets(success, skippedErrors))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"recoverable@example.com", "limited@example.com", "new@example.com"}; !reflect.DeepEqual(emails, want) || skipped != 2 {
+		t.Fatalf("fresh input emails=%v skipped=%d, want %v skipped=2", emails, skipped, want)
+	}
+}
+
 func TestClassifyJobsSkipsPreviousSuccessWithoutLoadingOrMutating(t *testing.T) {
 	result := newTracker(filepath.Join(t.TempDir(), "error.txt"), nil, nil, nil, nil)
 	manifest := []manifestRecord{{Email: "done@example.com", ResourceID: 10, Eligible: true}}

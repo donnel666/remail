@@ -1952,7 +1952,6 @@ VALUES (1000, 1, 'indexed@example.com', 'normal')`).Error)
 		{"allocation_order_guards", "PRIMARY"},
 		{"allocation_order_guards", "idx_allocation_order_guards_order_type"},
 		{"microsoft_allocations", "idx_ms_alloc_active_project"},
-		{"microsoft_allocations", "idx_ms_alloc_active_legacy_lookup"},
 		{"microsoft_allocations", "idx_ms_alloc_guard_type"},
 		{"microsoft_allocations", "idx_ms_alloc_product_project"},
 		{"microsoft_allocations", "idx_ms_alloc_explicit_alias_resource"},
@@ -1975,6 +1974,7 @@ VALUES (1000, 1, 'indexed@example.com', 'normal')`).Error)
 	} {
 		requireIndexExists(t, db, item.table, item.index)
 	}
+	requireIndexMissing(t, db, "microsoft_allocations", "idx_ms_alloc_active_legacy_lookup")
 
 	requireExplainUsesIndex(t, db,
 		"idx_microsoft_alloc_public",

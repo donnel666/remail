@@ -269,6 +269,29 @@ ALTER TABLE microsoft_allocations
 	requireIndexMissing(t, db, "microsoft_allocations", "idx_ms_alloc_active")
 }
 
+func TestMicrosoftLegacyActiveLookupCleanupMigrationMySQL(t *testing.T) {
+	db := newAllocMySQLTestDB(t)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, goose.SetDialect("mysql"))
+	migrationsDir := allocMigrationsDir(t)
+	requireIndexMissing(t, db, "microsoft_allocations", "idx_ms_alloc_active_legacy_lookup")
+
+	require.NoError(t, goose.DownTo(sqlDB, migrationsDir, 121))
+	requireIndexExists(t, db, "microsoft_allocations", "idx_ms_alloc_active_legacy_lookup")
+	require.NoError(t, db.Exec(`
+ALTER TABLE microsoft_allocations
+    DROP INDEX idx_ms_alloc_active_legacy_lookup,
+    ALGORITHM=INPLACE,
+    LOCK=NONE`).Error)
+
+	require.NoError(t, goose.UpTo(sqlDB, migrationsDir, 122))
+	version, err := goose.GetDBVersion(sqlDB)
+	require.NoError(t, err)
+	require.EqualValues(t, 122, version)
+	requireIndexMissing(t, db, "microsoft_allocations", "idx_ms_alloc_active_legacy_lookup")
+}
+
 func TestProjectScopedActiveMigrationDownRejectsCrossProjectMicrosoftAndGmailMySQL(t *testing.T) {
 	tests := []struct {
 		name        string

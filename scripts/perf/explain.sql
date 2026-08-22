@@ -2,6 +2,7 @@
 -- Save actual time, rows examined, chosen key, and hardware in the test report.
 
 SET @resource_id = 1000000000;
+SET @project_id = 900000001;
 SET @order_id = 4000000000;
 SET @message_id = 6000000000;
 SET @recipient = 'ms-0@bench.local';
@@ -20,7 +21,7 @@ WHERE ms.alloc_bucket = MOD(@resource_id, 2048)
 	      SELECT 1
 	      FROM microsoft_allocations history_main
 	      WHERE history_main.resource_id = ms.id
-	        AND history_main.project_id = 900000001
+	        AND history_main.project_id = @project_id
 	        AND history_main.mailbox = 'main'
 	  )
 ORDER BY ms.last_allocated_at ASC, ms.quality_score DESC, ms.id ASC
@@ -30,7 +31,7 @@ EXPLAIN ANALYZE
 SELECT id
 FROM microsoft_allocations
 WHERE active_kind = 1
-  AND active_project_id = 0
+  AND active_project_id = @project_id
   AND active_entity_id = @resource_id;
 
 EXPLAIN ANALYZE
