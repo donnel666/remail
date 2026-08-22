@@ -121,6 +121,9 @@ func (iCloudOnboardingTaskModel) TableName() string { return "icloud_resources" 
 const (
 	iCloudAppleIDReservationOnboarding = "onboarding"
 	iCloudAppleIDReservationImport     = "cookie_import"
+
+	iCloudOnboardingStageFamilyReset   = "waiting_family_reset"
+	iCloudOnboardingStageFamilySharing = "waiting_family_sharing"
 )
 
 type iCloudAppleIDReservationModel struct {
@@ -976,11 +979,26 @@ func iCloudOnboardingTaskView(task iCloudOnboardingTaskModel) OnboardingTaskView
 		PendingSMSPurpose:       task.PendingSMSPurpose,
 		NeedsManualCode:         !needsPostFamilyRecovery && task.Status == iCloudOnboardingWaiting && task.DispatchStatus == "waiting" && task.KitesimPhoneID == nil && task.PendingSMSPurpose != "",
 		NeedsICloudActivation:   task.Status == iCloudOnboardingWaiting && task.Stage == "waiting_icloud_activation",
-		NeedsFamilyReset:        task.Status == iCloudOnboardingWaiting && task.Stage == "waiting_family_reset",
+		NeedsFamilyReset:        task.Status == iCloudOnboardingWaiting && isICloudOnboardingFamilySharingStage(task.Stage),
 		NeedsPostFamilyRecovery: needsPostFamilyRecovery,
 		LastErrorCategory:       task.LastErrorCategory, LastSafeError: task.LastSafeError,
 		StartedAt: task.StartedAt, FinishedAt: task.FinishedAt, CreatedAt: task.CreatedAt, UpdatedAt: task.UpdatedAt,
 	}
+}
+
+func isICloudOnboardingFamilySharingStage(stage string) bool {
+	return stage == iCloudOnboardingStageFamilyReset || stage == iCloudOnboardingStageFamilySharing
+}
+
+func isICloudOnboardingFamilySharingWaitingTask(task *iCloudOnboardingTaskModel) bool {
+	return task != nil && task.Status == iCloudOnboardingWaiting && task.DispatchStatus == "waiting" &&
+		isICloudOnboardingFamilySharingStage(task.Stage)
+}
+
+func isICloudOnboardingFamilySharingWaitingResource(resource *iCloudResourceModel) bool {
+	return resource != nil && resource.WorkflowTaskKind == "onboarding" &&
+		resource.OnboardingStatus == iCloudOnboardingWaiting &&
+		resource.WorkflowStage == iCloudOnboardingStageFamilySharing
 }
 
 func iCloudOnboardingFingerprint(ownerUserID uint, expireAt time.Time, content []byte) string {

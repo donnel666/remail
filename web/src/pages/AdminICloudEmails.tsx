@@ -156,7 +156,10 @@ type RowAction =
   | "expiration";
 type ImportMode = "paste" | "file";
 type ICloudMaintenanceAction = "validate" | "alias";
-type ICloudRowMaintenanceAction = ICloudMaintenanceAction | "oldCookie";
+type ICloudRowMaintenanceAction =
+  | ICloudMaintenanceAction
+  | "familySharing"
+  | "oldCookie";
 type ICloudMaintenanceTarget =
   | { item: AdminICloudResourceItem; mode: "row" }
   | { count: number; mode: "ids"; resourceIds: number[] }
@@ -456,18 +459,21 @@ export function ICloudOnboardingTaskAction({
   };
 
   const confirmFamilyReset = () => {
+    const familySharingWaiting = task.stage === "waiting_family_sharing";
     Modal.confirm({
       cancelText: t("Cancel"),
-      content: t("Confirm that family sharing was disabled and enabled again on the primary account {{email}}.", {
-        email: task.familyPrimaryEmail || `#${task.familyPrimaryResourceId ?? "-"}`,
-      }),
+      content: familySharingWaiting
+        ? t("Confirm that family sharing has been enabled manually for an automatic onboarding resource before Apple account configuration continues.")
+        : t("Confirm that family sharing was disabled and enabled again on the primary account {{email}}.", {
+            email: task.familyPrimaryEmail || `#${task.familyPrimaryResourceId ?? "-"}`,
+          }),
       okText: t("Confirm"),
       onOk: async () => {
         setBusy("family");
         try {
           const updated = await confirmAdminICloudOnboardingFamilyReset(task.id);
           await onChanged(updated);
-          Toast.success(t("Family sharing reset confirmed."));
+          Toast.success(t(familySharingWaiting ? "Family sharing confirmed." : "Family sharing reset confirmed."));
         } catch (error) {
           Toast.error(getIamErrorMessage(t, error, "Family sharing confirmation failed."));
           throw error;
@@ -475,7 +481,7 @@ export function ICloudOnboardingTaskAction({
           setBusy(null);
         }
       },
-      title: t("Confirm family sharing reset"),
+      title: t(familySharingWaiting ? "Confirm family sharing" : "Confirm family sharing reset"),
     });
   };
 
@@ -553,6 +559,7 @@ export function ICloudOnboardingTaskAction({
     );
   }
   if (task.needsFamilyReset) {
+    const familySharingWaiting = task.stage === "waiting_family_sharing";
     return (
       <Button
         disabled={disabled || busy === "code"}
@@ -561,7 +568,7 @@ export function ICloudOnboardingTaskAction({
         size="small"
         type="primary"
       >
-        {t("Confirm reset")}
+        {t(familySharingWaiting ? "Confirm family sharing" : "Confirm reset")}
       </Button>
     );
   }
@@ -1861,6 +1868,13 @@ export function ICloudMaintenanceModal({
       key: "oldCookie",
       label: "Fetch old Cookie",
     });
+    actions.push({
+      description: "Confirm that family sharing has been enabled manually for an automatic onboarding resource before Apple account configuration continues.",
+      disabled: rowDisabled,
+      icon: Workflow,
+      key: "familySharing",
+      label: "Confirm family sharing",
+    });
   }
   const selectedAction = actions.find((item) => item.key === selected) ?? actions[0];
   const rowItem = target.mode === "row" ? target.item : null;
@@ -1872,6 +1886,25 @@ export function ICloudMaintenanceModal({
       if (selected === "oldCookie") {
         if (target.mode !== "row") return;
         await activateAdminICloudResource(target.item.id, target.item.version);
+      } else if (selected === "familySharing") {
+        if (target.mode !== "row") return;
+        const detailItem = target.item as AdminICloudResourceItem & {
+          onboardingTask?: AdminICloudOnboardingTask | null;
+        };
+        const task = "onboardingTask" in detailItem
+          ? detailItem.onboardingTask
+          : (await getAdminICloudResourceDetail(target.item.id)).onboardingTask;
+        if (
+          !task ||
+          task.taskKind !== "onboarding" ||
+          task.status !== "waiting" ||
+          task.stage !== "waiting_family_sharing" ||
+          !task.needsFamilyReset
+        ) {
+          Toast.info(t("No pending family sharing confirmation."));
+          return;
+        }
+        await confirmAdminICloudOnboardingFamilyReset(task.id);
       } else if (target.mode === "row") {
         if (selected === "alias") {
           const result = await createAdminICloudAliases(target.item.id, target.item.version);
@@ -1893,9 +1926,11 @@ export function ICloudMaintenanceModal({
       Toast.success(t(
         selected === "alias"
           ? "Alias creation batch submitted."
-          : selected === "oldCookie"
-            ? "Old Cookie refresh submitted."
-            : "Resource validation batch submitted.",
+          : selected === "familySharing"
+            ? "Family sharing confirmed."
+            : selected === "oldCookie"
+              ? "Old Cookie refresh submitted."
+              : "Resource validation batch submitted.",
         { count },
       ));
       await onCompleted(target.mode === "row" ? target.item.id : undefined);

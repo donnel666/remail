@@ -53,6 +53,9 @@ func (s *Service) RequestAdminICloudValidation(ctx context.Context, operatorUser
 		if resource.Status == iCloudResourceDisabled {
 			return ErrICloudResourceStatus
 		}
+		if isICloudOnboardingFamilySharingWaitingResource(&resource) {
+			return ErrICloudResourceStatus
+		}
 		generation := resource.ValidationGeneration + 1
 		if generation == 0 {
 			generation = 1
@@ -109,7 +112,8 @@ func (s *Service) iCloudValidationResource(ctx context.Context, task iCloudValid
 	}
 	if resource.ValidationGeneration != task.ValidationGeneration || resource.CredentialRevision != task.ExpectedCredentialRevision ||
 		(task.PreserveResourceStatus && resource.Status != iCloudResourceNormal) ||
-		(!task.PreserveResourceStatus && resource.Status != iCloudResourceValidating) {
+		(!task.PreserveResourceStatus && resource.Status != iCloudResourceValidating) ||
+		isICloudOnboardingFamilySharingWaitingResource(&resource) {
 		return nil, false, nil
 	}
 	return &resource, true, nil
@@ -284,7 +288,7 @@ func (s *Service) iCloudValidationCandidates(ctx context.Context, limit int) ([]
 		ValidationGeneration uint64 `gorm:"column:validation_generation"`
 		Status               string `gorm:"column:status"`
 	}
-	if err := s.db.WithContext(ctx).Table("icloud_resources AS ir").Select("ir.id, er.owner_user_id, ir.credential_revision, ir.validation_generation, ir.status").Joins("JOIN email_resources AS er ON er.id = ir.id AND er.type = ?", "icloud").Where("ir.status IN ? AND ir.next_validation_at IS NOT NULL AND ir.next_validation_at <= ?", []string{iCloudResourcePending, iCloudResourceNormal}, now).Order("ir.id ASC").Limit(limit).Scan(&rows).Error; err != nil {
+	if err := s.db.WithContext(ctx).Table("icloud_resources AS ir").Select("ir.id, er.owner_user_id, ir.credential_revision, ir.validation_generation, ir.status").Joins("JOIN email_resources AS er ON er.id = ir.id AND er.type = ?", "icloud").Where("ir.status IN ? AND ir.next_validation_at IS NOT NULL AND ir.next_validation_at <= ? AND NOT (ir.task_kind = ? AND ir.onboarding_status = ? AND ir.stage = ?)", []string{iCloudResourcePending, iCloudResourceNormal}, now, "onboarding", iCloudOnboardingWaiting, iCloudOnboardingStageFamilySharing).Order("ir.id ASC").Limit(limit).Scan(&rows).Error; err != nil {
 		return nil, ErrICloudValidationTemp
 	}
 	tasks := make([]iCloudValidationTask, 0, len(rows))
@@ -320,7 +324,7 @@ func (s *Service) markICloudValidationDispatched(ctx context.Context, task iClou
 			}
 			return err
 		}
-		if resource.CredentialRevision != task.ExpectedCredentialRevision || resource.ValidationGeneration != task.ValidationGeneration || resource.Status == iCloudResourceDisabled || resource.Status == iCloudResourceDeleted || resource.NextValidationAt == nil || resource.NextValidationAt.After(now) {
+		if resource.CredentialRevision != task.ExpectedCredentialRevision || resource.ValidationGeneration != task.ValidationGeneration || resource.Status == iCloudResourceDisabled || resource.Status == iCloudResourceDeleted || resource.NextValidationAt == nil || resource.NextValidationAt.After(now) || isICloudOnboardingFamilySharingWaitingResource(&resource) {
 			return nil
 		}
 		task.PreserveResourceStatus = resource.Status == iCloudResourceNormal

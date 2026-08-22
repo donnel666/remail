@@ -2,7 +2,6 @@ package appleweb
 
 import (
 	"encoding/json"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -32,32 +31,26 @@ func TestFDClientInfoMatchesFixedMacOSFingerprint(t *testing.T) {
 	}
 }
 
-func TestAutomatedBrowserProfilesUseOnlyWindowsAndLinux(t *testing.T) {
-	platforms := map[string]bool{}
-	for index := range 256 {
-		key := "account-" + strconv.Itoa(index) + "@example.com"
-		profile := AutomatedBrowserProfile(key)
-		if again := AutomatedBrowserProfile(key); again != profile {
-			t.Fatalf("profile changed for %q", key)
-		}
-		if strings.Contains(profile.UserAgent, "Macintosh") || strings.Contains(profile.UserAgent, "iPhone") || strings.Contains(profile.UserAgent, "iPad") {
-			t.Fatalf("automated profile uses an Apple platform: %+v", profile)
-		}
-		switch profile.SecCHPlatform {
-		case `"Windows"`, `"Linux"`:
-			platforms[profile.SecCHPlatform] = true
-		default:
-			t.Fatalf("unexpected automated platform %q", profile.SecCHPlatform)
-		}
-		if resolved, ok := BrowserProfileForUserAgent(profile.UserAgent); !ok || resolved != profile {
-			t.Fatalf("profile could not be resolved from its user agent: %+v", profile)
-		}
+func TestAutomatedBrowserProfileUsesWindows(t *testing.T) {
+	profile := AutomatedBrowserProfile("account@example.com")
+	if again := AutomatedBrowserProfile("different@example.com"); again != profile {
+		t.Fatalf("automated profile changed between accounts: first=%+v second=%+v", profile, again)
 	}
-	if len(platforms) != 2 {
-		t.Fatalf("automated profiles did not cover Windows and Linux: %v", platforms)
+	if profile.SecCHPlatform != `"Windows"` || !strings.Contains(profile.UserAgent, "Windows NT") {
+		t.Fatalf("automated profile is not Windows: %+v", profile)
+	}
+	if profile.UserAgent != AutomatedUserAgent || !strings.Contains(profile.UserAgent, "Chrome/151.") {
+		t.Fatalf("automated profile is not aligned with the Apple onboarding script: %+v", profile)
+	}
+	if resolved, ok := BrowserProfileForUserAgent(profile.UserAgent); !ok || resolved != profile {
+		t.Fatalf("profile could not be resolved from its user agent: %+v", profile)
+	}
+	legacyLinux := `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36`
+	if resolved, ok := BrowserProfileForUserAgent(legacyLinux); !ok || resolved.SecCHPlatform != `"Linux"` {
+		t.Fatalf("legacy Linux profile could not be resolved: %+v", resolved)
 	}
 
-	profile := AutomatedBrowserProfile("fd@example.com")
+	profile = AutomatedBrowserProfile("fd@example.com")
 	value, err := FDClientInfoFor(profile.UserAgent, time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("FDClientInfoFor: %v", err)

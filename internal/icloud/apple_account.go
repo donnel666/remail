@@ -15,9 +15,11 @@ import (
 )
 
 const (
-	appleAccountResponseMaxBytes = 4 << 20
-	appleAccountTokenPath        = "/account/manage/gs/ws/token"
-	appleAccountPrivateEmailPath = "/account/manage/email/private"
+	appleAccountResponseMaxBytes            = 4 << 20
+	appleAccountTokenPath                   = "/account/manage/gs/ws/token"
+	appleAccountPrivateEmailPath            = "/account/manage/email/private"
+	appleAccountPrivateEmailAddPath         = "/account/manage/email/private/add"
+	appleAccountPrivateEmailAddCompletePath = "/account/manage/email/private/add/complete"
 )
 
 type appleAccountPrivateEmail struct {
@@ -203,7 +205,7 @@ func (c *AppleAccountClient) create(ctx context.Context, channel iCloudResourceC
 	var generated struct {
 		EmailAddress string `json:"emailAddress"`
 	}
-	generatedStatus, err := c.request(ctx, &next, next.APIKey, http.MethodPost, "/account/manage/email/private/add", map[string]any{}, &generated, now)
+	generatedStatus, err := c.request(ctx, &next, next.APIKey, http.MethodPost, appleAccountPrivateEmailAddPath, map[string]any{}, &generated, now)
 	if err != nil {
 		return hmeAlias{}, next, err
 	}
@@ -218,7 +220,7 @@ func (c *AppleAccountClient) create(ctx context.Context, channel iCloudResourceC
 		ID           string `json:"id"`
 		Active       bool   `json:"active"`
 	}
-	completedStatus, err := c.request(ctx, &next, next.APIKey, http.MethodPut, "/account/manage/email/private/add/complete", map[string]string{
+	completedStatus, err := c.request(ctx, &next, next.APIKey, http.MethodPut, appleAccountPrivateEmailAddCompletePath, map[string]string{
 		"emailAddress": generated.EmailAddress,
 		"label":        "ReMail",
 		"note":         "",
@@ -408,7 +410,7 @@ func appleAccountRequestStage(requestPath string) string {
 		return "manage"
 	case appleAccountPrivateEmailPath:
 		return "list"
-	case "/account/manage/email/private/add", "/account/manage/email/private/add/complete":
+	case appleAccountPrivateEmailAddPath, appleAccountPrivateEmailAddCompletePath:
 		return "create"
 	default:
 		if strings.HasPrefix(requestPath, appleAccountPrivateEmailPath+"/") {

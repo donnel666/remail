@@ -111,6 +111,7 @@ type appleOnboardingBrowserState struct {
 	ServiceURL             string                  `json:"serviceUrl,omitempty"`
 	AuthVersion            string                  `json:"authVersion,omitempty"`
 	APIKey                 string                  `json:"apiKey,omitempty"`
+	PrivateAliasReady      bool                    `json:"privateAliasReady,omitempty"`
 	FrameID                string                  `json:"frameId,omitempty"`
 	SetupClientID          string                  `json:"setupClientId,omitempty"`
 	BuildNumber            string                  `json:"buildNumber,omitempty"`
@@ -891,6 +892,10 @@ func appleOnboardingServiceError(data map[string]any) string {
 		}
 	}
 	return strings.Join(messages, "; ")
+}
+
+func appleOnboardingFamilyJoinApplied(status int) bool {
+	return status == http.StatusBadRequest
 }
 
 func appleOnboardingLooksLocked(data map[string]any) bool {

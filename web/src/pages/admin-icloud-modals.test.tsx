@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   confirmFamilyReset: vi.fn(),
   getPreparation: vi.fn(),
   getOnboarding: vi.fn(),
+  getResourceDetail: vi.fn(),
   importOnboarding: vi.fn(),
   importResources: vi.fn(),
   listResources: vi.fn(),
@@ -195,7 +196,7 @@ vi.mock("@/lib/admin-icloud-api", async (importOriginal) => ({
   deleteAdminICloudResource: vi.fn(),
   disableAdminICloudResource: vi.fn(),
   enableAdminICloudResource: vi.fn(),
-  getAdminICloudResourceDetail: vi.fn(),
+  getAdminICloudResourceDetail: mocks.getResourceDetail,
   getAdminICloudImportPreparation: mocks.getPreparation,
   getAdminICloudOnboardingImport: mocks.getOnboarding,
   importAdminICloudResources: mocks.importResources,
@@ -416,6 +417,7 @@ describe("admin iCloud modal workflows", () => {
     mocks.createPreparation.mockResolvedValue(importPreparation());
     mocks.confirmFamilyReset.mockResolvedValue(onboardingTask());
     mocks.getPreparation.mockResolvedValue(importPreparation());
+    mocks.getResourceDetail.mockResolvedValue(resourceDetail());
     mocks.importResources.mockResolvedValue({ imported: 1, skipped: 0, status: "imported" });
     mocks.importOnboarding.mockResolvedValue(onboardingResponse());
     mocks.getOnboarding.mockResolvedValue(onboardingResponse());
@@ -478,6 +480,59 @@ describe("admin iCloud modal workflows", () => {
 
     await waitFor(() => expect(mocks.activate).toHaveBeenCalledWith(41, 3));
     expect(mocks.toastSuccess).toHaveBeenCalledWith("Old Cookie refresh submitted.");
+  });
+
+  it("confirms manual family sharing from the maintenance menu for automatic onboarding", async () => {
+    mocks.getResourceDetail.mockResolvedValueOnce({
+      ...resourceDetail(),
+      onboardingTask: onboardingTask({
+        needsFamilyReset: true,
+        needsManualCode: false,
+        stage: "waiting_family_sharing",
+      }),
+    });
+    const onCancel = vi.fn();
+    const onCompleted = vi.fn();
+
+    render(
+      <ICloudMaintenanceModal
+        aliasLimit={750}
+        onCancel={onCancel}
+        onCompleted={onCompleted}
+        target={{ item: resource(), mode: "row" }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Confirm family sharing/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Submit maintenance task" }));
+
+    await waitFor(() => expect(mocks.getResourceDetail).toHaveBeenCalledWith(41));
+    expect(mocks.confirmFamilyReset).toHaveBeenCalledWith(31);
+    expect(mocks.toastSuccess).toHaveBeenCalledWith("Family sharing confirmed.");
+    expect(onCompleted).toHaveBeenCalledWith(41);
+    expect(onCancel).toHaveBeenCalled();
+  });
+
+  it("does not use the new confirmation for the legacy family-reset stage", async () => {
+    mocks.getResourceDetail.mockResolvedValueOnce({
+      ...resourceDetail(),
+      onboardingTask: onboardingTask({ needsFamilyReset: true, stage: "waiting_family_reset" }),
+    });
+
+    render(
+      <ICloudMaintenanceModal
+        aliasLimit={750}
+        onCancel={vi.fn()}
+        onCompleted={vi.fn()}
+        target={{ item: resource(), mode: "row" }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Confirm family sharing/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Submit maintenance task" }));
+
+    await waitFor(() => expect(mocks.toastInfo).toHaveBeenCalledWith("No pending family sharing confirmation."));
+    expect(mocks.confirmFamilyReset).not.toHaveBeenCalled();
   });
 
   it("hides fact-owner tabs when their read permissions are missing", () => {

@@ -450,12 +450,18 @@ func mutateAdminICloudResourceTx(
 		if resource.Status == iCloudResourceDisabled {
 			return nil, false, ErrICloudResourceStatus
 		}
+		if isICloudOnboardingFamilySharingWaitingResource(&resource) {
+			return nil, false, ErrICloudResourceStatus
+		}
 		queuedGeneration = queueAdminICloudValidation(updates, resource, now)
 	case AdminICloudAlias:
 		if resource.Status == iCloudResourceDeleted {
 			return nil, false, ErrICloudResourceNotFound
 		}
 		if resource.Status != iCloudResourceNormal {
+			return nil, false, ErrICloudResourceStatus
+		}
+		if isICloudOnboardingFamilySharingWaitingResource(&resource) {
 			return nil, false, ErrICloudResourceStatus
 		}
 		if resource.AliasCount >= iCloudMaxAliases {

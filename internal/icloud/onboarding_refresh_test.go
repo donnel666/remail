@@ -381,6 +381,7 @@ func TestICloudOldCookieBackfillFailuresDoNotMarkHealthyResourceAbnormal(t *test
 			}
 			service := NewService(db, nil, nil)
 			service.now = func() time.Time { return now }
+			service.smsPhones = onboardingProvidedPhone{}
 			if infrastructureFailure {
 				if err := service.ReleaseICloudOnboardingTask(context.Background(), iCloudOnboardingTask{TaskID: task.ID, Generation: task.Generation}, "temporary failure"); err != nil {
 					t.Fatal(err)
@@ -423,6 +424,7 @@ func TestICloudOldCookieBackfillSelfRowFailurePreservesResourceSafeError(t *test
 
 	service := NewService(db, nil, nil)
 	service.now = func() time.Time { return now }
+	service.smsPhones = onboardingProvidedPhone{}
 	service.onboardingApple = &oldCookieBackfillApple{err: &AppleOnboardingError{
 		Category: "provider_rejected", SafeMessage: "Apple rejected the request.",
 	}}

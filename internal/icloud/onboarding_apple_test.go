@@ -3,6 +3,7 @@ package icloud
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -247,6 +248,7 @@ func TestAppleOnboardingMissingPostWriteCookiesRestartsAuthentication(t *testing
 		flow, err := loadAppleOnboardingFlow(context.Background(), appleOnboardingTestClient(now, session), appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) {
 			state.Mode = "manage"
 			state.APIKey = "api-key"
+			state.PrivateAliasReady = true
 		}), "test@example.com")
 		if err != nil {
 			t.Fatal(err)
@@ -378,6 +380,47 @@ func TestAppleOnboardingReconcilesAppliedWritesBeforeMutation(t *testing.T) {
 		}
 	})
 
+	t.Run("family_accept_bad_request_means_join_applied", func(t *testing.T) {
+		session := &appleOnboardingScriptedSession{
+			responses: []appleOnboardingScriptedResponse{
+				{status: http.StatusOK, body: `{}`, header: http.Header{"X-Apple-Gs-Token": {"gs-token"}}},
+				{status: http.StatusBadRequest, body: `{"serviceErrors":[{"message":"Error occurred while accepting family invitation"}]}`},
+			},
+			cookies: []msacl.SessionCookie{{Name: "myacinfo", Value: "active", Domain: ".apple.com", Host: "appleid.apple.com"}},
+		}
+		response, err := appleOnboardingTestClient(now, session).Execute(context.Background(), AppleOnboardingRequest{
+			Operation: appleOnboardingJoinFamily,
+			Session: appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) {
+				state.Mode = "family"
+				state.InviteToken = "invite-token"
+			}),
+		})
+		if err != nil || response.Next != "ready" || response.FamilyChannel == nil || len(session.requests) != 2 {
+			t.Fatalf("family join response=%+v requests=%v err=%v", response, session.requests, err)
+		}
+	})
+
+	t.Run("family_update_member_option_error_means_join_applied", func(t *testing.T) {
+		session := &appleOnboardingScriptedSession{
+			responses: []appleOnboardingScriptedResponse{
+				{status: http.StatusOK, body: `{}`, header: http.Header{"X-Apple-Gs-Token": {"gs-token"}}},
+				{status: http.StatusOK, body: `{"final":false,"serverContext":"ctx"}`},
+				{status: http.StatusBadRequest, body: `{"serviceErrors":[{"message":"Error occurred while updating the member option"}]}`},
+			},
+			cookies: []msacl.SessionCookie{{Name: "myacinfo", Value: "active", Domain: ".apple.com", Host: "appleid.apple.com"}},
+		}
+		response, err := appleOnboardingTestClient(now, session).Execute(context.Background(), AppleOnboardingRequest{
+			Operation: appleOnboardingJoinFamily,
+			Session: appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) {
+				state.Mode = "family"
+				state.InviteToken = "invite-token"
+			}),
+		})
+		if err != nil || response.Next != "ready" || response.FamilyChannel == nil || len(session.requests) != 3 {
+			t.Fatalf("family join response=%+v requests=%v err=%v", response, session.requests, err)
+		}
+	})
+
 	t.Run("forward_add_already_pending", func(t *testing.T) {
 		session := &appleOnboardingScriptedSession{responses: []appleOnboardingScriptedResponse{{
 			status: http.StatusOK,
@@ -385,7 +428,10 @@ func TestAppleOnboardingReconcilesAppliedWritesBeforeMutation(t *testing.T) {
 		}}}
 		response, err := appleOnboardingTestClient(now, session).Execute(context.Background(), AppleOnboardingRequest{
 			Operation: appleOnboardingAddForward, ForwardToEmail: "relay@example.com",
-			Session: appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) { state.APIKey = "api-key" }),
+			Session: appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) {
+				state.APIKey = "api-key"
+				state.PrivateAliasReady = true
+			}),
 		})
 		if err != nil || response.Next != "pending" || len(session.requests) != 1 || !strings.HasPrefix(session.requests[0], http.MethodGet+" ") {
 			t.Fatalf("forward add reconcile response=%+v requests=%v err=%v", response, session.requests, err)
@@ -447,6 +493,90 @@ func TestAppleOnboardingReconcilesAppliedWritesBeforeMutation(t *testing.T) {
 			t.Fatalf("forward verification request=%v err=%v", session.requests, err)
 		}
 	})
+
+	t.Run("forward_verify_rejects_success_without_vetting_confirmation", func(t *testing.T) {
+		session := &appleOnboardingScriptedSession{responses: []appleOnboardingScriptedResponse{
+			{status: http.StatusOK, body: `{"account":{"person":{"reachableAtOptions":{"alternateEmailAddresses":[]}}}}`},
+			{status: http.StatusOK, body: `{}`},
+		}}
+		_, err := appleOnboardingTestClient(now, session).Execute(context.Background(), AppleOnboardingRequest{
+			Operation: appleOnboardingVerifyForward, ForwardToEmail: "relay@example.com", ForwardCode: "123456",
+			Session: appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) {
+				state.APIKey = "api-key"
+				state.ForwardVerificationID = "verify-1"
+			}),
+		})
+		var providerErr *AppleOnboardingError
+		if !errors.As(err, &providerErr) || providerErr.Category != "forward_code_unconfirmed" || !providerErr.Retryable {
+			t.Fatalf("unconfirmed forward verification: err=%v", err)
+		}
+	})
+}
+
+func TestAppleOnboardingCreatesPrivateAliasBeforeAddingForward(t *testing.T) {
+	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+	session := &appleOnboardingScriptedSession{responses: []appleOnboardingScriptedResponse{
+		{status: http.StatusOK, body: `{"privateEmailList":[],"inactivePrivateEmailList":[],"maxLimitReached":false}`},
+		{status: http.StatusOK, body: `{"emailAddress":"created@icloud.com"}`},
+		{status: http.StatusOK, body: `{"emailAddress":"created@icloud.com","id":"alias-id","active":true}`},
+		{status: http.StatusOK, body: `{"privateEmailList":[{"emailAddress":"created@icloud.com","id":"alias-id"}],"inactivePrivateEmailList":[]}`},
+		{status: http.StatusOK, body: `{"account":{"person":{"reachableAtOptions":{"alternateEmailAddresses":[]}}}}`},
+		{status: http.StatusCreated, body: `{"verificationId":"verify-id"}`},
+	}}
+	response, err := appleOnboardingTestClient(now, session).Execute(context.Background(), AppleOnboardingRequest{
+		Operation: appleOnboardingAddForward, ForwardToEmail: "relay@example.com",
+		Session: appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) { state.APIKey = "api-key" }),
+	})
+	if err != nil || response.Next != "pending" {
+		t.Fatalf("forward add response=%+v err=%v", response, err)
+	}
+	wantPaths := []string{
+		"/account/manage/email/private",
+		"/account/manage/email/private/add",
+		"/account/manage/email/private/add/complete",
+		"/account/manage/email/private",
+		"/account/manage",
+		"/account/manage/email/alternate/add/verification",
+	}
+	if len(session.requests) != len(wantPaths) {
+		t.Fatalf("request count=%d requests=%v", len(session.requests), session.requests)
+	}
+	for index, path := range wantPaths {
+		if !strings.Contains(session.requests[index], path) {
+			t.Fatalf("request[%d]=%q want path %q", index, session.requests[index], path)
+		}
+	}
+	complete, ok := session.requestBodies[2].(map[string]any)
+	if !ok || complete["emailAddress"] != "created@icloud.com" || complete["label"] != "ReMail" {
+		t.Fatalf("alias completion payload=%#v", session.requestBodies[2])
+	}
+	var state appleOnboardingBrowserState
+	if err := json.Unmarshal(response.Session, &state); err != nil || !state.PrivateAliasReady {
+		t.Fatalf("private alias checkpoint=%+v err=%v", state, err)
+	}
+}
+
+func TestAppleOnboardingReusesExistingPrivateAlias(t *testing.T) {
+	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+	session := &appleOnboardingScriptedSession{responses: []appleOnboardingScriptedResponse{
+		{status: http.StatusOK, body: `{"privateEmailList":[{"emailAddress":"existing@icloud.com","id":"alias-id"}],"inactivePrivateEmailList":[],"maxLimitReached":false}`},
+		{status: http.StatusOK, body: `{"account":{"person":{"reachableAtOptions":{"alternateEmailAddresses":[]}}}}`},
+		{status: http.StatusCreated, body: `{"verificationId":"verify-id"}`},
+	}}
+	response, err := appleOnboardingTestClient(now, session).Execute(context.Background(), AppleOnboardingRequest{
+		Operation: appleOnboardingAddForward, ForwardToEmail: "relay@example.com",
+		Session: appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) { state.APIKey = "api-key" }),
+	})
+	if err != nil || response.Next != "pending" {
+		t.Fatalf("forward add response=%+v err=%v", response, err)
+	}
+	if len(session.requests) != 3 || strings.Contains(session.requests[1], "/email/private/add") || strings.Contains(session.requests[2], "/email/private/add") {
+		t.Fatalf("existing alias triggered creation: %v", session.requests)
+	}
+	var state appleOnboardingBrowserState
+	if err := json.Unmarshal(response.Session, &state); err != nil || !state.PrivateAliasReady {
+		t.Fatalf("private alias checkpoint=%+v err=%v", state, err)
+	}
 }
 
 func TestAppleOnboardingSelectsUniquePermanentlyBoundTrustedPhone(t *testing.T) {
@@ -526,6 +656,7 @@ func TestAppleOnboardingExportsNewAndPreservedOldChannels(t *testing.T) {
 			state.APIKey = "api-key"
 			state.OldChannel = old
 			state.AccountCountry = "US"
+			state.PrivateAliasReady = true
 		}),
 	})
 	if err != nil {
@@ -543,7 +674,7 @@ func TestAppleOnboardingExportSetsDefaultForwardingAddress(t *testing.T) {
 	now := time.Date(2026, 8, 16, 10, 0, 0, 0, time.UTC)
 	session := &appleOnboardingScriptedSession{
 		responses: []appleOnboardingScriptedResponse{
-			{status: http.StatusOK, body: `{}`},
+			{status: http.StatusOK, body: `{"forwardToEmail":{"address":"relay@example.com"}}`},
 			{status: http.StatusOK, body: `{}`},
 		},
 		cookies: []msacl.SessionCookie{{Name: "myacinfo", Value: "new-value", Domain: ".apple.com", Host: "appleid.apple.com"}},
@@ -551,7 +682,10 @@ func TestAppleOnboardingExportSetsDefaultForwardingAddress(t *testing.T) {
 	response, err := appleOnboardingTestClient(now, session).Execute(context.Background(), AppleOnboardingRequest{
 		Operation:      appleOnboardingExport,
 		ForwardToEmail: "Relay@Example.com",
-		Session:        appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) { state.APIKey = "api-key" }),
+		Session: appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) {
+			state.APIKey = "api-key"
+			state.PrivateAliasReady = true
+		}),
 	})
 	if err != nil || response.NewChannel == nil {
 		t.Fatalf("export response=%+v err=%v", response, err)
@@ -562,5 +696,44 @@ func TestAppleOnboardingExportSetsDefaultForwardingAddress(t *testing.T) {
 	payload, ok := session.requestBodies[0].(map[string]any)
 	if !ok || payload["forwardToEmail"] != "relay@example.com" {
 		t.Fatalf("default forwarding payload=%#v", session.requestBodies[0])
+	}
+}
+
+func TestAppleOnboardingExportRejectsUnconfirmedDefaultForwardingAddress(t *testing.T) {
+	session := &appleOnboardingScriptedSession{
+		responses: []appleOnboardingScriptedResponse{
+			{status: http.StatusOK, body: `{"forwardToEmail":{"address":"account@example.com"}}`},
+		},
+	}
+	_, err := appleOnboardingTestClient(time.Now(), session).Execute(context.Background(), AppleOnboardingRequest{
+		Operation:      appleOnboardingExport,
+		ForwardToEmail: "relay@example.com",
+		Session: appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) {
+			state.APIKey = "api-key"
+			state.PrivateAliasReady = true
+		}),
+	})
+	var providerErr *AppleOnboardingError
+	if !errors.As(err, &providerErr) || providerErr.Category != "forward_default_unconfirmed" || !providerErr.Retryable {
+		t.Fatalf("unconfirmed forwarding response: err=%v", err)
+	}
+	if len(session.requests) != 1 {
+		t.Fatalf("export continued after unconfirmed forwarding response: %v", session.requests)
+	}
+}
+
+func TestAppleOnboardingForwardAddressAcceptsWrappedAndStringResponses(t *testing.T) {
+	for name, data := range map[string]map[string]any{
+		"object":   {"forwardToEmail": map[string]any{"address": "Relay@Example.com"}},
+		"string":   {"forwardToEmail": "Relay@Example.com"},
+		"wrapped":  {"result": map[string]any{"forwardToEmail": map[string]any{"address": "Relay@Example.com"}}},
+		"options":  {"forwardToOptions": map[string]any{"forwardToEmail": map[string]any{"address": "Relay@Example.com"}}},
+		"selected": {"selectedForwardTo": "Relay@Example.com"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := appleOnboardingForwardAddress(data); got != "relay@example.com" {
+				t.Fatalf("forward address = %q", got)
+			}
+		})
 	}
 }

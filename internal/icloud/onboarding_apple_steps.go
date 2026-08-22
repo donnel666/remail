@@ -384,6 +384,9 @@ func (f *appleOnboardingFlow) joinFamily(request AppleOnboardingRequest) (AppleO
 	if f.state.Status == http.StatusUnauthorized || f.state.Status == http.StatusForbidden {
 		return AppleOnboardingResponse{}, appleOnboardingRestart("family_reconcile_prepare")
 	}
+	if appleOnboardingFamilyJoinApplied(f.state.Status) {
+		return f.familyJoinResponse()
+	}
 	if f.state.Status != http.StatusOK {
 		return AppleOnboardingResponse{}, appleOnboardingPermanent("family_join_failed", "Apple rejected the family invitation.", current)
 	}
@@ -407,6 +410,10 @@ func (f *appleOnboardingFlow) joinFamily(request AppleOnboardingRequest) (AppleO
 		}
 		if f.state.Status == http.StatusUnauthorized || f.state.Status == http.StatusForbidden {
 			return AppleOnboardingResponse{}, appleOnboardingRestart("family_reconcile_prepare")
+		}
+		// Apple can apply the membership and still return a stale 400.
+		if appleOnboardingFamilyJoinApplied(f.state.Status) {
+			return f.familyJoinResponse()
 		}
 		if f.state.Status != http.StatusOK {
 			return AppleOnboardingResponse{}, appleOnboardingPermanent("family_join_failed", "Apple family confirmation failed.", current)
@@ -546,6 +553,9 @@ func (f *appleOnboardingFlow) addForward(request AppleOnboardingRequest) (AppleO
 	if address == "" {
 		return AppleOnboardingResponse{}, &AppleOnboardingError{Category: "forward_address_missing", SafeMessage: "Forwarding address is missing."}
 	}
+	if err := f.ensurePrivateAlias(); err != nil {
+		return AppleOnboardingResponse{}, err
+	}
 	alternate, err := f.loadAlternateEmail(address)
 	if err != nil {
 		return AppleOnboardingResponse{}, err
@@ -620,6 +630,13 @@ func (f *appleOnboardingFlow) verifyForward(request AppleOnboardingRequest) (App
 	if f.state.Status != http.StatusOK || present && !vetted {
 		return AppleOnboardingResponse{}, &AppleOnboardingError{Category: "forward_code_rejected", SafeMessage: "Apple rejected the forwarding verification code."}
 	}
+	if !present || !vetted {
+		retryAt := f.now().UTC().Add(iCloudOnboardingForwardRetry)
+		return AppleOnboardingResponse{}, &AppleOnboardingError{
+			Category: "forward_code_unconfirmed", SafeMessage: "Apple did not confirm the forwarding address verification.",
+			Retryable: true, RetryAt: &retryAt,
+		}
+	}
 	f.state.ForwardVerificationID = ""
 	return AppleOnboardingResponse{Next: "ready"}, nil
 }
@@ -679,6 +696,9 @@ func (f *appleOnboardingFlow) exportChannels(request AppleOnboardingRequest) (Ap
 	if f.state.Mode != "manage" || f.state.APIKey == "" {
 		return AppleOnboardingResponse{}, appleOnboardingRestart("manage_prepare")
 	}
+	if err := f.ensurePrivateAlias(); err != nil {
+		return AppleOnboardingResponse{}, err
+	}
 	if address := strings.TrimSpace(request.ForwardToEmail); address != "" {
 		if err := f.setDefaultForward(address); err != nil {
 			return AppleOnboardingResponse{}, err
@@ -717,6 +737,94 @@ func (f *appleOnboardingFlow) exportChannels(request AppleOnboardingRequest) (Ap
 	return AppleOnboardingResponse{Next: "ready", CountryCode: f.state.AccountCountry, OldChannel: f.state.OldChannel, NewChannel: newChannel}, nil
 }
 
+func (f *appleOnboardingFlow) ensurePrivateAlias() error {
+	if f.state.PrivateAliasReady {
+		return nil
+	}
+	data, err := f.privateEmailList()
+	if err != nil {
+		return err
+	}
+	if appleOnboardingPrivateEmailCount(data) > 0 {
+		f.state.PrivateAliasReady = true
+		return nil
+	}
+	if appleOnboardingBool(data["maxLimitReached"]) {
+		return appleOnboardingPermanent("alias_limit_reached", "Apple Account cannot create a private email alias because its alias limit is reached.", data)
+	}
+	generated, err := f.postObject(strings.TrimRight(f.endpoints.AppleID, "/")+appleAccountPrivateEmailAddPath, map[string]any{}, "email/private/add", false, true, true)
+	if err != nil {
+		return err
+	}
+	if f.state.Status != http.StatusOK && f.state.Status != http.StatusCreated {
+		return appleOnboardingPermanent("alias_create_failed", "Apple rejected private email alias creation.", generated)
+	}
+	email := strings.ToLower(strings.TrimSpace(firstNonEmpty(
+		appleOnboardingString(generated["emailAddress"]),
+		appleOnboardingString(generated["address"]),
+	)))
+	if !validICloudHMEEmail(email) {
+		return &AppleOnboardingError{Category: "alias_create_invalid", SafeMessage: "Apple returned an invalid private email alias candidate.", Retryable: true}
+	}
+	completed, err := f.putObject(strings.TrimRight(f.endpoints.AppleID, "/")+appleAccountPrivateEmailAddCompletePath, map[string]any{
+		"emailAddress": email, "label": "ReMail", "note": "",
+	}, "email/private/add/complete", true, false, true)
+	if err != nil {
+		return err
+	}
+	if f.state.Status != http.StatusOK && f.state.Status != http.StatusCreated && f.state.Status != http.StatusNoContent {
+		return appleOnboardingPermanent("alias_create_failed", "Apple rejected private email alias completion.", completed)
+	}
+	completedEmail := strings.ToLower(strings.TrimSpace(firstNonEmpty(
+		appleOnboardingString(completed["emailAddress"]),
+		appleOnboardingString(completed["address"]),
+		email,
+	)))
+	if !validICloudHMEEmail(completedEmail) {
+		return &AppleOnboardingError{Category: "alias_create_invalid", SafeMessage: "Apple did not confirm the created private email alias.", Retryable: true}
+	}
+	confirmed, err := f.privateEmailList()
+	if err != nil {
+		return err
+	}
+	if appleOnboardingPrivateEmailCount(confirmed) == 0 {
+		retryAt := f.now().UTC().Add(iCloudOnboardingForwardRetry)
+		return &AppleOnboardingError{Category: "alias_create_unconfirmed", SafeMessage: "Apple did not make the private email alias available yet.", Retryable: true, RetryAt: &retryAt}
+	}
+	f.state.PrivateAliasReady = true
+	return nil
+}
+
+func (f *appleOnboardingFlow) privateEmailList() (map[string]any, error) {
+	data, err := f.getObject(strings.TrimRight(f.endpoints.AppleID, "/")+appleAccountPrivateEmailPath, "email/private", false, true, true, "application/json, text/plain, */*")
+	if err != nil {
+		return nil, err
+	}
+	if f.state.Status == http.StatusUnauthorized || f.state.Status == http.StatusForbidden {
+		return nil, appleOnboardingRestart("manage_prepare")
+	}
+	if f.state.Status != http.StatusOK {
+		return nil, appleOnboardingPermanent("alias_list_failed", "Apple private email aliases could not be loaded.", data)
+	}
+	if _, ok := data["privateEmailList"]; !ok {
+		return nil, &AppleOnboardingError{Category: "alias_list_invalid", SafeMessage: "Apple returned an incomplete private email alias list.", Retryable: true}
+	}
+	if _, ok := data["privateEmailList"].([]any); !ok {
+		return nil, &AppleOnboardingError{Category: "alias_list_invalid", SafeMessage: "Apple returned an invalid private email alias list.", Retryable: true}
+	}
+	if inactive, exists := data["inactivePrivateEmailList"]; exists && inactive != nil {
+		if _, ok := inactive.([]any); !ok {
+			return nil, &AppleOnboardingError{Category: "alias_list_invalid", SafeMessage: "Apple returned an invalid inactive private email alias list.", Retryable: true}
+		}
+	}
+	return data, nil
+}
+
+func appleOnboardingPrivateEmailCount(data map[string]any) int {
+	count := len(appleOnboardingSlice(data["privateEmailList"]))
+	return count + len(appleOnboardingSlice(data["inactivePrivateEmailList"]))
+}
+
 func (f *appleOnboardingFlow) setDefaultForward(address string) error {
 	address = strings.ToLower(strings.TrimSpace(address))
 	if address == "" {
@@ -734,7 +842,47 @@ func (f *appleOnboardingFlow) setDefaultForward(address string) error {
 	if f.state.Status != http.StatusOK && f.state.Status != http.StatusNoContent {
 		return appleOnboardingPermanent("forward_default_failed", "Apple rejected the default forwarding address.", data)
 	}
+	confirmed := appleOnboardingForwardAddress(data)
+	if confirmed != address {
+		retryAt := f.now().UTC().Add(iCloudOnboardingForwardRetry)
+		return &AppleOnboardingError{
+			Category: "forward_default_unconfirmed", SafeMessage: "Apple did not confirm the requested default forwarding address.", ProviderMessage: confirmed,
+			Retryable: true, RetryAt: &retryAt,
+		}
+	}
 	return nil
+}
+
+func appleOnboardingForwardAddress(data map[string]any) string {
+	return appleOnboardingFindForwardAddress(data, 0)
+}
+
+func appleOnboardingFindForwardAddress(value any, depth int) string {
+	if depth > 4 {
+		return ""
+	}
+	if address := appleOnboardingString(value); address != "" && strings.Contains(address, "@") {
+		return strings.ToLower(strings.TrimSpace(address))
+	}
+	data := appleOnboardingMap(value)
+	if len(data) == 0 {
+		return ""
+	}
+	for _, key := range []string{"forwardToEmail", "selectedForwardTo", "forwardToEmailAddress", "selectedForwardToEmail"} {
+		candidate := data[key]
+		if address := appleOnboardingString(candidate); address != "" && strings.Contains(address, "@") {
+			return strings.ToLower(strings.TrimSpace(address))
+		}
+		if address := appleOnboardingString(appleOnboardingMap(candidate)["address"]); address != "" {
+			return strings.ToLower(strings.TrimSpace(address))
+		}
+	}
+	for _, key := range []string{"forwardToOptions", "result", "data", "payload", "forwarding", "defaultForward"} {
+		if address := appleOnboardingFindForwardAddress(data[key], depth+1); address != "" {
+			return address
+		}
+	}
+	return ""
 }
 
 func (f *appleOnboardingFlow) loadICloudWeb() error {

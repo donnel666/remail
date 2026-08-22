@@ -18,14 +18,16 @@ import (
 )
 
 const (
-	UserAgent      = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
-	AcceptLanguage = "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6"
-	Language       = "zh-CN"
-	TimeZone       = "Asia/Shanghai"
-	TimeZoneOffset = "GMT+08:00"
-	SecCHUA        = `"Not(A:Brand";v="99", "Google Chrome";v="133", "Chromium";v="133"`
-	SecCHPlatform  = `"macOS"`
-	srpNLength     = 256
+	UserAgent          = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
+	AutomatedUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+	AcceptLanguage     = "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6"
+	Language           = "zh-CN"
+	TimeZone           = "Asia/Shanghai"
+	TimeZoneOffset     = "GMT+08:00"
+	SecCHUA            = `"Not(A:Brand";v="99", "Google Chrome";v="133", "Chromium";v="133"`
+	automatedSecCHUA   = `"Not(A:Brand";v="99", "Google Chrome";v="151", "Chromium";v="151"`
+	SecCHPlatform      = `"macOS"`
+	srpNLength         = 256
 )
 
 type BrowserProfile struct {
@@ -35,6 +37,13 @@ type BrowserProfile struct {
 }
 
 var automatedBrowserProfiles = [...]BrowserProfile{
+	{
+		UserAgent:     AutomatedUserAgent,
+		SecCHUA:       automatedSecCHUA,
+		SecCHPlatform: `"Windows"`,
+	},
+	// Keep resolving this identity for onboarding sessions created before
+	// new automated sessions were pinned to Windows.
 	{
 		UserAgent:     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
 		SecCHUA:       SecCHUA,
@@ -47,11 +56,10 @@ var automatedBrowserProfiles = [...]BrowserProfile{
 	},
 }
 
-// AutomatedBrowserProfile gives each Apple ID a stable Windows or Linux
-// identity, so retries and later Cookie refreshes do not change platforms.
-func AutomatedBrowserProfile(key string) BrowserProfile {
-	digest := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(key))))
-	return automatedBrowserProfiles[int(digest[0])%len(automatedBrowserProfiles)]
+// AutomatedBrowserProfile returns the fixed Windows identity used by new
+// automated Apple sessions. The key remains for caller compatibility.
+func AutomatedBrowserProfile(_ string) BrowserProfile {
+	return automatedBrowserProfiles[0]
 }
 
 func BrowserProfileForUserAgent(userAgent string) (BrowserProfile, bool) {

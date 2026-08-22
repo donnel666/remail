@@ -133,7 +133,7 @@ func generateICloudImportPreparationLocal() (string, error) {
 func (s *Service) cleanupICloudImportPreparations(ctx context.Context, before time.Time) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&iCloudOnboardingTaskModel{}).
-			Where("task_kind = ? AND forward_preparation_id IS NOT NULL AND (onboarding_status IN ? OR stage = ?)", "onboarding", []string{iCloudOnboardingCompleted, iCloudOnboardingFailed}, "waiting_family_reset").
+			Where("task_kind = ? AND forward_preparation_id IS NOT NULL AND (onboarding_status IN ? OR stage IN ?)", "onboarding", []string{iCloudOnboardingCompleted, iCloudOnboardingFailed}, []string{iCloudOnboardingStageFamilyReset, iCloudOnboardingStageFamilySharing}).
 			Update("forward_preparation_id", nil).Error; err != nil {
 			return err
 		}

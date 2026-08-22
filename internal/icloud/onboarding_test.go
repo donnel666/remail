@@ -791,7 +791,7 @@ func TestICloudOnboardingUpgradesUnknownResourceInPlace(t *testing.T) {
 	}
 }
 
-func TestICloudOnboardingFamilyResetWaitKeepsAppleIDReservation(t *testing.T) {
+func TestICloudOnboardingResourceImportCompletesAfterFamilyJoin(t *testing.T) {
 	service, db, task, _ := newOnboardingStateTest(t)
 	if err := db.AutoMigrate(
 		&iCloudRootModel{}, &iCloudResourceCredentialModel{}, &iCloudResourceChannelModel{}, &iCloudImportPreparationModel{},
@@ -829,23 +829,18 @@ func TestICloudOnboardingFamilyResetWaitKeepsAppleIDReservation(t *testing.T) {
 	service.onboardingApple = apple
 
 	processOnboardingStageForTest(t, service, db, task)
-	if task.Status != iCloudOnboardingWaiting || task.Stage != "waiting_family_reset" || task.ResourceID == nil ||
+	if task.Status != iCloudOnboardingCompleted || task.Stage != "completed" || task.ResourceID == nil ||
 		*task.ResourceID != placeholderID || apple.calls != 1 {
-		t.Fatalf("family reset wait = %+v Apple calls=%d", task, apple.calls)
+		t.Fatalf("resource import completion = %+v Apple calls=%d", task, apple.calls)
 	}
 	var count int64
 	if err := db.Model(&iCloudAppleIDReservationModel{}).
 		Where("email_key = ? AND owner_kind = ? AND owner_id = ?", iCloudImportEmailKey(task.PrimaryEmail), iCloudAppleIDReservationOnboarding, *task.ImportID).
-		Count(&count).Error; err != nil || count != 1 {
-		t.Fatalf("onboarding reservation count = %d err=%v", count, err)
+		Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("onboarding reservation count after completion = %d err=%v", count, err)
 	}
-	err := db.Transaction(func(tx *gorm.DB) error {
-		return reserveICloudAppleIDsTx(tx, []iCloudAppleIDReservationModel{{
-			EmailKey: task.PrimaryEmail, OwnerKind: iCloudAppleIDReservationImport, OwnerID: 77, CreatedAt: now,
-		}})
-	})
-	if !errors.Is(err, ErrICloudResourceIdentity) {
-		t.Fatalf("Cookie import acquired waiting onboarding Apple ID: %v", err)
+	if task.NextAttemptAt != nil || task.FinishedAt == nil {
+		t.Fatalf("completed task retained retry state: %+v", task)
 	}
 }
 
@@ -917,6 +912,7 @@ func TestICloudOnboardingManualConfirmationsAreNaturallyIdempotent(t *testing.T)
 		primaryID := uint(99)
 		if err := db.Model(task).Updates(map[string]any{
 			"resource_id": resourceID, "family_primary_resource_id": primaryID, "family_reservation_confirmed": true,
+			"task_kind":         "",
 			"onboarding_status": iCloudOnboardingWaiting, "stage": "waiting_family_reset", "dispatch_status": "waiting",
 		}).Error; err != nil {
 			t.Fatal(err)
@@ -952,6 +948,45 @@ func TestICloudOnboardingManualConfirmationsAreNaturallyIdempotent(t *testing.T)
 		var count int64
 		if err := db.Model(&governanceinfra.OperationLogModel{}).Where("operation_type = ?", "icloud.admin_account_onboarding.family_reset_confirm").Count(&count).Error; err != nil || count != 1 {
 			t.Fatalf("family audit count = %d err=%v", count, err)
+		}
+	})
+
+	t.Run("family_sharing", func(t *testing.T) {
+		service, db, task, _ := newOnboardingStateTest(t)
+		resourceID := task.ID
+		primaryID := uint(99)
+		if err := db.Model(task).Updates(map[string]any{
+			"resource_id": resourceID, "family_primary_resource_id": primaryID, "family_reservation_confirmed": true,
+			"onboarding_status": iCloudOnboardingWaiting, "stage": iCloudOnboardingStageFamilySharing, "dispatch_status": "waiting",
+			"session_payload": []byte(`{"temporary":true}`), "next_attempt_at": nil,
+		}).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Create(&iCloudAppleIDReservationModel{
+			EmailKey: iCloudImportEmailKey(task.PrimaryEmail), OwnerKind: iCloudAppleIDReservationOnboarding,
+			OwnerID: *task.ImportID, CreatedAt: service.now().UTC(),
+		}).Error; err != nil {
+			t.Fatal(err)
+		}
+		for _, requestID := range []string{"sharing-1", "sharing-2"} {
+			if err := service.ConfirmICloudOnboardingFamilyReset(context.Background(), task.ID, 9, requestID, "/test/family-sharing"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := db.First(task, task.ID).Error; err != nil {
+			t.Fatal(err)
+		}
+		if task.Status != iCloudOnboardingProcessing || task.Stage != "manage_prepare" || task.DispatchStatus != "pending" ||
+			task.Generation != 2 || task.SessionPayload != nil || task.FinishedAt != nil || !task.FamilyReservationConfirmed {
+			t.Fatalf("family sharing confirmation = %+v", task)
+		}
+		var reservationCount int64
+		if err := db.Model(&iCloudAppleIDReservationModel{}).Count(&reservationCount).Error; err != nil || reservationCount != 1 {
+			t.Fatalf("reservation count after family sharing confirmation = %d err=%v", reservationCount, err)
+		}
+		var auditCount int64
+		if err := db.Model(&governanceinfra.OperationLogModel{}).Where("operation_type = ?", "icloud.admin_account_onboarding.family_reset_confirm").Count(&auditCount).Error; err != nil || auditCount != 1 {
+			t.Fatalf("family sharing audit count = %d err=%v", auditCount, err)
 		}
 	})
 }
@@ -1179,7 +1214,7 @@ func TestICloudOnboardingFamilyApplyReconcilesPersistedIntentBeforeCurrentInvite
 	primaryID := primary.ID
 	session := []byte(`{"version":1,"mode":"family","inviteToken":"persisted-invite","familyOrganizerEmail":"primary@example.com"}`)
 	task := iCloudOnboardingTaskModel{
-		ID: 10, PrimaryEmail: "child@example.com", AccountRole: "child", FamilyPrimaryResourceID: &primaryID,
+		ID: 10, TaskKind: "onboarding", PrimaryEmail: "child@example.com", AccountRole: "child", FamilyPrimaryResourceID: &primaryID,
 		Status: iCloudOnboardingProcessing, Stage: "family_join_apply", DispatchStatus: "running",
 		Generation: 1, ClaimToken: "claim", MaxAttempts: 5, SessionPayload: session,
 		CreatedAt: now, UpdatedAt: now,
@@ -1207,11 +1242,31 @@ func TestICloudOnboardingFamilyApplyReconcilesPersistedIntentBeforeCurrentInvite
 	if err := db.First(&primary, primary.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if task.Stage != "manage_prepare" || task.DispatchStatus != "pending" || !task.FamilyReservationConfirmed || task.FamilyPrimaryResourceID == nil || *task.FamilyPrimaryResourceID != primary.ID || task.Attempts != 0 {
+	if task.Stage != iCloudOnboardingStageFamilySharing || task.Status != iCloudOnboardingWaiting || task.DispatchStatus != "waiting" ||
+		task.SessionPayload != nil || !task.FamilyReservationConfirmed || task.FamilyPrimaryResourceID == nil || *task.FamilyPrimaryResourceID != primary.ID || task.Attempts != 0 {
 		t.Fatalf("family apply did not confirm the original primary: task=%+v", task)
 	}
 	if primary.FamilyRemoteMemberCount != 2 {
 		t.Fatalf("family reconciliation was not committed: primary=%+v", primary)
+	}
+
+	if err := db.Model(&task).Updates(map[string]any{
+		"onboarding_status": iCloudOnboardingProcessing, "stage": "family_join_apply", "dispatch_status": "running",
+		"claim_token": "claim-2", "session_payload": session,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(&task, task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := service.joinICloudOnboardingFamily(context.Background(), &task, iCloudOnboardingSecret{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(&task, task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if task.Stage != "manage_prepare" || task.Status != iCloudOnboardingProcessing || task.DispatchStatus != "pending" {
+		t.Fatalf("confirmed family recovery re-entered manual sharing wait: task=%+v", task)
 	}
 }
 

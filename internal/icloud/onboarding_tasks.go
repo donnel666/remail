@@ -253,6 +253,8 @@ func (s *Service) processICloudOnboardingStage(ctx context.Context, task *iCloud
 		return s.refreshICloudOnboardingResource(ctx, task, secret)
 	case "waiting_family_reset":
 		return s.waitICloudOnboardingTask(ctx, task, nil, "waiting", "Waiting for the family organizer sharing reset.")
+	case "waiting_family_sharing":
+		return s.waitICloudOnboardingTask(ctx, task, nil, "waiting", "Waiting for manual family sharing setup.")
 	case "waiting_icloud_activation":
 		return s.waitICloudOnboardingTask(ctx, task, nil, "waiting", "Waiting for manual iCloud activation.")
 	default:
@@ -987,6 +989,12 @@ func (s *Service) joinICloudOnboardingFamily(ctx context.Context, task *iCloudOn
 		}
 		return s.failICloudOnboardingTask(ctx, task, category, safeICloudImportMessage(err.Error()))
 	}
+	if task.TaskKind == "onboarding" && task.AccountRole == "child" && task.FamilyPrimaryResourceID != nil && !task.FamilyReservationConfirmed {
+		return s.waitICloudOnboardingTaskWithUpdates(ctx, task, nil, "waiting", "Waiting for manual family sharing setup.", map[string]any{
+			"stage": iCloudOnboardingStageFamilySharing, "session_payload": nil,
+			"pending_sms_purpose": "", "manual_verification_code": "", "sms_sent_at": nil, "sms_poll_deadline": nil,
+		})
+	}
 	return s.advanceICloudOnboardingTask(ctx, task, "manage_prepare", nil, updates)
 }
 
@@ -1194,7 +1202,6 @@ func (s *Service) importICloudOnboardingResource(ctx context.Context, task *iClo
 		if err := requireICloudAppleIDReservationTx(tx, iCloudAppleIDReservationOnboarding, *locked.ImportID, locked.PrimaryEmail); err != nil {
 			return err
 		}
-		waitingFamilyReset := locked.AccountRole == "child" && locked.FamilyPrimaryResourceID != nil && locked.FamilyReservationConfirmed
 		if locked.ResourceID == nil || *locked.ResourceID != locked.ID {
 			return ErrICloudResourceIdentity
 		}
@@ -1235,10 +1242,8 @@ func (s *Service) importICloudOnboardingResource(ctx context.Context, task *iClo
 			}
 			if existing.Status != iCloudResourceDisabled {
 				updates["status"] = iCloudResourcePending
-				if !waitingFamilyReset {
-					updates["next_validation_at"] = now
-					validationReady = true
-				}
+				updates["next_validation_at"] = now
+				validationReady = true
 			}
 			updated := tx.Model(&iCloudResourceModel{}).Where("id = ? AND account_role = ?", existing.ID, "unknown").Updates(updates)
 			if updated.Error != nil {
@@ -1268,10 +1273,8 @@ func (s *Service) importICloudOnboardingResource(ctx context.Context, task *iClo
 			}
 			if existing.Status != iCloudResourceDisabled {
 				updates["status"] = iCloudResourcePending
-				if !waitingFamilyReset {
-					updates["next_validation_at"] = now
-					validationReady = true
-				}
+				updates["next_validation_at"] = now
+				validationReady = true
 			}
 			updated := tx.Model(&iCloudResourceModel{}).
 				Where("id = ? AND account_role = ?", existing.ID, locked.AccountRole).Updates(updates)
@@ -1320,25 +1323,16 @@ func (s *Service) importICloudOnboardingResource(ctx context.Context, task *iClo
 			"forward_preparation_id": nil, "claim_token": "", "next_attempt_at": nil,
 			"last_error_category": "", "last_safe_error": "", "updated_at": now,
 		}
-		if waitingFamilyReset {
-			updates["onboarding_status"] = iCloudOnboardingWaiting
-			updates["stage"] = "waiting_family_reset"
-			updates["dispatch_status"] = "waiting"
-		} else {
-			updates["onboarding_status"] = iCloudOnboardingCompleted
-			updates["stage"] = "completed"
-			updates["dispatch_status"] = "succeeded"
-			updates["finished_at"] = now
-		}
+		updates["onboarding_status"] = iCloudOnboardingCompleted
+		updates["stage"] = "completed"
+		updates["dispatch_status"] = "succeeded"
+		updates["finished_at"] = now
 		updated := tx.Model(&iCloudOnboardingTaskModel{}).Where("id = ? AND generation = ? AND claim_token = ?", locked.ID, locked.Generation, locked.ClaimToken).Updates(updates)
 		if updated.Error != nil {
 			return updated.Error
 		}
 		if updated.RowsAffected != 1 {
 			return ErrICloudImportClaim
-		}
-		if waitingFamilyReset {
-			return nil
 		}
 		return releaseICloudAppleIDReservationTx(tx, iCloudAppleIDReservationOnboarding, *locked.ImportID, locked.PrimaryEmail)
 	})
@@ -1912,6 +1906,7 @@ func (s *Service) ConfirmICloudOnboardingFamilyReset(ctx context.Context, taskID
 	}
 	now := s.now().UTC().Truncate(time.Millisecond)
 	var importID uint
+	resumeOnboarding := false
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var task iCloudOnboardingTaskModel
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&task, taskID).Error; err != nil {
@@ -1925,7 +1920,13 @@ func (s *Service) ConfirmICloudOnboardingFamilyReset(ctx context.Context, taskID
 			}
 			return nil
 		}
-		if task.Status != iCloudOnboardingWaiting || task.Stage != "waiting_family_reset" {
+		if task.Status == iCloudOnboardingProcessing && task.Stage == "manage_prepare" && task.DispatchStatus == "pending" &&
+			task.TaskKind == "onboarding" && task.AccountRole == "child" && task.ResourceID != nil && task.FamilyPrimaryResourceID != nil && task.FamilyReservationConfirmed {
+			importID = iCloudOnboardingImportID(&task)
+			resumeOnboarding = true
+			return nil
+		}
+		if !isICloudOnboardingFamilySharingWaitingTask(&task) {
 			return ErrICloudOnboardingInvalid
 		}
 		if task.ResourceID == nil {
@@ -1935,6 +1936,30 @@ func (s *Service) ConfirmICloudOnboardingFamilyReset(ctx context.Context, taskID
 			return err
 		}
 		importID = iCloudOnboardingImportID(&task)
+		if task.Stage == iCloudOnboardingStageFamilySharing {
+			if task.TaskKind != "onboarding" || task.AccountRole != "child" ||
+				task.FamilyPrimaryResourceID == nil || !task.FamilyReservationConfirmed {
+				return ErrICloudOnboardingInvalid
+			}
+			resumeOnboarding = true
+			if err := tx.Model(&iCloudOnboardingTaskModel{}).Where("id = ?", task.ID).Updates(map[string]any{
+				"onboarding_status": iCloudOnboardingProcessing, "stage": "manage_prepare", "dispatch_status": "pending",
+				"generation": task.Generation + 1, "claim_token": "", "session_payload": nil,
+				"manual_verification_code": "", "pending_sms_purpose": "", "sms_sent_at": nil, "sms_poll_deadline": nil,
+				"forward_preparation_id": nil, "stage_attempts": 0, "next_attempt_at": now,
+				"last_error_category": "", "last_safe_error": "", "finished_at": nil, "updated_at": now,
+			}).Error; err != nil {
+				return err
+			}
+			if s.operationLogs == nil {
+				return ErrICloudImportDependency
+			}
+			return s.operationLogs.CreateInTx(ctx, tx, &governancedomain.OperationLog{
+				OperatorUserID: operatorUserID, OperationType: "icloud.admin_account_onboarding.family_reset_confirm",
+				ResourceType: "icloud_account_onboarding_task", ResourceID: fmt.Sprintf("icloud-onboarding-task:%d", task.ID),
+				Path: pathValue, Result: "success", SafeSummary: "Confirmed manual family sharing setup.", RequestID: requestID,
+			})
+		}
 		if err := tx.Model(&iCloudResourceModel{}).Where("id = ?", *task.ResourceID).Updates(map[string]any{"next_validation_at": now, "last_safe_error": "", "updated_at": now}).Error; err != nil {
 			return err
 		}
@@ -1966,6 +1991,10 @@ func (s *Service) ConfirmICloudOnboardingFamilyReset(ctx context.Context, taskID
 		return ErrICloudOnboardingTemporary
 	}
 	_ = s.refreshICloudOnboardingImport(context.WithoutCancel(ctx), importID)
+	if resumeOnboarding {
+		_ = s.ScheduleICloudOnboardingDispatcher(context.WithoutCancel(ctx), 0)
+		return nil
+	}
 	_ = s.ScheduleICloudValidationDispatcher(context.WithoutCancel(ctx), 0)
 	return nil
 }
