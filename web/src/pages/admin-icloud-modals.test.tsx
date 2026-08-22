@@ -1100,10 +1100,10 @@ describe("admin iCloud modal workflows", () => {
       (screen.getByLabelText("Binding phone") as HTMLSelectElement).options,
     ).map((option) => option.value);
     expect(options).toEqual([
-      "+1 5813045473",
-      "+1 9999999999",
-      "+1 2345678901",
-      "+15550001111",
+      "9",
+      "7",
+      "8",
+      "91",
     ]);
   });
 
@@ -1359,13 +1359,14 @@ describe("admin iCloud modal workflows", () => {
       />,
     );
 
-    await waitFor(() => expect(screen.getByLabelText("Binding phone")).toHaveValue("+15550001111"));
+    await waitFor(() => expect(screen.getByLabelText("Binding phone")).toHaveValue("91"));
     fireEvent.change(screen.getByLabelText("Binding phone"), {
-      target: { value: "+1 5813045473" },
+      target: { value: "9" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(mocks.updateResource).toHaveBeenCalledWith(41, expect.objectContaining({
+      phoneId: 9,
       phoneNumber: "+1 5813045473",
       version: 3,
     })));

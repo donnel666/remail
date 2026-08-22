@@ -162,6 +162,39 @@ func TestRebindICloudSMSPhoneChangesPermanentBinding(t *testing.T) {
 	}
 }
 
+func TestRebindICloudSMSPhoneByIDRequiresMatchingNumber(t *testing.T) {
+	service, db, _ := newSMSPoolTestService(t)
+	ctx := context.Background()
+	var phone phoneModel
+	if err := db.Where("phone_number = ?", "14165550002").First(&phone).Error; err != nil {
+		t.Fatal(err)
+	}
+	binding, err := service.RebindICloudSMSPhoneByID(ctx, "by-id@example.com", phone.ID, "+1 416 555 0002")
+	if err != nil || binding.PhoneID != phone.ID {
+		t.Fatalf("ID binding = %+v err=%v", binding, err)
+	}
+	if _, err := service.RebindICloudSMSPhoneByID(ctx, "mismatch@example.com", phone.ID, "+1 416 555 0001"); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("mismatched ID/number error = %v", err)
+	}
+}
+
+func TestRebindICloudSMSPhoneNumberRejectsAmbiguousActiveRows(t *testing.T) {
+	service, db, _ := newSMSPoolTestService(t)
+	var account accountModel
+	if err := db.First(&account).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&phoneModel{
+		AccountID: account.ID, ProviderOrderID: "phone-duplicate", PhoneCode: "1",
+		PhoneNumber: "14165550002", CountryCode: "US", Status: int(PhoneActive),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.RebindICloudSMSPhone(context.Background(), "ambiguous@example.com", "4165550002"); !errors.Is(err, ErrSMSPhoneNumberAmbiguous) {
+		t.Fatalf("ambiguous number error = %v", err)
+	}
+}
+
 func TestBindICloudSMSPhoneRejectsConflictingRaceWinner(t *testing.T) {
 	service, db, _ := newSMSPoolTestService(t)
 	var first, second phoneModel

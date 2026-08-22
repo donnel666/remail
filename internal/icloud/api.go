@@ -599,6 +599,7 @@ type iCloudEditRequest struct {
 	Version         uint64     `json:"version"`
 	ImportLine      *string    `json:"importLine"`
 	FamilyInviteURL *string    `json:"familyInviteUrl"`
+	PhoneID         *uint      `json:"phoneId"`
 	PhoneNumber     *string    `json:"phoneNumber"`
 	OwnerID         *uint      `json:"ownerId"`
 	ForSale         *bool      `json:"forSale"`
@@ -616,11 +617,12 @@ func (h *handler) patchResource(c *gin.Context) {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 256<<10)
 	var request iCloudEditRequest
 	if err := c.ShouldBindJSON(&request); err != nil || request.Version == 0 ||
-		(request.ImportLine == nil && request.FamilyInviteURL == nil && request.PhoneNumber == nil && request.OwnerID == nil && request.ForSale == nil && request.ExpireAt == nil) {
+		(request.ImportLine == nil && request.FamilyInviteURL == nil && request.PhoneID == nil && request.PhoneNumber == nil && request.OwnerID == nil && request.ForSale == nil && request.ExpireAt == nil) ||
+		(request.PhoneID != nil && (*request.PhoneID == 0 || request.PhoneNumber == nil)) {
 		writeICloudError(c, ErrICloudResourceUpdate)
 		return
 	}
-	if (request.ForSale != nil || request.ExpireAt != nil || request.ImportLine != nil || request.FamilyInviteURL != nil || request.PhoneNumber != nil) && !h.requirePermission(c, "core:resource", "operate") {
+	if (request.ForSale != nil || request.ExpireAt != nil || request.ImportLine != nil || request.FamilyInviteURL != nil || request.PhoneID != nil || request.PhoneNumber != nil) && !h.requirePermission(c, "core:resource", "operate") {
 		return
 	}
 	operatorUserID, ok := middleware.GetCurrentUserID(c)
@@ -630,7 +632,7 @@ func (h *handler) patchResource(c *gin.Context) {
 	}
 	result, err := h.service.EditAdminICloudResource(c.Request.Context(), AdminICloudEditCommand{
 		ResourceID: resourceID, Version: request.Version, ImportLine: request.ImportLine, FamilyInviteURL: request.FamilyInviteURL,
-		PhoneNumber: request.PhoneNumber, OwnerUserID: request.OwnerID, ForSale: request.ForSale, ExpireAt: request.ExpireAt,
+		PhoneID: request.PhoneID, PhoneNumber: request.PhoneNumber, OwnerUserID: request.OwnerID, ForSale: request.ForSale, ExpireAt: request.ExpireAt,
 		OperatorUserID: operatorUserID, IdempotencyKey: c.GetHeader("Idempotency-Key"),
 		RequestID: middleware.GetRequestID(c), Path: c.FullPath(),
 	})

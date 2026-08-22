@@ -1642,7 +1642,9 @@ export function EditICloudModal({
   const [familyInviteURL, setFamilyInviteURL] = useState("");
   const [phones, setPhones] = useState<AdminKitesimPhoneItem[]>([]);
   const [phonesLoading, setPhonesLoading] = useState(false);
-  const [selectedPhone, setSelectedPhone] = useState("");
+  const [selectedPhoneId, setSelectedPhoneId] = useState<number | undefined>();
+  const [selectedPhoneNumber, setSelectedPhoneNumber] = useState("");
+  const [phoneSelectionChanged, setPhoneSelectionChanged] = useState(false);
   const [expireAt, setExpireAt] = useState<Date | null>(() =>
     target ? new Date(target.expireAt) : null,
   );
@@ -1656,7 +1658,9 @@ export function EditICloudModal({
     setOwnerId(target.owner.id);
     setForSale(target.forSale);
     setFamilyInviteURL(target.familyInviteUrl ?? "");
-    setSelectedPhone(target.boundPhoneNumber ?? "");
+    setSelectedPhoneId(target.kitesimPhoneId ?? undefined);
+    setSelectedPhoneNumber(target.boundPhoneNumber ?? "");
+    setPhoneSelectionChanged(false);
     setExpireAt(new Date(target.expireAt));
     setNewCurl("");
     setOldCurl("");
@@ -1674,9 +1678,14 @@ export function EditICloudModal({
       .then((items) => {
         if (controller.signal.aborted) return;
         setPhones(items);
-        const current = target?.boundPhoneNumber ?? "";
-        const match = items.find((phone) => samePhoneNumber(phone.phoneNumber, current));
-        if (match) setSelectedPhone(match.phoneNumber);
+        if (target?.kitesimPhoneId == null) {
+          const current = target.boundPhoneNumber ?? "";
+          const match = items.find((phone) => samePhoneNumber(phone.phoneNumber, current));
+          if (match?.phoneId != null) {
+            setSelectedPhoneId(match.phoneId);
+            setSelectedPhoneNumber(match.phoneNumber);
+          }
+        }
       })
       .catch(() => {
         if (!controller.signal.aborted) setPhones([]);
@@ -1685,7 +1694,7 @@ export function EditICloudModal({
         if (!controller.signal.aborted) setPhonesLoading(false);
       });
     return () => controller.abort();
-  }, [canOperate, credentialsOnly, target?.boundPhoneNumber, target?.id]);
+  }, [canOperate, credentialsOnly, target?.boundPhoneNumber, target?.id, target?.kitesimPhoneId]);
 
   const phoneOptions = useMemo(() => {
     const options = phones
@@ -1698,23 +1707,27 @@ export function EditICloudModal({
       .map((phone) => ({
         label: `${phone.phoneNumber} · ${t("Linked accounts")}: ${phone.linkedAccountCount ?? 0}`,
         linkedAccountCount: phone.linkedAccountCount ?? 0,
-        value: phone.phoneNumber,
+        phoneNumber: phone.phoneNumber,
+        value: String(phone.phoneId),
       }));
     if (
-      target?.boundPhoneNumber &&
-      !options.some((option) => samePhoneNumber(option.value, target.boundPhoneNumber ?? ""))
+      target?.kitesimPhoneId != null &&
+      target.boundPhoneNumber &&
+      !options.some((option) => option.value === String(target.kitesimPhoneId))
     ) {
       options.push({
         label: `${target.boundPhoneNumber} · ${t("Linked accounts")}: -`,
         linkedAccountCount: Number.MAX_SAFE_INTEGER,
-        value: target.boundPhoneNumber,
+        phoneNumber: target.boundPhoneNumber,
+        value: String(target.kitesimPhoneId),
       });
     }
     return options.sort((a, b) =>
       a.linkedAccountCount - b.linkedAccountCount ||
-      a.value.localeCompare(b.value, undefined, { numeric: true }),
+      a.phoneNumber.localeCompare(b.phoneNumber, undefined, { numeric: true }) ||
+      Number(a.value) - Number(b.value),
     );
-  }, [phones, t, target?.boundPhoneNumber]);
+  }, [phones, t, target?.boundPhoneNumber, target?.kitesimPhoneId]);
 
   const submit = async () => {
     if (!target || (!credentialsOnly && !ownerId)) return;
@@ -1758,12 +1771,9 @@ export function EditICloudModal({
     if (familyInviteURL.trim() !== (target.familyInviteUrl ?? "").trim()) {
       request.familyInviteUrl = familyInviteURL.trim();
     }
-    if (
-      !credentialsOnly &&
-      selectedPhone.trim() !== "" &&
-      !samePhoneNumber(selectedPhone, target.boundPhoneNumber ?? "")
-    ) {
-      request.phoneNumber = selectedPhone.trim();
+    if (!credentialsOnly && phoneSelectionChanged && selectedPhoneId != null && selectedPhoneNumber.trim() !== "") {
+      request.phoneId = selectedPhoneId;
+      request.phoneNumber = selectedPhoneNumber.trim();
     }
     if (nextImportLine) request.importLine = nextImportLine;
     if (Object.keys(request).length === 1) {
@@ -1841,11 +1851,18 @@ export function EditICloudModal({
                 aria-label={t("Binding phone")}
                 disabled={!canOperate || phonesLoading}
                 loading={phonesLoading}
-                onChange={(value) => setSelectedPhone(String(value ?? ""))}
+                onChange={(value) => {
+                  const nextID = Number(value);
+                  const option = phoneOptions.find((item) => Number(item.value) === nextID);
+                  if (!Number.isSafeInteger(nextID) || !option) return;
+                  setSelectedPhoneId(nextID);
+                  setSelectedPhoneNumber(option.phoneNumber);
+                  setPhoneSelectionChanged(nextID !== (target.kitesimPhoneId ?? undefined));
+                }}
                 optionList={phoneOptions}
                 placeholder={t("Select a Kitesim phone")}
                 style={{ width: "100%" }}
-                value={selectedPhone}
+                value={selectedPhoneId == null ? "" : String(selectedPhoneId)}
               />
             </label>
           ) : null}

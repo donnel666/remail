@@ -6213,7 +6213,10 @@ type AdminICloudUpdateRequest struct {
 	ImportLine *string `json:"importLine,omitempty"`
 	OwnerId    *int    `json:"ownerId,omitempty"`
 
-	// PhoneNumber Replace the permanent Kitesim phone binding for this account. The number must match an active Kitesim phone.
+	// PhoneId Exact active Kitesim phone row selected for the permanent iCloud binding. When supplied, phoneNumber is required and must match this row.
+	PhoneId *int `json:"phoneId,omitempty"`
+
+	// PhoneNumber Replace the permanent Kitesim phone binding for this account. The number must match the selected active Kitesim phone; without phoneId, legacy number matching is accepted only when unique.
 	PhoneNumber *string `json:"phoneNumber,omitempty"`
 
 	// Version Last observed resource version; stale writes return 409.

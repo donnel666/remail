@@ -24,6 +24,7 @@ type AdminICloudEditCommand struct {
 	Version         uint64
 	ImportLine      *string
 	FamilyInviteURL *string
+	PhoneID         *uint
 	PhoneNumber     *string
 	OwnerUserID     *uint
 	ForSale         *bool
@@ -36,7 +37,10 @@ type AdminICloudEditCommand struct {
 
 func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminICloudEditCommand) (*AdminICloudMutationResult, error) {
 	if s == nil || s.db == nil || s.operationLogs == nil || command.ResourceID == 0 || command.Version == 0 ||
-		command.OperatorUserID == 0 || (command.ImportLine == nil && command.FamilyInviteURL == nil && command.PhoneNumber == nil && command.OwnerUserID == nil && command.ForSale == nil && command.ExpireAt == nil) {
+		command.OperatorUserID == 0 || (command.ImportLine == nil && command.FamilyInviteURL == nil && command.PhoneID == nil && command.PhoneNumber == nil && command.OwnerUserID == nil && command.ForSale == nil && command.ExpireAt == nil) {
+		return nil, ErrICloudResourceUpdate
+	}
+	if command.PhoneID != nil && (*command.PhoneID == 0 || command.PhoneNumber == nil) {
 		return nil, ErrICloudResourceUpdate
 	}
 
@@ -90,11 +94,12 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 		Version         uint64     `json:"version"`
 		ImportLine      *string    `json:"importLine,omitempty"`
 		FamilyInviteURL *string    `json:"familyInviteUrl,omitempty"`
+		PhoneID         *uint      `json:"phoneId,omitempty"`
 		PhoneNumber     *string    `json:"phoneNumber,omitempty"`
 		OwnerID         *uint      `json:"ownerId,omitempty"`
 		ForSale         *bool      `json:"forSale,omitempty"`
 		ExpireAt        *time.Time `json:"expireAt,omitempty"`
-	}{command.Version, command.ImportLine, command.FamilyInviteURL, command.PhoneNumber, command.OwnerUserID, command.ForSale, command.ExpireAt})
+	}{command.Version, command.ImportLine, command.FamilyInviteURL, command.PhoneID, command.PhoneNumber, command.OwnerUserID, command.ForSale, command.ExpireAt})
 	if err != nil {
 		return nil, ErrICloudResourceQueryTemporary
 	}
@@ -162,19 +167,40 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 				return err
 			}
 		}
-		phoneChanged := command.PhoneNumber != nil &&
-			(resource.KitesimPhoneID == nil || !sameICloudPhoneNumber(*command.PhoneNumber, resource.BoundPhoneNumber))
+		phoneChanged := false
+		if command.PhoneID != nil {
+			phoneChanged = resource.KitesimPhoneID == nil || *resource.KitesimPhoneID != *command.PhoneID ||
+				!sameICloudPhoneNumber(*command.PhoneNumber, resource.BoundPhoneNumber)
+		} else if command.PhoneNumber != nil {
+			phoneChanged = resource.KitesimPhoneID == nil || !sameICloudPhoneNumber(*command.PhoneNumber, resource.BoundPhoneNumber)
+		}
 		var phoneBinding *kitesim.SMSPhoneBinding
 		if phoneChanged {
-			rebinder, ok := s.smsPhones.(interface {
-				RebindICloudSMSPhoneTx(context.Context, *gorm.DB, string, string) (kitesim.SMSPhoneBinding, error)
-			})
-			if !ok {
-				return ErrICloudResourceUpdate
+			bindingEmail := resource.PrimaryEmail
+			if emailChanged {
+				bindingEmail = imported.PrimaryEmail
 			}
-			binding, err := rebinder.RebindICloudSMSPhoneTx(ctx, tx, resource.PrimaryEmail, *command.PhoneNumber)
+			var binding kitesim.SMSPhoneBinding
+			var err error
+			if command.PhoneID != nil {
+				rebinder, ok := s.smsPhones.(interface {
+					RebindICloudSMSPhoneByIDTx(context.Context, *gorm.DB, string, uint, string) (kitesim.SMSPhoneBinding, error)
+				})
+				if !ok {
+					return ErrICloudResourceUpdate
+				}
+				binding, err = rebinder.RebindICloudSMSPhoneByIDTx(ctx, tx, bindingEmail, *command.PhoneID, *command.PhoneNumber)
+			} else {
+				rebinder, ok := s.smsPhones.(interface {
+					RebindICloudSMSPhoneTx(context.Context, *gorm.DB, string, string) (kitesim.SMSPhoneBinding, error)
+				})
+				if !ok {
+					return ErrICloudResourceUpdate
+				}
+				binding, err = rebinder.RebindICloudSMSPhoneTx(ctx, tx, bindingEmail, *command.PhoneNumber)
+			}
 			if err != nil {
-				if errors.Is(err, kitesim.ErrPhoneMissing) || errors.Is(err, kitesim.ErrInvalidInput) {
+				if errors.Is(err, kitesim.ErrPhoneMissing) || errors.Is(err, kitesim.ErrInvalidInput) || errors.Is(err, kitesim.ErrSMSPhoneNumberAmbiguous) {
 					return ErrICloudResourceUpdate
 				}
 				return err
@@ -236,7 +262,17 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 		if phoneBinding != nil {
 			phoneID := phoneBinding.PhoneID
 			updates["bound_phone_number"] = phoneBinding.PhoneNumber
-			updates["bound_phone_country_code"] = phoneBinding.CountryCode
+			countryCode := strings.ToUpper(strings.TrimSpace(phoneBinding.CountryCode))
+			if countryCode == "" {
+				countryCode = strings.ToUpper(strings.TrimSpace(resource.CountryCode))
+			}
+			if countryCode == "" {
+				countryCode = CountryCodeFromICloudRegion(resource.Region)
+			}
+			if countryCode == "" {
+				countryCode = strings.ToUpper(strings.TrimSpace(resource.BoundPhoneCountryCode))
+			}
+			updates["bound_phone_country_code"] = countryCode
 			updates["bound_phone_source"] = "manual"
 			updates["kitesim_phone_id"] = phoneID
 		}

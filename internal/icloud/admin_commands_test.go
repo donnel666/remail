@@ -20,6 +20,32 @@ func (adminEditPhoneRebinder) RebindICloudSMSPhoneTx(context.Context, *gorm.DB, 
 	return kitesim.SMSPhoneBinding{PhoneID: 8, PhoneNumber: "14165550002", CountryCode: "US", Source: "matched"}, nil
 }
 
+type adminEditRecordingPhoneRebinder struct {
+	onboardingProvidedPhone
+	email string
+}
+
+func (r *adminEditRecordingPhoneRebinder) RebindICloudSMSPhoneTx(_ context.Context, _ *gorm.DB, email, _ string) (kitesim.SMSPhoneBinding, error) {
+	r.email = email
+	return kitesim.SMSPhoneBinding{PhoneID: 8, PhoneNumber: "14165550002", CountryCode: "US", Source: "matched"}, nil
+}
+
+type adminEditIDPhoneRebinder struct {
+	onboardingProvidedPhone
+	phoneID uint
+}
+
+func (r *adminEditIDPhoneRebinder) RebindICloudSMSPhoneByIDTx(_ context.Context, _ *gorm.DB, _ string, phoneID uint, _ string) (kitesim.SMSPhoneBinding, error) {
+	r.phoneID = phoneID
+	return kitesim.SMSPhoneBinding{PhoneID: phoneID, PhoneNumber: "14165550002", Source: "matched"}, nil
+}
+
+type adminEditCountryFallbackPhoneRebinder struct{ onboardingProvidedPhone }
+
+func (adminEditCountryFallbackPhoneRebinder) RebindICloudSMSPhoneTx(context.Context, *gorm.DB, string, string) (kitesim.SMSPhoneBinding, error) {
+	return kitesim.SMSPhoneBinding{PhoneID: 8, PhoneNumber: "14165550002", Source: "matched"}, nil
+}
+
 func TestApplyAdminICloudValidationResetsOnlyHealthScheduling(t *testing.T) {
 	db := newAdminICloudCommandTestDB(t, "icloud-admin-validate")
 	now := time.Date(2026, 8, 14, 8, 0, 0, 0, time.UTC)
@@ -274,6 +300,96 @@ func TestEditAdminICloudResourceChangesPermanentPhone(t *testing.T) {
 	if resource.BoundPhoneNumber != "14165550002" || resource.BoundPhoneCountryCode != "US" ||
 		resource.BoundPhoneSource != "manual" || resource.KitesimPhoneID == nil || *resource.KitesimPhoneID != 8 {
 		t.Fatalf("unexpected phone binding: %#v", resource)
+	}
+}
+
+func TestEditAdminICloudResourceUsesNewEmailForPhoneBinding(t *testing.T) {
+	db := newAdminICloudCommandTestDB(t, "icloud-admin-edit-phone-email")
+	now := time.Date(2026, 8, 22, 9, 0, 0, 0, time.UTC)
+	createAdminICloudCommandResource(t, db, now, iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "old@icloud.com", AccountRole: "unknown",
+		Status: iCloudResourcePending, ExpireAt: now.Add(time.Hour), CredentialRevision: 1,
+		ValidationGeneration: 1,
+	})
+	rebinder := &adminEditRecordingPhoneRebinder{}
+	service := NewService(db, nil, nil)
+	service.smsPhones = rebinder
+	service.now = func() time.Time { return now }
+	line := "new@icloud.com----" + testICloudNewCurl
+	requested := "+1 416 555 0002"
+	result, err := service.EditAdminICloudResource(context.Background(), AdminICloudEditCommand{
+		ResourceID: 1, Version: 1, ImportLine: &line, PhoneNumber: &requested,
+		OperatorUserID: 99, IdempotencyKey: "edit-phone-email", RequestID: "edit-phone-email", Path: "/v1/admin/icloud/resources/1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Changed || result.Version != 2 {
+		t.Fatalf("unexpected mutation result: %#v", result)
+	}
+	if rebinder.email != "new@icloud.com" {
+		t.Fatalf("phone binding used email %q, want new@icloud.com", rebinder.email)
+	}
+	var resource iCloudResourceModel
+	if err := db.First(&resource, 1).Error; err != nil {
+		t.Fatal(err)
+	}
+	if resource.PrimaryEmail != "new@icloud.com" || resource.KitesimPhoneID == nil || *resource.KitesimPhoneID != 8 {
+		t.Fatalf("unexpected edited resource: %#v", resource)
+	}
+}
+
+func TestEditAdminICloudResourceBindsSelectedPhoneID(t *testing.T) {
+	db := newAdminICloudCommandTestDB(t, "icloud-admin-edit-phone-id")
+	now := time.Date(2026, 8, 22, 9, 30, 0, 0, time.UTC)
+	oldPhoneID := uint(7)
+	createAdminICloudCommandResource(t, db, now, iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "owner@icloud.com", CountryCode: "CA",
+		Region: "加拿大", BoundPhoneNumber: "14165550001", BoundPhoneCountryCode: "CA",
+		Status: iCloudResourceNormal, ExpireAt: now.Add(time.Hour), KitesimPhoneID: &oldPhoneID,
+	})
+	rebinder := &adminEditIDPhoneRebinder{}
+	service := NewService(db, nil, nil)
+	service.smsPhones = rebinder
+	service.now = func() time.Time { return now }
+	phoneID := uint(8)
+	requested := "+1 416 555 0002"
+	if _, err := service.EditAdminICloudResource(context.Background(), AdminICloudEditCommand{
+		ResourceID: 1, Version: 1, PhoneID: &phoneID, PhoneNumber: &requested,
+		OperatorUserID: 99, IdempotencyKey: "edit-phone-id", RequestID: "edit-phone-id", Path: "/v1/admin/icloud/resources/1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if rebinder.phoneID != phoneID {
+		t.Fatalf("rebinder phone ID = %d, want %d", rebinder.phoneID, phoneID)
+	}
+}
+
+func TestEditAdminICloudResourceFallsBackToResourceCountryCode(t *testing.T) {
+	db := newAdminICloudCommandTestDB(t, "icloud-admin-edit-phone-country")
+	now := time.Date(2026, 8, 22, 10, 0, 0, 0, time.UTC)
+	oldPhoneID := uint(7)
+	createAdminICloudCommandResource(t, db, now, iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "owner@icloud.com", CountryCode: "CA",
+		Region: "加拿大", BoundPhoneNumber: "14165550001", BoundPhoneCountryCode: "",
+		Status: iCloudResourceNormal, ExpireAt: now.Add(time.Hour), KitesimPhoneID: &oldPhoneID,
+	})
+	service := NewService(db, nil, nil)
+	service.smsPhones = adminEditCountryFallbackPhoneRebinder{}
+	service.now = func() time.Time { return now }
+	requested := "+1 416 555 0002"
+	if _, err := service.EditAdminICloudResource(context.Background(), AdminICloudEditCommand{
+		ResourceID: 1, Version: 1, PhoneNumber: &requested,
+		OperatorUserID: 99, IdempotencyKey: "edit-phone-country", RequestID: "edit-phone-country", Path: "/v1/admin/icloud/resources/1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var resource iCloudResourceModel
+	if err := db.First(&resource, 1).Error; err != nil {
+		t.Fatal(err)
+	}
+	if resource.BoundPhoneCountryCode != "CA" {
+		t.Fatalf("country fallback = %q, want CA", resource.BoundPhoneCountryCode)
 	}
 }
 

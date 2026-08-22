@@ -342,6 +342,7 @@ func TestPatchAdminICloudResourceRequiresOperateOnlyForSensitiveFields(t *testin
 		`{"version":1,"expireAt":"2026-09-08T11:00:00Z"}`,
 		`{"version":1,"importLine":"main@icloud.com----curl 'https://appleid.apple.com/account/manage/' -H 'Cookie: secret' -H 'scnt: value'"}`,
 		`{"version":1,"familyInviteUrl":"replacement-token"}`,
+		`{"version":1,"phoneId":8,"phoneNumber":"+1 416 555 0002"}`,
 	} {
 		request = httptest.NewRequest(http.MethodPatch, "/v1/admin/icloud/resources/1", bytes.NewBufferString(body))
 		request.Header.Set("Content-Type", "application/json")
@@ -356,7 +357,7 @@ func TestPatchAdminICloudResourceRequiresOperateOnlyForSensitiveFields(t *testin
 			t.Fatalf("sensitive edit %d status=%d body=%s", index, recorder.Code, recorder.Body.String())
 		}
 	}
-	if operateChecks != 4 {
-		t.Fatalf("operate checks = %d, want 4", operateChecks)
+	if operateChecks != 5 {
+		t.Fatalf("operate checks = %d, want 5", operateChecks)
 	}
 }

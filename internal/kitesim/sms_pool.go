@@ -17,6 +17,7 @@ var (
 	ErrSMSPhoneUnavailable       = errors.New("kitesim: SMS phone temporarily unavailable")
 	ErrSMSPhoneBindingConflict   = errors.New("kitesim: SMS phone binding conflict")
 	ErrSMSPhoneBoundUnavailable  = errors.New("kitesim: permanently bound SMS phone is unavailable")
+	ErrSMSPhoneNumberAmbiguous   = errors.New("kitesim: SMS phone number matches multiple active phones")
 	ErrSMSPhoneSuffixAmbiguous   = errors.New("kitesim: SMS phone suffix matches multiple active phones")
 	ErrSMSReservationNotFound    = errors.New("kitesim: SMS reservation not found")
 	ErrSMSChallengeOwnerConflict = errors.New("kitesim: SMS challenge owner key conflict")
@@ -166,15 +167,41 @@ func (s *Service) RebindICloudSMSPhone(ctx context.Context, email, requestedNumb
 	return binding, err
 }
 
+// RebindICloudSMSPhoneByID updates the permanent iCloud phone assignment using
+// the pool row selected by an administrator.  The number is still checked so
+// a stale or tampered UI value cannot bind a different phone.
+func (s *Service) RebindICloudSMSPhoneByID(ctx context.Context, email string, phoneID uint, requestedNumber string) (SMSPhoneBinding, error) {
+	if s == nil || s.db == nil {
+		return SMSPhoneBinding{}, ErrSMSPhoneUnavailable
+	}
+	var binding SMSPhoneBinding
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var err error
+		binding, err = s.RebindICloudSMSPhoneByIDTx(ctx, tx, email, phoneID, requestedNumber)
+		return err
+	})
+	return binding, err
+}
+
 // RebindICloudSMSPhoneTx is the transaction-aware rebinding primitive used by
 // the iCloud resource edit command.
 func (s *Service) RebindICloudSMSPhoneTx(ctx context.Context, tx *gorm.DB, email, requestedNumber string) (SMSPhoneBinding, error) {
+	return s.rebindICloudSMSPhoneTx(ctx, tx, email, 0, requestedNumber, false)
+}
+
+// RebindICloudSMSPhoneByIDTx is the transaction-aware, exact-ID variant used
+// by the administrator editor.
+func (s *Service) RebindICloudSMSPhoneByIDTx(ctx context.Context, tx *gorm.DB, email string, phoneID uint, requestedNumber string) (SMSPhoneBinding, error) {
+	return s.rebindICloudSMSPhoneTx(ctx, tx, email, phoneID, requestedNumber, true)
+}
+
+func (s *Service) rebindICloudSMSPhoneTx(ctx context.Context, tx *gorm.DB, email string, phoneID uint, requestedNumber string, usePhoneID bool) (SMSPhoneBinding, error) {
 	if s == nil || tx == nil {
 		return SMSPhoneBinding{}, ErrSMSPhoneUnavailable
 	}
 	consumerKey := strings.ToLower(strings.TrimSpace(email))
 	requestedDigits := phoneDigits(requestedNumber)
-	if consumerKey == "" || requestedDigits == "" {
+	if consumerKey == "" || requestedDigits == "" || (usePhoneID && phoneID == 0) {
 		return SMSPhoneBinding{}, ErrInvalidInput
 	}
 
@@ -187,21 +214,54 @@ func (s *Service) RebindICloudSMSPhoneTx(ctx context.Context, tx *gorm.DB, email
 	}
 	found := err == nil
 
-	var candidates []phoneModel
-	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("deleted_at IS NULL AND disabled_at IS NULL AND status = ?", int(PhoneActive)).
-		Order("id ASC").Find(&candidates).Error; err != nil {
-		return SMSPhoneBinding{}, err
-	}
 	var phone phoneModel
-	for _, candidate := range candidates {
-		if samePhoneDigits(smsPhoneBinding(candidate, "matched"), requestedDigits) {
-			phone = candidate
-			break
+	if usePhoneID {
+		err := tx.WithContext(ctx).Select("id, phone_code, phone_number, country_code").
+			Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND deleted_at IS NULL AND disabled_at IS NULL AND status = ?", phoneID, int(PhoneActive)).
+			Take(&phone).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return SMSPhoneBinding{}, ErrPhoneMissing
 		}
-	}
-	if phone.ID == 0 {
-		return SMSPhoneBinding{}, ErrPhoneMissing
+		if err != nil {
+			return SMSPhoneBinding{}, err
+		}
+		if !samePhoneDigits(smsPhoneBinding(phone, "matched"), requestedDigits) {
+			return SMSPhoneBinding{}, ErrInvalidInput
+		}
+	} else {
+		// The compatibility path deliberately reads only matching fields without
+		// locking the whole active pool, then locks the one selected row below.
+		var candidates []phoneModel
+		if err := tx.WithContext(ctx).Select("id, phone_code, phone_number, country_code").
+			Where("deleted_at IS NULL AND disabled_at IS NULL AND status = ?", int(PhoneActive)).
+			Order("id ASC").Find(&candidates).Error; err != nil {
+			return SMSPhoneBinding{}, err
+		}
+		matches := make([]phoneModel, 0, 1)
+		for _, candidate := range candidates {
+			if samePhoneDigits(smsPhoneBinding(candidate, "matched"), requestedDigits) {
+				matches = append(matches, candidate)
+			}
+		}
+		switch len(matches) {
+		case 0:
+			return SMSPhoneBinding{}, ErrPhoneMissing
+		case 1:
+			phone = matches[0]
+		default:
+			return SMSPhoneBinding{}, ErrSMSPhoneNumberAmbiguous
+		}
+		err := tx.WithContext(ctx).Select("id, phone_code, phone_number, country_code").
+			Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND deleted_at IS NULL AND disabled_at IS NULL AND status = ?", phone.ID, int(PhoneActive)).
+			Take(&phone).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return SMSPhoneBinding{}, ErrPhoneMissing
+		}
+		if err != nil {
+			return SMSPhoneBinding{}, err
+		}
 	}
 
 	if !found {
