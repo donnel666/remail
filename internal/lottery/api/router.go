@@ -25,9 +25,6 @@ func RegisterRoutes(rg *gin.RouterGroup, module *Module, fetcher middleware.Sess
 	admin.Use(middleware.LoadSession(fetcher))
 	admin.Use(middleware.AuthRequired())
 	admin.Use(middleware.CSRFRequired())
-	if turnstileGuard != nil {
-		admin.Use(turnstileGuard)
-	}
 	admin.GET("/lotteries", middleware.PermissionRequired(checker, "lottery:lottery", "read"), handler.GetAdminLotteries)
 	admin.POST("/lotteries", middleware.PermissionRequired(checker, "lottery:lottery", "write"), handler.PostAdminLottery)
 	admin.GET("/lotteries/:lotteryId", middleware.PermissionRequired(checker, "lottery:lottery", "read"), handler.GetAdminLottery)

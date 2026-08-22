@@ -49,6 +49,40 @@ var (
 	ErrLotterySettlement          = errors.New("lottery settlement is pending")
 )
 
+// Entry rejection codes are deliberately small and stable.  The API uses them
+// to translate a failed click without exposing the lottery's private rules in
+// the public activity payload.
+const (
+	EntryRejectedInactive = "lottery_account_inactive"
+	EntryRejectedAge      = "lottery_account_age"
+	EntryRejectedCreator  = "lottery_creator"
+	EntryRejectedClosed   = "lottery_closed"
+	EntryRejectedFull     = "lottery_full"
+)
+
+// EntryRejectedError carries only the reason needed for a safe client-facing
+// message.  It still unwraps to the existing sentinel so older callers keep
+// their status handling.
+type EntryRejectedError struct {
+	Code         string
+	RequiredDays int
+	Cause        error
+}
+
+func (e *EntryRejectedError) Error() string {
+	if e == nil || e.Cause == nil {
+		return ErrLotteryNotEligible.Error()
+	}
+	return e.Cause.Error()
+}
+
+func (e *EntryRejectedError) Unwrap() error {
+	if e == nil || e.Cause == nil {
+		return ErrLotteryNotEligible
+	}
+	return e.Cause
+}
+
 type TierWeights struct {
 	Consolation int `json:"consolation"`
 	Normal      int `json:"normal"`

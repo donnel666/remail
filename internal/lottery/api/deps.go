@@ -2,9 +2,11 @@ package api
 
 import (
 	"context"
+	"errors"
 
 	billingapp "github.com/donnel666/remail/internal/billing/app"
 	iamapp "github.com/donnel666/remail/internal/iam/app"
+	iamdomain "github.com/donnel666/remail/internal/iam/domain"
 	lotteryapp "github.com/donnel666/remail/internal/lottery/app"
 	lotteryinfra "github.com/donnel666/remail/internal/lottery/infra"
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
@@ -35,6 +37,9 @@ func (d iamUserDirectory) FindLotteryUser(ctx context.Context, userID uint) (*lo
 		return nil, nil
 	}
 	user, err := d.users.FindByID(ctx, userID)
+	if errors.Is(err, iamdomain.ErrUserNotFound) {
+		return nil, nil
+	}
 	if err != nil || user == nil {
 		return nil, err
 	}

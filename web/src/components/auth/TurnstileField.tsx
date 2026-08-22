@@ -89,7 +89,9 @@ export function TurnstileField({
     void (async () => {
       const { enabled, siteKey } = await getTurnstileConfig();
       if (!active) return;
-      if (!enabled) {
+      // Lottery entry is deliberately fail-closed on the server even when the
+      // general CAPTCHA switch is off, so it must still render a widget here.
+      if (!enabled && action !== "lottery_enter") {
         onTokenChange(CAPTCHA_DISABLED_TOKEN);
         setCaptchaDisabled(true);
         setLoading(false);

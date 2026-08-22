@@ -238,7 +238,7 @@ func (r *Repo) ListPayouts(ctx context.Context, lotteryID uint, offset, limit in
 	return items, total, nil
 }
 
-func (r *Repo) AddEntry(ctx context.Context, lotteryID, userID uint, registeredAt, now time.Time) (*lotteryapp.EntryResult, error) {
+func (r *Repo) AddEntry(ctx context.Context, lotteryID, userID uint, registeredAt time.Time, now func() time.Time) (*lotteryapp.EntryResult, error) {
 	var result lotteryapp.EntryResult
 	err := r.withTx(ctx, func(txCtx context.Context, tx *gorm.DB) error {
 		var lottery LotteryModel
@@ -262,10 +262,14 @@ func (r *Repo) AddEntry(ctx context.Context, lotteryID, userID uint, registeredA
 		if !errors.Is(findErr, gorm.ErrRecordNotFound) {
 			return fmt.Errorf("find lottery entry: %w", findErr)
 		}
-		if lottery.Status != string(lotterydomain.StatusOpen) || (lottery.DrawAt != nil && !lottery.DrawAt.After(now)) || (lottery.ParticipantTarget != nil && lottery.ParticipantCount >= *lottery.ParticipantTarget) || lottery.ParticipantCount >= lottery.MaxParticipants {
+		current := time.Now().UTC()
+		if now != nil {
+			current = now().UTC()
+		}
+		if lottery.Status != string(lotterydomain.StatusOpen) || (lottery.DrawAt != nil && !lottery.DrawAt.After(current)) || (lottery.ParticipantTarget != nil && lottery.ParticipantCount >= *lottery.ParticipantTarget) || lottery.ParticipantCount >= lottery.MaxParticipants {
 			return lotterydomain.ErrLotteryClosed
 		}
-		entryModel := EntryModel{LotteryID: lotteryID, UserID: userID, RegisteredAt: registeredAt, CreatedAt: now}
+		entryModel := EntryModel{LotteryID: lotteryID, UserID: userID, RegisteredAt: registeredAt, CreatedAt: current}
 		if err := txCtxDB(txCtx, tx).Create(&entryModel).Error; err != nil {
 			if errors.Is(err, gorm.ErrDuplicatedKey) {
 				return lotterydomain.ErrLotteryAlreadyEntered
@@ -273,10 +277,10 @@ func (r *Repo) AddEntry(ctx context.Context, lotteryID, userID uint, registeredA
 			return fmt.Errorf("create lottery entry: %w", err)
 		}
 		lottery.ParticipantCount++
-		updates := map[string]any{"participant_count": lottery.ParticipantCount, "updated_at": now}
+		updates := map[string]any{"participant_count": lottery.ParticipantCount, "updated_at": current}
 		if lottery.ParticipantTarget != nil && lottery.ParticipantCount >= *lottery.ParticipantTarget && lottery.TargetReachedAt == nil {
-			lottery.TargetReachedAt = &now
-			updates["target_reached_at"] = now
+			lottery.TargetReachedAt = &current
+			updates["target_reached_at"] = current
 		}
 		if err := txCtxDB(txCtx, tx).Model(&LotteryModel{}).Where("id = ?", lotteryID).Updates(updates).Error; err != nil {
 			return fmt.Errorf("update lottery participant count: %w", err)

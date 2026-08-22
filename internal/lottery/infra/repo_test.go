@@ -30,10 +30,30 @@ func TestAddEntryReturnsExistingEntryAfterLotteryClosed(t *testing.T) {
 	entry := EntryModel{LotteryID: lottery.ID, UserID: 2, RegisteredAt: now.Add(-24 * time.Hour), CreatedAt: now}
 	require.NoError(t, db.Create(&entry).Error)
 
-	result, err := NewRepo(db).AddEntry(context.Background(), lottery.ID, entry.UserID, entry.RegisteredAt, now.Add(time.Minute))
+	result, err := NewRepo(db).AddEntry(context.Background(), lottery.ID, entry.UserID, entry.RegisteredAt, func() time.Time { return now.Add(time.Minute) })
 	require.NoError(t, err)
 	require.True(t, result.AlreadyExists)
 	require.Equal(t, entry.ID, result.Entry.ID)
+}
+
+func TestAddEntryUsesFreshClockForDrawDeadline(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:lottery-entry-deadline-%s?mode=memory&cache=shared", t.Name())), &gorm.Config{TranslateError: true})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&LotteryModel{}, &EntryModel{}, &PayoutModel{}))
+	weights, err := json.Marshal(lotterydomain.TierWeights{Consolation: 80, Normal: 15, Lucky: 5})
+	require.NoError(t, err)
+	start := time.Now().UTC()
+	drawAt := start.Add(time.Minute)
+	lottery := LotteryModel{
+		PublicToken: "deadline-lottery", CreatedByUserID: 1, FundingUserID: 1, Title: "Deadline",
+		TotalAmount: "100.00", MinPayout: "1.00", MaxPayout: "20.00", TierWeightsJSON: string(weights),
+		DrawAt: &drawAt, MaxParticipants: 10, Status: string(lotterydomain.StatusOpen), AlgorithmVersion: "bounded-tier-v1",
+		IdempotencyKey: "deadline-test", CreatedAt: start, UpdatedAt: start,
+	}
+	require.NoError(t, db.Create(&lottery).Error)
+
+	_, err = NewRepo(db).AddEntry(context.Background(), lottery.ID, 2, start, func() time.Time { return drawAt.Add(time.Second) })
+	require.ErrorIs(t, err, lotterydomain.ErrLotteryClosed)
 }
 
 func TestRecordBillingTransactionsRejectsMissingPayout(t *testing.T) {

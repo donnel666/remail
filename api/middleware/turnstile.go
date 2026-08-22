@@ -40,7 +40,6 @@ var turnstileActions = map[string]string{
 	"/v1/projects/:projectId/resubmit": "project_resubmit",
 	"/v1/tickets":                      "ticket_create",
 	"/v1/lotteries/:token/entries":     "lottery_enter",
-	"/v1/admin/lotteries":              "lottery_publish",
 
 	// Bulk supplier writes: rare per user, large blast radius per call.
 	// ponytail: unconditional. Charging a challenge only past a daily free
@@ -76,10 +75,9 @@ func TurnstileGuard(verifier TurnstileVerifier, limiter TurnstileSiteLimiter) gi
 			c.Next()
 			return
 		}
-		// Lottery entry and publication are money-equivalent reward operations;
-		// they remain fail-closed even when the general low-risk CAPTCHA switch
-		// is disabled for other routes.
-		if !runtimeconfig.Bool("captcha_enabled", true) && action != "lottery_enter" && action != "lottery_publish" {
+		// Lottery entry remains fail-closed even when the general low-risk CAPTCHA
+		// switch is disabled for other routes.
+		if !runtimeconfig.Bool("captcha_enabled", true) && action != "lottery_enter" {
 			c.Next()
 			return
 		}

@@ -11,6 +11,7 @@ const translations: Record<string, string> = {
   "Please retry in {{seconds}} seconds.": "请在 {{seconds}} 秒后重试。",
   "Request failed.": "请求失败。",
   "Service is temporarily unavailable.": "服务暂时不可用，请稍后重试。",
+  "Lottery account must be at least {{days}} days old.": "账号需满 {{days}} 天。",
 };
 
 const t = ((key: string, options?: Record<string, unknown>) => {
@@ -30,6 +31,16 @@ describe("API error messages", () => {
     expect(getIamErrorMessage(t, error, "Order creation failed.")).toBe(
       "当前库存不足，请减少数量或更换商品。",
     );
+  });
+
+  it("translates a coded lottery eligibility error with its required age", () => {
+    const error = new IamApiError(403, {
+      code: "lottery_account_age",
+      message: "Lottery account age requirement not met.",
+      fields: { requiredDays: "30" },
+    });
+
+    expect(getIamErrorMessage(t, error)).toBe("账号需满 30 天。");
   });
 
   it("does not expose an unknown backend message", () => {

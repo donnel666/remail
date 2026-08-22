@@ -13,8 +13,8 @@ type CreateLotteryRequest struct {
 	MaxPayout         string                    `json:"maxPayout"`
 	TierWeights       lotterydomain.TierWeights `json:"tierWeights"`
 	MinAccountAgeDays int                       `json:"minAccountAgeDays"`
-	DrawAt            *time.Time                `json:"drawAt"`
-	ParticipantTarget *int                      `json:"participantTarget"`
+	DrawAt            *time.Time                `json:"drawAt,omitempty"`
+	ParticipantTarget *int                      `json:"participantTarget,omitempty"`
 }
 
 type LotteryResponse struct {
@@ -38,10 +38,28 @@ type LotteryResponse struct {
 	SettledAt         *time.Time                `json:"settledAt,omitempty"`
 }
 
+// PublicLotterySummary intentionally contains no rule, participant, account,
+// payout-tier, or accounting fields. The public URL is an invitation to enter
+// an activity, not an API for discovering its private allocation algorithm.
+type PublicLotterySummary struct {
+	Title       string     `json:"title"`
+	TotalAmount string     `json:"totalAmount"`
+	DrawAt      *time.Time `json:"drawAt,omitempty"`
+	Status      string     `json:"status"`
+}
+
+type PublicPayoutResponse struct {
+	Amount string `json:"amount"`
+}
+
 type PublicLotteryResponse struct {
-	Lottery    LotteryResponse `json:"lottery"`
-	HasEntered bool            `json:"hasEntered"`
-	MyPayout   *PayoutResponse `json:"myPayout,omitempty"`
+	Lottery    PublicLotterySummary  `json:"lottery"`
+	HasEntered bool                  `json:"hasEntered"`
+	MyPayout   *PublicPayoutResponse `json:"myPayout,omitempty"`
+}
+
+type PublicEntryResponse struct {
+	Already bool `json:"already"`
 }
 
 type EntryResponse struct {
@@ -90,6 +108,12 @@ func lotteryResponse(item *lotterydomain.Lottery) LotteryResponse {
 		ParticipantTarget: item.ParticipantTarget, ParticipantCount: item.ParticipantCount, MaxParticipants: item.MaxParticipants,
 		Status: string(item.Status), TriggeredBy: string(item.TriggeredBy), UnusedAmount: item.UnusedAmount,
 		CreatedAt: item.CreatedAt, SettledAt: item.SettledAt,
+	}
+}
+
+func publicLotterySummary(item *lotterydomain.Lottery) PublicLotterySummary {
+	return PublicLotterySummary{
+		Title: item.Title, TotalAmount: item.TotalAmount, DrawAt: item.DrawAt, Status: string(item.Status),
 	}
 }
 

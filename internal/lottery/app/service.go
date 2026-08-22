@@ -23,9 +23,9 @@ import (
 
 const (
 	algorithmVersion = "bounded-tier-v1"
-	// ponytail: keep the first release bounded until settlement is resumable
-	// in batches; raise this only with a chunked Billing contract.
-	maxLotteryEntries = 1000
+	// ponytail: keep one settlement below the current Billing task ceiling;
+	// raise this only with a chunked Billing contract.
+	maxLotteryEntries = 5000
 )
 
 func (s *Service) Create(ctx context.Context, req CreateRequest) (*CreateResult, error) {
@@ -37,9 +37,6 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*CreateResult,
 	total, minPayout, maxPayout, maxParticipants, err := validateRules(req)
 	if err != nil {
 		return nil, err
-	}
-	if req.DrawAt == nil || !req.DrawAt.UTC().After(now) {
-		return nil, lotterydomain.ErrLotteryInvalidRules
 	}
 	fingerprint := lotteryRequestFingerprint(req, total, minPayout, maxPayout)
 	if existing, lookupErr := s.repo.FindByIdempotency(ctx, req.CreatedByUserID, key); lookupErr == nil && existing != nil {
@@ -53,6 +50,9 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*CreateResult,
 		return &CreateResult{Lottery: existing, Replayed: true}, nil
 	} else if lookupErr != nil && !errors.Is(lookupErr, lotterydomain.ErrLotteryNotFound) {
 		return nil, lookupErr
+	}
+	if req.DrawAt != nil && !req.DrawAt.UTC().After(now) {
+		return nil, lotterydomain.ErrLotteryInvalidRules
 	}
 	target := copyInt(req.ParticipantTarget)
 	lottery := &lotterydomain.Lottery{
@@ -88,7 +88,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*CreateResult,
 		}
 		return nil, err
 	}
-	if s.queue != nil {
+	if s.queue != nil && lottery.DrawAt != nil {
 		_ = s.queue.EnqueueDraw(ctx, lottery.ID, lottery.DrawAt)
 	}
 	return &CreateResult{Lottery: lottery}, nil
@@ -103,17 +103,51 @@ func (s *Service) Enter(ctx context.Context, token string, userID uint) (*EntryR
 		return nil, err
 	}
 	if lottery.CreatedByUserID == userID {
-		return nil, lotterydomain.ErrLotteryClosed
+		return nil, &lotterydomain.EntryRejectedError{
+			Code: lotterydomain.EntryRejectedCreator, Cause: lotterydomain.ErrLotteryClosed,
+		}
+	}
+	now := s.now().UTC()
+	if lottery.Status != lotterydomain.StatusOpen ||
+		(lottery.DrawAt != nil && !lottery.DrawAt.After(now)) ||
+		(lottery.ParticipantTarget != nil && lottery.ParticipantCount >= *lottery.ParticipantTarget) {
+		return nil, &lotterydomain.EntryRejectedError{
+			Code: lotterydomain.EntryRejectedClosed, Cause: lotterydomain.ErrLotteryClosed,
+		}
+	}
+	if lottery.MaxParticipants > 0 && lottery.ParticipantCount >= lottery.MaxParticipants {
+		return nil, &lotterydomain.EntryRejectedError{
+			Code: lotterydomain.EntryRejectedFull, Cause: lotterydomain.ErrLotteryClosed,
+		}
+	}
+	if s.users == nil {
+		return nil, &lotterydomain.EntryRejectedError{
+			Code: lotterydomain.EntryRejectedInactive, Cause: lotterydomain.ErrLotteryNotEligible,
+		}
 	}
 	user, err := s.users.FindLotteryUser(ctx, userID)
-	if err != nil || user == nil || strings.ToLower(strings.TrimSpace(user.Status)) != "active" {
-		return nil, lotterydomain.ErrLotteryNotEligible
-	}
-	if lottery.MinAccountAgeDays > 0 && user.CreatedAt.After(s.now().UTC().AddDate(0, 0, -lottery.MinAccountAgeDays)) {
-		return nil, lotterydomain.ErrLotteryNotEligible
-	}
-	result, err := s.repo.AddEntry(ctx, lottery.ID, userID, user.CreatedAt, s.now().UTC())
 	if err != nil {
+		return nil, err
+	}
+	if user == nil || strings.ToLower(strings.TrimSpace(user.Status)) != "active" {
+		return nil, &lotterydomain.EntryRejectedError{
+			Code: lotterydomain.EntryRejectedInactive, Cause: lotterydomain.ErrLotteryNotEligible,
+		}
+	}
+	now = s.now().UTC()
+	if lottery.MinAccountAgeDays > 0 && user.CreatedAt.After(now.AddDate(0, 0, -lottery.MinAccountAgeDays)) {
+		return nil, &lotterydomain.EntryRejectedError{
+			Code: lotterydomain.EntryRejectedAge, RequiredDays: lottery.MinAccountAgeDays,
+			Cause: lotterydomain.ErrLotteryNotEligible,
+		}
+	}
+	result, err := s.repo.AddEntry(ctx, lottery.ID, userID, user.CreatedAt, s.now)
+	if err != nil {
+		if errors.Is(err, lotterydomain.ErrLotteryClosed) {
+			return nil, &lotterydomain.EntryRejectedError{
+				Code: lotterydomain.EntryRejectedClosed, Cause: lotterydomain.ErrLotteryClosed,
+			}
+		}
 		return nil, err
 	}
 	if !result.AlreadyExists && result.Lottery != nil && result.Lottery.ParticipantTarget != nil && result.Lottery.ParticipantCount >= *result.Lottery.ParticipantTarget && s.queue != nil {
@@ -203,9 +237,15 @@ func (s *Service) Draw(ctx context.Context, lotteryID uint) error {
 	if err != nil {
 		return fmt.Errorf("settle lottery %d: %w", lotteryID, err)
 	}
+	if settlement == nil {
+		return fmt.Errorf("settle lottery %d: nil billing result: %w", lotteryID, lotterydomain.ErrLotterySettlement)
+	}
+	if err := validateSettlementAwards(payouts, settlement.Awards); err != nil {
+		return fmt.Errorf("settle lottery %d: %w", lotteryID, err)
+	}
 	transactions := make(map[uint]string, len(settlement.Awards))
 	for _, award := range settlement.Awards {
-		transactions[award.UserID] = award.Transaction.TransactionNo
+		transactions[award.UserID] = strings.TrimSpace(award.Transaction.TransactionNo)
 	}
 	if err := s.repo.RecordBillingTransactions(ctx, lotteryID, transactions, unusedAmount); err != nil {
 		return err
@@ -254,7 +294,7 @@ func validateRules(req CreateRequest) (total, minPayout, maxPayout string, maxPa
 		err = lotterydomain.ErrLotteryInvalidRules
 		return
 	}
-	if req.MinAccountAgeDays < 0 || !req.TierWeights.Valid() || req.DrawAt == nil || req.ParticipantTarget == nil {
+	if req.MinAccountAgeDays < 0 || !req.TierWeights.Valid() || (req.DrawAt == nil && req.ParticipantTarget == nil) {
 		err = lotterydomain.ErrLotteryInvalidRules
 		return
 	}
@@ -269,14 +309,28 @@ func validateRules(req CreateRequest) (total, minPayout, maxPayout string, maxPa
 		err = lotterydomain.ErrLotteryInvalidRules
 		return
 	}
-	target := int64(*req.ParticipantTarget)
-	if target > math.MaxInt64/minUnits || target*minUnits >= totalUnits {
-		// The target must leave at least one unit of variable budget; otherwise
-		// a full target draw is necessarily flat at the minimum payout.
-		err = lotterydomain.ErrLotteryInvalidRules
-		return
+	maxParticipants = maxLotteryEntries
+	if req.ParticipantTarget != nil {
+		target := int64(*req.ParticipantTarget)
+		if target > math.MaxInt64/minUnits || target*minUnits >= totalUnits {
+			// The target must leave at least one unit of variable budget; otherwise
+			// a full target draw is necessarily flat at the minimum payout.
+			err = lotterydomain.ErrLotteryInvalidRules
+			return
+		}
+		maxParticipants = int(target)
+	} else {
+		// A time-only activity has no user-supplied target, so cap entries at a
+		// fundable count while retaining the global settlement bound.
+		if totalUnits <= minUnits {
+			err = lotterydomain.ErrLotteryInvalidRules
+			return
+		}
+		fundable := (totalUnits - 1) / minUnits
+		if fundable < int64(maxParticipants) {
+			maxParticipants = int(fundable)
+		}
 	}
-	maxParticipants = int(target)
 	return money.Format(totalDec), money.Format(minDec), money.Format(maxDec), maxParticipants, nil
 }
 
@@ -296,14 +350,17 @@ func Allocate(entries []lotterydomain.Entry, totalAmount, minPayout, maxPayout s
 	if err != nil {
 		return nil, "0.00", err
 	}
-	total, _ := amountUnits(totalDec)
-	minValue, _ := amountUnits(minDec)
-	maxValue, _ := amountUnits(maxDec)
+	total, totalUnitsErr := amountUnits(totalDec)
+	minValue, minUnitsErr := amountUnits(minDec)
+	maxValue, maxUnitsErr := amountUnits(maxDec)
+	if totalUnitsErr != nil || minUnitsErr != nil || maxUnitsErr != nil || total <= 0 {
+		return nil, "0.00", lotterydomain.ErrLotteryInvalidRules
+	}
 	n := int64(len(entries))
 	if n <= 0 || n > maxLotteryEntries || minValue <= 0 || maxValue < minValue {
 		return nil, "0.00", lotterydomain.ErrLotteryInvalidRules
 	}
-	if n > math.MaxInt64/maxValue || n > math.MaxInt64/minValue {
+	if n > math.MaxInt64/minValue {
 		return nil, "0.00", lotterydomain.ErrLotteryInvalidRules
 	}
 	// The configured maximum is still an upper bound, but a draw also caps one
@@ -314,6 +371,9 @@ func Allocate(entries []lotterydomain.Entry, totalAmount, minPayout, maxPayout s
 		effectiveMax = averageCap
 	}
 	if effectiveMax <= minValue {
+		return nil, "0.00", lotterydomain.ErrLotteryInvalidRules
+	}
+	if n > math.MaxInt64/effectiveMax {
 		return nil, "0.00", lotterydomain.ErrLotteryInvalidRules
 	}
 	budget := total
@@ -632,6 +692,15 @@ func (s *Service) Public(ctx context.Context, token string, userID uint) (*lotte
 		if err != nil {
 			return nil, nil, nil, err
 		}
+		if entry == nil {
+			payout = nil
+		}
+		// Payout rows are written before Billing and lottery completion. Keep the
+		// amount private until the award is final, rather than exposing a
+		// provisional allocation while the activity is settling.
+		if lottery.Status != lotterydomain.StatusCompleted {
+			payout = nil
+		}
 	}
 	return lottery, entry, payout, nil
 }
@@ -751,4 +820,33 @@ func remainingUnused(totalAmount string, payouts []lotterydomain.Payout) (string
 		return "", lotterydomain.ErrLotteryInvalidRules
 	}
 	return money.Format(unused), nil
+}
+
+func validateSettlementAwards(payouts []lotterydomain.Payout, awards []billingapp.LotteryAwardResult) error {
+	if len(payouts) != len(awards) {
+		return fmt.Errorf("billing returned %d awards for %d payouts: %w", len(awards), len(payouts), lotterydomain.ErrLotterySettlement)
+	}
+	expected := make(map[uint]string, len(payouts))
+	for _, payout := range payouts {
+		if _, exists := expected[payout.UserID]; exists {
+			return fmt.Errorf("duplicate payout user %d: %w", payout.UserID, lotterydomain.ErrLotterySettlement)
+		}
+		expected[payout.UserID] = payout.Amount
+	}
+	for _, award := range awards {
+		expectedAmount, ok := expected[award.UserID]
+		if !ok || strings.TrimSpace(award.Transaction.TransactionNo) == "" {
+			return fmt.Errorf("billing returned an unknown or transaction-less award for user %d: %w", award.UserID, lotterydomain.ErrLotterySettlement)
+		}
+		expectedValue, expectedErr := money.Parse(expectedAmount)
+		actualValue, actualErr := money.Parse(award.Amount)
+		if expectedErr != nil || actualErr != nil || !expectedValue.Equal(actualValue) {
+			return fmt.Errorf("billing award amount mismatch for user %d: %w", award.UserID, lotterydomain.ErrLotterySettlement)
+		}
+		delete(expected, award.UserID)
+	}
+	if len(expected) != 0 {
+		return fmt.Errorf("billing omitted %d payout awards: %w", len(expected), lotterydomain.ErrLotterySettlement)
+	}
+	return nil
 }

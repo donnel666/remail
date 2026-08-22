@@ -5381,6 +5381,8 @@ export interface components {
             };
         };
         Error: {
+            /** @description Stable business error code for client-side translation (optional) */
+            code?: string;
             /**
              * @description Safe business error message for the user
              * @example Account or password is incorrect.
@@ -5401,6 +5403,7 @@ export interface components {
             normal: number;
             lucky: number;
         };
+        /** @description Set at least one draw condition. If both are provided, whichever condition is met first starts the draw. */
         CreateLotteryRequest: {
             title: string;
             totalAmount: string;
@@ -5408,9 +5411,13 @@ export interface components {
             maxPayout: string;
             tierWeights: components["schemas"]["LotteryTierWeights"];
             minAccountAgeDays: number;
-            /** Format: date-time */
-            drawAt: string;
-            participantTarget: number;
+            /**
+             * Format: date-time
+             * @description Optional future draw time. The activity can use this condition, the participant target, or both.
+             */
+            drawAt?: string | null;
+            /** @description Optional participant count that triggers the draw. The activity can use this condition, the draw time, or both. */
+            participantTarget?: number | null;
         };
         LotteryResponse: {
             id: number;
@@ -5424,8 +5431,10 @@ export interface components {
             minAccountAgeDays: number;
             /** Format: date-time */
             drawAt?: string | null;
+            /** @description Participant count trigger, or null when the activity is time-only. */
             participantTarget?: number | null;
             participantCount: number;
+            /** @description Internal entry safety cap; it is not a draw condition when participantTarget is null. */
             maxParticipants: number;
             /** @enum {string} */
             status: "funding" | "open" | "settling" | "completed" | "cancelled";
@@ -5437,9 +5446,23 @@ export interface components {
             settledAt?: string | null;
         };
         PublicLotteryResponse: {
-            lottery: components["schemas"]["LotteryResponse"];
+            lottery: components["schemas"]["PublicLotterySummary"];
             hasEntered: boolean;
-            myPayout?: components["schemas"]["LotteryPayoutResponse"] | null;
+            myPayout?: components["schemas"]["PublicPayoutResponse"] | null;
+        };
+        PublicLotterySummary: {
+            title: string;
+            totalAmount: string;
+            /** Format: date-time */
+            drawAt?: string | null;
+            /** @enum {string} */
+            status: "funding" | "open" | "settling" | "completed" | "cancelled";
+        };
+        PublicPayoutResponse: {
+            amount: string;
+        };
+        PublicEntryResponse: {
+            already: boolean;
         };
         LotteryEntryResponse: {
             id: number;
@@ -24716,7 +24739,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LotteryEntryResponse"];
+                    "application/json": components["schemas"]["PublicEntryResponse"];
                 };
             };
             /** @description Entry accepted */
@@ -24725,7 +24748,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LotteryEntryResponse"];
+                    "application/json": components["schemas"]["PublicEntryResponse"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -24769,8 +24792,6 @@ export interface operations {
                 "X-CSRF-Token": components["parameters"]["CsrfToken"];
                 /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
                 "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
-                /** @description Single-use Cloudflare Turnstile token. Required when captcha_enabled is on for low-frequency, high-damage writes (money movement, submissions entering a human review queue, bulk supplier imports). Each route expects a token minted for its own action string, so a token cannot be replayed across routes. Ignored when the captcha_enabled system setting is off. Not required on the API-key /v1/open surface. */
-                "X-Turnstile-Token"?: components["parameters"]["TurnstileToken"];
             };
             path?: never;
             cookie?: never;

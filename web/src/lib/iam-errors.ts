@@ -33,6 +33,29 @@ function fallbackMessage(
   return t(fallbackKey);
 }
 
+function lotteryCodeMessage(t: TFunction, error: IamApiError) {
+  switch (error.code) {
+    case "lottery_account_age": {
+      const days = error.fields?.requiredDays;
+      return days
+        ? t("Lottery account must be at least {{days}} days old.", { days })
+        : t("Lottery account age requirement not met.");
+    }
+    case "lottery_account_inactive":
+      return t("Lottery account is not active.");
+    case "lottery_creator":
+      return t("The lottery creator cannot enter this activity.");
+    case "lottery_full":
+      return t("Lottery entry limit has been reached.");
+    case "lottery_closed":
+      return t("Lottery entry is closed.");
+    case "lottery_already_entered":
+      return t("You have already entered this lottery.");
+    default:
+      return undefined;
+  }
+}
+
 export function getApiErrorBodyMessage(
   t: TFunction,
   error: ApiErrorMessageBody | null | undefined,
@@ -47,6 +70,10 @@ export function getIamErrorMessage(
   fallbackKey = "Request failed.",
 ) {
   const fallback = fallbackMessage(t, error, fallbackKey);
+  if (error instanceof IamApiError) {
+    const coded = lotteryCodeMessage(t, error);
+    if (coded) return coded;
+  }
   let message = error instanceof Error ? error.message : undefined;
   if (error instanceof IamApiError && message === "Request failed.") {
     message = undefined;

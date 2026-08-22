@@ -3338,6 +3338,33 @@ func (e ProxyItemStatus) Valid() bool {
 	}
 }
 
+// Defines values for PublicLotterySummaryStatus.
+const (
+	PublicLotterySummaryStatusCancelled PublicLotterySummaryStatus = "cancelled"
+	PublicLotterySummaryStatusCompleted PublicLotterySummaryStatus = "completed"
+	PublicLotterySummaryStatusFunding   PublicLotterySummaryStatus = "funding"
+	PublicLotterySummaryStatusOpen      PublicLotterySummaryStatus = "open"
+	PublicLotterySummaryStatusSettling  PublicLotterySummaryStatus = "settling"
+)
+
+// Valid indicates whether the value is a known member of the PublicLotterySummaryStatus enum.
+func (e PublicLotterySummaryStatus) Valid() bool {
+	switch e {
+	case PublicLotterySummaryStatusCancelled:
+		return true
+	case PublicLotterySummaryStatusCompleted:
+		return true
+	case PublicLotterySummaryStatusFunding:
+		return true
+	case PublicLotterySummaryStatusOpen:
+		return true
+	case PublicLotterySummaryStatusSettling:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RechargeItemStatus.
 const (
 	RechargeItemStatusCallback   RechargeItemStatus = "callback"
@@ -7675,13 +7702,16 @@ type CreateDomainRequest struct {
 // CreateDomainRequestPurpose Defaults to not_sale. Domain creation does not accept sale; suppliers publish private domains through the resource publish endpoint. binding is admin-only and displayed as auxiliary mailbox in Chinese.
 type CreateDomainRequestPurpose string
 
-// CreateLotteryRequest defines model for CreateLotteryRequest.
+// CreateLotteryRequest Set at least one draw condition. If both are provided, whichever condition is met first starts the draw.
 type CreateLotteryRequest struct {
-	DrawAt            time.Time          `json:"drawAt"`
-	MaxPayout         string             `json:"maxPayout"`
-	MinAccountAgeDays int                `json:"minAccountAgeDays"`
-	MinPayout         string             `json:"minPayout"`
-	ParticipantTarget int                `json:"participantTarget"`
+	// DrawAt Optional future draw time. The activity can use this condition, the participant target, or both.
+	DrawAt            *time.Time `json:"drawAt,omitempty"`
+	MaxPayout         string     `json:"maxPayout"`
+	MinAccountAgeDays int        `json:"minAccountAgeDays"`
+	MinPayout         string     `json:"minPayout"`
+
+	// ParticipantTarget Optional participant count that triggers the draw. The activity can use this condition, the draw time, or both.
+	ParticipantTarget *int               `json:"participantTarget,omitempty"`
 	TierWeights       LotteryTierWeights `json:"tierWeights"`
 	Title             string             `json:"title"`
 	TotalAmount       string             `json:"totalAmount"`
@@ -7990,6 +8020,9 @@ type EmailCodeRequest struct {
 
 // Error defines model for Error.
 type Error struct {
+	// Code Stable business error code for client-side translation (optional)
+	Code *string `json:"code,omitempty"`
+
 	// Fields Field-level validation errors (optional)
 	Fields *map[string]string `json:"fields,omitempty"`
 
@@ -8547,14 +8580,18 @@ type LotteryPayoutResponseTier string
 
 // LotteryResponse defines model for LotteryResponse.
 type LotteryResponse struct {
-	CreatedAt         time.Time             `json:"createdAt"`
-	DrawAt            *time.Time            `json:"drawAt,omitempty"`
-	Id                int                   `json:"id"`
-	MaxParticipants   int                   `json:"maxParticipants"`
-	MaxPayout         string                `json:"maxPayout"`
-	MinAccountAgeDays int                   `json:"minAccountAgeDays"`
-	MinPayout         string                `json:"minPayout"`
-	ParticipantCount  int                   `json:"participantCount"`
+	CreatedAt time.Time  `json:"createdAt"`
+	DrawAt    *time.Time `json:"drawAt,omitempty"`
+	Id        int        `json:"id"`
+
+	// MaxParticipants Internal entry safety cap; it is not a draw condition when participantTarget is null.
+	MaxParticipants   int    `json:"maxParticipants"`
+	MaxPayout         string `json:"maxPayout"`
+	MinAccountAgeDays int    `json:"minAccountAgeDays"`
+	MinPayout         string `json:"minPayout"`
+	ParticipantCount  int    `json:"participantCount"`
+
+	// ParticipantTarget Participant count trigger, or null when the activity is time-only.
 	ParticipantTarget *int                  `json:"participantTarget,omitempty"`
 	PublicToken       string                `json:"publicToken"`
 	PublicUrl         string                `json:"publicUrl"`
@@ -9559,11 +9596,32 @@ type ProxyStatsResponse struct {
 	Total      int          `json:"total"`
 }
 
+// PublicEntryResponse defines model for PublicEntryResponse.
+type PublicEntryResponse struct {
+	Already bool `json:"already"`
+}
+
 // PublicLotteryResponse defines model for PublicLotteryResponse.
 type PublicLotteryResponse struct {
-	HasEntered bool                   `json:"hasEntered"`
-	Lottery    LotteryResponse        `json:"lottery"`
-	MyPayout   *LotteryPayoutResponse `json:"myPayout,omitempty"`
+	HasEntered bool                  `json:"hasEntered"`
+	Lottery    PublicLotterySummary  `json:"lottery"`
+	MyPayout   *PublicPayoutResponse `json:"myPayout,omitempty"`
+}
+
+// PublicLotterySummary defines model for PublicLotterySummary.
+type PublicLotterySummary struct {
+	DrawAt      *time.Time                 `json:"drawAt,omitempty"`
+	Status      PublicLotterySummaryStatus `json:"status"`
+	Title       string                     `json:"title"`
+	TotalAmount string                     `json:"totalAmount"`
+}
+
+// PublicLotterySummaryStatus defines model for PublicLotterySummary.Status.
+type PublicLotterySummaryStatus string
+
+// PublicPayoutResponse defines model for PublicPayoutResponse.
+type PublicPayoutResponse struct {
+	Amount string `json:"amount"`
 }
 
 // PublishResourcesRequest defines model for PublishResourcesRequest.
@@ -11423,9 +11481,6 @@ type PostAdminLotteryParams struct {
 
 	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
 	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
-
-	// XTurnstileToken Single-use Cloudflare Turnstile token. Required when captcha_enabled is on for low-frequency, high-damage writes (money movement, submissions entering a human review queue, bulk supplier imports). Each route expects a token minted for its own action string, so a token cannot be replayed across routes. Ignored when the captcha_enabled system setting is off. Not required on the API-key /v1/open surface.
-	XTurnstileToken *TurnstileToken `json:"X-Turnstile-Token,omitempty"`
 }
 
 // GetAdminLotteryEntriesParams defines parameters for GetAdminLotteryEntries.
@@ -22295,25 +22350,6 @@ func (siw *ServerInterfaceWrapper) PostAdminLottery(c *gin.Context) {
 	} else {
 		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
 		return
-	}
-
-	// ------------- Optional header parameter "X-Turnstile-Token" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("X-Turnstile-Token")]; found {
-		var XTurnstileToken TurnstileToken
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Turnstile-Token, got %d", n), http.StatusBadRequest)
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "X-Turnstile-Token", valueList[0], &XTurnstileToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Turnstile-Token: %w", err), http.StatusBadRequest)
-			return
-		}
-
-		params.XTurnstileToken = &XTurnstileToken
-
 	}
 
 	for _, middleware := range siw.HandlerMiddlewares {

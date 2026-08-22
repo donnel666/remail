@@ -136,9 +136,12 @@ func (h *Handler) GetPublicLottery(c *gin.Context) {
 		writeLotteryError(c, err)
 		return
 	}
-	response := PublicLotteryResponse{Lottery: lotteryResponse(lottery), HasEntered: entry != nil}
+	response := PublicLotteryResponse{
+		Lottery:    publicLotterySummary(lottery),
+		HasEntered: entry != nil,
+	}
 	if payout != nil {
-		mapped := payoutResponse(*payout)
+		mapped := PublicPayoutResponse{Amount: payout.Amount}
 		response.MyPayout = &mapped
 	}
 	c.Header("Cache-Control", "no-store")
@@ -160,7 +163,7 @@ func (h *Handler) PostPublicLotteryEntry(c *gin.Context) {
 	if result.AlreadyExists {
 		status = http.StatusOK
 	}
-	c.JSON(status, entryResponse(*result.Entry, result.AlreadyExists))
+	c.JSON(status, PublicEntryResponse{Already: result.AlreadyExists})
 }
 
 func parseLotteryID(c *gin.Context) (uint, bool) {
@@ -177,10 +180,36 @@ func writeInvalidLotteryBody(c *gin.Context) {
 }
 
 func writeLotteryError(c *gin.Context, err error) {
+	var rejected *lotterydomain.EntryRejectedError
+	if errors.As(err, &rejected) {
+		status := http.StatusForbidden
+		if errors.Is(err, lotterydomain.ErrLotteryClosed) {
+			status = http.StatusConflict
+		}
+		fields := map[string]string{}
+		if rejected.RequiredDays > 0 {
+			fields["requiredDays"] = strconv.Itoa(rejected.RequiredDays)
+		}
+		body := gin.H{
+			"code":      rejected.Code,
+			"message":   lotteryEntryErrorMessage(rejected.Code),
+			"requestId": middleware.GetRequestID(c),
+		}
+		if len(fields) > 0 {
+			body["fields"] = fields
+		}
+		c.JSON(status, body)
+		return
+	}
 	switch {
 	case errors.Is(err, lotterydomain.ErrLotteryNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"message": "Lottery not found.", "requestId": middleware.GetRequestID(c)})
-	case errors.Is(err, lotterydomain.ErrLotteryClosed), errors.Is(err, lotterydomain.ErrLotteryAlreadyEntered), errors.Is(err, lotterydomain.ErrLotteryNotReady):
+	case errors.Is(err, lotterydomain.ErrLotteryAlreadyEntered):
+		c.JSON(http.StatusConflict, gin.H{
+			"code": "lottery_already_entered", "message": "You have already entered this lottery.",
+			"requestId": middleware.GetRequestID(c),
+		})
+	case errors.Is(err, lotterydomain.ErrLotteryClosed), errors.Is(err, lotterydomain.ErrLotteryNotReady):
 		c.JSON(http.StatusConflict, gin.H{"message": "Lottery is closed or already settled.", "requestId": middleware.GetRequestID(c)})
 	case errors.Is(err, lotterydomain.ErrLotteryNotEligible):
 		c.JSON(http.StatusForbidden, gin.H{"message": "This account is not eligible for the lottery.", "requestId": middleware.GetRequestID(c)})
@@ -190,5 +219,20 @@ func writeLotteryError(c *gin.Context, err error) {
 		c.JSON(http.StatusConflict, gin.H{"message": "The idempotency key was already used with different lottery rules.", "requestId": middleware.GetRequestID(c)})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "An unexpected error occurred.", "requestId": middleware.GetRequestID(c)})
+	}
+}
+
+func lotteryEntryErrorMessage(code string) string {
+	switch code {
+	case lotterydomain.EntryRejectedInactive:
+		return "Lottery account is not active."
+	case lotterydomain.EntryRejectedAge:
+		return "Lottery account age requirement not met."
+	case lotterydomain.EntryRejectedCreator:
+		return "The lottery creator cannot enter this activity."
+	case lotterydomain.EntryRejectedFull:
+		return "Lottery entry limit has been reached."
+	default:
+		return "Lottery entry is closed."
 	}
 }

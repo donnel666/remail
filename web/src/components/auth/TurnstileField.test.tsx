@@ -1,16 +1,23 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, render, waitFor } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { TurnstileField } from "./TurnstileField";
+import { getTurnstileConfig } from "@/lib/iam-api";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 
 vi.mock("@/lib/iam-api", () => ({
-  getTurnstileConfig: vi.fn().mockResolvedValue({ enabled: true, siteKey: "site-key" }),
+  getTurnstileConfig: vi.fn(),
 }));
+
+const mockedGetTurnstileConfig = vi.mocked(getTurnstileConfig);
+
+beforeEach(() => {
+  mockedGetTurnstileConfig.mockResolvedValue({ enabled: true, siteKey: "site-key" });
+});
 
 afterEach(() => {
   cleanup();
@@ -43,4 +50,20 @@ it("renders the configured action and returns the verified token", async () => {
   await waitFor(() => expect(renderWidget).toHaveBeenCalledTimes(2));
   expect(remove).toHaveBeenCalledWith("widget-1");
   expect(onTokenChange).toHaveBeenLastCalledWith("");
+});
+
+it("still renders lottery verification when the general CAPTCHA switch is off", async () => {
+  mockedGetTurnstileConfig.mockResolvedValue({ enabled: false, siteKey: "site-key" });
+  const renderWidget = vi.fn(() => "widget-lottery");
+  window.turnstile = { render: renderWidget, remove: vi.fn() };
+
+  render(
+    <TurnstileField
+      action="lottery_enter"
+      onTokenChange={vi.fn()}
+      resetKey={0}
+    />,
+  );
+
+  await waitFor(() => expect(renderWidget).toHaveBeenCalledOnce());
 });

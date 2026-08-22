@@ -32,7 +32,7 @@ type Repository interface {
 	ListEntries(ctx context.Context, lotteryID uint, offset, limit int) ([]lotterydomain.Entry, int64, error)
 	ListPayouts(ctx context.Context, lotteryID uint, offset, limit int) ([]lotterydomain.Payout, int64, error)
 
-	AddEntry(ctx context.Context, lotteryID, userID uint, registeredAt, now time.Time) (*EntryResult, error)
+	AddEntry(ctx context.Context, lotteryID, userID uint, registeredAt time.Time, now func() time.Time) (*EntryResult, error)
 	ListAllEntries(ctx context.Context, lotteryID uint) ([]lotterydomain.Entry, error)
 	ClaimSettlement(ctx context.Context, lotteryID uint, now time.Time) (*lotterydomain.Lottery, error)
 	GetPayouts(ctx context.Context, lotteryID uint) ([]lotterydomain.Payout, error)

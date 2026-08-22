@@ -1,32 +1,50 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
-  Card,
+  DatePicker,
   Empty,
   Input,
-  Spin,
+  Modal,
+  SideSheet,
+  Space,
+  Tabs,
   Tag,
   Toast,
 } from "@douyinfe/semi-ui";
-import { Copy, ExternalLink, Gift, RefreshCw } from "lucide-react";
+import {
+  IllustrationNoResult,
+  IllustrationNoResultDark,
+} from "@douyinfe/semi-illustrations";
+import { ExternalLink, Gift, RefreshCw } from "lucide-react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 
-import { requireTurnstile } from "@/components/auth/TurnstileGate";
-import { CardTable } from "@/components/semi/card-table";
+import { CardPro } from "@/components/semi/card-pro";
+import { createCardProPagination } from "@/components/semi/card-pro-pagination";
+import {
+  CardTable,
+  DESKTOP_TABLE_SCROLL_Y,
+} from "@/components/semi/card-table";
+import { CopyableTableText } from "@/components/semi/copyable-table-text";
 import { copyText } from "@/lib/clipboard";
 import { generateIdempotencyKey } from "@/lib/idempotency";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import {
   createAdminLottery,
-  listAdminLotteryEntries,
-  listAdminLotteryPayouts,
+  getAdminLottery,
+  listAllAdminLotteryEntries,
+  listAllAdminLotteryPayouts,
   listAdminLotteries,
   type CreateLotteryInput,
   type Lottery,
-  type LotteryEntry,
+  type AdminLotteryEntry,
   type LotteryPayout,
 } from "@/lib/lottery-api";
+import { useIsMobile } from "@/hooks/use-is-mobile";
+import { useSharedPageSize } from "@/hooks/use-shared-page-size";
+
+type LotteryStatusFilter = "all" | Lottery["status"];
+const DETAIL_TABLE_SCROLL_Y = "max(220px, calc(100vh - 300px))";
 
 type FormState = {
   title: string;
@@ -37,7 +55,7 @@ type FormState = {
   normal: string;
   lucky: string;
   minAccountAgeDays: string;
-  drawAt: string;
+  drawAt: Date | null;
   participantTarget: string;
 };
 
@@ -50,11 +68,14 @@ const initialForm: FormState = {
   normal: "15",
   lucky: "5",
   minAccountAgeDays: "0",
-  drawAt: "",
+  drawAt: null,
   participantTarget: "100",
 };
 
-const statusMeta: Record<Lottery["status"], { color: string; labelKey: string }> = {
+const statusMeta: Record<
+  Lottery["status"],
+  { color: "amber" | "blue" | "orange" | "green" | "grey"; labelKey: string }
+> = {
   funding: { color: "amber", labelKey: "Lottery status funding" },
   open: { color: "blue", labelKey: "Lottery status open" },
   settling: { color: "orange", labelKey: "Lottery status settling" },
@@ -62,7 +83,7 @@ const statusMeta: Record<Lottery["status"], { color: string; labelKey: string }>
   cancelled: { color: "grey", labelKey: "Lottery status cancelled" },
 };
 
-const tierLabelKeys: Record<string, string> = {
+const tierLabelKeys: Record<LotteryPayout["tier"], string> = {
   consolation: "Consolation prize",
   normal: "Regular prize",
   lucky: "Lucky prize",
@@ -76,116 +97,125 @@ function formatTime(value: string | null | undefined, language: string) {
 
 function statusTag(status: Lottery["status"], t: TFunction) {
   const meta = statusMeta[status] ?? statusMeta.cancelled;
-  return <Tag color={meta.color as never}>{t(meta.labelKey)}</Tag>;
+  return (
+    <Tag color={meta.color} shape="circle" size="small">
+      {t(meta.labelKey)}
+    </Tag>
+  );
 }
 
-export default function AdminLotteries() {
-  const { i18n, t } = useTranslation();
-  const language = i18n.resolvedLanguage ?? i18n.language;
+function fieldLabel(label: string, required = false) {
+  return (
+    <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
+      {label}
+      {required ? " *" : ""}
+    </span>
+  );
+}
+
+function LotteryCreateModal({
+  onCancel,
+  onCreated,
+  visible,
+}: {
+  onCancel: () => void;
+  onCreated: (lottery: Lottery) => void | Promise<void>;
+  visible: boolean;
+}) {
+  const { t } = useTranslation();
   const [form, setForm] = useState<FormState>(initialForm);
-  const [items, setItems] = useState<Lottery[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [publishing, setPublishing] = useState(false);
-  const [selected, setSelected] = useState<Lottery | null>(null);
-  const [entries, setEntries] = useState<LotteryEntry[]>([]);
-  const [payouts, setPayouts] = useState<LotteryPayout[]>([]);
-  const [entryTotal, setEntryTotal] = useState(0);
-  const [payoutTotal, setPayoutTotal] = useState(0);
-  const [detailLoading, setDetailLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const publishKeyRef = useRef<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const response = await listAdminLotteries(undefined, 0, 50);
-      setItems(response.items);
-      setTotal(response.total);
-    } catch (error) {
-      Toast.error(getIamErrorMessage(t, error, "Lottery campaigns load failed."));
-    } finally {
-      setLoading(false);
-    }
-  }, [t]);
-
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (!visible) return;
+    setForm(initialForm);
+    publishKeyRef.current = null;
+  }, [visible]);
 
-  useEffect(() => {
-    if (!selected) {
-      setEntries([]);
-      setPayouts([]);
-      setEntryTotal(0);
-      setPayoutTotal(0);
-      return;
-    }
-    let cancelled = false;
-    setDetailLoading(true);
-    void Promise.all([
-      listAdminLotteryEntries(selected.id, 0, 100),
-      listAdminLotteryPayouts(selected.id, 0, 100),
-    ])
-      .then(([entryPage, payoutPage]) => {
-        if (cancelled) return;
-        setEntries(entryPage.items);
-        setPayouts(payoutPage.items);
-        setEntryTotal(entryPage.total);
-        setPayoutTotal(payoutPage.total);
-      })
-      .catch((error) => {
-        if (!cancelled) Toast.error(getIamErrorMessage(t, error, "Lottery details load failed."));
-      })
-      .finally(() => {
-        if (!cancelled) setDetailLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [selected, t]);
-
-  const setField = (key: keyof FormState, value: string) => {
+  const setField = <K extends keyof FormState>(key: K, value: FormState[K]) => {
     publishKeyRef.current = null;
     setForm((current) => ({ ...current, [key]: value }));
   };
 
-  const tierTotal = useMemo(
-    () =>
-      Number(form.consolation || 0) +
-      Number(form.normal || 0) +
-      Number(form.lucky || 0),
-    [form.consolation, form.lucky, form.normal],
-  );
+  const tierTotal =
+    Number(form.consolation || 0) +
+    Number(form.normal || 0) +
+    Number(form.lucky || 0);
 
-  const publish = async () => {
-    const target = Number(form.participantTarget);
+  const submit = async () => {
+    const hasTarget = form.participantTarget.trim() !== "";
+    const target = hasTarget ? Number(form.participantTarget) : undefined;
+    const hasDrawAt = form.drawAt !== null;
     const minAge = Number(form.minAccountAgeDays);
-    const drawAt = new Date(form.drawAt);
-    if (!form.drawAt || !Number.isFinite(drawAt.getTime()) || drawAt.getTime() <= Date.now()) {
-      Toast.warning(t("Please select a future draw time."));
-      return;
-    }
-    if (!Number.isInteger(target) || target <= 0 || !Number.isInteger(minAge) || minAge < 0) {
-      Toast.warning(t("Participant target and minimum account age must be valid integers."));
-      return;
-    }
-    if (tierTotal !== 100) {
-      Toast.warning(t("Prize tier percentages must total 100%."));
-      return;
-    }
     const total = Number(form.totalAmount);
     const minPayout = Number(form.minPayout);
     const maxPayout = Number(form.maxPayout);
-    if (!Number.isFinite(total) || !Number.isFinite(minPayout) || !Number.isFinite(maxPayout) || total <= 0 || minPayout <= 0 || minPayout >= maxPayout) {
-      Toast.warning(t("Total, minimum, and maximum amounts must be valid, and the minimum must be less than the maximum."));
+    const tierValues = [
+      Number(form.consolation),
+      Number(form.normal),
+      Number(form.lucky),
+    ];
+
+    if (!form.title.trim()) {
+      Toast.warning(t("Please enter an activity title."));
       return;
     }
-    if (total <= target * minPayout) {
-      Toast.warning(t("Total amount must exceed the minimum payout for all target participants to allow varied rewards."));
+    if (!hasDrawAt && !hasTarget) {
+      Toast.warning(
+        t("Please set at least one draw condition: a future draw time or a participant target.")
+      );
       return;
     }
-    const token = await requireTurnstile("lottery_publish");
-    if (!token) return;
+    if (hasDrawAt && form.drawAt!.getTime() <= Date.now()) {
+      Toast.warning(t("Please select a future draw time."));
+      return;
+    }
+    if (
+      (hasTarget && (!Number.isInteger(target) || target! <= 0)) ||
+      !Number.isInteger(minAge) ||
+      minAge < 0
+    ) {
+      Toast.warning(
+        t("Participant target and minimum account age must be valid integers.")
+      );
+      return;
+    }
+    if (
+      !Number.isFinite(total) ||
+      !Number.isFinite(minPayout) ||
+      !Number.isFinite(maxPayout) ||
+      total <= 0 ||
+      minPayout <= 0 ||
+      maxPayout <= 0 ||
+      minPayout >= maxPayout
+    ) {
+      Toast.warning(
+        t(
+          "Total, minimum, and maximum amounts must be valid, and the minimum must be less than the maximum."
+        )
+      );
+      return;
+    }
+    if (
+      !tierValues.every(
+        (value) => Number.isInteger(value) && value >= 0 && value <= 100,
+      ) ||
+      tierValues[0] <= 0 ||
+      tierTotal !== 100
+    ) {
+      Toast.warning(t("Prize tier percentages must be valid integers and total 100%."));
+      return;
+    }
+    if (hasTarget && total <= target! * minPayout) {
+      Toast.warning(
+        t(
+          "Total amount must exceed the minimum payout for all target participants to allow varied rewards."
+        )
+      );
+      return;
+    }
+
     const body: CreateLotteryInput = {
       title: form.title.trim(),
       totalAmount: form.totalAmount.trim(),
@@ -197,208 +227,672 @@ export default function AdminLotteries() {
         lucky: Number(form.lucky),
       },
       minAccountAgeDays: minAge,
-      drawAt: drawAt.toISOString(),
-      participantTarget: target,
+      drawAt: form.drawAt?.toISOString(),
+      participantTarget: hasTarget ? target : undefined,
     };
-    setPublishing(true);
+
+    setSubmitting(true);
     const idempotencyKey = publishKeyRef.current ?? generateIdempotencyKey();
     publishKeyRef.current = idempotencyKey;
-    let lottery: Lottery;
     try {
-      lottery = await createAdminLottery(body, token, idempotencyKey);
+      const lottery = await createAdminLottery(body, idempotencyKey);
+      await onCreated(lottery);
+      const url = new URL(lottery.publicUrl, window.location.origin).toString();
+      onCancel();
+      try {
+        await copyText(url);
+        Toast.success(t("Lottery published and link copied: {{url}}", { url }));
+      } catch {
+        Toast.success(t("Lottery published: {{url}}", { url }));
+        Toast.warning(t("Copy link failed. Please copy it manually."));
+      }
     } catch (error) {
       Toast.error(getIamErrorMessage(t, error, "Lottery publish failed."));
-      setPublishing(false);
-      return;
     } finally {
-      setPublishing(false);
-    }
-    publishKeyRef.current = null;
-    const url = new URL(lottery.publicUrl, window.location.origin).toString();
-    setForm(initialForm);
-    setSelected(lottery);
-    await load();
-    try {
-      await copyText(url);
-      Toast.success(t("Lottery published and link copied: {{url}}", { url }));
-    } catch {
-      Toast.success(t("Lottery published: {{url}}", { url }));
-      Toast.warning(t("Copy link failed. Please copy it manually."));
+      setSubmitting(false);
     }
   };
 
-  const lotteryColumns = [
-    {
-      title: t("Activity"),
-      key: "title",
-      render: (_: unknown, row: Lottery) => (
-        <button
-          className="flex min-w-0 cursor-pointer flex-col text-left"
-          onClick={() => setSelected(row)}
-          type="button"
-        >
-          <span className="truncate font-medium text-[var(--ink)]">{row.title}</span>
-          <span className="text-xs text-[var(--ink-muted)]">#{row.id}</span>
-        </button>
-      ),
-    },
-    {
-      title: t("Status"),
-      key: "status",
-      render: (_: unknown, row: Lottery) => statusTag(row.status, t),
-    },
-    {
-      title: t("Prize pool / Participants"),
-      key: "pool",
-      render: (_: unknown, row: Lottery) => (
-        <span className="text-sm text-[var(--ink)]">
-          {row.totalAmount} / {row.participantCount}
-          {row.participantTarget ? ` / ${row.participantTarget}` : ""}
-        </span>
-      ),
-    },
-    {
-      title: t("Draw time"),
-      key: "drawAt",
-      render: (_: unknown, row: Lottery) => (
-        <span className="text-sm text-[var(--ink-muted)]">{formatTime(row.drawAt, language)}</span>
-      ),
-    },
-    {
-      title: t("Link"),
-      key: "link",
-      render: (_: unknown, row: Lottery) => {
-        const url = new URL(row.publicUrl, window.location.origin).toString();
-        return (
-          <div className="flex items-center gap-1">
-            <Button
-              aria-label={t("Copy lottery link")}
-              icon={<Copy size={15} />}
-              onClick={() => void copyText(url).then(() => Toast.success(t("Lottery link copied."))).catch(() => Toast.error(t("Lottery link copy failed.")))}
-              size="small"
-              theme="borderless"
-            />
-            <a aria-label={t("Open lottery link")} href={url} rel="noreferrer" target="_blank">
-              <ExternalLink size={15} />
-            </a>
-          </div>
-        );
-      },
-    },
-  ];
-
-  const entryColumns = [
-    { title: t("User ID"), dataIndex: "userId", key: "userId" },
-    { title: t("Registered At"), key: "registeredAt", render: (_: unknown, row: LotteryEntry) => formatTime(row.registeredAt, language) },
-  ];
-  const payoutColumns = [
-    { title: t("User ID"), dataIndex: "userId", key: "userId" },
-    { title: t("Prize tier"), key: "tier", render: (_: unknown, row: LotteryPayout) => t(tierLabelKeys[row.tier] ?? row.tier) },
-    { title: t("Amount"), dataIndex: "amount", key: "amount" },
-    { title: t("Billing transaction number"), dataIndex: "billingTransactionNo", key: "billingTransactionNo" },
-  ];
-
   return (
-    <div className="console-content-width min-h-full py-5">
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2">
-            <Gift className="text-brand" size={22} />
-            <h1 className="text-xl font-semibold text-[var(--ink)]">{t("Lottery campaigns")}</h1>
-          </div>
-          <p className="mt-1 text-sm text-[var(--ink-muted)]">{t("Publish campaigns, copy links, and review draw results.")}</p>
-        </div>
-        <Button icon={<RefreshCw size={15} />} loading={loading} onClick={() => void load()} type="tertiary">
-          {t("Refresh")}
-        </Button>
-      </div>
+    <Modal
+      cancelText={t("Cancel")}
+      centered
+      confirmLoading={submitting}
+      onCancel={onCancel}
+      onOk={() => void submit()}
+      okText={t("Publish lottery")}
+      title={t("Create lottery campaign")}
+      visible={visible}
+      width="min(720px, calc(100vw - 32px))"
+    >
+      <div className="space-y-4 py-1">
+        <label className="block">
+          {fieldLabel(t("Activity title"), true)}
+          <Input
+            autoFocus
+            onChange={(value) => setField("title", String(value))}
+            placeholder={t("For example: Weekend points lottery")}
+            value={form.title}
+          />
+        </label>
 
-      <div className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
-        <Card title={t("Publish lottery")} className="!rounded-xl">
-          <div className="grid gap-3">
-            <label className="grid gap-1 text-sm text-[var(--ink-muted)]">
-              {t("Activity title")}
-              <Input value={form.title} onChange={(value) => setField("title", value)} placeholder={t("For example: Weekend points lottery")} />
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          {(
+            [
+              ["totalAmount", "Total amount"],
+              ["minPayout", "Minimum amount"],
+              ["maxPayout", "Maximum amount"],
+            ] as const
+          ).map(([key, label]) => (
+            <label className="block" key={key}>
+              {fieldLabel(t(label), true)}
+              <Input
+                onChange={(value) => setField(key, String(value))}
+                suffix={t("Points")}
+                value={form[key]}
+              />
             </label>
-            <div className="grid gap-2 sm:grid-cols-3">
-              {([
-                ["totalAmount", "Total amount"],
-                ["minPayout", "Minimum amount"],
-                ["maxPayout", "Maximum amount"],
-              ] as const).map(([key, label]) => (
-                <label className="grid gap-1 text-xs text-[var(--ink-muted)]" key={key}>
-                  {t(label)}
-                  <Input value={form[key]} onChange={(value) => setField(key, value)} suffix={t("Points")} />
-                </label>
-              ))}
-            </div>
-            <div className="grid gap-2 sm:grid-cols-3">
-              {([
+          ))}
+        </div>
+
+        <div className="rounded-lg border border-[var(--semi-color-border)] p-3">
+          <div className="mb-3 text-sm font-semibold text-[var(--semi-color-text-0)]">
+            {t("Reward rules")}
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            {(
+              [
                 ["consolation", "Consolation prize"],
                 ["normal", "Regular prize"],
                 ["lucky", "Lucky prize"],
-              ] as const).map(([key, label]) => (
-                <label className="grid gap-1 text-xs text-[var(--ink-muted)]" key={key}>
-                  {t(label)} %
-                  <Input value={form[key]} onChange={(value) => setField(key, value)} />
-                </label>
-              ))}
-            </div>
-            <div className={`text-xs ${tierTotal === 100 ? "text-emerald-600" : "text-red-500"}`}>
-              {t("Percent total: {{total}}%", { total: tierTotal })}
-            </div>
-            <label className="grid gap-1 text-sm text-[var(--ink-muted)]">
-              {t("Minimum account age")}
-              <Input value={form.minAccountAgeDays} onChange={(value) => setField("minAccountAgeDays", value)} suffix={t("Days unit")} />
-            </label>
-            <label className="grid gap-1 text-sm text-[var(--ink-muted)]">
-              {t("Draw time")}
-              <input className="semi-input w-full" onChange={(event) => setField("drawAt", event.target.value)} type="datetime-local" value={form.drawAt} />
-            </label>
-            <label className="grid gap-1 text-sm text-[var(--ink-muted)]">
-              {t("Participant target")}
-              <Input value={form.participantTarget} onChange={(value) => setField("participantTarget", value)} suffix={t("People unit")} />
-            </label>
-            <div className="rounded-lg bg-[var(--semi-color-fill-0)] px-3 py-2 text-xs leading-5 text-[var(--ink-muted)]">
-              {t("All eligible participants receive a prize. The draw starts when either condition is met first; unused budget is not awarded.")}
-            </div>
-            <Button block icon={<Gift size={16} />} loading={publishing} onClick={() => void publish()} theme="solid" type="primary">
-              {t("Publish lottery and copy link")}
-            </Button>
+              ] as const
+            ).map(([key, label]) => (
+              <label className="block" key={key}>
+                {fieldLabel(`${t(label)} (%)`, true)}
+                <Input
+                  onChange={(value) => setField(key, String(value))}
+                  value={form[key]}
+                />
+              </label>
+            ))}
           </div>
-        </Card>
+          <div
+            className={`mt-2 text-xs ${
+              tierTotal === 100
+                ? "text-[var(--semi-color-success)]"
+                : "text-[var(--semi-color-danger)]"
+            }`}
+          >
+            {t("Percent total: {{total}}%", { total: tierTotal })}
+          </div>
+        </div>
 
-        <Card title={t("Campaign list ({{count}})", { count: total })} className="!rounded-xl">
-          {items.length === 0 && !loading ? (
-            <Empty description={t("No lottery campaigns")} />
-          ) : (
-            <CardTable columns={lotteryColumns} dataSource={items} loading={loading} rowKey="id" hidePagination />
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <label className="block">
+            {fieldLabel(t("Minimum account age"), true)}
+            <Input
+              onChange={(value) => setField("minAccountAgeDays", String(value))}
+              suffix={t("Days unit")}
+              value={form.minAccountAgeDays}
+            />
+          </label>
+          <label className="block">
+            {fieldLabel(t("Participant target"))}
+            <Input
+              onChange={(value) => setField("participantTarget", String(value))}
+              placeholder={t("Optional")}
+              suffix={t("People unit")}
+              value={form.participantTarget}
+            />
+          </label>
+          <label className="block">
+            {fieldLabel(t("Draw time"))}
+            <DatePicker
+              format="yyyy-MM-dd HH:mm:ss"
+              onChange={(value) =>
+                setField("drawAt", value instanceof Date ? value : null)
+              }
+              showClear
+              style={{ width: "100%" }}
+              type="dateTime"
+              value={form.drawAt ?? undefined}
+            />
+          </label>
+        </div>
+
+        <div className="rounded-lg bg-[var(--semi-color-fill-0)] px-3 py-2.5 text-xs leading-5 text-[var(--semi-color-text-2)]">
+          {t(
+            "Set at least one draw condition: a future draw time or a participant target. If both are set, the first one reached starts the draw. All eligible participants receive a prize."
           )}
-        </Card>
+        </div>
       </div>
+    </Modal>
+  );
+}
 
-      {selected ? (
-        <Card className="mt-4 !rounded-xl" title={t("Campaign details: {{title}}", { title: selected.title })}>
-          <div className="mb-4 grid gap-3 text-sm sm:grid-cols-4">
-            <div><span className="text-[var(--ink-muted)]">{t("Status")}</span><div className="mt-1">{statusTag(selected.status, t)}</div></div>
-            <div><span className="text-[var(--ink-muted)]">{t("Participant progress")}</span><div className="mt-1 font-medium">{selected.participantCount} / {selected.participantTarget ?? selected.maxParticipants}</div></div>
-            <div><span className="text-[var(--ink-muted)]">{t("Draw time")}</span><div className="mt-1">{formatTime(selected.drawAt, language)}</div></div>
-            <div><span className="text-[var(--ink-muted)]">{t("Unused budget")}</span><div className="mt-1">{t("{{amount}} points", { amount: selected.unusedAmount })}</div></div>
+function LotteryDetailSheet({
+  detail,
+  entries,
+  entryTotal,
+  loading,
+  onCancel,
+  payouts,
+  payoutTotal,
+  t,
+  language,
+}: {
+  detail: Lottery | null;
+  entries: AdminLotteryEntry[];
+  entryTotal: number;
+  loading: boolean;
+  onCancel: () => void;
+  payouts: LotteryPayout[];
+  payoutTotal: number;
+  t: TFunction;
+  language: string;
+}) {
+  const isMobile = useIsMobile();
+  const [activeTab, setActiveTab] = useState("overview");
+
+  useEffect(() => {
+    setActiveTab("overview");
+  }, [detail?.id]);
+
+  const entryColumns = useMemo(
+    () =>
+      [
+        { dataIndex: "id", key: "id", title: "ID", width: 80 },
+        { dataIndex: "userId", key: "userId", title: t("User ID"), width: 120 },
+        {
+          dataIndex: "registeredAt",
+          key: "registeredAt",
+          title: t("Registered At"),
+          width: 220,
+          render: (value: unknown) => formatTime(String(value), language),
+        },
+      ] as any[],
+    [language, t]
+  );
+
+  const payoutColumns = useMemo(
+    () =>
+      [
+        { dataIndex: "id", key: "id", title: "ID", width: 80 },
+        { dataIndex: "userId", key: "userId", title: t("User ID"), width: 120 },
+        {
+          dataIndex: "tier",
+          key: "tier",
+          title: t("Prize tier"),
+          render: (value: unknown) =>
+            t(tierLabelKeys[String(value) as LotteryPayout["tier"]] ?? String(value)),
+        },
+        { dataIndex: "amount", key: "amount", title: t("Amount") },
+        {
+          dataIndex: "billingTransactionNo",
+          key: "billingTransactionNo",
+          title: t("Billing transaction number"),
+          render: (value: unknown) =>
+            value ? (
+              <CopyableTableText copiedText={t("Copied")} text={String(value)} />
+            ) : (
+              "-"
+            ),
+        },
+      ] as any[],
+    [t]
+  );
+  const publicUrl = detail
+    ? new URL(detail.publicUrl, window.location.origin).toString()
+    : "";
+
+  return (
+    <SideSheet
+      bodyStyle={{ padding: 0 }}
+      onCancel={onCancel}
+      placement="right"
+      title={detail ? `${t("Lottery details")} #${detail.id}` : t("Lottery details")}
+      visible={Boolean(detail)}
+      width={isMobile ? "100%" : 820}
+    >
+      {detail ? (
+        <div className="flex min-h-full flex-col">
+          <div className="sticky top-0 z-10 bg-[var(--semi-color-bg-2)] px-5 pt-2">
+            <Tabs activeKey={activeTab} onChange={setActiveTab} type="line">
+              <Tabs.TabPane itemKey="overview" tab={t("Overview")} />
+              <Tabs.TabPane itemKey="entries" tab={t("Entries ({{count}})", { count: entryTotal })} />
+              <Tabs.TabPane itemKey="payouts" tab={t("Payouts ({{count}})", { count: payoutTotal })} />
+            </Tabs>
           </div>
-          {detailLoading ? <div className="flex justify-center py-8"><Spin /></div> : (
-            <div className="grid gap-5 xl:grid-cols-2">
-              <div>
-                <h2 className="mb-2 text-sm font-semibold text-[var(--ink)]">{t("Participants ({{count}})", { count: entryTotal })}</h2>
-                <CardTable columns={entryColumns} dataSource={entries} rowKey="id" hidePagination />
+
+          <div className="flex-1 space-y-5 p-5">
+            {activeTab === "overview" ? (
+              <div className="space-y-5">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  <div>
+                    <div className="text-xs text-[var(--semi-color-text-2)]">{t("Activity")}</div>
+                    <div className="mt-1 font-medium text-[var(--semi-color-text-0)]">{detail.title}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-[var(--semi-color-text-2)]">{t("Status")}</div>
+                    <div className="mt-1">{statusTag(detail.status, t)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-[var(--semi-color-text-2)]">{t("Created at")}</div>
+                    <div className="mt-1 text-sm text-[var(--semi-color-text-0)]">{formatTime(detail.createdAt, language)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-[var(--semi-color-text-2)]">{t("Total amount")}</div>
+                    <div className="mt-1 text-sm text-[var(--semi-color-text-0)]">{detail.totalAmount} {t("Points")}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-[var(--semi-color-text-2)]">{t("Reward range")}</div>
+                    <div className="mt-1 text-sm text-[var(--semi-color-text-0)]">{detail.minPayout} - {detail.maxPayout} {t("Points")}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-[var(--semi-color-text-2)]">{t("Participant progress")}</div>
+                    <div className="mt-1 text-sm text-[var(--semi-color-text-0)]">
+                      {detail.participantTarget == null
+                        ? detail.participantCount
+                        : `${detail.participantCount} / ${detail.participantTarget}`}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-[var(--semi-color-text-2)]">{t("Draw time")}</div>
+                    <div className="mt-1 text-sm text-[var(--semi-color-text-0)]">{formatTime(detail.drawAt, language)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-[var(--semi-color-text-2)]">{t("Minimum account age")}</div>
+                    <div className="mt-1 text-sm text-[var(--semi-color-text-0)]">{t("At least {{days}} days", { days: detail.minAccountAgeDays })}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-[var(--semi-color-text-2)]">{t("Unused budget")}</div>
+                    <div className="mt-1 text-sm text-[var(--semi-color-text-0)]">{detail.unusedAmount} {t("Points")}</div>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-[var(--semi-color-border)] p-3">
+                  <div className="mb-2 text-xs text-[var(--semi-color-text-2)]">{t("Lottery public link")}</div>
+                  <div className="flex items-center gap-2">
+                    <CopyableTableText
+                      copiedText={t("Copied")}
+                      text={publicUrl}
+                    />
+                    <a
+                      aria-label={t("Open lottery link")}
+                      href={publicUrl}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      <ExternalLink size={15} />
+                    </a>
+                  </div>
+                </div>
+
+                <div className="rounded-lg bg-[var(--semi-color-fill-0)] px-3 py-2.5 text-sm text-[var(--semi-color-text-1)]">
+                  {t("Reward rules")}: {t("Consolation prize")} {detail.tierWeights.consolation}% · {t("Regular prize")} {detail.tierWeights.normal}% · {t("Lucky prize")} {detail.tierWeights.lucky}%
+                </div>
               </div>
-              <div>
-                <h2 className="mb-2 text-sm font-semibold text-[var(--ink)]">{t("Draw results ({{count}})", { count: payoutTotal })}</h2>
-                <CardTable columns={payoutColumns} dataSource={payouts} rowKey="id" hidePagination />
+            ) : null}
+
+            {activeTab === "entries" ? (
+              <CardTable
+                columns={entryColumns}
+                dataSource={entries}
+                empty={<Empty description={t("No entries yet")} style={{ padding: 24 }} />}
+                hidePagination
+                loading={loading}
+                rowKey="id"
+                scroll={{ x: 520, y: DETAIL_TABLE_SCROLL_Y }}
+                size="small"
+              />
+            ) : null}
+
+            {activeTab === "payouts" ? (
+              <CardTable
+                columns={payoutColumns}
+                dataSource={payouts}
+                empty={<Empty description={t("No payouts yet")} style={{ padding: 24 }} />}
+                hidePagination
+                loading={loading}
+                rowKey="id"
+                scroll={{ x: 720, y: DETAIL_TABLE_SCROLL_Y }}
+                size="small"
+              />
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+    </SideSheet>
+  );
+}
+
+export default function AdminLotteries() {
+  const { i18n, t } = useTranslation();
+  const language = i18n.resolvedLanguage ?? i18n.language;
+  const isMobile = useIsMobile();
+  const [statusFilter, setStatusFilter] = useState<LotteryStatusFilter>("all");
+  const [activePage, setActivePage] = useState(1);
+  const [pageSize, setPageSize] = useSharedPageSize();
+  const [reloadTick, setReloadTick] = useState(0);
+  const [items, setItems] = useState<Lottery[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [detail, setDetail] = useState<Lottery | null>(null);
+  const [entries, setEntries] = useState<AdminLotteryEntry[]>([]);
+  const [payouts, setPayouts] = useState<LotteryPayout[]>([]);
+  const [entryTotal, setEntryTotal] = useState(0);
+  const [payoutTotal, setPayoutTotal] = useState(0);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const detailRequestRef = useRef(0);
+
+  useEffect(() => {
+    setActivePage(1);
+  }, [pageSize, statusFilter]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    const offset = (activePage - 1) * pageSize;
+    void listAdminLotteries(
+      statusFilter === "all" ? undefined : statusFilter,
+      offset,
+      pageSize
+    )
+      .then((response) => {
+        if (cancelled) return;
+        setItems(response.items);
+        setTotal(response.total);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setItems([]);
+          setTotal(0);
+          Toast.error(getIamErrorMessage(t, error, "Lottery campaigns load failed."));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activePage, pageSize, reloadTick, statusFilter, t]);
+
+  const refresh = useCallback(() => {
+    setActivePage(1);
+    setReloadTick((value) => value + 1);
+  }, []);
+
+  const openDetail = useCallback(async (lottery: Lottery) => {
+    const requestId = ++detailRequestRef.current;
+    setDetail(lottery);
+    setEntries([]);
+    setPayouts([]);
+    setEntryTotal(0);
+    setPayoutTotal(0);
+    setDetailLoading(true);
+    try {
+      const [nextDetail, entryPage, payoutPage] = await Promise.all([
+        getAdminLottery(lottery.id),
+        listAllAdminLotteryEntries(lottery.id),
+        listAllAdminLotteryPayouts(lottery.id),
+      ]);
+      if (requestId !== detailRequestRef.current) return;
+      setDetail(nextDetail);
+      setEntries(entryPage.items);
+      setPayouts(payoutPage.items);
+      setEntryTotal(entryPage.total);
+      setPayoutTotal(payoutPage.total);
+    } catch (error) {
+      if (requestId === detailRequestRef.current) {
+        Toast.error(getIamErrorMessage(t, error, "Lottery details load failed."));
+      }
+    } finally {
+      if (requestId === detailRequestRef.current) setDetailLoading(false);
+    }
+  }, [t]);
+
+  const onCreated = useCallback(
+    async (lottery: Lottery) => {
+      setStatusFilter("all");
+      setActivePage(1);
+      setReloadTick((value) => value + 1);
+      void openDetail(lottery);
+    },
+    [openDetail]
+  );
+
+  const columns = useMemo(
+    () =>
+      [
+        {
+          dataIndex: "title",
+          key: "title",
+          title: t("Activity"),
+          width: 250,
+          render: (value: unknown, row: Lottery) => (
+            <button
+              className="flex min-w-0 cursor-pointer flex-col text-left"
+              onClick={() => void openDetail(row)}
+              type="button"
+            >
+              <span className="truncate font-medium text-[var(--semi-color-text-0)]">
+                {String(value || t("Untitled lottery"))}
+              </span>
+              <span className="text-xs text-[var(--semi-color-text-2)]">#{row.id}</span>
+            </button>
+          ),
+        },
+        {
+          dataIndex: "status",
+          key: "status",
+          title: t("Status"),
+          width: 130,
+          render: (value: unknown) => statusTag(String(value) as Lottery["status"], t),
+        },
+        {
+          key: "rules",
+          title: t("Reward rules"),
+          width: 285,
+          render: (_: unknown, row: Lottery) => (
+            <div className="min-w-0">
+              <div className="whitespace-nowrap text-sm tabular-nums text-[var(--semi-color-text-0)]">
+                {row.minPayout} - {row.maxPayout} {t("Points")}
+              </div>
+              <div className="text-xs leading-5 text-[var(--semi-color-text-2)]">
+                {t("Consolation prize")} {row.tierWeights.consolation}% · {t("Regular prize")} {row.tierWeights.normal}% · {t("Lucky prize")} {row.tierWeights.lucky}%
+              </div>
+              <div className="text-xs leading-5 text-[var(--semi-color-text-2)]">
+                {t("Minimum account age")}: {t("At least {{days}} days", { days: row.minAccountAgeDays })}
               </div>
             </div>
-          )}
-        </Card>
-      ) : null}
+          ),
+        },
+        {
+          dataIndex: "totalAmount",
+          key: "totalAmount",
+          title: t("Total amount"),
+          width: 145,
+          render: (value: unknown) => (
+            <span className="whitespace-nowrap tabular-nums text-[var(--semi-color-text-1)]">
+              {String(value)} {t("Points")}
+            </span>
+          ),
+        },
+        {
+          key: "participants",
+          title: t("Participants"),
+          width: 150,
+          render: (_: unknown, row: Lottery) => (
+            <span className="whitespace-nowrap tabular-nums text-[var(--semi-color-text-1)]">
+              {row.participantTarget == null
+                ? row.participantCount
+                : `${row.participantCount} / ${row.participantTarget}`}
+            </span>
+          ),
+        },
+        {
+          dataIndex: "drawAt",
+          key: "drawAt",
+          title: t("Draw time"),
+          width: 190,
+          render: (value: unknown) => (
+            <span className="whitespace-nowrap tabular-nums text-[var(--semi-color-text-1)]">
+              {formatTime(String(value || ""), language)}
+            </span>
+          ),
+        },
+        {
+          dataIndex: "publicUrl",
+          key: "publicUrl",
+          title: t("Link"),
+          width: 250,
+          render: (value: unknown) => {
+            const url = new URL(String(value), window.location.origin).toString();
+            return (
+              <Space spacing={6} wrap={false}>
+                <CopyableTableText copiedText={t("Copied")} text={url} />
+                <a
+                  aria-label={t("Open lottery link")}
+                  href={url}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  <ExternalLink size={14} />
+                </a>
+              </Space>
+            );
+          },
+        },
+        {
+          dataIndex: "operate",
+          fixed: "right",
+          key: "operate",
+          title: t("Action"),
+          width: 120,
+          render: (_: unknown, row: Lottery) => (
+            <Button onClick={() => void openDetail(row)} size="small" type="tertiary">
+              {t("Details")}
+            </Button>
+          ),
+        },
+      ] as any[],
+    [language, openDetail, t]
+  );
+
+  const tabsArea = (
+    <Tabs
+      activeKey={statusFilter}
+      className="mb-2"
+      collapsible
+      onChange={(key) => {
+        setStatusFilter(String(key) as LotteryStatusFilter);
+        setActivePage(1);
+      }}
+      type="card"
+    >
+      <Tabs.TabPane itemKey="all" tab={t("All")} />
+      {(Object.keys(statusMeta) as Lottery["status"][]).map((status) => (
+        <Tabs.TabPane
+          itemKey={status}
+          key={status}
+          tab={t(statusMeta[status].labelKey)}
+        />
+      ))}
+    </Tabs>
+  );
+
+  const actionsArea = (
+    <div className="flex w-full flex-col items-center justify-between gap-2 md:flex-row">
+      <div className="order-2 flex w-full flex-wrap gap-2 md:order-1 md:w-auto">
+        <Button
+          className="flex-1 md:flex-initial"
+          icon={<Gift size={14} />}
+          onClick={() => setCreateOpen(true)}
+          size="small"
+          type="primary"
+        >
+          {t("Create lottery campaign")}
+        </Button>
+        <Button
+          className="remail-toolbar-fixed-button flex-1 md:flex-none"
+          icon={<RefreshCw size={14} />}
+          loading={loading}
+          onClick={refresh}
+          size="small"
+          type="tertiary"
+        >
+          {t("Refresh")}
+        </Button>
+      </div>
+    </div>
+  );
+
+  const paginationArea = createCardProPagination({
+    currentPage: activePage,
+    isMobile,
+    onPageChange: setActivePage,
+    onPageSizeChange: (size) => {
+      setPageSize(size);
+      setActivePage(1);
+    },
+    pageSize,
+    total,
+    t,
+  });
+
+  return (
+    <div className="console-content-width py-5">
+      <CardPro
+        actionsArea={actionsArea}
+        paginationArea={paginationArea}
+        t={t}
+        tabsArea={tabsArea}
+        type="type3"
+      >
+        <CardTable
+          className="overflow-hidden rounded-xl"
+          columns={columns}
+          dataSource={items}
+          empty={
+            <Empty
+              darkModeImage={<IllustrationNoResultDark style={{ height: 150, width: 150 }} />}
+              description={t("No lottery campaigns")}
+              image={<IllustrationNoResult style={{ height: 150, width: 150 }} />}
+              style={{ padding: 30 }}
+            />
+          }
+          hidePagination
+          loading={loading}
+          pagination={false}
+          rowKey="id"
+          scroll={{ x: "max(100%, 1530px)", y: DESKTOP_TABLE_SCROLL_Y }}
+          size="middle"
+        />
+      </CardPro>
+
+      <LotteryCreateModal
+        onCancel={() => setCreateOpen(false)}
+        onCreated={onCreated}
+        visible={createOpen}
+      />
+
+      <LotteryDetailSheet
+        detail={detail}
+        entries={entries}
+        entryTotal={entryTotal}
+        language={language}
+        loading={detailLoading}
+        onCancel={() => {
+          detailRequestRef.current += 1;
+          setDetail(null);
+          setDetailLoading(false);
+        }}
+        payouts={payouts}
+        payoutTotal={payoutTotal}
+        t={t}
+      />
     </div>
   );
 }

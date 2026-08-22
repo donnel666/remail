@@ -3607,3 +3607,48 @@ body[theme-mode="dark"] .semi-always-light,
     max-width: 88%;
   }
 }
+
+/* Public lottery celebration: CSS keeps the effect tiny and dependency-free. */
+.lottery-celebration {
+  position: fixed;
+  z-index: 1200;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.lottery-confetti {
+  position: absolute;
+  top: 44%;
+  left: var(--lottery-left);
+  width: var(--lottery-size);
+  height: calc(var(--lottery-size) + 6px);
+  border-radius: 2px;
+  background: var(--lottery-color);
+  opacity: 0;
+  transform: translate3d(-50%, 0, 0) rotate(var(--lottery-rotate));
+  animation: lottery-confetti-burst 1.9s cubic-bezier(0.16, 1, 0.3, 1)
+    var(--lottery-delay) both;
+}
+
+@keyframes lottery-confetti-burst {
+  0% {
+    opacity: 0;
+    transform: translate3d(-50%, 10px, 0) rotate(0deg) scale(0.6);
+  }
+  12% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(calc(-50% + var(--lottery-x)), 42vh, 0)
+      rotate(720deg) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lottery-confetti {
+    animation: none;
+    opacity: 0;
+  }
+}

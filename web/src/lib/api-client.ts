@@ -76,6 +76,7 @@ export const apiClient = createClient<paths>({
 
 export class IamApiError extends Error {
   readonly status: number;
+  readonly code?: string;
   readonly requestId?: string;
   readonly fields?: ApiErrorBody["fields"];
   readonly retryAfterSeconds?: number;
@@ -84,6 +85,7 @@ export class IamApiError extends Error {
     super(body.message || "Request failed.");
     this.name = "IamApiError";
     this.status = status;
+    this.code = body.code;
     this.requestId = body.requestId;
     this.fields = body.fields;
     const retryAfter = response?.headers.get("Retry-After");

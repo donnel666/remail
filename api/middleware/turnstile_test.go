@@ -152,14 +152,15 @@ func TestTurnstileGuardSkippedWhenCaptchaDisabled(t *testing.T) {
 	require.Zero(t, verifier.calls)
 }
 
-func TestLotteryTurnstileRemainsRequiredWhenCaptchaDisabled(t *testing.T) {
+func TestLotteryEntryTurnstileRemainsRequiredWhenCaptchaDisabled(t *testing.T) {
 	runtimeconfig.Replace([]settingsdomain.Setting{{Key: "captcha_enabled", Value: "false"}})
 	t.Cleanup(func() { runtimeconfig.Replace(nil) })
 
 	verifier := &stubTurnstileVerifier{}
 	router := turnstileRouter(verifier)
 	require.Equal(t, http.StatusUnprocessableEntity, doTurnstile(router, http.MethodPost, "/v1/lotteries/abc/entries", "").Code)
-	require.Equal(t, http.StatusUnprocessableEntity, doTurnstile(router, http.MethodPost, "/v1/admin/lotteries", "").Code)
+	// Administrator publication is protected by the admin permission, not CAPTCHA.
+	require.Equal(t, http.StatusCreated, doTurnstile(router, http.MethodPost, "/v1/admin/lotteries", "").Code)
 }
 
 func TestTurnstileActionsCoverDistinctActions(t *testing.T) {

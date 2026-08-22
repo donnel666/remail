@@ -14081,13 +14081,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/LotteryEntryResponse"
+                $ref: "#/components/schemas/PublicEntryResponse"
         "200":
           description: Entry already existed
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/LotteryEntryResponse"
+                $ref: "#/components/schemas/PublicEntryResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -14133,7 +14133,6 @@ paths:
       parameters:
         - $ref: "#/components/parameters/CsrfToken"
         - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
-        - $ref: "#/components/parameters/TurnstileToken"
       requestBody:
         required: true
         content:
@@ -14494,6 +14493,9 @@ components:
         - message
         - requestId
       properties:
+        code:
+          type: string
+          description: Stable business error code for client-side translation (optional)
         message:
           type: string
           description: Safe business error message for the user
@@ -14530,7 +14532,8 @@ components:
 
     CreateLotteryRequest:
       type: object
-      required: [title, totalAmount, minPayout, maxPayout, tierWeights, minAccountAgeDays, drawAt, participantTarget]
+      description: Set at least one draw condition. If both are provided, whichever condition is met first starts the draw.
+      required: [title, totalAmount, minPayout, maxPayout, tierWeights, minAccountAgeDays]
       properties:
         title:
           type: string
@@ -14552,9 +14555,13 @@ components:
         drawAt:
           type: string
           format: date-time
+          nullable: true
+          description: Optional future draw time. The activity can use this condition, the participant target, or both.
         participantTarget:
           type: integer
           minimum: 1
+          nullable: true
+          description: Optional participant count that triggers the draw. The activity can use this condition, the draw time, or both.
       additionalProperties: false
 
     LotteryResponse:
@@ -14586,10 +14593,12 @@ components:
         participantTarget:
           type: integer
           nullable: true
+          description: Participant count trigger, or null when the activity is time-only.
         participantCount:
           type: integer
         maxParticipants:
           type: integer
+          description: Internal entry safety cap; it is not a draw condition when participantTarget is null.
         status:
           type: string
           enum: [funding, open, settling, completed, cancelled]
@@ -14612,13 +14621,46 @@ components:
       required: [lottery, hasEntered]
       properties:
         lottery:
-          $ref: "#/components/schemas/LotteryResponse"
+          $ref: "#/components/schemas/PublicLotterySummary"
         hasEntered:
           type: boolean
         myPayout:
           allOf:
-            - $ref: "#/components/schemas/LotteryPayoutResponse"
+            - $ref: "#/components/schemas/PublicPayoutResponse"
           nullable: true
+      additionalProperties: false
+
+    PublicLotterySummary:
+      type: object
+      required: [title, totalAmount, status]
+      properties:
+        title:
+          type: string
+        totalAmount:
+          type: string
+        drawAt:
+          type: string
+          format: date-time
+          nullable: true
+        status:
+          type: string
+          enum: [funding, open, settling, completed, cancelled]
+      additionalProperties: false
+
+    PublicPayoutResponse:
+      type: object
+      required: [amount]
+      properties:
+        amount:
+          type: string
+      additionalProperties: false
+
+    PublicEntryResponse:
+      type: object
+      required: [already]
+      properties:
+        already:
+          type: boolean
       additionalProperties: false
 
     LotteryEntryResponse:
