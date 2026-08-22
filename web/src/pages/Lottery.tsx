@@ -1,11 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Banner, Button, Card, Spin, Tag, Toast } from "@douyinfe/semi-ui";
-import {
-  CalendarClock,
-  CheckCircle2,
-  Gift,
-  Sparkles,
-} from "lucide-react";
+import { CalendarClock, CheckCircle2, Gift, Users } from "lucide-react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 
@@ -14,6 +9,7 @@ import { useAuth } from "@/context/auth-provider";
 import { storeLoginReturnTo } from "@/lib/auth-flow";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import { enterLottery, getPublicLottery, type PublicLottery } from "@/lib/lottery-api";
+import { formatPoints, formatPointsValue } from "@/lib/points";
 
 const statusLabelKeys: Record<string, string> = {
   funding: "Lottery status funding",
@@ -37,6 +33,47 @@ function formatTime(value: string | null | undefined, language: string) {
   if (!value) return "-";
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "-" : date.toLocaleString(language);
+}
+
+type CountdownParts = {
+  hours: number;
+  minutes: number;
+  seconds: number;
+  expired: boolean;
+} | null;
+
+function getCountdownParts(
+  drawAt: string | null | undefined,
+  now: number,
+): CountdownParts {
+  if (!drawAt) return null;
+  const deadline = new Date(drawAt).getTime();
+  if (!Number.isFinite(deadline)) return null;
+
+  const remainingSeconds = Math.max(0, Math.floor((deadline - now) / 1000));
+  return {
+    hours: Math.floor(remainingSeconds / 3600),
+    minutes: Math.floor((remainingSeconds % 3600) / 60),
+    seconds: remainingSeconds % 60,
+    expired: deadline <= now,
+  };
+}
+
+function padCountdown(value: number) {
+  return String(value).padStart(2, "0");
+}
+
+function formatParticipantCount(
+  count: number | null | undefined,
+  target: number | null | undefined,
+  language: string,
+) {
+  const format = (value: number | null | undefined) =>
+    (
+      typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0
+    ).toLocaleString(language);
+  const current = format(count);
+  return target == null ? current : `${current}/${format(target)}`;
 }
 
 function Celebration({ active }: { active: boolean }) {
@@ -78,6 +115,7 @@ export default function Lottery() {
   const [entering, setEntering] = useState(false);
   const [entryError, setEntryError] = useState<string | null>(null);
   const [celebrating, setCelebrating] = useState(false);
+  const [clockNow, setClockNow] = useState(() => Date.now());
   const celebrationTimer = useRef<number | undefined>(undefined);
   const loadRequestRef = useRef(0);
 
@@ -119,6 +157,28 @@ export default function Lottery() {
     [],
   );
 
+  useEffect(() => {
+    const drawAt = data?.lottery.drawAt;
+    if (!drawAt || data?.lottery.status !== "open") return;
+    const deadline = new Date(drawAt).getTime();
+    if (!Number.isFinite(deadline)) return;
+
+    let timer: number | undefined;
+    const tick = () => {
+      const current = Date.now();
+      setClockNow(current);
+      if (current >= deadline && timer !== undefined) {
+        window.clearInterval(timer);
+      }
+    };
+    timer = window.setInterval(tick, 1000);
+    tick();
+
+    return () => {
+      if (timer !== undefined) window.clearInterval(timer);
+    };
+  }, [data?.lottery.drawAt, data?.lottery.status]);
+
   const celebrate = () => {
     if (celebrationTimer.current !== undefined) {
       window.clearTimeout(celebrationTimer.current);
@@ -154,11 +214,44 @@ export default function Lottery() {
     }
   };
 
+  const countdown = getCountdownParts(data?.lottery.drawAt, clockNow);
+
+  // `load` stays local to this page so the request guard can discard stale
+  // responses when the route or authenticated user changes.
+  useEffect(() => {
+    const status = data?.lottery.status;
+    if (
+      !countdown?.expired ||
+      (status !== "open" && status !== "settling") ||
+      !data?.lottery.drawAt
+    ) {
+      return;
+    }
+
+    let attempts = 0;
+    let timer: number | undefined;
+    const refresh = () => {
+      attempts += 1;
+      void load(false);
+      if (attempts >= 10 && timer !== undefined) {
+        window.clearInterval(timer);
+      }
+    };
+    timer = window.setInterval(refresh, 3000);
+    refresh();
+
+    // ponytail: cap post-draw polling at 30s; use push updates if settlement latency grows.
+    return () => {
+      if (timer !== undefined) window.clearInterval(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [countdown?.expired, data?.lottery.drawAt, data?.lottery.status, token]);
+
   if (loading) {
     return (
       <div
         aria-label={t("Loading")}
-        className="flex min-h-screen items-center justify-center bg-[var(--canvas)]"
+        className="flex min-h-svh items-center justify-center bg-[var(--canvas)]"
         role="status"
       >
         <Spin size="large" />
@@ -167,7 +260,7 @@ export default function Lottery() {
   }
   if (!data) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[var(--canvas)] px-4">
+      <div className="flex min-h-svh items-center justify-center bg-[var(--canvas)] px-4">
         <Banner type="danger" description={t("Lottery is unavailable.")} />
       </div>
     );
@@ -185,46 +278,69 @@ export default function Lottery() {
           ? "orange"
           : "grey";
   const canEnter = !closed && !data.hasEntered;
+  const showCountdown =
+    lottery.status === "open" && Boolean(countdown) && !countdown?.expired;
+  const compactTotalAmount = formatPoints(lottery.totalAmount);
+  const exactTotalAmount = formatPointsValue(lottery.totalAmount);
+  const participantDisplay = formatParticipantCount(
+    lottery.participantCount,
+    lottery.participantTarget,
+    language,
+  );
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[var(--canvas)] px-4 py-8 sm:px-6 sm:py-14">
+    <main className="relative min-h-svh overflow-hidden bg-[var(--canvas)] px-4 py-8 sm:px-6 sm:py-12">
       <Celebration active={celebrating} />
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-72 bg-[radial-gradient(circle_at_top,rgba(255,122,26,0.18),transparent_68%)]" />
-      <div className="relative mx-auto w-full max-w-xl">
-        <div className="mb-6 flex items-center justify-center gap-2 text-sm font-medium text-[var(--ink-muted)]">
-          <Gift aria-hidden="true" className="text-brand" size={17} />
-          <span>{t("Activity Center")}</span>
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-64 bg-[radial-gradient(circle_at_top,rgba(255,122,26,0.16),transparent_68%)]" />
+      <div className="relative mx-auto w-full max-w-md">
+        <div className="mb-5 flex items-center justify-between gap-3 px-1 text-sm font-medium text-[var(--ink-muted)]">
+          <div className="flex items-center gap-2">
+            <Gift aria-hidden="true" className="text-brand" size={17} />
+            <span>{t("Activity Center")}</span>
+          </div>
+          <Tag color={statusColor} shape="circle" size="small">
+            {t(statusLabelKeys[lottery.status] ?? lottery.status)}
+          </Tag>
         </div>
 
         <Card
           bodyStyle={{ padding: 0 }}
-          className="overflow-hidden !rounded-3xl border border-[var(--semi-color-border)] !bg-[var(--surface)] shadow-[0_24px_70px_rgba(31,41,55,0.12)]"
+          className="overflow-hidden !rounded-[28px] border border-[var(--semi-color-border)] !bg-[var(--surface)] shadow-[0_20px_60px_rgba(31,41,55,0.12)]"
         >
-          <div className="border-b border-[var(--semi-color-border)] px-6 pb-7 pt-6 sm:px-9 sm:pt-8">
-            <div className="mb-7 flex items-center justify-between gap-3">
-              <Tag color={statusColor} shape="circle">
-                {t(statusLabelKeys[lottery.status] ?? lottery.status)}
-              </Tag>
-              <Sparkles aria-hidden="true" className="text-brand/70" size={19} />
-            </div>
-            <h1 className="break-words text-3xl font-semibold tracking-tight text-[var(--ink)] sm:text-4xl">
-              {lottery.title}
-            </h1>
-            {completed || lottery.status === "open" ? (
-              <p className="mt-3 max-w-md text-sm leading-6 text-[var(--ink-muted)]">
-                {completed ? t("Lottery is completed") : t("Lottery is open")}
+          <div className="relative overflow-hidden border-b border-[var(--semi-color-border)] bg-[linear-gradient(145deg,color-mix(in_oklch,var(--brand-subtle)_82%,white),var(--surface)_72%)] px-6 pb-7 pt-8 text-center sm:px-8">
+            <div className="pointer-events-none absolute -right-10 -top-12 h-32 w-32 rounded-full border-[18px] border-white/30" />
+            <div className="pointer-events-none absolute -bottom-16 -left-10 h-36 w-36 rounded-full border-[20px] border-brand/10" />
+            <div className="relative">
+              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-white/85 text-brand shadow-sm ring-1 ring-brand/15 dark:bg-black/10">
+                <Gift aria-hidden="true" size={31} strokeWidth={1.8} />
+              </div>
+              <h1 className="break-words text-2xl font-semibold tracking-tight text-[var(--ink-primary)] sm:text-3xl">
+                {lottery.title}
+              </h1>
+              <p className="mt-2 text-sm leading-6 text-[var(--ink-muted)]">
+                {completed
+                  ? t("Lottery is completed")
+                  : lottery.status === "open"
+                    ? t("Lottery is open")
+                    : t(statusLabelKeys[lottery.status] ?? lottery.status)}
               </p>
-            ) : null}
+            </div>
           </div>
 
-          <div className="space-y-6 px-6 py-7 sm:px-9 sm:py-8">
-            <div className="rounded-2xl bg-[linear-gradient(135deg,var(--brand-subtle),color-mix(in_oklch,var(--brand-light)_35%,transparent))] px-5 py-5 sm:px-6">
+          <div className="space-y-5 px-5 py-6 sm:px-7 sm:py-7">
+            <div
+              aria-label={t("Total prize pool: {{amount}} points", {
+                amount: exactTotalAmount,
+              })}
+              className="rounded-2xl border border-brand/15 bg-[linear-gradient(135deg,var(--brand-subtle),color-mix(in_oklch,var(--brand-light)_28%,transparent))] px-5 py-5 text-center sm:px-6"
+              title={exactTotalAmount}
+            >
               <div className="text-sm font-medium text-[var(--ink-muted)]">
                 {t("Total prize pool")}
               </div>
-              <div className="mt-2 flex items-baseline gap-2">
-                <span className="text-4xl font-bold tracking-tight text-[var(--ink)] sm:text-5xl">
-                  {lottery.totalAmount}
+              <div className="mt-2 flex items-baseline justify-center gap-2">
+                <span className="font-mono-data text-5xl font-bold tracking-tight text-[var(--ink-primary)] sm:text-6xl">
+                  {compactTotalAmount}
                 </span>
                 <span className="text-sm font-medium text-[var(--ink-muted)]">
                   {t("Points")}
@@ -232,33 +348,68 @@ export default function Lottery() {
               </div>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="rounded-xl border border-[var(--semi-color-border)] px-4 py-4">
-                <div className="flex items-center gap-2 text-sm text-[var(--ink-muted)]">
-                  <CalendarClock aria-hidden="true" size={16} />
-                  <span>{t("Draw time")}</span>
+            <div
+              aria-label={t("Participants ({{count}})", { count: participantDisplay })}
+              className="flex items-center justify-between gap-4 rounded-2xl border border-[var(--semi-color-border)] bg-[var(--surface)] px-4 py-4"
+              role="group"
+            >
+              <div className="flex items-center gap-2 text-sm font-medium text-[var(--ink-muted)]">
+                <Users aria-hidden="true" size={17} />
+                <span>{t("Participants")}</span>
+              </div>
+              <span className="whitespace-nowrap font-mono-data text-2xl font-semibold tabular-nums text-[var(--ink-primary)]">
+                {participantDisplay}
+              </span>
+            </div>
+
+            <div
+              aria-live={showCountdown ? "off" : "polite"}
+              className="rounded-2xl border border-[var(--semi-color-border)] bg-[var(--surface-sunken)] px-4 py-4 text-center"
+            >
+              <div className="flex items-center justify-center gap-2 text-sm font-medium text-[var(--ink-muted)]">
+                <CalendarClock aria-hidden="true" size={16} />
+                <span>{showCountdown ? t("Lottery countdown") : t("Draw time")}</span>
+              </div>
+              {showCountdown && countdown ? (
+                <div
+                  aria-label={t("Lottery countdown")}
+                  className="mt-4 grid grid-cols-3 gap-2"
+                  role="timer"
+                >
+                  {[
+                    [countdown.hours, t("Hours short")],
+                    [countdown.minutes, t("Minutes short")],
+                    [countdown.seconds, t("Seconds short")],
+                  ].map(([value, label]) => (
+                    <div
+                      className="rounded-xl border border-[var(--semi-color-border)] bg-[var(--surface)] px-2 py-3"
+                      key={String(label)}
+                    >
+                      <div className="font-mono-data text-3xl font-semibold tabular-nums text-[var(--ink-primary)] sm:text-4xl">
+                        {padCountdown(Number(value))}
+                      </div>
+                      <div className="mt-1 text-xs text-[var(--ink-muted)]">{label}</div>
+                    </div>
+                  ))}
                 </div>
-                <div className="mt-2 text-sm font-semibold leading-6 text-[var(--ink)]">
-                  {lottery.drawAt
-                    ? formatTime(lottery.drawAt, language)
+              ) : (
+                <div className="mt-3 text-base font-semibold text-[var(--ink-primary)]">
+                  {lottery.status === "settling"
+                    ? t("Lottery status settling")
                     : completed
-                      ? t("Lottery status completed")
-                      : t("Draw time pending")}
+                      ? lottery.drawAt
+                        ? formatTime(lottery.drawAt, language)
+                        : t("Lottery status completed")
+                      : countdown?.expired
+                        ? t("Lottery status settling")
+                        : t("Draw time pending")}
                 </div>
-              </div>
-              <div className="rounded-xl border border-[var(--semi-color-border)] px-4 py-4">
-                <div className="flex items-center gap-2 text-sm text-[var(--ink-muted)]">
-                  <CheckCircle2 aria-hidden="true" size={16} />
-                  <span>{t("Participation")}</span>
+              )}
+              {showCountdown && lottery.drawAt ? (
+                <div className="mt-3 text-xs text-[var(--ink-muted)]">
+                  {formatTime(lottery.drawAt, language)}
                 </div>
-                <div className="mt-2 text-sm font-semibold leading-6 text-[var(--ink)]">
-                  {data.hasEntered
-                    ? t("You have entered.")
-                    : lottery.status === "open"
-                      ? t("Open to eligible accounts")
-                      : t("Entry closed")}
-                </div>
-              </div>
+              ) : null}
             </div>
 
             {entryError ? (
@@ -282,7 +433,7 @@ export default function Lottery() {
                       {t("Congratulations")}
                     </div>
                     <div className="mt-1 text-xl font-bold text-emerald-900 dark:text-emerald-200">
-                      {t("Lottery prize amount", { amount: data.myPayout.amount })}
+                      {t("Lottery prize amount", { amount: formatPoints(data.myPayout.amount) })}
                     </div>
                   </div>
                 </div>
@@ -311,7 +462,7 @@ export default function Lottery() {
 
             <Button
               block
-              className="!h-12 !rounded-xl !font-semibold shadow-sm transition-transform hover:-translate-y-0.5 focus-visible:ring-2 focus-visible:ring-[var(--brand)] focus-visible:ring-offset-2"
+              className="!h-12 !cursor-pointer !rounded-xl !font-semibold shadow-sm transition-transform hover:-translate-y-0.5 focus-visible:ring-2 focus-visible:ring-[var(--brand)] focus-visible:ring-offset-2 disabled:!cursor-not-allowed"
               disabled={!canEnter}
               loading={entering}
               onClick={() => void enter()}

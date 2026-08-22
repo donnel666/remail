@@ -5453,6 +5453,10 @@ export interface components {
         PublicLotterySummary: {
             title: string;
             totalAmount: string;
+            /** @description Current number of eligible entries in the activity. */
+            participantCount: number;
+            /** @description Optional public participant total configured for the activity. Omitted when no total was configured. */
+            participantTarget?: number | null;
             /** Format: date-time */
             drawAt?: string | null;
             /** @enum {string} */

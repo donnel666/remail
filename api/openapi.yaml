@@ -14638,12 +14638,21 @@ components:
 
     PublicLotterySummary:
       type: object
-      required: [title, totalAmount, status]
+      required: [title, totalAmount, participantCount, status]
       properties:
         title:
           type: string
         totalAmount:
           type: string
+        participantCount:
+          type: integer
+          minimum: 0
+          description: Current number of eligible entries in the activity.
+        participantTarget:
+          type: integer
+          minimum: 1
+          nullable: true
+          description: Optional public participant total configured for the activity. Omitted when no total was configured.
         drawAt:
           type: string
           format: date-time

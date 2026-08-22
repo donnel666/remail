@@ -9616,10 +9616,16 @@ type PublicLotteryResponse struct {
 
 // PublicLotterySummary defines model for PublicLotterySummary.
 type PublicLotterySummary struct {
-	DrawAt      *time.Time                 `json:"drawAt,omitempty"`
-	Status      PublicLotterySummaryStatus `json:"status"`
-	Title       string                     `json:"title"`
-	TotalAmount string                     `json:"totalAmount"`
+	DrawAt *time.Time `json:"drawAt,omitempty"`
+
+	// ParticipantCount Current number of eligible entries in the activity.
+	ParticipantCount int `json:"participantCount"`
+
+	// ParticipantTarget Optional public participant total configured for the activity. Omitted when no total was configured.
+	ParticipantTarget *int                       `json:"participantTarget,omitempty"`
+	Status            PublicLotterySummaryStatus `json:"status"`
+	Title             string                     `json:"title"`
+	TotalAmount       string                     `json:"totalAmount"`
 }
 
 // PublicLotterySummaryStatus defines model for PublicLotterySummary.Status.

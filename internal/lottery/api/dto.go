@@ -38,14 +38,17 @@ type LotteryResponse struct {
 	SettledAt         *time.Time                `json:"settledAt,omitempty"`
 }
 
-// PublicLotterySummary intentionally contains no rule, participant, account,
-// payout-tier, or accounting fields. The public URL is an invitation to enter
-// an activity, not an API for discovering its private allocation algorithm.
+// PublicLotterySummary exposes only the campaign facts participants need to
+// decide whether to join. ParticipantCount and the optional ParticipantTarget
+// are display data; MaxParticipants and all allocation/account rules remain
+// private.
 type PublicLotterySummary struct {
-	Title       string     `json:"title"`
-	TotalAmount string     `json:"totalAmount"`
-	DrawAt      *time.Time `json:"drawAt,omitempty"`
-	Status      string     `json:"status"`
+	Title             string     `json:"title"`
+	TotalAmount       string     `json:"totalAmount"`
+	ParticipantCount  int        `json:"participantCount"`
+	ParticipantTarget *int       `json:"participantTarget,omitempty"`
+	DrawAt            *time.Time `json:"drawAt,omitempty"`
+	Status            string     `json:"status"`
 }
 
 type PublicPayoutResponse struct {
@@ -113,7 +116,12 @@ func lotteryResponse(item *lotterydomain.Lottery) LotteryResponse {
 
 func publicLotterySummary(item *lotterydomain.Lottery) PublicLotterySummary {
 	return PublicLotterySummary{
-		Title: item.Title, TotalAmount: item.TotalAmount, DrawAt: item.DrawAt, Status: string(item.Status),
+		Title:             item.Title,
+		TotalAmount:       item.TotalAmount,
+		ParticipantCount:  item.ParticipantCount,
+		ParticipantTarget: item.ParticipantTarget,
+		DrawAt:            item.DrawAt,
+		Status:            string(item.Status),
 	}
 }
 
