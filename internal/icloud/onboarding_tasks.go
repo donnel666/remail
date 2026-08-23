@@ -917,6 +917,14 @@ func (s *Service) iCloudOnboardingFamilyRecoveryInvite(ctx context.Context, task
 
 func (s *Service) retryICloudOnboardingFamilySelection(ctx context.Context, task *iCloudOnboardingTaskModel, category, message string) error {
 	s.cancelICloudOnboardingSMSChallenge(context.WithoutCancel(ctx), task)
+	if hasICloudDirectFamilyInvite(task) {
+		// A supplied invitation has no primary resource to reselect. Keep the
+		// operator-provided URL and restart the direct family flow.
+		return s.retryICloudOnboardingTask(ctx, task, "family_prepare", nil, category, message, map[string]any{
+			"session_payload": nil, "pending_sms_purpose": "", "manual_verification_code": "",
+			"sms_sent_at": nil, "sms_poll_deadline": nil,
+		})
+	}
 	now := s.now().UTC().Truncate(time.Millisecond)
 	terminal := false
 	importID := uint(0)
@@ -1506,7 +1514,7 @@ func (s *Service) handleICloudOnboardingAppleError(ctx context.Context, task *iC
 	if category == "" {
 		category = "apple_rejected"
 	}
-	if category == "family_invite_expired" || category == "family_invite_unavailable" || category == "family_invite_invalid" {
+	if isICloudFamilyInviteFailure(category) {
 		if isICloudPostFamilyRecoveryTask(task) {
 			s.cancelICloudOnboardingSMSChallenge(context.WithoutCancel(ctx), task)
 			return s.waitICloudPostFamilyRecovery(ctx, task, category, appleErr.SafeMessage, task.Attempts+1, map[string]any{

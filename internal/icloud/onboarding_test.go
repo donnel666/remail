@@ -1216,6 +1216,34 @@ func TestICloudOnboardingInvalidFamilyInviteReselectsWithinBudget(t *testing.T) 
 	}
 }
 
+func TestICloudOnboardingDirectInviteFailureDoesNotReselectPrimary(t *testing.T) {
+	service, db, task, _ := newOnboardingStateTest(t)
+	service.onboardingApple = onboardingFamilyInvalidApple{}
+	if err := db.Model(task).Updates(map[string]any{
+		"family_invite_url": "https://setup.icloud.com/family/messages?inviteCode=direct-token",
+		"stage":             "family_prepare",
+		"attempts":          1,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(task, task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	processOnboardingStageForTest(t, service, db, task)
+	if task.Status != iCloudOnboardingProcessing || task.DispatchStatus != "pending" || task.Stage != "family_prepare" ||
+		task.Attempts != 2 || task.LastErrorCategory != "family_invite_invalid" || task.FamilyInviteURL == "" {
+		t.Fatalf("direct invite failure was routed through primary selection: %+v", task)
+	}
+
+	for attempts := 0; attempts < 10 && task.Status == iCloudOnboardingProcessing; attempts++ {
+		processOnboardingStageForTest(t, service, db, task)
+	}
+	if task.Status != iCloudOnboardingFailed || task.LastErrorCategory != "family_invite_invalid" || strings.Contains(task.LastSafeError, "primary family") || task.Stage == "family_select" {
+		t.Fatalf("direct invite failure lost its category or entered primary selection: %+v", task)
+	}
+}
+
 func TestICloudOnboardingFamilyApplyInviteFailurePreservesOriginalFamily(t *testing.T) {
 	service, db, task, _ := newOnboardingStateTest(t)
 	service.onboardingApple = onboardingFamilyInvalidApple{}
