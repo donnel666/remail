@@ -5398,12 +5398,13 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /** @description Legacy wire name. New campaigns use fixed normal/lucky prize counts; consolation is derived from participant count. */
         LotteryTierWeights: {
             consolation: number;
             normal: number;
             lucky: number;
         };
-        /** @description Lottery amounts are whole points. Set at least one draw condition; if both are provided, whichever condition is met first starts the draw. */
+        /** @description Lottery amounts are whole points. Lucky and normal prize fields are fixed counts; all remaining participants receive the minimum award. For a participant target, the total must fit between target multiplied by the minimum and maximum payout. Set at least one draw condition; if both are provided, whichever condition is met first starts the draw. */
         CreateLotteryRequest: {
             title: string;
             totalAmount: string;
@@ -5436,6 +5437,8 @@ export interface components {
             participantCount: number;
             /** @description Internal entry safety cap; it is not a draw condition when participantTarget is null. */
             maxParticipants: number;
+            /** @description Internal allocator version for administrator auditing. */
+            algorithmVersion: string;
             /** @enum {string} */
             status: "funding" | "open" | "settling" | "completed" | "cancelled";
             triggeredBy?: string | null;

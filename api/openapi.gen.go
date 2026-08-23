@@ -7719,7 +7719,7 @@ type CreateDomainRequest struct {
 // CreateDomainRequestPurpose Defaults to not_sale. Domain creation does not accept sale; suppliers publish private domains through the resource publish endpoint. binding is admin-only and displayed as auxiliary mailbox in Chinese.
 type CreateDomainRequestPurpose string
 
-// CreateLotteryRequest Lottery amounts are whole points. Set at least one draw condition; if both are provided, whichever condition is met first starts the draw.
+// CreateLotteryRequest Lottery amounts are whole points. Lucky and normal prize fields are fixed counts; all remaining participants receive the minimum award. For a participant target, the total must fit between target multiplied by the minimum and maximum payout. Set at least one draw condition; if both are provided, whichever condition is met first starts the draw.
 type CreateLotteryRequest struct {
 	// DrawAt Optional future draw time. The activity can use this condition, the participant target, or both.
 	DrawAt            *time.Time `json:"drawAt,omitempty"`
@@ -8603,6 +8603,7 @@ type LotteryResponse struct {
 
 	// MaxParticipants Internal entry safety cap; it is not a draw condition when participantTarget is null.
 	MaxParticipants   int    `json:"maxParticipants"`
+	AlgorithmVersion  string `json:"algorithmVersion"`
 	MaxPayout         string `json:"maxPayout"`
 	MinAccountAgeDays int    `json:"minAccountAgeDays"`
 	MinPayout         string `json:"minPayout"`
@@ -8624,7 +8625,8 @@ type LotteryResponse struct {
 // LotteryResponseStatus defines model for LotteryResponse.Status.
 type LotteryResponseStatus string
 
-// LotteryTierWeights defines model for LotteryTierWeights.
+// LotteryTierWeights keeps the legacy wire name. New campaigns use fixed
+// normal/lucky prize counts; consolation is derived from the participant count.
 type LotteryTierWeights struct {
 	Consolation int `json:"consolation"`
 	Lucky       int `json:"lucky"`

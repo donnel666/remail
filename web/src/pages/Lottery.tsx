@@ -22,9 +22,10 @@ const statusLabelKeys: Record<string, string> = {
 const confettiColors = ["#ff7a1a", "#ff3d73", "#facc15", "#38bdf8", "#a78bfa"];
 const celebrationDurationMs = 12_000;
 const celebrationCleanupGraceMs = 400;
-const confettiCount = 40;
+const confettiCount = 120;
 const confettiMinDurationMs = 2_800;
 const confettiMaxDurationMs = 4_200;
+const confettiDelayCurve = 1.7;
 const confettiLastDelayMs =
   celebrationDurationMs - confettiMaxDurationMs - celebrationCleanupGraceMs;
 const confetti = Array.from({ length: confettiCount }, (_, index) => {
@@ -32,12 +33,14 @@ const confetti = Array.from({ length: confettiCount }, (_, index) => {
   const jitterMs =
     index === 0 || index === confettiCount - 1
       ? 0
-      : ((index * 53) % 111) - 55;
+      : ((index * 53) % 71) - 35;
   const delayMs = Math.max(
     0,
     Math.min(
       confettiLastDelayMs,
-      Math.round(progress * confettiLastDelayMs + jitterMs),
+      Math.round(
+        Math.pow(progress, confettiDelayCurve) * confettiLastDelayMs + jitterMs,
+      ),
     ),
   );
   const durationMs =

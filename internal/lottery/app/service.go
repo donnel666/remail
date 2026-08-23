@@ -22,8 +22,13 @@ import (
 )
 
 const (
-	// v2 allocates whole points so the credited amount and user-facing notices match.
-	algorithmVersion = "bounded-tier-v2"
+	// v3 uses history-weighted fixed prize counts and allocates the complete pool.
+	algorithmVersion               = "fixed-tier-v3"
+	legacyAlgorithmVersionV2       = "bounded-tier-v2"
+	legacyAlgorithmVersionV1       = "bounded-tier-v1"
+	winnerInitialScore       int64 = 1000
+	winnerLuckyPenalty       int64 = 500
+	winnerConsolationBonus   int64 = 10
 	// ponytail: keep one settlement below the current Billing task ceiling;
 	// raise this only with a chunked Billing contract.
 	maxLotteryEntries = 5000
@@ -69,7 +74,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*CreateResult,
 		ParticipantTarget:  target,
 		MaxParticipants:    maxParticipants,
 		Status:             lotterydomain.StatusOpen,
-		AlgorithmVersion:   algorithmVersion,
+		AlgorithmVersion:   algorithmVersionForWeights(req.TierWeights),
 		UnusedAmount:       "0.00",
 		IdempotencyKey:     key,
 		RequestFingerprint: fingerprint,
@@ -180,13 +185,44 @@ func (s *Service) Draw(ctx context.Context, lotteryID uint) error {
 	if lottery.Status != lotterydomain.StatusSettling {
 		return nil
 	}
-	entries, err := s.repo.ListAllEntries(ctx, lotteryID)
+	if txRepo, ok := s.repo.(DrawTransactionRepository); ok {
+		var settledLottery *lotterydomain.Lottery
+		var payouts []lotterydomain.Payout
+		err := txRepo.WithDrawTransaction(ctx, lotteryID, func(txCtx context.Context, locked *lotterydomain.Lottery) error {
+			if locked.Status != lotterydomain.StatusSettling {
+				return nil
+			}
+			settledLottery, payouts, err = s.drawSettling(txCtx, locked)
+			return err
+		})
+		if err != nil {
+			return err
+		}
+		if settledLottery != nil && len(payouts) > 0 {
+			s.sendWinnerEmails(ctx, *settledLottery, payouts)
+		}
+		return nil
+	}
+	settledLottery, payouts, err := s.drawSettling(ctx, lottery)
 	if err != nil {
 		return err
 	}
-	existing, err := s.repo.GetPayouts(ctx, lotteryID)
+	if settledLottery != nil && len(payouts) > 0 {
+		s.sendWinnerEmails(ctx, *settledLottery, payouts)
+	}
+	return nil
+}
+
+// drawSettling performs one complete settlement attempt. The caller may wrap
+// it in a repository transaction; emails are intentionally sent afterwards.
+func (s *Service) drawSettling(ctx context.Context, lottery *lotterydomain.Lottery) (*lotterydomain.Lottery, []lotterydomain.Payout, error) {
+	entries, err := s.repo.ListAllEntries(ctx, lottery.ID)
 	if err != nil {
-		return err
+		return nil, nil, err
+	}
+	existing, err := s.repo.GetPayouts(ctx, lottery.ID)
+	if err != nil {
+		return nil, nil, err
 	}
 	var payouts []lotterydomain.Payout
 	var unusedAmount string
@@ -194,22 +230,48 @@ func (s *Service) Draw(ctx context.Context, lotteryID uint) error {
 		payouts = existing
 		unusedAmount, err = remainingUnused(lottery.TotalAmount, payouts)
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
 	} else if len(entries) > 0 {
-		wholePoints := lottery.AlgorithmVersion == algorithmVersion
-		payouts, unusedAmount, err = allocate(entries, lottery.TotalAmount, lottery.MinPayout, lottery.MaxPayout, lottery.TierWeights, wholePoints)
-		if err != nil {
-			return err
+		if lockRepo, ok := s.repo.(WinnerUserLockRepository); ok {
+			if err := lockRepo.LockWinnerUsers(ctx, entryUserIDs(entries)); err != nil {
+				return nil, nil, err
+			}
 		}
-		if err := s.repo.SavePayouts(ctx, lotteryID, payouts); err != nil {
-			return err
+		switch lottery.AlgorithmVersion {
+		case algorithmVersion:
+			stats, statsErr := s.repo.LookupWinnerStats(ctx, entryUserIDs(entries))
+			if statsErr != nil {
+				return nil, nil, statsErr
+			}
+			if err := rankEntriesByHistory(entries, stats); err != nil {
+				return nil, nil, err
+			}
+			payouts, unusedAmount, err = allocateFixedCountsRanked(entries, lottery.TotalAmount, lottery.MinPayout, lottery.MaxPayout, lottery.TierWeights)
+		case legacyAlgorithmVersionV2:
+			payouts, unusedAmount, err = allocateLegacy(entries, lottery.TotalAmount, lottery.MinPayout, lottery.MaxPayout, lottery.TierWeights, true)
+		case legacyAlgorithmVersionV1:
+			payouts, unusedAmount, err = allocateLegacy(entries, lottery.TotalAmount, lottery.MinPayout, lottery.MaxPayout, lottery.TierWeights, false)
+		default:
+			payouts, unusedAmount, err = allocateLegacy(entries, lottery.TotalAmount, lottery.MinPayout, lottery.MaxPayout, lottery.TierWeights, false)
+		}
+		if err != nil {
+			if errors.Is(err, lotterydomain.ErrLotteryInsufficientParticipants) || errors.Is(err, lotterydomain.ErrLotteryInvalidRules) {
+				if cancelErr := s.cancelSettling(ctx, lottery); cancelErr != nil {
+					return nil, nil, cancelErr
+				}
+				return nil, nil, nil
+			}
+			return nil, nil, err
+		}
+		if err := s.repo.SavePayouts(ctx, lottery.ID, payouts); err != nil {
+			return nil, nil, err
 		}
 		// Another worker may have won the insert race. Always settle using the
 		// persisted payout rows, never a discarded in-memory allocation.
-		payouts, err = s.repo.GetPayouts(ctx, lotteryID)
+		payouts, err = s.repo.GetPayouts(ctx, lottery.ID)
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
 	} else {
 		unusedAmount = lottery.TotalAmount
@@ -217,46 +279,53 @@ func (s *Service) Draw(ctx context.Context, lotteryID uint) error {
 	if len(payouts) == 0 {
 		// No participant wallet is credited. The unused system budget is only
 		// recorded for audit.
-		if err := s.repo.RecordBillingTransactions(ctx, lotteryID, nil, unusedAmount); err != nil {
-			return err
+		if err := s.repo.RecordBillingTransactions(ctx, lottery.ID, nil, unusedAmount); err != nil {
+			return nil, nil, err
 		}
-		if err := s.repo.Complete(ctx, lotteryID, lotterydomain.StatusCancelled, unusedAmount, s.now().UTC()); err != nil {
-			return err
+		if err := s.repo.Complete(ctx, lottery.ID, lotterydomain.StatusCancelled, unusedAmount, s.now().UTC()); err != nil {
+			return nil, nil, err
 		}
-		return nil
+		return nil, nil, nil
 	}
 	awards := make([]billingapp.LotteryAward, len(payouts))
 	for i := range payouts {
 		awards[i] = billingapp.LotteryAward{UserID: payouts[i].UserID, Amount: payouts[i].Amount}
 	}
 	if s.billing == nil {
-		return lotterydomain.ErrLotterySettlement
+		return nil, nil, lotterydomain.ErrLotterySettlement
 	}
 	settlement, err := s.billing.SettleLotteryPool(ctx, billingapp.LotterySettlementRequest{
-		LotteryID: lotteryID, TotalAmount: lottery.TotalAmount,
+		LotteryID: lottery.ID, TotalAmount: lottery.TotalAmount,
 		Awards: awards, UnusedAmount: unusedAmount,
 	})
 	if err != nil {
-		return fmt.Errorf("settle lottery %d: %w", lotteryID, err)
+		return nil, nil, fmt.Errorf("settle lottery %d: %w", lottery.ID, err)
 	}
 	if settlement == nil {
-		return fmt.Errorf("settle lottery %d: nil billing result: %w", lotteryID, lotterydomain.ErrLotterySettlement)
+		return nil, nil, fmt.Errorf("settle lottery %d: nil billing result: %w", lottery.ID, lotterydomain.ErrLotterySettlement)
 	}
 	if err := validateSettlementAwards(payouts, settlement.Awards); err != nil {
-		return fmt.Errorf("settle lottery %d: %w", lotteryID, err)
+		return nil, nil, fmt.Errorf("settle lottery %d: %w", lottery.ID, err)
 	}
 	transactions := make(map[uint]string, len(settlement.Awards))
 	for _, award := range settlement.Awards {
 		transactions[award.UserID] = strings.TrimSpace(award.Transaction.TransactionNo)
 	}
-	if err := s.repo.RecordBillingTransactions(ctx, lotteryID, transactions, unusedAmount); err != nil {
+	if err := s.repo.RecordBillingTransactions(ctx, lottery.ID, transactions, unusedAmount); err != nil {
+		return nil, nil, err
+	}
+	if err := s.repo.Complete(ctx, lottery.ID, lotterydomain.StatusCompleted, unusedAmount, s.now().UTC()); err != nil {
+		return nil, nil, err
+	}
+	return lottery, payouts, nil
+}
+
+func (s *Service) cancelSettling(ctx context.Context, lottery *lotterydomain.Lottery) error {
+	unusedAmount := lottery.TotalAmount
+	if err := s.repo.RecordBillingTransactions(ctx, lottery.ID, nil, unusedAmount); err != nil {
 		return err
 	}
-	if err := s.repo.Complete(ctx, lotteryID, lotterydomain.StatusCompleted, unusedAmount, s.now().UTC()); err != nil {
-		return err
-	}
-	s.sendWinnerEmails(ctx, *lottery, payouts)
-	return nil
+	return s.repo.Complete(ctx, lottery.ID, lotterydomain.StatusCancelled, unusedAmount, s.now().UTC())
 }
 
 func (s *Service) sendWinnerEmails(ctx context.Context, lottery lotterydomain.Lottery, payouts []lotterydomain.Payout) {
@@ -280,6 +349,15 @@ func (s *Service) sendWinnerEmails(ctx context.Context, lottery lotterydomain.Lo
 	}
 }
 
+func algorithmVersionForWeights(weights lotterydomain.TierWeights) string {
+	if weights.ValidLegacyPercentages() {
+		// Keep old percentage clients on the v2 whole-point allocator. New
+		// requests use consolation=0 and are unambiguously v3 fixed counts.
+		return legacyAlgorithmVersionV2
+	}
+	return algorithmVersion
+}
+
 func validateRules(req CreateRequest) (total, minPayout, maxPayout string, maxParticipants int, err error) {
 	totalDec, parseErr := money.Parse(req.TotalAmount)
 	if parseErr != nil || !totalDec.IsPositive() {
@@ -296,7 +374,11 @@ func validateRules(req CreateRequest) (total, minPayout, maxPayout string, maxPa
 		err = lotterydomain.ErrLotteryInvalidRules
 		return
 	}
-	if req.MinAccountAgeDays < 0 || !req.TierWeights.Valid() || (req.DrawAt == nil && req.ParticipantTarget == nil) {
+	legacyWeights := req.TierWeights.ValidLegacyPercentages()
+	fixedWeights := req.TierWeights.ValidFixedCounts()
+	if req.MinAccountAgeDays < 0 || (!legacyWeights && !fixedWeights) ||
+		(fixedWeights && (req.TierWeights.Normal > maxLotteryEntries || req.TierWeights.Lucky > maxLotteryEntries-req.TierWeights.Normal)) ||
+		(req.DrawAt == nil && req.ParticipantTarget == nil) {
 		err = lotterydomain.ErrLotteryInvalidRules
 		return
 	}
@@ -314,36 +396,224 @@ func validateRules(req CreateRequest) (total, minPayout, maxPayout string, maxPa
 	maxParticipants = maxLotteryEntries
 	if req.ParticipantTarget != nil {
 		target := int64(*req.ParticipantTarget)
-		if target > math.MaxInt64/minUnits || target*minUnits >= totalUnits {
-			// The target must leave at least one unit of variable budget; otherwise
-			// a full target draw is necessarily flat at the minimum payout.
+		if target > math.MaxInt64/minUnits || target*minUnits > totalUnits ||
+			target > math.MaxInt64/maxUnits || target*maxUnits < totalUnits {
+			// The target draw must be able to distribute the complete pool within
+			// the configured per-participant range.
+			err = lotterydomain.ErrLotteryInvalidRules
+			return
+		}
+		if fixedWeights && !fixedCountsFitPool(target, totalUnits, minUnits, maxUnits, req.TierWeights) {
 			err = lotterydomain.ErrLotteryInvalidRules
 			return
 		}
 		maxParticipants = int(target)
 	} else {
 		// A time-only activity has no user-supplied target, so cap entries at a
-		// fundable count while retaining the global settlement bound.
-		if totalUnits <= minUnits {
+		// count that can receive at least the configured minimum.
+		if totalUnits < minUnits {
 			err = lotterydomain.ErrLotteryInvalidRules
 			return
 		}
-		fundable := (totalUnits - 1) / minUnits
+		fundable := totalUnits / minUnits
 		if fundable < int64(maxParticipants) {
 			maxParticipants = int(fundable)
+		}
+		if fixedWeights {
+			if int64(req.TierWeights.Normal+req.TierWeights.Lucky) > int64(maxParticipants) ||
+				!fixedCountsCanFitAnyPool(int64(maxParticipants), totalUnits, minUnits, maxUnits, req.TierWeights) {
+				err = lotterydomain.ErrLotteryInvalidRules
+				return
+			}
 		}
 	}
 	return money.Format(totalDec), money.Format(minDec), money.Format(maxDec), maxParticipants, nil
 }
 
-func Allocate(entries []lotterydomain.Entry, totalAmount, minPayout, maxPayout string, weights lotterydomain.TierWeights) ([]lotterydomain.Payout, string, error) {
-	return allocate(entries, totalAmount, minPayout, maxPayout, weights, true)
+func fixedCountsFitPool(n, total, minValue, maxValue int64, counts lotterydomain.TierWeights) bool {
+	if n <= 0 || minValue <= 0 || maxValue <= minValue || !counts.ValidFixedCounts() {
+		return false
+	}
+	lucky, normal := int64(counts.Lucky), int64(counts.Normal)
+	if lucky < 0 || normal < 0 || lucky > n-normal {
+		return false
+	}
+	capacity := maxValue - minValue
+	if n > math.MaxInt64/minValue || lucky > math.MaxInt64/capacity || normal > math.MaxInt64/capacity {
+		return false
+	}
+	base := n * minValue
+	if lucky*capacity > math.MaxInt64-base {
+		return false
+	}
+	base += lucky * capacity
+	if total < base {
+		return false
+	}
+	if normal*capacity > math.MaxInt64-base {
+		return false
+	}
+	return total <= base+normal*capacity
 }
 
-// allocate keeps the pre-v2 ledger-unit path available for campaigns already
-// persisted with fractional rules; new campaigns always use whole points.
-func allocate(entries []lotterydomain.Entry, totalAmount, minPayout, maxPayout string, weights lotterydomain.TierWeights, wholePoints bool) ([]lotterydomain.Payout, string, error) {
-	if len(entries) == 0 || !weights.Valid() {
+func fixedCountsCanFitAnyPool(maxParticipants, total, minValue, maxValue int64, counts lotterydomain.TierWeights) bool {
+	minimumParticipants := int64(counts.Normal + counts.Lucky)
+	if minimumParticipants < 1 {
+		minimumParticipants = 1
+	}
+	if minimumParticipants > maxParticipants {
+		return false
+	}
+	for n := minimumParticipants; n <= maxParticipants; n++ {
+		if fixedCountsFitPool(n, total, minValue, maxValue, counts) {
+			return true
+		}
+	}
+	return false
+}
+
+func Allocate(entries []lotterydomain.Entry, totalAmount, minPayout, maxPayout string, weights lotterydomain.TierWeights) ([]lotterydomain.Payout, string, error) {
+	if weights.ValidLegacyPercentages() {
+		return allocateLegacy(entries, totalAmount, minPayout, maxPayout, weights, true)
+	}
+	return allocateFixedCounts(entries, totalAmount, minPayout, maxPayout, weights)
+}
+
+func allocate(entries []lotterydomain.Entry, totalAmount, minPayout, maxPayout string, weights lotterydomain.TierWeights, fixedCounts bool) ([]lotterydomain.Payout, string, error) {
+	if fixedCounts {
+		return allocateFixedCounts(entries, totalAmount, minPayout, maxPayout, weights)
+	}
+	return allocateLegacy(entries, totalAmount, minPayout, maxPayout, weights, false)
+}
+
+func allocateFixedCountsRanked(entries []lotterydomain.Entry, totalAmount, minPayout, maxPayout string, counts lotterydomain.TierWeights) ([]lotterydomain.Payout, string, error) {
+	return allocateFixedCountsWithShuffle(entries, totalAmount, minPayout, maxPayout, counts, false)
+}
+
+// allocateFixedCounts gives lucky entries the configured maximum and
+// consolation entries the configured minimum. Normal entries absorb the
+// remaining pool inside the min/max range, so the settlement sum is exact.
+func allocateFixedCounts(entries []lotterydomain.Entry, totalAmount, minPayout, maxPayout string, counts lotterydomain.TierWeights) ([]lotterydomain.Payout, string, error) {
+	return allocateFixedCountsWithShuffle(entries, totalAmount, minPayout, maxPayout, counts, true)
+}
+
+func allocateFixedCountsWithShuffle(entries []lotterydomain.Entry, totalAmount, minPayout, maxPayout string, counts lotterydomain.TierWeights, shuffleEntries bool) ([]lotterydomain.Payout, string, error) {
+	if len(entries) == 0 || !counts.ValidFixedCounts() {
+		return nil, "0.00", lotterydomain.ErrLotteryInvalidRules
+	}
+	totalDec, err := money.Parse(totalAmount)
+	if err != nil {
+		return nil, "0.00", err
+	}
+	minDec, err := money.Parse(minPayout)
+	if err != nil {
+		return nil, "0.00", err
+	}
+	maxDec, err := money.Parse(maxPayout)
+	if err != nil {
+		return nil, "0.00", err
+	}
+	total, totalErr := wholePointUnits(totalDec)
+	minValue, minErr := wholePointUnits(minDec)
+	maxValue, maxErr := wholePointUnits(maxDec)
+	if totalErr != nil || minErr != nil || maxErr != nil || total <= 0 {
+		return nil, "0.00", lotterydomain.ErrLotteryInvalidRules
+	}
+	n := int64(len(entries))
+	if n > maxLotteryEntries || minValue <= 0 || maxValue <= minValue {
+		return nil, "0.00", lotterydomain.ErrLotteryInvalidRules
+	}
+	if n > math.MaxInt64/minValue || n > math.MaxInt64/maxValue {
+		return nil, "0.00", lotterydomain.ErrLotteryInvalidRules
+	}
+	minTotal := n * minValue
+	if total < minTotal || total > n*maxValue {
+		// The complete pool must fit between the per-entry minimum and maximum.
+		return nil, "0.00", lotterydomain.ErrLotteryInsufficientParticipants
+	}
+
+	capacity := maxValue - minValue
+	luckyRequested := int64(counts.Lucky)
+	normalRequested := int64(counts.Normal)
+	if luckyRequested < 0 || normalRequested < 0 || luckyRequested > n-normalRequested ||
+		!fixedCountsFitPool(n, total, minValue, maxValue, counts) {
+		return nil, "0.00", lotterydomain.ErrLotteryInsufficientParticipants
+	}
+	luckyCount, normalCount, normalCapacity := luckyRequested, normalRequested, capacity
+	if luckyCount < 0 || normalCount < 0 || luckyCount+normalCount > n {
+		return nil, "0.00", lotterydomain.ErrLotteryInsufficientParticipants
+	}
+	if normalCapacity <= 0 || normalCapacity > math.MaxInt64-minValue {
+		return nil, "0.00", lotterydomain.ErrLotteryInsufficientParticipants
+	}
+	normalMax := minValue + normalCapacity
+
+	if shuffleEntries {
+		if err := randomShuffle(entries); err != nil {
+			return nil, "0.00", err
+		}
+	}
+	luckyCountInt, normalCountInt := int(luckyCount), int(normalCount)
+	tiers := make([]lotterydomain.Tier, len(entries))
+	amounts := make([]int64, len(entries))
+	for i := range entries {
+		tiers[i] = lotterydomain.TierConsolation
+		amounts[i] = minValue
+	}
+	for i := 0; i < luckyCountInt; i++ {
+		tiers[i] = lotterydomain.TierLucky
+		amounts[i] = maxValue
+	}
+	for i := luckyCountInt; i < luckyCountInt+normalCountInt; i++ {
+		tiers[i] = lotterydomain.TierNormal
+	}
+
+	// Lucky awards already contribute their full max-minus-min bonus. The
+	// remaining bonus is spread only across normal awards.
+	bonus := total - minTotal - luckyCount*capacity
+	if normalCount == 0 {
+		if bonus != 0 {
+			return nil, "0.00", lotterydomain.ErrLotteryInsufficientParticipants
+		}
+	} else {
+		normalAmounts := make([]int64, normalCountInt)
+		normalWeights := make([]int64, normalCountInt)
+		for i := range normalAmounts {
+			normalAmounts[i] = minValue
+			normalWeights[i], err = tierRandomWeight(lotterydomain.TierNormal)
+			if err != nil {
+				return nil, "0.00", err
+			}
+		}
+		if err := distributeBonus(normalAmounts, normalWeights, bonus, normalCapacity); err != nil {
+			return nil, "0.00", err
+		}
+		if bonus > 0 && len(normalAmounts) > 1 {
+			ensureVariation(normalAmounts, normalWeights, minValue, normalMax)
+		}
+		for i, amount := range normalAmounts {
+			amounts[luckyCountInt+i] = amount
+		}
+	}
+
+	payouts := make([]lotterydomain.Payout, len(entries))
+	now := time.Now().UTC()
+	for i, entry := range entries {
+		payouts[i] = lotterydomain.Payout{
+			LotteryID: entry.LotteryID,
+			UserID:    entry.UserID,
+			Tier:      tiers[i],
+			Amount:    wholePointsAmount(amounts[i]),
+			CreatedAt: now,
+		}
+	}
+	return payouts, "0.00", nil
+}
+
+// allocateLegacy keeps the percentage-based ledger-unit path available for
+// campaigns persisted before fixed-count rules were introduced.
+func allocateLegacy(entries []lotterydomain.Entry, totalAmount, minPayout, maxPayout string, weights lotterydomain.TierWeights, wholePoints bool) ([]lotterydomain.Payout, string, error) {
+	if len(entries) == 0 || !weights.ValidLegacyPercentages() {
 		return nil, "0.00", lotterydomain.ErrLotteryInvalidRules
 	}
 	totalDec, err := money.Parse(totalAmount)
@@ -419,6 +689,9 @@ func allocate(entries []lotterydomain.Entry, totalAmount, minPayout, maxPayout s
 			tiers = append(tiers, item.tier)
 		}
 	}
+	if len(tiers) > len(entries) {
+		tiers = tiers[:len(entries)]
+	}
 	for len(tiers) < len(entries) {
 		tiers = append(tiers, lotterydomain.TierConsolation)
 	}
@@ -450,7 +723,7 @@ func allocate(entries []lotterydomain.Entry, totalAmount, minPayout, maxPayout s
 }
 
 func distributeBonus(amounts, weights []int64, bonus, capacity int64) error {
-	if bonus < 0 || capacity < 0 || len(amounts) != len(weights) {
+	if bonus < 0 || capacity < 0 || len(amounts) == 0 || len(amounts) != len(weights) {
 		return lotterydomain.ErrLotteryInvalidRules
 	}
 	base := amounts[0]
@@ -569,6 +842,9 @@ func ensureVariation(amounts, weights []int64, minValue, maxValue int64) {
 }
 
 func tierCounts(n int, weights lotterydomain.TierWeights) [3]int {
+	if n <= 0 || !weights.ValidLegacyPercentages() {
+		return [3]int{}
+	}
 	counts := [3]int{n * weights.Consolation / 100, n * weights.Normal / 100, n * weights.Lucky / 100}
 	for left := n - counts[0] - counts[1] - counts[2]; left > 0; left-- {
 		if weights.Lucky >= weights.Normal && weights.Lucky >= weights.Consolation && weights.Lucky > 0 {
@@ -603,6 +879,73 @@ func tierRandomWeight(tier lotterydomain.Tier) (int64, error) {
 		return 0, err
 	}
 	return minWeight + value.Int64(), nil
+}
+
+func entryUserIDs(entries []lotterydomain.Entry) []uint {
+	ids := make([]uint, len(entries))
+	for i, entry := range entries {
+		ids[i] = entry.UserID
+	}
+	return ids
+}
+
+// rankEntriesByHistory puts the highest history fairness scores first. Equal scores are
+// shuffled as a group so a boundary between tiers never favors insertion order.
+func rankEntriesByHistory(entries []lotterydomain.Entry, stats map[uint]WinnerStats) error {
+	if len(entries) < 2 {
+		return nil
+	}
+	type rankedEntry struct {
+		entry lotterydomain.Entry
+		score int64
+	}
+	ranked := make([]rankedEntry, len(entries))
+	for i, entry := range entries {
+		winnerStats := stats[entry.UserID]
+		ranked[i] = rankedEntry{entry: entry, score: winnerHistoryScore(winnerStats)}
+	}
+	sort.SliceStable(ranked, func(i, j int) bool { return ranked[i].score > ranked[j].score })
+	for start := 0; start < len(ranked); {
+		end := start + 1
+		for end < len(ranked) && ranked[end].score == ranked[start].score {
+			end++
+		}
+		if end-start == 1 {
+			entries[start] = ranked[start].entry
+			start = end
+			continue
+		}
+		group := make([]lotterydomain.Entry, end-start)
+		for i := start; i < end; i++ {
+			group[i-start] = ranked[i].entry
+		}
+		if err := randomShuffle(group); err != nil {
+			return err
+		}
+		for i := start; i < end; i++ {
+			entries[i] = group[i-start]
+		}
+		start = end
+	}
+	return nil
+}
+
+// score = 1000 - lucky awards*500 + consolation awards*10.
+func winnerHistoryScore(stats WinnerStats) int64 {
+	lucky := max(stats.LuckyCount, int64(0))
+	consolation := max(stats.ConsolationCount, int64(0))
+	if lucky > math.MaxInt64/winnerLuckyPenalty {
+		return math.MinInt64
+	}
+	score := winnerInitialScore - lucky*winnerLuckyPenalty
+	if consolation > math.MaxInt64/winnerConsolationBonus {
+		return math.MaxInt64
+	}
+	bonus := consolation * winnerConsolationBonus
+	if bonus > 0 && score > math.MaxInt64-bonus {
+		return math.MaxInt64
+	}
+	return score + bonus
 }
 
 func randomShuffle(entries []lotterydomain.Entry) error {

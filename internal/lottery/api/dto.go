@@ -31,6 +31,7 @@ type LotteryResponse struct {
 	ParticipantTarget *int                      `json:"participantTarget,omitempty"`
 	ParticipantCount  int                       `json:"participantCount"`
 	MaxParticipants   int                       `json:"maxParticipants"`
+	AlgorithmVersion  string                    `json:"algorithmVersion"`
 	Status            string                    `json:"status"`
 	TriggeredBy       string                    `json:"triggeredBy,omitempty"`
 	UnusedAmount      string                    `json:"unusedAmount"`
@@ -109,7 +110,8 @@ func lotteryResponse(item *lotterydomain.Lottery) LotteryResponse {
 		Title: item.Title, TotalAmount: item.TotalAmount, MinPayout: item.MinPayout, MaxPayout: item.MaxPayout,
 		TierWeights: item.TierWeights, MinAccountAgeDays: item.MinAccountAgeDays, DrawAt: item.DrawAt,
 		ParticipantTarget: item.ParticipantTarget, ParticipantCount: item.ParticipantCount, MaxParticipants: item.MaxParticipants,
-		Status: string(item.Status), TriggeredBy: string(item.TriggeredBy), UnusedAmount: item.UnusedAmount,
+		AlgorithmVersion: item.AlgorithmVersion,
+		Status:           string(item.Status), TriggeredBy: string(item.TriggeredBy), UnusedAmount: item.UnusedAmount,
 		CreatedAt: item.CreatedAt, SettledAt: item.SettledAt,
 	}
 }

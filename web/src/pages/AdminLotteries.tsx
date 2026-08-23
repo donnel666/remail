@@ -27,6 +27,7 @@ import {
 } from "@/components/semi/card-table";
 import { CopyableTableText } from "@/components/semi/copyable-table-text";
 import { copyText } from "@/lib/clipboard";
+import { listAdminUsers as lookupAdminUsers, type UserResponse } from "@/lib/iam-api";
 import { generateIdempotencyKey } from "@/lib/idempotency";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import {
@@ -40,8 +41,10 @@ import {
   type AdminLotteryEntry,
   type LotteryPayout,
 } from "@/lib/lottery-api";
+import { formatPoints, normalizePointValue } from "@/lib/points";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
+import { BalanceAccountCell } from "./admin-finance/balance-meta";
 
 type LotteryStatusFilter = "all" | Lottery["status"];
 const DETAIL_TABLE_SCROLL_Y = "max(220px, calc(100vh - 300px))";
@@ -51,7 +54,6 @@ type FormState = {
   totalAmount: string;
   minPayout: string;
   maxPayout: string;
-  consolation: string;
   normal: string;
   lucky: string;
   minAccountAgeDays: string;
@@ -64,8 +66,7 @@ const initialForm: FormState = {
   totalAmount: "300.00",
   minPayout: "1.00",
   maxPayout: "20.00",
-  consolation: "80",
-  normal: "15",
+  normal: "10",
   lucky: "5",
   minAccountAgeDays: "0",
   drawAt: null,
@@ -83,16 +84,127 @@ const statusMeta: Record<
   cancelled: { color: "grey", labelKey: "Lottery status cancelled" },
 };
 
-const tierLabelKeys: Record<LotteryPayout["tier"], string> = {
-  consolation: "Consolation prize",
-  normal: "Regular prize",
-  lucky: "Lucky prize",
-};
+const LOTTERY_USER_LOOKUP_CHUNK_SIZE = 100;
+
+const lotteryStatusTabs: Lottery["status"][] = [
+  "open",
+  "settling",
+  "completed",
+  "cancelled",
+];
+
+function comparePointAmounts(left: string, right: string) {
+  const normalize = (value: string) => {
+    const normalized = normalizePointValue(value);
+    if (!normalized) return 0n;
+    const negative = normalized.startsWith("-");
+    const unsigned = negative ? normalized.slice(1) : normalized;
+    const [integer, fraction = ""] = unsigned.split(".");
+    const units = BigInt(`${integer}${fraction.padEnd(6, "0")}`);
+    return negative ? -units : units;
+  };
+  const leftUnits = normalize(left);
+  const rightUnits = normalize(right);
+  return leftUnits === rightUnits ? 0 : leftUnits > rightUnits ? 1 : -1;
+}
+
+async function lookupLotteryUsers(userIDs: number[]) {
+  const uniqueIDs = Array.from(
+    new Set(userIDs.filter((id) => Number.isSafeInteger(id) && id > 0)),
+  );
+  if (uniqueIDs.length === 0) return {} as Record<number, UserResponse>;
+
+  const responses = await Promise.allSettled(
+    Array.from(
+      { length: Math.ceil(uniqueIDs.length / LOTTERY_USER_LOOKUP_CHUNK_SIZE) },
+      (_, index) => {
+        const ids = uniqueIDs.slice(
+          index * LOTTERY_USER_LOOKUP_CHUNK_SIZE,
+          (index + 1) * LOTTERY_USER_LOOKUP_CHUNK_SIZE,
+        );
+        return lookupAdminUsers({ ids, limit: ids.length, offset: 0 });
+      },
+    ),
+  );
+  const directory: Record<number, UserResponse> = {};
+  for (const response of responses) {
+    if (response.status !== "fulfilled") continue;
+    for (const user of response.value.users) directory[user.id] = user;
+  }
+  return directory;
+}
+
+function lotteryAccountCell(
+  userID: number,
+  directory: Record<number, UserResponse>,
+  t: TFunction,
+) {
+  const user = directory[userID];
+  if (!user) {
+    return <CopyableTableText copiedText={t("Copied")} text={`#${userID}`} />;
+  }
+  return (
+    <BalanceAccountCell
+      email={user.email}
+      groupName={user.userGroup?.name}
+      nickname={user.nickname}
+      role={user.role}
+      t={t}
+      userId={user.id}
+    />
+  );
+}
 
 function formatTime(value: string | null | undefined, language: string) {
   if (!value) return "-";
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "-" : date.toLocaleString(language);
+}
+
+function lotteryTierCountText(lottery: Lottery, t: TFunction) {
+  const participantCount = Math.max(0, lottery.participantCount);
+  let lucky = Math.max(0, lottery.tierWeights.lucky);
+  let normal = Math.max(0, lottery.tierWeights.normal);
+  let consolation = Math.max(0, participantCount - lucky - normal);
+  if (lottery.algorithmVersion !== "fixed-tier-v3") {
+    // v1/v2 stored percentages. Mirror the allocator's largest-remainder
+    // tie-break so admin counts remain meaningful for historical campaigns.
+    const weights = lottery.tierWeights;
+    const percentages = [
+      Math.max(0, weights.consolation),
+      Math.max(0, weights.normal),
+      Math.max(0, weights.lucky),
+    ];
+    const counts = percentages.map((weight) =>
+      Math.floor((participantCount * weight) / 100),
+    );
+    let remaining =
+      participantCount - counts.reduce((sum, value) => sum + value, 0);
+    while (remaining > 0) {
+      let index = 0;
+      if (
+        percentages[2] >= percentages[1] &&
+        percentages[2] >= percentages[0] &&
+        percentages[2] > 0
+      ) {
+        index = 2;
+      } else if (percentages[1] >= percentages[0] && percentages[1] > 0) {
+        index = 1;
+      }
+      if (percentages[index] <= 0) break;
+      counts[index] += 1;
+      remaining -= 1;
+    }
+    if (counts[0] === 0 && participantCount > 0) {
+      const donor = counts[1] > 0 ? 1 : counts[2] > 0 ? 2 : -1;
+      if (donor >= 0) {
+        counts[0] = 1;
+        counts[donor] -= 1;
+      }
+    }
+    [consolation, normal, lucky] = counts;
+  }
+  return `${t("Consolation prize")} ${consolation} · ${t("Regular prize")} ${normal} · ${t("Lucky prize")} ${lucky}`;
 }
 
 function statusTag(status: Lottery["status"], t: TFunction) {
@@ -138,11 +250,6 @@ function LotteryCreateModal({
     setForm((current) => ({ ...current, [key]: value }));
   };
 
-  const tierTotal =
-    Number(form.consolation || 0) +
-    Number(form.normal || 0) +
-    Number(form.lucky || 0);
-
   const submit = async () => {
     const hasTarget = form.participantTarget.trim() !== "";
     const target = hasTarget ? Number(form.participantTarget) : undefined;
@@ -151,11 +258,7 @@ function LotteryCreateModal({
     const total = Number(form.totalAmount);
     const minPayout = Number(form.minPayout);
     const maxPayout = Number(form.maxPayout);
-    const tierValues = [
-      Number(form.consolation),
-      Number(form.normal),
-      Number(form.lucky),
-    ];
+    const tierValues = [Number(form.normal), Number(form.lucky)];
 
     if (!form.title.trim()) {
       Toast.warning(t("Please enter an activity title."));
@@ -201,22 +304,40 @@ function LotteryCreateModal({
       return;
     }
     if (
-      !tierValues.every(
-        (value) => Number.isInteger(value) && value >= 0 && value <= 100,
-      ) ||
-      tierValues[0] <= 0 ||
-      tierTotal !== 100
+      !tierValues.every((value) => Number.isInteger(value) && value >= 0)
     ) {
-      Toast.warning(t("Prize tier percentages must be valid integers and total 100%."));
+      Toast.warning(t("Prize tier counts must be non-negative integers."));
       return;
     }
-    if (hasTarget && total <= target! * minPayout) {
+    if (hasTarget && total < target! * minPayout) {
       Toast.warning(
         t(
-          "Total amount must exceed the minimum payout for all target participants to allow varied rewards."
+          "Total amount must cover the minimum payout for all target participants."
         )
       );
       return;
+    }
+    if (hasTarget && total > target! * maxPayout) {
+      Toast.warning(
+        t(
+          "Total amount must fit within the maximum payout for all target participants."
+        )
+      );
+      return;
+    }
+    if (hasTarget && tierValues[0] + tierValues[1] > target!) {
+      Toast.warning(t("Prize counts cannot exceed the participant target."));
+      return;
+    }
+    if (hasTarget) {
+      const variableCapacity = maxPayout - minPayout;
+      const fixedMinimum =
+        target! * minPayout + tierValues[1] * variableCapacity;
+      const fixedMaximum = fixedMinimum + tierValues[0] * variableCapacity;
+      if (total < fixedMinimum || total > fixedMaximum) {
+        Toast.warning(t("Total amount does not fit the configured prize counts."));
+        return;
+      }
     }
 
     const body: CreateLotteryInput = {
@@ -225,9 +346,9 @@ function LotteryCreateModal({
       minPayout: form.minPayout.trim(),
       maxPayout: form.maxPayout.trim(),
       tierWeights: {
-        consolation: Number(form.consolation),
         normal: Number(form.normal),
         lucky: Number(form.lucky),
+        consolation: 0,
       },
       minAccountAgeDays: minAge,
       drawAt: form.drawAt?.toISOString(),
@@ -300,33 +421,27 @@ function LotteryCreateModal({
 
         <div className="rounded-lg border border-[var(--semi-color-border)] p-3">
           <div className="mb-3 text-sm font-semibold text-[var(--semi-color-text-0)]">
-            {t("Reward rules")}
+            {t("Prize counts")}
           </div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {(
               [
-                ["consolation", "Consolation prize"],
-                ["normal", "Regular prize"],
-                ["lucky", "Lucky prize"],
+                ["normal", "Regular prize count"],
+                ["lucky", "Lucky prize count"],
               ] as const
             ).map(([key, label]) => (
               <label className="block" key={key}>
-                {fieldLabel(`${t(label)} (%)`, true)}
+                {fieldLabel(t(label), true)}
                 <Input
                   onChange={(value) => setField(key, String(value))}
+                  suffix={t("People unit")}
                   value={form[key]}
                 />
               </label>
             ))}
           </div>
-          <div
-            className={`mt-2 text-xs ${
-              tierTotal === 100
-                ? "text-[var(--semi-color-success)]"
-                : "text-[var(--semi-color-danger)]"
-            }`}
-          >
-            {t("Percent total: {{total}}%", { total: tierTotal })}
+          <div className="mt-2 text-xs leading-5 text-[var(--semi-color-text-2)]">
+            {t("All other participants receive the minimum payout.")}
           </div>
         </div>
 
@@ -381,6 +496,7 @@ function LotteryDetailSheet({
   onCancel,
   payouts,
   payoutTotal,
+  userDirectory,
   t,
   language,
 }: {
@@ -391,6 +507,7 @@ function LotteryDetailSheet({
   onCancel: () => void;
   payouts: LotteryPayout[];
   payoutTotal: number;
+  userDirectory: Record<number, UserResponse>;
   t: TFunction;
   language: string;
 }) {
@@ -405,7 +522,14 @@ function LotteryDetailSheet({
     () =>
       [
         { dataIndex: "id", key: "id", title: "ID", width: 80 },
-        { dataIndex: "userId", key: "userId", title: t("User ID"), width: 120 },
+        {
+          dataIndex: "userId",
+          key: "userId",
+          title: t("Account"),
+          width: 280,
+          render: (value: unknown) =>
+            lotteryAccountCell(Number(value), userDirectory, t),
+        },
         {
           dataIndex: "registeredAt",
           key: "registeredAt",
@@ -414,22 +538,28 @@ function LotteryDetailSheet({
           render: (value: unknown) => formatTime(String(value), language),
         },
       ] as any[],
-    [language, t]
+    [language, t, userDirectory]
   );
 
   const payoutColumns = useMemo(
     () =>
       [
         { dataIndex: "id", key: "id", title: "ID", width: 80 },
-        { dataIndex: "userId", key: "userId", title: t("User ID"), width: 120 },
         {
-          dataIndex: "tier",
-          key: "tier",
-          title: t("Prize tier"),
+          dataIndex: "userId",
+          key: "userId",
+          title: t("Account"),
+          width: 280,
           render: (value: unknown) =>
-            t(tierLabelKeys[String(value) as LotteryPayout["tier"]] ?? String(value)),
+            lotteryAccountCell(Number(value), userDirectory, t),
         },
-        { dataIndex: "amount", key: "amount", title: t("Amount") },
+        {
+          dataIndex: "amount",
+          key: "amount",
+          title: t("Amount"),
+          width: 140,
+          render: (value: unknown) => formatPoints(String(value)),
+        },
         {
           dataIndex: "billingTransactionNo",
           key: "billingTransactionNo",
@@ -442,7 +572,15 @@ function LotteryDetailSheet({
             ),
         },
       ] as any[],
-    [t]
+    [t, userDirectory]
+  );
+  const sortedPayouts = useMemo(
+    () =>
+      [...payouts].sort(
+        (left, right) =>
+          comparePointAmounts(right.amount, left.amount) || left.id - right.id,
+      ),
+    [payouts],
   );
   const publicUrl = detail
     ? new URL(detail.publicUrl, window.location.origin).toString()
@@ -485,11 +623,11 @@ function LotteryDetailSheet({
                   </div>
                   <div>
                     <div className="text-xs text-[var(--semi-color-text-2)]">{t("Total amount")}</div>
-                    <div className="mt-1 text-sm text-[var(--semi-color-text-0)]">{detail.totalAmount} {t("Points")}</div>
+                    <div className="mt-1 text-sm text-[var(--semi-color-text-0)]">{formatPoints(detail.totalAmount)} {t("Points")}</div>
                   </div>
                   <div>
                     <div className="text-xs text-[var(--semi-color-text-2)]">{t("Reward range")}</div>
-                    <div className="mt-1 text-sm text-[var(--semi-color-text-0)]">{detail.minPayout} - {detail.maxPayout} {t("Points")}</div>
+                    <div className="mt-1 text-sm text-[var(--semi-color-text-0)]">{formatPoints(detail.minPayout)} - {formatPoints(detail.maxPayout)} {t("Points")}</div>
                   </div>
                   <div>
                     <div className="text-xs text-[var(--semi-color-text-2)]">{t("Participant progress")}</div>
@@ -509,7 +647,7 @@ function LotteryDetailSheet({
                   </div>
                   <div>
                     <div className="text-xs text-[var(--semi-color-text-2)]">{t("Unused budget")}</div>
-                    <div className="mt-1 text-sm text-[var(--semi-color-text-0)]">{detail.unusedAmount} {t("Points")}</div>
+                    <div className="mt-1 text-sm text-[var(--semi-color-text-0)]">{formatPoints(detail.unusedAmount)} {t("Points")}</div>
                   </div>
                 </div>
 
@@ -532,7 +670,7 @@ function LotteryDetailSheet({
                 </div>
 
                 <div className="rounded-lg bg-[var(--semi-color-fill-0)] px-3 py-2.5 text-sm text-[var(--semi-color-text-1)]">
-                  {t("Reward rules")}: {t("Consolation prize")} {detail.tierWeights.consolation}% · {t("Regular prize")} {detail.tierWeights.normal}% · {t("Lucky prize")} {detail.tierWeights.lucky}%
+                  {t("Prize counts")}: {lotteryTierCountText(detail, t)}
                 </div>
               </div>
             ) : null}
@@ -545,7 +683,7 @@ function LotteryDetailSheet({
                 hidePagination
                 loading={loading}
                 rowKey="id"
-                scroll={{ x: 520, y: DETAIL_TABLE_SCROLL_Y }}
+                scroll={{ x: 680, y: DETAIL_TABLE_SCROLL_Y }}
                 size="small"
               />
             ) : null}
@@ -553,12 +691,12 @@ function LotteryDetailSheet({
             {activeTab === "payouts" ? (
               <CardTable
                 columns={payoutColumns}
-                dataSource={payouts}
+                dataSource={sortedPayouts}
                 empty={<Empty description={t("No payouts yet")} style={{ padding: 24 }} />}
                 hidePagination
                 loading={loading}
                 rowKey="id"
-                scroll={{ x: 720, y: DETAIL_TABLE_SCROLL_Y }}
+                scroll={{ x: 700, y: DETAIL_TABLE_SCROLL_Y }}
                 size="small"
               />
             ) : null}
@@ -584,6 +722,7 @@ export default function AdminLotteries() {
   const [detail, setDetail] = useState<Lottery | null>(null);
   const [entries, setEntries] = useState<AdminLotteryEntry[]>([]);
   const [payouts, setPayouts] = useState<LotteryPayout[]>([]);
+  const [userDirectory, setUserDirectory] = useState<Record<number, UserResponse>>({});
   const [entryTotal, setEntryTotal] = useState(0);
   const [payoutTotal, setPayoutTotal] = useState(0);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -632,6 +771,7 @@ export default function AdminLotteries() {
     setDetail(lottery);
     setEntries([]);
     setPayouts([]);
+    setUserDirectory({});
     setEntryTotal(0);
     setPayoutTotal(0);
     setDetailLoading(true);
@@ -642,9 +782,15 @@ export default function AdminLotteries() {
         listAllAdminLotteryPayouts(lottery.id),
       ]);
       if (requestId !== detailRequestRef.current) return;
+      const directory = await lookupLotteryUsers([
+        ...entryPage.items.map((entry) => entry.userId),
+        ...payoutPage.items.map((payout) => payout.userId),
+      ]);
+      if (requestId !== detailRequestRef.current) return;
       setDetail(nextDetail);
       setEntries(entryPage.items);
       setPayouts(payoutPage.items);
+      setUserDirectory(directory);
       setEntryTotal(entryPage.total);
       setPayoutTotal(payoutPage.total);
     } catch (error) {
@@ -701,10 +847,10 @@ export default function AdminLotteries() {
           render: (_: unknown, row: Lottery) => (
             <div className="min-w-0">
               <div className="whitespace-nowrap text-sm tabular-nums text-[var(--semi-color-text-0)]">
-                {row.minPayout} - {row.maxPayout} {t("Points")}
+                {formatPoints(row.minPayout)} - {formatPoints(row.maxPayout)} {t("Points")}
               </div>
               <div className="text-xs leading-5 text-[var(--semi-color-text-2)]">
-                {t("Consolation prize")} {row.tierWeights.consolation}% · {t("Regular prize")} {row.tierWeights.normal}% · {t("Lucky prize")} {row.tierWeights.lucky}%
+                {t("Prize counts")}: {lotteryTierCountText(row, t)}
               </div>
               <div className="text-xs leading-5 text-[var(--semi-color-text-2)]">
                 {t("Minimum account age")}: {t("At least {{days}} days", { days: row.minAccountAgeDays })}
@@ -719,7 +865,7 @@ export default function AdminLotteries() {
           width: 145,
           render: (value: unknown) => (
             <span className="whitespace-nowrap tabular-nums text-[var(--semi-color-text-1)]">
-              {String(value)} {t("Points")}
+              {formatPoints(String(value))} {t("Points")}
             </span>
           ),
         },
@@ -796,7 +942,7 @@ export default function AdminLotteries() {
       type="card"
     >
       <Tabs.TabPane itemKey="all" tab={t("All")} />
-      {(Object.keys(statusMeta) as Lottery["status"][]).map((status) => (
+      {lotteryStatusTabs.map((status) => (
         <Tabs.TabPane
           itemKey={status}
           key={status}
@@ -816,7 +962,7 @@ export default function AdminLotteries() {
           size="small"
           type="primary"
         >
-          {t("Create lottery campaign")}
+          {t("Create")}
         </Button>
         <Button
           className="remail-toolbar-fixed-button flex-1 md:flex-none"
@@ -894,6 +1040,7 @@ export default function AdminLotteries() {
         }}
         payouts={payouts}
         payoutTotal={payoutTotal}
+        userDirectory={userDirectory}
         t={t}
       />
     </div>

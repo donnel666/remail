@@ -14519,26 +14519,27 @@ components:
       additionalProperties: false
 
     LotteryTierWeights:
+      description: Legacy wire name. New campaigns use fixed prize counts; consolation is derived from the participant count, and normal/lucky are requested counts.
       type: object
       required: [consolation, normal, lucky]
       properties:
         consolation:
           type: integer
-          minimum: 1
-          maximum: 100
+          minimum: 0
+          maximum: 5000
         normal:
           type: integer
           minimum: 0
-          maximum: 100
+          maximum: 5000
         lucky:
           type: integer
           minimum: 0
-          maximum: 100
+          maximum: 5000
       additionalProperties: false
 
     CreateLotteryRequest:
       type: object
-      description: Lottery amounts are whole points. Set at least one draw condition; if both are provided, whichever condition is met first starts the draw.
+      description: Lottery amounts are whole points. Prize counts are fixed for lucky and normal awards; all remaining participants receive the minimum award. For a participant target, the total must fit between target multiplied by the minimum and maximum payout. Set at least one draw condition; if both are provided, whichever condition is met first starts the draw.
       required: [title, totalAmount, minPayout, maxPayout, tierWeights, minAccountAgeDays]
       properties:
         title:
@@ -14572,7 +14573,7 @@ components:
 
     LotteryResponse:
       type: object
-      required: [id, publicToken, publicUrl, title, totalAmount, minPayout, maxPayout, tierWeights, minAccountAgeDays, participantCount, maxParticipants, status, unusedAmount, createdAt]
+      required: [id, publicToken, publicUrl, title, totalAmount, minPayout, maxPayout, tierWeights, minAccountAgeDays, participantCount, maxParticipants, algorithmVersion, status, unusedAmount, createdAt]
       properties:
         id:
           type: integer
@@ -14605,6 +14606,9 @@ components:
         maxParticipants:
           type: integer
           description: Internal entry safety cap; it is not a draw condition when participantTarget is null.
+        algorithmVersion:
+          type: string
+          description: Internal allocator version for administrator auditing.
         status:
           type: string
           enum: [funding, open, settling, completed, cancelled]

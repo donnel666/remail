@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -88,6 +89,65 @@ func (r *Repo) withTx(ctx context.Context, fn func(context.Context, *gorm.DB) er
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		return fn(platform.WithGormTx(ctx, tx), tx)
 	})
+}
+
+// WithDrawTransaction keeps selection, payout rows, Billing's ledger writes,
+// and the terminal lottery state in one database transaction. Billing's repo
+// reuses the GORM transaction carried by the context.
+func (r *Repo) WithDrawTransaction(ctx context.Context, lotteryID uint, fn func(context.Context, *lotterydomain.Lottery) error) error {
+	if lotteryID == 0 || fn == nil {
+		return lotterydomain.ErrLotteryNotFound
+	}
+	if tx, ok := platform.GormTxFromContext(ctx); ok {
+		return r.withLockedDraw(ctx, tx.WithContext(ctx), lotteryID, fn)
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		txCtx := platform.WithGormTx(ctx, tx)
+		return r.withLockedDraw(txCtx, tx, lotteryID, fn)
+	})
+}
+
+func (r *Repo) withLockedDraw(ctx context.Context, tx *gorm.DB, lotteryID uint, fn func(context.Context, *lotterydomain.Lottery) error) error {
+	var model LotteryModel
+	if err := txCtxDB(ctx, tx).Clauses(clause.Locking{Strength: "UPDATE"}).First(&model, "id = ?", lotteryID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return lotterydomain.ErrLotteryNotFound
+		}
+		return fmt.Errorf("lock lottery for draw: %w", err)
+	}
+	lottery, err := lotteryFromModel(model)
+	if err != nil {
+		return err
+	}
+	return fn(ctx, lottery)
+}
+
+// LockWinnerUsers serializes history snapshots for overlapping lotteries.
+// IDs are sorted before locking so concurrent draws acquire rows in one order.
+func (r *Repo) LockWinnerUsers(ctx context.Context, userIDs []uint) error {
+	if !r.db.Migrator().HasTable("users") {
+		return nil
+	}
+	ids := append([]uint(nil), userIDs...)
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	unique := ids[:0]
+	for _, id := range ids {
+		if id == 0 || (len(unique) > 0 && unique[len(unique)-1] == id) {
+			continue
+		}
+		unique = append(unique, id)
+	}
+	if len(unique) == 0 {
+		return nil
+	}
+	var rows []struct {
+		ID uint `gorm:"column:id"`
+	}
+	if err := r.dbFor(ctx).Table("users").Select("id").Where("id IN ?", unique).
+		Order("id ASC").Clauses(clause.Locking{Strength: "UPDATE"}).Find(&rows).Error; err != nil {
+		return fmt.Errorf("lock lottery winner users: %w", err)
+	}
+	return nil
 }
 
 func (r *Repo) Create(ctx context.Context, lottery *lotterydomain.Lottery) error {
@@ -228,7 +288,7 @@ func (r *Repo) ListPayouts(ctx context.Context, lotteryID uint, offset, limit in
 		return nil, 0, fmt.Errorf("count lottery payouts: %w", err)
 	}
 	var models []PayoutModel
-	if err := query.Order("id ASC").Offset(maxInt(offset, 0)).Limit(limit).Find(&models).Error; err != nil {
+	if err := query.Order("amount DESC").Order("id ASC").Offset(maxInt(offset, 0)).Limit(limit).Find(&models).Error; err != nil {
 		return nil, 0, fmt.Errorf("list lottery payouts: %w", err)
 	}
 	items := make([]lotterydomain.Payout, len(models))
@@ -311,6 +371,44 @@ func (r *Repo) ListAllEntries(ctx context.Context, lotteryID uint) ([]lotterydom
 	return items, nil
 }
 
+type winnerStatsRow struct {
+	UserID     uint   `gorm:"column:user_id"`
+	Tier       string `gorm:"column:tier"`
+	AwardCount int64  `gorm:"column:award_count"`
+}
+
+func (r *Repo) LookupWinnerStats(ctx context.Context, userIDs []uint) (map[uint]lotteryapp.WinnerStats, error) {
+	stats := make(map[uint]lotteryapp.WinnerStats, len(userIDs))
+	if len(userIDs) == 0 {
+		return stats, nil
+	}
+	rows := make([]winnerStatsRow, 0)
+	query := r.dbFor(ctx).Model(&PayoutModel{}).
+		Select("user_id, tier, COUNT(*) AS award_count").
+		Where("user_id IN ? AND tier IN ?", userIDs, []string{string(lotterydomain.TierLucky), string(lotterydomain.TierConsolation)})
+	// Older isolated repository tests (and pre-lottery installations) may not
+	// have the parent table. Production uses the status predicate so provisional
+	// payout rows cannot affect a later history snapshot.
+	if r.db.Migrator().HasTable("lotteries") {
+		query = query.Joins("JOIN lotteries ON lotteries.id = lottery_payouts.lottery_id").
+			Where("lotteries.status = ?", lotterydomain.StatusCompleted)
+	}
+	if err := query.Group("user_id, tier").Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("lookup lottery winner stats: %w", err)
+	}
+	for _, row := range rows {
+		item := stats[row.UserID]
+		switch lotterydomain.Tier(row.Tier) {
+		case lotterydomain.TierLucky:
+			item.LuckyCount = row.AwardCount
+		case lotterydomain.TierConsolation:
+			item.ConsolationCount = row.AwardCount
+		}
+		stats[row.UserID] = item
+	}
+	return stats, nil
+}
+
 func (r *Repo) ClaimSettlement(ctx context.Context, lotteryID uint, now time.Time) (*lotterydomain.Lottery, error) {
 	var result *lotterydomain.Lottery
 	err := r.withTx(ctx, func(txCtx context.Context, tx *gorm.DB) error {
@@ -357,7 +455,7 @@ func (r *Repo) ClaimSettlement(ctx context.Context, lotteryID uint, now time.Tim
 
 func (r *Repo) GetPayouts(ctx context.Context, lotteryID uint) ([]lotterydomain.Payout, error) {
 	var models []PayoutModel
-	if err := r.dbFor(ctx).Where("lottery_id = ?", lotteryID).Order("id ASC").Find(&models).Error; err != nil {
+	if err := r.dbFor(ctx).Where("lottery_id = ?", lotteryID).Order("amount DESC").Order("id ASC").Find(&models).Error; err != nil {
 		return nil, fmt.Errorf("get lottery payouts: %w", err)
 	}
 	items := make([]lotterydomain.Payout, len(models))
@@ -527,6 +625,8 @@ func payoutFromModel(model PayoutModel) lotterydomain.Payout {
 }
 
 var _ lotteryapp.Repository = (*Repo)(nil)
+var _ lotteryapp.DrawTransactionRepository = (*Repo)(nil)
+var _ lotteryapp.WinnerUserLockRepository = (*Repo)(nil)
 var _ interface {
 	FindEntry(context.Context, uint, uint) (*lotterydomain.Entry, error)
 	FindPayout(context.Context, uint, uint) (*lotterydomain.Payout, error)

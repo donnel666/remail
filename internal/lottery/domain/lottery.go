@@ -38,15 +38,19 @@ const (
 func (t Tier) String() string { return string(t) }
 
 var (
-	ErrLotteryNotFound            = errors.New("lottery not found")
-	ErrLotteryClosed              = errors.New("lottery is closed")
-	ErrLotteryNotReady            = errors.New("lottery draw conditions are not met")
-	ErrLotteryAlreadyEntered      = errors.New("already entered this lottery")
-	ErrLotteryNotEligible         = errors.New("account is not eligible for this lottery")
-	ErrLotteryNoEntries           = errors.New("lottery has no eligible entries")
-	ErrLotteryInvalidRules        = errors.New("lottery rules are invalid")
-	ErrLotteryIdempotencyConflict = errors.New("lottery idempotency key conflicts with an existing request")
-	ErrLotterySettlement          = errors.New("lottery settlement is pending")
+	ErrLotteryNotFound       = errors.New("lottery not found")
+	ErrLotteryClosed         = errors.New("lottery is closed")
+	ErrLotteryNotReady       = errors.New("lottery draw conditions are not met")
+	ErrLotteryAlreadyEntered = errors.New("already entered this lottery")
+	ErrLotteryNotEligible    = errors.New("account is not eligible for this lottery")
+	ErrLotteryNoEntries      = errors.New("lottery has no eligible entries")
+	ErrLotteryInvalidRules   = errors.New("lottery rules are invalid")
+	// ErrLotteryInsufficientParticipants is deterministic: the first draw
+	// condition won, but the entries cannot receive the complete pool while
+	// respecting the configured per-entry bounds and fixed prize counts.
+	ErrLotteryInsufficientParticipants = errors.New("lottery has insufficient participants for its pool")
+	ErrLotteryIdempotencyConflict      = errors.New("lottery idempotency key conflicts with an existing request")
+	ErrLotterySettlement               = errors.New("lottery settlement is pending")
 )
 
 // Entry rejection codes are deliberately small and stable.  The API uses them
@@ -83,6 +87,10 @@ func (e *EntryRejectedError) Unwrap() error {
 	return e.Cause
 }
 
+// TierWeights keeps the existing wire/storage name for compatibility. In new
+// campaigns the values are fixed counts: consolation is derived from the
+// participants, while normal and lucky are the requested special-prize counts.
+// Legacy campaigns continue to interpret all three values as percentages.
 type TierWeights struct {
 	Consolation int `json:"consolation"`
 	Normal      int `json:"normal"`
@@ -92,10 +100,21 @@ type TierWeights struct {
 func (w TierWeights) Total() int { return w.Consolation + w.Normal + w.Lucky }
 
 func (w TierWeights) Valid() bool {
+	return w.Consolation >= 0 && w.Normal >= 0 && w.Lucky >= 0
+}
+
+// ValidFixedCounts validates the v3 representation. Consolation is derived
+// from the entries, so callers only configure normal and lucky counts.
+func (w TierWeights) ValidFixedCounts() bool {
+	return w.Consolation == 0 && w.Normal >= 0 && w.Lucky >= 0
+}
+
+// ValidLegacyPercentages validates the v1/v2 representation retained for old
+// rows and old idempotent clients.
+func (w TierWeights) ValidLegacyPercentages() bool {
 	return w.Consolation > 0 && w.Consolation <= 100 &&
 		w.Normal >= 0 && w.Normal <= 100 &&
-		w.Lucky >= 0 && w.Lucky <= 100 &&
-		w.Total() == 100
+		w.Lucky >= 0 && w.Lucky <= 100 && w.Total() == 100
 }
 
 type Lottery struct {

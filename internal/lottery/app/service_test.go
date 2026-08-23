@@ -20,9 +20,8 @@ func TestAllocatePaysEveryEntryWithinBoundsAndPreservesPool(t *testing.T) {
 		entries[i] = lotterydomain.Entry{LotteryID: 7, UserID: uint(i + 1)}
 	}
 	payouts, unused, err := Allocate(entries, "1000.00", "1.00", "20.00", lotterydomain.TierWeights{
-		Consolation: 80,
-		Normal:      15,
-		Lucky:       5,
+		Normal: 43,
+		Lucky:  5,
 	})
 	require.NoError(t, err)
 	require.Len(t, payouts, len(entries))
@@ -39,36 +38,88 @@ func TestAllocatePaysEveryEntryWithinBoundsAndPreservesPool(t *testing.T) {
 		total = total.Add(amount)
 		tiers[payout.Tier]++
 		distinct[payout.Amount] = struct{}{}
+		switch payout.Tier {
+		case lotterydomain.TierLucky:
+			require.Equal(t, "20.00", payout.Amount)
+		case lotterydomain.TierConsolation:
+			require.Equal(t, "1.00", payout.Amount)
+		case lotterydomain.TierNormal:
+			require.True(t, amount.GreaterThanOrEqual(decimal.NewFromInt(1)))
+			require.True(t, amount.LessThanOrEqual(decimal.NewFromInt(20)))
+		}
 	}
-	unusedAmount, err := money.Parse(unused)
-	require.NoError(t, err)
-	require.True(t, total.Add(unusedAmount).Equal(decimal.NewFromInt(1000)))
-	require.Equal(t, 80, tiers[lotterydomain.TierConsolation])
-	require.Equal(t, 15, tiers[lotterydomain.TierNormal])
+	require.Equal(t, "0.00", unused)
+	require.True(t, total.Equal(decimal.NewFromInt(1000)))
+	require.Equal(t, 52, tiers[lotterydomain.TierConsolation])
+	require.Equal(t, 43, tiers[lotterydomain.TierNormal])
 	require.Equal(t, 5, tiers[lotterydomain.TierLucky])
 	require.Greater(t, len(distinct), 1)
 }
 
-func TestAllocateLeavesUnusedAmountAbovePerPersonMaximum(t *testing.T) {
+func TestAllocateDistributesPoolWhenConfiguredCountsNeedAdjustment(t *testing.T) {
 	entries := []lotterydomain.Entry{{LotteryID: 8, UserID: 1}, {LotteryID: 8, UserID: 2}}
-	payouts, unused, err := Allocate(entries, "100.00", "1.00", "10.00", lotterydomain.TierWeights{Consolation: 80, Normal: 15, Lucky: 5})
+	payouts, unused, err := Allocate(entries, "12.00", "1.00", "10.00", lotterydomain.TierWeights{Normal: 1, Lucky: 1})
 	require.NoError(t, err)
 	require.Len(t, payouts, 2)
-	require.Equal(t, "81.00", unused)
-	require.NotEqual(t, payouts[0].Amount, payouts[1].Amount)
+	require.Equal(t, "0.00", unused)
+	paid := decimal.Zero
+	for _, payout := range payouts {
+		amount, parseErr := money.Parse(payout.Amount)
+		require.NoError(t, parseErr)
+		paid = paid.Add(amount)
+	}
+	require.True(t, paid.Equal(decimal.NewFromInt(12)))
+	require.Equal(t, 1, countTier(payouts, lotterydomain.TierLucky))
+	require.Equal(t, 1, countTier(payouts, lotterydomain.TierNormal))
 }
 
-func TestAllocateCapsOneAccountAtThreeTimesNominalAverage(t *testing.T) {
+func TestAllocateRejectsFixedCountsWhenPoolIsTooSmall(t *testing.T) {
 	entries := make([]lotterydomain.Entry, 10)
 	for i := range entries {
 		entries[i] = lotterydomain.Entry{LotteryID: 9, UserID: uint(i + 1)}
 	}
-	payouts, _, err := Allocate(entries, "100.00", "1.00", "100.00", lotterydomain.TierWeights{Consolation: 80, Normal: 15, Lucky: 5})
-	require.NoError(t, err)
-	for _, payout := range payouts {
-		amount, parseErr := money.Parse(payout.Amount)
-		require.NoError(t, parseErr)
-		require.True(t, amount.LessThanOrEqual(decimal.NewFromInt(30)), payout.Amount)
+	_, unused, err := Allocate(entries, "20.00", "1.00", "20.00", lotterydomain.TierWeights{Normal: 0, Lucky: 1})
+	require.ErrorIs(t, err, lotterydomain.ErrLotteryInsufficientParticipants)
+	require.Equal(t, "0.00", unused)
+}
+
+func TestAllocateRejectsPoolAboveConfiguredMaximum(t *testing.T) {
+	entries := []lotterydomain.Entry{{LotteryID: 12, UserID: 1}, {LotteryID: 12, UserID: 2}}
+	_, unused, err := Allocate(entries, "21.00", "1.00", "10.00", lotterydomain.TierWeights{})
+	require.ErrorIs(t, err, lotterydomain.ErrLotteryInsufficientParticipants)
+	require.Equal(t, "0.00", unused)
+}
+
+func TestAllocateKeepsEachTierInsideItsConfiguredAmountRule(t *testing.T) {
+	entries := make([]lotterydomain.Entry, 5)
+	for i := range entries {
+		entries[i] = lotterydomain.Entry{LotteryID: 14, UserID: uint(i + 1)}
+	}
+	for total := int64(17); total <= 20; total++ {
+		payouts, unused, err := Allocate(entries, money.Format(decimal.NewFromInt(total)), "1.00", "7.00", lotterydomain.TierWeights{
+			Normal: 1,
+			Lucky:  2,
+		})
+		require.NoError(t, err, "pool=%d", total)
+		require.Equal(t, "0.00", unused, "pool=%d", total)
+		paid := decimal.Zero
+		for _, payout := range payouts {
+			amount, parseErr := money.Parse(payout.Amount)
+			require.NoError(t, parseErr, "pool=%d", total)
+			paid = paid.Add(amount)
+			switch payout.Tier {
+			case lotterydomain.TierLucky:
+				require.Equal(t, "7.00", payout.Amount, "pool=%d", total)
+			case lotterydomain.TierConsolation:
+				require.Equal(t, "1.00", payout.Amount, "pool=%d", total)
+			case lotterydomain.TierNormal:
+				require.True(t, amount.GreaterThanOrEqual(decimal.NewFromInt(1)), "pool=%d", total)
+				require.True(t, amount.LessThanOrEqual(decimal.NewFromInt(7)), "pool=%d", total)
+			default:
+				require.Failf(t, "unknown tier", "tier=%q pool=%d", payout.Tier, total)
+			}
+		}
+		require.True(t, paid.Equal(decimal.NewFromInt(total)), "pool=%d", total)
 	}
 }
 
@@ -79,16 +130,15 @@ func TestAllocateHandlesProductionScalePool(t *testing.T) {
 		entries[i] = lotterydomain.Entry{LotteryID: 11, UserID: uint(i + 1)}
 	}
 
-	payouts, unused, err := Allocate(entries, "3000000.00", "1.00", "10000000.00", lotterydomain.TierWeights{
-		Consolation: 80,
-		Normal:      15,
-		Lucky:       5,
+	payouts, unused, err := Allocate(entries, "3000000.00", "1.00", "3000.00", lotterydomain.TierWeights{
+		Normal: 1000,
+		Lucky:  10,
 	})
 	require.NoError(t, err)
 	require.Len(t, payouts, participants)
 
 	paid := decimal.Zero
-	maxAward := decimal.RequireFromString("3000.00") // three times the nominal 1000-point average
+	maxAward := decimal.RequireFromString("3000.00")
 	for _, payout := range payouts {
 		amount, parseErr := money.Parse(payout.Amount)
 		require.NoError(t, parseErr)
@@ -97,9 +147,147 @@ func TestAllocateHandlesProductionScalePool(t *testing.T) {
 		require.True(t, amount.LessThanOrEqual(maxAward), payout.Amount)
 		paid = paid.Add(amount)
 	}
-	unusedAmount, err := money.Parse(unused)
+	require.Equal(t, "0.00", unused)
+	require.True(t, paid.Equal(decimal.RequireFromString("3000000")))
+	require.Equal(t, 10, countTier(payouts, lotterydomain.TierLucky))
+	require.Equal(t, 1000, countTier(payouts, lotterydomain.TierNormal))
+}
+
+func TestRankEntriesByHistoryPrioritizesLeastServedUsers(t *testing.T) {
+	entries := []lotterydomain.Entry{
+		{UserID: 1},
+		{UserID: 2},
+		{UserID: 3},
+		{UserID: 4},
+	}
+	stats := map[uint]WinnerStats{
+		1: {LuckyCount: 0, ConsolationCount: 0}, // 1000
+		2: {ConsolationCount: 1},                // 1010
+		3: {LuckyCount: 1},                      // 500
+		4: {LuckyCount: 2},                      // 0
+	}
+	require.NoError(t, rankEntriesByHistory(entries, stats))
+	got := entryUserIDs(entries)
+	require.Equal(t, []uint{2, 1, 3, 4}, got)
+}
+
+func TestRankEntriesByHistoryRandomizesEqualScoreBoundary(t *testing.T) {
+	entries := []lotterydomain.Entry{{UserID: 1}, {UserID: 2}, {UserID: 3}}
+	stats := map[uint]WinnerStats{3: {LuckyCount: 1}}
+	require.NoError(t, rankEntriesByHistory(entries, stats))
+	firstTwo := map[uint]bool{entries[0].UserID: true, entries[1].UserID: true}
+	require.True(t, firstTwo[1])
+	require.True(t, firstTwo[2])
+	require.Equal(t, uint(3), entries[2].UserID)
+}
+
+func TestRankedAllocationKeepsHistoryOrderForTiers(t *testing.T) {
+	entries := []lotterydomain.Entry{{LotteryID: 15, UserID: 1}, {LotteryID: 15, UserID: 2}, {LotteryID: 15, UserID: 3}}
+	payouts, unused, err := allocateFixedCountsRanked(entries, "15.00", "1.00", "10.00", lotterydomain.TierWeights{Normal: 1, Lucky: 1})
 	require.NoError(t, err)
-	require.True(t, paid.Add(unusedAmount).Equal(decimal.RequireFromString("3000000.00")))
+	require.Equal(t, "0.00", unused)
+	require.Equal(t, uint(1), payouts[0].UserID)
+	require.Equal(t, lotterydomain.TierLucky, payouts[0].Tier)
+	require.Equal(t, uint(2), payouts[1].UserID)
+	require.Equal(t, lotterydomain.TierNormal, payouts[1].Tier)
+	require.Equal(t, uint(3), payouts[2].UserID)
+	require.Equal(t, lotterydomain.TierConsolation, payouts[2].Tier)
+}
+
+type weightedDrawRepoStub struct {
+	Repository
+	lottery *lotterydomain.Lottery
+	entries []lotterydomain.Entry
+	stats   map[uint]WinnerStats
+	payouts []lotterydomain.Payout
+}
+
+func (r *weightedDrawRepoStub) GetByID(context.Context, uint) (*lotterydomain.Lottery, error) {
+	return r.lottery, nil
+}
+
+func (r *weightedDrawRepoStub) ListAllEntries(context.Context, uint) ([]lotterydomain.Entry, error) {
+	return append([]lotterydomain.Entry(nil), r.entries...), nil
+}
+
+func (r *weightedDrawRepoStub) LookupWinnerStats(context.Context, []uint) (map[uint]WinnerStats, error) {
+	return r.stats, nil
+}
+
+func (r *weightedDrawRepoStub) GetPayouts(context.Context, uint) ([]lotterydomain.Payout, error) {
+	return append([]lotterydomain.Payout(nil), r.payouts...), nil
+}
+
+func (r *weightedDrawRepoStub) SavePayouts(_ context.Context, _ uint, payouts []lotterydomain.Payout) error {
+	r.payouts = append([]lotterydomain.Payout(nil), payouts...)
+	return nil
+}
+
+func (r *weightedDrawRepoStub) RecordBillingTransactions(context.Context, uint, map[uint]string, string) error {
+	return nil
+}
+
+func (r *weightedDrawRepoStub) Complete(_ context.Context, _ uint, status lotterydomain.Status, _ string, _ time.Time) error {
+	r.lottery.Status = status
+	return nil
+}
+
+type weightedDrawBillingStub struct{}
+
+func (weightedDrawBillingStub) SettleLotteryPool(_ context.Context, req billingapp.LotterySettlementRequest) (*billingapp.LotterySettlementResult, error) {
+	result := &billingapp.LotterySettlementResult{Awards: make([]billingapp.LotteryAwardResult, len(req.Awards))}
+	for i, award := range req.Awards {
+		result.Awards[i] = billingapp.LotteryAwardResult{UserID: award.UserID, Amount: award.Amount, Transaction: billingdomain.Transaction{TransactionNo: "TX"}}
+	}
+	return result, nil
+}
+
+func TestDrawUsesHistoryScoresToChooseTiers(t *testing.T) {
+	repo := &weightedDrawRepoStub{
+		lottery: &lotterydomain.Lottery{
+			ID: 16, Status: lotterydomain.StatusSettling, AlgorithmVersion: algorithmVersion,
+			TotalAmount: "15.00", MinPayout: "1.00", MaxPayout: "10.00",
+			TierWeights: lotterydomain.TierWeights{Normal: 1, Lucky: 1},
+		},
+		entries: []lotterydomain.Entry{{LotteryID: 16, UserID: 1}, {LotteryID: 16, UserID: 2}, {LotteryID: 16, UserID: 3}},
+		stats:   map[uint]WinnerStats{2: {ConsolationCount: 1}, 3: {LuckyCount: 1}},
+	}
+	service := NewService(repo, weightedDrawBillingStub{}, nil, nil, nil)
+	require.NoError(t, service.Draw(context.Background(), 16))
+	require.Len(t, repo.payouts, 3)
+	byUser := make(map[uint]lotterydomain.Payout, len(repo.payouts))
+	for _, payout := range repo.payouts {
+		byUser[payout.UserID] = payout
+	}
+	require.Equal(t, lotterydomain.TierLucky, byUser[2].Tier)
+	require.Equal(t, lotterydomain.TierNormal, byUser[1].Tier)
+	require.Equal(t, lotterydomain.TierConsolation, byUser[3].Tier)
+}
+
+func TestDrawCancelsWhenFixedPoolCannotFitTheEntries(t *testing.T) {
+	repo := &weightedDrawRepoStub{
+		lottery: &lotterydomain.Lottery{
+			ID: 17, Status: lotterydomain.StatusSettling, AlgorithmVersion: algorithmVersion,
+			TotalAmount: "100.00", MinPayout: "1.00", MaxPayout: "10.00",
+			TierWeights: lotterydomain.TierWeights{Lucky: 1},
+		},
+		entries: []lotterydomain.Entry{{LotteryID: 17, UserID: 1}, {LotteryID: 17, UserID: 2}},
+		stats:   map[uint]WinnerStats{},
+	}
+	service := NewService(repo, weightedDrawBillingStub{}, nil, nil, nil)
+	require.NoError(t, service.Draw(context.Background(), 17))
+	require.Equal(t, lotterydomain.StatusCancelled, repo.lottery.Status)
+	require.Empty(t, repo.payouts)
+}
+
+func countTier(payouts []lotterydomain.Payout, tier lotterydomain.Tier) int {
+	count := 0
+	for _, payout := range payouts {
+		if payout.Tier == tier {
+			count++
+		}
+	}
+	return count
 }
 
 func TestAllocateRejectsNonPositivePool(t *testing.T) {
@@ -167,7 +355,7 @@ func TestValidateRulesAcceptsEitherEarlyDrawCondition(t *testing.T) {
 	withoutTarget.ParticipantTarget = nil
 	_, _, _, capacity, err = validateRules(withoutTarget)
 	require.NoError(t, err)
-	require.Equal(t, 99, capacity)
+	require.Equal(t, 100, capacity)
 
 	withoutConditions := withoutTarget
 	withoutConditions.DrawAt = nil
@@ -333,7 +521,7 @@ func TestCreateUsesOnlyConfiguredDrawCondition(t *testing.T) {
 		queuedAt    bool
 		wantMax     int
 	}{
-		{name: "time only", drawAt: ptrTime(now.Add(time.Hour)), queueCalls: 1, queuedAt: true, wantMax: 99},
+		{name: "time only", drawAt: ptrTime(now.Add(time.Hour)), queueCalls: 1, queuedAt: true, wantMax: 100},
 		{name: "participants only", participant: &target, wantMax: target},
 		{name: "both", drawAt: ptrTime(now.Add(time.Hour)), participant: &target, queueCalls: 1, queuedAt: true, wantMax: target},
 		{name: "neither", wantMax: 0},
@@ -439,7 +627,7 @@ func TestDistributeBonusUsesOneRoundSnapshot(t *testing.T) {
 	require.Equal(t, []int64{50, 50}, amounts)
 }
 
-func TestValidateRulesRejectsFlatTargetDraw(t *testing.T) {
+func TestValidateRulesAllowsFlatTargetDrawWhenAllAwardsAreMinimum(t *testing.T) {
 	drawAt := time.Now().Add(time.Hour)
 	target := 100
 	base := CreateRequest{
@@ -448,9 +636,38 @@ func TestValidateRulesRejectsFlatTargetDraw(t *testing.T) {
 		DrawAt:      &drawAt, ParticipantTarget: &target,
 	}
 	_, _, _, _, err := validateRules(base)
+	require.NoError(t, err)
+
+	base.TotalAmount = "99.00"
+	_, _, _, _, err = validateRules(base)
 	require.ErrorIs(t, err, lotterydomain.ErrLotteryInvalidRules)
 
-	base.TotalAmount = "300.00"
+	base.TotalAmount = "2001.00"
+	base.ParticipantTarget = &target
 	_, _, _, _, err = validateRules(base)
+	require.ErrorIs(t, err, lotterydomain.ErrLotteryInvalidRules)
+}
+
+func TestValidateRulesRejectsInfeasibleFixedPrizeCounts(t *testing.T) {
+	drawAt := time.Now().Add(time.Hour)
+	target := 2
+	_, _, _, _, err := validateRules(CreateRequest{
+		TotalAmount: "12.00", MinPayout: "1.00", MaxPayout: "10.00",
+		TierWeights: lotterydomain.TierWeights{Normal: 0, Lucky: 1},
+		DrawAt:      &drawAt, ParticipantTarget: &target,
+	})
+	require.ErrorIs(t, err, lotterydomain.ErrLotteryInvalidRules)
+}
+
+func TestCreateRoutesLegacyPercentageRequestsToV2(t *testing.T) {
+	drawAt := time.Now().Add(time.Hour)
+	repo := &createLotteryRepoStub{}
+	service := NewService(repo, nil, nil, nil, nil)
+	_, err := service.Create(context.Background(), CreateRequest{
+		CreatedByUserID: 1, Title: "legacy", TotalAmount: "100.00", MinPayout: "1.00", MaxPayout: "20.00",
+		TierWeights: lotterydomain.TierWeights{Consolation: 80, Normal: 15, Lucky: 5},
+		DrawAt:      ptrTime(drawAt), IdempotencyKey: "legacy-v2",
+	})
 	require.NoError(t, err)
+	require.Equal(t, legacyAlgorithmVersionV2, repo.created.AlgorithmVersion)
 }
