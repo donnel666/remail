@@ -434,6 +434,68 @@ func TestListPhonesIncludesLinkedICloudAccountCount(t *testing.T) {
 	}
 }
 
+func TestListPhonesDerivesExclusiveStatusFromICloudAliasCapacity(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&accountModel{}, &phoneModel{}); err != nil {
+		t.Fatal(err)
+	}
+	accounts := []accountModel{
+		testAccount("exclusive@example.com", "password", "token"),
+		testAccount("released@example.com", "password", "token"),
+	}
+	if err := db.Create(&accounts).Error; err != nil {
+		t.Fatal(err)
+	}
+	phones := []phoneModel{
+		{AccountID: accounts[0].ID, ProviderOrderID: "order-exclusive", PhoneCode: "1", PhoneNumber: "4155550001", CountryCode: "US", Status: int(PhoneActive)},
+		{AccountID: accounts[1].ID, ProviderOrderID: "order-released", PhoneCode: "1", PhoneNumber: "4155550002", CountryCode: "US", Status: int(PhoneActive)},
+	}
+	if err := db.Create(&phones).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("CREATE TABLE icloud_resources (id INTEGER PRIMARY KEY, primary_email TEXT, kitesim_phone_id INTEGER, bound_phone_number TEXT, status TEXT, alias_count INTEGER)").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("INSERT INTO icloud_resources (id, primary_email, kitesim_phone_id, bound_phone_number, status, alias_count) VALUES (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?)",
+		1, "placeholder@example.com", nil, "4155550001", "normal", 749,
+		2, "full@example.com", phones[0].ID, "", "pending", 750,
+		3, "deleted@example.com", phones[1].ID, "", "deleted", 0,
+	).Error; err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(db, nil)
+	list, err := service.ListPhones(context.Background(), PhoneListFilter{Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if list.Facets.Exclusive != 1 || list.Facets.Active != 1 {
+		t.Fatalf("status facets = %+v", list.Facets)
+	}
+	byPhone := make(map[uint]PhoneItem, len(list.Items))
+	for _, item := range list.Items {
+		if item.PhoneID != nil {
+			byPhone[*item.PhoneID] = item
+		}
+	}
+	if byPhone[phones[0].ID].Status != AdminPhoneExclusive || byPhone[phones[0].ID].LinkedAccountCount != 2 {
+		t.Fatalf("exclusive phone = %+v", byPhone[phones[0].ID])
+	}
+	if byPhone[phones[1].ID].Status != AdminPhoneActive || byPhone[phones[1].ID].LinkedAccountCount != 0 {
+		t.Fatalf("released phone = %+v", byPhone[phones[1].ID])
+	}
+	exclusive, err := service.ListPhones(context.Background(), PhoneListFilter{Limit: 20, Status: AdminPhoneExclusive})
+	if err != nil || exclusive.Total != 1 || len(exclusive.Items) != 1 || exclusive.Items[0].Status != AdminPhoneExclusive {
+		t.Fatalf("exclusive filter = %+v err=%v", exclusive, err)
+	}
+	active, err := service.ListPhones(context.Background(), PhoneListFilter{Limit: 20, Status: AdminPhoneActive})
+	if err != nil || active.Total != 1 || len(active.Items) != 1 || active.Items[0].PhoneID == nil || *active.Items[0].PhoneID != phones[1].ID {
+		t.Fatalf("active filter = %+v err=%v", active, err)
+	}
+}
+
 func TestMessagesDoesNotOverwriteNewerToken(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:kitesim_message_token_fence?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {

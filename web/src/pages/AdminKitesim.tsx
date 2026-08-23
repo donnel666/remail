@@ -96,6 +96,7 @@ const STATUS_ORDER: AdminKitesimPhoneStatus[] = [
   "refunded",
   "unsynced",
   "disabled",
+  "exclusive",
 ];
 
 const STATUS_META: Record<
@@ -109,6 +110,7 @@ const STATUS_META: Record<
   refunded: { color: "grey", label: "Refunded" },
   unsynced: { color: "grey", label: "Unsynced" },
   disabled: { color: "grey", label: "Disabled" },
+  exclusive: { color: "orange", label: "Exclusive" },
 };
 
 const SYNC_META: Record<
@@ -926,6 +928,7 @@ export default function AdminKitesim() {
       refunded: 0,
       unsynced: 0,
       disabled: 0,
+      exclusive: 0,
       autoRenew: emptyBoolean,
       tokenAvailable: emptyBoolean,
       syncHealthy: emptyBoolean,

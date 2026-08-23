@@ -176,6 +176,17 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 		}
 		var phoneBinding *kitesim.SMSPhoneBinding
 		if phoneChanged {
+			existing := iCloudOnboardingExistingResource{
+				ID: resource.ID, PrimaryEmail: resource.PrimaryEmail,
+				BoundPhoneNumber: resource.BoundPhoneNumber, KitesimPhoneID: resource.KitesimPhoneID,
+			}
+			if err := s.validateICloudOnboardingPhoneExclusivityTx(
+				tx,
+				[]iCloudOnboardingLine{{PrimaryEmail: resource.PrimaryEmail, PhoneNumber: *command.PhoneNumber}},
+				map[string]iCloudOnboardingExistingResource{iCloudImportEmailKey(resource.PrimaryEmail): existing},
+			); err != nil {
+				return err
+			}
 			bindingEmail := resource.PrimaryEmail
 			if emailChanged {
 				bindingEmail = imported.PrimaryEmail

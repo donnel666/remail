@@ -139,6 +139,48 @@ func TestBindICloudSMSPhoneBalancesAndRemainsPermanent(t *testing.T) {
 	}
 }
 
+func TestBindICloudSMSPhoneHonorsICloudExclusivity(t *testing.T) {
+	service, db, _ := newSMSPoolTestService(t)
+	var phones []phoneModel
+	if err := db.Order("id ASC").Find(&phones).Error; err != nil || len(phones) != 2 {
+		t.Fatalf("load phones: phones=%+v err=%v", phones, err)
+	}
+	if err := db.Exec(`CREATE TABLE icloud_resources (
+		id INTEGER PRIMARY KEY, primary_email TEXT, kitesim_phone_id INTEGER,
+		bound_phone_number TEXT, status TEXT, alias_count INTEGER
+	)`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(
+		"INSERT INTO icloud_resources(id, primary_email, kitesim_phone_id, status, alias_count) VALUES (?, ?, ?, ?, ?)",
+		1, "owner@example.com", phones[0].ID, "normal", 749,
+	).Error; err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := service.BindICloudSMSPhone(ctx, "other@example.com", phones[0].PhoneNumber); !errors.Is(err, ErrSMSPhoneExclusive) {
+		t.Fatalf("explicit exclusive binding error = %v", err)
+	}
+	if _, err := service.BindICloudSMSPhoneBySuffix(ctx, "suffix@example.com", "0001"); !errors.Is(err, ErrSMSPhoneExclusive) {
+		t.Fatalf("suffix exclusive binding error = %v", err)
+	}
+	automatic, err := service.BindICloudSMSPhone(ctx, "automatic@example.com", "")
+	if err != nil || automatic.PhoneID != phones[1].ID {
+		t.Fatalf("automatic binding = %+v err=%v", automatic, err)
+	}
+	owner, err := service.BindICloudSMSPhoneBySuffix(ctx, "owner@example.com", "0001")
+	if err != nil || owner.PhoneID != phones[0].ID {
+		t.Fatalf("owner binding = %+v err=%v", owner, err)
+	}
+	if err := db.Exec("UPDATE icloud_resources SET alias_count = 750 WHERE id = 1").Error; err != nil {
+		t.Fatal(err)
+	}
+	released, err := service.BindICloudSMSPhone(ctx, "released@example.com", phones[0].PhoneNumber)
+	if err != nil || released.PhoneID != phones[0].ID {
+		t.Fatalf("released binding = %+v err=%v", released, err)
+	}
+}
+
 func TestRebindICloudSMSPhoneChangesPermanentBinding(t *testing.T) {
 	service, db, _ := newSMSPoolTestService(t)
 	ctx := context.Background()

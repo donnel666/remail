@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -19,6 +20,7 @@ var (
 	ErrSMSPhoneBoundUnavailable  = errors.New("kitesim: permanently bound SMS phone is unavailable")
 	ErrSMSPhoneNumberAmbiguous   = errors.New("kitesim: SMS phone number matches multiple active phones")
 	ErrSMSPhoneSuffixAmbiguous   = errors.New("kitesim: SMS phone suffix matches multiple active phones")
+	ErrSMSPhoneExclusive         = errors.New("kitesim: SMS phone is exclusively assigned")
 	ErrSMSReservationNotFound    = errors.New("kitesim: SMS reservation not found")
 	ErrSMSChallengeOwnerConflict = errors.New("kitesim: SMS challenge owner key conflict")
 	ErrSMSChallengeInactive      = errors.New("kitesim: SMS challenge is no longer active")
@@ -129,10 +131,19 @@ func (s *Service) BindICloudSMSPhone(ctx context.Context, email, requestedNumber
 				return ErrPhoneMissing
 			}
 		} else {
-			phone, err = s.pickSMSPhone(tx, s.now().UTC().Truncate(time.Millisecond))
+			phone, err = s.pickSMSPhone(tx, s.now().UTC().Truncate(time.Millisecond), consumerKey)
 		}
 		if err != nil {
 			return err
+		}
+		if requestedDigits != "" {
+			usage, loadErr := loadICloudPhoneUsage(tx, consumerKey)
+			if loadErr != nil {
+				return loadErr
+			}
+			if _, exclusive := usage.exclusive[phone.ID]; exclusive {
+				return ErrSMSPhoneExclusive
+			}
 		}
 		row := phoneBindingModel{PhoneID: phone.ID, ConsumerType: smsConsumerICloud, ConsumerKey: consumerKey, Source: source}
 		if err = tx.Create(&row).Error; err != nil {
@@ -334,6 +345,13 @@ func (s *Service) BindICloudSMSPhoneBySuffix(ctx context.Context, email, lastDig
 			return ErrSMSPhoneSuffixAmbiguous
 		}
 		phone := matches[0]
+		usage, err := loadICloudPhoneUsage(tx, consumerKey)
+		if err != nil {
+			return err
+		}
+		if _, exclusive := usage.exclusive[phone.ID]; exclusive {
+			return ErrSMSPhoneExclusive
+		}
 		row := phoneBindingModel{PhoneID: phone.ID, ConsumerType: smsConsumerICloud, ConsumerKey: consumerKey, Source: "matched"}
 		if err := tx.Create(&row).Error; err != nil {
 			if existing, found, loadErr := loadSMSBinding(tx, consumerKey); loadErr == nil && found {
@@ -380,38 +398,154 @@ func loadSMSBinding(tx *gorm.DB, consumerKey string) (SMSPhoneBinding, bool, err
 	return binding, true, nil
 }
 
-func (s *Service) pickSMSPhone(tx *gorm.DB, now time.Time) (phoneModel, error) {
+type iCloudPhoneUsage struct {
+	linked    map[uint]int64
+	exclusive map[uint]struct{}
+}
+
+func loadICloudPhoneUsage(tx *gorm.DB, exemptEmail string) (iCloudPhoneUsage, error) {
+	usage := iCloudPhoneUsage{linked: make(map[uint]int64), exclusive: make(map[uint]struct{})}
+	if tx == nil || !tx.Migrator().HasTable("icloud_resources") ||
+		!tx.Migrator().HasColumn("icloud_resources", "status") {
+		return usage, nil
+	}
+	hasPhoneID := tx.Migrator().HasColumn("icloud_resources", "kitesim_phone_id")
+	hasBoundPhone := tx.Migrator().HasColumn("icloud_resources", "bound_phone_number") &&
+		tx.Migrator().HasTable("kitesim_phones")
+	if !hasPhoneID && !hasBoundPhone {
+		return usage, nil
+	}
+	hasAliasCount := tx.Migrator().HasColumn("icloud_resources", "alias_count")
+	hasPrimaryEmail := tx.Migrator().HasColumn("icloud_resources", "primary_email")
+	type claim struct {
+		KitesimPhoneID   *uint  `gorm:"column:kitesim_phone_id"`
+		BoundPhoneNumber string `gorm:"column:bound_phone_number"`
+		PrimaryEmail     string `gorm:"column:primary_email"`
+		AliasCount       uint   `gorm:"column:alias_count"`
+	}
+	columns := make([]string, 0, 4)
+	if hasPhoneID {
+		columns = append(columns, "kitesim_phone_id")
+	}
+	if hasBoundPhone {
+		columns = append(columns, "bound_phone_number")
+	}
+	if hasPrimaryEmail {
+		columns = append(columns, "primary_email")
+	}
+	if hasAliasCount {
+		columns = append(columns, "COALESCE(alias_count, 0) AS alias_count")
+	}
+	var claims []claim
+	if err := tx.Table("icloud_resources").Select(strings.Join(columns, ", ")).
+		Where("status <> ?", "deleted").Find(&claims).Error; err != nil {
+		return usage, err
+	}
+
+	var phones []phoneModel
+	needsPhoneMatch := false
+	for _, claim := range claims {
+		if claim.KitesimPhoneID == nil && claim.BoundPhoneNumber != "" {
+			needsPhoneMatch = true
+			break
+		}
+	}
+	if needsPhoneMatch {
+		query := tx.Select("id", "phone_code", "phone_number")
+		if tx.Migrator().HasColumn("kitesim_phones", "deleted_at") {
+			query = query.Where("deleted_at IS NULL")
+		}
+		if err := query.Find(&phones).Error; err != nil {
+			return usage, err
+		}
+	}
+	exemptEmail = strings.TrimSpace(exemptEmail)
+	for _, claim := range claims {
+		phoneIDs := make(map[uint]struct{}, 1)
+		if claim.KitesimPhoneID != nil {
+			phoneIDs[*claim.KitesimPhoneID] = struct{}{}
+		} else if claim.BoundPhoneNumber != "" {
+			// ponytail: placeholders are transient; backfill phone IDs if this scan becomes hot.
+			for _, phone := range phones {
+				if sameICloudPhoneNumber(phone.PhoneCode, phone.PhoneNumber, claim.BoundPhoneNumber) {
+					phoneIDs[phone.ID] = struct{}{}
+				}
+			}
+		}
+		for phoneID := range phoneIDs {
+			usage.linked[phoneID]++
+			if hasAliasCount && claim.AliasCount < platform.ICloudMaxAliases &&
+				(exemptEmail == "" || !strings.EqualFold(strings.TrimSpace(claim.PrimaryEmail), exemptEmail)) {
+				usage.exclusive[phoneID] = struct{}{}
+			}
+		}
+	}
+	return usage, nil
+}
+
+func sameICloudPhoneNumber(phoneCode, phoneNumber, requested string) bool {
+	code, number := phoneNumberParts(phoneCode, phoneNumber)
+	left, right := code+number, phoneDigits(requested)
+	if left == "" || right == "" {
+		return false
+	}
+	if len(left) < len(right) {
+		left, right = right, left
+	}
+	return left == right || number == right || len(right) >= 7 && strings.HasSuffix(left, right)
+}
+
+func iCloudExclusivePhoneIDs(exclusive map[uint]struct{}) []uint {
+	ids := make([]uint, 0, len(exclusive))
+	for id := range exclusive {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func (s *Service) pickSMSPhone(tx *gorm.DB, now time.Time, exemptEmail string) (phoneModel, error) {
 	limit := runtimeconfig.Int(runtimeconfig.ICloudPhoneHourlySMSLimitKey, 10, 1)
 	windowStart := now.Add(-time.Hour)
+	usage, err := loadICloudPhoneUsage(tx, exemptEmail)
+	if err != nil {
+		return phoneModel{}, err
+	}
 	query := `SELECT p.*
 		FROM kitesim_phones AS p
 		WHERE p.deleted_at IS NULL AND p.disabled_at IS NULL AND p.status = ?
 		  AND (p.sms_blacklisted_until IS NULL OR p.sms_blacklisted_until <= ?)
 		  AND (p.sms_cooldown_until IS NULL OR p.sms_cooldown_until <= ?)
 		  AND (SELECT COUNT(*) FROM kitesim_phone_usage_events AS e
-		       WHERE e.phone_id = p.id AND e.created_at > ?) < ?
+		       WHERE e.phone_id = p.id AND e.created_at > ?) < ?`
+	args := []any{int(PhoneActive), now, now, windowStart, limit}
+	if excluded := iCloudExclusivePhoneIDs(usage.exclusive); len(excluded) > 0 {
+		query += " AND p.id NOT IN ?"
+		args = append(args, excluded)
+	}
+	query += `
 		ORDER BY
 		  (SELECT COUNT(*) FROM kitesim_phone_bindings AS b WHERE b.phone_id = p.id) ASC,
 		  (SELECT COUNT(*) FROM kitesim_phone_usage_events AS e WHERE e.phone_id = p.id AND e.created_at > ?) ASC,
 		  COALESCE(p.sms_last_used_at, p.created_at) ASC,
 		  p.id ASC
 		LIMIT 1`
+	args = append(args, windowStart)
 	if tx.Name() == "mysql" {
 		query += " FOR UPDATE"
 	}
 	var phone phoneModel
-	err := tx.Raw(query, int(PhoneActive), now, now, windowStart, limit, windowStart).Scan(&phone).Error
+	err = tx.Raw(query, args...).Scan(&phone).Error
 	if err != nil {
 		return phone, err
 	}
 	if phone.ID == 0 {
-		retryAt := s.nextSMSAvailability(tx, now, limit)
+		retryAt := s.nextSMSAvailability(tx, now, limit, usage.exclusive)
 		return phone, &SMSPhoneUnavailableError{RetryAt: retryAt, Reason: "all active phone numbers are cooling down, rate-limited, or blacklisted"}
 	}
 	return phone, nil
 }
 
-func (s *Service) nextSMSAvailability(tx *gorm.DB, now time.Time, limit int) time.Time {
+func (s *Service) nextSMSAvailability(tx *gorm.DB, now time.Time, limit int, exclusive map[uint]struct{}) time.Time {
 	var phones []phoneModel
 	if err := tx.Where("deleted_at IS NULL AND disabled_at IS NULL AND status = ?", int(PhoneActive)).Find(&phones).Error; err != nil || len(phones) == 0 {
 		return now.Add(time.Minute)
@@ -431,7 +565,12 @@ func (s *Service) nextSMSAvailability(tx *gorm.DB, now time.Time, limit int) tim
 		byPhone[row.PhoneID] = row
 	}
 	earliest := now.Add(24 * time.Hour)
+	eligible := false
 	for _, phone := range phones {
+		if _, excluded := exclusive[phone.ID]; excluded {
+			continue
+		}
+		eligible = true
 		available := now
 		if phone.SMSCooldownUntil != nil && phone.SMSCooldownUntil.After(available) {
 			available = *phone.SMSCooldownUntil
@@ -445,6 +584,9 @@ func (s *Service) nextSMSAvailability(tx *gorm.DB, now time.Time, limit int) tim
 		if available.Before(earliest) {
 			earliest = available
 		}
+	}
+	if !eligible {
+		return now.Add(time.Minute)
 	}
 	if !earliest.After(now) {
 		return now.Add(30 * time.Second)

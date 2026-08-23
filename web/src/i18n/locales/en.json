@@ -55,6 +55,8 @@
   "SMS inbox": "SMS inbox",
   "Inbox": "Inbox",
   "Unsynced": "Unsynced",
+  "Exclusive": "Exclusive",
+  "The selected phone number is exclusively assigned to an iCloud account below 750 aliases; choose another phone number.": "The selected phone number is exclusively assigned to an iCloud account below 750 aliases; choose another phone number.",
   "Message content": "Message content",
   "Order ID": "Order ID",
   "Order status": "Order status",

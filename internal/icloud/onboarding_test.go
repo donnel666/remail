@@ -206,6 +206,30 @@ func TestAcceptICloudOnboardingRejectsPermanentPhoneChangeBeforeUpdate(t *testin
 	}
 }
 
+func TestAcceptICloudOnboardingRejectsExclusivePhoneBeforeCreatingResource(t *testing.T) {
+	service, db, task, _ := newOnboardingStateTest(t)
+	if err := db.Exec("CREATE TABLE kitesim_phones (id INTEGER PRIMARY KEY, phone_code TEXT, phone_number TEXT, deleted_at DATETIME)").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("INSERT INTO kitesim_phones (id, phone_code, phone_number) VALUES (?, ?, ?)", 7, "1", "4155550001").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(task).Updates(map[string]any{
+		"kitesim_phone_id": nil, "bound_phone_number": "14155550001", "alias_count": 10,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	service.SetImportOwnerValidator(func(context.Context, uint) (bool, error) { return true, nil })
+	content := []byte("美国区----否----new@example.com----Secret2!----问题一?(a1)----问题二?(a2)----问题三?(a3)----2000-11-02----14155550001")
+	if _, _, err := service.AcceptAdminICloudOnboardingImport(context.Background(), 1, 1, content, service.now().Add(time.Hour), "exclusive-phone-key", "request", "/test"); !errors.Is(err, ErrICloudOnboardingPhoneExclusive) {
+		t.Fatalf("exclusive phone error = %v", err)
+	}
+	var count int64
+	if err := db.Model(&iCloudResourceModel{}).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("partial resource created: count=%d err=%v", count, err)
+	}
+}
+
 func TestSameICloudPhoneNumberAcceptsCountryCodeVariants(t *testing.T) {
 	for _, value := range []string{"+15488768536", "15488768536", "5488768536"} {
 		if !sameICloudPhoneNumber("15488768536", value) {

@@ -712,7 +712,8 @@ func normalizeAdminICloudCommandError(err error) error {
 		errors.Is(err, ErrICloudResourceNotFound), errors.Is(err, ErrICloudResourceStatus),
 		errors.Is(err, ErrICloudResourceVersion), errors.Is(err, ErrICloudResourceOwner),
 		errors.Is(err, ErrICloudResourceAllocation), errors.Is(err, ErrICloudResourceUpdate),
-		errors.Is(err, ErrICloudResourceIdentity), errors.Is(err, ErrICloudCookieRefreshUnavailable):
+		errors.Is(err, ErrICloudResourceIdentity), errors.Is(err, ErrICloudCookieRefreshUnavailable),
+		errors.Is(err, ErrICloudOnboardingPhoneExclusive):
 		return err
 	default:
 		return ErrICloudResourceQueryTemporary

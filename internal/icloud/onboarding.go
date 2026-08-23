@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/mail"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -37,10 +38,11 @@ func iCloudConfiguredOnboardingMaxAttempts() int {
 }
 
 var (
-	ErrICloudOnboardingInvalid   = errors.New("icloud: invalid account onboarding import")
-	ErrICloudOnboardingConflict  = errors.New("icloud: account onboarding idempotency conflict")
-	ErrICloudOnboardingNotFound  = errors.New("icloud: account onboarding import not found")
-	ErrICloudOnboardingTemporary = errors.New("icloud: account onboarding temporarily unavailable")
+	ErrICloudOnboardingInvalid        = errors.New("icloud: invalid account onboarding import")
+	ErrICloudOnboardingConflict       = errors.New("icloud: account onboarding idempotency conflict")
+	ErrICloudOnboardingNotFound       = errors.New("icloud: account onboarding import not found")
+	ErrICloudOnboardingTemporary      = errors.New("icloud: account onboarding temporarily unavailable")
+	ErrICloudOnboardingPhoneExclusive = errors.New("icloud: selected phone is exclusively assigned")
 )
 
 type iCloudOnboardingImportModel struct {
@@ -436,6 +438,125 @@ func CountryCodeFromICloudRegion(region string) string {
 	return countryCodeFromICloudRegion(region)
 }
 
+type iCloudOnboardingKitesimPhone struct {
+	ID          uint   `gorm:"column:id"`
+	PhoneCode   string `gorm:"column:phone_code"`
+	PhoneNumber string `gorm:"column:phone_number"`
+}
+
+// validateICloudOnboardingPhoneExclusivityTx rejects a requested phone before
+// any onboarding resource is created. Existing rows for the same Apple
+// account are exempt so a retry can keep its permanent phone binding.
+func (s *Service) validateICloudOnboardingPhoneExclusivityTx(
+	tx *gorm.DB,
+	lines []iCloudOnboardingLine,
+	existingByEmail map[string]iCloudOnboardingExistingResource,
+) error {
+	if tx == nil || len(lines) == 0 || !tx.Migrator().HasTable("kitesim_phones") ||
+		!tx.Migrator().HasTable("icloud_resources") ||
+		!tx.Migrator().HasColumn("kitesim_phones", "deleted_at") ||
+		!tx.Migrator().HasColumn("icloud_resources", "alias_count") ||
+		!tx.Migrator().HasColumn("icloud_resources", "kitesim_phone_id") {
+		return nil
+	}
+	hasBoundPhone := tx.Migrator().HasColumn("icloud_resources", "bound_phone_number")
+	var phones []iCloudOnboardingKitesimPhone
+	if err := tx.Table("kitesim_phones").
+		Select("id, phone_code, phone_number").
+		Where("deleted_at IS NULL").Find(&phones).Error; err != nil {
+		return err
+	}
+	claims := make(map[uint][]struct {
+		phone      string
+		resourceID uint
+	})
+	for _, line := range lines {
+		requested := strings.TrimSpace(line.PhoneNumber)
+		if requested == "" {
+			continue
+		}
+		resourceID := uint(0)
+		if existing, ok := existingByEmail[iCloudImportEmailKey(line.PrimaryEmail)]; ok &&
+			(existing.KitesimPhoneID != nil || sameICloudPhoneNumber(existing.BoundPhoneNumber, requested)) {
+			resourceID = existing.ID
+		}
+		for _, phone := range phones {
+			if !sameICloudPhoneNumber(phone.PhoneCode+phone.PhoneNumber, requested) &&
+				!sameICloudPhoneNumber(phone.PhoneNumber, requested) {
+				continue
+			}
+			claims[phone.ID] = append(claims[phone.ID], struct {
+				phone      string
+				resourceID uint
+			}{phone: requested, resourceID: resourceID})
+		}
+	}
+	phoneIDs := make([]uint, 0, len(claims))
+	for phoneID := range claims {
+		phoneIDs = append(phoneIDs, phoneID)
+	}
+	sort.Slice(phoneIDs, func(left, right int) bool { return phoneIDs[left] < phoneIDs[right] })
+	for _, phoneID := range phoneIDs {
+		phoneClaims := claims[phoneID]
+		var phone iCloudOnboardingKitesimPhone
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Table("kitesim_phones").Select("id, phone_code, phone_number").
+			Where("id = ? AND deleted_at IS NULL", phoneID).Take(&phone).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				continue
+			}
+			return err
+		}
+		allowed := make(map[uint]struct{}, len(phoneClaims))
+		for _, claim := range phoneClaims {
+			if claim.resourceID != 0 {
+				allowed[claim.resourceID] = struct{}{}
+			}
+		}
+		if len(phoneClaims) > 1 {
+			return fmt.Errorf("%w: %s", ErrICloudOnboardingPhoneExclusive, phoneClaims[0].phone)
+		}
+		var occupied []struct {
+			ID               uint   `gorm:"column:id"`
+			KitesimPhoneID   *uint  `gorm:"column:kitesim_phone_id"`
+			BoundPhoneNumber string `gorm:"column:bound_phone_number"`
+			AliasCount       uint   `gorm:"column:alias_count"`
+		}
+		// The phone row lock serializes competing imports; avoid locking resource
+		// rows here because onboarding workers lock the resource first.
+		resourceQuery := tx.Table("icloud_resources").
+			Select("id, kitesim_phone_id, alias_count")
+		if hasBoundPhone {
+			resourceQuery = resourceQuery.Select("id, kitesim_phone_id, bound_phone_number, alias_count").
+				Where("status <> ? AND (kitesim_phone_id = ? OR (kitesim_phone_id IS NULL AND bound_phone_number <> ''))", iCloudResourceDeleted, phoneID)
+		} else {
+			resourceQuery = resourceQuery.Where("status <> ? AND kitesim_phone_id = ?", iCloudResourceDeleted, phoneID)
+		}
+		if err := resourceQuery.Find(&occupied).Error; err != nil {
+			return err
+		}
+		for _, resource := range occupied {
+			if resource.KitesimPhoneID == nil &&
+				!sameICloudPhoneNumber(resource.BoundPhoneNumber, phone.PhoneCode+phone.PhoneNumber) &&
+				!sameICloudPhoneNumber(resource.BoundPhoneNumber, phone.PhoneNumber) {
+				continue
+			}
+			if resource.AliasCount >= platform.ICloudMaxAliases {
+				continue
+			}
+			if _, ok := allowed[resource.ID]; ok {
+				continue
+			}
+			requested := phone.PhoneCode + phone.PhoneNumber
+			if len(phoneClaims) > 0 {
+				requested = phoneClaims[0].phone
+			}
+			return fmt.Errorf("%w: %s", ErrICloudOnboardingPhoneExclusive, requested)
+		}
+	}
+	return nil
+}
+
 func (s *Service) AcceptAdminICloudOnboardingImport(
 	ctx context.Context,
 	operatorUserID, ownerUserID uint,
@@ -525,6 +646,9 @@ func (s *Service) AcceptAdminICloudOnboardingImport(
 				return ErrICloudResourceIdentity
 			}
 			existingByEmail[iCloudImportEmailKey(resource.PrimaryEmail)] = resource
+		}
+		if err := s.validateICloudOnboardingPhoneExclusivityTx(tx, lines, existingByEmail); err != nil {
+			return err
 		}
 		for _, line := range lines {
 			secret, marshalErr := json.Marshal(line.Secret)
@@ -687,6 +811,9 @@ func (s *Service) AcceptAdminICloudOnboardingImport(
 	})
 	if err != nil {
 		if errors.Is(err, ErrICloudOnboardingConflict) {
+			return nil, false, err
+		}
+		if errors.Is(err, ErrICloudOnboardingPhoneExclusive) {
 			return nil, false, err
 		}
 		var existing iCloudOnboardingTaskModel

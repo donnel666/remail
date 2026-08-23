@@ -1080,10 +1080,11 @@ describe("admin iCloud modal workflows", () => {
       .mockResolvedValueOnce(page([
         { phoneId: 9, phoneNumber: "+1 5813045473", status: "active", linkedAccountCount: 1 },
         { phoneId: 8, phoneNumber: "+1 2345678901", status: "active", linkedAccountCount: 4 },
-      ], 0, 3))
+        { phoneId: 10, phoneNumber: "+1 4155550000", status: "exclusive", linkedAccountCount: 1 },
+      ], 0, 4))
       .mockResolvedValueOnce(page([
         { phoneId: 7, phoneNumber: "+1 9999999999", status: "active", linkedAccountCount: 2 },
-      ], 2, 3));
+      ], 3, 4));
 
     render(
       <EditICloudModal

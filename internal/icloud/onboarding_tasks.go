@@ -337,7 +337,7 @@ func (s *Service) assignICloudOnboardingPhone(ctx context.Context, task *iCloudO
 		binding, err = s.smsPhones.BindICloudSMSPhone(ctx, task.PrimaryEmail, task.BoundPhoneNumber)
 	}
 	if err != nil {
-		if errors.Is(err, kitesim.ErrSMSPhoneBindingConflict) {
+		if errors.Is(err, kitesim.ErrSMSPhoneBindingConflict) || errors.Is(err, kitesim.ErrSMSPhoneExclusive) {
 			return s.failICloudOnboardingTask(ctx, task, "phone_binding_conflict", "The requested phone does not match this Apple ID's permanent phone binding.")
 		}
 		if errors.Is(err, kitesim.ErrPhoneMissing) && requested {
@@ -464,7 +464,7 @@ func (s *Service) bindICloudOnboardingTrustedPhone(ctx context.Context, task *iC
 		return nil, s.failICloudOnboardingTask(ctx, task, "phone_binding_ambiguous", "The Apple trusted phone suffix matches multiple eSIM pool numbers; import the explicit phone number.")
 	case errors.Is(err, kitesim.ErrPhoneMissing):
 		return nil, s.failICloudOnboardingTask(ctx, task, "phone_not_in_pool", "The Apple trusted phone is not available in the eSIM phone pool.")
-	case errors.Is(err, kitesim.ErrSMSPhoneBindingConflict):
+	case errors.Is(err, kitesim.ErrSMSPhoneBindingConflict), errors.Is(err, kitesim.ErrSMSPhoneExclusive):
 		return nil, s.failICloudOnboardingTask(ctx, task, "phone_binding_conflict", "The Apple trusted phone does not match this Apple ID's permanent phone binding.")
 	case errors.Is(err, kitesim.ErrSMSPhoneBoundUnavailable):
 		return nil, s.failICloudOnboardingTask(ctx, task, "phone_binding_unavailable", "The permanently bound phone is disabled or unavailable in the eSIM phone pool.")

@@ -1027,6 +1027,7 @@ const (
 	AdminKitesimPhoneStatusActivating AdminKitesimPhoneStatus = "activating"
 	AdminKitesimPhoneStatusActive     AdminKitesimPhoneStatus = "active"
 	AdminKitesimPhoneStatusDisabled   AdminKitesimPhoneStatus = "disabled"
+	AdminKitesimPhoneStatusExclusive  AdminKitesimPhoneStatus = "exclusive"
 	AdminKitesimPhoneStatusExpired    AdminKitesimPhoneStatus = "expired"
 	AdminKitesimPhoneStatusPending    AdminKitesimPhoneStatus = "pending"
 	AdminKitesimPhoneStatusRefunded   AdminKitesimPhoneStatus = "refunded"
@@ -1041,6 +1042,8 @@ func (e AdminKitesimPhoneStatus) Valid() bool {
 	case AdminKitesimPhoneStatusActive:
 		return true
 	case AdminKitesimPhoneStatusDisabled:
+		return true
+	case AdminKitesimPhoneStatusExclusive:
 		return true
 	case AdminKitesimPhoneStatusExpired:
 		return true
@@ -6350,6 +6353,7 @@ type AdminKitesimPhoneFacets struct {
 	All            int64                    `json:"all"`
 	AutoRenew      AdminKitesimBooleanFacet `json:"autoRenew"`
 	Disabled       int64                    `json:"disabled"`
+	Exclusive      int64                    `json:"exclusive"`
 	Expired        int64                    `json:"expired"`
 	Pending        int64                    `json:"pending"`
 	PhoneAvailable AdminKitesimBooleanFacet `json:"phoneAvailable"`

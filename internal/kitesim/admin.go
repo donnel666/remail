@@ -37,6 +37,7 @@ const (
 	AdminPhoneRefunded   AdminPhoneStatus = "refunded"
 	AdminPhoneUnsynced   AdminPhoneStatus = "unsynced"
 	AdminPhoneDisabled   AdminPhoneStatus = "disabled"
+	AdminPhoneExclusive  AdminPhoneStatus = "exclusive"
 )
 
 type SyncTaskStatus string
@@ -214,6 +215,7 @@ type PhoneFacets struct {
 	Refunded       int64         `json:"refunded"`
 	Unsynced       int64         `json:"unsynced"`
 	Disabled       int64         `json:"disabled"`
+	Exclusive      int64         `json:"exclusive"`
 	AutoRenew      BooleanFacets `json:"autoRenew"`
 	TokenAvailable BooleanFacets `json:"tokenAvailable"`
 	SyncHealthy    BooleanFacets `json:"syncHealthy"`
@@ -232,7 +234,12 @@ func (s *Service) ListPhones(ctx context.Context, filter PhoneListFilter) (*Phon
 	if filter.Offset < 0 || filter.Limit < 1 || filter.Limit > 100 {
 		return nil, ErrInvalidInput
 	}
-	query := s.filteredPhoneQuery(ctx, filter)
+	usage, err := loadICloudPhoneUsage(s.db.WithContext(ctx), "")
+	if err != nil {
+		return nil, fmt.Errorf("load iCloud phone usage: %w", err)
+	}
+	exclusivePhoneIDs := iCloudExclusivePhoneIDs(usage.exclusive)
+	query := s.filteredPhoneQuery(ctx, filter, exclusivePhoneIDs)
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		return nil, fmt.Errorf("list Kitesim phones: %w", err)
@@ -289,36 +296,6 @@ a.last_safe_error, a.last_synced_at, a.created_at AS account_created`).
 		return nil, fmt.Errorf("list Kitesim phones: %w", err)
 	}
 	items := make([]PhoneItem, 0, len(rows))
-	linkedCounts := make(map[uint]int64)
-	if s.db.Migrator().HasTable("icloud_resources") {
-		phoneIDs := make([]uint, 0, len(rows))
-		seenPhoneIDs := make(map[uint]struct{}, len(rows))
-		for _, row := range rows {
-			if row.PhoneID == nil {
-				continue
-			}
-			if _, seen := seenPhoneIDs[*row.PhoneID]; seen {
-				continue
-			}
-			seenPhoneIDs[*row.PhoneID] = struct{}{}
-			phoneIDs = append(phoneIDs, *row.PhoneID)
-		}
-		if len(phoneIDs) > 0 {
-			var counts []struct {
-				PhoneID uint  `gorm:"column:phone_id"`
-				Count   int64 `gorm:"column:linked_account_count"`
-			}
-			if err := s.db.WithContext(ctx).Table("icloud_resources").
-				Select("kitesim_phone_id AS phone_id, COUNT(DISTINCT id) AS linked_account_count").
-				Where("kitesim_phone_id IN ? AND status <> ?", phoneIDs, "deleted").
-				Group("kitesim_phone_id").Scan(&counts).Error; err != nil {
-				return nil, fmt.Errorf("count linked iCloud accounts: %w", err)
-			}
-			for _, count := range counts {
-				linkedCounts[count.PhoneID] = count.Count
-			}
-		}
-	}
 	for _, row := range rows {
 		item := PhoneItem{
 			AccountID: row.AccountID, PhoneID: row.PhoneID, Account: row.Account,
@@ -326,7 +303,7 @@ a.last_safe_error, a.last_synced_at, a.created_at AS account_created`).
 				if row.PhoneID == nil {
 					return 0
 				}
-				return linkedCounts[*row.PhoneID]
+				return usage.linked[*row.PhoneID]
 			}(),
 			Status: AdminPhoneUnsynced, TokenAvailable: row.TokenAvailable,
 			TokenUpdatedAt: row.TokenUpdatedAt, SyncHealthy: row.SyncHealthy,
@@ -346,6 +323,11 @@ a.last_safe_error, a.last_synced_at, a.created_at AS account_created`).
 		}
 		if row.DisabledAt != nil {
 			item.Status = AdminPhoneDisabled
+		}
+		if item.Status == AdminPhoneActive && row.PhoneID != nil {
+			if _, exclusive := usage.exclusive[*row.PhoneID]; exclusive {
+				item.Status = AdminPhoneExclusive
+			}
 		}
 		if row.OrderNo != nil {
 			item.OrderNo = *row.OrderNo
@@ -407,14 +389,14 @@ a.last_safe_error, a.last_synced_at, a.created_at AS account_created`).
 		}
 		items = append(items, item)
 	}
-	facets, err := s.phoneFacets(ctx, filter)
+	facets, err := s.phoneFacets(ctx, filter, exclusivePhoneIDs)
 	if err != nil {
 		return nil, err
 	}
 	return &PhoneList{Items: items, Total: total, Offset: filter.Offset, Limit: filter.Limit, Facets: facets}, nil
 }
 
-func (s *Service) filteredPhoneQuery(ctx context.Context, filter PhoneListFilter) *gorm.DB {
+func (s *Service) filteredPhoneQuery(ctx context.Context, filter PhoneListFilter, exclusivePhoneIDs []uint) *gorm.DB {
 	query := s.basePhoneQuery(ctx, filter.Search, filter.CreatedFrom, filter.CreatedTo)
 	if filter.AutoRenew != nil {
 		query = query.Where("p.id IS NOT NULL AND p.auto_renew = ?", *filter.AutoRenew)
@@ -446,12 +428,21 @@ func (s *Service) filteredPhoneQuery(ctx context.Context, filter PhoneListFilter
 	if filter.Status == AdminPhoneDisabled {
 		return query.Where("p.disabled_at IS NOT NULL")
 	}
+	if filter.Status == AdminPhoneExclusive {
+		if len(exclusivePhoneIDs) == 0 {
+			return query.Where("1 = 0")
+		}
+		return query.Where("p.id IS NOT NULL AND p.disabled_at IS NULL AND p.status = ? AND p.id IN ?", int(PhoneActive), exclusivePhoneIDs)
+	}
 	if filter.Status != "" {
 		status, ok := providerStatus(filter.Status)
 		if !ok {
 			return query.Where("1 = 0")
 		}
 		query = query.Where("p.disabled_at IS NULL AND p.status = ?", status)
+		if status == PhoneActive && len(exclusivePhoneIDs) > 0 {
+			query = query.Where("p.id NOT IN ?", exclusivePhoneIDs)
+		}
 	}
 	return query
 }
@@ -474,7 +465,7 @@ func (s *Service) basePhoneQuery(ctx context.Context, search string, createdFrom
 	return query
 }
 
-func (s *Service) phoneFacets(ctx context.Context, filter PhoneListFilter) (PhoneFacets, error) {
+func (s *Service) phoneFacets(ctx context.Context, filter PhoneListFilter, exclusivePhoneIDs []uint) (PhoneFacets, error) {
 	type counts struct {
 		All               int64 `gorm:"column:all_count"`
 		Active            int64 `gorm:"column:active_count"`
@@ -484,6 +475,7 @@ func (s *Service) phoneFacets(ctx context.Context, filter PhoneListFilter) (Phon
 		Refunded          int64 `gorm:"column:refunded_count"`
 		Unsynced          int64 `gorm:"column:unsynced_count"`
 		Disabled          int64 `gorm:"column:disabled_count"`
+		Exclusive         int64 `gorm:"column:exclusive_count"`
 		AutoRenewYes      int64 `gorm:"column:auto_renew_yes"`
 		TokenAvailableYes int64 `gorm:"column:token_available_yes"`
 		SyncHealthyYes    int64 `gorm:"column:sync_healthy_yes"`
@@ -491,18 +483,28 @@ func (s *Service) phoneFacets(ctx context.Context, filter PhoneListFilter) (Phon
 	}
 	query := s.basePhoneQuery(ctx, filter.Search, filter.CreatedFrom, filter.CreatedTo)
 	var row counts
-	if err := query.Select(`COUNT(*) AS all_count,
-SUM(CASE WHEN p.disabled_at IS NULL AND p.status = 1 THEN 1 ELSE 0 END) AS active_count,
+	activeCase := "SUM(CASE WHEN p.disabled_at IS NULL AND p.status = 1 THEN 1 ELSE 0 END) AS active_count"
+	exclusiveCase := "SUM(CASE WHEN 1 = 0 THEN 1 ELSE 0 END) AS exclusive_count"
+	var selectArgs []any
+	if len(exclusivePhoneIDs) > 0 {
+		activeCase = "SUM(CASE WHEN p.disabled_at IS NULL AND p.status = 1 AND p.id NOT IN ? THEN 1 ELSE 0 END) AS active_count"
+		exclusiveCase = "SUM(CASE WHEN p.disabled_at IS NULL AND p.status = 1 AND p.id IN ? THEN 1 ELSE 0 END) AS exclusive_count"
+		selectArgs = []any{exclusivePhoneIDs, exclusivePhoneIDs}
+	}
+	selectSQL := `COUNT(*) AS all_count,
+` + activeCase + `,
 SUM(CASE WHEN p.disabled_at IS NULL AND p.status = 2 THEN 1 ELSE 0 END) AS pending_count,
 SUM(CASE WHEN p.disabled_at IS NULL AND p.status = 3 THEN 1 ELSE 0 END) AS activating_count,
 SUM(CASE WHEN p.disabled_at IS NULL AND p.status = 0 THEN 1 ELSE 0 END) AS expired_count,
 SUM(CASE WHEN p.disabled_at IS NULL AND p.status = 4 THEN 1 ELSE 0 END) AS refunded_count,
 SUM(CASE WHEN p.id IS NULL THEN 1 ELSE 0 END) AS unsynced_count,
 SUM(CASE WHEN p.disabled_at IS NOT NULL THEN 1 ELSE 0 END) AS disabled_count,
+` + exclusiveCase + `,
 SUM(CASE WHEN p.id IS NOT NULL AND p.auto_renew = 1 THEN 1 ELSE 0 END) AS auto_renew_yes,
 SUM(CASE WHEN a.token IS NOT NULL AND LENGTH(a.token) > 0 THEN 1 ELSE 0 END) AS token_available_yes,
 SUM(CASE WHEN a.last_synced_at IS NOT NULL AND a.last_safe_error = '' THEN 1 ELSE 0 END) AS sync_healthy_yes,
-SUM(CASE WHEN p.id IS NOT NULL THEN 1 ELSE 0 END) AS phone_available_yes`).Scan(&row).Error; err != nil {
+SUM(CASE WHEN p.id IS NOT NULL THEN 1 ELSE 0 END) AS phone_available_yes`
+	if err := query.Select(selectSQL, selectArgs...).Scan(&row).Error; err != nil {
 		return PhoneFacets{}, fmt.Errorf("load Kitesim phone facets: %w", err)
 	}
 	boolean := func(yes int64) BooleanFacets {
@@ -512,6 +514,7 @@ SUM(CASE WHEN p.id IS NOT NULL THEN 1 ELSE 0 END) AS phone_available_yes`).Scan(
 		All: row.All, Active: row.Active, Pending: row.Pending,
 		Activating: row.Activating, Expired: row.Expired,
 		Refunded: row.Refunded, Unsynced: row.Unsynced, Disabled: row.Disabled,
+		Exclusive: row.Exclusive,
 		AutoRenew: boolean(row.AutoRenewYes), TokenAvailable: boolean(row.TokenAvailableYes),
 		SyncHealthy: boolean(row.SyncHealthyYes), PhoneAvailable: boolean(row.PhoneAvailableYes),
 	}, nil

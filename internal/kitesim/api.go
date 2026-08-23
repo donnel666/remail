@@ -64,7 +64,7 @@ func (h *handler) listPhones(c *gin.Context) {
 		return
 	}
 	status := AdminPhoneStatus(strings.TrimSpace(c.Query("status")))
-	if status != "" && status != AdminPhoneUnsynced && status != AdminPhoneDisabled {
+	if status != "" && status != AdminPhoneUnsynced && status != AdminPhoneDisabled && status != AdminPhoneExclusive {
 		if _, valid := providerStatus(status); !valid {
 			writeError(c, ErrInvalidInput)
 			return

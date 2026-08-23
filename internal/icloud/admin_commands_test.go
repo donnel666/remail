@@ -365,6 +365,51 @@ func TestEditAdminICloudResourceBindsSelectedPhoneID(t *testing.T) {
 	}
 }
 
+func TestEditAdminICloudResourceRejectsExclusivePhone(t *testing.T) {
+	db := newAdminICloudCommandTestDB(t, "icloud-admin-edit-exclusive-phone")
+	now := time.Date(2026, 8, 23, 9, 30, 0, 0, time.UTC)
+	oldPhoneID, exclusivePhoneID := uint(7), uint(8)
+	createAdminICloudCommandResource(t, db, now, iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "owner@icloud.com",
+		BoundPhoneNumber: "14165550001", KitesimPhoneID: &oldPhoneID,
+		Status: iCloudResourceNormal, AliasCount: 10, ExpireAt: now.Add(time.Hour),
+	})
+	createAdminICloudCommandResource(t, db, now, iCloudResourceModel{
+		ID: 2, ResourceType: "icloud", PrimaryEmail: "exclusive@icloud.com",
+		BoundPhoneNumber: "14165550002", KitesimPhoneID: &exclusivePhoneID,
+		Status: iCloudResourceNormal, AliasCount: 749, ExpireAt: now.Add(time.Hour),
+	})
+	if err := db.Exec("CREATE TABLE kitesim_phones (id INTEGER PRIMARY KEY, phone_code TEXT, phone_number TEXT, deleted_at DATETIME)").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("INSERT INTO kitesim_phones(id, phone_code, phone_number) VALUES (?, ?, ?), (?, ?, ?)",
+		oldPhoneID, "1", "14165550001", exclusivePhoneID, "1", "14165550002").Error; err != nil {
+		t.Fatal(err)
+	}
+	rebinder := &adminEditIDPhoneRebinder{}
+	service := NewService(db, nil, nil)
+	service.smsPhones = rebinder
+	service.now = func() time.Time { return now }
+	requested := "+1 416 555 0002"
+	_, err := service.EditAdminICloudResource(context.Background(), AdminICloudEditCommand{
+		ResourceID: 1, Version: 1, PhoneID: &exclusivePhoneID, PhoneNumber: &requested,
+		OperatorUserID: 99, IdempotencyKey: "edit-exclusive-phone", RequestID: "edit-exclusive-phone", Path: "/v1/admin/icloud/resources/1",
+	})
+	if !errors.Is(err, ErrICloudOnboardingPhoneExclusive) {
+		t.Fatalf("exclusive phone edit error = %v", err)
+	}
+	if rebinder.phoneID != 0 {
+		t.Fatalf("rebinder called with phone ID %d", rebinder.phoneID)
+	}
+	var resource iCloudResourceModel
+	if err := db.First(&resource, 1).Error; err != nil {
+		t.Fatal(err)
+	}
+	if resource.KitesimPhoneID == nil || *resource.KitesimPhoneID != oldPhoneID || resource.BoundPhoneNumber != "14165550001" {
+		t.Fatalf("rejected edit changed resource: %+v", resource)
+	}
+}
+
 func TestEditAdminICloudResourceFallsBackToResourceCountryCode(t *testing.T) {
 	db := newAdminICloudCommandTestDB(t, "icloud-admin-edit-phone-country")
 	now := time.Date(2026, 8, 22, 10, 0, 0, 0, time.UTC)

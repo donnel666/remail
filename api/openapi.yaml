@@ -23263,7 +23263,7 @@ components:
 
     AdminKitesimPhoneStatus:
       type: string
-      enum: [active, pending, activating, expired, refunded, unsynced, disabled]
+      enum: [active, pending, activating, expired, refunded, unsynced, disabled, exclusive]
 
     AdminKitesimSyncTaskStatus:
       type: string
@@ -23289,7 +23289,7 @@ components:
 
     AdminKitesimPhoneFacets:
       type: object
-      required: [all, active, pending, activating, expired, refunded, unsynced, disabled, autoRenew, tokenAvailable, syncHealthy, phoneAvailable]
+      required: [all, active, pending, activating, expired, refunded, unsynced, disabled, exclusive, autoRenew, tokenAvailable, syncHealthy, phoneAvailable]
       properties:
         all:
           type: integer
@@ -23320,6 +23320,10 @@ components:
           format: int64
           minimum: 0
         disabled:
+          type: integer
+          format: int64
+          minimum: 0
+        exclusive:
           type: integer
           format: int64
           minimum: 0

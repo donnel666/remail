@@ -7,6 +7,7 @@ import (
 
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/hibiken/asynq"
 	"gorm.io/gorm"
 )
@@ -50,7 +51,7 @@ var (
 	ErrICloudResourceStatus            = errors.New("icloud: invalid resource status")
 )
 
-const iCloudMaxAliases = 750
+const iCloudMaxAliases = platform.ICloudMaxAliases
 
 func normalizeICloudResourceExpireAt(value time.Time) time.Time {
 	return value.UTC().Truncate(time.Millisecond)
