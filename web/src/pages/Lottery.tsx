@@ -20,14 +20,51 @@ const statusLabelKeys: Record<string, string> = {
 };
 
 const confettiColors = ["#ff7a1a", "#ff3d73", "#facc15", "#38bdf8", "#a78bfa"];
-const confetti = Array.from({ length: 20 }, (_, index) => ({
-  color: confettiColors[index % confettiColors.length],
-  delay: `${(index % 7) * 55}ms`,
-  left: `${8 + ((index * 37) % 84)}%`,
-  rotate: `${(index * 41) % 180}deg`,
-  size: `${7 + (index % 4) * 2}px`,
-  x: `${-180 + ((index * 61) % 360)}px`,
-}));
+const celebrationDurationMs = 12_000;
+const celebrationCleanupGraceMs = 400;
+const confettiCount = 40;
+const confettiMinDurationMs = 2_800;
+const confettiMaxDurationMs = 4_200;
+const confettiLastDelayMs =
+  celebrationDurationMs - confettiMaxDurationMs - celebrationCleanupGraceMs;
+const confetti = Array.from({ length: confettiCount }, (_, index) => {
+  const progress = index / (confettiCount - 1);
+  const jitterMs =
+    index === 0 || index === confettiCount - 1
+      ? 0
+      : ((index * 53) % 111) - 55;
+  const delayMs = Math.max(
+    0,
+    Math.min(
+      confettiLastDelayMs,
+      Math.round(progress * confettiLastDelayMs + jitterMs),
+    ),
+  );
+  const durationMs =
+    index === confettiCount - 1
+      ? confettiMaxDurationMs
+      : confettiMinDurationMs +
+        ((index * 83) % (confettiMaxDurationMs - confettiMinDurationMs));
+  const drift = -150 + ((index * 97) % 301);
+  const sway = 20 + ((index * 29) % 41);
+  const spin = (index % 2 === 0 ? 1 : -1) * (540 + ((index * 67) % 361));
+  return {
+    color: confettiColors[index % confettiColors.length],
+    delay: `${delayMs}ms`,
+    duration: `${durationMs}ms`,
+    left: `${8 + ((index * 37) % 84)}%`,
+    spinEnd: `${Math.round(spin * 1.8)}deg`,
+    spinLate: `${Math.round(spin * 0.74)}deg`,
+    spinMid: `${Math.round(spin * 0.42)}deg`,
+    spinFinal: `${Math.round(spin * 1.35)}deg`,
+    size: `${7 + (index % 4) * 2}px`,
+    top: `${-18 - ((index * 71) % 56)}px`,
+    x1: `${drift + sway}px`,
+    x2: `${drift - sway}px`,
+    x3: `${drift + (index % 3 === 0 ? sway / 2 : -sway / 2)}px`,
+    x4: `${drift + (index % 2 === 0 ? sway : -sway)}px`,
+  };
+});
 
 function formatTime(value: string | null | undefined, language: string) {
   if (!value) return "-";
@@ -88,10 +125,18 @@ function Celebration({ active }: { active: boolean }) {
             {
               "--lottery-color": piece.color,
               "--lottery-delay": piece.delay,
+              "--lottery-duration": piece.duration,
               "--lottery-left": piece.left,
-              "--lottery-rotate": piece.rotate,
+              "--lottery-spin-end": piece.spinEnd,
+              "--lottery-spin-final": piece.spinFinal,
+              "--lottery-spin-late": piece.spinLate,
+              "--lottery-spin-mid": piece.spinMid,
               "--lottery-size": piece.size,
-              "--lottery-x": piece.x,
+              "--lottery-top": piece.top,
+              "--lottery-x1": piece.x1,
+              "--lottery-x2": piece.x2,
+              "--lottery-x3": piece.x3,
+              "--lottery-x4": piece.x4,
             } as CSSProperties
           }
         />
@@ -187,7 +232,7 @@ export default function Lottery() {
     celebrationTimer.current = window.setTimeout(() => {
       setCelebrating(false);
       celebrationTimer.current = undefined;
-    }, 2600);
+    }, celebrationDurationMs);
   };
 
   const enter = async () => {

@@ -3619,30 +3619,43 @@ body[theme-mode="dark"] .semi-always-light,
 
 .lottery-confetti {
   position: absolute;
-  top: 44%;
+  top: var(--lottery-top);
   left: var(--lottery-left);
   width: var(--lottery-size);
   height: calc(var(--lottery-size) + 6px);
   border-radius: 2px;
   background: var(--lottery-color);
   opacity: 0;
-  transform: translate3d(-50%, 0, 0) rotate(var(--lottery-rotate));
-  animation: lottery-confetti-burst 1.9s cubic-bezier(0.16, 1, 0.3, 1)
+  transform: translate3d(-50%, 0, 0) rotate(0deg);
+  animation: lottery-confetti-burst var(--lottery-duration) linear
     var(--lottery-delay) both;
 }
 
 @keyframes lottery-confetti-burst {
   0% {
     opacity: 0;
-    transform: translate3d(-50%, 10px, 0) rotate(0deg) scale(0.6);
+    transform: translate3d(-50%, -16px, 0) rotate(0deg) scale(0.65);
   }
-  12% {
+  10% {
     opacity: 1;
+  }
+  18% {
+    transform: translate3d(calc(-50% + var(--lottery-x1)), 5vh, 0)
+      rotate(var(--lottery-spin-mid)) scale(1);
+  }
+  45% {
+    transform: translate3d(calc(-50% + var(--lottery-x2)), 24vh, 0)
+      rotate(var(--lottery-spin-late)) scale(1);
+  }
+  72% {
+    opacity: 0.9;
+    transform: translate3d(calc(-50% + var(--lottery-x3)), 58vh, 0)
+      rotate(var(--lottery-spin-final)) scale(0.95);
   }
   100% {
     opacity: 0;
-    transform: translate3d(calc(-50% + var(--lottery-x)), 42vh, 0)
-      rotate(720deg) scale(1);
+    transform: translate3d(calc(-50% + var(--lottery-x4)), calc(100vh + 80px), 0)
+      rotate(var(--lottery-spin-end)) scale(0.8);
   }
 }
 
