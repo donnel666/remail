@@ -76,6 +76,8 @@ var (
 
 type config struct {
 	apply                   bool
+	pendingSoftFallback     bool
+	lockName                string
 	filePath                string
 	proxyFilePath           string
 	proxyURL                string
@@ -969,6 +971,11 @@ func main() {
 func parseFlags() config {
 	var cfg config
 	flag.BoolVar(&cfg.apply, "apply", false, "freeze and process the selected resources")
+	// Opt-in only for the separate pending-resource cleanup wrapper. The
+	// ordinary luckmail command never enables this, so its hard reauthorization
+	// policy remains unchanged.
+	flag.BoolVar(&cfg.pendingSoftFallback, "pending-soft-fallback", false, "allow RT+mailbox fallback when hard reauthorization cannot complete")
+	flag.StringVar(&cfg.lockName, "lock-name", "remail_luckmail_validation", "database advisory lock name")
 	flag.StringVar(&cfg.filePath, "file", "/state/luckmail_ok.txt", "newline-delimited email input")
 	flag.StringVar(&cfg.proxyFilePath, "proxy-file", "", "newline-delimited proxy URLs or host:port values; overrides database validation proxies")
 	flag.StringVar(&cfg.proxyURL, "proxy-url", "", "HTTP(S) endpoint returning newline-delimited proxy URLs, host:port, or host:port:user:password values")
@@ -1021,14 +1028,14 @@ func run(ctx context.Context, cfg config) error {
 		return fmt.Errorf("reserve MySQL connection: %w", err)
 	}
 	defer conn.Close()
-	locked, err := acquireLock(ctx, conn)
+	locked, err := acquireLock(ctx, conn, cfg.lockName)
 	if err != nil {
 		return err
 	}
 	if !locked {
 		return errors.New("another luckmail validation command owns the database lock")
 	}
-	defer releaseLock(conn)
+	defer releaseLock(conn, cfg.lockName)
 
 	state, found, err := loadCheckpoint(cfg.statePath)
 	if err != nil {
@@ -1559,6 +1566,9 @@ func processValidation(ctx context.Context, runtime *commandRuntime, state check
 				credentials.ClientID,
 				credentials.RefreshToken,
 			)
+		}
+		if cfg.pendingSoftFallback {
+			attemptCtx = mailapi.WithMicrosoftPendingSoftFallback(attemptCtx)
 		}
 		err = runtime.validation.Process(attemptCtx, task, attempt+1 == cfg.stage1Retries)
 		cancel()
@@ -2876,18 +2886,22 @@ WHERE NOT EXISTS (SELECT 1 FROM operation_logs WHERE operation_type = 'core.luck
 	return err
 }
 
-func acquireLock(ctx context.Context, conn *sql.Conn) (bool, error) {
+func acquireLock(ctx context.Context, conn *sql.Conn, name string) (bool, error) {
+	name = strings.TrimSpace(name)
+	if name == "" || len(name) > 64 {
+		return false, errors.New("invalid database advisory lock name")
+	}
 	var locked sql.NullInt64
-	if err := conn.QueryRowContext(ctx, "SELECT GET_LOCK('remail_luckmail_validation', 0)").Scan(&locked); err != nil {
+	if err := conn.QueryRowContext(ctx, "SELECT GET_LOCK(?, 0)", name).Scan(&locked); err != nil {
 		return false, err
 	}
 	return locked.Valid && locked.Int64 == 1, nil
 }
 
-func releaseLock(conn *sql.Conn) {
+func releaseLock(conn *sql.Conn, name string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_, _ = conn.ExecContext(ctx, "SELECT RELEASE_LOCK('remail_luckmail_validation')")
+	_, _ = conn.ExecContext(ctx, "SELECT RELEASE_LOCK(?)", strings.TrimSpace(name))
 }
 
 func normalizeRunID(value string) (string, error) {

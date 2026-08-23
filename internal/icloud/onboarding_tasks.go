@@ -50,7 +50,7 @@ func (s *Service) DispatchICloudOnboardingTasks(ctx context.Context, limit int) 
 	}
 	var tasks []iCloudOnboardingTaskModel
 	if err := s.db.WithContext(ctx).
-		Where("task_kind IN ? AND onboarding_status IN ? AND dispatch_status = ? AND (next_attempt_at IS NULL OR next_attempt_at <= ?)", []string{"onboarding", "refresh"}, []string{iCloudOnboardingProcessing, iCloudOnboardingWaiting}, "pending", now).
+		Where("task_kind IN ? AND onboarding_status IN ? AND dispatch_status = ? AND (next_attempt_at IS NULL OR next_attempt_at <= ?)", []string{"onboarding", "refresh", iCloudCookieRecoveryTaskKind}, []string{iCloudOnboardingProcessing, iCloudOnboardingWaiting}, "pending", now).
 		Order("id ASC").Limit(limit).Find(&tasks).Error; err != nil {
 		return ErrICloudOnboardingTemporary
 	}
@@ -101,7 +101,7 @@ func (s *Service) recoverStaleICloudOnboardingTasks(ctx context.Context, now tim
 		Where(`task_kind IN ? AND onboarding_status IN ? AND (
 			(dispatch_status = ? AND next_attempt_at IS NOT NULL AND next_attempt_at <= ?) OR
 			(dispatch_status = ? AND started_at IS NOT NULL AND started_at <= ?)
-		)`, []string{"onboarding", "refresh"}, []string{iCloudOnboardingProcessing, iCloudOnboardingWaiting}, "queued", now.Add(-iCloudOnboardingQueueLease), "running", now.Add(-iCloudOnboardingRunningLease)).
+		)`, []string{"onboarding", "refresh", iCloudCookieRecoveryTaskKind}, []string{iCloudOnboardingProcessing, iCloudOnboardingWaiting}, "queued", now.Add(-iCloudOnboardingQueueLease), "running", now.Add(-iCloudOnboardingRunningLease)).
 		Order("id ASC").Find(&tasks).Error; err != nil {
 		return ErrICloudOnboardingTemporary
 	}
@@ -120,7 +120,7 @@ func (s *Service) ProcessICloudOnboardingTask(ctx context.Context, payload iClou
 	claim := newICloudOnboardingClaimToken()
 	now := s.now().UTC().Truncate(time.Millisecond)
 	result := s.db.WithContext(ctx).Model(&iCloudOnboardingTaskModel{}).
-		Where("id = ? AND generation = ? AND task_kind IN ? AND onboarding_status IN ? AND dispatch_status IN ?", payload.TaskID, payload.Generation, []string{"onboarding", "refresh"}, []string{iCloudOnboardingProcessing, iCloudOnboardingWaiting}, []string{"pending", "queued"}).
+		Where("id = ? AND generation = ? AND task_kind IN ? AND onboarding_status IN ? AND dispatch_status IN ?", payload.TaskID, payload.Generation, []string{"onboarding", "refresh", iCloudCookieRecoveryTaskKind}, []string{iCloudOnboardingProcessing, iCloudOnboardingWaiting}, []string{"pending", "queued"}).
 		Updates(map[string]any{
 			"onboarding_status": iCloudOnboardingProcessing, "dispatch_status": "running", "claim_token": claim,
 			// started_at is the current worker lease timestamp, not the
@@ -151,6 +151,14 @@ func (s *Service) ProcessICloudOnboardingTask(ctx context.Context, payload iClou
 	task.ClaimToken = claim
 	if task.TaskKind == "refresh" {
 		proceed, err := s.preflightICloudRefreshTask(ctx, &task)
+		if err != nil {
+			return err
+		}
+		if !proceed {
+			return nil
+		}
+	} else if isICloudCookieRecoveryTask(&task) {
+		proceed, err := s.preflightICloudCookieRecoveryTask(ctx, &task)
 		if err != nil {
 			return err
 		}
@@ -235,6 +243,8 @@ func (s *Service) processICloudOnboardingStage(ctx context.Context, task *iCloud
 		return s.prepareICloudOnboardingApple(ctx, task, secret, appleOnboardingPrepareManage, "manage_profile")
 	case "manage_profile":
 		return s.fetchICloudOnboardingManage(ctx, task, secret)
+	case "cookie_recovery_export":
+		return s.recoverICloudAppleCookie(ctx, task, secret)
 	case "forwarding_prepare":
 		return s.prepareICloudOnboardingForwarding(ctx, task)
 	case "forwarding_add_intent":
@@ -1093,6 +1103,8 @@ func (s *Service) fetchICloudOnboardingManage(ctx context.Context, task *iCloudO
 	next := "forwarding_prepare"
 	if task.TaskKind == "refresh" {
 		next = "resource_refresh"
+	} else if isICloudCookieRecoveryTask(task) {
+		next = "cookie_recovery_export"
 	}
 	return s.advanceICloudOnboardingTask(ctx, task, next, nil, updates)
 }
@@ -1443,7 +1455,7 @@ func (s *Service) executeICloudOnboardingApple(ctx context.Context, task *iCloud
 	request.Session = append(request.Session[:0], task.SessionPayload...)
 	request.PhoneNumber = firstNonEmpty(request.PhoneNumber, task.BoundPhoneNumber)
 	request.PhoneCountryCode = firstNonEmpty(request.PhoneCountryCode, task.BoundPhoneCountryCode)
-	request.SkipPhoneEnrollment = request.SkipPhoneEnrollment || task.TaskKind == "refresh" || task.AccountRole == "primary" || task.BoundPhoneSource == "manual"
+	request.SkipPhoneEnrollment = request.SkipPhoneEnrollment || task.TaskKind == "refresh" || isICloudCookieRecoveryTask(task) || task.AccountRole == "primary" || task.BoundPhoneSource == "manual"
 	return s.onboardingApple.Execute(ctx, request)
 }
 
@@ -1453,6 +1465,9 @@ func (s *Service) handleICloudOnboardingAppleError(ctx context.Context, task *iC
 		return ErrICloudOnboardingTemporary
 	}
 	if restart := strings.TrimSpace(appleErr.RestartStage); restart != "" {
+		if isICloudCookieRecoveryTask(task) {
+			restart = "manage_prepare"
+		}
 		if isICloudOldCookieBackfill(task) && restart == "icloud_prepare" {
 			restart = "old_cookie_prepare"
 		}
@@ -1467,7 +1482,7 @@ func (s *Service) handleICloudOnboardingAppleError(ctx context.Context, task *iC
 		switch restart {
 		case "icloud_prepare", "old_cookie_prepare", "icloud_cookie_prepare", "family_prepare", "family_reconcile_prepare", "manage_prepare",
 			"forwarding_prepare", "forwarding_add_intent", "forwarding_add_apply", "forwarding_wait",
-			"forwarding_verify_intent", "forwarding_verify_apply", "resource_import":
+			"forwarding_verify_intent", "forwarding_verify_apply", "resource_import", "cookie_recovery_export":
 		default:
 			return s.failICloudOnboardingTask(ctx, task, "invalid_restart_stage", "Apple onboarding could not recover its authentication session.")
 		}
@@ -1747,6 +1762,9 @@ func (s *Service) waitICloudPostFamilyRecovery(ctx context.Context, task *iCloud
 }
 
 func (s *Service) failICloudOnboardingTask(ctx context.Context, task *iCloudOnboardingTaskModel, category, message string) error {
+	if task == nil {
+		return ErrICloudOnboardingTemporary
+	}
 	s.cancelICloudOnboardingSMSChallenge(context.WithoutCancel(ctx), task)
 	if task.TaskKind == "refresh" && task.ResourceID != nil {
 		return s.failICloudRefreshTask(ctx, task, category, message)
@@ -1757,16 +1775,18 @@ func (s *Service) failICloudOnboardingTask(ctx context.Context, task *iCloudOnbo
 	now := s.now().UTC().Truncate(time.Millisecond)
 	updated := false
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		updates := map[string]any{
+			"onboarding_status": iCloudOnboardingFailed, "dispatch_status": "failed", "claim_token": "", "next_attempt_at": nil,
+			"attempts":            min(task.Attempts+1, task.MaxAttempts),
+			"last_error_category": safeICloudImportMessage(category), "last_safe_error": safeICloudImportMessage(message),
+			"secret_payload": nil, "session_payload": nil, "manual_verification_code": "", "pending_sms_purpose": "",
+			"sms_sent_at": nil, "sms_poll_deadline": nil, "forward_preparation_id": nil,
+			"finished_at": now, "updated_at": now,
+		}
+		omitICloudOldCookieSafeError(task, updates)
 		result := tx.Model(&iCloudOnboardingTaskModel{}).
 			Where("id = ? AND generation = ? AND claim_token = ? AND dispatch_status = ?", task.ID, task.Generation, task.ClaimToken, "running").
-			Updates(map[string]any{
-				"onboarding_status": iCloudOnboardingFailed, "dispatch_status": "failed", "claim_token": "", "next_attempt_at": nil,
-				"attempts":            min(task.Attempts+1, task.MaxAttempts),
-				"last_error_category": safeICloudImportMessage(category), "last_safe_error": safeICloudImportMessage(message),
-				"secret_payload": nil, "session_payload": nil, "manual_verification_code": "", "pending_sms_purpose": "",
-				"sms_sent_at": nil, "sms_poll_deadline": nil, "forward_preparation_id": nil,
-				"finished_at": now, "updated_at": now,
-			})
+			Updates(updates)
 		if result.Error != nil {
 			return result.Error
 		}
@@ -1777,7 +1797,7 @@ func (s *Service) failICloudOnboardingTask(ctx context.Context, task *iCloudOnbo
 		if err := markICloudOnboardingResourceFailedTx(tx, task, message, now); err != nil {
 			return err
 		}
-		if task.ImportID != nil {
+		if task.TaskKind == "onboarding" && task.ImportID != nil {
 			return releaseICloudAppleIDReservationTx(tx, iCloudAppleIDReservationOnboarding, *task.ImportID, task.PrimaryEmail)
 		}
 		return nil

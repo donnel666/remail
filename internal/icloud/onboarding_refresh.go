@@ -143,10 +143,10 @@ func isICloudOldCookieBackfill(task *iCloudOnboardingTaskModel) bool {
 }
 
 // Workflow and resource state share a row after the resource-first migration.
-// Old-cookie maintenance must not replace the resource's canonical safe error
+// Cookie maintenance must not replace the resource's canonical safe error
 // with a transient workflow message.
 func omitICloudOldCookieSafeError(task *iCloudOnboardingTaskModel, updates map[string]any) {
-	if isICloudOldCookieBackfill(task) {
+	if isICloudOldCookieBackfill(task) || isICloudCookieRecoveryTask(task) {
 		delete(updates, "last_safe_error")
 	}
 }
@@ -289,14 +289,20 @@ func (s *Service) refreshICloudOnboardingResource(ctx context.Context, task *iCl
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("id = ? AND generation = ? AND claim_token = ? AND dispatch_status = ? AND task_kind = ?", task.ID, task.Generation, task.ClaimToken, "running", "refresh").
 			First(&locked).Error; err != nil {
-			return errICloudRefreshStale
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errICloudRefreshStale
+			}
+			return err
 		}
 		if locked.ResourceID == nil || *locked.ResourceID != *task.ResourceID {
 			return errICloudRefreshStale
 		}
 		var resource iCloudResourceModel
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&resource, *locked.ResourceID).Error; err != nil {
-			return errICloudRefreshStale
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errICloudRefreshStale
+			}
+			return err
 		}
 		if !iCloudRefreshSnapshotMatches(resource, task) {
 			return errICloudRefreshStale
@@ -335,7 +341,10 @@ func (s *Service) refreshICloudOnboardingResource(ctx context.Context, task *iCl
 		updated := tx.Model(&iCloudResourceModel{}).
 			Where("id = ? AND credential_revision = ?", resource.ID, locked.ExpectedCredentialRevision).
 			Updates(updates)
-		if updated.Error != nil || updated.RowsAffected != 1 {
+		if updated.Error != nil {
+			return updated.Error
+		}
+		if updated.RowsAffected != 1 {
 			return errICloudRefreshStale
 		}
 		if err := tx.Model(&iCloudRootModel{}).Where("id = ?", resource.ID).
@@ -353,7 +362,10 @@ func (s *Service) refreshICloudOnboardingResource(ctx context.Context, task *iCl
 		finished := tx.Model(&iCloudOnboardingTaskModel{}).
 			Where("id = ? AND generation = ? AND claim_token = ?", locked.ID, locked.Generation, locked.ClaimToken).
 			Updates(finishedUpdates)
-		if finished.Error != nil || finished.RowsAffected != 1 {
+		if finished.Error != nil {
+			return finished.Error
+		}
+		if finished.RowsAffected != 1 {
 			return errICloudRefreshStale
 		}
 		return nil
@@ -365,6 +377,7 @@ func (s *Service) refreshICloudOnboardingResource(ctx context.Context, task *iCl
 		return ErrICloudOnboardingTemporary
 	}
 	_ = s.ScheduleICloudValidationDispatcher(context.WithoutCancel(ctx), 0)
+	s.scheduleICloudCookieMaintenanceAfter(context.WithoutCancel(ctx), task.ResourceID, "refresh")
 	return nil
 }
 
@@ -377,12 +390,21 @@ func (s *Service) completeICloudOldCookieBackfill(ctx context.Context, task *iCl
 		var locked iCloudOnboardingTaskModel
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("id = ? AND generation = ? AND claim_token = ? AND dispatch_status = ? AND task_kind = ?", task.ID, task.Generation, task.ClaimToken, "running", "refresh").
-			First(&locked).Error; err != nil || !isICloudOldCookieBackfill(&locked) || locked.ResourceID == nil || *locked.ResourceID != *task.ResourceID {
+			First(&locked).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errICloudRefreshStale
+			}
+			return err
+		}
+		if !isICloudOldCookieBackfill(&locked) || locked.ResourceID == nil || *locked.ResourceID != *task.ResourceID {
 			return errICloudRefreshStale
 		}
 		var resource iCloudResourceModel
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&resource, *locked.ResourceID).Error; err != nil {
-			return errICloudRefreshStale
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errICloudRefreshStale
+			}
+			return err
 		}
 		if !iCloudRefreshSnapshotMatches(resource, task) {
 			return errICloudRefreshStale
@@ -429,7 +451,10 @@ func (s *Service) completeICloudOldCookieBackfill(ctx context.Context, task *iCl
 		finished := tx.Model(&iCloudOnboardingTaskModel{}).
 			Where("id = ? AND generation = ? AND claim_token = ?", locked.ID, locked.Generation, locked.ClaimToken).
 			Updates(finishedUpdates)
-		if finished.Error != nil || finished.RowsAffected != 1 {
+		if finished.Error != nil {
+			return finished.Error
+		}
+		if finished.RowsAffected != 1 {
 			return errICloudRefreshStale
 		}
 		return nil
@@ -441,6 +466,7 @@ func (s *Service) completeICloudOldCookieBackfill(ctx context.Context, task *iCl
 		return ErrICloudOnboardingTemporary
 	}
 	_ = s.ScheduleICloudValidationDispatcher(context.WithoutCancel(ctx), 0)
+	s.scheduleICloudCookieMaintenanceAfter(context.WithoutCancel(ctx), task.ResourceID, "refresh")
 	return nil
 }
 

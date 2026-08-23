@@ -152,6 +152,16 @@ func (a *MicrosoftAliasCreationAdapter) recoverAliasBindingViaPasswordRecovery(c
 		return mailapp.MicrosoftAliasBindingPreparationResult{BindingAddress: maskedAddress}, ctxErr
 	}
 	if err != nil {
+		if isMicrosoftRecoveryMailboxBusyError(err) {
+			// The CMD opts into concrete-recipient leases. A busy lease is a
+			// scheduling condition, not an unavailable Microsoft service; let the
+			// durable alias schedule retry shortly without consuming a candidate.
+			return mailapp.MicrosoftAliasBindingPreparationResult{
+				BindingAddress: maskedAddress,
+				Category:       "recovery_mailbox_busy",
+				SafeMessage:    "Microsoft recovery mailbox is already processing another verification code.",
+			}, nil
+		}
 		// The recovery session may already have sent a code. Do not rotate the
 		// proxy and start another session for the same masked proof. Return the
 		// observed mask so the task can persist that Microsoft fact before retrying.

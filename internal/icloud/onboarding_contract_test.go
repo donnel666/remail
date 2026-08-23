@@ -25,3 +25,10 @@ func TestICloudOnboardingTaskViewDoesNotExposeWriteOnlySecrets(t *testing.T) {
 		}
 	}
 }
+
+func TestICloudCookieRecoveryTaskUsesRefreshViewContract(t *testing.T) {
+	view := iCloudOnboardingTaskView(iCloudOnboardingTaskModel{TaskKind: iCloudCookieRecoveryTaskKind})
+	if view.TaskKind != "refresh" {
+		t.Fatalf("recovery task kind = %q, want refresh", view.TaskKind)
+	}
+}

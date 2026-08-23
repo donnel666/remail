@@ -80,7 +80,7 @@ jobs:
           - shard: mailtransport
             packages: ./internal/mailtransport/...
           - shard: app-entrypoints
-            packages: ./api/... ./cmd/benchseed/... ./cmd/kitesim/... ./cmd/msrecovery/... ./internal/aftersale/... ./internal/gmail/... ./internal/governance/... ./internal/icloud/... ./internal/kitesim/... ./internal/openapi/... ./internal/platform/... ./internal/smsbower/...
+            packages: ./api/... ./cmd/aliasworker/... ./cmd/benchseed/... ./cmd/kitesim/... ./cmd/msrecovery/... ./internal/aftersale/... ./internal/gmail/... ./internal/governance/... ./internal/icloud/... ./internal/kitesim/... ./internal/openapi/... ./internal/platform/... ./internal/smsbower/...
           - shard: allocation-billing
             packages: ./internal/alloc/... ./internal/billing/...
           - shard: delivery-trade
@@ -392,6 +392,7 @@ jobs:
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/remail/remail-server ./cmd/server
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/remail/remail-msrecovery ./cmd/msrecovery
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/remail/remail-apple ./cmd/apple
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/remail/remail-aliasworker ./cmd/aliasworker
           cp -r migrations dist/remail/migrations
           cp deploy/compose.yml dist/remail/
           tar -czf "dist/remail-${GITHUB_REF_NAME}-linux-amd64.tar.gz" -C dist remail

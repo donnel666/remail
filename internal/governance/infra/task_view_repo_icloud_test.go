@@ -109,6 +109,7 @@ INSERT INTO icloud_resources(
     (203, 'refresh', 'waiting', 'waiting', 2, 5, 9, '2026-08-17 08:02:00', '2026-08-17 08:02:01', NULL, '2026-08-17 08:02:02'),
     (204, 'refresh', 'completed', 'succeeded', 2, 5, 9, '2026-08-17 08:03:00', '2026-08-17 08:03:01', '2026-08-17 08:03:02', '2026-08-17 08:03:02'),
     (205, 'refresh', 'failed', 'failed', 5, 5, 9, '2026-08-17 08:04:00', '2026-08-17 08:04:01', '2026-08-17 08:04:02', '2026-08-17 08:04:02'),
+    (206, 'cookie_recovery', 'completed', 'succeeded', 1, 5, 10, '2026-08-17 08:05:00', '2026-08-17 08:05:01', '2026-08-17 08:05:02', '2026-08-17 08:05:02'),
     (207, 'onboarding', 'processing', 'pending', 0, 5, 0, '2026-08-17 08:06:00', NULL, NULL, '2026-08-17 08:06:00');
 `).Error)
 
@@ -117,9 +118,9 @@ INSERT INTO icloud_resources(
 		Source: governanceapp.AdminTaskSourceICloudRefresh, Limit: 20,
 	}, iCloudRefreshTaskSelect)
 	require.NoError(t, err)
-	require.Equal(t, int64(5), total)
-	require.Equal(t, int64(1), succeeded)
-	require.Len(t, items, 5)
+	require.Equal(t, int64(6), total)
+	require.Equal(t, int64(2), succeeded)
+	require.Len(t, items, 6)
 	require.Contains(t, iCloudResourceTaskUnion, iCloudRefreshTaskSelect)
 
 	statuses := make(map[string]string, len(items))
@@ -128,7 +129,12 @@ INSERT INTO icloud_resources(
 		require.Equal(t, governanceapp.AdminTaskBizICloudResource, item.BizType)
 		require.Equal(t, item.Ref.ID, item.BizID)
 		require.Equal(t, governanceapp.AdminTaskKindRefresh, item.Kind)
-		require.Equal(t, uint64(9), *item.CredentialRevision)
+		require.NotNil(t, item.CredentialRevision)
+		wantRevision := uint64(9)
+		if item.Ref.ID == 206 {
+			wantRevision = 10
+		}
+		require.Equal(t, wantRevision, *item.CredentialRevision)
 	}
 	require.Equal(t, map[string]string{
 		"icloud_refresh:201": governanceapp.AdminTaskStatusQueued,
@@ -136,6 +142,7 @@ INSERT INTO icloud_resources(
 		"icloud_refresh:203": governanceapp.AdminTaskStatusUncertain,
 		"icloud_refresh:204": governanceapp.AdminTaskStatusSucceeded,
 		"icloud_refresh:205": governanceapp.AdminTaskStatusFailed,
+		"icloud_refresh:206": governanceapp.AdminTaskStatusSucceeded,
 	}, statuses)
 
 	task, err := repo.FindByRef(context.Background(), governanceapp.AdminTaskRef{

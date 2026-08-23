@@ -20,6 +20,30 @@ type microsoftValidationFallbackOAuthCredentials struct {
 
 type microsoftValidationFallbackOAuthCredentialsKey struct{}
 
+// microsoftPendingSoftFallbackKey is deliberately opt-in. The existing
+// luckmail validation command keeps requiring hard reauthorization; the
+// pending-resource cleanup command may accept a read-only RT+mailbox check
+// after the hard flow cannot complete.
+type microsoftPendingSoftFallbackKey struct{}
+
+// WithMicrosoftPendingSoftFallback enables the pending-resource cleanup
+// fallback for this context only. It never changes the normal application or
+// luckmail validation policy.
+func WithMicrosoftPendingSoftFallback(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, microsoftPendingSoftFallbackKey{}, true)
+}
+
+func microsoftPendingSoftFallbackEnabled(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	enabled, _ := ctx.Value(microsoftPendingSoftFallbackKey{}).(bool)
+	return enabled
+}
+
 // WithMicrosoftValidationFallbackOAuthCredentials supplies a CMD-only OAuth
 // fallback without copying secrets into durable validation tasks or manifests.
 func WithMicrosoftValidationFallbackOAuthCredentials(ctx context.Context, email, clientID, refreshToken string) context.Context {

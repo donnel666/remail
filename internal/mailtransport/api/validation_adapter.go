@@ -337,7 +337,46 @@ func (a *ResourceValidationAdapter) ValidateMicrosoft(ctx context.Context, req c
 	ctx = msacl.WithRecoveryLeaseScope(ctx, req.ResourceID, "")
 	ctx = msacl.WithConcreteRecoveryLeaseKeys(ctx)
 	if a.hardReauthorize != nil {
-		return a.validateMicrosoftHardReauthorize(ctx, req)
+		hardResult, hardErr := a.validateMicrosoftHardReauthorize(ctx, req)
+		if !microsoftPendingSoftFallbackEnabled(ctx) || (hardErr == nil && hardResult.Valid) {
+			return hardResult, hardErr
+		}
+
+		// The fallback is intentionally limited to resources that already have
+		// an RT. It proves that the current credential can still exchange and
+		// read the mailbox, but it does not claim that old authorizations were
+		// revoked. The caller records the outcome as a separate audit category.
+		fallbackRequest := req
+		if hardResult.CredentialsAuthoritative {
+			if value := strings.TrimSpace(hardResult.ClientID); value != "" {
+				fallbackRequest.ClientID = value
+			}
+			if value := strings.TrimSpace(hardResult.RefreshToken); value != "" {
+				fallbackRequest.RefreshToken = value
+			}
+		}
+		if microsoftRequestHasRefreshToken(fallbackRequest) {
+			softAdapter := *a
+			softAdapter.hardReauthorize = nil
+			softResult, softErr := softAdapter.ValidateMicrosoft(ctx, fallbackRequest)
+			if softErr == nil && softResult.Valid {
+				softResult.Category = "rt_mail_fallback"
+				softResult.SafeMessage = "Microsoft RT refresh and mailbox receive succeeded; hard reauthorization was unavailable."
+				if !softResult.CredentialsAuthoritative && hardResult.CredentialsAuthoritative {
+					softResult.CredentialsAuthoritative = true
+				}
+				if strings.TrimSpace(softResult.ClientID) == "" {
+					softResult.ClientID = fallbackRequest.ClientID
+				}
+				if strings.TrimSpace(softResult.RefreshToken) == "" {
+					softResult.RefreshToken = fallbackRequest.RefreshToken
+				}
+				return softResult, nil
+			}
+		}
+		// Preserve an authoritative rotated credential even when the soft
+		// mailbox check also fails; Core can persist that progress safely.
+		return hardResult, hardErr
 	}
 
 	bindingSnapshot, err := a.microsoftBindingSnapshot(ctx, req.ResourceID)

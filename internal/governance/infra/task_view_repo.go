@@ -438,7 +438,7 @@ SELECT
     NULL AS progress_failed,
     NULL AS reason_buckets
 FROM icloud_resources AS resource
-WHERE resource.task_kind = 'refresh'`
+WHERE resource.task_kind IN ('refresh', 'cookie_recovery')`
 
 // Redis-only bulk cursors are absent from per-resource lists. Their bounded
 // live status remains available through the source-qualified lookup below.

@@ -330,7 +330,7 @@ func (s *Service) GetAdminICloudResource(ctx context.Context, resourceID uint) (
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrICloudResourceQueryTemporary
 	}
-	if err := s.db.WithContext(ctx).Where("task_kind = ? AND resource_id = ?", "refresh", resourceID).Order("id DESC").Take(&refresh).Error; err == nil {
+	if err := s.db.WithContext(ctx).Where("task_kind IN ? AND resource_id = ?", []string{"refresh", iCloudCookieRecoveryTaskKind}, resourceID).Order("id DESC").Take(&refresh).Error; err == nil {
 		view := iCloudOnboardingTaskView(refresh)
 		detail.RefreshTask = &view
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {

@@ -57,6 +57,13 @@ func WithCredentialTypeRateLimiter(ctx context.Context, wait func(context.Contex
 	return context.WithValue(ctx, credentialTypeRateLimiterKey{}, wait)
 }
 
+// WithCredentialTypeRateLimitRetry enables one same-session retry after an
+// upstream GetCredentialType 429. Validation and the standalone alias CMD use
+// this explicitly; ordinary application callers keep the historical policy.
+func WithCredentialTypeRateLimitRetry(ctx context.Context) context.Context {
+	return withCredentialTypeRateLimitRetry(ctx)
+}
+
 func waitForCredentialTypeRateLimiter(session *Session) error {
 	if session == nil {
 		return nil

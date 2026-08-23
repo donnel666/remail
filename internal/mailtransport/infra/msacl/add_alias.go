@@ -799,6 +799,20 @@ func addSingleExplicitAlias(session *Session, candidate, email, proxy, preferred
 		if canary != "" {
 			break
 		}
+		// A successful login can briefly land on an OAuth relay/interrupt page
+		// instead of AddAssocId. Re-converge the existing session before treating
+		// a missing canary as a business failure; this avoids spending a durable
+		// alias attempt on a page-state race.
+		if attempt == 0 && !isExplicitAliasManageURL(resp.URL) {
+			var convergeErr error
+			page, resp.URL, convergeErr = continueExplicitAliasLoginRelay(session, page, resp.URL, 6)
+			if convergeErr == nil {
+				page, resp.URL, convergeErr = followExplicitAliasTarget(session, page, resp.URL, 10)
+			}
+			if convergeErr != nil {
+				return fullAlias, "", false, convergeErr
+			}
+		}
 	}
 	if canary == "" {
 		logExplicitAliasStage(explicitAliasStageAddAssocIDMissingCanary)

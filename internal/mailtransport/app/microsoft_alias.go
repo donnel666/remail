@@ -27,6 +27,7 @@ const (
 	microsoftAliasRequiredNegativeConfirmations = 3
 	microsoftAliasTransientBackoffBase          = 15 * time.Minute
 	microsoftAliasTransientBackoffMax           = 12 * time.Hour
+	microsoftAliasRecoveryBusyDelay             = 15 * time.Second
 	MicrosoftAliasAttemptRunning                = "running"
 	MicrosoftAliasAttemptSucceeded              = "succeeded"
 	MicrosoftAliasAttemptFailed                 = "failed"
@@ -332,6 +333,20 @@ func (s *MicrosoftAliasService) Process(ctx context.Context, task MicrosoftAlias
 		recoveryMask = strings.ToLower(strings.TrimSpace(account.BindingAddress))
 	}
 	prepared.BindingAddress = strings.ToLower(strings.TrimSpace(prepared.BindingAddress))
+	if prepared.Category == "recovery_mailbox_busy" {
+		message := safeAliasMessage(prepared.SafeMessage)
+		if message == "" {
+			message = defaultAliasSafeMessage(prepared.Category)
+		}
+		return ignoreStaleAliasClaim(s.store.Defer(
+			ctx,
+			task.ResourceID,
+			account.ClaimToken,
+			now.Add(microsoftAliasRecoveryBusyDelay),
+			message,
+			false,
+		))
+	}
 	if prepareErr != nil || prepared.ProxyFailure {
 		if prepared.BindingAddress != "" && prepared.BindingAddress != strings.ToLower(strings.TrimSpace(account.BindingAddress)) {
 			if err := s.store.SaveBindingAddress(ctx, task.ResourceID, account.ClaimToken, account.BindingAddress, prepared.BindingAddress); errors.Is(err, ErrMicrosoftAliasStaleClaim) {
@@ -564,6 +579,9 @@ func (s *MicrosoftAliasService) completeAliasResult(
 		next = weekEnd
 	} else {
 		switch resultCategory {
+		case "recovery_mailbox_busy":
+			next = completedAt.Add(microsoftAliasRecoveryBusyDelay)
+			failed = false
 		case "rate_limited":
 			next = weekEnd
 			failed = true
@@ -682,6 +700,8 @@ func defaultAliasSafeMessage(category string) string {
 	switch strings.TrimSpace(category) {
 	case "rate_limited":
 		return "Microsoft alias creation is rate limited."
+	case "recovery_mailbox_busy":
+		return "Microsoft recovery mailbox is already processing another verification code."
 	case "password":
 		return "Microsoft account password is incorrect."
 	case "mfa", "passkey", "phone":

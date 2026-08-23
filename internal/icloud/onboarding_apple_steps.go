@@ -696,8 +696,10 @@ func (f *appleOnboardingFlow) exportChannels(request AppleOnboardingRequest) (Ap
 	if f.state.Mode != "manage" || f.state.APIKey == "" {
 		return AppleOnboardingResponse{}, appleOnboardingRestart("manage_prepare")
 	}
-	if err := f.ensurePrivateAlias(); err != nil {
-		return AppleOnboardingResponse{}, err
+	if !request.SkipPrivateAlias {
+		if err := f.ensurePrivateAlias(); err != nil {
+			return AppleOnboardingResponse{}, err
+		}
 	}
 	if address := strings.TrimSpace(request.ForwardToEmail); address != "" {
 		if err := f.setDefaultForward(address); err != nil {

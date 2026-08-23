@@ -515,7 +515,7 @@ func (s *Service) AcceptAdminICloudOnboardingImport(
 		}
 		existingByEmail := make(map[string]iCloudOnboardingExistingResource, len(existing))
 		for _, resource := range existing {
-			activeWorkflow := (resource.TaskKind == "onboarding" || resource.TaskKind == "refresh") &&
+			activeWorkflow := (resource.TaskKind == "onboarding" || resource.TaskKind == "refresh" || resource.TaskKind == iCloudCookieRecoveryTaskKind) &&
 				(resource.OnboardingStatus == iCloudOnboardingProcessing || resource.OnboardingStatus == iCloudOnboardingWaiting)
 			if activeWorkflow {
 				return ErrICloudResourceIdentity
@@ -843,16 +843,16 @@ func (s *Service) loadICloudOnboardingImport(ctx context.Context, importID uint)
 		return nil, ErrICloudOnboardingNotFound
 	}
 	var tasks []iCloudOnboardingTaskModel
-	if err := s.db.WithContext(ctx).Where("import_id = ? AND task_kind IN ?", importID, []string{"onboarding", "refresh"}).Order("line_number ASC, id ASC").Find(&tasks).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("import_id = ? AND task_kind IN ?", importID, []string{"onboarding", "refresh", iCloudCookieRecoveryTaskKind}).Order("line_number ASC, id ASC").Find(&tasks).Error; err != nil {
 		return nil, ErrICloudOnboardingTemporary
 	}
 	if len(tasks) == 0 {
 		return nil, ErrICloudOnboardingNotFound
 	}
-	// A refresh can only replace a completed onboarding workflow on the same
-	// resource row. Keep later cookie maintenance from rewriting import history.
+	// Cookie maintenance can replace a completed onboarding workflow on the same
+	// resource row. Keep later maintenance from rewriting import history.
 	for index := range tasks {
-		if tasks[index].TaskKind != "refresh" {
+		if tasks[index].TaskKind != "refresh" && tasks[index].TaskKind != iCloudCookieRecoveryTaskKind {
 			continue
 		}
 		tasks[index].TaskKind = "onboarding"
@@ -910,7 +910,7 @@ func (s *Service) GetAdminICloudOnboardingTask(ctx context.Context, taskID uint)
 		return nil, ErrICloudOnboardingNotFound
 	}
 	var task iCloudOnboardingTaskModel
-	if err := s.db.WithContext(ctx).Where("id = ? AND task_kind IN ?", taskID, []string{"onboarding", "refresh"}).First(&task).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("id = ? AND task_kind IN ?", taskID, []string{"onboarding", "refresh", iCloudCookieRecoveryTaskKind}).First(&task).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrICloudOnboardingNotFound
 		}
@@ -961,8 +961,14 @@ func (s *Service) populateICloudOnboardingFamilyEmails(ctx context.Context, task
 
 func iCloudOnboardingTaskView(task iCloudOnboardingTaskModel) OnboardingTaskView {
 	needsPostFamilyRecovery := isICloudPostFamilyRecoveryWaiting(task)
+	taskKind := firstNonEmpty(task.TaskKind, "onboarding")
+	// Keep the administrator contract stable: recovery is an internal
+	// maintenance variant of the existing Cookie-refresh task.
+	if taskKind == iCloudCookieRecoveryTaskKind {
+		taskKind = "refresh"
+	}
 	return OnboardingTaskView{
-		ID: task.ID, TaskKind: firstNonEmpty(task.TaskKind, "onboarding"), ResourceID: task.ResourceID, LineNumber: task.LineNumber,
+		ID: task.ID, TaskKind: taskKind, ResourceID: task.ResourceID, LineNumber: task.LineNumber,
 		PrimaryEmail: task.PrimaryEmail, AccountRole: task.AccountRole, FamilyPrimaryResourceID: task.FamilyPrimaryResourceID,
 		Region: task.Region, CountryCode: task.CountryCode, ICloudOpened: task.ICloudOpened,
 		FamilyInviteURL: task.FamilyInviteURL, BoundPhoneNumber: task.BoundPhoneNumber,

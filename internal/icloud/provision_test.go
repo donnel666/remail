@@ -1237,14 +1237,18 @@ func TestICloudProvisionDispatcherDrainsAllInvalidChannels(t *testing.T) {
 	}
 }
 
-func TestICloudProvisionCreatesRefreshTaskForInvalidChannel(t *testing.T) {
+func TestICloudProvisionCreatesExpectedCookieMaintenanceTaskForInvalidChannel(t *testing.T) {
 	for _, test := range []struct {
 		name            string
+		channelKind     string
+		taskKind        string
+		stage           string
 		sessionStatus   string
 		sessionFailures uint8
 	}{
-		{name: "already invalid", sessionStatus: iCloudSessionInvalid},
-		{name: "becomes invalid", sessionStatus: iCloudSessionValid, sessionFailures: iCloudSessionFailureLimit - 1},
+		{name: "Apple Account already invalid", channelKind: iCloudChannelAppleAccount, taskKind: iCloudCookieRecoveryTaskKind, stage: "manage_prepare", sessionStatus: iCloudSessionInvalid},
+		{name: "Apple Account becomes invalid", channelKind: iCloudChannelAppleAccount, taskKind: iCloudCookieRecoveryTaskKind, stage: "manage_prepare", sessionStatus: iCloudSessionValid, sessionFailures: iCloudSessionFailureLimit - 1},
+		{name: "iCloud web already invalid", channelKind: iCloudChannelWeb, taskKind: "refresh", stage: "old_cookie_prepare", sessionStatus: iCloudSessionInvalid},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			db, err := gorm.Open(sqlite.Open("file:icloud-provision-refresh-"+strings.ReplaceAll(test.name, " ", "-")+"?mode=memory&cache=shared"), &gorm.Config{})
@@ -1278,7 +1282,7 @@ func TestICloudProvisionCreatesRefreshTaskForInvalidChannel(t *testing.T) {
 				t.Fatalf("create credential: %v", err)
 			}
 			if err := db.Create(&iCloudResourceChannelModel{
-				ResourceID: resource.ID, Kind: iCloudChannelAppleAccount, Host: "appleid.apple.com",
+				ResourceID: resource.ID, Kind: test.channelKind, Host: map[string]string{iCloudChannelAppleAccount: "appleid.apple.com", iCloudChannelWeb: "p1-maildomainws.icloud.com"}[test.channelKind],
 				Cookie: "expired", Scnt: "scnt", APIKey: "api-key", SessionStatus: test.sessionStatus,
 				SessionFailures: test.sessionFailures, CreatedAt: now, UpdatedAt: now,
 			}).Error; err != nil {
@@ -1294,11 +1298,17 @@ func TestICloudProvisionCreatesRefreshTaskForInvalidChannel(t *testing.T) {
 				t.Fatalf("process provisioning: %v", err)
 			}
 			var tasks []iCloudOnboardingTaskModel
-			if err := db.Where("task_kind = ? AND resource_id = ?", "refresh", resource.ID).Find(&tasks).Error; err != nil {
-				t.Fatalf("read refresh task: %v", err)
+			if err := db.Where("task_kind = ? AND resource_id = ?", test.taskKind, resource.ID).Find(&tasks).Error; err != nil {
+				t.Fatalf("read %s task: %v", test.taskKind, err)
 			}
-			if len(tasks) != 1 || tasks[0].BoundPhoneNumber != resource.BoundPhoneNumber || tasks[0].Stage != "icloud_prepare" {
-				t.Fatalf("unexpected refresh tasks: %+v", tasks)
+			if len(tasks) != 1 || tasks[0].BoundPhoneNumber != resource.BoundPhoneNumber || tasks[0].Stage != test.stage {
+				t.Fatalf("unexpected %s tasks: %+v", test.taskKind, tasks)
+			}
+			if test.channelKind == iCloudChannelWeb && tasks[0].PendingSMSPurpose != appleSMSOldCookieLogin {
+				t.Fatalf("old-cookie recovery purpose = %q, want %q", tasks[0].PendingSMSPurpose, appleSMSOldCookieLogin)
+			}
+			if test.taskKind == iCloudCookieRecoveryTaskKind && (tasks[0].NextAttemptAt == nil || !tasks[0].NextAttemptAt.After(now) || tasks[0].NextAttemptAt.After(now.Add(60*time.Minute))) {
+				t.Fatalf("recovery delay = %v, want 1-60 minutes after %v", tasks[0].NextAttemptAt, now)
 			}
 		})
 	}
