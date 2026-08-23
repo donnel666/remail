@@ -7719,7 +7719,7 @@ type CreateDomainRequest struct {
 // CreateDomainRequestPurpose Defaults to not_sale. Domain creation does not accept sale; suppliers publish private domains through the resource publish endpoint. binding is admin-only and displayed as auxiliary mailbox in Chinese.
 type CreateDomainRequestPurpose string
 
-// CreateLotteryRequest Lottery amounts are whole points. Lucky and normal prize fields are fixed counts; all remaining participants receive the minimum award. For a participant target, the total must fit between target multiplied by the minimum and maximum payout. Set at least one draw condition; if both are provided, whichever condition is met first starts the draw.
+// CreateLotteryRequest Lottery amounts are whole points. Prize counts are fixed for lucky and normal awards; all remaining participants receive the minimum award. For a participant target, the total must fit between target multiplied by the minimum and maximum payout. Set at least one draw condition; if both are provided, whichever condition is met first starts the draw.
 type CreateLotteryRequest struct {
 	// DrawAt Optional future draw time. The activity can use this condition, the participant target, or both.
 	DrawAt            *time.Time `json:"drawAt,omitempty"`
@@ -7728,10 +7728,12 @@ type CreateLotteryRequest struct {
 	MinPayout         string     `json:"minPayout"`
 
 	// ParticipantTarget Optional participant count that triggers the draw. The activity can use this condition, the draw time, or both.
-	ParticipantTarget *int               `json:"participantTarget,omitempty"`
-	TierWeights       LotteryTierWeights `json:"tierWeights"`
-	Title             string             `json:"title"`
-	TotalAmount       string             `json:"totalAmount"`
+	ParticipantTarget *int `json:"participantTarget,omitempty"`
+
+	// TierWeights Legacy wire name. New campaigns use fixed prize counts; consolation is derived from the participant count, and normal/lucky are requested counts.
+	TierWeights LotteryTierWeights `json:"tierWeights"`
+	Title       string             `json:"title"`
+	TotalAmount string             `json:"totalAmount"`
 }
 
 // CreateMailServerRequest defines model for CreateMailServerRequest.
@@ -8597,13 +8599,14 @@ type LotteryPayoutResponseTier string
 
 // LotteryResponse defines model for LotteryResponse.
 type LotteryResponse struct {
-	CreatedAt time.Time  `json:"createdAt"`
-	DrawAt    *time.Time `json:"drawAt,omitempty"`
-	Id        int        `json:"id"`
+	// AlgorithmVersion Internal allocator version for administrator auditing.
+	AlgorithmVersion string     `json:"algorithmVersion"`
+	CreatedAt        time.Time  `json:"createdAt"`
+	DrawAt           *time.Time `json:"drawAt,omitempty"`
+	Id               int        `json:"id"`
 
 	// MaxParticipants Internal entry safety cap; it is not a draw condition when participantTarget is null.
 	MaxParticipants   int    `json:"maxParticipants"`
-	AlgorithmVersion  string `json:"algorithmVersion"`
 	MaxPayout         string `json:"maxPayout"`
 	MinAccountAgeDays int    `json:"minAccountAgeDays"`
 	MinPayout         string `json:"minPayout"`
@@ -8615,18 +8618,19 @@ type LotteryResponse struct {
 	PublicUrl         string                `json:"publicUrl"`
 	SettledAt         *time.Time            `json:"settledAt,omitempty"`
 	Status            LotteryResponseStatus `json:"status"`
-	TierWeights       LotteryTierWeights    `json:"tierWeights"`
-	Title             string                `json:"title"`
-	TotalAmount       string                `json:"totalAmount"`
-	TriggeredBy       *string               `json:"triggeredBy,omitempty"`
-	UnusedAmount      string                `json:"unusedAmount"`
+
+	// TierWeights Legacy wire name. New campaigns use fixed prize counts; consolation is derived from the participant count, and normal/lucky are requested counts.
+	TierWeights  LotteryTierWeights `json:"tierWeights"`
+	Title        string             `json:"title"`
+	TotalAmount  string             `json:"totalAmount"`
+	TriggeredBy  *string            `json:"triggeredBy,omitempty"`
+	UnusedAmount string             `json:"unusedAmount"`
 }
 
 // LotteryResponseStatus defines model for LotteryResponse.Status.
 type LotteryResponseStatus string
 
-// LotteryTierWeights keeps the legacy wire name. New campaigns use fixed
-// normal/lucky prize counts; consolation is derived from the participant count.
+// LotteryTierWeights Legacy wire name. New campaigns use fixed prize counts; consolation is derived from the participant count, and normal/lucky are requested counts.
 type LotteryTierWeights struct {
 	Consolation int `json:"consolation"`
 	Lucky       int `json:"lucky"`
