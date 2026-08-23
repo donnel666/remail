@@ -252,6 +252,48 @@ func TestICloudOnboardingClassifiesDuplicateResourceErrors(t *testing.T) {
 
 type onboardingFakeApple struct{ operations []string }
 
+type onboardingRequestApple struct {
+	request AppleOnboardingRequest
+}
+
+func (f *onboardingRequestApple) Execute(_ context.Context, request AppleOnboardingRequest) (AppleOnboardingResponse, error) {
+	f.request = request
+	return AppleOnboardingResponse{Next: "ready"}, nil
+}
+
+func TestICloudOnboardingSpecifiedPhoneDoesNotSkipTrustedPhoneEnrollment(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		taskKind    string
+		accountRole string
+		wantSkip    bool
+	}{
+		{name: "ordinary onboarding", taskKind: "onboarding", accountRole: "child"},
+		{name: "refresh", taskKind: "refresh", accountRole: "child", wantSkip: true},
+		{name: "cookie recovery", taskKind: iCloudCookieRecoveryTaskKind, accountRole: "child", wantSkip: true},
+		{name: "primary", taskKind: "onboarding", accountRole: "primary", wantSkip: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			provider := &onboardingRequestApple{}
+			service := &Service{onboardingApple: provider}
+			task := &iCloudOnboardingTaskModel{
+				TaskKind: test.taskKind, AccountRole: test.accountRole, PrimaryEmail: "child@example.com",
+				BoundPhoneNumber: "14155550001", BoundPhoneCountryCode: "US", BoundPhoneSource: "manual",
+			}
+			_, err := service.executeICloudOnboardingApple(context.Background(), task, iCloudOnboardingSecret{Password: "secret"}, AppleOnboardingRequest{Operation: appleOnboardingPrepareICloud})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if provider.request.SkipPhoneEnrollment != test.wantSkip {
+				t.Fatalf("SkipPhoneEnrollment = %t, want %t", provider.request.SkipPhoneEnrollment, test.wantSkip)
+			}
+			if provider.request.PhoneNumber != task.BoundPhoneNumber || provider.request.PhoneCountryCode != task.BoundPhoneCountryCode {
+				t.Fatalf("phone context = %q/%q, want %q/%q", provider.request.PhoneNumber, provider.request.PhoneCountryCode, task.BoundPhoneNumber, task.BoundPhoneCountryCode)
+			}
+		})
+	}
+}
+
 func (f *onboardingFakeApple) Execute(_ context.Context, request AppleOnboardingRequest) (AppleOnboardingResponse, error) {
 	f.operations = append(f.operations, request.Operation+":"+request.SMSPurpose)
 	session := json.RawMessage(`{"flow":"ok"}`)
@@ -579,6 +621,25 @@ func TestICloudOnboardingProvidedPhoneSkipsEnrollmentAndFamily(t *testing.T) {
 	}
 	if len(fakeApple.operations) != 2 || fakeApple.operations[0] != appleOnboardingPrepareManage+":" || fakeApple.operations[1] != appleOnboardingFetchManage+":" {
 		t.Fatalf("Apple operations = %v", fakeApple.operations)
+	}
+}
+
+func TestICloudOnboardingSpecifiedPhoneAndInviteStartsICloudBeforeFamily(t *testing.T) {
+	service, db, task, fakeApple := newOnboardingStateTest(t)
+	if err := db.Model(task).Update("family_invite_url", "https://setup.icloud.com/family/messages?inviteCode=test").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(task, task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	processOnboardingStageForTest(t, service, db, task)
+	if task.Stage != "icloud_prepare" || task.BoundPhoneSource != "manual" {
+		t.Fatalf("specified phone + invite skipped iCloud stage: %+v", task)
+	}
+	processOnboardingStageForTest(t, service, db, task)
+	if task.Stage != "sms_send" || task.PendingSMSPurpose != appleSMSPhoneEnrollment || len(fakeApple.operations) != 1 || fakeApple.operations[0] != appleOnboardingPrepareICloud+":" {
+		t.Fatalf("specified phone + invite did not start enrollment: task=%+v operations=%v", task, fakeApple.operations)
 	}
 }
 

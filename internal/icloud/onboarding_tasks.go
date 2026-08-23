@@ -1455,7 +1455,7 @@ func (s *Service) executeICloudOnboardingApple(ctx context.Context, task *iCloud
 	request.Session = append(request.Session[:0], task.SessionPayload...)
 	request.PhoneNumber = firstNonEmpty(request.PhoneNumber, task.BoundPhoneNumber)
 	request.PhoneCountryCode = firstNonEmpty(request.PhoneCountryCode, task.BoundPhoneCountryCode)
-	request.SkipPhoneEnrollment = request.SkipPhoneEnrollment || task.TaskKind == "refresh" || isICloudCookieRecoveryTask(task) || task.AccountRole == "primary" || task.BoundPhoneSource == "manual"
+	request.SkipPhoneEnrollment = request.SkipPhoneEnrollment || task.TaskKind == "refresh" || isICloudCookieRecoveryTask(task) || task.AccountRole == "primary"
 	return s.onboardingApple.Execute(ctx, request)
 }
 
