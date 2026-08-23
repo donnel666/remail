@@ -185,6 +185,9 @@ function LotteryCreateModal({
       !Number.isFinite(total) ||
       !Number.isFinite(minPayout) ||
       !Number.isFinite(maxPayout) ||
+      !Number.isInteger(total) ||
+      !Number.isInteger(minPayout) ||
+      !Number.isInteger(maxPayout) ||
       total <= 0 ||
       minPayout <= 0 ||
       maxPayout <= 0 ||
@@ -192,7 +195,7 @@ function LotteryCreateModal({
     ) {
       Toast.warning(
         t(
-          "Total, minimum, and maximum amounts must be valid, and the minimum must be less than the maximum."
+          "Total, minimum, and maximum amounts must be positive whole points, and the minimum must be less than the maximum."
         )
       );
       return;

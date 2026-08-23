@@ -5403,7 +5403,7 @@ export interface components {
             normal: number;
             lucky: number;
         };
-        /** @description Set at least one draw condition. If both are provided, whichever condition is met first starts the draw. */
+        /** @description Lottery amounts are whole points. Set at least one draw condition; if both are provided, whichever condition is met first starts the draw. */
         CreateLotteryRequest: {
             title: string;
             totalAmount: string;

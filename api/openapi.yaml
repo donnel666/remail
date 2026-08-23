@@ -14538,7 +14538,7 @@ components:
 
     CreateLotteryRequest:
       type: object
-      description: Set at least one draw condition. If both are provided, whichever condition is met first starts the draw.
+      description: Lottery amounts are whole points. Set at least one draw condition; if both are provided, whichever condition is met first starts the draw.
       required: [title, totalAmount, minPayout, maxPayout, tierWeights, minAccountAgeDays]
       properties:
         title:
@@ -14546,13 +14546,13 @@ components:
           maxLength: 120
         totalAmount:
           type: string
-          pattern: '^[0-9]+(\\.[0-9]{1,6})?$'
+          pattern: '^[0-9]+(\.0{1,6})?$'
         minPayout:
           type: string
-          pattern: '^[0-9]+(\\.[0-9]{1,6})?$'
+          pattern: '^[0-9]+(\.0{1,6})?$'
         maxPayout:
           type: string
-          pattern: '^[0-9]+(\\.[0-9]{1,6})?$'
+          pattern: '^[0-9]+(\.0{1,6})?$'
         tierWeights:
           $ref: "#/components/schemas/LotteryTierWeights"
         minAccountAgeDays:

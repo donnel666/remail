@@ -22,7 +22,8 @@ import (
 )
 
 const (
-	algorithmVersion = "bounded-tier-v1"
+	// v2 allocates whole points so the credited amount and user-facing notices match.
+	algorithmVersion = "bounded-tier-v2"
 	// ponytail: keep one settlement below the current Billing task ceiling;
 	// raise this only with a chunked Billing contract.
 	maxLotteryEntries = 5000
@@ -196,7 +197,8 @@ func (s *Service) Draw(ctx context.Context, lotteryID uint) error {
 			return err
 		}
 	} else if len(entries) > 0 {
-		payouts, unusedAmount, err = Allocate(entries, lottery.TotalAmount, lottery.MinPayout, lottery.MaxPayout, lottery.TierWeights)
+		wholePoints := lottery.AlgorithmVersion == algorithmVersion
+		payouts, unusedAmount, err = allocate(entries, lottery.TotalAmount, lottery.MinPayout, lottery.MaxPayout, lottery.TierWeights, wholePoints)
 		if err != nil {
 			return err
 		}
@@ -274,7 +276,7 @@ func (s *Service) sendWinnerEmails(ctx context.Context, lottery lotterydomain.Lo
 		if !ok || strings.TrimSpace(user.Email) == "" {
 			continue
 		}
-		_ = s.delivery.Send(ctx, mailapp.LotteryWinnerMessage(user.Email, lottery.ID, lottery.Title, payout.Amount, payout.Tier.String()))
+		_ = s.delivery.Send(ctx, mailapp.LotteryWinnerMessage(user.Email, lottery.ID, lottery.Title, payout.Amount))
 	}
 }
 
@@ -302,9 +304,9 @@ func validateRules(req CreateRequest) (total, minPayout, maxPayout string, maxPa
 		err = lotterydomain.ErrLotteryInvalidRules
 		return
 	}
-	totalUnits, totalErr := amountUnits(totalDec)
-	minUnits, minErr := amountUnits(minDec)
-	maxUnits, maxErr := amountUnits(maxDec)
+	totalUnits, totalErr := wholePointUnits(totalDec)
+	minUnits, minErr := wholePointUnits(minDec)
+	maxUnits, maxErr := wholePointUnits(maxDec)
 	if totalErr != nil || minErr != nil || maxErr != nil || minUnits <= 0 || maxUnits <= minUnits {
 		err = lotterydomain.ErrLotteryInvalidRules
 		return
@@ -335,6 +337,12 @@ func validateRules(req CreateRequest) (total, minPayout, maxPayout string, maxPa
 }
 
 func Allocate(entries []lotterydomain.Entry, totalAmount, minPayout, maxPayout string, weights lotterydomain.TierWeights) ([]lotterydomain.Payout, string, error) {
+	return allocate(entries, totalAmount, minPayout, maxPayout, weights, true)
+}
+
+// allocate keeps the pre-v2 ledger-unit path available for campaigns already
+// persisted with fractional rules; new campaigns always use whole points.
+func allocate(entries []lotterydomain.Entry, totalAmount, minPayout, maxPayout string, weights lotterydomain.TierWeights, wholePoints bool) ([]lotterydomain.Payout, string, error) {
 	if len(entries) == 0 || !weights.Valid() {
 		return nil, "0.00", lotterydomain.ErrLotteryInvalidRules
 	}
@@ -350,9 +358,15 @@ func Allocate(entries []lotterydomain.Entry, totalAmount, minPayout, maxPayout s
 	if err != nil {
 		return nil, "0.00", err
 	}
-	total, totalUnitsErr := amountUnits(totalDec)
-	minValue, minUnitsErr := amountUnits(minDec)
-	maxValue, maxUnitsErr := amountUnits(maxDec)
+	unitAmount := amountUnits
+	formatAmount := unitsAmount
+	if wholePoints {
+		unitAmount = wholePointUnits
+		formatAmount = wholePointsAmount
+	}
+	total, totalUnitsErr := unitAmount(totalDec)
+	minValue, minUnitsErr := unitAmount(minDec)
+	maxValue, maxUnitsErr := unitAmount(maxDec)
 	if totalUnitsErr != nil || minUnitsErr != nil || maxUnitsErr != nil || total <= 0 {
 		return nil, "0.00", lotterydomain.ErrLotteryInvalidRules
 	}
@@ -429,10 +443,10 @@ func Allocate(entries []lotterydomain.Entry, totalAmount, minPayout, maxPayout s
 	for i, entry := range entries {
 		payouts[i] = lotterydomain.Payout{
 			LotteryID: entry.LotteryID, UserID: entry.UserID, Tier: tiers[i],
-			Amount: unitsAmount(amounts[i]), CreatedAt: now,
+			Amount: formatAmount(amounts[i]), CreatedAt: now,
 		}
 	}
-	return payouts, unitsAmount(total - budget), nil
+	return payouts, formatAmount(total - budget), nil
 }
 
 func distributeBonus(amounts, weights []int64, bonus, capacity int64) error {
@@ -614,6 +628,17 @@ func amountUnits(value decimal.Decimal) (int64, error) {
 
 func unitsAmount(value int64) string {
 	return money.Format(decimal.New(value, -money.Scale))
+}
+
+func wholePointUnits(value decimal.Decimal) (int64, error) {
+	if !value.IsInteger() {
+		return 0, lotterydomain.ErrLotteryInvalidRules
+	}
+	return value.IntPart(), nil
+}
+
+func wholePointsAmount(value int64) string {
+	return money.Format(decimal.NewFromInt(value))
 }
 
 func copyInt(value *int) *int {

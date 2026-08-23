@@ -251,7 +251,7 @@ export default function Lottery() {
     return (
       <div
         aria-label={t("Loading")}
-        className="flex min-h-svh items-center justify-center bg-[var(--canvas)]"
+        className="flex min-h-svh items-center justify-center bg-white dark:bg-[var(--canvas)]"
         role="status"
       >
         <Spin size="large" />
@@ -260,7 +260,7 @@ export default function Lottery() {
   }
   if (!data) {
     return (
-      <div className="flex min-h-svh items-center justify-center bg-[var(--canvas)] px-4">
+      <div className="flex min-h-svh items-center justify-center bg-white px-4 dark:bg-[var(--canvas)]">
         <Banner type="danger" description={t("Lottery is unavailable.")} />
       </div>
     );
@@ -280,6 +280,7 @@ export default function Lottery() {
   const canEnter = !closed && !data.hasEntered;
   const showCountdown =
     lottery.status === "open" && Boolean(countdown) && !countdown?.expired;
+  const showDrawInfo = Boolean(lottery.drawAt);
   const compactTotalAmount = formatPoints(lottery.totalAmount);
   const exactTotalAmount = formatPointsValue(lottery.totalAmount);
   const participantDisplay = formatParticipantCount(
@@ -289,9 +290,8 @@ export default function Lottery() {
   );
 
   return (
-    <main className="relative min-h-svh overflow-hidden bg-[var(--canvas)] px-4 py-8 sm:px-6 sm:py-12">
+    <main className="relative min-h-svh overflow-hidden bg-white px-4 py-8 sm:px-6 sm:py-12 dark:bg-[var(--canvas)]">
       <Celebration active={celebrating} />
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-64 bg-[radial-gradient(circle_at_top,rgba(255,122,26,0.16),transparent_68%)]" />
       <div className="relative mx-auto w-full max-w-md">
         <div className="mb-5 flex items-center justify-between gap-3 px-1 text-sm font-medium text-[var(--ink-muted)]">
           <div className="flex items-center gap-2">
@@ -305,26 +305,22 @@ export default function Lottery() {
 
         <Card
           bodyStyle={{ padding: 0 }}
-          className="overflow-hidden !rounded-[28px] border border-[var(--semi-color-border)] !bg-[var(--surface)] shadow-[0_20px_60px_rgba(31,41,55,0.12)]"
+          className="overflow-hidden !rounded-[28px] border border-[var(--semi-color-border)] !bg-white shadow-[0_12px_32px_rgba(31,41,55,0.1)] dark:!bg-[var(--surface)]"
         >
-          <div className="relative overflow-hidden border-b border-[var(--semi-color-border)] bg-[linear-gradient(145deg,color-mix(in_oklch,var(--brand-subtle)_82%,white),var(--surface)_72%)] px-6 pb-7 pt-8 text-center sm:px-8">
-            <div className="pointer-events-none absolute -right-10 -top-12 h-32 w-32 rounded-full border-[18px] border-white/30" />
-            <div className="pointer-events-none absolute -bottom-16 -left-10 h-36 w-36 rounded-full border-[20px] border-brand/10" />
-            <div className="relative">
-              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-white/85 text-brand shadow-sm ring-1 ring-brand/15 dark:bg-black/10">
-                <Gift aria-hidden="true" size={31} strokeWidth={1.8} />
-              </div>
-              <h1 className="break-words text-2xl font-semibold tracking-tight text-[var(--ink-primary)] sm:text-3xl">
-                {lottery.title}
-              </h1>
-              <p className="mt-2 text-sm leading-6 text-[var(--ink-muted)]">
-                {completed
-                  ? t("Lottery is completed")
-                  : lottery.status === "open"
-                    ? t("Lottery is open")
-                    : t(statusLabelKeys[lottery.status] ?? lottery.status)}
-              </p>
+          <div className="border-b border-[var(--semi-color-border)] bg-white px-6 pb-7 pt-8 text-center dark:bg-[var(--surface)] sm:px-8">
+            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-white text-brand shadow-sm ring-1 ring-brand/15 dark:bg-[var(--surface-sunken)]">
+              <Gift aria-hidden="true" size={31} strokeWidth={1.8} />
             </div>
+            <h1 className="break-words text-2xl font-semibold tracking-tight text-[var(--ink-primary)] sm:text-3xl">
+              {lottery.title}
+            </h1>
+            <p className="mt-2 text-sm leading-6 text-[var(--ink-muted)]">
+              {completed
+                ? t("Lottery is completed")
+                : lottery.status === "open"
+                  ? t("Lottery is open")
+                  : t(statusLabelKeys[lottery.status] ?? lottery.status)}
+            </p>
           </div>
 
           <div className="space-y-5 px-5 py-6 sm:px-7 sm:py-7">
@@ -332,7 +328,7 @@ export default function Lottery() {
               aria-label={t("Total prize pool: {{amount}} points", {
                 amount: exactTotalAmount,
               })}
-              className="rounded-2xl border border-brand/15 bg-[linear-gradient(135deg,var(--brand-subtle),color-mix(in_oklch,var(--brand-light)_28%,transparent))] px-5 py-5 text-center sm:px-6"
+              className="rounded-2xl border border-brand/20 bg-white px-5 py-5 text-center dark:bg-[var(--surface)] sm:px-6"
               title={exactTotalAmount}
             >
               <div className="text-sm font-medium text-[var(--ink-muted)]">
@@ -362,55 +358,55 @@ export default function Lottery() {
               </span>
             </div>
 
-            <div
-              aria-live={showCountdown ? "off" : "polite"}
-              className="rounded-2xl border border-[var(--semi-color-border)] bg-[var(--surface-sunken)] px-4 py-4 text-center"
-            >
-              <div className="flex items-center justify-center gap-2 text-sm font-medium text-[var(--ink-muted)]">
-                <CalendarClock aria-hidden="true" size={16} />
-                <span>{showCountdown ? t("Lottery countdown") : t("Draw time")}</span>
-              </div>
-              {showCountdown && countdown ? (
-                <div
-                  aria-label={t("Lottery countdown")}
-                  className="mt-4 grid grid-cols-3 gap-2"
-                  role="timer"
-                >
-                  {[
-                    [countdown.hours, t("Hours short")],
-                    [countdown.minutes, t("Minutes short")],
-                    [countdown.seconds, t("Seconds short")],
-                  ].map(([value, label]) => (
-                    <div
-                      className="rounded-xl border border-[var(--semi-color-border)] bg-[var(--surface)] px-2 py-3"
-                      key={String(label)}
-                    >
-                      <div className="font-mono-data text-3xl font-semibold tabular-nums text-[var(--ink-primary)] sm:text-4xl">
-                        {padCountdown(Number(value))}
+            {showDrawInfo ? (
+              <div
+                aria-live={showCountdown ? "off" : "polite"}
+                className="rounded-2xl border border-[var(--semi-color-border)] bg-[var(--surface-sunken)] px-4 py-4 text-center"
+              >
+                <div className="flex items-center justify-center gap-2 text-sm font-medium text-[var(--ink-muted)]">
+                  <CalendarClock aria-hidden="true" size={16} />
+                  <span>{showCountdown ? t("Lottery countdown") : t("Draw time")}</span>
+                </div>
+                {showCountdown && countdown ? (
+                  <div
+                    aria-label={t("Lottery countdown")}
+                    className="mt-4 grid grid-cols-3 gap-2"
+                    role="timer"
+                  >
+                    {[
+                      [countdown.hours, t("Hours short")],
+                      [countdown.minutes, t("Minutes short")],
+                      [countdown.seconds, t("Seconds short")],
+                    ].map(([value, label]) => (
+                      <div
+                        className="rounded-xl border border-[var(--semi-color-border)] bg-[var(--surface)] px-2 py-3"
+                        key={String(label)}
+                      >
+                        <div className="font-mono-data text-3xl font-semibold tabular-nums text-[var(--ink-primary)] sm:text-4xl">
+                          {padCountdown(Number(value))}
+                        </div>
+                        <div className="mt-1 text-xs text-[var(--ink-muted)]">{label}</div>
                       </div>
-                      <div className="mt-1 text-xs text-[var(--ink-muted)]">{label}</div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="mt-3 text-base font-semibold text-[var(--ink-primary)]">
-                  {lottery.status === "settling"
-                    ? t("Lottery status settling")
-                    : completed
-                      ? lottery.drawAt
+                    ))}
+                  </div>
+                ) : (
+                  <div className="mt-3 text-base font-semibold text-[var(--ink-primary)]">
+                    {lottery.status === "settling"
+                      ? t("Lottery status settling")
+                      : completed
                         ? formatTime(lottery.drawAt, language)
-                        : t("Lottery status completed")
-                      : countdown?.expired
-                        ? t("Lottery status settling")
-                        : t("Draw time pending")}
-                </div>
-              )}
-              {showCountdown && lottery.drawAt ? (
-                <div className="mt-3 text-xs text-[var(--ink-muted)]">
-                  {formatTime(lottery.drawAt, language)}
-                </div>
-              ) : null}
-            </div>
+                        : countdown?.expired
+                          ? t("Lottery status settling")
+                          : t("Draw time pending")}
+                  </div>
+                )}
+                {showCountdown ? (
+                  <div className="mt-3 text-xs text-[var(--ink-muted)]">
+                    {formatTime(lottery.drawAt, language)}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
 
             {entryError ? (
               <Banner

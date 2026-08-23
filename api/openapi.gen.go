@@ -7715,7 +7715,7 @@ type CreateDomainRequest struct {
 // CreateDomainRequestPurpose Defaults to not_sale. Domain creation does not accept sale; suppliers publish private domains through the resource publish endpoint. binding is admin-only and displayed as auxiliary mailbox in Chinese.
 type CreateDomainRequestPurpose string
 
-// CreateLotteryRequest Set at least one draw condition. If both are provided, whichever condition is met first starts the draw.
+// CreateLotteryRequest Lottery amounts are whole points. Set at least one draw condition; if both are provided, whichever condition is met first starts the draw.
 type CreateLotteryRequest struct {
 	// DrawAt Optional future draw time. The activity can use this condition, the participant target, or both.
 	DrawAt            *time.Time `json:"drawAt,omitempty"`

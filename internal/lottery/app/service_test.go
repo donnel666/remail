@@ -33,6 +33,7 @@ func TestAllocatePaysEveryEntryWithinBoundsAndPreservesPool(t *testing.T) {
 	for _, payout := range payouts {
 		amount, parseErr := money.Parse(payout.Amount)
 		require.NoError(t, parseErr)
+		require.True(t, amount.IsInteger(), payout.Amount)
 		require.True(t, amount.GreaterThanOrEqual(decimal.NewFromInt(1)))
 		require.True(t, amount.LessThanOrEqual(decimal.NewFromInt(20)))
 		total = total.Add(amount)
@@ -53,7 +54,7 @@ func TestAllocateLeavesUnusedAmountAbovePerPersonMaximum(t *testing.T) {
 	payouts, unused, err := Allocate(entries, "100.00", "1.00", "10.00", lotterydomain.TierWeights{Consolation: 80, Normal: 15, Lucky: 5})
 	require.NoError(t, err)
 	require.Len(t, payouts, 2)
-	require.Equal(t, "81.80", unused)
+	require.Equal(t, "81.00", unused)
 	require.NotEqual(t, payouts[0].Amount, payouts[1].Amount)
 }
 
@@ -91,6 +92,7 @@ func TestAllocateHandlesProductionScalePool(t *testing.T) {
 	for _, payout := range payouts {
 		amount, parseErr := money.Parse(payout.Amount)
 		require.NoError(t, parseErr)
+		require.True(t, amount.IsInteger(), payout.Amount)
 		require.True(t, amount.GreaterThanOrEqual(decimal.NewFromInt(1)))
 		require.True(t, amount.LessThanOrEqual(maxAward), payout.Amount)
 		paid = paid.Add(amount)
@@ -108,6 +110,39 @@ func TestAllocateRejectsNonPositivePool(t *testing.T) {
 		Lucky:       5,
 	})
 	require.ErrorIs(t, err, lotterydomain.ErrLotteryInvalidRules)
+}
+
+func TestValidateRulesRejectsFractionalLotteryAmounts(t *testing.T) {
+	drawAt := time.Now().Add(time.Hour)
+	_, _, _, _, err := validateRules(CreateRequest{
+		TotalAmount: "100.50", MinPayout: "1.00", MaxPayout: "20.00",
+		TierWeights: lotterydomain.TierWeights{Consolation: 80, Normal: 15, Lucky: 5},
+		DrawAt:      &drawAt,
+	})
+	require.ErrorIs(t, err, lotterydomain.ErrLotteryInvalidRules)
+}
+
+func TestLegacyAllocationKeepsLedgerPrecision(t *testing.T) {
+	entries := make([]lotterydomain.Entry, 10)
+	for i := range entries {
+		entries[i] = lotterydomain.Entry{LotteryID: 13, UserID: uint(i + 1)}
+	}
+	payouts, unused, err := allocate(entries, "100.50", "1.25", "20.75", lotterydomain.TierWeights{
+		Consolation: 80,
+		Normal:      15,
+		Lucky:       5,
+	}, false)
+	require.NoError(t, err)
+	require.Len(t, payouts, len(entries))
+	paid := decimal.Zero
+	for _, payout := range payouts {
+		amount, parseErr := money.Parse(payout.Amount)
+		require.NoError(t, parseErr)
+		paid = paid.Add(amount)
+	}
+	unusedAmount, parseErr := money.Parse(unused)
+	require.NoError(t, parseErr)
+	require.True(t, paid.Add(unusedAmount).Equal(decimal.RequireFromString("100.50")))
 }
 
 func TestValidateRulesAcceptsEitherEarlyDrawCondition(t *testing.T) {

@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/donnel666/remail/internal/mailtransport/domain"
+	"github.com/donnel666/remail/internal/money"
+	"github.com/shopspring/decimal"
 )
 
 var diagnosticEmailPattern = regexp.MustCompile(`(?i)\b([a-z0-9._%+\-])[a-z0-9._%+\-]*@([a-z0-9.\-]+\.[a-z]{2,})\b`)
@@ -191,24 +193,15 @@ func LeaderboardRewardMessage(recipient, businessDate string, rank, score int, a
 	)
 }
 
-func LotteryWinnerMessage(recipient string, lotteryID uint, title, amount, tier string) domain.OutboundMessage {
+func LotteryWinnerMessage(recipient string, lotteryID uint, title, amount string) domain.OutboundMessage {
 	recipient = strings.TrimSpace(recipient)
 	title = oneLine(title, 120)
 	if title == "" {
 		title = "ReMail 抽奖"
 	}
-	tierLabel := map[string]string{
-		"consolation": "安慰奖",
-		"normal":      "普通奖",
-		"lucky":       "幸运奖",
-	}[strings.TrimSpace(tier)]
-	if tierLabel == "" {
-		tierLabel = "抽奖奖励"
-	}
 	details := []notificationDetail{
 		{Label: "抽奖活动", Value: title},
-		{Label: "奖励档位", Value: tierLabel},
-		{Label: "奖励积分", Value: amount + " 积分"},
+		{Label: "奖励积分", Value: formatLotteryReward(amount) + " 积分"},
 	}
 	return notificationMessage(
 		domain.PurposeSystemNotice,
@@ -222,6 +215,50 @@ func LotteryWinnerMessage(recipient string, lotteryID uint, title, amount, tier 
 		details,
 		"奖励已发放至您的消费钱包，此邮件由系统自动发送。",
 	)
+}
+
+func formatLotteryReward(value string) string {
+	trimmed := strings.TrimSpace(value)
+	amount, err := money.Parse(trimmed)
+	if err != nil {
+		return trimDecimalZeros(trimmed)
+	}
+	sign := ""
+	if amount.IsNegative() {
+		sign = "-"
+		amount = amount.Abs()
+	}
+	units := []struct {
+		threshold decimal.Decimal
+		suffix    string
+	}{
+		{threshold: decimal.NewFromInt(1_000_000_000), suffix: "B"},
+		{threshold: decimal.NewFromInt(1_000_000), suffix: "M"},
+		{threshold: decimal.NewFromInt(1_000), suffix: "K"},
+	}
+	for index, unit := range units {
+		if amount.LessThan(unit.threshold) {
+			continue
+		}
+		compact := amount.Div(unit.threshold).Round(1)
+		if compact.GreaterThanOrEqual(decimal.NewFromInt(1000)) && index > 0 {
+			unit = units[index-1]
+			compact = amount.Div(unit.threshold).Round(1)
+		}
+		return sign + trimDecimalZeros(compact.StringFixed(1)) + unit.suffix
+	}
+	// Keep defensive formatting for legacy/direct callers; never round a non-integer award in a notice.
+	return sign + trimDecimalZeros(amount.StringFixed(money.Scale))
+}
+
+func trimDecimalZeros(value string) string {
+	if strings.Contains(value, ".") {
+		value = strings.TrimRight(strings.TrimRight(value, "0"), ".")
+	}
+	if value == "" || value == "-0" {
+		return "0"
+	}
+	return value
 }
 
 func LoginNotificationMessage(recipient, sessionID, clientIP, userAgent string, at time.Time) domain.OutboundMessage {
