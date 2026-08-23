@@ -453,6 +453,9 @@ func mutateAdminICloudResourceTx(
 		if isICloudOnboardingFamilySharingWaitingResource(&resource) {
 			return nil, false, ErrICloudResourceStatus
 		}
+		if iCloudCookieMaintenanceBlocksValidation(&resource) {
+			return nil, false, ErrICloudResourceStatus
+		}
 		queuedGeneration = queueAdminICloudValidation(updates, resource, now)
 	case AdminICloudAlias:
 		if resource.Status == iCloudResourceDeleted {
@@ -713,7 +716,7 @@ func normalizeAdminICloudCommandError(err error) error {
 		errors.Is(err, ErrICloudResourceVersion), errors.Is(err, ErrICloudResourceOwner),
 		errors.Is(err, ErrICloudResourceAllocation), errors.Is(err, ErrICloudResourceUpdate),
 		errors.Is(err, ErrICloudResourceIdentity), errors.Is(err, ErrICloudCookieRefreshUnavailable),
-		errors.Is(err, ErrICloudOnboardingPhoneExclusive):
+		errors.Is(err, ErrICloudOnboardingPhoneExclusive), errors.Is(err, ErrICloudOnboardingPhoneBlacklisted):
 		return err
 	default:
 		return ErrICloudResourceQueryTemporary

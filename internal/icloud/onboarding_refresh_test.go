@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -69,6 +70,12 @@ type refreshCountingApple struct{ calls int }
 func (p *refreshCountingApple) Execute(context.Context, AppleOnboardingRequest) (AppleOnboardingResponse, error) {
 	p.calls++
 	return AppleOnboardingResponse{}, errors.New("unexpected Apple call")
+}
+
+type refreshBlacklistedPhone struct{ onboardingProvidedPhone }
+
+func (refreshBlacklistedPhone) CheckSMSPhoneAvailable(context.Context, uint) error {
+	return &kitesim.SMSPhoneUnavailableError{RetryAt: time.Now().UTC().Add(time.Hour), Reason: "phone number is blacklisted", Blacklisted: true}
 }
 
 type refreshMutatingApple struct {
@@ -179,6 +186,54 @@ func TestEnsureICloudCookieRefreshCreatesOnePermanentPhoneTask(t *testing.T) {
 	}
 	if len(tasks) != 1 || tasks[0].Stage != "icloud_prepare" || tasks[0].BoundPhoneNumber != resource.BoundPhoneNumber || tasks[0].ExpectedCredentialRevision != resource.CredentialRevision {
 		t.Fatalf("unexpected refresh tasks: %+v", tasks)
+	}
+}
+
+func TestEnsureICloudCookieRefreshReplacesStaleMaintenanceRevision(t *testing.T) {
+	now := time.Date(2026, 8, 23, 12, 5, 0, 0, time.UTC)
+	db := newICloudRefreshTestDB(t)
+	resource := seedICloudRefreshResource(t, db, now)
+	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", resource.ID).Updates(map[string]any{
+		"task_kind": "refresh", "onboarding_status": iCloudOnboardingProcessing,
+		"dispatch_status": "running", "generation": 7, "expected_credential_revision": resource.CredentialRevision - 1,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	if err := service.EnsureICloudCookieRefresh(context.Background(), resource.ID); err != nil {
+		t.Fatal(err)
+	}
+	var stored iCloudResourceModel
+	if err := db.First(&stored, resource.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.OnboardingStatus != iCloudOnboardingProcessing || stored.WorkflowExpectedCredential != resource.CredentialRevision || stored.WorkflowGeneration != 8 {
+		t.Fatalf("stale maintenance was not replaced: %#v", stored)
+	}
+}
+
+func TestICloudCookieMaintenanceReleasesValidatingResource(t *testing.T) {
+	now := time.Date(2026, 8, 23, 12, 15, 0, 0, time.UTC)
+	db := newICloudRefreshTestDB(t)
+	resource := seedICloudRefreshResource(t, db, now)
+	nextProvisionAt := now.Add(time.Minute)
+	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", resource.ID).Updates(map[string]any{
+		"status": iCloudResourceValidating, "next_validation_at": nil, "next_provision_at": nextProvisionAt,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	if err := service.EnsureICloudCookieRefresh(context.Background(), resource.ID); err != nil {
+		t.Fatal(err)
+	}
+	var stored iCloudResourceModel
+	if err := db.First(&stored, resource.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != iCloudResourcePending || stored.NextValidationAt == nil || !stored.NextValidationAt.Equal(now) || stored.NextProvisionAt != nil {
+		t.Fatalf("validating resource was not released for maintenance: %#v", stored)
 	}
 }
 
@@ -442,6 +497,56 @@ func TestICloudOldCookieBackfillSelfRowFailurePreservesResourceSafeError(t *test
 	if stored.OnboardingStatus != iCloudOnboardingFailed || stored.WorkflowLastErrorCategory != "provider_rejected" ||
 		len(stored.WorkflowSecretPayload) != 0 || len(stored.WorkflowSessionPayload) != 0 || stored.WorkflowSMSPurpose != "" {
 		t.Fatalf("self-row backfill workflow = %+v", stored)
+	}
+}
+
+func TestICloudCookieMaintenanceBlacklistDoesNotMarkResourceAbnormal(t *testing.T) {
+	for _, taskKind := range []string{"refresh", iCloudCookieRecoveryTaskKind} {
+		t.Run(taskKind, func(t *testing.T) {
+			now := time.Date(2026, time.August, 17, 8, 27, 0, 0, time.UTC)
+			db := newICloudRefreshTestDB(t)
+			resource := seedICloudRefreshResource(t, db, now)
+			if err := db.Model(&iCloudResourceModel{}).Where("id = ?", resource.ID).Updates(map[string]any{
+				"status": iCloudResourceNormal, "for_sale": true, "last_safe_error": "healthy",
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			secret, _ := json.Marshal(iCloudOnboardingSecret{Password: "Secret1!", Birthday: "2000-11-02"})
+			resourceID := resource.ID
+			task := iCloudOnboardingTaskModel{
+				ResourceID: &resourceID, TaskKind: taskKind, PrimaryEmail: resource.PrimaryEmail, AccountRole: "primary", ICloudOpened: true,
+				BoundPhoneNumber: resource.BoundPhoneNumber, BoundPhoneCountryCode: "US", BoundPhoneSource: "manual", KitesimPhoneID: resource.KitesimPhoneID,
+				SecretPayload: secret, Status: iCloudOnboardingProcessing, Stage: "manage_prepare", DispatchStatus: "pending",
+				Generation: 1, ExpectedCredentialRevision: resource.CredentialRevision, MaxAttempts: 5, CreatedAt: now, UpdatedAt: now,
+			}
+			if taskKind == "refresh" {
+				task.Stage = "old_cookie_prepare"
+				task.PendingSMSPurpose = appleSMSOldCookieLogin
+			}
+			if err := db.Create(&task).Error; err != nil {
+				t.Fatal(err)
+			}
+			service := NewService(db, nil, nil)
+			service.now = func() time.Time { return now }
+			service.smsPhones = refreshBlacklistedPhone{}
+			if err := service.ProcessICloudOnboardingTask(context.Background(), iCloudOnboardingTask{TaskID: task.ID, Generation: task.Generation}); err != nil {
+				t.Fatal(err)
+			}
+			var storedTask iCloudOnboardingTaskModel
+			if err := db.First(&storedTask, task.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			if storedTask.Status != iCloudOnboardingFailed || storedTask.LastErrorCategory != "phone_blacklisted" || !strings.Contains(storedTask.LastSafeError, "小黑屋") {
+				t.Fatalf("blacklist workflow = %+v", storedTask)
+			}
+			var storedResource iCloudResourceModel
+			if err := db.First(&storedResource, resource.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			if storedResource.Status != iCloudResourceNormal || !storedResource.ForSale || storedResource.LastSafeError != "healthy" {
+				t.Fatalf("resource changed after blacklist maintenance failure: %+v", storedResource)
+			}
+		})
 	}
 }
 

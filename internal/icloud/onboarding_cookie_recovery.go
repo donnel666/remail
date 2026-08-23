@@ -31,7 +31,7 @@ func (s *Service) ensureICloudCookieMaintenanceTx(ctx context.Context, tx *gorm.
 	if resource.Status == iCloudResourceDeleted || resource.Status == iCloudResourceDisabled {
 		return false, nil
 	}
-	if resource.OnboardingStatus == iCloudOnboardingProcessing || resource.OnboardingStatus == iCloudOnboardingWaiting {
+	if iCloudCookieMaintenanceWorkflowActive(resource) {
 		return false, nil
 	}
 	var invalidApple int64
@@ -40,7 +40,7 @@ func (s *Service) ensureICloudCookieMaintenanceTx(ctx context.Context, tx *gorm.
 		Count(&invalidApple).Error; err != nil {
 		return false, err
 	}
-	if invalidApple > 0 && !iCloudCookieRecoveryTerminallyFailed(resource) {
+	if invalidApple > 0 && !iCloudCookieRecoveryTerminallyFailed(resource) && !iCloudCookiePhoneBlacklistedTerminallyFailed(resource) {
 		created, err := s.ensureICloudCookieRecoveryTx(ctx, tx, resourceID)
 		if err != nil {
 			return false, err
@@ -58,7 +58,7 @@ func (s *Service) ensureICloudCookieMaintenanceTx(ctx context.Context, tx *gorm.
 			Count(&invalidWeb).Error; err != nil {
 			return false, err
 		}
-		if invalidWeb > 0 {
+		if invalidWeb > 0 && !iCloudCookiePhoneBlacklistedTerminallyFailed(resource) {
 			return s.ensureICloudCookieRefreshTx(ctx, tx, resourceID, true)
 		}
 	}
@@ -99,11 +99,8 @@ func (s *Service) ensureICloudCookieRecoveryTx(ctx context.Context, tx *gorm.DB,
 		Count(&invalidApple).Error; err != nil || invalidApple == 0 {
 		return false, err
 	}
-	var active int64
-	if err := tx.Model(&iCloudResourceModel{}).
-		Where("id = ? AND onboarding_status IN ?", resourceID, []string{iCloudOnboardingProcessing, iCloudOnboardingWaiting}).
-		Count(&active).Error; err != nil || active > 0 {
-		return false, err
+	if iCloudCookieMaintenanceWorkflowActive(resource) {
+		return false, nil
 	}
 	var credential iCloudResourceCredentialModel
 	if err := tx.First(&credential, resourceID).Error; err != nil {
@@ -153,8 +150,10 @@ func (s *Service) ensureICloudCookieRecoveryTx(ctx context.Context, tx *gorm.DB,
 	// Starting maintenance must not hide the resource's last validation error;
 	// only a successful channel replacement may clear it.
 	delete(updates, "last_safe_error")
+	prepareICloudCookieMaintenanceResource(resource, updates, now)
 	result := tx.Model(&iCloudResourceModel{}).
-		Where("id = ? AND onboarding_status NOT IN ?", resourceID, []string{iCloudOnboardingProcessing, iCloudOnboardingWaiting}).
+		Where("id = ? AND (onboarding_status NOT IN ? OR (task_kind IN ? AND expected_credential_revision <> credential_revision))",
+			resourceID, []string{iCloudOnboardingProcessing, iCloudOnboardingWaiting}, []string{"refresh", iCloudCookieRecoveryTaskKind}).
 		Updates(updates)
 	if result.Error != nil {
 		return false, result.Error

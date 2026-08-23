@@ -496,6 +496,61 @@ func TestListPhonesDerivesExclusiveStatusFromICloudAliasCapacity(t *testing.T) {
 	}
 }
 
+func TestListPhonesDerivesAndFiltersBlacklistedStatus(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&accountModel{}, &phoneModel{}); err != nil {
+		t.Fatal(err)
+	}
+	accounts := []accountModel{
+		testAccount("blacklisted@example.com", "password", "token"),
+		testAccount("available@example.com", "password", "token"),
+	}
+	if err := db.Create(&accounts).Error; err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, time.August, 16, 12, 0, 0, 0, time.UTC)
+	until := now.Add(time.Hour)
+	phones := []phoneModel{
+		{AccountID: accounts[0].ID, ProviderOrderID: "order-blacklisted", PhoneCode: "1", PhoneNumber: "4155550001", CountryCode: "US", Status: int(PhoneActive), SMSBlacklistedUntil: &until},
+		{AccountID: accounts[1].ID, ProviderOrderID: "order-available", PhoneCode: "1", PhoneNumber: "4155550002", CountryCode: "US", Status: int(PhoneActive)},
+	}
+	if err := db.Create(&phones).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("CREATE TABLE icloud_resources (id INTEGER PRIMARY KEY, primary_email TEXT, kitesim_phone_id INTEGER, bound_phone_number TEXT, status TEXT, alias_count INTEGER)").Error; err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(db, nil)
+	service.now = func() time.Time { return now }
+	list, err := service.ListPhones(context.Background(), PhoneListFilter{Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if list.Facets.Blacklisted != 1 || list.Facets.Active != 1 {
+		t.Fatalf("blacklist facets = %+v", list.Facets)
+	}
+	byPhone := make(map[uint]PhoneItem, len(list.Items))
+	for _, item := range list.Items {
+		if item.PhoneID != nil {
+			byPhone[*item.PhoneID] = item
+		}
+	}
+	if byPhone[phones[0].ID].Status != AdminPhoneBlacklisted {
+		t.Fatalf("blacklisted phone status = %+v", byPhone[phones[0].ID])
+	}
+	blacklisted, err := service.ListPhones(context.Background(), PhoneListFilter{Limit: 20, Status: AdminPhoneBlacklisted})
+	if err != nil || blacklisted.Total != 1 || len(blacklisted.Items) != 1 || blacklisted.Items[0].Status != AdminPhoneBlacklisted {
+		t.Fatalf("blacklisted filter = %+v err=%v", blacklisted, err)
+	}
+	active, err := service.ListPhones(context.Background(), PhoneListFilter{Limit: 20, Status: AdminPhoneActive})
+	if err != nil || active.Total != 1 || len(active.Items) != 1 || active.Items[0].PhoneID == nil || *active.Items[0].PhoneID != phones[1].ID {
+		t.Fatalf("active filter includes blacklisted phone: %+v err=%v", active, err)
+	}
+}
+
 func TestMessagesDoesNotOverwriteNewerToken(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:kitesim_message_token_fence?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {

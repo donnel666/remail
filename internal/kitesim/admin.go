@@ -30,14 +30,15 @@ var (
 type AdminPhoneStatus string
 
 const (
-	AdminPhoneActive     AdminPhoneStatus = "active"
-	AdminPhonePending    AdminPhoneStatus = "pending"
-	AdminPhoneActivating AdminPhoneStatus = "activating"
-	AdminPhoneExpired    AdminPhoneStatus = "expired"
-	AdminPhoneRefunded   AdminPhoneStatus = "refunded"
-	AdminPhoneUnsynced   AdminPhoneStatus = "unsynced"
-	AdminPhoneDisabled   AdminPhoneStatus = "disabled"
-	AdminPhoneExclusive  AdminPhoneStatus = "exclusive"
+	AdminPhoneActive      AdminPhoneStatus = "active"
+	AdminPhonePending     AdminPhoneStatus = "pending"
+	AdminPhoneActivating  AdminPhoneStatus = "activating"
+	AdminPhoneExpired     AdminPhoneStatus = "expired"
+	AdminPhoneRefunded    AdminPhoneStatus = "refunded"
+	AdminPhoneUnsynced    AdminPhoneStatus = "unsynced"
+	AdminPhoneDisabled    AdminPhoneStatus = "disabled"
+	AdminPhoneExclusive   AdminPhoneStatus = "exclusive"
+	AdminPhoneBlacklisted AdminPhoneStatus = "blacklisted"
 )
 
 type SyncTaskStatus string
@@ -216,6 +217,7 @@ type PhoneFacets struct {
 	Unsynced       int64         `json:"unsynced"`
 	Disabled       int64         `json:"disabled"`
 	Exclusive      int64         `json:"exclusive"`
+	Blacklisted    int64         `json:"blacklisted"`
 	AutoRenew      BooleanFacets `json:"autoRenew"`
 	TokenAvailable BooleanFacets `json:"tokenAvailable"`
 	SyncHealthy    BooleanFacets `json:"syncHealthy"`
@@ -239,7 +241,8 @@ func (s *Service) ListPhones(ctx context.Context, filter PhoneListFilter) (*Phon
 		return nil, fmt.Errorf("load iCloud phone usage: %w", err)
 	}
 	exclusivePhoneIDs := iCloudExclusivePhoneIDs(usage.exclusive)
-	query := s.filteredPhoneQuery(ctx, filter, exclusivePhoneIDs)
+	now := s.now().UTC()
+	query := s.filteredPhoneQuery(ctx, filter, exclusivePhoneIDs, now)
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		return nil, fmt.Errorf("list Kitesim phones: %w", err)
@@ -280,6 +283,7 @@ func (s *Service) ListPhones(ctx context.Context, filter PhoneListFilter) (*Phon
 		LastSafeError    string     `gorm:"column:last_safe_error"`
 		LastSyncedAt     *time.Time `gorm:"column:last_synced_at"`
 		DisabledAt       *time.Time `gorm:"column:disabled_at"`
+		BlacklistedUntil *time.Time `gorm:"column:sms_blacklisted_until"`
 		AccountCreatedAt time.Time  `gorm:"column:account_created"`
 	}
 	var rows []row
@@ -287,7 +291,7 @@ func (s *Service) ListPhones(ctx context.Context, filter PhoneListFilter) (*Phon
 p.phone_code, p.phone_number, p.status, p.order_no, p.country_code, p.order_status,
 p.package_id, p.duration_type, p.duration_value, p.auto_renew, p.currency,
 p.original_amount, p.paid_amount, p.auto_renew_price, p.create_time, p.payment_time,
-p.expire_time, p.latest_renewal_time, p.next_renewal_date, p.refund_time, p.disabled_at,
+p.expire_time, p.latest_renewal_time, p.next_renewal_date, p.refund_time, p.disabled_at, p.sms_blacklisted_until,
 CASE WHEN a.token IS NOT NULL AND LENGTH(a.token) > 0 THEN 1 ELSE 0 END AS token_available, a.token_updated_at,
 (a.last_synced_at IS NOT NULL AND a.last_safe_error = '') AS sync_healthy,
 a.sync_status, a.sync_queued_at, a.sync_started_at, a.sync_finished_at, a.sync_attempts,
@@ -323,6 +327,9 @@ a.last_safe_error, a.last_synced_at, a.created_at AS account_created`).
 		}
 		if row.DisabledAt != nil {
 			item.Status = AdminPhoneDisabled
+		}
+		if row.BlacklistedUntil != nil && row.BlacklistedUntil.After(now) && item.Status != AdminPhoneDisabled {
+			item.Status = AdminPhoneBlacklisted
 		}
 		if item.Status == AdminPhoneActive && row.PhoneID != nil {
 			if _, exclusive := usage.exclusive[*row.PhoneID]; exclusive {
@@ -389,14 +396,14 @@ a.last_safe_error, a.last_synced_at, a.created_at AS account_created`).
 		}
 		items = append(items, item)
 	}
-	facets, err := s.phoneFacets(ctx, filter, exclusivePhoneIDs)
+	facets, err := s.phoneFacets(ctx, filter, exclusivePhoneIDs, now)
 	if err != nil {
 		return nil, err
 	}
 	return &PhoneList{Items: items, Total: total, Offset: filter.Offset, Limit: filter.Limit, Facets: facets}, nil
 }
 
-func (s *Service) filteredPhoneQuery(ctx context.Context, filter PhoneListFilter, exclusivePhoneIDs []uint) *gorm.DB {
+func (s *Service) filteredPhoneQuery(ctx context.Context, filter PhoneListFilter, exclusivePhoneIDs []uint, now time.Time) *gorm.DB {
 	query := s.basePhoneQuery(ctx, filter.Search, filter.CreatedFrom, filter.CreatedTo)
 	if filter.AutoRenew != nil {
 		query = query.Where("p.id IS NOT NULL AND p.auto_renew = ?", *filter.AutoRenew)
@@ -432,7 +439,10 @@ func (s *Service) filteredPhoneQuery(ctx context.Context, filter PhoneListFilter
 		if len(exclusivePhoneIDs) == 0 {
 			return query.Where("1 = 0")
 		}
-		return query.Where("p.id IS NOT NULL AND p.disabled_at IS NULL AND p.status = ? AND p.id IN ?", int(PhoneActive), exclusivePhoneIDs)
+		return query.Where("p.id IS NOT NULL AND p.disabled_at IS NULL AND p.status = ? AND p.id IN ? AND (p.sms_blacklisted_until IS NULL OR p.sms_blacklisted_until <= ?)", int(PhoneActive), exclusivePhoneIDs, now)
+	}
+	if filter.Status == AdminPhoneBlacklisted {
+		return query.Where("p.id IS NOT NULL AND p.disabled_at IS NULL AND p.status = ? AND p.sms_blacklisted_until > ?", int(PhoneActive), now)
 	}
 	if filter.Status != "" {
 		status, ok := providerStatus(filter.Status)
@@ -442,6 +452,9 @@ func (s *Service) filteredPhoneQuery(ctx context.Context, filter PhoneListFilter
 		query = query.Where("p.disabled_at IS NULL AND p.status = ?", status)
 		if status == PhoneActive && len(exclusivePhoneIDs) > 0 {
 			query = query.Where("p.id NOT IN ?", exclusivePhoneIDs)
+		}
+		if status == PhoneActive {
+			query = query.Where("p.sms_blacklisted_until IS NULL OR p.sms_blacklisted_until <= ?", now)
 		}
 	}
 	return query
@@ -465,7 +478,7 @@ func (s *Service) basePhoneQuery(ctx context.Context, search string, createdFrom
 	return query
 }
 
-func (s *Service) phoneFacets(ctx context.Context, filter PhoneListFilter, exclusivePhoneIDs []uint) (PhoneFacets, error) {
+func (s *Service) phoneFacets(ctx context.Context, filter PhoneListFilter, exclusivePhoneIDs []uint, now time.Time) (PhoneFacets, error) {
 	type counts struct {
 		All               int64 `gorm:"column:all_count"`
 		Active            int64 `gorm:"column:active_count"`
@@ -476,6 +489,7 @@ func (s *Service) phoneFacets(ctx context.Context, filter PhoneListFilter, exclu
 		Unsynced          int64 `gorm:"column:unsynced_count"`
 		Disabled          int64 `gorm:"column:disabled_count"`
 		Exclusive         int64 `gorm:"column:exclusive_count"`
+		Blacklisted       int64 `gorm:"column:blacklisted_count"`
 		AutoRenewYes      int64 `gorm:"column:auto_renew_yes"`
 		TokenAvailableYes int64 `gorm:"column:token_available_yes"`
 		SyncHealthyYes    int64 `gorm:"column:sync_healthy_yes"`
@@ -483,13 +497,14 @@ func (s *Service) phoneFacets(ctx context.Context, filter PhoneListFilter, exclu
 	}
 	query := s.basePhoneQuery(ctx, filter.Search, filter.CreatedFrom, filter.CreatedTo)
 	var row counts
-	activeCase := "SUM(CASE WHEN p.disabled_at IS NULL AND p.status = 1 THEN 1 ELSE 0 END) AS active_count"
+	activeCase := "SUM(CASE WHEN p.disabled_at IS NULL AND p.status = 1 AND (p.sms_blacklisted_until IS NULL OR p.sms_blacklisted_until <= ?) THEN 1 ELSE 0 END) AS active_count"
 	exclusiveCase := "SUM(CASE WHEN 1 = 0 THEN 1 ELSE 0 END) AS exclusive_count"
-	var selectArgs []any
+	blacklistedCase := "SUM(CASE WHEN p.disabled_at IS NULL AND p.status = 1 AND p.sms_blacklisted_until > ? THEN 1 ELSE 0 END) AS blacklisted_count"
+	selectArgs := []any{now, now}
 	if len(exclusivePhoneIDs) > 0 {
-		activeCase = "SUM(CASE WHEN p.disabled_at IS NULL AND p.status = 1 AND p.id NOT IN ? THEN 1 ELSE 0 END) AS active_count"
-		exclusiveCase = "SUM(CASE WHEN p.disabled_at IS NULL AND p.status = 1 AND p.id IN ? THEN 1 ELSE 0 END) AS exclusive_count"
-		selectArgs = []any{exclusivePhoneIDs, exclusivePhoneIDs}
+		activeCase = "SUM(CASE WHEN p.disabled_at IS NULL AND p.status = 1 AND (p.sms_blacklisted_until IS NULL OR p.sms_blacklisted_until <= ?) AND p.id NOT IN ? THEN 1 ELSE 0 END) AS active_count"
+		exclusiveCase = "SUM(CASE WHEN p.disabled_at IS NULL AND p.status = 1 AND (p.sms_blacklisted_until IS NULL OR p.sms_blacklisted_until <= ?) AND p.id IN ? THEN 1 ELSE 0 END) AS exclusive_count"
+		selectArgs = []any{now, exclusivePhoneIDs, now, exclusivePhoneIDs, now}
 	}
 	selectSQL := `COUNT(*) AS all_count,
 ` + activeCase + `,
@@ -500,6 +515,7 @@ SUM(CASE WHEN p.disabled_at IS NULL AND p.status = 4 THEN 1 ELSE 0 END) AS refun
 SUM(CASE WHEN p.id IS NULL THEN 1 ELSE 0 END) AS unsynced_count,
 SUM(CASE WHEN p.disabled_at IS NOT NULL THEN 1 ELSE 0 END) AS disabled_count,
 ` + exclusiveCase + `,
+` + blacklistedCase + `,
 SUM(CASE WHEN p.id IS NOT NULL AND p.auto_renew = 1 THEN 1 ELSE 0 END) AS auto_renew_yes,
 SUM(CASE WHEN a.token IS NOT NULL AND LENGTH(a.token) > 0 THEN 1 ELSE 0 END) AS token_available_yes,
 SUM(CASE WHEN a.last_synced_at IS NOT NULL AND a.last_safe_error = '' THEN 1 ELSE 0 END) AS sync_healthy_yes,
@@ -514,7 +530,7 @@ SUM(CASE WHEN p.id IS NOT NULL THEN 1 ELSE 0 END) AS phone_available_yes`
 		All: row.All, Active: row.Active, Pending: row.Pending,
 		Activating: row.Activating, Expired: row.Expired,
 		Refunded: row.Refunded, Unsynced: row.Unsynced, Disabled: row.Disabled,
-		Exclusive: row.Exclusive,
+		Exclusive: row.Exclusive, Blacklisted: row.Blacklisted,
 		AutoRenew: boolean(row.AutoRenewYes), TokenAvailable: boolean(row.TokenAvailableYes),
 		SyncHealthy: boolean(row.SyncHealthyYes), PhoneAvailable: boolean(row.PhoneAvailableYes),
 	}, nil

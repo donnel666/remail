@@ -38,11 +38,12 @@ func iCloudConfiguredOnboardingMaxAttempts() int {
 }
 
 var (
-	ErrICloudOnboardingInvalid        = errors.New("icloud: invalid account onboarding import")
-	ErrICloudOnboardingConflict       = errors.New("icloud: account onboarding idempotency conflict")
-	ErrICloudOnboardingNotFound       = errors.New("icloud: account onboarding import not found")
-	ErrICloudOnboardingTemporary      = errors.New("icloud: account onboarding temporarily unavailable")
-	ErrICloudOnboardingPhoneExclusive = errors.New("icloud: selected phone is exclusively assigned")
+	ErrICloudOnboardingInvalid          = errors.New("icloud: invalid account onboarding import")
+	ErrICloudOnboardingConflict         = errors.New("icloud: account onboarding idempotency conflict")
+	ErrICloudOnboardingNotFound         = errors.New("icloud: account onboarding import not found")
+	ErrICloudOnboardingTemporary        = errors.New("icloud: account onboarding temporarily unavailable")
+	ErrICloudOnboardingPhoneExclusive   = errors.New("icloud: selected phone is exclusively assigned")
+	ErrICloudOnboardingPhoneBlacklisted = errors.New("icloud: selected phone is blacklisted")
 )
 
 type iCloudOnboardingImportModel struct {
@@ -439,9 +440,10 @@ func CountryCodeFromICloudRegion(region string) string {
 }
 
 type iCloudOnboardingKitesimPhone struct {
-	ID          uint   `gorm:"column:id"`
-	PhoneCode   string `gorm:"column:phone_code"`
-	PhoneNumber string `gorm:"column:phone_number"`
+	ID                  uint       `gorm:"column:id"`
+	PhoneCode           string     `gorm:"column:phone_code"`
+	PhoneNumber         string     `gorm:"column:phone_number"`
+	SMSBlacklistedUntil *time.Time `gorm:"column:sms_blacklisted_until"`
 }
 
 // validateICloudOnboardingPhoneExclusivityTx rejects a requested phone before
@@ -460,9 +462,14 @@ func (s *Service) validateICloudOnboardingPhoneExclusivityTx(
 		return nil
 	}
 	hasBoundPhone := tx.Migrator().HasColumn("icloud_resources", "bound_phone_number")
+	hasBlacklisted := tx.Migrator().HasColumn("kitesim_phones", "sms_blacklisted_until")
+	phoneSelect := "id, phone_code, phone_number"
+	if hasBlacklisted {
+		phoneSelect += ", sms_blacklisted_until"
+	}
 	var phones []iCloudOnboardingKitesimPhone
 	if err := tx.Table("kitesim_phones").
-		Select("id, phone_code, phone_number").
+		Select(phoneSelect).
 		Where("deleted_at IS NULL").Find(&phones).Error; err != nil {
 		return err
 	}
@@ -500,12 +507,15 @@ func (s *Service) validateICloudOnboardingPhoneExclusivityTx(
 		phoneClaims := claims[phoneID]
 		var phone iCloudOnboardingKitesimPhone
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Table("kitesim_phones").Select("id, phone_code, phone_number").
+			Table("kitesim_phones").Select(phoneSelect).
 			Where("id = ? AND deleted_at IS NULL", phoneID).Take(&phone).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				continue
 			}
 			return err
+		}
+		if hasBlacklisted && phone.SMSBlacklistedUntil != nil && phone.SMSBlacklistedUntil.After(s.now().UTC()) {
+			return fmt.Errorf("%w: %s", ErrICloudOnboardingPhoneBlacklisted, phoneClaims[0].phone)
 		}
 		allowed := make(map[uint]struct{}, len(phoneClaims))
 		for _, claim := range phoneClaims {
@@ -814,6 +824,9 @@ func (s *Service) AcceptAdminICloudOnboardingImport(
 			return nil, false, err
 		}
 		if errors.Is(err, ErrICloudOnboardingPhoneExclusive) {
+			return nil, false, err
+		}
+		if errors.Is(err, ErrICloudOnboardingPhoneBlacklisted) {
 			return nil, false, err
 		}
 		var existing iCloudOnboardingTaskModel

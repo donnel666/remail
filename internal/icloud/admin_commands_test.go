@@ -91,6 +91,33 @@ func TestApplyAdminICloudValidationResetsOnlyHealthScheduling(t *testing.T) {
 	}
 }
 
+func TestApplyAdminICloudValidationRejectsCookieMaintenance(t *testing.T) {
+	db := newAdminICloudCommandTestDB(t, "icloud-admin-validate-maintenance")
+	now := time.Date(2026, 8, 23, 12, 30, 0, 0, time.UTC)
+	createAdminICloudCommandResource(t, db, now, iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "maintenance@icloud.com",
+		Status: iCloudResourceNormal, ExpireAt: now.Add(time.Hour), CredentialRevision: 4,
+		ValidationGeneration: 5, NextValidationAt: &now,
+		WorkflowTaskKind: "refresh", OnboardingStatus: iCloudOnboardingProcessing,
+		WorkflowExpectedCredential: 4,
+	})
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	if _, err := service.ApplyAdminICloudCommand(
+		context.Background(), AdminICloudValidate, 1, 1, 99,
+		"validate-maintenance-1", "request-maintenance-1", "/v1/admin/icloud/resources/1/validation",
+	); !errors.Is(err, ErrICloudResourceStatus) {
+		t.Fatalf("validation during Cookie maintenance error = %v, want %v", err, ErrICloudResourceStatus)
+	}
+	var resource iCloudResourceModel
+	if err := db.First(&resource, 1).Error; err != nil {
+		t.Fatal(err)
+	}
+	if resource.Status != iCloudResourceNormal || resource.ValidationGeneration != 5 || resource.NextValidationAt == nil {
+		t.Fatalf("maintenance resource was mutated: %#v", resource)
+	}
+}
+
 func TestEditAdminICloudResourcePatchesSubmittedChannels(t *testing.T) {
 	db := newAdminICloudCommandTestDB(t, "icloud-admin-edit")
 	now := time.Date(2026, 8, 14, 9, 0, 0, 0, time.UTC)
@@ -277,7 +304,10 @@ func TestEditAdminICloudResourceChangesPermanentPhone(t *testing.T) {
 		ID: 1, ResourceType: "icloud", PrimaryEmail: "owner@icloud.com",
 		BoundPhoneNumber: "14165550001", BoundPhoneCountryCode: "US",
 		BoundPhoneSource: "manual", KitesimPhoneID: &phoneID,
-		Status: iCloudResourceNormal, ExpireAt: now.Add(time.Hour),
+		Status: iCloudResourceNormal, ExpireAt: now.Add(time.Hour), CredentialRevision: 4, ValidationGeneration: 5,
+		WorkflowTaskKind: "refresh", OnboardingStatus: iCloudOnboardingFailed,
+		WorkflowExpectedCredential: 4, WorkflowLastErrorCategory: "phone_blacklisted",
+		LastSafeError: "The permanently bound phone number is in the SMS blacklist (小黑屋).",
 	})
 	service := NewService(db, nil, nil)
 	service.smsPhones = adminEditPhoneRebinder{}
@@ -298,7 +328,10 @@ func TestEditAdminICloudResourceChangesPermanentPhone(t *testing.T) {
 		t.Fatal(err)
 	}
 	if resource.BoundPhoneNumber != "14165550002" || resource.BoundPhoneCountryCode != "US" ||
-		resource.BoundPhoneSource != "manual" || resource.KitesimPhoneID == nil || *resource.KitesimPhoneID != 8 {
+		resource.BoundPhoneSource != "manual" || resource.KitesimPhoneID == nil || *resource.KitesimPhoneID != 8 ||
+		resource.CredentialRevision != 5 || resource.ValidationGeneration != 6 || resource.NextValidationAt == nil ||
+		resource.WorkflowLastErrorCategory != "" || resource.LastSafeError != "" ||
+		iCloudCookiePhoneBlacklistedTerminallyFailed(resource) {
 		t.Fatalf("unexpected phone binding: %#v", resource)
 	}
 }
@@ -407,6 +440,12 @@ func TestEditAdminICloudResourceRejectsExclusivePhone(t *testing.T) {
 	}
 	if resource.KitesimPhoneID == nil || *resource.KitesimPhoneID != oldPhoneID || resource.BoundPhoneNumber != "14165550001" {
 		t.Fatalf("rejected edit changed resource: %+v", resource)
+	}
+}
+
+func TestNormalizeAdminICloudCommandErrorPreservesBlacklistedPhone(t *testing.T) {
+	if err := normalizeAdminICloudCommandError(ErrICloudOnboardingPhoneBlacklisted); !errors.Is(err, ErrICloudOnboardingPhoneBlacklisted) {
+		t.Fatalf("blacklisted phone error was normalized away: %v", err)
 	}
 }
 

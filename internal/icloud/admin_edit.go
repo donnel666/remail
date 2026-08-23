@@ -211,6 +211,9 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 				binding, err = rebinder.RebindICloudSMSPhoneTx(ctx, tx, bindingEmail, *command.PhoneNumber)
 			}
 			if err != nil {
+				if errors.Is(err, kitesim.ErrSMSPhoneBlacklisted) {
+					return ErrICloudOnboardingPhoneBlacklisted
+				}
 				if errors.Is(err, kitesim.ErrPhoneMissing) || errors.Is(err, kitesim.ErrInvalidInput) || errors.Is(err, kitesim.ErrSMSPhoneNumberAmbiguous) {
 					return ErrICloudResourceUpdate
 				}
@@ -235,13 +238,20 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 
 		updates := make(map[string]any)
 		nextCredentialRevision := resource.CredentialRevision
-		if credentialsSubmitted {
+		// The permanently bound phone is part of the maintenance credential
+		// snapshot. Changing it must invalidate a prior blacklist fence and any
+		// queued task that still targets the old phone.
+		if credentialsSubmitted || phoneBinding != nil {
 			nextCredentialRevision++
 			if nextCredentialRevision == 0 {
 				nextCredentialRevision = 1
 			}
 			updates["credential_revision"] = nextCredentialRevision
 			updates["credential_updated_at"] = now
+			if phoneBinding != nil && resource.WorkflowLastErrorCategory == "phone_blacklisted" {
+				updates["last_safe_error"] = ""
+				updates["last_error_category"] = ""
+			}
 		}
 		if imported != nil {
 			if accountIdentityChanged {
@@ -294,6 +304,18 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 			case resource.Status == iCloudResourceDisabled:
 				updates["next_validation_at"] = nil
 			case silentCredentialRefresh:
+				queuedGeneration = queueAdminICloudCredentialCheck(updates, resource, now)
+				queuedValidation = true
+			default:
+				queuedGeneration = queueAdminICloudValidation(updates, resource, now)
+				queuedValidation = true
+			}
+		}
+		if phoneBinding != nil && !credentialsSubmitted {
+			switch resource.Status {
+			case iCloudResourceDisabled:
+				updates["next_validation_at"] = nil
+			case iCloudResourceNormal:
 				queuedGeneration = queueAdminICloudCredentialCheck(updates, resource, now)
 				queuedValidation = true
 			default:

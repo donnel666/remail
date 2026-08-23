@@ -922,6 +922,158 @@ func TestICloudValidationLeaseRecoveryCountsExpiredAttempt(t *testing.T) {
 	}
 }
 
+func TestICloudValidationRecoversOrphanValidatingResource(t *testing.T) {
+	now := time.Date(2026, 8, 14, 11, 35, 0, 0, time.UTC)
+	db := openICloudValidationTestDB(t, "orphan-validating")
+	staleAt := now.Add(-iCloudValidationRunningLease - time.Minute)
+	if err := db.Create(&iCloudRootModel{ID: 1, Type: "icloud", OwnerUserID: 7, Version: 1, CreatedAt: staleAt, UpdatedAt: staleAt}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "orphan@example.com", Status: iCloudResourceValidating,
+		CredentialRevision: 1, ValidationGeneration: 1, UpdatedAt: staleAt, CreatedAt: staleAt,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	if err := service.recoverStaleICloudValidations(context.Background(), now); err != nil {
+		t.Fatal(err)
+	}
+	var resource iCloudResourceModel
+	if err := db.First(&resource, 1).Error; err != nil {
+		t.Fatal(err)
+	}
+	if resource.Status != iCloudResourcePending || resource.NextValidationAt == nil || !resource.NextValidationAt.Equal(now) || resource.NextProvisionAt != nil {
+		t.Fatalf("orphan validating resource was not recovered: %#v", resource)
+	}
+}
+
+func TestICloudValidationSkipsCookieMaintenance(t *testing.T) {
+	now := time.Date(2026, 8, 23, 10, 0, 0, 0, time.UTC)
+	for _, test := range []struct {
+		name             string
+		onboardingStatus string
+		category         string
+	}{
+		{name: "active", onboardingStatus: iCloudOnboardingProcessing},
+		{name: "blacklisted terminal", onboardingStatus: iCloudOnboardingFailed, category: "phone_blacklisted"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			db := openICloudValidationTestDB(t, "cookie-maintenance-"+strings.ReplaceAll(test.name, " ", "-"))
+			if err := db.Create(&iCloudRootModel{ID: 1, Type: "icloud", OwnerUserID: 7, Version: 1, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&iCloudResourceModel{
+				ID: 1, ResourceType: "icloud", PrimaryEmail: "maintenance@example.com", Status: iCloudResourceNormal,
+				CredentialRevision: 4, ValidationGeneration: 5, NextValidationAt: &now,
+				WorkflowTaskKind: "refresh", OnboardingStatus: test.onboardingStatus,
+				WorkflowExpectedCredential: 4, WorkflowLastErrorCategory: test.category,
+				CreatedAt: now, UpdatedAt: now,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			service := NewService(db, nil, nil)
+			service.now = func() time.Time { return now }
+			candidates, err := service.iCloudValidationCandidates(context.Background(), 10)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(candidates) != 0 {
+				t.Fatalf("maintenance resource was selected: %+v", candidates)
+			}
+			task := iCloudValidationTask{ResourceID: 1, OwnerUserID: 7, ValidationGeneration: 5, ExpectedCredentialRevision: 4}
+			_, claimed, err := service.markICloudValidationDispatched(context.Background(), task)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if claimed {
+				t.Fatal("maintenance resource was claimed after the candidate recheck")
+			}
+		})
+	}
+}
+
+func TestICloudValidationAllowsStaleCookieMaintenanceRevision(t *testing.T) {
+	now := time.Date(2026, 8, 23, 11, 0, 0, 0, time.UTC)
+	db := openICloudValidationTestDB(t, "cookie-maintenance-stale-revision")
+	if err := db.Create(&iCloudRootModel{ID: 1, Type: "icloud", OwnerUserID: 7, Version: 1, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "stale-maintenance@example.com", Status: iCloudResourceNormal,
+		CredentialRevision: 5, ValidationGeneration: 6, NextValidationAt: &now,
+		WorkflowTaskKind: "refresh", OnboardingStatus: iCloudOnboardingProcessing,
+		WorkflowExpectedCredential: 4, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	candidates, err := service.iCloudValidationCandidates(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 1 || candidates[0].ExpectedCredentialRevision != 5 {
+		t.Fatalf("stale maintenance blocked current credential validation: %#v", candidates)
+	}
+	resource := iCloudResourceModel{
+		WorkflowTaskKind: "refresh", OnboardingStatus: iCloudOnboardingProcessing,
+		WorkflowExpectedCredential: 4, CredentialRevision: 5,
+	}
+	if iCloudCookieMaintenanceBlocksValidation(&resource) {
+		t.Fatal("stale Cookie maintenance still blocked validation")
+	}
+}
+
+func TestICloudValidationReleaseRestoresValidatingResourceDuringCookieMaintenance(t *testing.T) {
+	now := time.Date(2026, 8, 23, 12, 45, 0, 0, time.UTC)
+	db := openICloudValidationTestDB(t, "release-cookie-maintenance")
+	nextProvisionAt := now.Add(time.Minute)
+	if err := db.Create(&iCloudRootModel{ID: 1, Type: "icloud", OwnerUserID: 7, Version: 1, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "maintenance@example.com", Status: iCloudResourceValidating,
+		CredentialRevision: 4, ValidationGeneration: 5, NextProvisionAt: &nextProvisionAt,
+		WorkflowTaskKind: "refresh", OnboardingStatus: iCloudOnboardingProcessing,
+		WorkflowExpectedCredential: 4, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	run := iCloudMaintenanceRunModel{
+		ID: 1, ResourceID: 1, ValidationGeneration: 5, Kind: iCloudMaintenanceValidation,
+		Status: iCloudMaintenanceRunning, Attempts: 1, MaxAttempts: iCloudValidationMaxFailures,
+		CredentialRevision: 4, QueuedAt: now, StartedAt: &now, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&run).Error; err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	err := service.releaseICloudValidation(context.Background(), iCloudValidationTask{
+		ResourceID: 1, OwnerUserID: 7, ValidationGeneration: 5, ExpectedCredentialRevision: 4,
+		MaintenanceRunID: run.ID, MaintenanceKind: iCloudMaintenanceValidation,
+	}, "validation worker stopped")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resource iCloudResourceModel
+	if err := db.First(&resource, 1).Error; err != nil {
+		t.Fatal(err)
+	}
+	if resource.Status != iCloudResourcePending || resource.NextValidationAt == nil || !resource.NextValidationAt.Equal(now) || resource.NextProvisionAt != nil {
+		t.Fatalf("validating resource was left owned by validation: %#v", resource)
+	}
+	var storedRun iCloudMaintenanceRunModel
+	if err := db.First(&storedRun, run.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if storedRun.Status != iCloudMaintenanceCanceled || storedRun.FinishedAt == nil {
+		t.Fatalf("validation run was not canceled: %#v", storedRun)
+	}
+}
+
 func openICloudValidationTestDB(t *testing.T, name string) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:icloud-validation-%s?mode=memory&cache=shared", name)), &gorm.Config{})

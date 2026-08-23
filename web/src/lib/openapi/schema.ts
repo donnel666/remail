@@ -8893,7 +8893,7 @@ export interface components {
             limit: number;
         };
         /** @enum {string} */
-        AdminKitesimPhoneStatus: "active" | "pending" | "activating" | "expired" | "refunded" | "unsynced" | "disabled" | "exclusive";
+        AdminKitesimPhoneStatus: "active" | "pending" | "activating" | "expired" | "refunded" | "unsynced" | "disabled" | "exclusive" | "blacklisted";
         /** @enum {string} */
         AdminKitesimSyncTaskStatus: "idle" | "queued" | "running" | "succeeded" | "failed";
         AdminKitesimBooleanFacet: {
@@ -8923,6 +8923,8 @@ export interface components {
             disabled: number;
             /** Format: int64 */
             exclusive: number;
+            /** Format: int64 */
+            blacklisted: number;
             autoRenew: components["schemas"]["AdminKitesimBooleanFacet"];
             tokenAvailable: components["schemas"]["AdminKitesimBooleanFacet"];
             syncHealthy: components["schemas"]["AdminKitesimBooleanFacet"];

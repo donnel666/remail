@@ -56,6 +56,7 @@
   "Inbox": "收件",
   "Unsynced": "未同步",
   "Exclusive": "独占中",
+  "Blacklisted": "小黑屋",
   "The selected phone number is exclusively assigned to an iCloud account below 750 aliases; choose another phone number.": "该手机号已被未满 750 个别名的 iCloud 账号独占，请更换手机号。",
   "Message content": "短信内容",
   "Order ID": "订单 ID",

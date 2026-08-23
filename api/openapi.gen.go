@@ -1024,14 +1024,15 @@ func (e AdminKitesimOperationStatus) Valid() bool {
 
 // Defines values for AdminKitesimPhoneStatus.
 const (
-	AdminKitesimPhoneStatusActivating AdminKitesimPhoneStatus = "activating"
-	AdminKitesimPhoneStatusActive     AdminKitesimPhoneStatus = "active"
-	AdminKitesimPhoneStatusDisabled   AdminKitesimPhoneStatus = "disabled"
-	AdminKitesimPhoneStatusExclusive  AdminKitesimPhoneStatus = "exclusive"
-	AdminKitesimPhoneStatusExpired    AdminKitesimPhoneStatus = "expired"
-	AdminKitesimPhoneStatusPending    AdminKitesimPhoneStatus = "pending"
-	AdminKitesimPhoneStatusRefunded   AdminKitesimPhoneStatus = "refunded"
-	AdminKitesimPhoneStatusUnsynced   AdminKitesimPhoneStatus = "unsynced"
+	AdminKitesimPhoneStatusActivating  AdminKitesimPhoneStatus = "activating"
+	AdminKitesimPhoneStatusActive      AdminKitesimPhoneStatus = "active"
+	AdminKitesimPhoneStatusBlacklisted AdminKitesimPhoneStatus = "blacklisted"
+	AdminKitesimPhoneStatusDisabled    AdminKitesimPhoneStatus = "disabled"
+	AdminKitesimPhoneStatusExclusive   AdminKitesimPhoneStatus = "exclusive"
+	AdminKitesimPhoneStatusExpired     AdminKitesimPhoneStatus = "expired"
+	AdminKitesimPhoneStatusPending     AdminKitesimPhoneStatus = "pending"
+	AdminKitesimPhoneStatusRefunded    AdminKitesimPhoneStatus = "refunded"
+	AdminKitesimPhoneStatusUnsynced    AdminKitesimPhoneStatus = "unsynced"
 )
 
 // Valid indicates whether the value is a known member of the AdminKitesimPhoneStatus enum.
@@ -1040,6 +1041,8 @@ func (e AdminKitesimPhoneStatus) Valid() bool {
 	case AdminKitesimPhoneStatusActivating:
 		return true
 	case AdminKitesimPhoneStatusActive:
+		return true
+	case AdminKitesimPhoneStatusBlacklisted:
 		return true
 	case AdminKitesimPhoneStatusDisabled:
 		return true
@@ -6352,6 +6355,7 @@ type AdminKitesimPhoneFacets struct {
 	Active         int64                    `json:"active"`
 	All            int64                    `json:"all"`
 	AutoRenew      AdminKitesimBooleanFacet `json:"autoRenew"`
+	Blacklisted    int64                    `json:"blacklisted"`
 	Disabled       int64                    `json:"disabled"`
 	Exclusive      int64                    `json:"exclusive"`
 	Expired        int64                    `json:"expired"`

@@ -28,6 +28,7 @@ const (
 	iCloudOnboardingStageDelayMinimum = 60 * time.Second
 	iCloudOnboardingStageDelayMaximum = 200 * time.Second
 	iCloudFamilyChildLimit            = 5
+	iCloudPhoneBlacklistedMessage     = "The permanently bound phone number is in the SMS blacklist (小黑屋)."
 )
 
 var appleSMSCodePattern = regexp.MustCompile(`(?:^|[^0-9])([0-9]{6})(?:[^0-9]|$)`)
@@ -337,6 +338,9 @@ func (s *Service) assignICloudOnboardingPhone(ctx context.Context, task *iCloudO
 		binding, err = s.smsPhones.BindICloudSMSPhone(ctx, task.PrimaryEmail, task.BoundPhoneNumber)
 	}
 	if err != nil {
+		if errors.Is(err, kitesim.ErrSMSPhoneBlacklisted) {
+			return s.failICloudOnboardingTask(ctx, task, "phone_blacklisted", iCloudPhoneBlacklistedMessage)
+		}
 		if errors.Is(err, kitesim.ErrSMSPhoneBindingConflict) || errors.Is(err, kitesim.ErrSMSPhoneExclusive) {
 			return s.failICloudOnboardingTask(ctx, task, "phone_binding_conflict", "The requested phone does not match this Apple ID's permanent phone binding.")
 		}
@@ -429,6 +433,8 @@ func (s *Service) checkICloudOnboardingSMSPhone(ctx context.Context, task *iClou
 		return false, s.failICloudOnboardingTask(ctx, task, "phone_binding_unavailable", "The permanently bound phone is disabled or unavailable in the eSIM phone pool.")
 	case errors.Is(err, kitesim.ErrPhoneMissing):
 		return false, s.failICloudOnboardingTask(ctx, task, "phone_not_in_pool", "The permanently bound phone is not available in the eSIM phone pool.")
+	case errors.Is(err, kitesim.ErrSMSPhoneBlacklisted):
+		return false, s.failICloudOnboardingTask(ctx, task, "phone_blacklisted", iCloudPhoneBlacklistedMessage)
 	}
 	if retryAt, ok := kitesim.SMSRetryAt(err); ok {
 		retryAt = iCloudOnboardingSMSRetryAt(retryAt, s.now().UTC())
@@ -460,6 +466,8 @@ func (s *Service) bindICloudOnboardingTrustedPhone(ctx context.Context, task *iC
 		return &binding, nil
 	}
 	switch {
+	case errors.Is(err, kitesim.ErrSMSPhoneBlacklisted):
+		return nil, s.failICloudOnboardingTask(ctx, task, "phone_blacklisted", iCloudPhoneBlacklistedMessage)
 	case errors.Is(err, kitesim.ErrSMSPhoneSuffixAmbiguous):
 		return nil, s.failICloudOnboardingTask(ctx, task, "phone_binding_ambiguous", "The Apple trusted phone suffix matches multiple eSIM pool numbers; import the explicit phone number.")
 	case errors.Is(err, kitesim.ErrPhoneMissing):
@@ -497,6 +505,8 @@ func (s *Service) sendICloudOnboardingSMS(ctx context.Context, task *iCloudOnboa
 		binding, err := s.smsPhones.BindICloudSMSPhone(ctx, task.PrimaryEmail, task.BoundPhoneNumber)
 		if err != nil {
 			switch {
+			case errors.Is(err, kitesim.ErrSMSPhoneBlacklisted):
+				return s.failICloudOnboardingTask(ctx, task, "phone_blacklisted", iCloudPhoneBlacklistedMessage)
 			case errors.Is(err, kitesim.ErrSMSPhoneBindingConflict):
 				return s.failICloudOnboardingTask(ctx, task, "phone_binding_conflict", "The SMS phone does not match this Apple ID's permanent phone binding.")
 			case errors.Is(err, kitesim.ErrPhoneMissing):
@@ -513,6 +523,9 @@ func (s *Service) sendICloudOnboardingSMS(ctx context.Context, task *iCloudOnboa
 		deadline := s.now().UTC().Add(iCloudOnboardingSMSDeadline)
 		reserved, err := s.smsPhones.ReserveSMSChallenge(ctx, binding.PhoneID, purpose, iCloudOnboardingSMSOwner(task), deadline)
 		if err != nil {
+			if errors.Is(err, kitesim.ErrSMSPhoneBlacklisted) {
+				return s.failICloudOnboardingTask(ctx, task, "phone_blacklisted", iCloudPhoneBlacklistedMessage)
+			}
 			if errors.Is(err, kitesim.ErrSMSPhoneBoundUnavailable) {
 				return s.failICloudOnboardingTask(ctx, task, "phone_binding_unavailable", "The permanently bound phone is disabled or unavailable in the eSIM phone pool.")
 			}
@@ -553,7 +566,16 @@ func (s *Service) sendICloudOnboardingSMS(ctx context.Context, task *iCloudOnboa
 		var appleErr *AppleOnboardingError
 		if reservation != nil && s.smsPhones != nil && errors.As(err, &appleErr) && appleErr.SendRejected {
 			if markErr := s.smsPhones.MarkSMSAttemptSendFailed(context.WithoutCancel(ctx), reservation.ID); markErr != nil {
+				if errors.Is(markErr, kitesim.ErrSMSPhoneBlacklisted) {
+					return s.failICloudOnboardingTask(ctx, task, "phone_blacklisted", iCloudPhoneBlacklistedMessage)
+				}
 				return ErrICloudOnboardingTemporary
+			}
+			// The send-failure counter may have crossed the blacklist threshold
+			// while finalizing this reservation. Recheck the phone before the
+			// normal cooldown retry path so a blacklisted number fails once.
+			if checkErr := s.smsPhones.CheckSMSPhoneAvailable(context.WithoutCancel(ctx), reservation.PhoneID); errors.Is(checkErr, kitesim.ErrSMSPhoneBlacklisted) {
+				return s.failICloudOnboardingTask(ctx, task, "phone_blacklisted", iCloudPhoneBlacklistedMessage)
 			}
 		}
 		if errors.As(err, &appleErr) && appleErr.SendRejected {

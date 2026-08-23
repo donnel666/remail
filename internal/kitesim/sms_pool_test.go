@@ -97,6 +97,47 @@ func TestBindICloudSMSPhoneBySuffixIsUniqueAndNeverAutoAllocates(t *testing.T) {
 	}
 }
 
+func TestICloudSMSBindingRejectsBlacklistedPhone(t *testing.T) {
+	service, db, clock := newSMSPoolTestService(t)
+	until := clock.Add(time.Hour)
+	if err := db.Model(&phoneModel{}).Where("phone_number = ?", "14165550001").Update("sms_blacklisted_until", until).Error; err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := service.BindICloudSMSPhone(ctx, "blocked@example.com", "14165550001"); !errors.Is(err, ErrSMSPhoneBlacklisted) {
+		t.Fatalf("explicit blacklisted binding error = %v", err)
+	}
+	if _, err := service.BindICloudSMSPhoneBySuffix(ctx, "blocked-suffix@example.com", "0001"); !errors.Is(err, ErrSMSPhoneBlacklisted) {
+		t.Fatalf("suffix blacklisted binding error = %v", err)
+	}
+	if err := service.CheckSMSPhoneAvailable(ctx, 1); !errors.Is(err, ErrSMSPhoneBlacklisted) {
+		t.Fatalf("blacklisted phone preflight error = %v", err)
+	}
+}
+
+func TestSMSBlacklistOverridesActiveChallenge(t *testing.T) {
+	service, db, clock := newSMSPoolTestService(t)
+	ctx := context.Background()
+	binding, err := service.BindICloudSMSPhone(ctx, "active-challenge@example.com", "14165550001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	expiresAt := clock.Add(time.Minute)
+	if _, err := service.ReserveSMSChallenge(ctx, binding.PhoneID, "apple_manage", "active-challenge", expiresAt); err != nil {
+		t.Fatal(err)
+	}
+	blacklistedUntil := clock.Add(time.Hour)
+	if err := db.Model(&phoneModel{}).Where("id = ?", binding.PhoneID).Update("sms_blacklisted_until", blacklistedUntil).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := service.CheckSMSPhoneAvailable(ctx, binding.PhoneID); !errors.Is(err, ErrSMSPhoneBlacklisted) {
+		t.Fatalf("blacklisted active challenge preflight error = %v", err)
+	}
+	if _, err := service.ReserveSMSChallenge(ctx, binding.PhoneID, "apple_manage", "active-challenge", expiresAt); !errors.Is(err, ErrSMSPhoneBlacklisted) {
+		t.Fatalf("blacklisted owner replay error = %v", err)
+	}
+}
+
 func TestBindICloudSMSPhoneBalancesAndRemainsPermanent(t *testing.T) {
 	service, db, _ := newSMSPoolTestService(t)
 	ctx := context.Background()

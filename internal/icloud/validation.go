@@ -56,6 +56,9 @@ func (s *Service) RequestAdminICloudValidation(ctx context.Context, operatorUser
 		if isICloudOnboardingFamilySharingWaitingResource(&resource) {
 			return ErrICloudResourceStatus
 		}
+		if iCloudCookieMaintenanceBlocksValidation(&resource) {
+			return ErrICloudResourceStatus
+		}
 		generation := resource.ValidationGeneration + 1
 		if generation == 0 {
 			generation = 1
@@ -113,7 +116,8 @@ func (s *Service) iCloudValidationResource(ctx context.Context, task iCloudValid
 	if resource.ValidationGeneration != task.ValidationGeneration || resource.CredentialRevision != task.ExpectedCredentialRevision ||
 		(task.PreserveResourceStatus && resource.Status != iCloudResourceNormal) ||
 		(!task.PreserveResourceStatus && resource.Status != iCloudResourceValidating) ||
-		isICloudOnboardingFamilySharingWaitingResource(&resource) {
+		isICloudOnboardingFamilySharingWaitingResource(&resource) ||
+		iCloudCookieMaintenanceBlocksValidation(&resource) {
 		return nil, false, nil
 	}
 	return &resource, true, nil
@@ -211,6 +215,12 @@ func (s *Service) recoverStaleICloudValidations(ctx context.Context, now time.Ti
 				(resource.Status != iCloudResourceNormal && resource.Status != iCloudResourceValidating) {
 				return finishICloudMaintenanceRunTx(ctx, tx, run.ID, iCloudMaintenanceCanceled, "Validation lease expired after the resource changed.", now)
 			}
+			if iCloudCookieMaintenanceBlocksValidation(&resource) {
+				if err := releaseICloudValidatingResourceForCookieMaintenanceTx(ctx, tx, &resource, now); err != nil {
+					return err
+				}
+				return finishICloudMaintenanceRunTx(ctx, tx, run.ID, iCloudMaintenanceCanceled, "Validation paused while Cookie maintenance is active.", now)
+			}
 			attempts := run.Attempts + 1
 			if run.MaxAttempts > 0 && attempts > run.MaxAttempts {
 				attempts = run.MaxAttempts
@@ -269,10 +279,38 @@ func (s *Service) recoverStaleICloudValidations(ctx context.Context, now time.Ti
 		return ErrICloudValidationTemp
 	}
 	for _, row := range orphaned {
-		if err := s.db.WithContext(ctx).Model(&iCloudResourceModel{}).Where("id = ? AND status = ?", row.ID, iCloudResourceValidating).Updates(map[string]any{
-			"status": iCloudResourcePending, "next_validation_at": now, "next_provision_at": nil,
-			"updated_at": now, "last_safe_error": "Validation lease expired; retrying session checks.",
-		}).Error; err != nil {
+		if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			var resource iCloudResourceModel
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&resource, row.ID).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return nil
+				}
+				return err
+			}
+			if resource.Status != iCloudResourceValidating || resource.UpdatedAt.After(now.Add(-iCloudValidationRunningLease)) {
+				return nil
+			}
+			if iCloudCookieMaintenanceBlocksValidation(&resource) {
+				return releaseICloudValidatingResourceForCookieMaintenanceTx(ctx, tx, &resource, now)
+			}
+			// The row lock and the timestamp recheck above establish the lease
+			// decision. Do not repeat the timestamp predicate here: precision
+			// differences can otherwise turn a successful recovery into a silent
+			// zero-row update and leave the resource stuck in validating.
+			result := tx.Model(&iCloudResourceModel{}).
+				Where("id = ? AND status = ?", row.ID, iCloudResourceValidating).
+				Updates(map[string]any{
+					"status": iCloudResourcePending, "next_validation_at": now, "next_provision_at": nil,
+					"updated_at": now, "last_safe_error": "Validation lease expired; retrying session checks.",
+				})
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return ErrICloudValidationTemp
+			}
+			return nil
+		}); err != nil {
 			return ErrICloudValidationTemp
 		}
 	}
@@ -288,7 +326,15 @@ func (s *Service) iCloudValidationCandidates(ctx context.Context, limit int) ([]
 		ValidationGeneration uint64 `gorm:"column:validation_generation"`
 		Status               string `gorm:"column:status"`
 	}
-	if err := s.db.WithContext(ctx).Table("icloud_resources AS ir").Select("ir.id, er.owner_user_id, ir.credential_revision, ir.validation_generation, ir.status").Joins("JOIN email_resources AS er ON er.id = ir.id AND er.type = ?", "icloud").Where("ir.status IN ? AND ir.next_validation_at IS NOT NULL AND ir.next_validation_at <= ? AND NOT (ir.task_kind = ? AND ir.onboarding_status = ? AND ir.stage = ?)", []string{iCloudResourcePending, iCloudResourceNormal}, now, "onboarding", iCloudOnboardingWaiting, iCloudOnboardingStageFamilySharing).Order("ir.id ASC").Limit(limit).Scan(&rows).Error; err != nil {
+	query := s.db.WithContext(ctx).Table("icloud_resources AS ir").
+		Select("ir.id, er.owner_user_id, ir.credential_revision, ir.validation_generation, ir.status").
+		Joins("JOIN email_resources AS er ON er.id = ir.id AND er.type = ?", "icloud").
+		Where("ir.status IN ? AND ir.next_validation_at IS NOT NULL AND ir.next_validation_at <= ?", []string{iCloudResourcePending, iCloudResourceNormal}, now).
+		Where("NOT (ir.task_kind = ? AND ir.onboarding_status = ? AND ir.stage = ?)", "onboarding", iCloudOnboardingWaiting, iCloudOnboardingStageFamilySharing).
+		Where("NOT (ir.task_kind IN ? AND ir.onboarding_status IN ? AND ir.expected_credential_revision = ir.credential_revision)", []string{"refresh", iCloudCookieRecoveryTaskKind}, []string{iCloudOnboardingProcessing, iCloudOnboardingWaiting}).
+		Where("NOT (ir.task_kind IN ? AND ir.onboarding_status = ? AND ir.last_error_category = ? AND ir.expected_credential_revision = ir.credential_revision)", []string{"refresh", iCloudCookieRecoveryTaskKind}, iCloudOnboardingFailed, "phone_blacklisted").
+		Order("ir.id ASC").Limit(limit)
+	if err := query.Scan(&rows).Error; err != nil {
 		return nil, ErrICloudValidationTemp
 	}
 	tasks := make([]iCloudValidationTask, 0, len(rows))
@@ -324,7 +370,7 @@ func (s *Service) markICloudValidationDispatched(ctx context.Context, task iClou
 			}
 			return err
 		}
-		if resource.CredentialRevision != task.ExpectedCredentialRevision || resource.ValidationGeneration != task.ValidationGeneration || resource.Status == iCloudResourceDisabled || resource.Status == iCloudResourceDeleted || resource.NextValidationAt == nil || resource.NextValidationAt.After(now) || isICloudOnboardingFamilySharingWaitingResource(&resource) {
+		if resource.CredentialRevision != task.ExpectedCredentialRevision || resource.ValidationGeneration != task.ValidationGeneration || resource.Status == iCloudResourceDisabled || resource.Status == iCloudResourceDeleted || resource.NextValidationAt == nil || resource.NextValidationAt.After(now) || isICloudOnboardingFamilySharingWaitingResource(&resource) || iCloudCookieMaintenanceBlocksValidation(&resource) {
 			return nil
 		}
 		task.PreserveResourceStatus = resource.Status == iCloudResourceNormal
@@ -396,6 +442,31 @@ func (s *Service) releaseICloudValidation(ctx context.Context, task iCloudValida
 	}
 	now := s.now().UTC()
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var resource iCloudResourceModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&resource, task.ResourceID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				if task.MaintenanceRunID > 0 && task.MaintenanceKind == iCloudMaintenanceValidation {
+					return finishICloudMaintenanceRunTx(ctx, tx, task.MaintenanceRunID, iCloudMaintenanceCanceled, "Validation was released after the resource was removed.", now)
+				}
+				return nil
+			}
+			return err
+		}
+		if resource.CredentialRevision != task.ExpectedCredentialRevision || resource.ValidationGeneration != task.ValidationGeneration {
+			if task.MaintenanceRunID > 0 && task.MaintenanceKind == iCloudMaintenanceValidation {
+				return finishICloudMaintenanceRunTx(ctx, tx, task.MaintenanceRunID, iCloudMaintenanceCanceled, "Validation was released because Cookie maintenance owns the session.", now)
+			}
+			return nil
+		}
+		if iCloudCookieMaintenanceBlocksValidation(&resource) {
+			if err := releaseICloudValidatingResourceForCookieMaintenanceTx(ctx, tx, &resource, now); err != nil {
+				return err
+			}
+			if task.MaintenanceRunID > 0 && task.MaintenanceKind == iCloudMaintenanceValidation {
+				return finishICloudMaintenanceRunTx(ctx, tx, task.MaintenanceRunID, iCloudMaintenanceCanceled, "Validation was released because Cookie maintenance owns the session.", now)
+			}
+			return nil
+		}
 		whereStatus := iCloudResourceValidating
 		updates := map[string]any{
 			"next_validation_at": now, "next_provision_at": nil,

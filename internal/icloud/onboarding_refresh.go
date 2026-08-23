@@ -51,6 +51,9 @@ func (s *Service) ensureICloudCookieRefreshTx(ctx context.Context, tx *gorm.DB, 
 	if resource.Status == iCloudResourceDeleted || resource.Status == iCloudResourceDisabled || strings.TrimSpace(resource.BoundPhoneNumber) == "" || resource.KitesimPhoneID == nil {
 		return false, nil
 	}
+	if iCloudCookieRefreshTerminallyFailed(resource) {
+		return false, nil
+	}
 	if !forceOldCookie {
 		var invalidChannels int64
 		if err := tx.Model(&iCloudResourceChannelModel{}).
@@ -59,11 +62,8 @@ func (s *Service) ensureICloudCookieRefreshTx(ctx context.Context, tx *gorm.DB, 
 			return false, err
 		}
 	}
-	var active int64
-	if err := tx.Model(&iCloudResourceModel{}).
-		Where("id = ? AND onboarding_status IN ?", resourceID, []string{iCloudOnboardingProcessing, iCloudOnboardingWaiting}).
-		Count(&active).Error; err != nil || active > 0 {
-		return false, err
+	if iCloudCookieMaintenanceWorkflowActive(resource) {
+		return false, nil
 	}
 	var credential iCloudResourceCredentialModel
 	if err := tx.First(&credential, resourceID).Error; err != nil {
@@ -126,8 +126,10 @@ func (s *Service) ensureICloudCookieRefreshTx(ctx context.Context, tx *gorm.DB, 
 	if forceOldCookie {
 		delete(updates, "last_safe_error")
 	}
+	prepareICloudCookieMaintenanceResource(resource, updates, now)
 	result := tx.Model(&iCloudResourceModel{}).
-		Where("id = ? AND onboarding_status NOT IN ?", resourceID, []string{iCloudOnboardingProcessing, iCloudOnboardingWaiting}).
+		Where("id = ? AND (onboarding_status NOT IN ? OR (task_kind IN ? AND expected_credential_revision <> credential_revision))",
+			resourceID, []string{iCloudOnboardingProcessing, iCloudOnboardingWaiting}, []string{"refresh", iCloudCookieRecoveryTaskKind}).
 		Updates(updates)
 	if result.Error != nil {
 		return false, result.Error
@@ -146,7 +148,8 @@ func isICloudOldCookieBackfill(task *iCloudOnboardingTaskModel) bool {
 // Cookie maintenance must not replace the resource's canonical safe error
 // with a transient workflow message.
 func omitICloudOldCookieSafeError(task *iCloudOnboardingTaskModel, updates map[string]any) {
-	if isICloudOldCookieBackfill(task) || isICloudCookieRecoveryTask(task) {
+	if (isICloudOldCookieBackfill(task) || isICloudCookieRecoveryTask(task)) &&
+		updates["last_error_category"] != "phone_blacklisted" {
 		delete(updates, "last_safe_error")
 	}
 }
@@ -160,6 +163,80 @@ func iCloudRefreshSnapshotMatches(resource iCloudResourceModel, task *iCloudOnbo
 	}
 	resourcePhone, taskPhone := onboardingPhoneDigits(resource.BoundPhoneNumber), onboardingPhoneDigits(task.BoundPhoneNumber)
 	return resourcePhone != "" && taskPhone != "" && sameICloudPhoneNumber(resourcePhone, taskPhone)
+}
+
+func iCloudCookieRefreshTerminallyFailed(resource iCloudResourceModel) bool {
+	return resource.WorkflowTaskKind == "refresh" &&
+		resource.OnboardingStatus == iCloudOnboardingFailed &&
+		resource.WorkflowExpectedCredential == resource.CredentialRevision &&
+		resource.WorkflowLastErrorCategory == "phone_blacklisted"
+}
+
+func iCloudCookiePhoneBlacklistedTerminallyFailed(resource iCloudResourceModel) bool {
+	if resource.WorkflowTaskKind != "refresh" && resource.WorkflowTaskKind != iCloudCookieRecoveryTaskKind {
+		return false
+	}
+	return resource.OnboardingStatus == iCloudOnboardingFailed &&
+		resource.WorkflowExpectedCredential == resource.CredentialRevision &&
+		resource.WorkflowLastErrorCategory == "phone_blacklisted"
+}
+
+// A stale maintenance snapshot may remain on the resource after credentials
+// change. It must not block the replacement task for the current revision;
+// onboarding workflows remain blocking regardless of their revision.
+func iCloudCookieMaintenanceWorkflowActive(resource iCloudResourceModel) bool {
+	if resource.OnboardingStatus != iCloudOnboardingProcessing && resource.OnboardingStatus != iCloudOnboardingWaiting {
+		return false
+	}
+	if resource.WorkflowTaskKind == "refresh" || resource.WorkflowTaskKind == iCloudCookieRecoveryTaskKind {
+		return resource.WorkflowExpectedCredential == resource.CredentialRevision
+	}
+	return true
+}
+
+// Cookie maintenance owns the session channels while it is active. A
+// terminal blacklist result also blocks validation until an operator changes
+// the phone or credentials; otherwise validation can erase the diagnostic and
+// immediately start alias traffic against the same invalid channel.
+func iCloudCookieMaintenanceBlocksValidation(resource *iCloudResourceModel) bool {
+	if resource == nil || (resource.WorkflowTaskKind != "refresh" && resource.WorkflowTaskKind != iCloudCookieRecoveryTaskKind) {
+		return false
+	}
+	if iCloudCookieMaintenanceWorkflowActive(*resource) {
+		return true
+	}
+	return iCloudCookiePhoneBlacklistedTerminallyFailed(*resource)
+}
+
+func prepareICloudCookieMaintenanceResource(resource iCloudResourceModel, updates map[string]any, now time.Time) {
+	if resource.Status != iCloudResourceValidating {
+		return
+	}
+	updates["status"] = iCloudResourcePending
+	updates["next_validation_at"] = now
+	updates["next_provision_at"] = nil
+}
+
+func releaseICloudValidatingResourceForCookieMaintenanceTx(ctx context.Context, tx *gorm.DB, resource *iCloudResourceModel, now time.Time) error {
+	if tx == nil || resource == nil || resource.Status != iCloudResourceValidating {
+		return nil
+	}
+	result := tx.WithContext(ctx).Model(&iCloudResourceModel{}).
+		Where("id = ? AND status = ? AND validation_generation = ? AND credential_revision = ?", resource.ID, iCloudResourceValidating, resource.ValidationGeneration, resource.CredentialRevision).
+		Updates(map[string]any{
+			"status": iCloudResourcePending, "next_validation_at": now, "next_provision_at": nil, "updated_at": now,
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrICloudValidationTemp
+	}
+	resource.Status = iCloudResourcePending
+	resource.NextValidationAt = &now
+	resource.NextProvisionAt = nil
+	resource.UpdatedAt = now
+	return nil
 }
 
 func (s *Service) activateAdminICloudResourceTx(

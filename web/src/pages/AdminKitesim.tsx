@@ -97,6 +97,7 @@ const STATUS_ORDER: AdminKitesimPhoneStatus[] = [
   "unsynced",
   "disabled",
   "exclusive",
+  "blacklisted",
 ];
 
 const STATUS_META: Record<
@@ -111,6 +112,7 @@ const STATUS_META: Record<
   unsynced: { color: "grey", label: "Unsynced" },
   disabled: { color: "grey", label: "Disabled" },
   exclusive: { color: "orange", label: "Exclusive" },
+  blacklisted: { color: "red", label: "Blacklisted" },
 };
 
 const SYNC_META: Record<
@@ -929,6 +931,7 @@ export default function AdminKitesim() {
       unsynced: 0,
       disabled: 0,
       exclusive: 0,
+      blacklisted: 0,
       autoRenew: emptyBoolean,
       tokenAvailable: emptyBoolean,
       syncHealthy: emptyBoolean,

@@ -350,7 +350,8 @@ func (s *Service) loadICloudValidationProvisionScope(ctx context.Context, expect
 	}
 	if resource.CredentialRevision != expected.CredentialRevision ||
 		(expected.Status == iCloudResourceNormal && resource.Status != iCloudResourceNormal) ||
-		(expected.Status != iCloudResourceNormal && resource.Status != iCloudResourceValidating) {
+		(expected.Status != iCloudResourceNormal && resource.Status != iCloudResourceValidating) ||
+		iCloudCookieMaintenanceBlocksValidation(&resource) {
 		return iCloudResourceModel{}, iCloudResourceChannelModel{}, errICloudValidationStale
 	}
 	var channel iCloudResourceChannelModel
@@ -396,10 +397,27 @@ func (s *Service) applyICloudChannelValidationResult(ctx context.Context, task i
 			}
 			return err
 		}
+		maintenanceBlocked := iCloudCookieMaintenanceBlocksValidation(&resource)
 		if resource.ValidationGeneration != task.ValidationGeneration ||
 			resource.CredentialRevision != task.ExpectedCredentialRevision ||
 			(task.PreserveResourceStatus && resource.Status != iCloudResourceNormal) ||
-			(!task.PreserveResourceStatus && resource.Status != iCloudResourceValidating) {
+			(!task.PreserveResourceStatus && resource.Status != iCloudResourceValidating) ||
+			maintenanceBlocked {
+			if maintenanceBlocked {
+				if resource.ValidationGeneration == task.ValidationGeneration && resource.CredentialRevision == task.ExpectedCredentialRevision {
+					if err := releaseICloudValidatingResourceForCookieMaintenanceTx(ctx, tx, &resource, now); err != nil {
+						return err
+					}
+				}
+				run, findErr := findICloudMaintenanceRunTx(ctx, tx, task)
+				if findErr != nil {
+					return findErr
+				}
+				if run != nil {
+					return finishICloudMaintenanceRunTx(ctx, tx, run.ID, iCloudMaintenanceCanceled, "Validation canceled because Cookie maintenance owns the session.", now)
+				}
+				return nil
+			}
 			return errICloudValidationStale
 		}
 		status := iCloudResourceNormal

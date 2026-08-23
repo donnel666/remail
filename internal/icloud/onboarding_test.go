@@ -230,6 +230,26 @@ func TestAcceptICloudOnboardingRejectsExclusivePhoneBeforeCreatingResource(t *te
 	}
 }
 
+func TestAcceptICloudOnboardingRejectsBlacklistedPhoneBeforeCreatingResource(t *testing.T) {
+	service, db, _, _ := newOnboardingStateTest(t)
+	if err := db.Exec("CREATE TABLE kitesim_phones (id INTEGER PRIMARY KEY, phone_code TEXT, phone_number TEXT, deleted_at DATETIME, sms_blacklisted_until DATETIME)").Error; err != nil {
+		t.Fatal(err)
+	}
+	until := service.now().Add(time.Hour)
+	if err := db.Exec("INSERT INTO kitesim_phones (id, phone_code, phone_number, sms_blacklisted_until) VALUES (?, ?, ?, ?)", 7, "1", "4155550001", until).Error; err != nil {
+		t.Fatal(err)
+	}
+	service.SetImportOwnerValidator(func(context.Context, uint) (bool, error) { return true, nil })
+	content := []byte("美国区----否----blocked@example.com----Secret2!----问题一?(a1)----问题二?(a2)----问题三?(a3)----2000-11-02----14155550001")
+	if _, _, err := service.AcceptAdminICloudOnboardingImport(context.Background(), 1, 1, content, service.now().Add(time.Hour), "blacklisted-phone-key", "request", "/test"); !errors.Is(err, ErrICloudOnboardingPhoneBlacklisted) {
+		t.Fatalf("blacklisted phone error = %v", err)
+	}
+	var count int64
+	if err := db.Model(&iCloudResourceModel{}).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("partial resource created: count=%d err=%v", count, err)
+	}
+}
+
 func TestSameICloudPhoneNumberAcceptsCountryCodeVariants(t *testing.T) {
 	for _, value := range []string{"+15488768536", "15488768536", "5488768536"} {
 		if !sameICloudPhoneNumber("15488768536", value) {
@@ -378,8 +398,10 @@ func (p *onboardingCountingPhone) BindICloudSMSPhoneBySuffix(ctx context.Context
 
 type onboardingSMSFailurePhone struct {
 	onboardingProvidedPhone
-	cooldown time.Time
-	failed   bool
+	cooldown              time.Time
+	failed                bool
+	blacklistAfterFailure bool
+	blacklisted           bool
 }
 
 type onboardingSMSCoolingPhone struct {
@@ -401,6 +423,14 @@ func (p *onboardingSMSFailurePhone) ReserveSMSChallenge(context.Context, uint, s
 
 func (p *onboardingSMSFailurePhone) MarkSMSAttemptSendFailed(context.Context, uint64) error {
 	p.failed = true
+	p.blacklisted = p.blacklistAfterFailure
+	return nil
+}
+
+func (p *onboardingSMSFailurePhone) CheckSMSPhoneAvailable(context.Context, uint) error {
+	if p.blacklisted {
+		return &kitesim.SMSPhoneUnavailableError{Reason: "phone number is blacklisted", Blacklisted: true}
+	}
 	return nil
 }
 
@@ -1469,6 +1499,27 @@ func TestICloudOnboardingProvidedPhoneUsesSMSPoolFailurePolicy(t *testing.T) {
 	processOnboardingStageForTest(t, service, db, task)
 	if task.Status != iCloudOnboardingWaiting || task.DispatchStatus != "pending" || task.Stage != "manage_prepare" || task.StageAttempts != 3 || task.NextAttemptAt == nil || !task.NextAttemptAt.Equal(cooldown) || !phone.failed || len(task.SessionPayload) != 0 || task.PendingSMSPurpose != "" {
 		t.Fatalf("SMS pool policy was bypassed: task=%+v markedFailed=%v", task, phone.failed)
+	}
+}
+
+func TestICloudOnboardingSendFailureBlacklistingStopsRetry(t *testing.T) {
+	service, db, task, _ := newOnboardingStateTest(t)
+	phone := &onboardingSMSFailurePhone{cooldown: service.now().UTC().Add(75 * time.Second), blacklistAfterFailure: true}
+	service.smsPhones = phone
+	service.onboardingApple = onboardingSendRejectedApple{}
+	if err := db.Model(task).Updates(map[string]any{
+		"stage": "sms_send", "bound_phone_source": "manual", "kitesim_phone_id": 7,
+		"pending_sms_purpose": appleSMSManageLogin, "stage_attempts": 2, "session_payload": []byte(`{"prepared":true}`),
+		"sms_poll_deadline": service.now().UTC().Add(2 * time.Minute),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(task, task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	processOnboardingStageForTest(t, service, db, task)
+	if task.Status != iCloudOnboardingFailed || task.DispatchStatus != "failed" || task.LastErrorCategory != "phone_blacklisted" || !phone.failed || task.NextAttemptAt != nil {
+		t.Fatalf("blacklisted SMS send was retried: task=%+v markedFailed=%v", task, phone.failed)
 	}
 }
 

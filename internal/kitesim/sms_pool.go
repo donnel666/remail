@@ -21,6 +21,7 @@ var (
 	ErrSMSPhoneNumberAmbiguous   = errors.New("kitesim: SMS phone number matches multiple active phones")
 	ErrSMSPhoneSuffixAmbiguous   = errors.New("kitesim: SMS phone suffix matches multiple active phones")
 	ErrSMSPhoneExclusive         = errors.New("kitesim: SMS phone is exclusively assigned")
+	ErrSMSPhoneBlacklisted       = errors.New("kitesim: SMS phone is in the blacklist")
 	ErrSMSReservationNotFound    = errors.New("kitesim: SMS reservation not found")
 	ErrSMSChallengeOwnerConflict = errors.New("kitesim: SMS challenge owner key conflict")
 	ErrSMSChallengeInactive      = errors.New("kitesim: SMS challenge is no longer active")
@@ -60,8 +61,9 @@ type SMSPhoneBinding struct {
 }
 
 type SMSPhoneUnavailableError struct {
-	RetryAt time.Time
-	Reason  string
+	RetryAt     time.Time
+	Reason      string
+	Blacklisted bool
 }
 
 func (e *SMSPhoneUnavailableError) Error() string {
@@ -72,6 +74,10 @@ func (e *SMSPhoneUnavailableError) Error() string {
 }
 
 func (e *SMSPhoneUnavailableError) Unwrap() error { return ErrSMSPhoneUnavailable }
+
+func (e *SMSPhoneUnavailableError) Is(target error) bool {
+	return e != nil && e.Blacklisted && target == ErrSMSPhoneBlacklisted
+}
 
 func SMSRetryAt(err error) (time.Time, bool) {
 	var unavailable *SMSPhoneUnavailableError
@@ -90,9 +96,10 @@ func (s *Service) BindICloudSMSPhone(ctx context.Context, email, requestedNumber
 		return SMSPhoneBinding{}, ErrInvalidInput
 	}
 	requestedDigits := phoneDigits(requestedNumber)
+	now := s.now().UTC().Truncate(time.Millisecond)
 	var binding SMSPhoneBinding
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		current, found, err := loadSMSBinding(tx, consumerKey)
+		current, found, err := loadSMSBinding(tx, consumerKey, now)
 		if err != nil {
 			return err
 		}
@@ -136,6 +143,9 @@ func (s *Service) BindICloudSMSPhone(ctx context.Context, email, requestedNumber
 		if err != nil {
 			return err
 		}
+		if smsPhoneBlacklisted(phone, now) {
+			return ErrSMSPhoneBlacklisted
+		}
 		if requestedDigits != "" {
 			usage, loadErr := loadICloudPhoneUsage(tx, consumerKey)
 			if loadErr != nil {
@@ -147,7 +157,7 @@ func (s *Service) BindICloudSMSPhone(ctx context.Context, email, requestedNumber
 		}
 		row := phoneBindingModel{PhoneID: phone.ID, ConsumerType: smsConsumerICloud, ConsumerKey: consumerKey, Source: source}
 		if err = tx.Create(&row).Error; err != nil {
-			if existing, found, loadErr := loadSMSBinding(tx, consumerKey); loadErr == nil && found {
+			if existing, found, loadErr := loadSMSBinding(tx, consumerKey, now); loadErr == nil && found {
 				if requestedDigits != "" && !samePhoneDigits(existing, requestedDigits) {
 					return ErrSMSPhoneBindingConflict
 				}
@@ -215,6 +225,7 @@ func (s *Service) rebindICloudSMSPhoneTx(ctx context.Context, tx *gorm.DB, email
 	if consumerKey == "" || requestedDigits == "" || (usePhoneID && phoneID == 0) {
 		return SMSPhoneBinding{}, ErrInvalidInput
 	}
+	now := s.now().UTC().Truncate(time.Millisecond)
 
 	var row phoneBindingModel
 	err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -227,7 +238,7 @@ func (s *Service) rebindICloudSMSPhoneTx(ctx context.Context, tx *gorm.DB, email
 
 	var phone phoneModel
 	if usePhoneID {
-		err := tx.WithContext(ctx).Select("id, phone_code, phone_number, country_code").
+		err := tx.WithContext(ctx).Select("id, phone_code, phone_number, country_code, sms_blacklisted_until").
 			Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("id = ? AND deleted_at IS NULL AND disabled_at IS NULL AND status = ?", phoneID, int(PhoneActive)).
 			Take(&phone).Error
@@ -236,6 +247,9 @@ func (s *Service) rebindICloudSMSPhoneTx(ctx context.Context, tx *gorm.DB, email
 		}
 		if err != nil {
 			return SMSPhoneBinding{}, err
+		}
+		if smsPhoneBlacklisted(phone, now) {
+			return SMSPhoneBinding{}, ErrSMSPhoneBlacklisted
 		}
 		if !samePhoneDigits(smsPhoneBinding(phone, "matched"), requestedDigits) {
 			return SMSPhoneBinding{}, ErrInvalidInput
@@ -263,7 +277,7 @@ func (s *Service) rebindICloudSMSPhoneTx(ctx context.Context, tx *gorm.DB, email
 		default:
 			return SMSPhoneBinding{}, ErrSMSPhoneNumberAmbiguous
 		}
-		err := tx.WithContext(ctx).Select("id, phone_code, phone_number, country_code").
+		err := tx.WithContext(ctx).Select("id, phone_code, phone_number, country_code, sms_blacklisted_until").
 			Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("id = ? AND deleted_at IS NULL AND disabled_at IS NULL AND status = ?", phone.ID, int(PhoneActive)).
 			Take(&phone).Error
@@ -273,6 +287,9 @@ func (s *Service) rebindICloudSMSPhoneTx(ctx context.Context, tx *gorm.DB, email
 		if err != nil {
 			return SMSPhoneBinding{}, err
 		}
+	}
+	if smsPhoneBlacklisted(phone, now) {
+		return SMSPhoneBinding{}, ErrSMSPhoneBlacklisted
 	}
 
 	if !found {
@@ -308,9 +325,10 @@ func (s *Service) BindICloudSMSPhoneBySuffix(ctx context.Context, email, lastDig
 	if consumerKey == "" {
 		return SMSPhoneBinding{}, ErrInvalidInput
 	}
+	now := s.now().UTC().Truncate(time.Millisecond)
 	var binding SMSPhoneBinding
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		current, found, err := loadSMSBinding(tx, consumerKey)
+		current, found, err := loadSMSBinding(tx, consumerKey, now)
 		if err != nil {
 			return err
 		}
@@ -345,6 +363,9 @@ func (s *Service) BindICloudSMSPhoneBySuffix(ctx context.Context, email, lastDig
 			return ErrSMSPhoneSuffixAmbiguous
 		}
 		phone := matches[0]
+		if smsPhoneBlacklisted(phone, now) {
+			return ErrSMSPhoneBlacklisted
+		}
 		usage, err := loadICloudPhoneUsage(tx, consumerKey)
 		if err != nil {
 			return err
@@ -354,7 +375,7 @@ func (s *Service) BindICloudSMSPhoneBySuffix(ctx context.Context, email, lastDig
 		}
 		row := phoneBindingModel{PhoneID: phone.ID, ConsumerType: smsConsumerICloud, ConsumerKey: consumerKey, Source: "matched"}
 		if err := tx.Create(&row).Error; err != nil {
-			if existing, found, loadErr := loadSMSBinding(tx, consumerKey); loadErr == nil && found {
+			if existing, found, loadErr := loadSMSBinding(tx, consumerKey, now); loadErr == nil && found {
 				if !strings.HasSuffix(phoneDigits(existing.PhoneNumber), suffix) {
 					return ErrSMSPhoneBindingConflict
 				}
@@ -369,19 +390,20 @@ func (s *Service) BindICloudSMSPhoneBySuffix(ctx context.Context, email, lastDig
 	return binding, err
 }
 
-func loadSMSBinding(tx *gorm.DB, consumerKey string) (SMSPhoneBinding, bool, error) {
+func loadSMSBinding(tx *gorm.DB, consumerKey string, now time.Time) (SMSPhoneBinding, bool, error) {
 	var row struct {
-		PhoneID     uint       `gorm:"column:phone_id"`
-		PhoneCode   string     `gorm:"column:phone_code"`
-		PhoneNumber string     `gorm:"column:phone_number"`
-		CountryCode string     `gorm:"column:country_code"`
-		Source      string     `gorm:"column:source"`
-		Status      int        `gorm:"column:status"`
-		DisabledAt  *time.Time `gorm:"column:disabled_at"`
-		DeletedAt   *time.Time `gorm:"column:deleted_at"`
+		PhoneID          uint       `gorm:"column:phone_id"`
+		PhoneCode        string     `gorm:"column:phone_code"`
+		PhoneNumber      string     `gorm:"column:phone_number"`
+		CountryCode      string     `gorm:"column:country_code"`
+		Source           string     `gorm:"column:source"`
+		Status           int        `gorm:"column:status"`
+		DisabledAt       *time.Time `gorm:"column:disabled_at"`
+		DeletedAt        *time.Time `gorm:"column:deleted_at"`
+		BlacklistedUntil *time.Time `gorm:"column:sms_blacklisted_until"`
 	}
 	err := tx.Table("kitesim_phone_bindings AS b").
-		Select("b.phone_id, p.phone_code, p.phone_number, p.country_code, b.source, p.status, p.disabled_at, p.deleted_at").
+		Select("b.phone_id, p.phone_code, p.phone_number, p.country_code, b.source, p.status, p.disabled_at, p.deleted_at, p.sms_blacklisted_until").
 		Joins("JOIN kitesim_phones AS p ON p.id = b.phone_id").
 		Where("b.consumer_type = ? AND b.consumer_key = ?", smsConsumerICloud, consumerKey).
 		Take(&row).Error
@@ -395,7 +417,14 @@ func loadSMSBinding(tx *gorm.DB, consumerKey string) (SMSPhoneBinding, bool, err
 	if row.DeletedAt != nil || row.DisabledAt != nil || PhoneStatus(row.Status) != PhoneActive {
 		return binding, true, ErrSMSPhoneBoundUnavailable
 	}
+	if row.BlacklistedUntil != nil && row.BlacklistedUntil.After(now) {
+		return binding, true, &SMSPhoneUnavailableError{RetryAt: *row.BlacklistedUntil, Reason: "phone number is blacklisted", Blacklisted: true}
+	}
 	return binding, true, nil
+}
+
+func smsPhoneBlacklisted(phone phoneModel, now time.Time) bool {
+	return phone.SMSBlacklistedUntil != nil && phone.SMSBlacklistedUntil.After(now)
 }
 
 type iCloudPhoneUsage struct {

@@ -807,6 +807,8 @@ func writeICloudError(c *gin.Context, err error) {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Invalid Apple account onboarding command.", "requestId": requestID})
 	case errors.Is(err, ErrICloudOnboardingPhoneExclusive):
 		c.JSON(http.StatusConflict, gin.H{"message": "The selected phone number is exclusively assigned to an iCloud account below 750 aliases; choose another phone number.", "requestId": requestID})
+	case errors.Is(err, ErrICloudOnboardingPhoneBlacklisted):
+		c.JSON(http.StatusConflict, gin.H{"message": "The selected phone number is currently in the SMS blacklist; choose another phone number.", "requestId": requestID})
 	case errors.Is(err, ErrICloudImportConflict):
 		c.JSON(http.StatusConflict, gin.H{"message": "Idempotency key was already used for a different command.", "requestId": requestID})
 	case errors.Is(err, ErrICloudOnboardingConflict):

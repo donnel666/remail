@@ -1237,6 +1237,80 @@ func TestICloudProvisionDispatcherDrainsAllInvalidChannels(t *testing.T) {
 	}
 }
 
+func TestICloudProvisionSkipsCookieMaintenance(t *testing.T) {
+	now := time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)
+	for _, test := range []struct {
+		name              string
+		taskKind          string
+		onboardingStatus  string
+		lastErrorCategory string
+		workflowRevision  uint64
+		wantDispatch      bool
+	}{
+		{name: "active refresh", taskKind: "refresh", onboardingStatus: iCloudOnboardingProcessing},
+		{name: "active recovery", taskKind: iCloudCookieRecoveryTaskKind, onboardingStatus: iCloudOnboardingWaiting},
+		{name: "blacklisted refresh", taskKind: "refresh", onboardingStatus: iCloudOnboardingFailed, lastErrorCategory: "phone_blacklisted"},
+		{name: "stale active refresh", taskKind: "refresh", onboardingStatus: iCloudOnboardingProcessing, workflowRevision: 3, wantDispatch: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			redisServer := miniredis.RunT(t)
+			queue := asynq.NewClient(asynq.RedisClientOpt{Addr: redisServer.Addr()})
+			inspector := asynq.NewInspector(asynq.RedisClientOpt{Addr: redisServer.Addr()})
+			t.Cleanup(func() {
+				_ = inspector.Close()
+				_ = queue.Close()
+			})
+			db, err := gorm.Open(sqlite.Open("file:icloud-provision-maintenance-"+strings.ReplaceAll(test.name, " ", "-")+"?mode=memory&cache=shared"), &gorm.Config{})
+			if err != nil {
+				t.Fatalf("open database: %v", err)
+			}
+			if err := db.AutoMigrate(&iCloudResourceModel{}, &iCloudResourceChannelModel{}, &iCloudMaintenanceRunModel{}); err != nil {
+				t.Fatalf("migrate database: %v", err)
+			}
+			workflowRevision := test.workflowRevision
+			if workflowRevision == 0 {
+				workflowRevision = 4
+			}
+			if err := db.Create(&iCloudResourceModel{
+				ID: 1, ResourceType: "icloud", PrimaryEmail: "maintenance@example.com", Status: iCloudResourceNormal,
+				ExpireAt: now.Add(time.Hour), CredentialRevision: 4, NextProvisionAt: &now,
+				WorkflowTaskKind: test.taskKind, OnboardingStatus: test.onboardingStatus,
+				WorkflowExpectedCredential: workflowRevision, WorkflowLastErrorCategory: test.lastErrorCategory,
+				CreatedAt: now, UpdatedAt: now,
+			}).Error; err != nil {
+				t.Fatalf("create resource: %v", err)
+			}
+			if err := db.Create(&iCloudResourceChannelModel{
+				ResourceID: 1, Kind: iCloudChannelWeb, Host: "p119-maildomainws.icloud.com", Cookie: "cookie",
+				SessionStatus: iCloudSessionValid, CreatedAt: now, UpdatedAt: now,
+			}).Error; err != nil {
+				t.Fatalf("create channel: %v", err)
+			}
+			service := NewService(db, queue, nil)
+			service.now = func() time.Time { return now }
+			if err := service.DispatchICloudProvisions(context.Background(), 10); err != nil {
+				t.Fatalf("dispatch provisioning: %v", err)
+			}
+			tasks, err := inspector.ListPendingTasks(platform.QueueBackgroundICloudValidation)
+			if err != nil && !errors.Is(err, asynq.ErrQueueNotFound) {
+				t.Fatalf("inspect provisioning queue: %v", err)
+			}
+			if test.wantDispatch {
+				if len(tasks) != 1 {
+					t.Fatalf("stale maintenance was not dispatched: tasks=%d", len(tasks))
+				}
+				return
+			}
+			if len(tasks) != 0 {
+				t.Fatalf("maintenance resource was dispatched: tasks=%d", len(tasks))
+			}
+			if _, _, claimed, err := service.claimICloudProvision(context.Background(), 1); err != nil || claimed {
+				t.Fatalf("maintenance resource was claimed: claimed=%t err=%v", claimed, err)
+			}
+		})
+	}
+}
+
 func TestICloudProvisionCreatesExpectedCookieMaintenanceTaskForInvalidChannel(t *testing.T) {
 	for _, test := range []struct {
 		name            string

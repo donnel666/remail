@@ -45,6 +45,8 @@ func (s *Service) DispatchICloudProvisions(ctx context.Context, limit int) error
 	err := s.db.WithContext(ctx).Table("icloud_resources AS ir").Distinct("ir.id").
 		Joins("JOIN icloud_resource_channels AS ch ON ch.resource_id = ir.id").
 		Where("ir.status = ? AND ir.next_provision_at IS NOT NULL AND ir.next_provision_at <= ?", iCloudResourceNormal, now).
+		Where("NOT (ir.task_kind IN ? AND ir.onboarding_status IN ? AND ir.expected_credential_revision = ir.credential_revision)", []string{"refresh", iCloudCookieRecoveryTaskKind}, []string{iCloudOnboardingProcessing, iCloudOnboardingWaiting}).
+		Where("NOT (ir.task_kind IN ? AND ir.onboarding_status = ? AND ir.last_error_category = ? AND ir.expected_credential_revision = ir.credential_revision)", []string{"refresh", iCloudCookieRecoveryTaskKind}, iCloudOnboardingFailed, "phone_blacklisted").
 		Order("ir.id ASC").Limit(limit).Pluck("ir.id", &resourceIDs).Error
 	if err != nil {
 		return ErrICloudValidationTemp
@@ -273,7 +275,7 @@ func (s *Service) claimICloudProvision(ctx context.Context, resourceID uint) (*i
 			}
 			return err
 		}
-		if scope.Resource.Status != iCloudResourceNormal || scope.Resource.NextProvisionAt == nil || scope.Resource.NextProvisionAt.After(now) {
+		if scope.Resource.Status != iCloudResourceNormal || scope.Resource.NextProvisionAt == nil || scope.Resource.NextProvisionAt.After(now) || iCloudCookieMaintenanceBlocksValidation(&scope.Resource) {
 			return nil
 		}
 		if err := tx.Order("CASE kind WHEN 'apple_account' THEN 0 ELSE 1 END").

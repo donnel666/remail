@@ -147,6 +147,9 @@ func (s *Service) ReserveSMSChallenge(ctx context.Context, phoneID uint, purpose
 		if phone.DeletedAt != nil || phone.DisabledAt != nil || PhoneStatus(phone.Status) != PhoneActive {
 			return smsInactivePhoneError(tx, phoneID)
 		}
+		if phone.SMSBlacklistedUntil != nil && phone.SMSBlacklistedUntil.After(now) {
+			return &SMSPhoneUnavailableError{RetryAt: *phone.SMSBlacklistedUntil, Reason: "phone number is blacklisted", Blacklisted: true}
+		}
 
 		if ownerKey != "" {
 			var existing smsChallengeModel
@@ -220,6 +223,9 @@ func (s *Service) ReserveSMSChallenge(ctx context.Context, phoneID uint, purpose
 }
 
 func availableSMSPhonePolicyTx(tx *gorm.DB, phone *phoneModel, now time.Time) (time.Time, uint8, error) {
+	if phone != nil && phone.SMSBlacklistedUntil != nil && phone.SMSBlacklistedUntil.After(now) {
+		return time.Time{}, 0, &SMSPhoneUnavailableError{RetryAt: *phone.SMSBlacklistedUntil, Reason: "phone number is blacklisted", Blacklisted: true}
+	}
 	var active smsChallengeModel
 	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("active_phone_id = ?", phone.ID).Take(&active).Error
 	if err == nil {
@@ -238,7 +244,7 @@ func availableSMSPhonePolicyTx(tx *gorm.DB, phone *phoneModel, now time.Time) (t
 func reserveSMSPhonePolicyTx(tx *gorm.DB, phone *phoneModel, now time.Time) (time.Time, uint8, error) {
 	if phone.SMSBlacklistedUntil != nil {
 		if phone.SMSBlacklistedUntil.After(now) {
-			return time.Time{}, 0, &SMSPhoneUnavailableError{RetryAt: *phone.SMSBlacklistedUntil, Reason: "phone number is blacklisted"}
+			return time.Time{}, 0, &SMSPhoneUnavailableError{RetryAt: *phone.SMSBlacklistedUntil, Reason: "phone number is blacklisted", Blacklisted: true}
 		}
 		if err := tx.Model(&phoneModel{}).Where("id = ?", phone.ID).Updates(map[string]any{
 			"sms_consecutive_failures": 0,
