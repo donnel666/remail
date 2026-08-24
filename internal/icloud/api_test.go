@@ -160,14 +160,12 @@ func TestAdminICloudOnboardingReadAndActionsRequireTaskRead(t *testing.T) {
 	}
 }
 
-func TestRetryAdminICloudOnboardingPostFamily(t *testing.T) {
+func TestConfirmAdminICloudOnboardingFamilySharing(t *testing.T) {
 	service, db, task, _ := newOnboardingStateTest(t)
-	primaryID := uint(88)
 	if err := db.Model(task).Updates(map[string]any{
-		"stage": "family_join_apply", "onboarding_status": iCloudOnboardingWaiting, "dispatch_status": "waiting",
-		"family_primary_resource_id": primaryID, "attempts": 5, "max_attempts": 5,
-		"session_payload":     []byte(`{"private":"api-secret-session"}`),
-		"last_error_category": "provider_unavailable", "last_safe_error": "Apple family state is uncertain.",
+		"stage": iCloudOnboardingStageFamilySharing, "onboarding_status": iCloudOnboardingWaiting, "dispatch_status": "waiting",
+		"family_invite_url": "https://setup.icloud.com/family/messages?inviteCode=test", "family_reservation_confirmed": true,
+		"session_payload": []byte(`{"private":"api-secret-session"}`),
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -184,16 +182,16 @@ func TestRetryAdminICloudOnboardingPostFamily(t *testing.T) {
 		}),
 		checker,
 	)
-	request := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/v1/admin/icloud/resources/onboarding-tasks/%d/retry", task.ID), nil)
-	request.Header.Set("Idempotency-Key", "retry-post-family")
+	request := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/v1/admin/icloud/resources/onboarding-tasks/%d/family-reset", task.ID), nil)
+	request.Header.Set("Idempotency-Key", "confirm-family-sharing")
 	request.AddCookie(&http.Cookie{Name: middleware.SessionCookieName, Value: "session"})
 	request.AddCookie(&http.Cookie{Name: middleware.CSRFCookieName, Value: "csrf"})
 	request.Header.Set(middleware.CSRFHeaderName, "csrf")
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"stage":"family_join_apply"`) ||
-		!strings.Contains(recorder.Body.String(), `"needsPostFamilyRecovery":false`) {
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"stage":"manage_prepare"`) ||
+		!strings.Contains(recorder.Body.String(), `"needsFamilyReset":false`) {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 	for _, forbidden := range []string{"Secret1!", "api-secret-session", "secretPayload", "sessionPayload"} {

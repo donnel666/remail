@@ -609,9 +609,6 @@ func (d *debugger) run(binding *kitesim.SMSPhoneBinding, config options) error {
 					return err
 				}
 				operation := icloud.AppleOnboardingPrepareFamily
-				if d.checkpoint != nil && d.checkpoint.Stage == "family_reconcile_prepare" {
-					operation = icloud.AppleOnboardingPrepareFamilyReconcile
-				}
 				if _, err := d.authWithRequest(icloud.AppleOnboardingRequest{
 					Operation: operation, FamilyInviteURL: d.input.FamilyInviteURL,
 				}, "family login", binding); err != nil {
@@ -621,12 +618,9 @@ func (d *debugger) run(binding *kitesim.SMSPhoneBinding, config options) error {
 					return err
 				}
 			}
-			joined, err := d.execute(icloud.AppleOnboardingRequest{Operation: icloud.AppleOnboardingJoinFamily})
+			_, err := d.execute(icloud.AppleOnboardingRequest{Operation: icloud.AppleOnboardingJoinFamily})
 			if err != nil {
 				return err
-			}
-			if joined.FamilyChannel == nil {
-				return errors.New("apple did not return a family session after joining")
 			}
 			if err := d.markCheckpoint(func(cp *accountCheckpoint) { cp.FamilyJoined = true; cp.Stage = "family_joined" }); err != nil {
 				return err
@@ -1117,8 +1111,11 @@ func (d *debugger) restartAt(stage string) error {
 	if d == nil || d.checkpoint == nil {
 		return errors.New("apple restart checkpoint is unavailable")
 	}
+	if stage == "family_reconcile_prepare" {
+		stage = "family_prepare"
+	}
 	switch stage {
-	case "icloud_prepare", "icloud_cookie_prepare", "family_prepare", "family_reconcile_prepare", "manage_prepare":
+	case "icloud_prepare", "icloud_cookie_prepare", "family_prepare", "manage_prepare":
 	default:
 		return fmt.Errorf("unsupported Apple restart stage %q", stage)
 	}
@@ -1139,8 +1136,6 @@ func (d *debugger) restartAt(stage string) error {
 		case "family_prepare":
 			cp.FamilyAuthenticated = false
 			cp.FamilyJoined = false
-		case "family_reconcile_prepare":
-			cp.FamilyAuthenticated = false
 		case "manage_prepare":
 			cp.ManageAuthenticated = false
 			cp.ManageReady = false
@@ -1377,7 +1372,7 @@ func appleRestartStage(purpose string) string {
 	case icloud.AppleSMSFamilyLogin:
 		return "family_prepare"
 	case icloud.AppleSMSFamilyReconcileLogin:
-		return "family_reconcile_prepare"
+		return "family_prepare"
 	case icloud.AppleSMSManageLogin:
 		return "manage_prepare"
 	default:

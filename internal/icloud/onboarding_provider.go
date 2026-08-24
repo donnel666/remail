@@ -241,7 +241,7 @@ func appleOnboardingOperationRestartStage(request AppleOnboardingRequest) string
 	case appleOnboardingPrepareFamily:
 		return "family_prepare"
 	case appleOnboardingPrepareFamilyReconcile, appleOnboardingJoinFamily:
-		return "family_reconcile_prepare"
+		return "family_prepare"
 	case appleOnboardingPrepareManage, appleOnboardingFetchManage, appleOnboardingAddForward,
 		appleOnboardingVerifyForward, appleOnboardingExport:
 		return "manage_prepare"

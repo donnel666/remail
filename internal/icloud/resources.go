@@ -322,11 +322,7 @@ func (s *Service) GetAdminICloudResource(ctx context.Context, resourceID uint) (
 	var onboarding iCloudOnboardingTaskModel
 	if err := s.db.WithContext(ctx).Where("task_kind = ? AND resource_id = ?", "onboarding", resourceID).Order("id DESC").Take(&onboarding).Error; err == nil {
 		view := iCloudOnboardingTaskView(onboarding)
-		views := []OnboardingTaskView{view}
-		if err := s.populateICloudOnboardingFamilyEmails(ctx, views); err != nil {
-			return nil, err
-		}
-		detail.OnboardingTask = &views[0]
+		detail.OnboardingTask = &view
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrICloudResourceQueryTemporary
 	}

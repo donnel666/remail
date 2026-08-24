@@ -332,7 +332,7 @@ func TestAppleRestartStageCoversEverySMSPurpose(t *testing.T) {
 		icloud.AppleSMSICloudCookieLogin:    "icloud_cookie_prepare",
 		icloud.AppleSMSPhoneEnrollment:      "icloud_prepare",
 		icloud.AppleSMSFamilyLogin:          "family_prepare",
-		icloud.AppleSMSFamilyReconcileLogin: "family_reconcile_prepare",
+		icloud.AppleSMSFamilyReconcileLogin: "family_prepare",
 		icloud.AppleSMSManageLogin:          "manage_prepare",
 	} {
 		if got := appleRestartStage(purpose); got != want {
