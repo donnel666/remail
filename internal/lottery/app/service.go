@@ -257,7 +257,12 @@ func (s *Service) drawSettling(ctx context.Context, lottery *lotterydomain.Lotte
 			if err := rankEntriesByHistory(entries, stats); err != nil {
 				return nil, nil, err
 			}
-			payouts, unusedAmount, err = allocateFixedCountsRanked(entries, lottery.TotalAmount, lottery.MinPayout, lottery.MaxPayout, lottery.TierWeights)
+			weights := lottery.TierWeights
+			if lottery.TriggeredBy == lotterydomain.TriggerTime &&
+				(len(entries) < weights.Normal+weights.Lucky) {
+				weights = fitEarlyDrawCounts(len(entries), lottery.TotalAmount, lottery.MinPayout, lottery.MaxPayout, weights)
+			}
+			payouts, unusedAmount, err = allocateFixedCountsRanked(entries, lottery.TotalAmount, lottery.MinPayout, lottery.MaxPayout, weights)
 		case legacyAlgorithmVersionV2:
 			payouts, unusedAmount, err = allocateLegacy(entries, lottery.TotalAmount, lottery.MinPayout, lottery.MaxPayout, lottery.TierWeights, true)
 		case legacyAlgorithmVersionV1:
@@ -370,7 +375,7 @@ func algorithmVersionForWeights(weights lotterydomain.TierWeights) string {
 
 func validateRules(req CreateRequest) (total, minPayout, maxPayout string, maxParticipants int, err error) {
 	req.LotteryType = normalizeLotteryType(req.LotteryType)
-	_, incrementDec, incrementErr := normalizedPoolIncrement(req)
+	_, _, incrementErr := normalizedPoolIncrement(req)
 	if incrementErr != nil {
 		err = incrementErr
 		return
@@ -404,81 +409,46 @@ func validateRules(req CreateRequest) (total, minPayout, maxPayout string, maxPa
 		return
 	}
 	totalUnits, totalErr := wholePointUnits(totalDec)
-	incrementUnits, incrementUnitsErr := wholePointUnits(incrementDec)
 	minUnits, minErr := wholePointUnits(minDec)
 	maxUnits, maxErr := wholePointUnits(maxDec)
-	if totalErr != nil || incrementUnitsErr != nil || minErr != nil || maxErr != nil || minUnits <= 0 || maxUnits <= minUnits {
+	if totalErr != nil || minErr != nil || maxErr != nil || minUnits <= 0 || maxUnits <= minUnits {
 		err = lotterydomain.ErrLotteryInvalidRules
 		return
 	}
 	maxParticipants = maxLotteryEntries
 	if req.ParticipantTarget != nil {
 		target := int64(*req.ParticipantTarget)
-		poolUnits := totalUnits
-		if req.LotteryType == lotterydomain.LotteryTypeGrowing {
-			var ok bool
-			poolUnits, ok = growingPoolUnits(totalUnits, incrementUnits, target)
-			if !ok || !poolUnitsWithinMoneyLimit(poolUnits) {
-				err = lotterydomain.ErrLotteryInvalidRules
-				return
-			}
-		}
-		if target > math.MaxInt64/minUnits || target*minUnits > poolUnits ||
-			target > math.MaxInt64/maxUnits || target*maxUnits < poolUnits {
+		if target > math.MaxInt64/minUnits || target*minUnits > totalUnits ||
+			target > math.MaxInt64/maxUnits || target*maxUnits < totalUnits {
 			// The target draw must be able to distribute the complete pool within
 			// the configured per-participant range.
 			err = lotterydomain.ErrLotteryInvalidRules
 			return
 		}
-		if fixedWeights {
-			if !fixedCountsFitPool(target, poolUnits, minUnits, maxUnits, req.TierWeights) {
-				err = lotterydomain.ErrLotteryInvalidRules
-				return
-			}
-			if req.DrawAt != nil && !fixedCountsFitEveryDrawCount(target, func(n int64) (int64, bool) {
-				if req.LotteryType == lotterydomain.LotteryTypeGrowing {
-					return growingPoolUnits(totalUnits, incrementUnits, n)
-				}
-				return totalUnits, true
-			}, minUnits, maxUnits, req.TierWeights) {
-				err = lotterydomain.ErrLotteryInvalidRules
-				return
-			}
+		if fixedWeights && !fixedCountsFitPool(target, totalUnits, minUnits, maxUnits, req.TierWeights) {
+			err = lotterydomain.ErrLotteryInvalidRules
+			return
 		}
 		maxParticipants = int(target)
 	} else {
-		if req.LotteryType == lotterydomain.LotteryTypeGrowing {
-			poolAtMax, ok := growingPoolUnits(totalUnits, incrementUnits, int64(maxParticipants))
-			if !ok {
-				err = lotterydomain.ErrLotteryInvalidRules
-				return
-			}
-			if !poolUnitsWithinMoneyLimit(poolAtMax) {
-				err = lotterydomain.ErrLotteryInvalidRules
-				return
-			}
-			if fixedWeights && !fixedCountsFitEveryDrawCount(int64(maxParticipants), func(n int64) (int64, bool) {
-				return growingPoolUnits(totalUnits, incrementUnits, n)
-			}, minUnits, maxUnits, req.TierWeights) {
-				err = lotterydomain.ErrLotteryInvalidRules
-				return
-			}
-			return money.Format(totalDec), money.Format(minDec), money.Format(maxDec), maxParticipants, nil
-		}
-		// A time-only activity has no user-supplied target, so cap entries at a
-		// count that can receive at least the configured minimum.
 		if totalUnits < minUnits {
 			err = lotterydomain.ErrLotteryInvalidRules
 			return
 		}
+		if req.LotteryType == lotterydomain.LotteryTypeGrowing {
+			// The starting pool is used for creation validation, but growing
+			// lotteries must keep accepting entries until their real draw condition.
+			return money.Format(totalDec), money.Format(minDec), money.Format(maxDec), maxParticipants, nil
+		}
+		// A time-only activity has no user-supplied target, so cap entries at a
+		// count that can receive at least the configured minimum.
 		fundable := totalUnits / minUnits
 		if fundable < int64(maxParticipants) {
 			maxParticipants = int(fundable)
 		}
 		if fixedWeights {
-			if !fixedCountsFitEveryDrawCount(int64(maxParticipants), func(int64) (int64, bool) {
-				return totalUnits, true
-			}, minUnits, maxUnits, req.TierWeights) {
+			if int64(req.TierWeights.Normal+req.TierWeights.Lucky) > int64(maxParticipants) ||
+				!fixedCountsCanFitAnyPool(int64(maxParticipants), totalUnits, minUnits, maxUnits, req.TierWeights) {
 				err = lotterydomain.ErrLotteryInvalidRules
 				return
 			}
@@ -512,18 +482,6 @@ func normalizedPoolIncrement(req CreateRequest) (string, decimal.Decimal, error)
 	return money.Format(increment), increment, nil
 }
 
-func growingPoolUnits(base, increment, participants int64) (int64, bool) {
-	if base <= 0 || increment < 0 || participants < 0 ||
-		participants != 0 && increment > math.MaxInt64/participants {
-		return 0, false
-	}
-	growth := increment * participants
-	if base > math.MaxInt64-growth {
-		return 0, false
-	}
-	return base + growth, true
-}
-
 func fixedCountsFitPool(n, total, minValue, maxValue int64, counts lotterydomain.TierWeights) bool {
 	if n <= 0 || minValue <= 0 || maxValue <= minValue || !counts.ValidFixedCounts() {
 		return false
@@ -550,25 +508,61 @@ func fixedCountsFitPool(n, total, minValue, maxValue int64, counts lotterydomain
 	return total <= base+normal*capacity
 }
 
-func fixedCountsFitEveryDrawCount(maxParticipants int64, poolAt func(int64) (int64, bool), minValue, maxValue int64, counts lotterydomain.TierWeights) bool {
-	if maxParticipants <= 0 || poolAt == nil {
-		return false
+// fitEarlyDrawCounts keeps a time-triggered fixed-count lottery settleable
+// when the clock wins before its participant target. Lucky seats are downgraded to
+// normal seats only as needed; the requested special-seat total is preserved
+// up to the number of entries actually present.
+func fitEarlyDrawCounts(n int, totalAmount, minPayout, maxPayout string, counts lotterydomain.TierWeights) lotterydomain.TierWeights {
+	if n <= 0 {
+		return counts
 	}
-	for n := int64(1); n <= maxParticipants; n++ {
-		pool, ok := poolAt(n)
-		if !ok || !poolUnitsWithinMoneyLimit(pool) || !fixedCountsFitPool(n, pool, minValue, maxValue, counts) {
-			return false
+	totalDec, totalErr := money.Parse(totalAmount)
+	minDec, minErr := money.Parse(minPayout)
+	maxDec, maxErr := money.Parse(maxPayout)
+	total, totalUnitsErr := wholePointUnits(totalDec)
+	minValue, minUnitsErr := wholePointUnits(minDec)
+	maxValue, maxUnitsErr := wholePointUnits(maxDec)
+	if totalErr != nil || minErr != nil || maxErr != nil || totalUnitsErr != nil || minUnitsErr != nil || maxUnitsErr != nil {
+		return counts
+	}
+	lucky := int64(counts.Lucky)
+	normal := int64(counts.Normal)
+	if lucky < 0 || normal < 0 {
+		return counts
+	}
+	if lucky > int64(n) {
+		lucky = int64(n)
+	}
+	special := lucky
+	if normal > int64(n)-special {
+		special = int64(n)
+	} else {
+		special += normal
+	}
+	for {
+		normal = special - lucky
+		candidate := lotterydomain.TierWeights{Normal: int(normal), Lucky: int(lucky)}
+		if fixedCountsFitPool(int64(n), total, minValue, maxValue, candidate) || lucky == 0 {
+			return candidate
 		}
+		lucky--
 	}
-	return true
 }
 
-func poolUnitsWithinMoneyLimit(units int64) bool {
-	if units <= 0 {
+func fixedCountsCanFitAnyPool(maxParticipants, total, minValue, maxValue int64, counts lotterydomain.TierWeights) bool {
+	minimumParticipants := int64(counts.Normal + counts.Lucky)
+	if minimumParticipants < 1 {
+		minimumParticipants = 1
+	}
+	if minimumParticipants > maxParticipants {
 		return false
 	}
-	_, err := money.Parse(wholePointsAmount(units))
-	return err == nil
+	for n := minimumParticipants; n <= maxParticipants; n++ {
+		if fixedCountsFitPool(n, total, minValue, maxValue, counts) {
+			return true
+		}
+	}
+	return false
 }
 
 func Allocate(entries []lotterydomain.Entry, totalAmount, minPayout, maxPayout string, weights lotterydomain.TierWeights) ([]lotterydomain.Payout, string, error) {
@@ -639,9 +633,6 @@ func allocateFixedCountsWithShuffle(entries []lotterydomain.Entry, totalAmount, 
 		return nil, "0.00", lotterydomain.ErrLotteryInsufficientParticipants
 	}
 	normalCapacity := capacity
-	if luckyCount < 0 || normalCount < 0 || luckyCount+normalCount > n {
-		return nil, "0.00", lotterydomain.ErrLotteryInsufficientParticipants
-	}
 	if normalCapacity <= 0 || normalCapacity > math.MaxInt64-minValue {
 		return nil, "0.00", lotterydomain.ErrLotteryInsufficientParticipants
 	}

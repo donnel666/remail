@@ -306,6 +306,38 @@ func TestDrawCancelsWhenFixedPoolCannotFitTheEntries(t *testing.T) {
 	require.Empty(t, repo.payouts)
 }
 
+func TestDrawAdjustsFixedCountsWhenTimeWinsEarly(t *testing.T) {
+	for _, lotteryType := range []lotterydomain.LotteryType{lotterydomain.LotteryTypeFixed, lotterydomain.LotteryTypeGrowing} {
+		t.Run(lotteryType.String(), func(t *testing.T) {
+			drawAt := time.Now().Add(time.Hour)
+			target := 10
+			repo := &weightedDrawRepoStub{
+				lottery: &lotterydomain.Lottery{
+					ID: 18, Status: lotterydomain.StatusSettling, LotteryType: lotteryType,
+					TriggeredBy: lotterydomain.TriggerTime, AlgorithmVersion: algorithmVersion,
+					TotalAmount: "12.00", MinPayout: "1.00", MaxPayout: "10.00",
+					TierWeights: lotterydomain.TierWeights{Normal: 5, Lucky: 5}, DrawAt: &drawAt, ParticipantTarget: &target,
+				},
+				entries: []lotterydomain.Entry{{LotteryID: 18, UserID: 1}, {LotteryID: 18, UserID: 2}},
+				stats:   map[uint]WinnerStats{},
+			}
+			service := NewService(repo, weightedDrawBillingStub{}, nil, nil, nil)
+			require.NoError(t, service.Draw(context.Background(), 18))
+			require.Equal(t, lotterydomain.StatusCompleted, repo.lottery.Status)
+			require.Len(t, repo.payouts, 2)
+			require.Equal(t, 1, countTier(repo.payouts, lotterydomain.TierLucky))
+			require.Equal(t, 1, countTier(repo.payouts, lotterydomain.TierNormal))
+			paid := decimal.Zero
+			for _, payout := range repo.payouts {
+				amount, parseErr := money.Parse(payout.Amount)
+				require.NoError(t, parseErr)
+				paid = paid.Add(amount)
+			}
+			require.True(t, paid.Equal(decimal.NewFromInt(12)))
+		})
+	}
+}
+
 func TestDrawRejectsGrowingPoolWhenConfiguredCountsCannotFit(t *testing.T) {
 	entries := make([]lotterydomain.Entry, 10)
 	for i := range entries {
@@ -706,14 +738,14 @@ func TestValidateRulesRejectsInfeasibleFixedPrizeCounts(t *testing.T) {
 	require.ErrorIs(t, err, lotterydomain.ErrLotteryInvalidRules)
 }
 
-func TestValidateRulesUsesGrowingPoolAtParticipantTarget(t *testing.T) {
+func TestValidateRulesUsesStartingPoolForGrowingLottery(t *testing.T) {
 	target := 10
 	_, _, _, capacity, err := validateRules(CreateRequest{
 		LotteryType:         lotterydomain.LotteryTypeGrowing,
-		TotalAmount:         "10000.00",
+		TotalAmount:         "40.00",
 		PoolIncrementAmount: "1000.00",
 		MinPayout:           "1.00",
-		MaxPayout:           "10000.00",
+		MaxPayout:           "20.00",
 		TierWeights:         lotterydomain.TierWeights{Normal: 1, Lucky: 1},
 		ParticipantTarget:   &target,
 	})
@@ -722,30 +754,29 @@ func TestValidateRulesUsesGrowingPoolAtParticipantTarget(t *testing.T) {
 
 	_, _, _, _, err = validateRules(CreateRequest{
 		LotteryType:         lotterydomain.LotteryTypeGrowing,
-		TotalAmount:         "10000.00",
+		TotalAmount:         "20.00",
 		PoolIncrementAmount: "1000.00",
 		MinPayout:           "1.00",
-		MaxPayout:           "1000.00",
+		MaxPayout:           "20.00",
 		TierWeights:         lotterydomain.TierWeights{Normal: 1, Lucky: 1},
 		ParticipantTarget:   &target,
 	})
 	require.ErrorIs(t, err, lotterydomain.ErrLotteryInvalidRules)
 }
 
-func TestGrowingTimeConditionRejectsEarlyInfeasibleDraw(t *testing.T) {
+func TestValidateRulesUsesStartingPoolForGrowingTimeLottery(t *testing.T) {
 	drawAt := time.Now().Add(time.Hour)
-	target := 10
-	_, _, _, _, err := validateRules(CreateRequest{
+	_, _, _, capacity, err := validateRules(CreateRequest{
 		LotteryType:         lotterydomain.LotteryTypeGrowing,
-		TotalAmount:         "10000.00",
+		TotalAmount:         "40.00",
 		PoolIncrementAmount: "1000.00",
 		MinPayout:           "1.00",
-		MaxPayout:           "10000.00",
+		MaxPayout:           "20.00",
 		TierWeights:         lotterydomain.TierWeights{Normal: 1, Lucky: 1},
 		DrawAt:              &drawAt,
-		ParticipantTarget:   &target,
 	})
-	require.ErrorIs(t, err, lotterydomain.ErrLotteryInvalidRules)
+	require.NoError(t, err)
+	require.Equal(t, 5000, capacity)
 }
 
 func TestGrowingAllocationKeepsConfiguredSpecialCounts(t *testing.T) {
