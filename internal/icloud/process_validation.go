@@ -26,6 +26,9 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 		return err
 	}
 	now := s.now().UTC()
+	if task.PreserveResourceStatus && resource.AliasCount >= iCloudMaxAliases {
+		return s.clearICloudMaintenanceAtAliasLimit(ctx, resource.ID, now)
+	}
 	var channels []iCloudResourceChannelModel
 	if err := s.db.WithContext(ctx).Order("CASE kind WHEN 'apple_account' THEN 0 ELSE 1 END").
 		Where("resource_id = ?", resource.ID).Find(&channels).Error; err != nil {
@@ -242,6 +245,9 @@ func (s *Service) processICloudCredentialCheck(ctx context.Context, task iCloudV
 			nextValidationAt = earlierICloudProvisionAt(nextValidationAt, now.Add(iCloudValidationRetryInterval))
 			continue
 		}
+		if currentResource.AliasCount >= iCloudMaxAliases {
+			return s.clearICloudMaintenanceAtAliasLimit(ctx, resource.ID, now)
+		}
 		if currentChannel.SessionStatus == iCloudSessionInvalid {
 			countFailure = true
 			lastSafeError = "iCloud channel session is invalid."
@@ -420,6 +426,9 @@ func (s *Service) applyICloudChannelValidationResult(ctx context.Context, task i
 			}
 			return errICloudValidationStale
 		}
+		if task.PreserveResourceStatus && resource.AliasCount >= iCloudMaxAliases {
+			return clearICloudMaintenanceAtAliasLimitTx(ctx, tx, resource.ID, now)
+		}
 		status := iCloudResourceNormal
 		if task.PreserveResourceStatus {
 			status = resource.Status
@@ -477,7 +486,7 @@ func (s *Service) applyICloudChannelValidationResult(ctx context.Context, task i
 			if selectedForwardTo != "" || credentialCheckSucceeded {
 				updates["last_valid_at"] = now
 			}
-			if resource.ExpireAt.After(now) && (!task.PreserveResourceStatus || credentialCheckSucceeded) && len(allowedDomains) > 0 {
+			if resource.ExpireAt.After(now) && resource.AliasCount < iCloudMaxAliases && (!task.PreserveResourceStatus || credentialCheckSucceeded) && len(allowedDomains) > 0 {
 				updates["next_provision_at"] = now
 			}
 			if resource.AccountRole == "primary" && (!task.PreserveResourceStatus || credentialCheckSucceeded) {

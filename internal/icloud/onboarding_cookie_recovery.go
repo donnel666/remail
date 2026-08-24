@@ -28,7 +28,7 @@ func (s *Service) ensureICloudCookieMaintenanceTx(ctx context.Context, tx *gorm.
 		}
 		return false, err
 	}
-	if resource.Status == iCloudResourceDeleted || resource.Status == iCloudResourceDisabled {
+	if resource.Status == iCloudResourceDeleted || resource.Status == iCloudResourceDisabled || resource.AliasCount >= iCloudMaxAliases {
 		return false, nil
 	}
 	if iCloudCookieMaintenanceWorkflowActive(resource) {
@@ -89,7 +89,7 @@ func (s *Service) ensureICloudCookieRecoveryTx(ctx context.Context, tx *gorm.DB,
 		}
 		return false, err
 	}
-	if resource.Status == iCloudResourceDeleted || resource.Status == iCloudResourceDisabled ||
+	if resource.Status == iCloudResourceDeleted || resource.Status == iCloudResourceDisabled || resource.AliasCount >= iCloudMaxAliases ||
 		strings.TrimSpace(resource.BoundPhoneNumber) == "" || resource.KitesimPhoneID == nil {
 		return false, nil
 	}
@@ -176,6 +176,7 @@ func (s *Service) preflightICloudCookieRecoveryTask(ctx context.Context, task *i
 		return false, s.failICloudOnboardingTask(ctx, task, "invalid_cookie_recovery_state", "Apple Account cookie recovery state is invalid.")
 	}
 	var locked iCloudOnboardingTaskModel
+	stoppedAtAliasLimit := false
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("id = ? AND generation = ? AND claim_token = ? AND dispatch_status = ? AND task_kind = ?", task.ID, task.Generation, task.ClaimToken, "running", iCloudCookieRecoveryTaskKind).
@@ -198,6 +199,12 @@ func (s *Service) preflightICloudCookieRecoveryTask(ctx context.Context, task *i
 		if !iCloudRefreshSnapshotMatches(resource, &locked) {
 			return errICloudRefreshStale
 		}
+		if resource.AliasCount >= iCloudMaxAliases {
+			if err := completeICloudCookieMaintenanceAtAliasLimitTx(ctx, tx, &locked, s.now().UTC().Truncate(time.Millisecond)); err != nil {
+				return err
+			}
+			stoppedAtAliasLimit = true
+		}
 		return nil
 	})
 	if errors.Is(err, errICloudRefreshStale) {
@@ -205,6 +212,10 @@ func (s *Service) preflightICloudCookieRecoveryTask(ctx context.Context, task *i
 	}
 	if err != nil {
 		return false, ErrICloudOnboardingTemporary
+	}
+	if stoppedAtAliasLimit {
+		s.cancelICloudOnboardingSMSChallenge(context.WithoutCancel(ctx), &locked)
+		return false, nil
 	}
 	*task = locked
 	return true, nil

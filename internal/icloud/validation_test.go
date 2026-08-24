@@ -356,17 +356,117 @@ func TestProcessICloudValidationCreationBlockPreservesExistingHealth(t *testing.
 			if err := db.First(&resource, 1).Error; err != nil {
 				t.Fatalf("read resource: %v", err)
 			}
-			var wantNextProvision *time.Time
-			if test.name == "full" {
-				wantNextProvision = &now
-			}
 			if resource.Status != iCloudResourceNormal || resource.ValidationFailures != 2 ||
 				resource.SelectedForwardTo != "mailbox@relay.example" || resource.NextValidationAt != nil ||
-				(resource.NextProvisionAt == nil) != (wantNextProvision == nil) ||
-				(resource.NextProvisionAt != nil && !resource.NextProvisionAt.Equal(*wantNextProvision)) {
+				resource.NextProvisionAt != nil {
 				t.Fatalf("creation block changed resource health: %#v", resource)
 			}
 		})
+	}
+}
+
+func TestProcessICloudCredentialValidationCancelsAtAliasLimit(t *testing.T) {
+	now := time.Date(2026, 8, 24, 15, 0, 0, 0, time.UTC)
+	lastCheckedAt := now.Add(-2 * time.Hour)
+	lastValidAt := now.Add(-time.Hour)
+	db := openICloudValidationTestDB(t, "credential-alias-limit")
+	if err := db.Create(&iCloudRootModel{ID: 1, Type: "icloud", OwnerUserID: 7, Version: 1, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "full@example.com", Status: iCloudResourceNormal, ForSale: true,
+		ExpireAt: now.Add(time.Hour), CredentialRevision: 4, ValidationGeneration: 5, ValidationFailures: 2,
+		AliasCount: iCloudMaxAliases, SelectedForwardTo: "mailbox@relay.example", LastSafeError: "existing resource error",
+		NextValidationAt: &now, NextProvisionAt: &now, LastCheckedAt: &lastCheckedAt, LastValidAt: &lastValidAt,
+		CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	channels := []iCloudResourceChannelModel{
+		{
+			ResourceID: 1, Kind: iCloudChannelAppleAccount, Host: "appleid.apple.com", Cookie: "expired", Scnt: "scnt",
+			SessionStatus: iCloudSessionInvalid, SessionFailures: 3, NextKeepaliveAt: &now,
+			LastCheckedAt: &lastCheckedAt, LastValidAt: &lastValidAt, CreatedAt: now, UpdatedAt: now,
+		},
+		{
+			ResourceID: 1, Kind: iCloudChannelWeb, Host: "p1-maildomainws.icloud.com", Cookie: "unchecked",
+			SessionStatus: iCloudSessionUnchecked, NextKeepaliveAt: &now,
+			LastCheckedAt: &lastCheckedAt, LastValidAt: &lastValidAt, CreatedAt: now, UpdatedAt: now,
+		},
+	}
+	if err := db.Create(&channels).Error; err != nil {
+		t.Fatal(err)
+	}
+	validationRun := iCloudMaintenanceRunModel{
+		ResourceID: 1, ValidationGeneration: 5, Kind: iCloudMaintenanceValidation,
+		Status: iCloudMaintenanceRunning, Attempts: 1, MaxAttempts: iCloudValidationMaxFailures,
+		CredentialRevision: 4, QueuedAt: now, StartedAt: &now, CreatedAt: now, UpdatedAt: now,
+	}
+	aliasRun := iCloudMaintenanceRunModel{
+		ResourceID: 1, ValidationGeneration: 1, Kind: iCloudMaintenanceAlias,
+		Status: iCloudMaintenanceRunning, Attempts: 1, MaxAttempts: 1,
+		CredentialRevision: 4, QueuedAt: now, StartedAt: &now, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&validationRun).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&aliasRun).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	service.apple = NewAppleAccountClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		t.Fatal("full resource must not call Apple Account")
+		return nil, nil
+	})})
+	service.hme = NewHMEClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		t.Fatal("full resource must not call legacy HME")
+		return nil, nil
+	})})
+	task := iCloudValidationTask{
+		ResourceID: 1, OwnerUserID: 7, ValidationGeneration: 5, ExpectedCredentialRevision: 4,
+		PreserveResourceStatus: true, MaintenanceRunID: validationRun.ID, MaintenanceKind: iCloudMaintenanceValidation,
+	}
+	if err := service.ProcessICloudValidation(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+
+	var resource iCloudResourceModel
+	if err := db.First(&resource, 1).Error; err != nil {
+		t.Fatal(err)
+	}
+	if resource.Status != iCloudResourceNormal || !resource.ForSale || resource.ValidationFailures != 2 ||
+		resource.LastSafeError != "existing resource error" || resource.SelectedForwardTo != "mailbox@relay.example" ||
+		resource.LastCheckedAt == nil || !resource.LastCheckedAt.Equal(lastCheckedAt) || resource.LastValidAt == nil || !resource.LastValidAt.Equal(lastValidAt) ||
+		resource.NextValidationAt != nil || resource.NextProvisionAt != nil {
+		t.Fatalf("full credential validation changed resource health: %#v", resource)
+	}
+	var storedChannels []iCloudResourceChannelModel
+	if err := db.Order("kind").Find(&storedChannels).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(storedChannels) != 2 || storedChannels[0].SessionStatus != iCloudSessionInvalid || storedChannels[0].SessionFailures != 3 ||
+		storedChannels[1].SessionStatus != iCloudSessionUnchecked {
+		t.Fatalf("full credential validation changed Cookie state: %#v", storedChannels)
+	}
+	for _, channel := range storedChannels {
+		if channel.NextKeepaliveAt != nil || channel.LastCheckedAt == nil || !channel.LastCheckedAt.Equal(lastCheckedAt) ||
+			channel.LastValidAt == nil || !channel.LastValidAt.Equal(lastValidAt) {
+			t.Fatalf("full credential validation changed Cookie timestamps: %#v", channel)
+		}
+	}
+	if err := db.First(&validationRun, validationRun.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if validationRun.Status != iCloudMaintenanceCanceled || validationRun.FinishedAt == nil {
+		t.Fatalf("full credential validation was not canceled: %#v", validationRun)
+	}
+	if err := db.First(&aliasRun, aliasRun.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if aliasRun.Status != iCloudMaintenanceRunning || aliasRun.FinishedAt != nil {
+		t.Fatalf("alias run was canceled with validation: %#v", aliasRun)
 	}
 }
 

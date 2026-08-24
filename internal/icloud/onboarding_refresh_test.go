@@ -127,6 +127,7 @@ func newICloudRefreshTestDB(t *testing.T) *gorm.DB {
 	}
 	if err := db.AutoMigrate(
 		&iCloudRootModel{}, &iCloudResourceModel{}, &iCloudResourceChannelModel{}, &iCloudResourceCredentialModel{},
+		&iCloudMaintenanceRunModel{},
 		&governanceinfra.OperationLogModel{}, &coreinfra.AdminResourceCommandReceiptModel{},
 	); err != nil {
 		t.Fatal(err)
@@ -186,6 +187,77 @@ func TestEnsureICloudCookieRefreshCreatesOnePermanentPhoneTask(t *testing.T) {
 	}
 	if len(tasks) != 1 || tasks[0].Stage != "icloud_prepare" || tasks[0].BoundPhoneNumber != resource.BoundPhoneNumber || tasks[0].ExpectedCredentialRevision != resource.CredentialRevision {
 		t.Fatalf("unexpected refresh tasks: %+v", tasks)
+	}
+}
+
+func TestICloudCookieMaintenanceSkipsFullResource(t *testing.T) {
+	now := time.Date(2026, 8, 24, 14, 0, 0, 0, time.UTC)
+	db := newICloudRefreshTestDB(t)
+	resource := seedICloudRefreshResource(t, db, now)
+	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", resource.ID).
+		Update("alias_count", iCloudMaxAliases).Error; err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	for _, forceOldCookie := range []bool{false, true} {
+		var created bool
+		if err := db.Transaction(func(tx *gorm.DB) error {
+			var err error
+			created, err = service.ensureICloudCookieMaintenanceTx(context.Background(), tx, resource.ID, forceOldCookie)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if created {
+			t.Fatalf("full resource created Cookie maintenance task (forceOldCookie=%t)", forceOldCookie)
+		}
+	}
+}
+
+func TestICloudCookieMaintenanceStopsQueuedTaskAtAliasLimit(t *testing.T) {
+	for _, taskKind := range []string{"refresh", iCloudCookieRecoveryTaskKind} {
+		t.Run(taskKind, func(t *testing.T) {
+			now := time.Date(2026, 8, 24, 14, 5, 0, 0, time.UTC)
+			db := newICloudRefreshTestDB(t)
+			resource := seedICloudRefreshResource(t, db, now)
+			if err := db.Model(&iCloudResourceChannelModel{}).Where("resource_id = ?", resource.ID).
+				Update("next_keepalive_at", now).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Model(&iCloudResourceModel{}).Where("id = ?", resource.ID).Updates(map[string]any{
+				"resource_id": resource.ID, "task_kind": taskKind, "alias_count": iCloudMaxAliases,
+				"onboarding_status": iCloudOnboardingProcessing, "stage": "manage_prepare", "dispatch_status": "pending",
+				"generation": uint64(1), "expected_credential_revision": resource.CredentialRevision,
+				"secret_payload": iCloudJSON([]byte(`{"password":"unused"}`)), "max_attempts": 5,
+				"next_validation_at": now, "next_provision_at": now, "last_safe_error": "existing resource error",
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			apple := &refreshCountingApple{}
+			service := NewService(db, nil, nil)
+			service.now = func() time.Time { return now }
+			service.onboardingApple = apple
+			if err := service.ProcessICloudOnboardingTask(context.Background(), iCloudOnboardingTask{TaskID: resource.ID, Generation: 1}); err != nil {
+				t.Fatal(err)
+			}
+			if apple.calls != 0 {
+				t.Fatalf("full resource called Apple %d times", apple.calls)
+			}
+			var stored iCloudResourceModel
+			if err := db.First(&stored, resource.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			if stored.OnboardingStatus != iCloudOnboardingCompleted || stored.WorkflowDispatchStatus != "succeeded" ||
+				stored.NextValidationAt != nil || stored.NextProvisionAt != nil || stored.LastSafeError != "existing resource error" {
+				t.Fatalf("full resource maintenance was not stopped cleanly: %+v", stored)
+			}
+			var scheduled int64
+			if err := db.Model(&iCloudResourceChannelModel{}).
+				Where("resource_id = ? AND next_keepalive_at IS NOT NULL", resource.ID).Count(&scheduled).Error; err != nil || scheduled != 0 {
+				t.Fatalf("full resource still has %d Cookie keepalives: %v", scheduled, err)
+			}
+		})
 	}
 }
 

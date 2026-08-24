@@ -71,6 +71,54 @@ func cancelActiveICloudMaintenanceRunsTx(ctx context.Context, tx *gorm.DB, resou
 	}).Error
 }
 
+func clearICloudMaintenanceAtAliasLimitTx(ctx context.Context, tx *gorm.DB, resourceID uint, now time.Time) error {
+	if tx == nil {
+		return ErrICloudValidationTemp
+	}
+	query := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Model(&iCloudResourceModel{}).
+		Where("alias_count >= ?", iCloudMaxAliases)
+	if resourceID > 0 {
+		query = query.Where("id = ?", resourceID)
+	} else {
+		query = query.Where("status = ?", iCloudResourceNormal).Where(`next_validation_at IS NOT NULL OR next_provision_at IS NOT NULL OR
+			EXISTS (SELECT 1 FROM icloud_resource_channels WHERE icloud_resource_channels.resource_id = icloud_resources.id AND next_keepalive_at IS NOT NULL) OR
+			EXISTS (SELECT 1 FROM icloud_maintenance_runs WHERE icloud_maintenance_runs.resource_id = icloud_resources.id AND kind = ? AND status IN ?)`,
+			iCloudMaintenanceValidation, []string{iCloudMaintenanceQueued, iCloudMaintenanceRunning})
+	}
+	var resourceIDs []uint
+	if err := query.Pluck("id", &resourceIDs).Error; err != nil || len(resourceIDs) == 0 {
+		return err
+	}
+	if err := tx.WithContext(ctx).Model(&iCloudResourceChannelModel{}).
+		Where("resource_id IN ? AND next_keepalive_at IS NOT NULL", resourceIDs).
+		Updates(map[string]any{"next_keepalive_at": nil, "updated_at": now}).Error; err != nil {
+		return err
+	}
+	if err := tx.WithContext(ctx).Model(&iCloudMaintenanceRunModel{}).
+		Where("resource_id IN ? AND kind = ? AND status IN ?", resourceIDs, iCloudMaintenanceValidation, []string{iCloudMaintenanceQueued, iCloudMaintenanceRunning}).
+		Updates(map[string]any{
+			"status": iCloudMaintenanceCanceled, "last_safe_error": "Validation canceled because the iCloud alias limit has been reached.",
+			"finished_at": now, "updated_at": now,
+		}).Error; err != nil {
+		return err
+	}
+	return tx.WithContext(ctx).Model(&iCloudResourceModel{}).
+		Where("id IN ? AND (next_validation_at IS NOT NULL OR next_provision_at IS NOT NULL)", resourceIDs).
+		Updates(map[string]any{"next_validation_at": nil, "next_provision_at": nil, "updated_at": now}).Error
+}
+
+func (s *Service) clearICloudMaintenanceAtAliasLimit(ctx context.Context, resourceID uint, now time.Time) error {
+	if s == nil || s.db == nil {
+		return ErrICloudValidationTemp
+	}
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return clearICloudMaintenanceAtAliasLimitTx(ctx, tx, resourceID, now)
+	}); err != nil {
+		return ErrICloudValidationTemp
+	}
+	return nil
+}
+
 func findICloudMaintenanceRunTx(ctx context.Context, tx *gorm.DB, task iCloudValidationTask) (*iCloudMaintenanceRunModel, error) {
 	var run iCloudMaintenanceRunModel
 	query := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"})

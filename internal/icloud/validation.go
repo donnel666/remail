@@ -153,6 +153,9 @@ func (s *Service) DispatchICloudValidations(ctx context.Context, limit int) erro
 		limit = iCloudValidationBatchLimit
 	}
 	now := s.now().UTC()
+	if err := s.clearICloudMaintenanceAtAliasLimit(ctx, 0, now); err != nil {
+		return err
+	}
 	if err := s.recoverStaleICloudValidations(ctx, now); err != nil {
 		return err
 	}
@@ -374,6 +377,9 @@ func (s *Service) markICloudValidationDispatched(ctx context.Context, task iClou
 			return nil
 		}
 		task.PreserveResourceStatus = resource.Status == iCloudResourceNormal
+		if task.PreserveResourceStatus && resource.AliasCount >= iCloudMaxAliases {
+			return clearICloudMaintenanceAtAliasLimitTx(ctx, tx, resource.ID, now)
+		}
 		run, err := ensureICloudValidationRunTx(ctx, tx, resource.ID, resource.ValidationGeneration, resource.CredentialRevision, now)
 		if err != nil {
 			return err

@@ -764,7 +764,7 @@ func TestICloudCookieKeepaliveUsesRuntimeSettingForBothChannels(t *testing.T) {
 	}
 }
 
-func TestICloudProvisionKeepsExpiredAndFullResourcesAliveWithoutCreating(t *testing.T) {
+func TestICloudProvisionKeepsExpiredResourceAliveAndStopsFullResource(t *testing.T) {
 	previous, existed := runtimeconfig.Snapshot()[runtimeconfig.ICloudCookieKeepaliveMinutesKey]
 	runtimeconfig.Set(runtimeconfig.ICloudCookieKeepaliveMinutesKey, "8")
 	t.Cleanup(func() {
@@ -792,7 +792,7 @@ func TestICloudProvisionKeepsExpiredAndFullResourcesAliveWithoutCreating(t *test
 	now := time.Date(2026, 8, 14, 10, 45, 0, 0, time.UTC)
 	resources := []iCloudResourceModel{
 		{ID: 1, ResourceType: "icloud", PrimaryEmail: "expired@example.com", Status: iCloudResourceNormal, ExpireAt: now.Add(-time.Minute), CredentialRevision: 1, NextProvisionAt: &now, CreatedAt: now, UpdatedAt: now},
-		{ID: 2, ResourceType: "icloud", PrimaryEmail: "full@example.com", Status: iCloudResourceNormal, ExpireAt: now.Add(time.Hour), AliasCount: iCloudMaxAliases, CredentialRevision: 1, NextProvisionAt: &now, CreatedAt: now, UpdatedAt: now},
+		{ID: 2, ResourceType: "icloud", PrimaryEmail: "full@example.com", Status: iCloudResourceNormal, ExpireAt: now.Add(time.Hour), AliasCount: iCloudMaxAliases, CredentialRevision: 1, ValidationGeneration: 1, NextValidationAt: &now, NextProvisionAt: &now, CreatedAt: now, UpdatedAt: now},
 	}
 	if err := db.Create(&resources).Error; err != nil {
 		t.Fatalf("create resources: %v", err)
@@ -807,6 +807,14 @@ func TestICloudProvisionKeepsExpiredAndFullResourcesAliveWithoutCreating(t *test
 	}
 	if err := db.Create(&channels).Error; err != nil {
 		t.Fatalf("create channels: %v", err)
+	}
+	validationRun := iCloudMaintenanceRunModel{
+		ResourceID: 2, ValidationGeneration: 1, Kind: iCloudMaintenanceValidation,
+		Status: iCloudMaintenanceQueued, MaxAttempts: iCloudValidationMaxFailures, CredentialRevision: 1,
+		QueuedAt: now, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&validationRun).Error; err != nil {
+		t.Fatalf("create validation run: %v", err)
 	}
 
 	paths := make([]string, 0, len(resources))
@@ -826,7 +834,7 @@ func TestICloudProvisionKeepsExpiredAndFullResourcesAliveWithoutCreating(t *test
 		t.Fatalf("dispatch keepalive-only resources: %v", err)
 	}
 	tasks, err := inspector.ListPendingTasks(platform.QueueBackgroundICloudValidation)
-	if err != nil || len(tasks) != len(resources) {
+	if err != nil || len(tasks) != 1 {
 		t.Fatalf("pending keepalive tasks=%d err=%v", len(tasks), err)
 	}
 	for _, pending := range tasks {
@@ -838,7 +846,7 @@ func TestICloudProvisionKeepsExpiredAndFullResourcesAliveWithoutCreating(t *test
 			t.Fatalf("process keepalive for resource %d: %v", task.ResourceID, err)
 		}
 	}
-	if len(paths) != 2*len(resources) {
+	if len(paths) != 2 {
 		t.Fatalf("keepalive request paths = %#v", paths)
 	}
 	for index := 0; index < len(paths); index += 2 {
@@ -846,15 +854,91 @@ func TestICloudProvisionKeepsExpiredAndFullResourcesAliveWithoutCreating(t *test
 			t.Fatalf("keepalive sequence = %#v", paths)
 		}
 	}
-	for _, expected := range resources {
-		var resource iCloudResourceModel
-		if err := db.First(&resource, expected.ID).Error; err != nil {
-			t.Fatalf("read resource %d: %v", expected.ID, err)
-		}
-		wantNext := now.Add(8 * time.Minute)
-		if resource.NextProvisionAt == nil || !resource.NextProvisionAt.Equal(wantNext) || resource.SelectedForwardTo != "mailbox@relay.example" {
-			t.Fatalf("keepalive-only resource %d = %#v, want next %v", resource.ID, resource, wantNext)
-		}
+	var expired, full iCloudResourceModel
+	if err := db.First(&expired, 1).Error; err != nil {
+		t.Fatal(err)
+	}
+	wantNext := now.Add(8 * time.Minute)
+	if expired.NextProvisionAt == nil || !expired.NextProvisionAt.Equal(wantNext) || expired.SelectedForwardTo != "mailbox@relay.example" {
+		t.Fatalf("expired resource = %#v, want next %v", expired, wantNext)
+	}
+	if err := db.First(&full, 2).Error; err != nil {
+		t.Fatal(err)
+	}
+	if full.NextValidationAt != nil || full.NextProvisionAt != nil {
+		t.Fatalf("full resource still has provisioning scheduled: %#v", full)
+	}
+	var fullChannel iCloudResourceChannelModel
+	if err := db.Where("resource_id = ?", full.ID).First(&fullChannel).Error; err != nil {
+		t.Fatal(err)
+	}
+	if fullChannel.NextKeepaliveAt != nil {
+		t.Fatalf("full resource still has Cookie keepalive scheduled: %#v", fullChannel)
+	}
+	if err := db.First(&validationRun, validationRun.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if validationRun.Status != iCloudMaintenanceCanceled || validationRun.FinishedAt == nil {
+		t.Fatalf("full resource validation run was not canceled: %#v", validationRun)
+	}
+}
+
+func TestFinishICloudProvisionCancelsValidationAtAliasLimit(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:icloud-provision-finish-alias-limit?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&iCloudResourceModel{}, &iCloudResourceChannelModel{}, &iCloudMaintenanceRunModel{}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 24, 15, 10, 0, 0, time.UTC)
+	resource := iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "full@example.com", Status: iCloudResourceNormal,
+		AliasCount: iCloudMaxAliases, CredentialRevision: 1, ValidationGeneration: 1,
+		NextValidationAt: &now, NextProvisionAt: &now, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&resource).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&iCloudResourceChannelModel{
+		ResourceID: 1, Kind: iCloudChannelAppleAccount, SessionStatus: iCloudSessionInvalid,
+		NextKeepaliveAt: &now, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	run := iCloudMaintenanceRunModel{
+		ResourceID: 1, ValidationGeneration: 1, Kind: iCloudMaintenanceValidation,
+		Status: iCloudMaintenanceQueued, MaxAttempts: iCloudValidationMaxFailures, CredentialRevision: 1,
+		QueuedAt: now, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&run).Error; err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	created, err := service.finishICloudProvision(context.Background(), resource, now.Add(time.Hour), now)
+	if err != nil || created {
+		t.Fatalf("finish full provision created maintenance=%t err=%v", created, err)
+	}
+	var stored iCloudResourceModel
+	if err := db.First(&stored, 1).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.NextValidationAt != nil || stored.NextProvisionAt != nil {
+		t.Fatalf("full resource remained scheduled: %#v", stored)
+	}
+	var channel iCloudResourceChannelModel
+	if err := db.Where("resource_id = ?", 1).First(&channel).Error; err != nil {
+		t.Fatal(err)
+	}
+	if channel.NextKeepaliveAt != nil || channel.SessionStatus != iCloudSessionInvalid {
+		t.Fatalf("full resource Cookie state changed incorrectly: %#v", channel)
+	}
+	if err := db.First(&run, run.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != iCloudMaintenanceCanceled || run.FinishedAt == nil {
+		t.Fatalf("queued validation was not canceled: %#v", run)
 	}
 }
 

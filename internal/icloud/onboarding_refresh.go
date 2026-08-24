@@ -48,7 +48,7 @@ func (s *Service) ensureICloudCookieRefreshTx(ctx context.Context, tx *gorm.DB, 
 		}
 		return false, err
 	}
-	if resource.Status == iCloudResourceDeleted || resource.Status == iCloudResourceDisabled || strings.TrimSpace(resource.BoundPhoneNumber) == "" || resource.KitesimPhoneID == nil {
+	if resource.Status == iCloudResourceDeleted || resource.Status == iCloudResourceDisabled || resource.AliasCount >= iCloudMaxAliases || strings.TrimSpace(resource.BoundPhoneNumber) == "" || resource.KitesimPhoneID == nil {
 		return false, nil
 	}
 	if iCloudCookieRefreshTerminallyFailed(resource) {
@@ -290,6 +290,28 @@ func (s *Service) activateAdminICloudResourceTx(
 	return adminICloudMutationResult(root, resource), true, nil
 }
 
+func completeICloudCookieMaintenanceAtAliasLimitTx(ctx context.Context, tx *gorm.DB, task *iCloudOnboardingTaskModel, now time.Time) error {
+	if tx == nil || task == nil || task.ResourceID == nil {
+		return errICloudRefreshStale
+	}
+	result := tx.WithContext(ctx).Model(&iCloudOnboardingTaskModel{}).
+		Where("id = ? AND generation = ? AND claim_token = ? AND dispatch_status = ? AND task_kind = ?", task.ID, task.Generation, task.ClaimToken, "running", task.TaskKind).
+		Updates(map[string]any{
+			"onboarding_status": iCloudOnboardingCompleted, "stage": "completed", "dispatch_status": "succeeded",
+			"secret_payload": nil, "session_payload": nil, "manual_verification_code": "", "pending_sms_purpose": "",
+			"sms_sent_at": nil, "sms_poll_deadline": nil, "forward_preparation_id": nil, "claim_token": "",
+			"next_attempt_at": nil, "next_validation_at": nil, "next_provision_at": nil,
+			"last_error_category": "", "finished_at": now, "updated_at": now,
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return errICloudRefreshStale
+	}
+	return clearICloudMaintenanceAtAliasLimitTx(ctx, tx, *task.ResourceID, now)
+}
+
 func (s *Service) preflightICloudRefreshTask(ctx context.Context, task *iCloudOnboardingTaskModel) (bool, error) {
 	if task == nil || task.TaskKind != "refresh" {
 		return true, nil
@@ -298,6 +320,7 @@ func (s *Service) preflightICloudRefreshTask(ctx context.Context, task *iCloudOn
 		return false, s.failICloudOnboardingTask(ctx, task, "invalid_refresh_state", "Apple session refresh state is invalid.")
 	}
 	var locked iCloudOnboardingTaskModel
+	stoppedAtAliasLimit := false
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("id = ? AND generation = ? AND claim_token = ? AND dispatch_status = ? AND task_kind = ?", task.ID, task.Generation, task.ClaimToken, "running", "refresh").
@@ -320,6 +343,12 @@ func (s *Service) preflightICloudRefreshTask(ctx context.Context, task *iCloudOn
 		if !iCloudRefreshSnapshotMatches(resource, &locked) {
 			return errICloudRefreshStale
 		}
+		if resource.AliasCount >= iCloudMaxAliases {
+			if err := completeICloudCookieMaintenanceAtAliasLimitTx(ctx, tx, &locked, s.now().UTC().Truncate(time.Millisecond)); err != nil {
+				return err
+			}
+			stoppedAtAliasLimit = true
+		}
 		return nil
 	})
 	if errors.Is(err, errICloudRefreshStale) {
@@ -327,6 +356,10 @@ func (s *Service) preflightICloudRefreshTask(ctx context.Context, task *iCloudOn
 	}
 	if err != nil {
 		return false, ErrICloudOnboardingTemporary
+	}
+	if stoppedAtAliasLimit {
+		s.cancelICloudOnboardingSMSChallenge(context.WithoutCancel(ctx), &locked)
+		return false, nil
 	}
 	*task = locked
 	return true, nil
