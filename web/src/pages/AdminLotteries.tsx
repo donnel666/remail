@@ -235,6 +235,7 @@ function LotteryCreateModal({
   visible: boolean;
 }) {
   const { t } = useTranslation();
+  const isMobile = useIsMobile();
   const [form, setForm] = useState<FormState>(initialForm);
   const [submitting, setSubmitting] = useState(false);
   const publishKeyRef = useRef<string | null>(null);
@@ -379,6 +380,10 @@ function LotteryCreateModal({
 
   return (
     <Modal
+      bodyStyle={{
+        maxHeight: "min(720px, calc(100vh - 152px))",
+        overflowY: "auto",
+      }}
       cancelText={t("Cancel")}
       centered
       confirmLoading={submitting}
@@ -466,10 +471,16 @@ function LotteryCreateModal({
           <label className="block">
             {fieldLabel(t("Draw time"))}
             <DatePicker
+              dropdownStyle={{
+                maxHeight: "calc(100vh - 24px)",
+                overflowY: "auto",
+              }}
               format="yyyy-MM-dd HH:mm:ss"
+              getPopupContainer={() => document.body}
               onChange={(value) =>
                 setField("drawAt", value instanceof Date ? value : null)
               }
+              position={isMobile ? "topRight" : "bottomLeft"}
               showClear
               style={{ width: "100%" }}
               type="dateTime"
