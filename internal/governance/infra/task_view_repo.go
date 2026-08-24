@@ -548,8 +548,7 @@ SELECT
             THEN 'uncertain'
         WHEN SUM(CASE WHEN resource.onboarding_status IN ('completed', 'failed') THEN 1 ELSE 0 END) < COUNT(*) THEN 'running'
         WHEN SUM(CASE WHEN resource.onboarding_status = 'failed' THEN 1 ELSE 0 END) = 0 THEN 'succeeded'
-        WHEN SUM(CASE WHEN resource.onboarding_status = 'completed' THEN 1 ELSE 0 END) = 0 THEN 'failed'
-        ELSE 'uncertain'
+        ELSE 'failed'
     END AS status,
     COALESCE(MAX(resource.attempts), 0) AS attempts,
     COALESCE(MAX(resource.max_attempts), 1) AS max_attempts,

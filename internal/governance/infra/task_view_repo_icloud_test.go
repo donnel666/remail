@@ -202,6 +202,54 @@ INSERT INTO icloud_resources(
 	require.Equal(t, &governanceapp.AdminTaskProgress{Total: 3, Processed: 2, Succeeded: 1, Failed: 1, ReasonCounts: []governanceapp.AdminTaskReasonCount{}}, items[0].Progress)
 }
 
+func TestAdminTaskViewRepoMarksFinishedMixedICloudOnboardingAsFailed(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:governance-icloud-onboarding-mixed-finished?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.Exec(`
+CREATE TABLE icloud_resources (
+    id INTEGER PRIMARY KEY, import_id INTEGER, task_kind TEXT, onboarding_status TEXT,
+    dispatch_status TEXT, attempts INTEGER, max_attempts INTEGER, created_at DATETIME,
+    started_at DATETIME, finished_at DATETIME, updated_at DATETIME
+);
+CREATE TABLE icloud_resource_imports (
+    id INTEGER PRIMARY KEY, dispatch_status TEXT, attempts INTEGER, max_attempts INTEGER,
+    accepted_count INTEGER, skipped_count INTEGER, imported_count INTEGER,
+    created_at DATETIME, started_at DATETIME, finished_at DATETIME, updated_at DATETIME
+);
+INSERT INTO icloud_resources(
+    id, import_id, task_kind, onboarding_status, dispatch_status, attempts, max_attempts,
+    created_at, started_at, finished_at, updated_at
+) VALUES
+    (51, 25, 'onboarding', 'completed', 'succeeded', 1, 5,
+     '2026-08-16 10:00:00', '2026-08-16 10:00:01', '2026-08-16 10:04:00', '2026-08-16 10:04:00'),
+    (52, 25, 'onboarding', 'completed', 'succeeded', 1, 5,
+     '2026-08-16 10:00:00', '2026-08-16 10:00:02', '2026-08-16 10:04:00', '2026-08-16 10:04:00'),
+    (53, 25, 'onboarding', 'completed', 'succeeded', 1, 5,
+     '2026-08-16 10:00:00', '2026-08-16 10:00:03', '2026-08-16 10:04:00', '2026-08-16 10:04:00'),
+    (54, 25, 'onboarding', 'failed', 'failed', 1, 5,
+     '2026-08-16 10:00:00', '2026-08-16 10:00:04', '2026-08-16 10:04:00', '2026-08-16 10:04:00');
+`).Error)
+
+	items, total, succeeded, err := NewAdminTaskViewRepo(db).ListForICloudImports(
+		context.Background(),
+		governanceapp.AdminTaskListFilter{
+			BizType: governanceapp.AdminTaskBizICloudResourceImport,
+			Source:  governanceapp.AdminTaskSourceICloudOnboarding,
+			Status:  governanceapp.AdminTaskStatusFailed,
+			Limit:   10,
+		},
+	)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Zero(t, succeeded)
+	require.Len(t, items, 1)
+	require.Equal(t, "icloud_onboarding:25", items[0].TaskID())
+	require.Equal(t, governanceapp.AdminTaskStatusFailed, items[0].Status)
+	require.Equal(t, &governanceapp.AdminTaskProgress{
+		Total: 4, Processed: 4, Succeeded: 3, Failed: 1, ReasonCounts: []governanceapp.AdminTaskReasonCount{},
+	}, items[0].Progress)
+}
+
 func TestAdminTaskViewRepoMarksManualICloudOnboardingAsUncertain(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:governance-icloud-onboarding-waiting?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
