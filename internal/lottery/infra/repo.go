@@ -428,7 +428,7 @@ func (r *Repo) LookupWinnerStats(ctx context.Context, userIDs []uint) (map[uint]
 	rows := make([]winnerStatsRow, 0)
 	query := r.dbFor(ctx).Model(&PayoutModel{}).
 		Select("user_id, tier, COUNT(*) AS award_count").
-		Where("user_id IN ? AND tier IN ?", userIDs, []string{string(lotterydomain.TierLucky), string(lotterydomain.TierConsolation)})
+		Where("user_id IN ? AND tier IN ?", userIDs, []string{string(lotterydomain.TierLucky), string(lotterydomain.TierNormal), string(lotterydomain.TierConsolation)})
 	// Older isolated repository tests (and pre-lottery installations) may not
 	// have the parent table. Production uses the status predicate so provisional
 	// payout rows cannot affect a later history snapshot.
@@ -444,6 +444,8 @@ func (r *Repo) LookupWinnerStats(ctx context.Context, userIDs []uint) (map[uint]
 		switch lotterydomain.Tier(row.Tier) {
 		case lotterydomain.TierLucky:
 			item.LuckyCount = row.AwardCount
+		case lotterydomain.TierNormal:
+			item.NormalCount = row.AwardCount
 		case lotterydomain.TierConsolation:
 			item.ConsolationCount = row.AwardCount
 		}

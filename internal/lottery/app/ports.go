@@ -23,9 +23,9 @@ type UserDirectory interface {
 }
 
 // WinnerStats is the small history snapshot used by the weighted draw order.
-// Normal awards intentionally do not affect the score.
 type WinnerStats struct {
 	LuckyCount       int64
+	NormalCount      int64
 	ConsolationCount int64
 }
 

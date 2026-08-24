@@ -157,7 +157,7 @@ func TestRecordBillingTransactionsIsIdempotentAndRejectsTransactionReplacement(t
 	require.ErrorContains(t, err, "payout")
 }
 
-func TestLookupWinnerStatsAggregatesLuckyAndConsolationAwards(t *testing.T) {
+func TestLookupWinnerStatsAggregatesAllAwardTiers(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:lottery-history-%s-%d?mode=memory&cache=shared", t.Name(), time.Now().UnixNano())), &gorm.Config{TranslateError: true})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&PayoutModel{}))
@@ -174,7 +174,7 @@ func TestLookupWinnerStatsAggregatesLuckyAndConsolationAwards(t *testing.T) {
 	stats, err := NewRepo(db).LookupWinnerStats(context.Background(), []uint{7, 8, 9})
 	require.NoError(t, err)
 	require.Equal(t, lotteryapp.WinnerStats{LuckyCount: 1, ConsolationCount: 2}, stats[7])
-	require.Equal(t, lotteryapp.WinnerStats{LuckyCount: 1}, stats[8])
+	require.Equal(t, lotteryapp.WinnerStats{LuckyCount: 1, NormalCount: 1}, stats[8])
 	_, ok := stats[9]
 	require.False(t, ok)
 }

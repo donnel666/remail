@@ -28,7 +28,8 @@ const (
 	legacyAlgorithmVersionV1       = "bounded-tier-v1"
 	winnerInitialScore       int64 = 1000
 	winnerLuckyPenalty       int64 = 500
-	winnerConsolationBonus   int64 = 10
+	winnerNormalPenalty      int64 = 100
+	winnerConsolationBonus   int64 = 50
 	// ponytail: keep one settlement below the current Billing task ceiling;
 	// raise this only with a chunked Billing contract.
 	maxLotteryEntries = 5000
@@ -1028,22 +1029,24 @@ func rankEntriesByHistory(entries []lotterydomain.Entry, stats map[uint]WinnerSt
 	return nil
 }
 
-// score = 1000 - lucky awards*500 + consolation awards*10.
+// score = max(0, 1000 - lucky awards*500 - normal awards*100 + consolation awards*50).
 func winnerHistoryScore(stats WinnerStats) int64 {
 	lucky := max(stats.LuckyCount, int64(0))
+	normal := max(stats.NormalCount, int64(0))
 	consolation := max(stats.ConsolationCount, int64(0))
-	if lucky > math.MaxInt64/winnerLuckyPenalty {
-		return math.MinInt64
+	// Keep the intermediate arithmetic exact; the final score is the only
+	// value that needs to be bounded to the ranking type.
+	score := big.NewInt(winnerInitialScore)
+	score.Sub(score, new(big.Int).Mul(big.NewInt(lucky), big.NewInt(winnerLuckyPenalty)))
+	score.Sub(score, new(big.Int).Mul(big.NewInt(normal), big.NewInt(winnerNormalPenalty)))
+	score.Add(score, new(big.Int).Mul(big.NewInt(consolation), big.NewInt(winnerConsolationBonus)))
+	if score.Sign() <= 0 {
+		return 0
 	}
-	score := winnerInitialScore - lucky*winnerLuckyPenalty
-	if consolation > math.MaxInt64/winnerConsolationBonus {
+	if !score.IsInt64() {
 		return math.MaxInt64
 	}
-	bonus := consolation * winnerConsolationBonus
-	if bonus > 0 && score > math.MaxInt64-bonus {
-		return math.MaxInt64
-	}
-	return score + bonus
+	return score.Int64()
 }
 
 func randomShuffle(entries []lotterydomain.Entry) error {

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -162,13 +163,38 @@ func TestRankEntriesByHistoryPrioritizesLeastServedUsers(t *testing.T) {
 	}
 	stats := map[uint]WinnerStats{
 		1: {LuckyCount: 0, ConsolationCount: 0}, // 1000
-		2: {ConsolationCount: 1},                // 1010
+		2: {ConsolationCount: 1},                // 1050
 		3: {LuckyCount: 1},                      // 500
 		4: {LuckyCount: 2},                      // 0
+		5: {NormalCount: 1},                     // 900
 	}
+	entries = append(entries, lotterydomain.Entry{UserID: 5})
 	require.NoError(t, rankEntriesByHistory(entries, stats))
 	got := entryUserIDs(entries)
-	require.Equal(t, []uint{2, 1, 3, 4}, got)
+	require.Equal(t, []uint{2, 1, 5, 3, 4}, got)
+}
+
+func TestWinnerHistoryScoreFloorsAtZero(t *testing.T) {
+	require.Zero(t, winnerHistoryScore(WinnerStats{LuckyCount: 3}))
+	require.Zero(t, winnerHistoryScore(WinnerStats{NormalCount: 11}))
+	require.Equal(t, int64(450), winnerHistoryScore(WinnerStats{LuckyCount: 1, NormalCount: 1, ConsolationCount: 1}))
+	require.Equal(t, int64(500), winnerHistoryScore(WinnerStats{LuckyCount: 3, ConsolationCount: 20}))
+}
+
+func TestWinnerHistoryScorePreservesRepresentableInt64Results(t *testing.T) {
+	maxInt := int64(math.MaxInt64)
+	normalCount := maxInt/winnerNormalPenalty + 1
+	consolationCount := maxInt / winnerConsolationBonus
+	require.Equal(t, int64(900), winnerHistoryScore(WinnerStats{
+		NormalCount:      normalCount,
+		ConsolationCount: consolationCount,
+	}))
+
+	consolationCount = maxInt/winnerConsolationBonus + 1
+	require.Equal(t, maxInt-457, winnerHistoryScore(WinnerStats{
+		LuckyCount:       3,
+		ConsolationCount: consolationCount,
+	}))
 }
 
 func TestRankEntriesByHistoryRandomizesEqualScoreBoundary(t *testing.T) {
