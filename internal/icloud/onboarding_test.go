@@ -14,48 +14,44 @@ import (
 	coreinfra "github.com/donnel666/remail/internal/core/infra"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	"github.com/donnel666/remail/internal/kitesim"
+	"github.com/donnel666/remail/internal/mailtransport/infra/msacl"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
 
 func TestParseICloudOnboardingImportTreatsEveryEntryAsChild(t *testing.T) {
 	content := []byte(
-		"美国区----是----primary@example.com----Secret1!----问题一?(remail1)----问题二?(remail2)----问题三?(remail3)----2000-11-02----https://www.icloud.com/family/invite?inviteCode=abc\n" +
-			"加拿大区----否----child@example.com----Secret2!----问题一?(remail1)----问题二?(remail2)----问题三?(remail3)----1999-01-03----14165550001\n" +
-			"日本区----否----child-no-phone@example.com----Secret3!----问题一?(remail1)----问题二?(remail2)----问题三?(remail3)----1998-01-04\n" +
-			"英国区----是----primary-with-phone@example.com----Secret4!----问题一?(remail1)----问题二?(remail2)----问题三?(remail3)----1997-01-05----447700900001----family-token-123\n" +
-			"美国区----是----primary-empty-phone@example.com----Secret5!----问题一?(remail1)----问题二?(remail2)----问题三?(remail3)----1996-01-06--------https://www.icloud.com/family/invite?inviteCode=def\n",
+		"美国区----是----first@example.com----Secret1!----问题一?(remail1)----问题二?(remail2)----问题三?(remail3)----2000-11-02----14155550001----https://setup.icloud.com/family/messages?inviteCode=abc\n" +
+			"加拿大区----否----second@example.com----Secret2!----问题一?(remail1)----问题二?(remail2)----问题三?(remail3)----1999-01-03----14165550002----family-token-123\n",
 	)
 	lines, err := parseICloudOnboardingImport(content)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(lines) != 5 {
+	if len(lines) != 2 {
 		t.Fatalf("lines = %d", len(lines))
 	}
-	if lines[0].AccountRole != "child" || lines[0].CountryCode != "US" || lines[0].PhoneNumber != "" || lines[0].FamilyInviteURL == "" || !lines[0].ICloudOpened {
+	if lines[0].AccountRole != "child" || lines[0].CountryCode != "US" || lines[0].PhoneNumber != "14155550001" || lines[0].FamilyInviteURL == "" || !lines[0].ICloudOpened {
 		t.Fatalf("direct-invite child = %+v", lines[0])
 	}
-	if lines[1].AccountRole != "child" || lines[1].CountryCode != "CA" || lines[1].PhoneNumber != "14165550001" || lines[1].FamilyInviteURL != "" || lines[1].ICloudOpened {
+	if lines[1].AccountRole != "child" || lines[1].CountryCode != "CA" || lines[1].PhoneNumber != "14165550002" || lines[1].FamilyInviteURL != "family-token-123" || lines[1].ICloudOpened {
 		t.Fatalf("child = %+v", lines[1])
-	}
-	if lines[2].AccountRole != "child" || lines[2].CountryCode != "JP" || lines[2].PhoneNumber != "" || lines[2].FamilyInviteURL != "" {
-		t.Fatalf("child without phone = %+v", lines[2])
-	}
-	if lines[3].AccountRole != "child" || lines[3].CountryCode != "GB" || lines[3].PhoneNumber != "447700900001" || lines[3].FamilyInviteURL != "family-token-123" {
-		t.Fatalf("child with phone = %+v", lines[3])
-	}
-	if lines[4].AccountRole != "child" || lines[4].PhoneNumber != "" || lines[4].FamilyInviteURL == "" {
-		t.Fatalf("child with empty phone field = %+v", lines[4])
 	}
 	if lines[0].Secret.SecurityAnswers[1].Answer != "remail2" || lines[0].Secret.Birthday != "2000-11-02" {
 		t.Fatalf("secret parser = %+v", lines[0].Secret)
 	}
-	if _, err := parseICloudOnboardingImport([]byte("美国区----也许----bad@example.com----x----q(a)----q(b)----q(c)----2000-01-01")); !errors.Is(err, ErrICloudOnboardingInvalid) {
+	if _, err := parseICloudOnboardingImport([]byte("美国区----也许----bad@example.com----x----q(a)----q(b)----q(c)----2000-01-01----14155550003----invite")); !errors.Is(err, ErrICloudOnboardingInvalid) {
 		t.Fatalf("invalid flag error = %v", err)
 	}
-	if lines, err := parseICloudOnboardingImport([]byte("美国区----否----child-invite@example.com----x----q(a)----q(b)----q(c)----2000-01-01----invite-token")); err != nil || len(lines) != 1 || lines[0].AccountRole != "child" {
-		t.Fatalf("unopened direct-invite child = lines=%+v err=%v", lines, err)
+	for _, invalid := range []string{
+		"美国区----否----missing@example.com----x----q(a)----q(b)----q(c)----2000-01-01",
+		"美国区----否----missing@example.com----x----q(a)----q(b)----q(c)----2000-01-01----14155550003",
+		"美国区----否----missing@example.com----x----q(a)----q(b)----q(c)----2000-01-01--------invite",
+		"美国区----否----missing@example.com----x----q(a)----q(b)----q(c)----2000-01-01----14155550003----",
+	} {
+		if _, err := parseICloudOnboardingImport([]byte(invalid)); !errors.Is(err, ErrICloudOnboardingInvalid) {
+			t.Fatalf("incomplete 10-field line accepted: %q err=%v", invalid, err)
+		}
 	}
 }
 
@@ -103,7 +99,7 @@ func TestAcceptICloudOnboardingRejectsExistingResourceAfterIdempotencyLookup(t *
 	}
 	now := time.Date(2026, time.August, 16, 12, 0, 0, 0, time.UTC)
 	expiresAt := now.Add(24 * time.Hour)
-	content := []byte("美国区----是----existing@example.com----Secret1!----问题一?(remail1)----问题二?(remail2)----问题三?(remail3)----2000-11-02")
+	content := []byte("美国区----是----existing@example.com----Secret1!----问题一?(remail1)----问题二?(remail2)----问题三?(remail3)----2000-11-02----14155550001----invite")
 	service := NewService(db, nil, nil)
 	service.now = func() time.Time { return now }
 	service.SetImportOwnerValidator(func(context.Context, uint) (bool, error) { return true, nil })
@@ -115,7 +111,7 @@ func TestAcceptICloudOnboardingRejectsExistingResourceAfterIdempotencyLookup(t *
 	if err := db.Model(&iCloudOnboardingTaskModel{}).Where("task_kind = ?", "onboarding").Count(&taskCount).Error; err != nil || taskCount != 0 {
 		t.Fatalf("task count = %d, err = %v", taskCount, err)
 	}
-	pendingContent := []byte("美国区----否----pending@example.com----Secret1!----问题一?(remail1)----问题二?(remail2)----问题三?(remail3)----2000-11-02----14155550001")
+	pendingContent := []byte("美国区----否----pending@example.com----Secret1!----问题一?(remail1)----问题二?(remail2)----问题三?(remail3)----2000-11-02----14155550001----invite")
 	pendingView, reused, err := service.AcceptAdminICloudOnboardingImport(context.Background(), 1, 1, pendingContent, expiresAt, "pending-key", "request", "/test")
 	if err != nil || reused || len(pendingView.Tasks) != 1 || pendingView.Tasks[0].ResourceID == nil {
 		t.Fatalf("pending acceptance = view=%+v reused=%v err=%v", pendingView, reused, err)
@@ -136,7 +132,7 @@ func TestAcceptICloudOnboardingRejectsExistingResourceAfterIdempotencyLookup(t *
 	if err := db.Create(&iCloudResourceModel{ID: 20, PrimaryEmail: "legacy@example.com", AccountRole: "unknown", Status: iCloudResourceNormal}).Error; err != nil {
 		t.Fatal(err)
 	}
-	legacyContent := []byte("美国区----否----legacy@example.com----Secret1!----问题一?(remail1)----问题二?(remail2)----问题三?(remail3)----2000-11-02----14155550001")
+	legacyContent := []byte("美国区----否----legacy@example.com----Secret1!----问题一?(remail1)----问题二?(remail2)----问题三?(remail3)----2000-11-02----14155550001----invite")
 	legacyView, reused, err := service.AcceptAdminICloudOnboardingImport(context.Background(), 1, 1, legacyContent, expiresAt, "legacy-key", "request", "/test")
 	if err != nil || reused || len(legacyView.Tasks) != 1 || legacyView.Tasks[0].ResourceID == nil || *legacyView.Tasks[0].ResourceID != 20 {
 		t.Fatalf("legacy acceptance = view=%+v reused=%v err=%v", legacyView, reused, err)
@@ -150,7 +146,7 @@ func TestAcceptICloudOnboardingRejectsExistingResourceAfterIdempotencyLookup(t *
 		t.Fatalf("legacy resource version = %+v err=%v", legacyRoot, err)
 	}
 
-	replayContent := []byte("美国区----是----replay@example.com----Secret1!----问题一?(remail1)----问题二?(remail2)----问题三?(remail3)----2000-11-02")
+	replayContent := []byte("美国区----是----replay@example.com----Secret1!----问题一?(remail1)----问题二?(remail2)----问题三?(remail3)----2000-11-02----14155550001----invite")
 	first, reused, err := service.AcceptAdminICloudOnboardingImport(context.Background(), 1, 1, replayContent, expiresAt, "replay-key", "request", "/test")
 	if err != nil || reused || first == nil {
 		t.Fatalf("initial idempotent import = view %+v, reused %v, err %v", first, reused, err)
@@ -159,6 +155,49 @@ func TestAcceptICloudOnboardingRejectsExistingResourceAfterIdempotencyLookup(t *
 	if err != nil || !reused || view.ImportID != first.ImportID {
 		t.Fatalf("idempotent replay = view %+v, reused %v, err %v", view, reused, err)
 	}
+}
+
+func TestAcceptICloudOnboardingDeletedResourceReuse(t *testing.T) {
+	t.Run("reuses failed onboarding placeholder", func(t *testing.T) {
+		service, db, task, _ := newOnboardingStateTest(t)
+		if err := db.Model(task).Updates(map[string]any{
+			"status": iCloudResourceDeleted, "task_kind": "onboarding",
+			"onboarding_status": iCloudOnboardingFailed, "dispatch_status": "failed",
+			"for_sale": false, "last_error_category": "family_invite_unavailable",
+		}).Error; err != nil {
+			t.Fatal(err)
+		}
+		service.SetImportOwnerValidator(func(context.Context, uint) (bool, error) { return true, nil })
+		content := []byte("美国区----否----child@example.com----Secret2!----问题一?(a1)----问题二?(a2)----问题三?(a3)----2000-11-02----14155550001----https://setup.icloud.com/family/messages?inviteCode=new")
+		view, reused, err := service.AcceptAdminICloudOnboardingImport(context.Background(), 1, 1, content, service.now().Add(time.Hour), "deleted-retry-key", "request", "/test")
+		if err != nil || reused || view == nil || len(view.Tasks) != 1 || view.Tasks[0].ResourceID == nil || *view.Tasks[0].ResourceID != task.ID {
+			t.Fatalf("deleted placeholder acceptance = view=%+v reused=%v err=%v", view, reused, err)
+		}
+		var resource iCloudResourceModel
+		if err := db.First(&resource, task.ID).Error; err != nil {
+			t.Fatal(err)
+		}
+		if resource.Status != iCloudResourcePending || resource.WorkflowTaskKind != "onboarding" ||
+			resource.OnboardingStatus != iCloudOnboardingProcessing || resource.FamilyInviteURL != "https://setup.icloud.com/family/messages?inviteCode=new" ||
+			resource.LastSafeError != "" {
+			t.Fatalf("deleted placeholder was not restored: %+v", resource)
+		}
+	})
+
+	t.Run("rejects unrelated deleted resource", func(t *testing.T) {
+		service, db, task, _ := newOnboardingStateTest(t)
+		if err := db.Model(task).Updates(map[string]any{
+			"status": iCloudResourceDeleted, "task_kind": "", "onboarding_status": "",
+			"for_sale": false,
+		}).Error; err != nil {
+			t.Fatal(err)
+		}
+		service.SetImportOwnerValidator(func(context.Context, uint) (bool, error) { return true, nil })
+		content := []byte("美国区----否----child@example.com----Secret2!----问题一?(a1)----问题二?(a2)----问题三?(a3)----2000-11-02----14155550001----invite")
+		if _, _, err := service.AcceptAdminICloudOnboardingImport(context.Background(), 1, 1, content, service.now().Add(time.Hour), "deleted-reject-key", "request", "/test"); !errors.Is(err, ErrICloudResourceIdentity) {
+			t.Fatalf("deleted resource error = %v", err)
+		}
+	})
 }
 
 func TestAcceptICloudOnboardingRejectsActiveUnknownWorkflow(t *testing.T) {
@@ -170,7 +209,7 @@ func TestAcceptICloudOnboardingRejectsActiveUnknownWorkflow(t *testing.T) {
 		t.Fatal(err)
 	}
 	service.SetImportOwnerValidator(func(context.Context, uint) (bool, error) { return true, nil })
-	content := []byte("美国区----否----child@example.com----Secret2!----问题一?(a1)----问题二?(a2)----问题三?(a3)----2000-11-02")
+	content := []byte("美国区----否----child@example.com----Secret2!----问题一?(a1)----问题二?(a2)----问题三?(a3)----2000-11-02----14155550001----invite")
 	if _, _, err := service.AcceptAdminICloudOnboardingImport(context.Background(), 1, 1, content, service.now().Add(time.Hour), "active-unknown-key", "request", "/test"); !errors.Is(err, ErrICloudResourceIdentity) {
 		t.Fatalf("active unknown workflow error = %v", err)
 	}
@@ -193,7 +232,7 @@ func TestAcceptICloudOnboardingRejectsPermanentPhoneChangeBeforeUpdate(t *testin
 		t.Fatal(err)
 	}
 	service.SetImportOwnerValidator(func(context.Context, uint) (bool, error) { return true, nil })
-	content := []byte("美国区----否----child@example.com----Secret2!----问题一?(a1)----问题二?(a2)----问题三?(a3)----2000-11-02----5488768537")
+	content := []byte("美国区----否----child@example.com----Secret2!----问题一?(a1)----问题二?(a2)----问题三?(a3)----2000-11-02----5488768537----invite")
 	if _, _, err := service.AcceptAdminICloudOnboardingImport(context.Background(), 1, 1, content, service.now().Add(time.Hour), "phone-conflict-key", "request", "/test"); !errors.Is(err, ErrICloudResourceIdentity) {
 		t.Fatalf("permanent phone conflict error = %v", err)
 	}
@@ -220,7 +259,7 @@ func TestAcceptICloudOnboardingRejectsExclusivePhoneBeforeCreatingResource(t *te
 		t.Fatal(err)
 	}
 	service.SetImportOwnerValidator(func(context.Context, uint) (bool, error) { return true, nil })
-	content := []byte("美国区----否----new@example.com----Secret2!----问题一?(a1)----问题二?(a2)----问题三?(a3)----2000-11-02----14155550001")
+	content := []byte("美国区----否----new@example.com----Secret2!----问题一?(a1)----问题二?(a2)----问题三?(a3)----2000-11-02----14155550001----invite")
 	if _, _, err := service.AcceptAdminICloudOnboardingImport(context.Background(), 1, 1, content, service.now().Add(time.Hour), "exclusive-phone-key", "request", "/test"); !errors.Is(err, ErrICloudOnboardingPhoneExclusive) {
 		t.Fatalf("exclusive phone error = %v", err)
 	}
@@ -240,7 +279,7 @@ func TestAcceptICloudOnboardingRejectsBlacklistedPhoneBeforeCreatingResource(t *
 		t.Fatal(err)
 	}
 	service.SetImportOwnerValidator(func(context.Context, uint) (bool, error) { return true, nil })
-	content := []byte("美国区----否----blocked@example.com----Secret2!----问题一?(a1)----问题二?(a2)----问题三?(a3)----2000-11-02----14155550001")
+	content := []byte("美国区----否----blocked@example.com----Secret2!----问题一?(a1)----问题二?(a2)----问题三?(a3)----2000-11-02----14155550001----invite")
 	if _, _, err := service.AcceptAdminICloudOnboardingImport(context.Background(), 1, 1, content, service.now().Add(time.Hour), "blacklisted-phone-key", "request", "/test"); !errors.Is(err, ErrICloudOnboardingPhoneBlacklisted) {
 		t.Fatalf("blacklisted phone error = %v", err)
 	}
@@ -635,25 +674,6 @@ func processOnboardingStageForTest(t *testing.T, service *Service, db *gorm.DB, 
 	*task = stored
 }
 
-func TestICloudOnboardingProvidedPhoneSkipsEnrollmentAndFamily(t *testing.T) {
-	service, db, task, fakeApple := newOnboardingStateTest(t)
-	processOnboardingStageForTest(t, service, db, task)
-	if task.ResourceID == nil || task.Stage != "manage_prepare" || task.BoundPhoneSource != "manual" || task.KitesimPhoneID == nil {
-		t.Fatalf("assigned task = %+v", task)
-	}
-	processOnboardingStageForTest(t, service, db, task)
-	if task.Stage != "manage_profile" {
-		t.Fatalf("prepared task = %+v", task)
-	}
-	processOnboardingStageForTest(t, service, db, task)
-	if task.Stage != "forwarding_prepare" {
-		t.Fatalf("profile task = %+v", task)
-	}
-	if len(fakeApple.operations) != 2 || fakeApple.operations[0] != appleOnboardingPrepareManage+":" || fakeApple.operations[1] != appleOnboardingFetchManage+":" {
-		t.Fatalf("Apple operations = %v", fakeApple.operations)
-	}
-}
-
 func TestICloudOnboardingSpecifiedPhoneAndInviteStartsICloudBeforeFamily(t *testing.T) {
 	service, db, task, fakeApple := newOnboardingStateTest(t)
 	if err := db.Model(task).Update("family_invite_url", "https://setup.icloud.com/family/messages?inviteCode=test").Error; err != nil {
@@ -775,10 +795,9 @@ func TestICloudOnboardingClosedICloudSkipsActivationDependentSteps(t *testing.T)
 		declared    bool
 		nextStage   string
 	}{
-		{name: "auto child declared closed", taskKind: "onboarding", accountRole: "child", phoneSource: "kitesim", nextStage: "family_select"},
-		{name: "auto child declared open", taskKind: "onboarding", accountRole: "child", phoneSource: "kitesim", declared: true, nextStage: "family_select"},
-		{name: "manual child", taskKind: "onboarding", accountRole: "child", phoneSource: "manual", nextStage: "manage_prepare"},
-		{name: "primary", taskKind: "onboarding", accountRole: "primary", phoneSource: "kitesim", declared: true, nextStage: "manage_prepare"},
+		{name: "auto child declared closed", taskKind: "onboarding", accountRole: "child", phoneSource: "kitesim", nextStage: "family_prepare"},
+		{name: "auto child declared open", taskKind: "onboarding", accountRole: "child", phoneSource: "kitesim", declared: true, nextStage: "family_prepare"},
+		{name: "manual child", taskKind: "onboarding", accountRole: "child", phoneSource: "manual", nextStage: "family_prepare"},
 		{name: "refresh", taskKind: "refresh", accountRole: "child", phoneSource: "manual", declared: true, nextStage: "manage_prepare"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -787,6 +806,9 @@ func TestICloudOnboardingClosedICloudSkipsActivationDependentSteps(t *testing.T)
 			updates := map[string]any{
 				"task_kind": test.taskKind, "account_role": test.accountRole, "bound_phone_source": test.phoneSource,
 				"icloud_opened": test.declared, "stage": "icloud_finish",
+			}
+			if test.accountRole == "child" && test.taskKind == "onboarding" {
+				updates["family_invite_url"] = "https://setup.icloud.com/family/messages?inviteCode=test"
 			}
 			if test.taskKind == "refresh" {
 				phoneID := uint(7)
@@ -905,7 +927,7 @@ func TestICloudOnboardingUpgradesUnknownResourceInPlace(t *testing.T) {
 		t.Fatal(err)
 	}
 	service.SetImportOwnerValidator(func(context.Context, uint) (bool, error) { return true, nil })
-	content := []byte("美国区----否----child@example.com----Secret2!----问题一?(a1)----问题二?(a2)----问题三?(a3)----2000-11-02----14155550001")
+	content := []byte("美国区----否----child@example.com----Secret2!----问题一?(a1)----问题二?(a2)----问题三?(a3)----2000-11-02----14155550001----invite")
 	view, reused, err := service.AcceptAdminICloudOnboardingImport(context.Background(), 1, 1, content, now.Add(time.Hour), "upgrade-key", "request", "/test")
 	if err != nil || reused || view == nil || len(view.Tasks) != 1 || view.Tasks[0].ResourceID == nil || *view.Tasks[0].ResourceID != resourceID {
 		t.Fatalf("upgrade acceptance = view=%+v reused=%v err=%v", view, reused, err)
@@ -957,7 +979,7 @@ func TestICloudOnboardingResourceImportCompletesAfterFamilyJoin(t *testing.T) {
 	phoneID, primaryID := uint(7), uint(99)
 	if err := db.Model(task).Updates(map[string]any{
 		"stage": "resource_import", "bound_phone_source": "kitesim", "kitesim_phone_id": phoneID,
-		"forward_preparation_id": preparation.ID, "family_primary_resource_id": primaryID,
+		"forward_preparation_id": preparation.ID, "selected_forward_to": preparation.ForwardToEmail, "family_primary_resource_id": primaryID,
 		"family_reservation_confirmed": true, "icloud_opened": false,
 	}).Error; err != nil {
 		t.Fatal(err)
@@ -981,6 +1003,37 @@ func TestICloudOnboardingResourceImportCompletesAfterFamilyJoin(t *testing.T) {
 	}
 	if task.NextAttemptAt != nil || task.FinishedAt == nil {
 		t.Fatalf("completed task retained retry state: %+v", task)
+	}
+}
+
+func TestICloudOnboardingRejectsMismatchedForwardingPreparationBeforeExport(t *testing.T) {
+	service, db, task, _ := newOnboardingStateTest(t)
+	if err := db.AutoMigrate(&iCloudImportPreparationModel{}); err != nil {
+		t.Fatal(err)
+	}
+	operatorID := uint(1)
+	preparation := iCloudImportPreparationModel{
+		OperatorUserID: &operatorID, ForwardToEmail: "relay@example.com", ExpiresAt: service.now().UTC().Add(time.Hour),
+	}
+	if err := db.Create(&preparation).Error; err != nil {
+		t.Fatal(err)
+	}
+	phoneID := uint(7)
+	if err := db.Model(task).Updates(map[string]any{
+		"stage": "resource_import", "bound_phone_source": "kitesim", "kitesim_phone_id": phoneID,
+		"forward_preparation_id": preparation.ID, "selected_forward_to": "different@example.com",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(task, task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	apple := &onboardingExportApple{}
+	service.onboardingApple = apple
+
+	processOnboardingStageForTest(t, service, db, task)
+	if task.Stage != "forwarding_prepare" || task.DispatchStatus != "pending" || task.ForwardPreparationID != nil || apple.calls != 0 {
+		t.Fatalf("mismatched forwarding preparation = task=%+v Apple calls=%d", task, apple.calls)
 	}
 }
 
@@ -1026,6 +1079,7 @@ func TestICloudOnboardingManualConfirmationsAreNaturallyIdempotent(t *testing.T)
 		if err := db.Model(task).Updates(map[string]any{
 			"onboarding_status": iCloudOnboardingWaiting, "stage": "waiting_icloud_activation", "dispatch_status": "waiting",
 			"bound_phone_source": "kitesim", "icloud_opened": false,
+			"family_invite_url": "https://setup.icloud.com/family/messages?inviteCode=test",
 		}).Error; err != nil {
 			t.Fatal(err)
 		}
@@ -1037,7 +1091,7 @@ func TestICloudOnboardingManualConfirmationsAreNaturallyIdempotent(t *testing.T)
 		if err := db.First(task, task.ID).Error; err != nil {
 			t.Fatal(err)
 		}
-		if task.Stage != "family_select" || task.ICloudActivationConfirmedAt == nil || task.ICloudOpened {
+		if task.Stage != "family_prepare" || task.ICloudActivationConfirmedAt == nil || task.ICloudOpened {
 			t.Fatalf("activation confirmation = %+v", task)
 		}
 		var count int64
@@ -1046,112 +1100,133 @@ func TestICloudOnboardingManualConfirmationsAreNaturallyIdempotent(t *testing.T)
 		}
 	})
 
-	t.Run("family_reset", func(t *testing.T) {
-		service, db, task, _ := newOnboardingStateTest(t)
-		resourceID := task.ID
-		primaryID := uint(99)
-		if err := db.Model(task).Updates(map[string]any{
-			"resource_id": resourceID, "family_primary_resource_id": primaryID, "family_reservation_confirmed": true,
-			"task_kind":         "",
-			"onboarding_status": iCloudOnboardingWaiting, "stage": "waiting_family_reset", "dispatch_status": "waiting",
-		}).Error; err != nil {
-			t.Fatal(err)
-		}
-		if err := db.Create(&iCloudAppleIDReservationModel{
-			EmailKey: iCloudImportEmailKey(task.PrimaryEmail), OwnerKind: iCloudAppleIDReservationOnboarding,
-			OwnerID: *task.ImportID, CreatedAt: service.now().UTC(),
-		}).Error; err != nil {
-			t.Fatal(err)
-		}
-		for _, requestID := range []string{"family-1", "family-2"} {
-			if err := service.ConfirmICloudOnboardingFamilyReset(context.Background(), task.ID, 9, requestID, "/test/family-reset"); err != nil {
+	for _, test := range []struct {
+		name     string
+		stage    string
+		taskKind string
+	}{
+		{name: "family_sharing", stage: iCloudOnboardingStageFamilySharing, taskKind: "onboarding"},
+		{name: "legacy_family_reset", stage: iCloudOnboardingStageFamilyReset},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			service, db, task, _ := newOnboardingStateTest(t)
+			resourceID := task.ID
+			primaryID := uint(99)
+			old := &AppleOnboardingChannel{Kind: iCloudChannelWeb, Host: "p1-maildomainws.icloud.com", Cookie: "old=value"}
+			checkpoint := appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) {
+				state.Cookies = []msacl.SessionCookie{{Name: "family", Value: "temporary", Domain: ".apple.com"}}
+				state.GSToken = "temporary-gs"
+				state.InviteToken = "temporary-invite"
+				state.OldChannel = old
+			})
+			if err := db.Model(task).Updates(map[string]any{
+				"task_kind":   test.taskKind,
+				"resource_id": resourceID, "family_invite_url": "https://setup.icloud.com/family/messages?inviteCode=test",
+				"family_primary_resource_id": primaryID, "family_reservation_confirmed": true,
+				"onboarding_status": iCloudOnboardingWaiting, "stage": test.stage, "dispatch_status": "waiting",
+				"session_payload": checkpoint, "attempts": 4, "stage_attempts": 3, "next_attempt_at": nil,
+			}).Error; err != nil {
 				t.Fatal(err)
 			}
-		}
-		if err := db.First(task, task.ID).Error; err != nil {
-			t.Fatal(err)
-		}
-		if task.Status != iCloudOnboardingCompleted || task.Stage != "completed" {
-			t.Fatalf("family confirmation = %+v", task)
-		}
-		var reservationCount int64
-		if err := db.Model(&iCloudAppleIDReservationModel{}).Count(&reservationCount).Error; err != nil || reservationCount != 0 {
-			t.Fatalf("reservation count after family confirmation = %d err=%v", reservationCount, err)
-		}
-		if err := db.Transaction(func(tx *gorm.DB) error {
-			return reserveICloudAppleIDsTx(tx, []iCloudAppleIDReservationModel{{
-				EmailKey: task.PrimaryEmail, OwnerKind: iCloudAppleIDReservationImport, OwnerID: 77, CreatedAt: service.now().UTC(),
-			}})
-		}); err != nil {
-			t.Fatalf("Cookie import could not reserve completed Apple ID: %v", err)
-		}
-		var count int64
-		if err := db.Model(&governanceinfra.OperationLogModel{}).Where("operation_type = ?", "icloud.admin_account_onboarding.family_reset_confirm").Count(&count).Error; err != nil || count != 1 {
-			t.Fatalf("family audit count = %d err=%v", count, err)
-		}
-	})
-
-	t.Run("family_sharing", func(t *testing.T) {
-		service, db, task, _ := newOnboardingStateTest(t)
-		resourceID := task.ID
-		primaryID := uint(99)
-		if err := db.Model(task).Updates(map[string]any{
-			"resource_id": resourceID, "family_primary_resource_id": primaryID, "family_reservation_confirmed": true,
-			"onboarding_status": iCloudOnboardingWaiting, "stage": iCloudOnboardingStageFamilySharing, "dispatch_status": "waiting",
-			"session_payload": []byte(`{"temporary":true}`), "next_attempt_at": nil,
-		}).Error; err != nil {
-			t.Fatal(err)
-		}
-		if err := db.Create(&iCloudAppleIDReservationModel{
-			EmailKey: iCloudImportEmailKey(task.PrimaryEmail), OwnerKind: iCloudAppleIDReservationOnboarding,
-			OwnerID: *task.ImportID, CreatedAt: service.now().UTC(),
-		}).Error; err != nil {
-			t.Fatal(err)
-		}
-		for _, requestID := range []string{"sharing-1", "sharing-2"} {
-			if err := service.ConfirmICloudOnboardingFamilyReset(context.Background(), task.ID, 9, requestID, "/test/family-sharing"); err != nil {
+			if err := db.Create(&iCloudAppleIDReservationModel{
+				EmailKey: iCloudImportEmailKey(task.PrimaryEmail), OwnerKind: iCloudAppleIDReservationOnboarding,
+				OwnerID: *task.ImportID, CreatedAt: service.now().UTC(),
+			}).Error; err != nil {
 				t.Fatal(err)
 			}
-		}
-		if err := db.First(task, task.ID).Error; err != nil {
-			t.Fatal(err)
-		}
-		if task.Status != iCloudOnboardingProcessing || task.Stage != "manage_prepare" || task.DispatchStatus != "pending" ||
-			task.Generation != 2 || task.SessionPayload != nil || task.FinishedAt != nil || !task.FamilyReservationConfirmed {
-			t.Fatalf("family sharing confirmation = %+v", task)
-		}
-		var reservationCount int64
-		if err := db.Model(&iCloudAppleIDReservationModel{}).Count(&reservationCount).Error; err != nil || reservationCount != 1 {
-			t.Fatalf("reservation count after family sharing confirmation = %d err=%v", reservationCount, err)
-		}
-		var auditCount int64
-		if err := db.Model(&governanceinfra.OperationLogModel{}).Where("operation_type = ?", "icloud.admin_account_onboarding.family_reset_confirm").Count(&auditCount).Error; err != nil || auditCount != 1 {
-			t.Fatalf("family sharing audit count = %d err=%v", auditCount, err)
-		}
-	})
+			for _, requestID := range []string{"sharing-1", "sharing-2"} {
+				if err := service.ConfirmICloudOnboardingFamilyReset(context.Background(), task.ID, 9, requestID, "/test/family-sharing"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := db.First(task, task.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			if task.Status != iCloudOnboardingProcessing || task.Stage != "manage_prepare" || task.DispatchStatus != "pending" ||
+				task.TaskKind != "onboarding" || task.Generation != 2 || len(task.SessionPayload) == 0 || task.FinishedAt != nil || !task.FamilyReservationConfirmed ||
+				task.FamilyPrimaryResourceID != nil || task.Attempts != 0 || task.StageAttempts != 0 ||
+				task.NextAttemptAt == nil || task.NextAttemptAt.Before(service.now().UTC().Add(iCloudOnboardingStageDelayMinimum)) ||
+				task.NextAttemptAt.After(service.now().UTC().Add(iCloudOnboardingStageDelayMaximum)) {
+				t.Fatalf("family sharing confirmation = %+v", task)
+			}
+			var state appleOnboardingBrowserState
+			if err := json.Unmarshal(task.SessionPayload, &state); err != nil || state.OldChannel == nil || state.OldChannel.Cookie != old.Cookie ||
+				len(state.Cookies) != 0 || state.GSToken != "" || state.InviteToken != "" {
+				t.Fatalf("family checkpoint was not sanitized: state=%+v err=%v", state, err)
+			}
+			var reservationCount int64
+			if err := db.Model(&iCloudAppleIDReservationModel{}).Count(&reservationCount).Error; err != nil || reservationCount != 1 {
+				t.Fatalf("reservation count after family sharing confirmation = %d err=%v", reservationCount, err)
+			}
+			var auditCount int64
+			if err := db.Model(&governanceinfra.OperationLogModel{}).Where("operation_type = ?", "icloud.admin_account_onboarding.family_reset_confirm").Count(&auditCount).Error; err != nil || auditCount != 1 {
+				t.Fatalf("family sharing audit count = %d err=%v", auditCount, err)
+			}
+		})
+	}
 }
 
-func TestICloudOnboardingInvalidFamilyReselectsAnotherPrimary(t *testing.T) {
-	service, db, task, _ := newOnboardingStateTest(t)
-	if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}); err != nil {
-		t.Fatal(err)
-	}
-	syncedAt := service.now().UTC()
-	for _, resource := range []iCloudResourceModel{
-		{ID: 10, PrimaryEmail: "disabled@example.com", AccountRole: "primary", Region: "美国区", CountryCode: "US", FamilyInviteURL: "old-token", Status: iCloudResourceDisabled},
-		{ID: 11, PrimaryEmail: "available@example.com", AccountRole: "primary", Region: "美国区", CountryCode: "US", FamilyInviteURL: "new-token", Status: iCloudResourceNormal,
-			FamilyID: "family-11", FamilyOrganizerDSID: "organizer-11", FamilySyncStatus: iCloudFamilySyncReady, FamilySyncedAt: &syncedAt},
+func TestICloudOnboardingNormalizesLegacyFamilyStages(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		stage   string
+		purpose string
+	}{
+		{name: "selection", stage: "family_select"},
+		{name: "reconcile prepare", stage: "family_reconcile_prepare"},
+		{name: "reconcile SMS", stage: "sms_wait", purpose: appleSMSFamilyReconcileLogin},
+		{name: "reconcile apply", stage: "family_join_apply"},
 	} {
-		if err := db.Create(&iCloudRootModel{ID: resource.ID, Type: "icloud", OwnerUserID: 1, Version: 1}).Error; err != nil {
-			t.Fatal(err)
-		}
-		if err := db.Create(&resource).Error; err != nil {
-			t.Fatal(err)
-		}
+		t.Run(test.name, func(t *testing.T) {
+			service, db, task, _ := newOnboardingStateTest(t)
+			primaryID := uint(99)
+			old := &AppleOnboardingChannel{Kind: iCloudChannelWeb, Host: "p1-maildomainws.icloud.com", Cookie: "old=value"}
+			session := appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) {
+				state.Cookies = []msacl.SessionCookie{{Name: "family", Value: "temporary", Domain: ".apple.com"}}
+				state.GSToken = "temporary-gs"
+				state.OldChannel = old
+			})
+			if err := db.Model(task).Updates(map[string]any{
+				"stage": test.stage, "dispatch_status": "running", "claim_token": "legacy-claim", "pending_sms_purpose": test.purpose,
+				"family_invite_url":          "https://setup.icloud.com/family/messages?inviteCode=direct",
+				"family_primary_resource_id": primaryID, "family_reservation_confirmed": true, "session_payload": session,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.First(task, task.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			proceed, err := service.normalizeLegacyICloudOnboardingStage(context.Background(), task)
+			if err != nil || !proceed {
+				t.Fatalf("legacy normalization proceed=%t err=%v", proceed, err)
+			}
+			if err := db.First(task, task.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			var state appleOnboardingBrowserState
+			if err := json.Unmarshal(task.SessionPayload, &state); err != nil || task.Stage != "family_prepare" ||
+				task.FamilyPrimaryResourceID != nil || task.FamilyReservationConfirmed || state.OldChannel == nil ||
+				state.OldChannel.Cookie != old.Cookie || len(state.Cookies) != 0 || state.GSToken != "" {
+				t.Fatalf("legacy stage was not normalized: task=%+v state=%+v err=%v", task, state, err)
+			}
+		})
 	}
-	disabledID := uint(10)
+}
+
+func TestICloudOnboardingWorkerNormalizesEmptyTaskKindAndLegacyFamilyStage(t *testing.T) {
+	service, db, task, _ := newOnboardingStateTest(t)
+	apple := &onboardingJoinedFamilyApple{}
+	service.onboardingApple = apple
+	primaryID := uint(99)
+	old := &AppleOnboardingChannel{Kind: iCloudChannelWeb, Host: "p1-maildomainws.icloud.com", Cookie: "old=value"}
+	session := appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) {
+		state.Cookies = []msacl.SessionCookie{{Name: "family", Value: "temporary", Domain: ".apple.com"}}
+		state.GSToken = "temporary-gs"
+		state.OldChannel = old
+	})
 	if err := db.Model(task).Updates(map[string]any{
-		"stage": "family_prepare", "family_primary_resource_id": disabledID, "bound_phone_source": "kitesim",
+		"task_kind": "", "stage": "family_select", "family_invite_url": "https://setup.icloud.com/family/messages?inviteCode=direct",
+		"family_primary_resource_id": primaryID, "family_reservation_confirmed": true, "session_payload": session,
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -1159,21 +1234,25 @@ func TestICloudOnboardingInvalidFamilyReselectsAnotherPrimary(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	processOnboardingStageForTest(t, service, db, task)
-	if task.Stage != "family_select" || task.Status != iCloudOnboardingProcessing || task.Attempts != 1 || task.FamilyPrimaryResourceID != nil {
-		t.Fatalf("invalid family reset = %+v", task)
+	for range 3 {
+		processOnboardingStageForTest(t, service, db, task)
 	}
-	var isolated iCloudResourceModel
-	if err := db.First(&isolated, disabledID).Error; err != nil || isolated.FamilySyncErrorCategory != "" {
-		t.Fatalf("disabled primary invitation state was mutated: resource=%+v err=%v", isolated, err)
+	if task.TaskKind != "onboarding" || task.Stage != iCloudOnboardingStageFamilySharing ||
+		task.Status != iCloudOnboardingWaiting || task.DispatchStatus != "waiting" || task.FamilyPrimaryResourceID != nil || !task.FamilyReservationConfirmed ||
+		len(apple.requests) != 2 || apple.requests[0].Operation != appleOnboardingPrepareFamily ||
+		apple.requests[0].FamilyInviteURL != "https://setup.icloud.com/family/messages?inviteCode=direct" ||
+		apple.requests[1].Operation != appleOnboardingJoinFamily {
+		t.Fatalf("legacy worker continuation = task=%+v requests=%+v", task, apple.requests)
 	}
-	processOnboardingStageForTest(t, service, db, task)
-	if task.Stage != "family_prepare" || task.FamilyPrimaryResourceID == nil || *task.FamilyPrimaryResourceID != 11 {
-		t.Fatalf("replacement family selection = %+v", task)
+	var state appleOnboardingBrowserState
+	if err := json.Unmarshal(task.SessionPayload, &state); err != nil || state.OldChannel == nil || state.OldChannel.Cookie != old.Cookie ||
+		len(state.Cookies) != 0 || state.GSToken != "" {
+		t.Fatalf("legacy worker checkpoint = state=%+v err=%v", state, err)
 	}
 }
 
 func TestICloudOnboardingFamilySelectionRejectsUnresolvedCountry(t *testing.T) {
+	t.Skip("legacy primary-family selection workflow was removed; direct invitations are tested separately")
 	service, db, task, _ := newOnboardingStateTest(t)
 	if err := db.Model(task).Updates(map[string]any{"stage": "family_select", "country_code": ""}).Error; err != nil {
 		t.Fatal(err)
@@ -1196,6 +1275,7 @@ func TestICloudOnboardingFamilySelectionRejectsUnresolvedCountry(t *testing.T) {
 }
 
 func TestICloudOnboardingInvalidFamilyInviteReselectsWithinBudget(t *testing.T) {
+	t.Skip("legacy primary-family selection workflow was removed; direct invitations are tested separately")
 	service, db, task, _ := newOnboardingStateTest(t)
 	service.onboardingApple = onboardingFamilyInvalidApple{}
 	if err := db.AutoMigrate(&iCloudRootModel{}, &iCloudResourceModel{}); err != nil {
@@ -1261,20 +1341,59 @@ func TestICloudOnboardingDirectInviteFailureDoesNotReselectPrimary(t *testing.T)
 	}
 
 	processOnboardingStageForTest(t, service, db, task)
-	if task.Status != iCloudOnboardingProcessing || task.DispatchStatus != "pending" || task.Stage != "family_prepare" ||
-		task.Attempts != 2 || task.LastErrorCategory != "family_invite_invalid" || task.FamilyInviteURL == "" {
-		t.Fatalf("direct invite failure was routed through primary selection: %+v", task)
+	if task.Status != iCloudOnboardingFailed || task.DispatchStatus != "failed" || task.Stage != "family_prepare" ||
+		task.LastErrorCategory != "family_invite_invalid" || task.FamilyInviteURL == "" {
+		t.Fatalf("direct invite failure was not terminal: %+v", task)
 	}
+	if strings.Contains(task.LastSafeError, "primary family") {
+		t.Fatalf("direct invite failure mentioned a primary account: %+v", task)
+	}
+}
 
-	for attempts := 0; attempts < 10 && task.Status == iCloudOnboardingProcessing; attempts++ {
-		processOnboardingStageForTest(t, service, db, task)
+func TestICloudOnboardingDirectInviteSkipsFamilySessionReconcile(t *testing.T) {
+	service, db, task, _ := newOnboardingStateTest(t)
+	old := &AppleOnboardingChannel{Kind: iCloudChannelWeb, Host: "p1-maildomainws.icloud.com", Cookie: "old=value"}
+	session := appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) {
+		state.Cookies = []msacl.SessionCookie{{Name: "family", Value: "temporary", Domain: ".apple.com"}}
+		state.GSToken = "temporary-gs"
+		state.OldChannel = old
+	})
+	if err := db.Model(task).Updates(map[string]any{
+		"family_invite_url": "https://setup.icloud.com/family/messages?inviteCode=direct-token",
+		"stage":             "family_join_apply", "dispatch_status": "running", "claim_token": "join-claim",
+		"family_reservation_confirmed": false, "session_payload": session,
+	}).Error; err != nil {
+		t.Fatal(err)
 	}
-	if task.Status != iCloudOnboardingFailed || task.LastErrorCategory != "family_invite_invalid" || strings.Contains(task.LastSafeError, "primary family") || task.Stage == "family_select" {
-		t.Fatalf("direct invite failure lost its category or entered primary selection: %+v", task)
+	if err := db.First(task, task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	service.onboardingApple = &onboardingJoinedFamilyApple{}
+	familyCalls := 0
+	service.family = newICloudFamilyClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		familyCalls++
+		return &http.Response{StatusCode: http.StatusUnauthorized, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+	})})
+
+	if err := service.joinICloudOnboardingFamily(context.Background(), task, iCloudOnboardingSecret{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(task, task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if familyCalls != 0 || task.Stage != iCloudOnboardingStageFamilySharing || task.Status != iCloudOnboardingWaiting ||
+		task.DispatchStatus != "waiting" || !task.FamilyReservationConfirmed {
+		t.Fatalf("direct invite was unexpectedly reconciled: family_calls=%d task=%+v", familyCalls, task)
+	}
+	var state appleOnboardingBrowserState
+	if err := json.Unmarshal(task.SessionPayload, &state); err != nil || state.OldChannel == nil || state.OldChannel.Cookie != old.Cookie ||
+		len(state.Cookies) != 0 || state.GSToken != "" {
+		t.Fatalf("family success lost old channel or retained family session: state=%+v err=%v", state, err)
 	}
 }
 
 func TestICloudOnboardingFamilyApplyInviteFailurePreservesOriginalFamily(t *testing.T) {
+	t.Skip("legacy FamilyWS reconciliation workflow was removed; direct invitations are tested separately")
 	service, db, task, _ := newOnboardingStateTest(t)
 	service.onboardingApple = onboardingFamilyInvalidApple{}
 	if err := db.AutoMigrate(&iCloudRootModel{}); err != nil {
@@ -1319,6 +1438,7 @@ func TestICloudOnboardingFamilyApplyInviteFailurePreservesOriginalFamily(t *test
 }
 
 func TestICloudOnboardingFamilyApplyRestartReauthenticatesSameFamily(t *testing.T) {
+	t.Skip("legacy FamilyWS reconciliation workflow was removed; direct invitations are tested separately")
 	service, db, task, _ := newOnboardingStateTest(t)
 	if err := db.AutoMigrate(&iCloudRootModel{}); err != nil {
 		t.Fatal(err)
@@ -1368,6 +1488,7 @@ func TestICloudOnboardingFamilyApplyRestartReauthenticatesSameFamily(t *testing.
 }
 
 func TestICloudOnboardingFamilyApplyReconcilesPersistedIntentBeforeCurrentInvite(t *testing.T) {
+	t.Skip("legacy FamilyWS reconciliation workflow was removed; direct invitations are tested separately")
 	db := openICloudFamilyTestDB(t, "onboarding-apply-intent")
 	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
 	primary := iCloudResourceModel{
@@ -1583,7 +1704,7 @@ func TestICloudOnboardingSMSCooldownDoesNotKeepPreparedTransaction(t *testing.T)
 }
 
 func TestICloudOnboardingChecksSMSCooldownBeforeEveryPhase(t *testing.T) {
-	for _, stage := range []string{"icloud_prepare", "family_select", "manage_prepare"} {
+	for _, stage := range []string{"icloud_prepare", "family_prepare", "manage_prepare"} {
 		t.Run(stage, func(t *testing.T) {
 			service, db, task, apple := newOnboardingStateTest(t)
 			retryAt := service.now().UTC().Add(6 * time.Minute)
@@ -1592,6 +1713,11 @@ func TestICloudOnboardingChecksSMSCooldownBeforeEveryPhase(t *testing.T) {
 				"stage": stage, "bound_phone_source": "manual", "kitesim_phone_id": 7,
 			}).Error; err != nil {
 				t.Fatal(err)
+			}
+			if stage == "family_prepare" {
+				if err := db.Model(task).Update("family_invite_url", "https://setup.icloud.com/family/messages?inviteCode=test").Error; err != nil {
+					t.Fatal(err)
+				}
 			}
 			if err := db.First(task, task.ID).Error; err != nil {
 				t.Fatal(err)
@@ -1770,7 +1896,6 @@ func TestICloudOnboardingPostFamilyFailuresRemainRecoverable(t *testing.T) {
 		confirmed bool
 	}{
 		{name: "confirmed family", stage: "manage_profile", confirmed: true},
-		{name: "join result uncertain", stage: "family_join_apply"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			service, db, task, _ := newOnboardingStateTest(t)
@@ -1780,7 +1905,7 @@ func TestICloudOnboardingPostFamilyFailuresRemainRecoverable(t *testing.T) {
 			primaryID, preparationID := uint(88), uint(77)
 			if err := db.Model(task).Updates(map[string]any{
 				"stage": test.stage, "dispatch_status": "running", "claim_token": "claim",
-				"family_primary_resource_id": primaryID, "family_reservation_confirmed": test.confirmed,
+				"family_primary_resource_id": primaryID, "family_invite_url": "https://setup.icloud.com/family/messages?inviteCode=test", "family_reservation_confirmed": test.confirmed,
 				"forward_preparation_id": preparationID, "session_payload": []byte(`{"flow":"post-family"}`),
 				"attempts": 4, "max_attempts": 5,
 			}).Error; err != nil {
@@ -1860,7 +1985,7 @@ func TestICloudOnboardingPostFamilyLeaseExhaustionRemainsRecoverable(t *testing.
 	primaryID, preparationID := uint(88), uint(77)
 	if err := db.Model(task).Updates(map[string]any{
 		"stage": "forwarding_add_apply", "dispatch_status": "running", "claim_token": "claim",
-		"family_primary_resource_id": primaryID, "family_reservation_confirmed": true,
+		"family_primary_resource_id": primaryID, "family_invite_url": "https://setup.icloud.com/family/messages?inviteCode=test", "family_reservation_confirmed": true,
 		"forward_preparation_id": preparationID, "session_payload": []byte(`{"flow":"post-family"}`),
 		"attempts": 4, "max_attempts": 5,
 	}).Error; err != nil {
@@ -1887,7 +2012,7 @@ func TestRetryICloudOnboardingPostFamilyIsIdempotentAndRestoresReservation(t *te
 	primaryID, preparationID := uint(88), uint(77)
 	if err := db.Model(task).Updates(map[string]any{
 		"stage": "sms_verify", "onboarding_status": iCloudOnboardingWaiting, "dispatch_status": "waiting",
-		"family_primary_resource_id": primaryID, "family_reservation_confirmed": true,
+		"family_primary_resource_id": primaryID, "family_invite_url": "https://setup.icloud.com/family/messages?inviteCode=test", "family_reservation_confirmed": true,
 		"forward_preparation_id": preparationID, "session_payload": []byte(`{"flow":"post-family"}`),
 		"pending_sms_purpose": appleSMSManageLogin, "manual_verification_code": "123456",
 		"attempts": 5, "max_attempts": 5, "last_error_category": "sms_rejected", "last_safe_error": "SMS failed.",
@@ -1940,7 +2065,7 @@ func TestRetryICloudOnboardingPostFamilyReplacesUnusableForwardingPreparation(t 
 			primaryID, preparationID := uint(88), uint(77)
 			if err := db.Model(task).Updates(map[string]any{
 				"stage": test.stage, "onboarding_status": iCloudOnboardingWaiting, "dispatch_status": "waiting",
-				"family_primary_resource_id": primaryID, "family_reservation_confirmed": true,
+				"family_primary_resource_id": primaryID, "family_invite_url": "https://setup.icloud.com/family/messages?inviteCode=test", "family_reservation_confirmed": true,
 				"forward_preparation_id": preparationID, "attempts": 5, "max_attempts": 5,
 				"last_error_category": test.category, "last_safe_error": "Apple rejected forwarding.",
 			}).Error; err != nil {
@@ -1990,7 +2115,7 @@ func TestRetryICloudOnboardingPostFamilyReservationConflictStopsBeforeApple(t *t
 	primaryID := uint(88)
 	if err := db.Model(task).Updates(map[string]any{
 		"stage": "family_join_apply", "onboarding_status": iCloudOnboardingWaiting, "dispatch_status": "waiting",
-		"family_primary_resource_id": primaryID, "attempts": 5, "max_attempts": 5,
+		"family_primary_resource_id": primaryID, "family_invite_url": "https://setup.icloud.com/family/messages?inviteCode=test", "attempts": 5, "max_attempts": 5,
 		"last_error_category": "provider_unavailable", "last_safe_error": "Apple family state is uncertain.",
 	}).Error; err != nil {
 		t.Fatal(err)
@@ -2021,6 +2146,7 @@ func TestRetryICloudOnboardingPostFamilyReservationConflictStopsBeforeApple(t *t
 }
 
 func TestICloudOnboardingFamilyReconciliationConsumesMaxAttempts(t *testing.T) {
+	t.Skip("legacy FamilyWS reconciliation workflow was removed; direct invitations are tested separately")
 	service, db, task, _ := newOnboardingStateTest(t)
 	if err := service.ensureICloudOnboardingAppleIDReservation(context.Background(), task); err != nil {
 		t.Fatal(err)

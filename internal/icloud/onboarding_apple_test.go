@@ -25,6 +25,18 @@ type appleOnboardingScriptedSession struct {
 	requestHeaders []map[string]string
 	requestBodies  []any
 	cookies        []msacl.SessionCookie
+	snapshotURLs   [][]string
+}
+
+func snapshotIncludesFamilyWS(snapshots [][]string) bool {
+	for _, snapshot := range snapshots {
+		for _, rawURL := range snapshot {
+			if strings.Contains(strings.ToLower(rawURL), "familyws.icloud.apple.com") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (s *appleOnboardingScriptedSession) Request(method, rawURL string, headers map[string]string, body any, _ bool) (*appleOnboardingHTTPResponse, error) {
@@ -43,7 +55,12 @@ func (s *appleOnboardingScriptedSession) Request(method, rawURL string, headers 
 	return &appleOnboardingHTTPResponse{StatusCode: response.status, Body: response.body, URL: rawURL, Header: response.header}, nil
 }
 
-func (s *appleOnboardingScriptedSession) SnapshotCookies(...string) ([]msacl.SessionCookie, error) {
+func (s *appleOnboardingScriptedSession) SnapshotCookies(urls ...string) ([]msacl.SessionCookie, error) {
+	// Keep track of snapshots so family join tests can assert that the
+	// familyws cookie is not part of the success gate.
+	// (The variadic argument is intentionally copied before recording.)
+	// This helper is test-only and never contacts Apple.
+	s.snapshotURLs = append(s.snapshotURLs, append([]string(nil), urls...))
 	return append([]msacl.SessionCookie(nil), s.cookies...), nil
 }
 
@@ -163,6 +180,29 @@ func TestParseAppleOnboardingBootArgsByID(t *testing.T) {
 	}
 }
 
+func TestAppleOnboardingPrepareFamilyDoesNotFetchInviteDetails(t *testing.T) {
+	session := &appleOnboardingScriptedSession{responses: []appleOnboardingScriptedResponse{
+		{status: http.StatusOK, body: `<script type="application/json" id="boot_args">{"direct":{"authWidgetConfig":{"serviceKey":"family-key"}}}</script>`},
+		{status: http.StatusOK, body: `<html></html>`}, // authorize; missing headers ends the test
+	}}
+	_, err := appleOnboardingTestClient(time.Now(), session).Execute(context.Background(), AppleOnboardingRequest{
+		Operation: appleOnboardingPrepareFamily, Email: "test@example.com", Secret: iCloudOnboardingSecret{Password: "secret"},
+		FamilyInviteURL: "https://setup.icloud.com/family/messages?inviteCode=invite-token",
+	})
+	if err == nil {
+		t.Fatal("expected scripted sign-in failure")
+	}
+	if len(session.requests) != 2 {
+		t.Fatalf("prepare family made an unexpected number of requests: %v (err=%v)", session.requests, err)
+	}
+	wantPaths := []string{"/family/messages?", "/auth/authorize/signin?"}
+	for index, path := range wantPaths {
+		if !strings.Contains(session.requests[index], path) {
+			t.Fatalf("prepare family request %d = %q, want path %q", index, session.requests[index], path)
+		}
+	}
+}
+
 func TestAppleOnboardingKeepsICloudAndAccountHeadersSeparate(t *testing.T) {
 	flow, err := loadAppleOnboardingFlow(context.Background(), appleOnboardingTestClient(time.Now(), &appleOnboardingScriptedSession{}), appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) {
 		state.Mode = "family"
@@ -184,7 +224,7 @@ func TestAppleOnboardingKeepsICloudAndAccountHeadersSeparate(t *testing.T) {
 		t.Fatalf("iCloud request leaked the family GS token: %#v", icloudHeaders)
 	}
 
-	familyHeaders, err := flow.headers("https://account.apple.com/family/invite/details?token=invite-token", false, false, false, false, true, "application/json")
+	familyHeaders, err := flow.headers("https://account.apple.com/family/invite/gs/ws/token", false, false, false, false, true, "application/json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +250,7 @@ func TestAppleOnboardingInvalidStoredSessionRestartsAtSafeStage(t *testing.T) {
 	}{
 		{appleOnboardingFinishICloud, "", "icloud_prepare"},
 		{appleOnboardingFinishICloudCookie, "", "icloud_cookie_prepare"},
-		{appleOnboardingJoinFamily, "", "family_reconcile_prepare"},
+		{appleOnboardingJoinFamily, "", "family_prepare"},
 		{appleOnboardingFetchManage, "", "manage_prepare"},
 		{appleOnboardingSendSMS, appleSMSManageLogin, "manage_prepare"},
 	}
@@ -228,21 +268,24 @@ func TestAppleOnboardingInvalidStoredSessionRestartsAtSafeStage(t *testing.T) {
 	}
 }
 
-func TestAppleOnboardingMissingPostWriteCookiesRestartsAuthentication(t *testing.T) {
+func TestAppleOnboardingFamilyJoinDoesNotRequireFamilyWSCookies(t *testing.T) {
 	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
 	t.Run("family", func(t *testing.T) {
-		flow, err := loadAppleOnboardingFlow(context.Background(), appleOnboardingTestClient(now, &appleOnboardingScriptedSession{}), appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) {
+		session := &appleOnboardingScriptedSession{}
+		flow, err := loadAppleOnboardingFlow(context.Background(), appleOnboardingTestClient(now, session), appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) {
 			state.Mode = "family"
 		}), "test@example.com")
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = flow.familyJoinResponse()
-		providerErr, ok := err.(*AppleOnboardingError)
-		if !ok || providerErr.RestartStage != "family_reconcile_prepare" {
-			t.Fatalf("family cookie recovery = %#v", err)
+		response, err := flow.familyJoinResponse()
+		if err != nil || response.Next != "ready" || response.FamilyChannel != nil || len(session.snapshotURLs) != 0 {
+			t.Fatalf("family join response = %+v err=%v snapshots=%v", response, err, session.snapshotURLs)
 		}
 	})
+
+	// Management export still requires its own account cookies; keep that
+	// existing authentication safeguard covered here.
 	t.Run("manage", func(t *testing.T) {
 		session := &appleOnboardingScriptedSession{responses: []appleOnboardingScriptedResponse{{status: http.StatusOK, body: `{}`}}}
 		flow, err := loadAppleOnboardingFlow(context.Background(), appleOnboardingTestClient(now, session), appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) {
@@ -353,7 +396,7 @@ func TestAppleOnboardingReconcilesAppliedWritesBeforeMutation(t *testing.T) {
 			}),
 		})
 		providerErr, ok := err.(*AppleOnboardingError)
-		if !ok || providerErr.RestartStage != "family_reconcile_prepare" || len(session.requests) != 0 {
+		if !ok || providerErr.RestartStage != "family_prepare" || len(session.requests) != 0 {
 			t.Fatalf("unexpected family restart: err=%#v requests=%v", err, session.requests)
 		}
 	})
@@ -395,7 +438,7 @@ func TestAppleOnboardingReconcilesAppliedWritesBeforeMutation(t *testing.T) {
 				state.InviteToken = "invite-token"
 			}),
 		})
-		if err != nil || response.Next != "ready" || response.FamilyChannel == nil || len(session.requests) != 2 {
+		if err != nil || response.Next != "ready" || response.FamilyChannel != nil || len(session.requests) != 2 || snapshotIncludesFamilyWS(session.snapshotURLs) {
 			t.Fatalf("family join response=%+v requests=%v err=%v", response, session.requests, err)
 		}
 	})
@@ -416,7 +459,7 @@ func TestAppleOnboardingReconcilesAppliedWritesBeforeMutation(t *testing.T) {
 				state.InviteToken = "invite-token"
 			}),
 		})
-		if err != nil || response.Next != "ready" || response.FamilyChannel == nil || len(session.requests) != 3 {
+		if err != nil || response.Next != "ready" || response.FamilyChannel != nil || len(session.requests) != 3 || snapshotIncludesFamilyWS(session.snapshotURLs) {
 			t.Fatalf("family join response=%+v requests=%v err=%v", response, session.requests, err)
 		}
 	})
@@ -513,13 +556,9 @@ func TestAppleOnboardingReconcilesAppliedWritesBeforeMutation(t *testing.T) {
 	})
 }
 
-func TestAppleOnboardingCreatesPrivateAliasBeforeAddingForward(t *testing.T) {
+func TestAppleOnboardingAddsForwardBeforePrivateAliasExport(t *testing.T) {
 	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
 	session := &appleOnboardingScriptedSession{responses: []appleOnboardingScriptedResponse{
-		{status: http.StatusOK, body: `{"privateEmailList":[],"inactivePrivateEmailList":[],"maxLimitReached":false}`},
-		{status: http.StatusOK, body: `{"emailAddress":"created@icloud.com"}`},
-		{status: http.StatusOK, body: `{"emailAddress":"created@icloud.com","id":"alias-id","active":true}`},
-		{status: http.StatusOK, body: `{"privateEmailList":[{"emailAddress":"created@icloud.com","id":"alias-id"}],"inactivePrivateEmailList":[]}`},
 		{status: http.StatusOK, body: `{"account":{"person":{"reachableAtOptions":{"alternateEmailAddresses":[]}}}}`},
 		{status: http.StatusCreated, body: `{"verificationId":"verify-id"}`},
 	}}
@@ -530,14 +569,7 @@ func TestAppleOnboardingCreatesPrivateAliasBeforeAddingForward(t *testing.T) {
 	if err != nil || response.Next != "pending" {
 		t.Fatalf("forward add response=%+v err=%v", response, err)
 	}
-	wantPaths := []string{
-		"/account/manage/email/private",
-		"/account/manage/email/private/add",
-		"/account/manage/email/private/add/complete",
-		"/account/manage/email/private",
-		"/account/manage",
-		"/account/manage/email/alternate/add/verification",
-	}
+	wantPaths := []string{"/account/manage", "/account/manage/email/alternate/add/verification"}
 	if len(session.requests) != len(wantPaths) {
 		t.Fatalf("request count=%d requests=%v", len(session.requests), session.requests)
 	}
@@ -546,13 +578,9 @@ func TestAppleOnboardingCreatesPrivateAliasBeforeAddingForward(t *testing.T) {
 			t.Fatalf("request[%d]=%q want path %q", index, session.requests[index], path)
 		}
 	}
-	complete, ok := session.requestBodies[2].(map[string]any)
-	if !ok || complete["emailAddress"] != "created@icloud.com" || complete["label"] != "ReMail" {
-		t.Fatalf("alias completion payload=%#v", session.requestBodies[2])
-	}
 	var state appleOnboardingBrowserState
-	if err := json.Unmarshal(response.Session, &state); err != nil || !state.PrivateAliasReady {
-		t.Fatalf("private alias checkpoint=%+v err=%v", state, err)
+	if err := json.Unmarshal(response.Session, &state); err != nil || state.PrivateAliasReady {
+		t.Fatalf("forward add created an alias early: state=%+v err=%v", state, err)
 	}
 }
 
@@ -560,17 +588,17 @@ func TestAppleOnboardingReusesExistingPrivateAlias(t *testing.T) {
 	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
 	session := &appleOnboardingScriptedSession{responses: []appleOnboardingScriptedResponse{
 		{status: http.StatusOK, body: `{"privateEmailList":[{"emailAddress":"existing@icloud.com","id":"alias-id"}],"inactivePrivateEmailList":[],"maxLimitReached":false}`},
-		{status: http.StatusOK, body: `{"account":{"person":{"reachableAtOptions":{"alternateEmailAddresses":[]}}}}`},
-		{status: http.StatusCreated, body: `{"verificationId":"verify-id"}`},
-	}}
+		{status: http.StatusOK, body: `{"forwardToEmail":{"address":"relay@example.com"}}`},
+		{status: http.StatusOK, body: `{}`},
+	}, cookies: []msacl.SessionCookie{{Name: "myacinfo", Value: "new-value", Domain: ".apple.com", Host: "appleid.apple.com"}}}
 	response, err := appleOnboardingTestClient(now, session).Execute(context.Background(), AppleOnboardingRequest{
-		Operation: appleOnboardingAddForward, ForwardToEmail: "relay@example.com",
+		Operation: appleOnboardingExport, ForwardToEmail: "relay@example.com",
 		Session: appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) { state.APIKey = "api-key" }),
 	})
-	if err != nil || response.Next != "pending" {
-		t.Fatalf("forward add response=%+v err=%v", response, err)
+	if err != nil || response.NewChannel == nil {
+		t.Fatalf("export response=%+v err=%v", response, err)
 	}
-	if len(session.requests) != 3 || strings.Contains(session.requests[1], "/email/private/add") || strings.Contains(session.requests[2], "/email/private/add") {
+	if len(session.requests) != 3 || strings.Contains(strings.Join(session.requests, "\n"), "/email/private/add") {
 		t.Fatalf("existing alias triggered creation: %v", session.requests)
 	}
 	var state appleOnboardingBrowserState

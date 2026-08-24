@@ -191,6 +191,11 @@ type iCloudOnboardingExistingResource struct {
 	FamilyPrimaryResourceID *uint  `gorm:"column:family_primary_resource_id"`
 }
 
+func isICloudOnboardingRetryablePlaceholder(resource iCloudOnboardingExistingResource) bool {
+	return firstNonEmpty(strings.TrimSpace(resource.TaskKind), "onboarding") == "onboarding" &&
+		resource.OnboardingStatus == iCloudOnboardingFailed && !resource.ForSale
+}
+
 type OnboardingTaskView struct {
 	ID                      uint       `json:"id"`
 	TaskKind                string     `json:"taskKind"`
@@ -272,8 +277,8 @@ func parseICloudOnboardingImport(content []byte) ([]iCloudOnboardingLine, error)
 
 func parseICloudOnboardingLine(lineNumber int, raw string) (iCloudOnboardingLine, error) {
 	parts := strings.Split(raw, "----")
-	if len(parts) < 8 || len(parts) > 10 {
-		return iCloudOnboardingLine{}, fmt.Errorf("%w: line %d must contain 8 to 10 fields", ErrICloudOnboardingInvalid, lineNumber)
+	if len(parts) != 10 {
+		return iCloudOnboardingLine{}, fmt.Errorf("%w: line %d must contain exactly 10 fields", ErrICloudOnboardingInvalid, lineNumber)
 	}
 	for index := range parts {
 		parts[index] = strings.TrimSpace(parts[index])
@@ -306,39 +311,17 @@ func parseICloudOnboardingLine(lineNumber int, raw string) (iCloudOnboardingLine
 	if err != nil || birthday.After(time.Now().UTC()) {
 		return iCloudOnboardingLine{}, fmt.Errorf("%w: invalid birthday on line %d", ErrICloudOnboardingInvalid, lineNumber)
 	}
-	phone, invite := "", ""
-	if len(parts) == 9 {
-		candidate := parts[8]
-		phoneShaped := candidate != "" && strings.IndexFunc(candidate, func(char rune) bool {
-			return (char < '0' || char > '9') && !strings.ContainsRune("+ -().", char)
-		}) == -1
-		if candidate != "" {
-			if !phoneShaped {
-				invite = candidate
-			} else {
-				phone = onboardingPhoneDigits(candidate)
-				if len(phone) < 7 || len(phone) > 20 {
-					return iCloudOnboardingLine{}, fmt.Errorf("%w: invalid phone number on line %d", ErrICloudOnboardingInvalid, lineNumber)
-				}
-			}
-		}
+	candidate := parts[8]
+	phoneShaped := candidate != "" && strings.IndexFunc(candidate, func(char rune) bool {
+		return (char < '0' || char > '9') && !strings.ContainsRune("+ -().", char)
+	}) == -1
+	phone := onboardingPhoneDigits(candidate)
+	if !phoneShaped || len(phone) < 7 || len(phone) > 20 {
+		return iCloudOnboardingLine{}, fmt.Errorf("%w: invalid phone number on line %d", ErrICloudOnboardingInvalid, lineNumber)
 	}
-	if len(parts) == 10 {
-		if candidate := parts[8]; candidate != "" {
-			phoneShaped := strings.IndexFunc(candidate, func(char rune) bool {
-				return (char < '0' || char > '9') && !strings.ContainsRune("+ -().", char)
-			}) == -1
-			phone = onboardingPhoneDigits(candidate)
-			if !phoneShaped || len(phone) < 7 || len(phone) > 20 {
-				return iCloudOnboardingLine{}, fmt.Errorf("%w: invalid phone number on line %d", ErrICloudOnboardingInvalid, lineNumber)
-			}
-		}
-		invite = parts[9]
-	}
-	if invite != "" || len(parts) == 10 {
-		if !validICloudFamilyInvite(invite) {
-			return iCloudOnboardingLine{}, fmt.Errorf("%w: invalid family invitation on line %d", ErrICloudOnboardingInvalid, lineNumber)
-		}
+	invite := parts[9]
+	if !validICloudFamilyInvite(invite) {
+		return iCloudOnboardingLine{}, fmt.Errorf("%w: invalid family invitation on line %d", ErrICloudOnboardingInvalid, lineNumber)
 	}
 	return iCloudOnboardingLine{
 		LineNumber: lineNumber, Region: region, CountryCode: countryCodeFromICloudRegion(region),
@@ -639,20 +622,21 @@ func (s *Service) AcceptAdminICloudOnboardingImport(
 		}
 		var existing []iCloudOnboardingExistingResource
 		if err := tx.Table("icloud_resources AS ir").Clauses(clause.Locking{Strength: "UPDATE"}).
-			Select("ir.id, er.owner_user_id, ir.primary_email, ir.account_role, ir.status, ir.task_kind, ir.onboarding_status, ir.for_sale, ir.generation, ir.credential_revision, ir.validation_generation, ir.bound_phone_number, ir.bound_phone_country_code, ir.bound_phone_source, ir.kitesim_phone_id, ir.family_primary_resource_id").
+			Select("ir.id, er.owner_user_id, ir.primary_email, ir.account_role, ir.status, ir.task_kind, ir.onboarding_status, ir.for_sale, ir.generation, ir.credential_revision, ir.validation_generation, ir.bound_phone_number, ir.bound_phone_country_code, ir.bound_phone_source, ir.kitesim_phone_id").
 			Joins("JOIN email_resources AS er ON er.id = ir.id AND er.type = ?", "icloud").
 			Where("LOWER(ir.primary_email) IN ?", emails).Find(&existing).Error; err != nil {
 			return ErrICloudOnboardingTemporary
 		}
 		existingByEmail := make(map[string]iCloudOnboardingExistingResource, len(existing))
 		for _, resource := range existing {
-			activeWorkflow := (resource.TaskKind == "onboarding" || resource.TaskKind == "refresh" || resource.TaskKind == iCloudCookieRecoveryTaskKind) &&
+			taskKind := firstNonEmpty(strings.TrimSpace(resource.TaskKind), "onboarding")
+			activeWorkflow := (taskKind == "onboarding" || taskKind == "refresh" || taskKind == iCloudCookieRecoveryTaskKind) &&
 				(resource.OnboardingStatus == iCloudOnboardingProcessing || resource.OnboardingStatus == iCloudOnboardingWaiting)
 			if activeWorkflow {
 				return ErrICloudResourceIdentity
 			}
-			retryablePlaceholder := resource.TaskKind == "onboarding" && resource.OnboardingStatus == iCloudOnboardingFailed && !resource.ForSale
-			if resource.OwnerUserID != ownerUserID || (resource.AccountRole != "unknown" && !retryablePlaceholder) || resource.Status == iCloudResourceDeleted {
+			retryablePlaceholder := isICloudOnboardingRetryablePlaceholder(resource)
+			if resource.OwnerUserID != ownerUserID || (resource.AccountRole != "unknown" && !retryablePlaceholder) || (resource.Status == iCloudResourceDeleted && !retryablePlaceholder) {
 				return ErrICloudResourceIdentity
 			}
 			existingByEmail[iCloudImportEmailKey(resource.PrimaryEmail)] = resource
@@ -679,7 +663,6 @@ func (s *Service) AcceptAdminICloudOnboardingImport(
 			boundPhoneCountryCode := ""
 			boundPhoneSource := ""
 			var kitesimPhoneID *uint
-			var familyPrimaryResourceID *uint
 			generation := uint64(1)
 			expectedCredentialRevision := uint64(1)
 			if hasExistingResource {
@@ -689,7 +672,6 @@ func (s *Service) AcceptAdminICloudOnboardingImport(
 				boundPhoneCountryCode = existingResource.BoundPhoneCountryCode
 				boundPhoneSource = existingResource.BoundPhoneSource
 				kitesimPhoneID = existingResource.KitesimPhoneID
-				familyPrimaryResourceID = existingResource.FamilyPrimaryResourceID
 				generation = existingResource.Generation + 1
 				if generation == 0 {
 					generation = 1
@@ -715,7 +697,7 @@ func (s *Service) AcceptAdminICloudOnboardingImport(
 				AccountRole: line.AccountRole, Region: line.Region, CountryCode: line.CountryCode,
 				ICloudOpened: line.ICloudOpened, FamilyInviteURL: line.FamilyInviteURL,
 				BoundPhoneNumber: boundPhone, BoundPhoneCountryCode: boundPhoneCountryCode, BoundPhoneSource: boundPhoneSource,
-				KitesimPhoneID: kitesimPhoneID, FamilyPrimaryResourceID: familyPrimaryResourceID, SecretPayload: secret,
+				KitesimPhoneID: kitesimPhoneID, SecretPayload: secret,
 				Status: iCloudOnboardingProcessing, Stage: "accepted", DispatchStatus: "pending",
 				Generation: generation, ExpectedCredentialRevision: expectedCredentialRevision,
 				MaxAttempts: iCloudConfiguredOnboardingMaxAttempts(), CreatedAt: now, UpdatedAt: now,
@@ -740,14 +722,14 @@ func (s *Service) AcceptAdminICloudOnboardingImport(
 
 				}
 				updated := tx.Model(&iCloudResourceModel{}).
-					Where("id = ? AND status <> ? AND (account_role = ? OR (task_kind = ? AND onboarding_status = ? AND for_sale = ?))", *task.ResourceID, iCloudResourceDeleted, "unknown", "onboarding", iCloudOnboardingFailed, false).
+					Where("id = ? AND ((status <> ? AND account_role = ?) OR (task_kind = ? AND onboarding_status = ? AND for_sale = ?))", *task.ResourceID, iCloudResourceDeleted, "unknown", "onboarding", iCloudOnboardingFailed, false).
 					Updates(map[string]any{
 						"status":       gorm.Expr("CASE WHEN status = ? THEN status ELSE ? END", iCloudResourceDisabled, iCloudResourcePending),
 						"account_role": line.AccountRole, "region": line.Region, "country_code": line.CountryCode,
 						"icloud_opened": line.ICloudOpened, "bound_phone_number": resourceBoundPhone,
 						"bound_phone_country_code": resourceBoundPhoneCountryCode, "bound_phone_source": resourceBoundPhoneSource,
 						"kitesim_phone_id":  resourceKitesimPhoneID,
-						"family_invite_url": line.FamilyInviteURL, "for_sale": false,
+						"family_invite_url": line.FamilyInviteURL, "family_primary_resource_id": nil, "family_reservation_confirmed": false, "for_sale": false,
 						"credential_revision": credentialRevision, "credential_updated_at": now,
 						"validation_generation": validationGeneration, "validation_failures": 0,
 						"next_validation_at": nil, "next_provision_at": nil,
@@ -970,9 +952,6 @@ func (s *Service) GetAdminICloudOnboardingImport(ctx context.Context, importID u
 	for index, task := range model.Tasks {
 		view.Tasks[index] = iCloudOnboardingTaskView(task)
 	}
-	if err := s.populateICloudOnboardingFamilyEmails(ctx, view.Tasks); err != nil {
-		return nil, err
-	}
 	return view, nil
 }
 
@@ -983,7 +962,7 @@ func (s *Service) loadICloudOnboardingImport(ctx context.Context, importID uint)
 		return nil, ErrICloudOnboardingNotFound
 	}
 	var tasks []iCloudOnboardingTaskModel
-	if err := s.db.WithContext(ctx).Where("import_id = ? AND task_kind IN ?", importID, []string{"onboarding", "refresh", iCloudCookieRecoveryTaskKind}).Order("line_number ASC, id ASC").Find(&tasks).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("import_id = ? AND task_kind IN ?", importID, []string{"", "onboarding", "refresh", iCloudCookieRecoveryTaskKind}).Order("line_number ASC, id ASC").Find(&tasks).Error; err != nil {
 		return nil, ErrICloudOnboardingTemporary
 	}
 	if len(tasks) == 0 {
@@ -1050,53 +1029,16 @@ func (s *Service) GetAdminICloudOnboardingTask(ctx context.Context, taskID uint)
 		return nil, ErrICloudOnboardingNotFound
 	}
 	var task iCloudOnboardingTaskModel
-	if err := s.db.WithContext(ctx).Where("id = ? AND task_kind IN ?", taskID, []string{"onboarding", "refresh", iCloudCookieRecoveryTaskKind}).First(&task).Error; err != nil {
+	if err := s.db.WithContext(ctx).
+		Where("id = ? AND (task_kind IN ? OR (task_kind = ? AND import_id IS NOT NULL))", taskID, []string{"onboarding", "refresh", iCloudCookieRecoveryTaskKind}, "").
+		First(&task).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrICloudOnboardingNotFound
 		}
 		return nil, ErrICloudOnboardingTemporary
 	}
 	view := iCloudOnboardingTaskView(task)
-	views := []OnboardingTaskView{view}
-	if err := s.populateICloudOnboardingFamilyEmails(ctx, views); err != nil {
-		return nil, err
-	}
-	view = views[0]
 	return &view, nil
-}
-
-func (s *Service) populateICloudOnboardingFamilyEmails(ctx context.Context, tasks []OnboardingTaskView) error {
-	ids := make([]uint, 0)
-	seen := make(map[uint]struct{})
-	for _, task := range tasks {
-		if task.FamilyPrimaryResourceID == nil {
-			continue
-		}
-		if _, exists := seen[*task.FamilyPrimaryResourceID]; !exists {
-			seen[*task.FamilyPrimaryResourceID] = struct{}{}
-			ids = append(ids, *task.FamilyPrimaryResourceID)
-		}
-	}
-	if len(ids) == 0 {
-		return nil
-	}
-	var rows []struct {
-		ID           uint   `gorm:"column:id"`
-		PrimaryEmail string `gorm:"column:primary_email"`
-	}
-	if err := s.db.WithContext(ctx).Model(&iCloudResourceModel{}).Select("id, primary_email").Where("id IN ?", ids).Scan(&rows).Error; err != nil {
-		return ErrICloudOnboardingTemporary
-	}
-	byID := make(map[uint]string, len(rows))
-	for _, row := range rows {
-		byID[row.ID] = row.PrimaryEmail
-	}
-	for index := range tasks {
-		if tasks[index].FamilyPrimaryResourceID != nil {
-			tasks[index].FamilyPrimaryEmail = byID[*tasks[index].FamilyPrimaryResourceID]
-		}
-	}
-	return nil
 }
 
 func iCloudOnboardingTaskView(task iCloudOnboardingTaskModel) OnboardingTaskView {

@@ -287,12 +287,11 @@ func (f *appleOnboardingFlow) prepareFamily(request AppleOnboardingRequest) (App
 	if err := f.reset("family"); err != nil {
 		return AppleOnboardingResponse{}, err
 	}
+	// All onboarding now uses the supplied invitation. Keep the legacy
+	// operation accepted for old callers, but deliberately use the same login
+	// purpose and restart stage so it cannot re-enter primary-family recovery.
 	smsPurpose := appleSMSFamilyLogin
 	restartStage := "family_prepare"
-	if request.Operation == appleOnboardingPrepareFamilyReconcile {
-		smsPurpose = appleSMSFamilyReconcileLogin
-		restartStage = "family_reconcile_prepare"
-	}
 	f.state.RedirectURI = f.endpoints.Account
 	f.state.RememberMe = false
 	f.state.InviteToken = token
@@ -304,18 +303,14 @@ func (f *appleOnboardingFlow) prepareFamily(request AppleOnboardingRequest) (App
 	if err != nil {
 		return AppleOnboardingResponse{}, err
 	}
-	if err := f.loadFamilyWidget(html); err != nil {
-		return AppleOnboardingResponse{}, err
-	}
-	details, err := f.getObject(strings.TrimRight(f.endpoints.Account, "/")+"/family/invite/details?token="+url.QueryEscape(token), "invite/details", false, false, true, "application/json, text/plain, */*")
-	if err != nil {
-		return AppleOnboardingResponse{}, err
-	}
 	if f.state.Status == http.StatusNotFound || f.state.Status == http.StatusGone {
 		return AppleOnboardingResponse{}, &AppleOnboardingError{Category: "family_invite_expired", SafeMessage: "The family invitation is expired or invalid."}
 	}
-	if f.state.Status != http.StatusOK {
-		return AppleOnboardingResponse{}, appleOnboardingPermanent("family_invite_unavailable", "The family invitation is unavailable.", details)
+	if f.state.Status < http.StatusOK || f.state.Status >= http.StatusMultipleChoices {
+		return AppleOnboardingResponse{}, &AppleOnboardingError{Category: "family_invite_unavailable", SafeMessage: "The family invitation is unavailable.", HTTPStatus: f.state.Status}
+	}
+	if err := f.loadFamilyWidget(html); err != nil {
+		return AppleOnboardingResponse{}, err
 	}
 	if err := f.authorize(); err != nil {
 		return AppleOnboardingResponse{}, err
@@ -352,7 +347,7 @@ func (f *appleOnboardingFlow) prepareFamily(request AppleOnboardingRequest) (App
 
 func (f *appleOnboardingFlow) joinFamily(request AppleOnboardingRequest) (AppleOnboardingResponse, error) {
 	if f.state.Mode != "family" {
-		return AppleOnboardingResponse{}, appleOnboardingRestart("family_reconcile_prepare")
+		return AppleOnboardingResponse{}, appleOnboardingRestart("family_prepare")
 	}
 	if organizer := strings.ToLower(strings.TrimSpace(request.FamilyOrganizerEmail)); organizer != "" {
 		f.state.FamilyOrganizerEmail = organizer
@@ -362,7 +357,7 @@ func (f *appleOnboardingFlow) joinFamily(request AppleOnboardingRequest) (AppleO
 		return AppleOnboardingResponse{}, err
 	}
 	if !hasCookie {
-		return AppleOnboardingResponse{}, appleOnboardingRestart("family_reconcile_prepare")
+		return AppleOnboardingResponse{}, appleOnboardingRestart("family_prepare")
 	}
 	_, err = f.request(http.MethodGet, strings.TrimRight(f.endpoints.Account, "/")+"/family/invite/gs/ws/token", nil, false, false, false, false, true, "application/json, text/plain, */*")
 	if err != nil {
@@ -370,7 +365,7 @@ func (f *appleOnboardingFlow) joinFamily(request AppleOnboardingRequest) (AppleO
 	}
 	if (f.state.Status != http.StatusOK && f.state.Status != http.StatusNoContent) || f.state.GSToken == "" {
 		if f.state.Status == http.StatusUnauthorized || f.state.Status == http.StatusForbidden {
-			return AppleOnboardingResponse{}, appleOnboardingRestart("family_reconcile_prepare")
+			return AppleOnboardingResponse{}, appleOnboardingRestart("family_prepare")
 		}
 		return AppleOnboardingResponse{}, &AppleOnboardingError{Category: "family_token_missing", SafeMessage: "Apple did not return a family authorization token.", Retryable: true}
 	}
@@ -382,7 +377,7 @@ func (f *appleOnboardingFlow) joinFamily(request AppleOnboardingRequest) (AppleO
 		return AppleOnboardingResponse{}, &AppleOnboardingError{Category: "family_invite_expired", SafeMessage: "The family invitation is expired or invalid."}
 	}
 	if f.state.Status == http.StatusUnauthorized || f.state.Status == http.StatusForbidden {
-		return AppleOnboardingResponse{}, appleOnboardingRestart("family_reconcile_prepare")
+		return AppleOnboardingResponse{}, appleOnboardingRestart("family_prepare")
 	}
 	if appleOnboardingFamilyJoinApplied(f.state.Status) {
 		return f.familyJoinResponse()
@@ -409,7 +404,7 @@ func (f *appleOnboardingFlow) joinFamily(request AppleOnboardingRequest) (AppleO
 			return AppleOnboardingResponse{}, err
 		}
 		if f.state.Status == http.StatusUnauthorized || f.state.Status == http.StatusForbidden {
-			return AppleOnboardingResponse{}, appleOnboardingRestart("family_reconcile_prepare")
+			return AppleOnboardingResponse{}, appleOnboardingRestart("family_prepare")
 		}
 		// Apple can apply the membership and still return a stale 400.
 		if appleOnboardingFamilyJoinApplied(f.state.Status) {
@@ -423,23 +418,9 @@ func (f *appleOnboardingFlow) joinFamily(request AppleOnboardingRequest) (AppleO
 }
 
 func (f *appleOnboardingFlow) familyJoinResponse() (AppleOnboardingResponse, error) {
-	// The family member/session host is separate from both the iCloud web host
-	// and account.apple.com. Keep it aligned with the familyws client endpoint.
-	endpoint := iCloudFamilyMembersBase
-	cookies, err := f.http.SnapshotCookies(endpoint, f.endpoints.Account, f.endpoints.Setup)
-	if err != nil {
-		return AppleOnboardingResponse{}, err
-	}
-	cookie := appleOnboardingCookieString(cookies, "apple.com")
-	if cookie == "" {
-		return AppleOnboardingResponse{}, appleOnboardingRestart("family_reconcile_prepare")
-	}
-	browser := f.browserProfile()
-	return AppleOnboardingResponse{Next: "ready", FamilyChannel: &AppleOnboardingChannel{
-		Kind: iCloudChannelFamilySession, Host: appleOnboardingHost(endpoint), Cookie: cookie, SetupCookie: cookie,
-		Origin: endpoint, Referer: endpoint + "/members?wid=d&env=idms_prod_account&theme=light&locale=zh_CN",
-		UserAgent: browser.UserAgent,
-	}}, nil
+	// Accept/update completion is the family-join success signal. The familyws
+	// session is not needed by onboarding and must not gate the next stage.
+	return AppleOnboardingResponse{Next: "ready"}, nil
 }
 
 func (f *appleOnboardingFlow) prepareManage(request AppleOnboardingRequest) (AppleOnboardingResponse, error) {
@@ -552,9 +533,6 @@ func (f *appleOnboardingFlow) addForward(request AppleOnboardingRequest) (AppleO
 	}
 	if address == "" {
 		return AppleOnboardingResponse{}, &AppleOnboardingError{Category: "forward_address_missing", SafeMessage: "Forwarding address is missing."}
-	}
-	if err := f.ensurePrivateAlias(); err != nil {
-		return AppleOnboardingResponse{}, err
 	}
 	alternate, err := f.loadAlternateEmail(address)
 	if err != nil {
@@ -1099,7 +1077,7 @@ func appleOnboardingRestartStage(purpose string) string {
 	case appleSMSFamilyLogin:
 		return "family_prepare"
 	case appleSMSFamilyReconcileLogin:
-		return "family_reconcile_prepare"
+		return "family_prepare"
 	case appleSMSManageLogin:
 		return "manage_prepare"
 	default:

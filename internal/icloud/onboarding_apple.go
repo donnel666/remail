@@ -237,6 +237,20 @@ func (f *appleOnboardingFlow) snapshot() (json.RawMessage, error) {
 	return json.Marshal(f.state)
 }
 
+func appleOnboardingCheckpoint(raw []byte) json.RawMessage {
+	var state appleOnboardingBrowserState
+	if len(raw) == 0 || json.Unmarshal(raw, &state) != nil || state.Version != appleOnboardingStateVersion {
+		return nil
+	}
+	checkpoint, err := json.Marshal(appleOnboardingBrowserState{
+		Version: appleOnboardingStateVersion, UserAgent: state.UserAgent, OldChannel: state.OldChannel,
+	})
+	if err != nil {
+		return nil
+	}
+	return checkpoint
+}
+
 func (f *appleOnboardingFlow) request(method, rawURL string, body any, html, profile, sendHashcash, appID, noSession bool, accept string) ([]byte, error) {
 	headers, err := f.headers(rawURL, html, profile, sendHashcash, appID, noSession, accept)
 	if err != nil {
