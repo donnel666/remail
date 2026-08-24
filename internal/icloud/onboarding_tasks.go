@@ -1080,14 +1080,19 @@ func (s *Service) importICloudOnboardingResource(ctx context.Context, task *iClo
 	if task.KitesimPhoneID == nil || strings.TrimSpace(task.BoundPhoneNumber) == "" {
 		return s.failICloudOnboardingTask(ctx, task, "phone_binding_missing", "The Apple ID has no permanent eSIM phone binding.")
 	}
-	preparation, err := s.iCloudOnboardingForwarding(ctx, task)
-	if err != nil {
-		if errors.Is(err, ErrICloudImportPreparationConflict) || errors.Is(err, ErrICloudImportPreparationNotFound) {
-			return s.retryICloudOnboardingForwardingPreparation(ctx, task)
+	var preparation *iCloudImportPreparationModel
+	forwardTo := strings.ToLower(strings.TrimSpace(task.SelectedForwardTo))
+	if task.ForwardPreparationID != nil || forwardTo != "" {
+		var err error
+		preparation, err = s.iCloudOnboardingForwarding(ctx, task)
+		if err != nil {
+			if errors.Is(err, ErrICloudImportPreparationConflict) || errors.Is(err, ErrICloudImportPreparationNotFound) {
+				return s.retryICloudOnboardingForwardingPreparation(ctx, task)
+			}
+			return err
 		}
-		return err
+		forwardTo = strings.ToLower(strings.TrimSpace(preparation.ForwardToEmail))
 	}
-	forwardTo := strings.ToLower(strings.TrimSpace(preparation.ForwardToEmail))
 	response, err := s.executeICloudOnboardingApple(ctx, task, secret, AppleOnboardingRequest{
 		Operation: appleOnboardingExport, ForwardToEmail: forwardTo,
 	})
@@ -1102,6 +1107,9 @@ func (s *Service) importICloudOnboardingResource(ctx context.Context, task *iClo
 			"session_payload": nil, "pending_sms_purpose": "", "manual_verification_code": "",
 			"sms_sent_at": nil, "sms_poll_deadline": nil,
 		})
+	}
+	if preparation == nil {
+		return s.retryICloudOnboardingForwardingPreparation(ctx, task)
 	}
 	birthday, err := time.Parse("2006-01-02", secret.Birthday)
 	if err != nil {
@@ -1960,12 +1968,12 @@ func (s *Service) RetryICloudOnboardingPostFamily(
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&task, taskID).Error; err != nil {
 			return ErrICloudOnboardingInvalid
 		}
+		if err := s.ensureICloudOnboardingAppleIDReservationTx(tx, &task); err != nil {
+			return err
+		}
 		stage := iCloudPostFamilyRecoveryStage(task)
 		if !isICloudPostFamilyRecoveryWaiting(task) || stage == "" {
 			return ErrICloudOnboardingInvalid
-		}
-		if err := s.ensureICloudOnboardingAppleIDReservationTx(tx, &task); err != nil {
-			return err
 		}
 		importID = iCloudOnboardingImportID(&task)
 		stored := task
