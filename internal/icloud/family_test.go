@@ -221,11 +221,13 @@ func TestICloudFamilyRetryAfterSurvivesEarlierHMERetry(t *testing.T) {
 	if err := service.ProcessICloudProvision(context.Background(), iCloudProvisionTask{ResourceID: resource.ID}); err != nil {
 		t.Fatalf("first provision: %v", err)
 	}
-	if err := db.First(&resource, resource.ID).Error; err != nil {
+	var stored iCloudResourceModel
+	if err := db.First(&stored, resource.ID).Error; err != nil {
 		t.Fatalf("reload first provision: %v", err)
 	}
-	if hmeCalls != 1 || familyCalls != 1 || resource.FamilyNextSyncAt == nil || !resource.FamilyNextSyncAt.Equal(now.Add(20*time.Minute)) ||
-		resource.NextProvisionAt == nil || !resource.NextProvisionAt.Equal(now.Add(iCloudProvisionRetry)) {
+	resource = stored
+	if hmeCalls != 0 || familyCalls != 1 || resource.FamilyNextSyncAt == nil || !resource.FamilyNextSyncAt.Equal(now.Add(20*time.Minute)) ||
+		resource.NextProvisionAt != nil {
 		t.Fatalf("independent retry schedule was not persisted: hme=%d family=%d resource=%#v", hmeCalls, familyCalls, resource)
 	}
 
@@ -233,11 +235,14 @@ func TestICloudFamilyRetryAfterSurvivesEarlierHMERetry(t *testing.T) {
 	if err := service.ProcessICloudProvision(context.Background(), iCloudProvisionTask{ResourceID: resource.ID}); err != nil {
 		t.Fatalf("earlier HME retry: %v", err)
 	}
-	if err := db.First(&resource, resource.ID).Error; err != nil {
+	stored = iCloudResourceModel{}
+	if err := db.First(&stored, resource.ID).Error; err != nil {
 		t.Fatalf("reload HME retry: %v", err)
 	}
-	if familyCalls != 1 || resource.FamilyNextSyncAt == nil || !resource.FamilyNextSyncAt.Equal(familyDue.Add(20*time.Minute)) {
-		t.Fatalf("earlier HME retry ignored FamilyWS Retry-After: calls=%d resource=%#v", familyCalls, resource)
+	resource = stored
+	if hmeCalls != 0 || familyCalls != 1 || resource.FamilyNextSyncAt == nil || !resource.FamilyNextSyncAt.Equal(familyDue.Add(20*time.Minute)) ||
+		resource.NextProvisionAt != nil {
+		t.Fatalf("full resource retried before FamilyWS Retry-After: hme=%d family=%d resource=%#v", hmeCalls, familyCalls, resource)
 	}
 }
 

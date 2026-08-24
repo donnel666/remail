@@ -793,6 +793,7 @@ func TestICloudProvisionKeepsExpiredResourceAliveAndStopsFullResource(t *testing
 	resources := []iCloudResourceModel{
 		{ID: 1, ResourceType: "icloud", PrimaryEmail: "expired@example.com", Status: iCloudResourceNormal, ExpireAt: now.Add(-time.Minute), CredentialRevision: 1, NextProvisionAt: &now, CreatedAt: now, UpdatedAt: now},
 		{ID: 2, ResourceType: "icloud", PrimaryEmail: "full@example.com", Status: iCloudResourceNormal, ExpireAt: now.Add(time.Hour), AliasCount: iCloudMaxAliases, CredentialRevision: 1, ValidationGeneration: 1, NextValidationAt: &now, NextProvisionAt: &now, CreatedAt: now, UpdatedAt: now},
+		{ID: 3, ResourceType: "icloud", PrimaryEmail: "full-primary@example.com", AccountRole: "primary", FamilySyncStatus: iCloudFamilySyncUnknown, Status: iCloudResourceNormal, ExpireAt: now.Add(time.Hour), AliasCount: iCloudMaxAliases, CredentialRevision: 1, CreatedAt: now, UpdatedAt: now},
 	}
 	if err := db.Create(&resources).Error; err != nil {
 		t.Fatalf("create resources: %v", err)
@@ -834,17 +835,25 @@ func TestICloudProvisionKeepsExpiredResourceAliveAndStopsFullResource(t *testing
 		t.Fatalf("dispatch keepalive-only resources: %v", err)
 	}
 	tasks, err := inspector.ListPendingTasks(platform.QueueBackgroundICloudValidation)
-	if err != nil || len(tasks) != 1 {
+	if err != nil || len(tasks) != 2 {
 		t.Fatalf("pending keepalive tasks=%d err=%v", len(tasks), err)
 	}
+	queued := make(map[uint]bool, len(tasks))
 	for _, pending := range tasks {
 		var task iCloudProvisionTask
 		if err := json.Unmarshal(pending.Payload, &task); err != nil {
 			t.Fatalf("decode provision task: %v", err)
 		}
+		queued[task.ResourceID] = true
+		if task.ResourceID == 3 {
+			continue
+		}
 		if err := service.ProcessICloudProvision(context.Background(), task); err != nil {
 			t.Fatalf("process keepalive for resource %d: %v", task.ResourceID, err)
 		}
+	}
+	if !queued[1] || queued[2] || !queued[3] {
+		t.Fatalf("unexpected provision dispatch set: %#v", queued)
 	}
 	if len(paths) != 2 {
 		t.Fatalf("keepalive request paths = %#v", paths)
@@ -880,6 +889,13 @@ func TestICloudProvisionKeepsExpiredResourceAliveAndStopsFullResource(t *testing
 	}
 	if validationRun.Status != iCloudMaintenanceCanceled || validationRun.FinishedAt == nil {
 		t.Fatalf("full resource validation run was not canceled: %#v", validationRun)
+	}
+	var fullPrimary iCloudResourceModel
+	if err := db.First(&fullPrimary, 3).Error; err != nil {
+		t.Fatal(err)
+	}
+	if fullPrimary.NextProvisionAt != nil || fullPrimary.FamilySyncStatus != iCloudFamilySyncUnknown {
+		t.Fatalf("full primary family sync was not independently dispatched: %#v", fullPrimary)
 	}
 }
 

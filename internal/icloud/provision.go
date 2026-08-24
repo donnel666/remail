@@ -30,6 +30,12 @@ type iCloudProvisionScope struct {
 	Channels []iCloudResourceChannelModel
 }
 
+func iCloudFamilySyncDue(resource iCloudResourceModel, now time.Time) bool {
+	return resource.AccountRole == "primary" &&
+		(resource.FamilyNextSyncAt != nil && !resource.FamilyNextSyncAt.After(now) ||
+			resource.FamilyNextSyncAt == nil && resource.FamilySyncStatus != iCloudFamilySyncFailed)
+}
+
 func (s *Service) DispatchICloudProvisions(ctx context.Context, limit int) error {
 	if s == nil || s.db == nil || s.queue == nil {
 		return ErrICloudValidationTemp
@@ -47,8 +53,11 @@ func (s *Service) DispatchICloudProvisions(ctx context.Context, limit int) error
 	var resourceIDs []uint
 	err := s.db.WithContext(ctx).Table("icloud_resources AS ir").Distinct("ir.id").
 		Joins("JOIN icloud_resource_channels AS ch ON ch.resource_id = ir.id").
-		Where("ir.status = ? AND ir.next_provision_at IS NOT NULL AND ir.next_provision_at <= ?", iCloudResourceNormal, now).
-		Where("ir.alias_count < ?", iCloudMaxAliases).
+		Where("ir.status = ?", iCloudResourceNormal).
+		Where(`((ir.alias_count < ? AND ir.next_provision_at IS NOT NULL AND ir.next_provision_at <= ?) OR
+			(ir.account_role = ? AND ch.kind = ? AND ((ir.family_next_sync_at IS NOT NULL AND ir.family_next_sync_at <= ?) OR
+				(ir.family_next_sync_at IS NULL AND ir.family_sync_status <> ?))))`,
+			iCloudMaxAliases, now, "primary", iCloudChannelWeb, now, iCloudFamilySyncFailed).
 		Where("NOT (ir.task_kind IN ? AND ir.onboarding_status IN ? AND ir.expected_credential_revision = ir.credential_revision)", []string{"refresh", iCloudCookieRecoveryTaskKind}, []string{iCloudOnboardingProcessing, iCloudOnboardingWaiting}).
 		Where("NOT (ir.task_kind IN ? AND ir.onboarding_status = ? AND ir.last_error_category = ? AND ir.expected_credential_revision = ir.credential_revision)", []string{"refresh", iCloudCookieRecoveryTaskKind}, iCloudOnboardingFailed, "phone_blacklisted").
 		Order("ir.id ASC").Limit(limit).Pluck("ir.id", &resourceIDs).Error
@@ -97,9 +106,7 @@ func (s *Service) ProcessICloudProvision(ctx context.Context, task iCloudProvisi
 			continue
 		}
 		primaryWeb := scope.Resource.AccountRole == "primary" && channel.Kind == iCloudChannelWeb
-		familyDue := primaryWeb && aliasCount < iCloudMaxAliases &&
-			(scope.Resource.FamilyNextSyncAt != nil && !scope.Resource.FamilyNextSyncAt.After(now) ||
-				scope.Resource.FamilyNextSyncAt == nil && scope.Resource.FamilySyncStatus != iCloudFamilySyncFailed)
+		familyDue := primaryWeb && iCloudFamilySyncDue(scope.Resource, now)
 		if primaryWeb && !familyDue && scope.Resource.FamilyNextSyncAt != nil {
 			nextAt = earlierICloudProvisionAt(nextAt, *scope.Resource.FamilyNextSyncAt)
 		}
@@ -285,11 +292,15 @@ func (s *Service) claimICloudProvision(ctx context.Context, resourceID uint) (*i
 			}
 			return err
 		}
-		if scope.Resource.Status != iCloudResourceNormal || scope.Resource.NextProvisionAt == nil || scope.Resource.NextProvisionAt.After(now) || iCloudCookieMaintenanceBlocksValidation(&scope.Resource) {
+		provisionDue := scope.Resource.NextProvisionAt != nil && !scope.Resource.NextProvisionAt.After(now)
+		familyDue := iCloudFamilySyncDue(scope.Resource, now)
+		if scope.Resource.Status != iCloudResourceNormal || (!provisionDue && !familyDue) || iCloudCookieMaintenanceBlocksValidation(&scope.Resource) {
 			return nil
 		}
 		if scope.Resource.AliasCount >= iCloudMaxAliases {
-			return clearICloudMaintenanceAtAliasLimitTx(ctx, tx, resourceID, now)
+			if err := clearICloudMaintenanceAtAliasLimitTx(ctx, tx, resourceID, now); err != nil || !familyDue {
+				return err
+			}
 		}
 		if err := tx.Order("CASE kind WHEN 'apple_account' THEN 0 ELSE 1 END").
 			Where("resource_id = ?", resourceID).Find(&scope.Channels).Error; err != nil {
