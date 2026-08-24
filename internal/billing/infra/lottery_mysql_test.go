@@ -24,12 +24,13 @@ func TestLotterySystemGrantSettlementMySQL(t *testing.T) {
 	result := db.Exec(`
 INSERT INTO lotteries(
     public_token, created_by_user_id, funding_user_id, title,
-    total_amount, min_payout, max_payout, tier_weights,
+    lottery_type, starting_amount, total_amount, pool_increment_amount,
+    min_payout, max_payout, tier_weights,
     min_account_age_days, draw_at, participant_target, max_participants,
     status, algorithm_version, unused_amount, idempotency_key, request_fingerprint
 ) VALUES (
     'mysql-system-grant', ?, ?, 'System grant',
-    10, 1, 8, JSON_OBJECT('consolation', 80, 'normal', 15, 'lucky', 5),
+    'fixed', 10, 10, 0, 1, 8, JSON_OBJECT('consolation', 80, 'normal', 15, 'lucky', 5),
     0, DATE_ADD(CURRENT_TIMESTAMP(3), INTERVAL 1 HOUR), 2, 2,
     'settling', 'bounded-tier-v1', 0, 'mysql-system-grant', REPEAT('a', 64)
 )`, creatorID, creatorID)
