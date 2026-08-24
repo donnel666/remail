@@ -235,7 +235,6 @@ function LotteryCreateModal({
   visible: boolean;
 }) {
   const { t } = useTranslation();
-  const isMobile = useIsMobile();
   const [form, setForm] = useState<FormState>(initialForm);
   const [submitting, setSubmitting] = useState(false);
   const publishKeyRef = useRef<string | null>(null);
@@ -480,7 +479,7 @@ function LotteryCreateModal({
               onChange={(value) =>
                 setField("drawAt", value instanceof Date ? value : null)
               }
-              position={isMobile ? "topRight" : "bottomLeft"}
+              position="topRight"
               showClear
               style={{ width: "100%" }}
               type="dateTime"
