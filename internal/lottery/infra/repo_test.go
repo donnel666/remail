@@ -57,6 +57,64 @@ func TestAddEntryUsesFreshClockForDrawDeadline(t *testing.T) {
 	require.ErrorIs(t, err, lotterydomain.ErrLotteryClosed)
 }
 
+func TestGrowingLotteryIncrementsPoolWithEachEntry(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:lottery-growing-%s?mode=memory&cache=shared", t.Name())), &gorm.Config{TranslateError: true})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&LotteryModel{}, &EntryModel{}, &PayoutModel{}))
+	weights, err := json.Marshal(lotterydomain.TierWeights{Normal: 1, Lucky: 1})
+	require.NoError(t, err)
+	now := time.Now().UTC()
+	lottery := LotteryModel{
+		PublicToken: "growing-lottery", CreatedByUserID: 1, FundingUserID: 1, Title: "Growing",
+		LotteryType: string(lotterydomain.LotteryTypeGrowing), StartingAmount: "10000.00",
+		TotalAmount: "9999.00", PoolIncrementAmount: "1000.00", MinPayout: "1.00", MaxPayout: "10000.00",
+		TierWeightsJSON: string(weights), MaxParticipants: 10, Status: string(lotterydomain.StatusOpen),
+		AlgorithmVersion: "fixed-tier-v3", IdempotencyKey: "growing-entry-test", CreatedAt: now, UpdatedAt: now,
+	}
+	require.NoError(t, db.Create(&lottery).Error)
+	repo := NewRepo(db)
+	first, err := repo.AddEntry(context.Background(), lottery.ID, 2, now, func() time.Time { return now })
+	require.NoError(t, err)
+	require.Equal(t, 1, first.Lottery.ParticipantCount)
+	require.Equal(t, "11000.00", first.Lottery.TotalAmount)
+	second, err := repo.AddEntry(context.Background(), lottery.ID, 3, now, func() time.Time { return now })
+	require.NoError(t, err)
+	require.Equal(t, 2, second.Lottery.ParticipantCount)
+	require.Equal(t, "12000.00", second.Lottery.TotalAmount)
+
+	stored, err := repo.GetByID(context.Background(), lottery.ID)
+	require.NoError(t, err)
+	require.Equal(t, "10000.00", stored.StartingAmount)
+	require.Equal(t, "12000.00", stored.TotalAmount)
+}
+
+func TestGrowingLotteryBackfillsMissingStartingPoolBeforeIncrementing(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:lottery-growing-backfill-%s?mode=memory&cache=shared", t.Name())), &gorm.Config{TranslateError: true})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&LotteryModel{}, &EntryModel{}, &PayoutModel{}))
+	weights, err := json.Marshal(lotterydomain.TierWeights{Normal: 1})
+	require.NoError(t, err)
+	now := time.Now().UTC()
+	lottery := LotteryModel{
+		PublicToken: "growing-backfill", CreatedByUserID: 1, FundingUserID: 1, Title: "Growing backfill",
+		LotteryType: string(lotterydomain.LotteryTypeGrowing), TotalAmount: "100.00", PoolIncrementAmount: "10.00",
+		MinPayout: "1.00", MaxPayout: "100.00", TierWeightsJSON: string(weights), MaxParticipants: 10,
+		Status: string(lotterydomain.StatusOpen), AlgorithmVersion: "fixed-tier-v3", IdempotencyKey: "growing-backfill-test",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	require.NoError(t, db.Create(&lottery).Error)
+	repo := NewRepo(db)
+	first, err := repo.AddEntry(context.Background(), lottery.ID, 2, now, func() time.Time { return now })
+	require.NoError(t, err)
+	require.Equal(t, "110.00", first.Lottery.TotalAmount)
+	second, err := repo.AddEntry(context.Background(), lottery.ID, 3, now, func() time.Time { return now })
+	require.NoError(t, err)
+	require.Equal(t, "120.00", second.Lottery.TotalAmount)
+	stored, err := repo.GetByID(context.Background(), lottery.ID)
+	require.NoError(t, err)
+	require.Equal(t, "100.00", stored.StartingAmount)
+}
+
 func TestRecordBillingTransactionsRejectsMissingPayout(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:lottery-transactions-%s?mode=memory&cache=shared", t.Name())), &gorm.Config{TranslateError: true})
 	require.NoError(t, err)

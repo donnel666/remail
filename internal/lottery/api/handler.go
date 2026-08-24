@@ -39,7 +39,8 @@ func (h *Handler) PostAdminLottery(c *gin.Context) {
 		return
 	}
 	result, err := h.module.Service.Create(c.Request.Context(), lotteryapp.CreateRequest{
-		CreatedByUserID: userID, Title: request.Title, TotalAmount: request.TotalAmount,
+		CreatedByUserID: userID, Title: request.Title, LotteryType: request.LotteryType,
+		TotalAmount: request.TotalAmount, PoolIncrementAmount: request.PoolIncrementAmount,
 		MinPayout: request.MinPayout, MaxPayout: request.MaxPayout, TierWeights: request.TierWeights,
 		MinAccountAgeDays: request.MinAccountAgeDays, DrawAt: request.DrawAt,
 		ParticipantTarget: request.ParticipantTarget, IdempotencyKey: c.GetHeader("Idempotency-Key"),

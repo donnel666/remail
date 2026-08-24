@@ -59,3 +59,23 @@ func TestPublicLotterySummaryOmitsUnsetParticipantTarget(t *testing.T) {
 	require.Contains(t, text, `"participantCount":100`)
 	require.NotContains(t, text, `"participantTarget"`)
 }
+
+func TestAdminLotteryResponseIncludesGrowingPoolConfiguration(t *testing.T) {
+	response := lotteryResponse(&lotterydomain.Lottery{
+		ID:                  7,
+		LotteryType:         lotterydomain.LotteryTypeGrowing,
+		StartingAmount:      "10000.00",
+		TotalAmount:         "12000.00",
+		PoolIncrementAmount: "1000.00",
+		MinPayout:           "1.00",
+		MaxPayout:           "10000.00",
+	})
+
+	payload, err := json.Marshal(response)
+	require.NoError(t, err)
+	text := string(payload)
+	require.Contains(t, text, `"lotteryType":"growing"`)
+	require.Contains(t, text, `"startingAmount":"10000.00"`)
+	require.Contains(t, text, `"totalAmount":"12000.00"`)
+	require.Contains(t, text, `"poolIncrementAmount":"1000.00"`)
+}

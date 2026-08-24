@@ -40,6 +40,12 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*CreateResult,
 	if req.CreatedByUserID == 0 || key == "" || len(key) > 128 {
 		return nil, lotterydomain.ErrLotteryInvalidRules
 	}
+	req.LotteryType = normalizeLotteryType(req.LotteryType)
+	poolIncrement, _, incrementErr := normalizedPoolIncrement(req)
+	if incrementErr != nil {
+		return nil, incrementErr
+	}
+	req.PoolIncrementAmount = poolIncrement
 	total, minPayout, maxPayout, maxParticipants, err := validateRules(req)
 	if err != nil {
 		return nil, err
@@ -62,24 +68,27 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*CreateResult,
 	}
 	target := copyInt(req.ParticipantTarget)
 	lottery := &lotterydomain.Lottery{
-		PublicToken:        platform.NewUUIDV4String(),
-		CreatedByUserID:    req.CreatedByUserID,
-		Title:              truncateTitle(req.Title),
-		TotalAmount:        total,
-		MinPayout:          minPayout,
-		MaxPayout:          maxPayout,
-		TierWeights:        req.TierWeights,
-		MinAccountAgeDays:  req.MinAccountAgeDays,
-		DrawAt:             copyTime(req.DrawAt),
-		ParticipantTarget:  target,
-		MaxParticipants:    maxParticipants,
-		Status:             lotterydomain.StatusOpen,
-		AlgorithmVersion:   algorithmVersionForWeights(req.TierWeights),
-		UnusedAmount:       "0.00",
-		IdempotencyKey:     key,
-		RequestFingerprint: fingerprint,
-		CreatedAt:          now,
-		UpdatedAt:          now,
+		PublicToken:         platform.NewUUIDV4String(),
+		CreatedByUserID:     req.CreatedByUserID,
+		Title:               truncateTitle(req.Title),
+		LotteryType:         req.LotteryType,
+		StartingAmount:      total,
+		TotalAmount:         total,
+		PoolIncrementAmount: poolIncrement,
+		MinPayout:           minPayout,
+		MaxPayout:           maxPayout,
+		TierWeights:         req.TierWeights,
+		MinAccountAgeDays:   req.MinAccountAgeDays,
+		DrawAt:              copyTime(req.DrawAt),
+		ParticipantTarget:   target,
+		MaxParticipants:     maxParticipants,
+		Status:              lotterydomain.StatusOpen,
+		AlgorithmVersion:    algorithmVersionForWeights(req.TierWeights),
+		UnusedAmount:        "0.00",
+		IdempotencyKey:      key,
+		RequestFingerprint:  fingerprint,
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	}
 	if err := s.repo.Create(ctx, lottery); err != nil {
 		if existing, lookupErr := s.repo.FindByIdempotency(ctx, req.CreatedByUserID, lottery.IdempotencyKey); lookupErr == nil && existing != nil {
@@ -359,6 +368,12 @@ func algorithmVersionForWeights(weights lotterydomain.TierWeights) string {
 }
 
 func validateRules(req CreateRequest) (total, minPayout, maxPayout string, maxParticipants int, err error) {
+	req.LotteryType = normalizeLotteryType(req.LotteryType)
+	_, incrementDec, incrementErr := normalizedPoolIncrement(req)
+	if incrementErr != nil {
+		err = incrementErr
+		return
+	}
 	totalDec, parseErr := money.Parse(req.TotalAmount)
 	if parseErr != nil || !totalDec.IsPositive() {
 		err = lotterydomain.ErrLotteryInvalidRules
@@ -377,6 +392,7 @@ func validateRules(req CreateRequest) (total, minPayout, maxPayout string, maxPa
 	legacyWeights := req.TierWeights.ValidLegacyPercentages()
 	fixedWeights := req.TierWeights.ValidFixedCounts()
 	if req.MinAccountAgeDays < 0 || (!legacyWeights && !fixedWeights) ||
+		(req.LotteryType == lotterydomain.LotteryTypeGrowing && !fixedWeights) ||
 		(fixedWeights && (req.TierWeights.Normal > maxLotteryEntries || req.TierWeights.Lucky > maxLotteryEntries-req.TierWeights.Normal)) ||
 		(req.DrawAt == nil && req.ParticipantTarget == nil) {
 		err = lotterydomain.ErrLotteryInvalidRules
@@ -387,28 +403,67 @@ func validateRules(req CreateRequest) (total, minPayout, maxPayout string, maxPa
 		return
 	}
 	totalUnits, totalErr := wholePointUnits(totalDec)
+	incrementUnits, incrementUnitsErr := wholePointUnits(incrementDec)
 	minUnits, minErr := wholePointUnits(minDec)
 	maxUnits, maxErr := wholePointUnits(maxDec)
-	if totalErr != nil || minErr != nil || maxErr != nil || minUnits <= 0 || maxUnits <= minUnits {
+	if totalErr != nil || incrementUnitsErr != nil || minErr != nil || maxErr != nil || minUnits <= 0 || maxUnits <= minUnits {
 		err = lotterydomain.ErrLotteryInvalidRules
 		return
 	}
 	maxParticipants = maxLotteryEntries
 	if req.ParticipantTarget != nil {
 		target := int64(*req.ParticipantTarget)
-		if target > math.MaxInt64/minUnits || target*minUnits > totalUnits ||
-			target > math.MaxInt64/maxUnits || target*maxUnits < totalUnits {
+		poolUnits := totalUnits
+		if req.LotteryType == lotterydomain.LotteryTypeGrowing {
+			var ok bool
+			poolUnits, ok = growingPoolUnits(totalUnits, incrementUnits, target)
+			if !ok || !poolUnitsWithinMoneyLimit(poolUnits) {
+				err = lotterydomain.ErrLotteryInvalidRules
+				return
+			}
+		}
+		if target > math.MaxInt64/minUnits || target*minUnits > poolUnits ||
+			target > math.MaxInt64/maxUnits || target*maxUnits < poolUnits {
 			// The target draw must be able to distribute the complete pool within
 			// the configured per-participant range.
 			err = lotterydomain.ErrLotteryInvalidRules
 			return
 		}
-		if fixedWeights && !fixedCountsFitPool(target, totalUnits, minUnits, maxUnits, req.TierWeights) {
-			err = lotterydomain.ErrLotteryInvalidRules
-			return
+		if fixedWeights {
+			if !fixedCountsFitPool(target, poolUnits, minUnits, maxUnits, req.TierWeights) {
+				err = lotterydomain.ErrLotteryInvalidRules
+				return
+			}
+			if req.DrawAt != nil && !fixedCountsFitEveryDrawCount(target, func(n int64) (int64, bool) {
+				if req.LotteryType == lotterydomain.LotteryTypeGrowing {
+					return growingPoolUnits(totalUnits, incrementUnits, n)
+				}
+				return totalUnits, true
+			}, minUnits, maxUnits, req.TierWeights) {
+				err = lotterydomain.ErrLotteryInvalidRules
+				return
+			}
 		}
 		maxParticipants = int(target)
 	} else {
+		if req.LotteryType == lotterydomain.LotteryTypeGrowing {
+			poolAtMax, ok := growingPoolUnits(totalUnits, incrementUnits, int64(maxParticipants))
+			if !ok {
+				err = lotterydomain.ErrLotteryInvalidRules
+				return
+			}
+			if !poolUnitsWithinMoneyLimit(poolAtMax) {
+				err = lotterydomain.ErrLotteryInvalidRules
+				return
+			}
+			if fixedWeights && !fixedCountsFitEveryDrawCount(int64(maxParticipants), func(n int64) (int64, bool) {
+				return growingPoolUnits(totalUnits, incrementUnits, n)
+			}, minUnits, maxUnits, req.TierWeights) {
+				err = lotterydomain.ErrLotteryInvalidRules
+				return
+			}
+			return money.Format(totalDec), money.Format(minDec), money.Format(maxDec), maxParticipants, nil
+		}
 		// A time-only activity has no user-supplied target, so cap entries at a
 		// count that can receive at least the configured minimum.
 		if totalUnits < minUnits {
@@ -420,14 +475,52 @@ func validateRules(req CreateRequest) (total, minPayout, maxPayout string, maxPa
 			maxParticipants = int(fundable)
 		}
 		if fixedWeights {
-			if int64(req.TierWeights.Normal+req.TierWeights.Lucky) > int64(maxParticipants) ||
-				!fixedCountsCanFitAnyPool(int64(maxParticipants), totalUnits, minUnits, maxUnits, req.TierWeights) {
+			if !fixedCountsFitEveryDrawCount(int64(maxParticipants), func(int64) (int64, bool) {
+				return totalUnits, true
+			}, minUnits, maxUnits, req.TierWeights) {
 				err = lotterydomain.ErrLotteryInvalidRules
 				return
 			}
 		}
 	}
 	return money.Format(totalDec), money.Format(minDec), money.Format(maxDec), maxParticipants, nil
+}
+
+func normalizeLotteryType(value lotterydomain.LotteryType) lotterydomain.LotteryType {
+	if value == "" {
+		return lotterydomain.LotteryTypeFixed
+	}
+	return value
+}
+
+func normalizedPoolIncrement(req CreateRequest) (string, decimal.Decimal, error) {
+	value := strings.TrimSpace(req.PoolIncrementAmount)
+	if value == "" {
+		value = "0"
+	}
+	increment, err := money.Parse(value)
+	if err != nil || !increment.IsInteger() || increment.IsNegative() {
+		return "", decimal.Zero, lotterydomain.ErrLotteryInvalidRules
+	}
+	typeValue := normalizeLotteryType(req.LotteryType)
+	if !typeValue.Valid() ||
+		(typeValue == lotterydomain.LotteryTypeFixed && !increment.IsZero()) ||
+		(typeValue == lotterydomain.LotteryTypeGrowing && !increment.IsPositive()) {
+		return "", decimal.Zero, lotterydomain.ErrLotteryInvalidRules
+	}
+	return money.Format(increment), increment, nil
+}
+
+func growingPoolUnits(base, increment, participants int64) (int64, bool) {
+	if base <= 0 || increment < 0 || participants < 0 ||
+		participants != 0 && increment > math.MaxInt64/participants {
+		return 0, false
+	}
+	growth := increment * participants
+	if base > math.MaxInt64-growth {
+		return 0, false
+	}
+	return base + growth, true
 }
 
 func fixedCountsFitPool(n, total, minValue, maxValue int64, counts lotterydomain.TierWeights) bool {
@@ -456,20 +549,25 @@ func fixedCountsFitPool(n, total, minValue, maxValue int64, counts lotterydomain
 	return total <= base+normal*capacity
 }
 
-func fixedCountsCanFitAnyPool(maxParticipants, total, minValue, maxValue int64, counts lotterydomain.TierWeights) bool {
-	minimumParticipants := int64(counts.Normal + counts.Lucky)
-	if minimumParticipants < 1 {
-		minimumParticipants = 1
-	}
-	if minimumParticipants > maxParticipants {
+func fixedCountsFitEveryDrawCount(maxParticipants int64, poolAt func(int64) (int64, bool), minValue, maxValue int64, counts lotterydomain.TierWeights) bool {
+	if maxParticipants <= 0 || poolAt == nil {
 		return false
 	}
-	for n := minimumParticipants; n <= maxParticipants; n++ {
-		if fixedCountsFitPool(n, total, minValue, maxValue, counts) {
-			return true
+	for n := int64(1); n <= maxParticipants; n++ {
+		pool, ok := poolAt(n)
+		if !ok || !poolUnitsWithinMoneyLimit(pool) || !fixedCountsFitPool(n, pool, minValue, maxValue, counts) {
+			return false
 		}
 	}
-	return false
+	return true
+}
+
+func poolUnitsWithinMoneyLimit(units int64) bool {
+	if units <= 0 {
+		return false
+	}
+	_, err := money.Parse(wholePointsAmount(units))
+	return err == nil
 }
 
 func Allocate(entries []lotterydomain.Entry, totalAmount, minPayout, maxPayout string, weights lotterydomain.TierWeights) ([]lotterydomain.Payout, string, error) {
@@ -533,13 +631,13 @@ func allocateFixedCountsWithShuffle(entries []lotterydomain.Entry, totalAmount, 
 	}
 
 	capacity := maxValue - minValue
-	luckyRequested := int64(counts.Lucky)
-	normalRequested := int64(counts.Normal)
-	if luckyRequested < 0 || normalRequested < 0 || luckyRequested > n-normalRequested ||
+	luckyCount := int64(counts.Lucky)
+	normalCount := int64(counts.Normal)
+	if luckyCount < 0 || normalCount < 0 || luckyCount > n-normalCount ||
 		!fixedCountsFitPool(n, total, minValue, maxValue, counts) {
 		return nil, "0.00", lotterydomain.ErrLotteryInsufficientParticipants
 	}
-	luckyCount, normalCount, normalCapacity := luckyRequested, normalRequested, capacity
+	normalCapacity := capacity
 	if luckyCount < 0 || normalCount < 0 || luckyCount+normalCount > n {
 		return nil, "0.00", lotterydomain.ErrLotteryInsufficientParticipants
 	}
@@ -1030,6 +1128,13 @@ func lotteryRequestFingerprint(req CreateRequest, total, minPayout, maxPayout st
 	} else {
 		parts = append(parts, "")
 	}
+	lotteryType := normalizeLotteryType(req.LotteryType)
+	if lotteryType == lotterydomain.LotteryTypeGrowing {
+		increment, _, incrementErr := normalizedPoolIncrement(req)
+		if incrementErr == nil {
+			parts = append(parts, lotteryType.String(), increment)
+		}
+	}
 	for _, part := range parts {
 		_, _ = hash.Write([]byte(part))
 		_, _ = hash.Write([]byte{0})
@@ -1038,12 +1143,17 @@ func lotteryRequestFingerprint(req CreateRequest, total, minPayout, maxPayout st
 }
 
 func lotteryFingerprintFromDomain(lottery lotterydomain.Lottery) string {
+	startingAmount := lottery.StartingAmount
+	if strings.TrimSpace(startingAmount) == "" {
+		startingAmount = lottery.TotalAmount
+	}
 	return lotteryRequestFingerprint(CreateRequest{
-		Title: lottery.Title, TotalAmount: lottery.TotalAmount, MinPayout: lottery.MinPayout,
+		Title: lottery.Title, LotteryType: normalizeLotteryType(lottery.LotteryType),
+		TotalAmount: startingAmount, PoolIncrementAmount: lottery.PoolIncrementAmount, MinPayout: lottery.MinPayout,
 		MaxPayout: lottery.MaxPayout, TierWeights: lottery.TierWeights,
 		MinAccountAgeDays: lottery.MinAccountAgeDays, DrawAt: lottery.DrawAt,
 		ParticipantTarget: copyInt(lottery.ParticipantTarget),
-	}, lottery.TotalAmount, lottery.MinPayout, lottery.MaxPayout)
+	}, startingAmount, lottery.MinPayout, lottery.MaxPayout)
 }
 
 func (s *Service) Public(ctx context.Context, token string, userID uint) (*lotterydomain.Lottery, *lotterydomain.Entry, *lotterydomain.Payout, error) {

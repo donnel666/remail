@@ -5404,10 +5404,20 @@ export interface components {
             normal: number;
             lucky: number;
         };
-        /** @description Lottery amounts are whole points. Prize counts are fixed for lucky and normal awards; all remaining participants receive the minimum award. For a participant target, the total must fit between target multiplied by the minimum and maximum payout. Set at least one draw condition; if both are provided, whichever condition is met first starts the draw. */
+        /**
+         * @description Fixed uses one configured pool. Growing starts at totalAmount and adds poolIncrementAmount for every accepted participant.
+         * @enum {string}
+         */
+        LotteryType: "fixed" | "growing";
+        /** @description Lottery amounts are whole points. For a fixed lottery, totalAmount is the complete pool. For a growing lottery, totalAmount is the starting pool and poolIncrementAmount is added for every accepted participant. Prize counts are fixed for lucky and normal awards; all remaining participants receive the minimum award. Set at least one draw condition; if both are provided, whichever condition is met first starts the draw. */
         CreateLotteryRequest: {
             title: string;
+            /** @description Optional; omitted values default to fixed on the server. */
+            lotteryType?: components["schemas"]["LotteryType"];
+            /** @description Fixed pool, or starting pool when lotteryType is growing. */
             totalAmount: string;
+            /** @description Whole points added to the pool for every accepted participant in a growing lottery; omitted values default to 0 on the server. */
+            poolIncrementAmount?: string;
             minPayout: string;
             maxPayout: string;
             tierWeights: components["schemas"]["LotteryTierWeights"];
@@ -5425,7 +5435,13 @@ export interface components {
             publicToken: string;
             publicUrl: string;
             title: string;
+            lotteryType: components["schemas"]["LotteryType"];
+            /** @description Starting pool; equal to totalAmount for fixed lotteries. */
+            startingAmount: string;
+            /** @description Current pool while open, or the settled pool at draw time. */
             totalAmount: string;
+            /** @description Whole points added for every accepted participant; zero for fixed lotteries. */
+            poolIncrementAmount: string;
             minPayout: string;
             maxPayout: string;
             tierWeights: components["schemas"]["LotteryTierWeights"];

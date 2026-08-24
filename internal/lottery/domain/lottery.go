@@ -19,6 +19,19 @@ const (
 
 func (s Status) String() string { return string(s) }
 
+type LotteryType string
+
+const (
+	LotteryTypeFixed   LotteryType = "fixed"
+	LotteryTypeGrowing LotteryType = "growing"
+)
+
+func (t LotteryType) Valid() bool {
+	return t == LotteryTypeFixed || t == LotteryTypeGrowing
+}
+
+func (t LotteryType) String() string { return string(t) }
+
 type Trigger string
 
 const (
@@ -118,29 +131,32 @@ func (w TierWeights) ValidLegacyPercentages() bool {
 }
 
 type Lottery struct {
-	ID                 uint
-	PublicToken        string
-	CreatedByUserID    uint
-	Title              string
-	TotalAmount        string
-	MinPayout          string
-	MaxPayout          string
-	TierWeights        TierWeights
-	MinAccountAgeDays  int
-	DrawAt             *time.Time
-	ParticipantTarget  *int
-	ParticipantCount   int
-	MaxParticipants    int
-	Status             Status
-	TriggeredBy        Trigger
-	TargetReachedAt    *time.Time
-	AlgorithmVersion   string
-	UnusedAmount       string
-	IdempotencyKey     string
-	RequestFingerprint string
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
-	SettledAt          *time.Time
+	ID                  uint
+	PublicToken         string
+	CreatedByUserID     uint
+	Title               string
+	LotteryType         LotteryType
+	StartingAmount      string
+	TotalAmount         string
+	PoolIncrementAmount string
+	MinPayout           string
+	MaxPayout           string
+	TierWeights         TierWeights
+	MinAccountAgeDays   int
+	DrawAt              *time.Time
+	ParticipantTarget   *int
+	ParticipantCount    int
+	MaxParticipants     int
+	Status              Status
+	TriggeredBy         Trigger
+	TargetReachedAt     *time.Time
+	AlgorithmVersion    string
+	UnusedAmount        string
+	IdempotencyKey      string
+	RequestFingerprint  string
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+	SettledAt           *time.Time
 }
 
 type Entry struct {

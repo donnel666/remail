@@ -5,6 +5,7 @@ import {
   Empty,
   Input,
   Modal,
+  Select,
   SideSheet,
   Space,
   Tabs,
@@ -47,11 +48,14 @@ import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import { BalanceAccountCell } from "./admin-finance/balance-meta";
 
 type LotteryStatusFilter = "all" | Lottery["status"];
+type LotteryType = "fixed" | "growing";
 const DETAIL_TABLE_SCROLL_Y = "max(220px, calc(100vh - 300px))";
 
 type FormState = {
   title: string;
+  lotteryType: LotteryType;
   totalAmount: string;
+  poolIncrementAmount: string;
   minPayout: string;
   maxPayout: string;
   normal: string;
@@ -63,7 +67,9 @@ type FormState = {
 
 const initialForm: FormState = {
   title: "",
+  lotteryType: "fixed",
   totalAmount: "300.00",
+  poolIncrementAmount: "0.00",
   minPayout: "1.00",
   maxPayout: "20.00",
   normal: "10",
@@ -216,6 +222,10 @@ function statusTag(status: Lottery["status"], t: TFunction) {
   );
 }
 
+function lotteryTypeLabel(value: Lottery["lotteryType"] | undefined, t: TFunction) {
+  return value === "growing" ? t("Growing pool") : t("Fixed pool");
+}
+
 function fieldLabel(label: string, required = false) {
   return (
     <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
@@ -258,6 +268,7 @@ function LotteryCreateModal({
     const total = Number(form.totalAmount);
     const minPayout = Number(form.minPayout);
     const maxPayout = Number(form.maxPayout);
+    const poolIncrement = Number(form.poolIncrementAmount);
     const tierValues = [Number(form.normal), Number(form.lucky)];
 
     if (!form.title.trim()) {
@@ -285,6 +296,15 @@ function LotteryCreateModal({
       return;
     }
     if (
+      !Number.isInteger(poolIncrement) ||
+      poolIncrement < 0 ||
+      (form.lotteryType === "growing" && poolIncrement <= 0) ||
+      (form.lotteryType === "fixed" && poolIncrement !== 0)
+    ) {
+      Toast.warning(t("Pool increment must be a positive whole point amount for a growing pool."));
+      return;
+    }
+    if (
       !Number.isFinite(total) ||
       !Number.isFinite(minPayout) ||
       !Number.isFinite(maxPayout) ||
@@ -309,7 +329,11 @@ function LotteryCreateModal({
       Toast.warning(t("Prize tier counts must be non-negative integers."));
       return;
     }
-    if (hasTarget && total < target! * minPayout) {
+    const drawPool =
+      form.lotteryType === "growing" && hasTarget
+        ? total + target! * poolIncrement
+        : total;
+    if (hasTarget && drawPool < target! * minPayout) {
       Toast.warning(
         t(
           "Total amount must cover the minimum payout for all target participants."
@@ -317,7 +341,7 @@ function LotteryCreateModal({
       );
       return;
     }
-    if (hasTarget && total > target! * maxPayout) {
+    if (hasTarget && drawPool > target! * maxPayout) {
       Toast.warning(
         t(
           "Total amount must fit within the maximum payout for all target participants."
@@ -329,12 +353,12 @@ function LotteryCreateModal({
       Toast.warning(t("Prize counts cannot exceed the participant target."));
       return;
     }
-    if (hasTarget) {
+    if (hasTarget && form.lotteryType === "fixed") {
       const variableCapacity = maxPayout - minPayout;
       const fixedMinimum =
         target! * minPayout + tierValues[1] * variableCapacity;
       const fixedMaximum = fixedMinimum + tierValues[0] * variableCapacity;
-      if (total < fixedMinimum || total > fixedMaximum) {
+      if (drawPool < fixedMinimum || drawPool > fixedMaximum) {
         Toast.warning(t("Total amount does not fit the configured prize counts."));
         return;
       }
@@ -342,7 +366,9 @@ function LotteryCreateModal({
 
     const body: CreateLotteryInput = {
       title: form.title.trim(),
+      lotteryType: form.lotteryType,
       totalAmount: form.totalAmount.trim(),
+      poolIncrementAmount: form.poolIncrementAmount.trim(),
       minPayout: form.minPayout.trim(),
       maxPayout: form.maxPayout.trim(),
       tierWeights: {
@@ -395,6 +421,27 @@ function LotteryCreateModal({
     >
       <div className="space-y-4 py-1">
         <label className="block">
+          {fieldLabel(t("Lottery type"), true)}
+          <Select
+            aria-label={t("Lottery type")}
+            onChange={(value) => {
+              const nextType = String(value) as LotteryType;
+              setForm((current) => ({
+                ...current,
+                lotteryType: nextType,
+                poolIncrementAmount:
+                  nextType === "fixed" ? "0.00" : current.poolIncrementAmount,
+              }));
+              publishKeyRef.current = null;
+            }}
+            style={{ width: "100%" }}
+            value={form.lotteryType}
+          >
+            <Select.Option value="fixed">{t("Fixed pool")}</Select.Option>
+            <Select.Option value="growing">{t("Growing pool")}</Select.Option>
+          </Select>
+        </label>
+        <label className="block">
           {fieldLabel(t("Activity title"), true)}
           <Input
             autoFocus
@@ -404,10 +451,15 @@ function LotteryCreateModal({
           />
         </label>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div
+          className={`grid grid-cols-1 gap-3 ${form.lotteryType === "growing" ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}
+        >
           {(
             [
-              ["totalAmount", "Total amount"],
+              [
+                "totalAmount",
+                form.lotteryType === "growing" ? "Starting pool" : "Total amount",
+              ],
               ["minPayout", "Minimum amount"],
               ["maxPayout", "Maximum amount"],
             ] as const
@@ -421,6 +473,16 @@ function LotteryCreateModal({
               />
             </label>
           ))}
+          {form.lotteryType === "growing" ? (
+            <label className="block">
+              {fieldLabel(t("Increase per participant"), true)}
+              <Input
+                onChange={(value) => setField("poolIncrementAmount", String(value))}
+                suffix={t("Points")}
+                value={form.poolIncrementAmount}
+              />
+            </label>
+          ) : null}
         </div>
 
         <div className="rounded-lg border border-[var(--semi-color-border)] p-3">
@@ -632,8 +694,20 @@ function LotteryDetailSheet({
                     <div className="mt-1 text-sm text-[var(--semi-color-text-0)]">{formatTime(detail.createdAt, language)}</div>
                   </div>
                   <div>
+                    <div className="text-xs text-[var(--semi-color-text-2)]">{t("Lottery type")}</div>
+                    <div className="mt-1 text-sm text-[var(--semi-color-text-0)]">{lotteryTypeLabel(detail.lotteryType, t)}</div>
+                  </div>
+                  <div>
                     <div className="text-xs text-[var(--semi-color-text-2)]">{t("Total amount")}</div>
                     <div className="mt-1 text-sm text-[var(--semi-color-text-0)]">{formatPoints(detail.totalAmount)} {t("Points")}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-[var(--semi-color-text-2)]">{t("Starting pool")}</div>
+                    <div className="mt-1 text-sm text-[var(--semi-color-text-0)]">{formatPoints(detail.startingAmount)} {t("Points")}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-[var(--semi-color-text-2)]">{t("Increase per participant")}</div>
+                    <div className="mt-1 text-sm text-[var(--semi-color-text-0)]">{formatPoints(detail.poolIncrementAmount)} {t("Points")}</div>
                   </div>
                   <div>
                     <div className="text-xs text-[var(--semi-color-text-2)]">{t("Reward range")}</div>
@@ -856,6 +930,17 @@ export default function AdminLotteries() {
           width: 285,
           render: (_: unknown, row: Lottery) => (
             <div className="min-w-0">
+              <div className="text-xs leading-5 text-[var(--semi-color-text-2)]">
+                {t("Lottery type")}: {lotteryTypeLabel(row.lotteryType, t)}
+              </div>
+              <div className="text-xs leading-5 text-[var(--semi-color-text-2)]">
+                {t("Starting pool")}: {formatPoints(row.startingAmount)} {t("Points")}
+              </div>
+              {row.lotteryType === "growing" ? (
+                <div className="text-xs leading-5 text-[var(--semi-color-text-2)]">
+                  {t("Increase per participant")}: {formatPoints(row.poolIncrementAmount)} {t("Points")}
+                </div>
+              ) : null}
               <div className="whitespace-nowrap text-sm tabular-nums text-[var(--semi-color-text-0)]">
                 {formatPoints(row.minPayout)} - {formatPoints(row.maxPayout)} {t("Points")}
               </div>
@@ -871,7 +956,7 @@ export default function AdminLotteries() {
         {
           dataIndex: "totalAmount",
           key: "totalAmount",
-          title: t("Total amount"),
+          title: t("Current pool"),
           width: 145,
           render: (value: unknown) => (
             <span className="whitespace-nowrap tabular-nums text-[var(--semi-color-text-1)]">

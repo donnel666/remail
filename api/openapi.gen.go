@@ -2471,6 +2471,24 @@ func (e LotteryResponseStatus) Valid() bool {
 	}
 }
 
+// Defines values for LotteryType.
+const (
+	Fixed   LotteryType = "fixed"
+	Growing LotteryType = "growing"
+)
+
+// Valid indicates whether the value is a known member of the LotteryType enum.
+func (e LotteryType) Valid() bool {
+	switch e {
+	case Fixed:
+		return true
+	case Growing:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MonitoringMetricSeriesType.
 const (
 	Counter   MonitoringMetricSeriesType = "counter"
@@ -7719,21 +7737,29 @@ type CreateDomainRequest struct {
 // CreateDomainRequestPurpose Defaults to not_sale. Domain creation does not accept sale; suppliers publish private domains through the resource publish endpoint. binding is admin-only and displayed as auxiliary mailbox in Chinese.
 type CreateDomainRequestPurpose string
 
-// CreateLotteryRequest Lottery amounts are whole points. Prize counts are fixed for lucky and normal awards; all remaining participants receive the minimum award. For a participant target, the total must fit between target multiplied by the minimum and maximum payout. Set at least one draw condition; if both are provided, whichever condition is met first starts the draw.
+// CreateLotteryRequest Lottery amounts are whole points. For a fixed lottery, totalAmount is the complete pool. For a growing lottery, totalAmount is the starting pool and poolIncrementAmount is added for every accepted participant. Prize counts are fixed for lucky and normal awards; all remaining participants receive the minimum award. Set at least one draw condition; if both are provided, whichever condition is met first starts the draw.
 type CreateLotteryRequest struct {
 	// DrawAt Optional future draw time. The activity can use this condition, the participant target, or both.
-	DrawAt            *time.Time `json:"drawAt,omitempty"`
-	MaxPayout         string     `json:"maxPayout"`
-	MinAccountAgeDays int        `json:"minAccountAgeDays"`
-	MinPayout         string     `json:"minPayout"`
+	DrawAt *time.Time `json:"drawAt,omitempty"`
+
+	// LotteryType Fixed uses one configured pool. Growing starts at totalAmount and adds poolIncrementAmount for every accepted participant.
+	LotteryType       *LotteryType `json:"lotteryType,omitempty"`
+	MaxPayout         string       `json:"maxPayout"`
+	MinAccountAgeDays int          `json:"minAccountAgeDays"`
+	MinPayout         string       `json:"minPayout"`
 
 	// ParticipantTarget Optional participant count that triggers the draw. The activity can use this condition, the draw time, or both.
 	ParticipantTarget *int `json:"participantTarget,omitempty"`
 
+	// PoolIncrementAmount Whole points added to the pool for every accepted participant in a growing lottery; omitted values default to 0 on the server.
+	PoolIncrementAmount *string `json:"poolIncrementAmount,omitempty"`
+
 	// TierWeights Legacy wire name. New campaigns use fixed prize counts; consolation is derived from the participant count, and normal/lucky are requested counts.
 	TierWeights LotteryTierWeights `json:"tierWeights"`
 	Title       string             `json:"title"`
-	TotalAmount string             `json:"totalAmount"`
+
+	// TotalAmount Fixed pool, or starting pool when lotteryType is growing.
+	TotalAmount string `json:"totalAmount"`
 }
 
 // CreateMailServerRequest defines model for CreateMailServerRequest.
@@ -8605,6 +8631,9 @@ type LotteryResponse struct {
 	DrawAt           *time.Time `json:"drawAt,omitempty"`
 	Id               int        `json:"id"`
 
+	// LotteryType Fixed uses one configured pool. Growing starts at totalAmount and adds poolIncrementAmount for every accepted participant.
+	LotteryType LotteryType `json:"lotteryType"`
+
 	// MaxParticipants Internal entry safety cap; it is not a draw condition when participantTarget is null.
 	MaxParticipants   int    `json:"maxParticipants"`
 	MaxPayout         string `json:"maxPayout"`
@@ -8613,18 +8642,26 @@ type LotteryResponse struct {
 	ParticipantCount  int    `json:"participantCount"`
 
 	// ParticipantTarget Participant count trigger, or null when the activity is time-only.
-	ParticipantTarget *int                  `json:"participantTarget,omitempty"`
-	PublicToken       string                `json:"publicToken"`
-	PublicUrl         string                `json:"publicUrl"`
-	SettledAt         *time.Time            `json:"settledAt,omitempty"`
-	Status            LotteryResponseStatus `json:"status"`
+	ParticipantTarget *int `json:"participantTarget,omitempty"`
+
+	// PoolIncrementAmount Whole points added for every accepted participant; zero for fixed lotteries.
+	PoolIncrementAmount string     `json:"poolIncrementAmount"`
+	PublicToken         string     `json:"publicToken"`
+	PublicUrl           string     `json:"publicUrl"`
+	SettledAt           *time.Time `json:"settledAt,omitempty"`
+
+	// StartingAmount Starting pool; equal to totalAmount for fixed lotteries.
+	StartingAmount string                `json:"startingAmount"`
+	Status         LotteryResponseStatus `json:"status"`
 
 	// TierWeights Legacy wire name. New campaigns use fixed prize counts; consolation is derived from the participant count, and normal/lucky are requested counts.
-	TierWeights  LotteryTierWeights `json:"tierWeights"`
-	Title        string             `json:"title"`
-	TotalAmount  string             `json:"totalAmount"`
-	TriggeredBy  *string            `json:"triggeredBy,omitempty"`
-	UnusedAmount string             `json:"unusedAmount"`
+	TierWeights LotteryTierWeights `json:"tierWeights"`
+	Title       string             `json:"title"`
+
+	// TotalAmount Current pool while open, or the settled pool at draw time.
+	TotalAmount  string  `json:"totalAmount"`
+	TriggeredBy  *string `json:"triggeredBy,omitempty"`
+	UnusedAmount string  `json:"unusedAmount"`
 }
 
 // LotteryResponseStatus defines model for LotteryResponse.Status.
@@ -8636,6 +8673,9 @@ type LotteryTierWeights struct {
 	Lucky       int `json:"lucky"`
 	Normal      int `json:"normal"`
 }
+
+// LotteryType Fixed uses one configured pool. Growing starts at totalAmount and adds poolIncrementAmount for every accepted participant.
+type LotteryType string
 
 // MailContentDetailResponse defines model for MailContentDetailResponse.
 type MailContentDetailResponse struct {

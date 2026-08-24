@@ -13,37 +13,41 @@ import (
 	lotterydomain "github.com/donnel666/remail/internal/lottery/domain"
 	"github.com/donnel666/remail/internal/money"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
 type LotteryModel struct {
-	ID                 uint       `gorm:"primaryKey;autoIncrement"`
-	PublicToken        string     `gorm:"type:varchar(64);not null;uniqueIndex;column:public_token"`
-	CreatedByUserID    uint       `gorm:"not null;column:created_by_user_id"`
-	FundingUserID      uint       `gorm:"not null;column:funding_user_id"`
-	Title              string     `gorm:"type:varchar(120);not null"`
-	TotalAmount        string     `gorm:"type:decimal(18,6);not null;column:total_amount"`
-	MinPayout          string     `gorm:"type:decimal(18,6);not null;column:min_payout"`
-	MaxPayout          string     `gorm:"type:decimal(18,6);not null;column:max_payout"`
-	TierWeightsJSON    string     `gorm:"type:json;not null;column:tier_weights"`
-	MinAccountAgeDays  int        `gorm:"not null;default:0;column:min_account_age_days"`
-	DrawAt             *time.Time `gorm:"column:draw_at"`
-	ParticipantTarget  *int       `gorm:"column:participant_target"`
-	ParticipantCount   int        `gorm:"not null;default:0;column:participant_count"`
-	MaxParticipants    int        `gorm:"not null;column:max_participants"`
-	Status             string     `gorm:"type:varchar(16);not null"`
-	TriggeredBy        string     `gorm:"type:varchar(16);not null;default:'';column:triggered_by"`
-	TargetReachedAt    *time.Time `gorm:"column:target_reached_at"`
-	FundTransactionNo  string     `gorm:"type:varchar(64);not null;default:'';column:fund_transaction_no"`
-	AlgorithmVersion   string     `gorm:"type:varchar(32);not null;column:algorithm_version"`
-	UnusedAmount       string     `gorm:"type:decimal(18,6);not null;default:0;column:unused_amount"`
-	IdempotencyKey     string     `gorm:"type:varchar(128);not null;column:idempotency_key"`
-	RequestFingerprint string     `gorm:"type:char(64);not null;default:'';column:request_fingerprint"`
-	FundingError       string     `gorm:"type:varchar(255);not null;default:'';column:funding_error"`
-	SettledAt          *time.Time `gorm:"column:settled_at"`
-	CreatedAt          time.Time  `gorm:"not null;autoCreateTime;column:created_at"`
-	UpdatedAt          time.Time  `gorm:"not null;autoUpdateTime;column:updated_at"`
+	ID                  uint       `gorm:"primaryKey;autoIncrement"`
+	PublicToken         string     `gorm:"type:varchar(64);not null;uniqueIndex;column:public_token"`
+	CreatedByUserID     uint       `gorm:"not null;column:created_by_user_id"`
+	FundingUserID       uint       `gorm:"not null;column:funding_user_id"`
+	Title               string     `gorm:"type:varchar(120);not null"`
+	LotteryType         string     `gorm:"type:varchar(16);not null;default:fixed;column:lottery_type"`
+	StartingAmount      string     `gorm:"type:decimal(18,6);not null;column:starting_amount"`
+	TotalAmount         string     `gorm:"type:decimal(18,6);not null;column:total_amount"`
+	PoolIncrementAmount string     `gorm:"type:decimal(18,6);not null;default:0;column:pool_increment_amount"`
+	MinPayout           string     `gorm:"type:decimal(18,6);not null;column:min_payout"`
+	MaxPayout           string     `gorm:"type:decimal(18,6);not null;column:max_payout"`
+	TierWeightsJSON     string     `gorm:"type:json;not null;column:tier_weights"`
+	MinAccountAgeDays   int        `gorm:"not null;default:0;column:min_account_age_days"`
+	DrawAt              *time.Time `gorm:"column:draw_at"`
+	ParticipantTarget   *int       `gorm:"column:participant_target"`
+	ParticipantCount    int        `gorm:"not null;default:0;column:participant_count"`
+	MaxParticipants     int        `gorm:"not null;column:max_participants"`
+	Status              string     `gorm:"type:varchar(16);not null"`
+	TriggeredBy         string     `gorm:"type:varchar(16);not null;default:'';column:triggered_by"`
+	TargetReachedAt     *time.Time `gorm:"column:target_reached_at"`
+	FundTransactionNo   string     `gorm:"type:varchar(64);not null;default:'';column:fund_transaction_no"`
+	AlgorithmVersion    string     `gorm:"type:varchar(32);not null;column:algorithm_version"`
+	UnusedAmount        string     `gorm:"type:decimal(18,6);not null;default:0;column:unused_amount"`
+	IdempotencyKey      string     `gorm:"type:varchar(128);not null;column:idempotency_key"`
+	RequestFingerprint  string     `gorm:"type:char(64);not null;default:'';column:request_fingerprint"`
+	FundingError        string     `gorm:"type:varchar(255);not null;default:'';column:funding_error"`
+	SettledAt           *time.Time `gorm:"column:settled_at"`
+	CreatedAt           time.Time  `gorm:"not null;autoCreateTime;column:created_at"`
+	UpdatedAt           time.Time  `gorm:"not null;autoUpdateTime;column:updated_at"`
 }
 
 func (LotteryModel) TableName() string { return "lotteries" }
@@ -155,10 +159,24 @@ func (r *Repo) Create(ctx context.Context, lottery *lotterydomain.Lottery) error
 	if err != nil {
 		return err
 	}
+	lotteryType := lottery.LotteryType
+	if !lotteryType.Valid() {
+		lotteryType = lotterydomain.LotteryTypeFixed
+	}
+	startingAmount := lottery.StartingAmount
+	if strings.TrimSpace(startingAmount) == "" {
+		startingAmount = lottery.TotalAmount
+	}
+	incrementAmount := lottery.PoolIncrementAmount
+	if strings.TrimSpace(incrementAmount) == "" {
+		incrementAmount = "0.00"
+	}
 	model := LotteryModel{
 		ID: lottery.ID, PublicToken: lottery.PublicToken, CreatedByUserID: lottery.CreatedByUserID,
-		FundingUserID: lottery.CreatedByUserID, Title: lottery.Title, TotalAmount: lottery.TotalAmount,
-		MinPayout: lottery.MinPayout, MaxPayout: lottery.MaxPayout, TierWeightsJSON: string(weights),
+		FundingUserID: lottery.CreatedByUserID, Title: lottery.Title, LotteryType: string(lotteryType),
+		StartingAmount: startingAmount, TotalAmount: lottery.TotalAmount,
+		PoolIncrementAmount: incrementAmount,
+		MinPayout:           lottery.MinPayout, MaxPayout: lottery.MaxPayout, TierWeightsJSON: string(weights),
 		MinAccountAgeDays: lottery.MinAccountAgeDays, DrawAt: lottery.DrawAt, ParticipantTarget: lottery.ParticipantTarget,
 		ParticipantCount: lottery.ParticipantCount, MaxParticipants: lottery.MaxParticipants,
 		Status: string(lottery.Status), TriggeredBy: string(lottery.TriggeredBy), TargetReachedAt: lottery.TargetReachedAt,
@@ -338,6 +356,31 @@ func (r *Repo) AddEntry(ctx context.Context, lotteryID, userID uint, registeredA
 		}
 		lottery.ParticipantCount++
 		updates := map[string]any{"participant_count": lottery.ParticipantCount, "updated_at": current}
+		lotteryType := lotterydomain.LotteryType(lottery.LotteryType)
+		if lotteryType == lotterydomain.LotteryTypeGrowing {
+			startingPool := lottery.StartingAmount
+			backfillStartingPool := strings.TrimSpace(startingPool) == "" || isZeroStoredAmount(startingPool)
+			if backfillStartingPool {
+				startingPool = lottery.TotalAmount
+			}
+			base, baseErr := money.Parse(startingPool)
+			increment, incrementErr := money.Parse(lottery.PoolIncrementAmount)
+			if baseErr != nil || incrementErr != nil || !base.IsPositive() || !increment.IsPositive() {
+				return lotterydomain.ErrLotteryInvalidRules
+			}
+			nextPool := base.Add(increment.Mul(decimal.NewFromInt(int64(lottery.ParticipantCount))))
+			nextPoolText, formatErr := money.Normalize(nextPool.String())
+			if formatErr != nil {
+				return lotterydomain.ErrLotteryInvalidRules
+			}
+			lottery.TotalAmount = nextPoolText
+			updates["total_amount"] = nextPoolText
+			if backfillStartingPool {
+				// Keep the legacy fallback stable for any row created before the
+				// growing-pool columns were backfilled by the migration.
+				updates["starting_amount"] = startingPool
+			}
+		}
 		if lottery.ParticipantTarget != nil && lottery.ParticipantCount >= *lottery.ParticipantTarget && lottery.TargetReachedAt == nil {
 			lottery.TargetReachedAt = &current
 			updates["target_reached_at"] = current
@@ -592,9 +635,28 @@ func lotteryFromModel(model LotteryModel) (*lotterydomain.Lottery, error) {
 	if err := json.Unmarshal([]byte(model.TierWeightsJSON), &weights); err != nil {
 		return nil, fmt.Errorf("decode lottery tier weights: %w", err)
 	}
+	lotteryType := lotterydomain.LotteryType(model.LotteryType)
+	if !lotteryType.Valid() {
+		lotteryType = lotterydomain.LotteryTypeFixed
+	}
+	startingAmount := model.StartingAmount
+	if strings.TrimSpace(startingAmount) == "" || isZeroStoredAmount(startingAmount) {
+		startingAmount = model.TotalAmount
+	}
+	incrementAmount := model.PoolIncrementAmount
+	if strings.TrimSpace(incrementAmount) == "" {
+		incrementAmount = "0.00"
+	}
+	startingAmount = normalizeStoredAmount(startingAmount)
+	totalAmount := normalizeStoredAmount(model.TotalAmount)
+	incrementAmount = normalizeStoredAmount(incrementAmount)
+	minPayout := normalizeStoredAmount(model.MinPayout)
+	maxPayout := normalizeStoredAmount(model.MaxPayout)
 	return &lotterydomain.Lottery{
 		ID: model.ID, PublicToken: model.PublicToken, CreatedByUserID: model.CreatedByUserID,
-		Title: model.Title, TotalAmount: model.TotalAmount, MinPayout: model.MinPayout, MaxPayout: model.MaxPayout,
+		Title: model.Title, LotteryType: lotteryType, StartingAmount: startingAmount,
+		TotalAmount: totalAmount, PoolIncrementAmount: incrementAmount,
+		MinPayout: minPayout, MaxPayout: maxPayout,
 		TierWeights: weights, MinAccountAgeDays: model.MinAccountAgeDays, DrawAt: model.DrawAt, ParticipantTarget: model.ParticipantTarget,
 		ParticipantCount: model.ParticipantCount, MaxParticipants: model.MaxParticipants, Status: lotterydomain.Status(model.Status),
 		TriggeredBy: lotterydomain.Trigger(model.TriggeredBy), TargetReachedAt: model.TargetReachedAt,
@@ -602,6 +664,19 @@ func lotteryFromModel(model LotteryModel) (*lotterydomain.Lottery, error) {
 		RequestFingerprint: model.RequestFingerprint,
 		SettledAt:          model.SettledAt, CreatedAt: model.CreatedAt, UpdatedAt: model.UpdatedAt,
 	}, nil
+}
+
+func normalizeStoredAmount(value string) string {
+	normalized, err := money.Normalize(value)
+	if err != nil {
+		return value
+	}
+	return normalized
+}
+
+func isZeroStoredAmount(value string) bool {
+	amount, err := money.Parse(value)
+	return err == nil && amount.IsZero()
 }
 
 func lotterySlice(models []LotteryModel) ([]*lotterydomain.Lottery, error) {

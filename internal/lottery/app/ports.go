@@ -66,17 +66,19 @@ type EntryResult struct {
 }
 
 type CreateRequest struct {
-	CreatedByUserID   uint
-	Title             string
-	TotalAmount       string
-	MinPayout         string
-	MaxPayout         string
-	TierWeights       lotterydomain.TierWeights
-	MinAccountAgeDays int
-	DrawAt            *time.Time
-	ParticipantTarget *int
-	IdempotencyKey    string
-	RequestID         string
+	CreatedByUserID     uint
+	Title               string
+	LotteryType         lotterydomain.LotteryType
+	TotalAmount         string
+	PoolIncrementAmount string
+	MinPayout           string
+	MaxPayout           string
+	TierWeights         lotterydomain.TierWeights
+	MinAccountAgeDays   int
+	DrawAt              *time.Time
+	ParticipantTarget   *int
+	IdempotencyKey      string
+	RequestID           string
 }
 
 type CreateResult struct {

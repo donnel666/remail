@@ -14537,17 +14537,32 @@ components:
           maximum: 5000
       additionalProperties: false
 
+    LotteryType:
+      type: string
+      enum: [fixed, growing]
+      description: >-
+        Fixed uses one configured pool. Growing starts at totalAmount and adds
+        poolIncrementAmount for every accepted participant.
+
     CreateLotteryRequest:
       type: object
-      description: Lottery amounts are whole points. Prize counts are fixed for lucky and normal awards; all remaining participants receive the minimum award. For a participant target, the total must fit between target multiplied by the minimum and maximum payout. Set at least one draw condition; if both are provided, whichever condition is met first starts the draw.
+      description: Lottery amounts are whole points. For a fixed lottery, totalAmount is the complete pool. For a growing lottery, totalAmount is the starting pool and poolIncrementAmount is added for every accepted participant. Prize counts are fixed for lucky and normal awards; all remaining participants receive the minimum award. Set at least one draw condition; if both are provided, whichever condition is met first starts the draw.
       required: [title, totalAmount, minPayout, maxPayout, tierWeights, minAccountAgeDays]
       properties:
         title:
           type: string
           maxLength: 120
+        lotteryType:
+          $ref: "#/components/schemas/LotteryType"
+          description: Optional; omitted values default to fixed on the server.
         totalAmount:
           type: string
           pattern: '^[0-9]+(\.0{1,6})?$'
+          description: Fixed pool, or starting pool when lotteryType is growing.
+        poolIncrementAmount:
+          type: string
+          pattern: '^[0-9]+(\.0{1,6})?$'
+          description: Whole points added to the pool for every accepted participant in a growing lottery; omitted values default to 0 on the server.
         minPayout:
           type: string
           pattern: '^[0-9]+(\.0{1,6})?$'
@@ -14573,7 +14588,7 @@ components:
 
     LotteryResponse:
       type: object
-      required: [id, publicToken, publicUrl, title, totalAmount, minPayout, maxPayout, tierWeights, minAccountAgeDays, participantCount, maxParticipants, algorithmVersion, status, unusedAmount, createdAt]
+      required: [id, publicToken, publicUrl, title, lotteryType, startingAmount, totalAmount, poolIncrementAmount, minPayout, maxPayout, tierWeights, minAccountAgeDays, participantCount, maxParticipants, algorithmVersion, status, unusedAmount, createdAt]
       properties:
         id:
           type: integer
@@ -14583,8 +14598,17 @@ components:
           type: string
         title:
           type: string
+        lotteryType:
+          $ref: "#/components/schemas/LotteryType"
+        startingAmount:
+          type: string
+          description: Starting pool; equal to totalAmount for fixed lotteries.
         totalAmount:
           type: string
+          description: Current pool while open, or the settled pool at draw time.
+        poolIncrementAmount:
+          type: string
+          description: Whole points added for every accepted participant; zero for fixed lotteries.
         minPayout:
           type: string
         maxPayout:
