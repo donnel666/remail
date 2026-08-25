@@ -206,6 +206,49 @@ describe("wallet payment modal", () => {
     expect(mocks.refreshCurrentUser).toHaveBeenCalledTimes(2);
   });
 
+  it("continues polling after opening payment in a new window", async () => {
+    mocks.createRecharge.mockResolvedValue({ recharge: payingRecharge, payUrl: "https://pay.example.com/qr", expiresAt: "2026-07-26T00:05:00Z" });
+    const openWindow = vi.spyOn(window, "open").mockReturnValue({} as Window);
+    render(<Wallet />);
+
+    const payButton = await screen.findByRole("button", { name: "Alipay" });
+    await waitFor(() => expect(payButton).toBeEnabled());
+    fireEvent.click(payButton);
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "Alipay Payment" })).toBeVisible());
+
+    fireEvent.click(screen.getByRole("button", { name: "Open in new window" }));
+
+    expect(openWindow).toHaveBeenCalledWith("https://pay.example.com/qr", "_blank", "noopener,noreferrer");
+    expect(screen.queryByRole("dialog", { name: "Alipay Payment" })).not.toBeInTheDocument();
+    await waitFor(() => expect(mocks.getRecharge).toHaveBeenCalledWith(payingRecharge.rechargeNo));
+  });
+
+  it("creates an EPUSDT recharge with the selected payment method", async () => {
+    mocks.getRechargeConfig.mockResolvedValue({
+      enabled: true,
+      paymentMethods: ["alipay", "epusdt_usdt_tron"],
+      minPoints: "1000.00",
+      feeRate: "0.6",
+      feeCapPoints: "0",
+      redemptionCodePurchaseUrl: "",
+      tiers: [{ points: "1000.00", bonusPoints: "0.00", feePoints: "6.00", creditedPoints: "1000.00" }],
+    });
+    mocks.createRecharge.mockResolvedValue({
+      recharge: { ...payingRecharge, paymentMethod: "epusdt_usdt_tron" },
+      payUrl: "https://pay.example.com/usdt",
+      expiresAt: "2026-07-26T00:05:00Z",
+    });
+    render(<Wallet />);
+
+    const payButton = await screen.findByRole("button", { name: "USDT (TRON)" });
+    await waitFor(() => expect(payButton).toBeEnabled());
+    fireEvent.click(payButton);
+
+    await waitFor(() => expect(mocks.createRecharge).toHaveBeenCalled());
+    expect(mocks.createRecharge.mock.calls[0][2]).toBe("epusdt_usdt_tron");
+    expect(await screen.findByRole("dialog", { name: "USDT (TRON) Payment" })).toBeVisible();
+  });
+
   it("links to the configured redemption code store and centers the input icon", async () => {
     const { container } = render(<Wallet />);
 

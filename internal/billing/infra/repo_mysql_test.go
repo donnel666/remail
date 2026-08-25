@@ -2,7 +2,9 @@ package infra
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1244,6 +1246,64 @@ func TestBillingRepoCreditRechargeExactlyOnceMySQL(t *testing.T) {
 	require.Equal(t, "95.00", summary.TotalRecharged)
 }
 
+func TestBillingRepoRechargeLegacyEpayFingerprintAliasMySQL(t *testing.T) {
+	db := newBillingMySQLTestDB(t)
+	ctx := context.Background()
+	userID := createBillingTestUser(t, db, "recharge-legacy-alias@example.com")
+	repo := NewBillingRepo(db)
+	now := time.Now().UTC()
+	legacyFingerprint := legacyRechargeFingerprintForTest(userID, "10.00")
+
+	created, err := repo.CreateRecharge(ctx, billingapp.CreateRechargeCommand{
+		Recharge: domain.Recharge{
+			RechargeNo:        "RC-LEGACY-ALIAS",
+			UserID:            userID,
+			PaymentMethod:     domain.RechargePaymentMethodAlipay,
+			RechargeQuota:     "10000.00",
+			PaymentAmount:     "10.00",
+			Status:            domain.RechargeStatusPaying,
+			GatewayConfigHash: "legacy-hash",
+			CreatedAt:         now,
+			UpdatedAt:         now,
+		},
+		MaxPendingOrders:   2,
+		IdempotencyKey:     "legacy-recharge-key",
+		RequestFingerprint: legacyFingerprint,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "RC-LEGACY-ALIAS", created.RechargeNo)
+
+	replayed, err := repo.CreateRecharge(ctx, billingapp.CreateRechargeCommand{
+		Recharge: domain.Recharge{
+			RechargeNo:        "RC-NEW-ALIAS-ATTEMPT",
+			UserID:            userID,
+			PaymentMethod:     domain.RechargePaymentMethodAlipay,
+			RechargeQuota:     "10000.00",
+			PaymentAmount:     "10.00",
+			Status:            domain.RechargeStatusPaying,
+			GatewayConfigHash: "legacy-hash",
+			CreatedAt:         now,
+			UpdatedAt:         now,
+		},
+		MaxPendingOrders:          2,
+		IdempotencyKey:            "legacy-recharge-key",
+		RequestFingerprint:        "points-v2-fingerprint",
+		LegacyRequestFingerprints: []string{legacyFingerprint},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "RC-LEGACY-ALIAS", replayed.RechargeNo)
+
+	var rechargeCount int64
+	require.NoError(t, db.Model(&RechargeModel{}).Where("user_id = ?", userID).Count(&rechargeCount).Error)
+	require.EqualValues(t, 1, rechargeCount)
+}
+
+func legacyRechargeFingerprintForTest(userID uint, amount string) string {
+	hash := sha256.New()
+	_, _ = fmt.Fprintf(hash, "recharges.create\x00%d\x00%s\x00", userID, amount)
+	return hex.EncodeToString(hash.Sum(nil))
+}
+
 func TestBillingRepoRechargePendingLimitIsSerializedMySQL(t *testing.T) {
 	db := newBillingMySQLTestDB(t)
 	ctx := context.Background()
@@ -1311,6 +1371,8 @@ func TestBillingRepoRechargeCallbackAndSchedulingMySQL(t *testing.T) {
 	models := []RechargeModel{
 		{RechargeNo: "RC-PAYING-WAIT", Status: string(domain.RechargeStatusPaying), CreatedAt: now.Add(-59 * time.Second)},
 		{RechargeNo: "RC-PAYING-DUE", Status: string(domain.RechargeStatusPaying), CreatedAt: now.Add(-domain.RechargeCallbackFallbackDelay)},
+		{RechargeNo: "RC-EPUSDT-WAIT", Status: string(domain.RechargeStatusPaying), CreatedAt: now.Add(-9 * time.Second)},
+		{RechargeNo: "RC-EPUSDT-DUE", Status: string(domain.RechargeStatusPaying), CreatedAt: now.Add(-domain.RechargeEpusdtFallbackDelay)},
 		{RechargeNo: "RC-CALLBACK-FIRST", Status: string(domain.RechargeStatusCallback), CreatedAt: now.Add(-20 * time.Second)},
 		{RechargeNo: "RC-FAST-WAIT", Status: string(domain.RechargeStatusCallback), QueryAttempts: 9, LastQueriedAt: &lastFastWait, CreatedAt: now.Add(-30 * time.Second)},
 		{RechargeNo: "RC-FAST-DUE", Status: string(domain.RechargeStatusCallback), QueryAttempts: 9, LastQueriedAt: &lastFastDue, CreatedAt: now.Add(-31 * time.Second)},
@@ -1321,6 +1383,9 @@ func TestBillingRepoRechargeCallbackAndSchedulingMySQL(t *testing.T) {
 	for index := range models {
 		models[index].UserID = createBillingTestUser(t, db, fmt.Sprintf("recharge-schedule-%d@example.com", index))
 		models[index].PaymentMethod = "alipay"
+		if strings.HasPrefix(models[index].RechargeNo, "RC-EPUSDT-") {
+			models[index].PaymentMethod = domain.RechargePaymentMethodEpusdtUSDTTron
+		}
 		models[index].RechargeQuota = "10.00"
 		models[index].PaymentAmount = "10.00"
 		models[index].GatewayConfigJSON = &snapshot
@@ -1334,7 +1399,24 @@ func TestBillingRepoRechargeCallbackAndSchedulingMySQL(t *testing.T) {
 	for index := range due {
 		dueNos[index] = due[index].RechargeNo
 	}
-	require.ElementsMatch(t, []string{"RC-PAYING-DUE", "RC-CALLBACK-FIRST", "RC-FAST-DUE", "RC-SLOW-DUE"}, dueNos)
+	require.ElementsMatch(t, []string{"RC-PAYING-DUE", "RC-EPUSDT-DUE", "RC-CALLBACK-FIRST", "RC-FAST-DUE", "RC-SLOW-DUE"}, dueNos)
+
+	expiredCount, err := repo.ExpirePendingRecharges(ctx, now.Add(-domain.RechargeReconciliationWindow), now)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, expiredCount)
+	var expiredModel RechargeModel
+	require.NoError(t, db.First(&expiredModel, "recharge_no = ?", "RC-EXPIRED").Error)
+	require.Equal(t, string(domain.RechargeStatusFailed), expiredModel.Status)
+	require.Equal(t, "query_timeout", expiredModel.FailureReason)
+	require.Nil(t, expiredModel.QueryLeaseUntil)
+
+	_, _, _, claimed, err := repo.ClaimRechargeQuery(ctx, "RC-EPUSDT-WAIT", now, now.Add(domain.RechargeQueryLease))
+	require.NoError(t, err)
+	require.False(t, claimed)
+	_, _, generation, claimed, err := repo.ClaimRechargeQuery(ctx, "RC-EPUSDT-WAIT", now.Add(time.Second), now.Add(time.Second).Add(domain.RechargeQueryLease))
+	require.NoError(t, err)
+	require.True(t, claimed)
+	require.NoError(t, repo.RecordRechargeQuery(ctx, "RC-EPUSDT-WAIT", generation, now.Add(time.Second)))
 
 	marked, err := repo.MarkRechargeCallback(ctx, "RC-PAYING-WAIT", now)
 	require.NoError(t, err)
@@ -1348,6 +1430,31 @@ func TestBillingRepoRechargeCallbackAndSchedulingMySQL(t *testing.T) {
 	marked, err = repo.MarkRechargeCallback(ctx, "RC-UNKNOWN", now)
 	require.NoError(t, err)
 	require.False(t, marked)
+
+	callbackResetLastQueriedAt := now.Add(-time.Second)
+	callbackReset := RechargeModel{
+		RechargeNo:        "RC-CALLBACK-RESET",
+		UserID:            createBillingTestUser(t, db, "recharge-callback-reset@example.com"),
+		PaymentMethod:     "alipay",
+		RechargeQuota:     "10.00",
+		PaymentAmount:     "10.00",
+		Status:            string(domain.RechargeStatusPaying),
+		LastQueriedAt:     &callbackResetLastQueriedAt,
+		CreatedAt:         now.Add(-20 * time.Second),
+		UpdatedAt:         now.Add(-time.Second),
+		GatewayConfigJSON: &snapshot,
+	}
+	require.NoError(t, db.Create(&callbackReset).Error)
+	marked, err = repo.MarkRechargeCallback(ctx, callbackReset.RechargeNo, now)
+	require.NoError(t, err)
+	require.True(t, marked)
+	claimedCallback, _, callbackGeneration, callbackClaimed, err := repo.ClaimRechargeQuery(
+		ctx, callbackReset.RechargeNo, now, now.Add(domain.RechargeQueryLease),
+	)
+	require.NoError(t, err)
+	require.True(t, callbackClaimed)
+	require.Equal(t, callbackReset.RechargeNo, claimedCallback.RechargeNo)
+	require.Equal(t, 1, callbackGeneration)
 
 	claimedRecharge, claimedConfig, generation, claimed, err := repo.ClaimRechargeQuery(
 		ctx, "RC-CALLBACK-FIRST", now, now.Add(domain.RechargeQueryLease),

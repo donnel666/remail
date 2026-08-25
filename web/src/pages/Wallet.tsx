@@ -56,6 +56,7 @@ import {
   transferReferralRewards,
   type RechargeConfigResponse,
   type RechargeItem,
+  type RechargePaymentMethod,
   type RechargeQuoteResponse,
   type TransactionItem,
   type WalletReferralResponse,
@@ -68,6 +69,7 @@ import { formatPoints, formatPointsValue, normalizePointValue } from "@/lib/poin
 
 const { Text } = Typography;
 const EPAY_RETURN_MESSAGE = "remail:epay-return";
+const EPUSDT_PAYMENT_METHOD = "epusdt_usdt_tron";
 const BILLING_PAGE_SIZE = 10;
 
 interface BannerStat {
@@ -81,6 +83,19 @@ function formatDateTime(value: string | undefined) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString();
+}
+
+function configuredPaymentMethods(config: RechargeConfigResponse | null): RechargePaymentMethod[] {
+  if (Array.isArray(config?.paymentMethods) && config.paymentMethods.length > 0) {
+    return config.paymentMethods as RechargePaymentMethod[];
+  }
+  return config?.enabled ? ["alipay"] : [];
+}
+
+function paymentMethodLabel(method: string, translate: (key: string) => string): string {
+  if (method === "alipay") return translate("Alipay");
+  if (method === EPUSDT_PAYMENT_METHOD) return translate("USDT (TRON)");
+  return method;
 }
 
 function buildReferralLink(inviteCode: string | undefined) {
@@ -193,14 +208,15 @@ export default function Wallet() {
   const [rechargesLoading, setRechargesLoading] = useState(false);
   const [redemptionsLoading, setRedemptionsLoading] = useState(false);
   const [recharging, setRecharging] = useState(false);
-  const [payment, setPayment] = useState<{ rechargeNo: string; url: string; expiresAt: string } | null>(null);
+  const [payment, setPayment] = useState<{ rechargeNo: string; url: string; expiresAt: string; method: string } | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<RechargePaymentMethod>("alipay");
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [paymentFrameLoaded, setPaymentFrameLoaded] = useState(false);
   const [paymentFrameSlow, setPaymentFrameSlow] = useState(false);
   const [redeeming, setRedeeming] = useState(false);
   const redeemAttemptRef = useRef<{ code: string; key: string } | null>(null);
   const transferAttemptRef = useRef<string | null>(null);
-  const rechargeAttemptRef = useRef<{ points: string; key: string } | null>(null);
+  const rechargeAttemptRef = useRef<{ points: string; key: string; method: string } | null>(null);
   const paymentFrameRef = useRef<HTMLIFrameElement | null>(null);
   const pendingRechargeNosRef = useRef(new Set<string>());
   const rechargeQuoteSeqRef = useRef(0);
@@ -257,12 +273,14 @@ export default function Wallet() {
     try {
       const config = await getRechargeConfig();
       setRechargeConfig(config);
+      const methods = configuredPaymentMethods(config);
+      setPaymentMethod((current) => methods.includes(current) ? current : methods[0] ?? "");
       const first = config.tiers[0];
       if (first) {
         const value = Number(first.points);
         setSelectedAmount(value);
         setCustomAmount(first.points);
-        setRechargeQuote(first);
+        setRechargeQuote(null);
         flushCustomPoints(first.points);
         amountFormApiRef.current?.setValue?.("topUpCount", value);
       }
@@ -506,9 +524,7 @@ export default function Wallet() {
     setSelectedAmount(value);
     setCustomAmount(points);
     flushCustomPoints(points);
-    setRechargeQuote(
-      rechargeConfig?.tiers.find((tier) => tier.points === points) ?? null
-    );
+    setRechargeQuote(null);
     amountFormApiRef.current?.setValue?.("topUpCount", value);
   };
 
@@ -526,25 +542,19 @@ export default function Wallet() {
       setRechargeQuote(null);
       return;
     }
-    const tier = rechargeConfig.tiers.find(
-      (item) => normalizePointValue(item.points) === points
-    );
-    if (tier) {
-      setRechargeQuote(tier);
-      return;
-    }
-    void quoteRecharge(points)
+    void quoteRecharge(points, paymentMethod || undefined)
       .then((quote) => {
         if (rechargeQuoteSeqRef.current === seq) setRechargeQuote(quote);
       })
       .catch(() => {
         if (rechargeQuoteSeqRef.current === seq) setRechargeQuote(null);
       });
-  }, [debouncedCustomPoints, rechargeConfig]);
+  }, [debouncedCustomPoints, paymentMethod, rechargeConfig]);
 
-  const handleRecharge = async () => {
+  const handleRecharge = async (requestedMethod: RechargePaymentMethod = paymentMethod) => {
     if (recharging) return;
-    if (!rechargeConfig?.enabled) {
+    const methods = configuredPaymentMethods(rechargeConfig);
+    if (!rechargeConfig?.enabled || !methods.includes(requestedMethod)) {
       Toast.warning(t("Online recharge is unavailable."));
       return;
     }
@@ -560,17 +570,17 @@ export default function Wallet() {
       Toast.warning(t("Recharge amount is below the minimum."));
       return;
     }
-    if (!rechargeAttemptRef.current || rechargeAttemptRef.current.points !== points) {
-      rechargeAttemptRef.current = { points, key: generateIdempotencyKey() };
+    if (!rechargeAttemptRef.current || rechargeAttemptRef.current.points !== points || rechargeAttemptRef.current.method !== requestedMethod) {
+      rechargeAttemptRef.current = { points, key: generateIdempotencyKey(), method: requestedMethod };
     }
     setRecharging(true);
     try {
-      const result = await createRecharge(points, rechargeAttemptRef.current.key);
+      const result = await createRecharge(points, rechargeAttemptRef.current.key, requestedMethod);
       rechargeAttemptRef.current = null;
       setPaymentOpen(true);
       setPaymentFrameLoaded(false);
       setPaymentFrameSlow(false);
-      setPayment({ rechargeNo: result.recharge.rechargeNo, url: result.payUrl, expiresAt: result.expiresAt });
+      setPayment({ rechargeNo: result.recharge.rechargeNo, url: result.payUrl, expiresAt: result.expiresAt, method: result.recharge.paymentMethod || requestedMethod });
       void refreshRecharges();
     } catch (error) {
       if (error instanceof IamApiError && error.status >= 400 && error.status < 500) {
@@ -746,7 +756,7 @@ export default function Wallet() {
         dataIndex: "paymentMethod",
         key: "paymentMethod",
         render: (paymentMethod: string) =>
-          paymentMethod === "Redemption Code" ? t(paymentMethod) : paymentMethod,
+          paymentMethod === "Redemption Code" ? t(paymentMethod) : paymentMethodLabel(paymentMethod, t),
         title: t("Payment method"),
       },
       {
@@ -772,6 +782,10 @@ export default function Wallet() {
     ],
     [t]
   );
+
+  const paymentTitle = payment?.method === EPUSDT_PAYMENT_METHOD
+    ? t("USDT (TRON) Payment")
+    : t("Alipay Payment");
 
   return (
     <>
@@ -841,6 +855,9 @@ export default function Wallet() {
                           {rechargeQuote ? (
                             <>
                               {t("Credited points")}: {formatPointsValue(rechargeQuote.creditedPoints)}
+                              {rechargeQuote.paymentAmount && rechargeQuote.paymentCurrency ? (
+                                <> | {t("Payment amount")}: {rechargeQuote.paymentAmount} {rechargeQuote.paymentCurrency}</>
+                              ) : null}
                             </>
                           ) : t("Enter recharge points for a quote")}
                         </Text>
@@ -866,16 +883,22 @@ export default function Wallet() {
                     />
                     <Form.Slot label={t("Payment Method")}>
                       <Space vertical align="start">
-                        <Button
-                          disabled={!rechargeConfig?.enabled}
-                          icon={<SiAlipay color="#1677FF" size={18} />}
-                          loading={recharging}
-                          onClick={() => void handleRecharge()}
-                          theme="outline"
-                          type="tertiary"
-                        >
-                          {t("Alipay")}
-                        </Button>
+                        {configuredPaymentMethods(rechargeConfig).map((method) => (
+                          <Button
+                            disabled={!rechargeConfig?.enabled || recharging}
+                            icon={method === "alipay" ? <SiAlipay color="#1677FF" size={18} /> : <Coins size={18} />}
+                            key={method}
+                            loading={recharging && paymentMethod === method}
+                            onClick={() => {
+                              setPaymentMethod(method);
+                              void handleRecharge(method);
+                            }}
+                            theme={paymentMethod === method ? "solid" : "outline"}
+                            type={paymentMethod === method ? "primary" : "tertiary"}
+                          >
+                            {paymentMethodLabel(method, t)}
+                          </Button>
+                        ))}
                       </Space>
                     </Form.Slot>
                   </div>
@@ -1096,7 +1119,14 @@ export default function Wallet() {
         footer={
           <Button
             disabled={!payment}
-            onClick={() => payment && window.open(payment.url, "_blank", "noopener,noreferrer")}
+            onClick={() => {
+              if (!payment) return;
+              const opened = window.open(payment.url, "_blank", "noopener,noreferrer");
+              if (!opened) return;
+              setPaymentOpen(false);
+              setPaymentFrameLoaded(false);
+              setPaymentFrameSlow(false);
+            }}
             theme="outline"
           >
             {t("Open in new window")}
@@ -1110,7 +1140,7 @@ export default function Wallet() {
           openBilling();
         }}
         size={isMobile ? "full-width" : "large"}
-        title={t("Alipay Payment")}
+        title={paymentTitle}
         visible={Boolean(payment) && paymentOpen}
         width={isMobile ? undefined : "min(960px, calc(100vw - 48px))"}
       >
@@ -1126,7 +1156,7 @@ export default function Wallet() {
               ref={paymentFrameRef}
               sandbox="allow-forms allow-same-origin allow-scripts"
               src={payment.url}
-              title={t("Alipay Payment")}
+              title={paymentTitle}
             />
             {!paymentFrameLoaded ? (
               <div aria-live="polite" className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-white px-6 text-center" role="status">

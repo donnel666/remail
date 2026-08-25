@@ -32,3 +32,9 @@ var (
 	ErrTransactionAlreadyReversed  = errors.New("billing: transaction already reversed")
 	ErrTransactionNotReversible    = errors.New("billing: transaction is not reversible")
 )
+
+// ErrRechargeGatewayAuthUnavailable means the provider rejected the
+// credentials used for a read-only query. Callers may retry with the current
+// provider configuration; it is not evidence that the payment response was
+// invalid or that the order is unpaid.
+var ErrRechargeGatewayAuthUnavailable = errors.New("billing: recharge gateway authentication unavailable")

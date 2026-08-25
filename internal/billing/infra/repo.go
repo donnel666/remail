@@ -450,7 +450,7 @@ func (r *BillingRepo) CreateRecharge(ctx context.Context, command billingapp.Cre
 		if err := tx.WithContext(ctx).Select("user_id").Clauses(clause.Locking{Strength: "UPDATE"}).First(&wallet, "user_id = ?", command.Recharge.UserID).Error; err != nil {
 			return fmt.Errorf("lock wallet for recharge: %w", err)
 		}
-		response, replayed, err := r.withIdempotencyInTx(ctx, tx, command.Recharge.UserID, "recharges.create", command.IdempotencyKey, command.RequestFingerprint, func(writeTx *gorm.DB) ([]byte, error) {
+		response, replayed, err := r.withIdempotencyInTxAliases(ctx, tx, command.Recharge.UserID, "recharges.create", command.IdempotencyKey, command.RequestFingerprint, command.LegacyRequestFingerprints, func(writeTx *gorm.DB) ([]byte, error) {
 			var pending int64
 			if err := writeTx.WithContext(ctx).Model(&RechargeModel{}).
 				Where("user_id = ? AND status IN ? AND created_at > ?", command.Recharge.UserID, pendingRechargeStatuses(), command.Recharge.CreatedAt.Add(-domain.RechargeReconciliationWindow)).
@@ -498,12 +498,15 @@ func (r *BillingRepo) GetRechargeByNo(ctx context.Context, rechargeNo string) (*
 }
 
 func (r *BillingRepo) MarkRechargeCallback(ctx context.Context, rechargeNo string, callbackAt time.Time) (bool, error) {
+	// Clear the throttle for this one-time wake-up; keep any active lease so an
+	// in-flight query is coalesced instead of issuing a concurrent provider call.
 	result := r.db.WithContext(ctx).
 		Model(&RechargeModel{}).
 		Where("recharge_no = ? AND status = ? AND created_at > ?", rechargeNo, domain.RechargeStatusPaying, callbackAt.Add(-domain.RechargeReconciliationWindow)).
 		Updates(map[string]any{
-			"status":     string(domain.RechargeStatusCallback),
-			"updated_at": callbackAt,
+			"status":          string(domain.RechargeStatusCallback),
+			"last_queried_at": nil,
+			"updated_at":      callbackAt,
 		})
 	if result.Error != nil {
 		return false, fmt.Errorf("mark recharge callback: %w", result.Error)
@@ -515,10 +518,13 @@ func (r *BillingRepo) ListDueRecharges(ctx context.Context, now time.Time, limit
 	var models []RechargeModel
 	if err := r.db.WithContext(ctx).
 		Where(
-			"created_at > ? AND (status IN ? OR (status = ? AND created_at <= ?)) AND (query_lease_until IS NULL OR query_lease_until <= ?) AND (last_queried_at IS NULL OR (query_attempts < ? AND last_queried_at <= ?) OR (query_attempts >= ? AND last_queried_at <= ?))",
+			"created_at > ? AND (status IN ? OR (status = ? AND ((payment_method = ? AND created_at <= ?) OR ((payment_method IS NULL OR payment_method <> ?) AND created_at <= ?)))) AND (query_lease_until IS NULL OR query_lease_until <= ?) AND (last_queried_at IS NULL OR (query_attempts < ? AND last_queried_at <= ?) OR (query_attempts >= ? AND last_queried_at <= ?))",
 			now.Add(-domain.RechargeReconciliationWindow),
 			[]string{string(domain.RechargeStatusCallback), string(domain.RechargeStatusReconciled)},
 			domain.RechargeStatusPaying,
+			domain.RechargePaymentMethodEpusdtUSDTTron,
+			now.Add(-domain.RechargeEpusdtFallbackDelay),
+			domain.RechargePaymentMethodEpusdtUSDTTron,
 			now.Add(-domain.RechargeCallbackFallbackDelay),
 			now,
 			domain.RechargeFastQueryLimit,
@@ -543,10 +549,11 @@ func (r *BillingRepo) ExpirePendingRecharges(ctx context.Context, createdBefore,
 		Model(&RechargeModel{}).
 		Where("status IN ? AND created_at <= ?", pendingRechargeStatuses(), createdBefore).
 		Updates(map[string]any{
-			"status":         string(domain.RechargeStatusFailed),
-			"failure_reason": "query_timeout",
-			"reconciled_at":  &now,
-			"updated_at":     now,
+			"status":            string(domain.RechargeStatusFailed),
+			"failure_reason":    "query_timeout",
+			"query_lease_until": nil,
+			"reconciled_at":     &now,
+			"updated_at":        now,
 		})
 	if result.Error != nil {
 		return 0, fmt.Errorf("expire pending recharges: %w", result.Error)
@@ -561,11 +568,14 @@ func (r *BillingRepo) ClaimRechargeQuery(ctx context.Context, rechargeNo string,
 		result := tx.WithContext(ctx).
 			Model(&RechargeModel{}).
 			Where(
-				"recharge_no = ? AND created_at > ? AND (status IN ? OR (status = ? AND created_at <= ?)) AND (query_lease_until IS NULL OR query_lease_until <= ?) AND (last_queried_at IS NULL OR (query_attempts < ? AND last_queried_at <= ?) OR (query_attempts >= ? AND last_queried_at <= ?))",
+				"recharge_no = ? AND created_at > ? AND (status IN ? OR (status = ? AND ((payment_method = ? AND created_at <= ?) OR ((payment_method IS NULL OR payment_method <> ?) AND created_at <= ?)))) AND (query_lease_until IS NULL OR query_lease_until <= ?) AND (last_queried_at IS NULL OR (query_attempts < ? AND last_queried_at <= ?) OR (query_attempts >= ? AND last_queried_at <= ?))",
 				rechargeNo,
 				claimedAt.Add(-domain.RechargeReconciliationWindow),
 				[]string{string(domain.RechargeStatusCallback), string(domain.RechargeStatusReconciled)},
 				domain.RechargeStatusPaying,
+				domain.RechargePaymentMethodEpusdtUSDTTron,
+				claimedAt.Add(-domain.RechargeEpusdtFallbackDelay),
+				domain.RechargePaymentMethodEpusdtUSDTTron,
 				claimedAt.Add(-domain.RechargeCallbackFallbackDelay),
 				claimedAt,
 				domain.RechargeFastQueryLimit,
@@ -593,14 +603,36 @@ func (r *BillingRepo) ClaimRechargeQuery(ctx context.Context, rechargeNo string,
 		return nil, billingapp.RechargeConfig{}, 0, false, nil
 	}
 	if model.GatewayConfigJSON == nil {
-		return nil, billingapp.RechargeConfig{}, 0, false, fmt.Errorf("recharge gateway config snapshot is missing")
+		return nil, billingapp.RechargeConfig{}, 0, false, r.quarantineRechargeSnapshot(
+			ctx, rechargeNo, model.QueryGeneration, claimedAt, errors.New("recharge gateway config snapshot is missing"),
+		)
+	}
+	rawSnapshot := strings.TrimSpace(*model.GatewayConfigJSON)
+	if rawSnapshot == "" || rawSnapshot == "null" || rawSnapshot == "{}" {
+		return nil, billingapp.RechargeConfig{}, 0, false, r.quarantineRechargeSnapshot(
+			ctx, rechargeNo, model.QueryGeneration, claimedAt, errors.New("recharge gateway config snapshot is empty"),
+		)
 	}
 	var config billingapp.RechargeConfig
-	if err := json.Unmarshal([]byte(*model.GatewayConfigJSON), &config); err != nil {
-		return nil, billingapp.RechargeConfig{}, 0, false, fmt.Errorf("decode recharge gateway config: %w", err)
+	if err := json.Unmarshal([]byte(rawSnapshot), &config); err != nil {
+		return nil, billingapp.RechargeConfig{}, 0, false, r.quarantineRechargeSnapshot(
+			ctx, rechargeNo, model.QueryGeneration, claimedAt, fmt.Errorf("decode recharge gateway config: %w", err),
+		)
+	}
+	if strings.TrimSpace(config.GatewayURL) == "" && strings.TrimSpace(config.EpusdtGatewayURL) == "" {
+		return nil, billingapp.RechargeConfig{}, 0, false, r.quarantineRechargeSnapshot(
+			ctx, rechargeNo, model.QueryGeneration, claimedAt, errors.New("recharge gateway config snapshot has no gateway"),
+		)
 	}
 	recharge := rechargeModelToDomain(model)
 	return &recharge, config, model.QueryGeneration, true, nil
+}
+
+func (r *BillingRepo) quarantineRechargeSnapshot(ctx context.Context, rechargeNo string, generation int, failedAt time.Time, snapshotErr error) error {
+	if err := r.FailRecharge(ctx, rechargeNo, generation, "migration_missing_gateway_snapshot", failedAt); err != nil {
+		return errors.Join(snapshotErr, fmt.Errorf("quarantine recharge snapshot: %w", err))
+	}
+	return snapshotErr
 }
 
 func (r *BillingRepo) RecordRechargeQuery(ctx context.Context, rechargeNo string, generation int, queriedAt time.Time) error {
@@ -1099,6 +1131,19 @@ func (r *BillingRepo) withIdempotencyInTx(
 	fingerprint string,
 	run func(*gorm.DB) ([]byte, error),
 ) ([]byte, bool, error) {
+	return r.withIdempotencyInTxAliases(ctx, tx, ownerUserID, operation, idempotencyKey, fingerprint, nil, run)
+}
+
+func (r *BillingRepo) withIdempotencyInTxAliases(
+	ctx context.Context,
+	tx *gorm.DB,
+	ownerUserID uint,
+	operation string,
+	idempotencyKey string,
+	fingerprint string,
+	legacyFingerprints []string,
+	run func(*gorm.DB) ([]byte, error),
+) ([]byte, bool, error) {
 	if strings.TrimSpace(idempotencyKey) == "" || strings.TrimSpace(fingerprint) == "" {
 		return nil, false, domain.ErrIdempotencyRequired
 	}
@@ -1121,7 +1166,16 @@ func (r *BillingRepo) withIdempotencyInTx(
 		First(&stored).Error; err != nil {
 		return nil, false, fmt.Errorf("lock idempotency key: %w", err)
 	}
-	if stored.RequestFingerprint != fingerprint {
+	fingerprintMatches := stored.RequestFingerprint == fingerprint
+	if !fingerprintMatches {
+		for _, legacy := range legacyFingerprints {
+			if stored.RequestFingerprint == legacy {
+				fingerprintMatches = true
+				break
+			}
+		}
+	}
+	if !fingerprintMatches {
 		return nil, false, domain.ErrIdempotencyConflict
 	}
 	if stored.Status == "succeeded" && stored.ResponseJSON.Valid && strings.TrimSpace(stored.ResponseJSON.String) != "" {

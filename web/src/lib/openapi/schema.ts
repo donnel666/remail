@@ -2204,7 +2204,7 @@ export interface paths {
         get: operations["getRecharges"];
         put?: never;
         /**
-         * Create an Alipay recharge order
+         * Create a recharge order
          * @description Credit is granted only after the server actively confirms the payment within five minutes.
          */
         post: operations["postRecharge"];
@@ -2310,6 +2310,30 @@ export interface paths {
          * @description Reads form field out_trade_no and triggers active reconciliation for an existing recharge. The notification itself is never used to credit funds.
          */
         post: operations["postEPayV2Webhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/payments/webhooks/epusdt/v1": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Receive an untrusted EPUSDT notification
+         * @description Reads order_id and triggers active reconciliation for an existing recharge. The notification payload, amount, status, and signature are never used to credit funds.
+         */
+        get: operations["getEPusdtWebhook"];
+        put?: never;
+        /**
+         * Receive an untrusted EPUSDT notification
+         * @description Reads order_id from JSON or form data and triggers active reconciliation for an existing recharge. The notification payload, amount, status, and signature are never used to credit funds.
+         */
+        post: operations["postEPusdtWebhook"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5989,6 +6013,8 @@ export interface components {
         };
         RechargeConfigResponse: {
             enabled: boolean;
+            /** @description Enabled payment method identifiers. */
+            paymentMethods: ("alipay" | "epusdt_usdt_tron")[];
             minPoints: components["schemas"]["NonNegativeLedgerAmount"];
             feeRate: components["schemas"]["NonNegativeLedgerAmount"];
             feeCapPoints: components["schemas"]["NonNegativeLedgerAmount"];
@@ -6001,15 +6027,32 @@ export interface components {
         };
         CreateRechargeRequest: {
             points: components["schemas"]["PositiveIntegerPointAmount"];
+            /**
+             * @description Optional payment method; omitted uses the first enabled method.
+             * @enum {string}
+             */
+            paymentMethod?: "alipay" | "epusdt_usdt_tron";
         };
         RechargeQuoteRequest: {
             points: components["schemas"]["PositiveIntegerPointAmount"];
+            /**
+             * @description Optional payment method; omitted uses the configured default method.
+             * @enum {string}
+             */
+            paymentMethod?: "alipay" | "epusdt_usdt_tron";
         };
         RechargeQuoteResponse: {
             points: components["schemas"]["NonNegativeLedgerAmount"];
             bonusPoints: components["schemas"]["NonNegativeLedgerAmount"];
             feePoints: components["schemas"]["NonNegativeLedgerAmount"];
             creditedPoints: components["schemas"]["NonNegativeLedgerAmount"];
+            /** @description Amount to send to the selected payment provider. */
+            paymentAmount: components["schemas"]["NonNegativeLedgerAmount"];
+            /**
+             * @description Currency of paymentAmount.
+             * @enum {string}
+             */
+            paymentCurrency: "CNY" | "USDT";
         };
         CreateRechargeResponse: {
             recharge: components["schemas"]["RechargeItem"];
@@ -17965,6 +18008,57 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Notification acknowledged */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+        };
+    };
+    getEPusdtWebhook: {
+        parameters: {
+            query?: {
+                order_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Notification acknowledged with success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+        };
+    };
+    postEPusdtWebhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    order_id?: string;
+                };
+                "application/x-www-form-urlencoded": {
+                    order_id?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Notification acknowledged with success */
             200: {
                 headers: {
                     [name: string]: unknown;

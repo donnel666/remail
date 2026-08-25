@@ -173,6 +173,16 @@ func TestValidateRechargePaymentSettings(t *testing.T) {
 	require.ErrorIs(t, Validate("epay_version", "v3"), domain.ErrInvalidValue)
 	require.NoError(t, Validate("epay_gateway_url", "https://pay.example.com/"))
 	require.ErrorIs(t, Validate("epay_gateway_url", "http://pay.example.com/"), domain.ErrInvalidValue)
+	require.ErrorIs(t, Validate("epusdt_gateway_url", "https://pay.example.com/?tenant=1"), domain.ErrInvalidValue)
+	require.ErrorIs(t, Validate("epusdt_gateway_url", "https://pay.example.com/#checkout"), domain.ErrInvalidValue)
+	require.NoError(t, Validate("epusdt_notify_url", "https://app.example.com/v1/payments/webhooks/epusdt?v=1"))
+	require.NoError(t, Validate("epusdt_return_url", "https://app.example.com/payment/return?source=wallet#done"))
+	require.NoError(t, Validate("epusdt_token", "USDT"))
+	require.NoError(t, Validate("epusdt_network", "tron"))
+	require.ErrorIs(t, Validate("epusdt_token", "USDT/TRON"), domain.ErrInvalidValue)
+	require.NoError(t, Validate("epusdt_allowed_hosts", "pay.example.com,api.example.com:8443,[::1]:9443"))
+	require.ErrorIs(t, Validate("epusdt_allowed_hosts", "https://pay.example.com"), domain.ErrInvalidValue)
+	require.ErrorIs(t, Validate("epusdt_allowed_hosts", "pay.example.com:70000"), domain.ErrInvalidValue)
 	require.NoError(t, Validate("redemption_code_purchase_url", "https://shop.example.com/cards"))
 	require.ErrorIs(t, Validate("redemption_code_purchase_url", "javascript:alert(1)"), domain.ErrInvalidValue)
 	require.NoError(t, Validate("customer_service_qq_group_number", "123456789"))
@@ -190,6 +200,9 @@ func TestValidateRechargePaymentSettings(t *testing.T) {
 	require.NoError(t, Validate("topup_fee_cap", "0.009"))
 	require.NoError(t, Validate("points_per_yuan", "1000"))
 	require.ErrorIs(t, Validate("points_per_yuan", "0"), domain.ErrInvalidValue)
+	require.NoError(t, Validate("epusdt_points_per_usdt", "6800"))
+	require.NoError(t, Validate("epusdt_points_per_usdt", "0"))
+	require.NoError(t, ValidatePersistedUpdates(DefaultSettings(), []domain.Setting{{Key: "epusdt_points_per_usdt", Value: "0"}}))
 	require.NoError(t, Validate("points_unit_migration_v1", "completed"))
 	require.ErrorIs(t, Validate("points_unit_migration_v1", "pending"), domain.ErrInvalidValue)
 	require.NoError(t, Validate("max_pending_recharge_orders", "10"))
@@ -231,6 +244,24 @@ func TestValidateRechargePaymentSettings(t *testing.T) {
 		{Key: "epay_platform_public_key", Value: "platform-public-key"},
 		{Key: "epay_notify_url", Value: "https://app.example.com/v1/payments/webhooks/epay/v2"},
 		{Key: "epay_return_url", Value: "https://app.example.com/wallet"},
+	}))
+	err = ValidatePersistedUpdates(DefaultSettings(), []domain.Setting{{Key: "epusdt_enabled", Value: "true"}})
+	require.ErrorAs(t, err, &fieldError)
+	require.Contains(t, fieldError.Fields, "epusdt_gateway_url")
+	require.Contains(t, fieldError.Fields, "epusdt_pid")
+	require.Contains(t, fieldError.Fields, "epusdt_points_per_usdt")
+	require.Contains(t, fieldError.Fields, "epusdt_api_secret")
+	require.NoError(t, ValidatePersistedUpdates(DefaultSettings(), []domain.Setting{
+		{Key: "epusdt_enabled", Value: "true"},
+		{Key: "epusdt_gateway_url", Value: "https://pay.example.com/"},
+		{Key: "epusdt_pid", Value: "1000"},
+		{Key: "epusdt_points_per_usdt", Value: "6800"},
+		{Key: "epusdt_api_secret", Value: "secret"},
+		{Key: "epusdt_token", Value: "USDT"},
+		{Key: "epusdt_network", Value: "tron"},
+		{Key: "epusdt_notify_url", Value: "https://app.example.com/v1/payments/webhooks/epusdt"},
+		{Key: "epusdt_return_url", Value: "https://app.example.com/wallet"},
+		{Key: "epusdt_allowed_hosts", Value: "pay.example.com"},
 	}))
 }
 

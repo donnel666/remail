@@ -278,6 +278,12 @@ func TestEPayGatewaySettingsRequireSensitivePermission(t *testing.T) {
 	} {
 		require.True(t, isSensitiveKey(key), key)
 	}
+	for _, key := range []string{
+		"epusdt_enabled", "epusdt_gateway_url", "epusdt_pid", "epusdt_api_key", "epusdt_api_secret",
+		"epusdt_token", "epusdt_network", "epusdt_notify_url", "epusdt_return_url", "epusdt_allowed_hosts",
+	} {
+		require.True(t, isSensitiveKey(key), key)
+	}
 	require.False(t, isSensitiveKey("topup_fee_rate"))
 }
 
@@ -286,6 +292,8 @@ func TestCredentialsAreWriteOnlyForPrivilegedAdmins(t *testing.T) {
 		"epay_merchant_key":        {Key: "epay_merchant_key", Value: "merchant-secret"},
 		"epay_private_key":         {Key: "epay_private_key", Value: "private-secret"},
 		"epay_platform_public_key": {Key: "epay_platform_public_key", Value: "public-key"},
+		"epusdt_api_key":           {Key: "epusdt_api_key", Value: "epusdt-key"},
+		"epusdt_api_secret":        {Key: "epusdt_api_secret", Value: "epusdt-secret"},
 		"github_client_id":         {Key: "github_client_id", Value: "github-client"},
 		"github_client_secret":     {Key: "github_client_secret", Value: "github-secret"},
 		"linuxdo_client_id":        {Key: "linuxdo_client_id", Value: "linuxdo-client"},
@@ -302,9 +310,11 @@ func TestCredentialsAreWriteOnlyForPrivilegedAdmins(t *testing.T) {
 	require.NotContains(t, list.Body.String(), "github-secret")
 	require.NotContains(t, list.Body.String(), "linuxdo-client")
 	require.NotContains(t, list.Body.String(), "linuxdo-secret")
+	require.NotContains(t, list.Body.String(), "epusdt-key")
+	require.NotContains(t, list.Body.String(), "epusdt-secret")
 	require.Contains(t, list.Body.String(), "public-key")
 
-	for _, key := range []string{"epay_merchant_key", "epay_private_key", "github_client_id", "github_client_secret", "linuxdo_client_id", "linuxdo_client_secret"} {
+	for _, key := range []string{"epay_merchant_key", "epay_private_key", "epusdt_api_key", "epusdt_api_secret", "github_client_id", "github_client_secret", "linuxdo_client_id", "linuxdo_client_secret"} {
 		response := httptest.NewRecorder()
 		r.ServeHTTP(response, requestWithSession(http.MethodGet, "/v1/admin/settings/"+key, ""))
 		require.Equal(t, http.StatusNotFound, response.Code)
@@ -325,17 +335,38 @@ func TestCredentialsAreWriteOnlyForPrivilegedAdmins(t *testing.T) {
 	require.Contains(t, bulk.Body.String(), "replacement-public")
 	require.Equal(t, "replacement-private", repo.items["epay_private_key"].Value)
 	require.Equal(t, "replacement-client", repo.items["github_client_id"].Value)
+
+	epusdt := httptest.NewRecorder()
+	r.ServeHTTP(epusdt, requestWithSession(http.MethodPut, "/v1/admin/settings/epusdt_api_secret", `{"value":"replacement-epusdt-secret"}`))
+	require.Equal(t, http.StatusNoContent, epusdt.Code)
+	require.Equal(t, "replacement-epusdt-secret", repo.items["epusdt_api_secret"].Value)
 }
 
 func TestBulkSettingsPermissionAndBlankSecretSafety(t *testing.T) {
 	repo := &fakeRepository{items: map[string]settingsdomain.Setting{
 		"site_title":           {Key: "site_title", Value: "old"},
 		"github_client_secret": {Key: "github_client_secret", Value: "secret"},
+		"epusdt_gateway_url":   {Key: "epusdt_gateway_url", Value: "https://pay.example.test"},
+		"epusdt_pid":           {Key: "epusdt_pid", Value: "merchant-123"},
 	}}
 	checker := permissionCheckerFunc(func(_ context.Context, _ uint, _ iamdomain.Role, _, action string) (bool, error) {
 		return action != "sensitive", nil
 	})
 	r := testRouter(repo, checker)
+
+	responseRepo := &fakeRepository{items: map[string]settingsdomain.Setting{
+		"site_title":         {Key: "site_title", Value: "old"},
+		"epusdt_gateway_url": {Key: "epusdt_gateway_url", Value: "https://pay.example.test"},
+		"epusdt_pid":         {Key: "epusdt_pid", Value: "merchant-123"},
+	}}
+	responseRouter := testRouter(responseRepo, checker)
+	nonSensitive := httptest.NewRecorder()
+	responseRouter.ServeHTTP(nonSensitive, requestWithSession(http.MethodPut, "/v1/admin/settings", `{"settings":[{"key":"site_title","value":"updated"}]}`))
+	require.Equal(t, http.StatusOK, nonSensitive.Code)
+	require.Contains(t, nonSensitive.Body.String(), "updated")
+	require.NotContains(t, nonSensitive.Body.String(), "pay.example.test")
+	require.NotContains(t, nonSensitive.Body.String(), "merchant-123")
+	require.Equal(t, "updated", responseRepo.items["site_title"].Value)
 
 	denied := httptest.NewRecorder()
 	r.ServeHTTP(denied, requestWithSession(http.MethodPut, "/v1/admin/settings", `{"settings":[{"key":"site_title","value":"new"},{"key":" github_client_secret ","value":"replacement"}]}`))

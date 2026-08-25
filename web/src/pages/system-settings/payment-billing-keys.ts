@@ -12,6 +12,22 @@ export const EPAY_GATEWAY_KEYS = [
 
 export const EPAY_WRITE_ONLY_KEYS = ["epay_merchant_key", "epay_private_key"] as const;
 
+export const EPUSDT_GATEWAY_KEYS = [
+  "epusdt_enabled",
+  "epusdt_gateway_url",
+  "epusdt_pid",
+  "epusdt_points_per_usdt",
+  "epusdt_api_key",
+  "epusdt_api_secret",
+  "epusdt_token",
+  "epusdt_network",
+  "epusdt_notify_url",
+  "epusdt_return_url",
+  "epusdt_allowed_hosts",
+] as const;
+
+export const EPUSDT_WRITE_ONLY_KEYS = ["epusdt_api_key", "epusdt_api_secret"] as const;
+
 export const TOPUP_KEYS = [
   "points_per_yuan",
   "min_topup_amount",
@@ -55,6 +71,7 @@ export const PRODUCT_PRICE_MULTIPLIER_KEYS = [
 
 export const PAYMENT_BILLING_KEYS = [
   ...EPAY_GATEWAY_KEYS,
+  ...EPUSDT_GATEWAY_KEYS,
   ...TOPUP_KEYS,
   ...RECHARGE_CHECK_KEYS,
   ...PROJECT_PRICE_KEYS,
@@ -77,4 +94,12 @@ export function changeEPayVersion(form: Record<string, unknown>, version: string
     epay_version: version,
     epay_notify_url: form.epay_notify_url === currentDefault ? "" : form.epay_notify_url,
   }, origin);
+}
+
+export function applyEpusdtURLDefaults(form: Record<string, unknown>, origin: string): Record<string, unknown> {
+  return {
+    ...form,
+    epusdt_notify_url: String(form.epusdt_notify_url ?? "").trim() || `${origin}/v1/payments/webhooks/epusdt/v1`,
+    epusdt_return_url: String(form.epusdt_return_url ?? "").trim() || `${origin}/payment/return`,
+  };
 }

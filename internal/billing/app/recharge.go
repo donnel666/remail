@@ -31,7 +31,11 @@ type RechargeTier struct {
 }
 
 type RechargeConfig struct {
-	Enabled           bool
+	Enabled bool
+	// PaymentMethod/Provider are set on the immutable snapshot stored with an
+	// order. Empty values are kept compatible with the legacy EPay snapshot.
+	PaymentMethod     string
+	Provider          string
 	Version           string
 	GatewayURL        string
 	MerchantID        string
@@ -47,6 +51,22 @@ type RechargeConfig struct {
 	Tiers             []RechargeTier
 	MaxPendingOrders  int
 	RequestTimeout    time.Duration
+	EpusdtEnabled     bool
+	EpusdtGatewayURL  string
+	EpusdtPID         string
+	EpusdtCurrency    string
+	// EpusdtPointsPerUSDT is the remail-side exchange rate for new EPUSDT
+	// orders. A missing value is retained for legacy CNY snapshots.
+	EpusdtPointsPerUSDT string
+	// EpusdtAPIKey is retained for deployments that keep a separate label;
+	// GMPay authenticates requests with PID + APISecret and does not send it.
+	EpusdtAPIKey       string
+	EpusdtAPISecret    string
+	EpusdtToken        string
+	EpusdtNetwork      string
+	EpusdtNotifyURL    string
+	EpusdtReturnURL    string
+	EpusdtAllowedHosts string
 }
 
 type RechargeConfigProvider interface {
@@ -74,11 +94,12 @@ type RechargeQueue interface {
 }
 
 type CreateRechargeCommand struct {
-	Recharge           domain.Recharge
-	GatewayConfig      RechargeConfig
-	MaxPendingOrders   int
-	IdempotencyKey     string
-	RequestFingerprint string
+	Recharge                  domain.Recharge
+	GatewayConfig             RechargeConfig
+	MaxPendingOrders          int
+	IdempotencyKey            string
+	RequestFingerprint        string
+	LegacyRequestFingerprints []string
 }
 
 type CreditRechargeCommand struct {
@@ -112,11 +133,12 @@ type RechargeUseCase struct {
 }
 
 type RechargeConfigResult struct {
-	Enabled      bool
-	MinPoints    string
-	FeeRate      string
-	FeeCapPoints string
-	Tiers        []RechargeTierResult
+	Enabled        bool
+	PaymentMethods []string
+	MinPoints      string
+	FeeRate        string
+	FeeCapPoints   string
+	Tiers          []RechargeTierResult
 }
 
 func (uc *RechargeUseCase) SetNotifications(delivery mailapp.DeliveryPort, users UserDirectory, wallets *WalletUseCase) {
@@ -133,15 +155,18 @@ type RechargeTierResult struct {
 type CreateRechargeRequest struct {
 	UserID         uint
 	Points         string
+	PaymentMethod  string
 	IdempotencyKey string
 	ClientIP       string
 }
 
 type RechargeQuoteResult struct {
-	Points         string
-	BonusPoints    string
-	FeePoints      string
-	CreditedPoints string
+	Points          string
+	BonusPoints     string
+	FeePoints       string
+	CreditedPoints  string
+	PaymentAmount   string
+	PaymentCurrency string
 }
 
 type CreateRechargeResult struct {
@@ -163,12 +188,19 @@ func (uc *RechargeUseCase) Config() (*RechargeConfigResult, error) {
 		return nil, err
 	}
 	result := &RechargeConfigResult{
-		Enabled:      config.Enabled && validateRechargeGatewayConfig(config) == nil,
-		MinPoints:    config.MinPoints,
-		FeeRate:      config.FeeRate,
-		FeeCapPoints: config.FeeCapPoints,
-		Tiers:        make([]RechargeTierResult, 0, len(config.Tiers)),
+		PaymentMethods: availableRechargePaymentMethods(config),
+		MinPoints:      config.MinPoints,
+		FeeRate:        config.FeeRate,
+		FeeCapPoints:   config.FeeCapPoints,
+		Tiers:          make([]RechargeTierResult, 0, len(config.Tiers)),
 	}
+	result.Enabled = len(result.PaymentMethods) > 0
+	if !result.Enabled {
+		return result, nil
+	}
+	// Tier fee semantics follow the first available method. The quote endpoint
+	// remains method-aware for custom and preset selections.
+	config.PaymentMethod = result.PaymentMethods[0]
 	for _, tier := range config.Tiers {
 		tierPoints, err := domain.ParseMoney(tier.Points)
 		if err != nil || !tierPoints.IsPositive() {
@@ -189,10 +221,32 @@ func (uc *RechargeUseCase) Config() (*RechargeConfigResult, error) {
 	return result, nil
 }
 
-func (uc *RechargeUseCase) Quote(rawPoints string) (*RechargeQuoteResult, error) {
+func (uc *RechargeUseCase) Quote(rawPoints string, requestedMethods ...string) (*RechargeQuoteResult, error) {
 	config, err := uc.currentConfig()
 	if err != nil {
 		return nil, err
+	}
+	if len(requestedMethods) > 0 && strings.TrimSpace(requestedMethods[0]) != "" {
+		method, ok := domain.NormalizeRechargePaymentMethod(requestedMethods[0])
+		if !ok {
+			return nil, domain.ErrInvalidRecharge
+		}
+		if !rechargePaymentMethodAvailable(config, method) {
+			return nil, domain.ErrRechargeConfigUnavailable
+		}
+		config.PaymentMethod = method
+	} else {
+		method, ok := domain.NormalizeRechargePaymentMethod(config.PaymentMethod)
+		if !ok {
+			return nil, domain.ErrRechargeConfigUnavailable
+		}
+		if strings.TrimSpace(config.PaymentMethod) == "" {
+			method = defaultRechargePaymentMethod(config)
+		}
+		if !rechargePaymentMethodAvailable(config, method) {
+			return nil, domain.ErrRechargeConfigUnavailable
+		}
+		config.PaymentMethod = method
 	}
 	quote, _, err := rechargeAmounts(config, rawPoints)
 	return quote, err
@@ -215,18 +269,40 @@ func (uc *RechargeUseCase) Create(ctx context.Context, request CreateRechargeReq
 		return nil, domain.ErrRechargeQueueUnavailable
 	}
 	config, err := uc.currentConfig()
-	if err != nil || !config.Enabled || config.MaxPendingOrders <= 0 || validateRechargeGatewayConfig(config) != nil {
+	if err != nil || !anyRechargeGatewayEnabled(config) || config.MaxPendingOrders <= 0 {
 		return nil, domain.ErrRechargeConfigUnavailable
+	}
+	method, ok := domain.NormalizeRechargePaymentMethod(request.PaymentMethod)
+	if !ok {
+		return nil, domain.ErrInvalidRecharge
+	}
+	if strings.TrimSpace(request.PaymentMethod) == "" {
+		method = defaultRechargePaymentMethod(config)
+	}
+	if !rechargePaymentMethodAvailable(config, method) {
+		return nil, domain.ErrRechargeConfigUnavailable
+	}
+	config.PaymentMethod = method
+	if method == domain.RechargePaymentMethodEpusdtUSDTTron {
+		config.Provider = "epusdt"
+	} else {
+		config.Provider = "epay"
+	}
+	if err := validateRechargeGatewayConfig(config); err != nil {
+		return nil, err
 	}
 	quote, payment, err := rechargeAmounts(config, request.Points)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateRechargePaymentAmount(method, payment); err != nil {
 		return nil, err
 	}
 	now := uc.now()
 	recharge := domain.Recharge{
 		RechargeNo:        "RC" + platform.NewUUIDV7CompactUpper(),
 		UserID:            request.UserID,
-		PaymentMethod:     "alipay",
+		PaymentMethod:     method,
 		RechargeQuota:     quote.CreditedPoints,
 		PaymentAmount:     payment,
 		Status:            domain.RechargeStatusPaying,
@@ -235,11 +311,12 @@ func (uc *RechargeUseCase) Create(ctx context.Context, request CreateRechargeReq
 		UpdatedAt:         now,
 	}
 	created, err := uc.repo.CreateRecharge(ctx, CreateRechargeCommand{
-		Recharge:           recharge,
-		GatewayConfig:      config,
-		MaxPendingOrders:   config.MaxPendingOrders,
-		IdempotencyKey:     strings.TrimSpace(request.IdempotencyKey),
-		RequestFingerprint: fingerprint("recharges.create", request.UserID, quote.Points),
+		Recharge:                  recharge,
+		GatewayConfig:             config,
+		MaxPendingOrders:          config.MaxPendingOrders,
+		IdempotencyKey:            strings.TrimSpace(request.IdempotencyKey),
+		RequestFingerprint:        rechargeCreateFingerprint(request.UserID, quote.Points, method),
+		LegacyRequestFingerprints: rechargeLegacyFingerprints(request.UserID, quote.Points, method),
 	})
 	if err != nil {
 		return nil, err
@@ -421,6 +498,28 @@ func (uc *RechargeUseCase) currentConfig() (RechargeConfig, error) {
 }
 
 func validateRechargeGatewayConfig(config RechargeConfig) error {
+	method, ok := domain.NormalizeRechargePaymentMethod(config.PaymentMethod)
+	if !ok {
+		return domain.ErrRechargeConfigUnavailable
+	}
+	if method == domain.RechargePaymentMethodEpusdtUSDTTron {
+		currency := strings.ToUpper(strings.TrimSpace(config.EpusdtCurrency))
+		if currency != "" && currency != "CNY" && currency != "USDT" {
+			return domain.ErrRechargeConfigUnavailable
+		}
+		if strings.TrimSpace(config.EpusdtPID) == "" || strings.TrimSpace(config.EpusdtAPISecret) == "" ||
+			strings.TrimSpace(config.EpusdtToken) == "" || strings.TrimSpace(config.EpusdtNetwork) == "" {
+			return domain.ErrRechargeConfigUnavailable
+		}
+		if !validHTTPSBaseURL(config.EpusdtGatewayURL) || !validHTTPSURL(config.EpusdtNotifyURL) || !validHTTPSURL(config.EpusdtReturnURL) {
+			return domain.ErrRechargeConfigUnavailable
+		}
+		if !strings.EqualFold(strings.TrimSpace(config.EpusdtToken), "USDT") || !strings.EqualFold(strings.TrimSpace(config.EpusdtNetwork), "tron") {
+			return domain.ErrRechargeConfigUnavailable
+		}
+		return nil
+	}
+
 	version := strings.ToLower(strings.TrimSpace(config.Version))
 	if strings.TrimSpace(config.MerchantID) == "" ||
 		(version == "v1" && strings.TrimSpace(config.MerchantKey) == "") ||
@@ -428,13 +527,95 @@ func validateRechargeGatewayConfig(config RechargeConfig) error {
 		(version != "v1" && version != "v2") {
 		return domain.ErrRechargeConfigUnavailable
 	}
-	for _, raw := range []string{config.GatewayURL, config.NotifyURL, config.ReturnURL} {
-		parsed, err := url.Parse(strings.TrimSpace(raw))
-		if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
-			return domain.ErrRechargeConfigUnavailable
-		}
+	if !validHTTPSURL(config.GatewayURL) || !validHTTPSURL(config.NotifyURL) || !validHTTPSURL(config.ReturnURL) {
+		return domain.ErrRechargeConfigUnavailable
 	}
 	return nil
+}
+
+func validHTTPSURL(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	return err == nil && strings.EqualFold(parsed.Scheme, "https") && parsed.Host != "" && parsed.User == nil
+}
+
+func validHTTPSBaseURL(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	return validHTTPSURL(raw) && err == nil && !parsed.ForceQuery && parsed.RawQuery == "" && parsed.Fragment == ""
+}
+
+func anyRechargeGatewayEnabled(config RechargeConfig) bool {
+	return config.Enabled || config.EpusdtEnabled
+}
+
+func rechargePaymentMethodAvailable(config RechargeConfig, method string) bool {
+	switch method {
+	case domain.RechargePaymentMethodAlipay:
+		return config.Enabled && validateRechargeGatewayConfig(RechargeConfig{
+			PaymentMethod: domain.RechargePaymentMethodAlipay, Version: config.Version,
+			GatewayURL: config.GatewayURL, MerchantID: config.MerchantID, MerchantKey: config.MerchantKey,
+			PrivateKey: config.PrivateKey, PlatformPublicKey: config.PlatformPublicKey,
+			NotifyURL: config.NotifyURL, ReturnURL: config.ReturnURL,
+		}) == nil
+	case domain.RechargePaymentMethodEpusdtUSDTTron:
+		return config.EpusdtEnabled && strings.EqualFold(strings.TrimSpace(config.EpusdtCurrency), "USDT") && validEpusdtPointsPerUSDT(config.EpusdtPointsPerUSDT) && validateRechargeGatewayConfig(RechargeConfig{
+			PaymentMethod:    domain.RechargePaymentMethodEpusdtUSDTTron,
+			EpusdtGatewayURL: config.EpusdtGatewayURL, EpusdtPID: config.EpusdtPID,
+			EpusdtCurrency: config.EpusdtCurrency, EpusdtPointsPerUSDT: config.EpusdtPointsPerUSDT,
+			EpusdtAPISecret: config.EpusdtAPISecret, EpusdtToken: config.EpusdtToken,
+			EpusdtNetwork: config.EpusdtNetwork, EpusdtNotifyURL: config.EpusdtNotifyURL,
+			EpusdtReturnURL: config.EpusdtReturnURL,
+		}) == nil
+	default:
+		return false
+	}
+}
+
+func availableRechargePaymentMethods(config RechargeConfig) []string {
+	methods := make([]string, 0, 2)
+	if rechargePaymentMethodAvailable(config, domain.RechargePaymentMethodAlipay) {
+		methods = append(methods, domain.RechargePaymentMethodAlipay)
+	}
+	if rechargePaymentMethodAvailable(config, domain.RechargePaymentMethodEpusdtUSDTTron) {
+		methods = append(methods, domain.RechargePaymentMethodEpusdtUSDTTron)
+	}
+	return methods
+}
+
+func defaultRechargePaymentMethod(config RechargeConfig) string {
+	if method, ok := domain.NormalizeRechargePaymentMethod(config.PaymentMethod); ok && rechargePaymentMethodAvailable(config, method) {
+		return method
+	}
+	methods := availableRechargePaymentMethods(config)
+	if len(methods) > 0 {
+		return methods[0]
+	}
+	return domain.RechargePaymentMethodAlipay
+}
+
+func rechargeCreateFingerprint(userID uint, points, method string) string {
+	if strings.TrimSpace(method) == "" || method == domain.RechargePaymentMethodAlipay {
+		// Keep the pre-payment-method EPay fingerprint replayable after rollout.
+		return fingerprint("recharges.create", userID, points)
+	}
+	return fingerprint("recharges.create", userID, points, method)
+}
+
+func rechargeLegacyFingerprints(userID uint, points, method string) []string {
+	if strings.TrimSpace(method) != "" && method != domain.RechargePaymentMethodAlipay {
+		return nil
+	}
+	// Before migration 68, EPay fingerprints used the RMB amount. Migration 68
+	// multiplied recharge points by the fixed 1000-point yuan scale; only an
+	// exact two-decimal quotient can have been a valid legacy request amount.
+	legacyAmount, err := domain.ParseMoney(points)
+	if err != nil || !legacyAmount.IsPositive() {
+		return nil
+	}
+	legacyAmount = legacyAmount.Div(decimal.NewFromInt(1000))
+	if !legacyAmount.Equal(legacyAmount.Round(2)) {
+		return nil
+	}
+	return []string{legacyFingerprint("recharges.create", userID, domain.MoneyString(legacyAmount))}
 }
 
 func rechargeAmounts(config RechargeConfig, rawPoints string) (*RechargeQuoteResult, string, error) {
@@ -446,16 +627,8 @@ func rechargeAmounts(config RechargeConfig, rawPoints string) (*RechargeQuoteRes
 	if err != nil || minimum.IsNegative() || points.LessThan(minimum) {
 		return nil, "", domain.ErrInvalidAmount
 	}
-	rate, err := domain.ParseMoney(config.FeeRate)
-	if err != nil || rate.IsNegative() || rate.GreaterThan(decimal.NewFromInt(100)) {
-		return nil, "", domain.ErrRechargeConfigUnavailable
-	}
-	capPoints, err := domain.ParseMoney(config.FeeCapPoints)
-	if err != nil || capPoints.IsNegative() {
-		return nil, "", domain.ErrRechargeConfigUnavailable
-	}
-	pointsPerYuan, err := domain.ParseMoney(config.PointsPerYuan)
-	if err != nil || !pointsPerYuan.IsPositive() {
+	method, ok := domain.NormalizeRechargePaymentMethod(config.PaymentMethod)
+	if !ok {
 		return nil, "", domain.ErrRechargeConfigUnavailable
 	}
 	bonus := decimal.Zero
@@ -469,12 +642,41 @@ func rechargeAmounts(config RechargeConfig, rawPoints string) (*RechargeQuoteRes
 			break
 		}
 	}
-	fee := points.Mul(rate).Div(decimal.NewFromInt(100)).RoundCeil(6)
-	if capPoints.IsPositive() && fee.GreaterThan(capPoints) {
-		fee = capPoints
+	fee := decimal.Zero
+	paymentCurrency := "CNY"
+	var payment decimal.Decimal
+	if method == domain.RechargePaymentMethodEpusdtUSDTTron {
+		pointsPerUSDT, rateErr := domain.ParseMoney(config.EpusdtPointsPerUSDT)
+		if rateErr != nil || !pointsPerUSDT.IsPositive() {
+			return nil, "", domain.ErrRechargeConfigUnavailable
+		}
+		paymentCurrency = "USDT"
+		payment = points.Div(pointsPerUSDT).RoundCeil(2)
+	} else {
+		rate, rateErr := domain.ParseMoney(config.FeeRate)
+		if rateErr != nil || rate.IsNegative() || rate.GreaterThan(decimal.NewFromInt(100)) {
+			return nil, "", domain.ErrRechargeConfigUnavailable
+		}
+		capPoints, capErr := domain.ParseMoney(config.FeeCapPoints)
+		if capErr != nil || capPoints.IsNegative() {
+			return nil, "", domain.ErrRechargeConfigUnavailable
+		}
+		pointsPerYuan, pointsErr := domain.ParseMoney(config.PointsPerYuan)
+		if pointsErr != nil || !pointsPerYuan.IsPositive() {
+			return nil, "", domain.ErrRechargeConfigUnavailable
+		}
+		fee = points.Mul(rate).Div(decimal.NewFromInt(100)).RoundCeil(6)
+		if capPoints.IsPositive() && fee.GreaterThan(capPoints) {
+			fee = capPoints
+		}
+		payment = points.Add(fee).Div(pointsPerYuan).RoundCeil(2)
 	}
 	credited := points.Add(bonus)
-	payment := points.Add(fee).Div(pointsPerYuan).RoundCeil(2)
+	if method == domain.RechargePaymentMethodEpusdtUSDTTron {
+		if err := validateRechargePaymentAmount(method, payment.StringFixed(2)); err != nil {
+			return nil, "", err
+		}
+	}
 	if payment.GreaterThan(decimal.RequireFromString("9999999999999999.99")) {
 		return nil, "", domain.ErrInvalidAmount
 	}
@@ -486,10 +688,49 @@ func rechargeAmounts(config RechargeConfig, rawPoints string) (*RechargeQuoteRes
 	return &RechargeQuoteResult{
 		Points: domain.MoneyString(points), BonusPoints: domain.MoneyString(bonus),
 		FeePoints: domain.MoneyString(fee), CreditedPoints: domain.MoneyString(credited),
+		PaymentAmount: payment.StringFixed(2), PaymentCurrency: paymentCurrency,
 	}, payment.StringFixed(2), nil
 }
 
+func validEpusdtPointsPerUSDT(raw string) bool {
+	rate, err := domain.ParseMoney(raw)
+	return err == nil && rate.IsPositive()
+}
+
+// EPUSDT rejects amounts at or below 0.01 USDT. Validate this before creating
+// the local pending order so an unsupported provider request cannot leave a
+// stranded recharge record.
+func validateRechargePaymentAmount(method, raw string) error {
+	if method != domain.RechargePaymentMethodEpusdtUSDTTron {
+		return nil
+	}
+	amount, err := domain.ParseMoney(raw)
+	minimum, _ := domain.ParseMoney("0.01")
+	if err != nil || !amount.GreaterThan(minimum) {
+		return domain.ErrInvalidAmount
+	}
+	return nil
+}
+
 func rechargeGatewayConfigHash(config RechargeConfig) string {
+	method, _ := domain.NormalizeRechargePaymentMethod(config.PaymentMethod)
+	if method == domain.RechargePaymentMethodEpusdtUSDTTron {
+		parts := []string{
+			"epusdt", strings.TrimSpace(config.EpusdtGatewayURL), strings.TrimSpace(config.EpusdtPID),
+			strings.TrimSpace(config.EpusdtAPISecret), strings.TrimSpace(config.EpusdtToken),
+			strings.TrimSpace(config.EpusdtNetwork), strings.TrimSpace(config.EpusdtNotifyURL),
+			strings.TrimSpace(config.EpusdtReturnURL), strings.TrimSpace(config.EpusdtAllowedHosts),
+		}
+		// Keep the old hash layout for snapshots that predate the explicit
+		// currency field; new direct-USDT snapshots bind their protocol mode.
+		if currency := strings.TrimSpace(config.EpusdtCurrency); currency != "" {
+			parts = append(parts, strings.ToUpper(currency))
+		}
+		hash := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
+		return hex.EncodeToString(hash[:])
+	}
+	// Keep the historical EPay hash byte-for-byte compatible for in-flight
+	// orders created before payment methods were introduced.
 	credential := config.MerchantKey
 	if strings.EqualFold(strings.TrimSpace(config.Version), "v2") {
 		credential = config.PrivateKey + "\x00" + config.PlatformPublicKey

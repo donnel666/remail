@@ -2066,6 +2066,24 @@ func (e CreateProjectApplicationRequestAccessType) Valid() bool {
 	}
 }
 
+// Defines values for CreateRechargeRequestPaymentMethod.
+const (
+	CreateRechargeRequestPaymentMethodAlipay         CreateRechargeRequestPaymentMethod = "alipay"
+	CreateRechargeRequestPaymentMethodEpusdtUsdtTron CreateRechargeRequestPaymentMethod = "epusdt_usdt_tron"
+)
+
+// Valid indicates whether the value is a known member of the CreateRechargeRequestPaymentMethod enum.
+func (e CreateRechargeRequestPaymentMethod) Valid() bool {
+	switch e {
+	case CreateRechargeRequestPaymentMethodAlipay:
+		return true
+	case CreateRechargeRequestPaymentMethodEpusdtUsdtTron:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CreateTicketRequestTicketType.
 const (
 	CreateTicketRequestTicketTypeGeneral CreateTicketRequestTicketType = "general"
@@ -3389,6 +3407,24 @@ func (e PublicLotterySummaryStatus) Valid() bool {
 	}
 }
 
+// Defines values for RechargeConfigResponsePaymentMethods.
+const (
+	RechargeConfigResponsePaymentMethodsAlipay         RechargeConfigResponsePaymentMethods = "alipay"
+	RechargeConfigResponsePaymentMethodsEpusdtUsdtTron RechargeConfigResponsePaymentMethods = "epusdt_usdt_tron"
+)
+
+// Valid indicates whether the value is a known member of the RechargeConfigResponsePaymentMethods enum.
+func (e RechargeConfigResponsePaymentMethods) Valid() bool {
+	switch e {
+	case RechargeConfigResponsePaymentMethodsAlipay:
+		return true
+	case RechargeConfigResponsePaymentMethodsEpusdtUsdtTron:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RechargeItemStatus.
 const (
 	RechargeItemStatusCallback   RechargeItemStatus = "callback"
@@ -3410,6 +3446,42 @@ func (e RechargeItemStatus) Valid() bool {
 	case RechargeItemStatusPaying:
 		return true
 	case RechargeItemStatusReconciled:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RechargeQuoteRequestPaymentMethod.
+const (
+	Alipay         RechargeQuoteRequestPaymentMethod = "alipay"
+	EpusdtUsdtTron RechargeQuoteRequestPaymentMethod = "epusdt_usdt_tron"
+)
+
+// Valid indicates whether the value is a known member of the RechargeQuoteRequestPaymentMethod enum.
+func (e RechargeQuoteRequestPaymentMethod) Valid() bool {
+	switch e {
+	case Alipay:
+		return true
+	case EpusdtUsdtTron:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RechargeQuoteResponsePaymentCurrency.
+const (
+	CNY  RechargeQuoteResponsePaymentCurrency = "CNY"
+	USDT RechargeQuoteResponsePaymentCurrency = "USDT"
+)
+
+// Valid indicates whether the value is a known member of the RechargeQuoteResponsePaymentCurrency enum.
+func (e RechargeQuoteResponsePaymentCurrency) Valid() bool {
+	switch e {
+	case CNY:
+		return true
+	case USDT:
 		return true
 	default:
 		return false
@@ -7832,9 +7904,15 @@ type CreateProxyRequest struct {
 
 // CreateRechargeRequest defines model for CreateRechargeRequest.
 type CreateRechargeRequest struct {
+	// PaymentMethod Optional payment method; omitted uses the first enabled method.
+	PaymentMethod *CreateRechargeRequestPaymentMethod `json:"paymentMethod,omitempty"`
+
 	// Points Positive whole-number point amount; a decimal representation is accepted only when its fractional part is zero, and the value must fit DECIMAL(18,6).
 	Points PositiveIntegerPointAmount `json:"points"`
 }
+
+// CreateRechargeRequestPaymentMethod Optional payment method; omitted uses the first enabled method.
+type CreateRechargeRequestPaymentMethod string
 
 // CreateRechargeResponse defines model for CreateRechargeResponse.
 type CreateRechargeResponse struct {
@@ -9729,10 +9807,16 @@ type RechargeConfigResponse struct {
 	// MinPoints Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	MinPoints NonNegativeLedgerAmount `json:"minPoints"`
 
+	// PaymentMethods Enabled payment method identifiers.
+	PaymentMethods []RechargeConfigResponsePaymentMethods `json:"paymentMethods"`
+
 	// RedemptionCodePurchaseUrl Configured HTTPS destination for buying redemption codes; omitted when not configured.
 	RedemptionCodePurchaseUrl *string        `json:"redemptionCodePurchaseUrl,omitempty"`
 	Tiers                     []RechargeTier `json:"tiers"`
 }
+
+// RechargeConfigResponsePaymentMethods defines model for RechargeConfigResponse.PaymentMethods.
+type RechargeConfigResponsePaymentMethods string
 
 // RechargeItem defines model for RechargeItem.
 type RechargeItem struct {
@@ -9767,9 +9851,15 @@ type RechargeListResponse struct {
 
 // RechargeQuoteRequest defines model for RechargeQuoteRequest.
 type RechargeQuoteRequest struct {
+	// PaymentMethod Optional payment method; omitted uses the configured default method.
+	PaymentMethod *RechargeQuoteRequestPaymentMethod `json:"paymentMethod,omitempty"`
+
 	// Points Positive whole-number point amount; a decimal representation is accepted only when its fractional part is zero, and the value must fit DECIMAL(18,6).
 	Points PositiveIntegerPointAmount `json:"points"`
 }
+
+// RechargeQuoteRequestPaymentMethod Optional payment method; omitted uses the configured default method.
+type RechargeQuoteRequestPaymentMethod string
 
 // RechargeQuoteResponse defines model for RechargeQuoteResponse.
 type RechargeQuoteResponse struct {
@@ -9782,9 +9872,18 @@ type RechargeQuoteResponse struct {
 	// FeePoints Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	FeePoints NonNegativeLedgerAmount `json:"feePoints"`
 
+	// PaymentAmount Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	PaymentAmount NonNegativeLedgerAmount `json:"paymentAmount"`
+
+	// PaymentCurrency Currency of paymentAmount.
+	PaymentCurrency RechargeQuoteResponsePaymentCurrency `json:"paymentCurrency"`
+
 	// Points Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	Points NonNegativeLedgerAmount `json:"points"`
 }
+
+// RechargeQuoteResponsePaymentCurrency Currency of paymentAmount.
+type RechargeQuoteResponsePaymentCurrency string
 
 // RechargeTier defines model for RechargeTier.
 type RechargeTier struct {
@@ -12630,6 +12729,21 @@ type PatchPasswordParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// GetEPusdtWebhookParams defines parameters for GetEPusdtWebhook.
+type GetEPusdtWebhookParams struct {
+	OrderId *string `form:"order_id,omitempty" json:"order_id,omitempty"`
+}
+
+// PostEPusdtWebhookJSONBody defines parameters for PostEPusdtWebhook.
+type PostEPusdtWebhookJSONBody struct {
+	OrderId *string `json:"order_id,omitempty"`
+}
+
+// PostEPusdtWebhookFormdataBody defines parameters for PostEPusdtWebhook.
+type PostEPusdtWebhookFormdataBody struct {
+	OrderId *string `form:"order_id,omitempty" json:"order_id,omitempty"`
+}
+
 // GetPickupMessagesParams defines parameters for GetPickupMessages.
 type GetPickupMessagesParams struct {
 	Email string `form:"email" json:"email"`
@@ -13308,6 +13422,12 @@ type PostPasswordResetJSONRequestBody = PasswordResetRequest
 
 // PostPasswordResetRequestJSONRequestBody defines body for PostPasswordResetRequest for application/json ContentType.
 type PostPasswordResetRequestJSONRequestBody = PasswordResetCodeRequest
+
+// PostEPusdtWebhookJSONRequestBody defines body for PostEPusdtWebhook for application/json ContentType.
+type PostEPusdtWebhookJSONRequestBody PostEPusdtWebhookJSONBody
+
+// PostEPusdtWebhookFormdataRequestBody defines body for PostEPusdtWebhook for application/x-www-form-urlencoded ContentType.
+type PostEPusdtWebhookFormdataRequestBody PostEPusdtWebhookFormdataBody
 
 // PostPickupMessagesBatchJSONRequestBody defines body for PostPickupMessagesBatch for application/json ContentType.
 type PostPickupMessagesBatchJSONRequestBody = PickupBatchRequest
@@ -14986,6 +15106,12 @@ type ServerInterface interface {
 	// Receive an untrusted EPay V2 notification
 	// (POST /v1/payments/webhooks/epay/v2)
 	PostEPayV2Webhook(c *gin.Context)
+	// Receive an untrusted EPUSDT notification
+	// (GET /v1/payments/webhooks/epusdt/v1)
+	GetEPusdtWebhook(c *gin.Context, params GetEPusdtWebhookParams)
+	// Receive an untrusted EPUSDT notification
+	// (POST /v1/payments/webhooks/epusdt/v1)
+	PostEPusdtWebhook(c *gin.Context)
 	// Read mail messages with service email and token
 	// (GET /v1/pickup)
 	GetPickupMessages(c *gin.Context, params GetPickupMessagesParams)
@@ -15016,7 +15142,7 @@ type ServerInterface interface {
 	// List recharge orders
 	// (GET /v1/recharges)
 	GetRecharges(c *gin.Context, params GetRechargesParams)
-	// Create an Alipay recharge order
+	// Create a recharge order
 	// (POST /v1/recharges)
 	PostRecharge(c *gin.Context, params PostRechargeParams)
 	// Get public recharge configuration
@@ -30600,6 +30726,46 @@ func (siw *ServerInterfaceWrapper) PostEPayV2Webhook(c *gin.Context) {
 	siw.Handler.PostEPayV2Webhook(c)
 }
 
+// GetEPusdtWebhook operation middleware
+func (siw *ServerInterfaceWrapper) GetEPusdtWebhook(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetEPusdtWebhookParams
+
+	// ------------- Optional query parameter "order_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "order_id", c.Request.URL.Query(), &params.OrderId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter order_id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetEPusdtWebhook(c, params)
+}
+
+// PostEPusdtWebhook operation middleware
+func (siw *ServerInterfaceWrapper) PostEPusdtWebhook(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostEPusdtWebhook(c)
+}
+
 // GetPickupMessages operation middleware
 func (siw *ServerInterfaceWrapper) GetPickupMessages(c *gin.Context) {
 
@@ -33019,6 +33185,8 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/payments/webhooks/epay/v1", wrapper.PostEPayWebhook)
 	router.GET(options.BaseURL+"/v1/payments/webhooks/epay/v2", wrapper.GetEPayV2Webhook)
 	router.POST(options.BaseURL+"/v1/payments/webhooks/epay/v2", wrapper.PostEPayV2Webhook)
+	router.GET(options.BaseURL+"/v1/payments/webhooks/epusdt/v1", wrapper.GetEPusdtWebhook)
+	router.POST(options.BaseURL+"/v1/payments/webhooks/epusdt/v1", wrapper.PostEPusdtWebhook)
 	router.GET(options.BaseURL+"/v1/pickup", wrapper.GetPickupMessages)
 	router.POST(options.BaseURL+"/v1/pickup/batch", wrapper.PostPickupMessagesBatch)
 	router.GET(options.BaseURL+"/v1/pickup/messages/:messageId", wrapper.GetPickupMessage)

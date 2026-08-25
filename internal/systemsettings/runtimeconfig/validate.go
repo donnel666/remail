@@ -20,6 +20,8 @@ const (
 	maxVerificationPatternCount = 64
 )
 
+var epusdtValuePattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
 type integerRange struct {
 	min int64
 	max int64
@@ -100,7 +102,7 @@ var removedKeys = map[string]struct{}{
 }
 
 var booleanKeys = map[string]struct{}{
-	"register_enabled": {}, "captcha_enabled": {}, "announcement_enabled": {}, "faq_enabled": {}, "epay_enabled": {},
+	"register_enabled": {}, "captcha_enabled": {}, "announcement_enabled": {}, "faq_enabled": {}, "epay_enabled": {}, "epusdt_enabled": {},
 	"daily_checkin_enabled": {}, "leaderboard_reward_enabled": {}, "linuxdo_oauth_enabled": {}, "github_oauth_enabled": {},
 }
 
@@ -162,6 +164,11 @@ func Validate(key, value string) error {
 		if err != nil || !amount.IsPositive() {
 			return domain.ErrInvalidValue
 		}
+	case "epusdt_points_per_usdt":
+		amount, err := money.Parse(value)
+		if err != nil || amount.IsNegative() {
+			return domain.ErrInvalidValue
+		}
 	case "points_unit_migration_v1":
 		if value != "completed" {
 			return domain.ErrInvalidValue
@@ -220,6 +227,25 @@ func Validate(key, value string) error {
 		if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
 			return domain.ErrInvalidValue
 		}
+	case "epusdt_gateway_url":
+		if value == "" {
+			return nil
+		}
+		parsed, err := url.Parse(value)
+		if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.ForceQuery || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return domain.ErrInvalidValue
+		}
+	case "epusdt_notify_url", "epusdt_return_url":
+		if value == "" {
+			return nil
+		}
+		// Query parameters are part of the signed notify URL and the return URL
+		// may carry browser-state parameters. They do not affect the provider
+		// API origin, which is validated separately above.
+		parsed, err := url.Parse(value)
+		if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
+			return domain.ErrInvalidValue
+		}
 	case "linuxdo_callback_url", "github_callback_url":
 		if value == "" {
 			return nil
@@ -241,6 +267,18 @@ func Validate(key, value string) error {
 		}
 	case "epay_private_key", "epay_platform_public_key":
 		if len(rawValue) > 32<<10 || strings.ContainsRune(rawValue, '\x00') {
+			return domain.ErrInvalidValue
+		}
+	case "epusdt_pid", "epusdt_api_key", "epusdt_api_secret":
+		if len(value) > 512 || strings.ContainsAny(value, "\r\n\x00") {
+			return domain.ErrInvalidValue
+		}
+	case "epusdt_token", "epusdt_network":
+		if len(value) == 0 || len(value) > 32 || !epusdtValuePattern.MatchString(value) {
+			return domain.ErrInvalidValue
+		}
+	case "epusdt_allowed_hosts":
+		if !validEpusdtAllowedHosts(value) {
 			return domain.ErrInvalidValue
 		}
 	case "topup_amount_presets":
@@ -417,6 +455,9 @@ func sanitizeRelationships(values map[string]string) {
 	if strings.TrimSpace(values["epay_enabled"]) == "true" && len(invalidEPayConfigFields(values)) > 0 {
 		values["epay_enabled"] = "false"
 	}
+	if strings.TrimSpace(values["epusdt_enabled"]) == "true" && len(invalidEpusdtConfigFields(values)) > 0 {
+		values["epusdt_enabled"] = "false"
+	}
 	if strings.TrimSpace(values["linuxdo_oauth_enabled"]) == "true" && len(invalidLinuxDOConfigFields(values)) > 0 {
 		values["linuxdo_oauth_enabled"] = "false"
 	}
@@ -469,6 +510,11 @@ func validateRelationships(values map[string]string) error {
 			return &domain.InvalidValueFieldsError{Fields: fields}
 		}
 	}
+	if strings.TrimSpace(values["epusdt_enabled"]) == "true" {
+		if fields := invalidEpusdtConfigFields(values); len(fields) > 0 {
+			return &domain.InvalidValueFieldsError{Fields: fields}
+		}
+	}
 	if strings.TrimSpace(values["linuxdo_oauth_enabled"]) == "true" {
 		if fields := invalidLinuxDOConfigFields(values); len(fields) > 0 {
 			return &domain.InvalidValueFieldsError{Fields: fields}
@@ -518,6 +564,27 @@ func invalidEPayConfigFields(values map[string]string) map[string]string {
 	return fields
 }
 
+func invalidEpusdtConfigFields(values map[string]string) map[string]string {
+	fields := make(map[string]string)
+	require := func(key string) {
+		if strings.TrimSpace(values[key]) == "" {
+			fields[key] = "Required when epusdt is enabled."
+		} else if Validate(key, values[key]) != nil {
+			fields[key] = "Invalid value."
+		}
+	}
+	for _, key := range []string{"epusdt_gateway_url", "epusdt_pid", "epusdt_points_per_usdt", "epusdt_api_secret", "epusdt_notify_url", "epusdt_return_url", "epusdt_token", "epusdt_network"} {
+		require(key)
+	}
+	if rate, err := money.Parse(strings.TrimSpace(values["epusdt_points_per_usdt"])); err != nil || !rate.IsPositive() {
+		fields["epusdt_points_per_usdt"] = "Must be positive when epusdt is enabled."
+	}
+	if raw := strings.TrimSpace(values["epusdt_allowed_hosts"]); raw != "" && Validate("epusdt_allowed_hosts", raw) != nil {
+		fields["epusdt_allowed_hosts"] = "Invalid value."
+	}
+	return fields
+}
+
 func invalidLinuxDOConfigFields(values map[string]string) map[string]string {
 	fields := make(map[string]string)
 	for _, key := range []string{"linuxdo_client_id", "linuxdo_client_secret", "linuxdo_callback_url"} {
@@ -558,6 +625,48 @@ func validDomain(value string) bool {
 			if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' {
 				return false
 			}
+		}
+	}
+	return true
+}
+
+func validEpusdtAllowedHosts(value string) bool {
+	if value == "" {
+		return true
+	}
+	for _, raw := range strings.Split(value, ",") {
+		entry := strings.ToLower(strings.TrimSpace(raw))
+		if entry == "" || strings.ContainsAny(entry, "/?#@\r\n\x00") {
+			return false
+		}
+		host, port := entry, ""
+		if strings.HasPrefix(entry, "[") {
+			var err error
+			host, port, err = net.SplitHostPort(entry)
+			if err != nil {
+				return false
+			}
+		} else if strings.Count(entry, ":") == 1 {
+			var err error
+			host, port, err = net.SplitHostPort(entry)
+			if err != nil {
+				return false
+			}
+		} else if strings.Contains(entry, ":") {
+			return false
+		}
+		if port != "" {
+			number, err := strconv.Atoi(port)
+			if err != nil || number < 1 || number > 65535 {
+				return false
+			}
+		}
+		host = strings.Trim(strings.TrimSpace(host), "[]")
+		if host == "localhost" || net.ParseIP(host) != nil {
+			continue
+		}
+		if !validDomain(host) {
+			return false
 		}
 	}
 	return true

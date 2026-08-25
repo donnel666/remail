@@ -100,6 +100,7 @@ type RechargeTierResponse struct {
 
 type RechargeConfigResponse struct {
 	Enabled                   bool                   `json:"enabled"`
+	PaymentMethods            []string               `json:"paymentMethods"`
 	MinPoints                 string                 `json:"minPoints"`
 	FeeRate                   string                 `json:"feeRate"`
 	FeeCapPoints              string                 `json:"feeCapPoints"`
@@ -108,18 +109,22 @@ type RechargeConfigResponse struct {
 }
 
 type CreateRechargeRequest struct {
-	Points string `json:"points" binding:"required"`
+	Points        string `json:"points" binding:"required"`
+	PaymentMethod string `json:"paymentMethod,omitempty"`
 }
 
 type RechargeQuoteRequest struct {
-	Points string `json:"points" binding:"required"`
+	Points        string `json:"points" binding:"required"`
+	PaymentMethod string `json:"paymentMethod,omitempty"`
 }
 
 type RechargeQuoteResponse struct {
-	Points         string `json:"points"`
-	BonusPoints    string `json:"bonusPoints"`
-	FeePoints      string `json:"feePoints"`
-	CreditedPoints string `json:"creditedPoints"`
+	Points          string `json:"points"`
+	BonusPoints     string `json:"bonusPoints"`
+	FeePoints       string `json:"feePoints"`
+	CreditedPoints  string `json:"creditedPoints"`
+	PaymentAmount   string `json:"paymentAmount"`
+	PaymentCurrency string `json:"paymentCurrency"`
 }
 
 type CreateRechargeResponse struct {

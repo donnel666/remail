@@ -3,7 +3,7 @@ package runtimeconfig
 import "github.com/donnel666/remail/internal/systemsettings/domain"
 
 const (
-	DefaultSettingsCount                         = 249
+	DefaultSettingsCount                         = 260
 	SMSBowerNoCodeRefundTimeoutMinutesKey        = "smsbower_no_code_refund_timeout_minutes"
 	MicrosoftPriceMultiplierKey                  = "product_price_multiplier_microsoft"
 	GmailPriceMultiplierKey                      = "product_price_multiplier_gmail"
@@ -93,6 +93,17 @@ var defaultSettings = []domain.Setting{
 	{Key: "epay_platform_public_key", Value: ""},
 	{Key: "epay_notify_url", Value: ""},
 	{Key: "epay_return_url", Value: ""},
+	{Key: "epusdt_enabled", Value: "false"},
+	{Key: "epusdt_gateway_url", Value: ""},
+	{Key: "epusdt_pid", Value: ""},
+	{Key: "epusdt_points_per_usdt", Value: "0"},
+	{Key: "epusdt_api_key", Value: ""},
+	{Key: "epusdt_api_secret", Value: ""},
+	{Key: "epusdt_token", Value: "USDT"},
+	{Key: "epusdt_network", Value: "tron"},
+	{Key: "epusdt_notify_url", Value: ""},
+	{Key: "epusdt_return_url", Value: ""},
+	{Key: "epusdt_allowed_hosts", Value: ""},
 	{Key: "redemption_code_purchase_url", Value: ""},
 	{Key: "points_per_yuan", Value: "1000"},
 	{Key: "min_topup_amount", Value: "10000"},

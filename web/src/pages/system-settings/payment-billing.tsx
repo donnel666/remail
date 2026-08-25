@@ -1,22 +1,22 @@
 import { useState } from "react";
 import { Button, InputNumber, Toast } from "@douyinfe/semi-ui";
-import { CreditCard, Plus, RefreshCw, Save, Trash2, WalletCards } from "lucide-react";
+import { CreditCard, Link2, Plus, RefreshCw, Save, Trash2, WalletCards } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { parseOption } from "@/lib/system-settings-api";
 
 import type { SectionProps } from "./index";
-import { applyEPayURLDefaults, changeEPayVersion, EPAY_GATEWAY_KEYS, EPAY_WRITE_ONLY_KEYS, RECHARGE_CHECK_KEYS, TOPUP_KEYS } from "./payment-billing-keys";
+import { applyEPayURLDefaults, applyEpusdtURLDefaults, changeEPayVersion, EPAY_GATEWAY_KEYS, EPAY_WRITE_ONLY_KEYS, EPUSDT_GATEWAY_KEYS, EPUSDT_WRITE_ONLY_KEYS, RECHARGE_CHECK_KEYS, TOPUP_KEYS } from "./payment-billing-keys";
 import { SettingsAccessBoundary, SettingsCardHeader, SettingsFormGrid, SettingsNumberField, SettingsSection, SettingsSelectField, SettingsTextField, SettingsTextareaField } from "./settings-layout";
 import { parseTopupTiers, serializeTopupTiers, type TopupTier } from "./topup-tiers";
 
-const D: Record<string, unknown> = { epay_enabled: false, epay_version: "v1", epay_gateway_url: "", epay_merchant_id: "", epay_merchant_key: "", epay_private_key: "", epay_platform_public_key: "", epay_notify_url: "", epay_return_url: "", points_per_yuan: 1000, min_topup_amount: 10000, topup_fee_rate: 0, topup_fee_cap: 0, topup_amount_presets: "[10000, 20000, 50000, 100000, 200000, 500000]", topup_amount_bonus: "{}", max_pending_recharge_orders: 10, redemption_code_purchase_url: "", async_check_request_timeout_seconds: 5 };
-const EPAY_WRITE_ONLY = new Set<string>(EPAY_WRITE_ONLY_KEYS);
+const D: Record<string, unknown> = { epay_enabled: false, epay_version: "v1", epay_gateway_url: "", epay_merchant_id: "", epay_merchant_key: "", epay_private_key: "", epay_platform_public_key: "", epay_notify_url: "", epay_return_url: "", epusdt_enabled: false, epusdt_gateway_url: "", epusdt_pid: "", epusdt_points_per_usdt: 0, epusdt_api_key: "", epusdt_api_secret: "", epusdt_token: "USDT", epusdt_network: "tron", epusdt_notify_url: "", epusdt_return_url: "", epusdt_allowed_hosts: "", points_per_yuan: 1000, min_topup_amount: 10000, topup_fee_rate: 0, topup_fee_cap: 0, topup_amount_presets: "[10000, 20000, 50000, 100000, 200000, 500000]", topup_amount_bonus: "{}", max_pending_recharge_orders: 10, redemption_code_purchase_url: "", async_check_request_timeout_seconds: 5 };
+const WRITE_ONLY = new Set<string>([...EPAY_WRITE_ONLY_KEYS, ...EPUSDT_WRITE_ONLY_KEYS]);
 
 export default function PaymentSection({ options, onBulkSave, canSensitive }: SectionProps) {
   const { t } = useTranslation();
   const origin = typeof window === "undefined" ? "" : window.location.origin;
-  const [form, setForm] = useState(() => applyEPayURLDefaults(parseOption(options, D as any) as Record<string, unknown>, origin));
+  const [form, setForm] = useState(() => applyEpusdtURLDefaults(applyEPayURLDefaults(parseOption(options, D as any) as Record<string, unknown>, origin), origin));
   const [topupTiers, setTopupTiers] = useState(() => parseTopupTiers(form.topup_amount_presets, form.topup_amount_bonus));
   const [savingCard, setSavingCard] = useState<string | null>(null);
   const update = (key: string, value: unknown) => setForm((current) => ({ ...current, [key]: value }));
@@ -26,10 +26,13 @@ export default function PaymentSection({ options, onBulkSave, canSensitive }: Se
     try {
       await onBulkSave(keys.flatMap((key) => {
         const value = String(form[key] ?? "");
-        return EPAY_WRITE_ONLY.has(key) && !value.trim() ? [] : [{ key, value }];
+        return WRITE_ONLY.has(key) && !value.trim() ? [] : [{ key, value }];
       }));
-      if (card === "gateway") {
+      if (card === "epay") {
         setForm((current) => ({ ...current, epay_merchant_key: "", epay_private_key: "" }));
+      }
+      if (card === "epusdt") {
+        setForm((current) => ({ ...current, epusdt_api_key: "", epusdt_api_secret: "" }));
       }
     }
     finally { setSavingCard(null); }
@@ -68,16 +71,32 @@ export default function PaymentSection({ options, onBulkSave, canSensitive }: Se
           <SettingsTextField label={t("支付回调地址")} value={String(form.epay_notify_url)} onChange={(value) => update("epay_notify_url", value)} />
           <SettingsTextField label={t("支付同步跳转地址")} value={String(form.epay_return_url)} onChange={(value) => update("epay_return_url", value)} />
         </SettingsFormGrid>
-        <Button icon={<Save size={14} />} loading={savingCard === "gateway"} onClick={() => void save("gateway", [...EPAY_GATEWAY_KEYS]).catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
+        <Button icon={<Save size={14} />} loading={savingCard === "epay"} onClick={() => void save("epay", [...EPAY_GATEWAY_KEYS]).catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
+      </SettingsSection>
+
+      <SettingsSection title={<SettingsCardHeader icon={<Link2 size={16} />} title={t("EPUSDT 网关")} description={t("USDT/TRON；回调只触发异步查账，不直接参与入账")} enabled={!!form.epusdt_enabled} onToggle={(value) => update("epusdt_enabled", value)} statusText={form.epusdt_enabled ? t("已启用") : t("已禁用")} />}>
+        <SettingsFormGrid className="mt-4">
+          <SettingsTextField label={t("EPUSDT 网关地址")} value={String(form.epusdt_gateway_url)} onChange={(value) => update("epusdt_gateway_url", value)} placeholder="https://epusdt.example.com/" />
+          <SettingsTextField label={t("EPUSDT PID")} value={String(form.epusdt_pid)} onChange={(value) => update("epusdt_pid", value)} placeholder="1000" />
+          <SettingsNumberField label={t("EPUSDT 汇率（1 USDT 等于多少积分）")} description={t("仅用于 USDT/TRON，EPUSDT 不叠加充值手续费")} value={number(form.epusdt_points_per_usdt)} onChange={(value) => update("epusdt_points_per_usdt", value)} min={0.000001} precision={6} step={1} />
+          <SettingsTextField label={t("EPUSDT API Key（兼容保留，不参与 GMPay 请求）")} value={String(form.epusdt_api_key)} onChange={(value) => update("epusdt_api_key", value)} type="password" placeholder={t("已保存密钥不会回显；留空保持不变")} />
+          <SettingsTextField label={t("EPUSDT API Secret")} value={String(form.epusdt_api_secret)} onChange={(value) => update("epusdt_api_secret", value)} type="password" placeholder={t("已保存密钥不会回显；留空保持不变")} />
+          <SettingsSelectField label={t("EPUSDT Token")} value={String(form.epusdt_token)} onChange={(value) => update("epusdt_token", value)} options={[{ label: "USDT", value: "USDT" }]} />
+          <SettingsSelectField label={t("EPUSDT Network")} value={String(form.epusdt_network)} onChange={(value) => update("epusdt_network", value)} options={[{ label: "TRON", value: "tron" }]} />
+          <SettingsTextField label={t("EPUSDT 支付回调地址")} value={String(form.epusdt_notify_url)} onChange={(value) => update("epusdt_notify_url", value)} />
+          <SettingsTextField label={t("EPUSDT 支付返回地址")} value={String(form.epusdt_return_url)} onChange={(value) => update("epusdt_return_url", value)} />
+          <SettingsTextField label={t("EPUSDT payment_url 主机白名单")} value={String(form.epusdt_allowed_hosts)} onChange={(value) => update("epusdt_allowed_hosts", value)} placeholder="pay.example.com,checkout.example.com:8443" />
+        </SettingsFormGrid>
+        <Button icon={<Save size={14} />} loading={savingCard === "epusdt"} onClick={() => void save("epusdt", [...EPUSDT_GATEWAY_KEYS]).catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
       </SettingsSection>
     </SettingsAccessBoundary>
 
-    <SettingsSection title={<SettingsCardHeader icon={<WalletCards size={16} />} title={t("充值配置")} description={t("配置支付宝积分汇率、最低充值积分、手续费和前端充值档位")} />}>
+    <SettingsSection title={<SettingsCardHeader icon={<WalletCards size={16} />} title={t("充值配置")} description={t("配置支付宝/EPay积分汇率、最低充值积分、手续费和前端充值档位")} />}>
       <SettingsFormGrid className="mt-4">
         <SettingsNumberField label={t("支付宝汇率（1 人民币等于多少积分）")} description={t("仅创建支付宝订单时用于把积分换算为人民币")} value={number(form.points_per_yuan)} onChange={(value) => update("points_per_yuan", value)} min={0.000001} precision={6} step={1} />
         <SettingsNumberField label={t("最低充值积分")} value={number(form.min_topup_amount)} onChange={(value) => update("min_topup_amount", value)} min={0.000001} precision={6} step={0.01} />
-        <SettingsNumberField label={t("充值手续费率（%）")} description={t("千分之六请输入 0.6")} value={number(form.topup_fee_rate)} onChange={(value) => update("topup_fee_rate", value)} min={0} max={100} precision={6} step={0.1} />
-        <SettingsNumberField label={t("手续费封顶积分")} description={t("0 表示不封顶")} value={number(form.topup_fee_cap)} onChange={(value) => update("topup_fee_cap", value)} min={0} precision={6} step={0.01} />
+        <SettingsNumberField label={t("充值手续费率（EPay/支付宝，%）")} description={t("仅 EPay/支付宝使用；千分之六请输入 0.6")} value={number(form.topup_fee_rate)} onChange={(value) => update("topup_fee_rate", value)} min={0} max={100} precision={6} step={0.1} />
+        <SettingsNumberField label={t("手续费封顶积分（仅 EPay/支付宝）")} description={t("0 表示不封顶；EPUSDT 不收此手续费")} value={number(form.topup_fee_cap)} onChange={(value) => update("topup_fee_cap", value)} min={0} precision={6} step={0.01} />
         <SettingsNumberField label={t("单用户最大未支付充值订单数")} value={number(form.max_pending_recharge_orders)} onChange={(value) => update("max_pending_recharge_orders", value)} min={1} max={100} precision={0} />
         <SettingsTextField label={t("兑换码购买地址")} value={String(form.redemption_code_purchase_url)} onChange={(value) => update("redemption_code_purchase_url", value)} placeholder="https://shop.example.com/cards" />
       </SettingsFormGrid>
@@ -111,7 +130,7 @@ export default function PaymentSection({ options, onBulkSave, canSensitive }: Se
       <Button icon={<Save size={14} />} loading={savingCard === "topup"} onClick={() => void saveTopup().catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
     </SettingsSection>
 
-    <SettingsSection title={<SettingsCardHeader icon={<RefreshCw size={16} />} title={t("异步查账")} description={t("回调后前 10 次每 5 秒查账，随后每 30 秒；无回调时 60 秒启动，5 分钟截止")} />}>
+    <SettingsSection title={<SettingsCardHeader icon={<RefreshCw size={16} />} title={t("异步查账")} description={t("回调后前 10 次每 5 秒查账，随后每 30 秒；EPUSDT 无回调 10 秒启动，EPay/历史订单无回调 60 秒启动，5 分钟截止")} />}>
       <SettingsFormGrid className="mt-4">
         <SettingsNumberField label={t("单次查账请求超时（秒）")} value={number(form.async_check_request_timeout_seconds)} onChange={(value) => update("async_check_request_timeout_seconds", value)} min={1} max={30} precision={0} />
       </SettingsFormGrid>

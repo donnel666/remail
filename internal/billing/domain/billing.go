@@ -47,6 +47,24 @@ const (
 	RechargeStatusFailed     RechargeStatus = "failed"
 )
 
+// Recharge payment method identifiers are persisted with the order and are
+// deliberately stable across gateway configuration changes.
+const (
+	RechargePaymentMethodAlipay         = "alipay"
+	RechargePaymentMethodEpusdtUSDTTron = "epusdt_usdt_tron"
+)
+
+func NormalizeRechargePaymentMethod(value string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", RechargePaymentMethodAlipay:
+		return RechargePaymentMethodAlipay, true
+	case RechargePaymentMethodEpusdtUSDTTron, "epusdt", "usdt_tron", "usdt-tron":
+		return RechargePaymentMethodEpusdtUSDTTron, true
+	default:
+		return "", false
+	}
+}
+
 type CardKeyStatus string
 
 const (
@@ -118,10 +136,14 @@ type Recharge struct {
 const (
 	RechargeReconciliationWindow  = 5 * time.Minute
 	RechargeCallbackFallbackDelay = time.Minute
-	RechargeFastQueryInterval     = 5 * time.Second
-	RechargeSlowQueryInterval     = 30 * time.Second
-	RechargeFastQueryLimit        = 10
-	RechargeQueryLease            = 40 * time.Second
+	// EPUSDT deployments may not have a provider-managed callback URL. Start
+	// polling those orders shortly after creation while keeping the EPay fallback
+	// delay unchanged for callback-enabled channels.
+	RechargeEpusdtFallbackDelay = 10 * time.Second
+	RechargeFastQueryInterval   = 5 * time.Second
+	RechargeSlowQueryInterval   = 30 * time.Second
+	RechargeFastQueryLimit      = 10
+	RechargeQueryLease          = 40 * time.Second
 )
 
 type CardKey struct {

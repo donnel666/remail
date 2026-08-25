@@ -663,3 +663,12 @@ func fingerprint(parts ...any) string {
 	}
 	return hex.EncodeToString(hash.Sum(nil))
 }
+
+func legacyFingerprint(parts ...any) string {
+	hash := sha256.New()
+	for _, part := range parts {
+		_, _ = fmt.Fprint(hash, part)
+		_, _ = hash.Write([]byte{0})
+	}
+	return hex.EncodeToString(hash.Sum(nil))
+}

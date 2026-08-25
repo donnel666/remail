@@ -25,9 +25,10 @@ func NewBillingModule(db *gorm.DB, clients ...*asynq.Client) *BillingModule {
 	if len(clients) > 0 {
 		client = clients[0]
 	}
+	configProvider := billinginfra.RechargeConfigProvider{}
 	return &BillingModule{
 		WalletUseCase:   billingapp.NewWalletUseCase(repo),
-		RechargeUseCase: billingapp.NewRechargeUseCase(repo, billinginfra.RechargeConfigProvider{}, billinginfra.NewEPay(), billinginfra.NewRechargeQueue(client)),
+		RechargeUseCase: billingapp.NewRechargeUseCase(repo, configProvider, billinginfra.NewRechargeGateway(configProvider), billinginfra.NewRechargeQueue(client)),
 		OperationLogs:   operationLogs,
 	}
 }

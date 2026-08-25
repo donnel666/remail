@@ -20,11 +20,11 @@ func TestRechargeAmountsAndActiveReconciliation(t *testing.T) {
 	config.Tiers = []RechargeTier{{Points: "100", BonusPoints: "10"}}
 	quote, payment, err := rechargeAmounts(config, "100")
 	require.NoError(t, err)
-	require.Equal(t, &RechargeQuoteResult{Points: "100.00", BonusPoints: "10.00", FeePoints: "2.50", CreditedPoints: "110.00"}, quote)
+	require.Equal(t, &RechargeQuoteResult{Points: "100.00", BonusPoints: "10.00", FeePoints: "2.50", CreditedPoints: "110.00", PaymentAmount: "0.11", PaymentCurrency: "CNY"}, quote)
 	require.Equal(t, "0.11", payment)
 	quote, payment, err = rechargeAmounts(config, "200")
 	require.NoError(t, err)
-	require.Equal(t, &RechargeQuoteResult{Points: "200.00", BonusPoints: "0.00", FeePoints: "3.00", CreditedPoints: "200.00"}, quote)
+	require.Equal(t, &RechargeQuoteResult{Points: "200.00", BonusPoints: "0.00", FeePoints: "3.00", CreditedPoints: "200.00", PaymentAmount: "0.21", PaymentCurrency: "CNY"}, quote)
 	require.Equal(t, "0.21", payment)
 	config.FeeRate = "0.6"
 	config.FeeCapPoints = "0"
@@ -33,7 +33,7 @@ func TestRechargeAmountsAndActiveReconciliation(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrInvalidAmount)
 	quote, payment, err = rechargeAmounts(config, "1.00")
 	require.NoError(t, err)
-	require.Equal(t, &RechargeQuoteResult{Points: "1.00", BonusPoints: "0.00", FeePoints: "0.006", CreditedPoints: "1.00"}, quote)
+	require.Equal(t, &RechargeQuoteResult{Points: "1.00", BonusPoints: "0.00", FeePoints: "0.006", CreditedPoints: "1.00", PaymentAmount: "0.01", PaymentCurrency: "CNY"}, quote)
 	require.Equal(t, "0.01", payment)
 	config.FeeCapPoints = "0.0000001"
 	_, _, err = rechargeAmounts(config, "1")
@@ -55,6 +55,7 @@ func TestRechargeAmountsAndActiveReconciliation(t *testing.T) {
 		{name: "pending does not credit", now: createdAt.Add(time.Minute), wantRecord: 1, wantQuery: 1},
 		{name: "paid credits", now: createdAt.Add(time.Minute), query: RechargeGatewayQuery{Paid: true, GatewayTrade: "GW1"}, wantCredit: 1, wantQuery: 1},
 		{name: "mismatch fails", now: createdAt.Add(time.Minute), queryErr: domain.ErrRechargeQueryMismatch, wantFail: "query_mismatch", wantQuery: 1},
+		{name: "provider auth rotates and retries", now: createdAt.Add(time.Minute), queryErr: domain.ErrRechargeGatewayAuthUnavailable, wantRecord: 1, wantQuery: 1},
 		{name: "gateway rejection retries", now: createdAt.Add(time.Minute), queryErr: ErrRechargeGatewayRejected, wantRecord: 1, wantQuery: 1},
 		{name: "duplicate gateway trade fails", now: createdAt.Add(time.Minute), query: RechargeGatewayQuery{Paid: true, GatewayTrade: "GW1"}, creditErr: domain.ErrRechargeQueryMismatch, wantCredit: 1, wantFail: "query_mismatch", wantQuery: 1},
 		{name: "timeout race is already terminal", now: createdAt.Add(time.Minute), query: RechargeGatewayQuery{Paid: true, GatewayTrade: "GW1"}, creditErr: domain.ErrRechargeExpired, wantCredit: 1, wantQuery: 1},
@@ -96,6 +97,85 @@ func TestRechargeAmountsAndActiveReconciliation(t *testing.T) {
 		require.Equal(t, "query_timeout", repo.failReason)
 		require.Equal(t, 1, gateway.calls)
 	})
+}
+
+func TestRechargeAmountsEpusdtUsesDedicatedRateWithoutFee(t *testing.T) {
+	config := validRechargeConfig()
+	config.PaymentMethod = domain.RechargePaymentMethodEpusdtUSDTTron
+	config.EpusdtPointsPerUSDT = "333"
+	config.FeeRate = "10"
+	config.FeeCapPoints = "1"
+	config.Tiers = []RechargeTier{{Points: "1000", BonusPoints: "50"}}
+
+	quote, payment, err := rechargeAmounts(config, "1000")
+	require.NoError(t, err)
+	require.Equal(t, "0.00", quote.FeePoints)
+	require.Equal(t, "1050.00", quote.CreditedPoints)
+	require.Equal(t, "3.01", quote.PaymentAmount)
+	require.Equal(t, "USDT", quote.PaymentCurrency)
+	require.Equal(t, "3.01", payment)
+
+	config.EpusdtPointsPerUSDT = "1000"
+	quote, payment, err = rechargeAmounts(config, "1000")
+	require.NoError(t, err)
+	require.Equal(t, "0.00", quote.FeePoints)
+	require.Equal(t, "1.00", payment)
+}
+
+func TestRechargeAmountsEpusdtRejectsInvalidRateAndProviderMinimum(t *testing.T) {
+	config := validRechargeConfig()
+	config.PaymentMethod = domain.RechargePaymentMethodEpusdtUSDTTron
+	config.EpusdtPointsPerUSDT = "0"
+	_, _, err := rechargeAmounts(config, "1000")
+	require.ErrorIs(t, err, domain.ErrRechargeConfigUnavailable)
+
+	config.EpusdtPointsPerUSDT = "100000"
+	_, _, err = rechargeAmounts(config, "1000")
+	require.ErrorIs(t, err, domain.ErrInvalidAmount)
+}
+
+func TestRechargeQuoteRejectsUnavailablePaymentMethods(t *testing.T) {
+	config := validRechargeConfig()
+	config.Enabled = false
+	useCase := NewRechargeUseCase(nil, rechargeConfigStub{config}, nil, nil)
+
+	_, err := useCase.Quote("100")
+	require.ErrorIs(t, err, domain.ErrRechargeConfigUnavailable)
+
+	config.Enabled = true
+	config.PaymentMethod = domain.RechargePaymentMethodEpusdtUSDTTron
+	config.EpusdtEnabled = true
+	config.EpusdtPointsPerUSDT = "500"
+	useCase = NewRechargeUseCase(nil, rechargeConfigStub{config}, nil, nil)
+	_, err = useCase.Quote("100")
+	require.ErrorIs(t, err, domain.ErrRechargeConfigUnavailable)
+
+	config.EpusdtCurrency = "USDT"
+	config.EpusdtGatewayURL = "https://epusdt.example.com"
+	config.EpusdtPID = "1000"
+	config.EpusdtAPISecret = "secret"
+	config.EpusdtToken = "USDT"
+	config.EpusdtNetwork = "tron"
+	config.EpusdtNotifyURL = "https://app.example.com/notify"
+	config.EpusdtReturnURL = "https://app.example.com/return"
+	config.FeeRate = "not-an-epay-rate"
+	config.FeeCapPoints = "not-an-epay-cap"
+	useCase = NewRechargeUseCase(nil, rechargeConfigStub{config}, nil, nil)
+	quote, err := useCase.Quote("100", domain.RechargePaymentMethodEpusdtUSDTTron)
+	require.NoError(t, err)
+	require.Equal(t, "USDT", quote.PaymentCurrency)
+}
+
+func TestRechargeConfigReturnsDisabledWhenNoGatewayIsAvailable(t *testing.T) {
+	config := validRechargeConfig()
+	config.Enabled = false
+	config.Tiers = []RechargeTier{{Points: "100", BonusPoints: "10"}}
+	useCase := NewRechargeUseCase(nil, rechargeConfigStub{config}, nil, nil)
+
+	result, err := useCase.Config()
+	require.NoError(t, err)
+	require.False(t, result.Enabled)
+	require.Empty(t, result.PaymentMethods)
 }
 
 func TestRechargeConfigSkipsLegacyFractionalTiers(t *testing.T) {
@@ -176,6 +256,63 @@ func TestRechargeCreateInputAndConfigReplaySafety(t *testing.T) {
 		require.ErrorIs(t, err, domain.ErrRechargeExpired)
 		require.Zero(t, gateway.paymentCalls)
 	})
+}
+
+func TestRechargeCreateSelectsEpusdtWithoutTrustingCreateResponse(t *testing.T) {
+	config := validRechargeConfig()
+	config.Enabled = false
+	config.EpusdtEnabled = true
+	config.EpusdtGatewayURL = "https://epusdt.example.com"
+	config.EpusdtPID = "1000"
+	config.EpusdtAPISecret = "secret"
+	config.EpusdtToken = "USDT"
+	config.EpusdtNetwork = "tron"
+	config.EpusdtCurrency = "USDT"
+	config.EpusdtPointsPerUSDT = "500"
+	config.EpusdtNotifyURL = "https://app.example.com/v1/payments/webhooks/epusdt/v1"
+	config.EpusdtReturnURL = "https://app.example.com/payment/return"
+	config.PointsPerYuan = "500"
+	config.PaymentMethod = domain.RechargePaymentMethodEpusdtUSDTTron
+	config.Provider = "epusdt"
+	created := domain.Recharge{
+		RechargeNo: "RC00000000000000000000000000000001", UserID: 1,
+		PaymentAmount: "0.02", RechargeQuota: "10.00", Status: domain.RechargeStatusPaying,
+		PaymentMethod: domain.RechargePaymentMethodEpusdtUSDTTron,
+		CreatedAt:     time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	created.GatewayConfigHash = rechargeGatewayConfigHash(config)
+	repo := &rechargeRepoStub{recharge: created}
+	gateway := &rechargeGatewayStub{}
+	useCase := NewRechargeUseCase(repo, rechargeConfigStub{config}, gateway, &rechargeQueueStub{})
+	useCase.now = func() time.Time { return created.CreatedAt }
+
+	result, err := useCase.Create(context.Background(), CreateRechargeRequest{
+		UserID: 1, Points: "10", PaymentMethod: domain.RechargePaymentMethodEpusdtUSDTTron, IdempotencyKey: "epusdt-create",
+	})
+	require.NoError(t, err)
+	require.Equal(t, domain.RechargePaymentMethodEpusdtUSDTTron, result.Recharge.PaymentMethod)
+	require.Equal(t, domain.RechargePaymentMethodEpusdtUSDTTron, gateway.queryConfig.PaymentMethod)
+	require.Equal(t, "epusdt", gateway.queryConfig.Provider)
+}
+
+func TestValidateEpusdtRejectsGatewayURLQueryOrFragment(t *testing.T) {
+	config := validRechargeConfig()
+	config.Enabled = false
+	config.EpusdtEnabled = true
+	config.PaymentMethod = domain.RechargePaymentMethodEpusdtUSDTTron
+	config.EpusdtGatewayURL = "https://epusdt.example.com/?tenant=wallet"
+	config.EpusdtPID = "1000"
+	config.EpusdtAPISecret = "secret"
+	config.EpusdtToken = "USDT"
+	config.EpusdtNetwork = "tron"
+	config.EpusdtNotifyURL = "https://app.example.com/v1/payments/webhooks/epusdt/v1"
+	config.EpusdtReturnURL = "https://app.example.com/payment/return"
+
+	require.ErrorIs(t, validateRechargeGatewayConfig(config), domain.ErrRechargeConfigUnavailable)
+
+	config.EpusdtGatewayURL = "https://epusdt.example.com"
+	config.EpusdtCurrency = "EUR"
+	require.ErrorIs(t, validateRechargeGatewayConfig(config), domain.ErrRechargeConfigUnavailable)
 }
 
 func TestRechargeReconcileUsesClaimedConfigAndSkipsUnclaimedTasks(t *testing.T) {
@@ -282,8 +419,9 @@ type rechargeGatewayStub struct {
 	queryConfig     RechargeConfig
 }
 
-func (stub *rechargeGatewayStub) PaymentURL(ctx context.Context, _ RechargeConfig, _ domain.Recharge, _ string) (string, error) {
+func (stub *rechargeGatewayStub) PaymentURL(ctx context.Context, config RechargeConfig, _ domain.Recharge, _ string) (string, error) {
 	stub.paymentCalls++
+	stub.queryConfig = config
 	stub.paymentDeadline, _ = ctx.Deadline()
 	return "https://pay.example.com/submit.php", nil
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applyEPayURLDefaults, changeEPayVersion } from "./payment-billing-keys";
+import { applyEPayURLDefaults, applyEpusdtURLDefaults, changeEPayVersion } from "./payment-billing-keys";
 import { parseTopupTiers, serializeTopupTiers } from "./topup-tiers";
 
 describe("topup tier settings", () => {
@@ -25,5 +25,14 @@ describe("EPay callback settings", () => {
   it("preserves an explicitly configured callback URL", () => {
     const form = { epay_version: "v1", epay_notify_url: "https://callback.example.com/notify", epay_return_url: "https://app.example.com/wallet" };
     expect(changeEPayVersion(form, "v2", "https://app.example.com").epay_notify_url).toBe(form.epay_notify_url);
+  });
+});
+
+describe("EPUSDT callback settings", () => {
+  it("fills the dedicated webhook route and shared return page", () => {
+    expect(applyEpusdtURLDefaults({ epusdt_notify_url: "", epusdt_return_url: "" }, "https://app.example.com")).toEqual({
+      epusdt_notify_url: "https://app.example.com/v1/payments/webhooks/epusdt/v1",
+      epusdt_return_url: "https://app.example.com/payment/return",
+    });
   });
 });

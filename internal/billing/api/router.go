@@ -11,6 +11,8 @@ func RegisterBillingRoutes(rg *gin.RouterGroup, mod *BillingModule, fetcher midd
 	rg.POST("/payments/webhooks/epay/v1", h.EPayWebhook)
 	rg.GET("/payments/webhooks/epay/v2", h.EPayWebhook)
 	rg.POST("/payments/webhooks/epay/v2", h.EPayWebhook)
+	rg.GET("/payments/webhooks/epusdt/v1", h.EpusdtWebhook)
+	rg.POST("/payments/webhooks/epusdt/v1", h.EpusdtWebhook)
 
 	auth := rg.Group("")
 	auth.Use(middleware.LoadSession(fetcher))

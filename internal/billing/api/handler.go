@@ -1,8 +1,10 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -257,7 +259,8 @@ func (h *BillingHandler) GetRechargeConfig(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, RechargeConfigResponse{
 		Enabled: result.Enabled, MinPoints: result.MinPoints,
-		FeeRate: result.FeeRate, FeeCapPoints: result.FeeCapPoints, Tiers: tiers,
+		PaymentMethods: result.PaymentMethods,
+		FeeRate:        result.FeeRate, FeeCapPoints: result.FeeCapPoints, Tiers: tiers,
 		RedemptionCodePurchaseURL: strings.TrimSpace(runtimeconfig.String("redemption_code_purchase_url", "")),
 	})
 }
@@ -269,7 +272,7 @@ func (h *BillingHandler) PostRechargeQuote(c *gin.Context) {
 		writeInvalidBody(c, err)
 		return
 	}
-	result, err := h.module.RechargeUseCase.Quote(request.Points)
+	result, err := h.module.RechargeUseCase.Quote(request.Points, request.PaymentMethod)
 	if err != nil {
 		writeBillingError(c, err)
 		return
@@ -277,6 +280,7 @@ func (h *BillingHandler) PostRechargeQuote(c *gin.Context) {
 	c.JSON(http.StatusOK, RechargeQuoteResponse{
 		Points: result.Points, BonusPoints: result.BonusPoints,
 		FeePoints: result.FeePoints, CreditedPoints: result.CreditedPoints,
+		PaymentAmount: result.PaymentAmount, PaymentCurrency: result.PaymentCurrency,
 	})
 }
 
@@ -292,7 +296,8 @@ func (h *BillingHandler) PostRecharge(c *gin.Context) {
 		return
 	}
 	result, err := h.module.RechargeUseCase.Create(c.Request.Context(), billingapp.CreateRechargeRequest{
-		UserID: userID, Points: request.Points, IdempotencyKey: c.GetHeader("Idempotency-Key"), ClientIP: c.ClientIP(),
+		UserID: userID, Points: request.Points, PaymentMethod: request.PaymentMethod,
+		IdempotencyKey: c.GetHeader("Idempotency-Key"), ClientIP: c.ClientIP(),
 	})
 	if err != nil {
 		writeBillingError(c, err)
@@ -317,21 +322,49 @@ func (h *BillingHandler) GetRecharge(c *gin.Context) {
 }
 
 func (h *BillingHandler) EPayWebhook(c *gin.Context) {
+	h.handleRechargeWebhook(c, false)
+}
+
+// EpusdtWebhook treats the provider payload as an untrusted wake-up signal.
+// It never verifies payment fields here and never credits a wallet; the
+// reconciliation worker performs the signed, amount-bound query instead.
+func (h *BillingHandler) EpusdtWebhook(c *gin.Context) {
+	h.handleRechargeWebhook(c, true)
+}
+
+func (h *BillingHandler) handleRechargeWebhook(c *gin.Context, epusdt bool) {
 	rechargeNo := c.Query("out_trade_no")
+	if epusdt {
+		rechargeNo = c.Query("order_id")
+	}
 	if c.Request.Method == http.MethodPost {
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxEPayWebhookBytes)
-		if err := c.Request.ParseForm(); err != nil {
-			c.String(http.StatusOK, "success")
-			return
+		contentType := strings.ToLower(c.GetHeader("Content-Type"))
+		if strings.Contains(contentType, "application/json") {
+			var payload map[string]json.RawMessage
+			if err := json.NewDecoder(io.LimitReader(c.Request.Body, maxEPayWebhookBytes)).Decode(&payload); err == nil {
+				key := "out_trade_no"
+				if epusdt {
+					key = "order_id"
+				}
+				if raw, ok := payload[key]; ok {
+					_ = json.Unmarshal(raw, &rechargeNo)
+				}
+			}
+		} else if err := c.Request.ParseForm(); err == nil {
+			key := "out_trade_no"
+			if epusdt {
+				key = "order_id"
+			}
+			rechargeNo = c.Request.Form.Get(key)
 		}
-		rechargeNo = c.Request.Form.Get("out_trade_no")
 	}
 	rechargeNo = strings.TrimSpace(rechargeNo)
-	if !domain.IsValidRechargeNo(rechargeNo) || h.webhook == nil || !h.webhook.Allow() {
+	if !domain.IsValidRechargeNo(rechargeNo) || h == nil || h.webhook == nil || !h.webhook.Allow() {
 		c.String(http.StatusOK, "success")
 		return
 	}
-	if h == nil || h.module == nil || h.module.RechargeUseCase == nil {
+	if h.module == nil || h.module.RechargeUseCase == nil {
 		c.String(http.StatusInternalServerError, "fail")
 		return
 	}

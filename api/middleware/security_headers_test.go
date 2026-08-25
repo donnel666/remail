@@ -31,3 +31,15 @@ func TestSecurityHeaders(t *testing.T) {
 	require.Equal(t, "nosniff", response.Header().Get("X-Content-Type-Options"))
 	require.Equal(t, "SAMEORIGIN", response.Header().Get("X-Frame-Options"))
 }
+
+func TestSecurityHeadersIncludesEpusdtFrameOrigins(t *testing.T) {
+	runtimeconfig.Replace([]settingsdomain.Setting{
+		{Key: "epusdt_gateway_url", Value: "https://crypto.example.com/base"},
+		{Key: "epusdt_allowed_hosts", Value: "checkout.example.com:8443"},
+	})
+	t.Cleanup(func() { runtimeconfig.Replace(nil) })
+
+	policy := contentSecurityPolicy()
+	require.Contains(t, policy, "https://crypto.example.com")
+	require.Contains(t, policy, "https://checkout.example.com:8443")
+}

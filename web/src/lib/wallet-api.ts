@@ -23,6 +23,7 @@ export type TransactionListResponse =
   components["schemas"]["TransactionListResponse"];
 export type SupplierWithdrawalResponse =
   components["schemas"]["TicketResponse"];
+export type RechargePaymentMethod = "alipay" | "epusdt_usdt_tron";
 
 export interface RechargeListFilter {
   search?: string;
@@ -134,10 +135,13 @@ export async function getRechargeConfig() {
   );
 }
 
-export async function quoteRecharge(points: string) {
+export async function quoteRecharge(
+  points: string,
+  paymentMethod?: RechargePaymentMethod,
+) {
   return unwrap<RechargeQuoteResponse>(
     await client.POST("/v1/recharges/quote", {
-      body: { points },
+      body: { points, ...(paymentMethod ? { paymentMethod } : {}) },
       params: { header: csrfHeader() },
     })
   );
@@ -145,11 +149,12 @@ export async function quoteRecharge(points: string) {
 
 export async function createRecharge(
   points: string,
-  key = generateIdempotencyKey()
+  key = generateIdempotencyKey(),
+  paymentMethod?: RechargePaymentMethod,
 ) {
   return unwrap<CreateRechargeResponse>(
     await client.POST("/v1/recharges", {
-      body: { points },
+      body: { points, ...(paymentMethod ? { paymentMethod } : {}) },
       params: {
         header: {
           ...csrfHeader(),

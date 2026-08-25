@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -59,6 +60,28 @@ func TestEPayWebhookStartsUntrustedReconciliationSignal(t *testing.T) {
 	require.Equal(t, "success", post.Body.String())
 	require.Equal(t, []string{validWebhookRechargeOne, validWebhookRechargeTwo}, repo.rechargeNos)
 	require.Equal(t, 2, queue.calls)
+}
+
+func TestEpusdtWebhookOnlyWakesReconciliation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &webhookRechargeRepoStub{marked: true}
+	queue := &webhookRechargeQueueStub{}
+	module := &BillingModule{RechargeUseCase: billingapp.NewRechargeUseCase(repo, nil, nil, queue)}
+	router := gin.New()
+	RegisterBillingRoutes(router.Group("/v1"), module, nil, nil, nil)
+	payload, err := json.Marshal(map[string]any{
+		"pid": "1000", "order_id": validWebhookRechargeOne, "status": 2,
+		"amount": "999999.99", "signature": "attacker-controlled",
+	})
+	require.NoError(t, err)
+	request := httptest.NewRequest(http.MethodPost, "/v1/payments/webhooks/epusdt/v1", strings.NewReader(string(payload)))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	require.Equal(t, http.StatusOK, response.Code)
+	require.Equal(t, "success", response.Body.String())
+	require.Equal(t, []string{validWebhookRechargeOne}, repo.rechargeNos)
+	require.Equal(t, 1, queue.calls)
 }
 
 func TestEPayWebhookIsOpaqueAndBodyLimited(t *testing.T) {

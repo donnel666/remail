@@ -6662,7 +6662,7 @@ paths:
 
     post:
       operationId: postRecharge
-      summary: Create an Alipay recharge order
+      summary: Create a recharge order
       description: Credit is granted only after the server actively confirms the payment within five minutes.
       tags:
         - Billing
@@ -6877,6 +6877,55 @@ paths:
       responses:
         "200":
           description: Notification acknowledged
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /v1/payments/webhooks/epusdt/v1:
+    get:
+      operationId: getEPusdtWebhook
+      summary: Receive an untrusted EPUSDT notification
+      description: Reads order_id and triggers active reconciliation for an existing recharge. The notification payload, amount, status, and signature are never used to credit funds.
+      tags:
+        - Billing
+      parameters:
+        - name: order_id
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Notification acknowledged with success
+          content:
+            text/plain:
+              schema:
+                type: string
+    post:
+      operationId: postEPusdtWebhook
+      summary: Receive an untrusted EPUSDT notification
+      description: Reads order_id from JSON or form data and triggers active reconciliation for an existing recharge. The notification payload, amount, status, and signature are never used to credit funds.
+      tags:
+        - Billing
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                order_id:
+                  type: string
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                order_id:
+                  type: string
+      responses:
+        "200":
+          description: Notification acknowledged with success
           content:
             text/plain:
               schema:
@@ -15931,6 +15980,7 @@ components:
       type: object
       required:
         - enabled
+        - paymentMethods
         - minPoints
         - feeRate
         - feeCapPoints
@@ -15938,6 +15988,12 @@ components:
       properties:
         enabled:
           type: boolean
+        paymentMethods:
+          type: array
+          description: Enabled payment method identifiers.
+          items:
+            type: string
+            enum: [alipay, epusdt_usdt_tron]
         minPoints:
           $ref: "#/components/schemas/NonNegativeLedgerAmount"
         feeRate:
@@ -15961,6 +16017,10 @@ components:
       properties:
         points:
           $ref: "#/components/schemas/PositiveIntegerPointAmount"
+        paymentMethod:
+          type: string
+          enum: [alipay, epusdt_usdt_tron]
+          description: Optional payment method; omitted uses the first enabled method.
       additionalProperties: false
 
     RechargeQuoteRequest:
@@ -15970,6 +16030,10 @@ components:
       properties:
         points:
           $ref: "#/components/schemas/PositiveIntegerPointAmount"
+        paymentMethod:
+          type: string
+          enum: [alipay, epusdt_usdt_tron]
+          description: Optional payment method; omitted uses the configured default method.
       additionalProperties: false
 
     RechargeQuoteResponse:
@@ -15979,6 +16043,8 @@ components:
         - bonusPoints
         - feePoints
         - creditedPoints
+        - paymentAmount
+        - paymentCurrency
       properties:
         points:
           $ref: "#/components/schemas/NonNegativeLedgerAmount"
@@ -15988,6 +16054,13 @@ components:
           $ref: "#/components/schemas/NonNegativeLedgerAmount"
         creditedPoints:
           $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        paymentAmount:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+          description: Amount to send to the selected payment provider.
+        paymentCurrency:
+          type: string
+          enum: [CNY, USDT]
+          description: Currency of paymentAmount.
       additionalProperties: false
 
     CreateRechargeResponse:

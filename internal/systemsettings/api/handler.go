@@ -240,8 +240,12 @@ func (h *Handler) PutBulk(c *gin.Context) {
 		}
 		updates = append(updates, domain.Setting{Key: item.Key, Value: *item.Value})
 	}
-	if sensitiveKey != "" && !h.requireSensitiveMutation(c, sensitiveKey) {
-		return
+	canReadSensitive := false
+	if sensitiveKey != "" {
+		if !h.requireSensitiveMutation(c, sensitiveKey) {
+			return
+		}
+		canReadSensitive = true
 	}
 	settings, err := h.module.Settings.BulkUpsert(c.Request.Context(), updates, mutationMeta(c))
 	if err != nil {
@@ -250,9 +254,10 @@ func (h *Handler) PutBulk(c *gin.Context) {
 	}
 	options := make([]settingDTO, 0, len(settings))
 	for i := range settings {
-		if !isWriteOnlyKey(settings[i].Key) {
-			options = append(options, toDTO(settings[i]))
+		if isWriteOnlyKey(settings[i].Key) || (isSensitiveKey(settings[i].Key) && !canReadSensitive) {
+			continue
 		}
+		options = append(options, toDTO(settings[i]))
 	}
 	c.JSON(http.StatusOK, gin.H{"options": options})
 }
@@ -277,7 +282,8 @@ func isSensitiveKey(key string) bool {
 	switch strings.ToLower(strings.TrimSpace(key)) {
 	case "github_client_id", "github_client_secret", "github_callback_url",
 		"linuxdo_client_id", "linuxdo_client_secret", "linuxdo_callback_url",
-		"epay_enabled", "epay_version", "epay_gateway_url", "epay_merchant_id", "epay_merchant_key", "epay_private_key", "epay_platform_public_key", "epay_notify_url", "epay_return_url":
+		"epay_enabled", "epay_version", "epay_gateway_url", "epay_merchant_id", "epay_merchant_key", "epay_private_key", "epay_platform_public_key", "epay_notify_url", "epay_return_url",
+		"epusdt_enabled", "epusdt_gateway_url", "epusdt_pid", "epusdt_api_key", "epusdt_api_secret", "epusdt_token", "epusdt_network", "epusdt_notify_url", "epusdt_return_url", "epusdt_allowed_hosts":
 		return true
 	default:
 		return false
@@ -286,7 +292,7 @@ func isSensitiveKey(key string) bool {
 
 func isWriteOnlyKey(key string) bool {
 	switch strings.ToLower(strings.TrimSpace(key)) {
-	case "epay_merchant_key", "epay_private_key", "github_client_id", "github_client_secret", "linuxdo_client_id", "linuxdo_client_secret", "points_unit_migration_v1":
+	case "epay_merchant_key", "epay_private_key", "epusdt_api_key", "epusdt_api_secret", "github_client_id", "github_client_secret", "linuxdo_client_id", "linuxdo_client_secret", "points_unit_migration_v1":
 		return true
 	default:
 		return false
