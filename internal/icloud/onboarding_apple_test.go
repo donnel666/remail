@@ -28,6 +28,15 @@ type appleOnboardingScriptedSession struct {
 	snapshotURLs   [][]string
 }
 
+type appleOnboardingRestoreErrorSession struct {
+	appleOnboardingScriptedSession
+	err error
+}
+
+func (s *appleOnboardingRestoreErrorSession) RestoreCookies([]msacl.SessionCookie) error {
+	return s.err
+}
+
 func snapshotIncludesFamilyWS(snapshots [][]string) bool {
 	for _, snapshot := range snapshots {
 		for _, rawURL := range snapshot {
@@ -142,6 +151,22 @@ func TestAppleOnboardingNewSessionUsesWindowsFingerprint(t *testing.T) {
 	}
 	if err := reloaded.reset("manage"); err != nil || reloaded.state.UserAgent != profile.UserAgent {
 		t.Fatalf("reset changed profile: userAgent=%q err=%v", reloaded.state.UserAgent, err)
+	}
+}
+
+func TestAppleOnboardingPreservesProxyRotationRestoreFailure(t *testing.T) {
+	session := &appleOnboardingRestoreErrorSession{err: appleProxyRotationErrorFor(nil, 0, true)}
+	client := appleOnboardingTestClient(time.Now(), &session.appleOnboardingScriptedSession)
+	client.newSession = func(context.Context) (appleOnboardingHTTPSession, error) { return session, nil }
+	state := appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) {
+		state.Cookies = []msacl.SessionCookie{{Name: "session", Value: "value", Domain: ".apple.com"}}
+	})
+	_, err := client.Execute(context.Background(), AppleOnboardingRequest{
+		Operation: appleOnboardingPrepareICloud, Email: "test@example.com", Session: state,
+	})
+	var providerErr *AppleOnboardingError
+	if !errors.As(err, &providerErr) || !providerErr.ProxyRetryExhausted || providerErr.Retryable {
+		t.Fatalf("proxy rotation restore failure = %#v", err)
 	}
 }
 

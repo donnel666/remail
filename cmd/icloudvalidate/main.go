@@ -526,10 +526,10 @@ func openRuntime(ctx context.Context, email string) (*runtime, error) {
 	sms := kitesim.NewService(services.DB, kitesim.NewSyncQueue(services.Asynq))
 	sms.SetProxyProvider(proxies.ProxyUseCase)
 	files := governanceinfra.NewMinIOFileStore(services.MinIO, services.MinIOBucket)
-	icloudService := icloud.NewService(services.DB, services.Asynq, files)
+	icloudService := icloud.NewService(services.DB, services.Asynq, files, services.Redis)
 	icloudService.SetAppleProxyProvider(proxies.ProxyUseCase)
 	icloudService.SetICloudSMSPhoneService(sms)
-	apple := icloud.NewAppleOnboardingClientWithProxyProvider(proxies.ProxyUseCase)
+	apple := icloud.NewAppleOnboardingClientWithProxyProvider(proxies.ProxyUseCase, services.Redis)
 	if strings.TrimSpace(email) == "" || apple == nil {
 		return fail(errors.New("apple validation runtime is unavailable"))
 	}
@@ -1066,7 +1066,23 @@ func (d *debugger) execute(request icloud.AppleOnboardingRequest) (icloud.AppleO
 	request.Session = d.session
 	started := time.Now()
 	d.logf("apple_operation=start operation=%s sms_purpose=%s transaction_present=%t phone_country=%s\n", request.Operation, firstNonEmpty(request.SMSPurpose, "none"), len(request.Session) > 0, firstNonEmpty(request.PhoneCountryCode, "unknown"))
-	response, err := d.runtime.apple.Execute(d.ctx, request)
+	var response icloud.AppleOnboardingResponse
+	var err error
+	for {
+		response, err = d.runtime.apple.Execute(d.ctx, request)
+		if err == nil {
+			break
+		}
+		var appleErr *icloud.AppleOnboardingError
+		if !errors.As(err, &appleErr) || !appleErr.ProxyRetryPending || appleErr.RetryAt == nil {
+			break
+		}
+		d.logf("apple_proxy=waiting retry_at=%s\n", appleErr.RetryAt.UTC().Format(time.RFC3339))
+		if waitErr := d.waitUntil(*appleErr.RetryAt); waitErr != nil {
+			return icloud.AppleOnboardingResponse{}, waitErr
+		}
+		request.Session = d.session
+	}
 	if err != nil {
 		var appleErr *icloud.AppleOnboardingError
 		if errors.As(err, &appleErr) {

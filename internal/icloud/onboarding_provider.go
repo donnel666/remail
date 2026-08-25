@@ -119,15 +119,17 @@ type AppleOnboardingChannel struct {
 }
 
 type AppleOnboardingError struct {
-	Category        string
-	SafeMessage     string
-	HTTPStatus      int
-	ProviderMessage string
-	Retryable       bool
-	SendRejected    bool
-	CodeRejected    bool
-	RetryAt         *time.Time
-	RestartStage    string
+	Category            string
+	SafeMessage         string
+	HTTPStatus          int
+	ProviderMessage     string
+	Retryable           bool
+	SendRejected        bool
+	CodeRejected        bool
+	RetryAt             *time.Time
+	RestartStage        string
+	ProxyRetryExhausted bool
+	ProxyRetryPending   bool
 }
 
 func (e *AppleOnboardingError) Error() string {
@@ -178,6 +180,9 @@ func (c *appleOnboardingClient) Execute(ctx context.Context, request AppleOnboar
 	}
 	flow, err := loadAppleOnboardingFlow(ctx, c, request.Session, request.Email)
 	if err != nil {
+		if providerErr := appleOnboardingProxyError(err, c.now); providerErr != nil {
+			return AppleOnboardingResponse{}, providerErr
+		}
 		var providerErr *AppleOnboardingError
 		if errors.As(err, &providerErr) && providerErr.Category == "invalid_session" && providerErr.RestartStage == "" {
 			providerErr.RestartStage = appleOnboardingOperationRestartStage(request)
@@ -218,6 +223,17 @@ func (c *appleOnboardingClient) Execute(ctx context.Context, request AppleOnboar
 		return AppleOnboardingResponse{}, &AppleOnboardingError{Category: "invalid_operation", SafeMessage: "Apple onboarding operation is invalid."}
 	}
 	if err != nil {
+		if proxyErr := appleOnboardingProxyError(err, flow.now); proxyErr != nil {
+			return AppleOnboardingResponse{}, proxyErr
+		}
+		if resetter, ok := flow.http.(appleProxyRotationResetter); ok {
+			if resetErr := resetter.resetProxyRotation(); resetErr != nil {
+				if proxyErr := appleOnboardingProxyError(resetErr, flow.now); proxyErr != nil {
+					return AppleOnboardingResponse{}, proxyErr
+				}
+				return AppleOnboardingResponse{}, resetErr
+			}
+		}
 		var providerErr *AppleOnboardingError
 		if errors.As(err, &providerErr) && providerErr.HTTPStatus == 0 {
 			providerErr.HTTPStatus = flow.lastHTTPStatus
@@ -227,9 +243,35 @@ func (c *appleOnboardingClient) Execute(ctx context.Context, request AppleOnboar
 	response.HTTPStatus = flow.lastHTTPStatus
 	response.Session, err = flow.snapshot()
 	if err != nil {
+		if proxyErr := appleOnboardingProxyError(err, flow.now); proxyErr != nil {
+			return AppleOnboardingResponse{}, proxyErr
+		}
 		return AppleOnboardingResponse{}, err
 	}
 	return response, nil
+}
+
+func appleOnboardingProxyError(err error, clock func() time.Time) *AppleOnboardingError {
+	retryAfter, exhausted, ok := appleProxyRotationDetails(err)
+	if !ok {
+		return nil
+	}
+	now := time.Now().UTC()
+	if clock != nil {
+		now = clock().UTC()
+	}
+	providerErr := &AppleOnboardingError{
+		Category: "apple_unavailable", SafeMessage: "Apple service is temporarily unavailable.",
+		Retryable: !exhausted, ProxyRetryExhausted: exhausted, ProxyRetryPending: !exhausted && retryAfter > 0,
+	}
+	if exhausted {
+		providerErr.SafeMessage = "Apple service remained unavailable after the proxy was rotated."
+	}
+	if retryAfter > 0 {
+		retryAt := now.Add(retryAfter)
+		providerErr.RetryAt = &retryAt
+	}
+	return providerErr
 }
 
 func appleOnboardingOperationRestartStage(request AppleOnboardingRequest) string {

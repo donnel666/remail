@@ -1323,6 +1323,9 @@ func (s *Service) handleICloudOnboardingAppleError(ctx context.Context, task *iC
 	if !errors.As(err, &appleErr) {
 		return ErrICloudOnboardingTemporary
 	}
+	if appleErr.ProxyRetryExhausted {
+		return s.failICloudOnboardingTask(ctx, task, firstNonEmpty(appleErr.Category, "apple_unavailable"), appleErr.SafeMessage)
+	}
 	if restart := strings.TrimSpace(appleErr.RestartStage); restart != "" {
 		if isICloudCookieRecoveryTask(task) {
 			restart = "manage_prepare"

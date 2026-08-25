@@ -669,6 +669,13 @@ func (s *Service) applyICloudProvisionError(ctx context.Context, resource iCloud
 			updates["cooldown_until"] = now.Add(delay)
 			updates["cooldown_stage"] = min(locked.CooldownStage+1, uint8(3))
 		default:
+			if retryAfter > 0 {
+				cooldownUntil := now.Add(retryAfter)
+				if locked.CooldownUntil != nil && locked.CooldownUntil.After(cooldownUntil) {
+					cooldownUntil = *locked.CooldownUntil
+				}
+				updates["cooldown_until"] = cooldownUntil
+			}
 			if permanent {
 				updates["session_status"] = iCloudSessionInvalid
 				updates["next_keepalive_at"] = nil
@@ -684,25 +691,56 @@ func (s *Service) applyICloudProvisionError(ctx context.Context, resource iCloud
 }
 
 func iCloudProvisionRequestRetryAt(requestErr error, channel iCloudResourceChannelModel, now time.Time) time.Time {
+	if iCloudProxyRetryExhausted(requestErr) {
+		return time.Time{}
+	}
 	if channel.SessionStatus == iCloudSessionInvalid {
 		return time.Time{}
 	}
+	var retryAt time.Time
 	if channel.CooldownUntil != nil && channel.CooldownUntil.After(now) {
-		return *channel.CooldownUntil
+		retryAt = *channel.CooldownUntil
+	}
+	if retryAfter := iCloudProvisionErrorRetryAfter(requestErr); retryAfter > 0 {
+		candidate := now.Add(retryAfter)
+		if retryAt.IsZero() || candidate.After(retryAt) {
+			retryAt = candidate
+		}
 	}
 	if iCloudProvisionErrorRetryable(requestErr) {
-		return now.Add(iCloudProvisionRetry)
+		candidate := now.Add(iCloudProvisionRetry)
+		if retryAt.IsZero() || candidate.After(retryAt) {
+			retryAt = candidate
+		}
 	}
-	return time.Time{}
+	return retryAt
+}
+
+func iCloudProxyRetryExhausted(requestErr error) bool {
+	var hmeErr *hmeError
+	if errors.As(requestErr, &hmeErr) {
+		return hmeErr.ProxyRetryExhausted
+	}
+	var appleErr *appleAccountError
+	if errors.As(requestErr, &appleErr) {
+		return appleErr.ProxyRetryExhausted
+	}
+	return false
 }
 
 func iCloudProvisionErrorRetryable(requestErr error) bool {
 	var hmeErr *hmeError
 	if errors.As(requestErr, &hmeErr) {
+		if hmeErr.ProxyRetryExhausted {
+			return false
+		}
 		return hmeErr.Retryable || hmeErr.Category == "session_invalid" || hmeErr.Category == "rate_limited"
 	}
 	var appleErr *appleAccountError
 	if errors.As(requestErr, &appleErr) {
+		if appleErr.ProxyRetryExhausted {
+			return false
+		}
 		switch appleErr.Category {
 		case "session_invalid", "rate_limited", "provider_unavailable":
 			return true
@@ -716,13 +754,31 @@ func iCloudProvisionErrorRetryable(requestErr error) bool {
 func iCloudProvisionErrorPermanent(requestErr error) bool {
 	var hmeErr *hmeError
 	if errors.As(requestErr, &hmeErr) {
+		if hmeErr.ProxyRetryExhausted {
+			return false
+		}
 		return !hmeErr.Retryable && hmeErr.Category != "session_invalid" && hmeErr.Category != "rate_limited"
 	}
 	var appleErr *appleAccountError
 	if errors.As(requestErr, &appleErr) {
+		if appleErr.ProxyRetryExhausted {
+			return false
+		}
 		return appleErr.Category == "invalid_context" || appleErr.Category == "provider_rejected" || appleErr.Category == "provider_response"
 	}
 	return false
+}
+
+func iCloudProvisionErrorRetryAfter(requestErr error) time.Duration {
+	var hmeErr *hmeError
+	if errors.As(requestErr, &hmeErr) {
+		return hmeErr.RetryAfter
+	}
+	var appleErr *appleAccountError
+	if errors.As(requestErr, &appleErr) {
+		return appleErr.RetryAfter
+	}
+	return 0
 }
 
 func (s *Service) persistICloudProvisionCandidate(ctx context.Context, resource iCloudResourceModel, candidate string, reconcile bool, now time.Time) error {

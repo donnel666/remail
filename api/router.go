@@ -267,7 +267,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		})
 		gmailapi.RegisterRoutes(v1, gmailMod, iamSessionFetcher, iamMod.PermissionChecker)
 		cleanupFuncs = append(cleanupFuncs, gmailapi.RegisterTaskHandlers(taskMux, gmailMod.Service))
-		icloudMod = icloudapi.NewModule(p.DB, p.Asynq, fileStore)
+		icloudMod = icloudapi.NewModule(p.DB, p.Asynq, fileStore, p.Redis)
 		icloudMod.Service.SetBackgroundExecutionGate(p.BackgroundLoad)
 		icloudMod.Service.SetAppleProxyProvider(proxyMod.ProxyUseCase)
 		icloudMod.Service.SetImportOwnerValidator(func(ctx context.Context, ownerID uint) (bool, error) {

@@ -320,6 +320,28 @@ func TestHMERateLimitUsesResponseBodyRetryAfter(t *testing.T) {
 	}
 }
 
+func TestHME5XXPropagatesProxyRotationWithoutRequiringResponseCookies(t *testing.T) {
+	client := NewHMEClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusServiceUnavailable,
+			Header: http.Header{
+				appleProxyRotationHeader:      {"1"},
+				appleProxyRotationDelayHeader: {"120"},
+			},
+			Body: io.NopCloser(strings.NewReader("temporarily unavailable")),
+		}, nil
+	})})
+	_, _, err := client.Generate(context.Background(), hmeConfig{
+		Host: "p119-maildomainws.icloud.com", DSID: "123", ClientID: "client", ClientBuildNumber: "build", ClientMasteringNumber: "mastering",
+		Cookie: "X-APPLE-DS-WEB-SESSION-TOKEN=session; X-APPLE-WEBAUTH-USER=user; X-APPLE-WEBAUTH-TOKEN=token",
+	})
+	var providerErr *hmeError
+	if !errors.As(err, &providerErr) || providerErr.Category != "provider_unavailable" ||
+		providerErr.HTTPStatus != http.StatusServiceUnavailable || providerErr.RetryAfter != 120*time.Second || providerErr.ProxyRetryExhausted {
+		t.Fatalf("5XX proxy rotation error = %#v", err)
+	}
+}
+
 func TestAppleAccountRateLimitUsesNestedResponseBodyRetryAfter(t *testing.T) {
 	now := time.Date(2026, 8, 14, 20, 0, 0, 0, time.UTC)
 	client := NewAppleAccountClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {

@@ -1072,6 +1072,15 @@ func TestICloudProvisionRefreshKeepsCooldownStageAndProviderDelayWins(t *testing
 	}
 }
 
+func TestICloudProvisionProxyRetryExhaustedDoesNotScheduleAnotherAttempt(t *testing.T) {
+	now := time.Date(2026, 8, 14, 10, 40, 0, 0, time.UTC)
+	cooldown := now.Add(time.Hour)
+	requestErr := &hmeError{Category: "provider_unavailable", Retryable: true, ProxyRetryExhausted: true}
+	if retryAt := iCloudProvisionRequestRetryAt(requestErr, iCloudResourceChannelModel{SessionStatus: iCloudSessionValid, CooldownUntil: &cooldown}, now); !retryAt.IsZero() {
+		t.Fatalf("exhausted proxy retry was rescheduled at %s", retryAt)
+	}
+}
+
 func TestICloudProvisionChannelAcceptsMatchedNoopUpdate(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:icloud-provision-noop-update?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {

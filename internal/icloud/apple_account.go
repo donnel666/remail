@@ -32,11 +32,12 @@ type appleAccountPrivateEmail struct {
 }
 
 type appleAccountError struct {
-	Category    string
-	SafeMessage string
-	RetryAfter  time.Duration
-	Stage       string
-	HTTPStatus  int
+	Category            string
+	SafeMessage         string
+	RetryAfter          time.Duration
+	Stage               string
+	HTTPStatus          int
+	ProxyRetryExhausted bool
 }
 
 func (e *appleAccountError) Error() string {
@@ -339,12 +340,23 @@ func (c *AppleAccountClient) request(
 	}
 	response, err := client.httpClient.Do(request)
 	if err != nil || response == nil || response.Body == nil {
+		if retryAfter, exhausted, ok := appleProxyRotationDetails(err); ok {
+			return 0, &appleAccountError{Category: "provider_unavailable", SafeMessage: "Apple Account is temporarily unavailable.", RetryAfter: retryAfter, Stage: stage, ProxyRetryExhausted: exhausted}
+		}
 		return 0, &appleAccountError{Category: "provider_unavailable", SafeMessage: "Apple Account is temporarily unavailable.", Stage: stage}
 	}
 	defer response.Body.Close()
 	data, readErr := io.ReadAll(io.LimitReader(response.Body, appleAccountResponseMaxBytes+1))
 	if readErr != nil || len(data) > appleAccountResponseMaxBytes {
+		if response.StatusCode == http.StatusRequestTimeout || response.StatusCode >= 500 {
+			retryAfter, exhausted := appleProxyResponseRetryAfter(response.Header, nil, now)
+			return response.StatusCode, &appleAccountError{Category: "provider_unavailable", SafeMessage: "Apple Account is temporarily unavailable.", RetryAfter: retryAfter, Stage: stage, HTTPStatus: response.StatusCode, ProxyRetryExhausted: exhausted}
+		}
 		return response.StatusCode, &appleAccountError{Category: "provider_unavailable", SafeMessage: "Apple Account returned an unreadable response.", Stage: stage, HTTPStatus: response.StatusCode}
+	}
+	if response.StatusCode == http.StatusRequestTimeout || response.StatusCode >= 500 {
+		retryAfter, exhausted := appleProxyResponseRetryAfter(response.Header, data, now)
+		return response.StatusCode, &appleAccountError{Category: "provider_unavailable", SafeMessage: "Apple Account is temporarily unavailable.", RetryAfter: retryAfter, Stage: stage, HTTPStatus: response.StatusCode, ProxyRetryExhausted: exhausted}
 	}
 	responseScnt := strings.TrimSpace(response.Header.Get("scnt"))
 	if responseScnt != "" && !validICloudImportValue(responseScnt, iCloudAppleAccountValueMaxLength) {
@@ -365,9 +377,6 @@ func (c *AppleAccountClient) request(
 			Category: "rate_limited", SafeMessage: "Apple Account alias creation is temporarily rate limited.",
 			RetryAfter: iCloudResponseRetryAfter(response.Header.Get("Retry-After"), data, now), Stage: stage, HTTPStatus: response.StatusCode,
 		}
-	}
-	if response.StatusCode == http.StatusRequestTimeout || response.StatusCode >= 500 {
-		return response.StatusCode, &appleAccountError{Category: "provider_unavailable", SafeMessage: "Apple Account is temporarily unavailable.", Stage: stage, HTTPStatus: response.StatusCode}
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return response.StatusCode, &appleAccountError{Category: "provider_rejected", SafeMessage: "Apple Account rejected the request.", Stage: stage, HTTPStatus: response.StatusCode}
@@ -468,12 +477,23 @@ func (c *AppleAccountClient) portalRequest(ctx context.Context, channel *iCloudR
 	}
 	response, err := client.httpClient.Do(request)
 	if err != nil || response == nil || response.Body == nil {
+		if retryAfter, exhausted, ok := appleProxyRotationDetails(err); ok {
+			return &appleAccountError{Category: "provider_unavailable", SafeMessage: "Apple Account is temporarily unavailable.", RetryAfter: retryAfter, Stage: "portal", ProxyRetryExhausted: exhausted}
+		}
 		return &appleAccountError{Category: "provider_unavailable", SafeMessage: "Apple Account is temporarily unavailable.", Stage: "portal"}
 	}
 	defer response.Body.Close()
 	data, readErr := io.ReadAll(io.LimitReader(response.Body, appleAccountResponseMaxBytes+1))
 	if readErr != nil || len(data) > appleAccountResponseMaxBytes {
+		if response.StatusCode == http.StatusRequestTimeout || response.StatusCode >= 500 {
+			retryAfter, exhausted := appleProxyResponseRetryAfter(response.Header, nil, now)
+			return &appleAccountError{Category: "provider_unavailable", SafeMessage: "Apple Account is temporarily unavailable.", RetryAfter: retryAfter, Stage: "portal", HTTPStatus: response.StatusCode, ProxyRetryExhausted: exhausted}
+		}
 		return &appleAccountError{Category: "provider_unavailable", SafeMessage: "Apple Account returned an unreadable response.", Stage: "portal", HTTPStatus: response.StatusCode}
+	}
+	if response.StatusCode == http.StatusRequestTimeout || response.StatusCode >= 500 {
+		retryAfter, exhausted := appleProxyResponseRetryAfter(response.Header, data, now)
+		return &appleAccountError{Category: "provider_unavailable", SafeMessage: "Apple Account is temporarily unavailable.", RetryAfter: retryAfter, Stage: "portal", HTTPStatus: response.StatusCode, ProxyRetryExhausted: exhausted}
 	}
 	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden || response.StatusCode == 419 {
 		return &appleAccountError{Category: "session_invalid", SafeMessage: "Apple Account session is invalid.", Stage: "portal", HTTPStatus: response.StatusCode}
@@ -483,9 +503,6 @@ func (c *AppleAccountClient) portalRequest(ctx context.Context, channel *iCloudR
 			Category: "rate_limited", SafeMessage: "Apple Account alias creation is temporarily rate limited.",
 			RetryAfter: iCloudResponseRetryAfter(response.Header.Get("Retry-After"), data, now), Stage: "portal", HTTPStatus: response.StatusCode,
 		}
-	}
-	if response.StatusCode == http.StatusRequestTimeout || response.StatusCode >= 500 {
-		return &appleAccountError{Category: "provider_unavailable", SafeMessage: "Apple Account is temporarily unavailable.", Stage: "portal", HTTPStatus: response.StatusCode}
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return &appleAccountError{Category: "provider_rejected", SafeMessage: "Apple Account rejected the request.", Stage: "portal", HTTPStatus: response.StatusCode}

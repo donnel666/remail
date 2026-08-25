@@ -9,6 +9,7 @@ import (
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/hibiken/asynq"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
@@ -73,8 +74,8 @@ type Module struct {
 	Service *Service
 }
 
-func NewModule(db *gorm.DB, queue *asynq.Client, files governanceapp.FilePort) *Module {
-	return &Module{Service: NewService(db, queue, files)}
+func NewModule(db *gorm.DB, queue *asynq.Client, files governanceapp.FilePort, redisClients ...redis.UniversalClient) *Module {
+	return &Module{Service: NewService(db, queue, files, redisClients...)}
 }
 
 // Service owns iCloud import, forwarded-mail pickup, and alias provisioning.
@@ -95,8 +96,8 @@ type Service struct {
 	backgroundExecution BackgroundExecutionGate
 }
 
-func NewService(db *gorm.DB, queue *asynq.Client, files governanceapp.FilePort) *Service {
-	appleRoutes := newAppleRouteManager()
+func NewService(db *gorm.DB, queue *asynq.Client, files governanceapp.FilePort, redisClients ...redis.UniversalClient) *Service {
+	appleRoutes := newAppleRouteManager(redisClients...)
 	return &Service{
 		db:              db,
 		queue:           queue,

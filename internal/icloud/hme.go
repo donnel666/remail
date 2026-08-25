@@ -78,16 +78,17 @@ type hmeListResult struct {
 // hmeError is intentionally limited to a provider-safe category and message.
 // It never carries an HTTP URL, response body, or Cookie value.
 type hmeError struct {
-	Category           string
-	SafeMessage        string
-	Retryable          bool
-	RetryAfter         time.Duration
-	SessionKnown       bool
-	SessionValid       bool
-	UpdatedCookie      string
-	UpdatedSetupCookie string
-	Stage              string
-	HTTPStatus         int
+	Category            string
+	SafeMessage         string
+	Retryable           bool
+	RetryAfter          time.Duration
+	SessionKnown        bool
+	SessionValid        bool
+	UpdatedCookie       string
+	UpdatedSetupCookie  string
+	Stage               string
+	HTTPStatus          int
+	ProxyRetryExhausted bool
 }
 
 func (e *hmeError) Error() string {
@@ -168,25 +169,30 @@ func (c *HMEClient) refreshSession(ctx context.Context, config hmeConfig) (hmeCo
 	}
 	response, err := client.httpClient.Do(request)
 	if err != nil || response == nil || response.Body == nil {
+		if retryAfter, exhausted, ok := appleProxyRotationDetails(err); ok {
+			return config, &hmeError{Category: "provider_unavailable", SafeMessage: "iCloud session refresh is temporarily unavailable.", Retryable: !exhausted, RetryAfter: retryAfter, Stage: "validate", ProxyRetryExhausted: exhausted}
+		}
 		return config, &hmeError{Category: "provider_unavailable", SafeMessage: "iCloud session refresh is temporarily unavailable.", Retryable: true, Stage: "validate"}
 	}
 	defer response.Body.Close()
-	responseCookies := response.Cookies()
-	updatedSetupCookie := mergeICloudCookies(config.SetupCookie, responseCookies)
-	updatedCookie := mergeICloudCookies(config.Cookie, iCloudCookiesForHost(responseCookies, config.Host, "/v2/hme/list"))
-	if !validICloudImportCookie(updatedSetupCookie) || !validICloudImportCookie(updatedCookie) {
-		return config, &hmeError{
-			Category: "session_invalid", SafeMessage: "iCloud session is invalid.", SessionKnown: true, SessionValid: false,
-			Stage: "validate", HTTPStatus: response.StatusCode,
-		}
-	}
 	responseBody, err := io.ReadAll(io.LimitReader(response.Body, iCloudHMEResponseMaxBytes+1))
 	if err != nil {
+		if response.StatusCode == http.StatusRequestTimeout || response.StatusCode >= 500 {
+			providerErr := hmeRefreshError("provider_unavailable", "iCloud session refresh is temporarily unavailable.", true, response.StatusCode)
+			providerErr.RetryAfter, providerErr.ProxyRetryExhausted = appleProxyResponseRetryAfter(response.Header, nil, time.Now().UTC())
+			return config, providerErr
+		}
 		return config, hmeRefreshError("provider_unavailable", "iCloud session refresh is temporarily unavailable.", true, response.StatusCode)
 	}
 	if len(responseBody) > iCloudHMEResponseMaxBytes {
+		if response.StatusCode == http.StatusRequestTimeout || response.StatusCode >= 500 {
+			providerErr := hmeRefreshError("provider_unavailable", "iCloud session refresh is temporarily unavailable.", true, response.StatusCode)
+			providerErr.RetryAfter, providerErr.ProxyRetryExhausted = appleProxyResponseRetryAfter(response.Header, responseBody, time.Now().UTC())
+			return config, providerErr
+		}
 		return config, hmeRefreshError("provider_response", "iCloud session refresh returned an oversized response.", true, response.StatusCode)
 	}
+	now := time.Now().UTC()
 	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden || response.StatusCode == 421 {
 		return config, &hmeError{
 			Category: "session_invalid", SafeMessage: "iCloud session is invalid.", SessionKnown: true, SessionValid: false,
@@ -195,14 +201,25 @@ func (c *HMEClient) refreshSession(ctx context.Context, config hmeConfig) (hmeCo
 	}
 	if response.StatusCode == http.StatusTooManyRequests {
 		providerErr := hmeRefreshError("rate_limited", "iCloud session refresh is temporarily rate limited.", true, response.StatusCode)
-		providerErr.RetryAfter = iCloudResponseRetryAfter(response.Header.Get("Retry-After"), responseBody, time.Now().UTC())
+		providerErr.RetryAfter = iCloudResponseRetryAfter(response.Header.Get("Retry-After"), responseBody, now)
 		return config, providerErr
 	}
 	if response.StatusCode == http.StatusRequestTimeout || response.StatusCode >= 500 {
-		return config, hmeRefreshError("provider_unavailable", "iCloud session refresh is temporarily unavailable.", true, response.StatusCode)
+		providerErr := hmeRefreshError("provider_unavailable", "iCloud session refresh is temporarily unavailable.", true, response.StatusCode)
+		providerErr.RetryAfter, providerErr.ProxyRetryExhausted = appleProxyResponseRetryAfter(response.Header, responseBody, now)
+		return config, providerErr
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return config, hmeRefreshError("provider_rejected", "iCloud session refresh was rejected.", false, response.StatusCode)
+	}
+	responseCookies := response.Cookies()
+	updatedSetupCookie := mergeICloudCookies(config.SetupCookie, responseCookies)
+	updatedCookie := mergeICloudCookies(config.Cookie, iCloudCookiesForHost(responseCookies, config.Host, "/v2/hme/list"))
+	if !validICloudImportCookie(updatedSetupCookie) || !validICloudImportCookie(updatedCookie) {
+		return config, &hmeError{
+			Category: "session_invalid", SafeMessage: "iCloud session is invalid.", SessionKnown: true, SessionValid: false,
+			Stage: "validate", HTTPStatus: response.StatusCode,
+		}
 	}
 	var payload struct {
 		DSInfo struct {
@@ -656,22 +673,44 @@ func (c *HMEClient) request(ctx context.Context, config hmeConfig, method, reque
 	}
 	response, err := client.httpClient.Do(request)
 	if err != nil || response == nil || response.Body == nil {
+		if retryAfter, exhausted, ok := appleProxyRotationDetails(err); ok {
+			return nil, "", &hmeError{Category: "provider_unavailable", SafeMessage: "iCloud HME service is temporarily unavailable.", Retryable: !exhausted, RetryAfter: retryAfter, Stage: stage, ProxyRetryExhausted: exhausted}
+		}
 		return nil, "", &hmeError{Category: "provider_unavailable", SafeMessage: "iCloud HME service is temporarily unavailable.", Retryable: true, Stage: stage}
 	}
 	defer response.Body.Close()
 	updatedCookie := mergeICloudCookies(config.Cookie, response.Cookies())
+	updatedCookieForError := updatedCookie
+	if len(updatedCookieForError) > iCloudImportCookieMaxBytes || !validICloudImportCookie(updatedCookieForError) {
+		updatedCookieForError = ""
+	}
+	responseBody, err := io.ReadAll(io.LimitReader(response.Body, iCloudHMEResponseMaxBytes+1))
+	if err != nil {
+		if response.StatusCode == http.StatusRequestTimeout || response.StatusCode >= 500 {
+			providerErr := hmeResponseError("provider_unavailable", "iCloud HME service is temporarily unavailable.", true, updatedCookieForError)
+			providerErr.RetryAfter, providerErr.ProxyRetryExhausted = appleProxyResponseRetryAfter(response.Header, nil, time.Now().UTC())
+			return nil, "", withHMEErrorContext(providerErr, stage, response.StatusCode)
+		}
+		return nil, "", withHMEErrorContext(hmeResponseError("provider_unavailable", "iCloud HME service is temporarily unavailable.", true, updatedCookie), stage, response.StatusCode)
+	}
+	if len(responseBody) > iCloudHMEResponseMaxBytes {
+		if response.StatusCode == http.StatusRequestTimeout || response.StatusCode >= 500 {
+			providerErr := hmeResponseError("provider_unavailable", "iCloud HME service is temporarily unavailable.", true, updatedCookieForError)
+			providerErr.RetryAfter, providerErr.ProxyRetryExhausted = appleProxyResponseRetryAfter(response.Header, responseBody, time.Now().UTC())
+			return nil, "", withHMEErrorContext(providerErr, stage, response.StatusCode)
+		}
+		return nil, "", withHMEErrorContext(hmeResponseError("provider_response", "iCloud HME returned an oversized response.", true, updatedCookie), stage, response.StatusCode)
+	}
+	if response.StatusCode == http.StatusRequestTimeout || response.StatusCode >= 500 {
+		providerErr := hmeResponseError("provider_unavailable", "iCloud HME service is temporarily unavailable.", true, updatedCookieForError)
+		providerErr.RetryAfter, providerErr.ProxyRetryExhausted = appleProxyResponseRetryAfter(response.Header, responseBody, time.Now().UTC())
+		return nil, "", withHMEErrorContext(providerErr, stage, response.StatusCode)
+	}
 	if len(updatedCookie) > iCloudImportCookieMaxBytes {
 		return nil, "", &hmeError{Category: "provider_response", SafeMessage: "iCloud HME returned an oversized session cookie.", SessionKnown: true, SessionValid: response.StatusCode < 400, Stage: stage, HTTPStatus: response.StatusCode}
 	}
 	if !validICloudImportCookie(updatedCookie) {
 		return nil, "", &hmeError{Category: "session_invalid", SafeMessage: "iCloud session is invalid.", SessionKnown: true, SessionValid: false, Stage: stage, HTTPStatus: response.StatusCode}
-	}
-	responseBody, err := io.ReadAll(io.LimitReader(response.Body, iCloudHMEResponseMaxBytes+1))
-	if err != nil {
-		return nil, "", withHMEErrorContext(hmeResponseError("provider_unavailable", "iCloud HME service is temporarily unavailable.", true, updatedCookie), stage, response.StatusCode)
-	}
-	if len(responseBody) > iCloudHMEResponseMaxBytes {
-		return nil, "", withHMEErrorContext(hmeResponseError("provider_response", "iCloud HME returned an oversized response.", true, updatedCookie), stage, response.StatusCode)
 	}
 	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden || response.StatusCode == 421 {
 		return nil, "", &hmeError{Category: "session_invalid", SafeMessage: "iCloud session is invalid.", SessionKnown: true, SessionValid: false, UpdatedCookie: updatedCookie, Stage: stage, HTTPStatus: response.StatusCode}
@@ -681,9 +720,6 @@ func (c *HMEClient) request(ctx context.Context, config hmeConfig, method, reque
 		providerErr.RetryAfter = iCloudResponseRetryAfter(response.Header.Get("Retry-After"), responseBody, time.Now().UTC())
 		providerErr = withHMEErrorContext(providerErr, stage, response.StatusCode)
 		return nil, "", providerErr
-	}
-	if response.StatusCode == http.StatusRequestTimeout || response.StatusCode >= 500 {
-		return nil, "", withHMEErrorContext(hmeResponseError("provider_unavailable", "iCloud HME service is temporarily unavailable.", true, updatedCookie), stage, response.StatusCode)
 	}
 	if response.StatusCode >= 400 {
 		if providerErr := hmeProviderErrorResponse(responseBody, updatedCookie); providerErr != nil {

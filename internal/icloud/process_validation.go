@@ -53,6 +53,7 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 	countFailure := len(channels) == 0
 	retryValidation := len(channels) == 0
 	transientValidation := false
+	proxyRetryExhaustedFailure := false
 	var failures []error
 	lastRequestSafeError := ""
 	for _, original := range channels {
@@ -139,12 +140,18 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 			if safeError := safeICloudProvisionRequestError(loadErr); safeError != "" {
 				lastRequestSafeError = safeError
 			}
-			definiteFailure := definiteAttemptFailure || iCloudValidationErrorCountsFailure(loadErr)
+			proxyRetryExhausted := iCloudProxyRetryExhausted(loadErr)
+			definiteFailure := definiteAttemptFailure || proxyRetryExhausted || iCloudValidationErrorCountsFailure(loadErr)
 			if definiteFailure {
 				countFailure = true
 				retryValidation = true
 			}
 			failures = append(failures, loadErr)
+			if proxyRetryExhausted {
+				proxyRetryExhaustedFailure = true
+				retryValidation = false
+				continue
+			}
 			if refreshedResource, refreshedChannel, refreshErr := s.loadICloudValidationProvisionScope(ctx, *resource, original.ID); refreshErr == nil {
 				if retryAt := iCloudValidationChannelRetryAt(refreshedResource, refreshedChannel, now); !retryAt.IsZero() {
 					retryValidation = true
@@ -213,7 +220,7 @@ func (s *Service) ProcessICloudValidation(ctx context.Context, task iCloudValida
 		}
 		message = firstNonEmptyICloudSafeError(lastRequestSafeError, fallback)
 	}
-	if transientValidation {
+	if transientValidation && !proxyRetryExhaustedFailure {
 		countFailure = false
 	}
 	return s.applyICloudChannelValidationResult(ctx, task, selectedForwardTo, message, countFailure, retryValidation, nextValidationAt)
@@ -231,6 +238,7 @@ func (s *Service) processICloudCredentialCheck(ctx context.Context, task iCloudV
 	nextValidationAt := time.Time{}
 	lastSafeError := ""
 	checked := false
+	proxyRetryExhaustedFailure := false
 	for _, original := range channels {
 		if original.SessionStatus == iCloudSessionValid {
 			continue
@@ -273,9 +281,14 @@ func (s *Service) processICloudCredentialCheck(ctx context.Context, task iCloudV
 		if requestErr == nil {
 			continue
 		}
-		checked = true
 		if safeError := safeICloudProvisionRequestError(requestErr); safeError != "" {
 			lastSafeError = safeError
+		}
+		checked = true
+		if iCloudProxyRetryExhausted(requestErr) {
+			countFailure = true
+			proxyRetryExhaustedFailure = true
+			continue
 		}
 		refreshedResource, refreshedChannel, refreshErr := s.loadICloudValidationProvisionScope(ctx, resource, original.ID)
 		if refreshErr == nil && refreshedChannel.SessionStatus == iCloudSessionInvalid {
@@ -299,7 +312,7 @@ func (s *Service) processICloudCredentialCheck(ctx context.Context, task iCloudV
 	}
 	// A transient channel failure gets another maintenance attempt; do not
 	// consume a health failure while a retry is still possible.
-	if retryValidation {
+	if retryValidation && !proxyRetryExhaustedFailure {
 		countFailure = false
 	}
 	message := firstNonEmptyICloudSafeError(lastSafeError, "iCloud credential check failed.")

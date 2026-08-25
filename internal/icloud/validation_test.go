@@ -286,6 +286,71 @@ func TestProcessICloudValidationRecordsAppleHTTPFailure(t *testing.T) {
 	}
 }
 
+func TestProcessICloudCredentialCheckTreatsExhaustedProxyRetryAsFailure(t *testing.T) {
+	now := time.Date(2026, 8, 14, 9, 42, 0, 0, time.UTC)
+	db := openICloudValidationTestDB(t, "credential-proxy-exhausted")
+	if err := db.Create(&iCloudRootModel{ID: 1, Type: "icloud", OwnerUserID: 7, Version: 1, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "owner@example.com", Status: iCloudResourceNormal,
+		ExpireAt: now.Add(time.Hour), CredentialRevision: 4, ValidationGeneration: 5,
+		LastSafeError: "previous error", CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	manageExpiresAt := now.Add(time.Hour)
+	nextKeepaliveAt := now.Add(time.Hour)
+	if err := db.Create(&iCloudResourceChannelModel{
+		ResourceID: 1, Kind: iCloudChannelAppleAccount, Host: "appleid.apple.com",
+		Cookie: "myacinfo=secret", Scnt: "scnt", APIKey: "api-key",
+		ManageExpiresAt: &manageExpiresAt, NextKeepaliveAt: &nextKeepaliveAt,
+		SessionStatus: iCloudSessionUnchecked, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	run := iCloudMaintenanceRunModel{
+		ResourceID: 1, ValidationGeneration: 5, Kind: iCloudMaintenanceValidation,
+		Status: iCloudMaintenanceRunning, Attempts: 1, MaxAttempts: iCloudValidationMaxFailures,
+		CredentialRevision: 4, QueuedAt: now, StartedAt: &now, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&run).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	service.apple = NewAppleAccountClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		header := make(http.Header)
+		header.Set(appleProxyRetryExhaustedHeader, "1")
+		return &http.Response{StatusCode: http.StatusServiceUnavailable, Header: header, Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+	})})
+
+	task := iCloudValidationTask{
+		ResourceID: 1, OwnerUserID: 7, ValidationGeneration: 5, ExpectedCredentialRevision: 4,
+		PreserveResourceStatus: true, MaintenanceRunID: run.ID, MaintenanceKind: iCloudMaintenanceValidation,
+	}
+	if err := service.ProcessICloudValidation(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+
+	var resource iCloudResourceModel
+	if err := db.First(&resource, 1).Error; err != nil {
+		t.Fatal(err)
+	}
+	if resource.Status != iCloudResourceNormal || resource.ValidationFailures != 1 || resource.NextValidationAt != nil ||
+		resource.LastSafeError == "previous error" || resource.LastValidAt != nil {
+		t.Fatalf("exhausted proxy retry was not recorded as a credential failure: %#v", resource)
+	}
+	var storedRun iCloudMaintenanceRunModel
+	if err := db.First(&storedRun, run.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if storedRun.Status != iCloudMaintenanceFailed || storedRun.FinishedAt == nil {
+		t.Fatalf("exhausted proxy retry did not fail the maintenance run: %#v", storedRun)
+	}
+}
+
 func TestProcessICloudValidationStopsAfterMaximumFailuresForInvalidSession(t *testing.T) {
 	now := time.Date(2026, 8, 14, 9, 40, 0, 0, time.UTC)
 	db := openICloudValidationTestDB(t, "max-failures")

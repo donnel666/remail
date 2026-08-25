@@ -50,16 +50,27 @@ func defaultAppleOnboardingEndpoints() appleOnboardingEndpoints {
 }
 
 type appleOnboardingHTTPResponse struct {
-	StatusCode int
-	Body       string
-	URL        string
-	Header     http.Header
+	StatusCode           int
+	Body                 string
+	URL                  string
+	Header               http.Header
+	ProxyRotationPending bool
+	ProxyRetryAfter      time.Duration
+	ProxyRetryExhausted  bool
 }
 
 type appleOnboardingHTTPSession interface {
 	Request(string, string, map[string]string, any, bool) (*appleOnboardingHTTPResponse, error)
 	SnapshotCookies(...string) ([]msacl.SessionCookie, error)
 	RestoreCookies([]msacl.SessionCookie) error
+}
+
+type appleProxyRotationFinalizer interface {
+	finalizeProxyRotation() error
+}
+
+type appleProxyRotationResetter interface {
+	resetProxyRotation() error
 }
 
 type appleOnboardingSessionFactory func(context.Context) (appleOnboardingHTTPSession, error)
@@ -181,6 +192,11 @@ func loadAppleOnboardingFlow(ctx context.Context, client *appleOnboardingClient,
 		return nil, &AppleOnboardingError{Category: "invalid_session", SafeMessage: "Stored Apple onboarding browser identity is invalid."}
 	}
 	if err := flow.http.RestoreCookies(flow.state.Cookies); err != nil {
+		// Preserve a proxy-rotation terminal result so the caller does not
+		// mistake it for a stale browser checkpoint and retry the same route.
+		if _, _, ok := appleProxyRotationDetails(err); ok {
+			return nil, err
+		}
 		return nil, &AppleOnboardingError{Category: "invalid_session", SafeMessage: "Stored Apple onboarding cookies are invalid."}
 	}
 	return flow, nil
@@ -201,6 +217,13 @@ func (f *appleOnboardingFlow) blankState() appleOnboardingBrowserState {
 func (f *appleOnboardingFlow) reset(mode string) error {
 	oldChannel := f.state.OldChannel
 	userAgent := f.state.UserAgent
+	if resetter, ok := f.http.(appleProxyRotationResetter); ok {
+		// The reset creates the session that will actually perform this stage;
+		// release an unstarted rotation claim before acquiring that session.
+		if err := resetter.resetProxyRotation(); err != nil {
+			return err
+		}
+	}
 	httpSession, err := f.factory(f.ctx)
 	if err != nil {
 		return err
@@ -233,6 +256,11 @@ func (f *appleOnboardingFlow) snapshot() (json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
+	if finalizer, ok := f.http.(appleProxyRotationFinalizer); ok {
+		if err := finalizer.finalizeProxyRotation(); err != nil {
+			return nil, err
+		}
+	}
 	f.state.Cookies = cookies
 	return json.Marshal(f.state)
 }
@@ -264,8 +292,15 @@ func (f *appleOnboardingFlow) request(method, rawURL string, body any, html, pro
 	f.lastHTTPStatus = response.StatusCode
 	f.absorb(response.Header, appleOnboardingHost(rawURL))
 	if response.StatusCode == http.StatusTooManyRequests || response.StatusCode == http.StatusRequestTimeout || response.StatusCode >= http.StatusInternalServerError {
-		retryAt := appleOnboardingRetryAt(response.Header.Get("Retry-After"), f.now())
-		return nil, &AppleOnboardingError{Category: "apple_unavailable", SafeMessage: "Apple service is temporarily unavailable.", Retryable: true, RetryAt: &retryAt}
+		if response.ProxyRetryExhausted {
+			return nil, &AppleOnboardingError{Category: "apple_unavailable", SafeMessage: "Apple service remained unavailable after the proxy was rotated.", HTTPStatus: response.StatusCode, ProxyRetryExhausted: true}
+		}
+		now := f.now()
+		retryAt := appleOnboardingRetryAt(response.Header.Get("Retry-After"), now)
+		if response.ProxyRotationPending && response.ProxyRetryAfter > 0 {
+			retryAt = now.UTC().Add(response.ProxyRetryAfter)
+		}
+		return nil, &AppleOnboardingError{Category: "apple_unavailable", SafeMessage: "Apple service is temporarily unavailable.", Retryable: true, RetryAt: &retryAt, ProxyRetryPending: response.ProxyRotationPending}
 	}
 	return []byte(response.Body), nil
 }

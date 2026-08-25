@@ -49,11 +49,12 @@ var (
 )
 
 type iCloudFamilyError struct {
-	Category    string
-	SafeMessage string
-	Retryable   bool
-	RetryAfter  time.Duration
-	HTTPStatus  int
+	Category            string
+	SafeMessage         string
+	Retryable           bool
+	RetryAfter          time.Duration
+	HTTPStatus          int
+	ProxyRetryExhausted bool
 }
 
 func (e *iCloudFamilyError) Error() string {
@@ -140,6 +141,9 @@ func (c *iCloudFamilyClient) fetch(ctx context.Context, channel iCloudResourceCh
 		if response != nil && response.Body != nil {
 			_ = response.Body.Close()
 		}
+		if retryAfter, exhausted, ok := appleProxyRotationDetails(err); ok {
+			return iCloudFamilySnapshot{}, &iCloudFamilyError{Category: "provider_unavailable", SafeMessage: "iCloud family service is temporarily unavailable.", Retryable: !exhausted, RetryAfter: retryAfter, ProxyRetryExhausted: exhausted}
+		}
 		return iCloudFamilySnapshot{}, &iCloudFamilyError{Category: "provider_unavailable", SafeMessage: "iCloud family service is temporarily unavailable.", Retryable: true}
 	}
 	if response == nil || response.Body == nil {
@@ -148,6 +152,10 @@ func (c *iCloudFamilyClient) fetch(ctx context.Context, channel iCloudResourceCh
 	defer response.Body.Close()
 	body, readErr := io.ReadAll(io.LimitReader(response.Body, iCloudFamilyResponseMaxBytes+1))
 	if readErr != nil || len(body) > iCloudFamilyResponseMaxBytes {
+		if response.StatusCode == http.StatusRequestTimeout || response.StatusCode >= 500 {
+			retryAfter, exhausted := appleProxyResponseRetryAfter(response.Header, nil, time.Now().UTC())
+			return iCloudFamilySnapshot{}, &iCloudFamilyError{Category: "provider_unavailable", SafeMessage: "iCloud family service is temporarily unavailable.", Retryable: !exhausted, RetryAfter: retryAfter, HTTPStatus: response.StatusCode, ProxyRetryExhausted: exhausted}
+		}
 		return iCloudFamilySnapshot{}, &iCloudFamilyError{Category: "provider_response_invalid", SafeMessage: "iCloud family service returned an invalid response.", Retryable: true, HTTPStatus: response.StatusCode}
 	}
 	now := time.Now().UTC()
@@ -164,7 +172,8 @@ func (c *iCloudFamilyClient) fetch(ctx context.Context, channel iCloudResourceCh
 			RetryAfter: iCloudResponseRetryAfter(response.Header.Get("Retry-After"), body, now), HTTPStatus: response.StatusCode,
 		}
 	default:
-		return iCloudFamilySnapshot{}, &iCloudFamilyError{Category: "provider_unavailable", SafeMessage: "iCloud family service is temporarily unavailable.", Retryable: true, HTTPStatus: response.StatusCode}
+		retryAfter, exhausted := appleProxyResponseRetryAfter(response.Header, body, now)
+		return iCloudFamilySnapshot{}, &iCloudFamilyError{Category: "provider_unavailable", SafeMessage: "iCloud family service is temporarily unavailable.", Retryable: !exhausted, RetryAfter: retryAfter, HTTPStatus: response.StatusCode, ProxyRetryExhausted: exhausted}
 	}
 	var payload iCloudFamilyMembersResponse
 	if err := json.Unmarshal(body, &payload); err != nil {
