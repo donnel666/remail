@@ -334,7 +334,7 @@ func TestEpusdtQueryRetriesWhenSecretRotationOnlyChangesWhitespace(t *testing.T)
 
 func TestEpusdtQueryDoesNotFallbackAcrossMerchantScope(t *testing.T) {
 	var attempts int
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		attempts++
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"status_code":401}`))
