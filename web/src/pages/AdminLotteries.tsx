@@ -50,6 +50,7 @@ import { BalanceAccountCell } from "./admin-finance/balance-meta";
 type LotteryStatusFilter = "all" | Lottery["status"];
 type LotteryType = "fixed" | "growing";
 const DETAIL_TABLE_SCROLL_Y = "max(220px, calc(100vh - 300px))";
+const MAX_LOTTERY_PARTICIPANTS = 5000;
 
 type FormState = {
   title: string;
@@ -295,6 +296,14 @@ function LotteryCreateModal({
       );
       return;
     }
+    if (hasTarget && target! > MAX_LOTTERY_PARTICIPANTS) {
+      Toast.warning(
+        t("Participant target cannot exceed {{count}}.", {
+          count: MAX_LOTTERY_PARTICIPANTS,
+        }),
+      );
+      return;
+    }
     if (
       !Number.isInteger(poolIncrement) ||
       poolIncrement < 0 ||
@@ -329,11 +338,7 @@ function LotteryCreateModal({
       Toast.warning(t("Prize tier counts must be non-negative integers."));
       return;
     }
-    const drawPool =
-      form.lotteryType === "growing" && hasTarget
-        ? total + target! * poolIncrement
-        : total;
-    if (hasTarget && drawPool < target! * minPayout) {
+    if (hasTarget && total < target! * minPayout) {
       Toast.warning(
         t(
           "Total amount must cover the minimum payout for all target participants."
@@ -341,7 +346,7 @@ function LotteryCreateModal({
       );
       return;
     }
-    if (hasTarget && drawPool > target! * maxPayout) {
+    if (hasTarget && total > target! * maxPayout) {
       Toast.warning(
         t(
           "Total amount must fit within the maximum payout for all target participants."
@@ -353,12 +358,12 @@ function LotteryCreateModal({
       Toast.warning(t("Prize counts cannot exceed the participant target."));
       return;
     }
-    if (hasTarget && form.lotteryType === "fixed") {
+    if (hasTarget) {
       const variableCapacity = maxPayout - minPayout;
       const fixedMinimum =
         target! * minPayout + tierValues[1] * variableCapacity;
       const fixedMaximum = fixedMinimum + tierValues[0] * variableCapacity;
-      if (drawPool < fixedMinimum || drawPool > fixedMaximum) {
+      if (total < fixedMinimum || total > fixedMaximum) {
         Toast.warning(t("Total amount does not fit the configured prize counts."));
         return;
       }

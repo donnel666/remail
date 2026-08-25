@@ -901,7 +901,7 @@ export function ICloudOnboardingModal({
       okText={t(result ? "Close" : "Start onboarding")}
       title={t("Automatic Apple onboarding")}
       visible={visible}
-      width="min(1080px, calc(100vw - 32px))"
+      width="95vh"
     >
       {!result && modeSelector ? <div className="mb-4">{modeSelector}</div> : null}
       {result ? (
@@ -1312,7 +1312,7 @@ export function ImportICloudModal({
       okText={t(step === "verification" ? "Next" : "Import")}
       title={t("Import iCloud Emails")}
       visible={visible}
-      width="min(720px, calc(100vw - 32px))"
+      width="95vh"
     >
       {modeSelector ? <div className="mb-4">{modeSelector}</div> : null}
       {step === "verification" ? (
