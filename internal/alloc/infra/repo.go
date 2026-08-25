@@ -92,6 +92,19 @@ func microsoftMainCandidateCondition(projectID uint, emailSuffix string) (string
 		append([]any{suffix, projectID, projectID}, aliasArgs...)
 }
 
+func microsoftProjectSuffixAllowedCondition(projectID uint, domainColumn string) (string, []any) {
+	return `NOT EXISTS (
+        SELECT 1
+        FROM project_microsoft_suffix_blacklists blocked
+        WHERE blocked.project_id = ?
+          AND blocked.suffix = ` + microsoftCanonicalDomainExpression(domainColumn) + `
+    )`, []any{projectID}
+}
+
+func microsoftCanonicalDomainExpression(domainColumn string) string {
+	return "LOWER(TRIM(TRAILING '.' FROM " + domainColumn + "))"
+}
+
 type Repo struct {
 	db *gorm.DB
 }
@@ -1958,6 +1971,8 @@ JOIN project_products pp ON pp.project_id = p.id
 	}
 	if stats.Microsoft.Enabled {
 		microsoftScope, microsoftScopeArgs := microsoftProjectInventoryScopeSQL(projectID)
+		microsoftAllowed, microsoftAllowedArgs := microsoftProjectSuffixAllowedCondition(projectID, "ms.email_domain")
+		microsoftAliasAllowed, microsoftAliasAllowedArgs := microsoftProjectSuffixAllowedCondition(projectID, "ea.email_domain")
 		var capacity struct {
 			EligibleResources int64
 			DotCapacity       int64
@@ -1972,7 +1987,8 @@ JOIN email_resources er ON er.id = ms.id AND er.type = 'microsoft'
 JOIN users u ON u.id = er.owner_user_id
 WHERE ms.status = 'normal'
   AND `+microsoftNotUnderBlockingMaintenanceCondition+`
-  AND `+microsoftScope, microsoftScopeArgs...); err != nil {
+	  AND `+microsoftScope+`
+  AND `+microsoftAllowed, append(microsoftScopeArgs, microsoftAllowedArgs...)...); err != nil {
 			return nil, err
 		}
 		stats.Microsoft.EligibleResources = capacity.EligibleResources
@@ -1986,7 +2002,8 @@ JOIN users u ON u.id = er.owner_user_id
 WHERE ms.status = 'normal'
   AND `+microsoftNotUnderBlockingMaintenanceCondition+`
   AND `+microsoftScope+`
-  AND `+microsoftUnusedMainCondition, append(microsoftScopeArgs, projectID, projectID)...); err != nil {
+  AND `+microsoftAllowed+`
+  AND `+microsoftUnusedMainCondition, append(append(append([]any{}, microsoftScopeArgs...), microsoftAllowedArgs...), projectID, projectID)...); err != nil {
 				return nil, err
 			}
 			if err := scan(&stats.Microsoft.ExplicitAliasAvailable, `
@@ -1999,6 +2016,7 @@ WHERE ea.status = 'normal'
   AND ms.status = 'normal'
   AND `+microsoftNotUnderBlockingMaintenanceCondition+`
   AND `+microsoftScope+`
+  AND `+microsoftAliasAllowed+`
   AND NOT EXISTS (
       SELECT 1 FROM microsoft_allocations history_alias
       WHERE history_alias.explicit_alias_id = ea.id
@@ -2010,7 +2028,7 @@ WHERE ea.status = 'normal'
       WHERE active_alias.active_kind = 2
         AND active_alias.project_id = ?
         AND active_alias.active_entity_id = ea.id
-  )`, append(microsoftScopeArgs, projectID, projectID)...); err != nil {
+			  )`, append(append(append([]any{}, microsoftScopeArgs...), microsoftAliasAllowedArgs...), projectID, projectID)...); err != nil {
 				return nil, err
 			}
 		}
@@ -2027,7 +2045,8 @@ WHERE ma.project_id = ?
   AND ma.status = 'allocated'
   AND ms.status = 'normal'
   AND `+microsoftNotUnderBlockingMaintenanceCondition+`
-  AND `+microsoftScope, append([]any{projectID}, microsoftScopeArgs...)...); err != nil {
+	  AND `+microsoftScope+`
+	  AND `+microsoftAllowed, append(append([]any{projectID}, microsoftScopeArgs...), microsoftAllowedArgs...)...); err != nil {
 				return nil, err
 			}
 			var dotAdjustment struct {
@@ -2064,7 +2083,8 @@ JOIN email_resources er ON er.id = ms.id AND er.type = 'microsoft'
 JOIN users u ON u.id = er.owner_user_id
 WHERE ms.status = 'normal'
   AND `+microsoftNotUnderBlockingMaintenanceCondition+`
-  AND `+microsoftScope, append([]any{projectID, projectID}, microsoftScopeArgs...)...); err != nil {
+	  AND `+microsoftScope+`
+	  AND `+microsoftAllowed, append(append([]any{projectID, projectID}, microsoftScopeArgs...), microsoftAllowedArgs...)...); err != nil {
 				return nil, err
 			}
 			stats.Microsoft.DotAvailable = nonNegative(stats.Microsoft.DotCapacity-dotAdjustment.CanonicalUnavailable) + dotAdjustment.NoncanonicalReusable
@@ -2081,7 +2101,8 @@ WHERE adu.usage_date = ?
   AND adu.usage_kind = 'plus'
   AND ms.status = 'normal'
   AND `+microsoftNotUnderBlockingMaintenanceCondition+`
-  AND `+microsoftScope, append([]any{today}, microsoftScopeArgs...)...); err != nil {
+	  AND `+microsoftScope+`
+	  AND `+microsoftAllowed, append(append([]any{today}, microsoftScopeArgs...), microsoftAllowedArgs...)...); err != nil {
 				return nil, err
 			}
 			stats.Microsoft.PlusDailyAvailable = nonNegative(stats.Microsoft.PlusDailyLimit - stats.Microsoft.PlusDailyUsed)
@@ -2451,6 +2472,8 @@ func (r *Repo) microsoftProductInventorySuffixTotals(ctx context.Context, projec
 
 func (r *Repo) microsoftSuffixInventory(ctx context.Context, projectID uint, row productInventoryRow, scope string, scopeArgs []any) (map[string]int64, error) {
 	result := map[string]int64{}
+	allowedRoot, allowedRootArgs := microsoftProjectSuffixAllowedCondition(projectID, "ms.email_domain")
+	allowedAlias, allowedAliasArgs := microsoftProjectSuffixAllowedCondition(projectID, "ea.email_domain")
 	var capacities []struct {
 		Suffix         string
 		DotCapacity    int64
@@ -2466,7 +2489,8 @@ JOIN users u ON u.id = er.owner_user_id
 WHERE ms.status = 'normal'
   AND `+microsoftNotUnderBlockingMaintenanceCondition+`
   AND `+scope+`
-GROUP BY ms.email_domain`, scopeArgs...).Scan(&capacities).Error; err != nil {
+  AND `+allowedRoot+`
+GROUP BY ms.email_domain`, append(append([]any{}, scopeArgs...), allowedRootArgs...)...).Scan(&capacities).Error; err != nil {
 		return nil, fmt.Errorf("microsoft suffix capacity: %w", err)
 	}
 	dotCapacityBySuffix := map[string]int64{}
@@ -2489,8 +2513,9 @@ JOIN users u ON u.id = er.owner_user_id
 WHERE ms.status = 'normal'
   AND `+microsoftNotUnderBlockingMaintenanceCondition+`
   AND `+scope+`
+  AND `+allowedRoot+`
   AND `+microsoftUnusedMainCondition+`
-GROUP BY ms.email_domain`, append(scopeArgs, projectID, projectID)...)
+GROUP BY ms.email_domain`, append(append(append([]any{}, scopeArgs...), allowedRootArgs...), projectID, projectID)...)
 		if err != nil {
 			return nil, err
 		}
@@ -2504,6 +2529,7 @@ WHERE ea.status = 'normal'
   AND ms.status = 'normal'
   AND `+microsoftNotUnderBlockingMaintenanceCondition+`
   AND `+scope+`
+  AND `+allowedAlias+`
   AND NOT EXISTS (
       SELECT 1 FROM microsoft_allocations history_alias
       WHERE history_alias.explicit_alias_id = ea.id
@@ -2516,7 +2542,7 @@ WHERE ea.status = 'normal'
         AND active_alias.project_id = ?
         AND active_alias.active_entity_id = ea.id
   )
-GROUP BY ea.email_domain`, append(scopeArgs, projectID, projectID)...)
+GROUP BY ea.email_domain`, append(append(append([]any{}, scopeArgs...), allowedAliasArgs...), projectID, projectID)...)
 		if err != nil {
 			return nil, err
 		}
@@ -2567,7 +2593,8 @@ JOIN users u ON u.id = er.owner_user_id
 WHERE ms.status = 'normal'
   AND `+microsoftNotUnderBlockingMaintenanceCondition+`
   AND `+scope+`
-GROUP BY ms.email_domain`, append([]any{projectID, projectID}, scopeArgs...)...).Scan(&adjustments).Error
+  AND `+allowedRoot+`
+GROUP BY ms.email_domain`, append(append([]any{projectID, projectID}, scopeArgs...), allowedRootArgs...)...).Scan(&adjustments).Error
 		if err != nil {
 			return nil, fmt.Errorf("microsoft dot suffix adjustment: %w", err)
 		}
@@ -2595,7 +2622,8 @@ WHERE adu.usage_date = ?
   AND ms.status = 'normal'
   AND `+microsoftNotUnderBlockingMaintenanceCondition+`
   AND `+scope+`
-GROUP BY ms.email_domain`, append([]any{today}, scopeArgs...)...)
+  AND `+allowedRoot+`
+GROUP BY ms.email_domain`, append(append([]any{today}, scopeArgs...), allowedRootArgs...)...)
 		if err != nil {
 			return nil, err
 		}
@@ -3161,7 +3189,7 @@ func domainPrivateInventoryScopeSQL(buyerUserID uint) (string, []any) {
 func normalizeCandidateSuffix(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	value = strings.TrimPrefix(value, "@")
-	return strings.TrimPrefix(value, ".")
+	return strings.TrimSuffix(strings.TrimPrefix(value, "."), ".")
 }
 
 func domainResourceSelectionCondition(value string) (string, []any) {

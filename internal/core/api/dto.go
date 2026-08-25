@@ -73,15 +73,16 @@ type CreateProjectApplicationRequest struct {
 
 // AdminCreateProjectRequest creates a complete listed project.
 type AdminCreateProjectRequest struct {
-	Name           string                   `json:"name" binding:"required"`
-	TargetPlatform string                   `json:"targetPlatform" binding:"required"`
-	LogoURL        string                   `json:"logoUrl,omitempty"`
-	Description    string                   `json:"description,omitempty"`
-	AccessType     string                   `json:"accessType,omitempty"`
-	AccessUserIDs  []uint                   `json:"accessUserIds,omitempty"`
-	LooseMatch     *bool                    `json:"looseMatch,omitempty"`
-	Products       []ProjectProductRequest  `json:"products" binding:"required"`
-	MailRules      []ProjectMailRuleRequest `json:"mailRules" binding:"required"`
+	Name                     string                   `json:"name" binding:"required"`
+	TargetPlatform           string                   `json:"targetPlatform" binding:"required"`
+	LogoURL                  string                   `json:"logoUrl,omitempty"`
+	Description              string                   `json:"description,omitempty"`
+	AccessType               string                   `json:"accessType,omitempty"`
+	AccessUserIDs            []uint                   `json:"accessUserIds,omitempty"`
+	LooseMatch               *bool                    `json:"looseMatch,omitempty"`
+	Products                 []ProjectProductRequest  `json:"products" binding:"required"`
+	MailRules                []ProjectMailRuleRequest `json:"mailRules" binding:"required"`
+	MicrosoftSuffixBlacklist []string                 `json:"microsoftSuffixBlacklist,omitempty"`
 }
 
 // AdminRejectProjectRequest rejects a reviewing project application.
@@ -122,7 +123,8 @@ type ProjectBulkUpdateProductsRequest struct {
 
 // ProjectPriceDefaultsResponse returns the non-sensitive project price defaults.
 type ProjectPriceDefaultsResponse struct {
-	Defaults map[string]string `json:"defaults"`
+	Defaults               map[string]string `json:"defaults"`
+	MicrosoftSuffixOptions []string          `json:"microsoftSuffixOptions"`
 }
 
 // GrantProjectAccessRequest grants a user access to a private project.
@@ -475,10 +477,11 @@ type ProjectAccessListResponse struct {
 
 // ProjectDetailResponse returns the Project aggregate detail.
 type ProjectDetailResponse struct {
-	Project   ProjectItemResponse       `json:"project"`
-	Products  []ProjectProductResponse  `json:"products"`
-	MailRules []ProjectMailRuleResponse `json:"mailRules,omitempty"`
-	Accesses  []ProjectAccessResponse   `json:"accesses,omitempty"`
+	Project                  ProjectItemResponse       `json:"project"`
+	Products                 []ProjectProductResponse  `json:"products"`
+	MailRules                []ProjectMailRuleResponse `json:"mailRules,omitempty"`
+	Accesses                 []ProjectAccessResponse   `json:"accesses,omitempty"`
+	MicrosoftSuffixBlacklist []string                  `json:"microsoftSuffixBlacklist,omitempty"`
 }
 
 // ProjectBulkCommandResponse returns the number of projects affected by a bulk command.

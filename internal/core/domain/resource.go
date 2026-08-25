@@ -2,6 +2,7 @@ package domain
 
 import (
 	"hash/crc32"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -743,6 +744,32 @@ func IsMicrosoftEmailDomain(email string) bool {
 	}
 	_, ok := microsoftEmailWhitelist[host]
 	return ok
+}
+
+// MicrosoftEmailDomains returns the live Microsoft consumer domain whitelist.
+func MicrosoftEmailDomains() []string {
+	configured := strings.TrimSpace(runtimeconfig.String("microsoft_domain_whitelist", ""))
+	if configured == "" {
+		domains := make([]string, 0, len(microsoftEmailWhitelist))
+		for domain := range microsoftEmailWhitelist {
+			domains = append(domains, domain)
+		}
+		sort.Strings(domains)
+		return domains
+	}
+	seen := make(map[string]struct{})
+	for _, candidate := range strings.FieldsFunc(configured, func(r rune) bool { return r == ',' || r == '，' || unicode.IsSpace(r) }) {
+		candidate = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(candidate)), ".")
+		if candidate != "" {
+			seen[candidate] = struct{}{}
+		}
+	}
+	domains := make([]string, 0, len(seen))
+	for domain := range seen {
+		domains = append(domains, domain)
+	}
+	sort.Strings(domains)
+	return domains
 }
 
 func DefaultPlusDailyLimitValue() int {

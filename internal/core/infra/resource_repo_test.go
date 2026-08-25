@@ -18,3 +18,9 @@ func TestUniqueMicrosoftEmails(t *testing.T) {
 		t.Fatalf("uniqueMicrosoftEmails mismatch:\nwant %#v\ngot  %#v", want, got)
 	}
 }
+
+func TestMicrosoftEmailDomainCanonicalizesTrailingDot(t *testing.T) {
+	if got := microsoftEmailDomain("User@Outlook.com."); got != "outlook.com" {
+		t.Fatalf("microsoftEmailDomain() = %q, want outlook.com", got)
+	}
+}

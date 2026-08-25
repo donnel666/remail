@@ -268,7 +268,7 @@ func microsoftEmailDomain(email string) string {
 	if index < 0 || index == len(normalized)-1 {
 		return ""
 	}
-	return normalized[index+1:]
+	return strings.TrimSuffix(normalized[index+1:], ".")
 }
 
 func normalizeDailyLimit(value int, fallback int) int {

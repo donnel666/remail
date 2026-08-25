@@ -310,6 +310,19 @@ func TestRandomSuffixInventoryPrecheckUsesMatchingProductSuffixes(t *testing.T) 
 	}
 }
 
+func TestSpecifiedMicrosoftSuffixMissingFromSnapshotIsUnknown(t *testing.T) {
+	totals := &ProjectProductInventoryTotals{Items: []ProductInventoryTotal{{
+		ProductID: 1, ProductType: coredomain.ProductTypeMicrosoft,
+		Suffixes: []ProductInventorySuffixTotal{{Suffix: "hotmail.com", PublicAvailable: 2}},
+	}}}
+	available, known := productInventoryAvailable(totals, ProductInventoryAvailabilityRequest{
+		ProductID: 1, EmailSuffix: "outlook.com", PublicOnly: true,
+	})
+	if available || known {
+		t.Fatalf("explicit Microsoft suffix availability = %t, %t; want false, false", available, known)
+	}
+}
+
 func TestSpecifiedSuffixProbesEveryBucketBeforeGlobalFallback(t *testing.T) {
 	buckets := bucketProbeSequence("order-1", 4, string(domain.MicrosoftMailboxPlus), MicrosoftBucketCount)
 	emptyBuckets := make(map[uint16]bool, len(buckets))

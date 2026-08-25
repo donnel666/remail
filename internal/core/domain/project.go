@@ -117,10 +117,11 @@ type ProjectAccess struct {
 
 // ProjectDetail is the aggregate view returned to API/application consumers.
 type ProjectDetail struct {
-	Project   Project
-	Products  []Product
-	MailRules []MailRule
-	Accesses  []ProjectAccess
+	Project                  Project
+	Products                 []Product
+	MailRules                []MailRule
+	Accesses                 []ProjectAccess
+	MicrosoftSuffixBlacklist []string
 }
 
 func IsValidProjectStatus(status ProjectStatus) bool {

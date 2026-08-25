@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -188,6 +189,8 @@ type CreateProjectRequest struct {
 	LooseMatch     bool
 	Products       []ProjectProductRequest
 	MailRules      []ProjectMailRuleRequest
+	// nil means omitted on update/approve; a non-nil empty slice explicitly clears it.
+	MicrosoftSuffixBlacklist []string
 }
 
 type ProjectProductRequest struct {
@@ -454,12 +457,17 @@ func (uc *ProjectUseCase) AdminCreateListed(ctx context.Context, operatorUserID 
 	if err != nil {
 		return nil, err
 	}
+	suffixBlacklist, err := normalizeMicrosoftSuffixBlacklist(req.MicrosoftSuffixBlacklist, products, nil)
+	if err != nil {
+		return nil, err
+	}
 
 	detail := &domain.ProjectDetail{
-		Project:   project,
-		Products:  products,
-		MailRules: rules,
-		Accesses:  accesses,
+		Project:                  project,
+		Products:                 products,
+		MailRules:                rules,
+		Accesses:                 accesses,
+		MicrosoftSuffixBlacklist: suffixBlacklist,
 	}
 	log := projectOperationLog(operatorUserID, requestID, path, "core.project.create", "project", "new", "success", "Listed project created.")
 	if err := uc.projects.CreateWithLog(ctx, detail, log); err != nil {
@@ -491,12 +499,17 @@ func (uc *ProjectUseCase) AdminUpdate(ctx context.Context, operatorUserID, proje
 	if err != nil {
 		return nil, err
 	}
+	suffixBlacklist, err := uc.normalizeMicrosoftSuffixBlacklist(ctx, projectID, req.MicrosoftSuffixBlacklist, products)
+	if err != nil {
+		return nil, err
+	}
 
 	detail := &domain.ProjectDetail{
-		Project:   project,
-		Products:  products,
-		MailRules: rules,
-		Accesses:  accesses,
+		Project:                  project,
+		Products:                 products,
+		MailRules:                rules,
+		Accesses:                 accesses,
+		MicrosoftSuffixBlacklist: suffixBlacklist,
 	}
 	log := projectOperationLog(operatorUserID, requestID, path, "core.project.update", "project", strconv.FormatUint(uint64(projectID), 10), "success", "Project updated.")
 	if err := uc.projects.UpdateWithLog(ctx, detail, log); err != nil {
@@ -537,11 +550,16 @@ func (uc *ProjectUseCase) AdminApproveWithConfig(ctx context.Context, operatorUs
 	if err != nil {
 		return nil, err
 	}
+	suffixBlacklist, err := uc.normalizeMicrosoftSuffixBlacklist(ctx, projectID, req.MicrosoftSuffixBlacklist, products)
+	if err != nil {
+		return nil, err
+	}
 	detail := &domain.ProjectDetail{
-		Project:   project,
-		Products:  products,
-		MailRules: rules,
-		Accesses:  accesses,
+		Project:                  project,
+		Products:                 products,
+		MailRules:                rules,
+		Accesses:                 accesses,
+		MicrosoftSuffixBlacklist: suffixBlacklist,
 	}
 	log := projectOperationLog(operatorUserID, requestID, path, "core.project.approve", "project", strconv.FormatUint(uint64(projectID), 10), "success", "Project approved with configuration.")
 	if err := uc.projects.ApproveWithConfigAndLog(ctx, detail, log); err != nil {
@@ -969,6 +987,69 @@ func normalizeProjectAccessRequests(accessType domain.ProjectAccessType, userIDs
 		})
 	}
 	return accesses, nil
+}
+
+func (uc *ProjectUseCase) normalizeMicrosoftSuffixBlacklist(ctx context.Context, projectID uint, values []string, products []domain.Product) ([]string, error) {
+	if values == nil && projectHasMicrosoftProduct(products) {
+		historical, findErr := uc.projects.FindDetail(ctx, projectID, 0, true)
+		if findErr != nil {
+			return nil, findErr
+		}
+		if historical == nil || historical.Project.ID != projectID {
+			return nil, nil
+		}
+		return normalizeMicrosoftSuffixBlacklist(historical.MicrosoftSuffixBlacklist, products, historical.MicrosoftSuffixBlacklist)
+	}
+	result, err := normalizeMicrosoftSuffixBlacklist(values, products, nil)
+	if err == nil || !projectHasMicrosoftProduct(products) {
+		return result, err
+	}
+	historical, findErr := uc.projects.FindDetail(ctx, projectID, 0, true)
+	if findErr != nil {
+		return nil, findErr
+	}
+	if historical == nil || historical.Project.ID != projectID {
+		return nil, err
+	}
+	return normalizeMicrosoftSuffixBlacklist(values, products, historical.MicrosoftSuffixBlacklist)
+}
+
+func normalizeMicrosoftSuffixBlacklist(values []string, products []domain.Product, historicalValues ...[]string) ([]string, error) {
+	if !projectHasMicrosoftProduct(products) || len(values) == 0 {
+		return nil, nil
+	}
+	var historical []string
+	if len(historicalValues) > 0 {
+		historical = historicalValues[0]
+	}
+	allowed := make(map[string]struct{}, len(domain.MicrosoftEmailDomains()))
+	for _, suffix := range domain.MicrosoftEmailDomains() {
+		allowed[suffix] = struct{}{}
+	}
+	for _, value := range historical {
+		suffix := strings.TrimPrefix(strings.TrimSuffix(strings.ToLower(strings.TrimSpace(value)), "."), "@")
+		if suffix != "" {
+			allowed[suffix] = struct{}{}
+		}
+	}
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		suffix := strings.TrimPrefix(strings.TrimSuffix(strings.ToLower(strings.TrimSpace(value)), "."), "@")
+		if suffix == "" {
+			return nil, domain.ErrInvalidProject
+		}
+		if _, ok := allowed[suffix]; !ok {
+			return nil, domain.ErrInvalidProject
+		}
+		if _, ok := seen[suffix]; ok {
+			return nil, domain.ErrInvalidProject
+		}
+		seen[suffix] = struct{}{}
+		result = append(result, suffix)
+	}
+	sort.Strings(result)
+	return result, nil
 }
 
 func normalizeMailRuleRequests(requests []ProjectMailRuleRequest, requireComplete bool, looseMatch bool) ([]domain.MailRule, error) {

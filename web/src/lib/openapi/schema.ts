@@ -7142,6 +7142,7 @@ export interface components {
             looseMatch: boolean;
             products: components["schemas"]["ProjectProductRequest"][];
             mailRules: components["schemas"]["ProjectMailRuleRequest"][];
+            microsoftSuffixBlacklist?: string[];
         };
         AdminRejectProjectRequest: {
             reviewReason: string;
@@ -7181,6 +7182,7 @@ export interface components {
             defaults: {
                 [key: string]: components["schemas"]["NonNegativeLedgerAmount"];
             };
+            microsoftSuffixOptions: string[];
         };
         ProjectBulkUpdateProductsRequest: {
             projectIds: number[];
@@ -7397,6 +7399,7 @@ export interface components {
             /** @description Returned to project admins and to the applicant while the project is an application; omitted for ordinary listed project detail. */
             mailRules?: components["schemas"]["ProjectMailRule"][];
             accesses?: components["schemas"]["ProjectAccess"][];
+            microsoftSuffixBlacklist?: string[];
         };
         ResourceValidationsResponse: {
             /** @description Number of explicit IDs accepted into Redis. Filter submissions return zero because matching is intentionally deferred. */

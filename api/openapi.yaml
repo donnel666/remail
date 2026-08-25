@@ -18976,6 +18976,10 @@ components:
           minItems: 1
           items:
             $ref: "#/components/schemas/ProjectMailRuleRequest"
+        microsoftSuffixBlacklist:
+          type: array
+          items:
+            type: string
       additionalProperties: false
 
     AdminRejectProjectRequest:
@@ -19070,11 +19074,16 @@ components:
       type: object
       required:
         - defaults
+        - microsoftSuffixOptions
       properties:
         defaults:
           type: object
           additionalProperties:
             $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        microsoftSuffixOptions:
+          type: array
+          items:
+            type: string
       additionalProperties: false
 
     ProjectBulkUpdateProductsRequest:
@@ -19595,6 +19604,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ProjectAccess"
+        microsoftSuffixBlacklist:
+          type: array
+          items:
+            type: string
       additionalProperties: false
 
     ResourceValidationsResponse:

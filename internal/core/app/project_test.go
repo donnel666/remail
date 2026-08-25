@@ -180,6 +180,99 @@ func TestProjectUseCaseAdminCreateListedRejectsInvalidEnums(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrInvalidProduct)
 }
 
+func TestProjectUseCaseAdminCreateListedNormalizesMicrosoftSuffixBlacklist(t *testing.T) {
+	previous, existed := runtimeconfig.Snapshot()["microsoft_domain_whitelist"]
+	runtimeconfig.Set("microsoft_domain_whitelist", "outlook.com,hotmail.com")
+	t.Cleanup(func() {
+		if existed {
+			runtimeconfig.Set("microsoft_domain_whitelist", previous)
+		} else {
+			runtimeconfig.Delete("microsoft_domain_whitelist")
+		}
+	})
+
+	repo := &fakeProjectRepo{}
+	req := validProjectCreateRequest()
+	req.MicrosoftSuffixBlacklist = []string{" @Outlook.com. ", "hotmail.com"}
+	detail, err := NewProjectUseCase(repo).AdminCreateListed(
+		context.Background(), 1, req, "req-microsoft-suffix-blacklist", "/v1/admin/projects",
+	)
+	require.NoError(t, err)
+	require.Equal(t, []string{"hotmail.com", "outlook.com"}, detail.MicrosoftSuffixBlacklist)
+	require.Equal(t, detail.MicrosoftSuffixBlacklist, repo.detail.MicrosoftSuffixBlacklist)
+
+	for _, blacklist := range [][]string{
+		{"unknown.example"},
+		{"hotmail.com", "@hotmail.com"},
+	} {
+		req = validProjectCreateRequest()
+		req.MicrosoftSuffixBlacklist = blacklist
+		_, err = NewProjectUseCase(&fakeProjectRepo{}).AdminCreateListed(
+			context.Background(), 1, req, "req-microsoft-suffix-blacklist-invalid", "/v1/admin/projects",
+		)
+		require.ErrorIs(t, err, domain.ErrInvalidProject)
+	}
+}
+
+func TestProjectUseCaseAllowsHistoricalMicrosoftSuffixAfterWhitelistRemoval(t *testing.T) {
+	previous, existed := runtimeconfig.Snapshot()["microsoft_domain_whitelist"]
+	runtimeconfig.Set("microsoft_domain_whitelist", "hotmail.com")
+	t.Cleanup(func() {
+		if existed {
+			runtimeconfig.Set("microsoft_domain_whitelist", previous)
+		} else {
+			runtimeconfig.Delete("microsoft_domain_whitelist")
+		}
+	})
+
+	repo := &fakeProjectRepo{detail: &domain.ProjectDetail{
+		Project:                  domain.Project{ID: 55, Status: domain.ProjectStatusListed},
+		MicrosoftSuffixBlacklist: []string{"outlook.com"},
+	}}
+	req := validProjectCreateRequest()
+	req.MicrosoftSuffixBlacklist = []string{"outlook.com"}
+	updated, err := NewProjectUseCase(repo).AdminUpdate(
+		context.Background(), 9, 55, req, "req-historical-suffix", "/v1/admin/projects/:projectId",
+	)
+	require.NoError(t, err)
+	require.Equal(t, []string{"outlook.com"}, updated.MicrosoftSuffixBlacklist)
+
+	req.MicrosoftSuffixBlacklist = []string{"outlook.com", "outlook.fr"}
+	_, err = NewProjectUseCase(repo).AdminUpdate(
+		context.Background(), 9, 55, req, "req-new-removed-suffix", "/v1/admin/projects/:projectId",
+	)
+	require.ErrorIs(t, err, domain.ErrInvalidProject)
+
+	// A nil slice represents an omitted field and keeps the historical value.
+	req.MicrosoftSuffixBlacklist = nil
+	preserved, err := NewProjectUseCase(repo).AdminUpdate(
+		context.Background(), 9, 55, req, "req-preserve-removed-suffix", "/v1/admin/projects/:projectId",
+	)
+	require.NoError(t, err)
+	require.Equal(t, []string{"outlook.com"}, preserved.MicrosoftSuffixBlacklist)
+
+	// An explicitly supplied empty array clears the existing configuration.
+	req.MicrosoftSuffixBlacklist = []string{}
+	cleared, err := NewProjectUseCase(repo).AdminUpdate(
+		context.Background(), 9, 55, req, "req-clear-removed-suffix", "/v1/admin/projects/:projectId",
+	)
+	require.NoError(t, err)
+	require.Empty(t, cleared.MicrosoftSuffixBlacklist)
+
+	approveRepo := &fakeProjectRepo{detail: &domain.ProjectDetail{
+		Project:                  domain.Project{ID: 56, Status: domain.ProjectStatusReviewing},
+		MicrosoftSuffixBlacklist: []string{"outlook.com"},
+	}}
+	_, err = NewProjectUseCase(approveRepo).AdminApproveWithConfig(
+		context.Background(), 9, 56, func() CreateProjectRequest {
+			req := validProjectCreateRequest()
+			req.MicrosoftSuffixBlacklist = []string{"outlook.com"}
+			return req
+		}(), "req-approve-historical-suffix", "/v1/admin/projects/:projectId/approve",
+	)
+	require.NoError(t, err)
+}
+
 func TestProjectUseCaseListEnrichesAdminProjectOwners(t *testing.T) {
 	ownerID := uint(7)
 	repo := &fakeProjectRepo{items: []ProjectSummary{{

@@ -198,6 +198,7 @@ interface ProjectDraft {
   logoUrl: string;
   looseMatch: boolean;
   mailRules: MailRuleDraft[];
+  microsoftSuffixBlacklist: string[];
   name: string;
   products: ProductDraft[];
   targetPlatform: string;
@@ -257,6 +258,7 @@ function initialDraft(priceDefaults: ProjectPriceDefaults = fallbackProjectPrice
     logoUrl: "",
     looseMatch: true,
     mailRules: createDefaultMailRules(),
+    microsoftSuffixBlacklist: [],
     name: "",
     products: [createDefaultProduct("microsoft", priceDefaults)],
     targetPlatform: "",
@@ -392,6 +394,7 @@ function detailToDraft(
             })
           )
         : createDefaultMailRules(),
+    microsoftSuffixBlacklist: detail.microsoftSuffixBlacklist ?? [],
     name: detail.project.name,
     products,
     targetPlatform: detail.project.targetPlatform,
@@ -583,6 +586,7 @@ function buildProjectPayload(
     logoUrl: draft.logoUrl.trim(),
     looseMatch: draft.looseMatch,
     mailRules,
+    microsoftSuffixBlacklist: draft.microsoftSuffixBlacklist,
     name: draft.name.trim(),
     products,
     targetPlatform: draft.targetPlatform.trim(),
@@ -1044,6 +1048,7 @@ function ProjectEditorSheet({
   mode,
   onCancel,
   onSubmit,
+  microsoftSuffixOptions,
   priceDefaults,
   visible,
 }: {
@@ -1054,6 +1059,7 @@ function ProjectEditorSheet({
     payload: AdminCreateProjectRequest | AdminUpdateProjectRequest,
     accessUserIDs: number[]
   ) => Promise<void>;
+  microsoftSuffixOptions: string[];
   priceDefaults: ProjectPriceDefaults;
   visible: boolean;
 }) {
@@ -1282,6 +1288,35 @@ function ProjectEditorSheet({
               </label>
             </div>
           </section>
+
+          {draft.products.some((product) => product.type === "microsoft") ? (
+            <section>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-[var(--semi-color-text-1)]">
+                  {t("Microsoft suffix blacklist")}
+                </span>
+                <Select
+                  filter
+                  multiple
+                  onChange={(value) =>
+                    setField(
+                      "microsoftSuffixBlacklist",
+                      Array.isArray(value) ? value.map(String) : []
+                    )
+                  }
+                  showClear
+                  style={{ width: "100%" }}
+                  value={draft.microsoftSuffixBlacklist}
+                >
+                  {microsoftSuffixOptions.map((suffix) => (
+                    <Select.Option key={suffix} value={suffix}>
+                      {suffix}
+                    </Select.Option>
+                  ))}
+                </Select>
+              </label>
+            </section>
+          ) : null}
 
           {draft.accessType === "private" ? (
             <section>
@@ -1626,6 +1661,7 @@ export default function AdminProjects() {
   const [editorDetail, setEditorDetail] = useState<ProjectDetailResponse | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [bulkProductsOpen, setBulkProductsOpen] = useState(false);
+  const [microsoftSuffixOptions, setMicrosoftSuffixOptions] = useState<string[]>([]);
   const [priceDefaults, setPriceDefaults] = useState<ProjectPriceDefaults | null>(null);
   const [operatingProjectID, setOperatingProjectID] = useState<number | null>(null);
   const [bulkOperating, setBulkOperating] = useState<
@@ -1637,8 +1673,12 @@ export default function AdminProjects() {
   useEffect(() => {
     let active = true;
     void getAdminProjectPriceDefaults()
-      .then(({ defaults }) => {
-        if (active) setPriceDefaults(projectPriceDefaultsFromValues(defaults));
+      .then(({ defaults, microsoftSuffixOptions }) => {
+        if (!active) return;
+        setPriceDefaults(projectPriceDefaultsFromValues(defaults));
+        setMicrosoftSuffixOptions(
+          Array.isArray(microsoftSuffixOptions) ? microsoftSuffixOptions : []
+        );
       })
       .catch((error) => {
         if (!active) return;
@@ -2810,6 +2850,7 @@ export default function AdminProjects() {
           setEditorDetail(null);
         }}
         onSubmit={handleEditorSubmit}
+        microsoftSuffixOptions={microsoftSuffixOptions}
         priceDefaults={resolvedPriceDefaults}
         visible={editorOpen && priceDefaults !== null}
       />

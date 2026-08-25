@@ -4096,6 +4096,19 @@ func TestCoreHandler_AdminProjectApproveWithConfig(t *testing.T) {
 	require.Len(t, response.Products, 1)
 }
 
+func TestAdminProjectRequestKeepsMicrosoftSuffixBlacklistFieldPresence(t *testing.T) {
+	var omitted AdminCreateProjectRequest
+	require.NoError(t, json.Unmarshal([]byte(`{"name":"p","targetPlatform":"x","products":[],"mailRules":[]}`), &omitted))
+	omittedApp := toAppProjectRequest(omitted)
+	require.Nil(t, omittedApp.MicrosoftSuffixBlacklist)
+
+	var explicit AdminCreateProjectRequest
+	require.NoError(t, json.Unmarshal([]byte(`{"name":"p","targetPlatform":"x","products":[],"mailRules":[],"microsoftSuffixBlacklist":[]}`), &explicit))
+	explicitApp := toAppProjectRequest(explicit)
+	require.NotNil(t, explicitApp.MicrosoftSuffixBlacklist)
+	require.Empty(t, explicitApp.MicrosoftSuffixBlacklist)
+}
+
 func TestCoreHandler_AdminProjectCreateWithPrivateAccessUsers(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

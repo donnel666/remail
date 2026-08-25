@@ -186,6 +186,15 @@ type ProjectAccessModel struct {
 	CreatedAt time.Time `gorm:"not null;autoCreateTime"`
 }
 
+type ProjectMicrosoftSuffixBlacklistModel struct {
+	ProjectID uint   `gorm:"primaryKey;column:project_id"`
+	Suffix    string `gorm:"primaryKey;type:varchar(255);column:suffix"`
+}
+
+func (ProjectMicrosoftSuffixBlacklistModel) TableName() string {
+	return "project_microsoft_suffix_blacklists"
+}
+
 func (ProjectAccessModel) TableName() string {
 	return "project_accesses"
 }
@@ -270,6 +279,9 @@ func (r *ProjectRepo) CreateWithLog(ctx context.Context, detail *domain.ProjectD
 			}
 		}
 		if err := r.replaceProjectAccesses(ctx, tx, projectModel.ID, detail); err != nil {
+			return err
+		}
+		if err := r.replaceMicrosoftSuffixBlacklist(ctx, tx, projectModel.ID, detail.MicrosoftSuffixBlacklist); err != nil {
 			return err
 		}
 
@@ -384,6 +396,9 @@ func (r *ProjectRepo) UpdateWithLog(ctx context.Context, detail *domain.ProjectD
 		if err := r.replaceProductsAndRules(ctx, tx, projectModel.ID, detail); err != nil {
 			return err
 		}
+		if err := r.replaceMicrosoftSuffixBlacklist(ctx, tx, projectModel.ID, detail.MicrosoftSuffixBlacklist); err != nil {
+			return err
+		}
 		if err := r.replaceProjectAccesses(ctx, tx, projectModel.ID, detail); err != nil {
 			return err
 		}
@@ -428,6 +443,9 @@ func (r *ProjectRepo) ApproveWithConfigAndLog(ctx context.Context, detail *domai
 		}
 		detail.Project = projectModel.toDomain()
 		if err := r.replaceProductsAndRules(ctx, tx, projectModel.ID, detail); err != nil {
+			return err
+		}
+		if err := r.replaceMicrosoftSuffixBlacklist(ctx, tx, projectModel.ID, detail.MicrosoftSuffixBlacklist); err != nil {
 			return err
 		}
 		if err := r.replaceProjectAccesses(ctx, tx, projectModel.ID, detail); err != nil {
@@ -806,6 +824,14 @@ func (r *ProjectRepo) FindDetail(ctx context.Context, projectID uint, userID uin
 	if err != nil {
 		return nil, err
 	}
+	var suffixBlacklistModels []ProjectMicrosoftSuffixBlacklistModel
+	if err := r.db.WithContext(ctx).Where("project_id = ?", project.ID).Order("suffix ASC").Find(&suffixBlacklistModels).Error; err != nil {
+		return nil, fmt.Errorf("list project Microsoft suffix blacklist: %w", err)
+	}
+	suffixBlacklist := make([]string, len(suffixBlacklistModels))
+	for i := range suffixBlacklistModels {
+		suffixBlacklist[i] = suffixBlacklistModels[i].Suffix
+	}
 	accesses := []domain.ProjectAccess{}
 	if isAdmin && domain.ProjectAccessType(project.AccessType) == domain.ProjectAccessPrivate {
 		accesses, err = r.listAccesses(ctx, project.ID)
@@ -815,10 +841,11 @@ func (r *ProjectRepo) FindDetail(ctx context.Context, projectID uint, userID uin
 	}
 
 	return &domain.ProjectDetail{
-		Project:   project.toDomain(),
-		Products:  products,
-		MailRules: rules,
-		Accesses:  accesses,
+		Project:                  project.toDomain(),
+		Products:                 products,
+		MailRules:                rules,
+		Accesses:                 accesses,
+		MicrosoftSuffixBlacklist: suffixBlacklist,
 	}, nil
 }
 
@@ -1092,6 +1119,23 @@ func (r *ProjectRepo) replaceProductsAndRules(ctx context.Context, tx *gorm.DB, 
 		for i := range ruleModels {
 			detail.MailRules[i] = ruleModels[i].toDomain()
 		}
+	}
+	return nil
+}
+
+func (r *ProjectRepo) replaceMicrosoftSuffixBlacklist(ctx context.Context, tx *gorm.DB, projectID uint, suffixes []string) error {
+	if err := tx.WithContext(ctx).Where("project_id = ?", projectID).Delete(&ProjectMicrosoftSuffixBlacklistModel{}).Error; err != nil {
+		return fmt.Errorf("replace project Microsoft suffix blacklist: %w", err)
+	}
+	if len(suffixes) == 0 {
+		return nil
+	}
+	models := make([]ProjectMicrosoftSuffixBlacklistModel, len(suffixes))
+	for i, suffix := range suffixes {
+		models[i] = ProjectMicrosoftSuffixBlacklistModel{ProjectID: projectID, Suffix: suffix}
+	}
+	if err := tx.WithContext(ctx).Create(&models).Error; err != nil {
+		return fmt.Errorf("create project Microsoft suffix blacklist: %w", err)
 	}
 	return nil
 }

@@ -1262,6 +1262,9 @@ func productInventoryAvailable(totals *ProjectProductInventoryTotals, req Produc
 			}
 			return suffix.TotalAvailable > 0, true
 		}
+		if item.ProductType == coredomain.ProductTypeMicrosoft {
+			return false, false
+		}
 		return false, true
 	}
 	return false, false
@@ -2443,7 +2446,7 @@ func allocationUsageDate(value time.Time) string {
 func normalizeEmailSuffix(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	value = strings.TrimPrefix(value, "@")
-	return strings.TrimPrefix(value, ".")
+	return strings.TrimSuffix(strings.TrimPrefix(value, "."), ".")
 }
 
 func normalizeDomainSelection(value string) (string, bool, error) {
@@ -2531,7 +2534,7 @@ func splitEmail(email string) (string, string, bool) {
 	if index <= 0 || index == len(email)-1 {
 		return "", "", false
 	}
-	return email[:index], email[index+1:], true
+	return email[:index], strings.TrimSuffix(email[index+1:], "."), true
 }
 
 func isValidMailboxFilter(value string) bool {

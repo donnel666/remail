@@ -1470,6 +1470,47 @@ INSERT INTO explicit_aliases(resource_id, owner_user_id, email, status) VALUES
 	require.Equal(t, "second@outlook.com", allocation.Email)
 }
 
+func TestMicrosoftSuffixBlacklistExcludesInventoryButAllowsExplicitAllocationMySQL(t *testing.T) {
+	db := newAllocMySQLTestDB(t)
+	seedAllocBase(t, db, "microsoft", 1, 0, 0)
+	seedMicrosoftResources(t, db, 1, 1000, 2, true, "normal")
+	require.NoError(t, db.Exec(`
+UPDATE microsoft_resources
+SET email_address = CASE id
+	        WHEN 1000 THEN 'blocked@outlook.com'
+        ELSE 'available@hotmail.com'
+    END,
+    email_domain = CASE id
+	        WHEN 1000 THEN 'outlook.com'
+        ELSE 'hotmail.com'
+    END
+WHERE id IN (1000, 1001)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO project_microsoft_suffix_blacklists(project_id, suffix)
+VALUES (10, 'outlook.com')`).Error)
+
+	repo := NewRepo(db)
+	totals, err := repo.GetProductInventoryTotals(context.Background(), 10)
+	require.NoError(t, err)
+	require.Equal(t, []allocapp.ProductInventorySuffixTotal{{
+		Suffix: "hotmail.com", TotalAvailable: 1, PublicAvailable: 1,
+	}}, totals.Items[0].Suffixes)
+
+	inventory, err := repo.ListProductSuffixInventory(context.Background(), allocapp.ProductAllocationConfig{
+		ProjectID: 10, ProductID: 20, ProductType: coredomain.ProductTypeMicrosoft, MainWeight: 1,
+	}, 2, domain.SupplyScopePublic)
+	require.NoError(t, err)
+	require.Equal(t, map[string]int64{"hotmail.com": 1}, inventory)
+
+	allocation, err := allocapp.NewUseCase(repo).Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo: "ord-blacklist-explicit-outlook", BuyerUserID: 2, ProjectProductID: 20,
+		SupplyScope: domain.SupplyScopePublic, EmailSuffix: "outlook.com",
+	})
+	require.NoError(t, err)
+	require.Equal(t, domain.MicrosoftMailboxMain, allocation.Mailbox)
+	require.Equal(t, "blocked@outlook.com", allocation.Email)
+}
+
 func TestMicrosoftSplitCandidatesPreserveOrderingMySQL(t *testing.T) {
 	db := newAllocMySQLTestDB(t)
 	seedAllocBase(t, db, "microsoft", 1, 0, 0)

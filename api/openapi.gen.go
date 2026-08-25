@@ -5415,11 +5415,12 @@ type AdminCreateProjectRequest struct {
 	LogoUrl       *string `json:"logoUrl,omitempty"`
 
 	// LooseMatch true requires sender+recipient; false requires sender+recipient+subject+body.
-	LooseMatch     *bool                    `json:"looseMatch,omitempty"`
-	MailRules      []ProjectMailRuleRequest `json:"mailRules"`
-	Name           string                   `json:"name"`
-	Products       []ProjectProductRequest  `json:"products"`
-	TargetPlatform string                   `json:"targetPlatform"`
+	LooseMatch               *bool                    `json:"looseMatch,omitempty"`
+	MailRules                []ProjectMailRuleRequest `json:"mailRules"`
+	MicrosoftSuffixBlacklist *[]string                `json:"microsoftSuffixBlacklist,omitempty"`
+	Name                     string                   `json:"name"`
+	Products                 []ProjectProductRequest  `json:"products"`
+	TargetPlatform           string                   `json:"targetPlatform"`
 }
 
 // AdminCreateProjectRequestAccessType defines model for AdminCreateProjectRequest.AccessType.
@@ -9282,9 +9283,10 @@ type ProjectDetailResponse struct {
 	Accesses *[]ProjectAccess `json:"accesses,omitempty"`
 
 	// MailRules Returned to project admins and to the applicant while the project is an application; omitted for ordinary listed project detail.
-	MailRules *[]ProjectMailRule `json:"mailRules,omitempty"`
-	Products  []ProjectProduct   `json:"products"`
-	Project   ProjectItem        `json:"project"`
+	MailRules                *[]ProjectMailRule `json:"mailRules,omitempty"`
+	MicrosoftSuffixBlacklist *[]string          `json:"microsoftSuffixBlacklist,omitempty"`
+	Products                 []ProjectProduct   `json:"products"`
+	Project                  ProjectItem        `json:"project"`
 }
 
 // ProjectInventoryResponse defines model for ProjectInventoryResponse.
@@ -9399,7 +9401,8 @@ type ProjectMatchFacets struct {
 
 // ProjectPriceDefaultsResponse defines model for ProjectPriceDefaultsResponse.
 type ProjectPriceDefaultsResponse struct {
-	Defaults map[string]NonNegativeLedgerAmount `json:"defaults"`
+	Defaults               map[string]NonNegativeLedgerAmount `json:"defaults"`
+	MicrosoftSuffixOptions []string                           `json:"microsoftSuffixOptions"`
 }
 
 // ProjectProduct defines model for ProjectProduct.

@@ -552,7 +552,10 @@ func (h *CoreHandler) GetAdminProjectPriceDefaults(c *gin.Context) {
 	if _, ok := requireCurrentUserID(c); !ok {
 		return
 	}
-	c.JSON(http.StatusOK, ProjectPriceDefaultsResponse{Defaults: coreapp.ProjectPriceDefaults()})
+	c.JSON(http.StatusOK, ProjectPriceDefaultsResponse{
+		Defaults:               coreapp.ProjectPriceDefaults(),
+		MicrosoftSuffixOptions: coredomain.MicrosoftEmailDomains(),
+	})
 }
 
 // GET /v1/projects
@@ -1445,6 +1448,7 @@ type projectRequestFields interface {
 	projectLooseMatch() *bool
 	projectProducts() []ProjectProductRequest
 	projectMailRules() []ProjectMailRuleRequest
+	projectMicrosoftSuffixBlacklist() []string
 }
 
 func (req CreateProjectApplicationRequest) projectName() string { return req.Name }
@@ -1464,6 +1468,7 @@ func (req CreateProjectApplicationRequest) projectProducts() []ProjectProductReq
 func (req CreateProjectApplicationRequest) projectMailRules() []ProjectMailRuleRequest {
 	return req.MailRules
 }
+func (req CreateProjectApplicationRequest) projectMicrosoftSuffixBlacklist() []string { return nil }
 
 func (req AdminCreateProjectRequest) projectName() string { return req.Name }
 func (req AdminCreateProjectRequest) projectTargetPlatform() string {
@@ -1482,6 +1487,9 @@ func (req AdminCreateProjectRequest) projectProducts() []ProjectProductRequest {
 func (req AdminCreateProjectRequest) projectMailRules() []ProjectMailRuleRequest {
 	return req.MailRules
 }
+func (req AdminCreateProjectRequest) projectMicrosoftSuffixBlacklist() []string {
+	return req.MicrosoftSuffixBlacklist
+}
 
 func toAppProjectRequest(req projectRequestFields) coreapp.CreateProjectRequest {
 	looseMatch := true
@@ -1499,15 +1507,16 @@ func toAppProjectRequest(req projectRequestFields) coreapp.CreateProjectRequest 
 		}
 	}
 	return coreapp.CreateProjectRequest{
-		Name:           req.projectName(),
-		TargetPlatform: req.projectTargetPlatform(),
-		LogoURL:        req.projectLogoURL(),
-		Description:    req.projectDescription(),
-		AccessType:     req.projectAccessType(),
-		AccessUserIDs:  req.projectAccessUserIDs(),
-		LooseMatch:     looseMatch,
-		Products:       products,
-		MailRules:      rules,
+		Name:                     req.projectName(),
+		TargetPlatform:           req.projectTargetPlatform(),
+		LogoURL:                  req.projectLogoURL(),
+		Description:              req.projectDescription(),
+		AccessType:               req.projectAccessType(),
+		AccessUserIDs:            req.projectAccessUserIDs(),
+		LooseMatch:               looseMatch,
+		Products:                 products,
+		MailRules:                rules,
+		MicrosoftSuffixBlacklist: req.projectMicrosoftSuffixBlacklist(),
 	}
 }
 
@@ -1733,6 +1742,12 @@ func toProjectDetailResponseWithInventory(detail *coredomain.ProjectDetail, incl
 		Products:  products,
 		MailRules: rules,
 		Accesses:  accesses,
+		MicrosoftSuffixBlacklist: func() []string {
+			if includeInternal {
+				return detail.MicrosoftSuffixBlacklist
+			}
+			return nil
+		}(),
 	}
 }
 

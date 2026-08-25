@@ -845,6 +845,7 @@
   "Order": "下单",
   "No products configured": "暂无商品配置",
   "Microsoft email": "微软邮箱",
+  "Microsoft suffix blacklist": "微软邮箱后缀黑名单",
   "Domain email": "域名邮箱",
   "Random email": "全随机邮箱",
   "Gmail email": "Gmail 邮箱",
