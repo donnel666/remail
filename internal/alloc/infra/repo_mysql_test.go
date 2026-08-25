@@ -1507,7 +1507,7 @@ VALUES (10, 'outlook.com')`).Error)
 		SupplyScope: domain.SupplyScopePublic, EmailSuffix: "outlook.com",
 	})
 	require.NoError(t, err)
-	require.Equal(t, domain.MicrosoftMailboxMain, allocation.Mailbox)
+	require.Equal(t, "main", allocation.Mailbox)
 	require.Equal(t, "blocked@outlook.com", allocation.Email)
 }
 
