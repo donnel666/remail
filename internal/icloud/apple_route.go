@@ -286,7 +286,7 @@ func (r *appleRouteManager) updateRotation(ctx context.Context, email string, mu
 		}
 		return result, resultKeep, nil
 	}
-	return appleProxyRotationState{}, false, fmt.Errorf("Apple proxy rotation state changed concurrently")
+	return appleProxyRotationState{}, false, fmt.Errorf("apple proxy rotation state changed concurrently")
 }
 
 func withAppleRouteEmail(ctx context.Context, email string) context.Context {
@@ -352,20 +352,18 @@ func (r *appleRouteManager) session(ctx context.Context) (appleOnboardingHTTPSes
 	if err != nil {
 		if rotating {
 			return nil, r.finishRotatedFailure(ctx, email, rotation.Token, err)
-		} else {
-			if stateErr := r.recordProxyTransportFailure(ctx, email, "", false); stateErr != nil {
-				return nil, stateErr
-			}
+		}
+		if stateErr := r.recordProxyTransportFailure(ctx, email, "", false); stateErr != nil {
+			return nil, stateErr
 		}
 		return nil, fmt.Errorf("%w: %v", errAppleProxyUnavailable, err)
 	}
 	if config == nil || config.Direct || config.ID == 0 || strings.TrimSpace(config.URL) == "" {
 		if rotating {
 			return nil, r.finishRotatedFailure(ctx, email, rotation.Token, errAppleProxyUnavailable)
-		} else {
-			if stateErr := r.recordProxyTransportFailure(ctx, email, "", false); stateErr != nil {
-				return nil, stateErr
-			}
+		}
+		if stateErr := r.recordProxyTransportFailure(ctx, email, "", false); stateErr != nil {
+			return nil, stateErr
 		}
 		return nil, errAppleProxyUnavailable
 	}
@@ -380,10 +378,9 @@ func (r *appleRouteManager) session(ctx context.Context) (appleOnboardingHTTPSes
 				r.reportFailure(ctx, config.ID)
 			}
 			return nil, failure
-		} else {
-			if stateErr := r.recordProxyTransportFailure(ctx, email, "", false); stateErr != nil {
-				return nil, stateErr
-			}
+		}
+		if stateErr := r.recordProxyTransportFailure(ctx, email, "", false); stateErr != nil {
+			return nil, stateErr
 		}
 		if isAppleProxyTransportFailure(ctx, err) {
 			r.reportFailure(ctx, config.ID)
