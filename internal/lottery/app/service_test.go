@@ -74,6 +74,37 @@ func TestAllocateDistributesPoolWhenConfiguredCountsNeedAdjustment(t *testing.T)
 	require.Equal(t, 1, countTier(payouts, lotterydomain.TierNormal))
 }
 
+func TestAllocateSpreadsSurplusAcrossConsolationAwards(t *testing.T) {
+	entries := make([]lotterydomain.Entry, 10)
+	for i := range entries {
+		entries[i] = lotterydomain.Entry{LotteryID: 20, UserID: uint(i + 1)}
+	}
+	payouts, unused, err := Allocate(entries, "2000.00", "10.00", "500.00", lotterydomain.TierWeights{Normal: 2, Lucky: 1})
+	require.NoError(t, err)
+	require.Equal(t, "0.00", unused)
+	require.Len(t, payouts, len(entries))
+	paid := decimal.Zero
+	consolationAmounts := make([]int64, 0, 7)
+	for _, payout := range payouts {
+		amount, parseErr := money.Parse(payout.Amount)
+		require.NoError(t, parseErr)
+		paid = paid.Add(amount)
+		switch payout.Tier {
+		case lotterydomain.TierLucky:
+			require.Equal(t, "500.00", payout.Amount)
+		case lotterydomain.TierNormal:
+			require.Equal(t, "500.00", payout.Amount)
+		case lotterydomain.TierConsolation:
+			consolationAmounts = append(consolationAmounts, amount.IntPart())
+		}
+	}
+	require.True(t, paid.Equal(decimal.NewFromInt(2000)))
+	require.Len(t, consolationAmounts, 7)
+	for _, amount := range consolationAmounts {
+		require.Contains(t, []int64{71, 72}, amount)
+	}
+}
+
 func TestAllocateRejectsFixedCountsWhenPoolIsTooSmall(t *testing.T) {
 	entries := make([]lotterydomain.Entry, 10)
 	for i := range entries {
@@ -222,10 +253,11 @@ func TestRankedAllocationKeepsHistoryOrderForTiers(t *testing.T) {
 
 type weightedDrawRepoStub struct {
 	Repository
-	lottery *lotterydomain.Lottery
-	entries []lotterydomain.Entry
-	stats   map[uint]WinnerStats
-	payouts []lotterydomain.Payout
+	lottery  *lotterydomain.Lottery
+	entries  []lotterydomain.Entry
+	stats    map[uint]WinnerStats
+	statsErr error
+	payouts  []lotterydomain.Payout
 }
 
 func (r *weightedDrawRepoStub) GetByID(context.Context, uint) (*lotterydomain.Lottery, error) {
@@ -237,6 +269,9 @@ func (r *weightedDrawRepoStub) ListAllEntries(context.Context, uint) ([]lotteryd
 }
 
 func (r *weightedDrawRepoStub) LookupWinnerStats(context.Context, []uint) (map[uint]WinnerStats, error) {
+	if r.statsErr != nil {
+		return nil, r.statsErr
+	}
 	return r.stats, nil
 }
 
@@ -290,7 +325,7 @@ func TestDrawUsesHistoryScoresToChooseTiers(t *testing.T) {
 	require.Equal(t, lotterydomain.TierConsolation, byUser[3].Tier)
 }
 
-func TestDrawCancelsWhenFixedPoolCannotFitTheEntries(t *testing.T) {
+func TestDrawFallsBackWhenFixedPoolCannotFitTheEntries(t *testing.T) {
 	repo := &weightedDrawRepoStub{
 		lottery: &lotterydomain.Lottery{
 			ID: 17, Status: lotterydomain.StatusSettling, AlgorithmVersion: algorithmVersion,
@@ -302,8 +337,11 @@ func TestDrawCancelsWhenFixedPoolCannotFitTheEntries(t *testing.T) {
 	}
 	service := NewService(repo, weightedDrawBillingStub{}, nil, nil, nil)
 	require.NoError(t, service.Draw(context.Background(), 17))
-	require.Equal(t, lotterydomain.StatusCancelled, repo.lottery.Status)
-	require.Empty(t, repo.payouts)
+	require.Equal(t, lotterydomain.StatusCompleted, repo.lottery.Status)
+	require.Len(t, repo.payouts, len(repo.entries))
+	require.Equal(t, "50.00", repo.payouts[0].Amount)
+	require.Equal(t, "50.00", repo.payouts[1].Amount)
+	require.Equal(t, int64(100), payoutTotal(repo.payouts).IntPart())
 }
 
 func TestDrawAdjustsFixedCountsWhenTimeWinsEarly(t *testing.T) {
@@ -338,7 +376,37 @@ func TestDrawAdjustsFixedCountsWhenTimeWinsEarly(t *testing.T) {
 	}
 }
 
-func TestDrawRejectsGrowingPoolWhenConfiguredCountsCannotFit(t *testing.T) {
+func TestDrawCompletesGrowingPoolWithConsolationSurplus(t *testing.T) {
+	entries := make([]lotterydomain.Entry, 10)
+	for i := range entries {
+		entries[i] = lotterydomain.Entry{LotteryID: 20, UserID: uint(i + 1)}
+	}
+	repo := &weightedDrawRepoStub{
+		lottery: &lotterydomain.Lottery{
+			ID: 20, Status: lotterydomain.StatusSettling, LotteryType: lotterydomain.LotteryTypeGrowing,
+			AlgorithmVersion: algorithmVersion, TotalAmount: "2000.00", MinPayout: "10.00", MaxPayout: "500.00",
+			TierWeights: lotterydomain.TierWeights{Normal: 2, Lucky: 1},
+		},
+		entries: entries,
+		stats:   map[uint]WinnerStats{},
+	}
+	service := NewService(repo, weightedDrawBillingStub{}, nil, nil, nil)
+	require.NoError(t, service.Draw(context.Background(), 20))
+	require.Equal(t, lotterydomain.StatusCompleted, repo.lottery.Status)
+	require.Len(t, repo.payouts, len(entries))
+	require.Equal(t, 1, countTier(repo.payouts, lotterydomain.TierLucky))
+	require.Equal(t, 2, countTier(repo.payouts, lotterydomain.TierNormal))
+	require.Equal(t, 7, countTier(repo.payouts, lotterydomain.TierConsolation))
+	paid := decimal.Zero
+	for _, payout := range repo.payouts {
+		amount, parseErr := money.Parse(payout.Amount)
+		require.NoError(t, parseErr)
+		paid = paid.Add(amount)
+	}
+	require.True(t, paid.Equal(decimal.NewFromInt(2000)))
+}
+
+func TestDrawFallsBackWhenGrowingPoolCannotFitConfiguredCounts(t *testing.T) {
 	entries := make([]lotterydomain.Entry, 10)
 	for i := range entries {
 		entries[i] = lotterydomain.Entry{LotteryID: 19, UserID: uint(i + 1)}
@@ -354,9 +422,60 @@ func TestDrawRejectsGrowingPoolWhenConfiguredCountsCannotFit(t *testing.T) {
 	}
 	service := NewService(repo, weightedDrawBillingStub{}, nil, nil, nil)
 	require.NoError(t, service.Draw(context.Background(), 19))
-	require.Equal(t, lotterydomain.StatusCancelled, repo.lottery.Status)
+	require.Equal(t, lotterydomain.StatusCompleted, repo.lottery.Status)
+	require.Len(t, repo.payouts, len(repo.entries))
+	require.Equal(t, int64(20), payoutTotal(repo.payouts).IntPart())
+	require.Equal(t, 1, countTier(repo.payouts, lotterydomain.TierLucky))
+}
+
+func TestDrawFallsBackWhenLegacyAllocationLeavesUnusedBudget(t *testing.T) {
+	entries := []lotterydomain.Entry{{LotteryID: 21, UserID: 1}, {LotteryID: 21, UserID: 2}}
+	repo := &weightedDrawRepoStub{
+		lottery: &lotterydomain.Lottery{
+			ID: 21, Status: lotterydomain.StatusSettling, AlgorithmVersion: legacyAlgorithmVersionV2,
+			TotalAmount: "100.00", MinPayout: "1.00", MaxPayout: "10.00",
+			TierWeights: lotterydomain.TierWeights{Consolation: 80, Normal: 15, Lucky: 5},
+		},
+		entries: entries,
+	}
+	service := NewService(repo, weightedDrawBillingStub{}, nil, nil, nil)
+	require.NoError(t, service.Draw(context.Background(), 21))
+	require.Equal(t, lotterydomain.StatusCompleted, repo.lottery.Status)
+	require.Len(t, repo.payouts, len(entries))
+	require.Equal(t, int64(100), payoutTotal(repo.payouts).IntPart())
+}
+
+func TestDrawKeepsInfrastructureFailuresRetryable(t *testing.T) {
+	lookupErr := errors.New("winner history unavailable")
+	repo := &weightedDrawRepoStub{
+		lottery: &lotterydomain.Lottery{
+			ID: 22, Status: lotterydomain.StatusSettling, AlgorithmVersion: algorithmVersion,
+			TotalAmount: "100.00", MinPayout: "1.00", MaxPayout: "10.00",
+			TierWeights: lotterydomain.TierWeights{Lucky: 1},
+		},
+		entries:  []lotterydomain.Entry{{LotteryID: 22, UserID: 1}},
+		statsErr: lookupErr,
+	}
+	service := NewService(repo, weightedDrawBillingStub{}, nil, nil, nil)
+	require.ErrorIs(t, service.Draw(context.Background(), 22), lookupErr)
+	require.Equal(t, lotterydomain.StatusSettling, repo.lottery.Status)
 	require.Empty(t, repo.payouts)
-	require.Equal(t, 0, countTier(repo.payouts, lotterydomain.TierLucky))
+}
+
+func TestFallbackAllocationPreservesLedgerPrecision(t *testing.T) {
+	entries := []lotterydomain.Entry{{LotteryID: 23, UserID: 1}, {LotteryID: 23, UserID: 2}, {LotteryID: 23, UserID: 3}}
+	payouts, unused, err := fallbackLotteryAllocation(entries, lotterydomain.Lottery{
+		ID: 23, TotalAmount: "1.000001", TierWeights: lotterydomain.TierWeights{Normal: 1, Lucky: 1},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "0.00", unused)
+	require.Len(t, payouts, len(entries))
+	require.True(t, payoutTotal(payouts).Equal(decimal.RequireFromString("1.000001")))
+	for _, payout := range payouts {
+		amount, parseErr := money.Parse(payout.Amount)
+		require.NoError(t, parseErr)
+		require.True(t, amount.IsPositive())
+	}
 }
 
 func countTier(payouts []lotterydomain.Payout, tier lotterydomain.Tier) int {
@@ -367,6 +486,18 @@ func countTier(payouts []lotterydomain.Payout, tier lotterydomain.Tier) int {
 		}
 	}
 	return count
+}
+
+func payoutTotal(payouts []lotterydomain.Payout) decimal.Decimal {
+	total := decimal.Zero
+	for _, payout := range payouts {
+		amount, err := money.Parse(payout.Amount)
+		if err != nil {
+			return decimal.Zero
+		}
+		total = total.Add(amount)
+	}
+	return total
 }
 
 func TestAllocateRejectsNonPositivePool(t *testing.T) {
@@ -727,7 +858,7 @@ func TestValidateRulesAllowsFlatTargetDrawWhenAllAwardsAreMinimum(t *testing.T) 
 	require.ErrorIs(t, err, lotterydomain.ErrLotteryInvalidRules)
 }
 
-func TestValidateRulesRejectsInfeasibleFixedPrizeCounts(t *testing.T) {
+func TestValidateRulesAllowsSurplusForConsolationAwards(t *testing.T) {
 	drawAt := time.Now().Add(time.Hour)
 	target := 2
 	_, _, _, _, err := validateRules(CreateRequest{
@@ -735,7 +866,7 @@ func TestValidateRulesRejectsInfeasibleFixedPrizeCounts(t *testing.T) {
 		TierWeights: lotterydomain.TierWeights{Normal: 0, Lucky: 1},
 		DrawAt:      &drawAt, ParticipantTarget: &target,
 	})
-	require.ErrorIs(t, err, lotterydomain.ErrLotteryInvalidRules)
+	require.NoError(t, err)
 }
 
 func TestValidateRulesUsesStartingPoolForGrowingLottery(t *testing.T) {
