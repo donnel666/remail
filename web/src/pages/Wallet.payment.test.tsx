@@ -71,13 +71,13 @@ vi.mock("@douyinfe/semi-illustrations", () => ({ IllustrationNoResult: () => nul
 vi.mock("@douyinfe/semi-ui", async () => {
   const React = await import("react");
   const Box = ({ children }: { children?: React.ReactNode }) => <div>{children}</div>;
-  const Button = ({ children, disabled, loading, onClick }: any) => <button disabled={disabled || loading} onClick={onClick}>{children}</button>;
+  const Button = ({ children, disabled, icon, loading, onClick }: any) => <button disabled={disabled || loading} onClick={onClick}>{icon}{children}</button>;
   const Card = ({ children, cover, title }: any) => <section>{title}{cover}{children}</section>;
   const Form = ({ children, getFormApi }: any) => {
     getFormApi?.({ setValue: vi.fn() });
     return <div>{children}</div>;
   };
-  Form.InputNumber = ({ label, onChange }: any) => <input aria-label={label} onChange={(event) => onChange?.(event.target.value)} />;
+  Form.InputNumber = ({ extraText, label, onChange }: any) => <div><input aria-label={label} onChange={(event) => onChange?.(event.target.value)} />{extraText}</div>;
   Form.Input = ({ onChange, placeholder, prefix, suffix }: any) => <div>{prefix}<input aria-label={placeholder} onChange={(event) => onChange?.(event.target.value)} />{suffix}</div>;
   Form.Slot = Box;
   const Input = ({ onChange, placeholder, value }: any) => <input aria-label={placeholder} onChange={(event) => onChange?.(event.target.value)} value={value} />;
@@ -238,12 +238,25 @@ describe("wallet payment modal", () => {
       payUrl: "https://pay.example.com/usdt",
       expiresAt: "2026-07-26T00:05:00Z",
     });
+    mocks.quoteRecharge.mockResolvedValue({
+      points: "1000.00",
+      bonusPoints: "0.00",
+      feePoints: "0.00",
+      creditedPoints: "1000.00",
+      paymentAmount: "2.00",
+      paymentCurrency: "USDT",
+    });
     render(<Wallet />);
 
-    const payButton = await screen.findByRole("button", { name: "USDT (TRON)" });
+    const payButton = await screen.findByRole("button", { name: "USDT" });
+    const tronIcon = payButton.querySelector("img");
+    expect(tronIcon?.getAttribute("src")).toMatch(/^(data:image\/svg\+xml|.*tron\.svg)/);
+    expect(tronIcon).toHaveAttribute("alt", "");
     await waitFor(() => expect(payButton).toBeEnabled());
     fireEvent.click(payButton);
 
+    expect((await screen.findAllByText(/Credited points:/)).some((element) => element.classList.contains("block"))).toBe(true);
+    expect((await screen.findAllByText(/Payment amount:/)).some((element) => element.classList.contains("block"))).toBe(true);
     await waitFor(() => expect(mocks.createRecharge).toHaveBeenCalled());
     expect(mocks.createRecharge.mock.calls[0][2]).toBe("epusdt_usdt_tron");
     expect(await screen.findByRole("dialog", { name: "USDT (TRON) Payment" })).toBeVisible();

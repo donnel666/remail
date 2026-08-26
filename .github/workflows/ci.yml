@@ -509,6 +509,10 @@ jobs:
             echo "docker compose plugin is required on the deploy host" >&2
             exit 1
           fi
+          if ! docker volume inspect epusdt_epusdt_runtime >/dev/null 2>&1; then
+            echo "EPUSDT runtime volume epusdt_epusdt_runtime is required" >&2
+            exit 1
+          fi
           wait_for_health() {
             for _ in $(seq 1 30); do
               if docker compose --env-file .env -f compose.yml exec -T server wget -qO- http://127.0.0.1:8080/readyz | grep -q '"ok"'; then

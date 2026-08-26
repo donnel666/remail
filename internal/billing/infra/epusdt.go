@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,6 +21,8 @@ import (
 
 	billingapp "github.com/donnel666/remail/internal/billing/app"
 	"github.com/donnel666/remail/internal/billing/domain"
+	// Register the pure-Go sqlite driver used for EPUSDT's read-only database.
+	_ "github.com/glebarez/go-sqlite"
 )
 
 const (
@@ -26,6 +31,7 @@ const (
 	epusdtQueryPath        = "payments/gmpay/v1/order/query"
 	epusdtLegacyCurrency   = "CNY"
 	epusdtDirectCurrency   = "USDT"
+	epusdtSQLitePathEnv    = "EPUSDT_SQLITE_PATH"
 )
 
 // Epusdt is the GMPay client used by the reconciliation worker.  The create
@@ -77,6 +83,11 @@ func (gateway *Epusdt) PaymentURL(ctx context.Context, config billingapp.Recharg
 	values, err := epusdtCreateValues(config, recharge, amount)
 	if err != nil {
 		return "", err
+	}
+	if path := strings.TrimSpace(os.Getenv(epusdtSQLitePathEnv)); path != "" {
+		if _, err := queryEpusdtSQLiteOrder(ctx, path, config, recharge); err != nil {
+			return "", err
+		}
 	}
 
 	body, status, requestErr := gateway.request(ctx, http.MethodPost, base, values)
@@ -133,6 +144,10 @@ func (gateway *Epusdt) Query(ctx context.Context, config billingapp.RechargeConf
 }
 
 func (gateway *Epusdt) queryOrder(ctx context.Context, config billingapp.RechargeConfig, recharge domain.Recharge) (epusdtOrder, error) {
+	if path := strings.TrimSpace(os.Getenv(epusdtSQLitePathEnv)); path != "" {
+		return queryEpusdtSQLiteOrder(ctx, path, config, recharge)
+	}
+
 	order, err := gateway.queryOrderWithConfig(ctx, config, recharge)
 	if !errors.Is(err, domain.ErrRechargeGatewayAuthUnavailable) || gateway == nil || gateway.configProvider == nil {
 		return order, err
@@ -169,12 +184,13 @@ func (gateway *Epusdt) queryOrderWithConfig(ctx context.Context, config billinga
 	if err != nil {
 		return epusdtOrder{}, err
 	}
+	orderID, err := epusdtProviderOrderID(recharge.RechargeNo)
+	if err != nil {
+		return epusdtOrder{}, err
+	}
 	values := map[string]string{
 		"pid":      strings.TrimSpace(config.EpusdtPID),
-		"order_id": strings.TrimSpace(recharge.RechargeNo),
-	}
-	if len(values["order_id"]) > 64 {
-		return epusdtOrder{}, domain.ErrInvalidRecharge
+		"order_id": orderID,
 	}
 	secret := config.EpusdtAPISecret
 	if values["pid"] == "" || values["order_id"] == "" || strings.TrimSpace(secret) == "" ||
@@ -254,8 +270,100 @@ type epusdtOrder struct {
 	BlockTransactionID string
 	PaymentURL         string
 	Signature          string
+	PayProvider        string
+	ParentTradeID      string
+	PayBySubID         uint64
 	values             map[string]string
 	outerValues        map[string]string
+}
+
+func queryEpusdtSQLiteOrder(ctx context.Context, path string, config billingapp.RechargeConfig, recharge domain.Recharge) (epusdtOrder, error) {
+	orderID, err := epusdtProviderOrderID(recharge.RechargeNo)
+	if err != nil {
+		return epusdtOrder{}, err
+	}
+	pid := strings.TrimSpace(config.EpusdtPID)
+	if pid == "" || !strings.EqualFold(strings.TrimSpace(config.EpusdtToken), "USDT") ||
+		!strings.EqualFold(strings.TrimSpace(config.EpusdtNetwork), "tron") {
+		return epusdtOrder{}, domain.ErrRechargeConfigUnavailable
+	}
+	dsn, err := epusdtSQLiteDSN(path)
+	if err != nil {
+		return epusdtOrder{}, err
+	}
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return epusdtOrder{}, fmt.Errorf("open epusdt sqlite: %w", err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+
+	var order epusdtOrder
+	err = db.QueryRowContext(ctx, `
+		SELECT k.pid,
+		       o.order_id,
+		       COALESCE(o.trade_id, ''),
+		       o.status,
+		       COALESCE(CAST(o.amount AS TEXT), ''),
+		       COALESCE(o.currency, ''),
+		       COALESCE(CAST(o.actual_amount AS TEXT), ''),
+		       COALESCE(o.token, ''),
+		       COALESCE(o.network, ''),
+		       COALESCE(o.receive_address, ''),
+		       COALESCE(o.block_transaction_id, ''),
+		       COALESCE(o.pay_provider, ''),
+		       COALESCE(o.parent_trade_id, ''),
+		       COALESCE(o.pay_by_sub_id, 0)
+		FROM orders AS o
+		JOIN api_keys AS k
+		  ON k.id = o.api_key_id
+		 AND k.pid = ?
+		WHERE o.order_id = ?
+		  AND o.deleted_at IS NULL
+		LIMIT 1`, pid, orderID).Scan(
+		&order.PID,
+		&order.OrderID,
+		&order.TradeID,
+		&order.Status,
+		&order.Amount,
+		&order.Currency,
+		&order.ActualAmount,
+		&order.Token,
+		&order.Network,
+		&order.ReceiveAddress,
+		&order.BlockTransactionID,
+		&order.PayProvider,
+		&order.ParentTradeID,
+		&order.PayBySubID,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return epusdtOrder{}, nil
+	}
+	if err != nil {
+		return epusdtOrder{}, fmt.Errorf("query epusdt sqlite: %w", err)
+	}
+	if err := validateEpusdtSQLiteOrder(order, config, recharge); err != nil {
+		return epusdtOrder{}, err
+	}
+	order.PaymentURL = "/pay/checkout-counter/" + strings.TrimSpace(order.TradeID)
+	return order, nil
+}
+
+func epusdtSQLiteDSN(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", domain.ErrRechargeConfigUnavailable
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return "", domain.ErrRechargeConfigUnavailable
+	}
+	dsn := &url.URL{Scheme: "file", Path: absolute}
+	query := url.Values{"mode": {"ro"}}
+	query.Add("_pragma", "query_only(1)")
+	query.Add("_pragma", "busy_timeout(5000)")
+	dsn.RawQuery = query.Encode()
+	return dsn.String(), nil
 }
 
 func epusdtCreateValues(config billingapp.RechargeConfig, recharge domain.Recharge, amount string) (map[string]string, error) {
@@ -266,9 +374,10 @@ func epusdtCreateValues(config billingapp.RechargeConfig, recharge domain.Rechar
 	if pid == "" || strings.TrimSpace(secret) == "" || token != "USDT" || network != "tron" {
 		return nil, domain.ErrRechargeConfigUnavailable
 	}
-	orderID := strings.TrimSpace(recharge.RechargeNo)
-	if orderID == "" || len(orderID) > 64 {
-		return nil, domain.ErrInvalidRecharge
+	localOrderID := strings.TrimSpace(recharge.RechargeNo)
+	orderID, err := epusdtProviderOrderID(localOrderID)
+	if err != nil {
+		return nil, err
 	}
 	for _, raw := range []string{config.EpusdtNotifyURL, config.EpusdtReturnURL} {
 		parsed, err := url.Parse(strings.TrimSpace(raw))
@@ -276,7 +385,7 @@ func epusdtCreateValues(config billingapp.RechargeConfig, recharge domain.Rechar
 			return nil, domain.ErrRechargeConfigUnavailable
 		}
 	}
-	redirectURL, err := epusdtRedirectURL(config.EpusdtReturnURL, orderID)
+	redirectURL, err := epusdtRedirectURL(config.EpusdtReturnURL, localOrderID)
 	if err != nil {
 		return nil, err
 	}
@@ -335,9 +444,27 @@ func epusdtOrderCurrency(config billingapp.RechargeConfig) string {
 	return epusdtLegacyCurrency
 }
 
+func epusdtProviderOrderID(rechargeNo string) (string, error) {
+	rechargeNo = strings.TrimSpace(rechargeNo)
+	if len(rechargeNo) <= 32 {
+		if rechargeNo == "" {
+			return "", domain.ErrInvalidRecharge
+		}
+		return rechargeNo, nil
+	}
+	if domain.IsValidRechargeNo(rechargeNo) {
+		return rechargeNo[2:], nil
+	}
+	return "", domain.ErrInvalidRecharge
+}
+
 func validateEpusdtOrder(order epusdtOrder, config billingapp.RechargeConfig, recharge domain.Recharge) error {
+	orderID, err := epusdtProviderOrderID(recharge.RechargeNo)
+	if err != nil {
+		return err
+	}
 	if strings.TrimSpace(order.PID) != strings.TrimSpace(config.EpusdtPID) ||
-		strings.TrimSpace(order.OrderID) != strings.TrimSpace(recharge.RechargeNo) ||
+		strings.TrimSpace(order.OrderID) != orderID ||
 		!sameMoney(order.Amount, recharge.PaymentAmount) ||
 		!strings.EqualFold(strings.TrimSpace(order.Currency), epusdtOrderCurrency(config)) ||
 		!strings.EqualFold(strings.TrimSpace(order.Token), strings.TrimSpace(config.EpusdtToken)) ||
@@ -350,7 +477,7 @@ func validateEpusdtOrder(order epusdtOrder, config billingapp.RechargeConfig, re
 	if order.Status == 2 && strings.TrimSpace(order.TradeID) == "" {
 		return domain.ErrRechargeQueryMismatch
 	}
-	if order.Status == 2 && epusdtOrderCurrency(config) == epusdtDirectCurrency {
+	if (order.Status == 1 || order.Status == 2) && epusdtOrderCurrency(config) == epusdtDirectCurrency {
 		expected, expectedErr := domain.ParseMoney(recharge.PaymentAmount)
 		actual, actualErr := domain.ParseMoney(order.ActualAmount)
 		if expectedErr != nil || actualErr != nil || actual.LessThan(expected) {
@@ -360,8 +487,28 @@ func validateEpusdtOrder(order epusdtOrder, config billingapp.RechargeConfig, re
 	return nil
 }
 
+func validateEpusdtSQLiteOrder(order epusdtOrder, config billingapp.RechargeConfig, recharge domain.Recharge) error {
+	if err := validateEpusdtOrder(order, config, recharge); err != nil {
+		return err
+	}
+	actual, actualErr := domain.ParseMoney(order.ActualAmount)
+	if strings.TrimSpace(order.TradeID) == "" ||
+		strings.TrimSpace(order.PayProvider) != "on_chain" ||
+		strings.TrimSpace(order.ParentTradeID) != "" ||
+		order.PayBySubID != 0 ||
+		order.Status == 2 && (strings.TrimSpace(order.ReceiveAddress) == "" ||
+			strings.TrimSpace(order.BlockTransactionID) == "" || actualErr != nil || !actual.IsPositive()) {
+		return domain.ErrRechargeQueryMismatch
+	}
+	return nil
+}
+
 func validateEpusdtCreateOrder(order epusdtOrder, config billingapp.RechargeConfig, recharge domain.Recharge) error {
-	if strings.TrimSpace(order.OrderID) != strings.TrimSpace(recharge.RechargeNo) ||
+	orderID, err := epusdtProviderOrderID(recharge.RechargeNo)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(order.OrderID) != orderID ||
 		!sameMoney(order.Amount, recharge.PaymentAmount) ||
 		!strings.EqualFold(strings.TrimSpace(order.Currency), epusdtOrderCurrency(config)) ||
 		!strings.EqualFold(strings.TrimSpace(order.Token), strings.TrimSpace(config.EpusdtToken)) {

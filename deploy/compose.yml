@@ -102,8 +102,15 @@ services:
       PPROF_CPU_PROFILE_DIR: "${PPROF_CPU_PROFILE_DIR:-pprof}"
       PPROF_CPU_PROFILE_DURATION: "${PPROF_CPU_PROFILE_DURATION:-10s}"
       PPROF_CPU_CHECK_INTERVAL: "${PPROF_CPU_CHECK_INTERVAL:-30s}"
+      EPUSDT_SQLITE_PATH: /run/epusdt/epusdt.db
     volumes:
       - /opt/remail/secrets/smtp-dkim-private-key.pem:/run/secrets/smtp-dkim-private-key.pem:ro
+      - type: volume
+        source: epusdt_runtime
+        target: /run/epusdt
+        read_only: true
+        volume:
+          nocopy: true
     ports:
       - "25:2525"
       - "127.0.0.1:8080:8080"
@@ -127,3 +134,6 @@ volumes:
   mysql_data:
   redis_data:
   minio_data:
+  epusdt_runtime:
+    external: true
+    name: epusdt_epusdt_runtime

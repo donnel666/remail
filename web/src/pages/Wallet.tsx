@@ -37,6 +37,7 @@ import { SiAlipay } from "react-icons/si";
 import { useTranslation } from "react-i18next";
 
 import sampleProjectCover from "@/assets/cover-4.webp";
+import tronIcon from "@/assets/tron.svg";
 import { requireTurnstile } from "@/components/auth/TurnstileGate";
 import { MembershipOverview } from "@/components/membership";
 import { useAuth } from "@/context/auth-provider";
@@ -854,9 +855,13 @@ export default function Wallet() {
                         <Text type="secondary">
                           {rechargeQuote ? (
                             <>
-                              {t("Credited points")}: {formatPointsValue(rechargeQuote.creditedPoints)}
+                              <span className="block">
+                                {t("Credited points")}: {formatPointsValue(rechargeQuote.creditedPoints)}
+                              </span>
                               {rechargeQuote.paymentAmount && rechargeQuote.paymentCurrency ? (
-                                <> | {t("Payment amount")}: {rechargeQuote.paymentAmount} {rechargeQuote.paymentCurrency}</>
+                                <span className="block">
+                                  {t("Payment amount")}: {rechargeQuote.paymentAmount} {rechargeQuote.paymentCurrency}
+                                </span>
                               ) : null}
                             </>
                           ) : t("Enter recharge points for a quote")}
@@ -885,8 +890,11 @@ export default function Wallet() {
                       <Space vertical align="start">
                         {configuredPaymentMethods(rechargeConfig).map((method) => (
                           <Button
+                            className="min-h-11"
                             disabled={!rechargeConfig?.enabled || recharging}
-                            icon={method === "alipay" ? <SiAlipay color="#1677FF" size={18} /> : <Coins size={18} />}
+                            icon={method === "alipay"
+                              ? <SiAlipay color="#1677FF" size={18} />
+                              : <img alt="" className="size-[18px]" src={tronIcon} />}
                             key={method}
                             loading={recharging && paymentMethod === method}
                             onClick={() => {
@@ -896,7 +904,7 @@ export default function Wallet() {
                             theme={paymentMethod === method ? "solid" : "outline"}
                             type={paymentMethod === method ? "primary" : "tertiary"}
                           >
-                            {paymentMethodLabel(method, t)}
+                            {method === EPUSDT_PAYMENT_METHOD ? "USDT" : paymentMethodLabel(method, t)}
                           </Button>
                         ))}
                       </Space>

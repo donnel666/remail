@@ -360,6 +360,9 @@ func (h *BillingHandler) handleRechargeWebhook(c *gin.Context, epusdt bool) {
 		}
 	}
 	rechargeNo = strings.TrimSpace(rechargeNo)
+	if epusdt && len(rechargeNo) == 32 {
+		rechargeNo = "RC" + rechargeNo
+	}
 	if !domain.IsValidRechargeNo(rechargeNo) || h == nil || h.webhook == nil || !h.webhook.Allow() {
 		c.String(http.StatusOK, "success")
 		return

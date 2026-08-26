@@ -70,7 +70,7 @@ func TestEpusdtWebhookOnlyWakesReconciliation(t *testing.T) {
 	router := gin.New()
 	RegisterBillingRoutes(router.Group("/v1"), module, nil, nil, nil)
 	payload, err := json.Marshal(map[string]any{
-		"pid": "1000", "order_id": validWebhookRechargeOne, "status": 2,
+		"pid": "1000", "order_id": strings.TrimPrefix(validWebhookRechargeOne, "RC"), "status": 2,
 		"amount": "999999.99", "signature": "attacker-controlled",
 	})
 	require.NoError(t, err)
