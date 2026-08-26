@@ -36,7 +36,6 @@ const errorResponses = {
 };
 
 const apiKeySecurity = [{ remailApiKey: [] }];
-const systemKeySecurity = [{ remailSystemKey: [] }];
 
 const paginationParams = [
   {
@@ -130,18 +129,6 @@ const schemas = {
       "createdAt",
       "updatedAt",
     ],
-  },
-  ICloudForwardingEmail: {
-    type: "object",
-    properties: {
-      id: { type: "integer", minimum: 1 },
-      forwardToEmail: { type: "string", format: "email" },
-      status: stringEnum(["waiting", "code_received", "expired", "consumed"]),
-      verificationCode: nullable("string"),
-      expiresAt: { type: "string", format: "date-time" },
-      createdAt: { type: "string", format: "date-time" },
-    },
-    required: ["id", "forwardToEmail", "status", "verificationCode", "expiresAt", "createdAt"],
   },
   ProjectListResponse: {
     type: "object",
@@ -769,7 +756,6 @@ const spec = {
     { name: "Core", description: "高频集成接口，覆盖 API Key 状态、项目查询、统一下单、订单查询和邮件取件。" },
     { name: "Resources", description: "自有微软邮箱、域名邮箱、邮件服务器和资源检测接口。" },
     { name: "Wallet", description: "钱包余额、账单、充值记录和兑换码充值接口。" },
-    { name: "Tickets", description: "售后工单接口，后端能力落地后开放。" },
   ],
   components: {
     securitySchemes: {
@@ -778,12 +764,6 @@ const spec = {
         scheme: "bearer",
         bearerFormat: "API Key",
         description: "填入 rk- 开头的 API Key 即可，Swagger UI 会自动加上 Bearer 前缀。",
-      },
-      remailSystemKey: {
-        type: "apiKey",
-        in: "header",
-        name: "X-System-Key",
-        description: "供第三方服务端应用使用的系统 Key，在系统设置中创建，仅可调用 iCloud 转发邮箱生成和收码接口。",
       },
     },
     responses: {
@@ -819,33 +799,6 @@ const spec = {
         security: apiKeySecurity,
         responses: {
           "200": ok(ref("APIKeyProfileResponse")),
-          ...errorResponses,
-        },
-      },
-    },
-    "/v1/open/icloud/forwarding-emails": {
-      post: {
-        tags: ["iCloud"],
-        operationId: "createICloudForwardingEmail",
-        summary: "生成 iCloud 转发邮箱",
-        description: "生成一个有效期为 30 分钟的临时转发邮箱。",
-        security: systemKeySecurity,
-        responses: {
-          "201": created(ref("ICloudForwardingEmail")),
-          ...errorResponses,
-        },
-      },
-    },
-    "/v1/open/icloud/forwarding-emails/{preparationId}": {
-      get: {
-        tags: ["iCloud"],
-        operationId: "getICloudForwardingEmail",
-        summary: "查询 iCloud 转发邮箱验证码",
-        description: "仅能查询由当前系统 Key 创建的转发邮箱。收到 noreply@apple.com 的邮件后返回验证码。",
-        security: systemKeySecurity,
-        parameters: [{ name: "preparationId", in: "path", required: true, schema: { type: "integer", minimum: 1 } }],
-        responses: {
-          "200": ok(ref("ICloudForwardingEmail")),
           ...errorResponses,
         },
       },

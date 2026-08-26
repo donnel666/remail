@@ -96,6 +96,36 @@ func TestPublicOpenAPISchemaUsesBackendEnums(t *testing.T) {
 	})
 }
 
+func TestPublicOpenAPIDoesNotExposeSystemKeySurface(t *testing.T) {
+	spec := publicOpenAPISpec(t)
+	paths := spec["paths"].(map[string]any)
+	for path := range paths {
+		if strings.HasPrefix(path, "/v1/open/icloud/") {
+			t.Fatalf("public openapi exposes system-key route %s", path)
+		}
+	}
+
+	components := spec["components"].(map[string]any)
+	securitySchemes := components["securitySchemes"].(map[string]any)
+	if _, ok := securitySchemes["remailSystemKey"]; ok {
+		t.Fatal("public openapi exposes the system-key security scheme")
+	}
+	for _, rawTag := range spec["tags"].([]any) {
+		if rawTag.(map[string]any)["name"] == "iCloud" {
+			t.Fatal("public openapi exposes the iCloud tag")
+		}
+	}
+}
+
+func TestPublicOpenAPIDoesNotExposeTicketsGroup(t *testing.T) {
+	spec := publicOpenAPISpec(t)
+	for _, rawTag := range spec["tags"].([]any) {
+		if rawTag.(map[string]any)["name"] == "Tickets" {
+			t.Fatal("public openapi exposes the unused Tickets group")
+		}
+	}
+}
+
 func TestPublicOpenAPIDoesNotExposeInternalProductIDs(t *testing.T) {
 	spec := publicOpenAPISpec(t)
 	components := spec["components"].(map[string]any)
@@ -180,7 +210,7 @@ func assertSchemaEnum(t *testing.T, spec map[string]any, schemaName string, prop
 }
 
 func isPublicOpenAPIRoute(path string) bool {
-	return strings.HasPrefix(path, "/v1/open/") || path == "/v1/pickup" || strings.HasPrefix(path, "/v1/pickup/")
+	return (strings.HasPrefix(path, "/v1/open/") && !strings.HasPrefix(path, "/v1/open/icloud/")) || path == "/v1/pickup" || strings.HasPrefix(path, "/v1/pickup/")
 }
 
 func normalizeGinOpenAPIPath(path string) string {

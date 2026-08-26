@@ -16,10 +16,6 @@
     {
       "name": "Wallet",
       "description": "钱包余额、账单、充值记录和兑换码充值接口。"
-    },
-    {
-      "name": "Tickets",
-      "description": "售后工单接口，后端能力落地后开放。"
     }
   ],
   "components": {
@@ -29,12 +25,6 @@
         "scheme": "bearer",
         "bearerFormat": "API Key",
         "description": "填入 rk- 开头的 API Key 即可，Swagger UI 会自动加上 Bearer 前缀。"
-      },
-      "remailSystemKey": {
-        "type": "apiKey",
-        "in": "header",
-        "name": "X-System-Key",
-        "description": "供第三方服务端应用使用的系统 Key，在系统设置中创建，仅可调用 iCloud 转发邮箱生成和收码接口。"
       }
     },
     "responses": {
@@ -266,50 +256,6 @@
           "activeRequests",
           "createdAt",
           "updatedAt"
-        ]
-      },
-      "ICloudForwardingEmail": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "integer",
-            "minimum": 1
-          },
-          "forwardToEmail": {
-            "type": "string",
-            "format": "email"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "waiting",
-              "code_received",
-              "expired",
-              "consumed"
-            ]
-          },
-          "verificationCode": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "expiresAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "id",
-          "forwardToEmail",
-          "status",
-          "verificationCode",
-          "expiresAt",
-          "createdAt"
         ]
       },
       "ProjectListResponse": {
@@ -1886,125 +1832,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/APIKeyProfileResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "422": {
-            "$ref": "#/components/responses/UnprocessableEntity"
-          },
-          "429": {
-            "$ref": "#/components/responses/TooManyRequests"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          },
-          "503": {
-            "$ref": "#/components/responses/ServiceUnavailable"
-          }
-        }
-      }
-    },
-    "/v1/open/icloud/forwarding-emails": {
-      "post": {
-        "tags": [
-          "iCloud"
-        ],
-        "operationId": "createICloudForwardingEmail",
-        "summary": "生成 iCloud 转发邮箱",
-        "description": "生成一个有效期为 30 分钟的临时转发邮箱。",
-        "security": [
-          {
-            "remailSystemKey": []
-          }
-        ],
-        "responses": {
-          "201": {
-            "description": "资源已创建。",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ICloudForwardingEmail"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "422": {
-            "$ref": "#/components/responses/UnprocessableEntity"
-          },
-          "429": {
-            "$ref": "#/components/responses/TooManyRequests"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          },
-          "503": {
-            "$ref": "#/components/responses/ServiceUnavailable"
-          }
-        }
-      }
-    },
-    "/v1/open/icloud/forwarding-emails/{preparationId}": {
-      "get": {
-        "tags": [
-          "iCloud"
-        ],
-        "operationId": "getICloudForwardingEmail",
-        "summary": "查询 iCloud 转发邮箱验证码",
-        "description": "仅能查询由当前系统 Key 创建的转发邮箱。收到 noreply@apple.com 的邮件后返回验证码。",
-        "security": [
-          {
-            "remailSystemKey": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "preparationId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "minimum": 1
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "请求成功。",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ICloudForwardingEmail"
                 }
               }
             }

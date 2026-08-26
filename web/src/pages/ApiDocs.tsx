@@ -14,7 +14,6 @@ const swaggerTagOrder = [
   "Core",
   "Resources",
   "Wallet",
-  "Tickets",
 ];
 
 const developmentFallbackApiKeys = [
