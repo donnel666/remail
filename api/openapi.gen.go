@@ -718,13 +718,16 @@ func (e AdminICloudOnboardingTaskStatus) Valid() bool {
 
 // Defines values for AdminICloudOnboardingTaskTaskKind.
 const (
-	AdminICloudOnboardingTaskTaskKindOnboarding AdminICloudOnboardingTaskTaskKind = "onboarding"
-	AdminICloudOnboardingTaskTaskKindRefresh    AdminICloudOnboardingTaskTaskKind = "refresh"
+	AdminICloudOnboardingTaskTaskKindCookieRecovery AdminICloudOnboardingTaskTaskKind = "cookie_recovery"
+	AdminICloudOnboardingTaskTaskKindOnboarding     AdminICloudOnboardingTaskTaskKind = "onboarding"
+	AdminICloudOnboardingTaskTaskKindRefresh        AdminICloudOnboardingTaskTaskKind = "refresh"
 )
 
 // Valid indicates whether the value is a known member of the AdminICloudOnboardingTaskTaskKind enum.
 func (e AdminICloudOnboardingTaskTaskKind) Valid() bool {
 	switch e {
+	case AdminICloudOnboardingTaskTaskKindCookieRecovery:
+		return true
 	case AdminICloudOnboardingTaskTaskKindOnboarding:
 		return true
 	case AdminICloudOnboardingTaskTaskKindRefresh:
@@ -11357,6 +11360,18 @@ type PostAdminICloudResourceCreateAliasesParams struct {
 	IdempotencyKey AdminStateCommandIdempotencyKey `json:"Idempotency-Key"`
 }
 
+// PostAdminICloudResourceCookieRefreshParams defines parameters for PostAdminICloudResourceCookieRefresh.
+type PostAdminICloudResourceCookieRefreshParams struct {
+	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
+	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op.
+	IdempotencyKey AdminStateCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
 // PostAdminICloudResourceDisableParams defines parameters for PostAdminICloudResourceDisable.
 type PostAdminICloudResourceDisableParams struct {
 	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
@@ -14464,6 +14479,9 @@ type ServerInterface interface {
 	// Queue alias provisioning for one iCloud resource below the alias limit
 	// (POST /v1/admin/icloud/resources/{resourceId}/aliases)
 	PostAdminICloudResourceCreateAliases(c *gin.Context, resourceId int, params PostAdminICloudResourceCreateAliasesParams)
+	// Queue recovery for unavailable iCloud Cookie channels
+	// (POST /v1/admin/icloud/resources/{resourceId}/cookie-refresh)
+	PostAdminICloudResourceCookieRefresh(c *gin.Context, resourceId int, params PostAdminICloudResourceCookieRefreshParams)
 	// Disable one iCloud resource without changing existing allocations
 	// (POST /v1/admin/icloud/resources/{resourceId}/disable)
 	PostAdminICloudResourceDisable(c *gin.Context, resourceId int, params PostAdminICloudResourceDisableParams)
@@ -20370,6 +20388,90 @@ func (siw *ServerInterfaceWrapper) PostAdminICloudResourceCreateAliases(c *gin.C
 	}
 
 	siw.Handler.PostAdminICloudResourceCreateAliases(c, resourceId, params)
+}
+
+// PostAdminICloudResourceCookieRefresh operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminICloudResourceCookieRefresh(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminICloudResourceCookieRefreshParams
+
+	// ------------- Required query parameter "version" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "version", c.Request.URL.Query(), &params.Version, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter version: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminStateCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminICloudResourceCookieRefresh(c, resourceId, params)
 }
 
 // PostAdminICloudResourceDisable operation middleware
@@ -32971,6 +33073,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.PATCH(options.BaseURL+"/v1/admin/icloud/resources/:resourceId", wrapper.PatchAdminICloudResource)
 	router.GET(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/aliases", wrapper.GetAdminICloudResourceAliases)
 	router.POST(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/aliases", wrapper.PostAdminICloudResourceCreateAliases)
+	router.POST(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/cookie-refresh", wrapper.PostAdminICloudResourceCookieRefresh)
 	router.POST(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/disable", wrapper.PostAdminICloudResourceDisable)
 	router.POST(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/enable", wrapper.PostAdminICloudResourceEnable)
 	router.POST(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/icloud-activation", wrapper.PostAdminICloudResourceActivateICloud)

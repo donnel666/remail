@@ -17,7 +17,7 @@ const iCloudCookieRecoveryTaskKind = "cookie_recovery"
 // ensureICloudCookieMaintenanceTx keeps the two session repairs independent:
 // Apple Account recovery only replaces the management cookie, while an
 // already-opened iCloud account uses the existing old-cookie backfill path.
-func (s *Service) ensureICloudCookieMaintenanceTx(ctx context.Context, tx *gorm.DB, resourceID uint, forceOldCookie bool) (bool, error) {
+func (s *Service) ensureICloudCookieMaintenanceTx(ctx context.Context, tx *gorm.DB, resourceID uint, forceOldCookie, retryFailedApple bool) (bool, error) {
 	if forceOldCookie {
 		return s.ensureICloudCookieRefreshTx(ctx, tx, resourceID, true)
 	}
@@ -34,13 +34,11 @@ func (s *Service) ensureICloudCookieMaintenanceTx(ctx context.Context, tx *gorm.
 	if iCloudCookieMaintenanceWorkflowActive(resource) {
 		return false, nil
 	}
-	var invalidApple int64
-	if err := tx.Model(&iCloudResourceChannelModel{}).
-		Where("resource_id = ? AND kind = ? AND session_status = ?", resourceID, iCloudChannelAppleAccount, iCloudSessionInvalid).
-		Count(&invalidApple).Error; err != nil {
+	appleNeedsRecovery, err := iCloudCookieChannelNeedsRecoveryTx(ctx, tx, resourceID, iCloudChannelAppleAccount)
+	if err != nil {
 		return false, err
 	}
-	if invalidApple > 0 && !iCloudCookieRecoveryTerminallyFailed(resource) && !iCloudCookiePhoneBlacklistedTerminallyFailed(resource) {
+	if appleNeedsRecovery && (retryFailedApple || !iCloudCookieRecoveryTerminallyFailed(resource)) && !iCloudCookiePhoneBlacklistedTerminallyFailed(resource) {
 		created, err := s.ensureICloudCookieRecoveryTx(ctx, tx, resourceID)
 		if err != nil {
 			return false, err
@@ -52,13 +50,11 @@ func (s *Service) ensureICloudCookieMaintenanceTx(ctx context.Context, tx *gorm.
 		// account from repairing its independent iCloud Web channel.
 	}
 	if resource.ICloudOpened {
-		var invalidWeb int64
-		if err := tx.Model(&iCloudResourceChannelModel{}).
-			Where("resource_id = ? AND kind = ? AND session_status = ?", resourceID, iCloudChannelWeb, iCloudSessionInvalid).
-			Count(&invalidWeb).Error; err != nil {
+		webNeedsRecovery, err := iCloudCookieChannelNeedsRecoveryTx(ctx, tx, resourceID, iCloudChannelWeb)
+		if err != nil {
 			return false, err
 		}
-		if invalidWeb > 0 && !iCloudCookiePhoneBlacklistedTerminallyFailed(resource) {
+		if webNeedsRecovery && !iCloudCookiePhoneBlacklistedTerminallyFailed(resource) {
 			return s.ensureICloudCookieRefreshTx(ctx, tx, resourceID, true)
 		}
 	}
@@ -66,6 +62,19 @@ func (s *Service) ensureICloudCookieMaintenanceTx(ctx context.Context, tx *gorm.
 	// path. A missing Apple recovery credential must not turn into a combined
 	// refresh that touches the healthy iCloud Web session.
 	return false, nil
+}
+
+func iCloudCookieChannelNeedsRecoveryTx(ctx context.Context, tx *gorm.DB, resourceID uint, kind string) (bool, error) {
+	var channel iCloudResourceChannelModel
+	err := tx.WithContext(ctx).Select("id", "session_status").
+		Where("resource_id = ? AND kind = ?", resourceID, kind).Take(&channel).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return channel.SessionStatus == iCloudSessionInvalid, nil
 }
 
 // A terminal recovery failure must not be recreated on every validation or
@@ -93,10 +102,8 @@ func (s *Service) ensureICloudCookieRecoveryTx(ctx context.Context, tx *gorm.DB,
 		strings.TrimSpace(resource.BoundPhoneNumber) == "" || resource.KitesimPhoneID == nil {
 		return false, nil
 	}
-	var invalidApple int64
-	if err := tx.Model(&iCloudResourceChannelModel{}).
-		Where("resource_id = ? AND kind = ? AND session_status = ?", resourceID, iCloudChannelAppleAccount, iCloudSessionInvalid).
-		Count(&invalidApple).Error; err != nil || invalidApple == 0 {
+	appleNeedsRecovery, err := iCloudCookieChannelNeedsRecoveryTx(ctx, tx, resourceID, iCloudChannelAppleAccount)
+	if err != nil || !appleNeedsRecovery {
 		return false, err
 	}
 	if iCloudCookieMaintenanceWorkflowActive(resource) {
@@ -326,19 +333,20 @@ func (s *Service) recoverICloudAppleCookie(ctx context.Context, task *iCloudOnbo
 }
 
 // The resource-first workflow row can execute one maintenance task at a time.
-// Once one channel is repaired, immediately enqueue the other invalid channel
-// instead of waiting for a later validation/provision sweep.
-func (s *Service) scheduleICloudCookieMaintenanceAfter(ctx context.Context, resourceID *uint, completedKind string) {
+// Once one channel reaches a terminal state, enqueue the other invalid channel
+// instead of waiting for a later validation/provision sweep. Terminal fences
+// prevent this from recreating the channel that just failed.
+func (s *Service) scheduleICloudCookieMaintenanceAfter(ctx context.Context, resourceID *uint, previousKind string) {
 	if s == nil || s.db == nil || resourceID == nil || *resourceID == 0 {
 		return
 	}
-	if completedKind != iCloudCookieRecoveryTaskKind && completedKind != "refresh" {
+	if previousKind != iCloudCookieRecoveryTaskKind && previousKind != "refresh" {
 		return
 	}
 	var created bool
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var err error
-		created, err = s.ensureICloudCookieMaintenanceTx(ctx, tx, *resourceID, false)
+		created, err = s.ensureICloudCookieMaintenanceTx(ctx, tx, *resourceID, false, false)
 		return err
 	})
 	if err == nil && created {

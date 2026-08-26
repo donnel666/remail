@@ -11260,6 +11260,44 @@ paths:
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 
+  /v1/admin/icloud/resources/{resourceId}/cookie-refresh:
+    post:
+      operationId: postAdminICloudResourceCookieRefresh
+      summary: Queue recovery for unavailable iCloud Cookie channels
+      description: Inspects both Cookie channels. A missing or invalid Apple Account Cookie queues the simplified management-login recovery; a missing or invalid old iCloud Web Cookie queues the simplified iCloud-login recovery only when iCloud is already opened. When both are unavailable, the existing durable workflow runs them sequentially. Requires a permanent eSIM phone binding, complete stored Apple credentials, fewer than 750 aliases, and no active Cookie-refresh task.
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/ExpectedAdminResourceVersion"
+        - $ref: "#/components/parameters/AdminStateCommandIdempotencyKey"
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "202":
+          description: Cookie refresh queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudMutationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
   /v1/admin/icloud/resources/{resourceId}/enable:
     post:
       operationId: postAdminICloudResourceEnable
@@ -21572,7 +21610,7 @@ components:
           minimum: 1
         taskKind:
           type: string
-          enum: [onboarding, refresh]
+          enum: [onboarding, refresh, cookie_recovery]
         resourceId:
           type: integer
           minimum: 1

@@ -811,7 +811,7 @@ func (s *Service) finishICloudProvision(ctx context.Context, resource iCloudReso
 		if err != nil {
 			return err
 		}
-		refreshCreated, err = s.ensureICloudCookieMaintenanceTx(ctx, tx, locked.ID, false)
+		refreshCreated, err = s.ensureICloudCookieMaintenanceTx(ctx, tx, locked.ID, false, false)
 		if err != nil {
 			return err
 		}

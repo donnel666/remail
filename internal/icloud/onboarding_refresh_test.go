@@ -204,7 +204,7 @@ func TestICloudCookieMaintenanceSkipsFullResource(t *testing.T) {
 		var created bool
 		if err := db.Transaction(func(tx *gorm.DB) error {
 			var err error
-			created, err = service.ensureICloudCookieMaintenanceTx(context.Background(), tx, resource.ID, forceOldCookie)
+			created, err = service.ensureICloudCookieMaintenanceTx(context.Background(), tx, resource.ID, forceOldCookie, false)
 			return err
 		}); err != nil {
 			t.Fatal(err)
@@ -297,8 +297,15 @@ func TestICloudCookieMaintenanceReleasesValidatingResource(t *testing.T) {
 	}
 	service := NewService(db, nil, nil)
 	service.now = func() time.Time { return now }
-	if err := service.EnsureICloudCookieRefresh(context.Background(), resource.ID); err != nil {
+	result, err := service.ApplyAdminICloudCommand(
+		context.Background(), AdminICloudRefresh, resource.ID, 1, 9,
+		"refresh-validating-resource", "request-1", "/v1/admin/icloud/resources/1/cookie-refresh",
+	)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if result.Status != iCloudResourcePending {
+		t.Fatalf("refresh result status = %q, want %q", result.Status, iCloudResourcePending)
 	}
 	var stored iCloudResourceModel
 	if err := db.First(&stored, resource.ID).Error; err != nil {
@@ -362,6 +369,194 @@ func TestApplyAdminICloudActivationQueuesForcedOldCookieRefresh(t *testing.T) {
 	var count int64
 	if err := db.Model(&iCloudOnboardingTaskModel{}).Where("task_kind = ? AND resource_id = ?", "refresh", resource.ID).Count(&count).Error; err != nil || count != 1 {
 		t.Fatalf("refresh task count = %d, err = %v", count, err)
+	}
+}
+
+func TestApplyAdminICloudCookieRefreshSelectsInvalidChannels(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		appleStatus  string
+		webStatus    string
+		iCloudOpened bool
+		missingKind  string
+		wantKind     string
+		wantStage    string
+		wantErr      bool
+	}{
+		{name: "new Cookie", appleStatus: iCloudSessionInvalid, webStatus: iCloudSessionValid, iCloudOpened: true, wantKind: iCloudCookieRecoveryTaskKind, wantStage: "manage_prepare"},
+		{name: "old Cookie", appleStatus: iCloudSessionValid, webStatus: iCloudSessionInvalid, iCloudOpened: true, wantKind: "refresh", wantStage: "old_cookie_prepare"},
+		{name: "both Cookies", appleStatus: iCloudSessionInvalid, webStatus: iCloudSessionInvalid, iCloudOpened: true, wantKind: iCloudCookieRecoveryTaskKind, wantStage: "manage_prepare"},
+		{name: "missing new Cookie", appleStatus: iCloudSessionValid, webStatus: iCloudSessionValid, iCloudOpened: true, missingKind: iCloudChannelAppleAccount, wantKind: iCloudCookieRecoveryTaskKind, wantStage: "manage_prepare"},
+		{name: "missing old Cookie", appleStatus: iCloudSessionValid, webStatus: iCloudSessionValid, iCloudOpened: true, missingKind: iCloudChannelWeb, wantKind: "refresh", wantStage: "old_cookie_prepare"},
+		{name: "old Cookie before iCloud activation", appleStatus: iCloudSessionValid, webStatus: iCloudSessionInvalid, wantErr: true},
+		{name: "no invalid Cookie", appleStatus: iCloudSessionValid, webStatus: iCloudSessionValid, iCloudOpened: true, wantErr: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			now := time.Date(2026, 8, 26, 6, 0, 0, 0, time.UTC)
+			db := newICloudRefreshTestDB(t)
+			resource := seedICloudRefreshResource(t, db, now)
+			if err := db.Model(&iCloudResourceModel{}).Where("id = ?", resource.ID).
+				Update("icloud_opened", test.iCloudOpened).Error; err != nil {
+				t.Fatal(err)
+			}
+			for kind, status := range map[string]string{
+				iCloudChannelAppleAccount: test.appleStatus,
+				iCloudChannelWeb:          test.webStatus,
+			} {
+				if err := db.Model(&iCloudResourceChannelModel{}).
+					Where("resource_id = ? AND kind = ?", resource.ID, kind).
+					Update("session_status", status).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			if test.missingKind != "" {
+				if err := db.Where("resource_id = ? AND kind = ?", resource.ID, test.missingKind).
+					Delete(&iCloudResourceChannelModel{}).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			service := NewService(db, nil, nil)
+			service.now = func() time.Time { return now }
+			result, err := service.ApplyAdminICloudCommand(
+				context.Background(), AdminICloudRefresh, resource.ID, 1, 9,
+				"refresh-cookies-"+strings.ReplaceAll(test.name, " ", "-"), "request-1",
+				"/v1/admin/icloud/resources/1/cookie-refresh",
+			)
+			if test.wantErr {
+				if !errors.Is(err, ErrICloudCookieMaintenanceUnavailable) {
+					t.Fatalf("error = %v, want %v", err, ErrICloudCookieMaintenanceUnavailable)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !result.Changed || result.Version != 2 {
+				t.Fatalf("refresh result = %+v", result)
+			}
+			var task iCloudOnboardingTaskModel
+			if err := db.First(&task, resource.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			if task.TaskKind != test.wantKind || task.Stage != test.wantStage {
+				t.Fatalf("refresh task = %+v, want kind=%q stage=%q", task, test.wantKind, test.wantStage)
+			}
+		})
+	}
+}
+
+func TestApplyAdminICloudCookieRefreshRetriesNonBlacklistFailure(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		category string
+		wantErr  bool
+	}{
+		{name: "provider failure", category: "provider_rejected"},
+		{name: "blacklisted phone", category: "phone_blacklisted", wantErr: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			now := time.Date(2026, 8, 26, 6, 30, 0, 0, time.UTC)
+			db := newICloudRefreshTestDB(t)
+			resource := seedICloudRefreshResource(t, db, now)
+			if err := db.Model(&iCloudResourceChannelModel{}).
+				Where("resource_id = ? AND kind = ?", resource.ID, iCloudChannelWeb).
+				Update("session_status", iCloudSessionValid).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Model(&iCloudResourceModel{}).Where("id = ?", resource.ID).Updates(map[string]any{
+				"resource_id": resource.ID, "task_kind": iCloudCookieRecoveryTaskKind,
+				"onboarding_status": iCloudOnboardingFailed, "dispatch_status": "failed",
+				"generation": uint64(1), "expected_credential_revision": resource.CredentialRevision,
+				"last_error_category": test.category, "last_safe_error": "previous recovery failed", "updated_at": now,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+
+			service := NewService(db, nil, nil)
+			service.now = func() time.Time { return now }
+			result, err := service.ApplyAdminICloudCommand(
+				context.Background(), AdminICloudRefresh, resource.ID, 1, 9,
+				"retry-cookie-recovery-"+strings.ReplaceAll(test.name, " ", "-"), "request-1",
+				"/v1/admin/icloud/resources/1/cookie-refresh",
+			)
+			if test.wantErr {
+				if !errors.Is(err, ErrICloudCookieMaintenanceUnavailable) {
+					t.Fatalf("error = %v, want %v", err, ErrICloudCookieMaintenanceUnavailable)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !result.Changed {
+				t.Fatalf("refresh result = %+v", result)
+			}
+			var task iCloudOnboardingTaskModel
+			if err := db.First(&task, resource.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			if task.TaskKind != iCloudCookieRecoveryTaskKind || task.Status != iCloudOnboardingProcessing || task.LastErrorCategory != "" {
+				t.Fatalf("retried recovery task = %+v", task)
+			}
+		})
+	}
+}
+
+func TestICloudCookieRecoveryFailureQueuesIndependentOldCookieBackfill(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		category       string
+		infrastructure bool
+		wantOldCookie  bool
+	}{
+		{name: "provider failure", category: "provider_rejected", wantOldCookie: true},
+		{name: "infrastructure exhausted", infrastructure: true, wantOldCookie: true},
+		{name: "blacklisted phone", category: "phone_blacklisted"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			now := time.Date(2026, 8, 26, 7, 0, 0, 0, time.UTC)
+			db := newICloudRefreshTestDB(t)
+			resource := seedICloudRefreshResource(t, db, now)
+			secret, _ := json.Marshal(iCloudOnboardingSecret{Password: "Secret1!", Birthday: "2000-11-02"})
+			attempts := 0
+			if test.infrastructure {
+				attempts = 4
+			}
+			if err := db.Model(&iCloudResourceModel{}).Where("id = ?", resource.ID).Updates(map[string]any{
+				"resource_id": resource.ID, "task_kind": iCloudCookieRecoveryTaskKind,
+				"onboarding_status": iCloudOnboardingProcessing, "stage": "manage_prepare", "dispatch_status": "running",
+				"claim_token": "claim", "generation": uint64(1), "expected_credential_revision": resource.CredentialRevision,
+				"secret_payload": iCloudJSON(secret), "attempts": attempts, "max_attempts": 5, "updated_at": now,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			var task iCloudOnboardingTaskModel
+			if err := db.First(&task, resource.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			service := NewService(db, nil, nil)
+			service.now = func() time.Time { return now }
+			var err error
+			if test.infrastructure {
+				err = service.ReleaseICloudOnboardingTask(context.Background(), iCloudOnboardingTask{TaskID: task.ID, Generation: task.Generation}, "temporary failure")
+			} else {
+				err = service.failICloudOnboardingTask(context.Background(), &task, test.category, "Apple rejected the request.")
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := db.First(&task, resource.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			if test.wantOldCookie {
+				if task.TaskKind != "refresh" || task.Stage != "old_cookie_prepare" || task.Status != iCloudOnboardingProcessing || task.PendingSMSPurpose != appleSMSOldCookieLogin {
+					t.Fatalf("independent old-cookie task = %+v", task)
+				}
+			} else if task.TaskKind != iCloudCookieRecoveryTaskKind || task.Status != iCloudOnboardingFailed || task.LastErrorCategory != "phone_blacklisted" {
+				t.Fatalf("blacklisted recovery task = %+v", task)
+			}
+		})
 	}
 }
 
@@ -1075,7 +1270,7 @@ func TestICloudCookieMaintenanceKeepsInvalidChannelsOnSeparatePaths(t *testing.T
 	var created bool
 	if err := db.Transaction(func(tx *gorm.DB) error {
 		var err error
-		created, err = service.ensureICloudCookieMaintenanceTx(context.Background(), tx, resource.ID, false)
+		created, err = service.ensureICloudCookieMaintenanceTx(context.Background(), tx, resource.ID, false, false)
 		return err
 	}); err != nil {
 		t.Fatal(err)

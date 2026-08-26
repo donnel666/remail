@@ -89,6 +89,7 @@ import {
   normalizeICloudImportContent,
   publishAdminICloudResource,
   recoverAdminICloudResource,
+  refreshAdminICloudResourceCookies,
   retryAdminICloudOnboardingPostFamily,
   setAdminICloudResourcesExpirationByFilter,
   setAdminICloudResourcesExpirationByIds,
@@ -161,6 +162,7 @@ type RowAction =
   | "expiration";
 type ImportMode = "paste" | "file";
 type ICloudMaintenanceAction = "validate" | "alias";
+type ICloudTaskAction = ICloudMaintenanceAction | "cookieRefresh";
 type ICloudRowMaintenanceAction =
   | ICloudMaintenanceAction
   | "familySharing"
@@ -2206,7 +2208,7 @@ export function ICloudTasksPanel({
   const [pageSize, setPageSize] = useSharedPageSize();
   const [page, setPage] = useState(1);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [busy, setBusy] = useState<ICloudMaintenanceAction | null>(null);
+  const [busy, setBusy] = useState<ICloudTaskAction | null>(null);
   const [submittedVersion, setSubmittedVersion] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -2270,10 +2272,14 @@ export function ICloudTasksPanel({
     };
   }, [item.id, page, pageSize, refreshGeneration, refreshKey, t]);
 
-  const runAction = async (action: ICloudMaintenanceAction) => {
+  const runAction = async (action: ICloudTaskAction) => {
     setBusy(action);
     try {
-      if (action === "alias") {
+      if (action === "cookieRefresh") {
+        const result = await refreshAdminICloudResourceCookies(item.id, item.version);
+        setSubmittedVersion(result.version);
+        Toast.success(t("Cookie refresh submitted."));
+      } else if (action === "alias") {
         const result = await createAdminICloudAliases(item.id, item.version);
         setSubmittedVersion(result.version);
         if (!result.changed) {
@@ -2348,6 +2354,12 @@ export function ICloudTasksPanel({
     ? Math.round((response.succeeded / response.total) * 100)
     : 0;
   const awaitingVersionRefresh = submittedVersion !== null && item.version < submittedVersion;
+  const cookieRefreshEligible = !item.newSession || item.newSession.status === "invalid" ||
+    (item.icloudOpened && (!item.oldSession || item.oldSession.status === "invalid"));
+  const automationTaskActive = [item.onboardingTask, item.refreshTask].some(
+    (task) => task?.status === "processing" || task?.status === "waiting",
+  );
+  const cookieRefreshPhoneBlacklisted = item.refreshTask?.lastErrorCategory === "phone_blacklisted";
 
   return (
     <div>
@@ -2375,6 +2387,16 @@ export function ICloudTasksPanel({
             type="tertiary"
           >
             {t("Create alias")}
+          </Button>
+          <Button
+            disabled={item.status === "deleted" || item.status === "disabled" || item.aliasCount >= item.aliasLimit || !item.boundPhoneNumber || !item.kitesimPhoneId || !cookieRefreshEligible || cookieRefreshPhoneBlacklisted || automationTaskActive || busy !== null || awaitingVersionRefresh}
+            icon={<RefreshCw size={14} />}
+            loading={busy === "cookieRefresh"}
+            onClick={() => void runAction("cookieRefresh")}
+            size="small"
+            type="tertiary"
+          >
+            {t("Refresh Cookie")}
           </Button>
         </div>
       ) : null}

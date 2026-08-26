@@ -1661,6 +1661,9 @@ func (s *Service) failICloudOnboardingTask(ctx context.Context, task *iCloudOnbo
 		return nil
 	}
 	_ = s.refreshICloudOnboardingImport(context.WithoutCancel(ctx), iCloudOnboardingImportID(task))
+	if isICloudCookieRecoveryTask(task) && task.ResourceID != nil && task.ID == *task.ResourceID {
+		s.scheduleICloudCookieMaintenanceAfter(context.WithoutCancel(ctx), task.ResourceID, iCloudCookieRecoveryTaskKind)
+	}
 	return nil
 }
 
@@ -1696,6 +1699,7 @@ func (s *Service) ReleaseICloudOnboardingTask(ctx context.Context, payload iClou
 func (s *Service) releaseICloudOnboardingTask(ctx context.Context, payload iCloudOnboardingTask, safeError string, now time.Time, staleOnly bool) error {
 	var importID uint
 	var postFamilyRecovery *iCloudOnboardingTaskModel
+	var failedCookieRecoveryResourceID *uint
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var task iCloudOnboardingTaskModel
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND generation = ? AND onboarding_status IN ? AND dispatch_status IN ?", payload.TaskID, payload.Generation, []string{iCloudOnboardingProcessing, iCloudOnboardingWaiting}, []string{"queued", "running"}).First(&task).Error; err != nil {
@@ -1745,6 +1749,10 @@ func (s *Service) releaseICloudOnboardingTask(ctx context.Context, payload iClou
 		if result.RowsAffected != 1 {
 			return ErrICloudOnboardingTemporary
 		}
+		if isICloudCookieRecoveryTask(&task) && task.ResourceID != nil && task.ID == *task.ResourceID {
+			resourceID := *task.ResourceID
+			failedCookieRecoveryResourceID = &resourceID
+		}
 		if err := markICloudOnboardingResourceFailedTx(tx, &task, message, now); err != nil {
 			return err
 		}
@@ -1763,6 +1771,9 @@ func (s *Service) releaseICloudOnboardingTask(ctx context.Context, payload iClou
 	}
 	if postFamilyRecovery != nil {
 		s.cancelICloudOnboardingSMSChallenge(context.WithoutCancel(ctx), postFamilyRecovery)
+	}
+	if failedCookieRecoveryResourceID != nil {
+		s.scheduleICloudCookieMaintenanceAfter(context.WithoutCancel(ctx), failedCookieRecoveryResourceID, iCloudCookieRecoveryTaskKind)
 	}
 	return s.refreshICloudOnboardingImport(context.WithoutCancel(ctx), importID)
 }

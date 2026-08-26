@@ -34,6 +34,7 @@ const mocks = vi.hoisted(() => ({
   permissions: {} as Record<string, boolean>,
   resourceMailsPanel: vi.fn(),
   retryPostFamily: vi.fn(),
+  refreshCookies: vi.fn(),
   selectionNotification: vi.fn(),
   tasks: vi.fn(),
   submitSmsCode: vi.fn(),
@@ -209,6 +210,7 @@ vi.mock("@/lib/admin-icloud-api", async (importOriginal) => ({
   listAdminICloudTasks: mocks.tasks,
   publishAdminICloudResource: vi.fn(),
   recoverAdminICloudResource: vi.fn(),
+  refreshAdminICloudResourceCookies: mocks.refreshCookies,
   retryAdminICloudOnboardingPostFamily: mocks.retryPostFamily,
   setAdminICloudResourcesExpirationByFilter: mocks.expirationByFilter,
   setAdminICloudResourcesExpirationByIds: mocks.expirationByIds,
@@ -427,6 +429,7 @@ describe("admin iCloud modal workflows", () => {
     mocks.importOnboarding.mockResolvedValue(onboardingResponse());
     mocks.getOnboarding.mockResolvedValue(onboardingResponse());
     mocks.retryPostFamily.mockResolvedValue(onboardingTask({ needsPostFamilyRecovery: false }));
+    mocks.refreshCookies.mockResolvedValue({ changed: true, version: 4 });
     mocks.submitSmsCode.mockResolvedValue(onboardingTask({ needsManualCode: false }));
     mocks.updateResource.mockResolvedValue({});
     mocks.tasks.mockResolvedValue({ items: [], limit: 20, offset: 0, succeeded: 0, total: 0 });
@@ -833,6 +836,111 @@ describe("admin iCloud modal workflows", () => {
 
     await waitFor(() => expect(mocks.alias).toHaveBeenCalledWith(41, 3));
     expect(onRefresh).toHaveBeenCalled();
+  });
+
+  it("creates a Cookie refresh task from task details", async () => {
+    const onRefresh = vi.fn();
+    render(
+      <ICloudTasksPanel
+        canOperate
+        item={{
+          ...resourceDetail(),
+          newSession: { ...resourceDetail().newSession!, status: "invalid" },
+        }}
+        onRefresh={onRefresh}
+        refreshGeneration={0}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh Cookie" }));
+
+    await waitFor(() => expect(mocks.refreshCookies).toHaveBeenCalledWith(41, 3));
+    expect(mocks.toastSuccess).toHaveBeenCalledWith("Cookie refresh submitted.");
+    expect(onRefresh).toHaveBeenCalled();
+  });
+
+  it("only offers old Cookie recovery after iCloud is opened", () => {
+    const detail = resourceDetail();
+    const oldSession = { ...detail.newSession!, status: "invalid" as const };
+    const props = {
+      canOperate: true,
+      onRefresh: vi.fn(),
+      refreshGeneration: 0,
+    };
+    const { rerender } = render(
+      <ICloudTasksPanel
+        {...props}
+        item={{ ...detail, newSession: { ...detail.newSession!, status: "valid" }, oldSession }}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Refresh Cookie" })).toBeEnabled();
+
+    rerender(
+      <ICloudTasksPanel
+        {...props}
+        item={{ ...detail, icloudOpened: false, newSession: { ...detail.newSession!, status: "valid" }, oldSession }}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Refresh Cookie" })).toBeDisabled();
+  });
+
+  it("offers recovery when an eligible Cookie channel is missing", () => {
+    const detail = resourceDetail();
+    const props = {
+      canOperate: true,
+      onRefresh: vi.fn(),
+      refreshGeneration: 0,
+    };
+    const { rerender } = render(
+      <ICloudTasksPanel
+        {...props}
+        item={{ ...detail, newSession: { ...detail.newSession!, status: "valid" }, oldSession: null }}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Refresh Cookie" })).toBeEnabled();
+
+    rerender(
+      <ICloudTasksPanel
+        {...props}
+        item={{ ...detail, newSession: null, oldSession: { ...detail.newSession!, status: "valid" } }}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Refresh Cookie" })).toBeEnabled();
+
+    rerender(
+      <ICloudTasksPanel
+        {...props}
+        item={{ ...detail, icloudOpened: false, newSession: { ...detail.newSession!, status: "valid" }, oldSession: null }}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Refresh Cookie" })).toBeDisabled();
+  });
+
+  it("does not offer Cookie recovery after the bound phone is blacklisted", () => {
+    const detail = resourceDetail();
+    render(
+      <ICloudTasksPanel
+        canOperate
+        item={{
+          ...detail,
+          newSession: { ...detail.newSession!, status: "invalid" },
+          refreshTask: onboardingTask({
+            id: detail.id,
+            kitesimPhoneId: detail.kitesimPhoneId,
+            lastErrorCategory: "phone_blacklisted",
+            resourceId: detail.id,
+            status: "failed",
+            taskKind: "cookie_recovery",
+          }),
+        }}
+        onRefresh={vi.fn()}
+        refreshGeneration={0}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Refresh Cookie" })).toBeDisabled();
   });
 
   it("does not report a full alias resource as submitted", async () => {

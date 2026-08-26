@@ -39,6 +39,7 @@ import {
   listAdminICloudTasks,
   normalizeICloudImportContent,
   retryAdminICloudOnboardingPostFamily,
+  refreshAdminICloudResourceCookies,
   setAdminICloudResourcesExpirationByFilter,
   setAdminICloudResourcesExpirationByIds,
   submitAdminICloudOnboardingSmsCode,
@@ -583,6 +584,29 @@ describe("admin iCloud API adapter", () => {
 
     expect(apiMocks.POST).toHaveBeenCalledWith(
       "/v1/admin/icloud/resources/{resourceId}/icloud-activation",
+      {
+        params: {
+          header: {
+            "X-CSRF-Token": "admin-csrf",
+            "Idempotency-Key": "icloud-command-1",
+          },
+          path: { resourceId: 7 },
+          query: { version: 4 },
+        },
+        signal: undefined,
+      },
+    );
+  });
+
+  it("queues recovery for whichever Cookie channels are invalid", async () => {
+    apiMocks.POST.mockResolvedValueOnce({
+      data: { resourceId: 7, version: 5, status: "normal", forSale: false, changed: true },
+    });
+
+    await refreshAdminICloudResourceCookies(7, 4);
+
+    expect(apiMocks.POST).toHaveBeenCalledWith(
+      "/v1/admin/icloud/resources/{resourceId}/cookie-refresh",
       {
         params: {
           header: {

@@ -544,6 +544,23 @@ export async function activateAdminICloudResource(
   );
 }
 
+export async function refreshAdminICloudResourceCookies(
+  resourceId: number,
+  version: number,
+  signal?: AbortSignal,
+) {
+  return unwrap(
+    await client.POST("/v1/admin/icloud/resources/{resourceId}/cookie-refresh", {
+      params: {
+        header: commandHeaders(),
+        path: { resourceId },
+        query: { version },
+      },
+      signal,
+    }),
+  );
+}
+
 export async function createAdminICloudAliases(
   resourceId: number,
   version: number,

@@ -3975,6 +3975,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/icloud/resources/{resourceId}/cookie-refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Queue recovery for unavailable iCloud Cookie channels
+         * @description Inspects both Cookie channels. A missing or invalid Apple Account Cookie queues the simplified management-login recovery; a missing or invalid old iCloud Web Cookie queues the simplified iCloud-login recovery only when iCloud is already opened. When both are unavailable, the existing durable workflow runs them sequentially. Requires a permanent eSIM phone binding, complete stored Apple credentials, fewer than 750 aliases, and no active Cookie-refresh task.
+         */
+        post: operations["postAdminICloudResourceCookieRefresh"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/icloud/resources/{resourceId}/enable": {
         parameters: {
             query?: never;
@@ -8216,7 +8236,7 @@ export interface components {
         AdminICloudOnboardingTask: {
             id: number;
             /** @enum {string} */
-            taskKind: "onboarding" | "refresh";
+            taskKind: "onboarding" | "refresh" | "cookie_recovery";
             resourceId: number | null;
             lineNumber: number;
             /** Format: email */
@@ -22322,6 +22342,42 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Durable old Cookie refresh queued */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudMutationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminICloudResourceCookieRefresh: {
+        parameters: {
+            query: {
+                /** @description Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write. */
+                version: components["parameters"]["ExpectedAdminResourceVersion"];
+            };
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op. */
+                "Idempotency-Key": components["parameters"]["AdminStateCommandIdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cookie refresh queued */
             202: {
                 headers: {
                     [name: string]: unknown;

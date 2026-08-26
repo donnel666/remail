@@ -12,8 +12,9 @@ import (
 )
 
 var (
-	errICloudRefreshStale             = errors.New("icloud: account refresh is stale")
-	ErrICloudCookieRefreshUnavailable = errors.New("icloud: cookie refresh is unavailable")
+	errICloudRefreshStale                 = errors.New("icloud: account refresh is stale")
+	ErrICloudCookieRefreshUnavailable     = errors.New("icloud: cookie refresh is unavailable")
+	ErrICloudCookieMaintenanceUnavailable = errors.New("icloud: no invalid cookie channel is eligible for refresh")
 )
 
 // EnsureICloudCookieRefresh creates at most one active refresh task for an
@@ -239,12 +240,13 @@ func releaseICloudValidatingResourceForCookieMaintenanceTx(ctx context.Context, 
 	return nil
 }
 
-func (s *Service) activateAdminICloudResourceTx(
+func (s *Service) queueAdminICloudCookieMaintenanceTx(
 	ctx context.Context,
 	tx *gorm.DB,
 	resourceID uint,
 	expectedVersion uint64,
 	now time.Time,
+	forceOldCookie bool,
 ) (*AdminICloudMutationResult, bool, error) {
 	var root iCloudRootModel
 	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -270,11 +272,14 @@ func (s *Service) activateAdminICloudResourceTx(
 	if resource.Status == iCloudResourceDisabled {
 		return nil, false, ErrICloudResourceStatus
 	}
-	created, err := s.ensureICloudCookieRefreshTx(ctx, tx, resourceID, true)
+	created, err := s.ensureICloudCookieMaintenanceTx(ctx, tx, resourceID, forceOldCookie, !forceOldCookie)
 	if err != nil {
 		return nil, false, err
 	}
 	if !created {
+		if !forceOldCookie {
+			return nil, false, ErrICloudCookieMaintenanceUnavailable
+		}
 		return nil, false, ErrICloudCookieRefreshUnavailable
 	}
 	updated := tx.WithContext(ctx).Model(&iCloudRootModel{}).
@@ -287,6 +292,9 @@ func (s *Service) activateAdminICloudResourceTx(
 		return nil, false, ErrICloudResourceVersion
 	}
 	root.Version++
+	if err := tx.WithContext(ctx).Take(&resource, resourceID).Error; err != nil {
+		return nil, false, err
+	}
 	return adminICloudMutationResult(root, resource), true, nil
 }
 
