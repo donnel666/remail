@@ -49,7 +49,10 @@ vi.mock("@douyinfe/semi-ui", async () => {
     Empty: ({ description }: any) => <div>{description}</div>,
     Input: ({ onChange, prefix: _prefix, showClear: _showClear, ...props }: any) => <input onChange={(event) => onChange(event.target.value)} {...props} />,
     Modal,
+    Radio: ({ children, value }: any) => <label><input type="radio" value={value} />{children}</label>,
+    RadioGroup: ({ children }: any) => <div>{children}</div>,
     Table: ({ columns, dataSource }: any) => <div>{dataSource.map((item: any) => <div key={item.id}>{columns.map((column: any, index: number) => <React.Fragment key={index}>{column.render ? column.render(item[column.dataIndex], item) : item[column.dataIndex]}</React.Fragment>)}</div>)}</div>,
+    Tag: ({ children }: any) => <span>{children}</span>,
     Toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() },
     Tooltip: ({ children }: any) => <>{children}</>,
     Typography: { Text: ({ children }: any) => <span>{children}</span> },
@@ -91,7 +94,7 @@ describe("SystemKeysSection", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
 
     expect(await screen.findByText("sk_created_secret")).toBeInTheDocument();
-    expect(mocks.create).toHaveBeenCalledWith("Worker");
+    expect(mocks.create).toHaveBeenCalledWith("Worker", "smtp_submission");
     fireEvent.click(screen.getByRole("button", { name: "I copied the key" }));
 
     await waitFor(() => expect(screen.queryByText("sk_created_secret")).not.toBeInTheDocument());

@@ -34,9 +34,21 @@ func (s *Service) ensureICloudCookieMaintenanceTx(ctx context.Context, tx *gorm.
 	if iCloudCookieMaintenanceWorkflowActive(resource) {
 		return false, nil
 	}
-	appleNeedsRecovery, err := iCloudCookieChannelNeedsRecoveryTx(ctx, tx, resourceID, iCloudChannelAppleAccount)
+	appleNeedsRecovery, appleExists, err := iCloudCookieChannelNeedsRecoveryTx(ctx, tx, resourceID, iCloudChannelAppleAccount)
 	if err != nil {
 		return false, err
+	}
+	webNeedsRecovery, webExists := false, false
+	if resource.ICloudOpened {
+		webNeedsRecovery, webExists, err = iCloudCookieChannelNeedsRecoveryTx(ctx, tx, resourceID, iCloudChannelWeb)
+		if err != nil {
+			return false, err
+		}
+	}
+	// Repair a channel that is explicitly invalid before backfilling a
+	// missing sibling. Both invalid channels still keep Apple Account first.
+	if webNeedsRecovery && webExists && appleNeedsRecovery && !appleExists && !iCloudCookiePhoneBlacklistedTerminallyFailed(resource) {
+		return s.ensureICloudCookieRefreshTx(ctx, tx, resourceID, true)
 	}
 	if appleNeedsRecovery && (retryFailedApple || !iCloudCookieRecoveryTerminallyFailed(resource)) && !iCloudCookiePhoneBlacklistedTerminallyFailed(resource) {
 		created, err := s.ensureICloudCookieRecoveryTx(ctx, tx, resourceID)
@@ -50,10 +62,6 @@ func (s *Service) ensureICloudCookieMaintenanceTx(ctx context.Context, tx *gorm.
 		// account from repairing its independent iCloud Web channel.
 	}
 	if resource.ICloudOpened {
-		webNeedsRecovery, err := iCloudCookieChannelNeedsRecoveryTx(ctx, tx, resourceID, iCloudChannelWeb)
-		if err != nil {
-			return false, err
-		}
 		if webNeedsRecovery && !iCloudCookiePhoneBlacklistedTerminallyFailed(resource) {
 			return s.ensureICloudCookieRefreshTx(ctx, tx, resourceID, true)
 		}
@@ -64,17 +72,17 @@ func (s *Service) ensureICloudCookieMaintenanceTx(ctx context.Context, tx *gorm.
 	return false, nil
 }
 
-func iCloudCookieChannelNeedsRecoveryTx(ctx context.Context, tx *gorm.DB, resourceID uint, kind string) (bool, error) {
+func iCloudCookieChannelNeedsRecoveryTx(ctx context.Context, tx *gorm.DB, resourceID uint, kind string) (needsRecovery, exists bool, err error) {
 	var channel iCloudResourceChannelModel
-	err := tx.WithContext(ctx).Select("id", "session_status").
+	err = tx.WithContext(ctx).Select("id", "session_status").
 		Where("resource_id = ? AND kind = ?", resourceID, kind).Take(&channel).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return true, nil
+		return true, false, nil
 	}
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
-	return channel.SessionStatus == iCloudSessionInvalid, nil
+	return channel.SessionStatus == iCloudSessionInvalid, true, nil
 }
 
 // A terminal recovery failure must not be recreated on every validation or
@@ -102,7 +110,7 @@ func (s *Service) ensureICloudCookieRecoveryTx(ctx context.Context, tx *gorm.DB,
 		strings.TrimSpace(resource.BoundPhoneNumber) == "" || resource.KitesimPhoneID == nil {
 		return false, nil
 	}
-	appleNeedsRecovery, err := iCloudCookieChannelNeedsRecoveryTx(ctx, tx, resourceID, iCloudChannelAppleAccount)
+	appleNeedsRecovery, _, err := iCloudCookieChannelNeedsRecoveryTx(ctx, tx, resourceID, iCloudChannelAppleAccount)
 	if err != nil || !appleNeedsRecovery {
 		return false, err
 	}

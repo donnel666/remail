@@ -1726,7 +1726,7 @@ func (s *Service) failICloudOnboardingTask(ctx context.Context, task *iCloudOnbo
 		return nil
 	}
 	_ = s.refreshICloudOnboardingImport(context.WithoutCancel(ctx), iCloudOnboardingImportID(task))
-	if isICloudCookieRecoveryTask(task) && task.ResourceID != nil && task.ID == *task.ResourceID {
+	if isICloudCookieRecoveryTask(task) && category != "cookie_recovery_stale" && task.ResourceID != nil && task.ID == *task.ResourceID {
 		s.scheduleICloudCookieMaintenanceAfter(context.WithoutCancel(ctx), task.ResourceID, iCloudCookieRecoveryTaskKind)
 	}
 	return nil
