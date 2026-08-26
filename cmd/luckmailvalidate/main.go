@@ -77,6 +77,7 @@ var (
 type config struct {
 	apply                   bool
 	pendingSoftFallback     bool
+	pendingNoFreeze         bool
 	lockName                string
 	filePath                string
 	proxyFilePath           string
@@ -975,6 +976,7 @@ func parseFlags() config {
 	// ordinary luckmail command never enables this, so its hard reauthorization
 	// policy remains unchanged.
 	flag.BoolVar(&cfg.pendingSoftFallback, "pending-soft-fallback", false, "allow RT+mailbox fallback when hard reauthorization cannot complete")
+	flag.BoolVar(&cfg.pendingNoFreeze, "pending-no-freeze", false, "leave pending resources unchanged until a worker starts them")
 	flag.StringVar(&cfg.lockName, "lock-name", "remail_luckmail_validation", "database advisory lock name")
 	flag.StringVar(&cfg.filePath, "file", "/state/luckmail_ok.txt", "newline-delimited email input")
 	flag.StringVar(&cfg.proxyFilePath, "proxy-file", "", "newline-delimited proxy URLs or host:port values; overrides database validation proxies")
@@ -2269,9 +2271,11 @@ func freezeAndFeed(
 				releaseSlots(slots, len(batch))
 				return err
 			}
-			if err := freezeChunk(ctx, conn, batch); err != nil {
-				releaseSlots(slots, len(batch))
-				return err
+			if !cfg.pendingNoFreeze {
+				if err := freezeChunk(ctx, conn, batch); err != nil {
+					releaseSlots(slots, len(batch))
+					return err
+				}
 			}
 		}
 		state.FreezeOffset = next

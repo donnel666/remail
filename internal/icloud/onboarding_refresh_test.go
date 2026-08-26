@@ -1013,7 +1013,7 @@ func TestICloudTrustedPhoneNeverReplacesKnownPhoneWithSuffixMatch(t *testing.T) 
 	service := NewService(db, nil, nil)
 	service.now = func() time.Time { return now }
 	service.smsPhones = phone
-	binding, err := service.bindICloudOnboardingTrustedPhone(context.Background(), &task, "01")
+	binding, err := service.bindICloudOnboardingTrustedPhone(context.Background(), &task, "01", false)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -69,6 +69,7 @@ type appleFlow struct {
 	repairToken    string
 	skipHSA2       bool
 	apiKey         string
+	accountCountry string
 }
 
 func newAppleFlow(ctx context.Context, proxyURL string) (*appleFlow, error) {
@@ -291,6 +292,10 @@ func processAppleAccountOnce(ctx context.Context, proxyURL string, account accou
 	if appleAccountUsesHSA2(profile) {
 		return accountOutput{}, errTwoFactorEnabled
 	}
+	region, err := appleAccountRegion(profile, flow.accountCountry, account.Region)
+	if err != nil {
+		return accountOutput{}, err
+	}
 	questions, err := updateAppleQuestions(flow, profile, loginPassword, newAnswers)
 	if err != nil {
 		return accountOutput{}, err
@@ -303,7 +308,7 @@ func processAppleAccountOnce(ctx context.Context, proxyURL string, account accou
 			return accountOutput{}, err
 		}
 	}
-	return accountOutput{Password: account.NewPassword, Birthday: account.NewBirthday, Questions: questions}, nil
+	return accountOutput{Region: region, Password: account.NewPassword, Birthday: account.NewBirthday, Questions: questions}, nil
 }
 
 func (f *appleFlow) request(method, rawURL string, body any, html, profile, sendHashcash bool, accept string) ([]byte, error) {
@@ -465,6 +470,9 @@ func (f *appleFlow) absorb(headers headerGetter, host string) {
 	if value := strings.TrimSpace(headers.Get("X-Apple-Auth-Attributes")); value != "" {
 		f.authAttributes = value
 	}
+	if value := strings.TrimSpace(headers.Get("X-Apple-ID-Account-Country")); value != "" {
+		f.accountCountry = value
+	}
 	if value := strings.TrimSpace(headers.Get("X-Apple-HC-Bits")); value != "" {
 		if parsed, err := strconv.Atoi(value); err == nil {
 			f.hashcashBits = parsed
@@ -506,6 +514,53 @@ func fetchAppleAccount(flow *appleFlow) (map[string]any, error) {
 	}
 	flow.apiKey = valueString(profile["apiKey"])
 	return profile, nil
+}
+
+func appleAccountRegion(profile map[string]any, sessionCountry, fallback string) (string, error) {
+	for _, path := range [][]string{{"dsInfo", "countryCode"}, {"account", "countryCode"}, {"appleID", "countryCode"}, {"countryCode"}} {
+		var current any = profile
+		for _, key := range path {
+			current = asMap(current)[key]
+		}
+		if code := normalizeAppleCountryCode(valueString(current)); code != "" {
+			if label, ok := appleCountryRegionLabels[code]; ok {
+				return label + "区", nil
+			}
+			return code, nil
+		}
+	}
+	if code := normalizeAppleCountryCode(sessionCountry); code != "" {
+		if label, ok := appleCountryRegionLabels[code]; ok {
+			return label + "区", nil
+		}
+		return code, nil
+	}
+	if fallback = strings.TrimSpace(fallback); fallback != "" {
+		return fallback, nil
+	}
+	return "", errors.New("account profile did not return countryCode")
+}
+
+func normalizeAppleCountryCode(value string) string {
+	value = strings.ToUpper(strings.TrimSpace(value))
+	switch value {
+	case "USA":
+		return "US"
+	case "UK":
+		return "GB"
+	default:
+		return value
+	}
+}
+
+var appleCountryRegionLabels = map[string]string{
+	"US": "美国", "CA": "加拿大", "CN": "中国", "HK": "香港", "TW": "台湾", "MO": "澳门",
+	"JP": "日本", "KR": "韩国", "GB": "英国", "AU": "澳大利亚", "NZ": "新西兰", "SG": "新加坡",
+	"MY": "马来西亚", "TH": "泰国", "VN": "越南", "PH": "菲律宾", "ID": "印度尼西亚", "IN": "印度",
+	"DE": "德国", "FR": "法国", "IT": "意大利", "ES": "西班牙", "PT": "葡萄牙", "NL": "荷兰",
+	"BE": "比利时", "AT": "奥地利", "CH": "瑞士", "SE": "瑞典", "NO": "挪威", "DK": "丹麦",
+	"FI": "芬兰", "PL": "波兰", "IE": "爱尔兰", "TR": "土耳其", "MX": "墨西哥", "BR": "巴西",
+	"AR": "阿根廷", "SA": "沙特", "AE": "阿联酋",
 }
 
 func updateAppleQuestions(flow *appleFlow, profile map[string]any, password string, replacements [3]string) ([3]securityAnswer, error) {

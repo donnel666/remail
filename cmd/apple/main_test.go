@@ -7,6 +7,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -43,6 +44,14 @@ func TestCredentialMetadataAndOutputFormat(t *testing.T) {
 	require.Equal(t, "1990-01-02", parsed.BirthdayISO)
 	require.Equal(t, securityAnswer{Question: "Question one?", Answer: "remail1"}, parsed.Current[0])
 
+	line, err = formatOutputLine(account, accountOutput{Region: "香港区", Password: "NewSecret1!", Birthday: "1990-01-02", Questions: [3]securityAnswer{
+		{Question: "Question one?", Answer: "remail1"},
+		{Question: "Question two?", Answer: "remail2"},
+		{Question: "Question three?", Answer: "remail3"},
+	}})
+	require.NoError(t, err)
+	require.True(t, strings.HasPrefix(line, "香港区----"))
+
 	textPath := filepath.Join(t.TempDir(), "apple.uk.txt")
 	require.NoError(t, os.WriteFile(textPath, []byte("owner@example.com----Secret123----qt11----qt22----qt33----2000/2/24\n"), 0o600))
 	accounts, _, _, _, err := loadAccounts([]string{textPath}, map[string]struct{}{})
@@ -50,6 +59,33 @@ func TestCredentialMetadataAndOutputFormat(t *testing.T) {
 	require.Len(t, accounts, 1)
 	require.Equal(t, "英国区", accounts[0].Region)
 	require.Equal(t, "未知", accounts[0].ICloudOpen)
+}
+
+func TestAppleAccountRegionUsesSessionCountryCode(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		profile map[string]any
+		want    string
+	}{
+		{name: "ds info", profile: map[string]any{"dsInfo": map[string]any{"countryCode": "us"}}, want: "美国区"},
+		{name: "account", profile: map[string]any{"account": map[string]any{"countryCode": "HK"}}, want: "香港区"},
+		{name: "apple id", profile: map[string]any{"appleID": map[string]any{"countryCode": "GB"}}, want: "英国区"},
+		{name: "root", profile: map[string]any{"countryCode": "ZZ"}, want: "ZZ"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := appleAccountRegion(test.profile, "", "未知地区")
+			require.NoError(t, err)
+			require.Equal(t, test.want, got)
+		})
+	}
+	got, err := appleAccountRegion(map[string]any{"account": map[string]any{}}, "ca", "未知地区")
+	require.NoError(t, err)
+	require.Equal(t, "加拿大区", got)
+	got, err = appleAccountRegion(map[string]any{"account": map[string]any{}}, "", "美国区")
+	require.NoError(t, err)
+	require.Equal(t, "美国区", got)
+	_, err = appleAccountRegion(map[string]any{"account": map[string]any{}}, "", "")
+	require.EqualError(t, err, "account profile did not return countryCode")
 }
 
 func TestGeneratedChangesAreDifferentAndRecoverable(t *testing.T) {

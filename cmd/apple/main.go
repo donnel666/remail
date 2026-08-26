@@ -67,6 +67,7 @@ type accountInput struct {
 }
 
 type accountOutput struct {
+	Region    string
 	Password  string
 	Birthday  string
 	Questions [3]securityAnswer
@@ -528,7 +529,14 @@ func (w *outputWriter) append(account accountInput, result accountOutput) error 
 }
 
 func formatOutputLine(account accountInput, result accountOutput) (string, error) {
-	fields := []string{account.Region, account.ICloudOpen, account.Email, sanitizeOutputField(result.Password)}
+	region := strings.TrimSpace(result.Region)
+	if region == "" {
+		region = strings.TrimSpace(account.Region)
+	}
+	if region == "" {
+		return "", errors.New("account region is missing")
+	}
+	fields := []string{sanitizeOutputField(region), account.ICloudOpen, account.Email, sanitizeOutputField(result.Password)}
 	for index, item := range result.Questions {
 		question := sanitizeOutputField(item.Question)
 		answer := sanitizeOutputField(item.Answer)
