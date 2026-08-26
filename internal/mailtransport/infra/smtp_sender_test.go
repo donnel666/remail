@@ -51,6 +51,15 @@ func TestSMTPMessageUsesMultipartAlternative(t *testing.T) {
 	assert.Contains(t, raw, "<h1")
 }
 
+func TestSignedSMTPMessagePreservesSubmittedRFC822(t *testing.T) {
+	raw := []byte("From: sender@example.com\r\nSubject: submitted\r\nX-App: local\r\n\r\nbody")
+	message := domain.OutboundMessage{RawMessage: raw}
+
+	rendered, err := newSignedSMTPMessage("sender@example.com", "user@example.net", message, nil)
+	require.NoError(t, err)
+	require.Equal(t, raw, rendered)
+}
+
 func TestSMTPMessageEmbedsInlineImagesByContentID(t *testing.T) {
 	message := mailapp.VerificationCodeMessage("user@example.com", "123456")
 	message.HTMLBody = `<p>正文</p><img src="cid:aa1@remail" alt="工单回复图片">`

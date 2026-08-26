@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useState } from "react";
-import { Button, Empty, Input, Modal, Table, Toast, Tooltip, Typography } from "@douyinfe/semi-ui";
+import { Button, Empty, Input, Modal, Radio, RadioGroup, Table, Tag, Toast, Tooltip, Typography } from "@douyinfe/semi-ui";
 import { KeyRound, Plus, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -10,6 +10,7 @@ import {
   deleteSystemKey,
   listSystemKeys,
   type AdminSystemKey,
+  type SystemKeyPurpose,
 } from "@/lib/system-keys-api";
 
 import type { SectionProps } from "./index";
@@ -26,12 +27,14 @@ function formatDateTime(value?: string | null) {
 export default function SystemKeysSection({ canSensitive, canWrite }: SectionProps) {
   const { t } = useTranslation();
   const nameInputId = useId();
+  const purposeLabelId = useId();
   const [keys, setKeys] = useState<AdminSystemKey[]>([]);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState<number | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
+  const [purpose, setPurpose] = useState<SystemKeyPurpose>("smtp_submission");
   const [createdKey, setCreatedKey] = useState<AdminSystemKey | null>(null);
 
   const load = useCallback(async () => {
@@ -59,11 +62,12 @@ export default function SystemKeysSection({ canSensitive, canWrite }: SectionPro
     }
     setCreating(true);
     try {
-      const result = await createSystemKey(nextName);
+      const result = await createSystemKey(nextName, purpose);
       if (!result.keyPlain) throw new Error("System key plaintext was not returned.");
       setKeys((current) => [{ ...result, keyPlain: undefined }, ...current]);
       setCreateOpen(false);
       setName("");
+      setPurpose("smtp_submission");
       setCreatedKey(result);
       Toast.success(t("System key created."));
     } catch (error) {
@@ -112,6 +116,16 @@ export default function SystemKeysSection({ canSensitive, canWrite }: SectionPro
       dataIndex: "keyPrefix",
       width: 210,
       render: (value: string) => <Text className="font-mono-data" type="secondary">{value}...</Text>,
+    },
+    {
+      title: t("Purpose"),
+      dataIndex: "purpose",
+      width: 180,
+      render: (value: SystemKeyPurpose) => (
+        <Tag color={value === "smtp_submission" ? "blue" : "green"}>
+          {t(value === "smtp_submission" ? "SMTP submission" : "iCloud forwarding")}
+        </Tag>
+      ),
     },
     {
       title: t("Created At"),
@@ -168,7 +182,7 @@ export default function SystemKeysSection({ canSensitive, canWrite }: SectionPro
         loading={loading}
         pagination={false}
         rowKey="id"
-        scroll={{ x: 910 }}
+        scroll={{ x: 1090 }}
         size="middle"
       />
     </SettingsSection>
@@ -183,6 +197,19 @@ export default function SystemKeysSection({ canSensitive, canWrite }: SectionPro
       title={t("Create system key")}
       visible={createOpen}
     >
+      <div className="mb-4">
+        <span className="mb-1.5 block text-sm font-medium" id={purposeLabelId}>{t("Purpose")}</span>
+        <RadioGroup
+          aria-labelledby={purposeLabelId}
+          buttonSize="middle"
+          onChange={(event) => setPurpose(event.target.value as SystemKeyPurpose)}
+          type="button"
+          value={purpose}
+        >
+          <Radio value="smtp_submission">{t("SMTP submission")}</Radio>
+          <Radio value="icloud_forwarding">{t("iCloud forwarding")}</Radio>
+        </RadioGroup>
+      </div>
       <label className="block" htmlFor={nameInputId}>
         <span className="mb-1.5 block text-sm font-medium">{t("System key name")}</span>
         <Input

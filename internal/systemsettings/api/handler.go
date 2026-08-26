@@ -72,12 +72,14 @@ type bulkSettingItem struct {
 }
 
 type systemKeyRequest struct {
-	Name string `json:"name"`
+	Name    string                  `json:"name"`
+	Purpose domain.SystemKeyPurpose `json:"purpose"`
 }
 
 type systemKeyDTO struct {
 	ID         uint       `json:"id"`
 	Name       string     `json:"name"`
+	Purpose    string     `json:"purpose"`
 	KeyPrefix  string     `json:"keyPrefix"`
 	KeyPlain   string     `json:"keyPlain,omitempty"`
 	LastUsedAt *time.Time `json:"lastUsedAt"`
@@ -111,7 +113,10 @@ func (h *Handler) PostSystemKey(c *gin.Context) {
 		writeSystemKeyError(c, domain.ErrInvalidSystemKey)
 		return
 	}
-	key, err := h.module.SystemKeys.Create(c.Request.Context(), req.Name, mutationMeta(c))
+	if req.Purpose == "" {
+		req.Purpose = domain.SystemKeyPurposeICloudForwarding
+	}
+	key, err := h.module.SystemKeys.Create(c.Request.Context(), req.Name, req.Purpose, mutationMeta(c))
 	if err != nil {
 		writeSystemKeyError(c, err)
 		return
@@ -138,7 +143,7 @@ func (h *Handler) DeleteSystemKey(c *gin.Context) {
 
 func toSystemKeyDTO(key domain.SystemKey, includePlain bool) systemKeyDTO {
 	dto := systemKeyDTO{
-		ID: key.ID, Name: key.Name, KeyPrefix: key.KeyPrefix,
+		ID: key.ID, Name: key.Name, Purpose: string(key.Purpose), KeyPrefix: key.KeyPrefix,
 		LastUsedAt: key.LastUsedAt, CreatedAt: key.CreatedAt,
 	}
 	if includePlain {

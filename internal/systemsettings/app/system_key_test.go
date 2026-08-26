@@ -23,7 +23,7 @@ func TestSystemKeyPlaintextIsReturnedOnceAndRevocationStopsAuthentication(t *tes
 	repo := settingsinfra.NewRepository(db)
 	useCase := settingsapp.NewSystemKeyUseCase(repo, governanceinfra.NewOperationLogRepo(db))
 	ctx := context.Background()
-	created, err := useCase.Create(ctx, "iCloud worker", settingsapp.MutationMeta{OperatorUserID: 7})
+	created, err := useCase.Create(ctx, "iCloud worker", settingsdomain.SystemKeyPurposeICloudForwarding, settingsapp.MutationMeta{OperatorUserID: 7})
 	require.NoError(t, err)
 	require.NotEmpty(t, created.KeyPlain)
 	require.True(t, strings.HasPrefix(created.KeyPlain, "sk_"))
@@ -33,6 +33,7 @@ func TestSystemKeyPlaintextIsReturnedOnceAndRevocationStopsAuthentication(t *tes
 	require.NoError(t, db.First(&stored, created.ID).Error)
 	require.NotEqual(t, created.KeyPlain, stored.KeyHash)
 	require.Len(t, stored.KeyHash, 64)
+	require.Equal(t, string(settingsdomain.SystemKeyPurposeICloudForwarding), stored.Purpose)
 
 	listed, err := useCase.List(ctx)
 	require.NoError(t, err)
@@ -52,6 +53,15 @@ func TestSystemKeyPlaintextIsReturnedOnceAndRevocationStopsAuthentication(t *tes
 	var usedTwice settingsinfra.SystemKeyModel
 	require.NoError(t, db.First(&usedTwice, created.ID).Error)
 	require.Equal(t, usedOnce.LastUsedAt, usedTwice.LastUsedAt)
+	_, err = useCase.AuthenticateSMTPSubmissionKey(ctx, created.KeyPlain)
+	require.ErrorIs(t, err, settingsdomain.ErrInvalidSystemKey)
+
+	smtpKey, err := useCase.Create(ctx, "SMTP sender", settingsdomain.SystemKeyPurposeSMTPSubmission, settingsapp.MutationMeta{OperatorUserID: 7})
+	require.NoError(t, err)
+	_, err = useCase.AuthenticateSMTPSubmissionKey(ctx, smtpKey.KeyPlain)
+	require.NoError(t, err)
+	_, err = useCase.AuthenticateSystemKey(ctx, smtpKey.KeyPlain)
+	require.ErrorIs(t, err, settingsdomain.ErrInvalidSystemKey)
 
 	require.NoError(t, useCase.Delete(ctx, created.ID, settingsapp.MutationMeta{OperatorUserID: 7}))
 	_, err = useCase.AuthenticateSystemKey(ctx, created.KeyPlain)

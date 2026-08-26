@@ -57,6 +57,7 @@ services:
     ports:
       - "127.0.0.1:8080:8080"
       - "127.0.0.1:6060:6060"
+      - "587:2587"
     environment:
       TZ: Asia/Shanghai
       SERVER_ADDR: ":8080"
@@ -87,6 +88,8 @@ services:
       SMTP_DKIM_IDENTITY: "${SMTP_DKIM_IDENTITY:-}"
       SMTP_DKIM_PRIVATE_KEY: "${SMTP_DKIM_PRIVATE_KEY:-}"
       SMTP_DKIM_PRIVATE_KEY_FILE: "${SMTP_DKIM_PRIVATE_KEY_FILE:-}"
+      SMTP_SUBMISSION_ENABLED: "${SMTP_SUBMISSION_ENABLED:-true}"
+      SMTP_SUBMISSION_ADDR: ":2587"
       PPROF_ADDR: ":6060"
       PPROF_CPU_THRESHOLD: "80"
       PPROF_CPU_PROFILE_DIR: "pprof"

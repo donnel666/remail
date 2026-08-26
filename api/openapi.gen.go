@@ -1520,6 +1520,42 @@ func (e AdminOperationLogResult) Valid() bool {
 	}
 }
 
+// Defines values for AdminSystemKeyPurpose.
+const (
+	AdminSystemKeyPurposeIcloudForwarding AdminSystemKeyPurpose = "icloud_forwarding"
+	AdminSystemKeyPurposeSmtpSubmission   AdminSystemKeyPurpose = "smtp_submission"
+)
+
+// Valid indicates whether the value is a known member of the AdminSystemKeyPurpose enum.
+func (e AdminSystemKeyPurpose) Valid() bool {
+	switch e {
+	case AdminSystemKeyPurposeIcloudForwarding:
+		return true
+	case AdminSystemKeyPurposeSmtpSubmission:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminSystemKeyCreateRequestPurpose.
+const (
+	AdminSystemKeyCreateRequestPurposeIcloudForwarding AdminSystemKeyCreateRequestPurpose = "icloud_forwarding"
+	AdminSystemKeyCreateRequestPurposeSmtpSubmission   AdminSystemKeyCreateRequestPurpose = "smtp_submission"
+)
+
+// Valid indicates whether the value is a known member of the AdminSystemKeyCreateRequestPurpose enum.
+func (e AdminSystemKeyCreateRequestPurpose) Valid() bool {
+	switch e {
+	case AdminSystemKeyCreateRequestPurposeIcloudForwarding:
+		return true
+	case AdminSystemKeyCreateRequestPurposeSmtpSubmission:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AdminSystemLogItemCategory.
 const (
 	AdminSystemLogItemCategorySystem AdminSystemLogItemCategory = "system"
@@ -7221,16 +7257,26 @@ type AdminSystemKey struct {
 	Id        int       `json:"id"`
 
 	// KeyPlain Plain system key returned only by the create endpoint.
-	KeyPlain   *string    `json:"keyPlain,omitempty"`
-	KeyPrefix  string     `json:"keyPrefix"`
-	LastUsedAt *time.Time `json:"lastUsedAt"`
-	Name       string     `json:"name"`
+	KeyPlain   *string               `json:"keyPlain,omitempty"`
+	KeyPrefix  string                `json:"keyPrefix"`
+	LastUsedAt *time.Time            `json:"lastUsedAt"`
+	Name       string                `json:"name"`
+	Purpose    AdminSystemKeyPurpose `json:"purpose"`
 }
+
+// AdminSystemKeyPurpose defines model for AdminSystemKey.Purpose.
+type AdminSystemKeyPurpose string
 
 // AdminSystemKeyCreateRequest defines model for AdminSystemKeyCreateRequest.
 type AdminSystemKeyCreateRequest struct {
 	Name string `json:"name"`
+
+	// Purpose Limits the key to either the iCloud forwarding API or SMTP submission.
+	Purpose *AdminSystemKeyCreateRequestPurpose `json:"purpose,omitempty"`
 }
+
+// AdminSystemKeyCreateRequestPurpose Limits the key to either the iCloud forwarding API or SMTP submission.
+type AdminSystemKeyCreateRequestPurpose string
 
 // AdminSystemKeyList defines model for AdminSystemKeyList.
 type AdminSystemKeyList struct {

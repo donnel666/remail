@@ -41,9 +41,9 @@ func NewSystemKeyUseCase(repo SystemKeyRepository, logs governanceapp.OperationL
 	return &SystemKeyUseCase{repo: repo, logs: logs, now: func() time.Time { return time.Now().UTC() }}
 }
 
-func (uc *SystemKeyUseCase) Create(ctx context.Context, name string, meta MutationMeta) (*domain.SystemKey, error) {
+func (uc *SystemKeyUseCase) Create(ctx context.Context, name string, purpose domain.SystemKeyPurpose, meta MutationMeta) (*domain.SystemKey, error) {
 	name = strings.TrimSpace(name)
-	if uc == nil || uc.repo == nil || uc.logs == nil || meta.OperatorUserID == 0 || name == "" || utf8.RuneCountInString(name) > 120 {
+	if uc == nil || uc.repo == nil || uc.logs == nil || meta.OperatorUserID == 0 || name == "" || utf8.RuneCountInString(name) > 120 || !validSystemKeyPurpose(purpose) {
 		return nil, domain.ErrInvalidSystemKey
 	}
 	plain, hash, err := newSystemKeyCredential()
@@ -51,7 +51,7 @@ func (uc *SystemKeyUseCase) Create(ctx context.Context, name string, meta Mutati
 		return nil, fmt.Errorf("generate system key: %w", err)
 	}
 	key := domain.SystemKey{
-		Name: name, KeyPrefix: credentialPrefix(plain), KeyPlain: plain,
+		Name: name, Purpose: purpose, KeyPrefix: credentialPrefix(plain), KeyPlain: plain,
 		CreatedAt: uc.now(),
 	}
 	var created *domain.SystemKey
@@ -104,15 +104,23 @@ func (uc *SystemKeyUseCase) Delete(ctx context.Context, keyID uint, meta Mutatio
 }
 
 func (uc *SystemKeyUseCase) AuthenticateSystemKey(ctx context.Context, plain string) (uint, error) {
+	return uc.authenticateSystemKey(ctx, plain, domain.SystemKeyPurposeICloudForwarding)
+}
+
+func (uc *SystemKeyUseCase) AuthenticateSMTPSubmissionKey(ctx context.Context, plain string) (uint, error) {
+	return uc.authenticateSystemKey(ctx, plain, domain.SystemKeyPurposeSMTPSubmission)
+}
+
+func (uc *SystemKeyUseCase) authenticateSystemKey(ctx context.Context, plain string, purpose domain.SystemKeyPurpose) (uint, error) {
 	plain = strings.TrimSpace(plain)
-	if uc == nil || uc.repo == nil || !validSystemKeyCredential(plain) {
+	if uc == nil || uc.repo == nil || !validSystemKeyCredential(plain) || !validSystemKeyPurpose(purpose) {
 		return 0, domain.ErrInvalidSystemKey
 	}
 	key, err := uc.repo.FindSystemKeyByHash(ctx, systemKeyHash(plain))
 	if err != nil {
 		return 0, err
 	}
-	if key == nil || key.ID == 0 {
+	if key == nil || key.ID == 0 || key.Purpose != purpose {
 		return 0, domain.ErrInvalidSystemKey
 	}
 	now := uc.now()
@@ -122,6 +130,10 @@ func (uc *SystemKeyUseCase) AuthenticateSystemKey(ctx context.Context, plain str
 		}
 	}
 	return key.ID, nil
+}
+
+func validSystemKeyPurpose(purpose domain.SystemKeyPurpose) bool {
+	return purpose == domain.SystemKeyPurposeICloudForwarding || purpose == domain.SystemKeyPurposeSMTPSubmission
 }
 
 func newSystemKeyCredential() (plain, hash string, err error) {

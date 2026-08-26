@@ -2,6 +2,7 @@ import { apiClient, csrfHeader, unwrap } from "./api-client";
 import type { components } from "./openapi/schema";
 
 export type AdminSystemKey = components["schemas"]["AdminSystemKey"];
+export type SystemKeyPurpose = NonNullable<components["schemas"]["AdminSystemKeyCreateRequest"]["purpose"]>;
 
 export async function listSystemKeys(signal?: AbortSignal) {
   return unwrap(
@@ -9,10 +10,10 @@ export async function listSystemKeys(signal?: AbortSignal) {
   );
 }
 
-export async function createSystemKey(name: string) {
+export async function createSystemKey(name: string, purpose: SystemKeyPurpose) {
   return unwrap(
     await apiClient.POST("/v1/admin/system-keys", {
-      body: { name },
+      body: { name, purpose },
       params: { header: csrfHeader() },
     }),
   );

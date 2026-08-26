@@ -31,5 +31,5 @@ COPY --from=backend /apple /usr/local/bin/apple
 COPY --from=backend /aliasworker /usr/local/bin/aliasworker
 COPY --from=backend /app/migrations /app/migrations
 ENV MIGRATIONS_DIR=/app/migrations
-EXPOSE 8080 2525
+EXPOSE 8080 2525 2587
 ENTRYPOINT ["/server"]

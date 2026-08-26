@@ -130,6 +130,15 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 				ReadTimeout:     p.SMTP.InboundReadTimeout,
 				WriteTimeout:    p.SMTP.InboundWriteTimeout,
 			},
+			mailinfra.SubmissionSMTPConfig{
+				Enabled:         p.SMTP.SubmissionEnabled,
+				Addr:            p.SMTP.SubmissionAddr,
+				Domain:          p.SMTP.HELODomain,
+				MaxMessageBytes: p.SMTP.InboundMaxMessageBytes,
+				ReadTimeout:     p.SMTP.InboundReadTimeout,
+				WriteTimeout:    p.SMTP.InboundWriteTimeout,
+			},
+			systemSettingsMod.SystemKeys,
 			proxyMod.ProxyUseCase,
 		)
 		if err != nil {

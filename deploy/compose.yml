@@ -95,6 +95,8 @@ services:
       SMTP_INBOUND_ADDR: "${SMTP_INBOUND_ADDR}"
       SMTP_INBOUND_DOMAIN: "${SMTP_INBOUND_DOMAIN}"
       SMTP_INBOUND_MAX_MESSAGE_BYTES: "${SMTP_INBOUND_MAX_MESSAGE_BYTES}"
+      SMTP_SUBMISSION_ENABLED: "${SMTP_SUBMISSION_ENABLED:-true}"
+      SMTP_SUBMISSION_ADDR: ":2587"
       LOG_LEVEL: info
       LOG_FORMAT: json
       PPROF_ADDR: "${PPROF_ADDR}"
@@ -113,6 +115,7 @@ services:
           nocopy: true
     ports:
       - "25:2525"
+      - "587:2587"
       - "127.0.0.1:8080:8080"
       - "127.0.0.1:6060:6060"
     depends_on:

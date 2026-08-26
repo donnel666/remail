@@ -6833,10 +6833,18 @@ export interface components {
         };
         AdminSystemKeyCreateRequest: {
             name: string;
+            /**
+             * @description Limits the key to either the iCloud forwarding API or SMTP submission.
+             * @default icloud_forwarding
+             * @enum {string}
+             */
+            purpose: "icloud_forwarding" | "smtp_submission";
         };
         AdminSystemKey: {
             id: number;
             name: string;
+            /** @enum {string} */
+            purpose: "icloud_forwarding" | "smtp_submission";
             keyPrefix: string;
             /** @description Plain system key returned only by the create endpoint. */
             keyPlain?: string;

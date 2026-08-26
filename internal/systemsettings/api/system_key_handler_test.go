@@ -39,11 +39,12 @@ func TestAdminSystemKeyPlaintextIsReturnedOnlyOnCreate(t *testing.T) {
 	}))
 
 	createdResponse := httptest.NewRecorder()
-	router.ServeHTTP(createdResponse, requestWithSession(http.MethodPost, "/v1/admin/system-keys", `{"name":"iCloud worker"}`))
+	router.ServeHTTP(createdResponse, requestWithSession(http.MethodPost, "/v1/admin/system-keys", `{"name":"SMTP sender","purpose":"smtp_submission"}`))
 	require.Equal(t, http.StatusCreated, createdResponse.Code)
 	var created systemKeyDTO
 	require.NoError(t, json.Unmarshal(createdResponse.Body.Bytes(), &created))
 	require.NotEmpty(t, created.KeyPlain)
+	require.Equal(t, "smtp_submission", created.Purpose)
 
 	listResponse := httptest.NewRecorder()
 	router.ServeHTTP(listResponse, requestWithSession(http.MethodGet, "/v1/admin/system-keys", ""))

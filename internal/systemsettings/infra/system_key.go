@@ -13,6 +13,7 @@ import (
 type SystemKeyModel struct {
 	ID         uint       `gorm:"column:id;primaryKey;autoIncrement"`
 	Name       string     `gorm:"column:name;type:varchar(120);not null"`
+	Purpose    string     `gorm:"column:purpose;type:varchar(32);not null;default:icloud_forwarding"`
 	KeyPrefix  string     `gorm:"column:key_prefix;type:varchar(20);not null"`
 	KeyHash    string     `gorm:"column:key_hash;type:char(64);not null"`
 	LastUsedAt *time.Time `gorm:"column:last_used_at"`
@@ -24,14 +25,14 @@ func (SystemKeyModel) TableName() string { return "system_keys" }
 
 func (m SystemKeyModel) toDomain() domain.SystemKey {
 	return domain.SystemKey{
-		ID: m.ID, Name: m.Name, KeyPrefix: m.KeyPrefix,
+		ID: m.ID, Name: m.Name, Purpose: domain.SystemKeyPurpose(m.Purpose), KeyPrefix: m.KeyPrefix,
 		LastUsedAt: m.LastUsedAt, CreatedAt: m.CreatedAt,
 	}
 }
 
 func (r *Repository) CreateSystemKey(ctx context.Context, key domain.SystemKey, keyHash string) (*domain.SystemKey, error) {
 	model := SystemKeyModel{
-		Name: key.Name, KeyPrefix: key.KeyPrefix, KeyHash: keyHash,
+		Name: key.Name, Purpose: string(key.Purpose), KeyPrefix: key.KeyPrefix, KeyHash: keyHash,
 		CreatedAt: key.CreatedAt,
 	}
 	if err := r.dbFor(ctx).Create(&model).Error; err != nil {

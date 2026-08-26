@@ -290,7 +290,11 @@ Microsoft ACL 只做 Go 进程内模块。辅助邮箱选择、掩码解析、�
 - `mailtransport:inbound_dispatch` 定期扫描 `pending` 和 stale `processing` 记录并补投递，读取原文失败按 Asynq 尝试次数恢复为 `pending` 或最终 `failed`，失败路径必须写 SystemLog。
 - Microsoft 辅助邮箱收码属于验证流程内的快速消费场景，`BindingCodeWaitPort` 可以读取 `pending/processing/stored` 入站事实对应的 private RFC822 原文；`stored` 只表示 MailMatch 后续消费前的异步可读确认，不应成为验证码读取的前置条件。收码轮询默认短间隔，并在超时边界保留小的晚到宽限窗口，以吸收 SMTP 入站与 Microsoft 页面流之间的秒级抖动。
 
-### 8.3 DNS
+### 8.3 局域网 SMTP 提交
+
+容器默认把宿主机 `587` 映射到 `server:2587`。外部应用使用无加密 SMTP、可选择 `AUTH PLAIN` 或 `AUTH LOGIN`（截图中的“强制 AUTH LOGIN”可开启）、填写任意用户名，并把后台“系统设置 > System Keys”随机生成、用途选择为“SMTP 发信”的完整系统 Key 作为密码；服务端忽略用户名，只校验 SMTP 用途的系统 Key。提交会话必须先认证，`MAIL FROM` 作为真实外发信封发件人，每次只接受一个 `RCPT TO`，RFC822 原文清除 `Bcc`、`Resent-Bcc` 和 `Return-Path` 后通过现有外发队列异步投递。系统 Key 撤销后立即不能再认证；该明文认证端口只适合受信任局域网，公网使用前必须增加 TLS。
+
+### 8.4 DNS
 
 开发/测试默认 DNS：
 

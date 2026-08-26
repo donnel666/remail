@@ -199,6 +199,13 @@ func newSMTPMessage(from string, to string, message domain.OutboundMessage) (*go
 }
 
 func newSignedSMTPMessage(from string, to string, message domain.OutboundMessage, signer *DKIMSigner) ([]byte, error) {
+	if len(message.RawMessage) > 0 {
+		rawMessage := append([]byte(nil), message.RawMessage...)
+		if signer == nil {
+			return rawMessage, nil
+		}
+		return signer.Sign(rawMessage)
+	}
 	mailMessage, err := newSMTPMessage(from, to, message)
 	if err != nil {
 		return nil, err

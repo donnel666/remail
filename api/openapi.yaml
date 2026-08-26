@@ -18114,17 +18114,25 @@ components:
           type: string
           minLength: 1
           maxLength: 120
+        purpose:
+          type: string
+          enum: [icloud_forwarding, smtp_submission]
+          default: icloud_forwarding
+          description: Limits the key to either the iCloud forwarding API or SMTP submission.
       additionalProperties: false
 
     AdminSystemKey:
       type: object
-      required: [id, name, keyPrefix, lastUsedAt, createdAt]
+      required: [id, name, purpose, keyPrefix, lastUsedAt, createdAt]
       properties:
         id:
           type: integer
           minimum: 1
         name:
           type: string
+        purpose:
+          type: string
+          enum: [icloud_forwarding, smtp_submission]
         keyPrefix:
           type: string
         keyPlain:

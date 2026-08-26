@@ -49,6 +49,8 @@ func TestConfigLoadDefaults(t *testing.T) {
 	assert.Equal(t, ":2525", cfg.SMTP.InboundAddr)
 	assert.Equal(t, "mx.aishop6.com", cfg.SMTP.InboundDomain)
 	assert.Equal(t, int64(10<<20), cfg.SMTP.InboundMaxMessageBytes)
+	assert.False(t, cfg.SMTP.SubmissionEnabled)
+	assert.Equal(t, ":2587", cfg.SMTP.SubmissionAddr)
 	assert.Equal(t, "no-reply@aishop6.com", cfg.SMTP.TicketMailFrom)
 	assert.Equal(t, "support", cfg.SMTP.TicketReplyLocalPart)
 	assert.Equal(t, "aishop6.com", cfg.SMTP.TicketReplyDomain)
@@ -259,6 +261,8 @@ func clearConfigEnv(t *testing.T) {
 		"SMTP_INBOUND_MAX_RECIPIENTS",
 		"SMTP_INBOUND_READ_TIMEOUT",
 		"SMTP_INBOUND_WRITE_TIMEOUT",
+		"SMTP_SUBMISSION_ENABLED",
+		"SMTP_SUBMISSION_ADDR",
 		"SMTP_TICKET_MAIL_FROM",
 		"SMTP_TICKET_REPLY_LOCAL",
 		"SMTP_TICKET_REPLY_DOMAIN",

@@ -14,6 +14,7 @@ const (
 	PurposeVerificationCode OutboundPurpose = "verification_code"
 	PurposeSystemNotice     OutboundPurpose = "system_notification"
 	PurposeSecurityNotice   OutboundPurpose = "security_notice"
+	PurposeSMTPSubmission   OutboundPurpose = "smtp_submission"
 )
 
 var (
@@ -40,6 +41,7 @@ type OutboundMessage struct {
 	TextBody       string
 	HTMLBody       string
 	InlineImages   []OutboundInlineImage
+	RawMessage     []byte
 }
 
 type OutboundInlineImage struct {
@@ -100,6 +102,7 @@ func (m OutboundMessage) RequestHash() string {
 			_, _ = h.Write([]byte{0})
 		}
 	}
+	_, _ = h.Write(m.RawMessage)
 	return hex.EncodeToString(h.Sum(nil))
 }
 

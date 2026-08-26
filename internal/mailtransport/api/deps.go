@@ -48,6 +48,8 @@ type MailTransportModule struct {
 	ValidationBinding   coreapp.MicrosoftValidationBindingCommitPort
 	InboundSMTP         *mailinfra.InboundSMTPServer
 	InboundSMTPEnabled  bool
+	SubmitSMTP          *mailinfra.SubmissionSMTPServer
+	SubmitSMTPEnabled   bool
 	BackgroundExecution BackgroundExecutionGate
 	AliasDispatch       MicrosoftAliasDispatchReleaser
 	tokenRefreshRepo    *mailinfra.MicrosoftTokenRefreshRepo
@@ -211,6 +213,8 @@ func NewMailTransportModule(
 	sender mailapp.SenderPort,
 	outboundFrom string,
 	inboundCfg mailinfra.InboundSMTPConfig,
+	submissionCfg mailinfra.SubmissionSMTPConfig,
+	submissionAuthenticator mailinfra.SubmissionTokenAuthenticator,
 	proxies *proxyapp.ProxyUseCase,
 ) (*MailTransportModule, error) {
 	systemLogs := governanceinfra.NewSystemLogRepo(db)
@@ -261,6 +265,7 @@ func NewMailTransportModule(
 		BindingAdmin:        NewMicrosoftBindingAdminAdapter(bindingRepo),
 		ValidationBinding:   NewMicrosoftValidationBindingCommitAdapter(bindingRepo, aliasStore),
 		InboundSMTPEnabled:  inboundCfg.Enabled,
+		SubmitSMTPEnabled:   submissionCfg.Enabled,
 		AliasDispatch:       aliasStore,
 		tokenRefreshRepo:    tokenRefreshRepo,
 		bindingDomains:      resourceRepo,
@@ -270,14 +275,19 @@ func NewMailTransportModule(
 	if inboundCfg.Enabled {
 		module.InboundSMTP = mailinfra.NewInboundSMTPServer(inboundCfg, inboundUseCase)
 	}
+	if submissionCfg.Enabled {
+		module.SubmitSMTP = mailinfra.NewSubmissionSMTPServer(submissionCfg, submissionAuthenticator, outboundDelivery)
+	}
 	return module, nil
 }
 
 func (m *MailTransportModule) Start(ctx context.Context) func(context.Context) {
 	smtpCleanup := m.StartInboundSMTP()
+	submissionCleanup := m.StartSubmissionSMTP()
 	dispatcherCleanup := m.StartDispatchers(ctx)
 	return func(ctx context.Context) {
 		dispatcherCleanup()
+		submissionCleanup(ctx)
 		smtpCleanup(ctx)
 	}
 }
@@ -304,6 +314,33 @@ func (m *MailTransportModule) StartInboundSMTP() func(context.Context) {
 				!errors.Is(err, context.DeadlineExceeded) &&
 				!errors.Is(err, smtpserver.ErrServerClosed) {
 				slog.Warn("inbound smtp shutdown failed", "error", err)
+			}
+		})
+	}
+}
+
+func (m *MailTransportModule) StartSubmissionSMTP() func(context.Context) {
+	if m == nil || !m.SubmitSMTPEnabled || m.SubmitSMTP == nil {
+		return func(context.Context) {}
+	}
+	go func() {
+		if err := m.SubmitSMTP.ListenAndServe(); err != nil {
+			if errors.Is(err, smtpserver.ErrServerClosed) {
+				return
+			}
+			slog.Warn("smtp submission server stopped", "error", err)
+		}
+	}()
+	var once sync.Once
+	return func(ctx context.Context) {
+		once.Do(func() {
+			shutdownCtx, cancel := context.WithTimeout(ctx, inboundSMTPShutdownTimeout)
+			defer cancel()
+			if err := m.SubmitSMTP.Shutdown(shutdownCtx); err != nil &&
+				!errors.Is(err, context.Canceled) &&
+				!errors.Is(err, context.DeadlineExceeded) &&
+				!errors.Is(err, smtpserver.ErrServerClosed) {
+				slog.Warn("smtp submission shutdown failed", "error", err)
 			}
 		})
 	}
