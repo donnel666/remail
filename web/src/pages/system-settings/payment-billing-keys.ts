@@ -17,6 +17,7 @@ export const EPUSDT_GATEWAY_KEYS = [
   "epusdt_gateway_url",
   "epusdt_pid",
   "epusdt_points_per_usdt",
+  "epusdt_minimum_payment_amount",
   "epusdt_api_key",
   "epusdt_api_secret",
   "epusdt_token",

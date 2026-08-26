@@ -1,5 +1,5 @@
 import type { TFunction } from "i18next";
-import { IamApiError } from "./iam-api";
+import { IamApiError } from "./api-client";
 
 interface ApiErrorMessageBody {
   message?: string | null;
@@ -71,6 +71,16 @@ export function getIamErrorMessage(
 ) {
   const fallback = fallbackMessage(t, error, fallbackKey);
   if (error instanceof IamApiError) {
+    if (error.code === "recharge_payment_below_minimum") {
+      const amount = error.fields?.minimumPaymentAmount;
+      const currency = error.fields?.paymentCurrency;
+      if (amount && currency) {
+        return t("Minimum {{currency}} payment is {{amount}} {{currency}}.", {
+          amount,
+          currency,
+        });
+      }
+    }
     const coded = lotteryCodeMessage(t, error);
     if (coded) return coded;
   }

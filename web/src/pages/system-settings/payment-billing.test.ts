@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applyEPayURLDefaults, applyEpusdtURLDefaults, changeEPayVersion } from "./payment-billing-keys";
+import { applyEPayURLDefaults, applyEpusdtURLDefaults, changeEPayVersion, EPUSDT_GATEWAY_KEYS } from "./payment-billing-keys";
 import { parseTopupTiers, serializeTopupTiers } from "./topup-tiers";
 
 describe("topup tier settings", () => {
@@ -29,6 +29,10 @@ describe("EPay callback settings", () => {
 });
 
 describe("EPUSDT callback settings", () => {
+  it("saves the configurable minimum payment with the EPUSDT gateway", () => {
+    expect(EPUSDT_GATEWAY_KEYS).toContain("epusdt_minimum_payment_amount");
+  });
+
   it("fills the dedicated webhook route and shared return page", () => {
     expect(applyEpusdtURLDefaults({ epusdt_notify_url: "", epusdt_return_url: "" }, "https://app.example.com")).toEqual({
       epusdt_notify_url: "https://app.example.com/v1/payments/webhooks/epusdt/v1",

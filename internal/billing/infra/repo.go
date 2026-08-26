@@ -451,6 +451,9 @@ func (r *BillingRepo) CreateRecharge(ctx context.Context, command billingapp.Cre
 			return fmt.Errorf("lock wallet for recharge: %w", err)
 		}
 		response, replayed, err := r.withIdempotencyInTxAliases(ctx, tx, command.Recharge.UserID, "recharges.create", command.IdempotencyKey, command.RequestFingerprint, command.LegacyRequestFingerprints, func(writeTx *gorm.DB) ([]byte, error) {
+			if command.RequireIdempotencyReplay {
+				return nil, domain.ErrRechargePaymentBelowMinimum
+			}
 			var pending int64
 			if err := writeTx.WithContext(ctx).Model(&RechargeModel{}).
 				Where("user_id = ? AND status IN ? AND created_at > ?", command.Recharge.UserID, pendingRechargeStatuses(), command.Recharge.CreatedAt.Add(-domain.RechargeReconciliationWindow)).

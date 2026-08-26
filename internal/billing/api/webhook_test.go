@@ -198,11 +198,16 @@ func TestRechargeSecurityErrorsAreClientVisible(t *testing.T) {
 	}{
 		{err: domain.ErrRechargePending, status: http.StatusConflict, message: "Too many recharge orders"},
 		{err: domain.ErrInvalidIdempotencyKey, status: http.StatusBadRequest, message: "Invalid Idempotency-Key"},
+		{err: &domain.RechargePaymentBelowMinimumError{MinimumPaymentAmount: "12.50", PaymentCurrency: "USDT"}, status: http.StatusUnprocessableEntity, message: "recharge_payment_below_minimum"},
 	} {
 		recorder := httptest.NewRecorder()
 		context, _ := gin.CreateTestContext(recorder)
 		writeBillingError(context, test.err)
 		require.Equal(t, test.status, recorder.Code)
 		require.Contains(t, recorder.Body.String(), test.message)
+		if errors.Is(test.err, domain.ErrRechargePaymentBelowMinimum) {
+			require.Contains(t, recorder.Body.String(), `"minimumPaymentAmount":"12.50"`)
+			require.Contains(t, recorder.Body.String(), `"paymentCurrency":"USDT"`)
+		}
 	}
 }

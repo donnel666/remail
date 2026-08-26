@@ -587,7 +587,12 @@ export default function Wallet() {
       if (error instanceof IamApiError && error.status >= 400 && error.status < 500) {
         rechargeAttemptRef.current = null;
       }
-      Toast.error(getIamErrorMessage(t, error));
+      const message = getIamErrorMessage(t, error);
+      if (error instanceof IamApiError && error.code === "recharge_payment_below_minimum") {
+        Toast.warning(message);
+      } else {
+        Toast.error(message);
+      }
     } finally {
       setRecharging(false);
     }
@@ -887,7 +892,7 @@ export default function Wallet() {
                       style={{ width: "100%" }}
                     />
                     <Form.Slot label={t("Payment Method")}>
-                      <Space vertical align="start">
+                      <Space wrap={false}>
                         {configuredPaymentMethods(rechargeConfig).map((method) => (
                           <Button
                             className="min-h-11"
@@ -901,8 +906,9 @@ export default function Wallet() {
                               setPaymentMethod(method);
                               void handleRecharge(method);
                             }}
-                            theme={paymentMethod === method ? "solid" : "outline"}
-                            type={paymentMethod === method ? "primary" : "tertiary"}
+                            style={{ backgroundColor: "#fff", borderColor: "#d9d9d9", color: "#1f2329" }}
+                            theme="outline"
+                            type="tertiary"
                           >
                             {method === EPUSDT_PAYMENT_METHOD ? "USDT" : paymentMethodLabel(method, t)}
                           </Button>

@@ -169,6 +169,11 @@ func Validate(key, value string) error {
 		if err != nil || amount.IsNegative() {
 			return domain.ErrInvalidValue
 		}
+	case "epusdt_minimum_payment_amount":
+		amount, err := money.Parse(value)
+		if err != nil || amount.LessThan(decimal.New(2, -2)) || !amount.Equal(amount.Round(2)) {
+			return domain.ErrInvalidValue
+		}
 	case "points_unit_migration_v1":
 		if value != "completed" {
 			return domain.ErrInvalidValue
@@ -573,7 +578,7 @@ func invalidEpusdtConfigFields(values map[string]string) map[string]string {
 			fields[key] = "Invalid value."
 		}
 	}
-	for _, key := range []string{"epusdt_gateway_url", "epusdt_pid", "epusdt_points_per_usdt", "epusdt_api_secret", "epusdt_notify_url", "epusdt_return_url", "epusdt_token", "epusdt_network"} {
+	for _, key := range []string{"epusdt_gateway_url", "epusdt_pid", "epusdt_points_per_usdt", "epusdt_minimum_payment_amount", "epusdt_api_secret", "epusdt_notify_url", "epusdt_return_url", "epusdt_token", "epusdt_network"} {
 		require(key)
 	}
 	if rate, err := money.Parse(strings.TrimSpace(values["epusdt_points_per_usdt"])); err != nil || !rate.IsPositive() {

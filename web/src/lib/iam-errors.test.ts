@@ -11,13 +11,14 @@ const translations: Record<string, string> = {
   "Please retry in {{seconds}} seconds.": "请在 {{seconds}} 秒后重试。",
   "Request failed.": "请求失败。",
   "Service is temporarily unavailable.": "服务暂时不可用，请稍后重试。",
+  "Minimum {{currency}} payment is {{amount}} {{currency}}.": "{{currency}} 单笔最低支付金额为 {{amount}} {{currency}}，请选择更高的充值档位。",
   "Lottery account must be at least {{days}} days old.": "账号需满 {{days}} 天。",
 };
 
 const t = ((key: string, options?: Record<string, unknown>) => {
   let value = translations[key] ?? String(options?.defaultValue ?? key);
   for (const [name, replacement] of Object.entries(options ?? {})) {
-    value = value.replace(`{{${name}}}`, String(replacement));
+    value = value.split(`{{${name}}}`).join(String(replacement));
   }
   return value;
 }) as TFunction;
@@ -41,6 +42,18 @@ describe("API error messages", () => {
     });
 
     expect(getIamErrorMessage(t, error)).toBe("账号需满 30 天。");
+  });
+
+  it("translates the USDT minimum payment error", () => {
+    const error = new IamApiError(422, {
+      code: "recharge_payment_below_minimum",
+      message: "Recharge payment is below the configured minimum.",
+      fields: { minimumPaymentAmount: "12.50", paymentCurrency: "USDT" },
+    });
+
+    expect(getIamErrorMessage(t, error)).toBe(
+      "USDT 单笔最低支付金额为 12.50 USDT，请选择更高的充值档位。",
+    );
   });
 
   it("does not expose an unknown backend message", () => {

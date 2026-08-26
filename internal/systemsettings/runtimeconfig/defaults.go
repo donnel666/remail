@@ -3,7 +3,7 @@ package runtimeconfig
 import "github.com/donnel666/remail/internal/systemsettings/domain"
 
 const (
-	DefaultSettingsCount                         = 260
+	DefaultSettingsCount                         = 261
 	SMSBowerNoCodeRefundTimeoutMinutesKey        = "smsbower_no_code_refund_timeout_minutes"
 	MicrosoftPriceMultiplierKey                  = "product_price_multiplier_microsoft"
 	GmailPriceMultiplierKey                      = "product_price_multiplier_gmail"
@@ -97,6 +97,7 @@ var defaultSettings = []domain.Setting{
 	{Key: "epusdt_gateway_url", Value: ""},
 	{Key: "epusdt_pid", Value: ""},
 	{Key: "epusdt_points_per_usdt", Value: "0"},
+	{Key: "epusdt_minimum_payment_amount", Value: "10.00"},
 	{Key: "epusdt_api_key", Value: ""},
 	{Key: "epusdt_api_secret", Value: ""},
 	{Key: "epusdt_token", Value: "USDT"},

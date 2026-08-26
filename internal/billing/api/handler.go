@@ -896,6 +896,19 @@ func writeBillingError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, domain.ErrInvalidAmount):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Invalid amount.", "requestId": requestID})
+	case errors.Is(err, domain.ErrRechargePaymentBelowMinimum):
+		body := gin.H{
+			"code": "recharge_payment_below_minimum", "message": "Recharge payment is below the configured minimum.",
+			"requestId": requestID,
+		}
+		var minimumErr *domain.RechargePaymentBelowMinimumError
+		if errors.As(err, &minimumErr) {
+			body["fields"] = gin.H{
+				"minimumPaymentAmount": minimumErr.MinimumPaymentAmount,
+				"paymentCurrency":      minimumErr.PaymentCurrency,
+			}
+		}
+		c.JSON(http.StatusUnprocessableEntity, body)
 	case errors.Is(err, domain.ErrInvalidRecharge):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Invalid recharge request.", "requestId": requestID})
 	case errors.Is(err, domain.ErrRechargeNotFound):

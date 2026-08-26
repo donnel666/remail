@@ -9,6 +9,7 @@ var (
 	ErrInvalidRecharge             = errors.New("billing: invalid recharge")
 	ErrRechargeNotFound            = errors.New("billing: recharge not found")
 	ErrRechargeExpired             = errors.New("billing: recharge reconciliation expired")
+	ErrRechargePaymentBelowMinimum = errors.New("billing: recharge payment below minimum")
 	ErrRechargeConfigUnavailable   = errors.New("billing: recharge payment config unavailable")
 	ErrRechargeQueueUnavailable    = errors.New("billing: recharge reconciliation queue unavailable")
 	ErrRechargeQueryMismatch       = errors.New("billing: recharge gateway query mismatch")
@@ -38,3 +39,18 @@ var (
 // provider configuration; it is not evidence that the payment response was
 // invalid or that the order is unpaid.
 var ErrRechargeGatewayAuthUnavailable = errors.New("billing: recharge gateway authentication unavailable")
+
+// RechargePaymentBelowMinimumError carries the configured payment threshold
+// used for the rejected recharge quote or order.
+type RechargePaymentBelowMinimumError struct {
+	MinimumPaymentAmount string
+	PaymentCurrency      string
+}
+
+func (err *RechargePaymentBelowMinimumError) Error() string {
+	return ErrRechargePaymentBelowMinimum.Error()
+}
+
+func (err *RechargePaymentBelowMinimumError) Unwrap() error {
+	return ErrRechargePaymentBelowMinimum
+}

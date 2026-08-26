@@ -102,7 +102,7 @@ func TestRechargeAmountsAndActiveReconciliation(t *testing.T) {
 func TestRechargeAmountsEpusdtUsesDedicatedRateWithoutFee(t *testing.T) {
 	config := validRechargeConfig()
 	config.PaymentMethod = domain.RechargePaymentMethodEpusdtUSDTTron
-	config.EpusdtPointsPerUSDT = "333"
+	config.EpusdtPointsPerUSDT = "100"
 	config.FeeRate = "10"
 	config.FeeCapPoints = "1"
 	config.Tiers = []RechargeTier{{Points: "1000", BonusPoints: "50"}}
@@ -111,27 +111,36 @@ func TestRechargeAmountsEpusdtUsesDedicatedRateWithoutFee(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "0.00", quote.FeePoints)
 	require.Equal(t, "1050.00", quote.CreditedPoints)
-	require.Equal(t, "3.01", quote.PaymentAmount)
+	require.Equal(t, "10.00", quote.PaymentAmount)
 	require.Equal(t, "USDT", quote.PaymentCurrency)
-	require.Equal(t, "3.01", payment)
+	require.Equal(t, "10.00", payment)
 
-	config.EpusdtPointsPerUSDT = "1000"
+	config.EpusdtPointsPerUSDT = "50"
 	quote, payment, err = rechargeAmounts(config, "1000")
 	require.NoError(t, err)
 	require.Equal(t, "0.00", quote.FeePoints)
-	require.Equal(t, "1.00", payment)
+	require.Equal(t, "20.00", payment)
 }
 
-func TestRechargeAmountsEpusdtRejectsInvalidRateAndProviderMinimum(t *testing.T) {
+func TestRechargeAmountsEpusdtRejectsInvalidRateAndPaymentMinimum(t *testing.T) {
 	config := validRechargeConfig()
 	config.PaymentMethod = domain.RechargePaymentMethodEpusdtUSDTTron
 	config.EpusdtPointsPerUSDT = "0"
 	_, _, err := rechargeAmounts(config, "1000")
 	require.ErrorIs(t, err, domain.ErrRechargeConfigUnavailable)
 
-	config.EpusdtPointsPerUSDT = "100000"
-	_, _, err = rechargeAmounts(config, "1000")
-	require.ErrorIs(t, err, domain.ErrInvalidAmount)
+	config.EpusdtPointsPerUSDT = "100"
+	config.EpusdtMinimumPaymentAmount = "12.50"
+	_, _, err = rechargeAmounts(config, "1249")
+	require.ErrorIs(t, err, domain.ErrRechargePaymentBelowMinimum)
+	var minimumErr *domain.RechargePaymentBelowMinimumError
+	require.ErrorAs(t, err, &minimumErr)
+	require.Equal(t, "12.50", minimumErr.MinimumPaymentAmount)
+	require.Equal(t, "USDT", minimumErr.PaymentCurrency)
+	quote, payment, err := rechargeAmounts(config, "1250")
+	require.NoError(t, err)
+	require.Equal(t, "12.50", quote.PaymentAmount)
+	require.Equal(t, "12.50", payment)
 }
 
 func TestRechargeQuoteRejectsUnavailablePaymentMethods(t *testing.T) {
@@ -145,7 +154,7 @@ func TestRechargeQuoteRejectsUnavailablePaymentMethods(t *testing.T) {
 	config.Enabled = true
 	config.PaymentMethod = domain.RechargePaymentMethodEpusdtUSDTTron
 	config.EpusdtEnabled = true
-	config.EpusdtPointsPerUSDT = "500"
+	config.EpusdtPointsPerUSDT = "10"
 	useCase = NewRechargeUseCase(nil, rechargeConfigStub{config}, nil, nil)
 	_, err = useCase.Quote("100")
 	require.ErrorIs(t, err, domain.ErrRechargeConfigUnavailable)
@@ -197,6 +206,28 @@ func TestRechargeConfigSkipsLegacyFractionalTiers(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "20.00", quote.Points)
 	require.Equal(t, "0.00", quote.BonusPoints)
+}
+
+func TestRechargeConfigSkipsEpusdtTiersBelowPaymentMinimum(t *testing.T) {
+	config := validRechargeConfig()
+	config.Enabled = false
+	config.EpusdtEnabled = true
+	config.EpusdtGatewayURL = "https://epusdt.example.com"
+	config.EpusdtPID = "1000"
+	config.EpusdtAPISecret = "secret"
+	config.EpusdtToken = "USDT"
+	config.EpusdtNetwork = "tron"
+	config.EpusdtCurrency = "USDT"
+	config.EpusdtPointsPerUSDT = "100"
+	config.EpusdtNotifyURL = "https://app.example.com/notify"
+	config.EpusdtReturnURL = "https://app.example.com/return"
+	config.Tiers = []RechargeTier{{Points: "999", BonusPoints: "0"}, {Points: "1000", BonusPoints: "0"}}
+	useCase := NewRechargeUseCase(nil, rechargeConfigStub{config}, nil, nil)
+
+	result, err := useCase.Config()
+	require.NoError(t, err)
+	require.Len(t, result.Tiers, 1)
+	require.Equal(t, "1000.00", result.Tiers[0].Points)
 }
 
 func TestRechargeCreateInputAndConfigReplaySafety(t *testing.T) {
@@ -268,7 +299,7 @@ func TestRechargeCreateSelectsEpusdtWithoutTrustingCreateResponse(t *testing.T) 
 	config.EpusdtToken = "USDT"
 	config.EpusdtNetwork = "tron"
 	config.EpusdtCurrency = "USDT"
-	config.EpusdtPointsPerUSDT = "500"
+	config.EpusdtPointsPerUSDT = "100"
 	config.EpusdtNotifyURL = "https://app.example.com/v1/payments/webhooks/epusdt/v1"
 	config.EpusdtReturnURL = "https://app.example.com/payment/return"
 	config.PointsPerYuan = "500"
@@ -276,7 +307,7 @@ func TestRechargeCreateSelectsEpusdtWithoutTrustingCreateResponse(t *testing.T) 
 	config.Provider = "epusdt"
 	created := domain.Recharge{
 		RechargeNo: "RC00000000000000000000000000000001", UserID: 1,
-		PaymentAmount: "0.02", RechargeQuota: "10.00", Status: domain.RechargeStatusPaying,
+		PaymentAmount: "10.00", RechargeQuota: "1000.00", Status: domain.RechargeStatusPaying,
 		PaymentMethod: domain.RechargePaymentMethodEpusdtUSDTTron,
 		CreatedAt:     time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}
@@ -287,12 +318,34 @@ func TestRechargeCreateSelectsEpusdtWithoutTrustingCreateResponse(t *testing.T) 
 	useCase.now = func() time.Time { return created.CreatedAt }
 
 	result, err := useCase.Create(context.Background(), CreateRechargeRequest{
-		UserID: 1, Points: "10", PaymentMethod: domain.RechargePaymentMethodEpusdtUSDTTron, IdempotencyKey: "epusdt-create",
+		UserID: 1, Points: "1000", PaymentMethod: domain.RechargePaymentMethodEpusdtUSDTTron, IdempotencyKey: "epusdt-create",
 	})
 	require.NoError(t, err)
 	require.Equal(t, domain.RechargePaymentMethodEpusdtUSDTTron, result.Recharge.PaymentMethod)
 	require.Equal(t, domain.RechargePaymentMethodEpusdtUSDTTron, gateway.queryConfig.PaymentMethod)
 	require.Equal(t, "epusdt", gateway.queryConfig.Provider)
+	require.Equal(t, 1, repo.createCalls)
+
+	_, err = useCase.Create(context.Background(), CreateRechargeRequest{
+		UserID: 1, Points: "999", PaymentMethod: domain.RechargePaymentMethodEpusdtUSDTTron, IdempotencyKey: "epusdt-too-small",
+	})
+	require.ErrorIs(t, err, domain.ErrRechargePaymentBelowMinimum)
+	require.Equal(t, 1, repo.createCalls)
+	require.Equal(t, 1, gateway.paymentCalls)
+
+	raisedConfig := config
+	raisedConfig.EpusdtMinimumPaymentAmount = "20.00"
+	repo.replay = true
+	replayGateway := &rechargeGatewayStub{}
+	replayUseCase := NewRechargeUseCase(repo, rechargeConfigStub{raisedConfig}, replayGateway, &rechargeQueueStub{})
+	replayUseCase.now = func() time.Time { return created.CreatedAt }
+	replayed, err := replayUseCase.Create(context.Background(), CreateRechargeRequest{
+		UserID: 1, Points: "1000", PaymentMethod: domain.RechargePaymentMethodEpusdtUSDTTron, IdempotencyKey: "epusdt-create",
+	})
+	require.NoError(t, err)
+	require.Equal(t, created.RechargeNo, replayed.Recharge.RechargeNo)
+	require.Equal(t, 1, repo.createCalls)
+	require.Equal(t, 1, replayGateway.paymentCalls)
 }
 
 func TestValidateEpusdtRejectsGatewayURLQueryOrFragment(t *testing.T) {
@@ -401,8 +454,9 @@ func validRechargeConfig() RechargeConfig {
 		NotifyURL:     "https://app.example.com/v1/payments/webhooks/epay/v1",
 		ReturnURL:     "https://app.example.com/wallet",
 		PointsPerYuan: "1000", MinPoints: "10", FeeRate: "0", FeeCapPoints: "0",
-		MaxPendingOrders: 10,
-		RequestTimeout:   5 * time.Second,
+		EpusdtMinimumPaymentAmount: "10.00",
+		MaxPendingOrders:           10,
+		RequestTimeout:             5 * time.Second,
 	}
 }
 
@@ -446,6 +500,8 @@ func (stub *rechargeQueueStub) Enqueue(context.Context, RechargeTask) error {
 
 type rechargeRepoStub struct {
 	recharge         domain.Recharge
+	createCalls      int
+	replay           bool
 	claimConfig      RechargeConfig
 	claimDisabled    bool
 	creditErr        error
@@ -461,7 +517,14 @@ type rechargeRepoStub struct {
 	expiredBefore    time.Time
 }
 
-func (stub *rechargeRepoStub) CreateRecharge(context.Context, CreateRechargeCommand) (*domain.Recharge, error) {
+func (stub *rechargeRepoStub) CreateRecharge(_ context.Context, command CreateRechargeCommand) (*domain.Recharge, error) {
+	if command.RequireIdempotencyReplay {
+		if stub.replay {
+			return &stub.recharge, nil
+		}
+		return nil, domain.ErrRechargePaymentBelowMinimum
+	}
+	stub.createCalls++
 	return &stub.recharge, nil
 }
 

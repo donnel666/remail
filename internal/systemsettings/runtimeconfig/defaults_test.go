@@ -35,6 +35,7 @@ func TestDefaultSettingsAreValidAndIndependent(t *testing.T) {
 	require.Equal(t, "0", keys["registration_reward_amount"])
 	require.Equal(t, "86400", keys["session_max_age_seconds"])
 	require.Equal(t, "0.8", keys["first_order_rebate_ratio"])
+	require.Equal(t, "10.00", keys["epusdt_minimum_payment_amount"])
 	require.Equal(t, "90", keys["rebate_expiry_days"])
 	require.Equal(t, "", keys["domain_custom_tlds"])
 	require.Equal(t, DefaultDomainSaleTLDWhitelist, keys[DomainSaleTLDWhitelistKey])

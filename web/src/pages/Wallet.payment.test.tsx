@@ -71,7 +71,7 @@ vi.mock("@douyinfe/semi-illustrations", () => ({ IllustrationNoResult: () => nul
 vi.mock("@douyinfe/semi-ui", async () => {
   const React = await import("react");
   const Box = ({ children }: { children?: React.ReactNode }) => <div>{children}</div>;
-  const Button = ({ children, disabled, icon, loading, onClick }: any) => <button disabled={disabled || loading} onClick={onClick}>{icon}{children}</button>;
+  const Button = ({ children, disabled, icon, loading, onClick, style }: any) => <button disabled={disabled || loading} onClick={onClick} style={style}>{icon}{children}</button>;
   const Card = ({ children, cover, title }: any) => <section>{title}{cover}{children}</section>;
   const Form = ({ children, getFormApi }: any) => {
     getFormApi?.({ setValue: vi.fn() });
@@ -105,6 +105,7 @@ vi.mock("@douyinfe/semi-ui", async () => {
   };
 });
 
+import { IamApiError } from "@/lib/api-client";
 import Wallet from "./Wallet";
 
 let now = Date.parse("2026-07-26T00:00:00Z");
@@ -243,7 +244,7 @@ describe("wallet payment modal", () => {
       bonusPoints: "0.00",
       feePoints: "0.00",
       creditedPoints: "1000.00",
-      paymentAmount: "2.00",
+      paymentAmount: "10.00",
       paymentCurrency: "USDT",
     });
     render(<Wallet />);
@@ -252,6 +253,8 @@ describe("wallet payment modal", () => {
     const tronIcon = payButton.querySelector("img");
     expect(tronIcon?.getAttribute("src")).toMatch(/^(data:image\/svg\+xml|.*tron\.svg)/);
     expect(tronIcon).toHaveAttribute("alt", "");
+    expect(payButton).toHaveStyle({ backgroundColor: "#fff", borderColor: "#d9d9d9", color: "#1f2329" });
+    expect(screen.getByRole("button", { name: "Alipay" })).toHaveStyle({ backgroundColor: "#fff", borderColor: "#d9d9d9", color: "#1f2329" });
     await waitFor(() => expect(payButton).toBeEnabled());
     fireEvent.click(payButton);
 
@@ -260,6 +263,33 @@ describe("wallet payment modal", () => {
     await waitFor(() => expect(mocks.createRecharge).toHaveBeenCalled());
     expect(mocks.createRecharge.mock.calls[0][2]).toBe("epusdt_usdt_tron");
     expect(await screen.findByRole("dialog", { name: "USDT (TRON) Payment" })).toBeVisible();
+  });
+
+  it("handles an EPUSDT minimum rejection without opening payment", async () => {
+    mocks.getRechargeConfig.mockResolvedValue({
+      enabled: true,
+      paymentMethods: ["alipay", "epusdt_usdt_tron"],
+      minPoints: "1000.00",
+      feeRate: "0.6",
+      feeCapPoints: "0",
+      redemptionCodePurchaseUrl: "",
+      tiers: [{ points: "1000.00", bonusPoints: "0.00", feePoints: "6.00", creditedPoints: "1000.00" }],
+    });
+    mocks.createRecharge.mockRejectedValue(new IamApiError(422, {
+      code: "recharge_payment_below_minimum",
+      message: "Recharge payment is below the configured minimum.",
+      fields: { minimumPaymentAmount: "12.50", paymentCurrency: "USDT" },
+    }));
+    render(<Wallet />);
+
+    const payButton = await screen.findByRole("button", { name: "USDT" });
+    await waitFor(() => expect(payButton).toBeEnabled());
+    fireEvent.click(payButton);
+
+    await waitFor(() => expect(mocks.toastWarning).toHaveBeenCalledWith("Minimum {{currency}} payment is {{amount}} {{currency}}."));
+    expect(mocks.createRecharge).toHaveBeenCalledOnce();
+    expect(mocks.createRecharge.mock.calls[0][2]).toBe("epusdt_usdt_tron");
+    expect(document.querySelector("iframe")).toBeNull();
   });
 
   it("links to the configured redemption code store and centers the input icon", async () => {

@@ -57,7 +57,8 @@ type RechargeConfig struct {
 	EpusdtCurrency    string
 	// EpusdtPointsPerUSDT is the remail-side exchange rate for new EPUSDT
 	// orders. A missing value is retained for legacy CNY snapshots.
-	EpusdtPointsPerUSDT string
+	EpusdtPointsPerUSDT        string
+	EpusdtMinimumPaymentAmount string
 	// EpusdtAPIKey is retained for deployments that keep a separate label;
 	// GMPay authenticates requests with PID + APISecret and does not send it.
 	EpusdtAPIKey       string
@@ -100,6 +101,7 @@ type CreateRechargeCommand struct {
 	IdempotencyKey            string
 	RequestFingerprint        string
 	LegacyRequestFingerprints []string
+	RequireIdempotencyReplay  bool
 }
 
 type CreditRechargeCommand struct {
@@ -210,6 +212,9 @@ func (uc *RechargeUseCase) Config() (*RechargeConfigResult, error) {
 			continue
 		}
 		quote, _, err := rechargeAmounts(config, tier.Points)
+		if errors.Is(err, domain.ErrRechargePaymentBelowMinimum) {
+			continue
+		}
 		if err != nil {
 			return nil, domain.ErrRechargeConfigUnavailable
 		}
@@ -291,12 +296,10 @@ func (uc *RechargeUseCase) Create(ctx context.Context, request CreateRechargeReq
 	if err := validateRechargeGatewayConfig(config); err != nil {
 		return nil, err
 	}
-	quote, payment, err := rechargeAmounts(config, request.Points)
-	if err != nil {
-		return nil, err
-	}
-	if err := validateRechargePaymentAmount(method, payment); err != nil {
-		return nil, err
+	quote, payment, amountErr := rechargeAmounts(config, request.Points)
+	belowMinimum := errors.Is(amountErr, domain.ErrRechargePaymentBelowMinimum)
+	if amountErr != nil && !belowMinimum {
+		return nil, amountErr
 	}
 	now := uc.now()
 	recharge := domain.Recharge{
@@ -317,8 +320,12 @@ func (uc *RechargeUseCase) Create(ctx context.Context, request CreateRechargeReq
 		IdempotencyKey:            strings.TrimSpace(request.IdempotencyKey),
 		RequestFingerprint:        rechargeCreateFingerprint(request.UserID, quote.Points, method),
 		LegacyRequestFingerprints: rechargeLegacyFingerprints(request.UserID, quote.Points, method),
+		RequireIdempotencyReplay:  belowMinimum,
 	})
 	if err != nil {
+		if belowMinimum && errors.Is(err, domain.ErrRechargePaymentBelowMinimum) {
+			return nil, amountErr
+		}
 		return nil, err
 	}
 	if !domain.IsPendingRechargeStatus(created.Status) {
@@ -557,7 +564,7 @@ func rechargePaymentMethodAvailable(config RechargeConfig, method string) bool {
 			NotifyURL: config.NotifyURL, ReturnURL: config.ReturnURL,
 		}) == nil
 	case domain.RechargePaymentMethodEpusdtUSDTTron:
-		return config.EpusdtEnabled && strings.EqualFold(strings.TrimSpace(config.EpusdtCurrency), "USDT") && validEpusdtPointsPerUSDT(config.EpusdtPointsPerUSDT) && validateRechargeGatewayConfig(RechargeConfig{
+		return config.EpusdtEnabled && strings.EqualFold(strings.TrimSpace(config.EpusdtCurrency), "USDT") && validEpusdtPointsPerUSDT(config.EpusdtPointsPerUSDT) && validEpusdtMinimumPaymentAmount(config.EpusdtMinimumPaymentAmount) && validateRechargeGatewayConfig(RechargeConfig{
 			PaymentMethod:    domain.RechargePaymentMethodEpusdtUSDTTron,
 			EpusdtGatewayURL: config.EpusdtGatewayURL, EpusdtPID: config.EpusdtPID,
 			EpusdtCurrency: config.EpusdtCurrency, EpusdtPointsPerUSDT: config.EpusdtPointsPerUSDT,
@@ -672,11 +679,6 @@ func rechargeAmounts(config RechargeConfig, rawPoints string) (*RechargeQuoteRes
 		payment = points.Add(fee).Div(pointsPerYuan).RoundCeil(2)
 	}
 	credited := points.Add(bonus)
-	if method == domain.RechargePaymentMethodEpusdtUSDTTron {
-		if err := validateRechargePaymentAmount(method, payment.StringFixed(2)); err != nil {
-			return nil, "", err
-		}
-	}
 	if payment.GreaterThan(decimal.RequireFromString("9999999999999999.99")) {
 		return nil, "", domain.ErrInvalidAmount
 	}
@@ -685,11 +687,15 @@ func rechargeAmounts(config RechargeConfig, rawPoints string) (*RechargeQuoteRes
 			return nil, "", domain.ErrInvalidAmount
 		}
 	}
-	return &RechargeQuoteResult{
+	result := &RechargeQuoteResult{
 		Points: domain.MoneyString(points), BonusPoints: domain.MoneyString(bonus),
 		FeePoints: domain.MoneyString(fee), CreditedPoints: domain.MoneyString(credited),
 		PaymentAmount: payment.StringFixed(2), PaymentCurrency: paymentCurrency,
-	}, payment.StringFixed(2), nil
+	}
+	if err := validateRechargePaymentAmount(method, result.PaymentAmount, config.EpusdtMinimumPaymentAmount); err != nil {
+		return result, result.PaymentAmount, err
+	}
+	return result, result.PaymentAmount, nil
 }
 
 func validEpusdtPointsPerUSDT(raw string) bool {
@@ -697,17 +703,28 @@ func validEpusdtPointsPerUSDT(raw string) bool {
 	return err == nil && rate.IsPositive()
 }
 
-// EPUSDT rejects amounts at or below 0.01 USDT. Validate this before creating
-// the local pending order so an unsupported provider request cannot leave a
-// stranded recharge record.
-func validateRechargePaymentAmount(method, raw string) error {
+func validEpusdtMinimumPaymentAmount(raw string) bool {
+	minimum, err := domain.ParseMoney(raw)
+	return err == nil && !minimum.LessThan(decimal.New(2, -2)) && minimum.Equal(minimum.Round(2))
+}
+
+func validateRechargePaymentAmount(method, raw, minimumRaw string) error {
 	if method != domain.RechargePaymentMethodEpusdtUSDTTron {
 		return nil
 	}
 	amount, err := domain.ParseMoney(raw)
-	minimum, _ := domain.ParseMoney("0.01")
-	if err != nil || !amount.GreaterThan(minimum) {
+	if err != nil || !amount.IsPositive() {
 		return domain.ErrInvalidAmount
+	}
+	minimum, err := domain.ParseMoney(minimumRaw)
+	if err != nil || minimum.LessThan(decimal.New(2, -2)) || !minimum.Equal(minimum.Round(2)) {
+		return domain.ErrRechargeConfigUnavailable
+	}
+	if amount.LessThan(minimum) {
+		return &domain.RechargePaymentBelowMinimumError{
+			MinimumPaymentAmount: domain.MoneyString(minimum),
+			PaymentCurrency:      "USDT",
+		}
 	}
 	return nil
 }
