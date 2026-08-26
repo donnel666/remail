@@ -262,6 +262,12 @@ func (s *Service) processICloudOnboardingStage(ctx context.Context, task *iCloud
 	}
 	switch task.Stage {
 	case "accepted":
+		// A manually specified phone is only a requested binding at this
+		// point. Let Apple identify the account region first so a mismatched
+		// import cannot consume a phone-pool assignment.
+		if isICloudOnboardingPhoneBindingPending(task) {
+			return s.prepareICloudOnboardingApple(ctx, task, secret, appleOnboardingPrepareICloud, "icloud_finish")
+		}
 		return s.assignICloudOnboardingPhone(ctx, task)
 	case "icloud_prepare":
 		return s.prepareICloudOnboardingApple(ctx, task, secret, appleOnboardingPrepareICloud, "icloud_finish")
@@ -430,25 +436,51 @@ func (s *Service) prepareICloudOnboardingApple(ctx context.Context, task *iCloud
 }
 
 func (s *Service) prepareICloudOnboardingAppleWithInvite(ctx context.Context, task *iCloudOnboardingTaskModel, secret iCloudOnboardingSecret, operation, readyStage, invite, organizer string) error {
+	pendingPhoneBinding := isICloudOnboardingPhoneBindingPending(task)
 	response, err := s.executeICloudOnboardingApple(ctx, task, secret, AppleOnboardingRequest{Operation: operation, FamilyInviteURL: invite, FamilyOrganizerEmail: organizer})
 	if err != nil {
+		var providerErr *AppleOnboardingError
+		if pendingPhoneBinding && errors.As(err, &providerErr) && strings.TrimSpace(providerErr.CountryCode) != "" {
+			if message := iCloudOnboardingCountryMismatch(task.CountryCode, providerErr.CountryCode); message != "" {
+				return s.failICloudOnboardingTask(ctx, task, "account_region_mismatch", message)
+			}
+		}
 		return s.handleICloudOnboardingAppleError(ctx, task, err)
+	}
+	if pendingPhoneBinding && canonicalICloudCountryCode(response.CountryCode) == "" {
+		return s.failICloudOnboardingTask(ctx, task, "account_region_missing", "Apple did not return the account region before phone binding.")
+	}
+	if task.TaskKind == "onboarding" && (task.Stage == "accepted" || task.Stage == "icloud_prepare") {
+		if message := iCloudOnboardingCountryMismatch(task.CountryCode, response.CountryCode); message != "" {
+			return s.failICloudOnboardingTask(ctx, task, "account_region_mismatch", message)
+		}
 	}
 	updates := map[string]any{}
 	if len(response.Session) > 0 {
 		updates["session_payload"] = iCloudJSON(response.Session)
 	}
-	if response.Next == "ready" || response.Next == "" {
-		return s.advanceICloudOnboardingTask(ctx, task, readyStage, nil, updates)
-	}
 	if isICloudOldCookieBackfill(task) && response.Next == appleSMSICloudLogin {
 		response.Next = appleSMSOldCookieLogin
 	}
-	if response.Next != appleSMSICloudLogin && response.Next != appleSMSOldCookieLogin && response.Next != appleSMSICloudCookieLogin && response.Next != appleSMSPhoneEnrollment && response.Next != appleSMSFamilyLogin && response.Next != appleSMSFamilyReconcileLogin && response.Next != appleSMSManageLogin {
+	if response.Next != "ready" && response.Next != "" && response.Next != appleSMSICloudLogin && response.Next != appleSMSOldCookieLogin && response.Next != appleSMSICloudCookieLogin && response.Next != appleSMSPhoneEnrollment && response.Next != appleSMSFamilyLogin && response.Next != appleSMSFamilyReconcileLogin && response.Next != appleSMSManageLogin {
 		return s.failICloudOnboardingTask(ctx, task, "unsupported_challenge", "Apple returned an unsupported authentication challenge.")
 	}
-	if task.KitesimPhoneID == nil && response.Next != appleSMSPhoneEnrollment {
-		binding, err := s.bindICloudOnboardingTrustedPhone(ctx, task, response.TrustedPhoneLastTwo)
+	if pendingPhoneBinding {
+		binding, err := s.bindICloudOnboardingTrustedPhone(ctx, task, response.TrustedPhoneLastTwo, true)
+		if err != nil || binding == nil {
+			return err
+		}
+		phoneID := binding.PhoneID
+		updates["bound_phone_number"] = binding.PhoneNumber
+		updates["bound_phone_country_code"] = firstNonEmpty(strings.ToUpper(strings.TrimSpace(binding.CountryCode)), task.CountryCode)
+		updates["bound_phone_source"] = "manual"
+		updates["kitesim_phone_id"] = &phoneID
+	}
+	if response.Next == "ready" || response.Next == "" {
+		return s.advanceICloudOnboardingTask(ctx, task, readyStage, nil, updates)
+	}
+	if task.KitesimPhoneID == nil && !pendingPhoneBinding {
+		binding, err := s.bindICloudOnboardingTrustedPhone(ctx, task, response.TrustedPhoneLastTwo, false)
 		if err != nil || binding == nil {
 			return err
 		}
@@ -489,19 +521,26 @@ func (s *Service) checkICloudOnboardingSMSPhone(ctx context.Context, task *iClou
 	return false, ErrICloudOnboardingTemporary
 }
 
-func (s *Service) bindICloudOnboardingTrustedPhone(ctx context.Context, task *iCloudOnboardingTaskModel, suffix string) (*kitesim.SMSPhoneBinding, error) {
+func isICloudOnboardingPhoneBindingPending(task *iCloudOnboardingTaskModel) bool {
+	if task == nil || task.TaskKind != "onboarding" || task.KitesimPhoneID != nil || strings.TrimSpace(task.BoundPhoneNumber) == "" {
+		return false
+	}
+	return task.Stage == "accepted" || task.Stage == "icloud_prepare"
+}
+
+func (s *Service) bindICloudOnboardingTrustedPhone(ctx context.Context, task *iCloudOnboardingTaskModel, suffix string, allowMissingSuffix bool) (*kitesim.SMSPhoneBinding, error) {
 	suffix = onboardingPhoneDigits(suffix)
-	if suffix == "" {
+	boundNumber := onboardingPhoneDigits(task.BoundPhoneNumber)
+	if suffix == "" && (!allowMissingSuffix || boundNumber == "") {
 		return nil, s.failICloudOnboardingTask(ctx, task, "phone_binding_missing", "Apple did not return the permanently bound trusted phone.")
 	}
 	if s.smsPhones == nil {
 		return nil, ErrICloudOnboardingTemporary
 	}
-	boundNumber := onboardingPhoneDigits(task.BoundPhoneNumber)
 	var binding kitesim.SMSPhoneBinding
 	var err error
 	if boundNumber != "" {
-		if !strings.HasSuffix(boundNumber, suffix) {
+		if suffix != "" && !strings.HasSuffix(boundNumber, suffix) {
 			return nil, s.failICloudOnboardingTask(ctx, task, "phone_binding_mismatch", "The Apple trusted phone does not match the permanently bound phone number.")
 		}
 		binding, err = s.smsPhones.BindICloudSMSPhone(ctx, task.PrimaryEmail, task.BoundPhoneNumber)
@@ -845,11 +884,16 @@ func (s *Service) finishICloudOnboardingICloud(ctx context.Context, task *iCloud
 	if err != nil {
 		return s.handleICloudOnboardingAppleError(ctx, task, err)
 	}
+	if task.TaskKind == "onboarding" && task.Stage == "icloud_finish" {
+		if message := iCloudOnboardingCountryMismatch(task.CountryCode, response.CountryCode); message != "" {
+			return s.failICloudOnboardingTask(ctx, task, "account_region_mismatch", message)
+		}
+	}
 	updates := map[string]any{}
 	if len(response.Session) > 0 {
 		updates["session_payload"] = iCloudJSON(response.Session)
 	}
-	if code := strings.ToUpper(strings.TrimSpace(response.CountryCode)); code != "" {
+	if code := canonicalICloudCountryCode(response.CountryCode); code != "" {
 		updates["country_code"] = code
 	}
 	if response.ICloudOpened != nil {
@@ -877,6 +921,18 @@ func (s *Service) finishICloudOnboardingICloud(ctx context.Context, task *iCloud
 		next = "family_prepare"
 	}
 	return s.advanceICloudOnboardingTask(ctx, task, next, nil, updates)
+}
+
+func iCloudOnboardingCountryMismatch(expected, actual string) string {
+	rawExpected := strings.ToUpper(strings.TrimSpace(expected))
+	rawActual := strings.ToUpper(strings.TrimSpace(actual))
+	if rawExpected == "" || rawActual == "" || canonicalICloudCountryCode(rawExpected) == canonicalICloudCountryCode(rawActual) {
+		return ""
+	}
+	return fmt.Sprintf(
+		"Apple Account region mismatch: actual region is %s (实际地区为%s), imported region is %s (导入地区为%s).",
+		rawActual, rawActual, rawExpected, rawExpected,
+	)
 }
 
 func (s *Service) joinICloudOnboardingFamily(ctx context.Context, task *iCloudOnboardingTaskModel, secret iCloudOnboardingSecret) error {
@@ -924,7 +980,7 @@ func (s *Service) fetchICloudOnboardingManage(ctx context.Context, task *iCloudO
 		updates["country_code"] = code
 	}
 	if task.KitesimPhoneID == nil {
-		binding, err := s.bindICloudOnboardingTrustedPhone(ctx, task, response.TrustedPhoneLastTwo)
+		binding, err := s.bindICloudOnboardingTrustedPhone(ctx, task, response.TrustedPhoneLastTwo, false)
 		if err != nil || binding == nil {
 			return err
 		}
@@ -1314,6 +1370,9 @@ func (s *Service) executeICloudOnboardingApple(ctx context.Context, task *iCloud
 	request.Session = append(request.Session[:0], task.SessionPayload...)
 	request.PhoneNumber = firstNonEmpty(request.PhoneNumber, task.BoundPhoneNumber)
 	request.PhoneCountryCode = firstNonEmpty(request.PhoneCountryCode, task.BoundPhoneCountryCode)
+	if request.PhoneCountryCode == "" && isICloudOnboardingPhoneBindingPending(task) {
+		request.PhoneCountryCode = task.CountryCode
+	}
 	request.SkipPhoneEnrollment = request.SkipPhoneEnrollment || task.TaskKind == "refresh" || isICloudCookieRecoveryTask(task) || task.AccountRole == "primary"
 	return s.onboardingApple.Execute(ctx, request)
 }
@@ -1631,6 +1690,12 @@ func (s *Service) failICloudOnboardingTask(ctx context.Context, task *iCloudOnbo
 			"secret_payload": nil, "session_payload": nil, "manual_verification_code": "", "pending_sms_purpose": "",
 			"sms_sent_at": nil, "sms_poll_deadline": nil, "forward_preparation_id": nil,
 			"finished_at": now, "updated_at": now,
+		}
+		if isICloudOnboardingPhoneBindingPending(task) && (category == "account_region_mismatch" || category == "account_region_missing") {
+			updates["bound_phone_number"] = ""
+			updates["bound_phone_country_code"] = ""
+			updates["bound_phone_source"] = ""
+			updates["kitesim_phone_id"] = nil
 		}
 		omitICloudOldCookieSafeError(task, updates)
 		result := tx.Model(&iCloudOnboardingTaskModel{}).

@@ -204,6 +204,17 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	defer rt.close()
 	fmt.Fprintf(stdout, "runtime=ready proxy_mode=sticky_pool duration=%s\n", elapsed(runtimeStarted))
 
+	preparedBeforeBinding := false
+	if checkpoint.Binding == nil && input.PhoneNumber != "" && !checkpoint.ICloudAuthenticated && !checkpoint.ICloudReady && strings.TrimSpace(checkpoint.CountryCode) == "" {
+		preflight := &debugger{ctx: ctx, input: input, runtime: rt, reader: reader, stdout: stdout,
+			statePath: config.statePath, state: &state, stateKey: stateKey, checkpoint: &checkpoint,
+			session: append(json.RawMessage(nil), checkpoint.Session...)}
+		if err := preflight.prepareICloudRegionBeforeBinding(); err != nil {
+			return err
+		}
+		preparedBeforeBinding = true
+	}
+
 	var binding *kitesim.SMSPhoneBinding
 	bindPhone := func(requested string) (kitesim.SMSPhoneBinding, error) {
 		for {
@@ -269,8 +280,10 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	d := &debugger{ctx: ctx, input: input, runtime: rt, reader: reader, stdout: stdout,
 		statePath: config.statePath, state: &state, stateKey: stateKey, checkpoint: &checkpoint,
 		session: append(json.RawMessage(nil), checkpoint.Session...)}
-	if err := d.recoverPendingSMSCheckpoint(); err != nil {
-		return err
+	if !preparedBeforeBinding {
+		if err := d.recoverPendingSMSCheckpoint(); err != nil {
+			return err
+		}
 	}
 	err = d.run(binding, config)
 	if err == nil {
@@ -786,6 +799,60 @@ func (d *debugger) run(binding *kitesim.SMSPhoneBinding, config options) error {
 	}
 	d.logf("manage=ok country=%s new_cookie=ok\nvalidation=ok cookies_printed=false\n", firstNonEmpty(d.checkpoint.CountryCode, d.input.CountryCode))
 	return nil
+}
+
+func (d *debugger) prepareICloudRegionBeforeBinding() error {
+	d.logf("account_region_check=start expected=%s phone_binding=pending\n", d.input.CountryCode)
+	response, err := d.execute(icloud.AppleOnboardingRequest{Operation: icloud.AppleOnboardingPrepareICloud})
+	if err != nil {
+		var providerErr *icloud.AppleOnboardingError
+		if errors.As(err, &providerErr) && strings.TrimSpace(providerErr.CountryCode) != "" {
+			if _, countryErr := validateICloudAccountCountry(d.input.CountryCode, providerErr.CountryCode); countryErr != nil {
+				d.logf("account_region_check=failed expected=%s actual=%s phone_bound=false\n", d.input.CountryCode, strings.ToUpper(strings.TrimSpace(providerErr.CountryCode)))
+				return countryErr
+			}
+		}
+		return err
+	}
+	countryCode, err := validateICloudAccountCountry(d.input.CountryCode, response.CountryCode)
+	if err != nil {
+		d.logf("account_region_check=failed expected=%s actual=%s phone_bound=false\n", d.input.CountryCode, firstNonEmpty(strings.ToUpper(strings.TrimSpace(response.CountryCode)), "missing"))
+		return err
+	}
+	d.logf("account_region_check=ok expected=%s actual=%s phone_bound=false\n", d.input.CountryCode, strings.ToUpper(strings.TrimSpace(response.CountryCode)))
+	switch response.Next {
+	case "", "ready":
+		return d.markCheckpoint(func(cp *accountCheckpoint) {
+			cp.CountryCode = countryCode
+			cp.ICloudAuthenticated = true
+			cp.Stage = "icloud_authenticated"
+		})
+	default:
+		if !isSMSPurpose(response.Next) {
+			return fmt.Errorf("iCloud login returned unsupported next step %q", response.Next)
+		}
+		return d.markCheckpoint(func(cp *accountCheckpoint) {
+			cp.CountryCode = countryCode
+			cp.PendingSMSPurpose = response.Next
+			cp.Stage = "sms_wait"
+		})
+	}
+}
+
+func validateICloudAccountCountry(expected, actual string) (string, error) {
+	rawExpected := strings.ToUpper(strings.TrimSpace(expected))
+	rawActual := strings.ToUpper(strings.TrimSpace(actual))
+	actualCode := icloud.CountryCodeFromICloudRegion(rawActual)
+	if rawActual == "" || actualCode == "" {
+		return "", errors.New("account_region_missing: Apple did not return a supported account region before phone binding")
+	}
+	if expectedCode := icloud.CountryCodeFromICloudRegion(rawExpected); expectedCode == "" || expectedCode != actualCode {
+		return "", fmt.Errorf(
+			"account_region_mismatch: actual region is %s (实际地区为%s), imported region is %s (导入地区为%s)",
+			rawActual, rawActual, rawExpected, rawExpected,
+		)
+	}
+	return actualCode, nil
 }
 
 func (d *debugger) auth(operation, label string, binding *kitesim.SMSPhoneBinding) (icloud.AppleOnboardingResponse, error) {

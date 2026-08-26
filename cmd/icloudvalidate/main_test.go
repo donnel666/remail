@@ -57,6 +57,42 @@ func TestSpecifiedPhoneDoesNotSkipEnrollment(t *testing.T) {
 	}
 }
 
+func TestPrepareICloudRegionBeforeBinding(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		actual      string
+		providerErr error
+		wantCountry string
+		wantError   string
+	}{
+		{name: "matching alpha-3", actual: "USA", wantCountry: "US"},
+		{name: "mismatch", actual: "JPN", wantError: "account_region_mismatch"},
+		{name: "mismatch survives later Apple failure", actual: "JPN", providerErr: &icloud.AppleOnboardingError{Category: "phone_enrollment_unavailable", SafeMessage: "Apple did not allow trusted phone enrollment.", CountryCode: "JPN"}, wantError: "account_region_mismatch"},
+		{name: "missing", wantError: "account_region_missing"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			provider := &recordingAppleProvider{err: test.providerErr, response: icloud.AppleOnboardingResponse{
+				Next: icloud.AppleSMSPhoneEnrollment, CountryCode: test.actual, Session: json.RawMessage(`{"flow":"region-check"}`),
+			}}
+			checkpoint := accountCheckpoint{}
+			d := &debugger{
+				ctx: context.Background(), input: accountInput{Email: "example@example.com", CountryCode: "US", PhoneNumber: "14155550001"},
+				runtime: &runtime{apple: provider}, checkpoint: &checkpoint,
+			}
+			err := d.prepareICloudRegionBeforeBinding()
+			if test.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), test.wantError) || (test.actual != "" && !strings.Contains(err.Error(), "实际地区为"+test.actual)) || checkpoint.Binding != nil || checkpoint.PendingSMSPurpose != "" {
+					t.Fatalf("region rejection = err=%v checkpoint=%+v", err, checkpoint)
+				}
+				return
+			}
+			if err != nil || checkpoint.CountryCode != test.wantCountry || checkpoint.PendingSMSPurpose != icloud.AppleSMSPhoneEnrollment || checkpoint.Binding != nil || provider.calls != 1 {
+				t.Fatalf("region acceptance = err=%v checkpoint=%+v calls=%d", err, checkpoint, provider.calls)
+			}
+		})
+	}
+}
+
 func TestExecuteLogsFailureWithoutSecrets(t *testing.T) {
 	var output strings.Builder
 	provider := &recordingAppleProvider{err: &icloud.AppleOnboardingError{

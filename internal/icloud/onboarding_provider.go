@@ -121,6 +121,7 @@ type AppleOnboardingChannel struct {
 type AppleOnboardingError struct {
 	Category            string
 	SafeMessage         string
+	CountryCode         string
 	HTTPStatus          int
 	ProviderMessage     string
 	Retryable           bool

@@ -399,13 +399,13 @@ func sameICloudPhoneNumber(left, right string) bool {
 func countryCodeFromICloudRegion(region string) string {
 	value := strings.ToLower(strings.TrimSpace(strings.TrimSuffix(region, "区")))
 	for label, code := range map[string]string{
-		"美国": "US", "usa": "US", "us": "US", "加拿大": "CA", "canada": "CA", "ca": "CA",
-		"中国": "CN", "大陆": "CN", "china": "CN", "香港": "HK", "台湾": "TW", "澳门": "MO",
-		"日本": "JP", "韩国": "KR", "英国": "GB", "澳大利亚": "AU", "澳洲": "AU", "新西兰": "NZ",
-		"新加坡": "SG", "马来西亚": "MY", "泰国": "TH", "越南": "VN", "菲律宾": "PH", "印度尼西亚": "ID", "印度": "IN",
-		"德国": "DE", "法国": "FR", "意大利": "IT", "西班牙": "ES", "葡萄牙": "PT", "荷兰": "NL", "比利时": "BE",
-		"奥地利": "AT", "瑞士": "CH", "瑞典": "SE", "挪威": "NO", "丹麦": "DK", "芬兰": "FI", "波兰": "PL",
-		"爱尔兰": "IE", "土耳其": "TR", "墨西哥": "MX", "巴西": "BR", "阿根廷": "AR", "沙特": "SA", "阿联酋": "AE",
+		"美国": "US", "usa": "US", "us": "US", "加拿大": "CA", "canada": "CA", "can": "CA", "ca": "CA",
+		"中国": "CN", "大陆": "CN", "china": "CN", "chn": "CN", "香港": "HK", "hkg": "HK", "台湾": "TW", "twn": "TW", "澳门": "MO", "mac": "MO",
+		"日本": "JP", "jpn": "JP", "韩国": "KR", "kor": "KR", "英国": "GB", "gbr": "GB", "澳大利亚": "AU", "澳洲": "AU", "aus": "AU", "新西兰": "NZ", "nzl": "NZ",
+		"新加坡": "SG", "sgp": "SG", "马来西亚": "MY", "mys": "MY", "泰国": "TH", "tha": "TH", "越南": "VN", "vnm": "VN", "菲律宾": "PH", "phl": "PH", "印度尼西亚": "ID", "idn": "ID", "印度": "IN", "ind": "IN",
+		"德国": "DE", "deu": "DE", "法国": "FR", "fra": "FR", "意大利": "IT", "ita": "IT", "西班牙": "ES", "esp": "ES", "葡萄牙": "PT", "prt": "PT", "荷兰": "NL", "nld": "NL", "比利时": "BE", "bel": "BE",
+		"奥地利": "AT", "aut": "AT", "瑞士": "CH", "che": "CH", "瑞典": "SE", "swe": "SE", "挪威": "NO", "nor": "NO", "丹麦": "DK", "dnk": "DK", "芬兰": "FI", "fin": "FI", "波兰": "PL", "pol": "PL",
+		"爱尔兰": "IE", "irl": "IE", "土耳其": "TR", "tur": "TR", "墨西哥": "MX", "mex": "MX", "巴西": "BR", "bra": "BR", "阿根廷": "AR", "arg": "AR", "沙特": "SA", "sau": "SA", "阿联酋": "AE", "are": "AE",
 	} {
 		if value == label {
 			return code
@@ -420,6 +420,17 @@ func countryCodeFromICloudRegion(region string) string {
 // CountryCodeFromICloudRegion uses the same region normalization as imports.
 func CountryCodeFromICloudRegion(region string) string {
 	return countryCodeFromICloudRegion(region)
+}
+
+func canonicalICloudCountryCode(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if code := countryCodeFromICloudRegion(value); code != "" {
+		return code
+	}
+	return strings.ToUpper(value)
 }
 
 type iCloudOnboardingKitesimPhone struct {

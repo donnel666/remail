@@ -309,7 +309,13 @@ func TestICloudOnboardingClassifiesDuplicateResourceErrors(t *testing.T) {
 	}
 }
 
-type onboardingFakeApple struct{ operations []string }
+type onboardingFakeApple struct {
+	operations        []string
+	countryCode       string
+	forceReady        bool
+	restartICloudOnce bool
+	prepareErr        error
+}
 
 type onboardingRequestApple struct {
 	request AppleOnboardingRequest
@@ -358,10 +364,17 @@ func (f *onboardingFakeApple) Execute(_ context.Context, request AppleOnboarding
 	session := json.RawMessage(`{"flow":"ok"}`)
 	switch request.Operation {
 	case appleOnboardingPrepareICloud:
-		if request.SkipPhoneEnrollment {
-			return AppleOnboardingResponse{Session: session, Next: "ready"}, nil
+		if f.prepareErr != nil {
+			return AppleOnboardingResponse{}, f.prepareErr
 		}
-		return AppleOnboardingResponse{Session: session, Next: appleSMSPhoneEnrollment}, nil
+		if f.restartICloudOnce {
+			f.restartICloudOnce = false
+			return AppleOnboardingResponse{}, appleOnboardingRestart("icloud_prepare")
+		}
+		if request.SkipPhoneEnrollment || f.forceReady {
+			return AppleOnboardingResponse{Session: session, Next: "ready", CountryCode: f.countryCode}, nil
+		}
+		return AppleOnboardingResponse{Session: session, Next: appleSMSPhoneEnrollment, CountryCode: f.countryCode}, nil
 	case appleOnboardingSendSMS:
 		return AppleOnboardingResponse{Session: session}, nil
 	case appleOnboardingVerifySMS:
@@ -592,16 +605,16 @@ func (p *onboardingJoinedFamilyApple) Execute(_ context.Context, request AppleOn
 	}}, nil
 }
 
-type onboardingClosedICloudApple struct{}
+type onboardingClosedICloudApple struct{ countryCode string }
 
-func (onboardingClosedICloudApple) Execute(_ context.Context, request AppleOnboardingRequest) (AppleOnboardingResponse, error) {
+func (p onboardingClosedICloudApple) Execute(_ context.Context, request AppleOnboardingRequest) (AppleOnboardingResponse, error) {
 	session := json.RawMessage(`{"flow":"icloud-closed"}`)
 	switch request.Operation {
 	case appleOnboardingPrepareICloud, appleOnboardingPrepareICloudCookie:
 		return AppleOnboardingResponse{Session: session, Next: "ready"}, nil
 	case appleOnboardingFinishICloud, appleOnboardingFinishICloudCookie:
 		opened := false
-		return AppleOnboardingResponse{Session: session, Next: "ready", ICloudOpened: &opened}, nil
+		return AppleOnboardingResponse{Session: session, Next: "ready", CountryCode: p.countryCode, ICloudOpened: &opened}, nil
 	default:
 		return AppleOnboardingResponse{}, fmt.Errorf("unexpected operation %s", request.Operation)
 	}
@@ -654,7 +667,7 @@ func newOnboardingStateTest(t *testing.T) (*Service, *gorm.DB, *iCloudOnboarding
 	if err := db.First(task, root.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	fakeApple := &onboardingFakeApple{}
+	fakeApple := &onboardingFakeApple{countryCode: "US"}
 	service := NewService(db, nil, nil)
 	service.now = func() time.Time { return now }
 	service.smsPhones = onboardingProvidedPhone{}
@@ -684,12 +697,117 @@ func TestICloudOnboardingSpecifiedPhoneAndInviteStartsICloudBeforeFamily(t *test
 	}
 
 	processOnboardingStageForTest(t, service, db, task)
-	if task.Stage != "icloud_prepare" || task.BoundPhoneSource != "manual" {
-		t.Fatalf("specified phone + invite skipped iCloud stage: %+v", task)
+	if task.Stage != "sms_send" || task.PendingSMSPurpose != appleSMSPhoneEnrollment || task.BoundPhoneSource != "manual" || task.KitesimPhoneID == nil || len(fakeApple.operations) != 1 || fakeApple.operations[0] != appleOnboardingPrepareICloud+":" {
+		t.Fatalf("specified phone + invite did not start enrollment: task=%+v operations=%v", task, fakeApple.operations)
+	}
+}
+
+func TestICloudOnboardingRejectsCountryMismatchBeforeSMS(t *testing.T) {
+	service, db, task, fakeApple := newOnboardingStateTest(t)
+	fakeApple.countryCode = "JPN"
+	fakeApple.forceReady = true
+	phone := &onboardingCountingPhone{}
+	service.smsPhones = phone
+	if err := db.Model(task).Updates(map[string]any{"bound_phone_country_code": "US", "bound_phone_source": "manual"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(task, task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	processOnboardingStageForTest(t, service, db, task)
+	if task.Status != iCloudOnboardingFailed || task.LastErrorCategory != "account_region_mismatch" ||
+		!strings.Contains(task.LastSafeError, "实际地区为JPN") || !strings.Contains(task.LastSafeError, "导入地区为US") ||
+		task.Stage != "accepted" || task.BoundPhoneNumber != "" || task.BoundPhoneCountryCode != "" ||
+		task.BoundPhoneSource != "" || task.KitesimPhoneID != nil || phone.bindCalls != 0 || len(fakeApple.operations) != 1 {
+		t.Fatalf("country mismatch was not rejected before phone binding: task=%+v binds=%d operations=%v", task, phone.bindCalls, fakeApple.operations)
+	}
+}
+
+func TestICloudOnboardingRejectsCountryMismatchCarriedByAppleError(t *testing.T) {
+	service, db, task, fakeApple := newOnboardingStateTest(t)
+	fakeApple.prepareErr = &AppleOnboardingError{
+		Category: "phone_enrollment_unavailable", SafeMessage: "Apple did not allow trusted phone enrollment.", CountryCode: "JPN",
+	}
+	phone := &onboardingCountingPhone{}
+	service.smsPhones = phone
+
+	processOnboardingStageForTest(t, service, db, task)
+	if task.Status != iCloudOnboardingFailed || task.LastErrorCategory != "account_region_mismatch" ||
+		!strings.Contains(task.LastSafeError, "实际地区为JPN") || !strings.Contains(task.LastSafeError, "导入地区为US") ||
+		task.BoundPhoneNumber != "" || task.KitesimPhoneID != nil || phone.bindCalls != 0 {
+		t.Fatalf("country-bearing Apple error reached phone binding: task=%+v binds=%d", task, phone.bindCalls)
+	}
+}
+
+func TestICloudOnboardingRejectsMissingCountryBeforePhoneBinding(t *testing.T) {
+	service, db, task, fakeApple := newOnboardingStateTest(t)
+	fakeApple.countryCode = ""
+	phone := &onboardingCountingPhone{}
+	service.smsPhones = phone
+
+	processOnboardingStageForTest(t, service, db, task)
+	if task.Status != iCloudOnboardingFailed || task.LastErrorCategory != "account_region_missing" ||
+		task.Stage != "accepted" || task.KitesimPhoneID != nil || phone.bindCalls != 0 {
+		t.Fatalf("missing country reached phone binding: task=%+v binds=%d", task, phone.bindCalls)
+	}
+}
+
+func TestICloudOnboardingCountryCodesNormalizeAppleAlpha3(t *testing.T) {
+	codes := map[string]string{
+		"USA": "US", "CAN": "CA", "CHN": "CN", "HKG": "HK", "TWN": "TW", "MAC": "MO",
+		"JPN": "JP", "KOR": "KR", "GBR": "GB", "AUS": "AU", "NZL": "NZ",
+		"SGP": "SG", "MYS": "MY", "THA": "TH", "VNM": "VN", "PHL": "PH", "IDN": "ID", "IND": "IN",
+		"DEU": "DE", "FRA": "FR", "ITA": "IT", "ESP": "ES", "PRT": "PT", "NLD": "NL", "BEL": "BE",
+		"AUT": "AT", "CHE": "CH", "SWE": "SE", "NOR": "NO", "DNK": "DK", "FIN": "FI", "POL": "PL",
+		"IRL": "IE", "TUR": "TR", "MEX": "MX", "BRA": "BR", "ARG": "AR", "SAU": "SA", "ARE": "AE",
+	}
+	for alpha3, alpha2 := range codes {
+		if got := canonicalICloudCountryCode(alpha3); got != alpha2 {
+			t.Errorf("canonicalICloudCountryCode(%q) = %q, want %q", alpha3, got, alpha2)
+		}
+		if message := iCloudOnboardingCountryMismatch(alpha2, alpha3); message != "" {
+			t.Errorf("equivalent country codes %s/%s mismatched: %s", alpha2, alpha3, message)
+		}
+	}
+	if message := iCloudOnboardingCountryMismatch("US", "JPN"); message == "" {
+		t.Fatal("different country codes were accepted")
+	}
+}
+
+func TestICloudOnboardingRestartBeforePhoneBindingStillBindsBeforeReady(t *testing.T) {
+	service, db, task, fakeApple := newOnboardingStateTest(t)
+	fakeApple.forceReady = true
+	fakeApple.restartICloudOnce = true
+	phone := &onboardingCountingPhone{}
+	service.smsPhones = phone
+
+	processOnboardingStageForTest(t, service, db, task)
+	if task.Stage != "icloud_prepare" || task.KitesimPhoneID != nil || phone.bindCalls != 0 {
+		t.Fatalf("restart checkpoint = task=%+v binds=%d", task, phone.bindCalls)
 	}
 	processOnboardingStageForTest(t, service, db, task)
-	if task.Stage != "sms_send" || task.PendingSMSPurpose != appleSMSPhoneEnrollment || len(fakeApple.operations) != 1 || fakeApple.operations[0] != appleOnboardingPrepareICloud+":" {
-		t.Fatalf("specified phone + invite did not start enrollment: task=%+v operations=%v", task, fakeApple.operations)
+	if task.Stage != "icloud_finish" || task.KitesimPhoneID == nil || task.BoundPhoneSource != "manual" || phone.bindCalls != 1 || len(fakeApple.operations) != 2 {
+		t.Fatalf("restarted task skipped phone binding: task=%+v binds=%d operations=%v", task, phone.bindCalls, fakeApple.operations)
+	}
+}
+
+func TestICloudOnboardingRejectsCountryMismatchAtICloudFinish(t *testing.T) {
+	service, db, task, _ := newOnboardingStateTest(t)
+	service.onboardingApple = onboardingClosedICloudApple{countryCode: "JPN"}
+	if err := db.Model(task).Updates(map[string]any{
+		"stage": "icloud_finish", "family_invite_url": "https://setup.icloud.com/family/messages?inviteCode=test",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(task, task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	processOnboardingStageForTest(t, service, db, task)
+	if task.Status != iCloudOnboardingFailed || task.LastErrorCategory != "account_region_mismatch" ||
+		!strings.Contains(task.LastSafeError, "实际地区为JPN") || !strings.Contains(task.LastSafeError, "导入地区为US") || task.Stage != "icloud_finish" {
+		t.Fatalf("country mismatch was not rejected at iCloud finish: task=%+v", task)
 	}
 }
 
@@ -783,6 +901,23 @@ func TestICloudOnboardingPrimaryWithoutChallengeRestoresPermanentPhone(t *testin
 	processOnboardingStageForTest(t, service, db, task)
 	if task.Stage != "forwarding_prepare" || task.KitesimPhoneID == nil || task.BoundPhoneNumber != "14155550001" || len(apple.operations) != 1 || apple.operations[0] != appleOnboardingFetchManage {
 		t.Fatalf("primary phone was not restored: task=%+v operations=%v", task, apple.operations)
+	}
+}
+
+func TestICloudOnboardingManageRequiresTrustedPhoneSuffix(t *testing.T) {
+	service, db, task, apple := newOnboardingStateTest(t)
+	phone := &onboardingCountingPhone{}
+	service.smsPhones = phone
+	if err := db.Model(task).Updates(map[string]any{"stage": "manage_profile", "kitesim_phone_id": nil}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(task, task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	processOnboardingStageForTest(t, service, db, task)
+	if task.Status != iCloudOnboardingFailed || task.LastErrorCategory != "phone_binding_missing" || phone.bindCalls != 0 || len(apple.operations) != 1 {
+		t.Fatalf("manage accepted a missing trusted-phone suffix: task=%+v binds=%d operations=%v", task, phone.bindCalls, apple.operations)
 	}
 }
 

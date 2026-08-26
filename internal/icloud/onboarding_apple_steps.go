@@ -12,7 +12,7 @@ import (
 	"github.com/donnel666/remail/internal/platform"
 )
 
-func (f *appleOnboardingFlow) prepareICloud(request AppleOnboardingRequest) (AppleOnboardingResponse, error) {
+func (f *appleOnboardingFlow) prepareICloud(request AppleOnboardingRequest) (_ AppleOnboardingResponse, resultErr error) {
 	if err := validateAppleOnboardingCredentials(request); err != nil {
 		return AppleOnboardingResponse{}, err
 	}
@@ -40,6 +40,13 @@ func (f *appleOnboardingFlow) prepareICloud(request AppleOnboardingRequest) (App
 	if err != nil {
 		return AppleOnboardingResponse{}, err
 	}
+	f.rememberCountry(complete)
+	defer func() {
+		var providerErr *AppleOnboardingError
+		if resultErr != nil && errors.As(resultErr, &providerErr) && strings.TrimSpace(providerErr.CountryCode) == "" {
+			providerErr.CountryCode = strings.ToUpper(strings.TrimSpace(f.state.AccountCountry))
+		}
+	}()
 	status := f.state.Status
 	authType := strings.ToLower(appleOnboardingString(complete["authType"]))
 	needRepair := false
@@ -48,7 +55,7 @@ func (f *appleOnboardingFlow) prepareICloud(request AppleOnboardingRequest) (App
 		if err := f.prepareTrustedPhone(request.PhoneNumber); err != nil {
 			return AppleOnboardingResponse{}, err
 		}
-		return AppleOnboardingResponse{Next: smsPurpose, TrustedPhoneLastTwo: f.state.PendingPhoneLastTwo}, nil
+		return AppleOnboardingResponse{Next: smsPurpose, CountryCode: f.state.AccountCountry, TrustedPhoneLastTwo: f.state.PendingPhoneLastTwo}, nil
 	case status == http.StatusConflict && authType == "sa":
 		if err := f.submitIDMSAQuestions(request.Secret); err != nil {
 			return AppleOnboardingResponse{}, err
@@ -57,7 +64,7 @@ func (f *appleOnboardingFlow) prepareICloud(request AppleOnboardingRequest) (App
 	case status == http.StatusPreconditionFailed:
 		needRepair = true
 	case status == http.StatusOK || status == http.StatusNoContent:
-		return AppleOnboardingResponse{Next: "ready"}, nil
+		return AppleOnboardingResponse{Next: "ready", CountryCode: f.state.AccountCountry}, nil
 	default:
 		return AppleOnboardingResponse{}, &AppleOnboardingError{Category: "unsupported_challenge", SafeMessage: "Apple returned an unsupported iCloud sign-in challenge."}
 	}
@@ -76,13 +83,13 @@ func (f *appleOnboardingFlow) prepareICloud(request AppleOnboardingRequest) (App
 			if err := f.prepareEnrollment(request.Secret); err != nil {
 				return AppleOnboardingResponse{}, err
 			}
-			return AppleOnboardingResponse{Next: appleSMSPhoneEnrollment}, nil
+			return AppleOnboardingResponse{Next: appleSMSPhoneEnrollment, CountryCode: f.state.AccountCountry}, nil
 		}
 		if err := f.completeRepair(); err != nil {
 			return AppleOnboardingResponse{}, err
 		}
 	}
-	return AppleOnboardingResponse{Next: "ready"}, nil
+	return AppleOnboardingResponse{Next: "ready", CountryCode: f.state.AccountCountry}, nil
 }
 
 func (f *appleOnboardingFlow) sendSMS(request AppleOnboardingRequest) (AppleOnboardingResponse, error) {
